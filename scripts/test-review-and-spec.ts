@@ -10631,6 +10631,8 @@ seeded()
   .then(() => reviewLimitsFix242AsyncChecks())
   .then(() => reviewLimitsFinal242AsyncChecks())
   .then(() => portal245FinalReviewAsyncChecks())
+  .then(() => portal246ScopeAsyncChecks())
+  .then(() => portal246PricingAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -30380,4 +30382,263 @@ async function portal245FinalReviewAsyncChecks(): Promise<void> {
   registerFixture("quotes", gen2.quoteId);
   const madeQuote2 = await q222Get(gen2.quoteId);
   ok(madeQuote2?.owner === "" && !madeQuote2?.preparedBy, "#245 final review fix: an unassigned company's portal quote leaves preparedBy untouched (the store default) rather than writing another blank over it");
+}
+
+/* ======================================================================
+   Portal service quotes — Task 1: scope pre-fill + builder-identical
+   pricing (#246 Task 1; spec docs/superpowers/specs/2026-09-28-portal-
+   service-quotes-design.md §3, §6). Pure checks (pickScopeCount,
+   serviceRequestProblem) run at top level; DB-backed checks are registered
+   in the async chain as portal246ScopeAsyncChecks() and
+   portal246PricingAsyncChecks().
+   ====================================================================== */
+import {
+  pickScopeCount as d246Pick,
+  serviceScopeFor as d246ScopeFor,
+} from "@/lib/portal-service-scope";
+import {
+  priceServiceRequest as d246Price,
+  serviceRequestProblem as d246Problem,
+  PICK_VENUE_COPY as d246PickCopy,
+  CURTAINS_RANGE_COPY as d246CurtainsCopy,
+  LINE_SETS_RANGE_COPY as d246LineSetsCopy,
+} from "@/lib/portal-service-pricing";
+import { flameVenueInputsFrom as d246Fvi, resolveQuoteOffice as d246Office } from "@/lib/service-quote-inputs";
+import { compute as d246ComputeFlame, getRates as d246FlameRates } from "@/lib/flametest-engine";
+import { coordsOf as d246CoordsOf } from "@/lib/geo";
+import { normalizeTestingOverride as d246NormTest } from "@/lib/service-pricing";
+import { create as d246CreateFlameJob } from "@/lib/stores/flame-jobs";
+import { create as d246CreateInspection } from "@/lib/stores/inspections";
+import { resolveTier as d246ResolveTier } from "@/lib/pricing-tiers";
+import { getTravelRates as d246TravelRates } from "@/lib/stores/pricing";
+import { get as d246GetCustomer } from "@/lib/stores/customers";
+
+// ---- pure: pickScopeCount (job wins, else quote, else neither) ----
+{
+  const jobAt = new Date(2025, 5, 1).getTime();
+  const quoteAt = new Date(2024, 2, 1).getTime();
+  const eq246 = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok(eq246(d246Pick({ job: { count: 12, at: jobAt }, quote: { count: 14, at: quoteAt } }), { count: 12, source: "job", sourceYear: 2025 }),
+    "#246 pickScopeCount: the job wins over the quote even though the quote's date is later");
+  ok(eq246(d246Pick({ job: null, quote: { count: 8, at: quoteAt } }), { count: 8, source: "quote", sourceYear: 2024 }),
+    "#246 pickScopeCount: the quote is used when there's no job");
+  ok(eq246(d246Pick({}), { count: null, source: null, sourceYear: null }), "#246 pickScopeCount: neither → no guess");
+  ok(eq246(d246Pick({ job: undefined, quote: undefined }), { count: null, source: null, sourceYear: null }), "#246 pickScopeCount: explicit undefineds → no guess");
+}
+
+// ---- pure: serviceRequestProblem (verbatim copy, #246 global constraints) ----
+{
+  const ids246 = new Set(["v1", "v2"]);
+  const flameReq246 = (venues: unknown) => ({ service: { kind: "flame" }, venues });
+  const inspReq246 = (venues: unknown, level: unknown = 1) => ({ service: { kind: "inspection", level }, venues });
+  ok(d246CurtainsCopy === "Enter the number of curtains (1–200)." && d246LineSetsCopy === "Enter the number of line sets (1–300)." && d246PickCopy === "Pick at least one venue.",
+    "#246 serviceRequestProblem: the exported copy constants are verbatim");
+  ok(d246Problem(flameReq246([]), ids246) === d246PickCopy, "#246 serviceRequestProblem: empty venues → Pick at least one venue.");
+  ok(d246Problem(null, ids246) === d246PickCopy, "#246 serviceRequestProblem: a malformed (null) request → Pick at least one venue.");
+  ok(d246Problem(flameReq246([{ venueId: "v9", count: 10 }]), ids246) === d246PickCopy, "#246 serviceRequestProblem: a foreign venue id → Pick at least one venue.");
+  ok(d246Problem(flameReq246([{ venueId: "v1", count: 1.5 }]), ids246) === d246CurtainsCopy, "#246 serviceRequestProblem: non-integer curtains → the curtains range copy");
+  ok(d246Problem(flameReq246([{ venueId: "v1", count: 0 }]), ids246) === d246CurtainsCopy, "#246 serviceRequestProblem: 0 curtains → the curtains range copy");
+  ok(d246Problem(flameReq246([{ venueId: "v1", count: 201 }]), ids246) === d246CurtainsCopy, "#246 serviceRequestProblem: 201 curtains → the curtains range copy");
+  ok(d246Problem(flameReq246([{ venueId: "v1", count: 200 }]), ids246) === null, "#246 serviceRequestProblem: 200 curtains is in range (inclusive)");
+  ok(d246Problem(inspReq246([{ venueId: "v1", count: 301 }]), ids246) === d246LineSetsCopy, "#246 serviceRequestProblem: 301 line sets → the line-sets range copy");
+  ok(d246Problem(inspReq246([{ venueId: "v1", count: 300 }]), ids246) === null, "#246 serviceRequestProblem: 300 line sets is in range (inclusive)");
+  ok(d246Problem(inspReq246([{ venueId: "v1", count: 5 }], 3), ids246) === d246PickCopy, "#246 serviceRequestProblem: a bad level (not 1 or 2) refuses the request");
+  ok(d246Problem(inspReq246([{ venueId: "v1", count: 5 }], "1"), ids246) === d246PickCopy, "#246 serviceRequestProblem: a level posted as a string (not the number 1|2) refuses the request");
+  ok(d246Problem(flameReq246([{ venueId: "v1", count: 1 }, { venueId: "v2", count: 200 }]), ids246) === null,
+    "#246 serviceRequestProblem: several of the caller's own venues, all in range → ok");
+}
+
+async function portal246ScopeAsyncChecks(): Promise<void> {
+  const CO = fixtureId(246, "scope-co");
+  const FJ_NEW = fixtureId(246, "scope-fj-new");
+  const FJ_SCHEDULED = fixtureId(246, "scope-fj-scheduled");
+  const IR_L1 = fixtureId(246, "scope-ir-l1");
+  const IR_L2 = fixtureId(246, "scope-ir-l2");
+
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 Scope Co",
+      type: "Education",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium" },
+        { id: "v2", label: "Black Box", primary: false, venueKind: "proscenium" },
+        { id: "v3", label: "No History", primary: false, venueKind: "proscenium" },
+      ],
+      contacts: [],
+    });
+
+    // v1: a completed flame job (12 curtains) …
+    const T1 = new Date(2025, 5, 1).getTime();
+    await d246CreateFlameJob({
+      id: FJ_NEW,
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      locationId: "v1",
+      venues: [{ id: "v1", label: "Main Hall", city: "", state: "", lat: null, lng: null, curtains: 12 }],
+      curtainsTotal: 12,
+      stage: "completed",
+      completedAt: T1,
+      dueAt: T1 + 365 * 86400000,
+    });
+    registerFixture("flame_jobs", FJ_NEW);
+    // … a job that's only SCHEDULED (never completed) is ignored entirely —
+    // v3 must fall through to "no guess", not this job's 99 curtains.
+    await d246CreateFlameJob({
+      id: FJ_SCHEDULED,
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      locationId: "v3",
+      venues: [{ id: "v3", label: "No History", city: "", state: "", lat: null, lng: null, curtains: 99 }],
+      curtainsTotal: 99,
+      stage: "scheduled",
+    });
+    registerFixture("flame_jobs", FJ_SCHEDULED);
+
+    // … and a LATER quote for v1 (14 curtains) that must still lose to the
+    // completed job — the source order is job > quote, not most-recent-wins.
+    const qV1 = await QuoteStore.create({
+      quoteType: "flame_test",
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      source: "flametest",
+      flameTest: { venues: [{ id: "v1", label: "Main Hall", curtains: 14 }] },
+    });
+    registerFixture("quotes", qV1.id);
+
+    // v2: no job at all, only a quote (8 curtains) — the quote is the scope.
+    const qV2 = await QuoteStore.create({
+      quoteType: "flame_test",
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      source: "flametest",
+      flameTest: { venues: [{ id: "v2", label: "Black Box", curtains: 8 }] },
+    });
+    registerFixture("quotes", qV2.id);
+
+    const scope = await d246ScopeFor(CO, { kind: "flame" });
+    const byId246 = new Map(scope.map((s) => [s.venueId, s]));
+    ok(byId246.get("v1")?.count === 12 && byId246.get("v1")?.source === "job" && byId246.get("v1")?.sourceYear === 2025,
+      "#246 scope: v1's completed job (12 curtains) wins over its later quote (14)");
+    ok(byId246.get("v2")?.count === 8 && byId246.get("v2")?.source === "quote",
+      "#246 scope: v2 has no completed job, so its scope comes from its quote");
+    ok(byId246.get("v3")?.count === null && byId246.get("v3")?.source === null && byId246.get("v3")?.sourceYear === null,
+      "#246 scope: v3's only job is SCHEDULED (never completed) and it has no quote either — no guess");
+    ok(scope.length === 3, "#246 scope: one entry per customer venue");
+
+    // Inspections are level-specific (D53: records are per-venue): v1 gets
+    // an L1 record (5 line sets) and a separate L2 record (9) — each
+    // level's scope reads only its own level's record.
+    await d246CreateInspection({ id: IR_L1, customerId: CO, locationId: "v1", level: 1, lineSets: 5, stage: "completed", surveyDate: "2025-04-01" });
+    registerFixture("inspections", IR_L1);
+    await d246CreateInspection({ id: IR_L2, customerId: CO, locationId: "v1", level: 2, lineSets: 9, stage: "completed", surveyDate: "2023-04-01" });
+    registerFixture("inspections", IR_L2);
+
+    const scopeL1 = await d246ScopeFor(CO, { kind: "inspection", level: 1 });
+    const scopeL2 = await d246ScopeFor(CO, { kind: "inspection", level: 2 });
+    ok(scopeL1.find((s) => s.venueId === "v1")?.count === 5 && scopeL1.find((s) => s.venueId === "v1")?.source === "job",
+      "#246 scope: inspection L1 reads the L1 record's line sets (5)");
+    ok(scopeL2.find((s) => s.venueId === "v1")?.count === 9 && scopeL2.find((s) => s.venueId === "v1")?.source === "job",
+      "#246 scope: inspection L2 reads the L2 record's line sets (9), not L1's");
+  } finally {
+    await removeCustomer(CO);
+  }
+}
+
+async function portal246PricingAsyncChecks(): Promise<void> {
+  const CO = fixtureId(246, "price-co");
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 Price Co",
+      type: "Education",
+      pricingTier: "silver",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", lat: 44.26, lng: -88.42, travelMiles: 120, travelMin: 150 },
+        { id: "v2", label: "Black Box", primary: false, venueKind: "proscenium", lat: 44.5, lng: -88.0, travelMiles: 140, travelMin: 170 },
+      ],
+      contacts: [],
+    });
+    const session246 = { customerId: CO, name: "Pat Buyer" };
+
+    // ---- refusals ----
+    const noVenues = await d246Price(session246, { service: { kind: "flame" }, venues: [] });
+    ok(!noVenues.ok && noVenues.error === d246PickCopy, "#246 priceServiceRequest: no venues → Pick at least one venue.");
+    const foreign = await d246Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "nope", count: 5 }] });
+    ok(!foreign.ok && foreign.error === d246PickCopy, "#246 priceServiceRequest: a venue id that isn't the customer's own is refused");
+    const badCount = await d246Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 0 }] });
+    ok(!badCount.ok && badCount.error === d246CurtainsCopy, "#246 priceServiceRequest: an out-of-range count is refused with the range copy");
+    const noCust = await d246Price({ customerId: fixtureId(246, "price-no-such-co"), name: "X" }, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 5 }] });
+    ok(!noCust.ok, "#246 priceServiceRequest: an unknown customer is refused");
+
+    // ---- flame: the copied venue-input mapping matches a plain replica of
+    // the builder's own inline mapping (persist()), and the priced total
+    // matches compute() run over that replica at the same tier margin. ----
+    const tier246 = await d246ResolveTier(CO, "Pat Buyer");
+    const office246 = await d246Office();
+    const travelRates246 = await d246TravelRates();
+    const cust246 = await d246GetCustomer(CO);
+    const rawVenues246 = [
+      { id: "v1", curtains: 15 },
+      { id: "v2", curtains: 9 },
+    ];
+    const locById246p = new Map((cust246?.locations || []).map((l) => [l.id, l]));
+    const builderReplica246 = rawVenues246.map((v) => {
+      const loc = locById246p.get(v.id);
+      const coords = loc ? d246CoordsOf(loc) : null;
+      return {
+        id: v.id,
+        label: loc?.label || "Venue",
+        curtains: v.curtains,
+        testingOverride: d246NormTest(undefined),
+        coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
+        oneWayMiles: loc?.travelMiles ?? null,
+        oneWayMin: loc?.travelMin ?? null,
+      };
+    });
+    const portalCopyInputs246 = d246Fvi(rawVenues246, cust246);
+    ok(JSON.stringify(builderReplica246) === JSON.stringify(portalCopyInputs246),
+      "#246 parity: the portal's copied venue-input mapping (service-quote-inputs.ts) matches a plain replica of the builder's own inline mapping, venue for venue");
+
+    const baseRates246 = await d246FlameRates();
+    const rates246 = { ...baseRates246, margin: tier246.margin };
+    const builderR246 = d246ComputeFlame({ office: office246 || undefined, venues: builderReplica246 }, rates246, travelRates246);
+
+    const priced = await d246Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 15 }, { venueId: "v2", count: 9 }] });
+    ok(priced.ok && priced.total === Math.round(builderR246.total),
+      "#246 parity: priceServiceRequest's total equals compute() run over the builder's own input path, same tier margin");
+    if (priced.ok) {
+      ok(priced.margin === builderR246.effectiveMargin && priced.tier === tier246.tier && priced.tierMargin === tier246.margin,
+        "#246 parity: margin/tier/tierMargin match the builder's own resolveTier() + the engine's effectiveMargin");
+      const lineSum = priced.view.lines.reduce((a, l) => a + l.amount, 0);
+      ok(priced.view.total === priced.total && lineSum + priced.view.travel === priced.total,
+        "#246 view: the per-venue lines plus the travel line sum to exactly the total");
+      ok(priced.view.lines.length === 2 &&
+          priced.view.lines[0].label === "Flame test — Main Hall (15 curtains)" &&
+          priced.view.lines[1].label === "Flame test — Black Box (9 curtains)",
+        "#246 view: one line per venue, labeled Flame test — <venue> (N curtains)");
+      const asJson246 = JSON.stringify(priced.view).toLowerCase();
+      for (const forbidden of ['"margin', '"rate', '"hours', '"cost', '"crew', '"airfare', '"tier']) {
+        ok(!asJson246.includes(forbidden), `#246 whitelist: the customer view never carries a ${forbidden.slice(1)} key`);
+      }
+    }
+
+    // ---- inspection: no per-venue breakdown in the engine → one summary
+    // line; L1 and L2 price the same line-set count differently. ----
+    const p1 = await d246Price(session246, { service: { kind: "inspection", level: 1 }, venues: [{ venueId: "v1", count: 20 }] });
+    const p2 = await d246Price(session246, { service: { kind: "inspection", level: 2 }, venues: [{ venueId: "v1", count: 20 }] });
+    ok(p1.ok && p2.ok && p1.total !== p2.total, "#246 inspection: L1 and L2 price the same line-set count differently (the level multiplier)");
+    if (p1.ok) {
+      ok(p1.view.lines.length === 1 &&
+          p1.view.lines[0].label === "Annual rigging inspection — 20 line sets across 1 venue" &&
+          p1.view.lines[0].amount + p1.view.travel === p1.total,
+        "#246 inspection view: one summary line (the engine has no per-venue breakdown); the line + travel sum to the total");
+    }
+    if (p2.ok) {
+      ok(p2.view.lines[0].label === "Five-year rigging inspection — 20 line sets across 1 venue",
+        "#246 inspection view: the L2 summary line says Five-year, not Annual");
+    }
+  } finally {
+    await removeCustomer(CO);
+  }
 }
