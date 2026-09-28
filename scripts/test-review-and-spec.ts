@@ -30436,3 +30436,53 @@ async function portal245FinalReviewAsyncChecks(): Promise<void> {
   const madeQuote2 = await q222Get(gen2.quoteId);
   ok(madeQuote2?.owner === "" && !madeQuote2?.preparedBy, "#245 final review fix: an unassigned company's portal quote leaves preparedBy untouched (the store default) rather than writing another blank over it");
 }
+
+/* --- #247: venue templates — stretch engine, proscenium key lines, house dims --- */
+import { PROSCENIUM_TEMPLATE as vt247Tpl, stretchProscenium as vt247Stretch } from "@/lib/design/venue-templates/proscenium";
+import { PROSCENIUM_KEYS as vt247Keys, PROSCENIUM_SPACES as vt247Spaces } from "@/lib/design/venue-templates/proscenium.keys";
+import { makeXMap as vt247X, makeYMap as vt247Y } from "@/lib/design/venue-templates/stretch";
+import { HOUSE_NARROW_WARNING as vt247Warn, houseDims as vt247House, prosceniumDims as vt247Dims } from "@/lib/design/venue-templates/house-dims";
+import { defaultAState as vt247Default } from "@/app/(app)/design/quick/engine";
+{
+  const D0 = { ...vt247Keys.defaults, pit: true };
+  const X0 = vt247X(vt247Keys, D0), Y0 = vt247Y(vt247Keys, D0);
+  const pts = [...vt247Tpl.segments.flatMap(([a, b, c, d]) => [{ x: a, y: b }, { x: c, y: d }]), ...vt247Tpl.labels];
+  ok(pts.length > 100 && pts.every((p) => Math.abs(X0(p.x, p.y) - p.x) < 0.1 && Math.abs(Y0(p.y) - p.y) < 0.1), "#247: at the drawing's own dimensions the stretch leaves every point within 0.1\" of the drawing");
+  ok(vt247Tpl.units === "in" && vt247Keys.requiredLabels.every((t) => vt247Tpl.labels.some((l) => l.text === t)), "#247: the committed template is in inches and carries every required label");
+
+  const variants = [
+    { proWidthFt: 40, wingFt: 10, stageDepthFt: 24, houseWidthFt: 60, houseDepthFt: 45, pit: true },
+    { proWidthFt: 60, wingFt: 20, stageDepthFt: 40, houseWidthFt: 120, houseDepthFt: 110, pit: true },
+    { proWidthFt: 50, wingFt: 8, stageDepthFt: 30, houseWidthFt: 90, houseDepthFt: 70, pit: true },
+  ];
+  for (const d of variants) {
+    const X = vt247X(vt247Keys, d), Y = vt247Y(vt247Keys, d);
+    const tag = `${d.proWidthFt}/${d.wingFt}/${d.stageDepthFt}/${d.houseWidthFt}/${d.houseDepthFt}`;
+    ok(Math.abs(X(-65.75, 200) - X(-71.75, 200) - 6) < 1e-9 && Math.abs(X(900.25, 200) - X(894.25, 200) - 6) < 1e-9, `#247 ${tag}: the stage side walls stay 6"`);
+    ok(Math.abs(Y(375) - Y(369) - 6) < 1e-9 && Math.abs(Y(9) - Y(3) - 6) < 1e-9 && Math.abs(Y(-943.107) - Y(-949.107) - 6) < 1e-9, `#247 ${tag}: the stage back wall, proscenium wall and booth-row wall stay 6"`);
+    ok(Math.abs(X(-64.691, -900) - X(-70.691, -900) - 6) < 1e-9 && Math.abs(X(900.25, -900) - X(894.25, -900) - 6) < 1e-9, `#247 ${tag}: the rooms behind the house keep 6" outer walls`);
+    const side = X(-63.32, -600) - X(-69.32, -600);
+    ok(Math.abs(side - 6) < 1.0, `#247 ${tag}: the house side walls stay within an inch of 6" (the drawing is ~1" out of square there): ${side.toFixed(2)}`);
+    ok(Math.abs(Y(-223.144) - Y(-279.022) - 55.878) < 1e-6 && Math.abs(Y(-620.963) - Y(-676.84) - 55.877) < 1e-6 && Math.abs(Y(-817.103) - Y(-949.107) - 132.004) < 1e-6, `#247 ${tag}: the catwalk, cross aisle and booth row keep their depth`);
+    ok(Math.abs(X(714.25, 9) - X(114.25, 9) - d.proWidthFt * 12) < 1e-6 && Math.abs(X(894.25, 200) - X(-65.75, 200) - (d.proWidthFt + 2 * d.wingFt) * 12) < 1e-6, `#247 ${tag}: the opening and the inside stage width match the typed widths`);
+    ok(Math.abs(Y(369) - Y(9) - d.stageDepthFt * 12) < 1e-6 && Math.abs(Y(9) - Y(-817.103) - d.houseDepthFt * 12) < 1e-6, `#247 ${tag}: stage depth and house depth match the typed depths`);
+    ok(Math.abs(X(414.25 + 478.605, -700) - X(414.25 - 478.605, -700) - d.houseWidthFt * 12) < 1e-6, `#247 ${tag}: the back of the house matches the typed house width`);
+    ok(Math.abs(X(642.25, -36) - X(186.25, -36) - 0.76 * d.proWidthFt * 12) < 1e-6, `#247 ${tag}: the pit keeps 76% of the opening`);
+    const xs = Array.from({ length: 100 }, (_, i) => -80 + i * 10);
+    ok([200, -100, -300, -600, -900].every((y) => xs.every((x, i) => i === 0 || X(x, y) > X(xs[i - 1], y))) && xs.every((y, i) => i === 0 || Y(-y * 10) < Y(-xs[i - 1] * 10)), `#247 ${tag}: both maps are strictly monotonic (nothing folds over)`);
+    const onlyHouse = vt247X(vt247Keys, { ...D0, houseWidthFt: d.houseWidthFt });
+    ok([[100, 200], [-65.75, -100], [600, -150]].every(([x, y]) => Math.abs(onlyHouse(x, y) - X0(x, y)) < 1e-9), `#247 ${tag}: changing only the house width leaves the stage and forestage alone`);
+  }
+
+  const on = vt247Stretch(D0), off = vt247Stretch({ ...D0, pit: false });
+  ok(off.polylines.length === on.polylines.length - 3 && !off.labels.some((l) => l.text === "Pit") && !off.regions.Pit && !!on.regions.Pit && off.lines.stageEdge.length > 10, "#247: pit off drops the pit's three lines, its label and its Space; the stage-edge curve stays");
+  ok([...Object.keys(on.regions)].sort().join("|") === [...vt247Spaces].sort().join("|"), "#247: the stretched plan carries one region per Space name");
+
+  const hd = (o: Record<string, number | null>) => vt247House({ width: 50, wing: 10, ...o });
+  ok(hd({}).widthFt === 70 && Math.abs(hd({}).depthFt - (9 + 817.103) / 12) < 1e-9 && hd({}).warning === null, "#247: with nothing typed the house is as wide as the stage and as deep as Jeff's drawing");
+  ok(hd({ houseHalfFt: 40 }).widthFt === 80 && hd({ houseWidthFt: 90, houseHalfFt: 40 }).widthFt === 90, "#247: a Quick Design save from before #247 keeps its dragged house width (2 × houseHalfFt); a typed width wins");
+  ok(hd({ houseWidthFt: 10 }).widthFt === 50 && hd({ houseWidthFt: 999 }).widthFt === 200 && hd({ houseDepthFt: 5 }).depthFt === 40 && hd({ houseDepthFt: 999 }).depthFt === 200, "#247: typed house sizes clamp (width ≥ max(45, pro width), depth 40–200)");
+  ok(hd({ houseWidthFt: 60 }).warning === vt247Warn && hd({ houseWidthFt: 70 }).warning === null, "#247: the narrow-house warning fires only when the house is narrower than the stage");
+  const pd = vt247Dims({ ...vt247Default(0), width: 44, wing: 12, depth: 28, houseDepthFt: 75, sys: { ...vt247Default(0).sys, pit: false } });
+  ok(pd.proWidthFt === 44 && pd.wingFt === 12 && pd.stageDepthFt === 28 && pd.houseWidthFt === 68 && pd.houseDepthFt === 75 && pd.pit === false, "#247: prosceniumDims reads pro width, wings, stage depth, the house and the pit switch off the designer state");
+}
