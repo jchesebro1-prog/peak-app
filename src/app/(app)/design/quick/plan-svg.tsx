@@ -10,6 +10,9 @@
 
 import type * as React from "react";
 import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
+import { houseDims, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
+import { stretchProscenium } from "@/lib/design/venue-templates/proscenium";
+import { legacyProsGeom } from "@/lib/design/legacy-pros-geom";
 
 /* ------------------------------ primitive types ------------------------------ */
 
@@ -140,42 +143,48 @@ function booth(L: L, cx: number, yTop: number, w: number, h: number, floor: stri
 
 export type ProsGeom = ReturnType<typeof prosGeom>;
 
-/** shared proscenium groundplan geometry (auto plan AND drag math) */
+type Box = { x: number; y: number; w: number; h: number };
+type XY = { x: number; y: number };
+const boxOf = (pts: XY[]): Box => {
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+};
+
+/**
+ * Shared proscenium groundplan geometry (#247): Jeff's Auditorium / PAC
+ * template drawing (lib/design/venue-templates) stretched to the room and
+ * laid on the 640-px plan canvas, stage at the top. The auto plan, the Grid
+ * base sheet, Quick Design's wall drag, starter Spaces and Auto fill all read
+ * this, so they always agree.
+ */
 export function prosGeom(s: AState) {
-  const W = 640, ML = 58, MR = 138, MT = 52;
-  const wing = s.wing || 0;
-  const houseWft = s.width + 2 * wing;
-  const ppf = (W - ML - MR) / Math.max(houseWft, 1);
-  const depthPx = Math.max(150, s.depth * ppf);
-  const pitFt = s.sys.pit ? Math.min(Math.max(s.depth * 0.16, 6), 12) : 0;
-  const pitPx = pitFt * ppf;
-  const xHouseL = ML, xHouseR = W - MR, cx = (xHouseL + xHouseR) / 2;
-  const yBack = MT, yPlaster = yBack + depthPx;
-  const xProcL = cx - (s.width / 2) * ppf, xProcR = cx + (s.width / 2) * ppf, openW = xProcR - xProcL;
-  const apronFt = 6, apronPx = apronFt * ppf, apronBulge = apronPx * 0.7;
-  const yApron = yPlaster + apronPx, yApronFront = yApron + apronBulge;
-  const defHalfFt = houseWft / 2;
-  const minHalfFt = s.width / 2 + 1.5, maxHalfFt = Math.min(cx - 12, W - 12 - cx) / ppf;
-  let halfFt = typeof s.houseHalfFt === "number" && s.houseHalfFt > 0 ? s.houseHalfFt : defHalfFt;
-  halfFt = Math.max(minHalfFt, Math.min(halfFt, maxHalfFt));
-  const halfPx = halfFt * ppf, xAudL = R(cx - halfPx), xAudR = R(cx + halfPx);
-  const yHouseFront = R(yPlaster);
-  const seatTop = R(yApronFront) + 16, seatRows = 4, seatGap = 13;
-  const seatBottom = seatTop + seatRows * seatGap;
-  const yBackWall = R(seatBottom + 16);
-  const boothW = R(Math.min(openW * 0.5, halfPx * 1.05));
-  const boothH = 24, yBoothBottom = R(yBackWall + boothH);
-  const yMix = R(seatTop + (seatBottom - seatTop) * 0.6);
-  const doorsL = Array.isArray(s.doorsL) ? s.doorsL : [0.34, 0.82];
-  const doorsR = Array.isArray(s.doorsR) ? s.doorsR : [0.34, 0.82];
-  const doorsBack = Array.isArray(s.doorsBack) ? s.doorsBack : [0.13, 0.87];
-  const H = R(yBoothBottom + 22);
+  const dims = prosceniumDims(s);
+  const plan = stretchProscenium(dims);
+  const W = 640, ML = 58, MR = 138, MT = 52, MB = 44;
+  const b = plan.bounds;
+  const ppi = (W - ML - MR) / Math.max(b.maxX - b.minX, 1);
+  const ppf = ppi * 12;
+  const px = (p: XY): XY => ({ x: R(ML + (p.x - b.minX) * ppi), y: R(MT + (b.maxY - p.y) * ppi) });
+  const H = R(MT + (b.maxY - b.minY) * ppi + MB);
+  const pt = (name: string) => px(plan.points[name]);
+  const regions: Record<string, XY[]> = {};
+  for (const [name, pts] of Object.entries(plan.regions)) regions[name] = pts.map(px);
+  const xProcL = pt("proL").x, xProcR = pt("proR").x, openW = R(xProcR - xProcL);
+  const yBack = pt("stageBack").y, yPlaster = pt("centre").y;
   return {
-    W, H, ML, MR, MT, wing, houseWft, ppf, depthPx, apronFt, apronPx, apronBulge, pitFt, pitPx,
-    yApron, yApronFront, xHouseL, xHouseR, cx, yBack, yPlaster, xProcL, xProcR, openW,
-    halfFt, halfPx, minHalfFt, maxHalfFt, xAudL, xAudR, yHouseFront, seatTop, seatRows, seatGap,
-    seatBottom, yBackWall, boothW, boothH, yBoothBottom, yMix, doorsL, doorsR, doorsBack,
-    stage: { x: xProcL, y: yBack, w: openW, h: depthPx },
+    W, H, ML, MR, MT, MB, ppi, ppf, dims, warning: houseDims(s).warning,
+    cx: pt("centre").x, xProcL, xProcR, openW, yBack, yPlaster, yTop: pt("top").y,
+    stage: { x: xProcL, y: yBack, w: openW, h: R(yPlaster - yBack) },
+    xStageL: pt("stageOuterL").x, xStageR: pt("stageOuterR").x, xWingL: pt("wingL").x, xWingR: pt("wingR").x,
+    yBackWall: pt("backWall").y, xHouseL: pt("houseL").x, xHouseR: pt("houseR").x, yMix: pt("mix").y,
+    house: boxOf(regions.House), booth: boxOf(regions.Booth), catwalk: boxOf(regions.Catwalk), electrical: boxOf(regions["Electrical Room"]),
+    regions,
+    stageEdge: plan.lines.stageEdge.map(px),
+    catwalkLine: plan.lines.catwalk.map(px),
+    polylines: plan.polylines.map((pl) => pl.map(px)),
+    labels: plan.labels.map((l) => ({ text: l.text, ...px(l) })),
+    handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("backWall") },
   };
 }
 
@@ -204,17 +213,21 @@ export function churchGeom(s: AState) {
 function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _accent: string): PlanData {
   void _accent; // proscenium symbols draw in system colors; the accent styles only the handles (rendered by <PlanSvg>)
   const G = prosGeom(s);
-  const { W, H, wing, ppf, depthPx, apronPx, apronBulge, pitFt, yApron, yApronFront, xHouseL, xHouseR, cx, yBack, yPlaster, xProcL, xProcR, openW, xAudL, xAudR, yHouseFront, seatTop, seatRows, seatGap, seatBottom, yBackWall, boothW, boothH, yMix, doorsL, doorsR, doorsBack } = G;
-  void apronPx; void apronBulge; void seatBottom;
-
+  const { W, H, ML, cx, yTop, yBack, yPlaster, xProcL, xProcR, openW, xStageL, xStageR, xWingL, xWingR, yBackWall, xHouseL, xHouseR, ppf, dims } = G;
+  const wing = dims.wingFt;
   const rects: Rect[] = [], lines: LineEl[] = [], circles: CircleEl[] = [], texts: TextEl[] = [], paths: PathEl[] = [];
   const handles: PlanHandle[] = [];
+  const depthPx = yPlaster - yBack;
   const yAt = (frac: number) => R(yBack + frac * depthPx);
   const tick = (x: number, y: number) => lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
+  const trace = (pts: XY[]) => pts.map((p, i) => (i ? "L " : "M ") + p.x + " " + p.y).join(" ");
 
-  // floors: wing house + playing area
-  rects.push({ x: R(xHouseL), y: R(yBack), w: R(xHouseR - xHouseL), h: R(depthPx), fill: "#f6f7f9", stroke: "#dcdfe5", sw: 1.2, rx: 2, dash: "" });
-  rects.push({ x: R(xProcL), y: R(yBack), w: R(openW), h: R(depthPx), fill: "#ffffff", stroke: "#e3e5ea", sw: 1, rx: 1, dash: "" });
+  // floors, the playing area, then the room itself — Jeff's template drawing, stretched (#247)
+  paths.push({ d: trace(G.regions.Stage) + " Z", fill: "#f6f7f9", stroke: "none" });
+  paths.push({ d: trace(G.regions.House) + " Z", fill: "#f9fafb", stroke: "none" });
+  paths.push({ d: "M " + R(xProcL) + " " + R(yBack) + " H " + R(xProcR) + " V " + R(yPlaster) + " H " + R(xProcL) + " Z", fill: "#ffffff", stroke: "#e3e5ea", sw: 1 });
+  paths.push({ d: G.polylines.map(trace).join(" "), fill: "none", stroke: "#3a3f4a", sw: 0.9 });
+  for (const l of G.labels) texts.push({ x: l.x, y: R(l.y + 7), t: l.text, fill: "#737985", size: 8, weight: 600, anchor: "start", transform: "" });
 
   // faded unrigged line sets (background grid)
   const n = Math.max(lineSets, 1);
@@ -245,7 +258,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     for (let j = 0; j < electrics; j++) rigged.push({ frac: (electrics - j) / (electrics + 1), label: (ord[j] || j + 1 + "th") + " electric", kind: "electric" });
 
   rigged.sort((a, b) => a.frac - b.frac);
-  const labelX = xHouseR + 12;
+  const labelX = xStageR + 12;
   let lastLy = -99;
   rigged.forEach((it) => {
     const y = yAt(it.frac);
@@ -261,76 +274,26 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     }
     const ly = y < lastLy + 11 ? lastLy + 11 : y;
     lastLy = ly;
-    lines.push({ x1: R(xProcR), y1: y, x2: R(xHouseR + 6), y2: R(ly), stroke: "#d0d3da", sw: 0.8, dash: "" });
+    lines.push({ x1: R(xProcR), y1: y, x2: R(xStageR + 6), y2: R(ly), stroke: "#d0d3da", sw: 0.8, dash: "" });
     texts.push({ x: R(labelX), y: R(ly + 3), t: it.label, fill: it.kind === "electric" ? cLight : cCurt, size: 8, anchor: "start", transform: "" });
   });
 
-  // structure: back wall, side walls, proscenium walls + opening
-  lines.push({ x1: R(xHouseL), y1: R(yBack), x2: R(xHouseR), y2: R(yBack), stroke: "#16181d", sw: 2.4, dash: "" });
-  lines.push({ x1: R(xHouseL), y1: R(yBack), x2: R(xHouseL), y2: R(yPlaster), stroke: "#16181d", sw: 2, dash: "" });
-  lines.push({ x1: R(xHouseR), y1: R(yBack), x2: R(xHouseR), y2: R(yPlaster), stroke: "#16181d", sw: 2, dash: "" });
-  lines.push({ x1: R(xHouseL), y1: R(yPlaster), x2: R(xProcL), y2: R(yPlaster), stroke: "#16181d", sw: 3.4, dash: "" });
-  lines.push({ x1: R(xProcR), y1: R(yPlaster), x2: R(xHouseR), y2: R(yPlaster), stroke: "#16181d", sw: 3.4, dash: "" });
+  // reference lines: plaster line across the opening, the opening's edges, the centreline
   lines.push({ x1: R(xProcL), y1: R(yPlaster), x2: R(xProcR), y2: R(yPlaster), stroke: "#8c919c", sw: 1, dash: "2 3" });
   lines.push({ x1: R(xProcL), y1: R(yBack), x2: R(xProcL), y2: R(yPlaster), stroke: "#c4c9d2", sw: 1, dash: "4 4" });
   lines.push({ x1: R(xProcR), y1: R(yBack), x2: R(xProcR), y2: R(yPlaster), stroke: "#c4c9d2", sw: 1, dash: "4 4" });
   lines.push({ x1: R(cx), y1: R(yBack), x2: R(cx), y2: R(yBackWall), stroke: "#c4c9d2", sw: 1, dash: "3 4" });
 
-  // apron / forestage
-  paths.push({ d: "M " + R(xProcL) + " " + R(yPlaster) + " L " + R(xProcL) + " " + R(yApron) + " Q " + R(cx) + " " + R(yApronFront) + " " + R(xProcR) + " " + R(yApron) + " L " + R(xProcR) + " " + R(yPlaster) + " Z", fill: "#fcfcfd", stroke: "#e3e5ea", sw: 1, dash: "" });
-  // orchestra pit
-  if (pitFt) {
-    const pw = openW * 0.5, pTop = R(yApron - 1);
-    paths.push({ d: "M " + R(cx - pw / 2) + " " + pTop + " Q " + R(cx) + " " + R(yApronFront - 1) + " " + R(cx + pw / 2) + " " + pTop + " Z", fill: "#eceef1", stroke: SYSCOLOR.pit, sw: 1, dash: "" });
-    texts.push({ x: R(cx), y: R((yApron + yApronFront) / 2 + 2), t: "PIT", fill: SYSCOLOR.pit, size: 8, anchor: "middle", transform: "" });
-  }
-
-  // auditorium (house) floor
-  rects.push({ x: R(xAudL), y: R(yHouseFront), w: R(xAudR - xAudL), h: R(yBackWall - yHouseFront), fill: "#f9fafb", stroke: "none", sw: 0, rx: 2, dash: "" });
-
-  // audience seating arcs
-  for (let r = 0; r < seatRows; r++) {
-    const yy = seatTop + r * seatGap, half = openW * 0.5 * (0.72 + r * 0.12);
-    paths.push({ d: "M " + R(cx - half) + " " + R(yy) + " Q " + R(cx) + " " + R(yy + 9) + " " + R(cx + half) + " " + R(yy), fill: "none", stroke: "#dcdfe5", sw: 1, dash: "" });
-  }
-
   const L: L = { rects, lines, circles, texts, paths };
-  const floor = "#f9fafb", wallCol = "#16181d";
-  const span = yBackWall - yHouseFront;
-  lines.push({ x1: R(xHouseL), y1: R(yPlaster), x2: R(xAudL), y2: R(yPlaster), stroke: wallCol, sw: 2, dash: "" });
-  lines.push({ x1: R(xHouseR), y1: R(yPlaster), x2: R(xAudR), y2: R(yPlaster), stroke: wallCol, sw: 2, dash: "" });
-  lines.push({ x1: R(xAudL), y1: R(yHouseFront), x2: R(xAudL), y2: R(yBackWall), stroke: wallCol, sw: 2, dash: "" });
-  lines.push({ x1: R(xAudR), y1: R(yHouseFront), x2: R(xAudR), y2: R(yBackWall), stroke: wallCol, sw: 2, dash: "" });
-  lines.push({ x1: R(xAudL), y1: R(yBackWall), x2: R(cx - boothW / 2), y2: R(yBackWall), stroke: wallCol, sw: 2, dash: "" });
-  lines.push({ x1: R(cx + boothW / 2), y1: R(yBackWall), x2: R(xAudR), y2: R(yBackWall), stroke: wallCol, sw: 2, dash: "" });
-  doorsL.forEach((f) => vDoor(L, xAudL, yHouseFront + span * f, 1, 17, floor));
-  doorsR.forEach((f) => vDoor(L, xAudR, yHouseFront + span * f, -1, 17, floor));
-  doorsBack.forEach((f) => hDoor(L, xAudL + (xAudR - xAudL) * f, yBackWall, -1, 17, floor));
-  mixPos(L, cx, yMix, Math.min(openW * 0.3, 86));
-  const boothConsole = !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console);
-  booth(L, cx, yBackWall, boothW, boothH, floor, boothConsole);
-
-  // interactive handles — slide walls, drag/remove doors
-  {
-    const wy = R(yHouseFront + span * 0.52);
-    handles.push({ type: "wall", side: "L", cx: xAudL, cy: wy, shape: "wall" });
-    handles.push({ type: "wall", side: "R", cx: xAudR, cy: wy, shape: "wall" });
-    doorsL.forEach((f, i) => {
-      const dy = R(yHouseFront + span * f);
-      handles.push({ type: "door", key: "doorsL", idx: i, axis: "y", cx: xAudL, cy: dy, rmX: R(xAudL - 13), rmY: R(dy - 12), shape: "door", removable: true });
-    });
-    doorsR.forEach((f, i) => {
-      const dy = R(yHouseFront + span * f);
-      handles.push({ type: "door", key: "doorsR", idx: i, axis: "y", cx: xAudR, cy: dy, rmX: R(xAudR + 13), rmY: R(dy - 12), shape: "door", removable: true });
-    });
-    doorsBack.forEach((f, i) => {
-      const dx = R(xAudL + (xAudR - xAudL) * f);
-      handles.push({ type: "door", key: "doorsBack", idx: i, axis: "x", cx: dx, cy: R(yBackWall), rmX: R(dx + 12), rmY: R(yBackWall + 13), shape: "door", removable: true });
-    });
+  mixPos(L, cx, G.yMix, Math.min(openW * 0.3, 86));
+  if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
+    const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
+    rects.push({ x: R(bcx - cw / 2), y: R(bx.y + 6), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+    texts.push({ x: R(bcx), y: R(bx.y + bx.h - 6), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
 
   // dimension lines — proscenium width + wings (top)
-  const yWid = yBack - 26;
+  const yWid = yTop - 26;
   lines.push({ x1: R(xProcL), y1: R(yBack - 4), x2: R(xProcL), y2: R(yWid - 3), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xProcR), y1: R(yBack - 4), x2: R(xProcR), y2: R(yWid - 3), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xProcL), y1: R(yWid), x2: R(xProcR), y2: R(yWid), stroke: "#8c919c", sw: 1, dash: "" });
@@ -338,22 +301,33 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   tick(xProcR, yWid);
   texts.push({ x: R(cx), y: R(yWid - 6), t: s.width + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
   if (wing > 0) {
-    ([[xHouseL, xProcL], [xProcR, xHouseR]] as Array<[number, number]>).forEach((seg) => {
-      const a = seg[0], b = seg[1];
+    ([[xWingL, xProcL], [xProcR, xWingR]] as Array<[number, number]>).forEach(([a, b]) => {
       lines.push({ x1: R(a), y1: R(yWid), x2: R(b), y2: R(yWid), stroke: "#c4c9d2", sw: 0.9, dash: "" });
       tick(a, yWid);
       tick(b, yWid);
       texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wing + "'", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
     });
   }
-  // dimension line — depth (left)
-  const xDep = xHouseL - 30, yMid = (yBack + yPlaster) / 2;
-  lines.push({ x1: R(xHouseL - 4), y1: R(yBack), x2: R(xDep - 3), y2: R(yBack), stroke: "#c4c9d2", sw: 0.8, dash: "" });
-  lines.push({ x1: R(xHouseL - 4), y1: R(yPlaster), x2: R(xDep - 3), y2: R(yPlaster), stroke: "#c4c9d2", sw: 0.8, dash: "" });
-  lines.push({ x1: R(xDep), y1: R(yBack), x2: R(xDep), y2: R(yPlaster), stroke: "#8c919c", sw: 1, dash: "" });
-  tick(xDep, yBack);
-  tick(xDep, yPlaster);
-  texts.push({ x: R(xDep - 7), y: R(yMid), t: s.depth + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "rotate(-90 " + R(xDep - 7) + " " + R(yMid) + ")" });
+  // dimension lines — stage depth, then house depth (left, one chain)
+  const xDep = ML - 30;
+  const vDim = (ya: number, yb: number, label: string) => {
+    lines.push({ x1: R(xDep), y1: R(ya), x2: R(xDep), y2: R(yb), stroke: "#8c919c", sw: 1, dash: "" });
+    tick(xDep, ya);
+    tick(xDep, yb);
+    const ym = (ya + yb) / 2;
+    texts.push({ x: R(xDep - 7), y: R(ym), t: label, fill: "#8c919c", size: 11, anchor: "middle", transform: "rotate(-90 " + R(xDep - 7) + " " + R(ym) + ")" });
+  };
+  lines.push({ x1: R(xStageL - 4), y1: R(yBack), x2: R(xDep - 3), y2: R(yBack), stroke: "#c4c9d2", sw: 0.8, dash: "" });
+  lines.push({ x1: R(xStageL - 4), y1: R(yPlaster), x2: R(xDep - 3), y2: R(yPlaster), stroke: "#c4c9d2", sw: 0.8, dash: "" });
+  lines.push({ x1: R(xHouseL - 4), y1: R(yBackWall), x2: R(xDep - 3), y2: R(yBackWall), stroke: "#c4c9d2", sw: 0.8, dash: "" });
+  vDim(yBack, yPlaster, s.depth + "'-0\"");
+  vDim(yPlaster, yBackWall, Math.round(dims.houseDepthFt) + "'-0\"");
+  // dimension line — house width (bottom)
+  const yHW = H - 18;
+  lines.push({ x1: R(xHouseL), y1: R(yHW), x2: R(xHouseR), y2: R(yHW), stroke: "#8c919c", sw: 1, dash: "" });
+  tick(xHouseL, yHW);
+  tick(xHouseR, yHW);
+  texts.push({ x: R((xHouseL + xHouseR) / 2), y: R(yHW - 6), t: Math.round(dims.houseWidthFt) + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
 
   texts.push({ x: R(cx), y: R(yPlaster - 6), t: "PLASTER LINE", fill: "#8c919c", size: 8, anchor: "middle", transform: "" });
 
@@ -816,7 +790,7 @@ export function houseDragPatch(
   if (kind !== "proscenium" && kind !== "church") return null;
   if (hd.type === "wall") {
     if (kind !== "proscenium") return null;
-    const G = prosGeom(s);
+    const G = legacyProsGeom(s);
     const halfFt = clamp(Math.abs(G.cx - sx) / G.ppf, G.minHalfFt, G.maxHalfFt);
     return { houseHalfFt: +halfFt.toFixed(2) };
   }
@@ -839,7 +813,7 @@ export function houseDragPatch(
       }
       return { [key]: arr } as Partial<AState>;
     }
-    const G = prosGeom(s);
+    const G = legacyProsGeom(s);
     const arr = (Array.isArray(s[key]) ? (s[key] as number[]) : G[key] || []).slice();
     if (hd.axis === "x") {
       const lX = G.xAudL, rX = G.xAudR;
@@ -862,7 +836,7 @@ export function houseDragPatch(
 export function currentDoors(s: AState): { doorsL: number[]; doorsR: number[]; doorsBack: number[] } {
   const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
   const kind = venue.kind || "proscenium";
-  const G = kind === "church" ? churchGeom(s) : prosGeom(s);
+  const G = kind === "church" ? churchGeom(s) : legacyProsGeom(s);
   return { doorsL: G.doorsL.slice(), doorsR: G.doorsR.slice(), doorsBack: G.doorsBack.slice() };
 }
 

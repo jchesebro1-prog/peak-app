@@ -18277,7 +18277,7 @@ import { autoEstimateCards as gemCards7, autoTargets as gemAutoTargets7, clampSc
 import { EACH_CAP as gemEachCap7, generateAutoLayout as gemLayout7, partIdForLine as gemPartIdFor7, venueFrame as gemFrame7 } from "@/lib/design/grid-auto-layout";
 import { buildEquipmentPriceTable as gemTable7, type EquipCell as GemCell7 } from "@/lib/design/equipment-map";
 import { compute as gemCompute7, defaultAState as gemDefault7, type AState as GemAState7 } from "@/app/(app)/design/quick/engine";
-import { prosGeom as gemProsGeom7 } from "@/app/(app)/design/quick/plan-svg";
+import { legacyProsGeom as gemProsGeom7 } from "@/lib/design/legacy-pros-geom";
 import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake";
 {
   const parts = new Map<string, { sku: string; desc: string; unit: string; cost: number; list: number; category: string; curtainAreaRate?: number }>([
@@ -30485,4 +30485,23 @@ import { defaultAState as vt247Default } from "@/app/(app)/design/quick/engine";
   ok(hd({ houseWidthFt: 60 }).warning === vt247Warn && hd({ houseWidthFt: 70 }).warning === null, "#247: the narrow-house warning fires only when the house is narrower than the stage");
   const pd = vt247Dims({ ...vt247Default(0), width: 44, wing: 12, depth: 28, houseDepthFt: 75, sys: { ...vt247Default(0).sys, pit: false } });
   ok(pd.proWidthFt === 44 && pd.wingFt === 12 && pd.stageDepthFt === 28 && pd.houseWidthFt === 68 && pd.houseDepthFt === 75 && pd.pit === false, "#247: prosceniumDims reads pro width, wings, stage depth, the house and the pit switch off the designer state");
+}
+
+/* --- #247 T3: the proscenium plan draws Jeff's template --- */
+import { buildPlan as vt247bBuild, prosGeom as vt247bGeom, renderPlanSvgMarkup as vt247bMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as vt247bDefault } from "@/app/(app)/design/quick/engine";
+{
+  const base = vt247bDefault(0);
+  const a = { ...base, venue: "pac", width: 50, depth: 30, wing: 15, sys: { ...base.sys, pit: true, curtains: true, lighting: true } };
+  const svg = vt247bMarkup(vt247bBuild(a, 8, 3, "#3a3f4a"), "#3a3f4a");
+  ok(["Stage", "Pit", "Catwalk", "Center Aisle", "Booth", "Electrical Room", "MISC Rooms"].every((t) => svg.includes(">" + t + "<")), "#247 T3: the plan shows every label from Jeff's drawing");
+  ok(!svg.includes("CONTROL BOOTH") && !svg.includes(">PIT<"), "#247 T3: the old schematic's booth box and PIT text are gone");
+  ok(svg.includes(">PLASTER LINE<") && svg.includes(">50'-0&quot;<") && svg.includes(">30'-0&quot;<") && svg.includes(">69'-0&quot;<") && svg.includes(">80'-0&quot;<"), "#247 T3: overlays still draw — plaster line; pro width, stage depth, house depth and house width dimensions");
+  const noPit = vt247bMarkup(vt247bBuild({ ...a, sys: { ...a.sys, pit: false } }, 8, 3, "#3a3f4a"), "#3a3f4a");
+  ok(!noPit.includes(">Pit<") && noPit.includes(">Catwalk<"), "#247 T3: with the pit off its label is gone and the rest stays");
+  const G = vt247bGeom(a);
+  ok(G.W === 640 && G.xProcL < G.cx && G.cx < G.xProcR && G.yTop < G.yBack && G.yBack < G.yPlaster && G.yPlaster < G.catwalk.y && G.catwalk.y < G.yBackWall && G.booth.y >= G.yBackWall - 2, "#247 T3: stage at the top, then the catwalk, the back wall and the booth behind it");
+  ok(Math.abs((G.xWingR - G.xWingL) / G.ppf - 80) < 0.05 && Math.abs(G.openW / G.ppf - 50) < 0.05, "#247 T3: the canvas scale reads true — 80' wall to wall, 50' opening");
+  const church = vt247bBuild({ ...a, venue: "church" }, 8, 3, "#3a3f4a");
+  ok((church.handles || []).some((h) => h.type === "door"), "#247 T3: other venue kinds keep their own plans (church still has its doors)");
 }

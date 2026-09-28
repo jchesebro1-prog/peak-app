@@ -22,7 +22,8 @@
  */
 import { clamp01, type Point } from "@/lib/annotations";
 import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
-import { churchGeom, prosGeom } from "@/app/(app)/design/quick/plan-svg";
+import { churchGeom } from "@/app/(app)/design/quick/plan-svg";
+import { legacyProsGeom } from "./legacy-pros-geom";
 import type { GridCurtain } from "./grid-bom";
 import type { AutoTag } from "./grid-auto-model";
 import type { AutoCard, AutoLine } from "./auto-estimate";
@@ -36,7 +37,7 @@ export const EACH_CAP = 120;
 export function venueFrame(a: AState): VenueFrame {
   const kind = venueOf(a).kind || "proscenium";
   if (kind === "proscenium") {
-    const G = prosGeom(a);
+    const G = legacyProsGeom(a);
     const r = (x: number, y: number, w: number, h: number): Rect => ({ x: x / G.W, y: y / G.H, w: w / G.W, h: h / G.H });
     return {
       stage: r(G.stage.x, G.stage.y, G.stage.w, G.stage.h),

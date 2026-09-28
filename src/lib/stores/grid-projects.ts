@@ -42,6 +42,7 @@ import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { legacyProsGeom } from "@/lib/design/legacy-pros-geom";
 import {
   autoEstimatesOf,
   cleanLotQty,
@@ -380,7 +381,7 @@ function starterSpaces(
   sheetId: string
 ): Array<{ sheetId: string; page: number; name: string; points: Point[] }> {
   if (kind === "proscenium") {
-    const G = prosGeom(a);
+    const G = legacyProsGeom(a);
     const at = (x: number, y: number): Point => ({ x: clamp01(x / G.W), y: clamp01(y / G.H) });
     return [
       {
@@ -452,24 +453,27 @@ export async function generateBaseSheet(
 
   // Auto-calibrate from the plan's own known geometry so nothing downstream
   // ever prompts for a calibration step on this sheet (Task 1 acceptance).
-  // Every buildPlan* function's FIRST rect is the outer room/house floor —
-  // its real-world width is the venue's full width in feet (plus wings, for
-  // a proscenium house, whose house rect is wider than just the proscenium
-  // opening) — a reference that holds for every venue kind without needing
-  // each builder's private margin constants (see starterSpaces above for why
-  // those aren't all exported).
+  // A proscenium calibrates from the template's inner stage walls, exactly
+  // pro width + 2 × wing apart (#247). Every other buildPlan* function's
+  // FIRST rect is the outer room/house floor — its real-world width is the
+  // venue's full width in feet — a reference that holds for every other
+  // venue kind without needing each builder's private margin constants (see
+  // starterSpaces above for why those aren't all exported).
   const venue = VENUES.find((v) => v.key === a.venue) || VENUES[0];
   const kind = venue.kind || "proscenium";
-  const refWidthFt = kind === "proscenium" ? a.width + 2 * (a.wing || 0) : a.width;
-  const room = plan.rects[0];
-  const scale = room
-    ? calibrationScale(
-        { x: room.x / plan.W, y: room.y / plan.H },
-        { x: (room.x + room.w) / plan.W, y: room.y / plan.H },
-        plan.H / plan.W,
-        refWidthFt
-      )
-    : null;
+  let scale: number | null = null;
+  let refWidthFt = a.width;
+  if (kind === "proscenium") {
+    // #247: the template's inner stage walls are exactly pro width + 2 × wing apart.
+    const G = prosGeom(a);
+    refWidthFt = G.dims.proWidthFt + 2 * G.dims.wingFt;
+    scale = calibrationScale({ x: G.xWingL / plan.W, y: G.yBack / plan.H }, { x: G.xWingR / plan.W, y: G.yBack / plan.H }, plan.H / plan.W, refWidthFt);
+  } else {
+    const room = plan.rects[0];
+    scale = room
+      ? calibrationScale({ x: room.x / plan.W, y: room.y / plan.H }, { x: (room.x + room.w) / plan.W, y: room.y / plan.H }, plan.H / plan.W, refWidthFt)
+      : null;
+  }
   if (scale) {
     await setSheetCalibration(projectId, {
       docId: sheet.id,
