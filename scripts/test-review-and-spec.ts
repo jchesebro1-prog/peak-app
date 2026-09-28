@@ -16813,10 +16813,10 @@ import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
 
 /* ======================================================================
    #210 — one fixture builder: resolveFixture / sanitizeFixtureInput /
-   fixtureAssembliesFrom. Pure.
+   allAssembliesFrom (was fixtureAssembliesFrom until #247). Pure.
    ====================================================================== */
 import {
-  resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, fixtureAssembliesFrom, headLineForPick,
+  resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, allAssembliesFrom, headLineForPick,
   clampPickerLimit, FIXTURE_MAX_LINES,
   type FixtureRecord as FxbRecord, type HeadLine as HeadLineT,
 } from "@/lib/fixture-assemblies";
@@ -16938,10 +16938,11 @@ import {
     ok(/try \{\s*await deleteFixtureAction/.test(removeFn) && removeFn.includes("setListError(") && builderSrc.includes("{listError &&"), "#210 final review M10: a rejected delete is caught and shown on the list");
   }
 
-  const fa = fixtureAssembliesFrom([rec, sys], cat);
-  ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#210 fixtureAssembliesFrom: fixtures only, id and label carried");
-  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#210 fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
-  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#210 fixtureAssembliesFrom: the override rides through as the component cost");
+  // #247: the fixtures-only fixtureAssembliesFrom is gone — allAssembliesFrom lists every kind, fixtures first.
+  const fa = allAssembliesFrom([sys, rec], cat);
+  ok(fa.length === 2 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED" && fa[0].kind === "fixture" && fa[1].kind === "system", "#210/#247 allAssembliesFrom: fixtures first, id and label carried");
+  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#210 allAssembliesFrom: slots map back to Estimator roles and default quantities");
+  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#210 allAssembliesFrom: the override rides through as the component cost");
 }
 
 /* ======================================================================
@@ -16990,7 +16991,7 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
     { sku: "C-OTH", desc: "Misc", unit: "ea", cost: 3, list: 5 },
   ];
   const before = resolveFixtureAssemblies([asm], cat)[0];
-  const after = fixtureAssembliesFrom([f], cat)[0];
+  const after = allAssembliesFrom([f], cat)[0];
   const bt = assemblyUnitTotals(before);
   const at = assemblyUnitTotals(after);
   ok(after.id === before.id && after.name === before.name && bt.cost === at.cost && bt.sell === at.sell && bt.cost === 1293 && bt.sell === 1995, "#210 parity: a converted assembly keeps its id, name and unit cost/sell");
@@ -17047,7 +17048,7 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
     { sku: "B-BARN", desc: "Barn door", unit: "ea", cost: 60, list: 90 },
   ];
   const before = resolveFixtureAssemblies([asm], cat)[0];
-  const after = fixtureAssembliesFrom([assemblyToFixture(asm, 1)], cat)[0];
+  const after = allAssembliesFrom([assemblyToFixture(asm, 1)], cat)[0];
   const draft = { componentQty: {}, position: "FOH", circuit: "4" };
   const b = fixtureBomLine(before, draft)!;
   const a = fixtureBomLine(after, draft)!;
@@ -17126,7 +17127,7 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
 
   // NEW math: convert, then run fixture-bom.ts's fixtureBomLine over the
   // exact same draft.
-  const after = fixtureAssembliesFrom([assemblyToFixture(stored, 5000)], cat)[0];
+  const after = allAssembliesFrom([assemblyToFixture(stored, 5000)], cat)[0];
   const line = fixtureBomLine(after, draft)!;
 
   ok(
@@ -22749,7 +22750,7 @@ import { compute as n229Compute, defaultAState as n229Default } from "@/app/(app
 
 /* --- #228: Hardware assemblies — a third FixtureKind through the builder, the Equipment map and Auto --- */
 import {
-  sanitizeFixtureInput as h228Sanitize, fixtureLineParts as h228Lines, resolveFixture as h228Resolve, fixtureAssembliesFrom as h228From,
+  sanitizeFixtureInput as h228Sanitize, fixtureLineParts as h228Lines, resolveFixture as h228Resolve, allAssembliesFrom as h228From,
   type FixtureRecord as H228Rec,
 } from "@/lib/fixture-assemblies";
 import { normalizeFixtureRow as h228Normalize } from "@/lib/fixtures-convert";
@@ -22781,7 +22782,8 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
     "#228: hardware prices its parts list (cost 10 + 2×5, sell 20 + 2×8)");
   const norm = h228Normalize({ ...rec } as unknown as Record<string, unknown> & { id: string });
   ok(norm.kind === "hardware" && (norm.parts || []).length === 2, "#228: a stored hardware row normalizes as hardware, keeping its parts");
-  ok(h228From([rec], catalog).length === 0, "#228: hardware never appears in the Estimator / Quick Design fixture pickers");
+  // #246/#247 reversed #228's "never in the pickers": both pickers list hardware now, as its own group.
+  ok(h228From([rec], catalog).map((a) => `${a.kind}:${a.id}`).join(",") === "hardware:SA-HW1", "#228/#247: hardware is listed in the Estimator / Quick Design pickers, as hardware");
 
   const ctx = { parts: catalog, fixtures: new Map([[rec.id, rec]]), margin: 0.3 };
   const opt = h228Opts([rec], ctx)[0];
@@ -22807,6 +22809,138 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
   ok(ff.includes('const isParts = draft.kind !== "fixture"') && ff.includes("isHardware"), "#228: the form edits hardware as one parts list");
   const emc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
   ok(emc.includes('a.kind === "hardware" ? "Hardware"') && emc.includes("Assembly (fixture, system or hardware)"), "#228: the map picker labels hardware assemblies");
+}
+
+/* --- #246: the Estimator's "+ Add assembly" lists every assembly — fixtures, systems and hardware (pure + source) --- */
+import {
+  allAssembliesFrom as e246From, ASSEMBLY_GROUPS as e246Groups,
+  type FixtureRecord as E246Rec,
+} from "@/lib/fixture-assemblies";
+import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(app)/estimator/fixture-bom";
+{
+  const base = { description: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t" };
+  const recs: E246Rec[] = [
+    // listFixtures order (by label), kinds interleaved on purpose.
+    { ...base, id: "SA-H1", kind: "hardware", label: "Batten wrap", lightEngineSku: "", parts: [{ sku: "E246-CH", qty: 2 }] },
+    { ...base, id: "SA-F1", kind: "fixture", label: "Cyc light", lightEngineSku: "E246-ENG", position: "1st elec", circuit: "12" },
+    { ...base, id: "SA-S1", kind: "system", label: "Stage wash package", scope: "Lighting", lightEngineSku: "", parts: [{ sku: "E246-ENG", qty: 4 }], position: "stray", circuit: "9" },
+    { ...base, id: "SA-F2", kind: "fixture", label: "Wash", lightEngineSku: "E246-ENG" },
+    { ...base, id: "SA-S2", kind: "system", label: "Voice lift", scope: "Audio", lightEngineSku: "", parts: [{ sku: "E246-CH", qty: 1 }] },
+  ];
+  const cat = new Map([
+    ["E246-ENG", { sku: "E246-ENG", desc: "Engine", unit: "ea", cost: 100, list: 200 }],
+    ["E246-CH", { sku: "E246-CH", desc: "Chain", unit: "ea", cost: 10, list: 25 }],
+  ]);
+  const all = e246From(recs, cat);
+  ok(all.map((a) => `${a.kind}:${a.id}`).join(",") === "fixture:SA-F1,fixture:SA-F2,system:SA-S1,system:SA-S2,hardware:SA-H1",
+    "#246: allAssembliesFrom returns fixtures, then systems, then hardware — each in the input (label) order, every row carrying its kind");
+  ok(e246Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware", "#246: the picker's groups are Fixtures / Systems / Hardware");
+  const s1 = all.find((a) => a.id === "SA-S1")!;
+  ok(s1.scope === "Lighting" && s1.name === "Stage wash package" && s1.components.length === 1 && s1.components[0].role === "other" && s1.components[0].defaultQty === 4 && s1.components[0].list === 200,
+    "#246: a system resolves in the same shape — its scope, its parts list as components");
+  ok(!("position" in s1) && !("circuit" in s1) && !("scope" in all.find((a) => a.id === "SA-H1")!), "#246: only a fixture carries a hang position / circuit; hardware has no scope");
+  const f1 = all.find((a) => a.id === "SA-F1")!;
+  ok(f1.position === "1st elec" && f1.circuit === "12" && f1.kind === "fixture", "#246: a fixture keeps its default hang position / circuit");
+
+  const draft = { componentQty: {}, position: "1st elec", circuit: "12" };
+  ok(e246Bom(f1, draft)!.desc.endsWith(" (Pos 1st elec / Ckt 12)"), "#246: a fixture's BOM line still ends in (Pos … / Ckt …)");
+  const sysLine = e246Bom(s1, draft)!;
+  ok(!/Pos|Ckt/.test(sysLine.desc) && sysLine.price === 800 && sysLine.cost === 400, "#246: a system's BOM line drops a stale Pos / Ckt from the draft, priced 4 × $200");
+  ok(!/Pos|Ckt/.test(e246Bom(all.find((a) => a.id === "SA-H1")!, draft)!.desc), "#246: …and so does hardware");
+  ok(e246Hang({}) && e246Hang({ kind: "fixture" }) && !e246Hang({ kind: "system" }) && !e246Hang({ kind: "hardware" }), "#246: no kind (a legacy row) reads as a fixture");
+
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
+  ok(card.includes('addBtn("+ Add assembly", p.onToggleFixture') && !card.includes("Configure fixture"), "#246: the section card's button reads \"+ Add assembly\"");
+  const modal = readFileSync(join(process.cwd(), "src/app/(app)/estimator/fixture-modal.tsx"), "utf8");
+  ok(modal.includes('title="Add assembly"') && modal.includes(">Add assembly</button>") && modal.includes("<optgroup key={g.kind} label={g.label}>")
+    && modal.includes("No assemblies yet — build one in the Assembly Builder") && modal.includes(">Qty</label>") && !/[Ff]ixture qty|Add fixture|No fixture assemblies/.test(modal),
+    "#246: the modal says Add assembly, groups its options, and reads Qty");
+  ok(/\{showHang && <>/.test(modal) && modal.includes("hasHangPosition(assembly)"), "#246: Hang position / Circuit # show only for a fixture");
+  const page = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
+  ok(page.includes("fixtureAssemblies={allAssembliesFrom(fixtures, catalogRows)}"), "#246: the Estimator page passes every assembly kind");
+  const client = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(client.includes('fixtureAssemblies.find((item) => (item.kind ?? "fixture") === "fixture")'), "#246: opening the modal preselects the first fixture (never a system)");
+}
+
+/* --- #247: Quick Design's lighting fixture picker lists every assembly — fixtures, systems and hardware (pure + source) --- */
+import {
+  allAssembliesFrom as q247From, groupAssemblies as q247Group, assemblyOptionLabel as q247Label, ASSEMBLY_GROUPS as q247Groups,
+  type FixtureRecord as Q247Rec,
+} from "@/lib/fixture-assemblies";
+import { fixturePricesFrom as q247Prices, pickedFixtureIds as q247Picked } from "@/lib/stores/design-pricing";
+import { fixtureOverridesFor as q247Overrides, quickDesignPrice as q247Price } from "@/lib/design/equipment-pricing";
+import { EQUIPMENT_ROWS as q247Rows } from "@/lib/design/equipment-vocab";
+import { defaultAState as q247Default } from "@/app/(app)/design/quick/engine";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const base = { description: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t" };
+  const recs: Q247Rec[] = [
+    { ...base, id: "SA-Q47H", kind: "hardware", label: "Pipe clamp kit", lightEngineSku: "", parts: [{ sku: "Q247-CL", qty: 2 }] },
+    { ...base, id: "SA-Q47F", kind: "fixture", label: "Par wash", lightEngineSku: "Q247-ENG" },
+    { ...base, id: "SA-Q47S", kind: "system", label: "Stage wash package", scope: "Lighting", lightEngineSku: "", parts: [{ sku: "Q247-ENG", qty: 4 }] },
+    { ...base, id: "SA-Q47Z", kind: "system", label: "Unpriced package", scope: "Lighting", lightEngineSku: "", parts: [{ sku: "Q247-NOPE", qty: 1 }] },
+  ];
+  const parts = new Map([
+    ["Q247-ENG", { sku: "Q247-ENG", desc: "Engine", unit: "ea", cost: 100, list: 200 }],
+    ["Q247-CL", { sku: "Q247-CL", desc: "Clamp", unit: "ea", cost: 10, list: 25 }],
+  ]);
+
+  // The list: every kind, grouped, and the client rows carry kind (+ a system's scope).
+  const list = q247From(recs, parts);
+  ok(list.map((a) => `${a.kind}:${a.id}`).join(",") === "fixture:SA-Q47F,system:SA-Q47S,system:SA-Q47Z,hardware:SA-Q47H", "#247: allAssembliesFrom lists fixtures, systems, then hardware");
+  const legacy: Array<{ id: string; name: string; kind?: "fixture" | "system" | "hardware" }> = [{ id: "legacy", name: "Old fixture" }];
+  const groups = q247Group([...list.map(({ id, name, kind }) => ({ id, name, kind })), ...legacy]);
+  ok(groups.map((g) => `${g.label}:${g.items.map((i) => i.id).join("+")}`).join(",") === "Fixtures:SA-Q47F+legacy,Systems:SA-Q47S+SA-Q47Z,Hardware:SA-Q47H"
+    && q247Group([{ id: "h", name: "H", kind: "hardware" as const }]).map((g) => g.label).join(",") === "Hardware"
+    && q247Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware",
+    "#247: groupAssemblies — Fixtures / Systems / Hardware in order, a kind-less row reads as a fixture, empty groups dropped");
+  ok(q247Label({ name: "Stage wash package", kind: "system", scope: "Lighting" }) === "Stage wash package (Lighting)" && q247Label({ name: "Pipe clamp kit", kind: "hardware" }) === "Pipe clamp kit" && q247Label({ name: "Par wash" }) === "Par wash",
+    "#247: a system option names its scope, the Estimator's format; fixtures and hardware show the bare name");
+
+  // Pricing: a system / hardware pick prices through priceCell's assembly branch — no kind filter anywhere.
+  const ctx = { parts, fixtures: new Map(recs.map((r) => [r.id, r])), margin: 0.3 };
+  const cfg = { ...q247Default(10), tier: "better", fixtureAssemblies: { par: "SA-Q47S", front: "SA-Q47H", cyc: "SA-Q47F" } } as unknown as Record<string, unknown>;
+  const rec = { tier: "better", config: cfg };
+  const ids = q247Picked(rec);
+  ok(ids.sort().join(",") === "SA-Q47F,SA-Q47H,SA-Q47S", "#247: pickedFixtureIds returns system and hardware picks too (serverDesignPrice / serverDesignPrices / quickPromoteCheck load these)");
+  const fp = q247Prices([...ids, "SA-Q47Z"], ctx);
+  ok(fp["SA-Q47S"]?.status === "assembly" && fp["SA-Q47S"].unitSell === 800 && fp["SA-Q47S"].unitCost === 400 && fp["SA-Q47H"]?.status === "assembly" && fp["SA-Q47H"].unitSell === 50 && fp["SA-Q47H"].unitCost === 20,
+    "#247: fixturePricesFrom prices a system pick (4 × $200 sell / $100 cost) and a hardware pick (2 × $25 / $10) from their parts lists");
+  ok(fp["SA-Q47Z"]?.status === "needs-part", "#247: a system with no priced parts stays needs-a-part");
+  const ov = q247Overrides(cfg.fixtureAssemblies as Record<string, string>, fp);
+  ok(ov["lighting:par"]?.status === "assembly" && ov["lighting:par"].desc === "Stage wash package" && ov["lighting:front"]?.status === "assembly" && ov["lighting:front"].desc === "Pipe clamp kit",
+    "#247: fixtureOverridesFor turns a system / hardware pick into its lighting row's price");
+  const table = {
+    margin: 0.3,
+    byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(q247Rows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
+  };
+  const rates = { freightPct: 5, contingencyPct: 10 };
+  const plain = q247Price({ tier: "better", config: { ...cfg, fixtureAssemblies: {} } }, table, {}, rates);
+  const picked = q247Price(rec, table, fp, rates);
+  ok(plain.needsPart === 0 && picked.needsPart === 0 && picked.budget > plain.budget,
+    `#247: the server's Quick Design price (quickDesignPrice) prices system + hardware picks and stays complete (${plain.budget} → ${picked.budget})`);
+  const dead = q247Price({ tier: "better", config: { ...cfg, fixtureAssemblies: { par: "SA-Q47Z" } } }, table, fp, rates);
+  ok(dead.needsPart > 0, "#247: an unpriceable system pick blocks Add to Quotes (needs a part), like a fixture pick");
+
+  // Source: the page, the picker, and the server paths.
+  const qp = read("src/app/(app)/design/quick/page.tsx");
+  ok(qp.includes("allAssembliesFrom(fixtureRecords, catalogRows)") && !qp.includes("fixtureAssembliesFrom") && qp.includes("kind: assembly.kind") && qp.includes("scope: assembly.scope"),
+    "#247: Quick Design's page lists every assembly kind and passes kind + scope to the picker");
+  ok(!read("src/lib/fixture-assemblies.ts").includes("export function fixtureAssembliesFrom") && !/estimatorAssembliesFrom|ESTIMATOR_ASSEMBLY_GROUPS/.test(read("src/lib/fixture-assemblies.ts")),
+    "#247: the fixtures-only helper is gone; the all-kinds list and groups have neutral names");
+  const panel = read("src/components/design/scope-inputs-panel.tsx");
+  const iDead = panel.indexOf("(deleted — choose another)"), iGen = panel.indexOf(">Generic allowance</option>"), iGrp = panel.indexOf("<optgroup key={g.kind} label={g.label}>");
+  ok(panel.includes("groupAssemblies(fixtureAssemblies)") && panel.includes("assemblyOptionLabel(assembly)") && iDead > 0 && iDead < iGen && iGen < iGrp,
+    "#247: the picker keeps the dead pick, then Generic allowance, then Fixtures / Systems / Hardware optgroups");
+  ok(panel.includes("fixtureAssemblies?: AssemblyPickerOption[]") && read("src/app/(app)/design/quick/quick-design-client.tsx").includes("fixtureAssemblies: AssemblyPickerOption[]"), "#247: the client list type carries kind / scope");
+  const modal = read("src/app/(app)/estimator/fixture-modal.tsx");
+  ok(modal.includes("groupAssemblies(assemblies)") && modal.includes("assemblyOptionLabel(item)"), "#247: the Estimator's modal shares the same grouping and option label");
+  const dp = read("src/lib/stores/design-pricing.ts");
+  const em = read("src/lib/stores/equipment-map.ts");
+  ok(!/kind === "fixture"/.test(dp) && !/kind === "fixture"/.test(em), "#247: no Quick Design server price path (design-pricing, loadEquipPriceCtx) filters picks to fixtures");
+  const acts = read("src/app/(app)/design/assemblies/actions.ts");
+  const rc = acts.slice(acts.indexOf("const revalidateConsumers"), acts.indexOf("};", acts.indexOf("const revalidateConsumers")));
+  ok(rc.includes('"/design/quick"') && !/kind/.test(rc), "#247: saving or deleting any assembly kind revalidates Quick Design");
 }
 
 /* --- #231/#232 T1: wire pull + system labor — rules and formulas (pure) --- */

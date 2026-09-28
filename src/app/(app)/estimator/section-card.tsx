@@ -1076,7 +1076,7 @@ export default function SectionCard(p: SectionCardProps) {
                   catalog stays the highlighted default, as in the prototype. */}
               {addBtn("+ Add part from catalog", handleToggleCatalog, openMethod === "catalog" || openMethod === null)}
               {addBtn("+ Configure curtain", p.onToggleCurtain, openMethod === "curtain")}
-              {addBtn("+ Configure fixture", p.onToggleFixture, openMethod === "fixture")}
+              {addBtn("+ Add assembly", p.onToggleFixture, openMethod === "fixture")}
               {addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
               {addBtn("+ Build custom part", handleToggleCustom, openMethod === "custom")}
               {addBtn("+ Vendor quote", p.onToggleVendor, openMethod === "vendor")}
