@@ -1224,8 +1224,8 @@ export async function setStatus(
       pushRevision(doc, by || DEFAULT_ACTOR, "sent", "Sent to customer");
       sentCut.value = true;
       // Final review fix (#245): a staff SEND resolves the review no matter
-      // which path got it here — the Estimator save's own clear (D242/#245
-      // Task 13, clearPricedPor) only fires when every POR item has been
+      // which path got it here — the Estimator save's own clear (D416,
+      // clearPricedPor) only fires when every POR item has been
       // priced AND that exact save is what's still loaded; a quote sent any
       // other way (a stale-loaded save, a future caller of setStatus) must
       // not leave portalReview stamped on a now-"sent" quote — canAcceptPortal
