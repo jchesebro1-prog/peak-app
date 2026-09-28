@@ -103,6 +103,7 @@ export function quoteDocumentDataFor(
     taxRatePct: TAX_RATE_PCT,
     ...normalizePdfOptions(q.pdfOptions),
     paymentTerms,
+    isPortalCatalog: q.source === "portal-catalog",
     ...portalDocumentExtras(q, sections),
   };
 }

@@ -46,6 +46,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       // bytes behind one (id, history) pair never change — but the current
       // file of an id does, so the cache stays short.
       "cache-control": h === null ? "private, max-age=300" : "private, max-age=86400",
+      // #245 final review: a stored file's real bytes never got a magic-byte
+      // check before some upload paths existed — this stops a browser from
+      // sniffing a misdeclared content-type (e.g. treating an uploaded file
+      // as HTML/script) instead of trusting the header above.
+      "x-content-type-options": "nosniff",
     },
   });
 }

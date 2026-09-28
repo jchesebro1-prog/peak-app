@@ -37,6 +37,9 @@ import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectV
 import { getAllProjects } from "@/lib/stores/projects";
 
 export const dynamic = "force-dynamic";
+/** #222/#245: Refresh pricing → refreshPortalQuote → scheduleQuotePdf renders
+ *  in after() — a page's maxDuration is its Server Actions' budget. */
+export const maxDuration = 120;
 
 /**
  * Customer PORTAL dashboard (IDEAS #47 phase 1 + the quote-request slice of

@@ -10,6 +10,14 @@ import { renderThumbnailsAction } from "./actions";
  * and no image yet. Loops the action — like the Datasheets fetch loop
  * (documents-client.tsx) — until nothing is left within this run's reach,
  * since the whole catalog's gap can outrun one call's 45s render budget.
+ *
+ * Fix round 2: candidates are recomputed fresh every call, so a datasheet
+ * that keeps failing to render never gets an image and would otherwise sort
+ * first again on every retry — the naive `for (;;)` loop never terminated.
+ * This accumulates every failed datasheet id across calls and passes it back
+ * as `skip`, and stops the moment EITHER nothing is left (`remaining === 0`)
+ * OR a call made no progress at all (`done === 0` — every candidate it tried
+ * failed, or the whole run's candidates are down to already-failed ones).
  */
 export default function ThumbnailButton() {
   const router = useRouter();
@@ -21,18 +29,20 @@ export default function ThumbnailButton() {
       setMsg(null);
       let done = 0;
       let failed = 0;
+      let skip: string[] = [];
       for (;;) {
-        const r = await renderThumbnailsAction();
+        const r = await renderThumbnailsAction({ skip });
         if (!r.ok) {
           setMsg({ ok: false, text: r.error });
           break;
         }
         done += r.done;
         failed += r.failed;
-        if (r.remaining <= 0) {
+        skip = [...skip, ...r.failedIds];
+        if (r.remaining <= 0 || r.done === 0) {
           setMsg({
             ok: true,
-            text: done === 0 && failed === 0 ? "Nothing needed a thumbnail." : `Rendered ${done} thumbnail${done === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}.`,
+            text: done === 0 && failed === 0 ? "Nothing needed a thumbnail." : `${done} rendered${failed ? ` · ${failed} couldn't be rendered` : ""}.`,
           });
           break;
         }

@@ -55,6 +55,12 @@ export type QuoteDocumentProps = {
   /** #245 — the freight row label ("Freight & delivery — 412 mi" on a portal
    *  quote whose distance is known). Never a freight %. */
   freightLabel?: string;
+  /** #245 final review — true only for a portal-catalog quote. A staff-
+   *  reviewed portal quote can still have a `por: true` item left at $0 (the
+   *  Estimator's own "stays POR" rule for a $0 typed price) when it's sent
+   *  anyway; scoped here so an ordinary Estimator quote's own $0 lines (an
+   *  intentional freebie, not price-on-request) are never relabeled. */
+  isPortalCatalog?: boolean;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -180,11 +186,20 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                       : [],
                   qty: it.qty as string | number,
                   unit: it.unit,
-                  ext: fmt(cl.ext),
+                  // #245 final review: a POR line on a portal-catalog quote
+                  // still reads $0.00 in cl.ext (nothing else to sum), which
+                  // printed as if the item were actually free — say why.
+                  ext: p.isPortalCatalog && it.por ? "Price on request" : fmt(cl.ext),
                 };
               }),
       };
     });
+
+  // #245 final review: any POR line left on a SENT portal-catalog quote
+  // (staff sent it before every price-on-request item was resolved) means
+  // the printed Total is understated by whatever those lines turn out to
+  // cost — the label says so instead of implying the total is final.
+  const anyPorPrinted = !!p.isPortalCatalog && p.sections.some((sec) => sec.items.some((it) => !it.option && it.por));
 
   const lineCount = previewSections.reduce((a, s) => a + s.lines.length, 0);
   const optionItems: Array<{ sec: string; it: SpecItem }> = [];
@@ -638,7 +653,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 padding: "13px 15px",
               }}
             >
-              <span style={{ fontSize: 14, fontWeight: 700 }}>Total</span>
+              <span style={{ fontSize: 14, fontWeight: 700 }}>{anyPorPrinted ? "Total (excludes items pending price)" : "Total"}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 600 }}>
                 {fmt(p.t.grand)}
               </span>

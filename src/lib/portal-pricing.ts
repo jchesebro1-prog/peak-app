@@ -321,8 +321,12 @@ export async function priceCart(cart: PortalCart, ctx: PortalPricingContext): Pr
   }));
 
   // `mat` = sell of non-labor, non-option lines — the materials subtotal
-  // before freight. Labor rides only INSIDE a fixture item (its components),
-  // never as a labor item of its own, so it equals `rev`.
+  // before freight. A fixture line CAN fold in a real internal labor/travel
+  // component today (componentParts / fixtureComponentPart, portal-catalog-
+  // index.ts #245 Task 11 — e.g. shop fabrication), priced right into that
+  // fixture's own cost/price — but the fixture's SpecItem is never itself
+  // tagged `labor`, and no portal section is ever `kind: "labor"`, so
+  // totals() still counts every portal line as `mat`, and `mat` equals `rev`.
   const t = totals(sections, 0);
   const subtotal = cents(t.mat);
   const amount = cents(t.fr);
@@ -355,10 +359,17 @@ export type CustomerQuoteView = {
 };
 
 /** The customer-facing view: an explicit whitelist, so nothing staff-side
- *  (sections, cost, freight %) can ride along by accident. */
+ *  (sections, cost, freight %) can ride along by accident. Also strips each
+ *  line's `porReason` (final review fix) — that's staff-only context ("stale
+ *  cost", "verify price", "curtain", "component") for why a line is POR; a
+ *  customer keeps `por: true` and the "Price on request" copy it drives, but
+ *  never learns the internal reason. */
 export function sellView(p: PricedCart): CustomerQuoteView {
   return {
-    lines: p.lines.map((l) => ({ ...l })),
+    lines: p.lines.map(({ porReason, ...l }) => {
+      void porReason;
+      return { ...l };
+    }),
     subtotal: p.subtotal,
     freight: { amount: p.freight.amount, miles: p.freight.miles },
     total: p.total,

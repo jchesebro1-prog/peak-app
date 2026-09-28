@@ -436,7 +436,7 @@ export default function SectionCard(p: SectionCardProps) {
               <input
                 type="range"
                 min={0}
-                max={15}
+                max={30}
                 step={0.5}
                 value={sec.freightPct || 0}
                 onChange={(e) => p.onSetFreight(e.target.value)}
@@ -457,7 +457,17 @@ export default function SectionCard(p: SectionCardProps) {
                 {fmt(secFreight)}
               </span>
             </div>
-            {sec.freightAuto && p.freightUnknown && (
+            {(
+              (sec.freightAuto && p.freightUnknown) ||
+              // #245 final review: a portal-catalog quote's sections are
+              // server-priced with freightAuto: false (never hand-editable
+              // here), so the chip above never showed even when that section
+              // was capped for the same reason (no locatable venue). Those
+              // sections always carry freightMiles (null when unknown) —
+              // an ordinary Estimator section never sets the field at all —
+              // so this reads it directly instead of relying on freightAuto.
+              (sec.freightMiles === null && typeof sec.freightMiles !== "undefined")
+            ) && (
               <div style={{ fontSize: 11, fontWeight: 500, color: "#b4543a" }}>
                 Freight at max — venue not located
               </div>

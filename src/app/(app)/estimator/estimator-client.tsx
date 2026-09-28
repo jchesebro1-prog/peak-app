@@ -1232,7 +1232,11 @@ export default function EstimatorClient({
   const setFreightPct = (secId: string, val: string) => {
     let v = parseFloat(val);
     if (isNaN(v) || v < 0) v = 0;
-    if (v > 15) v = 15;
+    // #245 final review: 30 matches the Estimating Rules freight-cap max
+    // (src/lib/stores/pricing.ts FREIGHT_RATE_IDS.cap, min:0/max:30) — the
+    // old 15 ceiling meant an auto-applied cap above 15% (an admin can set
+    // the rule's cap up to 30) could never be typed back in by hand.
+    if (v > 30) v = 30;
     // #245: a hand-set freight % opts this section out of the distance-rule
     // auto-updates a later venue change would otherwise re-apply.
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, freightPct: v, freightAuto: false } : s)));

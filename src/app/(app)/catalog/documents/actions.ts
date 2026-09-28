@@ -378,7 +378,11 @@ export async function setImageOrderAction(input: { sku: string; documentIds: str
   await requireUser();
   const sku = String(input.sku || "").trim();
   if (!sku) return { ok: false, error: "Missing part." };
-  const raw = input.documentIds || [];
+  // Fix round 3: a non-array documentIds (e.g. malformed client state, a
+  // hand-crafted request) must refuse cleanly — `input.documentIds || []`
+  // only catches null/undefined; anything else truthy (a string, an object)
+  // reached `.filter` below and threw a TypeError instead of a refusal.
+  const raw = Array.isArray(input.documentIds) ? input.documentIds : [];
   const ids = raw.filter(isDocumentId);
   // Fix round 2: a malformed id (not `raw.filter`ed silently away) must
   // refuse the whole call rather than reorder against a silently-shortened
@@ -454,12 +458,18 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
  * datasheet's page 1 — one PDF renders once and attaches to every SKU that
  * shares it (thumbnailCandidates groups by datasheet). Runs under a 45s
  * wall-clock budget like fetchLinksAction; the client button loops calls
- * until `remaining` reaches 0, since production's gap can exceed one call's
- * render budget. A single datasheet's render failing (bad PDF, Chrome
- * unavailable, …) is recorded and the batch moves on — never aborts the
- * rest of the run.
+ * until `remaining` reaches 0 or a call makes no progress, since
+ * production's gap can exceed one call's render budget. A single
+ * datasheet's render failing (bad PDF, Chrome unavailable, …) is recorded
+ * and the batch moves on — never aborts the rest of the run. `skip` (fix
+ * round 2) is the caller's accumulated set of datasheet ids that already
+ * failed earlier in this run: candidates are recomputed fresh from
+ * imagesBySku/ownDatasheetBySku every call, so a datasheet that keeps
+ * failing never gets an image and would otherwise sort first again on
+ * every retry — the batch would never finish. `failedIds` on the result is
+ * what the caller folds into the next call's `skip`.
  */
-export async function renderThumbnailsAction(): Promise<DocActionResult<{ done: number; failed: number; remaining: number }>> {
+export async function renderThumbnailsAction(input?: { skip?: string[] }): Promise<DocActionResult<{ done: number; failed: number; remaining: number; failedIds: string[] }>> {
   const user = await requirePerm("manage_users");
   if (!blobEnabled()) {
     return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be rendered on this deployment." };
@@ -503,12 +513,13 @@ export async function renderThumbnailsAction(): Promise<DocActionResult<{ done: 
     if (own) ownDatasheetBySku.set(sku, { id: own.id, blobKey: own.blobKey });
   }
 
-  const candidates = thumbnailCandidates({ skus, imagesBySku, ownDatasheetBySku });
+  const candidates = thumbnailCandidates({ skus, imagesBySku, ownDatasheetBySku, skip: input?.skip });
   const groups = groupCandidatesByDatasheet(candidates);
 
   let done = 0;
   let failed = 0;
   let i = 0;
+  const failedIds: string[] = [];
   for (; i < groups.length; i++) {
     // Same rule as fetch-links' budget (I1): the very first render of the
     // whole call always runs, even if the budget is already tight; every
@@ -518,7 +529,10 @@ export async function renderThumbnailsAction(): Promise<DocActionResult<{ done: 
     const g = groups[i];
     const r = await renderDatasheetThumbnail(g.datasheetId, g.skus, user.name, { origin });
     if (r.ok) done++;
-    else failed++;
+    else {
+      failed++;
+      failedIds.push(g.datasheetId);
+    }
   }
   const remaining = groups.length - i;
 
@@ -527,5 +541,5 @@ export async function renderThumbnailsAction(): Promise<DocActionResult<{ done: 
     revalidatePath("/catalog/documents");
     revalidatePath("/catalog");
   }
-  return { ok: true, done, failed, remaining };
+  return { ok: true, done, failed, remaining, failedIds };
 }

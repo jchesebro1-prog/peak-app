@@ -241,7 +241,12 @@ export type Quote = {
    *  null on every other quote, including a review quote staff later send. */
   portalFirm?: { generatedAt: number; validUntil: number } | null;
   /** #245 (spec §4.3) — a portal-catalog generation waiting on Peak: some line
-   *  is price on request. Cleared when staff send it. */
+   *  is price on request. Cleared by setStatus's own write the moment the
+   *  quote actually transitions to "sent" (final review fix — a review is
+   *  resolved once it's sent, so it can never outlive the send that gates
+   *  `canAcceptPortal`); also cleared earlier, as an editing convenience, by
+   *  an Estimator save once every POR item has been priced and none remain
+   *  (estimator/actions.ts, clearPricedPor). */
   portalReview?: { requestedAt: number; reasons: string[] } | null;
   /** #245 (spec §4.4) — staff declined the customer's portal acceptance. */
   portalDecline?: { at: number; by: string; note: string } | null;
@@ -1218,6 +1223,15 @@ export async function setStatus(
     if (status === "sent") {
       pushRevision(doc, by || DEFAULT_ACTOR, "sent", "Sent to customer");
       sentCut.value = true;
+      // Final review fix (#245): a staff SEND resolves the review no matter
+      // which path got it here — the Estimator save's own clear (D242/#245
+      // Task 13, clearPricedPor) only fires when every POR item has been
+      // priced AND that exact save is what's still loaded; a quote sent any
+      // other way (a stale-loaded save, a future caller of setStatus) must
+      // not leave portalReview stamped on a now-"sent" quote — canAcceptPortal
+      // reads status === "sent" && !portalReview together, so a lingering
+      // stamp here would permanently block the customer's Accept.
+      doc.portalReview = null;
     }
     doc.updatedAt = t;
   });

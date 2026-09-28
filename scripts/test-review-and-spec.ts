@@ -10630,6 +10630,7 @@ seeded()
   .then(() => reviewLimitChips242AsyncChecks())
   .then(() => reviewLimitsFix242AsyncChecks())
   .then(() => reviewLimitsFinal242AsyncChecks())
+  .then(() => portal245FinalReviewAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25287,6 +25288,7 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
     "src/app/(app)/flame-tests/page.tsx",
     "src/app/(app)/inspections/page.tsx",
     "src/app/(app)/page.tsx",
+    "src/app/portal/page.tsx",
   ];
   const short = pages.filter((p) => !/\nexport const maxDuration = 120;\n/.test(src(p)));
   ok(short.length === 0, `#222 T4 fix: every render-scheduling page sets maxDuration = 120${short.length ? " — missing: " + short.join(", ") : ""}`);
@@ -28071,6 +28073,17 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     ok(!sv.includes("\"cost\"") && !sv.includes("\"sections\"") && !sv.includes("margin") && !sv.includes("silver"), "#245 cart: sellView carries no cost, sections, margin or tier name");
     ok(!sv.includes("\"pct\"") && !sv.includes("\"unknown\"") && JSON.stringify(JSON.parse(sv).freight) === JSON.stringify({ amount: p.freight.amount, miles: null }),
       "#245 cart: sellView freight is amount + miles only — no pct or unknown (cost could be backed out)");
+    // Final review fix: the curtain line above is `por` with `porReason:
+    // "curtain"` on the staff-side PricedCart — sellView must keep `por`
+    // (drives the customer's "Price on request" copy) but never leak WHY.
+    ok(curtain.porReason === "curtain" && !sv.includes("porReason") && JSON.parse(sv).lines.some((l: { por?: boolean }) => l.por === true),
+      "#245 cart fix: sellView strips porReason from every line (staff-only) while keeping por: true");
+    const srcRoot245 = join(process.cwd(), "src");
+    const porReasonReaders = (v216Readdir(srcRoot245, { recursive: true, encoding: "utf8" }) as string[])
+      .filter((f) => /\.tsx?$/.test(f))
+      .filter((f) => readFileSync(join(srcRoot245, f), "utf8").includes("porReason"));
+    ok(porReasonReaders.every((f) => f === "lib/portal-pricing.ts" || f === "lib/portal-price-rules.ts"),
+      `#245 cart fix: no client component reads porReason — only the server pricing modules that compute it should mention it (found: ${porReasonReaders.join(", ")})`);
   } finally {
     d245Invalidate();
     await removeCustomer(CO);
@@ -28790,6 +28803,18 @@ import { execFileSync as d245ExecFile } from "node:child_process";
   const cc = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
   ok(cc.startsWith('"use client"') && !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db|lib\/portal-pricing|lib\/portal-quotes)/m.test(cc) && !/freight\.pct|\.sections\b|\bcost\b/.test(cc),
     "#245 cart page: the client imports no store/pricing values and never reads a freight %, sections or cost");
+
+  // Final review fix: a POR line on a portal-catalog quote must print
+  // "Price on request" (never $0.00), and the printed Total must say so
+  // when one is left unresolved. QuoteDocument itself imports a .jpg
+  // letterhead, which this Node harness can't load, so — like the #222
+  // "no client directive" check above — this reads its source rather than
+  // rendering it.
+  const qdSrc245 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/quote-document.tsx"), "utf8");
+  ok(/ext: p\.isPortalCatalog && it\.por \? "Price on request" : fmt\(cl\.ext\)/.test(qdSrc245),
+    "#245 final review: a portal-catalog quote's POR line prints \"Price on request\" instead of fmt($0.00)");
+  ok(/const anyPorPrinted = !!p\.isPortalCatalog && p\.sections\.some/.test(qdSrc245) && /\{anyPorPrinted \? "Total \(excludes items pending price\)" : "Total"\}/.test(qdSrc245),
+    "#245 final review: the printed Total relabels itself when a POR line remains on a portal-catalog quote");
 }
 
 async function portal245GenerateAsyncChecks(): Promise<void> {
@@ -28869,6 +28894,7 @@ async function portal245GenerateAsyncChecks(): Promise<void> {
       ok(eq242(doc.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax.", "Valid until " + untilLabel]) && doc.validUntilMs === NOW + 30 * DAY,
         "#245 generate firm: the quote PDF data carries the review line, the tax line and Valid until");
       ok(doc.freightLabel === "Freight & delivery — 450 mi" && !JSON.stringify(doc.standingLines).includes("%"), "#245 generate firm: the PDF freight line reads Freight & delivery — 450 mi");
+      ok(doc.isPortalCatalog === true, "#245 final review: quoteDocumentDataFor flags every portal-catalog quote, firm or review, so the document knows to check for POR lines");
     }
 
     // Review: a part + a curtain (always price on request).
@@ -28883,6 +28909,8 @@ async function portal245GenerateAsyncChecks(): Promise<void> {
     if (qr) {
       const doc = d245DocData(qr, cust, { companyName: "Peak", logoDark: null });
       ok(doc.standingLines?.length === 2 && doc.validUntilMs === null, "#245 generate review: the PDF data prints the standing lines without a validity date");
+      ok(doc.isPortalCatalog === true && doc.sections.some((s) => s.items.some((it) => it.por === true)),
+        "#245 final review: a review portal quote's PDF data is flagged isPortalCatalog and still carries its POR item (customer document prints 'Price on request', never $0.00)");
     }
     ok((await d245GetCart(G, CO)).lines.length === 0, "#245 generate review: the cart is empty afterwards");
 
@@ -29284,6 +29312,31 @@ import { groupCandidatesByDatasheet as d245GroupByDatasheet, thumbnailCandidates
   ok(groups.length === 2, "#245 thumbnails: 3 candidate SKUs across 2 distinct datasheets (PD-c, PD-shared) group into 2 render entries — one per datasheet, not one per SKU");
   const shared = groups.find((g) => g.datasheetId === "PD-shared");
   ok(!!shared && shared.skus.length === 2 && shared.skus.includes("SKU-SHARED-1") && shared.skus.includes("SKU-SHARED-2"), "#245 thumbnails: two SKUs sharing one datasheet group into ONE render entry naming both — the renderer is called once per datasheet, not once per SKU");
+
+  // Fix round 2 (#245): a datasheet that keeps failing to render never gets
+  // an image, so it would recompute as candidate #1 again on every retry —
+  // the `for (;;)` loop in the button never terminated. `skip` is the
+  // caller's accumulated failed-datasheet-id list; passing it back excludes
+  // that datasheet from the NEXT call's candidates, so `remaining` actually
+  // reaches 0 once every renderable datasheet is done.
+  const call1 = d245ThumbCandidates({ skus, imagesBySku, ownDatasheetBySku });
+  ok(call1.some((c) => c.datasheetId === "PD-c"), "#245 thumbnails fix2: first call (no skip) still offers the datasheet that's about to fail");
+  const call2 = d245ThumbCandidates({ skus, imagesBySku, ownDatasheetBySku, skip: ["PD-c"] });
+  ok(!call2.some((c) => c.datasheetId === "PD-c") && call2.some((c) => c.datasheetId === "PD-shared"), "#245 thumbnails fix2: skip excludes only the datasheet id(s) that already failed this run, leaving other candidates alone");
+  const groups2 = d245GroupByDatasheet(d245ThumbCandidates({ skus: ["SKU-NO-IMAGE"], imagesBySku, ownDatasheetBySku, skip: ["PD-c"] }));
+  ok(groups2.length === 0, "#245 thumbnails fix2: once the only candidate's datasheet is in skip, remaining drops to 0 instead of looping forever");
+  ok(d245ThumbCandidates({ skus, imagesBySku, ownDatasheetBySku, skip: new Set(["PD-c"]) }).length === call2.length, "#245 thumbnails fix2: skip also accepts a Set (renderThumbnailsAction folds the caller's array into one)");
+
+  const actionSrc245 = readFileSync("src/app/(app)/catalog/documents/actions.ts", "utf8");
+  ok(/renderThumbnailsAction\(input\?: \{ skip\?: string\[\] \}\)/.test(actionSrc245), "#245 thumbnails fix2: renderThumbnailsAction accepts an optional skip list");
+  ok(/thumbnailCandidates\(\{ skus, imagesBySku, ownDatasheetBySku, skip: input\?\.skip \}\)/.test(actionSrc245), "#245 thumbnails fix2: the action forwards skip into thumbnailCandidates");
+  ok(/failedIds\.push\(g\.datasheetId\)/.test(actionSrc245) && /return \{ ok: true, done, failed, remaining, failedIds \};/.test(actionSrc245), "#245 thumbnails fix2: the action collects and returns this call's failed datasheet ids");
+
+  const buttonSrc245 = readFileSync("src/app/(app)/catalog/documents/thumbnail-button.tsx", "utf8");
+  ok(/let skip: string\[\] = \[\]/.test(buttonSrc245) && /skip = \[\.\.\.skip, \.\.\.r\.failedIds\]/.test(buttonSrc245), "#245 thumbnails fix2: the button accumulates failed ids into skip across calls");
+  ok(/renderThumbnailsAction\(\{ skip \}\)/.test(buttonSrc245), "#245 thumbnails fix2: every call passes the accumulated skip list back");
+  ok(/r\.remaining <= 0 \|\| r\.done === 0/.test(buttonSrc245), "#245 thumbnails fix2: the loop stops on remaining === 0 OR a call making no progress (done === 0), never unconditionally");
+  ok(!/for \(;;\) \{\s*const r = await renderThumbnailsAction\(\);/.test(buttonSrc245), "#245 thumbnails fix2: the old unconditional for(;;) with no skip argument is gone");
 }
 
 {
@@ -30219,4 +30272,112 @@ import { shouldAdoptUrlQ } from "@/lib/url-search-text";
     ok(src.includes("useUrlSearchText(q)"), `#243: ${f} uses the shared useUrlSearchText hook`);
     ok(!src.includes("setPrevQ"), `#243: ${f} no longer carries its own unconditional URL→draft reset`);
   }
+}
+
+/* ======================================================================
+   Portal catalog — final-review fix wave (#245, D402–D417 + this wave).
+   Sync source-text checks below (freight chip, freight clamp, nosniff
+   header, docs corrections); the DB-backed checks (setStatus clearing
+   portalReview on a send, preparedBy on Generate) are registered in the
+   async chain as portal245FinalReviewAsyncChecks().
+   ====================================================================== */
+{
+  const scSrc245 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
+  ok(/max=\{30\}/.test(scSrc245) && !/max=\{15\}/.test(scSrc245), "#245 final review fix: the freight slider's max is 30 (the Estimating Rules cap max), not 15");
+  ok(/\(sec\.freightMiles === null && typeof sec\.freightMiles !== "undefined"\)/.test(scSrc245), "#245 final review fix: the 'Freight at max' chip also reads a portal-catalog section's own freightMiles === null, not only freightAuto");
+  ok(/\(sec\.freightAuto && p\.freightUnknown\) \|\|/.test(scSrc245), "#245 final review fix: the ordinary Estimator-editable case (freightAuto + freightUnknown) still shows the chip too");
+
+  const ecSrc245 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(/if \(v > 30\) v = 30;/.test(ecSrc245) && !/if \(v > 15\) v = 15;/.test(ecSrc245), "#245 final review fix: setFreightPct clamps to 30, not 15");
+
+  const routeSrc245 = readFileSync(join(process.cwd(), "src/app/api/part-documents/[id]/route.ts"), "utf8");
+  ok(/"x-content-type-options": "nosniff"/.test(routeSrc245), "#245 final review fix: the team part-documents route sends X-Content-Type-Options: nosniff");
+
+  const punch245 = readFileSync(join(process.cwd(), "PUNCHLIST.md"), "utf8");
+  const punch245Item = punch245.slice(punch245.indexOf("## 245. Customer portal catalog"), punch245.indexOf("## 246.") > -1 ? punch245.indexOf("## 246.") : undefined);
+  ok(!/\*\*DaVinci image import\*\* \/ \*\*Datasheet thumbnails\*\* admin batches/.test(punch245Item) && /Datasheet thumbnails\*\* admin batch \(a DaVinci image import was scoped but dropped/.test(punch245Item),
+    "#245 docs fix: punch #245's Done section no longer claims a DaVinci image import batch exists (D411 dropped it) — only Datasheet thumbnails shipped");
+  ok(!/90-day-stale carts already show empty/.test(punch245Item), "#245 docs fix: punch #245 no longer claims stale carts show an empty-with-notice state");
+  ok(/carts don't expire/.test(punch245Item), "#245 docs fix: punch #245 says plainly that carts don't expire");
+  ok(!/still says "build an estimate"/.test(punch245Item), "#245 docs fix: the stale 'build an estimate' empty-browse-copy line is removed (that string no longer exists in the app)");
+  for (const needle of ["cold-start cost", "take the cart", "before Accept's own guards run", "loadPartDocsState` still running as a write off the external Displays API"]) {
+    ok(punch245Item.includes(needle), `#245 docs fix: punch #245 follow-ups now name "${needle}"`);
+  }
+
+  const dec245 = readFileSync(join(process.cwd(), "DECISIONS.md"), "utf8");
+  const d406 = dec245.slice(dec245.indexOf("## D406."), dec245.indexOf("## D407."));
+  ok(!/shows empty-with-notice/.test(d406) && /Carts\s+don't expire/.test(d406), "#245 docs fix: D406 no longer claims stale carts show empty-with-notice — says carts don't expire");
+}
+
+async function portal245FinalReviewAsyncChecks(): Promise<void> {
+  // Task 3 fix: a staff SEND must resolve portalReview in the same write,
+  // however the quote got to "sent" — not only through the Estimator save's
+  // own clearPricedPor path. Simulate the worst case directly: a portal-
+  // catalog quote that somehow reaches setStatus("sent") with portalReview
+  // still stamped (bypassing the normal approval gate the way #242's own
+  // tests do, since this is testing setStatus's WRITE, not the gate itself).
+  const sendClearId = fixtureId(245, "send-clear");
+  await q222Create({ id: sendClearId, source: "portal-catalog", name: "Test245 send-clear", customer: "Test245 Co" });
+  registerFixture("quotes", sendClearId);
+  await q222Update(sendClearId, { portalReview: { requestedAt: Date.now(), reasons: ["curtain"] } });
+  const beforeSend = await q222Get(sendClearId);
+  ok(!!beforeSend?.portalReview, "#245 final review fix setup: the fixture starts with portalReview stamped, as a staff-priced review quote about to be sent would");
+  ok(!d245CanAccept({ status: beforeSend!.status, portalAcceptance: beforeSend!.portalAcceptance, portalFirm: beforeSend!.portalFirm, portalReview: beforeSend!.portalReview }, Date.now()).ok,
+    "#245 final review fix setup: canAcceptPortal correctly refuses while still a draft with portalReview set");
+  await q222SetStatus(sendClearId, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+  const afterSend = await q222Get(sendClearId);
+  ok(afterSend?.status === "sent" && afterSend.portalReview === null, "#245 final review fix: setStatus's own write to \"sent\" clears portalReview — a staff send always resolves the review, whichever path got it there");
+  ok(d245CanAccept({ status: afterSend!.status, portalAcceptance: afterSend!.portalAcceptance, portalFirm: afterSend!.portalFirm, portalReview: afterSend!.portalReview }, Date.now()).ok,
+    "#245 final review fix: canAcceptPortal is now ok — a lingering portalReview no longer permanently blocks Accept once the quote is actually sent");
+  // A non-portal quote's send must not misbehave either (portalReview simply
+  // stays absent/null — no crash, no unintended field on a plain estimate).
+  const plainId = fixtureId(245, "send-clear-plain");
+  await q222Create({ id: plainId, source: "estimator", name: "Test245 plain" });
+  registerFixture("quotes", plainId);
+  await q222SetStatus(plainId, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+  const plainAfter = await q222Get(plainId);
+  ok(plainAfter?.status === "sent" && !plainAfter.portalReview, "#245 final review fix: an ordinary (non-portal) quote's send is unaffected — portalReview is just absent");
+
+  // Task 10 fix: Generate sets preparedBy to the account owner's name when
+  // the company has one — the fallback quoteOwnerName() (review-limits.ts,
+  // D396) reads when `owner` itself doesn't resolve to an active roster
+  // name. Reuses the same fixtures/shape as portal245GenerateAsyncChecks.
+  const CO = fixtureId(245, "prep-co");
+  const P = fixtureId(245, "prep-part");
+  const G = fixtureId(245, "prep-grant");
+  registerFixture("portal_carts", G);
+  await d245MergeUpsert(P, { desc: "Test245 Prepared-by Part", category: "Test245 PrepCat", unit: "ea", list: 100, cost: 60 });
+  registerFixture("catalog_parts", P);
+  const owner = (await activeUsers())[0]?.name || "";
+  const venue = { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 10 };
+  await upsertCustomer({ id: CO, name: "Test245 Prepared-by Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
+  d245Invalidate();
+  const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+  await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: Date.now(), lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
+  const gen = await d245Generate(sess, { now: Date.now(), schedulePdf: false });
+  if (!gen.ok) throw new Error("#245 final review Task 10 setup failed — " + gen.error);
+  registerFixture("quotes", gen.quoteId);
+  const madeQuote = await q222Get(gen.quoteId);
+  ok(madeQuote?.owner === owner && madeQuote?.preparedBy === owner, "#245 final review fix: Generate sets preparedBy to the account owner's name alongside owner, so quoteOwnerName()'s fallback has the same name to try");
+  // The customer document's own "Prepared by" line is sourced from `owner`
+  // (quote-document-data.ts ownerName), not preparedBy — confirm that's
+  // still what feeds it, so this fix is understood for what it actually
+  // changes (the review-limit owner lookup), not assumed to fix the print.
+  const qdDataSrc245 = readFileSync(join(process.cwd(), "src/lib/quote-pdf/quote-document-data.ts"), "utf8");
+  ok(/ownerName: q\.owner \|\| companyName/.test(qdDataSrc245), "#245 final review: confirms the printed 'Prepared by' line's real source field is `owner`, not `preparedBy`");
+
+  // Unowned company: owner stays "" (buildQuote's own store default is never
+  // overwritten with another blank) — preparedBy is left untouched too.
+  const CO2 = fixtureId(245, "prep-co-noowner");
+  const G2 = fixtureId(245, "prep-grant-noowner");
+  registerFixture("portal_carts", G2);
+  await upsertCustomer({ id: CO2, name: "Test245 Prepared-by Co (no owner)", type: "Education", locations: [{ ...venue, id: "v2" }], contacts: [] });
+  d245Invalidate();
+  const sess2 = { grantId: G2, customerId: CO2, name: "Rae Buyer", email: "rae@example.com" };
+  await d245SaveCart({ id: G2, customerId: CO2, locationId: "v2", updatedAt: Date.now(), lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
+  const gen2 = await d245Generate(sess2, { now: Date.now(), schedulePdf: false });
+  if (!gen2.ok) throw new Error("#245 final review Task 10 (no-owner) setup failed — " + gen2.error);
+  registerFixture("quotes", gen2.quoteId);
+  const madeQuote2 = await q222Get(gen2.quoteId);
+  ok(madeQuote2?.owner === "" && !madeQuote2?.preparedBy, "#245 final review fix: an unassigned company's portal quote leaves preparedBy untouched (the store default) rather than writing another blank over it");
 }

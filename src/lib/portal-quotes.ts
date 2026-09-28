@@ -135,6 +135,15 @@ export async function generatePortalQuote(
     try {
       await updateQuote(created.id, {
         owner: cust.owner || "",
+        // #245 final review: preparedBy is what quoteOwnerName() falls back
+        // to (review-limits.ts, D396) when `owner` doesn't match an active
+        // roster name — set it alongside owner so an unowned-company portal
+        // quote's review-limit lookup has the same name to try. Left
+        // untouched (buildQuote's own default) when the company has no
+        // account owner, rather than writing another blank over it — note
+        // the customer document's own "Prepared by" line is `ownerName`,
+        // sourced from `owner` (quote-document-data.ts), not this field.
+        ...(cust.owner ? { preparedBy: cust.owner } : {}),
         portalReview: mode === "review" ? { requestedAt: now, reasons: p.reason ? [p.reason] : [] } : null,
       });
       if (mode === "firm") {

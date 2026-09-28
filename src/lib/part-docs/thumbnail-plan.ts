@@ -17,12 +17,19 @@ export function thumbnailCandidates(input: {
   skus: readonly string[];
   imagesBySku: Map<string, unknown[]>;
   ownDatasheetBySku: Map<string, { id: string; blobKey: string | null }>;
+  /** Datasheet ids that already failed to render earlier in THIS run
+   *  (renderThumbnailsAction's caller-accumulated list) — excluded so a
+   *  permanently-failing datasheet doesn't recreate itself as candidate #1
+   *  forever and keep the batch from ever finishing. */
+  skip?: readonly string[] | ReadonlySet<string>;
 }): ThumbnailCandidate[] {
+  const skip = input.skip instanceof Set ? input.skip : new Set(input.skip ?? []);
   const out: ThumbnailCandidate[] = [];
   for (const sku of input.skus) {
     if ((input.imagesBySku.get(sku)?.length ?? 0) > 0) continue;
     const datasheet = input.ownDatasheetBySku.get(sku);
     if (!datasheet || !datasheet.blobKey) continue;
+    if (skip.has(datasheet.id)) continue;
     out.push({ sku, datasheetId: datasheet.id });
   }
   return out;
