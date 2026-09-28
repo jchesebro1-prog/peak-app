@@ -7,6 +7,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import type { AssembledSection, LeftOutReason } from "@/lib/specs/assemble-section";
 import type { SpecDocument } from "@/lib/specs/spec-document";
+import { specRowKey } from "@/lib/specs/record-keys";
 import { specFileName } from "@/lib/specs/spec-file-name";
 import { writePartSpecFieldsAction } from "@/app/(app)/catalog/actions";
 import {
@@ -386,24 +387,27 @@ function Picker({
 
 function HeaderSelect({
   docId,
-  sku,
+  row,
   sectionArticles,
   run,
   pending,
 }: {
   docId: string;
-  sku: string;
+  row: SpecProductRow;
   sectionArticles: ArticleOption[];
   run: RunFn;
   pending: boolean;
 }) {
+  // The row's key (§3.1) — a real SKU's is `SKU:<UPPER>`, so this keeps
+  // matching the same product server-side that `sku` used to.
+  const rowKey = specRowKey(row);
   return (
     <select
       className="pk-input"
-      aria-label={`Header for ${sku}`}
+      aria-label={`Header for ${row.sku}`}
       value=""
       disabled={pending}
-      onChange={(e) => e.target.value && run(() => setSpecProductHeaderAction(docId, sku, e.target.value))}
+      onChange={(e) => e.target.value && run(() => setSpecProductHeaderAction(docId, rowKey, e.target.value))}
       style={{ width: "auto", padding: "5px 8px", fontSize: 12.5 }}
     >
       <option value="">— Pick a header —</option>
@@ -463,19 +467,21 @@ function ProductsCard({
     const a = rows[i];
     const b = rows[i + dir];
     if (!a || !b) return;
-    const order = productRows.map((r) => r.sku);
-    const ia = order.indexOf(a.sku);
-    const ib = order.indexOf(b.sku);
+    const order = productRows.map((r) => specRowKey(r));
+    const ia = order.indexOf(specRowKey(a));
+    const ib = order.indexOf(specRowKey(b));
     [order[ia], order[ib]] = [order[ib], order[ia]];
     run(() => reorderSpecProductsAction(doc.id, order));
   };
 
   // A removed product goes back into the picker's offer.
-  const remove = (sku: string) =>
-    run(
-      () => removeSpecProductAction(doc.id, sku),
-      () => setAdded((a) => a.filter((s) => s.toUpperCase() !== sku.toUpperCase()))
+  const remove = (r: SpecProductRow) => {
+    const rowKey = specRowKey(r);
+    return run(
+      () => removeSpecProductAction(doc.id, rowKey),
+      () => setAdded((a) => a.filter((s) => s.toUpperCase() !== r.sku.toUpperCase()))
     );
+  };
 
   const onPick = async (p: SpecPickerPart): Promise<void> => {
     if (p.hasSpec && p.inSection) {
@@ -548,14 +554,14 @@ function ProductsCard({
         return (
           <span style={{ ...WARN, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             Pick a header
-            {canEdit && <HeaderSelect docId={doc.id} sku={r.sku} sectionArticles={sectionArticles} run={run} pending={pending} />}
+            {canEdit && <HeaderSelect docId={doc.id} row={r} sectionArticles={sectionArticles} run={run} pending={pending} />}
           </span>
         );
       case "other-section":
         return (
           <span style={{ ...WARN, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             Belongs to {r.otherArticleTitle || "another article"}&apos;s section — Use a header here
-            {canEdit && <HeaderSelect docId={doc.id} sku={r.sku} sectionArticles={sectionArticles} run={run} pending={pending} />}
+            {canEdit && <HeaderSelect docId={doc.id} row={r} sectionArticles={sectionArticles} run={run} pending={pending} />}
           </span>
         );
       case "not-in-catalog":
@@ -566,7 +572,7 @@ function ProductsCard({
   };
 
   const productRow = (r: SpecProductRow, i: number, rows: SpecProductRow[]) => (
-    <div key={r.sku} style={ROW}>
+    <div key={specRowKey(r)} style={ROW}>
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
           <span style={SKU}>{r.sku}</span>
@@ -591,7 +597,7 @@ function ProductsCard({
           >
             ↓
           </button>
-          <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending} onClick={() => remove(r.sku)}>
+          <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending} onClick={() => remove(r)}>
             Remove
           </button>
         </div>

@@ -24,11 +24,18 @@ export type PartSpecFields = Pick<
 
 export type SpecCatalogPart = CatalogPart & PartSpecFields;
 
-/** One line of the incoming equipment list, from a quote or an upload. */
+/** One line of the incoming equipment list, from a quote or an upload.
+ *  `mfrNumber`/`manufacturer`/`specKey` are carried through from the source
+ *  quote line (#205 follow-on, spec records design §3.1) but ignored by D94's
+ *  own catalog-sku matching below — they exist for `record-match.ts` and the
+ *  builder's row identity (`specRowKey`). */
 export type BomRow = {
   sku: string;
   desc: string;
   qty: number;
+  mfrNumber?: string;
+  manufacturer?: string;
+  specKey?: string;
 };
 
 export type MatchBucket = "ready" | "no-spec" | "no-match";

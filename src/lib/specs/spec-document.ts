@@ -5,9 +5,29 @@
  * the library at preview/download time (design §2).
  */
 
+import { specRowKey } from "@/lib/specs/record-keys";
+
 export type SpecSourceKind = "scratch" | "quote" | "grid";
 export type SpecDocHeader = { projectName: string; projectNumber: string; phase: string; issueDate: string; preparedBy: string };
-export type SpecDocProduct = { sku: string; qty?: number; articleId?: string };
+/** A product/BOM row on the spec (spec records design §3.1). `sku` may be
+ *  empty for a row that only ever carried a manufacturer part number, a
+ *  system match key, or a bare description — `mfrNumber`/`manufacturer`/
+ *  `specKey`/`desc`/`specId` are what `specRowKey` and `record-match.ts`
+ *  identify and match it by. `fromLibrary` marks a row added straight from
+ *  the Spec Library (Add from Spec Library, §5.3) rather than from a BOM.
+ *  `waived` (§5.1) prints under ITEMS NOT SPECIFIED instead of matching. */
+export type SpecDocProduct = {
+  sku: string;
+  qty?: number;
+  articleId?: string;
+  mfrNumber?: string;
+  manufacturer?: string;
+  specKey?: string;
+  desc?: string;
+  specId?: string;
+  fromLibrary?: true;
+  waived?: { reason: string };
+};
 export type SpecDocSource = { kind: SpecSourceKind; id?: string; label?: string; quoteId?: string };
 export type SpecDocument = {
   id: string;
@@ -46,16 +66,39 @@ export function isValidIsoDate(v: unknown): v is string {
 const KINDS: readonly SpecSourceKind[] = ["scratch", "quote", "grid"];
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v)).trim();
-const same = (a: string, b: string) => a.toUpperCase() === b.toUpperCase();
+/** Strings capped at 200, a waive reason at 500 (spec records design §3.1). */
+const capStr = (v: string, max: number) => (v.length > max ? v.slice(0, max) : v);
 
+/** Accepts a row with no `sku` as long as it carries a `mfrNumber`,
+ *  `specKey`, `desc`, or `specId` — that's the whole point of #205's
+ *  sku-less allowance/vendor/system rows (design §3.1). Returns null only
+ *  when the row would carry NONE of those, i.e. it identifies nothing. */
 function product(v: unknown): SpecDocProduct | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   const sku = str(o.sku);
-  if (!sku) return null;
+  const mfrNumber = capStr(str(o.mfrNumber), SPEC_HEADER_MAX);
+  const manufacturer = capStr(str(o.manufacturer), SPEC_HEADER_MAX);
+  const specKey = capStr(str(o.specKey), SPEC_HEADER_MAX);
+  const desc = capStr(str(o.desc), SPEC_HEADER_MAX);
+  const specId = capStr(str(o.specId), SPEC_HEADER_MAX);
+  if (!sku && !mfrNumber && !specKey && !desc && !specId) return null;
   const qty = Number(o.qty);
   const articleId = str(o.articleId);
-  return { sku, ...(Number.isFinite(qty) && o.qty !== "" && o.qty != null ? { qty } : {}), ...(articleId ? { articleId } : {}) };
+  const w = o.waived && typeof o.waived === "object" ? (o.waived as Record<string, unknown>) : null;
+  const waivedReason = w ? capStr(str(w.reason), SPEC_FILL_IN_MAX) : "";
+  return {
+    sku,
+    ...(Number.isFinite(qty) && o.qty !== "" && o.qty != null ? { qty } : {}),
+    ...(articleId ? { articleId } : {}),
+    ...(mfrNumber ? { mfrNumber } : {}),
+    ...(manufacturer ? { manufacturer } : {}),
+    ...(specKey ? { specKey } : {}),
+    ...(desc ? { desc } : {}),
+    ...(specId ? { specId } : {}),
+    ...(o.fromLibrary === true ? { fromLibrary: true as const } : {}),
+    ...(waivedReason ? { waived: { reason: waivedReason } } : {}),
+  };
 }
 
 export function normalizeSpecDocument(raw: unknown): SpecDocument {
@@ -64,9 +107,14 @@ export function normalizeSpecDocument(raw: unknown): SpecDocument {
   const s = (o.source && typeof o.source === "object" ? o.source : {}) as Record<string, unknown>;
   const kind = KINDS.includes(s.kind as SpecSourceKind) ? (s.kind as SpecSourceKind) : "scratch";
   const products: SpecDocProduct[] = [];
+  const seenKeys = new Set<string>();
   for (const p of Array.isArray(o.products) ? o.products : []) {
     const n = product(p);
-    if (n && !products.some((x) => same(x.sku, n.sku))) products.push(n);
+    if (!n) continue;
+    const k = specRowKey(n);
+    if (seenKeys.has(k)) continue;
+    seenKeys.add(k);
+    products.push(n);
   }
   const stringMap = (v: unknown): Record<string, string> => {
     const out: Record<string, string> = {};
@@ -129,30 +177,53 @@ export function pickSpecHeaderPatch(patch: Record<string, unknown> | null | unde
   return out;
 }
 
+/** Row-key prefixes `specRowKey` ever returns (record-keys.ts §3.1). */
+const ROW_KEY_PREFIX = /^(SKU|MPN|KEY|DESC|SPEC):/;
+
+/** `withoutProduct`/`withProductOrder`/`withProductHeader` take a row
+ *  identity, but a caller may hand either a pre-computed `specRowKey(p)`
+ *  (a sku-less row, or any new caller) or a bare real SKU (every caller
+ *  written before #205's sku-less rows existed) — already-prefixed strings
+ *  pass through untouched, anything else is treated as a sku, exactly
+ *  reproducing the old case-insensitive `same(sku, sku)` match. */
+function keyFor(identity: string): string {
+  return ROW_KEY_PREFIX.test(identity) ? identity : specRowKey({ sku: identity });
+}
+
+/** Row identity everywhere on `SpecDocument` from here down (spec records
+ *  design §3.1): a real SKU's row key is case-insensitive exactly like the
+ *  old `same(sku, sku)` check it replaces, so every real-SKU caller keeps
+ *  working unchanged; a sku-less row (allowance/vendor/system/library) now
+ *  gets a stable identity too. */
 export function withProduct(doc: SpecDocument, p: SpecDocProduct): SpecDocument {
   const n = product(p);
-  if (!n || doc.products.some((x) => same(x.sku, n.sku))) return doc;
+  if (!n) return doc;
+  const k = specRowKey(n);
+  if (doc.products.some((x) => specRowKey(x) === k)) return doc;
   return { ...doc, products: [...doc.products, n] };
 }
 
-export function withoutProduct(doc: SpecDocument, sku: string): SpecDocument {
-  return { ...doc, products: doc.products.filter((p) => !same(p.sku, sku)) };
+export function withoutProduct(doc: SpecDocument, rowKey: string): SpecDocument {
+  const k = keyFor(rowKey);
+  return { ...doc, products: doc.products.filter((p) => specRowKey(p) !== k) };
 }
 
-export function withProductOrder(doc: SpecDocument, skus: string[]): SpecDocument {
+export function withProductOrder(doc: SpecDocument, rowKeys: string[]): SpecDocument {
   const first: SpecDocProduct[] = [];
-  for (const s of skus) {
-    const hit = doc.products.find((p) => same(p.sku, s));
+  for (const rk of rowKeys) {
+    const k = keyFor(rk);
+    const hit = doc.products.find((p) => specRowKey(p) === k);
     if (hit && !first.includes(hit)) first.push(hit);
   }
   return { ...doc, products: [...first, ...doc.products.filter((p) => !first.includes(p))] };
 }
 
-export function withProductHeader(doc: SpecDocument, sku: string, articleId: string | null): SpecDocument {
+export function withProductHeader(doc: SpecDocument, rowKey: string, articleId: string | null): SpecDocument {
+  const k = keyFor(rowKey);
   return {
     ...doc,
     products: doc.products.map((p) => {
-      if (!same(p.sku, sku)) return p;
+      if (specRowKey(p) !== k) return p;
       const { articleId: _drop, ...rest } = p;
       void _drop;
       return articleId ? { ...rest, articleId } : rest;
@@ -160,15 +231,38 @@ export function withProductHeader(doc: SpecDocument, sku: string, articleId: str
   };
 }
 
-export function bomProducts(rows: Array<{ sku: string; qty: number }>): SpecDocProduct[] {
+/** BOM rows → spec products, merged by row key (not sku) so qty on the same
+ *  real part sums as before, AND a sku-less allowance/vendor/system row
+ *  survives instead of vanishing (spec records design §3.1). A row with
+ *  none of sku/mfrNumber/specKey/desc carries no identity and is dropped. */
+export function bomProducts(
+  rows: Array<{ sku: string; desc?: string; qty: number; mfrNumber?: string; manufacturer?: string; specKey?: string }>
+): SpecDocProduct[] {
   const out: SpecDocProduct[] = [];
+  const byKey = new Map<string, SpecDocProduct>();
   for (const r of rows) {
     const sku = str(r.sku);
-    if (!sku) continue;
+    const desc = str(r.desc);
+    const mfrNumber = str(r.mfrNumber);
+    const specKey = str(r.specKey);
+    if (!sku && !mfrNumber && !specKey && !desc) continue;
     const qty = Number(r.qty) || 0;
-    const hit = out.find((p) => same(p.sku, sku));
-    if (hit) hit.qty = (hit.qty || 0) + qty;
-    else out.push({ sku, qty });
+    const k = specRowKey({ sku, mfrNumber, specKey, desc });
+    const hit = byKey.get(k);
+    if (hit) {
+      hit.qty = (hit.qty || 0) + qty;
+      continue;
+    }
+    const p: SpecDocProduct = {
+      sku,
+      qty,
+      ...(mfrNumber ? { mfrNumber } : {}),
+      ...(r.manufacturer ? { manufacturer: str(r.manufacturer) } : {}),
+      ...(specKey ? { specKey } : {}),
+      ...(desc ? { desc } : {}),
+    };
+    byKey.set(k, p);
+    out.push(p);
   }
   return out;
 }

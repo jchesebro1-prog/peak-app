@@ -29,6 +29,7 @@ import {
   type SpecDocHeader,
   type SpecDocSource,
 } from "@/lib/specs/spec-document";
+import { specRowKey } from "@/lib/specs/record-keys";
 import { articleInSection } from "@/lib/specs/assemble-section";
 import { fillInLabelKey, fillInSlots } from "@/lib/specs/fill-ins";
 import { searchSpecParts, type SpecPickerPart } from "@/lib/specs/picker";
@@ -215,7 +216,8 @@ export async function addSpecProductAction(id: string, sku: string, articleId?: 
   if (!part) return { ok: false, error: `Part ${s || sku} not found.` };
   const doc = await getSpecDocument(id);
   if (!doc) return { ok: false, error: "Spec not found." };
-  if (doc.products.some((p) => p.sku.toUpperCase() === part.sku.toUpperCase())) {
+  const newKey = specRowKey({ sku: part.sku });
+  if (doc.products.some((p) => specRowKey(p) === newKey)) {
     return { ok: false, error: "Already on this spec." };
   }
   const trimmedArticleId = String(articleId || "").trim();
@@ -228,19 +230,23 @@ export async function addSpecProductAction(id: string, sku: string, articleId?: 
   return applyPatch(id, user, (d) => withProduct(d, { sku: part.sku, ...(aid ? { articleId: aid } : {}) }));
 }
 
-export async function removeSpecProductAction(id: string, sku: string): Promise<Result> {
+/** `rowKey` is `specRowKey(row)` as computed by the caller (§3.1) — a real
+ *  catalog part's is `SKU:<UPPER>`, so a plain sku still works for every
+ *  existing real-part caller; a sku-less row (allowance/vendor/system) needs
+ *  its full row key instead. */
+export async function removeSpecProductAction(id: string, rowKey: string): Promise<Result> {
   const user = await requirePerm("create");
-  return applyPatch(id, user, (d) => withoutProduct(d, sku));
+  return applyPatch(id, user, (d) => withoutProduct(d, rowKey));
 }
 
-export async function reorderSpecProductsAction(id: string, skus: string[]): Promise<Result> {
+export async function reorderSpecProductsAction(id: string, rowKeys: string[]): Promise<Result> {
   const user = await requirePerm("create");
-  const list = Array.isArray(skus) ? skus.map((s) => String(s ?? "")) : [];
+  const list = Array.isArray(rowKeys) ? rowKeys.map((s) => String(s ?? "")) : [];
   if (list.length > SPEC_REORDER_MAX) return { ok: false, error: `A spec can't reorder more than ${SPEC_REORDER_MAX} products at once.` };
   return applyPatch(id, user, (d) => withProductOrder(d, list));
 }
 
-export async function setSpecProductHeaderAction(id: string, sku: string, articleId: string | null): Promise<Result> {
+export async function setSpecProductHeaderAction(id: string, rowKey: string, articleId: string | null): Promise<Result> {
   const user = await requirePerm("create");
   const aid = String(articleId || "").trim();
   if (aid) {
@@ -249,7 +255,7 @@ export async function setSpecProductHeaderAction(id: string, sku: string, articl
     const check = await checkArticleInSection(aid, doc.sectionId);
     if (!check.ok) return check;
   }
-  return applyPatch(id, user, (d) => withProductHeader(d, sku, aid || null));
+  return applyPatch(id, user, (d) => withProductHeader(d, rowKey, aid || null));
 }
 
 export async function setSpecPrintQuantitiesAction(id: string, on: boolean): Promise<Result> {

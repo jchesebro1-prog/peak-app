@@ -150,10 +150,10 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
  * Every other line passes through unchanged.
  */
 export function gridSpecBomRows(
-  lines: ReadonlyArray<{ sku?: string; desc?: string; qty?: number; allowance?: boolean }>,
+  lines: ReadonlyArray<{ sku?: string; desc?: string; qty?: number; allowance?: boolean; specKey?: string }>,
   fixtureOf: (id: string) => FixtureResolvable | null | undefined
-): Array<{ sku: string; desc: string; qty: number }> {
-  const rows: Array<{ sku: string; desc: string; qty: number }> = [];
+): Array<{ sku: string; desc: string; qty: number; specKey?: string }> {
+  const rows: Array<{ sku: string; desc: string; qty: number; specKey?: string }> = [];
   for (const l of lines) {
     const sku = String(l.sku || "").trim();
     const desc = String(l.desc || "").trim();
@@ -173,7 +173,7 @@ export function gridSpecBomRows(
       continue;
     }
     if (!sku && !desc) continue;
-    rows.push({ sku, desc, qty });
+    rows.push({ sku, desc, qty, ...(l.specKey ? { specKey: l.specKey } : {}) });
   }
   return rows;
 }

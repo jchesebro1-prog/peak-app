@@ -85,6 +85,11 @@ export type SpecItem = {
   noFreight?: boolean;
   /** #245: customer-requested line still waiting on a Peak price. */
   por?: boolean;
+  /** Spec records design §6 — a system record's match key, set at the
+   *  source (custom/curtain line editing; UI lands in a later task) so
+   *  `bomFromQuote`/`record-match.ts` can match this line with no catalog
+   *  part number. */
+  specKey?: string;
   /** #245 Task 13 — the fixture record this line was configured from, and the
    *  add-on quantities chosen (keyed `slot:sku`, as on a portal cart line).
    *  Carried ONLY on a `fixture: true` item written by the portal

@@ -38,7 +38,7 @@ import type { TierKey } from "@/app/(app)/design/quick/engine";
 const LABOR_COST_FRAC_FALLBACK = 0.7;
 
 export type GridQuoteSpecLine = {
-  sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true;
+  sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true; specKey?: string;
 };
 
 export type GridQuoteBuild = {
@@ -282,6 +282,7 @@ export async function buildGridQuote(
       ext: l.ext,
       ...(isFallbackLine(l) ? { tierFallback: true as const } : {}),
       ...(allowanceIds.has(l.partId) || l.allowance ? { allowance: true as const } : {}),
+      ...(l.specKey ? { specKey: l.specKey } : {}),
     })),
   };
   const manyOptions = ensureOptions(project).options.length > 1;

@@ -13,6 +13,8 @@ import type { Port } from "@/lib/catalog-connect";
 // margin) - importing it here keeps this module client-safe.
 import type { CurtainSpec } from "@/lib/curtain-geom";
 import type { GridShape } from "./grid-symbols";
+// Pure (no store/db imports) — safe in this client-safe module.
+import { curtainSpecKey } from "@/lib/specs/record-keys";
 
 /** The slice of a catalog part the BOM needs — structurally satisfied by
  *  stores/catalog.CatalogPart, mapped server-side and passed to the client. */
@@ -127,6 +129,10 @@ export type GridCurtain = {
   fabricSku: string;
   /** Optional. Empty means the curtain template's defaultColor prints. */
   color?: string;
+  /** Optional override of the derived `curtainSpecKey(type, name)` (spec
+   *  records design §6) — set when a designer needs a drape kind the name/
+   *  type keywords don't resolve to. */
+  specKey?: string;
 };
 
 /** Placement slice the curtain BOM needs. */
@@ -205,6 +211,7 @@ export function curtainLines(
       ext: price,
       kind: "curtain",
       curtainName: pl.curtain.name,
+      specKey: pl.curtain.specKey || curtainSpecKey(pl.curtain.type, pl.curtain.name) || undefined,
     });
   }
   return lines.sort((a, b) => b.ext - a.ext || a.partId.localeCompare(b.partId));
@@ -230,6 +237,9 @@ export type BomLine = {
   kind?: "curtain";
   /** Curtain lines only: the name the designer typed, for a short label. */
   curtainName?: string;
+  /** Curtain lines: the drape kind's spec match key (spec records design
+   *  §6), for `record-match.ts` and the bid-spec BOM. */
+  specKey?: string;
   /** #212: an allowance line that carries its own flag (custom items) —
    *  the quote marks its spec line `allowance`, the bid spec drops it. */
   allowance?: true;

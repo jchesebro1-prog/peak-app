@@ -10651,6 +10651,7 @@ seeded()
   .then(() => specRecordsImportAsyncChecks())
   .then(() => specRecordsImportFixRound1AsyncChecks())
   .then(() => specRecordMatchAsyncChecks())
+  .then(() => specRecordsBomSeamAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32656,4 +32657,34 @@ async function specRecordMatchAsyncChecks(): Promise<void> {
   ok(K.specRowKey({ sku: "CURTAIN", specKey: "Stage Drapes – Legs", desc: "Legs" }) === "KEY:stage drapes - legs|legs"
     && K.specRowKey({ sku: "", mfrNumber: " iq24 " }) === "MPN:IQ24" && K.specRowKey({ sku: "ls-p" }) === "SKU:LS-P"
     && K.specRowKey({ specId: "PS-1", fromLibrary: true }) === "SPEC:PS-1", "record-keys: specRowKey");
+}
+
+/* ---- Spec records BOM seam (Task 5, design §3.1) ----
+ * Needs `await` (dynamic imports + a doc-store write in the temp test DB),
+ * so it lives in its own named async function wired into the promise chain
+ * (HARNESS PATTERN), rather than the brief's literal top-level `{ }` block.
+ * Assertions are copied verbatim from the brief. */
+async function specRecordsBomSeamAsyncChecks(): Promise<void> {
+  const SD = await import("@/lib/specs/spec-document");
+  const { upsertDoc } = await import("@/db/doc-store");
+  const { bomFromQuote } = await import("@/lib/specs/quote-bom");
+  await upsertDoc("quotes", { id: "Q-SPECREC-1", name: "Spec rec test", vendorQuotes: [{ id: "vq1", lines: [{ id: 1, description: "Sensor IQ 24", manufacturerPartNumber: "IQ24", qty: 2, unit: "ea", amount: 0 }] }],
+    spec: { sections: [{ items: [
+      { sku: "LS-P", desc: "Lonestar Prime", qty: 4 },
+      { sku: "", desc: "Acoustic shell towers", qty: 1, custom: true, allowance: true, specKey: "Acoustic Shell – Towers" },
+      { sku: "CRT-9", desc: "Main Curtain — IFR velour, 40×20", qty: 1, curtain: true },
+      { sku: "VQ", desc: "Vendor: Sensor IQ", qty: 1, vendorQuoteId: "vq1" },
+      { sku: "LAB", desc: "Labor", qty: 1, labor: true },
+    ] }] } } as never);
+  const r = await bomFromQuote("Q-SPECREC-1");
+  ok(r.ok && r.rows.some((x) => x.mfrNumber === "IQ24" && x.qty === 2) && !r.rows.some((x) => x.desc === "Vendor: Sensor IQ"), "bom seam: a vendor-quote roll-up expands into its lines' part numbers");
+  ok(r.ok && r.rows.some((x) => x.specKey === "Acoustic Shell – Towers" && x.sku === ""), "bom seam: an allowance with no SKU is kept with its specKey");
+  ok(r.ok && r.rows.some((x) => x.sku === "CRT-9" && x.specKey === "Stage Drapes – Main Curtain"), "bom seam: an estimator curtain derives its specKey from the description");
+  ok(r.ok && !r.rows.some((x) => x.desc === "Labor"), "bom seam: labor still skipped");
+  const prods = SD.bomProducts([{ sku: "LS-P", desc: "a", qty: 1 }, { sku: "ls-p", desc: "b", qty: 2 }, { sku: "", desc: "Shell", qty: 1, specKey: "Acoustic Shell – Towers" }, { sku: "", desc: "", qty: 1 }]);
+  ok(prods.length === 2 && prods[0].qty === 3 && prods[1].specKey === "Acoustic Shell – Towers", "bom seam: bomProducts merges by row key and keeps non-catalog rows");
+  const nd = SD.normalizeSpecDocument({ products: [{ sku: "", mfrNumber: "IQ24", desc: "IQ" }, { specId: "PS-1", fromLibrary: true }, { sku: "", mfrNumber: "iq24" }] });
+  ok(nd.products.length === 2, "bom seam: normalize keeps sku-less rows and de-dups by row key");
+  const { gridSpecBomRows } = await import("@/lib/design/grid-virtual-parts");
+  ok(gridSpecBomRows([{ sku: "CURTAIN", desc: "Main", qty: 1, specKey: "Stage Drapes – Main Curtain" }], () => null)[0].specKey === "Stage Drapes – Main Curtain", "bom seam: Grid curtain lines carry specKey");
 }
