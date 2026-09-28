@@ -32777,7 +32777,13 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   const a3 = run(doc([{ sku: "", specKey: "Stage Drapes – Main Curtain", desc: "Main" }]));
   ok(a3.checklist.leftOut.some((l) => l.reason === "other-section" && l.sectionNumber === "11 61 23"), "assembly: a record from another section is listed with its section number");
   const a4 = run(doc([{ sku: "XYZ-123", desc: "mystery" }, { sku: "LS-P", waived: { reason: "Owner furnished" } }]));
-  ok(a4.checklist.leftOut.some((l) => l.reason === "no-match") && a4.part2.articles.at(-1)!.title === "ITEMS NOT SPECIFIED", "assembly: no-match listed; waived row prints under ITEMS NOT SPECIFIED");
+  const xyz = a4.checklist.leftOut.find((l) => l.rowKey === "SKU:XYZ-123");
+  ok(xyz?.reason === "not-in-catalog" && xyz.match?.status === "no-match" && Array.isArray(xyz.match.candidates) && !a4.part2.articles.some((a) => a.products.some((p) => p.rowKeys.includes("SKU:XYZ-123"))) && a4.part2.articles.at(-1)!.title === "ITEMS NOT SPECIFIED", "assembly: a real sku with no part and no record is not-in-catalog carrying its no-match result (never assigned); waived row prints under ITEMS NOT SPECIFIED");
+  // "mystery" scores nothing against the library (candidates []); the
+  // canonical brief §10 row does, and its candidates ride on the entry.
+  const a4b = run(doc([{ sku: "XYZ-123", desc: "Lonestar moving light" }]));
+  const xyzB = a4b.checklist.leftOut.find((l) => l.rowKey === "SKU:XYZ-123");
+  ok(xyzB?.reason === "not-in-catalog" && xyzB.match?.status === "no-match" && xyzB.match.candidates.includes("PS-260961-028") && a4b.part2.articles.length === 0 && Object.keys(a4b.usedRecords).length === 0, "assembly: not-in-catalog carries non-empty no-match candidates and never prints one");
   const btn = run(doc([{ sku: "UH10005-41F" }], { fillIns: { "PS-260961-007#1": "Black (RAL 9004)" }, fillInLabels: {} }));
   ok(btn.checklist.jobValues.length > 0 && btn.usedRecords["PS-260961-007"] === 1, "assembly: job values listed; usedRecords stamps the revision");
   const ov = run(doc([{ sku: "LS-P" }], { overrides: { "PS-260961-028": { title: "CUSTOM TITLE", specText: "Only this", baseRevision: 0 } } }));
@@ -32807,9 +32813,9 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   // A sku-less row with no match is no-match, never not-in-catalog.
   const nm = run(doc([{ sku: "CUSTOM", desc: "Stage widget" }]));
   ok(nm.checklist.leftOut.length === 1 && nm.checklist.leftOut[0].reason === "no-match" && nm.checklist.leftOut[0].match?.status === "no-match", "assembly: a placeholder-sku row with no match is no-match (with its match), never not-in-catalog");
-  // A bare real sku gone from the catalog keeps today's not-in-catalog.
+  // A bare real sku gone from the catalog keeps today's not-in-catalog, with its match.
   const gone = run(doc([{ sku: "GONE-1" }]));
-  ok(gone.checklist.leftOut[0]?.reason === "not-in-catalog", "assembly: a bare real sku missing from the catalog with no match stays not-in-catalog");
+  ok(gone.checklist.leftOut[0]?.reason === "not-in-catalog" && gone.checklist.leftOut[0]?.match?.status === "no-match", "assembly: a real sku missing from the catalog with no match stays not-in-catalog and carries its match");
   // Every row's outcome is reported by row key.
   ok(a4.rowMatches["SKU:LS-P"]?.status === "waived" && a4.rowMatches["SKU:XYZ-123"]?.status === "no-match", "assembly: rowMatches keyed by specRowKey");
   // ITEMS NOT SPECIFIED line text + numbering.
@@ -32843,7 +32849,18 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   const tb = A.assembleSection({ section: tableSec, articles: arts as never, sections: [tableSec, s116123] as never, parts: new Map(), doc: doc([{ sku: "UH10005-41F", qty: 4 }, { sku: "LS-P", waived: { reason: "By others" } }]), records: recs });
   if (tb.part2.style !== "table") throw new Error("expected table");
   const tr = tb.part2.rows[0];
-  ok(tb.part2.rows.length === 1 && tr.model === "UH10005-41F" && tr.description === recs.find((r) => r.specId === "PS-260961-007")!.title && tr.qty === 4 && tb.part2.articles.at(-1)!.title === "ITEMS NOT SPECIFIED", "assembly: table rows for records use the row's matched number + record title; ITEMS NOT SPECIFIED appends");
+  ok(tb.part2.rows.length === 1 && tr.model === "UH10005-41F" && tr.description === recs.find((r) => r.specId === "PS-260961-007")!.title && tr.qty === 4 && !tb.part2.articles.some((a) => a.title === "ITEMS NOT SPECIFIED") && tb.part2.trailing?.title === "ITEMS NOT SPECIFIED" && tb.part2.trailing.num === `2.${tb.part2.articles.length + 1}`, "assembly: table rows for records use the row's matched number + record title; ITEMS NOT SPECIFIED is the table's trailing article");
+  // Fix round 1: in Word, the equipment table precedes ITEMS NOT SPECIFIED.
+  const tbXml = await (await JSZip.loadAsync(await buildSectionDocx(tb))).file("word/document.xml")!.async("string");
+  const tblAt = tbXml.indexOf("<w:tbl>"), insAt = tbXml.indexOf("ITEMS NOT SPECIFIED");
+  ok(tblAt > 0 && insAt > tblAt && tbXml.indexOf("By others") > insAt, "assembly: in a table-style Word file the equipment table comes before the ITEMS NOT SPECIFIED heading");
+  const previewSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/[id]/preview.tsx"), "utf8");
+  ok(previewSrc.indexOf("p2.trailing.title") > previewSrc.indexOf("</table>"), "preview: a table-style trailing ITEMS NOT SPECIFIED renders after the table");
+  // Fix round 1: [FILL IN:] in record text prints as written, with a warning.
+  const fiRecs = recs.map((r) => (r.specId === "PS-260961-028" ? { ...r, specText: r.specText + "\nWarranty: [FILL IN: years] years." } : r));
+  const fi = A.assembleSection({ section: s260961, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map(), doc: doc([{ sku: "LS-P" }]), records: fiRecs });
+  const fiText = fi.part2.articles.flatMap((x) => x.products).flatMap((p) => p.lines.map((l) => l.text)).join("\n");
+  ok(fiText.includes("[FILL IN: years]") && fi.warnings.includes("PS-260961-028 has a [FILL IN] blank that can't be answered in the builder yet — edit the spec text.") && fi.checklist.fillInsLeft === 0 && !a2.warnings.some((w) => w.includes("[FILL IN]")), "assembly: a [FILL IN:] in record text prints as written and warns, never counted as a fill-in");
 
   // spec-document: overrides / usedRecords / downloadedAt + pure edits.
   const base = doc([{ sku: "LS-P" }, { sku: "", desc: "Allowance" }]);
@@ -32868,7 +32885,16 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   ok(libRun.rowMatches["SPEC:PS-260961-011"]?.status === "matched", "assembly: a library row matches its pinned record");
   const st = SD.withDownloadStamp(base, { "PS-260961-028": 2 }, 1234);
   ok(st.usedRecords["PS-260961-028"] === 2 && st.downloadedAt === 1234 && SD.normalizeSpecDocument(st).downloadedAt === 1234 && SD.normalizeSpecDocument(st).usedRecords["PS-260961-028"] === 2, "spec doc: withDownloadStamp stamps usedRecords + downloadedAt and survives normalize");
-  // The docx route stamps the download, best-effort.
+  // The docx route stamps the download after the response, best-effort.
   const routeSrc = readFileSync(join(process.cwd(), "src/app/api/spec-documents/[id]/docx/route.ts"), "utf8");
-  ok(routeSrc.includes("withDownloadStamp(") && routeSrc.includes("patchSpecDocument(") && /try\s*\{[\s\S]*withDownloadStamp[\s\S]*\}\s*catch/.test(routeSrc) && routeSrc.includes("await requireUser()"), "docx route: stamps usedRecords after building, inside try/catch, still behind requireUser");
+  ok(/after\(async \(\) => \{\s*try \{\s*await stampSpecDocumentDownload\(/.test(routeSrc) && /\}\s*catch \(err\) \{\s*console\.error/.test(routeSrc) && !routeSrc.includes("patchSpecDocument(") && routeSrc.includes("await requireUser()"), "docx route: stamps usedRecords inside after() with try/catch + logging, still behind requireUser");
+  // The stamp store call leaves updatedAt/updatedBy alone.
+  const SDS = await import("@/lib/stores/spec-documents");
+  const made = await SDS.createSpecDocument({ sectionId: "ss-260961", header: { projectName: "Stamp", projectNumber: "", phase: "", issueDate: "", preparedBy: "" }, source: { kind: "scratch" }, products: [], printQuantities: false, fillIns: {}, createdBy: "t", updatedBy: "Editor" });
+  const before = await SDS.getSpecDocument(made.id);
+  const stamped = await SDS.stampSpecDocumentDownload(made.id, { "PS-260961-028": 3 }, 4242);
+  const after2 = await SDS.getSpecDocument(made.id);
+  ok(!!before && !!stamped && !!after2 && after2.usedRecords["PS-260961-028"] === 3 && after2.downloadedAt === 4242 && after2.updatedAt === before.updatedAt && after2.updatedBy === "Editor", "spec doc store: stampSpecDocumentDownload changes usedRecords/downloadedAt and leaves updatedAt/updatedBy equal");
+  ok((await SDS.stampSpecDocumentDownload("SP-NOPE-0", { A: 1 }, 1)) === null, "spec doc store: stamping a missing spec is a no-op null");
+  await SDS.removeSpecDocument(made.id);
 }

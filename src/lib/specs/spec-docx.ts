@@ -154,6 +154,10 @@ function body(a: AssembledSection): Array<Paragraph | Table> {
   if (a.part2.style === "table" && a.part2.rows.length > 0) {
     out.push(new Paragraph({ spacing: { after: 0 }, children: [] }), equipmentTable(a.part2.rows, a.part2.showQty));
   }
+  // ITEMS NOT SPECIFIED follows the schedule, never precedes it.
+  if (a.part2.style === "table" && a.part2.trailing) {
+    out.push(articleHeading(a.part2.trailing.title), ...lines(a.part2.trailing.general));
+  }
 
   out.push(partHeading("EXECUTION"));
   for (const art of a.part3) out.push(articleHeading(art.title), ...lines(art.lines));

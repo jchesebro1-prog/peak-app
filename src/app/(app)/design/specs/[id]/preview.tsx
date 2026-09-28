@@ -66,7 +66,7 @@ export default function Preview({ assembled }: { assembled: AssembledSection }) 
       <Articles articles={assembled.part1} />
 
       <div style={PART}>PART 2 – PRODUCTS</div>
-      {p2.articles.length === 0 && (
+      {p2.articles.length === 0 && !(p2.style === "table" && p2.trailing) && (
         <div style={{ color: "#9aa0ab", fontStyle: "italic" }}>No products yet.</div>
       )}
       {p2.articles.map((a) => (
@@ -107,6 +107,15 @@ export default function Preview({ assembled }: { assembled: AssembledSection }) 
             ))}
           </tbody>
         </table>
+      )}
+      {/* ITEMS NOT SPECIFIED follows the schedule, never precedes it. */}
+      {p2.style === "table" && p2.trailing && (
+        <div>
+          <div style={ARTICLE}>
+            {p2.trailing.num} {p2.trailing.title}
+          </div>
+          <Lines lines={p2.trailing.general} />
+        </div>
       )}
 
       <div style={PART}>PART 3 – EXECUTION</div>

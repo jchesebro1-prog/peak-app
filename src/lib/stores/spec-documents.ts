@@ -1,5 +1,5 @@
 import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc, type Doc } from "@/db/doc-store";
-import { normalizeSpecDocument, type SpecDocument } from "@/lib/specs/spec-document";
+import { normalizeSpecDocument, withDownloadStamp, type SpecDocument } from "@/lib/specs/spec-document";
 
 export type { SpecDocument };
 
@@ -32,6 +32,25 @@ export async function patchSpecDocument(
   const out = await patchDoc<Doc>("spec_documents", id, (raw) => {
     const next = mutate(normalizeSpecDocument(raw));
     return { ...next, id, updatedAt: Date.now(), updatedBy: by } as unknown as Doc;
+  });
+  return out ? normalizeSpecDocument(out) : null;
+}
+
+/** The Word download stamp (spec records design §5.3): only `usedRecords` +
+ *  `downloadedAt` change — a download is not an edit, so `updatedAt` /
+ *  `updatedBy` (and the saved-specs sort) stay as they were. */
+export async function stampSpecDocumentDownload(
+  id: string,
+  used: Record<string, number>,
+  at: number
+): Promise<SpecDocument | null> {
+  const out = await patchDoc<Doc>("spec_documents", id, (raw) => {
+    const stamped = withDownloadStamp(normalizeSpecDocument(raw), used, at);
+    return {
+      ...raw,
+      usedRecords: stamped.usedRecords,
+      ...(stamped.downloadedAt ? { downloadedAt: stamped.downloadedAt } : {}),
+    } as Doc;
   });
   return out ? normalizeSpecDocument(out) : null;
 }

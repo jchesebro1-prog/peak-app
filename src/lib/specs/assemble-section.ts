@@ -84,7 +84,16 @@ export type AssembledSection = {
   part3: AssembledArticle[];
   part2:
     | { style: "paragraphs"; articles: AssembledPart2Article[] }
-    | { style: "table"; articles: AssembledPart2Article[]; rows: EquipmentRow[]; showQty: boolean };
+    | {
+        style: "table";
+        articles: AssembledPart2Article[];
+        rows: EquipmentRow[];
+        showQty: boolean;
+        /** ITEMS NOT SPECIFIED (design §4) — printed AFTER the equipment
+         *  table, so the schedule never files under it. Paragraph style has
+         *  no table and keeps it as its last article instead. */
+        trailing?: AssembledPart2Article;
+      };
   checklist: SpecChecklist;
   warnings: string[];
   /** `{ specId: revision }` of every record entry printed (companions too). */
@@ -261,17 +270,17 @@ export function assembleSection(input: {
       return;
     }
 
-    // No catalog part and no record. A bare real sku (a catalog pick whose
-    // part has since gone) keeps today's "not-in-catalog"; a row that
-    // carries what the quote knew (description / part number / key), or
-    // has no real sku at all, is "no-match" with its candidates.
-    const bare = realSku && !p.desc && !p.mfrNumber && !p.specKey && !p.specId;
+    // No catalog part and no record. A real sku keeps today's
+    // "not-in-catalog" (why it doesn't print) and carries the no-match
+    // result (the suggestions for Link / Write new / Waive) — the same
+    // pattern as a catalog part with no text above. A row with no real sku
+    // never had a catalog part to lose: it is "no-match".
     leftOut.push({
       sku: p.sku,
-      desc: bare ? p.sku : rowDesc,
-      reason: bare ? "not-in-catalog" : "no-match",
+      desc: rowDesc,
+      reason: realSku ? "not-in-catalog" : "no-match",
       rowKey,
-      ...(match.status === "no-match" && !bare ? { match } : {}),
+      match,
     });
   });
 
@@ -387,7 +396,6 @@ export function assembleSection(input: {
       general: generalFor(a.general, a.manufacturers),
       products: [],
     }));
-    if (waived.length) articlesOut.push(itemsNotSpecified(articlesOut.length));
     const rows: EquipmentRow[] = entries.map((c) => {
       if (c.kind === "legacy") {
         return {
@@ -409,7 +417,13 @@ export function assembleSection(input: {
         ...(showQty && t.qty > 0 ? { qty: t.qty } : {}),
       };
     });
-    part2 = { style: "table", articles: articlesOut, rows, showQty };
+    part2 = {
+      style: "table",
+      articles: articlesOut,
+      rows,
+      showQty,
+      ...(waived.length ? { trailing: itemsNotSpecified(articlesOut.length) } : {}),
+    };
   } else {
     const articlesOut: AssembledPart2Article[] = used.map((a, i) => {
       const general = generalFor(a.general, a.manufacturers);
@@ -432,7 +446,14 @@ export function assembleSection(input: {
           jobValueTitles.set(r.specId, t.title);
           usedRecords[r.specId] = r.revision;
           const heading = showQty && t.qty > 0 ? `${t.title} (Quantity: ${t.qty})` : t.title;
-          const lines = render(applyJobValues(t.specText, r.specId, doc.fillIns, labels), "entry", placeholders);
+          const finalText = applyJobValues(t.specText, r.specId, doc.fillIns, labels);
+          // [FILL IN: …] in record text is deferred (Task 7 fix round): it
+          // prints as written — still a visible blank — but can't be
+          // answered in the builder yet.
+          if (finalText.includes("[FILL IN:")) {
+            warnings.push(`${r.specId} has a [FILL IN] blank that can't be answered in the builder yet — edit the spec text.`);
+          }
+          const lines = render(finalText, "entry", placeholders);
           return {
             sku: c.rows[0]?.p.sku || r.specId,
             label,
