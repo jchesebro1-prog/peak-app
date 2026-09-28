@@ -9204,3 +9204,16 @@ appear for a fixture; a system or hardware line prints without them. Quote lines
 editing as they did. Quick Design's dropdown still lists fixtures only. See D418.
 
 **Still open.** None.
+
+---
+
+## 247. Quick Design — the lighting fixture picker lists every assembly — DONE 2026-09-28 (D419)
+
+**Reported:** 2026-09-28 (Jeff): "Make Quick Design pull from all assemblies too" (follow-up to #246).
+
+**Done.** The assembly drop-down on each Lighting row (Par, Front, Cyc, Side light, Automated) now lists every
+Assembly Builder record, grouped Fixtures / Systems / Hardware like the Estimator's "+ Add assembly". Any pick prices
+that row the same way a fixture pick always has — one assembly per unit on that row — and the saved design's budget
+and Add to Quotes use the same price. See D419.
+
+**Still open.** None.

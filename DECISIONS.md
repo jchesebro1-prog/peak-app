@@ -7195,3 +7195,15 @@ still preselects the first fixture, never a system. Lines keep today's saved sha
 id, `components`), so existing quotes load unchanged; internal names (`FixtureModal`, `FixtureDraft`, the `"fixture"`
 method key) stay. A system's or hardware's component row omits the generic "other" role.
 
+## D419. Quick Design's lighting picker lists every assembly (#247, 2026-09-28)
+
+Quick Design reads `allAssembliesFrom()` (renamed from #246's `estimatorAssembliesFrom`); `fixtureAssembliesFrom()` had
+no callers left and is deleted, so D298's fixtures-only rule is gone everywhere. The grouping (`ASSEMBLY_GROUPS`,
+`groupAssemblies`) and the system-scope label (`assemblyOptionLabel`, "Name (Scope)") live in
+`src/lib/fixture-assemblies.ts`, shared by the Estimator modal and `ScopeInputsPanel`, so the two pickers can't drift.
+A system or hardware pick prices exactly like a fixture pick: `priceCell`'s assembly branch already resolved every
+kind, and nothing in the server re-price path (`pickedFixtureIds` → `serverDesignPrice` / `quickPromoteCheck`)
+filtered by kind. The pick replaces that lighting row's **per-unit** price, so it is charged once per unit on the row
+(a "system package" picked on Par is multiplied by the Par count) — unchanged override semantics, noted because a
+package reads differently from a fixture. The Grid scope panel still passes no list, so no picker renders there.
+
