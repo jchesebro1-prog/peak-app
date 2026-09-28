@@ -32059,6 +32059,12 @@ function d251Eq(a: unknown, b: unknown): boolean {
   const otherClaim = d251Sanitize([{ id: "other", name: "Sneaky", categories: [] }], null);
   ok(otherClaim.ok && otherClaim.value[0].id !== "other", '#251 sanitizeDepartments: "other" can never be claimed as a real department id — it falls back to a fresh slug');
 
+  // #251 fix round 1: supplied ids are collected in a first pass, BEFORE any
+  // slug is generated — so a new (id-less) row ABOVE an existing row later
+  // in the array still avoids that row's id.
+  const orderFix = d251Sanitize([{ name: "Lighting", categories: [] }, { id: "lighting", name: "Existing Lighting", categories: [] }], null);
+  ok(orderFix.ok && orderFix.value[0].id === "lighting-2" && orderFix.value[1].id === "lighting", '#251 sanitizeDepartments: a new "Lighting" row above an existing id "lighting" saves as "lighting-2" (order-independent id collision)');
+
   const dupNames = d251Sanitize([{ name: "Rigging", categories: [] }, { name: "rigging", categories: [] }], null);
   ok(!dupNames.ok && /Two departments/.test((dupNames as { error: string }).error), "#251 sanitizeDepartments: duplicate names (case-insensitive) are refused");
 
@@ -32091,7 +32097,9 @@ function d251Eq(a: unknown, b: unknown): boolean {
   ok(d251Resolve(depts, null) === null && d251Resolve(depts, "") === null, "#251 resolveDept: no id → null");
   ok(d251Resolve(depts, "bogus") === null, '#251 resolveDept: an id matching nothing → null ("invalid ?dept= is ignored")');
   ok(d251Resolve(depts, "rigging")?.name === "Rigging", "#251 resolveDept: a real id resolves to its department");
-  ok(d251Resolve(depts, "other")?.name === "Other", '#251 resolveDept: "other" always resolves, even with real departments configured');
+  ok(d251Resolve(depts, "other")?.name === "Other", '#251 resolveDept: "other" resolves once real departments are configured');
+  ok(d251Resolve([], "other") === null, "#251 fix round 1: with NO departments configured, \"other\" also resolves to null — the portal browses exactly as before, no phantom Other for a stray ?dept=other");
+  ok(d251Resolve([], "rigging") === null, "#251 fix round 1: any id resolves to null with no departments configured");
 
   const incl = d251FilterFor(depts, "rigging");
   ok(!!incl && incl.mode === "include" && incl.categories.has("Rigging Hardware") && !incl.categories.has("Fixtures"), "#251 departmentFilterFor: a real department → an include filter of exactly its own categories");
@@ -32162,6 +32170,22 @@ function d251Eq(a: unknown, b: unknown): boolean {
   ok(unrestricted.total === 3, "#251 searchCatalog dept: no dept field at all behaves exactly as before (#245 unchanged)");
 }
 
+// ---- #251 fix round 1: parseCatalogParams reads/trims ?dept=; catalogHref carries it ----
+{
+  ok(d245ParseCat({ dept: "  rigging  " }).dept === "rigging", "#251 browse: ?dept= is read and trimmed");
+  ok(d245ParseCat({}).dept === "", "#251 browse: no ?dept= → empty string");
+  ok(d245ParseCat({ dept: ["rigging", "lighting"] }).dept === "rigging", "#251 browse: a repeated ?dept= (array) takes the first, like every other single-value param");
+
+  const withDept = d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "rigging" });
+  ok(withDept === "/portal/catalog?dept=rigging", "#251 browse: catalogHref carries ?dept=");
+  const noDept = d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "" });
+  ok(noDept === "/portal/catalog", "#251 browse: an empty dept is left out of the URL");
+  const clearedDept = d245CatHref({ q: "led", mfr: [], cat: [], page: 1, part: "", dept: "rigging" }, { dept: "" });
+  ok(clearedDept === "/portal/catalog?q=led", "#251 browse: catalogHref can clear just dept (the breadcrumb/Search-all-departments link), keeping the rest of the query");
+  const withPreview = d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "other" }, {}, "lakefront");
+  ok(withPreview === "/portal/catalog?dept=other&preview=lakefront", "#251 browse: catalogHref orders dept before preview, same as every other param");
+}
+
 // ---- departmentTiles: counts, image pick, Other hidden when empty, none configured ----
 {
   const src = (over: Partial<D251Entry>): D251Entry => d251Entry({ key: "X", sku: "X", ...over });
@@ -32195,6 +32219,52 @@ function d251Eq(a: unknown, b: unknown): boolean {
     [src({ category: "Some Other Category", browsable: true, rank: 1 })],
     () => null
   );
+  // #251 fix round 1: departmentTiles was rewritten from "filter `entries`
+  // once PER department" to one single pass over `entries`. Pin that the
+  // rewrite produces the exact same output as the old per-department-filter
+  // approach (reimplemented here, byte-for-byte, from the still-exported
+  // departmentFilterFor/matchesDeptFilter primitives) on a nontrivial sample:
+  // several departments, tied ranks, a missing image, a fixture, and a
+  // leftover category for Other.
+  function oldDepartmentTiles(depts: D251Dept[], ents: D251Entry[], imgOf2: (k: string) => string | null) {
+    if (!depts.length) return [];
+    const groups = [...depts.map((d) => ({ id: d.id, name: d.name })), { id: d251Other.id, name: d251Other.name }];
+    const out: Array<{ id: string; name: string; count: number; imageId: string | null }> = [];
+    for (const g of groups) {
+      const filter = d251FilterFor(depts, g.id);
+      if (!filter) continue;
+      const members = ents.filter((e) => e.browsable && d251Matches(e.category, filter));
+      if (!members.length) continue;
+      let best: D251Entry | null = null;
+      for (const e of members) {
+        if (e.kind !== "part") continue;
+        if (!imgOf2(e.key)) continue;
+        if (!best || e.rank > best.rank) best = e;
+      }
+      out.push({ id: g.id, name: g.name, count: members.length, imageId: best ? imgOf2(best.key) : null });
+    }
+    return out;
+  }
+  const sampleDepts: D251Dept[] = [
+    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware", "Truss & Pipe"] },
+    { id: "lighting", name: "Lighting", categories: ["Fixtures", "Fixture assemblies"] },
+    { id: "empty-dept", name: "Empty Department", categories: ["Category Nobody Has"] },
+  ];
+  const sampleEntries: D251Entry[] = [
+    src({ key: "A1", category: "Rigging Hardware", browsable: true, rank: 3 }),
+    src({ key: "A2", category: "Rigging Hardware", browsable: true, rank: 3 }), // tied rank with A1
+    src({ key: "A3", category: "Truss & Pipe", browsable: false, rank: 50 }), // not browsable
+    src({ key: "B1", category: "Fixtures", browsable: true, rank: 1, kind: "fixture" }),
+    src({ key: "B2", category: "Fixture assemblies", browsable: true, rank: 2 }), // no image
+    src({ key: "C1", category: "Cable & Connectors", browsable: true, rank: 9 }), // leftover → Other
+    src({ key: "C2", category: "", browsable: true, rank: 1 }), // blank category → also Other
+  ];
+  const sampleImages = imgOf({ A1: "img-a1", A2: "img-a2" });
+  ok(
+    d251Eq(d251Tiles(sampleDepts, sampleEntries, sampleImages), oldDepartmentTiles(sampleDepts, sampleEntries, sampleImages)),
+    "#251 fix round 1: the single-pass departmentTiles produces the exact same output as the old per-department-filter approach on a nontrivial sample"
+  );
+
   ok(!emptyRigging.some((t) => t.id === "empty"), "#251 departmentTiles: a configured department with zero browsable members produces no tile of its own");
   ok(emptyRigging.length === 1 && emptyRigging[0].id === "other", "#251 departmentTiles: the category nothing claims still falls into Other, so Other's tile still shows");
 
@@ -32203,7 +32273,7 @@ function d251Eq(a: unknown, b: unknown): boolean {
 }
 
 async function portal251AsyncChecks(): Promise<void> {
-  // ---- getDepartments/saveDepartments: round trip + invalidation wiring ----
+  // ---- getDepartments/saveDepartments: round trip; known-category derivation lives in the store ----
   const before = await d251Get();
   ok(Array.isArray(before), "#251 getDepartments: reads as an array even before anything is ever saved");
 
@@ -32211,6 +32281,7 @@ async function portal251AsyncChecks(): Promise<void> {
   const L251 = fixtureId(251, "lighting-sku");
   const catR = "Test251 Rigging Gear";
   const catL = "Test251 Lighting Gear";
+  const catFake = "Test251 Not A Real Category";
   try {
     await d245MergeUpsert(R251, { desc: "Test251 rigging part", category: catR, unit: "ea", list: 10, cost: 5, portalVisibility: "show" });
     registerFixture("catalog_parts", R251);
@@ -32218,14 +32289,21 @@ async function portal251AsyncChecks(): Promise<void> {
     registerFixture("catalog_parts", L251);
     d245Invalidate();
 
-    const saved = await d251Save([{ name: "Test251 Rigging", categories: [catR] }], [catR, catL]);
-    ok(saved.ok, "#251 saveDepartments: a valid save against the real catalog's known categories succeeds");
+    // #251 fix round 1: saveDepartments takes ONE argument now — it derives
+    // knownCategories itself (from the real portal index), so a category the
+    // real catalog doesn't have (catFake) is dropped without the caller ever
+    // naming a known-categories list.
+    const saved = await d251Save([{ name: "Test251 Rigging", categories: [catR, catFake] }]);
+    ok(saved.ok, "#251 saveDepartments: a valid save succeeds, deriving known categories itself");
+    ok(saved.ok && !saved.value[0].categories.includes(catFake), "#251 saveDepartments: derives knownCategories from the real index itself — a category the catalog doesn't have is dropped (fix round 1 moved this out of actions.ts)");
     const reread = await d251Get();
     const dept = reread.find((d) => d.name === "Test251 Rigging");
     ok(!!dept && dept.categories.includes(catR) && dept.id.length > 0, "#251 saveDepartments/getDepartments: round-trips through the real blob store");
 
     const storeSrc = readFileSync(join(process.cwd(), "src/lib/stores/portal-departments.ts"), "utf8");
-    ok(storeSrc.includes("invalidatePortalIndex()"), "#251 saveDepartments: calls invalidatePortalIndex() on every save (spec pick 7's last line)");
+    ok(!storeSrc.includes("invalidatePortalIndex()"), "#251 fix round 1: saveDepartments does NOT call invalidatePortalIndex() — departments aren't in the cached index (getDepartments is read fresh every browse), so invalidating would only force an unrelated ~37k-part rebuild (DECISIONS)");
+    const actionsSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/actions.ts"), "utf8");
+    ok(!actionsSrc251.includes("portalIndex()") && actionsSrc251.includes("saveDepartments(input)"), "#251 fix round 1: the known-category derivation moved out of actions.ts entirely (no portalIndex() call here) — saveDepartments takes just the input now");
 
     // ---- end-to-end: the real portal index + the freshly saved department ----
     const ix = await d245Index({ fresh: true });
@@ -32240,16 +32318,25 @@ async function portal251AsyncChecks(): Promise<void> {
     ok(otherMembers.some((e) => e.sku === L251) && !otherMembers.some((e) => e.sku === R251), "#251 end-to-end: the lighting part (unassigned) falls into Other; the rigging part (assigned) does not");
 
     // Renaming keeps the id; re-saving with a category dropped moves it to Other.
-    const renamed = await d251Save([{ id: deptId, name: "Test251 Rigging Renamed", categories: [] }], [catR, catL]);
+    const renamed = await d251Save([{ id: deptId, name: "Test251 Rigging Renamed", categories: [] }]);
     ok(renamed.ok && renamed.value[0].id === deptId, "#251 saveDepartments: a rename in the real store keeps the department's id");
     const afterRename = await d251Get();
     ok(!afterRename.some((d) => d.categories.includes(catR)), "#251 saveDepartments: dropping a category from the department leaves it unclaimed (falls to Other on next browse)");
   } finally {
-    await d251Save([], []);
+    await d251Save([]);
   }
 
   // ---- browseCatalog wiring: dept resolves via the browse layer, an invalid id is ignored ----
   const browseSrc = readFileSync(join(process.cwd(), "src/lib/portal-catalog-browse.ts"), "utf8");
   ok(browseSrc.includes("departmentTiles(") && browseSrc.includes("departmentFilterFor("), "#251 browseCatalog: wires departmentTiles + departmentFilterFor (resolves dept → filter in the browse layer, not in searchCatalog)");
   ok(browseSrc.includes("resolveDept("), "#251 browseCatalog: resolves the active department for the breadcrumb/search-all-departments link via the pure resolveDept helper");
+
+  // ---- #251 fix round 1: the save-message wrapper is unkeyed, the editor stays keyed ----
+  const editorSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/departments-editor.tsx"), "utf8");
+  ok(editorSrc251.includes('key={JSON.stringify(departments)}'), "#251 fix: DepartmentsEditor keys the inner DepartmentsClient by the server departments, so its draft state resets after a save");
+  const clientSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/departments-client.tsx"), "utf8");
+  ok(!clientSrc251.includes("saveDepartmentsAction"), "#251 fix: DepartmentsClient no longer calls the server action directly — it delegates to the onSave prop the unkeyed wrapper owns");
+  const pageSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/page.tsx"), "utf8");
+  ok(pageSrc251.includes("DepartmentsEditor") && !pageSrc251.includes("DepartmentsClient"), "#251 fix: the page renders DepartmentsEditor, not DepartmentsClient directly");
+  ok(!/<DepartmentsEditor[^>]*\bkey=/.test(pageSrc251), "#251 fix: the page does NOT key <DepartmentsEditor> — it must survive router.refresh() for the save message to show, unlike the inner editor it wraps");
 }

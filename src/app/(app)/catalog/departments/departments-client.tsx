@@ -1,9 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import type { Department } from "@/lib/portal-departments";
-import { saveDepartmentsAction } from "./actions";
 
 /**
  * Catalog → Departments editor (#251, spec pick 7). One card for the
@@ -15,9 +13,13 @@ import { saveDepartmentsAction } from "./actions";
  * uncheck-the-other-one dance a per-department checklist would require.
  * Moving a category from one draft department to another is instant in the
  * UI; the server (sanitizeDepartments) still re-validates on save.
+ *
+ * `pending`/`onSave` are owned by the unkeyed wrapper (departments-editor.tsx,
+ * #251 fix round 1) — this component only owns the DRAFT editing state, which
+ * is exactly what should reset when the key (a stringified `departments`)
+ * changes after a save.
  */
 
-type Result = { ok: true; value: Department[] } | { ok: false; error: string };
 type Draft = { key: string; id?: string; name: string };
 
 const OTHER_CHOICE = "";
@@ -40,15 +42,15 @@ export default function DepartmentsClient({
   departments,
   categories,
   suggestions,
+  pending,
+  onSave,
 }: {
   departments: Department[];
   categories: Array<{ category: string; count: number }>;
   suggestions: Department[];
+  pending: boolean;
+  onSave: (payload: Array<{ id?: string; name: string; categories: string[] }>) => void;
 }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
   const initialDrafts = useMemo<Draft[]>(() => departments.map((d, i) => ({ key: draftKey(d, i), id: d.id, name: d.name })), [departments]);
   const initialCatDept = useMemo<Record<string, string>>(() => {
     const m: Record<string, string> = {};
@@ -71,17 +73,6 @@ export default function DepartmentsClient({
   const shown = categories.filter((c) => !needle || c.category.toLowerCase().includes(needle));
   const visible = shown.slice(0, ROW_CAP);
 
-  const run = (fn: () => Promise<Result>) => {
-    setMsg(null);
-    start(async () => {
-      const r = await fn();
-      if (r.ok) {
-        setMsg({ ok: true, text: `${r.value.length} ${r.value.length === 1 ? "department" : "departments"} saved.` });
-        router.refresh();
-      } else setMsg({ ok: false, text: r.error });
-    });
-  };
-
   const save = () => {
     const byKey = new Map<string, string[]>();
     for (const [cat, key] of Object.entries(catDept)) {
@@ -91,7 +82,7 @@ export default function DepartmentsClient({
       byKey.set(key, arr);
     }
     const payload = drafts.map((d) => ({ id: d.id, name: d.name, categories: byKey.get(d.key) ?? [] }));
-    run(() => saveDepartmentsAction(payload));
+    onSave(payload);
   };
 
   const rename = (i: number, name: string) => setDrafts((d) => d.map((x, j) => (j === i ? { ...x, name } : x)));
@@ -124,15 +115,6 @@ export default function DepartmentsClient({
   };
   return (
     <>
-      {msg && (
-        <div
-          role="status"
-          style={{ marginBottom: 12, fontSize: 12.5, borderRadius: 8, padding: "9px 12px", color: msg.ok ? "#1f7a52" : "#b4543a", background: msg.ok ? "#eaf6ef" : "#f9ece8", border: `1px solid ${msg.ok ? "#cfe9da" : "#f0d6cd"}` }}
-        >
-          {msg.text}
-        </div>
-      )}
-
       <section className="pk-card" style={CARD}>
         <div style={HEAD}>
           <div style={{ minWidth: 0 }}>

@@ -155,6 +155,10 @@ const ROUTES = [
   "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
   // #251 — a ?dept= filter, signed out; an unknown id is simply ignored.
   "/portal/catalog?dept=rigging",
+  // #251 fix round 1 — the same, as a team preview: Other, and an id that
+  // resolves to nothing (both are ignored gracefully, no error).
+  "/portal/catalog?preview=lakefront&dept=other",
+  "/portal/catalog?preview=lakefront&dept=bogus",
   // #245 Task 11: the part sidebar renders server-side from ?part= — a real
   // SKU, and an unknown key ("This item isn't available.").
   "/portal/catalog?preview=lakefront&q=velour&part=RB-EN-22",

@@ -1,6 +1,6 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { sanitizeDepartments, type Department } from "@/lib/portal-departments";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
+import { portalIndex } from "@/lib/portal-catalog-index";
 
 /**
  * Portal departments store (#251). One settings blob, no table and no
@@ -20,18 +20,25 @@ export async function getDepartments(): Promise<Department[]> {
 }
 
 /**
- * The Departments editor's save (spec pick 7). `knownCategories` is the
- * live set of catalog categories — sanitizeDepartments drops anything else.
- * Invalidates the portal index (spec pick 7's last line) so the browse
- * page's category → department map and tiles pick up the change immediately.
+ * The Departments editor's save (spec pick 7). Reads the live catalog
+ * categories itself (via the portal index — #251 fix round 1 moved this out
+ * of the caller, src/app/(app)/catalog/departments/actions.ts, so any future
+ * caller gets the same defensive drop for free) and hands them to
+ * sanitizeDepartments as `knownCategories`, which drops anything the catalog
+ * doesn't actually have.
+ *
+ * Deliberately skips the index-invalidation call other blob-store saves make
+ * (#251 fix round 1, DECISIONS): departments are never baked into the cached
+ * PortalIndex — portal-catalog-browse.ts reads getDepartments() fresh on
+ * every browse — so invalidating would only force an unrelated, expensive
+ * rebuild of the whole ~37k-part index for no correctness benefit.
  */
-export async function saveDepartments(
-  input: unknown,
-  knownCategories: readonly string[]
-): Promise<{ ok: true; value: Department[] } | { ok: false; error: string }> {
-  const res = sanitizeDepartments(input, knownCategories);
+export async function saveDepartments(input: unknown): Promise<{ ok: true; value: Department[] } | { ok: false; error: string }> {
+  const ix = await portalIndex();
+  const known = new Set<string>();
+  for (const e of ix.entries) known.add(e.category || "—");
+  const res = sanitizeDepartments(input, [...known]);
   if (!res.ok) return res;
   await setBlob(DEPARTMENTS_BLOB, { departments: res.value });
-  invalidatePortalIndex();
   return res;
 }

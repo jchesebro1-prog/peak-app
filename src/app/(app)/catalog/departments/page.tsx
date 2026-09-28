@@ -4,7 +4,7 @@ import { can } from "@/lib/team";
 import { portalIndex } from "@/lib/portal-catalog-index";
 import { getDepartments } from "@/lib/stores/portal-departments";
 import { suggestDepartments } from "@/lib/portal-departments";
-import DepartmentsClient from "./departments-client";
+import DepartmentsEditor from "./departments-editor";
 
 export const metadata = { title: "Departments — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -55,7 +55,7 @@ export default async function DepartmentsPage() {
           anything left over falling into an automatic <em>Other</em>. A category belongs to at most one department.
         </div>
       </div>
-      <DepartmentsClient key={JSON.stringify(departments)} departments={departments} categories={categories} suggestions={suggestions} />
+      <DepartmentsEditor departments={departments} categories={categories} suggestions={suggestions} />
     </div>
   );
 }

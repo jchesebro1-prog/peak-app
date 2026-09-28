@@ -54,6 +54,18 @@ export function sanitizeDepartments(
   if (!Array.isArray(raw)) return { ok: false, error: "Nothing to save." };
   if (raw.length > MAX_DEPARTMENTS) return { ok: false, error: `At most ${MAX_DEPARTMENTS} departments.` };
   const known = knownCategories ? new Set(knownCategories) : null;
+
+  // First pass (#251 fix round 1): every explicitly-supplied id, collected
+  // BEFORE any slug is generated — so a new (id-less) row above an existing
+  // row later in the array still avoids that row's id, regardless of order
+  // (e.g. a new "Lighting" row saves as "lighting-2" when an existing
+  // "lighting" row appears anywhere else in the list).
+  const suppliedIds = new Set<string>();
+  for (const row of raw) {
+    const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+    if (typeof r.id === "string" && ID_RE.test(r.id) && r.id !== OTHER_DEPT.id) suppliedIds.add(r.id);
+  }
+
   const ids = new Set<string>();
   const names = new Set<string>();
   const usedCategories = new Set<string>();
@@ -72,7 +84,7 @@ export function sanitizeDepartments(
       const base = slugify(name);
       let candidate = base === OTHER_DEPT.id ? `${base}-2` : base;
       let n = 2;
-      while (ids.has(candidate) || candidate === OTHER_DEPT.id) candidate = `${base}-${n++}`;
+      while (ids.has(candidate) || suppliedIds.has(candidate) || candidate === OTHER_DEPT.id) candidate = `${base}-${n++}`;
       id = candidate;
     }
     if (ids.has(id)) return { ok: false, error: "The same department appears twice." };
@@ -107,9 +119,13 @@ export function departmentOfCategory(depts: readonly Department[]): Map<string, 
 
 /** `deptId` resolved against the saved list (or "other") → its id+name, or
  *  null for anything else — an unknown/invalid id is simply not a department
- *  (spec pick: "Invalid ?dept= is ignored, no error"). */
+ *  (spec pick: "Invalid ?dept= is ignored, no error"). With NO departments
+ *  configured, "other" resolves to null too (#251 fix round 1) — spec pick
+ *  3 says the portal browses exactly as today when nothing is configured,
+ *  and a phantom Other (matching everything, since nothing is assigned)
+ *  would otherwise still turn on the department UI for a stray `?dept=other`. */
 export function resolveDept(departments: readonly Department[], deptId: string | null | undefined): { id: string; name: string } | null {
-  if (!deptId) return null;
+  if (!deptId || !departments.length) return null;
   if (deptId === OTHER_DEPT.id) return { id: OTHER_DEPT.id, name: OTHER_DEPT.name };
   const d = departments.find((x) => x.id === deptId);
   return d ? { id: d.id, name: d.name } : null;
@@ -208,20 +224,32 @@ export type DeptTileVM = { id: string; name: string; count: number; imageId: str
  */
 export function departmentTiles(departments: readonly Department[], entries: readonly DeptTileSource[], imageIdOf: (key: string) => string | null): DeptTileVM[] {
   if (!departments.length) return [];
-  const groups: Array<{ id: string; name: string }> = [...departments.map((d) => ({ id: d.id, name: d.name })), OTHER_DEPT];
-  const out: DeptTileVM[] = [];
-  for (const g of groups) {
-    const filter = departmentFilterFor(departments, g.id);
-    if (!filter) continue;
-    const members = entries.filter((e) => e.browsable && matchesDeptFilter(e.category, filter));
-    if (!members.length) continue;
-    let best: DeptTileSource | null = null;
-    for (const e of members) {
-      if (e.kind !== "part") continue;
-      if (!imageIdOf(e.key)) continue;
-      if (!best || e.rank > best.rank) best = e;
-    }
-    out.push({ id: g.id, name: g.name, count: members.length, imageId: best ? imageIdOf(best.key) : null });
+
+  // #251 fix round 1: one pass over `entries` (was one filter pass PER
+  // department, department count times) — build the category → department
+  // map once, then bucket every browsable entry directly by its owning
+  // department (or Other) as we scan. Same output, same tie-break (highest
+  // rank browsable PART with an image; Other/an empty department omitted).
+  const catMap = departmentOfCategory(departments);
+  type Bucket = { id: string; name: string; count: number; best: DeptTileSource | null };
+  const buckets = new Map<string, Bucket>();
+  for (const d of departments) buckets.set(d.id, { id: d.id, name: d.name, count: 0, best: null });
+  buckets.set(OTHER_DEPT.id, { id: OTHER_DEPT.id, name: OTHER_DEPT.name, count: 0, best: null });
+
+  for (const e of entries) {
+    if (!e.browsable) continue;
+    const deptId = catMap.get(e.category) ?? OTHER_DEPT.id;
+    const bucket = buckets.get(deptId)!;
+    bucket.count++;
+    if (e.kind === "part" && imageIdOf(e.key) && (!bucket.best || e.rank > bucket.best.rank)) bucket.best = e;
   }
+
+  const out: DeptTileVM[] = [];
+  for (const d of departments) {
+    const b = buckets.get(d.id)!;
+    if (b.count) out.push({ id: b.id, name: b.name, count: b.count, imageId: b.best ? imageIdOf(b.best.key) : null });
+  }
+  const other = buckets.get(OTHER_DEPT.id)!;
+  if (other.count) out.push({ id: other.id, name: other.name, count: other.count, imageId: other.best ? imageIdOf(other.best.key) : null });
   return out;
 }
