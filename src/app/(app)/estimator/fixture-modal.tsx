@@ -67,7 +67,7 @@ export default function FixtureModal({
               <div key={part.sku} style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 12, alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f0f1f4", background: optional && !on ? "#fbfbfc" : "#fff" }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 650 }}>{part.label}{optional && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: "#8c919c" }}>optional add-on</span>}</div>
-                  <div style={{ fontSize: 11.5, color: part.found ? "#8c919c" : "#b4543a" }}>{part.sku} · {part.role} · {part.desc}{!part.found ? " — missing from catalog" : ""}</div>
+                  <div style={{ fontSize: 11.5, color: part.found ? "#8c919c" : "#b4543a" }}>{part.sku} · {part.role !== "other" && <>{part.role} · </>}{part.desc}{!part.found ? " — missing from catalog" : ""}</div>
                 </div>
                 {optional && !on ? (
                   <label style={{ display: "inline-flex", gap: 5, alignItems: "center", justifySelf: "end", fontSize: 12, color: "#5b616e", cursor: "pointer" }}>
