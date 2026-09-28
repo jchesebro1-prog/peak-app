@@ -10655,6 +10655,7 @@ seeded()
   .then(() => specRecordsBomSeamAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
+  .then(() => specRecordActionsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32897,4 +32898,40 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   ok(!!before && !!stamped && !!after2 && after2.usedRecords["PS-260961-028"] === 3 && after2.downloadedAt === 4242 && after2.updatedAt === before.updatedAt && after2.updatedBy === "Editor", "spec doc store: stampSpecDocumentDownload changes usedRecords/downloadedAt and leaves updatedAt/updatedBy equal");
   ok((await SDS.stampSpecDocumentDownload("SP-NOPE-0", { A: 1 }, 1)) === null, "spec doc store: stamping a missing spec is a no-op null");
   await SDS.removeSpecDocument(made.id);
+}
+
+/* ---- Spec record server actions (§5, Task 8) ----
+ * Needs `await` (dynamic imports + a real file read of the not-yet-written
+ * record-actions.ts), so like every other async check in this file it lives
+ * in its own named async function, wired into the promise chain, rather
+ * than the brief's literal top-level `{ }` block — esbuild's cjs output
+ * refuses real top-level await. Assertions are copied verbatim from the
+ * brief's task-8-brief.md Step 1, relying on Task 3's import block (earlier
+ * in this same chain) having committed the v1 records into the test DB. */
+async function specRecordActionsAsyncChecks(): Promise<void> {
+  const SD = await import("@/lib/specs/spec-document");
+  let d = SD.normalizeSpecDocument({ id: "SP-A", products: [{ sku: "", mfrNumber: "ZZ-1", desc: "Mystery" }, { sku: "CUSTOM", desc: "Shell" }] });
+  const k0 = "MPN:ZZ-1", k1 = "DESC:shell";
+  d = SD.withWaive(d, k0, "Owner furnished");
+  ok(d.products[0].waived?.reason === "Owner furnished" && !SD.withoutWaive(d, k0).products[0].waived, "record actions: waive/unwaive by row key");
+  ok(SD.withRowSpecKey(d, k1, "Acoustic Shell – Towers").products[1].specKey === "Acoustic Shell – Towers", "record actions: withRowSpecKey");
+  ok(SD.withRowPin(d, k1, "PS-9").products[1].specId === "PS-9", "record actions: withRowPin");
+  ok(SD.withLibraryRow(d, "PS-7").products.some((p) => p.specId === "PS-7" && p.fromLibrary) && SD.withLibraryRow(SD.withLibraryRow(d, "PS-7"), "PS-7").products.filter((p) => p.specId === "PS-7").length === 1, "record actions: withLibraryRow adds once");
+  const o = SD.withOverride(d, "PS-1", { title: "T", specText: "X", baseRevision: 2 });
+  ok(o.overrides["PS-1"].baseRevision === 2 && !("PS-1" in SD.withoutOverride(o, "PS-1").overrides), "record actions: override set/clear");
+  ok(SD.withDownloadStamp(d, { "PS-1": 3 }, 42).usedRecords["PS-1"] === 3, "record actions: download stamp");
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/record-actions.ts"), "utf8");
+  const exported = [...src.matchAll(/export async function (\w+)\(/g)].map((m) => m[1]);
+  ok(exported.length >= 12 && exported.every((name) => { const body = src.slice(src.indexOf(`export async function ${name}(`)).split(/\nexport async function /)[0]; return /require(Perm\("create"\)|User\(\))/.test(body); }),
+    "record actions: every exported action checks the session");
+  ok(!/window\.(confirm|prompt)/.test(src), "record actions: no window.confirm/prompt");
+  // Library edit vs project edit (brief §10)
+  const S = await import("@/lib/stores/spec-records");
+  const before = (await S.getSpecRecord("PS-260961-028"))!;
+  const proj = SD.withOverride(d, "PS-260961-028", { title: "X", specText: "Y", baseRevision: before.revision });
+  ok((await S.getSpecRecord("PS-260961-028"))!.revision === before.revision && !!proj.overrides["PS-260961-028"], "brief §10: edit 'this project only' leaves the library revision unchanged");
+  const up = await S.saveSpecRecord({ ...before, specText: before.specText + "\nAdded line." }, "Tester", "library edit");
+  const hist = await S.specRecordRevisions("PS-260961-028");
+  ok(up.record.revision === before.revision + 1 && hist[0].record.specText === before.specText && proj.overrides["PS-260961-028"].specText === "Y",
+    "brief §10: 'update the library' bumps revision, keeps the old version, leaves other specs' overrides untouched");
 }
