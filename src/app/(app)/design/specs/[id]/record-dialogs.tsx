@@ -36,7 +36,7 @@ export type RecordRowTarget = {
   rowKey: string;
   sku: string;
   desc: string;
-  writeDefaults: { kind: SpecKind; title: string; partNumber: string; manufacturer: string; matchKey: string };
+  writeDefaults: { kind: SpecKind; title: string; partNumber: string; manufacturer: string; matchKey: string; specText: string };
 };
 type ArticleOption = { id: string; title: string };
 
@@ -235,10 +235,20 @@ export function WriteRecordDialog({
   const [manufacturer, setManufacturer] = useState(d.manufacturer);
   const [basis, setBasis] = useState("");
   const [matchKey, setMatchKey] = useState(d.matchKey);
-  const [articleId, setArticleId] = useState(sectionArticles.length === 1 ? sectionArticles[0].id : "");
-  const [text, setText] = useState("");
+  const initialArticle = sectionArticles.length === 1 ? sectionArticles[0].id : "";
+  const [articleId, setArticleId] = useState(initialArticle);
+  // A catalog part's draft legacy text (never approved) is the starting point.
+  const [text, setText] = useState(d.specText);
   const [asking, setAsking] = useState(false);
-  const dirty = text.trim() !== "" || title !== d.title || basis !== "";
+  const dirty =
+    text !== d.specText ||
+    title !== d.title ||
+    basis !== "" ||
+    kind !== d.kind ||
+    numbers !== d.partNumber ||
+    matchKey !== d.matchKey ||
+    manufacturer !== d.manufacturer ||
+    articleId !== initialArticle;
   useEscape(dirty, pending, onClose, setAsking);
   const isSystem = kind === "system";
 

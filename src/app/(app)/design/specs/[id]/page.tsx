@@ -94,6 +94,8 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
         partNumber,
         manufacturer: p.manufacturer || part?.mfr || "",
         matchKey: p.specKey || p.desc || "",
+        // A catalog part's own (draft) legacy text seeds Write new spec.
+        specText: part?.specBody || "",
       },
       waivedReason: match?.status === "waived" ? match.reason : null,
       recordTitle: record?.title ?? null,

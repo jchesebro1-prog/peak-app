@@ -190,7 +190,8 @@ export async function searchSpecRecordsAction(
 }
 
 /** Link-to-existing (design §5.1). A row with a part number adds it to the
- *  record's `mfrNumbers`; a system record with a row that has no part
+ *  record's `mfrNumbers` (or, when the record already holds it, pins the
+ *  row to that record); a system record with a row that has no part
  *  number sets the row's `specKey` to the record's match key; otherwise
  *  pins `specId` on the row. Refuses an archived record. */
 export async function linkRowToRecordAction(docId: string, rowKey: string, specId: string): Promise<Result> {
@@ -207,12 +208,15 @@ export async function linkRowToRecordAction(docId: string, rowKey: string, specI
   if (partNumber) {
     const norm = normPartNumber(partNumber);
     const already = record.mfrNumbers.some((m) => normPartNumber(m) === norm);
-    if (!already) {
-      const all = await allSpecRecords();
-      const conflict = partNumberConflict({ ...record, mfrNumbers: [partNumber] }, all);
-      if (conflict) return { ok: false, error: `That part number is already on ${conflict}.` };
-      await saveSpecRecord({ ...record, mfrNumbers: [...record.mfrNumbers, partNumber] }, user.name, `Linked from ${docId}`);
-    }
+    // The record already holds this number (an ambiguous row's candidate, a
+    // draft's, or a wildcard hit): adding it again would change nothing and
+    // the row would stay unresolved — pin the row to the pick instead
+    // (Task 9 fix round).
+    if (already) return applyPatch(docId, user, (d) => withRowPin(d, rowKey, specId));
+    const all = await allSpecRecords();
+    const conflict = partNumberConflict({ ...record, mfrNumbers: [partNumber] }, all);
+    if (conflict) return { ok: false, error: `That part number is already on ${conflict}.` };
+    await saveSpecRecord({ ...record, mfrNumbers: [...record.mfrNumbers, partNumber] }, user.name, `Linked from ${docId}`);
     revalidateAll(docId);
     return { ok: true };
   }

@@ -33034,31 +33034,56 @@ async function specBuilderMatchReportAsyncChecks(): Promise<void> {
   ok(/sp\.section\b/.test(newPage) && /defaultSectionId/.test(newPage), "match report: /design/specs/new accepts a section= preselect");
   const ba = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/builder-actions.ts"), "utf8");
   const fillBody = ba.slice(ba.indexOf("export async function setSpecFillInAction(")).split(/\nexport async function /)[0];
-  ok(/jobValueAnswerLabel\(/.test(fillBody), "match report: setSpecFillInAction accepts job-value keys through jobValueAnswerLabel");
+  ok(/checklist\.jobValues\.find\(/.test(fillBody) && /fillInLabelKey\(jv\.defaultText\)/.test(fillBody) && !/jobValueAnswerLabel/.test(ba),
+    "match report: setSpecFillInAction accepts exactly the job-value keys the assembled checklist lists, labelled by their default text");
   const ra = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/record-actions.ts"), "utf8");
   const pinBody = ra.slice(ra.indexOf("export async function pinRowToRecordAction(")).split(/\nexport async function /)[0];
   ok(ra.includes("export async function pinRowToRecordAction(") && /requirePerm\("create"\)/.test(pinBody) && /withRowPin\(/.test(pinBody),
     "match report: pinRowToRecordAction (ambiguous rows pick one) is create-gated and pins through withRowPin");
 
+  // Fix round: Link on a record that already holds the row's number pins.
+  const linkBody = ra.slice(ra.indexOf("export async function linkRowToRecordAction(")).split(/\nexport async function /)[0];
+  ok(/if \(already\) return applyPatch\(docId, user, \(d\) => withRowPin\(d, rowKey, specId\)\)/.test(linkBody),
+    "match report: linkRowToRecordAction pins the row when the record already holds its part number (ambiguous/draft picks resolve)");
+  const wd = srcs["record-dialogs.tsx"];
+  const dirtyExpr = wd.slice(wd.indexOf("const dirty =", wd.indexOf("export function WriteRecordDialog")), wd.indexOf("useEscape(dirty", wd.indexOf("export function WriteRecordDialog")));
+  ok(["kind", "numbers", "matchKey", "manufacturer", "articleId", "text", "title", "basis"].every((f) => new RegExp(`\\b${f} !==`).test(dirtyExpr)) && /useState\(d\.specText\)/.test(wd),
+    "match report: Write new spec counts every field as unsaved work and starts from the part's draft legacy text");
+
+  // Job values: what the checklist lists (the save's whitelist) and the
+  // preview's answered spans — pure, on the v1 fixture.
   const J = await import("@/lib/specs/record-fill-ins");
-  const label = (J as unknown as { jobValueAnswerLabel?: (key: string, printed: Record<string, number>, records: Array<{ specId: string; specText: string }>, overrides: Record<string, { specText: string }>) => string | null }).jobValueAnswerLabel;
-  ok(typeof label === "function", "job-value keys: record-fill-ins exports jobValueAnswerLabel");
-  if (typeof label === "function") {
-    const recsJ = [
-      { specId: "PS-T-001", specText: "Supply [1] transporter.\n  Color [Cream,  Ivory]." },
-      { specId: "PS-T-002", specText: "No brackets here." },
-    ];
-    const printed = { "PS-T-001": 3, "PS-T-002": 1 };
-    ok(label("PS-T-001#1", printed, recsJ, {}) === "1" && label("PS-T-001#2", printed, recsJ, {}) === "cream, ivory",
-      "job-value keys: a printed record's bracket key returns its normalized default as the label");
-    ok(label("PS-T-001#3", printed, recsJ, {}) === null, "job-value keys: an index past the record's brackets is refused");
-    ok(label("PS-T-001#1", { "PS-T-002": 1 }, recsJ, {}) === null, "job-value keys: a record not printed in this doc is refused");
-    ok(label("PS-T-002#1", printed, recsJ, {}) === null, "job-value keys: a record with no brackets has no job-value keys");
-    ok(label("PS-NOPE#1", { "PS-NOPE": 1 }, recsJ, {}) === null, "job-value keys: an unknown record is refused");
-    ok(label("ar-nhs-1#1", printed, recsJ, {}) === null && label("PS-T-001", printed, recsJ, {}) === null && label("#1", printed, recsJ, {}) === null,
-      "job-value keys: a Part 1/3 key, a bare specId and a bare #n are refused");
-    const ov = { "PS-T-001": { specText: "Provide [4 ea] hoists." } };
-    ok(label("PS-T-001#1", printed, recsJ, ov) === "4 ea" && label("PS-T-001#2", printed, recsJ, ov) === null,
-      "job-value keys: a project-only override's text is the one scanned, not the library text");
-  }
+  const I = await import("@/lib/specs/record-import");
+  const A = await import("@/lib/specs/assemble-section");
+  const SD = await import("@/lib/specs/spec-document");
+  const { buildSectionDocx } = await import("@/lib/specs/spec-docx");
+  const recs = I.recordsFromJson(JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"))).records;
+  const sec = (style: string) => ({ id: "ss-260961", number: "26 09 61", title: "T", part1: [], part3: [], part2Style: style, quantities: "drawings", sort: 0, updatedAt: 0, updatedBy: "" }) as never;
+  const arts = [...new Set(recs.map((r) => r.sourceArticleId!))].map((id, i) => {
+    const r = recs.find((x) => x.sourceArticleId === id)!;
+    return { id, sectionId: "ss-" + r.section.replace(/ /g, ""), sort: i, title: r.article, manufacturers: [], general: "", categoryKeys: [], updatedAt: 0, updatedBy: "" };
+  });
+  const mk = (fillIns: Record<string, string>, text: string) =>
+    SD.normalizeSpecDocument({ id: "SP-T9", sectionId: "ss-260961", header: { projectName: "P", projectNumber: "1", phase: "CD", issueDate: "2026-09-28", preparedBy: "x" }, source: { kind: "quote", id: "Q" }, products: [{ sku: "LS-P" }], fillIns, overrides: { "PS-260961-028": { title: "T9", specText: text, baseRevision: 99 } } });
+  const TXT = "Supply [1] transporter.\n  Color [Cream].";
+  const run9 = (style: string, d: ReturnType<typeof mk>) => A.assembleSection({ section: sec(style), articles: arts as never, sections: [sec(style)] as never, parts: new Map(), doc: d, records: recs });
+  const para = run9("paragraphs", mk({ "PS-260961-028#1": "3" }, TXT));
+  ok(para.checklist.jobValues.map((j) => j.key).join() === "PS-260961-028#1,PS-260961-028#2" && para.checklist.jobValues[0].answered && !para.checklist.jobValues[1].answered,
+    "job-value keys: the checklist lists a printed record's brackets (from the override's text), answered state per key");
+  ok(run9("table", mk({}, TXT)).checklist.jobValues.length === 0, "job-value keys: a table-style section lists none — its brackets never print, so the save refuses them");
+  const entry = para.part2.articles.flatMap((a) => a.products).find((x) => x.specId === "PS-260961-028")!;
+  const supply = entry.lines.findIndex((l) => l.text === "Supply 3 transporter.");
+  ok(supply >= 0 && JSON.stringify(entry.answered?.[supply]) === JSON.stringify([{ start: 7, end: 8 }]) && entry.answered?.every((sp, i) => i === supply || sp.length === 0) === true,
+    "answered highlight: the answered value's span is found in its rendered line; the unanswered line has none");
+  ok(entry.lines.every((l) => !/[\uE000\uE001]/.test(l.text)), "answered highlight: printed lines never carry the private-use marks");
+  const xml9 = await (await JSZip.loadAsync(await buildSectionDocx(para))).file("word/document.xml")!.async("string");
+  ok(xml9.includes("Supply 3 transporter.") && !/[\uE000\uE001]/.test(xml9), "answered highlight: the Word file prints the plain answer, no marks");
+  const unanswered = run9("paragraphs", mk({}, TXT)).part2.articles.flatMap((a) => a.products).find((x) => x.specId === "PS-260961-028")!;
+  ok(unanswered.answered === undefined, "answered highlight: no answered values → no spans");
+  // An answer that looks like an outline label parses differently once
+  // marked — the spans are dropped, the printed text is untouched.
+  const odd = run9("paragraphs", mk({ "PS-260961-028#1": "B." }, "[1] item")).part2.articles.flatMap((a) => a.products).find((x) => x.specId === "PS-260961-028")!;
+  ok(odd.answered === undefined && odd.lines.every((l) => !/[\uE000\uE001]/.test(l.text)), "answered highlight: a mark that would change parsing drops the spans, never the printed text");
+  ok(J.answeredSpans([{ text: "ab" }], [{ text: "a" }]) === undefined && J.answeredSpans([{ text: "ab" }], [{ text: "\uE000a\uE001b" }])?.[0][0].end === 1,
+    "answered highlight: answeredSpans refuses a mismatch and maps a marked span to plain offsets");
 }

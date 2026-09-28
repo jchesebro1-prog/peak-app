@@ -81,7 +81,7 @@ export type SpecProductRow = {
   /** Added straight from the Spec Library (a `SPEC:<id>` row, §5.3). */
   fromLibrary: boolean;
   /** Write new spec's starting values, inferred server-side from the row. */
-  writeDefaults: { kind: SpecKind; title: string; partNumber: string; manufacturer: string; matchKey: string };
+  writeDefaults: { kind: SpecKind; title: string; partNumber: string; manufacturer: string; matchKey: string; specText: string };
 };
 
 type ArticleOption = { id: string; title: string };
@@ -436,8 +436,6 @@ function ProductsCard({
 
   const reasonLine = (r: SpecProductRow) => {
     switch (r.leftOutReason) {
-      case "no-spec":
-        return <span style={WARN}>No approved spec</span>;
       case "needs-header":
         return (
           <span style={{ ...WARN, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

@@ -32,7 +32,6 @@ import {
 import { specRowKey } from "@/lib/specs/record-keys";
 import { articleInSection } from "@/lib/specs/assemble-section";
 import { fillInLabelKey, fillInSlots } from "@/lib/specs/fill-ins";
-import { jobValueAnswerLabel } from "@/lib/specs/record-fill-ins";
 import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { searchSpecParts, type SpecPickerPart } from "@/lib/specs/picker";
 import { bomFromQuote } from "@/lib/specs/quote-bom";
@@ -200,11 +199,14 @@ export async function setSpecFillInAction(id: string, key: string, value: string
     } else {
       // A `[bracket]` job value (`${specId}#n`, spec records design §4) of a
       // record this doc prints — labelled from the printed text (a
-      // project-only override's, else the record's), never the client's.
-      const { assembled, records } = await loadAssembledSpec(id);
-      const jv = assembled ? jobValueAnswerLabel(k, assembled.usedRecords, records, doc.overrides) : null;
-      if (jv == null) return { ok: false, error: "That blank is no longer in this section's text." };
-      label = jv;
+      // project-only override's, else the record's, as assembled), never
+      // the client's.
+      // The assembly's checklist lists exactly the brackets that print (a
+      // table-style section prints titles only, so it lists none).
+      const { assembled } = await loadAssembledSpec(id);
+      const jv = assembled?.checklist.jobValues.find((s) => s.key === k);
+      if (!jv) return { ok: false, error: "That blank is no longer in this section's text." };
+      label = fillInLabelKey(jv.defaultText);
     }
   }
   return applyPatch(id, user, (d) => {

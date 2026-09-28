@@ -11,8 +11,10 @@ import { jobValueSegments } from "@/lib/specs/record-fill-ins";
  * Presentational only — no hooks, rendered by the client Builder.
  *
  * Spec records (Task 9): in a record entry, a `[bracket]` job value still
- * showing (no answer yet, so it prints as written) is highlighted amber —
- * an answered one has already become its value. A record entry changed for
+ * showing (no answer yet, so it prints as written) is highlighted amber, and
+ * an answered one — already replaced by its value — gets a subtle underline
+ * tint, located by the assembly's `answered` spans (the entry rendered once
+ * more with private-use marks around each answer; see `answeredSpans`). A record entry changed for
  * this project carries a small badge, and one whose library text moved on
  * since carries a second — screen only, never in the Word file.
  */
@@ -33,6 +35,40 @@ const PART: CSSProperties = { fontWeight: 700, marginTop: 18, marginBottom: 6 };
 const ARTICLE: CSSProperties = { fontWeight: 700, marginTop: 10, marginBottom: 2 };
 /** An unanswered job value, as it will print (brackets included). */
 const BRACKET: CSSProperties = { background: "#fbeec4", color: "#6d5412", borderRadius: 3, padding: "0 2px" };
+/** An answered job value — its value, subtly marked. */
+const ANSWERED: CSSProperties = { background: "#f3f6fa", borderBottom: "1px dotted #9aa7bb", borderRadius: 2 };
+
+type Span = { start: number; end: number };
+
+/** Plain text with unanswered `[brackets]` marked amber. */
+function withBrackets(text: string, keyBase: string) {
+  return jobValueSegments(text).map((seg, j) =>
+    seg.bracket ? (
+      <mark key={`${keyBase}-${j}`} style={BRACKET} title="Job value — answer it in the Checklist, or it prints as written">
+        {seg.text}
+      </mark>
+    ) : (
+      <span key={`${keyBase}-${j}`}>{seg.text}</span>
+    )
+  );
+}
+
+/** One record-entry line: answered spans subtle, the rest scanned for brackets. */
+function highlighted(text: string, spans: Span[]) {
+  const out = [];
+  let at = 0;
+  spans.forEach((sp, i) => {
+    if (sp.start > at) out.push(...withBrackets(text.slice(at, sp.start), `p${i}`));
+    out.push(
+      <span key={`a${i}`} style={ANSWERED} title="Job value — answered in the Checklist">
+        {text.slice(sp.start, sp.end)}
+      </span>
+    );
+    at = sp.end;
+  });
+  if (at < text.length) out.push(...withBrackets(text.slice(at), "tail"));
+  return out;
+}
 const BADGE: CSSProperties = {
   fontFamily: "var(--font-ui)",
   fontSize: 10.5,
@@ -47,24 +83,14 @@ const CELL: CSSProperties = { border: "1px solid #c9cdd4", padding: "4px 8px", t
 
 /** `highlight` marks `[bracket]` job values — record entries only, so a
  *  legacy part's or Part 1/3's own brackets are left alone. */
-function Lines({ lines, highlight }: { lines: OutlineLine[]; highlight?: boolean }) {
+function Lines({ lines, highlight, answered }: { lines: OutlineLine[]; highlight?: boolean; answered?: Span[][] }) {
   return (
     <>
       {lines.map((l, i) => (
         <div key={i} style={{ paddingLeft: l.depth * INDENT, display: "flex", gap: 8 }}>
           <span style={{ minWidth: 22, flexShrink: 0 }}>{l.label}</span>
           <span style={{ whiteSpace: "pre-wrap" }}>
-            {highlight
-              ? jobValueSegments(l.text).map((seg, j) =>
-                  seg.bracket ? (
-                    <mark key={j} style={BRACKET} title="Job value — answer it in the Checklist, or it prints as written">
-                      {seg.text}
-                    </mark>
-                  ) : (
-                    <span key={j}>{seg.text}</span>
-                  )
-                )
-              : l.text}
+            {highlight ? highlighted(l.text, answered?.[i] ?? []) : l.text}
           </span>
         </div>
       ))}
@@ -116,7 +142,7 @@ export default function Preview({ assembled }: { assembled: AssembledSection }) 
                 {pr.overridden && <span style={{ ...BADGE, color: "#3b5b8c", background: "#e8eef8" }}>Changed for this project</span>}
                 {pr.overrideStale && <span style={{ ...BADGE, color: "#8a6d1f", background: "#fbf3dd" }}>Library updated since</span>}
               </div>
-              <Lines lines={pr.lines} highlight={!!pr.specId} />
+              <Lines lines={pr.lines} highlight={!!pr.specId} answered={pr.answered} />
             </div>
           ))}
         </div>

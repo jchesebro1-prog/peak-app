@@ -61,11 +61,15 @@ export function jobValueSlots(specId: string, text: string): JobValueSlot[] {
   return out;
 }
 
+/** `mark` (preview only, Task 9 fix round) wraps each answered value in
+ *  JOB_VALUE_MARK_OPEN/CLOSE so `answeredSpans` can find it after the
+ *  outline is rendered; the printed text never carries marks. */
 export function applyJobValues(
   text: string,
   specId: string,
   answers: Record<string, string>,
-  labels?: Record<string, string>
+  labels?: Record<string, string>,
+  mark?: boolean
 ): string {
   let n = 0;
   return String(text || "").replace(JOB_VALUE_RE, (whole, defaultText: string) => {
@@ -73,8 +77,49 @@ export function applyJobValues(
     const key = `${specId}#${n}`;
     if (labelMismatch(labels, key, defaultText.trim())) return whole;
     const v = (answers[key] || "").replace(/\s+/g, " ").trim();
-    return v || whole;
+    if (!v) return whole;
+    return mark ? JOB_VALUE_MARK_OPEN + v + JOB_VALUE_MARK_CLOSE : v;
   });
+}
+
+/** Private-use characters (never typed, never printed) that bracket an
+ *  answered job value in the marked render only. */
+export const JOB_VALUE_MARK_OPEN = "\uE000";
+export const JOB_VALUE_MARK_CLOSE = "\uE001";
+
+/** Where the answered job values sit in each rendered line (design §4:
+ *  subtle highlight for answered values). `plain` is the entry's printed
+ *  lines; `marked` is the same text rendered with `applyJobValues(…, true)`.
+ *  Each marked line, with its marks stripped, must equal the plain line —
+ *  otherwise (the marks changed how a line parsed, e.g. an answer that
+ *  looks like an outline label) this returns undefined and the preview
+ *  simply shows no answered highlight for that entry, so the printed text
+ *  is never at the mercy of the marks. `[start, end)` offsets into the
+ *  plain line text; an empty list = no answered value on that line. */
+export function answeredSpans(
+  plain: ReadonlyArray<{ text: string }>,
+  marked: ReadonlyArray<{ text: string }>
+): Array<Array<{ start: number; end: number }>> | undefined {
+  if (plain.length !== marked.length) return undefined;
+  const out: Array<Array<{ start: number; end: number }>> = [];
+  for (let i = 0; i < plain.length; i++) {
+    const spans: Array<{ start: number; end: number }> = [];
+    let text = "";
+    let open = -1;
+    for (const ch of marked[i].text) {
+      if (ch === JOB_VALUE_MARK_OPEN) {
+        if (open >= 0) return undefined;
+        open = text.length;
+      } else if (ch === JOB_VALUE_MARK_CLOSE) {
+        if (open < 0) return undefined;
+        if (text.length > open) spans.push({ start: open, end: text.length });
+        open = -1;
+      } else text += ch;
+    }
+    if (open >= 0 || text !== plain[i].text) return undefined;
+    out.push(spans);
+  }
+  return out;
 }
 
 /** Saved answers that no longer print: their key's specId isn't in the map
@@ -115,29 +160,3 @@ export function jobValueSegments(text: string): Array<{ text: string; bracket: b
   return out;
 }
 
-/**
- * The label to store beside a job-value answer (`fillInLabels[key]`), or
- * `null` when `key` is not a job value of a record this doc prints (Task 9).
- * `printed` is the assembly's `usedRecords` (`{ specId: revision }`); the
- * text scanned is the one that prints — a project-only override's when the
- * doc has one, else the record's own — so the label always matches the
- * bracket the builder showed. The label is the normalized default text, the
- * same form `labelMismatch` compares (D332 staleness).
- */
-export function jobValueAnswerLabel(
-  key: string,
-  printed: Record<string, number>,
-  records: ReadonlyArray<{ specId: string; specText: string }>,
-  overrides: Record<string, { specText: string }>
-): string | null {
-  const k = String(key || "");
-  const hash = k.lastIndexOf("#");
-  if (hash <= 0) return null;
-  const specId = k.slice(0, hash);
-  if (!Object.prototype.hasOwnProperty.call(printed, specId)) return null;
-  const ov = Object.prototype.hasOwnProperty.call(overrides, specId) ? overrides[specId] : undefined;
-  const text = ov ? ov.specText : records.find((r) => r.specId === specId)?.specText;
-  if (text == null) return null;
-  const slot = jobValueSlots(specId, text).find((s) => s.key === k);
-  return slot ? fillInLabelKey(slot.defaultText) : null;
-}

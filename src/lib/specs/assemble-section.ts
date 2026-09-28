@@ -6,7 +6,7 @@ import type { SpecDocHeader, SpecDocProduct, SpecDocument } from "@/lib/specs/sp
 import { sectionIdForRecord, type SpecRecord } from "@/lib/specs/records";
 import { isPlaceholderSku, normPartNumber, partNumberCandidates, specRowKey, wildcardMatches } from "@/lib/specs/record-keys";
 import { companionsFor, matchRow, type RowMatch } from "@/lib/specs/record-match";
-import { applyJobValues, jobValueSlots, staleJobValueKeys, type JobValueSlot } from "@/lib/specs/record-fill-ins";
+import { answeredSpans, applyJobValues, jobValueSlots, staleJobValueKeys, type JobValueSlot } from "@/lib/specs/record-fill-ins";
 
 /**
  * The spec builder's one assembly (#205 Phase B, design §3). Pure: the
@@ -50,6 +50,10 @@ export type AssembledProduct = {
   overrideStale?: boolean;
   /** Every BOM row (specRowKey) that landed on this entry; [] for a companion. */
   rowKeys: string[];
+  /** Preview only (Task 9 fix round): per line of `lines`, where answered
+   *  `[bracket]` job values now sit — absent when none are answered. The
+   *  Word writer ignores it. */
+  answered?: Array<Array<{ start: number; end: number }>>;
 };
 export type AssembledPart2Article = { num: string; title: string; general: OutlineLine[]; products: AssembledProduct[] };
 export type EquipmentRow = { sku: string; mfr: string; model: string; description: string; qty?: number };
@@ -454,6 +458,10 @@ export function assembleSection(input: {
             warnings.push(`${r.specId} has a [FILL IN] blank that can't be answered in the builder yet — edit the spec text.`);
           }
           const lines = render(finalText, "entry", placeholders);
+          // Answered values, located by rendering the same text once more
+          // with marks around them (no warnings collected from this pass).
+          const markedText = applyJobValues(t.specText, r.specId, doc.fillIns, labels, true);
+          const answered = markedText !== finalText ? answeredSpans(lines, renderBody(markedText, { context: "entry", placeholders }).lines) : undefined;
           return {
             sku: c.rows[0]?.p.sku || r.specId,
             label,
@@ -464,6 +472,7 @@ export function assembleSection(input: {
             overridden: t.overridden,
             overrideStale: t.overrideStale,
             rowKeys: c.rows.map((x) => x.rowKey),
+            ...(answered && answered.some((a) => a.length) ? { answered } : {}),
           };
         });
       return { num: `2.${i + 1}`, title: a.title, general, products };
