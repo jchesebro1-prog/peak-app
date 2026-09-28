@@ -8,13 +8,22 @@ export const PROSCENIUM_TEMPLATE = raw as unknown as VenueTemplate;
 /** Stamped on a Grid design whose base sheet this template drew (intake.baseSheetTemplate). */
 export const PROSCENIUM_TEMPLATE_ID = "proscenium@1";
 
-let last: { key: string; plan: StretchedPlan } | null = null;
+const cache: Array<{ key: string; plan: StretchedPlan }> = [];
 
-/** The proscenium template stretched to `d` — memoized on the last call (a render and its drag math ask twice). */
+/** The proscenium template stretched to `d` — memoized on the last two calls
+ * (during a Quick Design wall drag, the drag-start state and the render ask
+ * with different dims on every pointermove, alternating two keys; a
+ * single-entry memo would miss on every call). */
 export function stretchProscenium(d: StretchDims): StretchedPlan {
   const key = JSON.stringify(d);
-  if (last?.key === key) return last.plan;
+  const hitIdx = cache.findIndex((e) => e.key === key);
+  if (hitIdx !== -1) {
+    const [hit] = cache.splice(hitIdx, 1);
+    cache.unshift(hit);
+    return hit.plan;
+  }
   const plan = stretchTemplate(PROSCENIUM_TEMPLATE, PROSCENIUM_KEYS, d);
-  last = { key, plan };
+  cache.unshift({ key, plan });
+  cache.length = Math.min(cache.length, 2);
   return plan;
 }

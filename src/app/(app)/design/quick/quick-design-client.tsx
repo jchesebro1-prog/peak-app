@@ -674,6 +674,7 @@ export default function QuickDesignClient({
               systems={SYS_ORDER}
               fixtureAssemblies={fixtureAssemblies}
               accentHex={accentHex}
+              showHouse
             />
           </div>
         ) : (

@@ -83,6 +83,7 @@ export default function ScopeInputsPanel({
   systems,
   fixtureAssemblies: fixtureAssembliesProp,
   accentHex,
+  showHouse = false,
 }: {
   value: QuickScopeInputs;
   onChange: (patch: Partial<QuickScopeInputs>) => void;
@@ -95,6 +96,10 @@ export default function ScopeInputsPanel({
    * Hardware. */
   fixtureAssemblies?: AssemblyPickerOption[];
   accentHex: string;
+  /** #249 fix: the house width/depth rows only mean something where the plan
+   * redraws live — Quick Design. The Grid's base sheet is fixed at intake,
+   * so its scope panel must omit this (default false). */
+  showHouse?: boolean;
 }) {
   const [sec, setSec] = useState({ venue: true, size: true, dims: true, systems: true });
   const venue = venueOf(value);
@@ -194,7 +199,8 @@ export default function ScopeInputsPanel({
               <input type="range" min={LIM[d.field][0]} max={LIM[d.field][1]} step={2} value={value[d.field]} onChange={(e) => setDimVal(d.field, e.target.value)} style={{ width: "100%", accentColor: accentHex, cursor: "pointer" }} />
             </div>
           ))}
-          {venue.kind === "proscenium" &&
+          {showHouse &&
+            venue.kind === "proscenium" &&
             (() => {
               // #249: the house the template stretches to — shown as the value in use (typed, or the default).
               const h = houseDims(value);

@@ -30601,6 +30601,9 @@ import { defaultAState as vt249Default } from "@/app/(app)/design/quick/engine";
   ok(hd({ houseWidthFt: 60 }).warning === vt249Warn && hd({ houseWidthFt: 70 }).warning === null, "#249: the narrow-house warning fires only when the house is narrower than the stage");
   const pd = vt249Dims({ ...vt249Default(0), width: 44, wing: 12, depth: 28, houseDepthFt: 75, sys: { ...vt249Default(0).sys, pit: false } });
   ok(pd.proWidthFt === 44 && pd.wingFt === 12 && pd.stageDepthFt === 28 && pd.houseWidthFt === 68 && pd.houseDepthFt === 75 && pd.pit === false, "#249: prosceniumDims reads pro width, wings, stage depth, the house and the pit switch off the designer state");
+  const mA = { ...vt249Keys.defaults, pit: true }, mB = { ...mA, houseWidthFt: 90 };
+  const pA = vt249Stretch(mA), pB = vt249Stretch(mB);
+  ok(vt249Stretch(mA) === pA && vt249Stretch(mB) === pB, "#249: the stretch memo keeps two entries, so alternating drag/render dims don't recompute");
 }
 
 /* --- #249 T3: the proscenium plan draws Jeff's template --- */
@@ -30647,6 +30650,8 @@ import { defaultAState as vt249cDefault } from "@/app/(app)/design/quick/engine"
   const sip = readFileSync(join(process.cwd(), "src/components/design/scope-inputs-panel.tsx"), "utf8");
   ok(qd.includes("plan.hasDoors") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#249 T4: Quick Design shows door buttons only where the plan has doors, and Reset house clears the house size");
   ok(sip.includes("House width") && sip.includes("House depth") && sip.includes("houseDims(") && sip.includes("h.warning"), "#249 T4: the dimension panel shows house width, house depth and the narrow-house warning");
+  const gsp = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
+  ok(/showHouse\s*&&\s*venue\.kind === "proscenium"/.test(sip) && /<ScopeInputsPanel[\s\S]{0,400}?showHouse/.test(qd) && !gsp.includes("showHouse"), "#249 T4: house rows show in Quick Design only — the Grid Scope panel's base sheet is fixed at intake");
 }
 
 /* --- #249 T5: Grid — starter Spaces and Auto fill on the template --- */
@@ -30708,6 +30713,7 @@ async function grid249T5AsyncChecks(): Promise<void> {
   ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#249 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
   const intake = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/grid-intake.tsx"), "utf8");
   ok(intake.includes("House width") && intake.includes("House depth") && intake.includes("houseDims(") && intake.includes("h.warning"), "#249 T5: the Grid intake shows house width, house depth and the narrow-house warning");
+  ok(intake.includes("label={r.label}"), "#249 T5: the intake's house inputs are labeled for screen readers by name");
 }
 
 /* ======================================================================
