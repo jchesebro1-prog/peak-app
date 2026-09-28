@@ -7339,3 +7339,69 @@ inspection>&venue=<id>` — the request form's own existing `SERVICES` values an
 pre-fill (D420's Repair path), reused rather than duplicated. A request naming only located venues still prices
 normally.
 
+
+## D431. Venue background templates are Jeff's own drawings, converted once and built in (#249, 2026-09-28)
+
+Jeff (2026-09-28): stretchable backgrounds "based off this drawing for an auditorium and PAC", no layers — the text
+labels he drew mark the areas to track. His Vectorworks DWG is committed at `docs/venue-templates/source/<kind>.dwg`
+and converted on this Mac by `scripts/venue-template-convert.py` (Homebrew LibreDWG `dwg2dxf` → Python `ezdxf`) into
+`src/lib/design/venue-templates/<kind>.json`: inches, y up, blocks exploded, Vectorworks' duplicated group geometry
+deduped, wipeouts/hatches/dimensions dropped, labels anchored top-left. The converter refuses a drawing not in
+inches or missing a required label, `--check` proves the committed JSON is what the DWG converts to, `--selftest`
+proves the refusal. Templates are built in (no upload screen) — Jeff sends DWGs, Claude converts and commits them
+(docs/venue-templates/README.md has the recipe). The stretch is data-driven: a hand-written `<kind>.keys.ts` names
+the key lines, which input drives each span, the labeled regions and the required labels; one pure engine
+(`stretch.ts`) maps every point through a piecewise-linear front-to-back map (plaster line fixed) and a side-to-side
+map blended from the stage map (pro width, wings) to a back-of-house map (booth + vestibules rigid, sides follow
+house width), so 6" walls stay 6" and nothing folds over.
+
+## D432. House width and house depth — new fields, their defaults and limits (#249, 2026-09-28)
+
+`AState.houseWidthFt` (inside faces at the back of the house) and `houseDepthFt` (plaster line → back-wall inner face
+at the centreline), shown on the Grid intake and Quick Design's dimension panel for proscenium venues only. **Default
+width is the stage's inside width** (`width + 2 × wing`), not the drawing's own 80' the spec named — a typed stage
+then gets a house that meets it squarely instead of an 80' house on a 60' stage. Default depth is the drawing's
+68.84'. **Minimum depth is 40', not the spec's 20'**: the drawing's fixed forestage, catwalk, cross aisle and curved
+back wall alone add to 36'. Width clamps to [max(45', pro width), 200'] (the rigid booth + vestibules are ≈35').
+A Quick Design save from before #249 carries only its dragged `houseHalfFt`, read as width `2 × houseHalfFt`. When
+the house is narrower than the stage a warning shows under the fields ("…so its side walls slant inward"); nothing
+is blocked.
+
+## D433. The template draws every proscenium plan; old Grid sheets keep their Auto-fill frame (#249, 2026-09-28)
+
+Jeff chose "everywhere": the Grid base sheet, Quick Design and the saved-Designs view all draw the template through
+one template-backed `prosGeom()`. Quick Design and saved Designs render live from state, so existing proscenium
+designs there show the new drawing the next time they open (their data is unchanged). A Grid base sheet is stored
+at intake, so existing Grid designs keep their plan — and `generateBaseSheet` now stamps `intake.baseSheetTemplate =
+"proscenium@1"` (kept across intake re-saves). `fillAutoScopes` uses the template frame only for a stamped design;
+an unstamped one keeps the pre-#249 schematic's frame (`src/lib/design/legacy-pros-geom.ts`, the old `prosGeom`
+verbatim), so "Change equipment…" still lands on the plan the design actually has. The proscenium sheet calibrates
+from the template's inner stage walls (`width + 2 × wing`). Kept on the plan: line sets, electrics, drapes/legs/
+borders + labels, FOH mix, console, legend, "PLASTER LINE", dimension chains (now with house depth and house width).
+Dropped for proscenium: seating arcs, doors, the old booth box, "PIT" text and apron bulge.
+
+## D434. Quick Design house drag is relative; proscenium doors are gone (#249, 2026-09-28)
+
+Two side-wall handles (house width, symmetric) and one back-wall handle (house depth), whole feet, the typed fields'
+limits. The drag converts the pointer's movement since the drag began at the drag-start scale instead of mapping
+the absolute pointer, because the canvas rescales as the house grows — an absolute mapping would chase itself.
+Door add/remove/drag stays for church only; a proscenium room's entrances are whatever the drawing shows. Reset house
+clears the house size back to its defaults.
+
+## D435. Labeled areas become Spaces; front lights on the catwalk, subs on the stage edge (#249, 2026-09-28)
+
+A new proscenium base sheet starts with Spaces Stage, Pit (only when on), House, Catwalk, Center Aisle, Booth,
+Electrical Room and MISC Rooms, outlined from the stretched drawing (House is the one area without a label — the
+seating between the stage edge and the back wall). Auto fill hangs front lights along the catwalk and spaces
+subwoofers along the stage-edge curve; mixer/DSP, video processor and projector land in the Booth region;
+everything else keeps its rule on template-derived rects. **The Electrical Room is a Space only**: Controls is not
+one of the Grid's Auto-fill scopes (`TRACKABLE_SYS_KEYS`), so the dimmer-rack rule discussed in brainstorming has
+nothing to place and was not built.
+
+## D436. The drawing's small imprecisions are absorbed, not corrected (#249, 2026-09-28)
+
+Jeff's drawing is ~3" out of square across the back of the house (inside faces at −62.959 and 894.25 about a
+414.25 centreline) and the left house wall leans 1". The back-of-house map uses the mean half-width (478.605"), so
+the left house wall stays within an inch of 6" at any house width from 60' to 120' (harness-checked); every
+orthogonal wall elsewhere stays exactly 6". Labels render at 8 px on the drawing's own text baseline (top-left y +
+the drawing's text height), so a label Jeff set just above a wall stays clear of it.

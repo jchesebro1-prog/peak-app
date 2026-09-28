@@ -247,3 +247,19 @@ other venue kinds (each arrives as its own DWG + keys file), the section view.
    labels).
 4. Point that kind's `buildPlan*` / geometry at the template; add its harness
    block (identity, walls, spans).
+
+## As built (2026-09-28)
+
+Shipped as punch **#249** (#247 and #248 were taken on main meanwhile), decisions D431–D436. Where the build
+differs from the design above:
+
+- **Default house width** is the stage's inside width (`width + 2 × wing`), not the drawing's 80' — it equals 80' at
+  the drawing's own size (D432).
+- **Minimum house depth is 40'**, not 20': the drawing's fixed forestage, catwalk, cross aisle and back-wall curve
+  total 36' (D432).
+- **No Electrical Room placement rule** — Controls isn't a Grid Auto-fill scope, so the Electrical Room is a Space
+  only (D435).
+- The drawing has **75** distinct line segments (not 76), 7 arcs, 7 labels.
+- The left house wall is within 1" of 6" (the drawing is out of square there); every orthogonal wall is exactly 6"
+  (D436).
+- Labels sit on the drawing's own text baseline (D436).

@@ -426,6 +426,21 @@ See `.env.example`.
     with a real grant, check a multi-venue portal quote against the builder,
     confirm letters on a real render. Decisions D420–D428, D429–D430; punch
     item #248.
+21. ✅ **Venue background templates** (#249, D431–D436) — Jeff's Vectorworks
+    Auditorium/PAC drawing (`docs/venue-templates/source/proscenium.dwg`),
+    converted by `scripts/venue-template-convert.py` into
+    `src/lib/design/venue-templates/proscenium.json` and stretched by a pure
+    engine (`stretch.ts` + hand-written `proscenium.keys.ts`) to pro width,
+    wings, stage depth and new house width / house depth fields — walls stay
+    6", the pit follows the pit switch. One template-backed `prosGeom()`
+    draws every proscenium plan (Grid base sheet, Quick Design, saved
+    Designs); its labeled areas become the base sheet's starter Spaces and
+    Auto fill hangs front lights on the catwalk and subs on the stage edge.
+    Quick Design drags the house walls; proscenium doors are gone. Grid
+    sheets drawn before #249 keep their Auto-fill frame
+    (`intake.baseSheetTemplate`, `legacy-pros-geom.ts`). Remaining is
+    Jeff-gated: DWGs for the other venue types (church, gym stage, black box,
+    conference, arena). Punch item #249.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

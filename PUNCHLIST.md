@@ -9270,3 +9270,27 @@ signed out.
 **Follow-ups (not built).** A priced repair library (would let repairs self-serve too, D420); scheduling/date
 requests (the job scheduler stays staff-side, per the original spec's out-of-scope); customer choice of travel mode
 (Auto only, matching #208's own scope). See D420–D430.
+
+## 249. Grid — stretchable venue backgrounds from Jeff's drawings (Auditorium / PAC first) — DONE 2026-09-28 (D431–D436)
+
+**Reported:** Jeff (2026-09-28): better templates for the Grid's background layouts — "Stretchable drawing based on
+the template", then a Vectorworks DWG for the auditorium/PAC with labels on the areas to track, no layers.
+
+**Done.**
+- **Converter** `scripts/venue-template-convert.py` (LibreDWG + ezdxf, dev-time only) → committed
+  `src/lib/design/venue-templates/proscenium.json`; source DWG in `docs/venue-templates/source/`; recipe in
+  `docs/venue-templates/README.md` (D431).
+- **Stretch engine** (`stretch.ts`) + hand-written key lines (`proscenium.keys.ts`): pro width, wings, stage depth,
+  house width, house depth; walls keep 6"; pit shows/hides with the pit switch and keeps 76 % of the opening (D431,
+  D436).
+- **House width / house depth** on the Grid intake and Quick Design (proscenium only), defaults, limits and the
+  narrow-house warning (D432).
+- **Every proscenium plan draws the template** — Grid base sheet, Quick Design, saved Designs; overlays kept;
+  seats/doors/old booth dropped; old Grid sheets keep their Auto-fill frame via `intake.baseSheetTemplate` (D433).
+- **Quick Design** side-wall and back-wall drag, doors church-only, Reset house (D434).
+- **Spaces** from the labeled areas; front lights on the catwalk, subs on the stage edge (D435).
+- Proof renders in `docs/venue-templates/renders/`.
+
+**Follow-ups (Jeff-gated).** Send DWGs for the other venue types (church, gym stage, black box, conference, arena)
+— each is a conversion + a key-lines file, no new engine work. An upload screen for templates (Grid Settings →
+Backgrounds) if Jeff wants to swap drawings himself. Seats or doors only if they're drawn into the DWG.
