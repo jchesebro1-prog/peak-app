@@ -456,6 +456,24 @@ See `.env.example`.
     any fabric the index can't price) still lands price-on-request,
     unchanged. Remaining is Jeff-gated: try a curtain in the portal with a
     real grant and compare against the Estimator. Punch item #250.
+23. ✅ **Portal department tree** (#252, D442–D445) — staff group catalog
+    categories into named departments at Catalog → Departments
+    (`/catalog/departments`, admin-only, one settings blob
+    `portal_departments`, stable slug ids, a category in at most one
+    department, "other" reserved); the portal catalog landing
+    (`/portal/catalog`) shows a tile per department plus an automatic
+    unstored Other (hidden when empty) — count of browsable items, a
+    top-ranked-part thumbnail — and `?dept=<id>` scopes results, the
+    Category facet and search itself to that department, with a breadcrumb
+    and a "Search all departments" link on a dead-end search. Additive: a
+    shop with no departments configured browses exactly as before. The
+    editor is one Department `<select>` per catalog category (including the
+    "Fixture assemblies" pseudo-category), not a checklist, so a
+    double-assignment is structurally impossible; "Start from suggestions"
+    (Rigging/Lighting/Cable & Connectors/Atmospherics/Hardware/Drapery)
+    shows whenever the draft list is empty. Remaining is Jeff-gated: nothing
+    shows in the portal until departments are actually set up. Punch item
+    #252.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

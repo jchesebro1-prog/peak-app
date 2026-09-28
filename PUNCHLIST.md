@@ -9328,3 +9328,40 @@ and compare the number against the same curtain opened in the Estimator.
 **Follow-ups (not built).** The department tree (a separate spec, per the #245 brainstorm). Custom fabrics, hang/
 bottom pricing and a firmer (non-review) curtain path are all still Jeff's call — he wants curtains reviewed for
 now. See D437–D440.
+
+## 252. Customer portal — browse the catalog by department — DONE 2026-09-28 (D442–D445)
+
+**Reported:** Jeff (2026-09-27, #245 brainstorm): *"I think we can filter by Manufacturer then by category … We
+could also do the department tree long term but for now I think the first approach will be enough."* 2026-09-28:
+*"go ahead with the department tree."*
+
+**Done.**
+- **Catalog → Departments** (`/catalog/departments`, admin-only, beside Device types): staff group catalog
+  categories — including the "Fixture assemblies" pseudo-category — into named departments, one `<select>` per
+  category (double-assignment is structurally impossible, not just refused on save). Rename/reorder/add/delete;
+  "Start from suggestions" (Rigging/Lighting/Cable & Connectors/Atmospherics/Hardware/Drapery, matched
+  case-insensitively) whenever the draft list is empty (D442, D445).
+- **A category belongs to at most one department**, ids are stable slugs of the name (survive a rename), and
+  `"other"` can never be claimed — anything left unassigned falls into an automatic, unstored Other, hidden
+  whenever it would be empty (D442, D443).
+- **The portal landing** (`/portal/catalog`, no search/filters/department active) shows a department tile per
+  configured department plus Other — name, a count of browsable items, a thumbnail from the top-ranked browsable
+  part with an image. Nothing shows until departments are actually saved — the tree is additive, so a shop with
+  none configured browses exactly as before #252 (D443, D444).
+- **Clicking a tile sets `?dept=<id>`**: results, the Category facet, and search itself scope to the department;
+  a breadcrumb ("All departments › Rigging") clears it; a search with no hits inside a department offers "Search
+  all departments" (D444).
+- **Fix round 1:** the editor's "N departments saved." confirmation was getting destroyed the instant it should
+  have shown (the page keyed the whole editor by the freshly-saved departments, and `router.refresh()` remounted
+  it before the message could render) — the message now lives in a thin, unkeyed wrapper around the keyed editor.
+  `departmentTiles` was rewritten from one filter pass per department to a single pass (same output, pinned by a
+  test against the old approach). `saveDepartments` no longer calls `invalidatePortalIndex()` (departments were
+  never baked into that cache) and derives its own known-categories list instead of its caller. A new department
+  above an existing same-named id now slugs order-independently. `resolveDept("other")` is `null` when no
+  departments are configured, not a phantom Other (D442–D445).
+
+**Jeff-gated.** Nothing shows in the portal until departments are set up — go to Catalog → Departments, click
+"Start from suggestions," review the six starter groups against the real catalog, adjust and save.
+
+**Follow-ups (not built).** Nested sub-departments, per-department hero images uploaded by staff, and reordering
+categories inside a department were all explicitly out of scope (the original spec). See D442–D445.
