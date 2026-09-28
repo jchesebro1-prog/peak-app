@@ -1,7 +1,8 @@
 import ExcelJS from "exceljs";
 import { cellText } from "@/lib/import/xlsx-to-csv";
+import { csiKey } from "@/lib/specs/articles";
 import { saveSpecRecord } from "@/lib/stores/spec-records";
-import { createSection } from "@/lib/stores/spec-sections";
+import { allSections, createSection } from "@/lib/stores/spec-sections";
 import {
   LIBRARY_HEADERS,
   LIBRARY_SHEET,
@@ -85,20 +86,32 @@ export async function writeLibraryWorkbook(records: SpecRecord[]): Promise<Buffe
 
 export type CommitResult = { created: number; updated: number; unchanged: number; sectionsCreated: string[] };
 
-/** Commits a plan: creates any missing v1 sections first (idempotent on
- *  number via `createSection`/the sections store), then upserts every item
- *  through `saveSpecRecord` — `unchanged` items are skipped entirely so
- *  running an import twice writes no new revisions. Refuses a blocking plan. */
+/** Commits a plan: creates any missing v1 sections first, then upserts every
+ *  item through `saveSpecRecord` — `unchanged` items are skipped entirely so
+ *  running an import twice writes no new revisions. Refuses a blocking plan.
+ *
+ *  Section creation re-reads the LIVE sections right before creating, rather
+ *  than trusting `plan.missingSections` at face value: `createSection` mints
+ *  a fresh random id every call, so a stale plan (built before an earlier
+ *  commit, or simply committed twice) would otherwise create a second
+ *  section with the same CSI number. Only a number with no live match (by
+ *  `csiKey`) at commit time is actually created, and `sectionsCreated` names
+ *  only those. */
 export async function commitSpecRecordImport(plan: ImportPlan, by: string, why: string): Promise<CommitResult> {
   if (plan.blocking) {
     throw new Error("commitSpecRecordImport: refusing to commit a plan with blocking problems.");
   }
 
+  const liveKeys = new Set((await allSections()).map((s) => csiKey(s.number)));
+
   const sectionsCreated: string[] = [];
   for (const number of plan.missingSections) {
+    const key = csiKey(number);
+    if (liveKeys.has(key)) continue; // already exists — a stale/repeated plan, not actually missing
     const title = V1_SECTION_TITLES[number];
     if (!title) continue; // a non-creatable missing section would already be blocking, above
     await createSection({ number, title, by });
+    liveKeys.add(key); // guard a duplicate number within the same plan.missingSections list too
     sectionsCreated.push(number);
   }
 

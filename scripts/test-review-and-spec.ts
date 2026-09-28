@@ -10649,6 +10649,7 @@ seeded()
   .then(() => specRecordsAsyncChecks())
   .then(() => specRecordsStoreAsyncChecks())
   .then(() => specRecordsImportAsyncChecks())
+  .then(() => specRecordsImportFixRound1AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32528,4 +32529,80 @@ async function specRecordsImportAsyncChecks(): Promise<void> {
   await IO.commitSpecRecordImport({ ...plan, missingSections: [] }, "Tester", "Import test");
   const again = I.planSpecRecordImport(parsed, { existing: await S.allSpecRecords(), sections: secs, articles: arts });
   ok(again.counts.unchanged === 46, "record import: committing then re-planning = 46 unchanged (import twice → 0 changes)");
+}
+
+/* ---- Spec record import — fix round 1 (reviewer) ----
+ * Important: commitSpecRecordImport must not mint a duplicate section for a
+ * CSI number that already exists — createSection() gives every call a fresh
+ * random id, so trusting a (possibly stale) plan.missingSections at face
+ * value would create a second section with the same number if the same
+ * plan were committed twice. Exercised for real below: a genuinely-missing
+ * v1 section number, a plan whose own (non-empty) missingSections drives
+ * the creation, two real commits of the SAME plan.
+ * Minor: a file carrying the same Spec ID twice is a blocking problem. */
+async function specRecordsImportFixRound1AsyncChecks(): Promise<void> {
+  const I = await import("@/lib/specs/record-import");
+  const IO = await import("@/lib/specs/record-io");
+  const R = await import("@/lib/specs/records");
+  const SS = await import("@/lib/stores/spec-sections");
+
+  // "11 61 14" (Orchestra Pit Filler) is a real v1 section number that no
+  // earlier block in this run creates (the main import block above always
+  // overrides `missingSections: []` before its commit, specifically to
+  // avoid creating sections — see its test) — so this test DB genuinely has
+  // no live section for it yet.
+  const fixSectionNumber = "11 61 14";
+  const before = (await SS.allSections()).filter((s) => s.number === fixSectionNumber);
+  ok(before.length === 0, "fix round 1 (important): no live section exists yet for the number this test targets");
+
+  // status "draft" so the record's own missing-article problem (the
+  // to-be-created section has no articles) is non-blocking — lets a real,
+  // committable plan exercise the section-creation path without also
+  // tripping §2's ready-record article validation.
+  const fixRecord = R.normalizeSpecRecord({
+    specId: "PS-D358-FIX-001",
+    kind: "system",
+    status: "draft",
+    section: fixSectionNumber,
+    article: "TEST FIXTURE",
+    title: "Idempotent section-create fixture",
+    matchKey: "Test358 – Idempotent Section",
+    specText: "Line one",
+    mfrNumbers: [],
+    includeWith: [],
+    sourceArticleId: null,
+  })!;
+  const fixPlan = I.planSpecRecordImport({ records: [fixRecord], problems: [] }, { existing: [], sections: [], articles: [] });
+  ok(!fixPlan.blocking && fixPlan.missingSections.includes(fixSectionNumber),
+    "fix round 1 (important): a real, non-blocking plan lists the genuinely-missing v1 section for creation");
+
+  const commit1 = await IO.commitSpecRecordImport(fixPlan, "Tester", "Fix round 1 — first commit");
+  ok(commit1.sectionsCreated.length === 1 && commit1.sectionsCreated[0] === fixSectionNumber,
+    "fix round 1 (important): the first commit actually creates the missing section");
+  const afterFirst = await SS.allSections();
+  for (const s of afterFirst) if (s.number === fixSectionNumber) registerFixture("spec_sections", s.id);
+  ok(afterFirst.filter((s) => s.number === fixSectionNumber).length === 1,
+    "fix round 1 (important): exactly one section exists for that number after the first commit");
+
+  // Same plan object, committed again — a stale/repeated commit.
+  const commit2 = await IO.commitSpecRecordImport(fixPlan, "Tester", "Fix round 1 — second commit of the SAME plan");
+  ok(commit2.sectionsCreated.length === 0,
+    "fix round 1 (important): re-committing the same plan creates no section the second time");
+  const afterSecond = (await SS.allSections()).filter((s) => s.number === fixSectionNumber);
+  ok(afterSecond.length === 1,
+    "fix round 1 (important): still exactly one section for that number — commit is idempotent on the CSI number, not just the plan object");
+
+  // ---- Minor: a duplicate Spec ID within the file is a blocking problem ----
+  const v1 = JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"));
+  const parsed = I.recordsFromJson(v1);
+  const secs = ["11 61 13", "11 61 14", "11 61 23", "26 09 61"].map((n) => ({ id: "ss-" + n.replace(/ /g, ""), number: n }));
+  const arts = [...new Set(parsed.records.map((r) => r.sourceArticleId!))].map((id) => {
+    const r = parsed.records.find((x) => x.sourceArticleId === id)!;
+    return { id, sectionId: "ss-" + r.section.replace(/ /g, "") };
+  });
+  const firstId = parsed.records[0].specId;
+  const dupIdFile = { records: [...parsed.records, { ...parsed.records[0] }], problems: [] };
+  const dupIdPlan = I.planSpecRecordImport(dupIdFile, { existing: [], sections: secs, articles: arts });
+  ok(dupIdPlan.blocking && dupIdPlan.problems.some((p) => p.blocking && p.specId === firstId && /appears 2 times/i.test(p.message)),
+    "fix round 1 (minor): a file carrying the same Spec ID twice is a blocking problem");
 }
