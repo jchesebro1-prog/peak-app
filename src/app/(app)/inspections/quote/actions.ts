@@ -26,7 +26,7 @@ import { driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
 import { inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
-import { sourceForSave } from "@/lib/portal-quote-mode";
+import { approveKeepsAcceptedPrice, sourceForSave } from "@/lib/portal-quote-mode";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -225,12 +225,27 @@ export async function saveInspectionQuote(formData: FormData): Promise<void> {
 export async function approveInspectionQuote(formData: FormData): Promise<void> {
   let id: string | null;
   try {
-    id = await persist(formData);
-    if (!id) {
-      revalidatePath("/", "layout");
-      return;
+    // #248 final review (controller decision 1): an accepted portal-service
+    // quote approves at the price the customer already accepted — persist()
+    // would re-price it at today's rates/tier first, which a mileage-rate
+    // or margin edit between Accept and Approve could quietly change out
+    // from under the accepted number. Same permission check persist() would
+    // have made (requireUser()), just made directly since persist() is
+    // skipped.
+    const editingId = String(formData.get("editingId") || "");
+    const existing = editingId ? await getQuote(editingId) : null;
+    if (existing && approveKeepsAcceptedPrice(existing)) {
+      const user = await requireUser();
+      await setStatus(editingId, "won", user.name, { bypassApprovalGate: "engine-owned-flow" });
+      id = editingId;
+    } else {
+      id = await persist(formData);
+      if (!id) {
+        revalidatePath("/", "layout");
+        return;
+      }
+      await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
     }
-    await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   } catch (error) {
     // `persist()` opens with requireUser(), which sends an expired session to
     // /login BY throwing — a catch in the app directory must never eat that

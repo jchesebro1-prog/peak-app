@@ -10637,6 +10637,7 @@ seeded()
   .then(() => portal248RefreshAsyncChecks())
   .then(() => portal248Task3AsyncChecks())
   .then(() => portal248Task4AsyncChecks())
+  .then(() => portal248FinalFixAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -31346,6 +31347,234 @@ async function portal248Task4AsyncChecks(): Promise<void> {
     const job4 = await flameByQuote(q4.id);
     ok(!!job4, "#248 Task 4 approve: approving a portal-service flame quote through the builder's approve path spawns its flame job");
     if (job4) await d248RemoveFlameJob(job4.id);
+  } finally {
+    await removeCustomer(CO);
+  }
+}
+
+/* ======================================================================
+   #248 final-review fix wave — approve keeps the accepted price (controller
+   decision 1); the zero-travel guard (decision 2); duplicate/over-length
+   venue lists (decision 3); minors 4/5/7. Pure checks run at top level;
+   DB-backed checks are registered in the async chain as
+   portal248FinalFixAsyncChecks().
+   ====================================================================== */
+import { approveKeepsAcceptedPrice as d248ApproveKeeps } from "@/lib/portal-quote-mode";
+import { travelUnknownError as d248TravelErr } from "@/lib/portal-service-pricing";
+import { setRates as d248FixSetFlameRates } from "@/lib/flametest-engine";
+
+// ---- pure: approveKeepsAcceptedPrice (controller decision 1) ----
+{
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: { at: 1, by: "Pat" } }) === true,
+    "#248 final approveKeepsAcceptedPrice: a sent, accepted portal-service quote → true (skip persist(), go straight to won)"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: null }) === false,
+    "#248 final approveKeepsAcceptedPrice: sent but not yet accepted → false (ordinary persist()-then-won)"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent" }) === false,
+    "#248 final approveKeepsAcceptedPrice: portalAcceptance absent entirely → false"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "won", portalAcceptance: { at: 1, by: "Pat" } }) === false,
+    "#248 final approveKeepsAcceptedPrice: already won (a re-approve replay) → false — setStatus's own no-op repair handles that, not this branch"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "draft", portalAcceptance: { at: 1, by: "Pat" } }) === false,
+    "#248 final approveKeepsAcceptedPrice: a staff-recalled draft → false (persist()-then-won, same as any staff edit)"
+  );
+  ok(
+    d248ApproveKeeps({ source: "estimator", status: "sent", portalAcceptance: { at: 1, by: "Pat" } }) === false,
+    "#248 final approveKeepsAcceptedPrice: not portal-service (a staff-built or portal-catalog quote) → false"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: undefined }) === false,
+    "#248 final approveKeepsAcceptedPrice: explicit undefined acceptance → false"
+  );
+}
+
+// ---- pure: travelUnknownError verbatim copy (controller decision 2) ----
+{
+  ok(
+    d248TravelErr("Main Hall") === "We need to confirm travel for Main Hall — request a quote instead.",
+    "#248 final travelUnknownError: verbatim copy, venue label interpolated"
+  );
+}
+
+// ---- source-grep: approve wiring, service-form reprice, smoke routes ----
+{
+  const readSrc248 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  for (const [dir, label] of [
+    ["flame-tests", "flame-test"],
+    ["inspections", "inspection"],
+  ] as const) {
+    const actionsSrc248 = readSrc248(`src/app/(app)/${dir}/quote/actions.ts`);
+    ok(
+      actionsSrc248.includes("approveKeepsAcceptedPrice(existing)") &&
+        actionsSrc248.includes('await setStatus(editingId, "won", user.name, { bypassApprovalGate: "engine-owned-flow" });'),
+      `#248 final ${dir}/quote/actions.ts: approve${label === "flame-test" ? "Flame" : "Inspection"}Quote branches on approveKeepsAcceptedPrice and, when true, calls setStatus directly with the approving user's name — never persist() first`
+    );
+    // The re-price branch (persist() then a setStatus with no `by`) must
+    // stay reachable for every quote that ISN'T an accepted portal-service
+    // one — this is the structural half of the "everything else unchanged"
+    // requirement.
+    ok(
+      actionsSrc248.includes("id = await persist(formData);") &&
+        actionsSrc248.includes('await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });'),
+      `#248 final ${dir}/quote/actions.ts: the ordinary persist()-then-won path is still there for every other quote`
+    );
+  }
+
+  const pricingSrc248 = readSrc248("src/lib/portal-service-pricing.ts");
+  ok(
+    pricingSrc248.includes("firstUnlocatedVenueLabel(req.venues, cust)") &&
+      pricingSrc248.indexOf("firstUnlocatedVenueLabel(req.venues, cust)") < pricingSrc248.indexOf("if (req.service.kind ===" ),
+    "#248 final portal-service-pricing.ts: the zero-travel guard runs before either service branch prices anything"
+  );
+  ok(
+    pricingSrc248.includes("email: session.email || \"\""),
+    "#248 final portal-service-pricing.ts: the saved subdoc contact threads session.email (controller decision 5)"
+  );
+
+  const formSrc248 = readSrc248("src/app/portal/service/service-form.tsx");
+  ok(
+    formSrc248.includes("const next = rows.map((r) => (r.venueId === venueId ? { ...r, ...patch } : r));\n    setRows(next);\n    reprice(next);"),
+    "#248 final service-form.tsx: updateRow computes `next`, sets state, THEN calls reprice() — not inside the setRows updater (minor 4)"
+  );
+  ok(
+    formSrc248.includes("requestQuoteHref(service.kind, tv.venueId)"),
+    "#248 final service-form.tsx: the zero-travel refusal renders a Request a quote link carrying the matched venue's id"
+  );
+
+  const smokeSrc248 = readSrc248("scripts/smoke-routes.ts");
+  ok(
+    smokeSrc248.includes('"/portal/service?type=flame&venue=x"') && smokeSrc248.includes('"/portal/service?from=x"'),
+    "#248 final smoke-routes.ts: /portal/service entry-point query params smoke-test signed out (minor 7)"
+  );
+}
+
+async function portal248FinalFixAsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "finalfix-co");
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test248 FinalFix Co",
+      type: "Education",
+      pricingTier: "silver",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", lat: 44.26, lng: -88.42, travelMiles: 120, travelMin: 150 },
+        // No lat/lng, no city/state, no travelMiles/travelMin — the engine
+        // has nothing to price this venue's travel leg from (controller
+        // decision 2).
+        { id: "v2", label: "No-Coords Hall", primary: false, venueKind: "proscenium" },
+      ],
+      contacts: [],
+    });
+    const session = { customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+
+    // ---- controller decision 2: zero-travel guard ----
+    const unlocatedOnly = await d248Price(session, { service: { kind: "flame" }, venues: [{ venueId: "v2", count: 5 }] });
+    ok(
+      !unlocatedOnly.ok && unlocatedOnly.error === "We need to confirm travel for No-Coords Hall — request a quote instead.",
+      "#248 final priceServiceRequest: an unlocated venue alone is refused, naming it"
+    );
+
+    const mixedBoth = await d248Price(session, {
+      service: { kind: "flame" },
+      venues: [{ venueId: "v1", count: 5 }, { venueId: "v2", count: 5 }],
+    });
+    ok(
+      !mixedBoth.ok && mixedBoth.error === "We need to confirm travel for No-Coords Hall — request a quote instead.",
+      "#248 final priceServiceRequest: a located venue plus an unlocated one still refuses, naming the unlocated one"
+    );
+
+    const locatedOnly = await d248Price(session, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 5 }] });
+    ok(locatedOnly.ok, "#248 final priceServiceRequest: a request with only located venues still prices");
+    if (locatedOnly.ok) {
+      const sub = locatedOnly.subdoc as { contact?: { email?: string } };
+      ok(
+        sub.contact?.email === "pat@example.com",
+        "#248 final priceServiceRequest: the saved subdoc contact carries session.email (controller decision 5), not a blank string"
+      );
+    }
+
+    // ---- controller decision 3: duplicate / over-length venue lists ----
+    const dup = await d248Price(session, {
+      service: { kind: "flame" },
+      venues: [{ venueId: "v1", count: 5 }, { venueId: "v1", count: 6 }],
+    });
+    ok(!dup.ok && dup.error === d248PickCopy, "#248 final priceServiceRequest: a repeated venue id is refused with Pick at least one venue.");
+
+    const tooMany = await d248Price(session, {
+      service: { kind: "flame" },
+      venues: [
+        { venueId: "v1", count: 5 },
+        { venueId: "v2", count: 5 },
+        { venueId: "v1", count: 5 },
+      ],
+    });
+    ok(
+      !tooMany.ok && tooMany.error === d248PickCopy,
+      "#248 final priceServiceRequest: a venue list longer than the customer's own venue count is refused"
+    );
+
+    // ---- controller decision 1: approve keeps the accepted price (DB) ----
+    // A real generate → accept → approve round trip through the "use
+    // server" action needs a browser session (requireUser() + redirect()),
+    // same constraint Task 4's test already documents — so, following that
+    // precedent, this drives the exact DB call the action's skip-persist
+    // branch makes (setStatus alone, no persist()) and proves the resulting
+    // quote is untouched by a mileage-rate change made in between: if the
+    // branch had instead fallen through to persist(), the changed rate
+    // would show up in `value`.
+    const owner = (await activeUsers())[0]?.name || "Test Harness";
+    const baseFlameRates = await d248FlameRates();
+    try {
+      const q = await QuoteStore.create({
+        name: "#248 final-fix approve harness quote",
+        quoteType: "flame_test",
+        customer: "Test248 FinalFix Co",
+        customerId: CO,
+        locationId: "v1",
+        value: 4321,
+        margin: 0.3,
+        source: "portal-service",
+        owner,
+        flameTest: { venues: [{ id: "v1", label: "Main Hall", curtains: 8 }] },
+      });
+      registerFixture("quotes", q.id);
+      await QuoteStore.setStatus(q.id, "sent", owner, { bypassApprovalGate: "engine-owned-flow" });
+      await QuoteStore.update(q.id, {
+        portalFirm: { generatedAt: Date.now(), validUntil: Date.now() + 30 * 86400000 },
+        portalAcceptance: { at: Date.now(), by: "Pat Buyer", byEmail: "pat@example.com" },
+      });
+      const accepted = await QuoteStore.get(q.id);
+      ok(
+        !!accepted && d248ApproveKeeps(accepted),
+        "#248 final approve: the sent, accepted portal-service fixture takes the skip-persist branch"
+      );
+
+      // Change the global flame mileage rate — the exact input persist()
+      // would feed into a re-price if the action's skip-persist branch
+      // didn't fire for this quote.
+      await d248FixSetFlameRates({ mileageRate: baseFlameRates.mileageRate + 500 });
+
+      ok(await flameByQuote(q.id) === null, "#248 final approve: no flame job exists before approval");
+      await QuoteStore.setStatus(q.id, "won", owner, { bypassApprovalGate: "engine-owned-flow" });
+      const approved = await QuoteStore.get(q.id);
+      ok(
+        !!approved && approved.status === "won" && approved.value === 4321,
+        "#248 final approve: approving an accepted portal-service quote after changing the flame mileage rate leaves its value unchanged and marks it won"
+      );
+      const job = await flameByQuote(q.id);
+      ok(!!job, "#248 final approve: approving still spawns the flame job from the stored subdoc");
+      if (job) await d248RemoveFlameJob(job.id);
+    } finally {
+      await d248FixSetFlameRates(baseFlameRates);
+    }
   } finally {
     await removeCustomer(CO);
   }

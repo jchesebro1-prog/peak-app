@@ -66,6 +66,28 @@ export function sourceForSave(prior: string | null | undefined, builderSource: s
   return prior === "portal-catalog" || prior === "portal-service" ? prior : builderSource;
 }
 
+/**
+ * #248 final review (controller decision 1) — a portal-service quote the
+ * customer has already accepted must approve at the ACCEPTED price, never a
+ * re-price. The flame/inspection builders' ordinary Approve re-runs
+ * `persist()` (today's rates, today's tier) before marking Won; for an
+ * accepted portal-service quote that would silently change the number the
+ * customer agreed to (e.g. a mileage-rate edit between accept and approve).
+ * True only for a `portal-service` quote that is still `sent` (not already
+ * won/lost — an already-won replay goes through setStatus's own no-op
+ * repair path, never this one) with a recorded acceptance; every other
+ * quote — staff-built, a portal-service quote nobody has sent yet, one a
+ * customer hasn't accepted — approves through the ordinary
+ * persist()-then-won path, unchanged. Pure.
+ */
+export function approveKeepsAcceptedPrice(q: {
+  source?: string | null;
+  status: string;
+  portalAcceptance?: unknown;
+}): boolean {
+  return q.source === "portal-service" && q.status === "sent" && !!q.portalAcceptance;
+}
+
 export const PURCHASE_METHODS = ["po", "card", "check", "other"] as const;
 export const PURCHASE_METHOD_LABEL: Record<(typeof PURCHASE_METHODS)[number], string> = { po: "Purchase order", card: "Credit card", check: "Check", other: "Other" };
 

@@ -30,6 +30,20 @@ const PICK_VENUE_COPY = "Pick at least one venue.";
 const CURTAINS_HINT = "Enter the number of curtains (1–200).";
 const LINE_SETS_HINT = "Enter the number of line sets (1–300).";
 const PREVIEW_PRICE_HINT = "Preview — customers see live prices here.";
+// #248 final review (controller decision 2) — same literal prefix/suffix as
+// src/lib/portal-service-pricing.ts's `travelUnknownError` (duplicated: this
+// "use client" module can't import a value out of that DB-touching module,
+// same reason REVIEW_LINE/PICK_VENUE_COPY above are local copies). Matching
+// the venue LABEL back out of the error text (there's no venue id in the
+// returned string) is what lets the link below target the right venue.
+const TRAVEL_UNKNOWN_PREFIX = "We need to confirm travel for ";
+const TRAVEL_UNKNOWN_SUFFIX = " — request a quote instead.";
+// The request form's own SERVICES values (src/app/portal/request/request-form.tsx) — not this
+// module's `service.kind`.
+const REQUEST_SERVICE_VALUE: Record<"flame" | "inspection", string> = {
+  flame: "Flame testing",
+  inspection: "Rigging inspection",
+};
 
 export type ServiceFormVenue = {
   venueId: string;
@@ -115,6 +129,24 @@ function toCount(text: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** #248 final review (controller decision 2): when `error` is the
+ *  zero-travel refusal, pull the venue label back out of it and match it
+ *  against the current rows so the "request a quote instead" link can carry
+ *  that venue's id. Returns null for any other error (or no match — a stale
+ *  row set mid-navigation) so the plain error text still renders on its own. */
+function travelUnknownVenue(error: string, rows: Row[]): Row | null {
+  if (!error.startsWith(TRAVEL_UNKNOWN_PREFIX) || !error.endsWith(TRAVEL_UNKNOWN_SUFFIX)) return null;
+  const label = error.slice(TRAVEL_UNKNOWN_PREFIX.length, error.length - TRAVEL_UNKNOWN_SUFFIX.length);
+  return rows.find((r) => r.label === label) || null;
+}
+
+function requestQuoteHref(kind: "flame" | "inspection", venueId: string): string {
+  const p = new URLSearchParams();
+  p.set("service", REQUEST_SERVICE_VALUE[kind]);
+  p.set("venue", venueId);
+  return "/portal/request?" + p.toString();
+}
+
 function pillHref(kind: "flame" | "inspection", level: 1 | 2, previewCid: string): string {
   const p = new URLSearchParams();
   p.set("type", kind);
@@ -198,11 +230,15 @@ export function ServiceForm({
   }
 
   function updateRow(venueId: string, patch: Partial<Row>) {
-    setRows((prev) => {
-      const next = prev.map((r) => (r.venueId === venueId ? { ...r, ...patch } : r));
-      reprice(next);
-      return next;
-    });
+    // #248 final review (minor 4): reprice() is a side effect (it schedules
+    // a debounced timer/transition) — it must not run inside the setRows
+    // updater, which React may call more than once for one update (e.g.
+    // Strict Mode's double-invoke). Compute `next` off the current `rows`
+    // state first, then set state and fire the side effect as two separate
+    // statements.
+    const next = rows.map((r) => (r.venueId === venueId ? { ...r, ...patch } : r));
+    setRows(next);
+    reprice(next);
   }
 
   function generate() {
@@ -323,7 +359,26 @@ export function ServiceForm({
             </>
           ) : (
             <div className="psv-empty" style={{ padding: "6px 0 2px" }}>
-              {preview ? PREVIEW_PRICE_HINT : error || "Tick at least one venue to see pricing."}
+              {preview ? (
+                PREVIEW_PRICE_HINT
+              ) : error ? (
+                <>
+                  {error}
+                  {(() => {
+                    const tv = travelUnknownVenue(error, rows);
+                    return tv ? (
+                      <>
+                        {" "}
+                        <Link href={requestQuoteHref(service.kind, tv.venueId)} className="psv-link">
+                          Request a quote →
+                        </Link>
+                      </>
+                    ) : null;
+                  })()}
+                </>
+              ) : (
+                "Tick at least one venue to see pricing."
+              )}
             </div>
           )}
           <div className="psv-fine">

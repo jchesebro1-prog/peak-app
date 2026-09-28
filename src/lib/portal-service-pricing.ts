@@ -1,4 +1,5 @@
-import { get as getCustomer } from "@/lib/stores/customers";
+import { get as getCustomer, type CustomerDoc } from "@/lib/stores/customers";
+import { coordsOf } from "@/lib/geo";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { compute as computeFlame, getRates as getFlameRates } from "@/lib/flametest-engine";
@@ -55,6 +56,16 @@ export type PriceServiceResult =
 export const PICK_VENUE_COPY = "Pick at least one venue.";
 export const CURTAINS_RANGE_COPY = "Enter the number of curtains (1–200).";
 export const LINE_SETS_RANGE_COPY = "Enter the number of line sets (1–300).";
+/** #248 final review (controller decision 2), verbatim copy — kept as
+ *  literal prefix/suffix (rather than one whole-string constant) so the
+ *  client form (service-form.tsx, which can't import a value out of this
+ *  DB-touching module) can duplicate them and match a venue label back out
+ *  of the returned error to build its "request a quote instead" link. */
+export const TRAVEL_UNKNOWN_PREFIX = "We need to confirm travel for ";
+export const TRAVEL_UNKNOWN_SUFFIX = " — request a quote instead.";
+export function travelUnknownError(venueLabel: string): string {
+  return `${TRAVEL_UNKNOWN_PREFIX}${venueLabel}${TRAVEL_UNKNOWN_SUFFIX}`;
+}
 
 function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -80,14 +91,49 @@ export function serviceRequestProblem(req: unknown, venueIds: Set<string>): stri
   const service = req.service as PortalService;
   const venues = Array.isArray(req.venues) ? req.venues : null;
   if (!venues || !venues.length) return PICK_VENUE_COPY;
+  // #248 final review (controller decision 3): a request can't list more
+  // venues than the customer actually has, or repeat one — either would
+  // double-count that venue's trip leg in the shared-trip pricing (D423).
+  // Neither condition has its own copy (spec's six standing error strings
+  // don't cover it), and both make the whole request unpickable, so both
+  // reuse "Pick at least one venue." (same D421 reasoning as a foreign id or
+  // a bad inspection level).
+  if (venues.length > venueIds.size) return PICK_VENUE_COPY;
   const rangeCopy = service.kind === "flame" ? CURTAINS_RANGE_COPY : LINE_SETS_RANGE_COPY;
   const max = service.kind === "flame" ? 200 : 300;
+  const seen = new Set<string>();
   for (const v of venues) {
     if (!isPlainRecord(v)) return PICK_VENUE_COPY;
     if (typeof v.venueId !== "string" || !v.venueId || !venueIds.has(v.venueId)) return PICK_VENUE_COPY;
+    if (seen.has(v.venueId)) return PICK_VENUE_COPY;
+    seen.add(v.venueId);
     const count = v.count;
     if (typeof count !== "number" || !Number.isInteger(count)) return rangeCopy;
     if (count < 1 || count > max) return rangeCopy;
+  }
+  return null;
+}
+
+/**
+ * #248 final review (controller decision 2) — the engine can only price a
+ * venue's travel from coords (geocoded or explicit lat/lng) or a saved
+ * fallback `travelMiles`; a venue with neither would otherwise price a
+ * silent $0 travel share for that leg. Returns the FIRST such venue's label
+ * (request order, not directory order) so the customer sees which venue to
+ * fix, or null when every requested venue can be priced. `venueIds` in
+ * `req.venues` are already proven to be this customer's own by
+ * `serviceRequestProblem` before this runs.
+ */
+function firstUnlocatedVenueLabel(
+  venues: Array<{ venueId: string }>,
+  cust: CustomerDoc | null
+): string | null {
+  const locById = new Map((cust?.locations || []).map((l) => [l.id, l]));
+  for (const v of venues) {
+    const loc = v.venueId ? locById.get(v.venueId) : undefined;
+    if (!loc) continue;
+    if (coordsOf(loc) || loc.travelMiles != null) continue;
+    return loc.label || loc.locationName || "this venue";
   }
   return null;
 }
@@ -121,7 +167,7 @@ function splitProportional(rest: number, weights: number[]): number[] {
  * returns it as `unknown`, unsaved).
  */
 export async function priceServiceRequest(
-  session: { customerId: string; name: string },
+  session: { customerId: string; name: string; email?: string },
   req: ServiceRequest
 ): Promise<PriceServiceResult> {
   const cust = await getCustomer(session.customerId);
@@ -129,11 +175,24 @@ export async function priceServiceRequest(
   const venueIds = new Set((cust.locations || []).map((l) => l.id).filter((id): id is string => !!id));
   const problem = serviceRequestProblem(req, venueIds);
   if (problem) return { ok: false, error: problem };
+  // #248 final review (controller decision 2): refuse before pricing rather
+  // than silently pricing a $0 travel leg for a venue the engine can't
+  // locate.
+  const unlocated = firstUnlocatedVenueLabel(req.venues, cust);
+  if (unlocated) return { ok: false, error: travelUnknownError(unlocated) };
 
   const tier = await resolveTier(session.customerId, session.name);
   const office = await resolveQuoteOffice();
   const travelRates = await getTravelRates();
-  const contact = { name: session.name, role: "", email: "" };
+  // #248 final review (controller decision 5): thread the portal session's
+  // email into the saved subdoc contact — previously always "", so a
+  // portal-service quote's contact record carried no way to reach the
+  // customer back. `session.email` is optional here only because
+  // refreshServicePortalQuote (src/lib/portal-quotes.ts) rebuilds a
+  // customerId/contactName-only session from the stored quote, not a live
+  // portalSession() (D425 — refresh deliberately reprices at the quote's
+  // OWN customer/tier, never the caller's session).
+  const contact = { name: session.name, role: "", email: session.email || "" };
   const origin = office
     ? {
         name: office.name || "",
