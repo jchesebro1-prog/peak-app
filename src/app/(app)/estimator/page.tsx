@@ -208,6 +208,10 @@ async function initialFrom(
             porItems: (sections || []).flatMap((s) =>
               s.items.filter((it) => it.por).map((it) => ({ desc: it.desc, qty: it.qty }))
             ),
+            // #250: priced curtains still waiting on Peak's confirmation.
+            confirmItems: (sections || []).flatMap((s) =>
+              s.items.filter((it) => it.portalConfirm).map((it) => ({ desc: it.desc, qty: it.qty }))
+            ),
             back: `/estimator?id=${encodeURIComponent(q.id)}`,
           }
         : null,

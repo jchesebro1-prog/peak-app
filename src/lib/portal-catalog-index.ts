@@ -99,6 +99,11 @@ export type PortalIndex = {
    *  spec §3.3): quotable "Fabric" parts with an area rate. Names only —
    *  the rate never leaves the server. */
   fabrics: Array<{ sku: string; name: string }>;
+  /** #250 SERVER-ONLY: fabric SKU → its curtain area rate (fabricAreaRateOf),
+   *  for priceCurtain/priceCurtainOptions. Deliberately separate from
+   *  `fabrics` above (which pages hand straight to the client) so the rate
+   *  never rides along in a server-component prop. */
+  fabricRates: Map<string, number>;
 };
 
 const TTL_MS = 5 * 60 * 1000;
@@ -232,6 +237,7 @@ async function buildIndex(): Promise<Built> {
   const facts = new Map<string, VisibilityFacts>();
   const docMeta: PortalIndex["docMeta"] = new Map();
   const fabrics: PortalIndex["fabrics"] = [];
+  const fabricRates: PortalIndex["fabricRates"] = new Map();
   const entries: SearchEntry[] = [];
   for (const p of live) {
     const visibility = normalizeVisibility(p.portalVisibility);
@@ -282,7 +288,13 @@ async function buildIndex(): Promise<Built> {
         docMeta.set(id, { kind: d.kind, title: (d.title || d.fileName || "").trim(), pdf });
       }
     }
-    if ((p.category || "").trim() === "Fabric" && fabricAreaRateOf(p) > 0) fabrics.push({ sku: p.sku, name: (p.desc || p.sku).trim() });
+    if ((p.category || "").trim() === "Fabric") {
+      const rate = fabricAreaRateOf(p);
+      if (rate > 0) {
+        fabrics.push({ sku: p.sku, name: (p.desc || p.sku).trim() });
+        fabricRates.set(p.sku, rate);
+      }
+    }
     entries.push({
       key: ip.sku,
       kind: "part",
@@ -352,7 +364,7 @@ async function buildIndex(): Promise<Built> {
 
   fabrics.sort((a, b) => a.name.localeCompare(b.name));
 
-  return { at: now, ix: { parts, componentParts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics }, facts, rule };
+  return { at: now, ix: { parts, componentParts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics, fabricRates }, facts, rule };
 }
 
 function headQty(q: number | undefined): number {

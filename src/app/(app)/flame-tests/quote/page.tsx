@@ -197,6 +197,7 @@ export default async function FlameTestQuotePage({
               portalAcceptance: editQuote.portalAcceptance ?? null,
               portalDecline: editQuote.portalDecline ?? null,
               porItems: [],
+              confirmItems: [],
               back: `/flame-tests/quote?id=${encodeURIComponent(editQuote.id)}`,
             }
           : null,

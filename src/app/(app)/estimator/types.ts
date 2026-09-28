@@ -51,6 +51,11 @@ export type SpecItem = {
   curtain?: boolean;
   fixture?: boolean;
   labor?: boolean;
+  /** #250: a portal curtain line priced live (Estimator curtain math, tier
+   *  margin) that still needs Peak to confirm measurements + fabric — stays
+   *  set through Save; only sending the quote (or staff replacing the line)
+   *  resolves it (clearPricedPor's `anyConfirm`, portal-quote-mode.ts). */
+  portalConfirm?: boolean;
   /** optional-scope item — excluded from totals (prototype carried the flag) */
   option?: boolean;
   /** budget allowance — a priced line with no committed SKU (BOM allowance pattern, punch #36) */
@@ -350,7 +355,9 @@ export type TravelLite = {
  * loaded quote with `source === "portal-catalog"`; null otherwise (a fresh
  * estimate, or any other quote type/source never renders the panel).
  * `porItems` is a point-in-time read of the loaded spec's `por` lines (the
- * next Save recomputes what remains — see `clearPricedPor`).
+ * next Save recomputes what remains — see `clearPricedPor`). `confirmItems`
+ * (#250) is the same read of `portalConfirm` lines — priced curtains still
+ * awaiting Peak's confirmation.
  */
 export type PortalPanelData = {
   quoteId: string;
@@ -366,6 +373,7 @@ export type PortalPanelData = {
   } | null;
   portalDecline: { at: number; by: string; note: string } | null;
   porItems: Array<{ desc: string; qty: number }>;
+  confirmItems: Array<{ desc: string; qty: number }>;
   /** Where the Approve (→ won) status button redirects back to on refusal. */
   back: string;
 };

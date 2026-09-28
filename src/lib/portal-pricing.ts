@@ -4,10 +4,12 @@
 // convention as src/lib/curtain-pricing.ts).
 import { totals } from "@/app/(app)/estimator/pricing";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import { curtainCost, curtainPrice } from "@/lib/design/curtain-pricing";
 import type { AssemblyRole } from "@/lib/fixture-assemblies";
 import { freightPctForMiles } from "@/lib/freight-rule";
 import { loadFreightRule, loadPortalRules } from "@/lib/freight-rule-load";
-import type { CartLine, PortalCart } from "@/lib/portal-cart-types";
+import { loadCurtainSewingPct } from "@/lib/stores/pricing";
+import type { CartLine, CurtainRequest, PortalCart } from "@/lib/portal-cart-types";
 import { fixtureComponentPart, portalIndex, type IndexedFixture, type IndexedPart, type PortalIndex } from "@/lib/portal-catalog-index";
 import { fixtureUnitPrice, unitPriceFor, type FixtureComponentInput, type PriceRuleOpts } from "@/lib/portal-price-rules";
 import { quoteMode } from "@/lib/portal-quote-mode";
@@ -34,10 +36,13 @@ export type PortalPricingContext = {
   tierMargin: number;
   staleCostMonths: number;
   now: number;
+  /** #250: the live curtain sewing % (Estimating Rules), so priceCurtain
+   *  matches the Estimator's own computeCurtain() to the cent. */
+  curtainSewingPct: number;
 };
 
 export async function pricingContextFor(session: { customerId: string; name: string }): Promise<PortalPricingContext> {
-  const [t, rules] = await Promise.all([resolveTier(session.customerId, session.name), loadPortalRules()]);
+  const [t, rules, curtainSewingPct] = await Promise.all([resolveTier(session.customerId, session.name), loadPortalRules(), loadCurtainSewingPct()]);
   return {
     customerId: session.customerId,
     margin: t.margin,
@@ -45,6 +50,7 @@ export async function pricingContextFor(session: { customerId: string; name: str
     tierMargin: t.margin,
     staleCostMonths: rules.staleCostMonths,
     now: Date.now(),
+    curtainSewingPct,
   };
 }
 
@@ -59,6 +65,10 @@ export type SellLine = {
   extPrice: number | null;
   por: boolean;
   porReason?: string;
+  /** #250: priced, but still needs Peak's confirmation (a curtain's
+   *  measurements + fabric) — distinct from `por` (no price at all). Drives
+   *  quoteMode's review classification alongside `por`. */
+  review?: boolean;
   unavailable: boolean;
   detail?: string;
 };
@@ -250,13 +260,66 @@ export async function priceFixture(
   return { unitPrice: p.sell.unitPrice, por: p.sell.por };
 }
 
-function priceCurtain(l: CartLine, qty: number): Priced {
+/**
+ * #250: a curtain line now prices live — the Estimator's own curtain math
+ * (curtainCost + curtainPrice, src/lib/design/curtain-pricing.ts) at the
+ * customer's tier margin and the live sewing % — whenever the customer named
+ * a real fabric with a catalog area rate. "Not sure — recommend one" (no
+ * fabric, or one whose rate somehow isn't in the index) keeps today's
+ * price-on-request line untouched. Either way the line is `review`-gated:
+ * Peak confirms measurements + fabric before a curtain quote sends, priced
+ * or not (spec "Picks" 2–3).
+ */
+function priceCurtain(l: CartLine, qty: number, ix: PortalIndex, ctx: PortalPricingContext): Priced {
   const c = l.curtainInputs;
   if (!c) return { sell: unavailableLine(l, qty, null), item: null, section: "drape" };
   const name = (c.name || "").trim() || "Curtain";
   const fabric = (c.fabricName || "").trim() || "Fabric to confirm";
   const size = `${c.width || "?"}'W × ${c.height || "?"}'H, ${c.fullness || "0"}% fullness`;
   const spec = `${fabric}, ${size}`;
+  const fabricSku = (c.fabricSku || "").trim();
+  const fabricRate = fabricSku ? ix.fabricRates.get(fabricSku) ?? 0 : 0;
+
+  if (fabricRate <= 0) {
+    // Not sure (or an unrecognized fabric) — price on request, as before.
+    const sell: SellLine = {
+      lineId: l.lineId,
+      kind: "curtain",
+      title: name,
+      sku: null,
+      qty,
+      unit: "ea",
+      unitPrice: null,
+      extPrice: null,
+      por: true,
+      porReason: "curtain",
+      unavailable: false,
+      // The cart's curtain summary (#245 Task 12): "30'W × 18'H, 50% fullness — IFR Velour".
+      detail: `${size} — ${fabric}`,
+    };
+    const item: Omit<SpecItem, "id"> = {
+      sku: "CRT-REQ",
+      desc: `${name} — ${spec} (customer request — price on request)`,
+      qty,
+      unit: "ea",
+      cost: 0,
+      price: 0,
+      curtain: true,
+      por: true,
+      // #245 Task 13: the raw request, carried so Copy to new quote / a
+      // refresh can rebuild this line's cart entry (cartLinesFromSpec) — the
+      // formatted `desc` above is customer copy, not machine-readable.
+      curtainInputs: { ...c },
+    };
+    return { sell, item, section: "drape" };
+  }
+
+  const cc = curtainCost(
+    { finishedWidthFt: Number(c.width) || 0, finishedHeightFt: Number(c.height) || 0, fullnessPct: Number(c.fullness) || 0, qty: 1 },
+    { fabricRate, sewingPct: ctx.curtainSewingPct }
+  );
+  const unitPrice = curtainPrice(cc.costEach, ctx.margin);
+  const extPrice = cents(unitPrice * qty);
   const sell: SellLine = {
     lineId: l.lineId,
     kind: "curtain",
@@ -264,29 +327,43 @@ function priceCurtain(l: CartLine, qty: number): Priced {
     sku: null,
     qty,
     unit: "ea",
-    unitPrice: null,
-    extPrice: null,
-    por: true,
-    porReason: "curtain",
+    unitPrice,
+    extPrice,
+    por: false,
+    review: true,
     unavailable: false,
-    // The cart's curtain summary (#245 Task 12): "30'W × 18'H, 50% fullness — IFR Velour".
     detail: `${size} — ${fabric}`,
   };
   const item: Omit<SpecItem, "id"> = {
-    sku: "CRT-REQ",
-    desc: `${name} — ${spec} (customer request — price on request)`,
+    sku: "CRT-P",
+    desc: `${name} — ${spec}`,
     qty,
     unit: "ea",
-    cost: 0,
-    price: 0,
+    cost: cc.costEach,
+    price: unitPrice,
     curtain: true,
-    por: true,
-    // #245 Task 13: the raw request, carried so Copy to new quote / a
-    // refresh can rebuild this line's cart entry (cartLinesFromSpec) — the
-    // formatted `desc` above is customer copy, not machine-readable.
+    portalConfirm: true,
     curtainInputs: { ...c },
   };
   return { sell, item, section: "drape" };
+}
+
+/**
+ * The curtain configurator's live price (#250, pattern: priceFixture) —
+ * unit + extended sell only, for the panel's debounced preview. `curtain`
+ * MUST already be clean (cleanCurtainRequest) — the action wrapper
+ * (priceCurtainOptionsFor) validates before calling this. Both null for
+ * "Not sure" or an unrecognized fabric, exactly like the cart line.
+ */
+export async function priceCurtainInputs(
+  curtain: CurtainRequest,
+  qty: number,
+  ctx: PortalPricingContext
+): Promise<{ unitPrice: number | null; extPrice: number | null }> {
+  const ix = await portalIndex();
+  const line: CartLine = { lineId: "", kind: "curtain", curtainInputs: curtain, qty };
+  const p = priceCurtain(line, lineQty(qty), ix, ctx);
+  return { unitPrice: p.sell.unitPrice, extPrice: p.sell.extPrice };
 }
 
 const SECTIONS = [
@@ -304,7 +381,7 @@ export async function priceCart(cart: PortalCart, ctx: PortalPricingContext): Pr
   let nextId = 1;
   for (const l of cart.lines ?? []) {
     const qty = lineQty(l.qty);
-    const p = l.kind === "fixture" ? priceFixtureLine(l, qty, ix, o) : l.kind === "curtain" ? priceCurtain(l, qty) : pricePart(l, qty, ix, o);
+    const p = l.kind === "fixture" ? priceFixtureLine(l, qty, ix, o) : l.kind === "curtain" ? priceCurtain(l, qty, ix, ctx) : pricePart(l, qty, ix, o);
     lines.push(p.sell);
     if (p.item) buckets[p.section].push({ id: nextId++, ...p.item });
   }

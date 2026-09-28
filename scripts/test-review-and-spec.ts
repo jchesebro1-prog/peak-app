@@ -10639,6 +10639,7 @@ seeded()
   .then(() => portal248Task3AsyncChecks())
   .then(() => portal248Task4AsyncChecks())
   .then(() => portal248FinalFixAsyncChecks())
+  .then(() => portal250AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -26585,14 +26586,18 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
       rd("src/app/(app)/estimator/estimator-client.tsx").includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
     "#227 late: the Estimator reads the rule on the server and hands it to its client curtain math");
   // #245 Tasks 10/12: the portal estimate page and its submit are retired —
-  // portal curtains are price on request (Peak prices them in the Estimator,
-  // which reads the rule above), so no portal path prices fabric any more.
-  ok(!rd("src/app/portal/actions.ts").includes("curtainCost(") && !rd("src/app/portal/estimate/page.tsx").includes("fabricSellPerSqft") && !rd("src/lib/portal-pricing.ts").includes("curtainCost("),
-    "#227 late: no portal path prices a curtain outside the rule (#245: portal curtains are price on request)");
+  // no portal path there prices fabric any more.
+  ok(!rd("src/app/portal/actions.ts").includes("curtainCost(") && !rd("src/app/portal/estimate/page.tsx").includes("fabricSellPerSqft"),
+    "#227 late: no legacy portal path (estimate page/actions) prices a curtain");
+  // #250: the portal configurator DOES price curtains now — through the ONE
+  // shared chain (curtainCost/curtainPrice imported from the canonical
+  // module), never a reimplementation.
+  ok(rd("src/lib/portal-pricing.ts").includes('import { curtainCost, curtainPrice } from "@/lib/design/curtain-pricing"'),
+    "#250: the portal cart prices curtains through the shared Estimator curtain math (curtainCost/curtainPrice), not a re-implementation");
   ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadCurtainSewingPct()") && rd("src/lib/design/grid-quote.ts").includes("loadCurtainSewingPct()") && rd("src/lib/stores/equipment-map.ts").includes("loadCurtainSewingPct()"),
     "#227 late: the Grid editor, the Grid quote and the Equipment-map price context read the rule");
   // #245 Task 12: the portal estimate builder is deleted; the portal cart (which shows curtain requests) takes its place here.
-  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/catalog/quote/cart-client.tsx"];
+  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/catalog/quote/cart-client.tsx", "src/app/portal/catalog/curtain-request.tsx"];
   ok(clients.every((f) => !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db)/m.test(rd(f))), "#227 late: no client curtain file imports a VALUE from a store");
 }
 
@@ -31741,5 +31746,202 @@ async function portal248FinalFixAsyncChecks(): Promise<void> {
     }
   } finally {
     await removeCustomer(CO);
+  }
+}
+
+/* ======================================================================
+   #250 — portal curtain configurator: the "Request curtain pricing" panel
+   becomes a priced configurator. One curtain price = the Estimator's own
+   (curtainCost + curtainPrice at the customer's tier margin, live sewing %);
+   a curtain line still makes the quote a Peak-review quote — priced, but
+   confirmed by staff before it sends. quoteMode/clearPricedPor extend with
+   a `review`/`portalConfirm` flavor distinct from `por`. Registered in the
+   async chain as portal250AsyncChecks().
+   ====================================================================== */
+import { quoteMode as d250Mode, clearPricedPor as d250ClearPor } from "@/lib/portal-quote-mode";
+import { priceCurtainInputs as d250PriceCurtainInputs } from "@/lib/portal-pricing";
+import { priceCurtainOptionsFor as d250PriceOptions } from "@/lib/portal-part-detail";
+
+async function portal250AsyncChecks(): Promise<void> {
+  // ---- quoteMode: por / review / both / neither (pure) ----
+  const firm250 = d250Mode([{ por: false }, { por: false }]);
+  ok(firm250.mode === "firm" && firm250.reason === null, "#250 quoteMode: no por, no review → firm, unchanged");
+  const porOnly250 = d250Mode([{ por: true }, { por: true }, { por: false }]);
+  ok(porOnly250.mode === "review" && porOnly250.reason === "2 lines are price on request", "#250 quoteMode: por-only reason is unchanged by the review extension");
+  const reviewOnly250 = d250Mode([{ por: false, review: true }, { por: false }]);
+  ok(reviewOnly250.mode === "review" && reviewOnly250.reason === "Curtains are confirmed by Peak (measurements and fabric)", "#250 quoteMode: review-only reason is the exact curtain copy");
+  const both250 = d250Mode([{ por: true }, { por: false, review: true }]);
+  ok(both250.mode === "review" && both250.reason === "1 line is price on request; curtains are confirmed by Peak", "#250 quoteMode: por + review combine with the exact joined copy");
+  const bothPlural250 = d250Mode([{ por: true }, { por: true }, { por: false, review: true }]);
+  ok(bothPlural250.reason === "2 lines are price on request; curtains are confirmed by Peak", "#250 quoteMode: the plural POR text still leads the joined reason");
+
+  // ---- clearPricedPor: anyConfirm, never rewrites a portalConfirm item ----
+  const item250 = (over: Partial<SpecItem> = {}): SpecItem => ({ id: 1, sku: "S", desc: "D", qty: 1, unit: "ea", cost: 0, price: 0, ...over });
+  const sec250 = (items: SpecItem[]): D242Section => ({ id: "S", name: "S", kind: "materials", mfr: "", freightPct: 0, freightAuto: false, freightMiles: null, items });
+  const confirmItem250 = item250({ portalConfirm: true, price: 500, curtain: true });
+  const rConfirm250 = d250ClearPor([sec250([confirmItem250])]);
+  ok(rConfirm250.anyPor === false && rConfirm250.anyConfirm === true, "#250 clearPricedPor: a priced portalConfirm curtain reports anyConfirm, no anyPor");
+  ok(rConfirm250.sections[0].items[0] === confirmItem250, "#250 clearPricedPor: a portalConfirm item is never rewritten (only por items are cleared)");
+  const mixed250 = d250ClearPor([sec250([item250({ por: true, price: 80 }), confirmItem250])]);
+  ok(mixed250.anyPor === false && mixed250.anyConfirm === true, "#250 clearPricedPor: a formerly-POR item now priced clears por, but the curtain's portalConfirm still remains");
+  const neither250 = d250ClearPor([sec250([item250({ price: 10 })])]);
+  ok(neither250.anyPor === false && neither250.anyConfirm === false, "#250 clearPricedPor: an ordinary priced item trips neither flag");
+
+  // The Estimator save gates portalReview's clear on BOTH flags (source
+  // check — a real save needs a browser session, same #248 precedent noted
+  // throughout this suite).
+  const actionsSrc250 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  ok(actionsSrc250.includes("isPortalCatalog && !anyPor && !anyConfirm"), "#250 estimator save: portalReview clears on Save only when neither a POR line nor a portalConfirm curtain remains");
+
+  // ---- cart page: Generate's gate never blocks on por/review/mode (a review-only curtain quote generates exactly like a POR quote today) ----
+  const cartPageSrc250 = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/page.tsx"), "utf8");
+  const blockedSrc250 = cartPageSrc250.slice(cartPageSrc250.indexOf("const blocked ="), cartPageSrc250.indexOf("return (", cartPageSrc250.indexOf("const blocked =")));
+  ok(blockedSrc250.length > 0 && !/por|mode/i.test(blockedSrc250), "#250 cart page: Generate's blocked gate checks neither por, review nor mode");
+
+  // ---- cart line: the Confirmed by Peak tag ----
+  const cartClientSrc250 = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
+  ok(cartClientSrc250.includes('line.kind === "curtain" && <span className="pq-confirm">Confirmed by Peak</span>'), "#250 cart page: every curtain line carries a Confirmed by Peak tag");
+
+  // ---- curtain panel: verbatim copy, no store-value import (the browser never computes the price) ----
+  const curtainReqSrc250 = readFileSync(join(process.cwd(), "src/app/portal/catalog/curtain-request.tsx"), "utf8");
+  ok(curtainReqSrc250.includes("Configure a curtain"), "#250 curtain panel: header copy is Configure a curtain");
+  ok(curtainReqSrc250.includes("Curtains are confirmed by Peak before your quote is final."), "#250 curtain panel: the exact confirmation copy");
+  ok(curtainReqSrc250.includes("priceCurtainOptions("), "#250 curtain panel: prices live through the server action, debounced");
+
+  // ---- priceCurtain parity with the Estimator's computeCurtain, a real fabric end to end ----
+  const CO250 = fixtureId(250, "co");
+  const FAB250 = fixtureId(250, "fab");
+  const P250 = await import("@/lib/stores/pricing");
+  try {
+    await d245MergeUpsert(FAB250, { desc: "Test250 Velour", category: "Fabric", unit: "sq ft", list: 0, cost: 0, curtainAreaRate: 3.5 });
+    registerFixture("catalog_parts", FAB250);
+    await upsertCustomer({ id: CO250, name: "Test250 Curtain Co", type: "Education", pricingTier: "silver", locations: [{ id: "v1", label: "Hall", primary: true, venueKind: "proscenium" }], contacts: [] });
+    await P250.setValue("curtains.sewingPct", 12);
+    d245Invalidate();
+
+    const ix250 = await d245Index({ fresh: true });
+    ok(ix250.fabricRates.get(FAB250) === 3.5, "#250 fabricRates: the index carries the catalog fabric's own curtainAreaRate, server-only");
+    ok(!ix250.fabrics.some((f) => "curtainAreaRate" in (f as object)), "#250 fabricRates: the client-facing fabrics list never carries the rate");
+
+    const ctx250 = await d245Ctx({ customerId: CO250, name: "" });
+    ok(ctx250.curtainSewingPct === 12, "#250 pricingContextFor: carries the live curtain sewing % alongside tier/margin");
+
+    const wantEach250 = computeCurtainQuote(
+      { name: "x", hang: "", fabric: FAB250, qty: "1", width: "30", height: "18", fullness: "50", bottom: "" } as any,
+      [{ sku: FAB250, name: "Test250 Velour", costPerSqft: 0, curtainAreaRate: 3.5 }] as any,
+      { sewingPct: 12 },
+      ctx250.margin
+    ).priceEach;
+
+    const curtainCart250: D242Cart = {
+      id: "TEST250:cart", customerId: CO250, locationId: null, updatedAt: Date.now(),
+      lines: [{ lineId: "1", kind: "curtain", qty: 1, curtainInputs: { name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" } }],
+    };
+    const priced250 = await d245PriceCart(curtainCart250, ctx250);
+    const curtainLine250 = priced250.lines[0];
+    ok(
+      curtainLine250.por === false && curtainLine250.review === true && curtainLine250.unitPrice === wantEach250,
+      `#250 priceCurtain parity: a real fabric prices exactly like the Estimator's computeCurtain (got ${curtainLine250.unitPrice}, want ${wantEach250})`
+    );
+    ok(curtainLine250.extPrice === wantEach250, "#250 priceCurtain: extPrice = unitPrice × qty (qty 1 here)");
+    ok(priced250.mode === "review" && priced250.reason === "Curtains are confirmed by Peak (measurements and fabric)", "#250 priceCart: a fully-priced curtain still makes the quote review-mode, with the curtain reason");
+    ok(curtainLine250.detail === "30'W × 18'H, 50% fullness — Test250 Velour", "#250 priceCurtain: the cart line's detail keeps the existing 'size — fabric' format");
+
+    // Direct qty=3 parity (extPrice scales, unit price doesn't).
+    const qty3Cart250: D242Cart = {
+      id: "TEST250:cart3", customerId: CO250, locationId: null, updatedAt: Date.now(),
+      lines: [{ lineId: "1", kind: "curtain", qty: 3, curtainInputs: { name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" } }],
+    };
+    const priced3_250 = await d245PriceCart(qty3Cart250, ctx250);
+    ok(priced3_250.lines[0].unitPrice === wantEach250 && priced3_250.lines[0].extPrice === Math.round(wantEach250 * 3 * 100) / 100, "#250 priceCurtain: qty scales extPrice only, unit price is per curtain");
+
+    // Customer view carries no cost, but does carry review.
+    const sv250 = d245SellView(priced250);
+    ok(!("cost" in sv250.lines[0]), "#250 sellView: the customer view of a priced curtain line carries no cost");
+    ok(sv250.lines[0].review === true, "#250 sellView: review flows through to the customer view");
+
+    // Staff SpecItem: sku CRT-P, portalConfirm, cost + curtainInputs carried.
+    const drape250 = priced250.sections.find((s) => s.id === "SEC-DRAPE")!;
+    ok(
+      drape250.items[0].sku === "CRT-P" && drape250.items[0].portalConfirm === true && drape250.items[0].curtainInputs?.fabricSku === FAB250 && drape250.items[0].cost > 0 && !drape250.items[0].por,
+      "#250 priceCurtain: the staff SpecItem is sku CRT-P, portalConfirm, cost carried, no por"
+    );
+    ok(drape250.items[0].desc === "Main Drape — Test250 Velour, 30'W × 18'H, 50% fullness", "#250 priceCurtain: the staff desc is name — fabric, WxH, fullness (no 'price on request' suffix)");
+
+    // Not-sure fabric (blank) still prices on request — the unchanged rule.
+    const notSureCart250: D242Cart = {
+      id: "TEST250:notsure", customerId: CO250, locationId: null, updatedAt: Date.now(),
+      lines: [{ lineId: "1", kind: "curtain", qty: 1, curtainInputs: { name: "Side Drape", fabricSku: "", fabricName: "", qty: "1", width: "10", height: "10", fullness: "0" } }],
+    };
+    const notSurePriced250 = await d245PriceCart(notSureCart250, ctx250);
+    ok(
+      notSurePriced250.lines[0].por === true && notSurePriced250.lines[0].unitPrice === null && !notSurePriced250.lines[0].review,
+      "#250 priceCurtain: 'Not sure' (no fabric) still prices on request, not review"
+    );
+    ok(notSurePriced250.sections[0].items[0].sku === "CRT-REQ", "#250 priceCurtain: the not-sure line keeps the CRT-REQ staff sku (no portalConfirm)");
+    ok(!notSurePriced250.sections[0].items[0].portalConfirm, "#250 priceCurtain: a POR curtain never carries portalConfirm");
+
+    // An unrecognized fabric SKU (not in the index) also falls back to POR.
+    const unknownFabCart250: D242Cart = {
+      id: "TEST250:unknownfab", customerId: CO250, locationId: null, updatedAt: Date.now(),
+      lines: [{ lineId: "1", kind: "curtain", qty: 1, curtainInputs: { name: "X", fabricSku: "NOT-A-REAL-FABRIC", fabricName: "Ghost Velour", qty: "1", width: "10", height: "10", fullness: "0" } }],
+    };
+    const unknownFabPriced250 = await d245PriceCart(unknownFabCart250, ctx250);
+    ok(unknownFabPriced250.lines[0].por === true && unknownFabPriced250.lines[0].unitPrice === null, "#250 priceCurtain: a fabric sku with no indexed rate also falls back to price on request");
+
+    // ---- priceCurtainOptions: validates via cleanCurtainRequest, nulls for not-sure, matches the cart's own unit price ----
+    const sess250 = { grantId: fixtureId(250, "grant"), customerId: CO250, name: "Pat Buyer", email: "pat@example.com" };
+    const okPrice250 = await d250PriceOptions(sess250, false, { name: "Main Drape", fabricSku: FAB250, qty: "1", width: "30", height: "18", fullness: "50" });
+    ok(okPrice250.ok && okPrice250.unitPrice === wantEach250 && okPrice250.extPrice === wantEach250, "#250 priceCurtainOptions: prices the exact same unit as the cart line");
+    const notSureOpt250 = await d250PriceOptions(sess250, false, { name: "Side", fabricSku: "", qty: "1", width: "10", height: "10", fullness: "0" });
+    ok(notSureOpt250.ok && notSureOpt250.unitPrice === null && notSureOpt250.extPrice === null, "#250 priceCurtainOptions: 'Not sure' returns { ok:true, unitPrice:null, extPrice:null }, not an error");
+    const badName250 = await d250PriceOptions(sess250, false, { name: "", fabricSku: FAB250, qty: "1", width: "30", height: "18", fullness: "50" });
+    ok(!badName250.ok && badName250.error === "Name the curtain (e.g. Main Grand Drape).", "#250 priceCurtainOptions: an invalid draft refuses with cleanCurtainRequest's own copy");
+    const badFab250 = await d250PriceOptions(sess250, false, { name: "X", fabricSku: "NOT-A-REAL-FABRIC", qty: "1", width: "10", height: "10", fullness: "0" });
+    ok(!badFab250.ok && badFab250.error === "Pick a fabric from the list.", "#250 priceCurtainOptions: a fabric off the list refuses (cleanCurtainRequest, not silently priced null)");
+    const noSess250 = await d250PriceOptions(null, false, { name: "x", fabricSku: FAB250, qty: "1", width: "1", height: "1", fullness: "0" });
+    ok(!noSess250.ok, "#250 priceCurtainOptions: no session → refused");
+    const previewPrice250 = await d250PriceOptions({ grantId: "preview", customerId: CO250, name: "", email: "" }, true, { name: "Main Drape", fabricSku: FAB250, qty: "1", width: "30", height: "18", fullness: "50" });
+    ok(previewPrice250.ok && previewPrice250.unitPrice === wantEach250, "#250 priceCurtainOptions: works for a team preview viewer, same as priceFixtureOptions");
+
+    // Rate limit: 240/min per grant, like priceFixtureOptions.
+    const rlSess250 = { grantId: fixtureId(250, "grant-rl"), customerId: CO250, name: "Pat Buyer", email: "pat@example.com" };
+    let rlUnder250 = true;
+    for (let i = 0; i < 240; i++) {
+      const r = await d250PriceOptions(rlSess250, false, { name: "x", fabricSku: FAB250, qty: "1", width: "10", height: "10", fullness: "0" });
+      if (!r.ok) rlUnder250 = false;
+    }
+    const rlOver250 = await d250PriceOptions(rlSess250, false, { name: "x", fabricSku: FAB250, qty: "1", width: "10", height: "10", fullness: "0" });
+    ok(rlUnder250 && !rlOver250.ok, "#250 priceCurtainOptions: 240 requests a minute allowed, the 241st refused");
+
+    // priceCurtainInputs (the exported pure-ish helper priceCurtainOptionsFor calls) directly.
+    const directPrice250 = await d250PriceCurtainInputs({ name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" }, 1, ctx250);
+    ok(directPrice250.unitPrice === wantEach250, "#250 priceCurtainInputs: the same helper priceCart's priceCurtain wraps");
+
+    // ---- Generate: a fully-priced curtain-only cart still lands as a review draft, carrying the priced portalConfirm item ----
+    const GG250 = fixtureId(250, "gen-grant");
+    registerFixture("portal_carts", GG250);
+    const gsess250 = { grantId: GG250, customerId: CO250, name: "Pat Buyer", email: "pat@example.com" };
+    await d245SaveCart({
+      id: GG250, customerId: CO250, locationId: "v1", updatedAt: Date.now(),
+      lines: [{ lineId: "c", kind: "curtain", qty: 1, curtainInputs: { name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" } }],
+    });
+    const gr250 = await d245Generate(gsess250, { now: Date.now(), schedulePdf: false });
+    ok(gr250.ok && gr250.mode === "review", "#250 generate: a fully-priced curtain-only cart still generates as review (Peak confirms it), not firm");
+    if (gr250.ok) {
+      registerFixture("quotes", gr250.quoteId);
+      const gq250 = await d245GetQuote(gr250.quoteId);
+      ok(
+        !!gq250 && gq250.status === "draft" && !!gq250.portalReview && gq250.portalReview.reasons[0] === "Curtains are confirmed by Peak (measurements and fabric)" && !gq250.portalFirm,
+        "#250 generate: the review draft's portalReview reason is the exact curtain copy, no portalFirm"
+      );
+      const gsecs250 = ((gq250?.spec as { sections?: D242Section[] } | null)?.sections ?? []) as D242Section[];
+      const gitem250 = gsecs250.flatMap((s) => s.items).find((it) => it.curtain);
+      ok(!!gitem250 && gitem250.portalConfirm === true && gitem250.price === wantEach250 && gitem250.sku === "CRT-P", "#250 generate: the saved spec carries the priced, portalConfirm curtain item at the same price");
+    }
+
+    await P250.resetValue("curtains.sewingPct");
+  } finally {
+    await removeCustomer(CO250);
   }
 }

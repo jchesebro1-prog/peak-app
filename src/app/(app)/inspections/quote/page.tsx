@@ -202,6 +202,7 @@ export default async function InspectionQuotePage({
               portalAcceptance: editQuote.portalAcceptance ?? null,
               portalDecline: editQuote.portalDecline ?? null,
               porItems: [],
+              confirmItems: [],
               back: `/inspections/quote?id=${encodeURIComponent(editQuote.id)}`,
             }
           : null,

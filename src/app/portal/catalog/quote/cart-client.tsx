@@ -39,6 +39,7 @@ const CSS = `
   .pq-line-detail { font-size: 12px; color: #5b616e; margin-top: 4px; line-height: 1.45; }
   .pq-line-unit { font-size: 12px; color: #5b616e; margin-top: 4px; }
   .pq-por { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #8a6d1f; background: #fbf3dd; border: 1px solid #f0e2bd; border-radius: 5px; padding: 2px 7px; }
+  .pq-confirm { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #3155a8; background: #e9eefb; border: 1px solid #d4ddf3; border-radius: 5px; padding: 2px 7px; margin-left: 6px; }
   .pq-gone { color: #9aa0ab; }
   .pq-gone .pq-line-title { color: #8c919c; }
   .pq-right { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
@@ -135,7 +136,10 @@ function CartLineRow({
         <div className="pq-line-title">{line.title}</div>
         {line.sku && line.kind !== "curtain" && <div className="pq-line-sku">{line.sku}</div>}
         {line.detail && <div className="pq-line-detail">{line.detail}</div>}
-        <div className="pq-line-unit">{line.por ? <span className="pq-por">Price on request</span> : unitLabel(line)}</div>
+        <div className="pq-line-unit">
+          {line.por ? <span className="pq-por">Price on request</span> : unitLabel(line)}
+          {line.kind === "curtain" && <span className="pq-confirm">Confirmed by Peak</span>}
+        </div>
       </div>
       <div className="pq-right">
         <QtyStepper value={qty} onChange={change} disabled={readOnly || busy} label={`Quantity — ${line.title}`} />

@@ -1,11 +1,25 @@
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 
-/** Firm vs review, validity, accept eligibility, card guard (#245, spec §2.3/§4). Pure. */
-export type ModeLine = { por: boolean };
+/**
+ * Firm vs review, validity, accept eligibility, card guard (#245, spec
+ * §2.3/§4; extended #250, spec "Picks" 2–3). `review` marks a line that's
+ * fully priced but still needs Peak's confirmation (a curtain: measurements
+ * + fabric) — distinct from `por` (no price at all). Either flavor makes the
+ * quote review-mode; the reason text names which. Pure.
+ */
+export type ModeLine = { por: boolean; review?: boolean };
 export function quoteMode(lines: readonly ModeLine[]): { mode: "firm" | "review"; porCount: number; reason: string | null } {
   const porCount = lines.filter((l) => l.por).length;
-  if (!porCount) return { mode: "firm", porCount, reason: null };
-  return { mode: "review", porCount, reason: `${porCount} ${porCount === 1 ? "line is" : "lines are"} price on request` };
+  const reviewCount = lines.filter((l) => l.review).length;
+  if (!porCount && !reviewCount) return { mode: "firm", porCount, reason: null };
+  const porText = porCount ? `${porCount} ${porCount === 1 ? "line is" : "lines are"} price on request` : "";
+  const reason =
+    porCount && reviewCount
+      ? `${porText}; curtains are confirmed by Peak`
+      : reviewCount
+      ? "Curtains are confirmed by Peak (measurements and fabric)"
+      : porText;
+  return { mode: "review", porCount, reason };
 }
 export function firmValidUntil(generatedAt: number, validityDays: number): number {
   return generatedAt + Math.max(1, Math.round(validityDays)) * 86400000;
@@ -92,18 +106,24 @@ export const PURCHASE_METHODS = ["po", "card", "check", "other"] as const;
 export const PURCHASE_METHOD_LABEL: Record<(typeof PURCHASE_METHODS)[number], string> = { po: "Purchase order", card: "Credit card", check: "Check", other: "Other" };
 
 /**
- * Estimator save (#245 Task 13, controller decision 6): `por` is cleared on
- * any item staff have now priced (`price > 0`) — a POR line staff left at 0
- * stays flagged. Returns whether any `por` item remains, so the caller can
- * clear the quote's `portalReview` stamp exactly when there is nothing left
- * to review. Pure; sections/items not carrying `por` at all pass through
- * unchanged (object-identical), so a non-portal quote's save is untouched.
+ * Estimator save (#245 Task 13, controller decision 6; extended #250 —
+ * design pick 5): `por` is cleared on any item staff have now priced
+ * (`price > 0`) — a POR line staff left at 0 stays flagged. `anyConfirm`
+ * reports whether any `portalConfirm` item (a priced curtain awaiting Peak's
+ * confirmation) remains — never cleared here; only `setStatus(…, "sent")`
+ * resolves it (a curtain is "confirmed" simply by the quote going out, or by
+ * staff editing the line). The caller clears `portalReview` on save only
+ * when neither `anyPor` nor `anyConfirm` remains. Pure; sections/items not
+ * carrying `por` at all pass through unchanged (object-identical), so a
+ * non-portal quote's save is untouched.
  */
-export function clearPricedPor(sections: readonly SpecSection[]): { sections: SpecSection[]; anyPor: boolean } {
+export function clearPricedPor(sections: readonly SpecSection[]): { sections: SpecSection[]; anyPor: boolean; anyConfirm: boolean } {
   let anyPor = false;
+  let anyConfirm = false;
   const next = sections.map((s) => {
     let changed = false;
     const items = s.items.map((it) => {
+      if (it.portalConfirm) anyConfirm = true;
       if (!it.por) return it;
       if (it.price > 0) {
         changed = true;
@@ -116,5 +136,5 @@ export function clearPricedPor(sections: readonly SpecSection[]): { sections: Sp
     });
     return changed ? { ...s, items } : s;
   });
-  return { sections: next, anyPor };
+  return { sections: next, anyPor, anyConfirm };
 }

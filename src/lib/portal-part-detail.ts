@@ -13,7 +13,8 @@ import {
   type PartDetail,
   type PartDocVM,
 } from "@/lib/portal-part-view";
-import { priceFixture, priceSku, pricingContextFor, type PortalPricingContext } from "@/lib/portal-pricing";
+import { cleanCurtainRequest } from "@/lib/portal-cart-rules";
+import { priceCurtainInputs, priceFixture, priceSku, pricingContextFor, type PortalPricingContext } from "@/lib/portal-pricing";
 import type { SearchEntry } from "@/lib/portal-search";
 import { rateLimit } from "@/lib/rate-limit";
 import { unitPriceFor } from "@/lib/portal-price-rules";
@@ -108,4 +109,34 @@ export async function priceFixtureOptionsFor(
   if (!p) return { ok: true, unitPrice: null, por: false, unavailable: true };
   const unitPrice = !p.por && typeof p.unitPrice === "number" ? p.unitPrice : null;
   return { ok: true, unitPrice, por: unitPrice == null, unavailable: false };
+}
+
+export type CurtainPriceResult = { ok: true; unitPrice: number | null; extPrice: number | null } | { ok: false; error: string };
+
+const CURTAIN_PRICE_LIMIT = 240;
+const CURTAIN_PRICE_WINDOW_MS = 60_000;
+
+/**
+ * The curtain configurator's live price (`priceCurtainOptions` action body,
+ * #250, pattern: priceFixtureOptionsFor). `session` comes from
+ * `resolvePortalViewer` (the grant cookie, or a signed-in team member's
+ * preview — `preview` true). `input` is validated exactly like an add-to-
+ * cart curtain request (`cleanCurtainRequest` — same field errors), so an
+ * incomplete draft (no name yet, say) comes back `{ ok: false, error }`
+ * rather than a price; "Not sure — recommend one" (blank fabricSku) and an
+ * unrecognized fabric both price as null/null, same as the cart line.
+ */
+export async function priceCurtainOptionsFor(
+  session: PortalSession | null,
+  preview: boolean,
+  input: unknown
+): Promise<CurtainPriceResult> {
+  if (!session) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  const key = preview ? "portal-price:preview:" + session.customerId : "portal-price:" + session.grantId;
+  if (!rateLimit(key, CURTAIN_PRICE_LIMIT, CURTAIN_PRICE_WINDOW_MS).ok) return { ok: false, error: PORTAL_BROWSE_RATE_COPY };
+  const ix = await portalIndex();
+  const c = cleanCurtainRequest(input, ix.fabrics);
+  if (!c.ok) return c;
+  const priced = await priceCurtainInputs(c.curtain, c.qty, await pricingContextFor(session));
+  return { ok: true, unitPrice: priced.unitPrice, extPrice: priced.extPrice };
 }

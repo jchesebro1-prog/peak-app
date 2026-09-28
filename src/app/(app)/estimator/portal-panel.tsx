@@ -112,11 +112,16 @@ export function PortalPanel({
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8a6d1f", marginBottom: 6 }}>
             Needs Peak&rsquo;s price before it can be sent
           </div>
-          {data.porItems.length > 0 ? (
+          {data.porItems.length > 0 || data.confirmItems.length > 0 ? (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "#5b616e" }}>
               {data.porItems.map((it, i) => (
-                <li key={i}>
+                <li key={"por" + i}>
                   Price on request: {it.desc} {it.qty !== 1 ? `×${it.qty}` : ""}
+                </li>
+              ))}
+              {data.confirmItems.map((it, i) => (
+                <li key={"cf" + i}>
+                  Curtain to confirm: {it.desc} {it.qty !== 1 ? `×${it.qty}` : ""}
                 </li>
               ))}
             </ul>

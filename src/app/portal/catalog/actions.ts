@@ -5,7 +5,14 @@ import { redirect } from "next/navigation";
 import { portalSession } from "@/lib/portal";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { searchPortalCatalogFor, type SearchPortalCatalogResult } from "@/lib/portal-catalog-browse";
-import { partDetailActionFor, priceFixtureOptionsFor, type FixturePriceResult, type PartDetailResult } from "@/lib/portal-part-detail";
+import {
+  partDetailActionFor,
+  priceCurtainOptionsFor,
+  priceFixtureOptionsFor,
+  type CurtainPriceResult,
+  type FixturePriceResult,
+  type PartDetailResult,
+} from "@/lib/portal-part-detail";
 import {
   addToCartFor,
   askAboutPartFor,
@@ -60,6 +67,16 @@ export async function priceFixtureOptions(
   const cid = typeof previewCid === "string" ? previewCid.slice(0, 200) : "";
   const viewer = await resolvePortalViewer(cid).catch(() => ({ session: null, preview: false }));
   return priceFixtureOptionsFor(viewer.session, viewer.preview, fixtureId, options);
+}
+
+/**
+ * The curtain configurator's live price (#250, pattern: priceFixtureOptions).
+ * A team preview passes its `previewCid`, resolved the same way.
+ */
+export async function priceCurtainOptions(input: unknown, previewCid?: string): Promise<CurtainPriceResult> {
+  const cid = typeof previewCid === "string" ? previewCid.slice(0, 200) : "";
+  const viewer = await resolvePortalViewer(cid).catch(() => ({ session: null, preview: false }));
+  return priceCurtainOptionsFor(viewer.session, viewer.preview, input);
 }
 
 /** Add a part, a configured fixture or a curtain request to the grant's quote. */

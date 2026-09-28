@@ -355,10 +355,13 @@ export async function saveQuoteAction(
   // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
   // item staff have now priced; `portalReview` clears once none remain —
   // scoped to a portal-catalog quote so no other save's behavior changes.
+  // #250 (design pick 5): a priced curtain line (`portalConfirm`) also holds
+  // `portalReview` open on Save — it clears only when the quote is sent
+  // (setStatus already does that unconditionally), never here.
   const isPortalCatalog = savedSource === "portal-catalog";
-  const { sections: savedSections, anyPor } = isPortalCatalog
+  const { sections: savedSections, anyPor, anyConfirm } = isPortalCatalog
     ? clearPricedPor(payload.sections)
-    : { sections: payload.sections, anyPor: false };
+    : { sections: payload.sections, anyPor: false, anyConfirm: false };
   // #242 final: the review-limit gate auto-approves on the STORED value, so it
   // is the server's own totals() over the posted sections — a posted value
   // that disagrees beyond rounding is replaced, never trusted.
@@ -386,7 +389,7 @@ export async function saveQuoteAction(
     source: savedSource,
     spec: { sections: savedSections, mobs: payload.mobs },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
-    ...(isPortalCatalog && !anyPor ? { portalReview: null } : {}),
+    ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
