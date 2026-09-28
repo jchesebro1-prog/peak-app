@@ -33199,12 +33199,18 @@ async function specLibraryScreenAsyncChecks(): Promise<void> {
     ok(bad.length === 0, `library client: ${f} imports stores/db/exceljs/io type-only (${bad.join(", ") || "none"})`);
   }
   // Fix round: allocated ids, validation, errors inline, permission-gated controls.
-  ok(R.isValidSpecId("PS-260961-028") && recs.every((r) => R.isValidSpecId(r.specId)), "library ids: PS-######-### ids (every v1 id) are valid");
-  ok(!R.isValidSpecId("PS-26096-028") && !R.isValidSpecId("ps-260961-028") && !R.isValidSpecId("PS-260961-028x") && !R.isValidSpecId("") && !R.isValidSpecId("X".repeat(21)),
-    "library ids: anything else (short digits, lowercase, suffix, blank, over 20 chars) is refused");
+  ok(R.isValidSpecId("PS-260961-028") && recs.every((r) => R.isValidSpecId(r.specId)), "library ids: every v1 id is valid");
+  ok(R.isValidSpecId("PS-11614313-001") && R.isValidSpecId("PS-260961-1000"), "library ids: a long section part and a 4-digit sequence are valid (PS-11614313-001, PS-260961-1000)");
+  const seq999 = Array.from({ length: 999 }, (_, i) => `PS-260961-${String(i + 1).padStart(3, "0")}`);
+  ok(R.nextSpecIdFor("26 09 61", seq999) === "PS-260961-1000" && R.isValidSpecId(R.nextSpecIdFor("26 09 61", seq999)) && R.isValidSpecId(R.nextSpecIdFor("11 61 43.13", [])),
+    "library ids: whatever nextSpecIdFor emits passes the check");
+  ok(!R.isValidSpecId("foo") && !R.isValidSpecId("26 09 61") && !R.isValidSpecId("ps-260961-028") && !R.isValidSpecId("PS-260961-028x") && !R.isValidSpecId("PS-260961-02") && !R.isValidSpecId("") && !R.isValidSpecId("PS-" + "1".repeat(26) + "-001"),
+    "library ids: foo, a bare CSI number, lowercase, a suffix, a 2-digit sequence, blank and over 32 chars are refused");
   const saveBody = ra.slice(ra.indexOf("export async function saveSpecRecordAction(")).split(/\nexport async function /)[0];
-  ok(/specId = await nextSpecId\(section\)/.test(saveBody) && (saveBody.match(/await nextSpecId\(section\)/g) || []).length === 2 && /isValidSpecId\(specId\)/.test(saveBody) && !/isNew/.test(saveBody),
-    "library save: a create always allocates via nextSpecId (re-checked, retried once), every id is validated, no typed-id path");
+  const createBlock = saveBody.slice(saveBody.indexOf("if (isCreate) {"), saveBody.indexOf("const normalized ="));
+  ok(/specId = await nextSpecId\(section\)/.test(createBlock) && (createBlock.match(/await nextSpecId\(section\)/g) || []).length === 2 && /isValidSpecId\(specId\)/.test(createBlock) && !/isNew/.test(saveBody),
+    "library save: a create always allocates via nextSpecId (re-checked, retried once) and sanity-checks the id, no typed-id path");
+  ok((saveBody.match(/isValidSpecId\(/g) || []).length === 1, "library save: an edit is never format-checked (isValidSpecId only on the create path)");
   const restoreBody = ra.slice(ra.indexOf("export async function restoreSpecRecordRevisionAction(")).split(/\nexport async function /)[0];
   ok(/outcome: result\.outcome/.test(restoreBody), "library restore: the action returns the save outcome");
   ok(!/rec-specid[^>]*<input|<input[^>]*id="rec-specid"|setSpecIdText/.test(editor) && /Assigned on save/.test(editor), "library editor: the new-record Spec ID is read-only (Assigned on save / preview)");

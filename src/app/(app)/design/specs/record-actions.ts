@@ -455,8 +455,9 @@ export async function addLibraryRowAction(docId: string, specId: string): Promis
  *  only previews it. Allocating at save time rather than on page load makes
  *  a collision between two people creating in the same section unlikely;
  *  the allocated id is re-checked and re-allocated once if another save got
- *  there first. A non-blank specId must name an existing record (an edit).
- *  Either way the id must be a `PS-######-###` id (`isValidSpecId`). */
+ *  there first, and sanity-checked against the allocator's own shape
+ *  (`isValidSpecId`). A non-blank specId is an edit and only has to name an
+ *  existing record — edits are never format-checked. */
 export async function saveSpecRecordAction(
   record: unknown,
   why: string
@@ -472,13 +473,14 @@ export async function saveSpecRecordAction(
     specId = await nextSpecId(section);
     if (await getSpecRecord(specId)) specId = await nextSpecId(section); // someone saved that id meanwhile — retry once
     if (await getSpecRecord(specId)) return { ok: false, error: "Couldn't assign a Spec ID — try saving again." };
-  }
-  if (!isValidSpecId(specId)) {
-    return { ok: false, error: `"${specId.slice(0, 40)}" isn't a Spec ID (PS-######-###).` };
+    // Sanity check on the allocator's own output (never applied to edits).
+    if (!isValidSpecId(specId)) return { ok: false, error: `Couldn't assign a Spec ID for section "${section.slice(0, 40)}".` };
   }
   const normalized = normalizeSpecRecord({ ...raw, specId });
   if (!normalized) return { ok: false, error: "That spec record isn't valid." };
 
+  // An edit only has to name an existing record — no format check, so
+  // records created by Write new or by an import are never locked out.
   const existing = isCreate ? null : await getSpecRecord(specId);
   if (!isCreate && !existing) return { ok: false, error: "Spec record not found." };
   const w = String(why || "").trim();

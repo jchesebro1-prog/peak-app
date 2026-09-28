@@ -361,12 +361,14 @@ export function specRecordHistory(current: SpecRecord, revisions: readonly SpecR
   return out.sort((a, b) => b.revision - a.revision);
 }
 
-/** The Spec Library editor's save path (design §7) accepts only Peak's own
- *  `PS-<6 digits>-<3 digits>` ids (≤ 20 chars) — every allocated id and
- *  every v1 id fits. The import planner deliberately does NOT use this: it
- *  keeps whatever ids the file carries. */
-export const SPEC_ID_PATTERN = /^PS-\d{6}-\d{3}$/;
-export const SPEC_ID_MAX = 20;
+/** The shape `nextSpecIdFor` emits — `PS-<section letters/digits>-<3+
+ *  digit sequence>` (≤ 32 chars): the section part keeps every letter and
+ *  digit of the CSI number (e.g. `PS-11614313-001`) and the sequence grows
+ *  past 999 (`PS-260961-1000`). Only the editor's CREATE path checks it, as
+ *  a sanity check on the allocated id; edits of an existing record and the
+ *  import planner never format-check ids. */
+export const SPEC_ID_PATTERN = /^PS-[0-9A-Za-z]+-\d{3,}$/;
+export const SPEC_ID_MAX = 32;
 export function isValidSpecId(id: string): boolean {
   return typeof id === "string" && id.length <= SPEC_ID_MAX && SPEC_ID_PATTERN.test(id);
 }
