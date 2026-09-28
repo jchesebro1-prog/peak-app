@@ -164,6 +164,15 @@ const ROUTES = [
   "/portal/catalog/quote",
   "/portal/catalog/quote?preview=lakefront",
   "/portal?preview=lakefront&generated=firm&q=Q-0",
+  // #248 Task 3 — the service intake: signed out (no team-preview session
+  // here, so it renders the signed-out card, same as /portal/catalog above).
+  "/portal/service",
+  "/portal/service?type=inspection&level=2",
+  // #248 final review (minor 7): signed-out still 200s with the entry-point
+  // query params a real "Quote it" link / "Quote again" row carries — the
+  // page returns the signed-out card before any of them are read.
+  "/portal/service?type=flame&venue=x",
+  "/portal/service?from=x",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",

@@ -38,6 +38,7 @@ import { CABLE_PACKAGE_KEY } from "@/lib/design/cable-package";
 import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
+import type { AssemblyPickerOption } from "@/lib/fixture-assemblies";
 import { PlanSvg, buildPlan, churchGeom, currentDoors, houseDragPatch, prosGeom, type PlanHandle } from "./plan-svg";
 import {
   getAccentHex,
@@ -122,7 +123,8 @@ export default function QuickDesignClient({
   prices: EquipmentPriceTable;
   rates: QuickRates;
   reviewerNames: string[];
-  fixtureAssemblies: Array<{ id: string; name: string }>;
+  /** #247: every Assembly Builder kind, grouped in the picker. */
+  fixtureAssemblies: AssemblyPickerOption[];
   /** Server-priced fixture picks, keyed by fixture id (priceCell on an
    *  assembly cell — final review I3). Never a list-only sum. */
   fixturePrices: Record<string, UnitPrice>;

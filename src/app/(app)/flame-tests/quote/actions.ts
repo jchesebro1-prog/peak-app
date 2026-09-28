@@ -16,14 +16,10 @@ import {
 import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/flametest-engine";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
-import { getSettings } from "@/lib/settings";
-import { coordsOf, quoteOrigin } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
-import {
-  deriveSeededMarker,
-  normalizePriceOverride,
-  normalizeTestingOverride,
-} from "@/lib/service-pricing";
+import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
+import { flameVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
+import { approveKeepsAcceptedPrice, sourceForSave } from "@/lib/portal-quote-mode";
 
 /**
  * Flame-test quote mutations (server port of Flame Test Quote.dc.html
@@ -88,24 +84,9 @@ async function persist(formData: FormData): Promise<string | null> {
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
-  const locById = new Map((cust?.locations || []).map((l) => [l.id, l]));
-  const venueInputs: FlameTestVenueInput[] = venues.map((v) => {
-    const loc = locById.get(v.id);
-    const coords = loc ? coordsOf(loc) : null;
-    return {
-      id: v.id,
-      label: v.label || loc?.label || "Venue",
-      curtains: v.curtains,
-      testingOverride: normalizeTestingOverride(v.testingOverride),
-      coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
-      oneWayMiles: loc?.travelMiles ?? null,
-      oneWayMin: loc?.travelMin ?? null,
-    };
-  });
+  const venueInputs: FlameTestVenueInput[] = flameVenueInputsFrom(venues, cust);
 
-  const settings = await getSettings();
-  const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const office = quoteOrigin(offices);
+  const office = await resolveQuoteOffice();
 
   const travelRates = await getTravelRates();
   // Flights over drive (spec 2026-09-25): the builder posts its Auto · Drive ·
@@ -165,7 +146,10 @@ async function persist(formData: FormData): Promise<string | null> {
     margin: r.effectiveMargin,
     pricingTier: tier.tier,
     tierMargin: tier.margin,
-    source: "flametest",
+    // #248 Task 4 (spec §5): a portal-generated quote (source
+    // "portal-service") keeps that source across a staff save — the same
+    // rule the Estimator applies to portal-catalog (D416).
+    source: sourceForSave(existingForMarker?.source, "flametest"),
     quoteType: "flame_test",
     // #242 final: the owner is set when the quote is CREATED (below) and kept
     // on every later save — the review limit follows the quote's owner, never
@@ -231,12 +215,27 @@ export async function saveFlameQuote(formData: FormData): Promise<void> {
 export async function approveFlameQuote(formData: FormData): Promise<void> {
   let id: string | null;
   try {
-    id = await persist(formData);
-    if (!id) {
-      revalidatePath("/", "layout");
-      return;
+    // #248 final review (controller decision 1): an accepted portal-service
+    // quote approves at the price the customer already accepted — persist()
+    // would re-price it at today's rates/tier first, which a mileage-rate
+    // or margin edit between Accept and Approve could quietly change out
+    // from under the accepted number. Same permission check persist() would
+    // have made (requireUser()), just made directly since persist() is
+    // skipped.
+    const editingId = String(formData.get("editingId") || "");
+    const existing = editingId ? await getQuote(editingId) : null;
+    if (existing && approveKeepsAcceptedPrice(existing)) {
+      const user = await requireUser();
+      await setStatus(editingId, "won", user.name, { bypassApprovalGate: "engine-owned-flow" });
+      id = editingId;
+    } else {
+      id = await persist(formData);
+      if (!id) {
+        revalidatePath("/", "layout");
+        return;
+      }
+      await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
     }
-    await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   } catch (error) {
     // `persist()` opens with requireUser(), which sends an expired session to
     // /login BY throwing — a catch in the app directory must never eat that

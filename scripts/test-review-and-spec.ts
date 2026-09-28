@@ -10632,6 +10632,13 @@ seeded()
   .then(() => reviewLimitsFinal242AsyncChecks())
   .then(() => portal245FinalReviewAsyncChecks())
   .then(() => grid249T5AsyncChecks())
+  .then(() => portal248ScopeAsyncChecks())
+  .then(() => portal248PricingAsyncChecks())
+  .then(() => portal248GenerateAsyncChecks())
+  .then(() => portal248RefreshAsyncChecks())
+  .then(() => portal248Task3AsyncChecks())
+  .then(() => portal248Task4AsyncChecks())
+  .then(() => portal248FinalFixAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -16808,10 +16815,10 @@ import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
 
 /* ======================================================================
    #210 — one fixture builder: resolveFixture / sanitizeFixtureInput /
-   fixtureAssembliesFrom. Pure.
+   allAssembliesFrom (was fixtureAssembliesFrom until #247). Pure.
    ====================================================================== */
 import {
-  resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, fixtureAssembliesFrom, headLineForPick,
+  resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, allAssembliesFrom, headLineForPick,
   clampPickerLimit, FIXTURE_MAX_LINES,
   type FixtureRecord as FxbRecord, type HeadLine as HeadLineT,
 } from "@/lib/fixture-assemblies";
@@ -16933,10 +16940,11 @@ import {
     ok(/try \{\s*await deleteFixtureAction/.test(removeFn) && removeFn.includes("setListError(") && builderSrc.includes("{listError &&"), "#210 final review M10: a rejected delete is caught and shown on the list");
   }
 
-  const fa = fixtureAssembliesFrom([rec, sys], cat);
-  ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#210 fixtureAssembliesFrom: fixtures only, id and label carried");
-  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#210 fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
-  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#210 fixtureAssembliesFrom: the override rides through as the component cost");
+  // #247: the fixtures-only fixtureAssembliesFrom is gone — allAssembliesFrom lists every kind, fixtures first.
+  const fa = allAssembliesFrom([sys, rec], cat);
+  ok(fa.length === 2 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED" && fa[0].kind === "fixture" && fa[1].kind === "system", "#210/#247 allAssembliesFrom: fixtures first, id and label carried");
+  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#210 allAssembliesFrom: slots map back to Estimator roles and default quantities");
+  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#210 allAssembliesFrom: the override rides through as the component cost");
 }
 
 /* ======================================================================
@@ -16985,7 +16993,7 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
     { sku: "C-OTH", desc: "Misc", unit: "ea", cost: 3, list: 5 },
   ];
   const before = resolveFixtureAssemblies([asm], cat)[0];
-  const after = fixtureAssembliesFrom([f], cat)[0];
+  const after = allAssembliesFrom([f], cat)[0];
   const bt = assemblyUnitTotals(before);
   const at = assemblyUnitTotals(after);
   ok(after.id === before.id && after.name === before.name && bt.cost === at.cost && bt.sell === at.sell && bt.cost === 1293 && bt.sell === 1995, "#210 parity: a converted assembly keeps its id, name and unit cost/sell");
@@ -17042,7 +17050,7 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
     { sku: "B-BARN", desc: "Barn door", unit: "ea", cost: 60, list: 90 },
   ];
   const before = resolveFixtureAssemblies([asm], cat)[0];
-  const after = fixtureAssembliesFrom([assemblyToFixture(asm, 1)], cat)[0];
+  const after = allAssembliesFrom([assemblyToFixture(asm, 1)], cat)[0];
   const draft = { componentQty: {}, position: "FOH", circuit: "4" };
   const b = fixtureBomLine(before, draft)!;
   const a = fixtureBomLine(after, draft)!;
@@ -17121,7 +17129,7 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
 
   // NEW math: convert, then run fixture-bom.ts's fixtureBomLine over the
   // exact same draft.
-  const after = fixtureAssembliesFrom([assemblyToFixture(stored, 5000)], cat)[0];
+  const after = allAssembliesFrom([assemblyToFixture(stored, 5000)], cat)[0];
   const line = fixtureBomLine(after, draft)!;
 
   ok(
@@ -21189,9 +21197,18 @@ import {
   const fa = src217("src/app/(app)/flame-tests/quote/actions.ts");
   ok(typedIn.test(fa) && /venues: venueInputs, travel: travelOverride, priceOverride \}/.test(fa),
     "#217 flame save: reads the typed total and prices with it");
-  ok(/testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(fa) &&
+  // #248 fix round 1: the venue-input mapping (incl. the typed testing-cost
+  // validation below) moved out of this file into the shared
+  // src/lib/service-quote-inputs.ts (also called by the portal's
+  // builder-identical pricing) — this now asserts the builder calls that
+  // shared helper AND that the helper itself still carries the
+  // testingOverride mapping, so the same invariant (a venue's typed testing
+  // cost is validated, priced and saved) stays guarded either way.
+  const sqi217 = src217("src/lib/service-quote-inputs.ts");
+  ok(/venueInputs: FlameTestVenueInput\[\] = flameVenueInputsFrom\(venues, cust\);/.test(fa) &&
+      /testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(sqi217) &&
       /\.\.\.\(v\.testingOverride != null \? \{ testingOverride: v\.testingOverride \} : \{\}\)/.test(fa),
-    "#217 flame save: each venue's typed testing cost is validated, priced and saved on the venue");
+    "#217 flame save: builds venue inputs through the shared service-quote-inputs.ts helper (which validates + prices each venue's typed testing cost), and still saves it on the venue");
   ok(/margin: r\.effectiveMargin,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
     "#217 flame save: stores the back-solved margin, the typed total (when set) and the auto figure");
 
@@ -22735,7 +22752,7 @@ import { compute as n229Compute, defaultAState as n229Default } from "@/app/(app
 
 /* --- #228: Hardware assemblies — a third FixtureKind through the builder, the Equipment map and Auto --- */
 import {
-  sanitizeFixtureInput as h228Sanitize, fixtureLineParts as h228Lines, resolveFixture as h228Resolve, fixtureAssembliesFrom as h228From,
+  sanitizeFixtureInput as h228Sanitize, fixtureLineParts as h228Lines, resolveFixture as h228Resolve, allAssembliesFrom as h228From,
   type FixtureRecord as H228Rec,
 } from "@/lib/fixture-assemblies";
 import { normalizeFixtureRow as h228Normalize } from "@/lib/fixtures-convert";
@@ -22767,7 +22784,8 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
     "#228: hardware prices its parts list (cost 10 + 2×5, sell 20 + 2×8)");
   const norm = h228Normalize({ ...rec } as unknown as Record<string, unknown> & { id: string });
   ok(norm.kind === "hardware" && (norm.parts || []).length === 2, "#228: a stored hardware row normalizes as hardware, keeping its parts");
-  ok(h228From([rec], catalog).length === 0, "#228: hardware never appears in the Estimator / Quick Design fixture pickers");
+  // #246/#247 reversed #228's "never in the pickers": both pickers list hardware now, as its own group.
+  ok(h228From([rec], catalog).map((a) => `${a.kind}:${a.id}`).join(",") === "hardware:SA-HW1", "#228/#247: hardware is listed in the Estimator / Quick Design pickers, as hardware");
 
   const ctx = { parts: catalog, fixtures: new Map([[rec.id, rec]]), margin: 0.3 };
   const opt = h228Opts([rec], ctx)[0];
@@ -22797,7 +22815,7 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
 
 /* --- #246: the Estimator's "+ Add assembly" lists every assembly — fixtures, systems and hardware (pure + source) --- */
 import {
-  estimatorAssembliesFrom as e246From, fixtureAssembliesFrom as e246FixturesOnly, ESTIMATOR_ASSEMBLY_GROUPS as e246Groups,
+  allAssembliesFrom as e246From, ASSEMBLY_GROUPS as e246Groups,
   type FixtureRecord as E246Rec,
 } from "@/lib/fixture-assemblies";
 import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(app)/estimator/fixture-bom";
@@ -22817,7 +22835,7 @@ import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(a
   ]);
   const all = e246From(recs, cat);
   ok(all.map((a) => `${a.kind}:${a.id}`).join(",") === "fixture:SA-F1,fixture:SA-F2,system:SA-S1,system:SA-S2,hardware:SA-H1",
-    "#246: estimatorAssembliesFrom returns fixtures, then systems, then hardware — each in the input (label) order, every row carrying its kind");
+    "#246: allAssembliesFrom returns fixtures, then systems, then hardware — each in the input (label) order, every row carrying its kind");
   ok(e246Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware", "#246: the picker's groups are Fixtures / Systems / Hardware");
   const s1 = all.find((a) => a.id === "SA-S1")!;
   ok(s1.scope === "Lighting" && s1.name === "Stage wash package" && s1.components.length === 1 && s1.components[0].role === "other" && s1.components[0].defaultQty === 4 && s1.components[0].list === 200,
@@ -22825,8 +22843,6 @@ import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(a
   ok(!("position" in s1) && !("circuit" in s1) && !("scope" in all.find((a) => a.id === "SA-H1")!), "#246: only a fixture carries a hang position / circuit; hardware has no scope");
   const f1 = all.find((a) => a.id === "SA-F1")!;
   ok(f1.position === "1st elec" && f1.circuit === "12" && f1.kind === "fixture", "#246: a fixture keeps its default hang position / circuit");
-  const only = e246FixturesOnly(recs, cat);
-  ok(only.map((a) => a.id).join(",") === "SA-F1,SA-F2" && only.every((a) => !("kind" in a)), "#246: fixtureAssembliesFrom (Quick Design) still returns fixtures only, unchanged");
 
   const draft = { componentQty: {}, position: "1st elec", circuit: "12" };
   ok(e246Bom(f1, draft)!.desc.endsWith(" (Pos 1st elec / Ckt 12)"), "#246: a fixture's BOM line still ends in (Pos … / Ckt …)");
@@ -22843,11 +22859,90 @@ import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(a
     "#246: the modal says Add assembly, groups its options, and reads Qty");
   ok(/\{showHang && <>/.test(modal) && modal.includes("hasHangPosition(assembly)"), "#246: Hang position / Circuit # show only for a fixture");
   const page = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
-  ok(page.includes("fixtureAssemblies={estimatorAssembliesFrom(fixtures, catalogRows)}"), "#246: the Estimator page passes every assembly kind");
-  const qdPage = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/page.tsx"), "utf8");
-  ok(qdPage.includes("fixtureAssembliesFrom(fixtureRecords, catalogRows)"), "#246: Quick Design keeps reading fixtures only");
+  ok(page.includes("fixtureAssemblies={allAssembliesFrom(fixtures, catalogRows)}"), "#246: the Estimator page passes every assembly kind");
   const client = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
   ok(client.includes('fixtureAssemblies.find((item) => (item.kind ?? "fixture") === "fixture")'), "#246: opening the modal preselects the first fixture (never a system)");
+}
+
+/* --- #247: Quick Design's lighting fixture picker lists every assembly — fixtures, systems and hardware (pure + source) --- */
+import {
+  allAssembliesFrom as q247From, groupAssemblies as q247Group, assemblyOptionLabel as q247Label, ASSEMBLY_GROUPS as q247Groups,
+  type FixtureRecord as Q247Rec,
+} from "@/lib/fixture-assemblies";
+import { fixturePricesFrom as q247Prices, pickedFixtureIds as q247Picked } from "@/lib/stores/design-pricing";
+import { fixtureOverridesFor as q247Overrides, quickDesignPrice as q247Price } from "@/lib/design/equipment-pricing";
+import { EQUIPMENT_ROWS as q247Rows } from "@/lib/design/equipment-vocab";
+import { defaultAState as q247Default } from "@/app/(app)/design/quick/engine";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const base = { description: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t" };
+  const recs: Q247Rec[] = [
+    { ...base, id: "SA-Q47H", kind: "hardware", label: "Pipe clamp kit", lightEngineSku: "", parts: [{ sku: "Q247-CL", qty: 2 }] },
+    { ...base, id: "SA-Q47F", kind: "fixture", label: "Par wash", lightEngineSku: "Q247-ENG" },
+    { ...base, id: "SA-Q47S", kind: "system", label: "Stage wash package", scope: "Lighting", lightEngineSku: "", parts: [{ sku: "Q247-ENG", qty: 4 }] },
+    { ...base, id: "SA-Q47Z", kind: "system", label: "Unpriced package", scope: "Lighting", lightEngineSku: "", parts: [{ sku: "Q247-NOPE", qty: 1 }] },
+  ];
+  const parts = new Map([
+    ["Q247-ENG", { sku: "Q247-ENG", desc: "Engine", unit: "ea", cost: 100, list: 200 }],
+    ["Q247-CL", { sku: "Q247-CL", desc: "Clamp", unit: "ea", cost: 10, list: 25 }],
+  ]);
+
+  // The list: every kind, grouped, and the client rows carry kind (+ a system's scope).
+  const list = q247From(recs, parts);
+  ok(list.map((a) => `${a.kind}:${a.id}`).join(",") === "fixture:SA-Q47F,system:SA-Q47S,system:SA-Q47Z,hardware:SA-Q47H", "#247: allAssembliesFrom lists fixtures, systems, then hardware");
+  const legacy: Array<{ id: string; name: string; kind?: "fixture" | "system" | "hardware" }> = [{ id: "legacy", name: "Old fixture" }];
+  const groups = q247Group([...list.map(({ id, name, kind }) => ({ id, name, kind })), ...legacy]);
+  ok(groups.map((g) => `${g.label}:${g.items.map((i) => i.id).join("+")}`).join(",") === "Fixtures:SA-Q47F+legacy,Systems:SA-Q47S+SA-Q47Z,Hardware:SA-Q47H"
+    && q247Group([{ id: "h", name: "H", kind: "hardware" as const }]).map((g) => g.label).join(",") === "Hardware"
+    && q247Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware",
+    "#247: groupAssemblies — Fixtures / Systems / Hardware in order, a kind-less row reads as a fixture, empty groups dropped");
+  ok(q247Label({ name: "Stage wash package", kind: "system", scope: "Lighting" }) === "Stage wash package (Lighting)" && q247Label({ name: "Pipe clamp kit", kind: "hardware" }) === "Pipe clamp kit" && q247Label({ name: "Par wash" }) === "Par wash",
+    "#247: a system option names its scope, the Estimator's format; fixtures and hardware show the bare name");
+
+  // Pricing: a system / hardware pick prices through priceCell's assembly branch — no kind filter anywhere.
+  const ctx = { parts, fixtures: new Map(recs.map((r) => [r.id, r])), margin: 0.3 };
+  const cfg = { ...q247Default(10), tier: "better", fixtureAssemblies: { par: "SA-Q47S", front: "SA-Q47H", cyc: "SA-Q47F" } } as unknown as Record<string, unknown>;
+  const rec = { tier: "better", config: cfg };
+  const ids = q247Picked(rec);
+  ok(ids.sort().join(",") === "SA-Q47F,SA-Q47H,SA-Q47S", "#247: pickedFixtureIds returns system and hardware picks too (serverDesignPrice / serverDesignPrices / quickPromoteCheck load these)");
+  const fp = q247Prices([...ids, "SA-Q47Z"], ctx);
+  ok(fp["SA-Q47S"]?.status === "assembly" && fp["SA-Q47S"].unitSell === 800 && fp["SA-Q47S"].unitCost === 400 && fp["SA-Q47H"]?.status === "assembly" && fp["SA-Q47H"].unitSell === 50 && fp["SA-Q47H"].unitCost === 20,
+    "#247: fixturePricesFrom prices a system pick (4 × $200 sell / $100 cost) and a hardware pick (2 × $25 / $10) from their parts lists");
+  ok(fp["SA-Q47Z"]?.status === "needs-part", "#247: a system with no priced parts stays needs-a-part");
+  const ov = q247Overrides(cfg.fixtureAssemblies as Record<string, string>, fp);
+  ok(ov["lighting:par"]?.status === "assembly" && ov["lighting:par"].desc === "Stage wash package" && ov["lighting:front"]?.status === "assembly" && ov["lighting:front"].desc === "Pipe clamp kit",
+    "#247: fixtureOverridesFor turns a system / hardware pick into its lighting row's price");
+  const table = {
+    margin: 0.3,
+    byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(q247Rows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
+  };
+  const rates = { freightPct: 5, contingencyPct: 10 };
+  const plain = q247Price({ tier: "better", config: { ...cfg, fixtureAssemblies: {} } }, table, {}, rates);
+  const picked = q247Price(rec, table, fp, rates);
+  ok(plain.needsPart === 0 && picked.needsPart === 0 && picked.budget > plain.budget,
+    `#247: the server's Quick Design price (quickDesignPrice) prices system + hardware picks and stays complete (${plain.budget} → ${picked.budget})`);
+  const dead = q247Price({ tier: "better", config: { ...cfg, fixtureAssemblies: { par: "SA-Q47Z" } } }, table, fp, rates);
+  ok(dead.needsPart > 0, "#247: an unpriceable system pick blocks Add to Quotes (needs a part), like a fixture pick");
+
+  // Source: the page, the picker, and the server paths.
+  const qp = read("src/app/(app)/design/quick/page.tsx");
+  ok(qp.includes("allAssembliesFrom(fixtureRecords, catalogRows)") && !qp.includes("fixtureAssembliesFrom") && qp.includes("kind: assembly.kind") && qp.includes("scope: assembly.scope"),
+    "#247: Quick Design's page lists every assembly kind and passes kind + scope to the picker");
+  ok(!read("src/lib/fixture-assemblies.ts").includes("export function fixtureAssembliesFrom") && !/estimatorAssembliesFrom|ESTIMATOR_ASSEMBLY_GROUPS/.test(read("src/lib/fixture-assemblies.ts")),
+    "#247: the fixtures-only helper is gone; the all-kinds list and groups have neutral names");
+  const panel = read("src/components/design/scope-inputs-panel.tsx");
+  const iDead = panel.indexOf("(deleted — choose another)"), iGen = panel.indexOf(">Generic allowance</option>"), iGrp = panel.indexOf("<optgroup key={g.kind} label={g.label}>");
+  ok(panel.includes("groupAssemblies(fixtureAssemblies)") && panel.includes("assemblyOptionLabel(assembly)") && iDead > 0 && iDead < iGen && iGen < iGrp,
+    "#247: the picker keeps the dead pick, then Generic allowance, then Fixtures / Systems / Hardware optgroups");
+  ok(panel.includes("fixtureAssemblies?: AssemblyPickerOption[]") && read("src/app/(app)/design/quick/quick-design-client.tsx").includes("fixtureAssemblies: AssemblyPickerOption[]"), "#247: the client list type carries kind / scope");
+  const modal = read("src/app/(app)/estimator/fixture-modal.tsx");
+  ok(modal.includes("groupAssemblies(assemblies)") && modal.includes("assemblyOptionLabel(item)"), "#247: the Estimator's modal shares the same grouping and option label");
+  const dp = read("src/lib/stores/design-pricing.ts");
+  const em = read("src/lib/stores/equipment-map.ts");
+  ok(!/kind === "fixture"/.test(dp) && !/kind === "fixture"/.test(em), "#247: no Quick Design server price path (design-pricing, loadEquipPriceCtx) filters picks to fixtures");
+  const acts = read("src/app/(app)/design/assemblies/actions.ts");
+  const rc = acts.slice(acts.indexOf("const revalidateConsumers"), acts.indexOf("};", acts.indexOf("const revalidateConsumers")));
+  ok(rc.includes('"/design/quick"') && !/kind/.test(rc), "#247: saving or deleting any assembly kind revalidates Quick Design");
 }
 
 /* --- #231/#232 T1: wire pull + system labor — rules and formulas (pure) --- */
@@ -28412,12 +28507,20 @@ import {
   ok(d245Tile({ key: "k", kind: "part", title: "", sku: "S", mfr: "", category: "" }, null, { unitPrice: 5, por: true }).unitPrice === null,
     "#245 tile: a POR price never shows a number");
 
+  // #248 Task 3 added a Service item between Catalog and Quote — reindexed
+  // here rather than left pinned to the pre-#248 shape.
   const nav = d245Nav("catalog", { cartCount: 3 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Quote"]) && nav[1].active === true && !nav[0].active && nav[2].badge === 3 && nav[2].href === "/portal/catalog/quote",
-    "#245 nav: Home · Catalog · Quote (N), Catalog active");
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "Quote"]) && nav[1].active === true && !nav[0].active && nav[3].badge === 3 && nav[3].href === "/portal/catalog/quote",
+    "#245 nav: Home · Catalog · Service · Quote (N), Catalog active");
   const pvNav = d245Nav("home", { previewCid: "c 1" });
-  ok(pvNav[0].href === "/portal?preview=c%201" && pvNav[1].href === "/portal/catalog?preview=c%201" && pvNav[2].disabled === true && pvNav[2].badge === undefined,
-    "#245 nav: a team preview carries ?preview=, shows no cart count and disables Quote");
+  ok(
+    pvNav[0].href === "/portal?preview=c%201" &&
+      pvNav[1].href === "/portal/catalog?preview=c%201" &&
+      pvNav[2].href === "/portal/service?preview=c%201" &&
+      pvNav[3].disabled === true &&
+      pvNav[3].badge === undefined,
+    "#245 nav: a team preview carries ?preview= (Home/Catalog/Service), shows no cart count and disables Quote"
+  );
 }
 
 async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
@@ -29338,6 +29441,18 @@ import { portalBellGroups as d245BellGroups } from "@/lib/portal-bell";
   ok(generatedIds.includes("Q-firm-recent"), "#245 bell: a firm portal quote generated 10h ago is a 'new portal quote'");
   ok(!generatedIds.includes("Q-firm-stale"), "#245 bell: a firm portal quote generated 80h ago has aged off the 72h window");
   ok(!generatedIds.includes("Q-firm-other"), "#245 bell: another owner's firm generation never shows on my bell");
+
+  // #248 Task 4: portal-service (flame/inspection self-serve) joins the
+  // "New portal quotes" group exactly like portal-catalog; it never joins
+  // the review group (service pricing is never price-on-request).
+  const svcFirmRecent = { ...base, id: "Q-svc-firm-recent", source: "portal-service", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 10 * HOUR, validUntil: NOW + 1000 } };
+  const svcFirmStale = { ...base, id: "Q-svc-firm-stale", source: "portal-service", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 80 * HOUR, validUntil: NOW + 1000 } };
+  const g2 = d245BellGroups([...( [mine, someoneElse, unowned, notPortal, firmRecent, firmStale, firmOther] as never[]), svcFirmRecent, svcFirmStale] as never, ME, NOW);
+  const generatedIds2 = g2.generated.map((i) => i.id);
+  const reviewIds2 = g2.review.map((i) => i.id);
+  ok(generatedIds2.includes("Q-svc-firm-recent"), "#248 bell: a firm portal-service quote generated 10h ago is a 'new portal quote'");
+  ok(!generatedIds2.includes("Q-svc-firm-stale"), "#248 bell: a firm portal-service quote generated 80h ago has aged off the 72h window");
+  ok(!reviewIds2.includes("Q-svc-firm-recent"), "#248 bell: portal-service never joins the review group, even with a stray portalReview elsewhere on the doc");
 }
 
 import { groupCandidatesByDatasheet as d245GroupByDatasheet, thumbnailCandidates as d245ThumbCandidates } from "@/lib/part-docs/thumbnail-plan";
@@ -30593,4 +30708,1032 @@ async function grid249T5AsyncChecks(): Promise<void> {
   ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#249 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
   const intake = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/grid-intake.tsx"), "utf8");
   ok(intake.includes("House width") && intake.includes("House depth") && intake.includes("houseDims(") && intake.includes("h.warning"), "#249 T5: the Grid intake shows house width, house depth and the narrow-house warning");
+}
+
+/* ======================================================================
+   Portal service quotes — Task 1: scope pre-fill + builder-identical
+   pricing (#248 Task 1; spec docs/superpowers/specs/2026-09-28-portal-
+   service-quotes-design.md §3, §6). Pure checks (pickScopeCount,
+   serviceRequestProblem) run at top level; DB-backed checks are registered
+   in the async chain as portal248ScopeAsyncChecks() and
+   portal248PricingAsyncChecks().
+   ====================================================================== */
+import {
+  pickScopeCount as d248Pick,
+  serviceScopeFor as d248ScopeFor,
+} from "@/lib/portal-service-scope";
+import {
+  priceServiceRequest as d248Price,
+  serviceRequestProblem as d248Problem,
+  PICK_VENUE_COPY as d248PickCopy,
+  CURTAINS_RANGE_COPY as d248CurtainsCopy,
+  LINE_SETS_RANGE_COPY as d248LineSetsCopy,
+} from "@/lib/portal-service-pricing";
+import {
+  flameVenueInputsFrom as d248Fvi,
+  inspectionVenueInputsFrom as d248Ivi,
+  resolveQuoteOffice as d248Office,
+} from "@/lib/service-quote-inputs";
+import { compute as d248ComputeFlame, getRates as d248FlameRates } from "@/lib/flametest-engine";
+import { computeEstimate as d248ComputeInsp, getRates as d248InspRates } from "@/lib/inspection-engine";
+import { create as d248CreateFlameJob } from "@/lib/stores/flame-jobs";
+import { create as d248CreateInspection } from "@/lib/stores/inspections";
+import { resolveTier as d248ResolveTier } from "@/lib/pricing-tiers";
+import { getTravelRates as d248TravelRates } from "@/lib/stores/pricing";
+import { get as d248GetCustomer } from "@/lib/stores/customers";
+
+// ---- pure: pickScopeCount (job wins, else quote, else neither) ----
+{
+  const jobAt = new Date(2025, 5, 1).getTime();
+  const quoteAt = new Date(2024, 2, 1).getTime();
+  const eq246 = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok(eq246(d248Pick({ job: { count: 12, at: jobAt }, quote: { count: 14, at: quoteAt } }), { count: 12, source: "job", sourceYear: 2025 }),
+    "#248 pickScopeCount: the job wins over the quote even though the quote's date is later");
+  ok(eq246(d248Pick({ job: null, quote: { count: 8, at: quoteAt } }), { count: 8, source: "quote", sourceYear: 2024 }),
+    "#248 pickScopeCount: the quote is used when there's no job");
+  ok(eq246(d248Pick({}), { count: null, source: null, sourceYear: null }), "#248 pickScopeCount: neither → no guess");
+  ok(eq246(d248Pick({ job: undefined, quote: undefined }), { count: null, source: null, sourceYear: null }), "#248 pickScopeCount: explicit undefineds → no guess");
+}
+
+// ---- pure: serviceRequestProblem (verbatim copy, #248 global constraints) ----
+{
+  const ids246 = new Set(["v1", "v2"]);
+  const flameReq246 = (venues: unknown) => ({ service: { kind: "flame" }, venues });
+  const inspReq246 = (venues: unknown, level: unknown = 1) => ({ service: { kind: "inspection", level }, venues });
+  ok(d248CurtainsCopy === "Enter the number of curtains (1–200)." && d248LineSetsCopy === "Enter the number of line sets (1–300)." && d248PickCopy === "Pick at least one venue.",
+    "#248 serviceRequestProblem: the exported copy constants are verbatim");
+  ok(d248Problem(flameReq246([]), ids246) === d248PickCopy, "#248 serviceRequestProblem: empty venues → Pick at least one venue.");
+  ok(d248Problem(null, ids246) === d248PickCopy, "#248 serviceRequestProblem: a malformed (null) request → Pick at least one venue.");
+  ok(d248Problem(flameReq246([{ venueId: "v9", count: 10 }]), ids246) === d248PickCopy, "#248 serviceRequestProblem: a foreign venue id → Pick at least one venue.");
+  ok(d248Problem(flameReq246([{ venueId: "v1", count: 1.5 }]), ids246) === d248CurtainsCopy, "#248 serviceRequestProblem: non-integer curtains → the curtains range copy");
+  ok(d248Problem(flameReq246([{ venueId: "v1", count: 0 }]), ids246) === d248CurtainsCopy, "#248 serviceRequestProblem: 0 curtains → the curtains range copy");
+  ok(d248Problem(flameReq246([{ venueId: "v1", count: 201 }]), ids246) === d248CurtainsCopy, "#248 serviceRequestProblem: 201 curtains → the curtains range copy");
+  ok(d248Problem(flameReq246([{ venueId: "v1", count: 200 }]), ids246) === null, "#248 serviceRequestProblem: 200 curtains is in range (inclusive)");
+  ok(d248Problem(inspReq246([{ venueId: "v1", count: 301 }]), ids246) === d248LineSetsCopy, "#248 serviceRequestProblem: 301 line sets → the line-sets range copy");
+  ok(d248Problem(inspReq246([{ venueId: "v1", count: 300 }]), ids246) === null, "#248 serviceRequestProblem: 300 line sets is in range (inclusive)");
+  ok(d248Problem(inspReq246([{ venueId: "v1", count: 5 }], 3), ids246) === d248PickCopy, "#248 serviceRequestProblem: a bad level (not 1 or 2) refuses the request");
+  ok(d248Problem(inspReq246([{ venueId: "v1", count: 5 }], "1"), ids246) === d248PickCopy, "#248 serviceRequestProblem: a level posted as a string (not the number 1|2) refuses the request");
+  ok(d248Problem(flameReq246([{ venueId: "v1", count: 1 }, { venueId: "v2", count: 200 }]), ids246) === null,
+    "#248 serviceRequestProblem: several of the caller's own venues, all in range → ok");
+}
+
+async function portal248ScopeAsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "scope-co");
+  const FJ_NEW = fixtureId(248, "scope-fj-new");
+  const FJ_SCHEDULED = fixtureId(248, "scope-fj-scheduled");
+  const IR_L1 = fixtureId(248, "scope-ir-l1");
+  const IR_L2 = fixtureId(248, "scope-ir-l2");
+
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 Scope Co",
+      type: "Education",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium" },
+        { id: "v2", label: "Black Box", primary: false, venueKind: "proscenium" },
+        { id: "v3", label: "No History", primary: false, venueKind: "proscenium" },
+      ],
+      contacts: [],
+    });
+
+    // v1: a completed flame job (12 curtains) …
+    const T1 = new Date(2025, 5, 1).getTime();
+    await d248CreateFlameJob({
+      id: FJ_NEW,
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      locationId: "v1",
+      venues: [{ id: "v1", label: "Main Hall", city: "", state: "", lat: null, lng: null, curtains: 12 }],
+      curtainsTotal: 12,
+      stage: "completed",
+      completedAt: T1,
+      dueAt: T1 + 365 * 86400000,
+    });
+    registerFixture("flame_jobs", FJ_NEW);
+    // … a job that's only SCHEDULED (never completed) is ignored entirely —
+    // v3 must fall through to "no guess", not this job's 99 curtains.
+    await d248CreateFlameJob({
+      id: FJ_SCHEDULED,
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      locationId: "v3",
+      venues: [{ id: "v3", label: "No History", city: "", state: "", lat: null, lng: null, curtains: 99 }],
+      curtainsTotal: 99,
+      stage: "scheduled",
+    });
+    registerFixture("flame_jobs", FJ_SCHEDULED);
+
+    // … and a LATER quote for v1 (14 curtains) that must still lose to the
+    // completed job — the source order is job > quote, not most-recent-wins.
+    const qV1 = await QuoteStore.create({
+      quoteType: "flame_test",
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      source: "flametest",
+      flameTest: { venues: [{ id: "v1", label: "Main Hall", curtains: 14 }] },
+    });
+    registerFixture("quotes", qV1.id);
+
+    // v2: no job at all, only a quote (8 curtains) — the quote is the scope.
+    const qV2 = await QuoteStore.create({
+      quoteType: "flame_test",
+      customerId: CO,
+      customer: "Test246 Scope Co",
+      source: "flametest",
+      flameTest: { venues: [{ id: "v2", label: "Black Box", curtains: 8 }] },
+    });
+    registerFixture("quotes", qV2.id);
+
+    const scope = await d248ScopeFor(CO, { kind: "flame" });
+    const byId246 = new Map(scope.map((s) => [s.venueId, s]));
+    ok(byId246.get("v1")?.count === 12 && byId246.get("v1")?.source === "job" && byId246.get("v1")?.sourceYear === 2025,
+      "#248 scope: v1's completed job (12 curtains) wins over its later quote (14)");
+    ok(byId246.get("v2")?.count === 8 && byId246.get("v2")?.source === "quote",
+      "#248 scope: v2 has no completed job, so its scope comes from its quote");
+    ok(byId246.get("v3")?.count === null && byId246.get("v3")?.source === null && byId246.get("v3")?.sourceYear === null,
+      "#248 scope: v3's only job is SCHEDULED (never completed) and it has no quote either — no guess");
+    ok(scope.length === 3, "#248 scope: one entry per customer venue");
+
+    // Inspections are level-specific (D53: records are per-venue): v1 gets
+    // an L1 record (5 line sets) and a separate L2 record (9) — each
+    // level's scope reads only its own level's record.
+    await d248CreateInspection({ id: IR_L1, customerId: CO, locationId: "v1", level: 1, lineSets: 5, stage: "completed", surveyDate: "2025-04-01" });
+    registerFixture("inspections", IR_L1);
+    await d248CreateInspection({ id: IR_L2, customerId: CO, locationId: "v1", level: 2, lineSets: 9, stage: "completed", surveyDate: "2023-04-01" });
+    registerFixture("inspections", IR_L2);
+
+    const scopeL1 = await d248ScopeFor(CO, { kind: "inspection", level: 1 });
+    const scopeL2 = await d248ScopeFor(CO, { kind: "inspection", level: 2 });
+    ok(scopeL1.find((s) => s.venueId === "v1")?.count === 5 && scopeL1.find((s) => s.venueId === "v1")?.source === "job",
+      "#248 scope: inspection L1 reads the L1 record's line sets (5)");
+    ok(scopeL2.find((s) => s.venueId === "v1")?.count === 9 && scopeL2.find((s) => s.venueId === "v1")?.source === "job",
+      "#248 scope: inspection L2 reads the L2 record's line sets (9), not L1's");
+  } finally {
+    await removeCustomer(CO);
+  }
+}
+
+async function portal248PricingAsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "price-co");
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 Price Co",
+      type: "Education",
+      pricingTier: "silver",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", lat: 44.26, lng: -88.42, travelMiles: 120, travelMin: 150 },
+        { id: "v2", label: "Black Box", primary: false, venueKind: "proscenium", lat: 44.5, lng: -88.0, travelMiles: 140, travelMin: 170 },
+      ],
+      contacts: [],
+    });
+    const session246 = { customerId: CO, name: "Pat Buyer" };
+
+    // ---- refusals ----
+    const noVenues = await d248Price(session246, { service: { kind: "flame" }, venues: [] });
+    ok(!noVenues.ok && noVenues.error === d248PickCopy, "#248 priceServiceRequest: no venues → Pick at least one venue.");
+    const foreign = await d248Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "nope", count: 5 }] });
+    ok(!foreign.ok && foreign.error === d248PickCopy, "#248 priceServiceRequest: a venue id that isn't the customer's own is refused");
+    const badCount = await d248Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 0 }] });
+    ok(!badCount.ok && badCount.error === d248CurtainsCopy, "#248 priceServiceRequest: an out-of-range count is refused with the range copy");
+    const noCust = await d248Price({ customerId: fixtureId(248, "price-no-such-co"), name: "X" }, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 5 }] });
+    ok(!noCust.ok, "#248 priceServiceRequest: an unknown customer is refused");
+
+    // ---- flame: SAME inputs through the shared helper (service-quote-
+    // inputs.ts — now the one path both the builder and the portal call,
+    // #248 fix round 1) feed compute() directly; priceServiceRequest() must
+    // land on the identical total at the same tier margin. This is a real
+    // parity check (not a replica) — flameVenueInputsFrom/resolveQuoteOffice
+    // are the exact functions src/app/(app)/flame-tests/quote/actions.ts
+    // persist() calls today. ----
+    const tier246 = await d248ResolveTier(CO, "Pat Buyer");
+    const office246 = await d248Office();
+    const travelRates246 = await d248TravelRates();
+    const cust246 = await d248GetCustomer(CO);
+    const rawVenues246 = [
+      { id: "v1", curtains: 15 },
+      { id: "v2", curtains: 9 },
+    ];
+    const sharedFlameInputs246 = d248Fvi(rawVenues246, cust246);
+    const baseRates246 = await d248FlameRates();
+    const rates246 = { ...baseRates246, margin: tier246.margin };
+    const builderR246 = d248ComputeFlame({ office: office246 || undefined, venues: sharedFlameInputs246 }, rates246, travelRates246);
+
+    const priced = await d248Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 15 }, { venueId: "v2", count: 9 }] });
+    ok(priced.ok && priced.total === Math.round(builderR246.total),
+      "#248 parity: priceServiceRequest's total equals compute() run over the builder's own input path, same tier margin");
+    if (priced.ok) {
+      ok(priced.margin === builderR246.effectiveMargin && priced.tier === tier246.tier && priced.tierMargin === tier246.margin,
+        "#248 parity: margin/tier/tierMargin match the builder's own resolveTier() + the engine's effectiveMargin");
+      const lineSum = priced.view.lines.reduce((a, l) => a + l.amount, 0);
+      ok(priced.view.total === priced.total && lineSum + priced.view.travel === priced.total,
+        "#248 view: the per-venue lines plus the travel line sum to exactly the total");
+      ok(priced.view.lines.length === 2 &&
+          priced.view.lines[0].label === "Flame test — Main Hall (15 curtains)" &&
+          priced.view.lines[1].label === "Flame test — Black Box (9 curtains)",
+        "#248 view: one line per venue, labeled Flame test — <venue> (N curtains)");
+      const asJson246 = JSON.stringify(priced.view).toLowerCase();
+      for (const forbidden of ['"margin', '"rate', '"hours', '"cost', '"crew', '"airfare', '"tier']) {
+        ok(!asJson246.includes(forbidden), `#248 whitelist: the customer view never carries a ${forbidden.slice(1)} key`);
+      }
+    }
+
+    // ---- inspection: the same real parity check, through
+    // inspectionVenueInputsFrom (the shared helper src/app/(app)/
+    // inspections/quote/actions.ts persist() also calls). ----
+    const rawInspVenues246 = [{ id: "v1", lineSets: 20 }];
+    const sharedInspInputs246 = d248Ivi(rawInspVenues246, cust246);
+    const baseInspRates246 = await d248InspRates();
+    const inspRates246 = { ...baseInspRates246, margin: tier246.margin };
+    const builderIns1_246 = d248ComputeInsp({ office: office246 || undefined, venues: sharedInspInputs246, level: 1 }, inspRates246, travelRates246);
+
+    // ---- inspection: no per-venue breakdown in the engine → one summary
+    // line; L1 and L2 price the same line-set count differently. ----
+    const p1 = await d248Price(session246, { service: { kind: "inspection", level: 1 }, venues: [{ venueId: "v1", count: 20 }] });
+    const p2 = await d248Price(session246, { service: { kind: "inspection", level: 2 }, venues: [{ venueId: "v1", count: 20 }] });
+    ok(p1.ok && p1.total === Math.round(builderIns1_246.total),
+      "#248 parity: priceServiceRequest's inspection total equals computeEstimate() run over the shared inspectionVenueInputsFrom helper, same tier margin");
+    ok(p1.ok && p2.ok && p1.total !== p2.total, "#248 inspection: L1 and L2 price the same line-set count differently (the level multiplier)");
+    if (p1.ok) {
+      ok(p1.view.lines.length === 1 &&
+          p1.view.lines[0].label === "Annual rigging inspection — 20 line sets across 1 venue" &&
+          p1.view.lines[0].amount + p1.view.travel === p1.total,
+        "#248 inspection view: one summary line (the engine has no per-venue breakdown); the line + travel sum to the total");
+    }
+    if (p2.ok) {
+      ok(p2.view.lines[0].label === "Five-year rigging inspection — 20 line sets across 1 venue",
+        "#248 inspection view: the L2 summary line says Five-year, not Annual");
+    }
+  } finally {
+    await removeCustomer(CO);
+  }
+}
+
+/* ======================================================================
+   Portal service quotes — Task 2: generate, refresh, decline widening
+   (#248 Task 2; spec §3, §4, §6). Pure checks (serviceQuoteName,
+   portalListsQuote, portalDocumentExtras' letter data) run at top level;
+   DB-backed checks are registered in the async chain as
+   portal248GenerateAsyncChecks() and portal248RefreshAsyncChecks().
+   ====================================================================== */
+import {
+  generateServiceQuote as d248Generate,
+  serviceQuoteName as d248Name,
+  GENERATE_LIMIT as d248GenLimit,
+  GENERATE_RATE_COPY as d248GenRateCopy,
+  GENERATE_BUSY_COPY as d248GenBusyCopy,
+} from "@/lib/portal-service-quotes";
+import { displayQuoteNumber as d248Display } from "@/lib/estimate-number";
+
+// ---- pure: serviceQuoteName (verbatim shape, 120-char truncation) ----
+{
+  ok(d248Name({ kind: "flame" }, ["Main Hall", "Black Box"]) === "Flame test — Main Hall, Black Box",
+    "#248 serviceQuoteName: 'Flame test — <venues joined by \", \">'");
+  ok(d248Name({ kind: "inspection", level: 1 }, ["Main Hall"]) === "Inspection (Annual) — Main Hall",
+    "#248 serviceQuoteName: Level 1 reads Annual");
+  ok(d248Name({ kind: "inspection", level: 2 }, ["Main Hall"]) === "Inspection (Five-year) — Main Hall",
+    "#248 serviceQuoteName: Level 2 reads Five-year");
+  const longLabels = Array.from({ length: 20 }, (_, i) => "Very Long Venue Name Number " + i);
+  const longName = d248Name({ kind: "flame" }, longLabels);
+  ok(longName.length === 120 && longName === ("Flame test — " + longLabels.join(", ")).slice(0, 120),
+    "#248 serviceQuoteName: a long venue list truncates the name to 120 chars");
+}
+
+// ---- pure: portalListsQuote — a portal-service DRAFT is never listed (Task 4, carried from Task 2 review) ----
+{
+  const base246 = { id: "x", customerId: "c-portal", status: "draft" as const, source: "portal-service", portalAcceptance: null, portalReview: null };
+  ok(!QuoteStore.portalListsQuote(base246, "c-portal"),
+    "#248 portalListsQuote: a portal-service quote recalled to draft by staff is NOT listed — service quotes are never review quotes, and a staff recall must not surface an in-progress edit to the customer");
+  ok(QuoteStore.portalListsQuote({ ...base246, status: "sent" as const }, "c-portal"),
+    "#248 portalListsQuote: the same quote, sent, IS listed for its own customer");
+  ok(!QuoteStore.portalListsQuote({ ...base246, status: "sent" as const }, "c-other"),
+    "#248 portalListsQuote: tenant scoping is unchanged for portal-service");
+  ok(QuoteStore.portalListsQuote({ ...base246, source: "portal-catalog" }, "c-portal"),
+    "#248 portalListsQuote: a portal-catalog draft is still listed — only portal-service drafts are hidden");
+  ok(!QuoteStore.portalListsQuote({ ...base246, source: "estimator" }, "c-portal"),
+    "#248 portalListsQuote: an ordinary internal draft (not portal-self-serve/portal-catalog) is still hidden");
+}
+
+// ---- pure: portalDocumentExtras (widened #245 helper) reused by the letters ----
+{
+  const eq246 = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const until246 = new Date(2026, 9, 28, 12).getTime();
+  const svcFirm = d245DocExtras(
+    { source: "portal-service", portalFirm: { generatedAt: until246 - 30 * 86400000, validUntil: until246 } },
+    []
+  );
+  ok(
+    eq246(svcFirm.standingLines, [
+      "All quotes are subject to Peak review and approval.",
+      "Plus applicable sales tax.",
+      "Valid until October 28, 2026",
+    ]) && svcFirm.validUntilMs === until246,
+    "#248 letter data: a firm portal-service quote prints the review line, the tax line and Valid until <Month D, YYYY>"
+  );
+  const svcNoFirm = d245DocExtras({ source: "portal-service", portalFirm: null }, []);
+  ok(
+    eq246(svcNoFirm.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax."]) &&
+      svcNoFirm.validUntilMs === null,
+    "#248 letter data: a portal-service quote with no active portalFirm prints the standing lines without a validity date"
+  );
+  // The proposal letters (letter-view.tsx) are React server components, not
+  // pure data functions (#222/#223 precedent) — verified by source, the same
+  // way #223's display sweep checks those files.
+  for (const k of ["flame-tests", "inspections"]) {
+    const view246 = readFileSync(join(process.cwd(), `src/app/(app)/${k}/letter/letter-view.tsx`), "utf8");
+    ok(
+      view246.includes("portalDocumentExtras(quote, [])") && view246.includes("portalExtras.standingLines"),
+      `#248 ${k} letter: the proposal letter prints the portal-service standing lines via portalDocumentExtras`
+    );
+  }
+}
+
+async function portal248GenerateAsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "gen-co");
+  const CO2 = fixtureId(248, "gen-co-noowner");
+  const NOW = new Date(2026, 8, 28, 12).getTime();
+  const DAY = 86400000;
+  const sess = { grantId: fixtureId(248, "gen-grant"), customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+
+  try {
+    const owner = (await activeUsers())[0]?.name || "";
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 Gen Co",
+      type: "Education",
+      pricingTier: "silver",
+      owner,
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 },
+        { id: "v2", label: "Black Box", primary: false, venueKind: "proscenium", travelMiles: 140 },
+      ],
+      contacts: [],
+    });
+    await upsertCustomer({
+      id: CO2,
+      name: "Test246 Gen Co Two",
+      type: "Education",
+      locations: [{ id: "w1", label: "Studio", primary: true, venueKind: "proscenium", travelMiles: 90 }],
+      contacts: [],
+    });
+
+    // Refusals first — none of these spends a Generate or makes a quote.
+    const flameReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] };
+    const none = await d248Generate(null, flameReq, { now: NOW, schedulePdf: false });
+    ok(!none.ok && none.error === d245ExpiredCopy, "#248 generate: no session → the expired-link copy");
+    const preview = await d248Generate({ ...sess, grantId: "preview" }, flameReq, { now: NOW, schedulePdf: false });
+    ok(!preview.ok && preview.error === d245ExpiredCopy, "#248 generate: a team preview (grantId preview) never generates");
+    const ghostSess = { grantId: fixtureId(248, "gen-grant-ghost"), customerId: fixtureId(248, "gen-co-ghost"), name: "Ghost", email: "g@example.com" };
+    const ghost = await d248Generate(ghostSess, flameReq, { now: NOW, schedulePdf: false });
+    ok(!ghost.ok && ghost.error === d245ExpiredCopy, "#248 generate: a grant whose customer no longer exists (an expired link) → the expired-link copy");
+    const bad = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [] }, { now: NOW, schedulePdf: false });
+    ok(!bad.ok && bad.error === "Pick at least one venue.", "#248 generate: an empty venue list is refused with the venue copy (validated before the rate limit is touched)");
+
+    // Firm flame generate — two venues.
+    const rf = await d248Generate(sess, flameReq, { now: NOW, schedulePdf: false });
+    ok(rf.ok, "#248 generate flame: a valid two-venue request generates a firm quote — " + (rf.ok ? "" : rf.error));
+    if (rf.ok) registerFixture("quotes", rf.quoteId);
+    const qf = rf.ok ? await QuoteStore.get(rf.quoteId) : null;
+    ok(!!qf && qf.status === "sent" && qf.quoteType === "flame_test" && qf.source === "portal-service",
+      "#248 generate flame: sent at once, quoteType flame_test, source portal-service");
+    ok(!!qf && typeof qf.estNo === "number" && d248Display(qf).startsWith("FLM-"), "#248 generate flame: numbered with the FLM prefix");
+    ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview,
+      "#248 generate flame: portalFirm good for 30 days from generation; no review stamp (service pricing is never price-on-request)");
+    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1",
+      "#248 generate flame: owned by the company's owner, attn the grant's name, located at the first venue");
+    const ft246 = (qf?.flameTest || {}) as { venues?: Array<{ id?: string; curtains?: number }> };
+    ok(
+      Array.isArray(ft246.venues) && ft246.venues.length === 2 &&
+        ft246.venues.find((v) => v.id === "v1")?.curtains === 10 &&
+        ft246.venues.find((v) => v.id === "v2")?.curtains === 6,
+      "#248 generate flame: the flameTest subdoc saves both venues' curtain counts"
+    );
+    ok(qf?.name === "Flame test — Main Hall, Black Box", "#248 generate flame: name is 'Flame test — <venues>'");
+    ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"),
+      "#248 generate flame: sent through setStatus (history + sent revision)");
+    ok(!!qf && QuoteStore.portalListsQuote(qf, CO) && QuoteStore.portalCanAcceptQuote(qf, CO), "#248 generate flame: listed and acceptable for its customer");
+
+    // Firm inspection generate — Level 2.
+    const inspReq = { service: { kind: "inspection" as const, level: 2 as const }, venues: [{ venueId: "v1", count: 25 }] };
+    const ri = await d248Generate(sess, inspReq, { now: NOW, schedulePdf: false });
+    ok(ri.ok, "#248 generate inspection: a valid L2 request generates a firm quote — " + (ri.ok ? "" : ri.error));
+    if (ri.ok) registerFixture("quotes", ri.quoteId);
+    const qi = ri.ok ? await QuoteStore.get(ri.quoteId) : null;
+    ok(!!qi && qi.status === "sent" && qi.quoteType === "inspection" && qi.source === "portal-service",
+      "#248 generate inspection: sent at once, quoteType inspection, source portal-service");
+    ok(!!qi && typeof qi.estNo === "number" && d248Display(qi).startsWith("RIG-"), "#248 generate inspection: numbered with the RIG prefix");
+    const insp246 = (qi?.inspection || {}) as { level?: number; venues?: Array<{ id?: string; lineSets?: number }> };
+    ok(insp246.level === 2 && insp246.venues?.find((v) => v.id === "v1")?.lineSets === 25,
+      "#248 generate inspection: the inspection subdoc's level is 2 and saves the line-set count");
+    ok(qi?.name === "Inspection (Five-year) — Main Hall", "#248 generate inspection: name is 'Inspection (Five-year) — <venues>'");
+
+    // Owner fallback: a company with no owner → unassigned.
+    const noOwnerSess = { grantId: fixtureId(248, "gen-grant-noowner"), customerId: CO2, name: "Rae Two", email: "rae@example.com" };
+    const r2 = await d248Generate(noOwnerSess, { service: { kind: "flame" as const }, venues: [{ venueId: "w1", count: 4 }] }, { now: NOW, schedulePdf: false });
+    ok(r2.ok, "#248 generate: a request for a customer with no owner still generates — " + (r2.ok ? "" : r2.error));
+    if (r2.ok) registerFixture("quotes", r2.quoteId);
+    const q2 = r2.ok ? await QuoteStore.get(r2.quoteId) : null;
+    ok(!!q2 && q2.owner === "" && q2.status === "sent", "#248 generate: a company with no owner → the quote is unassigned (owner \"\")");
+
+    // Rate limit: 10 an hour per grant.
+    const rlGrant = fixtureId(248, "gen-grant-rate");
+    for (let i = 0; i < d248GenLimit; i++) d245RateLimit("portal-service-generate:" + rlGrant, d248GenLimit, 3_600_000);
+    const rl = await d248Generate({ ...sess, grantId: rlGrant }, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 5 }] }, { now: NOW, schedulePdf: false });
+    ok(d248GenLimit === 10 && !rl.ok && rl.error === d248GenRateCopy, "#248 generate: the 11th Generate in an hour on one grant is refused");
+
+    // In-flight guard (Task 4, carried from Task 2 review): two concurrent
+    // Generate calls for the SAME grant never mint two quotes — the second
+    // is refused "busy" while the first is still writing.
+    const raceGrant = fixtureId(248, "gen-grant-race");
+    const raceReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 5 }] };
+    const [raceA, raceB] = await Promise.all([
+      d248Generate({ ...sess, grantId: raceGrant }, raceReq, { now: NOW, schedulePdf: false }),
+      d248Generate({ ...sess, grantId: raceGrant }, raceReq, { now: NOW, schedulePdf: false }),
+    ]);
+    const raceResults = [raceA, raceB];
+    const raceOks = raceResults.filter((r) => r.ok);
+    const raceBusy = raceResults.filter((r) => !r.ok && r.error === d248GenBusyCopy);
+    ok(
+      raceOks.length === 1 && raceBusy.length === 1,
+      "#248 generate: two concurrent Generate calls on one grant resolve to exactly one success and one 'busy' refusal — " +
+        JSON.stringify(raceResults)
+    );
+    if (raceOks[0]?.ok) registerFixture("quotes", (raceOks[0] as { ok: true; quoteId: string }).quoteId);
+  } finally {
+    await removeCustomer(CO);
+    await removeCustomer(CO2);
+  }
+}
+
+async function portal248RefreshAsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "refresh-co");
+  const CO_X = fixtureId(248, "refresh-co-other");
+  const NOW = new Date(2026, 8, 28, 12).getTime();
+  const DAY = 86400000;
+  const EXPIRED_NOW = NOW + 31 * DAY;
+  const sess = { grantId: fixtureId(248, "refresh-grant"), customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 Refresh Co",
+      type: "Education",
+      pricingTier: "silver",
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }],
+      contacts: [],
+    });
+    await upsertCustomer({
+      id: CO_X,
+      name: "Test246 Refresh Co Other",
+      type: "Education",
+      locations: [{ id: "x1", label: "Other Hall", primary: true, venueKind: "proscenium", travelMiles: 60 }],
+      contacts: [],
+    });
+
+    const gen = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }] }, { now: NOW, schedulePdf: false });
+    if (!gen.ok) throw new Error("#248 Task 2 refresh setup failed — " + gen.error);
+    registerFixture("quotes", gen.quoteId);
+    const q0 = await QuoteStore.get(gen.quoteId);
+    const rev1 = (q0?.revisions || []).find((r) => r.reason === "sent");
+    if (!rev1) throw new Error("#248 Task 2 refresh setup: no sent revision after Generate");
+    ok(await d245SetRevPdf(gen.quoteId, rev1.rev, "quote-pdfs/test246-rev1.pdf"), "#248 refresh setup: simulate the original send's PDF landing");
+    const q0pdf = await QuoteStore.get(gen.quoteId);
+    ok(!!q0pdf && portalQuotePdfSource(q0pdf, CO)?.rev === rev1.rev, "#248 refresh setup: the portal PDF source points at the original sent revision before any refresh");
+
+    const otherR = await d245RefreshPortalQuote({ ...sess, grantId: fixtureId(248, "refresh-grant-other"), customerId: CO_X }, gen.quoteId, EXPIRED_NOW);
+    ok(!otherR.ok && otherR.error === d245NotFound, "#248 refresh: another customer's session can't refresh this quote");
+
+    const early = await d245RefreshPortalQuote(sess, gen.quoteId, NOW);
+    ok(!early.ok, "#248 refresh: refusing before validUntil has passed");
+
+    // Change the rate — gold margin instead of silver — so the refresh
+    // lands on a genuinely different value, not a replay of the same price.
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 Refresh Co",
+      type: "Education",
+      pricingTier: "gold",
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }],
+      contacts: [],
+    });
+
+    const refreshed = await d245RefreshPortalQuote(sess, gen.quoteId, EXPIRED_NOW);
+    ok(refreshed.ok && refreshed.mode === "firm",
+      "#248 refresh: past validUntil, a portal-service quote refreshes firm (never review — service pricing is never price-on-request)");
+    const q1 = await QuoteStore.get(gen.quoteId);
+    ok(!!q1 && q1.status === "sent" && !!q1.portalFirm && q1.portalFirm.validUntil === EXPIRED_NOW + 30 * DAY,
+      "#248 refresh: stays sent; validUntil restarts 30 days from the refresh");
+    ok(!!q1 && q1.value !== q0?.value && q1.pricingTier === "gold",
+      "#248 refresh: re-priced at today's (changed) rate — a different value, the new tier stamped");
+    ok((q1?.revisions?.length || 0) > (q0?.revisions?.length || 0), "#248 refresh: a new revision was appended");
+    const rev2 = (q1?.revisions || []).slice().reverse().find((r) => r.reason === "sent");
+    if (!rev2 || rev2.rev === rev1.rev) throw new Error("#248 Task 2: refresh cut no new sent revision");
+    ok(await d245SetRevPdf(gen.quoteId, rev2.rev, "quote-pdfs/test246-rev2.pdf"), "#248 refresh: simulate the refreshed price's PDF landing");
+    const afterRefreshPdf = portalQuotePdfSource((await QuoteStore.get(gen.quoteId))!, CO);
+    ok(afterRefreshPdf?.rev === rev2.rev && afterRefreshPdf.path === "quote-pdfs/test246-rev2.pdf",
+      "#248 refresh: the portal PDF source now points at the NEWEST sent revision, not the original");
+
+    // Accept (unchanged — canAcceptPortal doesn't filter by source) then
+    // staff decline, widened here to cover portal-service (#248 controller
+    // decision: decline accepts either portal source).
+    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
+    ok(acc.ok, "#248 accept: an accepted portal-service quote accepts exactly like portal-catalog (canAcceptPortal untouched)");
+    const declineR = await d245DeclinePortalAcceptance(gen.quoteId, "Staff", "Need a PO");
+    ok(declineR.ok, "#248 decline: staff decline, widened to portal-service, declines a real acceptance");
+    const q2 = await QuoteStore.get(gen.quoteId);
+    ok(
+      q2?.portalAcceptance === null && q2?.portalDecline?.note === "Need a PO" && q2?.status === "sent",
+      "#248 decline: portalAcceptance clears, portalDecline stamps {by, note}, status stays sent"
+    );
+  } finally {
+    await removeCustomer(CO);
+    await removeCustomer(CO_X);
+  }
+}
+
+/* ======================================================================
+   Portal service quotes — Task 3: /portal/service UI's pure URL/quote-scope
+   helpers (#248 Task 3; spec §2, §6). `parseServiceParams` and
+   `serviceRequestFromQuote` (src/lib/portal-service-view.ts) run pure checks
+   at top level; the tenant-scoping refusal on `serviceRequestFromQuoteId`
+   (src/lib/portal-service-quotes.ts) is DB-backed, registered in the async
+   chain as portal248Task3AsyncChecks().
+   ====================================================================== */
+import { parseServiceParams as d248Parse, serviceRequestFromQuote as d248FromQuote } from "@/lib/portal-service-view";
+import { serviceRequestFromQuoteId as d248FromQuoteId } from "@/lib/portal-service-quotes";
+
+// ---- pure: parseServiceParams ----
+{
+  const eqReq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok(eqReq(d248Parse({}), { service: null, venueIds: [], fromQuoteId: null }), "#248 parseServiceParams: no query at all → null service, no venues, no from");
+  ok(eqReq(d248Parse({ type: "flame" }), { service: { kind: "flame" }, venueIds: [], fromQuoteId: null }), "#248 parseServiceParams: type=flame");
+  ok(
+    eqReq(d248Parse({ type: "inspection" }), { service: { kind: "inspection", level: 1 }, venueIds: [], fromQuoteId: null }),
+    "#248 parseServiceParams: type=inspection with no level defaults to Level 1"
+  );
+  ok(
+    eqReq(d248Parse({ type: "inspection", level: "2" }), { service: { kind: "inspection", level: 2 }, venueIds: [], fromQuoteId: null }),
+    "#248 parseServiceParams: type=inspection&level=2 → Level 2"
+  );
+  ok(
+    eqReq(d248Parse({ type: "inspection", level: "3" }), { service: { kind: "inspection", level: 1 }, venueIds: [], fromQuoteId: null }),
+    "#248 parseServiceParams: an unrecognized level (not literally \"2\") falls back to Level 1"
+  );
+  ok(d248Parse({ type: "bogus" }).service === null, "#248 parseServiceParams: an unrecognized type → null service (the page defaults it, not this)");
+  ok(eqReq(d248Parse({ venue: ["v1", "v2", "v1"] }).venueIds, ["v1", "v2"]), "#248 parseServiceParams: repeated ?venue= de-duplicates, order preserved");
+  ok(eqReq(d248Parse({ venue: "solo" }).venueIds, ["solo"]), "#248 parseServiceParams: a single ?venue= (not an array) still parses");
+  ok(d248Parse({ from: "Q-2041" }).fromQuoteId === "Q-2041", "#248 parseServiceParams: ?from= is read through");
+  ok(d248Parse({ from: ["Q-1", "Q-2"] }).fromQuoteId === "Q-1", "#248 parseServiceParams: a repeated ?from= takes the first");
+  ok(d248Parse({ from: "" }).fromQuoteId === null, "#248 parseServiceParams: an empty ?from= reads as no quote (null, not \"\")");
+  const manyVenues246 = Array.from({ length: 150 }, (_, i) => "v" + i);
+  ok(d248Parse({ venue: manyVenues246 }).venueIds.length === 100, "#248 parseServiceParams: venue ids cap at 100 (#245-style URL parsing)");
+}
+
+// ---- pure: serviceRequestFromQuote ----
+{
+  const eqReq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const flameQ246 = { quoteType: "flame_test", flameTest: { venues: [{ id: "v1", curtains: 10 }, { id: "v2", curtains: 6 }] } };
+  ok(
+    eqReq(d248FromQuote(flameQ246), { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] }),
+    "#248 serviceRequestFromQuote: a flame_test quote's subdoc becomes a ServiceRequest"
+  );
+  const inspQ246L2 = { quoteType: "inspection", inspection: { level: 2, venues: [{ id: "v1", lineSets: 25 }] } };
+  ok(
+    eqReq(d248FromQuote(inspQ246L2), { service: { kind: "inspection", level: 2 }, venues: [{ venueId: "v1", count: 25 }] }),
+    "#248 serviceRequestFromQuote: an inspection quote's Level 2 and line-set counts carry through"
+  );
+  const inspQ246NoLevel = { quoteType: "inspection", inspection: { venues: [{ id: "v1", lineSets: 5 }] } };
+  ok(
+    d248FromQuote(inspQ246NoLevel)?.service.kind === "inspection" &&
+      (d248FromQuote(inspQ246NoLevel)?.service as { level?: number })?.level === 1,
+    "#248 serviceRequestFromQuote: a missing/non-2 level defaults to Level 1"
+  );
+  ok(d248FromQuote({ quoteType: "system" }) === null, "#248 serviceRequestFromQuote: a non-flame/inspection quoteType → null");
+  ok(d248FromQuote({ quoteType: "flame_test", flameTest: null }) === null, "#248 serviceRequestFromQuote: a null subdoc → null");
+  ok(
+    d248FromQuote({ quoteType: "flame_test", flameTest: { venues: [{ id: "v1", curtains: "10" }] } }) === null,
+    "#248 serviceRequestFromQuote: a malformed row (curtains not a number) is dropped, leaving no venues → null"
+  );
+  ok(
+    d248FromQuote({ quoteType: "flame_test", flameTest: { venues: [{ curtains: 10 }] } }) === null,
+    "#248 serviceRequestFromQuote: a row with no venue id is dropped too"
+  );
+}
+
+async function portal248Task3AsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "t3-co");
+  const CO_OTHER = fixtureId(248, "t3-co-other");
+  const NOW = new Date(2026, 8, 28, 12).getTime();
+  const sess = { grantId: fixtureId(248, "t3-grant"), customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 T3 Co",
+      type: "Education",
+      pricingTier: "silver",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 },
+        { id: "v2", label: "Black Box", primary: false, venueKind: "proscenium", travelMiles: 140 },
+      ],
+      contacts: [],
+    });
+    await upsertCustomer({
+      id: CO_OTHER,
+      name: "Test246 T3 Co Other",
+      type: "Education",
+      locations: [{ id: "w1", label: "Studio", primary: true, venueKind: "proscenium", travelMiles: 90 }],
+      contacts: [],
+    });
+
+    const gen = await d248Generate(
+      sess,
+      { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] },
+      { now: NOW, schedulePdf: false }
+    );
+    if (!gen.ok) throw new Error("#248 Task 3 from= setup failed — " + gen.error);
+    registerFixture("quotes", gen.quoteId);
+
+    const mine246 = await d248FromQuoteId(CO, gen.quoteId);
+    ok(
+      !!mine246 &&
+        mine246.service.kind === "flame" &&
+        mine246.venues.length === 2 &&
+        mine246.venues.find((v) => v.venueId === "v1")?.count === 10 &&
+        mine246.venues.find((v) => v.venueId === "v2")?.count === 6,
+      "#248 serviceRequestFromQuoteId: this customer's own listed flame quote loads its saved scope"
+    );
+
+    const other246 = await d248FromQuoteId(CO_OTHER, gen.quoteId);
+    ok(other246 === null, "#248 serviceRequestFromQuoteId: another customer's session refuses this quote (?from= can't leak scope across tenants)");
+
+    const ghost246 = await d248FromQuoteId(CO, fixtureId(248, "t3-no-such-quote"));
+    ok(ghost246 === null, "#248 serviceRequestFromQuoteId: an id that doesn't resolve to any quote → null");
+
+    ok((await d248FromQuoteId("", gen.quoteId)) === null, "#248 serviceRequestFromQuoteId: an empty customerId refuses outright");
+    ok((await d248FromQuoteId(CO, "")) === null, "#248 serviceRequestFromQuoteId: an empty quoteId refuses outright");
+  } finally {
+    await removeCustomer(CO);
+    await removeCustomer(CO_OTHER);
+  }
+}
+
+/* ======================================================================
+   Portal service quotes — Task 4: staff side (#248 Task 4; spec §5).
+   Pure checks (sourceForSave, source-grep on the generalized panel/
+   builders/bell/badge/company line) run at top level; the DB-backed
+   approve→won→spawn check is registered in the async chain as
+   portal248Task4AsyncChecks().
+   ====================================================================== */
+import { sourceForSave as d248SourceForSave } from "@/lib/portal-quote-mode";
+import { remove as d248RemoveFlameJob } from "@/lib/stores/flame-jobs";
+
+// ---- pure: sourceForSave ----
+{
+  ok(d248SourceForSave("portal-catalog", "estimator") === "portal-catalog",
+    "#248 sourceForSave: a portal-catalog prior source survives a save that would otherwise stamp the builder's own source");
+  ok(d248SourceForSave("portal-service", "flametest") === "portal-service",
+    "#248 sourceForSave: a portal-service prior source survives a flame-test builder save");
+  ok(d248SourceForSave("portal-service", "inspection") === "portal-service",
+    "#248 sourceForSave: a portal-service prior source survives an inspection builder save");
+  ok(d248SourceForSave("estimator", "flametest") === "flametest",
+    "#248 sourceForSave: any other prior source takes the builder's own fallback stamp");
+  ok(d248SourceForSave(undefined, "estimator") === "estimator",
+    "#248 sourceForSave: no prior quote at all (a fresh create) takes the builder's fallback stamp");
+  ok(d248SourceForSave(null, "inspection") === "inspection",
+    "#248 sourceForSave: a null prior source (same as undefined) takes the builder's fallback stamp");
+}
+
+// ---- source-grep: the generalized panel, its builder wiring, and the widened bell/badge/company line ----
+{
+  const readSrc246 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  const panelSrc246 = readSrc246("src/app/(app)/estimator/portal-panel.tsx");
+  ok(panelSrc246.includes("onApprove") && panelSrc246.includes("approving"),
+    "#248 portal-panel: PortalPanel takes an optional onApprove/approving pair instead of always posting the default won-status form");
+  ok(panelSrc246.includes("declinePortalAcceptanceAction"),
+    "#248 portal-panel: Decline still reuses declinePortalAcceptanceAction unchanged — no separate decline path for the builders");
+
+  for (const [dir, actionsFile] of [
+    ["flame-tests", "flametest"],
+    ["inspections", "inspection"],
+  ] as const) {
+    const actionsSrc246 = readSrc246(`src/app/(app)/${dir}/quote/actions.ts`);
+    ok(actionsSrc246.includes("sourceForSave") && actionsSrc246.includes(`sourceForSave(existingForMarker?.source, "${actionsFile}"`),
+      `#248 ${dir}/quote/actions.ts: persist() stamps source through sourceForSave, keeping a loaded portal-service quote's source`);
+
+    const controlsSrc246 = readSrc246(`src/app/(app)/${dir}/quote/controls.tsx`);
+    ok(
+      controlsSrc246.includes("<PortalPanel") &&
+        controlsSrc246.includes("onApprove={doApprove}") &&
+        controlsSrc246.includes('initial.portal &&'),
+      `#248 ${dir}/quote/controls.tsx: renders the shared PortalPanel only for a loaded portal quote, Approve wired to the builder's own engine-owned approve step`
+    );
+
+    const pageSrc246 = readSrc246(`src/app/(app)/${dir}/quote/page.tsx`);
+    ok(pageSrc246.includes('editQuote.source === "portal-service"'),
+      `#248 ${dir}/quote/page.tsx: the Portal panel's data is built only for a loaded portal-service quote`);
+  }
+
+  const estimatorActionsSrc246 = readSrc246("src/app/(app)/estimator/actions.ts");
+  ok(estimatorActionsSrc246.includes("sourceForSave(prior?.source"),
+    "#248 estimator/actions.ts: saveQuoteAction's source stamp now goes through the shared sourceForSave (D416 generalized)");
+
+  const hubSrc246 = readSrc246("src/app/(app)/quotes/page.tsx");
+  ok(hubSrc246.includes('q.source === "portal-catalog" || q.source === "portal-service"'),
+    "#248 quotes/page.tsx: the Portal badge shows for portal-service quotes too");
+
+  const companySrc246 = readSrc246("src/app/(app)/companies/[id]/page.tsx");
+  ok(companySrc246.includes('qt.source === "portal-catalog" || qt.source === "portal-service"'),
+    "#248 companies/[id]/page.tsx: 'Portal activity' counts both portal sources");
+
+  const bellSrc246 = readSrc246("src/lib/portal-bell.ts");
+  ok(bellSrc246.includes('(q.source === "portal-catalog" || q.source === "portal-service")'),
+    "#248 portal-bell.ts: 'New portal quotes' (the generated group) includes portal-service");
+}
+
+async function portal248Task4AsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "t4-co");
+
+  try {
+    const owner = (await activeUsers())[0]?.name || "Test Harness";
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 T4 Co",
+      type: "Education",
+      pricingTier: "silver",
+      owner,
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }],
+      contacts: [],
+    });
+
+    /* Approve (spec §5, controller decision 7): the flame builder's
+     * approveFlameQuote is persist() (a plain re-save — proven to keep
+     * `source: "portal-service"` above) then EXACTLY this setStatus call
+     * with the engine-owned-flow bypass. A real generate → accept → approve
+     * round trip through the "use server" action needs a browser session
+     * (requireUser() + redirect()), so — per the brief, following the
+     * existing #170/#217 pattern (quoteSpawnAsyncChecks) — this drives the
+     * lib-level body the action calls: a portal-service flame_test quote,
+     * already sent and customer-accepted, transitions to won and spawns its
+     * flame job exactly like a staff Approve click would. */
+    const q4 = await QuoteStore.create({
+      name: "#248 T4 harness flame quote",
+      quoteType: "flame_test",
+      customer: "Test246 T4 Co",
+      customerId: CO,
+      locationId: "v1",
+      value: 1500,
+      margin: 0.3,
+      source: "portal-service",
+      owner,
+      flameTest: { venues: [{ id: "v1", label: "Main Hall", curtains: 10 }] },
+    });
+    registerFixture("quotes", q4.id);
+    await QuoteStore.setStatus(q4.id, "sent", owner, { bypassApprovalGate: "engine-owned-flow" });
+    await QuoteStore.update(q4.id, {
+      portalFirm: { generatedAt: Date.now(), validUntil: Date.now() + 30 * 86400000 },
+      portalAcceptance: { at: Date.now(), by: "Pat Buyer", byEmail: "pat@example.com" },
+    });
+    ok(await flameByQuote(q4.id) === null, "#248 Task 4 approve: no flame job exists before approval");
+
+    await QuoteStore.setStatus(q4.id, "won", owner, { bypassApprovalGate: "engine-owned-flow" });
+    const approved4 = await QuoteStore.get(q4.id);
+    ok(!!approved4 && approved4.status === "won" && approved4.source === "portal-service",
+      "#248 Task 4 approve: the builder's approve path (engine-owned-flow → won) leaves a portal-service quote won, source intact");
+    const job4 = await flameByQuote(q4.id);
+    ok(!!job4, "#248 Task 4 approve: approving a portal-service flame quote through the builder's approve path spawns its flame job");
+    if (job4) await d248RemoveFlameJob(job4.id);
+  } finally {
+    await removeCustomer(CO);
+  }
+}
+
+/* ======================================================================
+   #248 final-review fix wave — approve keeps the accepted price (controller
+   decision 1); the zero-travel guard (decision 2); duplicate/over-length
+   venue lists (decision 3); minors 4/5/7. Pure checks run at top level;
+   DB-backed checks are registered in the async chain as
+   portal248FinalFixAsyncChecks().
+   ====================================================================== */
+import { approveKeepsAcceptedPrice as d248ApproveKeeps } from "@/lib/portal-quote-mode";
+import { travelUnknownError as d248TravelErr } from "@/lib/portal-service-pricing";
+import { setRates as d248FixSetFlameRates } from "@/lib/flametest-engine";
+
+// ---- pure: approveKeepsAcceptedPrice (controller decision 1) ----
+{
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: { at: 1, by: "Pat" } }) === true,
+    "#248 final approveKeepsAcceptedPrice: a sent, accepted portal-service quote → true (skip persist(), go straight to won)"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: null }) === false,
+    "#248 final approveKeepsAcceptedPrice: sent but not yet accepted → false (ordinary persist()-then-won)"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent" }) === false,
+    "#248 final approveKeepsAcceptedPrice: portalAcceptance absent entirely → false"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "won", portalAcceptance: { at: 1, by: "Pat" } }) === false,
+    "#248 final approveKeepsAcceptedPrice: already won (a re-approve replay) → false — setStatus's own no-op repair handles that, not this branch"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "draft", portalAcceptance: { at: 1, by: "Pat" } }) === false,
+    "#248 final approveKeepsAcceptedPrice: a staff-recalled draft → false (persist()-then-won, same as any staff edit)"
+  );
+  ok(
+    d248ApproveKeeps({ source: "estimator", status: "sent", portalAcceptance: { at: 1, by: "Pat" } }) === false,
+    "#248 final approveKeepsAcceptedPrice: not portal-service (a staff-built or portal-catalog quote) → false"
+  );
+  ok(
+    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: undefined }) === false,
+    "#248 final approveKeepsAcceptedPrice: explicit undefined acceptance → false"
+  );
+}
+
+// ---- pure: travelUnknownError verbatim copy (controller decision 2) ----
+{
+  ok(
+    d248TravelErr("Main Hall") === "We need to confirm travel for Main Hall — request a quote instead.",
+    "#248 final travelUnknownError: verbatim copy, venue label interpolated"
+  );
+}
+
+// ---- source-grep: approve wiring, service-form reprice, smoke routes ----
+{
+  const readSrc248 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  for (const [dir, label] of [
+    ["flame-tests", "flame-test"],
+    ["inspections", "inspection"],
+  ] as const) {
+    const actionsSrc248 = readSrc248(`src/app/(app)/${dir}/quote/actions.ts`);
+    ok(
+      actionsSrc248.includes("approveKeepsAcceptedPrice(existing)") &&
+        actionsSrc248.includes('await setStatus(editingId, "won", user.name, { bypassApprovalGate: "engine-owned-flow" });'),
+      `#248 final ${dir}/quote/actions.ts: approve${label === "flame-test" ? "Flame" : "Inspection"}Quote branches on approveKeepsAcceptedPrice and, when true, calls setStatus directly with the approving user's name — never persist() first`
+    );
+    // The re-price branch (persist() then a setStatus with no `by`) must
+    // stay reachable for every quote that ISN'T an accepted portal-service
+    // one — this is the structural half of the "everything else unchanged"
+    // requirement.
+    ok(
+      actionsSrc248.includes("id = await persist(formData);") &&
+        actionsSrc248.includes('await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });'),
+      `#248 final ${dir}/quote/actions.ts: the ordinary persist()-then-won path is still there for every other quote`
+    );
+  }
+
+  const pricingSrc248 = readSrc248("src/lib/portal-service-pricing.ts");
+  ok(
+    pricingSrc248.includes("firstUnlocatedVenueLabel(req.venues, cust)") &&
+      pricingSrc248.indexOf("firstUnlocatedVenueLabel(req.venues, cust)") < pricingSrc248.indexOf("if (req.service.kind ===" ),
+    "#248 final portal-service-pricing.ts: the zero-travel guard runs before either service branch prices anything"
+  );
+  ok(
+    pricingSrc248.includes("email: session.email || \"\""),
+    "#248 final portal-service-pricing.ts: the saved subdoc contact threads session.email (controller decision 5)"
+  );
+
+  const formSrc248 = readSrc248("src/app/portal/service/service-form.tsx");
+  ok(
+    formSrc248.includes("const next = rows.map((r) => (r.venueId === venueId ? { ...r, ...patch } : r));\n    setRows(next);\n    reprice(next);"),
+    "#248 final service-form.tsx: updateRow computes `next`, sets state, THEN calls reprice() — not inside the setRows updater (minor 4)"
+  );
+  ok(
+    formSrc248.includes("requestQuoteHref(service.kind, tv.venueId)"),
+    "#248 final service-form.tsx: the zero-travel refusal renders a Request a quote link carrying the matched venue's id"
+  );
+
+  const smokeSrc248 = readSrc248("scripts/smoke-routes.ts");
+  ok(
+    smokeSrc248.includes('"/portal/service?type=flame&venue=x"') && smokeSrc248.includes('"/portal/service?from=x"'),
+    "#248 final smoke-routes.ts: /portal/service entry-point query params smoke-test signed out (minor 7)"
+  );
+}
+
+async function portal248FinalFixAsyncChecks(): Promise<void> {
+  const CO = fixtureId(248, "finalfix-co");
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test248 FinalFix Co",
+      type: "Education",
+      pricingTier: "silver",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", lat: 44.26, lng: -88.42, travelMiles: 120, travelMin: 150 },
+        // No lat/lng, no city/state, no travelMiles/travelMin — the engine
+        // has nothing to price this venue's travel leg from (controller
+        // decision 2).
+        { id: "v2", label: "No-Coords Hall", primary: false, venueKind: "proscenium" },
+      ],
+      contacts: [],
+    });
+    const session = { customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+
+    // ---- controller decision 2: zero-travel guard ----
+    const unlocatedOnly = await d248Price(session, { service: { kind: "flame" }, venues: [{ venueId: "v2", count: 5 }] });
+    ok(
+      !unlocatedOnly.ok && unlocatedOnly.error === "We need to confirm travel for No-Coords Hall — request a quote instead.",
+      "#248 final priceServiceRequest: an unlocated venue alone is refused, naming it"
+    );
+
+    const mixedBoth = await d248Price(session, {
+      service: { kind: "flame" },
+      venues: [{ venueId: "v1", count: 5 }, { venueId: "v2", count: 5 }],
+    });
+    ok(
+      !mixedBoth.ok && mixedBoth.error === "We need to confirm travel for No-Coords Hall — request a quote instead.",
+      "#248 final priceServiceRequest: a located venue plus an unlocated one still refuses, naming the unlocated one"
+    );
+
+    const locatedOnly = await d248Price(session, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 5 }] });
+    ok(locatedOnly.ok, "#248 final priceServiceRequest: a request with only located venues still prices");
+    if (locatedOnly.ok) {
+      const sub = locatedOnly.subdoc as { contact?: { email?: string } };
+      ok(
+        sub.contact?.email === "pat@example.com",
+        "#248 final priceServiceRequest: the saved subdoc contact carries session.email (controller decision 5), not a blank string"
+      );
+    }
+
+    // ---- controller decision 3: duplicate / over-length venue lists ----
+    const dup = await d248Price(session, {
+      service: { kind: "flame" },
+      venues: [{ venueId: "v1", count: 5 }, { venueId: "v1", count: 6 }],
+    });
+    ok(!dup.ok && dup.error === d248PickCopy, "#248 final priceServiceRequest: a repeated venue id is refused with Pick at least one venue.");
+
+    const tooMany = await d248Price(session, {
+      service: { kind: "flame" },
+      venues: [
+        { venueId: "v1", count: 5 },
+        { venueId: "v2", count: 5 },
+        { venueId: "v1", count: 5 },
+      ],
+    });
+    ok(
+      !tooMany.ok && tooMany.error === d248PickCopy,
+      "#248 final priceServiceRequest: a venue list longer than the customer's own venue count is refused"
+    );
+
+    // ---- controller decision 1: approve keeps the accepted price (DB) ----
+    // A real generate → accept → approve round trip through the "use
+    // server" action needs a browser session (requireUser() + redirect()),
+    // same constraint Task 4's test already documents — so, following that
+    // precedent, this drives the exact DB call the action's skip-persist
+    // branch makes (setStatus alone, no persist()) and proves the resulting
+    // quote is untouched by a mileage-rate change made in between: if the
+    // branch had instead fallen through to persist(), the changed rate
+    // would show up in `value`.
+    const owner = (await activeUsers())[0]?.name || "Test Harness";
+    const baseFlameRates = await d248FlameRates();
+    try {
+      const q = await QuoteStore.create({
+        name: "#248 final-fix approve harness quote",
+        quoteType: "flame_test",
+        customer: "Test248 FinalFix Co",
+        customerId: CO,
+        locationId: "v1",
+        value: 4321,
+        margin: 0.3,
+        source: "portal-service",
+        owner,
+        flameTest: { venues: [{ id: "v1", label: "Main Hall", curtains: 8 }] },
+      });
+      registerFixture("quotes", q.id);
+      await QuoteStore.setStatus(q.id, "sent", owner, { bypassApprovalGate: "engine-owned-flow" });
+      await QuoteStore.update(q.id, {
+        portalFirm: { generatedAt: Date.now(), validUntil: Date.now() + 30 * 86400000 },
+        portalAcceptance: { at: Date.now(), by: "Pat Buyer", byEmail: "pat@example.com" },
+      });
+      const accepted = await QuoteStore.get(q.id);
+      ok(
+        !!accepted && d248ApproveKeeps(accepted),
+        "#248 final approve: the sent, accepted portal-service fixture takes the skip-persist branch"
+      );
+
+      // Change the global flame mileage rate — the exact input persist()
+      // would feed into a re-price if the action's skip-persist branch
+      // didn't fire for this quote.
+      await d248FixSetFlameRates({ mileageRate: baseFlameRates.mileageRate + 500 });
+
+      ok(await flameByQuote(q.id) === null, "#248 final approve: no flame job exists before approval");
+      await QuoteStore.setStatus(q.id, "won", owner, { bypassApprovalGate: "engine-owned-flow" });
+      const approved = await QuoteStore.get(q.id);
+      ok(
+        !!approved && approved.status === "won" && approved.value === 4321,
+        "#248 final approve: approving an accepted portal-service quote after changing the flame mileage rate leaves its value unchanged and marks it won"
+      );
+      const job = await flameByQuote(q.id);
+      ok(!!job, "#248 final approve: approving still spawns the flame job from the stored subdoc");
+      if (job) await d248RemoveFlameJob(job.id);
+    } finally {
+      await d248FixSetFlameRates(baseFlameRates);
+    }
+  } finally {
+    await removeCustomer(CO);
+  }
 }

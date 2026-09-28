@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ESTIMATOR_ASSEMBLY_GROUPS, type ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
+import { assemblyOptionLabel, groupAssemblies, type ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
 import type { FixtureDraft } from "./types";
 import { assemblyComponentTotals, hasHangPosition, optionalToggleQty } from "./fixture-bom";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, Stat } from "./est-ui";
@@ -12,11 +12,6 @@ function totals(assembly: ResolvedFixtureAssembly | undefined, quantities: Recor
   if (!assembly) return { cost: 0, sell: 0 };
   const { cost, price } = assemblyComponentTotals(assembly, quantities);
   return { cost, sell: price };
-}
-
-/** #246 — a picker option's text: a system names its scope. */
-function optionLabel(item: ResolvedFixtureAssembly): string {
-  return item.kind === "system" && item.scope ? `${item.name} (${item.scope})` : item.name;
 }
 
 /** #246 — the "+ Add assembly" modal: every Assembly Builder kind, grouped
@@ -40,10 +35,8 @@ export default function FixtureModal({
   const count = Math.max(1, Number.parseInt(draft.qty, 10) || 1);
   const valid = !!assembly && unit.sell > 0;
   const showHang = !!assembly && hasHangPosition(assembly);
-  // An assembly with no kind (a legacy/fixture-only list) groups as a fixture.
-  const groups = ESTIMATOR_ASSEMBLY_GROUPS
-    .map((g) => ({ ...g, items: assemblies.filter((item) => (item.kind ?? "fixture") === g.kind) }))
-    .filter((g) => g.items.length > 0);
+  // An assembly with no kind (a legacy row) groups as a fixture.
+  const groups = groupAssemblies(assemblies);
 
   return (
     <ConfigModal width={700} icon="◉" iconSize={15} title="Add assembly" sub={<>Adds to {secName}</>} onClose={onClose}
@@ -56,7 +49,7 @@ export default function FixtureModal({
           <Link href="/design/assemblies" style={{ display: "inline-block", marginTop: 10, color: "var(--accent)", fontWeight: 650 }}>Open Assembly Builder →</Link>
         </div>
       ) : <>
-        <div style={{ marginBottom: 16 }}><label style={LBL}>Assembly</label><select value={draft.assemblyId} onChange={(event) => onAssembly(event.target.value)} style={{ ...FIELD, background: "#fff" }}><option value="">— Select an assembly —</option>{groups.map((g) => <optgroup key={g.kind} label={g.label}>{g.items.map((item) => <option key={item.id} value={item.id}>{optionLabel(item)}</option>)}</optgroup>)}</select></div>
+        <div style={{ marginBottom: 16 }}><label style={LBL}>Assembly</label><select value={draft.assemblyId} onChange={(event) => onAssembly(event.target.value)} style={{ ...FIELD, background: "#fff" }}><option value="">— Select an assembly —</option>{groups.map((g) => <optgroup key={g.kind} label={g.label}>{g.items.map((item) => <option key={item.id} value={item.id}>{assemblyOptionLabel(item)}</option>)}</optgroup>)}</select></div>
         {assembly && <div style={{ marginBottom: 16 }}>
           <label style={LBL}>Components <span style={{ color: "#aab0bb", textTransform: "none", letterSpacing: 0 }}>· tick an optional add-on to include it</span></label>
           <div style={{ border: "1px solid #e4e7ec", borderRadius: 10, overflow: "hidden" }}>{assembly.components.map((part) => {

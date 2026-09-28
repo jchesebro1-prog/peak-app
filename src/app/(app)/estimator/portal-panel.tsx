@@ -7,11 +7,23 @@ import { PURCHASE_METHOD_LABEL } from "@/lib/portal-quote-mode";
 import type { PortalPanelData } from "./types";
 
 /**
- * Staff Portal panel (#245 Task 13, spec §5) — rendered at the top of the
- * Estimator for a loaded `source === "portal-catalog"` quote. A review
- * banner listing every price-on-request line, the customer's acceptance
- * (purchase method / notes / PO file) with Approve (→ the normal gated Won
- * path) / Decline, and a firm quote's validity date.
+ * Staff Portal panel (#245 Task 13, spec §5; generalized #248 Task 4, spec
+ * §5) — rendered at the top of a builder for a loaded portal-generated
+ * quote: the Estimator (`source === "portal-catalog"`) and, since #248, the
+ * flame-test and inspection quote builders (`source === "portal-service"`).
+ * A review banner listing every price-on-request line (portal-catalog
+ * only — a service quote is never price-on-request), the customer's
+ * acceptance (purchase method / notes / PO file) with Approve / Decline,
+ * and a firm quote's validity date.
+ *
+ * Approve defaults to the Estimator's own gated Won status action
+ * (`setQuoteStatus`, a plain form) — the original #245 behavior. A caller
+ * that supplies `onApprove` (the flame/inspection builders) gets a button
+ * that calls it instead: their own engine-owned-flow approve step, which
+ * re-persists the quote's current builder state, marks it Won and spawns
+ * the flame job / inspection record (`approveFlameQuote` /
+ * `approveInspectionQuote`) — the exact same "Mark as approved" action
+ * those builders already offer for a staff-built quote.
  */
 
 function fmtDate(ms: number): string {
@@ -36,9 +48,18 @@ const CARD: CSSProperties = {
 export function PortalPanel({
   data,
   statusError,
+  onApprove,
+  approving,
 }: {
   data: PortalPanelData;
   statusError?: string | null;
+  /** #248 Task 4: when supplied, Approve calls this instead of submitting
+   *  the default `setQuoteStatus` form — the flame/inspection builders' own
+   *  engine-owned approve step (persist + won + spawn). */
+  onApprove?: () => void;
+  /** Disables the Approve button while the caller's own `onApprove`
+   *  transition is in flight. Ignored when `onApprove` is absent. */
+  approving?: boolean;
 }) {
   const [declining, setDeclining] = useState(false);
   const [note, setNote] = useState("");
@@ -130,12 +151,11 @@ export function PortalPanel({
             </div>
           )}
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap", marginTop: 4 }}>
-            <form action={setQuoteStatus}>
-              <input type="hidden" name="id" value={data.quoteId} />
-              <input type="hidden" name="status" value="won" />
-              <input type="hidden" name="back" value={data.back} />
+            {onApprove ? (
               <button
-                type="submit"
+                type="button"
+                onClick={onApprove}
+                disabled={!!approving}
                 style={{
                   fontFamily: "var(--font-ui)",
                   fontSize: 12.5,
@@ -145,12 +165,35 @@ export function PortalPanel({
                   border: "none",
                   borderRadius: 8,
                   padding: "8px 14px",
-                  cursor: "pointer",
+                  cursor: approving ? "not-allowed" : "pointer",
+                  opacity: approving ? 0.7 : 1,
                 }}
               >
-                Approve (mark Won)
+                {approving ? "Approving…" : "Approve (mark Won)"}
               </button>
-            </form>
+            ) : (
+              <form action={setQuoteStatus}>
+                <input type="hidden" name="id" value={data.quoteId} />
+                <input type="hidden" name="status" value="won" />
+                <input type="hidden" name="back" value={data.back} />
+                <button
+                  type="submit"
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: "#fff",
+                    background: "#1f7a52",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "8px 14px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Approve (mark Won)
+                </button>
+              </form>
+            )}
             {!declining ? (
               <button
                 type="button"

@@ -9171,8 +9171,8 @@ website for it." Closes MASTER-QUESTIONS **S19**. Spec:
 - Try the whole flow once with a real customer grant — browse, configure a fixture, request curtain pricing, cart,
   Generate, Accept — before pointing an actual customer at it.
 
-**Follow-ups (not built).** Self-serve service quotes (flame test / repair / inspection — a separate spec, reuses
-this build's firm/review split and Accept/Approve flow); a priced curtain configurator (replaces the request-only
+**Follow-ups (not built).** ~~Self-serve service quotes (flame test / repair / inspection — a separate spec, reuses
+this build's firm/review split and Accept/Approve flow)~~ — shipped as **#248**. A priced curtain configurator (replaces the request-only
 panel); a department-tree layer over the facets; Quick Design adopting the freight rule; public sign-up (create a
 customer + grant on the spot); carts don't expire — stale cart-row cleanup (90-day-plus, never touched again) is a
 follow-up, not built; a DaVinci product-photo import, if a real photo export ever exists (D411); two stale
@@ -9204,3 +9204,69 @@ appear for a fixture; a system or hardware line prints without them. Quote lines
 editing as they did. Quick Design's dropdown still lists fixtures only. See D418.
 
 **Still open.** None.
+
+---
+
+## 247. Quick Design — the lighting fixture picker lists every assembly — DONE 2026-09-28 (D419)
+
+**Reported:** 2026-09-28 (Jeff): "Make Quick Design pull from all assemblies too" (follow-up to #246).
+
+**Done.** The assembly drop-down on each Lighting row (Par, Front, Cyc, Side light, Automated) now lists every
+Assembly Builder record, grouped Fixtures / Systems / Hardware like the Estimator's "+ Add assembly". Any pick prices
+that row the same way a fixture pick always has — one assembly per unit on that row — and the saved design's budget
+and Add to Quotes use the same price. See D419.
+
+**Still open.** None.
+
+---
+
+## 248. Customer portal — flame-test and inspection quotes customers generate themselves — DONE 2026-09-28 (D420–D430)
+
+**Reported:** follow-up named in PUNCHLIST #245 ("Self-serve service quotes — a separate spec, reuses this build's
+firm/review split and Accept/Approve flow"). Jeff (2026-09-27): *"Auto quotes are good and should be quotable."*
+
+**Done.**
+- **`/portal/service`** — a service picker (Flame test · Inspection Annual (L1) · Inspection Five-year (L2)), a
+  venue checklist pre-filled per venue from its latest completed job/record, else its latest quote of that type
+  (inspections level-specific), else left for the customer to enter (D421), a debounced live estimate, and
+  **Generate**. Counts are bounded 1–200 curtains / 1–300 line sets; several venues tick together and price as one
+  shared trip (D423).
+- **Pricing is builder-identical.** `src/lib/service-quote-inputs.ts` is now the one venue-input step shared by both
+  staff builders' `persist()` and the portal's `priceServiceRequest` (D422) — tier margin, live rates, travel Auto
+  (#208), $25 rounding (#217), no overrides. The customer sees only per-venue lines, one Travel line
+  (`travelLineShare`) and the total — never rates, hours, margin, tier or travel mode.
+- **Repairs stay a request** — no priced repair library exists, so "Request a repair" opens the existing
+  `/portal/request` form with Repair and the venue pre-filled (D420).
+- **Same lifecycle as #245**, firm-only (no review state): Generate sends through `sendPortalFirm`, 30-day
+  `portalFirm.validUntil`, a saved proposal-letter PDF, Accept/Decline, and expiry → Refresh pricing as a new
+  revision that re-prices at the quote's own customer and tier (D424, D425). Source is `portal-service` with the
+  real `quoteType` (FLM/RIG numbers). A staff-recalled service quote in `draft` no longer lists to the customer
+  (D424).
+- **Entry points:** portal nav gains **Service**; the compliance card gets a header **Get a service quote** button
+  and a per-chip **Quote it** link; any listed flame_test/inspection quote row gets **Quote again** (D427).
+- **Staff side:** the Estimator's Portal panel is shared into both service builders — acceptance details, firm-
+  validity, **Approve** (the builder's own engine-owned-flow "Mark as approved," spawning the flame job / inspection
+  record), Decline with note (D426). A per-row Portal chip in the Quotes hub, the "New portal quotes" bell group and company "Portal
+  activity" all count `portal-service` alongside `portal-catalog`. Letters print the standing review line, tax line
+  and "Valid until" for portal-service quotes (D428).
+
+**Final review (2026-09-28).** Approve no longer re-prices an already-accepted portal-service quote — it goes Won at
+the accepted value with no `persist()` call, so a rate change between Accept and Approve can't silently move the
+number the customer agreed to (D429). A request naming a venue the engine can't locate (no coords, no saved
+`travelMiles`) now refuses up front — "We need to confirm travel for `<venue>` — request a quote instead." — with a
+link to `/portal/request` pre-filled for that venue, rather than quietly pricing a $0 travel leg (D430). A request
+listing a duplicate venue id, or more venues than the customer actually has, is refused the same way an empty list
+is. Minor fixes: the live-price debounce no longer fires from inside a `setRows` updater; the saved subdoc's contact
+now carries the portal session's email; `test:smoke` covers the `?type=&venue=` / `?from=` entry-point params
+signed out.
+
+**Jeff-gated.**
+- Try the whole flow with a real customer grant — pick venues, watch the live price, Generate, Accept.
+- Compare one multi-venue portal flame quote's total against the same venues priced in the flame builder — confirm
+  the shared-trip math lines up (D423).
+- Confirm the flame/inspection letters render correctly for a real portal-service quote (the standing lines are new,
+  D428).
+
+**Follow-ups (not built).** A priced repair library (would let repairs self-serve too, D420); scheduling/date
+requests (the job scheduler stays staff-side, per the original spec's out-of-scope); customer choice of travel mode
+(Auto only, matching #208's own scope). See D420–D430.

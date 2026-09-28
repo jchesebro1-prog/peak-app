@@ -399,6 +399,33 @@ See `.env.example`.
     production, upload hero images, review Hide/Show and the Labor
     category list, and try the flow with a real customer grant. Decisions
     D402–D417; punch item #245.
+20. ✅ **Portal service quotes** (#248, D420–D428) — customers generate firm,
+    numbered flame-test and inspection (L1 annual / L2 five-year) quotes for
+    one or more of their own venues at `/portal/service`, priced by the same
+    engines and a shared venue-input helper (`src/lib/service-quote-inputs.ts`)
+    the staff builders now use too — tier margin, live rates, travel Auto,
+    $25 rounding, no overrides, sell-only per-venue lines + one Travel line +
+    total. Venue counts pre-fill from each venue's latest completed
+    job/record, else its latest quote of that type (inspections
+    level-specific), else the customer enters it; several venues price as one
+    shared trip. Repairs stay a request (no priced repair library) via the
+    existing pre-filled `/portal/request` form. Source `portal-service` with
+    the real `quoteType` reuses #245's whole lifecycle firm-only —
+    `sendPortalFirm`, 30-day validity, Accept/Decline, Refresh pricing as a
+    new revision re-priced at the quote's own customer and tier — with no
+    review state (service pricing is never price-on-request) and a
+    staff-recalled draft no longer listed to the customer. Entry points: nav
+    Service, the compliance card's "Get a service quote" / per-chip "Quote
+    it" / per-venue "Request a repair", and "Quote again" on any listed
+    flame/inspection quote row. Staff get the shared Portal panel on both
+    service builders — Approve runs the builder's own engine-owned approve
+    for a still-`sent`, not-yet-accepted quote; an already-accepted quote
+    approves at the accepted price with no re-persist, spawning the
+    job/record either way — plus a per-row Portal chip in the Quotes hub,
+    bell and company-activity coverage. Remaining is Jeff-gated: try the flow
+    with a real grant, check a multi-venue portal quote against the builder,
+    confirm letters on a real render. Decisions D420–D428, D429–D430; punch
+    item #248.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

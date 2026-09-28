@@ -10,6 +10,7 @@ import type { PortalSession } from "@/lib/portal";
 import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
 import { cartLinesFromSpec, priceCart, pricingContextFor } from "@/lib/portal-pricing";
 import { canAcceptPortal, firmValidUntil, looksLikeCardNumber, PURCHASE_METHODS } from "@/lib/portal-quote-mode";
+import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-pricing";
 import { copySentRevisionPdf } from "@/lib/quote-pdf/generate";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
@@ -24,6 +25,7 @@ import {
   portalListsQuote,
   setStatus,
   update as updateQuote,
+  type Quote,
 } from "@/lib/stores/quotes";
 
 /** Guard copy (verbatim, controller decision 8) — the cart page shows the same. */
@@ -308,7 +310,7 @@ export async function refreshPortalQuote(
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
   const q = await getQuote(quoteId);
   if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
-  if (q.source !== "portal-catalog") return { ok: false, error: REFRESH_NOT_ELIGIBLE_COPY };
+  if (q.source !== "portal-catalog" && q.source !== "portal-service") return { ok: false, error: REFRESH_NOT_ELIGIBLE_COPY };
 
   const gate = canAcceptPortal(q, now);
   if (gate.ok) return { ok: false, error: REFRESH_NOT_EXPIRED_COPY };
@@ -317,6 +319,7 @@ export async function refreshPortalQuote(
   if (!rateLimit("portal-refresh:" + session.grantId, REFRESH_LIMIT, REFRESH_WINDOW_MS).ok) {
     return { ok: false, error: REFRESH_RATE_COPY };
   }
+  if (q.source === "portal-service") return refreshServicePortalQuote(q, now);
   try {
     const priorSections = ((q.spec as { sections?: SpecSection[] } | null)?.sections ?? []) as SpecSection[];
     const rawLines = cartLinesFromSpec(priorSections).map((l, i) => ({ ...l, lineId: "refresh-" + i }));
@@ -355,6 +358,67 @@ export async function refreshPortalQuote(
     return { ok: true, mode: "review" };
   } catch (e) {
     console.error("refreshPortalQuote failed", q.id, e);
+    return { ok: false, error: REFRESH_FAIL_COPY };
+  }
+}
+
+/** Minimal structural view of a saved flame-test / inspection quote subdoc's
+ *  venue rows — enough to rebuild the `ServiceRequest` a refresh re-prices. */
+type ServiceSubdocVenue = { id?: string | null; curtains?: number; lineSets?: number };
+type ServiceSubdocLike = { level?: number | string; venues?: ServiceSubdocVenue[] };
+
+/**
+ * Refresh an expired firm portal-service quote (#248 Task 2, spec §3): re-
+ * prices the STORED subdoc's own venues/counts (+ level, for an inspection)
+ * through `priceServiceRequest` at today's rates — using the quote's own
+ * `customerId`/`contactName`, not the caller's session, so the refreshed
+ * price is exactly what a fresh Generate from this quote's saved scope would
+ * produce. A service request is never price-on-request (the engines are
+ * fully deterministic) — there's no review branch here, only the firm path:
+ * write the new value + subdoc, cut a "sent" revision by hand (same shape
+ * `setStatus`'s own send path cuts), and copy the sent-revision PDF so the
+ * #222 portal PDF route reads the refreshed price, not the original.
+ */
+async function refreshServicePortalQuote(
+  q: Quote,
+  now: number
+): Promise<{ ok: true; mode: "firm" } | { ok: false; error: string }> {
+  if (!q.customerId) return { ok: false, error: REFRESH_NOT_ELIGIBLE_COPY };
+  const quoteType = q.quoteType;
+  const sub = (quoteType === "flame_test" ? q.flameTest : q.inspection) as ServiceSubdocLike | undefined;
+  const rows = Array.isArray(sub?.venues) ? sub!.venues! : [];
+  if (!rows.length) return { ok: false, error: REFRESH_NOT_ELIGIBLE_COPY };
+
+  const req: ServiceRequest =
+    quoteType === "flame_test"
+      ? {
+          service: { kind: "flame" },
+          venues: rows.map((v) => ({ venueId: v.id || "", count: Number(v.curtains) || 0 })),
+        }
+      : {
+          service: { kind: "inspection", level: Number(sub?.level) === 2 ? 2 : 1 },
+          venues: rows.map((v) => ({ venueId: v.id || "", count: Number(v.lineSets) || 0 })),
+        };
+
+  try {
+    const priced = await priceServiceRequest({ customerId: q.customerId, name: q.contactName || "" }, req);
+    if (!priced.ok) return { ok: false, error: REFRESH_FAIL_COPY };
+
+    const rules = await loadPortalRules();
+    await updateQuote(q.id, {
+      value: Math.round(priced.total),
+      margin: priced.margin,
+      pricingTier: priced.tier,
+      tierMargin: priced.tierMargin,
+      ...(quoteType === "flame_test" ? { flameTest: priced.subdoc } : { inspection: priced.subdoc }),
+      portalFirm: { generatedAt: now, validUntil: firmValidUntil(now, rules.validityDays) },
+    });
+    await scheduleQuotePdf(q.id);
+    await addQuoteRevision(q.id, { by: "Customer portal", reason: "sent", note: "Portal price refresh" });
+    await copySentRevisionPdf(q.id).catch((e) => console.error("refreshServicePortalQuote: sent-revision copy failed", q.id, e));
+    return { ok: true, mode: "firm" };
+  } catch (e) {
+    console.error("refreshServicePortalQuote failed", q.id, e);
     return { ok: false, error: REFRESH_FAIL_COPY };
   }
 }
@@ -447,7 +511,7 @@ export async function declinePortalAcceptance(
   if (!trimmed || trimmed.length > 500) return { ok: false, error: DECLINE_NOTE_COPY };
   try {
     const q = await getQuote(quoteId);
-    if (!q || q.source !== "portal-catalog" || !q.portalAcceptance) {
+    if (!q || (q.source !== "portal-catalog" && q.source !== "portal-service") || !q.portalAcceptance) {
       return { ok: false, error: DECLINE_NO_ACCEPTANCE_COPY };
     }
     await updateQuote(quoteId, { portalAcceptance: null, portalDecline: { at: Date.now(), by: by || "Staff", note: trimmed } });

@@ -133,6 +133,7 @@ export default async function InspectionQuotePage({
     savedNumber: "",
     status: "draft",
     replaces: "",
+    portal: null,
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -188,6 +189,22 @@ export default async function InspectionQuotePage({
       savedNumber: displayQuoteNumber(editQuote),
       status: editQuote.status,
       replaces: "",
+      // #248 Task 4 (spec §5): the staff Portal panel — present only for a
+      // portal-service quote. No price-on-request review here (service
+      // pricing is never price-on-request), so portalReview/porItems are
+      // always empty/null.
+      portal:
+        editQuote.source === "portal-service"
+          ? {
+              quoteId: editQuote.id,
+              portalFirm: editQuote.portalFirm ?? null,
+              portalReview: null,
+              portalAcceptance: editQuote.portalAcceptance ?? null,
+              portalDecline: editQuote.portalDecline ?? null,
+              porItems: [],
+              back: `/inspections/quote?id=${encodeURIComponent(editQuote.id)}`,
+            }
+          : null,
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;

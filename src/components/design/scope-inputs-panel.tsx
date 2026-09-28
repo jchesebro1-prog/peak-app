@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { CSSProperties } from "react";
+import { assemblyOptionLabel, groupAssemblies, type AssemblyPickerOption } from "@/lib/fixture-assemblies";
 import {
   DIMSCHEMA,
   LIM,
@@ -89,8 +90,10 @@ export default function ScopeInputsPanel({
    * 8), or the 5 catalog-trackable systems for Manual mode. */
   systems: SysKey[];
   /** Catalog-backed lighting assembly picker (Auto/Quick Design only) —
-   * Manual-mode caller simply omits it and the sub-picker never renders. */
-  fixtureAssemblies?: Array<{ id: string; name: string }>;
+   * Manual-mode caller simply omits it and the sub-picker never renders.
+   * #247: every Assembly Builder kind, shown grouped Fixtures / Systems /
+   * Hardware. */
+  fixtureAssemblies?: AssemblyPickerOption[];
   accentHex: string;
 }) {
   const [sec, setSec] = useState({ venue: true, size: true, dims: true, systems: true });
@@ -100,6 +103,7 @@ export default function ScopeInputsPanel({
   /** A fixture pick whose assembly is no longer offered (deleted) — fix wave
    *  3, I2: it prices needs-a-part, so the picker shows it and lets it be changed. */
   const fixtureAssemblies = fixtureAssembliesProp || [];
+  const assemblyGroups = groupAssemblies(fixtureAssemblies);
   const liveAssemblyIds = new Set(fixtureAssemblies.map((x) => x.id));
   const isDeadPick = (fxKey: string) => {
     const id = value.fixtureAssemblies?.[fxKey];
@@ -290,8 +294,12 @@ export default function ScopeInputsPanel({
                           >
                             {isDeadPick(fxKey) && <option value={value.fixtureAssemblies![fxKey]}>(deleted — choose another)</option>}
                             <option value="">Generic allowance</option>
-                            {fixtureAssemblies.map((assembly) => (
-                              <option key={assembly.id} value={assembly.id}>{assembly.name}</option>
+                            {assemblyGroups.map((g) => (
+                              <optgroup key={g.kind} label={g.label}>
+                                {g.items.map((assembly) => (
+                                  <option key={assembly.id} value={assembly.id}>{assemblyOptionLabel(assembly)}</option>
+                                ))}
+                              </optgroup>
                             ))}
                           </select>
                         </label>

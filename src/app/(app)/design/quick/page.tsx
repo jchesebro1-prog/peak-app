@@ -4,7 +4,7 @@ import { can } from "@/lib/team";
 import { getDesign } from "@/lib/stores/designs";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { list as catalogList } from "@/lib/stores/catalog";
-import { fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
+import { allAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { loadWireLaborRules, num } from "@/lib/stores/pricing";
 import { reviewers } from "@/lib/users";
@@ -53,9 +53,12 @@ export default async function Page({
   if (design?.layoutMode === "manual") {
     redirect(design.gridProjectId ? `/design/grid/${encodeURIComponent(design.gridProjectId)}` : "/design/designs");
   }
-  // #210: fixtures (not systems) under their kept ids — included parts only.
-  const fixtureList = fixtureAssembliesFrom(fixtureRecords, catalogRows);
-  // The Equipment map price table (#211) plus each pickable fixture's price,
+  // #247: every Assembly Builder kind — fixtures, systems and hardware, under
+  // their kept ids (was fixtures only, #210/D298). A system or hardware pick
+  // prices like a fixture pick: priceCell's assembly branch resolves every
+  // kind (its parts list), per lighting-row unit.
+  const fixtureList = allAssembliesFrom(fixtureRecords, catalogRows);
+  // The Equipment map price table (#211) plus each pickable assembly's price,
   // built from the catalog and fixtures this request already loaded (no
   // second load of either). A fixture pick prices through the SAME resolver
   // as an Equipment map assembly cell (priceCell, final review I3): its
@@ -71,7 +74,13 @@ export default async function Page({
     [...new Set([...fixtureList.map((f) => f.id), ...(design ? pickedFixtureIds(design) : [])])],
     { catalog: catalogRows, fixtures: fixtureRecords }
   );
-  const fixtureAssemblies = fixtureList.map((assembly) => ({ id: assembly.id, name: assembly.name }));
+  // #247: kind (and a system's scope) ride along so the picker can group them.
+  const fixtureAssemblies = fixtureList.map((assembly) => ({
+    id: assembly.id,
+    name: assembly.name,
+    ...(assembly.kind ? { kind: assembly.kind } : {}),
+    ...(assembly.scope ? { scope: assembly.scope } : {}),
+  }));
 
   return (
     <CanMapProvider canMap={can("manage_users", user.roles)}>
