@@ -28,7 +28,7 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { travelForId } from "@/lib/stores/customers";
-import { clearPricedPor } from "@/lib/portal-quote-mode";
+import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
 import type { QuoteLite, TravelLite } from "./types";
 import type { DraftedLine } from "./ai-scope-modal";
@@ -347,10 +347,15 @@ export async function saveQuoteAction(
   // the customer's "in review" copy and every portal-only rule for good.
   // Every other quote keeps the prior unconditional "estimator" stamp.
   const prior = loadedId ? await get(loadedId) : null;
+  // #246 Task 4: source stamping goes through the shared sourceForSave —
+  // portal-catalog (the only portal source the Estimator ever loads; a
+  // portal-service quote redirects to its own builder before reaching here)
+  // keeps its source across this save exactly like before.
+  const savedSource = sourceForSave(prior?.source, "estimator");
   // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
   // item staff have now priced; `portalReview` clears once none remain —
   // scoped to a portal-catalog quote so no other save's behavior changes.
-  const isPortalCatalog = prior?.source === "portal-catalog";
+  const isPortalCatalog = savedSource === "portal-catalog";
   const { sections: savedSections, anyPor } = isPortalCatalog
     ? clearPricedPor(payload.sections)
     : { sections: payload.sections, anyPor: false };
@@ -378,7 +383,7 @@ export async function saveQuoteAction(
     category: (payload.category || "").trim(),
     value: priced.value,
     margin: priced.margin,
-    source: isPortalCatalog ? "portal-catalog" : "estimator",
+    source: savedSource,
     spec: { sections: savedSections, mobs: payload.mobs },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
     ...(isPortalCatalog && !anyPor ? { portalReview: null } : {}),

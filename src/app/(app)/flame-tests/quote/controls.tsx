@@ -7,6 +7,8 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel";
 import type { CSSProperties } from "react";
 import { saveFlameQuote, approveFlameQuote } from "./actions";
+import { PortalPanel } from "@/app/(app)/estimator/portal-panel";
+import type { PortalPanelData } from "@/app/(app)/estimator/types";
 import { CustomerCombobox } from "@/components/customer-combobox";
 import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
@@ -102,6 +104,8 @@ export type BuilderInitial = {
   travel?: TravelOverride | null;
   /** #217: the typed total to reopen with (null = auto). */
   priceOverride?: number | null;
+  /** #246 Task 4 — set only for a loaded `source === "portal-service"` quote. */
+  portal?: PortalPanelData | null;
 };
 
 /* ---------- inlined pure pricing (port of flametest-engine.ts) ---------- */
@@ -631,6 +635,8 @@ export function QuoteBuilder({
           </div>
         </div>
       </div>
+
+      {initial.portal && <PortalPanel data={initial.portal} onApprove={doApprove} approving={pending} />}
 
       <div
         className="ftq-grid"

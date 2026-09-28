@@ -10636,6 +10636,7 @@ seeded()
   .then(() => portal246GenerateAsyncChecks())
   .then(() => portal246RefreshAsyncChecks())
   .then(() => portal246Task3AsyncChecks())
+  .then(() => portal246Task4AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -29304,6 +29305,18 @@ import { portalBellGroups as d245BellGroups } from "@/lib/portal-bell";
   ok(generatedIds.includes("Q-firm-recent"), "#245 bell: a firm portal quote generated 10h ago is a 'new portal quote'");
   ok(!generatedIds.includes("Q-firm-stale"), "#245 bell: a firm portal quote generated 80h ago has aged off the 72h window");
   ok(!generatedIds.includes("Q-firm-other"), "#245 bell: another owner's firm generation never shows on my bell");
+
+  // #246 Task 4: portal-service (flame/inspection self-serve) joins the
+  // "New portal quotes" group exactly like portal-catalog; it never joins
+  // the review group (service pricing is never price-on-request).
+  const svcFirmRecent = { ...base, id: "Q-svc-firm-recent", source: "portal-service", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 10 * HOUR, validUntil: NOW + 1000 } };
+  const svcFirmStale = { ...base, id: "Q-svc-firm-stale", source: "portal-service", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 80 * HOUR, validUntil: NOW + 1000 } };
+  const g2 = d245BellGroups([...( [mine, someoneElse, unowned, notPortal, firmRecent, firmStale, firmOther] as never[]), svcFirmRecent, svcFirmStale] as never, ME, NOW);
+  const generatedIds2 = g2.generated.map((i) => i.id);
+  const reviewIds2 = g2.review.map((i) => i.id);
+  ok(generatedIds2.includes("Q-svc-firm-recent"), "#246 bell: a firm portal-service quote generated 10h ago is a 'new portal quote'");
+  ok(!generatedIds2.includes("Q-svc-firm-stale"), "#246 bell: a firm portal-service quote generated 80h ago has aged off the 72h window");
+  ok(!reviewIds2.includes("Q-svc-firm-recent"), "#246 bell: portal-service never joins the review group, even with a stray portalReview elsewhere on the doc");
 }
 
 import { groupCandidatesByDatasheet as d245GroupByDatasheet, thumbnailCandidates as d245ThumbCandidates } from "@/lib/part-docs/thumbnail-plan";
@@ -30676,6 +30689,7 @@ import {
   serviceQuoteName as d246Name,
   GENERATE_LIMIT as d246GenLimit,
   GENERATE_RATE_COPY as d246GenRateCopy,
+  GENERATE_BUSY_COPY as d246GenBusyCopy,
 } from "@/lib/portal-service-quotes";
 import { displayQuoteNumber as d246Display } from "@/lib/estimate-number";
 
@@ -30693,14 +30707,19 @@ import { displayQuoteNumber as d246Display } from "@/lib/estimate-number";
     "#246 serviceQuoteName: a long venue list truncates the name to 120 chars");
 }
 
-// ---- pure: portalListsQuote treats portal-service like portal-catalog ----
+// ---- pure: portalListsQuote — a portal-service DRAFT is never listed (Task 4, carried from Task 2 review) ----
 {
   const base246 = { id: "x", customerId: "c-portal", status: "draft" as const, source: "portal-service", portalAcceptance: null, portalReview: null };
-  ok(QuoteStore.portalListsQuote(base246, "c-portal"),
-    "#246 portalListsQuote: a portal-service quote (even in draft status) is listed for its own customer, same as portal-catalog");
-  ok(!QuoteStore.portalListsQuote(base246, "c-other"), "#246 portalListsQuote: tenant scoping is unchanged for portal-service");
+  ok(!QuoteStore.portalListsQuote(base246, "c-portal"),
+    "#246 portalListsQuote: a portal-service quote recalled to draft by staff is NOT listed — service quotes are never review quotes, and a staff recall must not surface an in-progress edit to the customer");
+  ok(QuoteStore.portalListsQuote({ ...base246, status: "sent" as const }, "c-portal"),
+    "#246 portalListsQuote: the same quote, sent, IS listed for its own customer");
+  ok(!QuoteStore.portalListsQuote({ ...base246, status: "sent" as const }, "c-other"),
+    "#246 portalListsQuote: tenant scoping is unchanged for portal-service");
+  ok(QuoteStore.portalListsQuote({ ...base246, source: "portal-catalog" }, "c-portal"),
+    "#246 portalListsQuote: a portal-catalog draft is still listed — only portal-service drafts are hidden");
   ok(!QuoteStore.portalListsQuote({ ...base246, source: "estimator" }, "c-portal"),
-    "#246 portalListsQuote: an ordinary internal draft (not portal-self-serve/portal-catalog/portal-service) is still hidden");
+    "#246 portalListsQuote: an ordinary internal draft (not portal-self-serve/portal-catalog) is still hidden");
 }
 
 // ---- pure: portalDocumentExtras (widened #245 helper) reused by the letters ----
@@ -30829,6 +30848,25 @@ async function portal246GenerateAsyncChecks(): Promise<void> {
     for (let i = 0; i < d246GenLimit; i++) d245RateLimit("portal-service-generate:" + rlGrant, d246GenLimit, 3_600_000);
     const rl = await d246Generate({ ...sess, grantId: rlGrant }, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 5 }] }, { now: NOW, schedulePdf: false });
     ok(d246GenLimit === 10 && !rl.ok && rl.error === d246GenRateCopy, "#246 generate: the 11th Generate in an hour on one grant is refused");
+
+    // In-flight guard (Task 4, carried from Task 2 review): two concurrent
+    // Generate calls for the SAME grant never mint two quotes — the second
+    // is refused "busy" while the first is still writing.
+    const raceGrant = fixtureId(246, "gen-grant-race");
+    const raceReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 5 }] };
+    const [raceA, raceB] = await Promise.all([
+      d246Generate({ ...sess, grantId: raceGrant }, raceReq, { now: NOW, schedulePdf: false }),
+      d246Generate({ ...sess, grantId: raceGrant }, raceReq, { now: NOW, schedulePdf: false }),
+    ]);
+    const raceResults = [raceA, raceB];
+    const raceOks = raceResults.filter((r) => r.ok);
+    const raceBusy = raceResults.filter((r) => !r.ok && r.error === d246GenBusyCopy);
+    ok(
+      raceOks.length === 1 && raceBusy.length === 1,
+      "#246 generate: two concurrent Generate calls on one grant resolve to exactly one success and one 'busy' refusal — " +
+        JSON.stringify(raceResults)
+    );
+    if (raceOks[0]?.ok) registerFixture("quotes", (raceOks[0] as { ok: true; quoteId: string }).quoteId);
   } finally {
     await removeCustomer(CO);
     await removeCustomer(CO2);
@@ -31045,5 +31083,136 @@ async function portal246Task3AsyncChecks(): Promise<void> {
   } finally {
     await removeCustomer(CO);
     await removeCustomer(CO_OTHER);
+  }
+}
+
+/* ======================================================================
+   Portal service quotes — Task 4: staff side (#246 Task 4; spec §5).
+   Pure checks (sourceForSave, source-grep on the generalized panel/
+   builders/bell/badge/company line) run at top level; the DB-backed
+   approve→won→spawn check is registered in the async chain as
+   portal246Task4AsyncChecks().
+   ====================================================================== */
+import { sourceForSave as d246SourceForSave } from "@/lib/portal-quote-mode";
+import { remove as d246RemoveFlameJob } from "@/lib/stores/flame-jobs";
+
+// ---- pure: sourceForSave ----
+{
+  ok(d246SourceForSave("portal-catalog", "estimator") === "portal-catalog",
+    "#246 sourceForSave: a portal-catalog prior source survives a save that would otherwise stamp the builder's own source");
+  ok(d246SourceForSave("portal-service", "flametest") === "portal-service",
+    "#246 sourceForSave: a portal-service prior source survives a flame-test builder save");
+  ok(d246SourceForSave("portal-service", "inspection") === "portal-service",
+    "#246 sourceForSave: a portal-service prior source survives an inspection builder save");
+  ok(d246SourceForSave("estimator", "flametest") === "flametest",
+    "#246 sourceForSave: any other prior source takes the builder's own fallback stamp");
+  ok(d246SourceForSave(undefined, "estimator") === "estimator",
+    "#246 sourceForSave: no prior quote at all (a fresh create) takes the builder's fallback stamp");
+  ok(d246SourceForSave(null, "inspection") === "inspection",
+    "#246 sourceForSave: a null prior source (same as undefined) takes the builder's fallback stamp");
+}
+
+// ---- source-grep: the generalized panel, its builder wiring, and the widened bell/badge/company line ----
+{
+  const readSrc246 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  const panelSrc246 = readSrc246("src/app/(app)/estimator/portal-panel.tsx");
+  ok(panelSrc246.includes("onApprove") && panelSrc246.includes("approving"),
+    "#246 portal-panel: PortalPanel takes an optional onApprove/approving pair instead of always posting the default won-status form");
+  ok(panelSrc246.includes("declinePortalAcceptanceAction"),
+    "#246 portal-panel: Decline still reuses declinePortalAcceptanceAction unchanged — no separate decline path for the builders");
+
+  for (const [dir, actionsFile] of [
+    ["flame-tests", "flametest"],
+    ["inspections", "inspection"],
+  ] as const) {
+    const actionsSrc246 = readSrc246(`src/app/(app)/${dir}/quote/actions.ts`);
+    ok(actionsSrc246.includes("sourceForSave") && actionsSrc246.includes(`sourceForSave(existingForMarker?.source, "${actionsFile}"`),
+      `#246 ${dir}/quote/actions.ts: persist() stamps source through sourceForSave, keeping a loaded portal-service quote's source`);
+
+    const controlsSrc246 = readSrc246(`src/app/(app)/${dir}/quote/controls.tsx`);
+    ok(
+      controlsSrc246.includes("<PortalPanel") &&
+        controlsSrc246.includes("onApprove={doApprove}") &&
+        controlsSrc246.includes('initial.portal &&'),
+      `#246 ${dir}/quote/controls.tsx: renders the shared PortalPanel only for a loaded portal quote, Approve wired to the builder's own engine-owned approve step`
+    );
+
+    const pageSrc246 = readSrc246(`src/app/(app)/${dir}/quote/page.tsx`);
+    ok(pageSrc246.includes('editQuote.source === "portal-service"'),
+      `#246 ${dir}/quote/page.tsx: the Portal panel's data is built only for a loaded portal-service quote`);
+  }
+
+  const estimatorActionsSrc246 = readSrc246("src/app/(app)/estimator/actions.ts");
+  ok(estimatorActionsSrc246.includes("sourceForSave(prior?.source"),
+    "#246 estimator/actions.ts: saveQuoteAction's source stamp now goes through the shared sourceForSave (D416 generalized)");
+
+  const hubSrc246 = readSrc246("src/app/(app)/quotes/page.tsx");
+  ok(hubSrc246.includes('q.source === "portal-catalog" || q.source === "portal-service"'),
+    "#246 quotes/page.tsx: the Portal badge shows for portal-service quotes too");
+
+  const companySrc246 = readSrc246("src/app/(app)/companies/[id]/page.tsx");
+  ok(companySrc246.includes('qt.source === "portal-catalog" || qt.source === "portal-service"'),
+    "#246 companies/[id]/page.tsx: 'Portal activity' counts both portal sources");
+
+  const bellSrc246 = readSrc246("src/lib/portal-bell.ts");
+  ok(bellSrc246.includes('(q.source === "portal-catalog" || q.source === "portal-service")'),
+    "#246 portal-bell.ts: 'New portal quotes' (the generated group) includes portal-service");
+}
+
+async function portal246Task4AsyncChecks(): Promise<void> {
+  const CO = fixtureId(246, "t4-co");
+
+  try {
+    const owner = (await activeUsers())[0]?.name || "Test Harness";
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 T4 Co",
+      type: "Education",
+      pricingTier: "silver",
+      owner,
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }],
+      contacts: [],
+    });
+
+    /* Approve (spec §5, controller decision 7): the flame builder's
+     * approveFlameQuote is persist() (a plain re-save — proven to keep
+     * `source: "portal-service"` above) then EXACTLY this setStatus call
+     * with the engine-owned-flow bypass. A real generate → accept → approve
+     * round trip through the "use server" action needs a browser session
+     * (requireUser() + redirect()), so — per the brief, following the
+     * existing #170/#217 pattern (quoteSpawnAsyncChecks) — this drives the
+     * lib-level body the action calls: a portal-service flame_test quote,
+     * already sent and customer-accepted, transitions to won and spawns its
+     * flame job exactly like a staff Approve click would. */
+    const q4 = await QuoteStore.create({
+      name: "#246 T4 harness flame quote",
+      quoteType: "flame_test",
+      customer: "Test246 T4 Co",
+      customerId: CO,
+      locationId: "v1",
+      value: 1500,
+      margin: 0.3,
+      source: "portal-service",
+      owner,
+      flameTest: { venues: [{ id: "v1", label: "Main Hall", curtains: 10 }] },
+    });
+    registerFixture("quotes", q4.id);
+    await QuoteStore.setStatus(q4.id, "sent", owner, { bypassApprovalGate: "engine-owned-flow" });
+    await QuoteStore.update(q4.id, {
+      portalFirm: { generatedAt: Date.now(), validUntil: Date.now() + 30 * 86400000 },
+      portalAcceptance: { at: Date.now(), by: "Pat Buyer", byEmail: "pat@example.com" },
+    });
+    ok(await flameByQuote(q4.id) === null, "#246 Task 4 approve: no flame job exists before approval");
+
+    await QuoteStore.setStatus(q4.id, "won", owner, { bypassApprovalGate: "engine-owned-flow" });
+    const approved4 = await QuoteStore.get(q4.id);
+    ok(!!approved4 && approved4.status === "won" && approved4.source === "portal-service",
+      "#246 Task 4 approve: the builder's approve path (engine-owned-flow → won) leaves a portal-service quote won, source intact");
+    const job4 = await flameByQuote(q4.id);
+    ok(!!job4, "#246 Task 4 approve: approving a portal-service flame quote through the builder's approve path spawns its flame job");
+    if (job4) await d246RemoveFlameJob(job4.id);
+  } finally {
+    await removeCustomer(CO);
   }
 }

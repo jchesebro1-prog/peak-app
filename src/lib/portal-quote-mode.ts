@@ -52,6 +52,20 @@ export function looksLikeCardNumber(text: string): boolean {
   }
   return false;
 }
+/**
+ * #246 Task 4 (spec §5, the D416 pattern generalized) — a builder save must
+ * never reclassify a portal-generated quote away from its portal source:
+ * once a quote is `portal-catalog` or `portal-service`, every later save (the
+ * Estimator, the flame-test builder, the inspection builder) keeps that
+ * source, so the Portal panel, the customer's portal listing and this
+ * quote's acceptance/refresh rules never silently drop. Any other prior
+ * source (or no prior quote at all — a fresh create) takes the builder's own
+ * fallback stamp. Pure.
+ */
+export function sourceForSave(prior: string | null | undefined, builderSource: string): string {
+  return prior === "portal-catalog" || prior === "portal-service" ? prior : builderSource;
+}
+
 export const PURCHASE_METHODS = ["po", "card", "check", "other"] as const;
 export const PURCHASE_METHOD_LABEL: Record<(typeof PURCHASE_METHODS)[number], string> = { po: "Purchase order", card: "Credit card", check: "Check", other: "Other" };
 

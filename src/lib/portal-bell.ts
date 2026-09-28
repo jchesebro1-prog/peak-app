@@ -18,10 +18,14 @@ function mineOrUnassigned(owner: string, me: string): boolean {
 /**
  * Two derived groups (spec §8.2, supersedes §4.2/§4.3's bell/queue text):
  * - `review` — a portal-catalog quote still stamped `portalReview` (any
- *   price-on-request line), waiting on Peak to send it.
- * - `generated` — a firm portal-catalog quote (`portalFirm`) sent within the
- *   last 72h, so the team notices new customer-generated business quickly
- *   without it lingering once stale.
+ *   price-on-request line), waiting on Peak to send it. Portal-service
+ *   quotes never carry `portalReview` (service pricing is never
+ *   price-on-request, #246 spec §3), so this group stays portal-catalog only.
+ * - `generated` — a firm quote (`portalFirm`) sent within the last 72h, so
+ *   the team notices new customer-generated business quickly without it
+ *   lingering once stale. #246 Task 4: widened to portal-service (flame/
+ *   inspection quotes generated from the customer's own service intake) —
+ *   both portal sources land here.
  * Both are mine-or-unassigned only, matching every other bell group.
  */
 export function portalBellGroups(
@@ -34,7 +38,7 @@ export function portalBellGroups(
   );
   const generated = quotes.filter(
     (q) =>
-      q.source === "portal-catalog" &&
+      (q.source === "portal-catalog" || q.source === "portal-service") &&
       !!q.portalFirm &&
       q.status === "sent" &&
       mineOrUnassigned(q.owner, me) &&

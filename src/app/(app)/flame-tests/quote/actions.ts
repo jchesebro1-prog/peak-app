@@ -19,6 +19,7 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
 import { flameVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
+import { sourceForSave } from "@/lib/portal-quote-mode";
 
 /**
  * Flame-test quote mutations (server port of Flame Test Quote.dc.html
@@ -145,7 +146,10 @@ async function persist(formData: FormData): Promise<string | null> {
     margin: r.effectiveMargin,
     pricingTier: tier.tier,
     tierMargin: tier.margin,
-    source: "flametest",
+    // #246 Task 4 (spec §5): a portal-generated quote (source
+    // "portal-service") keeps that source across a staff save — the same
+    // rule the Estimator applies to portal-catalog (D416).
+    source: sourceForSave(existingForMarker?.source, "flametest"),
     quoteType: "flame_test",
     // #242 final: the owner is set when the quote is CREATED (below) and kept
     // on every later save — the review limit follows the quote's owner, never

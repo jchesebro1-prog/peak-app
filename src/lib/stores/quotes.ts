@@ -429,17 +429,21 @@ type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "porta
 
 /** Customer portal list rule: the grant's customer's published quotes plus
  *  their own self-serve drafts (the retired estimate builder's
- *  "portal-self-serve", #245's "portal-catalog" review quotes, and #246's
- *  "portal-service" flame/inspection quotes) — never an internal draft,
- *  never imported Daylite history. */
+ *  "portal-self-serve" and #245's "portal-catalog" review quotes) — never an
+ *  internal draft, never imported Daylite history. #246 Task 4 (carried from
+ *  Task 2 review): a "portal-service" DRAFT is deliberately NOT listed —
+ *  service quotes are never review quotes (Generate always sends them at
+ *  once, firm), so the only way one is ever in draft is a staff recall
+ *  (setStatus back to draft) — and that must not surface an in-progress
+ *  staff edit to the customer. A sent/won/etc portal-service quote is still
+ *  listed via the `status !== "draft"` branch below. */
 export function portalListsQuote(q: PortalQuoteFields, customerId: string): boolean {
   if (!customerId || q.customerId !== customerId) return false;
   if (isImportedHistoryQuote(q)) return false;
   return (
     q.status !== "draft" ||
     q.source === "portal-self-serve" ||
-    q.source === "portal-catalog" ||
-    q.source === "portal-service"
+    q.source === "portal-catalog"
   );
 }
 

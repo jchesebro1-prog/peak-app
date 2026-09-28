@@ -26,6 +26,7 @@ import { driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
 import { inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
+import { sourceForSave } from "@/lib/portal-quote-mode";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -157,7 +158,10 @@ async function persist(formData: FormData): Promise<string | null> {
     margin: r.effectiveMargin,
     pricingTier: tier.tier,
     tierMargin: tier.margin,
-    source: "inspection",
+    // #246 Task 4 (spec §5): a portal-generated quote (source
+    // "portal-service") keeps that source across a staff save — the same
+    // rule the Estimator applies to portal-catalog (D416).
+    source: sourceForSave(existingForMarker?.source, "inspection"),
     quoteType: "inspection",
     // #242 final: the owner is set when the quote is CREATED (below) and kept
     // on every later save — the review limit follows the quote's owner, never
