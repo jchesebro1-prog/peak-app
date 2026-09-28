@@ -1025,8 +1025,12 @@ ok(
   "go-live reset covers every business-document collection"
 );
 ok(
-  CONFIG_COLLECTIONS.join() === "subassemblies" && !resetCollections.includes("subassemblies"),
+  CONFIG_COLLECTIONS.join() === "subassemblies,spec_records,spec_record_revisions" && !resetCollections.includes("subassemblies"),
   "#210 final review M5: the go-live reset keeps the Assembly Builder's fixtures/systems (configuration, like settings)"
+);
+ok(
+  !resetCollections.includes("spec_records") && !resetCollections.includes("spec_record_revisions"),
+  "spec-records: the go-live reset keeps Spec Library records — they're authored content, not demo data, and unlike spec_templates/spec_articles they have no starter seed to reseed from"
 );
 {
   const settingsActions = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
@@ -10643,6 +10647,7 @@ seeded()
   .then(() => portal250FixRound1AsyncChecks())
   .then(() => portal252AsyncChecks())
   .then(() => specRecordsAsyncChecks())
+  .then(() => specRecordsStoreAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32448,4 +32453,32 @@ async function specRecordsAsyncChecks(): Promise<void> {
   ok(!R.sameSpecContent(ready, { ...ready, specText: "y" }), "records: sameSpecContent sees text changes");
   ok(R.nextSpecIdFor("26 09 61", ["PS-260961-028", "PS-260961-007", "PS-116123-010"]) === "PS-260961-029"
     && R.nextSpecIdFor("11 61 99", []) === "PS-116199-001", "records: nextSpecIdFor");
+}
+
+/* ---- Spec records store (§1.2) ----
+ * DB-backed (the harness runs on a temp PGlite) — like every other async
+ * check in this file, its own named async function wired into the promise
+ * chain rather than a bare top-level `{ }` block (esbuild's cjs output
+ * refuses real top-level await). */
+async function specRecordsStoreAsyncChecks(): Promise<void> {
+  const S = await import("@/lib/stores/spec-records");
+  const R = await import("@/lib/specs/records");
+  const rec = R.normalizeSpecRecord({ specId: "PS-TEST-001", kind: "system", status: "ready", section: "11 61 23", article: "A",
+    title: "T", matchKey: "Test – Key", specText: "Line one", mfrNumbers: [], includeWith: [], sourceArticleId: "ar-t" })!;
+  const a = await S.saveSpecRecord(rec, "Tester", "first");
+  ok(a.outcome === "created" && a.record.revision === 1, "spec-records store: first save creates revision 1");
+  const b = await S.saveSpecRecord({ ...rec, updatedAt: 5 }, "Tester", "noop");
+  ok(b.outcome === "unchanged" && (await S.specRecordRevisions("PS-TEST-001")).length === 0, "spec-records store: identical content is a no-op");
+  const c = await S.saveSpecRecord({ ...rec, specText: "Line two" }, "Tester", "edit");
+  const revs = await S.specRecordRevisions("PS-TEST-001");
+  ok(c.outcome === "updated" && c.record.revision === 2 && revs.length === 1 && revs[0].record.specText === "Line one" && revs[0].why === "edit",
+    "spec-records store: an edit bumps revision and keeps the prior version with why");
+  const r = await S.restoreSpecRecordRevision("PS-TEST-001", 1, "Tester");
+  ok(r.ok && r.record.revision === 3 && r.record.specText === "Line one" && (await S.specRecordRevisions("PS-TEST-001")).length === 2,
+    "spec-records store: restore is a new revision, history never shrinks");
+  ok((await S.nextSpecId("11 61 23")).startsWith("PS-116123-"), "spec-records store: nextSpecId uses the section digits");
+  const dt = readFileSync(join(process.cwd(), "src/db/doc-tables.ts"), "utf8");
+  ok(dt.includes('docTable("spec_records")') && dt.includes('docTable("spec_record_revisions")'), "spec-records: both doc tables registered");
+  const sql = readFileSync(join(process.cwd(), "drizzle/0033_spec_records.sql"), "utf8");
+  ok(/CREATE TABLE IF NOT EXISTS "spec_records"/.test(sql) && /spec_record_revisions_seq_bump/.test(sql), "spec-records: migration 0033 is idempotent with seq-bump triggers");
 }

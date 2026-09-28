@@ -153,8 +153,20 @@ export async function seedDemoCollections(): Promise<number> {
  * survive the go-live reset like settings do. `subassemblies` holds the
  * Assembly Builder's fixtures and systems (#210) — before the merge those
  * assemblies lived in settings, which the reset has always kept.
+ *
+ * `spec_records`/`spec_record_revisions` (Spec Library records, spec
+ * 2026-09-28-spec-records-design.md §1.1) are real authored library content,
+ * not demo business records — a spec is written once and reused across
+ * every job that specs the same product. Unlike `spec_templates`/
+ * `spec_articles` (which the reset DOES wipe, but which then auto-reseed
+ * from starter fixtures on next startup — see seedIfEmpty below), a wiped
+ * spec record has no seed to reseed from, so it must never be wiped.
  */
-export const CONFIG_COLLECTIONS: readonly CollectionName[] = ["subassemblies"];
+export const CONFIG_COLLECTIONS: readonly CollectionName[] = [
+  "subassemblies",
+  "spec_records",
+  "spec_record_revisions",
+];
 
 export const DEMO_COLLECTIONS: CollectionName[] = (Object.keys(
   DOC_TABLES

@@ -232,6 +232,13 @@
       "when": 1790525452581,
       "tag": "0032_portal_carts",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790630055458,
+      "tag": "0033_spec_records",
+      "breakpoints": true
     }
   ]
 }

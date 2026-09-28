@@ -96,6 +96,8 @@ export const partDocuments = docTable("part_documents"); // Part documents (#207
 export const partDocumentLinks = docTable("part_document_links"); // Part documents (#207) — one row per part↔document, soft-deleted to detach; migration 0026_part_documents
 export const partAccessoryLinks = docTable("part_accessory_links"); // Part documents (#207) — the fixture→accessory graph that computes accessory coverage; migration 0026_part_documents
 export const specDocuments = docTable("spec_documents"); // Spec builder (#205 Phase B) — one saved spec per CSI section: header, products, fill-in answers; migration 0027_spec_documents
+export const specRecords = docTable("spec_records"); // Spec Library records — one record per product/system/companion spec, matched against BOM rows (spec 2026-09-28-spec-records-design.md §1.1); migration 0033_spec_records
+export const specRecordRevisions = docTable("spec_record_revisions"); // Spec Library records — prior versions of a spec_records row, one per past revision, id `${specId}@${revision}` (spec §1.2); migration 0033_spec_records
 export const documents = docTable("documents"); // Documents (#218) — company/venue/project files in private Blob, shared both ways through the portal; migration 0029_documents
 export const portalCarts = docTable("portal_carts"); // Portal catalog (#245) — one cart per portal grant; never a quote row until Generate; migration 0032_portal_carts
 
@@ -138,6 +140,8 @@ export const DOC_TABLES = {
   spec_documents: specDocuments,
   documents,
   portal_carts: portalCarts,
+  spec_records: specRecords,
+  spec_record_revisions: specRecordRevisions,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
