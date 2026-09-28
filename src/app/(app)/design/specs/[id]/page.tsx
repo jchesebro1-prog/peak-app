@@ -4,6 +4,7 @@ import { can } from "@/lib/team";
 import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { placeProduct } from "@/lib/specs/assemble-section";
 import { articleIdForPart } from "@/lib/specs/articles";
+import { specRowKey } from "@/lib/specs/record-keys";
 import { specCustomerOptions } from "../customer-options";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import Builder, { type SpecProductRow } from "./builder";
@@ -41,8 +42,16 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
     const placement = section ? placeProduct(p, part, section.id, articles, sections) : null;
     const otherArticleId = placement && !placement.ok && placement.reason === "other-section" ? placement.articleId : undefined;
     return {
+      // Row identity (spec records design §3.1) computed here, server-side,
+      // from the STORED product — a sku-less row's mfrNumber/specKey/specId/
+      // fromLibrary never reach the client any other way, and re-deriving
+      // this on the client from the display-only fields below would collapse
+      // every such row to the same `DESC:` key (#205 fix round).
+      rowKey: specRowKey(p),
       sku: part?.sku || p.sku,
-      desc: part?.desc || "",
+      // A sku-less row (allowance/vendor/curtain) has no catalog part to read
+      // a description from — fall back to the quote's own stored desc.
+      desc: part?.desc || p.desc || "",
       ...(p.qty != null ? { qty: p.qty } : {}),
       placedArticleId: placement?.ok ? placement.articleId : null,
       leftOutReason: leftOut?.reason ?? null,

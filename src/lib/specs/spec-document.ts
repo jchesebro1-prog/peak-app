@@ -177,24 +177,14 @@ export function pickSpecHeaderPatch(patch: Record<string, unknown> | null | unde
   return out;
 }
 
-/** Row-key prefixes `specRowKey` ever returns (record-keys.ts §3.1). */
-const ROW_KEY_PREFIX = /^(SKU|MPN|KEY|DESC|SPEC):/;
-
-/** `withoutProduct`/`withProductOrder`/`withProductHeader` take a row
- *  identity, but a caller may hand either a pre-computed `specRowKey(p)`
- *  (a sku-less row, or any new caller) or a bare real SKU (every caller
- *  written before #205's sku-less rows existed) — already-prefixed strings
- *  pass through untouched, anything else is treated as a sku, exactly
- *  reproducing the old case-insensitive `same(sku, sku)` match. */
-function keyFor(identity: string): string {
-  return ROW_KEY_PREFIX.test(identity) ? identity : specRowKey({ sku: identity });
-}
-
 /** Row identity everywhere on `SpecDocument` from here down (spec records
- *  design §3.1): a real SKU's row key is case-insensitive exactly like the
- *  old `same(sku, sku)` check it replaces, so every real-SKU caller keeps
- *  working unchanged; a sku-less row (allowance/vendor/system/library) now
- *  gets a stable identity too. */
+ *  design §3.1): `rowKey` is always the caller's own `specRowKey(p)` output
+ *  — a real SKU's is `SKU:<UPPER>`, already normalized, so every real-SKU
+ *  caller keeps working as long as it passes that (not a bare sku); a
+ *  sku-less row (allowance/vendor/system/library) gets a stable identity
+ *  the same way. Compared directly against `specRowKey(p)`, never guessed
+ *  at — a bare SKU that happens to start `KEY:`/`MPN:`/etc. would be
+ *  misread by any heuristic that tried to tell the two apart. */
 export function withProduct(doc: SpecDocument, p: SpecDocProduct): SpecDocument {
   const n = product(p);
   if (!n) return doc;
@@ -204,14 +194,12 @@ export function withProduct(doc: SpecDocument, p: SpecDocProduct): SpecDocument 
 }
 
 export function withoutProduct(doc: SpecDocument, rowKey: string): SpecDocument {
-  const k = keyFor(rowKey);
-  return { ...doc, products: doc.products.filter((p) => specRowKey(p) !== k) };
+  return { ...doc, products: doc.products.filter((p) => specRowKey(p) !== rowKey) };
 }
 
 export function withProductOrder(doc: SpecDocument, rowKeys: string[]): SpecDocument {
   const first: SpecDocProduct[] = [];
-  for (const rk of rowKeys) {
-    const k = keyFor(rk);
+  for (const k of rowKeys) {
     const hit = doc.products.find((p) => specRowKey(p) === k);
     if (hit && !first.includes(hit)) first.push(hit);
   }
@@ -219,11 +207,10 @@ export function withProductOrder(doc: SpecDocument, rowKeys: string[]): SpecDocu
 }
 
 export function withProductHeader(doc: SpecDocument, rowKey: string, articleId: string | null): SpecDocument {
-  const k = keyFor(rowKey);
   return {
     ...doc,
     products: doc.products.map((p) => {
-      if (specRowKey(p) !== k) return p;
+      if (specRowKey(p) !== rowKey) return p;
       const { articleId: _drop, ...rest } = p;
       void _drop;
       return articleId ? { ...rest, articleId } : rest;
@@ -241,26 +228,19 @@ export function bomProducts(
   const out: SpecDocProduct[] = [];
   const byKey = new Map<string, SpecDocProduct>();
   for (const r of rows) {
-    const sku = str(r.sku);
-    const desc = str(r.desc);
-    const mfrNumber = str(r.mfrNumber);
-    const specKey = str(r.specKey);
-    if (!sku && !mfrNumber && !specKey && !desc) continue;
+    // Same normalizer as every other product on the doc — caps desc/
+    // mfrNumber/manufacturer/specKey the same way, and drops a row with
+    // none of sku/mfrNumber/specKey/desc (#205 fix round).
+    const n = product({ sku: r.sku, mfrNumber: r.mfrNumber, manufacturer: r.manufacturer, specKey: r.specKey, desc: r.desc });
+    if (!n) continue;
     const qty = Number(r.qty) || 0;
-    const k = specRowKey({ sku, mfrNumber, specKey, desc });
+    const k = specRowKey(n);
     const hit = byKey.get(k);
     if (hit) {
       hit.qty = (hit.qty || 0) + qty;
       continue;
     }
-    const p: SpecDocProduct = {
-      sku,
-      qty,
-      ...(mfrNumber ? { mfrNumber } : {}),
-      ...(r.manufacturer ? { manufacturer: str(r.manufacturer) } : {}),
-      ...(specKey ? { specKey } : {}),
-      ...(desc ? { desc } : {}),
-    };
+    const p: SpecDocProduct = { ...n, qty };
     byKey.set(k, p);
     out.push(p);
   }

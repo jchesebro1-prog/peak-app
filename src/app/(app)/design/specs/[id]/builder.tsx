@@ -7,7 +7,6 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import type { AssembledSection, LeftOutReason } from "@/lib/specs/assemble-section";
 import type { SpecDocument } from "@/lib/specs/spec-document";
-import { specRowKey } from "@/lib/specs/record-keys";
 import { specFileName } from "@/lib/specs/spec-file-name";
 import { writePartSpecFieldsAction } from "@/app/(app)/catalog/actions";
 import {
@@ -39,6 +38,12 @@ import Preview from "./preview";
  */
 
 export type SpecProductRow = {
+  /** Server-computed `specRowKey` of the STORED product (spec records design
+   *  §3.1, #205 fix round) — the one identity `removeSpecProductAction`/
+   *  `reorderSpecProductsAction`/`setSpecProductHeaderAction` and React keys
+   *  use. Never recompute this from display-only fields on the client: a
+   *  sku-less row's mfrNumber/specKey/specId/fromLibrary never reach here. */
+  rowKey: string;
   sku: string;
   desc: string;
   qty?: number;
@@ -398,9 +403,8 @@ function HeaderSelect({
   run: RunFn;
   pending: boolean;
 }) {
-  // The row's key (§3.1) — a real SKU's is `SKU:<UPPER>`, so this keeps
-  // matching the same product server-side that `sku` used to.
-  const rowKey = specRowKey(row);
+  // Server-computed (§3.1, #205 fix round) — see SpecProductRow.rowKey.
+  const rowKey = row.rowKey;
   return (
     <select
       className="pk-input"
@@ -467,21 +471,19 @@ function ProductsCard({
     const a = rows[i];
     const b = rows[i + dir];
     if (!a || !b) return;
-    const order = productRows.map((r) => specRowKey(r));
-    const ia = order.indexOf(specRowKey(a));
-    const ib = order.indexOf(specRowKey(b));
+    const order = productRows.map((r) => r.rowKey);
+    const ia = order.indexOf(a.rowKey);
+    const ib = order.indexOf(b.rowKey);
     [order[ia], order[ib]] = [order[ib], order[ia]];
     run(() => reorderSpecProductsAction(doc.id, order));
   };
 
   // A removed product goes back into the picker's offer.
-  const remove = (r: SpecProductRow) => {
-    const rowKey = specRowKey(r);
-    return run(
-      () => removeSpecProductAction(doc.id, rowKey),
+  const remove = (r: SpecProductRow) =>
+    run(
+      () => removeSpecProductAction(doc.id, r.rowKey),
       () => setAdded((a) => a.filter((s) => s.toUpperCase() !== r.sku.toUpperCase()))
     );
-  };
 
   const onPick = async (p: SpecPickerPart): Promise<void> => {
     if (p.hasSpec && p.inSection) {
@@ -572,7 +574,7 @@ function ProductsCard({
   };
 
   const productRow = (r: SpecProductRow, i: number, rows: SpecProductRow[]) => (
-    <div key={specRowKey(r)} style={ROW}>
+    <div key={r.rowKey} style={ROW}>
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
           <span style={SKU}>{r.sku}</span>

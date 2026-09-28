@@ -332,6 +332,7 @@ import {
   normalizeSpecDocument, withProduct, withoutProduct, withProductOrder, withProductHeader, bomProducts, DEFAULT_SPEC_PHASE,
   pickSpecHeaderPatch, isValidIsoDate, SPEC_FILL_IN_MAX, SPEC_HEADER_MAX, SPEC_REORDER_MAX,
 } from "@/lib/specs/spec-document";
+import { specRowKey } from "@/lib/specs/record-keys";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -19234,9 +19235,9 @@ async function gridCustomItemsAsyncChecks(): Promise<void> {
   const d2 = withProduct(d, { sku: "a" });
   ok(d2.products.length === 1, "#205 spec builder: withProduct ignores a SKU already present (case-insensitive)");
   const d3 = withProduct(withProduct(d, { sku: "B" }), { sku: "C" });
-  ok(withProductOrder(d3, ["C", "A"]).products.map((p) => p.sku).join() === "C,A,B", "#205 spec builder: withProductOrder puts listed SKUs first, keeps the rest after");
-  ok(withoutProduct(d3, "b").products.map((p) => p.sku).join() === "A,C", "#205 spec builder: withoutProduct removes case-insensitively");
-  ok(withProductHeader(d3, "C", "ar-1").products[2].articleId === "ar-1" && withProductHeader(withProductHeader(d3, "C", "ar-1"), "C", null).products[2].articleId === undefined, "#205 spec builder: withProductHeader sets and clears the per-spec header");
+  ok(withProductOrder(d3, [specRowKey({ sku: "C" }), specRowKey({ sku: "A" })]).products.map((p) => p.sku).join() === "C,A,B", "#205 spec builder: withProductOrder puts listed SKUs first, keeps the rest after");
+  ok(withoutProduct(d3, specRowKey({ sku: "b" })).products.map((p) => p.sku).join() === "A,C", "#205 spec builder: withoutProduct removes case-insensitively");
+  ok(withProductHeader(d3, specRowKey({ sku: "C" }), "ar-1").products[2].articleId === "ar-1" && withProductHeader(withProductHeader(d3, specRowKey({ sku: "C" }), "ar-1"), specRowKey({ sku: "C" }), null).products[2].articleId === undefined, "#205 spec builder: withProductHeader sets and clears the per-spec header");
   const bp = bomProducts([{ sku: "X", qty: 2 }, { sku: "x", qty: 3 }, { sku: " ", qty: 1 }, { sku: "Y", qty: 0 }]);
   ok(bp.length === 2 && bp[0].sku === "X" && bp[0].qty === 5 && bp[1].qty === 0, "#205 spec builder: bomProducts sums duplicate SKUs and drops blanks");
 }
@@ -32687,4 +32688,44 @@ async function specRecordsBomSeamAsyncChecks(): Promise<void> {
   ok(nd.products.length === 2, "bom seam: normalize keeps sku-less rows and de-dups by row key");
   const { gridSpecBomRows } = await import("@/lib/design/grid-virtual-parts");
   ok(gridSpecBomRows([{ sku: "CURTAIN", desc: "Main", qty: 1, specKey: "Stage Drapes – Main Curtain" }], () => null)[0].specKey === "Stage Drapes – Main Curtain", "bom seam: Grid curtain lines carry specKey");
+
+  /* ---- #205 fix round: withoutProduct/withProductOrder/withProductHeader
+   * act on sku-less (MPN:) and placeholder-sku (CRT-9, a KEY: row) products
+   * by their specRowKey — no keyFor heuristic, no client-side recompute. */
+  const seamProducts = SD.bomProducts([
+    { sku: "LS-P", desc: "Lonestar Prime", qty: 1 },
+    { sku: "", desc: "Sensor IQ 24", qty: 2, mfrNumber: "IQ24" },
+    { sku: "CRT-9", desc: "Main Curtain", qty: 1, specKey: "Stage Drapes – Main Curtain" },
+  ]);
+  const seam = SD.normalizeSpecDocument({ products: seamProducts });
+  const mpnKey = specRowKey({ sku: "", mfrNumber: "IQ24", desc: "Sensor IQ 24" });
+  const curtainKey = specRowKey({ sku: "CRT-9", specKey: "Stage Drapes – Main Curtain", desc: "Main Curtain" });
+  ok(
+    seam.products.length === 3 && seam.products.some((p) => specRowKey(p) === mpnKey) && seam.products.some((p) => specRowKey(p) === curtainKey),
+    "bom seam: a sku-less MPN row and a placeholder-sku (CRT-9) row both keep their own row key through normalizeSpecDocument"
+  );
+  const afterOrder = SD.withProductOrder(seam, [curtainKey, mpnKey]);
+  ok(
+    afterOrder.products.slice(0, 2).map((p) => specRowKey(p)).join() === [curtainKey, mpnKey].join(),
+    "bom seam: withProductOrder reorders the MPN and CRT-9 rows by specRowKey, not sku"
+  );
+  const afterHeader = SD.withProductHeader(seam, mpnKey, "ar-9");
+  ok(afterHeader.products.find((p) => specRowKey(p) === mpnKey)?.articleId === "ar-9", "bom seam: withProductHeader sets a header on the sku-less MPN row by its specRowKey");
+  const afterRemove = SD.withoutProduct(seam, curtainKey);
+  ok(
+    !afterRemove.products.some((p) => specRowKey(p) === curtainKey) && afterRemove.products.some((p) => specRowKey(p) === mpnKey),
+    "bom seam: withoutProduct removes the CRT-9 curtain row by its specRowKey, leaving the MPN row in place"
+  );
+
+  // Regression guard (#205 fix round, Critical): the client must never
+  // recompute a row's identity from display-only SpecProductRow fields
+  // (sku/desc) — a sku-less row's mfrNumber/specKey/specId/fromLibrary never
+  // reach the client any other way, so a client-side specRowKey(r) would
+  // collapse every such row to the same DESC: key. The server computes
+  // `rowKey` once (page.tsx) and builder.tsx must only read `.rowKey`.
+  const builderSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/[id]/builder.tsx"), "utf8");
+  ok(
+    !builderSrc.includes("specRowKey(") && /\.rowKey\b/.test(builderSrc),
+    "bom seam: builder.tsx never calls specRowKey( itself — it reads the server-computed SpecProductRow.rowKey"
+  );
 }
