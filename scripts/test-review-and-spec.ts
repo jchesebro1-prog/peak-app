@@ -10648,6 +10648,7 @@ seeded()
   .then(() => portal252AsyncChecks())
   .then(() => specRecordsAsyncChecks())
   .then(() => specRecordsStoreAsyncChecks())
+  .then(() => specRecordsImportAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32481,4 +32482,50 @@ async function specRecordsStoreAsyncChecks(): Promise<void> {
   ok(dt.includes('docTable("spec_records")') && dt.includes('docTable("spec_record_revisions")'), "spec-records: both doc tables registered");
   const sql = readFileSync(join(process.cwd(), "drizzle/0033_spec_records.sql"), "utf8");
   ok(/CREATE TABLE IF NOT EXISTS "spec_records"/.test(sql) && /spec_record_revisions_seq_bump/.test(sql), "spec-records: migration 0033 is idempotent with seq-bump triggers");
+}
+
+/* ---- Spec record import (§2) ----
+ * Needs `await` (dynamic imports of not-yet-written modules and real file
+ * reads), so like every other async check in this file it lives in its own
+ * named async function, wired into the promise chain, rather than a bare
+ * top-level `{ }` block — esbuild's cjs output refuses real top-level await. */
+async function specRecordsImportAsyncChecks(): Promise<void> {
+  const I = await import("@/lib/specs/record-import");
+  const IO = await import("@/lib/specs/record-io");
+  const v1 = JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"));
+  const parsed = I.recordsFromJson(v1);
+  ok(parsed.records.length === 46 && parsed.problems.length === 0, "record import: v1 JSON parses to 46 records, no problems");
+  // A context that has the v1 sections + every referenced article
+  const secs = ["11 61 13", "11 61 14", "11 61 23", "26 09 61"].map((n) => ({ id: "ss-" + n.replace(/ /g, ""), number: n }));
+  const arts = [...new Set(parsed.records.map((r) => r.sourceArticleId!))].map((id) => {
+    const r = parsed.records.find((x) => x.sourceArticleId === id)!;
+    return { id, sectionId: "ss-" + r.section.replace(/ /g, "") };
+  });
+  const p1 = I.planSpecRecordImport(parsed, { existing: [], sections: secs, articles: arts });
+  ok(!p1.blocking && p1.counts.created === 46 && p1.counts.archived === 1, "record import: first plan creates 46 (1 archived), nothing blocking");
+  const p2 = I.planSpecRecordImport(parsed, { existing: parsed.records, sections: secs, articles: arts });
+  ok(p2.counts.unchanged === 46 && p2.counts.created === 0 && p2.counts.updated === 0, "record import: planning against itself = 46 unchanged");
+  const dup = { records: [...parsed.records, { ...parsed.records.find((r) => r.specId === "PS-260961-028")!, specId: "PS-260961-999" }], problems: [] };
+  ok(I.planSpecRecordImport(dup, { existing: [], sections: secs, articles: arts }).problems.some((p) => p.blocking && /LS-P/.test(p.message)), "record import: a part number in two ready records blocks");
+  const noSec = I.planSpecRecordImport(parsed, { existing: [], sections: secs.slice(0, 3), articles: arts });
+  ok(noSec.missingSections.includes("26 09 61"), "record import: a missing v1 section is listed for creation");
+  // Sheet round-trip
+  const rows = [[...I.LIBRARY_HEADERS], ...parsed.records.map(I.recordToSheetRow)];
+  const back = I.recordsFromSheetRows(rows);
+  ok(back.records.length === 46 && back.records.every((r, i) => I.planSpecRecordImport({ records: [r], problems: [] }, { existing: [parsed.records[i]], sections: secs, articles: arts }).counts.unchanged === 1),
+    "record import: sheet rows round-trip every record unchanged");
+  const buf = await IO.writeLibraryWorkbook(parsed.records);
+  const rd = await IO.readLibraryWorkbook(buf);
+  ok(rd.ok && I.recordsFromSheetRows(rd.rows).records.length === 46, "record io: workbook write → read keeps 46 records");
+  const jeff = await IO.readLibraryWorkbook(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/Peak Spec Library v1.xlsx")));
+  const jr = jeff.ok ? I.recordsFromSheetRows(jeff.rows) : null;
+  ok(!!jr && jr.records.length === 46 && jr.problems.filter((p) => p.blocking).length === 0, "record io: Jeff's v1 workbook reads 46 records");
+  ok(!!jr && jr.records.every((r) => { const j = parsed.records.find((x) => x.specId === r.specId)!; return j && r.kind === j.kind && r.status === j.status && r.mfrNumbers.join("|") === j.mfrNumbers.join("|"); }),
+    "record io: workbook and JSON agree on kind, status and part numbers");
+  // Import twice through the real store
+  const S = await import("@/lib/stores/spec-records");
+  const plan = I.planSpecRecordImport(parsed, { existing: await S.allSpecRecords(), sections: secs, articles: arts });
+  await IO.commitSpecRecordImport({ ...plan, missingSections: [] }, "Tester", "Import test");
+  const again = I.planSpecRecordImport(parsed, { existing: await S.allSpecRecords(), sections: secs, articles: arts });
+  ok(again.counts.unchanged === 46, "record import: committing then re-planning = 46 unchanged (import twice → 0 changes)");
 }
