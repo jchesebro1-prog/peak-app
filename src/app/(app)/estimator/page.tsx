@@ -4,7 +4,7 @@ import { can } from "@/lib/team";
 import { get as getQuote, type Quote, type QuoteReview } from "@/lib/stores/quotes";
 import { quoteBuilderHref, estimatorShouldRedirect } from "@/lib/quote-links";
 import { byCategory, list as catalogList } from "@/lib/stores/catalog";
-import { estimatorAssembliesFrom } from "@/lib/fixture-assemblies";
+import { allAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import {
@@ -386,7 +386,7 @@ export default async function EstimatorPage({
       laborRates={laborRates}
       fixtureRates={fixtureRates}
       // #246: every Assembly Builder kind — fixtures, systems and hardware.
-      fixtureAssemblies={estimatorAssembliesFrom(fixtures, catalogRows)}
+      fixtureAssemblies={allAssembliesFrom(fixtures, catalogRows)}
       vendors={vendorNames}
       blobUploads={blobEnabled()}
       customers={customers}

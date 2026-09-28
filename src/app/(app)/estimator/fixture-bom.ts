@@ -15,7 +15,7 @@ export type FixtureBomLine = {
 };
 
 /** #246 — only a fixture has a hang position / circuit. An assembly with no
- *  `kind` (fixtureAssembliesFrom, legacy rows) is a fixture. */
+ *  `kind` (a legacy row) is a fixture. */
 export function hasHangPosition(assembly: Pick<ResolvedFixtureAssembly, "kind">): boolean {
   return (assembly.kind ?? "fixture") === "fixture";
 }
