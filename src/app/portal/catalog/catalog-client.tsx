@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type { Facet } from "@/lib/portal-search";
+import type { DeptTileVM } from "@/lib/portal-departments";
 import type { PartDetail } from "@/lib/portal-part-view";
 import { CurtainRequestButton } from "./curtain-request";
 import { PANEL_CSS } from "./panel-css";
@@ -96,6 +97,14 @@ const CSS = `
   .pc-toast a { color: #fff; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
   .pc-toast button { border: none; background: none; color: #9aa0ab; font-size: 17px; cursor: pointer; padding: 0 0 0 4px; line-height: 1; }
   .pc-empty { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 34px 24px; text-align: center; }
+  .pc-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .pc-dept-tile { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; overflow: hidden; text-decoration: none; color: inherit; display: flex; flex-direction: column; transition: box-shadow .15s, border-color .15s; }
+  .pc-dept-tile:hover { border-color: #d3d7de; box-shadow: 0 6px 18px rgba(22, 24, 29, .07); }
+  .pc-dept-media { display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 9; background: #fff; border-bottom: 1px solid #f0f1f4; padding: 10px; }
+  .pc-dept-media img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .pc-dept-body { padding: 10px 12px 12px; }
+  .pc-dept-name { font-size: 13px; font-weight: 600; color: #16181d; }
+  .pc-dept-count { font-size: 11.5px; color: #8c919c; margin-top: 2px; }
   @media (max-width: 767px) {
     .pc-body { grid-template-columns: 1fr; gap: 14px; }
     .pc-rail { display: none; position: static; }
@@ -274,6 +283,8 @@ export function CatalogClient({
   detail,
   viewer,
   fabrics,
+  dept,
+  tiles,
 }: {
   params: CatalogParams;
   previewCid: string;
@@ -285,6 +296,11 @@ export function CatalogClient({
   detail: PartDetail | null;
   viewer: { name: string; email: string };
   fabrics: Array<{ sku: string; name: string }>;
+  /** #251: the active department (resolved server-side), and the landing
+   *  page's department tiles (empty outside the true landing, or when no
+   *  departments are configured). */
+  dept: { id: string; name: string } | null;
+  tiles: DeptTileVM[];
 }) {
   const router = useRouter();
   const [toast, setToast] = useState<Toast | null>(null);
@@ -348,6 +364,16 @@ export function CatalogClient({
   return (
     <div>
       <style>{CSS + PANEL_CSS}</style>
+
+      {dept && (
+        <nav aria-label="Breadcrumb" style={{ fontSize: 12.5, marginBottom: 10 }}>
+          <Link href={catalogHref(params, { dept: "" }, previewCid)} scroll={false} style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+            All departments
+          </Link>
+          <span style={{ color: "#aab0bb", margin: "0 6px" }}>›</span>
+          <span style={{ color: "#5b616e", fontWeight: 600 }}>{dept.name}</span>
+        </nav>
+      )}
 
       <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0, flex: "1 1 320px" }}>
@@ -441,6 +467,32 @@ export function CatalogClient({
             </div>
           )}
 
+          {tiles.length > 0 && (
+            <div style={{ marginBottom: 26 }}>
+              <div className="pc-section-head">
+                <div className="pc-section-title">Departments</div>
+              </div>
+              <div className="pc-dept-grid">
+                {tiles.map((t) => (
+                  <Link key={t.id} href={catalogHref(params, { dept: t.id, page: 1 }, previewCid)} scroll={false} className="pc-dept-tile">
+                    <div className={"pc-dept-media" + (t.imageId ? "" : " pc-media-empty")}>
+                      {t.imageId ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={docSrc(t.imageId, previewCid)} alt="" loading="lazy" decoding="async" />
+                      ) : (
+                        <PlaceholderArt />
+                      )}
+                    </div>
+                    <div className="pc-dept-body">
+                      <div className="pc-dept-name">{t.name}</div>
+                      <div className="pc-dept-count">{t.count.toLocaleString("en-US")} items</div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="pc-section-head">
             <div className="pc-section-title">{browsing ? "Browse the catalog" : "Results"}</div>
             <div className="pc-section-sub" aria-live="polite">
@@ -472,6 +524,13 @@ export function CatalogClient({
                   </>
                 )}
               </div>
+              {dept && (
+                <div style={{ marginTop: 10 }}>
+                  <Link href={catalogHref(params, { dept: "" }, previewCid)} scroll={false} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+                    Search all departments
+                  </Link>
+                </div>
+              )}
             </div>
           ) : (
             <div className="pc-grid" style={{ opacity: pending ? 0.55 : 1 }}>

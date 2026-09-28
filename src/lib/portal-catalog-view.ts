@@ -32,12 +32,24 @@ export const SHELF_MAX = 12;
 const MAX_TEXT = 200;
 const MAX_FACET_VALUES = 50;
 
-export type CatalogParams = { q: string; mfr: string[]; cat: string[]; page: number; part: string };
+export type CatalogParams = { q: string; mfr: string[]; cat: string[]; page: number; part: string; dept: string };
 
 type RawParams = Record<string, string | string[] | undefined>;
 
 function first(v: string | string[] | undefined): string {
   return (Array.isArray(v) ? v[0] ?? "" : v ?? "").slice(0, MAX_TEXT);
+}
+
+/** The raw `?dept=`/client `dept` field, cleaned to a plain id string. An
+ *  id that doesn't resolve to a real department (or "other") is simply
+ *  ignored downstream (departmentFilterFor/resolveDept) — no validation
+ *  needed here beyond a length cap (#251). */
+export function cleanDeptId(raw: unknown): string {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const v = (raw as Record<string, unknown>).dept;
+    return typeof v === "string" ? v.trim().slice(0, 40) : "";
+  }
+  return "";
 }
 
 function cleanList(v: unknown): string[] {
@@ -57,7 +69,7 @@ function cleanPage(v: unknown): number {
   return Number.isFinite(n) && n >= 1 ? n : 1;
 }
 
-/** `?q=&mfr=&cat=&page=&part=` (mfr/cat may repeat) → clean params. */
+/** `?q=&mfr=&cat=&page=&part=&dept=` (mfr/cat may repeat) → clean params. */
 export function parseCatalogParams(sp: RawParams): CatalogParams {
   return {
     q: first(sp.q).trim(),
@@ -65,6 +77,7 @@ export function parseCatalogParams(sp: RawParams): CatalogParams {
     cat: cleanList(sp.cat),
     page: cleanPage(first(sp.page)),
     part: first(sp.part).trim(),
+    dept: first(sp.dept).trim(),
   };
 }
 
@@ -92,6 +105,7 @@ export function catalogHref(p: CatalogParams, over: Partial<CatalogParams> = {},
   for (const c of n.cat) u.append("cat", c);
   if (n.page > 1) u.set("page", String(n.page));
   if (n.part) u.set("part", n.part);
+  if (n.dept) u.set("dept", n.dept);
   if (previewCid) u.set("preview", previewCid);
   const s = u.toString();
   return "/portal/catalog" + (s ? "?" + s : "");

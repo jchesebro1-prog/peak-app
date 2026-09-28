@@ -125,6 +125,8 @@ export default async function PortalCatalogPage({
         detail={detail}
         viewer={{ name: session.name, email: session.email }}
         fabrics={ix.fabrics}
+        dept={result.dept}
+        tiles={result.tiles}
       />
     </PortalShell>
   );

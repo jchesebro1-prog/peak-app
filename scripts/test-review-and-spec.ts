@@ -10641,6 +10641,7 @@ seeded()
   .then(() => portal248FinalFixAsyncChecks())
   .then(() => portal250AsyncChecks())
   .then(() => portal250FixRound1AsyncChecks())
+  .then(() => portal251AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -28487,7 +28488,7 @@ import {
   ok(href === "/portal/catalog?q=led+par&mfr=ETC&mfr=Chauvet&cat=Lighting&part=SKU-1&preview=cust-9", "#245 browse: catalogHref keeps every param, drops page 1, carries preview");
   const back = d245ParseCat(Object.fromEntries([...new URL("http://x" + href).searchParams.keys()].map((k) => [k, new URL("http://x" + href).searchParams.getAll(k)])));
   ok(back.q === pc.q && eq(back.mfr, pc.mfr) && eq(back.cat, pc.cat) && back.part === pc.part, "#245 browse: catalogHref round-trips through parseCatalogParams");
-  ok(d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "" }) === "/portal/catalog", "#245 browse: empty params → bare /portal/catalog");
+  ok(d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "" }) === "/portal/catalog", "#245 browse: empty params → bare /portal/catalog");
   ok(eq(d245Toggle(["a", "b"], "a"), ["b"]) && eq(d245Toggle(["a"], "b"), ["a", "b"]), "#245 browse: toggleValue adds or removes a facet value");
 
   const cq = d245CleanQ({ q: 7, mfr: "ETC", cat: [1, "Cable", "Cable"], page: "2", pageSize: 500 });
@@ -32009,4 +32010,246 @@ async function portal250FixRound1AsyncChecks(): Promise<void> {
   } finally {
     await removeCustomer(CO250b);
   }
+}
+
+/* ======================================================================
+   #251 — the portal department tree: staff group catalog categories into
+   named departments at Catalog → Departments (src/lib/portal-departments.ts,
+   pure; src/lib/stores/portal-departments.ts, the settings-blob store); the
+   portal catalog browses by department (portal-search.ts's `dept` filter,
+   portal-catalog-browse.ts's tiles + resolution). Registered in the async
+   chain as portal251AsyncChecks().
+   ====================================================================== */
+import {
+  OTHER_DEPT as d251Other,
+  sanitizeDepartments as d251Sanitize,
+  departmentOfCategory as d251OfCategory,
+  resolveDept as d251Resolve,
+  departmentFilterFor as d251FilterFor,
+  matchesDeptFilter as d251Matches,
+  restrictToDept as d251Restrict,
+  suggestDepartments as d251Suggest,
+  departmentTiles as d251Tiles,
+  type Department as D251Dept,
+} from "@/lib/portal-departments";
+import { searchCatalog as d251Search, type SearchEntry as D251Entry } from "@/lib/portal-search";
+import { getDepartments as d251Get, saveDepartments as d251Save } from "@/lib/stores/portal-departments";
+
+function d251Entry(over: Partial<D251Entry> = {}): D251Entry {
+  return { key: "SKU-1", kind: "part", title: "Test part", sku: "SKU-1", mfr: "ETC", category: "Rigging Hardware", haystack: " test part sku-1 etc rigging hardware ", browsable: true, rank: 0, ...over };
+}
+function d251Eq(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// ---- sanitizeDepartments: names, ids, limits, category exclusivity ----
+{
+  const empty = d251Sanitize([], null);
+  ok(empty.ok && empty.value.length === 0, "#251 sanitizeDepartments: an empty list saves as an empty list");
+  ok(!d251Sanitize("nope", null).ok, "#251 sanitizeDepartments: a non-array input is refused");
+  ok(!d251Sanitize([{ name: "", categories: [] }], null).ok, "#251 sanitizeDepartments: a blank name is refused");
+  ok(!d251Sanitize([{ name: "x".repeat(41), categories: [] }], null).ok, "#251 sanitizeDepartments: a name over 40 chars is refused");
+
+  const named = d251Sanitize([{ name: "Rigging & Hoists", categories: [] }], null);
+  ok(named.ok && named.value[0].id === "rigging-hoists", "#251 sanitizeDepartments: a new department's id is a slug of its name");
+
+  const renamed = d251Sanitize([{ id: "rigging-hoists", name: "Rigging", categories: [] }], null);
+  ok(renamed.ok && renamed.value[0].id === "rigging-hoists", "#251 sanitizeDepartments: an existing id survives a rename — ids are stable across renames");
+
+  const otherClaim = d251Sanitize([{ id: "other", name: "Sneaky", categories: [] }], null);
+  ok(otherClaim.ok && otherClaim.value[0].id !== "other", '#251 sanitizeDepartments: "other" can never be claimed as a real department id — it falls back to a fresh slug');
+
+  const dupNames = d251Sanitize([{ name: "Rigging", categories: [] }, { name: "rigging", categories: [] }], null);
+  ok(!dupNames.ok && /Two departments/.test((dupNames as { error: string }).error), "#251 sanitizeDepartments: duplicate names (case-insensitive) are refused");
+
+  const dupCat = d251Sanitize(
+    [{ name: "A", categories: ["Rigging Hardware"] }, { name: "B", categories: ["Rigging Hardware"] }],
+    null
+  );
+  ok(!dupCat.ok && /already in another department/.test((dupCat as { error: string }).error), "#251 sanitizeDepartments: a category claimed by two departments is refused (at most one department per category)");
+
+  const tooMany = d251Sanitize(Array.from({ length: 31 }, (_, i) => ({ name: `D${i}`, categories: [] })), null);
+  ok(!tooMany.ok, "#251 sanitizeDepartments: 31 departments — over the 30 limit — is refused");
+  const exactly30 = d251Sanitize(Array.from({ length: 30 }, (_, i) => ({ name: `D${i}`, categories: [] })), null);
+  ok(exactly30.ok, "#251 sanitizeDepartments: exactly 30 departments is allowed");
+
+  const knownFilter = d251Sanitize([{ name: "A", categories: ["Real", "Fake"] }], ["Real"]);
+  ok(knownFilter.ok && d251Eq(knownFilter.value[0].categories, ["Real"]), "#251 sanitizeDepartments: a category the catalog doesn't have is silently dropped when knownCategories is given");
+  const noFilter = d251Sanitize([{ name: "A", categories: ["Real", "Fake"] }], null);
+  ok(noFilter.ok && d251Eq(noFilter.value[0].categories, ["Real", "Fake"]), "#251 sanitizeDepartments: knownCategories=null (a plain read) keeps every stored category, even one the catalog no longer has");
+}
+
+// ---- departmentOfCategory / resolveDept / departmentFilterFor / matchesDeptFilter / restrictToDept ----
+{
+  const depts: D251Dept[] = [
+    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware", "Truss & Pipe"] },
+    { id: "lighting", name: "Lighting", categories: ["Fixtures", "Fixture assemblies"] },
+  ];
+  const map = d251OfCategory(depts);
+  ok(map.get("Rigging Hardware") === "rigging" && map.get("Fixtures") === "lighting" && !map.has("Cable & Connectors"), "#251 departmentOfCategory: maps every assigned category to its department id, nothing else");
+
+  ok(d251Resolve(depts, null) === null && d251Resolve(depts, "") === null, "#251 resolveDept: no id → null");
+  ok(d251Resolve(depts, "bogus") === null, '#251 resolveDept: an id matching nothing → null ("invalid ?dept= is ignored")');
+  ok(d251Resolve(depts, "rigging")?.name === "Rigging", "#251 resolveDept: a real id resolves to its department");
+  ok(d251Resolve(depts, "other")?.name === "Other", '#251 resolveDept: "other" always resolves, even with real departments configured');
+
+  const incl = d251FilterFor(depts, "rigging");
+  ok(!!incl && incl.mode === "include" && incl.categories.has("Rigging Hardware") && !incl.categories.has("Fixtures"), "#251 departmentFilterFor: a real department → an include filter of exactly its own categories");
+  const excl = d251FilterFor(depts, "other");
+  ok(!!excl && excl.mode === "exclude" && excl.categories.has("Rigging Hardware") && excl.categories.has("Fixtures"), "#251 departmentFilterFor: Other → an exclude filter of every assigned category across every department");
+  ok(d251FilterFor(depts, "bogus") === null && d251FilterFor(depts, null) === null, "#251 departmentFilterFor: invalid/no id → null (unrestricted)");
+
+  ok(d251Matches("Rigging Hardware", incl!) && !d251Matches("Fixtures", incl!), "#251 matchesDeptFilter: include mode");
+  ok(!d251Matches("Rigging Hardware", excl!) && d251Matches("Cable & Connectors", excl!), "#251 matchesDeptFilter: exclude mode (Other)");
+  ok(d251Matches("", excl!), '#251 matchesDeptFilter: a blank category reads as "—" — never assigned, so it always lands in Other');
+
+  const entries = [
+    { category: "Rigging Hardware" }, { category: "Fixtures" }, { category: "Cable & Connectors" },
+  ];
+  ok(d251Restrict(entries, "rigging", depts).length === 1, "#251 restrictToDept: narrows to the one member of the named department");
+  ok(d251Restrict(entries, "other", depts).length === 1 && d251Restrict(entries, "other", depts)[0].category === "Cable & Connectors", "#251 restrictToDept: Other keeps only what no department claims");
+  ok(d251Restrict(entries, null, depts).length === 3, "#251 restrictToDept: no department → every entry, unchanged");
+}
+
+// ---- suggestDepartments: starter set, mutual exclusivity, unmatched dropped ----
+{
+  const cats = [
+    "Hoists & Motors", "Fixtures", "Fixture assemblies", "Cable & Connectors",
+    "Fog Machines", "Mounting Hardware", "Drapery", "Curtain Track", "Uncategorized Widgets",
+  ];
+  const sug = d251Suggest(cats);
+  const byId = new Map(sug.map((d) => [d.id, d]));
+  ok(!!byId.get("rigging")?.categories.includes("Hoists & Motors"), "#251 suggestDepartments: Rigging picks up hoists");
+  ok(!!byId.get("lighting")?.categories.includes("Fixtures") && !!byId.get("lighting")?.categories.includes("Fixture assemblies"), "#251 suggestDepartments: Lighting picks up Fixtures AND the Fixture assemblies pseudo-category (spec pick 6)");
+  ok(!!byId.get("cable-connectors")?.categories.includes("Cable & Connectors"), "#251 suggestDepartments: Cable & Connectors matches its own name");
+  ok(!!byId.get("atmospherics")?.categories.includes("Fog Machines"), "#251 suggestDepartments: Atmospherics picks up fog");
+  ok(!!byId.get("hardware")?.categories.includes("Mounting Hardware"), "#251 suggestDepartments: Hardware picks up mounting hardware");
+  ok(!!byId.get("drapery")?.categories.includes("Drapery"), "#251 suggestDepartments: Drapery matches its own name");
+  ok(!!byId.get("rigging")?.categories.includes("Curtain Track") && !byId.get("drapery")?.categories.includes("Curtain Track"), "#251 suggestDepartments: a category matching two rules (Curtain Track) goes to the earlier rule only — Rigging, not Drapery, per spec's own 'track' keyword under Rigging");
+  ok(!sug.some((d) => d.categories.includes("Uncategorized Widgets")), "#251 suggestDepartments: a category matching nothing is dropped, not forced into a bucket");
+  const allSuggested = sug.flatMap((d) => d.categories);
+  ok(new Set(allSuggested).size === allSuggested.length, "#251 suggestDepartments: every suggested category appears in exactly one department — saving the suggestion as-is never trips sanitizeDepartments' exclusivity rule");
+  const straightToSave = d251Sanitize(sug, cats);
+  ok(straightToSave.ok, "#251 suggestDepartments: its own output saves cleanly through sanitizeDepartments with no staff edits");
+
+  ok(d251Suggest([]).length === 0, "#251 suggestDepartments: no categories → no suggestions");
+  ok(d251Suggest(["Nothing Matches Here"]).length === 0, "#251 suggestDepartments: a starter with zero matches is left out entirely, not offered empty");
+}
+
+// ---- searchCatalog with dept (results, facets, Other) ----
+{
+  const all: D251Entry[] = [
+    d251Entry({ key: "R1", sku: "R1", category: "Rigging Hardware", mfr: "ETC", haystack: " r1 rigging hardware etc " }),
+    d251Entry({ key: "L1", sku: "L1", category: "Fixtures", mfr: "Chauvet", haystack: " l1 fixtures chauvet " }),
+    d251Entry({ key: "C1", sku: "C1", category: "Cable & Connectors", mfr: "ETC", haystack: " c1 cable connectors etc " }),
+  ];
+  const depts: D251Dept[] = [{ id: "rigging", name: "Rigging", categories: ["Rigging Hardware"] }];
+
+  const inDept = d251Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48, dept: d251FilterFor(depts, "rigging")! });
+  ok(inDept.total === 1 && inDept.entries[0].sku === "R1", "#251 searchCatalog dept: results restrict to the department's categories");
+  ok(inDept.catFacets.length === 1 && inDept.catFacets[0].value === "Rigging Hardware", "#251 searchCatalog dept: the Category facet lists only categories inside the department");
+  ok(inDept.mfrFacets.every((f) => f.value === "ETC"), "#251 searchCatalog dept: Manufacturer facets narrow to what's actually in the department");
+
+  const otherSearch = d251Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48, dept: d251FilterFor(depts, "other")! });
+  ok(otherSearch.total === 2 && otherSearch.entries.every((e) => e.sku !== "R1"), "#251 searchCatalog dept: Other returns everything no department claims");
+
+  const noHits = d251Search(all, { q: "chauvet", mfr: [], cat: [], page: 1, pageSize: 48, dept: d251FilterFor(depts, "rigging")! });
+  ok(noHits.total === 0, "#251 searchCatalog dept: a search with no hits inside the department returns empty (drives the client's 'Search all departments' link)");
+  const sameSearchNoDept = d251Search(all, { q: "chauvet", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(sameSearchNoDept.total === 1, "#251 searchCatalog dept: the same query without dept finds it — confirms the link's premise");
+
+  const unrestricted = d251Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(unrestricted.total === 3, "#251 searchCatalog dept: no dept field at all behaves exactly as before (#245 unchanged)");
+}
+
+// ---- departmentTiles: counts, image pick, Other hidden when empty, none configured ----
+{
+  const src = (over: Partial<D251Entry>): D251Entry => d251Entry({ key: "X", sku: "X", ...over });
+  const imgOf = (m: Record<string, string>) => (key: string) => m[key] ?? null;
+
+  ok(d251Tiles([], [src({ category: "Rigging Hardware" })], () => null).length === 0, "#251 departmentTiles: no departments configured → no tiles at all (not even Other)");
+
+  const depts: D251Dept[] = [
+    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware"] },
+    { id: "lighting", name: "Lighting", categories: ["Fixtures"] },
+  ];
+  const entries: D251Entry[] = [
+    src({ key: "R1", category: "Rigging Hardware", browsable: true, rank: 1 }),
+    src({ key: "R2", category: "Rigging Hardware", browsable: true, rank: 5, kind: "part" }),
+    src({ key: "R3", category: "Rigging Hardware", browsable: false, rank: 99 }), // not browsable — excluded from count
+    src({ key: "L1", category: "Fixtures", browsable: true, rank: 1, kind: "fixture" }), // fixture: never a thumbnail
+  ];
+  const tiles = d251Tiles(depts, entries, imgOf({ R1: "img-r1", R2: "img-r2" }));
+  const rig = tiles.find((t) => t.id === "rigging")!;
+  ok(rig.count === 2, "#251 departmentTiles: count = browsable entries only (R3 excluded)");
+  ok(rig.imageId === "img-r2", "#251 departmentTiles: thumbnail = the highest-ranked browsable PART with an image (R2 over R1)");
+  const light = tiles.find((t) => t.id === "lighting")!;
+  ok(light.count === 1 && light.imageId === null, "#251 departmentTiles: a fixture entry counts but never supplies the thumbnail image");
+  ok(!tiles.some((t) => t.id === "other"), "#251 departmentTiles: Other is hidden when every category is claimed (nothing left over)");
+
+  const withLeftover = d251Tiles(depts, [...entries, src({ key: "C1", category: "Cable & Connectors", browsable: true, rank: 1 })], () => null);
+  ok(withLeftover.some((t) => t.id === "other" && t.name === "Other" && t.count === 1), "#251 departmentTiles: Other appears, named 'Other', once something is left over");
+
+  const emptyRigging = d251Tiles(
+    [{ id: "empty", name: "Empty Dept", categories: ["Nothing Here"] }],
+    [src({ category: "Some Other Category", browsable: true, rank: 1 })],
+    () => null
+  );
+  ok(!emptyRigging.some((t) => t.id === "empty"), "#251 departmentTiles: a configured department with zero browsable members produces no tile of its own");
+  ok(emptyRigging.length === 1 && emptyRigging[0].id === "other", "#251 departmentTiles: the category nothing claims still falls into Other, so Other's tile still shows");
+
+  const allEmpty = d251Tiles([{ id: "empty", name: "Empty Dept", categories: ["Nothing Here"] }], [src({ category: "Nothing Here", browsable: false, rank: 1 })], () => null);
+  ok(allEmpty.length === 0, "#251 departmentTiles: when the only member isn't browsable, neither the department nor Other gets a tile");
+}
+
+async function portal251AsyncChecks(): Promise<void> {
+  // ---- getDepartments/saveDepartments: round trip + invalidation wiring ----
+  const before = await d251Get();
+  ok(Array.isArray(before), "#251 getDepartments: reads as an array even before anything is ever saved");
+
+  const R251 = fixtureId(251, "rigging-sku");
+  const L251 = fixtureId(251, "lighting-sku");
+  const catR = "Test251 Rigging Gear";
+  const catL = "Test251 Lighting Gear";
+  try {
+    await d245MergeUpsert(R251, { desc: "Test251 rigging part", category: catR, unit: "ea", list: 10, cost: 5, portalVisibility: "show" });
+    registerFixture("catalog_parts", R251);
+    await d245MergeUpsert(L251, { desc: "Test251 lighting part", category: catL, unit: "ea", list: 10, cost: 5, portalVisibility: "show" });
+    registerFixture("catalog_parts", L251);
+    d245Invalidate();
+
+    const saved = await d251Save([{ name: "Test251 Rigging", categories: [catR] }], [catR, catL]);
+    ok(saved.ok, "#251 saveDepartments: a valid save against the real catalog's known categories succeeds");
+    const reread = await d251Get();
+    const dept = reread.find((d) => d.name === "Test251 Rigging");
+    ok(!!dept && dept.categories.includes(catR) && dept.id.length > 0, "#251 saveDepartments/getDepartments: round-trips through the real blob store");
+
+    const storeSrc = readFileSync(join(process.cwd(), "src/lib/stores/portal-departments.ts"), "utf8");
+    ok(storeSrc.includes("invalidatePortalIndex()"), "#251 saveDepartments: calls invalidatePortalIndex() on every save (spec pick 7's last line)");
+
+    // ---- end-to-end: the real portal index + the freshly saved department ----
+    const ix = await d245Index({ fresh: true });
+    const deptId = dept!.id;
+    const filter = d251FilterFor(reread, deptId);
+    ok(!!filter, "#251 end-to-end: the saved department resolves to a real filter");
+    const members = ix.entries.filter((e) => e.browsable && d251Matches(e.category, filter!));
+    ok(members.length === 1 && members[0].sku === R251, "#251 end-to-end: the real portal index, filtered by the saved department, carries exactly the rigging part");
+
+    const otherFilter = d251FilterFor(reread, d251Other.id);
+    const otherMembers = ix.entries.filter((e) => e.browsable && d251Matches(e.category, otherFilter!));
+    ok(otherMembers.some((e) => e.sku === L251) && !otherMembers.some((e) => e.sku === R251), "#251 end-to-end: the lighting part (unassigned) falls into Other; the rigging part (assigned) does not");
+
+    // Renaming keeps the id; re-saving with a category dropped moves it to Other.
+    const renamed = await d251Save([{ id: deptId, name: "Test251 Rigging Renamed", categories: [] }], [catR, catL]);
+    ok(renamed.ok && renamed.value[0].id === deptId, "#251 saveDepartments: a rename in the real store keeps the department's id");
+    const afterRename = await d251Get();
+    ok(!afterRename.some((d) => d.categories.includes(catR)), "#251 saveDepartments: dropping a category from the department leaves it unclaimed (falls to Other on next browse)");
+  } finally {
+    await d251Save([], []);
+  }
+
+  // ---- browseCatalog wiring: dept resolves via the browse layer, an invalid id is ignored ----
+  const browseSrc = readFileSync(join(process.cwd(), "src/lib/portal-catalog-browse.ts"), "utf8");
+  ok(browseSrc.includes("departmentTiles(") && browseSrc.includes("departmentFilterFor("), "#251 browseCatalog: wires departmentTiles + departmentFilterFor (resolves dept → filter in the browse layer, not in searchCatalog)");
+  ok(browseSrc.includes("resolveDept("), "#251 browseCatalog: resolves the active department for the breadcrumb/search-all-departments link via the pure resolveDept helper");
 }

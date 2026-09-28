@@ -283,6 +283,24 @@ export default async function CatalogPage({
               Device types
             </Link>
           )}
+          {/* #251 — the portal's department tree (admin). */}
+          {isAdmin && (
+            <Link
+              href="/catalog/departments"
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#16181d",
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "10px 15px",
+                textDecoration: "none",
+              }}
+            >
+              Departments
+            </Link>
+          )}
           <Link
             href="/catalog?new=1"
             style={{

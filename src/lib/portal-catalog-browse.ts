@@ -3,11 +3,13 @@
 // it hands the browser `TileVM`s only (sell-only, see portal-catalog-view.ts).
 import type { PortalSession } from "@/lib/portal";
 import { portalIndex, type PortalIndex } from "@/lib/portal-catalog-index";
-import { cleanSearchQuery, quotedBeforeSkus, toTileVM, type TileVM } from "@/lib/portal-catalog-view";
+import { cleanDeptId, cleanSearchQuery, quotedBeforeSkus, toTileVM, type TileVM } from "@/lib/portal-catalog-view";
+import { departmentFilterFor, departmentTiles, resolveDept, type DeptTileVM } from "@/lib/portal-departments";
 import { priceFixture, priceSku, pricingContextFor, type PortalPricingContext } from "@/lib/portal-pricing";
-import { searchCatalog, type Facet, type SearchEntry } from "@/lib/portal-search";
+import { searchCatalog, type Facet, type SearchEntry, type SearchQuery } from "@/lib/portal-search";
 import { rateLimit } from "@/lib/rate-limit";
 import { getAll as getAllQuotes, portalListsQuote } from "@/lib/stores/quotes";
+import { getDepartments } from "@/lib/stores/portal-departments";
 
 /**
  * Portal catalog browse (#245 Task 10, spec §3.1). The page renders first
@@ -48,6 +50,12 @@ export type CatalogResult = {
   pages: number;
   mfrFacets: Facet[];
   catFacets: Facet[];
+  /** The active department (#251), resolved — null when none is selected
+   *  or the `?dept=` id doesn't resolve to a real department/"other". */
+  dept: { id: string; name: string } | null;
+  /** Department tiles for the true landing page only (no q/mfr/cat, page 1,
+   *  no dept); [] otherwise, and [] when no departments are configured. */
+  tiles: DeptTileVM[];
 };
 
 export type SearchPortalCatalogResult = { ok: true; result: CatalogResult } | { ok: false; error: string };
@@ -69,8 +77,15 @@ export async function tilesFor(entries: readonly SearchEntry[], ix: PortalIndex,
 
 /** One page of results + both facet lists, as tiles. */
 export async function browseCatalog(query: unknown, ctx: PortalPricingContext): Promise<CatalogResult> {
-  const ix = await portalIndex();
-  const r = searchCatalog(ix.entries, cleanSearchQuery(query));
+  const [ix, departments] = await Promise.all([portalIndex(), getDepartments()]);
+  const sq = cleanSearchQuery(query);
+  const deptId = cleanDeptId(query);
+  const dept = resolveDept(departments, deptId);
+  const filter = departmentFilterFor(departments, deptId);
+  const q: SearchQuery = filter ? { ...sq, dept: filter } : sq;
+  const r = searchCatalog(ix.entries, q);
+  const landing = !sq.q && !sq.mfr.length && !sq.cat.length && sq.page === 1 && !dept;
+  const tiles = landing ? departmentTiles(departments, ix.entries, (key) => ix.parts.get(key)?.imageIds[0] ?? null) : [];
   return {
     entries: await tilesFor(r.entries, ix, ctx),
     total: r.total,
@@ -78,6 +93,8 @@ export async function browseCatalog(query: unknown, ctx: PortalPricingContext): 
     pages: r.pages,
     mfrFacets: r.mfrFacets,
     catFacets: r.catFacets,
+    dept,
+    tiles,
   };
 }
 

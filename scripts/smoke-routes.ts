@@ -75,6 +75,7 @@ const ROUTES = [
   "/catalog/documents?show=missing-datasheet",
   "/catalog/documents/upload", // #207 — bulk drop
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
+  "/catalog/departments", // #251 — the portal department tree editor (admin)
   "/estimating-rules",
   "/inspections",
   "/flame-tests",
@@ -152,6 +153,8 @@ const ROUTES = [
   "/portal/catalog",
   "/portal/catalog?preview=lakefront",
   "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
+  // #251 — a ?dept= filter, signed out; an unknown id is simply ignored.
+  "/portal/catalog?dept=rigging",
   // #245 Task 11: the part sidebar renders server-side from ?part= — a real
   // SKU, and an unknown key ("This item isn't available.").
   "/portal/catalog?preview=lakefront&q=velour&part=RB-EN-22",
