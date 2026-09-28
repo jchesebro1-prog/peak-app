@@ -1,0 +1,38 @@
+A. RIGGING PACKAGED HOISTS
+  1. Basis of Design: Prodigy P1 as manufactured by ETC.
+    a. Minimum Safety Factor: 10:1 for equipment and hardware unless specified otherwise.
+    b. Standards Compliance: UL Listed and tested as a complete system made up of UL listed components.
+    c. Hoists:
+      1) Wire Rope Lift Lines: Design factor of 10:1. Ultimate strength: 4200 lb.
+      2) Load Path Components Between Building Structure and Batten: Must exceed breaking strength of wire rope.
+      3) Motor Brake: Rated at 125 percent of motor torque.
+      4) Capable of Supporting the Following Loads:
+        a) General Purpose Hoists:
+          (1) P1900G 30 fpm (0.15 m per s): Capacity: 2000 lb (907 kg) in standard configuration. Powerhead (HxWxL): 16 x 18 x 53.5 inches (406 x 157 x 1359 mm). Weight: 580 lb (263 kg).
+        b) Stage Electric Hoists:
+          (1) P1500E 30 fpm (0.15 m per s): Capacity: 1500 lb (680 kg) in standard configuration. Powerhead (HxWxL): 16 x 18 x 53.5 inches (406 x 157 x 1359 mm). Weight: 580 lb (263 kg).
+      5) Hoists: Major components.
+        a) Powerhead.
+        b) Compression tube with beam clamps, loft blocks, lift line and lift line terminations, Right Angle Cable Adjuster (RACA).
+        c) Pipe batten.
+        d) Electric Hoists: Major components.
+          (1) Cable management system.
+          (2) Power and control distribution strip.
+      6) Features:
+        a) Compression Tube: Prevents hoist system lateral forces from transferring to building. Hoisting systems imposing lateral loads on buildings are not acceptable.
+        b) Built-in load cell.
+        c) Built-in slack line sensor.
+        d) Emergency contactor built into the hoist.
+        e) Absolute position encoders.
+    d. Compression Tube and Beam Clamps:
+      1) Compression Tube: Extruded aluminum channel, engineered in conjunction with beam clamps to neutralize rigging-generated lateral forces on buildings.
+        a) Support the system loft blocks.
+        b) Sections joined in a continuous assembly by a pair of dedicated splicing plates at each tube joint.
+        c) Installed with dedicated beam clamps that allow tube to snap into place and fractionally move horizontally under load.
+      2) Beam Clamps: Capable of attaching to horizontal beams, joists, truss flanges or flat steel plates. Thickness: 1/4 to 1 inch (6 to 25 mm). Width: 4 to 14 inches (102 to 356 mm).
+    e. Loft Blocks: Assemblies of steel side plates, a wire rope idler, sheave, bearings, shaft locked against rotation and support hardware.
+      1) Loft blocks are inserted into the slot on the bottom of compression tube positioned no closer than 48 inches (1219 mm) from each other, unless muled.
+      2) Loft Block Sheaves: 5 inches (127 mm) diameter. Contain a pair of press fit sealed ball bearings and are concentric about the hub and evenly balanced for rotation.
+        a) Lift Lines: Travel in groove sized for 3/16 inch (5 mm) diameter wire rope per latest edition of Wire Rope Users' Manual, published by the Wire Rope Technical Board.
+      3) Idler: on top of loft block to guide and support lift lines as they pass the block.
+      4) Hoisting systems requiring loft blocks be mounted directly to facility structure are not acceptable.

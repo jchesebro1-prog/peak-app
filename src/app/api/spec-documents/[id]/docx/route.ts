@@ -2,6 +2,8 @@ import { requireUser } from "@/lib/session";
 import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { buildSectionDocx } from "@/lib/specs/spec-docx";
 import { specFileName } from "@/lib/specs/spec-file-name";
+import { withDownloadStamp } from "@/lib/specs/spec-document";
+import { patchSpecDocument } from "@/lib/stores/spec-documents";
 
 /**
  * .docx download for a saved spec (#205 Phase B, design §4). A route handler
@@ -9,12 +11,19 @@ import { specFileName } from "@/lib/specs/spec-file-name";
  * when its section has since been deleted from the library.
  */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await ctx.params;
   const { doc, section, assembled } = await loadAssembledSpec(id);
   if (!doc.id) return new Response("Spec not found.", { status: 404 });
   if (!section || !assembled) return new Response("This section is no longer in the library.", { status: 409 });
   const buf = await buildSectionDocx(assembled);
+  // Record which library revisions this download printed (spec records
+  // design §5.3) — best-effort: a failed stamp never fails the download.
+  try {
+    await patchSpecDocument(doc.id, (d) => withDownloadStamp(d, assembled.usedRecords, Date.now()), user.name);
+  } catch (err) {
+    console.error("spec docx: download stamp failed", err);
+  }
   const name = specFileName(doc.header, section);
   // Header values must be Latin-1 (a project name with an en dash would
   // throw), so the plain filename= is an ASCII fallback; filename*= carries

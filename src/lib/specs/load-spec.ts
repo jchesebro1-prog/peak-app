@@ -6,6 +6,9 @@ import { getManyAnyCase, type CatalogPart } from "@/lib/stores/catalog";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { getSpecDocument } from "@/lib/stores/spec-documents";
+import { allSpecRecords } from "@/lib/stores/spec-records";
+import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import type { SpecRecord } from "@/lib/specs/records";
 
 /**
  * One saved spec, assembled against the live library and catalog (#205
@@ -17,6 +20,8 @@ import { getSpecDocument } from "@/lib/stores/spec-documents";
  * library and the parts it read come back too (#205 spec builder final fix
  * 10), so the builder page reuses them instead of reading them again —
  * `parts` is keyed by UPPERCASE sku and includes same-as targets.
+ * `records` is the whole Spec Library (spec records design §3) — rows match
+ * against it before falling back to a part's legacy text.
  */
 export type LoadedSpec = {
   doc: SpecDocument;
@@ -25,14 +30,15 @@ export type LoadedSpec = {
   sections: SpecSection[];
   articles: SpecCategoryArticle[];
   parts: Map<string, CatalogPart>;
+  records: SpecRecord[];
 };
 
 export async function loadAssembledSpec(id: string): Promise<LoadedSpec> {
   const doc = (await getSpecDocument(id)) ?? normalizeSpecDocument({});
   const parts = new Map<string, CatalogPart>();
-  if (!doc.id) return { doc, section: null, assembled: null, sections: [], articles: [], parts };
+  if (!doc.id) return { doc, section: null, assembled: null, sections: [], articles: [], parts, records: [] };
 
-  const [sections, articles] = await Promise.all([allSections(), allArticles()]);
+  const [sections, articles, records] = await Promise.all([allSections(), allArticles(), allSpecRecords()]);
   const section = sections.find((s) => s.id === doc.sectionId) ?? null;
 
   // The doc's products, then each found part's same-as target (one hop is
@@ -41,12 +47,15 @@ export async function loadAssembledSpec(id: string): Promise<LoadedSpec> {
   const add = (list: CatalogPart[]) => {
     for (const p of list) parts.set(p.sku.toUpperCase(), p);
   };
-  add(await getManyAnyCase(doc.products.map((p) => p.sku)));
+  // Only rows with a real sku have a catalog part to look up (a placeholder /
+  // empty sku is an allowance, vendor, curtain or library row, §3.1).
+  const skus = doc.products.map((p) => p.sku).filter((s) => s && !isPlaceholderSku(s));
+  if (skus.length) add(await getManyAnyCase(skus));
   const targets = [...parts.values()]
     .map((p) => (p.specSameAs || "").trim())
     .filter((s) => s && !parts.has(s.toUpperCase()));
   if (targets.length) add(await getManyAnyCase([...new Set(targets)]));
 
-  const assembled = section ? assembleSection({ section, articles, sections, parts, doc }) : null;
-  return { doc, section, assembled, sections, articles, parts };
+  const assembled = section ? assembleSection({ section, articles, sections, parts, doc, records }) : null;
+  return { doc, section, assembled, sections, articles, parts, records };
 }

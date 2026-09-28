@@ -239,8 +239,8 @@ import {
   type RateFn,
 } from "@/app/(app)/estimator/pricing";
 import type { SpecItem, SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { loadExtract } from "@/lib/davinci/load";
 import type { DavinciExtract, DavinciRecord } from "@/lib/davinci/types";
@@ -10654,6 +10654,7 @@ seeded()
   .then(() => specRecordMatchAsyncChecks())
   .then(() => specRecordsBomSeamAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
+  .then(() => specRecordsAssemblyAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32749,4 +32750,125 @@ async function sixthLevelJobValuesAsyncChecks(): Promise<void> {
   ok(J.applyJobValues(t, "PS-1", { "PS-1#2": "14" }, { "PS-1#2": "99" }).includes("[12]"), "job values: label mismatch never lands in the wrong bracket");
   ok(J.staleJobValueKeys(new Map([["PS-1", slots]]), { "PS-1#9": "x", "PS-1#2": "14" }, { "PS-1#2": "12" }).join() === "PS-1#9", "job values: stale = key gone or label mismatch");
   ok(J.jobValueSegments("a [1] b").filter((s) => s.bracket).length === 1, "job values: segments for highlighting");
+}
+
+/* ---- Spec records assembly (§3.3, §4, Task 7) ----
+ * Pure — no DB — wired as a named async function per HARNESS PATTERN. */
+async function specRecordsAssemblyAsyncChecks(): Promise<void> {
+  const I = await import("@/lib/specs/record-import");
+  const A = await import("@/lib/specs/assemble-section");
+  const SD = await import("@/lib/specs/spec-document");
+  const { buildSectionDocx } = await import("@/lib/specs/spec-docx");
+  const recs = I.recordsFromJson(JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"))).records;
+  const sec = (num: string) => ({ id: "ss-" + num.replace(/ /g, ""), number: num, title: "T " + num, part1: [], part3: [], part2Style: "paragraphs", quantities: "drawings", sort: 0, updatedAt: 0, updatedBy: "" }) as never;
+  const s260961 = sec("26 09 61"), s116123 = sec("11 61 23");
+  const arts = [...new Set(recs.map((r) => r.sourceArticleId!))].map((id, i) => {
+    const r = recs.find((x) => x.sourceArticleId === id)!;
+    return { id, sectionId: "ss-" + r.section.replace(/ /g, ""), sort: i, title: r.article, manufacturers: [], general: "", categoryKeys: [], updatedAt: 0, updatedBy: "" };
+  });
+  const doc = (products: object[], extra: object = {}) => SD.normalizeSpecDocument({ id: "SP-T", sectionId: "ss-260961", header: { projectName: "P", projectNumber: "1", phase: "CD", issueDate: "2026-09-28", preparedBy: "x" }, source: { kind: "quote", id: "Q" }, products, printQuantities: true, fillIns: {}, ...extra });
+  const run = (d: ReturnType<typeof doc>, section = s260961) => A.assembleSection({ section, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map(), doc: d, records: recs });
+  const a1 = run(doc([{ sku: "ION XE 20 2K-US", qty: 1 }, { sku: "ELEMENT 2 1K", qty: 1 }]));
+  const entries = a1.part2.articles.flatMap((x) => x.products.map((p) => p.specId));
+  ok(JSON.stringify(entries) === '["PS-260961-012","PS-260961-013","PS-260961-011"]', "assembly: consoles then companion 011 once, under their article");
+  const a2 = run(doc([{ sku: "LS-P", qty: 2 }, { sku: "LS-P-CAM", qty: 3 }]));
+  const lp = a2.part2.articles.flatMap((x) => x.products);
+  ok(lp.length === 1 && lp[0].heading.includes("(Quantity: 5)") && lp[0].rowKeys.length === 2, "assembly: two rows on one record print once, quantities summed");
+  const a3 = run(doc([{ sku: "", specKey: "Stage Drapes – Main Curtain", desc: "Main" }]));
+  ok(a3.checklist.leftOut.some((l) => l.reason === "other-section" && l.sectionNumber === "11 61 23"), "assembly: a record from another section is listed with its section number");
+  const a4 = run(doc([{ sku: "XYZ-123", desc: "mystery" }, { sku: "LS-P", waived: { reason: "Owner furnished" } }]));
+  ok(a4.checklist.leftOut.some((l) => l.reason === "no-match") && a4.part2.articles.at(-1)!.title === "ITEMS NOT SPECIFIED", "assembly: no-match listed; waived row prints under ITEMS NOT SPECIFIED");
+  const btn = run(doc([{ sku: "UH10005-41F" }], { fillIns: { "PS-260961-007#1": "Black (RAL 9004)" }, fillInLabels: {} }));
+  ok(btn.checklist.jobValues.length > 0 && btn.usedRecords["PS-260961-007"] === 1, "assembly: job values listed; usedRecords stamps the revision");
+  const ov = run(doc([{ sku: "LS-P" }], { overrides: { "PS-260961-028": { title: "CUSTOM TITLE", specText: "Only this", baseRevision: 0 } } }));
+  const ovp = ov.part2.articles.flatMap((x) => x.products)[0];
+  ok(!!(ovp.heading.startsWith("CUSTOM TITLE") && ovp.overridden && ovp.overrideStale), "assembly: a project-only override prints and flags a newer library revision");
+  // Snapshots: deterministic + golden
+  const snap = (id: string, row: object, section = s260961) => {
+    void id;
+    const x = run(doc([row]), section);
+    const lines = x.part2.articles.flatMap((a) => a.products.flatMap((p) => [p.label + " " + p.heading, ...p.lines.map((l) => "  ".repeat(l.depth) + l.label + " " + l.text)]));
+    return lines.join("\n");
+  };
+  for (const [id, row, s] of [["PS-260961-028", { sku: "LS-P" }, s260961], ["PS-260961-007", { sku: "UH10001-11F" }, s260961], ["PS-116123-008", { sku: "", specKey: "Rigging Hoist – Prodigy P1" }, s116123]] as const) {
+    const golden = join(process.cwd(), `docs/specs-seed/spec-library-v1/snapshots/${id}.txt`);
+    const now = snap(id, row, s);
+    if (!existsSync(golden)) { mkdirSync(dirname(golden), { recursive: true }); writeFileSync(golden, now); }
+    ok(now === readFileSync(golden, "utf8") && now === snap(id, row, s), `assembly snapshot: ${id} matches its golden and is stable`);
+  }
+  const d1 = await buildSectionDocx(run(doc([{ sku: "LS-P" }]))!);
+  const d2 = await buildSectionDocx(run(doc([{ sku: "LS-P" }]))!);
+  const JSZip = (await import("jszip")).default;
+  const x1 = await (await JSZip.loadAsync(d1)).file("word/document.xml")!.async("string");
+  const x2 = await (await JSZip.loadAsync(d2)).file("word/document.xml")!.async("string");
+  ok(x1 === x2 && x1.includes("Lonestar"), "assembly: Word document.xml is identical across runs");
+
+  /* -- Task 7 additions beyond the brief: the resolutions + pure edits -- */
+  // A sku-less row with no match is no-match, never not-in-catalog.
+  const nm = run(doc([{ sku: "CUSTOM", desc: "Stage widget" }]));
+  ok(nm.checklist.leftOut.length === 1 && nm.checklist.leftOut[0].reason === "no-match" && nm.checklist.leftOut[0].match?.status === "no-match", "assembly: a placeholder-sku row with no match is no-match (with its match), never not-in-catalog");
+  // A bare real sku gone from the catalog keeps today's not-in-catalog.
+  const gone = run(doc([{ sku: "GONE-1" }]));
+  ok(gone.checklist.leftOut[0]?.reason === "not-in-catalog", "assembly: a bare real sku missing from the catalog with no match stays not-in-catalog");
+  // Every row's outcome is reported by row key.
+  ok(a4.rowMatches["SKU:LS-P"]?.status === "waived" && a4.rowMatches["SKU:XYZ-123"]?.status === "no-match", "assembly: rowMatches keyed by specRowKey");
+  // ITEMS NOT SPECIFIED line text + numbering.
+  const ins = a4.part2.articles.at(-1)!;
+  ok(ins.num === `2.${a4.part2.articles.length}` && ins.general.length === 1 && ins.general[0].label === "A." && ins.general[0].text === "LS-P — Owner furnished" && ins.products.length === 0 && a4.checklist.waived[0]?.rowKey === "SKU:LS-P", "assembly: ITEMS NOT SPECIFIED lists each waived row as a lettered line <desc> — <reason>");
+  ok(!a1.part2.articles.some((x) => x.title === "ITEMS NOT SPECIFIED"), "assembly: no ITEMS NOT SPECIFIED article without a waived row");
+  // Job values: answered value prints; its key is not a stale Part 1/3 answer; fillInsLeft untouched.
+  const btnText = btn.part2.articles.flatMap((x) => x.products).flatMap((p) => p.lines.map((l) => l.text)).join("\n");
+  ok(btnText.includes("Black (RAL 9004)") && btn.checklist.jobValues.find((j) => j.key === "PS-260961-007#1")?.answered === true && !btn.checklist.staleAnswers.includes("PS-260961-007#1") && btn.checklist.fillInsLeft === 0, "assembly: an answered job value prints, is not a stale Part 1/3 answer, and never counts as a fill-in");
+  const btnStale = run(doc([{ sku: "UH10005-41F" }], { fillIns: { "PS-260961-007#99": "x" } }));
+  ok(btnStale.checklist.staleJobValues.join() === "PS-260961-007#99" && !btnStale.checklist.staleAnswers.includes("PS-260961-007#99"), "assembly: a job value whose slot is gone is a stale job value, not a stale fill-in");
+  // Draft / ambiguous rows are left out with their match.
+  const draftRecs = recs.map((r) => (r.specId === "PS-260961-022" ? { ...r, status: "draft" as const } : r));
+  const dr = A.assembleSection({ section: s260961, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map(), doc: doc([{ sku: "LS-UB-MI" }]), records: draftRecs });
+  ok(dr.checklist.leftOut[0]?.reason === "draft" && dr.checklist.leftOut[0]?.match?.status === "draft" && dr.part2.articles.length === 0, "assembly: a draft-only match is listed, never printed");
+  const ambRecs = [...recs, { ...recs.find((r) => r.specId === "PS-260961-022")!, specId: "PS-260961-099" }];
+  const am = A.assembleSection({ section: s260961, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map(), doc: doc([{ sku: "LS-UB-MI" }]), records: ambRecs });
+  ok(am.checklist.leftOut[0]?.reason === "ambiguous" && am.part2.articles.length === 0, "assembly: an ambiguous match is listed, never printed");
+  // A record whose article isn't in this section → needs-header.
+  const noArt = recs.map((r) => (r.specId === "PS-260961-028" ? { ...r, sourceArticleId: "ar-gone" } : r));
+  const na = A.assembleSection({ section: s260961, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map(), doc: doc([{ sku: "LS-P" }]), records: noArt });
+  ok(na.checklist.leftOut[0]?.reason === "needs-header", "assembly: a record whose article isn't in this section is needs-header");
+  // Legacy + record entries share an article in BOM row order.
+  const legacyPart = { sku: "OLD-1", desc: "Old mover", specState: "authored", specArticleId: "ar-nhs-260961-07", specTitle: "OLD MOVER", specBody: "Old text" } as never;
+  const mix = A.assembleSection({ section: s260961, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map([["OLD-1", legacyPart]]), doc: doc([{ sku: "LS-P" }, { sku: "OLD-1" }]), records: recs });
+  const mixP = mix.part2.articles.flatMap((x) => x.products);
+  ok(mixP.map((p) => `${p.label} ${p.specId || p.sku}`).join("|") === "A. PS-260961-028|B. OLD-1" && mix.rowMatches["SKU:OLD-1"]?.status === "legacy" && mixP[1].heading === "OLD MOVER" && mixP[1].lines[0].text === "Old text", "assembly: legacy and record entries interleave in BOM order; legacy prints exactly as before");
+  ok(JSON.stringify(mix.usedRecords) === '{"PS-260961-028":1}' && JSON.stringify(Object.entries(a1.usedRecords).sort()) === '[["PS-260961-011",1],["PS-260961-012",1],["PS-260961-013",1]]', "assembly: usedRecords stamps every printed record, companions included");
+  // Table-style section: record rows use record manufacturer/title and the row's matched number.
+  const tableSec = { ...(s260961 as object), part2Style: "table" } as never;
+  const tb = A.assembleSection({ section: tableSec, articles: arts as never, sections: [tableSec, s116123] as never, parts: new Map(), doc: doc([{ sku: "UH10005-41F", qty: 4 }, { sku: "LS-P", waived: { reason: "By others" } }]), records: recs });
+  if (tb.part2.style !== "table") throw new Error("expected table");
+  const tr = tb.part2.rows[0];
+  ok(tb.part2.rows.length === 1 && tr.model === "UH10005-41F" && tr.description === recs.find((r) => r.specId === "PS-260961-007")!.title && tr.qty === 4 && tb.part2.articles.at(-1)!.title === "ITEMS NOT SPECIFIED", "assembly: table rows for records use the row's matched number + record title; ITEMS NOT SPECIFIED appends");
+
+  // spec-document: overrides / usedRecords / downloadedAt + pure edits.
+  const base = doc([{ sku: "LS-P" }, { sku: "", desc: "Allowance" }]);
+  ok(JSON.stringify(base.overrides) === "{}" && JSON.stringify(base.usedRecords) === "{}" && base.downloadedAt === undefined, "spec doc: overrides/usedRecords default empty, no downloadedAt");
+  const capped = SD.normalizeSpecDocument({ ...base, overrides: { A: { title: "t".repeat(400), specText: "x".repeat(25000), baseRevision: 2 } } });
+  ok(capped.overrides.A.title.length === 300 && capped.overrides.A.specText.length === 20000 && capped.overrides.A.baseRevision === 2, "spec doc: override title ≤ 300, specText ≤ 20000");
+  const many = Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`PS-${i}`, { title: "t", specText: "s", baseRevision: 1 }]));
+  ok(Object.keys(SD.normalizeSpecDocument({ ...base, overrides: many }).overrides).length === 200, "spec doc: at most 200 overrides");
+  const o1 = SD.withOverride(base, "PS-260961-028", { title: " New ", specText: "  Line\n    Sub", baseRevision: 3 });
+  ok(o1.overrides["PS-260961-028"].title === "New" && o1.overrides["PS-260961-028"].specText === "  Line\n    Sub" && o1.overrides["PS-260961-028"].baseRevision === 3, "spec doc: withOverride stores title/text/baseRevision (text indentation kept)");
+  ok(!("PS-260961-028" in SD.withoutOverride(o1, "PS-260961-028").overrides), "spec doc: withoutOverride drops it");
+  const w1 = SD.withWaive(base, "SKU:LS-P", "  Owner furnished ");
+  ok(w1.products[0].waived?.reason === "Owner furnished" && SD.withWaive(base, "SKU:LS-P", "  ") === base, "spec doc: withWaive sets a trimmed reason; a blank reason is refused");
+  ok(SD.withoutWaive(w1, "SKU:LS-P").products[0].waived === undefined, "spec doc: withoutWaive clears it");
+  const k1 = SD.withRowSpecKey(base, "DESC:allowance", "Stage Drapes – Legs");
+  ok(k1.products[1].specKey === "Stage Drapes – Legs" && k1.products.length === 2, "spec doc: withRowSpecKey sets the row's match key");
+  const pin = SD.withRowPin(base, "DESC:allowance", "PS-116123-004");
+  ok(pin.products[1].specId === "PS-116123-004" && SD.withRowPin(pin, "DESC:allowance", "").products[1].specId === undefined, "spec doc: withRowPin pins / unpins a specId");
+  const lib = SD.withLibraryRow(base, "PS-260961-011");
+  ok(lib.products.length === 3 && lib.products[2].fromLibrary === true && lib.products[2].specId === "PS-260961-011" && SD.withLibraryRow(lib, "PS-260961-011").products.length === 3, "spec doc: withLibraryRow adds one SPEC: row, idempotent");
+  const libRun = run(lib);
+  ok(libRun.rowMatches["SPEC:PS-260961-011"]?.status === "matched", "assembly: a library row matches its pinned record");
+  const st = SD.withDownloadStamp(base, { "PS-260961-028": 2 }, 1234);
+  ok(st.usedRecords["PS-260961-028"] === 2 && st.downloadedAt === 1234 && SD.normalizeSpecDocument(st).downloadedAt === 1234 && SD.normalizeSpecDocument(st).usedRecords["PS-260961-028"] === 2, "spec doc: withDownloadStamp stamps usedRecords + downloadedAt and survives normalize");
+  // The docx route stamps the download, best-effort.
+  const routeSrc = readFileSync(join(process.cwd(), "src/app/api/spec-documents/[id]/docx/route.ts"), "utf8");
+  ok(routeSrc.includes("withDownloadStamp(") && routeSrc.includes("patchSpecDocument(") && /try\s*\{[\s\S]*withDownloadStamp[\s\S]*\}\s*catch/.test(routeSrc) && routeSrc.includes("await requireUser()"), "docx route: stamps usedRecords after building, inside try/catch, still behind requireUser");
 }

@@ -1,0 +1,73 @@
+A. ENTERTAINMENT LUMINAIRES MOVING
+  1. Basis of Design: Lonestar Prime as manufactured by ETC High End Systems.
+  2. Standards Compliance:
+    a. cETLus Listed.
+    b. Listed to UL 1573.
+    c. Certified to CSA C22.2 No. 166.
+    d. CE Compliant.
+    e. UKCA Compliant.
+    f. CB Certified.
+    g. RoHS Compliant.
+  3. Source:
+    a. Engine: Extra Bright Color Boost white LED engine.
+    b. LED Power: 350 W.
+    c. Maximum Integrating Sphere Output: 17,000 lumens.
+    d. Native Color Temperature: 6500 K.
+  4. Color:
+    a. Color Mixing: Cyan, magenta, yellow, and CTO.
+    b. Variable Color Temperature: Down to 2700 K.
+    c. Color Wheel: Ten dichroic colors plus open.
+  5. Optical:
+    a. Beam Angle Range: 3.8 to 55 degrees.
+    b. Pattern Projection:
+      1) Rotating and indexable wheel with nine interchangeable patterns plus open.
+      2) Fixed wheel with ten fixed patterns plus open.
+    c. Animation: Bi-directional rotating animation wheel with linear insertion and variable angle.
+    d. Prism:
+      1) Five-facet star rotating prism.
+      2) Four-facet linear rotating prism.
+      3) Simultaneous prism insertion.
+    e. Diffusion:
+      1) Light and medium diffusion with variable insertion.
+      2) No effect on focus or zoom.
+    f. Iris: 16-blade iris.
+    g. Framing: Four-plane, full-curtain framing system with 180-degree module rotation.
+  6. Control:
+    a. Input Method:
+      1) DMX via 5-pin connector.
+      2) Ethernet.
+    b. Protocols:
+      1) DMX via RS-485.
+      2) Art-Net or sACN via Ethernet.
+      3) RDM.
+    c. Dimming: 16-bit, DMX controlled.
+    d. Configuration:
+      1) Full-color graphical user interface.
+      2) Local control.
+      3) NFC configuration.
+  7. Physical:
+    a. Pan Range: Selectable 630- or 540-degree range.
+    b. Tilt Range: 260 degrees.
+    c. Maximum Movement Speed:
+      1) Pan: 360 degrees in 1.62 seconds.
+      2) Tilt: 180 degrees in 0.88 seconds.
+    d. Mounting Orientation: Any orientation.
+    e. Environmental Rating: IP54 for indoor and temporary outdoor installations.
+    f. Operating Temperature: Minus 10 to 35 degrees C (14 to 95 degrees F).
+    g. Weight: 51 lb (23.1 kg), excluding mounting hardware.
+  8. Electrical:
+    a. Voltage Range: 100-240 V, 50-60 Hz.
+    b. Input Method: REAN power X Series connector.
+    c. Power Consumption: 550 W.
+    d. Fixtures per Circuit:
+      1) Three fixtures on an R20 module or similar circuit.
+  9. Included Accessories:
+    a. X Series IP65-to-bare-end fixture tail.
+    b. Two 107 mm single-hole Omega brackets.
+    c. Safety cable.
+  10. RigPOV Configuration:
+    a. LS-P-CAM: Provide Lonestar Prime with RigPOV camera configuration.
+      1) Camera: 1080p low-latency camera.
+      2) Communication: NDI HX, RTSP, RTMP, and SRT.
+      3) Connection: RJ45 connection replacing the Ethernet thru connection.
+      4) Environmental Rating: IP54 when installed.

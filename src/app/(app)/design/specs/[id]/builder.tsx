@@ -52,6 +52,12 @@ export type SpecProductRow = {
   leftOutReason: LeftOutReason | null;
   /** For "other-section": the title of the article the part does belong to. */
   otherArticleTitle: string | null;
+  /** For a Spec Library record from another section: that section's number. */
+  otherSectionNumber: string | null;
+  /** The row was waived — it prints under ITEMS NOT SPECIFIED. */
+  waivedReason: string | null;
+  /** The Spec Library record this row matched, when one did. */
+  recordTitle: string | null;
   /** The part's own resolved article (explicit or category default), any section. */
   ownArticleId: string | null;
   specArticleId: string | null;
@@ -92,6 +98,9 @@ const REASON_TEXT: Record<LeftOutReason, string> = {
   "needs-header": "Pick a header",
   "other-section": "Belongs to another section",
   "not-in-catalog": "Part no longer in catalog",
+  "no-match": "No spec in the Spec Library",
+  ambiguous: "More than one library spec matches",
+  draft: "Has a draft spec — approve to use",
 };
 
 /** The part a Write spec box is for — a picker result or a product row. */
@@ -461,6 +470,8 @@ function ProductsCard({
     if (attention.length || otherSectionRows.length) {
       groups.push({ key: "attention", title: "Needs attention — left out of the Word file", rows: attention, attention: true });
     }
+    const waivedRows = productRows.filter((r) => r.waivedReason);
+    if (waivedRows.length) groups.push({ key: "waived", title: "Not specified — prints under ITEMS NOT SPECIFIED", rows: waivedRows });
   } else if (productRows.length) {
     groups.push({ key: "all", title: "Products", rows: productRows });
   }
@@ -560,6 +571,7 @@ function ProductsCard({
           </span>
         );
       case "other-section":
+        if (r.otherSectionNumber) return <span style={WARN}>Belongs to section {r.otherSectionNumber}</span>;
         return (
           <span style={{ ...WARN, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             Belongs to {r.otherArticleTitle || "another article"}&apos;s section — Use a header here
@@ -568,6 +580,10 @@ function ProductsCard({
         );
       case "not-in-catalog":
         return <span style={WARN}>Part no longer in catalog</span>;
+      case "no-match":
+      case "ambiguous":
+      case "draft":
+        return <span style={WARN}>{REASON_TEXT[r.leftOutReason]}</span>;
       default:
         return null;
     }
@@ -578,11 +594,12 @@ function ProductsCard({
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
           <span style={SKU}>{r.sku}</span>
-          <span style={{ fontSize: 13, color: "#16181b" }}>{r.specTitle || r.desc || "—"}</span>
+          <span style={{ fontSize: 13, color: "#16181b" }}>{r.recordTitle || r.specTitle || r.desc || "—"}</span>
           {fromBom && r.qty != null && <span style={{ ...MUTED, fontFamily: "var(--font-mono)" }}>Qty {r.qty}</span>}
         </div>
         {r.specTitle && r.desc && r.specTitle !== r.desc && <div style={MUTED}>{r.desc}</div>}
         {r.leftOutReason && <div style={{ marginTop: 3 }}>{reasonLine(r)}</div>}
+        {r.waivedReason && <div style={{ ...MUTED, marginTop: 3 }}>Waived — {r.waivedReason}</div>}
       </div>
       {canEdit && (
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -710,8 +727,8 @@ function ChecklistCard({ assembled }: { assembled: AssembledSection }) {
       {m > 0 && (
         <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12.5, color: "#3a3f4a" }}>
           {c.leftOut.map((l) => (
-            <li key={l.sku}>
-              <span style={SKU}>{l.sku}</span> — {REASON_TEXT[l.reason]}
+            <li key={l.rowKey}>
+              <span style={SKU}>{l.sku || l.desc}</span> — {REASON_TEXT[l.reason]}
             </li>
           ))}
         </ul>

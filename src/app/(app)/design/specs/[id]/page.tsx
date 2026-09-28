@@ -23,7 +23,7 @@ export const metadata = { title: "Spec — Quartzite-6" };
 export default async function SpecBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const [user, { id }] = await Promise.all([requireUser(), params]);
   // The loader's library + parts are reused below — one read of each.
-  const { doc, section, assembled, articles, sections, parts } = await loadAssembledSpec(id);
+  const { doc, section, assembled, articles, sections, parts, records } = await loadAssembledSpec(id);
   if (!doc.id) notFound();
 
   const canEdit = can("create", user.roles);
@@ -34,27 +34,45 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
     .sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title))
     .map((a) => ({ id: a.id, title: a.title }));
   const articleTitle = new Map(articles.map((a) => [a.id, a.title]));
-  const leftOutBySku = new Map((assembled?.checklist.leftOut || []).map((l) => [l.sku.toUpperCase(), l]));
+  // Keyed by row identity, not sku — a sku-less row has sku "" (§3.1).
+  const leftOutByKey = new Map((assembled?.checklist.leftOut || []).map((l) => [l.rowKey, l]));
+  const recordById = new Map(records.map((r) => [r.specId, r]));
 
   const productRows: SpecProductRow[] = doc.products.map((p) => {
+    const rowKey = specRowKey(p);
     const part = parts.get(p.sku.toUpperCase());
-    const leftOut = leftOutBySku.get(p.sku.toUpperCase()) || null;
+    const leftOut = leftOutByKey.get(rowKey) || null;
+    const match = assembled?.rowMatches[rowKey];
+    // A row matched to a Spec Library record prints under the record's own
+    // article (design §3.3); every other row keeps the #205 placement.
+    const record = match?.status === "matched" ? recordById.get(match.specId) : undefined;
     const placement = section ? placeProduct(p, part, section.id, articles, sections) : null;
-    const otherArticleId = placement && !placement.ok && placement.reason === "other-section" ? placement.articleId : undefined;
+    const placedArticleId =
+      match?.status === "waived" ? null : record ? (leftOut ? null : record.sourceArticleId) : placement?.ok ? placement.articleId : null;
+    const otherArticleId = record
+      ? leftOut?.reason === "other-section"
+        ? record.sourceArticleId || undefined
+        : undefined
+      : placement && !placement.ok && placement.reason === "other-section"
+        ? placement.articleId
+        : undefined;
     return {
       // Row identity (spec records design §3.1) computed here, server-side,
       // from the STORED product — a sku-less row's mfrNumber/specKey/specId/
       // fromLibrary never reach the client any other way, and re-deriving
       // this on the client from the display-only fields below would collapse
       // every such row to the same `DESC:` key (#205 fix round).
-      rowKey: specRowKey(p),
+      rowKey,
       sku: part?.sku || p.sku,
       // A sku-less row (allowance/vendor/curtain) has no catalog part to read
       // a description from — fall back to the quote's own stored desc.
       desc: part?.desc || p.desc || "",
       ...(p.qty != null ? { qty: p.qty } : {}),
-      placedArticleId: placement?.ok ? placement.articleId : null,
+      placedArticleId,
       leftOutReason: leftOut?.reason ?? null,
+      otherSectionNumber: leftOut?.sectionNumber ?? null,
+      waivedReason: match?.status === "waived" ? match.reason : null,
+      recordTitle: record?.title ?? null,
       otherArticleTitle: otherArticleId ? articleTitle.get(otherArticleId) || null : null,
       ownArticleId: part ? articleIdForPart(part, articles, sections) : null,
       specArticleId: part?.specArticleId || null,

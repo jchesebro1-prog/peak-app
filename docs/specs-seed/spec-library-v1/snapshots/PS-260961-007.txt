@@ -1,0 +1,11 @@
+A. ARCHITECTURAL CONTROL BUTTON STATIONS
+  1. General
+    a. The Lighting Control Stations shall be the Heritage Series Control Stations as manufactured by Electronic Theatre Controls, Inc., or equal.
+    b. Functional
+      1) The Unison Paradigm Control System shall be designed to allow control of lighting and associated systems via Button, Button/Fader, and Interface or Astronomical time clock controls. System shall allow the programming of presets, sequences, macros and time clock events.
+      2) Station Button, Button/Fader, and Interface) control components shall be designed to operate standard default or custom system functions. Components shall operate default functions unless re-assigned via LightDesigner, the Windows-based configuration program.
+      3) Stations (Button and Button/Fader) shall allow programming of station and component electronic lockout levels via LightDesigner.
+    c. Mechanical
+      1) Mounting: Flush-mount in industry-standard gang boxes (by others).
+      2) Configuration: 1-gang button stations (1, 2, 5, 7, or 10 buttons) and keyswitch stations (maintained or momentary, with 0, 1, 2, or 5 buttons), legends as scheduled [per Drawings].
+      3) Finish: [Cream (RAL 9001), Ivory (RAL 1015), Gray (RAL 7001), Black (RAL 9004), or Signal White (RAL 9003)], as selected by the Architect.
