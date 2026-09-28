@@ -3,11 +3,13 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { placeProduct } from "@/lib/specs/assemble-section";
-import { articleIdForPart } from "@/lib/specs/articles";
-import { specRowKey } from "@/lib/specs/record-keys";
+import { articleIdForPart, csiKey } from "@/lib/specs/articles";
+import { isPlaceholderSku, specRowKey } from "@/lib/specs/record-keys";
+import type { SpecKind } from "@/lib/specs/records";
 import { specCustomerOptions } from "../customer-options";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import Builder, { type SpecProductRow } from "./builder";
+import type { SlimSpecRecord } from "./record-row";
 
 /**
  * #205 Phase B (T5) — the spec builder's server shell. Loads the spec
@@ -16,6 +18,12 @@ import Builder, { type SpecProductRow } from "./builder";
  * header pickers, and one row per product on the spec with where it lands
  * (or why it's left out). All editing lives in the client Builder; viewers
  * without `create` get the same screen read-only.
+ *
+ * Spec records (Task 9): each row also carries its match outcome and the
+ * Write-new-spec defaults inferred from the row, and the client gets a slim
+ * `recordsById` map of just the records this spec refers to, the library
+ * text of the ones it prints (the Edit panel's starting point) and the
+ * system match keys (Write new spec's key suggestions).
  */
 
 export const metadata = { title: "Spec — Quartzite-6" };
@@ -56,6 +64,12 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       : placement && !placement.ok && placement.reason === "other-section"
         ? placement.articleId
         : undefined;
+    // Write new spec (design §5.1): kind inferred from what the row knows.
+    const realSku = !!p.sku && !isPlaceholderSku(p.sku);
+    const colon = p.sku.indexOf(":");
+    const partNumber = p.mfrNumber || part?.manufacturerPartNumber || (realSku ? (colon >= 0 ? p.sku.slice(colon + 1) : p.sku) : "");
+    const kind: SpecKind = part ? "product_catalog" : partNumber ? "product_vendor" : "system";
+    const otherSectionNumber = leftOut?.sectionNumber ?? null;
     return {
       // Row identity (spec records design §3.1) computed here, server-side,
       // from the STORED product — a sku-less row's mfrNumber/specKey/specId/
@@ -70,7 +84,17 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       ...(p.qty != null ? { qty: p.qty } : {}),
       placedArticleId,
       leftOutReason: leftOut?.reason ?? null,
-      otherSectionNumber: leftOut?.sectionNumber ?? null,
+      otherSectionNumber,
+      otherSectionId: otherSectionNumber ? sections.find((x) => csiKey(x.number) === csiKey(otherSectionNumber))?.id ?? null : null,
+      match: match ?? null,
+      fromLibrary: !!p.fromLibrary,
+      writeDefaults: {
+        kind,
+        title: part?.desc || p.desc || "",
+        partNumber,
+        manufacturer: p.manufacturer || part?.mfr || "",
+        matchKey: p.specKey || p.desc || "",
+      },
       waivedReason: match?.status === "waived" ? match.reason : null,
       recordTitle: record?.title ?? null,
       otherArticleTitle: otherArticleId ? articleTitle.get(otherArticleId) || null : null,
@@ -83,6 +107,36 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       specSort: typeof part?.specSort === "number" && Number.isFinite(part.specSort) ? part.specSort : null,
     };
   });
+
+  // Only the records this spec refers to reach the client (rows' matches,
+  // candidates and drafts, overrides, the last download's stamp, what prints
+  // now) — never the whole library.
+  const referenced = new Set<string>([
+    ...Object.keys(doc.overrides),
+    ...Object.keys(doc.usedRecords),
+    ...Object.keys(assembled?.usedRecords || {}),
+  ]);
+  for (const m of Object.values(assembled?.rowMatches || {})) {
+    if (m.status === "matched" || m.status === "draft") referenced.add(m.specId);
+    else if (m.status === "ambiguous") m.specIds.forEach((x) => referenced.add(x));
+    else if (m.status === "no-match") m.candidates.forEach((x) => referenced.add(x));
+  }
+  const recordsById: Record<string, SlimSpecRecord> = {};
+  for (const id of referenced) {
+    const r = recordById.get(id);
+    if (r) recordsById[id] = { specId: r.specId, title: r.title, kind: r.kind, status: r.status, revision: r.revision, matchKey: r.matchKey, section: r.section };
+  }
+  // Library text of each matched record — the Edit panel starts from it (or
+  // from the project override the client already has on `doc`).
+  const recordTexts: Record<string, { title: string; specText: string }> = {};
+  for (const m of Object.values(assembled?.rowMatches || {})) {
+    if (m.status !== "matched") continue;
+    const r = recordById.get(m.specId);
+    if (r) recordTexts[r.specId] = { title: r.title, specText: r.specText };
+  }
+  const systemMatchKeys = [
+    ...new Set(records.filter((r) => r.kind === "system" && r.status !== "archived" && r.matchKey).map((r) => r.matchKey as string)),
+  ].sort((a, b) => a.localeCompare(b));
 
   // #223 — the source quote's estimate number for the header's Source line.
   const srcQuoteId = doc.source.quoteId || (doc.source.kind === "quote" ? doc.source.id : undefined);
@@ -98,6 +152,9 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       customerOptions={customerOptions}
       canEdit={canEdit}
       sourceQuoteNumber={sourceQuoteNumber}
+      recordsById={recordsById}
+      recordTexts={recordTexts}
+      systemMatchKeys={systemMatchKeys}
     />
   );
 }

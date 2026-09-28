@@ -32,6 +32,8 @@ import {
 import { specRowKey } from "@/lib/specs/record-keys";
 import { articleInSection } from "@/lib/specs/assemble-section";
 import { fillInLabelKey, fillInSlots } from "@/lib/specs/fill-ins";
+import { jobValueAnswerLabel } from "@/lib/specs/record-fill-ins";
+import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { searchSpecParts, type SpecPickerPart } from "@/lib/specs/picker";
 import { bomFromQuote } from "@/lib/specs/quote-bom";
 
@@ -174,7 +176,8 @@ export async function setSpecCustomerAction(id: string, customerId: string | nul
 
 /**
  * Answer (or clear) one [FILL IN: …] blank. Setting a value needs a key that
- * is a live blank of the spec's section; the blank's label is looked up here
+ * is a live blank of the spec's section, or a `[bracket]` job value of a
+ * record this spec prints (Task 9); the blank's label is looked up here
  * on the server — never taken from the client — and stored beside the
  * answer, so a later library edit that moves a different blank to this
  * position shows the answer as stale instead of printing it in the wrong
@@ -192,8 +195,17 @@ export async function setSpecFillInAction(id: string, key: string, value: string
     if (!doc) return { ok: false, error: "Spec not found." };
     const section = await getSection(doc.sectionId);
     const slot = section ? fillInSlots(section).find((s) => s.key === k) : undefined;
-    if (!slot) return { ok: false, error: "That blank is no longer in this section's text." };
-    label = fillInLabelKey(slot.label);
+    if (slot) {
+      label = fillInLabelKey(slot.label);
+    } else {
+      // A `[bracket]` job value (`${specId}#n`, spec records design §4) of a
+      // record this doc prints — labelled from the printed text (a
+      // project-only override's, else the record's), never the client's.
+      const { assembled, records } = await loadAssembledSpec(id);
+      const jv = assembled ? jobValueAnswerLabel(k, assembled.usedRecords, records, doc.overrides) : null;
+      if (jv == null) return { ok: false, error: "That blank is no longer in this section's text." };
+      label = jv;
+    }
   }
   return applyPatch(id, user, (d) => {
     const fillIns = { ...d.fillIns };

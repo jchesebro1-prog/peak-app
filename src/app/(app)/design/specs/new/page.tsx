@@ -17,6 +17,9 @@ import NewSpecForm, { type NewSpecSource } from "./new-spec-form";
  *   /design/specs/new                               from scratch
  *   /design/specs/new?quote=<id>                    Spec from this quote
  *   /design/specs/new?grid=<projectId>&quote=<id>   Spec from this Grid design
+ *   /design/specs/new?section=<sectionId>&quote=<id> a quote, section preselected
+ *     (a matched spec record from another section — Task 9's "Start a
+ *     <section> spec from this quote"; any source param combines with it)
  *   /design/specs/new?engagement=<id>               the old engagement door:
  *     its install quote, else its own quote when that is a system quote
  *     (a consulting proposal carries no equipment), else from scratch
@@ -65,6 +68,10 @@ export default async function NewSpecPage({
   const quoteParam = one(sp.quote);
   const gridParam = one(sp.grid);
   const engagementParam = one(sp.engagement);
+  // Only a section the library still has is preselected; anything else is
+  // ignored and the owner picks as usual.
+  const sectionParam = one(sp.section);
+  const defaultSectionId = sections.some((s) => s.id === sectionParam) ? sectionParam : "";
 
   let quoteId = "";
   let fromLabel = "";
@@ -157,6 +164,7 @@ export default async function NewSpecPage({
           notice={notice}
           defaultCustomerId={defaultCustomerId}
           defaultProjectName={defaultProjectName}
+          defaultSectionId={defaultSectionId}
         />
       )}
     </div>

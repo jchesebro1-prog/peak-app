@@ -10657,6 +10657,7 @@ seeded()
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
   .then(() => recordConflictGuardsAsyncChecks())
+  .then(() => specBuilderMatchReportAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -19556,7 +19557,10 @@ async function specBuilderActionsAsyncChecks(): Promise<void> {
   for (const [name, text] of [["builder", b], ["new-spec-form", f], ["header-fields", h]] as const) {
     ok(text.startsWith('"use client"') && !/@\/lib\/stores\/|@\/db\/|from "docx"|exceljs/.test(text.replace(/import type[^;]*;/g, "")), `#205 spec builder: ${name} is a client file with no store/db/docx imports`);
   }
-  ok(b.includes("/api/spec-documents/") && b.includes("searchSpecPartsAction") && b.includes("writePartSpecFieldsAction"), "#205 spec builder: builder downloads, searches and writes part specs");
+  // Spec records Task 9: the builder's Write flow saves a Spec Library record
+  // (createRecordFromRowAction, record-dialogs.tsx) — it no longer writes
+  // spec text onto the catalog part (writePartSpecFieldsAction).
+  ok(b.includes("/api/spec-documents/") && b.includes("searchSpecPartsAction") && !b.includes("writePartSpecFieldsAction"), "#205 spec builder: builder downloads and searches parts; writing spec text moved to Spec Library records (Task 9)");
   const list = read("src/app/(app)/design/specs/page.tsx");
   ok(!list.includes('redirect("/design/specs/library")') && list.includes("/design/specs/new"), "#205 spec builder: /design/specs is the saved-spec list with + New spec");
   const smoke = read("scripts/smoke-routes.ts");
@@ -32988,4 +32992,73 @@ async function recordConflictGuardsAsyncChecks(): Promise<void> {
     "conflict guards: restoreSpecRecordRevisionAction runs the conflict guards before restoring a ready revision");
   ok(/status\s*===\s*"ready"/.test(restoreBody),
     "conflict guards: restoreSpecRecordRevisionAction only runs the guards when the restored version is ready");
+}
+
+/* ---- Builder match report — Task 9 (spec records design §5) ----
+ * The harness can't render React, so the UI is checked by source: the new
+ * sibling files exist, never use window.confirm/prompt (D96), import only
+ * types from anything that reaches the doc-store/db, and the builder wires
+ * the record actions (Link / Write new / Waive / project vs library edits /
+ * Add from Spec Library) instead of the old catalog-part Write spec. The one
+ * piece of logic — which `${specId}#n` job-value keys the fill-in save
+ * accepts, and the label stored beside them — is a pure helper, tested
+ * directly. */
+async function specBuilderMatchReportAsyncChecks(): Promise<void> {
+  const dir = join(process.cwd(), "src/app/(app)/design/specs/[id]");
+  const read = (f: string) => { try { return readFileSync(join(dir, f), "utf8"); } catch { return ""; } };
+  const newFiles = ["record-row.tsx", "record-dialogs.tsx", "library-picker.tsx"];
+  const srcs = Object.fromEntries(["builder.tsx", ...newFiles, "preview.tsx", "page.tsx"].map((f) => [f, read(f)]));
+  ok(newFiles.every((f) => srcs[f].length > 0), "match report: record-row.tsx, record-dialogs.tsx and library-picker.tsx exist");
+  ok(["builder.tsx", ...newFiles].every((f) => !/window\.(confirm|prompt)/.test(srcs[f])),
+    "match report: no window.confirm / window.prompt in the builder or its new sibling files (D96)");
+  const storeImport = /^import\s+(?!type\b)[^;]*from\s+"(@\/lib\/stores\/[^"]*|@\/db[^"]*|[^"]*record-io[^"]*|exceljs)"/m;
+  ok(["builder.tsx", ...newFiles].every((f) => !srcs[f].includes('"use client"') || !storeImport.test(srcs[f])),
+    "match report: \"use client\" builder files import only types from @/lib/stores, @/db and record-io");
+  ok(newFiles.every((f) => srcs[f].startsWith('"use client"')), "match report: the new sibling files are client components");
+  const ui = ["builder.tsx", ...newFiles].map((f) => srcs[f]).join("\n");
+  for (const a of ["linkRowToRecordAction", "createRecordFromRowAction", "waiveRowAction", "unwaiveRowAction", "saveRowOverrideAction", "clearRowOverrideAction", "updateLibraryRecordAction", "recordUsageAction", "approveDraftRecordAction", "addLibraryRowAction", "searchSpecRecordsAction", "pinRowToRecordAction"]) {
+    ok(new RegExp(`\\b${a}\\(`).test(ui), `match report: the builder calls ${a}`);
+  }
+  ok(!/writePartSpecFieldsAction/.test(ui), "match report: the builder's Write flow no longer calls the catalog-part writePartSpecFieldsAction");
+  ok(newFiles.every((f) => !srcs[f].includes("specRowKey(")), "match report: the new files never recompute a row key — they read the server's rowKey");
+  // Every row mutation goes through the builder's shared save hook, which is
+  // the transition + inline error + router.refresh() (header-fields.tsx).
+  const hf = read("header-fields.tsx");
+  const useSaveBody = hf.slice(hf.indexOf("export function useSave("), hf.indexOf("return { err, setErr, pending, run, track }"));
+  ok(newFiles.every((f) => /useSave\(\)|useTransition/.test(srcs[f])) && /useTransition\(\)/.test(useSaveBody) && /router\.refresh\(\)/.test(useSaveBody) && /setErr\(r\.error\)/.test(useSaveBody),
+    "match report: mutations run in a transition, show their error inline and refresh the router (useSave)");
+  ok(/\/design\/specs\/new\?section=/.test(ui), "match report: an other-section row links to a new spec for that section");
+  ok(/jobValueSegments/.test(srcs["preview.tsx"]), "match report: the preview highlights [bracket] job values via jobValueSegments");
+  ok(/recordsById/.test(srcs["page.tsx"]) && /recordsById/.test(srcs["builder.tsx"]), "match report: page.tsx passes the slim recordsById map to the builder");
+  const newPage = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/new/page.tsx"), "utf8");
+  ok(/sp\.section\b/.test(newPage) && /defaultSectionId/.test(newPage), "match report: /design/specs/new accepts a section= preselect");
+  const ba = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/builder-actions.ts"), "utf8");
+  const fillBody = ba.slice(ba.indexOf("export async function setSpecFillInAction(")).split(/\nexport async function /)[0];
+  ok(/jobValueAnswerLabel\(/.test(fillBody), "match report: setSpecFillInAction accepts job-value keys through jobValueAnswerLabel");
+  const ra = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/record-actions.ts"), "utf8");
+  const pinBody = ra.slice(ra.indexOf("export async function pinRowToRecordAction(")).split(/\nexport async function /)[0];
+  ok(ra.includes("export async function pinRowToRecordAction(") && /requirePerm\("create"\)/.test(pinBody) && /withRowPin\(/.test(pinBody),
+    "match report: pinRowToRecordAction (ambiguous rows pick one) is create-gated and pins through withRowPin");
+
+  const J = await import("@/lib/specs/record-fill-ins");
+  const label = (J as unknown as { jobValueAnswerLabel?: (key: string, printed: Record<string, number>, records: Array<{ specId: string; specText: string }>, overrides: Record<string, { specText: string }>) => string | null }).jobValueAnswerLabel;
+  ok(typeof label === "function", "job-value keys: record-fill-ins exports jobValueAnswerLabel");
+  if (typeof label === "function") {
+    const recsJ = [
+      { specId: "PS-T-001", specText: "Supply [1] transporter.\n  Color [Cream,  Ivory]." },
+      { specId: "PS-T-002", specText: "No brackets here." },
+    ];
+    const printed = { "PS-T-001": 3, "PS-T-002": 1 };
+    ok(label("PS-T-001#1", printed, recsJ, {}) === "1" && label("PS-T-001#2", printed, recsJ, {}) === "cream, ivory",
+      "job-value keys: a printed record's bracket key returns its normalized default as the label");
+    ok(label("PS-T-001#3", printed, recsJ, {}) === null, "job-value keys: an index past the record's brackets is refused");
+    ok(label("PS-T-001#1", { "PS-T-002": 1 }, recsJ, {}) === null, "job-value keys: a record not printed in this doc is refused");
+    ok(label("PS-T-002#1", printed, recsJ, {}) === null, "job-value keys: a record with no brackets has no job-value keys");
+    ok(label("PS-NOPE#1", { "PS-NOPE": 1 }, recsJ, {}) === null, "job-value keys: an unknown record is refused");
+    ok(label("ar-nhs-1#1", printed, recsJ, {}) === null && label("PS-T-001", printed, recsJ, {}) === null && label("#1", printed, recsJ, {}) === null,
+      "job-value keys: a Part 1/3 key, a bare specId and a bare #n are refused");
+    const ov = { "PS-T-001": { specText: "Provide [4 ea] hoists." } };
+    ok(label("PS-T-001#1", printed, recsJ, ov) === "4 ea" && label("PS-T-001#2", printed, recsJ, ov) === null,
+      "job-value keys: a project-only override's text is the one scanned, not the library text");
+  }
 }

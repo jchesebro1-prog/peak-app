@@ -41,6 +41,7 @@ export default function NewSpecForm({
   notice,
   defaultCustomerId,
   defaultProjectName,
+  defaultSectionId = "",
 }: {
   sections: Array<{ id: string; number: string; title: string }>;
   customerOptions: CustomerComboboxOption[];
@@ -51,9 +52,11 @@ export default function NewSpecForm({
   notice: string;
   defaultCustomerId: string;
   defaultProjectName: string;
+  /** A `section=` preselect the page already checked exists. */
+  defaultSectionId?: string;
 }) {
   const router = useRouter();
-  const [sectionId, setSectionId] = useState("");
+  const [sectionId, setSectionId] = useState(defaultSectionId);
   const [customerId, setCustomerId] = useState(defaultCustomerId);
   const [projectName, setProjectName] = useState(defaultProjectName);
   const [projectNumber, setProjectNumber] = useState("");

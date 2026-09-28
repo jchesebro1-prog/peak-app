@@ -114,3 +114,30 @@ export function jobValueSegments(text: string): Array<{ text: string; bracket: b
   if (last < s.length) out.push({ text: s.slice(last), bracket: false });
   return out;
 }
+
+/**
+ * The label to store beside a job-value answer (`fillInLabels[key]`), or
+ * `null` when `key` is not a job value of a record this doc prints (Task 9).
+ * `printed` is the assembly's `usedRecords` (`{ specId: revision }`); the
+ * text scanned is the one that prints — a project-only override's when the
+ * doc has one, else the record's own — so the label always matches the
+ * bracket the builder showed. The label is the normalized default text, the
+ * same form `labelMismatch` compares (D332 staleness).
+ */
+export function jobValueAnswerLabel(
+  key: string,
+  printed: Record<string, number>,
+  records: ReadonlyArray<{ specId: string; specText: string }>,
+  overrides: Record<string, { specText: string }>
+): string | null {
+  const k = String(key || "");
+  const hash = k.lastIndexOf("#");
+  if (hash <= 0) return null;
+  const specId = k.slice(0, hash);
+  if (!Object.prototype.hasOwnProperty.call(printed, specId)) return null;
+  const ov = Object.prototype.hasOwnProperty.call(overrides, specId) ? overrides[specId] : undefined;
+  const text = ov ? ov.specText : records.find((r) => r.specId === specId)?.specText;
+  if (text == null) return null;
+  const slot = jobValueSlots(specId, text).find((s) => s.key === k);
+  return slot ? fillInLabelKey(slot.defaultText) : null;
+}

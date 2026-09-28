@@ -225,6 +225,22 @@ export async function linkRowToRecordAction(docId: string, rowKey: string, specI
   return applyPatch(docId, user, (d) => withRowPin(d, rowKey, specId));
 }
 
+/** Pick one record for an ambiguous row (design §5.1: "Ambiguous rows pick
+ *  among their candidates the same way (pin)") — always a pin, never a
+ *  part-number add: every candidate already holds the row's number, so
+ *  adding it again would change nothing and the row would stay ambiguous.
+ *  Refuses an archived record. */
+export async function pinRowToRecordAction(docId: string, rowKey: string, specId: string): Promise<Result> {
+  const user = await requirePerm("create");
+  const doc = await getSpecDocument(docId);
+  if (!doc) return { ok: false, error: "Spec not found." };
+  if (!rowOnDoc(doc, rowKey)) return { ok: false, error: ROW_GONE };
+  const record = await getSpecRecord(specId);
+  if (!record) return { ok: false, error: "Spec record not found." };
+  if (record.status === "archived") return { ok: false, error: "That spec record is archived." };
+  return applyPatch(docId, user, (d) => withRowPin(d, rowKey, specId));
+}
+
 /** Write new spec (design §5.1). Prefilled from the row; saves a new
  *  `ready` record at the next free id for the doc's section. A system
  *  record also sets the row's match key. */

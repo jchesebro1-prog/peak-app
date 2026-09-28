@@ -6,9 +6,10 @@ import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import type { AssembledSection, LeftOutReason } from "@/lib/specs/assemble-section";
+import type { RowMatch } from "@/lib/specs/record-match";
+import type { SpecKind } from "@/lib/specs/records";
 import type { SpecDocument } from "@/lib/specs/spec-document";
 import { specFileName } from "@/lib/specs/spec-file-name";
-import { writePartSpecFieldsAction } from "@/app/(app)/catalog/actions";
 import {
   addSpecProductAction,
   deleteSpecDocumentAction,
@@ -19,22 +20,28 @@ import {
   setSpecProductHeaderAction,
   type SpecPickerPart,
 } from "../builder-actions";
-import { CARD, CARD_SUB, CARD_TITLE, ERR, FillInsCard, HeaderCard, MUTED, SaveTracker, useSave, type ActionResult } from "./header-fields";
+import { CARD, CARD_SUB, CARD_TITLE, ERR, FillInsCard, HeaderCard, MUTED, SaveTracker, useSave } from "./header-fields";
 import Preview from "./preview";
+import { LibraryPicker } from "./library-picker";
+import { Chip, isRecordState, JobValuesGroup, RecordRowStatus, rowState, type SlimSpecRecord } from "./record-row";
 
 /**
  * #205 Phase B (T5) — the spec builder, top to bottom: Header, Fill-ins,
- * Products (+ Add product picker, Write spec), Checklist, Preview + Download
- * Word, Delete. Everything saves as it changes through the builder's server
+ * Products (+ Add product picker, + Add from Spec Library, the match report),
+ * Checklist, Preview + Download Word, Delete. Everything saves as it changes through the builder's server
  * actions; router.refresh() re-runs the page's assembly so the preview and
  * checklist always show what the Word file will hold. Nothing here blocks the
  * download — gaps are listed, never enforced (design decision 4) — but a
  * Download click waits for saves still in flight (SaveTracker).
  *
- * Writing spec text for a part saves it TO THE PART (the catalog Spec
- * panel's writePartSpecFieldsAction), so the next spec gets it for free.
- * That action overwrites every spec field it is handed, so the part's
- * current specArticleId and specSort always go back with it.
+ * Spec records (Task 9, design §5): each product row shows its match
+ * outcome and actions (record-row.tsx, record-dialogs.tsx). "Write new spec"
+ * saves a Spec Library record, never text on the catalog part — the old
+ * catalog-part Write spec is gone from the builder (the catalog's own Spec
+ * panel keeps its legacy editor). The catalog picker's "Show all catalog
+ * parts" adds a part without a spec straight onto the spec, where its row
+ * offers Write new spec like any other unresolved row; a part with text
+ * from another section still asks for a header here.
  */
 
 export type SpecProductRow = {
@@ -67,6 +74,14 @@ export type SpecProductRow = {
   specTitle: string;
   specBody: string;
   specSort: number | null;
+  /** Spec records (Task 9): this row's match outcome (null = no assembly). */
+  match: RowMatch | null;
+  /** For a record from another section: that section's id, when it exists. */
+  otherSectionId: string | null;
+  /** Added straight from the Spec Library (a `SPEC:<id>` row, §5.3). */
+  fromLibrary: boolean;
+  /** Write new spec's starting values, inferred server-side from the row. */
+  writeDefaults: { kind: SpecKind; title: string; partNumber: string; manufacturer: string; matchKey: string };
 };
 
 type ArticleOption = { id: string; title: string };
@@ -82,16 +97,10 @@ const ROW: CSSProperties = {
 };
 const SKU: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: 12, color: "#3a3f4a" };
 const SMALL_BTN: CSSProperties = { padding: "4px 8px", fontSize: 11.5 };
-const LINK_BTN: CSSProperties = {
-  background: "none",
-  border: "none",
-  padding: 0,
-  color: "var(--accent)",
-  fontSize: 12.5,
-  fontWeight: 600,
-  cursor: "pointer",
-};
 const WARN: CSSProperties = { fontSize: 12.5, color: "#8a6d1f" };
+
+/** A row's name for aria-labels — sku-less rows have none of their own. */
+const rowName = (r: SpecProductRow) => r.sku || r.recordTitle || r.desc || "product";
 
 const REASON_TEXT: Record<LeftOutReason, string> = {
   "no-spec": "No approved spec",
@@ -103,173 +112,67 @@ const REASON_TEXT: Record<LeftOutReason, string> = {
   draft: "Has a draft spec — approve to use",
 };
 
-/** The part a Write spec box is for — a picker result or a product row. */
-type WriteTarget = {
-  sku: string;
-  desc: string;
-  /** The part's explicit article, when it still exists. */
-  specArticleId: string | null;
-  /** The part's own resolved article (explicit or category default), any section. */
-  ownArticleId: string | null;
-  /** The part's explicit article was deleted from the library. */
-  deadArticle: boolean;
-  specSameAs: string;
-  specTitle: string;
-  specBody: string;
-  specSort: number | null;
-  /** Needs spec text written (false = it has an approved spec already). */
-  needsText: boolean;
-  /** Needs a header in this spec (it isn't in this section on its own). */
-  needsHeader: boolean;
-  /** Add it to the spec after saving (picker) vs. it is already on it (row). */
-  addToSpec: boolean;
-};
-
-/** Write a part's spec text (and/or pick its header), then add it to the spec. */
-function WriteSpecDialog({
+/** A catalog part with spec text from another section, picked in "Show all
+ *  catalog parts": it needs a header in this spec before it's added. No text
+ *  is typed here, so Escape just closes. */
+function HeaderPickDialog({
   docId,
-  target,
+  part,
   sectionArticles,
   onClose,
   onDone,
 }: {
   docId: string;
-  target: WriteTarget;
+  part: SpecPickerPart;
   sectionArticles: ArticleOption[];
   onClose: () => void;
   onDone: (sku: string) => void;
 }) {
-  const { track } = useSave();
-  const [title, setTitle] = useState(target.specTitle);
-  const [body, setBody] = useState(target.specBody);
+  const { err, pending, run } = useSave();
   const [header, setHeader] = useState("");
-  const [err, setErr] = useState("");
-  const [pending, setPending] = useState(false);
-  const dirty = title !== target.specTitle || body !== target.specBody || header !== "";
-  // A dead article needs a new one picked, even when the part is already on the spec.
-  const showHeader = target.needsHeader || (target.needsText && target.deadArticle);
 
-  // Escape closes only when nothing was typed; otherwise it asks first. A
-  // click on the scrim never closes — it would throw away written text.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || pending) return;
-      if (!dirty || window.confirm("Discard what you wrote here?")) onClose();
+      if (e.key === "Escape" && !pending) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dirty, pending, onClose]);
-
-  const save = async () => {
-    setErr("");
-    if (target.needsText && !body.trim()) {
-      setErr("Write the spec text first.");
-      return;
-    }
-    setPending(true);
-    try {
-      await track(async (): Promise<ActionResult> => {
-        if (target.needsText) {
-          // Keep the part's own (live) article; a part with no article at all
-          // — or a deleted one — adopts the header picked here. A part whose
-          // category puts it in another section keeps that; the header then
-          // goes on this spec only.
-          const specArticleId = target.specArticleId || (!target.ownArticleId && header ? header : undefined);
-          const w = await writePartSpecFieldsAction({
-            sku: target.sku,
-            specArticleId,
-            specTitle: title,
-            specBody: body,
-            ...(target.specSort != null ? { specSort: target.specSort } : {}),
-          });
-          if (!w.ok) {
-            setErr(w.error);
-            return w;
-          }
-        }
-        if (target.addToSpec) {
-          const a = await addSpecProductAction(docId, target.sku, target.needsHeader && header ? header : undefined);
-          if (!a.ok) {
-            setErr(a.error);
-            return a;
-          }
-        }
-        onDone(target.sku);
-        return { ok: true };
-      });
-    } catch {
-      setErr("Could not save. Try again.");
-    } finally {
-      setPending(false);
-    }
-  };
+  }, [pending, onClose]);
 
   return (
     <div className="pk-modal-scrim">
-      <div className="pk-modal" role="dialog" aria-modal="true" aria-labelledby="write-spec-heading" style={{ width: 620 }}>
-        <div id="write-spec-heading" style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>
-          {target.needsText ? "Write spec" : "Pick a header"}
+      <div className="pk-modal" role="dialog" aria-modal="true" aria-labelledby="pick-header-heading" style={{ width: 520 }}>
+        <div id="pick-header-heading" style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>
+          Pick a header
         </div>
-        <div style={{ ...MUTED, marginBottom: 14 }}>
-          <span style={SKU}>{target.sku}</span> {target.desc}
+        <div style={{ ...MUTED, marginBottom: 12 }}>
+          <span style={SKU}>{part.sku}</span> {part.desc}
         </div>
-
-        {target.needsText && (
-          <>
-            <div style={{ ...MUTED, marginBottom: 12 }}>
-              This text is saved to the part in the catalog, so every future spec gets it too.
-              {target.specBody.trim() && " The part already has draft text — review it; saving approves it."}
-            </div>
-            {target.specSameAs && (
-              <div style={{ ...WARN, marginBottom: 12 }}>This replaces the &apos;same as {target.specSameAs}&apos; link.</div>
-            )}
-            <label className="pk-field-label" htmlFor="write-spec-title" style={{ display: "block" }}>
-              Title (the product&apos;s heading in the spec)
-            </label>
-            <input
-              id="write-spec-title"
-              className="pk-input"
-              value={title}
-              placeholder={target.desc || "e.g. COLOR MIXING LED PROFILE FIXTURE"}
-              onChange={(e) => setTitle(e.target.value)}
-              style={{ marginBottom: 12 }}
-            />
-            <label className="pk-field-label" htmlFor="write-spec-body" style={{ display: "block" }}>
-              Spec text — one item per line, indent two spaces per level
-            </label>
-            <textarea
-              id="write-spec-body"
-              className="pk-input pk-mono"
-              rows={12}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              style={{ resize: "vertical", marginBottom: 12 }}
-            />
-          </>
-        )}
-
-        {showHeader && (
-          <>
-            <label className="pk-field-label" htmlFor="write-spec-header" style={{ display: "block" }}>
-              Header in this spec
-            </label>
-            {target.deadArticle && (
-              <div style={{ ...MUTED, marginBottom: 6 }}>This part&apos;s header was deleted from the library — pick one from this section.</div>
-            )}
-            <select id="write-spec-header" className="pk-input" value={header} onChange={(e) => setHeader(e.target.value)} style={{ marginBottom: 12 }}>
-              <option value="">— Decide later —</option>
-              {sectionArticles.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.title}
-                </option>
-              ))}
-            </select>
-          </>
-        )}
-
+        <div style={{ ...MUTED, marginBottom: 12 }}>This part&apos;s spec belongs to another section. Pick the header it prints under in this one.</div>
+        <label className="pk-field-label" htmlFor="pick-header-select" style={{ display: "block" }}>
+          Header in this spec
+        </label>
+        <select id="pick-header-select" className="pk-input" value={header} onChange={(e) => setHeader(e.target.value)} style={{ marginBottom: 12 }}>
+          <option value="">— Decide later —</option>
+          {sectionArticles.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.title}
+            </option>
+          ))}
+        </select>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button type="button" className="pk-btn-accent" disabled={pending} onClick={save}>
-            {pending ? "Saving…" : target.addToSpec ? (target.needsText ? "Save spec and add" : "Add") : "Save spec"}
+          <button
+            type="button"
+            className="pk-btn-accent"
+            disabled={pending}
+            onClick={() =>
+              run(
+                () => addSpecProductAction(docId, part.sku, header || undefined),
+                () => onDone(part.sku)
+              )
+            }
+          >
+            {pending ? "Adding…" : "Add"}
           </button>
           <button type="button" className="pk-btn-outline" disabled={pending} onClick={onClose}>
             Cancel
@@ -360,7 +263,7 @@ function Picker({
       </div>
       <div style={{ ...MUTED, marginBottom: 8 }}>
         {showAll
-          ? "Every catalog part. A part without a spec asks you to write one; a part from another section asks for a header."
+          ? "Every catalog part. A part without a spec is added so you can write one (Write new spec on its row); a part from another section asks for a header."
           : "Parts with an approved spec that belong to this section."}
       </div>
       {err && (
@@ -435,24 +338,36 @@ function HeaderSelect({
 
 function ProductsCard({
   doc,
-  hasSection,
+  section,
   sectionArticles,
   productRows,
   canEdit,
+  recordsById,
+  recordTexts,
+  systemMatchKeys,
 }: {
   doc: SpecDocument;
-  hasSection: boolean;
+  section: { id: string; number: string } | null;
   sectionArticles: ArticleOption[];
   productRows: SpecProductRow[];
   canEdit: boolean;
+  recordsById: Record<string, SlimSpecRecord>;
+  recordTexts: Record<string, { title: string; specText: string }>;
+  systemMatchKeys: string[];
 }) {
   const router = useRouter();
   const { err, setErr, pending, run, track } = useSave();
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [writing, setWriting] = useState<WriteTarget | null>(null);
+  const hasSection = !!section;
+  // One picker open at a time: the catalog's, or the Spec Library's.
+  const [picker, setPicker] = useState<"" | "catalog" | "library">("");
+  const [headerFor, setHeaderFor] = useState<SpecPickerPart | null>(null);
   const [added, setAdded] = useState<string[]>([]);
   const fromBom = doc.source.kind !== "scratch";
-  const closeWriting = useCallback(() => setWriting(null), []);
+  const closeHeader = useCallback(() => setHeaderFor(null), []);
+  // Records already on the spec as their own library rows.
+  const librarySpecIds = productRows
+    .filter((r) => r.fromLibrary && r.match && (r.match.status === "matched" || r.match.status === "draft"))
+    .map((r) => (r.match as { specId: string }).specId);
 
   const groups: Array<{ key: string; title: string; rows: SpecProductRow[]; attention?: boolean }> = [];
   // From a BOM, a quote's parts for OTHER sections are expected (one quote
@@ -497,7 +412,10 @@ function ProductsCard({
     );
 
   const onPick = async (p: SpecPickerPart): Promise<void> => {
-    if (p.hasSpec && p.inSection) {
+    // With text from another section: pick a header first. Otherwise add it
+    // as is — a part without a spec lands as an unresolved row whose
+    // Write new spec writes a Spec Library record (Task 9).
+    if (!(p.hasSpec && !p.inSection)) {
       try {
         const r = await track(() => addSpecProductAction(doc.id, p.sku));
         if (!r.ok) {
@@ -513,56 +431,13 @@ function ProductsCard({
       router.refresh();
       return;
     }
-    setWriting({
-      sku: p.sku,
-      desc: p.desc,
-      specArticleId: p.articleId ? p.specArticleId : null,
-      ownArticleId: p.articleId,
-      deadArticle: !!p.specArticleId && !p.articleId,
-      specSameAs: p.specSameAs,
-      specTitle: p.specTitle,
-      specBody: p.specBody,
-      specSort: p.specSort,
-      needsText: !p.hasSpec,
-      needsHeader: !p.inSection,
-      addToSpec: true,
-    });
+    setHeaderFor(p);
   };
 
   const reasonLine = (r: SpecProductRow) => {
     switch (r.leftOutReason) {
       case "no-spec":
-        return (
-          <span style={WARN}>
-            No approved spec —{" "}
-            {canEdit ? (
-              <button
-                type="button"
-                style={LINK_BTN}
-                onClick={() =>
-                  setWriting({
-                    sku: r.sku,
-                    desc: r.desc,
-                    specArticleId: r.deadArticle ? null : r.specArticleId,
-                    ownArticleId: r.ownArticleId,
-                    deadArticle: r.deadArticle,
-                    specSameAs: r.specSameAs,
-                    specTitle: r.specTitle,
-                    specBody: r.specBody,
-                    specSort: r.specSort,
-                    needsText: true,
-                    needsHeader: false,
-                    addToSpec: false,
-                  })
-                }
-              >
-                Write spec
-              </button>
-            ) : (
-              "write one in the catalog"
-            )}
-          </span>
-        );
+        return <span style={WARN}>No approved spec</span>;
       case "needs-header":
         return (
           <span style={{ ...WARN, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -589,21 +464,44 @@ function ProductsCard({
     }
   };
 
-  const productRow = (r: SpecProductRow, i: number, rows: SpecProductRow[]) => (
+  const productRow = (r: SpecProductRow, i: number, rows: SpecProductRow[]) => {
+    const state = rowState(r);
+    // A row the Spec Library speaks for: its title is the record's, never
+    // the catalog part's legacy specTitle, and it has no header picker (a
+    // record's placement is its own article).
+    const record = isRecordState(state);
+    const heading = record ? r.recordTitle || r.desc : r.specTitle || r.desc;
+    const subtitle = record ? (r.recordTitle && r.desc && r.recordTitle !== r.desc ? r.desc : "") : r.specTitle && r.desc && r.specTitle !== r.desc ? r.desc : "";
+    return (
     <div key={r.rowKey} style={ROW}>
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-          <span style={SKU}>{r.sku}</span>
-          <span style={{ fontSize: 13, color: "#16181b" }}>{r.recordTitle || r.specTitle || r.desc || "—"}</span>
+          {r.sku && <span style={SKU}>{r.sku}</span>}
+          <span style={{ fontSize: 13, color: "#16181b" }}>{heading || "—"}</span>
           {fromBom && r.qty != null && <span style={{ ...MUTED, fontFamily: "var(--font-mono)" }}>Qty {r.qty}</span>}
+          {state === "legacy" && <Chip tone="plain">Legacy text</Chip>}
         </div>
-        {r.specTitle && r.desc && r.specTitle !== r.desc && <div style={MUTED}>{r.desc}</div>}
-        {r.leftOutReason && <div style={{ marginTop: 3 }}>{reasonLine(r)}</div>}
-        {r.waivedReason && <div style={{ ...MUTED, marginTop: 3 }}>Waived — {r.waivedReason}</div>}
+        {subtitle && <div style={MUTED}>{subtitle}</div>}
+        {record ? (
+          <RecordRowStatus
+            doc={doc}
+            row={r}
+            recordsById={recordsById}
+            recordTexts={recordTexts}
+            sectionArticles={sectionArticles}
+            systemMatchKeys={systemMatchKeys}
+            canEdit={canEdit}
+          />
+        ) : (
+          <>
+            {r.leftOutReason && <div style={{ marginTop: 3 }}>{reasonLine(r)}</div>}
+            {r.waivedReason && <div style={{ ...MUTED, marginTop: 3 }}>Waived — {r.waivedReason}</div>}
+          </>
+        )}
       </div>
       {canEdit && (
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending || i === 0} onClick={() => move(rows, i, -1)} aria-label={`Move ${r.sku} up`}>
+          <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending || i === 0} onClick={() => move(rows, i, -1)} aria-label={`Move ${rowName(r)} up`}>
             ↑
           </button>
           <button
@@ -612,7 +510,7 @@ function ProductsCard({
             style={SMALL_BTN}
             disabled={pending || i === rows.length - 1}
             onClick={() => move(rows, i, 1)}
-            aria-label={`Move ${r.sku} down`}
+            aria-label={`Move ${rowName(r)} down`}
           >
             ↓
           </button>
@@ -622,7 +520,8 @@ function ProductsCard({
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="pk-card" style={CARD}>
@@ -646,9 +545,14 @@ function ProductsCard({
               Print quantities
             </label>
           )}
-          {canEdit && hasSection && !pickerOpen && (
-            <button type="button" className="pk-btn-accent" onClick={() => setPickerOpen(true)}>
+          {canEdit && hasSection && picker !== "catalog" && (
+            <button type="button" className="pk-btn-accent" onClick={() => setPicker("catalog")}>
               + Add product
+            </button>
+          )}
+          {canEdit && hasSection && picker !== "library" && (
+            <button type="button" className="pk-btn-outline" onClick={() => setPicker("library")}>
+              Add from Spec Library
             </button>
           )}
         </div>
@@ -688,19 +592,21 @@ function ProductsCard({
         </div>
       )}
 
-      {pickerOpen && canEdit && <Picker docId={doc.id} hidden={added} onPick={onPick} onClose={() => setPickerOpen(false)} />}
+      {picker === "catalog" && canEdit && <Picker docId={doc.id} hidden={added} onPick={onPick} onClose={() => setPicker("")} />}
+      {picker === "library" && canEdit && section && (
+        <LibraryPicker docId={doc.id} sectionNumber={section.number} onSpec={librarySpecIds} onClose={() => setPicker("")} />
+      )}
 
-      {writing && (
-        <WriteSpecDialog
+      {headerFor && (
+        <HeaderPickDialog
           docId={doc.id}
-          target={writing}
+          part={headerFor}
           sectionArticles={sectionArticles}
-          onClose={closeWriting}
+          onClose={closeHeader}
           onDone={(sku) => {
-            if (writing.addToSpec) setAdded((a) => [...a, sku]);
-            setWriting(null);
+            setAdded((a) => [...a, sku]);
+            setHeaderFor(null);
             setErr("");
-            router.refresh();
           }}
         />
       )}
@@ -708,7 +614,7 @@ function ProductsCard({
   );
 }
 
-function ChecklistCard({ assembled }: { assembled: AssembledSection }) {
+function ChecklistCard({ assembled, doc, canEdit }: { assembled: AssembledSection; doc: SpecDocument; canEdit: boolean }) {
   const c = assembled.checklist;
   const n = c.fillInsLeft;
   const m = c.leftOut.length;
@@ -733,6 +639,7 @@ function ChecklistCard({ assembled }: { assembled: AssembledSection }) {
           ))}
         </ul>
       )}
+      <JobValuesGroup docId={doc.id} answers={doc.fillIns} labels={doc.fillInLabels} checklist={c} canEdit={canEdit} />
       {assembled.warnings.length > 0 && (
         <div style={{ marginTop: 10 }}>
           {assembled.warnings.map((w, i) => (
@@ -775,6 +682,9 @@ export default function Builder({
   customerOptions,
   canEdit,
   sourceQuoteNumber,
+  recordsById,
+  recordTexts,
+  systemMatchKeys,
 }: {
   doc: SpecDocument;
   section: { id: string; number: string; title: string } | null;
@@ -785,6 +695,12 @@ export default function Builder({
   canEdit: boolean;
   /** #223 — the source quote's estimate number (null: no quote / unknown). */
   sourceQuoteNumber: string | null;
+  /** Spec records (Task 9): the records this spec refers to, slim. */
+  recordsById: Record<string, SlimSpecRecord>;
+  /** Library title/text of each matched record — the Edit panel's start. */
+  recordTexts: Record<string, { title: string; specText: string }>;
+  /** System records' match keys — Write new spec's suggestions. */
+  systemMatchKeys: string[];
 }) {
   const router = useRouter();
   const downloadHref = `/api/spec-documents/${encodeURIComponent(doc.id)}/docx`;
@@ -852,9 +768,18 @@ export default function Builder({
 
         {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} labels={doc.fillInLabels} checklist={assembled.checklist} canEdit={canEdit} />}
 
-        <ProductsCard doc={doc} hasSection={!!section} sectionArticles={sectionArticles} productRows={productRows} canEdit={canEdit} />
+        <ProductsCard
+          doc={doc}
+          section={section}
+          sectionArticles={sectionArticles}
+          productRows={productRows}
+          canEdit={canEdit}
+          recordsById={recordsById}
+          recordTexts={recordTexts}
+          systemMatchKeys={systemMatchKeys}
+        />
 
-        {assembled && <ChecklistCard assembled={assembled} />}
+        {assembled && <ChecklistCard assembled={assembled} doc={doc} canEdit={canEdit} />}
 
         {section && assembled && (
           <div className="pk-card" style={CARD}>
