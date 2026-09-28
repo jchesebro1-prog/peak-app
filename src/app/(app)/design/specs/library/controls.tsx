@@ -282,6 +282,8 @@ export function CoverageControls({
 
   const hrefWith = (patch: { q?: string; article?: string; state?: string; bom?: boolean; datasheet?: boolean }) => {
     const p = new URLSearchParams();
+    // The coverage table lives on the Sections & articles view (Task 10).
+    p.set("view", "sections");
     const nq = patch.q !== undefined ? patch.q : text;
     const na = patch.article !== undefined ? patch.article : articleId;
     const ns = patch.state !== undefined ? patch.state : state;
@@ -292,8 +294,7 @@ export function CoverageControls({
     if (ns && ns !== "all") p.set("state", ns);
     if (nb) p.set("bom", "1");
     if (nd) p.set("datasheet", "1");
-    const s = p.toString();
-    return "/design/specs/library" + (s ? "?" + s : "") + "#coverage";
+    return "/design/specs/library?" + p.toString() + "#coverage";
   };
   const pushWith = (patch: { article?: string; state?: string; bom?: boolean; datasheet?: boolean }) => go(hrefWith(patch));
   const onSearch = (v: string) => setSearch(v, hrefWith({ q: v }));

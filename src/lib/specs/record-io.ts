@@ -1,14 +1,20 @@
 import ExcelJS from "exceljs";
 import { cellText } from "@/lib/import/xlsx-to-csv";
 import { csiKey } from "@/lib/specs/articles";
-import { saveSpecRecord } from "@/lib/stores/spec-records";
+import { allSpecRecords, saveSpecRecord } from "@/lib/stores/spec-records";
 import { allSections, createSection } from "@/lib/stores/spec-sections";
+import { allArticles } from "@/lib/stores/spec-articles";
 import {
   LIBRARY_HEADERS,
   LIBRARY_SHEET,
   V1_SECTION_TITLES,
+  checkSpecRecordImportFile,
+  planSpecRecordImport,
   recordToSheetRow,
+  recordsFromJson,
+  recordsFromSheetRows,
   type ImportPlan,
+  type ParsedRecords,
 } from "@/lib/specs/record-import";
 import type { SpecRecord } from "@/lib/specs/records";
 
@@ -127,4 +133,47 @@ export async function commitSpecRecordImport(plan: ImportPlan, by: string, why: 
     else result.unchanged++;
   }
   return result;
+}
+
+/** Reads an uploaded Spec Library file (`.xlsx` → the `Spec Library` sheet,
+ *  `.json` → `{ records: [...] }`) and plans it against the LIVE library,
+ *  sections and articles. Both of the screen's import actions (preview and
+ *  commit) come through here, so a commit always re-plans from the file
+ *  itself and never trusts a plan from the client (design §2, D328). */
+export async function planSpecRecordImportFile(
+  name: string,
+  buf: ArrayBuffer | Buffer
+): Promise<{ ok: true; plan: ImportPlan } | { ok: false; error: string }> {
+  const refused = checkSpecRecordImportFile(name, buf.byteLength);
+  if (refused) return { ok: false, error: refused };
+
+  let parsed: ParsedRecords;
+  if (name.trim().toLowerCase().endsWith(".json")) {
+    let json: unknown;
+    try {
+      const bytes = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+      json = JSON.parse(bytes.toString("utf8"));
+    } catch {
+      return { ok: false, error: "That file couldn’t be read as JSON." };
+    }
+    parsed = recordsFromJson(json);
+    if (!parsed.records.length && !parsed.problems.length) {
+      return { ok: false, error: "That JSON file has no spec records." };
+    }
+  } else {
+    const read = await readLibraryWorkbook(buf);
+    if (!read.ok) return read;
+    parsed = recordsFromSheetRows(read.rows);
+    if (!parsed.records.length && !parsed.problems.length) {
+      return { ok: false, error: `The "${LIBRARY_SHEET}" sheet has no spec rows.` };
+    }
+  }
+
+  const [existing, sections, articles] = await Promise.all([allSpecRecords(), allSections(), allArticles()]);
+  const plan = planSpecRecordImport(parsed, {
+    existing,
+    sections: sections.map((s) => ({ id: s.id, number: s.number })),
+    articles: articles.map((a) => ({ id: a.id, sectionId: a.sectionId })),
+  });
+  return { ok: true, plan };
 }

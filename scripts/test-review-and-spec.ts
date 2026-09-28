@@ -10658,6 +10658,7 @@ seeded()
   .then(() => specRecordActionsAsyncChecks())
   .then(() => recordConflictGuardsAsyncChecks())
   .then(() => specBuilderMatchReportAsyncChecks())
+  .then(() => specLibraryScreenAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -19015,7 +19016,7 @@ import {
   ok(client.startsWith('"use client"') && clientImports.length > 0 && clientImports.every((s) => !s.startsWith("@/lib/stores/") && s !== "exceljs" && !s.startsWith("@/db") && !s.includes("product-spec-io")), "#205 product specs: the client component imports no store, no exceljs, no db");
   const pureImports = [...read("src/lib/specs/product-spec-import.ts").matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
   ok(JSON.stringify(pureImports) === JSON.stringify(["@/lib/specs/articles"]), "#205 product specs: the rules module stays pure — its only import is the spec articles rules");
-  ok(read("src/app/(app)/design/specs/library/page.tsx").includes('href="/design/specs/library/product-specs"'), "#205 product specs: the library page links to the import");
+  ok(read("src/app/(app)/design/specs/library/sections-view.tsx").includes('href="/design/specs/library/product-specs"'), "#205 product specs: the library page links to the import");
 }
 
 /* --- #213: Catalog under Estimating --- */
@@ -33086,4 +33087,119 @@ async function specBuilderMatchReportAsyncChecks(): Promise<void> {
   ok(odd.answered === undefined && odd.lines.every((l) => !/[\uE000\uE001]/.test(l.text)), "answered highlight: a mark that would change parsing drops the spans, never the printed text");
   ok(J.answeredSpans([{ text: "ab" }], [{ text: "a" }]) === undefined && J.answeredSpans([{ text: "ab" }], [{ text: "\uE000a\uE001b" }])?.[0][0].end === 1,
     "answered highlight: answeredSpans refuses a mismatch and maps a marked span to plain offsets");
+}
+
+/* ---- Spec Library screen (Task 10, spec records design §2, §7) ----
+ * Pure: `filterSpecRecords` (the records view's URL filters), the history
+ * timeline, the import file guard, and an export → re-import round trip at
+ * the io level (write the workbook, read it, plan it against the same
+ * records → everything unchanged). Store-backed: the server-side
+ * `planSpecRecordImportFile` both import actions share, fed the live
+ * library's own export. Source checks: export route session, import
+ * actions' create gate, no confirm()/prompt() in the editor, and client
+ * files touching stores/db/exceljs/io type-only. */
+async function specLibraryScreenAsyncChecks(): Promise<void> {
+  const R = await import("@/lib/specs/records");
+  const I = await import("@/lib/specs/record-import");
+  const IO = await import("@/lib/specs/record-io");
+  const v1 = JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"));
+  const recs = I.recordsFromJson(v1).records;
+  const ids = (xs: Array<{ specId: string }>) => xs.map((r) => r.specId).join(",");
+
+  // filterSpecRecords
+  ok(R.filterSpecRecords(recs, {}).length === 46 && R.filterSpecRecords(recs, { q: "", kind: "", section: "", status: "", mfr: "" }).length === 46,
+    "library filter: no filter (or all blank) keeps all 46 records");
+  ok(R.filterSpecRecords(recs, { kind: "system" }).length === 18 && R.filterSpecRecords(recs, { kind: "companion" }).length === 1,
+    "library filter: kind narrows to that kind (18 system, 1 companion)");
+  ok(R.filterSpecRecords(recs, { status: "archived" }).length === 1 && R.filterSpecRecords(recs, { status: "ready" }).every((r) => r.status === "ready"),
+    "library filter: status narrows to that status");
+  ok(R.filterSpecRecords(recs, { section: "26 09 61" }).length === 28 && R.filterSpecRecords(recs, { section: "260961" }).length === 28,
+    "library filter: section matches by CSI number, spacing-insensitive");
+  ok(R.filterSpecRecords(recs, { mfr: "etc" }).length === 31 && R.filterSpecRecords(recs, { mfr: "ETC" }).length === 31 && R.filterSpecRecords(recs, { mfr: "ET" }).length === 0,
+    "library filter: manufacturer is an exact, case-insensitive match");
+  ok(ids(R.filterSpecRecords(recs, { q: "260961-028" })) === "PS-260961-028", "library filter: q finds a spec id");
+  ok(R.filterSpecRecords(recs, { q: "ls-p-cam" }).some((r) => r.specId === "PS-260961-028"), "library filter: q finds a part number, case-insensitive");
+  ok(R.filterSpecRecords(recs, { q: "entertainment luminaires moving" }).some((r) => r.specId === "PS-260961-028"), "library filter: q finds a title, case-insensitive");
+  ok(R.filterSpecRecords(recs, { q: "zz-no-such-thing" }).length === 0, "library filter: an unmatched q returns nothing");
+  const both = R.filterSpecRecords(recs, { kind: "product_catalog", section: "26 09 61", mfr: "ETC" });
+  ok(both.length > 0 && both.every((r) => r.kind === "product_catalog" && r.section === "26 09 61" && r.manufacturer === "ETC"), "library filter: filters combine (AND)");
+
+  // History timeline: each version's why is the reason recorded when it was saved.
+  const base = recs.find((r) => r.specId === "PS-260961-028")!;
+  const v1r = { ...base, revision: 1, updatedAt: 100, updatedBy: "Ann" };
+  const v2r = { ...base, specText: base.specText + "\nX.", revision: 2, updatedAt: 200, updatedBy: "Bo" };
+  const cur = { ...base, specText: base.specText + "\nY.", revision: 3, updatedAt: 300, updatedBy: "Cy" };
+  const hist = R.specRecordHistory(cur, [
+    { revision: 2, record: v2r, savedAt: 300, savedBy: "Cy", why: "Added Y" },
+    { revision: 1, record: v1r, savedAt: 200, savedBy: "Bo", why: "Added X" },
+  ]);
+  ok(hist.map((h) => h.revision).join() === "3,2,1" && hist[0].current && !hist[1].current, "library history: newest first, current version first");
+  ok(hist[0].why === "Added Y" && hist[1].why === "Added X" && hist[2].why === "Created", "library history: each version carries the reason it was saved with");
+  ok(hist[0].by === "Cy" && hist[1].by === "Bo" && hist[2].at === 100 && hist[1].record.specText.endsWith("X."), "library history: who/when/text come from that version itself");
+  ok(R.specRecordHistory({ ...base, revision: 1, updatedAt: 5, updatedBy: "A" }, []).map((h) => h.why).join() === "Created", "library history: a never-edited record lists just its creation");
+
+  // Import file guard
+  ok(I.SPEC_RECORD_IMPORT_MAX_BYTES === 5 * 1024 * 1024, "library import: the file cap is 5 MB");
+  ok(I.checkSpecRecordImportFile("a.xlsx", 10) === null && I.checkSpecRecordImportFile("A.JSON", 10) === null, "library import: .xlsx and .json are accepted");
+  ok(!!I.checkSpecRecordImportFile("a.csv", 10) && !!I.checkSpecRecordImportFile("a.xls", 10) && !!I.checkSpecRecordImportFile("", 10), "library import: anything else is refused");
+  ok(!!I.checkSpecRecordImportFile("a.xlsx", 5 * 1024 * 1024 + 1) && I.checkSpecRecordImportFile("a.xlsx", 5 * 1024 * 1024) === null, "library import: over 5 MB is refused");
+
+  // Export → re-import round trip (pure/io level): everything unchanged.
+  const secs = ["11 61 13", "11 61 14", "11 61 23", "26 09 61"].map((n) => ({ id: "ss-" + n.replace(/ /g, ""), number: n }));
+  const arts = [...new Set(recs.map((r) => r.sourceArticleId!))].map((id) => {
+    const r = recs.find((x) => x.sourceArticleId === id)!;
+    return { id, sectionId: "ss-" + r.section.replace(/ /g, "") };
+  });
+  const edge = recs.map((r) => (r.specId === "PS-260961-028" ? { ...r, notes: "Line one\nLine two", basisOfDesign: null } : r));
+  const wb = await IO.writeLibraryWorkbook(edge);
+  const read = await IO.readLibraryWorkbook(wb);
+  const back = read.ok ? I.recordsFromSheetRows(read.rows) : null;
+  const rt = back ? I.planSpecRecordImport(back, { existing: edge, sections: secs, articles: arts }) : null;
+  ok(!!rt && rt.counts.unchanged === 46 && rt.counts.created === 0 && rt.counts.updated === 0 && !rt.blocking && rt.missingSections.length === 0,
+    "library round trip: export → read → plan against the same records = 46 unchanged, nothing blocking");
+
+  // The server-side file planner both import actions share, on the live store.
+  const S = await import("@/lib/stores/spec-records");
+  const live = await S.allSpecRecords();
+  const liveWb = await IO.writeLibraryWorkbook(live);
+  const px = await IO.planSpecRecordImportFile("Peak Spec Library.xlsx", liveWb);
+  ok(px.ok && px.plan.counts.unchanged === live.length && px.plan.counts.created === 0 && px.plan.counts.updated === 0,
+    "library import: the live library's own export re-plans as all unchanged");
+  const pj = await IO.planSpecRecordImportFile("lib.json", Buffer.from(JSON.stringify({ records: live })));
+  ok(pj.ok && pj.plan.counts.unchanged === live.length, "library import: a JSON file plans through the same path");
+  const bad = await IO.planSpecRecordImportFile("lib.json", Buffer.from("{not json"));
+  ok(!bad.ok && /JSON/.test(bad.error), "library import: unreadable JSON is refused with a message");
+  const csv = await IO.planSpecRecordImportFile("lib.csv", Buffer.from("a,b"));
+  ok(!csv.ok, "library import: the server planner refuses a non-.xlsx/.json file");
+
+  // Source checks
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const route = src("src/app/(app)/design/specs/library/records-export/route.ts");
+  ok(/await requireUser\(\)/.test(route) && /writeLibraryWorkbook\(await allSpecRecords\(\)\)/.test(route) && /attachment; filename="Peak Spec Library \$\{/.test(route),
+    "library export: the route checks the session and sends the workbook as Peak Spec Library <date>.xlsx");
+  const ra = src("src/app/(app)/design/specs/record-actions.ts");
+  for (const name of ["previewSpecRecordImportAction", "commitSpecRecordImportAction"]) {
+    const body = ra.slice(ra.indexOf(`export async function ${name}(`)).split(/\nexport async function /)[0];
+    ok(ra.includes(`export async function ${name}(form: FormData)`) && /requirePerm\("create"\)/.test(body) && /planSpecRecordImportFile\(/.test(body),
+      `library import: ${name} is create-gated and re-plans the uploaded file on the server`);
+  }
+  const commitBody = ra.slice(ra.indexOf("export async function commitSpecRecordImportAction(")).split(/\nexport async function /)[0];
+  ok(/`Import \$\{file\.name\}`/.test(commitBody) && /commitSpecRecordImport\(/.test(commitBody), "library import: commit writes with why \"Import <filename>\"");
+  const editor = src("src/app/(app)/design/specs/library/records/[specId]/record-editor.tsx");
+  ok(!/window\.(confirm|prompt)|\bconfirm\(|\bprompt\(/.test(editor), "library editor: no window.confirm/prompt");
+  ok(/Restore revision \$\{/.test(editor) || /Restore revision \{/.test(editor), "library editor: restore asks inline (Restore revision N?)");
+  const clientFiles = [
+    "src/app/(app)/design/specs/library/records/[specId]/record-editor.tsx",
+    "src/app/(app)/design/specs/library/records-import.tsx",
+  ];
+  for (const f of clientFiles) {
+    const s = src(f);
+    ok(s.startsWith('"use client"'), `library client: ${f} is a client component`);
+    const bad = [...s.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
+    ok(bad.length === 0, `library client: ${f} imports stores/db/exceljs/io type-only (${bad.join(", ") || "none"})`);
+  }
+  const page = src("src/app/(app)/design/specs/library/page.tsx");
+  ok(/view === "sections"/.test(page) && /<SectionsView/.test(page) && /<RecordsView/.test(page), "library page: ?view=sections renders the sections view, default is records");
+  const cov = src("src/app/(app)/design/specs/library/controls.tsx");
+  ok(/p\.set\("view", "sections"\)/.test(cov), "library page: coverage filters stay on the sections view");
 }

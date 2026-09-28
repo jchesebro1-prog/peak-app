@@ -99,7 +99,9 @@ const ROUTES = [
   "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
   "/design/grid/settings/equipment-map", // #211 Equipment map tab (admin; read-only on load)
   "/design/specs/new", // #205 spec builder (T5) — the New spec form
-  "/design/specs/library", // Specs module (#205) — the library index
+  "/design/specs/library", // Spec records (Task 10) — the records view (default)
+  "/design/specs/library?view=sections", // Specs module (#205) — sections / articles / coverage, moved under ?view=sections
+  "/design/specs/library/records/new", // Spec records (Task 10) — the new-record editor
   "/design/specs/templates", // Specs module (#205) — the template list
   "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
   "/inbox",

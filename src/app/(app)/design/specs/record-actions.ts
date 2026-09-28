@@ -33,10 +33,13 @@ import {
   normalizeSpecRecord,
   partNumberConflict,
   validateSpecRecord,
+  type RecordProblem,
   type SpecKind,
   type SpecRecord,
 } from "@/lib/specs/records";
 import { csiKey } from "@/lib/specs/articles";
+import { commitSpecRecordImport, planSpecRecordImportFile } from "@/lib/specs/record-io";
+import { checkSpecRecordImportFile, type ImportPlan } from "@/lib/specs/record-import";
 
 /**
  * Server actions for the Spec Library records (spec records design §5,
@@ -447,13 +450,27 @@ export async function addLibraryRowAction(docId: string, specId: string): Promis
  *  (a brand-new one has nothing to explain yet). */
 export async function saveSpecRecordAction(
   record: unknown,
-  why: string
+  why: string,
+  opts?: { isNew?: boolean }
 ): Promise<Result<{ specId: string; outcome: SaveOutcome }>> {
   const user = await requirePerm("create");
-  const normalized = normalizeSpecRecord(record);
+  // A blank specId is a new record: the id is allocated here, at save time,
+  // from the chosen section (design §7) — so two people creating specs in
+  // the same section at once never get the same number.
+  const raw = (record && typeof record === "object" ? record : {}) as Record<string, unknown>;
+  let isNew = opts?.isNew === true;
+  let input: Record<string, unknown> = raw;
+  if (!String(raw.specId ?? "").trim()) {
+    const section = String(raw.section ?? "").trim();
+    if (!csiKey(section)) return { ok: false, error: "Choose a section first." };
+    input = { ...raw, specId: await nextSpecId(section) };
+    isNew = true;
+  }
+  const normalized = normalizeSpecRecord(input);
   if (!normalized) return { ok: false, error: "That spec record isn't valid." };
 
   const existing = await getSpecRecord(normalized.specId);
+  if (isNew && existing) return { ok: false, error: `Spec ID ${normalized.specId} is already taken.` };
   const w = String(why || "").trim();
   if (existing && !w) return { ok: false, error: "A reason is required." };
   const badWhy = tooLong(w, WHY_MAX, "the reason");
@@ -500,4 +517,83 @@ export async function restoreSpecRecordRevisionAction(specId: string, revision: 
   if (!result.ok) return { ok: false, error: result.error };
   revalidateAll();
   return { ok: true };
+}
+
+/* ---- Spec Library screen: Import .xlsx (design §2, §7) ---- */
+
+export type SpecRecordImportPreview = {
+  fileName: string;
+  counts: ImportPlan["counts"];
+  problems: RecordProblem[];
+  missingSections: string[];
+  blocking: boolean;
+  /** Records the import would create or change (unchanged ones omitted). */
+  changes: Array<{ specId: string; action: "create" | "update"; title: string }>;
+};
+
+/** The uploaded file from the form, after the cheap name/size guard — the
+ *  bytes are only read once the file has passed it. */
+function uploadedFile(form: FormData): { ok: true; file: File } | { ok: false; error: string } {
+  const file = form.get("file");
+  if (!file || typeof file === "string") return { ok: false, error: "Choose a file first." };
+  const refused = checkSpecRecordImportFile(file.name, file.size);
+  if (refused) return { ok: false, error: refused };
+  return { ok: true, file };
+}
+
+/** Import .xlsx, step 1: read + plan the uploaded file against the live
+ *  library and report what an import would do. Writes nothing. */
+export async function previewSpecRecordImportAction(form: FormData): Promise<Result<{ preview: SpecRecordImportPreview }>> {
+  await requirePerm("create");
+  const up = uploadedFile(form);
+  if (!up.ok) return up;
+  const { file } = up;
+  try {
+    const res = await planSpecRecordImportFile(file.name, await file.arrayBuffer());
+    if (!res.ok) return res;
+    const { plan } = res;
+    return {
+      ok: true,
+      preview: {
+        fileName: file.name,
+        counts: plan.counts,
+        problems: plan.problems,
+        missingSections: plan.missingSections,
+        blocking: plan.blocking,
+        changes: plan.items
+          .filter((i) => i.action !== "unchanged")
+          .map((i) => ({ specId: i.specId, action: i.action as "create" | "update", title: i.record.title })),
+      },
+    };
+  } catch (e) {
+    console.error("previewSpecRecordImportAction", e);
+    return { ok: false, error: "Could not read that file. Try again." };
+  }
+}
+
+type ImportCommitResult = { created: number; updated: number; unchanged: number; sectionsCreated: string[] };
+
+/** Import .xlsx, step 2 (Confirm): re-reads and re-plans the SAME uploaded
+ *  file on the server — never a plan from the client — refuses a blocking
+ *  plan, then commits every change through `saveSpecRecord` with why
+ *  "Import <filename>". */
+export async function commitSpecRecordImportAction(form: FormData): Promise<Result<ImportCommitResult>> {
+  const user = await requirePerm("create");
+  const up = uploadedFile(form);
+  if (!up.ok) return up;
+  const { file } = up;
+  try {
+    const res = await planSpecRecordImportFile(file.name, await file.arrayBuffer());
+    if (!res.ok) return res;
+    if (res.plan.blocking) {
+      const n = res.plan.problems.filter((p) => p.blocking).length;
+      return { ok: false, error: `This file has ${n} blocking problem${n === 1 ? "" : "s"} — fix them and preview again. Nothing was imported.` };
+    }
+    const result = await commitSpecRecordImport(res.plan, user.name, `Import ${file.name}`);
+    revalidateAll();
+    return { ok: true, ...result };
+  } catch (e) {
+    console.error("commitSpecRecordImportAction", e);
+    return { ok: false, error: "Could not import that file. Records saved before the failure keep their changes." };
+  }
 }

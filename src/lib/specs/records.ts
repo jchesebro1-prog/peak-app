@@ -286,3 +286,77 @@ export function matchKeyConflict(candidate: SpecRecord, all: readonly SpecRecord
   }
   return null;
 }
+
+/* ---- Spec Library screen (design §7) — pure helpers for the records view
+ * and the record editor's history panel. */
+
+export type SpecRecordFilter = { q?: string; kind?: string; section?: string; status?: string; mfr?: string };
+
+/** The records view's URL filters. Blank values don't filter. `kind` and
+ *  `status` are exact enum values; `section` matches by CSI number via
+ *  `csiKey` (so "26 09 61" and "260961" agree); `mfr` is an exact,
+ *  case-insensitive manufacturer match; `q` is a case-insensitive substring
+ *  over spec id, title, article, manufacturer, basis of design, match key
+ *  and every part number. */
+export function filterSpecRecords(records: readonly SpecRecord[], f: SpecRecordFilter): SpecRecord[] {
+  const q = str(f.q).trim().toLowerCase();
+  const kind = str(f.kind).trim();
+  const status = str(f.status).trim();
+  const sectionKey = csiKey(str(f.section));
+  const mfr = str(f.mfr).trim().toLowerCase();
+  return records.filter((r) => {
+    if (kind && r.kind !== kind) return false;
+    if (status && r.status !== status) return false;
+    if (sectionKey && csiKey(r.section) !== sectionKey) return false;
+    if (mfr && (r.manufacturer ?? "").trim().toLowerCase() !== mfr) return false;
+    if (q) {
+      const hay = [r.specId, r.title, r.article, r.manufacturer, r.basisOfDesign, r.matchKey, ...r.mfrNumbers]
+        .filter(Boolean)
+        .join("\n")
+        .toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+export type SpecRecordRevisionLike = {
+  revision: number;
+  record: SpecRecord;
+  savedAt: number;
+  savedBy: string;
+  why: string;
+};
+
+export type SpecRecordHistoryEntry = {
+  revision: number;
+  record: SpecRecord;
+  at: number;
+  by: string;
+  why: string;
+  current: boolean;
+};
+
+/** Newest-first timeline of every version of a record: the current one plus
+ *  each stored prior version. A stored revision row N holds version N and
+ *  the `why` of the save that REPLACED it (the save that made N + 1), so a
+ *  version's own reason is row N − 1's `why`; version 1 is "Created". Who
+ *  and when come from the version itself (`updatedBy`/`updatedAt`). */
+export function specRecordHistory(current: SpecRecord, revisions: readonly SpecRecordRevisionLike[]): SpecRecordHistoryEntry[] {
+  const whyFor = new Map<number, string>();
+  for (const r of revisions) whyFor.set(r.revision + 1, r.why);
+  const entry = (record: SpecRecord, isCurrent: boolean): SpecRecordHistoryEntry => ({
+    revision: record.revision,
+    record,
+    at: record.updatedAt,
+    by: record.updatedBy,
+    why: whyFor.get(record.revision) ?? (record.revision === 1 ? "Created" : ""),
+    current: isCurrent,
+  });
+  const out = [entry(current, true)];
+  for (const r of revisions) {
+    if (r.revision === current.revision) continue;
+    out.push(entry({ ...r.record, revision: r.revision }, false));
+  }
+  return out.sort((a, b) => b.revision - a.revision);
+}

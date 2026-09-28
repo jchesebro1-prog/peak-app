@@ -114,7 +114,7 @@ export default function SectionEditor({
   return (
     <div className="pk-content" style={{ maxWidth: 960, margin: "0 auto" }}>
       <div style={{ marginBottom: 10 }}>
-        <Link href="/design/specs/library" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>
+        <Link href="/design/specs/library?view=sections" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>
           ← Spec library
         </Link>
       </div>
@@ -275,7 +275,7 @@ function HeaderCard({ section }: { section: SpecSection }) {
           onConfirm={async () => {
             const res = await removeLibrarySectionAction(section.id);
             if (!res.ok) throw new Error(res.error);
-            router.push("/design/specs/library");
+            router.push("/design/specs/library?view=sections");
           }}
         />
       </div>

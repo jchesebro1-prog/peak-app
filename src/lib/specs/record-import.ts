@@ -313,3 +313,18 @@ export function planSpecRecordImport(parsed: ParsedRecords, ctx: ImportPlanCtx):
     missingSections,
   };
 }
+
+/* ---- Spec Library screen's Import .xlsx (design §2, §7) ---- */
+
+/** 5 MB — the Spec Library import's own file cap (a real library is ~30 KB).
+ *  Pure so the client component can mirror it. */
+export const SPEC_RECORD_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+
+/** `null` when the file may be imported, else the refusal to show: only
+ *  `.xlsx` or `.json`, at most 5 MB. */
+export function checkSpecRecordImportFile(name: string, size: number): string | null {
+  const lower = str(name).trim().toLowerCase();
+  if (!lower.endsWith(".xlsx") && !lower.endsWith(".json")) return "Choose an .xlsx or .json file.";
+  if (!(size >= 0) || size > SPEC_RECORD_IMPORT_MAX_BYTES) return "That file is too large — the Spec Library import limit is 5 MB.";
+  return null;
+}

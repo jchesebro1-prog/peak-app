@@ -151,7 +151,7 @@ export default async function NewSpecPage({
       {sectionOptions.length === 0 ? (
         <div className="pk-card" style={{ padding: 20, fontSize: 13, color: "#3a3f4a" }}>
           The library has no sections yet — import or add one in the Spec library first.{" "}
-          <Link href="/design/specs/library" style={{ color: "var(--accent)", fontWeight: 600 }}>
+          <Link href="/design/specs/library?view=sections" style={{ color: "var(--accent)", fontWeight: 600 }}>
             Open the Spec library →
           </Link>
         </div>

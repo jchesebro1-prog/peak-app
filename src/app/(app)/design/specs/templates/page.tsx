@@ -43,7 +43,7 @@ export default async function SpecTemplatesPage() {
   return (
     <div className="pk-content" style={{ maxWidth: 1080, margin: "0 auto" }}>
       <div style={{ marginBottom: 10 }}>
-        <Link href="/design/specs/library" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>
+        <Link href="/design/specs/library?view=sections" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>
           ← Spec library
         </Link>
       </div>
