@@ -7068,8 +7068,9 @@ A new doc collection **`portal_carts`** (migration 0032), one row per portal gra
 `{ lines, venueId?, updatedAt }` with **no stored prices** — everything is re-priced server-side on every read. Every
 quote insert allocates an estimate number on write (#223), so treating the cart as a draft quote would burn a number
 per abandoned browse session and need a "hide carts" exception on every staff surface that lists quotes. Generate is
-the only step that inserts a quote row (and so the only step that allocates a number), then empties the cart. A
-cart untouched for 90 days just shows empty-with-notice on the next visit; row cleanup itself is a follow-up (§7).
+the only step that inserts a quote row (and so the only step that allocates a number), then empties the cart. Carts
+don't expire — a cart untouched for 90 days reads exactly as it was left, lines and all, on the next visit; pruning
+stale cart rows themselves is a follow-up (§7), not built.
 
 ## D407. Customer visibility is Auto/Show/Hide over a computed browsable rule; search always covers the full quotable catalog (#245, 2026-09-27)
 

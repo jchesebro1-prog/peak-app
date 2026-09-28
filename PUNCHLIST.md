@@ -9145,7 +9145,7 @@ website for it." Closes MASTER-QUESTIONS **S19**. Spec:
 - **Catalog media:** images are a third `part_documents` kind alongside datasheets/spec sheets (upload, URL fetch,
   or an admin-run datasheet-page-1 thumbnail render) with a per-part Auto/Show/Hide visibility selector and a
   computed browsable rule (D407, D410); `/catalog/documents` gained an Image column, an image-from-URL action, and
-  the **DaVinci image import** / **Datasheet thumbnails** admin batches.
+  the **Datasheet thumbnails** admin batch (a DaVinci image import was scoped but dropped — D411).
 - **Pricing:** cost ÷ (1 − tier margin) with a list fallback and three price-on-request reasons (D413); a new
   freight-by-distance rule, also defaulted into new Estimator sections (D402, D403); curtains and any POR line make
   the whole quote a review quote, everything else sends firm through a named approval-gate bypass (D404).
@@ -9174,12 +9174,19 @@ website for it." Closes MASTER-QUESTIONS **S19**. Spec:
 **Follow-ups (not built).** Self-serve service quotes (flame test / repair / inspection — a separate spec, reuses
 this build's firm/review split and Accept/Approve flow); a priced curtain configurator (replaces the request-only
 panel); a department-tree layer over the facets; Quick Design adopting the freight rule; public sign-up (create a
-customer + grant on the spot); abandoned-cart row cleanup (90-day-stale carts already show empty, the rows
-themselves aren't pruned); a DaVinci product-photo import, if a real photo export ever exists (D411); and two stale
+customer + grant on the spot); carts don't expire — stale cart-row cleanup (90-day-plus, never touched again) is a
+follow-up, not built; a DaVinci product-photo import, if a real photo export ever exists (D411); two stale
 DECISIONS entries worth a cleanup pass — D60 (grant length, says 6 months against 90-day code) and D63 (says #48
-"stays parked" — this punch item supersedes it).
+"stays parked" — this punch item supersedes it); the cold-start cost of building the portal catalog index the first
+time it's needed (the catalog editor's coverage/reason line, and the portal landing page, both currently read every
+quote to compute it — verify the real timing on production catalog size; a targeted quote-count query, not a full
+read, is the fix if it's slow); a DB-side atomic "take the cart" (Generate reads-then-clears the cart in two steps,
+leaving a narrow cross-instance window for a double Generate from the same cart); the PO file upload happening
+before Accept's own guards run (a rejected accept can still leave an uploaded PO file behind); and the legacy
+datasheet backfill inside `loadPartDocsState` still running as a write off the external Displays API's read-only
+GET endpoints (a bare bearer-token request, no team/portal session behind it) — not only from an authenticated
+admin action.
 
 **Review minors worth a later pass:** the fixture picker's Included list still shows Labor-category component SKUs
 by name (cosmetic); the datasheet-thumbnail render's tie-break when one SKU somehow has two own datasheets is an
-arbitrary but stable array-order pick, not a documented rule; the empty-browse-set copy still says "build an
-estimate" in one spot. See D402–D417.
+arbitrary but stable array-order pick, not a documented rule. See D402–D417.
