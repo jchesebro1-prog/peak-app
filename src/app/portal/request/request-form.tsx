@@ -46,14 +46,22 @@ export function RequestForm({
   requester,
   showDetailsError,
   showSubmitError,
+  initialService = "",
+  initialVenueId = "",
 }: {
   venues: Array<{ id: string; label: string; place: string }>;
   requester: { name: string; email: string };
   showDetailsError: boolean;
   showSubmitError: boolean;
+  /** #246 Task 3: "Request a repair" and other pre-linked entry points carry
+   *  `?service=&venue=`. `initialVenueId` is already validated as this
+   *  customer's own venue (or "") by the page; an unrecognized `initialService`
+   *  falls back to the first SERVICES option, same as no override at all. */
+  initialService?: string;
+  initialVenueId?: string;
 }) {
-  const [venue, setVenue] = useState(venues[0]?.id || "");
-  const [service, setService] = useState(SERVICES[0]);
+  const [venue, setVenue] = useState(initialVenueId || venues[0]?.id || "");
+  const [service, setService] = useState(SERVICES.includes(initialService) ? initialService : SERVICES[0]);
   const [urgency, setUrgency] = useState(URGENCIES[0]);
   const [phone, setPhone] = useState("");
   const [details, setDetails] = useState("");

@@ -17,9 +17,10 @@ import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
 import { sendPortalFirm } from "@/lib/portal-quotes";
 import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-pricing";
 import type { PortalService } from "@/lib/portal-service-scope";
+import { serviceRequestFromQuote } from "@/lib/portal-service-view";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer, type CustomerDoc } from "@/lib/stores/customers";
-import { create as createQuote, update as updateQuote } from "@/lib/stores/quotes";
+import { create as createQuote, get as getQuote, portalListsQuote, update as updateQuote } from "@/lib/stores/quotes";
 
 export const GENERATE_LIMIT = 10;
 const GENERATE_WINDOW_MS = 3_600_000;
@@ -41,6 +42,23 @@ function writable(session: PortalSession | null): session is PortalSession {
 function venueLabel(cust: CustomerDoc | null, venueId: string): string {
   const loc = (cust?.locations || []).find((l) => l.id === venueId);
   return loc?.label || loc?.locationName || "Venue";
+}
+
+/**
+ * "Quote again" (#246 Task 3, spec §1, §3): the flame/inspection quote's own
+ * saved scope, as a `ServiceRequest` the `/portal/service` form can pre-fill
+ * from — or null when the id doesn't resolve, isn't LISTED for this customer
+ * (`portalListsQuote` — tenant scoping, hides internal-only drafts), or isn't
+ * a flame_test/inspection quote with a usable subdoc. Spec: "any source" of
+ * this customer's own listed flame/inspection quotes qualifies, not only
+ * `portal-service` ones — `portalListsQuote` + the quoteType check below are
+ * the whole gate; there is no separate source check.
+ */
+export async function serviceRequestFromQuoteId(customerId: string, quoteId: string): Promise<ServiceRequest | null> {
+  if (!customerId || !quoteId) return null;
+  const q = await getQuote(quoteId);
+  if (!q || !portalListsQuote(q, customerId)) return null;
+  return serviceRequestFromQuote(q);
 }
 
 /** "Flame test — A, B" / "Inspection (Annual|Five-year) — A, B", truncated

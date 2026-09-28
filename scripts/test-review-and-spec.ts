@@ -10635,6 +10635,7 @@ seeded()
   .then(() => portal246PricingAsyncChecks())
   .then(() => portal246GenerateAsyncChecks())
   .then(() => portal246RefreshAsyncChecks())
+  .then(() => portal246Task3AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -28369,12 +28370,20 @@ import {
   ok(d245Tile({ key: "k", kind: "part", title: "", sku: "S", mfr: "", category: "" }, null, { unitPrice: 5, por: true }).unitPrice === null,
     "#245 tile: a POR price never shows a number");
 
+  // #246 Task 3 added a Service item between Catalog and Quote — reindexed
+  // here rather than left pinned to the pre-#246 shape.
   const nav = d245Nav("catalog", { cartCount: 3 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Quote"]) && nav[1].active === true && !nav[0].active && nav[2].badge === 3 && nav[2].href === "/portal/catalog/quote",
-    "#245 nav: Home · Catalog · Quote (N), Catalog active");
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "Quote"]) && nav[1].active === true && !nav[0].active && nav[3].badge === 3 && nav[3].href === "/portal/catalog/quote",
+    "#245 nav: Home · Catalog · Service · Quote (N), Catalog active");
   const pvNav = d245Nav("home", { previewCid: "c 1" });
-  ok(pvNav[0].href === "/portal?preview=c%201" && pvNav[1].href === "/portal/catalog?preview=c%201" && pvNav[2].disabled === true && pvNav[2].badge === undefined,
-    "#245 nav: a team preview carries ?preview=, shows no cart count and disables Quote");
+  ok(
+    pvNav[0].href === "/portal?preview=c%201" &&
+      pvNav[1].href === "/portal/catalog?preview=c%201" &&
+      pvNav[2].href === "/portal/service?preview=c%201" &&
+      pvNav[3].disabled === true &&
+      pvNav[3].badge === undefined,
+    "#245 nav: a team preview carries ?preview= (Home/Catalog/Service), shows no cart count and disables Quote"
+  );
 }
 
 async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
@@ -30909,5 +30918,132 @@ async function portal246RefreshAsyncChecks(): Promise<void> {
   } finally {
     await removeCustomer(CO);
     await removeCustomer(CO_X);
+  }
+}
+
+/* ======================================================================
+   Portal service quotes — Task 3: /portal/service UI's pure URL/quote-scope
+   helpers (#246 Task 3; spec §2, §6). `parseServiceParams` and
+   `serviceRequestFromQuote` (src/lib/portal-service-view.ts) run pure checks
+   at top level; the tenant-scoping refusal on `serviceRequestFromQuoteId`
+   (src/lib/portal-service-quotes.ts) is DB-backed, registered in the async
+   chain as portal246Task3AsyncChecks().
+   ====================================================================== */
+import { parseServiceParams as d246Parse, serviceRequestFromQuote as d246FromQuote } from "@/lib/portal-service-view";
+import { serviceRequestFromQuoteId as d246FromQuoteId } from "@/lib/portal-service-quotes";
+
+// ---- pure: parseServiceParams ----
+{
+  const eqReq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok(eqReq(d246Parse({}), { service: null, venueIds: [], fromQuoteId: null }), "#246 parseServiceParams: no query at all → null service, no venues, no from");
+  ok(eqReq(d246Parse({ type: "flame" }), { service: { kind: "flame" }, venueIds: [], fromQuoteId: null }), "#246 parseServiceParams: type=flame");
+  ok(
+    eqReq(d246Parse({ type: "inspection" }), { service: { kind: "inspection", level: 1 }, venueIds: [], fromQuoteId: null }),
+    "#246 parseServiceParams: type=inspection with no level defaults to Level 1"
+  );
+  ok(
+    eqReq(d246Parse({ type: "inspection", level: "2" }), { service: { kind: "inspection", level: 2 }, venueIds: [], fromQuoteId: null }),
+    "#246 parseServiceParams: type=inspection&level=2 → Level 2"
+  );
+  ok(
+    eqReq(d246Parse({ type: "inspection", level: "3" }), { service: { kind: "inspection", level: 1 }, venueIds: [], fromQuoteId: null }),
+    "#246 parseServiceParams: an unrecognized level (not literally \"2\") falls back to Level 1"
+  );
+  ok(d246Parse({ type: "bogus" }).service === null, "#246 parseServiceParams: an unrecognized type → null service (the page defaults it, not this)");
+  ok(eqReq(d246Parse({ venue: ["v1", "v2", "v1"] }).venueIds, ["v1", "v2"]), "#246 parseServiceParams: repeated ?venue= de-duplicates, order preserved");
+  ok(eqReq(d246Parse({ venue: "solo" }).venueIds, ["solo"]), "#246 parseServiceParams: a single ?venue= (not an array) still parses");
+  ok(d246Parse({ from: "Q-2041" }).fromQuoteId === "Q-2041", "#246 parseServiceParams: ?from= is read through");
+  ok(d246Parse({ from: ["Q-1", "Q-2"] }).fromQuoteId === "Q-1", "#246 parseServiceParams: a repeated ?from= takes the first");
+  ok(d246Parse({ from: "" }).fromQuoteId === null, "#246 parseServiceParams: an empty ?from= reads as no quote (null, not \"\")");
+  const manyVenues246 = Array.from({ length: 150 }, (_, i) => "v" + i);
+  ok(d246Parse({ venue: manyVenues246 }).venueIds.length === 100, "#246 parseServiceParams: venue ids cap at 100 (#245-style URL parsing)");
+}
+
+// ---- pure: serviceRequestFromQuote ----
+{
+  const eqReq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const flameQ246 = { quoteType: "flame_test", flameTest: { venues: [{ id: "v1", curtains: 10 }, { id: "v2", curtains: 6 }] } };
+  ok(
+    eqReq(d246FromQuote(flameQ246), { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] }),
+    "#246 serviceRequestFromQuote: a flame_test quote's subdoc becomes a ServiceRequest"
+  );
+  const inspQ246L2 = { quoteType: "inspection", inspection: { level: 2, venues: [{ id: "v1", lineSets: 25 }] } };
+  ok(
+    eqReq(d246FromQuote(inspQ246L2), { service: { kind: "inspection", level: 2 }, venues: [{ venueId: "v1", count: 25 }] }),
+    "#246 serviceRequestFromQuote: an inspection quote's Level 2 and line-set counts carry through"
+  );
+  const inspQ246NoLevel = { quoteType: "inspection", inspection: { venues: [{ id: "v1", lineSets: 5 }] } };
+  ok(
+    d246FromQuote(inspQ246NoLevel)?.service.kind === "inspection" &&
+      (d246FromQuote(inspQ246NoLevel)?.service as { level?: number })?.level === 1,
+    "#246 serviceRequestFromQuote: a missing/non-2 level defaults to Level 1"
+  );
+  ok(d246FromQuote({ quoteType: "system" }) === null, "#246 serviceRequestFromQuote: a non-flame/inspection quoteType → null");
+  ok(d246FromQuote({ quoteType: "flame_test", flameTest: null }) === null, "#246 serviceRequestFromQuote: a null subdoc → null");
+  ok(
+    d246FromQuote({ quoteType: "flame_test", flameTest: { venues: [{ id: "v1", curtains: "10" }] } }) === null,
+    "#246 serviceRequestFromQuote: a malformed row (curtains not a number) is dropped, leaving no venues → null"
+  );
+  ok(
+    d246FromQuote({ quoteType: "flame_test", flameTest: { venues: [{ curtains: 10 }] } }) === null,
+    "#246 serviceRequestFromQuote: a row with no venue id is dropped too"
+  );
+}
+
+async function portal246Task3AsyncChecks(): Promise<void> {
+  const CO = fixtureId(246, "t3-co");
+  const CO_OTHER = fixtureId(246, "t3-co-other");
+  const NOW = new Date(2026, 8, 28, 12).getTime();
+  const sess = { grantId: fixtureId(246, "t3-grant"), customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test246 T3 Co",
+      type: "Education",
+      pricingTier: "silver",
+      locations: [
+        { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 },
+        { id: "v2", label: "Black Box", primary: false, venueKind: "proscenium", travelMiles: 140 },
+      ],
+      contacts: [],
+    });
+    await upsertCustomer({
+      id: CO_OTHER,
+      name: "Test246 T3 Co Other",
+      type: "Education",
+      locations: [{ id: "w1", label: "Studio", primary: true, venueKind: "proscenium", travelMiles: 90 }],
+      contacts: [],
+    });
+
+    const gen = await d246Generate(
+      sess,
+      { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] },
+      { now: NOW, schedulePdf: false }
+    );
+    if (!gen.ok) throw new Error("#246 Task 3 from= setup failed — " + gen.error);
+    registerFixture("quotes", gen.quoteId);
+
+    const mine246 = await d246FromQuoteId(CO, gen.quoteId);
+    ok(
+      !!mine246 &&
+        mine246.service.kind === "flame" &&
+        mine246.venues.length === 2 &&
+        mine246.venues.find((v) => v.venueId === "v1")?.count === 10 &&
+        mine246.venues.find((v) => v.venueId === "v2")?.count === 6,
+      "#246 serviceRequestFromQuoteId: this customer's own listed flame quote loads its saved scope"
+    );
+
+    const other246 = await d246FromQuoteId(CO_OTHER, gen.quoteId);
+    ok(other246 === null, "#246 serviceRequestFromQuoteId: another customer's session refuses this quote (?from= can't leak scope across tenants)");
+
+    const ghost246 = await d246FromQuoteId(CO, fixtureId(246, "t3-no-such-quote"));
+    ok(ghost246 === null, "#246 serviceRequestFromQuoteId: an id that doesn't resolve to any quote → null");
+
+    ok((await d246FromQuoteId("", gen.quoteId)) === null, "#246 serviceRequestFromQuoteId: an empty customerId refuses outright");
+    ok((await d246FromQuoteId(CO, "")) === null, "#246 serviceRequestFromQuoteId: an empty quoteId refuses outright");
+  } finally {
+    await removeCustomer(CO);
+    await removeCustomer(CO_OTHER);
   }
 }

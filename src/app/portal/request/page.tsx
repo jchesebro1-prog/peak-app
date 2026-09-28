@@ -69,6 +69,13 @@ export default async function PortalRequestPage({
   }));
   const err = one(sp.err);
 
+  // #246 Task 3: "Request a repair" (and any other pre-linked entry point)
+  // pre-selects both the service and the venue — the venue only when it's
+  // genuinely this customer's own (never trusted blind from the URL).
+  const qService = one(sp.service);
+  const qVenue = one(sp.venue);
+  const initialVenueId = qVenue && venues.some((v) => v.id === qVenue) ? qVenue : "";
+
   return (
     <PortalShell
       companyName={companyName}
@@ -104,6 +111,8 @@ export default async function PortalRequestPage({
         requester={{ name: session.name, email: session.email }}
         showDetailsError={err === "details"}
         showSubmitError={err === "send"}
+        initialService={qService}
+        initialVenueId={initialVenueId}
       />
     </PortalShell>
   );

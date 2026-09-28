@@ -150,6 +150,48 @@ function Chip({ c }: { c: { label: string; ink: string; soft: string; bd: string
   );
 }
 
+/** #246 Task 3: `/portal/service?type=&level=&venue=` for a compliance
+ *  chip's "Quote it" link — carries `?preview=` for a team preview (the
+ *  service page itself renders read-only in preview, same as the catalog). */
+function serviceHref(type: "flame" | "inspection", level: 1 | 2 | undefined, venueId: string, previewCid: string): string {
+  const p = new URLSearchParams();
+  p.set("type", type);
+  if (level) p.set("level", String(level));
+  p.set("venue", venueId);
+  if (previewCid) p.set("preview", previewCid);
+  return "/portal/service?" + p.toString();
+}
+
+/** A compliance chip plus its own "Quote it" link — prominent (accent,
+ *  bold) for an overdue/due-soon record or no record at all, muted
+ *  (grey) once it's current. */
+function ChipAction({
+  c,
+  href,
+  prominent,
+}: {
+  c: { label: string; ink: string; soft: string; bd: string };
+  href: string;
+  prominent: boolean;
+}) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <Chip c={c} />
+      <Link
+        href={href}
+        style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          textDecoration: "underline",
+          color: prominent ? "var(--accent)" : "#9aa0ab",
+        }}
+      >
+        Quote it
+      </Link>
+    </span>
+  );
+}
+
 /**
  * #222: whether a row with no PDF to open says "Document being prepared" —
  * only while a copy can still arrive: a sent revision awaiting its copy
@@ -287,6 +329,10 @@ export default async function PortalPage({
 
   const quoteRow = (q: (typeof published)[number]) => {
     const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
+    // #246 Task 3: "Quote again" replaces "Copy to new quote" for any listed
+    // flame_test/inspection quote of this customer, any source (spec §1, §3)
+    // — /portal/service?from=<id> re-checks portalListsQuote itself.
+    const isServiceQuote = q.quoteType === "flame_test" || q.quoteType === "inspection";
     const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
     const acceptGate = canAcceptPortal(q, Date.now());
     const isExpired = q.status === "sent" && !q.portalAcceptance && acceptGate.reason === "expired";
@@ -354,7 +400,7 @@ export default async function PortalPage({
             {isExpired && !preview && <RefreshPricingButton quoteId={q.id} />}
           </div>
         </div>
-        {(q.portalDecline || q.source === "portal-catalog") && (
+        {(q.portalDecline || q.source === "portal-catalog" || isServiceQuote) && (
           <div
             style={{
               display: "flex",
@@ -387,6 +433,20 @@ export default async function PortalPage({
                   Copy to new quote
                 </button>
               </form>
+            )}
+            {isServiceQuote && (
+              <Link
+                href={`/portal/service?from=${encodeURIComponent(q.id)}` + (preview ? `&preview=${encodeURIComponent(cid)}` : "")}
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: "var(--accent)",
+                  textDecoration: "underline",
+                }}
+              >
+                Quote again
+              </Link>
             )}
           </div>
         )}
@@ -682,8 +742,16 @@ export default async function PortalPage({
       <div style={CARD}>
         <div style={CARD_HEAD}>
           <div style={{ fontSize: 14.5, fontWeight: 600 }}>Your venues &amp; compliance</div>
-          <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
-            flame tests annual · inspections L1 annual / L2 five-year
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
+              flame tests annual · inspections L1 annual / L2 five-year
+            </div>
+            <Link
+              href={"/portal/service" + (preview ? `?preview=${encodeURIComponent(cid)}` : "")}
+              style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}
+            >
+              Get a service quote
+            </Link>
           </div>
         </div>
         {venues.map((v) => {
@@ -691,6 +759,12 @@ export default async function PortalPage({
           const f = flameByVenue.get(vid);
           const i1 = inspByVenueLevel.get(vid + "|1");
           const i2 = inspByVenueLevel.get(vid + "|2");
+          const previewCid = preview ? cid : "";
+          // Overdue/due-soon (and no record at all) links show prominently;
+          // a current ("ok"/"upcoming") record's link stays muted.
+          const flameProminent = !f || f._renewal.state === "overdue" || f._renewal.state === "due_soon";
+          const i1Prominent = !i1 || i1._renewal.state === "overdue" || i1._renewal.state === "due_soon";
+          const i2Prominent = !!i2 && (i2._renewal.state === "overdue" || i2._renewal.state === "due_soon");
           return (
             <div key={vid} style={{ padding: "13px 20px", borderBottom: "1px solid #f5f6f8" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -701,7 +775,7 @@ export default async function PortalPage({
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginTop: 8 }}>
                 {f ? (
-                  <Chip
+                  <ChipAction
                     c={{
                       ...flameRenewalMeta(f._renewal.state),
                       label:
@@ -710,12 +784,18 @@ export default async function PortalPage({
                           ? "current — last " + fmtShortMs(f.completedAt)
                           : flameDueLabel(f._renewal.days, f._renewal.state)),
                     }}
+                    href={serviceHref("flame", undefined, vid, previewCid)}
+                    prominent={flameProminent}
                   />
                 ) : (
-                  <Chip c={{ label: "Flame test — no record", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec" }} />
+                  <ChipAction
+                    c={{ label: "Flame test — no record", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec" }}
+                    href={serviceHref("flame", undefined, vid, previewCid)}
+                    prominent={flameProminent}
+                  />
                 )}
                 {i1 ? (
-                  <Chip
+                  <ChipAction
                     c={{
                       ...inspRenewalMeta(i1._renewal.state),
                       label:
@@ -724,12 +804,18 @@ export default async function PortalPage({
                           ? "current — last " + fmtShortIso(i1.surveyDate)
                           : inspDueLabel(i1._renewal.days, i1._renewal.state)),
                     }}
+                    href={serviceHref("inspection", 1, vid, previewCid)}
+                    prominent={i1Prominent}
                   />
                 ) : (
-                  <Chip c={{ label: "Inspection L1 — no record", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec" }} />
+                  <ChipAction
+                    c={{ label: "Inspection L1 — no record", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec" }}
+                    href={serviceHref("inspection", 1, vid, previewCid)}
+                    prominent={i1Prominent}
+                  />
                 )}
                 {i2 && (
-                  <Chip
+                  <ChipAction
                     c={{
                       ...inspRenewalMeta(i2._renewal.state),
                       label:
@@ -738,7 +824,24 @@ export default async function PortalPage({
                           ? "current — last " + fmtShortIso(i2.surveyDate)
                           : inspDueLabel(i2._renewal.days, i2._renewal.state)),
                     }}
+                    href={serviceHref("inspection", 2, vid, previewCid)}
+                    prominent={i2Prominent}
                   />
+                )}
+                {preview ? (
+                  <span
+                    title="Disabled in preview"
+                    style={{ fontSize: 10.5, fontWeight: 700, color: "#c3c7ce", cursor: "not-allowed" }}
+                  >
+                    Request a repair
+                  </span>
+                ) : (
+                  <Link
+                    href={`/portal/request?service=${encodeURIComponent("Repair")}&venue=${encodeURIComponent(vid)}`}
+                    style={{ fontSize: 10.5, fontWeight: 700, textDecoration: "underline", color: "#9aa0ab" }}
+                  >
+                    Request a repair
+                  </Link>
                 )}
               </div>
             </div>
