@@ -93,7 +93,7 @@ export async function restoreSpecRecordRevision(
   specId: string,
   revision: number,
   by: string
-): Promise<{ ok: true; record: SpecRecord } | { ok: false; error: string }> {
+): Promise<{ ok: true; record: SpecRecord; outcome: SaveOutcome } | { ok: false; error: string }> {
   const revisionDoc = await getDoc<SpecRecordRevision & Doc>("spec_record_revisions", `${specId}@${revision}`);
   if (!revisionDoc) return { ok: false, error: `No revision ${revision} found for ${specId}.` };
   const current = await getSpecRecord(specId);
@@ -107,10 +107,18 @@ export async function restoreSpecRecordRevision(
     by,
     `Restored revision ${revision}`
   );
-  return { ok: true, record: result.record };
+  return { ok: true, record: result.record, outcome: result.outcome };
+}
+
+/** Every spec id ever used, soft-deleted ones included — the set
+ *  `nextSpecIdFor` counts past, so an id is never reused. One list; callers
+ *  that need several sections' next ids compute them from this with the
+ *  pure `nextSpecIdFor`. */
+export async function allSpecIdsEverUsed(): Promise<string[]> {
+  const all = await listDocs<Doc>("spec_records", { includeDeleted: true });
+  return all.map((d) => d.id);
 }
 
 export async function nextSpecId(sectionNumber: string): Promise<string> {
-  const all = await listDocs<Doc>("spec_records", { includeDeleted: true });
-  return nextSpecIdFor(sectionNumber, all.map((d) => d.id));
+  return nextSpecIdFor(sectionNumber, await allSpecIdsEverUsed());
 }

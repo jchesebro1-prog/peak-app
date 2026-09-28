@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { commitSpecRecordImportAction, previewSpecRecordImportAction, type SpecRecordImportPreview } from "../record-actions";
-import { checkSpecRecordImportFile } from "@/lib/specs/record-import";
+import { SPEC_RECORD_IMPORT_TOO_LARGE, SPEC_RECORD_IMPORT_UPLOAD_BYTES, checkSpecRecordImportFile } from "@/lib/specs/record-import";
 
 /**
  * Spec records Task 10 — the Spec Library's **Import .xlsx** (design §2,
@@ -76,7 +76,7 @@ export function RecordsImport() {
     setOpen(true);
     setPreview(null);
     setMsg("");
-    const refused = checkSpecRecordImportFile(f.name, f.size);
+    const refused = checkSpecRecordImportFile(f.name, f.size) ?? (f.size > SPEC_RECORD_IMPORT_UPLOAD_BYTES ? SPEC_RECORD_IMPORT_TOO_LARGE : null);
     if (refused) {
       setFile(null);
       setErr(refused);
@@ -93,7 +93,7 @@ export function RecordsImport() {
         }
         setPreview(res.preview);
       } catch {
-        setErr("Could not upload that file. Try again — a very large file may be refused by the server.");
+        setErr("Could not upload that file. Try again — the import limit is about 1 MB.");
       }
     });
   };

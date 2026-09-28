@@ -360,3 +360,13 @@ export function specRecordHistory(current: SpecRecord, revisions: readonly SpecR
   }
   return out.sort((a, b) => b.revision - a.revision);
 }
+
+/** The Spec Library editor's save path (design §7) accepts only Peak's own
+ *  `PS-<6 digits>-<3 digits>` ids (≤ 20 chars) — every allocated id and
+ *  every v1 id fits. The import planner deliberately does NOT use this: it
+ *  keeps whatever ids the file carries. */
+export const SPEC_ID_PATTERN = /^PS-\d{6}-\d{3}$/;
+export const SPEC_ID_MAX = 20;
+export function isValidSpecId(id: string): boolean {
+  return typeof id === "string" && id.length <= SPEC_ID_MAX && SPEC_ID_PATTERN.test(id);
+}

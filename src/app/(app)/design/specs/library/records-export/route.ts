@@ -10,10 +10,11 @@ import { writeLibraryWorkbook } from "@/lib/specs/record-io";
  * create-gated server action.
  */
 
+/** Today in Peak's own time zone (Central), as YYYY-MM-DD — "en-CA" formats
+ *  dates year-first, so the server's own zone (UTC on Vercel) never shifts
+ *  an evening export onto tomorrow's date. */
 function today(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date());
 }
 
 export async function GET() {

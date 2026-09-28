@@ -33198,6 +33198,24 @@ async function specLibraryScreenAsyncChecks(): Promise<void> {
     const bad = [...s.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
     ok(bad.length === 0, `library client: ${f} imports stores/db/exceljs/io type-only (${bad.join(", ") || "none"})`);
   }
+  // Fix round: allocated ids, validation, errors inline, permission-gated controls.
+  ok(R.isValidSpecId("PS-260961-028") && recs.every((r) => R.isValidSpecId(r.specId)), "library ids: PS-######-### ids (every v1 id) are valid");
+  ok(!R.isValidSpecId("PS-26096-028") && !R.isValidSpecId("ps-260961-028") && !R.isValidSpecId("PS-260961-028x") && !R.isValidSpecId("") && !R.isValidSpecId("X".repeat(21)),
+    "library ids: anything else (short digits, lowercase, suffix, blank, over 20 chars) is refused");
+  const saveBody = ra.slice(ra.indexOf("export async function saveSpecRecordAction(")).split(/\nexport async function /)[0];
+  ok(/specId = await nextSpecId\(section\)/.test(saveBody) && (saveBody.match(/await nextSpecId\(section\)/g) || []).length === 2 && /isValidSpecId\(specId\)/.test(saveBody) && !/isNew/.test(saveBody),
+    "library save: a create always allocates via nextSpecId (re-checked, retried once), every id is validated, no typed-id path");
+  const restoreBody = ra.slice(ra.indexOf("export async function restoreSpecRecordRevisionAction(")).split(/\nexport async function /)[0];
+  ok(/outcome: result\.outcome/.test(restoreBody), "library restore: the action returns the save outcome");
+  ok(!/rec-specid[^>]*<input|<input[^>]*id="rec-specid"|setSpecIdText/.test(editor) && /Assigned on save/.test(editor), "library editor: the new-record Spec ID is read-only (Assigned on save / preview)");
+  ok(/matches the current text — nothing to restore/.test(editor), "library editor: an unchanged restore says there's nothing to restore");
+  ok((editor.match(/\} catch \{/g) || []).length >= 2, "library editor: save and restore catch a thrown action into the inline error");
+  ok(/canCreate &&/.test(src("src/app/(app)/design/specs/library/records-view.tsx")) && /canCreate=\{can\("create", user\.roles\)\}/.test(src("src/app/(app)/design/specs/library/page.tsx")) && /canRestore &&/.test(editor) && /!canCreate \?/.test(editor),
+    "library permissions: New spec / Import .xlsx / Save / Restore show only with create");
+  const newPage = src("src/app/(app)/design/specs/library/records/new/page.tsx");
+  ok(/nextSpecIdFor\(s\.number, usedIds\)/.test(newPage) && !/await nextSpecId\(/.test(newPage), "library new: one id list, pure nextSpecIdFor per section");
+  ok(/timeZone: "America\/Chicago"/.test(route) && /new Intl\.DateTimeFormat\("en-CA"/.test(route), "library export: the filename date is Central time");
+  ok(/about 1 MB/.test(I.SPEC_RECORD_IMPORT_TOO_LARGE) && I.checkSpecRecordImportFile("a.xlsx", 6 * 1024 * 1024) === I.SPEC_RECORD_IMPORT_TOO_LARGE, "library import: the size refusal names the real ceiling (about 1 MB)");
   const page = src("src/app/(app)/design/specs/library/page.tsx");
   ok(/view === "sections"/.test(page) && /<SectionsView/.test(page) && /<RecordsView/.test(page), "library page: ?view=sections renders the sections view, default is records");
   const cov = src("src/app/(app)/design/specs/library/controls.tsx");

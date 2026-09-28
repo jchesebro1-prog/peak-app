@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { allSpecRecords, getSpecRecord, specRecordRevisions } from "@/lib/stores/spec-records";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
@@ -21,7 +22,7 @@ function fmtWhen(ts: number): string {
 }
 
 export default async function SpecRecordPage({ params }: { params: Promise<{ specId: string }> }) {
-  const [, { specId: rawId }] = await Promise.all([requireUser(), params]);
+  const [user, { specId: rawId }] = await Promise.all([requireUser(), params]);
   let specId = rawId;
   try {
     specId = decodeURIComponent(rawId);
@@ -59,6 +60,7 @@ export default async function SpecRecordPage({ params }: { params: Promise<{ spe
         .filter((r) => r.specId !== record.specId)
         .map((r): EditorOther => ({ specId: r.specId, title: r.title, kind: r.kind, status: r.status, mfrNumbers: r.mfrNumbers, matchKey: r.matchKey }))}
       nextIds={{}}
+      canCreate={can("create", user.roles)}
     />
   );
 }

@@ -115,8 +115,12 @@ type Props = {
   sections: EditorSection[];
   articles: EditorArticle[];
   others: EditorOther[];
-  /** New records only: each section number's next free Spec ID. */
+  /** New records only: each section number's next free Spec ID (a preview —
+   *  the server allocates the real one on save). */
   nextIds: Record<string, string>;
+  /** The viewer's `create` permission (D260): without it the form is
+   *  read-only — no Save, no Restore. The actions refuse regardless. */
+  canCreate: boolean;
 };
 
 export default function RecordEditor(props: Props) {
@@ -154,7 +158,7 @@ export default function RecordEditor(props: Props) {
       )}
 
       <RecordForm key={`${record.specId}@${record.revision}`} {...props} onNotice={setNotice} />
-      {mode === "edit" && <History specId={record.specId} history={history} onNotice={setNotice} />}
+      {mode === "edit" && <History specId={record.specId} history={history} canRestore={props.canCreate} onNotice={setNotice} />}
     </div>
   );
 }
@@ -166,14 +170,13 @@ function RecordForm({
   articles,
   others,
   nextIds,
+  canCreate,
   onNotice,
 }: Props & { onNotice: (s: string) => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState("");
 
-  const [specIdText, setSpecIdText] = useState("");
-  const [specIdEdited, setSpecIdEdited] = useState(false);
   const [kind, setKind] = useState<SpecKind>(record.kind);
   const [status, setStatus] = useState<SpecStatus>(record.status);
   const [section, setSection] = useState(record.section);
@@ -199,8 +202,10 @@ function RecordForm({
   );
   const articleInSection = sectionArticles.some((a) => a.id === sourceArticleId);
 
-  const autoId = mode === "new" ? (sectionRow ? nextIds[sectionRow.number] ?? "" : "") : "";
-  const specIdShown = mode === "new" ? (specIdEdited ? specIdText : autoId) : record.specId;
+  // New records: a read-only preview of the section's next id; the server
+  // allocates the real one at save time (it may differ if someone else
+  // created a spec in the same section meanwhile).
+  const previewId = mode === "new" ? (sectionRow ? nextIds[sectionRow.number] ?? "" : "") : record.specId;
 
   // The article text is round-trip only (design §1.1): keep the record's own
   // heading while the placement is unchanged, else take the chosen article's.
@@ -228,7 +233,7 @@ function RecordForm({
     updatedAt: record.updatedAt,
     updatedBy: record.updatedBy,
   };
-  const candidate = normalizeSpecRecord({ ...raw, specId: specIdShown.trim() || "(new)" });
+  const candidate = normalizeSpecRecord({ ...raw, specId: previewId || "(new)" });
 
   const otherRecords = useMemo(() => others.map(asRecord), [others]);
   const problems = candidate
@@ -275,26 +280,27 @@ function RecordForm({
     start(async () => {
       setErr("");
       onNotice("");
-      if (mode === "new") {
-        // A blank id → the server takes the section's next free number at
-        // save time; a hand-typed id is checked as new (never overwrites).
-        const typed = specIdEdited ? specIdText.trim() : "";
-        const specId = typed && typed !== autoId ? typed : "";
-        const res = await saveSpecRecordAction({ ...raw, specId }, "", { isNew: true });
+      try {
+        if (mode === "new") {
+          // A blank id is a create — the server allocates the id.
+          const res = await saveSpecRecordAction({ ...raw, specId: "" }, "");
+          if (!res.ok) {
+            setErr(res.error);
+            return;
+          }
+          router.push(`/design/specs/library/records/${encodeURIComponent(res.specId)}`);
+          return;
+        }
+        const res = await saveSpecRecordAction({ ...raw, specId: record.specId }, why.trim());
         if (!res.ok) {
           setErr(res.error);
           return;
         }
-        router.push(`/design/specs/library/records/${encodeURIComponent(res.specId)}`);
-        return;
+        onNotice(res.outcome === "unchanged" ? "No changes to save." : `Saved ${record.specId} as revision ${record.revision + 1}.`);
+        router.refresh();
+      } catch {
+        setErr("Could not save — check your connection and try again.");
       }
-      const res = await saveSpecRecordAction({ ...raw, specId: record.specId }, why.trim());
-      if (!res.ok) {
-        setErr(res.error);
-        return;
-      }
-      onNotice(res.outcome === "unchanged" ? "No changes to save." : `Saved ${record.specId} as revision ${record.revision + 1}.`);
-      router.refresh();
     });
   };
 
@@ -304,26 +310,18 @@ function RecordForm({
 
       <div style={GRID2}>
         <div>
-          <label style={LBL} htmlFor="rec-specid">
-            Spec ID
-          </label>
+          <div style={LBL}>Spec ID</div>
           {mode === "new" ? (
             <>
-              <input
-                id="rec-specid"
-                className="pk-input mono"
-                value={specIdShown}
-                placeholder={sectionRow ? "" : "Choose a section"}
-                onChange={(e) => {
-                  setSpecIdEdited(true);
-                  setSpecIdText(e.target.value);
-                }}
-                style={{ width: "100%" }}
-              />
-              <div style={EXPLAIN}>From the section — the next free number is taken when you save. Type one to set it yourself.</div>
+              <div id="rec-specid" style={{ ...MONO, fontSize: 13, padding: "8px 0", color: previewId ? "#3a3f4a" : "#9aa0ab" }}>
+                {previewId || "Assigned on save"}
+              </div>
+              <div style={EXPLAIN}>
+                {previewId ? "The section's next number — assigned when you save." : "Choose a section; the next number is assigned when you save."}
+              </div>
             </>
           ) : (
-            <div style={{ ...MONO, fontSize: 13, padding: "8px 0" }}>{record.specId}</div>
+            <div id="rec-specid" style={{ ...MONO, fontSize: 13, padding: "8px 0" }}>{record.specId}</div>
           )}
         </div>
         <div>
@@ -486,7 +484,7 @@ function RecordForm({
         <textarea id="rec-notes" className="pk-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ width: "100%", resize: "vertical" }} />
       </div>
 
-      {mode === "edit" && (
+      {mode === "edit" && canCreate && (
         <div style={{ marginBottom: 14 }}>
           <label style={LBL} htmlFor="rec-why">
             Why are you changing it?
@@ -506,20 +504,24 @@ function RecordForm({
 
       {conflict && <div style={{ ...FIELD_ERR, marginBottom: 10 }}>{conflict}</div>}
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" className="pk-btn-accent" disabled={pending || blocking || unchanged || !candidate} onClick={save}>
-          {pending ? "Saving…" : mode === "new" ? "Create spec" : "Save"}
-        </button>
-        {mode === "new" ? (
-          <Link href="/design/specs/library" className="pk-btn-outline" style={{ textDecoration: "none" }}>
-            Cancel
-          </Link>
-        ) : null}
-        {unchanged && <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>No changes yet.</span>}
-        {!unchanged && blocking && <span style={{ fontSize: 11.5, color: "#b4543a" }}>Fix the problems above to save.</span>}
-        {!unchanged && !blocking && needWhy && <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>A reason is required to save.</span>}
-        {err && <span style={ERR}>{err}</span>}
-      </div>
+      {!canCreate ? (
+        <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>You can view this spec; editing needs the Create permission.</div>
+      ) : (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button type="button" className="pk-btn-accent" disabled={pending || blocking || unchanged || !candidate} onClick={save}>
+            {pending ? "Saving…" : mode === "new" ? "Create spec" : "Save"}
+          </button>
+          {mode === "new" ? (
+            <Link href="/design/specs/library" className="pk-btn-outline" style={{ textDecoration: "none" }}>
+              Cancel
+            </Link>
+          ) : null}
+          {unchanged && <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>No changes yet.</span>}
+          {!unchanged && blocking && <span style={{ fontSize: 11.5, color: "#b4543a" }}>Fix the problems above to save.</span>}
+          {!unchanged && !blocking && needWhy && <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>A reason is required to save.</span>}
+          {err && <span style={ERR}>{err}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -614,10 +616,12 @@ function IncludeWithPicker({
 function History({
   specId,
   history,
+  canRestore,
   onNotice,
 }: {
   specId: string;
   history: EditorHistoryEntry[];
+  canRestore: boolean;
   onNotice: (s: string) => void;
 }) {
   const router = useRouter();
@@ -630,15 +634,23 @@ function History({
     start(async () => {
       setErr("");
       onNotice("");
-      const res = await restoreSpecRecordRevisionAction(specId, revision);
-      if (!res.ok) {
-        setErr(res.error);
-        return;
+      try {
+        const res = await restoreSpecRecordRevisionAction(specId, revision);
+        if (!res.ok) {
+          setErr(res.error);
+          return;
+        }
+        setAsking(null);
+        setOpen(null);
+        if (res.outcome === "unchanged") {
+          onNotice(`Revision ${revision} matches the current text — nothing to restore.`);
+          return;
+        }
+        onNotice(`Restored revision ${revision} as a new revision — nothing was deleted from the history.`);
+        router.refresh();
+      } catch {
+        setErr("Could not restore — check your connection and try again.");
       }
-      setAsking(null);
-      setOpen(null);
-      onNotice(`Restored revision ${revision} as a new revision — nothing was deleted from the history.`);
-      router.refresh();
     });
 
   return (
@@ -665,7 +677,7 @@ function History({
               <button type="button" className="pk-btn-outline" onClick={() => setOpen(open === h.revision ? null : h.revision)}>
                 {open === h.revision ? "Hide" : "Show"}
               </button>
-              {!h.current && asking !== h.revision && (
+              {canRestore && !h.current && asking !== h.revision && (
                 <button type="button" className="pk-btn-outline" disabled={pending} onClick={() => setAsking(h.revision)}>
                   Restore this version
                 </button>

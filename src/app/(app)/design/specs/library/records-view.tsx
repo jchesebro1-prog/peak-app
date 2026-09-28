@@ -40,7 +40,15 @@ function fmtDate(ts: number): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default async function RecordsView({ sp }: { sp: Record<string, string | string[] | undefined> }) {
+/** `canCreate` (the viewer's `create` permission, D260) shows New spec and
+ *  Import .xlsx; the actions refuse without it regardless. */
+export default async function RecordsView({
+  sp,
+  canCreate,
+}: {
+  sp: Record<string, string | string[] | undefined>;
+  canCreate: boolean;
+}) {
   const all = await allSpecRecords();
 
   const q = one(sp.q).trim();
@@ -76,10 +84,14 @@ export default async function RecordsView({ sp }: { sp: Record<string, string | 
             Every product, system and companion spec — written once, matched against any BOM row.
           </div>
         </div>
-        <Link href="/design/specs/library/records/new" className="pk-btn-accent" style={{ textDecoration: "none" }}>
-          New spec
-        </Link>
-        <RecordsImport />
+        {canCreate && (
+          <>
+            <Link href="/design/specs/library/records/new" className="pk-btn-accent" style={{ textDecoration: "none" }}>
+              New spec
+            </Link>
+            <RecordsImport />
+          </>
+        )}
         {/* A file download from a route handler, not a page — a plain <a>, never a client-side <Link>. */}
         <a href="/design/specs/library/records-export" download className="pk-btn-outline" style={{ textDecoration: "none" }}>
           Export .xlsx

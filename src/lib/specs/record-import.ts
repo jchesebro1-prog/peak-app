@@ -320,11 +320,18 @@ export function planSpecRecordImport(parsed: ParsedRecords, ctx: ImportPlanCtx):
  *  Pure so the client component can mirror it. */
 export const SPEC_RECORD_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 
+/** The ceiling a file actually meets first: the upload rides a Server Action
+ *  capped at 1200kb in next.config.ts, so the client refuses above this
+ *  (headroom for the multipart envelope) and every refusal names "about
+ *  1 MB" — the limit a user can really reach. */
+export const SPEC_RECORD_IMPORT_UPLOAD_BYTES = 1_100_000;
+export const SPEC_RECORD_IMPORT_TOO_LARGE = "That file is too large — the Spec Library import limit is about 1 MB.";
+
 /** `null` when the file may be imported, else the refusal to show: only
  *  `.xlsx` or `.json`, at most 5 MB. */
 export function checkSpecRecordImportFile(name: string, size: number): string | null {
   const lower = str(name).trim().toLowerCase();
   if (!lower.endsWith(".xlsx") && !lower.endsWith(".json")) return "Choose an .xlsx or .json file.";
-  if (!(size >= 0) || size > SPEC_RECORD_IMPORT_MAX_BYTES) return "That file is too large — the Spec Library import limit is 5 MB.";
+  if (!(size >= 0) || size > SPEC_RECORD_IMPORT_MAX_BYTES) return SPEC_RECORD_IMPORT_TOO_LARGE;
   return null;
 }

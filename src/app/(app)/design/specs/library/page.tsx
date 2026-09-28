@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import SectionsView from "./sections-view";
 import RecordsView from "./records-view";
 
@@ -20,8 +21,8 @@ export default async function SpecLibraryPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp] = await Promise.all([requireUser(), searchParams]);
+  const [user, sp] = await Promise.all([requireUser(), searchParams]);
   const view = one(sp.view);
   if (view === "sections") return <SectionsView sp={sp} />;
-  return <RecordsView sp={sp} />;
+  return <RecordsView sp={sp} canCreate={can("create", user.roles)} />;
 }

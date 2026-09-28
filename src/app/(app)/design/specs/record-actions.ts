@@ -29,6 +29,7 @@ import {
 } from "@/lib/specs/spec-document";
 import { isPlaceholderSku, normPartNumber, specRowKey } from "@/lib/specs/record-keys";
 import {
+  isValidSpecId,
   matchKeyConflict,
   normalizeSpecRecord,
   partNumberConflict,
@@ -447,30 +448,39 @@ export async function addLibraryRowAction(docId: string, specId: string): Promis
 /** The Spec Library screen's record editor (design §7) — normalizes and
  *  validates, then the same duplicate-part-number and match-key guards as
  *  Link/Write new. `why` is required only when editing an existing record
- *  (a brand-new one has nothing to explain yet). */
+ *  (a brand-new one has nothing to explain yet).
+ *
+ *  A blank specId is a create: the id is ALWAYS allocated here from the
+ *  chosen section (`nextSpecId`), never taken from the client — the editor
+ *  only previews it. Allocating at save time rather than on page load makes
+ *  a collision between two people creating in the same section unlikely;
+ *  the allocated id is re-checked and re-allocated once if another save got
+ *  there first. A non-blank specId must name an existing record (an edit).
+ *  Either way the id must be a `PS-######-###` id (`isValidSpecId`). */
 export async function saveSpecRecordAction(
   record: unknown,
-  why: string,
-  opts?: { isNew?: boolean }
+  why: string
 ): Promise<Result<{ specId: string; outcome: SaveOutcome }>> {
   const user = await requirePerm("create");
-  // A blank specId is a new record: the id is allocated here, at save time,
-  // from the chosen section (design §7) — so two people creating specs in
-  // the same section at once never get the same number.
   const raw = (record && typeof record === "object" ? record : {}) as Record<string, unknown>;
-  let isNew = opts?.isNew === true;
-  let input: Record<string, unknown> = raw;
-  if (!String(raw.specId ?? "").trim()) {
+  const givenId = String(raw.specId ?? "").trim();
+  const isCreate = !givenId;
+  let specId = givenId;
+  if (isCreate) {
     const section = String(raw.section ?? "").trim();
     if (!csiKey(section)) return { ok: false, error: "Choose a section first." };
-    input = { ...raw, specId: await nextSpecId(section) };
-    isNew = true;
+    specId = await nextSpecId(section);
+    if (await getSpecRecord(specId)) specId = await nextSpecId(section); // someone saved that id meanwhile — retry once
+    if (await getSpecRecord(specId)) return { ok: false, error: "Couldn't assign a Spec ID — try saving again." };
   }
-  const normalized = normalizeSpecRecord(input);
+  if (!isValidSpecId(specId)) {
+    return { ok: false, error: `"${specId.slice(0, 40)}" isn't a Spec ID (PS-######-###).` };
+  }
+  const normalized = normalizeSpecRecord({ ...raw, specId });
   if (!normalized) return { ok: false, error: "That spec record isn't valid." };
 
-  const existing = await getSpecRecord(normalized.specId);
-  if (isNew && existing) return { ok: false, error: `Spec ID ${normalized.specId} is already taken.` };
+  const existing = isCreate ? null : await getSpecRecord(specId);
+  if (!isCreate && !existing) return { ok: false, error: "Spec record not found." };
   const w = String(why || "").trim();
   if (existing && !w) return { ok: false, error: "A reason is required." };
   const badWhy = tooLong(w, WHY_MAX, "the reason");
@@ -502,7 +512,10 @@ export async function saveSpecRecordAction(
  *  collision the library has since resolved. A `draft`/`archived` target
  *  needs no guard (design §1.1: those statuses never participate in
  *  matching, so they can't collide). */
-export async function restoreSpecRecordRevisionAction(specId: string, revision: number): Promise<Result> {
+export async function restoreSpecRecordRevisionAction(
+  specId: string,
+  revision: number
+): Promise<Result<{ outcome: SaveOutcome }>> {
   const user = await requirePerm("create");
   const rev = Number(revision);
   const revs = await specRecordRevisions(specId);
@@ -516,7 +529,7 @@ export async function restoreSpecRecordRevisionAction(specId: string, revision: 
   const result = await restoreSpecRecordRevision(specId, rev, user.name);
   if (!result.ok) return { ok: false, error: result.error };
   revalidateAll();
-  return { ok: true };
+  return { ok: true, outcome: result.outcome };
 }
 
 /* ---- Spec Library screen: Import .xlsx (design §2, §7) ---- */

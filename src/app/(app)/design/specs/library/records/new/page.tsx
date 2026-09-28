@@ -1,16 +1,16 @@
-import { requireUser } from "@/lib/session";
-import { allSpecRecords, nextSpecId } from "@/lib/stores/spec-records";
+import { requirePerm } from "@/lib/session";
+import { allSpecIdsEverUsed, allSpecRecords } from "@/lib/stores/spec-records";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { csiKey } from "@/lib/specs/articles";
-import type { SpecRecord } from "@/lib/specs/records";
+import { nextSpecIdFor, type SpecRecord } from "@/lib/specs/records";
 import RecordEditor, { type EditorArticle, type EditorOther, type EditorSection } from "../[specId]/record-editor";
 
 /**
  * Spec records Task 10 — a new spec record (design §7). Defaults: kind
- * Product – catalog, status Ready. The Spec ID previews as the section's
- * next free number once a section is chosen (`nextIds`); the server takes
- * the next free number at save time, so the preview never collides. An
+ * Product – catalog, status Ready. The Spec ID is read-only: it previews as
+ * the section's next free number once a section is chosen (`nextIds`), and
+ * the server allocates the real one at save time. An
  * optional `?section=<CSI number>` preselects the section.
  */
 
@@ -25,12 +25,19 @@ export default async function NewSpecRecordPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp] = await Promise.all([requireUser(), searchParams]);
-  const [sections, articles, records] = await Promise.all([allSections(), allArticles(), allSpecRecords()]);
+  // Creating is a write — without `create` there's nothing to do here (the
+  // records view hides New spec; requirePerm redirects a typed URL home).
+  const [, sp] = await Promise.all([requirePerm("create"), searchParams]);
+  const [sections, articles, records, usedIds] = await Promise.all([
+    allSections(),
+    allArticles(),
+    allSpecRecords(),
+    allSpecIdsEverUsed(),
+  ]);
 
-  const nextIds: Record<string, string> = Object.fromEntries(
-    await Promise.all(sections.map(async (s) => [s.number, await nextSpecId(s.number)] as const))
-  );
+  // One list of every id ever used, then the pure allocator per section —
+  // a preview only; the server allocates again at save time.
+  const nextIds: Record<string, string> = Object.fromEntries(sections.map((s) => [s.number, nextSpecIdFor(s.number, usedIds)]));
 
   const wanted = csiKey(one(sp.section));
   const preselect = wanted ? sections.find((s) => csiKey(s.number) === wanted)?.number ?? "" : "";
@@ -64,6 +71,7 @@ export default async function NewSpecRecordPage({
       articles={articles.map((a): EditorArticle => ({ id: a.id, sectionId: a.sectionId, title: a.title, sort: a.sort }))}
       others={records.map((r): EditorOther => ({ specId: r.specId, title: r.title, kind: r.kind, status: r.status, mfrNumbers: r.mfrNumbers, matchKey: r.matchKey }))}
       nextIds={nextIds}
+      canCreate
     />
   );
 }
