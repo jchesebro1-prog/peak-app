@@ -1,9 +1,8 @@
 import { get as getCustomer } from "@/lib/stores/customers";
-import { getAll as getAllFlameJobs, type FlameJob } from "@/lib/stores/flame-jobs";
+import { getAll as getAllFlameJobs, type FlameJob, type FlameJobVenue } from "@/lib/stores/flame-jobs";
 import {
   completedAtOf,
   getAll as getAllInspections,
-  levelMeta,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
 import { getAll as getAllQuotes, type Quote } from "@/lib/stores/quotes";
@@ -50,17 +49,24 @@ export function pickScopeCount(input: {
 }
 
 /** The latest completed flame job covering this venue (across possibly
- *  multi-venue jobs), else null. */
+ *  multi-venue jobs), else null. Falls back to the whole job's
+ *  `curtainsTotal` only if the matched venue row itself has no `curtains`
+ *  (a malformed row) — a normal row always has one, so this is a defensive
+ *  fallback, not a "venue not found" case (a job is only ever selected as
+ *  `best` because its venues array DID contain this venue). */
 function latestFlameJobFor(jobs: FlameJob[], venueId: string): { count: number; at: number } | null {
   let best: FlameJob | null = null;
+  let bestVenue: FlameJobVenue | null = null;
   for (const j of jobs) {
     const jv = (j.venues || []).find((v) => v.id === venueId);
     if (!jv) continue;
-    if (!best || (j.completedAt || 0) > (best.completedAt || 0)) best = j;
+    if (!best || (j.completedAt || 0) > (best.completedAt || 0)) {
+      best = j;
+      bestVenue = jv;
+    }
   }
   if (!best) return null;
-  const jv = (best.venues || []).find((v) => v.id === venueId);
-  const count = jv ? jv.curtains : best.curtainsTotal;
+  const count = bestVenue?.curtains ?? best.curtainsTotal;
   return { count: Number(count) || 0, at: best.completedAt || 0 };
 }
 
@@ -125,9 +131,12 @@ export async function serviceScopeFor(customerId: string, service: PortalService
   const matchingQuotes = allQuotes.filter((q) => q.quoteType === quoteType && q.customerId === customerId);
   const completedJobs =
     service.kind === "flame" ? jobs.filter((j) => j.customerId === customerId && j.stage === "completed") : [];
+  // Number(r.level) === service.level (never levelMeta(r.level).key): levelMeta
+  // has a lenient DISPLAY fallback — an unmatched/missing level defaults to
+  // Level 1 — which would wrongly count a record with NO level as an L1 match.
   const completedRecs =
     service.kind === "inspection"
-      ? recs.filter((r) => r.customerId === customerId && r.stage === "completed" && levelMeta(r.level).key === service.level)
+      ? recs.filter((r) => r.customerId === customerId && r.stage === "completed" && Number(r.level) === service.level)
       : [];
 
   return venues.map((loc) => {

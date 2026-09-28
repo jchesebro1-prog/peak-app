@@ -21190,9 +21190,18 @@ import {
   const fa = src217("src/app/(app)/flame-tests/quote/actions.ts");
   ok(typedIn.test(fa) && /venues: venueInputs, travel: travelOverride, priceOverride \}/.test(fa),
     "#217 flame save: reads the typed total and prices with it");
-  ok(/testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(fa) &&
+  // #246 fix round 1: the venue-input mapping (incl. the typed testing-cost
+  // validation below) moved out of this file into the shared
+  // src/lib/service-quote-inputs.ts (also called by the portal's
+  // builder-identical pricing) — this now asserts the builder calls that
+  // shared helper AND that the helper itself still carries the
+  // testingOverride mapping, so the same invariant (a venue's typed testing
+  // cost is validated, priced and saved) stays guarded either way.
+  const sqi217 = src217("src/lib/service-quote-inputs.ts");
+  ok(/venueInputs: FlameTestVenueInput\[\] = flameVenueInputsFrom\(venues, cust\);/.test(fa) &&
+      /testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(sqi217) &&
       /\.\.\.\(v\.testingOverride != null \? \{ testingOverride: v\.testingOverride \} : \{\}\)/.test(fa),
-    "#217 flame save: each venue's typed testing cost is validated, priced and saved on the venue");
+    "#217 flame save: builds venue inputs through the shared service-quote-inputs.ts helper (which validates + prices each venue's typed testing cost), and still saves it on the venue");
   ok(/margin: r\.effectiveMargin,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
     "#217 flame save: stores the back-solved margin, the typed total (when set) and the auto figure");
 
@@ -30403,10 +30412,13 @@ import {
   CURTAINS_RANGE_COPY as d246CurtainsCopy,
   LINE_SETS_RANGE_COPY as d246LineSetsCopy,
 } from "@/lib/portal-service-pricing";
-import { flameVenueInputsFrom as d246Fvi, resolveQuoteOffice as d246Office } from "@/lib/service-quote-inputs";
+import {
+  flameVenueInputsFrom as d246Fvi,
+  inspectionVenueInputsFrom as d246Ivi,
+  resolveQuoteOffice as d246Office,
+} from "@/lib/service-quote-inputs";
 import { compute as d246ComputeFlame, getRates as d246FlameRates } from "@/lib/flametest-engine";
-import { coordsOf as d246CoordsOf } from "@/lib/geo";
-import { normalizeTestingOverride as d246NormTest } from "@/lib/service-pricing";
+import { computeEstimate as d246ComputeInsp, getRates as d246InspRates } from "@/lib/inspection-engine";
 import { create as d246CreateFlameJob } from "@/lib/stores/flame-jobs";
 import { create as d246CreateInspection } from "@/lib/stores/inspections";
 import { resolveTier as d246ResolveTier } from "@/lib/pricing-tiers";
@@ -30571,9 +30583,13 @@ async function portal246PricingAsyncChecks(): Promise<void> {
     const noCust = await d246Price({ customerId: fixtureId(246, "price-no-such-co"), name: "X" }, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 5 }] });
     ok(!noCust.ok, "#246 priceServiceRequest: an unknown customer is refused");
 
-    // ---- flame: the copied venue-input mapping matches a plain replica of
-    // the builder's own inline mapping (persist()), and the priced total
-    // matches compute() run over that replica at the same tier margin. ----
+    // ---- flame: SAME inputs through the shared helper (service-quote-
+    // inputs.ts — now the one path both the builder and the portal call,
+    // #246 fix round 1) feed compute() directly; priceServiceRequest() must
+    // land on the identical total at the same tier margin. This is a real
+    // parity check (not a replica) — flameVenueInputsFrom/resolveQuoteOffice
+    // are the exact functions src/app/(app)/flame-tests/quote/actions.ts
+    // persist() calls today. ----
     const tier246 = await d246ResolveTier(CO, "Pat Buyer");
     const office246 = await d246Office();
     const travelRates246 = await d246TravelRates();
@@ -30582,27 +30598,10 @@ async function portal246PricingAsyncChecks(): Promise<void> {
       { id: "v1", curtains: 15 },
       { id: "v2", curtains: 9 },
     ];
-    const locById246p = new Map((cust246?.locations || []).map((l) => [l.id, l]));
-    const builderReplica246 = rawVenues246.map((v) => {
-      const loc = locById246p.get(v.id);
-      const coords = loc ? d246CoordsOf(loc) : null;
-      return {
-        id: v.id,
-        label: loc?.label || "Venue",
-        curtains: v.curtains,
-        testingOverride: d246NormTest(undefined),
-        coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
-        oneWayMiles: loc?.travelMiles ?? null,
-        oneWayMin: loc?.travelMin ?? null,
-      };
-    });
-    const portalCopyInputs246 = d246Fvi(rawVenues246, cust246);
-    ok(JSON.stringify(builderReplica246) === JSON.stringify(portalCopyInputs246),
-      "#246 parity: the portal's copied venue-input mapping (service-quote-inputs.ts) matches a plain replica of the builder's own inline mapping, venue for venue");
-
+    const sharedFlameInputs246 = d246Fvi(rawVenues246, cust246);
     const baseRates246 = await d246FlameRates();
     const rates246 = { ...baseRates246, margin: tier246.margin };
-    const builderR246 = d246ComputeFlame({ office: office246 || undefined, venues: builderReplica246 }, rates246, travelRates246);
+    const builderR246 = d246ComputeFlame({ office: office246 || undefined, venues: sharedFlameInputs246 }, rates246, travelRates246);
 
     const priced = await d246Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 15 }, { venueId: "v2", count: 9 }] });
     ok(priced.ok && priced.total === Math.round(builderR246.total),
@@ -30623,10 +30622,21 @@ async function portal246PricingAsyncChecks(): Promise<void> {
       }
     }
 
+    // ---- inspection: the same real parity check, through
+    // inspectionVenueInputsFrom (the shared helper src/app/(app)/
+    // inspections/quote/actions.ts persist() also calls). ----
+    const rawInspVenues246 = [{ id: "v1", lineSets: 20 }];
+    const sharedInspInputs246 = d246Ivi(rawInspVenues246, cust246);
+    const baseInspRates246 = await d246InspRates();
+    const inspRates246 = { ...baseInspRates246, margin: tier246.margin };
+    const builderIns1_246 = d246ComputeInsp({ office: office246 || undefined, venues: sharedInspInputs246, level: 1 }, inspRates246, travelRates246);
+
     // ---- inspection: no per-venue breakdown in the engine → one summary
     // line; L1 and L2 price the same line-set count differently. ----
     const p1 = await d246Price(session246, { service: { kind: "inspection", level: 1 }, venues: [{ venueId: "v1", count: 20 }] });
     const p2 = await d246Price(session246, { service: { kind: "inspection", level: 2 }, venues: [{ venueId: "v1", count: 20 }] });
+    ok(p1.ok && p1.total === Math.round(builderIns1_246.total),
+      "#246 parity: priceServiceRequest's inspection total equals computeEstimate() run over the shared inspectionVenueInputsFrom helper, same tier margin");
     ok(p1.ok && p2.ok && p1.total !== p2.total, "#246 inspection: L1 and L2 price the same line-set count differently (the level multiplier)");
     if (p1.ok) {
       ok(p1.view.lines.length === 1 &&

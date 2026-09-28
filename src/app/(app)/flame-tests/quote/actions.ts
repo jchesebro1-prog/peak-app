@@ -16,14 +16,9 @@ import {
 import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/flametest-engine";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
-import { getSettings } from "@/lib/settings";
-import { coordsOf, quoteOrigin } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
-import {
-  deriveSeededMarker,
-  normalizePriceOverride,
-  normalizeTestingOverride,
-} from "@/lib/service-pricing";
+import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
+import { flameVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
 
 /**
  * Flame-test quote mutations (server port of Flame Test Quote.dc.html
@@ -88,24 +83,9 @@ async function persist(formData: FormData): Promise<string | null> {
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
-  const locById = new Map((cust?.locations || []).map((l) => [l.id, l]));
-  const venueInputs: FlameTestVenueInput[] = venues.map((v) => {
-    const loc = locById.get(v.id);
-    const coords = loc ? coordsOf(loc) : null;
-    return {
-      id: v.id,
-      label: v.label || loc?.label || "Venue",
-      curtains: v.curtains,
-      testingOverride: normalizeTestingOverride(v.testingOverride),
-      coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
-      oneWayMiles: loc?.travelMiles ?? null,
-      oneWayMin: loc?.travelMin ?? null,
-    };
-  });
+  const venueInputs: FlameTestVenueInput[] = flameVenueInputsFrom(venues, cust);
 
-  const settings = await getSettings();
-  const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const office = quoteOrigin(offices);
+  const office = await resolveQuoteOffice();
 
   const travelRates = await getTravelRates();
   // Flights over drive (spec 2026-09-25): the builder posts its Auto · Drive ·

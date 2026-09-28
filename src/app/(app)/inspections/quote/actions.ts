@@ -21,11 +21,11 @@ import {
   type InspectionVenueInput,
 } from "@/lib/inspection-engine";
 import { resolveTier } from "@/lib/pricing-tiers";
-import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
-import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
+import { driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
+import { inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -88,23 +88,10 @@ async function persist(formData: FormData): Promise<string | null> {
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
-  const locById = new Map((cust?.locations || []).map((l) => [l.id, l]));
-  const venueInputs: Array<InspectionVenueInput & { id: string | null }> = venues.map((v) => {
-    const loc = locById.get(v.id);
-    const coords = loc ? coordsOf(loc) : null;
-    return {
-      id: v.id || null,
-      label: v.label || loc?.label || "Venue",
-      lineSets: Math.max(0, Math.round(Number(v.lineSets) || 0)),
-      coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
-      oneWayMiles: loc?.travelMiles ?? null,
-      oneWayMin: loc?.travelMin ?? null,
-    };
-  });
+  const venueInputs: Array<InspectionVenueInput & { id: string | null }> =
+    inspectionVenueInputsFrom(venues, cust);
 
-  const settings = await getSettings();
-  const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const office = quoteOrigin(offices);
+  const office = await resolveQuoteOffice();
 
   // same offline haversine tier the client inlines, so the saved value
   // matches the live preview — but bound to the LIVE Estimating Rules

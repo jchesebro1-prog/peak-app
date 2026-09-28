@@ -6,24 +6,25 @@ import type { FlameTestVenueInput } from "@/lib/flametest-engine";
 import type { InspectionVenueInput } from "@/lib/inspection-engine";
 
 /**
- * The "venue inputs + office → engine opts" step (#246 Task 1) — a port of
- * the mapping the flame-test and inspection quote builders' `persist()` run
- * inline (src/app/(app)/flame-tests/quote/actions.ts,
- * src/app/(app)/inspections/quote/actions.ts): resolve each posted venue's
- * coords from the customer directory (falling back to the venue's saved
- * travelMiles/travelMin), and resolve the quote's office from Settings.
+ * Shared "venue inputs + office → engine opts" step (#246 Task 1, fix round
+ * 1) — the flame-test and inspection quote builders' `persist()`
+ * (src/app/(app)/flame-tests/quote/actions.ts,
+ * src/app/(app)/inspections/quote/actions.ts) and the portal's
+ * builder-identical pricing (`src/lib/portal-service-pricing.ts`) all call
+ * these: resolve each posted venue's coords from the customer directory
+ * (falling back to the venue's saved travelMiles/travelMin), and resolve the
+ * quote's office from Settings. One code path — a builder save and a portal
+ * price can never quietly drift apart.
  *
- * This was meant to be extracted INTO the builders (one shared code path),
- * but an existing #217 test (scripts/test-review-and-spec.ts, "each venue's
- * typed testing cost is validated, priced and saved on the venue") greps the
- * builder's own source text for this exact inline mapping, so replacing it
- * with a call out to a shared helper fails that test. Per the task brief's
- * fallback ("if extraction is risky, copy and add a parity test instead"):
- * the builders are UNCHANGED, and this module is a copy used only by
- * `src/lib/portal-service-pricing.ts` (the portal's builder-identical
- * pricing). A parity test (scripts/test-review-and-spec.ts,
- * portal246PricingAsyncChecks) pins this copy against the builders' own
- * computed totals so the two can't silently drift apart undetected.
+ * An earlier version of this extraction was reverted because an existing
+ * #217 test greps the builder's own source text for this exact inline
+ * mapping ("each venue's typed testing cost is validated, priced and saved
+ * on the venue"). That test now asserts the builder calls
+ * `flameVenueInputsFrom` AND that this file still carries the
+ * `testingOverride: normalizeTestingOverride(v.testingOverride),` line —
+ * so it keeps guarding the same invariant (per-venue testing overrides
+ * flow through to the saved quote) without pinning the mapping to living
+ * inline in the builder.
  */
 
 type PostedFlameVenue = {
