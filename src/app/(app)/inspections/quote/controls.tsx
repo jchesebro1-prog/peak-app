@@ -103,7 +103,7 @@ export type BuilderInitial = {
   travel?: TravelOverride | null;
   /** #217: the typed total to reopen with (null = auto). */
   priceOverride?: number | null;
-  /** #246 Task 4 — set only for a loaded `source === "portal-service"` quote. */
+  /** #248 Task 4 — set only for a loaded `source === "portal-service"` quote. */
   portal?: PortalPanelData | null;
 };
 

@@ -53,7 +53,7 @@ export function RequestForm({
   requester: { name: string; email: string };
   showDetailsError: boolean;
   showSubmitError: boolean;
-  /** #246 Task 3: "Request a repair" and other pre-linked entry points carry
+  /** #248 Task 3: "Request a repair" and other pre-linked entry points carry
    *  `?service=&venue=`. `initialVenueId` is already validated as this
    *  customer's own venue (or "") by the page; an unrecognized `initialService`
    *  falls back to the first SERVICES option, same as no override at all. */

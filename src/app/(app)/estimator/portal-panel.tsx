@@ -7,9 +7,9 @@ import { PURCHASE_METHOD_LABEL } from "@/lib/portal-quote-mode";
 import type { PortalPanelData } from "./types";
 
 /**
- * Staff Portal panel (#245 Task 13, spec §5; generalized #246 Task 4, spec
+ * Staff Portal panel (#245 Task 13, spec §5; generalized #248 Task 4, spec
  * §5) — rendered at the top of a builder for a loaded portal-generated
- * quote: the Estimator (`source === "portal-catalog"`) and, since #246, the
+ * quote: the Estimator (`source === "portal-catalog"`) and, since #248, the
  * flame-test and inspection quote builders (`source === "portal-service"`).
  * A review banner listing every price-on-request line (portal-catalog
  * only — a service quote is never price-on-request), the customer's
@@ -53,7 +53,7 @@ export function PortalPanel({
 }: {
   data: PortalPanelData;
   statusError?: string | null;
-  /** #246 Task 4: when supplied, Approve calls this instead of submitting
+  /** #248 Task 4: when supplied, Approve calls this instead of submitting
    *  the default `setQuoteStatus` form — the flame/inspection builders' own
    *  engine-owned approve step (persist + won + spawn). */
   onApprove?: () => void;

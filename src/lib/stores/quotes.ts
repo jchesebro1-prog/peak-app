@@ -430,7 +430,7 @@ type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "porta
 /** Customer portal list rule: the grant's customer's published quotes plus
  *  their own self-serve drafts (the retired estimate builder's
  *  "portal-self-serve" and #245's "portal-catalog" review quotes) — never an
- *  internal draft, never imported Daylite history. #246 Task 4 (carried from
+ *  internal draft, never imported Daylite history. #248 Task 4 (carried from
  *  Task 2 review): a "portal-service" DRAFT is deliberately NOT listed —
  *  service quotes are never review quotes (Generate always sends them at
  *  once, firm), so the only way one is ever in draft is a staff recall

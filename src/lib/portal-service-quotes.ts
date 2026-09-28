@@ -1,5 +1,5 @@
 // SERVER ONLY — Generate: a portal service request (flame test / inspection)
-// becomes a real, firm quote (#246 Task 2, spec §3). Twin of #245's
+// becomes a real, firm quote (#248 Task 2, spec §3). Twin of #245's
 // generatePortalQuote (src/lib/portal-quotes.ts) for the service side: same
 // "use server" boundary (nothing here takes a customer id, a venue's owner
 // or a price from the browser — the caller's cookie-reading wrapper passes
@@ -45,7 +45,7 @@ function venueLabel(cust: CustomerDoc | null, venueId: string): string {
 }
 
 /**
- * "Quote again" (#246 Task 3, spec §1, §3): the flame/inspection quote's own
+ * "Quote again" (#248 Task 3, spec §1, §3): the flame/inspection quote's own
  * saved scope, as a `ServiceRequest` the `/portal/service` form can pre-fill
  * from — or null when the id doesn't resolve, isn't LISTED for this customer
  * (`portalListsQuote` — tenant scoping, hides internal-only drafts), or isn't
@@ -80,7 +80,7 @@ const inFlight = new Set<string>();
 
 /**
  * Generate a firm flame-test or inspection quote from the portal's scope
- * intake (#246 Task 2, spec §3). Guards → price → create → send, in that
+ * intake (#248 Task 2, spec §3). Guards → price → create → send, in that
  * order: a refusal (expired session, bad venues/counts, a venue that isn't
  * this customer's own) never spends a Generate token and never makes a
  * quote — only a request that actually prices does. `schedulePdf: false`

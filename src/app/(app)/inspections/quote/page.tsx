@@ -189,7 +189,7 @@ export default async function InspectionQuotePage({
       savedNumber: displayQuoteNumber(editQuote),
       status: editQuote.status,
       replaces: "",
-      // #246 Task 4 (spec §5): the staff Portal panel — present only for a
+      // #248 Task 4 (spec §5): the staff Portal panel — present only for a
       // portal-service quote. No price-on-request review here (service
       // pricing is never price-on-request), so portalReview/porItems are
       // always empty/null.

@@ -14,7 +14,7 @@
 
 - Worktree `/Users/sm/Downloads/peak-app/.claude/worktrees/portal-service`, branch `feat/portal-service`. `npm ci` once if `node_modules` is absent (never symlink); copy `.env.local` + `next-env.d.ts` from the main checkout if absent. `export PATH="$HOME/.local/node/bin:$PATH"`.
 - Never open `.data/pglite`; never run two DB processes; never leave `tsx`/`next dev` running; **never `git stash`** (commit `wip(...)` instead).
-- Punch **#246** (recompute before docs). Test messages prefixed `#246`; aliases `d246…`; async checks `portal246XxxAsyncChecks` chained directly above `  // Before the report and before the \`.catch\``; fixtures `fixtureId(246, "slug")` + `registerFixture(coll, id)`.
+- Punch **#248** (recompute before docs). Test messages prefixed `#248`; aliases `d246…`; async checks `portal248XxxAsyncChecks` chained directly above `  // Before the report and before the \`.catch\``; fixtures `fixtureId(248, "slug")` + `registerFixture(coll, id)`.
 - Server-action files export only cookie-reading wrappers (`portalSession()`); session-taking bodies live in `src/lib/` (the #245 pattern, e.g. `src/lib/portal-cart-actions.ts`, `src/lib/portal-quotes.ts`).
 - Customers never receive rates, hours, margin, tier name, cost, travel mode/crew/airfare. Customer views are explicit whitelists (never spread).
 - Verbatim copy: "All quotes are subject to Peak review and approval." · "Plus applicable sales tax." · "Your access link has expired — open the link we sent you again." · "Pick at least one venue." · "Enter the number of curtains (1–200)." · "Enter the number of line sets (1–300)."
@@ -44,7 +44,7 @@ export function serviceRequestProblem(req: unknown, venueIds: Set<string>): stri
 - [ ] Read both builders' `persist()` and `src/lib/renewal-outreach.ts` `ensureFlameRenewalQuote` / `ensureInspectionRenewalQuote` (scope sources, `coordsOf`, office via `quoteOrigin`, `getTravelRates`, rates blobs). Read `flame-jobs.ts` `renewals` and `inspections.ts` `renewals` for "latest completed per venue (+level)".
 - [ ] Write failing tests: `pickScopeCount` order; `serviceRequestProblem` (empty venues, foreign venue id, non-integer / 0 / 201 curtains, 301 line sets, bad level) with verbatim copy; DB: a customer with a completed flame job (curtains 12) and a later quote (curtains 14) → scope count 12 source "job"; inspection scope is level-specific; **parity**: for the same customer/venues/counts, `priceServiceRequest(...).total` equals what the builder engine returns via the builder's own input path at the same tier margin; `JSON.stringify(view)` has no `margin`/`rate`/`hours`/`cost`/`crew`/`airfare`/`tier` keys.
 - [ ] Implement. Prefer extracting the builders' venue-input step into `service-quote-inputs.ts` and calling it from both builders and `priceServiceRequest` (no behavior change for builders — their existing tests must still pass). Customer view: per-venue lines use the engine's per-venue sell where it exists (flame `perVenue`); where the engine has no per-venue sell (inspection), print one line "Annual rigging inspection — N line sets across M venues" style and the total; travel line = the engine's travel sell portion if separable, else fold travel into lines and set `travel` = 0 — document the choice.
-- [ ] Gates; commit `feat(portal): service quote scope pre-fill + builder-identical pricing (#246)`.
+- [ ] Gates; commit `feat(portal): service quote scope pre-fill + builder-identical pricing (#248)`.
 
 ### Task 2: Generate, refresh, accept/decline widening
 
@@ -54,7 +54,7 @@ export function serviceRequestProblem(req: unknown, venueIds: Set<string>): stri
 
 - [ ] Failing DB tests: generate flame (2 venues) → `status "sent"`, `quoteType "flame_test"`, `source "portal-service"`, FLM estimate number, `portalFirm.validUntil` = +30 d, `flameTest` subdoc venues/curtains saved, owner = company owner or ""; inspection L2 → `inspection.level === 2`, RIG number; preview (`grantId "preview"`) refused; expired grant copy; rate limit 10/h; refresh an expired portal-service quote at a changed rate → new value, new revision, portal PDF source points at newest sent revision; decline works on an accepted portal-service quote; accept path unchanged (`canAcceptPortal`).
 - [ ] Implement: follow `generatePortalQuote` (create → schedule PDF → `sendPortalFirm`; once created, report success even if a later step fails; in-flight guard). Name: "Flame test — <venue labels joined by ', '>" / "Inspection (Annual|Five-year) — …" (truncate to 120 chars). Letter PDF (flame/inspection letter templates via `src/lib/quote-pdf/quote-document-data.ts` or the letter data module — find where letters build their lines): for `source === "portal-service"` add the standing review line, "Plus applicable sales tax.", and "Valid until <Month D, YYYY>" when `portalFirm`.
-- [ ] Gates; commit `feat(portal): generate firm flame/inspection quotes; refresh + decline cover portal service quotes (#246)`.
+- [ ] Gates; commit `feat(portal): generate firm flame/inspection quotes; refresh + decline cover portal service quotes (#248)`.
 
 ### Task 3: Portal UI — `/portal/service`, entry points, repair request prefill
 
@@ -63,7 +63,7 @@ export function serviceRequestProblem(req: unknown, venueIds: Set<string>): stri
 - [ ] Page per spec §2: `resolvePortalViewer(preview)`; signed-out → the shared signed-out card; service picker (URL `?type=flame|inspection&level=1|2&venue=`), venue checklist with pre-filled counts + source hint, debounced live price (server action re-validates everything; rate-limited), standing lines, Generate (disabled with reason; preview read-only) → redirect `/portal?generated=firm&q=<id>`.
 - [ ] Entry points per spec §1. "Quote again" pre-fills the form from the quote's scope (`?from=<quoteId>`; the page loads that quote only if `portalListsQuote(q, cid)` and it's `portal-service` or a flame/inspection quote of this customer).
 - [ ] Tests: harness checks for any pure helpers (URL param parsing → PortalService); smoke GETs `/portal/service`, `/portal/service?type=inspection&level=2`.
-- [ ] Gates incl. build + smoke; commit `feat(portal): /portal/service — pick venues, see the price, generate; entry points on the compliance card; repair requests pre-filled (#246)`.
+- [ ] Gates incl. build + smoke; commit `feat(portal): /portal/service — pick venues, see the price, generate; entry points on the compliance card; repair requests pre-filled (#248)`.
 
 ### Task 4: Staff side
 
@@ -71,9 +71,9 @@ export function serviceRequestProblem(req: unknown, venueIds: Set<string>): stri
 
 - [ ] Failing tests: builder `persist` on a loaded `portal-service` quote keeps the source (DB check through the lib-level body, or a pure `sourceForSave(prior, fallback)` helper used by the three builders + Estimator); bell "New portal quotes" and hub badge include `portal-service`; Approve from the flame builder panel → won + flame job spawned (the builder's approve action path).
 - [ ] Implement; the panel's Decline reuses `declinePortalAcceptanceAction`.
-- [ ] Gates incl. build; commit `feat(portal): staff Portal panel on flame/inspection builders; portal service quotes keep their source; badge/bell/company counts (#246)`.
+- [ ] Gates incl. build; commit `feat(portal): staff Portal panel on flame/inspection builders; portal service quotes keep their source; badge/bell/company counts (#248)`.
 
 ### Task 5: Docs
 
-- [ ] Recompute next free D/punch numbers from `origin/main`. DECISIONS (one entry per pick in the spec + build deviations from reports), PUNCHLIST #246 (what shipped, Jeff-gated: try with a real grant; check a multi-venue flame quote against the builder; follow-ups: repair pricing library, scheduling requests), AGENTS.md phase item 20, update PUNCHLIST #245 follow-up line to point at #246.
-- [ ] Commit `docs: portal service quotes — punch #246, D4xx–D4yy`.
+- [ ] Recompute next free D/punch numbers from `origin/main`. DECISIONS (one entry per pick in the spec + build deviations from reports), PUNCHLIST #248 (what shipped, Jeff-gated: try with a real grant; check a multi-venue flame quote against the builder; follow-ups: repair pricing library, scheduling requests), AGENTS.md phase item 20, update PUNCHLIST #245 follow-up line to point at #248.
+- [ ] Commit `docs: portal service quotes — punch #248, D4xx–D4yy`.

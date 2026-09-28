@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 /**
- * Portal SERVICE — `/portal/service` (#246 Task 3, spec §2). The self-serve
+ * Portal SERVICE — `/portal/service` (#248 Task 3, spec §2). The self-serve
  * flame-test / rigging-inspection intake: pick a service, tick venues (each
  * pre-filled from history), see the builder-identical live price, Generate a
  * firm, numbered quote. Entry points (spec §1) land here via

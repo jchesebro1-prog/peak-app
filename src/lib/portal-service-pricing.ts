@@ -9,7 +9,7 @@ import { travelLineShare } from "@/lib/service-pricing";
 import type { PortalService } from "@/lib/portal-service-scope";
 
 /**
- * Portal service quotes (#246 Task 1) — builder-identical pricing: the same
+ * Portal service quotes (#248 Task 1) — builder-identical pricing: the same
  * engine math the flame-test / inspection quote builders run
  * (src/app/(app)/flame-tests/quote/actions.ts,
  * src/app/(app)/inspections/quote/actions.ts persist()), reusing the shared
@@ -68,7 +68,7 @@ function isValidService(s: unknown): s is PortalService {
 }
 
 /**
- * Pure validation, verbatim copy (#246 global constraints): an empty/foreign
+ * Pure validation, verbatim copy (#248 global constraints): an empty/foreign
  * venue list, or any listed venue id the caller doesn't own → "Pick at least
  * one venue."; an out-of-range or non-integer count → the service's exact
  * range copy. `venueIds` is the caller's own venues — callers pass the
@@ -114,7 +114,7 @@ function splitProportional(rest: number, weights: number[]): number[] {
 /**
  * Builder-identical pricing for a portal service request: resolves the
  * customer's tier margin exactly like the builders' `persist()` (no
- * overrides of any kind — #246 controller decision), builds engine inputs
+ * overrides of any kind — #248 controller decision), builds engine inputs
  * through the shared service-quote-inputs helpers, prices with the live
  * engine + rates, and returns a sell-only customer view alongside the
  * subdoc a builder save would write (owned by later tasks — this task

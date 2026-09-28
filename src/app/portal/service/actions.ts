@@ -9,7 +9,7 @@ import { generateServiceQuote } from "@/lib/portal-service-quotes";
 import { rateLimit } from "@/lib/rate-limit";
 
 /**
- * Portal SERVICE actions (#246 Task 3, spec §2, §6). SECURITY: same shape as
+ * Portal SERVICE actions (#248 Task 3, spec §2, §6). SECURITY: same shape as
  * ../catalog/actions.ts — every export is a thin cookie-reading wrapper
  * around `portalSession()`; the session-taking bodies (`priceServiceRequest`,
  * `generateServiceQuote`) live in src/lib/ and never trust a client-posted

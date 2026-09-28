@@ -30,7 +30,7 @@ function longDate(ms: number): string {
 }
 
 /**
- * #245 (widened #246 Task 2) — what a portal-catalog OR portal-service quote
+ * #245 (widened #248 Task 2) — what a portal-catalog OR portal-service quote
  * adds to the document: the review + tax lines, "Valid until <date>" for a
  * firm generation, and (portal-catalog only, via `sections`) the freight row
  * with the venue's one-way miles when known ("Freight & delivery — 412 mi").

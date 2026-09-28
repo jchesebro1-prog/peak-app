@@ -164,7 +164,7 @@ const ROUTES = [
   "/portal/catalog/quote",
   "/portal/catalog/quote?preview=lakefront",
   "/portal?preview=lakefront&generated=firm&q=Q-0",
-  // #246 Task 3 — the service intake: signed out (no team-preview session
+  // #248 Task 3 — the service intake: signed out (no team-preview session
   // here, so it renders the signed-out card, same as /portal/catalog above).
   "/portal/service",
   "/portal/service?type=inspection&level=2",

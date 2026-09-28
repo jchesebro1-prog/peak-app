@@ -1,6 +1,6 @@
 /**
  * Portal shell nav items: Home · Catalog · Service · Quote (N) (#245 Task
- * 10; Service added #246 Task 3). Pure. A team preview (`previewCid`)
+ * 10; Service added #248 Task 3). Pure. A team preview (`previewCid`)
  * carries `?preview=` on Home, Catalog and Service, and shows the Quote item
  * disabled with no count — a preview never touches the customer's cart (the
  * service intake itself stays open in preview — it prices read-only, spec

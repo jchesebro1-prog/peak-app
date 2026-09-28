@@ -2,7 +2,7 @@ import type { PortalService } from "@/lib/portal-service-scope";
 import type { ServiceRequest } from "@/lib/portal-service-pricing";
 
 /**
- * `/portal/service` — pure, client-safe URL + quote-scope helpers (#246 Task
+ * `/portal/service` — pure, client-safe URL + quote-scope helpers (#248 Task
  * 3, spec §2). No server imports at runtime (the two `import type`s above are
  * erased at compile time), so this module is safe for both the server page
  * and the "use client" form to pull in, mirroring portal-catalog-view.ts's

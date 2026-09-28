@@ -347,7 +347,7 @@ export async function saveQuoteAction(
   // the customer's "in review" copy and every portal-only rule for good.
   // Every other quote keeps the prior unconditional "estimator" stamp.
   const prior = loadedId ? await get(loadedId) : null;
-  // #246 Task 4: source stamping goes through the shared sourceForSave —
+  // #248 Task 4: source stamping goes through the shared sourceForSave —
   // portal-catalog (the only portal source the Estimator ever loads; a
   // portal-service quote redirects to its own builder before reaching here)
   // keeps its source across this save exactly like before.

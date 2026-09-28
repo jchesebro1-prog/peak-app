@@ -69,7 +69,7 @@ export default async function PortalRequestPage({
   }));
   const err = one(sp.err);
 
-  // #246 Task 3: "Request a repair" (and any other pre-linked entry point)
+  // #248 Task 3: "Request a repair" (and any other pre-linked entry point)
   // pre-selects both the service and the venue — the venue only when it's
   // genuinely this customer's own (never trusted blind from the URL).
   const qService = one(sp.service);

@@ -53,7 +53,7 @@ export function looksLikeCardNumber(text: string): boolean {
   return false;
 }
 /**
- * #246 Task 4 (spec §5, the D416 pattern generalized) — a builder save must
+ * #248 Task 4 (spec §5, the D416 pattern generalized) — a builder save must
  * never reclassify a portal-generated quote away from its portal source:
  * once a quote is `portal-catalog` or `portal-service`, every later save (the
  * Estimator, the flame-test builder, the inspection builder) keeps that

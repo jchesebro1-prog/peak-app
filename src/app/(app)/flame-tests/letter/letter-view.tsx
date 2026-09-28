@@ -320,7 +320,7 @@ export async function FlameLetterView({ id }: { id: string }) {
   const priceSupport = renderField(settings.templates, "flame_proposal", "costTail", {});
   const signoffCta = renderField(settings.templates, "flame_proposal", "signoff", {});
 
-  // #246 Task 2 (spec §4): a portal-service quote (generated/refreshed from
+  // #248 Task 2 (spec §4): a portal-service quote (generated/refreshed from
   // the customer portal) prints the standing review + tax lines and, while
   // still firm, "Valid until <date>" — the same helper #245 uses for the
   // portal-catalog Estimator document, reused here with no sections (this

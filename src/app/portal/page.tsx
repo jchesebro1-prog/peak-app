@@ -150,7 +150,7 @@ function Chip({ c }: { c: { label: string; ink: string; soft: string; bd: string
   );
 }
 
-/** #246 Task 3: `/portal/service?type=&level=&venue=` for a compliance
+/** #248 Task 3: `/portal/service?type=&level=&venue=` for a compliance
  *  chip's "Quote it" link — carries `?preview=` for a team preview (the
  *  service page itself renders read-only in preview, same as the catalog). */
 function serviceHref(type: "flame" | "inspection", level: 1 | 2 | undefined, venueId: string, previewCid: string): string {
@@ -329,7 +329,7 @@ export default async function PortalPage({
 
   const quoteRow = (q: (typeof published)[number]) => {
     const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
-    // #246 Task 3: "Quote again" replaces "Copy to new quote" for any listed
+    // #248 Task 3: "Quote again" replaces "Copy to new quote" for any listed
     // flame_test/inspection quote of this customer, any source (spec §1, §3)
     // — /portal/service?from=<id> re-checks portalListsQuote itself.
     const isServiceQuote = q.quoteType === "flame_test" || q.quoteType === "inspection";

@@ -368,7 +368,7 @@ type ServiceSubdocVenue = { id?: string | null; curtains?: number; lineSets?: nu
 type ServiceSubdocLike = { level?: number | string; venues?: ServiceSubdocVenue[] };
 
 /**
- * Refresh an expired firm portal-service quote (#246 Task 2, spec §3): re-
+ * Refresh an expired firm portal-service quote (#248 Task 2, spec §3): re-
  * prices the STORED subdoc's own venues/counts (+ level, for an inspection)
  * through `priceServiceRequest` at today's rates — using the quote's own
  * `customerId`/`contactName`, not the caller's session, so the refreshed

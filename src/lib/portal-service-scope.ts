@@ -8,7 +8,7 @@ import {
 import { getAll as getAllQuotes, type Quote } from "@/lib/stores/quotes";
 
 /**
- * Portal service quotes (#246 Task 1) — scope pre-fill: each of the
+ * Portal service quotes (#248 Task 1) — scope pre-fill: each of the
  * customer's venues gets a curtain/line-set count guessed from its history,
  * in the renewal-outreach source order (src/lib/renewal-outreach.ts
  * ensureFlameRenewalQuote / ensureInspectionRenewalQuote): the venue's latest

@@ -1,6 +1,6 @@
 # Portal service quotes — customers get firm flame-test and inspection quotes themselves
 
-Date: 2026-09-28 · Branch `feat/portal-service` (off `origin/main` fd50ef40) · Punch **#246** (proposed —
+Date: 2026-09-28 · Branch `feat/portal-service` (off `origin/main` fd50ef40) · Punch **#248** (proposed —
 recompute from `origin/main` right before writing docs).
 
 Follow-up named in PUNCHLIST #245 ("Self-serve service quotes — a separate spec, reuses this build's firm/review

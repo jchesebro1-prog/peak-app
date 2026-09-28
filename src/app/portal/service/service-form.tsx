@@ -8,7 +8,7 @@ import type { ServiceCustomerView } from "@/lib/portal-service-pricing";
 import { generateServiceAction, priceServiceAction } from "./actions";
 
 /**
- * The `/portal/service` intake (#246 Task 3, spec §2). Service is URL state
+ * The `/portal/service` intake (#248 Task 3, spec §2). Service is URL state
  * (the three pills are plain links — switching service re-renders the page
  * server-side with a fresh scope, since pre-filled counts come from a
  * different history per service/level); venue ticks and counts are local
@@ -17,7 +17,7 @@ import { generateServiceAction, priceServiceAction } from "./actions";
  * `generateServiceAction`, which redirects to the #245 `/portal` banner on
  * success — only a refusal ever comes back here.
  *
- * Verbatim copy (#246 global constraints) is duplicated as local constants
+ * Verbatim copy (#248 global constraints) is duplicated as local constants
  * rather than imported — a "use client" module can't pull named values out
  * of a module that (transitively) touches the DB, only types (see
  * ../catalog/quote/cart-client.tsx's REVIEW_LINE/TAX_LINE for the same

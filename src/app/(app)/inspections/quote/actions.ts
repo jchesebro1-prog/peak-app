@@ -158,7 +158,7 @@ async function persist(formData: FormData): Promise<string | null> {
     margin: r.effectiveMargin,
     pricingTier: tier.tier,
     tierMargin: tier.margin,
-    // #246 Task 4 (spec §5): a portal-generated quote (source
+    // #248 Task 4 (spec §5): a portal-generated quote (source
     // "portal-service") keeps that source across a staff save — the same
     // rule the Estimator applies to portal-catalog (D416).
     source: sourceForSave(existingForMarker?.source, "inspection"),

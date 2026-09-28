@@ -145,7 +145,7 @@ export default async function CustomerDetailPage({
   const custQuotes = quotes.filter((qt) =>
     qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name
   );
-  /* #245 (spec §5) — "Portal activity" line under PortalAccessCard. #246
+  /* #245 (spec §5) — "Portal activity" line under PortalAccessCard. #248
      Task 4: widened to portal-service (the customer's own flame/inspection
      quote intake) alongside portal-catalog. */
   const portalQuotes = custQuotes.filter(
