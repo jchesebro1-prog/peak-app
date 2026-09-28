@@ -10653,6 +10653,7 @@ seeded()
   .then(() => specRecordsImportFixRound1AsyncChecks())
   .then(() => specRecordMatchAsyncChecks())
   .then(() => specRecordsBomSeamAsyncChecks())
+  .then(() => sixthLevelJobValuesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -15414,9 +15415,9 @@ async function deletePartBAsyncChecks(): Promise<void> {
   const blank = parseOutline("One\n\n\n  Two\n   \n");
   ok(blank.lines.length === 2, "outline: blank and whitespace-only lines are ignored");
 
-  const deep = parseOutline("1\n  2\n    3\n      4\n        5\n          6");
-  ok(deep.lines.length === 6, "outline: every line still prints when clamped");
-  ok(deep.lines[5].depth === MAX_OUTLINE_DEPTH - 1, "outline: depth beyond the fifth level clamps to the fifth");
+  const deep = parseOutline("1\n  2\n    3\n      4\n        5\n          6\n            7");
+  ok(deep.lines.length === 7, "outline: every line still prints when clamped");
+  ok(deep.lines[6].depth === MAX_OUTLINE_DEPTH - 1, "outline: depth beyond the sixth level clamps to the sixth");
   ok(deep.warnings.some((w) => w.includes("deeper")), "outline: clamping raises a warning");
 
   const jump = parseOutline("One\n      Way too deep");
@@ -15482,7 +15483,7 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(rendered.lines[1].depth === rendered.lines[2].depth, "outline: renderBody keeps an expanded list flat");
   ok(rendered.warnings.length === 0, "outline: a clean body renders without warnings");
 
-  const both = renderBody("See {{project.architect}}\n1\n  2\n    3\n      4\n        5\n          6", {});
+  const both = renderBody("See {{project.architect}}\n1\n  2\n    3\n      4\n        5\n          6\n            7", {});
   ok(both.warnings.some((w) => w.includes("project.architect")), "outline: renderBody keeps the substitution's warnings");
   ok(both.warnings.some((w) => w.includes("deeper")), "outline: renderBody keeps the parser's warnings too");
 
@@ -32728,4 +32729,24 @@ async function specRecordsBomSeamAsyncChecks(): Promise<void> {
     !builderSrc.includes("specRowKey(") && /\.rowKey\b/.test(builderSrc),
     "bom seam: builder.tsx never calls specRowKey( itself — it reads the server-computed SpecProductRow.rowKey"
   );
+}
+
+/* ---- Sixth outline level + [bracket] job values (design §4, Task 6) ----
+ * Pure — no DB — but wired as a named async function per HARNESS PATTERN
+ * (this file's esbuild/cjs output refuses bare top-level await). */
+async function sixthLevelJobValuesAsyncChecks(): Promise<void> {
+  const O = await import("@/lib/specs/outline");
+  const J = await import("@/lib/specs/record-fill-ins");
+  const deep = "L0\n  L1\n    L2\n      L3\n        L4";
+  const r = O.parseOutline(deep, "entry");
+  ok(r.lines.map((l) => l.label).join(" ") === "1. a. 1) a) (1)" && r.warnings.length === 0, "outline: entry context reaches a sixth level (1) without clamping");
+  const docx = readFileSync(join(process.cwd(), "src/lib/specs/spec-docx.ts"), "utf8");
+  ok(docx.includes('text: "(%8)"') && docx.includes("level: 7"), "spec-docx: Word list has level 7 (%8)");
+  const t = "Supply [1] transporter.\nWidth: [12] feet. Must [FILL IN: days] days. Color [Cream, Ivory].";
+  const slots = J.jobValueSlots("PS-1", t);
+  ok(slots.length === 3 && slots[0].key === "PS-1#1" && slots[1].defaultText === "12" && slots[2].defaultText === "Cream, Ivory", "job values: [brackets] are slots, [FILL IN:] is not");
+  ok(J.applyJobValues(t, "PS-1", { "PS-1#2": " 14 " }, { "PS-1#2": "12" }).includes("Width: 14 feet.") && J.applyJobValues(t, "PS-1", {}).includes("[1]"), "job values: answered replaces, unanswered prints as written");
+  ok(J.applyJobValues(t, "PS-1", { "PS-1#2": "14" }, { "PS-1#2": "99" }).includes("[12]"), "job values: label mismatch never lands in the wrong bracket");
+  ok(J.staleJobValueKeys(new Map([["PS-1", slots]]), { "PS-1#9": "x", "PS-1#2": "14" }, { "PS-1#2": "12" }).join() === "PS-1#9", "job values: stale = key gone or label mismatch");
+  ok(J.jobValueSegments("a [1] b").filter((s) => s.bracket).length === 1, "job values: segments for highlighting");
 }

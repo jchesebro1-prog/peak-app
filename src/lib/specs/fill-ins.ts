@@ -38,7 +38,7 @@ export function fillInLabelKey(label: string): string {
 }
 
 /** The last few words before `at` on the same line, other blanks shown as "…". */
-function contextBefore(body: string, at: number): string {
+export function contextBefore(body: string, at: number): string {
   const lineStart = body.lastIndexOf("\n", at - 1) + 1;
   const words = body
     .slice(lineStart, at)

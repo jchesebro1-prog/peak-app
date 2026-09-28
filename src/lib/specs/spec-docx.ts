@@ -79,9 +79,10 @@ const LEVELS: ILevelsOptions[] = [
   { level: 4, format: LevelFormat.LOWER_LETTER, text: "%5.", alignment: AlignmentType.LEFT, suffix: LevelSuffix.TAB, style: { paragraph: indent(2880) } },
   { level: 5, format: LevelFormat.DECIMAL, text: "%6)", alignment: AlignmentType.LEFT, suffix: LevelSuffix.TAB, style: { paragraph: indent(3600) } },
   { level: 6, format: LevelFormat.LOWER_LETTER, text: "%7)", alignment: AlignmentType.LEFT, suffix: LevelSuffix.TAB, style: { paragraph: indent(4320) } },
+  { level: 7, format: LevelFormat.DECIMAL, text: "(%8)", alignment: AlignmentType.LEFT, suffix: LevelSuffix.TAB, style: { paragraph: indent(5040) } },
 ];
 
-const numbered = (level: number) => ({ reference: REF, level: Math.min(6, Math.max(0, level)), instance: INSTANCE });
+const numbered = (level: number) => ({ reference: REF, level: Math.min(7, Math.max(0, level)), instance: INSTANCE });
 /** In a STYLE, `custom` stops docx writing `pStyle ListParagraph` into the style's own pPr (invalid there). */
 const styleNumbered = (level: number) => ({ ...numbered(level), custom: true });
 

@@ -12,7 +12,7 @@
  * action, and what makes every rule below testable in the pure harness.
  */
 
-export const OUTLINE_LABELS = ["A.", "1.", "a.", "1)", "a)"] as const;
+export const OUTLINE_LABELS = ["A.", "1.", "a.", "1)", "a)", "(1)"] as const;
 export const MAX_OUTLINE_DEPTH = OUTLINE_LABELS.length;
 
 export type OutlineLine = { depth: number; label: string; text: string };
@@ -46,7 +46,7 @@ function alpha(n: number): string {
   return out;
 }
 
-/** Label for the n-th (1-based) item at a depth: A. / 1. / a. / 1) / a). */
+/** Label for the n-th (1-based) item at a depth: A. / 1. / a. / 1) / a) / (1). */
 export function outlineLabel(depth: number, n: number): string {
   switch (depth) {
     case 0:
@@ -57,8 +57,10 @@ export function outlineLabel(depth: number, n: number): string {
       return alpha(n).toLowerCase() + ".";
     case 3:
       return String(n) + ")";
-    default:
+    case 4:
       return alpha(n).toLowerCase() + ")";
+    default:
+      return "(" + n + ")";
   }
 }
 
