@@ -19,6 +19,7 @@ import {
   type QuickScopeInputs,
   type SysKey,
 } from "@/app/(app)/design/quick/engine";
+import { HOUSE_DEPTH_LIM, houseDims, houseWidthLim } from "@/lib/design/venue-templates/house-dims";
 
 /**
  * Shared venue/size/dimensions/systems-to-include config panel
@@ -189,6 +190,38 @@ export default function ScopeInputsPanel({
               <input type="range" min={LIM[d.field][0]} max={LIM[d.field][1]} step={2} value={value[d.field]} onChange={(e) => setDimVal(d.field, e.target.value)} style={{ width: "100%", accentColor: accentHex, cursor: "pointer" }} />
             </div>
           ))}
+          {venue.kind === "proscenium" &&
+            (() => {
+              // #247: the house the template stretches to — shown as the value in use (typed, or the default).
+              const h = houseDims(value);
+              const rows: Array<{ key: "houseWidthFt" | "houseDepthFt"; label: string; note: string; v: number; lim: [number, number] }> = [
+                { key: "houseWidthFt", label: "House width", note: "Inside walls, at the back of the house", v: Math.round(h.widthFt), lim: houseWidthLim(value) },
+                { key: "houseDepthFt", label: "House depth", note: "Plaster line to back wall", v: Math.round(h.depthFt), lim: HOUSE_DEPTH_LIM },
+              ];
+              const setHouse = (key: "houseWidthFt" | "houseDepthFt", n: number, lim: [number, number]) =>
+                update({ [key]: clamp(Math.round(n), lim[0], lim[1]) } as Partial<QuickScopeInputs>);
+              return (
+                <>
+                  {rows.map((r) => (
+                    <div key={r.key}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
+                          <div style={{ fontSize: 11, color: "#aab0bb" }}>{r.note}</div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                          <button onClick={() => setHouse(r.key, r.v - 2, r.lim)} style={stepBtn}>–</button>
+                          <span style={{ fontFamily: MONO, fontSize: 14.5, fontWeight: 600, minWidth: 52, textAlign: "center" }}>{r.v} ft</span>
+                          <button onClick={() => setHouse(r.key, r.v + 2, r.lim)} style={stepBtn}>+</button>
+                        </div>
+                      </div>
+                      <input type="range" min={r.lim[0]} max={r.lim[1]} step={2} value={r.v} onChange={(e) => setHouse(r.key, Number(e.target.value), r.lim)} style={{ width: "100%", accentColor: accentHex, cursor: "pointer" }} />
+                    </div>
+                  ))}
+                  {h.warning && <div style={{ fontSize: 11, color: "#b4543a", lineHeight: 1.4 }}>{h.warning}</div>}
+                </>
+              );
+            })()}
         </div>
       )}
 

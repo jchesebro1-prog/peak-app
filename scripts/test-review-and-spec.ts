@@ -30507,3 +30507,28 @@ import { defaultAState as vt247bDefault } from "@/app/(app)/design/quick/engine"
   const regionBottom = (name: string) => Math.max(...G.regions[name].map((p) => p.y));
   ok(["Booth", "Electrical Room", "MISC Rooms"].every((name) => { const l = G.labels.find((x) => x.text === name)!; return l.y + l.h < regionBottom(name); }), "#247 T3: room labels sit on the drawing's own baseline, clear of the room's bottom wall");
 }
+
+/* --- #247 T4: Quick Design — house walls drag, doors gone for proscenium --- */
+import { buildPlan as vt247cBuild, currentDoors as vt247cDoors, houseDragPatch as vt247cDrag, prosGeom as vt247cGeom } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as vt247cDefault } from "@/app/(app)/design/quick/engine";
+{
+  const a = { ...vt247cDefault(0), venue: "school", width: 50, depth: 30, wing: 15 };
+  const G = vt247cGeom(a);
+  const plan = vt247cBuild(a, 8, 3, "#3a3f4a");
+  const hs = plan.handles || [];
+  const side = (s: "L" | "R" | "B") => hs.find((h) => h.side === s)!;
+  ok(hs.length === 3 && hs.filter((h) => h.shape === "wall").length === 2 && side("B")?.shape === "backWall" && !hs.some((h) => h.type === "door") && !plan.hasDoors, "#247 T4: a proscenium plan offers two side-wall handles and a back-wall handle, and no doors");
+  const zero = { sx: 0, sy: 0 };
+  ok(vt247cDrag(a, side("R"), { ...zero, dx: 5 * G.ppf, dy: 0 })?.houseWidthFt === 90 && vt247cDrag(a, side("L"), { ...zero, dx: -5 * G.ppf, dy: 0 })?.houseWidthFt === 90, "#247 T4: dragging either side wall out 5' widens the house 10', in whole feet");
+  ok(vt247cDrag(a, side("B"), { ...zero, dx: 0, dy: 12 * G.ppf })?.houseDepthFt === Math.round((9 + 817.103) / 12 + 12), "#247 T4: dragging the back wall down 12' deepens the house 12'");
+  ok(vt247cDrag(a, side("R"), { ...zero, dx: 1e6, dy: 0 })?.houseWidthFt === 200 && vt247cDrag(a, side("B"), { ...zero, dx: 0, dy: -1e6 })?.houseDepthFt === 40, "#247 T4: the drag respects the same limits as the typed fields");
+  const d = vt247cDoors(a);
+  ok(d.doorsL.length === 0 && d.doorsR.length === 0 && d.doorsBack.length === 0, "#247 T4: a proscenium room has no doors to add or remove");
+  const ch = { ...a, venue: "church" };
+  const door = (vt247cBuild(ch, 8, 3, "#3a3f4a").handles || []).find((h) => h.type === "door")!;
+  ok(!!door && !!vt247cDrag(ch, door, { sx: 300, sy: 200, dx: 0, dy: 0 }), "#247 T4: church doors still drag");
+  const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
+  const sip = readFileSync(join(process.cwd(), "src/components/design/scope-inputs-panel.tsx"), "utf8");
+  ok(qd.includes("plan.hasDoors") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#247 T4: Quick Design shows door buttons only where the plan has doors, and Reset house clears the house size");
+  ok(sip.includes("House width") && sip.includes("House depth") && sip.includes("houseDims(") && sip.includes("h.warning"), "#247 T4: the dimension panel shows house width, house depth and the narrow-house warning");
+}

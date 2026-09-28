@@ -457,11 +457,11 @@ export default function QuickDesignClient({
     cur.splice(idx, 1);
     updA({ [key]: cur } as Partial<AState>);
   };
-  const resetHouse = () => updA({ houseHalfFt: null, doorsL: null, doorsR: null, doorsBack: null });
+  const resetHouse = () => updA({ houseHalfFt: null, houseWidthFt: null, houseDepthFt: null, doorsL: null, doorsR: null, doorsBack: null });
 
-  // The wall/door drag maps the ABSOLUTE pointer position onto the plan
-  // geometry (port of the prototype's 'house' drag), so the handlers can
-  // safely close over the drag-start state: cx/ppf/bounds don't move.
+  // #247: proscenium walls drag RELATIVE to where the drag began (the canvas
+  // rescales as the house grows); church doors keep the prototype's absolute
+  // mapping. Deltas convert at the drag-start scale (the SVG is width:100%).
   const dragCleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => dragCleanup.current?.(), []);
   const onHandleDown = (hd: PlanHandle, e: ReactPointerEvent<SVGGElement>) => {
@@ -472,12 +472,18 @@ export default function QuickDesignClient({
     const s = a;
     const kind = venueOf(s).kind;
     const G = kind === "church" ? churchGeom(s) : prosGeom(s);
+    const r0 = svg.getBoundingClientRect();
+    const k = r0.width ? G.W / r0.width : 1;
+    const x0 = e.clientX, y0 = e.clientY;
     const move = (ev: globalThis.PointerEvent) => {
       const r = svg.getBoundingClientRect();
       if (!r.width || !r.height) return;
-      const sx = ((ev.clientX - r.left) / r.width) * G.W;
-      const sy = ((ev.clientY - r.top) / r.height) * G.H;
-      const patch = houseDragPatch(s, hd, sx, sy);
+      const patch = houseDragPatch(s, hd, {
+        sx: ((ev.clientX - r.left) / r.width) * G.W,
+        sy: ((ev.clientY - r.top) / r.height) * G.H,
+        dx: (ev.clientX - x0) * k,
+        dy: (ev.clientY - y0) * k,
+      });
       if (patch) setA((prev) => ({ ...prev, ...patch }));
     };
     const up = () => {
@@ -904,12 +910,18 @@ export default function QuickDesignClient({
                   <div style={{ background: "#fbfbfc", border: "1px solid #f0f1f4", borderRadius: 12, padding: 18 }}>
                     {plan.isHouse && (
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 14, paddingBottom: 13, borderBottom: "1px solid #f0f1f4" }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginRight: 2 }}>Doors</span>
-                        <button onClick={() => addDoor("doorsL")} style={doorBtn}>+ Left wall</button>
-                        <button onClick={() => addDoor("doorsR")} style={doorBtn}>+ Right wall</button>
-                        <button onClick={() => addDoor("doorsBack")} style={doorBtn}>+ Rear wall</button>
+                        {plan.hasDoors ? (
+                          <>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginRight: 2 }}>Doors</span>
+                            <button onClick={() => addDoor("doorsL")} style={doorBtn}>+ Left wall</button>
+                            <button onClick={() => addDoor("doorsR")} style={doorBtn}>+ Right wall</button>
+                            <button onClick={() => addDoor("doorsBack")} style={doorBtn}>+ Rear wall</button>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#9aa0ab" }}>Drag the side or back wall to size the house</span>
+                        )}
                         <span style={{ flex: 1 }} />
-                        <button onClick={resetHouse} title="Reset walls & doors to defaults" style={ghostDoorBtn}>Reset house</button>
+                        <button onClick={resetHouse} title="Reset the house to its default size" style={ghostDoorBtn}>Reset house</button>
                       </div>
                     )}
                     <PlanSvg plan={plan} accent={accentHex} interactive onHandleDown={onHandleDown} onRemoveDoor={removeDoor} svgId="qd-autoplan-svg" />

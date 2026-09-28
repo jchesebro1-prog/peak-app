@@ -10,9 +10,8 @@
 
 import type * as React from "react";
 import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
-import { houseDims, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
+import { HOUSE_DEPTH_LIM, houseDims, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
 import { stretchProscenium } from "@/lib/design/venue-templates/proscenium";
-import { legacyProsGeom } from "@/lib/design/legacy-pros-geom";
 
 /* ------------------------------ primitive types ------------------------------ */
 
@@ -24,7 +23,7 @@ type PathEl = { d: string; fill: string; stroke?: string; sw?: number; dash?: st
 
 export type PlanHandle = {
   type: "wall" | "door";
-  side?: "L" | "R";
+  side?: "L" | "R" | "B";
   key?: "doorsL" | "doorsR" | "doorsBack";
   idx?: number;
   axis?: "x" | "y";
@@ -32,7 +31,7 @@ export type PlanHandle = {
   cy: number;
   rmX?: number;
   rmY?: number;
-  shape: "wall" | "door";
+  shape: "wall" | "backWall" | "door";
   removable?: boolean;
 };
 
@@ -48,6 +47,8 @@ export type PlanData = {
   legend?: Array<{ sw: React.CSSProperties; label: string }>;
   isHouse?: boolean;
   canSlideWalls?: boolean;
+  /** #247: the plan offers add/remove doors (church). */
+  hasDoors?: boolean;
 };
 
 type L = { rects: Rect[]; lines: LineEl[]; circles: CircleEl[]; texts: TextEl[]; paths: PathEl[] };
@@ -291,6 +292,11 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     rects.push({ x: R(bcx - cw / 2), y: R(bx.y + 6), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
     texts.push({ x: R(bcx), y: R(bx.y + bx.h - 6), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
+
+  // #247: drag handles — each side wall sets house width, the back wall house depth
+  handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
+  handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
+  handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
 
   // dimension lines — proscenium width + wings (top)
   const yWid = yTop - 26;
@@ -618,6 +624,7 @@ export function buildPlan(s: AState, lineSets: number, electrics: number, accent
   p.legend = legendFor(kind, s, electrics, accent);
   p.isHouse = kind === "proscenium" || kind === "church";
   p.canSlideWalls = kind === "proscenium";
+  p.hasDoors = kind === "church";
   return p;
 }
 
@@ -685,6 +692,12 @@ export function PlanSvg({
                   <rect x={hd.cx - 5.5} y={hd.cy - 15} width={11} height={30} rx={4} fill={accent} stroke="#fff" strokeWidth={1.6} />
                   <line x1={hd.cx - 2} y1={hd.cy - 4} x2={hd.cx - 2} y2={hd.cy + 4} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
                   <line x1={hd.cx + 2} y1={hd.cy - 4} x2={hd.cx + 2} y2={hd.cy + 4} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
+                </>
+              ) : hd.shape === "backWall" ? (
+                <>
+                  <rect x={hd.cx - 15} y={hd.cy - 5.5} width={30} height={11} rx={4} fill={accent} stroke="#fff" strokeWidth={1.6} />
+                  <line x1={hd.cx - 4} y1={hd.cy - 2} x2={hd.cx + 4} y2={hd.cy - 2} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
+                  <line x1={hd.cx - 4} y1={hd.cy + 2} x2={hd.cx + 4} y2={hd.cy + 2} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
                 </>
               ) : (
                 <>
@@ -774,69 +787,54 @@ export function renderPlanSvgMarkup(plan: PlanData, accent: string): string {
 
 /* --------------------- house drag math (auto plan) --------------------- */
 
+/** A drag's pointer: absolute viewBox position, and the viewBox delta since the drag began. */
+export type DragPos = { sx: number; sy: number; dx: number; dy: number };
+
 /**
- * Port of the prototype's _onPtrMove 'house' branch: converts a pointer
- * position (in SVG viewBox coords) into a state patch for the dragged
- * wall / door handle.
+ * Converts a wall / door drag into a state patch. Proscenium (#247): the side
+ * walls set house width (symmetric) and the back wall house depth, from the
+ * drag's DELTA at the drag-start scale — the canvas rescales as the house
+ * grows, so an absolute position would chase itself. Whole feet, clamped like
+ * the typed fields. Church: the prototype's absolute door drag.
  */
-export function houseDragPatch(
-  s: AState,
-  hd: PlanHandle,
-  sx: number,
-  sy: number
-): Partial<AState> | null {
+export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos): Partial<AState> | null {
   const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
   const kind = venue.kind || "proscenium";
-  if (kind !== "proscenium" && kind !== "church") return null;
-  if (hd.type === "wall") {
-    if (kind !== "proscenium") return null;
-    const G = legacyProsGeom(s);
-    const halfFt = clamp(Math.abs(G.cx - sx) / G.ppf, G.minHalfFt, G.maxHalfFt);
-    return { houseHalfFt: +halfFt.toFixed(2) };
-  }
-  if (hd.type === "door" && hd.key && hd.idx != null) {
-    const key = hd.key;
-    if (kind === "church") {
-      const G = churchGeom(s);
-      const arr = (Array.isArray(s[key]) ? (s[key] as number[]) : G[key] || []).slice();
-      if (hd.axis === "x") {
-        const lX = G.x0, rX = G.x1;
-        let frac = (sx - lX) / (rX - lX);
-        const fbl = (G.cx - G.boothW / 2 - lX) / (rX - lX) - 0.02;
-        const fbr = (G.cx + G.boothW / 2 - lX) / (rX - lX) + 0.02;
-        if (frac > fbl && frac < fbr) frac = sx < G.cx ? fbl : fbr;
-        arr[hd.idx] = +clamp(frac, 0.04, 0.96).toFixed(3);
-      } else {
-        const top = G.pBot + 26;
-        const bot = G.seatBot;
-        arr[hd.idx] = +clamp((sy - top) / (bot - top), 0.06, 0.94).toFixed(3);
-      }
-      return { [key]: arr } as Partial<AState>;
+  if (kind === "proscenium") {
+    if (hd.type !== "wall") return null;
+    const G = prosGeom(s);
+    if (hd.side === "B") {
+      const [lo, hi] = HOUSE_DEPTH_LIM;
+      return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };
     }
-    const G = legacyProsGeom(s);
-    const arr = (Array.isArray(s[key]) ? (s[key] as number[]) : G[key] || []).slice();
-    if (hd.axis === "x") {
-      const lX = G.xAudL, rX = G.xAudR;
-      let frac = (sx - lX) / (rX - lX);
-      const fbl = (G.cx - G.boothW / 2 - lX) / (rX - lX) - 0.02;
-      const fbr = (G.cx + G.boothW / 2 - lX) / (rX - lX) + 0.02;
-      if (frac > fbl && frac < fbr) frac = sx < G.cx ? fbl : fbr;
-      arr[hd.idx] = +clamp(frac, 0.04, 0.96).toFixed(3);
-    } else {
-      const top = G.yHouseFront;
-      const bot = G.yBackWall;
-      arr[hd.idx] = +clamp((sy - top) / (bot - top), 0.06, 0.94).toFixed(3);
-    }
-    return { [key]: arr } as Partial<AState>;
+    const [lo, hi] = houseWidthLim(s);
+    const dir = hd.side === "L" ? -1 : 1;
+    return { houseWidthFt: Math.round(clamp(G.dims.houseWidthFt + (2 * dir * pos.dx) / G.ppf, lo, hi)) };
   }
-  return null;
+  if (kind !== "church" || hd.type !== "door" || !hd.key || hd.idx == null) return null;
+  const key = hd.key;
+  const G = churchGeom(s);
+  const arr = (Array.isArray(s[key]) ? (s[key] as number[]) : G[key] || []).slice();
+  if (hd.axis === "x") {
+    const lX = G.x0, rX = G.x1;
+    let frac = (pos.sx - lX) / (rX - lX);
+    const fbl = (G.cx - G.boothW / 2 - lX) / (rX - lX) - 0.02;
+    const fbr = (G.cx + G.boothW / 2 - lX) / (rX - lX) + 0.02;
+    if (frac > fbl && frac < fbr) frac = pos.sx < G.cx ? fbl : fbr;
+    arr[hd.idx] = +clamp(frac, 0.04, 0.96).toFixed(3);
+  } else {
+    const top = G.pBot + 26;
+    const bot = G.seatBot;
+    arr[hd.idx] = +clamp((pos.sy - top) / (bot - top), 0.06, 0.94).toFixed(3);
+  }
+  return { [key]: arr } as Partial<AState>;
 }
 
-/** default door arrays for the current venue kind (used by add/remove door) */
+/** Door arrays for add/remove door — church only; a proscenium room's entrances are in its template (#247). */
 export function currentDoors(s: AState): { doorsL: number[]; doorsR: number[]; doorsBack: number[] } {
   const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
-  const kind = venue.kind || "proscenium";
-  const G = kind === "church" ? churchGeom(s) : legacyProsGeom(s);
+  if ((venue.kind || "proscenium") !== "church") return { doorsL: [], doorsR: [], doorsBack: [] };
+  const G = churchGeom(s);
   return { doorsL: G.doorsL.slice(), doorsR: G.doorsR.slice(), doorsBack: G.doorsBack.slice() };
 }
 
