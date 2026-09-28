@@ -10640,6 +10640,7 @@ seeded()
   .then(() => portal248Task4AsyncChecks())
   .then(() => portal248FinalFixAsyncChecks())
   .then(() => portal250AsyncChecks())
+  .then(() => portal250FixRound1AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -28164,6 +28165,10 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     const fr = await d245FreightFor(CO, null);
     ok(fr.unknown && fr.pct === 10 && fr.miles === null, "#245 freight: no venue → unknown distance at the cap");
 
+    // "FAB-1" is deliberately never registered as a catalog fabric in this
+    // fixture — under #250 this line exercises the unrecognized-fabric
+    // fallback (no indexed rate → prices on request, same as "not sure"),
+    // not a blanket "every curtain is POR" rule any more.
     const cart: D242Cart = {
       id: "TEST245:cart", customerId: CO, locationId: null, updatedAt: Date.now(),
       lines: [
@@ -28176,7 +28181,7 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     const partLine = p.lines.find((l) => l.lineId === "1")!;
     const curtain = p.lines.find((l) => l.lineId === "2")!;
     const gone = p.lines.find((l) => l.lineId === "3")!;
-    ok(p.mode === "review" && curtain.por && curtain.porReason === "curtain" && curtain.unitPrice === null, "#245 cart: a curtain line is price on request → review");
+    ok(p.mode === "review" && curtain.por && curtain.porReason === "curtain" && curtain.unitPrice === null, "#245 cart: a curtain naming an unrecognized fabric (FAB-1, never indexed) prices on request → review (#250 fallback)");
     ok(partLine.extPrice === Math.round(2 * partLine.unitPrice! * 100) / 100 && !partLine.por, "#245 cart: part extPrice = qty × server unit price");
     ok(gone.unavailable && gone.title === "No longer available" && gone.extPrice === null, "#245 cart: a hidden part reads No longer available");
     ok(p.freight.unknown && p.freight.pct === 10 && p.freight.miles === null, "#245 cart: no venue → freight at the cap, unknown");
@@ -28185,7 +28190,7 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     ok(!p.sections.some((s) => s.items.some((i) => i.sku === HIDE)) && p.sections.every((s) => s.freightPct === 10 && s.freightMiles === null),
       "#245 cart: staff sections skip unavailable lines and carry the freight % + miles");
     const drape = p.sections.find((s) => s.id === "SEC-DRAPE");
-    ok(!!drape && drape.items[0].sku === "CRT-REQ" && drape.items[0].por === true && drape.items[0].desc.includes("50% fullness"), "#245 cart: the curtain request lands as a POR drapery line for staff");
+    ok(!!drape && drape.items[0].sku === "CRT-REQ" && drape.items[0].por === true && drape.items[0].desc.includes("50% fullness"), "#245 cart: the curtain request (unrecognized fabric — #250 fallback) lands as a POR drapery line for staff");
     // Fixture assembly: light engine (IMG) + a required PLAIN ×2 + an optional HIDE add-on
     // (not quotable, so never offered) + an optional PLAIN-priced add-on the cart turns on.
     const FX = fixtureId(245, "fx");
@@ -31943,5 +31948,65 @@ async function portal250AsyncChecks(): Promise<void> {
     await P250.resetValue("curtains.sewingPct");
   } finally {
     await removeCustomer(CO250);
+  }
+}
+
+/* ======================================================================
+   #250 review fix round 1 — staff banner heading varies by which item
+   kinds remain (POR vs. portalConfirm curtain); the cart's review-reason
+   line never double-states "confirmed by Peak"; curtain live-pricing has
+   its own rate-limit budget, distinct from the fixture configurator's.
+   Registered in the async chain as portal250FixRound1AsyncChecks().
+   ====================================================================== */
+import { cartReviewReasonLine as d250ReasonLine, reviewBannerHeading as d250Heading } from "@/lib/portal-quote-mode";
+import { priceFixtureOptionsFor as d250PriceFixtureFor } from "@/lib/portal-part-detail";
+
+async function portal250FixRound1AsyncChecks(): Promise<void> {
+  // ---- reviewBannerHeading: pure, by which item kinds remain ----
+  ok(d250Heading(true, false) === "Needs Peak’s price before it can be sent", "#250 fix: reviewBannerHeading — POR only keeps the original heading");
+  ok(d250Heading(true, true) === "Needs Peak’s price and a curtain check before it can be sent", "#250 fix: reviewBannerHeading — POR + confirm gets the combined heading");
+  ok(d250Heading(false, true) === "Curtains need Peak’s confirmation before it can be sent", "#250 fix: reviewBannerHeading — confirm-only names curtains, not price");
+  ok(d250Heading(false, false) === "Needs Peak’s price before it can be sent", "#250 fix: reviewBannerHeading — neither present falls back to the original heading");
+
+  const panelSrc250 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/portal-panel.tsx"), "utf8");
+  ok(panelSrc250.includes("reviewBannerHeading(data.porItems.length > 0, data.confirmItems.length > 0)"), "#250 fix: the staff banner heading is driven by the pure helper, not a hard-coded string");
+
+  // ---- cartReviewReasonLine: pure, no double "confirmed by Peak" ----
+  ok(d250ReasonLine(null) === "Some lines need pricing — Peak will confirm pricing.", "#250 fix: cartReviewReasonLine — no reason falls back, suffix appended");
+  ok(d250ReasonLine("2 lines are price on request") === "2 lines are price on request — Peak will confirm pricing.", "#250 fix: cartReviewReasonLine — a POR-only reason still gets the suffix appended");
+  ok(
+    d250ReasonLine("Curtains are confirmed by Peak (measurements and fabric)") === "Curtains are confirmed by Peak (measurements and fabric)",
+    "#250 fix: cartReviewReasonLine — a review-only reason already saying 'confirmed by Peak' gets no appended suffix"
+  );
+  ok(
+    d250ReasonLine("1 line is price on request; curtains are confirmed by Peak") === "1 line is price on request; curtains are confirmed by Peak",
+    "#250 fix: cartReviewReasonLine — the combined por+review reason also already says 'confirmed by Peak', no double confirmation"
+  );
+
+  const cartClientSrc250b = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
+  ok(cartClientSrc250b.includes("cartReviewReasonLine(view.reason)"), "#250 fix: the cart's review-reason line is driven by the pure helper, not inlined");
+
+  // ---- own curtain-pricing rate-limit key, independent of the fixture configurator's ----
+  const partDetailSrc250 = readFileSync(join(process.cwd(), "src/lib/portal-part-detail.ts"), "utf8");
+  ok(partDetailSrc250.includes('"portal-price-curtain:preview:"') && partDetailSrc250.includes('"portal-price-curtain:"'), "#250 fix: priceCurtainOptionsFor keys its rate limit portal-price-curtain:<grant>, its own namespace");
+
+  const CO250b = fixtureId(250, "fix1-co");
+  const FAB250b = fixtureId(250, "fix1-fab");
+  try {
+    await d245MergeUpsert(FAB250b, { desc: "Test250b Velour", category: "Fabric", unit: "sq ft", list: 0, cost: 0, curtainAreaRate: 4 });
+    registerFixture("catalog_parts", FAB250b);
+    await upsertCustomer({ id: CO250b, name: "Test250b Curtain Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
+    d245Invalidate();
+    const sess250b = { grantId: fixtureId(250, "fix1-grant"), customerId: CO250b, name: "Pat Buyer", email: "pat@example.com" };
+
+    // Exhaust the FIXTURE configurator's limiter on this grant — the curtain
+    // limiter must still have its own budget (a shared key would starve it).
+    for (let i = 0; i < 240; i++) await d250PriceFixtureFor(sess250b, false, "no-such-fixture", {});
+    const fixtureNow = await d250PriceFixtureFor(sess250b, false, "no-such-fixture", {});
+    ok(!fixtureNow.ok, "#250 fix setup: the fixture configurator's own limiter is now exhausted on this grant");
+    const curtainStill = await d250PriceOptions(sess250b, false, { name: "x", fabricSku: FAB250b, qty: "1", width: "10", height: "10", fullness: "0" });
+    ok(curtainStill.ok, "#250 fix: curtain live-pricing still works on a grant whose FIXTURE limiter is exhausted — separate budgets");
+  } finally {
+    await removeCustomer(CO250b);
   }
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition, type CSSProperties } from "react";
 import { setQuoteStatus } from "@/app/(app)/quotes/actions";
 import { declinePortalAcceptanceAction } from "./actions";
-import { PURCHASE_METHOD_LABEL } from "@/lib/portal-quote-mode";
+import { PURCHASE_METHOD_LABEL, reviewBannerHeading } from "@/lib/portal-quote-mode";
 import type { PortalPanelData } from "./types";
 
 /**
@@ -110,7 +110,7 @@ export function PortalPanel({
       {data.portalReview && (
         <div style={{ background: "#fbf3dd", border: "1px solid #f0e2bd", borderRadius: 8, padding: "10px 12px" }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8a6d1f", marginBottom: 6 }}>
-            Needs Peak&rsquo;s price before it can be sent
+            {reviewBannerHeading(data.porItems.length > 0, data.confirmItems.length > 0)}
           </div>
           {data.porItems.length > 0 || data.confirmItems.length > 0 ? (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "#5b616e" }}>

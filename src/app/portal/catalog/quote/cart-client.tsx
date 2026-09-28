@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { CustomerQuoteView, SellLine } from "@/lib/portal-pricing";
+import { cartReviewReasonLine } from "@/lib/portal-quote-mode";
 import { generateQuote, removeCartLine, setCartVenue, updateCartLine } from "../actions";
 import { PANEL_CSS } from "../panel-css";
 import { money, QtyStepper } from "../panel-ui";
@@ -294,11 +295,7 @@ export function CartClient({
           {live.length > 0 && (
             <div className="pq-mode">
               {view.mode === "firm" ? <span className="pq-badge pq-firm">Firm quote</span> : <span className="pq-badge pq-review">Needs Peak review</span>}
-              <span className="pq-reason">
-                {view.mode === "firm"
-                  ? "Every line is priced — your quote is ready the moment you generate it."
-                  : `${view.reason ? view.reason.charAt(0).toUpperCase() + view.reason.slice(1) : "Some lines need pricing"} — Peak will confirm pricing.`}
-              </span>
+              <span className="pq-reason">{view.mode === "firm" ? "Every line is priced — your quote is ready the moment you generate it." : cartReviewReasonLine(view.reason)}</span>
             </div>
           )}
           <div className="pq-fine">

@@ -132,7 +132,10 @@ export async function priceCurtainOptionsFor(
   input: unknown
 ): Promise<CurtainPriceResult> {
   if (!session) return { ok: false, error: PORTAL_EXPIRED_COPY };
-  const key = preview ? "portal-price:preview:" + session.customerId : "portal-price:" + session.grantId;
+  // Its own limiter namespace (#250 review fix) — distinct from
+  // priceFixtureOptionsFor's "portal-price:" key, so curtain and fixture
+  // live-pricing on the same grant don't share (and starve) one budget.
+  const key = preview ? "portal-price-curtain:preview:" + session.customerId : "portal-price-curtain:" + session.grantId;
   if (!rateLimit(key, CURTAIN_PRICE_LIMIT, CURTAIN_PRICE_WINDOW_MS).ok) return { ok: false, error: PORTAL_BROWSE_RATE_COPY };
   const ix = await portalIndex();
   const c = cleanCurtainRequest(input, ix.fabrics);

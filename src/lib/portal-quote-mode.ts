@@ -138,3 +138,30 @@ export function clearPricedPor(sections: readonly SpecSection[]): { sections: Sp
   });
   return { sections: next, anyPor, anyConfirm };
 }
+
+/**
+ * #250 review fix — the staff Portal panel's review-banner heading, by
+ * which item kinds still block Save and Send: a POR line (no price at all)
+ * vs. a portalConfirm curtain (priced, still needs Peak's confirmation).
+ * Neither present is the same "nothing to review" shape callers never
+ * render this for, so it falls back to the original POR-only copy. Pure.
+ */
+export function reviewBannerHeading(hasPor: boolean, hasConfirm: boolean): string {
+  if (hasPor && hasConfirm) return "Needs Peak’s price and a curtain check before it can be sent";
+  if (hasConfirm) return "Curtains need Peak’s confirmation before it can be sent";
+  return "Needs Peak’s price before it can be sent";
+}
+
+/**
+ * #250 review fix — the portal cart's review-reason line (cart-client.tsx).
+ * `quoteMode`'s reason already reads "Curtains are confirmed by Peak…" when
+ * every review line is a priced curtain; appending the generic "— Peak will
+ * confirm pricing." on top of that would read as a redundant, slightly
+ * contradictory double confirmation. Appends it only when the reason does
+ * NOT already say so. Pure.
+ */
+export function cartReviewReasonLine(reason: string | null): string {
+  const capped = reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : "Some lines need pricing";
+  if (reason && reason.toLowerCase().includes("confirmed by peak")) return capped;
+  return `${capped} — Peak will confirm pricing.`;
+}
