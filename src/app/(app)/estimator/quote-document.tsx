@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
-import { customerLines, fmt, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
+import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 
 /**
@@ -209,6 +209,9 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
     })
   );
   const showOptions = p.pdfOptions && optionItems.length > 0;
+  // #251 (Jeff, Sep 28): name only what the quote actually carries — no
+  // labor means no "includes installation", same for freight at $0.
+  const inclusions = inclusionsLine(p.t);
 
   return (
         <div
@@ -353,7 +356,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   ? ` · ${optionItems.length} optional`
                   : ""}
               </div>
-              <div>Materials, installation &amp; freight included</div>
+              {inclusions && <div>{inclusions}</div>}
             </div>
           </div>
 
@@ -604,30 +607,34 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               <span>Materials</span>
               <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.mat)}</span>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 12.5,
-                color: "#5b616e",
-                marginBottom: 6,
-              }}
-            >
-              <span>Labor — installation &amp; commissioning</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.lab)}</span>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 12.5,
-                color: "#5b616e",
-                marginBottom: 10,
-              }}
-            >
-              <span>{freightRowLabel}</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.fr)}</span>
-            </div>
+            {p.t.lab > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12.5,
+                  color: "#5b616e",
+                  marginBottom: 6,
+                }}
+              >
+                <span>Labor — installation &amp; commissioning</span>
+                <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.lab)}</span>
+              </div>
+            )}
+            {p.t.fr > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12.5,
+                  color: "#5b616e",
+                  marginBottom: 10,
+                }}
+              >
+                <span>{freightRowLabel}</span>
+                <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.fr)}</span>
+              </div>
+            )}
             {p.t.tax > 0 && (
               <div
                 style={{

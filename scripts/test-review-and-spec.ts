@@ -32010,3 +32010,76 @@ async function portal250FixRound1AsyncChecks(): Promise<void> {
     await removeCustomer(CO250b);
   }
 }
+
+/* ======================================================================
+   #251 (Jeff, Sep 28) — the estimate document's "Materials, installation &
+   freight included" header line, and the Labor / freight totals rows,
+   name/print only what the quote actually carries: no labor → no
+   "installation" wording and no Labor row; freight at $0 → no freight
+   wording or row. QuoteDocument itself imports a .jpg letterhead this Node
+   harness can't load (see the #222/#245 checks above), so — same
+   workaround — this reads its source rather than rendering it, plus
+   exercises the pure inclusionsLine() helper (pricing.ts) directly against
+   totals() over small fixture sections.
+   ====================================================================== */
+import { inclusionsLine as d251Inclusions, round2 as d251Round2, totals as d251Totals } from "@/app/(app)/estimator/pricing";
+{
+  const matItem = (id: number, ext: number) => ({ id, sku: "M" + id, desc: "Mat " + id, qty: 1, unit: "ea", cost: ext / 2, price: ext });
+  const labItem = (id: number, ext: number) => ({ ...matItem(id, ext), labor: true });
+  const matSec = (id: string, ext: number, freightPct = 0) => ({ id, name: id, kind: "materials", mfr: "", freightPct, items: [matItem(1, ext)] });
+  const laborSec = (id: string, ext: number) => ({ id, name: id, kind: "labor", mfr: "", freightPct: 0, items: [labItem(1, ext)] });
+
+  // materials only — no labor, no freight.
+  const t1 = d251Totals([matSec("S1", 500)], 0);
+  ok(t1.lab === 0 && t1.fr === 0 && t1.mat === 500, "#251 fixture: a materials-only section carries no labor and no freight");
+  ok(d251Inclusions(t1) === "Materials included", "#251 inclusionsLine: materials only → \"Materials included\"");
+
+  // materials + freight, no labor.
+  const t2 = d251Totals([matSec("S1", 500, 10)], 0);
+  ok(t2.lab === 0 && t2.fr > 0, "#251 fixture: a freightPct section carries freight but no labor");
+  ok(d251Inclusions(t2) === "Materials & freight included", "#251 inclusionsLine: materials + freight, no labor → \"Materials & freight included\"");
+
+  // materials + labor, no freight.
+  const t3 = d251Totals([matSec("S1", 500), laborSec("S2", 200)], 0);
+  ok(t3.lab > 0 && t3.fr === 0 && t3.mat === 500, "#251 fixture: a labor section adds lab with freightPct 0 leaving fr at 0");
+  ok(d251Inclusions(t3) === "Materials & installation included", "#251 inclusionsLine: materials + labor, no freight → \"Materials & installation included\"");
+
+  // all three present.
+  const t4 = d251Totals([matSec("S1", 500, 10), laborSec("S2", 200)], 0);
+  ok(t4.lab > 0 && t4.fr > 0 && t4.mat > 0, "#251 fixture: materials + labor + freightPct section carries all three");
+  ok(d251Inclusions(t4) === "Materials, installation & freight included", "#251 inclusionsLine: all three → \"Materials, installation & freight included\" (original sentence)");
+
+  // none of the three (an empty quote, or a materials-only section that
+  // never priced — mat itself can be 0 too).
+  const t5 = d251Totals([], 0);
+  ok(t5.mat === 0 && t5.lab === 0 && t5.fr === 0 && d251Inclusions(t5) === "", "#251 inclusionsLine: nothing priced → empty string (caller omits the line)");
+
+  // The totals block must still sum to the grand total regardless of which
+  // rows print — grand is computed from the underlying totals, not from
+  // what's rendered.
+  ok(d251Round2(t3.grand) === d251Round2(t3.mat + t3.lab + t3.fr + t3.tax), "#251 math: grand still equals mat+lab+fr+tax when the freight row is hidden (fr=0 contributes nothing)");
+  ok(d251Round2(t4.grand) === d251Round2(t4.mat + t4.lab + t4.fr + t4.tax), "#251 math: grand still equals mat+lab+fr+tax when every row is shown");
+
+  // ---- structural checks on QuoteDocument's source ----
+  const qdSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/quote-document.tsx"), "utf8");
+  ok(qdSrc251.includes('import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";'),
+    "#251: QuoteDocument imports inclusionsLine from ./pricing");
+  ok(!qdSrc251.includes("<div>Materials, installation &amp; freight included</div>"), "#251: the old unconditional header sentence is gone from the source");
+  ok(qdSrc251.includes("const inclusions = inclusionsLine(p.t);") && qdSrc251.includes("{inclusions && <div>{inclusions}</div>}"),
+    "#251: the header line is built from inclusionsLine(p.t) and only prints when non-empty");
+  ok(/\{p\.t\.lab > 0 && \(\s*<div/.test(qdSrc251) && qdSrc251.includes("<span>Labor — installation &amp; commissioning</span>"),
+    "#251: the Labor — installation & commissioning totals row only renders when p.t.lab > 0");
+  ok(/\{p\.t\.fr > 0 && \(\s*<div/.test(qdSrc251), "#251: the freight totals row only renders when p.t.fr > 0");
+  // The already-conditional per-system narrative freight note (#245) stays
+  // untouched by this fix.
+  ok(qdSrc251.includes('{ps.hasFreight ? " · includes freight & delivery" : ""}'),
+    "#251: the per-system narrative \"includes freight & delivery\" note (already conditional on hasFreight) is unchanged");
+
+  // pdf-doc-key.ts needs no change: the printed sentence and rows derive
+  // from totals(sections) at render time, and sections are already part of
+  // the fingerprint — confirm the key still keys off sections, not a
+  // separately-carried totals object.
+  const keySrc251 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/pdf-doc-key.ts"), "utf8");
+  ok(keySrc251.includes("i.sections,") && !/\bt\??:\s*QuoteTotals/.test(keySrc251),
+    "#251: pdf-doc-key.ts fingerprints sections (which totals() derives from), carries no separate totals field to update");
+}

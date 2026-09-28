@@ -7459,3 +7459,17 @@ confirmation. `priceCurtainOptionsFor` now rate-limits under its own `"portal-pr
 budget — pricing a curtain and configuring a fixture on the same grant no longer starve each other. The
 `portalReview` notification preference's description was widened to "Customer quotes with items waiting on a
 Peak price or confirmation." (`src/lib/stores/notif-prefs.ts`).
+
+## D441. The estimate document names installation and freight only when the quote carries them (#251, 2026-09-28)
+
+Jeff (2026-09-28): "if there is no labor on the estimate then it does not say includes installation... same with
+freight if the cost is 0." `QuoteDocument`'s "Materials, installation & freight included" header line was
+unconditional; now a new pure helper, `inclusionsLine()` (`src/app/(app)/estimator/pricing.ts`), builds it from
+the quote's own `QuoteTotals`: "materials" whenever `t.mat > 0`, "installation" only when `t.lab > 0`, "freight"
+only when `t.fr > 0`, joined with commas and a trailing "&" (e.g. "Materials, installation & freight included",
+"Materials & freight included", "Materials included") and omitted entirely when none apply. The totals block's
+"Labor — installation & commissioning" row and the freight row each render only when their total is `> 0`; the
+printed grand total is unaffected either way, since it's computed from the underlying totals regardless of which
+rows are visible. The per-system narrative's "· includes freight & delivery" note (#245) was already conditional
+on that system's own freight and needed no change, and `pdf-doc-key.ts` needed none either — the fingerprint keys
+off `sections`, which `totals()` (and now `inclusionsLine()`) derive from at render time.
