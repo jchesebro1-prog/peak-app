@@ -7308,3 +7308,34 @@ small block above the authorization section. Nothing else in either letter chang
 activity" now count `portal-service` alongside `portal-catalog`, and the "New portal quotes" bell group (never
 "Portal quotes to review" — service quotes have no review state, D424) includes both sources too.
 
+## D429. Approve keeps the accepted price for an already-accepted portal-service quote — no re-persist (#248, 2026-09-28)
+
+Final review: the flame/inspection builders' Approve step (D426) always re-ran `persist()` — a full re-price at
+TODAY's rates and tier — before marking a quote Won, even for a `portal-service` quote the customer had already
+accepted at a specific, quoted number. A mileage-rate or margin edit landing between Accept and Approve would
+silently change the number the customer agreed to. `approveKeepsAcceptedPrice` (`src/lib/portal-quote-mode.ts`,
+pure) is true only for a quote that is `source === "portal-service"`, still `status === "sent"` (not already
+won/lost — a re-approve replay of an already-won quote goes through `setStatus`'s own no-op repair path, D170,
+never this branch) and carries a `portalAcceptance`. `approveFlameQuote` / `approveInspectionQuote`
+(`src/app/(app)/flame-tests/quote/actions.ts`, `.../inspections/quote/actions.ts`) load the existing quote first
+and, when that helper says true, skip `persist()` entirely and call `setStatus(id, "won", user.name, {
+bypassApprovalGate: "engine-owned-flow" })` directly — the same `requireUser()` permission check `persist()` would
+have made, made explicitly since `persist()` is skipped — so the quote goes Won at the accepted value and still
+spawns the flame job / inspection record from the subdoc that was already saved at Generate/Refresh time. Every
+other quote (staff-built, a portal-service quote nobody has sent yet, one the customer hasn't accepted) approves
+through the unchanged `persist()`-then-`won` path.
+
+## D430. Zero-travel guard: an unlocated venue refuses with a link to request a quote instead (#248, 2026-09-28)
+
+Final review: `priceServiceRequest` (`src/lib/portal-service-pricing.ts`) resolves each venue's travel leg from
+coords (explicit lat/lng or a geocoded city/state) or a saved fallback `travelMiles` — a venue with neither would
+otherwise price a silent $0 travel share for that leg rather than refusing. After the existing venue/count
+validation (`serviceRequestProblem`) passes, `firstUnlocatedVenueLabel` checks every requested venue (in REQUEST
+order, not directory order) and, on the first one the engine can't locate, refuses with `"We need to confirm
+travel for <venue label> — request a quote instead."` (`travelUnknownError`) instead of pricing. `/portal/service`
+(`service-form.tsx`) matches that venue's label back out of the error text (the error carries no venue id) against
+its current rows and shows a **Request a quote →** link to `/portal/request?service=<Flame testing|Rigging
+inspection>&venue=<id>` — the request form's own existing `SERVICES` values and its existing `?service=&venue=`
+pre-fill (D420's Repair path), reused rather than duplicated. A request naming only located venues still prices
+normally.
+

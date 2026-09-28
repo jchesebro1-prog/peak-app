@@ -9220,7 +9220,7 @@ and Add to Quotes use the same price. See D419.
 
 ---
 
-## 248. Customer portal — flame-test and inspection quotes customers generate themselves — DONE 2026-09-28 (D420–D428)
+## 248. Customer portal — flame-test and inspection quotes customers generate themselves — DONE 2026-09-28 (D420–D430)
 
 **Reported:** follow-up named in PUNCHLIST #245 ("Self-serve service quotes — a separate spec, reuses this build's
 firm/review split and Accept/Approve flow"). Jeff (2026-09-27): *"Auto quotes are good and should be quotable."*
@@ -9246,9 +9246,19 @@ firm/review split and Accept/Approve flow"). Jeff (2026-09-27): *"Auto quotes ar
   and a per-chip **Quote it** link; any listed flame_test/inspection quote row gets **Quote again** (D427).
 - **Staff side:** the Estimator's Portal panel is shared into both service builders — acceptance details, firm-
   validity, **Approve** (the builder's own engine-owned-flow "Mark as approved," spawning the flame job / inspection
-  record), Decline with note (D426). Quotes hub Portal badge, the "New portal quotes" bell group and company "Portal
+  record), Decline with note (D426). A per-row Portal chip in the Quotes hub, the "New portal quotes" bell group and company "Portal
   activity" all count `portal-service` alongside `portal-catalog`. Letters print the standing review line, tax line
   and "Valid until" for portal-service quotes (D428).
+
+**Final review (2026-09-28).** Approve no longer re-prices an already-accepted portal-service quote — it goes Won at
+the accepted value with no `persist()` call, so a rate change between Accept and Approve can't silently move the
+number the customer agreed to (D429). A request naming a venue the engine can't locate (no coords, no saved
+`travelMiles`) now refuses up front — "We need to confirm travel for `<venue>` — request a quote instead." — with a
+link to `/portal/request` pre-filled for that venue, rather than quietly pricing a $0 travel leg (D430). A request
+listing a duplicate venue id, or more venues than the customer actually has, is refused the same way an empty list
+is. Minor fixes: the live-price debounce no longer fires from inside a `setRows` updater; the saved subdoc's contact
+now carries the portal session's email; `test:smoke` covers the `?type=&venue=` / `?from=` entry-point params
+signed out.
 
 **Jeff-gated.**
 - Try the whole flow with a real customer grant — pick venues, watch the live price, Generate, Accept.
@@ -9259,4 +9269,4 @@ firm/review split and Accept/Approve flow"). Jeff (2026-09-27): *"Auto quotes ar
 
 **Follow-ups (not built).** A priced repair library (would let repairs self-serve too, D420); scheduling/date
 requests (the job scheduler stays staff-side, per the original spec's out-of-scope); customer choice of travel mode
-(Auto only, matching #208's own scope). See D420–D428.
+(Auto only, matching #208's own scope). See D420–D430.

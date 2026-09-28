@@ -418,11 +418,14 @@ See `.env.example`.
     Service, the compliance card's "Get a service quote" / per-chip "Quote
     it" / per-venue "Request a repair", and "Quote again" on any listed
     flame/inspection quote row. Staff get the shared Portal panel on both
-    service builders — Approve runs the builder's own engine-owned approve,
-    spawning the job/record — plus Quotes-hub badge, bell and
-    company-activity coverage. Remaining is Jeff-gated: try the flow with a
-    real grant, check a multi-venue portal quote against the builder, confirm
-    letters on a real render. Decisions D420–D428; punch item #248.
+    service builders — Approve runs the builder's own engine-owned approve
+    for a still-`sent`, not-yet-accepted quote; an already-accepted quote
+    approves at the accepted price with no re-persist, spawning the
+    job/record either way — plus a per-row Portal chip in the Quotes hub,
+    bell and company-activity coverage. Remaining is Jeff-gated: try the flow
+    with a real grant, check a multi-venue portal quote against the builder,
+    confirm letters on a real render. Decisions D420–D428, D429–D430; punch
+    item #248.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
