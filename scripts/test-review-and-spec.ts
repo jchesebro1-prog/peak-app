@@ -30713,7 +30713,7 @@ async function grid249T5AsyncChecks(): Promise<void> {
   ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#249 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
   const intake = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/grid-intake.tsx"), "utf8");
   ok(intake.includes("House width") && intake.includes("House depth") && intake.includes("houseDims(") && intake.includes("h.warning"), "#249 T5: the Grid intake shows house width, house depth and the narrow-house warning");
-  ok(intake.includes("label={r.label}"), "#249 T5: the intake's house inputs are labeled for screen readers by name");
+  ok(intake.includes("<FeetInput label={r.label}"), "#249 T5: the intake's house inputs are labeled for screen readers by name");
 }
 
 /* ======================================================================
