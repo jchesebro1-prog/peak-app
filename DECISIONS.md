@@ -7207,3 +7207,104 @@ filtered by kind. The pick replaces that lighting row's **per-unit** price, so i
 (a "system package" picked on Par is multiplied by the Par count) — unchanged override semantics, noted because a
 package reads differently from a fixture. The Grid scope panel still passes no list, so no picker renders there.
 
+## D420. Firm self-serve for flame tests and inspections; repairs stay a request (#248, 2026-09-28)
+
+Follow-up from PUNCHLIST #245, decided per Jeff (2026-09-27): *"Auto quotes are good and should be quotable"*. Flame
+tests and inspections (L1 annual, L2 five-year) are priced end to end by the existing engines
+(`src/lib/flametest-engine.ts`, `src/lib/inspection-engine.ts`) — the same math the staff builders and the #36
+one-click renewals run — so a customer generating one gets the number Peak's own builder would produce, no review
+step. Repairs don't get the same treatment: the repair engine only prices hours and parts a person has already
+estimated (`src/lib/repair-engine.ts`), there's no priced issue/parts library to price one sight-unseen, so
+**"Request a repair"** opens the existing `/portal/request` form with Repair and the venue pre-filled — the D63
+unassigned-lead, 48h-SLA path, unchanged.
+
+## D421. Scope pre-fills from the venue's own history, level-specific for inspections; counts bounded 1–200 / 1–300 (#248, 2026-09-28)
+
+`serviceScopeFor` (`src/lib/portal-service-scope.ts`) reads, in order, the venue's latest **completed** flame job /
+inspection record, then its latest **quote** of that type that lists the venue (the same source order the #36
+renewal outreach uses) — `pickScopeCount` is job-wins, else quote, else the customer types it. Inspections filter
+both the job/record clause and the quote fallback by **level** (L1 and L2 are different services with unrelated
+line-set counts — not spelled out in the spec's parenthetical, which only marked the job/record clause; applied to
+both per the build-workflow's proceed-and-log rule rather than blocking on it). Curtain counts are whole numbers
+1–200; line-set counts 1–300 — enforced server-side by `serviceRequestProblem`, verbatim copy "Enter the number of
+curtains (1–200)." / "Enter the number of line sets (1–300).". A foreign venue id or an out-of-range level both
+refuse with the verbatim "Pick at least one venue." — none of the six standing error strings covers either case
+specifically, and both make the whole request unpickable.
+
+## D422. Builder-identical pricing through one shared venue-input helper; sell-only customer view (#248, 2026-09-28)
+
+`src/lib/service-quote-inputs.ts` (`flameVenueInputsFrom`, `inspectionVenueInputsFrom`, `resolveQuoteOffice`) is now
+the **one** venue-input step both staff builders' `persist()` and the portal's `priceServiceRequest` call — a real
+extraction, not a copy. The first pass copied the logic instead (an existing #217 test grepped the flame builder's
+file for the inline mapping, which broke once it moved), but a copy can silently drift from the builder's real code,
+so a fix round did the extraction properly and retargeted the #217 test to check the shared helper's call site and
+its content instead of inline text. `priceServiceRequest` then runs the same engine `compute`/`computeEstimate` at
+`resolveTier(customerId, grant)` margin, live rates, travel mode Auto (#208) and $25 rounding (#217) — no typed
+totals, no per-venue testing override, no travel override. The customer view (`ServiceCustomerView`) is an explicit
+whitelist — `lines[].label/amount`, `travel`, `total` only, verified by a key-substring test against
+`margin`/`rate`/`hours`/`cost`/`crew`/`airfare`/`tier`. The travel line is a real share of the marked-up total via
+`travelLineShare()` (the same helper the renewal letters already use for their one travel line), not a raw cost
+figure; flame prints one line per venue (the engine's per-venue sell exists), inspection has no per-venue
+breakdown so it prints one summary line ("Annual rigging inspection — N line sets across M venues" / "Five-year …").
+Lines plus travel always sum to the total exactly — the last line absorbs the rounding remainder.
+
+## D423. Several venues price as one shared trip (#248, 2026-09-28)
+
+A multi-venue quote runs the engines over one shared office → v1 … vn → office trip, the same way the builders and
+the #36 renewal outreach already price a multi-stop run — so a customer ticking several of their venues in one
+request gets the per-venue discount a single combined trip produces, not n separate trips' worth of travel.
+
+## D424. Same #245 lifecycle, no review path; a staff-recalled service quote stops listing to the customer (#248, 2026-09-28)
+
+Generate → numbered quote (real `quoteType`, `flame_test`/`inspection`, FLM/RIG prefix), `sendPortalFirm` (the
+`portal-firm` gate bypass, #245's `bypassApprovalGate`), 30-day `portalFirm.validUntil`, saved proposal-letter PDF,
+Accept/Decline and expiry → Refresh pricing as a new revision — all reused unchanged from #245. There's no review
+branch: the flame/inspection engines are fully deterministic (no price-on-request case exists for them the way a
+curtain or an unpriced catalog line is for #245), so every generated service quote is sent firm at once.
+`portalListsQuote` (`src/lib/stores/quotes.ts`) originally listed a `portal-service` quote in any status, same as
+`portal-catalog` — caught in Task 4 review: since a service quote is never a draft except after a staff recall, that
+would leak an in-progress staff edit to the customer's portal. A `portal-service` quote in `draft` status is now
+excluded; every other status still lists.
+
+## D425. Refresh re-prices at the quote's own customer and tier, not the caller's session (#248, 2026-09-28)
+
+`refreshPortalQuote`'s `portal-service` branch rebuilds the `ServiceRequest` from the quote's own saved
+`flameTest`/`inspection` subdoc and re-prices via `priceServiceRequest` using the **quote's** `customerId` and
+`contactName` — not whoever is calling refresh — so a refresh always reprices exactly the scope that was generated,
+at today's rates and that customer's tier, cutting a new revision and restarting the 30-day window the same way
+#245's catalog refresh does. There is no review-flip branch here (D424) — a service refresh is always firm.
+
+## D426. Staff Portal panel on the flame/inspection builders; Approve reuses each builder's own engine-owned approve (#248, 2026-09-28)
+
+`PortalPanel` (`src/app/(app)/estimator/portal-panel.tsx`) is generalized with optional `onApprove`/`approving`
+props: absent, the Estimator's own behavior is unchanged (Approve is the ordinary `setQuoteStatus` form submit);
+present, on the two service builders, Approve is a plain button calling the builder's own "Mark as approved" action
+— the same `persist()` + `setStatus(..., "won", ..., { bypassApprovalGate: "engine-owned-flow" })` call the
+builder's sidebar approve button already makes, so a won portal service quote spawns its flame job / inspection
+record exactly like a staff-built one, through one code path instead of two. Decline stays inside the shared
+component (`declinePortalAcceptanceAction` is already called from there; the builders only import the component, a
+plain cross-folder React import). Source preservation is centralized too: `sourceForSave(prior, builderSource)`
+(`src/lib/portal-quote-mode.ts`, pure) says a quote's source survives any later builder save once it's
+`portal-catalog` or `portal-service`; the Estimator's own save and both service builders' `persist()` now call it in
+place of their separate inline ternaries.
+
+## D427. Entry points across the portal home and quote rows; rate limits match #245 (#248, 2026-09-28)
+
+Portal nav gains **Service** (Home · Catalog · Service · Quote). The "Your venues & compliance" card gets a header
+**Get a service quote** button plus a per-chip **Quote it** link (prominent when overdue/due-soon/no-record, muted
+once current) and a per-venue **Request a repair** link; any listed flame_test/inspection quote row (any source, not
+only `portal-service`) gets **Quote again**, replacing "Copy to new quote" for those rows only — catalog quotes keep
+their existing copy action. Rate limits follow the #245 pattern: pricing 240/min per grant (matches #245's fixture
+pricing limit), generate 10/h per grant (matches #245's generate limit) — both keyed `portal-service-price:<grantId>`
+/ `portal-service-generate:<grantId>`, separate buckets from the catalog's own limits.
+
+## D428. Letters print the same standing lines #245 established, for portal-service (#248, 2026-09-28)
+
+The flame and inspection proposal letters (`letter-view.tsx`, React server components, not the Estimator's pure
+data-building path) call the shared `portalDocumentExtras` helper (its `source` guard widened to accept
+`portal-service` alongside `portal-catalog`) and print its `standingLines` — the review line, "Plus applicable sales
+tax.", and "Valid until <date>" while `portalFirm` is active — for `source === "portal-service"` quotes only, in a
+small block above the authorization section. Nothing else in either letter changes. Quotes hub and company "Portal
+activity" now count `portal-service` alongside `portal-catalog`, and the "New portal quotes" bell group (never
+"Portal quotes to review" — service quotes have no review state, D424) includes both sources too.
+
