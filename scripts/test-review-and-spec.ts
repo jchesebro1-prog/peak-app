@@ -22794,6 +22794,61 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
   ok(emc.includes('a.kind === "hardware" ? "Hardware"') && emc.includes("Assembly (fixture, system or hardware)"), "#228: the map picker labels hardware assemblies");
 }
 
+/* --- #246: the Estimator's "+ Add assembly" lists every assembly — fixtures, systems and hardware (pure + source) --- */
+import {
+  estimatorAssembliesFrom as e246From, fixtureAssembliesFrom as e246FixturesOnly, ESTIMATOR_ASSEMBLY_GROUPS as e246Groups,
+  type FixtureRecord as E246Rec,
+} from "@/lib/fixture-assemblies";
+import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(app)/estimator/fixture-bom";
+{
+  const base = { description: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t" };
+  const recs: E246Rec[] = [
+    // listFixtures order (by label), kinds interleaved on purpose.
+    { ...base, id: "SA-H1", kind: "hardware", label: "Batten wrap", lightEngineSku: "", parts: [{ sku: "E246-CH", qty: 2 }] },
+    { ...base, id: "SA-F1", kind: "fixture", label: "Cyc light", lightEngineSku: "E246-ENG", position: "1st elec", circuit: "12" },
+    { ...base, id: "SA-S1", kind: "system", label: "Stage wash package", scope: "Lighting", lightEngineSku: "", parts: [{ sku: "E246-ENG", qty: 4 }], position: "stray", circuit: "9" },
+    { ...base, id: "SA-F2", kind: "fixture", label: "Wash", lightEngineSku: "E246-ENG" },
+    { ...base, id: "SA-S2", kind: "system", label: "Voice lift", scope: "Audio", lightEngineSku: "", parts: [{ sku: "E246-CH", qty: 1 }] },
+  ];
+  const cat = new Map([
+    ["E246-ENG", { sku: "E246-ENG", desc: "Engine", unit: "ea", cost: 100, list: 200 }],
+    ["E246-CH", { sku: "E246-CH", desc: "Chain", unit: "ea", cost: 10, list: 25 }],
+  ]);
+  const all = e246From(recs, cat);
+  ok(all.map((a) => `${a.kind}:${a.id}`).join(",") === "fixture:SA-F1,fixture:SA-F2,system:SA-S1,system:SA-S2,hardware:SA-H1",
+    "#246: estimatorAssembliesFrom returns fixtures, then systems, then hardware — each in the input (label) order, every row carrying its kind");
+  ok(e246Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware", "#246: the picker's groups are Fixtures / Systems / Hardware");
+  const s1 = all.find((a) => a.id === "SA-S1")!;
+  ok(s1.scope === "Lighting" && s1.name === "Stage wash package" && s1.components.length === 1 && s1.components[0].role === "other" && s1.components[0].defaultQty === 4 && s1.components[0].list === 200,
+    "#246: a system resolves in the same shape — its scope, its parts list as components");
+  ok(!("position" in s1) && !("circuit" in s1) && !("scope" in all.find((a) => a.id === "SA-H1")!), "#246: only a fixture carries a hang position / circuit; hardware has no scope");
+  const f1 = all.find((a) => a.id === "SA-F1")!;
+  ok(f1.position === "1st elec" && f1.circuit === "12" && f1.kind === "fixture", "#246: a fixture keeps its default hang position / circuit");
+  const only = e246FixturesOnly(recs, cat);
+  ok(only.map((a) => a.id).join(",") === "SA-F1,SA-F2" && only.every((a) => !("kind" in a)), "#246: fixtureAssembliesFrom (Quick Design) still returns fixtures only, unchanged");
+
+  const draft = { componentQty: {}, position: "1st elec", circuit: "12" };
+  ok(e246Bom(f1, draft)!.desc.endsWith(" (Pos 1st elec / Ckt 12)"), "#246: a fixture's BOM line still ends in (Pos … / Ckt …)");
+  const sysLine = e246Bom(s1, draft)!;
+  ok(!/Pos|Ckt/.test(sysLine.desc) && sysLine.price === 800 && sysLine.cost === 400, "#246: a system's BOM line drops a stale Pos / Ckt from the draft, priced 4 × $200");
+  ok(!/Pos|Ckt/.test(e246Bom(all.find((a) => a.id === "SA-H1")!, draft)!.desc), "#246: …and so does hardware");
+  ok(e246Hang({}) && e246Hang({ kind: "fixture" }) && !e246Hang({ kind: "system" }) && !e246Hang({ kind: "hardware" }), "#246: no kind (a legacy row) reads as a fixture");
+
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
+  ok(card.includes('addBtn("+ Add assembly", p.onToggleFixture') && !card.includes("Configure fixture"), "#246: the section card's button reads \"+ Add assembly\"");
+  const modal = readFileSync(join(process.cwd(), "src/app/(app)/estimator/fixture-modal.tsx"), "utf8");
+  ok(modal.includes('title="Add assembly"') && modal.includes(">Add assembly</button>") && modal.includes("<optgroup key={g.kind} label={g.label}>")
+    && modal.includes("No assemblies yet — build one in the Assembly Builder") && modal.includes(">Qty</label>") && !/[Ff]ixture qty|Add fixture|No fixture assemblies/.test(modal),
+    "#246: the modal says Add assembly, groups its options, and reads Qty");
+  ok(/\{showHang && <>/.test(modal) && modal.includes("hasHangPosition(assembly)"), "#246: Hang position / Circuit # show only for a fixture");
+  const page = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
+  ok(page.includes("fixtureAssemblies={estimatorAssembliesFrom(fixtures, catalogRows)}"), "#246: the Estimator page passes every assembly kind");
+  const qdPage = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/page.tsx"), "utf8");
+  ok(qdPage.includes("fixtureAssembliesFrom(fixtureRecords, catalogRows)"), "#246: Quick Design keeps reading fixtures only");
+  const client = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(client.includes('fixtureAssemblies.find((item) => (item.kind ?? "fixture") === "fixture")'), "#246: opening the modal preselects the first fixture (never a system)");
+}
+
 /* --- #231/#232 T1: wire pull + system labor — rules and formulas (pure) --- */
 import * as wl231 from "@/lib/design/wire-labor";
 import { GROUPS as wl231Groups } from "@/lib/stores/pricing";

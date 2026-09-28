@@ -1,16 +1,24 @@
 import { assemblyDescription, type ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
 import type { FixtureDraft, SpecItem } from "./types";
 
-/** The fixture configurator's BOM line (#210) — moved out of
+/** The assembly configurator's BOM line (#210) — moved out of
  *  estimator-client.tsx unchanged so it is testable: included components at
  *  the draft's quantities, aggregate unit cost/sell, "Name — part; part"
- *  plus "(Pos … / Ckt …)". Pure. */
+ *  plus "(Pos … / Ckt …)" — a fixture's only (#246: a system or hardware
+ *  assembly has no hang position / circuit, so a stale draft value is
+ *  ignored). Pure. */
 export type FixtureBomLine = {
   desc: string;
   cost: number;
   price: number;
   components: NonNullable<SpecItem["components"]>;
 };
+
+/** #246 — only a fixture has a hang position / circuit. An assembly with no
+ *  `kind` (fixtureAssembliesFrom, legacy rows) is a fixture. */
+export function hasHangPosition(assembly: Pick<ResolvedFixtureAssembly, "kind">): boolean {
+  return (assembly.kind ?? "fixture") === "fixture";
+}
 
 /** An optional (default qty 0) add-on's switch: on = qty 1, off = 0. */
 export function optionalToggleQty(on: boolean): string {
@@ -51,8 +59,8 @@ export function fixtureBomLine(
   const { cost, price, components } = assemblyComponentTotals(assembly, d.componentQty);
   if (price <= 0) return null;
   const pc: string[] = [];
-  if ((d.position || "").trim()) pc.push("Pos " + d.position.trim());
-  if ((d.circuit || "").trim()) pc.push("Ckt " + d.circuit.trim());
+  if (hasHangPosition(assembly) && (d.position || "").trim()) pc.push("Pos " + d.position.trim());
+  if (hasHangPosition(assembly) && (d.circuit || "").trim()) pc.push("Ckt " + d.circuit.trim());
   let desc = assemblyDescription({
     ...assembly,
     components: assembly.components.map((part) => ({

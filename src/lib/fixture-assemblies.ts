@@ -35,6 +35,11 @@ export type ResolvedFixtureAssembly = Omit<FixtureAssembly, "components"> & {
   /** #210 — the fixture's default hang position / circuit (Estimator pre-fill). */
   position?: string;
   circuit?: string;
+  /** #246 — set by `estimatorAssembliesFrom` (every kind); absent means a
+   *  fixture (fixtureAssembliesFrom, the legacy settings.fixtureAssemblies). */
+  kind?: FixtureKind;
+  /** #246 — a system's scope (systems only). */
+  scope?: SystemScope;
 };
 
 export function sanitizeFixtureAssemblies(value: unknown): FixtureAssembly[] {
@@ -560,11 +565,39 @@ const SLOT_ROLE: Record<FixtureSlot, AssemblyRole> = {
   parts: "other",
 };
 
+/** One record → the Estimator/Quick Design shape: id → id, label → name,
+ *  every priced line → a component (qty → defaultQty, sell → list). */
+function toResolvedAssembly(
+  r: FixtureRecord,
+  bySku: ReadonlyMap<string, FixtureCatalogPart>,
+  settings: PriceDateSettings
+): ResolvedFixtureAssembly {
+  const x = resolveFixture(r, bySku, settings);
+  return {
+    id: x.id,
+    name: x.label,
+    ...(x.position ? { position: x.position } : {}),
+    ...(x.circuit ? { circuit: x.circuit } : {}),
+    components: x.parts.map((p) => ({
+      sku: p.sku,
+      label: p.label,
+      role: SLOT_ROLE[p.slot],
+      defaultQty: p.qty,
+      ...(p.costOverride !== undefined ? { costOverride: p.costOverride } : {}),
+      desc: p.desc,
+      unit: p.unit,
+      cost: p.cost,
+      list: p.sell,
+      found: p.found,
+    })),
+  };
+}
+
 /**
- * Fixture records → the Estimator/Quick Design shape (ResolvedFixtureAssembly),
- * so those consumers keep one code path: id → id, label → name, every priced
- * line → a component (qty → defaultQty, sell → list). Systems and hardware are left out —
- * the pickers list fixtures (spec §5).
+ * Fixture records → the Quick Design shape (ResolvedFixtureAssembly). Fixtures
+ * only — systems and hardware are left out, because Quick Design's picker
+ * lists fixtures (spec §5, D298). The Estimator reads every kind through
+ * `estimatorAssembliesFrom` since #246.
  */
 export function fixtureAssembliesFrom(
   records: readonly FixtureRecord[],
@@ -572,27 +605,41 @@ export function fixtureAssembliesFrom(
   settings: PriceDateSettings = {}
 ): ResolvedFixtureAssembly[] {
   const bySku = toSkuMap(catalog);
-  return records
-    .filter((r) => r.kind === "fixture")
-    .map((r) => {
-      const x = resolveFixture(r, bySku, settings);
-      return {
-        id: x.id,
-        name: x.label,
-        ...(x.position ? { position: x.position } : {}),
-        ...(x.circuit ? { circuit: x.circuit } : {}),
-        components: x.parts.map((p) => ({
-          sku: p.sku,
-          label: p.label,
-          role: SLOT_ROLE[p.slot],
-          defaultQty: p.qty,
-          ...(p.costOverride !== undefined ? { costOverride: p.costOverride } : {}),
-          desc: p.desc,
-          unit: p.unit,
-          cost: p.cost,
-          list: p.sell,
-          found: p.found,
-        })),
-      };
-    });
+  return records.filter((r) => r.kind === "fixture").map((r) => toResolvedAssembly(r, bySku, settings));
+}
+
+/** #246 — the Estimator's "+ Add assembly" picker groups, in order. */
+export const ESTIMATOR_ASSEMBLY_GROUPS: ReadonlyArray<{ kind: FixtureKind; label: string }> = [
+  { kind: "fixture", label: "Fixtures" },
+  { kind: "system", label: "Systems" },
+  { kind: "hardware", label: "Hardware" },
+];
+
+/**
+ * #246 — the whole Assembly Builder list for the Estimator: fixtures, then
+ * systems, then hardware (ESTIMATOR_ASSEMBLY_GROUPS), each keeping the input
+ * order (listFixtures sorts by label). Same shape as fixtureAssembliesFrom,
+ * plus `kind` on every row and `scope` on a system. Only a fixture carries a
+ * default hang position / circuit. Pure.
+ */
+export function estimatorAssembliesFrom(
+  records: readonly FixtureRecord[],
+  catalog: SkuLookup<FixtureCatalogPart>,
+  settings: PriceDateSettings = {}
+): ResolvedFixtureAssembly[] {
+  const bySku = toSkuMap(catalog);
+  return ESTIMATOR_ASSEMBLY_GROUPS.flatMap(({ kind }) =>
+    records
+      .filter((r) => r.kind === kind)
+      .map((r) => {
+        const { position, circuit, ...rest } = toResolvedAssembly(r, bySku, settings);
+        return {
+          ...rest,
+          ...(kind === "fixture" && position ? { position } : {}),
+          ...(kind === "fixture" && circuit ? { circuit } : {}),
+          kind,
+          ...(kind === "system" && r.scope ? { scope: r.scope } : {}),
+        };
+      })
+  );
 }

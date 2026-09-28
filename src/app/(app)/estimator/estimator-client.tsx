@@ -1467,7 +1467,9 @@ export default function EstimatorClient({
       const rec = editId ? vendorQuotes.find((v) => v.id === editId) : undefined;
       setVendorDraft(rec ? vendorDraftFromRecord(rec) : freshVendor());
     } else if (kind === "fixture") {
-      const first = fixtureAssemblies[0];
+      // #246: the list now holds every kind (fixtures first); preselect the
+      // first FIXTURE — today's pick — and nothing when there is none.
+      const first = fixtureAssemblies.find((item) => (item.kind ?? "fixture") === "fixture");
       // #210: the fixture's default hang position / circuit.
       const position = first?.position || "";
       const circuit = first?.circuit || "";
