@@ -9293,4 +9293,5 @@ the template", then a Vectorworks DWG for the auditorium/PAC with labels on the 
 
 **Follow-ups (Jeff-gated).** Send DWGs for the other venue types (church, gym stage, black box, conference, arena)
 — each is a conversion + a key-lines file, no new engine work. An upload screen for templates (Grid Settings →
-Backgrounds) if Jeff wants to swap drawings himself. Seats or doors only if they're drawn into the DWG.
+Backgrounds) if Jeff wants to swap drawings himself. Seats or doors only if they're drawn into the DWG. When a second proscenium template id ships (e.g. `proscenium@2`), turn
+`grid-auto-fill.ts`'s `baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID` check into an id → geometry lookup.
