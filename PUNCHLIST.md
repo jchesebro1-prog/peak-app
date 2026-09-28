@@ -9190,3 +9190,17 @@ admin action.
 **Review minors worth a later pass:** the fixture picker's Included list still shows Labor-category component SKUs
 by name (cosmetic); the datasheet-thumbnail render's tie-break when one SKU somehow has two own datasheets is an
 arbitrary but stable array-order pick, not a documented rule. See D402–D417.
+
+---
+
+## 246. Estimator — "+ Add assembly" pulls from the whole assemblies list — DONE 2026-09-28 (D418)
+
+**Reported:** 2026-09-28 (Jeff): "The estimator needs to swap fixtures for assemblies and then pull from the
+assemblies list."
+
+**Done.** "+ Configure fixture" is now **"+ Add assembly"**, and it lists every assembly from the Assembly Builder —
+Fixtures, Systems and Hardware, grouped in the picker (a system shows its scope). Hang position and Circuit # only
+appear for a fixture; a system or hardware line prints without them. Quote lines added before this keep loading and
+editing as they did. Quick Design's dropdown still lists fixtures only. See D418.
+
+**Still open.** None.

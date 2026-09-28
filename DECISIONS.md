@@ -7183,3 +7183,15 @@ Manufacturer or Category list) only appears once a facet has more than 8 values 
 plain list is faster than typing. A tile's quick **Add** always adds qty 1 directly, no sidebar detour; opening the
 image or title still opens the sidebar.
 
+## D418. The Estimator lists every assembly; only a fixture has a hang position (#246, 2026-09-28)
+
+Reverses D298 for the Estimator (Jeff: "swap fixtures for assemblies and then pull from the assemblies list"). The
+page reads `estimatorAssembliesFrom()` (`src/lib/fixture-assemblies.ts`) — fixture, system and hardware records in the
+same `ResolvedFixtureAssembly` shape plus `kind` (and a system's `scope`), grouped Fixtures → Systems → Hardware, label
+order within. `fixtureAssembliesFrom()` is unchanged and still feeds Quick Design, fixtures only. The configurator reads
+"+ Add assembly" / "Add assembly" / "Qty"; Hang position and Circuit # show, and print on the BOM line, only for a
+fixture (a row with no `kind` counts as one), and a system's or hardware's stored position/circuit is dropped. The modal
+still preselects the first fixture, never a system. Lines keep today's saved shape (`fixture: true`, `sku` = assembly
+id, `components`), so existing quotes load unchanged; internal names (`FixtureModal`, `FixtureDraft`, the `"fixture"`
+method key) stay. A system's or hardware's component row omits the generic "other" role.
+
