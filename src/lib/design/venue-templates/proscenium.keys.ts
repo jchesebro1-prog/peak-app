@@ -1,7 +1,7 @@
 import type { TemplateKeys } from "./types";
 
 /**
- * Key lines for Jeff's Auditorium / PAC background (#247 —
+ * Key lines for Jeff's Auditorium / PAC background (#249 —
  * docs/venue-templates/source/proscenium.dwg → proscenium.json). Drawing
  * inches, y UP: the stage is at the top (y > 0), the house below. Every value
  * is measured from the converted drawing; see

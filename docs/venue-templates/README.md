@@ -1,4 +1,4 @@
-# Venue templates (#247)
+# Venue templates (#249)
 
 Background drawings for generated plans. Each venue kind has:
 
@@ -32,4 +32,4 @@ Background drawings for generated plans. Each venue kind has:
 1. Save Jeff's DWG as `source/<kind>.dwg`; add its required labels to `REQUIRED` in the converter.
 2. Convert; confirm `<kind>.png` with Jeff.
 3. Write `<kind>.keys.ts` (see `proscenium.keys.ts`) — key lines measured from the JSON.
-4. Point that kind's geometry / `buildPlan*` at the template and add a `#247`-style harness block (identity at the drawing's own size, walls keep 6", driven spans match the inputs).
+4. Point that kind's geometry / `buildPlan*` at the template and add a `#249`-style harness block (identity at the drawing's own size, walls keep 6", driven spans match the inputs).

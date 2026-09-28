@@ -10631,7 +10631,7 @@ seeded()
   .then(() => reviewLimitsFix242AsyncChecks())
   .then(() => reviewLimitsFinal242AsyncChecks())
   .then(() => portal245FinalReviewAsyncChecks())
-  .then(() => grid247T5AsyncChecks())
+  .then(() => grid249T5AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -30438,18 +30438,18 @@ async function portal245FinalReviewAsyncChecks(): Promise<void> {
   ok(madeQuote2?.owner === "" && !madeQuote2?.preparedBy, "#245 final review fix: an unassigned company's portal quote leaves preparedBy untouched (the store default) rather than writing another blank over it");
 }
 
-/* --- #247: venue templates — stretch engine, proscenium key lines, house dims --- */
-import { PROSCENIUM_TEMPLATE as vt247Tpl, stretchProscenium as vt247Stretch } from "@/lib/design/venue-templates/proscenium";
-import { PROSCENIUM_KEYS as vt247Keys, PROSCENIUM_SPACES as vt247Spaces } from "@/lib/design/venue-templates/proscenium.keys";
-import { makeXMap as vt247X, makeYMap as vt247Y } from "@/lib/design/venue-templates/stretch";
-import { HOUSE_NARROW_WARNING as vt247Warn, houseDims as vt247House, prosceniumDims as vt247Dims } from "@/lib/design/venue-templates/house-dims";
-import { defaultAState as vt247Default } from "@/app/(app)/design/quick/engine";
+/* --- #249: venue templates — stretch engine, proscenium key lines, house dims --- */
+import { PROSCENIUM_TEMPLATE as vt249Tpl, stretchProscenium as vt249Stretch } from "@/lib/design/venue-templates/proscenium";
+import { PROSCENIUM_KEYS as vt249Keys, PROSCENIUM_SPACES as vt249Spaces } from "@/lib/design/venue-templates/proscenium.keys";
+import { makeXMap as vt249X, makeYMap as vt249Y } from "@/lib/design/venue-templates/stretch";
+import { HOUSE_NARROW_WARNING as vt249Warn, houseDims as vt249House, prosceniumDims as vt249Dims } from "@/lib/design/venue-templates/house-dims";
+import { defaultAState as vt249Default } from "@/app/(app)/design/quick/engine";
 {
-  const D0 = { ...vt247Keys.defaults, pit: true };
-  const X0 = vt247X(vt247Keys, D0), Y0 = vt247Y(vt247Keys, D0);
-  const pts = [...vt247Tpl.segments.flatMap(([a, b, c, d]) => [{ x: a, y: b }, { x: c, y: d }]), ...vt247Tpl.labels];
-  ok(pts.length > 100 && pts.every((p) => Math.abs(X0(p.x, p.y) - p.x) < 0.1 && Math.abs(Y0(p.y) - p.y) < 0.1), "#247: at the drawing's own dimensions the stretch leaves every point within 0.1\" of the drawing");
-  ok(vt247Tpl.units === "in" && vt247Keys.requiredLabels.every((t) => vt247Tpl.labels.some((l) => l.text === t)), "#247: the committed template is in inches and carries every required label");
+  const D0 = { ...vt249Keys.defaults, pit: true };
+  const X0 = vt249X(vt249Keys, D0), Y0 = vt249Y(vt249Keys, D0);
+  const pts = [...vt249Tpl.segments.flatMap(([a, b, c, d]) => [{ x: a, y: b }, { x: c, y: d }]), ...vt249Tpl.labels];
+  ok(pts.length > 100 && pts.every((p) => Math.abs(X0(p.x, p.y) - p.x) < 0.1 && Math.abs(Y0(p.y) - p.y) < 0.1), "#249: at the drawing's own dimensions the stretch leaves every point within 0.1\" of the drawing");
+  ok(vt249Tpl.units === "in" && vt249Keys.requiredLabels.every((t) => vt249Tpl.labels.some((l) => l.text === t)), "#249: the committed template is in inches and carries every required label");
 
   const variants = [
     { proWidthFt: 40, wingFt: 10, stageDepthFt: 24, houseWidthFt: 60, houseDepthFt: 45, pit: true },
@@ -30457,113 +30457,113 @@ import { defaultAState as vt247Default } from "@/app/(app)/design/quick/engine";
     { proWidthFt: 50, wingFt: 8, stageDepthFt: 30, houseWidthFt: 90, houseDepthFt: 70, pit: true },
   ];
   for (const d of variants) {
-    const X = vt247X(vt247Keys, d), Y = vt247Y(vt247Keys, d);
+    const X = vt249X(vt249Keys, d), Y = vt249Y(vt249Keys, d);
     const tag = `${d.proWidthFt}/${d.wingFt}/${d.stageDepthFt}/${d.houseWidthFt}/${d.houseDepthFt}`;
-    ok(Math.abs(X(-65.75, 200) - X(-71.75, 200) - 6) < 1e-9 && Math.abs(X(900.25, 200) - X(894.25, 200) - 6) < 1e-9, `#247 ${tag}: the stage side walls stay 6"`);
-    ok(Math.abs(Y(375) - Y(369) - 6) < 1e-9 && Math.abs(Y(9) - Y(3) - 6) < 1e-9 && Math.abs(Y(-943.107) - Y(-949.107) - 6) < 1e-9, `#247 ${tag}: the stage back wall, proscenium wall and booth-row wall stay 6"`);
-    ok(Math.abs(X(-64.691, -900) - X(-70.691, -900) - 6) < 1e-9 && Math.abs(X(900.25, -900) - X(894.25, -900) - 6) < 1e-9, `#247 ${tag}: the rooms behind the house keep 6" outer walls`);
+    ok(Math.abs(X(-65.75, 200) - X(-71.75, 200) - 6) < 1e-9 && Math.abs(X(900.25, 200) - X(894.25, 200) - 6) < 1e-9, `#249 ${tag}: the stage side walls stay 6"`);
+    ok(Math.abs(Y(375) - Y(369) - 6) < 1e-9 && Math.abs(Y(9) - Y(3) - 6) < 1e-9 && Math.abs(Y(-943.107) - Y(-949.107) - 6) < 1e-9, `#249 ${tag}: the stage back wall, proscenium wall and booth-row wall stay 6"`);
+    ok(Math.abs(X(-64.691, -900) - X(-70.691, -900) - 6) < 1e-9 && Math.abs(X(900.25, -900) - X(894.25, -900) - 6) < 1e-9, `#249 ${tag}: the rooms behind the house keep 6" outer walls`);
     const side = X(-63.32, -600) - X(-69.32, -600);
-    ok(Math.abs(side - 6) < 1.0, `#247 ${tag}: the house side walls stay within an inch of 6" (the drawing is ~1" out of square there): ${side.toFixed(2)}`);
-    ok(Math.abs(Y(-223.144) - Y(-279.022) - 55.878) < 1e-6 && Math.abs(Y(-620.963) - Y(-676.84) - 55.877) < 1e-6 && Math.abs(Y(-817.103) - Y(-949.107) - 132.004) < 1e-6, `#247 ${tag}: the catwalk, cross aisle and booth row keep their depth`);
-    ok(Math.abs(X(714.25, 9) - X(114.25, 9) - d.proWidthFt * 12) < 1e-6 && Math.abs(X(894.25, 200) - X(-65.75, 200) - (d.proWidthFt + 2 * d.wingFt) * 12) < 1e-6, `#247 ${tag}: the opening and the inside stage width match the typed widths`);
-    ok(Math.abs(Y(369) - Y(9) - d.stageDepthFt * 12) < 1e-6 && Math.abs(Y(9) - Y(-817.103) - d.houseDepthFt * 12) < 1e-6, `#247 ${tag}: stage depth and house depth match the typed depths`);
-    ok(Math.abs(X(414.25 + 478.605, -700) - X(414.25 - 478.605, -700) - d.houseWidthFt * 12) < 1e-6, `#247 ${tag}: the back of the house matches the typed house width`);
-    ok(Math.abs(X(642.25, -36) - X(186.25, -36) - 0.76 * d.proWidthFt * 12) < 1e-6, `#247 ${tag}: the pit keeps 76% of the opening`);
+    ok(Math.abs(side - 6) < 1.0, `#249 ${tag}: the house side walls stay within an inch of 6" (the drawing is ~1" out of square there): ${side.toFixed(2)}`);
+    ok(Math.abs(Y(-223.144) - Y(-279.022) - 55.878) < 1e-6 && Math.abs(Y(-620.963) - Y(-676.84) - 55.877) < 1e-6 && Math.abs(Y(-817.103) - Y(-949.107) - 132.004) < 1e-6, `#249 ${tag}: the catwalk, cross aisle and booth row keep their depth`);
+    ok(Math.abs(X(714.25, 9) - X(114.25, 9) - d.proWidthFt * 12) < 1e-6 && Math.abs(X(894.25, 200) - X(-65.75, 200) - (d.proWidthFt + 2 * d.wingFt) * 12) < 1e-6, `#249 ${tag}: the opening and the inside stage width match the typed widths`);
+    ok(Math.abs(Y(369) - Y(9) - d.stageDepthFt * 12) < 1e-6 && Math.abs(Y(9) - Y(-817.103) - d.houseDepthFt * 12) < 1e-6, `#249 ${tag}: stage depth and house depth match the typed depths`);
+    ok(Math.abs(X(414.25 + 478.605, -700) - X(414.25 - 478.605, -700) - d.houseWidthFt * 12) < 1e-6, `#249 ${tag}: the back of the house matches the typed house width`);
+    ok(Math.abs(X(642.25, -36) - X(186.25, -36) - 0.76 * d.proWidthFt * 12) < 1e-6, `#249 ${tag}: the pit keeps 76% of the opening`);
     const xs = Array.from({ length: 100 }, (_, i) => -80 + i * 10);
-    ok([200, -100, -300, -600, -900].every((y) => xs.every((x, i) => i === 0 || X(x, y) > X(xs[i - 1], y))) && xs.every((y, i) => i === 0 || Y(-y * 10) < Y(-xs[i - 1] * 10)), `#247 ${tag}: both maps are strictly monotonic (nothing folds over)`);
-    const onlyHouse = vt247X(vt247Keys, { ...D0, houseWidthFt: d.houseWidthFt });
-    ok([[100, 200], [-65.75, -100], [600, -150]].every(([x, y]) => Math.abs(onlyHouse(x, y) - X0(x, y)) < 1e-9), `#247 ${tag}: changing only the house width leaves the stage and forestage alone`);
+    ok([200, -100, -300, -600, -900].every((y) => xs.every((x, i) => i === 0 || X(x, y) > X(xs[i - 1], y))) && xs.every((y, i) => i === 0 || Y(-y * 10) < Y(-xs[i - 1] * 10)), `#249 ${tag}: both maps are strictly monotonic (nothing folds over)`);
+    const onlyHouse = vt249X(vt249Keys, { ...D0, houseWidthFt: d.houseWidthFt });
+    ok([[100, 200], [-65.75, -100], [600, -150]].every(([x, y]) => Math.abs(onlyHouse(x, y) - X0(x, y)) < 1e-9), `#249 ${tag}: changing only the house width leaves the stage and forestage alone`);
   }
 
-  const on = vt247Stretch(D0), off = vt247Stretch({ ...D0, pit: false });
-  ok(off.polylines.length === on.polylines.length - 3 && !off.labels.some((l) => l.text === "Pit") && !off.regions.Pit && !!on.regions.Pit && off.lines.stageEdge.length > 10, "#247: pit off drops the pit's three lines, its label and its Space; the stage-edge curve stays");
-  ok([...Object.keys(on.regions)].sort().join("|") === [...vt247Spaces].sort().join("|"), "#247: the stretched plan carries one region per Space name");
+  const on = vt249Stretch(D0), off = vt249Stretch({ ...D0, pit: false });
+  ok(off.polylines.length === on.polylines.length - 3 && !off.labels.some((l) => l.text === "Pit") && !off.regions.Pit && !!on.regions.Pit && off.lines.stageEdge.length > 10, "#249: pit off drops the pit's three lines, its label and its Space; the stage-edge curve stays");
+  ok([...Object.keys(on.regions)].sort().join("|") === [...vt249Spaces].sort().join("|"), "#249: the stretched plan carries one region per Space name");
 
-  const hd = (o: Record<string, number | null>) => vt247House({ width: 50, wing: 10, ...o });
-  ok(hd({}).widthFt === 70 && Math.abs(hd({}).depthFt - (9 + 817.103) / 12) < 1e-9 && hd({}).warning === null, "#247: with nothing typed the house is as wide as the stage and as deep as Jeff's drawing");
-  ok(hd({ houseHalfFt: 40 }).widthFt === 80 && hd({ houseWidthFt: 90, houseHalfFt: 40 }).widthFt === 90, "#247: a Quick Design save from before #247 keeps its dragged house width (2 × houseHalfFt); a typed width wins");
-  ok(hd({ houseWidthFt: 10 }).widthFt === 50 && hd({ houseWidthFt: 999 }).widthFt === 200 && hd({ houseDepthFt: 5 }).depthFt === 40 && hd({ houseDepthFt: 999 }).depthFt === 200, "#247: typed house sizes clamp (width ≥ max(45, pro width), depth 40–200)");
-  ok(hd({ houseWidthFt: 60 }).warning === vt247Warn && hd({ houseWidthFt: 70 }).warning === null, "#247: the narrow-house warning fires only when the house is narrower than the stage");
-  const pd = vt247Dims({ ...vt247Default(0), width: 44, wing: 12, depth: 28, houseDepthFt: 75, sys: { ...vt247Default(0).sys, pit: false } });
-  ok(pd.proWidthFt === 44 && pd.wingFt === 12 && pd.stageDepthFt === 28 && pd.houseWidthFt === 68 && pd.houseDepthFt === 75 && pd.pit === false, "#247: prosceniumDims reads pro width, wings, stage depth, the house and the pit switch off the designer state");
+  const hd = (o: Record<string, number | null>) => vt249House({ width: 50, wing: 10, ...o });
+  ok(hd({}).widthFt === 70 && Math.abs(hd({}).depthFt - (9 + 817.103) / 12) < 1e-9 && hd({}).warning === null, "#249: with nothing typed the house is as wide as the stage and as deep as Jeff's drawing");
+  ok(hd({ houseHalfFt: 40 }).widthFt === 80 && hd({ houseWidthFt: 90, houseHalfFt: 40 }).widthFt === 90, "#249: a Quick Design save from before #249 keeps its dragged house width (2 × houseHalfFt); a typed width wins");
+  ok(hd({ houseWidthFt: 10 }).widthFt === 50 && hd({ houseWidthFt: 999 }).widthFt === 200 && hd({ houseDepthFt: 5 }).depthFt === 40 && hd({ houseDepthFt: 999 }).depthFt === 200, "#249: typed house sizes clamp (width ≥ max(45, pro width), depth 40–200)");
+  ok(hd({ houseWidthFt: 60 }).warning === vt249Warn && hd({ houseWidthFt: 70 }).warning === null, "#249: the narrow-house warning fires only when the house is narrower than the stage");
+  const pd = vt249Dims({ ...vt249Default(0), width: 44, wing: 12, depth: 28, houseDepthFt: 75, sys: { ...vt249Default(0).sys, pit: false } });
+  ok(pd.proWidthFt === 44 && pd.wingFt === 12 && pd.stageDepthFt === 28 && pd.houseWidthFt === 68 && pd.houseDepthFt === 75 && pd.pit === false, "#249: prosceniumDims reads pro width, wings, stage depth, the house and the pit switch off the designer state");
 }
 
-/* --- #247 T3: the proscenium plan draws Jeff's template --- */
-import { buildPlan as vt247bBuild, prosGeom as vt247bGeom, renderPlanSvgMarkup as vt247bMarkup } from "@/app/(app)/design/quick/plan-svg";
-import { defaultAState as vt247bDefault } from "@/app/(app)/design/quick/engine";
+/* --- #249 T3: the proscenium plan draws Jeff's template --- */
+import { buildPlan as vt249bBuild, prosGeom as vt249bGeom, renderPlanSvgMarkup as vt249bMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as vt249bDefault } from "@/app/(app)/design/quick/engine";
 {
-  const base = vt247bDefault(0);
+  const base = vt249bDefault(0);
   const a = { ...base, venue: "pac", width: 50, depth: 30, wing: 15, sys: { ...base.sys, pit: true, curtains: true, lighting: true } };
-  const svg = vt247bMarkup(vt247bBuild(a, 8, 3, "#3a3f4a"), "#3a3f4a");
-  ok(["Stage", "Pit", "Catwalk", "Center Aisle", "Booth", "Electrical Room", "MISC Rooms"].every((t) => svg.includes(">" + t + "<")), "#247 T3: the plan shows every label from Jeff's drawing");
-  ok(!svg.includes("CONTROL BOOTH") && !svg.includes(">PIT<"), "#247 T3: the old schematic's booth box and PIT text are gone");
-  ok(svg.includes(">PLASTER LINE<") && svg.includes(">50'-0&quot;<") && svg.includes(">30'-0&quot;<") && svg.includes(">69'-0&quot;<") && svg.includes(">80'-0&quot;<"), "#247 T3: overlays still draw — plaster line; pro width, stage depth, house depth and house width dimensions");
-  const noPit = vt247bMarkup(vt247bBuild({ ...a, sys: { ...a.sys, pit: false } }, 8, 3, "#3a3f4a"), "#3a3f4a");
-  ok(!noPit.includes(">Pit<") && noPit.includes(">Catwalk<"), "#247 T3: with the pit off its label is gone and the rest stays");
-  const G = vt247bGeom(a);
-  ok(G.W === 640 && G.xProcL < G.cx && G.cx < G.xProcR && G.yTop < G.yBack && G.yBack < G.yPlaster && G.yPlaster < G.catwalk.y && G.catwalk.y < G.yBackWall && G.booth.y >= G.yBackWall - 2, "#247 T3: stage at the top, then the catwalk, the back wall and the booth behind it");
-  ok(Math.abs((G.xWingR - G.xWingL) / G.ppf - 80) < 0.05 && Math.abs(G.openW / G.ppf - 50) < 0.05, "#247 T3: the canvas scale reads true — 80' wall to wall, 50' opening");
-  const church = vt247bBuild({ ...a, venue: "church" }, 8, 3, "#3a3f4a");
-  ok((church.handles || []).some((h) => h.type === "door"), "#247 T3: other venue kinds keep their own plans (church still has its doors)");
+  const svg = vt249bMarkup(vt249bBuild(a, 8, 3, "#3a3f4a"), "#3a3f4a");
+  ok(["Stage", "Pit", "Catwalk", "Center Aisle", "Booth", "Electrical Room", "MISC Rooms"].every((t) => svg.includes(">" + t + "<")), "#249 T3: the plan shows every label from Jeff's drawing");
+  ok(!svg.includes("CONTROL BOOTH") && !svg.includes(">PIT<"), "#249 T3: the old schematic's booth box and PIT text are gone");
+  ok(svg.includes(">PLASTER LINE<") && svg.includes(">50'-0&quot;<") && svg.includes(">30'-0&quot;<") && svg.includes(">69'-0&quot;<") && svg.includes(">80'-0&quot;<"), "#249 T3: overlays still draw — plaster line; pro width, stage depth, house depth and house width dimensions");
+  const noPit = vt249bMarkup(vt249bBuild({ ...a, sys: { ...a.sys, pit: false } }, 8, 3, "#3a3f4a"), "#3a3f4a");
+  ok(!noPit.includes(">Pit<") && noPit.includes(">Catwalk<"), "#249 T3: with the pit off its label is gone and the rest stays");
+  const G = vt249bGeom(a);
+  ok(G.W === 640 && G.xProcL < G.cx && G.cx < G.xProcR && G.yTop < G.yBack && G.yBack < G.yPlaster && G.yPlaster < G.catwalk.y && G.catwalk.y < G.yBackWall && G.booth.y >= G.yBackWall - 2, "#249 T3: stage at the top, then the catwalk, the back wall and the booth behind it");
+  ok(Math.abs((G.xWingR - G.xWingL) / G.ppf - 80) < 0.05 && Math.abs(G.openW / G.ppf - 50) < 0.05, "#249 T3: the canvas scale reads true — 80' wall to wall, 50' opening");
+  const church = vt249bBuild({ ...a, venue: "church" }, 8, 3, "#3a3f4a");
+  ok((church.handles || []).some((h) => h.type === "door"), "#249 T3: other venue kinds keep their own plans (church still has its doors)");
   const regionBottom = (name: string) => Math.max(...G.regions[name].map((p) => p.y));
-  ok(["Booth", "Electrical Room", "MISC Rooms"].every((name) => { const l = G.labels.find((x) => x.text === name)!; return l.y + l.h < regionBottom(name); }), "#247 T3: room labels sit on the drawing's own baseline, clear of the room's bottom wall");
+  ok(["Booth", "Electrical Room", "MISC Rooms"].every((name) => { const l = G.labels.find((x) => x.text === name)!; return l.y + l.h < regionBottom(name); }), "#249 T3: room labels sit on the drawing's own baseline, clear of the room's bottom wall");
 }
 
-/* --- #247 T4: Quick Design — house walls drag, doors gone for proscenium --- */
-import { buildPlan as vt247cBuild, currentDoors as vt247cDoors, houseDragPatch as vt247cDrag, prosGeom as vt247cGeom } from "@/app/(app)/design/quick/plan-svg";
-import { defaultAState as vt247cDefault } from "@/app/(app)/design/quick/engine";
+/* --- #249 T4: Quick Design — house walls drag, doors gone for proscenium --- */
+import { buildPlan as vt249cBuild, currentDoors as vt249cDoors, houseDragPatch as vt249cDrag, prosGeom as vt249cGeom } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as vt249cDefault } from "@/app/(app)/design/quick/engine";
 {
-  const a = { ...vt247cDefault(0), venue: "school", width: 50, depth: 30, wing: 15 };
-  const G = vt247cGeom(a);
-  const plan = vt247cBuild(a, 8, 3, "#3a3f4a");
+  const a = { ...vt249cDefault(0), venue: "school", width: 50, depth: 30, wing: 15 };
+  const G = vt249cGeom(a);
+  const plan = vt249cBuild(a, 8, 3, "#3a3f4a");
   const hs = plan.handles || [];
   const side = (s: "L" | "R" | "B") => hs.find((h) => h.side === s)!;
-  ok(hs.length === 3 && hs.filter((h) => h.shape === "wall").length === 2 && side("B")?.shape === "backWall" && !hs.some((h) => h.type === "door") && !plan.hasDoors, "#247 T4: a proscenium plan offers two side-wall handles and a back-wall handle, and no doors");
+  ok(hs.length === 3 && hs.filter((h) => h.shape === "wall").length === 2 && side("B")?.shape === "backWall" && !hs.some((h) => h.type === "door") && !plan.hasDoors, "#249 T4: a proscenium plan offers two side-wall handles and a back-wall handle, and no doors");
   const zero = { sx: 0, sy: 0 };
-  ok(vt247cDrag(a, side("R"), { ...zero, dx: 5 * G.ppf, dy: 0 })?.houseWidthFt === 90 && vt247cDrag(a, side("L"), { ...zero, dx: -5 * G.ppf, dy: 0 })?.houseWidthFt === 90, "#247 T4: dragging either side wall out 5' widens the house 10', in whole feet");
-  ok(vt247cDrag(a, side("B"), { ...zero, dx: 0, dy: 12 * G.ppf })?.houseDepthFt === Math.round((9 + 817.103) / 12 + 12), "#247 T4: dragging the back wall down 12' deepens the house 12'");
-  ok(vt247cDrag(a, side("R"), { ...zero, dx: 1e6, dy: 0 })?.houseWidthFt === 200 && vt247cDrag(a, side("B"), { ...zero, dx: 0, dy: -1e6 })?.houseDepthFt === 40, "#247 T4: the drag respects the same limits as the typed fields");
-  const d = vt247cDoors(a);
-  ok(d.doorsL.length === 0 && d.doorsR.length === 0 && d.doorsBack.length === 0, "#247 T4: a proscenium room has no doors to add or remove");
+  ok(vt249cDrag(a, side("R"), { ...zero, dx: 5 * G.ppf, dy: 0 })?.houseWidthFt === 90 && vt249cDrag(a, side("L"), { ...zero, dx: -5 * G.ppf, dy: 0 })?.houseWidthFt === 90, "#249 T4: dragging either side wall out 5' widens the house 10', in whole feet");
+  ok(vt249cDrag(a, side("B"), { ...zero, dx: 0, dy: 12 * G.ppf })?.houseDepthFt === Math.round((9 + 817.103) / 12 + 12), "#249 T4: dragging the back wall down 12' deepens the house 12'");
+  ok(vt249cDrag(a, side("R"), { ...zero, dx: 1e6, dy: 0 })?.houseWidthFt === 200 && vt249cDrag(a, side("B"), { ...zero, dx: 0, dy: -1e6 })?.houseDepthFt === 40, "#249 T4: the drag respects the same limits as the typed fields");
+  const d = vt249cDoors(a);
+  ok(d.doorsL.length === 0 && d.doorsR.length === 0 && d.doorsBack.length === 0, "#249 T4: a proscenium room has no doors to add or remove");
   const ch = { ...a, venue: "church" };
-  const door = (vt247cBuild(ch, 8, 3, "#3a3f4a").handles || []).find((h) => h.type === "door")!;
-  ok(!!door && !!vt247cDrag(ch, door, { sx: 300, sy: 200, dx: 0, dy: 0 }), "#247 T4: church doors still drag");
+  const door = (vt249cBuild(ch, 8, 3, "#3a3f4a").handles || []).find((h) => h.type === "door")!;
+  ok(!!door && !!vt249cDrag(ch, door, { sx: 300, sy: 200, dx: 0, dy: 0 }), "#249 T4: church doors still drag");
   const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
   const sip = readFileSync(join(process.cwd(), "src/components/design/scope-inputs-panel.tsx"), "utf8");
-  ok(qd.includes("plan.hasDoors") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#247 T4: Quick Design shows door buttons only where the plan has doors, and Reset house clears the house size");
-  ok(sip.includes("House width") && sip.includes("House depth") && sip.includes("houseDims(") && sip.includes("h.warning"), "#247 T4: the dimension panel shows house width, house depth and the narrow-house warning");
+  ok(qd.includes("plan.hasDoors") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#249 T4: Quick Design shows door buttons only where the plan has doors, and Reset house clears the house size");
+  ok(sip.includes("House width") && sip.includes("House depth") && sip.includes("houseDims(") && sip.includes("h.warning"), "#249 T4: the dimension panel shows house width, house depth and the narrow-house warning");
 }
 
-/* --- #247 T5: Grid — starter Spaces and Auto fill on the template --- */
-import { prosGeom as vt247dGeom } from "@/app/(app)/design/quick/plan-svg";
-import { defaultAState as vt247dDefault } from "@/app/(app)/design/quick/engine";
-import { generateAutoLayout as vt247dLayout, venueFrame as vt247dFrame } from "@/lib/design/grid-auto-layout";
-import { legacyProsGeom as vt247dLegacy } from "@/lib/design/legacy-pros-geom";
-import { PROSCENIUM_SPACES as vt247dSpaces } from "@/lib/design/venue-templates/proscenium.keys";
-import { PROSCENIUM_TEMPLATE_ID as vt247dTplId } from "@/lib/design/venue-templates/proscenium";
+/* --- #249 T5: Grid — starter Spaces and Auto fill on the template --- */
+import { prosGeom as vt249dGeom } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as vt249dDefault } from "@/app/(app)/design/quick/engine";
+import { generateAutoLayout as vt249dLayout, venueFrame as vt249dFrame } from "@/lib/design/grid-auto-layout";
+import { legacyProsGeom as vt249dLegacy } from "@/lib/design/legacy-pros-geom";
+import { PROSCENIUM_SPACES as vt249dSpaces } from "@/lib/design/venue-templates/proscenium.keys";
+import { PROSCENIUM_TEMPLATE_ID as vt249dTplId } from "@/lib/design/venue-templates/proscenium";
 import type { AutoCard as Vt247dCard } from "@/lib/design/auto-estimate";
-async function grid247T5AsyncChecks(): Promise<void> {
+async function grid249T5AsyncChecks(): Promise<void> {
   const GP = await import("../src/lib/stores/grid-projects");
-  const base = vt247dDefault(0);
+  const base = vt249dDefault(0);
   const a = { ...base, venue: "pac", width: 50, depth: 30, wing: 15, sys: { ...base.sys, pit: true } };
-  ok(GP.starterSpaces(a, "proscenium", "sh").map((s) => s.name).join("|") === vt247dSpaces.join("|"), "#247 T5: a proscenium base sheet starts with Stage, Pit, House, Catwalk, Center Aisle, Booth, Electrical Room and MISC Rooms");
-  ok(!GP.starterSpaces({ ...a, sys: { ...a.sys, pit: false } }, "proscenium", "sh").some((s) => s.name === "Pit"), "#247 T5: no Pit Space when the pit is off");
+  ok(GP.starterSpaces(a, "proscenium", "sh").map((s) => s.name).join("|") === vt249dSpaces.join("|"), "#249 T5: a proscenium base sheet starts with Stage, Pit, House, Catwalk, Center Aisle, Booth, Electrical Room and MISC Rooms");
+  ok(!GP.starterSpaces({ ...a, sys: { ...a.sys, pit: false } }, "proscenium", "sh").some((s) => s.name === "Pit"), "#249 T5: no Pit Space when the pit is off");
 
-  const fr = vt247dFrame(a), G = vt247dGeom(a);
-  ok(!!fr.catwalk && !!fr.stageEdge && Math.abs(fr.audience.y - G.house.y / G.H) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#247 T5: the Auto fill frame is the template's own House, Booth, Catwalk and stage edge");
-  const old = vt247dFrame(a, { legacy: true }), L = vt247dLegacy(a);
-  ok(!old.catwalk && Math.abs(old.audience.y - L.yHouseFront / L.H) < 1e-12 && Math.abs(old.booth.y - L.yBackWall / L.H) < 1e-12, "#247 T5: a design whose base sheet predates the template keeps the old frame");
+  const fr = vt249dFrame(a), G = vt249dGeom(a);
+  ok(!!fr.catwalk && !!fr.stageEdge && Math.abs(fr.audience.y - G.house.y / G.H) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#249 T5: the Auto fill frame is the template's own House, Booth, Catwalk and stage edge");
+  const old = vt249dFrame(a, { legacy: true }), L = vt249dLegacy(a);
+  ok(!old.catwalk && Math.abs(old.audience.y - L.yHouseFront / L.H) < 1e-12 && Math.abs(old.booth.y - L.yBackWall / L.H) < 1e-12, "#249 T5: a design whose base sheet predates the template keeps the old frame");
 
   const line = (rowKey: string, ref: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref, unitCost: 1, unitSell: 1, total: qty, swapped: false });
   const cards = [
     { scope: "lighting", tier: "better", lines: [line("lighting:front", "VT247-FRONT", 8)] },
     { scope: "audio", tier: "better", lines: [line("audio:subwoofer", "VT247-SUB", 4)] },
   ] as unknown as Vt247dCard[];
-  const specs = vt247dLayout(a, cards, { electrics: 3, sets: 10 });
+  const specs = vt249dLayout(a, cards, { electrics: 3, sets: 10 });
   const fronts = specs.filter((s) => s.auto.rowKey === "lighting:front");
   const subs = specs.filter((s) => s.auto.rowKey === "audio:subwoofer");
   const cw = fr.catwalk!;
-  ok(fronts.length === 8 && fronts.every((s) => s.x >= cw.x && s.x <= cw.x + cw.w && s.y >= cw.y && s.y <= cw.y + cw.h), "#247 T5: front lights hang on the catwalk");
+  ok(fronts.length === 8 && fronts.every((s) => s.x >= cw.x && s.x <= cw.x + cw.w && s.y >= cw.y && s.y <= cw.y + cw.h), "#249 T5: front lights hang on the catwalk");
   const sp = GP.starterSpaces(a, "proscenium", "sh");
   const inPoly = (p: { x: number; y: number }, poly: Array<{ x: number; y: number }>) => {
     let c = false;
@@ -30572,10 +30572,10 @@ async function grid247T5AsyncChecks(): Promise<void> {
     }
     return c;
   };
-  ok(fronts.every((s) => inPoly(s, sp.find((x) => x.name === "Catwalk")!.points)), "#247 T5: …so each front light falls inside the Catwalk Space");
+  ok(fronts.every((s) => inPoly(s, sp.find((x) => x.name === "Catwalk")!.points)), "#249 T5: …so each front light falls inside the Catwalk Space");
   const edge = fr.stageEdge!;
   const near = (p: { x: number; y: number }) => Math.min(...edge.map((q) => Math.hypot(q.x - p.x, q.y - p.y)));
-  ok(subs.length === 4 && subs.every((s) => near(s) < 0.01), "#247 T5: subwoofers sit along the stage edge curve");
+  ok(subs.length === 4 && subs.every((s) => near(s) < 0.01), "#249 T5: subwoofers sit along the stage edge curve");
 
   const gp = await GP.createProject({ name: "Test247 template sheet", customer: "", customerId: null, by: "Test Harness" });
   registerFixture("grid_projects", gp.id);
@@ -30583,14 +30583,14 @@ async function grid247T5AsyncChecks(): Promise<void> {
   const sheet = await GP.generateBaseSheet(gp.id, a, "#3a3f4a", "Test Harness");
   if (sheet) registerFixture("grid_sheets", sheet.id);
   let p = (await GP.getProject(gp.id))!;
-  ok(p.intake?.baseSheetTemplate === vt247dTplId && (p.spaces || []).map((s) => s.name).join("|") === vt247dSpaces.join("|"), "#247 T5: generating the base sheet stamps the template id and adds the template's Spaces");
+  ok(p.intake?.baseSheetTemplate === vt249dTplId && (p.spaces || []).map((s) => s.name).join("|") === vt249dSpaces.join("|"), "#249 T5: generating the base sheet stamps the template id and adds the template's Spaces");
   const cal = (p.calibrations || []).find((c) => c.docId === sheet?.id);
-  ok(!!cal && cal.unit === "ft" && cal.refLength === 80, "#247 T5: the sheet is calibrated from the template (80' inside stage width)");
+  ok(!!cal && cal.unit === "ft" && cal.refLength === 80, "#249 T5: the sheet is calibrated from the template (80' inside stage width)");
   await GP.saveGridIntake(gp.id, { ...p.intake!, baseSheetTemplate: undefined, notes: "edited" });
   p = (await GP.getProject(gp.id))!;
-  ok(p.intake?.baseSheetTemplate === vt247dTplId && p.intake?.notes === "edited", "#247 T5: re-saving the intake keeps the template stamp");
+  ok(p.intake?.baseSheetTemplate === vt249dTplId && p.intake?.notes === "edited", "#249 T5: re-saving the intake keeps the template stamp");
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
-  ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#247 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
+  ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#249 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
   const intake = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/grid-intake.tsx"), "utf8");
-  ok(intake.includes("House width") && intake.includes("House depth") && intake.includes("houseDims(") && intake.includes("h.warning"), "#247 T5: the Grid intake shows house width, house depth and the narrow-house warning");
+  ok(intake.includes("House width") && intake.includes("House depth") && intake.includes("houseDims(") && intake.includes("h.warning"), "#249 T5: the Grid intake shows house width, house depth and the narrow-house warning");
 }

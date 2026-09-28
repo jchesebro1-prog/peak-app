@@ -192,7 +192,7 @@ export default function ScopeInputsPanel({
           ))}
           {venue.kind === "proscenium" &&
             (() => {
-              // #247: the house the template stretches to — shown as the value in use (typed, or the default).
+              // #249: the house the template stretches to — shown as the value in use (typed, or the default).
               const h = houseDims(value);
               const rows: Array<{ key: "houseWidthFt" | "houseDepthFt"; label: string; note: string; v: number; lim: [number, number] }> = [
                 { key: "houseWidthFt", label: "House width", note: "Inside walls, at the back of the house", v: Math.round(h.widthFt), lim: houseWidthLim(value) },

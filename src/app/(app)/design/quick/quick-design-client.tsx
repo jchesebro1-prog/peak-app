@@ -459,7 +459,7 @@ export default function QuickDesignClient({
   };
   const resetHouse = () => updA({ houseHalfFt: null, houseWidthFt: null, houseDepthFt: null, doorsL: null, doorsR: null, doorsBack: null });
 
-  // #247: proscenium walls drag RELATIVE to where the drag began (the canvas
+  // #249: proscenium walls drag RELATIVE to where the drag began (the canvas
   // rescales as the house grows); church doors keep the prototype's absolute
   // mapping. Deltas convert at the drag-start scale (the SVG is width:100%).
   const dragCleanup = useRef<(() => void) | null>(null);

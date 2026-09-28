@@ -3,7 +3,7 @@ import { PROSCENIUM_KEYS } from "./proscenium.keys";
 import type { StretchDims } from "./types";
 
 /**
- * House size for a proscenium room (#247) — the typed feet, or a default.
+ * House size for a proscenium room (#249) — the typed feet, or a default.
  * Pure; safe in client components. Width is inside faces at the back of the
  * house; depth is plaster line → back wall at the centreline.
  */
@@ -25,7 +25,7 @@ const pos = (v: unknown): v is number => typeof v === "number" && Number.isFinit
 const clamp = (n: number, [lo, hi]: [number, number]) => Math.max(lo, Math.min(hi, n));
 
 export function houseDims(s: HouseInput): { widthFt: number; depthFt: number; warning: string | null } {
-  // A Quick Design save from before #247 carries only its dragged half-width.
+  // A Quick Design save from before #249 carries only its dragged half-width.
   const rawW = pos(s.houseWidthFt) ? s.houseWidthFt : pos(s.houseHalfFt) ? 2 * s.houseHalfFt : stageInsideWidthFt(s);
   const widthFt = clamp(rawW, houseWidthLim(s));
   const depthFt = clamp(pos(s.houseDepthFt) ? s.houseDepthFt : PROSCENIUM_KEYS.defaults.houseDepthFt, HOUSE_DEPTH_LIM);

@@ -1,5 +1,5 @@
 /**
- * Venue templates (#247) — a background drawing converted from Jeff's DWG
+ * Venue templates (#249) — a background drawing converted from Jeff's DWG
  * (scripts/venue-template-convert.py) plus its hand-written key lines. All
  * template coordinates are drawing inches, x right, y UP (CAD convention).
  */

@@ -138,7 +138,7 @@ export type AState = {
   /** manual-layout placements — preserved opaquely so saved prototypes round-trip */
   placements: unknown[];
   houseHalfFt?: number | null;
-  /** #247: the proscenium house — width (inside faces, back of house) and depth (plaster line → back wall), ft. null = the default (venue-templates/house-dims). */
+  /** #249: the proscenium house — width (inside faces, back of house) and depth (plaster line → back wall), ft. null = the default (venue-templates/house-dims). */
   houseWidthFt?: number | null;
   houseDepthFt?: number | null;
   doorsL?: number[] | null;

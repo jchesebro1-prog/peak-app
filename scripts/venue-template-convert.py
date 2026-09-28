@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Venue templates (#247): convert a venue background drawing (DWG or DXF)
+"""Venue templates (#249): convert a venue background drawing (DWG or DXF)
 into the Grid's venue-template JSON.
 
   python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg

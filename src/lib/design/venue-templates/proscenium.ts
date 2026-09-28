@@ -3,7 +3,7 @@ import { PROSCENIUM_KEYS } from "./proscenium.keys";
 import { stretchTemplate } from "./stretch";
 import type { StretchDims, StretchedPlan, VenueTemplate } from "./types";
 
-/** Jeff's Auditorium / PAC background (#247), converted by scripts/venue-template-convert.py. */
+/** Jeff's Auditorium / PAC background (#249), converted by scripts/venue-template-convert.py. */
 export const PROSCENIUM_TEMPLATE = raw as unknown as VenueTemplate;
 /** Stamped on a Grid design whose base sheet this template drew (intake.baseSheetTemplate). */
 export const PROSCENIUM_TEMPLATE_ID = "proscenium@1";

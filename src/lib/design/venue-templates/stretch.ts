@@ -1,7 +1,7 @@
 import type { PathItem, Pt, StretchDims, StretchedPlan, TemplateKeys, VenueTemplate } from "./types";
 
 /**
- * The venue-template stretch (#247). Pure. Every point moves through a
+ * The venue-template stretch (#249). Pure. Every point moves through a
  * front-to-back map (piecewise-linear through the key lines, the plaster line
  * fixed) and a side-to-side map about the centreline that depends on how far
  * downstage the point is. Straight lines are densified (≤ 12") and arcs

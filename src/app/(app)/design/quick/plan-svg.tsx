@@ -47,7 +47,7 @@ export type PlanData = {
   legend?: Array<{ sw: React.CSSProperties; label: string }>;
   isHouse?: boolean;
   canSlideWalls?: boolean;
-  /** #247: the plan offers add/remove doors (church). */
+  /** #249: the plan offers add/remove doors (church). */
   hasDoors?: boolean;
 };
 
@@ -153,7 +153,7 @@ const boxOf = (pts: XY[]): Box => {
 };
 
 /**
- * Shared proscenium groundplan geometry (#247): Jeff's Auditorium / PAC
+ * Shared proscenium groundplan geometry (#249): Jeff's Auditorium / PAC
  * template drawing (lib/design/venue-templates) stretched to the room and
  * laid on the 640-px plan canvas, stage at the top. The auto plan, the Grid
  * base sheet, Quick Design's wall drag, starter Spaces and Auto fill all read
@@ -223,7 +223,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   const tick = (x: number, y: number) => lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
   const trace = (pts: XY[]) => pts.map((p, i) => (i ? "L " : "M ") + p.x + " " + p.y).join(" ");
 
-  // floors, the playing area, then the room itself — Jeff's template drawing, stretched (#247)
+  // floors, the playing area, then the room itself — Jeff's template drawing, stretched (#249)
   paths.push({ d: trace(G.regions.Stage) + " Z", fill: "#f6f7f9", stroke: "none" });
   paths.push({ d: trace(G.regions.House) + " Z", fill: "#f9fafb", stroke: "none" });
   paths.push({ d: "M " + R(xProcL) + " " + R(yBack) + " H " + R(xProcR) + " V " + R(yPlaster) + " H " + R(xProcL) + " Z", fill: "#ffffff", stroke: "#e3e5ea", sw: 1 });
@@ -293,7 +293,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     texts.push({ x: R(bcx), y: R(bx.y + bx.h - 6), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
 
-  // #247: drag handles — each side wall sets house width, the back wall house depth
+  // #249: drag handles — each side wall sets house width, the back wall house depth
   handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
   handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
   handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
@@ -791,7 +791,7 @@ export function renderPlanSvgMarkup(plan: PlanData, accent: string): string {
 export type DragPos = { sx: number; sy: number; dx: number; dy: number };
 
 /**
- * Converts a wall / door drag into a state patch. Proscenium (#247): the side
+ * Converts a wall / door drag into a state patch. Proscenium (#249): the side
  * walls set house width (symmetric) and the back wall house depth, from the
  * drag's DELTA at the drag-start scale — the canvas rescales as the house
  * grows, so an absolute position would chase itself. Whole feet, clamped like
@@ -830,7 +830,7 @@ export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos): Partial
   return { [key]: arr } as Partial<AState>;
 }
 
-/** Door arrays for add/remove door — church only; a proscenium room's entrances are in its template (#247). */
+/** Door arrays for add/remove door — church only; a proscenium room's entrances are in its template (#249). */
 export function currentDoors(s: AState): { doorsL: number[]; doorsR: number[]; doorsBack: number[] } {
   const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
   if ((venue.kind || "proscenium") !== "church") return { doorsL: [], doorsR: [], doorsBack: [] };

@@ -3,7 +3,7 @@ import type { AState } from "@/app/(app)/design/quick/engine";
 const R = (n: number) => Math.round(n * 10) / 10;
 
 /**
- * The proscenium geometry from before #247 — the hand-drawn schematic
+ * The proscenium geometry from before #249 — the hand-drawn schematic
  * (house of four seat arcs, doors, a booth box). Kept for Grid designs whose
  * generated base sheet was drawn with it: a re-fill must land on the plan the
  * design actually has (grid-auto-layout venueFrame, intake.baseSheetTemplate).

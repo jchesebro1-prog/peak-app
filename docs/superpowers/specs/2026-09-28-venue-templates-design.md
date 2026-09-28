@@ -1,6 +1,6 @@
 # Venue templates — stretchable background drawings (design)
 
-**Date:** 2026-09-28 · **Punch:** #247 (recheck the free number on origin/main right before writing docs) · **Branch:** `feat/venue-templates`
+**Date:** 2026-09-28 · **Punch:** #249 (recheck the free number on origin/main right before writing docs) · **Branch:** `feat/venue-templates`
 
 ## Problem
 

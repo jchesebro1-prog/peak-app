@@ -243,7 +243,7 @@ export type GridProject = {
     notes: string;
     /** Shared Quick Design inputs; the Grid editor is their manual-layout workspace. */
     autoConfig?: AState;
-    /** #247: the venue template that drew the generated base sheet ("proscenium@1"); absent = the pre-#247 schematic. */
+    /** #249: the venue template that drew the generated base sheet ("proscenium@1"); absent = the pre-#249 schematic. */
     baseSheetTemplate?: string;
   };
   /** Sheet display order; the docs live in grid_sheets. */
@@ -366,7 +366,7 @@ export async function createProject(input: {
 
 /**
  * Starter Spaces for a generated base sheet (Task 1, #38 — D145). Proscenium
- * Spaces come straight from the template's own labeled regions (#247) — one
+ * Spaces come straight from the template's own labeled regions (#249) — one
  * Space per region name in `PROSCENIUM_SPACES`, outlined from the stretched
  * drawing (`prosGeom`), so they land exactly where the template drew them
  * (Pit absent when the pit is off). Church venues get Spaces drawn from the
@@ -388,7 +388,7 @@ export function starterSpaces(
   sheetId: string
 ): Array<{ sheetId: string; page: number; name: string; points: Point[] }> {
   if (kind === "proscenium") {
-    // #247: one Space per labeled area of the template, outlined from the stretched drawing.
+    // #249: one Space per labeled area of the template, outlined from the stretched drawing.
     const G = prosGeom(a);
     const at = (p: Point): Point => ({ x: clamp01(p.x / G.W), y: clamp01(p.y / G.H) });
     return PROSCENIUM_SPACES.filter((name) => G.regions[name]).map((name) => ({ sheetId, page: 1, name, points: G.regions[name].map(at) }));
@@ -449,7 +449,7 @@ export async function generateBaseSheet(
   // Auto-calibrate from the plan's own known geometry so nothing downstream
   // ever prompts for a calibration step on this sheet (Task 1 acceptance).
   // A proscenium calibrates from the template's inner stage walls, exactly
-  // pro width + 2 × wing apart (#247). Every other buildPlan* function's
+  // pro width + 2 × wing apart (#249). Every other buildPlan* function's
   // FIRST rect is the outer room/house floor — its real-world width is the
   // venue's full width in feet — a reference that holds for every other
   // venue kind without needing each builder's private margin constants (see
@@ -459,7 +459,7 @@ export async function generateBaseSheet(
   let scale: number | null = null;
   let refWidthFt = a.width;
   if (kind === "proscenium") {
-    // #247: the template's inner stage walls are exactly pro width + 2 × wing apart.
+    // #249: the template's inner stage walls are exactly pro width + 2 × wing apart.
     const G = prosGeom(a);
     refWidthFt = G.dims.proWidthFt + 2 * G.dims.wingFt;
     scale = calibrationScale({ x: G.xWingL / plan.W, y: G.yBack / plan.H }, { x: G.xWingR / plan.W, y: G.yBack / plan.H }, plan.H / plan.W, refWidthFt);

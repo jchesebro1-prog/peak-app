@@ -61,7 +61,7 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   // recorded) count toward each row's new quantity. Read from the same
   // project snapshot the fill priced; the replace below never removes them.
   const kept = keptUnitsByRow(project.placements || [], scopes, optionId);
-  // #247: a base sheet the template didn't draw keeps the old frame.
+  // #249: a base sheet the template didn't draw keeps the old frame.
   const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept, legacy: project.intake?.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID });
   const res = await replaceAutoPlacements(projectId, { optionId, scopes, sheetId, page: 1, items, by });
   if (!res) return { ok: false, error: "That option was removed — refresh the page." };
