@@ -218,6 +218,32 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
 }
 
 /**
+ * #251 (Jeff, Sep 28): the customer document's "Materials, installation &
+ * freight included" header line names only what the quote actually carries
+ * — a quote with no labor doesn't say it includes installation, and same
+ * for freight sitting at $0. Materials is named whenever the quote carries
+ * any (mat > 0); installation only when there's labor sell; freight only
+ * when there's freight sell. Joined with commas and a trailing "&" (never
+ * an Oxford comma before it), e.g. "Materials, installation & freight
+ * included", "Materials & freight included", "Materials included". Empty
+ * when none apply (a POR-only quote, say) — the caller omits the line.
+ */
+export function inclusionsLine(t: Pick<QuoteTotals, "mat" | "lab" | "fr">): string {
+  const parts: string[] = [];
+  if (t.mat > 0) parts.push("materials");
+  if (t.lab > 0) parts.push("installation");
+  if (t.fr > 0) parts.push("freight");
+  if (parts.length === 0) return "";
+  const joined =
+    parts.length === 1
+      ? parts[0]
+      : parts.length === 2
+      ? parts.join(" & ")
+      : parts.slice(0, -1).join(", ") + " & " + parts[parts.length - 1];
+  return joined.charAt(0).toUpperCase() + joined.slice(1) + " included";
+}
+
+/**
  * #242 final — the value a saved Estimator quote carries is the server's own
  * figure, never a client-posted one: the review-limit gate auto-approves on
  * the stored value. Recomputes totals() (tax 0, as the builder does) over a

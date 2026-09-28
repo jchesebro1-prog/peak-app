@@ -9329,6 +9329,26 @@ and compare the number against the same curtain opened in the Estimator.
 bottom pricing and a firmer (non-review) curtain path are all still Jeff's call — he wants curtains reviewed for
 now. See D437–D440.
 
+---
+
+## 251. Estimate document names installation and freight only when the quote has them — DONE 2026-09-28
+
+**Reported:** 2026-09-28 (Jeff): "In the estimate template we need to ensure that if there is no labor on the
+estimate then it does not say includes installation. I think that should be exempted and same with freight if
+the cost is 0."
+
+**Done.** The customer quote document's (#222) header line — "Materials, installation & freight included" —
+now names only what the quote actually carries: materials whenever there's material sell, installation only
+when there's labor sell, freight only when there's freight sell, joined naturally ("Materials & freight
+included", "Materials & installation included", "Materials included") and left off the page entirely when none
+apply. The totals block's "Labor — installation & commissioning" row and its freight row now print only when
+their own total is above $0; the grand total prints unchanged either way. One new pure helper,
+`inclusionsLine()` (`src/app/(app)/estimator/pricing.ts`), backs the header line so the rule lives in one place.
+Applies everywhere the document renders: the Estimator's customer preview, the signed print route, the saved
+PDF, and the portal. See D441.
+
+**Still open.** None.
+
 ## 252. Customer portal — browse the catalog by department — DONE 2026-09-28 (D442–D445)
 
 **Reported:** Jeff (2026-09-27, #245 brainstorm): *"I think we can filter by Manufacturer then by category … We
