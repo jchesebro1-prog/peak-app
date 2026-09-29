@@ -129,7 +129,7 @@ export const TEMPLATES: TemplateDef[] = [
         label: "Cost note / proposed-fee basis",
         multiline: true,
         default:
-          "This amount covers mobilization, on-site NFPA 705 field testing, item-by-item disposition, and issuance of the final document set. Applicable sales and use tax, lift rentals, or other site-specific third-party costs may be stated separately when required.",
+          "This amount covers mobilization, on-site NFPA 705 field testing, item-by-item disposition, and issuance of the final document set. Applicable sales and use tax, lift rentals not listed above, or other site-specific third-party costs may be stated separately when required.",
       },
       {
         id: "signoff",
@@ -309,7 +309,7 @@ export const TEMPLATES: TemplateDef[] = [
         label: "Cost note / engagement-fee basis",
         multiline: true,
         default:
-          "This amount covers mobilization, the agreed rigging inspection scope, prioritization of findings, and issuance of the written results and summary record package. Applicable sales and use tax, lift rentals, or other third-party site costs may be stated separately when required.",
+          "This amount covers mobilization, the agreed rigging inspection scope, prioritization of findings, and issuance of the written results and summary record package. Applicable sales and use tax, lift rentals not listed above, or other third-party site costs may be stated separately when required.",
       },
       {
         id: "signoff",
