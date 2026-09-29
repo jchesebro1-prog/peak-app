@@ -9658,6 +9658,16 @@ Shell file came from (no Fall Creek 11 61 13 spec was ever saved — the library
 numbers vs Bray's TOC (MasterFormat has 11 61 23 as Folding and Portable Stages; SP-1002 and SP-1004 are both
 26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61).
 
+**Follow-up (same day) — Acoustic Shell + Pit Filler (D478).** Jeff's Acoustic Shell file turned out to be the North HS
+Word original edited by hand (its own list definitions: `lvlRestart=0` → 1.2/G numbered 4.–6., Times labels on Arial
+text, 0.5" indents), not a builder output. The library already held its Part 2 (four system records); the gaps were
+the duplicated record headings and 2.1 never printing — fixed by D478 plus companion PS-116113-005 SYSTEM DESCRIPTION
+(StageRight Opus II basis of design, Wenger acceptable). Pit Filler 11 61 14 replaced from Jeff's StageRight ME-1000
+file (production, backup `backups/peak-backup-20260929-1554.json`): Parts 1/3 match the file (warranty 3 years, Part 3
+= Training only); PS-116114-001…004 (Clear Span) archived; new PS-116114-005…008 (same match keys, supports now
+"Pit Filler – ME-1000 Supports") + companion -009 MANUFACTURERS. Local dev DB not updated. Open: Jeff's file heads
+it "11 61 23 – Pit Filler" (kept 11 61 14); bracket Arena / 36–56" as job values?
+
 ---
 
 ## 266. Estimator — Copy a system to another estimate (or within this one), re-priced — DONE 2026-09-29 (D476)

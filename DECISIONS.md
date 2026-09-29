@@ -8019,3 +8019,17 @@ silently re-pricing what customers already have, only new systems and draft/unsa
 sent/won/lost and portal-built quotes stay exact until someone clicks Round to $25 on a system (a draft's first open
 after this change shows "Unsaved changes" until Save). A copied system drops its typed price because Copy re-prices the
 lines (D476).
+
+## D478. A record titled like its article prints as the article's own clauses; 2.1 articles ride as companions (#265, 2026-09-29)
+
+Jeff's Fall Creek Acoustic Shell and Pit Filler files follow the architect's layout — "2.2 TOWERS, SIDE AND BACK WALLS"
+then "A. Towers:" — but the builder printed every record as a product entry, so a record titled like its article
+repeated the title ("A. TOWERS, SIDE AND BACK WALLS") and pushed its body a level deeper. Now an entry whose title
+equals its article's (trimmed, case-insensitive, trailing colon/period ignored — `titledLikeArticle`) is `flat`: no
+heading prints, its body parses in article context (A., 1., a.…) and its letters continue after the article's General
+lines and any earlier entries. Normal entries are unchanged; the builder's product rows still show the heading.
+14 of the v1 library's 46 records print flat (11 61 13 and 11 61 14 all, 11 61 23 -008/-009/-010, 26 09 61
+-012/-013/-022/-028). Accepted: with Print quantities on, a flat entry's "(Quantity: N)" (which lived in the heading)
+does not print. Separately, a Part 2 article prints only when an entry lands in it, so article-only text (2.1 System
+Description, 2.1 Manufacturers) never printed; those are now companion records riding with their section's records
+(PS-116113-005, PS-116114-009) instead of article General text.
