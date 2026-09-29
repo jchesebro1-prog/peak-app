@@ -9553,23 +9553,27 @@ Legend chips are unchanged. Harness `#261`. See D468.
 
 ---
 
-## 262. Estimator — Parts list (CSV) for the PM, assemblies broken into their parts — DONE 2026-09-29 (D469)
+## 262. Estimator — Parts list (CSV) for the PM, assemblies broken into their parts — DONE 2026-09-29 (D469, D471)
 
 **Reported:** Jeff (2026-09-29): "Can estimator get a CSV export option for the PM that has model number description
-and cost. We would also need to make sure it tracks through the parts of assemblies that have multiple parts."
+and cost. We would also need to make sure it tracks through the parts of assemblies that have multiple parts." Then
+sent the exact layout (`Dropbox/est-1009-parts-list.numbers`): "I do need exactly those columns in that order". Room:
+option 2 — a field per system.
 
 **Done.** A **Parts list (CSV)** button beside Save in the Estimator header downloads `<estimate number>-parts-list.csv`
-with Manufacturer, Model number, Peak SKU, Description, Qty, Unit, Unit cost, Extended cost and Used in, plus a Total
-row. It reads the estimate on screen, so unsaved edits are included. An assembly line is broken into its included
-parts (part qty × line qty; optional add-ons left at 0 are left out), each with the catalog's description,
-manufacturer and model number. A vendor quote is listed line by line. The same part used in several places is one row
-with the total quantity, and Used in names every system › assembly it came from. Labor, labor overhead and optional
-(option) lines are left out. Model number: the line's own model → its own mfr P/N → the catalog's model → the
-catalog's P/N → the catalog SKU; blank for a part that isn't in the catalog. When an assembly's line cost no longer
-matches the sum of its parts, or a vendor quote's typed total differs from its lines, a "Cost adjustment" row carries
-the difference, so the file always totals to the estimate's material cost (freight excluded). Pure module
-`src/app/(app)/estimator/parts-csv.ts`; `resolveCatalogSkusAction` now also returns mfr / P/N / model number. Harness
-`#262`. See D469.
+with exactly Jeff's columns: Manufacturer, Model number, Room, System, Qty, Unit Cost, Unit Sell, Description, Notes (no
+total row). It reads the estimate on screen, so unsaved edits are included. Each system card gains a **Room** box
+(internal only, never on the customer document); blank uses the quote's venue name, shown as its placeholder. An
+assembly line is broken into its included parts (part qty × line qty; optional add-ons at 0 left out) with the
+catalog's description, manufacturer and model number; a vendor quote is listed line by line. Unit Sell of an assembly
+or vendor-quote part is the line's sell split by cost share, so the parts carry the line's margin and add up to it.
+Notes: "Part of: <assembly>", "per <unit>" when not sold each, then the line's internal note. The same part is merged
+within one room + system. Labor, labor overhead and option lines are left out. Model number: the line's own model → its
+own mfr P/N → the catalog's model → the catalog's P/N → the catalog SKU; blank for a part not in the catalog. When an
+assembly's cost no longer matches its parts, or a vendor quote's typed total differs from its lines, a "Cost
+adjustment" row carries the difference, so Σ qty × Unit Cost is the estimate's material cost and Σ qty × Unit Sell its
+material sell (freight excluded). Pure module `src/app/(app)/estimator/parts-csv.ts`; `SpecSection.room`;
+`resolveCatalogSkusAction` also returns mfr / P/N / model number. Harness `#262`. See D469, D471.
 
 **Not in scope:** Grid quotes (flat `spec.lines`, opened in the Grid, not the Estimator) and service quotes. The spec
 builder's BOM (`src/lib/specs/quote-bom.ts`) still reads an Estimator assembly line as one row — noted, not changed.

@@ -7920,3 +7920,17 @@ its symbol swatches (dot, loudspeaker, a new `screen` swatch) to match; other sw
 CONSOLE mark is unchanged (the word still draws). Grid Auto fill places catalog devices, not these glyphs, and reads
 none of their sizes — unaffected. Grid base sheets already stored keep the SVG (and glyphs) they were generated with.
 
+
+## D471. The PM parts list uses Jeff's nine columns; Room is per system — amends D469 (#262, 2026-09-29)
+
+Jeff sent the exact layout: Manufacturer, Model number, Room, System, Qty, Unit Cost, Unit Sell, Description, Notes —
+that order, nothing else. So D469's Peak SKU / Unit / Extended cost / Used in columns and its Total row are gone.
+**Room** (Jeff chose a per-system field over the venue alone or a per-line field): `SpecSection.room`, typed on the
+system card in the build view, never printed for the customer; a blank room falls back to the quote's venue name, so
+estimates saved before #262 export with a room. **System** is the system card's name. Since Room and System are now
+columns, identical parts merge only within one room + system (D469 merged across the whole estimate). **Unit Sell**:
+an ordinary line's own sell (`extSellOverride / qty` when set); an assembly's or vendor quote's parts get the line's
+sell split by each part's cost share — the margin slider re-prices the line, not its stored components, so a
+component's catalog list would not add up to what the customer is charged. **Notes** carries what the dropped columns
+did: "Part of: <assembly or vendor quote>", "per <unit>" when the unit isn't "ea" (a 120 of cable needs its unit), then
+the line's internal note. D469's base-scope, cost-adjustment and model-number rules are unchanged.
