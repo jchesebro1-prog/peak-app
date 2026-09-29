@@ -70,7 +70,7 @@ export function typeMobMiles(m: MobDraft, value: string): MobDraft {
 }
 
 /** The modal's "Use N mi RT" button: the route's miles, still auto (a later route change follows). */
-export function useRouteMiles(m: MobDraft, travel: TravelLite | null): MobDraft {
+export function setRouteMiles(m: MobDraft, travel: TravelLite | null): MobDraft {
   const rt = roundTripMiles(travel);
   return rt == null ? m : withMiles(m, { milesRT: String(rt), milesAuto: true });
 }

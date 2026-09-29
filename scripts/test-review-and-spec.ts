@@ -37241,7 +37241,7 @@ import {
   mobMissingMileage as l272Missing,
   roundTripMiles as l272RT,
   typeMobMiles as l272Type,
-  useRouteMiles as l272Use,
+  setRouteMiles as l272Use,
 } from "@/app/(app)/estimator/labor-defaults";
 import { readFileSync as l272Read } from "node:fs";
 {
@@ -37351,7 +37351,7 @@ import { readFileSync as l272Read } from "node:fs";
   const usedBtn = l272Use(l272Type(nearMob, "5"), far);
   ok(usedBtn.milesRT === "342" && usedBtn.milesAuto === true && l272Use(nearMob, noMiles) === nearMob, "#272 'Use N mi RT' button: takes the route's miles as auto; a no-route click is a no-op");
   const clientSrc = l272Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
-  ok(clientSrc.includes('field === "milesRT" ? typeMobMiles(m, val)') && clientSrc.includes("useRouteMiles(m, est)"), "#272 wiring: typing in the miles box clears the flag (setMob), the Use button sets it");
+  ok(clientSrc.includes('field === "milesRT" ? typeMobMiles(m, val)') && clientSrc.includes("setRouteMiles(m, est)"), "#272 wiring: typing in the miles box clears the flag (setMob), the Use button sets it");
 
   /* ---- #269 round trip: flag survives the stored draft; reopen never refills ---- */
   const savedAuto: L270Draft = {

@@ -95,7 +95,7 @@ import {
   laborMob,
   roundTripMiles,
   typeMobMiles,
-  useRouteMiles,
+  setRouteMiles,
 } from "./labor-defaults";
 import {
   laborGroupEdits,
@@ -2175,7 +2175,7 @@ export default function EstimatorClient({
   const applyAutoMiles = (idx: number) => {
     const est = travelEstNow();
     if (roundTripMiles(est) == null) return;
-    setLaborDraft((d) => ({ ...d, mobs: d.mobs.map((m, i) => (i === idx ? useRouteMiles(m, est) : m)) }));
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.map((m, i) => (i === idx ? setRouteMiles(m, est) : m)) }));
   };
   // #272: the pure helpers (labor-defaults.ts) own the fill rule — blank miles
   // fill from the route for Local and Travel alike, typed miles always win.
