@@ -186,6 +186,15 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const platform = boxOf(regions[keys.roles.stage]);
   const nave = boxOf(regions[keys.roles.house]);
   const booth = boothRoom ?? mixBox;
+  // Auto fill's stage frame: the box under the platform's back wall, as wide as that wall, running down until the
+  // Platform stops covering it — Traditional's chancel (its front step is wider), Contemporary's core above the
+  // pointed front. Stage-rule devices spread across it never land in a side room.
+  const platBackL = pt("platBackL"), platBackR = pt("platBackR");
+  const covers = (y: number) => rowSpans(regions[keys.roles.stage], y).some(([l, r]) => l <= platBackL.x + 0.5 && r >= platBackR.x - 0.5);
+  let yStage = yBack;
+  for (let y = yBack + 0.5; y <= yFront - 0.5 && covers(y); y += 0.5) yStage = y;
+  if (yStage >= yFront - 1) yStage = yFront;
+  const stageBox: Box = { x: platBackL.x, y: yBack, w: platBackR.x - platBackL.x, h: yStage - yBack };
   // Where the loudspeakers stand, when the template says (else buildPlanChurch's Traditional notch rule).
   const speakers = keys.points.spkL && keys.points.spkR ? [pt("spkL"), pt("spkR")] : null;
   const pews: Array<{ x1: number; x2: number; y: number }> = [];
@@ -212,9 +221,9 @@ export function churchGeom(s: AState, tpl?: string | null) {
   return {
     template: id, W, H, ppi, ppf, dims, warning: houseDims(s, id).warning,
     cx: centre.x, yTop: MT, yBack, yFront, yNaveBack, xMin: ML,
-    platBackL: pt("platBackL"), platBackR: pt("platBackR"), platFrontL: pt("platFrontL"), platFrontR: pt("platFrontR"),
+    platBackL, platBackR, platFrontL: pt("platFrontL"), platFrontR: pt("platFrontR"),
     naveL, naveR, mix, mixBox, aisle, speakers,
-    platform, nave, booth, stage: platform, pews,
+    platform, nave, booth, stage: platform, stageBox, pews,
     regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
     polylines: C.polylines, labels: C.labels,
     handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("handleBack") },

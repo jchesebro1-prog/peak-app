@@ -34544,3 +34544,44 @@ import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
   ok(Math.abs(fr.booth.x - G.booth.x / G.W) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#255 T8: Auto fill sends the FOH mix gear to the Control Booth");
   ok([...c255T8Spaces].length === 11 && G.spaces.map((r) => G.regionLabels[r]).filter((t) => t === "Storage").length === 4, "#255 T8: eleven starter Spaces, four of them Storage");
 }
+
+/* --- #255 T6 fix: the church Auto-fill stage frame stays inside the Platform (Traditional's chancel, Contemporary's core) --- */
+import { churchGeom as c255T6fGeom } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T6fDefault } from "@/app/(app)/design/quick/engine";
+import { generateAutoLayout as c255T6fLayout } from "@/lib/design/grid-auto-layout";
+import type { AutoCard as C255T6fCard } from "@/lib/design/auto-estimate";
+{
+  const inPoly = (poly: Array<{ x: number; y: number }>, x: number, y: number) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if (poly[i].y > y !== poly[j].y > y && x < ((poly[j].x - poly[i].x) * (y - poly[i].y)) / (poly[j].y - poly[i].y) + poly[i].x) c = !c;
+    return c;
+  };
+  const line = (rowKey: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref: "C255F-" + rowKey, unitCost: 1, unitSell: 1, total: qty, swapped: false });
+  const STAGE_RULES = ["lighting:par", "lighting:automated", "lighting:cyc", "rigging:electricHoist", "video:screen"];
+  const cards = [
+    { scope: "lighting", tier: "better", lines: [line("lighting:par", 24), line("lighting:automated", 8), line("lighting:cyc", 6), line("lighting:side", 4)] },
+    { scope: "rigging", tier: "better", lines: [line("rigging:electricHoist", 4)] },
+    { scope: "video", tier: "better", lines: [line("video:screen", 1)] },
+  ] as unknown as C255T6fCard[];
+  const base = c255T6fDefault(0);
+  const cases: Array<[string, string, Record<string, number>]> = [
+    ["church-traditional@1", "default", { width: 51, depth: 26 }],
+    ["church-traditional@1", "small", { width: 20, depth: 14, houseWidthFt: 36, houseDepthFt: 30 }],
+    ["church-traditional@1", "wide", { width: 50, depth: 26, houseWidthFt: 120, houseDepthFt: 55 }],
+    ["church-contemporary@1", "default", { width: 43, depth: 23 }],
+    ["church-contemporary@1", "small", { width: 30, depth: 18, houseWidthFt: 80, houseDepthFt: 40 }],
+    ["church-contemporary@1", "wide", { width: 43, depth: 23, houseWidthFt: 160 }],
+  ];
+  for (const [tpl, size, dims] of cases) {
+    const a = { ...base, venue: "church", templateId: tpl, ...dims, sys: { ...base.sys, lighting: true, rigging: true, video: true } };
+    const G = c255T6fGeom(a, tpl), plat = G.regions[G.roles.stage];
+    const specs = c255T6fLayout(a, cards, { electrics: 2, sets: 6, template: tpl });
+    const stage = specs.filter((s) => STAGE_RULES.includes(s.auto.rowKey));
+    const outside = stage.filter((s) => !inPoly(plat, s.x * G.W, s.y * G.H));
+    ok(stage.length === 24 + 8 + 6 + 4 + 1 && outside.length === 0, `#255 T6 fix ${tpl} ${size}: every par, automated light, cyc unit, electric hoist and screen lands inside the Platform (${outside.length} outside: ${[...new Set(outside.map((s) => s.auto.rowKey))].join(", ")})`);
+    const S = G.stageBox;
+    if (tpl === "church-traditional@1")
+      ok(S.x === G.platBackL.x && S.w === G.platBackR.x - G.platBackL.x && S.y === G.yBack && S.h === G.yFront - G.yBack, `#255 T6 fix ${tpl} ${size}: the stage frame is the chancel — back-wall width, back wall to platform front`);
+    else ok(S.x === G.platBackL.x && S.w === G.platBackR.x - G.platBackL.x && S.y === G.yBack && S.h > 0.5 * (G.yFront - G.yBack) && S.h < G.yFront - G.yBack, `#255 T6 fix ${tpl} ${size}: the stage frame is the platform's core — back-wall width, down to where the pointed front cuts in`);
+  }
+}

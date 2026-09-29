@@ -60,10 +60,11 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
       };
     }
     if (family === "church") {
-      // The template's Platform and Nave; its booth, or the plan's FOH mix position (today's church rule).
+      // The Platform's stage box (never its whole bounding box: Traditional's front step and Contemporary's
+      // splays and pointed front reach past the rooms beside it), the Nave, and the booth room or FOH mix position.
       const G = churchGeom(a, id);
       const n = W(G);
-      return { stage: n(G.platform), audience: n(G.nave), booth: n(G.booth) };
+      return { stage: n(G.stageBox), audience: n(G.nave), booth: n(G.booth) };
     }
   }
   if (kind === "proscenium") {
