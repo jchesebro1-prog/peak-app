@@ -17,6 +17,7 @@ import { effectiveTemplateFor, planKindTemplates, resolveBackground, sanitizeTem
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { VenueType } from "@/lib/venue-types";
+import FeetInput from "@/components/design/feet-input";
 import MovableFields from "@/components/design/movable-fields";
 import type { IntakeCustomer } from "@/app/(app)/quotes/new/types";
 import CustomerVenueContactPicker, {
@@ -59,45 +60,6 @@ const card = (on: boolean): React.CSSProperties => ({
 });
 const primary = (busy: boolean): React.CSSProperties => ({ border: "none", borderRadius: 9, padding: "12px 16px", background: "var(--accent)", color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: busy ? "wait" : "pointer" });
 const ghost: React.CSSProperties = { border: "1px solid #e4e7ec", borderRadius: 9, padding: "12px 16px", background: "#fff", color: "#3a3f4a", fontSize: 13.5, fontWeight: 600, cursor: "pointer" };
-
-/** An exact-feet readout (#244): type any whole number; it clamps to [min, max] on Enter / blur. */
-function FeetInput({ label, min, max, value, onCommit }: { label: string; min: number; max: number; value: number; onCommit: (n: number) => void }) {
-  const [draft, setDraft] = useState(String(value));
-  const [synced, setSynced] = useState(value);
-  if (value !== synced) {
-    setSynced(value);
-    setDraft(String(value));
-  }
-  const commit = () => {
-    const n = Math.round(Number(draft));
-    const next = Number.isFinite(n) && draft.trim() !== "" ? Math.max(min, Math.min(max, n)) : value;
-    setDraft(String(next));
-    if (next !== value) onCommit(next);
-  };
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "var(--font-mono)", color: "#737985" }}>
-      <input
-        type="number"
-        inputMode="numeric"
-        min={min}
-        max={max}
-        step={1}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit();
-          }
-        }}
-        aria-label={`${label} in feet`}
-        style={{ width: 56, border: "1px solid #e4e7ec", borderRadius: 6, padding: "3px 6px", fontFamily: "var(--font-mono)", fontSize: 12, color: "#16181d", textAlign: "right", background: "#fff" }}
-      />
-      ft
-    </span>
-  );
-}
 
 export default function GridIntake({
   projectId,

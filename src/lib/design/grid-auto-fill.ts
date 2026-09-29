@@ -5,7 +5,7 @@ import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { ensureGridSymbolsFor } from "@/lib/stores/grid-catalog";
 import { buildEquipmentPriceTable } from "./equipment-map";
 import { autoEstimateCards, autoQuoteNeedsPart, clampScopeInputs, priceOverrides } from "./auto-estimate";
-import { generateAutoLayout } from "./grid-auto-layout";
+import { fillGeometry, generateAutoLayout } from "./grid-auto-layout";
 import { autoEstimateFor, keptUnitsByRow, overrideRefs } from "./grid-auto-model";
 import { defaultOptionId } from "./grid-options";
 
@@ -35,8 +35,7 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   if (!project) return { ok: false, error: "That design could not be found." };
   const inputs = project.scopeInputs;
   // #255: lay out on the rooms where the stamped sheet drew them, never where the intake says now.
-  const a0 = project.intake?.autoConfig;
-  const a = a0 && project.intake?.baseSheetMovables ? { ...a0, movables: project.intake.baseSheetMovables } : a0;
+  const { a, stamp } = fillGeometry(project.intake);
   const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
   if (!inputs || !a || !est) return { ok: false, error: "This design has no Auto choices to fill from." };
   const sheetId = project.sheetIds[0];
@@ -63,7 +62,6 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   // project snapshot the fill priced; the replace below never removes them.
   const kept = keptUnitsByRow(project.placements || [], scopes, optionId);
   // #249/#255: the frame of the drawing the base sheet was stamped with; an unstamped (pre-template) sheet keeps its old frame.
-  const stamp = project.intake?.baseSheetTemplate;
   const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept, legacy: !stamp, template: stamp ?? null });
   const res = await replaceAutoPlacements(projectId, { optionId, scopes, sheetId, page: 1, items, by });
   if (!res) return { ok: false, error: "That option was removed — refresh the page." };

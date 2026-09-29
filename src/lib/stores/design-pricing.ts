@@ -5,7 +5,11 @@ import { buildEquipmentPriceTable, priceCell, type EquipmentPriceTable, type Equ
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { quickDesignPrice, type QuickDesignPrice, type QuickRates } from "@/lib/design/equipment-pricing";
 import { addToQuotesGuard } from "@/lib/design/scope-targets";
-import type { DesignRecordLike } from "@/app/(app)/design/quick/engine";
+import { venueOf, type AState, type DesignRecordLike } from "@/app/(app)/design/quick/engine";
+import { effectiveTemplateFor } from "@/lib/design/venue-templates";
+import { sanitizeMovables } from "@/lib/design/venue-templates/movable-options";
+import { getSettings } from "@/lib/settings";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { loadWireLaborRules, num } from "@/lib/stores/pricing";
 import { createDesign, getDesign, updateDesign, type DesignRecord } from "@/lib/stores/designs";
 
@@ -147,6 +151,12 @@ export async function saveQuickDesign(
   known?: QuickDesignPrice
 ): Promise<{ ok: true; record: DesignRecord } | { ok: false; error: string }> {
   const fields = quickSaveFields(input);
+  // #255: the config's movable rooms, kept only as the design's effective template allows (never trusted).
+  const cfg = fields.config as Partial<AState> | undefined;
+  if (cfg && cfg.movables != null) {
+    const tpl = effectiveTemplateFor(venueOf({ venue: String(cfg.venue ?? "") }).kind, cfg, venueTypesFrom((await getSettings()).venueTypes));
+    fields.config = { ...cfg, movables: sanitizeMovables(cfg.movables, tpl) };
+  }
   const existing = id ? await getDesign(id) : null;
   if (existing?.layoutMode === "manual") return { ok: false, error: GRID_DESIGN_REFUSAL };
   const price = known ?? (await serverDesignPrice({ ...(existing || {}), ...fields }));

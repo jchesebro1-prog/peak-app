@@ -10666,6 +10666,7 @@ seeded()
   .then(() => specRecordDupSectionAsyncChecks())
   .then(() => c255T6GridAsyncChecks())
   .then(() => c255T11MovablesAsyncChecks())
+  .then(() => c255Rv11SanitizeAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -30673,18 +30674,19 @@ import { defaultAState as vt249cDefault } from "@/app/(app)/design/quick/engine"
   const G = vt249cGeom(a);
   const plan = vt249cBuild(a, 8, 3, "#3a3f4a");
   const hs = plan.handles || [];
-  const side = (s: "L" | "R" | "B") => hs.find((h) => h.side === s)!;
+  const side = (s: "L" | "R" | "B") => hs.find((h) => h.type === "wall" && h.side === s)!;
   ok(hs.length === 3 && hs.filter((h) => h.shape === "wall").length === 2 && side("B")?.shape === "backWall" && hs.every((h) => h.type === "wall"), "#249 T4: a proscenium plan offers two side-wall handles and a back-wall handle, and no doors");
   const zero = { sx: 0, sy: 0 };
   ok(vt249cDrag(a, side("R"), { ...zero, dx: 5 * G.ppf, dy: 0 })?.houseWidthFt === 90 && vt249cDrag(a, side("L"), { ...zero, dx: -5 * G.ppf, dy: 0 })?.houseWidthFt === 90, "#249 T4: dragging either side wall out 5' widens the house 10', in whole feet");
   ok(vt249cDrag(a, side("B"), { ...zero, dx: 0, dy: 12 * G.ppf })?.houseDepthFt === Math.round((9 + 817.103) / 12 + 12), "#249 T4: dragging the back wall down 12' deepens the house 12'");
   ok(vt249cDrag(a, side("R"), { ...zero, dx: 1e6, dy: 0 })?.houseWidthFt === 200 && vt249cDrag(a, side("B"), { ...zero, dx: 0, dy: -1e6 })?.houseDepthFt === 40, "#249 T4: the drag respects the same limits as the typed fields");
   const ch = { ...a, venue: "church" };
-  const chWall = (vt249cBuild(ch, 8, 3, "#3a3f4a").handles || []).find((h) => h.side === "R")!;
+  const chWall = (vt249cBuild(ch, 8, 3, "#3a3f4a").handles || []).find((h) => h.type === "wall" && h.side === "R")!;
   ok(!!chWall && vt249cDrag(ch, chWall, { sx: 0, sy: 0, dx: 0, dy: 0 })?.houseWidthFt != null, "#249 T4 (updated #255): church walls drag too — its doors are retired");
   const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
   const sip = readFileSync(join(process.cwd(), "src/components/design/scope-inputs-panel.tsx"), "utf8");
-  ok(!qd.includes("addDoor") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#249 T4 (updated #255): Quick Design has no door buttons; Reset house clears the house size");
+  // #255 T11 review: Reset applies RESET_HOUSE_PATCH (checked behaviourally in the T11 review block).
+  ok(!qd.includes("addDoor") && qd.includes("updA(RESET_HOUSE_PATCH)"), "#249 T4 (updated #255): Quick Design has no door buttons; Reset house clears the house size");
   ok(sip.includes("houseFields(") && sip.includes("f.warning"), "#249 T4 (updated #255): the dimension panel shows the template's house rows and its warning");
   const gsp = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
   ok(/showHouse \? houseFields\(/.test(sip) && /<ScopeInputsPanel[\s\S]{0,400}?showHouse/.test(qd) && !gsp.includes("showHouse"), "#249 T4: house rows show in Quick Design only — the Grid Scope panel's base sheet is fixed at intake");
@@ -34202,7 +34204,7 @@ import { rowSpans as c255T4Rows } from "@/lib/design/venue-templates/canvas";
   const hs = plan.handles || [];
   ok(hs.length === 3 && hs.every((h) => h.type === "wall") && !svg.includes("doors"), "#255 T4: a church plan offers nave-wall handles and no doors");
   const zero = { sx: 0, sy: 0 };
-  const side = (s: "L" | "R" | "B") => hs.find((h) => h.side === s)!;
+  const side = (s: "L" | "R" | "B") => hs.find((h) => h.type === "wall" && h.side === s)!;
   ok(c255T4Drag(a, side("R"), { ...zero, dx: 5 * G.ppf, dy: 0 })?.houseWidthFt === 90 && c255T4Drag(a, side("B"), { ...zero, dx: 0, dy: 10 * G.ppf })?.houseDepthFt === 65, "#255 T4: dragging a church side wall sets nave width; the back wall sets nave depth");
   ok(c255T4Drag(a, side("R"), { ...zero, dx: -1e6, dy: 0 })?.houseWidthFt === 50 && c255T4Drag(a, side("B"), { ...zero, dx: 0, dy: -1e6 })?.houseDepthFt === 20, "#255 T4: the drag clamps like the typed fields (nave ≥ platform + 16', depth ≥ 20')");
   ok(c255T4Rows([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], 5).map(([l, r]) => `${l}-${r}`).join() === "0-10", "#255 T4: rowSpans finds where a row crosses a region");
@@ -34211,7 +34213,7 @@ import { rowSpans as c255T4Rows } from "@/lib/design/venue-templates/canvas";
   // #255 T4 review: a null or unknown template resolves to the kind's default in buildPlan AND houseDragPatch — the handles drawn always drag.
   const dragsWhatsDrawn = (st: typeof a, tpl: string | null) => {
     const p = c255T4Build(st, 8, 3, "#3a3f4a", tpl);
-    const r = (p.handles || []).find((h) => h.side === "R");
+    const r = (p.handles || []).find((h) => h.type === "wall" && h.side === "R");
     return !!p.isHouse && !!r && c255T4Drag(st, r, { ...zero, dx: 0, dy: 0 }, tpl)?.houseWidthFt !== undefined;
   };
   ok([null, "bogus@9"].every((t) => dragsWhatsDrawn(a, t) && dragsWhatsDrawn(pac, t)), "#255 T4 review: a church or proscenium plan with no (or an unknown) template draws its kind's default, and its wall handles drag");
@@ -34309,10 +34311,10 @@ async function c255T6GridAsyncChecks(): Promise<void> {
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
   ok(/legacy:\s*!stamp/.test(fill) && /template:\s*stamp \?\? null/.test(fill), "#255 T6: Auto fill uses the frame of the drawing the sheet was stamped with");
   const act = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
-  ok(act.includes("venueType: site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
+  ok(act.includes("const venueType = site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
   // Task 5 review: a client's per-design Background is kept only when the plan kind can draw it.
   ok(c255T6SanTpl("church", "church-traditional@1") === "church-traditional@1" && c255T6SanTpl("church", "proscenium@1") === null && c255T6SanTpl("gym", "proscenium@1") === null && c255T6SanTpl("church", "church-bogus@9") === null && c255T6SanTpl("church", 42) === null && c255T6SanTpl("proscenium", null) === null, "#255 T6: a design's Background override survives only when it is a template its plan kind can draw");
-  ok(act.includes("templateId: sanitizeTemplateId(") && act.indexOf("templateId: sanitizeTemplateId(") < act.indexOf("saveGridIntake(input.projectId"), "#255 T6: the intake drops a Background override the venue kind can't draw before saving");
+  ok(act.includes("const templateId = sanitizeTemplateId(kind, input.autoConfig.templateId)") && act.indexOf("const templateId = sanitizeTemplateId(") < act.indexOf("saveGridIntake(input.projectId"), "#255 T6: the intake drops a Background override the venue kind can't draw before saving");
 }
 
 /* --- #255 T7: engine — y-profile room, diagonal walls stay 6" perpendicular --- */
@@ -34836,7 +34838,7 @@ import { boothMix as c255T10BoothMix, LABEL_CHAR_PX as c255T10CharPx } from "@/a
   const svg = c255T10Markup(c255T10Build(g, 8, 3, "#3a3f4a"), "#3a3f4a");
   ok(["Stage", "Gym Floor", "Storage", "Electrical Room", "Booth"].every((t) => svg.includes(">" + t + "<")) && !svg.includes("BLEACHERS"), "#255 T10: Quick Design's Gym Stage draws Jeff's gym, not the old bleacher schematic");
   const plan = c255T10Build(g, 8, 3, "#3a3f4a"), G = c255T10Geom(g, "gym-stage@1");
-  const r = (plan.handles || []).find((h) => h.side === "R")!;
+  const r = (plan.handles || []).find((h) => h.type === "wall" && h.side === "R")!;
   ok(c255T10Drag(g, r, { sx: 0, sy: 0, dx: 3 * G.ppf, dy: 0 }, "gym-stage@1")?.houseWidthFt === 126, "#255 T10: dragging a gym-kind side wall sets the floor width (the house field)");
   const fr = c255T10Frame(g, { template: "gym-stage@1" });
   ok(Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12 && fr.booth.y > fr.audience.y + fr.audience.h - 1e-9 && !fr.catwalk && !fr.stageEdge, "#255 T10: Auto fill's booth is the Booth room behind the floor; no catwalk or stage edge on this drawing");
@@ -34896,7 +34898,7 @@ import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "
   const od = c255T10Dims(old, "gym-stage@1");
   ok(od.proWidthFt === 54 && od.stageDepthFt === 40 && od.houseWidthFt === 120 && od.houseDepthFt === 49.5, "#255 T10 fix: a gym design saved before #255 keeps its width as the opening; its floor takes the drawing's defaults");
   const pl0 = c255T10Build(gDef, 8, 3, "#3a3f4a"), G0 = c255T10Geom(gDef);
-  const hR = (pl0.handles || []).find((h) => h.side === "R")!, hB = (pl0.handles || []).find((h) => h.side === "B")!;
+  const hR = (pl0.handles || []).find((h) => h.type === "wall" && h.side === "R")!, hB = (pl0.handles || []).find((h) => h.type === "wall" && h.side === "B")!;
   const dR = c255T10Drag(gDef, hR, { sx: 0, sy: 0, dx: 5 * G0.ppf, dy: 0 }), dB = c255T10Drag(gDef, hB, { sx: 0, sy: 0, dx: 0, dy: 4 * G0.ppf });
   ok(JSON.stringify(dR) === JSON.stringify({ houseWidthFt: 130 }) && JSON.stringify(dB) === JSON.stringify({ houseDepthFt: 54 }), "#255 T10 fix: a gym's wall handles drag the gym floor (house fields), never the opening or stage depth");
 
@@ -34950,6 +34952,7 @@ import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "
 }
 
 /* --- #255 T11: moving the Booth — Quick Design handle, fields, Grid stamp --- */
+import { planToolbar as c255T11rToolbar, RESET_HOUSE_PATCH as c255T11rReset } from "@/app/(app)/design/quick/plan-svg";
 import { buildPlan as c255T11Build, houseDragPatch as c255T11Drag, prosGeom as c255T11Geom } from "@/app/(app)/design/quick/plan-svg";
 import { defaultAState as c255T11Default } from "@/app/(app)/design/quick/engine";
 import { movableOptions as c255T11Options, movablePatch as c255T11Patch } from "@/lib/design/venue-templates/movable-options";
@@ -34960,7 +34963,7 @@ import type { AutoCard as C255T11Card } from "@/lib/design/auto-estimate";
   const a = { ...base, venue: "school", templateId: "gym-stage@1", width: 40, wing: 10, depth: 20, houseWidthFt: 120, houseDepthFt: 49.5 };
   const o = c255T11Options(a, "gym-stage@1");
   ok(o.items.length === 1 && o.items[0].label === "Booth" && o.items[0].wall === "back" && o.items[0].walls.map((w) => `${w.id}:${w.fits}`).join() === "back:true,left:true,right:true", "#255 T11: the Booth's fields — its wall (back, left, right) and a position");
-  ok(o.items[0].maxFt === Math.floor((1452 - 252) / 12) && o.items[0].ft === Math.round(0.5 * o.items[0].maxFt), "#255 T11: its position reads in whole feet along the wall's run");
+  ok(o.items[0].maxFt === (1452 - 252) / 12 && o.items[0].ft === Math.round(0.5 * o.items[0].maxFt), "#255 T11: its position reads in whole feet along the wall's run");
   const plan = c255T11Build(a, 8, 3, "#3a3f4a", "gym-stage@1");
   const h = (plan.handles || []).find((x) => x.type === "movable" && x.key === "booth")!;
   const G = c255T11Geom(a, "gym-stage@1");
@@ -34979,8 +34982,12 @@ import type { AutoCard as C255T11Card } from "@/lib/design/auto-estimate";
   const mix = c255T11Layout(moved, cards, { electrics: 2, sets: 6, template: "gym-stage@1" })[0];
   const fr = c255T11Frame(moved, { template: "gym-stage@1" });
   ok(mix.x < fr.audience.x && mix.x >= fr.booth.x - 1e-9, "#255 T11: Auto fill puts the FOH mix gear in the Booth wherever it is");
+  // #255 T11 review: behavioural — the toolbar (planToolbar) and Reset (RESET_HOUSE_PATCH) Quick Design renders / applies.
   const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
-  ok(qd.includes("movables: null") && qd.includes('h.type === "movable"'), "#255 T11: Quick Design's toolbar shows for movable rooms, and Reset puts them home");
+  const tb = c255T11rToolbar(plan);
+  const reset = { ...moved, ...c255T11rReset };
+  const home = c255T11Options(reset, "gym-stage@1").items[0];
+  ok(qd.includes("planToolbar(plan)") && qd.includes("updA(RESET_HOUSE_PATCH)") && !!tb && tb.hint.includes("a room along the walls") && home.wall === "back" && home.ft === Math.round(home.maxFt / 2) && reset.houseWidthFt === null, "#255 T11: Quick Design's toolbar shows for movable rooms, and Reset puts them home");
 }
 
 async function c255T11MovablesAsyncChecks(): Promise<void> {
@@ -34998,8 +35005,9 @@ async function c255T11MovablesAsyncChecks(): Promise<void> {
   await GP.saveGridIntake(gp.id, { ...p.intake!, baseSheetMovables: undefined, autoConfig: { ...a, movables: { booth: { wall: "right", t: 0.5 } } } });
   p = (await GP.getProject(gp.id))!;
   ok(p.intake?.baseSheetMovables?.booth?.wall === "left", "#255 T11: re-saving the intake with the Booth moved never moves the stamped sheet's Booth");
+  // #255 T11 review: behavioural in the T11 review block (fillGeometry); here only that Auto fill reads through it.
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
-  ok(/baseSheetMovables/.test(fill), "#255 T11: Auto fill lays out on the stamped Booth position");
+  ok(fill.includes("fillGeometry(project.intake)"), "#255 T11: Auto fill lays out on the stamped Booth position");
 }
 
 /* --- #255 T11 review minors (Engine III): overflow as one centred group, named validation errors, lifted arcs --- */
@@ -35119,4 +35127,104 @@ import { venueFrame as c255T12Frame } from "@/lib/design/grid-auto-layout";
         const off = g.labels.filter((l) => l.anchor === "middle").filter((l) => !Object.entries(g.regions).some(([id, poly]) => id !== "Blackbox" && (() => { const xs = poly.map((q) => q.x), ys = poly.map((q) => q.y); return l.x > Math.min(...xs) && l.x < Math.max(...xs) && l.y > Math.min(...ys) && l.y < Math.max(...ys); })()));
         ok(g.labels.filter((l) => l.anchor === "middle").length === 3 && !off.length, `#255 T12 ${venue} ${w}×${dp} ${wall}: the Storage and Electrical Room labels sit inside their rooms`);
       }
+}
+
+/* --- #255 T11 review: handles clear of the walls', whole-foot fields, stamped fill geometry, movables sanitized --- */
+import { buildPlan as c255Rv11Build, blackboxGeom as c255Rv11BbGeom, houseDragPatch as c255Rv11Drag, planToolbar as c255Rv11Toolbar, prosGeom as c255Rv11Geom, renderPlanSvgMarkup as c255Rv11Markup, type PlanHandle as C255Rv11Handle } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255Rv11Default } from "@/app/(app)/design/quick/engine";
+import { movableOptions as c255Rv11Options, sanitizeMovables as c255Rv11Sanitize, wallChangeT as c255Rv11WallT } from "@/lib/design/venue-templates/movable-options";
+import { fillGeometry as c255Rv11Fill, generateAutoLayout as c255Rv11Layout, venueFrame as c255Rv11Frame } from "@/lib/design/grid-auto-layout";
+import type { AutoCard as C255Rv11Card } from "@/lib/design/auto-estimate";
+{
+  const base = c255Rv11Default(0);
+  const gym = { ...base, venue: "gym", width: 40, wing: 10, depth: 20, houseWidthFt: 120, houseDepthFt: 49.5 };
+  // A movable's 13-px hit circle never overlaps a wall handle's grip (11 × 30, or 30 × 11 on the back wall).
+  const grip = (h: C255Rv11Handle) => (h.shape === "backWall" ? { x: h.cx - 15, y: h.cy - 5.5, w: 30, h: 11 } : { x: h.cx - 5.5, y: h.cy - 15, w: 11, h: 30 });
+  const clear = (c: C255Rv11Handle, r: { x: number; y: number; w: number; h: number }) => Math.hypot(Math.max(r.x - c.cx, 0, c.cx - r.x - r.w), Math.max(r.y - c.cy, 0, c.cy - r.y - r.h)) >= 13;
+  for (const [hw, hd] of [[120, 49.5], [200, 120]])
+    for (const wall of ["back", "left", "right"]) {
+      const st = { ...gym, houseWidthFt: hw, houseDepthFt: hd, movables: { booth: { wall, t: 0.5 } } };
+      const hs = c255Rv11Build(st, 8, 3, "#3a3f4a").handles || [];
+      const mv = hs.filter((h) => h.type === "movable"), walls = hs.filter((h) => h.type === "wall");
+      ok(mv.length === 1 && walls.length === 3 && hs.indexOf(mv[0]) < hs.indexOf(walls[0]) && walls.every((w) => clear(mv[0], grip(w))), `#255 T11 review ${hw}×${hd} ${wall}: the Booth's handle is listed under the walls' and never overlaps a wall grip`);
+      // The handle sits on the Booth's outer face; dragging it by nothing leaves the Booth where it is.
+      const G = c255Rv11Geom(st, "gym-stage@1");
+      const same = c255Rv11Drag(st, mv[0], { sx: 0, sy: 0, dx: 0, dy: 0 });
+      const o = c255Rv11Options(st, "gym-stage@1").items[0];
+      // (t 0.5 of a 99' run is 49'-6"; a drag always lands on a whole foot, so it may settle half a foot off.)
+      ok(!!same && same.movables?.booth.wall === wall && Math.abs((same.movables?.booth.t ?? -1) * o.maxFt - 0.5 * o.maxFt) <= 0.5 + 1e-6 && Math.hypot(mv[0].cx - G.movables[0].centre.x, mv[0].cy - G.movables[0].centre.y) > 5, `#255 T11 review ${hw}×${hd} ${wall}: the handle sits off the room's centre, and a still drag keeps the Booth in place`);
+    }
+  // Blackbox: two rooms on one wall — their handles never overlap each other.
+  const bb = { ...base, venue: "blackbox", width: 49, depth: 49 };
+  for (const [w, dp] of [[49, 49], [26, 24], [120, 60]])
+    for (const wall of ["bottom", "right", "top", "left"]) {
+      const st = { ...bb, width: w, depth: dp, movables: { booth: { wall, t: 0 }, electrical: { wall, t: 1 } } };
+      const hs = (c255Rv11Build(st, 8, 3, "#3a3f4a").handles || []).filter((h) => h.type === "movable");
+      ok(hs.length === 4 && hs.every((a, i) => hs.every((b, j) => i === j || Math.hypot(a.cx - b.cx, a.cy - b.cy) >= 26)), `#255 T11 review blackbox ${w}×${dp} ${wall}: no two room handles overlap`);
+    }
+  // Fields: each wall's run length; a new wall lands on a whole foot; 0 ft names its corner.
+  const bo = c255Rv11Options({ ...bb, width: 26, depth: 24 }, "blackbox@1");
+  ok(bo.items.every((m) => m.walls.every((x) => x.lenFt > 0 && Number.isInteger(Math.round(c255Rv11WallT(x.lenFt) * x.lenFt * 1e9) / 1e9))), "#255 T11 review: moving a room to another wall lands it on a whole foot");
+  ok(c255Rv11Options(gym, "gym-stage@1").items[0].walls.map((x) => x.lenFt).join() === "100,28.5,28.5", "#255 T11 review: each wall reports its run's exact length (a 28'-6\" side run)");
+  const fromOf = (wall: string) => c255Rv11Options({ ...bb, movables: { booth: { wall, t: 0.5 } } }, "blackbox@1").items.find((m) => m.id === "booth")!.from;
+  ok(["bottom", "right", "top", "left"].map(fromOf).join("|") === "left corner|bottom corner|right corner|top corner", "#255 T11 review: the position says which corner 0 ft is");
+  // Auto fill's geometry: the stamp's rooms, or home when the stamp predates moving rooms — never the live intake.
+  const moved = { ...gym, movables: { booth: { wall: "right", t: 0.5 } } };
+  const line = (rowKey: string, ref: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref, unitCost: 1, unitSell: 1, total: qty, swapped: false });
+  const cards = [{ scope: "audio", tier: "better", lines: [line("audio:mixerDsp", "C255R-MIX", 1)] }] as unknown as C255Rv11Card[];
+  const mixIn = (intake: Parameters<typeof c255Rv11Fill>[0]) => {
+    const { a, stamp } = c255Rv11Fill(intake);
+    const mix = c255Rv11Layout(a!, cards, { electrics: 2, sets: 6, template: stamp ?? null })[0];
+    const b = c255Rv11Frame(a!, { template: stamp ?? null }).booth;
+    return { mix, b, a: a! };
+  };
+  const stamped = mixIn({ autoConfig: moved, baseSheetTemplate: "gym-stage@1", baseSheetMovables: { booth: { wall: "left", t: 0.5 } } });
+  ok(stamped.a.movables?.booth.wall === "left" && stamped.mix.x >= stamped.b.x - 1e-9 && stamped.mix.x <= stamped.b.x + stamped.b.w + 1e-9 && stamped.b.x < 0.2, "#255 T11 review: Auto fill puts the FOH mix in the Booth where the sheet was stamped (left), not where the intake says now (right)");
+  const oldStamp = mixIn({ autoConfig: moved, baseSheetTemplate: "gym-stage@1" });
+  const homeBooth = c255Rv11Frame({ ...moved, movables: null }, { template: "gym-stage@1" }).booth;
+  ok(oldStamp.a.movables === null && JSON.stringify(oldStamp.b) === JSON.stringify(homeBooth) && oldStamp.mix.y >= homeBooth.y - 1e-9 && oldStamp.mix.y <= homeBooth.y + homeBooth.h + 1e-9 && homeBooth.x > 0.3, "#255 T11 review: a sheet stamped before rooms moved lays out on the Booth at home (the back wall)");
+  ok(c255Rv11Fill({ autoConfig: moved }).a === moved, "#255 T11 review: an unstamped sheet keeps the intake as it is");
+  // The server's sanitizer: only the template's rooms, allowed walls, t clamped / nulled; junk is dropped.
+  const S = c255Rv11Sanitize;
+  ok(S({ booth: { wall: "left", t: 1.7 }, electrical: { wall: "top", t: -3 }, "storage-top": { wall: "right", t: 0.25 } }, "blackbox@1")?.booth.t === 1 && S({ electrical: { wall: "top", t: -3 } }, "blackbox@1")?.electrical.t === 0 && S({ "storage-top": { wall: "right", t: 0.25 } }, "blackbox@1")?.["storage-top"].t === 0.25, "#255 T11 review: sanitizeMovables clamps t to [0, 1]");
+  ok(JSON.stringify(S({ booth: { wall: "left", t: NaN }, electrical: { wall: "top", t: "0.5" }, "storage-right": { wall: "bottom", t: Infinity } }, "blackbox@1")) === JSON.stringify({ electrical: { wall: "top", t: null }, booth: { wall: "left", t: null }, "storage-right": { wall: "bottom", t: null } }), "#255 T11 review: a t that isn't a finite number becomes null");
+  const junk: unknown[] = [null, undefined, "left", 5, [], [{ wall: "left", t: 0.5 }], { booth: null }, { booth: "left" }, { booth: { wall: 7, t: 0.5 } }, { booth: { wall: "nowhere", t: 0.5 } }, { booth: { wall: "toString", t: 0.5 } }, { booth: { wall: "__proto__", t: 0.5 } }, { nope: { wall: "left", t: 0.5 } }, JSON.parse('{"__proto__": {"wall": "left", "t": 0.5}}'), { toString: { wall: "left", t: 0.5 } }];
+  ok(junk.every((j) => S(j, "blackbox@1") === null), "#255 T11 review: junk — non-objects, arrays, unknown rooms, walls a room can't use, inherited names — sanitizes to null");
+  ok(S({ booth: { wall: "left", t: 0.5 } }, "proscenium@1") === null && S({ booth: { wall: "left", t: 0.5 } }, null) === null && S({ booth: { wall: "left", t: 0.5 } }, "bogus@9") === null && S({ booth: { wall: "back", t: 0.5 } }, "blackbox@1") === null, "#255 T11 review: rooms the effective template doesn't have (or its walls don't) are dropped");
+  ok(JSON.stringify(S({ booth: { wall: "left", t: 0.5 }, extra: { wall: "left", t: 0.5 } }, "gym-stage@1")) === JSON.stringify({ booth: { wall: "left", t: 0.5 } }) && Object.keys(S({ booth: { wall: "top", t: 0 }, electrical: { wall: "top", t: 1 }, "storage-top": { wall: "left", t: 0 }, "storage-right": { wall: "left", t: 1 }, x1: {}, x2: {} }, "blackbox@1") || {}).length === 4, "#255 T11 review: never more rooms than the template has");
+  // Bad stored positions never make a plan throw — they fall back to where the rooms were drawn (or a wall's middle).
+  const svgOf = (a: typeof bb) => c255Rv11Markup(c255Rv11Build(a, 8, 3, "#3a3f4a"), "#3a3f4a");
+  for (const [tag, st] of [["blackbox", bb], ["conference", { ...bb, venue: "concenter", width: 50, depth: 30 }], ["gym", gym]] as const) {
+    const home = svgOf(st as typeof bb);
+    let threw = "";
+    const all = junk.every((j) => {
+      try {
+        const a = { ...st, movables: j } as unknown as typeof bb;
+        const p = c255Rv11Build(a, 8, 3, "#3a3f4a");
+        for (const h of p.handles || []) c255Rv11Drag(a, h, { sx: 0, sy: 0, dx: 5, dy: 5 });
+        c255Rv11Options(a, tag === "gym" ? "gym-stage@1" : "blackbox@1");
+        if (tag !== "gym") c255Rv11BbGeom(a);
+        return c255Rv11Markup(p, "#3a3f4a") === home;
+      } catch (e) {
+        threw = String(e);
+        return false;
+      }
+    });
+    ok(all, `#255 T11 review ${tag}: junk stored positions draw the rooms where they were drawn, never throw${threw ? " — " + threw : ""}`);
+  }
+  // The toolbar fits what the plan can drag: a blackbox's rooms only; a church's walls only.
+  const bbTb = c255Rv11Toolbar(c255Rv11Build(bb, 8, 3, "#3a3f4a"));
+  const chTb = c255Rv11Toolbar(c255Rv11Build({ ...base, venue: "church" }, 8, 3, "#3a3f4a"));
+  ok(bbTb?.hint === "Drag a room along the walls" && bbTb.reset === "Reset rooms" && chTb?.hint === "Drag the side or back wall to size the room" && chTb.reset === "Reset house", "#255 T11 review: the plan toolbar names what can be dragged and reset");
+  const act = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+  ok((act.match(/cleanMovables\(/g) || []).length >= 3 && act.indexOf("cleanMovables({ ...input.autoConfig") < act.indexOf("saveGridIntake(input.projectId") && act.includes("setScopeInputs(projectId, scopeInputs && cleanMovables(scopeInputs, tpl))"), "#255 T11 review: the Grid intake and Scope-inputs saves sanitize movables before storing");
+}
+
+async function c255Rv11SanitizeAsyncChecks(): Promise<void> {
+  const DP = await import("../src/lib/stores/design-pricing");
+  const base = c255Rv11Default(0);
+  const config = { ...base, venue: "blackbox", movables: { booth: { wall: "left", t: 1.5 }, "storage-top": { wall: "nowhere", t: 0.5 }, extra: { wall: "left", t: 0.5 } } };
+  const res = await DP.saveQuickDesign(null, { name: "Test255 sanitize", venue: "blackbox", size: "medium", tier: "better", width: 26, depth: 24, grid: 18, systems: [], customer: "", customerId: null, locationId: null, config }, "Test Harness");
+  if (res.ok) registerFixture("designs", res.record.id);
+  ok(res.ok && JSON.stringify((res.record.config as { movables?: unknown }).movables) === JSON.stringify({ booth: { wall: "left", t: 1 } }), "#255 T11 review: a Quick Design save stores only the rooms and walls its template allows, t clamped");
 }

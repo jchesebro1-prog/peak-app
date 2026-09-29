@@ -380,9 +380,9 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
     const u0 = unit(sub(hw.to, hw.from)), n0 = { x: u0.y, y: -u0.x };
     // Element-local coordinates: s along its home wall from the anchor, t out from the wall (outside the room).
     const local = (p: Pt) => ({ s: dot(sub(p, m.home.anchor), u0), t: dot(sub(p, m.home.anchor), n0) });
-    const reg = k.regions[m.region];
     const own = owned.get(m.id);
-    const pts = [...(own?.segs ?? []).flat(), ...(own?.arcs ?? []).flat(), ...(reg ? pathPoints(reg) : [])].map(local);
+    // checkMovables has made sure the region exists.
+    const pts = [...(own?.segs ?? []).flat(), ...(own?.arcs ?? []).flat(), ...pathPoints(k.regions[m.region])].map(local);
     if (!pts.length) throw new Error(`venue template ${k.kind}: movable ${m.id} owns no drawn lines and has no region`);
     const sMin = Math.min(...pts.map((q) => q.s)), sMax = Math.max(...pts.map((q) => q.s));
     const tMin = Math.min(...pts.map((q) => q.t)), tMax = Math.max(...pts.map((q) => q.t));
@@ -432,8 +432,7 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
     for (const [a, b] of owned.get(e.m.id)?.segs ?? []) out.polylines.push(densifySegment(a, b).map(place));
     for (const arc of owned.get(e.m.id)?.arcs ?? []) out.polylines.push(arc.map(place));
     for (const l of owned.get(e.m.id)?.labels ?? []) out.labels.push({ text: l.text, h: l.h, ...place(l) });
-    const reg = k.regions[e.m.region];
-    if (reg) out.regions[e.m.region] = densifyPath(pathPoints(reg), true).map(place);
+    out.regions[e.m.region] = densifyPath(pathPoints(k.regions[e.m.region]), true).map(place);
     const sMid = (e.sMin + e.sMax) / 2;
     const runs: PlacedMovable["runs"] = {};
     for (const w of e.m.walls) if (walls[w]) runs[w] = { from: walls[w].from, to: walls[w].to, lo: -e.sMin, hi: walls[w].len - e.sMax, sMid };
@@ -441,6 +440,7 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
       wall: e.wall,
       t: e.hi > e.lo ? clamp01((e.c - e.lo) / (e.hi - e.lo)) : 0.5,
       centre: add(A, add(mul(W.u, sMid), mul(W.n, (e.tMin + e.tMax) / 2))),
+      outer: add(A, add(mul(W.u, sMid), mul(W.n, e.tMax))),
       fits: e.fits,
       runs,
     };

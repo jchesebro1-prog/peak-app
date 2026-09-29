@@ -2,7 +2,8 @@
 
 import type * as React from "react";
 import type { AState } from "@/app/(app)/design/quick/engine";
-import { movableOptions, movablePatch } from "@/lib/design/venue-templates/movable-options";
+import { movableOptions, movablePatch, wallChangeT } from "@/lib/design/venue-templates/movable-options";
+import FeetInput from "./feet-input";
 
 type MovableValue = Parameters<typeof movableOptions>[0];
 
@@ -23,24 +24,31 @@ export default function MovableFields({ value, tpl, onChange }: { value: Movable
         <div key={m.id}>
           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 5 }}>{m.label}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <select aria-label={`${m.label} wall`} value={m.wall} onChange={(e) => onChange(movablePatch(value, m.id, { wall: e.target.value, t: 0.5 }))} style={field}>
+            <select
+              aria-label={`${m.label} wall`}
+              value={m.wall}
+              onChange={(e) => {
+                const w = m.walls.find((x) => x.id === e.target.value);
+                // A whole foot on the new wall: the one nearest its middle.
+                onChange(movablePatch(value, m.id, { wall: e.target.value, t: wallChangeT(w?.lenFt ?? 0) }));
+              }}
+              style={field}
+            >
               {m.walls.map((w) => (
                 <option key={w.id} value={w.id} disabled={!w.fits}>
                   {w.label} wall{w.fits ? "" : " (too short)"}
                 </option>
               ))}
             </select>
-            <input
-              type="number"
+            {/* Commits on Enter / blur, clamped — a cleared field keeps the room where it is. */}
+            <FeetInput
+              label={`${m.label} position`}
               min={0}
-              max={Math.floor(m.maxFt)}
-              step={1}
+              max={Math.ceil(m.maxFt)}
               value={m.ft}
-              aria-label={`${m.label} position in feet`}
-              onChange={(e) => onChange(movablePatch(value, m.id, { wall: m.wall, t: m.maxFt > 0 ? Math.max(0, Math.min(m.maxFt, Math.round(Number(e.target.value) || 0))) / m.maxFt : 0.5 }))}
-              style={{ ...field, width: 64, textAlign: "right" }}
+              onCommit={(n) => onChange(movablePatch(value, m.id, { wall: m.wall, t: m.maxFt > 0 ? Math.min(m.maxFt, n) / m.maxFt : 0.5 }))}
             />
-            <span style={{ fontSize: 11, color: "#9aa0ab" }}>ft along the wall (of {runLabel(m.maxFt)})</span>
+            <span style={{ fontSize: 11, color: "#9aa0ab" }}>from the {m.from} (of {runLabel(m.maxFt)})</span>
           </div>
         </div>
       ))}

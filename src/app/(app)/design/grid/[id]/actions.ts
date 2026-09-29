@@ -97,6 +97,7 @@ import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
 import { getSettings } from "@/lib/settings";
 import { effectiveTemplateFor, sanitizeTemplateId } from "@/lib/design/venue-templates";
+import { sanitizeMovables } from "@/lib/design/venue-templates/movable-options";
 import { venueTypesFrom } from "@/lib/venue-types";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
@@ -237,6 +238,11 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
  * siteId), and the first-save gate below runs unchanged, now also copying
  * the title and customer onto the linked design record(s).
  */
+/** #255: a client's movable rooms kept only as template `tpl` allows (sanitizeMovables); absent stays absent. */
+function cleanMovables<T extends { movables?: AState["movables"] }>(x: T, tpl: string | null): T {
+  return x.movables == null ? x : { ...x, movables: sanitizeMovables(x.movables, tpl) };
+}
+
 export async function saveGridIntakeAction(input: {
   projectId: string;
   /** "auto" = Auto (equations); "manual" = Blank (stored as before, D307). */
@@ -289,11 +295,13 @@ export async function saveGridIntakeAction(input: {
   const site = linked.locationId ? siteForLocId(await sitesForCompany(linked.customerId), linked.locationId) : null;
   // #255: the design's venue type is its venue's (the site's venue_kind) — it picks the plan's Background;
   // a per-design Background override survives only when the plan kind can draw it.
-  const autoConfig: AState = {
-    ...input.autoConfig,
-    venueType: site?.venueKind ?? null,
-    templateId: sanitizeTemplateId(venueOf(input.autoConfig).kind, input.autoConfig.templateId),
-  };
+  // #255: the design's effective Background, resolved once — it draws the sheet, and it decides which movable rooms
+  // (and walls) a client may place (sanitizeMovables).
+  const kind = venueOf(input.autoConfig).kind;
+  const venueType = site?.venueKind ?? null;
+  const templateId = sanitizeTemplateId(kind, input.autoConfig.templateId);
+  const tpl = effectiveTemplateFor(kind, { venueType, templateId }, venueTypesFrom((await getSettings()).venueTypes));
+  const autoConfig: AState = cleanMovables({ ...input.autoConfig, venueType, templateId }, tpl);
   // A cover page left blank takes the chosen venue's names and address.
   const fromVenue = site
     ? coverFromVenue({ label: site.name, locationName: site.locationName, address: site.address, city: site.city, state: site.state }, linked.customerName)
@@ -330,7 +338,7 @@ export async function saveGridIntakeAction(input: {
   let warning: string | undefined;
   const isFirstSave = (saved.sheetIds || []).length === 0;
   if (isFirstSave) {
-    await setScopeInputs(input.projectId, scopeInputs);
+    await setScopeInputs(input.projectId, cleanMovables(scopeInputs, tpl));
     // #211 fix wave 1 (M6): setAutoEstimate refuses (null) when the option it
     // was resolved against is already gone — a specific warning instead of
     // silently proceeding to fill from an estimate that was never saved.
@@ -355,7 +363,6 @@ export async function saveGridIntakeAction(input: {
     for (const d of designs) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
     // #255: the sheet draws the design's effective template (its override ?? its venue type's Background ?? the kind default).
-    const tpl = effectiveTemplateFor(venueOf(autoConfig).kind, autoConfig, venueTypesFrom((await getSettings()).venueTypes));
     await generateBaseSheet(input.projectId, autoConfig, "#3a3f4a", user.name, tpl);
     if (est && estimateSaved) {
       // #211 fix wave 1 (I1): a thrown error here (not just a returned
@@ -865,7 +872,9 @@ export async function setScopeInputsAction(
   scopeInputs: QuickScopeInputs,
 ): Promise<Result> {
   await requireUser();
-  const p = await setScopeInputs(projectId, scopeInputs);
+  // #255: movable rooms are the one field checked — only the effective template's rooms, on walls they may use.
+  const tpl = scopeInputs?.movables == null ? null : effectiveTemplateFor(venueOf(scopeInputs).kind, scopeInputs, venueTypesFrom((await getSettings()).venueTypes));
+  const p = await setScopeInputs(projectId, scopeInputs && cleanMovables(scopeInputs, tpl));
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };

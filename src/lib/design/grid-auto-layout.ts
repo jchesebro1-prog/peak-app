@@ -102,6 +102,17 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
   };
 }
 
+/**
+ * #255: the geometry Auto fill lays out on — the intake's design, its movable rooms where the stamped sheet drew
+ * them (never where the intake says now), or home when the sheet was stamped before rooms moved (a stamp with no
+ * `baseSheetMovables`). An unstamped (pre-template) sheet keeps the intake as it is; `stamp` = the sheet's template.
+ */
+export function fillGeometry(intake: { autoConfig?: AState; baseSheetTemplate?: string; baseSheetMovables?: Record<string, { wall: string; t: number }> } | undefined): { a: AState | undefined; stamp: string | undefined } {
+  const a0 = intake?.autoConfig;
+  const stamp = intake?.baseSheetTemplate;
+  return { a: a0 && stamp ? { ...a0, movables: intake?.baseSheetMovables ?? null } : a0, stamp };
+}
+
 /** The placement partId for a line: a catalog SKU, `asm:<id>`, `allow:<row>:<tier>` — null when it must not be placed. */
 export function partIdForLine(line: Pick<AutoLine, "status" | "ref" | "rowKey" | "qty">, tier: TierKey): string | null {
   if (line.qty <= 0) return null;

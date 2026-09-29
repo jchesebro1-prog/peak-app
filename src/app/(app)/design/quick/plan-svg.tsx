@@ -26,14 +26,23 @@ type TextEl = { x: number; y: number; t: string; fill: string; size: number; wei
 type PathEl = { d: string; fill: string; stroke?: string; sw?: number; dash?: string };
 
 /** A drag handle on the auto plan: a wall (`side`) sizes the room; a movable room (`key` = its id, #255) slides along the walls it may use. */
-export type PlanHandle = {
-  type: "wall" | "movable";
-  side?: "L" | "R" | "B";
-  key?: string;
-  cx: number;
-  cy: number;
-  shape: "wall" | "backWall" | "movable";
-};
+export type PlanHandle =
+  | { type: "wall"; side: "L" | "R" | "B"; cx: number; cy: number; shape: "wall" | "backWall" }
+  | { type: "movable"; key: string; cx: number; cy: number; shape: "movable" };
+
+/** #255: a movable room's handle sits on the middle of its outer face — off the wall it hangs on, clear of that wall's own handle. */
+const movableHandles = (ms: Array<{ id: string; handle: XY }>): PlanHandle[] => ms.map((m) => ({ type: "movable", key: m.id, cx: m.handle.x, cy: m.handle.y, shape: "movable" }));
+
+/** #255: the Quick Design plan toolbar — shown when the plan has anything to drag; its hint and Reset button fit what that is. */
+export function planToolbar(p: Pick<PlanData, "isHouse" | "handles">): { hint: string; reset: string; resetTitle: string } | null {
+  const rooms = (p.handles || []).some((h) => h.type === "movable");
+  if (!p.isHouse && !rooms) return null;
+  if (!p.isHouse) return { hint: "Drag a room along the walls", reset: "Reset rooms", resetTitle: "Put the rooms back where they were drawn" };
+  return { hint: rooms ? "Drag the walls to size the room, or a room along the walls" : "Drag the side or back wall to size the room", reset: "Reset house", resetTitle: "Reset the room to its default size" };
+}
+
+/** #255: what Reset puts back — the house to its default size and every movable room where it was drawn. */
+export const RESET_HOUSE_PATCH = { houseHalfFt: null, houseWidthFt: null, houseDepthFt: null, movables: null } as const satisfies Partial<AState>;
 
 export type PlanData = {
   W: number;
@@ -551,12 +560,13 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     texts.push({ x: R(bcx), y: R(bx.y + bx.h - 6), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
 
+  // #255: each movable room (the Gym Stage Booth) drags along the walls it may use — listed first, so the wall
+  // handles (drawn after, on top) win wherever the two overlap.
+  handles.push(...movableHandles(G.movables));
   // #249: drag handles — each side wall sets house width, the back wall house depth
   handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
   handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
   handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
-  // #255: each movable room (the Gym Stage Booth) drags along the walls it may use.
-  for (const m of G.movables) handles.push({ type: "movable", key: m.id, cx: m.centre.x, cy: m.centre.y, shape: "movable" });
 
   // dimension lines — proscenium width + wings (top)
   const yWid = yTop - 26;
@@ -678,12 +688,12 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
     L.paths.push({ d: box(c.x - cw / 2, c.y, cw, 4.5), fill: SYSCOLOR.controls, stroke: "none" });
     L.texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
+  // #255: each movable room drags along the walls it may use — listed before the wall handles, so the walls win overlaps.
+  handles.push(...movableHandles(G.movables));
   // #255: drag handles — each side wall sets nave width, the back wall nave depth
   handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
   handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
   handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
-  // #255: each movable room (the Gym Stage Booth) drags along the walls it may use.
-  for (const m of G.movables) handles.push({ type: "movable", key: m.id, cx: m.centre.x, cy: m.centre.y, shape: "movable" });
   dimH(L, G.platBackL.x, G.platBackR.x, G.yTop - 26, s.width + "'-0\"", false);
   // #255 fix: a platform the drawing shortened (Contemporary's depth limit) prints the depth it draws.
   const platDepth = G.dims.stageDepthFt < s.depth ? Math.floor(Math.round(G.dims.stageDepthFt * 12) / 12) + "'-" + (Math.round(G.dims.stageDepthFt * 12) % 12) + '"' : s.depth + "'-0\"";
@@ -716,8 +726,7 @@ function blackboxBase(G: BlackboxGeom, s: AState, houseLabelAt: XY): { L: L; han
       L.texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
     }
   }
-  const handles: PlanHandle[] = G.movables.map((m) => ({ type: "movable", key: m.id, cx: m.centre.x, cy: m.centre.y, shape: "movable" }));
-  return { L, handles };
+  return { L, handles: movableHandles(G.movables) };
 }
 
 /** Black box (#255): Jeff's Blackbox drawing; tension grid, perimeter masking, riser blocks, lighting, movable seating inside the room. */
@@ -1031,9 +1040,11 @@ export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: st
   if (family !== "proscenium" && family !== "church" && family !== "blackbox") return null;
   const G = family === "church" ? churchGeom(s, id) : family === "blackbox" ? blackboxGeom(s, id) : prosGeom(s, id);
   if (hd.type === "movable") {
-    if (!hd.key) return null;
-    // #255: a room follows the pointer (relative drag, drag-start scale) and snaps to the nearest wall it may use, whole feet.
-    const snap = snapMovable(G.plan, hd.key, G.fromPx({ x: hd.cx + pos.dx, y: hd.cy + pos.dy }));
+    // #255: a room follows the pointer (relative drag, drag-start scale) and snaps to the nearest wall it may use, whole
+    // feet. The handle sits on the room's outer face; the room's centre is what moves by the drag.
+    const m = G.movables.find((x) => x.id === hd.key);
+    if (!m) return null;
+    const snap = snapMovable(G.plan, hd.key, G.fromPx({ x: m.centre.x + pos.dx, y: m.centre.y + pos.dy }));
     return snap ? movablePatch(s, hd.key, snap) : null;
   }
   // A blackbox-family plan has no wall handles (width/depth are the room's own fields).

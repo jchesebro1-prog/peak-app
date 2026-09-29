@@ -111,6 +111,8 @@ export type PlacedMovable = {
   t: number;
   /** The element's centre, stretched inches. */
   centre: Pt;
+  /** The middle of its outer face (the side farthest from the wall), stretched inches — where its drag handle sits, clear of the wall's own. */
+  outer: Pt;
   fits: boolean;
   /** Per allowed wall: its mapped ends and the usable range of the attachment point along it (lo…hi), sMid = the centre's offset. */
   runs: Record<string, { from: Pt; to: Pt; lo: number; hi: number; sMid: number }>;
