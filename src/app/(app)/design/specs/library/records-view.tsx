@@ -172,7 +172,7 @@ export default async function RecordsView({
               <span style={TH}>Kind</span>
               <span style={TH}>Section</span>
               <span style={TH}>Status</span>
-              <span style={TH}>Manufacturer</span>
+              <span style={TH}>Mfr</span>
               <span style={TH}>Model #s</span>
               <span style={{ ...TH, textAlign: "right" }}>Rev</span>
               <span style={TH}>Updated</span>
