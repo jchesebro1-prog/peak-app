@@ -9829,3 +9829,16 @@ that also removes the project's open tasks; done tasks and notes stay. A quote-o
 quote-sync's `coveredQuoteIds()` skips it — checked by reload). The card's link now wraps only the card content, so the
 button isn't nested inside an `<a>`. Same permission as the detail header (any signed-in user). One file:
 `src/app/(app)/design/engagements/view.tsx`.
+
+---
+
+## 276. Estimator — the PM parts list's Unit Sell follows the system's rounded / typed price — DONE 2026-09-29 (D479)
+
+**Reported:** Jeff (2026-09-29): "Make the parts list CSV use the rounded system sell." (Follow-up to #262 / #267.)
+
+**Done.** Each system's parts are priced at the system's actual price: every row's Unit Sell (plain lines, assembly
+components, vendor-quote lines) is scaled by that system's price ÷ its lines' sell, so per system Σ qty × Unit Sell
+equals the system price (typed, or rounded up to $25) less its freight — freight is not a part and isn't listed — and
+less any labor lines, which the parts list already leaves out. Unit Cost is unchanged; cost-adjustment rows stay at $0
+sell; a system with no rounding or typed price (sent/won legacy) is unchanged; a typed price below the system's
+freight lists its parts at $0, never negative. `src/app/(app)/estimator/parts-csv.ts`. Harness `#276`. See D479.
