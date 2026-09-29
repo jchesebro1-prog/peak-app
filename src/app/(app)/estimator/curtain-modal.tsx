@@ -6,7 +6,7 @@ import { fabricRateLabel } from "@/lib/curtain-geom";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 
 /**
- * Curtain configurator — name / fabric (catalog category 'Fabric', priced by
+ * Curtain configurator — name / fabric (a fabric part — #264 isFabricPart, priced by
  * sewn area × the fabric's $/sq ft × (1 + sewing %)) / qty / W / H / fullness / optional
  * Rose Brand cost override, with live fabric-area + cost + ext pricing in
  * the footer. Hang type and bottom finish no longer affect price (curtain

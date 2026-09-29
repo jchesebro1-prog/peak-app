@@ -193,7 +193,7 @@ export type { AutoEquipHit } from "@/lib/design/auto-estimate";
 /**
  * Swap picker search (#211; curtain-row scoping #211 fix wave 1 I2/M1):
  * `rowKey` picks the branch. A curtain row (equipment-vocab's `curtain`
- * shape) swaps only to a Fabric part priced by area rate — never an
+ * shape) swaps only to a fabric part (#264: isFabricPart) priced by area rate — never an
  * assembly, and never the generic cost>0||list>0 filter, which would hide
  * the normal case of a list-less, cost-less fabric. Every other row keeps
  * the part search as before, plus a System/Fixture assembly search now
@@ -210,7 +210,16 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
     if (!hits.length) return { hits: [] };
     const [parts, rates] = await Promise.all([getCatalogParts(hits.map((h) => h.sku)), getCatalogRates()]);
     const bySku = new Map(parts.map((p) => [p.sku, p]));
-    return { hits: curtainSwapHits(hits.map((h) => ({ sku: h.sku, desc: h.desc, curtainAreaRate: bySku.get(h.sku)?.curtainAreaRate, costPerSqft: bySku.get(h.sku)?.costPerSqft })), rates.defaultMargin) };
+    // #264: unit + cost ride along so a sq-ft Soft Goods fabric prices at its cost.
+    return {
+      hits: curtainSwapHits(
+        hits.map((h) => {
+          const p = bySku.get(h.sku);
+          return { sku: h.sku, desc: h.desc, curtainAreaRate: p?.curtainAreaRate, costPerSqft: p?.costPerSqft, unit: p?.unit, cost: p?.cost };
+        }),
+        rates.defaultMargin
+      ),
+    };
   }
   const [{ hits }, fixtures, rates] = await Promise.all([searchCatalog(q, "", 15), listFixtures(), getCatalogRates()]);
   const m = rates.defaultMargin;

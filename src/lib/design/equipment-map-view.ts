@@ -19,6 +19,7 @@ import {
   type EquipRowStatus,
 } from "./equipment-map";
 import { resolveFixture, type FixtureKind, type FixtureRecord } from "@/lib/fixture-assemblies";
+import { isFabricPart } from "@/lib/fabric-part";
 
 export type EquipCellVM = {
   tier: TierKey;
@@ -160,10 +161,11 @@ export function assemblyOptions(fixtures: Iterable<FixtureRecord>, ctx: EquipPri
 /**
  * Suggested catalog matches for one row (spec §3, "help filling it"): the old
  * per-tier fabric SKUs first, then parts whose description / category contain
- * the row's search words. Fabric rows see Fabric parts only; other rows never
- * see Fabric or Labor. One pass over the given parts.
+ * the row's search words. Fabric rows see fabric parts only (#264:
+ * isFabricPart — Fabric, or Theatrical/Soft Goods sold per sq ft); other rows
+ * never see a fabric or Labor. One pass over the given parts.
  */
-export function suggestParts<P extends { sku: string; desc: string; category?: string }>(
+export function suggestParts<P extends { sku: string; desc: string; category?: string; unit?: string | null }>(
   parts: Iterable<P>,
   def: EquipRowDef,
   hintSkus: readonly string[],
@@ -174,7 +176,8 @@ export function suggestParts<P extends { sku: string; desc: string; category?: s
   const scored: Array<{ p: P; score: number }> = [];
   for (const p of parts) {
     const cat = p.category || "";
-    if (def.curtain ? cat !== "Fabric" : cat === "Fabric" || cat === "Labor") continue;
+    const fabric = isFabricPart(p);
+    if (def.curtain ? !fabric : fabric || cat === "Labor") continue;
     const text = `${p.desc} ${cat}`.toLowerCase();
     let score = hinted.has(p.sku) ? 10 : 0;
     for (const w of words) if (text.includes(w)) score += 1;

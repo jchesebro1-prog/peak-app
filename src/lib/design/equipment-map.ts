@@ -15,7 +15,8 @@
  *  - assembly  → resolveFixture's included cost / sell;
  *  - allowance → the confirmed amount is a unit cost, sold like a list-less
  *                part;
- *  - fabric rows (curtains) → the mapped Fabric part's $/sq ft FABRIC
+ *  - fabric rows (curtains) → the mapped fabric part's (#264: category
+ *                Fabric, or Theatrical/Soft Goods sold per sq ft) $/sq ft FABRIC
  *                cost, read through fabricAreaRateOf — the one chain every
  *                curtain path uses, seed rates included (#227, reverses the
  *                #211 no-seed rule) — plus the sewing % it prices with
@@ -27,6 +28,7 @@ import { EQUIPMENT_KEY_ALIASES, EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type Equip
 import { fixtureSkus, resolveFixture, type FixtureCatalogPart, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { fabricAreaRateOf, sewingPctFrom } from "./curtain-pricing";
 import { NO_FABRIC_RATE } from "@/lib/curtain-geom";
+import { isFabricPart } from "@/lib/fabric-part";
 
 export const EQUIPMENT_MAP_BLOB = "grid_equipment_map";
 export const EQUIP_TIERS: readonly TierKey[] = ["good", "better", "best"];
@@ -241,7 +243,7 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
     const p = ctx.parts.get(cell.sku);
     if (!p) return needs(`${cell.sku} is no longer in the catalog`);
     if (def.curtain) {
-      if (p.category !== "Fabric") return needs(`${p.sku} is not a Fabric part`);
+      if (!isFabricPart(p)) return needs(`${p.sku} is not a fabric (category Fabric, or Theatrical/Soft Goods sold per sq ft)`);
       const rate = fabricAreaRateOf(p);
       if (!(rate > 0)) return needs(`${p.sku}: ${NO_FABRIC_RATE}`);
       return { status: "part", ref: p.sku, desc: p.desc, unit: def.unit, unitCost: 0, unitSell: 0, areaRate: rate, sewingPct: sewingPctFrom(ctx.sewingPct) };
@@ -251,7 +253,7 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
     if (!(cost > 0) && !(list > 0)) return needs(`${p.sku} has no price in the catalog`);
     return { status: "part", ref: p.sku, desc: p.desc, unit: p.unit || def.unit, unitCost: cost, unitSell: list > 0 ? list : sellFromCost(cost, ctx.margin) };
   }
-  if (def.curtain) return needs("A curtain row maps to a Fabric part");
+  if (def.curtain) return needs("A curtain row maps to a fabric part");
   const f = ctx.fixtures.get(cell.id);
   if (!f) return needs(`Assembly ${cell.id} was deleted`);
   const r = resolveFixture(f, ctx.parts);

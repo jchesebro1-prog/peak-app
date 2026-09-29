@@ -7,6 +7,7 @@ import { buildImageIndex, type ImageRef } from "@/lib/part-docs/views";
 import { DOC_SLOT_KINDS } from "@/lib/part-docs/types";
 import { loadPortalRules } from "@/lib/freight-rule-load";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
+import { isFabricPart } from "@/lib/fabric-part";
 import {
   browsable,
   browseReason,
@@ -96,7 +97,7 @@ export type PortalIndex = {
    *  `fixtureComponentPart`. An explicit Hide is never here. */
   componentParts: Map<string, IndexedPart>;
   /** Curtain fabrics a customer may name on a curtain request (#245 Task 11,
-   *  spec §3.3): quotable "Fabric" parts with an area rate. Names only —
+   *  spec §3.3): quotable fabric parts (#264: isFabricPart) with an area rate. Names only —
    *  the rate never leaves the server. */
   fabrics: Array<{ sku: string; name: string }>;
   /** #250 SERVER-ONLY: fabric SKU → its curtain area rate (fabricAreaRateOf),
@@ -288,7 +289,7 @@ async function buildIndex(): Promise<Built> {
         docMeta.set(id, { kind: d.kind, title: (d.title || d.fileName || "").trim(), pdf });
       }
     }
-    if ((p.category || "").trim() === "Fabric") {
+    if (isFabricPart(p)) {
       const rate = fabricAreaRateOf(p);
       if (rate > 0) {
         fabrics.push({ sku: p.sku, name: (p.desc || p.sku).trim() });

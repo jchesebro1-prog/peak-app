@@ -20,6 +20,8 @@
  * no sewing on top.
  */
 
+import { isSqftUnit } from "@/lib/fabric-part";
+
 /** #227 late — the Estimating Rules id of the sewing-labor adder (a percent number, 10 = 10 %). */
 export const SEWING_PCT_ID = "curtains.sewingPct";
 export const DEFAULT_SEWING_PCT = 10;
@@ -93,19 +95,25 @@ export type FabricRateSource = {
   sku?: string;
   curtainAreaRate?: number | null;
   costPerSqft?: number | null;
+  /** #264 — the part's selling unit; `cost` is only a per-sq-ft rate when this reads as sq ft. */
+  unit?: string | null;
+  cost?: number | null;
 };
 
 /**
  * THE fabric area rate (#227) — every curtain path reads it here, so no path
  * can drift: the catalog's editable `curtainAreaRate`, else the seed rate for
- * that SKU, else the raw `costPerSqft`, else 0 ("No $/sq ft set" — the drape
- * prices at $0). A non-finite or non-positive result is 0. Pure.
+ * that SKU, else the raw `costPerSqft`, else (#264, D473) the part's `cost`
+ * when its unit is sq ft (a price-book fabric sold per sq ft, e.g. Rose
+ * Brand's RB-FAB-…), else 0 ("No $/sq ft set" — the drape prices at $0). A
+ * non-finite or non-positive result is 0. Pure.
  */
 export function fabricAreaRateOf(part: FabricRateSource | null | undefined): number {
   if (!part) return 0;
   const sku = part.sku ?? "";
   const seed = Object.prototype.hasOwnProperty.call(SEED_FABRIC_RATES, sku) ? SEED_FABRIC_RATES[sku] : undefined;
-  const rate = Number(part.curtainAreaRate ?? seed ?? part.costPerSqft ?? 0);
+  const sqftCost = isSqftUnit(part.unit) ? part.cost : undefined;
+  const rate = Number(part.curtainAreaRate ?? seed ?? part.costPerSqft ?? sqftCost ?? 0);
   return Number.isFinite(rate) && rate > 0 ? rate : 0;
 }
 

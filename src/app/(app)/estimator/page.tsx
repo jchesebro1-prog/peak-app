@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { get as getQuote, type Quote, type QuoteReview } from "@/lib/stores/quotes";
 import { quoteBuilderHref, estimatorShouldRedirect } from "@/lib/quote-links";
-import { byCategory, list as catalogList } from "@/lib/stores/catalog";
+import { byCategory, fabricParts, list as catalogList } from "@/lib/stores/catalog";
 import { allAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
@@ -267,7 +267,7 @@ export default async function EstimatorPage({
 
   const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords] =
     await Promise.all([
-      byCategory("Fabric"),
+      fabricParts(),
       byCategory("Labor"),
       allCustomers(),
       reviewerUsers(),
@@ -291,6 +291,8 @@ export default async function EstimatorPage({
   // Only catalog fabrics with a $/sq ft rate feed the curtain configurator
   // (#227: fabricAreaRateOf — the catalog rate, a seed, or cost per sq ft —
   // fabric cost only; the modal adds curtainSewingPct on top, #227 late).
+  // #264: fabricParts() includes Theatrical/Soft Goods sold per sq ft, whose
+  // rate falls back to their per-sq-ft `cost`.
   // Imported per-unit fabric rows with no rate would otherwise show up as
   // $0/sq ft options. curtainAreaRate carries the RESOLVED rate, so the
   // modal's label and computeCurtain read the same number.

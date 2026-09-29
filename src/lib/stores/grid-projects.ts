@@ -40,6 +40,8 @@ import {
 import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "@/lib/design/wire-labor";
 import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
+import { get as getCatalogPart } from "@/lib/stores/catalog";
+import { isFabricPart } from "@/lib/fabric-part";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { arenaGeom, blackboxGeom, buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
@@ -1350,7 +1352,10 @@ export async function saveAccessory(
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   if (!(typeof r.id === "string" && r.id)) {
     const symbol = await getGridSymbol(String(r.partId ?? "").trim());
-    if (!symbol || symbol.category === "Fabric" || symbol.category === "Labor")
+    // #264: a fabric is never an accessory — the symbol carries no unit, so a
+    // Soft Goods sq-ft fabric is recognised through its pricing part's unit.
+    const pricing = symbol?.pricingPartId ? await getCatalogPart(symbol.pricingPartId) : null;
+    if (!symbol || isFabricPart({ category: symbol.category, unit: pricing?.unit }) || symbol.category === "Labor")
       return { ok: false, error: "That part isn't in the Grid library — pick it from the search." };
   }
   let out: { ok: true; item: GridAccessory; clamped?: true } | { ok: false; error: string } = { ok: false, error: "Design not found." };

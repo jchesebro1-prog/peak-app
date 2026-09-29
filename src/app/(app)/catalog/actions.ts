@@ -89,10 +89,12 @@ export async function upsertPart(formData: FormData): Promise<void> {
   }
 
   // #227 final wave B: the fabric rate is refused server-side on a part that
-  // isn't Fabric, and above a sane ceiling — whatever the form sent.
+  // isn't Fabric, and above a sane ceiling — whatever the form sent. #264: a
+  // Theatrical/Soft Goods part sold per sq ft is a fabric too.
   const category = String(formData.get("category") || "").trim() || "Uncategorized";
+  const unit = String(formData.get("unit") || "").trim() || "ea";
   const optional = optionalPartFields(formData);
-  const rateProblem = fabricRateProblem(category, optional.curtainAreaRate);
+  const rateProblem = fabricRateProblem(category, optional.curtainAreaRate, unit);
   if (rateProblem) redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(rateProblem)}`);
 
   // Compared through serializePorts — the same stable key order the editor's
@@ -107,7 +109,7 @@ export async function upsertPart(formData: FormData): Promise<void> {
     ...(portsReplaced ? { davinci: undefined } : {}),
     desc,
     category,
-    unit: String(formData.get("unit") || "").trim() || "ea",
+    unit,
     list: num(formData.get("list")),
     cost: num(formData.get("cost")),
     mfr: String(formData.get("mfr") || "").trim() || undefined,

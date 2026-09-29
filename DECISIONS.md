@@ -7952,3 +7952,18 @@ floor sits just under that); the manufacturer rule places more on live data. The
 (1,010 in production) in chunks of 200, with Unassigned-only and In-department filters, a "Move all N shown to…"
 bulk action and "Re-run suggestions" behind an inline confirm; the per-category manufacturer breakdown stays on the
 server.
+
+## D473. Soft goods sold per sq ft count as fabric; a fabric's rate falls back to its sq-ft cost (#264, 2026-09-29)
+
+Production's Rose Brand price book files its fabrics (`RB-FAB-…`) under **Theatrical/Soft Goods** with unit
+**sq ft** and a cost per sq ft, not under the app's **Fabric** category, so the Equipment map refused them and every
+curtain path would have priced them at $0. Recategorising by hand was not an option: a price-book re-import resets
+the category. Jeff's rule: soft goods sold per sq ft count as fabric, everywhere. One pure test,
+`isFabricPart` (`src/lib/fabric-part.ts`) — category Fabric (any unit), or Theatrical/Soft Goods whose unit reads as
+square feet (`isSqftUnit`: case, spaces, dots, hyphens and underscores ignored; sqft, sf, ft2, ft², square feet/foot,
+sq feet) — replaces every `category === "Fabric"` part check. Soft Goods sold by the each (track, pipe pockets,
+finished goods) stay ordinary, placeable parts. `fabricAreaRateOf` gains one step at the end of its chain:
+`curtainAreaRate` → seed rate → `costPerSqft` → `cost` **only when the unit is sq ft** → 0. Side effect, accepted:
+a Fabric-category part sold per sq ft that had a cost but no rate used to read "No $/sq ft set" and price at $0; it
+now prices at its cost. The category-level exclusions (the catalog taxonomy card, the device-type map's excluded
+head nouns) stay on "Fabric" only — they act on a whole category, and Soft Goods holds non-fabric parts too.

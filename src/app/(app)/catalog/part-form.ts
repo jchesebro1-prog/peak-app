@@ -2,6 +2,7 @@
  * Pure halves of catalog/actions.ts, so the harness can test them.
  */
 import { normalizeVisibility } from "@/lib/portal-visibility";
+import { isFabricPart } from "@/lib/fabric-part";
 
 function num(v: FormDataEntryValue | null): number {
   const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
@@ -55,15 +56,16 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
 export const FABRIC_AREA_RATE_MAX = 500;
 
 /**
- * Server-side gate for the fabric rate (#227 final wave B): only a Fabric part
- * carries one, and never above FABRIC_AREA_RATE_MAX. `rate` is what
+ * Server-side gate for the fabric rate (#227 final wave B): only a fabric part
+ * (#264: isFabricPart — category Fabric, or Theatrical/Soft Goods sold per
+ * sq ft) carries one, and never above FABRIC_AREA_RATE_MAX. `rate` is what
  * optionalPartFields parsed (undefined = cleared or not submitted — always
  * fine). null = fine, else the message the part modal shows.
  */
-export function fabricRateProblem(category: string, rate: number | undefined): string | null {
+export function fabricRateProblem(category: string, rate: number | undefined, unit?: string | null): string | null {
   if (rate === undefined) return null;
-  if (category.trim() !== "Fabric")
-    return "Only a Fabric part carries a fabric $/sq ft rate — clear the rate or set the category to Fabric.";
+  if (!isFabricPart({ category, unit }))
+    return "Only a fabric part (category Fabric, or Theatrical/Soft Goods sold per sq ft) carries a fabric $/sq ft rate — clear the rate or change the category.";
   if (rate > FABRIC_AREA_RATE_MAX)
     return `A fabric rate over $${FABRIC_AREA_RATE_MAX}/sq ft looks like a typo — enter the cost per sq ft of sewn fabric.`;
   return null;
