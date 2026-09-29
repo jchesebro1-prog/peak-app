@@ -8,7 +8,8 @@ import { getRates } from "@/lib/flametest-engine";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { normalizeTravelOverride } from "@/lib/travel-plan";
-import { seedPriceOverride } from "@/lib/service-pricing";
+import { normalizeLift, seedPriceOverride } from "@/lib/service-pricing";
+import { getLiftRate } from "@/lib/service-quote-inputs";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -50,6 +51,8 @@ type FlameTestDoc = {
   travel?: unknown;
   trip?: { mode?: string } | null;
   priceOverride?: unknown;
+  /** #275: the saved lift rental. */
+  lift?: unknown;
 } | null;
 
 export default async function FlameTestQuotePage({
@@ -57,13 +60,14 @@ export default async function FlameTestQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, customerDocs, rates, settings, travelRates] = await Promise.all([
+  const [user, sp, customerDocs, rates, settings, travelRates, liftRate] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
     getRates(),
     getSettings(),
     getTravelRates(),
+    getLiftRate(),
   ]);
 
   const editId = one(sp.id);
@@ -193,6 +197,8 @@ export default async function FlameTestQuotePage({
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
       priceOverride: seedPriceOverride(editQuote.status, editQuote.value, ft && ft.priceOverride),
+      // #275: reopen with the saved lift (its own rate kept).
+      lift: normalizeLift(ft && ft.lift, liftRate) ?? null,
       // #248 Task 4 (spec §5): the staff Portal panel — present only for a
       // portal-service quote. Unlike the Estimator's portal-catalog panel,
       // there is no price-on-request review here (service pricing is never
@@ -265,6 +271,7 @@ export default async function FlameTestQuotePage({
         offices={offices}
         rates={rates}
         travelRates={travelRates}
+        liftRate={liftRate}
         initial={initial}
         pdf={editQuote ? pdfView(editQuote.pdf, Date.now()) : null}
         accent={settings.accent || "#7b3f8a"}

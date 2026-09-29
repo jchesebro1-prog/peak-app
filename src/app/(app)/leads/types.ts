@@ -22,6 +22,7 @@ export type WorklistRowVM = {
   stage: ChipVM;
   reason: ChipVM;
   canClaim: boolean;
+  canDelete: boolean;
   href: string;
 };
 

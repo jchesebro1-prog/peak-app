@@ -1,8 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties, type MouseEvent } from "react";
 import { MOB_TYPES } from "./estimator-data";
-import { computeLabor, fmt, fmtTime, round2, type RateFn, type RateSource } from "./pricing";
+import { computeLabor, fmt, fmtTime, mobTravelParts, round2, type RateFn, type RateSource } from "./pricing";
 import type { LaborDraft, MobDraft, TravelLite } from "./types";
 import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, Stat } from "./est-ui";
 
@@ -11,11 +11,18 @@ import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, S
  * 'Labor'), one line per mobilization (crew/days/OT, local vs travel with
  * mileage/lodging/per-diem, supervisor, lift), shop & engineering hours with
  * auto PM/drafting defaults, misc allowance and margin. addLabor
- * (estimator-client.tsx) adds shop & engineering / the allowance /
- * performance bonus as their own separate lines too — internal-estimate
- * only; the customer document folds their sell into the mobilization line(s)
- * (see `customerLines`, pricing.ts).
+ * (estimator-client.tsx) adds each mobilization's mileage / hotel / per diem
+ * / lift (#270) and shop & engineering / the allowance / performance bonus
+ * as their own separate lines too — internal-estimate only; the customer
+ * document folds their sell into the mobilization line(s) (see
+ * `customerLines`, pricing.ts).
+ *
+ * #269: reopened from one of those lines (`editing`), it edits that labor
+ * group's stored draft, and "Update labor" rebuilds the group in place.
  */
+
+/** #269: how long after opening a double-click's second click is ignored. */
+const OPEN_GUARD_MS = 800;
 
 const MOBFIELD: CSSProperties = {
   width: "100%",
@@ -123,6 +130,7 @@ export default function LaborModal({
   onToggleMobFlag,
   onApplyAutoMiles,
   onAdd,
+  editing,
   onClose,
 }: {
   secName: string;
@@ -142,9 +150,24 @@ export default function LaborModal({
   onToggleMobFlag: (i: number, field: "sup" | "lift") => void;
   onApplyAutoMiles: (i: number) => void;
   onAdd: () => void;
+  /** #269: set when reopened from a labor group's line — Update mode. */
+  editing?: { group: string; handEdited: number; removed: number } | null;
   onClose: () => void;
 }) {
   const lr = computeLabor(draft, rate);
+
+  // #269: when the modal mounted — a multi-click (detail > 1) landing inside
+  // it within OPEN_GUARD_MS is the tail of the double-click that opened it.
+  const openedAtRef = useRef(0);
+  useEffect(() => {
+    openedAtRef.current = Date.now();
+  }, []);
+  const swallowOpeningDoubleClick = (e: MouseEvent) => {
+    if (e.detail > 1 && Date.now() - openedAtRef.current < OPEN_GUARD_MS) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
   const valid = lr.totalCost > 0;
   const pctLabel = Math.round(lr.pct * 100) + "%";
 
@@ -177,12 +200,16 @@ export default function LaborModal({
       width={660}
       icon="⏱"
       iconSize={15}
-      title="Configure labor"
+      title={editing ? "Edit labor" : "Configure labor"}
       sub={
-        <>
-          Adds to {secName} · one line per mobilization, plus shop &amp; engineering and bonus lines
-          (internal — the customer sees them folded into labor)
-        </>
+        editing ? (
+          <>Updates this labor in {secName} · its lines are rebuilt in place at today&rsquo;s rates</>
+        ) : (
+          <>
+            Adds to {secName} · one line per mobilization plus its mileage, hotel, per diem and lift lines, and
+            shop &amp; engineering and bonus lines (internal — the customer sees them folded into labor)
+          </>
+        )
       }
       onClose={onClose}
       footerLeft={
@@ -198,10 +225,49 @@ export default function LaborModal({
       }
       footerRight={
         <button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>
-          Add labor
+          {editing ? "Update labor" : "Add labor"}
         </button>
       }
     >
+      {/* #269: the modal opens on the first click of a line / ✎; the second
+          click of a double-click must not land on whatever control now sits
+          under the pointer (the Lift rental toggle, for one). */}
+      <div onClickCapture={swallowOpeningDoubleClick}>
+      {editing && (
+        <div
+          role="note"
+          style={{
+            marginBottom: 16,
+            padding: "9px 12px",
+            borderRadius: 8,
+            border: "1px solid #efe4c4",
+            background: "#fffdf6",
+            color: "#8a6d1f",
+            fontSize: 11.5,
+            lineHeight: 1.45,
+          }}
+        >
+          Update labor replaces every line this labor added, in the same place in the system.
+          {editing.handEdited > 0 && (
+            <>
+              {" "}
+              <strong>
+                {editing.handEdited} {editing.handEdited === 1 ? "line has" : "lines have"} hand edits (price, qty or
+                notes)
+              </strong>{" "}
+              that Update will replace.
+            </>
+          )}
+          {editing.removed > 0 && (
+            <>
+              {" "}
+              {editing.removed} {editing.removed === 1 ? "line was" : "lines were"} removed since it was added and will
+              come back.
+            </>
+          )}
+        </div>
+      )}
+
       {/* discipline */}
       <div style={{ marginBottom: 18 }}>
         <label style={LBL}>
@@ -287,11 +353,9 @@ export default function LaborModal({
         const nameAsCustom = !!(raw.nameCustom === true || (raw.name && MOB_TYPES.indexOf(raw.name) < 0));
         const nameSelectVal = raw.name && MOB_TYPES.indexOf(raw.name) >= 0 ? raw.name : "";
         const crewHint = m.reg > 0 ? m.reg + " reg hr" + (m.supHrs ? " + " + m.supHrs + " sup" : "") : "—";
-        const travHint = m.travel
-          ? m.vehicles + " veh · " + m.days + " nt lodging · per diem"
-          : raw.milesRT
-            ? "daily mileage"
-            : "no travel";
+        // #270: the dollars behind each line this mobilization inserts.
+        const travelParts = mobTravelParts(m);
+        const travHint = m.travel ? "travel" : raw.milesRT ? "daily mileage" : "no travel";
         const tripHintShow = oneWayMin != null;
         const tripAutoFar = farTravel && raw.tripAuto !== false;
         const tripHintLabel =
@@ -536,6 +600,20 @@ export default function LaborModal({
               <div style={{ fontSize: 10.5, color: "#aab0bb", lineHeight: 1.4 }}>
                 First crew member billed as supervisor · {crewHint} · {travHint}
               </div>
+              <div
+                data-testid="mob-cost-breakdown"
+                style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", gap: "4px 14px", fontSize: 11, color: "#5b616e" }}
+              >
+                <span>
+                  Labor <strong style={{ fontFamily: "var(--font-mono)", color: "#16181d" }}>{fmt(m.labor)}</strong>
+                </span>
+                {travelParts.map((t) => (
+                  <span key={t.kind} title={t.basis}>
+                    {t.label} <strong style={{ fontFamily: "var(--font-mono)", color: "#16181d" }}>{fmt(t.cost)}</strong>
+                    <span style={{ color: "#aab0bb" }}> · {t.basis}</span>
+                  </span>
+                ))}
+              </div>
               {autoMilesShow && (
                 <button
                   type="button"
@@ -736,6 +814,7 @@ export default function LaborModal({
       </div>
       <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#f7f8fa", color: "#5b616e", fontSize: 11.5 }}>
         Performance bonus · 5% of {fmt(lr.baseCost)} cost = <strong style={{ color: "#16181d" }}>{fmt(lr.performanceBonus)}</strong>
+      </div>
       </div>
     </ConfigModal>
   );

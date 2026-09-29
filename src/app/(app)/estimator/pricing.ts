@@ -14,6 +14,7 @@ import type {
   FabricOpt,
   FixtureDraft,
   LaborDraft,
+  LaborTravelKind,
   MobDraft,
   SpecSection,
   SpecItem,
@@ -562,6 +563,12 @@ export type MobCalc = {
   foodCost: number;
   lifts: number;
   liftCost: number;
+  /** #270: the unit rates the travel costs above were priced at (the basis
+   *  each travel line shows). */
+  mileRate: number;
+  hotelRate: number;
+  foodRate: number;
+  liftRate: number;
   labor: number;
   trav: number;
   cost: number;
@@ -586,9 +593,12 @@ export function computeMob(m: MobDraft, disc: string, rate: RateFn): MobCalc {
   const vehicles = people > 0 ? Math.ceil(people / 2) : 0; // 2 crew per vehicle/room
   const milesRT = Math.max(0, parseFloat(m.milesRT) || 0);
   // local = drive round-trip every day; travel = drive there once
-  const mileCost = (travel ? milesRT * vehicles : milesRT * vehicles * days) * rate("TVL-MIL");
-  const hotelCost = travel ? days * vehicles * rate("TVL-HTL") : 0;
-  const foodCost = travel ? people * days * rate("TVL-FOD") : 0;
+  const mileRate = rate("TVL-MIL");
+  const hotelRate = rate("TVL-HTL");
+  const foodRate = rate("TVL-FOD");
+  const mileCost = (travel ? milesRT * vehicles : milesRT * vehicles * days) * mileRate;
+  const hotelCost = travel ? days * vehicles * hotelRate : 0;
+  const foodCost = travel ? people * days * foodRate : 0;
   const lifts = m.lift && days > 0 ? Math.ceil(days / 5) : 0;
   const liftRate = Math.max(0, parseFloat(m.liftRate || "") || rate("EQP-LIFT"));
   const liftCost = lifts * liftRate;
@@ -611,6 +621,10 @@ export function computeMob(m: MobDraft, disc: string, rate: RateFn): MobCalc {
     foodCost,
     lifts,
     liftCost,
+    mileRate,
+    hotelRate,
+    foodRate,
+    liftRate,
     labor,
     trav,
     cost: labor + trav,
@@ -684,27 +698,97 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
   };
 }
 
+/** #270: one travel cost of a mobilization, with the basis it was priced on. */
+export type MobTravelPart = { kind: LaborTravelKind; label: string; cost: number; basis: string };
+
+/** $0.7 → "$0.70", $150 → "$150" — a unit rate in a basis line. */
+function unitRate(n: number): string {
+  const v = round2(n);
+  return "$" + (Number.isInteger(v) ? v.toLocaleString("en-US") : v.toFixed(2));
+}
+const plural = (n: number, one: string, many = one + "s") => n + " " + (n === 1 ? one : many);
+
 /**
- * Pure line-building half of `addLabor` (estimator-client.tsx): one item
- * per active mobilization, plus shop & engineering / the misc allowance /
- * the performance bonus as their own separate lines when present — restored
- * to that older, unfolded shape (owner request: "I like setting the shop
- * and engineering as separate lines ... and the bonus"). The caller still owns
- * `pushItems`/`closeInput`/the `r.totalCost <= 0` early-out; `nextId` is
- * injected so this stays a pure function of its inputs.
+ * #270: a mobilization's travel costs, split out in a fixed order (mileage,
+ * hotel, per diem, lift rental) — only the ones that cost something. The
+ * same numbers `computeMob` summed into `trav`, so Σ cost === m.trav.
+ */
+export function mobTravelParts(m: MobCalc): MobTravelPart[] {
+  const parts: MobTravelPart[] = [];
+  if (m.mileCost > 0) {
+    const miles = m.milesRT.toLocaleString("en-US");
+    const perMile = unitRate(m.mileRate) + "/mi";
+    parts.push({
+      kind: "mileage",
+      label: "Mileage",
+      cost: m.mileCost,
+      basis: m.travel
+        ? plural(m.vehicles, "vehicle") + " × " + miles + " mi RT × " + perMile
+        : plural(m.vehicles, "vehicle") + " × " + miles + " mi RT × " + plural(m.days, "day") + " × " + perMile,
+    });
+  }
+  if (m.hotelCost > 0)
+    parts.push({
+      kind: "hotel",
+      label: "Hotel",
+      cost: m.hotelCost,
+      basis: plural(m.vehicles, "room") + " × " + plural(m.days, "night") + " × " + unitRate(m.hotelRate),
+    });
+  if (m.foodCost > 0)
+    parts.push({
+      kind: "perdiem",
+      label: "Per diem",
+      cost: m.foodCost,
+      basis: m.people + " crew × " + plural(m.days, "day") + " × " + unitRate(m.foodRate),
+    });
+  if (m.liftCost > 0)
+    parts.push({
+      kind: "lift",
+      label: "Lift rental",
+      cost: m.liftCost,
+      basis: plural(m.lifts, "rental") + " × " + unitRate(m.liftRate),
+    });
+  return parts;
+}
+
+const TRAVEL_SKU: Record<LaborTravelKind, string> = { mileage: "MIL", hotel: "HTL", perdiem: "FOD", lift: "LIFT" };
+
+/**
+ * Pure line-building half of `addLabor` (estimator-client.tsx): per active
+ * mobilization, one crew-labor line followed by #270's travel lines
+ * (mileage, hotel, per diem, lift rental — each its own line when it costs
+ * something), plus shop & engineering / the misc allowance / the
+ * performance bonus as their own separate lines when present (owner
+ * request: "I like setting the shop and engineering as separate lines ...
+ * and the bonus"). The caller still owns `pushItems`/`closeInput`/the
+ * `r.totalCost <= 0` early-out; `nextId` is injected so this stays a pure
+ * function of its inputs.
  *
- * The overhead lines carry `laborOverhead` so `customerLines` (below) can
- * hide them from the CUSTOMER document without a SKU-prefix guess.
+ * The overhead lines carry `laborOverhead`, the travel lines `laborTravel`
+ * plus their mobilization's `laborMobKey`, so `customerLines` (below) can
+ * hide them from the CUSTOMER document without a SKU-prefix guess — each
+ * travel line folds back into its own mobilization line there.
+ *
+ * #270 keeps the pre-split numbers: a mobilization's lines together cost
+ * exactly round2(m.cost) (the labor line takes the rounding remainder), and
+ * every line sells at exactly its own cost's seed — so #254/#266 tier
+ * re-pricing still recognises each one — which puts a mobilization's sell
+ * within a few cents of its old single line; the total still lands on
+ * `r.totalPrice` through the drift nudge below.
  *
  * The modal rounds its "Price · ext" total once (`r.totalPrice`) while each
  * line here rounds its own share, so bounded rounding drift (≤5¢, scaled by
  * line count) can appear between the lines' own sum and that total — it
  * lands on the LAST emitted line, the same bound `foldLaborMobLines` uses
  * for its own target-total nudge.
+ *
+ * `group` (#269) tags every line with the labor group id and keys each
+ * mobilization's lines `<group>:<index>`; without one the key is `mob<id>`.
  */
-export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => number): SpecItem[] {
+export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => number, group?: string): SpecItem[] {
   const price = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
   const items: SpecItem[] = [];
+  const tag: Pick<SpecItem, "laborGroup"> = group ? { laborGroup: group } : {};
   r.mobs.forEach((m, i) => {
     if (m.cost <= 0) return;
     const label = m.raw.name && m.raw.name.trim() ? m.raw.name.trim() : "Mobilization " + (i + 1);
@@ -713,19 +797,43 @@ export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => n
     const internalNote = (m.raw.internalNote || "").trim();
     const idN = nextId();
     const skuN = nextId();
+    const mobKey = group ? group + ":" + i : "mob" + idN;
+    const travel = mobTravelParts(m).map((t) => ({ ...t, cost: round2(t.cost), price: price(t.cost) }));
+    const travelCost = travel.reduce((a, t) => a + t.cost, 0);
+    const laborCost = round2(round2(m.cost) - travelCost);
     items.push({
       id: idN,
       sku: "LAB-" + r.disc + "-" + skuN,
       desc,
       qty: 1,
       unit: "lot",
-      cost: round2(m.cost),
-      price: price(m.cost),
+      cost: laborCost,
+      price: price(laborCost),
       labor: true,
       comment,
       internalNote,
       mob: { type: label, days: m.days, crew: m.people, discipline: discLabel },
+      laborMobKey: mobKey,
+      ...tag,
     });
+    for (const t of travel) {
+      const tId = nextId();
+      const tSku = nextId();
+      items.push({
+        id: tId,
+        sku: "LAB-" + TRAVEL_SKU[t.kind] + "-" + tSku,
+        desc: t.label + " — " + label,
+        qty: 1,
+        unit: "lot",
+        cost: t.cost,
+        price: t.price,
+        labor: true,
+        internalNote: t.basis,
+        laborTravel: t.kind,
+        laborMobKey: mobKey,
+        ...tag,
+      });
+    }
   });
   if (r.shopCost > 0) {
     const idN = nextId();
@@ -740,6 +848,7 @@ export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => n
       price: price(r.shopCost),
       labor: true,
       laborOverhead: "shop",
+      ...tag,
     });
   }
   if (r.misc > 0) {
@@ -755,6 +864,7 @@ export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => n
       price: price(r.misc),
       labor: true,
       laborOverhead: "misc",
+      ...tag,
     });
   }
   if (r.performanceBonus > 0) {
@@ -770,6 +880,7 @@ export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => n
       price: price(r.performanceBonus),
       labor: true,
       laborOverhead: "bonus",
+      ...tag,
     });
   }
   if (items.length) {
@@ -895,6 +1006,18 @@ export function isLaborOverheadItem(it: Pick<SpecItem, "labor" | "sku" | "laborO
   return !!(it.labor && /^LAB-(SHOP|MISC|BONUS)-/.test(it.sku || ""));
 }
 
+/** #270: a mobilization's mileage / hotel / per diem / lift-rental line —
+ *  internal only; `customerLines` folds it into its mobilization line. */
+export function isLaborTravelItem(it: Pick<SpecItem, "laborTravel">): boolean {
+  return !!it.laborTravel;
+}
+
+/** A labor line the CUSTOMER document never shows by itself: overhead
+ *  (shop & engineering / bonus / allowance) or #270 travel. */
+export function isLaborInternalItem(it: Pick<SpecItem, "labor" | "sku" | "laborOverhead" | "laborTravel">): boolean {
+  return isLaborOverheadItem(it) || isLaborTravelItem(it);
+}
+
 /** One row of the CUSTOMER document: either a real spec line with its
  *  customer-facing `ext` (overhead sell already folded in when this is the
  *  home line it folded onto), or — only when a section has overhead lines
@@ -924,9 +1047,34 @@ export type CustomerLine = { item: SpecItem; ext: number } | { item: null; desc:
  */
 function customerLinesRaw(sec: SpecSection): CustomerLine[] {
   const visible = sec.items.filter((it) => !it.option);
-  const overhead = visible.filter(isLaborOverheadItem);
-  const rest = visible.filter((it) => !isLaborOverheadItem(it));
-  if (!overhead.length) return rest.map((item) => ({ item, ext: lineExtSellOf(item) }));
+
+  // #270: each travel line (mileage / hotel / per diem / lift) folds into the
+  // mobilization line sharing its laborMobKey — sell AND cost, so that line
+  // reads, and weighs in the overhead fold below, exactly as the one
+  // mobilization line did before the split. A travel line whose
+  // mobilization line is gone (removed, or an option) is folded like overhead.
+  const mobByKey = new Map<string, SpecItem>();
+  for (const it of visible) {
+    if (it.labor && it.mob && !isLaborTravelItem(it) && it.laborMobKey && !mobByKey.has(it.laborMobKey))
+      mobByKey.set(it.laborMobKey, it);
+  }
+  const travelAdd = new Map<SpecItem, { sell: number; cost: number }>();
+  const orphanTravel: SpecItem[] = [];
+  for (const it of visible) {
+    if (!isLaborTravelItem(it)) continue;
+    const home = it.laborMobKey ? mobByKey.get(it.laborMobKey) : undefined;
+    if (!home) {
+      orphanTravel.push(it);
+      continue;
+    }
+    const cur = travelAdd.get(home) || { sell: 0, cost: 0 };
+    travelAdd.set(home, { sell: cur.sell + lineExtSellOf(it), cost: cur.cost + it.qty * it.cost });
+  }
+  const extOf = (it: SpecItem) => round2(lineExtSellOf(it) + (travelAdd.get(it)?.sell || 0));
+
+  const overhead = [...visible.filter(isLaborOverheadItem), ...orphanTravel];
+  const rest = visible.filter((it) => !isLaborOverheadItem(it) && !isLaborTravelItem(it));
+  if (!overhead.length) return rest.map((item) => ({ item, ext: travelAdd.has(item) ? extOf(item) : lineExtSellOf(item) }));
 
   const overheadTotal = round2(overhead.reduce((a, it) => a + lineExtSellOf(it), 0));
   const extras: LaborExtra[] = overhead.map((it) => ({ label: it.desc, cost: 0, price: round2(lineExtSellOf(it)) }));
@@ -944,15 +1092,15 @@ function customerLinesRaw(sec: SpecSection): CustomerLine[] {
   }
 
   const weights = homeLines.map((it) =>
-    mobLines.length ? round2(it.qty * it.cost) : round2(lineExtSellOf(it))
+    mobLines.length ? round2(it.qty * it.cost + (travelAdd.get(it)?.cost || 0)) : round2(lineExtSellOf(it))
   );
-  const homePrices = homeLines.map((it) => round2(lineExtSellOf(it)));
+  const homePrices = homeLines.map(extOf);
   const folded = foldLaborMobLines(weights, homePrices, extras);
-  const foldedById = new Map(homeLines.map((it, i) => [it.id, folded[i].price]));
+  const foldedByLine = new Map(homeLines.map((it, i) => [it, folded[i].price]));
 
   return rest.map((item) => ({
     item,
-    ext: foldedById.has(item.id) ? (foldedById.get(item.id) as number) : lineExtSellOf(item),
+    ext: foldedByLine.has(item) ? (foldedByLine.get(item) as number) : travelAdd.has(item) ? extOf(item) : lineExtSellOf(item),
   }));
 }
 

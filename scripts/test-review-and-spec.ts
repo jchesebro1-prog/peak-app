@@ -10675,6 +10675,7 @@ seeded()
   .then(() => c255StorSpacesAsyncChecks())
   .then(() => specLabelsAsyncChecks())
   .then(() => track274AsyncChecks())
+  .then(() => lift275AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -36616,12 +36617,551 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   ok(qd267.includes("const sub = systemSellTotal(sec);") && qd267.includes("rows.reduce((a, cl) => a + cl.ext, 0)"), "#267: the customer document's system subtotals and labor lines read the system price");
 }
 
+/* ======================================================================
+   #269 / #270 — labor lines: travel as its own lines (mileage, hotel,
+   per diem, lift) folded back into their mobilization on the customer
+   document, and click-to-edit through a per-group stored draft.
+   ====================================================================== */
+import {
+  buildLaborItems as l270Build,
+  computeLabor as l270Compute,
+  customerLines as l270CustomerLines,
+  isLaborInternalItem as l270IsInternal,
+  isLaborOverheadItem as l270IsOverhead,
+  isLaborTravelItem as l270IsTravel,
+  makeLaborRate as l270Rate,
+  mobTravelParts as l270TravelParts,
+  round2 as l270R2,
+  systemItemsRev as l270Rev,
+} from "@/app/(app)/estimator/pricing";
+import {
+  isLaborLineEditable as l269Editable,
+  laborGroupEdits as l269Edits,
+  laborGroupRecord as l269Record,
+  newLaborGroupId as l269NewId,
+  pruneLaborGroups as l269Prune,
+  snapshotLaborDraft as l269Snap,
+  withLaborGroup as l269With,
+} from "@/app/(app)/estimator/labor-group";
+import { copySectionForTarget as l269Copy } from "@/app/(app)/estimator/copy-system";
+import { repriceForTier as l269Reprice } from "@/app/(app)/estimator/tier-reprice";
+import { partsListRows as l269PartsRows } from "@/app/(app)/estimator/parts-csv";
+import { defaultLaborMobs as l270Mobs } from "@/app/(app)/estimator/labor-defaults";
+import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270Sec } from "@/app/(app)/estimator/types";
+{
+  const rate = l270Rate({
+    "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 60,
+    "TVL-MIL": 0.7, "TVL-HTL": 139, "TVL-FOD": 55, "EQP-LIFT": 875.33,
+    "SHP-PM": 65, "SHP-IN": 45, "DRF-SUB": 50,
+  });
+  const base = l270Mobs(null)[0];
+  const draft = (margin = "27", crew = "3"): L270Draft => ({
+    discipline: "RIG", margin,
+    mobs: [
+      { ...base, name: "Install", tripType: "travel", tripAuto: false, people: crew, days: "3", milesRT: "341.7", lift: true },
+      { ...base, name: "Site Visit", tripType: "local", tripAuto: false, people: "2", days: "2", milesRT: "37.3", lift: false },
+    ],
+    pmHrs: "", pmAuto: true, shopHrs: "4", drfHrs: "", drfAuto: true, misc: "123.45",
+  });
+  let n = 500;
+  const nid = () => ++n;
+  const r = l270Compute(draft(), rate);
+  const items = l270Build(r, "Rigging", nid, "lgTEST");
+  const m = r.margin;
+  const priceOf = (c: number) => l270R2(c / (1 - m));
+
+  /* ---- #270 split: cost unchanged to the cent, sell per mobilization unchanged ---- */
+  const mobLines = items.filter((x) => x.mob);
+  ok(mobLines.length === 2, "#270 build: still one crew-labor line per mobilization (the line carrying `mob`)");
+  r.mobs.forEach((mc, i) => {
+    const key = "lgTEST:" + i;
+    const lines = items.filter((x) => x.laborMobKey === key);
+    ok(l270R2(lines.reduce((a, x) => a + x.cost, 0)) === l270R2(mc.cost),
+      `#270 build: mobilization ${i + 1}'s lines cost exactly round2(m.cost) together (${l270R2(mc.cost)}) — the pre-split single line's cost`);
+    ok(Math.abs(l270R2(lines.reduce((a, x) => a + x.price, 0)) - priceOf(mc.cost)) <= 0.005 * lines.length + 1e-9,
+      `#270 build: mobilization ${i + 1}'s lines sell the pre-split line's sell within rounding (${l270R2(lines.reduce((a, x) => a + x.price, 0))} vs ${priceOf(mc.cost)})`);
+    const mobLine = lines.find((x) => x.mob)!;
+    ok(Math.abs(mobLine.cost - mc.labor) <= 0.02, `#270 build: mobilization ${i + 1}'s own line is crew labor only (${mobLine.cost} ≈ ${l270R2(mc.labor)})`);
+  });
+  ok(l270R2(items.reduce((a, x) => a + x.cost, 0)) === l270R2(r.mobs.reduce((a, x) => a + l270R2(x.cost), 0) + l270R2(r.shopCost) + l270R2(r.misc) + l270R2(r.performanceBonus)),
+    "#270 build: the labor total's cost is unchanged to the cent (Σ mobilizations + shop + misc + bonus)");
+  ok(l270R2(items.reduce((a, x) => a + x.price, 0)) === l270R2(r.totalPrice), "#270 build: the lines still sum to the modal's rounded Price · ext");
+  ok(items.slice(0, -1).every((x) => x.price === priceOf(x.cost)), "#270 build: every line but the drift-nudged last sells at exactly its own cost's seed (so #254 tier re-pricing recognises each)");
+
+  /* ---- #270 travel lines: kinds, order, basis, tags ---- */
+  const travel0 = items.filter((x) => x.laborMobKey === "lgTEST:0" && x.laborTravel);
+  const travel1 = items.filter((x) => x.laborMobKey === "lgTEST:1" && x.laborTravel);
+  ok(travel0.map((x) => x.laborTravel).join(",") === "mileage,hotel,perdiem,lift", "#270 build: a Travel mobilization inserts mileage, hotel, per diem and lift, in that order");
+  ok(travel1.map((x) => x.laborTravel).join(",") === "mileage", "#270 build: a Local mobilization inserts only its daily mileage (no hotel / per diem / lift)");
+  const idx0 = items.findIndex((x) => x.laborMobKey === "lgTEST:0" && x.mob);
+  ok(items.slice(idx0 + 1, idx0 + 5).every((x) => x.laborTravel && x.laborMobKey === "lgTEST:0"), "#270 build: travel lines follow their own mobilization line directly");
+  const byKind = (k: string) => travel0.find((x) => x.laborTravel === k)!;
+  ok(byKind("mileage").desc === "Mileage — Install" && byKind("hotel").desc === "Hotel — Install" && byKind("perdiem").desc === "Per diem — Install" && byKind("lift").desc === "Lift rental — Install",
+    "#270 build: travel lines read '<Kind> — <mobilization label>'");
+  ok(byKind("mileage").internalNote === "2 vehicles × 341.7 mi RT × $0.70/mi", `#270 basis: mileage (travel) — ${byKind("mileage").internalNote}`);
+  ok(byKind("hotel").internalNote === "2 rooms × 3 nights × $139", `#270 basis: hotel — ${byKind("hotel").internalNote}`);
+  ok(byKind("perdiem").internalNote === "3 crew × 3 days × $55", `#270 basis: per diem — ${byKind("perdiem").internalNote}`);
+  ok(byKind("lift").internalNote === "1 rental × $875.33", `#270 basis: lift — ${byKind("lift").internalNote}`);
+  ok(travel1[0].internalNote === "1 vehicle × 37.3 mi RT × 2 days × $0.70/mi", `#270 basis: local mileage runs every day — ${travel1[0].internalNote}`);
+  ok(byKind("mileage").cost === l270R2(2 * 341.7 * 0.7) && byKind("hotel").cost === 2 * 3 * 139 && byKind("perdiem").cost === 3 * 3 * 55 && byKind("lift").cost === 875.33,
+    "#270 build: each travel line costs exactly computeMob's own figure");
+  ok(travel0.every((x) => x.price === priceOf(x.cost)), "#270 build: travel lines sell through the same labor margin");
+  ok(byKind("mileage").sku.startsWith("LAB-MIL-") && byKind("hotel").sku.startsWith("LAB-HTL-") && byKind("perdiem").sku.startsWith("LAB-FOD-") && byKind("lift").sku.startsWith("LAB-LIFT-"),
+    "#270 build: travel SKUs are LAB-MIL-/HTL-/FOD-/LIFT- (never the SHOP/MISC/BONUS overhead prefixes)");
+  ok(items.every((x) => x.labor && x.laborGroup === "lgTEST"), "#269 build: every line of one Add labor is a labor line carrying the group id");
+  ok(travel0.every((x) => !x.mob && !x.comment), "#270 build: travel lines carry no `mob` (spec.mobs unchanged) and no customer comment");
+  ok(l270TravelParts(r.mobs[0]).reduce((a, t) => a + t.cost, 0) === r.mobs[0].trav, "#270 mobTravelParts: the parts sum to computeMob's trav exactly");
+  ok(l270IsTravel(byKind("hotel")) && !l270IsOverhead(byKind("hotel")) && l270IsInternal(byKind("hotel")) && l270IsInternal(items.find((x) => x.laborOverhead === "bonus")!) && !l270IsInternal(mobLines[0]),
+    "#270 predicates: travel is travel (not overhead); both are internal; a mobilization line is neither");
+  const noGroup = l270Build(r, "Rigging", nid);
+  ok(noGroup.every((x) => !x.laborGroup) && noGroup.filter((x) => x.laborTravel).every((x) => noGroup.some((y) => y.mob && y.laborMobKey === x.laborMobKey)),
+    "#270 build: without a group id the travel lines still key to their mobilization line");
+
+  /* ---- #270 customerLines: travel folds into ITS OWN mobilization, the customer sees today's rows ---- */
+  const matLine: L270Item = { id: 9001, sku: "TRUSS", desc: "Truss", qty: 2, unit: "ea", cost: 100, price: 150 };
+  const sec: L270Sec = { id: "sysL", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [matLine, ...items] };
+  // The pre-#270 shape of the same labor: each mobilization one line (its lines summed), overhead as-is.
+  const collapsed: L270Item[] = [matLine];
+  for (const it of items) {
+    if (it.laborTravel) {
+      const home = collapsed.find((x) => x.laborMobKey === it.laborMobKey)!;
+      home.cost = l270R2(home.cost + it.cost);
+      home.price = l270R2(home.price + it.price);
+    } else collapsed.push({ ...it });
+  }
+  const oldSec: L270Sec = { ...sec, items: collapsed.map((x) => ({ ...x, laborMobKey: undefined })) };
+  const rowsNew = l270CustomerLines(sec);
+  const rowsOld = l270CustomerLines(oldSec);
+  ok(rowsNew.length === 3 && rowsNew.every((x) => !!x.item && !x.item.laborTravel && !x.item.laborOverhead), "#270 customerLines: travel and overhead lines never appear — one row per mobilization + the material line");
+  ok(rowsNew.map((x) => x.ext).join("|") === rowsOld.map((x) => x.ext).join("|"),
+    `#270 customerLines: every row's ext equals the pre-split estimate's, to the cent (${rowsNew.map((x) => x.ext).join(" / ")})`);
+  ok(l270R2(rowsNew.reduce((a, x) => a + x.ext, 0)) === l270R2(l270Rev(sec)), "#270 customerLines: rows sum to the section's own items total");
+  const noOverhead: L270Sec = { ...sec, items: sec.items.filter((x) => !x.laborOverhead) };
+  const rowsNoOh = l270CustomerLines(noOverhead);
+  const mob0Sell = l270R2(items.filter((x) => x.laborMobKey === "lgTEST:0").reduce((a, x) => a + x.price, 0));
+  ok(rowsNoOh.length === 3 && rowsNoOh.find((x) => x.item?.laborMobKey === "lgTEST:0")!.ext === mob0Sell,
+    "#270 customerLines: with no overhead lines, a mobilization row still carries its own travel (labor + mileage + hotel + per diem + lift)");
+  const orphan: L270Sec = { ...sec, items: sec.items.filter((x) => !(x.mob && x.laborMobKey === "lgTEST:0")) };
+  const rowsOrphan = l270CustomerLines(orphan);
+  ok(rowsOrphan.every((x) => !!x.item && !x.item.laborTravel) && l270R2(rowsOrphan.reduce((a, x) => a + x.ext, 0)) === l270R2(l270Rev(orphan)),
+    "#270 customerLines: travel whose mobilization line was removed folds like overhead — never shown, never dropped");
+  const optTravel: L270Sec = { ...sec, items: sec.items.map((x) => (x.laborTravel === "hotel" ? { ...x, option: true } : x)) };
+  ok(l270R2(l270CustomerLines(optTravel).reduce((a, x) => a + x.ext, 0)) === l270R2(l270Rev(optTravel)), "#270 customerLines: an option-flagged travel line is excluded like any option");
+
+  /* ---- #269 draft round-trip + in-place replace ---- */
+  const d1 = draft();
+  const a: L270Item = { id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 10, price: 20 };
+  const b: L270Item = { id: 2, sku: "B", desc: "B", qty: 1, unit: "ea", cost: 10, price: 20 };
+  const c: L270Item = { id: 3, sku: "C", desc: "C", qty: 1, unit: "ea", cost: 10, price: 20 };
+  const g = l269NewId(1_700_000_000_000, 0.5);
+  ok(/^lg[0-9a-z]+$/.test(g) && g !== l269NewId(1_700_000_000_001, 0.5), "#269 newLaborGroupId: a compact, time-unique id");
+  const built1 = l270Build(l270Compute(d1, rate), "Rigging", nid, g);
+  const s1: L270Sec = l269With({ id: "sysE", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [a, b] }, g, built1, d1);
+  ok(s1.items.length === 2 + built1.length && s1.items[0] === a && s1.items[1] === b, "#269 withLaborGroup: a new group appends after the existing lines");
+  ok(s1.laborGroups?.[g]?.lines === built1.length, "#269 withLaborGroup: the record stores how many lines the draft produced");
+  d1.mobs[0].people = "9";
+  ok(l269Record(s1, g)!.draft.mobs[0].people === "3", "#269 withLaborGroup: the stored draft is a snapshot — later typing in the modal never leaks into it");
+  const saved = JSON.parse(JSON.stringify(s1)) as L270Sec;
+  ok(JSON.stringify(l269Record(saved, g)!.draft) === JSON.stringify(l269Record(s1, g)!.draft) && saved.items.every((x) => !x.labor || x.laborGroup === g),
+    "#269 round-trip: the draft and the group ids survive a JSON save/load unchanged");
+  ok(saved.items.filter((x) => x.labor).every((x) => l269Editable(saved, x)) && !l269Editable(saved, a), "#269 isLaborLineEditable: every line of a stored group is editable; a material line is not");
+  const legacy: L270Item = { id: 77, sku: "LAB-RIG-77", desc: "Install — Rigging", qty: 1, unit: "lot", cost: 100, price: 130, labor: true, mob: { type: "Install", days: 1, crew: 1, discipline: "Rigging" } };
+  const withLegacy: L270Sec = { ...saved, items: [...saved.items, legacy] };
+  ok(!l269Editable(withLegacy, legacy),"#269 isLaborLineEditable: a labor line added before #269 (no group) is not editable");
+  ok(l269Edits(saved, g).handEdited === 0 && l269Edits(saved, g).removed === 0, "#269 laborGroupEdits: a fresh group reads no hand edits and no removed lines");
+  // Move a material line into the middle of the group, hand-edit two lines, remove another.
+  const groupIdx = saved.items.findIndex((x) => x.laborGroup === g);
+  const mid: L270Item[] = [...saved.items.slice(0, groupIdx + 1), c, ...saved.items.slice(groupIdx + 1)];
+  const hotel = mid.find((x) => x.laborTravel === "hotel")!;
+  const edited: L270Sec = {
+    ...saved,
+    items: mid
+      .map((x) => (x.laborOverhead === "misc" ? { ...x, qty: 2 } : x))
+      .map((x) => (x.laborOverhead === "shop" ? { ...x, price: x.price + 10, sellOverride: true } : x))
+      .filter((x) => x !== hotel),
+  };
+  const e = l269Edits(edited, g);
+  ok(e.handEdited === 2 && e.removed === 1, `#269 laborGroupEdits: a qty change and a typed price count as hand edits (2), the removed hotel line as removed (1) — got ${e.handEdited}/${e.removed}`);
+  const reopened = l269Record(edited, g)!.draft;
+  const d2 = { ...l269Snap(reopened), mobs: reopened.mobs.map((mm, i) => (i === 0 ? { ...mm, people: "5" } : mm)) };
+  const built2 = l270Build(l270Compute(d2, rate), "Rigging", nid, g);
+  const s2 = l269With(edited, g, built2, d2);
+  const firstAt = s2.items.findIndex((x) => x.laborGroup === g);
+  ok(s2.items.slice(0, firstAt).map((x) => x.id).join(",") === "1,2" && firstAt === groupIdx,
+    "#269 in-place replace: the rebuilt group starts where the group's first line was");
+  ok(s2.items.filter((x) => x.laborGroup === g).length === built2.length && s2.items.slice(firstAt, firstAt + built2.length).every((x) => x.laborGroup === g),
+    "#269 in-place replace: the whole group is rebuilt contiguously from the draft — removed lines come back, hand edits are replaced");
+  ok(s2.items[firstAt + built2.length] === c && s2.items.length === 3 + built2.length, "#269 in-place replace: lines that sat between group lines keep their order after the group");
+  ok(s2.items.find((x) => x.mob && x.laborGroup === g)!.mob!.crew === 5 && l269Record(s2, g)!.draft.mobs[0].people === "5" && l269Record(s2, g)!.lines === built2.length,
+    "#269 in-place replace: the new crew lands on the lines and the stored draft; same group id");
+  const ordered = l269With({ ...edited, items: edited.items.map((x, i) => ({ ...x, lineOrder: i })) }, g, built2, d2);
+  ok(ordered.items.every((x, i) => x.lineOrder === i), "#269 in-place replace: a section using lineOrder is restamped by position");
+  const onlyA = l269Prune({ ...s2, items: s2.items.filter((x) => x.laborGroup !== g) });
+  ok(!onlyA.laborGroups && l269Prune(s2) === s2, "#269 pruneLaborGroups: the record goes with the group's last line and is kept while any line remains");
+
+  /* ---- #269 copy-system carries the group; tier moves keep the draft in step ---- */
+  const src: L270Sec = { ...s1, items: s1.items.map((x) => ({ ...x })) };
+  const before = JSON.stringify(src);
+  const same = l269Copy(src, { newSectionId: "sysCopy", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.27 });
+  ok(JSON.stringify(src) === before, "#269 copy system: the source section is not mutated");
+  ok(same.section.items.filter((x) => x.laborGroup === g).length === built1.length && same.section.items.filter((x) => x.laborTravel).length === built1.filter((x) => x.laborTravel).length
+    && JSON.stringify(same.section.laborGroups) === JSON.stringify(src.laborGroups),
+    "#269 copy system: the labor group's lines, travel tags and stored draft all carry to the copy");
+  ok(same.section.items.filter((x) => x.laborGroup).every((x) => l269Editable(same.section, x)), "#269 copy system: every copied labor line is still click-to-edit");
+  const moved = l269Copy(src, { newSectionId: "sysCopy2", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 });
+  ok(l269Record(moved.section, g)!.draft.margin === "20" && l269Record(src, g)!.draft.margin === "27",
+    "#269 copy system: a tier move that re-prices the group's lines moves its stored margin too (27 → 20), source untouched");
+  ok(moved.section.items.filter((x) => x.laborGroup === g).every((x) => x.price === l270R2(x.cost / 0.8)), "#269 copy system: the group's lines (travel included) land on the target tier's labor seed");
+  const typed: L270Sec = { ...src, laborGroups: { [g]: { ...src.laborGroups![g], draft: { ...src.laborGroups![g].draft, margin: "33" } } } };
+  ok(l269Record(l269Copy(typed, { newSectionId: "x", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 }).section, g)!.draft.margin === "33",
+    "#269 copy system: a draft margin that isn't the source tier's (typed by hand) is left alone");
+  const rep = l269Reprice([src], 0.27, 0.2);
+  ok(rep.repriced === built1.length && l269Record(rep.sections[0], g)!.draft.margin === "20", "#269 tier re-price (#254): re-priced labor lines move their group's stored margin to the new tier");
+
+  /* ---- #269 review fix: the draft follows the tier even when EVERY group line is hand-priced ---- */
+  const allHand: L270Sec = { ...src, items: src.items.map((x) => (x.laborGroup === g ? { ...x, price: l270R2(x.price + 7), sellOverride: true } : x)) };
+  const allHandCopy = l269Copy(allHand, { newSectionId: "sysH", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 });
+  ok(l269Record(allHandCopy.section, g)!.draft.margin === "20" && allHandCopy.section.items.filter((x) => x.laborGroup === g).every((x, i) => x.price === allHand.items.filter((y) => y.laborGroup === g)[i].price),
+    "#269 copy system: an all-hand-priced group keeps its lines' prices but its stored draft still moves to the target tier's seed (27 → 20)");
+  const allHandRep = l269Reprice([allHand], 0.27, 0.2);
+  ok(allHandRep.repriced === 0 && allHandRep.sections[0] !== allHand && l269Record(allHandRep.sections[0], g)!.draft.margin === "20" && l269Record(allHand, g)!.draft.margin === "27",
+    "#269 tier re-price: nothing re-priced, yet the new sections carry the draft moved to the new seed (a draft-only change still lands; input untouched)");
+  const typedHand: L270Sec = { ...allHand, laborGroups: { [g]: { ...allHand.laborGroups![g], draft: { ...allHand.laborGroups![g].draft, margin: "33" } } } };
+  const typedRep = l269Reprice([typedHand], 0.27, 0.2);
+  ok(typedRep.repriced === 0 && typedRep.sections[0] === typedHand && l269Record(typedRep.sections[0], g)!.draft.margin === "33",
+    "#269 tier re-price: a hand-typed draft margin (≠ the previous seed) never moves — and with nothing else changed the same sections come back");
+  ok(l269Record(l269Copy(typedHand, { newSectionId: "y", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 }).section, g)!.draft.margin === "33",
+    "#269 copy system: a hand-typed draft margin never moves, hand-priced lines or not");
+  const sameSeed = l269Reprice([allHand], 0.274, 0.27);
+  ok(sameSeed.sections[0] === allHand && l269Record(sameSeed.sections[0], g)!.draft.margin === "27",
+    "#269 tier re-price: a stamp change inside the same labor whole percent (27.4% → 27%) leaves the draft and the section alone");
+  ok(JSON.stringify(l269Copy(allHand, { newSectionId: "z", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.27 }).section.laborGroups) === JSON.stringify(allHand.laborGroups),
+    "#269 copy system: equal tiers leave the stored draft exactly as it was");
+  const cliFix = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
+    "#269 applyTierStamp: a draft-only change is applied silently (no banner) when nothing re-priced");
+
+  /* ---- #269 review fix: notes count as hand edits too ---- */
+  const noted: L270Sec = {
+    ...saved,
+    items: saved.items.map((x) =>
+      x.mob && x.laborMobKey === g + ":0" ? { ...x, comment: "Typed on the line" }
+        : x.laborOverhead === "shop" ? { ...x, internalNote: "PM note", price: l270R2(x.price + 3) }
+        : x.laborTravel === "hotel" ? { ...x, internalNote: "a different basis" }
+        : x
+    ),
+  };
+  const ne = l269Edits(noted, g);
+  ok(ne.handEdited === 2 && ne.removed === 0,
+    `#269 laborGroupEdits: a comment typed on a mobilization line and an overhead line with a note + price count as 2 hand edits (a line counts once; a travel basis note is regenerated, not typed) — got ${ne.handEdited}`);
+  const draftNoted: L270Sec = {
+    ...saved,
+    laborGroups: { [g]: { ...saved.laborGroups![g], draft: { ...saved.laborGroups![g].draft, mobs: saved.laborGroups![g].draft.mobs.map((mm, i) => (i === 0 ? { ...mm, internalNote: "  crew note " } : mm)) } } },
+    items: saved.items.map((x) => (x.mob && x.laborMobKey === g + ":0" ? { ...x, internalNote: "crew note" } : x)),
+  };
+  ok(l269Edits(draftNoted, g).handEdited === 0, "#269 laborGroupEdits: a mobilization line whose notes match its draft (trimmed) is not a hand edit");
+  const cardFix = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
+  const modalFix = readFileSync(join(process.cwd(), "src/app/(app)/estimator/labor-modal.tsx"), "utf8");
+  ok(/const openLabor = \(e: \{ detail: number \}\) => \{[\s\S]{0,300}if \(e\.detail > 1\) return;/.test(cardFix) && modalFix.includes("<div onClickCapture={swallowOpeningDoubleClick}>") && /e\.detail > 1 && Date\.now\(\) - openedAtRef\.current < OPEN_GUARD_MS/.test(modalFix),
+    "#269 double-click: the line / ✎ open on the first click only, and the modal swallows a double-click's tail for its first moments");
+
+  /* ---- #262 parts list never lists labor or travel lines ---- */
+  const partsRows = l269PartsRows([s1], [], {});
+  ok(partsRows.length === 2 && partsRows.every((x) => x.sku === "A" || x.sku === "B"), "#270 parts list: labor, travel and overhead lines never appear (only the two material lines)");
+
+  /* ---- wiring (source) ---- */
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(cli.includes("buildLaborItems(r, discLabel, nextId, group)") && cli.includes("withLaborGroup(s, group, items, draft)") && cli.includes("laborEdit?.group || newLaborGroupId()"),
+    "#269 addLabor: builds with a group id (the edited group's on Update) and places the lines through withLaborGroup");
+  ok(/const openLaborEdit = \(secId: string, group: string\)[\s\S]{0,400}closeInput\(\);[\s\S]{0,200}laborEditRef\.current = [\s\S]{0,120}openInputMethod\("labor", secId\)/.test(cli),
+    "#269 openLaborEdit: closes whatever is open, sets the pending edit, then opens labor (the vendor-edit pattern)");
+  ok(/const edit = laborEditRef\.current;\s*laborEditRef\.current = null;\s*if \(edit\) \{[\s\S]{0,200}setLaborDraft\(snapshotLaborDraft\(edit\.draft\)\);\s*return;/.test(cli),
+    "#269 seedDraft: an edit seeds the stored draft and skips the travel reseed that would overwrite it");
+  ok(cli.includes("pruneLaborGroups({ ...s, items: s.items.filter((x) => x.id !== id) })") && cli.includes("onEditLabor={(group) => openLaborEdit(sec.id, group)}") && cli.includes("editing={laborEdit}"),
+    "#269 wiring: removeItem prunes stored drafts; SectionCard and LaborModal get the edit hooks");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(card.includes("isLaborLineEditable(sec, it)") && card.includes("onClick={laborEditable ? openLabor : undefined}") && card.includes("Added before labor editing — remove and re-add to change"),
+    "#269 section card: an editable labor line opens on its description and a ✎ action; a pre-#269 labor line explains why it can't");
+  const modal = rd("src/app/(app)/estimator/labor-modal.tsx");
+  ok(modal.includes('{editing ? "Update labor" : "Add labor"}') && modal.includes("hand edits (price, qty or") && modal.includes("that Update will replace.") && modal.includes('data-testid="mob-cost-breakdown"') && modal.includes("mobTravelParts(m)"),
+    "#269/#270 labor modal: Update labor + the hand-edit note in edit mode; per-mobilization labor/mileage/hotel/per diem/lift dollars");
+}
+
+/* ======================================================================
+   #275 — a Lift rental on flame-test, inspection and repair quotes: count ×
+   rate (default the live EQP-LIFT catalog cost), margined with the job ON TOP
+   of any floor, inside the $25 rounding and a typed total, through the shared
+   finish functions the builder previews run. Printed as its own "Lift rental"
+   line (count > 0 only); renewals carry the count at today's rate; a portal
+   Refresh keeps a staff-added lift; a customer's own portal Generate never
+   has one. Pure checks run at top level; DB-backed checks are registered on
+   the promise chain as lift275AsyncChecks().
+   ====================================================================== */
+import {
+  LIFT_LINE as l275Line,
+  LIFT_RATE_FALLBACK as l275Fallback,
+  carryLift as l275Carry,
+  finishFlame as l275FinishFlame,
+  finishInspection as l275FinishInsp,
+  finishRepair as l275FinishRepair,
+  liftDraftFrom as l275DraftFrom,
+  liftLabel as l275Label,
+  liftRateChangeReason as l275Reason,
+  normalizeLift as l275Norm,
+  printedLift as l275Printed,
+  savedLift as l275Saved,
+} from "@/lib/service-pricing";
+{
+  const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
+  const L1 = { count: 1, rate: 750 };
+  const L2 = { count: 2, rate: 750 };
+
+  // ---- normalizeLift: posted drafts, stored lifts, JSON text ----
+  ok(JSON.stringify(l275Norm({ count: "2", rate: "" }, 800)) === JSON.stringify({ count: 2, rate: 800 }),
+    "#275 normalizeLift: a blank rate prices at the default");
+  ok(JSON.stringify(l275Norm({ count: "3", rate: "$1,200" }, 750)) === JSON.stringify({ count: 3, rate: 1200 }),
+    "#275 normalizeLift: a typed rate is whole dollars ($ and commas stripped)");
+  ok(JSON.stringify(l275Norm('{"count":"1","rate":"900"}', 750)) === JSON.stringify({ count: 1, rate: 900 }),
+    "#275 normalizeLift: reads the builder's posted JSON text");
+  ok(JSON.stringify(l275Norm({ count: 2, rate: 750, cost: 1500, line: 2143 }, 999)) === JSON.stringify({ count: 2, rate: 750 }),
+    "#275 normalizeLift: a stored lift keeps its own rate");
+  ok([{ count: "" }, { count: "0" }, { count: 0 }, { count: "1.5" }, { count: 2.5 }, { count: "-1" }, { count: 51 }, { count: "abc" }, null, undefined, "junk", "{", 7]
+      .every((v) => l275Norm(v, 750) === undefined),
+    "#275 normalizeLift: blank, 0, fractions, negatives, > 50 and junk mean no lift");
+  ok(l275Norm({ count: "1", rate: "-5" }, 750)?.rate === 750 && l275Norm({ count: "1", rate: "1e3" }, 750)?.rate === 750 && l275Norm({ count: "1", rate: "0" }, 750)?.rate === 0,
+    "#275 normalizeLift: a junk rate falls back to the default; $0 is a real rate");
+  ok(l275Norm({ count: "1" }, NaN)?.rate === l275Fallback && l275Fallback === 750, "#275 normalizeLift: no usable default → the $750 seed");
+
+  // ---- the builder draft round-trips ----
+  ok(JSON.stringify(l275DraftFrom(L2, 750)) === JSON.stringify({ count: "2", rate: "" }),
+    "#275 liftDraftFrom: a saved lift at today's default reopens with a blank rate (follows the default)");
+  ok(JSON.stringify(l275DraftFrom({ count: 1, rate: 900 }, 750)) === JSON.stringify({ count: "1", rate: "900" }),
+    "#275 liftDraftFrom: a hand-typed rate reopens typed in");
+  ok(JSON.stringify(l275DraftFrom(null, 750)) === JSON.stringify({ count: "", rate: "" }), "#275 liftDraftFrom: no lift reopens empty (off)");
+  ok(JSON.stringify(l275Norm(l275DraftFrom({ count: 3, rate: 900 }, 750), 750)) === JSON.stringify({ count: 3, rate: 900 }),
+    "#275: draft → normalizeLift round-trips the saved lift");
+
+  // ---- inspection engine: lift on top of the minimum fee, rounded, typed ----
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iV = [{ id: "l275-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
+  const i0 = trvInspectionEstimate({ venues: iV }, iR);
+  const i0b = trvInspectionEstimate({ venues: iV, lift: null }, iR);
+  ok(i0.total === 1200 && i0.lift === null && i0.liftCost === 0 && i0.liftLine === 0 && i0b.total === i0.total && i0b.cost === i0.cost,
+    "#275 inspection: no lift prices exactly as before (1,200) with a zero lift");
+  const i1 = trvInspectionEstimate({ venues: iV, lift: L1 }, iR);
+  ok(near(i1.totalRaw, 832.5 / 0.7 + 750 / 0.7) && i1.total === 2250 && i1.cost === 1582.5 && i1.liftCost === 750 && i1.liftLine === 1071,
+    "#275 inspection: + 1 lift at $750 → 1,189.29 + 1,071.43 = 2,260.71 rounds to 2,250; the lift line prints $1,071");
+  ok(near(i1.effectiveMargin, 1 - 1582.5 / 2250) && i1.marginAmount === 2250 - 1582.5, "#275 inspection: the margin back-solves over labor + travel + lift");
+  const iHere = [{ id: "l275-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }];
+  const iMin = trvInspectionEstimate({ venues: iHere, lift: L1 }, iR);
+  ok(iMin.minApplied && near(iMin.totalRaw, 650 + 750 / 0.7) && iMin.total === 1725,
+    "#275 inspection: the minimum fee floors the inspection and the lift adds ON TOP (650 + 1,071.43 → rounds UP to 1,725), never absorbed by the floor");
+  const iTyped = trvInspectionEstimate({ venues: iV, lift: L1, priceOverride: 2000 }, iR);
+  ok(iTyped.total === 2000 && iTyped.overridden && iTyped.autoTotal === 2250 && iTyped.liftLine === 1071 && near(iTyped.effectiveMargin, 1 - 1582.5 / 2000),
+    "#275 inspection: a typed total is used exactly; the lift line keeps its own price and the margin back-solves");
+  const iPrev = l275FinishInsp({ cost: i0.cost, minFee: 650, margin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(iPrev.total === i1.total && iPrev.cost === i1.cost && iPrev.liftLine === i1.liftLine,
+    "#275 parity: the builder preview's finishInspection() prices the lift exactly like the engine");
+
+  // ---- flame engine: lift after the base-fee floor ----
+  const fR = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const fV: FTVenue = { id: "l275-f1", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
+  const f0 = computeFlameQuote({ venues: [fV] }, fR);
+  ok(f0.total === 825 && f0.lift === null && f0.liftLine === 0, "#275 flame: no lift prices exactly as before (825)");
+  const f2 = computeFlameQuote({ venues: [fV], lift: L2 }, fR);
+  ok(f2.rawCost === 575 && f2.cost === 2075 && f2.total === 2975 && f2.liftCost === 1500 && f2.liftLine === 2143,
+    "#275 flame: + 2 lifts at $750 → cost 2,075, 2,964.29 rounds to 2,975; the lift line prints $2,143");
+  const fHere = computeFlameQuote({ venues: [{ id: "l275-f2", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }], lift: L1 }, fR);
+  ok(fHere.baseApplied && fHere.cost === 900 && fHere.total === 1300,
+    "#275 flame: the $150 base fee floors the testing, the lift adds on top (900 ÷ 0.7 = 1,285.71 rounds UP to 1,300)");
+  const fTyped = computeFlameQuote({ venues: [fV], lift: L2, priceOverride: 3000 }, fR);
+  ok(fTyped.total === 3000 && fTyped.overridden && fTyped.autoTotal === 2975 && near(fTyped.effectiveMargin, 1 - 2075 / 3000),
+    "#275 flame: a typed total with a lift is used exactly");
+  const fPrev = l275FinishFlame({ rawCost: f0.rawCost, baseFee: 150, margin: 0.3, priceOverride: null, liftCost: 1500 });
+  ok(fPrev.total === f2.total && fPrev.cost === f2.cost && fPrev.liftLine === f2.liftLine, "#275 parity: finishFlame() prices the lift exactly like the engine");
+
+  // ---- repair engine: lift at the SERVICE margin, on top of the call-out ----
+  const rR = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rV = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
+  const r0 = trvRepairEstimate({ venues: rV, laborHours: 4 }, rR);
+  ok(r0.total === 875 && r0.lift === null && r0.liftLine === 0, "#275 repair: no lift prices exactly as before (875)");
+  const r1 = trvRepairEstimate({ venues: rV, laborHours: 4, lift: L1 }, rR);
+  ok(r1.total === 1950 && r1.cost === 1357.5 && r1.liftLine === 1071 && near(r1.liftSell, 750 / 0.7) && near(r1.serviceSell, 1950 - 750 / 0.7),
+    "#275 repair: + 1 lift → 867.86 + 1,071.43 = 1,939.29 rounds to 1,950; the service line absorbs the rounding");
+  const rP = trvRepairEstimate({ venues: rV, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }], lift: L1 }, rR);
+  ok(near(rP.serviceSell + rP.partsSell + rP.liftSell, rP.total) && near(rP.partsSell, 200 / 0.7),
+    "#275 repair: service + parts + lift sell sum to the total; parts keep their own markup");
+  const rC = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1, lift: L1 }, rR);
+  ok(rC.calloutApplied && rC.total === 1425, "#275 repair: the minimum call-out floors the service, the lift adds on top (350 + 1,071.43 → rounds UP to 1,425)");
+  const rT = trvRepairEstimate({ venues: rV, laborHours: 4, lift: L1, priceOverride: 1500 }, rR);
+  ok(rT.total === 1500 && rT.overridden && near(rT.serviceMargin, rT.effectiveMargin) && near(rT.effectiveMargin, 1 - 1357.5 / 1500),
+    "#275 repair: a typed total with a lift reports the whole-job effective margin");
+  const rPrev = l275FinishRepair({ serviceCost: r0.serviceCost, minCallout: 350, margin: 0.3, partsCost: 0, partsMargin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(rPrev.total === r1.total && rPrev.liftLine === r1.liftLine, "#275 parity: finishRepair() prices the lift exactly like the engine");
+
+  // ---- the saved lift + the printed line (count > 0 only) ----
+  const saved = l275Saved(L2, f2);
+  ok(JSON.stringify(saved) === JSON.stringify({ count: 2, rate: 750, cost: 1500, line: 2143 }), "#275 savedLift: count, rate, cost and the printed line");
+  ok(l275Saved(null, f0) === undefined && l275Saved({ count: 0, rate: 750 }, f0) === undefined, "#275 savedLift: no lift writes nothing");
+  const pl = l275Printed({ lift: saved }, 0.3);
+  ok(!!pl && pl.line === 2143 && pl.count === 2 && pl.label === "Lift rental ×2", "#275 printedLift: a saved lift prints its stored line");
+  ok(l275Printed({}, 0.3) === null && l275Printed(null, 0.3) === null && l275Printed({ lift: { count: 0, rate: 750 } }, 0.3) === null,
+    "#275 printedLift: a quote with no lift (every pre-#275 quote) prints no lift line");
+  ok(l275Printed({ lift: { count: 1, rate: 700 } }, 0.3)?.line === 1000, "#275 printedLift: a lift saved without a line prints count × rate ÷ (1 − margin)");
+  ok(l275Label(1) === l275Line && l275Line === "Lift rental" && l275Label(3) === "Lift rental ×3", "#275: the customer-facing label is 'Lift rental' (×n for more than one)");
+
+  // ---- renewals carry the count at today's rate ----
+  ok(JSON.stringify(l275Carry({ count: 2, rate: 900, line: 2571 }, 750)) === JSON.stringify({ count: 2, rate: 750 }),
+    "#275 renewal: last year's lift count carries, re-priced at today's rate (a typed rate does not carry)");
+  ok(JSON.stringify(l275Carry({ count: 2, rate: 750 }, 800, 1)) === JSON.stringify({ count: 2, rate: 800 }),
+    "#275 renewal: a single-venue inspection prior carries its full count");
+  ok(JSON.stringify(l275Carry({ count: 3, rate: 750 }, 800, 3)) === JSON.stringify({ count: 1, rate: 800 }),
+    "#275 renewal: a multi-venue inspection prior carries one rental (the record prices one venue)");
+  ok(l275Carry(undefined, 750) === undefined && l275Carry({ count: 0 }, 750) === undefined, "#275 renewal: no prior lift → no lift");
+  ok(l275Reason({ count: 1, rate: 700 }, { count: 1, rate: 750 }) === "the current lift rental rate ($750 per rental, was $700)",
+    "#275 renewal reason: a moved lift rate is cited");
+  ok(l275Reason({ count: 1, rate: 750 }, { count: 1, rate: 750 }) === null && l275Reason(undefined, { count: 1, rate: 750 }) === null && l275Reason({ count: 1, rate: 700 }, null) === null,
+    "#275 renewal reason: an unchanged rate, no prior lift, or no carried lift says nothing");
+  const fPrior = { rates: f2.rates, trip: { miles: f2.trip.miles, mode: "drive" as const }, curtainsTotal: f2.curtainsTotal, lift: { count: 2, rate: 700 } };
+  ok(JSON.stringify(flameChangeReasons(fPrior, f2)) === JSON.stringify(["the current lift rental rate ($750 per rental, was $700)"]),
+    "#275 renewal: flameChangeReasons cites only the lift rate when nothing else moved");
+  ok(JSON.stringify(flameChangeReasons({ ...fPrior, lift: { count: 2, rate: 750 } }, f2)) === "[]",
+    "#275 renewal: an unchanged lift rate adds no reason");
+  const iPrior = { rates: i1.rates, trip: { miles: i1.trip.miles, mode: "drive" as const }, venues: [{ id: "l275-i1", lineSets: 20 }], lineSetsTotal: 20, lift: { count: 1, rate: 600 } };
+  ok(inspectionChangeReasons(iPrior, i1, "Near").includes("the current lift rental rate ($750 per rental, was $600)"),
+    "#275 renewal: inspectionChangeReasons cites a moved lift rate");
+
+  // ---- wiring (source) ----
+  const r275 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  for (const [dir, sub] of [["flame-tests", "ft"], ["inspections", "insp"], ["repairs", "rp"]] as const) {
+    const acts = r275(`src/app/(app)/${dir}/quote/actions.ts`);
+    ok(acts.includes('const lift = normalizeLift(formData.get("lift"), await getLiftRate());') && /priceOverride,\s*lift,|\{ lift, office: office/.test(acts),
+      `#275 ${dir}: the save action normalizes the posted lift against the live default and prices it through the engine`);
+    ok(acts.includes("...(r.lift ? { lift: savedLift(r.lift, r) } : {}),"), `#275 ${dir}: the save action stores the lift on the quote subdoc (only when present)`);
+    const page = r275(`src/app/(app)/${dir}/quote/page.tsx`);
+    ok(page.includes(`lift: normalizeLift(${sub} && ${sub}.lift, liftRate) ?? null,`) && page.includes("liftRate={liftRate}") && page.includes("getLiftRate(),"),
+      `#275 ${dir}: the page reopens the saved lift and hands the builder the live default rate`);
+    const ctl = r275(`src/app/(app)/${dir}/quote/controls.tsx`);
+    ok(ctl.includes('fd.set("lift", JSON.stringify(liftDraft));') && ctl.includes("liftCost: liftCostOf(lift),") && ctl.includes("<LiftRentalPanel"),
+      `#275 ${dir}: the builder shows the Lift rental control, previews it through the shared finish and posts it`);
+  }
+  for (const dir of ["flame-tests", "inspections"]) {
+    const v = r275(`src/app/(app)/${dir}/letter/letter-view.tsx`);
+    ok(/const lift = printedLift\([a-z]+, travelMargin\);\s*if \(lift\) \{\s*scopeRows\.push\(\{\s*item: pad2\(sr\+\+\),\s*desc: lift\.label,\s*qty: money\(lift\.line\),/.test(v),
+      `#275 ${dir} letter: a 'Lift rental' row prints with its own price only when the quote has a lift`);
+  }
+  const rpl = r275("src/app/(app)/repairs/letter/letter-view.tsx");
+  ok(rpl.includes("const lift = printedLift(rp, travelMargin);") && /\{lift\s*\? ", including "/.test(rpl),
+    "#275 repair letter: the cost sentence names the lift and its price only when the quote has one");
+  const ren = r275("src/lib/renewal-outreach.ts");
+  ok(ren.includes("const lift = priorFt?.lift ? carryLift(priorFt.lift, await getLiftRate()) : undefined;") &&
+      ren.includes("const lift = priorIn?.lift ? carryLift(priorIn.lift, await getLiftRate(), priorVenueCount) : undefined;") &&
+      (ren.match(/\.\.\.\(r\.lift \? \{ lift: savedLift\(r\.lift, r\) \} : \{\}\),/g) || []).length === 2,
+    "#275 renewal: both renewal re-pricers carry last year's lift at today's rate and save it");
+  ok(ren.includes("if (ftLift) blocks.push(") && ren.includes("if (inLift) blocks.push("),
+    "#275 renewal: both renewal PDF letters name the lift only when the quote has one");
+  const psa = r275("src/app/portal/service/actions.ts");
+  const psq = r275("src/lib/portal-service-quotes.ts");
+  const psp = r275("src/app/portal/service/page.tsx");
+  ok(/priceServiceRequest\(session, req\);/.test(psa) && /priceServiceRequest\(session, req\);/.test(psq) && /priceServiceRequest\(session, initialReq\)/.test(psp),
+    "#275 portal: the customer's own price/Generate paths never pass a lift — portal self-quotes stay lift-free");
+  ok(r275("src/lib/portal-quotes.ts").includes('req, { lift });'), "#275 portal: only Refresh pricing carries a staff-added lift");
+}
+
+/* #275 (DB-backed): the live default rate, a saved quote's lift round-trip,
+ * and the portal (lift-free Generate; Refresh keeps a staff-added lift). */
+async function lift275AsyncChecks(): Promise<void> {
+  const { getLiftRate } = await import("@/lib/service-quote-inputs");
+  const { getMany } = await import("@/lib/stores/catalog");
+  const [row] = await getMany(["EQP-LIFT"]);
+  const liveRate = await getLiftRate();
+  ok(liveRate === (row ? Math.round(row.cost) : 750), `#275 getLiftRate: the default is the live EQP-LIFT catalog cost ($${liveRate}), else $750`);
+
+  // ---- persistence round-trip: what the inspection save writes reopens and re-prices identically ----
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iV = [{ id: "l275-rt", label: "Hall", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
+  const lift = l275Norm({ count: "2", rate: "" }, liveRate)!;
+  const r = trvInspectionEstimate({ venues: iV, lift }, iR);
+  const created = await QuoteStore.create({
+    name: "Test275 lift round-trip",
+    customer: "Test275 Co",
+    source: "inspection",
+    quoteType: "inspection",
+    value: Math.round(r.total),
+    inspection: { rates: r.rates, venues: iV, lift: l275Saved(r.lift, r), cost: Math.round(r.cost), total: Math.round(r.total) },
+  } as Parameters<typeof QuoteStore.create>[0]);
+  registerFixture("quotes", created.id);
+  const plain = await QuoteStore.create({
+    name: "Test275 no lift",
+    customer: "Test275 Co",
+    source: "inspection",
+    quoteType: "inspection",
+    value: 1200,
+    inspection: { rates: iR, venues: iV, total: 1200 },
+  } as Parameters<typeof QuoteStore.create>[0]);
+  registerFixture("quotes", plain.id);
+  const back = (await QuoteStore.get(created.id))?.inspection as { lift?: unknown } | undefined;
+  const reopened = l275Norm(back?.lift, liveRate);
+  ok(JSON.stringify(reopened) === JSON.stringify({ count: 2, rate: liveRate }), "#275 round-trip: the saved lift reopens with its count and rate");
+  ok(trvInspectionEstimate({ venues: iV, lift: reopened }, iR).total === (await QuoteStore.get(created.id))?.value,
+    "#275 round-trip: re-pricing the reopened lift lands on the saved value");
+  ok(l275Printed(back, 0.3)?.line === r.liftLine, "#275 round-trip: the letter prints the saved lift line");
+  const plainBack = (await QuoteStore.get(plain.id))?.inspection as Record<string, unknown> | undefined;
+  ok(!!plainBack && !("lift" in plainBack) && l275Printed(plainBack, 0.3) === null, "#275 round-trip: a quote saved without a lift carries none and prints none");
+
+  // ---- portal: Generate is lift-free; Refresh keeps a staff-added lift ----
+  const CO = fixtureId(275, "portal-lift-co");
+  const NOW = new Date(2026, 8, 29, 12).getTime();
+  const EXPIRED = NOW + 31 * 86400000;
+  const sess = { grantId: fixtureId(275, "portal-lift-grant"), customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test275 Portal Lift Co",
+      type: "Education",
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }],
+      contacts: [],
+    });
+    const fReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }] };
+    const iReq = { service: { kind: "inspection" as const, level: 1 as const }, venues: [{ venueId: "v1", count: 12 }] };
+    for (const req of [fReq, iReq]) {
+      const free = await d248Price(sess, req);
+      const withLift = await d248Price(sess, req, { lift: { count: 1, rate: liveRate } });
+      if (!free.ok || !withLift.ok) throw new Error("#275 portal pricing setup failed");
+      const kind = req.service.kind;
+      ok(!("lift" in (free.subdoc as Record<string, unknown>)) && !free.view.lines.some((l) => l.label.startsWith("Lift rental")),
+        `#275 portal ${kind}: a customer's own price has no lift line and saves no lift`);
+      const liftLine = withLift.view.lines.find((l) => l.label === "Lift rental");
+      const sum = withLift.view.lines.reduce((a, l) => a + l.amount, 0) + withLift.view.travel;
+      ok(!!liftLine && liftLine.amount > 0 && sum === withLift.total && withLift.total > free.total &&
+          (withLift.subdoc as { lift?: { count?: number } }).lift?.count === 1,
+        `#275 portal ${kind}: a carried lift prints its own line, the lines still sum to the total, and the subdoc keeps it`);
+    }
+    const gen = await d248Generate(sess, fReq, { now: NOW, schedulePdf: false });
+    if (!gen.ok) throw new Error("#275 portal generate setup failed — " + gen.error);
+    registerFixture("quotes", gen.quoteId);
+    const g0 = await QuoteStore.get(gen.quoteId);
+    ok(!!g0 && !("lift" in ((g0.flameTest as Record<string, unknown>) || {})), "#275 portal: a generated self-quote is lift-free");
+    // Staff add a lift to the portal quote (a builder save keeps source portal-service).
+    await QuoteStore.update(gen.quoteId, { flameTest: { ...(g0!.flameTest as Record<string, unknown>), lift: { count: 2, rate: 999, cost: 1998, line: 2854 } } });
+    const refreshed = await d245RefreshPortalQuote(sess, gen.quoteId, EXPIRED);
+    ok(refreshed.ok, "#275 portal: Refresh pricing still works on a quote carrying a lift");
+    const g1 = await QuoteStore.get(gen.quoteId);
+    const g1Lift = (g1?.flameTest as { lift?: { count?: number; rate?: number } } | undefined)?.lift;
+    const expect = await d248Price({ customerId: CO, name: g1?.contactName || "" }, fReq, { lift: { count: 2, rate: liveRate } });
+    ok(g1Lift?.count === 2 && g1Lift?.rate === liveRate && expect.ok && g1?.value === expect.total,
+      "#275 portal: Refresh keeps the staff-added lift count, re-priced at today's rate, inside the refreshed value");
+  } finally {
+    await removeCustomer(CO);
+  }
+}
+
 /* --- #276: the parts list's Unit Sell follows the system price (typed, or rounded up to $25) --- */
 import { partsListRows as p273Rows } from "@/app/(app)/estimator/parts-csv";
 import {
   systemFreight as p273Freight,
   systemItemsRev as p273Rev,
-  systemSellAdjustment as p273Adj,
   systemSellTotal as p273Total,
 } from "@/app/(app)/estimator/pricing";
 import type { SpecItem as P273Item, SpecSection as P273Section, VendorQuote as P273Vq } from "@/app/(app)/estimator/types";
@@ -36642,18 +37182,23 @@ import type { SpecItem as P273Item, SpecSection as P273Section, VendorQuote as P
   const ca = rr.find((r) => r.sku === "CA")!;
   const cb = rr.find((r) => r.sku === "CB")!;
   ok(p273Freight(rounded) === 12 && p273Total(rounded) === 1025, "#276 parts list: fixture — items 1000.40 + freight 12.00 = 1012.40 rounds up to 1025");
-  ok(near(sellSum(rr), p273Total(rounded) - p273Freight(rounded)) && near(sellSum(rr), 1013), "#276 parts list: Σ qty × Unit Sell = the rounded system price less freight (1013.00)");
+  ok(near(sellSum(rr), p273Total(rounded)) && near(sellSum(rr), 1025), "#279 parts list: Σ qty × Unit Sell = the rounded system price, freight included (1025.00)");
   ok(plain.unitCost === 250 && ca.unitCost === 40 && cb.unitCost === 30, "#276 parts list: Unit Cost is unchanged by the rounding");
-  const k = 1013 / 1000.4;
-  ok(Math.abs(plain.unitSell - 450 * k) < 1e-9, "#276 parts list: a plain line's unit sell scales by price ÷ lines sell");
-  ok(Math.abs(ca.unitSell - 40.16 * k) < 1e-9 && Math.abs(cb.unitSell - 30.12 * k) < 1e-9, "#276 parts list: an assembly's components scale by the same factor");
+  const k = 1025 / 1000.4;
+  ok(Math.abs(plain.unitSell - 450 * k) < 1e-9, "#279 parts list: a plain line's unit sell scales by price (freight included) ÷ lines sell");
+  ok(Math.abs(ca.unitSell - 40.16 * k) < 1e-9 && Math.abs(cb.unitSell - 30.12 * k) < 1e-9, "#279 parts list: an assembly's components scale by the same factor");
 
   const typed = sec({ priceRound: 25, sellOverride: 2000 });
   const tr = p273Rows([typed], [], {});
-  ok(near(sellSum(tr), 2000 - p273Freight(typed)) && tr.find((r) => r.sku === "PLAIN")!.unitCost === 250, "#276 parts list: a typed system sell (2000) — Σ = 2000 less freight (1988.00), costs unchanged");
+  ok(near(sellSum(tr), 2000) && tr.find((r) => r.sku === "PLAIN")!.unitCost === 250, "#279 parts list: a typed system sell (2000) — Σ = 2000, freight included, costs unchanged");
 
-  const legacy = p273Rows([sec()], [], {});
-  ok(legacy.find((r) => r.sku === "PLAIN")!.unitSell === 450 && Math.abs(legacy.find((r) => r.sku === "CA")!.unitSell - 40.16) < 1e-9 && near(sellSum(legacy), 1000.4), "#276 parts list: a legacy section (no priceRound, no override) keeps its lines' unit sells");
+  const legacySec = sec();
+  const legacy = p273Rows([legacySec], [], {});
+  const kl = (p273Rev(legacySec) + p273Freight(legacySec)) / p273Rev(legacySec);
+  ok(Math.abs(legacy.find((r) => r.sku === "PLAIN")!.unitSell - 450 * kl) < 1e-9 && Math.abs(legacy.find((r) => r.sku === "CA")!.unitSell - 40.16 * kl) < 1e-9 && near(sellSum(legacy), 1012.4), "#279 parts list: a legacy section (no priceRound, no override) scales its lines' unit sells by (rev + freight) ÷ rev (Σ 1012.40)");
+  const legacyF: P273Section = { id: "lf", name: "LegacyF", kind: "materials", mfr: "", freightPct: 10, items: [{ id: 1, sku: "LF", desc: "LF", qty: 2, unit: "ea", cost: 100, price: 150 }] };
+  const lfr = p273Rows([legacyF], [], {});
+  ok(p273Freight(legacyF) === 20 && near(sellSum(lfr), p273Rev(legacyF) + p273Freight(legacyF)) && near(sellSum(lfr), 320) && near(lfr[0].unitSell, 160), "#279 parts list: a legacy system with freight and no rounding — Σ qty × Unit Sell = lines sell + freight (300 + 20 = 320)");
 
   const mixed: P273Section = {
     id: "m", name: "Mixed", kind: "materials", mfr: "", freightPct: 0, priceRound: 25,
@@ -36663,8 +37208,8 @@ import type { SpecItem as P273Item, SpecSection as P273Section, VendorQuote as P
     ],
   };
   const mr = p273Rows([mixed], [], {});
-  const km = (p273Rev(mixed) + p273Adj(mixed)) / p273Rev(mixed);
-  ok(mr.length === 1 && mr[0].sku === "MAT" && Math.abs(sellSum(mr) - km * 600) < 1e-9 && near(sellSum(mr), 614.99), "#276 parts list: a mixed system lists only its materials, at (rev + adj) ÷ rev × their sell");
+  const km = p273Total(mixed) / p273Rev(mixed);
+  ok(mr.length === 1 && mr[0].sku === "MAT" && Math.abs(sellSum(mr) - km * 600) < 1e-9 && near(sellSum(mr), 614.99), "#279 parts list: a mixed system lists only its materials, at system price ÷ rev × their sell");
 
   const vqs: P273Vq[] = [{
     id: "VQ-9", vendor: "Acme", quoteNumber: "", description: "", terms: "", notes: "", total: 110, includesFreight: false, display: "single",
@@ -36680,7 +37225,7 @@ import type { SpecItem as P273Item, SpecSection as P273Section, VendorQuote as P
 
   const under: P273Section = { id: "u", name: "Under", kind: "materials", mfr: "", freightPct: 10, sellOverride: 5, items: [{ id: 1, sku: "U", desc: "U", qty: 1, unit: "ea", cost: 100, price: 100 }] };
   const ur = p273Rows([under], [], {});
-  ok(ur.length === 1 && ur[0].unitSell === 0 && ur[0].unitCost === 100, "#276 parts list: a typed price below the freight lists parts at $0 sell, never negative");
+  ok(ur.length === 1 && near(ur[0].unitSell, 5) && ur[0].unitSell >= 0 && ur[0].unitCost === 100, "#279 parts list: a typed price below the freight scales parts by price ÷ lines sell (5 ÷ 100 → 5.00), never negative");
 }
 
 /* ======================================================================

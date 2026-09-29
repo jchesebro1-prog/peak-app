@@ -30,7 +30,8 @@ import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
-import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
+import { deriveSeededMarker, normalizeLift, normalizePriceOverride, savedLift } from "@/lib/service-pricing";
+import { getLiftRate } from "@/lib/service-quote-inputs";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -151,6 +152,9 @@ async function persist(formData: FormData): Promise<string | null> {
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
   // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
+  // #275: an optional lift rental — count × rate (blank rate = the live
+  // EQP-LIFT default); count 0 / absent = no lift.
+  const lift = normalizeLift(formData.get("lift"), await getLiftRate());
   // #217 fix wave: whether this typed total is only the D286 reopen-seed for
   // an old off-grid sent price — never something anyone actually typed — is
   // derived from the STORED quote, not a client-posted flag (a client can't
@@ -182,6 +186,7 @@ async function persist(formData: FormData): Promise<string | null> {
       crewSize,
       travel: travelOverride,
       priceOverride,
+      lift,
       geo: {
         driveMiles: (a, b) => driveMiles(a, b, travelRates),
         driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
@@ -254,6 +259,7 @@ async function persist(formData: FormData): Promise<string | null> {
       partsCost: Math.round(r.partsCost),
       partsSell: Math.round(r.partsSell),
       partsMargin: r.partsMargin,
+      ...(r.lift ? { lift: savedLift(r.lift, r) } : {}),
       marginAmount: Math.round(r.marginAmount),
       autoTotal: Math.round(r.autoTotal),
       ...(r.priceOverride != null ? { priceOverride: r.priceOverride } : {}),

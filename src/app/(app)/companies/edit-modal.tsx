@@ -183,6 +183,7 @@ export default function EditCustomerModal({
   fieldDefs = [],
   venueTypes,
   autoNamedLocIds = [],
+  canDelete = false,
 }: {
   mode: "new" | "edit";
   initial: SaveCustomerInput | null;
@@ -191,9 +192,12 @@ export default function EditCustomerModal({
   venueTypes: VenueType[];
   /** #216 — doc location ids of auto-named venues: they re-derive on every save. */
   autoNamedLocIds?: string[];
+  /** #278 — the viewer holds `create`; only then is Delete offered. */
+  canDelete?: boolean;
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
+  const [delErr, setDelErr] = useState<string | null>(null);
   const defaultKind = venueTypeOptions(venueTypes)[0]?.key || "proscenium";
 
   const [name, setName] = useState(initial?.name || "");
@@ -417,7 +421,11 @@ export default function EditCustomerModal({
   const doDelete = () => {
     if (!initial?.id) return;
     startTransition(async () => {
-      await deleteCustomerAction(initial.id!);
+      const res = await deleteCustomerAction(initial.id!);
+      if (!res.ok) {
+        setDelErr(res.error);
+        return;
+      }
       router.push("/companies");
       router.refresh();
     });
@@ -944,8 +952,8 @@ export default function EditCustomerModal({
             flexShrink: 0,
           }}
         >
-          <div>
-            {mode === "edit" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {mode === "edit" && canDelete && (
               <ConfirmButton
                 label="Delete"
                 confirmLabel="Confirm delete"
@@ -954,6 +962,11 @@ export default function EditCustomerModal({
                 style={{ fontSize: 13, fontWeight: 600, color: "#b4543a", background: "#f8ece7", border: "1px solid #eccfc4", borderRadius: 9, padding: "10px 14px", cursor: "pointer" }}
                 onConfirm={doDelete}
               />
+            )}
+            {delErr && (
+              <span role="alert" style={{ color: "#b4543a", fontSize: 12 }}>
+                {delErr}
+              </span>
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

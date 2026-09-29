@@ -8042,3 +8042,51 @@ proportional rule the customer document uses, but applied to the unrounded unit 
 stay exact before the CSV prints to the cent. Freight is not added in: the file lists parts, and freight has no part
 row, so a system's parts sum to its price less freight. In a system that mixes materials and labor lines, labor's
 share of the adjustment stays with the (unlisted) labor. Unit Cost never changes.
+
+## D480. Parts-list sell carries freight — amends D479 (#279, 2026-09-29)
+
+Jeff wants the parts list's sell to include freight. The one scaling factor per system becomes system price ÷ lines'
+sell (D479 used price less freight), so a system's listed parts sum to its whole price. Freight is spread by each
+part's share of the lines' sell rather than by the freight base (cost), matching how the #267 adjustment is spread;
+labor lines' share stays out of the file as before. Legacy systems with freight are scaled too.
+
+## D481. One lift price for the Estimator and service quotes; one rental = one lift for up to a week (#275, 2026-09-29)
+
+The service quotes' lift rental defaults to the live `EQP-LIFT` catalog cost — the row Estimator Labor already prices
+lifts from — with a $750 fallback, rather than a new Estimating Rule, so there is one lift price to keep current. The
+unit matches the Estimator's `ceil(days/5)`: one rental is one lift for up to a week. Count is per quote (not per venue),
+0–50; the rate is editable per quote in whole dollars, and a saved quote keeps its saved rate.
+
+## D482. A lift is margined with the job and sits on top of any floor (#275, 2026-09-29)
+
+The lift prices inside the shared finish functions (`service-pricing.ts`) at the job's margin — repairs at the service
+margin, not the parts margin — and is added after the base fee / minimum fee / minimum call-out, so a floor never
+absorbs it. The existing $25 rounding (up when a floor set the price) and a typed total apply to the whole; the printed
+lift amount is its own margined price in whole dollars and the service line absorbs the rounding, as it does for repair
+parts. Fly-mode travel keeps its own single line.
+
+## D483. Renewals carry the lift count at today's rate; portal self-quotes never add one (#275, 2026-09-29)
+
+A renewal carries last year's lift count re-priced at today's default rate — a typed rate does not carry, like airfare
+(D69/#208) — and a multi-venue inspection renews with one rental, since nothing records which venue needed it; a changed
+rate joins the "why the price changed" list. A customer's own portal pricing and Generate (#248) never include a lift;
+Refresh pricing keeps a lift staff added, at today's rate. The letter boilerplate's "lift rentals … may be stated
+separately" became "lift rentals not listed above", so it no longer reads as an extra charge beside a listed lift.
+
+## D484. Labor travel lines sell at the margin on their own cost (#270, 2026-09-29)
+
+Splitting a mobilization into labor + mileage/hotel/per diem/lift lines keeps its cost to the cent, but each line's
+sell is its own cost at the labor margin, so a mobilization's total sell can differ from the old single line by a few
+cents. Forcing the old sell onto the labor line could push it more than 5¢ off its seed, and tier re-pricing (#254) and
+Copy system (#266) would then treat it as hand-priced and skip it. The labor total always matches the configurator's
+total; saved quotes are not rewritten. The customer document folds each travel line into its own mobilization line.
+
+## D485. The labor configurator draft is stored once per group on the system (#269, 2026-09-29)
+
+`sec.laborGroups[id] = { draft, lines }` (not on a line), so deleting any single line keeps the group editable; the
+last line's removal drops the record. Re-opening uses the draft's inputs at today's rates, and Update rebuilds the whole
+group in place — including restoring removed lines and replacing hand edits (the modal counts them first). When the
+labor seed margin moves (tier change, Copy system to another tier), a draft still at the previous whole-percent seed
+follows it whether or not any line re-priced; a hand-typed draft margin is the user's and never moves. Labor added
+before #269 has no draft and stays non-editable rather than guessing one from its lines.
+

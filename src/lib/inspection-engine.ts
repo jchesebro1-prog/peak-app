@@ -15,7 +15,12 @@ import {
   type TravelPlan,
   type TripMode,
 } from "@/lib/travel-plan";
-import { finishInspection, normalizePriceOverride } from "@/lib/service-pricing";
+import {
+  finishInspection,
+  liftCostOf,
+  normalizePriceOverride,
+  type LiftRental,
+} from "@/lib/service-pricing";
 
 export { INSPECTION_RATE_DEFAULTS };
 export type { GeoAdapter, TripTravel, TripVenueInput };
@@ -35,7 +40,9 @@ export type { GeoAdapter, TripTravel, TripVenueInput };
  *      SHARED across venues visited on one trip (identical math to the
  *      repair engine — tripTravel is imported from it so the two can never
  *      drift).
- *   4. Total = (labor + travel) ÷ (1 − margin), floored at the minimum fee, then rounded to the nearest $25 (or a typed total, #217).
+ *   4. Total = (labor + travel) ÷ (1 − margin), floored at the minimum fee,
+ *      plus an optional lift rental (#275: count × rate, margined, on top of
+ *      the floor), then rounded to the nearest $25 (or a typed total, #217).
  *   5. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
  *      whose drive cost reaches the threshold prices as flights (default crew
  *      inspection_rates.flyCrew, nights from the inspection hours). Drive
@@ -93,6 +100,8 @@ export type InspectionEstimateOptions = {
   geo?: GeoAdapter | null;
   /** #217: a typed quote total — replaces the rounded auto total exactly. */
   priceOverride?: number | string | null;
+  /** #275: an optional lift rental (already normalized — normalizeLift). */
+  lift?: LiftRental | null;
 };
 
 export type InspectionEstimate = {
@@ -124,6 +133,11 @@ export type InspectionEstimate = {
   marginAmount: number;
   /** 1 − cost ÷ total. */
   effectiveMargin: number;
+  /** #275: the lift priced (null = none), its cost, margined sell and printed line. */
+  lift: LiftRental | null;
+  liftCost: number;
+  liftSell: number;
+  liftLine: number;
 };
 
 /** Pure compute with the rates passed in explicitly. */
@@ -156,13 +170,15 @@ export function computeEstimate(
   });
   const trip = withMode(drive, plan);
   const cost = laborCost + plan.total;
+  const lift = opts.lift && opts.lift.count > 0 ? opts.lift : null;
   // #217: min-fee floor, the $25 rounding and a typed total — finishInspection()
-  // is the same code the builder preview runs.
+  // is the same code the builder preview runs (#275: so is the lift).
   const fin = finishInspection({
     cost,
     minFee: C.minFee,
     margin: C.margin,
     priceOverride: normalizePriceOverride(opts.priceOverride),
+    liftCost: liftCostOf(lift),
   });
 
   return {
@@ -177,6 +193,7 @@ export function computeEstimate(
     laborCost,
     trip,
     travel: plan,
+    lift,
     ...fin,
   };
 }

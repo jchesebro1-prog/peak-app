@@ -146,18 +146,20 @@ export default function WorklistRow({ row }: { row: WorklistRowVM }) {
         <button onClick={() => run(() => snoozeLeadAction(row.id))} disabled={isPending} style={chipBtn}>
           Snooze
         </button>
-        <ConfirmButton
-          className="pk-btn-danger"
-          label="Delete"
-          confirmLabel="Confirm"
-          style={{ fontSize: 11, padding: "6px 10px" }}
-          onConfirm={() =>
-            startTransition(async () => {
-              await deleteLeadAction(row.id);
-              router.refresh();
-            })
-          }
-        />
+        {row.canDelete && (
+          <ConfirmButton
+            className="pk-btn-danger"
+            label="Delete"
+            confirmLabel="Confirm"
+            style={{ fontSize: 11, padding: "6px 10px" }}
+            onConfirm={() =>
+              startTransition(async () => {
+                await deleteLeadAction(row.id);
+                router.refresh();
+              })
+            }
+          />
+        )}
       </div>
     </div>
   );

@@ -86,6 +86,14 @@ import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { fixtureBomLine } from "./fixture-bom";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
+import {
+  laborGroupEdits,
+  laborGroupRecord,
+  newLaborGroupId,
+  pruneLaborGroups,
+  snapshotLaborDraft,
+  withLaborGroup,
+} from "./labor-group";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
@@ -636,6 +644,12 @@ export default function EstimatorClient({
      cleared by discardDraft, so an abandoned edit can never leak into the next
      plain "+ Vendor quote". */
   const vendorEditRef = useRef<string | null>(null);
+  /* #269: the labor group a "click the line to edit" open is seeding, set
+     just before openInputMethod("labor") and consumed by seedDraft — the
+     vendor-edit pattern above. `laborEdit` is that open's live state (the
+     modal's Update mode + its note); discardDraft clears both. */
+  const laborEditRef = useRef<{ group: string; draft: LaborDraft; handEdited: number; removed: number } | null>(null);
+  const [laborEdit, setLaborEdit] = useState<{ group: string; handEdited: number; removed: number } | null>(null);
   /* #210: the position/circuit values last auto-filled from a fixture's
      defaults, so switching the assembly can tell "still what we prefilled"
      apart from "the user typed something" and never clobber the latter. */
@@ -738,9 +752,10 @@ export default function EstimatorClient({
      (punch: raw-looking columns) so Unit sell's 92px input + margin% chip and
      Ext sell's own input both have room; the ×/↑/↓ actions now share ONE
      64px cell instead of three, which used to overflow the old 22px column
-     and wrap onto a second grid row. */
+     and wrap onto a second grid row. #269: 84px internally, room for the
+     labor lines' ✎ Edit labor button beside them. */
   const cols = isInternal
-    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 64px"
+    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 84px"
     : "minmax(150px,1.3fr) 104px 136px 116px 64px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
@@ -855,9 +870,14 @@ export default function EstimatorClient({
   const applyTierStamp = (prev: number | null, next: number, tier: string | null) => {
     const before = sectionsRef.current;
     const res = repriceForTier(before, prev, next);
+    // Any change lands — including (#269) a draft-only one, where nothing
+    // re-priced but a stored labor draft's margin followed the tier. That
+    // case applies silently: no banner, and an existing banner is left alone.
+    if (res.sections !== before) {
+      sectionsRef.current = res.sections;
+      setSectionsState(res.sections);
+    }
     if (res.repriced === 0) return;
-    sectionsRef.current = res.sections;
-    setSectionsState(res.sections);
     setTierReprice({
       before,
       repriced: res.repriced,
@@ -1365,7 +1385,8 @@ export default function EstimatorClient({
     const gone = sections.flatMap((s) => s.items).find((x) => x.id === id);
     if (gone?.vendorQuoteId)
       setVendorQuotes((vs) => vs.filter((v) => v.id !== gone.vendorQuoteId));
-    setSections((ss) => ss.map((s) => ({ ...s, items: s.items.filter((x) => x.id !== id) })));
+    // #269: a labor group's stored draft goes with its LAST line.
+    setSections((ss) => ss.map((s) => pruneLaborGroups({ ...s, items: s.items.filter((x) => x.id !== id) })));
   };
 
   // #267: both margin sliders re-price the lines AND drop a typed system sell.
@@ -1722,10 +1743,14 @@ export default function EstimatorClient({
       // #144: an abandoned edit must not seed the next "+ Vendor quote".
       vendorEditRef.current = null;
       setVendorDraft(freshVendor());
-    } else if (kind === "labor")
+    } else if (kind === "labor") {
+      // #269: an abandoned labor edit must not seed the next "+ Labor".
+      laborEditRef.current = null;
+      setLaborEdit(null);
       setLaborDraft(
         freshLabor(travelEstNow(), tierMargin, sections.find((s) => s.id === secId)?.name || "")
       );
+    }
   };
 
   /** Seed the incoming method's draft (the prototype defaults each had). */
@@ -1756,6 +1781,18 @@ export default function EstimatorClient({
         circuit,
       });
     } else if (kind === "labor") {
+      /* #269: reopened from a labor line — seed the group's own stored draft
+         (consumed and CLEARED here, so it applies to exactly one open) and
+         skip the travel reseed below, which would overwrite it. Rates are
+         whatever `rate` resolves now, exactly as for a fresh add. */
+      const edit = laborEditRef.current;
+      laborEditRef.current = null;
+      if (edit) {
+        setLaborEdit({ group: edit.group, handEdited: edit.handEdited, removed: edit.removed });
+        setLaborDraft(snapshotLaborDraft(edit.draft));
+        return;
+      }
+      setLaborEdit(null);
       // Resolve travel before seeding the draft (punch #89): the estimate is
       // fetched on selection now, so opening this immediately after picking a
       // customer could otherwise seed the mobilization with no distance and
@@ -1809,6 +1846,19 @@ export default function EstimatorClient({
     closeInput();
     vendorEditRef.current = vqId;
     openInputMethod("vendor", secId);
+  };
+
+  /** #269: reopen the Labor configurator on the draft that built a labor
+   *  group, from any of its lines. Same close-then-seed dance as
+   *  openVendorEdit. A group with no stored draft (added before #269) has
+   *  no edit affordance, so this is a no-op for it. */
+  const openLaborEdit = (secId: string, group: string) => {
+    const sec = sections.find((s) => s.id === secId);
+    const rec = sec ? laborGroupRecord(sec, group) : null;
+    if (!sec || !rec) return;
+    closeInput();
+    laborEditRef.current = { group, draft: rec.draft, ...laborGroupEdits(sec, group) };
+    openInputMethod("labor", secId);
   };
 
   const addCustomPart = async (secId: string) => {
@@ -2187,9 +2237,19 @@ export default function EstimatorClient({
     // ... and the bonus"). The customer document still never shows them:
     // `customerLines` (pricing.ts) folds their sell into the mobilization
     // line(s) for display only. buildLaborItems is the pure line-building
-    // half, kept in pricing.ts for testability.
-    const items = buildLaborItems(r, discLabel, nextId);
-    if (items.length) pushItems(secId, items);
+    // half, kept in pricing.ts for testability. #270: each mobilization's
+    // mileage / hotel / per diem / lift land as their own lines too.
+    //
+    // #269: every line shares one labor group id and the draft is stored
+    // once on the section, so clicking any of them reopens this configurator.
+    // An edit rebuilds the whole group from the draft IN PLACE (same
+    // position, same group id) — lines removed from the group come back and
+    // hand edits to its lines are replaced (the modal says so).
+    const group = laborEdit?.group || newLaborGroupId();
+    const items = buildLaborItems(r, discLabel, nextId, group);
+    const draft = snapshotLaborDraft(laborDraft);
+    if (items.length)
+      setSections((ss) => ss.map((s) => (s.id === secId ? withLaborGroup(s, group, items, draft) : s)));
     closeInput(); // discards → reseeds freshLabor for this system
   };
 
@@ -3652,6 +3712,7 @@ export default function EstimatorClient({
                   onImportMaterials={(items) => importMaterials(sec.id, items)}
                   onSetVendorDisplay={setVendorDisplay}
                   onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
+                  onEditLabor={(group) => openLaborEdit(sec.id, group)}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
                   onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
@@ -3988,6 +4049,7 @@ export default function EstimatorClient({
               onToggleMobFlag={toggleMobFlag}
               onApplyAutoMiles={applyAutoMiles}
               onAdd={() => addLabor(laborFor)}
+              editing={laborEdit}
               onClose={closeInput}
             />
           )}

@@ -13,6 +13,7 @@ import { CustomerCombobox } from "@/components/customer-combobox";
 import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 import { TravelModePanel } from "@/components/travel-mode-panel";
+import { LiftRentalPanel } from "@/components/lift-rental-panel";
 import {
   FLY_CREW_DEFAULTS,
   draftFromOverride,
@@ -30,9 +31,14 @@ import type { PricingTier } from "@/lib/identity/config";
 import {
   finishInspection,
   fmtPts,
+  liftCostOf,
+  liftDraftFrom,
+  normalizeLift,
   normalizePriceOverride,
   sliderPts,
   type InspectionFinish,
+  type LiftDraft,
+  type LiftRental,
 } from "@/lib/service-pricing";
 
 /**
@@ -110,6 +116,8 @@ export type BuilderInitial = {
   travel?: TravelOverride | null;
   /** #217: the typed total to reopen with (null = auto). */
   priceOverride?: number | null;
+  /** #275: the saved lift rental (null/absent = none). */
+  lift?: LiftRental | null;
   /** #254: the saved quote's own knob in points (absent for a new quote) — never re-seeded on load. */
   marginPts?: number | null;
   /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
@@ -223,7 +231,8 @@ function computePricing(
   rates: BuilderRates,
   tr: BuilderTravelRates,
   override: TravelOverride | undefined,
-  priceOverride: number | undefined
+  priceOverride: number | undefined,
+  lift: LiftRental | undefined
 ): Pricing {
   const levelMult = level === 2 ? rates.level2Mult || 1 : 1;
   const perVenue: PerVenue[] = venues.map((v) => {
@@ -252,6 +261,7 @@ function computePricing(
     minFee: rates.minFee,
     margin: rates.margin,
     priceOverride,
+    liftCost: liftCostOf(lift),
   });
   return {
     perVenue,
@@ -313,6 +323,7 @@ export function QuoteBuilder({
   offices,
   rates: baseRates,
   travelRates,
+  liftRate,
   levels,
   initial,
   accent,
@@ -322,6 +333,8 @@ export function QuoteBuilder({
   offices: BuilderOffice[];
   rates: BuilderRates;
   travelRates: BuilderTravelRates;
+  /** #275: the default lift rental rate (live EQP-LIFT catalog cost). */
+  liftRate: number;
   levels: BuilderLevel[];
   initial: BuilderInitial;
   me: string;
@@ -356,6 +369,8 @@ export function QuoteBuilder({
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
   const [travelDraft, setTravelDraft] = useState<TravelDraft>(() => draftFromOverride(initial.travel));
+  /* #275: the optional lift rental (count "" = none; rate "" = the default). */
+  const [liftDraft, setLiftDraft] = useState<LiftDraft>(() => liftDraftFrom(initial.lift, liftRate));
   /* #217: the typed Total ("" = auto — rounded to the nearest $25). */
   const [priceText, setPriceText] = useState(
     initial.priceOverride != null ? String(initial.priceOverride) : ""
@@ -486,9 +501,10 @@ export function QuoteBuilder({
   const hasCustomer = !!customer;
   const office = offices.find((o) => o.quoteDefault) || offices[0] || null;
   const priceOverride = normalizePriceOverride(priceText);
+  const lift = normalizeLift(liftDraft, liftRate);
   const r =
     hasCustomer && selectedVenues.length
-      ? computePricing(office, selectedVenues, level, liveRates, travelRates, overrideFromDraft(travelDraft), priceOverride)
+      ? computePricing(office, selectedVenues, level, liveRates, travelRates, overrideFromDraft(travelDraft), priceOverride, lift)
       : null;
   const chargeById = new Map((r?.perVenue || []).map((p) => [p.id, p]));
 
@@ -534,6 +550,7 @@ export function QuoteBuilder({
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
     fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
+    fd.set("lift", JSON.stringify(liftDraft));
     // #217 fix wave: no priceOverrideSeeded post — the save action derives
     // the marker itself from the stored quote, never from a client flag.
     fd.set(
@@ -1040,6 +1057,17 @@ export function QuoteBuilder({
                   ellipsis
                 />
               ))}
+
+              <LiftRentalPanel
+                draft={liftDraft}
+                onDraft={(next) => {
+                  setLiftDraft(next);
+                  dirty();
+                }}
+                defaultRate={liftRate}
+                liftCost={r?.liftCost ?? 0}
+                liftLine={r?.liftLine ?? 0}
+              />
 
               <div style={{ borderTop: "1px solid #eceef1", marginTop: 13, paddingTop: 12 }}>
                 <BreakRow label="Cost subtotal" value={money(r?.cost || 0)} />

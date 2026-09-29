@@ -18,6 +18,7 @@ import {
 } from "./pricing";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import { isLaborLineEditable } from "./labor-group";
 import CatalogPicker from "./catalog-picker";
 import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "./material-csv";
@@ -155,6 +156,8 @@ export type SectionCardProps = {
   onSetVendorDisplay: (vendorQuoteId: string, display: "single" | "itemized") => void;
   /** Reopen the vendor form on a stored quote to edit it in place (#144). */
   onEditVendor: (vendorQuoteId: string) => void;
+  /** #269: reopen the Labor configurator on a labor group's stored draft. */
+  onEditLabor?: (laborGroup: string) => void;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
   onMoveToNew: () => void;
   /** Moves this system into an already-existing estimate, by id. */
@@ -860,6 +863,18 @@ export default function SectionCard(p: SectionCardProps) {
                 : null;
               const ext = lineExtSellOf(it);
               const lineMargin = ext > 0 ? (ext - it.qty * it.cost) / ext : 0;
+              /* #269: a labor line from a stored group reopens the Labor
+                 configurator — its description and an Edit link, like a
+                 vendor line. A labor line added before #269 has no draft to
+                 reopen, so it only says so. */
+              const laborEditable = isInternal && !!p.onEditLabor && isLaborLineEditable(sec, it);
+              const openLabor = (e: { detail: number }) => {
+                // Opens on the FIRST click only — a double-click's second
+                // click must not reopen or land on the modal (labor-modal.tsx
+                // swallows it there too).
+                if (e.detail > 1) return;
+                if (laborEditable && it.laborGroup) p.onEditLabor?.(it.laborGroup);
+              };
               return (
                 <div
                   key={it.id}
@@ -876,13 +891,15 @@ export default function SectionCard(p: SectionCardProps) {
                 >
                   <div style={{ minWidth: 0 }}>
                     <div
-                      title={lineDesc}
+                      title={laborEditable ? lineDesc + " — click to edit this labor" : lineDesc}
+                      onClick={laborEditable ? openLabor : undefined}
                       style={{
                         lineHeight: 1.3,
                         display: "-webkit-box",
                         WebkitLineClamp: 2,
                         WebkitBoxOrient: "vertical",
                         overflow: "hidden",
+                        cursor: laborEditable ? "pointer" : undefined,
                       }}
                     >
                       {lineDesc}
@@ -923,6 +940,11 @@ export default function SectionCard(p: SectionCardProps) {
                       )}
                       {!!it.labor && (
                         <span
+                          title={
+                            isInternal && !laborEditable
+                              ? "Added before labor editing — remove and re-add to change"
+                              : undefined
+                          }
                           style={{
                             fontSize: 9.5,
                             fontWeight: 700,
@@ -1211,6 +1233,9 @@ export default function SectionCard(p: SectionCardProps) {
                       onto a second grid row. Subdued until the row is
                       hovered so the numbers read first. */}
                   <div className="est-actions" style={{ display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 1 }}>
+                    {laborEditable && (
+                      <button type="button" className="est-action-btn" onClick={openLabor} title="Edit labor — reopens the configurator for every line this labor added" aria-label={`Edit labor for ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={ACTION_BTN}>↑</button>
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={ACTION_BTN}>↓</button>
                     <button
