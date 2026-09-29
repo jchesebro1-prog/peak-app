@@ -37,6 +37,9 @@ const movableHandles = (ms: Array<{ id: string; handle: XY }>): PlanHandle[] => 
 export function planToolbar(p: Pick<PlanData, "isHouse" | "handles">): { hint: string; reset: string; resetTitle: string } | null {
   const rooms = (p.handles || []).some((h) => h.type === "movable");
   if (!p.isHouse && !rooms) return null;
+  // The arena's end stage moves like a room (its handle key is "stage") — the hint and Reset say so.
+  const stage = (p.handles || []).some((h) => h.type === "movable" && h.key === "stage");
+  if (!p.isHouse && stage) return { hint: "Drag the stage or a room along the walls", reset: "Reset rooms", resetTitle: "Put the stage and rooms back where they were drawn" };
   if (!p.isHouse) return { hint: "Drag a room along the walls", reset: "Reset rooms", resetTitle: "Put the rooms back where they were drawn" };
   return { hint: rooms ? "Drag the walls to size the room, or a room along the walls" : "Drag the side or back wall to size the room", reset: "Reset house", resetTitle: "Reset the room to its default size" };
 }

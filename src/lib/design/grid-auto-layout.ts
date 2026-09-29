@@ -26,6 +26,7 @@ import { clamp01, type Point } from "@/lib/annotations";
 import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
 import { arenaGeom, blackboxGeom, churchGeom, planTemplate, prosGeom } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
+import { ARENA_CORNER_R } from "@/lib/design/venue-templates/arena.keys";
 import { legacyChurchGeom } from "./legacy-church-geom";
 import { legacyProsGeom } from "./legacy-pros-geom";
 import type { GridCurtain } from "./grid-bom";
@@ -49,6 +50,8 @@ export type VenueFrame = {
   /** #255: an arena's movable stage — stage-relative placements turn by this (radians; 0 = facing down the sheet) about the stage's centre; aspect = sheet H / W. */
   stageAngle?: number;
   aspect?: number;
+  /** #255 review (arena only): the box every lot marker is pulled inside — the floor, inset past its round corners, so none lands in the bowl. */
+  lotBox?: Rect;
 };
 export const EACH_CAP = 120;
 
@@ -94,7 +97,10 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
       const G = arenaGeom(a, id);
       const n = W(G);
       const st: Rect = { x: G.stageCentre.x - G.stageAlong / 2, y: G.stageCentre.y - G.stageDepth / 2, w: G.stageAlong, h: G.stageDepth };
-      return { stage: n(st), audience: n(G.floor), booth: n(G.booth), ...(Math.abs(G.stageAngle) > 1e-9 ? { stageAngle: G.stageAngle, aspect: G.H / G.W } : {}) };
+      // A point this far in from both sides of a corner of the floor's box is inside its quarter circle (r − r/√2 ≈ 0.3 r).
+      const cut = Math.min(0.3 * ARENA_CORNER_R * G.ppi, G.floor.w / 2, G.floor.h / 2);
+      const lotBox = n({ x: G.floor.x + cut, y: G.floor.y + cut, w: G.floor.w - 2 * cut, h: G.floor.h - 2 * cut });
+      return { stage: n(st), audience: n(G.floor), booth: n(G.booth), lotBox, ...(Math.abs(G.stageAngle) > 1e-9 ? { stageAngle: G.stageAngle, aspect: G.H / G.W } : {}) };
     }
   }
   if (kind === "proscenium") {
@@ -264,7 +270,7 @@ function clusterPoints(n: number, S: Rect, room?: Rect): Point[] {
   }));
 }
 
-/** Where the k-th lot marker of a scope sits: rigging at the lock rail (stage right), others on their region's lower margin. */
+/** Where the k-th lot marker of a scope sits: rigging at the lock rail (stage right), others on their region's lower margin (audio's the floor's, the rest the stage's) — laid out as if the stage faced down the sheet. */
 function lotPoint(scope: SysKey, k: number, f: VenueFrame): Point {
   const S = f.stage;
   if (scope === "rigging") return { x: clamp01(S.x + S.w + 0.02), y: clamp01(S.y + (0.1 + 0.08 * k) * S.h) };
@@ -380,7 +386,11 @@ export function generateAutoLayout(
       if (def.place === "lot" || line.qty > EACH_CAP) {
         const k = lots.get(card.scope) ?? 0;
         lots.set(card.scope, k + 1);
-        const lot = card.scope === "rigging" ? turn([lotPoint(card.scope, k, f)])[0] : lotPoint(card.scope, k, f);
+        // #255 review: every lot but audio's (on the floor) is laid out against the stage, so it turns with an arena's
+        // stage; on the arena each lot is then pulled inside the floor — never into the bowl or off the building.
+        const at = lotPoint(card.scope, k, f);
+        const turned = card.scope === "audio" ? at : turn([at])[0];
+        const lot = f.lotBox ? inRoom(turned, f.lotBox) : turned;
         out.push({ ...keep(line.rowKey)(lot), partId, qty: line.qty, auto });
         continue;
       }

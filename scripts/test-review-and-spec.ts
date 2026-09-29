@@ -35622,3 +35622,55 @@ async function c255T14GridAsyncChecks(): Promise<void> {
   ok(p.intake?.baseSheetTemplate === "arena@1" && p.intake?.baseSheetMovables?.stage?.wall === "floorLeft" && (p.spaces || []).length === 6, "#255 T14: generating an arena base sheet stamps arena@1, where its stage sits, and adds its six Spaces");
   ok(!!cal && cal.unit === "ft" && Math.abs(cal.refLength - 100) < 1e-9 && Math.abs(cal.scale - 100 / (G.floor.w / G.W)) < 1e-6, "#255 T14: the arena sheet is calibrated from the floor's straight sides, exactly the floor width apart");
 }
+
+/* --- #255 T15: arena lot markers — every stage-region lot turns with the stage, and every lot stays on the floor --- */
+import { arenaGeom as c255T15Geom } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T15Default } from "@/app/(app)/design/quick/engine";
+import { EACH_CAP as c255T15Cap, generateAutoLayout as c255T15Layout, venueFrame as c255T15Frame } from "@/lib/design/grid-auto-layout";
+import { inPoly as c255T15InPoly } from "@/lib/design/venue-templates/canvas";
+import type { AutoCard as C255T15Card } from "@/lib/design/auto-estimate";
+{
+  const base = c255T15Default(0);
+  const A = (o: Record<string, unknown>) => ({ ...base, venue: "arena", width: 40, depth: 24, ...o }) as typeof base;
+  const line = (rowKey: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "lot", eqQty: qty, qty, status: "part", ref: "C255T15-" + rowKey, unitCost: 1, unitSell: 1, total: qty, swapped: false });
+  const card = (scope: string, rows: string[], qty = 4) => ({ scope, tier: "better", lines: rows.map((r) => line(r, qty)) });
+  const rig = ["rigging:footblock", "rigging:arbor", "rigging:tbarTrack", "rigging:lockRail", "rigging:handline", "rigging:loftblock", "rigging:pipe", "rigging:aircraftCable", "rigging:chainWrap", "rigging:terminationKit"];
+  const cards = [card("lighting", ["lighting:cablePackage"]), card("curtains", ["curtains:scenerytrack"]), card("rigging", rig), card("audio", ["audio:subwoofer", "audio:lineArray"], c255T15Cap + 10), card("video", ["video:screen"], c255T15Cap + 10)] as unknown as C255T15Card[];
+  const cases: Array<{ tag: string; o: Record<string, unknown> }> = [];
+  for (const wall of ["floorTop", "floorRight", "floorBottom", "floorLeft"]) cases.push({ tag: `90×134 stage ${wall}`, o: { movables: { stage: { wall, t: 0.5 } } } });
+  for (const wall of ["floorTop", "floorLeft"]) for (const t of [0, 1]) cases.push({ tag: `90×134 stage ${wall} t${t}`, o: { movables: { stage: { wall, t } } } });
+  cases.push({ tag: "59×88, 80×52 stage left", o: { width: 80, depth: 52, houseWidthFt: 59, houseDepthFt: 88, movables: { stage: { wall: "floorLeft", t: 0.5 } } } });
+  for (const wall of ["floorLeft", "floorTop", "floorRight", "floorBottom"]) cases.push({ tag: `250×400 bowl 60, 80×14 stage ${wall}`, o: { width: 80, depth: 14, houseWidthFt: 250, houseDepthFt: 400, bowlDepthFt: 60, movables: { stage: { wall, t: 0.5 } } } });
+  let onFloor = true, turned = true;
+  const bad: string[] = [];
+  for (const c of cases) {
+    const s = A(c.o);
+    const G = c255T15Geom(s);
+    const floor = G.regions[G.roles.house];
+    const lots = c255T15Layout(s, cards, { electrics: 2, sets: 6, template: "arena@1" }).filter((x) => x.qty !== undefined);
+    if (lots.length !== 15) { onFloor = false; bad.push(`${c.tag}: ${lots.length} lots`); }
+    for (const l of lots) if (!c255T15InPoly(floor, { x: l.x * G.W, y: l.y * G.H })) { onFloor = false; bad.push(`${c.tag}: ${l.auto.rowKey}`); }
+    // Every stage-region lot sits nearer the stage's centre than the floor's far side does: it went with the stage.
+    const sc = { x: G.stageCentre.x / G.W, y: G.stageCentre.y / G.H };
+    const reach = (Math.hypot(G.stageAlong, G.stageDepth) / 2 + 0.12 * G.W) / G.W;
+    for (const l of lots.filter((x) => x.auto.scope !== "audio")) if (Math.hypot(l.x - sc.x, (l.y - sc.y) * (G.H / G.W)) > reach) { turned = false; bad.push(`${c.tag}: ${l.auto.rowKey} far from the stage`); }
+  }
+  ok(onFloor, `#255 T15: every arena lot marker lands on the Arena Floor — never in the Seating Bowl or off the building, on any edge, at any size${bad.length ? " — " + bad.slice(0, 3).join(", ") : ""}`);
+  ok(turned, `#255 T15: lighting, curtain, rigging and video lots go with the arena's stage wherever it sits${bad.length ? " — " + bad.slice(0, 3).join(", ") : ""}`);
+  // The lighting and curtain lots turn exactly as rigging's does: at the default floor a side stage's lots are the top stage's, turned about its centre.
+  const top = A({}), left = A({ movables: { stage: { wall: "floorLeft", t: 0.5 } } });
+  const fT = c255T15Frame(top, { template: "arena@1" }), fL = c255T15Frame(left, { template: "arena@1" });
+  const lotOf = (s: typeof base, rowKey: string) => c255T15Layout(s, cards, { electrics: 2, sets: 6, template: "arena@1" }).find((x) => x.auto.rowKey === rowKey)!;
+  const Gk = c255T15Geom(top), k = Gk.H / Gk.W;
+  // A lot's offset from the stage's centre in true proportions, turned back by the stage's angle.
+  const rel = (p: { x: number; y: number }, f: typeof fT) => { const cx = f.stage.x + f.stage.w / 2, cy = f.stage.y + f.stage.h / 2, a = -(f.stageAngle ?? 0); const dx = p.x - cx, dy = (p.y - cy) * k; return { x: dx * Math.cos(a) - dy * Math.sin(a), y: dx * Math.sin(a) + dy * Math.cos(a) }; };
+  const same = ["lighting:cablePackage", "curtains:scenerytrack"].every((r) => { const a = rel(lotOf(top, r), fT), b = rel(lotOf(left, r), fL); return Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6; });
+  ok(same && !fT.stageAngle && Math.abs((fL.stageAngle ?? 0) + Math.PI / 2) < 1e-9, "#255 T15: the lighting and curtain lots sit where they do on a top stage, turned with a side stage");
+}
+{
+  const handles = (keys: string[]) => keys.map((key) => ({ type: "movable" as const, key, cx: 0, cy: 0, shape: "movable" as const }));
+  const arena = c255T15Toolbar({ isHouse: false, handles: handles(["booth", "electrical", "stage"]) });
+  const bb = c255T15Toolbar({ isHouse: false, handles: handles(["booth", "storage-top"]) });
+  ok(arena?.hint === "Drag the stage or a room along the walls" && arena.resetTitle === "Put the stage and rooms back where they were drawn" && arena.reset === "Reset rooms" && bb?.hint === "Drag a room along the walls" && bb.resetTitle === "Put the rooms back where they were drawn", "#255 T15: on the arena the plan toolbar's hint and Reset title name the stage");
+}
+import { planToolbar as c255T15Toolbar } from "@/app/(app)/design/quick/plan-svg";
