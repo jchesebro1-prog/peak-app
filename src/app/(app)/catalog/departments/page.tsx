@@ -33,15 +33,23 @@ export default async function DepartmentsPage() {
   }
 
   const [ix, departments] = await Promise.all([portalIndex(), getDepartments()]);
-  const counts = new Map<string, number>();
+  // Per category: its total part count, and a part count per manufacturer
+  // (suggestDepartments' (k) dominant-manufacturer fallback reads this —
+  // production categories are mostly bare brand product-family names, so
+  // name keywords alone classify only a fraction of them).
+  const stats = new Map<string, { count: number; mfrs: Record<string, number> }>();
   for (const e of ix.entries) {
     const cat = e.category || "—";
-    counts.set(cat, (counts.get(cat) ?? 0) + 1);
+    const s = stats.get(cat) ?? { count: 0, mfrs: {} };
+    s.count++;
+    const mfr = e.mfr || "—";
+    s.mfrs[mfr] = (s.mfrs[mfr] ?? 0) + 1;
+    stats.set(cat, s);
   }
-  const categories = [...counts.entries()]
-    .map(([category, count]) => ({ category, count }))
+  const categories = [...stats.entries()]
+    .map(([category, s]) => ({ category, count: s.count, mfrs: s.mfrs }))
     .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
-  const suggestions = suggestDepartments(categories.map((c) => c.category));
+  const suggestions = suggestDepartments(categories);
 
   return (
     <div className="pk-content" style={{ maxWidth: 1100 }}>

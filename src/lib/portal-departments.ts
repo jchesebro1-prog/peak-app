@@ -164,46 +164,217 @@ export function restrictToDept<T extends DeptRestrictable>(entries: readonly T[]
   return entries.filter((e) => matchesDeptFilter(e.category, filter));
 }
 
+/**
+ * Pure: the new draft catDept map after the editor's "Move all N shown to
+ * <dept>/Other" bulk action is applied to `categoryNames` (every category
+ * currently matching the editor's filter — computed by the caller, not
+ * here). `targetKey` is a draft department key, or "" for Other (which
+ * removes the category's entry instead of pointing it at a dead key, same
+ * convention the per-row select already uses).
+ */
+export function computeBulkMove(catDept: Readonly<Record<string, string>>, categoryNames: readonly string[], targetKey: string): Record<string, string> {
+  const next = { ...catDept };
+  for (const cat of categoryNames) {
+    if (targetKey) next[cat] = targetKey;
+    else delete next[cat];
+  }
+  return next;
+}
+
 /* ------------------------- suggested starter set ------------------------- */
 
-type StarterRule = { id: string; name: string; re: RegExp };
+/** Per-category input to suggestDepartments: its raw part count (unused by
+ *  the classifier itself, carried for callers/tests) and a part count per
+ *  manufacturer — the (k) dominant-manufacturer fallback below reads
+ *  whichever key has the highest count. */
+export type CategoryStat = { category: string; count: number; mfrs: Record<string, number> };
 
-/** Spec pick 4's exact starter set. Order is match precedence — a category
- *  matching more than one rule (e.g. a curtain "Track" also reading as
- *  rigging track) goes to whichever rule comes first, so a single "Start
- *  from suggestions" click never produces two departments claiming the same
- *  category (which sanitizeDepartments would then refuse to save). */
-const STARTERS: readonly StarterRule[] = [
-  { id: "rigging", name: "Rigging", re: /\b(hoists?|blocks?|arbors?|rope ?locks?|tracks?|pipes?|trusses?|rigging|winch(es)?|battens?|shackles?|slings?)\b/i },
-  { id: "lighting", name: "Lighting", re: /\b(fixtures?|lamps?|fixture assemblies|luminaires?|dimmers?|dimming|lighting)\b/i },
-  { id: "cable-connectors", name: "Cable & Connectors", re: /\b(cables?|cabling|connectors?|adapters?|wire|wiring)\b/i },
-  { id: "atmospherics", name: "Atmospherics", re: /\b(fog|haze|hazers?|smoke|atmospherics?)\b/i },
-  { id: "hardware", name: "Hardware", re: /\b(hardware|clamps?|mounts?|brackets?|hooks?|fasteners?)\b/i },
-  { id: "drapery", name: "Drapery", re: /\b(drapes?|drapery|curtains?|scrims?|velour|masking|cycloramas?)\b/i },
+/** The ten production-shaped departments (#252 rebuild, Sep 2026 — a real
+ *  prod catalog run showed 94% of parts landing in "Other" under the old
+ *  keyword-only STARTERS set, and "mount" wrongly pulling projection-screen
+ *  and speaker parts into a generic Hardware bucket). This is DISPLAY order
+ *  — the order suggested departments come back in, and the order a fresh
+ *  "Start/Re-run from suggestions" lists them — which is NOT the same as
+ *  NAME_RULES' classification-priority order below. */
+const DEPT_DEFS: readonly { id: string; name: string }[] = [
+  { id: "projection-screens", name: "Projection Screens" },
+  { id: "drapery", name: "Drapery" },
+  { id: "lighting", name: "Lighting" },
+  { id: "audio", name: "Audio" },
+  { id: "video-displays", name: "Video & Displays" },
+  { id: "control-networking", name: "Control & Networking" },
+  { id: "rigging", name: "Rigging" },
+  { id: "cable-connectors", name: "Cable & Connectors" },
+  { id: "power", name: "Power" },
+  { id: "mounts-hardware", name: "Mounts & Hardware" },
 ];
 
+type NameRule = { dept: string; re: RegExp };
+
 /**
- * Matches the given catalog categories against the starter set
- * case-insensitively; a category matches at most one starter (first rule
- * wins). Unmatched categories are dropped (spec pick 4); a starter with
- * nothing matched is left out entirely, so "Start from suggestions" never
- * offers an empty department. Nothing is saved here — the caller (editor)
- * shows the result for staff review.
+ * Classification PRIORITY order (first match wins) — deliberately NOT the
+ * same order as DEPT_DEFS' display order above. Real production categories
+ * are mostly brand product-family names (Access V, Targa, ArcSystem Pro,
+ * Source Four, Tesira…), so most of the actual matching weight comes from
+ * those literal product names, not generic English words.
+ *
+ * Two deliberate reorderings vs. a naive a-through-j reading:
+ *  - Cable & Connectors is raised above Video & Displays so "HDMI Cables"
+ *    reads as Cable & Connectors, not Video (a name carrying both "cable"
+ *    and a video term should read as the cable accessory).
+ *  - The Video & Displays "projector" keyword carries a negative lookahead
+ *    for a trailing "(custom) mount(s)" so "RPMX: Projector Custom Mounts
+ *    Locking" and "VCM: Projector Custom Mounts" fall through to Mounts &
+ *    Hardware's "mount" keyword instead — a projector *mount* is hardware,
+ *    even though a bare "proj." → Projection Screens (checked earlier) and
+ *    a bare "projector" → Video & Displays (this rule) both still apply.
+ *  - Projection Screens' keyword list deliberately excludes "aerolift" —
+ *    AeroLift is a projector LIFT (Chief/Da-Lite), not a screen; it falls
+ *    through to Mounts & Hardware's "lift" keyword instead.
  */
-export function suggestDepartments(categories: readonly string[]): Department[] {
-  const buckets = new Map<string, string[]>();
-  for (const cat of categories) {
-    if (typeof cat !== "string" || !cat.trim()) continue;
-    const hit = STARTERS.find((s) => s.re.test(cat));
-    if (!hit) continue;
-    const arr = buckets.get(hit.id) ?? [];
-    arr.push(cat);
-    buckets.set(hit.id, arr);
+const NAME_RULES: readonly NameRule[] = [
+  { dept: "drapery", re: /drape|drapery|velour|i\.?f\.?r|dress kit|skirt|valance|soft goods|curtain/i },
+  {
+    dept: "projection-screens",
+    re: /screen|stagescreen|focalpoint|cinefold|\bufs\b|folding screen|projection|proj\.|tecvision|clarion|acumen|paragon|targa|access (v|e|xl|m)\b|ultimate access|premier|styleline|nocturne|profile\+|edgeless|cine-studio|fast-fold|shadowbox/i,
+  },
+  {
+    dept: "audio",
+    re: /speaker|spkr|loudspeaker|subwoofer|\bsub\b|line array|point source|column|mic(s|rophone)?\b|amp(lifiers?|s)?\b|mixer|dsp|signal processor|headphone|earphone|transducer|driver|monitor|tesira|vocia|soundweb|dante|audio|sound|loop|infrared|\bir\b|digi-wave|fm ?& ?fm\+|recone|diaphragm|horn|intellivox|iconyx|varia|cdd|eon|prx|srx|vrx|jrx|irx|vtx|wavefront|stagebox|audio console|fixed installation/i,
+  },
+  {
+    dept: "lighting",
+    re: /source four|source ?4|colorsource|eos|irideon|fos\/4|arcsystem|desire|desono|lens tube|hog|\bmac\b|mac |exterior (wash|dot|linear)|luma|unison|echo\b|paradigm|sensor|mosaic|pharos|sohrana|static lights|effect lights|fixture assemblies|high end systems|city theatrical/i,
+  },
+  { dept: "cable-connectors", re: /cable|connect|patch|insert|wall plate|keystone|phoenix|snake|termination|faceplate|nema plate/i },
+  {
+    dept: "video-displays",
+    re: /hdmi|hdbaset|display|signage|video|dvled|led video|projector(?! (custom )?mounts?)|switcher|extender|splitter|scaler|matrix|av over ip|networkhd|4k|8k|camera|image projection|capture/i,
+  },
+  {
+    dept: "control-networking",
+    re: /touch ?panel|keypad|control(ler| processor| system|s)?\b|remote|network|switch(es)?\b|router|access point|wifi|sfp|mxnet|bridge|teams rooms|room system|unified communication|software|license/i,
+  },
+  { dept: "rigging", re: /hoist|block|arbor|rope ?lock|track|pipe|batten|rigging|truss|counterweight|head ?block|loft ?block|mule|shoe/i },
+  { dept: "power", re: /power|ups|sequencer|surge|distribution|psu|supply|conditioning/i },
+  {
+    dept: "mounts-hardware",
+    re: /mount|bracket|lift|cart|stands?\b|enclosure|box(es)?\b|plate|kit|clamp|case|crank|pole|hardware|trim|flange|pocket|back box|easel|caster|eyebolt/i,
+  },
+];
+
+/** A bare "led" only reads as Lighting when the category's own dominant
+ *  manufacturer also reads as a lighting brand (spec: "led\b (only when
+ *  mfr also suggests lighting)") — everywhere else "LED" alone is too
+ *  common a token across every department to name-match on its own. */
+const LED_RE = /\bled\b/i;
+
+type MfrRule = { dept: string; re: RegExp };
+
+/**
+ * (k) Fallback when no name rule matched: the category's DOMINANT
+ * manufacturer (the mfr with the most parts in it) decides the department.
+ * This is what actually classifies a pure product-family category name
+ * ("Access V", "Targa", "Standard", "Professional", "Community", "Prebuilt
+ * system"…) that carries no readable department signal on its own —
+ * production categories are mostly brand names, not descriptions.
+ */
+const MFR_RULES: readonly MfrRule[] = [
+  { dept: "projection-screens", re: /draper|da-?lite|stewart|elite screens|screen innovations/i },
+  { dept: "drapery", re: /rose brand/i },
+  { dept: "lighting", re: /\betc\b|high end|martin|chauvet|city theatrical|\brobe\b|elation/i },
+  {
+    dept: "audio",
+    re: /biamp|shure|\bqsc\b|\bjbl\b|crown|\bbss\b|\bdbx\b|soundcraft|allen ?& ?heath|community|\beaw\b|renkus|williams|listen|sennheiser|audio-technica|\bbose\b|yamaha|electro-voice|lab\.?gruppen|tannoy|atlasied|lexicon|harman(?!.*lighting)/i,
+  },
+  {
+    dept: "video-displays",
+    re: /wyrestorm|extron|crestron|\bbarco\b|\blg\b|samsung|\babsen\b|\bplanar\b|christie|\bepson\b|panasonic|\bsony\b|\bnec\b|unilumin|kramer/i,
+  },
+  { dept: "mounts-hardware", re: /\bchief\b|peerless|legrand|middle atlantic|\bfsr\b/i },
+  { dept: "rigging", re: /j\.?r\.? clancy|\bclancy\b|\bthern\b|columbus mckinnon|\bcm\b/i },
+];
+
+function dominantMfr(mfrs: Record<string, number> | null | undefined): string | null {
+  if (!mfrs) return null;
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [mfr, count] of Object.entries(mfrs)) {
+    if (typeof count !== "number" || !(count > bestCount)) continue;
+    best = mfr;
+    bestCount = count;
   }
+  return best;
+}
+
+/**
+ * Classifies real catalog categories (#252 rebuild) into the ten
+ * DEPT_DEFS departments: a single pass through NAME_RULES' priority order,
+ * where the Lighting slot ALSO matches a bare "led" when the category's
+ * dominant manufacturer reads as a lighting brand (the led+mfr combined
+ * check runs AT Lighting's priority position, not after every name rule
+ * has failed — otherwise a bare "led" paired with a lighting mfr could
+ * never win against a later Mounts & Hardware "mount" keyword on the same
+ * category, e.g. a hypothetical "LED Mounts" from an ETC-dominant
+ * category). Only once nothing in that ordered pass matches does (k) the
+ * dominant-manufacturer fallback run on its own, independent of "led" —
+ * e.g. a bare "LED" category whose dominant mfr is Chief (a mounts/display-
+ * mount brand, not a lighting one) still resolves to Mounts & Hardware
+ * through the plain mfr fallback, just not through the Lighting-specific
+ * led+mfr reading. A category matching neither is left out entirely
+ * (Other); every suggested category appears in exactly one department, so
+ * the result always saves cleanly through sanitizeDepartments with no
+ * staff edits. A department with nothing matched is left out (never
+ * offered empty). `count` isn't read by the classifier — only `category`
+ * and `mfrs` decide — but is accepted so a caller can hand this straight
+ * from a `{category, count, mfrs}` catalog roll-up.
+ */
+export function suggestDepartments(cats: readonly CategoryStat[]): Department[] {
+  const buckets = new Map<string, string[]>();
+  const assign = (dept: string, category: string) => {
+    const arr = buckets.get(dept) ?? [];
+    arr.push(category);
+    buckets.set(dept, arr);
+  };
+  const lightingMfrRe = MFR_RULES.find((r) => r.dept === "lighting")!.re;
+
+  for (const c of cats) {
+    if (!c || typeof c.category !== "string" || !c.category.trim()) continue;
+    const cat = c.category;
+    const dominant = dominantMfr(c.mfrs);
+    const dominantIsLighting = dominant ? lightingMfrRe.test(dominant) : false;
+
+    let matchedDept: string | null = null;
+    for (const rule of NAME_RULES) {
+      if (rule.re.test(cat)) {
+        matchedDept = rule.dept;
+        break;
+      }
+      if (rule.dept === "lighting" && LED_RE.test(cat) && dominantIsLighting) {
+        matchedDept = "lighting";
+        break;
+      }
+    }
+    if (matchedDept) {
+      assign(matchedDept, cat);
+      continue;
+    }
+
+    if (dominant) {
+      const mfrHit = MFR_RULES.find((r) => r.re.test(dominant));
+      if (mfrHit) {
+        assign(mfrHit.dept, cat);
+        continue;
+      }
+    }
+    // no name rule (incl. the led+mfr combined check), no (or unresolved)
+    // dominant manufacturer → Other
+  }
+
   const out: Department[] = [];
-  for (const s of STARTERS) {
-    const cats = buckets.get(s.id);
-    if (cats && cats.length) out.push({ id: s.id, name: s.name, categories: cats });
+  for (const d of DEPT_DEFS) {
+    const members = buckets.get(d.id);
+    if (members && members.length) out.push({ id: d.id, name: d.name, categories: members });
   }
   return out;
 }

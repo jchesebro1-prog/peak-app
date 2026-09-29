@@ -32133,6 +32133,7 @@ import {
   restrictToDept as d252Restrict,
   suggestDepartments as d252Suggest,
   departmentTiles as d252Tiles,
+  computeBulkMove as d252BulkMove,
   type Department as D251Dept,
 } from "@/lib/portal-departments";
 import { searchCatalog as d252Search, type SearchEntry as D251Entry } from "@/lib/portal-search";
@@ -32222,29 +32223,154 @@ function d252Eq(a: unknown, b: unknown): boolean {
   ok(d252Restrict(entries, null, depts).length === 3, "#252 restrictToDept: no department → every entry, unchanged");
 }
 
-// ---- suggestDepartments: starter set, mutual exclusivity, unmatched dropped ----
+// ---- suggestDepartments (Sep 2026 rebuild): real production category names,
+// manufacturer + name classification, mutual exclusivity, unmatched dropped ----
+function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {}): { category: string; count: number; mfrs: Record<string, number> } {
+  return { category, count, mfrs };
+}
 {
   const cats = [
-    "Hoists & Motors", "Fixtures", "Fixture assemblies", "Cable & Connectors",
-    "Fog Machines", "Mounting Hardware", "Drapery", "Curtain Track", "Uncategorized Widgets",
+    d252Cat("Drapes - I.F.R.", 19), d252Cat("Fixture assemblies", 30), d252Cat("Cable & Connectors", 12),
+    d252Cat("Fog Machines", 8), d252Cat("Mounting Hardware", 6), d252Cat("Nothing Matches Here", 3),
   ];
   const sug = d252Suggest(cats);
   const byId = new Map(sug.map((d) => [d.id, d]));
-  ok(!!byId.get("rigging")?.categories.includes("Hoists & Motors"), "#252 suggestDepartments: Rigging picks up hoists");
-  ok(!!byId.get("lighting")?.categories.includes("Fixtures") && !!byId.get("lighting")?.categories.includes("Fixture assemblies"), "#252 suggestDepartments: Lighting picks up Fixtures AND the Fixture assemblies pseudo-category (spec pick 6)");
+  ok(!!byId.get("drapery")?.categories.includes("Drapes - I.F.R."), "#252 suggestDepartments: Drapery picks up an I.F.R. drape category by name");
+  ok(!!byId.get("lighting")?.categories.includes("Fixture assemblies"), "#252 suggestDepartments: Lighting picks up the Fixture assemblies pseudo-category (spec pick 6)");
   ok(!!byId.get("cable-connectors")?.categories.includes("Cable & Connectors"), "#252 suggestDepartments: Cable & Connectors matches its own name");
-  ok(!!byId.get("atmospherics")?.categories.includes("Fog Machines"), "#252 suggestDepartments: Atmospherics picks up fog");
-  ok(!!byId.get("hardware")?.categories.includes("Mounting Hardware"), "#252 suggestDepartments: Hardware picks up mounting hardware");
-  ok(!!byId.get("drapery")?.categories.includes("Drapery"), "#252 suggestDepartments: Drapery matches its own name");
-  ok(!!byId.get("rigging")?.categories.includes("Curtain Track") && !byId.get("drapery")?.categories.includes("Curtain Track"), "#252 suggestDepartments: a category matching two rules (Curtain Track) goes to the earlier rule only — Rigging, not Drapery, per spec's own 'track' keyword under Rigging");
-  ok(!sug.some((d) => d.categories.includes("Uncategorized Widgets")), "#252 suggestDepartments: a category matching nothing is dropped, not forced into a bucket");
+  ok(!!byId.get("mounts-hardware")?.categories.includes("Mounting Hardware"), "#252 suggestDepartments: Mounts & Hardware picks up mounting hardware");
+  ok(!sug.some((d) => d.categories.includes("Fog Machines")), "#252 suggestDepartments: a category matching no rule (Fog Machines — no Atmospherics department in the rebuild) is dropped, not forced into a bucket");
+  ok(!sug.some((d) => d.categories.includes("Nothing Matches Here")), "#252 suggestDepartments: a category matching nothing is dropped");
   const allSuggested = sug.flatMap((d) => d.categories);
   ok(new Set(allSuggested).size === allSuggested.length, "#252 suggestDepartments: every suggested category appears in exactly one department — saving the suggestion as-is never trips sanitizeDepartments' exclusivity rule");
-  const straightToSave = d252Sanitize(sug, cats);
+  const straightToSave = d252Sanitize(sug, cats.map((c) => c.category));
   ok(straightToSave.ok, "#252 suggestDepartments: its own output saves cleanly through sanitizeDepartments with no staff edits");
 
   ok(d252Suggest([]).length === 0, "#252 suggestDepartments: no categories → no suggestions");
-  ok(d252Suggest(["Nothing Matches Here"]).length === 0, "#252 suggestDepartments: a starter with zero matches is left out entirely, not offered empty");
+  ok(d252Suggest([d252Cat("Nothing Matches Here")]).length === 0, "#252 suggestDepartments: a department with zero matches is left out entirely, not offered empty");
+
+  // Departments come back in DISPLAY order (Projection Screens, Drapery,
+  // Lighting, Audio, Video & Displays, Control & Networking, Rigging,
+  // Cable & Connectors, Power, Mounts & Hardware), not the classification
+  // priority order — confirm against a set hitting every department.
+  const everyDept = d252Suggest([
+    d252Cat("CEILING RECESSED TENSIONED PROJ. SCREENS", 3035), d252Cat("Drapes - I.F.R.", 19),
+    d252Cat("Fixture assemblies", 30), d252Cat("Tesira", 105), d252Cat("HDMI Cables", 93),
+    d252Cat("LED Video", 88), d252Cat("Touch Panels", 16), d252Cat("Hoists & Motors", 6),
+    d252Cat("Patch Cables", 18), d252Cat("Power Sequencer", 18), d252Cat("Mounting Hardware", 6),
+  ]);
+  ok(
+    everyDept.map((d) => d.name).join("|") ===
+      "Projection Screens|Drapery|Lighting|Audio|Video & Displays|Control & Networking|Rigging|Cable & Connectors|Power|Mounts & Hardware",
+    "#252 suggestDepartments: departments come back in display order, not classification-priority order (got: " + everyDept.map((d) => d.name).join("|") + ")"
+  );
+}
+
+// ---- suggestDepartments: the #252 rebuild's own pinned name-rule ordering
+// consequences (mount-vs-screen-vs-speaker, cable-vs-hdmi, projector-vs-mount) ----
+{
+  const pin = (category: string, wantId: string, why: string) => {
+    const got = d252Suggest([d252Cat(category, 1)]);
+    ok(got.length === 1 && got[0].id === wantId, `#252 suggestDepartments pin: "${category}" → ${wantId} (${why}) — got ${got[0]?.id ?? "Other"}`);
+  };
+  pin("WALL OR CEILING MOUNT TENS. PROJ. SCREEN", "projection-screens", "screen beats the leading 'mount'");
+  pin("Surface-Mount Speaker", "audio", "speaker beats 'mount'");
+  pin("RPMX: Projector Custom Mounts Locking", "mounts-hardware", "a projector *mount* is hardware, not Video & Displays");
+  pin("VCM: Projector Custom Mounts", "mounts-hardware", "same projector-mount exception");
+  pin("KITP: Projector Kits", "video-displays", "a bare 'projector' with no mount reads as Video & Displays");
+  pin("HDMI Cables", "cable-connectors", "cable beats hdmi — Cable & Connectors is checked ahead of Video & Displays");
+  pin("Fixture assemblies", "lighting", "spec pick 6 pseudo-category");
+  pin("Drapes - I.F.R.", "drapery", "I.F.R. drape");
+  pin("StageScreen Dress Kit With Case - 20oz. (567g) Velour", "drapery", "dress kit/velour beats 'StageScreen'");
+  pin("FocalPoint Dress Kit Skirt - Velour", "drapery", "dress kit/skirt/velour beats 'FocalPoint'");
+  pin("Lens Tubes", "lighting", "ETC lens tube");
+  pin("Tesira", "audio", "Biamp Tesira DSP, not a lighting/video term despite being a 'system'");
+  pin("Eos Family", "lighting", "ETC Eos");
+  pin("Hog Family", "lighting", "High End Hog console");
+  pin("Touch Panels", "control-networking", "AV control touch panel");
+  pin("Enterprise Switches", "control-networking", "'switch' matches even though bare 'Enterprise' never gets a name rule");
+  pin("TIL: Direct View LED Mounts", "mounts-hardware", "'mount' wins; bare 'led' never name-matches on its own");
+  pin("AeroLift 35", "mounts-hardware", "a projector LIFT is hardware, not a screen, despite 'aerolift' sounding screen-adjacent");
+  pin("Access V", "projection-screens", "Draper Access screen family — matches by name directly");
+  pin("Targa", "projection-screens", "Draper Targa screen family — matches by name directly");
+  pin("ArcSystem Pro", "lighting", "ETC ArcSystem — matches by name directly");
+  pin("Point Source", "audio", "loudspeaker term");
+  pin("Back boxes and Locking Covers", "mounts-hardware", "back box");
+  pin("Digital Media Switchers", "video-displays", "AV switcher");
+  pin("Power Sequencer", "power", "power sequencer");
+  pin("Wireless Mics", "audio", "mic");
+}
+
+// ---- suggestDepartments: (k) dominant-manufacturer fallback — pure
+// product-family category names that carry no readable department signal
+// of their own resolve ONLY through mfrs, never a name rule ----
+{
+  const noName = d252Suggest([d252Cat("Standard", 5)]);
+  ok(noName.length === 0, "#252 suggestDepartments: 'Standard' with NO mfrs data stays Other — it has no name rule");
+  const mfr = (cat: string, mfrs: Record<string, number>) => d252Suggest([d252Cat(cat, 10, mfrs)])[0]?.id;
+  ok(mfr("Standard", { Draper: 10 }) === "projection-screens", "#252 (k) mfr fallback: 'Standard' resolves through its dominant mfr (Draper) to Projection Screens");
+  ok(mfr("Professional", { "ETC": 10 }) === "lighting", "#252 (k) mfr fallback: 'Professional' + ETC → Lighting");
+  ok(mfr("Enterprise", { "QSC": 10 }) === "audio", "#252 (k) mfr fallback: 'Enterprise' + QSC → Audio");
+  ok(mfr("Community", { "Community": 10 }) === "audio", "#252 (k) mfr fallback: 'Community' (brand == category name) + mfr Community → Audio");
+  ok(mfr("Prebuilt system", { "Da-Lite": 10 }) === "projection-screens", "#252 (k) mfr fallback: 'Prebuilt system' + Da-Lite → Projection Screens");
+  ok(mfr("Prebuilt system", { "Chief": 10 }) === "mounts-hardware", "#252 (k) mfr fallback: the SAME category name resolves differently per its own dominant mfr (Chief → Mounts & Hardware)");
+  // dominant = the mfr with the MOST parts in that category, not the first key
+  ok(mfr("Standard", { Chief: 2, Draper: 9 }) === "projection-screens", "#252 (k) mfr fallback: dominant mfr is whichever has the most parts, not object key order");
+  // a name rule ALWAYS wins over the mfr fallback, even when mfrs disagrees
+  ok(mfr("Access V", { Chief: 10 }) === "projection-screens", "#252 (k) mfr fallback never overrides a name-rule hit — 'Access V' names Projection Screens regardless of mfrs");
+  // led + mfr combined rule: bare "led" alone never name-matches, but reads as Lighting once its dominant mfr is a lighting brand
+  ok(mfr("LED", { ETC: 10 }) === "lighting", "#252 led+mfr: a bare 'LED' category reads as Lighting once its dominant manufacturer is a lighting brand (ETC)");
+  ok(mfr("LED", { Chief: 10 }) === "mounts-hardware", "#252 led+mfr: the same bare 'LED' category with a non-lighting dominant mfr (Chief) still resolves through the plain (k) mfr fallback — the led+mfr gate only affects the Lighting-specific reading, it doesn't block the others");
+  // an unresolved/unknown mfr with no matching MFR_RULES entry stays Other
+  ok(mfr("Standard", { "Some Unknown Brand": 10 }) === undefined, "#252 (k) mfr fallback: an mfr matching none of the MFR_RULES entries leaves the category in Other");
+}
+
+// ---- suggestDepartments: coverage test against the REAL production
+// category list (top ~191 categories by part count, .superpowers/sdd/
+// prod-categories-top.txt) — name rules only (mfrs empty), exactly what
+// "Start from suggestions" sees on a first run before any staff sets up
+// Grid Equipment map-style manufacturer data. Pins the % achieved so a
+// future regression is visible, not just a threshold flip. ----
+{
+  const raw = readFileSync(join(process.cwd(), ".superpowers/sdd/prod-categories-top.txt"), "utf8").trim();
+  const prodCats = raw.split("\n").map((line) => {
+    const [category, countStr] = line.split("|");
+    return d252Cat(category, Number(countStr));
+  });
+  const totalParts = prodCats.reduce((n, c) => n + c.count, 0);
+  const sug = d252Suggest(prodCats);
+  const coveredCats = new Set(sug.flatMap((d) => d.categories));
+  const coveredParts = prodCats.filter((c) => coveredCats.has(c.category)).reduce((n, c) => n + c.count, 0);
+  const pct = coveredParts / totalParts;
+  ok(pct >= 0.65, `#252 coverage (real prod categories, name rules only): ${(pct * 100).toFixed(1)}% of ${totalParts.toLocaleString("en-US")} parts land in a non-Other department (want >= 65%)`);
+  // Every suggested category still appears in exactly one department on
+  // this much larger, real-world input (not just the small hand-built set
+  // above) — the same invariant sanitizeDepartments enforces on save.
+  const allReal = sug.flatMap((d) => d.categories);
+  ok(new Set(allReal).size === allReal.length, "#252 coverage: every real-prod-category suggestion still lands in exactly one department");
+  ok(d252Sanitize(sug, prodCats.map((c) => c.category)).ok, "#252 coverage: the real-prod suggestion set saves cleanly through sanitizeDepartments");
+}
+
+// ---- computeBulkMove: the editor's "Move all N shown to <dept>/Other" pure helper ----
+{
+  const catDept = { "Rigging Hardware": "rigging", "Fixtures": "lighting", "Cable & Connectors": "rigging" };
+  const toAudio = d252BulkMove(catDept, ["Rigging Hardware", "Cable & Connectors"], "audio");
+  ok(toAudio["Rigging Hardware"] === "audio" && toAudio["Cable & Connectors"] === "audio" && toAudio["Fixtures"] === "lighting",
+    "#252 computeBulkMove: moves every named category to the target dept key, leaves everything else untouched");
+  ok(catDept["Rigging Hardware"] === "rigging", "#252 computeBulkMove: does not mutate the input map");
+
+  const toOther = d252BulkMove(catDept, ["Rigging Hardware"], "");
+  ok(!("Rigging Hardware" in toOther) && toOther["Cable & Connectors"] === "rigging",
+    '#252 computeBulkMove: an empty targetKey ("Other") removes the category\'s entry instead of pointing it at a dead key');
+
+  const noop = d252BulkMove(catDept, [], "audio");
+  ok(JSON.stringify(noop) === JSON.stringify(catDept), "#252 computeBulkMove: an empty category list is a no-op");
+
+  // A category with no prior entry gets one; re-running with the same
+  // target twice is idempotent.
+  const fresh = d252BulkMove({}, ["New Category"], "lighting");
+  ok(fresh["New Category"] === "lighting", "#252 computeBulkMove: a previously-unassigned category gets the target key");
+  ok(JSON.stringify(d252BulkMove(fresh, ["New Category"], "lighting")) === JSON.stringify(fresh), "#252 computeBulkMove: applying the same move twice is idempotent");
 }
 
 // ---- searchCatalog with dept (results, facets, Other) ----
