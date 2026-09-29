@@ -199,7 +199,7 @@ export function assembleSection(input: {
 
   /** Where a record prints in THIS section, or why it can't (design §3.3). */
   const recordPlacement = (r: SpecRecord): { ok: true; articleId: string } | { ok: false; reason: "other-section" | "needs-header" } => {
-    if (sectionIdForRecord(r, sections) !== section.id) return { ok: false, reason: "other-section" };
+    if (sectionIdForRecord(r, sections, articles) !== section.id) return { ok: false, reason: "other-section" };
     if (!articleInSection(r.sourceArticleId, section.id, articles)) return { ok: false, reason: "needs-header" };
     return { ok: true, articleId: r.sourceArticleId! };
   };
