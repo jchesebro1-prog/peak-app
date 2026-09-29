@@ -123,7 +123,7 @@ async function persist(formData: FormData): Promise<string | null> {
       : null,
   });
   const r = compute(
-    { office: office || undefined, venues: venueInputs, travel: travelOverride, priceOverride, lift },
+    { lift, office: office || undefined, venues: venueInputs, travel: travelOverride, priceOverride },
     rates,
     travelRates
   );

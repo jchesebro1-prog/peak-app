@@ -10674,6 +10674,7 @@ seeded()
   .then(() => c255T14GridAsyncChecks())
   .then(() => c255StorSpacesAsyncChecks())
   .then(() => specLabelsAsyncChecks())
+  .then(() => lift275AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -36613,4 +36614,273 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   ok(card267.includes("Reset to auto") && card267.includes("Round to ${SYSTEM_PRICE_STEP}") && card267.includes("Rounded to ${sec.priceRound}"), "#267: the card shows Reset to auto, Round to $25 and the rounding hint");
   const qd267 = read267("src/app/(app)/estimator/quote-document.tsx");
   ok(qd267.includes("const sub = systemSellTotal(sec);") && qd267.includes("rows.reduce((a, cl) => a + cl.ext, 0)"), "#267: the customer document's system subtotals and labor lines read the system price");
+}
+
+/* ======================================================================
+   #275 — a Lift rental on flame-test, inspection and repair quotes: count ×
+   rate (default the live EQP-LIFT catalog cost), margined with the job ON TOP
+   of any floor, inside the $25 rounding and a typed total, through the shared
+   finish functions the builder previews run. Printed as its own "Lift rental"
+   line (count > 0 only); renewals carry the count at today's rate; a portal
+   Refresh keeps a staff-added lift; a customer's own portal Generate never
+   has one. Pure checks run at top level; DB-backed checks are registered on
+   the promise chain as lift275AsyncChecks().
+   ====================================================================== */
+import {
+  LIFT_LINE as l275Line,
+  LIFT_RATE_FALLBACK as l275Fallback,
+  carryLift as l275Carry,
+  finishFlame as l275FinishFlame,
+  finishInspection as l275FinishInsp,
+  finishRepair as l275FinishRepair,
+  liftDraftFrom as l275DraftFrom,
+  liftLabel as l275Label,
+  liftRateChangeReason as l275Reason,
+  normalizeLift as l275Norm,
+  printedLift as l275Printed,
+  savedLift as l275Saved,
+} from "@/lib/service-pricing";
+{
+  const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
+  const L1 = { count: 1, rate: 750 };
+  const L2 = { count: 2, rate: 750 };
+
+  // ---- normalizeLift: posted drafts, stored lifts, JSON text ----
+  ok(JSON.stringify(l275Norm({ count: "2", rate: "" }, 800)) === JSON.stringify({ count: 2, rate: 800 }),
+    "#275 normalizeLift: a blank rate prices at the default");
+  ok(JSON.stringify(l275Norm({ count: "3", rate: "$1,200" }, 750)) === JSON.stringify({ count: 3, rate: 1200 }),
+    "#275 normalizeLift: a typed rate is whole dollars ($ and commas stripped)");
+  ok(JSON.stringify(l275Norm('{"count":"1","rate":"900"}', 750)) === JSON.stringify({ count: 1, rate: 900 }),
+    "#275 normalizeLift: reads the builder's posted JSON text");
+  ok(JSON.stringify(l275Norm({ count: 2, rate: 750, cost: 1500, line: 2143 }, 999)) === JSON.stringify({ count: 2, rate: 750 }),
+    "#275 normalizeLift: a stored lift keeps its own rate");
+  ok([{ count: "" }, { count: "0" }, { count: 0 }, { count: "1.5" }, { count: 2.5 }, { count: "-1" }, { count: 51 }, { count: "abc" }, null, undefined, "junk", "{", 7]
+      .every((v) => l275Norm(v, 750) === undefined),
+    "#275 normalizeLift: blank, 0, fractions, negatives, > 50 and junk mean no lift");
+  ok(l275Norm({ count: "1", rate: "-5" }, 750)?.rate === 750 && l275Norm({ count: "1", rate: "1e3" }, 750)?.rate === 750 && l275Norm({ count: "1", rate: "0" }, 750)?.rate === 0,
+    "#275 normalizeLift: a junk rate falls back to the default; $0 is a real rate");
+  ok(l275Norm({ count: "1" }, NaN)?.rate === l275Fallback && l275Fallback === 750, "#275 normalizeLift: no usable default → the $750 seed");
+
+  // ---- the builder draft round-trips ----
+  ok(JSON.stringify(l275DraftFrom(L2, 750)) === JSON.stringify({ count: "2", rate: "" }),
+    "#275 liftDraftFrom: a saved lift at today's default reopens with a blank rate (follows the default)");
+  ok(JSON.stringify(l275DraftFrom({ count: 1, rate: 900 }, 750)) === JSON.stringify({ count: "1", rate: "900" }),
+    "#275 liftDraftFrom: a hand-typed rate reopens typed in");
+  ok(JSON.stringify(l275DraftFrom(null, 750)) === JSON.stringify({ count: "", rate: "" }), "#275 liftDraftFrom: no lift reopens empty (off)");
+  ok(JSON.stringify(l275Norm(l275DraftFrom({ count: 3, rate: 900 }, 750), 750)) === JSON.stringify({ count: 3, rate: 900 }),
+    "#275: draft → normalizeLift round-trips the saved lift");
+
+  // ---- inspection engine: lift on top of the minimum fee, rounded, typed ----
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iV = [{ id: "l275-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
+  const i0 = trvInspectionEstimate({ venues: iV }, iR);
+  const i0b = trvInspectionEstimate({ venues: iV, lift: null }, iR);
+  ok(i0.total === 1200 && i0.lift === null && i0.liftCost === 0 && i0.liftLine === 0 && i0b.total === i0.total && i0b.cost === i0.cost,
+    "#275 inspection: no lift prices exactly as before (1,200) with a zero lift");
+  const i1 = trvInspectionEstimate({ venues: iV, lift: L1 }, iR);
+  ok(near(i1.totalRaw, 832.5 / 0.7 + 750 / 0.7) && i1.total === 2250 && i1.cost === 1582.5 && i1.liftCost === 750 && i1.liftLine === 1071,
+    "#275 inspection: + 1 lift at $750 → 1,189.29 + 1,071.43 = 2,260.71 rounds to 2,250; the lift line prints $1,071");
+  ok(near(i1.effectiveMargin, 1 - 1582.5 / 2250) && i1.marginAmount === 2250 - 1582.5, "#275 inspection: the margin back-solves over labor + travel + lift");
+  const iHere = [{ id: "l275-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }];
+  const iMin = trvInspectionEstimate({ venues: iHere, lift: L1 }, iR);
+  ok(iMin.minApplied && near(iMin.totalRaw, 650 + 750 / 0.7) && iMin.total === 1725,
+    "#275 inspection: the minimum fee floors the inspection and the lift adds ON TOP (650 + 1,071.43 → rounds UP to 1,725), never absorbed by the floor");
+  const iTyped = trvInspectionEstimate({ venues: iV, lift: L1, priceOverride: 2000 }, iR);
+  ok(iTyped.total === 2000 && iTyped.overridden && iTyped.autoTotal === 2250 && iTyped.liftLine === 1071 && near(iTyped.effectiveMargin, 1 - 1582.5 / 2000),
+    "#275 inspection: a typed total is used exactly; the lift line keeps its own price and the margin back-solves");
+  const iPrev = l275FinishInsp({ cost: i0.cost, minFee: 650, margin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(iPrev.total === i1.total && iPrev.cost === i1.cost && iPrev.liftLine === i1.liftLine,
+    "#275 parity: the builder preview's finishInspection() prices the lift exactly like the engine");
+
+  // ---- flame engine: lift after the base-fee floor ----
+  const fR = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const fV: FTVenue = { id: "l275-f1", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
+  const f0 = computeFlameQuote({ venues: [fV] }, fR);
+  ok(f0.total === 825 && f0.lift === null && f0.liftLine === 0, "#275 flame: no lift prices exactly as before (825)");
+  const f2 = computeFlameQuote({ venues: [fV], lift: L2 }, fR);
+  ok(f2.rawCost === 575 && f2.cost === 2075 && f2.total === 2975 && f2.liftCost === 1500 && f2.liftLine === 2143,
+    "#275 flame: + 2 lifts at $750 → cost 2,075, 2,964.29 rounds to 2,975; the lift line prints $2,143");
+  const fHere = computeFlameQuote({ venues: [{ id: "l275-f2", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }], lift: L1 }, fR);
+  ok(fHere.baseApplied && fHere.cost === 900 && fHere.total === 1300,
+    "#275 flame: the $150 base fee floors the testing, the lift adds on top (900 ÷ 0.7 = 1,285.71 rounds UP to 1,300)");
+  const fTyped = computeFlameQuote({ venues: [fV], lift: L2, priceOverride: 3000 }, fR);
+  ok(fTyped.total === 3000 && fTyped.overridden && fTyped.autoTotal === 2975 && near(fTyped.effectiveMargin, 1 - 2075 / 3000),
+    "#275 flame: a typed total with a lift is used exactly");
+  const fPrev = l275FinishFlame({ rawCost: f0.rawCost, baseFee: 150, margin: 0.3, priceOverride: null, liftCost: 1500 });
+  ok(fPrev.total === f2.total && fPrev.cost === f2.cost && fPrev.liftLine === f2.liftLine, "#275 parity: finishFlame() prices the lift exactly like the engine");
+
+  // ---- repair engine: lift at the SERVICE margin, on top of the call-out ----
+  const rR = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rV = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
+  const r0 = trvRepairEstimate({ venues: rV, laborHours: 4 }, rR);
+  ok(r0.total === 875 && r0.lift === null && r0.liftLine === 0, "#275 repair: no lift prices exactly as before (875)");
+  const r1 = trvRepairEstimate({ venues: rV, laborHours: 4, lift: L1 }, rR);
+  ok(r1.total === 1950 && r1.cost === 1357.5 && r1.liftLine === 1071 && near(r1.liftSell, 750 / 0.7) && near(r1.serviceSell, 1950 - 750 / 0.7),
+    "#275 repair: + 1 lift → 867.86 + 1,071.43 = 1,939.29 rounds to 1,950; the service line absorbs the rounding");
+  const rP = trvRepairEstimate({ venues: rV, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }], lift: L1 }, rR);
+  ok(near(rP.serviceSell + rP.partsSell + rP.liftSell, rP.total) && near(rP.partsSell, 200 / 0.7),
+    "#275 repair: service + parts + lift sell sum to the total; parts keep their own markup");
+  const rC = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1, lift: L1 }, rR);
+  ok(rC.calloutApplied && rC.total === 1425, "#275 repair: the minimum call-out floors the service, the lift adds on top (350 + 1,071.43 → rounds UP to 1,425)");
+  const rT = trvRepairEstimate({ venues: rV, laborHours: 4, lift: L1, priceOverride: 1500 }, rR);
+  ok(rT.total === 1500 && rT.overridden && near(rT.serviceMargin, rT.effectiveMargin) && near(rT.effectiveMargin, 1 - 1357.5 / 1500),
+    "#275 repair: a typed total with a lift reports the whole-job effective margin");
+  const rPrev = l275FinishRepair({ serviceCost: r0.serviceCost, minCallout: 350, margin: 0.3, partsCost: 0, partsMargin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(rPrev.total === r1.total && rPrev.liftLine === r1.liftLine, "#275 parity: finishRepair() prices the lift exactly like the engine");
+
+  // ---- the saved lift + the printed line (count > 0 only) ----
+  const saved = l275Saved(L2, f2);
+  ok(JSON.stringify(saved) === JSON.stringify({ count: 2, rate: 750, cost: 1500, line: 2143 }), "#275 savedLift: count, rate, cost and the printed line");
+  ok(l275Saved(null, f0) === undefined && l275Saved({ count: 0, rate: 750 }, f0) === undefined, "#275 savedLift: no lift writes nothing");
+  const pl = l275Printed({ lift: saved }, 0.3);
+  ok(!!pl && pl.line === 2143 && pl.count === 2 && pl.label === "Lift rental ×2", "#275 printedLift: a saved lift prints its stored line");
+  ok(l275Printed({}, 0.3) === null && l275Printed(null, 0.3) === null && l275Printed({ lift: { count: 0, rate: 750 } }, 0.3) === null,
+    "#275 printedLift: a quote with no lift (every pre-#275 quote) prints no lift line");
+  ok(l275Printed({ lift: { count: 1, rate: 700 } }, 0.3)?.line === 1000, "#275 printedLift: a lift saved without a line prints count × rate ÷ (1 − margin)");
+  ok(l275Label(1) === l275Line && l275Line === "Lift rental" && l275Label(3) === "Lift rental ×3", "#275: the customer-facing label is 'Lift rental' (×n for more than one)");
+
+  // ---- renewals carry the count at today's rate ----
+  ok(JSON.stringify(l275Carry({ count: 2, rate: 900, line: 2571 }, 750)) === JSON.stringify({ count: 2, rate: 750 }),
+    "#275 renewal: last year's lift count carries, re-priced at today's rate (a typed rate does not carry)");
+  ok(JSON.stringify(l275Carry({ count: 2, rate: 750 }, 800, 1)) === JSON.stringify({ count: 2, rate: 800 }),
+    "#275 renewal: a single-venue inspection prior carries its full count");
+  ok(JSON.stringify(l275Carry({ count: 3, rate: 750 }, 800, 3)) === JSON.stringify({ count: 1, rate: 800 }),
+    "#275 renewal: a multi-venue inspection prior carries one rental (the record prices one venue)");
+  ok(l275Carry(undefined, 750) === undefined && l275Carry({ count: 0 }, 750) === undefined, "#275 renewal: no prior lift → no lift");
+  ok(l275Reason({ count: 1, rate: 700 }, { count: 1, rate: 750 }) === "the current lift rental rate ($750 per rental, was $700)",
+    "#275 renewal reason: a moved lift rate is cited");
+  ok(l275Reason({ count: 1, rate: 750 }, { count: 1, rate: 750 }) === null && l275Reason(undefined, { count: 1, rate: 750 }) === null && l275Reason({ count: 1, rate: 700 }, null) === null,
+    "#275 renewal reason: an unchanged rate, no prior lift, or no carried lift says nothing");
+  const fPrior = { rates: f2.rates, trip: { miles: f2.trip.miles, mode: "drive" as const }, curtainsTotal: f2.curtainsTotal, lift: { count: 2, rate: 700 } };
+  ok(JSON.stringify(flameChangeReasons(fPrior, f2)) === JSON.stringify(["the current lift rental rate ($750 per rental, was $700)"]),
+    "#275 renewal: flameChangeReasons cites only the lift rate when nothing else moved");
+  ok(JSON.stringify(flameChangeReasons({ ...fPrior, lift: { count: 2, rate: 750 } }, f2)) === "[]",
+    "#275 renewal: an unchanged lift rate adds no reason");
+  const iPrior = { rates: i1.rates, trip: { miles: i1.trip.miles, mode: "drive" as const }, venues: [{ id: "l275-i1", lineSets: 20 }], lineSetsTotal: 20, lift: { count: 1, rate: 600 } };
+  ok(inspectionChangeReasons(iPrior, i1, "Near").includes("the current lift rental rate ($750 per rental, was $600)"),
+    "#275 renewal: inspectionChangeReasons cites a moved lift rate");
+
+  // ---- wiring (source) ----
+  const r275 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  for (const [dir, sub] of [["flame-tests", "ft"], ["inspections", "insp"], ["repairs", "rp"]] as const) {
+    const acts = r275(`src/app/(app)/${dir}/quote/actions.ts`);
+    ok(acts.includes('const lift = normalizeLift(formData.get("lift"), await getLiftRate());') && /priceOverride,\s*lift,|\{ lift, office: office/.test(acts),
+      `#275 ${dir}: the save action normalizes the posted lift against the live default and prices it through the engine`);
+    ok(acts.includes("...(r.lift ? { lift: savedLift(r.lift, r) } : {}),"), `#275 ${dir}: the save action stores the lift on the quote subdoc (only when present)`);
+    const page = r275(`src/app/(app)/${dir}/quote/page.tsx`);
+    ok(page.includes(`lift: normalizeLift(${sub} && ${sub}.lift, liftRate) ?? null,`) && page.includes("liftRate={liftRate}") && page.includes("getLiftRate(),"),
+      `#275 ${dir}: the page reopens the saved lift and hands the builder the live default rate`);
+    const ctl = r275(`src/app/(app)/${dir}/quote/controls.tsx`);
+    ok(ctl.includes('fd.set("lift", JSON.stringify(liftDraft));') && ctl.includes("liftCost: liftCostOf(lift),") && ctl.includes("<LiftRentalPanel"),
+      `#275 ${dir}: the builder shows the Lift rental control, previews it through the shared finish and posts it`);
+  }
+  for (const dir of ["flame-tests", "inspections"]) {
+    const v = r275(`src/app/(app)/${dir}/letter/letter-view.tsx`);
+    ok(/const lift = printedLift\([a-z]+, travelMargin\);\s*if \(lift\) \{\s*scopeRows\.push\(\{\s*item: pad2\(sr\+\+\),\s*desc: lift\.label,\s*qty: money\(lift\.line\),/.test(v),
+      `#275 ${dir} letter: a 'Lift rental' row prints with its own price only when the quote has a lift`);
+  }
+  const rpl = r275("src/app/(app)/repairs/letter/letter-view.tsx");
+  ok(rpl.includes("const lift = printedLift(rp, travelMargin);") && /\{lift\s*\? ", including "/.test(rpl),
+    "#275 repair letter: the cost sentence names the lift and its price only when the quote has one");
+  const ren = r275("src/lib/renewal-outreach.ts");
+  ok(ren.includes("const lift = priorFt?.lift ? carryLift(priorFt.lift, await getLiftRate()) : undefined;") &&
+      ren.includes("const lift = priorIn?.lift ? carryLift(priorIn.lift, await getLiftRate(), priorVenueCount) : undefined;") &&
+      (ren.match(/\.\.\.\(r\.lift \? \{ lift: savedLift\(r\.lift, r\) \} : \{\}\),/g) || []).length === 2,
+    "#275 renewal: both renewal re-pricers carry last year's lift at today's rate and save it");
+  ok(ren.includes("if (ftLift) blocks.push(") && ren.includes("if (inLift) blocks.push("),
+    "#275 renewal: both renewal PDF letters name the lift only when the quote has one");
+  const psa = r275("src/app/portal/service/actions.ts");
+  const psq = r275("src/lib/portal-service-quotes.ts");
+  const psp = r275("src/app/portal/service/page.tsx");
+  ok(/priceServiceRequest\(session, req\);/.test(psa) && /priceServiceRequest\(session, req\);/.test(psq) && /priceServiceRequest\(session, initialReq\)/.test(psp),
+    "#275 portal: the customer's own price/Generate paths never pass a lift — portal self-quotes stay lift-free");
+  ok(r275("src/lib/portal-quotes.ts").includes('req, { lift });'), "#275 portal: only Refresh pricing carries a staff-added lift");
+}
+
+/* #275 (DB-backed): the live default rate, a saved quote's lift round-trip,
+ * and the portal (lift-free Generate; Refresh keeps a staff-added lift). */
+async function lift275AsyncChecks(): Promise<void> {
+  const { getLiftRate } = await import("@/lib/service-quote-inputs");
+  const { getMany } = await import("@/lib/stores/catalog");
+  const [row] = await getMany(["EQP-LIFT"]);
+  const liveRate = await getLiftRate();
+  ok(liveRate === (row ? Math.round(row.cost) : 750), `#275 getLiftRate: the default is the live EQP-LIFT catalog cost ($${liveRate}), else $750`);
+
+  // ---- persistence round-trip: what the inspection save writes reopens and re-prices identically ----
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iV = [{ id: "l275-rt", label: "Hall", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
+  const lift = l275Norm({ count: "2", rate: "" }, liveRate)!;
+  const r = trvInspectionEstimate({ venues: iV, lift }, iR);
+  const created = await QuoteStore.create({
+    name: "Test275 lift round-trip",
+    customer: "Test275 Co",
+    source: "inspection",
+    quoteType: "inspection",
+    value: Math.round(r.total),
+    inspection: { rates: r.rates, venues: iV, lift: l275Saved(r.lift, r), cost: Math.round(r.cost), total: Math.round(r.total) },
+  } as Parameters<typeof QuoteStore.create>[0]);
+  registerFixture("quotes", created.id);
+  const plain = await QuoteStore.create({
+    name: "Test275 no lift",
+    customer: "Test275 Co",
+    source: "inspection",
+    quoteType: "inspection",
+    value: 1200,
+    inspection: { rates: iR, venues: iV, total: 1200 },
+  } as Parameters<typeof QuoteStore.create>[0]);
+  registerFixture("quotes", plain.id);
+  const back = (await QuoteStore.get(created.id))?.inspection as { lift?: unknown } | undefined;
+  const reopened = l275Norm(back?.lift, liveRate);
+  ok(JSON.stringify(reopened) === JSON.stringify({ count: 2, rate: liveRate }), "#275 round-trip: the saved lift reopens with its count and rate");
+  ok(trvInspectionEstimate({ venues: iV, lift: reopened }, iR).total === (await QuoteStore.get(created.id))?.value,
+    "#275 round-trip: re-pricing the reopened lift lands on the saved value");
+  ok(l275Printed(back, 0.3)?.line === r.liftLine, "#275 round-trip: the letter prints the saved lift line");
+  const plainBack = (await QuoteStore.get(plain.id))?.inspection as Record<string, unknown> | undefined;
+  ok(!!plainBack && !("lift" in plainBack) && l275Printed(plainBack, 0.3) === null, "#275 round-trip: a quote saved without a lift carries none and prints none");
+
+  // ---- portal: Generate is lift-free; Refresh keeps a staff-added lift ----
+  const CO = fixtureId(275, "portal-lift-co");
+  const NOW = new Date(2026, 8, 29, 12).getTime();
+  const EXPIRED = NOW + 31 * 86400000;
+  const sess = { grantId: fixtureId(275, "portal-lift-grant"), customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+  try {
+    await upsertCustomer({
+      id: CO,
+      name: "Test275 Portal Lift Co",
+      type: "Education",
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }],
+      contacts: [],
+    });
+    const fReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }] };
+    const iReq = { service: { kind: "inspection" as const, level: 1 as const }, venues: [{ venueId: "v1", count: 12 }] };
+    for (const req of [fReq, iReq]) {
+      const free = await d248Price(sess, req);
+      const withLift = await d248Price(sess, req, { lift: { count: 1, rate: liveRate } });
+      if (!free.ok || !withLift.ok) throw new Error("#275 portal pricing setup failed");
+      const kind = req.service.kind;
+      ok(!("lift" in (free.subdoc as Record<string, unknown>)) && !free.view.lines.some((l) => l.label.startsWith("Lift rental")),
+        `#275 portal ${kind}: a customer's own price has no lift line and saves no lift`);
+      const liftLine = withLift.view.lines.find((l) => l.label === "Lift rental");
+      const sum = withLift.view.lines.reduce((a, l) => a + l.amount, 0) + withLift.view.travel;
+      ok(!!liftLine && liftLine.amount > 0 && sum === withLift.total && withLift.total > free.total &&
+          (withLift.subdoc as { lift?: { count?: number } }).lift?.count === 1,
+        `#275 portal ${kind}: a carried lift prints its own line, the lines still sum to the total, and the subdoc keeps it`);
+    }
+    const gen = await d248Generate(sess, fReq, { now: NOW, schedulePdf: false });
+    if (!gen.ok) throw new Error("#275 portal generate setup failed — " + gen.error);
+    registerFixture("quotes", gen.quoteId);
+    const g0 = await QuoteStore.get(gen.quoteId);
+    ok(!!g0 && !("lift" in ((g0.flameTest as Record<string, unknown>) || {})), "#275 portal: a generated self-quote is lift-free");
+    // Staff add a lift to the portal quote (a builder save keeps source portal-service).
+    await QuoteStore.update(gen.quoteId, { flameTest: { ...(g0!.flameTest as Record<string, unknown>), lift: { count: 2, rate: 999, cost: 1998, line: 2854 } } });
+    const refreshed = await d245RefreshPortalQuote(sess, gen.quoteId, EXPIRED);
+    ok(refreshed.ok, "#275 portal: Refresh pricing still works on a quote carrying a lift");
+    const g1 = await QuoteStore.get(gen.quoteId);
+    const g1Lift = (g1?.flameTest as { lift?: { count?: number; rate?: number } } | undefined)?.lift;
+    const expect = await d248Price({ customerId: CO, name: g1?.contactName || "" }, fReq, { lift: { count: 2, rate: liveRate } });
+    ok(g1Lift?.count === 2 && g1Lift?.rate === liveRate && expect.ok && g1?.value === expect.total,
+      "#275 portal: Refresh keeps the staff-added lift count, re-priced at today's rate, inside the refreshed value");
+  } finally {
+    await removeCustomer(CO);
+  }
 }
