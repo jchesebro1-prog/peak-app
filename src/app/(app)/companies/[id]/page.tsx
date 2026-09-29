@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
-import { deriveInitials, fallbackColor } from "@/lib/team";
+import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
@@ -110,7 +110,7 @@ export default async function CustomerDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, { id }, sp] = await Promise.all([requireUser(), params, searchParams]);
+  const [me, { id }, sp] = await Promise.all([requireUser(), params, searchParams]);
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
@@ -844,7 +844,7 @@ export default async function CustomerDetailPage({
       </div>
 
       {edit === "1" && (
-        <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} venueTypes={venueTypes} autoNamedLocIds={companySites.filter((s) => s.nameAuto).map(docLocId)} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
+        <EditCustomerModal mode="edit" canDelete={can("create", me.roles)} initial={editInitial} fieldDefs={fieldDefs} venueTypes={venueTypes} autoNamedLocIds={companySites.filter((s) => s.nameAuto).map(docLocId)} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
       )}
       {addVenue === "1" && (
         <VenueDialog

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { loadConsultingData } from "../data";
 import { ConsultingView } from "../view";
 import { TABS, type TabKey } from "../tabs";
@@ -41,7 +42,7 @@ export default async function ConsultingDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, p, sp, data] = await Promise.all([
+  const [user, p, sp, data] = await Promise.all([
     requireUser(),
     params,
     searchParams,
@@ -120,6 +121,7 @@ export default async function ConsultingDetailPage({
       <ActionError message={data.syncSkipped.length ? `Some consulting quotes could not be reconciled (${data.syncSkipped.join(", ")}). Refresh later or contact an administrator.` : undefined} />
       <ConsultingView
         data={data}
+        canDelete={can("create", user.roles)}
         sel={sel}
         tab={tab}
         notes={notes}

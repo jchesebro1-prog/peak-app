@@ -140,7 +140,7 @@ export function CatalogControls({
 }
 
 /**
- * Import-to-catalog side panel. Upload and paste share the same parser and
+ * Import-to-catalog panel (rendered inside the slide-over Drawer, #271). Upload and paste share the same parser and
  * authoritative server action, including MFR PN files exported by design tools.
  */
 export function CatalogImportPanel({
@@ -186,8 +186,7 @@ export function CatalogImportPanel({
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div style={{ padding: "14px 16px", borderBottom: "1px solid #f0f1f4" }}>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>Import to catalog</div>
-        <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 11.5, color: "#8c919c", lineHeight: 1.4 }}>
           Add a manufacturer price book — it lands in the shared database for every quote.
         </div>
       </div>

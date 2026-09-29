@@ -8033,3 +8033,19 @@ lines and any earlier entries. Normal entries are unchanged; the builder's produ
 does not print. Separately, a Part 2 article prints only when an entry lands in it, so article-only text (2.1 System
 Description, 2.1 Manufacturers) never printed; those are now companion records riding with their section's records
 (PS-116113-005, PS-116114-009) instead of article General text.
+
+## D479. The parts list spreads a system's price adjustment over its parts by one factor, freight left out (#276, 2026-09-29)
+
+Jeff asked for the parts list to use the rounded system sell. The #267 adjustment (typed price or $25 round-up) is
+spread over a system's listed parts by scaling each Unit Sell by (lines' sell + adjustment) ÷ lines' sell — the same
+proportional rule the customer document uses, but applied to the unrounded unit sell so quantities of more than one
+stay exact before the CSV prints to the cent. Freight is not added in: the file lists parts, and freight has no part
+row, so a system's parts sum to its price less freight. In a system that mixes materials and labor lines, labor's
+share of the adjustment stays with the (unlisted) labor. Unit Cost never changes.
+
+## D480. Parts-list sell carries freight — amends D479 (#279, 2026-09-29)
+
+Jeff wants the parts list's sell to include freight. The one scaling factor per system becomes system price ÷ lines'
+sell (D479 used price less freight), so a system's listed parts sum to its whole price. Freight is spread by each
+part's share of the lines' sell rather than by the freight base (cost), matching how the #267 adjustment is spread;
+labor lines' share stays out of the file as before. Legacy systems with freight are scaled too.

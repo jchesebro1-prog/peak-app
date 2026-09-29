@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { ProjectsView } from "../view";
 import { loadProjectsData, one, normFilter } from "../data";
 import ActionError from "@/components/action-error";
@@ -47,6 +48,7 @@ export default async function ProjectDetailPage({
         view={view}
         who={who}
         meName={user.name}
+        canDelete={can("create", user.roles)}
         custById={data.custById}
         identity={data.identity}
         roster={data.roster}

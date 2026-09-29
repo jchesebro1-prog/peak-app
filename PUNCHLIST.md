@@ -9759,13 +9759,19 @@ modal shows the per-mobilization dollar breakdown.
 
 ---
 
-## 271. Catalog — Import price book opens as a slide-over drawer — OPEN (building)
+## 271. Catalog — Import price book opens as a slide-over drawer — DONE 2026-09-29
 
-**Reported:** Jeff (2026-09-29): "Import Price Book needs to be sidebar." Confirmed: a **slide-over drawer**. Today
-`?import=1` turns the catalog body into a third 360px grid column (`catalog/page.tsx`), squeezing the parts list.
+**Reported:** Jeff (2026-09-29): "Import Price Book needs to be sidebar." Confirmed: a **slide-over drawer**. Before,
+`?import=1` turned the catalog body into a third 360px grid column (`catalog/page.tsx`), squeezing the parts list — and
+that rail was hidden below 1040px, so import was unreachable on narrow screens.
 
-**Plan:** keep `?import=1` as the URL state; render `CatalogImportPanel` in a right-hand overlay drawer (backdrop, ✕,
-Esc, full width on phones) instead of a grid column.
+**Done.** `?import=1` now opens `CatalogImportPanel` in a right-hand drawer over the catalog (480px, full height, own
+scroll, full width under 640px) — new reusable `src/components/ui/Drawer.tsx` (`role="dialog"`, `aria-modal`, focus
+into the panel and back on close, Tab wraps; backdrop / ✕ / Esc navigate to the same URL without `import`) with
+`.pk-drawer*` styles in `globals.css` (slide-in, off under reduced motion). The import still redirects to
+`?imported=` / `?importError=`, so the drawer closes on finish and the banners show as before. Works at every width.
+Gates: tsc 0; test:specs ALL PASSED, 0 FAIL; test:smoke 168/0 (= baseline); eslint 0 errors, no new warnings;
+next build OK. Browser-verified on a scratch datadir (desktop overlay, Esc/backdrop/✕ close, 375px full width).
 
 ---
 
@@ -9817,3 +9823,69 @@ stated separately" (`src/lib/templates.ts:132`, `:312`). Only Estimator Labor pr
 rate, default rate from the `EQP-LIFT` catalog row / an Estimating Rule), priced through the same engine, tier margin
 and $25 rounding; printed as its own "Lift rental" line on the letter, quote document and PDF, and carried by renewal
 re-pricing. Portal self-quotes (#248) stay lift-free unless Jeff says otherwise.
+
+## 273. Consulting — delete a consulting project right from its list card — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29, screenshot of /design/engagements): "We also need to be able to delete on this screen?"
+Delete existed only in a consulting project's detail header.
+
+**Done.** Each card on the Consulting list gains a Delete button (the shared `ConfirmButton`: Delete → Confirm delete /
+Cancel, auto-disarms after 5 s or on Esc) running the same `removeEngagementAction` as the detail header — a soft delete
+that also removes the project's open tasks; done tasks and notes stay. A quote-originated project stays deleted (the
+quote-sync's `coveredQuoteIds()` skips it — checked by reload). The card's link now wraps only the card content, so the
+button isn't nested inside an `<a>`. Follow-up (Jeff, same day): delete is limited to users with `create` (Admin,
+Manager, Estimator) like deleting a design — `removeEngagementAction` refuses otherwise, and both Delete buttons (card +
+detail header) are hidden from a Reviewer. `view.tsx`, `actions.ts`, and both engagement pages (`canDelete` prop).
+
+---
+
+## 276. Estimator — the PM parts list's Unit Sell follows the system's rounded / typed price — DONE 2026-09-29 (D479)
+
+**Reported:** Jeff (2026-09-29): "Make the parts list CSV use the rounded system sell." (Follow-up to #262 / #267.)
+
+**Done.** Each system's parts are priced at the system's actual price: every row's Unit Sell (plain lines, assembly
+components, vendor-quote lines) is scaled by that system's price ÷ its lines' sell, so per system Σ qty × Unit Sell
+equals the system price (typed, or rounded up to $25) less its freight — freight is not a part and isn't listed — and
+less any labor lines, which the parts list already leaves out. Unit Cost is unchanged; cost-adjustment rows stay at $0
+sell; a system with no rounding or typed price (sent/won legacy) is unchanged; a typed price below the system's
+freight lists its parts at $0, never negative. `src/app/(app)/estimator/parts-csv.ts`. Harness `#276`. See D479.
+
+## 277. Projects — delete a project right from its list card — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Add delete to the Projects screen cards too." Delete existed only in a project's
+detail header.
+
+**Done.** Each card in the Projects list (left column; the board view stays read-only) gains a compact Delete (the shared
+`ConfirmButton`: Delete → Confirm delete / Cancel) through the detail header's own `DeleteProjectButton`, now with an
+optional `backHref` and a `compact` size. Deleting the project that's open returns to the list; deleting any other card
+just refreshes. Same soft delete as before — `removeProject` records the source quote as dismissed, so the won-quote
+sync never re-creates it (checked by reload). Like designs and consulting (#268, #273), deleting a project is limited to
+users with `create` (Admin, Manager, Estimator): `removeProjectAction` refuses otherwise and both Delete buttons are
+hidden from a Reviewer (`canDelete` from both project pages). The card's link now wraps only the card content, so the
+button isn't nested inside an `<a>`.
+
+## 278. Companies (Customers) — delete a company right from its directory row — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Add delete to the Customers screen too." Customers is the Companies directory
+(`/companies`, D85); Delete existed only in a company's Edit dialog.
+
+**Done.** Each directory row gains a compact Delete (new `DeleteCompanyButton`, the shared `ConfirmButton`: Delete →
+Confirm delete / Cancel) running the Edit dialog's own `deleteCustomerAction` — the same soft delete
+(`CustomerStore.remove`: the company and its venues; contacts keep their historical link, quotes and projects keep their
+customer id). Its tooltip names how many quotes the company has. Like designs, consulting and projects (#268, #273,
+#277), deleting a company is limited to users with `create`: `deleteCustomerAction` refuses otherwise (and now returns an
+error the Edit dialog shows instead of navigating away as if it worked), and both Delete buttons are hidden from a
+Reviewer (`canDelete` on the list page and the Edit dialog). The row's link now wraps only the row content, so the
+button isn't nested inside an `<a>`.
+
+---
+
+## 279. Estimator — the PM parts list's Unit Sell includes the system's freight — DONE 2026-09-29 (D480)
+
+**Reported:** Jeff (2026-09-29): "Include freight in the parts list sell too." (Follow-up to #276.)
+
+**Done.** Each system's parts are now scaled by the system's full price (freight included) ÷ its lines' sell, so per
+system Σ qty × Unit Sell equals the system price — typed, rounded up to $25, or exact for a legacy system — less only
+any labor lines' share. Freight still has no row of its own; it rides in the parts' sell. This now also applies to
+sent/won systems with freight and no rounding (their parts' sell rises by the freight). Unit Cost is unchanged.
+`src/app/(app)/estimator/parts-csv.ts`. Harness `#279`. See D480.

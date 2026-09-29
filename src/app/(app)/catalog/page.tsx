@@ -7,6 +7,7 @@ import { dateYear, money } from "@/lib/format";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel } from "./controls";
+import Drawer from "@/components/ui/Drawer";
 import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
 import { PriceDateBanner } from "./price-date-banner";
@@ -50,9 +51,8 @@ const CSS = `
   .ct-row:hover { background: #fafbff; }
   .ct-filter:hover { background: #f6f7f9; }
   .ct-body { display: grid; gap: 18px; align-items: start; grid-template-columns: 210px minmax(0,1fr); }
-  .ct-body.ct-import { grid-template-columns: 210px minmax(0,1fr) 360px; }
   @media (max-width: 1040px) {
-    .ct-body, .ct-body.ct-import { grid-template-columns: 1fr; }
+    .ct-body { grid-template-columns: 1fr; }
     .ct-rail { display: none; }
   }
 `;
@@ -384,7 +384,7 @@ export default async function CatalogPage({
 
       {flaggedBooks.length > 0 && <PriceDateBanner books={flaggedBooks} />}
 
-      <div className={"ct-body" + (importOpen ? " ct-import" : "")}>
+      <div className="ct-body">
         {/* left filter rail */}
         <div className="ct-rail" style={{ minWidth: 0 }}>
           <FilterGroup
@@ -579,24 +579,14 @@ export default async function CatalogPage({
             </div>
           </div>
         </div>
-
-        {/* right import rail */}
-        {importOpen && (
-          <div
-            className="ct-rail"
-            style={{
-              background: "#fff",
-              border: "1px solid #ececf0",
-              borderRadius: 13,
-              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-              overflow: "hidden",
-              minWidth: 0,
-            }}
-          >
-            <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" today={isoDateOf(Date.now())} />
-          </div>
-        )}
       </div>
+
+      {/* #271 — import price book is a slide-over drawer, not a third column */}
+      {importOpen && (
+        <Drawer title="Import price book" closeHref={hrefForImport(hrefFor, false)}>
+          <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" today={isoDateOf(Date.now())} />
+        </Drawer>
+      )}
 
       {isAdmin && (
         <>

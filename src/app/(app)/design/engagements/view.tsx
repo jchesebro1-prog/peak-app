@@ -180,6 +180,7 @@ export function ConsultingView({
   prefillId,
   recordingSource,
   earlierSpecCount,
+  canDelete = false,
 }: {
   data: ConsultingData;
   sel: ConsultingEngagement | null;
@@ -218,8 +219,10 @@ export function ConsultingView({
    *  saved before the spec builder replaced that generator; > 0 shows an
    *  "Earlier bid specs" link to where they are still viewable. */
   earlierSpecCount?: number;
+  /** #273 — Delete (list cards + detail header) only for users with `create`. */
+  canDelete?: boolean;
 }) {
-  if (!sel) return <ConsultingList data={data} />;
+  if (!sel) return <ConsultingList data={data} canDelete={canDelete} />;
   return (
     <EngagementDetail
       data={data}
@@ -234,13 +237,15 @@ export function ConsultingView({
       prefillId={prefillId ?? null}
       recordingSource={recordingSource ?? null}
       earlierSpecCount={earlierSpecCount ?? 0}
+      canDelete={canDelete}
     />
   );
 }
 
 /* ============================ list ================================ */
 
-function ConsultingList({ data }: { data: ConsultingData }) {
+function ConsultingList({ data, canDelete }: { data: ConsultingData; canDelete: boolean }) {
+  const router = useRouter();
   const [creating, setCreating] = useState(false);
   const active = data.engagements.filter(isOpenEngagement);
   const feeBook = data.engagements.reduce(
@@ -298,8 +303,8 @@ function ConsultingList({ data }: { data: ConsultingData }) {
             const ph = activePhase(e);
             const ms = nextMilestone(e);
             return (
-              <Link key={e.id} href={`/design/engagements/${encodeURIComponent(e.id)}`} style={{ textDecoration: "none", color: "inherit" }}>
-                <Card style={{ height: "100%" }}>
+              <Card key={e.id} style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+                <Link href={`/design/engagements/${encodeURIComponent(e.id)}`} style={{ textDecoration: "none", color: "inherit", flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <Mono>{e.id}</Mono>
                     <StatusPill tone={ENGAGEMENT_STAGE_TONE[e.status]}>{ENGAGEMENT_STATUS_LABEL[e.status]}</StatusPill>
@@ -316,8 +321,24 @@ function ConsultingList({ data }: { data: ConsultingData }) {
                       Fees: <b style={{ color: "#3a3f4a" }}>{money(fees.done)} of {money(fees.total)}</b> billed-milestone value complete
                     </div>
                   </div>
-                </Card>
-              </Link>
+                </Link>
+                {/* #273 — delete from the list, same action + confirm as the detail header */}
+                {canDelete && (
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, paddingTop: 10, borderTop: "1px solid #f2f3f5" }}>
+                    <ConfirmButton
+                      label="Delete"
+                      confirmLabel="Confirm delete"
+                      title="Delete this consulting project (its open tasks go too)"
+                      ariaLabel={`Delete ${e.name}`}
+                      onConfirm={async () => {
+                        const res = await removeEngagementAction(e.id);
+                        if (!res.ok) throw new Error(res.error);
+                        router.refresh();
+                      }}
+                    />
+                  </div>
+                )}
+              </Card>
             );
           })}
         </div>
@@ -392,6 +413,7 @@ function EngagementDetail({
   prefillId,
   recordingSource,
   earlierSpecCount,
+  canDelete,
 }: {
   data: ConsultingData;
   eng: ConsultingEngagement;
@@ -405,6 +427,7 @@ function EngagementDetail({
   prefillId: string | null;
   recordingSource: MeetingSource | null;
   earlierSpecCount: number;
+  canDelete: boolean;
 }) {
   const router = useRouter();
   const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
@@ -440,16 +463,18 @@ function EngagementDetail({
           ))}
         </select>
         <span style={{ flex: 1 }} />
-        <ConfirmButton
-          label="Delete"
-          confirmLabel="Confirm delete"
-          onConfirm={async () => {
-            const res = await removeEngagementAction(eng.id);
-            if (!res.ok) throw new Error(res.error);
-            router.push("/design/engagements");
-            router.refresh();
-          }}
-        />
+        {canDelete && (
+          <ConfirmButton
+            label="Delete"
+            confirmLabel="Confirm delete"
+            onConfirm={async () => {
+              const res = await removeEngagementAction(eng.id);
+              if (!res.ok) throw new Error(res.error);
+              router.push("/design/engagements");
+              router.refresh();
+            }}
+          />
+        )}
       </div>
       <div style={{ fontSize: 12.5, color: "#5b616e", display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
         <span>{eng.customer}</span>

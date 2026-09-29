@@ -224,6 +224,7 @@ export function ProjectsView({
   people,
   templateSets,
   pipelines,
+  canDelete = false,
 }: {
   projects: ProjectRecord[];
   pending: QuoteLike[];
@@ -242,6 +243,8 @@ export function ProjectsView({
   templateSets: TaskTemplateSetRecord[];
   /** Settings → Pipelines (loaded by the page) — board columns, stage tracker, labels. */
   pipelines: Pipelines;
+  /** #277 — Delete (list cards + detail header) only for users with `create`. */
+  canDelete?: boolean;
 }) {
   const custName = (p: { customerId: string | null; customer: string }) =>
     (p.customerId && custById.get(p.customerId)) || p.customer || "—";
@@ -311,6 +314,11 @@ export function ProjectsView({
       view: view === "board" ? "board" : undefined,
       who: whoQ,
     });
+  // The list URL with no selection — where deleting the open project lands (#277).
+  const listHref =
+    view === "board"
+      ? "/projects" + qs({ view: "board", who: whoQ })
+      : "/projects" + qs({ filter: filter === "active" ? undefined : filter, who: whoQ });
   const cardHref = (id: string) =>
     "/projects/" +
     encodeURIComponent(id) +
@@ -684,9 +692,8 @@ export function ProjectsView({
             const pct = progressPct(p);
             const dueLabel = dueChipLabel(meta.tag === "done", due, fmtDate(p.updatedAt));
             return (
-              <Link
+              <div
                 key={p.id}
-                href={cardHref(p.id)}
                 className="pm-listcard"
                 style={{
                   display: "flex",
@@ -697,75 +704,98 @@ export function ProjectsView({
                   border: "1px solid " + (isSel ? "var(--accent)" : "#ececf0"),
                   borderRadius: 12,
                   padding: "13px 15px",
-                  textDecoration: "none",
                   color: "#16181d",
                   boxShadow: isSel ? "0 2px 10px var(--accent-soft)" : "0 1px 2px rgba(0,0,0,.04)",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <span style={kindBadgeStyle(p.kind)}>{kindLabel(p.kind)}</span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#aab0bb" }}>{p.id}</span>
-                  {risks.length > 0 && (
-                    <span
-                      style={{
-                        marginLeft: "auto",
-                        fontSize: 9.5,
-                        fontWeight: 700,
-                        color: "#b4543a",
-                        background: "#f7e9e5",
-                        border: "1px solid #f0d6cd",
-                        padding: "2px 7px",
-                        borderRadius: 5,
-                      }}
-                    >
-                      {risks.length + (risks.length === 1 ? " flag" : " flags")}
-                    </span>
-                  )}
-                </div>
-                <div
-                  style={{
-                    fontSize: 13.5,
-                    fontWeight: 600,
-                    lineHeight: 1.3,
-                    marginTop: 9,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
+                <Link
+                  href={cardHref(p.id)}
+                  style={{ display: "flex", flexDirection: "column", textDecoration: "none", color: "inherit" }}
                 >
-                  {p.name}
-                </div>
-                <div
-                  style={{
-                    fontSize: 11.5,
-                    color: "#9aa0ab",
-                    marginTop: 2,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {custName(p)}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11 }}>
-                  <div style={{ flex: 1, height: 5, background: "#eef0f3", borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ width: pct + "%", height: "100%", background: barColorFor(meta.tag) }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <span style={kindBadgeStyle(p.kind)}>{kindLabel(p.kind)}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#aab0bb" }}>{p.id}</span>
+                    {risks.length > 0 && (
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          color: "#b4543a",
+                          background: "#f7e9e5",
+                          border: "1px solid #f0d6cd",
+                          padding: "2px 7px",
+                          borderRadius: 5,
+                        }}
+                      >
+                        {risks.length + (risks.length === 1 ? " flag" : " flags")}
+                      </span>
+                    )}
                   </div>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#9aa0ab" }}>{pct}%</span>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    marginTop: 9,
-                  }}
-                >
-                  <span style={sp.style}>{sp.label}</span>
-                  <span style={{ fontSize: 11, color: "#9aa0ab" }}>{dueLabel}</span>
-                </div>
-              </Link>
+                  <div
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      lineHeight: 1.3,
+                      marginTop: 9,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {p.name}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      color: "#9aa0ab",
+                      marginTop: 2,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {custName(p)}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11 }}>
+                    <div style={{ flex: 1, height: 5, background: "#eef0f3", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: pct + "%", height: "100%", background: barColorFor(meta.tag) }} />
+                    </div>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#9aa0ab" }}>{pct}%</span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      marginTop: 9,
+                    }}
+                  >
+                    <span style={sp.style}>{sp.label}</span>
+                    <span style={{ fontSize: 11, color: "#9aa0ab" }}>{dueLabel}</span>
+                  </div>
+                </Link>
+                {/* #277 — delete from the list; same action + confirm as the detail header */}
+                {canDelete && (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      marginTop: 9,
+                      paddingTop: 8,
+                      borderTop: "1px solid #f2f3f5",
+                    }}
+                  >
+                    <DeleteProjectButton
+                      id={p.id}
+                      compact
+                      ariaLabel={`Delete ${p.name}`}
+                      backHref={isSel ? listHref : undefined}
+                    />
+                  </div>
+                )}
+              </div>
             );
           })}
           {listSrc.length === 0 && (
@@ -810,6 +840,7 @@ export function ProjectsView({
               people={people}
               templateSets={templateSets}
               pipelines={pipelines}
+              canDelete={canDelete}
             />
           ) : (
             <div
@@ -869,6 +900,7 @@ function ProjectDetail({
   people,
   templateSets,
   pipelines,
+  canDelete,
 }: {
   p: ProjectRecord;
   tab: string;
@@ -882,6 +914,7 @@ function ProjectDetail({
   people: { id: string; name: string }[];
   templateSets: TaskTemplateSetRecord[];
   pipelines: Pipelines;
+  canDelete: boolean;
 }) {
   const { colorOf, initialsOf } = makeIdentityLookup(identity);
   // The record's own pipeline — an order walks the order pipeline, a job on a
@@ -984,7 +1017,7 @@ function ProjectDetail({
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600, color: dueColor }}>{dueBig}</div>
               <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 2 }}>{dueSub}</div>
             </div>
-            <DeleteProjectButton id={p.id} backHref={backHref} />
+            {canDelete && <DeleteProjectButton id={p.id} backHref={backHref} />}
           </div>
         </div>
 
