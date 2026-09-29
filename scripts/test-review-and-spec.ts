@@ -34101,7 +34101,8 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
       const uy = ((a.x ** 2 + a.y ** 2) * (c.x - b.x) + (b.x ** 2 + b.y ** 2) * (a.x - c.x) + (c.x ** 2 + c.y ** 2) * (b.x - a.x)) / D;
       const r = Math.hypot(a.x - ux, a.y - uy);
       ok(arc.every((p) => Math.abs(Math.hypot(p.x - ux, p.y - uy) - r) < 0.01) && Math.abs(r - T.arcs[i].r * k) < 1e-6 && Math.abs(ux - 4.151) < 1e-6, `#255 T3 ${tag}: apse arc ${i} stays a true circle on the centreline, radius × platform ratio`);
-      ok(Math.abs(a.y - Y(i === 0 ? 312.496 : 318.496)) < 1e-6 && Math.abs(c.y - a.y) < 1e-6, `#255 T3 ${tag}: apse arc ${i} meets its back-wall face`);
+      // 0.005": the converter stores arc angles to 3 decimals, so a drawn arc ends ~0.001" off its wall line.
+      ok(Math.abs(a.y - Y(i === 0 ? 312.496 : 318.496)) < 0.005 && Math.abs(c.y - a.y) < 0.005, `#255 T3 ${tag}: apse arc ${i} meets its back-wall face`);
     }
   }
 
