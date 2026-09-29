@@ -46,10 +46,17 @@ export default async function DepartmentsPage() {
     s.mfrs[mfr] = (s.mfrs[mfr] ?? 0) + 1;
     stats.set(cat, s);
   }
-  const categories = [...stats.entries()]
+  const categoryStats = [...stats.entries()]
     .map(([category, s]) => ({ category, count: s.count, mfrs: s.mfrs }))
     .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
-  const suggestions = suggestDepartments(categories);
+  const suggestions = suggestDepartments(categoryStats);
+  // The client only ever needs category + count (the row list, the filter,
+  // the bulk-move helper) — manufacturer data is what suggestDepartments
+  // needed server-side to classify a pure product-family name; it never
+  // needs to cross the wire. "Re-run suggestions" reuses this same
+  // server-computed `suggestions` array rather than re-deriving anything
+  // client-side, so the client component never needs `mfrs` either.
+  const categories = categoryStats.map(({ category, count }) => ({ category, count }));
 
   return (
     <div className="pk-content" style={{ maxWidth: 1100 }}>

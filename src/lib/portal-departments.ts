@@ -218,6 +218,24 @@ type NameRule = { dept: string; re: RegExp };
  * Source Four, Tesira…), so most of the actual matching weight comes from
  * those literal product names, not generic English words.
  *
+ * Every keyword below is `\b`-bounded (whole word/phrase only) UNLESS it's
+ * a punctuation-terminated token (`proj.`, `profile\+`, `fos\/4`, `i\.?f\.?r`)
+ * where `\b` misbehaves right after the punctuation, or a deliberately
+ * unbounded stem (`source ?4`, to still catch "Source 4WRD" with no space
+ * before the trailing letters) or a still-unique multi-word phrase (`dress
+ * kit`, `back box`…) that's already specific enough not to need it. This
+ * matters because production category names are often ONE compound word: a
+ * bare "eon" wrongly read "Irideon" as Audio (an ETC lighting fixture, not
+ * an "eon" JBL loudspeaker) and a bare "bridge" wrongly read "Cambridge" (an
+ * unrelated Community loudspeaker category, no relation to a video bridge)
+ * as Control & Networking — both are real prod-category names this rebuild
+ * is built against (#252 fix round 2). The one deliberate exception is
+ * "aerolift" in Mounts & Hardware: it's a genuine compound brand word
+ * (Aero+Lift, no space) that SHOULD still match the same "lift" concept, so
+ * it gets its own explicit bounded keyword rather than relying on a bare,
+ * unbounded "lift" substring (which would reopen the same Irideon/Cambridge
+ * class of bug for every other word that happens to contain "lift").
+ *
  * Two deliberate reorderings vs. a naive a-through-j reading:
  *  - Cable & Connectors is raised above Video & Displays so "HDMI Cables"
  *    reads as Cable & Connectors, not Video (a name carrying both "cable"
@@ -228,38 +246,44 @@ type NameRule = { dept: string; re: RegExp };
  *    Hardware's "mount" keyword instead — a projector *mount* is hardware,
  *    even though a bare "proj." → Projection Screens (checked earlier) and
  *    a bare "projector" → Video & Displays (this rule) both still apply.
- *  - Projection Screens' keyword list deliberately excludes "aerolift" —
- *    AeroLift is a projector LIFT (Chief/Da-Lite), not a screen; it falls
- *    through to Mounts & Hardware's "lift" keyword instead.
  */
 const NAME_RULES: readonly NameRule[] = [
-  { dept: "drapery", re: /drape|drapery|velour|i\.?f\.?r|dress kit|skirt|valance|soft goods|curtain/i },
+  {
+    dept: "drapery",
+    re: /\bdrapes?\b|\bdrapery\b|\bvelour\b|\bi\.?f\.?r\.?\b|dress kit|\bskirts?\b|\bvalance\b|soft goods|\bcurtains?\b/i,
+  },
   {
     dept: "projection-screens",
-    re: /screen|stagescreen|focalpoint|cinefold|\bufs\b|folding screen|projection|proj\.|tecvision|clarion|acumen|paragon|targa|access (v|e|xl|m)\b|ultimate access|premier|styleline|nocturne|profile\+|edgeless|cine-studio|fast-fold|shadowbox/i,
+    re: /\bscreens?\b|\bstagescreen\b|\bfocalpoint\b|\bcinefold\b|\bufs\b|folding screen|\bprojection\b|proj\.|\btecvision\b|\bclarion\b|\bacumen\b|\bparagon\b|\btarga\b|\baccess (v|e|xl|m)\b|ultimate access|\bpremier\b|\bstyleline\b|\bnocturne\b|profile\+|\bedgeless\b|cine-studio|fast-fold|\bshadowbox\b/i,
   },
   {
     dept: "audio",
-    re: /speaker|spkr|loudspeaker|subwoofer|\bsub\b|line array|point source|column|mic(s|rophone)?\b|amp(lifiers?|s)?\b|mixer|dsp|signal processor|headphone|earphone|transducer|driver|monitor|tesira|vocia|soundweb|dante|audio|sound|loop|infrared|\bir\b|digi-wave|fm ?& ?fm\+|recone|diaphragm|horn|intellivox|iconyx|varia|cdd|eon|prx|srx|vrx|jrx|irx|vtx|wavefront|stagebox|audio console|fixed installation/i,
+    re: /\bspeakers?\b|\bspkr\b|\bloudspeakers?\b|\bsubwoofers?\b|\bsub\b|line array|point source|\bcolumn\b|\bmics?\b|\bmicrophones?\b|\bamp(lifiers?|s)?\b|\bmixers?\b|\bdsp\b|signal processor|\bheadphones?\b|\bearphones?\b|\btransducers?\b|\bdrivers?\b|\bmonitors?\b|\btesira\b|\bvocia\b|\bsoundweb\b|\bdante\b|\baudio\b|\bsound\b|\bloop\b|\binfrared\b|\bir\b|\bdigi-wave\b|fm ?& ?fm\+|\brecone\b|\bdiaphragms?\b|\bhorns?\b|\bintellivox\b|\biconyx\b|\bvaria\b|\bcdd\b|\beon\b|\bprx\b|\bsrx\b|\bvrx\b|\bjrx\b|\birx\b|\bvtx\b|\bwavefront\b|\bstagebox\b|audio console|fixed installation/i,
   },
   {
     dept: "lighting",
-    re: /source four|source ?4|colorsource|eos|irideon|fos\/4|arcsystem|desire|desono|lens tube|hog|\bmac\b|mac |exterior (wash|dot|linear)|luma|unison|echo\b|paradigm|sensor|mosaic|pharos|sohrana|static lights|effect lights|fixture assemblies|high end systems|city theatrical/i,
+    re: /source four|source ?4|\bcolorsource\b|\beos\b|\birideon\b|fos\/4|\barcsystem\b|\bdesire\b|\bdesono\b|\blens tubes?\b|\bhog\b|\bmac\b|\bexterior (wash|dot|linear)\b|\bluma\b|\bunison\b|\becho\b|\bparadigm\b|\bsensor\b|\bmosaic\b|\bpharos\b|\bsohrana\b|\bstatic lights?\b|\beffect lights?\b|\bfixture assemblies\b|\bhigh end systems\b|\bcity theatrical\b/i,
   },
-  { dept: "cable-connectors", re: /cable|connect|patch|insert|wall plate|keystone|phoenix|snake|termination|faceplate|nema plate/i },
+  {
+    dept: "cable-connectors",
+    re: /\bcables?\b|\bconnectors?\b|\bpatch\b|\binserts?\b|wall plate|\bkeystone\b|\bphoenix\b|\bsnake\b|\btermination\b|\bfaceplate\b|nema plate/i,
+  },
   {
     dept: "video-displays",
-    re: /hdmi|hdbaset|display|signage|video|dvled|led video|projector(?! (custom )?mounts?)|switcher|extender|splitter|scaler|matrix|av over ip|networkhd|4k|8k|camera|image projection|capture/i,
+    re: /\bhdmi\b|\bhdbaset\b|\bdisplays?\b|\bsignage\b|\bvideo\b|\bdvled\b|led video|\bprojector(?! (custom )?mounts?)\b|\bswitchers?\b|\bextenders?\b|\bsplitters?\b|\bscalers?\b|\bmatrix\b|av over ip|\bnetworkhd\b|\b4k\b|\b8k\b|\bcameras?\b|image projection|\bcapture\b/i,
   },
   {
     dept: "control-networking",
-    re: /touch ?panel|keypad|control(ler| processor| system|s)?\b|remote|network|switch(es)?\b|router|access point|wifi|sfp|mxnet|bridge|teams rooms|room system|unified communication|software|license/i,
+    re: /touch ?panels?|\bkeypads?\b|\bcontrol(ler| processor| system|s)?\b|\bremote\b|\bnetwork(ed)?\b|\bswitch(es)?\b|\brouters?\b|access points?|\bwifi\b|\bsfp\b|\bmxnet\b|\bbridge\b|teams rooms?|room systems?|unified communications?|\bsoftware\b|\blicenses?\b/i,
   },
-  { dept: "rigging", re: /hoist|block|arbor|rope ?lock|track|pipe|batten|rigging|truss|counterweight|head ?block|loft ?block|mule|shoe/i },
-  { dept: "power", re: /power|ups|sequencer|surge|distribution|psu|supply|conditioning/i },
+  {
+    dept: "rigging",
+    re: /\bhoists?\b|\bblocks?\b|\barbors?\b|rope ?locks?|\btracks?\b|\bpipes?\b|\bbattens?\b|\brigging\b|\btruss(es)?\b|\bcounterweights?\b|head ?blocks?|loft ?blocks?|\bmules?\b|\bshoes?\b/i,
+  },
+  { dept: "power", re: /\bpower\b|\bups\b|\bsequencers?\b|\bsurge\b|\bdistribution\b|\bpsu\b|\bsupply\b|\bconditioning\b/i },
   {
     dept: "mounts-hardware",
-    re: /mount|bracket|lift|cart|stands?\b|enclosure|box(es)?\b|plate|kit|clamp|case|crank|pole|hardware|trim|flange|pocket|back box|easel|caster|eyebolt/i,
+    re: /\bmounts?\b|\bbrackets?\b|\blifts?\b|\baerolift\b|\bcarts?\b|\bstands?\b|\benclosures?\b|\bbox(es)?\b|\bplates?\b|\bkits?\b|\bclamps?\b|\bcases?\b|\bcranks?\b|\bpoles?\b|\bhardware\b|\btrim\b|\bflange\b|\bpockets?\b|back box|\beasels?\b|\bcasters?\b|\beyebolts?\b/i,
   },
 ];
 
@@ -280,18 +304,18 @@ type MfrRule = { dept: string; re: RegExp };
  * production categories are mostly brand names, not descriptions.
  */
 const MFR_RULES: readonly MfrRule[] = [
-  { dept: "projection-screens", re: /draper|da-?lite|stewart|elite screens|screen innovations/i },
+  { dept: "projection-screens", re: /\bdraper\b|da-?lite|\bstewart\b|elite screens|screen innovations/i },
   { dept: "drapery", re: /rose brand/i },
-  { dept: "lighting", re: /\betc\b|high end|martin|chauvet|city theatrical|\brobe\b|elation/i },
+  { dept: "lighting", re: /\betc\b|high end|\bmartin\b|\bchauvet\b|city theatrical|\brobe\b|\belation\b/i },
   {
     dept: "audio",
-    re: /biamp|shure|\bqsc\b|\bjbl\b|crown|\bbss\b|\bdbx\b|soundcraft|allen ?& ?heath|community|\beaw\b|renkus|williams|listen|sennheiser|audio-technica|\bbose\b|yamaha|electro-voice|lab\.?gruppen|tannoy|atlasied|lexicon|harman(?!.*lighting)/i,
+    re: /\bbiamp\b|\bshure\b|\bqsc\b|\bjbl\b|\bcrown\b|\bbss\b|\bdbx\b|\bsoundcraft\b|allen ?& ?heath|\bcommunity\b|\beaw\b|\brenkus\b|\bwilliams\b|\blisten\b|\bsennheiser\b|audio-technica|\bbose\b|\byamaha\b|electro-voice|lab\.?gruppen|\btannoy\b|\batlasied\b|\blexicon\b|\bharman\b(?!.*lighting)/i,
   },
   {
     dept: "video-displays",
-    re: /wyrestorm|extron|crestron|\bbarco\b|\blg\b|samsung|\babsen\b|\bplanar\b|christie|\bepson\b|panasonic|\bsony\b|\bnec\b|unilumin|kramer/i,
+    re: /\bwyrestorm\b|\bextron\b|\bcrestron\b|\bbarco\b|\blg\b|\bsamsung\b|\babsen\b|\bplanar\b|\bchristie\b|\bepson\b|\bpanasonic\b|\bsony\b|\bnec\b|\bunilumin\b|\bkramer\b/i,
   },
-  { dept: "mounts-hardware", re: /\bchief\b|peerless|legrand|middle atlantic|\bfsr\b/i },
+  { dept: "mounts-hardware", re: /\bchief\b|\bpeerless\b|\blegrand\b|middle atlantic|\bfsr\b/i },
   { dept: "rigging", re: /j\.?r\.? clancy|\bclancy\b|\bthern\b|columbus mckinnon|\bcm\b/i },
 ];
 

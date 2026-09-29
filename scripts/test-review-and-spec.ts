@@ -32299,6 +32299,22 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
   pin("Digital Media Switchers", "video-displays", "AV switcher");
   pin("Power Sequencer", "power", "power sequencer");
   pin("Wireless Mics", "audio", "mic");
+
+  // #252 fix round 2: every short/dictionary-word keyword is \b-bounded so
+  // it can't match as a substring embedded in an unrelated compound word —
+  // "Irideon" (an ETC lighting fixture) was wrongly reading as Audio via a
+  // bare "eon" (as in the JBL EON loudspeaker line), and "Cambridge" (an
+  // unrelated Community loudspeaker category) was wrongly reading as
+  // Control & Networking via a bare "bridge". Neither is a hypothetical —
+  // both are real prod-category-adjacent names this rebuild classifies.
+  const other = (category: string, why: string) => {
+    const got = d252Suggest([d252Cat(category, 1)]);
+    ok(got.length === 0, `#252 suggestDepartments pin: "${category}" → Other (${why}) — got ${got[0]?.id ?? "Other"}`);
+  };
+  pin("Irideon", "lighting", "fix round 2: a bare 'eon' no longer wrongly reads this ETC fixture as Audio (JBL EON)");
+  other("Cambridge", "fix round 2: a bare 'bridge' no longer wrongly reads this as Control & Networking");
+  other("Thornlite", "fix round 2: a bare 'horn' no longer wrongly reads this as Audio");
+  other("Bainbridge", "fix round 2: a bare 'bridge' no longer wrongly reads this as Control & Networking (probe, not real catalog data)");
 }
 
 // ---- suggestDepartments: (k) dominant-manufacturer fallback — pure
@@ -32342,7 +32358,7 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
   const coveredCats = new Set(sug.flatMap((d) => d.categories));
   const coveredParts = prodCats.filter((c) => coveredCats.has(c.category)).reduce((n, c) => n + c.count, 0);
   const pct = coveredParts / totalParts;
-  ok(pct >= 0.65, `#252 coverage (real prod categories, name rules only): ${(pct * 100).toFixed(1)}% of ${totalParts.toLocaleString("en-US")} parts land in a non-Other department (want >= 65%)`);
+  ok(pct >= 0.66, `#252 coverage (real prod categories, name rules only): ${(pct * 100).toFixed(1)}% of ${totalParts.toLocaleString("en-US")} parts land in a non-Other department (want >= 66%, honest floor just under the ~66.2% actually achieved post fix-round-2 word-boundary pass)`);
   // Every suggested category still appears in exactly one department on
   // this much larger, real-world input (not just the small hand-built set
   // above) — the same invariant sanitizeDepartments enforces on save.
