@@ -37,6 +37,8 @@ export type VenueType = {
   worksLike: BuiltInVenueKind;
   order: number;
   archived?: true;
+  /** #255: the Background template id (Settings → Venue types); null = the built-in schematic. Resolved by venueTypesFrom (Task 5). */
+  background?: string | null;
 };
 
 export const VENUE_TYPE_LABEL_MAX = 40;

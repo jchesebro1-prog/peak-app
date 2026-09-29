@@ -141,6 +141,10 @@ export type AState = {
   /** #249: the proscenium house — width (inside faces, back of house) and depth (plaster line → back wall), ft. null = the default (venue-templates/house-dims). */
   houseWidthFt?: number | null;
   houseDepthFt?: number | null;
+  /** #255: the venue type (#216 key, a site's venue_kind) of this design's venue; null = none linked. Picks the plan's Background. */
+  venueType?: string | null;
+  /** #255: a per-design Background override — a template id (e.g. "church-contemporary@1"); null = the venue type's Background. */
+  templateId?: string | null;
   doorsL?: number[] | null;
   doorsR?: number[] | null;
   doorsBack?: number[] | null;

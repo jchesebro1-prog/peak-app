@@ -34051,3 +34051,75 @@ import type { TemplateKeys as C255T2Keys, VenueTemplate as C255T2Tpl } from "@/l
   const same = c255T2Stretch(tpl, keys, D({ proWidthFt: 5, stageDepthFt: 50 / 12 }));
   ok(same.polylines.flat().every((p) => p.x >= -1e-9 && p.x <= 100 + 1e-9) && same.polylines[same.polylines.length - 1].every((p) => Math.abs(Math.hypot(p.x - 50, p.y - 50) - 30) < 1e-6), "#255 T2: at the drawing's own dimensions the true arc is the drawn arc");
 }
+
+/* --- #255 T3: Church Traditional key lines, registry, per-template house inputs --- */
+import { CHURCH_TRADITIONAL_KEYS as c255T3Keys, CHURCH_TRADITIONAL_SPACES as c255T3Spaces } from "@/lib/design/venue-templates/church-traditional.keys";
+import { keysById as c255T3KeysById, stretchById as c255T3Stretch, templateData as c255T3Data, TEMPLATE_IDS as c255T3Ids } from "@/lib/design/venue-templates/templates";
+import { makeXMap as c255T3X, makeYMap as c255T3Y } from "@/lib/design/venue-templates/stretch";
+import {
+  VENUE_TEMPLATES as c255T3Reg, defaultBackground as c255T3Default, effectiveTemplateFor as c255T3Effective,
+  resolveBackground as c255T3Resolve, sanitizeBackground as c255T3Sanitize, templatesFor as c255T3For,
+} from "@/lib/design/venue-templates";
+import { CHURCH_NAVE_WARNING as c255T3Warn, churchDims as c255T3ChurchDims, houseDims as c255T3House, houseFields as c255T3Fields } from "@/lib/design/venue-templates/house-dims";
+import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
+{
+  const K = c255T3Keys, T = c255T3Data("church-traditional@1").template;
+  const D0 = { ...K.defaults, pit: false };
+  const X0 = c255T3X(K, D0), Y0 = c255T3Y(K, D0);
+  const pts = [...T.segments.flatMap(([a, b, c, d]) => [{ x: a, y: b }, { x: c, y: d }]), ...T.labels.filter((l) => l.text !== "Apse")];
+  ok(pts.length > 80 && pts.every((p) => Math.abs(X0(p.x, p.y) - p.x) < 0.1 && Math.abs(Y0(p.y) - p.y) < 0.1), "#255 T3: at the drawing's own size the Traditional stretch leaves every point within 0.1\"");
+  const id = c255T3Stretch("church-traditional@1", D0);
+  const apse = id.polylines.slice(-2);
+  ok(apse.length === 2 && apse.every((pl, i) => pl.every((p) => Math.abs(Math.hypot(p.x - T.arcs[i].cx, p.y - T.arcs[i].cy) - T.arcs[i].r) < 1e-6)), "#255 T3: …and the apse is its own drawn arcs");
+  const need = new Map<string, number>();
+  K.requiredLabels.forEach((t) => need.set(t, (need.get(t) || 0) + 1));
+  ok([...need].every(([t, n]) => T.labels.filter((l) => l.text === t).length >= n) && [...c255T3Spaces].sort().join("|") === Object.keys(K.regions).sort().join("|"), "#255 T3: the template carries every required label; one region per Space");
+
+  const variants = [
+    { proWidthFt: 34, stageDepthFt: 22, houseWidthFt: 80, houseDepthFt: 55 }, // today's default church
+    { proWidthFt: 20, stageDepthFt: 14, houseWidthFt: 36, houseDepthFt: 30 }, // small chapel
+    { proWidthFt: 50, stageDepthFt: 26, houseWidthFt: 120, houseDepthFt: 55 }, // wide nave
+    { proWidthFt: 616.73 / 12, stageDepthFt: 316.496 / 12, houseWidthFt: 80, houseDepthFt: 110 }, // deep nave
+  ];
+  for (const v of variants) {
+    const d = { ...v, wingFt: 0, pit: false };
+    const X = c255T3X(K, d), Y = c255T3Y(K, d);
+    const tag = `${v.proWidthFt.toFixed(1)}/${v.stageDepthFt.toFixed(1)}/${v.houseWidthFt}/${v.houseDepthFt}`;
+    const six = (a: number, b: number) => Math.abs(a - b - 6) < 1e-9;
+    ok(six(X(-304.214, 200), X(-310.214, 200)) && six(X(318.516, 200), X(312.516, 200)) && six(X(-355.688, 60), X(-361.688, 60)) && six(X(490, -300), X(484, -300)) && six(X(-108.601, -700), X(-114.601, -700)) && six(X(125.399, -700), X(119.399, -700)), `#255 T3 ${tag}: chancel, notch, outer and entry walls stay 6"`);
+    ok(six(Y(318.496), Y(312.496)) && six(Y(86), Y(80)) && six(Y(50), Y(44)) && six(Y(-666.376), Y(-672.376)) && six(Y(-812.107), Y(-818.107)), `#255 T3 ${tag}: back, notch, side-room, back-room and outer walls stay 6"`);
+    ok(Math.abs(X(312.516, 200) - X(-304.214, 200) - v.proWidthFt * 12) < 1e-6 && Math.abs(2 * (X(484, -300) - 4.151) - v.houseWidthFt * 12) < 1e-6, `#255 T3 ${tag}: platform width and nave width match the typed widths`);
+    ok(Math.abs(Y(312.496) - Y(-4) - v.stageDepthFt * 12) < 1e-6 && Math.abs(Y(-4) - Y(-666.376) - v.houseDepthFt * 12) < 1e-6 && Math.abs(Y(80) - Y(-4) - 84) < 1e-9, `#255 T3 ${tag}: platform depth and nave depth match; the front step keeps 7'`);
+    ok(Math.abs(X(119.399, -700) - X(-108.601, -700) - 228) < 1e-9 && Math.abs(X(484, -700) - X(125.399, -700) - (v.houseWidthFt * 6 - 121.248)) < 1e-6, `#255 T3 ${tag}: the entry keeps 19'; the back rooms absorb the nave width`);
+    ok(Math.abs(X(363.99, 20) - X(312.516, 20) - 51.474) < 1e-9 && X(484, 200) - X(318.516, 200) > 0, `#255 T3 ${tag}: the front step keeps its overhang; the side rooms never go negative`);
+    const plan = c255T3Stretch("church-traditional@1", d);
+    const k = (v.proWidthFt * 12) / 616.73;
+    for (const [i, arc] of plan.polylines.slice(-2).entries()) {
+      const a = arc[0], b = arc[Math.floor(arc.length / 2)], c = arc[arc.length - 1];
+      const D = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+      const ux = ((a.x ** 2 + a.y ** 2) * (b.y - c.y) + (b.x ** 2 + b.y ** 2) * (c.y - a.y) + (c.x ** 2 + c.y ** 2) * (a.y - b.y)) / D;
+      const uy = ((a.x ** 2 + a.y ** 2) * (c.x - b.x) + (b.x ** 2 + b.y ** 2) * (a.x - c.x) + (c.x ** 2 + c.y ** 2) * (b.x - a.x)) / D;
+      const r = Math.hypot(a.x - ux, a.y - uy);
+      ok(arc.every((p) => Math.abs(Math.hypot(p.x - ux, p.y - uy) - r) < 0.01) && Math.abs(r - T.arcs[i].r * k) < 1e-6 && Math.abs(ux - 4.151) < 1e-6, `#255 T3 ${tag}: apse arc ${i} stays a true circle on the centreline, radius × platform ratio`);
+      ok(Math.abs(a.y - Y(i === 0 ? 312.496 : 318.496)) < 1e-6 && Math.abs(c.y - a.y) < 1e-6, `#255 T3 ${tag}: apse arc ${i} meets its back-wall face`);
+    }
+  }
+
+  ok(c255T3Ids.slice().sort().join("|") === c255T3Reg.map((t) => t.id).sort().join("|") && c255T3KeysById("church-traditional@1") === K, "#255 T3: every registered template has its drawing and key lines");
+  ok(c255T3For("church").map((t) => t.id).join() === "church-traditional@1" && c255T3For("arena").length === 0 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === null, "#255 T3: templates are listed per works-like kind; a kind with none has no default");
+  ok(c255T3Sanitize("church", "church", "proscenium@1") === "church-traditional@1" && c255T3Sanitize("church", "church", "church-traditional@1") === "church-traditional@1" && c255T3Sanitize("arena", "arena", "x") === null, "#255 T3: a stored background not made for the type's kind falls back to its default");
+  const seed = c255T3Seed.map((t) => ({ ...t, background: c255T3Default(t.worksLike, t.key) }));
+  ok(c255T3Resolve(seed, null, "church") === "church-traditional@1" && c255T3Resolve(seed, null, "proscenium") === "proscenium@1" && c255T3Resolve(seed, null, "arena") === null, "#255 T3: a design with no venue follows its kind's built-in type");
+  ok(c255T3Resolve(seed, "church", "proscenium") === "proscenium@1", "#255 T3: a venue type that works like another kind never decides this plan's background");
+  ok(c255T3Effective("church", { templateId: "proscenium@1" }, seed) === "church-traditional@1" && c255T3Effective("church", { templateId: "church-traditional@1" }, seed) === "church-traditional@1", "#255 T3: a per-design override counts only when it is a template for the design's kind");
+
+  const hd = (o: Record<string, number | null>) => c255T3House({ width: 51, wing: 0, ...o }, "church-traditional@1");
+  ok(Math.abs(hd({}).widthFt - 959.698 / 12) < 1e-9 && Math.abs(hd({}).depthFt - 662.376 / 12) < 1e-9 && hd({}).warning === null, "#255 T3: with nothing typed the nave is the drawing's 80' × 55'");
+  ok(hd({ houseWidthFt: 60 }).widthFt === 67 && hd({ houseWidthFt: 60 }).warning === c255T3Warn && hd({ houseWidthFt: 90 }).warning === null, "#255 T3: a typed nave narrower than platform + 16' widens to fit, with the warning");
+  ok(c255T3House({ width: 70, wing: 0 }, "church-traditional@1").widthFt === 86 && c255T3House({ width: 70, wing: 0 }, "church-traditional@1").warning === null, "#255 T3: with nothing typed a wide platform just gets a wide enough nave — no warning");
+  ok(hd({ houseDepthFt: 5 }).depthFt === 20 && hd({ houseDepthFt: 999 }).depthFt === 200 && hd({ houseHalfFt: 60 }).widthFt === hd({}).widthFt, "#255 T3: nave depth clamps to 20–200'; a proscenium-only legacy half-width is ignored for church");
+  const cd = c255T3ChurchDims({ width: 34, wing: 0, depth: 22, houseWidthFt: 90, houseDepthFt: 60, sys: {} } as never, "church-traditional@1");
+  ok(cd.proWidthFt === 34 && cd.stageDepthFt === 22 && cd.houseWidthFt === 90 && cd.houseDepthFt === 60 && cd.pit === false, "#255 T3: church width/depth are the platform; the nave comes from the house fields");
+  const f = c255T3Fields({ width: 34, wing: 0 }, "church-traditional@1")!;
+  ok(f.rows.map((r) => r.label).join("|") === "Nave width|Nave depth" && c255T3Fields({ width: 50, wing: 15 }, "proscenium@1")!.rows.map((r) => r.label).join("|") === "House width|House depth" && c255T3Fields({ width: 50, wing: 0 }, null) === null, "#255 T3: house fields are labeled per template");
+}
