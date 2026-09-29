@@ -51,10 +51,10 @@ export function withLaborGroup(sec: SpecSection, group: string, items: SpecItem[
   let next: SpecItem[];
   if (at < 0) next = [...sec.items, ...tagged];
   else {
+    // No group line sits before `at`, so the first `at` kept lines are
+    // exactly the lines before the group's first line.
     const kept = sec.items.filter((it) => it.laborGroup !== group);
-    // Lines before the first group line are exactly the kept lines before it.
-    const before = sec.items.slice(0, at).length;
-    next = [...kept.slice(0, before), ...tagged, ...kept.slice(before)];
+    next = [...kept.slice(0, at), ...tagged, ...kept.slice(at)];
   }
   if (sec.items.some((it) => typeof it.lineOrder === "number")) next = next.map((it, i) => ({ ...it, lineOrder: i }));
   return {
