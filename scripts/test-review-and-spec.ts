@@ -33403,3 +33403,147 @@ async function specRecordsFinalReviewAsyncChecks(): Promise<void> {
   ok(/validateSpecRecord\(/.test(body("restoreSpecRecordRevisionAction")), "final review M1: restoring a ready revision re-validates it like approve");
 }
 
+
+/* ---- #254 — a tier change re-prices lines still at the previous tier margin (Estimator) ----
+ * repriceForTier (src/app/(app)/estimator/tier-reprice.ts) is pure; the
+ * Estimator applies it when updateQuoteMetaAction hands back a new stamp and
+ * the normal Save persists it. Labor re-seeds through the labor draft's
+ * whole-percent margin; curtains through curtainPrice; fixtures are never
+ * tier-priced. Nothing about tiers reaches the customer document (D87). */
+import {
+  repriceForTier as t254Reprice,
+  tierRepriceMessage as t254Msg,
+  seedMarginOf as t254Seed,
+  laborSeedMarginOf as t254LaborSeed,
+  TIER_REPRICE_TOLERANCE as t254Tol,
+} from "@/app/(app)/estimator/tier-reprice";
+import {
+  computeLabor as t254ComputeLabor,
+  buildLaborItems as t254BuildLabor,
+  makeLaborRate as t254Rate,
+  computeCurtain as t254Curtain,
+  round2 as t254R2,
+} from "@/app/(app)/estimator/pricing";
+import { defaultLaborMobs as t254Mobs } from "@/app/(app)/estimator/labor-defaults";
+import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254LaborDraft } from "@/app/(app)/estimator/types";
+{
+  const sec = (id: string, items: T254Item[]): T254Sec => ({ id, name: id, kind: "materials", mfr: "", freightPct: 5, items });
+  const line = (id: number, cost: number, price: number, extra: Partial<T254Item> = {}): T254Item =>
+    ({ id, sku: "S" + id, desc: "Line " + id, qty: 2, unit: "ea", cost, price, ...extra });
+  const at = (cost: number, m: number) => t254R2(cost / (1 - m));
+
+  // Seeded vs hand-priced vs override vs POR vs zero-cost, at the 0.30 fallback.
+  const secs = [
+    sec("sys101", [
+      line(1, 100, at(100, 0.3)), // catalog part, seeded at 30 → re-priced
+      line(2, 100, 150), // hand-priced → kept
+      line(3, 100, at(100, 0.3), { extSellOverride: 400 }), // ext-sell override → kept
+      line(4, 0, 0, { por: true }), // POR → kept
+      line(5, 0, 55), // no cost → kept
+      line(6, 10, at(10, 0.3), { option: true }), // option, seeded → re-priced, still an option
+      line(7, 1234.5, at(1234.5, 0.3), { qty: 1, unit: "lot", vendorQuoteId: "VQ-1" }), // vendor-quote line
+    ]),
+  ];
+  const r = t254Reprice(secs, null, 0.2);
+  const it = (n: number) => r.sections[0].items.find((x) => x.id === n)!;
+  ok(r.repriced === 3 && r.kept === 4, `#254 repriceForTier: 3 seeded lines re-priced, 4 kept (got ${r.repriced}/${r.kept})`);
+  ok(it(1).price === 125 && it(1).cost === 100, "#254 repriceForTier: a catalog line at the 30% seed moves to cost ÷ (1 − 0.20)");
+  ok(it(2).price === 150, "#254 repriceForTier: a hand-priced sell is kept");
+  ok(it(3).price === at(100, 0.3) && it(3).extSellOverride === 400, "#254 repriceForTier: a line with an ext-sell override is kept, override intact");
+  ok(it(4).price === 0 && it(4).por === true, "#254 repriceForTier: a POR line is kept");
+  ok(it(5).price === 55, "#254 repriceForTier: a zero-cost line is kept");
+  ok(it(6).price === 12.5 && it(6).option === true, "#254 repriceForTier: an option line re-prices like any seeded line and stays an option");
+  ok(it(7).price === at(1234.5, 0.2) && it(7).vendorQuoteId === "VQ-1", "#254 repriceForTier: a vendor-quote line re-prices from its cost");
+  ok(secs[0].items[0].price === at(100, 0.3), "#254 repriceForTier: the input sections are not mutated");
+
+  // prev null means the 0.30 fallback — the same result as an explicit 0.30.
+  ok(JSON.stringify(t254Reprice(secs, 0.3, 0.2).sections) === JSON.stringify(r.sections) && t254Seed(null) === 0.3 && t254Seed(0) === 0.3 && t254Seed(1) === 0.3,
+    "#254 repriceForTier: prev = null (or an unusable stamp) is the client's 0.30 fallback");
+  // Identical margins → no change, same reference.
+  const same = t254Reprice(secs, 0.3, 0.3);
+  const sameNull = t254Reprice(secs, null, 0.3);
+  ok(same.sections === secs && same.repriced === 0 && same.kept === 0 && sameNull.sections === secs && sameNull.repriced === 0,
+    "#254 repriceForTier: prev === next (incl. null vs 0.30) changes nothing and returns the same array");
+  ok(t254Reprice(secs, 0.3, null).sections === secs && t254Reprice(secs, 0.3, 1).repriced === 0,
+    "#254 repriceForTier: a missing or unusable next margin changes nothing");
+
+  // Rounding tolerance: one cent off the seed still matches; two cents is hand-priced.
+  const tol = t254Reprice([sec("sys1", [line(1, 100, t254R2(at(100, 0.3) + 0.01)), line(2, 100, t254R2(at(100, 0.3) - 0.01)), line(3, 100, t254R2(at(100, 0.3) + 0.02))])], 0.3, 0.2);
+  ok(t254Tol === 0.01 && tol.repriced === 2 && tol.kept === 1 && tol.sections[0].items[2].price === t254R2(at(100, 0.3) + 0.02),
+    "#254 repriceForTier: $0.01 tolerance — ±1¢ off the seed re-prices, 2¢ off is kept");
+
+  // Tier → tier: lines at Gold's 20% move to Silver's 22%; a line at 30% is now hand-priced.
+  const tt = t254Reprice([sec("sys1", [line(1, 80, at(80, 0.2)), line(2, 80, at(80, 0.3))])], 0.2, 0.22);
+  ok(tt.repriced === 1 && tt.kept === 1 && tt.sections[0].items[0].price === at(80, 0.22) && tt.sections[0].items[1].price === at(80, 0.3),
+    "#254 repriceForTier: tier → tier re-prices only the lines at the previous tier's margin");
+
+  // Nothing seeded → the same array back; an untouched section keeps its reference.
+  const none = t254Reprice([sec("sys1", [line(1, 100, 150)])], 0.3, 0.2);
+  ok(none.repriced === 0 && none.kept === 1, "#254 repriceForTier: no seeded line → 0 re-priced (no banner)");
+  const two = [sec("a", [line(1, 100, 150)]), sec("b", [line(2, 100, at(100, 0.3))])];
+  const twoR = t254Reprice(two, null, 0.2);
+  ok(twoR.sections[0] === two[0] && twoR.sections[1] !== two[1], "#254 repriceForTier: a section with nothing re-priced keeps its reference");
+
+  // Fixture lines are priced from their assembly, never the tier: untouched, not counted.
+  const fx = t254Reprice([sec("sys1", [line(1, 100, at(100, 0.3), { fixture: true }), line(2, 100, at(100, 0.3))])], null, 0.2);
+  ok(fx.repriced === 1 && fx.kept === 0 && fx.sections[0].items[0].price === at(100, 0.3),
+    "#254 repriceForTier: a fixture line (assembly-priced) is never re-priced and not counted as hand-priced");
+
+  // Curtain lines: cost + sell from computeCurtain at the tier margin → re-seed through the same math.
+  const fabrics = [{ sku: "RB-MV-MN", name: "Memphis Velour", costPerSqft: 1.37 }];
+  const cd = { name: "Main drape", hang: "", fabric: "RB-MV-MN", qty: "2", height: "21.5", width: "17.25", fullness: "50", bottom: "" };
+  const c30 = t254Curtain(cd, fabrics, { sewingPct: 18 }, 0.3);
+  const c15 = t254Curtain(cd, fabrics, { sewingPct: 18 }, 0.15);
+  const curt = t254Reprice([sec("sys1", [line(1, c30.costEach, c30.priceEach, { curtain: true })])], null, 0.15);
+  ok(curt.repriced === 1 && curt.sections[0].items[0].price === c15.priceEach,
+    `#254 repriceForTier: a curtain line re-seeds exactly as computeCurtain would at the new tier (${c30.priceEach} → ${c15.priceEach})`);
+
+  // Labor lines: seeded through the labor draft's WHOLE-percent margin, last line nudged by drift.
+  ok(t254LaborSeed(0.274) === 0.27 && t254LaborSeed(null) === 0.3 && t254LaborSeed(0.2) === 0.2, "#254 laborSeedMarginOf: the labor draft's whole-percent margin (27.4% → 27%)");
+  const rate = t254Rate({});
+  const draft = (margin: string): T254LaborDraft => ({
+    discipline: "RIG", margin,
+    mobs: t254Mobs({ miles: 137.3, minutes: 150, officeName: null }),
+    pmHrs: "", pmAuto: true, shopHrs: "3", drfHrs: "", drfAuto: true, misc: "123.457",
+  });
+  let n254 = 1000;
+  const lab27 = t254BuildLabor(t254ComputeLabor(draft("27"), rate), "Rigging", () => ++n254).map((x) => ({ ...x }));
+  const lab20 = t254BuildLabor(t254ComputeLabor(draft("20"), rate), "Rigging", () => ++n254);
+  const labR = t254Reprice([{ ...sec("sys2", lab27), kind: "labor" }], 0.274, 0.2);
+  ok(lab27.length >= 3 && labR.repriced === lab27.length && labR.kept === 0,
+    `#254 repriceForTier: every labor line built at the tier's 27% (stamp 27.4%) is re-priced, incl. the drift-nudged last line (${labR.repriced}/${lab27.length})`);
+  ok(labR.sections[0].items.every((x, i) => x.price === at(x.cost, 0.2) && Math.abs(x.price - lab20[i].price) <= 0.05),
+    "#254 repriceForTier: re-priced labor lands on cost ÷ (1 − 0.20), within the labor drift bound of a fresh 20% build");
+  const labHand = t254Reprice([sec("sys2", lab27.map((x, i) => (i === 0 ? { ...x, price: t254R2(x.price + 25) } : x)))], 0.274, 0.2);
+  ok(labHand.kept === 1 && labHand.sections[0].items[0].price === t254R2(lab27[0].price + 25),
+    "#254 repriceForTier: a labor line re-priced by hand in the modal (or typed) is kept");
+  const lab30 = t254BuildLabor(t254ComputeLabor(draft("30"), rate), "Rigging", () => ++n254);
+  ok(t254Reprice([sec("sys2", lab30)], null, 0.304).repriced === 0,
+    "#254 repriceForTier: a stamp change inside the same whole percent leaves labor alone (30% → 30.4%)");
+
+  // Banner text.
+  ok(t254Msg(14, 2, "Gold", 0.2) === "Re-priced 14 lines to Gold (20%) · kept 2 hand-priced lines", "#254 banner: the spec's wording");
+  ok(t254Msg(1, 0, "Silver", 0.225) === "Re-priced 1 line to Silver (22.5%)" && t254Msg(3, 1, "Base", 0.3) === "Re-priced 3 lines to Base (30%) · kept 1 hand-priced line",
+    "#254 banner: singulars, no kept segment at 0, fractional percent");
+
+  // Structural: wiring, Undo, next-edit clear, client safety, customer document.
+  const t254Client = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const t254Pure = readFileSync(join(process.cwd(), "src/app/(app)/estimator/tier-reprice.ts"), "utf8");
+  const t254Persist = t254Client.slice(t254Client.indexOf("const persistMeta = "), t254Client.indexOf("const openTitle = "));
+  ok(/await updateQuoteMetaAction\(id, meta\)[\s\S]*tierMarginRef\.current = r\.tierMargin[\s\S]*applyTierStamp\(prevMargin, r\.tierMargin/.test(t254Persist),
+    "#254 wiring: persistMeta applies the helper when the meta action hands back a new stamp, against the stamp in effect before it");
+  const t254Apply = t254Client.slice(t254Client.indexOf("const applyTierStamp = "), t254Client.indexOf("const persistMeta = "));
+  ok(/repriceForTier\(before, prev, next\)/.test(t254Apply) && /setSectionsState\(res\.sections\)/.test(t254Apply) && /res\.repriced === 0[\s\S]*setTierReprice\(null\)/.test(t254Apply),
+    "#254 wiring: applyTierStamp re-prices the latest sections, and no re-priced line means no banner");
+  ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
+    "#254 Undo: restores the exact sections from before the re-price and clears the banner");
+  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);\s*setSectionsState\(v\);/.test(t254Client)
+    && (t254Client.match(/setSectionsState\(/g) || []).length === 4,
+    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price and Undo write the raw state");
+  ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
+    "#254 the automatic freight re-apply keeps a live banner and carries into its Undo snapshot");
+  ok(!/from "@\/(lib\/stores|db)/.test(t254Pure) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(t254Client),
+    "#254 client safety: the pure helper imports no store/db, and the client imports no store/db value");
+  ok(["quote-document.tsx", "preview-doc.tsx", "pdf-doc-key.ts"].every((f) => !/tierReprice|PRICING_TIER_LABEL|pricingTier|tierMargin|tier-reprice/.test(readFileSync(join(process.cwd(), "src/app/(app)/estimator", f), "utf8"))),
+    "#254 internal only: nothing about tiers reaches the customer document");
+}

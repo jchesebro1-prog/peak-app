@@ -9420,3 +9420,20 @@ system key. Brainstorm answers Q1–Q5 are logged in D447–D451.
 - Job-value answers orphaned by a library text edit aren't reported.
 - Two concurrent creates in one section can race the spec-id allocation (the save re-checks and retries once).
 - Ambiguity is detected only among `ready` records, not among drafts.
+
+## 254. Customer pricing tiers re-price the quote when the customer changes — IN PROGRESS (Estimator done; service builders next)
+
+**Reported:** Jeff (2026-09-28): "How do we get it so the pricing tiers automatically apply to the customer when
+we are quoting?" Proposed: re-price every line still at the previous tier's margin when the customer or contact
+changes, keep hand-priced lines, say what happened with Undo. Jeff: "Yes, build it for both" (Estimator +
+service builders). Design: `docs/superpowers/specs/2026-09-28-tier-reprice-design.md`.
+
+**Done (Estimator).** A customer/contact change that re-stamps the tier re-prices the lines still at the previous
+tier margin: catalog parts, CSV imports, vendor-quote lines, allowances, curtains, options and labor (at the labor
+draft's whole percent). Ext-sell overrides, POR / no-cost lines and any other sell are kept, and fixtures are left
+alone. A banner reads "Re-priced N lines to Gold (20%) · kept M hand-priced lines · Undo"; Undo restores the exact
+previous sections, and the banner clears on the next edit. Save persists it. Nothing about tiers prints on the
+customer document. See D457.
+
+**Next.** Service builders (flame test, repair, inspection): re-seed the margin knob on a customer **and** a
+contact change when it's still at the previous seed; keep a hand-set knob with a "Use <Tier>" prompt.

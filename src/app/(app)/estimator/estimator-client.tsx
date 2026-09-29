@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine, staleAutoApprovalLine } from "@/lib/review-line";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
@@ -101,6 +101,8 @@ import VendorQuoteModal, {
 import PreviewDoc from "./preview-doc";
 import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 import { PortalPanel } from "./portal-panel";
+import { repriceForTier, tierRepriceMessage } from "./tier-reprice";
+import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 
 /**
  * Estimator workspace — client port of Estimator.dc.html (build + preview
@@ -395,9 +397,31 @@ export default function EstimatorClient({
     miles: initialTravelMiles,
     rule: freightRule,
   });
-  const [sections, setSections] = useState<SpecSection[]>(
+  const [sections, setSectionsState] = useState<SpecSection[]>(
     () => initial.sections ?? freshSections(initialFreightDefault.pct)
   );
+  /** #254 — the tier re-price banner: what the stamp just changed, and the
+   *  exact sections to put back on Undo. Internal only (D87). */
+  const [tierReprice, setTierReprice] = useState<{
+    before: SpecSection[];
+    repriced: number;
+    kept: number;
+    label: string;
+    margin: number;
+  } | null>(null);
+  /** Every user edit to the sections goes through here, so the next edit
+   *  clears the #254 banner (its Undo would otherwise restore over it). The
+   *  tier re-price itself, Undo, and the automatic freight re-apply write
+   *  setSectionsState directly. */
+  const setSections: Dispatch<SetStateAction<SpecSection[]>> = (v) => {
+    setTierReprice(null);
+    setSectionsState(v);
+  };
+  /** The latest committed sections, read when a tier stamp lands (#254). */
+  const sectionsRef = useRef(sections);
+  useEffect(() => {
+    sectionsRef.current = sections;
+  }, [sections]);
   const nidRef = useRef<number | null>(null);
   if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
   const nextId = () => ++(nidRef.current as number);
@@ -634,6 +658,9 @@ export default function EstimatorClient({
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
+  /** The stamp in effect, read synchronously when the next one lands (#254) —
+   *  the closure's `tierMargin` can be a render behind. */
+  const tierMarginRef = useRef<number | null>(initial.tierMargin);
   const [laborDraft, setLaborDraft] = useState<LaborDraft>(() =>
     freshLabor(null, initial.tierMargin, (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.name || "")
   );
@@ -738,7 +765,10 @@ export default function EstimatorClient({
     withTravelFor(custId, locId, (est) => {
       const fd = sectionFreightDefault({ hasVenue: !!locId, miles: est?.miles ?? null, rule: freightRule });
       setFreightDefault(fd);
-      setSections((ss) => applyAutoFreight(ss, { pct: fd.pct }));
+      // Automatic, not an edit: a live #254 banner stays, and its Undo
+      // snapshot takes the same freight so Undo never reverts it.
+      setSectionsState((ss) => applyAutoFreight(ss, { pct: fd.pct }));
+      setTierReprice((n) => (n ? { ...n, before: applyAutoFreight(n.before, { pct: fd.pct }) } : n));
     });
   };
 
@@ -773,13 +803,46 @@ export default function EstimatorClient({
   const pdfDirty = !!loadedId && docKey !== savedDocKey;
 
   /* ---------------- persistence ---------------- */
+  /** #254 (D87 amended) — re-price the lines still at `prev`'s margin to
+   *  `next`, keep hand-priced ones, and say so with Undo. The normal Save
+   *  persists it; no re-priced line → no banner (the silent stamp). */
+  const applyTierStamp = (prev: number | null, next: number, tier: string | null) => {
+    const before = sectionsRef.current;
+    const res = repriceForTier(before, prev, next);
+    if (res.repriced === 0) {
+      setTierReprice(null);
+      return;
+    }
+    setSectionsState(res.sections);
+    setTierReprice({
+      before,
+      repriced: res.repriced,
+      kept: res.kept,
+      label: (tier && PRICING_TIER_LABEL[tier as PricingTier]) || tier || "Base",
+      margin: next,
+    });
+  };
+  /** Undo puts back the exact sections from before the re-price; the new
+   *  tier stamp stays — it describes the customer. */
+  const undoTierReprice = () => {
+    if (!tierReprice) return;
+    setSectionsState(tierReprice.before);
+    setTierReprice(null);
+  };
+
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
     if (!loadedId) return;
     const id = loadedId;
     startTransition(async () => {
       const r = await updateQuoteMetaAction(id, meta);
-      // Customer/contact changes re-stamp the tier server-side (item 11).
-      if (r && typeof r.tierMargin === "number") setTierMargin(r.tierMargin);
+      // Customer/contact changes re-stamp the tier server-side (item 11);
+      // #254: lines still at the previous tier's margin follow the new one.
+      if (r && typeof r.tierMargin === "number") {
+        const prevMargin = tierMarginRef.current;
+        tierMarginRef.current = r.tierMargin;
+        setTierMargin(r.tierMargin);
+        applyTierStamp(prevMargin, r.tierMargin, r.pricingTier ?? null);
+      }
       if (r && r.ok) {
         setSavedDoc((d) => withSavedMeta(d, meta));
         if (r.pdf) setPdf(r.pdf);
@@ -2672,6 +2735,64 @@ export default function EstimatorClient({
               <button
                 type="button"
                 onClick={() => setMoveNotice(null)}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: "inherit",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  flexShrink: 0,
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* #254 tier re-price banner — internal only, never on the
+              customer document; clears on the next edit or Undo. */}
+          {tierReprice && (
+            <div
+              role="status"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "9px 22px",
+                background: "#eef3fb",
+                borderBottom: "1px solid #cddaf0",
+                color: "#2b4a7a",
+                fontSize: 12.5,
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              <span>
+                {tierRepriceMessage(tierReprice.repriced, tierReprice.kept, tierReprice.label, tierReprice.margin)}
+                {" · "}
+                <button
+                  type="button"
+                  onClick={undoTierReprice}
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: "inherit",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    textDecoration: "underline",
+                  }}
+                >
+                  Undo
+                </button>
+              </span>
+              <button
+                type="button"
+                onClick={() => setTierReprice(null)}
                 style={{
                   fontSize: 12.5,
                   fontWeight: 600,

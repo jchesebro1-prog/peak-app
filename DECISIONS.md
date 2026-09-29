@@ -7661,3 +7661,30 @@ down as plain strings, so no client file imports the records store. The shared s
 "Auto: <derived key>" from `curtainSpecKey` (the estimator from the line's description, the Grid from type +
 name), which is what the builder uses when no key is picked. An estimator curtain add defaults its key from the
 curtain name. The builder never writes a key back onto a quote line (out of scope, design §9).
+
+## D457. A tier change re-prices the Estimator lines still at the previous tier margin — amends D87 (#254, 2026-09-28)
+
+D87/D88 said the pricing-tier stamp only SEEDS pricing and never rewrites existing lines. Jeff (2026-09-28): the
+tiers should apply to the customer while quoting. Amended: when a customer or contact change re-stamps an
+Estimator quote with a different margin, every line still at the previous tier's margin moves to the new one;
+hand-priced lines are kept. The previous margin is the stamp in effect, or the 0.30 fallback the client used when
+none was stamped.
+
+`repriceForTier(sections, prev, next)` (`src/app/(app)/estimator/tier-reprice.ts`, pure) classifies each line by
+how it was actually stored. Catalog parts, CSV-imported catalog hits with no stated sell, vendor-quote lines,
+unpriced custom allowances, curtains and options all store cost + sell with sell = round2(cost ÷ (1 − m)); one
+matching within $0.01 re-prices to round2(cost ÷ (1 − new)). Labor stores cost + sell too, but its margin went
+through the labor draft's whole-percent field (27.4 % seeds labor at 27 %), and the labor modal nudges the last
+line by up to a few cents of rounding drift. So labor re-seeds at the whole percent and matches within $0.05; the
+largest drift measured across 13,596 generated labor lines was $0.02. Fixture lines are priced from their
+assembly's own component list prices, never the tier, so they are left alone and not counted. An ext-sell
+override, a POR line, a line with no cost, or any other sell is hand-priced and kept.
+
+The client applies it where `updateQuoteMetaAction` hands back the new stamp and the normal Save persists it. The
+server recomputes value (#242). A banner under the header reads "Re-priced N lines to <Tier> (<pct>%) · kept M
+hand-priced lines · Undo". Undo restores the exact sections from before the re-price; the new stamp stays,
+because it describes the customer. Every sections edit goes through one wrapper that clears the banner. The
+automatic freight re-apply is the exception: it can land after the stamp when the venue's travel is fetched, so
+it keeps the banner and applies the same freight to the Undo snapshot. No re-priced line means no banner. Tiers
+stay internal: nothing prints on the customer document. An unsaved new estimate isn't re-stamped until its first
+save (unchanged), so nothing re-prices before then.
