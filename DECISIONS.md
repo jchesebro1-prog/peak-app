@@ -7934,3 +7934,21 @@ sell split by each part's cost share — the margin slider re-prices the line, n
 component's catalog list would not add up to what the customer is charged. **Notes** carries what the dropped columns
 did: "Part of: <assembly or vendor quote>", "per <unit>" when the unit isn't "ea" (a 120 of cable needs its unit), then
 the line's internal note. D469's base-scope, cost-adjustment and model-number rules are unchanged.
+
+## D472. Department suggestions classify by whole-word name rules, then the category's dominant manufacturer (#252, 2026-09-29)
+
+Running "Start from suggestions" on the real catalog left ~94% of parts in Other: production categories are mostly
+brand product families (Access V, Targa, Acumen, ArcSystem Pro, Source Four, Tesira…), and a bare "mount" pulled
+projection screens and speakers into Hardware. Suggestions now build ten departments — Projection Screens, Drapery,
+Lighting, Audio, Video & Displays, Control & Networking, Rigging, Cable & Connectors, Power, Mounts & Hardware (empty
+ones dropped) — from an ordered rule table in `src/lib/portal-departments.ts`: name rules in priority order Drapery →
+Screens → Audio → Lighting → (projector/LED mounts → Mounts) → Video → Control → Rigging → Cable → Power → Mounts, every
+short or dictionary token matched as a whole word (an unbounded `eon` had put Irideon in Audio, `bridge` had put
+Cambridge in Control); when no name rule matches, the category's dominant manufacturer decides (Draper/Da-Lite →
+Screens, ETC/High End → Lighting, Biamp/Shure/QSC/JBL… → Audio, WyreStorm/Barco/LG… → Video, Chief/Peerless → Mounts,
+Clancy → Rigging). Generic family names (Standard, Professional, Enterprise, Commercial, Prebuilt system…) are left to
+the manufacturer rule on purpose. Name rules alone place 66% of production parts in a department (the spec test's
+floor sits just under that); the manufacturer rule places more on live data. The editor now lists every category
+(1,010 in production) in chunks of 200, with Unassigned-only and In-department filters, a "Move all N shown to…"
+bulk action and "Re-run suggestions" behind an inline confirm; the per-category manufacturer breakdown stays on the
+server.

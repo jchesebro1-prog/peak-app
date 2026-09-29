@@ -9349,7 +9349,7 @@ PDF, and the portal. See D441.
 
 **Still open.** None.
 
-## 252. Customer portal — browse the catalog by department — DONE 2026-09-28 (D442–D445)
+## 252. Customer portal — browse the catalog by department — DONE 2026-09-28 (D442–D445, D472)
 
 **Reported:** Jeff (2026-09-27, #245 brainstorm): *"I think we can filter by Manufacturer then by category … We
 could also do the department tree long term but for now I think the first approach will be enough."* 2026-09-28:
@@ -9385,6 +9385,9 @@ could also do the department tree long term but for now I think the first approa
 
 **Follow-ups (not built).** Nested sub-departments, per-department hero images uploaded by staff, and reordering
 categories inside a department were all explicitly out of scope (the original spec). See D442–D445.
+
+
+**Follow-up 2026-09-29 (D472):** suggestions rebuilt against the real catalog (whole-word name rules + dominant manufacturer, ten departments); the editor lists every category with filters and a bulk move. Production departments were re-created from the new suggestions.
 
 ## 253. Spec Library records — Jeff's individually-written specs as a library the builder matches against — DONE 2026-09-28 (D446–D456)
 
