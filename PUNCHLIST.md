@@ -9863,3 +9863,29 @@ sync never re-creates it (checked by reload). Like designs and consulting (#268,
 users with `create` (Admin, Manager, Estimator): `removeProjectAction` refuses otherwise and both Delete buttons are
 hidden from a Reviewer (`canDelete` from both project pages). The card's link now wraps only the card content, so the
 button isn't nested inside an `<a>`.
+
+## 278. Companies (Customers) — delete a company right from its directory row — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Add delete to the Customers screen too." Customers is the Companies directory
+(`/companies`, D85); Delete existed only in a company's Edit dialog.
+
+**Done.** Each directory row gains a compact Delete (new `DeleteCompanyButton`, the shared `ConfirmButton`: Delete →
+Confirm delete / Cancel) running the Edit dialog's own `deleteCustomerAction` — the same soft delete
+(`CustomerStore.remove`: the company and its venues; contacts keep their historical link, quotes and projects keep their
+customer id). Its tooltip names how many quotes the company has. Like designs, consulting and projects (#268, #273,
+#277), deleting a company is limited to users with `create`: `deleteCustomerAction` refuses otherwise (and now returns an
+error the Edit dialog shows instead of navigating away as if it worked), and both Delete buttons are hidden from a
+Reviewer (`canDelete` on the list page and the Edit dialog). The row's link now wraps only the row content, so the
+button isn't nested inside an `<a>`.
+
+---
+
+## 279. Estimator — the PM parts list's Unit Sell includes the system's freight — DONE 2026-09-29 (D480)
+
+**Reported:** Jeff (2026-09-29): "Include freight in the parts list sell too." (Follow-up to #276.)
+
+**Done.** Each system's parts are now scaled by the system's full price (freight included) ÷ its lines' sell, so per
+system Σ qty × Unit Sell equals the system price — typed, rounded up to $25, or exact for a legacy system — less only
+any labor lines' share. Freight still has no row of its own; it rides in the parts' sell. This now also applies to
+sent/won systems with freight and no rounding (their parts' sell rises by the freight). Unit Cost is unchanged.
+`src/app/(app)/estimator/parts-csv.ts`. Harness `#279`. See D480.

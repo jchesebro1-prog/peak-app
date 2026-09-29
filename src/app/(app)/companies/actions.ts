@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { remove, upsert } from "@/lib/stores/customers";
 import { addNoteRecord, canDeleteNote, getNote, removeNote } from "@/lib/stores/notes";
 import {
@@ -135,10 +136,14 @@ export async function saveVenueAction(input: SaveVenueInput): Promise<SaveVenueR
   return res;
 }
 
-/** Soft-delete a customer (prototype: setDirectory full-replace dropped it). */
-export async function deleteCustomerAction(id: string) {
-  await requireUser();
-  if (!id) return { ok: false as const };
+/** Soft-delete a customer (prototype: setDirectory full-replace dropped it).
+ *  Gated on `create`, like deleting a design, consulting project or project (#278). */
+export async function deleteCustomerAction(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false as const, error: "You can't delete companies." };
+  if (!id) return { ok: false as const, error: "Missing company id." };
   await remove(id);
   revalidatePath("/", "layout");
   return { ok: true as const };

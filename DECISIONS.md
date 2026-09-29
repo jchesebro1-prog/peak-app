@@ -8042,3 +8042,10 @@ proportional rule the customer document uses, but applied to the unrounded unit 
 stay exact before the CSV prints to the cent. Freight is not added in: the file lists parts, and freight has no part
 row, so a system's parts sum to its price less freight. In a system that mixes materials and labor lines, labor's
 share of the adjustment stays with the (unlisted) labor. Unit Cost never changes.
+
+## D480. Parts-list sell carries freight — amends D479 (#279, 2026-09-29)
+
+Jeff wants the parts list's sell to include freight. The one scaling factor per system becomes system price ÷ lines'
+sell (D479 used price less freight), so a system's listed parts sum to its whole price. Freight is spread by each
+part's share of the lines' sell rather than by the freight base (cost), matching how the #267 adjustment is spread;
+labor lines' share stays out of the file as before. Legacy systems with freight are scaled too.
