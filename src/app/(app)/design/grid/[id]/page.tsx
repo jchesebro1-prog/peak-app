@@ -196,7 +196,8 @@ export default async function GridEditorPage({
    * both run the same flat $/sq ft model (#227) at the same tier margin, with
    * the sewing adder (#227 late) folded into the sell rate.
    */
-  const tier = await resolveTier(project.customerId);
+  // #254: company + the design's contact — the tier buildGridQuote stamps.
+  const tier = await resolveTier(project.customerId, project.contactName);
   const fabrics: FabricSell[] = catalog
     .filter(isFabricRow)
     .map((p) => ({

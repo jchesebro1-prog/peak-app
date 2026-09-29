@@ -18833,7 +18833,7 @@ import {
   const gq = read("src/lib/design/grid-quote.ts");
   ok(nav.includes("listDesignRecords()") && !nav.includes("getAllDesigns"), "#211 wave 3 I3: nav counts read design records only — no live Grid pricing on every page");
   ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 4, "#211 wave 3 I3 (+ #244 rename/relink): the Grid actions find linked designs with a filtered read");
-  ok(ds.includes("loadGridQuoteInputs(priceable") && ds.includes("getProjects(ids)") && gq.includes("inputs?: GridQuoteInputs") && gq.includes("inputs.tierFor(project.customerId)"), "#211 wave 3 I3: withLiveGrid shares one catalog / library / price ctx / tier memo across every design in the read");
+  ok(ds.includes("loadGridQuoteInputs(priceable") && ds.includes("getProjects(ids)") && gq.includes("inputs?: GridQuoteInputs") && gq.includes("inputs.tierFor(project.customerId, project.contactName)"), "#211 wave 3 I3: withLiveGrid shares one catalog / library / price ctx / tier memo across every design in the read");
   // Minors.
   ok(ds.includes("fail CLOSED") || ds.includes("Fail CLOSED"), "#211 wave 3 minor: an Auto completeness failure marks the design incomplete");
   ok(/price: \{ needsPart: number; budget: number \}\n\): Promise<Quote \| null>/.test(ds), "#211 wave 3 minor: promoteDesignToQuote's price is required");
@@ -33701,8 +33701,40 @@ import {
     "#254 review: applyTierStamp has exactly one caller (the shared block), which is the only resolveTierAction call");
   const save = between("const doSave = () => {", "const changeStatus = ");
   ok(/const repriceSeqAtSave = tierRepriceSeqRef\.current;/.test(save)
-    && /if \(res\.ok\) \{[\s\S]{0,300}setTierReprice\(\(n\) => \(n && n\.unsaved && n\.seq <= repriceSeqAtSave \? \{ \.\.\.n, unsaved: false \} : n\)\)/.test(save),
-    "#254 review: a successful Save clears \"Save to keep\" only for a re-price it carried");
+    && /if \(res\.id\) \{[\s\S]{0,400}setTierReprice\(\(n\) => \(n && n\.unsaved && n\.seq <= repriceSeqAtSave \? \{ \.\.\.n, unsaved: false \} : n\)\)/.test(save)
+    && (save.match(/unsaved: false/g) || []).length === 1,
+    "#254 review: a Save that wrote the quote (res.id, even with a refused status change) clears \"Save to keep\" only for a re-price it carried");
+
+  // Fix wave 2 — Save waits for an in-flight tier lookup.
+  ok(/const \[tierResolving, setTierResolving\] = useState\(false\);/.test(c) && /const tierResolvingRef = useRef\(false\);/.test(c)
+    && /tierResolvingRef\.current = true;\s*setTierResolving\(true\);/.test(resolveFor)
+    && /\} finally \{\s*(\/\/[^\n]*\n\s*)*if \(seq === tierResolveSeqRef\.current\) \{\s*tierResolvingRef\.current = false;\s*setTierResolving\(false\);/.test(resolveFor),
+    "#254 wave 2: a tier lookup marks Save pending until the LATEST lookup settles (ok, refused or thrown)");
+  ok(/^\s*\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return;/.test(save.slice("const doSave = () => {".length)),
+    "#254 wave 2: doSave refuses to run while a tier lookup is in flight (pick then immediate Save can't stamp ahead of its lines)");
+  ok(/onClick=\{doSave\}\s*disabled=\{statusChanging \|\| tierResolving\}/.test(c) && /onSave=\{doSave\}\s*saveDisabled=\{statusChanging \|\| tierResolving\}/.test(c),
+    "#254 wave 2: both Save buttons are disabled while a tier lookup is in flight");
+
+  // Fix wave 2 — a new estimate opens at its customer's tier (server-side).
+  const pg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
+  const pgNew = pg.slice(pg.indexOf("if (preCustomer) {"), pg.indexOf("const lite = ("));
+  ok(/^import \{ resolveTier \} from "@\/lib\/pricing-tiers";$/m.test(pg)
+    && /if \(!q\) \{\s*const t = await resolveTier\(initial\.customerId, initial\.contactName\);\s*initial\.pricingTier = t\.tier;\s*initial\.tierMargin = t\.margin;\s*\}/.test(pgNew)
+    && pgNew.indexOf("if (!q) {") > pgNew.indexOf("initial.contactName = pickContactName("),
+    "#254 wave 2: a new estimate resolves its tier from the intake's customer + contact (or Base with none) after the intake seeds them");
+  ok(/pricingTier: q\.pricingTier \?\? null,\s*tierMargin: q\.tierMargin \?\? null,/.test(pg),
+    "#254 wave 2: a loaded quote keeps its stored stamp");
+  ok(/useState<number \| null>\(initial\.tierMargin\)/.test(c) && /useRef<number \| null>\(initial\.tierMargin\)/.test(c),
+    "#254 wave 2: the client seeds its stamp in effect from the page's resolution — the first added line prices at it");
+
+  // Fix wave 2 — the Grid resolves with the design's contact, as Save does.
+  const gq = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
+  const gpg = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
+  ok(/inputs\.tierFor\(project\.customerId, project\.contactName\)/.test(gq) && /: await resolveTier\(project\.customerId, project\.contactName\);/.test(gq)
+    && /tiers\.set\(k, resolveTier\(customerId, contactName\)\)/.test(gq) && !/resolveTier\(project\.customerId\)/.test(gq),
+    "#254 wave 2: buildGridQuote (both promote paths) resolves the tier with the design's contact, memoized per company + contact");
+  ok(/resolveTier\(project\.customerId, project\.contactName\)/.test(gpg) && !/resolveTier\(project\.customerId\)/.test(gpg),
+    "#254 wave 2: the Grid editor's preview prices at the same company + contact tier its quote stamps");
   ok(/tierRepriceMessage\(tierReprice\.repriced, tierReprice\.handPriced, tierReprice\.label, tierReprice\.margin, tierReprice\.unsaved\)/.test(c),
     "#254 review: the banner renders handPriced and the unsaved state");
   ok(!/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(c), "#254 review: the client still imports no store/db value");
@@ -33745,17 +33777,35 @@ async function tier254SaveStampAsyncChecks(): Promise<void> {
       pricingTier: gold.tier, tierMargin: gold.margin, spec: { sections: rp.sections, mobs: [] } } as Parameters<typeof QuoteStore.create>[0]);
     registerFixture("quotes", created.id);
     const q1 = await QuoteStore.get(created.id);
-    ok(q1?.pricingTier === "gold" && q1?.tierMargin === gold.margin, "#254 review: a create save stamps the tier (was: no stamp until a later meta edit)");
+    ok(q1?.pricingTier === "gold" && q1?.tierMargin === gold.margin, "#254 review: the quote store keeps a tier stamp written on create");
     const lines = ((q1?.spec as { sections?: T254Sec[] } | undefined)?.sections || [])[0]?.items || [];
-    ok(lines[0]?.price === at(100, gold.margin), "#254 review: the saved lines sit at the saved stamp's margin");
+    ok(lines[0]?.price === at(100, gold.margin), "#254 review: the store keeps the re-priced lines alongside that stamp, at its margin");
     // Reopen: the stamp in effect IS the lines' margin, so the next tier change moves them.
     const base = await resolveTier(null, "");
     const again = t254Reprice(((q1?.spec as { sections: T254Sec[] }).sections), q1?.tierMargin ?? null, base.margin);
     ok(again.repriced === 1 && again.sections[0].items[0].price === at(100, base.margin),
       "#254 review: reopened, the saved stamp matches its lines — the next tier change re-prices them");
+    // Fix wave 2: what a NEW estimate's page resolves (resolveTier over the
+    // intake's customer + contact) is what its first Save stamps — a
+    // customerless estimate opens at Base per Estimating Rules, not 0.30.
+    const { tierMargin: t254TierMargin } = await import("@/lib/pricing-tiers");
+    const openBare = await resolveTier(null, "");
+    ok(openBare.tier === "base" && openBare.margin === (await t254TierMargin("base")),
+      `#254 wave 2: a customerless new estimate opens at Base's Estimating Rules margin (${openBare.margin})`);
+    const openCo = await resolveTier(CO, "Nobody Here");
+    ok(openCo.tier === "gold" && openCo.margin === gold.margin,
+      "#254 wave 2: a new estimate opened with ?customer= (an untiered contact) opens at the company's tier");
+    const oneLine = (m: number): T254Sec[] => [{ id: "s0", name: "s0", kind: "materials", mfr: "", freightPct: 5, items: [
+      { id: 9, sku: "Z", desc: "Z", qty: 1, unit: "ea", cost: 100, price: at(100, m) },
+    ] }];
+    // Saved with the stamp Save writes (gold), then the customer changes to Base:
+    const seededAtOpen = t254Reprice(oneLine(openCo.margin), openCo.margin, openBare.margin);
+    const seededAtFallback = t254Reprice(oneLine(0.3), openCo.margin, openBare.margin);
+    ok(seededAtOpen.repriced === 1 && seededAtOpen.handPriced === 0 && seededAtFallback.handPriced === 1,
+      "#254 wave 2: a line seeded at the opened tier matches the stamp Save writes and follows the next tier change (the old 0.30 seed read as hand-priced)");
     // An update save re-stamps from the customer being saved.
     const q2 = await QuoteStore.update(created.id, { customerId: null, pricingTier: base.tier, tierMargin: base.margin, spec: { sections: again.sections, mobs: [] } } as Parameters<typeof QuoteStore.update>[1]);
-    ok(q2?.pricingTier === base.tier && q2?.tierMargin === base.margin, "#254 review: an update save re-stamps the tier with its lines");
+    ok(q2?.pricingTier === base.tier && q2?.tierMargin === base.margin, "#254 review: the quote store keeps a replacement stamp written by update");
   } finally {
     await removeCustomer(CO);
   }

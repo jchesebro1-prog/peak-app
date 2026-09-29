@@ -71,7 +71,9 @@ export type GridQuoteInputs = {
   catalog: CatalogPart[];
   symbols: GridSymbol[];
   equip: Awaited<ReturnType<typeof loadEquipPriceCtx>> | null;
-  tierFor: (customerId: string | null | undefined) => ReturnType<typeof resolveTier>;
+  /** #254: company + the design's attn contact — the same resolution the
+   *  Estimator's Save stamps (contact's own tier → company tier → Base). */
+  tierFor: (customerId: string | null | undefined, contactName?: string | null) => ReturnType<typeof resolveTier>;
   location: boolean;
   /** #231/#232 rules (loadWireLaborRules). */
   wireLabor: WireLaborRules;
@@ -104,9 +106,9 @@ export async function loadGridQuoteInputs(
     loadGridGroupParts(symbols, catalog),
   ]);
   const tiers = new Map<string, ReturnType<typeof resolveTier>>();
-  const tierFor = (customerId: string | null | undefined) => {
-    const k = customerId || "";
-    if (!tiers.has(k)) tiers.set(k, resolveTier(customerId));
+  const tierFor = (customerId: string | null | undefined, contactName?: string | null) => {
+    const k = (customerId || "") + "\u0000" + (contactName || "").trim();
+    if (!tiers.has(k)) tiers.set(k, resolveTier(customerId, contactName));
     return tiers.get(k)!;
   };
   return { catalog, symbols, equip, tierFor, location: opts.location ?? true, wireLabor, sewingPct, groupParts };
@@ -143,7 +145,11 @@ export async function buildGridQuote(
     };
   }
 
-  const tier = inputs ? await inputs.tierFor(project.customerId) : await resolveTier(project.customerId);
+  // #254: resolved with the design's contact too, so a Grid quote's stamp is
+  // the one the Estimator's first Save would stamp for the same quote.
+  const tier = inputs
+    ? await inputs.tierFor(project.customerId, project.contactName)
+    : await resolveTier(project.customerId, project.contactName);
   const catalog = inputs ? inputs.catalog : await listCatalog();
   const symbols = inputs ? inputs.symbols : await listGridSymbols();
   // #211: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.

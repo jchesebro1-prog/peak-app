@@ -26,6 +26,7 @@ import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
+import { resolveTier } from "@/lib/pricing-tiers";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
@@ -348,6 +349,17 @@ export default async function EstimatorPage({
     // "— <category>") instead of the old static "New estimate".
     initial.projectName = handoff.name || (initial.customerId ? systemQuoteName(initial.custName, initial.category) : initial.projectName);
     initial.replaces = handoff.replaces;
+  }
+
+  // #254 fix wave 2: a NEW estimate opens at its customer's tier — the
+  // intake's ?customer=/&contact= (quotes/new, Inbox newQuoteHref) or, with
+  // no customer, Base per Estimating Rules — so lines seed at the margin the
+  // first Save will stamp (saveQuoteAction resolves the same customer +
+  // contact). A loaded quote keeps its own stored stamp.
+  if (!q) {
+    const t = await resolveTier(initial.customerId, initial.contactName);
+    initial.pricingTier = t.tier;
+    initial.tierMargin = t.margin;
   }
 
   /* ---- travel estimate for the LOADED quote only (E3/E4, punch #89) ----

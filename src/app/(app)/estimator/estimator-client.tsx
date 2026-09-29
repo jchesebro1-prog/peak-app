@@ -838,21 +838,38 @@ export default function EstimatorClient({
    *  a resolution that came back ok. Nothing is persisted here — Save stamps
    *  the tier together with the re-priced lines. */
   const tierResolveSeqRef = useRef(0);
+  /** #254 fix wave 2: a tier lookup is in flight — Save waits for it, so a
+   *  pick-then-Save can't stamp the new tier over lines still at the old
+   *  margin (the server resolves the stamp from the posted customer/contact).
+   *  The ref guards a click that lands before the disabled button renders. */
+  const [tierResolving, setTierResolving] = useState(false);
+  const tierResolvingRef = useRef(false);
   const resolveTierFor = (custId: string | null, contact: string) => {
     const seq = ++tierResolveSeqRef.current;
+    tierResolvingRef.current = true;
+    setTierResolving(true);
     startTransition(async () => {
-      let r: Awaited<ReturnType<typeof resolveTierAction>>;
       try {
-        r = await resolveTierAction(custId, contact);
-      } catch (e) {
-        console.error("[estimator] resolveTierAction threw:", e);
-        return;
+        let r: Awaited<ReturnType<typeof resolveTierAction>>;
+        try {
+          r = await resolveTierAction(custId, contact);
+        } catch (e) {
+          console.error("[estimator] resolveTierAction threw:", e);
+          return;
+        }
+        if (seq !== tierResolveSeqRef.current || !r.ok) return;
+        const prev = tierMarginRef.current;
+        tierMarginRef.current = r.tierMargin;
+        setTierMargin(r.tierMargin);
+        applyTierStamp(prev, r.tierMargin, r.pricingTier);
+      } finally {
+        // Only the latest lookup clears the wait — an older one finishing
+        // first must not re-enable Save ahead of the newer pick.
+        if (seq === tierResolveSeqRef.current) {
+          tierResolvingRef.current = false;
+          setTierResolving(false);
+        }
       }
-      if (seq !== tierResolveSeqRef.current || !r.ok) return;
-      const prev = tierMarginRef.current;
-      tierMarginRef.current = r.tierMargin;
-      setTierMargin(r.tierMargin);
-      applyTierStamp(prev, r.tierMargin, r.pricingTier);
     });
   };
   /** Undo puts back the exact sections from before the re-price; the new
@@ -943,6 +960,8 @@ export default function EstimatorClient({
   };
 
   const doSave = () => {
+    // #254 fix wave 2: never save while a tier lookup is in flight.
+    if (tierResolvingRef.current) return;
     const docAtSave = docInput;
     const repriceSeqAtSave = tierRepriceSeqRef.current;
     const cname = customerId
@@ -983,6 +1002,10 @@ export default function EstimatorClient({
         // `loadedId` unset, so the next Save took the create path again and
         // minted a second quote for the same draft.
         if (res.id) {
+          // #254: the quote WAS written — lines and the tier stamp together —
+          // even when a requested status change was refused (ok:false with
+          // the gate's message), so the banner stops asking to Save.
+          setTierReprice((n) => (n && n.unsaved && n.seq <= repriceSeqAtSave ? { ...n, unsaved: false } : n));
           setLoadedId(res.id);
           // #223: this save's render prints the number the server hands back.
           setSavedDoc({ ...docAtSave, quoteNumber: res.number ?? res.id });
@@ -1010,9 +1033,6 @@ export default function EstimatorClient({
           if (res.stage) setStage(res.stage);
         }
         if (res.ok) {
-          // #254: this save carried the re-price (and the server stamped the
-          // tier with it) — the banner stops asking to Save.
-          setTierReprice((n) => (n && n.unsaved && n.seq <= repriceSeqAtSave ? { ...n, unsaved: false } : n));
           setActionError(null);
           // #180 review 3 — a stale tab's status got silently refreshed;
           // shown alongside "Saved ✓", never implying the save failed.
@@ -2327,8 +2347,14 @@ export default function EstimatorClient({
               <button
                 type="button"
                 onClick={doSave}
-                disabled={statusChanging}
-                title={statusChanging ? "A status change is still saving — try again in a moment." : undefined}
+                disabled={statusChanging || tierResolving}
+                title={
+                  statusChanging
+                    ? "A status change is still saving — try again in a moment."
+                    : tierResolving
+                      ? "Looking up the customer’s pricing tier — Save in a moment."
+                      : undefined
+                }
                 style={{
                   fontFamily: "var(--font-ui)",
                   fontSize: 13,
@@ -2336,8 +2362,8 @@ export default function EstimatorClient({
                   border: "none",
                   borderRadius: 8,
                   padding: "9px 15px",
-                  cursor: statusChanging ? "not-allowed" : "pointer",
-                  opacity: statusChanging ? 0.6 : 1,
+                  cursor: statusChanging || tierResolving ? "not-allowed" : "pointer",
+                  opacity: statusChanging || tierResolving ? 0.6 : 1,
                   ...(justSaved
                     ? { background: "#22361f", color: "#5fd29a" }
                     : { background: "#2b2e35", color: "#cfd3da" }),
@@ -3837,7 +3863,7 @@ export default function EstimatorClient({
           onPdf={setPdf}
           dirty={pdfDirty}
           onSave={doSave}
-          saveDisabled={statusChanging}
+          saveDisabled={statusChanging || tierResolving}
           sections={sections}
           setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
           detail={detail}

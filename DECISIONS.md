@@ -7684,9 +7684,16 @@ A customer or contact pick resolves the tier through the read-only `resolveTierA
 company tier → Base), on a saved quote and on a new, unsaved estimate alike, and the client re-prices against it
 in one shared block. The tier stamp is persisted only with the lines: `saveQuoteAction` resolves it server-side
 from the customer and contact being saved and writes it in the same create or update as the re-priced sections.
-The header autosave (`updateQuoteMetaAction`) no longer writes a stamp, so a stamp can never be saved ahead of the
-lines it seeded. The server recomputes value (#242). A banner under the header reads "Re-priced N lines to <Tier>
-(<pct>%) · kept M hand-priced lines · Save to keep · Undo"; "Save to keep" drops once a Save carries the re-price.
+The header autosave (`updateQuoteMetaAction`) no longer writes a stamp, and Save is disabled while a tier lookup
+is in flight, so the Estimator never saves a new stamp ahead of the lines it re-priced. A new estimate resolves its
+tier when it opens (the page runs `resolveTier` over the intake's customer and contact, or Base per Estimating
+Rules with no customer), so its lines seed at the margin its first Save stamps; a loaded quote keeps its stored
+stamp. The Grid resolves with the design's contact too, so its quote's stamp is the one that Save would write. One
+edge remains: a quote created elsewhere with a stale stamp is re-stamped on its first Estimator Save without a
+re-price, and its lines then read as hand-priced — the safe side, since nothing moves without the estimator seeing
+it. The server recomputes value (#242). A banner under the header reads "Re-priced N lines to <Tier>
+(<pct>%) · kept M hand-priced lines · Save to keep · Undo"; "Save to keep" drops once a Save that carried the re-price writes the quote, even if
+a status change in that Save was refused.
 M counts only hand-priced lines (an ext-sell override or a sell off the seed); POR, no-cost and fixture lines are
 kept without being counted. Undo restores the exact sections from before the re-price; the new stamp stays,
 because it describes the customer. Every sections edit goes through one wrapper that clears the banner. The
