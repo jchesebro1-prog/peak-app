@@ -5,7 +5,7 @@ import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { placeProduct } from "@/lib/specs/assemble-section";
 import { articleIdForPart, csiKey } from "@/lib/specs/articles";
 import { isPlaceholderSku, specRowKey } from "@/lib/specs/record-keys";
-import type { SpecKind } from "@/lib/specs/records";
+import { systemMatchKeys as systemMatchKeysOf, type SpecKind } from "@/lib/specs/records";
 import { specCustomerOptions } from "../customer-options";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import Builder, { type SpecProductRow } from "./builder";
@@ -136,9 +136,7 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
     const r = recordById.get(m.specId);
     if (r) recordTexts[r.specId] = { title: r.title, specText: r.specText };
   }
-  const systemMatchKeys = [
-    ...new Set(records.filter((r) => r.kind === "system" && r.status !== "archived" && r.matchKey).map((r) => r.matchKey as string)),
-  ].sort((a, b) => a.localeCompare(b));
+  const systemMatchKeys = systemMatchKeysOf(records);
 
   // #223 — the source quote's estimate number for the header's Source line.
   const srcQuoteId = doc.source.quoteId || (doc.source.kind === "quote" ? doc.source.id : undefined);

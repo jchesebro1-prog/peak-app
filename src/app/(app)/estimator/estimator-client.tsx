@@ -86,6 +86,7 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
+import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
@@ -176,6 +177,7 @@ const freshCustom = (): CustomDraft => ({
   link: "",
   allowance: "",
   addToCatalog: "",
+  specKey: "",
   sku: "",
   unit: "ea",
   qty: "1",
@@ -377,6 +379,7 @@ export default function EstimatorClient({
   assumptionLibrary,
   freightRule,
   portalStatusError,
+  specKeys,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -1179,6 +1182,8 @@ export default function EstimatorClient({
     if (!Number.isFinite(price) || price < 0) return;
     patchItem(id, (it) => ({ ...it, ...priceFromUnitSellEdit(price) }));
   };
+  const setItemSpecKey = (id: number, value: string) =>
+    patchItem(id, (it) => ({ ...it, specKey: value || undefined }));
   const setItemExtSell = (id: number, value: string) => {
     const ext = Number(value.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(ext) || ext < 0) return;
@@ -1579,6 +1584,7 @@ export default function EstimatorClient({
         priceGoodThrough: d.priceGoodThrough || undefined,
         link: (d.link || "").trim() || undefined,
         allowance: d.allowance ? true : undefined,
+        specKey: d.specKey || undefined,
       },
     ]);
     closeInput(); // closing discards, so the draft reseed happens there
@@ -1754,6 +1760,7 @@ export default function EstimatorClient({
         cost: c.costEach,
         price: c.priceEach,
         curtain: true,
+        specKey: curtainSpecKey(undefined, name) || undefined,
       },
     ]);
     closeInput();
@@ -3256,6 +3263,8 @@ export default function EstimatorClient({
                   onSetQty={setQty}
                   onSetPrice={setItemPrice}
                   onSetExtSell={setItemExtSell}
+                  specKeys={specKeys}
+                  onSetSpecKey={setItemSpecKey}
                   onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                   onRemoveItem={removeItem}
                   onToggleCatalog={() => openInputMethod("catalog", sec.id)}

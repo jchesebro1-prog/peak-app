@@ -486,6 +486,8 @@ export async function placeCurtainAction(
       fullnessPct: number;
       fabricSku: string;
       color?: string;
+      /** Spec records design §6 — optional system match key override. */
+      specKey?: string;
     };
     category?: string;
     optionId: string;
@@ -520,6 +522,7 @@ export async function placeCurtainAction(
     fullnessPct: Number(c.fullnessPct),
     fabricSku: fabric.id,
     color: (c.color || "").trim().slice(0, 40) || undefined,
+    specKey: (typeof c.specKey === "string" ? c.specKey : "").trim().slice(0, 120) || undefined,
   };
   const p = await addCurtainPlacement(projectId, {
     sheetId: input.sheetId,

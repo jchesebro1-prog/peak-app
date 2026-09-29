@@ -86,7 +86,8 @@ export type SpecItem = {
   /** #245: customer-requested line still waiting on a Peak price. */
   por?: boolean;
   /** Spec records design §6 — a system record's match key, set at the
-   *  source (custom/curtain line editing; UI lands in a later task) so
+   *  source (the custom-part form, the curtain add, and the Spec select on a
+   *  custom/curtain line — spec-key-select.tsx) so
    *  `bomFromQuote`/`record-match.ts` can match this line with no catalog
    *  part number. */
   specKey?: string;
@@ -203,6 +204,8 @@ export type CustomDraft = {
   allowance: string;
   /** Add this non-allowance custom part to the shared catalog after saving. */
   addToCatalog: string;
+  /** Spec records design §6 — optional system match key ("" = none). */
+  specKey: string;
 };
 
 export type CurtainDraft = {
@@ -493,4 +496,8 @@ export type EstimatorProps = {
   /** #245 Task 13 — a Portal panel Approve refusal's message (?statusError=
    *  from the Quotes-hub status action), or null. */
   portalStatusError: string | null;
+  /** Spec records design §6 — the Spec select's options: every non-archived
+   *  system record's match key (`systemMatchKeys`), read on the server so the
+   *  client never imports the records store. */
+  specKeys: string[];
 };

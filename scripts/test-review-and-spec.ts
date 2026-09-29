@@ -10659,6 +10659,7 @@ seeded()
   .then(() => recordConflictGuardsAsyncChecks())
   .then(() => specBuilderMatchReportAsyncChecks())
   .then(() => specLibraryScreenAsyncChecks())
+  .then(() => specKeyPickersAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -33226,4 +33227,81 @@ async function specLibraryScreenAsyncChecks(): Promise<void> {
   ok(/view === "sections"/.test(page) && /<SectionsView/.test(page) && /<RecordsView/.test(page), "library page: ?view=sections renders the sections view, default is records");
   const cov = src("src/app/(app)/design/specs/library/controls.tsx");
   ok(/p\.set\("view", "sections"\)/.test(cov), "library page: coverage filters stay on the sections view");
+}
+
+/* Spec records Task 11 — specKey pickers at the source (design §6): the
+   estimator's custom-part form + custom/curtain line Spec select, the Grid
+   curtain dialog's optional override, options read on the server. */
+async function specKeyPickersAsyncChecks(): Promise<void> {
+  const R = await import("@/lib/specs/records");
+  const I = await import("@/lib/specs/record-import");
+  const SK = await import("@/components/spec-key-select");
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const v1 = JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"));
+  const recs = I.recordsFromJson(v1).records;
+
+  // Pure: the picker's options.
+  const keys = R.systemMatchKeys(recs);
+  const expected = [...new Set(recs.filter((r) => r.kind === "system" && r.status !== "archived" && r.matchKey).map((r) => r.matchKey as string))].sort((a, b) => a.localeCompare(b));
+  ok(keys.length > 0 && JSON.stringify(keys) === JSON.stringify(expected) && keys.includes("Stage Drapes – Main Curtain"),
+    `spec pickers: systemMatchKeys lists the v1 library's ${keys.length} non-archived system match keys, sorted (incl. Stage Drapes – Main Curtain)`);
+  const mini = [
+    { kind: "system" as const, status: "ready" as const, matchKey: "B key" },
+    { kind: "system" as const, status: "draft" as const, matchKey: "A key" },
+    { kind: "system" as const, status: "archived" as const, matchKey: "Z archived" },
+    { kind: "product_catalog" as const, status: "ready" as const, matchKey: "Q product" },
+    { kind: "system" as const, status: "ready" as const, matchKey: null },
+    { kind: "system" as const, status: "ready" as const, matchKey: "B key" },
+  ];
+  ok(JSON.stringify(R.systemMatchKeys(mini)) === JSON.stringify(["A key", "B key"]),
+    "spec pickers: systemMatchKeys keeps drafts, drops archived / non-system / blank keys, de-dups and sorts");
+  ok(SK.autoSpecKeyFor({ curtain: true, desc: "Main Grand Drape — IFR Velour, 40'W × 20'H, 50% fullness" }) === "Stage Drapes – Main Curtain"
+    && SK.autoSpecKeyFor({ custom: true, desc: "Main acoustic shell" } as { curtain?: boolean; desc: string }) === null
+    && SK.autoSpecKeyFor({ curtain: true, desc: "Something else" }) === null,
+    "spec pickers: the Auto placeholder derives a curtain's key from its description (as bomFromQuote does); a custom line has none");
+
+  // Estimator.
+  const page = src("src/app/(app)/estimator/page.tsx");
+  ok(/allSpecRecords\(\)/.test(page) && /specKeys=\{systemMatchKeys\(specRecords\)\}/.test(page),
+    "spec pickers: the estimator page reads the records on the server and passes specKeys as strings");
+  const client = src("src/app/(app)/estimator/estimator-client.tsx");
+  const addCustom = client.slice(client.indexOf("const addCustomPart = async"), client.indexOf("/* ---------------- vendor quote (#143"));
+  ok(/specKey: d\.specKey \|\| undefined/.test(addCustom), "spec pickers: the custom-part path writes SpecItem.specKey from the form");
+  const addCurtain = client.slice(client.indexOf("const addCurtain = (secId: string)"), client.indexOf("const setFixture ="));
+  ok(/specKey: curtainSpecKey\(undefined, name\) \|\| undefined/.test(addCurtain), "spec pickers: an estimator curtain add defaults its specKey from the curtain name");
+  ok(/const setItemSpecKey = /.test(client) && /onSetSpecKey=\{setItemSpecKey\}/.test(client) && /specKeys=\{specKeys\}/.test(client),
+    "spec pickers: the estimator hands the section card its Spec options and setter");
+  ok(/specKey: "",/.test(client.slice(client.indexOf("const freshCustom ="), client.indexOf("const freshCustom =") + 600)), "spec pickers: a fresh custom-part draft starts with no spec key");
+  const card = src("src/app/(app)/estimator/section-card.tsx");
+  ok(/isInternal && \(it\.custom \|\| it\.curtain\) && \(/.test(card) && /auto=\{autoSpecKeyFor\(it\)\}/.test(card) && /p\.onSetSpecKey\(it\.id, v\)/.test(card),
+    "spec pickers: custom and curtain lines get a Spec select (Auto placeholder for a curtain)");
+  ok(/p\.onSetCustomDraft\("specKey", v\)/.test(card), "spec pickers: the custom-part form offers the Spec select");
+  const sel = src("src/components/spec-key-select.tsx");
+  ok(/`Auto: \$\{auto\}`/.test(sel) && /"— none —"/.test(sel), "spec pickers: the empty option reads Auto: <key> or — none —");
+
+  // Grid.
+  const drop = src("src/app/(app)/design/grid/[id]/curtain-drop.tsx");
+  ok(/<SpecKeySelect/.test(drop) && /auto=\{curtainSpecKey\(type, name\)\}/.test(drop) && /specKey: specKey \|\| undefined/.test(drop),
+    "spec pickers: the Grid curtain dialog offers an optional Spec select with the derived key as Auto");
+  const gridPage = src("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(/allSpecRecords\(\)/.test(gridPage) && /specKeys=\{systemMatchKeys\(specRecords\)\}/.test(gridPage), "spec pickers: the Grid page passes specKeys from the server");
+  ok(/specKeys=\{specKeys\}/.test(src("src/app/(app)/design/grid/[id]/editor.tsx")), "spec pickers: the Grid editor forwards specKeys to the curtain dialog");
+  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
+  const placeBody = acts.slice(acts.indexOf("export async function placeCurtainAction("), acts.indexOf("user-defined categories (#48/#41)"));
+  ok(/specKey: \(typeof c\.specKey === "string" \? c\.specKey : ""\)\.trim\(\)\.slice\(0, 120\) \|\| undefined/.test(placeBody),
+    "spec pickers: placeCurtainAction stores the trimmed, capped specKey on the curtain");
+
+  // The "use client" import rule.
+  for (const f of [
+    "src/components/spec-key-select.tsx",
+    "src/app/(app)/estimator/section-card.tsx",
+    "src/app/(app)/estimator/estimator-client.tsx",
+    "src/app/(app)/design/grid/[id]/curtain-drop.tsx",
+    "src/app/(app)/design/grid/[id]/editor.tsx",
+  ]) {
+    const s = src(f);
+    const bad = [...s.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
+    ok(s.startsWith('"use client"') && bad.length === 0, `spec pickers: ${f} is a client file with no store/db value imports (${bad.join(", ") || "none"})`);
+  }
+  // The BOM seam (custom specKey kept, keyless curtain derived) is covered by specRecordsBomSeamAsyncChecks.
 }

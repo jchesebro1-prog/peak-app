@@ -81,6 +81,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import DesignIdentity from "./design-identity";
 import CurtainDrop from "./curtain-drop";
+import { curtainSpecKey } from "@/lib/specs/record-keys";
 import LayersPanel from "./layers-panel";
 import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
@@ -265,6 +266,7 @@ export default function GridEditor({
   sheets,
   parts,
   fabrics,
+  specKeys,
   scopeTargets,
   auto,
   venues,
@@ -288,6 +290,9 @@ export default function GridEditor({
   parts: PartLite[];
   /** Catalog fabric rows with SELL price/sq ft (punch #49) - never cost. */
   fabrics: FabricSell[];
+  /** Spec records design §6 — system match keys for the curtain dialog's
+   *  optional Spec override (grid/[id]/page.tsx, systemMatchKeys). */
+  specKeys: string[];
   /** Scope panel Good/Better/Best targets per scope (#211, D305) — SELL
    *  numbers computed server-side (grid/[id]/page.tsx); no cost crosses. */
   scopeTargets: ScopeTargetsByTier | null;
@@ -1792,6 +1797,15 @@ export default function GridEditor({
                   {moneyFmt(curtainPrices.get(selectedPlacement.id) || 0)}
                 </div>
               )}
+              {selectedPlacement.curtain && (() => {
+                const c = selectedPlacement.curtain;
+                const key = c.specKey || curtainSpecKey(c.type, c.name);
+                return (
+                  <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
+                    Spec: {key ? (c.specKey ? key : `Auto: ${key}`) : "— none —"}
+                  </div>
+                );
+              })()}
               <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
                 {scopeOfPlacement(selectedPlacement)} · by {selectedPlacement.by}
               </div>
@@ -2384,6 +2398,7 @@ export default function GridEditor({
                   <CurtainDrop
                     type={armedCurtainType}
                     fabrics={fabrics}
+                    specKeys={specKeys}
                     busy={busy}
                     onConfirm={dropCurtain}
                     onCancel={() => setCurtainAt(null)}

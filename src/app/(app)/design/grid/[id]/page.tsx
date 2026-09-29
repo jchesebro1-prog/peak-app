@@ -38,6 +38,8 @@ import type { PartLite } from "@/lib/design/grid-bom";
 import { buildGridQuote, type GridQuoteInputs } from "@/lib/design/grid-quote";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
+import { allSpecRecords } from "@/lib/stores/spec-records";
+import { systemMatchKeys } from "@/lib/specs/records";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 
@@ -104,7 +106,7 @@ export default async function GridEditorPage({
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor, sewingPct, companies] = await Promise.all([
+  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor, sewingPct, companies, specRecords] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
@@ -113,6 +115,7 @@ export default async function GridEditorPage({
     loadWireLaborRules(),
     loadCurtainSewingPct(),
     allCompanies(),
+    allSpecRecords(),
   ]);
   // #244 — the header's customer control: a lean list (id, name, type).
   const customerOptions = companies.map((c) => ({ id: c.id, name: c.name, ...(c.type ? { detail: c.type } : {}) }));
@@ -270,6 +273,8 @@ export default async function GridEditorPage({
       }))}
       parts={parts}
       fabrics={fabrics}
+      // Spec records design §6: the curtain dialog's Spec options, as plain strings.
+      specKeys={systemMatchKeys(specRecords)}
       scopeTargets={scopeTargets}
       auto={auto}
       venues={venues}

@@ -287,6 +287,20 @@ export function matchKeyConflict(candidate: SpecRecord, all: readonly SpecRecord
   return null;
 }
 
+/** The Spec picker's options (design §6): every non-`archived` `system`
+ *  record's match key, de-duped and sorted. Computed on the server and
+ *  handed to the estimator / Grid curtain dialog as plain strings, so no
+ *  client file imports the records store. */
+export function systemMatchKeys(records: readonly Pick<SpecRecord, "kind" | "status" | "matchKey">[]): string[] {
+  return [
+    ...new Set(
+      records
+        .filter((r) => r.kind === "system" && r.status !== "archived" && r.matchKey)
+        .map((r) => r.matchKey as string)
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+}
+
 /* ---- Spec Library screen (design §7) — pure helpers for the records view
  * and the record editor's history panel. */
 

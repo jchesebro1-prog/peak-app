@@ -21,6 +21,8 @@ import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
+import { allSpecRecords } from "@/lib/stores/spec-records";
+import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
@@ -262,7 +264,7 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -276,6 +278,7 @@ export default async function EstimatorPage({
       listFixtures(),
       loadCurtainSewingPct(),
       loadFreightRule(),
+      allSpecRecords(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -406,6 +409,8 @@ export default async function EstimatorPage({
       assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
       freightRule={freightRule}
       portalStatusError={portalStatusError}
+      // Spec records design §6: the Spec select's options, as plain strings.
+      specKeys={systemMatchKeys(specRecords)}
     />
   );
 }

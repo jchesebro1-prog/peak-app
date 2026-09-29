@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { curtainPriceEach, sewnSellLabel, type FabricSell } from "@/lib/curtain-geom";
 import { GRID_FULLNESS, curtainSpecOf, type GridCurtain, type GridCurtainType } from "@/lib/design/grid-bom";
+import { curtainSpecKey } from "@/lib/specs/record-keys";
+import SpecKeySelect from "@/components/spec-key-select";
 
 /**
  * Curtain drop-in dialog (punch #49) - Jeff: "when you drop it in you specify
@@ -57,12 +59,16 @@ function moneyFmt(n: number): string {
 export default function CurtainDrop({
   type,
   fabrics,
+  specKeys,
   busy,
   onConfirm,
   onCancel,
 }: {
   type: GridCurtainType;
   fabrics: FabricSell[];
+  /** Spec records design §6 — system match keys (read on the server) for the
+   *  optional Spec override; empty = derive from type + name at quote time. */
+  specKeys: string[];
   busy: boolean;
   onConfirm: (curtain: GridCurtain) => void;
   onCancel: () => void;
@@ -74,6 +80,7 @@ export default function CurtainDrop({
   const [height, setHeight] = useState("");
   const [fullnessPct, setFullnessPct] = useState(50);
   const [color, setColor] = useState("");
+  const [specKey, setSpecKey] = useState("");
 
   const widthFt = parseFloat(width) || 0;
   const heightFt = parseFloat(height) || 0;
@@ -85,6 +92,7 @@ export default function CurtainDrop({
     fullnessPct,
     fabricSku,
     color: color.trim() || undefined,
+    specKey: specKey || undefined,
   };
   const fabric = fabrics.find((f) => f.sku === fabricSku);
   const price = curtainPriceEach(curtainSpecOf(draft), fabric?.pricePerSqft || 0);
@@ -201,6 +209,18 @@ export default function CurtainDrop({
           value={color}
           onChange={(e) => setColor(e.target.value)}
           placeholder="Black"
+          style={INPUT}
+        />
+      </div>
+
+      <div style={{ marginBottom: 9 }}>
+        <label style={LBL} htmlFor="grid-curtain-spec">Spec (optional)</label>
+        <SpecKeySelect
+          id="grid-curtain-spec"
+          value={specKey}
+          options={specKeys}
+          auto={curtainSpecKey(type, name)}
+          onChange={setSpecKey}
           style={INPUT}
         />
       </div>
