@@ -218,6 +218,32 @@ export function liftDraftFrom(lift: LiftRental | null | undefined, defaultRate: 
   return { count: String(lift.count), rate: lift.rate === Math.round(defaultRate) ? "" : String(lift.rate) };
 }
 
+/**
+ * Renewal re-pricing (D69 — last year's scope at today's rates): the prior
+ * quote's lift COUNT carries, priced at today's default rate (a hand-typed
+ * rate is last year's number, like airfare, and does not carry). An
+ * inspection renewal prices one venue on its own (D53); when last year's
+ * quote combined several venues (`priorVenueCount` > 1) there is no telling
+ * which venue needed the lift, so it carries as one rental.
+ */
+export function carryLift(
+  prior: unknown,
+  todayRate: number,
+  priorVenueCount?: number
+): LiftRental | undefined {
+  const l = normalizeLift(prior, todayRate);
+  if (!l) return undefined;
+  const count = priorVenueCount != null && priorVenueCount > 1 ? 1 : l.count;
+  return { count, rate: Math.round(todayRate) };
+}
+
+/** A renewal's customer-safe reason when a carried lift's rate moved, else null. */
+export function liftRateChangeReason(prior: unknown, current: LiftRental | null | undefined): string | null {
+  const old = normalizeLift(prior, NaN);
+  if (!old || !current || old.rate === current.rate) return null;
+  return `the current lift rental rate (${fmtDollars(current.rate)} per rental, was ${fmtDollars(old.rate)})`;
+}
+
 /** "Lift rental", or "Lift rental ×2" for more than one. */
 export function liftLabel(count: number): string {
   return count > 1 ? `${LIFT_LINE} ×${count}` : LIFT_LINE;

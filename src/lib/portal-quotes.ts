@@ -11,6 +11,8 @@ import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
 import { cartLinesFromSpec, priceCart, pricingContextFor } from "@/lib/portal-pricing";
 import { canAcceptPortal, firmValidUntil, looksLikeCardNumber, PURCHASE_METHODS } from "@/lib/portal-quote-mode";
 import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-pricing";
+import { carryLift } from "@/lib/service-pricing";
+import { getLiftRate } from "@/lib/service-quote-inputs";
 import { copySentRevisionPdf } from "@/lib/quote-pdf/generate";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
@@ -365,7 +367,7 @@ export async function refreshPortalQuote(
 /** Minimal structural view of a saved flame-test / inspection quote subdoc's
  *  venue rows — enough to rebuild the `ServiceRequest` a refresh re-prices. */
 type ServiceSubdocVenue = { id?: string | null; curtains?: number; lineSets?: number };
-type ServiceSubdocLike = { level?: number | string; venues?: ServiceSubdocVenue[] };
+type ServiceSubdocLike = { level?: number | string; venues?: ServiceSubdocVenue[]; lift?: unknown };
 
 /**
  * Refresh an expired firm portal-service quote (#248 Task 2, spec §3): re-
@@ -401,7 +403,10 @@ async function refreshServicePortalQuote(
         };
 
   try {
-    const priced = await priceServiceRequest({ customerId: q.customerId, name: q.contactName || "" }, req);
+    // #275: a lift staff added to this quote carries through the refresh at
+    // today's rate (the customer's own Generate never adds one).
+    const lift = sub?.lift ? carryLift(sub.lift, await getLiftRate()) : undefined;
+    const priced = await priceServiceRequest({ customerId: q.customerId, name: q.contactName || "" }, req, { lift });
     if (!priced.ok) return { ok: false, error: REFRESH_FAIL_COPY };
 
     const rules = await loadPortalRules();

@@ -17,8 +17,8 @@ import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/fla
 import { getTravelRates } from "@/lib/stores/pricing";
 import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
-import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
-import { flameVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
+import { deriveSeededMarker, normalizeLift, normalizePriceOverride, savedLift } from "@/lib/service-pricing";
+import { flameVenueInputsFrom, getLiftRate, resolveQuoteOffice } from "@/lib/service-quote-inputs";
 import { approveKeepsAcceptedPrice, sourceForSave } from "@/lib/portal-quote-mode";
 
 /**
@@ -99,6 +99,9 @@ async function persist(formData: FormData): Promise<string | null> {
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
   // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
+  // #275: an optional lift rental — count × rate (blank rate = the live
+  // EQP-LIFT default); count 0 / absent = no lift.
+  const lift = normalizeLift(formData.get("lift"), await getLiftRate());
   // #217 fix wave: whether this typed total is only the D286 reopen-seed for
   // an old off-grid sent price — never something anyone actually typed — is
   // derived from the STORED quote, not a client-posted flag (a client can't
@@ -120,7 +123,7 @@ async function persist(formData: FormData): Promise<string | null> {
       : null,
   });
   const r = compute(
-    { office: office || undefined, venues: venueInputs, travel: travelOverride, priceOverride },
+    { office: office || undefined, venues: venueInputs, travel: travelOverride, priceOverride, lift },
     rates,
     travelRates
   );
@@ -176,6 +179,7 @@ async function persist(formData: FormData): Promise<string | null> {
       rawCost: Math.round(r.rawCost),
       baseFee: Math.round(r.baseFee),
       baseApplied: r.baseApplied,
+      ...(r.lift ? { lift: savedLift(r.lift, r) } : {}),
       cost: Math.round(r.cost),
       marginAmount: Math.round(r.marginAmount),
       autoTotal: Math.round(r.autoTotal),
