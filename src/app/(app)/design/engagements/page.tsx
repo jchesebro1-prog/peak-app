@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { loadConsultingData } from "./data";
 import { ConsultingView } from "./view";
 import ActionError from "@/components/action-error";
@@ -21,7 +22,7 @@ export default async function ConsultingPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, data] = await Promise.all([
+  const [user, sp, data] = await Promise.all([
     requireUser(),
     searchParams,
     loadConsultingData(),
@@ -31,7 +32,7 @@ export default async function ConsultingPage({
   return (
     <>
       <ActionError message={data.syncSkipped.length ? `Some consulting quotes could not be reconciled (${data.syncSkipped.join(", ")}). Refresh later or contact an administrator.` : undefined} />
-      <ConsultingView data={data} sel={null} tab="overview" />
+      <ConsultingView data={data} sel={null} tab="overview" canDelete={can("create", user.roles)} />
     </>
   );
 }
