@@ -34345,3 +34345,64 @@ import type { TemplateKeys as C255T7Keys, VenueTemplate as C255T7Tpl } from "@/l
   }
   ok(threw, "#255 T7: a declared face that is not a drawn segment is a keys error");
 }
+
+/* --- #255 T7 fix: the profile map stays continuous where the depth map bends; slid ends never double back; outlines follow redrawn walls --- */
+import { makeXMap as c255T7fX, stretchTemplate as c255T7fStretch } from "@/lib/design/venue-templates/stretch";
+import type { TemplateKeys as C255T7fKeys, VenueTemplate as C255T7fTpl } from "@/lib/design/venue-templates/types";
+{
+  const D = (o: Record<string, number>) => ({ proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 50 / 12, pit: false, ...o });
+  const base = { lines: {}, points: {}, requiredLabels: [], spaces: ["R"], roles: { stage: "R", house: "R" }, defaults: { proWidthFt: 20 / 12, wingFt: 0, stageDepthFt: 20 / 12, houseWidthFt: 80 / 12, houseDepthFt: 30 / 12 } };
+
+  // A splayed room whose depth map bends between its profile keys (origin −20 between keys 0 and −50), with a fixed 6" wall at 40–46 in the outside map.
+  const prof: C255T7fKeys = {
+    ...base, kind: "pf", cx: 0,
+    x: { kind: "profile", keys: [{ y: 0, half: 10, drive: "pro" }, { y: -50, half: 40, drive: "house" }], outside: [{ to: 10, drive: "pro" }, { to: 40, drive: "absorb" }, { to: 46, drive: "fixed" }, { to: 100, drive: "absorb" }] },
+    ySpans: [{ from: 0, to: -20, drive: "stageDepth" }, { from: -20, to: -50, drive: "houseOpen" }], origin: -20, stageDepthTo: 0, houseDepthTo: -50,
+    regions: { R: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 40, y: -50 }, { x: 0, y: -50 }] },
+  };
+  const bent = D({ proWidthFt: 20 / 12, stageDepthFt: 30 / 12, houseWidthFt: 160 / 12, houseDepthFt: 15 / 12 }); // stage × 1.5, house depth × 0.5
+  const X = c255T7fX(prof, bent);
+  let worst = 0;
+  for (let y = -2; y > -49; y -= 3) {
+    const ho = 10 + (30 * -y) / 50;
+    worst = Math.max(worst, Math.abs(X(ho + 0.011, y) - X(ho, y)));
+  }
+  ok(worst < 0.5, `#255 T7 fix: the outside of a splayed room meets its face where the depth map bends (worst step ${worst.toFixed(3)}")`);
+  ok(Math.abs(X(46, -10) - X(40, -10) - 6) < 1e-9 && Math.abs(X(46, -40) - X(40, -40) - 6) < 1e-9 && Math.abs(X(100, -10) - X(100, -40)) < 1e-9, "#255 T7 fix: …while a fixed wall beyond the band keeps its 6\" and the outer wall stays straight");
+  let bad = 0;
+  for (const keys of [[{ y: 0, half: 0, drive: "pro" as const }, { y: -50, half: 40, drive: "house" as const }], [{ y: -50, half: 10, drive: "pro" as const }, { y: 0, half: 40, drive: "house" as const }], [{ y: 0, half: 10, drive: "pro" as const }]]) {
+    try {
+      c255T7fX({ ...prof, x: { kind: "profile", keys, outside: [{ to: 100, drive: "absorb" }] } }, bent);
+    } catch {
+      bad++;
+    }
+  }
+  ok(bad === 3, "#255 T7 fix: profile keys need ≥ 2 keys, y descending and every half > 0");
+
+  // A 45° wall squeezed hard (x × 0.3): the post ending on its face slides more than one 12" piece; a room's corners sit on the face.
+  const tpl: C255T7fTpl = { kind: "w", source: "w", units: "in", extents: { minX: 0, minY: -50, maxX: 100, maxY: 0 }, arcs: [], labels: [], segments: [[0, -50, 100, -50], [0, 0, 100, 0], [10, -50, 60, 0], [18.485, -50, 68.485, 0], [40, -50, 40, -28.485]] };
+  const walls: C255T7fKeys = {
+    ...base, kind: "w", cx: 0, x: { kind: "spans", spans: [{ to: 100, drive: "absorb" }] },
+    ySpans: [{ from: 0, to: -50, drive: "houseOpen" }], origin: 0, stageDepthTo: 0, houseDepthTo: -50,
+    regions: { R: [{ x: 40, y: -50 }, { x: 40, y: -28.485 }, { x: 50, y: -18.485 }, { x: 100, y: -18.485 }, { x: 100, y: -50 }] },
+    points: { onFace: { x: 50, y: -18.485 } },
+    walls: [{ ref: [{ x: 10, y: -50 }, { x: 60, y: 0 }], faces: [[{ x: 18.485, y: -50 }, { x: 68.485, y: 0 }]] }],
+  };
+  const sq = c255T7fStretch(tpl, walls, D({ houseWidthFt: 30 / 12 }));
+  const post = sq.polylines[4], dir = { x: post[post.length - 1].x - post[0].x, y: post[post.length - 1].y - post[0].y };
+  ok(post.every((p, i) => i === 0 || (p.x - post[i - 1].x) * dir.x + (p.y - post[i - 1].y) * dir.y > 0) && post[post.length - 1].y < -40, "#255 T7 fix: a segment that slides more than one piece onto a face never doubles back");
+  const F = sq.polylines[3], fa = F[0], fb = F[F.length - 1], fl = Math.hypot(fb.x - fa.x, fb.y - fa.y);
+  const onF = (p: { x: number; y: number }) => Math.abs(((fb.x - fa.x) * (p.y - fa.y) - (fb.y - fa.y) * (p.x - fa.x)) / fl) < 1e-6;
+  const R = sq.regions.R;
+  ok(R.some((p) => Math.hypot(p.x - post[post.length - 1].x, p.y - post[post.length - 1].y) < 1e-9) && R.filter(onF).length >= 2 && onF(sq.points.onFace), "#255 T7 fix: a region corner at a slid end goes with it; corners and points mid-face stay on the redrawn face");
+  let notParallel = false;
+  try {
+    c255T7fStretch(tpl, { ...walls, walls: [{ ref: [{ x: 10, y: -50 }, { x: 60, y: 0 }], faces: [[{ x: 0, y: -50 }, { x: 100, y: -50 }]] }] }, D({ houseWidthFt: 30 / 12 }));
+  } catch {
+    notParallel = true;
+  }
+  ok(notParallel, "#255 T7 fix: a declared face not parallel to its ref is a keys error");
+  const straight = c255T7fStretch(tpl, { ...walls, x: { kind: "spans", spans: [{ to: 30, drive: "absorb" }, { to: 100, drive: "fixed" }] } }, D({ houseWidthFt: 120 / 12 }));
+  const rf = straight.polylines[2], ra = rf[0], rb = rf[rf.length - 1], rl = Math.hypot(rb.x - ra.x, rb.y - ra.y);
+  ok(rf.every((p) => Math.abs(((rb.x - ra.x) * (p.y - ra.y) - (rb.y - ra.y) * (p.x - ra.x)) / rl) < 1e-6), "#255 T7 fix: a ref wall stays straight where the side-to-side map has a kink");
+}

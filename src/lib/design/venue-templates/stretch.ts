@@ -135,16 +135,32 @@ export function makeXMap(k: TemplateKeys, d: StretchDims): (x: number, y: number
     };
   }
   if (xm.kind === "profile") {
+    const keys = xm.keys;
+    if (keys.length < 2 || keys.some((q, i) => !(q.half > 0) || (i > 0 && !(q.y < keys[i - 1].y))))
+      throw new Error(`venue template ${k.kind}: profile keys need ≥ 2 keys, y descending, every half > 0`);
     const Y = makeYMap(k, d);
     const proHalf = (d.proWidthFt * 12) / 2, houseHalf = (d.houseWidthFt * 12) / 2;
-    const ys = xm.keys.map((q) => q.y), my = ys.map(Y);
-    const oldHalf = xm.keys.map((q) => q.half);
-    const newHalf = xm.keys.map((q) => (q.drive === "pro" ? proHalf : houseHalf));
+    const ys = keys.map((q) => q.y), my = ys.map(Y);
+    const oldHalf = keys.map((q) => q.half);
+    const newHalf = keys.map((q) => (q.drive === "pro" ? proHalf : houseHalf));
     const outside = makeSpanMap(xm.outside, d);
+    // Where the band beside the face ends: the next fixed span's start, else the last span's end.
+    const ends = [0, ...xm.outside.map((s) => s.to)];
+    const anchors = [...xm.outside.flatMap((s, i) => (s.drive === "fixed" ? [ends[i]] : [])), ends[ends.length - 1]].sort((p, q) => p - q);
     return (x: number, y: number) => {
       const dx = x - k.cx, a = Math.abs(dx);
       const ho = lerpDesc(y, ys, oldHalf);
-      const a2 = a <= ho + 1e-9 ? (a * lerpDesc(Y(y), my, newHalf)) / ho : outside(a);
+      const N = lerpDesc(Y(y), my, newHalf); // the mapped face's half-width at this y
+      let a2: number;
+      // 0.01" (the converter's rounding) counts as on the face.
+      if (a <= ho + 0.01) a2 = (a * N) / ho;
+      else {
+        // The face is placed in mapped y; the outside map ignores y. Between the face and the anchor the band
+        // blends linearly from the face to the outside map, so the two always meet; beyond it the outside map
+        // alone (fixed walls and outer walls stay straight and keep their size).
+        const b = anchors.find((v) => v > ho + 0.01);
+        a2 = b == null ? outside(a) + (N - outside(ho)) : a >= b ? outside(a) : N + ((a - ho) * (outside(b) - N)) / (b - ho);
+      }
       return k.cx + Math.sign(dx) * a2;
     };
   }
@@ -198,21 +214,42 @@ const parallel = (s: Seg, q: Seg) => {
  * in the drawing (another redrawn face first, else that segment's mapped
  * direction there); a free end projects. A plain segment that ended on a face
  * slides along its own mapped direction onto the redrawn face — unless it
- * merely continues straight into another segment (a split outer wall).
+ * merely continues straight into another segment (a split outer wall); the
+ * points it slides past are dropped, so it never doubles back. First, the
+ * drawn segment a ref lies on is drawn straight along the mapped ref, its ends
+ * projected onto it (a straight wall stays straight wherever the map bends).
  * Mutates `polys` (one entry per drawn segment, null = not drawn).
+ *
+ * Returns how other geometry follows the redrawn faces: `snap` sends a drawn
+ * point where the redraw put that spot — a drawn segment end that moved goes
+ * to its new end, a point mid-face to where the face meets whatever else
+ * passes through it (by the same rule as a face end) — and `alongFace` says
+ * whether two drawn points share a face, so an outline edge between them stays
+ * on the redrawn face.
  */
-function redrawWalls(segs: Seg[], polys: Array<Pt[] | null>, walls: WallPair[], map: (p: Pt) => Pt): void {
+type WallSnap = { snap: (p: Pt) => Pt | null; alongFace: (a: Pt, b: Pt) => boolean };
+function redrawWalls(segs: Seg[], polys: Array<Pt[] | null>, walls: WallPair[], map: (p: Pt) => Pt): WallSnap {
   const face = new Map<number, Line>();
+  const segOf = (f: [Pt, Pt]) =>
+    segs.findIndex((s) => {
+      const [a, b] = endsOf(s);
+      return (same(a, f[0]) && same(b, f[1])) || (same(a, f[1]) && same(b, f[0]));
+    });
   for (const w of walls) {
     const A = map(w.ref[0]), B = map(w.ref[1]);
     const u = unit(sub(B, A)), n = { x: -u.y, y: u.x };
     const v = unit(sub(w.ref[1], w.ref[0])), n0 = { x: -v.y, y: v.x };
+    // The drawn segment the ref lies on (it may run past the ref's ends) is drawn straight along the mapped ref.
+    const r = segs.findIndex((s, j) => polys[j] && onSeg(w.ref[0], s) && onSeg(w.ref[1], s));
+    if (r >= 0) {
+      const refLine = { p: A, u }, [e0, e1] = endsOf(segs[r]);
+      polys[r] = densifySegment(project(map(e0), refLine), project(map(e1), refLine));
+    }
     for (const f of w.faces) {
-      const i = segs.findIndex((s) => {
-        const [a, b] = endsOf(s);
-        return (same(a, f[0]) && same(b, f[1])) || (same(a, f[1]) && same(b, f[0]));
-      });
+      const i = segOf(f);
       if (i < 0) throw new Error(`venue template: wall face ${JSON.stringify(f)} is not a drawn segment`);
+      // 1e-4 ≈ 0.006°: the converter's 3-decimal rounding, never a real angle.
+      if (Math.abs(cross(unit(sub(f[1], f[0])), v)) > 1e-4) throw new Error(`venue template: wall face ${JSON.stringify(f)} is not parallel to its ref`);
       face.set(i, { p: add(A, mul(n, dot(sub(f[0], w.ref[0]), n0))), u });
     }
   }
@@ -248,11 +285,35 @@ function redrawWalls(segs: Seg[], polys: Array<Pt[] | null>, walls: WallPair[], 
     if (!P) return;
     const [m0, m1] = moved[i];
     if (face.has(i) && m0 && m1) polys[i] = densifySegment(m0, m1);
-    else {
-      if (m0) P[0] = m0;
-      if (m1) P[P.length - 1] = m1;
+    else if (m0 || m1) {
+      // Slid ends: keep only the points still between the two ends (a slide longer than one piece would double back).
+      const A = m0 ?? P[0], B = m1 ?? P[P.length - 1], ab = sub(B, A), L2 = dot(ab, ab);
+      polys[i] = [A, ...P.slice(1, -1).filter((q) => {
+        const s = dot(sub(q, A), ab);
+        return s > 1e-9 && s < L2 - 1e-9;
+      }), B];
     }
   });
+  const facesThrough = (p: Pt) => [...face.keys()].filter((i) => polys[i] && onSeg(p, segs[i]));
+  return {
+    snap: (p) => {
+      for (let j = 0; j < segs.length; j++) {
+        const P = polys[j];
+        if (!P) continue;
+        const [a, b] = endsOf(segs[j]);
+        if (moved[j][0] && same(a, p)) return P[0];
+        if (moved[j][1] && same(b, p)) return P[P.length - 1];
+      }
+      const [i] = facesThrough(p);
+      if (i == null) return null;
+      const own = face.get(i)!;
+      const others = segs.map((_, j) => j).filter((j) => j !== i && polys[j] && onSeg(p, segs[j]) && !parallel(segs[i], segs[j]));
+      const j = others.find((jj) => face.has(jj)) ?? others[0];
+      const line = j == null ? null : (face.get(j) ?? tangent(j, p));
+      return (line && intersect(own, line)) ?? project(map(p), own);
+    },
+    alongFace: (a, b) => facesThrough(a).some((i) => onSeg(b, segs[i])),
+  };
 }
 
 export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDims): StretchedPlan {
@@ -310,8 +371,8 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
       return { pts: arcPoints({ cx: c.x, cy: c.y, r }, from, to), c, r };
     }
     const ref = innermostAt(arc);
-    const same = (a: number, b: number) => Math.abs(a - b) < 1e-6;
-    const isRef = !ref || (same(arc.r, ref.r) && ((same(from, ref.a0) && same(to, ref.a1)) || (same(from, ref.a1) && same(to, ref.a0))));
+    const eq = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+    const isRef = !ref || (eq(arc.r, ref.r) && ((eq(from, ref.a0) && eq(to, ref.a1)) || (eq(from, ref.a1) && eq(to, ref.a0))));
     if (isRef) return chordArc(arc, from, to, g);
     const inner = chordArc(ref, ref.a0, ref.a1, g);
     const c = inner.c, r = inner.r + (arc.r - ref.r);
@@ -329,22 +390,36 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
     return { pts: arcPoints({ cx: c.x, cy: c.y, r }, t0, t1), c, r };
   };
 
-  /** A region / line path mapped: true-arc items keep their circle; everything else follows the map. */
+  const segPolys: Array<Pt[] | null> = t.segments.map(([x1, y1, x2, y2]) => {
+    const a = { x: x1, y: y1 }, b = { x: x2, y: y2 };
+    if (!d.pit && k.pit && inBox(a, k.pit.bbox) && inBox(b, k.pit.bbox)) return null;
+    return densifySegment(a, b).map(map);
+  });
+  const walls = k.walls?.length ? redrawWalls(t.segments, segPolys, k.walls, map) : null;
+  /** A drawn point on a redrawn wall face goes where the redraw put it; anything else follows the map. */
+  const mapPt = (p: Pt): Pt => walls?.snap(p) ?? map(p);
+
+  /**
+   * A region / line path mapped: true-arc items keep their circle; corners on a redrawn wall face stay on it
+   * (an edge along a face runs straight between them); everything else follows the map.
+   */
   const mapPath = (items: PathItem[], closed: boolean): Pt[] => {
-    if (!items.some((it) => "arc" in it && groupOf(it.arc))) return densifyPath(pathPoints(items), closed).map(map);
+    if (!walls && !items.some((it) => "arc" in it && groupOf(it.arc))) return densifyPath(pathPoints(items), closed).map(map);
     const pieces = items.map((it) => {
       if ("arc" in it) {
         const raw = arcPoints(it.arc, it.arc.from, it.arc.to);
         const g = groupOf(it.arc);
         return { start: raw[0], end: raw[raw.length - 1], mapped: g ? trueArc(it.arc, it.arc.from, it.arc.to, g).pts : raw.map(map) };
       }
-      return { start: it, end: it, mapped: [map(it)] };
+      return { start: it, end: it, mapped: [mapPt(it)] };
     });
     const out: Pt[] = [];
     pieces.forEach((p, i) => {
       out.push(...p.mapped);
       const next = i + 1 < pieces.length ? pieces[i + 1] : closed ? pieces[0] : null;
-      if (next) out.push(...densifySegment(p.end, next.start).slice(1, -1).map(map));
+      if (!next) return;
+      if (walls?.alongFace(p.end, next.start)) out.push(...densifySegment(p.mapped[p.mapped.length - 1], next.mapped[0]).slice(1, -1));
+      else out.push(...densifySegment(p.end, next.start).slice(1, -1).map(map));
     });
     return out;
   };
@@ -362,12 +437,6 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
     return null;
   };
 
-  const segPolys: Array<Pt[] | null> = t.segments.map(([x1, y1, x2, y2]) => {
-    const a = { x: x1, y: y1 }, b = { x: x2, y: y2 };
-    if (!d.pit && k.pit && inBox(a, k.pit.bbox) && inBox(b, k.pit.bbox)) return null;
-    return densifySegment(a, b).map(map);
-  });
-  if (k.walls?.length) redrawWalls(t.segments, segPolys, k.walls, map);
   const polylines: Pt[][] = segPolys.filter((p): p is Pt[] => !!p);
   for (const arc of t.arcs) {
     const g = groupOf(arc);
@@ -386,7 +455,7 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   const lines: Record<string, Pt[]> = {};
   for (const [name, items] of Object.entries(k.lines)) lines[name] = mapPath(items, false);
   const points: Record<string, Pt> = {};
-  for (const [name, p] of Object.entries(k.points)) points[name] = zoneMap(p) ?? map(p);
+  for (const [name, p] of Object.entries(k.points)) points[name] = zoneMap(p) ?? mapPt(p);
   const all = polylines.flat();
   const bounds = {
     minX: Math.min(...all.map((p) => p.x)),
