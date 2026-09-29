@@ -1,4 +1,4 @@
-import type { PathItem, Pt, StretchDims, StretchedPlan, TemplateKeys, TrueArcGroup, VenueTemplate, XSpan } from "./types";
+import type { PathItem, Pt, StretchDims, StretchedPlan, TemplateKeys, TrueArcGroup, VenueTemplate, WallPair, XSpan } from "./types";
 
 /**
  * The venue-template stretch (#249, #255). Pure. Every point moves through a
@@ -110,6 +110,20 @@ export function makeYMap(k: TemplateKeys, d: StretchDims): (y: number) => number
   };
 }
 
+/** Linear interpolation over keys listed in DESCENDING order of `xs`, holding the end values beyond them. */
+function lerpDesc(v: number, xs: number[], vs: number[]): number {
+  const n = xs.length - 1;
+  if (v >= xs[0]) return vs[0];
+  if (v <= xs[n]) return vs[n];
+  for (let i = 0; i < n; i++) {
+    if (v <= xs[i] && v >= xs[i + 1]) {
+      const s = xs[i] - xs[i + 1];
+      return s === 0 ? vs[i] : vs[i] + ((vs[i + 1] - vs[i]) * (xs[i] - v)) / s;
+    }
+  }
+  return vs[n];
+}
+
 /** The side-to-side map about the centreline (see XMap). */
 export function makeXMap(k: TemplateKeys, d: StretchDims): (x: number, y: number) => number {
   const xm = k.x;
@@ -118,6 +132,20 @@ export function makeXMap(k: TemplateKeys, d: StretchDims): (x: number, y: number
     return (x: number) => {
       const dx = x - k.cx;
       return k.cx + Math.sign(dx) * m(Math.abs(dx));
+    };
+  }
+  if (xm.kind === "profile") {
+    const Y = makeYMap(k, d);
+    const proHalf = (d.proWidthFt * 12) / 2, houseHalf = (d.houseWidthFt * 12) / 2;
+    const ys = xm.keys.map((q) => q.y), my = ys.map(Y);
+    const oldHalf = xm.keys.map((q) => q.half);
+    const newHalf = xm.keys.map((q) => (q.drive === "pro" ? proHalf : houseHalf));
+    const outside = makeSpanMap(xm.outside, d);
+    return (x: number, y: number) => {
+      const dx = x - k.cx, a = Math.abs(dx);
+      const ho = lerpDesc(y, ys, oldHalf);
+      const a2 = a <= ho + 1e-9 ? (a * lerpDesc(Y(y), my, newHalf)) / ho : outside(a);
+      return k.cx + Math.sign(dx) * a2;
     };
   }
   const up = makeSpanMap(xm.upper, d);
@@ -132,6 +160,100 @@ export function makeXMap(k: TemplateKeys, d: StretchDims): (x: number, y: number
 }
 
 const inBox = (p: Pt, b: { minX: number; maxX: number; minY: number; maxY: number }) => p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY;
+
+type Line = { p: Pt; u: Pt };
+type Seg = [number, number, number, number];
+const sub = (a: Pt, b: Pt): Pt => ({ x: a.x - b.x, y: a.y - b.y });
+const add = (a: Pt, b: Pt): Pt => ({ x: a.x + b.x, y: a.y + b.y });
+const mul = (a: Pt, s: number): Pt => ({ x: a.x * s, y: a.y * s });
+const dot = (a: Pt, b: Pt) => a.x * b.x + a.y * b.y;
+const cross = (a: Pt, b: Pt) => a.x * b.y - a.y * b.x;
+const unit = (a: Pt): Pt => {
+  const l = Math.hypot(a.x, a.y) || 1;
+  return { x: a.x / l, y: a.y / l };
+};
+const endsOf = (s: Seg): [Pt, Pt] => [{ x: s[0], y: s[1] }, { x: s[2], y: s[3] }];
+const same = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y) < 0.01;
+const intersect = (l1: Line, l2: Line): Pt | null => {
+  const den = cross(l1.u, l2.u);
+  if (Math.abs(den) < 1e-9) return null;
+  return add(l1.p, mul(l1.u, cross(sub(l2.p, l1.p), l2.u) / den));
+};
+const project = (p: Pt, l: Line): Pt => add(l.p, mul(l.u, dot(sub(p, l.p), l.u)));
+/** p lies on segment s, within 0.01". */
+function onSeg(p: Pt, s: Seg): boolean {
+  const [a, b] = endsOf(s), ab = sub(b, a), len = Math.hypot(ab.x, ab.y);
+  if (len < 1e-9) return same(p, a);
+  const t = dot(sub(p, a), ab) / (len * len);
+  return t >= -1e-6 && t <= 1 + 1e-6 && Math.abs(cross(sub(p, a), ab)) / len < 0.01;
+}
+const parallel = (s: Seg, q: Seg) => {
+  const [a, b] = endsOf(s), [c, e] = endsOf(q);
+  return Math.abs(cross(unit(sub(b, a)), unit(sub(e, c)))) < 1e-6;
+};
+
+/**
+ * #255: redraw each wall's `faces` parallel to its mapped `ref` at the drawn
+ * perpendicular distance. A face's ends meet the line of whatever it abutted
+ * in the drawing (another redrawn face first, else that segment's mapped
+ * direction there); a free end projects. A plain segment that ended on a face
+ * slides along its own mapped direction onto the redrawn face — unless it
+ * merely continues straight into another segment (a split outer wall).
+ * Mutates `polys` (one entry per drawn segment, null = not drawn).
+ */
+function redrawWalls(segs: Seg[], polys: Array<Pt[] | null>, walls: WallPair[], map: (p: Pt) => Pt): void {
+  const face = new Map<number, Line>();
+  for (const w of walls) {
+    const A = map(w.ref[0]), B = map(w.ref[1]);
+    const u = unit(sub(B, A)), n = { x: -u.y, y: u.x };
+    const v = unit(sub(w.ref[1], w.ref[0])), n0 = { x: -v.y, y: v.x };
+    for (const f of w.faces) {
+      const i = segs.findIndex((s) => {
+        const [a, b] = endsOf(s);
+        return (same(a, f[0]) && same(b, f[1])) || (same(a, f[1]) && same(b, f[0]));
+      });
+      if (i < 0) throw new Error(`venue template: wall face ${JSON.stringify(f)} is not a drawn segment`);
+      face.set(i, { p: add(A, mul(n, dot(sub(f[0], w.ref[0]), n0))), u });
+    }
+  }
+  const tangent = (j: number, E: Pt): Line | null => {
+    const P = polys[j];
+    if (!P || P.length < 2) return null;
+    const [a, b] = endsOf(segs[j]), ab = sub(b, a);
+    const t = Math.max(0, Math.min(1, dot(sub(E, a), ab) / (dot(ab, ab) || 1)));
+    const k = Math.min(P.length - 2, Math.max(0, Math.floor(t * (P.length - 1))));
+    return { p: P[k], u: unit(sub(P[k + 1], P[k])) };
+  };
+  const moved: Array<[Pt | null, Pt | null]> = segs.map(() => [null, null]);
+  segs.forEach((s, i) => {
+    if (!polys[i]) return;
+    ([0, 1] as const).forEach((e) => {
+      const E = endsOf(s)[e];
+      const own = face.get(i);
+      if (own) {
+        const others = segs.map((_, j) => j).filter((j) => j !== i && polys[j] && onSeg(E, segs[j]) && !parallel(s, segs[j]));
+        const j = others.find((jj) => face.has(jj)) ?? others[0];
+        const line = j == null ? null : (face.get(j) ?? tangent(j, E));
+        moved[i][e] = (line && intersect(own, line)) ?? project(map(E), own);
+        return;
+      }
+      if (segs.some((q, j) => j !== i && (same(endsOf(q)[0], E) || same(endsOf(q)[1], E)) && parallel(s, q))) return;
+      const j = segs.findIndex((q, jj) => jj !== i && face.has(jj) && onSeg(E, q) && !parallel(s, q));
+      const tan = j < 0 ? null : tangent(i, E);
+      if (j >= 0 && tan) moved[i][e] = intersect(tan, face.get(j)!);
+    });
+  });
+  segs.forEach((_, i) => {
+    const P = polys[i];
+    if (!P) return;
+    const [m0, m1] = moved[i];
+    if (face.has(i) && m0 && m1) polys[i] = densifySegment(m0, m1);
+    else {
+      if (m0) P[0] = m0;
+      if (m1) P[P.length - 1] = m1;
+    }
+  });
+}
 
 export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDims): StretchedPlan {
   const X = makeXMap(k, d);
@@ -240,12 +362,13 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
     return null;
   };
 
-  const polylines: Pt[][] = [];
-  for (const [x1, y1, x2, y2] of t.segments) {
+  const segPolys: Array<Pt[] | null> = t.segments.map(([x1, y1, x2, y2]) => {
     const a = { x: x1, y: y1 }, b = { x: x2, y: y2 };
-    if (!d.pit && k.pit && inBox(a, k.pit.bbox) && inBox(b, k.pit.bbox)) continue;
-    polylines.push(densifySegment(a, b).map(map));
-  }
+    if (!d.pit && k.pit && inBox(a, k.pit.bbox) && inBox(b, k.pit.bbox)) return null;
+    return densifySegment(a, b).map(map);
+  });
+  if (k.walls?.length) redrawWalls(t.segments, segPolys, k.walls, map);
+  const polylines: Pt[][] = segPolys.filter((p): p is Pt[] => !!p);
   for (const arc of t.arcs) {
     const g = groupOf(arc);
     polylines.push(g ? trueArc(arc, arc.a0, arc.a1, g).pts : arcPoints(arc, arc.a0, arc.a1).map(map));

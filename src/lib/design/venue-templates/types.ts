@@ -41,7 +41,14 @@ export type XMap =
   /** One side-to-side map at every y. */
   | { kind: "spans"; spans: XSpan[] }
   /** `upper` at y ≥ yStart, `lower` at y ≤ yEnd, blended linearly between. yStart === yEnd switches hard: y > yStart is upper, the line itself is lower. */
-  | { kind: "blend"; upper: XSpan[]; lower: XSpan[]; yStart: number; yEnd: number };
+  | { kind: "blend"; upper: XSpan[]; lower: XSpan[]; yStart: number; yEnd: number }
+  /**
+   * #255: a room whose inside face is a y-profile (splayed walls). Keys run top → bottom; between them the drawn
+   * half-width is linear in y. A point inside the face scales by new ÷ drawn half-width — the new half-width
+   * interpolated in MAPPED y, so a splayed wall stays straight whatever the front-to-back map does. Beyond the
+   * face the `outside` span map applies (the rooms behind a splay, the outer walls).
+   */
+  | { kind: "profile"; keys: Array<{ y: number; half: number; drive: "pro" | "house" }>; outside: XSpan[] };
 
 /**
  * #255: arcs that must stay true circles (an apse, a pointed stage front).
@@ -61,6 +68,13 @@ export type TrueArcGroup = {
   /** Labels above this y and inside the group's smallest drawn circle move with it (a similarity about its centre). */
   zoneMinY?: number;
 };
+
+/**
+ * #255: a diagonal wall. `ref` is the face on the key lines — it follows the map. Each `faces` segment is redrawn
+ * parallel to the mapped ref at its drawn perpendicular distance (a 45° wall stays 6" whatever angle it takes), and
+ * every drawn segment that ended on a face is moved along itself onto the redrawn face.
+ */
+export type WallPair = { ref: [Pt, Pt]; faces: Array<[Pt, Pt]> };
 
 export type TemplateKeys = {
   kind: string;
@@ -92,6 +106,7 @@ export type TemplateKeys = {
   /** The drawing's own size — the stretch is the identity here. */
   defaults: { proWidthFt: number; wingFt: number; stageDepthFt: number; houseWidthFt: number; houseDepthFt: number };
   trueArcs?: TrueArcGroup[];
+  walls?: WallPair[];
 };
 
 export type StretchDims = { proWidthFt: number; wingFt: number; stageDepthFt: number; houseWidthFt: number; houseDepthFt: number; pit: boolean };

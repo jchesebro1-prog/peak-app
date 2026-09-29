@@ -34310,3 +34310,38 @@ async function c255T6GridAsyncChecks(): Promise<void> {
   ok(c255T6SanTpl("church", "church-traditional@1") === "church-traditional@1" && c255T6SanTpl("church", "proscenium@1") === null && c255T6SanTpl("gym", "proscenium@1") === null && c255T6SanTpl("church", "church-bogus@9") === null && c255T6SanTpl("church", 42) === null && c255T6SanTpl("proscenium", null) === null, "#255 T6: a design's Background override survives only when it is a template its plan kind can draw");
   ok(act.includes("templateId: sanitizeTemplateId(") && act.indexOf("templateId: sanitizeTemplateId(") < act.indexOf("saveGridIntake(input.projectId"), "#255 T6: the intake drops a Background override the venue kind can't draw before saving");
 }
+
+/* --- #255 T7: engine — y-profile room, diagonal walls stay 6" perpendicular --- */
+import { makeXMap as c255T7X, stretchTemplate as c255T7Stretch } from "@/lib/design/venue-templates/stretch";
+import type { TemplateKeys as C255T7Keys, VenueTemplate as C255T7Tpl } from "@/lib/design/venue-templates/types";
+{
+  const D = (o: Record<string, number>) => ({ proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 50 / 12, pit: false, ...o });
+  const common = { ySpans: [{ from: 0, to: -50, drive: "houseOpen" as const }], origin: 0, stageDepthTo: 0, houseDepthTo: -50, regions: { R: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: -50 }, { x: 0, y: -50 }] }, spaces: ["R"], roles: { stage: "R", house: "R" }, lines: {}, points: {}, requiredLabels: [], defaults: { proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: 200 / 12, houseDepthFt: 50 / 12 } };
+
+  // A splayed room: the inside face widens from ±10 at y 0 to ±40 at y −50; beyond it an outside span map.
+  const prof: C255T7Keys = { kind: "p", cx: 0, x: { kind: "profile", keys: [{ y: 0, half: 10, drive: "pro" }, { y: -50, half: 40, drive: "house" }], outside: [{ to: 40, drive: "absorb" }] }, ...common };
+  const X = c255T7X(prof, D({ proWidthFt: 40 / 12, houseWidthFt: 160 / 12 }));
+  ok(Math.abs(X(10, 0) - 20) < 1e-9 && Math.abs(X(40, -50) - 80) < 1e-9 && Math.abs(X(25, -25) - 50) < 1e-9, "#255 T7: the profile's inside face maps onto the new face and stays straight");
+  ok(Math.abs(X(12.5, -25) - 25) < 1e-9 && Math.abs(X(45, -25) - 85) < 1e-9 && Math.abs(X(-25, -25) + 50) < 1e-9, "#255 T7: inside points scale with the local half-width; outside points follow the outside map; both sides mirror");
+
+  // A 45° wall: ref (10,−50)→(60,0), its other face 6" to the right, between a floor and a ceiling line, plus a post that ends on the face.
+  const tpl: C255T7Tpl = { kind: "w", source: "w", units: "in", extents: { minX: 0, minY: -50, maxX: 100, maxY: 0 }, arcs: [], labels: [], segments: [[0, -50, 100, -50], [0, 0, 100, 0], [10, -50, 60, 0], [18.485, -50, 68.485, 0], [40, -50, 40, -28.485]] };
+  const walls: C255T7Keys = { kind: "w", cx: 0, x: { kind: "spans", spans: [{ to: 100, drive: "absorb" }] }, ...common, walls: [{ ref: [{ x: 10, y: -50 }, { x: 60, y: 0 }], faces: [[{ x: 18.485, y: -50 }, { x: 68.485, y: 0 }]] }] };
+  const same = c255T7Stretch(tpl, walls, D({ houseWidthFt: 200 / 12 }));
+  ok(same.polylines[3].every((p) => Math.abs(p.y - p.x + 68.485) < 1e-6) && Math.abs(same.polylines[3][0].x - 18.485) < 1e-6, "#255 T7: at the drawing's own size a redrawn wall face is the drawn face");
+  const sp = c255T7Stretch(tpl, walls, D({ houseWidthFt: 300 / 12 })); // x × 1.5: the wall leans to ~34°
+  const A = { x: 15, y: -50 }, B = { x: 90, y: 0 }, L = Math.hypot(B.x - A.x, B.y - A.y);
+  const dist = (p: { x: number; y: number }) => ((B.x - A.x) * (p.y - A.y) - (B.y - A.y) * (p.x - A.x)) / L;
+  ok(sp.polylines[3].length > 5 && sp.polylines[3].every((p) => Math.abs(dist(p) + 6) < 1e-3), "#255 T7: under a non-uniform stretch the other face stays 6\" from the ref, measured perpendicular");
+  const f = sp.polylines[3];
+  ok(Math.abs(f[0].y + 50) < 1e-6 && Math.abs(f[f.length - 1].y) < 1e-6, "#255 T7: the redrawn face still ends on the floor and ceiling lines");
+  const post = sp.polylines[4];
+  ok(Math.abs(post[post.length - 1].x - 60) < 1e-6 && Math.abs(dist(post[post.length - 1]) + 6) < 1e-3 && Math.abs(post[0].y + 50) < 1e-6, "#255 T7: a wall that ended on the face still ends on it; its other end stays put");
+  let threw = false;
+  try {
+    c255T7Stretch(tpl, { ...walls, walls: [{ ref: walls.walls![0].ref, faces: [[{ x: 1, y: 1 }, { x: 2, y: 2 }]] }] }, D({ houseWidthFt: 300 / 12 }));
+  } catch {
+    threw = true;
+  }
+  ok(threw, "#255 T7: a declared face that is not a drawn segment is a keys error");
+}
