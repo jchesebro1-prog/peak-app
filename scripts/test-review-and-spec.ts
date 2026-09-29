@@ -10662,6 +10662,7 @@ seeded()
   .then(() => specKeyPickersAsyncChecks())
   .then(() => specRecordsFinalReviewAsyncChecks())
   .then(() => tier254SaveStampAsyncChecks())
+  .then(() => service254DefaultMarginAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -33757,5 +33758,111 @@ async function tier254SaveStampAsyncChecks(): Promise<void> {
     ok(q2?.pricingTier === base.tier && q2?.tierMargin === base.margin, "#254 review: an update save re-stamps the tier with its lines");
   } finally {
     await removeCustomer(CO);
+  }
+}
+
+/* ======================================================================
+   #254 follow-up — an untiered customer's service quote (flame test,
+   repair, inspection) used to fall back to tier Base's 30% REGISTRY margin
+   for its save stamp, its no-posted-knob fallback, and portal-service
+   pricing — even though the builder's own margin knob already seeds an
+   untiered customer from the SERVICE'S OWN default (baseRates.margin,
+   src/lib/tier-seed.ts seedFor). Numbers matched today only because every
+   service default happens to be 0.30; editing one in Estimating Rules would
+   have silently split the builder's seed from what got saved/priced.
+   Fixed with one pure helper, `serviceMarginFor` (src/lib/pricing-tiers.ts):
+   an untiered (source: "default") resolution uses the service's own
+   default; a resolved contact/company tier is unchanged. Pure checks run at
+   top level; the DB-backed resolution check is registered on the promise
+   chain as service254DefaultMarginAsyncChecks().
+   ====================================================================== */
+import { serviceMarginFor as s254mMarginFor, type ResolvedTier as S254mResolvedTier } from "@/lib/pricing-tiers";
+
+// ---- pure: serviceMarginFor ----
+{
+  const untiered: S254mResolvedTier = { tier: "base", margin: 0.3, source: "default" };
+  const company: S254mResolvedTier = { tier: "gold", margin: 0.2, source: "company" };
+  const contact: S254mResolvedTier = { tier: "platinum", margin: 0.15, source: "contact" };
+  ok(s254mMarginFor(untiered, 0.25) === 0.25,
+    "#254 serviceMarginFor: an untiered (default-source) resolution uses the service's own default margin, not tier Base's registry margin");
+  ok(s254mMarginFor(untiered, 0.3) === 0.3,
+    "#254 serviceMarginFor: numbers still match today when the service default happens to equal tier Base's 30%");
+  ok(s254mMarginFor(company, 0.25) === 0.2, "#254 serviceMarginFor: a company tier is unaffected by the service default");
+  ok(s254mMarginFor(contact, 0.25) === 0.15, "#254 serviceMarginFor: a contact tier is unaffected by the service default");
+}
+
+// ---- pure: the saved <subdoc>.rates.margin is the KNOB value (quoteMargin),
+// never the back-solved effectiveMargin — the reopen fix (initialTierSeed,
+// D457) depends on reading rates.margin, and $25 rounding routinely moves
+// effectiveMargin away from the knob a quote was actually priced at. ----
+{
+  const rates254 = { mileageRate: 0.7, laborRate: 30, curtainMinutes: 5, baseFee: 150, margin: 0.31, travelRoundMin: 15 };
+  const r254 = computeFlameQuote({ venues: [{ id: "v1", label: "Venue", curtains: 3 }] }, rates254);
+  ok(r254.rates.margin === 0.31,
+    "#254 rates.margin: compute()'s returned rates object carries the exact knob margin posted, unchanged by $25 rounding");
+  ok(Math.abs(r254.effectiveMargin - r254.rates.margin) > 0.001,
+    `#254 rates.margin: $25 rounding moves the back-solved effectiveMargin (${r254.effectiveMargin}) away from the knob (${r254.rates.margin}) — a reopen must read rates.margin, never effectiveMargin`);
+}
+
+// ---- structural: the three service save actions + portal-service pricing
+// resolve their margin through serviceMarginFor, stamp tierMargin from it,
+// and persist the KNOB (r.rates, never a hand-built effectiveMargin object)
+// into <subdoc>.rates ----
+{
+  const s254mRead = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  for (const [dir, subdocKey] of [
+    ["flame-tests", "flameTest"],
+    ["repairs", "repair"],
+    ["inspections", "inspection"],
+  ] as const) {
+    const src = s254mRead(`src/app/(app)/${dir}/quote/actions.ts`);
+    ok(/const serviceMargin = serviceMarginFor\(tier, baseRates\.margin\);/.test(src),
+      `#254 ${dir}/quote/actions.ts: the fallback margin (no posted knob) resolves through serviceMarginFor, not the raw tier margin`);
+    ok(/\? Math\.max\(5, Math\.min\(50, marginPts\)\) \/ 100\s*: serviceMargin;/.test(src),
+      `#254 ${dir}/quote/actions.ts: an unposted margin falls back to serviceMargin (never tier.margin)`);
+    ok(/pricingTier: tier\.tier,\s*tierMargin: serviceMargin,/.test(src) && !/tierMargin: tier\.margin,/.test(src),
+      `#254 ${dir}/quote/actions.ts: the saved tierMargin stamp is the service margin everywhere — no stamp still reads the raw tier margin`);
+    ok(new RegExp(`${subdocKey}: \\{\\s*rates: r\\.rates,`).test(src),
+      `#254 ${dir}/quote/actions.ts: the saved <subdoc>.rates is the engine's own rates echo (the KNOB), not a hand-built object`);
+  }
+
+  const portalSrc = s254mRead("src/lib/portal-service-pricing.ts");
+  ok((portalSrc.match(/const serviceMargin = serviceMarginFor\(tier, baseRates\.margin\);/g) || []).length === 2,
+    "#254 portal-service-pricing.ts: both the flame and inspection branches resolve their margin through serviceMarginFor");
+  ok((portalSrc.match(/tierMargin: serviceMargin,/g) || []).length === 2 && !/tierMargin: tier\.margin,/.test(portalSrc),
+    "#254 portal-service-pricing.ts: both returned results stamp tierMargin from the service margin, never the raw tier margin");
+  ok((portalSrc.match(/rates: r\.rates,/g) || []).length === 2,
+    "#254 portal-service-pricing.ts: both subdocs echo the engine's own rates (the knob), matching the staff builders");
+}
+
+/* #254 follow-up (DB-backed): mirrors what persist() in
+ * flame-tests/quote/actions.ts actually does — resolveTier() against a real
+ * customer, then serviceMarginFor() against the live flametest baseRates —
+ * without exercising the server action itself (which needs a request-scoped
+ * session). An untiered customer combined with a flame service default of
+ * 0.25 seeds/stamps at 0.25, never tier Base's registry 30%; a gold-tier
+ * customer is unaffected by that same service-default change. */
+async function service254DefaultMarginAsyncChecks(): Promise<void> {
+  const { getRates: s254GetFlameRates, setRates: s254SetFlameRates } = await import("@/lib/flametest-engine");
+  const { resolveTier: s254ResolveTier } = await import("@/lib/pricing-tiers");
+  const baseFlameRates254 = await s254GetFlameRates();
+  const CO254 = fixtureId(254, "service-default-margin-co");
+  try {
+    await upsertCustomer({ id: CO254, name: "Test254 Service Default Co", type: "Education", pricingTier: "gold", locations: [], contacts: [] });
+    await s254SetFlameRates({ margin: 0.25 });
+
+    const untiered = await s254ResolveTier(null, "");
+    ok(untiered.source === "default", "#254 service default: an unassigned customer resolves to the default source");
+    ok(s254mMarginFor(untiered, (await s254GetFlameRates()).margin) === 0.25,
+      "#254 service default: an untiered customer seeds/stamps at the service's OWN default (0.25), not tier Base's registry 30%");
+
+    const tiered = await s254ResolveTier(CO254, "");
+    ok(tiered.tier === "gold" && tiered.source === "company",
+      "#254 service default: a gold-tier customer still resolves to its own company tier");
+    ok(s254mMarginFor(tiered, (await s254GetFlameRates()).margin) === tiered.margin,
+      `#254 service default: a tiered customer's margin (${tiered.margin}) is unaffected by the flame service default (0.25)`);
+  } finally {
+    await s254SetFlameRates(baseFlameRates254);
+    await removeCustomer(CO254);
   }
 }

@@ -7709,3 +7709,10 @@ and is never re-seeded on load. Its previous seed is the knob itself when the kn
 margin or today's seed; otherwise it's the stamp, or today's seed when there's no stamp. A new quote opened for a
 customer (`?customer=`, inspection hand-off) opens at that customer/contact's seed rather than the flat default.
 Rentals don't seed from tiers, so they're unchanged; consulting has no tiers.
+
+**Follow-up (2026-09-28).** The seed wasn't the whole story: an untiered customer's saved margin (the save
+actions' stamp and fallback, plus portal-service pricing) still fell back to tier Base's 30% registry margin
+rather than the service's own default — harmless while every service default happens to be 0.30, wrong the moment
+Jeff edits one. Fixed everywhere at once (`serviceMarginFor`, src/lib/pricing-tiers.ts): an untiered customer's
+service quote uses the service default everywhere (builder, save stamp, portal); renewal-created quotes carry no
+stamp and reopen as hand-set for a tiered customer (the prompt offers the tier).

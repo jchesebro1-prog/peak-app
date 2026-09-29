@@ -101,6 +101,19 @@ export async function tierMarginByCompany(
   return out;
 }
 
+/**
+ * The margin a service quote actually prices/stamps at: an untiered customer
+ * (`resolveTier`'s `source === "default"`) uses the SERVICE'S OWN default
+ * margin (`serviceDefault` — the service's Estimating Rules `baseRates.margin`,
+ * the same value the builder's margin knob seeds from, src/lib/tier-seed.ts
+ * `seedFor`), never tier Base's registry margin — the two agree today only
+ * because every service default happens to be 0.30 (#254 follow-up; D457).
+ * A resolved contact/company tier is unchanged.
+ */
+export function serviceMarginFor(tier: ResolvedTier, serviceDefault: number): number {
+  return tier.source === "default" ? serviceDefault : tier.margin;
+}
+
 export type BuilderTier = {
   /** Company-level margin (company tier, else Base). */
   margin: number;

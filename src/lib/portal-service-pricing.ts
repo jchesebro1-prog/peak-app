@@ -1,6 +1,6 @@
 import { get as getCustomer, type CustomerDoc } from "@/lib/stores/customers";
 import { coordsOf } from "@/lib/geo";
-import { resolveTier } from "@/lib/pricing-tiers";
+import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { compute as computeFlame, getRates as getFlameRates } from "@/lib/flametest-engine";
 import { computeEstimate as computeInspection, getRates as getInspectionRates } from "@/lib/inspection-engine";
@@ -205,7 +205,10 @@ export async function priceServiceRequest(
 
   if (req.service.kind === "flame") {
     const baseRates = await getFlameRates();
-    const rates = { ...baseRates, margin: tier.margin };
+    // #254 follow-up: an untiered customer prices/stamps at flame testing's
+    // own default margin, not tier Base's registry margin.
+    const serviceMargin = serviceMarginFor(tier, baseRates.margin);
+    const rates = { ...baseRates, margin: serviceMargin };
     const venueInputs = flameVenueInputsFrom(
       req.venues.map((v) => ({ id: v.venueId, curtains: v.count })),
       cust
@@ -253,13 +256,16 @@ export async function priceServiceRequest(
       total: Math.round(r.total),
       margin: r.effectiveMargin,
       tier: tier.tier,
-      tierMargin: tier.margin,
+      tierMargin: serviceMargin,
     };
   }
 
   const level = req.service.level;
   const baseRates = await getInspectionRates();
-  const rates = { ...baseRates, margin: tier.margin };
+  // #254 follow-up: an untiered customer prices/stamps at inspections' own
+  // default margin, not tier Base's registry margin.
+  const serviceMargin = serviceMarginFor(tier, baseRates.margin);
+  const rates = { ...baseRates, margin: serviceMargin };
   const venueInputs = inspectionVenueInputsFrom(
     req.venues.map((v) => ({ id: v.venueId, lineSets: v.count })),
     cust
@@ -313,6 +319,6 @@ export async function priceServiceRequest(
     total: Math.round(r.total),
     margin: r.effectiveMargin,
     tier: tier.tier,
-    tierMargin: tier.margin,
+    tierMargin: serviceMargin,
   };
 }

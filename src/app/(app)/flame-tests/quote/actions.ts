@@ -15,7 +15,7 @@ import {
 } from "@/lib/stores/quotes";
 import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/flametest-engine";
 import { getTravelRates } from "@/lib/stores/pricing";
-import { resolveTier } from "@/lib/pricing-tiers";
+import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
 import { flameVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
@@ -77,9 +77,13 @@ async function persist(formData: FormData): Promise<string | null> {
   if (Object.keys(patch).length) await setRates(patch);
   const baseRates = await getRates();
   const tier = await resolveTier(customerId, contactName);
+  // #254 follow-up: an untiered customer prices/stamps at THIS service's own
+  // default margin (baseRates.margin — same seed the builder knob uses), not
+  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarginFor).
+  const serviceMargin = serviceMarginFor(tier, baseRates.margin);
   const quoteMargin = Number.isFinite(marginPts)
     ? Math.max(5, Math.min(50, marginPts)) / 100
-    : tier.margin;
+    : serviceMargin;
   const rates = { ...baseRates, margin: quoteMargin };
 
   // resolve venue coords from the customer directory + nearest office
@@ -145,7 +149,7 @@ async function persist(formData: FormData): Promise<string | null> {
     value: Math.round(r.total),
     margin: r.effectiveMargin,
     pricingTier: tier.tier,
-    tierMargin: tier.margin,
+    tierMargin: serviceMargin,
     // #248 Task 4 (spec §5): a portal-generated quote (source
     // "portal-service") keeps that source across a staff save — the same
     // rule the Estimator applies to portal-catalog (D416).
