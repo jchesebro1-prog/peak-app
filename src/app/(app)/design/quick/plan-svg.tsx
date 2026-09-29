@@ -95,7 +95,7 @@ export type ProsGeom = ReturnType<typeof prosGeom>;
 
 type XY = { x: number; y: number };
 
-const planKindOf = (s: AState): VenueKind => (VENUES.find((v) => v.key === s.venue) || VENUES[0]).kind || "proscenium";
+const planKindOf = (s: Pick<AState, "venue">): VenueKind => (VENUES.find((v) => v.key === s.venue) || VENUES[0]).kind || "proscenium";
 
 /**
  * The template a plan draws — and its wall handles drag (#255): a known id as
@@ -103,7 +103,7 @@ const planKindOf = (s: AState): VenueKind => (VENUES.find((v) => v.key === s.ven
  * a kind drawn by its built-in schematic). buildPlan, houseDragPatch and the
  * geometries all resolve through this, so the handles always drag what's drawn.
  */
-const planTemplate = (s: AState, tpl: string | null | undefined): string | null =>
+export const planTemplate = (s: Pick<AState, "venue">, tpl: string | null | undefined): string | null =>
   tpl && templateEntry(tpl) ? tpl : resolveBackground([], null, planKindOf(s));
 
 /**
@@ -180,11 +180,14 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const half = 2.5 * ppf;
   // The aisle-side ends round away from the aisle, so a 0.1-px rounding never narrows it.
   const down = (n: number) => Math.floor(n * 10 + 1e-9) / 10, up = (n: number) => Math.ceil(n * 10 - 1e-9) / 10;
-  // Pews paint after the mix box's white knock-out, so a row crossing it stops 2 px short of each side.
+  // Pews paint after the mix box's white knock-out, so a row crossing it stops 2 px short of each side — and,
+  // when the CONSOLE mark is drawn under the booth (buildPlanChurch: 3–14 px below it), short of that too.
   const gap = 2, mixL = R(mixBox.x - gap), mixR = R(mixBox.x + mixBox.w + gap);
+  const consoleMark = !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console) && booth === mixBox;
+  const clipBot = mixBox.y + mixBox.h + (consoleMark ? 16 : gap);
   const push = (x1: number, x2: number, y: number) => {
     const yy = R(y);
-    const spans: Array<[number, number]> = yy >= mixBox.y - gap && yy <= mixBox.y + mixBox.h + gap && x1 < mixR && x2 > mixL ? [[x1, Math.min(x2, mixL)], [Math.max(x1, mixR), x2]] : [[x1, x2]];
+    const spans: Array<[number, number]> = yy >= mixBox.y - gap && yy <= clipBot && x1 < mixR && x2 > mixL ? [[x1, Math.min(x2, mixL)], [Math.max(x1, mixR), x2]] : [[x1, x2]];
     for (const [a, b] of spans) if (b - a > ppf) pews.push({ x1: a, x2: b, y: yy });
   };
   for (let y = yFront + 6 * ppf; y <= yNaveBack - 8 * ppf + 1e-6; y += 3 * ppf) {
@@ -443,12 +446,15 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
         for (let k = 0; k < dn; k++) L.circles.push({ cx: R(x1 + ((k + 0.5) / dn) * (x2 - x1)), cy: R(y), r: 2.4, fill: SYSCOLOR.lighting });
       }
     });
-  if (s.sys.audio) [G.platFrontL, G.platFrontR].forEach((p, i) => L.rects.push({ x: R(p.x + (i ? 8 : -18)), y: R(p.y - 22), w: 10, h: 14, fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, rx: 2, dash: "" }));
+  // Marks over the Nave's fill are paths, not rects: rects paint before paths, i.e. under the fill.
+  const box = (x: number, y: number, w: number, h: number) => "M " + R(x) + " " + R(y) + " h " + w + " v " + h + " h " + -w + " Z";
+  // Loudspeakers stand in the Nave beside the platform step, centred in its 4' notch (2' upstage of the front edge).
+  if (s.sys.audio) [G.platFrontL, G.platFrontR].forEach((p, i) => L.paths.push({ d: box(p.x + (i ? 8 : -18), p.y - 2 * G.ppf - 7, 10, 14), fill: "#eef0f3", stroke: "#3155a8", sw: 1.2 }));
   for (const p of G.pews) L.lines.push({ x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: "#cdd1d9", sw: 1.4, dash: "" });
   mixPos(L, G.mix.x, G.mix.y, G.mixBox.w);
   if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
     const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
-    L.rects.push({ x: R(bcx - cw / 2), y: R(bx.y + bx.h + 3), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+    L.paths.push({ d: box(bcx - cw / 2, bx.y + bx.h + 3, cw, 4.5), fill: SYSCOLOR.controls, stroke: "none" });
     L.texts.push({ x: R(bcx), y: R(bx.y + bx.h + 14), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
   // #255: drag handles — each side wall sets nave width, the back wall nave depth

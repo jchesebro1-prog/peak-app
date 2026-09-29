@@ -7,7 +7,6 @@ import { buildEquipmentPriceTable } from "./equipment-map";
 import { autoEstimateCards, autoQuoteNeedsPart, clampScopeInputs, priceOverrides } from "./auto-estimate";
 import { generateAutoLayout } from "./grid-auto-layout";
 import { autoEstimateFor, keptUnitsByRow, overrideRefs } from "./grid-auto-model";
-import { PROSCENIUM_TEMPLATE_ID } from "@/lib/design/venue-templates/proscenium";
 import { defaultOptionId } from "./grid-options";
 
 // Server-only (the `server-only` package isn't installed here): fail loudly if a client bundle ever pulls it in.
@@ -61,8 +60,9 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   // recorded) count toward each row's new quantity. Read from the same
   // project snapshot the fill priced; the replace below never removes them.
   const kept = keptUnitsByRow(project.placements || [], scopes, optionId);
-  // #249: a base sheet the template didn't draw keeps the old frame.
-  const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept, legacy: project.intake?.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID });
+  // #249/#255: the frame of the drawing the base sheet was stamped with; an unstamped (pre-template) sheet keeps its old frame.
+  const stamp = project.intake?.baseSheetTemplate;
+  const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept, legacy: !stamp, template: stamp ?? null });
   const res = await replaceAutoPlacements(projectId, { optionId, scopes, sheetId, page: 1, items, by });
   if (!res) return { ok: false, error: "That option was removed — refresh the page." };
   return {

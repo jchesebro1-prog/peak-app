@@ -41,10 +41,8 @@ import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "
 import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
-import { buildPlan, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
-import { legacyChurchGeom } from "@/lib/design/legacy-church-geom";
-import { PROSCENIUM_TEMPLATE_ID } from "@/lib/design/venue-templates/proscenium";
-import { PROSCENIUM_SPACES } from "@/lib/design/venue-templates/proscenium.keys";
+import { buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { templateEntry } from "@/lib/design/venue-templates";
 import {
   autoEstimatesOf,
   cleanLotQty,
@@ -244,7 +242,7 @@ export type GridProject = {
     notes: string;
     /** Shared Quick Design inputs; the Grid editor is their manual-layout workspace. */
     autoConfig?: AState;
-    /** #249: the venue template that drew the generated base sheet ("proscenium@1"); absent = the pre-#249 schematic. */
+    /** #249/#255: the venue template id that drew the generated base sheet ("proscenium@1", "church-traditional@1", …); absent = a pre-template schematic. */
     baseSheetTemplate?: string;
   };
   /** Sheet display order; the docs live in grid_sheets. */
@@ -366,55 +364,26 @@ export async function createProject(input: {
 }
 
 /**
- * Starter Spaces for a generated base sheet (Task 1, #38 — D145). Proscenium
- * Spaces come straight from the template's own labeled regions (#249) — one
- * Space per region name in `PROSCENIUM_SPACES`, outlined from the stretched
- * drawing (`prosGeom`), so they land exactly where the template drew them
- * (Pit absent when the pit is off). Church venues get Spaces drawn from the
- * SAME geometry the plan itself used (`churchGeom`, already exported for
- * exactly this kind of reuse), so "Stage"/"Audience view"/"FOH · control"
- * land roughly where the real stage, house and booth are instead of
- * arbitrary fixed fractions.
- *
- * The other buildable kinds (flat, blackbox, gym) compute their room/booth
- * geometry as private local variables inside their own buildPlan* function —
- * there's no exported equivalent of prosGeom/churchGeom for them, and
- * reverse-engineering each one's private margins here to get one would be
- * more than the "small addition" this task calls for. They keep the old
- * fixed-fraction Spaces; follow-up noted in DECISIONS.md D145.
+ * Starter Spaces for a generated base sheet (Task 1, #38 — D145; #249, #255).
+ * A template-drawn sheet gets one Space per labeled area of its drawing, in
+ * the keys' Space order, named by the area's display label and outlined from
+ * the stretched drawing (the proscenium Pit only when on). Kinds without a
+ * drawing keep the fixed-fraction Spaces (follow-up D145).
  */
 export function starterSpaces(
   a: AState,
   kind: VenueKind,
-  sheetId: string
+  sheetId: string,
+  tpl?: string | null
 ): Array<{ sheetId: string; page: number; name: string; points: Point[] }> {
-  if (kind === "proscenium") {
-    // #249: one Space per labeled area of the template, outlined from the stretched drawing.
-    const G = prosGeom(a);
+  // Resolved exactly as buildPlan draws it (planTemplate: a known id as named, else the default of
+  // `a`'s plan kind — the same kind the caller passes as `kind`).
+  const id = planTemplate(a, tpl);
+  const family = templateEntry(id)?.family;
+  if (family) {
+    const G = family === "church" ? churchGeom(a, id) : prosGeom(a, id);
     const at = (p: Point): Point => ({ x: clamp01(p.x / G.W), y: clamp01(p.y / G.H) });
-    return PROSCENIUM_SPACES.filter((name) => G.regions[name]).map((name) => ({ sheetId, page: 1, name, points: G.regions[name].map(at) }));
-  }
-  if (kind === "church") {
-    const G = legacyChurchGeom(a);
-    // churchGeom computes its booth bottom edge as a local (y1 + boothH) but
-    // doesn't return it — recomputed the same way here rather than changing
-    // that function's return shape for a caller outside plan-svg.tsx.
-    const boothBottom = G.y1 + G.boothH;
-    const at = (x: number, y: number): Point => ({ x: clamp01(x / G.W), y: clamp01(y / G.H) });
-    return [
-      {
-        sheetId, page: 1, name: "Stage",
-        points: [at(G.stage.x, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y + G.stage.h), at(G.stage.x, G.stage.y + G.stage.h)],
-      },
-      {
-        sheetId, page: 1, name: "Audience view",
-        points: [at(G.x0, G.pBot), at(G.x1, G.pBot), at(G.x1, G.seatBot), at(G.x0, G.seatBot)],
-      },
-      {
-        sheetId, page: 1, name: "FOH / control",
-        points: [at(G.cx - G.boothW / 2, G.y1), at(G.cx + G.boothW / 2, G.y1), at(G.cx + G.boothW / 2, boothBottom), at(G.cx - G.boothW / 2, boothBottom)],
-      },
-    ];
+    return G.spaces.filter((rid) => G.regions[rid]).map((rid) => ({ sheetId, page: 1, name: G.regionLabels[rid] ?? rid, points: G.regions[rid].map(at) }));
   }
   return [
     { sheetId, page: 1, name: "Audience view", points: [{ x: 0.08, y: 0.58 }, { x: 0.92, y: 0.58 }, { x: 0.92, y: 0.9 }, { x: 0.08, y: 0.9 }] },
@@ -434,10 +403,18 @@ export async function generateBaseSheet(
   projectId: string,
   a: AState,
   accent: string,
-  by: string
+  by: string,
+  tpl?: string | null
 ): Promise<GridSheet | null> {
+  const venue = VENUES.find((v) => v.key === a.venue) || VENUES[0];
+  const kind = venue.kind || "proscenium";
+  // #255: the template the caller resolved (the design's effective Background). Resolved exactly as
+  // buildPlan draws it (planTemplate: a known id as named, else the kind default), so the stamp,
+  // calibration and Spaces always describe the drawing on the sheet.
+  const id = planTemplate(a, tpl);
+  const family = templateEntry(id)?.family;
   const { lineSets, electrics } = compute(a);
-  const plan = buildPlan(a, lineSets, electrics, accent);
+  const plan = buildPlan(a, lineSets, electrics, accent, id);
   const markup = renderPlanSvgMarkup(plan, accent);
   const sheet = await addSheet(projectId, {
     name: "Generated base plan",
@@ -449,21 +426,24 @@ export async function generateBaseSheet(
 
   // Auto-calibrate from the plan's own known geometry so nothing downstream
   // ever prompts for a calibration step on this sheet (Task 1 acceptance).
-  // A proscenium calibrates from the template's inner stage walls, exactly
-  // pro width + 2 × wing apart (#249). Every other buildPlan* function's
-  // FIRST rect is the outer room/house floor — its real-world width is the
-  // venue's full width in feet — a reference that holds for every other
-  // venue kind without needing each builder's private margin constants (see
-  // starterSpaces above for why those aren't all exported).
-  const venue = VENUES.find((v) => v.key === a.venue) || VENUES[0];
-  const kind = venue.kind || "proscenium";
+  // A proscenium template calibrates from its inner stage walls, exactly
+  // pro width + 2 × wing apart (#249); a church template from the nave's
+  // inside walls, exactly the nave width apart (#255). Every schematic
+  // buildPlan* function's FIRST rect is the outer room/house floor — its
+  // real-world width is the venue's full width in feet — a reference that
+  // holds for the schematic kinds without their private margin constants.
   let scale: number | null = null;
   let refWidthFt = a.width;
-  if (kind === "proscenium") {
+  if (family === "proscenium") {
     // #249: the template's inner stage walls are exactly pro width + 2 × wing apart.
-    const G = prosGeom(a);
+    const G = prosGeom(a, id);
     refWidthFt = G.dims.proWidthFt + 2 * G.dims.wingFt;
     scale = calibrationScale({ x: G.xWingL / plan.W, y: G.yBack / plan.H }, { x: G.xWingR / plan.W, y: G.yBack / plan.H }, plan.H / plan.W, refWidthFt);
+  } else if (family === "church") {
+    // #255: the nave's inside walls are exactly the nave width apart.
+    const G = churchGeom(a, id);
+    refWidthFt = G.dims.houseWidthFt;
+    scale = calibrationScale({ x: G.naveL.x / plan.W, y: G.naveL.y / plan.H }, { x: G.naveR.x / plan.W, y: G.naveR.y / plan.H }, plan.H / plan.W, refWidthFt);
   } else {
     const room = plan.rects[0];
     scale = room
@@ -482,12 +462,12 @@ export async function generateBaseSheet(
     });
   }
 
-  for (const sp of starterSpaces(a, kind, sheet.id)) {
+  for (const sp of starterSpaces(a, kind, sheet.id, id)) {
     await addSpace(projectId, { ...sp, by });
   }
-  if (kind === "proscenium") {
+  if (id && family) {
     await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-      if (p.intake) p.intake.baseSheetTemplate = PROSCENIUM_TEMPLATE_ID;
+      if (p.intake) p.intake.baseSheetTemplate = id;
     });
   }
   return sheet;

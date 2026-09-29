@@ -1,9 +1,11 @@
 /**
  * The Grid — Auto fill placement rules (#211, spec §5). Pure. Turns priced
  * Auto cards into placement specs on the GENERATED base sheet, using the same
- * venue geometry the sheet was drawn from (prosGeom / churchGeom, and for the
- * other kinds the fixed-fraction frame starterSpaces() in grid-projects.ts
- * already uses for Stage / Audience view / FOH·control).
+ * venue geometry the sheet was drawn from — the stamped template's (prosGeom /
+ * churchGeom), a pre-template sheet's legacy schematic (legacyProsGeom /
+ * legacyChurchGeom), and for the other kinds the fixed-fraction frame
+ * starterSpaces() in grid-projects.ts uses for Stage / Audience view /
+ * FOH·control.
  *
  * Rules (normalized 0..1, y grows downstage toward the house):
  *  - Lighting: pars / movers in rows on each electric (grid-seed's old row
@@ -22,7 +24,8 @@
  */
 import { clamp01, type Point } from "@/lib/annotations";
 import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
-import { prosGeom } from "@/app/(app)/design/quick/plan-svg";
+import { churchGeom, planTemplate, prosGeom } from "@/app/(app)/design/quick/plan-svg";
+import { templateEntry } from "@/lib/design/venue-templates";
 import { legacyChurchGeom } from "./legacy-church-geom";
 import { legacyProsGeom } from "./legacy-pros-geom";
 import type { GridCurtain } from "./grid-bom";
@@ -32,20 +35,39 @@ import { EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { allowancePartId, assemblyPartId } from "./grid-virtual-parts";
 
 export type Rect = { x: number; y: number; w: number; h: number };
-/** Normalized to the base sheet. `catwalk` / `stageEdge` exist only on the #249 template plan. */
+/** Normalized to the base sheet. `catwalk` / `stageEdge` exist only where the drawing's template has them (#249 Auditorium). */
 export type VenueFrame = { stage: Rect; audience: Rect; booth: Rect; catwalk?: Rect; stageEdge?: Point[] };
 export const EACH_CAP = 120;
 
-export function venueFrame(a: AState, opts: { legacy?: boolean } = {}): VenueFrame {
+export function venueFrame(a: AState, opts: { legacy?: boolean; template?: string | null } = {}): VenueFrame {
   const kind = venueOf(a).kind || "proscenium";
-  if (kind === "proscenium" && !opts.legacy) {
-    // #249: the template's own House, Booth and Catwalk, and its stage-edge curve.
-    const G = prosGeom(a);
-    const n = (r: Rect): Rect => ({ x: r.x / G.W, y: r.y / G.H, w: r.w / G.W, h: r.h / G.H });
-    return { stage: n(G.stage), audience: n(G.house), booth: n(G.booth), ...(G.catwalk ? { catwalk: n(G.catwalk) } : {}), stageEdge: G.stageEdge.map((p) => ({ x: p.x / G.W, y: p.y / G.H })) };
+  if (!opts.legacy) {
+    // #249/#255: the frame of the drawing the sheet was drawn from — resolved exactly as buildPlan
+    // draws it (planTemplate: a known id as named, else the kind default).
+    const id = planTemplate(a, opts.template);
+    const family = templateEntry(id)?.family;
+    const W = (g: { W: number; H: number }) => (r: Rect): Rect => ({ x: r.x / g.W, y: r.y / g.H, w: r.w / g.W, h: r.h / g.H });
+    if (family === "proscenium") {
+      // The template's own House, Booth and Catwalk, and its stage-edge curve.
+      const G = prosGeom(a, id);
+      const n = W(G);
+      return {
+        stage: n(G.stage),
+        audience: n(G.house),
+        booth: n(G.booth),
+        ...(G.catwalk ? { catwalk: n(G.catwalk) } : {}),
+        ...(G.stageEdge.length > 1 ? { stageEdge: G.stageEdge.map((p) => ({ x: p.x / G.W, y: p.y / G.H })) } : {}),
+      };
+    }
+    if (family === "church") {
+      // The template's Platform and Nave; its booth, or the plan's FOH mix position (today's church rule).
+      const G = churchGeom(a, id);
+      const n = W(G);
+      return { stage: n(G.platform), audience: n(G.nave), booth: n(G.booth) };
+    }
   }
   if (kind === "proscenium") {
-    // A base sheet drawn before #249 keeps the old schematic's frame, so a re-fill lands on the plan the design has.
+    // A base sheet no template drew (before #249) keeps the old schematic's frame, so a re-fill lands on the plan the design has.
     const G = legacyProsGeom(a);
     const r = (x: number, y: number, w: number, h: number): Rect => ({ x: x / G.W, y: y / G.H, w: w / G.W, h: h / G.H });
     return {
@@ -55,6 +77,7 @@ export function venueFrame(a: AState, opts: { legacy?: boolean } = {}): VenueFra
     };
   }
   if (kind === "church") {
+    // A church sheet no template drew (before #255) keeps the old schematic's frame.
     const G = legacyChurchGeom(a);
     const r = (x: number, y: number, w: number, h: number): Rect => ({ x: x / G.W, y: y / G.H, w: w / G.W, h: h / G.H });
     return {
@@ -214,17 +237,18 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
  * Placement specs for the given cards (spec §5). `a` is the geometry the base
  * sheet was drawn from (intake.autoConfig); `opts` are that design's electric
  * and set counts (compute()), plus `kept` — units per row already on the plan
- * by hand (keptUnitsByRow, D320), subtracted before placing — and `legacy`,
- * true when the base sheet predates the #249 template, so the fill lands on
- * the plan the design actually has. Every spec carries
- * `auto: { scope, rowKey, tier }`.
+ * by hand (keptUnitsByRow, D320), subtracted before placing — `template`,
+ * the id the base sheet was stamped with (intake.baseSheetTemplate), and
+ * `legacy`, true when no template drew the sheet (pre-#249 proscenium,
+ * pre-#255 church), so the fill lands on the plan the design actually has.
+ * Every spec carries `auto: { scope, rowKey, tier }`.
  */
 export function generateAutoLayout(
   a: AState,
   cards: AutoCard[],
-  opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>>; legacy?: boolean }
+  opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>>; legacy?: boolean; template?: string | null }
 ): AutoPlacementSpec[] {
-  const f = venueFrame(a, { legacy: opts.legacy });
+  const f = venueFrame(a, { legacy: opts.legacy, template: opts.template });
   const out: AutoPlacementSpec[] = [];
   const lots = new Map<SysKey, number>();
   for (const card of cards) {

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
-import type { QuickScopeInputs, SysKey, TierKey } from "@/app/(app)/design/quick/engine";
+import { venueOf, type QuickScopeInputs, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
 import {
   addCurtainPlacement,
   addOption,
@@ -96,6 +96,8 @@ import { isFabricRow } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
 import { getSettings } from "@/lib/settings";
+import { effectiveTemplateFor, sanitizeTemplateId } from "@/lib/design/venue-templates";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { displayQuoteNumber } from "@/lib/estimate-number";
@@ -285,6 +287,13 @@ export async function saveGridIntakeAction(input: {
   const linked = await resolveIntakeCustomer(input.customer);
   if (!linked.ok) return { ok: false, error: linked.error };
   const site = linked.locationId ? siteForLocId(await sitesForCompany(linked.customerId), linked.locationId) : null;
+  // #255: the design's venue type is its venue's (the site's venue_kind) — it picks the plan's Background;
+  // a per-design Background override survives only when the plan kind can draw it.
+  const autoConfig: AState = {
+    ...input.autoConfig,
+    venueType: site?.venueKind ?? null,
+    templateId: sanitizeTemplateId(venueOf(input.autoConfig).kind, input.autoConfig.templateId),
+  };
   // A cover page left blank takes the chosen venue's names and address.
   const fromVenue = site
     ? coverFromVenue({ label: site.name, locationName: site.locationName, address: site.address, city: site.city, state: site.state }, linked.customerName)
@@ -310,7 +319,7 @@ export async function saveGridIntakeAction(input: {
     locationName: locationName.trim(),
     address: address.trim(),
     notes: input.notes.trim(),
-    autoConfig: input.autoConfig,
+    autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
   // First-save gate (D145) — see the pre-#211 comment: idempotent re-applies
@@ -337,7 +346,7 @@ export async function saveGridIntakeAction(input: {
       projectName: project.name,
       venueName,
       locationName,
-      a: input.autoConfig,
+      a: autoConfig,
       title: input.title,
       customer: { customer: linked.customerName, customerId: linked.customerId, locationId: linked.locationId || null },
     });
@@ -345,7 +354,9 @@ export async function saveGridIntakeAction(input: {
     const designs = await designsForGridProject(input.projectId);
     for (const d of designs) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
-    await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
+    // #255: the sheet draws the design's effective template (its override ?? its venue type's Background ?? the kind default).
+    const tpl = effectiveTemplateFor(venueOf(autoConfig).kind, autoConfig, venueTypesFrom((await getSettings()).venueTypes));
+    await generateBaseSheet(input.projectId, autoConfig, "#3a3f4a", user.name, tpl);
     if (est && estimateSaved) {
       // #211 fix wave 1 (I1): a thrown error here (not just a returned
       // {ok:false}) must not fail the whole save — the base sheet, scope

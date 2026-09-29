@@ -10664,6 +10664,7 @@ seeded()
   .then(() => tier254SaveStampAsyncChecks())
   .then(() => service254DefaultMarginAsyncChecks())
   .then(() => specRecordDupSectionAsyncChecks())
+  .then(() => c255T6GridAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -30744,7 +30745,7 @@ async function grid249T5AsyncChecks(): Promise<void> {
   p = (await GP.getProject(gp.id))!;
   ok(p.intake?.baseSheetTemplate === vt249dTplId && p.intake?.notes === "edited", "#249 T5: re-saving the intake keeps the template stamp");
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
-  ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#249 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
+  ok(/legacy:\s*!stamp/.test(fill), "#249 T5 (updated #255): Auto fill uses the old frame only for a design whose sheet no template drew");
   const intake = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/grid-intake.tsx"), "utf8");
   ok(intake.includes("houseFields(") && intake.includes("f.warning"), "#249 T5 (updated #255): the Grid intake shows the template's house rows and its warning");
   ok(intake.includes("<FeetInput label={r.label}"), "#249 T5: the intake's house inputs are labeled for screen readers by name");
@@ -34244,4 +34245,68 @@ import { defaultBackground as c255T5Default, effectiveTemplateFor as c255T5Effec
   ok(qd.includes("effectiveTemplateFor(") && qd.includes("buildPlan(a, gridSets(a, tierDefs), C.electrics, accentHex, bg)") && /houseDragPatch\([\s\S]{0,300}?,\s*bg\)/.test(qd) && /buildPlan\([^;]*effectiveTemplateFor\(/.test(dc), "#255 T5: Quick Design and saved Designs draw (and drag) the design's effective template");
   const sip = read("src/components/design/scope-inputs-panel.tsx"), gi = read("src/app/(app)/design/grid/[id]/grid-intake.tsx");
   ok(/showHouse \? houseFields\(/.test(sip) && sip.includes("templateId:") && gi.includes("houseFields(") && gi.includes("templateId:") && gi.includes("pickedVenueType"), "#255 T5: both panels show the effective template's house rows and a template choice");
+}
+
+/* --- #255 T6: Grid — church Spaces, Auto-fill frame, stamp --- */
+import { buildPlan as c255T6Build, churchGeom as c255T6Geom, renderPlanSvgMarkup as c255T6Markup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T6Default } from "@/app/(app)/design/quick/engine";
+import { generateAutoLayout as c255T6Layout, venueFrame as c255T6Frame } from "@/lib/design/grid-auto-layout";
+import { legacyChurchGeom as c255T6Legacy } from "@/lib/design/legacy-church-geom";
+import { CHURCH_TRADITIONAL_SPACES as c255T6Spaces } from "@/lib/design/venue-templates/church-traditional.keys";
+import type { AutoCard as C255T6Card } from "@/lib/design/auto-estimate";
+import { sanitizeTemplateId as c255T6SanTpl } from "@/lib/design/venue-templates";
+async function c255T6GridAsyncChecks(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const base = c255T6Default(0);
+  const a = { ...base, venue: "church", width: 34, depth: 22, sys: { ...base.sys, audio: true, lighting: true } };
+  ok(GP.starterSpaces(a, "church", "sh").map((s) => s.name).join("|") === [...c255T6Spaces].join("|"), "#255 T6: a church base sheet starts with Platform, Apse, Nave, Entry, Choir Room, Electrical Room, Cry Room and Storage");
+  // Task 5 review: pews also stop short of the CONSOLE mark drawn under the FOH mix box (a 140' nave's 5' aisle is narrower than the mark).
+  const wide = { ...a, houseWidthFt: 140, sys: { ...a.sys, controls: true }, ctrl: { ...a.ctrl, console: true } };
+  const GW = c255T6Geom(wide), band = { x: GW.mixBox.x, x2: GW.mixBox.x + GW.mixBox.w, y: GW.mixBox.y, y2: GW.mixBox.y + GW.mixBox.h + 16 };
+  const inBand = (p: { y: number }) => p.y >= band.y && p.y <= band.y2;
+  ok(GW.pews.some(inBand) && GW.pews.filter(inBand).every((p) => p.x2 < band.x || p.x1 > band.x2) && c255T6Markup(c255T6Build(wide, 8, 3, "#3a3f4a"), "#3a3f4a").includes(">CONSOLE<"), "#255 T6: no pew crosses the FOH mix box or the CONSOLE mark under it — a 140' nave");
+  const noCon = c255T6Geom({ ...wide, ctrl: { ...wide.ctrl, console: false } });
+  ok(noCon.pews.some((p) => p.y > GW.mixBox.y + GW.mixBox.h + 2 && p.y <= band.y2 && p.x1 < band.x2 && p.x2 > band.x), "#255 T6: …and without a console the rows under the mix box run through as before");
+  // Render review: the loudspeaker marks and the CONSOLE bar paint over the Nave fill (rects render before paths), inside the Nave.
+  const inNave = (g: typeof GW, x: number, y: number) => {
+    const poly = g.regions.Nave;
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if (poly[i].y > y !== poly[j].y > y && x < ((poly[j].x - poly[i].x) * (y - poly[i].y)) / (poly[j].y - poly[i].y) + poly[i].x) c = !c;
+    return c;
+  };
+  const marksOk = [34, 90, 120, 140].every((hw) => {
+    const st = { ...wide, houseWidthFt: hw, sys: { ...wide.sys, audio: true } }, g = c255T6Geom(st);
+    const svg = c255T6Markup(c255T6Build(st, 8, 3, "#3a3f4a"), "#3a3f4a");
+    const fillAt = svg.indexOf('fill="#f6f7f9"'), spk = [...svg.matchAll(/<path d="M ([\d.]+) ([\d.]+) h 10 v 14 h -10 Z" fill="#eef0f3" stroke="#3155a8"/g)];
+    return spk.length === 2 && spk.every((m) => m.index! > fillAt && inNave(g, +m[1], +m[2]) && inNave(g, +m[1] + 10, +m[2] + 14)) && /<path d="[^"]*" fill="#1f7a52"/.test(svg.slice(fillAt));
+  });
+  ok(marksOk, "#255 T6: church loudspeaker marks and the CONSOLE bar draw over the Nave fill, the speakers inside the Nave beside the platform step — 34' to 140' naves");
+  const fr = c255T6Frame(a, { template: "church-traditional@1" }), G = c255T6Geom(a);
+  ok(Math.abs(fr.stage.y - G.platform.y / G.H) < 1e-12 && Math.abs(fr.audience.y - G.nave.y / G.H) < 1e-12 && Math.abs(fr.booth.x - G.booth.x / G.W) < 1e-12, "#255 T6: the church Auto-fill frame is the template's Platform, Nave and FOH-mix position");
+  const old = c255T6Frame(a, { legacy: true }), L = c255T6Legacy(a);
+  ok(Math.abs(old.audience.y - L.pBot / L.H) < 1e-12 && Math.abs(old.booth.y - L.y1 / L.H) < 1e-12, "#255 T6: a church sheet drawn before #255 keeps the old frame");
+  const line = (rowKey: string, ref: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref, unitCost: 1, unitSell: 1, total: qty, swapped: false });
+  const cards = [{ scope: "audio", tier: "better", lines: [line("audio:mixerDsp", "C255-MIX", 1)] }] as unknown as C255T6Card[];
+  const mix = c255T6Layout(a, cards, { electrics: 2, sets: 6, template: "church-traditional@1" }).find((s) => s.auto.rowKey === "audio:mixerDsp")!;
+  ok(!!mix && mix.x >= fr.booth.x && mix.x <= fr.booth.x + fr.booth.w && mix.y >= fr.booth.y && mix.y <= fr.booth.y + fr.booth.h, "#255 T6: the mixer lands at the church's FOH mix position (today's church rule)");
+
+  const gp = await GP.createProject({ name: "Test255 church sheet", customer: "", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  await GP.saveGridIntake(gp.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "Church", address: "", notes: "", autoConfig: a });
+  const sheet = await GP.generateBaseSheet(gp.id, a, "#3a3f4a", "Test Harness", "church-traditional@1");
+  if (sheet) registerFixture("grid_sheets", sheet.id);
+  let p = (await GP.getProject(gp.id))!;
+  ok(p.intake?.baseSheetTemplate === "church-traditional@1" && (p.spaces || []).map((s) => s.name).join("|") === [...c255T6Spaces].join("|"), "#255 T6: generating a church base sheet stamps church-traditional@1 and adds the template's Spaces");
+  const cal = (p.calibrations || []).find((c) => c.docId === sheet?.id);
+  ok(!!cal && cal.unit === "ft" && Math.abs(cal.refLength - 959.698 / 12) < 1e-9, "#255 T6: the church sheet is calibrated from the nave's inside walls");
+  await GP.saveGridIntake(gp.id, { ...p.intake!, baseSheetTemplate: undefined, notes: "edited" });
+  p = (await GP.getProject(gp.id))!;
+  ok(p.intake?.baseSheetTemplate === "church-traditional@1", "#255 T6: re-saving the intake keeps the stamp");
+  const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
+  ok(/legacy:\s*!stamp/.test(fill) && /template:\s*stamp \?\? null/.test(fill), "#255 T6: Auto fill uses the frame of the drawing the sheet was stamped with");
+  const act = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+  ok(act.includes("venueType: site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
+  // Task 5 review: a client's per-design Background is kept only when the plan kind can draw it.
+  ok(c255T6SanTpl("church", "church-traditional@1") === "church-traditional@1" && c255T6SanTpl("church", "proscenium@1") === null && c255T6SanTpl("gym", "proscenium@1") === null && c255T6SanTpl("church", "church-bogus@9") === null && c255T6SanTpl("church", 42) === null && c255T6SanTpl("proscenium", null) === null, "#255 T6: a design's Background override survives only when it is a template its plan kind can draw");
+  ok(act.includes("templateId: sanitizeTemplateId(") && act.indexOf("templateId: sanitizeTemplateId(") < act.indexOf("saveGridIntake(input.projectId"), "#255 T6: the intake drops a Background override the venue kind can't draw before saving");
 }

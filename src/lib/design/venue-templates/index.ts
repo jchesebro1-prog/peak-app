@@ -95,14 +95,18 @@ export function resolveBackground(types: readonly VenueType[], typeKey: string |
   return defaultBackground(wl, baseKey);
 }
 
+/** A design's per-design Background override, kept only when it is a template its plan kind can draw; else null. */
+export function sanitizeTemplateId(planKind: VenueKind, raw: unknown): string | null {
+  const wl = PLAN_KIND_WORKS_LIKE[planKind];
+  return typeof raw === "string" && templatesFor(wl).some((t) => t.id === raw) ? raw : null;
+}
+
 /** A design's effective template: its own override ?? its venue type's Background ?? the kind default. */
 export function effectiveTemplateFor(
   planKind: VenueKind,
   a: { venueType?: string | null; templateId?: string | null },
   types: readonly VenueType[]
 ): string | null {
-  const wl = PLAN_KIND_WORKS_LIKE[planKind];
-  if (!wl) return null;
-  if (a.templateId && templatesFor(wl).some((t) => t.id === a.templateId)) return a.templateId;
-  return resolveBackground(types, a.venueType, planKind);
+  if (!PLAN_KIND_WORKS_LIKE[planKind]) return null;
+  return sanitizeTemplateId(planKind, a.templateId) ?? resolveBackground(types, a.venueType, planKind);
 }
