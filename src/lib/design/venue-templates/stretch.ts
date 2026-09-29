@@ -1,4 +1,4 @@
-import type { PathItem, Pt, StretchDims, StretchedPlan, TemplateKeys, TrueArcGroup, VenueTemplate, WallPair, XSpan } from "./types";
+import type { Movable, PathItem, PlacedMovable, Pt, StretchDims, StretchedPlan, TemplateKeys, TemplateLabel, TrueArcGroup, VenueTemplate, WallPair, XSpan } from "./types";
 
 /**
  * The venue-template stretch (#249, #255). Pure. Every point moves through a
@@ -316,6 +316,109 @@ function redrawWalls(segs: Seg[], polys: Array<Pt[] | null>, walls: WallPair[], 
   };
 }
 
+type Owned = Map<string, { segs: Array<[Pt, Pt]>; labels: TemplateLabel[] }>;
+
+/**
+ * #255: re-place each movable element against its wall (see Movable) — its drawn size kept, on the wall's right
+ * (outside the room), turned with the wall — then resolve each wall: nobody past the run's ends, `movableGap`
+ * between neighbours. A wall that can't take its elements warns and marks them `fits: false`. `map` places the
+ * walls and home anchors (the stretch's own point map, redrawn wall faces included).
+ */
+function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owned: Owned) {
+  const out = { polylines: [] as Pt[][], labels: [] as TemplateLabel[], regions: {} as Record<string, Pt[]>, movables: {} as Record<string, PlacedMovable>, warnings: [] as string[] };
+  const movs: Movable[] = k.movables ?? [];
+  if (!movs.length) return out;
+  const gap = k.movableGap ?? 24;
+  const walls: Record<string, { from: Pt; u: Pt; n: Pt; len: number; to: Pt }> = {};
+  for (const [id, w] of Object.entries(k.movableWalls ?? {})) {
+    const f = map(w.from), e = map(w.to), u = unit(sub(e, f));
+    walls[id] = { from: f, to: e, u, n: { x: u.y, y: -u.x }, len: Math.hypot(e.x - f.x, e.y - f.y) };
+  }
+  const els = movs.map((m) => {
+    const hw = k.movableWalls?.[m.home.wall];
+    if (!hw || !walls[m.home.wall]) throw new Error(`venue template ${k.kind}: movable ${m.id}'s home wall "${m.home.wall}" is not in movableWalls`);
+    const u0 = unit(sub(hw.to, hw.from)), n0 = { x: u0.y, y: -u0.x };
+    // Element-local coordinates: s along its home wall from the anchor, t out from the wall (outside the room).
+    const local = (p: Pt) => ({ s: dot(sub(p, m.home.anchor), u0), t: dot(sub(p, m.home.anchor), n0) });
+    const reg = k.regions[m.region];
+    const pts = [...(owned.get(m.id)?.segs ?? []).flat(), ...(reg ? pathPoints(reg) : [])].map(local);
+    if (!pts.length) throw new Error(`venue template ${k.kind}: movable ${m.id} owns no drawn lines and has no region`);
+    const sMin = Math.min(...pts.map((q) => q.s)), sMax = Math.max(...pts.map((q) => q.s));
+    const tMin = Math.min(...pts.map((q) => q.t)), tMax = Math.max(...pts.map((q) => q.t));
+    const req = d.movables?.[m.id];
+    const wall = req && m.walls.includes(req.wall) && walls[req.wall] ? req.wall : m.home.wall;
+    const W = walls[wall];
+    const lo = -sMin, hi = W.len - sMax;
+    let c: number;
+    if (req && req.wall === wall && req.t != null && Number.isFinite(req.t)) c = lo + clamp01(req.t) * (hi - lo);
+    else if (wall === m.home.wall) c = dot(sub(map(m.home.anchor), W.from), W.u);
+    else c = (lo + hi) / 2;
+    return { m, local, sMin, sMax, tMin, tMax, wall, c, lo, hi, fits: true };
+  });
+  for (const wid of Object.keys(walls)) {
+    const on = els.filter((e) => e.wall === wid).sort((a, b) => a.c - b.c);
+    if (!on.length) continue;
+    // Push forward off the start and apart; then back off the end and apart. Whatever still overlaps doesn't fit.
+    on.forEach((e, i) => {
+      e.c = Math.max(e.c, e.lo);
+      if (i) e.c = Math.max(e.c, on[i - 1].c + on[i - 1].sMax - e.sMin + gap);
+    });
+    for (let i = on.length - 1; i >= 0; i--) {
+      const e = on[i];
+      e.c = Math.min(e.c, e.hi);
+      if (i < on.length - 1) e.c = Math.min(e.c, on[i + 1].c - (e.sMax - on[i + 1].sMin) - gap);
+    }
+    const fine = on.every((e, i) => e.c >= e.lo - 1e-6 && e.c <= e.hi + 1e-6 && (i === 0 || e.c - on[i - 1].c >= on[i - 1].sMax - e.sMin + gap - 1e-6));
+    if (!fine) {
+      out.warnings.push(`Not everything fits on the ${k.movableWallLabels?.[wid] ?? wid} wall — move a room to another wall.`);
+      for (const e of on) {
+        e.fits = false;
+        if (e.hi < e.lo) e.c = (e.lo + e.hi) / 2;
+      }
+    }
+  }
+  for (const e of els) {
+    const W = walls[e.wall], A = add(W.from, mul(W.u, e.c));
+    const place = (p: Pt) => {
+      const q = e.local(p);
+      return add(A, add(mul(W.u, q.s), mul(W.n, q.t)));
+    };
+    for (const [a, b] of owned.get(e.m.id)?.segs ?? []) out.polylines.push(densifySegment(a, b).map(place));
+    for (const l of owned.get(e.m.id)?.labels ?? []) out.labels.push({ text: l.text, h: l.h, ...place(l) });
+    const reg = k.regions[e.m.region];
+    if (reg) out.regions[e.m.region] = densifyPath(pathPoints(reg), true).map(place);
+    const sMid = (e.sMin + e.sMax) / 2;
+    const runs: PlacedMovable["runs"] = {};
+    for (const w of e.m.walls) if (walls[w]) runs[w] = { from: walls[w].from, to: walls[w].to, lo: -e.sMin, hi: walls[w].len - e.sMax, sMid };
+    out.movables[e.m.id] = {
+      wall: e.wall,
+      t: e.hi > e.lo ? clamp01((e.c - e.lo) / (e.hi - e.lo)) : 0.5,
+      centre: add(A, add(mul(W.u, sMid), mul(W.n, (e.tMin + e.tMax) / 2))),
+      fits: e.fits,
+      runs,
+    };
+  }
+  return out;
+}
+
+/** #255: where a dragged movable lands — the nearest allowed wall it fits on, whole feet along it. `p` = its dropped centre, stretched inches. */
+export function snapMovable(plan: StretchedPlan, id: string, p: Pt): { wall: string; t: number } | null {
+  const m = plan.movables[id];
+  if (!m) return null;
+  let best: { wall: string; t: number; dist: number } | null = null;
+  for (const [wall, r] of Object.entries(m.runs)) {
+    if (r.hi < r.lo) continue;
+    const u = unit(sub(r.to, r.from));
+    const c = Math.max(r.lo, Math.min(r.hi, dot(sub(p, r.from), u) - r.sMid));
+    const foot = add(r.from, mul(u, c + r.sMid));
+    const dist = Math.hypot(p.x - foot.x, p.y - foot.y);
+    const cFt = Math.min(r.hi, r.lo + Math.round((c - r.lo) / 12) * 12);
+    const t = r.hi > r.lo ? Math.round(((cFt - r.lo) / (r.hi - r.lo)) * 1e6) / 1e6 : 0.5;
+    if (!best || dist < best.dist - 1e-9) best = { wall, t, dist };
+  }
+  return best && { wall: best.wall, t: best.t };
+}
+
 export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDims): StretchedPlan {
   const X = makeXMap(k, d);
   const Y = makeYMap(k, d);
@@ -390,9 +493,20 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
     return { pts: arcPoints({ cx: c.x, cy: c.y, r }, t0, t1), c, r };
   };
 
+  // #255: movable elements' lines, labels and regions are lifted out of the stretch and placed after it.
+  const movs = k.movables ?? [];
+  const ownerOf = (a: Pt, b: Pt = a) => movs.find((m) => inBox(a, m.bbox) && inBox(b, m.bbox));
+  const owned: Owned = new Map(movs.map((m) => [m.id, { segs: [], labels: [] }]));
+  const movableRegions = new Set(movs.map((m) => m.region));
+
   const segPolys: Array<Pt[] | null> = t.segments.map(([x1, y1, x2, y2]) => {
     const a = { x: x1, y: y1 }, b = { x: x2, y: y2 };
     if (!d.pit && k.pit && inBox(a, k.pit.bbox) && inBox(b, k.pit.bbox)) return null;
+    const m = ownerOf(a, b);
+    if (m) {
+      owned.get(m.id)!.segs.push([a, b]);
+      return null;
+    }
     return densifySegment(a, b).map(map);
   });
   const walls = k.walls?.length ? redrawWalls(t.segments, segPolys, k.walls, map) : null;
@@ -444,11 +558,17 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   }
   const labels = t.labels
     .filter((l) => d.pit || !k.pit || !k.pit.labels.includes(l.text))
+    .filter((l) => {
+      const m = ownerOf(l);
+      if (m) owned.get(m.id)!.labels.push(l);
+      return !m;
+    })
     .map((l) => ({ text: l.text, h: l.h, ...(zoneMap(l) ?? map(l)) }));
   const regions: Record<string, Pt[]> = {};
   const regionLabels: Record<string, string> = {};
   for (const [name, items] of Object.entries(k.regions)) {
     if (k.pit && name === k.pit.region && !d.pit) continue;
+    if (movableRegions.has(name)) continue;
     regions[name] = mapPath(items, true);
     regionLabels[name] = k.regionLabels?.[name] ?? name;
   }
@@ -456,6 +576,13 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   for (const [name, items] of Object.entries(k.lines)) lines[name] = mapPath(items, false);
   const points: Record<string, Pt> = {};
   for (const [name, p] of Object.entries(k.points)) points[name] = zoneMap(p) ?? mapPt(p);
+  const placed = placeMovables(k, d, mapPt, owned);
+  polylines.push(...placed.polylines);
+  labels.push(...placed.labels);
+  for (const [name, pts] of Object.entries(placed.regions)) {
+    regions[name] = pts;
+    regionLabels[name] = k.regionLabels?.[name] ?? name;
+  }
   const all = polylines.flat();
   const bounds = {
     minX: Math.min(...all.map((p) => p.x)),
@@ -463,5 +590,5 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
     maxX: Math.max(...all.map((p) => p.x)),
     maxY: Math.max(...all.map((p) => p.y)),
   };
-  return { bounds, polylines, labels, regions, regionLabels, lines, points, map };
+  return { bounds, polylines, labels, regions, regionLabels, lines, points, map, movables: placed.movables, warnings: placed.warnings };
 }

@@ -34585,3 +34585,99 @@ import type { AutoCard as C255T6fCard } from "@/lib/design/auto-estimate";
     else ok(S.x === G.platBackL.x && S.w === G.platBackR.x - G.platBackL.x && S.y === G.yBack && S.h > 0.5 * (G.yFront - G.yBack) && S.h < G.yFront - G.yBack, `#255 T6 fix ${tpl} ${size}: the stage frame is the platform's core — back-wall width, down to where the pointed front cuts in`);
   }
 }
+
+/* --- #255 T9: engine — movable rooms snap to walls, rotate, keep clear of corners and each other --- */
+import { snapMovable as c255T9Snap, stretchTemplate as c255T9Stretch } from "@/lib/design/venue-templates/stretch";
+import type { TemplateKeys as C255T9Keys, VenueTemplate as C255T9Tpl } from "@/lib/design/venue-templates/types";
+import { keysById as c255T9KeysById, stretchById as c255T9ById, TEMPLATE_IDS as c255T9Ids } from "@/lib/design/venue-templates/templates";
+{
+  const tpl: C255T9Tpl = {
+    kind: "m", source: "m", units: "in", extents: { minX: -100, minY: -130, maxX: 100, maxY: 130 }, arcs: [], labels: [{ text: "A", x: -5, y: -110, h: 5 }],
+    segments: [[-100, -100, 100, -100], [100, -100, 100, 100], [-100, 100, 100, 100], [-100, -100, -100, 100], [-20, -130, 20, -130], [-20, -130, -20, -100], [20, -130, 20, -100], [-20, 130, 20, 130], [-20, 100, -20, 130], [20, 100, 20, 130]],
+  };
+  const all = ["bottom", "right", "top", "left"];
+  const keys: C255T9Keys = {
+    kind: "m", cx: 0, x: { kind: "spans", spans: [{ to: 100, drive: "pro" }] },
+    ySpans: [{ from: 100, to: -100, drive: "houseOpen" }], origin: 100, stageDepthTo: 100, houseDepthTo: -100,
+    regions: { Room: [{ x: -100, y: 100 }, { x: 100, y: 100 }, { x: 100, y: -100 }, { x: -100, y: -100 }], A: [{ x: -20, y: -100 }, { x: 20, y: -100 }, { x: 20, y: -130 }, { x: -20, y: -130 }], B: [{ x: -20, y: 130 }, { x: 20, y: 130 }, { x: 20, y: 100 }, { x: -20, y: 100 }] },
+    spaces: ["Room", "A", "B"], roles: { stage: "Room", house: "Room" }, lines: {}, points: {}, requiredLabels: [],
+    defaults: { proWidthFt: 200 / 12, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 200 / 12 },
+    movableWalls: { bottom: { from: { x: -100, y: -100 }, to: { x: 100, y: -100 } }, right: { from: { x: 100, y: -100 }, to: { x: 100, y: 100 } }, top: { from: { x: 100, y: 100 }, to: { x: -100, y: 100 } }, left: { from: { x: -100, y: 100 }, to: { x: -100, y: -100 } } },
+    movables: [
+      { id: "a", region: "A", bbox: { minX: -21, maxX: 21, minY: -131, maxY: -99.5 }, home: { wall: "bottom", anchor: { x: 0, y: -100 } }, walls: all },
+      { id: "b", region: "B", bbox: { minX: -21, maxX: 21, minY: 99.5, maxY: 131 }, home: { wall: "top", anchor: { x: 0, y: 100 } }, walls: all },
+    ],
+  };
+  const D = (o: Record<string, unknown> = {}) => ({ proWidthFt: 200 / 12, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 200 / 12, pit: false, ...o });
+  const box = (pts: Array<{ x: number; y: number }>) => ({ x0: Math.min(...pts.map((p) => p.x)), x1: Math.max(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), y1: Math.max(...pts.map((p) => p.y)) });
+  const home = c255T9Stretch(tpl, keys, D());
+  const hA = box(home.regions.A);
+  ok(Math.abs(hA.x0 + 20) < 1e-9 && Math.abs(hA.x1 - 20) < 1e-9 && Math.abs(hA.y0 + 130) < 1e-9 && Math.abs(hA.y1 + 100) < 1e-9 && home.movables.a.wall === "bottom" && home.movables.a.fits && home.polylines.length === 10, "#255 T9: at the drawing's size a movable room is exactly where it was drawn");
+  const left = c255T9Stretch(tpl, keys, D({ movables: { a: { wall: "left", t: 0.5 } } }));
+  const lA = box(left.regions.A);
+  ok(Math.abs(lA.x1 + 100) < 1e-9 && Math.abs(lA.x0 + 130) < 1e-9 && Math.abs(lA.y0 + 20) < 1e-9 && Math.abs(lA.y1 - 20) < 1e-9, "#255 T9: moved to the left wall it sits outside that wall, turned to face in, centred at t 0.5");
+  ok(left.labels.some((l) => l.text === "A" && l.x < -100), "#255 T9: its label travels with it");
+  const both = c255T9Stretch(tpl, keys, D({ movables: { a: { wall: "bottom", t: 0.5 }, b: { wall: "bottom", t: 0.5 } } }));
+  const bA = box(both.regions.A), bB = box(both.regions.B);
+  ok(bB.x0 - bA.x1 >= 24 - 1e-6 && bA.x0 >= -100 - 1e-9 && bB.x1 <= 100 + 1e-9 && both.movables.b.wall === "bottom" && both.movables.a.fits && both.warnings.length === 0, "#255 T9: two rooms on one wall keep a 2' gap and stay off the corners");
+  const tight = c255T9Stretch(tpl, keys, D({ proWidthFt: 80 / 12, movables: { a: { wall: "bottom", t: 0.5 }, b: { wall: "bottom", t: 0.5 } } }));
+  ok(!tight.movables.a.fits && tight.warnings.some((w) => w.includes("bottom wall")), "#255 T9: when a wall can't take its rooms the plan says so");
+  ok(JSON.stringify(c255T9Snap(home, "a", { x: -150, y: 5 })) === JSON.stringify({ wall: "left", t: 0.45 }), "#255 T9: a room dropped beside the left wall snaps to it, whole feet along the run");
+  const rightB = c255T9Stretch(tpl, keys, D({ movables: { b: { wall: "right", t: 0 } } }));
+  const rB = box(rightB.regions.B);
+  ok(rB.x0 >= 100 - 1e-9 && Math.abs(rB.y0 + 100) < 1e-9, "#255 T9: t 0 puts a room at the start of its run, flush with the corner, never past it");
+
+  // Extra (non-brief): both asked for the far end — the later one sits flush at the corner, the other slides back a 2' gap.
+  const far = c255T9Stretch(tpl, keys, D({ movables: { a: { wall: "bottom", t: 1 }, b: { wall: "bottom", t: 1 } } }));
+  const fA = box(far.regions.A), fB = box(far.regions.B);
+  ok(Math.abs(fB.x1 - 100) < 1e-9 && Math.abs(fB.x0 - fA.x1 - 24) < 1e-9 && far.movables.a.fits && far.movables.b.fits && far.warnings.length === 0, "#255 T9: two rooms asked past a wall's end stack back from the corner, 2' apart");
+
+  // Non-uniform, non-default: a fixed centre band + a pro band side to side, a fixed + open depth; an off-centre, non-square room.
+  const tpl2: C255T9Tpl = {
+    kind: "m2", source: "m2", units: "in", extents: { minX: -100, minY: -120, maxX: 100, maxY: 100 }, arcs: [], labels: [{ text: "C", x: 60, y: -110, h: 5 }],
+    segments: [[-100, -100, 100, -100], [100, -100, 100, 100], [-100, 100, 100, 100], [-100, -100, -100, 100], [50, -120, 80, -120], [50, -120, 50, -100], [80, -120, 80, -100]],
+  };
+  const keys2: C255T9Keys = {
+    kind: "m2", cx: 0, x: { kind: "spans", spans: [{ to: 40, drive: "fixed" }, { to: 100, drive: "pro" }] },
+    ySpans: [{ from: 100, to: 0, drive: "fixed" }, { from: 0, to: -100, drive: "houseOpen" }], origin: 100, stageDepthTo: 100, houseDepthTo: -100,
+    regions: { Room: [{ x: -100, y: 100 }, { x: 100, y: 100 }, { x: 100, y: -100 }, { x: -100, y: -100 }], C: [{ x: 50, y: -100 }, { x: 80, y: -100 }, { x: 80, y: -120 }, { x: 50, y: -120 }] },
+    spaces: ["Room", "C"], roles: { stage: "Room", house: "Room", booth: "C" }, lines: {}, points: {}, requiredLabels: [],
+    defaults: { proWidthFt: 10, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 200 / 12 },
+    movableWalls: { ...keys.movableWalls, diag: { from: { x: -100, y: -100 }, to: { x: 100, y: 100 } } },
+    movableWallLabels: { bottom: "Back" },
+    movables: [{ id: "c", region: "C", bbox: { minX: 45, maxX: 85, minY: -121, maxY: -99.5 }, home: { wall: "bottom", anchor: { x: 65, y: -100 } }, walls: ["bottom", "left", "right", "diag"] }],
+  };
+  const D2 = (o: Record<string, unknown> = {}) => ({ proWidthFt: 16, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 30, pit: false, ...o });
+  const id2 = c255T9Stretch(tpl2, keys2, { ...keys2.defaults, pit: false });
+  const iC = box(id2.regions.C);
+  ok(Math.abs(iC.x0 - 50) < 1e-9 && Math.abs(iC.x1 - 80) < 1e-9 && Math.abs(iC.y0 + 120) < 1e-9 && Math.abs(iC.y1 + 100) < 1e-9 && id2.labels.some((l) => l.text === "C" && Math.abs(l.x - 60) < 1e-9 && Math.abs(l.y + 110) < 1e-9), "#255 T9 non-uniform: at the drawing's size an off-centre room is exactly where it was drawn");
+  const h2 = c255T9Stretch(tpl2, keys2, D2());
+  const hC = box(h2.regions.C);
+  // The map sends the anchor (65, -100) to (40 + 25·1.6, -260) = (80, -260); the drawn map would widen the room to 48".
+  ok(Math.abs(hC.x0 - 65) < 1e-9 && Math.abs(hC.x1 - 95) < 1e-9 && Math.abs(hC.y1 + 260) < 1e-9 && Math.abs(hC.y0 + 280) < 1e-9 && h2.movables.c.wall === "bottom" && h2.labels.some((l) => l.text === "C" && Math.abs(l.x - 75) < 1e-9 && Math.abs(l.y + 270) < 1e-9), "#255 T9 non-uniform: stretched, a room stays home against its mapped wall at its drawn 30×20 size, centred on its mapped anchor");
+  const cLen = h2.polylines.slice(-3).reduce((n, pl) => n + pl.slice(1).reduce((m, p, i) => m + Math.hypot(p.x - pl[i].x, p.y - pl[i].y), 0), 0);
+  ok(h2.polylines.length === 7 && Math.abs(cLen - 70) < 1e-9, "#255 T9 non-uniform: the room's drawn lines keep their lengths");
+  const l2 = c255T9Stretch(tpl2, keys2, D2({ movables: { c: { wall: "left", t: 1 } } }));
+  const lC = box(l2.regions.C);
+  ok(Math.abs(lC.y0 + 260) < 1e-9 && Math.abs(lC.y1 + 230) < 1e-9 && Math.abs(lC.x1 + 136) < 1e-9 && Math.abs(lC.x0 + 156) < 1e-9 && l2.movables.c.fits, "#255 T9 non-uniform: t 1 on a stretched side wall is flush with the far corner, turned to face in");
+  const s2 = c255T9Snap(h2, "c", { x: 150, y: -100 });
+  const r2 = s2 && c255T9Stretch(tpl2, keys2, D2({ movables: { c: s2 } }));
+  const run = r2?.movables.c.runs.right;
+  const cAlong = run ? run.lo + s2!.t * (run.hi - run.lo) : NaN;
+  ok(s2?.wall === "right" && !!run && Math.abs((cAlong - run.lo) / 12 - Math.round((cAlong - run.lo) / 12)) < 1e-3 && Math.abs(r2!.movables.c.centre.y - (-260 + 159)) < 1e-3, "#255 T9 non-uniform: a drop by the stretched right wall snaps there on a whole foot and re-stretches to that spot");
+  const g2 = c255T9Stretch(tpl2, keys2, D2({ movables: { c: { wall: "diag", t: 0.5 } } }));
+  const f = { x: -136, y: -260 }, e = { x: 136, y: 100 }, L = Math.hypot(e.x - f.x, e.y - f.y), u = { x: (e.x - f.x) / L, y: (e.y - f.y) / L }, n = { x: u.y, y: -u.x };
+  const along = g2.regions.C.map((p) => (p.x - f.x) * u.x + (p.y - f.y) * u.y), off = g2.regions.C.map((p) => (p.x - f.x) * n.x + (p.y - f.y) * n.y);
+  ok(Math.abs(Math.max(...along) - Math.min(...along) - 30) < 1e-9 && Math.abs(Math.min(...off)) < 1e-9 && Math.abs(Math.max(...off) - 20) < 1e-9 && Math.abs((Math.max(...along) + Math.min(...along)) / 2 - L / 2) < 1e-9, "#255 T9 non-uniform: on a slanted wall the room turns with it — 30\" along, 20\" out, on the outside, centred at t 0.5");
+  const bad = c255T9Stretch(tpl2, keys2, D2({ movables: { c: { wall: "top", t: 0.5 } } }));
+  ok(bad.movables.c.wall === "bottom" && Math.abs(box(bad.regions.C).x0 - 65) < 1e-9 && !("top" in bad.movables.c.runs), "#255 T9: a wall the room isn't allowed on is ignored — it stays home");
+  const tight2 = c255T9Stretch(tpl2, keys2, D2({ proWidthFt: 0, movables: { c: { wall: "bottom", t: 0.5 } } }));
+  ok(tight2.movables.c.fits && tight2.warnings.length === 0, "#255 T9: a lone room on a short wall still fits when the run takes it");
+  const tiny = c255T9Stretch(tpl2, { ...keys2, x: { kind: "spans", spans: [{ to: 100, drive: "pro" }] } }, D2({ proWidthFt: 2, movables: { c: { wall: "bottom", t: 0.5 } } }));
+  ok(!tiny.movables.c.fits && tiny.warnings.includes("Not everything fits on the Back wall — move a room to another wall.") && Math.abs(tiny.movables.c.centre.x) < 1e-9, "#255 T9: a wall shorter than its room warns by the wall's display name and centres the room");
+  // Templates without movables are untouched.
+  for (const tid of c255T9Ids) {
+    const p = c255T9ById(tid, { ...c255T9KeysById(tid).defaults, pit: false });
+    ok(JSON.stringify(p.movables) === "{}" && p.warnings.length === 0, `#255 T9 ${tid}: no movables, no warnings`);
+  }
+}

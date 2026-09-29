@@ -76,6 +76,33 @@ export type TrueArcGroup = {
  */
 export type WallPair = { ref: [Pt, Pt]; faces: Array<[Pt, Pt]> };
 
+/** #255: a wall a movable element can sit against — listed so the room lies on its LEFT; the element sits on its right. */
+export type MovableWall = { from: Pt; to: Pt };
+
+/**
+ * #255: a movable element — a room drawn against a wall (the Gym Stage Booth, the Blackbox rooms). Every drawn
+ * segment with both ends in `bbox`, every label anchored in it and the region `region` are lifted out of the stretch
+ * and re-placed afterwards against the chosen wall, keeping their drawn size, turned to face in.
+ */
+export type Movable = {
+  id: string;
+  region: string;
+  bbox: { minX: number; maxX: number; minY: number; maxY: number };
+  home: { wall: string; anchor: Pt };
+  walls: string[];
+};
+
+export type PlacedMovable = {
+  wall: string;
+  /** 0..1 along the wall's usable run. */
+  t: number;
+  /** The element's centre, stretched inches. */
+  centre: Pt;
+  fits: boolean;
+  /** Per allowed wall: its mapped ends and the usable range of the attachment point along it (lo…hi), sMid = the centre's offset. */
+  runs: Record<string, { from: Pt; to: Pt; lo: number; hi: number; sMid: number }>;
+};
+
 export type TemplateKeys = {
   kind: string;
   /** Centreline x — everything maps symmetrically about it. */
@@ -107,9 +134,24 @@ export type TemplateKeys = {
   defaults: { proWidthFt: number; wingFt: number; stageDepthFt: number; houseWidthFt: number; houseDepthFt: number };
   trueArcs?: TrueArcGroup[];
   walls?: WallPair[];
+  movableWalls?: Record<string, MovableWall>;
+  /** Display names for the walls ("Back", "Left side"…) — the fit warning names a wall by it; default = the id as written. */
+  movableWallLabels?: Record<string, string>;
+  movables?: Movable[];
+  /** Clearance between two elements on one wall, inches (default 24). */
+  movableGap?: number;
 };
 
-export type StretchDims = { proWidthFt: number; wingFt: number; stageDepthFt: number; houseWidthFt: number; houseDepthFt: number; pit: boolean };
+export type StretchDims = {
+  proWidthFt: number;
+  wingFt: number;
+  stageDepthFt: number;
+  houseWidthFt: number;
+  houseDepthFt: number;
+  pit: boolean;
+  /** #255: where each movable element sits — `t` 0..1 along the wall's usable run; absent / null = home, or the middle of another wall. */
+  movables?: Record<string, { wall: string; t: number | null }>;
+};
 
 export type StretchedPlan = {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
@@ -121,4 +163,8 @@ export type StretchedPlan = {
   lines: Record<string, Pt[]>;
   points: Record<string, Pt>;
   map: (p: Pt) => Pt;
+  /** #255: every movable element as placed (empty when the template has none). */
+  movables: Record<string, PlacedMovable>;
+  /** #255: plan-level notes for the user ("Not everything fits on the … wall"). */
+  warnings: string[];
 };
