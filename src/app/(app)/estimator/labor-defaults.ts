@@ -30,6 +30,24 @@ export function disciplineForSystemTitle(title: string): "RIG" | "LIG" | "AUD" |
   return "OTH";
 }
 
+/**
+ * #272: the route's round-trip miles (one-way x 2, whole miles) — what the
+ * Labor modal's "Use N mi RT" button shows — or null when there is no route
+ * (venue not located, no estimate yet).
+ */
+export function roundTripMiles(travel: TravelLite | null | undefined): number | null {
+  return travel && travel.miles != null ? Math.round(travel.miles * 2) : null;
+}
+
+/** True while a miles box is empty — "untouched"; a typed 0 is a deliberate choice. */
+const blankMiles = (v: string | undefined | null) => v === "" || v == null;
+
+/** A miles box with a route behind it: blank fills from the route, typed miles win. */
+function fillBlankMiles(current: string, travel: TravelLite | null | undefined): string {
+  const rt = roundTripMiles(travel);
+  return blankMiles(current) && rt != null ? String(rt) : current;
+}
+
 export function laborMob(
   travel: TravelLite | null,
   name = "",
@@ -37,7 +55,6 @@ export function laborMob(
   days = "1"
 ): MobDraft {
   const far = !!(travel && travel.minutes != null && travel.minutes > 60);
-  const roundTrip = travel && travel.miles != null ? Math.round(travel.miles * 2) : null;
   return {
     name,
     nameCustom: false,
@@ -48,12 +65,51 @@ export function laborMob(
     hoursPerDay: "8",
     otHrs: "",
     sup: true,
-    milesRT: far && roundTrip != null ? String(roundTrip) : "",
+    // #272: Local seeds the route's miles too — local mileage bills every day
+    // (computeMob), so a blank box silently priced it at $0.
+    milesRT: fillBlankMiles("", travel),
     lift: false,
     liftRate: "",
     comments: "",
     internalNote: "",
   };
+}
+
+/**
+ * #272: switching a mobilization to Local (a manual pick, so the >1 h auto rule
+ * stops applying). A blank miles box fills from the route — daily mileage now
+ * needs the number — while typed miles stay.
+ */
+export function applyLocalTrip(m: MobDraft, travel: TravelLite | null): MobDraft {
+  return { ...m, tripType: "local", tripAuto: false, milesRT: fillBlankMiles(m.milesRT, travel) };
+}
+
+/** Switching a mobilization to Travel (manual): blank miles fill, typed miles stay. */
+export function applyTravelTripTo(m: MobDraft, travel: TravelLite | null): MobDraft {
+  return { ...m, tripType: "travel", tripAuto: false, milesRT: fillBlankMiles(m.milesRT, travel) };
+}
+
+/**
+ * The customer / venue changed while Labor is open: every mobilization still on
+ * the auto rule takes the trip type the route implies (> 60 min one way ->
+ * Travel), and — Local or Travel alike (#272) — a BLANK miles box fills from
+ * the route. Typed miles, a manual Local/Travel pick, and a reopened #269
+ * draft's saved miles are never overwritten.
+ */
+export function applyAutoTrips(mobs: MobDraft[], travel: TravelLite | null): MobDraft[] {
+  const far = !!(travel && travel.minutes != null && travel.minutes > 60);
+  return mobs.map((m) => {
+    if (m.tripAuto === false) return m; // manual override wins
+    return { ...m, tripType: far ? "travel" : "local", milesRT: fillBlankMiles(m.milesRT, travel) };
+  });
+}
+
+/**
+ * #272: a mobilization whose miles box is blank with no route to fill it from
+ * bills $0 mileage without saying so — the Labor modal flags it (never blocks Add).
+ */
+export function mobMissingMileage(m: Pick<MobDraft, "milesRT">, travel: TravelLite | null | undefined): boolean {
+  return blankMiles(m.milesRT) && roundTripMiles(travel) == null;
 }
 
 /** Labor opens with ONE blank mobilization (D207) — "+ Add mobilization" adds more. */

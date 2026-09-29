@@ -37226,3 +37226,100 @@ import type { SpecItem as P273Item, SpecSection as P273Section, VendorQuote as P
   const ur = p273Rows([under], [], {});
   ok(ur.length === 1 && near(ur[0].unitSell, 5) && ur[0].unitSell >= 0 && ur[0].unitCost === 100, "#279 parts list: a typed price below the freight scales parts by price ÷ lines sell (5 ÷ 100 → 5.00), never negative");
 }
+
+/* ======================================================================
+   #272 — Labor: a Local mobilization fills the route's round-trip miles
+   (daily mileage no longer prices at $0 off a blank box); typed miles
+   always win; no route → blank + a modal warning; a reopened #269 draft
+   keeps its saved miles.
+   ====================================================================== */
+import {
+  applyAutoTrips as l272AutoTrips,
+  applyLocalTrip as l272Local,
+  applyTravelTripTo as l272Travel,
+  laborMob as l272Mob,
+  mobMissingMileage as l272Missing,
+  roundTripMiles as l272RT,
+} from "@/app/(app)/estimator/labor-defaults";
+import { readFileSync as l272Read } from "node:fs";
+{
+  const near = { miles: 18.4, minutes: 25, officeName: "Denver" }; // Local: RT 37
+  const far = { miles: 170.9, minutes: 190, officeName: "Denver" }; // Travel: RT 342
+  const noMiles = { miles: null, minutes: null, officeName: null };
+  const rate = l270Rate({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 60, "TVL-MIL": 0.7, "TVL-HTL": 139, "TVL-FOD": 55, "EQP-LIFT": 875.33, "SHP-PM": 65, "SHP-IN": 45, "DRF-SUB": 50 });
+
+  /* ---- seeding: defaultLaborMobs / laborMob / a newly added mobilization ---- */
+  ok(l272RT(near) === 37 && l272RT(far) === 342 && l272RT(null) === null && l272RT(noMiles) === null, "#272: roundTripMiles = round(one-way x 2), null with no route");
+  const nearMob = l270Mobs(near)[0];
+  ok(nearMob.tripType === "local" && nearMob.milesRT === "37", "#272 defaultLaborMobs: a Local trip seeds the route's round-trip miles (was blank)");
+  const farMob = l270Mobs(far)[0];
+  ok(farMob.tripType === "travel" && farMob.milesRT === "342", "#272 defaultLaborMobs: a Travel trip still seeds them (unchanged)");
+  ok(l270Mobs(null)[0].milesRT === "" && l270Mobs(noMiles)[0].milesRT === "" && l270Mobs(noMiles)[0].tripType === "local", "#272 defaultLaborMobs: no route → blank miles, Local");
+  ok(l272Mob(near, "Install", "4", "5").milesRT === "37" && l272Mob(near).tripAuto === true, "#272: a newly added mobilization (laborMob) seeds Local miles and stays on the auto rule");
+  ok(l270Mobs({ miles: 200, minutes: 60, officeName: null })[0].tripType === "local" && l270Mobs({ miles: 200, minutes: 61, officeName: null })[0].tripType === "travel", "#272: the > 60 min → Travel rule is unchanged");
+
+  /* ---- the trip-type auto rule when the customer / venue changes ---- */
+  const blankLocal = { ...l270Mobs(null)[0] }; // tripAuto true, blank miles
+  const afterNear = l272AutoTrips([blankLocal], near)[0];
+  ok(afterNear.tripType === "local" && afterNear.milesRT === "37", "#272 applyAutoTrips: a blank Local mobilization fills the route's miles");
+  const afterFar = l272AutoTrips([blankLocal], far)[0];
+  ok(afterFar.tripType === "travel" && afterFar.milesRT === "342", "#272 applyAutoTrips: a blank mobilization on a far venue flips to Travel and fills (unchanged)");
+  const typed = { ...blankLocal, milesRT: "12" };
+  ok(l272AutoTrips([typed], near)[0].milesRT === "12" && l272AutoTrips([typed], far)[0].milesRT === "12", "#272 applyAutoTrips: typed miles survive a customer/venue change");
+  ok(l272AutoTrips([{ ...typed, milesRT: "0" }], near)[0].milesRT === "0", "#272 applyAutoTrips: a typed 0 is a choice, not blank");
+  const manual = { ...blankLocal, tripAuto: false, tripType: "local" as const };
+  ok(l272AutoTrips([manual], far)[0].tripType === "local" && l272AutoTrips([manual], far)[0].milesRT === "", "#272 applyAutoTrips: a manual Local pick keeps its type and is not touched");
+  ok(l272AutoTrips([blankLocal], noMiles)[0].milesRT === "" && l272AutoTrips([blankLocal], null)[0].milesRT === "", "#272 applyAutoTrips: no route leaves miles blank");
+
+  /* ---- switching a row to Local / Travel ---- */
+  const toLocal = l272Local({ ...farMob, milesRT: "" }, near);
+  ok(toLocal.tripType === "local" && toLocal.tripAuto === false && toLocal.milesRT === "37", "#272 setTripLocal: switching to Local fills blank miles and turns the auto rule off");
+  ok(l272Local({ ...farMob, milesRT: "55" }, near).milesRT === "55", "#272 setTripLocal: typed miles win");
+  ok(l272Local({ ...farMob, milesRT: "" }, null).milesRT === "" && l272Local({ ...farMob, milesRT: "" }, noMiles).milesRT === "", "#272 setTripLocal: no route → still blank");
+  const toTravel = l272Travel({ ...nearMob, milesRT: "" }, far);
+  ok(toTravel.tripType === "travel" && toTravel.tripAuto === false && toTravel.milesRT === "342" && l272Travel({ ...nearMob, milesRT: "9" }, far).milesRT === "9", "#272 applyTravelTrip: fills blank, keeps typed (unchanged behaviour)");
+
+  /* ---- no route → blank + warning ---- */
+  ok(l272Missing({ milesRT: "" }, null) && l272Missing({ milesRT: "" }, noMiles), "#272 warning: blank miles with no route is flagged");
+  ok(!l272Missing({ milesRT: "" }, near) && !l272Missing({ milesRT: "37" }, null) && !l272Missing({ milesRT: "0" }, null), "#272 warning: not flagged with a route, typed miles, or a typed 0");
+  const modal272 = l272Read("src/app/(app)/estimator/labor-modal.tsx", "utf8");
+  ok(modal272.includes("mobMissingMileage(raw, travel)") && modal272.includes("No mileage — venue not located; enter round-trip miles") && modal272.includes('data-testid="mob-no-mileage"'), "#272 warning: the Labor modal renders it per mobilization off mobMissingMileage");
+  ok(!/disabled=\{[^}]*missingMiles/.test(modal272) && modal272.includes("disabled={!valid}"), "#272 warning: never blocks Add (the button still gates on valid only)");
+
+  /* ---- wiring in the estimator client ---- */
+  const client272 = l272Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  ok(client272.includes("applyLocalTrip(m, est)") && client272.includes("applyAutoTripsToMobs(d.mobs, est)") && client272.includes("laborMob(travelEstNow())"), "#272 wiring: setTripLocal, applyAutoTrips and + Add mobilization all run the fill rule");
+  const seed272 = client272.slice(client272.indexOf("#269: reopened from a labor line"));
+  const edit272 = seed272.slice(0, seed272.indexOf("withTravelFor(customerId, locationId"));
+  ok(edit272.includes("setLaborDraft(snapshotLaborDraft(edit.draft));") && /return;\s*\}/.test(edit272), "#272 wiring: reopening a saved labor group seeds its own draft and returns BEFORE the travel reseed");
+
+  /* ---- #269: a reopened draft keeps its miles ---- */
+  const saved: L270Draft = {
+    discipline: "RIG", margin: "27",
+    mobs: [
+      { ...l270Mobs(null)[0], name: "Install", people: "2", days: "3", tripType: "local", tripAuto: true, milesRT: "61" },
+      { ...l270Mobs(null)[0], name: "Site Visit", people: "1", days: "1", tripType: "local", tripAuto: true, milesRT: "" },
+    ],
+    pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "",
+  };
+  const sec272 = { id: "sys1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as L270Sec;
+  const built = l270Build(l270Compute(saved, rate), "Rigging", (() => { let k = 900; return () => ++k; })(), "lg272");
+  const stored = l269With(sec272, "lg272", built, saved);
+  const reopened = l269Snap(l269Record(stored, "lg272")!.draft);
+  ok(reopened.mobs[0].milesRT === "61" && reopened.mobs[1].milesRT === "", "#272 #269: the stored draft round-trips its miles exactly (the reopen path applies no route)");
+  const afterVenueChange = l272AutoTrips(reopened.mobs, near);
+  ok(afterVenueChange[0].milesRT === "61", "#272 #269: a venue change on a reopened draft never overwrites its saved miles");
+  ok(afterVenueChange[1].milesRT === "37", "#272 #269: only the draft's blank box fills");
+
+  /* ---- #270: a Local mobilization with filled miles prices + lines correctly ---- */
+  const filled = { ...nearMob, name: "Site Visit", people: "1", days: "3" };
+  const mk = (m: typeof filled) => l270Compute({ discipline: "RIG", margin: "27", mobs: [m], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, rate);
+  const lc = mk(filled);
+  const blankCalc = mk({ ...filled, milesRT: "" });
+  ok(l270R2(lc.mobs[0].mileCost) === l270R2(37 * 1 * 3 * 0.7) && blankCalc.mobs[0].mileCost === 0, "#272 pricing: local mileage is RT miles x vehicles x days x $/mi (a blank box was $0)");
+  const lines272 = l270Build(lc, "Rigging", (() => { let k = 950; return () => ++k; })(), "lg272b");
+  const mile272 = lines272.filter((x) => x.laborTravel === "mileage");
+  ok(mile272.length === 1 && mile272[0].internalNote === "1 vehicle × 37 mi RT × 3 days × $0.70/mi" && mile272[0].cost === l270R2(37 * 3 * 0.7), `#272 #270: the Local mobilization inserts its own Mileage line with the per-day basis (${mile272[0]?.internalNote})`);
+  ok(lines272.every((x) => x.laborTravel !== "hotel" && x.laborTravel !== "perdiem"), "#272 #270: a Local mobilization adds no hotel / per diem lines");
+  ok(l270Build(blankCalc, "Rigging", (() => { let k = 980; return () => ++k; })(), "lg272c").every((x) => x.laborTravel !== "mileage"), "#272 #270: a blank-miles Local mobilization has no Mileage line (the silent $0 the warning now flags)");
+}
