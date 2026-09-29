@@ -9849,3 +9849,17 @@ equals the system price (typed, or rounded up to $25) less its freight — freig
 less any labor lines, which the parts list already leaves out. Unit Cost is unchanged; cost-adjustment rows stay at $0
 sell; a system with no rounding or typed price (sent/won legacy) is unchanged; a typed price below the system's
 freight lists its parts at $0, never negative. `src/app/(app)/estimator/parts-csv.ts`. Harness `#276`. See D479.
+
+## 277. Projects — delete a project right from its list card — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Add delete to the Projects screen cards too." Delete existed only in a project's
+detail header.
+
+**Done.** Each card in the Projects list (left column; the board view stays read-only) gains a compact Delete (the shared
+`ConfirmButton`: Delete → Confirm delete / Cancel) through the detail header's own `DeleteProjectButton`, now with an
+optional `backHref` and a `compact` size. Deleting the project that's open returns to the list; deleting any other card
+just refreshes. Same soft delete as before — `removeProject` records the source quote as dismissed, so the won-quote
+sync never re-creates it (checked by reload). Like designs and consulting (#268, #273), deleting a project is limited to
+users with `create` (Admin, Manager, Estimator): `removeProjectAction` refuses otherwise and both Delete buttons are
+hidden from a Reviewer (`canDelete` from both project pages). The card's link now wraps only the card content, so the
+button isn't nested inside an `<a>`.
