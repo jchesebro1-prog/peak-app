@@ -368,6 +368,7 @@ function checkMovables(k: TemplateKeys) {
     if (m.sized && m.bbox) throw new Error(`${who}: movable ${m.id} is code-sized and has a bbox — it can be one or the other`);
     if (!m.sized && !m.bbox) throw new Error(`${who}: movable ${m.id} has no bbox — a drawn movable needs one (or mark it sized)`);
     if (!m.sized && !k.regions[m.region]) throw new Error(`${who}: movable ${m.id} names region "${m.region}" — no such region`);
+    if (m.sized && Object.hasOwn(k.regions, m.region)) throw new Error(`${who}: code-sized movable ${m.id} names region "${m.region}", which is also a drawn region — a sized room's region is created, never drawn`);
   }
 }
 
@@ -493,6 +494,8 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   const Y = makeYMap(k, d);
   const map = (p: Pt): Pt => ({ x: X(p.x, p.y), y: Y(p.y) });
   const groups = k.trueArcs ?? [];
+  for (const g of groups)
+    if (g.scaleHalf != null && g.atY == null) throw new Error(`venue template ${k.kind}: a true-arc group with scaleHalf needs atY (the y its half-width is measured at)`);
   const near = (c: Pt, a: { cx: number; cy: number }) => Math.abs(c.x - a.cx) < 0.01 && Math.abs(c.y - a.cy) < 0.01;
   const groupOf = (a: { cx: number; cy: number }) => groups.find((g) => g.centres.some((c) => near(c, a)));
   const scaleOf = (g: TrueArcGroup) => (X(k.cx + g.scaleHalf!, g.atY!) - X(k.cx, g.atY!)) / g.scaleHalf!;
@@ -655,7 +658,10 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   const lines: Record<string, Pt[]> = {};
   for (const [name, items] of Object.entries(k.lines)) lines[name] = mapPath(items, false);
   // #255: key lines that are part of the drawing (curves the DWG only carries as splines).
-  for (const id of k.drawn ?? []) if (lines[id]) polylines.push(lines[id].slice());
+  for (const id of k.drawn ?? []) {
+    if (!lines[id]) throw new Error(`venue template ${k.kind}: drawn line "${id}" is not in lines`);
+    polylines.push(lines[id].slice());
+  }
   const points: Record<string, Pt> = {};
   for (const [name, p] of Object.entries(k.points)) points[name] = zoneMap(p) ?? mapPt(p);
   const placed = placeMovables(k, d, mapPt, owned);

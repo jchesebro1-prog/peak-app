@@ -36,12 +36,22 @@ REQUIRED = {
     "church-contemporary": ["Platform", "Nave", "Backstage", "Storage", "Storage", "Storage", "Storage", "Green Room", "Electrical Room", "Control Booth", "Cry Room"],
     "gym-stage": ["Stage", "Gym Floor", "Storage", "Electrical Room", "Booth"],
     "blackbox": ["Blackbox", "Electrical Room", "Booth", "Storage", "Storage"],
+    "arena": ["Seating Bowl", "Arena Floor", "Court", "Booth", "Electrical Room"],
 }
 
 # Drawings far from their own origin are shifted by these drawing inches first (#255).
 ORIGIN = {
     # the Blackbox drawing sits around (-495, -573); shift its room to the origin
     "blackbox": (-495.0, -573.0),
+}
+
+
+# The rounded rectangles a drawing's closed splines must convert to (#255) - checked by --selftest.
+ROUND_RECTS = {
+    "arena": [
+        {"minX": -714.0, "minY": -984.0, "maxX": 726.0, "maxY": 984.0, "rx": 207.8, "ry": 284.1},
+        {"minX": -534.0, "minY": -804.0, "maxX": 546.0, "maxY": 804.0, "rx": 155.9, "ry": 232.1},
+    ],
 }
 
 
@@ -64,7 +74,13 @@ def r3(v):
 
 
 def round_rect(pts):
-    """An axis-aligned rounded rectangle, or None: bbox + corner extents (rx along x, ry along y), to 0.1". (#255)"""
+    """An axis-aligned rounded rectangle, or None: bbox + the smallest corner extents (rx along x, ry along y), to 0.1".
+
+    #255: drawn corners need not be arcs or agree (Jeff's arena splines run 155.9" at three corners, 180" at the
+    fourth, where the spline's seam sits) - the JSON records the drawing, a template's key lines decide the curves.
+    A curve is a rounded rectangle when each side has a real straight run (at least 12" and 10% of that side, within
+    0.05" of it), every corner extent is positive, and every point off those runs lies in a corner box (within the
+    largest corner extent of both sides). A circle, an ellipse or an astroid never qualifies."""
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     mnx, mxx, mny, mxy = min(xs), max(xs), min(ys), max(ys)
     tol = 0.05
@@ -74,12 +90,25 @@ def round_rect(pts):
     lft = [p[1] for p in pts if p[0] <= mnx + tol]
     if not (top and bot and rgt and lft):
         return None
+    w, h = mxx - mnx, mxy - mny
+    for run, side in ((top, w), (bot, w), (rgt, h), (lft, h)):
+        if max(run) - min(run) < max(12.0, 0.1 * side):
+            return None
     rx = [mxx - max(top), min(top) - mnx, mxx - max(bot), min(bot) - mnx]
     ry = [mxy - max(rgt), min(rgt) - mny, mxy - max(lft), min(lft) - mny]
-    if max(rx) - min(rx) > 0.5 or max(ry) - min(ry) > 0.5 or min(rx) <= 0 or min(ry) <= 0:
+    if min(rx) <= 0 or min(ry) <= 0:
         return None
+    RX, RY = max(rx), max(ry)
+    for x, y in pts:
+        on_run = y >= mxy - tol or y <= mny + tol or x >= mxx - tol or x <= mnx + tol
+        if on_run:
+            continue
+        in_x = x <= mnx + RX or x >= mxx - RX
+        in_y = y <= mny + RY or y >= mxy - RY
+        if not (in_x and in_y):
+            return None
     r1 = lambda v: round(float(v), 1) + 0.0
-    return {"minX": r3(mnx), "minY": r3(mny), "maxX": r3(mxx), "maxY": r3(mxy), "rx": r1(sum(rx) / 4), "ry": r1(sum(ry) / 4)}
+    return {"minX": r3(mnx), "minY": r3(mny), "maxX": r3(mxx), "maxY": r3(mxy), "rx": r1(min(rx)), "ry": r1(min(ry))}
 
 
 def overlay_for(source):
@@ -269,7 +298,27 @@ def preview(obj, path):
 def selftest(kind, dxf, source, required, overlay, origin, tmp):
     import ezdxf
 
-    build(kind, dxf, source, required, overlay, origin)  # the real drawing converts
+    real = build(kind, dxf, source, required, overlay, origin)  # the real drawing converts
+    want = ROUND_RECTS.get(kind, [])
+    if real.get("roundRects", []) != want:
+        print("selftest FAILED - the drawing's rounded rectangles are %r, expected %r" % (real.get("roundRects"), want), file=sys.stderr)
+        return 1
+    if want:
+        print("selftest OK - the drawing's %d closed splines are rounded rectangles %s" % (len(want), ", ".join("rx %s ry %s" % (r["rx"], r["ry"]) for r in want)))
+    # A closed spline that is not a rounded rectangle (a circle, an ellipse) is flattened into segments.
+    from ezdxf.math import ConstructionEllipse, rational_bspline_from_arc, rational_bspline_from_ellipse
+    for name, curve in (("circle", rational_bspline_from_arc(center=(0, 0), radius=100, start_angle=0, end_angle=360)),
+                        ("ellipse", rational_bspline_from_ellipse(ConstructionEllipse(center=(0, 0), major_axis=(300, 0), ratio=0.4)))):
+        doc = ezdxf.new()
+        doc.header["$INSUNITS"] = 1
+        sp = doc.modelspace().add_spline()
+        sp.apply_construction_tool(curve)
+        sp.dxf.flags = sp.dxf.flags | 1  # closed (a clamped curve flagged closed, like Vectorworks' splines)
+        segs, _, _, rects = collect(doc, (0.0, 0.0))
+        if rects or len(segs) < 20:
+            print("selftest FAILED - a closed %s spline became %d rounded rectangles, %d segments" % (name, len(rects), len(segs)), file=sys.stderr)
+            return 1
+        print("selftest OK - a closed %s spline is flattened (%d segments), not a rounded rectangle" % (name, len(segs)))
     victim = required[-1]
     if any(o["text"] == victim for o in overlay):
         idx = max(i for i, o in enumerate(overlay) if o["text"] == victim)

@@ -10,7 +10,7 @@
 
 import type * as React from "react";
 import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
-import { blackboxDims, churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
+import { arenaDims, blackboxDims, churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
 import { planKindAllows, resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
 import { boxOf, canvasOf, distToPoly, inPoly, movablesPx, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
@@ -43,6 +43,8 @@ export function planToolbar(p: Pick<PlanData, "isHouse" | "handles">): { hint: s
 
 /** #255: what Reset puts back — the house to its default size and every movable room where it was drawn. */
 export const RESET_HOUSE_PATCH = { houseHalfFt: null, houseWidthFt: null, houseDepthFt: null, movables: null } as const satisfies Partial<AState>;
+/** #255 T14: a plan with rooms but no wall handles (Blackbox, Arena) resets only its rooms — never its floor or bowl fields. */
+export const RESET_ROOMS_PATCH = { movables: null } as const satisfies Partial<AState>;
 
 export type PlanData = {
   W: number;
@@ -473,6 +475,70 @@ export function blackboxGeom(s: AState, tpl?: string | null) {
   };
 }
 
+export type ArenaGeom = ReturnType<typeof arenaGeom>;
+
+/**
+ * Arena geometry (#255): Jeff's arena drawing — bowl, floor, court — at the
+ * typed floor and bowl, with the rooms and the end stage where the design
+ * put them. `stageAngle` turns the stage to face the floor (0 = at the top
+ * end facing down the sheet; −π/2 = on the left side facing right). The FOH
+ * mix goes in the Booth wherever it sits (boothMix, as the Gym Stage's); the
+ * Electrical Room's label is centred in its room (turned when the room is too
+ * narrow across), and the floor's label moves to the far end when the stage
+ * would cover it.
+ */
+export function arenaGeom(s: AState, tpl?: string | null) {
+  const want = planTemplate(s, tpl);
+  const id = want && templateEntry(want)?.family === "arena" ? want : "arena@1";
+  const keys = keysById(id);
+  const dims = arenaDims(s, id);
+  const plan = stretchById(id, dims);
+  const C = canvasOf(plan, { W: 640, ML: 56, MR: 56, MT: 54, MB: 44 });
+  const floor = boxOf(C.regions[keys.roles.house]);
+  const boothPoly = keys.roles.booth ? C.regions[keys.roles.booth] : undefined;
+  const booth = boothPoly ? boxOf(boothPoly) : floor;
+  const mix = boothPoly ? boothMix(boothPoly, C.labels, !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console), floor) : null;
+  const sm = plan.movables.stage;
+  const run = sm.runs[sm.wall];
+  // The stage faces the wall's right side (drawing y up); on the canvas (y down) that is (uy, ux), the downstage
+  // direction (0, 1) turned by stageAngle.
+  const ux = run.to.x - run.from.x, uy = run.to.y - run.from.y, ul = Math.hypot(ux, uy) || 1;
+  const stageAngle = Math.atan2(-uy / ul, ux / ul);
+  const size = dims.movableSizes?.stage ?? { alongFt: 0, depthFt: 0 };
+  const h = houseDims(s, id);
+  const stagePoly = C.regions[keys.roles.stage] ?? [];
+  // Labels keep Jeff's top-left anchor ("start") unless re-laid (the blackbox rule): the Booth's by boothMix, every
+  // other room's centred in its room, and the floor's reflected through the floor's centre when the stage covers it.
+  const moved = mix?.label;
+  const labels: BlackboxLabel[] = C.labels.map((l, i) => (moved && i === moved.i ? { ...l, x: moved.x, y: moved.y } : { ...l }));
+  const inBox = (b: Box, l: { x: number; y: number }) => l.x >= b.x - 0.5 && l.x <= b.x + b.w + 0.5 && l.y >= b.y - 0.5 && l.y <= b.y + b.h + 0.5;
+  for (const m of keys.movables ?? []) {
+    if (m.region === keys.roles.booth || m.sized || !C.regions[m.region]) continue;
+    const b = boxOf(C.regions[m.region]);
+    const i = C.labels.findIndex((l) => inBox(b, l));
+    if (i < 0) continue;
+    const w = labels[i].text.length * LABEL_CHAR_PX, cx = R(b.x + b.w / 2), cy = R(b.y + b.h / 2);
+    const turn = w > b.w - 8 && b.h > b.w;
+    labels[i] = { ...labels[i], x: cx, y: R(cy + 3), anchor: "middle", ...(turn ? { rotate: { x: cx, y: cy } } : {}) };
+  }
+  const fi = C.labels.findIndex((l) => l.text === plan.regionLabels[keys.roles.house]);
+  if (fi >= 0 && stagePoly.length) {
+    const l = C.labels[fi], w = l.text.length * LABEL_CHAR_PX;
+    const mid = { x: l.x + w / 2, y: l.y + l.h / 2 };
+    if (inPoly(stagePoly, mid) || distToPoly(stagePoly, mid) < 10) {
+      const fx = floor.x + floor.w / 2, fy = floor.y + floor.h / 2;
+      labels[fi] = { ...l, x: R(2 * fx - mid.x), y: R(2 * fy - mid.y + 3), anchor: "middle" };
+    }
+  }
+  return {
+    template: id, W: C.W, H: C.H, ppi: C.ppi, ppf: C.ppf, dims, floor, booth, mix, stagePoly,
+    stageCentre: C.px(sm.centre), stageAngle, stageAlong: size.alongFt * C.ppf, stageDepth: size.depthFt * C.ppf,
+    floorWidthFt: h.widthFt, floorLengthFt: h.depthFt,
+    regions: C.regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
+    polylines: C.polylines, labels, movables: movablesPx(plan, C.px), fromPx: C.fromPx, plan,
+  };
+}
+
 /* -------------------------------- builders -------------------------------- */
 
 function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _accent: string, tpl?: string | null): PlanData {
@@ -781,33 +847,49 @@ function buildPlanBlackbox(s: AState, _lineSets: number, _electrics: number, acc
   return { W: G.W, H: G.H, ...L, handles };
 }
 
-/** Arena — large open floor, end-stage platform, concentric bowl-seating arcs. */
-function buildPlanArena(s: AState, _lineSets: number, _electrics: number, accent: string): PlanData {
-  const Wpx = 640, ML = 56, MR = 56, MT = 54;
-  const ppf = (Wpx - ML - MR) / Math.max(s.width, 1);
-  const depthPx = Math.max(200, Math.min(s.depth * ppf, 440));
-  const x0 = ML, x1 = Wpx - MR, y0 = MT, y1 = y0 + depthPx, cx = (x0 + x1) / 2;
+/** Arena (#255): Jeff's drawing, the movable end stage (rigging points, line arrays), the FOH mix in the Booth, movable rooms. */
+function buildPlanArena(s: AState, _lineSets: number, _electrics: number, accent: string, tpl?: string | null): PlanData {
+  const G = arenaGeom(s, tpl);
   const L: L = { rects: [], lines: [], circles: [], texts: [], paths: [] };
-  L.rects.push({ x: R(x0), y: R(y0), w: R(x1 - x0), h: R(depthPx), fill: "#f6f7f9", stroke: "#16181d", sw: 2, rx: 2, dash: "" });
-  const platW = (x1 - x0) * 0.5, platH = depthPx * 0.17, px0 = cx - platW / 2;
-  L.rects.push({ x: R(px0), y: R(y0 + 6), w: R(platW), h: R(platH), fill: "#ffffff", stroke: accent, sw: 1.6, rx: 2, dash: "" });
-  L.texts.push({ x: R(cx), y: R(y0 + 6 + platH / 2 + 3), t: "STAGE", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
-  const rn = Math.max(4, Math.round(platW / 30));
-  for (let k = 0; k < rn; k++) L.circles.push({ cx: R(px0 + ((k + 0.5) / rn) * platW), cy: R(y0 + 6 + platH + 8), r: 2.4, fill: SYSCOLOR.rigging });
-  if (s.sys.audio)
-    [px0 - 14, px0 + platW + 14].forEach((x) => {
-      for (let i = 0; i < 3; i++) L.rects.push({ x: R(x - 4), y: R(y0 + 10 + i * 9), w: 8, h: 7, fill: "#eef0f3", stroke: "#3155a8", sw: 1, rx: 1, dash: "" });
-    });
-  const arcTop = y0 + 6 + platH + 26, arcBot = y1 - 14;
-  const arcs = Math.max(4, Math.min(9, Math.round((arcBot - arcTop) / 16)));
-  for (let r = 0; r < arcs; r++) {
-    const yy = arcTop + (r * (arcBot - arcTop)) / Math.max(arcs - 1, 1), half = (x1 - x0) * 0.5 * (0.46 + r * 0.07);
-    L.paths.push({ d: "M " + R(cx - half) + " " + R(yy) + " Q " + R(cx) + " " + R(yy + 12) + " " + R(cx + half) + " " + R(yy), fill: "none", stroke: "#d0d3da", sw: 1.3, dash: "" });
+  const trace = (pts: XY[]) => pts.map((p, i) => (i ? "L " : "M ") + p.x + " " + p.y).join(" ");
+  if (G.regions["Seating Bowl"]) L.paths.push({ d: trace(G.regions["Seating Bowl"]) + " Z", fill: "#f2f3f5", stroke: "none" });
+  L.paths.push({ d: trace(G.regions[G.roles.house]) + " Z", fill: "#f9fafb", stroke: "none" });
+  L.paths.push({ d: G.polylines.map(trace).join(" "), fill: "none", stroke: "#3a3f4a", sw: 0.9 });
+  const c = G.stageCentre, ca = Math.cos(G.stageAngle), sa = Math.sin(G.stageAngle);
+  const at = (x: number, y: number): XY => ({ x: R(c.x + x * ca - y * sa), y: R(c.y + x * sa + y * ca) }); // x along the stage, y downstage
+  const hw = G.stageAlong / 2, hd = G.stageDepth / 2;
+  if (G.stagePoly.length) L.paths.push({ d: trace(G.stagePoly) + " Z", fill: "#ffffff", stroke: accent, sw: 1.6 });
+  const rn = Math.max(4, Math.round(G.stageAlong / 30));
+  for (let k = 0; k < rn; k++) {
+    const p = at(-hw + ((k + 0.5) / rn) * 2 * hw, hd + 8);
+    L.circles.push({ cx: p.x, cy: p.y, r: 2.4, fill: SYSCOLOR.rigging });
   }
-  L.texts.push({ x: R(cx), y: R(arcBot + 12), t: "BOWL SEATING", fill: "#c4c9d2", size: 8, anchor: "middle", transform: "" });
-  dimH(L, x0, x1, y0 - 26, s.width + "'-0\"", false);
-  dimV(L, y0, y1, x0 - 30, s.depth + "'-0\"");
-  return { W: Wpx, H: R(y1 + 26), ...L };
+  if (s.sys.audio)
+    [-1, 1].forEach((side) => {
+      for (let i = 0; i < 3; i++) {
+        // A path, not a rect: rects paint under the bowl and floor fills (paths).
+        const p = at(side * (hw + 14), -hd + 8 + i * 9);
+        L.paths.push({ d: "M " + R(p.x - 4) + " " + R(p.y - 3.5) + " h 8 v 7 h -8 Z", fill: "#eef0f3", stroke: "#3155a8", sw: 1 });
+      }
+    });
+  for (const l of G.labels) {
+    const t = { t: l.text, fill: "#737985", size: 8, weight: 600 };
+    if (l.anchor === "middle") L.texts.push({ ...t, x: l.x, y: l.y, anchor: "middle", transform: l.rotate ? "rotate(-90 " + l.rotate.x + " " + l.rotate.y + ")" : "" });
+    else L.texts.push({ ...t, x: l.x, y: R(l.y + l.h), anchor: "start", transform: "" });
+  }
+  const mid = at(0, 0);
+  L.texts.push({ x: mid.x, y: R(mid.y + 3), t: "STAGE", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
+  if (G.mix) {
+    mixPos(L, G.mix.x, G.mix.y, G.mix.w, G.mix.text, G.mix.h / 2);
+    const con = G.mix.console, cw = Math.min(R(G.mix.w * 0.38), 22);
+    if (con) {
+      L.rects.push({ x: R(con.x - cw / 2), y: R(con.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+      L.texts.push({ x: R(con.x), y: R(con.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
+    }
+  }
+  dimH(L, G.floor.x, G.floor.x + G.floor.w, 54 - 26, Math.round(G.floorWidthFt) + "'-0\"", false);
+  dimV(L, G.floor.y, G.floor.y + G.floor.h, 56 - 30, Math.round(G.floorLengthFt) + "'-0\"");
+  return { W: G.W, H: G.H, ...L, handles: movableHandles(G.movables) };
 }
 
 /* ------------------------------ legend builder ------------------------------ */
@@ -868,7 +950,6 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
     it.push({ sw: mk("box"), label: "End stage" });
     it.push({ sw: mk("dot", C.rigging), label: "Rigging point" });
     if (sys.audio) it.push({ sw: mk("spk"), label: "Line array" });
-    it.push({ sw: mk("faint"), label: "Bowl seating" });
   }
   return it;
 }
@@ -877,14 +958,14 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
 
 export function buildPlan(s: AState, lineSets: number, electrics: number, accent: string, tpl?: string | null): PlanData {
   const kind = planKindOf(s);
-  // Proscenium, church, blackbox and flat kinds always resolve a template (planTemplate), so every kind below draws its built-in schematic.
+  // Every plan kind resolves a template (planTemplate) since the Arena's (#255 T14).
   const id = planTemplate(s, tpl);
   const family = templateEntry(id)?.family;
   let p: PlanData;
   if (family === "church") p = buildPlanChurch(s, lineSets, electrics, accent, id);
   else if (family === "proscenium") p = buildPlanProscenium(s, lineSets, electrics, accent, id);
   else if (family === "blackbox") p = kind === "flat" ? buildPlanFlat(s, lineSets, electrics, accent, id) : buildPlanBlackbox(s, lineSets, electrics, accent, id);
-  else p = buildPlanArena(s, lineSets, electrics, accent);
+  else p = buildPlanArena(s, lineSets, electrics, accent, id);
   // #255: a template plan's legend is its family's (Quick Design's Gym Stage draws the proscenium-family gym drawing).
   p.legend = legendFor(family === "proscenium" ? "proscenium" : kind, s, electrics, accent);
   p.isHouse = family === "proscenium" || family === "church";
@@ -1051,8 +1132,8 @@ export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: st
   if (hd.type !== "wall" && hd.type !== "movable") return null;
   const id = planTemplate(s, tpl);
   const family = templateEntry(id)?.family;
-  if (family !== "proscenium" && family !== "church" && family !== "blackbox") return null;
-  const G = family === "church" ? churchGeom(s, id) : family === "blackbox" ? blackboxGeom(s, id) : prosGeom(s, id);
+  if (family !== "proscenium" && family !== "church" && family !== "blackbox" && family !== "arena") return null;
+  const G = family === "church" ? churchGeom(s, id) : family === "blackbox" ? blackboxGeom(s, id) : family === "arena" ? arenaGeom(s, id) : prosGeom(s, id);
   if (hd.type === "movable") {
     // #255: a room follows the pointer (relative drag, drag-start scale) and snaps to the nearest wall it may use, whole
     // feet. The handle sits on the room's outer face; the room's centre is what moves by the drag.
@@ -1061,8 +1142,8 @@ export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: st
     const snap = snapMovable(G.plan, hd.key, G.fromPx({ x: m.centre.x + pos.dx, y: m.centre.y + pos.dy }));
     return snap ? movablePatch(s, hd.key, snap) : null;
   }
-  // A blackbox-family plan has no wall handles (width/depth are the room's own fields).
-  if (family === "blackbox") return null;
+  // A blackbox- or arena-family plan has no wall handles (their sizes are fields).
+  if (family === "blackbox" || family === "arena") return null;
   if (hd.side === "B") {
     const [lo, hi] = houseSpecFor(G.template).depthLim;
     return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };

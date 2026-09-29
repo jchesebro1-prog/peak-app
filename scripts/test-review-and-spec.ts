@@ -10668,6 +10668,7 @@ seeded()
   .then(() => c255T11MovablesAsyncChecks())
   .then(() => c255Rv11SanitizeAsyncChecks())
   .then(() => c255Rv12SpacesAsyncChecks())
+  .then(() => c255T14GridAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -34110,10 +34111,10 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
   }
 
   ok(c255T3Ids.slice().sort().join("|") === c255T3Reg.map((t) => t.id).sort().join("|") && c255T3KeysById("church-traditional@1") === K, "#255 T3: every registered template has its drawing and key lines");
-  ok(c255T3For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1" && c255T3For("arena").length === 0 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === null, "#255 T3: templates are listed per works-like kind; a kind with none has no default (two since Contemporary, T8)");
-  ok(c255T3Sanitize("church", "church", "proscenium@1") === "church-traditional@1" && c255T3Sanitize("church", "church", "church-traditional@1") === "church-traditional@1" && c255T3Sanitize("arena", "arena", "x") === null, "#255 T3: a stored background not made for the type's kind falls back to its default");
+  ok(c255T3For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1" && c255T3For("arena").length === 1 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === "arena@1", "#255 T3: templates are listed per works-like kind, each kind with its default (two since Contemporary, T8; Arena has one since T14)");
+  ok(c255T3Sanitize("church", "church", "proscenium@1") === "church-traditional@1" && c255T3Sanitize("church", "church", "church-traditional@1") === "church-traditional@1" && c255T3Sanitize("arena", "arena", "x") === "arena@1", "#255 T3: a stored background not made for the type's kind falls back to its default");
   const seed = c255T3Seed.map((t) => ({ ...t, background: c255T3Default(t.worksLike, t.key) }));
-  ok(c255T3Resolve(seed, null, "church") === "church-traditional@1" && c255T3Resolve(seed, null, "proscenium") === "proscenium@1" && c255T3Resolve(seed, null, "arena") === null, "#255 T3: a design with no venue follows its kind's built-in type");
+  ok(c255T3Resolve(seed, null, "church") === "church-traditional@1" && c255T3Resolve(seed, null, "proscenium") === "proscenium@1" && c255T3Resolve(seed, null, "arena") === "arena@1", "#255 T3: a design with no venue follows its kind's built-in type");
   ok(c255T3Resolve(seed, "church", "proscenium") === "proscenium@1", "#255 T3: a venue type that works like another kind never decides this plan's background");
   ok(c255T3Effective("church", { templateId: "proscenium@1" }, seed) === "church-traditional@1" && c255T3Effective("church", { templateId: "church-traditional@1" }, seed) === "church-traditional@1", "#255 T3: a per-design override counts only when it is a template for the design's kind");
 
@@ -34164,8 +34165,9 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
   ok(Math.abs(font.x - 50) < 1e-6 && Math.abs(font.y - 90) < 1e-6, "#255 fix: a zone label moves with the group's smallest partial arc, never a full circle");
 
   for (const e of c255T3Reg) {
-    const kk = c255T3KeysById(e.id), ids = new Set(Object.keys(kk.regions));
-    ok(kk.spaces.length > 0 && kk.spaces.every((s) => ids.has(s)) && Object.values(kk.roles).every((r) => r == null || ids.has(r)), `#255 fix ${e.id}: every Space and role names one of the template's regions`);
+    // #255 T14: a code-sized movable's region (the Arena's Stage) is created by the stretch, never drawn — it counts too.
+    const kk = c255T3KeysById(e.id), ids = new Set([...Object.keys(kk.regions), ...(kk.movables ?? []).filter((m) => m.sized).map((m) => m.region)]);
+    ok(kk.spaces.length > 0 && kk.spaces.every((s) => ids.has(s)) && Object.values(kk.roles).every((r) => r == null || ids.has(r)), `#255 fix ${e.id}: every Space and role names one of the template's regions (a sized room's included)`);
   }
 
   const churchType = c255T3Seed.find((t) => t.key === "church")!;
@@ -34231,7 +34233,7 @@ import { mergeVenueTypes as c255T5Merge, venueTypesFrom as c255T5From } from "@/
 import { defaultBackground as c255T5Default, effectiveTemplateFor as c255T5Effective } from "@/lib/design/venue-templates";
 {
   const seed = c255T5From(undefined);
-  ok(seed.find((t) => t.key === "proscenium")?.background === "proscenium@1" && seed.find((t) => t.key === "church")?.background === "church-traditional@1" && seed.find((t) => t.key === "arena")?.background === null, "#255 T5: nothing stored — each type starts on its kind's default Background (none for a kind without a drawing)");
+  ok(seed.find((t) => t.key === "proscenium")?.background === "proscenium@1" && seed.find((t) => t.key === "church")?.background === "church-traditional@1" && seed.find((t) => t.key === "arena")?.background === "arena@1", "#255 T5: nothing stored — each type starts on its kind's default Background (Arena's drawing since T14)");
   ok(seed.find((t) => t.key === "gymstage")?.background === c255T5Default("proscenium", "gymstage"), "#255 T5: Gym Stage starts on the Background made for it, else its kind's");
   const stored = c255T5From([{ key: "church", label: "Sanctuary", worksLike: "church", background: "proscenium@1" }, { key: "chapel", label: "Chapel", worksLike: "church", background: "church-traditional@1" }]);
   ok(stored.find((t) => t.key === "church")?.background === "church-traditional@1" && stored.find((t) => t.key === "chapel")?.background === "church-traditional@1", "#255 T5: a stored Background not drawn for the type's kind falls back to its default; a valid one is kept");
@@ -35288,7 +35290,7 @@ import { makeYMap as c255T13eY } from "@/lib/design/venue-templates/stretch";
   const keys: C255T13Keys = {
     kind: "r", cx: 0, x: { kind: "spans", spans }, yMap: { cy: 0, spans }, ySpans: [], origin: 0, stageDepthTo: 0, houseDepthTo: 0,
     regions: { Floor: outline }, spaces: ["Floor"], roles: { stage: "Floor", house: "Floor" },
-    lines: { outline }, drawn: ["outline", "no-such-line"], points: {}, requiredLabels: [],
+    lines: { outline }, drawn: ["outline"], points: {}, requiredLabels: [],
     defaults: { proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: 100 / 12, houseDepthFt: 100 / 12 },
     trueArcs: [{ centres: [{ x: 50, y: 50 }, { x: 50, y: -50 }, { x: -50, y: -50 }, { x: -50, y: 50 }] }],
     movableWalls: { floorTop: { from: { x: -50, y: 70 }, to: { x: 50, y: 70 } }, floorRight: { from: { x: 70, y: 50 }, to: { x: 70, y: -50 } } },
@@ -35320,7 +35322,7 @@ import { makeYMap as c255T13eY } from "@/lib/design/venue-templates/stretch";
   ok(corners && noFold && bboxOk, "#255 T13 edges: keep-sweep corners stay radius-20 quarter circles and the outline never folds, over a width × depth sweep");
   const sp = c255T13Stretch(tpl, keys, dims(300, 60));
   const circ = sp.polylines.find((pl) => pl.length > 100 && pl.every((p) => Math.abs(Math.hypot(p.x - 150, p.y - 30) - 5) < 1e-9));
-  ok(!!circ && sp.polylines.length === 3, "#255 T13 edges: a full circle with no scaleHalf keeps its drawn radius about its mapped centre; an unknown drawn id adds nothing");
+  ok(!!circ && sp.polylines.length === 3, "#255 T13 edges: a full circle with no scaleHalf keeps its drawn radius about its mapped centre");
   const bx = (r: Array<{ x: number; y: number }>) => [Math.min(...r.map((p) => p.x)), Math.max(...r.map((p) => p.x)), Math.min(...r.map((p) => p.y)), Math.max(...r.map((p) => p.y))];
   const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
   const sz = { stage: { alongFt: 5, depthFt: 2 } };
@@ -35429,4 +35431,194 @@ async function c255Rv12SpacesAsyncChecks(): Promise<void> {
   const base = c255Rv12Default(0);
   const names = (venue: string, kind: "blackbox" | "flat") => GP.starterSpaces({ ...base, venue, width: 40, depth: 30 }, kind, "sh").map((x) => x.name).join("|");
   ok(names("blackbox", "blackbox") === "Blackbox|Electrical Room|Booth|Storage 1|Storage 2" && names("concenter", "flat") === "Conference Room|Electrical Room|Booth|Storage 1|Storage 2", "#255 T12 review: starter Spaces — Conference Room on a Conference, and Storage 1 / Storage 2");
+}
+
+/* --- #255 T14: Arena — even bowl, round corners, court keeps its share, the stage and rooms move --- */
+import { ARENA_KEYS as c255T14Keys, ARENA_SPACES as c255T14Spaces } from "@/lib/design/venue-templates/arena.keys";
+import { stretchById as c255T14Stretch, templateData as c255T14Data } from "@/lib/design/venue-templates/templates";
+import { resolveBackground as c255T14Resolve } from "@/lib/design/venue-templates";
+import { arenaDims as c255T14Dims, houseFields as c255T14Fields } from "@/lib/design/venue-templates/house-dims";
+import { arenaGeom as c255T14Geom, buildPlan as c255T14Build, renderPlanSvgMarkup as c255T14Markup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T14Default, VENUES as c255T14Venues } from "@/app/(app)/design/quick/engine";
+import { generateAutoLayout as c255T14Layout, venueFrame as c255T14Frame } from "@/lib/design/grid-auto-layout";
+import { venueTypesFrom as c255T14Types } from "@/lib/venue-types";
+import type { AutoCard as C255T14Card } from "@/lib/design/auto-estimate";
+{
+  void c255T14Keys;
+  const T = c255T14Data("arena@1").template;
+  ok(T.segments.length === 12 && (T.roundRects || []).length === 2 && T.labels.length === 5, "#255 T14: the arena converts — 12 lines, its two outlines as rounded rectangles, five labels");
+  const base = c255T14Default(0);
+  ok(c255T14Venues.some((v) => v.key === "arena" && v.kind === "arena"), "#255 T14: Quick Design has an Arena venue");
+  const A = (o: Record<string, unknown>) => ({ ...base, venue: "arena", width: 40, depth: 24, ...o }) as typeof base;
+  const bb = (r: Array<{ x: number; y: number }>) => ({ w: Math.max(...r.map((p) => p.x)) - Math.min(...r.map((p) => p.x)), h: Math.max(...r.map((p) => p.y)) - Math.min(...r.map((p) => p.y)), cx: (Math.max(...r.map((p) => p.x)) + Math.min(...r.map((p) => p.x))) / 2, cy: (Math.max(...r.map((p) => p.y)) + Math.min(...r.map((p) => p.y))) / 2 });
+  for (const v of [{ W: 90, L: 134, B: 15 }, { W: 60, L: 90, B: 10 }, { W: 90, L: 200, B: 15 }, { W: 90, L: 134, B: 30 }]) {
+    const s = A({ width: 30, houseWidthFt: v.W, houseDepthFt: v.L, bowlDepthFt: v.B });
+    const plan = c255T14Stretch("arena@1", c255T14Dims(s, "arena@1"));
+    const tag = `${v.W}×${v.L} bowl ${v.B}`;
+    const fl = bb(plan.regions["Arena Floor"]), bw = bb(plan.regions["Seating Bowl"]), ct = bb(plan.regions.Court);
+    ok(Math.abs(fl.w - v.W * 12) < 1e-6 && Math.abs(fl.h - v.L * 12) < 1e-6 && Math.abs(bw.w - fl.w - 24 * v.B) < 1e-6 && Math.abs(bw.h - fl.h - 24 * v.B) < 1e-6, `#255 T14 ${tag}: the floor is its typed size; the bowl is an even band all round`);
+    ok(Math.abs(ct.w / fl.w - 600 / 1080) < 1e-9 && Math.abs(ct.h / fl.h - 1128 / 1608) < 1e-9 && Math.abs(ct.cx - fl.cx) < 1e-9 && Math.abs(ct.cy - fl.cy) < 1e-9, `#255 T14 ${tag}: the court keeps its share of the floor, centred`);
+    const inner = plan.lines.inner, outer = plan.lines.outer; // the drawn key lines (the moved rooms' lines come after them in polylines)
+    const cx = 6 + (v.W * 12) / 2 - 156, cy = (v.L * 12) / 2 - 156;
+    const tr = (pl: typeof inner) => pl.filter((p) => p.x > cx + 1e-6 && p.y > cy + 1e-6);
+    ok(tr(inner).every((p) => Math.abs(Math.hypot(p.x - cx, p.y - cy) - 156) < 1e-6) && tr(outer).every((p) => Math.abs(Math.hypot(p.x - cx, p.y - cy) - (156 + 12 * v.B)) < 1e-6) && tr(outer).length > 5, `#255 T14 ${tag}: corners are true quarter circles — inner 13', outer 13' + the bowl, one centre`);
+  }
+  const home = c255T14Stretch("arena@1", c255T14Dims(A({}), "arena@1"));
+  const st = bb(home.regions.Stage), fl = bb(home.regions["Arena Floor"]);
+  ok(Math.abs(st.w - 480) < 1e-6 && Math.abs(st.h - 288) < 1e-6 && Math.abs(st.cx - 6) < 1e-6 && Math.abs(st.cy + st.h / 2 - (fl.cy + fl.h / 2)) < 1e-6, "#255 T14: the end stage is its typed 40' × 24', at the top end of the floor, centred, inside it");
+  const side = c255T14Stretch("arena@1", c255T14Dims(A({ movables: { stage: { wall: "floorLeft", t: 0.5 } } }), "arena@1"));
+  const ss = bb(side.regions.Stage);
+  ok(Math.abs(ss.w - 288) < 1e-6 && Math.abs(ss.h - 480) < 1e-6 && Math.abs(ss.cx - ss.w / 2 - (fl.cx - fl.w / 2)) < 1e-6, "#255 T14: moved to a side, the stage turns to face the floor, against the side");
+  const rooms = c255T14Stretch("arena@1", c255T14Dims(A({ movables: { booth: { wall: "top", t: 0.5 } } }), "arena@1"));
+  const br = bb(rooms.regions.Booth), bw0 = bb(rooms.regions["Seating Bowl"]);
+  ok(Math.abs(br.w - 536) < 1e-6 && Math.abs(br.h - 120) < 1e-6 && br.cy - br.h / 2 >= bw0.cy + bw0.h / 2 - 1e-6, "#255 T14: the Booth moves to the top end's straight run, outside the bowl, turned to face in");
+  ok(c255T14Resolve(c255T14Types(undefined), null, "arena") === "arena@1" && c255T14Types(undefined).find((t) => t.key === "arena")?.background === "arena@1", "#255 T14: Arena defaults to Jeff's arena drawing");
+  const f = c255T14Fields(A({}), "arena@1")!;
+  ok(f.rows.map((r) => `${r.label}=${r.v}`).join("|") === "Floor width=90|Floor length=134|Bowl depth=15", "#255 T14: floor width, floor length and bowl depth, defaulting to the drawing");
+  const s1 = c255T14Markup(c255T14Build(A({ sys: { ...base.sys, audio: true, rigging: true } }), 8, 3, "#3a3f4a"), "#3a3f4a");
+  // The FOH mix box is boothMix's (the Gym Stage / Blackbox rule): "FOH" in the 10'-wide Booth on a side, "FOH MIX" once it is on an end.
+  const gHome = c255T14Geom(A({ sys: { ...base.sys, audio: true, rigging: true } }));
+  const inB = (m: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => m.x - m.w / 2 >= b.x && m.x + m.w / 2 <= b.x + b.w && m.y - m.h / 2 >= b.y && m.y + m.h / 2 <= b.y + b.h;
+  ok(["Seating Bowl", "Arena Floor", "Court", "Booth", "Electrical Room"].every((t) => s1.includes(">" + t + "<")) && s1.includes(">STAGE<") && s1.includes(">" + gHome.mix!.text + "<") && inB(gHome.mix!, gHome.booth) && !s1.includes(">BOWL SEATING<"), "#255 T14: the arena plan draws Jeff's drawing, the stage and the FOH mix in the Booth");
+  const onEnd = c255T14Geom(A({ movables: { booth: { wall: "top", t: 0.5 } } }));
+  ok(onEnd.mix!.text === "FOH MIX" && inB(onEnd.mix!, onEnd.booth) && c255T14Markup(c255T14Build(A({ movables: { booth: { wall: "top", t: 0.5 } } }), 8, 3, "#3a3f4a"), "#3a3f4a").includes(">FOH MIX<"), "#255 T14: the Booth on an end reads FOH MIX, inside it");
+  const G = c255T14Geom(A({ movables: { stage: { wall: "floorLeft", t: 0.5 } } }));
+  ok(Math.abs(G.stageAngle + Math.PI / 2) < 1e-9, "#255 T14: a stage on the left side faces right (−90°)");
+  const line = (rowKey: string, ref: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref, unitCost: 1, unitSell: 1, total: qty, swapped: false });
+  const cards = [{ scope: "lighting", tier: "better", lines: [line("lighting:par", "C255-PAR", 8)] }, { scope: "audio", tier: "better", lines: [line("audio:mixerDsp", "C255-MIX", 1)] }] as unknown as C255T14Card[];
+  const sideA = A({ movables: { stage: { wall: "floorLeft", t: 0.5 } } });
+  const fr = c255T14Frame(sideA, { template: "arena@1" });
+  const specs = c255T14Layout(sideA, cards, { electrics: 2, sets: 6, template: "arena@1" });
+  const pars = specs.filter((x) => x.auto.rowKey === "lighting:par"), mix = specs.find((x) => x.auto.rowKey === "audio:mixerDsp")!;
+  const box = { x0: (G.stageCentre.x - G.stageDepth / 2) / G.W, x1: (G.stageCentre.x + G.stageDepth / 2) / G.W, y0: (G.stageCentre.y - G.stageAlong / 2) / G.H, y1: (G.stageCentre.y + G.stageAlong / 2) / G.H };
+  ok(pars.length === 8 && pars.every((p) => p.x >= box.x0 - 1e-6 && p.x <= box.x1 + 1e-6 && p.y >= box.y0 - 1e-6 && p.y <= box.y1 + 1e-6) && new Set(pars.map((p) => p.x.toFixed(4))).size <= 2, "#255 T14: lights hang over the side stage, in rows parallel to its front");
+  ok(mix.x >= fr.booth.x && mix.x <= fr.booth.x + fr.booth.w && mix.y >= fr.booth.y && mix.y <= fr.booth.y + fr.booth.h, "#255 T14: the FOH mix gear goes to the Booth");
+  ok([...c255T14Spaces].join("|") === "Seating Bowl|Arena Floor|Court|Stage|Booth|Electrical Room", "#255 T14: six starter Spaces, the stage among them");
+}
+
+/* --- #255 T14 edges: tangent corners and no fold over every legal input, identity, junk, named throws, drag and sanitizer --- */
+import { makeXMap as c255T14eX, makeYMap as c255T14eY, stretchTemplate as c255T14eStretch } from "@/lib/design/venue-templates/stretch";
+import { ARENA_CORNER_R as c255T14eR, ARENA_KEYS as c255T14eKeys } from "@/lib/design/venue-templates/arena.keys";
+import { houseDragPatch as c255T14eDrag, arenaGeom as c255T14eGeom, buildPlan as c255T14eBuild } from "@/app/(app)/design/quick/plan-svg";
+import { movableOptions as c255T14eOpts, sanitizeMovables as c255T14eSan } from "@/lib/design/venue-templates/movable-options";
+import { arenaDims as c255T14eDims, familyDims as c255T14eFamily } from "@/lib/design/venue-templates/house-dims";
+import { templateData as c255T14eData } from "@/lib/design/venue-templates/templates";
+import { defaultAState as c255T14eDefault } from "@/app/(app)/design/quick/engine";
+{
+  const K = c255T14eKeys, T = c255T14eData("arena@1").template;
+  const base = c255T14eDefault(0);
+  const A = (o: Record<string, unknown>) => ({ ...base, venue: "arena", width: 40, depth: 24, ...o }) as typeof base;
+  ok(T.arcs.length === 0, "#255 T14 edges: the arena drawing carries no arcs, so no drawn arc pins the bowl's corners concentric");
+  // Every legal floor × length × bowl (and the limits' ends): the corners stay tangent (X and Y move a corner's radius
+  // the same), both maps never fold, both outlines turn one way all round, the court stays inside the floor.
+  const polarOk = (line: Array<{ x: number; y: number }>) => {
+    const ang = line.map((p) => Math.atan2(p.y, p.x - 6));
+    let turned = 0;
+    for (let i = 1; i < ang.length; i++) {
+      let da = ang[i] - ang[i - 1];
+      if (da > Math.PI) da -= 2 * Math.PI;
+      if (da < -Math.PI) da += 2 * Math.PI;
+      if (da > 1e-9) return false;
+      turned += da;
+    }
+    return Math.abs(turned + 2 * Math.PI) < 1e-6;
+  };
+  let tangent = true, mono = true, turns = true, court = true;
+  const bad: string[] = [];
+  for (const W of [59, 60, 75, 90, 150, 250]) for (const L of [88, 100, 134, 250, 400]) for (const B of [0, 5, 15, 30, 60]) {
+    const d = c255T14eDims(A({ houseWidthFt: W, houseDepthFt: L, bowlDepthFt: B }), "arena@1");
+    const X = c255T14eX(K, d), Y = c255T14eY(K, d);
+    for (const r of [0, 40, c255T14eR, 250, c255T14eR + 180]) {
+      if (Math.abs(X(390 + r, 0) - X(390, 0) - (Y(648 + r) - Y(648))) > 1e-9) tangent = false;
+      if (Math.abs(X(-378 - r, 0) - X(-378, 0) - (Y(-648 - r) - Y(-648))) > 1e-9) tangent = false;
+    }
+    for (let x = -1000; x < 1000; x += 3) if (X(x + 3, 0) < X(x, 0) - 1e-9) mono = false;
+    for (let y = -1200; y < 1200; y += 3) if (Y(y + 3) < Y(y) - 1e-9) mono = false;
+    const sp = c255T14eStretch(T, K, d);
+    if (!polarOk(sp.lines.inner) || !polarOk(sp.lines.outer)) turns = false;
+    const xs = (id: string) => sp.regions[id].map((p) => p.x), ys = (id: string) => sp.regions[id].map((p) => p.y);
+    if (Math.min(...xs("Court")) < Math.min(...xs("Arena Floor")) - 1e-9 || Math.max(...xs("Court")) > Math.max(...xs("Arena Floor")) + 1e-9 || Math.min(...ys("Court")) < Math.min(...ys("Arena Floor")) - 1e-9 || Math.max(...ys("Court")) > Math.max(...ys("Arena Floor")) + 1e-9) court = false;
+    if (!(tangent && mono && turns && court)) bad.push(`${W}×${L}×${B}`);
+  }
+  ok(tangent && mono && turns && court, `#255 T14 edges: every legal floor × length × bowl keeps tangent corners, never folds, keeps the court inside the floor${bad.length ? " — " + bad.slice(0, 3).join(", ") : ""}`);
+  // Junk and out-of-range inputs clamp: every span ≥ 0, the court never past the straight run, no fold.
+  let junkOk = true;
+  for (const o of [{ houseWidthFt: 1, houseDepthFt: 1, bowlDepthFt: -4 }, { houseWidthFt: -30, houseDepthFt: Number.NaN, bowlDepthFt: Number.NaN }, { houseWidthFt: 1e6, houseDepthFt: 1e6, bowlDepthFt: 1e6 }, { width: -10, depth: Number.NaN }, { width: 1e5, depth: 1e5 }]) {
+    const d = c255T14eDims(A(o), "arena@1");
+    const vals = [d.proWidthFt, d.wingFt, d.stageDepthFt, d.houseWidthFt, d.houseDepthFt, d.movableSizes!.stage.alongFt, d.movableSizes!.stage.depthFt];
+    if (!vals.every((v) => Number.isFinite(v) && v >= 0) || d.proWidthFt > d.houseWidthFt + 1e-9 || d.stageDepthFt > d.houseDepthFt + 1e-9) junkOk = false;
+    const X = c255T14eX(K, d), Y = c255T14eY(K, d);
+    for (let x = -1000; x < 1000; x += 5) if (X(x + 5, 0) < X(x, 0) - 1e-9) junkOk = false;
+    for (let y = -1200; y < 1200; y += 5) if (Y(y + 5) < Y(y) - 1e-9) junkOk = false;
+  }
+  ok(junkOk, "#255 T14 edges: junk or out-of-range floor, bowl and stage values clamp — every span ≥ 0, the court inside the run, no fold");
+  // At the drawing's own size every drawn line is where Jeff drew it and the outlines are the drawing's bboxes.
+  const d0 = c255T14eDims(A({}), "arena@1");
+  ok(Math.abs(d0.proWidthFt - K.defaults.proWidthFt) < 1e-9 && Math.abs(d0.wingFt - K.defaults.wingFt) < 1e-9 && Math.abs(d0.stageDepthFt - K.defaults.stageDepthFt) < 1e-9 && Math.abs(d0.houseWidthFt - K.defaults.houseWidthFt) < 1e-9 && Math.abs(d0.houseDepthFt - K.defaults.houseDepthFt) < 1e-9, "#255 T14 edges: the default inputs are the drawing's own size");
+  const sp0 = c255T14eStretch(T, K, d0);
+  const X0 = c255T14eX(K, d0), Y0 = c255T14eY(K, d0);
+  const court0 = T.segments.filter(([x1, , x2]) => Math.abs(x1) < 700 && Math.abs(x2) < 700);
+  const rr = T.roundRects!;
+  const bx = (pts: Array<{ x: number; y: number }>) => [Math.min(...pts.map((p) => p.x)), Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.y))];
+  const eqB = (b: number[], r: { minX: number; minY: number; maxX: number; maxY: number }) => [r.minX, r.minY, r.maxX, r.maxY].every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  ok(court0.length === 4 && court0.every(([x1, y1, x2, y2]) => Math.abs(X0(x1, y1) - x1) < 1e-9 && Math.abs(Y0(y1) - y1) < 1e-9 && Math.abs(X0(x2, y2) - x2) < 1e-9 && Math.abs(Y0(y2) - y2) < 1e-9) && eqB(bx(sp0.lines.inner), rr[1]) && eqB(bx(sp0.lines.outer), rr[0]), "#255 T14 edges: at the drawing's size the court is where Jeff drew it and the outlines fill the drawing's own boxes");
+  const bh = bx(sp0.regions.Booth), eh = bx(sp0.regions["Electrical Room"]);
+  ok([bh[0], bh[1], bh[2], bh[3]].every((v, i) => Math.abs(v - [-834, -268, -714, 268][i]) < 1e-6) && [eh[0], eh[1], eh[2], eh[3]].every((v, i) => Math.abs(v - [726, -268, 846, 268][i]) < 1e-6), "#255 T14 edges: the rooms start where Jeff drew them");
+  // Named errors for a broken template.
+  const throwsNamed = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test(String((e as Error).message)); } };
+  ok(throwsNamed(() => c255T14eStretch(T, { ...K, drawn: ["inner", "nope"] }, d0), /drawn line "nope" is not in lines/), "#255 T14 edges: an unknown drawn line id is a named error");
+  ok(throwsNamed(() => c255T14eStretch(T, { ...K, trueArcs: [{ centres: K.trueArcs![0].centres, scaleHalf: 100 }] }, d0), /scaleHalf needs atY/), "#255 T14 edges: a true-arc group with scaleHalf but no atY is a named error");
+  ok(throwsNamed(() => c255T14eStretch(T, { ...K, movables: K.movables!.map((m) => (m.id === "stage" ? { ...m, region: "Court" } : m)) }, d0), /code-sized movable stage names region "Court", which is also a drawn region/), "#255 T14 edges: a sized room named after a drawn region is a named error");
+  // The stage drags along the floor's edges, whole feet; the rooms along the bowl's; Reset-free patches only.
+  const G = c255T14eGeom(A({}));
+  const stageH = c255T14eBuild(A({}), 8, 3, "#3a3f4a").handles!.find((h) => h.type === "movable" && h.key === "stage")!;
+  const toLeft = c255T14eDrag(A({}), stageH, { sx: 0, sy: 0, dx: G.floor.x - G.stageCentre.x + 20, dy: G.floor.y + G.floor.h / 2 - G.stageCentre.y });
+  ok(!!stageH && toLeft?.movables?.stage?.wall === "floorLeft" && Object.keys(toLeft).join() === "movables", "#255 T14 edges: dragging the stage to the floor's left side moves it there (its handle, a movables patch only)");
+  const wallH = { type: "wall" as const, side: "L" as const, cx: 0, cy: 0, shape: "wall" as const };
+  ok(c255T14eDrag(A({}), wallH, { sx: 0, sy: 0, dx: 30, dy: 0 }) === null, "#255 T14 edges: the arena has no wall handles (the floor and bowl are fields)");
+  // The server sanitizer keeps only the arena's own rooms on their own walls.
+  const san = c255T14eSan({ stage: { wall: "floorRight", t: 2 }, booth: { wall: "floorTop", t: 0.5 }, electrical: { wall: "bottom", t: "x" }, ghost: { wall: "top", t: 0 } }, "arena@1");
+  ok(JSON.stringify(san) === JSON.stringify({ electrical: { wall: "bottom", t: null }, stage: { wall: "floorRight", t: 1 } }), "#255 T14 edges: the sanitizer keeps the stage on the floor's edges and the rooms on the bowl's, t clamped, junk dropped");
+  // Both rooms on one side fit apart; both on one end (a 64' run) don't — the plan says so and keeps them apart.
+  const two = c255T14eOpts(A({ movables: { booth: { wall: "left", t: 0 }, electrical: { wall: "left", t: 0 } } }), "arena@1");
+  const sp2 = c255T14eStretch(T, K, c255T14eFamily(A({ movables: { booth: { wall: "left", t: 0 }, electrical: { wall: "left", t: 0 } } }), "arena@1"));
+  const b2 = bx(sp2.regions.Booth), e2 = bx(sp2.regions["Electrical Room"]);
+  ok(two.warnings.length === 0 && (b2[1] >= e2[3] + 24 - 1e-6 || e2[1] >= b2[3] + 24 - 1e-6), "#255 T14 edges: both rooms on one side sit 2' apart, never overlapping");
+  const ends = c255T14eOpts(A({ movables: { booth: { wall: "top", t: 0 }, electrical: { wall: "top", t: 1 } } }), "arena@1");
+  ok(ends.warnings.length === 1 && /Top end/.test(ends.warnings[0]), "#255 T14 edges: two rooms on one end don't fit — a named warning");
+  ok(two.items.map((i) => i.label).join("|") === "Booth|Electrical Room|Stage" && two.items.find((i) => i.id === "stage")!.walls.map((w) => w.label).join("|") === "Top end|Right side|Bottom end|Left side", "#255 T14 edges: the room fields list the stage with the floor's four edges");
+  // A stage too big for the floor is drawn to fit — no longer than its edge's straight run, no deeper than half the
+  // floor across it — and the floor rows say so; it never overhangs the round corners.
+  let fitOk = true;
+  for (const W of [59, 90, 250]) for (const L of [88, 134, 400]) for (const wall of ["floorTop", "floorLeft", "floorBottom", "floorRight"]) for (const [sw, sd] of [[20, 14], [40, 24], [80, 52]]) {
+    const s = A({ width: sw, depth: sd, houseWidthFt: W, houseDepthFt: L, movables: { stage: { wall, t: 0.5 } } });
+    const sp = c255T14eStretch(T, K, c255T14eDims(s, "arena@1"));
+    const st = bx(sp.regions.Stage), fl = bx(sp.regions["Arena Floor"]);
+    const side = wall === "floorLeft" || wall === "floorRight";
+    const along = side ? st[3] - st[1] : st[2] - st[0], deep = side ? st[2] - st[0] : st[3] - st[1];
+    const run = ((side ? L : W) - 26) * 12, across = ((side ? W : L) * 12) / 2;
+    const want = { a: Math.min(sw * 12, run), d: Math.min(sd * 12, across) };
+    const inside = st[0] >= fl[0] - 1e-6 && st[2] <= fl[2] + 1e-6 && st[1] >= fl[1] - 1e-6 && st[3] <= fl[3] + 1e-6;
+    const warned = (c255T14Fields(s, "arena@1")!.warning ?? "").includes("shrinks it to fit");
+    if (Math.abs(along - want.a) > 1e-6 || Math.abs(deep - want.d) > 1e-6 || !inside || !sp.movables.stage.fits || warned !== (sw * 12 > run || sd * 12 > across)) fitOk = false;
+  }
+  const qd14 = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
+  ok(c255T14eBuild(A({}), 8, 3, "#3a3f4a").isHouse === false && qd14.includes("(house ? updA(RESET_HOUSE_PATCH) : updA(RESET_ROOMS_PATCH))") && qd14.includes("resetHouse(!!plan.isHouse)"), "#255 T14 edges: Reset rooms on the arena moves the rooms and stage home, never resetting the floor or bowl");
+  ok(fitOk, "#255 T14 edges: the stage is its typed size when it fits and shrinks to the floor (with a warning) when it doesn't — always inside the floor, on any edge");
+}
+async function c255T14GridAsyncChecks(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const base = c255T14eDefault(0);
+  const a = { ...base, venue: "arena", width: 40, depth: 24, houseWidthFt: 100, bowlDepthFt: 20, movables: { stage: { wall: "floorLeft", t: 0.5 } }, sys: { ...base.sys, audio: true, rigging: true } };
+  ok(GP.starterSpaces(a, "arena", "sh").map((s) => s.name).join("|") === "Seating Bowl|Arena Floor|Court|Stage|Booth|Electrical Room", "#255 T14: an arena base sheet starts with the bowl, floor, court, stage and both rooms as Spaces");
+  const gp = await GP.createProject({ name: "Test255 arena sheet", customer: "", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  await GP.saveGridIntake(gp.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "Arena", address: "", notes: "", autoConfig: a });
+  const sheet = await GP.generateBaseSheet(gp.id, a, "#3a3f4a", "Test Harness", "arena@1");
+  if (sheet) registerFixture("grid_sheets", sheet.id);
+  const p = (await GP.getProject(gp.id))!;
+  const cal = (p.calibrations || []).find((c) => c.docId === sheet?.id);
+  const G = c255T14eGeom(a);
+  ok(p.intake?.baseSheetTemplate === "arena@1" && p.intake?.baseSheetMovables?.stage?.wall === "floorLeft" && (p.spaces || []).length === 6, "#255 T14: generating an arena base sheet stamps arena@1, where its stage sits, and adds its six Spaces");
+  ok(!!cal && cal.unit === "ft" && Math.abs(cal.refLength - 100) < 1e-9 && Math.abs(cal.scale - 100 / (G.floor.w / G.W)) < 1e-6, "#255 T14: the arena sheet is calibrated from the floor's straight sides, exactly the floor width apart");
 }

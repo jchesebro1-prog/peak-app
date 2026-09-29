@@ -39,7 +39,7 @@ import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map"
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import type { AssemblyPickerOption } from "@/lib/fixture-assemblies";
-import { PlanSvg, RESET_HOUSE_PATCH, buildPlan, houseDragPatch, planToolbar, type PlanHandle } from "./plan-svg";
+import { PlanSvg, RESET_HOUSE_PATCH, RESET_ROOMS_PATCH, buildPlan, houseDragPatch, planToolbar, type PlanHandle } from "./plan-svg";
 import { effectiveTemplateFor } from "@/lib/design/venue-templates";
 import type { VenueType } from "@/lib/venue-types";
 import {
@@ -454,7 +454,8 @@ export default function QuickDesignClient({
 
   /* ---- house walls (auto plan) ---- */
 
-  const resetHouse = () => updA(RESET_HOUSE_PATCH);
+  // #255 T14: "Reset rooms" (a plan with no wall handles — the Arena's floor and bowl are fields) moves the rooms only.
+  const resetHouse = (house: boolean) => (house ? updA(RESET_HOUSE_PATCH) : updA(RESET_ROOMS_PATCH));
 
   /* ------------------------------ view data ------------------------------ */
 
@@ -912,7 +913,7 @@ export default function QuickDesignClient({
                           <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 14, paddingBottom: 13, borderBottom: "1px solid #f0f1f4" }}>
                             <span style={{ fontSize: 11, color: "#9aa0ab" }}>{tb.hint}</span>
                             <span style={{ flex: 1 }} />
-                            <button onClick={resetHouse} title={tb.resetTitle} style={ghostDoorBtn}>{tb.reset}</button>
+                            <button onClick={() => resetHouse(!!plan.isHouse)} title={tb.resetTitle} style={ghostDoorBtn}>{tb.reset}</button>
                           </div>
                         )
                       );

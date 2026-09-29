@@ -1,4 +1,5 @@
 import type { AState } from "@/app/(app)/design/quick/engine";
+import { ARENA_CORNER_R, ARENA_COURT_SHARE } from "./arena.keys";
 import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
 import { CHURCH_TRADITIONAL_KEYS } from "./church-traditional.keys";
 import { GYM_STAGE_KEYS } from "./gym-stage.keys";
@@ -11,7 +12,7 @@ import type { StretchDims } from "./types";
  * Pure; safe in client components. Called without a template id every
  * function behaves exactly as #249's proscenium version.
  */
-type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt" | "movables">>;
+type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt" | "movables" | "bowlDepthFt">>;
 
 export const HOUSE_DEPTH_LIM: [number, number] = [40, 200];
 export const HOUSE_NARROW_WARNING = "The house is narrower than the stage, so its side walls slant inward.";
@@ -20,6 +21,7 @@ export const CONTEMPORARY_NAVE_WARNING = "The nave needs 12' beside the platform
 /** #255 fix: Contemporary's pointed front loops past its splays on a platform deeper than this × its width. */
 export const CONTEMPORARY_PLATFORM_DEPTH_RATIO = 2.2;
 export const CONTEMPORARY_PLATFORM_WARNING = "The pointed front needs a platform no deeper than 2.2 × its width, so the plan shortens it.";
+export const ARENA_STAGE_WARNING = "The stage is bigger than the floor takes there, so the plan shrinks it to fit.";
 export const GYM_FLOOR_WARNING = "The gym floor needs room for the stage and its side rooms, so the plan widens it to fit.";
 /** #255 fix: the Gym Stage Booth's length along a side wall (feet) — the shallowest gym floor. */
 export const GYM_BOOTH_SIDE_FT = 21;
@@ -41,6 +43,8 @@ export type HouseSpec = {
   warning: (s: HouseInput, raw: number, widthFt: number) => string | null;
   /** #255 fix: the deepest stage / platform the drawing takes at this width (feet), and what to say when it bites. */
   stageDepthMax?: { max: (s: HouseInput) => number; warning: string };
+  /** #255: a third row after width / depth (the arena's bowl depth): its field, label, limits and default (feet). */
+  extra?: { key: "bowlDepthFt"; label: string; note: string; lim: [number, number]; dflt: number };
 };
 
 export const HOUSE_SPECS: Record<string, HouseSpec> = {
@@ -88,6 +92,19 @@ export const HOUSE_SPECS: Record<string, HouseSpec> = {
     depthDefault: GYM_STAGE_KEYS.defaults.houseDepthFt,
     legacyHalf: false,
     warning: (_s, raw, widthFt) => (raw < widthFt - 1e-9 ? GYM_FLOOR_WARNING : null),
+  },
+  // #255: the arena floor (the drawing's inner outline) and its seating bowl. The lower limits keep the court's share of
+  // the floor clear of the 13' corners (ARENA_COURT_SHARE): 59' across, 88' along.
+  "arena@1": {
+    width: { label: "Floor width", note: "Arena floor, side to side" },
+    depth: { label: "Floor length", note: "Arena floor, end to end" },
+    widthLim: () => [59, 250],
+    widthDefault: () => 90,
+    depthLim: [88, 400],
+    depthDefault: 134,
+    legacyHalf: false,
+    warning: (s) => (arenaStageFor(s).clamped ? ARENA_STAGE_WARNING : null),
+    extra: { key: "bowlDepthFt", label: "Bowl depth", note: "Seating, even all round", lim: [0, 60], dflt: 15 },
   },
 };
 
@@ -140,13 +157,60 @@ export function blackboxDims(s: Pick<AState, "width" | "depth"> & Partial<Pick<A
   return { proWidthFt: s.width, wingFt: 0, stageDepthFt: 0, houseWidthFt: s.width, houseDepthFt: s.depth, pit: false, movables: s.movables ?? undefined };
 }
 
+/** #255: the arena's bowl depth (feet) — the typed value (≥ 0), else the spec's default, within its limits; 0 for a spec without one. */
+const bowlOf = (s: HouseInput, spec: HouseSpec) =>
+  spec.extra ? clamp(typeof s.bowlDepthFt === "number" && Number.isFinite(s.bowlDepthFt) && s.bowlDepthFt >= 0 ? s.bowlDepthFt : spec.extra.dflt, spec.extra.lim) : 0;
+
+/** A finite number ≥ 0, else 0. */
+const nonNeg = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, v) : 0);
+
+/**
+ * #255: the arena's end stage as the plan draws it (feet) — its typed width / depth (junk = 0), shrunk to fit the
+ * floor where it sits: along its edge no longer than that edge's straight run (it never overhangs the round corners),
+ * and no deeper than half the floor across it. `clamped` when either bit.
+ */
+export function arenaStageFor(s: HouseInput): { alongFt: number; depthFt: number; clamped: boolean } {
+  const spec = HOUSE_SPECS["arena@1"];
+  const w = clamp(pos(s.houseWidthFt) ? s.houseWidthFt : spec.widthDefault(s), spec.widthLim(s));
+  const l = clamp(pos(s.houseDepthFt) ? s.houseDepthFt : spec.depthDefault, spec.depthLim);
+  const wall = s.movables?.stage?.wall;
+  const side = wall === "floorLeft" || wall === "floorRight";
+  const r = (2 * ARENA_CORNER_R) / 12;
+  const runFt = Math.max(0, (side ? l : w) - r), acrossFt = (side ? w : l) / 2;
+  const along = nonNeg(s.width), depth = nonNeg(s.depth);
+  return { alongFt: Math.min(along, runFt), depthFt: Math.min(depth, acrossFt), clamped: along > runFt + 1e-9 || depth > acrossFt + 1e-9 };
+}
+
+/**
+ * The stretch inputs for the arena family (#255): floor, bowl, and the end stage's typed size (a code-sized movable,
+ * fitted to the floor — arenaStageFor).
+ * The floor's straight runs are the floor less a corner radius each end; the court keeps its share of the floor. Every
+ * span is clamped ≥ 0 and the court never past the straight run, so no input (typed, stored or junk) folds the plan.
+ */
+export function arenaDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string): StretchDims {
+  const spec = houseSpecFor(id);
+  const h = houseDims(s, id);
+  const r = ARENA_CORNER_R / 12;
+  const runW = Math.max(0, h.widthFt - 2 * r), runL = Math.max(0, h.depthFt - 2 * r);
+  return {
+    proWidthFt: Math.min(runW, Math.max(0, h.widthFt * ARENA_COURT_SHARE.x)),
+    wingFt: bowlOf(s, spec),
+    stageDepthFt: Math.min(runL, Math.max(0, h.depthFt * ARENA_COURT_SHARE.y)),
+    houseWidthFt: runW,
+    houseDepthFt: runL,
+    pit: false,
+    movables: s.movables ?? undefined,
+    movableSizes: { stage: (({ alongFt, depthFt }) => ({ alongFt, depthFt }))(arenaStageFor(s)) },
+  };
+}
+
 /** The stretch inputs for any template, by its family. */
 export function familyDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string): StretchDims {
   const f = templateEntry(id)?.family;
-  return f === "church" ? churchDims(s, id) : f === "blackbox" ? blackboxDims(s) : prosceniumDims(s, id);
+  return f === "church" ? churchDims(s, id) : f === "blackbox" ? blackboxDims(s) : f === "arena" ? arenaDims(s, id) : prosceniumDims(s, id);
 }
 
-export type HouseField = { key: "houseWidthFt" | "houseDepthFt"; label: string; note: string; v: number; lim: [number, number] };
+export type HouseField = { key: "houseWidthFt" | "houseDepthFt" | "bowlDepthFt"; label: string; note: string; v: number; lim: [number, number] };
 
 /** The house / nave rows a dimension panel shows for a template; null = none. */
 export function houseFields(s: HouseInput, id: string | null | undefined): { rows: HouseField[]; warning: string | null } | null {
@@ -157,6 +221,7 @@ export function houseFields(s: HouseInput, id: string | null | undefined): { row
     rows: [
       { key: "houseWidthFt", ...spec.width, v: Math.round(h.widthFt), lim: spec.widthLim(s) },
       { key: "houseDepthFt", ...spec.depth, v: Math.round(h.depthFt), lim: spec.depthLim },
+      ...(spec.extra ? [{ key: spec.extra.key, label: spec.extra.label, note: spec.extra.note, v: Math.round(bowlOf(s, spec)), lim: spec.extra.lim }] : []),
     ],
     warning: h.warning,
   };

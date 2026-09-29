@@ -41,7 +41,7 @@ import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "
 import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
-import { blackboxGeom, buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { arenaGeom, blackboxGeom, buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
 import { familyDims } from "@/lib/design/venue-templates/house-dims";
 import { stretchById } from "@/lib/design/venue-templates/templates";
@@ -385,7 +385,7 @@ export function starterSpaces(
   const id = planTemplate(a, tpl);
   const family = templateEntry(id)?.family;
   if (family) {
-    const G = family === "church" ? churchGeom(a, id) : family === "blackbox" ? blackboxGeom(a, id) : prosGeom(a, id);
+    const G = family === "church" ? churchGeom(a, id) : family === "blackbox" ? blackboxGeom(a, id) : family === "arena" ? arenaGeom(a, id) : prosGeom(a, id);
     const at = (p: Point): Point => ({ x: clamp01(p.x / G.W), y: clamp01(p.y / G.H) });
     return G.spaces.filter((rid) => G.regions[rid]).map((rid) => ({ sheetId, page: 1, name: G.regionLabels[rid] ?? rid, points: G.regions[rid].map(at) }));
   }
@@ -453,6 +453,11 @@ export async function generateBaseSheet(
     const G = blackboxGeom(a, id);
     refWidthFt = a.width;
     scale = calibrationScale({ x: G.room.x / plan.W, y: G.room.y / plan.H }, { x: (G.room.x + G.room.w) / plan.W, y: G.room.y / plan.H }, plan.H / plan.W, refWidthFt);
+  } else if (family === "arena") {
+    // #255: the floor's straight sides are exactly the floor width apart.
+    const G = arenaGeom(a, id);
+    refWidthFt = G.floorWidthFt;
+    scale = calibrationScale({ x: G.floor.x / plan.W, y: (G.floor.y + G.floor.h / 2) / plan.H }, { x: (G.floor.x + G.floor.w) / plan.W, y: (G.floor.y + G.floor.h / 2) / plan.H }, plan.H / plan.W, refWidthFt);
   } else {
     const room = plan.rects[0];
     scale = room

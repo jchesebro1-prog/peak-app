@@ -141,6 +141,8 @@ export type AState = {
   /** #249: the proscenium house — width (inside faces, back of house) and depth (plaster line → back wall), ft. null = the default (venue-templates/house-dims). */
   houseWidthFt?: number | null;
   houseDepthFt?: number | null;
+  /** #255: the arena's seating bowl depth, ft, even all round; null = the drawing's 15'. */
+  bowlDepthFt?: number | null;
   /** #255: the venue type (#216 key, a site's venue_kind) of this design's venue; null = none linked. Picks the plan's Background. */
   venueType?: string | null;
   /** #255: a per-design Background override — a template id (e.g. "church-contemporary@1"); null = the venue type's Background. */
@@ -208,6 +210,8 @@ export const VENUES: VenueDef[] = [
   { key: "blackbox", label: "Black Box", sub: "Black box theater", kind: "blackbox", w: 26, d: 24, g: 18, wing: 0, ph: 16, sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: false, acoustical: true, pit: false } },
   // #255 fix: Jeff's Gym Stage drawing — a 40' opening, 10' wings, a 20' stage (the gym floor is the house fields).
   { key: "gym", label: "Gym Stage", sub: "Gymnasium stage", kind: "gym", w: 40, d: 20, g: 26, wing: 10, ph: 14, sys: { rigging: true, curtains: true, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false } },
+  // #255: Jeff's Arena drawing — width / depth are the end stage's (the floor and bowl are the drawing's own rows).
+  { key: "arena", label: "Arena", sub: "Arena / open floor", kind: "arena", w: 40, d: 24, g: 60, wing: 0, ph: 20, sys: { rigging: true, curtains: false, lighting: true, controls: true, audio: true, video: true, acoustical: false, pit: false } },
 ];
 
 export const LIM: Record<DimField, [number, number]> = {
@@ -251,9 +255,11 @@ export const DIMSCHEMA: Record<VenueKind, Array<{ field: DimField; label: string
     { field: "grid", label: "Ceiling height", note: "Floor to structure" },
     { field: "wing", label: "Wings", note: "Return wall to stage side wall, each side" },
   ],
+  // #255 (Jeff 2026-09-28): the arena's width / depth are its end stage (drawn by code, movable along the floor's
+  // edges); the floor's width / length and the bowl depth are the drawing's rows (house-dims.ts).
   arena: [
-    { field: "width", label: "Floor width", note: "Wall to wall" },
-    { field: "depth", label: "Floor depth", note: "Front to back" },
+    { field: "width", label: "Stage width", note: "End stage, edge to edge" },
+    { field: "depth", label: "Stage depth", note: "Front edge to back" },
     { field: "grid", label: "Clearance height", note: "Floor to structure" },
   ],
 };

@@ -24,7 +24,7 @@
  */
 import { clamp01, type Point } from "@/lib/annotations";
 import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
-import { blackboxGeom, churchGeom, planTemplate, prosGeom } from "@/app/(app)/design/quick/plan-svg";
+import { arenaGeom, blackboxGeom, churchGeom, planTemplate, prosGeom } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
 import { legacyChurchGeom } from "./legacy-church-geom";
 import { legacyProsGeom } from "./legacy-pros-geom";
@@ -39,7 +39,17 @@ export type Rect = { x: number; y: number; w: number; h: number };
  * Normalized to the base sheet. `catwalk` / `stageEdge` exist only where the drawing's template has them (#249 Auditorium).
  * `room` (#255 review, blackbox family only): the walls every point outside the Booth stays inside.
  */
-export type VenueFrame = { stage: Rect; audience: Rect; booth: Rect; catwalk?: Rect; stageEdge?: Point[]; room?: Rect };
+export type VenueFrame = {
+  stage: Rect;
+  audience: Rect;
+  booth: Rect;
+  catwalk?: Rect;
+  stageEdge?: Point[];
+  room?: Rect;
+  /** #255: an arena's movable stage — stage-relative placements turn by this (radians; 0 = facing down the sheet) about the stage's centre; aspect = sheet H / W. */
+  stageAngle?: number;
+  aspect?: number;
+};
 export const EACH_CAP = 120;
 
 export function venueFrame(a: AState, opts: { legacy?: boolean; template?: string | null } = {}): VenueFrame {
@@ -78,6 +88,14 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
       const aud: Rect = kind === "flat" ? { x: G.room.x, y: G.platform.y + G.platform.h, w: G.room.w, h: G.room.y + G.room.h - (G.platform.y + G.platform.h) } : G.room;
       return { stage: kind === "flat" ? n(G.platform) : blackboxStage(room), audience: n(aud), booth: n(G.booth), room };
     }
+    if (family === "arena") {
+      // The end stage laid out as if at the top end (width across, depth down) about its centre, turned by stageAngle
+      // into place (generateAutoLayout's `turn`); the floor is the audience; the Booth wherever it sits.
+      const G = arenaGeom(a, id);
+      const n = W(G);
+      const st: Rect = { x: G.stageCentre.x - G.stageAlong / 2, y: G.stageCentre.y - G.stageDepth / 2, w: G.stageAlong, h: G.stageDepth };
+      return { stage: n(st), audience: n(G.floor), booth: n(G.booth), ...(Math.abs(G.stageAngle) > 1e-9 ? { stageAngle: G.stageAngle, aspect: G.H / G.W } : {}) };
+    }
   }
   if (kind === "proscenium") {
     // A base sheet no template drew (before #249) keeps the old schematic's frame, so a re-fill lands on the plan the design has.
@@ -99,7 +117,7 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
       booth: r(G.cx - G.boothW / 2, G.y1, G.boothW, G.boothH),
     };
   }
-  // flat / blackbox sheets no template drew (before #255), gym / arena — starterSpaces()'s fixed-fraction frame.
+  // flat / blackbox / arena sheets no template drew (before #255) — starterSpaces()'s fixed-fraction frame.
   return {
     stage: { x: 0.2, y: 0.12, w: 0.6, h: 0.28 },
     audience: { x: 0.08, y: 0.58, w: 0.84, h: 0.32 },
@@ -132,6 +150,9 @@ function inRoom(p: Point, r: Rect): Point {
   const m = (lo: number, hi: number, v: number) => (hi - lo > 2 * ROOM_MARGIN ? Math.min(hi - ROOM_MARGIN, Math.max(lo + ROOM_MARGIN, v)) : (lo + hi) / 2);
   return { x: m(r.x, r.x + r.w, p.x), y: m(r.y, r.y + r.h, p.y) };
 }
+
+/** #255: placements laid out relative to the stage — they turn with an arena's movable stage. */
+const STAGE_ROWS = new Set(["lighting:par", "lighting:automated", "lighting:cyc", "lighting:side", "audio:lineArray", "audio:subwoofer", "video:screen", "rigging:electricHoist", "rigging:lowCapHoist", "rigging:highCapHoist", "rigging:varSpeedHoist", "rigging:riggingPoint", "rigging:headblock"]);
 
 /** Rows that belong in the Booth room — the only points a blackbox-family fill may put outside the room. */
 const BOOTH_ROWS = new Set(["audio:mixerDsp", "video:processor", "video:projector"]);
@@ -311,6 +332,16 @@ export function generateAutoLayout(
   // quantities past what the rules lay out inside it (an edited count, a long run of lot markers).
   const room = f.room;
   const keep = (rowKey: string) => (p: Point): Point => (room && !BOOTH_ROWS.has(rowKey) ? inRoom(p, room) : p);
+  // #255: stage-relative points turned with an arena's stage about its centre (in true proportions: y scaled by the
+  // sheet's aspect first). No stageAngle — every other frame — leaves them exactly as laid out.
+  const turn = (pts: Point[]): Point[] => {
+    if (!f.stageAngle) return pts;
+    const cx = f.stage.x + f.stage.w / 2, cy = f.stage.y + f.stage.h / 2, k = f.aspect ?? 1, c = Math.cos(f.stageAngle), s = Math.sin(f.stageAngle);
+    return pts.map((p) => {
+      const dx = p.x - cx, dy = (p.y - cy) * k;
+      return { x: clamp01(cx + dx * c - dy * s), y: clamp01(cy + (dx * s + dy * c) / k) };
+    });
+  };
   const out: AutoPlacementSpec[] = [];
   const lots = new Map<SysKey, number>();
   for (const card of cards) {
@@ -329,7 +360,7 @@ export function generateAutoLayout(
         const drape = line.drape;
         const fabricSku = line.ref;
         const gridType = def.curtain.grid;
-        curtainPoints(def.itemKey, line.qty, f.stage).map(keep(line.rowKey)).forEach((pt, i) =>
+        turn(curtainPoints(def.itemKey, line.qty, f.stage)).map(keep(line.rowKey)).forEach((pt, i) =>
           out.push({
             ...pt,
             partId: fabricSku,
@@ -349,10 +380,12 @@ export function generateAutoLayout(
       if (def.place === "lot" || line.qty > EACH_CAP) {
         const k = lots.get(card.scope) ?? 0;
         lots.set(card.scope, k + 1);
-        out.push({ ...keep(line.rowKey)(lotPoint(card.scope, k, f)), partId, qty: line.qty, auto });
+        const lot = card.scope === "rigging" ? turn([lotPoint(card.scope, k, f)])[0] : lotPoint(card.scope, k, f);
+        out.push({ ...keep(line.rowKey)(lot), partId, qty: line.qty, auto });
         continue;
       }
-      for (const pt of eachPoints(line, line.qty, f, opts).map(keep(line.rowKey))) out.push({ ...pt, partId, auto });
+      const pts = eachPoints(line, line.qty, f, opts);
+      for (const pt of (STAGE_ROWS.has(line.rowKey) ? turn(pts) : pts).map(keep(line.rowKey))) out.push({ ...pt, partId, auto });
     }
   }
   return out;

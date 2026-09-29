@@ -60,7 +60,8 @@ export function battenLenFt(proWidthFt: number): number {
  * blackbox / arena it is wall to wall (DIMSCHEMA in quick/engine.ts). Those
  * kinds therefore size drapes off a number that is wider than any opening.
  * (#255: the gym's `width` is now its stage opening too — DIMSCHEMA "Opening" —
- * but it still prices as a non-proscenium kind: no wings added, pipe = width.) That `width -> proWidthFt` mapping
+ * but it still prices as a non-proscenium kind: no wings added, pipe = width. #255 T14: the arena's `width` / `depth`
+ * are now its end stage's — DIMSCHEMA "Stage width" / "Stage depth"; the floor is the drawing's own rows.) That `width -> proWidthFt` mapping
  * is UNCHANGED here on purpose (fixing it needs Jeff to say what a black
  * box's "drape width" is, and it is accepted, logged behavior — #66) — do
  * NOT branch it on venue kind.

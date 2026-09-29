@@ -39,8 +39,18 @@ converter; the JSON then records `"origin"`.
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py church-contemporary docs/venue-templates/source/church-contemporary.dwg --check
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py gym-stage docs/venue-templates/source/gym-stage.dwg --check
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py blackbox docs/venue-templates/source/blackbox.dwg --check
+    ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py arena docs/venue-templates/source/arena.dwg --check
 
 `--check` exits 1 if the committed JSON is not what the source converts to.
+
+Closed splines (#255, the Arena): a closed SPLINE that is an axis-aligned
+rounded rectangle — a straight run on every side (at least 12" and 10% of
+that side), every other point in a corner box — is kept as a `roundRects`
+entry (its bbox and the smallest corner runs `rx`/`ry`); any other spline is
+flattened into segments. The JSON records the drawing; the template's key
+lines draw the curves (the Arena's are true quarter circles, radius 13' and
+13' + the bowl). `--selftest` checks a drawing's round rects against
+`ROUND_RECTS` in the converter and that a circle or ellipse spline flattens.
 
 ## Adding a venue kind
 
