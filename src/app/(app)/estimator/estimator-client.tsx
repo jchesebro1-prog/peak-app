@@ -89,6 +89,8 @@ import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
+import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
+import { downloadCsv, fileStem } from "../design/export";
 import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
@@ -1487,6 +1489,37 @@ export default function EstimatorClient({
     return { fromCatalog, custom: next.length - fromCatalog };
   };
 
+  const [partsBusy, setPartsBusy] = useState(false);
+  const exportPartsList = async () => {
+    if (partsBusy) return;
+    setPartsBusy(true);
+    try {
+      const skus = partsListSkus(sections);
+      const resolved = skus.length ? await resolveCatalogSkusAction(skus) : {};
+      const info: Record<string, PartInfo> = {};
+      for (const [sku, r] of Object.entries(resolved)) {
+        info[sku] = {
+          desc: r.desc,
+          mfr: r.mfr,
+          manufacturerPartNumber: r.manufacturerPartNumber,
+          manufacturerModelNumber: r.manufacturerModelNumber,
+        };
+      }
+      const rows = partsListRows(sections, vendorQuotes, info);
+      if (!rows.length) {
+        setActionError(null);
+        setActionNotice("No parts to export yet.");
+        return;
+      }
+      const name = loadedId ? quoteId : projectName || quoteId;
+      downloadCsv(`${fileStem(name, "estimate")}-parts-list`, PARTS_CSV_HEADER, partsListCsvRows(rows));
+    } catch {
+      setActionError("Couldn't build the parts list — try again.");
+    } finally {
+      setPartsBusy(false);
+    }
+  };
+
   /* ---- Scope draft from survey/inspection (S12/D83 — rules-based) ----
      Deterministic: the linked record's captured fields are assembled into a
      scope paragraph (no model call, no line items — Jeff adds items
@@ -2344,6 +2377,26 @@ export default function EstimatorClient({
                   Draft from survey/inspection
                 </button>
               )}
+              <button
+                type="button"
+                onClick={exportPartsList}
+                disabled={partsBusy}
+                title="Model numbers, descriptions and cost for every part — assemblies broken into their parts. For purchasing."
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "9px 15px",
+                  cursor: partsBusy ? "not-allowed" : "pointer",
+                  opacity: partsBusy ? 0.6 : 1,
+                  background: "#2b2e35",
+                  color: "#cfd3da",
+                }}
+              >
+                Parts list (CSV)
+              </button>
               <button
                 type="button"
                 onClick={doSave}
