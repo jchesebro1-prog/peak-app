@@ -3,7 +3,7 @@
 import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { CustomerCombobox, type CustomerComboboxOption } from "@/components/customer-combobox";
-import { SPEC_HEADER_MAX } from "@/lib/specs/spec-document";
+import { SPEC_HEADER_MAX, sameProjectNumber, type SpecDocHeader } from "@/lib/specs/spec-document";
 import { createSpecDocumentAction } from "../builder-actions";
 import { COMBO_INPUT } from "../[id]/header-fields";
 
@@ -11,6 +11,11 @@ import { COMBO_INPUT } from "../[id]/header-fields";
  * #205 Phase B (T5) — the New spec form. Section is the one required pick;
  * customer and project name/number are optional (the builder edits them
  * later too). Create → the builder.
+ *
+ * A project number that matches a known project (another saved spec's)
+ * copies that project's header — name, phase, issue date, prepared by — so
+ * every spec of one project starts with the same header. A project name you
+ * typed is never replaced.
  */
 
 export type NewSpecSource = { kind: "quote"; quoteId: string } | { kind: "grid"; gridProjectId: string; quoteId: string };
@@ -26,6 +31,13 @@ const LBL: CSSProperties = {
 };
 const FIELD: CSSProperties = { marginBottom: 14 };
 const ERR: CSSProperties = { fontSize: 12.5, color: "#b4543a" };
+const HINT: CSSProperties = { fontSize: 12, color: "#9aa0ab", marginTop: -6, marginBottom: 14 };
+
+/** The datalist's label for a known project — "3748 — Fall Creek High School…". */
+function projectLabel(h: SpecDocHeader): string {
+  const name = h.projectName.length > 60 ? `${h.projectName.slice(0, 59).trimEnd()}…` : h.projectName;
+  return name ? `${h.projectNumber} — ${name}` : h.projectNumber;
+}
 
 /** Today in the browser's own time zone, YYYY-MM-DD — the default issue date. */
 function localToday(): string {
@@ -42,6 +54,7 @@ export default function NewSpecForm({
   defaultCustomerId,
   defaultProjectName,
   defaultSectionId = "",
+  knownProjects = [],
 }: {
   sections: Array<{ id: string; number: string; title: string }>;
   customerOptions: CustomerComboboxOption[];
@@ -54,12 +67,31 @@ export default function NewSpecForm({
   defaultProjectName: string;
   /** A `section=` preselect the page already checked exists. */
   defaultSectionId?: string;
+  /** One header per project number already on a saved spec. */
+  knownProjects?: SpecDocHeader[];
 }) {
   const router = useRouter();
   const [sectionId, setSectionId] = useState(defaultSectionId);
   const [customerId, setCustomerId] = useState(defaultCustomerId);
   const [projectName, setProjectName] = useState(defaultProjectName);
   const [projectNumber, setProjectNumber] = useState("");
+  // The known project whose header this spec copies, if any.
+  const [copied, setCopied] = useState<SpecDocHeader | null>(null);
+
+  const changeProjectNumber = (value: string) => {
+    setProjectNumber(value);
+    const hit = knownProjects.find((p) => sameProjectNumber(p.projectNumber, value)) || null;
+    // Only a name nobody typed is replaced: blank, the page's default, or
+    // the one an earlier match filled in.
+    const untouched = !projectName.trim() || projectName === defaultProjectName || (!!copied && projectName === copied.projectName);
+    if (hit && untouched) {
+      setProjectName(hit.projectName);
+      setCopied(hit);
+    } else {
+      if (copied && projectName === copied.projectName) setProjectName(defaultProjectName);
+      setCopied(null);
+    }
+  };
   const [err, setErr] = useState("");
   // The page already checked the source has equipment lines; if it changes
   // before Create (the quote was edited meanwhile), the owner can still
@@ -82,6 +114,8 @@ export default function NewSpecForm({
         projectName,
         projectNumber,
         issueDate: localToday(),
+        // A known project's header wins; its blank issue date keeps today.
+        ...(copied ? { phase: copied.phase, preparedBy: copied.preparedBy, ...(copied.issueDate ? { issueDate: copied.issueDate } : {}) } : {}),
         ...(activeSource ? { source: activeSource } : {}),
       });
       if (!res.ok) {
@@ -165,11 +199,23 @@ export default function NewSpecForm({
             className="pk-input"
             style={{ fontFamily: "var(--font-mono)" }}
             maxLength={SPEC_HEADER_MAX}
+            list={knownProjects.length ? "new-spec-known-projects" : undefined}
+            autoComplete="off"
             value={projectNumber}
-            onChange={(e) => setProjectNumber(e.target.value)}
+            onChange={(e) => changeProjectNumber(e.target.value)}
           />
+          {knownProjects.length > 0 && (
+            <datalist id="new-spec-known-projects">
+              {knownProjects.map((p) => (
+                <option key={p.projectNumber.toLowerCase()} value={p.projectNumber} label={projectLabel(p)} />
+              ))}
+            </datalist>
+          )}
         </div>
       </div>
+      {copied && (
+        <div style={HINT}>Header copied from Project No. {copied.projectNumber}&apos;s other specs.</div>
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button type="submit" className="pk-btn-accent" disabled={pending}>

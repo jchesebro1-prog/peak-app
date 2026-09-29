@@ -6,6 +6,8 @@ import { getEngagement } from "@/lib/stores/engagements";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getProject } from "@/lib/stores/grid-projects";
 import { bomFromQuote } from "@/lib/specs/quote-bom";
+import { allSpecDocuments } from "@/lib/stores/spec-documents";
+import { projectHeaders } from "@/lib/specs/spec-document";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { specCustomerOptions } from "../customer-options";
 import NewSpecForm, { type NewSpecSource } from "./new-spec-form";
@@ -29,6 +31,10 @@ import NewSpecForm, { type NewSpecSource } from "./new-spec-form";
  * falls back to from scratch rather than failing the create: the page runs
  * the same bomFromQuote the create action does, so the form it shows is never
  * a dead end (final fix 1).
+ *
+ * Known projects: every project number already on a saved spec, with the
+ * header of that project's most recently updated spec — typing or picking
+ * one pre-fills the new spec's header so a project's specs start alike.
  */
 
 export const metadata = { title: "New spec — Quartzite-6" };
@@ -64,7 +70,8 @@ export default async function NewSpecPage({
     );
   }
   // Only a creator gets this far, so only a creator's request reads the book.
-  const [sections, customerOptions] = await Promise.all([allSections(), specCustomerOptions()]);
+  const [sections, customerOptions, specDocs] = await Promise.all([allSections(), specCustomerOptions(), allSpecDocuments()]);
+  const knownProjects = projectHeaders(specDocs);
   const quoteParam = one(sp.quote);
   const gridParam = one(sp.grid);
   const engagementParam = one(sp.engagement);
@@ -165,6 +172,7 @@ export default async function NewSpecPage({
           defaultCustomerId={defaultCustomerId}
           defaultProjectName={defaultProjectName}
           defaultSectionId={defaultSectionId}
+          knownProjects={knownProjects}
         />
       )}
     </div>

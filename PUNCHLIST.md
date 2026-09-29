@@ -9619,3 +9619,41 @@ sq ft** → 0. Harness `#264`. See D473.
 **Left on "Fabric" on purpose:** the catalog taxonomy card's category-level exclusion and the device-type map's
 excluded head nouns (a whole category — Soft Goods also holds non-fabric parts), `scripts/inventory.ts`, the catalog
 seed, and the Lineset "no Fabric parts" message text.
+
+---
+
+## 265. Fall Creek spec review — Word files off the Bray template, library text errors, one header per project — DONE 2026-09-29 (D474, D475)
+
+**Reported:** Jeff (2026-09-29), passing on a reviewer's mark-up of the Fall Creek specs (SP-1001…SP-1005) against
+Bray's AV section `Fall Creek HS Auditorium AV Written Spec Section 27-41-00.docx`: docs vary from each other and
+from Bray's template, headers/footers are missing, tab distances differ between sections, list letters show in Times
+while text shows in Arial, sub-numbers are off (Acoustic Shell 1.2/G, Rigging Part 2), a "recommended and approved
+dealers" list that doesn't exist, KM Fabrics named outright, two-year vs one-year warranty, and very long
+Acceptable Manufacturers lists in Theatrical Lighting. Then: "we should have a field to set the headers".
+
+**Done — Word writer.** `src/lib/specs/spec-docx.ts` now writes Bray's MasterSpec format (D474). Harness `#205 spec
+builder` blocks updated to the new format.
+
+**Done — library text (data, production + local dev, 2026-09-29; backup `backups/peak-backup-20260929-1440.json`).**
+Through the stores' own write paths (records get a new revision):
+- "Refer to Part 1, Quality Assurance for recommended and approved dealers…" removed from all ten category headers
+  (11 61 23 × 2, 26 09 61 × 8).
+- 26 09 61 category headers: pre-approval "fifteen days" → "ten days" (their own Part 1 and Bray's AV section say
+  ten); "Luminaries" → "Luminaires"; 11 61 23 motorized rigging "Electronic Theater Controls" → "Theatre";
+  26 09 61 QA "manufacturer of" → "manufacture of".
+- Records PS-116123-003/-004/-005 (Borders, Legs, Mid and Rear Draws): "as by KM fabrics" → "KM Fabrics or
+  approved equal".
+- 11 61 23 1.2/E.3 "Three (3) sets…": the three items after it now nest under it; 3.9/A "…shall include the
+  following:": its three items now nest under A. (both inherited from the North HS originals' typed numbers; a
+  library-wide scan found no others).
+- Warranties to one year (Jeff): 11 61 23 3.8, 11 61 13 1.5, 11 61 14 1.5, 26 09 61 3.3.
+- SP-1001…SP-1005 headers set to Bray's: "Fall Creek High School – Addition & Remodeling", 3748, Construction
+  Documents, 2026-10-14.
+
+**Done — one header per project (D475).** Header card: "Apply this header to N other specs for Project No. <n>";
+New spec: known project numbers pre-fill the header. Harness checks added.
+
+**Open (Jeff):** the Theatrical Lighting Acceptable Manufacturers list per category; where the reviewer's Acoustic
+Shell file came from (no Fall Creek 11 61 13 spec was ever saved — the library's 1.2/G numbers 1., 2., 3.); spec
+numbers vs Bray's TOC (MasterFormat has 11 61 23 as Folding and Portable Stages; SP-1002 and SP-1004 are both
+26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61).

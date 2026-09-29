@@ -7967,3 +7967,30 @@ finished goods) stay ordinary, placeable parts. `fabricAreaRateOf` gains one ste
 a Fabric-category part sold per sq ft that had a cost but no rate used to read "No $/sq ft set" and price at $0; it
 now prices at its cost. The category-level exclusions (the catalog taxonomy card, the device-type map's excluded
 head nouns) stay on "Fabric" only — they act on a whole category, and Soft Goods holds non-fabric parts too.
+
+## D474. Spec Word files follow the architect's MasterSpec format (#265, 2026-09-29)
+
+The spec builder's Word writer (`src/lib/specs/spec-docx.ts`) drops its own house layout (11 pt, Heading 1/2,
+0.5" indent steps, centered bold title) for the format of Bray's AV section, which is ARCOM MasterSpec: Times New
+Roman 10 pt, justified; custom paragraph styles SCT (title), PRT ("PART %1 - ", no suffix), ART (%1.%2, 864/864),
+PR1 (A., 864/576), PR2 (1., 1440/576), PR3 (a., 2016/576), PR4 (1), 2592/576), PR5 (a), 3168/576) and PR6 ((1),
+3744/576 — our sixth outline level, not in MasterSpec), EOS; HDR header (date ⇥ project ⇥ Project No., phase tabbed
+to the same center stop beneath) and FTR footer (TITLE ⇥ "<number> - " PAGE), 11 pt; equipment table 9360 wide with
+single rules. As in MasterSpec every outline paragraph carries only its style, and the style carries the list level
+— so architects can drop our section into their project manual and it takes their styles, and a paragraph added in
+Word by picking the style numbers itself. MasterSpec's unused levels 1–2 (SUT/DST) are compressed out. Times New
+Roman is written explicitly on docDefaults, every style and every list level's label run: the reviewer saw labels
+in Times and text in Arial, which only happens when a viewer falls back for runs with no explicit font. Not
+matched, docx 9.7 limits: the list type stays `hybridMultilevel`, no suppressAutoHyphens, no `w:customStyle`, and the
+header's center tab is written on each header paragraph because a docx style can carry only one tab kind.
+
+## D475. One header per project, by project number (#265, 2026-09-29)
+
+Jeff: "we should have a field to set the headers." Each spec keeps its own header (the Word file prints it), but
+specs sharing a project number (trimmed, case-insensitive; a blank number is never a project) are one project:
+the Header card offers "Apply this header to N other specs for Project No. <n>", which copies the SAVED header —
+all five fields, read on the server — onto every other live spec with that number (two-click confirm, waits for any
+header save in flight). The New spec page lists known project numbers; an exact match pre-fills the name (only when
+the name is still blank/default — a typed name is never replaced) plus phase, issue date and prepared by, from that
+project's most recently updated spec. Rejected: a separate project-header record read live by every spec — it would
+need a new collection and would stop one spec from ever differing.

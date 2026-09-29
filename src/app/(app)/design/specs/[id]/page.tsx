@@ -8,6 +8,8 @@ import { isPlaceholderSku, specRowKey } from "@/lib/specs/record-keys";
 import { partNumbersSummary, recordProductName, systemMatchKeys as systemMatchKeysOf, type SpecKind } from "@/lib/specs/records";
 import { specCustomerOptions } from "../customer-options";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
+import { allSpecDocuments } from "@/lib/stores/spec-documents";
+import { projectSiblings } from "@/lib/specs/spec-document";
 import Builder, { type SpecProductRow } from "./builder";
 import type { SlimSpecRecord } from "./record-row";
 
@@ -142,6 +144,10 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
   const srcQuoteId = doc.source.quoteId || (doc.source.kind === "quote" ? doc.source.id : undefined);
   const sourceQuoteNumber = srcQuoteId ? (await quoteNumbersFor([srcQuoteId])).get(srcQuoteId) ?? null : null;
 
+  // One header per project: how many other saved specs share this spec's
+  // project number (the Header card's "Apply this header to N other specs").
+  const projectSpecCount = canEdit && doc.header.projectNumber.trim() ? projectSiblings(await allSpecDocuments(), doc).length : 0;
+
   return (
     <Builder
       doc={doc}
@@ -152,6 +158,7 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       customerOptions={customerOptions}
       canEdit={canEdit}
       sourceQuoteNumber={sourceQuoteNumber}
+      projectSpecCount={projectSpecCount}
       recordsById={recordsById}
       recordTexts={recordTexts}
       systemMatchKeys={systemMatchKeys}

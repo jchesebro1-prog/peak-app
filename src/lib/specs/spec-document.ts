@@ -234,6 +234,48 @@ export function pickSpecHeaderPatch(patch: Record<string, unknown> | null | unde
   return out;
 }
 
+/** One header for every spec of a project: two project numbers are the same
+ *  project when they match trimmed and case-insensitively. A blank number is
+ *  never a project — two specs with no number don't belong together. */
+export function sameProjectNumber(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = str(a).toLowerCase();
+  return !!x && x === str(b).toLowerCase();
+}
+
+/** The other saved specs that share `doc`'s project number (never `doc`
+ *  itself, never any when its number is blank). */
+export function projectSiblings<T extends Pick<SpecDocument, "id" | "header">>(docs: readonly T[], doc: Pick<SpecDocument, "id" | "header">): T[] {
+  return docs.filter((d) => d.id !== doc.id && sameProjectNumber(d.header.projectNumber, doc.header.projectNumber));
+}
+
+/** One header per known project number — the header of that project's most
+ *  recently updated spec — newest project first. Specs with no number are
+ *  skipped. The New spec page pre-fills from these. */
+export function projectHeaders(docs: readonly Pick<SpecDocument, "header" | "updatedAt">[]): SpecDocHeader[] {
+  const best = new Map<string, Pick<SpecDocument, "header" | "updatedAt">>();
+  for (const d of docs) {
+    const k = str(d.header.projectNumber).toLowerCase();
+    if (!k) continue;
+    const had = best.get(k);
+    if (!had || d.updatedAt > had.updatedAt) best.set(k, d);
+  }
+  return [...best.values()].sort((a, b) => b.updatedAt - a.updatedAt).map((d) => ({ ...d.header }));
+}
+
+/** `doc` with all five header fields copied from `header`. */
+export function withSpecHeader(doc: SpecDocument, header: SpecDocHeader): SpecDocument {
+  return {
+    ...doc,
+    header: {
+      projectName: header.projectName,
+      projectNumber: header.projectNumber,
+      phase: header.phase,
+      issueDate: header.issueDate,
+      preparedBy: header.preparedBy,
+    },
+  };
+}
+
 /** Row identity everywhere on `SpecDocument` from here down (spec records
  *  design §3.1): `rowKey` is always the caller's own `specRowKey(p)` output
  *  — a real SKU's is `SKU:<UPPER>`, already normalized, so every real-SKU

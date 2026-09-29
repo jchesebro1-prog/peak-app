@@ -255,6 +255,7 @@ import { createSection, getSection } from "@/lib/stores/spec-sections";
 import { createArticle } from "@/lib/stores/spec-articles";
 import {
   createSpecDocument, getSpecDocument, allSpecDocuments, patchSpecDocument, removeSpecDocument,
+  copySpecHeaderToProject,
 } from "@/lib/stores/spec-documents";
 // Final fix wave item 8 — a partial library import must not blank a
 // section's omitted fields.
@@ -331,6 +332,7 @@ import {
 import {
   normalizeSpecDocument, withProduct, withoutProduct, withProductOrder, withProductHeader, bomProducts, DEFAULT_SPEC_PHASE,
   pickSpecHeaderPatch, isValidIsoDate, SPEC_FILL_IN_MAX, SPEC_HEADER_MAX, SPEC_REORDER_MAX,
+  sameProjectNumber, projectSiblings, projectHeaders, withSpecHeader,
 } from "@/lib/specs/spec-document";
 import { specRowKey } from "@/lib/specs/record-keys";
 
@@ -10579,6 +10581,7 @@ seeded()
   .then(() => gridSymbolLookAsyncChecks())
   .then(() => gridCustomItemsAsyncChecks())
   .then(() => specDocumentsAsyncChecks())
+  .then(() => specProjectHeaderAsyncChecks())
   .then(() => specDocxAsyncChecks())
   .then(() => specBuilderActionsAsyncChecks())
   .then(() => specBuilderFinalFixAsyncChecks())
@@ -19430,33 +19433,67 @@ async function specDocxAsyncChecks(): Promise<void> {
   const files = Object.keys(zip.files);
   const hdrXml = await zip.file(files.find((f) => /^word\/header\d*\.xml$/.test(f))!)!.async("string");
   const ftrXml = await zip.file(files.find((f) => /^word\/footer\d*\.xml$/.test(f))!)!.async("string");
-  ok((docXml.match(/<w:numPr>/g) || []).length >= 10, "#205 spec builder: outline paragraphs carry real Word numbering (numPr)");
-  ok(!/<w:t[^>]*>[A-Z]\.\s*<\/w:t>/.test(docXml) && !docXml.includes(">1.01<"), "#205 spec builder: no typed-in outline labels");
-  ok((numXml.match(/<w:lvl /g) || []).length >= 7 && numXml.includes("PART %1"), "#205 spec builder: one multi-level list, PART → n.m → A. … a)");
-  ok(docXml.includes("SECTION 11 61 23") && docXml.includes("END OF SECTION 11 61 23"), "#205 spec builder: title and END OF SECTION");
+  const stylesXml = await zip.file("word/styles.xml")!.async("string");
   const paras = (xml: string) => xml.match(/<w:p>[\s\S]*?<\/w:p>|<w:p [\s\S]*?<\/w:p>/g) || [];
   const textOf = (p: string) => (p.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((t) => t.replace(/<[^>]+>/g, "")).join("");
+  const styleOf = (id: string) => (stylesXml.match(new RegExp(`<w:style [^>]*w:styleId="${id}"[\\s\\S]*?<\\/w:style>`)) || [""])[0];
+  const pStyleOf = (p: string) => (p.match(/<w:pStyle w:val="([^"]+)"\/>/) || [])[1];
+  const TNR = '<w:rFonts w:ascii="Times New Roman" w:cs="Times New Roman" w:eastAsia="Times New Roman" w:hAnsi="Times New Roman"/>';
+  // Bray MasterSpec format: every outline paragraph numbers through its STYLE.
+  const bodyParas = paras(docXml);
+  const outlineParas = bodyParas.filter((p) => /^(PRT|ART|PR[1-6])$/.test(pStyleOf(p) || ""));
+  ok(outlineParas.length >= 10 && !docXml.includes("<w:numPr>"), "#205 spec builder: outline paragraphs carry only a MasterSpec style (PRT/ART/PR1…), never a direct numPr");
+  ok(!/<w:t[^>]*>[A-Z]\.\s*<\/w:t>/.test(docXml) && !docXml.includes(">1.01<") && !docXml.includes(">PART 1"), "#205 spec builder: no typed-in outline labels");
+  ok(!docXml.includes('w:val="Heading1"') && !docXml.includes('w:val="Heading2"'), "#205 spec builder: no Heading 1/2 paragraphs — PRT/ART replace them");
+  const styleNumIds = ["PRT", "ART", "PR1", "PR2", "PR3", "PR4", "PR5", "PR6"].map((id) => (styleOf(id).match(/<w:numId w:val="(\d+)"\/>/) || [])[1]);
+  ok(styleNumIds.every((n) => !!n) && new Set(styleNumIds).size === 1, `#205 spec builder: PRT/ART/PR1…PR6 styles all link to ONE list instance (numIds: ${styleNumIds.join(",")})`);
+  const styleLvl = (id: string) => (styleOf(id).match(/<w:ilvl w:val="(\d+)"\/>/) || [])[1];
+  ok(["PRT", "ART", "PR1", "PR2", "PR3", "PR4", "PR5", "PR6"].every((id, i) => styleLvl(id) === String(i) && styleOf(id).includes(`<w:outlineLvl w:val="${i}"/>`)), "#205 spec builder: PRT → level 0, ART → 1, PR1…PR6 → 2…7, each with its matching outline level");
+  ok(["SCT", "PRT", "ART", "PR1", "PR2", "PR3", "PR4", "PR5", "PR6", "EOS", "HDR", "FTR"].every((id) => { const st = styleOf(id); return st.includes('<w:basedOn w:val="Normal"/>') && st.includes('<w:jc w:val="both"/>') && st.includes(TNR) && !st.includes("<w:pStyle") && !st.includes("<w:b/>"); }), "#205 spec builder: SCT/PRT/ART/PR1…PR6/EOS/HDR/FTR are Normal-based, justified, Times New Roman, not bold, no pStyle inside a style's pPr");
+  ok(["SCT", "PRT", "ART", "PR1", "PR2", "PR3", "PR4", "PR5", "PR6", "EOS"].every((id) => styleOf(id).includes('<w:sz w:val="20"/>')) && ["HDR", "FTR"].every((id) => styleOf(id).includes('<w:sz w:val="22"/>')), "#205 spec builder: body styles are 10 pt, header/footer styles 11 pt");
+  ok(styleOf("PRT").includes("<w:keepNext/>") && styleOf("PRT").includes('<w:spacing w:before="480"/>') && styleOf("ART").includes("<w:keepNext/>") && styleOf("ART").includes('<w:spacing w:before="480"/>') && styleOf("PR1").includes('<w:spacing w:before="240"/>') && !styleOf("PR2").includes("<w:spacing") && styleOf("SCT").includes('<w:spacing w:before="240"/>') && styleOf("EOS").includes('<w:spacing w:before="480"/>'), "#205 spec builder: MasterSpec spacing — PRT/ART keepNext + 480 before, PR1 240 before, PR2 none, SCT 240, EOS 480");
+  const docDefaults = (stylesXml.match(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/) || [""])[0];
+  ok(docDefaults.includes(TNR), "#205 spec builder: docDefaults carry explicit Times New Roman on ascii/hAnsi/cs/eastAsia");
+  const ourAbs = (numXml.match(/<w:abstractNum [^>]*>(?:(?!<\/w:abstractNum>)[\s\S])*?PART %1[\s\S]*?<\/w:abstractNum>/) || [""])[0];
+  const lvl = (i: number) => (ourAbs.match(new RegExp(`<w:lvl w:ilvl="${i}"[^>]*>[\\s\\S]*?<\\/w:lvl>`)) || [""])[0];
+  ok((ourAbs.match(/<w:lvl /g) || []).length === 8, "#205 spec builder: one multi-level list, PART → n.m → A. … a) → (1)");
+  ok(lvl(0).includes('<w:lvlText w:val="PART %1 - "/>') && lvl(0).includes('<w:suff w:val="nothing"/>') && !lvl(0).includes("<w:b/>"), "#205 spec builder: PRT label is \"PART %1 - \" with suffix nothing, not bold");
+  ok(lvl(1).includes('<w:lvlText w:val="%1.%2"/>') && lvl(1).includes('<w:ind w:left="864" w:hanging="864"/>') && lvl(1).includes('<w:tab w:val="left" w:pos="864"/>'), "#205 spec builder: ART level %1.%2 at left 864 hanging 864, tab 864");
+  ok(lvl(2).includes('<w:numFmt w:val="upperLetter"/>') && lvl(2).includes('<w:ind w:left="864" w:hanging="576"/>') && lvl(3).includes('<w:ind w:left="1440" w:hanging="576"/>') && lvl(4).includes('<w:ind w:left="2016" w:hanging="576"/>') && lvl(5).includes('<w:ind w:left="2592" w:hanging="576"/>') && lvl(6).includes('<w:ind w:left="3168" w:hanging="576"/>') && lvl(7).includes('<w:lvlText w:val="(%8)"/>') && lvl(7).includes('<w:ind w:left="3744" w:hanging="576"/>'), "#205 spec builder: PR1…PR6 levels at MasterSpec indents (864/1440/2016/2592/3168/3744, hanging 576)");
+  ok([0, 1, 2, 3, 4, 5, 6, 7].every((i) => lvl(i).includes(TNR) && lvl(i).includes('<w:sz w:val="20"/>')), "#205 spec builder: every list level's label run is Times New Roman 10 pt");
+  ok(docXml.includes("SECTION 11 61 23") && docXml.includes("END OF SECTION 11 61 23"), "#205 spec builder: title and END OF SECTION");
+  const sct = bodyParas.find((p) => textOf(p).startsWith("SECTION 11 61 23"));
+  const eos = bodyParas.find((p) => textOf(p) === "END OF SECTION 11 61 23");
+  ok(!!sct && pStyleOf(sct) === "SCT" && !sct.includes("<w:jc ") && !!eos && pStyleOf(eos) === "EOS" && !eos.includes("<w:jc "), "#205 spec builder: section title is an SCT paragraph and END OF SECTION an EOS paragraph, not centered");
   const hdrParas = paras(hdrXml);
   const hdrLine = hdrParas.find((p) => textOf(p).includes("North HS"));
-  ok(!!hdrLine && textOf(hdrLine).includes("July 30, 2026") && textOf(hdrLine).includes("Project No. 3580") && (hdrLine.match(/<w:tab\/>/g) || []).length === 2 && hdrLine.includes('w:val="center" w:pos="4680"') && hdrLine.includes('w:val="right" w:pos="9360"') && !hdrLine.includes("<w:b/>"), "#205 spec builder: running header — date ⇥ project ⇥ Project No. on one tabbed line, not bold");
-  ok(hdrParas.some((p) => textOf(p) === "Construction Documents" && p.includes('<w:jc w:val="center"/>')), "#205 spec builder: running header — phase centered on its own line");
-  const numIds = new Set([...docXml.matchAll(/<w:numId w:val="(\d+)"\/>/g)].map((m) => m[1]));
-  ok(numIds.size === 1, `#205 spec builder: every numbered paragraph is in ONE list instance (numIds: ${[...numIds].join(",")})`);
+  ok(!!hdrLine && pStyleOf(hdrLine) === "HDR" && textOf(hdrLine).includes("July 30, 2026") && textOf(hdrLine).includes("Project No. 3580") && (hdrLine.match(/<w:tab\/>/g) || []).length === 2 && hdrLine.includes('w:val="center" w:pos="4680"') && hdrLine.includes('w:val="right" w:pos="9360"') && hdrLine.includes('<w:sz w:val="22"/>') && !hdrLine.includes("<w:b/>"), "#205 spec builder: running header — HDR line date ⇥ project ⇥ Project No., 11 pt, not bold");
+  ok(styleOf("FTR").includes('<w:tab w:val="right" w:pos="9360"/>') && styleOf("HDR").includes('<w:tab w:val="right" w:pos="9360"/>'), "#205 spec builder: HDR/FTR styles carry the right tab at 9360");
+  // The fixture has no phase; the phase line is checked on a copy with one.
+  const phXml = await (await JSZip.loadAsync(await buildSectionDocx({ ...a, header: { ...a.header, phase: "Construction Documents" } }))).file(files.find((f) => /^word\/header\d*\.xml$/.test(f))!)!.async("string");
+  const phLine = paras(phXml).find((p) => textOf(p) === "Construction Documents");
+  ok(!!phLine && pStyleOf(phLine) === "HDR" && /<w:r>(?:<w:rPr>[\s\S]*?<\/w:rPr>)?<w:tab\/><w:t[^>]*>Construction Documents</.test(phLine) && phLine.includes('w:val="center" w:pos="4680"') && !phLine.includes('<w:jc w:val="center"/>'), "#205 spec builder: running header — phase tabbed to the 4680 center stop on its own line, under the project name");
   ok(!numXml.includes("w:lvlRestart"), "#205 spec builder: deeper levels restart by Word's default (no lvlRestart)");
-  const valance = paras(docXml).find((p) => textOf(p) === "VALANCE (Quantity: 1)");
-  ok(!!valance && valance.includes('<w:ilvl w:val="2"/>'), "#205 spec builder: a product heading is a level-2 item in the same list");
-  const stylesXml = await zip.file("word/styles.xml")!.async("string");
-  const h1 = (stylesXml.match(/<w:style [^>]*w:styleId="Heading1"[\s\S]*?<\/w:style>/) || [""])[0];
-  const h2 = (stylesXml.match(/<w:style [^>]*w:styleId="Heading2"[\s\S]*?<\/w:style>/) || [""])[0];
-  ok(h1.includes('<w:ilvl w:val="0"/>') && h1.includes(`<w:numId w:val="${[...numIds][0]}"/>`) && h2.includes('<w:ilvl w:val="1"/>') && h2.includes(`<w:numId w:val="${[...numIds][0]}"/>`) && !h1.includes("<w:pStyle") && !h2.includes("<w:pStyle"), "#205 spec builder: Heading 1/2 styles carry the list's numbering (style-linked), with no pStyle inside a style's pPr");
-  ok(!numXml.includes("<w:pStyle"), "#205 spec builder: no pStyle on list levels (docx writes it out of schema order; the style → list link alone numbers new headings)");
-  const partPara = paras(docXml).find((p) => textOf(p) === "GENERAL");
-  ok(!!partPara && partPara.includes('w:val="Heading1"') && !partPara.includes("<w:numPr>"), "#205 spec builder: PART headings number through their style, no direct numPr");
-  ok(/PAGE/.test(ftrXml) && ftrXml.includes("11 61 23 - "), "#205 spec builder: footer carries the section number and a PAGE field");
+  const valance = bodyParas.find((p) => textOf(p) === "VALANCE (Quantity: 1)");
+  ok(!!valance && pStyleOf(valance) === "PR1" && valance.includes("<w:keepNext/>") && !valance.includes("<w:numPr>"), "#205 spec builder: a product heading is a PR1 (level-2) item in the same list, kept with its text");
+  ok(!numXml.includes("<w:pStyle"), "#205 spec builder: no pStyle on list levels (docx writes it out of schema order; the style → list link alone numbers new paragraphs)");
+  const partPara = bodyParas.find((p) => textOf(p) === "GENERAL");
+  ok(!!partPara && pStyleOf(partPara) === "PRT" && !partPara.includes("<w:numPr>"), "#205 spec builder: PART headings are PRT paragraphs, numbered through their style");
+  ok(bodyParas.every((p) => !p.includes('<w:spacing w:after="120"/>')), "#205 spec builder: no per-item spacing — spacing comes from the styles");
+  ok(/PAGE/.test(ftrXml) && ftrXml.includes("11 61 23 - ") && ftrXml.includes('w:val="FTR"') && ftrXml.includes('<w:sz w:val="22"/>'), "#205 spec builder: FTR footer carries the section number and a PAGE field, 11 pt");
   // Table style
   const tBuf = await buildSectionDocx(tAssembled);
   const tXml = await (await JSZip.loadAsync(tBuf)).file("word/document.xml")!.async("string");
   ok(tXml.includes("<w:tbl>") && tXml.includes("ANX4"), "#205 spec builder: table style writes a real Word table");
+  const tbl = (tXml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/) || [""])[0];
+  const grid = [...tbl.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]));
+  ok(tbl.includes('<w:tblW w:type="dxa" w:w="9360"/>') && tbl.includes('<w:tblLayout w:type="fixed"/>') && grid.join(",") === "828,1422,2520,4590", `#205 spec builder: equipment table is 9360 dxa, fixed layout, columns 828/1422/2520/4590 with qty (got ${grid.join(",")})`);
+  ok(["top", "bottom", "left", "right", "insideH", "insideV"].every((b) => new RegExp(`<w:${b} w:val="single" w:color="000000" w:sz="6"/>`).test((tbl.match(/<w:tblBorders>[\s\S]*?<\/w:tblBorders>/) || [""])[0])) && (tbl.match(/<w:tcBorders>/g) || []).length === (tbl.match(/<w:tc>/g) || []).length, "#205 spec builder: equipment table has single black sz-6 borders on the table (inside too) and every cell");
+  const hdrRow = (tbl.match(/<w:tr>[\s\S]*?<\/w:tr>/) || [""])[0];
+  ok(hdrRow.includes("<w:tblHeader/>") && (hdrRow.match(/<w:b\/>/g) || []).length === 4 && (tbl.match(/<w:r>/g) || []).length === (tbl.match(/<w:sz w:val="20"\/>/g) || []).length && (tbl.match(/<w:r>/g) || []).length === (tbl.split(TNR).length - 1), "#205 spec builder: header row repeats and is bold; every cell run is Times New Roman 10 pt");
+  const noQty = buildSectionDocx({ ...tAssembled, part2: { ...tAssembled.part2, showQty: false } as typeof tAssembled.part2 });
+  const nqTbl = ((await (await JSZip.loadAsync(await noQty)).file("word/document.xml")!.async("string")).match(/<w:tbl>[\s\S]*?<\/w:tbl>/) || [""])[0];
+  ok([...nqTbl.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => m[1]).join(",") === "2250,2520,4590", "#205 spec builder: without Qty the Mfr column takes its width (2250/2520/4590 = 9360)");
 
   // Case-insensitive part lookup (DB-backed, suite's throwaway datadir).
   const ciSku = fixtureId("SPECT3", "CaseSku");
@@ -36269,4 +36306,89 @@ import type { SpecItem as C266Item, SpecSection as C266Section } from "@/app/(ap
 
   const acts = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   ok(/export async function copySystemToEstimateAction\(/.test(acts) && acts.includes('newName: moved.name + " (moved)"') && acts.includes('newName: section.name + " (copy)"'), "#266: Move and Copy share placeSystemInEstimate — '(moved)' and '(copy)' names");
+}
+
+// Specs — one header for every spec of a project
+{
+  ok(sameProjectNumber(" 3748 ", "3748") && sameProjectNumber("ab-12", "AB-12"), "project header: sameProjectNumber matches trimmed and case-insensitively");
+  ok(!sameProjectNumber("", "") && !sameProjectNumber("  ", "") && !sameProjectNumber(undefined, null) && !sameProjectNumber("3748", "3749"), "project header: a blank number is never a project, and different numbers differ");
+
+  const H = (projectNumber: string, projectName = "", updatedAt = 0, id = "") =>
+    normalizeSpecDocument({ id, sectionId: "ss", header: { projectName, projectNumber, phase: "Bid", issueDate: "2026-09-01", preparedBy: "Jeff" }, source: { kind: "scratch" }, updatedAt });
+  const docs = [H("3748", "Fall Creek", 10, "SP-1"), H("3748 ", "Fall Creek School District", 30, "SP-2"), H("3748", "FC", 20, "SP-3"), H("9000", "Other", 40, "SP-4"), H("", "No number", 50, "SP-5"), H("", "Also none", 60, "SP-6")];
+  const sib = projectSiblings(docs, docs[0]).map((d) => d.id).join();
+  ok(sib === "SP-2,SP-3", `project header: projectSiblings lists the other specs sharing the number, never itself (got ${sib})`);
+  ok(projectSiblings(docs, docs[4]).length === 0, "project header: a spec with no project number has no siblings, even beside other unnumbered specs");
+
+  const known = projectHeaders(docs);
+  ok(known.length === 2 && known[0].projectNumber === "9000" && known[1].projectName === "Fall Creek School District", "project header: projectHeaders gives one header per number — its most recently updated spec's — newest first, skipping blanks");
+
+  const copied = withSpecHeader(docs[0], { projectName: "Fall Creek HS", projectNumber: "3748", phase: "CD", issueDate: "2026-09-29", preparedBy: "SM" });
+  ok(copied.header.projectName === "Fall Creek HS" && copied.header.phase === "CD" && copied.header.issueDate === "2026-09-29" && copied.header.preparedBy === "SM" && copied.id === "SP-1", "project header: withSpecHeader copies all five fields and nothing else");
+
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const actions = read("src/app/(app)/design/specs/builder-actions.ts");
+  const bodyOf = (name: string) => {
+    const start = actions.indexOf(`export async function ${name}`);
+    const next = actions.indexOf("export async function", start + 1);
+    return start < 0 ? "" : actions.slice(start, next === -1 ? undefined : next);
+  };
+  const apply = bodyOf("applySpecHeaderToProjectAction");
+  ok(apply.includes('requirePerm("create")'), "project header: applySpecHeaderToProjectAction requires create");
+  ok(apply.includes("getSpecDocument(") && apply.includes("copySpecHeaderToProject(source.id, user.name)") && !/\(id: string, [a-z]/.test(apply.split("\n")[0]), "project header: apply reads the source's saved header on the server and takes no header values from the client");
+  ok(apply.includes('revalidatePath("/design/specs")') && apply.includes("for (const t of out.ids) revalidatePath("), "project header: apply revalidates the specs index and every touched spec");
+  const create = bodyOf("createSpecDocumentAction");
+  ok(create.includes("headerTooLong([projectName, projectNumber, phase, preparedBy])") && create.includes("phase || DEFAULT_SPEC_PHASE") && create.includes("preparedBy || user.name"), "project header: create caps the copied phase / prepared by and falls back to the defaults");
+
+  const card = read("src/app/(app)/design/specs/[id]/header-fields.tsx");
+  ok(card.includes("ConfirmButton") && !/window\.confirm|\bconfirm\(/.test(card), "project header: Apply arms a ConfirmButton, never window.confirm");
+  ok(card.includes("canEdit && projectNumber && projectSpecCount > 0") && card.includes("disabled={pending}"), "project header: the Apply button shows only for editors with siblings and is disabled while a header save is pending");
+  ok(card.includes("track(() => applySpecHeaderToProjectAction(doc.id))") && card.includes("headerSaves.current"), "project header: Apply counts as a save in flight (a Download waits for it) and waits for header saves first");
+  const page = read("src/app/(app)/design/specs/[id]/page.tsx");
+  ok(page.includes("projectSiblings(await allSpecDocuments(), doc).length") && page.includes("projectSpecCount={projectSpecCount}"), "project header: the builder page counts the siblings on the server");
+
+  const nw = read("src/app/(app)/design/specs/new/page.tsx");
+  ok(nw.includes("projectHeaders(specDocs)") && nw.includes("knownProjects={knownProjects}"), "project header: the New page passes the known projects");
+  const form = read("src/app/(app)/design/specs/new/new-spec-form.tsx");
+  ok(form.includes("<datalist") && form.includes("sameProjectNumber(p.projectNumber, value)") && form.includes("Header copied from Project No."), "project header: the New form offers known numbers and says when it copied a header");
+  ok(form.includes("!projectName.trim() || projectName === defaultProjectName"), "project header: the New form only replaces a blank or default project name");
+}
+
+/**
+ * DB-backed: two specs share a project number, a third has another; copying
+ * the source's header changes only the matching sibling.
+ */
+async function specProjectHeaderAsyncChecks(): Promise<void> {
+  const num = `PH-${Date.now()}`;
+  const make = async (projectName: string, projectNumber: string, phase: string) => {
+    const d = await createSpecDocument({
+      sectionId: "ss-project-header",
+      header: { projectName, projectNumber, phase, issueDate: "2026-09-01", preparedBy: "Harness" },
+      source: { kind: "scratch" },
+      products: [],
+      printQuantities: false,
+      fillIns: {},
+      createdBy: "Test Harness",
+      updatedBy: "Test Harness",
+    });
+    registerFixture("spec_documents", d.id);
+    return d;
+  };
+  const src = await make("Fall Creek High School", num, "Bid Documents");
+  const sib = await make("Fall Creek", ` ${num.toLowerCase()} `, "Construction Documents");
+  const other = await make("Somewhere Else", `${num}-X`, "Construction Documents");
+
+  const out = await copySpecHeaderToProject(src.id, "Applier");
+  ok(!!out && out.ids.length === 1 && out.ids[0] === sib.id, `project header: copySpecHeaderToProject touches only the spec sharing the number (got ${out?.ids.join()})`);
+  const sibNow = await getSpecDocument(sib.id);
+  ok(!!sibNow && sibNow.header.projectName === "Fall Creek High School" && sibNow.header.phase === "Bid Documents" && sibNow.header.projectNumber === num && sibNow.updatedBy === "Applier", "project header: the sibling gets all five fields and updatedBy");
+  const otherNow = await getSpecDocument(other.id);
+  ok(!!otherNow && otherNow.header.projectName === "Somewhere Else" && otherNow.updatedAt === other.updatedAt, "project header: a spec with a different number is untouched");
+  const srcNow = await getSpecDocument(src.id);
+  ok(!!srcNow && srcNow.updatedAt === src.updatedAt, "project header: the source spec itself is not rewritten");
+
+  await removeSpecDocument(sib.id);
+  const again = await copySpecHeaderToProject(src.id, "Applier");
+  ok(!!again && again.ids.length === 0, "project header: a deleted spec is not a sibling");
+  ok((await copySpecHeaderToProject("SP-NOPE-0", "Applier")) === null, "project header: an unknown source spec returns null");
 }
