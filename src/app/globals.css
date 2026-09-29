@@ -1189,3 +1189,85 @@ button.pk-searchbar-glass {
     width: 100vw;
   }
 }
+
+/* Slide-over drawer (#271) — components/ui/Drawer.tsx. Overlays the page
+   instead of reflowing it; full width under 640px; slide-in is skipped for
+   prefers-reduced-motion. */
+.pk-drawer-root {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  font-family: var(--font-ui);
+  color: #16181d;
+}
+.pk-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(22, 24, 29, 0.32);
+  animation: pk-drawer-fade 0.18s ease-out;
+}
+.pk-drawer-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 480px;
+  max-width: 100vw;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.14);
+  animation: pk-drawer-slide 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.pk-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f0f1f4;
+  flex-shrink: 0;
+}
+.pk-drawer-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pk-drawer-close {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #5b616e;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pk-drawer-close:hover {
+  background: #f1f2f5;
+}
+.pk-drawer-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.pk-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@keyframes pk-drawer-slide {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes pk-drawer-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (max-width: 640px) {
+  .pk-drawer-panel { width: 100vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pk-drawer-panel, .pk-drawer-backdrop { animation: none; }
+}
