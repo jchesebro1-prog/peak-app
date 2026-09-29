@@ -8007,3 +8007,15 @@ overrides survive; a component no longer in the catalog keeps the line's own num
 sell (Σ component list) takes the new list total, otherwise it keeps its margin. Fixtures are never tier-priced (#254).
 Copying into an estimate that is already Sent is allowed, same as Move. Vendor-quote records are shared by id rather
 than duplicated: their Blob path is keyed by the record id and nothing deletes vendor files.
+
+## D477. Estimator system prices: a typed price is exact, the auto price rounds UP to $25, lines keep their prices (#267, 2026-09-29)
+
+Modelled on the service quotes (D363–D365) with one change Jeff made: the auto price rounds **up** to the next $25,
+never to the nearest (a service total rounds to the nearest). The system price is items + freight. A typed price is
+kept to the cent. The difference between the price and the lines is a system-level adjustment rather than a rewrite
+of line prices, so hand-priced lines survive and nothing ratchets on repeated edits; it counts in revenue (split
+materials/labor by the system's own line sell) and is spread across the lines only on the customer document. To avoid
+silently re-pricing what customers already have, only new systems and draft/unsaved estimates round automatically;
+sent/won/lost and portal-built quotes stay exact until someone clicks Round to $25 on a system (a draft's first open
+after this change shows "Unsaved changes" until Save). A copied system drops its typed price because Copy re-prices the
+lines (D476).

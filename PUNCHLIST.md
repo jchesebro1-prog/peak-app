@@ -9682,6 +9682,28 @@ attached file (vendor files are never deleted). Move now shares its persistence 
 (`copySectionForTarget`), `copySystemToEstimateAction`, tier helpers exported from `tier-reprice.ts`. Harness `#266`.
 See D476.
 
+## 267. Estimator — set a system's sell price by hand; system prices round up to $25 — DONE 2026-09-29 (D477)
+
+**Reported:** Jeff (2026-09-29): "I need the ability to manually set the system sell price too, I also would like the
+systems sell price to automatically round to 25 dollars." Then: "Make it always round up."
+
+**Done.** A system's **Sell** box is now its price (items + freight): a typed figure is used exactly (`sellOverride`),
+the line prices stay as they are and the margin follows; it holds when lines change, shows a **Set** tag and **Reset to
+auto**, and warns (never blocks) below cost or under a 10% margin. The old box re-priced every line at one margin,
+wiping hand pricing and rarely landing on the typed number. With no typed price, the system's price rounds **up** to
+the next $25 (`priceRound: 25`, `ceilToStep`), with "Rounded to $25 (+$X)" under the box. The difference rides on the
+system (`systemSellAdjustment`): quote totals, value, margin, the sidebar and the card use it, and the customer
+document spreads it over the system's lines in whole cents (never below $0) so an itemized system still adds up.
+Rounding is on for new systems and, on open, every system of a draft or unsaved estimate; sent/won/lost quotes and
+portal-built quotes keep their exact prices until a system's **Round to $25** link is used. Either Margin slider clears
+a typed price. The server drops a bad typed price or rounding step on Save, Move and Copy; Copy drops a typed price.
+Helpers in `src/app/(app)/estimator/pricing.ts`. Harness `#267`. See D477.
+
+**Not changed:** the PM parts list (#262) stays on raw line prices, so its Unit Sell no longer sums to a rounded or
+typed system price; the equipment-sold dashboard credits parts, not system adjustments.
+
+---
+
 ## 268. Design Dashboard — rename and delete right on each design card — DONE 2026-09-29
 
 **Reported:** Jeff (2026-09-29, screenshot of /design/designs): "I still need the ability to edit and delete from this
