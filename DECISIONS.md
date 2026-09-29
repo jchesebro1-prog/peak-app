@@ -7885,3 +7885,17 @@ HTML outside the SVG are unchanged.
 `renderPlanSvgMarkup` writes the same reduced sizes (k = 1), so saved Designs, new Grid base sheets and print match
 Quick Design — smaller text suits a zoomable Grid sheet too. Grid base sheets already stored keep the SVG (and text
 sizes) they were generated with; only sheets generated from now on get the new sizes.
+
+## D469. The PM parts list consolidates parts and always totals to the estimate's cost (#262, 2026-09-29)
+
+Jeff asked for model number, description and cost, "tracking through" multi-part assemblies. Defaults taken without
+asking: (1) **one row per distinct part**, not one per estimate line — the PM orders by part, so identical parts
+(same manufacturer, model, SKU, unit and unit cost) merge, and a Used in column ("System › Assembly", "; "-joined)
+keeps the trail back to every assembly. A different unit cost stays a separate row. (2) **Cost, not sell** — unit
+and extended cost, no margin or freight. (3) **Base scope only** — option lines, labor lines, labor overhead and labor
+systems are left out; allowances, curtains and custom parts stay in. (4) **Reconciliation rows** — an assembly's
+components come from the line's stored `components` (what was chosen when it was configured), so when the line's cost
+has since been edited, or a vendor quote's typed total differs from its lines, a "Cost adjustment" row carries the
+difference rather than the file silently disagreeing with the estimate. (5) Model number falls back to the catalog
+SKU for a catalog part with no printed model or P/N (many SKUs are the manufacturer's number); a non-catalog part
+with none is left blank.
