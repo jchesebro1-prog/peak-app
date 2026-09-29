@@ -168,12 +168,27 @@ export type RecordValidationCtx = {
 };
 
 /** The live section id a record's `section` (a CSI number) resolves to, or
- *  `null` when it doesn't match exactly one live section (via `csiKey`). */
-export function sectionIdForRecord(r: SpecRecord, sections: Array<{ id: string; number: string }>): string | null {
+ *  `null` when it can't be pinned down. Exactly one section carrying that
+ *  CSI number resolves outright; when two (or more) live sections share a
+ *  number — e.g. an empty starter next to the real seeded section — the
+ *  record's own `sourceArticleId` breaks the tie when it names an article
+ *  that lives in one of the candidates. Otherwise (no source article, or
+ *  one that names an article in none of them) it stays unresolved rather
+ *  than guessing. */
+export function sectionIdForRecord(
+  r: SpecRecord,
+  sections: Array<{ id: string; number: string }>,
+  articles?: ReadonlyArray<{ id: string; sectionId: string }>
+): string | null {
   const key = csiKey(r.section);
   if (!key) return null;
   const hits = sections.filter((s) => csiKey(s.number) === key);
-  return hits.length === 1 ? hits[0].id : null;
+  if (hits.length === 1) return hits[0].id;
+  if (hits.length > 1 && articles && r.sourceArticleId) {
+    const article = articles.find((a) => a.id === r.sourceArticleId);
+    if (article && hits.some((h) => h.id === article.sectionId)) return article.sectionId;
+  }
+  return null;
 }
 
 export function validateSpecRecord(r: SpecRecord, ctx: RecordValidationCtx): RecordProblem[] {
@@ -202,7 +217,7 @@ export function validateSpecRecord(r: SpecRecord, ctx: RecordValidationCtx): Rec
     }
   }
 
-  const sectionId = sectionIdForRecord(r, ctx.sections);
+  const sectionId = sectionIdForRecord(r, ctx.sections, ctx.articles);
   if (!sectionId) {
     problem("section", `"${r.section}" does not resolve to exactly one section.`, true);
   }

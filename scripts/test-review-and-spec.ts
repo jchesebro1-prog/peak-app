@@ -10663,6 +10663,7 @@ seeded()
   .then(() => specRecordsFinalReviewAsyncChecks())
   .then(() => tier254SaveStampAsyncChecks())
   .then(() => service254DefaultMarginAsyncChecks())
+  .then(() => specRecordDupSectionAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -33916,3 +33917,71 @@ async function service254DefaultMarginAsyncChecks(): Promise<void> {
     await removeCustomer(CO254);
   }
 }
+
+/* ---- A record's article picks its section when two sections share a
+ * number (bugfix) — prod has an empty starter "26 09 61" next to the real
+ * seeded "26 09 61" section, which made every record on that number fail
+ * both the section check and article-placement. `sectionIdForRecord` now
+ * takes an optional `articles` list and breaks a number tie using the
+ * record's own `sourceArticleId`. */
+async function specRecordDupSectionAsyncChecks(): Promise<void> {
+  const R = await import("@/lib/specs/records");
+  const I = await import("@/lib/specs/record-import");
+  const A = await import("@/lib/specs/assemble-section");
+  const SD = await import("@/lib/specs/spec-document");
+
+  const rec = R.normalizeSpecRecord({
+    specId: "PS-1", kind: "product_vendor", status: "ready", section: "26 09 61", article: "A",
+    title: "T", mfrNumbers: ["IQ12"], includeWith: [], specText: "x", sourceArticleId: "ar-1",
+  })!;
+
+  // Unique number: unchanged behaviour, with or without the new arg.
+  const oneSection = [{ id: "ss1", number: "26 09 61" }];
+  ok(R.sectionIdForRecord(rec, oneSection) === "ss1", "dup-section: a unique number resolves with no articles arg");
+  ok(R.sectionIdForRecord(rec, oneSection, [{ id: "ar-1", sectionId: "ss1" }]) === "ss1", "dup-section: a unique number resolves the same with an articles arg");
+
+  const dup = [{ id: "ss-empty", number: "26 09 61" }, { id: "ss-real", number: "26 09 61" }];
+
+  // Duplicate number, nothing to break the tie with → unresolved.
+  ok(R.sectionIdForRecord(rec, dup) === null, "dup-section: two sections sharing a number is unresolved with no articles list");
+  ok(R.sectionIdForRecord(rec, dup, []) === null, "dup-section: two sections sharing a number is unresolved with an empty articles list");
+
+  // Duplicate number + the record's sourceArticleId names an article in one of them → that one.
+  const artsTie = [{ id: "ar-1", sectionId: "ss-real" }];
+  ok(R.sectionIdForRecord(rec, dup, artsTie) === "ss-real", "dup-section: the source article's own section breaks the tie");
+
+  // Duplicate number + an article that lives in neither candidate → still unresolved.
+  const artsElsewhere = [{ id: "ar-1", sectionId: "ss-other" }];
+  ok(R.sectionIdForRecord(rec, dup, artsElsewhere) === null, "dup-section: an article outside both candidates does not resolve");
+
+  // Duplicate number + the record itself has no source article → unresolved,
+  // even though an article named "ar-1" happens to exist and would tie-break.
+  const noArticle = { ...rec, sourceArticleId: null };
+  ok(R.sectionIdForRecord(noArticle, dup, artsTie) === null, "dup-section: no source article on the record leaves it unresolved");
+
+  // validateSpecRecord on the real v1 record against the actual prod shape:
+  // an empty starter "26 09 61" plus the real seeded "26 09 61" holding the
+  // record's article.
+  const v1 = I.recordsFromJson(JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8")));
+  const rec028 = v1.records.find((r) => r.specId === "PS-260961-028")!;
+  ok(!!rec028 && rec028.sourceArticleId === "ar-nhs-260961-07", "dup-section: fixture sanity — PS-260961-028 carries its expected source article");
+  const dupSections = [
+    { id: "ss-qyg0p192", number: "26 09 61" },
+    { id: "ss-nhs-260961", number: "26 09 61" },
+  ];
+  const dupArticles = [{ id: "ar-nhs-260961-07", sectionId: "ss-nhs-260961" }];
+  const ctx = { sections: dupSections, articles: dupArticles, specIds: new Set([rec028.specId]) };
+  const problems = R.validateSpecRecord(rec028, ctx);
+  ok(problems.filter((p) => p.blocking).length === 0, `dup-section: PS-260961-028 validates clean despite the duplicate section pair (got ${JSON.stringify(problems)})`);
+
+  // assembleSection places PS-260961-028's row into the real section, not
+  // "other-section", with the empty duplicate also present.
+  const s260961Real = { id: "ss-nhs-260961", number: "26 09 61", title: "26 09 61 Theatrical Lighting Controls and Fixtures", part1: [], part3: [], part2Style: "paragraphs", quantities: "drawings", sort: 0, updatedAt: 0, updatedBy: "" } as never;
+  const s260961Empty = { id: "ss-qyg0p192", number: "26 09 61", title: "26 09 61 Theatrical Lighting Controls", part1: [], part3: [], part2Style: "paragraphs", quantities: "drawings", sort: 1, updatedAt: 0, updatedBy: "" } as never;
+  const arts = [{ id: "ar-nhs-260961-07", sectionId: "ss-nhs-260961", sort: 0, title: rec028.article, manufacturers: [], general: "", categoryKeys: [], updatedAt: 0, updatedBy: "" }];
+  const doc = SD.normalizeSpecDocument({ id: "SP-T2", sectionId: "ss-nhs-260961", header: { projectName: "P", projectNumber: "1", phase: "CD", issueDate: "2026-09-28", preparedBy: "x" }, source: { kind: "quote", id: "Q" }, products: [{ sku: "LS-P" }], printQuantities: true, fillIns: {} });
+  const assembled = A.assembleSection({ section: s260961Real, articles: arts as never, sections: [s260961Empty, s260961Real] as never, parts: new Map(), doc, records: v1.records });
+  const placed = assembled.part2.articles.flatMap((x) => x.products).find((p) => p.specId === "PS-260961-028");
+  ok(!!placed, `dup-section: LS-P places under PS-260961-028 despite the duplicate-number empty starter (leftOut: ${JSON.stringify(assembled.checklist.leftOut)})`);
+}
+
