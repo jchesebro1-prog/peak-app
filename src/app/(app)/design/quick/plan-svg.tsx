@@ -167,15 +167,27 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const C = canvasOf(plan, { W: 640, ML, MR: 40, MT, MB: 44 });
   const { W, H, ppi, ppf, px, regions } = C;
   const pt = (name: string) => px(plan.points[name]);
-  const centre = pt("centre"), mix = pt("mix"), aisle = pt("aisle");
+  const centre = pt("centre"), aisle = pt("aisle");
   const yFront = centre.y, yBack = pt("platBack").y, yNaveBack = pt("naveBack").y;
   const naveL = pt("naveL"), naveR = pt("naveR");
-  // The FOH mix box buildPlanChurch knocks out of the Nave (mixPos: w wide, 18 px tall).
-  const mixW = Math.min((naveR.x - naveL.x) * 0.3, 86);
+  // A template with a booth room (Contemporary's Control Booth) puts the FOH mix in it: centred, 45% down its
+  // box (above the room's own label, which sits low), clear of its bottom wall with the CONSOLE mark under it,
+  // and no wider than the room at the box's top edge. Otherwise the FOH mix box stands at the template's `mix`
+  // point in the Nave, and buildPlanChurch knocks it out of the pews (mixPos: w wide, 18 px tall).
+  const consoleOn = !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console);
+  const boothPoly = keys.roles.booth ? regions[keys.roles.booth] : undefined;
+  const boothRoom = boothPoly ? boxOf(boothPoly) : null;
+  const mix = boothRoom
+    ? { x: R(boothRoom.x + boothRoom.w / 2), y: R(Math.min(boothRoom.y + boothRoom.h * 0.45, boothRoom.y + boothRoom.h - 12 - (consoleOn ? 16 : 0))) }
+    : pt("mix");
+  const room = boothPoly ? rowSpans(boothPoly, mix.y - 9).reduce((w, [l, r]) => (l <= mix.x && r >= mix.x ? Math.min(mix.x - l, r - mix.x) * 2 : w), 0) : 0;
+  const mixW = boothRoom ? Math.max(0, Math.min(boothRoom.w * 0.45, 86, room - 6)) : Math.min((naveR.x - naveL.x) * 0.3, 86);
   const mixBox: Box = { x: R(mix.x - mixW / 2), y: R(mix.y - 9), w: R(mixW), h: 18 };
   const platform = boxOf(regions[keys.roles.stage]);
   const nave = boxOf(regions[keys.roles.house]);
-  const booth = keys.roles.booth && regions[keys.roles.booth] ? boxOf(regions[keys.roles.booth]) : mixBox;
+  const booth = boothRoom ?? mixBox;
+  // Where the loudspeakers stand, when the template says (else buildPlanChurch's Traditional notch rule).
+  const speakers = keys.points.spkL && keys.points.spkR ? [pt("spkL"), pt("spkR")] : null;
   const pews: Array<{ x1: number; x2: number; y: number }> = [];
   const half = 2.5 * ppf;
   // The aisle-side ends round away from the aisle, so a 0.1-px rounding never narrows it.
@@ -183,7 +195,7 @@ export function churchGeom(s: AState, tpl?: string | null) {
   // Pews paint after the mix box's white knock-out, so a row crossing it stops 2 px short of each side — and,
   // when the CONSOLE mark is drawn under the booth (buildPlanChurch: 3–14 px below it), short of that too.
   const gap = 2, mixL = R(mixBox.x - gap), mixR = R(mixBox.x + mixBox.w + gap);
-  const consoleMark = !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console) && booth === mixBox;
+  const consoleMark = consoleOn && booth === mixBox;
   const clipBot = mixBox.y + mixBox.h + (consoleMark ? 16 : gap);
   const push = (x1: number, x2: number, y: number) => {
     const yy = R(y);
@@ -201,7 +213,7 @@ export function churchGeom(s: AState, tpl?: string | null) {
     template: id, W, H, ppi, ppf, dims, warning: houseDims(s, id).warning,
     cx: centre.x, yTop: MT, yBack, yFront, yNaveBack, xMin: ML,
     platBackL: pt("platBackL"), platBackR: pt("platBackR"), platFrontL: pt("platFrontL"), platFrontR: pt("platFrontR"),
-    naveL, naveR, mix, mixBox, aisle,
+    naveL, naveR, mix, mixBox, aisle, speakers,
     platform, nave, booth, stage: platform, pews,
     regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
     polylines: C.polylines, labels: C.labels,
@@ -448,12 +460,19 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
     });
   // Marks over the Nave's fill are paths, not rects: rects paint before paths, i.e. under the fill.
   const box = (x: number, y: number, w: number, h: number) => "M " + R(x) + " " + R(y) + " h " + w + " v " + h + " h " + -w + " Z";
-  // Loudspeakers stand in the Nave beside the platform step, centred in its 4' notch (2' upstage of the front edge).
-  if (s.sys.audio) [G.platFrontL, G.platFrontR].forEach((p, i) => L.paths.push({ d: box(p.x + (i ? 8 : -18), p.y - 2 * G.ppf - 7, 10, 14), fill: "#eef0f3", stroke: "#3155a8", sw: 1.2 }));
+  // …with the rect's rx: 2 corners, as arcs.
+  const rbox = (x: number, y: number, w: number, h: number, r: number) =>
+    "M " + R(x + r) + " " + R(y) + " h " + (w - 2 * r) + " a " + r + " " + r + " 0 0 1 " + r + " " + r + " v " + (h - 2 * r) + " a " + r + " " + r + " 0 0 1 " + -r + " " + r +
+    " h " + -(w - 2 * r) + " a " + r + " " + r + " 0 0 1 " + -r + " " + -r + " v " + -(h - 2 * r) + " a " + r + " " + r + " 0 0 1 " + r + " " + -r + " Z";
+  // Loudspeakers stand in the Nave beside the platform: centred on the template's spkL / spkR points, else (Traditional)
+  // centred in the platform step's 4' notch, 2' upstage of the front edge.
+  const spk = G.speakers ?? [G.platFrontL, G.platFrontR].map((p, i) => ({ x: p.x + (i ? 13 : -13), y: p.y - 2 * G.ppf }));
+  if (s.sys.audio) spk.forEach((p) => L.paths.push({ d: rbox(p.x - 5, p.y - 7, 10, 14, 2), fill: "#eef0f3", stroke: "#3155a8", sw: 1.2 }));
   for (const p of G.pews) L.lines.push({ x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: "#cdd1d9", sw: 1.4, dash: "" });
   mixPos(L, G.mix.x, G.mix.y, G.mixBox.w);
   if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
-    const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
+    // Under the FOH mix box — in the Nave, or in the booth room when the template has one.
+    const bx = G.mixBox, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
     L.paths.push({ d: box(bcx - cw / 2, bx.y + bx.h + 3, cw, 4.5), fill: SYSCOLOR.controls, stroke: "none" });
     L.texts.push({ x: R(bcx), y: R(bx.y + bx.h + 14), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }

@@ -21,7 +21,7 @@ import {
   type SysKey,
 } from "@/app/(app)/design/quick/engine";
 import { houseFields, type HouseField } from "@/lib/design/venue-templates/house-dims";
-import { effectiveTemplateFor, PLAN_KIND_WORKS_LIKE, templatesFor } from "@/lib/design/venue-templates";
+import { effectiveTemplateFor, PLAN_KIND_WORKS_LIKE, resolveBackground, sanitizeTemplateId, templateEntry, templatesFor } from "@/lib/design/venue-templates";
 import type { VenueType } from "@/lib/venue-types";
 
 /**
@@ -215,7 +215,9 @@ export default function ScopeInputsPanel({
                 {showHouse && choices.length > 1 && (
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Background</div>
-                    <select value={tplId ?? ""} onChange={(e) => update({ templateId: e.target.value || null })} aria-label="Background drawing" style={{ width: "100%", fontSize: 12.5, padding: "6px 8px", border: "1px solid #e4e7ec", borderRadius: 7, background: "#fff" }}>
+                    {/* Blank = no override: the design follows its venue type's Background. */}
+                    <select value={sanitizeTemplateId(venue.kind, value.templateId) ?? ""} onChange={(e) => update({ templateId: e.target.value || null })} aria-label="Background drawing" style={{ width: "100%", fontSize: 12.5, padding: "6px 8px", border: "1px solid #e4e7ec", borderRadius: 7, background: "#fff" }}>
+                      <option value="">Venue type default ({templateEntry(resolveBackground(venueTypes ?? [], value.venueType, venue.kind))?.label ?? "none"})</option>
                       {choices.map((t) => (
                         <option key={t.id} value={t.id}>{t.label}</option>
                       ))}

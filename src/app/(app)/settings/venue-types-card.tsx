@@ -10,7 +10,7 @@ import {
   type BuiltInVenueKind,
   type VenueType,
 } from "@/lib/venue-types";
-import { BUILT_IN_SCHEMATIC_LABEL, defaultBackground, templatesFor } from "@/lib/design/venue-templates";
+import { BUILT_IN_SCHEMATIC_LABEL, defaultBackground, templateEntry, templatesFor } from "@/lib/design/venue-templates";
 import { saveVenueTypesAction } from "./actions";
 
 /**
@@ -189,7 +189,13 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
                       title={choices.length ? "The drawing this type's plans start from." : "No drawing yet for this kind — plans use the built-in schematic."}
                       style={{ ...inS, cursor: choices.length < 2 ? "not-allowed" : "pointer", background: choices.length < 2 ? "#f1f2f5" : "#fff" }}
                     >
-                      {choices.length ? choices.map((t) => <option key={t.id} value={t.id}>{t.label}</option>) : <option value="">{BUILT_IN_SCHEMATIC_LABEL}</option>}
+                      {/* Blank = this type's default drawing (saved as that drawing's id). */}
+                      {choices.length ? (
+                        <>
+                          <option value="">Venue type default ({templateEntry(defaultBackground(r.worksLike as BuiltInVenueKind, r.key || null))?.label ?? BUILT_IN_SCHEMATIC_LABEL})</option>
+                          {choices.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                        </>
+                      ) : <option value="">{BUILT_IN_SCHEMATIC_LABEL}</option>}
                     </select>
                   );
                 })()}

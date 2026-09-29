@@ -34106,7 +34106,7 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
   }
 
   ok(c255T3Ids.slice().sort().join("|") === c255T3Reg.map((t) => t.id).sort().join("|") && c255T3KeysById("church-traditional@1") === K, "#255 T3: every registered template has its drawing and key lines");
-  ok(c255T3For("church").map((t) => t.id).join() === "church-traditional@1" && c255T3For("arena").length === 0 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === null, "#255 T3: templates are listed per works-like kind; a kind with none has no default");
+  ok(c255T3For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1" && c255T3For("arena").length === 0 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === null, "#255 T3: templates are listed per works-like kind; a kind with none has no default (two since Contemporary, T8)");
   ok(c255T3Sanitize("church", "church", "proscenium@1") === "church-traditional@1" && c255T3Sanitize("church", "church", "church-traditional@1") === "church-traditional@1" && c255T3Sanitize("arena", "arena", "x") === null, "#255 T3: a stored background not made for the type's kind falls back to its default");
   const seed = c255T3Seed.map((t) => ({ ...t, background: c255T3Default(t.worksLike, t.key) }));
   ok(c255T3Resolve(seed, null, "church") === "church-traditional@1" && c255T3Resolve(seed, null, "proscenium") === "proscenium@1" && c255T3Resolve(seed, null, "arena") === null, "#255 T3: a design with no venue follows its kind's built-in type");
@@ -34277,10 +34277,10 @@ async function c255T6GridAsyncChecks(): Promise<void> {
   const marksOk = [34, 90, 120, 140].every((hw) => {
     const st = { ...wide, houseWidthFt: hw, sys: { ...wide.sys, audio: true } }, g = c255T6Geom(st);
     const svg = c255T6Markup(c255T6Build(st, 8, 3, "#3a3f4a"), "#3a3f4a");
-    const fillAt = svg.indexOf('fill="#f6f7f9"'), spk = [...svg.matchAll(/<path d="M ([\d.]+) ([\d.]+) h 10 v 14 h -10 Z" fill="#eef0f3" stroke="#3155a8"/g)];
-    return spk.length === 2 && spk.every((m) => m.index! > fillAt && inNave(g, +m[1], +m[2]) && inNave(g, +m[1] + 10, +m[2] + 14)) && /<path d="[^"]*" fill="#1f7a52"/.test(svg.slice(fillAt));
+    const fillAt = svg.indexOf('fill="#f6f7f9"'), spk = [...svg.matchAll(/<path d="M ([\d.]+) ([\d.]+) h 6 a 2 2 0 0 1 2 2 v 10 a 2 2 0 0 1 -2 2 h -6 a 2 2 0 0 1 -2 -2 v -10 a 2 2 0 0 1 2 -2 Z" fill="#eef0f3" stroke="#3155a8"/g)];
+    return spk.length === 2 && spk.every((m) => m.index! > fillAt && inNave(g, +m[1] - 2, +m[2]) && inNave(g, +m[1] + 8, +m[2] + 14)) && /<path d="[^"]*" fill="#1f7a52"/.test(svg.slice(fillAt));
   });
-  ok(marksOk, "#255 T6: church loudspeaker marks and the CONSOLE bar draw over the Nave fill, the speakers inside the Nave beside the platform step — 34' to 140' naves");
+  ok(marksOk, "#255 T6: church loudspeaker marks and the CONSOLE bar draw over the Nave fill, the speakers (rounded, T8) inside the Nave beside the platform step — 34' to 140' naves");
   const fr = c255T6Frame(a, { template: "church-traditional@1" }), G = c255T6Geom(a);
   ok(Math.abs(fr.stage.y - G.platform.y / G.H) < 1e-12 && Math.abs(fr.audience.y - G.nave.y / G.H) < 1e-12 && Math.abs(fr.booth.x - G.booth.x / G.W) < 1e-12, "#255 T6: the church Auto-fill frame is the template's Platform, Nave and FOH-mix position");
   const old = c255T6Frame(a, { legacy: true }), L = c255T6Legacy(a);
@@ -34405,4 +34405,142 @@ import type { TemplateKeys as C255T7fKeys, VenueTemplate as C255T7fTpl } from "@
   const straight = c255T7fStretch(tpl, { ...walls, x: { kind: "spans", spans: [{ to: 30, drive: "absorb" }, { to: 100, drive: "fixed" }] } }, D({ houseWidthFt: 120 / 12 }));
   const rf = straight.polylines[2], ra = rf[0], rb = rf[rf.length - 1], rl = Math.hypot(rb.x - ra.x, rb.y - ra.y);
   ok(rf.every((p) => Math.abs(((rb.x - ra.x) * (p.y - ra.y) - (rb.y - ra.y) * (p.x - ra.x)) / rl) < 1e-6), "#255 T7 fix: a ref wall stays straight where the side-to-side map has a kink");
+}
+
+/* --- #255 T8: Church Contemporary — splays stay 6", pointed front stays true, rooms named by Jeff --- */
+import { CHURCH_CONTEMPORARY_KEYS as c255T8Keys, CHURCH_CONTEMPORARY_SPACES as c255T8Spaces } from "@/lib/design/venue-templates/church-contemporary.keys";
+import { stretchById as c255T8Stretch, templateData as c255T8Data } from "@/lib/design/venue-templates/templates";
+import { makeXMap as c255T8X, makeYMap as c255T8Y } from "@/lib/design/venue-templates/stretch";
+import { effectiveTemplateFor as c255T8Effective, templatesFor as c255T8For } from "@/lib/design/venue-templates";
+import { CONTEMPORARY_NAVE_WARNING as c255T8Warn, houseDims as c255T8House } from "@/lib/design/venue-templates/house-dims";
+import { buildPlan as c255T8Build, churchGeom as c255T8Geom, renderPlanSvgMarkup as c255T8Markup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T8Default } from "@/app/(app)/design/quick/engine";
+import { venueFrame as c255T8Frame } from "@/lib/design/grid-auto-layout";
+import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
+{
+  const K = c255T8Keys, T = c255T8Data("church-contemporary@1").template;
+  const D0 = { ...K.defaults, pit: false };
+  const id0 = c255T8Stretch("church-contemporary@1", D0);
+  const segIdx = (f: [{ x: number; y: number }, { x: number; y: number }]) => T.segments.findIndex(([a, b, c, d]) => (Math.abs(a - f[0].x) < 0.01 && Math.abs(b - f[0].y) < 0.01 && Math.abs(c - f[1].x) < 0.01 && Math.abs(d - f[1].y) < 0.01) || (Math.abs(a - f[1].x) < 0.01 && Math.abs(b - f[1].y) < 0.01 && Math.abs(c - f[0].x) < 0.01 && Math.abs(d - f[0].y) < 0.01));
+  ok(T.segments.every((s, i) => Math.hypot(id0.polylines[i][0].x - s[0], id0.polylines[i][0].y - s[1]) < 0.1 && Math.hypot(id0.polylines[i][id0.polylines[i].length - 1].x - s[2], id0.polylines[i][id0.polylines[i].length - 1].y - s[3]) < 0.1), "#255 T8: at the drawing's own size every Contemporary line is where Jeff drew it");
+  ok(T.labels.filter((l) => l.text === "Storage").length === 4 && K.requiredLabels.filter((t) => t === "Storage").length === 4 && ["storage-1", "storage-2", "storage-3", "storage-4"].every((r) => K.regionLabels?.[r] === "Storage"), "#255 T8: four Storage rooms — four labels, four unique region ids, one display text");
+  const variants = [
+    { proWidthFt: 511.878 / 12, stageDepthFt: 280.133 / 12, houseWidthFt: 1457.388 / 12, houseDepthFt: 665.377 / 12 },
+    { proWidthFt: 30, stageDepthFt: 18, houseWidthFt: 80, houseDepthFt: 40 },
+    { proWidthFt: 43, stageDepthFt: 23, houseWidthFt: 160, houseDepthFt: 55 },
+    { proWidthFt: 43, stageDepthFt: 23, houseWidthFt: 121, houseDepthFt: 90 },
+    { proWidthFt: 43, stageDepthFt: 35, houseWidthFt: 121, houseDepthFt: 27.7 }, // platform depth × 1.5, nave depth × 0.5: the depth map bends hard at the tip
+  ];
+  for (const v of variants) {
+    const d = { ...v, wingFt: 0, pit: false };
+    const X = c255T8X(K, d), Y = c255T8Y(K, d), plan = c255T8Stretch("church-contemporary@1", d);
+    const tag = `${v.proWidthFt.toFixed(1)}/${v.stageDepthFt.toFixed(1)}/${v.houseWidthFt.toFixed(1)}/${v.houseDepthFt.toFixed(1)}`;
+    for (const w of K.walls!) {
+      const A = plan.map(w.ref[0]), B = plan.map(w.ref[1]), L = Math.hypot(B.x - A.x, B.y - A.y);
+      const dist = (p: { x: number; y: number }) => ((B.x - A.x) * (p.y - A.y) - (B.y - A.y) * (p.x - A.x)) / L;
+      const v0 = { x: w.ref[1].x - w.ref[0].x, y: w.ref[1].y - w.ref[0].y }, L0 = Math.hypot(v0.x, v0.y);
+      for (const f of w.faces) {
+        const want = (v0.x * (f[0].y - w.ref[0].y) - v0.y * (f[0].x - w.ref[0].x)) / L0;
+        ok(plan.polylines[segIdx(f)].every((p) => Math.abs(dist(p) - want) < 1e-3), `#255 T8 ${tag}: the 45° wall face at (${f[0].x}, ${f[0].y}) stays ${Math.abs(want).toFixed(2)}" off its ref, perpendicular`);
+      }
+    }
+    ok(Math.abs(X(-475.986, 200) - X(-481.986, 200) - 6) < 1e-9 && Math.abs(X(741.331, 0) - X(735.331, 0) - 6) < 1e-9 && Math.abs(Y(402.134) - Y(282.134) - 120) < 1e-9 && Math.abs(Y(282.134) - Y(276.134) - 6) < 1e-9, `#255 T8 ${tag}: orthogonal walls stay 6"; Backstage keeps 10'`);
+    ok(Math.abs(X(260.09, 276.134) - X(-251.788, 276.134) - v.proWidthFt * 12) < 1e-6 && Math.abs(X(732.845, -196.621) - X(-724.543, -196.621) - v.houseWidthFt * 12) < 1e-6, `#255 T8 ${tag}: platform width at the back wall and nave width at its widest match the inputs`);
+    ok(Math.abs(Y(276.134) - Y(-3.999) - v.stageDepthFt * 12) < 1e-6 && Math.abs(Y(-3.999) - Y(-669.376) - v.houseDepthFt * 12) < 1e-6, `#255 T8 ${tag}: platform depth (back wall → tip) and nave depth (tip → back wall) match`);
+    const k = (v.proWidthFt * 12) / 511.878;
+    const ul = K.walls![0], lA = plan.map(ul.ref[0]), lB = plan.map(ul.ref[1]);
+    for (const arc of plan.polylines.slice(-2)) {
+      const a = arc[0], b = arc[Math.floor(arc.length / 2)], c = arc[arc.length - 1];
+      const Dd = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+      const ux = ((a.x ** 2 + a.y ** 2) * (b.y - c.y) + (b.x ** 2 + b.y ** 2) * (c.y - a.y) + (c.x ** 2 + c.y ** 2) * (a.y - b.y)) / Dd;
+      const uy = ((a.x ** 2 + a.y ** 2) * (c.x - b.x) + (b.x ** 2 + b.y ** 2) * (a.x - c.x) + (c.x ** 2 + c.y ** 2) * (b.x - a.x)) / Dd;
+      ok(arc.every((p) => Math.abs(Math.hypot(p.x - ux, p.y - uy) - 749.119 * k) < 0.01), `#255 T8 ${tag}: each pointed-front arc stays a true circle, radius × the platform-width ratio`);
+      const tip = [a, c].find((p) => Math.abs(p.y + 3.999) < 0.01); // the drawn arcs end at y −3.9992, 0.0002" off the origin line
+      ok(!!tip, `#255 T8 ${tag}: …meeting its twin at the platform tip`);
+    }
+    const onLeft = (p: { x: number; y: number }) => Math.abs(((lB.x - lA.x) * (p.y - lA.y) - (lB.y - lA.y) * (p.x - lA.x)) / Math.hypot(lB.x - lA.x, lB.y - lA.y)) < 0.01; // the drawn arc end sits 0.004" off the splay
+    ok(plan.polylines.slice(-2).some((arc) => onLeft(arc[0]) || onLeft(arc[arc.length - 1])), `#255 T8 ${tag}: …and ending on the splayed wall`);
+    // A room behind a splay keeps its diagonal edge on the redrawn wall face, not where the plain map would send it.
+    let roomsOnFaces = true;
+    for (const [name, items] of Object.entries(K.regions)) {
+      const corners = items.filter((it): it is { x: number; y: number } => !("arc" in it));
+      for (const w of K.walls!) for (const f of w.faces) {
+        const u = { x: f[1].x - f[0].x, y: f[1].y - f[0].y }, L = Math.hypot(u.x, u.y);
+        const n = corners.filter((c) => Math.abs(u.x * (c.y - f[0].y) - u.y * (c.x - f[0].x)) / L < 0.01).length;
+        if (!n) continue;
+        const P = plan.polylines[segIdx(f)], a = P[0], b = P[P.length - 1], l = Math.hypot(b.x - a.x, b.y - a.y);
+        const on = plan.regions[name].filter((p) => Math.abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / l < 1e-3).length;
+        if (on < Math.min(n, 2)) roomsOnFaces = false;
+      }
+    }
+    ok(roomsOnFaces, `#255 T8 ${tag}: rooms behind the 45° walls keep their diagonal edges on the redrawn wall faces`);
+    // Task 7 review: the profile map's outside meets its face (rows ≥ 12" from a band anchor; nearer, the band is inside the wall itself).
+    const pk = (K.x as { keys: Array<{ y: number; half: number }> }).keys;
+    let jump = 0;
+    for (let y = 270; y > -665; y -= 10) {
+      const i = pk.findIndex((q, j) => j < pk.length - 1 && y <= q.y && y >= pk[j + 1].y);
+      const ho = pk[i].half + ((pk[i + 1].half - pk[i].half) * (pk[i].y - y)) / (pk[i].y - pk[i + 1].y);
+      if ([480.137, 728.694].some((b) => b > ho && b - ho < 12)) continue;
+      jump = Math.max(jump, Math.abs(X(4.151 - ho - 0.011, y) - X(4.151 - ho, y)), Math.abs(X(4.151 + ho + 0.011, y) - X(4.151 + ho, y)));
+    }
+    ok(jump < 0.5, `#255 T8 ${tag}: the rooms behind the splays meet the splays' faces — no jump in the map (worst ${jump.toFixed(3)}")`);
+    const refSegs = K.walls!.map((w) => T.segments.findIndex(([a, b, c, e]) => [w.ref[0], w.ref[1]].every((p) => Math.abs((c - a) * (p.y - b) - (e - b) * (p.x - a)) / Math.hypot(c - a, e - b) < 0.01)));
+    const bow = Math.max(...refSegs.map((i) => {
+      const P = plan.polylines[i], a = P[0], b = P[P.length - 1], L = Math.hypot(b.x - a.x, b.y - a.y);
+      return Math.max(...P.map((p) => Math.abs(((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / L)));
+    }));
+    ok(refSegs.every((i) => i >= 0) && bow < 0.1, `#255 T8 ${tag}: every 45° wall's nave-side (ref) line stays straight (worst ${bow.toFixed(4)}")`);
+    ok(T.segments.every((_, i) => {
+      const P = plan.polylines[i], a = P[0], b = P[P.length - 1];
+      return P.every((p, j) => j === 0 || (p.x - P[j - 1].x) * (b.x - a.x) + (p.y - P[j - 1].y) * (b.y - a.y) > 0);
+    }), `#255 T8 ${tag}: no wall line doubles back`);
+    let cornersAtEnds = true;
+    for (const [name, items] of Object.entries(K.regions))
+      for (const c of items)
+        T.segments.forEach((s, i) => {
+          if ("arc" in c) return;
+          const e = Math.hypot(s[0] - c.x, s[1] - c.y) < 0.01 ? 0 : Math.hypot(s[2] - c.x, s[3] - c.y) < 0.01 ? 1 : -1;
+          if (e < 0) return;
+          const P = plan.polylines[i], end = e === 0 ? P[0] : P[P.length - 1];
+          if (!plan.regions[name].some((p) => Math.hypot(p.x - end.x, p.y - end.y) < 1e-6)) cornersAtEnds = false;
+        });
+    ok(cornersAtEnds, `#255 T8 ${tag}: a region corner at a wall end sits on that wall's redrawn end`);
+  }
+  ok(c255T8For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1", "#255 T8: church has two drawings to choose from");
+  const types = c255T8Types([{ key: "church", label: "Worship / Church", worksLike: "church", background: "church-contemporary@1" }]);
+  ok(c255T8Effective("church", { venueType: "church" }, types) === "church-contemporary@1" && c255T8Effective("church", { venueType: "church", templateId: "church-traditional@1" }, types) === "church-traditional@1", "#255 T8: a type set to Contemporary draws Contemporary; a design can still pick Traditional");
+  const hd = (o: Record<string, number | null>) => c255T8House({ width: 43, wing: 0, ...o }, "church-contemporary@1");
+  ok(Math.abs(hd({}).widthFt - 1457.388 / 12) < 1e-9 && hd({ houseWidthFt: 50 }).widthFt === 67 && hd({ houseWidthFt: 50 }).warning === c255T8Warn, "#255 T8: the Contemporary nave defaults to the drawing's 121' and widens to platform + 24' with the warning");
+  const cf = c255T3Fields({ width: 43, wing: 0 }, "church-contemporary@1")!;
+  ok(cf.rows.map((r) => `${r.label}:${r.lim.join("-")}`).join("|") === "Nave width:67-250|Nave depth:20-200" && cf.rows[0].v === 121 && cf.rows[1].v === 55 && cf.warning === null, "#255 T8: the dimension panels show Nave width (platform + 24' to 250') and Nave depth (20–200') for Contemporary, at the drawing's 121' × 55'");
+  ok(c255T8Effective("church", { venueType: "church", templateId: null }, types) === "church-contemporary@1" && c255T8Effective("church", { venueType: "church", templateId: "" }, types) === "church-contemporary@1", "#255 T8: clearing a design's Background (the blank option) returns it to its venue type's");
+  ok(["src/app/(app)/settings/venue-types-card.tsx", "src/components/design/scope-inputs-panel.tsx", "src/app/(app)/design/grid/[id]/grid-intake.tsx"].every((f) => /<option value="">Venue type default \(/.test(readFileSync(f, "utf8"))) && ["src/components/design/scope-inputs-panel.tsx", "src/app/(app)/design/grid/[id]/grid-intake.tsx"].every((f) => /<select value=\{sanitizeTemplateId\(venue\.kind, (value|a)\.templateId\) \?\? ""\}/.test(readFileSync(f, "utf8"))), "#255 T8: every Background select offers a blank 'Venue type default (…)' option, and the design selects show the override, not the effective drawing");
+
+  const base = c255T8Default(0);
+  const a = { ...base, venue: "church", width: 43, depth: 23, templateId: "church-contemporary@1", sys: { ...base.sys, lighting: true, audio: true } };
+  const svg = c255T8Markup(c255T8Build(a, 8, 3, "#3a3f4a", "church-contemporary@1"), "#3a3f4a");
+  ok(["Platform", "Nave", "Backstage", "Green Room", "Electrical Room", "Control Booth", "Cry Room"].every((t) => svg.includes(">" + t + "<")) && svg.split(">Storage<").length - 1 === 4, "#255 T8: the Contemporary plan shows every room Jeff named");
+  const G = c255T8Geom(a, "church-contemporary@1");
+  ok(G.pews.length > 20 && G.booth.x < G.nave.x + G.nave.w / 3, "#255 T8: pews fill the nave; the booth role is the Control Booth (lower left)");
+  const inPoly = (poly: Array<{ x: number; y: number }>, x: number, y: number) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if (poly[i].y > y !== poly[j].y > y && x < ((poly[j].x - poly[i].x) * (y - poly[i].y)) / (poly[j].y - poly[i].y) + poly[i].x) c = !c;
+    return c;
+  };
+  const marks = [{}, { width: 30, depth: 18, houseWidthFt: 80, houseDepthFt: 40 }, { houseWidthFt: 160 }, { houseDepthFt: 90 }, { depth: 35, houseDepthFt: 28 }].every((o) => {
+    const st = { ...a, ...o, sys: { ...a.sys, audio: true, controls: true }, ctrl: { ...a.ctrl, console: true } }, g = c255T8Geom(st, "church-contemporary@1");
+    const svg = c255T8Markup(c255T8Build(st, 8, 3, "#3a3f4a", "church-contemporary@1"), "#3a3f4a");
+    const spk = [...svg.matchAll(/<path d="M ([\d.]+) ([\d.]+) h 6 a 2 2 0 0 1 2 2 v 10 a 2 2 0 0 1 -2 2 h -6 a 2 2 0 0 1 -2 -2 v -10 a 2 2 0 0 1 2 -2 Z" fill="#eef0f3" stroke="#3155a8"/g)];
+    const booth = g.regions["Control Booth"], m = g.mixBox;
+    const con = svg.match(/<text x="([\d.]+)" y="([\d.]+)"[^>]*>CONSOLE</);
+    return (
+      spk.length === 2 && spk.every((s) => [[-2, 0], [8, 0], [-2, 14], [8, 14]].every(([dx, dy]) => inPoly(g.regions.Nave, +s[1] + dx, +s[2] + dy) && !inPoly(g.regions.Platform, +s[1] + dx, +s[2] + dy))) &&
+      [[m.x, m.y], [m.x + m.w, m.y], [m.x, m.y + m.h], [m.x + m.w, m.y + m.h]].every(([x, y]) => inPoly(booth, x, y)) &&
+      !!con && inPoly(booth, +con[1], +con[2]) && svg.includes(">FOH MIX<")
+    );
+  });
+  ok(marks, "#255 T8: Contemporary loudspeakers stand in the Nave beside the platform; the FOH mix box and the CONSOLE mark sit inside the Control Booth — default, small, wide, deep, deep-platform");
+  const fr = c255T8Frame(a, { template: "church-contemporary@1" });
+  ok(Math.abs(fr.booth.x - G.booth.x / G.W) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#255 T8: Auto fill sends the FOH mix gear to the Control Booth");
+  ok([...c255T8Spaces].length === 11 && G.spaces.map((r) => G.regionLabels[r]).filter((t) => t === "Storage").length === 4, "#255 T8: eleven starter Spaces, four of them Storage");
 }

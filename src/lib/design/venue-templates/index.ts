@@ -26,6 +26,7 @@ export type VenueTemplateEntry = {
 export const VENUE_TEMPLATES: readonly VenueTemplateEntry[] = [
   { id: "proscenium@1", label: "Auditorium", family: "proscenium", worksLike: ["proscenium"], defaultForKinds: ["proscenium"], defaultForTypes: [] },
   { id: "church-traditional@1", label: "Church — Traditional", family: "church", worksLike: ["church"], defaultForKinds: ["church"], defaultForTypes: [] },
+  { id: "church-contemporary@1", label: "Church — Contemporary", family: "church", worksLike: ["church"], defaultForKinds: [], defaultForTypes: [] },
 ];
 
 export const BUILT_IN_SCHEMATIC_LABEL = "Built-in schematic";

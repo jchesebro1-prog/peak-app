@@ -36,6 +36,7 @@ converter; the JSON then records `"origin"`.
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg --check
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg --selftest
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py church-traditional docs/venue-templates/source/church-traditional.dwg --check
+    ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py church-contemporary docs/venue-templates/source/church-contemporary.dwg --check
 
 `--check` exits 1 if the committed JSON is not what the source converts to.
 

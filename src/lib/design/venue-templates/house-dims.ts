@@ -1,4 +1,5 @@
 import type { AState } from "@/app/(app)/design/quick/engine";
+import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
 import { CHURCH_TRADITIONAL_KEYS } from "./church-traditional.keys";
 import { templateEntry } from "./index";
 import { PROSCENIUM_KEYS } from "./proscenium.keys";
@@ -14,6 +15,7 @@ type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "houseWi
 export const HOUSE_DEPTH_LIM: [number, number] = [40, 200];
 export const HOUSE_NARROW_WARNING = "The house is narrower than the stage, so its side walls slant inward.";
 export const CHURCH_NAVE_WARNING = "The nave needs 8' beside the platform on each side, so the plan widens it to fit.";
+export const CONTEMPORARY_NAVE_WARNING = "The nave needs 12' beside the platform on each side at its widest, so the plan widens it to fit.";
 
 export function stageInsideWidthFt(s: Pick<AState, "width" | "wing">): number {
   return (s.width || 0) + 2 * (s.wing || 0);
@@ -53,6 +55,16 @@ export const HOUSE_SPECS: Record<string, HouseSpec> = {
     depthDefault: CHURCH_TRADITIONAL_KEYS.defaults.houseDepthFt,
     legacyHalf: false,
     warning: (_s, raw, widthFt) => (raw < widthFt - 1e-9 ? CHURCH_NAVE_WARNING : null),
+  },
+  "church-contemporary@1": {
+    width: { label: "Nave width", note: "Inside, at its widest" },
+    depth: { label: "Nave depth", note: "Platform tip to back wall" },
+    widthLim: (s) => [Math.ceil(s.width || 0) + 24, 250],
+    widthDefault: (s) => Math.max(CHURCH_CONTEMPORARY_KEYS.defaults.houseWidthFt, (s.width || 0) + 24),
+    depthLim: [20, 200],
+    depthDefault: CHURCH_CONTEMPORARY_KEYS.defaults.houseDepthFt,
+    legacyHalf: false,
+    warning: (_s, raw, widthFt) => (raw < widthFt - 1e-9 ? CONTEMPORARY_NAVE_WARNING : null),
   },
 };
 

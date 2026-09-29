@@ -13,7 +13,7 @@ import {
 } from "@/app/(app)/design/quick/engine";
 import { coverAutoName, coverFromVenue, gridIntakeDefaults, intakeScopeInputs, UNTITLED_GRID_DESIGN } from "@/lib/design/grid-intake";
 import { houseFields, type HouseField } from "@/lib/design/venue-templates/house-dims";
-import { effectiveTemplateFor, PLAN_KIND_WORKS_LIKE, templatesFor } from "@/lib/design/venue-templates";
+import { effectiveTemplateFor, PLAN_KIND_WORKS_LIKE, resolveBackground, sanitizeTemplateId, templateEntry, templatesFor } from "@/lib/design/venue-templates";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { VenueType } from "@/lib/venue-types";
@@ -330,7 +330,9 @@ export default function GridIntake({
                               {choices.length > 1 && (
                                 <label style={{ display: "block", fontSize: 12.5, fontWeight: 600 }}>
                                   Background
-                                  <select value={tplId ?? ""} onChange={(e) => update({ templateId: e.target.value || null })} style={{ display: "block", width: "100%", marginTop: 5, fontSize: 12.5, padding: "6px 8px", border: "1px solid #e4e7ec", borderRadius: 7, background: "#fff" }}>
+                                  {/* Blank = no override: the design follows its venue type's Background. */}
+                                  <select value={sanitizeTemplateId(venue.kind, a.templateId) ?? ""} onChange={(e) => update({ templateId: e.target.value || null })} style={{ display: "block", width: "100%", marginTop: 5, fontSize: 12.5, padding: "6px 8px", border: "1px solid #e4e7ec", borderRadius: 7, background: "#fff" }}>
+                                    <option value="">Venue type default ({templateEntry(resolveBackground(venueTypes, pickedVenueType, venue.kind))?.label ?? "none"})</option>
                                     {choices.map((t) => (
                                       <option key={t.id} value={t.id}>{t.label}</option>
                                     ))}

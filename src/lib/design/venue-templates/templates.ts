@@ -1,3 +1,5 @@
+import churchContemporaryRaw from "./church-contemporary.json";
+import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
 import churchTraditionalRaw from "./church-traditional.json";
 import { CHURCH_TRADITIONAL_KEYS } from "./church-traditional.keys";
 import { PROSCENIUM_TEMPLATE, stretchProscenium } from "./proscenium";
@@ -34,6 +36,7 @@ function memo(template: VenueTemplate, keys: TemplateKeys): TemplateData {
 const DATA: Record<string, TemplateData> = {
   "proscenium@1": { template: PROSCENIUM_TEMPLATE, keys: PROSCENIUM_KEYS, stretch: stretchProscenium },
   "church-traditional@1": memo(churchTraditionalRaw as unknown as VenueTemplate, CHURCH_TRADITIONAL_KEYS),
+  "church-contemporary@1": memo(churchContemporaryRaw as unknown as VenueTemplate, CHURCH_CONTEMPORARY_KEYS),
 };
 
 export const TEMPLATE_IDS = Object.keys(DATA);
