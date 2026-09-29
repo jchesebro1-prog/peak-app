@@ -7861,16 +7861,27 @@ out against the stage and every lot marker but audio's turn with it, and every l
 inset past the corners) — never into the bowl. Six starter Spaces; the sheet calibrates from the floor's straight
 sides and stamps the stage's position with the rooms. The toolbar reads "Drag the stage or a room along the walls".
 
-## D468. Quick Design plan text is a fixed on-screen size (#261, 2026-09-29)
+## D468. Quick Design plan text is a fixed on-screen size; dimensions draw smaller (#261, 2026-09-29)
 
 Jeff: "the labels are really huge on the drawings and they need to decrease the sizes." `<PlanSvg>` draws the
-640-wide viewBox at `width: 100%` and every text's size is in viewBox units, so text grew with the panel: at a
-657 px plan room labels read 8.2 px and dimensions 14.4 px, and on a wide monitor or with side panels collapsed
-12–20 px and 22–35 px. `<PlanSvg>` now measures its rendered width (a ResizeObserver in a callback ref, no hooks, so
-`plan-svg.tsx` stays importable from `grid-projects.ts` / `grid-auto-layout.ts` on the server) and sizes each text
-`planTextSize(base, k) = base × 0.85 / max(k, 1)` viewBox units, k = rendered px per viewBox unit. On-screen text is
-therefore at most 0.85 × its builder size however wide the plan draws (room labels 6.8 px, dimensions 9.35–11.9 px,
-CONSOLE 5.1 px) and still shrinks with the plan on a narrow panel. Positions, anchors and rotations are untouched, and
-since the viewBox size never exceeds 0.85 × base the builders' label-fit checks (`LABEL_CHAR_PX`) stay conservative.
-Legend chips and other HTML outside the SVG are unchanged, and so is `renderPlanSvgMarkup` (Grid base sheets and
-print keep the builders' sizes; a Grid sheet is scaled by its own zoom).
+640-wide viewBox at `width: 100%` and every text's size is in viewBox units, so text grew with the panel (at a 657 px
+plan room labels read 8.2 px and dimensions 14.4 px). Quick Design caps the plan near 720 px, so the text was mostly
+too big *relative to the drawing* — the 14-unit bold dimensions worst, against 8-unit room names.
+
+`planTextSize(base, k, role)` = `base × f / max(k, 1)` viewBox units, k = rendered px per viewBox unit:
+- **Dimension labels** — `role: "dim"`, tagged at the builder on every `dimH` / `dimV` text and the proscenium's
+  width / wing / depth / house-width chains (every text of base 11–14) — f = 0.65: ~9 px on screen (14 → 9.1,
+  11 → 7.15). `dimH` / `dimV` size the line gap and centre the label for that reduced size.
+- **Room / area labels and equipment marks** (6–8) — f = 0.85: ~6.8 px (CONSOLE 5.1 px). Not smaller: 6.8 px is the
+  readability floor for the mono font.
+
+On-screen text never exceeds those sizes however wide the plan draws, and still shrinks with the plan on a narrow
+panel. `<PlanSvg>` measures its rendered width with a ResizeObserver in a callback ref (no hooks, so `plan-svg.tsx`
+stays importable from `grid-projects.ts` / `grid-auto-layout.ts` on the server) and stores `1 / max(k, 1)` as
+`--plan-text`; before the first measure it draws at k = 1. Positions, anchors and rotations are otherwise unchanged,
+and the builders' label-fit checks (`LABEL_CHAR_PX`) stay conservative since no text grows. Legend chips and other
+HTML outside the SVG are unchanged.
+
+`renderPlanSvgMarkup` writes the same reduced sizes (k = 1), so saved Designs, new Grid base sheets and print match
+Quick Design — smaller text suits a zoomable Grid sheet too. Grid base sheets already stored keep the SVG (and text
+sizes) they were generated with; only sheets generated from now on get the new sizes.

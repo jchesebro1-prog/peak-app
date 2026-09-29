@@ -35751,20 +35751,37 @@ import { quickSaveFields as c255HardSaveFields } from "@/lib/stores/design-prici
   ok(inLim("width", cfg.width) && inLim("depth", cfg.depth) && inLim("grid", cfg.grid) && inLim("wing", cfg.wing) && inLim("ph", cfg.ph), "#255 hardening: quickSaveFields clamps config.width/depth/grid/wing/ph to LIM too");
 }
 
-/* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws (D468) --- */
-import { PLAN_TEXT_SCALE as c261Scale, planTextSize as c261Size } from "@/app/(app)/design/quick/plan-svg";
+/* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
+import { buildPlan as c261Build, PLAN_DIM_TEXT_SCALE as c261DimScale, PLAN_TEXT_SCALE as c261Scale, planTextSize as c261Size, renderPlanSvgMarkup as c261Markup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c261Default, VENUES as c261Venues } from "@/app/(app)/design/quick/engine";
 {
   const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
-  ok(c261Scale === 0.85, "#261: PLAN_TEXT_SCALE is 0.85 — plan text reads at 85% of its builder size");
-  ok(near(c261Size(8, 1), 6.8) && near(c261Size(14, 1), 11.9), "#261: at display scale k = 1, a plan text is 0.85 × its base size (8 → 6.8, 14 → 11.9)");
-  ok(near(c261Size(8, 2) * 2, 6.8) && near(c261Size(14, 3) * 3, 11.9), "#261: on a wide panel (k = 2, 3) the on-screen size (viewBox size × k) stays 0.85 × base — text no longer grows with the plan");
+  ok(c261Scale === 0.85 && c261DimScale === 0.65, "#261: PLAN_TEXT_SCALE is 0.85 (labels, marks) and PLAN_DIM_TEXT_SCALE 0.65 (dimensions)");
+  ok(near(c261Size(8, 1), 6.8) && near(c261Size(6, 1), 5.1), "#261: at display scale k = 1, a room label / mark is 0.85 × its base size (8 → 6.8, 6 → 5.1)");
+  ok(near(c261Size(14, 1, "dim"), 9.1) && near(c261Size(11, 1, "dim"), 7.15), "#261: at k = 1 a dimension label is 0.65 × its base size (14 → 9.1, 11 → 7.15)");
+  ok(near(c261Size(8, 2) * 2, 6.8) && near(c261Size(14, 3, "dim") * 3, 9.1), "#261: on a wide panel (k = 2, 3) the on-screen size (viewBox size × k) holds — text no longer grows with the plan");
   ok(near(c261Size(8, 0.5), 6.8) && near(c261Size(8, 0.5) * 0.5, 3.4), "#261: on a narrow panel (k = 0.5) the viewBox size holds, so the on-screen text shrinks with the plan as before");
   ok([0, -1, Number.NaN, Number.POSITIVE_INFINITY].every((k) => near(c261Size(8, k), 6.8)), "#261: a zero/negative/non-finite display scale falls back to k = 1");
+  // Every venue kind: each text of base size ≥ 11 is a dimension (role "dim"); labels/marks (6–8) are not.
+  const base = c261Default(0);
+  const bad: string[] = [];
+  let dims = 0;
+  for (const v of c261Venues) {
+    const plan = c261Build({ ...base, venue: v.key }, 8, 3, "#3a3f4a");
+    for (const t of plan.texts as Array<{ t: string; size: number; role?: string }>) {
+      if (t.role === "dim") dims++;
+      if ((t.size >= 11) !== (t.role === "dim")) bad.push(`${v.key}: "${t.t}" size ${t.size} role ${t.role ?? "-"}`);
+    }
+  }
+  ok(dims > 0 && bad.length === 0, `#261: on every venue kind, exactly the 11–14 dimension labels carry role "dim"${bad.length ? " — " + bad.slice(0, 4).join(", ") : ""}`);
+  // Static markup (saved Designs, Grid base sheets, print) uses the same reduced sizes.
+  const plan = c261Build({ ...base, venue: c261Venues[0].key }, 8, 3, "#3a3f4a");
+  const sizes = [...c261Markup(plan, "#3a3f4a").matchAll(/font-size="([0-9.]+)"/g)].map((m) => Number(m[1]));
+  const want = (plan.texts as Array<{ size: number; role?: "dim" }>).map((t) => c261Size(t.size, 1, t.role));
+  ok(sizes.length === want.length && sizes.every((x, i) => Math.abs(x - want[i]) < 1e-3) && Math.max(...sizes) <= 9.1 + 1e-9, "#261: renderPlanSvgMarkup writes planTextSize(size, 1, role) (to 3 places) — no static plan text above 9.1");
   const src = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/plan-svg.tsx"), "utf8");
   const comp = src.slice(src.indexOf("export function PlanSvg("), src.indexOf("export function renderPlanSvgMarkup("));
-  ok(/ref=\{observePlanScale\}/.test(comp) && /new ResizeObserver\(/.test(src) && /ro\.observe\(svg\)/.test(src) && /planTextSize\(1, renderedW \/ vbW\)/.test(src), "#261: <PlanSvg> observes its rendered width (ResizeObserver) and stores planTextSize(1, renderedWidth / viewBoxWidth) on the svg");
-  ok(/fontSize=\{planTextSize\(t\.size, 1\)\}/.test(comp) && /var\(\$\{PLAN_TEXT_VAR\}, \$\{PLAN_TEXT_SCALE\}\)/.test(comp), "#261: every <PlanSvg> text sizes through planTextSize (k = 1 before the first measure)");
+  ok(/ref=\{observePlanScale\}/.test(comp) && /new ResizeObserver\(/.test(src) && /ro\.observe\(svg\)/.test(src) && /planTextSize\(1, renderedW \/ vbW\)/.test(src), "#261: <PlanSvg> observes its rendered width (ResizeObserver) and stores its display factor (from renderedWidth / viewBoxWidth) on the svg");
+  ok(/fontSize=\{planTextSize\(t\.size, 1, t\.role\)\}/.test(comp) && /calc\(\$\{planTextSize\(t\.size, 1, t\.role\)\}px \* var\(\$\{PLAN_TEXT_VAR\}, 1\)\)/.test(comp), "#261: every <PlanSvg> text sizes through planTextSize with its role (k = 1 before the first measure)");
   ok(!/\buse(State|Effect|Ref|LayoutEffect)\b/.test(src) && !/^["']use client["']/m.test(src), "#261: plan-svg.tsx stays hook-free (no 'use client') — grid-projects.ts and grid-auto-layout.ts import it on the server");
-  const markup = src.slice(src.indexOf("export function renderPlanSvgMarkup("));
-  ok(/font-size="\$\{t\.size\}"/.test(markup), "#261: renderPlanSvgMarkup (Grid base sheets / print) keeps the builder's own text sizes");
 }

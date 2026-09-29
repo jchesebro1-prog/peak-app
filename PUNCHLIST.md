@@ -9541,9 +9541,12 @@ platform). Keep the mark inside the booth (or beside the box) at every legal siz
 
 **Reported:** Jeff (2026-09-29): "the labels are really huge on the drawings and they need to decrease the sizes"
 (Quick Design, all plan text). Cause: `<PlanSvg>` scales its 640-wide viewBox to the panel, and every text's size is
-in viewBox units, so labels and dimensions grew with the panel (dimensions up to 22–35 px on a wide screen).
+in viewBox units, so labels and dimensions grew with the panel — and the 14-unit bold dimensions dominated the
+drawing even at normal widths.
 
 **Done.** `<PlanSvg>` (`src/app/(app)/design/quick/plan-svg.tsx`) watches its rendered width and sizes every text
-through `planTextSize(base, k)` — 0.85 × the builder size on screen at any width (room labels 6.8 px, dimensions
-9.35–11.9 px), shrinking with the plan on a narrow panel. Text positions, anchors and rotated labels are unchanged; legend
-chips, Grid base sheets and print (`renderPlanSvgMarkup`) keep their sizes. Harness `#261`. See D468.
+through `planTextSize(base, k, role)`: dimension labels (tagged `role: "dim"` at the builder) ~9 px on screen, room /
+area labels and equipment marks ~6.8 px, at any width, shrinking with the plan on a narrow panel. Text positions,
+anchors and rotated labels are unchanged (dimension lines size their gap to the smaller label). Saved Designs, new Grid
+base sheets and print (`renderPlanSvgMarkup`) use the same sizes; Grid sheets already stored keep their old text.
+Legend chips are unchanged. Harness `#261`. See D468.
