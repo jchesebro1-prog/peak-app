@@ -1,10 +1,13 @@
+import { systemItemsRev, systemSellAdjustment } from "./pricing";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —
  *  every orderable part in the estimate's material systems, assemblies
  *  exploded into their components, vendor quotes into their lines, identical
  *  parts consolidated per room + system. Σ qty × Unit Cost equals the
- *  estimate's material cost; Σ qty × Unit Sell equals its material sell.
+ *  estimate's material cost; per system, Σ qty × Unit Sell equals the
+ *  system's price (typed, or rounded up to $25) less its freight and any
+ *  labor lines (#276) — freight is not a part and is not listed.
  *  Pure: no React, no server imports. */
 
 /** Catalog facts for one SKU, keyed by the trimmed SKU (#262). */
@@ -73,6 +76,11 @@ function expand(
     if (section.kind === "labor") continue;
     const room = section.room?.trim() || defaultRoom.trim();
     const system = section.name;
+    // #276: every part's sell scales by the system's price ÷ its lines' sell.
+    const rev = systemItemsRev(section);
+    const k0 = rev > 0 ? Math.max(0, rev + systemSellAdjustment(section)) / rev : 1;
+    const k = Number.isFinite(k0) ? k0 : 1;
+    const start = out.length;
     for (const item of section.items) {
       if (item.labor || item.laborOverhead || item.laborTravel || item.option) continue;
       if (!Number.isFinite(item.qty) || item.qty <= 0) continue;
@@ -189,6 +197,7 @@ function expand(
         notes,
       });
     }
+    if (k !== 1) for (let i = start; i < out.length; i++) out[i].unitSell *= k;
   }
   return out;
 }

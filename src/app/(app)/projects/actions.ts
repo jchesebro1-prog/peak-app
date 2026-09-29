@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { activeUsers } from "@/lib/users";
 import {
   getProject,
@@ -434,9 +435,11 @@ export async function applyProjectTemplateAction(formData: FormData): Promise<{ 
  * Called directly from the project view's Delete control, not a form
  * action, so it never calls redirect() itself — the client navigates to
  * the book on success.
+ * Gated on `create`, like deleting a design or consulting project (#277).
  */
 export async function removeProjectAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requireUser();
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "You can't delete projects." };
   if (!id) return { ok: false, error: "Missing project id." };
   const p = await getProject(id);
   if (!p) return { ok: false, error: "That project could not be found." };

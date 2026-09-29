@@ -9729,3 +9729,137 @@ name, and Quick Design re-appends its "— Tier design (W'×D')" suffix on its n
 card ("Delete this design? Its plan sheets go too." for Grid designs) and runs the existing `deleteDesignAction`
 (cascades to the Grid project); deleting from a card no longer closes an unrelated open detail panel. Errors show under
 the card. New `renameDesignAction` in `src/app/(app)/design/designs/actions.ts`; UI in `design-client.tsx`.
+
+---
+
+## 269. Estimator — click an inserted labor line to reopen and edit it — OPEN (building)
+
+**Reported:** Jeff (2026-09-29): "Need the ability to edit the labor when you click the line item that inserted when
+finished." Today `addLabor` (`estimator-client.tsx`) pushes `buildLaborItems` output and `closeInput()` discards the
+configurator draft, so nothing about the crew/days/trip survives on the lines — the only fix is delete and re-add.
+
+**Plan:** every line from one "Add labor" shares a `laborGroup` id and the `LaborDraft` snapshot is stored with the
+group; clicking a group line reopens the Labor configurator pre-filled, **Update labor** replaces the group's lines in
+place at current rates (hand edits to those lines are replaced — said in the modal). Labor lines added before this
+change carry no draft and show no edit control. Being built alongside #270.
+
+---
+
+## 270. Estimator Labor — hotel, per diem, mileage (and lift) as their own lines — OPEN (building)
+
+**Reported:** Jeff (2026-09-29): "We also need to see hotels pre-diem and mileage costs on labor and insert that."
+Confirmed: **inserted as their own lines.** `computeMob` (`pricing.ts`) already computes `mileCost`, `hotelCost`,
+`foodCost` (per diem) and `liftCost`, but `buildLaborItems` folds them into one line per mobilization and the Labor
+modal shows only "2 veh · 3 nt lodging · per diem" with no dollars.
+
+**Plan:** each mobilization line becomes crew labor only; Mileage / Hotel / Per diem / Lift rental follow it as their
+own internal lines (tagged, with the basis shown, e.g. "2 vehicles × 340 mi RT × $0.70"). Cost unchanged to the cent.
+The customer document keeps folding them into their mobilization line, as it already folds shop/misc/bonus. The Labor
+modal shows the per-mobilization dollar breakdown.
+
+---
+
+## 271. Catalog — Import price book opens as a slide-over drawer — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Import Price Book needs to be sidebar." Confirmed: a **slide-over drawer**. Before,
+`?import=1` turned the catalog body into a third 360px grid column (`catalog/page.tsx`), squeezing the parts list — and
+that rail was hidden below 1040px, so import was unreachable on narrow screens.
+
+**Done.** `?import=1` now opens `CatalogImportPanel` in a right-hand drawer over the catalog (480px, full height, own
+scroll, full width under 640px) — new reusable `src/components/ui/Drawer.tsx` (`role="dialog"`, `aria-modal`, focus
+into the panel and back on close, Tab wraps; backdrop / ✕ / Esc navigate to the same URL without `import`) with
+`.pk-drawer*` styles in `globals.css` (slide-in, off under reduced motion). The import still redirects to
+`?imported=` / `?importError=`, so the drawer closes on finish and the banners show as before. Works at every width.
+Gates: tsc 0; test:specs ALL PASSED, 0 FAIL; test:smoke 168/0 (= baseline); eslint 0 errors, no new warnings;
+next build OK. Browser-verified on a scratch datadir (desktop overlay, Esc/backdrop/✕ close, 375px full width).
+
+---
+
+## 272. Estimator Labor — Local trips never fill round-trip mileage, so daily mileage prices at $0 — OPEN (after #270)
+
+**Reported:** 2026-09-23 practice run (re-raised 2026-09-29): "Labor — Does travel not automatically calculate? Had to
+add round trip mileage when adding for Xavier Lighting Controls."
+
+**Cause (code-verified):** round-trip miles are only auto-filled when the trip is **Travel** (venue > 1 h away):
+`defaultLaborMobs` (`labor-defaults.ts:51`) seeds `milesRT` only when `far`, and `applyAutoTrips` /
+`applyTravelTrip` (`estimator-client.tsx`) fill it only for `tripType === "travel"`. A **Local** mobilization starts
+with blank miles and `computeMob` charges local mileage per day (`milesRT × vehicles × days`), so a blank box silently
+prices mileage at $0; the only way in is the small apply-auto-miles hint. It also needs a located venue.
+
+**Plan:** seed and re-apply the route's round-trip miles for Local mobilizations too (same "untouched only" rule —
+typed miles win), and flag a blank mileage when the venue isn't located. Build after #270 lands (same files).
+
+---
+
+## 274. Estimator — a track configurator for curtain / traveler track rigging — OPEN (design with Jeff first)
+
+**Reported:** 2026-09-23 practice run: "Add a way to quote track rigging on Estimate." **Jeff (2026-09-29): "We need a
+track configurator."** (Not ready-made track assemblies.)
+
+**Today:** the Estimator's add buttons are catalog / curtain / assembly / labor / custom / vendor — no track. Track
+exists only as a weight list for rigging loads (`TRACKS` in `src/lib/design/steel.ts`: light / standard / heavy, lb/ft)
+used by the Lineset builder; nothing prices it. Grid's Equipment map has a `rigging:tbarTrack` row (legacy hint
+$100/tier). The curtain configurator (`estimator/curtain-modal.tsx`, `src/lib/curtain-pricing.ts`) is the pattern to
+follow: a "+ Configure track" modal that builds priced lines from catalog parts.
+
+**Open design questions (for Jeff):** manufacturers/series to support; track types (walk-along vs cord-operated,
+bi-parting vs one-way, straight vs curved); inputs (run length, overlap, stick length, carrier spacing, hanger/clamp
+spacing, live/dead ends, operating line, floor pulley); whether parts come from the catalog (by MFR #) or a rate table
+in Estimating Rules; install labor; and whether a curtain line can carry its track in one step.
+
+---
+
+## 275. Flame-test, inspection and repair quotes — a lift rental line — OPEN
+
+**Reported:** 2026-09-23 practice run on Q-2047 (`/inspections/letter`): "Do we want the lift rental adder information
+listed on the quote? It currently looks like it would be a tight fit to add." **Jeff (2026-09-29): "We need lift rental
+on the quotes."**
+
+**Today:** the service engines have no lift adder at all — only the letter boilerplate says "lift rentals … may be
+stated separately" (`src/lib/templates.ts:132`, `:312`). Only Estimator Labor prices a lift (`EQP-LIFT`, $750 seed,
+`ceil(days/5)` weeks).
+
+**Plan (to confirm on build):** an optional Lift rental in the flame-test, inspection and repair builders (count ×
+rate, default rate from the `EQP-LIFT` catalog row / an Estimating Rule), priced through the same engine, tier margin
+and $25 rounding; printed as its own "Lift rental" line on the letter, quote document and PDF, and carried by renewal
+re-pricing. Portal self-quotes (#248) stay lift-free unless Jeff says otherwise.
+
+## 273. Consulting — delete a consulting project right from its list card — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29, screenshot of /design/engagements): "We also need to be able to delete on this screen?"
+Delete existed only in a consulting project's detail header.
+
+**Done.** Each card on the Consulting list gains a Delete button (the shared `ConfirmButton`: Delete → Confirm delete /
+Cancel, auto-disarms after 5 s or on Esc) running the same `removeEngagementAction` as the detail header — a soft delete
+that also removes the project's open tasks; done tasks and notes stay. A quote-originated project stays deleted (the
+quote-sync's `coveredQuoteIds()` skips it — checked by reload). The card's link now wraps only the card content, so the
+button isn't nested inside an `<a>`. Follow-up (Jeff, same day): delete is limited to users with `create` (Admin,
+Manager, Estimator) like deleting a design — `removeEngagementAction` refuses otherwise, and both Delete buttons (card +
+detail header) are hidden from a Reviewer. `view.tsx`, `actions.ts`, and both engagement pages (`canDelete` prop).
+
+---
+
+## 276. Estimator — the PM parts list's Unit Sell follows the system's rounded / typed price — DONE 2026-09-29 (D479)
+
+**Reported:** Jeff (2026-09-29): "Make the parts list CSV use the rounded system sell." (Follow-up to #262 / #267.)
+
+**Done.** Each system's parts are priced at the system's actual price: every row's Unit Sell (plain lines, assembly
+components, vendor-quote lines) is scaled by that system's price ÷ its lines' sell, so per system Σ qty × Unit Sell
+equals the system price (typed, or rounded up to $25) less its freight — freight is not a part and isn't listed — and
+less any labor lines, which the parts list already leaves out. Unit Cost is unchanged; cost-adjustment rows stay at $0
+sell; a system with no rounding or typed price (sent/won legacy) is unchanged; a typed price below the system's
+freight lists its parts at $0, never negative. `src/app/(app)/estimator/parts-csv.ts`. Harness `#276`. See D479.
+
+## 277. Projects — delete a project right from its list card — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Add delete to the Projects screen cards too." Delete existed only in a project's
+detail header.
+
+**Done.** Each card in the Projects list (left column; the board view stays read-only) gains a compact Delete (the shared
+`ConfirmButton`: Delete → Confirm delete / Cancel) through the detail header's own `DeleteProjectButton`, now with an
+optional `backHref` and a `compact` size. Deleting the project that's open returns to the list; deleting any other card
+just refreshes. Same soft delete as before — `removeProject` records the source quote as dismissed, so the won-quote
+sync never re-creates it (checked by reload). Like designs and consulting (#268, #273), deleting a project is limited to
+users with `create` (Admin, Manager, Estimator): `removeProjectAction` refuses otherwise and both Delete buttons are
+hidden from a Reviewer (`canDelete` from both project pages). The card's link now wraps only the card content, so the
+button isn't nested inside an `<a>`.
