@@ -11,11 +11,14 @@
  */
 
 import { csiKey } from "@/lib/specs/articles";
+import { normPartNumber } from "@/lib/specs/record-keys";
 import {
   KIND_LABELS,
   kindFromLabel,
+  matchKeyConflict,
   normalizeSpecRecord,
   sameSpecContent,
+  specRecordCapProblems,
   statusFromLabel,
   validateSpecRecord,
   type RecordProblem,
@@ -56,10 +59,6 @@ export const V1_SECTION_TITLES: Record<string, string> = {
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
-}
-
-function normalizePartNumber(s: string): string {
-  return str(s).trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 /** `{ records: [...] }` or a bare array — the JSON already carries exact
@@ -209,8 +208,8 @@ export type ImportPlanCtx = {
 
 /** Plans an upsert-keyed-on-`specId` import (spec §2). Records absent from
  *  the file are left entirely alone — they're only consulted for the
- *  duplicate-part-number check against the merged (existing overlaid by
- *  file) set of `ready` records. */
+ *  duplicate-part-number and duplicate-match-key checks against the merged
+ *  (existing overlaid by file) set of `ready` records. */
 export function planSpecRecordImport(parsed: ParsedRecords, ctx: ImportPlanCtx): ImportPlan {
   const problems: RecordProblem[] = [...parsed.problems];
   const fileRecords = parsed.records;
@@ -260,6 +259,8 @@ export function planSpecRecordImport(parsed: ParsedRecords, ctx: ImportPlanCtx):
 
   for (const r of fileRecords) {
     problems.push(...validateSpecRecord(r, { sections: sectionsForValidation, articles: ctx.articles, specIds }));
+    // The editor's size caps — an import must not store what the editor refuses.
+    problems.push(...specRecordCapProblems(r));
   }
 
   // Duplicate part number across two different `ready` records of the
@@ -270,7 +271,7 @@ export function planSpecRecordImport(parsed: ParsedRecords, ctx: ImportPlanCtx):
   for (const r of merged.values()) {
     if (r.status !== "ready") continue;
     for (const num of r.mfrNumbers) {
-      const norm = normalizePartNumber(num);
+      const norm = normPartNumber(num);
       if (!norm) continue;
       const owner = ownerByNumber.get(norm);
       if (owner && owner !== r.specId) {
@@ -284,6 +285,25 @@ export function planSpecRecordImport(parsed: ParsedRecords, ctx: ImportPlanCtx):
         ownerByNumber.set(norm, r.specId);
       }
     }
+  }
+
+  // Duplicate match key across two different `ready` system records of the
+  // merged set — the same rule the editor, Write new, approve and restore
+  // enforce (`matchKeyConflict`), reported once per pair.
+  const readySystems = [...merged.values()].filter((r) => r.status === "ready" && r.kind === "system" && r.matchKey);
+  const reportedPairs = new Set<string>();
+  for (const r of readySystems) {
+    const other = matchKeyConflict(r, readySystems);
+    if (!other) continue;
+    const pair = [r.specId, other].sort().join("|");
+    if (reportedPairs.has(pair)) continue;
+    reportedPairs.add(pair);
+    problems.push({
+      specId: r.specId,
+      field: "matchKey",
+      message: `Match key "${r.matchKey}" is used by both ${other} and ${r.specId}.`,
+      blocking: true,
+    });
   }
 
   const items: ImportPlanItem[] = [];

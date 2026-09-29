@@ -7549,7 +7549,12 @@ content-equal saves are a no-op, any real change copies the prior version into r
 and **Restore** writes the old text as a new revision (history is never rewritten). `sourceArticleId` is the
 placement — a record prints as a lettered entry under that Part 2 article; the `article` text column is kept for
 the workbook round-trip only. Both collections are in `CONFIG_COLLECTIONS`, so the go-live "Clear demo data"
-wipe keeps the library.
+wipe keeps the library — but the `spec_sections`/`spec_articles` records point at are wiped and not reseeded, so
+after a reset kept records stop resolving until the sections are re-created (re-importing the workbook re-creates
+the v1 sections) and records re-placed. A brand-new id (Write new, the library editor's create) is saved
+create-only — `saveSpecRecord(…, { mustCreate: true })` refuses with `"exists"` inside the store, right before the
+write, and the caller re-allocates the section's next id once — so a racing save is never overwritten. Restoring a
+`ready` revision validates it as `ready` (like approve) before the conflict guards.
 
 ## D447. Saved specs stay live on library edits; each Word download stamps what it used (Jeff Q1, #253, 2026-09-28)
 
@@ -7564,7 +7569,9 @@ download, and it never bumps the spec's `updatedAt`/`updatedBy`.
 
 Jeff kept D330's single multi-level numbering definition. The hoist specs (PS-116123-008/009) nest one level
 deeper than the outline engine allowed, so `outline.ts` gains a sixth body level printed "(1)" — Word level 7,
-`(%8)` — in both the live preview and the `.docx`. Snapshot tests pin PS-260961-028, PS-260961-007 and
+`(%8)` — in both the live preview and the `.docx`. `MAX_OUTLINE_DEPTH` 6 is the engine's one clamp, so it applies
+to legacy catalog `specBody` text as well: legacy text nested six deep now prints a sixth level instead of
+clamping to five (accepted). Snapshot tests pin PS-260961-028, PS-260961-007 and
 PS-116123-008 (assembled lines and `document.xml`, golden + second-run identical).
 
 ## D449. Specs written from the builder save as `ready`; "Write spec" now writes a Spec Library record; project-only edits are overrides (Jeff Q3, #253, 2026-09-28)
@@ -7596,7 +7603,9 @@ number and nothing more. The BOM rows the builder reads (`bomFromQuote`, `src/li
 part numbers, and allowance or custom rows with no SKU are kept (they can still match by `specKey`). Row identity
 is `specRowKey` (`SKU:` / `MPN:` / `KEY:` / `DESC:` / `SPEC:`, `src/lib/specs/record-keys.ts`), computed on the
 server. Left-over reasons: a real SKU with no catalog part and no match is *not in catalog* (with candidates); a
-placeholder or empty SKU is *no match*; a catalog part with no text keeps its #205 reason plus candidates.
+placeholder or empty SKU is *no match*; a catalog part with no text keeps its #205 reason plus candidates. The D94
+generator (`/design/engagements/spec`, unlinked since D329) reads the same shared `bomFromQuote`, so it now also
+receives the expanded vendor-quote rows and SKU-less allowance rows (accepted — old saved D94 specs are unchanged).
 
 ## D452. Match order: pinned → exact part number → wildcard → system match key → legacy catalog text → no match; one part number, one ready record (#253, 2026-09-28)
 
@@ -7604,10 +7613,12 @@ placeholder or empty SKU is *no match*; a catalog part with no text keeps its #2
 SKU's text after `Mfr:`, then the catalog part's MPN/model — uppercase, whitespace-collapsed); a wildcard, where
 `#` matches exactly one digit `1`–`5`; a `system` record's match key (case- and dash-insensitive); the legacy
 catalog `specBody`; else *no match* with up to four candidates by word overlap (floor 0.1), never auto-assigned.
-Two or more `ready` records at one step is *ambiguous*; a draft-only hit reads "Has a draft spec — approve to
-use". Companions (`includeWith`) print once per section. One part number maps to one `ready` record, enforced on
+Two or more `ready` records at one step is *ambiguous*. With no ready hit, legacy catalog text wins over a
+draft-only hit — a draft never shadows text that prints today; the row stays *legacy* and notes "Has a draft spec
+(<id>)". A draft-only hit with no legacy text reads "Has a draft spec — approve to use". Companions (`includeWith`) print once per section. One part number maps to one `ready` record, enforced on
 link, write-new, library save, approve and restore (pure `partNumberConflict` / `matchKeyConflict`), and the
-import planner refuses duplicates too.
+import planner refuses duplicates too — both a part number and a system match key shared by two `ready` records of
+the merged set block, naming both ids.
 
 ## D453. `[brackets]` in record text are per-job values keyed by spec id; `[FILL IN: …]` inside record text is deferred (#253, 2026-09-28)
 
@@ -7631,8 +7642,14 @@ warns without blocking (D331).
 .xlsx** share one planner (`src/lib/specs/record-import.ts`); the server re-plans the uploaded file itself, and
 the server-action body limit makes about 1 MB the practical ceiling. A second import of the same file changes
 nothing (46 unchanged); records absent from a file are left alone. **Export .xlsx** writes the exact "Spec
-Library" sheet layout, so the workbook round-trips. The production import is Jeff's step: run `npm run
-db:export` first, then Library → Import .xlsx on production.
+Library" sheet layout, so the workbook round-trips. `matchKey` is kept only on `system` records (normalized to
+null on every other kind — Jeff's workbook fills "Spec Type (match key)" on 28 product rows, which would otherwise
+read as 28 updates), and `includeWith` reads the spec-id tokens (`PS-<section>-<NNN+>`) out of each entry, so a
+prose cell like "PS-260961-013 (and any future Eos-family console spec)" yields `PS-260961-013`; an entry with no
+token is kept as written so validation still names it. Jeff's xlsx planned against the JSON is 46 unchanged, 0
+blocking. The planner applies the editor's caps (title ≤ 300, spec text ≤ 20,000, ≤ 100 part numbers — shared
+`specRecordCapProblems`) as blocking problems. The production import is Jeff's step: run `npm run db:export`
+first, then Library → Import .xlsx on production.
 
 ## D456. `specKey` is set at the source — a Spec select on estimator custom/curtain lines, the custom-part form and the Grid curtain dialog (#253, 2026-09-28)
 

@@ -478,6 +478,9 @@ function ProductsCard({
           <span style={{ fontSize: 13, color: "#16181b" }}>{heading || "—"}</span>
           {fromBom && r.qty != null && <span style={{ ...MUTED, fontFamily: "var(--font-mono)" }}>Qty {r.qty}</span>}
           {state === "legacy" && <Chip tone="plain">Legacy text</Chip>}
+          {state === "legacy" && r.match?.status === "legacy" && r.match.draftSpecId && (
+            <span style={MUTED}>Has a draft spec ({r.match.draftSpecId}) — approve it in the Spec Library to replace the legacy text</span>
+          )}
         </div>
         {subtitle && <div style={MUTED}>{subtitle}</div>}
         {record ? (

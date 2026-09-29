@@ -10,6 +10,7 @@
 
 import { csiKey } from "@/lib/specs/articles";
 import { normMatchKey, normPartNumber } from "@/lib/specs/record-keys";
+import { SPEC_OVERRIDE_TEXT_MAX, SPEC_OVERRIDE_TITLE_MAX } from "@/lib/specs/spec-document";
 
 export type SpecKind = "product_catalog" | "product_vendor" | "system" | "companion";
 export type SpecStatus = "draft" | "ready" | "archived";
@@ -67,6 +68,24 @@ function splitList(v: unknown): string[] {
   return out;
 }
 
+/** A spec id token inside prose — the shape `nextSpecIdFor` emits
+ *  (`SPEC_ID_PATTERN` below, unanchored). */
+const SPEC_ID_TOKEN = /PS-[0-9A-Za-z]+-\d{3,}/g;
+
+/** `includeWith` from a list or a workbook cell (D455): each entry yields the
+ *  spec-id tokens inside it, so "PS-260961-013 (and any future Eos-family
+ *  console spec)" reads as `PS-260961-013`. An entry with no token is kept
+ *  trimmed as-is, so validation still names a genuinely bad id. */
+function includeWithList(v: unknown): string[] {
+  const out: string[] = [];
+  for (const entry of splitList(v)) {
+    const tokens = entry.match(SPEC_ID_TOKEN);
+    if (tokens) out.push(...tokens);
+    else out.push(entry);
+  }
+  return splitList(out);
+}
+
 /** Normalizes a raw (importer row / form / doc) shape into a `SpecRecord`, or
  *  `null` when it can't be — an empty `specId` or an unrecognized `kind` are
  *  refusals, never silently defaulted. Everything else has a safe default. */
@@ -98,8 +117,11 @@ export function normalizeSpecRecord(raw: unknown): SpecRecord | null {
     basisOfDesign: trimmedOrNull(o.basisOfDesign),
     manufacturer: trimmedOrNull(o.manufacturer),
     mfrNumbers: splitList(o.mfrNumbers),
-    matchKey: trimmedOrNull(o.matchKey),
-    includeWith: splitList(o.includeWith),
+    // Only a system record matches by key (design §1.1, D455) — Jeff's
+    // workbook fills "Spec Type (match key)" on product rows too, which must
+    // not read as a real key (or as an edit on every re-import).
+    matchKey: kind === "system" ? trimmedOrNull(o.matchKey) : null,
+    includeWith: includeWithList(o.includeWith),
     specText: str(o.specText),
     notes: trimmedOrNull(o.notes),
     sourceArticleId: trimmedOrNull(o.sourceArticleId),
@@ -200,6 +222,33 @@ export function validateSpecRecord(r: SpecRecord, ctx: RecordValidationCtx): Rec
     }
   }
 
+  return problems;
+}
+
+/** At most this many part numbers on one record (design §5 gates). */
+export const SPEC_RECORD_MFR_NUMBERS_MAX = 100;
+
+/** The record editor's size caps (design §5 gates: title ≤ 300, specText ≤
+ *  20000, ≤ 100 part numbers — the title/text caps are the builder's own
+ *  override caps), as blocking problems. One rule for every write path: the
+ *  record server actions refuse on these and the import planner blocks on
+ *  them, so an import can't store what the editor would refuse. */
+export function specRecordCapProblems(r: SpecRecord): RecordProblem[] {
+  const problems: RecordProblem[] = [];
+  if (r.title.length > SPEC_OVERRIDE_TITLE_MAX) {
+    problems.push({ specId: r.specId, field: "title", message: `Keep the title under ${SPEC_OVERRIDE_TITLE_MAX} characters.`, blocking: true });
+  }
+  if (r.specText.length > SPEC_OVERRIDE_TEXT_MAX) {
+    problems.push({ specId: r.specId, field: "specText", message: `Keep spec text under ${SPEC_OVERRIDE_TEXT_MAX} characters.`, blocking: true });
+  }
+  if (r.mfrNumbers.length > SPEC_RECORD_MFR_NUMBERS_MAX) {
+    problems.push({
+      specId: r.specId,
+      field: "mfrNumbers",
+      message: `A spec record can't carry more than ${SPEC_RECORD_MFR_NUMBERS_MAX} part numbers.`,
+      blocking: true,
+    });
+  }
   return problems;
 }
 

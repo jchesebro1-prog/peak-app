@@ -29,6 +29,7 @@ import {
 } from "@/lib/specs/spec-document";
 import { isPlaceholderSku, normPartNumber, specRowKey } from "@/lib/specs/record-keys";
 import {
+  SPEC_RECORD_MFR_NUMBERS_MAX as MFR_NUMBERS_MAX,
   isValidSpecId,
   matchKeyConflict,
   normalizeSpecRecord,
@@ -59,7 +60,6 @@ type Result<T = unknown> = ({ ok: true } & T) | { ok: false; error: string };
  *  reason ≤ 500, why ≤ 300, ≤ 100 part numbers"). */
 const WHY_MAX = 300;
 const REASON_MAX = SPEC_FILL_IN_MAX; // 500 — same cap withWaive's reason uses.
-const MFR_NUMBERS_MAX = 100;
 
 function tooLong(value: string, max: number, label: string): { ok: false; error: string } | null {
   return value.length > max ? { ok: false, error: `Keep ${label} under ${max} characters.` } : null;
@@ -137,6 +137,27 @@ function conflictError(candidate: SpecRecord, all: readonly SpecRecord[]): strin
   return null;
 }
 
+/** Saves a brand-new record create-only (`mustCreate`), so an id another
+ *  save claimed between allocation and write is never overwritten: on
+ *  `"exists"` the section's next id is allocated once more and the save
+ *  retried once; a second collision refuses. Shared by Write new and the
+ *  library editor's create path. The candidate's content is already
+ *  validated — only its id changes on the retry. */
+async function createRecordAtNextId(
+  candidate: SpecRecord,
+  sectionNumber: string,
+  by: string,
+  why: string
+): Promise<{ ok: true; record: SpecRecord } | { ok: false; error: string }> {
+  const first = await saveSpecRecord(candidate, by, why, { mustCreate: true });
+  if (first.outcome === "created") return { ok: true, record: first.record };
+  const retryId = await nextSpecId(sectionNumber);
+  if (!isValidSpecId(retryId)) return { ok: false, error: `Couldn't assign a Spec ID for section "${sectionNumber.slice(0, 40)}".` };
+  const second = await saveSpecRecord({ ...candidate, specId: retryId }, by, why, { mustCreate: true });
+  if (second.outcome === "created") return { ok: true, record: second.record };
+  return { ok: false, error: "Couldn't assign a Spec ID — try saving again." };
+}
+
 export type SpecRecordHit = {
   specId: string;
   title: string;
@@ -212,10 +233,11 @@ export async function linkRowToRecordAction(docId: string, rowKey: string, specI
   if (partNumber) {
     const norm = normPartNumber(partNumber);
     const already = record.mfrNumbers.some((m) => normPartNumber(m) === norm);
-    // The record already holds this number (an ambiguous row's candidate, a
-    // draft's, or a wildcard hit): adding it again would change nothing and
-    // the row would stay unresolved — pin the row to the pick instead
-    // (Task 9 fix round).
+    // The record already holds this exact number (normalized) — an ambiguous
+    // row's candidate or a draft's: adding it again would change nothing and
+    // the row would stay unresolved — pin the row to the pick instead (Task 9
+    // fix round). A `#` wildcard entry never counts here: it only equals a
+    // number spelled with the `#` itself.
     if (already) return applyPatch(docId, user, (d) => withRowPin(d, rowKey, specId));
     const all = await allSpecRecords();
     const conflict = partNumberConflict({ ...record, mfrNumbers: [partNumber] }, all);
@@ -324,12 +346,13 @@ export async function createRecordFromRowAction(
   const conflict = conflictError(candidate, allRecords);
   if (conflict) return { ok: false, error: conflict };
 
-  await saveSpecRecord(candidate, user.name, `Created from ${docId}`);
+  const created = await createRecordAtNextId(candidate, section.number, user.name, `Created from ${docId}`);
+  if (!created.ok) return created;
   if (candidate.kind === "system" && candidate.matchKey) {
     await patchSpecDocument(docId, (d) => withRowSpecKey(d, rowKey, candidate.matchKey!), user.name);
   }
   revalidateAll(docId);
-  return { ok: true, specId };
+  return { ok: true, specId: created.record.specId };
 }
 
 /** Waive an unresolved row (design §5.1) — reason required, capped. */
@@ -454,9 +477,10 @@ export async function addLibraryRowAction(docId: string, specId: string): Promis
  *  chosen section (`nextSpecId`), never taken from the client — the editor
  *  only previews it. Allocating at save time rather than on page load makes
  *  a collision between two people creating in the same section unlikely;
- *  the allocated id is re-checked and re-allocated once if another save got
- *  there first, and sanity-checked against the allocator's own shape
- *  (`isValidSpecId`). A non-blank specId is an edit and only has to name an
+ *  the write is create-only (`createRecordAtNextId` → `mustCreate`), so an
+ *  id another save got to first is re-allocated once rather than
+ *  overwritten, and the id is sanity-checked against the allocator's own
+ *  shape (`isValidSpecId`). A non-blank specId is an edit and only has to name an
  *  existing record — edits are never format-checked. */
 export async function saveSpecRecordAction(
   record: unknown,
@@ -471,8 +495,6 @@ export async function saveSpecRecordAction(
     const section = String(raw.section ?? "").trim();
     if (!csiKey(section)) return { ok: false, error: "Choose a section first." };
     specId = await nextSpecId(section);
-    if (await getSpecRecord(specId)) specId = await nextSpecId(section); // someone saved that id meanwhile — retry once
-    if (await getSpecRecord(specId)) return { ok: false, error: "Couldn't assign a Spec ID — try saving again." };
     // Sanity check on the allocator's own output (never applied to edits).
     if (!isValidSpecId(specId)) return { ok: false, error: `Couldn't assign a Spec ID for section "${section.slice(0, 40)}".` };
   }
@@ -502,6 +524,12 @@ export async function saveSpecRecordAction(
   const conflict = conflictError(normalized, ctx.records);
   if (conflict) return { ok: false, error: conflict };
 
+  if (isCreate) {
+    const created = await createRecordAtNextId(normalized, normalized.section, user.name, w);
+    if (!created.ok) return created;
+    revalidateAll();
+    return { ok: true, specId: created.record.specId, outcome: "created" };
+  }
   const result = await saveSpecRecord(normalized, user.name, w);
   revalidateAll();
   return { ok: true, specId: result.record.specId, outcome: result.outcome };
@@ -509,8 +537,8 @@ export async function saveSpecRecordAction(
 
 /** Restore a prior revision (design §1.2) — a new revision, never a rewind.
  *  Fix round 1: if the version being restored is `ready`, it goes through
- *  the same duplicate-part-number/match-key guards as every other path to
- *  `ready` — restoring a `ready` revision could otherwise reintroduce a
+ *  the same validation (as approve does) and duplicate-part-number/match-key
+ *  guards as every other path to `ready` — restoring a `ready` revision could otherwise reintroduce a
  *  collision the library has since resolved. A `draft`/`archived` target
  *  needs no guard (design §1.1: those statuses never participate in
  *  matching, so they can't collide). */
@@ -524,8 +552,14 @@ export async function restoreSpecRecordRevisionAction(
   const target = revs.find((r) => r.revision === rev);
   if (!target) return { ok: false, error: `No revision ${rev} found for ${specId}.` };
   if (target.record.status === "ready") {
-    const all = await allSpecRecords();
-    const conflict = conflictError({ ...target.record, specId }, all);
+    // Same gate as approve: the restored version must still validate as
+    // `ready` against today's sections/articles (its article may be gone),
+    // then clear the duplicate part-number / match-key guards.
+    const restored = { ...target.record, specId };
+    const ctx = await recordCtx();
+    const problems = validateSpecRecord(restored, ctx).filter((p) => p.blocking);
+    if (problems.length) return { ok: false, error: problems.map((p) => p.message).join(" ") };
+    const conflict = conflictError(restored, ctx.records);
     if (conflict) return { ok: false, error: conflict };
   }
   const result = await restoreSpecRecordRevision(specId, rev, user.name);

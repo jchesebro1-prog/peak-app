@@ -244,10 +244,10 @@ export async function addSpecProductAction(id: string, sku: string, articleId?: 
   return applyPatch(id, user, (d) => withProduct(d, { sku: part.sku, ...(aid ? { articleId: aid } : {}) }));
 }
 
-/** `rowKey` is `specRowKey(row)` as computed by the caller (§3.1) — a real
- *  catalog part's is `SKU:<UPPER>`, so a plain sku still works for every
- *  existing real-part caller; a sku-less row (allowance/vendor/system) needs
- *  its full row key instead. */
+/** `rowKey` must be the full `specRowKey(row)` computed on the server
+ *  (§3.1) — `SKU:<UPPER>` for a real catalog part, `MPN:`/`KEY:`/`DESC:`/
+ *  `SPEC:` for the rest. A plain sku matches nothing: `withoutProduct`
+ *  compares row keys only, so passing one is a silent no-op. */
 export async function removeSpecProductAction(id: string, rowKey: string): Promise<Result> {
   const user = await requirePerm("create");
   return applyPatch(id, user, (d) => withoutProduct(d, rowKey));

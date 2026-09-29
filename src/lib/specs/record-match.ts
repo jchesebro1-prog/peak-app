@@ -2,7 +2,7 @@
  * Spec record matching (#205 follow-on, spec 2026-09-28-spec-records-design.md
  * §3.2) — pure. Matches one BOM/estimate row against the Spec Library, in
  * order: pinned → exact part number → wildcard → match key → legacy →
- * no-match-with-candidates. Only `ready` records print; `archived` never
+ * draft → no-match-with-candidates. Only `ready` records print; `archived` never
  * matches; a `draft` hit is reported, never printed. Never auto-assigns —
  * `no-match` candidates are for a human to pick from.
  */
@@ -22,7 +22,7 @@ export type MatchRow = {
 
 export type RowMatch =
   | { status: "matched"; specId: string; via: "pinned" | "exact" | "wildcard" | "key" }
-  | { status: "legacy" }
+  | { status: "legacy"; draftSpecId?: string }
   | { status: "ambiguous"; specIds: string[] }
   | { status: "draft"; specId: string }
   | { status: "waived"; reason: string }
@@ -102,13 +102,14 @@ export function matchRow(
   if (step3.length === 1) return { status: "matched", specId: step3[0].specId, via: "key" };
   if (step3.length >= 2) return { status: "ambiguous", specIds: sortedIds(step3) };
 
-  // No ready hit at steps 1-3 — a draft-only hit at the same steps is
-  // reported (not printed), ahead of legacy / no-match.
+  // No ready hit at steps 1-3. Legacy catalog text still prints, so it wins
+  // over a draft-only hit (D452) — a draft must never shadow text that
+  // prints today; the draft rides along as a note. A draft-only hit with no
+  // legacy text is reported (not printed), ahead of no-match.
   const draftHit =
     exactHits(draft, candidates)[0] ?? wildcardHits(draft, candidates)[0] ?? keyHits(draft, row.specKey)[0];
+  if (hasLegacyText) return draftHit ? { status: "legacy", draftSpecId: draftHit.specId } : { status: "legacy" };
   if (draftHit) return { status: "draft", specId: draftHit.specId };
-
-  if (hasLegacyText) return { status: "legacy" };
 
   const rowText = [row.desc, candidates.join(" ")].filter(Boolean).join(" ");
   const scored = ready

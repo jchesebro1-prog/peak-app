@@ -10660,6 +10660,7 @@ seeded()
   .then(() => specBuilderMatchReportAsyncChecks())
   .then(() => specLibraryScreenAsyncChecks())
   .then(() => specKeyPickersAsyncChecks())
+  .then(() => specRecordsFinalReviewAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -33209,8 +33210,10 @@ async function specLibraryScreenAsyncChecks(): Promise<void> {
     "library ids: foo, a bare CSI number, lowercase, a suffix, a 2-digit sequence, blank and over 32 chars are refused");
   const saveBody = ra.slice(ra.indexOf("export async function saveSpecRecordAction(")).split(/\nexport async function /)[0];
   const createBlock = saveBody.slice(saveBody.indexOf("if (isCreate) {"), saveBody.indexOf("const normalized ="));
-  ok(/specId = await nextSpecId\(section\)/.test(createBlock) && (createBlock.match(/await nextSpecId\(section\)/g) || []).length === 2 && /isValidSpecId\(specId\)/.test(createBlock) && !/isNew/.test(saveBody),
-    "library save: a create always allocates via nextSpecId (re-checked, retried once) and sanity-checks the id, no typed-id path");
+  // Final review M4: the re-check + single retry moved into the shared
+  // create-only helper (`createRecordAtNextId` → saveSpecRecord mustCreate).
+  ok(/specId = await nextSpecId\(section\)/.test(createBlock) && (createBlock.match(/await nextSpecId\(section\)/g) || []).length === 1 && /isValidSpecId\(specId\)/.test(createBlock) && /createRecordAtNextId\(/.test(saveBody) && !/isNew/.test(saveBody),
+    "library save: a create always allocates via nextSpecId (saved create-only, retried once) and sanity-checks the id, no typed-id path");
   ok((saveBody.match(/isValidSpecId\(/g) || []).length === 1, "library save: an edit is never format-checked (isValidSpecId only on the create path)");
   const restoreBody = ra.slice(ra.indexOf("export async function restoreSpecRecordRevisionAction(")).split(/\nexport async function /)[0];
   ok(/outcome: result\.outcome/.test(restoreBody), "library restore: the action returns the save outcome");
@@ -33305,3 +33308,98 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
   }
   // The BOM seam (custom specKey kept, keyless curtain derived) is covered by specRecordsBomSeamAsyncChecks.
 }
+
+/* ---- Spec Library records — final whole-branch review fixes ----
+ * C1: Jeff's workbook round-trips against the JSON (matchKey only on system
+ * records; includeWith reads spec-id tokens out of prose). I1: legacy text
+ * wins over a draft-only hit. M2: planner match-key + size-cap guards. M4:
+ * saveSpecRecord's create-only path. M1/M4 action wiring is checked by
+ * source (the actions are requirePerm-gated; the harness can't satisfy it). */
+async function specRecordsFinalReviewAsyncChecks(): Promise<void> {
+  const R = await import("@/lib/specs/records");
+  const I = await import("@/lib/specs/record-import");
+  const IO = await import("@/lib/specs/record-io");
+  const M = await import("@/lib/specs/record-match");
+  const S = await import("@/lib/stores/spec-records");
+  const json = I.recordsFromJson(JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8")));
+  const secs = ["11 61 13", "11 61 14", "11 61 23", "26 09 61"].map((n) => ({ id: "ss-" + n.replace(/ /g, ""), number: n }));
+  const arts = [...new Set(json.records.map((r) => r.sourceArticleId!))].map((id) => {
+    const r = json.records.find((x) => x.sourceArticleId === id)!;
+    return { id, sectionId: "ss-" + r.section.replace(/ /g, "") };
+  });
+
+  // C1 — JSON into an empty library, then Jeff's xlsx against it.
+  const p0 = I.planSpecRecordImport(json, { existing: [], sections: secs, articles: arts });
+  ok(!p0.blocking && p0.counts.created === 46, "final review C1: the JSON plans 46 creates into an empty library, nothing blocking");
+  const jeff = await IO.readLibraryWorkbook(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/Peak Spec Library v1.xlsx")));
+  const jr = jeff.ok ? I.recordsFromSheetRows(jeff.rows) : { records: [], problems: [] };
+  const pj = I.planSpecRecordImport(jr, { existing: p0.items.map((i) => i.record), sections: secs, articles: arts });
+  ok(pj.counts.unchanged === 46 && pj.counts.updated === 0 && pj.counts.created === 0 && pj.problems.filter((p) => p.blocking).length === 0,
+    `final review C1: Jeff's xlsx against the JSON library = 46 unchanged, 0 blocking (got ${JSON.stringify(pj.counts)}, ${pj.problems.filter((p) => p.blocking).length} blocking)`);
+  const c011 = jr.records.find((r) => r.specId === "PS-260961-011");
+  ok(!!c011 && JSON.stringify(c011.includeWith) === '["PS-260961-012","PS-260961-013"]',
+    "final review C1: PS-260961-011's prose Include-with cell yields exactly the two spec ids");
+  ok(jr.records.filter((r) => r.kind !== "system").every((r) => r.matchKey === null) && jr.records.filter((r) => r.kind === "system").every((r) => !!r.matchKey),
+    "final review C1: the workbook's product-row Spec Type never reads as a match key; system rows keep theirs");
+  const prod = R.normalizeSpecRecord({ specId: "PS-X-001", kind: "product_catalog", matchKey: "Some Type", includeWith: [] })!;
+  const sys = R.normalizeSpecRecord({ specId: "PS-X-002", kind: "system", matchKey: "  Stage Drapes – Legs " })!;
+  ok(prod.matchKey === null && sys.matchKey === "Stage Drapes – Legs", "final review C1: normalizeSpecRecord keeps matchKey only for kind system");
+  const prose = R.normalizeSpecRecord({ specId: "PS-X-003", kind: "companion", includeWith: "PS-260961-012 / PS-260961-013 (and any future Eos-family console spec)" })!;
+  ok(JSON.stringify(prose.includeWith) === '["PS-260961-012","PS-260961-013"]', "final review C1: a slash-joined prose cell yields both tokens");
+  const bad = R.normalizeSpecRecord({ specId: "PS-X-004", kind: "companion", includeWith: ["  not an id  ", "PS-260961-012", "ps-260961-012"] })!;
+  ok(JSON.stringify(bad.includeWith) === '["not an id","PS-260961-012"]', "final review C1: an entry with no token is kept trimmed as-is; tokens de-dup");
+  ok(R.validateSpecRecord(bad, { sections: [], articles: [], specIds: new Set(["PS-260961-012"]) }).some((p) => p.field === "includeWith" && p.blocking && /not an id/.test(p.message)),
+    "final review C1: validation still names a genuinely bad include-with id");
+  const editorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/library/records/[specId]/record-editor.tsx"), "utf8");
+  ok(editorSrc.includes('matchKey: kind === "system" ? matchKey : null') && editorSrc.includes('includeWith: kind === "companion" ? includeWith : []'),
+    "final review C1: the record editor still clears fields that don't belong to the kind");
+
+  // I1 — legacy text is never shadowed by a draft.
+  const draftRecs = json.records.map((r) => (r.specId === "PS-260961-022" ? { ...r, status: "draft" as const } : r));
+  const lg = M.matchRow({ sku: "LS-UB-MI" }, draftRecs, null, true);
+  ok(lg.status === "legacy" && lg.draftSpecId === "PS-260961-022", "final review I1: legacy text + a draft record on the number → legacy (draft noted)");
+  ok(M.matchRow({ sku: "LS-UB-MI" }, draftRecs, null, false).status === "draft", "final review I1: a draft-only hit with no legacy text still reports draft");
+  const lgNoDraft = M.matchRow({ sku: "NOPE" }, json.records, null, true);
+  ok(lgNoDraft.status === "legacy" && lgNoDraft.draftSpecId === undefined, "final review I1: plain legacy carries no draft note");
+
+  // M2 — planner match-key conflict + caps.
+  const legs = json.records.find((r) => r.specId === "PS-116123-004")!;
+  const twinKey = { records: [{ ...legs, specId: "PS-116123-900", matchKey: "stage drapes - legs" }], problems: [] };
+  const mk = I.planSpecRecordImport(twinKey, { existing: json.records, sections: secs, articles: arts });
+  ok(mk.blocking && mk.problems.some((p) => p.blocking && p.field === "matchKey" && p.message.includes("PS-116123-004") && p.message.includes("PS-116123-900")),
+    "final review M2: a duplicate ready system match key blocks the import, naming both ids");
+  const draftTwin = { records: [{ ...legs, specId: "PS-116123-901", status: "draft" as const, matchKey: "Stage Drapes – Legs" }], problems: [] };
+  ok(!I.planSpecRecordImport(draftTwin, { existing: json.records, sections: secs, articles: arts }).problems.some((p) => p.field === "matchKey"),
+    "final review M2: a draft twin of a match key does not block");
+  const base = json.records.find((r) => r.specId === "PS-260961-028")!;
+  const big = { records: [
+    { ...base, specId: "PS-260961-901", title: "T".repeat(301), mfrNumbers: ["BIG-1"] },
+    { ...base, specId: "PS-260961-902", specText: "x".repeat(20001), mfrNumbers: ["BIG-2"] },
+    { ...base, specId: "PS-260961-903", mfrNumbers: Array.from({ length: 101 }, (_, i) => `BIGN-${i}`) },
+  ], problems: [] };
+  const capPlan = I.planSpecRecordImport(big, { existing: [], sections: secs, articles: arts });
+  const capHit = (id: string, field: string) => capPlan.problems.some((p) => p.blocking && p.specId === id && p.field === field);
+  ok(capHit("PS-260961-901", "title") && capHit("PS-260961-902", "specText") && capHit("PS-260961-903", "mfrNumbers"),
+    "final review M2: over-cap title / spec text / part-number count are blocking import problems");
+  const importSrc = readFileSync(join(process.cwd(), "src/lib/specs/record-import.ts"), "utf8");
+  ok(!/function normalizePartNumber/.test(importSrc) && /normPartNumber/.test(importSrc) && /specRecordCapProblems/.test(importSrc),
+    "final review M2: the planner reuses normPartNumber and the shared cap guard");
+
+  // M4 — create-only saves.
+  const rec = R.normalizeSpecRecord({ specId: "PS-MC-001", kind: "system", status: "draft", section: "11 61 23", article: "A",
+    title: "Must create", matchKey: "Test – Must Create", specText: "Original", mfrNumbers: [], includeWith: [], sourceArticleId: null })!;
+  const first = await S.saveSpecRecord(rec, "Tester", "create", { mustCreate: true });
+  registerFixture("spec_records", "PS-MC-001");
+  ok(first.outcome === "created" && first.record.revision === 1, "final review M4: mustCreate on a free id creates it");
+  const second = await S.saveSpecRecord({ ...rec, specText: "Clobber" }, "Tester", "create again", { mustCreate: true });
+  const after = await S.getSpecRecord("PS-MC-001");
+  ok(second.outcome === "exists" && after?.specText === "Original" && after.revision === 1 && (await S.specRecordRevisions("PS-MC-001")).length === 0,
+    "final review M4: mustCreate on an existing id refuses with exists and leaves it untouched");
+
+  const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/record-actions.ts"), "utf8");
+  const body = (name: string) => actSrc.slice(actSrc.indexOf(`export async function ${name}(`)).split(/\nexport async function /)[0];
+  ok(/createRecordAtNextId\(/.test(body("createRecordFromRowAction")) && /createRecordAtNextId\(/.test(body("saveSpecRecordAction")) && /mustCreate: true/.test(actSrc),
+    "final review M4: Write new and the library editor's create both save create-only with one re-allocate retry");
+  ok(/validateSpecRecord\(/.test(body("restoreSpecRecordRevisionAction")), "final review M1: restoring a ready revision re-validates it like approve");
+}
+

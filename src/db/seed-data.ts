@@ -157,10 +157,13 @@ export async function seedDemoCollections(): Promise<number> {
  * `spec_records`/`spec_record_revisions` (Spec Library records, spec
  * 2026-09-28-spec-records-design.md §1.1) are real authored library content,
  * not demo business records — a spec is written once and reused across
- * every job that specs the same product. Unlike `spec_templates`/
- * `spec_articles` (which the reset DOES wipe, but which then auto-reseed
- * from starter fixtures on next startup — see seedIfEmpty below), a wiped
- * spec record has no seed to reseed from, so it must never be wiped.
+ * every job that specs the same product, and has no seed to come back from,
+ * so the reset keeps it. Caveat: the `spec_sections`/`spec_articles` those
+ * records point at (`section`, `sourceArticleId`) ARE wiped and are NOT
+ * reseeded (only `spec_templates`/`spec_curtain_templates` reseed, below;
+ * the North HS seed is one-time) — after a reset the kept records stop
+ * resolving to a section/article until the sections are re-created and the
+ * records re-placed (re-importing the workbook re-creates the v1 sections).
  */
 export const CONFIG_COLLECTIONS: readonly CollectionName[] = [
   "subassemblies",

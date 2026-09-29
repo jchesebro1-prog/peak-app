@@ -44,16 +44,35 @@ export async function allSpecRecords(): Promise<SpecRecord[]> {
   return docs.map(toRecord).sort((a, b) => (a.specId < b.specId ? -1 : a.specId > b.specId ? 1 : 0));
 }
 
+/** The one write path. `{ mustCreate: true }` is create-only: when the id is
+ *  already taken it refuses with outcome `"exists"` and leaves the stored
+ *  record untouched — a freshly allocated id that another save claimed in
+ *  the meantime must never overwrite that record. The check runs here,
+ *  right before the write, not in the caller. */
 export async function saveSpecRecord(
   next: SpecRecord,
   by: string,
   why: string
-): Promise<{ outcome: SaveOutcome; record: SpecRecord }> {
+): Promise<{ outcome: SaveOutcome; record: SpecRecord }>;
+export async function saveSpecRecord(
+  next: SpecRecord,
+  by: string,
+  why: string,
+  opts: { mustCreate: true }
+): Promise<{ outcome: "created" | "exists"; record: SpecRecord }>;
+export async function saveSpecRecord(
+  next: SpecRecord,
+  by: string,
+  why: string,
+  opts?: { mustCreate?: boolean }
+): Promise<{ outcome: SaveOutcome | "exists"; record: SpecRecord }> {
   const normalized = normalizeSpecRecord(next);
   if (!normalized) throw new Error("saveSpecRecord: invalid spec record");
 
   const current = await getSpecRecord(normalized.specId);
   const now = Date.now();
+
+  if (current && opts?.mustCreate) return { outcome: "exists", record: current };
 
   if (!current) {
     const created: SpecRecord = { ...normalized, revision: 1, updatedAt: now, updatedBy: by };
