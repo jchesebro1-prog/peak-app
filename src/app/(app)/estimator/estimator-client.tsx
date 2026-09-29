@@ -1939,7 +1939,9 @@ export default function EstimatorClient({
     setCurtainDraft(next);
     if (!curtainTrack) return;
     const pre = curtainTrackPrefill(next);
-    setCurtainTrack((t) => (t ? followCurtainPrefill(t, curtainTrackPrefillRef.current, pre) : t));
+    // Captured now: the updater runs later, after the ref has moved on.
+    const prev = curtainTrackPrefillRef.current;
+    setCurtainTrack((t) => (t ? followCurtainPrefill(t, prev, pre) : t));
     curtainTrackPrefillRef.current = pre;
   };
   const toggleCurtainTrack = (on: boolean) => {

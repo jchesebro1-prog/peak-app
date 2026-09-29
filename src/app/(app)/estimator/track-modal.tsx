@@ -315,7 +315,9 @@ export default function TrackModal({
   const cost = readOnly ? readOnly.cost : bom.cost;
   const price = readOnly ? readOnly.price : bom.price;
   const partsCount = readOnly ? (readOnly.components || []).length : bom.rows.length;
-  const errors = readOnly ? [TRACK_SERIES_GONE] : noSeries ? [] : bom.errors;
+  // A blank run is the untouched form, not a mistake — Add stays disabled
+  // without shouting "Enter the run length." before anything is typed.
+  const errors = readOnly ? [TRACK_SERIES_GONE] : noSeries || !draft.run.trim() ? [] : bom.errors;
 
   return (
     <ConfigModal

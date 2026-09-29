@@ -217,7 +217,7 @@ export default function CurtainModal({
                 </div>
               )}
               {/* No series at all: TrackFields already says to set one up. */}
-              {tb && trackSeriesRow && <TrackErrors errors={tb.errors} />}
+              {tb && trackSeriesRow && track.run.trim() !== "" && <TrackErrors errors={tb.errors} />}
             </div>
           )}
         </div>

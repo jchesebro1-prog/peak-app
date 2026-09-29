@@ -37835,6 +37835,9 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   const openTrackEdit = client.slice(client.indexOf("const openTrackEdit = "), client.indexOf("const addTrack = "));
   ok(openTrackEdit.includes("closeInput();") && openTrackEdit.indexOf("closeInput();") < openTrackEdit.indexOf("trackEditRef.current = {") && openTrackEdit.includes('openInputMethod("track", secId)') && /readOnly: gone \?/.test(openTrackEdit),
     "#274B reopen: a track line reopens through the #269 close-then-seed dance; a deleted series opens read-only");
+  const setCurtainField = client.slice(client.indexOf("const setCurtainField = "), client.indexOf("const toggleCurtainTrack = "));
+  ok(/const prev = curtainTrackPrefillRef\.current;\s*setCurtainTrack\(\(t\) => \(t \? followCurtainPrefill\(t, prev, pre\) : t\)\);\s*curtainTrackPrefillRef\.current = pre;/.test(setCurtainField),
+    "#274B curtain: the track follows the curtain from the pre-fill captured BEFORE the ref moves on (the updater runs later — browser-found bug)");
   ok(client.includes("price: catalogAddPrice(cat.cost, cat.price, tierMargin)") && client.includes("catalogAddPrice(cost, hit.list, tierMargin)"),
     "#274B pricing: addPart and the CSV import price through the same catalogAddPrice the track uses");
   ok(card.includes('addBtn("+ Configure track", p.onToggleTrack, openMethod === "track")') && /const openTrack = \(e: \{ detail: number \}\) => \{\s*if \(e\.detail > 1\) return;/.test(card) && card.includes("onClick={openTrack}") && card.includes("TRACK"),
