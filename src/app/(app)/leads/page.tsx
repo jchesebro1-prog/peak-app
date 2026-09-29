@@ -2,7 +2,8 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
-import { firstName } from "@/lib/team";
+import { can, firstName } from "@/lib/team";
+import { DeleteLeadButton } from "./delete-lead-button";
 import { LEAD_STAGE_TONE, SegmentedToggle, StatusPill } from "@/components/ui";
 import {
   dateLabel,
@@ -60,6 +61,7 @@ const VIEW_OPTIONS: Array<{ key: ViewKey; label: string }> = [
 ];
 
 const COLS = "minmax(0,1.7fr) minmax(0,1.6fr) 82px 90px minmax(0,0.95fr) 74px 100px 66px";
+const COLS_DEL = COLS + " 70px";
 
 function hrefFor(view: ViewKey, seg: SegKey, lead?: string, who?: string): string {
   const p = new URLSearchParams();
@@ -86,6 +88,7 @@ const styleBlock = `
   .lv-pad { padding-left: 16px !important; padding-right: 16px !important; }
   .lv-head { flex-direction: column !important; align-items: stretch !important; }
   .lv-trow { grid-template-columns: minmax(0,1fr) 74px 100px !important; }
+  .lv-trow.lv-del { grid-template-columns: minmax(0,1fr) 74px 100px 70px !important; }
   .lv-scope, .lv-src, .lv-stage, .lv-own, .lv-upd { display: none !important; }
 }
 /* copied from quotes/page.tsx — select.qt-sel's dropdown-arrow rule, so OwnerSelect renders identically here */
@@ -225,6 +228,7 @@ export default async function LeadsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const me = await requireUser();
+  const canDelete = can("create", me.roles);
   const sp = await searchParams;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || "";
 
@@ -452,6 +456,7 @@ export default async function LeadsPage({
       stage: stageChip(l),
       reason: { label: fu.full, ink: fu.ink, soft: fu.soft, bd: fu.bd },
       canClaim: !l.owner,
+      canDelete,
       href: hrefFor("worklist", "all", l.id, who),
     };
   };
@@ -560,10 +565,10 @@ export default async function LeadsPage({
             }}
           >
             <div
-              className="lv-trow"
+              className={canDelete ? "lv-trow lv-del" : "lv-trow"}
               style={{
                 display: "grid",
-                gridTemplateColumns: COLS,
+                gridTemplateColumns: canDelete ? COLS_DEL : COLS,
                 gap: 10,
                 padding: "11px 18px",
                 fontSize: 10,
@@ -585,24 +590,25 @@ export default async function LeadsPage({
               <span className="lv-upd" style={{ textAlign: "right" }}>
                 Updated
               </span>
+              {canDelete && <span />}
             </div>
             {rows.map((r) => (
-              <Link
+              <div
                 key={r.id}
-                href={r.href}
-                className="lv-trow lv-hoverrow"
+                className={canDelete ? "lv-trow lv-del lv-hoverrow" : "lv-trow lv-hoverrow"}
                 style={{
+                  position: "relative",
                   display: "grid",
-                  gridTemplateColumns: COLS,
+                  gridTemplateColumns: canDelete ? COLS_DEL : COLS,
                   gap: 10,
                   padding: "12px 18px",
                   alignItems: "center",
                   borderBottom: "1px solid #f5f6f8",
                   cursor: "pointer",
-                  textDecoration: "none",
-                  color: "inherit",
                 }}
               >
+                {/* #280 — the whole row still opens the lead; Delete sits above this overlay */}
+                <Link href={r.href} aria-label={`Open ${r.org}`} style={{ position: "absolute", inset: 0 }} />
                 <div style={{ minWidth: 0 }}>
                   <div
                     style={{
@@ -700,7 +706,12 @@ export default async function LeadsPage({
                 <span className="lv-upd" style={{ fontSize: 11, color: "#9aa0ab", textAlign: "right" }}>
                   {r.updated}
                 </span>
-              </Link>
+                {canDelete && (
+                  <div style={{ position: "relative", zIndex: 1, justifySelf: "end" }}>
+                    <DeleteLeadButton id={r.id} name={r.org} />
+                  </div>
+                )}
+              </div>
             ))}
             {rows.length === 0 && (
               <div style={{ padding: "44px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
@@ -836,6 +847,7 @@ export default async function LeadsPage({
           thread={thread}
           visitReasons={mergedVisitReasons(settings.visitReasons)}
           customers={leadCustomers}
+          canDelete={canDelete}
         />
       )}
     </>
