@@ -22,7 +22,9 @@ import { snapMovable } from "@/lib/design/venue-templates/stretch";
 type Rect = { x: number; y: number; w: number; h: number; fill: string; stroke: string; sw: number; rx?: number; dash?: string };
 type LineEl = { x1: number; y1: number; x2: number; y2: number; stroke: string; sw: number; dash?: string };
 type CircleEl = { cx: number; cy: number; r: number; fill: string };
-type TextEl = { x: number; y: number; t: string; fill: string; size: number; weight?: number; anchor: string; transform?: string };
+/** `role: "dim"` marks a dimension label (`dimH` / `dimV` / the proscenium's chains) — drawn smaller (#261, D468). */
+type TextEl = { x: number; y: number; t: string; fill: string; size: number; weight?: number; anchor: string; transform?: string; role?: TextRole };
+export type TextRole = "dim";
 type PathEl = { d: string; fill: string; stroke?: string; sw?: number; dash?: string };
 
 /** A drag handle on the auto plan: a wall (`side`) sizes the room; a movable room (`key` = its id, #255) slides along the walls it may use. */
@@ -72,29 +74,31 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 function dimH(L: L, ax: number, bx: number, y: number, label: string, faint: boolean) {
   const sz = faint ? 11 : 14;
+  const eff = planTextSize(sz, 1, "dim"); // the size the label draws at (at most), so the line gap + centring fit it
   const col = faint ? "#c4c9d2" : "#8c919c";
   const tcol = faint ? "#9aa0ab" : "#2f333a";
   const mid = (ax + bx) / 2;
-  const half = label.length * sz * 0.32 + 4;
+  const half = label.length * eff * 0.32 + 4;
   const tick = (x: number) => L.lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
   L.lines.push({ x1: R(ax), y1: R(y), x2: R(mid - half), y2: R(y), stroke: col, sw: faint ? 0.9 : 1, dash: "" });
   L.lines.push({ x1: R(mid + half), y1: R(y), x2: R(bx), y2: R(y), stroke: col, sw: faint ? 0.9 : 1, dash: "" });
   tick(ax);
   tick(bx);
-  L.texts.push({ x: R(mid), y: R(y + sz * 0.35), t: label, fill: tcol, size: sz, weight: 600, anchor: "middle", transform: "" });
+  L.texts.push({ x: R(mid), y: R(y + eff * 0.35), t: label, fill: tcol, size: sz, weight: 600, anchor: "middle", transform: "", role: "dim" });
 }
 
 function dimV(L: L, ay: number, by: number, x: number, label: string) {
   const sz = 14;
+  const eff = planTextSize(sz, 1, "dim");
   const mid = (ay + by) / 2;
-  const half = label.length * sz * 0.32 + 4;
-  const tx = x + sz * 0.35;
+  const half = label.length * eff * 0.32 + 4;
+  const tx = x + eff * 0.35;
   const tick = (y: number) => L.lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
   L.lines.push({ x1: R(x), y1: R(ay), x2: R(x), y2: R(mid - half), stroke: "#8c919c", sw: 1, dash: "" });
   L.lines.push({ x1: R(x), y1: R(mid + half), x2: R(x), y2: R(by), stroke: "#8c919c", sw: 1, dash: "" });
   tick(ay);
   tick(by);
-  L.texts.push({ x: R(tx), y: R(mid), t: label, fill: "#2f333a", size: sz, weight: 600, anchor: "middle", transform: "rotate(-90 " + R(tx) + " " + R(mid) + ")" });
+  L.texts.push({ x: R(tx), y: R(mid), t: label, fill: "#2f333a", size: sz, weight: 600, anchor: "middle", transform: "rotate(-90 " + R(tx) + " " + R(mid) + ")", role: "dim" });
 }
 
 /** center FOH mix position — seats removed mid-house for the front-of-house console */
@@ -658,13 +662,13 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xProcL), y1: R(yWid), x2: R(xProcR), y2: R(yWid), stroke: "#8c919c", sw: 1, dash: "" });
   tick(xProcL, yWid);
   tick(xProcR, yWid);
-  texts.push({ x: R(cx), y: R(yWid - 6), t: s.width + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+  texts.push({ x: R(cx), y: R(yWid - 6), t: s.width + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "", role: "dim" });
   if (wing > 0) {
     ([[xWingL, xProcL], [xProcR, xWingR]] as Array<[number, number]>).forEach(([a, b]) => {
       lines.push({ x1: R(a), y1: R(yWid), x2: R(b), y2: R(yWid), stroke: "#c4c9d2", sw: 0.9, dash: "" });
       tick(a, yWid);
       tick(b, yWid);
-      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wing + "'", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wing + "'", fill: "#8c919c", size: 11, anchor: "middle", transform: "", role: "dim" });
     });
   }
   // dimension lines — stage depth, then house depth (left, one chain)
@@ -674,7 +678,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     tick(xDep, ya);
     tick(xDep, yb);
     const ym = (ya + yb) / 2;
-    texts.push({ x: R(xDep - 7), y: R(ym), t: label, fill: "#8c919c", size: 11, anchor: "middle", transform: "rotate(-90 " + R(xDep - 7) + " " + R(ym) + ")" });
+    texts.push({ x: R(xDep - 7), y: R(ym), t: label, fill: "#8c919c", size: 11, anchor: "middle", transform: "rotate(-90 " + R(xDep - 7) + " " + R(ym) + ")", role: "dim" });
   };
   lines.push({ x1: R(xStageL - 4), y1: R(yBack), x2: R(xDep - 3), y2: R(yBack), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xStageL - 4), y1: R(yPlaster), x2: R(xDep - 3), y2: R(yPlaster), stroke: "#c4c9d2", sw: 0.8, dash: "" });
@@ -686,7 +690,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xHouseL), y1: R(yHW), x2: R(xHouseR), y2: R(yHW), stroke: "#8c919c", sw: 1, dash: "" });
   tick(xHouseL, yHW);
   tick(xHouseR, yHW);
-  texts.push({ x: R((xHouseL + xHouseR) / 2), y: R(yHW - 6), t: Math.round(dims.houseWidthFt) + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+  texts.push({ x: R((xHouseL + xHouseR) / 2), y: R(yHW - 6), t: Math.round(dims.houseWidthFt) + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "", role: "dim" });
 
   texts.push({ x: R(cx), y: R(yPlaster - 6), t: "PLASTER LINE", fill: "#8c919c", size: 8, anchor: "middle", transform: "" });
 
@@ -995,6 +999,48 @@ const MONO = "var(--font-mono), IBM Plex Mono, monospace";
  *  properties), so the static markup falls straight back to the named font. */
 const STATIC_MONO = "IBM Plex Mono, monospace";
 
+/** Plan text reads at this share of its builder size (#261, D468): Jeff found the labels too big. Room / area
+ *  labels and equipment marks (6–8) land at ~6.8 px — the mono font's readability floor. */
+export const PLAN_TEXT_SCALE = 0.85;
+/** Dimension labels (`role: "dim"`, 11–14 bold) draw smaller still — ~9 px — so they stop dominating the drawing. */
+export const PLAN_DIM_TEXT_SCALE = 0.65;
+
+/**
+ * A plan text's font size in viewBox units (#261, D468). `k` is the plan's display scale (rendered px per viewBox
+ * unit). The builders size text for k = 1; `<PlanSvg>` draws at `width: 100%`, so on a wide panel the text used to
+ * grow with the plan (dimensions reached 22–35 px). Dividing by `max(k, 1)` holds it at `base × PLAN_TEXT_SCALE`
+ * on-screen px however wide the plan draws; on a narrow panel (k < 1) it still shrinks with the plan.
+ */
+export function planTextSize(base: number, k: number, role?: TextRole): number {
+  const scale = Number.isFinite(k) && k > 0 ? k : 1;
+  return (base * (role === "dim" ? PLAN_DIM_TEXT_SCALE : PLAN_TEXT_SCALE)) / Math.max(scale, 1);
+}
+
+/** The CSS variable `<PlanSvg>`'s texts read their display factor from (`1 / max(k, 1)`); each text multiplies it by
+ *  its own `planTextSize(size, 1, role)`. */
+const PLAN_TEXT_VAR = "--plan-text";
+
+/**
+ * Callback ref (React 19 cleanup) that watches the rendered width of a `<PlanSvg>` and stores
+ * `1 / max(k, 1)` on it as `--plan-text`. A module-level function, so its identity is stable across renders;
+ * no hooks, so this file stays importable from server modules (`grid-projects.ts`, `grid-auto-layout.ts`).
+ */
+function observePlanScale(svg: SVGSVGElement | null): (() => void) | void {
+  if (!svg) return;
+  const apply = (renderedW: number) => {
+    const vbW = svg.viewBox.baseVal?.width || 0;
+    if (!(vbW > 0) || !(renderedW > 0)) return;
+    svg.style.setProperty(PLAN_TEXT_VAR, String(planTextSize(1, renderedW / vbW) / PLAN_TEXT_SCALE));
+  };
+  apply(svg.getBoundingClientRect().width);
+  if (typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver((entries) => {
+    for (const e of entries) apply(e.contentRect.width);
+  });
+  ro.observe(svg);
+  return () => ro.disconnect();
+}
+
 export function PlanSvg({
   plan,
   accent,
@@ -1013,6 +1059,7 @@ export function PlanSvg({
   return (
     <svg
       id={svgId}
+      ref={observePlanScale}
       viewBox={`0 0 ${p.W} ${p.H}`}
       preserveAspectRatio="xMidYMid meet"
       style={{ width: "100%", height: "auto", display: "block", touchAction: "none" }}
@@ -1030,7 +1077,7 @@ export function PlanSvg({
         <circle key={"c" + i} cx={c.cx} cy={c.cy} r={c.r} fill={c.fill} />
       ))}
       {(p.texts || []).map((t, i) => (
-        <text key={"t" + i} x={t.x} y={t.y} textAnchor={t.anchor as "start" | "middle" | "end"} transform={t.transform || undefined} fontSize={t.size} fontWeight={t.weight || 400} fill={t.fill} style={{ fontFamily: MONO }}>
+        <text key={"t" + i} x={t.x} y={t.y} textAnchor={t.anchor as "start" | "middle" | "end"} transform={t.transform || undefined} fontSize={planTextSize(t.size, 1, t.role)} fontWeight={t.weight || 400} fill={t.fill} style={{ fontFamily: MONO, fontSize: `calc(${planTextSize(t.size, 1, t.role)}px * var(${PLAN_TEXT_VAR}, 1))` }}>
           {t.t}
         </text>
       ))}
@@ -1120,7 +1167,7 @@ export function renderPlanSvgMarkup(plan: PlanData, accent: string): string {
   const texts = (p.texts || [])
     .map(
       (t) =>
-        `<text x="${t.x}" y="${t.y}" text-anchor="${esc(t.anchor)}"${attr("transform", t.transform)} font-size="${t.size}" font-weight="${t.weight || 400}" fill="${esc(t.fill)}" font-family="${esc(STATIC_MONO)}">${esc(t.t)}</text>`
+        `<text x="${t.x}" y="${t.y}" text-anchor="${esc(t.anchor)}"${attr("transform", t.transform)} font-size="${+planTextSize(t.size, 1, t.role).toFixed(3)}" font-weight="${t.weight || 400}" fill="${esc(t.fill)}" font-family="${esc(STATIC_MONO)}">${esc(t.t)}</text>`
     )
     .join("");
 
