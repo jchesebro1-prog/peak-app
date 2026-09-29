@@ -18,6 +18,8 @@ export type VenueTemplate = {
   extents: { minX: number; minY: number; maxX: number; maxY: number };
   segments: Array<[number, number, number, number]>;
   arcs: TemplateArc[];
+  /** #255: closed splines that are axis-aligned rounded rectangles (corner extents rx/ry), kept for reference — a template draws its curves from key lines. */
+  roundRects?: Array<{ minX: number; minY: number; maxX: number; maxY: number; rx: number; ry: number }>;
   labels: TemplateLabel[];
 };
 
@@ -65,11 +67,14 @@ export type XMap =
  * the mapped y of their drawn ends. A full 360° circle is a similarity about
  * its mapped centre (radius × k). Arcs that are not concentric (a mirrored
  * pointed front) belong in separate groups.
+ *
+ * Without scaleHalf an arc keeps its sweep: its radius follows its mapped chord (a quarter-circle corner stays a
+ * tangent quarter circle). A full circle (no chord) then keeps its drawn radius about its mapped centre.
  */
 export type TrueArcGroup = {
   centres: Pt[];
-  scaleHalf: number;
-  atY: number;
+  scaleHalf?: number;
+  atY?: number;
   /** Labels above this y and inside the group's smallest drawn circle move with it (a similarity about its centre). */
   zoneMinY?: number;
 };
@@ -96,11 +101,19 @@ export type MovableWall = { from: Pt; to: Pt };
  * keeping their drawn size, turned to face in. Only those travel: key `points` and key `lines` inside `bbox` are
  * NOT lifted — they stay where the stretch maps them — so a template keeps them outside its movables. `id`s are
  * unique and every wall in `walls` names a `movableWalls` entry (a template breaking either throws, named).
+ * A `sized` element has no bbox and no drawn lines: see `sized`.
  */
 export type Movable = {
   id: string;
   region: string;
-  bbox: { minX: number; maxX: number; minY: number; maxY: number };
+  bbox?: { minX: number; maxX: number; minY: number; maxY: number };
+  /**
+   * #255: a code-drawn rectangle sized by StretchDims.movableSizes[id] (no drawn lines, no bbox): `alongFt` along its
+   * wall centred on the attachment point, `depthFt` out to the wall's right (list an inner wall clockwise to put it
+   * inside the room). Its region (`region`, created — not drawn in `regions`) is that rectangle. No size = a
+   * zero-size rectangle at its anchor.
+   */
+  sized?: true;
   home: { wall: string; anchor: Pt };
   walls: string[];
 };
@@ -126,6 +139,8 @@ export type TemplateKeys = {
   x: XMap;
   /** Contiguous spans, top → bottom, each fixed or driven by an input. */
   ySpans: Array<{ from: number; to: number; drive: YDrive }>;
+  /** #255: a front-to-back map mirrored about y = cy (pro = stage depth / 2, wing = wing, house = house depth / 2); replaces ySpans. */
+  yMap?: { cy: number; spans: XSpan[] };
   /** A y key line that never moves (proscenium: the plaster line; church: the platform front). */
   origin: number;
   /** Stage / platform depth runs origin → stageDepthTo; house / nave depth runs origin → houseDepthTo. */
@@ -142,6 +157,8 @@ export type TemplateKeys = {
   /** #255: the region ids that play each part for plans, Spaces and Auto fill. */
   roles: { stage: string; house: string; booth?: string; catwalk?: string };
   lines: Record<string, PathItem[]>;
+  /** #255: ids of `lines` that are part of the drawing. */
+  drawn?: string[];
   points: Record<string, Pt>;
   /** Display texts the drawing must carry; a text listed n times must appear n times. */
   requiredLabels: string[];
@@ -166,6 +183,8 @@ export type StretchDims = {
   pit: boolean;
   /** #255: where each movable element sits — `t` 0..1 along the wall's usable run; absent / null = home, or the middle of another wall. */
   movables?: Record<string, { wall: string; t: number | null }>;
+  /** #255: each code-sized movable's size (see Movable.sized), feet. */
+  movableSizes?: Record<string, { alongFt: number; depthFt: number }>;
 };
 
 export type StretchedPlan = {

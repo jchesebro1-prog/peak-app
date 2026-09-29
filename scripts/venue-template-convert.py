@@ -63,6 +63,25 @@ def r3(v):
     return round(float(v), 3) + 0.0  # + 0.0 turns -0.0 into 0.0
 
 
+def round_rect(pts):
+    """An axis-aligned rounded rectangle, or None: bbox + corner extents (rx along x, ry along y), to 0.1". (#255)"""
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    mnx, mxx, mny, mxy = min(xs), max(xs), min(ys), max(ys)
+    tol = 0.05
+    top = [p[0] for p in pts if p[1] >= mxy - tol]
+    bot = [p[0] for p in pts if p[1] <= mny + tol]
+    rgt = [p[1] for p in pts if p[0] >= mxx - tol]
+    lft = [p[1] for p in pts if p[0] <= mnx + tol]
+    if not (top and bot and rgt and lft):
+        return None
+    rx = [mxx - max(top), min(top) - mnx, mxx - max(bot), min(bot) - mnx]
+    ry = [mxy - max(rgt), min(rgt) - mny, mxy - max(lft), min(lft) - mny]
+    if max(rx) - min(rx) > 0.5 or max(ry) - min(ry) > 0.5 or min(rx) <= 0 or min(ry) <= 0:
+        return None
+    r1 = lambda v: round(float(v), 1) + 0.0
+    return {"minX": r3(mnx), "minY": r3(mny), "maxX": r3(mxx), "maxY": r3(mxy), "rx": r1(sum(rx) / 4), "ry": r1(sum(ry) / 4)}
+
+
 def overlay_for(source):
     """The label overlay next to the source drawing, or [] when there is none."""
     path = os.path.splitext(source)[0] + ".labels.json"
@@ -82,9 +101,11 @@ def overlay_for(source):
 
 def collect(doc, origin):
     """Every line / polyline edge / arc / label in model space, blocks exploded,
-    exact duplicates (Vectorworks exports each group twice) removed, shifted by `origin`."""
+    exact duplicates (Vectorworks exports each group twice) removed, shifted by `origin`.
+    #255: a closed SPLINE that is an axis-aligned rounded rectangle is kept as a round rect;
+    any other SPLINE is flattened (0.1") into segments."""
     ox, oy = origin
-    segs, arcs, labels = {}, {}, []
+    segs, arcs, labels, round_rects = {}, {}, [], {}
 
     def P(x, y):
         return (r3(x - ox), r3(y - oy))
@@ -119,6 +140,14 @@ def collect(doc, origin):
             cx, cy = P(e.dxf.center.x, e.dxf.center.y)
             arc = {"cx": cx, "cy": cy, "r": r3(e.dxf.radius), "a0": r3(a0), "a1": r3(a1)}
             arcs[(round(cx, 2), round(cy, 2), round(arc["r"], 2), round(a0, 1), round(a1, 1))] = arc
+        elif t == "SPLINE":
+            pts = [P(p.x, p.y) for p in e.flattening(0.1)]
+            rr = round_rect(pts) if e.closed else None
+            if rr:
+                round_rects[(rr["minX"], rr["minY"], rr["maxX"], rr["maxY"])] = rr
+            else:
+                for a, b in zip(pts, pts[1:]):
+                    add_seg(a, b)
         elif t in ("TEXT", "MTEXT"):
             text = (e.plain_text() if t == "MTEXT" else e.dxf.text).strip()
             if text:
@@ -135,6 +164,7 @@ def collect(doc, origin):
         sorted(segs.values()),
         sorted(arcs.values(), key=lambda a: (a["cx"], a["cy"], a["r"], a["a0"])),
         labels,
+        sorted(round_rects.values(), key=lambda r: (r["minX"], r["minY"])),
     )
 
 
@@ -156,8 +186,8 @@ def build(kind, dxf_path, source_rel, required, overlay, origin):
     units = doc.header.get("$INSUNITS", 0)
     if units != 1:
         raise Refused("the drawing is not in inches ($INSUNITS=%s) - set the document units to inches before exporting" % units)
-    segments, arcs, drawn = collect(doc, origin)
-    if not segments and not arcs:
+    segments, arcs, drawn, round_rects = collect(doc, origin)
+    if not segments and not arcs and not round_rects:
         raise Refused("nothing drawable was found (lines, polylines, arcs)")
     labels = merge_labels(drawn, overlay, origin)
     need, have = Counter(required), Counter(l["text"] for l in labels)
@@ -170,6 +200,8 @@ def build(kind, dxf_path, source_rel, required, overlay, origin):
         for i in range(n + 1):
             ang = math.radians(a["a0"] + (a["a1"] - a["a0"]) * i / n)
             pts.append((a["cx"] + a["r"] * math.cos(ang), a["cy"] + a["r"] * math.sin(ang)))
+    for r in round_rects:
+        pts.extend([(r["minX"], r["minY"]), (r["maxX"], r["minY"]), (r["maxX"], r["maxY"]), (r["minX"], r["maxY"])])
     ext = {
         "minX": r3(min(p[0] for p in pts)), "minY": r3(min(p[1] for p in pts)),
         "maxX": r3(max(p[0] for p in pts)), "maxY": r3(max(p[1] for p in pts)),
@@ -177,7 +209,10 @@ def build(kind, dxf_path, source_rel, required, overlay, origin):
     obj = {"kind": kind, "source": source_rel}
     if origin != (0.0, 0.0):
         obj["origin"] = [r3(origin[0]), r3(origin[1])]
-    obj.update({"units": "in", "extents": ext, "segments": segments, "arcs": arcs, "labels": labels})
+    obj.update({"units": "in", "extents": ext, "segments": segments, "arcs": arcs})
+    if round_rects:
+        obj["roundRects"] = round_rects
+    obj["labels"] = labels
     return obj
 
 
@@ -187,12 +222,13 @@ def dump(obj):
     for k in ("kind", "source", "origin", "units", "extents"):
         if k in obj:
             out.append("  %s: %s," % (json.dumps(k), json.dumps(obj[k])))
-    keys = ("segments", "arcs", "labels")
-    for key in keys:
+    keys = ("segments", "arcs", "roundRects", "labels")
+    present = [k for k in keys if k in obj]  # "roundRects" only when a drawing has some
+    for key in present:
         rows = [json.dumps(v) for v in obj[key]]
         out.append("  %s: [" % json.dumps(key))
         out.extend("    " + r + ("," if i < len(rows) - 1 else "") for i, r in enumerate(rows))
-        out.append("  ]" + ("," if key != keys[-1] else ""))
+        out.append("  ]" + ("," if key != present[-1] else ""))
     out.append("}")
     return "\n".join(out) + "\n"
 
@@ -210,6 +246,17 @@ def preview(obj, path):
         n = max(2, int(math.ceil(a["a1"] - a["a0"])))
         angs = [math.radians(a["a0"] + (a["a1"] - a["a0"]) * i / n) for i in range(n + 1)]
         ax.plot([a["cx"] + a["r"] * math.cos(t) for t in angs], [a["cy"] + a["r"] * math.sin(t) for t in angs], color="#3a3f4a", linewidth=0.6)
+    for r in obj.get("roundRects", []):
+        # Four straight runs joined by quarter-ellipse corners (rx along x, ry along y).
+        rx, ry = r["rx"], r["ry"]
+        xs, ys = [], []
+        for cx, cy, a0 in ((r["maxX"] - rx, r["maxY"] - ry, 0), (r["minX"] + rx, r["maxY"] - ry, 90),
+                           (r["minX"] + rx, r["minY"] + ry, 180), (r["maxX"] - rx, r["minY"] + ry, 270)):
+            for i in range(31):
+                t = math.radians(a0 + 90 * i / 30)
+                xs.append(cx + rx * math.cos(t))
+                ys.append(cy + ry * math.sin(t))
+        ax.plot(xs + xs[:1], ys + ys[:1], color="#3a3f4a", linewidth=0.6)
     for l in obj["labels"]:
         # Blue = placed by Claude from the overlay; rust = drawn by Jeff.
         ax.text(l["x"], l["y"], l["text"], fontsize=7, va="top", color="#3155a8" if l.get("added") else "#b4543a")

@@ -50,13 +50,12 @@ function densifyPath(pts: Pt[], closed: boolean): Pt[] {
 }
 
 /**
- * #255: a side-to-side map over half-distance a ≥ 0 (see XSpan). `face` (a profile band's mapped face: drawn
- * half-width → mapped half-width) places "face" spans' ends.
+ * #255: a side-to-side (or mirrored front-to-back) map over half-distance a ≥ 0, given its targets in inches: the
+ * pro half, the wing, the house half (see XSpan). `face` (a profile band's mapped face: drawn half-width → mapped
+ * half-width) places "face" spans' ends.
  */
-export function makeSpanMap(spans: XSpan[], d: StretchDims, face?: (a: number) => number): (a: number) => number {
-  const proHalf = (d.proWidthFt * 12) / 2;
-  const wing = Math.max(0, d.wingFt * 12);
-  const houseHalf = (d.houseWidthFt * 12) / 2;
+export function makeHalfMap(spans: XSpan[], halves: { pro: number; wing: number; house: number }, face?: (a: number) => number): (a: number) => number {
+  const proHalf = halves.pro, wing = Math.max(0, halves.wing), houseHalf = halves.house;
   const xs = [0, ...spans.map((s) => s.to)];
   const len = (i: number) => xs[i + 1] - xs[i];
   const total = (drive: XSpan["drive"], upto = spans.length) =>
@@ -87,8 +86,21 @@ export function makeSpanMap(spans: XSpan[], d: StretchDims, face?: (a: number) =
   };
 }
 
-/** The front-to-back map: piecewise-linear through the key lines; the origin line never moves. */
+/** #255: a side-to-side map over half-distance a ≥ 0 (see XSpan and makeHalfMap). */
+export function makeSpanMap(spans: XSpan[], d: StretchDims, face?: (a: number) => number): (a: number) => number {
+  return makeHalfMap(spans, { pro: (d.proWidthFt * 12) / 2, wing: d.wingFt * 12, house: (d.houseWidthFt * 12) / 2 }, face);
+}
+
+/**
+ * The front-to-back map: piecewise-linear through the key lines; the origin line never moves. #255: a `yMap`
+ * replaces that with a span map mirrored about y = cy (see TemplateKeys.yMap).
+ */
 export function makeYMap(k: TemplateKeys, d: StretchDims): (y: number) => number {
+  if (k.yMap) {
+    const { cy, spans } = k.yMap;
+    const m = makeHalfMap(spans, { pro: (d.stageDepthFt * 12) / 2, wing: d.wingFt * 12, house: (d.houseDepthFt * 12) / 2 });
+    return (y: number) => cy + Math.sign(y - cy) * m(Math.abs(y - cy));
+  }
   const spans = k.ySpans;
   const len = (s: { from: number; to: number }) => s.from - s.to;
   const openOf = (drive: string) => spans.filter((s) => s.drive === drive).reduce((n, s) => n + len(s), 0);
@@ -353,7 +365,9 @@ function checkMovables(k: TemplateKeys) {
     if (seen.has(m.id)) throw new Error(`${who}: movable id "${m.id}" is used twice`);
     seen.add(m.id);
     for (const w of m.walls) if (!k.movableWalls?.[w]) throw new Error(`${who}: movable ${m.id} lists wall "${w}", which is not in movableWalls`);
-    if (!k.regions[m.region]) throw new Error(`${who}: movable ${m.id} names region "${m.region}" — no such region`);
+    if (m.sized && m.bbox) throw new Error(`${who}: movable ${m.id} is code-sized and has a bbox — it can be one or the other`);
+    if (!m.sized && !m.bbox) throw new Error(`${who}: movable ${m.id} has no bbox — a drawn movable needs one (or mark it sized)`);
+    if (!m.sized && !k.regions[m.region]) throw new Error(`${who}: movable ${m.id} names region "${m.region}" — no such region`);
   }
 }
 
@@ -381,8 +395,14 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
     // Element-local coordinates: s along its home wall from the anchor, t out from the wall (outside the room).
     const local = (p: Pt) => ({ s: dot(sub(p, m.home.anchor), u0), t: dot(sub(p, m.home.anchor), n0) });
     const own = owned.get(m.id);
-    // checkMovables has made sure the region exists.
-    const pts = [...(own?.segs ?? []).flat(), ...(own?.arcs ?? []).flat(), ...pathPoints(k.regions[m.region])].map(local);
+    // #255: a code-sized element is a rectangle in local coordinates — its typed size, centred along the wall, out to
+    // its right. No size (or a junk one) = a zero-size rectangle at its anchor.
+    const sz = m.sized ? d.movableSizes?.[m.id] : undefined;
+    const ft = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, v) : 0);
+    const half = ft(sz?.alongFt) * 6, deep = ft(sz?.depthFt) * 12;
+    const corners = m.sized ? [{ s: -half, t: 0 }, { s: half, t: 0 }, { s: half, t: deep }, { s: -half, t: deep }] : null;
+    // checkMovables has made sure a drawn element's region exists.
+    const pts = corners ?? [...(own?.segs ?? []).flat(), ...(own?.arcs ?? []).flat(), ...pathPoints(k.regions[m.region])].map(local);
     if (!pts.length) throw new Error(`venue template ${k.kind}: movable ${m.id} owns no drawn lines and has no region`);
     const sMin = Math.min(...pts.map((q) => q.s)), sMax = Math.max(...pts.map((q) => q.s));
     const tMin = Math.min(...pts.map((q) => q.t)), tMax = Math.max(...pts.map((q) => q.t));
@@ -394,7 +414,7 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
     if (req && req.wall === wall && req.t != null && Number.isFinite(req.t)) c = lo + clamp01(req.t) * (hi - lo);
     else if (wall === m.home.wall) c = dot(sub(map(m.home.anchor), W.from), W.u);
     else c = (lo + hi) / 2;
-    return { m, local, sMin, sMax, tMin, tMax, wall, c, lo, hi, fits: true };
+    return { m, local, corners, sMin, sMax, tMin, tMax, wall, c, lo, hi, fits: true };
   });
   for (const wid of Object.keys(walls)) {
     const on = els.filter((e) => e.wall === wid).sort((a, b) => a.c - b.c);
@@ -432,7 +452,8 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
     for (const [a, b] of owned.get(e.m.id)?.segs ?? []) out.polylines.push(densifySegment(a, b).map(place));
     for (const arc of owned.get(e.m.id)?.arcs ?? []) out.polylines.push(arc.map(place));
     for (const l of owned.get(e.m.id)?.labels ?? []) out.labels.push({ text: l.text, h: l.h, ...place(l) });
-    out.regions[e.m.region] = densifyPath(pathPoints(k.regions[e.m.region]), true).map(place);
+    if (e.corners) out.regions[e.m.region] = densifyPath(e.corners.map((q) => add(A, add(mul(W.u, q.s), mul(W.n, q.t)))), true);
+    else out.regions[e.m.region] = densifyPath(pathPoints(k.regions[e.m.region]), true).map(place);
     const sMid = (e.sMin + e.sMax) / 2;
     const runs: PlacedMovable["runs"] = {};
     for (const w of e.m.walls) if (walls[w]) runs[w] = { from: walls[w].from, to: walls[w].to, lo: -e.sMin, hi: walls[w].len - e.sMax, sMid };
@@ -474,9 +495,11 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   const groups = k.trueArcs ?? [];
   const near = (c: Pt, a: { cx: number; cy: number }) => Math.abs(c.x - a.cx) < 0.01 && Math.abs(c.y - a.cy) < 0.01;
   const groupOf = (a: { cx: number; cy: number }) => groups.find((g) => g.centres.some((c) => near(c, a)));
-  const scaleOf = (g: TrueArcGroup) => (X(k.cx + g.scaleHalf, g.atY) - X(k.cx, g.atY)) / g.scaleHalf;
+  const scaleOf = (g: TrueArcGroup) => (X(k.cx + g.scaleHalf!, g.atY!) - X(k.cx, g.atY!)) / g.scaleHalf!;
 
   type Circle = { cx: number; cy: number; r: number };
+  /** #255: a circle with no chord to follow (full, or a collapsed sweep): scaled by the group's k, or — keep-sweep — its drawn radius. */
+  const noChordR = (arc: Circle, g: TrueArcGroup) => (g.scaleHalf != null ? arc.r * scaleOf(g) : arc.r);
   const isFull = (from: number, to: number) => Math.abs(to - from) >= 360 - 1e-9;
   const drawnEnd = (arc: Circle, deg: number): Pt => ({ x: arc.cx + arc.r * Math.cos(deg * DEG), y: arc.cy + arc.r * Math.sin(deg * DEG) });
   /** The sweep t0 → t1 in the drawn arc's direction. */
@@ -496,11 +519,12 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
     const half = Math.hypot(m1.x - m0.x, m1.y - m0.y) / 2;
     if (half < 1e-9) {
       // No chord (a full circle, or a zero sweep): a similarity about the mapped centre.
-      const c = map({ x: arc.cx, y: arc.cy }), r = arc.r * scaleOf(g);
+      const c = map({ x: arc.cx, y: arc.cy }), r = noChordR(arc, g);
       return { pts: arcPoints({ cx: c.x, cy: c.y, r }, from, to), c, r };
     }
     // Never smaller than the chord needs; a semicircle (chord = diameter) keeps its centre on the chord exactly.
-    const r = Math.max(arc.r * scaleOf(g), half);
+    // #255: without scaleHalf the arc keeps its sweep — the radius that sweeps it over the mapped chord.
+    const r = g.scaleHalf != null ? Math.max(arc.r * scaleOf(g), half) : half / Math.sin((Math.abs(to - from) * DEG) / 2);
     const side = Math.sign((e1.x - e0.x) * (arc.cy - e0.y) - (e1.y - e0.y) * (arc.cx - e0.x)) || 1;
     const ux = (m1.x - m0.x) / (2 * half), uy = (m1.y - m0.y) / (2 * half);
     const h = Math.sqrt(Math.max(0, (r - half) * (r + half)));
@@ -518,7 +542,7 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
    */
   const trueArc = (arc: Circle, from: number, to: number, g: TrueArcGroup) => {
     if (isFull(from, to)) {
-      const c = map({ x: arc.cx, y: arc.cy }), r = arc.r * scaleOf(g);
+      const c = map({ x: arc.cx, y: arc.cy }), r = noChordR(arc, g);
       return { pts: arcPoints({ cx: c.x, cy: c.y, r }, from, to), c, r };
     }
     const ref = innermostAt(arc);
@@ -543,7 +567,8 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
 
   // #255: movable elements' lines, labels and regions are lifted out of the stretch and placed after it.
   const movs = k.movables ?? [];
-  const ownerOf = (a: Pt, b: Pt = a) => movs.find((m) => inBox(a, m.bbox) && inBox(b, m.bbox));
+  // Only a drawn movable (one with a bbox) owns drawing; a code-sized one owns nothing.
+  const ownerOf = (a: Pt, b: Pt = a) => movs.find((m) => m.bbox && inBox(a, m.bbox) && inBox(b, m.bbox));
   const owned: Owned = new Map(movs.map((m) => [m.id, { segs: [], arcs: [], labels: [] }]));
   const movableRegions = new Set(movs.map((m) => m.region));
 
@@ -603,7 +628,7 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   for (const arc of t.arcs) {
     // #255 T11 minors: an arc wholly inside a movable's box is lifted with it, like its lines.
     const raw = arcPoints(arc, arc.a0, arc.a1);
-    const m = movs.find((mv) => raw.every((p) => inBox(p, mv.bbox)));
+    const m = movs.find((mv) => mv.bbox && raw.every((p) => inBox(p, mv.bbox!)));
     if (m) {
       owned.get(m.id)!.arcs.push(raw);
       continue;
@@ -629,6 +654,8 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   }
   const lines: Record<string, Pt[]> = {};
   for (const [name, items] of Object.entries(k.lines)) lines[name] = mapPath(items, false);
+  // #255: key lines that are part of the drawing (curves the DWG only carries as splines).
+  for (const id of k.drawn ?? []) if (lines[id]) polylines.push(lines[id].slice());
   const points: Record<string, Pt> = {};
   for (const [name, p] of Object.entries(k.points)) points[name] = zoneMap(p) ?? mapPt(p);
   const placed = placeMovables(k, d, mapPt, owned);

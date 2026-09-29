@@ -35228,3 +35228,119 @@ async function c255Rv11SanitizeAsyncChecks(): Promise<void> {
   if (res.ok) registerFixture("designs", res.record.id);
   ok(res.ok && JSON.stringify((res.record.config as { movables?: unknown }).movables) === JSON.stringify({ booth: { wall: "left", t: 1 } }), "#255 T11 review: a Quick Design save stores only the rooms and walls its template allows, t clamped");
 }
+
+/* --- #255 T13: engine — symmetric y map, keep-sweep corners, drawn key lines, a code-sized movable --- */
+import { makeHalfMap as c255T13Half, stretchTemplate as c255T13Stretch } from "@/lib/design/venue-templates/stretch";
+import type { TemplateKeys as C255T13Keys, VenueTemplate as C255T13Tpl } from "@/lib/design/venue-templates/types";
+{
+  const f = c255T13Half([{ to: 10, drive: "pro" }, { to: 20, drive: "absorb" }, { to: 25, drive: "wing" }], { pro: 20, wing: 10, house: 30 });
+  ok(Math.abs(f(10) - 20) < 1e-9 && Math.abs(f(20) - 30) < 1e-9 && Math.abs(f(25) - 40) < 1e-9 && Math.abs(f(30) - 45) < 1e-9, "#255 T13: makeHalfMap takes its three targets directly");
+  const corner = (cx: number, cy: number, from: number, to: number) => ({ arc: { cx, cy, r: 20, from, to } });
+  const outline = [
+    { x: -50, y: 70 }, { x: 50, y: 70 }, corner(50, 50, 90, 0), { x: 70, y: -50 }, corner(50, -50, 0, -90),
+    { x: -50, y: -70 }, corner(-50, -50, 270, 180), { x: -70, y: 50 }, corner(-50, 50, 180, 90), { x: -50, y: 70 },
+  ];
+  const tpl: C255T13Tpl = { kind: "r", source: "r", units: "in", extents: { minX: -70, minY: -70, maxX: 70, maxY: 70 }, segments: [[-10, -10, 10, 10]], arcs: [], labels: [] };
+  const keys: C255T13Keys = {
+    kind: "r", cx: 0,
+    x: { kind: "spans", spans: [{ to: 50, drive: "absorb" }, { to: 70, drive: "fixed" }] },
+    yMap: { cy: 0, spans: [{ to: 50, drive: "absorb" }, { to: 70, drive: "fixed" }] },
+    ySpans: [], origin: 0, stageDepthTo: 0, houseDepthTo: 0,
+    regions: { Floor: outline }, spaces: ["Floor"], roles: { stage: "Floor", house: "Floor" },
+    lines: { outline }, drawn: ["outline"], points: {}, requiredLabels: [],
+    defaults: { proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: 100 / 12, houseDepthFt: 100 / 12 },
+    trueArcs: [{ centres: [{ x: 50, y: 50 }, { x: 50, y: -50 }, { x: -50, y: -50 }, { x: -50, y: 50 }] }],
+    movableWalls: { floorTop: { from: { x: -50, y: 70 }, to: { x: 50, y: 70 } } },
+    movables: [{ id: "stage", region: "Stage", sized: true, home: { wall: "floorTop", anchor: { x: 0, y: 70 } }, walls: ["floorTop"] }],
+  };
+  const d = { proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: 200 / 12, houseDepthFt: 100 / 12, pit: false, movableSizes: { stage: { alongFt: 5, depthFt: 2 } } };
+  const sp = c255T13Stretch(tpl, keys, d);
+  const drawnLine = sp.polylines[sp.polylines.length - 1];
+  const tr = drawnLine.filter((p) => p.x > 100 + 1e-9 && p.y > 50 + 1e-9);
+  ok(tr.length > 5 && tr.every((p) => Math.abs(Math.hypot(p.x - 100, p.y - 50) - 20) < 1e-6), "#255 T13: a quarter-circle corner keeps its radius and centre while the straight run doubles — never an ellipse");
+  ok(drawnLine.some((p) => Math.abs(p.x - 120) < 1e-9) && drawnLine.filter((p) => Math.abs(p.y - 70) < 1e-9).some((p) => Math.abs(p.x - 100) < 1e-9), "#255 T13: a drawn key line joins the drawing, mapped by both mirrored maps");
+  const st = sp.regions.Stage, sx = st.map((p) => p.x), sy = st.map((p) => p.y);
+  ok(Math.abs(Math.min(...sx) + 30) < 1e-9 && Math.abs(Math.max(...sx) - 30) < 1e-9 && Math.abs(Math.max(...sy) - 70) < 1e-9 && Math.abs(Math.min(...sy) - 46) < 1e-9, "#255 T13: a code-sized stage is its typed size, inside the floor against its wall");
+  ok(sp.regionLabels.Stage === "Stage" && sp.movables.stage.fits, "#255 T13: …and becomes a region like any drawn room");
+}
+
+/* --- #255 T13 edges: the mirrored map never folds, corners hold at non-uniform sizes, sized rooms move and turn --- */
+import { makeYMap as c255T13eY } from "@/lib/design/venue-templates/stretch";
+{
+  // The mirrored front-to-back map: symmetric about cy and never folding, over a sweep of every input.
+  const yk = { kind: "y", yMap: { cy: 5, spans: [{ to: 10, drive: "pro" as const }, { to: 30, drive: "absorb" as const }, { to: 40, drive: "wing" as const }, { to: 50, drive: "fixed" as const }] } } as unknown as C255T13Keys;
+  let sym = true, mono = true;
+  for (const sd of [0, 1, 20 / 12, 5, 12]) for (const wf of [0, 10 / 12, 3]) for (const hd of [0, 2, 60 / 12, 10, 40]) {
+    const Y = c255T13eY(yk, { proWidthFt: 0, wingFt: wf, stageDepthFt: sd, houseWidthFt: 0, houseDepthFt: hd, pit: false });
+    for (let a = 0; a <= 70; a += 0.5) if (Math.abs(Y(5 + a) - 5 + (Y(5 - a) - 5)) > 1e-9) sym = false;
+    for (let y = -70; y < 80; y += 0.5) if (Y(y + 0.5) < Y(y) - 1e-9) mono = false;
+  }
+  ok(sym && mono, "#255 T13 edges: the mirrored y map is symmetric about cy and never folds, whatever the stage depth, wing and house depth");
+
+  const corner = (cx: number, cy: number, from: number, to: number) => ({ arc: { cx, cy, r: 20, from, to } });
+  const outline = [
+    { x: -50, y: 70 }, { x: 50, y: 70 }, corner(50, 50, 90, 0), { x: 70, y: -50 }, corner(50, -50, 0, -90),
+    { x: -50, y: -70 }, corner(-50, -50, 270, 180), { x: -70, y: 50 }, corner(-50, 50, 180, 90), { x: -50, y: 70 },
+  ];
+  const tpl: C255T13Tpl = { kind: "r", source: "r", units: "in", extents: { minX: -70, minY: -70, maxX: 70, maxY: 70 }, segments: [[-10, -10, 10, 10]], arcs: [{ cx: 50, cy: 50, r: 5, a0: 0, a1: 360 }], labels: [] };
+  const spans = [{ to: 50, drive: "absorb" as const }, { to: 70, drive: "fixed" as const }];
+  const keys: C255T13Keys = {
+    kind: "r", cx: 0, x: { kind: "spans", spans }, yMap: { cy: 0, spans }, ySpans: [], origin: 0, stageDepthTo: 0, houseDepthTo: 0,
+    regions: { Floor: outline }, spaces: ["Floor"], roles: { stage: "Floor", house: "Floor" },
+    lines: { outline }, drawn: ["outline", "no-such-line"], points: {}, requiredLabels: [],
+    defaults: { proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: 100 / 12, houseDepthFt: 100 / 12 },
+    trueArcs: [{ centres: [{ x: 50, y: 50 }, { x: 50, y: -50 }, { x: -50, y: -50 }, { x: -50, y: 50 }] }],
+    movableWalls: { floorTop: { from: { x: -50, y: 70 }, to: { x: 50, y: 70 } }, floorRight: { from: { x: 70, y: 50 }, to: { x: 70, y: -50 } } },
+    movables: [{ id: "stage", region: "Stage", sized: true, home: { wall: "floorTop", anchor: { x: 0, y: 70 } }, walls: ["floorTop", "floorRight"] }],
+  };
+  const dims = (W: number, D: number, extra: Record<string, unknown> = {}) => ({ proWidthFt: 0, wingFt: 0, stageDepthFt: 0, houseWidthFt: W / 12, houseDepthFt: D / 12, pit: false, ...extra });
+  // Every corner stays a quarter circle of radius 20 about its mapped centre at any width × depth, the outline never folds.
+  let corners = true, noFold = true, bboxOk = true;
+  for (const W of [0, 40, 100, 300, 1000]) for (const D of [0, 30, 60, 100, 700]) {
+    const sp = c255T13Stretch(tpl, keys, dims(W, D));
+    const line = sp.lines.outline, hx = W / 2, hy = D / 2;
+    for (const p of line) {
+      if (Math.abs(p.x) > hx + 1e-9 && Math.abs(p.y) > hy + 1e-9 && Math.abs(Math.hypot(Math.abs(p.x) - hx, Math.abs(p.y) - hy) - 20) > 1e-6) corners = false;
+    }
+    // Clockwise all the way round: the polar angle about the centre only ever decreases.
+    const ang = line.map((p) => Math.atan2(p.y, p.x));
+    let turned = 0;
+    for (let i = 1; i < ang.length; i++) {
+      let da = ang[i] - ang[i - 1];
+      if (da > Math.PI) da -= 2 * Math.PI;
+      if (da < -Math.PI) da += 2 * Math.PI;
+      if (da > 1e-9) noFold = false;
+      turned += da;
+    }
+    if (Math.abs(turned + 2 * Math.PI) > 1e-6) noFold = false;
+    const xs = line.map((p) => p.x), ys = line.map((p) => p.y);
+    if (Math.abs(Math.max(...xs) - Math.min(...xs) - (W + 40)) > 1e-6 || Math.abs(Math.max(...ys) - Math.min(...ys) - (D + 40)) > 1e-6) bboxOk = false;
+  }
+  ok(corners && noFold && bboxOk, "#255 T13 edges: keep-sweep corners stay radius-20 quarter circles and the outline never folds, over a width × depth sweep");
+  const sp = c255T13Stretch(tpl, keys, dims(300, 60));
+  const circ = sp.polylines.find((pl) => pl.length > 100 && pl.every((p) => Math.abs(Math.hypot(p.x - 150, p.y - 30) - 5) < 1e-9));
+  ok(!!circ && sp.polylines.length === 3, "#255 T13 edges: a full circle with no scaleHalf keeps its drawn radius about its mapped centre; an unknown drawn id adds nothing");
+  const bx = (r: Array<{ x: number; y: number }>) => [Math.min(...r.map((p) => p.x)), Math.max(...r.map((p) => p.x)), Math.min(...r.map((p) => p.y)), Math.max(...r.map((p) => p.y))];
+  const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  const sz = { stage: { alongFt: 5, depthFt: 2 } };
+  const atStart = c255T13Stretch(tpl, keys, dims(200, 100, { movableSizes: sz, movables: { stage: { wall: "floorTop", t: 0 } } }));
+  const onRight = c255T13Stretch(tpl, keys, dims(200, 100, { movableSizes: sz, movables: { stage: { wall: "floorRight", t: 0.5 } } }));
+  ok(near(bx(atStart.regions.Stage), [-100, -40, 46, 70]) && near(bx(onRight.regions.Stage), [96, 120, -30, 30]) && atStart.movables.stage.fits && onRight.movables.stage.wall === "floorRight",
+    "#255 T13 edges: a sized stage slides along its wall and turns to face in on another wall, keeping its size");
+  const big = c255T13Stretch(tpl, keys, dims(200, 100, { movableSizes: { stage: { alongFt: 20, depthFt: 2 } } }));
+  const none = c255T13Stretch(tpl, keys, dims(200, 100));
+  const junk = c255T13Stretch(tpl, keys, dims(200, 100, { movableSizes: { stage: { alongFt: Number.NaN, depthFt: -3 } } }));
+  ok(!big.movables.stage.fits && big.warnings.length === 1 && near(bx(none.regions.Stage), [0, 0, 70, 70]) && near(bx(junk.regions.Stage), [0, 0, 70, 70]),
+    "#255 T13 edges: a sized stage too long for its wall warns; no size (or a junk one) is a zero-size rectangle at its anchor");
+  const throws = (m: Record<string, unknown>) => {
+    try {
+      c255T13Stretch(tpl, { ...keys, movables: [m as unknown as NonNullable<C255T13Keys["movables"]>[number]] }, dims(200, 100));
+      return "";
+    } catch (e) {
+      return String(e);
+    }
+  };
+  const base = { id: "stage", region: "Stage", home: { wall: "floorTop", anchor: { x: 0, y: 70 } }, walls: ["floorTop"] };
+  ok(throws({ ...base, sized: true, bbox: { minX: 0, maxX: 1, minY: 0, maxY: 1 } }).includes("code-sized and has a bbox") && throws(base).includes("has no bbox"),
+    "#255 T13 edges: a movable is drawn (bbox) or code-sized, never both or neither — named errors");
+}
