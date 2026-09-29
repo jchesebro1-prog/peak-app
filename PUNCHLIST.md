@@ -9732,30 +9732,38 @@ the card. New `renameDesignAction` in `src/app/(app)/design/designs/actions.ts`;
 
 ---
 
-## 269. Estimator — click an inserted labor line to reopen and edit it — OPEN (building)
+## 269. Estimator — click an inserted labor line to reopen and edit it — DONE 2026-09-29 (D485)
 
 **Reported:** Jeff (2026-09-29): "Need the ability to edit the labor when you click the line item that inserted when
-finished." Today `addLabor` (`estimator-client.tsx`) pushes `buildLaborItems` output and `closeInput()` discards the
-configurator draft, so nothing about the crew/days/trip survives on the lines — the only fix is delete and re-add.
+finished." Before, `addLabor` discarded the configurator draft, so the lines could only be deleted and re-added.
 
-**Plan:** every line from one "Add labor" shares a `laborGroup` id and the `LaborDraft` snapshot is stored with the
-group; clicking a group line reopens the Labor configurator pre-filled, **Update labor** replaces the group's lines in
-place at current rates (hand edits to those lines are replaced — said in the modal). Labor lines added before this
-change carry no draft and show no edit control. Being built alongside #270.
+**Done.** Every line from one "Add labor" shares a `laborGroup` id and the draft is stored once per group on the
+system (`sec.laborGroups[id] = { draft, lines }`, new `estimator/labor-group.ts`), so removing one line never loses it
+(removing the last line drops it). Clicking a labor line's description or its new ✎ reopens the configurator filled
+from the draft at today's rates; **Update labor** rebuilds the whole group where its first line was (removed lines come
+back), Cancel leaves it. The modal says how many lines have hand edits (price, qty or notes) that Update will replace
+and how many were removed. When a tier change or Copy system (#254/#266) moves the labor seed, a stored draft still at
+the old seed follows — even when every line is hand-priced — while a hand-typed draft margin stays (review fix).
+Double-clicks can't reach the modal's controls. Labor added before this change shows no edit control (the LABOR
+badge's tooltip explains). Carried through Save, Move and Copy.
+Gates (merged with main incl. #275): tsc 0; test:specs 8944 PASS / 0 FAIL; test:smoke 168/0; eslint 0 errors, no new
+warnings; next build OK. Browser-verified on a scratch datadir (7 lines from a Travel mob with a lift; edit crew 4→6 →
+replaced in place; hand-edit warning; save/reload; customer print shows one line). Reviewed; the one finding fixed.
 
 ---
 
-## 270. Estimator Labor — hotel, per diem, mileage (and lift) as their own lines — OPEN (building)
+## 270. Estimator Labor — hotel, per diem, mileage (and lift) as their own lines — DONE 2026-09-29 (D484)
 
 **Reported:** Jeff (2026-09-29): "We also need to see hotels pre-diem and mileage costs on labor and insert that."
-Confirmed: **inserted as their own lines.** `computeMob` (`pricing.ts`) already computes `mileCost`, `hotelCost`,
-`foodCost` (per diem) and `liftCost`, but `buildLaborItems` folds them into one line per mobilization and the Labor
-modal shows only "2 veh · 3 nt lodging · per diem" with no dollars.
+Confirmed: inserted as their own lines.
 
-**Plan:** each mobilization line becomes crew labor only; Mileage / Hotel / Per diem / Lift rental follow it as their
-own internal lines (tagged, with the basis shown, e.g. "2 vehicles × 340 mi RT × $0.70"). Cost unchanged to the cent.
-The customer document keeps folding them into their mobilization line, as it already folds shop/misc/bonus. The Labor
-modal shows the per-mobilization dollar breakdown.
+**Done.** Each mobilization now inserts its crew-labor line followed by Mileage / Hotel / Per diem / Lift rental lines
+(only those with a cost), named like "Hotel — Install", tagged `laborTravel`, each with its basis in the internal note
+("2 vehicles × 300 mi RT × $0.70/mi", "2 rooms × 3 nights × $140", "4 crew × 3 days × $70", "1 rental × $750"). Cost
+is unchanged to the cent (the labor line absorbs rounding). The customer document folds each travel line's sell into
+its own mobilization's line, as it already did for shop/misc/bonus, so what the customer sees is unchanged; the PM parts
+list skips them; Copy system keeps their cost. The Labor modal shows each mobilization's Labor / Mileage / Hotel / Per
+diem / Lift dollars with the basis. See D484 for the per-line sell.
 
 ---
 

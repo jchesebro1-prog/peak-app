@@ -8073,3 +8073,20 @@ rate joins the "why the price changed" list. A customer's own portal pricing and
 Refresh pricing keeps a lift staff added, at today's rate. The letter boilerplate's "lift rentals … may be stated
 separately" became "lift rentals not listed above", so it no longer reads as an extra charge beside a listed lift.
 
+## D484. Labor travel lines sell at the margin on their own cost (#270, 2026-09-29)
+
+Splitting a mobilization into labor + mileage/hotel/per diem/lift lines keeps its cost to the cent, but each line's
+sell is its own cost at the labor margin, so a mobilization's total sell can differ from the old single line by a few
+cents. Forcing the old sell onto the labor line could push it more than 5¢ off its seed, and tier re-pricing (#254) and
+Copy system (#266) would then treat it as hand-priced and skip it. The labor total always matches the configurator's
+total; saved quotes are not rewritten. The customer document folds each travel line into its own mobilization line.
+
+## D485. The labor configurator draft is stored once per group on the system (#269, 2026-09-29)
+
+`sec.laborGroups[id] = { draft, lines }` (not on a line), so deleting any single line keeps the group editable; the
+last line's removal drops the record. Re-opening uses the draft's inputs at today's rates, and Update rebuilds the whole
+group in place — including restoring removed lines and replacing hand edits (the modal counts them first). When the
+labor seed margin moves (tier change, Copy system to another tier), a draft still at the previous whole-percent seed
+follows it whether or not any line re-priced; a hand-typed draft margin is the user's and never moves. Labor added
+before #269 has no draft and stays non-editable rather than guessing one from its lines.
+
