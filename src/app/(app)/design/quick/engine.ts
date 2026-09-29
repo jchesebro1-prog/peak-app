@@ -415,6 +415,29 @@ export function clamp(v: number, a: number, b: number): number {
   return Math.max(a, Math.min(b, v));
 }
 
+/**
+ * A `DimField` value clamped to LIM; a non-finite/junk input (NaN, ±Infinity, a string, missing) becomes the
+ * range's midpoint (#255 hardening). A forged Quick Design / Grid Scope save can carry anything — 1e6, -1e6,
+ * NaN, Infinity — and the plan geometry's loops (house-dims.ts, plan-svg.tsx) scale with width/depth/wing, so
+ * every save path (quickSaveFields, the Grid intake + Scope-panel saves) and the geometry's own read
+ * (house-dims.ts's family Dims functions) clamp the same way — a save can't store junk, and an already-stored
+ * one (from before this fix) can't hang or crash a render either.
+ */
+export function clampDimField(field: DimField, v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? clamp(n, LIM[field][0], LIM[field][1]) : (LIM[field][0] + LIM[field][1]) / 2;
+}
+
+/** width/depth/grid/wing/ph on a saved Quick Design / Grid Scope config, clamped to LIM (#255 hardening) —
+ *  only touches keys already present on `cfg`, so a partial patch stays partial. */
+export function clampConfigDims<T extends Partial<Record<DimField, unknown>>>(cfg: T): T {
+  const out: Record<string, unknown> = { ...cfg };
+  (["width", "depth", "grid", "wing", "ph"] as const satisfies readonly DimField[]).forEach((f) => {
+    if (cfg[f] !== undefined) out[f] = clampDimField(f, cfg[f]);
+  });
+  return out as T;
+}
+
 /** '$' + rounded, en-US grouped — the prototype's num(). */
 export function moneyRound(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");

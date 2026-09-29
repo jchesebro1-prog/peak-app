@@ -311,6 +311,15 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const ML = 62, MT = 54;
   const C = canvasOf(plan, { W: 640, ML, MR: 40, MT, MB: 44 });
   const { W, H, ppi, ppf, px, regions } = C;
+  // #255 review fix (D465): a label two or more regions share is numbered, exactly as blackboxGeom's rooms —
+  // Church Contemporary's four Storage rooms read "Storage 1".."Storage 4" in the dimension fields, the plan
+  // and the starter Spaces, never four unnumbered "Storage"s.
+  const names = numberedRegionLabels(plan.regionLabels, Object.keys(keys.regions));
+  const inBox = (b: Box, l: { x: number; y: number }) => l.x >= b.x - 0.5 && l.x <= b.x + b.w + 0.5 && l.y >= b.y - 0.5 && l.y <= b.y + b.h + 0.5;
+  const labels = C.labels.map((l) => {
+    const rid = Object.keys(keys.regions).find((r) => names[r] !== plan.regionLabels[r] && l.text === plan.regionLabels[r] && regions[r] && inBox(boxOf(regions[r]), l));
+    return rid ? { ...l, text: names[rid] } : l;
+  });
   const pt = (name: string) => px(plan.points[name]);
   const centre = pt("centre"), aisle = pt("aisle");
   const yFront = centre.y, yBack = pt("platBack").y, yNaveBack = pt("naveBack").y;
@@ -418,8 +427,8 @@ export function churchGeom(s: AState, tpl?: string | null) {
     platBackL, platBackR, platFrontL: pt("platFrontL"), platFrontR: pt("platFrontR"),
     naveL, naveR, mix, mixBox, mixText, consoleAt, aisle, speakers,
     platform, nave, booth, stage: platform, stageBox, pews,
-    regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
-    polylines: C.polylines, labels: C.labels,
+    regions, regionLabels: names, spaces: keys.spaces, roles: keys.roles,
+    polylines: C.polylines, labels,
     handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("handleBack") },
     movables: movablesPx(plan, px),
     fromPx: C.fromPx,

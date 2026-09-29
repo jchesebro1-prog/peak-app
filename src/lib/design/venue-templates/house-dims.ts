@@ -1,4 +1,4 @@
-import type { AState } from "@/app/(app)/design/quick/engine";
+import { clampDimField, type AState } from "@/app/(app)/design/quick/engine";
 import { ARENA_CORNER_R, ARENA_COURT_SHARE } from "./arena.keys";
 import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
 import { CHURCH_TRADITIONAL_KEYS } from "./church-traditional.keys";
@@ -12,7 +12,7 @@ import type { StretchDims } from "./types";
  * Pure; safe in client components. Called without a template id every
  * function behaves exactly as #249's proscenium version.
  */
-type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt" | "movables" | "bowlDepthFt">>;
+export type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt" | "movables" | "bowlDepthFt">>;
 
 export const HOUSE_DEPTH_LIM: [number, number] = [40, 200];
 export const HOUSE_NARROW_WARNING = "The house is narrower than the stage, so its side walls slant inward.";
@@ -140,21 +140,35 @@ export function houseDims(s: HouseInput, id?: string | null): { widthFt: number;
  * The stretch inputs for a proscenium-family template. #255 fix: Quick Design's Gym Stage venue maps exactly like
  * a proscenium — width = the opening, wing = return wall → stage side wall, depth = the stage; the house fields
  * are the gym floor — the same numbers its pricing reads.
+ * #255 hardening: width/wing/depth are clamped to LIM here — the single read the geometry takes them through —
+ * so an already-stored (or forged) 1e6/-1e6/NaN/Infinity config can't blow up a HouseSpec's own width/depth
+ * limits (several derive their lower bound FROM width/wing) or the drawing's loops.
  */
 export function prosceniumDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string = "proscenium@1"): StretchDims {
-  const h = houseDims(s, id);
-  return { proWidthFt: s.width, wingFt: s.wing || 0, stageDepthFt: s.depth, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: !!s.sys?.pit, movables: s.movables ?? undefined };
+  const width = clampDimField("width", s.width);
+  const wing = clampDimField("wing", s.wing || 0);
+  const depth = clampDimField("depth", s.depth);
+  const h = houseDims({ ...s, width, wing }, id);
+  return { proWidthFt: width, wingFt: wing, stageDepthFt: depth, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: !!s.sys?.pit, movables: s.movables ?? undefined };
 }
 
-/** The stretch inputs for a church-family template: width / depth are the platform, the house fields the nave. */
+/** The stretch inputs for a church-family template: width / depth are the platform, the house fields the nave.
+ *  #255 hardening: width/depth clamped to LIM first (see prosceniumDims). */
 export function churchDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string): StretchDims {
-  const h = houseDims(s, id);
-  return { proWidthFt: s.width, wingFt: 0, stageDepthFt: stageDepthFor(s, id).depthFt, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: false, movables: s.movables ?? undefined };
+  const width = clampDimField("width", s.width);
+  const depth = clampDimField("depth", s.depth);
+  const c = { ...s, width, depth };
+  const h = houseDims(c, id);
+  return { proWidthFt: width, wingFt: 0, stageDepthFt: stageDepthFor(c, id).depthFt, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: false, movables: s.movables ?? undefined };
 }
 
-/** The stretch inputs for the blackbox family (#255): the room's own width/depth fields (blackbox and Conference kinds alike). */
+/** The stretch inputs for the blackbox family (#255): the room's own width/depth fields (blackbox and Conference
+ *  kinds alike). #255 hardening: clamped to LIM first — blackboxDims has no HouseSpec to fall back on, so an
+ *  unclamped width/depth would otherwise flow straight into the room's own house dims. */
 export function blackboxDims(s: Pick<AState, "width" | "depth"> & Partial<Pick<AState, "movables">>): StretchDims {
-  return { proWidthFt: s.width, wingFt: 0, stageDepthFt: 0, houseWidthFt: s.width, houseDepthFt: s.depth, pit: false, movables: s.movables ?? undefined };
+  const width = clampDimField("width", s.width);
+  const depth = clampDimField("depth", s.depth);
+  return { proWidthFt: width, wingFt: 0, stageDepthFt: 0, houseWidthFt: width, houseDepthFt: depth, pit: false, movables: s.movables ?? undefined };
 }
 
 /** #255: the arena's bowl depth (feet) — the typed value (≥ 0), else the spec's default, within its limits; 0 for a spec without one. */
@@ -225,4 +239,26 @@ export function houseFields(s: HouseInput, id: string | null | undefined): { row
     ],
     warning: h.warning,
   };
+}
+
+/**
+ * A saved config's house fields (houseWidthFt / houseDepthFt / bowlDepthFt), clamped to the effective
+ * template's own limits (#255 hardening, save time) — houseDims/bowlOf already re-derive safely from a
+ * junk stored value at READ time (a non-finite or negative one falls back to the spec's default, same as
+ * here), but this keeps a forged huge value from ever being written. Only touches keys `cfg` carries;
+ * `id` unresolved (or a spec without the `extra` row) leaves `bowlDepthFt` alone.
+ */
+export function clampHouseFieldsFor<T extends Partial<HouseInput>>(cfg: T, id: string | null | undefined): T {
+  const spec = houseSpecFor(id);
+  // widthLim reads width/wing (a missing width/wing — a partial Scope patch — falls back to 0, same as every
+  // HouseSpec.widthLim implementation's own `|| 0`).
+  const dims: HouseInput = { width: cfg.width ?? 0, wing: cfg.wing ?? 0 };
+  const out: Record<string, unknown> = { ...cfg };
+  if ("houseWidthFt" in cfg) out.houseWidthFt = pos(cfg.houseWidthFt) ? clamp(cfg.houseWidthFt as number, spec.widthLim(dims)) : null;
+  if ("houseDepthFt" in cfg) out.houseDepthFt = pos(cfg.houseDepthFt) ? clamp(cfg.houseDepthFt as number, spec.depthLim) : null;
+  if (spec.extra && "bowlDepthFt" in cfg) {
+    const v = cfg.bowlDepthFt;
+    out.bowlDepthFt = typeof v === "number" && Number.isFinite(v) && v >= 0 ? clamp(v, spec.extra.lim) : null;
+  }
+  return out as T;
 }

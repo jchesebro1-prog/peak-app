@@ -10669,6 +10669,7 @@ seeded()
   .then(() => c255Rv11SanitizeAsyncChecks())
   .then(() => c255Rv12SpacesAsyncChecks())
   .then(() => c255T14GridAsyncChecks())
+  .then(() => c255StorSpacesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -34531,7 +34532,7 @@ import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
   const base = c255T8Default(0);
   const a = { ...base, venue: "church", width: 43, depth: 23, templateId: "church-contemporary@1", sys: { ...base.sys, lighting: true, audio: true } };
   const svg = c255T8Markup(c255T8Build(a, 8, 3, "#3a3f4a", "church-contemporary@1"), "#3a3f4a");
-  ok(["Platform", "Nave", "Backstage", "Green Room", "Electrical Room", "Control Booth", "Cry Room"].every((t) => svg.includes(">" + t + "<")) && svg.split(">Storage<").length - 1 === 4, "#255 T8: the Contemporary plan shows every room Jeff named");
+  ok(["Platform", "Nave", "Backstage", "Green Room", "Electrical Room", "Control Booth", "Cry Room"].every((t) => svg.includes(">" + t + "<")) && ["Storage 1", "Storage 2", "Storage 3", "Storage 4"].every((t) => svg.split(">" + t + "<").length === 2) && !svg.includes(">Storage<"), "#255 T8 review: the Contemporary plan shows every room Jeff named, its four Storage rooms numbered (D465)");
   const G = c255T8Geom(a, "church-contemporary@1");
   ok(G.pews.length > 20 && G.booth.x < G.nave.x + G.nave.w / 3, "#255 T8: pews fill the nave; the booth role is the Control Booth (lower left)");
   const inPoly = (poly: Array<{ x: number; y: number }>, x: number, y: number) => {
@@ -34554,7 +34555,7 @@ import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
   ok(marks, "#255 T8: Contemporary loudspeakers stand in the Nave beside the platform; the FOH mix box and the CONSOLE mark sit inside the Control Booth — default, small, wide, deep, deep-platform");
   const fr = c255T8Frame(a, { template: "church-contemporary@1" });
   ok(Math.abs(fr.booth.x - G.booth.x / G.W) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#255 T8: Auto fill sends the FOH mix gear to the Control Booth");
-  ok([...c255T8Spaces].length === 11 && G.spaces.map((r) => G.regionLabels[r]).filter((t) => t === "Storage").length === 4, "#255 T8: eleven starter Spaces, four of them Storage");
+  ok([...c255T8Spaces].length === 11 && JSON.stringify(G.spaces.filter((r) => r.startsWith("storage")).map((r) => G.regionLabels[r])) === JSON.stringify(["Storage 1", "Storage 2", "Storage 3", "Storage 4"]), "#255 T8 review: eleven starter Spaces, its four Storage rooms numbered Storage 1..Storage 4 (D465)");
 }
 
 /* --- #255 T8 fix: Contemporary never folds, the pointed front stays clear of the splays, the marks fit their rooms --- */
@@ -35220,7 +35221,10 @@ import type { AutoCard as C255Rv11Card } from "@/lib/design/auto-estimate";
   const chTb = c255Rv11Toolbar(c255Rv11Build({ ...base, venue: "church" }, 8, 3, "#3a3f4a"));
   ok(bbTb?.hint === "Drag a room along the walls" && bbTb.reset === "Reset rooms" && chTb?.hint === "Drag the side or back wall to size the room" && chTb.reset === "Reset house", "#255 T11 review: the plan toolbar names what can be dragged and reset");
   const act = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
-  ok((act.match(/cleanMovables\(/g) || []).length >= 3 && act.indexOf("cleanMovables({ ...input.autoConfig") < act.indexOf("saveGridIntake(input.projectId") && act.includes("setScopeInputs(projectId, scopeInputs && cleanMovables(scopeInputs, tpl))"), "#255 T11 review: the Grid intake and Scope-inputs saves sanitize movables before storing");
+  // #255 hardening: both saves now also clamp width/depth/grid/wing/ph (clampConfigDims) — and the Grid intake
+  // save the house fields too (clampHouseFieldsFor) — around the same cleanMovables() call this test already
+  // checked runs before either config is stored.
+  ok((act.match(/cleanMovables\(/g) || []).length >= 3 && act.indexOf("cleanMovables(clampHouseFieldsFor(clampConfigDims({ ...input.autoConfig") < act.indexOf("saveGridIntake(input.projectId") && act.includes("setScopeInputs(projectId, cleaned && cleanMovables(cleaned, tpl))"), "#255 T11 review: the Grid intake and Scope-inputs saves sanitize movables before storing");
 }
 
 async function c255Rv11SanitizeAsyncChecks(): Promise<void> {
@@ -35674,3 +35678,75 @@ import type { AutoCard as C255T15Card } from "@/lib/design/auto-estimate";
   ok(arena?.hint === "Drag the stage or a room along the walls" && arena.resetTitle === "Put the stage and rooms back where they were drawn" && arena.reset === "Reset rooms" && bb?.hint === "Drag a room along the walls" && bb.resetTitle === "Put the rooms back where they were drawn", "#255 T15: on the arena the plan toolbar's hint and Reset title name the stage");
 }
 import { planToolbar as c255T15Toolbar } from "@/app/(app)/design/quick/plan-svg";
+
+/* --- #255 review fix: Church Contemporary's four Storage rooms are numbered, in the plan and the Spaces (D465) --- */
+import { churchGeom as c255StorGeom, buildPlan as c255StorBuild, renderPlanSvgMarkup as c255StorMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255StorDefault } from "@/app/(app)/design/quick/engine";
+{
+  const base = c255StorDefault(0);
+  const a = { ...base, venue: "church", width: 43, depth: 23 };
+  const G = c255StorGeom(a, "church-contemporary@1");
+  const ids = ["storage-1", "storage-2", "storage-3", "storage-4"];
+  ok(ids.map((id) => G.regionLabels[id]).join("|") === "Storage 1|Storage 2|Storage 3|Storage 4" && G.regionLabels.Platform === "Platform" && G.regionLabels["Control Booth"] === "Control Booth", "#255 review fix: churchGeom numbers Church Contemporary's four Storage rooms — a name no other region shares stays as-is");
+  const svg = c255StorMarkup(c255StorBuild(a, 8, 3, "#3a3f4a", "church-contemporary@1"), "#3a3f4a");
+  ok(["Storage 1", "Storage 2", "Storage 3", "Storage 4"].every((t) => svg.split(">" + t + "<").length === 2) && !svg.includes(">Storage<"), "#255 review fix: the Contemporary plan draws Storage 1..Storage 4, never a bare Storage — consistent with how blackboxGeom numbers its own rooms");
+  // Traditional has no duplicate room names — numberedRegionLabels is a no-op there.
+  const T = c255StorGeom(a, "church-traditional@1");
+  ok(Object.values(T.regionLabels).every((v, _i, arr) => arr.filter((x) => x === v).length === 1), "#255 review fix: Church Traditional's room names are already unique — numbering never touches them");
+}
+async function c255StorSpacesAsyncChecks(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const base = c255StorDefault(0);
+  const a = { ...base, venue: "church", width: 43, depth: 23, templateId: "church-contemporary@1" };
+  const spaces = GP.starterSpaces(a, "church", "sh", "church-contemporary@1");
+  ok(spaces.length === 11 && spaces.filter((s) => s.name.startsWith("Storage")).map((s) => s.name).join("|") === "Storage 1|Storage 2|Storage 3|Storage 4", "#255 review fix: a Church Contemporary base sheet's starter Spaces name the four Storage rooms Storage 1..Storage 4, never four unnumbered Storage Spaces");
+}
+
+/* --- #255 hardening: forged Quick Design / Grid Scope dimensions clamp at save and read; buildPlan never hangs or throws --- */
+import { buildPlan as c255HardBuild } from "@/app/(app)/design/quick/plan-svg";
+import { clampConfigDims as c255HardClampCfg, clampDimField as c255HardClampField, defaultAState as c255HardDefault, LIM as c255HardLim, VENUES as c255HardVenues } from "@/app/(app)/design/quick/engine";
+import { quickSaveFields as c255HardSaveFields } from "@/lib/stores/design-pricing";
+{
+  const base = c255HardDefault(0);
+  const junkVals: Array<[string, number]> = [["1e6", 1e6], ["-1e6", -1e6], ["NaN", Number.NaN], ["Infinity", Number.POSITIVE_INFINITY]];
+  let allSafe = true, allFast = true;
+  const bad: string[] = [];
+  for (const v of c255HardVenues) {
+    for (const [tag, junk] of junkVals) {
+      const s = { ...base, venue: v.key, width: junk, depth: junk, grid: junk, wing: junk, ph: junk };
+      const t0 = Date.now();
+      try {
+        c255HardBuild(s, 8, 3, "#3a3f4a");
+      } catch (e) {
+        allSafe = false;
+        bad.push(`${v.key} ${tag}: threw ${e instanceof Error ? e.message : String(e)}`);
+      }
+      const ms = Date.now() - t0;
+      if (ms > 200) { allFast = false; bad.push(`${v.key} ${tag}: ${ms}ms`); }
+    }
+  }
+  ok(allSafe, `#255 hardening: buildPlan never throws on a forged (1e6/-1e6/NaN/Infinity) width/depth/grid/wing/ph, on every venue kind${bad.length ? " — " + bad.slice(0, 5).join(", ") : ""}`);
+  ok(allFast, `#255 hardening: buildPlan returns within 200ms of a forged width/depth/grid/wing/ph, on every venue kind${bad.length ? " — " + bad.slice(0, 5).join(", ") : ""}`);
+  // clampDimField: a huge/negative-but-finite value clamps to LIM; a non-finite one falls to the range's midpoint.
+  ok(
+    c255HardClampField("width", 1e6) === c255HardLim.width[1] &&
+    c255HardClampField("width", -1e6) === c255HardLim.width[0] &&
+    c255HardClampField("width", Number.NaN) === (c255HardLim.width[0] + c255HardLim.width[1]) / 2 &&
+    c255HardClampField("depth", Number.POSITIVE_INFINITY) === (c255HardLim.depth[0] + c255HardLim.depth[1]) / 2 &&
+    c255HardClampField("grid", 40) === 40,
+    "#255 hardening: clampDimField clamps a huge/negative value to LIM, a non-finite one to the range's midpoint, and leaves an in-range value alone"
+  );
+  const untouched = { name: "kept" } as Record<string, unknown>;
+  ok(JSON.stringify(c255HardClampCfg(untouched)) === JSON.stringify(untouched), "#255 hardening: clampConfigDims only touches the dimension keys a config actually carries");
+  // quickSaveFields: a forged save's width/depth/grid land in LIM at the top level AND inside `config` — the
+  // object the plan geometry actually reads (design-pricing.ts's own comment: "never trusted").
+  const forged = {
+    name: "x", venue: "church", width: 1e6, depth: -1e6, grid: Number.NaN,
+    config: { venue: "church", width: 1e6, depth: -1e6, grid: Number.NaN, wing: Number.POSITIVE_INFINITY, ph: 1e6 },
+  };
+  const saved = c255HardSaveFields(forged);
+  const cfg = saved.config as Record<string, number>;
+  const inLim = (f: "width" | "depth" | "grid" | "wing" | "ph", v: number) => Number.isFinite(v) && v >= c255HardLim[f][0] && v <= c255HardLim[f][1];
+  ok(inLim("width", saved.width!) && inLim("depth", saved.depth!) && inLim("grid", saved.grid!), "#255 hardening: quickSaveFields clamps the top-level width/depth/grid to LIM");
+  ok(inLim("width", cfg.width) && inLim("depth", cfg.depth) && inLim("grid", cfg.grid) && inLim("wing", cfg.wing) && inLim("ph", cfg.ph), "#255 hardening: quickSaveFields clamps config.width/depth/grid/wing/ph to LIM too");
+}

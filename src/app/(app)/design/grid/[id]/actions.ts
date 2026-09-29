@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
-import { venueOf, type QuickScopeInputs, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
+import { clampConfigDims, venueOf, type QuickScopeInputs, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
+import { clampHouseFieldsFor } from "@/lib/design/venue-templates/house-dims";
 import {
   addCurtainPlacement,
   addOption,
@@ -301,7 +302,11 @@ export async function saveGridIntakeAction(input: {
   const venueType = site?.venueKind ?? null;
   const templateId = sanitizeTemplateId(kind, input.autoConfig.templateId);
   const tpl = effectiveTemplateFor(kind, { venueType, templateId }, venueTypesFrom((await getSettings()).venueTypes));
-  const autoConfig: AState = cleanMovables({ ...input.autoConfig, venueType, templateId }, tpl);
+  // #255 hardening: width/depth/grid/wing/ph clamped to LIM and the house fields to `tpl`'s own limits before
+  // anything (scope inputs, the base sheet, the linked designs' config) is derived from this intake — a forged
+  // `autoConfig` (this is a client payload, `AState`-typed but never trusted) can otherwise carry a 1e6/-1e6/
+  // NaN/Infinity dimension straight into the plan geometry's loops.
+  const autoConfig: AState = cleanMovables(clampHouseFieldsFor(clampConfigDims({ ...input.autoConfig, venueType, templateId }), tpl), tpl);
   // A cover page left blank takes the chosen venue's names and address.
   const fromVenue = site
     ? coverFromVenue({ label: site.name, locationName: site.locationName, address: site.address, city: site.city, state: site.state }, linked.customerName)
@@ -874,7 +879,12 @@ export async function setScopeInputsAction(
   await requireUser();
   // #255: movable rooms are the one field checked — only the effective template's rooms, on walls they may use.
   const tpl = scopeInputs?.movables == null ? null : effectiveTemplateFor(venueOf(scopeInputs).kind, scopeInputs, venueTypesFrom((await getSettings()).venueTypes));
-  const p = await setScopeInputs(projectId, scopeInputs && cleanMovables(scopeInputs, tpl));
+  // #255 hardening: "no validation: any well-typed payload is accepted" is exactly the hole — width/depth/
+  // grid/wing/ph clamped to LIM before this is stored (cheap, no settings read, so every save keeps this
+  // action's fast path), so a forged Scope-panel save can't carry a 1e6/-1e6/NaN/Infinity dimension into the
+  // plan geometry's loops; the geometry's own read (house-dims.ts) clamps the same way regardless.
+  const cleaned = scopeInputs && clampConfigDims(scopeInputs);
+  const p = await setScopeInputs(projectId, cleaned && cleanMovables(cleaned, tpl));
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };

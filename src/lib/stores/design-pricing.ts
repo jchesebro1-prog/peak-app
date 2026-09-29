@@ -5,8 +5,9 @@ import { buildEquipmentPriceTable, priceCell, type EquipmentPriceTable, type Equ
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { quickDesignPrice, type QuickDesignPrice, type QuickRates } from "@/lib/design/equipment-pricing";
 import { addToQuotesGuard } from "@/lib/design/scope-targets";
-import { venueOf, type AState, type DesignRecordLike } from "@/app/(app)/design/quick/engine";
+import { clampConfigDims, clampDimField, venueOf, type AState, type DesignRecordLike } from "@/app/(app)/design/quick/engine";
 import { effectiveTemplateFor } from "@/lib/design/venue-templates";
+import { clampHouseFieldsFor } from "@/lib/design/venue-templates/house-dims";
 import { sanitizeMovables } from "@/lib/design/venue-templates/movable-options";
 import { getSettings } from "@/lib/settings";
 import { venueTypesFrom } from "@/lib/venue-types";
@@ -125,15 +126,19 @@ export function quickSaveFields(input: unknown): QuickSaveFields {
   for (const k of ["name", "venue", "size", "tier", "customer"] as const) {
     if (typeof src[k] === "string") out[k] = src[k] as string;
   }
+  // #255 hardening: LIM-clamped (junk/huge → the range's midpoint/bound), never stored raw — a forged
+  // 1e6/-1e6/NaN/Infinity here would otherwise flow into the plan geometry's loops (house-dims.ts).
   for (const k of ["width", "depth", "grid"] as const) {
-    const v = Number(src[k]);
-    if (src[k] != null && Number.isFinite(v)) out[k] = v;
+    if (src[k] != null) out[k] = clampDimField(k, src[k]);
   }
   if (Array.isArray(src.systems)) out.systems = src.systems.filter((x): x is string => typeof x === "string");
   for (const k of ["customerId", "locationId"] as const) {
     if (src[k] === null || typeof src[k] === "string") out[k] = (src[k] as string | null) || null;
   }
-  if (src.config && typeof src.config === "object" && !Array.isArray(src.config)) out.config = src.config as Record<string, unknown>;
+  // #255 hardening: width/depth/grid/wing/ph clamped to LIM here too — this is the object the plan geometry
+  // actually reads (`config`, not the summary fields above); house fields (houseWidthFt/houseDepthFt/
+  // bowlDepthFt) are clamped in saveQuickDesign, which has the effective template to clamp them against.
+  if (src.config && typeof src.config === "object" && !Array.isArray(src.config)) out.config = clampConfigDims(src.config as Record<string, unknown>);
   return out;
 }
 
@@ -152,10 +157,16 @@ export async function saveQuickDesign(
 ): Promise<{ ok: true; record: DesignRecord } | { ok: false; error: string }> {
   const fields = quickSaveFields(input);
   // #255: the config's movable rooms, kept only as the design's effective template allows (never trusted).
+  // #255 hardening: the same pass clamps houseWidthFt/houseDepthFt/bowlDepthFt to that template's own limits
+  // (quickSaveFields already clamped width/depth/grid/wing/ph to LIM, so the template's own limits — several
+  // of which derive their lower bound from width/wing — are themselves bounded here).
   const cfg = fields.config as Partial<AState> | undefined;
-  if (cfg && cfg.movables != null) {
+  if (cfg) {
     const tpl = effectiveTemplateFor(venueOf({ venue: String(cfg.venue ?? "") }).kind, cfg, venueTypesFrom((await getSettings()).venueTypes));
-    fields.config = { ...cfg, movables: sanitizeMovables(cfg.movables, tpl) };
+    fields.config = {
+      ...clampHouseFieldsFor(cfg, tpl),
+      ...(cfg.movables != null ? { movables: sanitizeMovables(cfg.movables, tpl) } : {}),
+    };
   }
   const existing = id ? await getDesign(id) : null;
   if (existing?.layoutMode === "manual") return { ok: false, error: GRID_DESIGN_REFUSAL };
