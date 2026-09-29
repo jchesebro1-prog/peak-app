@@ -9827,5 +9827,6 @@ Delete existed only in a consulting project's detail header.
 Cancel, auto-disarms after 5 s or on Esc) running the same `removeEngagementAction` as the detail header — a soft delete
 that also removes the project's open tasks; done tasks and notes stay. A quote-originated project stays deleted (the
 quote-sync's `coveredQuoteIds()` skips it — checked by reload). The card's link now wraps only the card content, so the
-button isn't nested inside an `<a>`. Same permission as the detail header (any signed-in user). One file:
-`src/app/(app)/design/engagements/view.tsx`.
+button isn't nested inside an `<a>`. Follow-up (Jeff, same day): delete is limited to users with `create` (Admin,
+Manager, Estimator) like deleting a design — `removeEngagementAction` refuses otherwise, and both Delete buttons (card +
+detail header) are hidden from a Reviewer. `view.tsx`, `actions.ts`, and both engagement pages (`canDelete` prop).
