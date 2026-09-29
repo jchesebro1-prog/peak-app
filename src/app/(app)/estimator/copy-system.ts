@@ -1,6 +1,7 @@
 import { syncLaborDraftMargins } from "./labor-group";
 import { lineMarginOf, round2 } from "./pricing";
 import {
+  catalogAddPrice,
   isAtTierSeed,
   isTierPriceable,
   laborSeedMarginOf,
@@ -18,7 +19,8 @@ import type { SpecItem, SpecSection } from "./types";
  *
  * Two steps, in order:
  * 1. Cost refresh — a plain catalog line (and every catalog-backed fixture
- *    component) takes TODAY's catalog cost. Custom, curtain, allowance,
+ *    or #274 track component) takes TODAY's catalog cost; a track line's
+ *    cost is its parts' sum, and its parts re-seed at the landing tier. Custom, curtain, allowance,
  *    vendor-quote, labor, POR and portal-confirm lines keep their cost.
  * 2. Tier — a line still at the SOURCE tier's seed (judged on its ORIGINAL
  *    cost and sell, #254's rule) lands at exactly the TARGET tier's seed on
@@ -107,8 +109,12 @@ export function copySectionForTarget(
   const items = (section.items || []).map((it): SpecItem => {
     const comps = Array.isArray(it.components) ? it.components : [];
 
+    /* #274: a track line is a tier-seeded line whose "catalog cost" is its
+       parts' — refreshed below with the plain lines, not here. */
+    const track = !!it.track && comps.length > 0;
+
     /* ---- fixture line: refresh components, never tier-priced ---- */
-    if (comps.length) {
+    if (comps.length && !track) {
       const fixture = opts.fixtures.get(it.fixtureId || it.sku);
       const byFixtureSku = new Map<string, { cost: number; list: number }>();
       for (const c of fixture?.components || []) if (!byFixtureSku.has(c.sku)) byFixtureSku.set(c.sku, c);
@@ -148,25 +154,44 @@ export function copySectionForTarget(
       if (hand) handPriced++;
     }
 
-    /* ---- cost refresh (plain catalog lines only) ---- */
+    /* ---- cost refresh (plain catalog lines, and a track line's parts) ---- */
     let cost = it.cost;
-    const part = !keepsOwnCost(it) && it.sku ? opts.catalog.get(it.sku) : undefined;
-    if (part && Number.isFinite(part.cost) && Math.abs(part.cost - it.cost) >= COST_EPSILON) {
-      cost = part.cost;
-      costsUpdated++;
+    let parts: SpecItem["components"] | undefined;
+    if (track) {
+      // #274: each part takes today's catalog cost (a part gone from the
+      // catalog, or with no cost today, keeps its own) and its sell at the
+      // landing tier's seed; the line's cost is their sum.
+      let sum = 0;
+      parts = comps.map((c) => {
+        const cat = opts.catalog.get(c.sku);
+        const partCost = cat ? cat.cost : c.cost;
+        if (c.qty > 0) sum += partCost * c.qty;
+        return { ...c, cost: partCost, price: partCost > 0 ? catalogAddPrice(partCost, c.price, tgt) : c.price };
+      });
+      if (Math.abs(sum - it.cost) >= COST_EPSILON) {
+        cost = sum;
+        costsUpdated++;
+      }
+    } else {
+      const part = !keepsOwnCost(it) && it.sku ? opts.catalog.get(it.sku) : undefined;
+      if (part && Number.isFinite(part.cost) && Math.abs(part.cost - it.cost) >= COST_EPSILON) {
+        cost = part.cost;
+        costsUpdated++;
+      }
     }
     const costChanged = cost !== it.cost;
+    const withParts = (line: SpecItem): SpecItem => (parts ? { ...line, components: parts } : line);
 
     if (atSeed) {
       const seedMoved = tierSeedMarginFor(it, src) !== tierSeedMarginFor(it, tgt);
       if (seedMoved) tierRepriced++;
       // Unchanged cost and seed: keep the sell verbatim (labor's drift nudge,
       // a cent of rounding) rather than round-trip it through the formula.
-      if (!costChanged && !seedMoved) return { ...it };
-      return { ...it, cost, price: tierSeedPrice({ cost, labor: it.labor }, tgt) };
+      if (!costChanged && !seedMoved) return withParts({ ...it });
+      return withParts({ ...it, cost, price: tierSeedPrice({ cost, labor: it.labor }, tgt) });
     }
-    if (!costChanged) return { ...it };
-    return { ...withSell(it, keepMarginOnNewCost(it, it.cost, cost)), cost };
+    if (!costChanged) return withParts({ ...it });
+    return withParts({ ...withSell(it, keepMarginOnNewCost(it, it.cost, cost)), cost });
   });
 
   // #267: a typed system sell was the source's price for the source's costs —

@@ -77,6 +77,7 @@ import type {
   SpecItem,
   SpecMob,
   SpecSection,
+  TrackDraft,
   TravelLite,
   VendorDraft,
   VendorLineDraft,
@@ -108,6 +109,18 @@ import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
+import TrackModal from "./track-modal";
+import {
+  curtainTrackDraft,
+  curtainTrackPrefill,
+  followCurtainPrefill,
+  freshTrackDraft,
+  replaceTrackLine,
+  trackConfigFromDraft,
+  trackDraftFromConfig,
+  trackLine,
+  type CurtainTrackPrefill,
+} from "./track-bom";
 import VendorQuoteModal, {
   vendorDraftTotal,
   vendorDraftTotalSource,
@@ -117,7 +130,7 @@ import VendorQuoteModal, {
 import PreviewDoc from "./preview-doc";
 import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 import { PortalPanel } from "./portal-panel";
-import { repriceForTier, tierRepriceMessage } from "./tier-reprice";
+import { catalogAddPrice, repriceForTier, tierRepriceMessage } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 
 /**
@@ -380,6 +393,8 @@ export default function EstimatorClient({
   pipelines,
   fabrics,
   curtainSewingPct,
+  trackSeries,
+  trackParts,
   laborRates,
   fixtureRates,
   fixtureAssemblies,
@@ -620,6 +635,7 @@ export default function EstimatorClient({
   const fixtureFor = openFor("fixture");
   const laborFor = openFor("labor");
   const vendorFor = openFor("vendor");
+  const trackFor = openFor("track");
   const [customDraft, setCustomDraft] = useState<CustomDraft>(freshCustom);
   const [curtainDraft, setCurtainDraft] = useState<CurtainDraft>(() =>
     freshCurtain(defaultFabric)
@@ -650,6 +666,18 @@ export default function EstimatorClient({
      modal's Update mode + its note); discardDraft clears both. */
   const laborEditRef = useRef<{ group: string; draft: LaborDraft; handEdited: number; removed: number } | null>(null);
   const [laborEdit, setLaborEdit] = useState<{ group: string; handEdited: number; removed: number } | null>(null);
+  /* #274: the track configurator's form. Reopened from a track line (the
+     #269 labor pattern above), `trackEditRef` carries that line to seedDraft
+     and `trackEdit` is the open's live state — Update mode, or read-only
+     (with the line's saved parts) when its series was deleted. */
+  const [trackDraft, setTrackDraft] = useState<TrackDraft>(() => freshTrackDraft(trackSeries));
+  type TrackEdit = { lineId: number; readOnly: { components: SpecItem["components"]; cost: number; price: number } | null };
+  const trackEditRef = useRef<(TrackEdit & { draft: TrackDraft }) | null>(null);
+  const [trackEdit, setTrackEdit] = useState<TrackEdit | null>(null);
+  /* #274: the curtain modal's Add track form (null = off) and the pre-fill
+     it last took from the curtain, so untouched fields follow the curtain. */
+  const [curtainTrack, setCurtainTrack] = useState<TrackDraft | null>(null);
+  const curtainTrackPrefillRef = useRef<CurtainTrackPrefill>({ operation: "oneway", run: "", label: "" });
   /* #210: the position/circuit values last auto-filled from a fixture's
      defaults, so switching the assembly can tell "still what we prefilled"
      apart from "the user typed something" and never clobber the latter. */
@@ -1588,10 +1616,9 @@ export default function EstimatorClient({
   /** #160: a catalog add carries its qty and keeps the picker OPEN (rapid-fire);
    *  the panel closes only via its toggle or ×. */
   const addPart = (secId: string, cat: SuggestPart, qty = 1) => {
-    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     const n = Math.max(1, Math.floor(qty) || 1);
     pushItems(secId, [
-      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: n, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
+      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: n, unit: cat.unit, cost: cat.cost, price: catalogAddPrice(cat.cost, cat.price, tierMargin) },
     ]);
   };
 
@@ -1607,14 +1634,13 @@ export default function EstimatorClient({
   ): Promise<{ fromCatalog: number; custom: number }> => {
     const skus = Array.from(new Set(items.map((item) => item.sku.trim()).filter(Boolean)));
     const resolved = skus.length ? await resolveCatalogSkusAction(skus) : {};
-    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     let fromCatalog = 0;
     const next: SpecItem[] = items.map((item) => {
       const hit = item.sku.trim() ? resolved[item.sku.trim()] : undefined;
       if (!hit) return { ...item, id: nextId(), desc: item.desc || item.sku, unit: item.unit || "ea", custom: true };
       fromCatalog++;
       const cost = item.cost > 0 ? item.cost : hit.cost;
-      const price = item.price > 0 ? item.price : cost > 0 ? round2(cost / (1 - margin)) : hit.list;
+      const price = item.price > 0 ? item.price : catalogAddPrice(cost, hit.list, tierMargin);
       return {
         ...item,
         id: nextId(),
@@ -1737,8 +1763,15 @@ export default function EstimatorClient({
    *  mid-flight still has to report what it did. */
   const discardDraft = (kind: InputKind, secId: string) => {
     if (kind === "custom") setCustomDraft(freshCustom());
-    else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
-    else if (kind === "fixture") setFixtureDraft(freshFixture());
+    else if (kind === "curtain") {
+      setCurtainDraft(freshCurtain(defaultFabric));
+      setCurtainTrack(null);
+    } else if (kind === "track") {
+      // #274: an abandoned track edit must not seed the next "+ Configure track".
+      trackEditRef.current = null;
+      setTrackEdit(null);
+      setTrackDraft(freshTrackDraft(trackSeries));
+    } else if (kind === "fixture") setFixtureDraft(freshFixture());
     else if (kind === "vendor") {
       // #144: an abandoned edit must not seed the next "+ Vendor quote".
       vendorEditRef.current = null;
@@ -1756,8 +1789,17 @@ export default function EstimatorClient({
   /** Seed the incoming method's draft (the prototype defaults each had). */
   const seedDraft = (kind: InputKind, secId: string) => {
     if (kind === "custom") setCustomDraft(freshCustom());
-    else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
-    else if (kind === "vendor") {
+    else if (kind === "curtain") {
+      setCurtainDraft(freshCurtain(defaultFabric));
+      setCurtainTrack(null);
+    } else if (kind === "track") {
+      /* #274: reopened from a track line — its stored config, consumed and
+         CLEARED here so it applies to exactly one open (as labor, #269). */
+      const edit = trackEditRef.current;
+      trackEditRef.current = null;
+      setTrackEdit(edit ? { lineId: edit.lineId, readOnly: edit.readOnly } : null);
+      setTrackDraft(edit ? edit.draft : freshTrackDraft(trackSeries));
+    } else if (kind === "vendor") {
       /* #144: the pending edit seed, consumed and CLEARED here so it applies to
          exactly one open. With none set — or a record since deleted — this is
          the unchanged blank form. */
@@ -1859,6 +1901,51 @@ export default function EstimatorClient({
     closeInput();
     laborEditRef.current = { group, draft: rec.draft, ...laborGroupEdits(sec, group) };
     openInputMethod("labor", secId);
+  };
+
+  /** #274: reopen the track configurator on a track line — the same
+   *  close-then-seed dance as openLaborEdit. A line whose series no longer
+   *  exists opens read-only with its saved parts. */
+  const openTrackEdit = (secId: string, lineId: number) => {
+    const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
+    if (!it?.track) return;
+    const gone = !trackSeries.some((s) => s.id === it.track!.seriesId);
+    closeInput();
+    trackEditRef.current = {
+      lineId,
+      draft: trackDraftFromConfig(it.track),
+      readOnly: gone ? { components: it.components, cost: it.cost, price: it.price } : null,
+    };
+    openInputMethod("track", secId);
+  };
+
+  /** #274: Add track pushes one track line; Update track replaces the line
+   *  it was opened from, in place, at today's catalog prices. */
+  const addTrack = (secId: string) => {
+    if (trackEdit?.readOnly) return;
+    const config = trackConfigFromDraft(trackDraft);
+    const res = trackLine(config, trackSeries.find((s) => s.id === config.seriesId), trackParts, tierMargin);
+    if (!res.ok) return;
+    const lineId = trackEdit?.lineId;
+    if (lineId != null) setSections((ss) => ss.map((s) => (s.id === secId ? replaceTrackLine(s, lineId, res.item) : s)));
+    else pushItems(secId, [{ ...res.item, id: nextId() }]);
+    closeInput();
+  };
+
+  /** #274: a curtain field changed — an Add track form follows the curtain's
+   *  pre-fills on every field the user hasn't touched. */
+  const setCurtainField = (field: keyof CurtainDraft, val: string) => {
+    const next = { ...curtainDraft, [field]: val };
+    setCurtainDraft(next);
+    if (!curtainTrack) return;
+    const pre = curtainTrackPrefill(next);
+    setCurtainTrack((t) => (t ? followCurtainPrefill(t, curtainTrackPrefillRef.current, pre) : t));
+    curtainTrackPrefillRef.current = pre;
+  };
+  const toggleCurtainTrack = (on: boolean) => {
+    if (!on) return setCurtainTrack(null);
+    curtainTrackPrefillRef.current = curtainTrackPrefill(curtainDraft);
+    setCurtainTrack(curtainTrackDraft(curtainDraft, trackSeries));
   };
 
   const addCustomPart = async (secId: string) => {
@@ -2064,11 +2151,21 @@ export default function EstimatorClient({
     const name = (d.name || "").trim();
     const c = computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined);
     if (!name || c.priceEach <= 0) return;
+    // #274: Add track — the curtain's track line follows it; a track with a
+    // blocking error blocks the whole add (the modal already disables it).
+    let track: SpecItem | null = null;
+    if (curtainTrack) {
+      const config = trackConfigFromDraft(curtainTrack);
+      const res = trackLine(config, trackSeries.find((s) => s.id === config.seriesId), trackParts, tierMargin);
+      if (!res.ok) return;
+      track = { ...res.item, id: 0 };
+    }
     let qty = parseInt(d.qty, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
     const dims = (parseFloat(d.width) || 0) + "'W × " + (parseFloat(d.height) || 0) + "'H";
     const idN = nextId();
     const skuN = nextId();
+    if (track) track.id = nextId();
     pushItems(secId, [
       {
         id: idN,
@@ -2081,6 +2178,7 @@ export default function EstimatorClient({
         curtain: true,
         specKey: curtainSpecKey(undefined, name) || undefined,
       },
+      ...(track ? [track] : []),
     ]);
     closeInput();
   };
@@ -2343,6 +2441,7 @@ export default function EstimatorClient({
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
   const laborSec = sections.find((s) => s.id === laborFor);
   const vendorSec = sections.find((s) => s.id === vendorFor);
+  const trackSec = sections.find((s) => s.id === trackFor);
   /** The stored quote the vendor form is editing, if it is editing one (#144). */
   const vendorEditingRec = vendorQuotes.find((v) => v.id === vendorDraft.id);
   /**
@@ -3706,6 +3805,7 @@ export default function EstimatorClient({
                   onToggleCurtain={() => openInputMethod("curtain", sec.id)}
                   onToggleFixture={() => openInputMethod("fixture", sec.id)}
                   onToggleLabor={() => openInputMethod("labor", sec.id)}
+                  onToggleTrack={() => openInputMethod("track", sec.id)}
                   onToggleCustom={() => openInputMethod("custom", sec.id)}
                   onToggleVendor={() => openInputMethod("vendor", sec.id)}
                   onAddPart={(cat, qty) => addPart(sec.id, cat, qty)}
@@ -3713,6 +3813,7 @@ export default function EstimatorClient({
                   onSetVendorDisplay={setVendorDisplay}
                   onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
                   onEditLabor={(group) => openLaborEdit(sec.id, group)}
+                  onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
                   onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
@@ -4013,8 +4114,27 @@ export default function EstimatorClient({
               fabrics={fabrics}
               sewingPct={curtainSewingPct}
               margin={tierMargin ?? undefined}
-              onSet={(field, val) => setCurtainDraft((d) => ({ ...d, [field]: val }))}
+              onSet={setCurtainField}
               onAdd={() => addCurtain(curtainFor)}
+              onClose={closeInput}
+              track={curtainTrack}
+              trackSeries={trackSeries}
+              trackParts={trackParts}
+              onToggleTrack={toggleCurtainTrack}
+              onSetTrack={(field, val) => setCurtainTrack((t) => (t ? { ...t, [field]: val } : t))}
+            />
+          )}
+          {trackFor && (
+            <TrackModal
+              secName={trackSec ? trackSec.name : ""}
+              draft={trackDraft}
+              series={trackSeries}
+              parts={trackParts}
+              margin={tierMargin}
+              editing={!!trackEdit}
+              readOnly={trackEdit?.readOnly ?? null}
+              onSet={(field, val) => setTrackDraft((d) => ({ ...d, [field]: val }))}
+              onAdd={() => addTrack(trackFor)}
               onClose={closeInput}
             />
           )}

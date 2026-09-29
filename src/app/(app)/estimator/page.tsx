@@ -22,6 +22,7 @@ import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
+import { listTrackSeries } from "@/lib/stores/track-series";
 import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
@@ -40,6 +41,7 @@ import type {
   InitialQuote,
   PaymentTerms,
   SpecSection,
+  TrackPart,
   TravelLite,
   VendorQuote,
 } from "./types";
@@ -265,7 +267,7 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries] =
     await Promise.all([
       fabricParts(),
       byCategory("Labor"),
@@ -280,6 +282,7 @@ export default async function EstimatorPage({
       loadCurtainSewingPct(),
       loadFreightRule(),
       allSpecRecords(),
+      listTrackSeries(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -310,6 +313,16 @@ export default async function EstimatorPage({
   const vendorNames = Array.from(
     new Set(catalogRows.map((p) => (p.mfr || "").trim()).filter(Boolean))
   ).sort((a, b) => a.localeCompare(b));
+
+  // #274: the live catalog part behind every SKU a track series maps (the
+  // catalog rows are already loaded); a mapped SKU absent here was deleted,
+  // and the track modal treats it as unmapped.
+  const trackSkus = new Set(trackSeries.flatMap((s) => Object.values(s.parts).map((p) => p?.sku || "")).filter(Boolean));
+  const trackParts: Record<string, TrackPart> = {};
+  for (const p of catalogRows) {
+    if (!trackSkus.has(p.sku)) continue;
+    trackParts[p.sku] = { sku: p.sku, desc: p.desc || "", cost: Number(p.cost) || 0, list: Number(p.list) || 0, unit: p.unit || "ea", mfr: p.mfr || "" };
+  }
 
   const laborRates: Record<string, number> = {};
   laborRows.forEach((p) => {
@@ -404,6 +417,8 @@ export default async function EstimatorPage({
       logoDark={settings.logoDark || null}
       fabrics={fabrics}
       curtainSewingPct={curtainSewingPct}
+      trackSeries={trackSeries}
+      trackParts={trackParts}
       laborRates={laborRates}
       fixtureRates={fixtureRates}
       // #246: every Assembly Builder kind — fixtures, systems and hardware.

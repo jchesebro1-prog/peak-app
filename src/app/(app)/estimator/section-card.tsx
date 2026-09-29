@@ -33,13 +33,13 @@ import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "
  * card the answer for its own system (see `openMethod`).
  */
 
-/** The six mutually-exclusive add-part input methods. Declared here rather than
+/** The mutually-exclusive add-part input methods (#274 added "track"). Declared here rather than
  *  in the estimator client so the card can name them without a cyclic import.
  *
  *  #143 replaced "import" with "vendor": the CSV importer is no longer
  *  separately openable — it lives inside the catalog panel, where the parts it
  *  batch-adds come from — and "+ Vendor quote" became its own method. */
-export type InputKind = "catalog" | "custom" | "curtain" | "fixture" | "labor" | "vendor";
+export type InputKind = "catalog" | "custom" | "curtain" | "fixture" | "labor" | "vendor" | "track";
 
 const LBL: CSSProperties = {
   display: "block",
@@ -145,6 +145,8 @@ export type SectionCardProps = {
   onToggleCurtain: () => void;
   onToggleFixture: () => void;
   onToggleLabor: () => void;
+  /** #274: "+ Configure track". */
+  onToggleTrack: () => void;
   onToggleCustom: () => void;
   onToggleVendor: () => void;
   onAddPart: (cat: SuggestPart, qty: number) => void;
@@ -158,6 +160,8 @@ export type SectionCardProps = {
   onEditVendor: (vendorQuoteId: string) => void;
   /** #269: reopen the Labor configurator on a labor group's stored draft. */
   onEditLabor?: (laborGroup: string) => void;
+  /** #274: reopen the track configurator on a track line (by line id). */
+  onEditTrack?: (lineId: number) => void;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
   onMoveToNew: () => void;
   /** Moves this system into an already-existing estimate, by id. */
@@ -875,6 +879,15 @@ export default function SectionCard(p: SectionCardProps) {
                 if (e.detail > 1) return;
                 if (laborEditable && it.laborGroup) p.onEditLabor?.(it.laborGroup);
               };
+              /* #274: a track line reopens the track configurator the same
+                 way — its description or ✎, first click only. */
+              const trackEditable = isInternal && !!p.onEditTrack && !!it.track;
+              const openTrack = (e: { detail: number }) => {
+                if (e.detail > 1) return;
+                if (trackEditable) p.onEditTrack?.(it.id);
+              };
+              const lineEditable = laborEditable || trackEditable;
+              const openLine = laborEditable ? openLabor : openTrack;
               return (
                 <div
                   key={it.id}
@@ -891,15 +904,15 @@ export default function SectionCard(p: SectionCardProps) {
                 >
                   <div style={{ minWidth: 0 }}>
                     <div
-                      title={laborEditable ? lineDesc + " — click to edit this labor" : lineDesc}
-                      onClick={laborEditable ? openLabor : undefined}
+                      title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : lineDesc}
+                      onClick={lineEditable ? openLine : undefined}
                       style={{
                         lineHeight: 1.3,
                         display: "-webkit-box",
                         WebkitLineClamp: 2,
                         WebkitBoxOrient: "vertical",
                         overflow: "hidden",
-                        cursor: laborEditable ? "pointer" : undefined,
+                        cursor: lineEditable ? "pointer" : undefined,
                       }}
                     >
                       {lineDesc}
@@ -936,6 +949,22 @@ export default function SectionCard(p: SectionCardProps) {
                           }}
                         >
                           CURTAIN
+                        </span>
+                      )}
+                      {!!it.track && (
+                        <span
+                          style={{
+                            fontSize: 9.5,
+                            fontWeight: 700,
+                            color: "#fff",
+                            background: "var(--accent)",
+                            padding: "1px 6px",
+                            borderRadius: 4,
+                            letterSpacing: ".04em",
+                            marginLeft: 6,
+                          }}
+                        >
+                          TRACK
                         </span>
                       )}
                       {!!it.labor && (
@@ -1236,6 +1265,9 @@ export default function SectionCard(p: SectionCardProps) {
                     {laborEditable && (
                       <button type="button" className="est-action-btn" onClick={openLabor} title="Edit labor — reopens the configurator for every line this labor added" aria-label={`Edit labor for ${it.desc}`} style={ACTION_BTN}>✎</button>
                     )}
+                    {trackEditable && (
+                      <button type="button" className="est-action-btn" onClick={openTrack} title="Edit track — reopens the track configurator" aria-label={`Edit track for ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={ACTION_BTN}>↑</button>
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={ACTION_BTN}>↓</button>
                     <button
@@ -1288,11 +1320,12 @@ export default function SectionCard(p: SectionCardProps) {
 
           {/* add part */}
           <div style={{ borderTop: "1px solid #f3f4f7", padding: "11px 20px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", rowGap: 8 }}>
               {/* Only the open method reads as accented; with nothing open the
                   catalog stays the highlighted default, as in the prototype. */}
               {addBtn("+ Add part from catalog", handleToggleCatalog, openMethod === "catalog" || openMethod === null)}
               {addBtn("+ Configure curtain", p.onToggleCurtain, openMethod === "curtain")}
+              {addBtn("+ Configure track", p.onToggleTrack, openMethod === "track")}
               {addBtn("+ Add assembly", p.onToggleFixture, openMethod === "fixture")}
               {addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
               {addBtn("+ Build custom part", handleToggleCustom, openMethod === "custom")}

@@ -24,6 +24,10 @@ import type { SpecItem, SpecSection } from "./types";
  *   modal's single rounded total nudges the LAST line by its rounding drift
  *   (≤ 5¢ per line). So labor is re-seeded at `laborSeedMarginOf` and matched
  *   within LABOR_REPRICE_TOLERANCE.
+ * - track (#274, track-bom.ts) — each part priced as addPart would price
+ *   it, the line selling for their sum, which is the seed on the line's cost
+ *   when every part has a cost: an ordinary seeded line (its parts re-seed
+ *   with it, `reseedTrackComponents`).
  * - fixture (addFixture → fixtureBomLine) — sell is the assembly's own
  *   component list prices, never the tier; left alone and not counted.
  * - kept, hand-priced: an ext-sell override, or a sell that doesn't match
@@ -52,6 +56,26 @@ export function laborSeedMarginOf(m: number | null | undefined): number {
 }
 
 const sellAt = (cost: number, margin: number) => round2(cost / (1 - margin));
+
+/** The unit sell a catalog part gets when it is added from the Estimator's
+ *  catalog picker (addPart): its cost at the tier seed (`seedMarginOf` — the
+ *  stamp, else 0.30), or its catalog list price when it has no cost. The one
+ *  rule addPart, the CSV import's catalog hits and the #274 track configurator
+ *  (track-bom.ts) all price by. */
+export function catalogAddPrice(cost: number, list: number, m: number | null | undefined): number {
+  return cost > 0 ? sellAt(cost, seedMarginOf(m)) : list;
+}
+
+/** #274: a track line's parts at stamp `m`'s seed — the line itself is
+ *  re-priced like any tier-seeded line; its `components` follow so the parts
+ *  table and parts list agree with it. A part with no cost keeps its sell
+ *  (it was priced at its list, which isn't tier-dependent). */
+export function reseedTrackComponents(
+  comps: NonNullable<SpecItem["components"]>,
+  m: number | null | undefined
+): NonNullable<SpecItem["components"]> {
+  return comps.map((c) => (c.cost > 0 ? { ...c, price: catalogAddPrice(c.cost, c.price, m) } : c));
+}
 
 /** #266 — the margin a line kind seeds at under stamp `m` (labor through its
  *  whole-percent field, every other line through `seedMarginOf`). */
@@ -131,6 +155,8 @@ export function repriceForTier(
       repriced++;
       if (v.price === it.price) return it;
       changed = true;
+      // #274: a track line's parts follow the line to the new seed.
+      if (it.track && Array.isArray(it.components)) return { ...it, price: v.price, components: reseedTrackComponents(it.components, next) };
       return { ...it, price: v.price };
     });
     const base = changed ? { ...sec, items } : sec;

@@ -1,9 +1,12 @@
 "use client";
 
 import { computeCurtain, fmt } from "./pricing";
-import type { CurtainDraft, FabricOpt } from "./types";
+import type { CurtainDraft, FabricOpt, TrackDraft, TrackPart } from "./types";
 import { fabricRateLabel } from "@/lib/curtain-geom";
+import type { TrackSeries } from "@/lib/track-series";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
+import { trackBom, trackConfigFromDraft } from "./track-bom";
+import { TrackErrors, TrackFields, type TrackSetter } from "./track-modal";
 
 /**
  * Curtain configurator — name / fabric (a fabric part — #264 isFabricPart, priced by
@@ -11,6 +14,11 @@ import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./
  * Rose Brand cost override, with live fabric-area + cost + ext pricing in
  * the footer. Hang type and bottom finish no longer affect price (curtain
  * pricing rebuild) and have been dropped from this UI.
+ *
+ * #274: an **Add track** toggle carries the curtain's track in the same step
+ * — the track configurator's fields, compact, pre-filled from the curtain
+ * (track-bom.ts `curtainTrackPrefill`); adding pushes the curtain line then
+ * its track line. A track with a blocking error blocks the add.
  */
 
 const FULLNESS: [string, string][] = [
@@ -30,6 +38,11 @@ export default function CurtainModal({
   onSet,
   onAdd,
   onClose,
+  track = null,
+  trackSeries = [],
+  trackParts = {},
+  onToggleTrack,
+  onSetTrack,
 }: {
   secName: string;
   editing?: boolean;
@@ -42,10 +55,19 @@ export default function CurtainModal({
   onSet: (field: keyof CurtainDraft, val: string) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** #274: the curtain's track form — null while Add track is off. */
+  track?: TrackDraft | null;
+  trackSeries?: readonly TrackSeries[];
+  trackParts?: Record<string, TrackPart>;
+  onToggleTrack?: (on: boolean) => void;
+  onSetTrack?: TrackSetter;
 }) {
   const cc = computeCurtain(draft, fabrics, { sewingPct }, margin);
   const qty = Math.max(1, parseInt(draft.qty, 10) || 0);
-  const valid = (draft.name || "").trim().length > 0 && cc.priceEach > 0;
+  const trackSeriesRow = track ? trackSeries.find((s) => s.id === track.seriesId) || null : null;
+  const tb = track ? trackBom(trackConfigFromDraft(track), trackSeriesRow, trackParts, margin) : null;
+  const trackOk = !tb || (!tb.errors.length && tb.price > 0);
+  const valid = (draft.name || "").trim().length > 0 && cc.priceEach > 0 && trackOk;
 
   return (
     <ConfigModal
@@ -65,11 +87,12 @@ export default function CurtainModal({
             size={14}
             weight={700}
           />
+          {tb && <Stat label="Track" value={tb.price > 0 ? fmt(tb.price) : "—"} size={14} weight={700} />}
         </>
       }
       footerRight={
         <button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>
-          {editing ? "Update curtain" : "Add curtain"}
+          {editing ? "Update curtain" : track ? "Add curtain + track" : "Add curtain"}
         </button>
       }
     >
@@ -176,6 +199,29 @@ export default function CurtainModal({
           style={NUMFIELD}
         />
       </div>
+
+      {/* #274: Add track */}
+      {onToggleTrack && onSetTrack && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #ececf0" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#3a3f4a", cursor: "pointer" }}>
+            <input type="checkbox" checked={!!track} onChange={(e) => onToggleTrack(e.target.checked)} />
+            Add track
+            <span style={{ fontSize: 11.5, fontWeight: 500, color: "#aab0bb" }}>· adds a track line for this curtain, priced from the catalog</span>
+          </label>
+          {track && (
+            <div style={{ marginTop: 12 }}>
+              <TrackFields draft={track} series={trackSeries} onSet={onSetTrack} compact />
+              {tb && tb.rows.length > 0 && !tb.errors.length && (
+                <div style={{ marginTop: 10, fontSize: 11.5, color: "#8c919c" }}>
+                  {tb.rows.length} parts · cost {fmt(tb.cost)} · price {fmt(tb.price)}
+                </div>
+              )}
+              {/* No series at all: TrackFields already says to set one up. */}
+              {tb && trackSeriesRow && <TrackErrors errors={tb.errors} />}
+            </div>
+          )}
+        </div>
+      )}
     </ConfigModal>
   );
 }

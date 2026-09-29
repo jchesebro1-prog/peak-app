@@ -8,6 +8,8 @@ import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
 import type { CurtainRequest } from "@/lib/portal-cart-types";
 import type { ReviewLimitChipData } from "@/lib/review-limits";
+import type { TrackConfig } from "@/lib/track-engine";
+import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -121,6 +123,12 @@ export type SpecItem = {
    *  (portal-pricing.ts priceCurtain), carried the same way as `fixtureId`
    *  above so the line can be rebuilt into a cart line. */
   curtainInputs?: CurtainRequest;
+  /** #274: a configured track line — the configurator inputs, kept so the
+   *  line reopens the track modal (track-modal.tsx). The line is one lot;
+   *  its priced parts ride in `components` (so the PM parts list explodes
+   *  them) and the customer document shows only the one line. Built by
+   *  track-bom.ts `trackLine`. */
+  track?: TrackConfig;
 };
 
 /* ---------------- vendor quotes (#143, D162) ---------------- */
@@ -255,6 +263,28 @@ export type CurtainDraft = {
   /** Real vendor (Rose Brand) unit cost; when set, overrides the make-it cost. */
   vendorCostOverride?: string;
 };
+
+/** #274: the track configurator's form (strings while editing, like every
+ *  other draft); `trackConfigFromDraft` (track-bom.ts) turns it into the
+ *  TrackConfig the engine prices and the line stores. Blank spacing = the
+ *  series default. */
+export type TrackDraft = {
+  seriesId: string;
+  operation: TrackOperation;
+  curved: boolean;
+  radius: string;
+  run: string;
+  mounting: TrackMounting;
+  trim: string;
+  qty: string;
+  label: string;
+  carrierSpacing: string;
+  hangerSpacing: string;
+};
+
+/** #274: one catalog part a track series maps a role to, as the Estimator
+ *  page hands it to the client (read from the live catalog on load). */
+export type TrackPart = { sku: string; desc: string; cost: number; list: number; unit: string; mfr: string };
 
 /** One typed materials row in the vendor-quote form (strings while editing). */
 export type VendorLineDraft = {
@@ -490,6 +520,13 @@ export type EstimatorProps = {
   fabrics: FabricOpt[];
   /** #227 late: the curtain sewing % (Estimating Rules curtains.sewingPct), read on the server. */
   curtainSewingPct: number;
+  /** #274: every track series (Estimating Rules → Track series), active or
+   *  not — the modal lists active ones; a saved line on an inactive one still
+   *  reopens. A deleted series is simply absent. */
+  trackSeries: TrackSeries[];
+  /** #274: the live catalog part behind every SKU a series maps, keyed by
+   *  SKU. A mapped SKU missing here was deleted from the catalog. */
+  trackParts: Record<string, TrackPart>;
   /** Live labor/travel rates from catalog category 'Labor' (sku → cost). */
   laborRates: Record<string, number>;
   /** Live fixture add-on rates (Estimating Rules → fixture group). */

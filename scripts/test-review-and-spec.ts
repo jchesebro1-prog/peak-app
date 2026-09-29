@@ -10675,6 +10675,7 @@ seeded()
   .then(() => c255StorSpacesAsyncChecks())
   .then(() => specLabelsAsyncChecks())
   .then(() => track274AsyncChecks())
+  .then(() => track274bAsyncChecks())
   .then(() => lift275AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -36881,7 +36882,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   ok(cli.includes("pruneLaborGroups({ ...s, items: s.items.filter((x) => x.id !== id) })") && cli.includes("onEditLabor={(group) => openLaborEdit(sec.id, group)}") && cli.includes("editing={laborEdit}"),
     "#269 wiring: removeItem prunes stored drafts; SectionCard and LaborModal get the edit hooks");
   const card = rd("src/app/(app)/estimator/section-card.tsx");
-  ok(card.includes("isLaborLineEditable(sec, it)") && card.includes("onClick={laborEditable ? openLabor : undefined}") && card.includes("Added before labor editing — remove and re-add to change"),
+  ok(card.includes("isLaborLineEditable(sec, it)") && card.includes("const openLine = laborEditable ? openLabor : openTrack;") && card.includes("onClick={lineEditable ? openLine : undefined}") /* #274 B: a track line shares the description click */ && card.includes("Added before labor editing — remove and re-add to change"),
     "#269 section card: an editable labor line opens on its description and a ✎ action; a pre-#269 labor line explains why it can't");
   const modal = rd("src/app/(app)/estimator/labor-modal.tsx");
   ok(modal.includes('{editing ? "Update labor" : "Add labor"}') && modal.includes("hand edits (price, qty or") && modal.includes("that Update will replace.") && modal.includes('data-testid="mob-cost-breakdown"') && modal.includes("mobTravelParts(m)"),
@@ -37576,4 +37577,311 @@ async function track274AsyncChecks(): Promise<void> {
     if (firstId) await t274Delete(firstId);
     if (secondId) await t274Delete(secondId);
   }
+}
+
+/* ======================================================================
+   #274 Phase B — the track configurator in the Estimator
+   (docs/superpowers/specs/2026-09-29-track-configurator-design.md §3–§4):
+   estimator/track-bom.ts (pure pricing + the one line, reopen/Update,
+   curtain pre-fill), SpecItem.track, the track modal, the curtain modal's
+   Add track step, and every consumer of the line — tier re-price (#254),
+   Copy system (#266), the PM parts list (#262), the customer document.
+   Series + parts are the pure fixtures of the Phase A block above
+   (t274Series / t274Cfg — every SKU a P-<role> placeholder, nothing real);
+   the save round-trip runs as track274bAsyncChecks() on a TEST274B: quote.
+   ====================================================================== */
+import {
+  TRACK_SERIES_GONE as t274bGone,
+  cleanTrackConfig as t274bClean,
+  curtainTrackDraft as t274bCurtainDraft,
+  curtainTrackPrefill as t274bPrefill,
+  followCurtainPrefill as t274bFollow,
+  freshTrackDraft as t274bFresh,
+  replaceTrackLine as t274bReplace,
+  selectableTrackSeries as t274bSelectable,
+  trackBom as t274bBom,
+  trackConfigFromDraft as t274bFromDraft,
+  trackDraftFromConfig as t274bToDraft,
+  trackLine as t274bLine,
+} from "@/app/(app)/estimator/track-bom";
+import { catalogAddPrice as t274bAddPrice, repriceForTier as t274bReprice, reseedTrackComponents as t274bReseed } from "@/app/(app)/estimator/tier-reprice";
+import { copySectionForTarget as t274bCopy, type CopyCatalogPart as T274bCopyPart } from "@/app/(app)/estimator/copy-system";
+import { partsListRows as t274bPartsRows } from "@/app/(app)/estimator/parts-csv";
+import { customerLines as t274bCustomerLines, sanitizeSystemSell as t274bSanitizeSell, reconcileEstimatorValue as t274bReconcile } from "@/app/(app)/estimator/pricing";
+import { clearPricedPor as t274bClearPor } from "@/lib/portal-quote-mode";
+import type { SpecItem as T274bItem, SpecSection as T274bSection, TrackPart as T274bPart } from "@/app/(app)/estimator/types";
+
+/** Live catalog parts for every P-<role> SKU: cost / list per role (operating line per ft). */
+const T274B_COST: Record<T274Role, number> = {
+  track: 50, curved: 70, splice: 5, carrier: 2, masterCarrier: 12, endStop: 4, battenClamp: 6, ceilingHanger: 8,
+  livePulley: 30, deadPulley: 30, floorBlock: 40, operatingLine: 0.5,
+};
+function t274bParts(over: Partial<Record<T274Role, Partial<T274bPart> | null>> = {}): Record<string, T274bPart> {
+  const out: Record<string, T274bPart> = {};
+  for (const r of t274Roles) {
+    const o = over[r];
+    if (o === null) continue; // deleted from the catalog
+    out[`P-${r}`] = { sku: `P-${r}`, desc: `Test part ${r}`, cost: T274B_COST[r], list: T274B_COST[r] * 2, unit: r === "operatingLine" ? "ft" : "ea", mfr: "ADC", ...(o || {}) };
+  }
+  return out;
+}
+const t274bNear = (a: number, b: number) => Math.abs(a - b) < 0.005;
+/** Key-order-insensitive equality — jsonb storage reorders object keys. */
+function t274bCanon(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(t274bCanon);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, t274bCanon((v as Record<string, unknown>)[k])]));
+  return v;
+}
+const t274bSame = (a: unknown, b: unknown) => JSON.stringify(t274bCanon(a)) === JSON.stringify(t274bCanon(b));
+const t274bR2 = (n: number) => Math.round(n * 100) / 100;
+
+// ---- pricing: a fully mapped series ----
+{
+  // bi-parting 40' straight batten: 5 sticks, 4 splices, 38 carriers, 2 masters, 2 end stops, 10 clamps, 2 pulleys, floor block, 122' line.
+  const cfg = t274Cfg({ operation: "biparting", label: "Main drape track" });
+  const cost = 5 * 50 + 4 * 5 + 38 * 2 + 2 * 12 + 2 * 4 + 10 * 6 + 30 + 30 + 40 + 122 * 0.5; // 599
+  const bom = t274bBom(cfg, t274Series(), t274bParts(), 0.25);
+  ok(bom.errors.length === 0 && t274bNear(bom.cost, cost) && bom.cost === 599, "#274B pricing: a mapped bi-parting 40' batten track costs the catalog cost × qty of every part (599)");
+  ok(bom.price === t274bR2(599 / 0.75), "#274B pricing: the line sells at the tier seed on its cost when every part has a cost (599 ÷ 0.75 = 798.67)");
+  const carrier = bom.rows.find((r) => r.role === "carrier")!;
+  ok(carrier.qty === 38 && carrier.price === t274bAddPrice(2, 4, 0.25) && carrier.price === 2.67 && carrier.ext === t274bR2(2.67 * 38),
+    "#274B pricing: each part is priced exactly as a catalog-picker add (catalogAddPrice — cost at the tier seed: carrier $2 → $2.67)");
+  ok(bom.trackLengthFt === 41 && bom.rows.length === 10, "#274B pricing: track length 41' (40' run + 1' overlap), 10 part rows");
+  const noTier = t274bBom(cfg, t274Series(), t274bParts(), null);
+  ok(noTier.price === t274bR2(599 / 0.7), "#274B pricing: no tier stamp → the 0.30 fallback addPart uses (855.71)");
+
+  const res = t274bLine(cfg, t274Series(), t274bParts(), 0.25);
+  ok(res.ok, "#274B line: a mapped series yields a line");
+  if (res.ok) {
+    const it = res.item;
+    ok(it.qty === 1 && it.unit === "lot" && it.cost === 599 && it.price === 798.67 && it.manufacturer === "ADC" && it.sku === "TRK-ADC-280",
+      "#274B line: qty 1, unit lot, cost/price = the parts' sums, manufacturer from the series");
+    ok(it.desc === "Main drape track — ADC 280 bi-parting track, 40' run", `#274B line: desc "<label> — <series> <operation> track, <run>' run" (got "${it.desc}")`);
+    ok(t274Eq(it.track, t274bClean(cfg)) && it.track!.label === "Main drape track", "#274B line: the inputs ride on the line as `track` (a clean TrackConfig) so it reopens");
+    ok((it.components || []).length === 10 && it.components!.every((c) => c.sku.startsWith("P-") && c.cost === t274bParts()[c.sku].cost && c.price === t274bAddPrice(c.cost, t274bParts()[c.sku].list, 0.25)),
+      "#274B line: the priced parts ride in `components` (the fixture BOM shape) at catalog cost + catalog-add sell");
+    ok(it.components!.find((c) => c.sku === "P-battenClamp")!.role === "mount" && it.components!.find((c) => c.sku === "P-carrier")!.label === "Carrier",
+      "#274B line: components are labelled by role (mounting parts role 'mount')");
+    ok(!it.fixture && !it.curtain && !it.custom, "#274B line: not a fixture/curtain/custom line — an ordinary tier-seeded catalog-backed line");
+  }
+  const curved = t274bLine(t274Cfg({ curved: true, radiusFt: 12, runFt: 20, qty: 2 }), t274Series(), t274bParts(), 0.25);
+  ok(curved.ok && curved.item.desc === "Track — ADC 280 one-way track, 20' run, curved R12' (2 tracks)" && curved.item.components!.some((c) => c.sku === "P-curved") && !curved.item.components!.some((c) => c.sku === "P-track"),
+    "#274B line: a curved run prices curved sections, says ', curved R12'' and names the track count; no label → 'Track'");
+  const walk = t274bLine(t274Cfg({ operation: "walkalong" }), t274Series(), t274bParts(), 0.25);
+  ok(walk.ok && !walk.item.components!.some((c) => /Pulley|floorBlock|operatingLine/.test(c.sku)) && walk.item.track!.trimFt === undefined,
+    "#274B line: walk-along carries no pulleys, floor block, line or trim");
+}
+
+// ---- pricing: unmapped / deleted parts, gone series, list-priced parts ----
+{
+  const noFloor = t274Series({ parts: { ...T274_ALL_PARTS, floorBlock: undefined } });
+  const r = t274bLine(t274Cfg({ operation: "biparting" }), noFloor, t274bParts(), 0.25);
+  ok(!r.ok && r.errors.includes("ADC 280 has no part for Floor block — map it in Estimating Rules → Track series."),
+    "#274B pricing: an unmapped required role blocks the line and names it (spec's exact message)");
+  ok(!r.ok && r.bom.rows.find((x) => x.role === "floorBlock")!.missing, "#274B pricing: the parts table still lists the unmapped role (flagged missing)");
+  ok(t274bLine(t274Cfg({ operation: "walkalong" }), noFloor, t274bParts(), 0.25).ok, "#274B pricing: a role the configuration doesn't use (floor block on walk-along) doesn't block");
+  const gone = t274bLine(t274Cfg(), t274Series(), t274bParts({ endStop: null }), 0.25);
+  ok(!gone.ok && gone.errors.some((e) => /no part for End stop — map it in Estimating Rules → Track series/.test(e)) && gone.bom.rows.find((x) => x.role === "endStop")!.desc === "P-endStop — no longer in the catalog",
+    "#274B pricing: a mapped SKU deleted from the catalog counts as unmapped — blocks and names End stop");
+  const nilSeries = t274bBom(t274Cfg(), null, t274bParts(), 0.25);
+  ok(t274Eq(nilSeries.errors, [t274bGone]) && t274bGone === "This series no longer exists.", "#274B pricing: a deleted series prices nothing — 'This series no longer exists.'");
+  const bad = t274bLine(t274Cfg({ runFt: 0 }), t274Series(), t274bParts(), 0.25);
+  ok(!bad.ok && bad.errors.includes("Enter the run length."), "#274B pricing: engine input errors block the line too");
+  const listed = t274bBom(t274Cfg({ operation: "walkalong" }), t274Series(), t274bParts({ endStop: { cost: 0, list: 9 } }), 0.25);
+  const costed = 4 * 50 + 3 * 5 + 39 * 2 + 12 + 9 * 6;
+  ok(listed.errors.length === 0 && listed.rows.find((x) => x.role === "endStop")!.price === 9 && listed.price === t274bR2(costed / 0.75 + 18),
+    "#274B pricing: a part with no catalog cost sells at its list, like a catalog-picker add");
+}
+
+// ---- the form: draft ↔ config, fresh draft, series list ----
+{
+  const cfg = t274Cfg({ operation: "biparting", curved: true, radiusFt: 15, trimFt: 25, carrierSpacingIn: 10, hangerSpacingFt: 4, label: "Mid", qty: 3 });
+  ok(t274Eq(t274bFromDraft(t274bToDraft(cfg)), t274bClean(cfg)), "#274B form: a stored config → the form → back is the same config (reopen round-trip)");
+  const d = { ...t274bToDraft(t274Cfg({ operation: "walkalong" })), qty: "", carrierSpacing: "", hangerSpacing: "", trim: "30" };
+  const back = t274bFromDraft(d);
+  ok(back.qty === 1 && back.carrierSpacingIn === undefined && back.hangerSpacingFt === undefined && back.trimFt === undefined,
+    "#274B form: blank qty = 1, blank spacing = the series default, trim ignored off cord-operated");
+  const inactive = t274Series({ id: "old", name: "Old", active: false });
+  const list = [t274Series(), inactive];
+  ok(t274Eq(t274bSelectable(list).map((s) => s.id), ["adc-280"]) && t274Eq(t274bSelectable(list, "old").map((s) => s.id), ["adc-280", "old"]),
+    "#274B form: the series select lists active series only (plus a reopened line's own)");
+  ok(t274bFresh(list).seriesId === "adc-280" && t274bFresh([inactive]).seriesId === "" && t274bFresh([]).mounting === "batten",
+    "#274B form: a fresh track picks the first active series (none → blank, the modal's empty state)");
+}
+
+// ---- reopen → Update replaces the line in place ----
+{
+  const first = t274bLine(t274Cfg({ runFt: 30 }), t274Series(), t274bParts(), 0.25);
+  const second = t274bLine(t274Cfg({ runFt: 50, operation: "biparting" }), t274Series(), t274bParts(), 0.25);
+  if (first.ok && second.ok) {
+    const a: T274bItem = { id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2, lineOrder: 0 };
+    const b: T274bItem = { id: 3, sku: "B", desc: "B", qty: 1, unit: "ea", cost: 1, price: 2, lineOrder: 2 };
+    const t: T274bItem = { ...first.item, id: 2, lineOrder: 1, price: 999, comment: "Customer note", internalNote: "Internal" };
+    const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [a, t, b] };
+    const out = t274bReplace(sec, 2, second.item);
+    const n = out.items[1];
+    ok(out.items.length === 3 && out.items[0] === a && out.items[2] === b && n.id === 2 && n.lineOrder === 1,
+      "#274B Update: the track line is replaced in place — same id, position and lineOrder; the other lines untouched");
+    ok(n.price === second.item.price && n.track!.runFt === 50 && n.desc.includes("50' run") && n.comment === "Customer note" && n.internalNote === "Internal",
+      "#274B Update: new inputs at today's prices (a typed price is replaced); its customer comment and internal note are kept");
+    ok(sec.items[1] === t, "#274B Update: pure — the original section is not mutated");
+    const gone = t274bReplace(sec, 42, second.item);
+    ok(gone.items.length === 4 && gone.items[3].id === 42, "#274B Update: a line no longer there is appended instead");
+  } else ok(false, "#274B Update: fixture lines priced");
+}
+
+// ---- Add track from a curtain: pre-fill ----
+{
+  const two = t274bPrefill({ name: "Main Grand Drape", qty: "2", width: "20" });
+  ok(two.operation === "biparting" && two.run === "40" && two.label === "Main Grand Drape track", "#274B curtain: qty 2 → Bi-parting, run = width × qty (40), label = name + ' track'");
+  const one = t274bPrefill({ name: "Border", qty: "1", width: "36" });
+  ok(one.operation === "oneway" && one.run === "36", "#274B curtain: qty 1 → One-way, run = width");
+  const three = t274bPrefill({ name: "Tabs", qty: "3", width: "8" });
+  ok(three.operation === "oneway" && three.run === "8", "#274B curtain: qty other than 2 → One-way, run = the width");
+  const d = t274bCurtainDraft({ name: "Main Grand Drape", qty: "2", width: "20" }, [t274Series()]);
+  ok(d.mounting === "batten" && d.seriesId === "adc-280" && d.operation === "biparting" && d.run === "40" && d.qty === "1",
+    "#274B curtain: the track form pre-fills Batten mounting and the first active series");
+  const touched = { ...d, label: "Typed label" };
+  const next = t274bPrefill({ name: "Main Grand Drape", qty: "2", width: "25" });
+  const followed = t274bFollow(touched, two, next);
+  ok(followed.run === "50" && followed.label === "Typed label" && followed.operation === "biparting",
+    "#274B curtain: untouched pre-fills follow the curtain (width 25 → run 50); a typed field is kept");
+  const priced = t274bLine(t274bFromDraft(d), t274Series(), t274bParts(), 0.25);
+  ok(priced.ok && priced.item.desc === "Main Grand Drape track — ADC 280 bi-parting track, 40' run", "#274B curtain: the pre-filled track prices into its own line");
+}
+
+// ---- tier re-price (#254) ----
+{
+  const res = t274bLine(t274Cfg({ operation: "biparting" }), t274Series(), t274bParts(), 0.25);
+  if (res.ok) {
+    const seeded: T274bItem = { ...res.item, id: 1 };
+    const hand: T274bItem = { ...res.item, id: 2, price: 1000 };
+    const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [seeded, hand] };
+    const out = t274bReprice([sec], 0.25, 0.2);
+    const [s1, s2] = out.sections[0].items;
+    ok(out.repriced === 1 && out.handPriced === 1 && s1.price === t274bR2(599 / 0.8) && s2.price === 1000,
+      "#274B tier: a tier change re-prices a track line still at the seed (599 ÷ 0.8) and keeps a hand-priced one");
+    ok(s1.components!.find((c) => c.sku === "P-carrier")!.price === 2.5 && t274Eq(s1.track, seeded.track) && s2.components === hand.components,
+      "#274B tier: the re-priced line's parts re-seed with it (carrier $2 → $2.50); the kept line's parts untouched");
+    ok(t274Eq(t274bReseed([{ sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }], 0.2)[0], { sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }),
+      "#274B tier: a no-cost (list-priced) part keeps its sell");
+  } else ok(false, "#274B tier: fixture line priced");
+}
+
+// ---- Copy system (#266) ----
+{
+  const res = t274bLine(t274Cfg({ operation: "biparting" }), t274Series(), t274bParts(), 0.25);
+  if (res.ok) {
+    const seeded: T274bItem = { ...res.item, id: 1, comment: "c" };
+    const hand: T274bItem = { ...res.item, id: 2, extSellOverride: 1198 }; // 50 % on 599
+    const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 5, items: [seeded, hand] };
+    // Today: carriers went from $2 to $3.
+    const catalog = new Map<string, T274bCopyPart>(Object.values(t274bParts()).map((p) => [p.sku, { sku: p.sku, cost: p.sku === "P-carrier" ? 3 : p.cost, list: p.list }]));
+    const same = t274bCopy(sec, { newSectionId: "s2", catalog, fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.25 });
+    const [c1, c2] = same.section.items;
+    ok(c1.cost === 599 + 38 && c1.price === t274bR2(637 / 0.75) && same.costsUpdated === 2,
+      "#274B copy: a track line takes today's catalog cost for its parts (carrier $2 → $3: 599 → 637) and stays at the tier seed");
+    ok(c1.components!.find((c) => c.sku === "P-carrier")!.cost === 3 && c1.components!.find((c) => c.sku === "P-carrier")!.price === 4 && t274Eq(c1.track, seeded.track) && c1.comment === "c",
+      "#274B copy: its parts carry today's cost + catalog-add sell; `track` and notes carry over");
+    ok(c2.cost === 637 && c2.extSellOverride === t274bR2(637 * 2) && c2.price === hand.price,
+      "#274B copy: a hand-priced (typed ext sell) track line keeps its own margin on the new cost");
+    const moved = t274bCopy(sec, { newSectionId: "s3", catalog, fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.2 });
+    ok(moved.section.items[0].price === t274bR2(637 / 0.8) && moved.tierRepriced === 1 && moved.section.items[0].components!.find((c) => c.sku === "P-carrier")!.price === 3.75,
+      "#274B copy: copied to another tier, a seeded track line lands at the target tier's seed, parts too");
+    const noCat = t274bCopy(sec, { newSectionId: "s4", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.25 });
+    ok(noCat.section.items[0].cost === 599 && noCat.section.items[0].price === seeded.price && noCat.costsUpdated === 0,
+      "#274B copy: parts missing from today's catalog keep their own cost — the line is unchanged");
+  } else ok(false, "#274B copy: fixture line priced");
+}
+
+// ---- PM parts list (#262) explodes the track; the customer sees one line ----
+{
+  const res = t274bLine(t274Cfg({ operation: "biparting", label: "Main drape track" }), t274Series(), t274bParts(), 0.25);
+  if (res.ok) {
+    const curtain: T274bItem = { id: 1, sku: "CRT-1", desc: "Main Grand Drape — IFR Velour", qty: 2, unit: "ea", cost: 1000, price: 1428.57, curtain: true };
+    const track: T274bItem = { ...res.item, id: 2 };
+    const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [curtain, track] };
+    const rows = t274bPartsRows([sec], [], {});
+    const trackRows = rows.filter((r) => r.partOf.includes("Main drape track"));
+    ok(trackRows.length === 10 && trackRows.find((r) => r.sku === "P-operatingLine")!.qty === 122 && trackRows.find((r) => r.sku === "P-carrier")!.qty === 38,
+      "#274B parts list: the track line explodes into its 10 parts at their quantities, 'part of' the track's label");
+    const trackCost = trackRows.reduce((a, r) => a + r.qty * r.unitCost, 0);
+    const trackSell = trackRows.reduce((a, r) => a + r.qty * r.unitSell, 0);
+    ok(t274bNear(trackCost, 599) && t274bNear(trackSell, track.price) && !rows.some((r) => /Cost adjustment/.test(r.desc)),
+      "#274B parts list: the parts carry the line's cost and sell exactly (no cost-adjustment row)");
+    const cust = t274bCustomerLines(sec);
+    ok(cust.length === 2 && cust[1].item === track && t274bNear(cust[1].ext, track.price), "#274B customer: the curtain and its track are two rows — the track is ONE line, never its parts");
+  } else ok(false, "#274B parts list: fixture line priced");
+  const doc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/quote-document.tsx"), "utf8");
+  const prev = readFileSync(join(process.cwd(), "src/app/(app)/estimator/preview-doc.tsx"), "utf8");
+  ok(!/\.components\b/.test(doc) && !/\.components\b/.test(prev), "#274B customer: the quote document / preview never read a line's components");
+}
+
+// ---- wiring (source) ----
+{
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const client = src("src/app/(app)/estimator/estimator-client.tsx");
+  const card = src("src/app/(app)/estimator/section-card.tsx");
+  const modal = src("src/app/(app)/estimator/track-modal.tsx");
+  const curtainModal = src("src/app/(app)/estimator/curtain-modal.tsx");
+  const acts = src("src/app/(app)/estimator/actions.ts");
+  const page = src("src/app/(app)/estimator/page.tsx");
+  const addCurtain = client.slice(client.indexOf("const addCurtain = "), client.indexOf("const setFixture = "));
+  ok(/curtain: true,[\s\S]*?\},\s*\.\.\.\(track \? \[track\] : \[\]\),\s*\]\);/.test(addCurtain) && addCurtain.includes("trackLine(config,") && addCurtain.includes("if (!res.ok) return;"),
+    "#274B curtain: Add track pushes the curtain line THEN its track line, and a blocked track blocks the add");
+  const addTrack = client.slice(client.indexOf("const addTrack = "), client.indexOf("const setCurtainField = "));
+  ok(addTrack.includes("replaceTrackLine(s, lineId, res.item)") && addTrack.includes("pushItems(secId, [{ ...res.item, id: nextId() }])") && addTrack.includes("trackEdit?.readOnly"),
+    "#274B Update: Update track replaces the reopened line in place; Add pushes a new one; read-only never writes");
+  const openTrackEdit = client.slice(client.indexOf("const openTrackEdit = "), client.indexOf("const addTrack = "));
+  ok(openTrackEdit.includes("closeInput();") && openTrackEdit.indexOf("closeInput();") < openTrackEdit.indexOf("trackEditRef.current = {") && openTrackEdit.includes('openInputMethod("track", secId)') && /readOnly: gone \?/.test(openTrackEdit),
+    "#274B reopen: a track line reopens through the #269 close-then-seed dance; a deleted series opens read-only");
+  ok(client.includes("price: catalogAddPrice(cat.cost, cat.price, tierMargin)") && client.includes("catalogAddPrice(cost, hit.list, tierMargin)"),
+    "#274B pricing: addPart and the CSV import price through the same catalogAddPrice the track uses");
+  ok(card.includes('addBtn("+ Configure track", p.onToggleTrack, openMethod === "track")') && /const openTrack = \(e: \{ detail: number \}\) => \{\s*if \(e\.detail > 1\) return;/.test(card) && card.includes("onClick={openTrack}") && card.includes("TRACK"),
+    "#274B card: '+ Configure track' add button; a track line's description / ✎ reopen it on the first click only (#269's guard)");
+  ok(modal.includes("useSwallowOpeningDoubleClick()") && modal.includes("onClickCapture={swallowOpeningDoubleClick}") && modal.includes('"Update track" : "Add track"') && modal.includes("No track series yet — set one up in"),
+    "#274B modal: swallows the opening double-click, Update/Add track, and the empty-state link to Track series");
+  ok(curtainModal.includes("Add track") && curtainModal.includes("<TrackFields draft={track}"), "#274B curtain modal: the Add track toggle shows the track fields");
+  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(acts), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
+  ok(page.includes("listTrackSeries()") && page.includes("trackSeries={trackSeries}") && page.includes("trackParts={trackParts}"), "#274B page: the Estimator loads the series and their live catalog parts");
+}
+
+async function track274bAsyncChecks(): Promise<void> {
+  const Q = fixtureId("274B", "track-line-roundtrip");
+  registerFixture("quotes", Q);
+  const res = t274bLine(t274Cfg({ operation: "biparting", label: "Main drape track" }), t274Series(), t274bParts(), 0.25);
+  if (!res.ok) {
+    ok(false, "#274B save: fixture line priced");
+    return;
+  }
+  const track: T274bItem = { ...res.item, id: 7 };
+  const posted: T274bSection = { id: "sysT", name: "Rigging", kind: "materials", mfr: "", freightPct: 5, priceRound: 25, items: [track] };
+  // saveQuoteAction's pipeline over the posted sections (requireUser() keeps
+  // the action itself out of this harness): sanitizeSystemSell →
+  // clearPricedPor → reconcileEstimatorValue, then the quotes store.
+  const sanitized = [posted].map(t274bSanitizeSell);
+  const { sections } = t274bClearPor(sanitized);
+  const priced = t274bReconcile(sanitized, { value: 0, margin: 0 });
+  ok(priced.value > 0, "#274B save: the server's own value recompute prices the track line like any line");
+  await QuoteStore.create({ id: Q, name: "#274B track round-trip", quoteType: "system", status: "draft", customer: "Test Customer", source: "estimator", owner: "Test Harness", spec: { sections, mobs: [] } });
+  const back = await QuoteStore.get(Q);
+  const saved = ((back?.spec as { sections?: T274bSection[] } | null)?.sections || [])[0]?.items?.[0];
+  ok(!!saved && t274bSame(saved.track, track.track) && t274bSame(saved.components, track.components) && saved.price === track.price && saved.unit === "lot",
+    "#274B save: a track line round-trips through save with its `track` config and `components` intact");
+  const copied = t274bCopy((back!.spec as { sections: T274bSection[] }).sections[0], {
+    newSectionId: "sysT2",
+    catalog: new Map(Object.values(t274bParts()).map((p) => [p.sku, { sku: p.sku, cost: p.cost, list: p.list }])),
+    fixtures: new Map(),
+    sourceTierMargin: 0.25,
+    targetTierMargin: 0.25,
+  });
+  const c = copied.section.items[0];
+  ok(t274bSame(c.track, track.track) && t274bSame(c.components, track.components) && c.price === track.price && copied.costsUpdated === 0,
+    "#274B save: the saved line copies (Copy system) with `track` + `components` intact at an unchanged catalog");
+  const upd = t274bLine(t274Cfg({ runFt: 60 }), t274Series(), t274bParts(), 0.25);
+  const savedSec = (back!.spec as { sections: T274bSection[] }).sections[0];
+  if (upd.ok) await QuoteStore.update(Q, { spec: { sections: [t274bReplace(savedSec, 7, upd.item)], mobs: [] } });
+  const again = ((await QuoteStore.get(Q))?.spec as { sections?: T274bSection[] } | null)?.sections?.[0]?.items || [];
+  ok(again.length === 1 && again[0].id === 7 && again[0].track!.runFt === 60 && again[0].track!.operation === "oneway",
+    "#274B save: an Update-track'd line saves back as the same line (same id) with its new inputs");
 }

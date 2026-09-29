@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
 
 /**
@@ -262,3 +263,27 @@ export const NUMFIELD: CSSProperties = {
   borderRadius: 8,
   padding: "9px 11px",
 };
+
+/** How long after a configurator opens a multi-click inside it still counts
+ *  as the tail of the double-click that opened it (#269's labor rule). */
+export const OPEN_GUARD_MS = 800;
+
+/**
+ * #269/#274: a configurator reopened from a line opens on the line's FIRST
+ * click; the second click of a double-click must not land on whatever
+ * control now sits under the pointer. Returns an `onClickCapture` handler
+ * for the modal body that swallows a multi-click (detail > 1) arriving
+ * within OPEN_GUARD_MS of mount — the same guard labor-modal.tsx applies.
+ */
+export function useSwallowOpeningDoubleClick(): (e: MouseEvent) => void {
+  const openedAtRef = useRef(0);
+  useEffect(() => {
+    openedAtRef.current = Date.now();
+  }, []);
+  return (e: MouseEvent) => {
+    if (e.detail > 1 && Date.now() - openedAtRef.current < OPEN_GUARD_MS) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
+}

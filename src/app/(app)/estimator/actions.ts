@@ -821,7 +821,8 @@ export async function copySystemToEstimateAction(
     if (it?.sku) skus.add(it.sku);
     const comps = Array.isArray(it?.components) ? it.components : [];
     if (comps.length) {
-      fixtureIds.add(it.fixtureId || it.sku);
+      // #274: a track line's parts are plain catalog parts — no fixture record.
+      if (!it.track) fixtureIds.add(it.fixtureId || it.sku);
       comps.forEach((c) => c?.sku && skus.add(c.sku));
     }
   }
