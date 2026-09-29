@@ -95,9 +95,16 @@ export type ProsGeom = ReturnType<typeof prosGeom>;
 
 type XY = { x: number; y: number };
 
-/** The kind's default template when a caller names none (tests, legacy callers). */
-const templateOrDefault = (s: AState, tpl: string | null | undefined): string | null =>
-  tpl === undefined ? resolveBackground([], null, (VENUES.find((v) => v.key === s.venue) || VENUES[0]).kind) : tpl;
+const planKindOf = (s: AState): VenueKind => (VENUES.find((v) => v.key === s.venue) || VENUES[0]).kind || "proscenium";
+
+/**
+ * The template a plan draws — and its wall handles drag (#255): a known id as
+ * named; none, null or an unknown id → the plan kind's default (null only for
+ * a kind drawn by its built-in schematic). buildPlan, houseDragPatch and the
+ * geometries all resolve through this, so the handles always drag what's drawn.
+ */
+const planTemplate = (s: AState, tpl: string | null | undefined): string | null =>
+  tpl && templateEntry(tpl) ? tpl : resolveBackground([], null, planKindOf(s));
 
 /**
  * Shared proscenium groundplan geometry (#249, #255): a proscenium-family
@@ -107,7 +114,7 @@ const templateOrDefault = (s: AState, tpl: string | null | undefined): string | 
  * this, so they always agree.
  */
 export function prosGeom(s: AState, tpl?: string | null) {
-  const want = templateOrDefault(s, tpl);
+  const want = planTemplate(s, tpl);
   const id = want && templateEntry(want)?.family === "proscenium" ? want : "proscenium@1";
   const keys = keysById(id);
   const dims = prosceniumDims(s, id);
@@ -151,7 +158,7 @@ export type ChurchGeom = ReturnType<typeof churchGeom>;
  * centre aisle on the template's `aisle` point (the Entry).
  */
 export function churchGeom(s: AState, tpl?: string | null) {
-  const want = templateOrDefault(s, tpl);
+  const want = planTemplate(s, tpl);
   const id = want && templateEntry(want)?.family === "church" ? want : "church-traditional@1";
   const keys = keysById(id);
   const dims = churchDims(s, id);
@@ -162,7 +169,10 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const pt = (name: string) => px(plan.points[name]);
   const centre = pt("centre"), mix = pt("mix"), aisle = pt("aisle");
   const yFront = centre.y, yBack = pt("platBack").y, yNaveBack = pt("naveBack").y;
-  const mixBox: Box = { x: R(mix.x - 43), y: R(mix.y - 9), w: 86, h: 18 };
+  const naveL = pt("naveL"), naveR = pt("naveR");
+  // The FOH mix box buildPlanChurch knocks out of the Nave (mixPos: w wide, 18 px tall).
+  const mixW = Math.min((naveR.x - naveL.x) * 0.3, 86);
+  const mixBox: Box = { x: R(mix.x - mixW / 2), y: R(mix.y - 9), w: R(mixW), h: 18 };
   const platform = boxOf(regions[keys.roles.stage]);
   const nave = boxOf(regions[keys.roles.house]);
   const booth = keys.roles.booth && regions[keys.roles.booth] ? boxOf(regions[keys.roles.booth]) : mixBox;
@@ -170,18 +180,25 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const half = 2.5 * ppf;
   // The aisle-side ends round away from the aisle, so a 0.1-px rounding never narrows it.
   const down = (n: number) => Math.floor(n * 10 + 1e-9) / 10, up = (n: number) => Math.ceil(n * 10 - 1e-9) / 10;
+  // Pews paint after the mix box's white knock-out, so a row crossing it stops 2 px short of each side.
+  const gap = 2, mixL = R(mixBox.x - gap), mixR = R(mixBox.x + mixBox.w + gap);
+  const push = (x1: number, x2: number, y: number) => {
+    const yy = R(y);
+    const spans: Array<[number, number]> = yy >= mixBox.y - gap && yy <= mixBox.y + mixBox.h + gap && x1 < mixR && x2 > mixL ? [[x1, Math.min(x2, mixL)], [Math.max(x1, mixR), x2]] : [[x1, x2]];
+    for (const [a, b] of spans) if (b - a > ppf) pews.push({ x1: a, x2: b, y: yy });
+  };
   for (let y = yFront + 6 * ppf; y <= yNaveBack - 8 * ppf + 1e-6; y += 3 * ppf) {
     for (const [a, b] of rowSpans(regions[keys.roles.house], y)) {
       const l = a + 4 * ppf, r = b - 4 * ppf;
-      if (Math.min(r, aisle.x - half) - l > ppf) pews.push({ x1: R(l), x2: down(Math.min(r, aisle.x - half)), y: R(y) });
-      if (r - Math.max(l, aisle.x + half) > ppf) pews.push({ x1: up(Math.max(l, aisle.x + half)), x2: R(r), y: R(y) });
+      if (Math.min(r, aisle.x - half) - l > ppf) push(R(l), down(Math.min(r, aisle.x - half)), y);
+      if (r - Math.max(l, aisle.x + half) > ppf) push(up(Math.max(l, aisle.x + half)), R(r), y);
     }
   }
   return {
     template: id, W, H, ppi, ppf, dims, warning: houseDims(s, id).warning,
     cx: centre.x, yTop: MT, yBack, yFront, yNaveBack, xMin: ML,
     platBackL: pt("platBackL"), platBackR: pt("platBackR"), platFrontL: pt("platFrontL"), platFrontR: pt("platFrontR"),
-    naveL: pt("naveL"), naveR: pt("naveR"), mix, aisle,
+    naveL, naveR, mix, mixBox, aisle,
     platform, nave, booth, stage: platform, pews,
     regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
     polylines: C.polylines, labels: C.labels,
@@ -428,7 +445,7 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
     });
   if (s.sys.audio) [G.platFrontL, G.platFrontR].forEach((p, i) => L.rects.push({ x: R(p.x + (i ? 8 : -18)), y: R(p.y - 22), w: 10, h: 14, fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, rx: 2, dash: "" }));
   for (const p of G.pews) L.lines.push({ x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: "#cdd1d9", sw: 1.4, dash: "" });
-  mixPos(L, G.mix.x, G.mix.y, Math.min((G.naveR.x - G.naveL.x) * 0.3, 86));
+  mixPos(L, G.mix.x, G.mix.y, G.mixBox.w);
   if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
     const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
     L.rects.push({ x: R(bcx - cw / 2), y: R(bx.y + bx.h + 3), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
@@ -586,20 +603,19 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
 /* ------------------------------- entry point ------------------------------- */
 
 export function buildPlan(s: AState, lineSets: number, electrics: number, accent: string, tpl?: string | null): PlanData {
-  const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
-  const kind: VenueKind = venue.kind || "proscenium";
-  const id = templateOrDefault(s, tpl);
+  const kind = planKindOf(s);
+  // Proscenium and church kinds always resolve a template (planTemplate), so every kind below draws its built-in schematic.
+  const id = planTemplate(s, tpl);
   const family = templateEntry(id)?.family;
   let p: PlanData;
-  if (family === "church" || kind === "church") p = buildPlanChurch(s, lineSets, electrics, accent, id);
+  if (family === "church") p = buildPlanChurch(s, lineSets, electrics, accent, id);
   else if (family === "proscenium") p = buildPlanProscenium(s, lineSets, electrics, accent, id);
   else if (kind === "flat") p = buildPlanFlat(s, lineSets, electrics, accent);
   else if (kind === "blackbox") p = buildPlanBlackbox(s, lineSets, electrics, accent);
   else if (kind === "gym") p = buildPlanGym(s, lineSets, electrics, accent);
-  else if (kind === "arena") p = buildPlanArena(s, lineSets, electrics, accent);
-  else p = buildPlanProscenium(s, lineSets, electrics, accent, id);
+  else p = buildPlanArena(s, lineSets, electrics, accent);
   p.legend = legendFor(kind, s, electrics, accent);
-  p.isHouse = family === "proscenium" || family === "church" || kind === "church";
+  p.isHouse = family === "proscenium" || family === "church";
   p.canSlideWalls = p.isHouse;
   return p;
 }
@@ -754,7 +770,7 @@ export type DragPos = { sx: number; sy: number; dx: number; dy: number };
  */
 export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: string | null): Partial<AState> | null {
   if (hd.type !== "wall") return null;
-  const id = templateOrDefault(s, tpl);
+  const id = planTemplate(s, tpl);
   const family = templateEntry(id)?.family;
   if (family !== "proscenium" && family !== "church") return null;
   const G = family === "church" ? churchGeom(s, id) : prosGeom(s, id);

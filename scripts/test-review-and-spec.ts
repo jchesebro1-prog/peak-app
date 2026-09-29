@@ -34189,7 +34189,13 @@ import { rowSpans as c255T4Rows } from "@/lib/design/venue-templates/canvas";
     return c;
   };
   ok(G.pews.length >= 20 && G.pews.every((p) => inside({ x: p.x1 + 0.5, y: p.y }, G.regions.Nave) && inside({ x: p.x2 - 0.5, y: p.y }, G.regions.Nave)), "#255 T4: pews are drawn inside the Nave");
-  ok(G.pews.every((p) => p.x2 <= G.aisle.x - 2.5 * G.ppf + 1e-6 || p.x1 >= G.aisle.x + 2.5 * G.ppf - 1e-6) && Math.abs(G.aisle.x - (G.naveL.x + G.naveR.x) / 2) < 2, "#255 T4: a 5' centre aisle lines up with the Entry");
+  const aisleOk = (g: typeof G) => g.pews.every((p) => p.x2 <= g.aisle.x - 2.5 * g.ppf + 1e-6 || p.x1 >= g.aisle.x + 2.5 * g.ppf - 1e-6) && Math.abs(g.aisle.x - (g.naveL.x + g.naveR.x) / 2) < 2;
+  const G140 = c255T4Geom({ ...a, houseWidthFt: 140 });
+  ok(aisleOk(G) && aisleOk(G140) && Math.abs((G140.naveR.x - G140.naveL.x) / G140.ppf - 140) < 0.05, "#255 T4: a 5' centre aisle lines up with the Entry — default nave and a 140' nave");
+  // #255 T4 review: pews stop short of the FOH mix box (lines paint after its white knock-out).
+  const clearOfMix = (g: typeof G) => g.pews.length > 0 && g.pews.every((p) => p.y < g.mixBox.y || p.y > g.mixBox.y + g.mixBox.h || p.x2 < g.mixBox.x || p.x1 > g.mixBox.x + g.mixBox.w);
+  const rowsAtMix = (g: typeof G) => g.pews.some((p) => p.y >= g.mixBox.y && p.y <= g.mixBox.y + g.mixBox.h);
+  ok(clearOfMix(G) && clearOfMix(G140) && rowsAtMix(G) && rowsAtMix(G140), "#255 T4 review: no pew runs through the FOH mix box — default nave and a 140' nave");
   ok(Math.abs((G.naveR.x - G.naveL.x) / G.ppf - 959.698 / 12) < 0.05 && Math.abs((G.platBackR.x - G.platBackL.x) / G.ppf - 34) < 0.05, "#255 T4: the canvas scale reads true — the nave and the platform measure what they should");
   const hs = plan.handles || [];
   ok(hs.length === 3 && hs.every((h) => h.type === "wall") && !svg.includes("doors"), "#255 T4: a church plan offers nave-wall handles and no doors");
@@ -34200,5 +34206,14 @@ import { rowSpans as c255T4Rows } from "@/lib/design/venue-templates/canvas";
   ok(c255T4Rows([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], 5).map(([l, r]) => `${l}-${r}`).join() === "0-10", "#255 T4: rowSpans finds where a row crosses a region");
   ok(c255T4Dims.church.map((d) => d.label).join("|") === "Platform width|Platform depth|Ceiling height", "#255 T4: church dimensions read as the platform");
   const pac = { ...base, venue: "pac", width: 50, depth: 30, wing: 15 };
-  ok(c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a"), "#3a3f4a") === c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "proscenium@1"), "#3a3f4a") && c255T4Pros(pac).roles.house === "House", "#255 T4: a proscenium plan with no template named draws proscenium@1, unchanged");
+  // #255 T4 review: a null or unknown template resolves to the kind's default in buildPlan AND houseDragPatch — the handles drawn always drag.
+  const dragsWhatsDrawn = (st: typeof a, tpl: string | null) => {
+    const p = c255T4Build(st, 8, 3, "#3a3f4a", tpl);
+    const r = (p.handles || []).find((h) => h.side === "R");
+    return !!p.isHouse && !!r && c255T4Drag(st, r, { ...zero, dx: 0, dy: 0 }, tpl)?.houseWidthFt !== undefined;
+  };
+  ok([null, "bogus@9"].every((t) => dragsWhatsDrawn(a, t) && dragsWhatsDrawn(pac, t)), "#255 T4 review: a church or proscenium plan with no (or an unknown) template draws its kind's default, and its wall handles drag");
+  ok(c255T4Markup(c255T4Build(a, 8, 3, "#3a3f4a", null), "#3a3f4a") === svg && c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "bogus@9"), "#3a3f4a") === c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "proscenium@1"), "#3a3f4a") && c255T4Pros(pac).roles.house === "House", "#255 T4 review: an unresolved template draws exactly the kind default's plan");
+  const flat = { ...base, venue: "concenter" };
+  ok(!c255T4Build(flat, 8, 3, "#3a3f4a", null).isHouse && !(c255T4Build(flat, 8, 3, "#3a3f4a", null).handles || []).length, "#255 T4 review: a kind with no template keeps its built-in schematic and no wall handles");
 }
