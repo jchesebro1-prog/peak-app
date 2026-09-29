@@ -1,3 +1,5 @@
+import blackboxRaw from "./blackbox.json";
+import { BLACKBOX_KEYS } from "./blackbox.keys";
 import churchContemporaryRaw from "./church-contemporary.json";
 import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
 import churchTraditionalRaw from "./church-traditional.json";
@@ -40,6 +42,7 @@ const DATA: Record<string, TemplateData> = {
   "church-traditional@1": memo(churchTraditionalRaw as unknown as VenueTemplate, CHURCH_TRADITIONAL_KEYS),
   "church-contemporary@1": memo(churchContemporaryRaw as unknown as VenueTemplate, CHURCH_CONTEMPORARY_KEYS),
   "gym-stage@1": memo(gymStageRaw as unknown as VenueTemplate, GYM_STAGE_KEYS),
+  "blackbox@1": memo(blackboxRaw as unknown as VenueTemplate, BLACKBOX_KEYS),
 };
 
 export const TEMPLATE_IDS = Object.keys(DATA);

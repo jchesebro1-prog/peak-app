@@ -8,7 +8,7 @@ import type { BuiltInVenueKind, VenueType } from "@/lib/venue-types";
  * ships as @2 and never changes a Grid sheet stamped with @1. Adding a
  * template = its JSON + keys (./templates) + one entry here.
  */
-export type TemplateFamily = "proscenium" | "church";
+export type TemplateFamily = "proscenium" | "church" | "blackbox";
 
 export type VenueTemplateEntry = {
   id: string;
@@ -28,6 +28,7 @@ export const VENUE_TEMPLATES: readonly VenueTemplateEntry[] = [
   { id: "gym-stage@1", label: "Gym Stage", family: "proscenium", worksLike: ["proscenium"], defaultForKinds: [], defaultForTypes: ["gymstage"] },
   { id: "church-traditional@1", label: "Church — Traditional", family: "church", worksLike: ["church"], defaultForKinds: ["church"], defaultForTypes: [] },
   { id: "church-contemporary@1", label: "Church — Contemporary", family: "church", worksLike: ["church"], defaultForKinds: [], defaultForTypes: [] },
+  { id: "blackbox@1", label: "Blackbox", family: "blackbox", worksLike: ["blackbox", "flat"], defaultForKinds: ["blackbox", "flat"], defaultForTypes: [] },
 ];
 
 export const BUILT_IN_SCHEMATIC_LABEL = "Built-in schematic";

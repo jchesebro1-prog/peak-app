@@ -41,7 +41,7 @@ import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "
 import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
-import { buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { blackboxGeom, buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
 import { familyDims } from "@/lib/design/venue-templates/house-dims";
 import { stretchById } from "@/lib/design/venue-templates/templates";
@@ -385,7 +385,7 @@ export function starterSpaces(
   const id = planTemplate(a, tpl);
   const family = templateEntry(id)?.family;
   if (family) {
-    const G = family === "church" ? churchGeom(a, id) : prosGeom(a, id);
+    const G = family === "church" ? churchGeom(a, id) : family === "blackbox" ? blackboxGeom(a, id) : prosGeom(a, id);
     const at = (p: Point): Point => ({ x: clamp01(p.x / G.W), y: clamp01(p.y / G.H) });
     return G.spaces.filter((rid) => G.regions[rid]).map((rid) => ({ sheetId, page: 1, name: G.regionLabels[rid] ?? rid, points: G.regions[rid].map(at) }));
   }
@@ -448,6 +448,11 @@ export async function generateBaseSheet(
     const G = churchGeom(a, id);
     refWidthFt = G.dims.houseWidthFt;
     scale = calibrationScale({ x: G.naveL.x / plan.W, y: G.naveL.y / plan.H }, { x: G.naveR.x / plan.W, y: G.naveR.y / plan.H }, plan.H / plan.W, refWidthFt);
+  } else if (family === "blackbox") {
+    // #255: the room's inside walls are exactly its width apart.
+    const G = blackboxGeom(a, id);
+    refWidthFt = a.width;
+    scale = calibrationScale({ x: G.room.x / plan.W, y: G.room.y / plan.H }, { x: (G.room.x + G.room.w) / plan.W, y: G.room.y / plan.H }, plan.H / plan.W, refWidthFt);
   } else {
     const room = plan.rects[0];
     scale = room

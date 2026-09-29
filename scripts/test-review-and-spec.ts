@@ -34216,8 +34216,11 @@ import { rowSpans as c255T4Rows } from "@/lib/design/venue-templates/canvas";
   };
   ok([null, "bogus@9"].every((t) => dragsWhatsDrawn(a, t) && dragsWhatsDrawn(pac, t)), "#255 T4 review: a church or proscenium plan with no (or an unknown) template draws its kind's default, and its wall handles drag");
   ok(c255T4Markup(c255T4Build(a, 8, 3, "#3a3f4a", null), "#3a3f4a") === svg && c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "bogus@9"), "#3a3f4a") === c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "proscenium@1"), "#3a3f4a") && c255T4Pros(pac).roles.house === "House", "#255 T4 review: an unresolved template draws exactly the kind default's plan");
+  // #255 T12: every Quick Design venue now draws a template — the flat kind (Conference) the Blackbox drawing,
+  // whose rooms move but whose walls have no drag handles (width/depth are the room's own fields).
   const flat = { ...base, venue: "concenter" };
-  ok(!c255T4Build(flat, 8, 3, "#3a3f4a", null).isHouse && !(c255T4Build(flat, 8, 3, "#3a3f4a", null).handles || []).length, "#255 T4 review: a kind with no template keeps its built-in schematic and no wall handles");
+  const fp = c255T4Build(flat, 8, 3, "#3a3f4a", null);
+  ok(!fp.isHouse && (fp.handles || []).length === 4 && (fp.handles || []).every((h) => h.type === "movable"), "#255 T4 review (T12): a template without wall handles draws only its rooms' handles");
 }
 
 /* --- #255 T5: Settings → Venue types Background column; plans follow the effective template --- */
@@ -35053,4 +35056,67 @@ async function c255T11MovablesAsyncChecks(): Promise<void> {
   const left = c255T9Stretch(tpl, keys, D({ movables: { a: { wall: "left", t: 0.5 } } }));
   const lc = circle(left), lx = lc.map((q) => q.x), ly = lc.map((q) => q.y);
   ok(!!lc && Math.abs((Math.min(...lx) + Math.max(...lx)) / 2 + 115) < 1e-9 && Math.abs((Math.min(...ly) + Math.max(...ly)) / 2) < 1e-9 && left.polylines.length === home.polylines.length, "#255 T11 minors: moved to the left wall, the arc goes with the room (centre 15\" out from the wall, mid-run)");
+}
+
+/* --- #255 T12: Blackbox — shared with Conference; four movable rooms --- */
+import { BLACKBOX_KEYS as c255T12Keys, BLACKBOX_SPACES as c255T12Spaces } from "@/lib/design/venue-templates/blackbox.keys";
+import { stretchById as c255T12Stretch, templateData as c255T12Data } from "@/lib/design/venue-templates/templates";
+import { makeXMap as c255T12X, makeYMap as c255T12Y } from "@/lib/design/venue-templates/stretch";
+import { resolveBackground as c255T12Resolve } from "@/lib/design/venue-templates";
+import { blackboxDims as c255T12Dims } from "@/lib/design/venue-templates/house-dims";
+import { blackboxGeom as c255T12Geom, buildPlan as c255T12Build, renderPlanSvgMarkup as c255T12Markup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T12Default } from "@/app/(app)/design/quick/engine";
+import { movableOptions as c255T12Options } from "@/lib/design/venue-templates/movable-options";
+import { venueFrame as c255T12Frame } from "@/lib/design/grid-auto-layout";
+{
+  const K = c255T12Keys, T = c255T12Data("blackbox@1").template;
+  ok(JSON.stringify(T.origin) === "[-495,-573]" && T.extents.minX === -420 && T.extents.maxY === 420, "#255 T12: the Blackbox drawing is normalised to its room's centre and records the shift");
+  const D0 = { ...K.defaults, pit: false };
+  const p0 = c255T12Stretch("blackbox@1", D0);
+  const ends = p0.polylines.flatMap((pl) => [pl[0], pl[pl.length - 1]]);
+  ok(T.segments.every(([a, b, c, d]) => ends.some((p) => Math.hypot(p.x - a, p.y - b) < 0.1) && ends.some((p) => Math.hypot(p.x - c, p.y - d) < 0.1)), "#255 T12: at the drawing's own size every line — rooms too — is where Jeff drew it");
+  for (const [w, dp] of [[49, 49], [26, 24], [60, 40]]) {
+    const d = { ...K.defaults, proWidthFt: w, houseWidthFt: w, houseDepthFt: dp, pit: false };
+    const X = c255T12X(K, d), Y = c255T12Y(K, d);
+    ok(Math.abs(X(294, 0) - X(-294, 0) - w * 12) < 1e-9 && Math.abs(Y(294) - Y(-294) - dp * 12) < 1e-9 && Math.abs(X(300, 0) - X(294, 0) - 6) < 1e-9 && Math.abs(Y(300) - Y(294) - 6) < 1e-9, `#255 T12 ${w}×${dp}: the room's inside matches width/depth; walls stay 6"`);
+    const plan = c255T12Stretch("blackbox@1", d);
+    const size = (r: Array<{ x: number; y: number }>) => [Math.max(...r.map((p) => p.x)) - Math.min(...r.map((p) => p.x)), Math.max(...r.map((p) => p.y)) - Math.min(...r.map((p) => p.y))].map((n) => Math.round(n)).join("x");
+    ok(size(plan.regions.Booth) === "228x114" && size(plan.regions["Electrical Room"]) === "114x228" && size(plan.regions["storage-1"]) === "228x114", `#255 T12 ${w}×${dp}: each room keeps its drawn size, turned to its wall`);
+  }
+  const types: never[] = [];
+  ok(c255T12Resolve(types, null, "blackbox") === "blackbox@1" && c255T12Resolve(types, null, "flat") === "blackbox@1", "#255 T12: Black Box and Conference both default to the Blackbox drawing");
+  const base = c255T12Default(0);
+  const bb = { ...base, venue: "blackbox", width: 26, depth: 24, sys: { ...base.sys, lighting: true, curtains: true } };
+  const conf = { ...base, venue: "concenter", width: 50, depth: 30, sys: { ...base.sys, lighting: true, video: true, audio: true } };
+  const bd = c255T12Dims(bb);
+  ok(bd.proWidthFt === 26 && bd.houseDepthFt === 24, "#255 T12: the room's own width/depth fields size it");
+  const s1 = c255T12Markup(c255T12Build(bb, 8, 3, "#3a3f4a"), "#3a3f4a"), s2 = c255T12Markup(c255T12Build(conf, 8, 3, "#3a3f4a"), "#3a3f4a");
+  ok(["Blackbox", "Electrical Room", "Booth"].every((t) => s1.includes(">" + t + "<") && s2.includes(">" + t + "<")) && s1.split(">Storage<").length - 1 === 2 && s1.includes(">TENSION GRID<") && s2.includes(">PLATFORM<"), "#255 T12: Black Box and Conference draw Jeff's drawing — the conference keeps its low platform");
+  const G = c255T12Geom(conf);
+  ok(Math.abs(G.platform.y - G.room.y) < 1e-9 && G.platform.w < G.room.w && (c255T12Build(conf, 8, 3, "#3a3f4a").handles || []).filter((h) => h.type === "movable").length === 4, "#255 T12: the platform sits at the front of the room; all four rooms have drag handles");
+  const o = c255T12Options(bb, "blackbox@1");
+  ok(o.items.map((m) => m.label).sort().join("|") === "Booth|Electrical Room|Storage|Storage" && o.items.every((m) => m.walls.length === 4), "#255 T12: four movable rooms, each allowed on any wall");
+  const crowded = c255T12Options({ ...bb, movables: { booth: { wall: "bottom", t: 0.5 }, "storage-top": { wall: "bottom", t: 0.5 } } }, "blackbox@1");
+  ok(crowded.warnings.some((w) => w.includes("Bottom wall")), "#255 T12: two 20' rooms on a 26' wall — the plan says they don't fit");
+  const roomy = c255T12Stretch("blackbox@1", { ...K.defaults, pit: false, movables: { booth: { wall: "bottom", t: 0 }, "storage-top": { wall: "bottom", t: 1 } } });
+  const bx = (r: string) => roomy.regions[r].map((p) => p.x);
+  ok(Math.min(...bx("storage-1")) - Math.max(...bx("Booth")) >= 24 - 1e-6 && Math.min(...bx("Booth")) >= -300 - 1e-6 && Math.max(...bx("storage-1")) <= 300 + 1e-6, "#255 T12: on a 50' wall two rooms fit side by side, 2' apart, off the corners");
+  const fr = c255T12Frame(conf, { template: "blackbox@1" });
+  ok(Math.abs(fr.stage.y - G.platform.y / G.H) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#255 T12: Auto fill's stage is the conference platform and its booth the Booth room");
+  ok([...c255T12Spaces].map((r) => (r.startsWith("storage") ? "Storage" : r)).join("|") === "Blackbox|Electrical Room|Booth|Storage|Storage", "#255 T12: five starter Spaces");
+  // Jeff: the FOH mix follows the Booth — on every wall, at small / default / wide rooms, with the console on.
+  const conOn = (x: typeof bb) => ({ ...x, sys: { ...x.sys, controls: true }, ctrl: { ...x.ctrl, console: true } });
+  for (const [w, dp] of [[26, 24], [49, 49], [120, 60]])
+    for (const wall of ["bottom", "left", "top", "right"])
+      for (const venue of ["blackbox", "concenter"]) {
+        const st = conOn({ ...bb, venue, width: w, depth: dp, movables: { booth: { wall, t: 0.3 } } });
+        const g = c255T12Geom(st);
+        const b = g.booth, m = g.mix!;
+        const inside = (x: number, y: number) => x >= b.x - 1e-9 && x <= b.x + b.w + 1e-9 && y >= b.y - 1e-9 && y <= b.y + b.h + 1e-9;
+        const svg = c255T12Markup(c255T12Build(st, 8, 3, "#3a3f4a"), "#3a3f4a");
+        ok(!!m && inside(m.x - m.w / 2, m.y - m.h / 2) && inside(m.x + m.w / 2, m.y + m.h / 2) && !!m.console && svg.includes(">" + m.text + "<") && svg.includes(">CONSOLE<"), `#255 T12 ${venue} ${w}×${dp} ${wall}: the FOH mix box is drawn inside the Booth`);
+        // Every other room's label sits centred inside its room (turned to read along a narrow one).
+        const off = g.labels.filter((l) => l.anchor === "middle").filter((l) => !Object.entries(g.regions).some(([id, poly]) => id !== "Blackbox" && (() => { const xs = poly.map((q) => q.x), ys = poly.map((q) => q.y); return l.x > Math.min(...xs) && l.x < Math.max(...xs) && l.y > Math.min(...ys) && l.y < Math.max(...ys); })()));
+        ok(g.labels.filter((l) => l.anchor === "middle").length === 3 && !off.length, `#255 T12 ${venue} ${w}×${dp} ${wall}: the Storage and Electrical Room labels sit inside their rooms`);
+      }
 }

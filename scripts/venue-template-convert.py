@@ -35,10 +35,14 @@ REQUIRED = {
     "church-traditional": ["Platform", "Apse", "Nave", "Entry", "Choir Room", "Electrical Room", "Cry Room", "Storage"],
     "church-contemporary": ["Platform", "Nave", "Backstage", "Storage", "Storage", "Storage", "Storage", "Green Room", "Electrical Room", "Control Booth", "Cry Room"],
     "gym-stage": ["Stage", "Gym Floor", "Storage", "Electrical Room", "Booth"],
+    "blackbox": ["Blackbox", "Electrical Room", "Booth", "Storage", "Storage"],
 }
 
 # Drawings far from their own origin are shifted by these drawing inches first (#255).
-ORIGIN = {}
+ORIGIN = {
+    # the Blackbox drawing sits around (-495, -573); shift its room to the origin
+    "blackbox": (-495.0, -573.0),
+}
 
 
 class Refused(Exception):

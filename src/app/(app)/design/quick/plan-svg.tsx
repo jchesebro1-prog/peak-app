@@ -10,7 +10,7 @@
 
 import type * as React from "react";
 import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
-import { churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
+import { blackboxDims, churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
 import { planKindAllows, resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
 import { boxOf, canvasOf, distToPoly, inPoly, movablesPx, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
@@ -413,6 +413,52 @@ export function churchGeom(s: AState, tpl?: string | null) {
   };
 }
 
+export type BlackboxGeom = ReturnType<typeof blackboxGeom>;
+/** A blackbox plan label: Jeff's (top-left anchor, "start"), or re-laid — `anchor: "middle"` puts x, y at its centre and baseline, `rotate` turns it −90° about that point. */
+type BlackboxLabel = { text: string; x: number; y: number; h: number; anchor?: "middle"; rotate?: XY };
+
+/**
+ * Blackbox-family geometry (#255): Jeff's Blackbox drawing stretched to the
+ * room's width/depth, its four rooms where the design put them. The
+ * Conference kind shares it and adds a low platform across the front. The
+ * FOH mix goes in the Booth room wherever it sits (boothMix, as the Gym Stage's).
+ */
+export function blackboxGeom(s: AState, tpl?: string | null) {
+  const want = planTemplate(s, tpl);
+  const id = want && templateEntry(want)?.family === "blackbox" ? want : "blackbox@1";
+  const keys = keysById(id);
+  const dims = blackboxDims(s);
+  const plan = stretchById(id, dims);
+  const C = canvasOf(plan, { W: 640, ML: 62, MR: 40, MT: 54, MB: 44 });
+  const room = boxOf(C.regions[keys.roles.house]);
+  const platW = room.w * 0.62, platH = Math.min(Math.max(s.depth * 0.16, 6) * C.ppf, room.h * 0.3);
+  const platform: Box = { x: R(room.x + (room.w - platW) / 2), y: room.y, w: R(platW), h: R(platH) };
+  const boothPoly = keys.roles.booth ? C.regions[keys.roles.booth] : undefined;
+  const booth = boothPoly ? boxOf(boothPoly) : room;
+  const mix = boothPoly ? boothMix(boothPoly, C.labels, !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console), room) : null;
+  const moved = mix?.label;
+  // Labels keep Jeff's top-left anchor ("start") unless re-laid: every other room's label centred in its room — turned
+  // to read along the room when the room is too narrow for it across (a Storage on a side wall) — and the main room's
+  // label (houseLabel) placed by each builder clear of what it draws.
+  const labels: BlackboxLabel[] = C.labels.map((l, i) => (moved && i === moved.i ? { ...l, x: moved.x, y: moved.y } : { ...l }));
+  const inBox = (b: Box, l: { x: number; y: number }) => l.x >= b.x - 0.5 && l.x <= b.x + b.w + 0.5 && l.y >= b.y - 0.5 && l.y <= b.y + b.h + 0.5;
+  for (const m of keys.movables ?? []) {
+    if (m.region === keys.roles.booth || !C.regions[m.region]) continue;
+    const b = boxOf(C.regions[m.region]);
+    const i = C.labels.findIndex((l) => inBox(b, l));
+    if (i < 0) continue;
+    const w = labels[i].text.length * LABEL_CHAR_PX, cx = R(b.x + b.w / 2), cy = R(b.y + b.h / 2);
+    const turn = w > b.w - 8 && b.h > b.w;
+    labels[i] = { ...labels[i], x: cx, y: R(cy + 3), anchor: "middle", ...(turn ? { rotate: { x: cx, y: cy } } : {}) };
+  }
+  const houseLabel = C.labels.findIndex((l) => l.text === plan.regionLabels[keys.roles.house] && inBox(room, l));
+  return {
+    template: id, W: C.W, H: C.H, ppi: C.ppi, ppf: C.ppf, dims, room, platform, booth, mix,
+    regions: C.regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
+    polylines: C.polylines, labels, houseLabel, movables: movablesPx(plan, C.px), fromPx: C.fromPx, plan,
+  };
+}
+
 /* -------------------------------- builders -------------------------------- */
 
 function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _accent: string, tpl?: string | null): PlanData {
@@ -554,18 +600,15 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   return { W, H, rects, lines, circles, texts, paths, handles };
 }
 
-/** Conference center — rectangular room, low platform at the front, seating grid facing it. */
-function buildPlanFlat(s: AState, _lineSets: number, _electrics: number, accent: string): PlanData {
-  const Wpx = 640, ML = 62, MR = 40, MT = 54;
-  const ppf = (Wpx - ML - MR) / Math.max(s.width, 1);
-  const depthPx = Math.max(180, Math.min(s.depth * ppf, 420));
-  const x0 = ML, x1 = Wpx - MR, y0 = MT, y1 = y0 + depthPx, cx = (x0 + x1) / 2;
-  const L: L = { rects: [], lines: [], circles: [], texts: [], paths: [] };
-  L.rects.push({ x: R(x0), y: R(y0), w: R(x1 - x0), h: R(depthPx), fill: "#f6f7f9", stroke: "#16181d", sw: 2, rx: 2, dash: "" });
-  const platW = (x1 - x0) * 0.62, platH = Math.min(Math.max(s.depth * 0.16, 6) * ppf, depthPx * 0.3);
-  const px0 = cx - platW / 2, px1 = cx + platW / 2, pBot = y0 + platH;
-  L.rects.push({ x: R(px0), y: R(y0), w: R(platW), h: R(platH), fill: "#ffffff", stroke: accent, sw: 1.6, rx: 2, dash: "" });
-  L.texts.push({ x: R(cx), y: R(y0 + platH / 2 + 3), t: "PLATFORM", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
+/** Conference center (#255): the Blackbox drawing (Jeff: Blackbox and Convention Center share) with the low platform at the front, seating facing it. */
+function buildPlanFlat(s: AState, _lineSets: number, _electrics: number, accent: string, tpl?: string | null): PlanData {
+  const G = blackboxGeom(s, tpl);
+  const x0 = G.room.x, x1 = G.room.x + G.room.w, y0 = G.room.y, y1 = G.room.y + G.room.h, cx = (x0 + x1) / 2;
+  const P = G.platform, platW = P.w, px0 = P.x, px1 = P.x + P.w, pBot = P.y + P.h;
+  // The room's label: centred just above the seats (under the FOH lighting bar when there is one).
+  const { L, handles } = blackboxBase(G, s, { x: cx, y: pBot + (s.sys.lighting ? 34 : 18) });
+  L.rects.push({ x: P.x, y: P.y, w: P.w, h: P.h, fill: "#ffffff", stroke: accent, sw: 1.6, rx: 2, dash: "" });
+  L.texts.push({ x: R(cx), y: R(P.y + P.h / 2 + 3), t: "PLATFORM", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
   if (s.sys.video) {
     L.lines.push({ x1: R(cx - platW * 0.32), y1: R(y0 + 4), x2: R(cx + platW * 0.32), y2: R(y0 + 4), stroke: SYSCOLOR.video, sw: 3.4, dash: "" });
     L.texts.push({ x: R(cx), y: R(y0 + 15), t: "SCREEN", fill: SYSCOLOR.video, size: 7.5, anchor: "middle", transform: "" });
@@ -588,10 +631,9 @@ function buildPlanFlat(s: AState, _lineSets: number, _electrics: number, accent:
       const sx = x0 + 12 + (c + 0.5) * gx, sy = seatTop + r * gy;
       L.rects.push({ x: R(sx - 3.4), y: R(sy - 3), w: 6.8, h: 6, fill: "#e6e8ec", stroke: "#cdd1d9", sw: 0.6, rx: 1.5, dash: "" });
     }
-  L.texts.push({ x: R(cx), y: R(seatBot + 12), t: "SEATING", fill: "#c4c9d2", size: 8, anchor: "middle", transform: "" });
-  dimH(L, x0, x1, y0 - 26, s.width + "'-0\"", false);
-  dimV(L, y0, y1, x0 - 32, s.depth + "'-0\"");
-  return { W: Wpx, H: R(seatBot + 30), ...L };
+  dimH(L, x0, x1, 54 - 26, s.width + "'-0\"", false);
+  dimV(L, y0, y1, 62 - 32, s.depth + "'-0\"");
+  return { W: G.W, H: G.H, ...L, handles };
 }
 
 /** Church — Jeff's template (#255): the drawing, the platform's systems, pews in the Nave, FOH mix, dimension chains. */
@@ -651,20 +693,45 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
   return { W: G.W, H: G.H, ...L, handles };
 }
 
-/** Black box — open square room, tension grid, perimeter masking, riser blocks. */
-function buildPlanBlackbox(s: AState, _lineSets: number, _electrics: number, accent: string): PlanData {
-  const Wpx = 640, ML = 62, MR = 40, MT = 54;
-  const ppf = (Wpx - ML - MR) / Math.max(s.width, 1);
-  const depthPx = Math.max(180, Math.min(s.depth * ppf, 420));
-  const x0 = ML, x1 = Wpx - MR, y0 = MT, y1 = y0 + depthPx, cx = (x0 + x1) / 2;
+/**
+ * The drawing itself under a blackbox-family plan: the room's floor (the first rect, so the marks drawn as rects
+ * paint over it), the lines, labels, the FOH mix in the Booth room and the rooms' drag handles.
+ */
+function blackboxBase(G: BlackboxGeom, s: AState, houseLabelAt: XY): { L: L; handles: PlanHandle[] } {
   const L: L = { rects: [], lines: [], circles: [], texts: [], paths: [] };
-  L.rects.push({ x: R(x0), y: R(y0), w: R(x1 - x0), h: R(depthPx), fill: "#f6f7f9", stroke: "#16181d", sw: 2, rx: 2, dash: "" });
+  const trace = (pts: XY[]) => pts.map((p, i) => (i ? "L " : "M ") + p.x + " " + p.y).join(" ");
+  L.rects.push({ x: R(G.room.x), y: R(G.room.y), w: R(G.room.w), h: R(G.room.h), fill: "#f6f7f9", stroke: "none", sw: 0, dash: "" });
+  L.paths.push({ d: G.polylines.map(trace).join(" "), fill: "none", stroke: "#3a3f4a", sw: 0.9 });
+  G.labels.forEach((l, i) => {
+    const t = { t: l.text, fill: "#737985", size: 8, weight: 600 };
+    if (i === G.houseLabel) L.texts.push({ ...t, x: R(houseLabelAt.x), y: R(houseLabelAt.y), anchor: "middle", transform: "" });
+    else if (l.anchor === "middle") L.texts.push({ ...t, x: l.x, y: l.y, anchor: "middle", transform: l.rotate ? "rotate(-90 " + l.rotate.x + " " + l.rotate.y + ")" : "" });
+    else L.texts.push({ ...t, x: l.x, y: R(l.y + l.h), anchor: "start", transform: "" });
+  });
+  if (G.mix) {
+    mixPos(L, G.mix.x, G.mix.y, G.mix.w, G.mix.text, G.mix.h / 2);
+    const c = G.mix.console, cw = Math.min(R(G.mix.w * 0.38), 22);
+    if (c && s.sys) {
+      L.rects.push({ x: R(c.x - cw / 2), y: R(c.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+      L.texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
+    }
+  }
+  const handles: PlanHandle[] = G.movables.map((m) => ({ type: "movable", key: m.id, cx: m.centre.x, cy: m.centre.y, shape: "movable" }));
+  return { L, handles };
+}
+
+/** Black box (#255): Jeff's Blackbox drawing; tension grid, perimeter masking, riser blocks, lighting, movable seating inside the room. */
+function buildPlanBlackbox(s: AState, _lineSets: number, _electrics: number, accent: string, tpl?: string | null): PlanData {
+  const G = blackboxGeom(s, tpl);
+  const x0 = G.room.x, x1 = G.room.x + G.room.w, y0 = G.room.y, depthPx = G.room.h, y1 = y0 + depthPx, cx = (x0 + x1) / 2, ppf = G.ppf;
+  const bW = (x1 - x0) * 0.5, bH = depthPx * 0.26, bx0 = cx - bW / 2, by0 = y0 + depthPx * 0.15, cellW = bW / 4, cellH = bH / 2;
+  // The room's label: centred in the 30-px band between the riser blocks and the seats.
+  const { L, handles } = blackboxBase(G, s, { x: cx, y: by0 + bH + 18 });
   const stepPx = Math.max(18, 8 * ppf);
   for (let x = x0 + stepPx; x < x1 - 2; x += stepPx) L.lines.push({ x1: R(x), y1: R(y0), x2: R(x), y2: R(y1), stroke: "#eceef1", sw: 0.8, dash: "" });
   for (let y = y0 + stepPx; y < y1 - 2; y += stepPx) L.lines.push({ x1: R(x0), y1: R(y), x2: R(x1), y2: R(y), stroke: "#eceef1", sw: 0.8, dash: "" });
   L.texts.push({ x: R(x1 - 6), y: R(y0 + 13), t: "TENSION GRID", fill: "#c4c9d2", size: 7.5, anchor: "end", transform: "" });
   if (s.sys.curtains) L.rects.push({ x: R(x0 + 10), y: R(y0 + 10), w: R(x1 - x0 - 20), h: R(depthPx - 20), fill: "none", stroke: SYSCOLOR.curtains, sw: 1.6, rx: 1, dash: "5 4" });
-  const bW = (x1 - x0) * 0.5, bH = depthPx * 0.26, bx0 = cx - bW / 2, by0 = y0 + depthPx * 0.15, cellW = bW / 4, cellH = bH / 2;
   for (let r = 0; r < 2; r++)
     for (let c = 0; c < 4; c++)
       L.rects.push({ x: R(bx0 + c * cellW + 1), y: R(by0 + r * cellH + 1), w: R(cellW - 2), h: R(cellH - 2), fill: "#ffffff", stroke: accent, sw: 1.2, rx: 2, dash: "" });
@@ -686,9 +753,9 @@ function buildPlanBlackbox(s: AState, _lineSets: number, _electrics: number, acc
         L.rects.push({ x: R(sx - 3.2), y: R(sy - 3), w: 6.4, h: 6, fill: "#e6e8ec", stroke: "#cdd1d9", sw: 0.6, rx: 1.5, dash: "" });
       }
   }
-  dimH(L, x0, x1, y0 - 26, s.width + "'-0\"", false);
-  dimV(L, y0, y1, x0 - 32, s.depth + "'-0\"");
-  return { W: Wpx, H: R(y1 + 28), ...L };
+  dimH(L, x0, x1, 54 - 26, s.width + "'-0\"", false);
+  dimV(L, y0, y1, 62 - 32, s.depth + "'-0\"");
+  return { W: G.W, H: G.H, ...L, handles };
 }
 
 /** Arena — large open floor, end-stage platform, concentric bowl-seating arcs. */
@@ -787,14 +854,13 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
 
 export function buildPlan(s: AState, lineSets: number, electrics: number, accent: string, tpl?: string | null): PlanData {
   const kind = planKindOf(s);
-  // Proscenium and church kinds always resolve a template (planTemplate), so every kind below draws its built-in schematic.
+  // Proscenium, church, blackbox and flat kinds always resolve a template (planTemplate), so every kind below draws its built-in schematic.
   const id = planTemplate(s, tpl);
   const family = templateEntry(id)?.family;
   let p: PlanData;
   if (family === "church") p = buildPlanChurch(s, lineSets, electrics, accent, id);
   else if (family === "proscenium") p = buildPlanProscenium(s, lineSets, electrics, accent, id);
-  else if (kind === "flat") p = buildPlanFlat(s, lineSets, electrics, accent);
-  else if (kind === "blackbox") p = buildPlanBlackbox(s, lineSets, electrics, accent);
+  else if (family === "blackbox") p = kind === "flat" ? buildPlanFlat(s, lineSets, electrics, accent, id) : buildPlanBlackbox(s, lineSets, electrics, accent, id);
   else p = buildPlanArena(s, lineSets, electrics, accent);
   // #255: a template plan's legend is its family's (Quick Design's Gym Stage draws the proscenium-family gym drawing).
   p.legend = legendFor(family === "proscenium" ? "proscenium" : kind, s, electrics, accent);
@@ -962,14 +1028,16 @@ export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: st
   if (hd.type !== "wall" && hd.type !== "movable") return null;
   const id = planTemplate(s, tpl);
   const family = templateEntry(id)?.family;
-  if (family !== "proscenium" && family !== "church") return null;
-  const G = family === "church" ? churchGeom(s, id) : prosGeom(s, id);
+  if (family !== "proscenium" && family !== "church" && family !== "blackbox") return null;
+  const G = family === "church" ? churchGeom(s, id) : family === "blackbox" ? blackboxGeom(s, id) : prosGeom(s, id);
   if (hd.type === "movable") {
     if (!hd.key) return null;
     // #255: a room follows the pointer (relative drag, drag-start scale) and snaps to the nearest wall it may use, whole feet.
     const snap = snapMovable(G.plan, hd.key, G.fromPx({ x: hd.cx + pos.dx, y: hd.cy + pos.dy }));
     return snap ? movablePatch(s, hd.key, snap) : null;
   }
+  // A blackbox-family plan has no wall handles (width/depth are the room's own fields).
+  if (family === "blackbox") return null;
   if (hd.side === "B") {
     const [lo, hi] = houseSpecFor(G.template).depthLim;
     return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };

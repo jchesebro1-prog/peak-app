@@ -38,6 +38,7 @@ converter; the JSON then records `"origin"`.
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py church-traditional docs/venue-templates/source/church-traditional.dwg --check
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py church-contemporary docs/venue-templates/source/church-contemporary.dwg --check
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py gym-stage docs/venue-templates/source/gym-stage.dwg --check
+    ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py blackbox docs/venue-templates/source/blackbox.dwg --check
 
 `--check` exits 1 if the committed JSON is not what the source converts to.
 

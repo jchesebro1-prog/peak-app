@@ -135,9 +135,15 @@ export function churchDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: st
   return { proWidthFt: s.width, wingFt: 0, stageDepthFt: stageDepthFor(s, id).depthFt, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: false, movables: s.movables ?? undefined };
 }
 
+/** The stretch inputs for the blackbox family (#255): the room's own width/depth fields (blackbox and Conference kinds alike). */
+export function blackboxDims(s: Pick<AState, "width" | "depth"> & Partial<Pick<AState, "movables">>): StretchDims {
+  return { proWidthFt: s.width, wingFt: 0, stageDepthFt: 0, houseWidthFt: s.width, houseDepthFt: s.depth, pit: false, movables: s.movables ?? undefined };
+}
+
 /** The stretch inputs for any template, by its family. */
 export function familyDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string): StretchDims {
-  return templateEntry(id)?.family === "church" ? churchDims(s, id) : prosceniumDims(s, id);
+  const f = templateEntry(id)?.family;
+  return f === "church" ? churchDims(s, id) : f === "blackbox" ? blackboxDims(s) : prosceniumDims(s, id);
 }
 
 export type HouseField = { key: "houseWidthFt" | "houseDepthFt"; label: string; note: string; v: number; lim: [number, number] };

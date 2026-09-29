@@ -24,7 +24,7 @@
  */
 import { clamp01, type Point } from "@/lib/annotations";
 import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
-import { churchGeom, planTemplate, prosGeom } from "@/app/(app)/design/quick/plan-svg";
+import { blackboxGeom, churchGeom, planTemplate, prosGeom } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
 import { legacyChurchGeom } from "./legacy-church-geom";
 import { legacyProsGeom } from "./legacy-pros-geom";
@@ -66,6 +66,13 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
       const n = W(G);
       return { stage: n(G.stageBox), audience: n(G.nave), booth: n(G.booth) };
     }
+    if (family === "blackbox") {
+      const G = blackboxGeom(a, id);
+      const n = W(G);
+      // Conference: the platform is the stage and the room behind it the audience; a black box plays in the whole room.
+      const aud: Rect = kind === "flat" ? { x: G.room.x, y: G.platform.y + G.platform.h, w: G.room.w, h: G.room.y + G.room.h - (G.platform.y + G.platform.h) } : G.room;
+      return { stage: n(kind === "flat" ? G.platform : G.room), audience: n(aud), booth: n(G.booth) };
+    }
   }
   if (kind === "proscenium") {
     // A base sheet no template drew (before #249) keeps the old schematic's frame, so a re-fill lands on the plan the design has.
@@ -87,7 +94,7 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
       booth: r(G.cx - G.boothW / 2, G.y1, G.boothW, G.boothH),
     };
   }
-  // flat / blackbox / gym / arena — starterSpaces()'s fixed-fraction frame.
+  // flat / blackbox sheets no template drew (before #255), gym / arena — starterSpaces()'s fixed-fraction frame.
   return {
     stage: { x: 0.2, y: 0.12, w: 0.6, h: 0.28 },
     audience: { x: 0.08, y: 0.58, w: 0.84, h: 0.32 },
