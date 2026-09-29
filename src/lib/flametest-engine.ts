@@ -15,9 +15,11 @@ import {
 } from "@/lib/travel-plan";
 import {
   finishFlame,
+  liftCostOf,
   normalizePriceOverride,
   venueTesting,
   type FlameFinish,
+  type LiftRental,
 } from "@/lib/service-pricing";
 
 /**
@@ -46,6 +48,9 @@ import {
  *      forces Fly) travel prices as flights; the base fee and margin then
  *      apply to that figure exactly as they do to the drive. Drive mode is
  *      unchanged.
+ *   6. Lift rental (#275) — an optional count × rate added to the cost AFTER
+ *      the base-fee floor, margined with the rest:
+ *        cost = max(baseFee, trip.total + testingSubtotal) + liftCost
  *
  * Everything prices from an explicit rates object (pure functions);
  * getRates()/priceQuote() are the async wrappers that read the live,
@@ -202,9 +207,13 @@ export type FlameTestComputeOpts = {
   travel?: TravelOverride | null;
   /** #217: a typed quote total — replaces the rounded auto total exactly. */
   priceOverride?: number | string | null;
+  /** #275: an optional lift rental (already normalized — normalizeLift). */
+  lift?: LiftRental | null;
 };
 
 export type FlameTestPricing = FlameFinish & {
+  /** #275: the lift priced (null = none); its cost/sell/line are on the finish. */
+  lift: LiftRental | null;
   rates: FlameTestRates;
   perVenue: VenuePrice[];
   testingSubtotal: number;
@@ -345,11 +354,13 @@ export function compute(
   // (#217) the total rounds to the nearest $25 unless a typed total replaces
   // it — finishFlame() is the same code the builder preview runs.
   const rawCost = plan.total + testingSubtotal;
+  const lift = opts.lift && opts.lift.count > 0 ? opts.lift : null;
   const fin = finishFlame({
     rawCost,
     baseFee: C.baseFee,
     margin: C.margin,
     priceOverride: normalizePriceOverride(opts.priceOverride),
+    liftCost: liftCostOf(lift),
   });
 
   return {
@@ -361,6 +372,7 @@ export function compute(
     venueCount: venues.length,
     trip,
     travel: plan,
+    lift,
     ...fin,
   };
 }

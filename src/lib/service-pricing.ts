@@ -126,7 +126,123 @@ export function finishPrice(
   };
 }
 
-export type FlameFinish = FinishedPrice & {
+/* ---------- #275 lift rental ---------- */
+
+/** The customer-facing line a lift prints as on every service letter. */
+export const LIFT_LINE = "Lift rental";
+/** The seed rate when the catalog has no live `EQP-LIFT` row (the catalog seed / Estimator fallback). */
+export const LIFT_RATE_FALLBACK = 750;
+/** The catalog row the default lift rate reads (Estimator Labor prices its lift from the same row). */
+export const LIFT_SKU = "EQP-LIFT";
+export const LIFT_COUNT_MAX = 50;
+export const LIFT_RATE_MAX = 100_000;
+
+/**
+ * An optional lift rental on a flame-test, inspection or repair quote:
+ * `count` rentals (one rental = one lift for up to a week, the Estimator's
+ * `ceil(days / 5)` unit) × `rate` dollars each.
+ */
+export type LiftRental = { count: number; rate: number };
+
+/**
+ * A posted/stored lift → `{ count, rate }`, or undefined for no lift.
+ * `count` must be a whole number 1–50 (blank, 0 or junk = no lift); `rate`
+ * is whole dollars 0–$100,000 and falls back to `defaultRate` when blank or
+ * junk. Accepts the builder's `{ count: "2", rate: "" }` strings, a stored
+ * `{ count: 2, rate: 750 }`, or the posted JSON text of either.
+ */
+export function normalizeLift(raw: unknown, defaultRate: number): LiftRental | undefined {
+  let v: unknown = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as { count?: unknown; rate?: unknown };
+  const c =
+    typeof o.count === "number"
+      ? o.count
+      : typeof o.count === "string" && /^\s*\d+\s*$/.test(o.count)
+        ? Number(o.count)
+        : NaN;
+  if (!Number.isInteger(c) || c < 1 || c > LIFT_COUNT_MAX) return undefined;
+  const r = wholeDollars(o.rate);
+  const fallback = Number.isFinite(defaultRate) && defaultRate >= 0 ? Math.round(defaultRate) : LIFT_RATE_FALLBACK;
+  const rate = r != null && r <= LIFT_RATE_MAX ? r : fallback;
+  return { count: c, rate };
+}
+
+/** count × rate; 0 for no lift. */
+export function liftCostOf(lift: LiftRental | null | undefined): number {
+  return lift ? lift.count * lift.rate : 0;
+}
+
+/** What a finish adds for a lift: its cost, its margined sell, and the whole-dollar line it prints as. */
+export type LiftFinish = {
+  /** count × rate (0 = no lift). */
+  liftCost: number;
+  /** liftCost ÷ (1 − margin) — margined like the rest of the job. */
+  liftSell: number;
+  /**
+   * The printed "Lift rental" amount: liftSell in whole dollars, never above
+   * the total. Like repair parts, the lift keeps its own sell; the service
+   * line absorbs the $25 rounding and a typed total.
+   */
+  liftLine: number;
+};
+
+function liftFinish(liftCost: number | undefined, margin: number, total: number): LiftFinish {
+  const cost = Math.max(0, Number.isFinite(liftCost as number) ? (liftCost as number) : 0);
+  const sell = sellAtMargin(cost, margin);
+  return { liftCost: cost, liftSell: sell, liftLine: Math.max(0, Math.min(Math.round(total), Math.round(sell))) };
+}
+
+/** The saved form of a quote's lift (`<subdoc>.lift`): the inputs plus the cost and printed line. */
+export type SavedLift = LiftRental & { cost: number; line: number };
+
+/** The `lift` a save writes onto the quote subdoc — undefined (nothing written) when there is no lift. */
+export function savedLift(lift: LiftRental | null | undefined, fin: LiftFinish): SavedLift | undefined {
+  if (!lift || !(lift.count > 0)) return undefined;
+  return { count: lift.count, rate: lift.rate, cost: Math.round(fin.liftCost), line: fin.liftLine };
+}
+
+/** The builders' lift inputs as typed: rentals ("" / "0" = no lift) and rate ("" = the default). */
+export type LiftDraft = { count: string; rate: string };
+
+/** A saved lift → the builder's inputs. A rate equal to today's default reopens blank (follows the default). */
+export function liftDraftFrom(lift: LiftRental | null | undefined, defaultRate: number): LiftDraft {
+  if (!lift || !(lift.count > 0)) return { count: "", rate: "" };
+  return { count: String(lift.count), rate: lift.rate === Math.round(defaultRate) ? "" : String(lift.rate) };
+}
+
+/** "Lift rental", or "Lift rental ×2" for more than one. */
+export function liftLabel(count: number): string {
+  return count > 1 ? `${LIFT_LINE} ×${count}` : LIFT_LINE;
+}
+
+/**
+ * The lift a saved quote prints, read from its subdoc: `{ count, line }` or
+ * null when the quote has no lift (every quote saved before #275). A stored
+ * line wins; a lift saved without one prints count × rate ÷ (1 − margin).
+ */
+export function printedLift(
+  doc: { lift?: unknown } | null | undefined,
+  margin?: number | null
+): { count: number; line: number; label: string } | null {
+  const l = normalizeLift(doc?.lift, LIFT_RATE_FALLBACK);
+  if (!l) return null;
+  const stored = (doc?.lift as { line?: unknown }).line;
+  const line =
+    typeof stored === "number" && Number.isFinite(stored) && stored >= 0
+      ? Math.round(stored)
+      : Math.round(sellAtMargin(liftCostOf(l), margin ?? 0));
+  return { count: l.count, line, label: liftLabel(l.count) };
+}
+
+export type FlameFinish = FinishedPrice & LiftFinish & {
   rawCost: number;
   baseFee: number;
   baseApplied: boolean;
@@ -135,53 +251,80 @@ export type FlameFinish = FinishedPrice & {
   margin: number;
 };
 
-/** Flame tests: cost = max(baseFee, rawCost); total = cost ÷ (1 − margin), rounded. */
+/**
+ * Flame tests: cost = max(baseFee, rawCost) + liftCost; total = cost ÷ (1 − margin),
+ * rounded. #275: a lift adds on top of the base-fee floor — the floor is a
+ * minimum for the testing visit and never absorbs a lift rental.
+ */
 export function finishFlame(i: {
   rawCost: number;
   baseFee: number;
   margin: number;
   priceOverride?: number | null;
+  /** #275: count × rate of an optional lift rental (0/absent = none). */
+  liftCost?: number;
 }): FlameFinish {
   const baseApplied = i.rawCost < i.baseFee;
-  const cost = baseApplied ? i.baseFee : i.rawCost;
+  const lift = Math.max(0, i.liftCost || 0);
+  const cost = (baseApplied ? i.baseFee : i.rawCost) + lift;
+  const fin = finishPrice(sellAtMargin(cost, i.margin), cost, i.priceOverride, baseApplied);
   return {
     rawCost: i.rawCost,
     baseFee: i.baseFee,
     baseApplied,
     cost,
     margin: i.margin,
-    ...finishPrice(sellAtMargin(cost, i.margin), cost, i.priceOverride, baseApplied),
+    ...fin,
+    ...liftFinish(lift, i.margin, fin.total),
   };
 }
 
-export type InspectionFinish = FinishedPrice & {
+export type InspectionFinish = FinishedPrice & LiftFinish & {
+  /** Labor + travel + lift (the whole job's cost). */
   cost: number;
+  /** (labor + travel) ÷ (1 − margin) — the service sell before the minimum fee. */
   sellRaw: number;
   minFee: number;
   minApplied: boolean;
   margin: number;
 };
 
-/** Inspections: total = max(minFee, cost ÷ (1 − margin)), rounded. */
+/**
+ * Inspections: total = max(minFee, cost ÷ (1 − margin)) + liftCost ÷ (1 − margin),
+ * rounded. #275: the minimum fee floors the inspection itself; a lift rental
+ * adds on top of it rather than being absorbed by it.
+ */
 export function finishInspection(i: {
+  /** Labor + travel — the service cost, before any lift. */
   cost: number;
   minFee: number;
   margin: number;
   priceOverride?: number | null;
+  /** #275: count × rate of an optional lift rental (0/absent = none). */
+  liftCost?: number;
 }): InspectionFinish {
   const sellRaw = sellAtMargin(i.cost, i.margin);
   const minApplied = sellRaw < i.minFee;
+  const lift = Math.max(0, i.liftCost || 0);
+  const cost = i.cost + lift;
+  const fin = finishPrice(
+    (minApplied ? i.minFee : sellRaw) + sellAtMargin(lift, i.margin),
+    cost,
+    i.priceOverride,
+    minApplied
+  );
   return {
-    cost: i.cost,
+    cost,
     sellRaw,
     minFee: i.minFee,
     minApplied,
     margin: i.margin,
-    ...finishPrice(minApplied ? i.minFee : sellRaw, i.cost, i.priceOverride, minApplied),
+    ...fin,
+    ...liftFinish(lift, i.margin, fin.total),
   };
 }
 
-export type RepairFinish = FinishedPrice & {
+export type RepairFinish = FinishedPrice & LiftFinish & {
   serviceCost: number;
   serviceSellRaw: number;
   minCallout: number;
@@ -190,8 +333,9 @@ export type RepairFinish = FinishedPrice & {
   serviceSellAuto: number;
   partsCost: number;
   partsSell: number;
-  /** total − partsSell: the service line absorbs the rounding / typed difference. */
+  /** total − partsSell − liftSell: the service line absorbs the rounding / typed difference. */
   serviceSell: number;
+  /** Service + parts + lift. */
   cost: number;
   margin: number;
   partsMargin: number;
@@ -201,7 +345,9 @@ export type RepairFinish = FinishedPrice & {
 
 /**
  * Repairs: serviceSell = max(minCallout, serviceCost ÷ (1 − margin)); parts sell
- * at their own margin; total = serviceSell + partsSell, rounded (or typed).
+ * at their own margin; #275 a lift rental sells at the SERVICE margin, on top
+ * of the call-out floor; total = serviceSell + partsSell + liftSell, rounded
+ * (or typed).
  */
 export function finishRepair(i: {
   serviceCost: number;
@@ -210,14 +356,18 @@ export function finishRepair(i: {
   partsCost: number;
   partsMargin: number;
   priceOverride?: number | null;
+  /** #275: count × rate of an optional lift rental (0/absent = none). */
+  liftCost?: number;
 }): RepairFinish {
   const serviceSellRaw = sellAtMargin(i.serviceCost, i.margin);
   const calloutApplied = serviceSellRaw < i.minCallout;
   const serviceSellAuto = calloutApplied ? i.minCallout : serviceSellRaw;
   const partsSell = sellAtMargin(i.partsCost, i.partsMargin);
-  const cost = i.serviceCost + i.partsCost;
-  const fin = finishPrice(serviceSellAuto + partsSell, cost, i.priceOverride, calloutApplied);
-  const serviceSell = fin.total - partsSell;
+  const lift = Math.max(0, i.liftCost || 0);
+  const liftSell = sellAtMargin(lift, i.margin);
+  const cost = i.serviceCost + i.partsCost + lift;
+  const fin = finishPrice(serviceSellAuto + partsSell + liftSell, cost, i.priceOverride, calloutApplied);
+  const serviceSell = fin.total - partsSell - liftSell;
   // #217 fix wave 2: the service-only ratio (1 − serviceCost ÷ serviceSell)
   // blows up — or goes negative — whenever the FINAL serviceSell (total minus
   // parts, after rounding/typing) is zero or negative: a typed total that
@@ -245,6 +395,7 @@ export function finishRepair(i: {
     margin: i.margin,
     partsMargin: i.partsMargin,
     serviceMargin,
+    ...liftFinish(lift, i.margin, fin.total),
   };
 }
 
