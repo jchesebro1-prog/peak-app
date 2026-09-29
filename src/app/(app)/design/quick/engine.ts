@@ -204,7 +204,8 @@ export const VENUES: VenueDef[] = [
   { key: "pac", label: "PAC", sub: "Performing arts", kind: "proscenium", w: 48, d: 34, g: 58, wing: 18, ph: 28, sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: true, acoustical: true, pit: true } },
   { key: "concenter", label: "Conference", sub: "Conference center", kind: "flat", w: 50, d: 30, g: 34, wing: 0, ph: 24, sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: true, acoustical: false, pit: false } },
   { key: "blackbox", label: "Black Box", sub: "Black box theater", kind: "blackbox", w: 26, d: 24, g: 18, wing: 0, ph: 16, sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: false, acoustical: true, pit: false } },
-  { key: "gym", label: "Gym Stage", sub: "Gymnasium stage", kind: "gym", w: 54, d: 40, g: 26, wing: 0, ph: 14, sys: { rigging: true, curtains: true, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false } },
+  // #255 fix: Jeff's Gym Stage drawing — a 40' opening, 10' wings, a 20' stage (the gym floor is the house fields).
+  { key: "gym", label: "Gym Stage", sub: "Gymnasium stage", kind: "gym", w: 40, d: 20, g: 26, wing: 10, ph: 14, sys: { rigging: true, curtains: true, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false } },
 ];
 
 export const LIM: Record<DimField, [number, number]> = {
@@ -239,11 +240,14 @@ export const DIMSCHEMA: Record<VenueKind, Array<{ field: DimField; label: string
     { field: "depth", label: "Room depth", note: "Front to back" },
     { field: "grid", label: "Grid height", note: "Floor to tension grid" },
   ],
+  // #255 fix: the gym maps like the proscenium — the opening, wings and stage depth here; the gym floor's width
+  // and depth are the drawing's house rows (house-dims.ts, "Gym floor width" / "Gym floor depth").
   gym: [
-    { field: "width", label: "Gym floor width", note: "Sideline to sideline" },
-    { field: "depth", label: "Floor depth", note: "Stage to back wall" },
+    { field: "width", label: "Opening", note: "Proscenium opening, edge to edge" },
     { field: "ph", label: "Stage height", note: "Floor to proscenium header" },
+    { field: "depth", label: "Stage depth", note: "Plaster line to back wall" },
     { field: "grid", label: "Ceiling height", note: "Floor to structure" },
+    { field: "wing", label: "Wings", note: "Return wall to stage side wall, each side" },
   ],
   arena: [
     { field: "width", label: "Floor width", note: "Wall to wall" },

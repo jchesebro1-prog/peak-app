@@ -34307,7 +34307,7 @@ async function c255T6GridAsyncChecks(): Promise<void> {
   const act = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
   ok(act.includes("venueType: site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
   // Task 5 review: a client's per-design Background is kept only when the plan kind can draw it.
-  ok(c255T6SanTpl("church", "church-traditional@1") === "church-traditional@1" && c255T6SanTpl("church", "proscenium@1") === null && c255T6SanTpl("gym", "church-traditional@1") === null && c255T6SanTpl("church", "church-bogus@9") === null && c255T6SanTpl("church", 42) === null && c255T6SanTpl("proscenium", null) === null, "#255 T6: a design's Background override survives only when it is a template its plan kind can draw");
+  ok(c255T6SanTpl("church", "church-traditional@1") === "church-traditional@1" && c255T6SanTpl("church", "proscenium@1") === null && c255T6SanTpl("gym", "proscenium@1") === null && c255T6SanTpl("church", "church-bogus@9") === null && c255T6SanTpl("church", 42) === null && c255T6SanTpl("proscenium", null) === null, "#255 T6: a design's Background override survives only when it is a template its plan kind can draw");
   ok(act.includes("templateId: sanitizeTemplateId(") && act.indexOf("templateId: sanitizeTemplateId(") < act.indexOf("saveGridIntake(input.projectId"), "#255 T6: the intake drops a Background override the venue kind can't draw before saving");
 }
 
@@ -34783,10 +34783,12 @@ import { keysById as c255T9KeysById, stretchById as c255T9ById, TEMPLATE_IDS as 
   ok(tight2.movables.c.fits && tight2.warnings.length === 0, "#255 T9: a lone room on a short wall still fits when the run takes it");
   const tiny = c255T9Stretch(tpl2, { ...keys2, x: { kind: "spans", spans: [{ to: 100, drive: "pro" }] } }, D2({ proWidthFt: 2, movables: { c: { wall: "bottom", t: 0.5 } } }));
   ok(!tiny.movables.c.fits && tiny.warnings.includes("Not everything fits on the Back wall — move a room to another wall.") && Math.abs(tiny.movables.c.centre.x) < 1e-9, "#255 T9: a wall shorter than its room warns by the wall's display name and centres the room");
-  // Templates without movables are untouched (Gym Stage's Booth, T10, is the first with one).
-  for (const tid of c255T9Ids.filter((id) => !c255T9KeysById(id).movables?.length)) {
+  // Templates without movables are untouched; one with movables (Gym Stage's Booth, T10) warns about nothing at its own defaults.
+  for (const tid of c255T9Ids) {
+    const movs = c255T9KeysById(tid).movables ?? [];
     const p = c255T9ById(tid, { ...c255T9KeysById(tid).defaults, pit: false });
-    ok(JSON.stringify(p.movables) === "{}" && p.warnings.length === 0, `#255 T9 ${tid}: no movables, no warnings`);
+    if (!movs.length) ok(JSON.stringify(p.movables) === "{}" && p.warnings.length === 0, `#255 T9 ${tid}: no movables, no warnings`);
+    else ok(p.warnings.length === 0 && movs.every((m) => p.movables[m.id]?.fits && p.movables[m.id].wall === m.home.wall), `#255 T9 ${tid}: at its defaults every movable sits home and fits, no warnings`);
   }
 }
 
@@ -34820,17 +34822,18 @@ import { boothMix as c255T10BoothMix, LABEL_CHAR_PX as c255T10CharPx } from "@/a
   const seed = c255T10Types(undefined);
   ok(seed.find((t) => t.key === "gymstage")?.background === "gym-stage@1" && c255T10Default("proscenium") === "proscenium@1" && c255T10Resolve(seed, null, "gym") === "gym-stage@1" && c255T10Resolve(seed, null, "proscenium") === "proscenium@1", "#255 T10: Gym Stage (type and Quick Design venue) defaults to the gym drawing; Auditorium and PAC keep proscenium@1");
   const base = c255T10DefaultA(0);
-  const g = { ...base, venue: "gym", width: 54, depth: 40 };
+  // #255 fix: the gym kind maps exactly like the proscenium — width = the opening, wing, depth = the stage; the house fields = the floor.
+  const g = { ...base, venue: "gym", width: 54, wing: 4, depth: 40 };
   const gd = c255T10Dims(g, "gym-stage@1");
-  ok(gd.houseWidthFt === 54 && gd.houseDepthFt === 40 && Math.abs(gd.proWidthFt - 18) < 1e-9 && Math.abs(gd.wingFt - 4.5) < 1e-9 && gd.stageDepthFt === 20, "#255 T10: a Quick Design gym's width/depth are the floor; the stage keeps the drawing's proportions");
-  ok(c255T10Fields(g, "gym-stage@1") === null && c255T10Fields({ ...base, venue: "school", width: 40, wing: 10 }, "gym-stage@1")!.rows[0].label === "Gym floor width", "#255 T10: a gym-kind design sizes its floor with its own fields; a proscenium design on the gym drawing gets floor rows");
+  ok(gd.proWidthFt === 54 && gd.wingFt === 4 && gd.stageDepthFt === 40 && gd.houseWidthFt === 120 && gd.houseDepthFt === 49.5, "#255 T10: a Quick Design gym's width / wing / depth are the opening, wings and stage; its floor defaults to the drawing's 120' × 49.5'");
+  ok(c255T10Fields(g, "gym-stage@1")!.rows.map((r) => r.label).join("|") === "Gym floor width|Gym floor depth" && c255T10Fields({ ...base, width: 40, wing: 10 }, "gym-stage@1")!.rows[0].label === "Gym floor width", "#255 T10: a gym-kind design, and a proscenium design on the gym drawing, size the floor with the drawing's floor rows");
   const hd = c255T10House({ width: 40, wing: 10, houseWidthFt: 50 }, "gym-stage@1");
   ok(hd.widthFt === 69 && hd.warning === c255T10Warn && c255T10House({ width: 40, wing: 10 }, "gym-stage@1").widthFt === 120, "#255 T10: the floor defaults to 120' and widens past the stage and its rooms with the warning");
   const svg = c255T10Markup(c255T10Build(g, 8, 3, "#3a3f4a"), "#3a3f4a");
   ok(["Stage", "Gym Floor", "Storage", "Electrical Room", "Booth"].every((t) => svg.includes(">" + t + "<")) && !svg.includes("BLEACHERS"), "#255 T10: Quick Design's Gym Stage draws Jeff's gym, not the old bleacher schematic");
   const plan = c255T10Build(g, 8, 3, "#3a3f4a"), G = c255T10Geom(g, "gym-stage@1");
   const r = (plan.handles || []).find((h) => h.side === "R")!;
-  ok(c255T10Drag(g, r, { sx: 0, sy: 0, dx: 3 * G.ppf, dy: 0 }, "gym-stage@1")?.width === 60, "#255 T10: dragging a gym-kind side wall sets the floor width (its own width field)");
+  ok(c255T10Drag(g, r, { sx: 0, sy: 0, dx: 3 * G.ppf, dy: 0 }, "gym-stage@1")?.houseWidthFt === 126, "#255 T10: dragging a gym-kind side wall sets the floor width (the house field)");
   const fr = c255T10Frame(g, { template: "gym-stage@1" });
   ok(Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12 && fr.booth.y > fr.audience.y + fr.audience.h - 1e-9 && !fr.catwalk && !fr.stageEdge, "#255 T10: Auto fill's booth is the Booth room behind the floor; no catwalk or stage edge on this drawing");
   ok([...c255T10Spaces].join("|") === "Stage|Gym Floor|Storage|Electrical Room|Booth", "#255 T10: five starter Spaces");
@@ -34852,9 +34855,92 @@ import { boothMix as c255T10BoothMix, LABEL_CHAR_PX as c255T10CharPx } from "@/a
     ok(lab?.text === "Booth" && !!clear && lx >= bb.x - 1e-9 && lx + lab.text.length * c255T10CharPx <= bb.x + bb.w + 1e-9 && base - 7 >= bb.y, `#255 T10: on the ${wall} wall the Booth label sits in the room, clear of the FOH MIX box`);
   }
   {
-    // On the back wall of the 120' floor the Booth is too shallow for label + box + CONSOLE: the label moves just under the room.
+    // On the back wall of the 120' floor the Booth is too shallow for label + box + CONSOLE stacked (#255 fix): the label
+    // stays over the box and the CONSOLE mark moves beside it, all inside the room.
     const pl = c255T10Stretch("gym-stage@1", D0), C = c255T10Canvas(pl, { W: 640, ML: 58, MR: 138, MT: 52, MB: 44 }), bb = c255T10Box(C.regions.Booth);
-    const m = c255T10BoothMix(C.regions.Booth, C.labels, true), lab = C.labels[m.label?.i ?? -1];
-    ok(lab?.text === "Booth" && (m.label?.y ?? 0) + lab.h - 7 >= bb.y + bb.h && inside(bb, m) && m.text === "FOH MIX", "#255 T10: a shallow Booth keeps the box inside and its label just under the room");
+    const m = c255T10BoothMix(C.regions.Booth, C.labels, true), lab = C.labels[m.label?.i ?? -1], base = (m.label?.y ?? NaN) + (lab?.h ?? 0);
+    ok(lab?.text === "Booth" && base - 7 >= bb.y && base <= m.y - 9 && inside(bb, m) && !!m.console && Math.abs(m.console.y - (m.y - 5.5)) < 1e-9 && m.console.x + 13 <= bb.x + bb.w - 3 + 1e-9, "#255 T10: a shallow Booth keeps label, box and the CONSOLE mark (beside the box) inside");
   }
+}
+
+/* --- #255 T10 fix: the gym maps like the proscenium; Booth mix layouts on wide floors; gym kind draws only gym drawings --- */
+import { DIMSCHEMA as c255T10fDims, LIM as c255T10fLim, sizedDims as c255T10fSized, VENUES as c255T10fVenues, compute as c255T10fCompute } from "@/app/(app)/design/quick/engine";
+import { venueDimsFromEstimator as c255T10fVdEst } from "@/lib/design/venue-dims";
+import { GYM_BOOTH_SIDE_FT as c255T10fBoothFt, houseSpecFor as c255T10fSpec } from "@/lib/design/venue-templates/house-dims";
+import { effectiveTemplateFor as c255T10fEff, planKindTemplates as c255T10fKindTpls, sanitizeTemplateId as c255T10fSan } from "@/lib/design/venue-templates";
+import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "@/app/(app)/design/quick/plan-svg";
+{
+  const base = c255T10DefaultA(0);
+  // (a) field mapping: width = opening, wing = return wall → stage side wall, depth = stage depth; house fields = the gym floor.
+  const gv = c255T10fVenues.find((v) => v.key === "gym")!;
+  const sd = c255T10fSized(gv, "medium");
+  ok(gv.w === 40 && gv.d === 20 && gv.wing === 10 && sd.width === 40 && sd.depth === 20 && sd.wing === 10, "#255 T10 fix: Quick Design's Gym Stage defaults to the drawing — 40' opening, 10' wings, 20' stage");
+  ok(c255T10fDims.gym.map((d) => d.label).join("|") === "Opening|Stage height|Stage depth|Ceiling height|Wings", "#255 T10 fix: the gym's dimension rows read Opening / Wings / Stage depth (plus heights)");
+  const gDef = { ...base, venue: "gym", ...sd };
+  const fDef = c255T10Fields(gDef, c255T10fEff("gym", gDef, c255T10Types(undefined)))!;
+  ok(fDef.rows.map((r) => r.label).join("|") === "Gym floor width|Gym floor depth" && fDef.rows[0].v === 120 && fDef.rows[1].v === 50 && fDef.rows[0].lim[0] <= 120 && fDef.rows[0].lim[1] === 250 && fDef.rows[1].lim[0] === 21 && !fDef.warning, "#255 T10 fix: a Quick Design gym gets Gym floor width / depth rows from the template's limits — 120' × 49.5' by default, up to 250'");
+  ok(c255T10fLim.width[1] < 120 && c255T10Dims({ ...gDef, houseWidthFt: 180 }, "gym-stage@1").houseWidthFt === 180, "#255 T10 fix: the gym floor is no longer capped by the engine's width limit (80') — 180' draws");
+  for (const g2 of [{ ...base, venue: "gym", width: 44, wing: 12, depth: 24, houseWidthFt: 150, houseDepthFt: 70 }, { ...base, venue: "gym", width: 54, wing: 4, depth: 40 }, { ...gDef }]) {
+    const G = c255T10Geom(g2), d = G.dims, est = c255T10fVdEst({ ...g2, proscenium: false });
+    const tag = `${g2.width}/${g2.wing}/${g2.depth}`;
+    ok(G.template === "gym-stage@1" && d.proWidthFt === g2.width && d.wingFt === g2.wing && d.stageDepthFt === g2.depth && est.proWidthFt === d.proWidthFt && est.stageDepthFt === d.stageDepthFt, `#255 T10 fix ${tag}: pricing's opening and stage depth are the plan's`);
+    ok(Math.abs((G.xProcR - G.xProcL) / G.ppf - g2.width) < 0.05 && Math.abs((G.xWingR - G.xProcR) / G.ppf - g2.wing) < 0.05 && Math.abs((G.yPlaster - G.yBack) / G.ppf - g2.depth) < 0.05, `#255 T10 fix ${tag}: the plan draws that opening, those wings and that stage depth`);
+    const svg = c255T10Markup(c255T10Build(g2, c255T10fCompute(g2).lineSets, 3, "#3a3f4a"), "#3a3f4a");
+    ok(svg.includes(">" + g2.width + "'-0&quot;<") && svg.includes(">" + g2.depth + "'-0&quot;<"), `#255 T10 fix ${tag}: its dimensions print the design's own opening and stage depth`);
+  }
+  const old = { ...base, venue: "gym", width: 54, wing: 4, depth: 40 };
+  const od = c255T10Dims(old, "gym-stage@1");
+  ok(od.proWidthFt === 54 && od.stageDepthFt === 40 && od.houseWidthFt === 120 && od.houseDepthFt === 49.5, "#255 T10 fix: a gym design saved before #255 keeps its width as the opening; its floor takes the drawing's defaults");
+  const pl0 = c255T10Build(gDef, 8, 3, "#3a3f4a"), G0 = c255T10Geom(gDef);
+  const hR = (pl0.handles || []).find((h) => h.side === "R")!, hB = (pl0.handles || []).find((h) => h.side === "B")!;
+  const dR = c255T10Drag(gDef, hR, { sx: 0, sy: 0, dx: 5 * G0.ppf, dy: 0 }), dB = c255T10Drag(gDef, hB, { sx: 0, sy: 0, dx: 0, dy: 4 * G0.ppf });
+  ok(JSON.stringify(dR) === JSON.stringify({ houseWidthFt: 130 }) && JSON.stringify(dB) === JSON.stringify({ houseDepthFt: 54 }), "#255 T10 fix: a gym's wall handles drag the gym floor (house fields), never the opening or stage depth");
+
+  // (c) the gym kind draws only gym drawings.
+  ok(c255T10fKindTpls("gym").map((t) => t.id).join() === "gym-stage@1" && c255T10fKindTpls("proscenium").some((t) => t.id === "gym-stage@1") && c255T10fKindTpls("proscenium").some((t) => t.id === "proscenium@1"), "#255 T10 fix: the gym kind's Background choices are the gym drawings only (the picker hides with one); proscenium keeps both");
+  const seed = c255T10Types(undefined);
+  const audGym = seed.map((t) => (t.key === "gymstage" ? { ...t, background: "proscenium@1" } : t));
+  ok(c255T10fSan("gym", "proscenium@1") === null && c255T10fSan("gym", "gym-stage@1") === "gym-stage@1" && c255T10Resolve(audGym, null, "gym") === "gym-stage@1" && c255T10Resolve(seed, "proscenium", "gym") === "gym-stage@1" && c255T10fEff("gym", { templateId: "proscenium@1" }, seed) === "gym-stage@1", "#255 T10 fix: a gym design never resolves the Auditorium — not by override, its venue's type, or a gymstage type set to Auditorium");
+  ok(c255T10fPlanTpl(gDef, "proscenium@1") === "gym-stage@1" && c255T10Geom(gDef, "proscenium@1").template === "gym-stage@1" && c255T10fPlanTpl({ venue: "school" }, "gym-stage@1") === "gym-stage@1" && c255T10fPlanTpl({ venue: "school" }, "proscenium@1") === "proscenium@1", "#255 T10 fix: the plan of a gym forced onto proscenium@1 still draws the gym; a proscenium design may still pick the gym drawing");
+  {
+    const intake = readFileSync("src/app/(app)/design/grid/[id]/grid-intake.tsx", "utf8"), panel = readFileSync("src/components/design/scope-inputs-panel.tsx", "utf8");
+    ok([intake, panel].every((f) => f.includes("const choices = planKindTemplates(venue.kind);") && !f.includes("templatesFor(PLAN_KIND_WORKS_LIKE")), "#255 T10 fix: the Grid intake and Quick Design Background pickers list the plan kind's own templates");
+  }
+
+  // (d) the gym floor is never shallower than the Booth is long on a side wall, so it fits on every wall.
+  ok(c255T10fBoothFt === 21 && c255T10fSpec("gym-stage@1").depthLim[0] === 21 && c255T10House({ width: 40, wing: 10, houseDepthFt: 14 }, "gym-stage@1").depthFt === 21, "#255 T10 fix: the gym floor depth starts at 21' (the Booth + its two 6\" walls)");
+  for (const wall of ["left", "right", "back"] as const)
+    for (const t of [0, 0.5, 1]) {
+      const pl = c255T10Stretch("gym-stage@1", { proWidthFt: 40, wingFt: 10, stageDepthFt: 20, houseWidthFt: 120, houseDepthFt: 21, pit: false, movables: { booth: { wall, t } } });
+      const bx = c255T10Box(pl.regions.Booth), fl = c255T10Box(pl.regions["Gym Floor"]);
+      ok(pl.movables.booth.fits && pl.warnings.length === 0 && (wall === "back" || (bx.y >= fl.y - 6 - 1e-6 && bx.y + bx.h <= fl.y + fl.h + 6 + 1e-6)), `#255 T10 fix: a 21'-deep floor takes the Booth on the ${wall} wall at t ${t} without overhang or warning`);
+    }
+
+  // (b) the FOH mix, the CONSOLE mark and the Booth label fit inside the Booth — or tidily outside it — on wide floors.
+  type Rc = { x: number; y: number; w: number; h: number };
+  const hit = (a: Rc, b: Rc, pad = 0) => a.x < b.x + b.w + pad && a.x + a.w + pad > b.x && a.y < b.y + b.h + pad && a.y + a.h + pad > b.y;
+  const within = (a: Rc, b: Rc) => a.x >= b.x - 1e-6 && a.y >= b.y - 1e-6 && a.x + a.w <= b.x + b.w + 1e-6 && a.y + a.h <= b.y + b.h + 1e-6;
+  for (const hw of [120, 180, 250])
+    for (const wall of ["back", "left", "right"] as const) {
+      const pl = c255T10Stretch("gym-stage@1", { proWidthFt: 40, wingFt: 10, stageDepthFt: 20, houseWidthFt: hw, houseDepthFt: 49.5, pit: false, movables: { booth: { wall, t: 0.5 } } });
+      const C = c255T10Canvas(pl, { W: 640, ML: 58, MR: 138, MT: 52, MB: 44 });
+      const room = c255T10Box(C.regions.Booth), floor = c255T10Box(C.regions["Gym Floor"]);
+      const m = c255T10BoothMix(C.regions.Booth, C.labels, true, floor);
+      const lab = C.labels[m.label?.i ?? -1], labW = (lab?.text.length ?? 0) * c255T10fChar, base = (m.label?.y ?? NaN) + (lab?.h ?? 0);
+      const box: Rc = { x: m.x - m.w / 2, y: m.y - m.h / 2, w: m.w, h: m.h };
+      const con: Rc = { x: m.console!.x - 13, y: m.console!.y, w: 26, h: 13 };
+      const labR: Rc = { x: m.label!.x, y: base - 7, w: labW, h: 7 };
+      const inner: Rc = { x: room.x + 1, y: room.y + 1, w: room.w - 2, h: room.h - 2 };
+      const tidy = (r: Rc) => within(r, inner) || (!hit(r, room) && !hit(r, floor, 1) && within(r, { x: 0, y: 0, w: C.W, h: C.H }));
+      const tag = `${hw}' floor, ${wall} wall`;
+      ok(lab?.text === "Booth" && !!m.console && [box, con, labR].every(tidy), `#255 T10 fix ${tag}: the FOH box, the CONSOLE mark and the Booth label each sit inside the Booth or clear of it and the floor`);
+      ok(!hit(box, con) && !hit(box, labR) && !hit(con, labR), `#255 T10 fix ${tag}: box, CONSOLE mark and label never overlap`);
+      if (wall === "back" || hw === 120) ok(within(box, inner) && m.w >= 26 && m.h >= 10, `#255 T10 fix ${tag}: the FOH box itself is inside the Booth (${m.w} × ${m.h} px, "${m.text}")`);
+      if (wall === "back") ok([box, con, labR].every((r) => r.y + r.h <= C.H - 33), `#255 T10 fix ${tag}: nothing reaches the floor's width dimension under the Booth`);
+      if (hw === 120) ok([box, con, labR].every((r) => within(r, inner)), `#255 T10 fix ${tag}: at the drawing's width everything is inside the Booth`);
+    }
+  // Through the plan itself: a 180' Quick Design gym with a console.
+  const wide = { ...gDef, houseWidthFt: 180, sys: { ...gDef.sys, controls: true }, ctrl: { ...gDef.ctrl, console: true } };
+  const GW = c255T10Geom(wide), svgW = c255T10Markup(c255T10Build(wide, 8, 3, "#3a3f4a"), "#3a3f4a");
+  ok(GW.mixInBooth && !!GW.consoleAt && GW.mixBox.y >= GW.booth.y && GW.mixBox.y + GW.mixBox.h <= GW.booth.y + GW.booth.h && GW.consoleAt.x - 13 >= GW.booth.x + GW.booth.w && svgW.includes(">CONSOLE<") && svgW.includes(">" + GW.mixText + "<") && GW.labels.some((l) => l.text === "Booth" && l.x + 5 * c255T10fChar <= GW.booth.x), "#255 T10 fix: on a 180' floor the plan draws the FOH box in the Booth, the CONSOLE mark beside it and the label to its left");
 }

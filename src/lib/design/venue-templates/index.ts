@@ -38,7 +38,8 @@ export const PLAN_KIND_WORKS_LIKE: Record<VenueKind, BuiltInVenueKind | null> = 
   church: "church",
   flat: "flat",
   blackbox: "blackbox",
-  // #255: Quick Design's Gym Stage venue draws the gym drawing through the gymstage type (PLAN_KIND_TYPE_KEY) — its own fields and pricing kind are unchanged.
+  // #255: Quick Design's Gym Stage venue draws the gym drawing through the gymstage type (PLAN_KIND_TYPE_KEY), and
+  // only gym drawings (PLAN_KIND_TEMPLATE_TYPE); its fields map as the proscenium's, its pricing kind is unchanged.
   gym: "proscenium",
   arena: "arena",
 };
@@ -53,11 +54,33 @@ export const PLAN_KIND_TYPE_KEY: Record<VenueKind, string> = {
   arena: "arena",
 };
 
+/**
+ * #255 fix: a plan kind limited to the templates made for one venue-type key. Quick Design's Gym Stage venue
+ * works like proscenium (its fields map as the proscenium's: width = the opening, wing, depth = the stage; the
+ * house fields = the gym floor) but only ever draws a gym drawing — never the Auditorium.
+ */
+export const PLAN_KIND_TEMPLATE_TYPE: Partial<Record<VenueKind, string>> = { gym: "gymstage" };
+
 export const templateEntry = (id: string | null | undefined): VenueTemplateEntry | undefined =>
   id ? VENUE_TEMPLATES.find((t) => t.id === id) : undefined;
 
 export function templatesFor(kind: BuiltInVenueKind | null | undefined): VenueTemplateEntry[] {
   return kind ? VENUE_TEMPLATES.filter((t) => t.worksLike.includes(kind)) : [];
+}
+
+/** The templates a plan of `planKind` may draw (Background choices): its behaviour's, narrowed for a kind limited to one type's drawings. */
+export function planKindTemplates(planKind: VenueKind): VenueTemplateEntry[] {
+  const list = templatesFor(PLAN_KIND_WORKS_LIKE[planKind]);
+  const only = PLAN_KIND_TEMPLATE_TYPE[planKind];
+  return only ? list.filter((t) => t.defaultForTypes.includes(only)) : list;
+}
+
+/** Whether a plan of `planKind` may draw template `id` at all (a kind with no limit: any known template). */
+export function planKindAllows(planKind: VenueKind, id: string): boolean {
+  const e = templateEntry(id);
+  if (!e) return false;
+  const only = PLAN_KIND_TEMPLATE_TYPE[planKind];
+  return !only || e.defaultForTypes.includes(only);
 }
 
 /** A type's default Background: a template made the default for its key, else for its kind, else the kind's first; null = none. */
@@ -86,22 +109,26 @@ export function sanitizeBackground(kind: BuiltInVenueKind, typeKey: string, raw:
 export function resolveBackground(types: readonly VenueType[], typeKey: string | null | undefined, planKind: VenueKind): string | null {
   const wl = PLAN_KIND_WORKS_LIKE[planKind];
   if (!wl) return null;
-  const list = templatesFor(wl);
+  const list = planKindTemplates(planKind);
   if (!list.length) return null;
   const valid = (id: unknown): id is string => typeof id === "string" && list.some((t) => t.id === id);
+  // A default outside a limited kind's list (the gym kind under a proscenium-type venue) falls to the list's first.
+  const fallback = (key: string) => {
+    const d = defaultBackground(wl, key);
+    return valid(d) ? d : list[0].id;
+  };
   const own = typeKey ? types.find((t) => t.key === typeKey) : undefined;
   // The design's own type decides when it works like this plan: its Background, else its own default.
-  if (own && own.worksLike === wl) return valid(own.background) ? own.background : defaultBackground(wl, own.key);
+  if (own && own.worksLike === wl) return valid(own.background) ? own.background : fallback(own.key);
   const baseKey = PLAN_KIND_TYPE_KEY[planKind];
   const base = types.find((t) => t.key === baseKey);
   if (base && base.worksLike === wl && valid(base.background)) return base.background;
-  return defaultBackground(wl, baseKey);
+  return fallback(baseKey);
 }
 
 /** A design's per-design Background override, kept only when it is a template its plan kind can draw; else null. */
 export function sanitizeTemplateId(planKind: VenueKind, raw: unknown): string | null {
-  const wl = PLAN_KIND_WORKS_LIKE[planKind];
-  return typeof raw === "string" && templatesFor(wl).some((t) => t.id === raw) ? raw : null;
+  return typeof raw === "string" && planKindTemplates(planKind).some((t) => t.id === raw) ? raw : null;
 }
 
 /** A design's effective template: its own override ?? its venue type's Background ?? the kind default. */

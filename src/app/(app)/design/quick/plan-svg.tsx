@@ -9,9 +9,9 @@
  */
 
 import type * as React from "react";
-import { LIM, SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
+import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
 import { churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
-import { resolveBackground, templateEntry } from "@/lib/design/venue-templates";
+import { planKindAllows, resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
 import { boxOf, canvasOf, distToPoly, inPoly, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
 
@@ -101,40 +101,106 @@ const planKindOf = (s: Pick<AState, "venue">): VenueKind => (VENUES.find((v) => 
  * named; none, null or an unknown id → the plan kind's default (null only for
  * a kind drawn by its built-in schematic). buildPlan, houseDragPatch and the
  * geometries all resolve through this, so the handles always drag what's drawn.
+ * #255 fix: a kind limited to one type's drawings (the gym) never draws another
+ * (the Auditorium) — it gets its default instead.
  */
 export const planTemplate = (s: Pick<AState, "venue">, tpl: string | null | undefined): string | null =>
-  tpl && templateEntry(tpl) ? tpl : resolveBackground([], null, planKindOf(s));
+  tpl && planKindAllows(planKindOf(s), tpl) ? tpl : resolveBackground([], null, planKindOf(s));
 
 /** Approximate advance of the plan's 8-px semibold mono label glyphs (px per character). */
 export const LABEL_CHAR_PX = 4.9;
 
+/** A booth room's FOH mix layout (boothMix): the box (centre, size, text), the CONSOLE mark (bar's centre x and top y) and the room's label. */
+export type BoothMix = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  /** The CONSOLE mark: its bar's centre x and top y (the word 11 px under the bar's top); null = console off. */
+  console: { x: number; y: number } | null;
+  /** The room's label: its index in `labels` and its new top-left anchor (labels draw their baseline at y + h). */
+  label: { i: number; x: number; y: number } | null;
+};
+
 /**
- * #255: the FOH mix box inside a booth room (px) — for a booth that moves (the Gym Stage Booth), wherever it
- * sits. The room's own label, the box (18 px tall, no wider than the room less 6 px, never over 86; reading
- * "FOH" when "FOH MIX" won't fit) and — when `consoleOn` — the CONSOLE mark under the box stack centred in
- * the room, the label centred over the box. A room too shallow for that stack (the Booth on the back wall of
- * a wide floor) keeps just the box (and mark), centred, and its label moves just under the room, centred.
- * `label` = the room's label index in `labels` and its new top-left anchor (labels draw their baseline at y + h).
+ * #255 (fix): the FOH mix box for a booth room that moves (the Gym Stage Booth), wherever it sits (px). The room's
+ * own label (7-px glyphs), the box (no wider than the room less 6 px, never over 86 nor under MIX_MIN_W; "FOH" where
+ * "FOH MIX" won't fit) and, when `consoleOn`, the CONSOLE mark (bar + word, CONSOLE_SIDE_W wide, 11 px tall beside
+ * the box or 16 px under it) take the first layout that fits inside the room, 3 px clear of its walls:
+ *   1. label over the box, the mark under the box;  2. label over the box, the mark beside it;
+ *   3. the box, the mark under it — label outside;  4. the box, the mark beside it — label outside;
+ *   5. the box shrunk to the room's height (≥ 11 px), the mark beside it — label outside;
+ *   6. the box shrunk to the room's height (≥ 10 px) alone inside, the label outside; the mark just outside the room —
+ *      right of a room on the back wall, after the label for a room on a side wall;
+ *   7. (a side-wall room narrower than the box) label, box and mark stacked just outside the room.
+ * A label outside sits left of a room on the back wall (the floor's width dimension runs under it); outside a room on
+ * a side wall things stack along the wall, under it — or over it when it sits too low on the wall for that. `house` = the floor the room is attached to: whatever leaves the room keeps to the room's
+ * side of that floor's wall (a side-wall room's outside stack aligns to its outer edge). Every piece stays clear of
+ * the others.
  */
 export function boothMix(
   poly: XY[],
   labels: Array<{ text: string; x: number; y: number; h: number }>,
-  consoleOn: boolean
-): { x: number; y: number; w: number; text: string; label: { i: number; x: number; y: number } | null } {
+  consoleOn: boolean,
+  house?: Box | null
+): BoothMix {
   const bb = boxOf(poly);
   const i = labels.findIndex((l) => l.x >= bb.x && l.x <= bb.x + bb.w && l.y >= bb.y && l.y <= bb.y + bb.h);
   const lab = i < 0 ? null : labels[i];
-  const under = consoleOn ? 16 : 0;
-  const w = R(Math.max(0, Math.min(bb.w - 6, 86)));
-  const text = w >= 7 * LABEL_CHAR_PX + 4 ? "FOH MIX" : "FOH";
-  const x = R(bb.x + bb.w / 2);
-  const labX = lab ? R(x - (lab.text.length * LABEL_CHAR_PX) / 2) : 0;
-  const stack = (lab ? 11 : 0) + 18 + under; // label (7 px glyphs + 4 px gap), box, console mark
-  if (!lab || stack + 6 <= bb.h) {
-    const top = bb.y + (bb.h - stack) / 2;
-    return { x, y: R(top + (lab ? 11 : 0) + 9), w, text, label: lab ? { i, x: labX, y: R(top + 7 - lab.h) } : null };
-  }
-  return { x, y: R(Math.max(bb.y + 11, bb.y + (bb.h - under) / 2)), w, text, label: { i, x: labX, y: R(bb.y + bb.h + 10 - lab.h) } };
+  const labW = lab ? lab.text.length * LABEL_CHAR_PX : 0;
+  const PAD = 3, LAB = 11, UNDER = 16, SIDE = CONSOLE_SIDE_W + 4;
+  const iw = bb.w - 2 * PAD, ih = bb.h - 2 * PAD;
+  const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+  // -1: the room sits left of the floor (left wall), +1: right of it (right wall), 0: under it (back wall) or unknown.
+  const away = !house ? 0 : bb.x + bb.w <= house.x + 1 ? -1 : bb.x >= house.x + house.w - 1 ? 1 : 0;
+  const textFor = (w: number) => (w >= 7 * LABEL_CHAR_PX + 4 ? "FOH MIX" : "FOH");
+  const labAt = (x: number, baseline: number) => (lab ? { i, x: R(x), y: R(baseline - lab.h) } : null);
+  // Just under the room: centred when it fits under the room's width, else to its outer edge.
+  const underX = (w: number) => (w <= iw || away === 0 ? cx - w / 2 : away < 0 ? bb.x + bb.w - PAD - w : bb.x + PAD);
+  const out = (x: number, y: number, w: number, h: number, con: { x: number; y: number } | null, label: BoothMix["label"]): BoothMix => ({
+    x: R(x), y: R(y), w: R(w), h, text: textFor(w), console: con && { x: R(con.x), y: R(con.y) }, label,
+  });
+  const labFits = !lab || labW <= iw;
+  // Outside a side-wall room, things stack along the wall under it — over it only when the stack would run past the
+  // plan's bottom margin (the room low on the wall); `outTop(h)` = the top of an h-px stack there. Back wall: under.
+  const outTop = (h: number) => (away === 0 || !house || bb.y + bb.h + 3 + h <= house.y + house.h + 40 ? bb.y + bb.h + 3 : bb.y - 3 - h);
+  // The label outside the room: beside it on the left for a room on the back wall (under it sits the floor's width
+  // dimension), just under (or over) it for a room on a side wall.
+  const labUnder = away === 0 ? labAt(bb.x - 4 - labW, cy + 3.5) : labAt(underX(labW), outTop(7) + 7);
+  const conUnder = (x: number, yBox: number, h: number) => ({ x, y: yBox + h / 2 + 3 });
+  // Box (w × h, the mark under it when consoleOn), stacked with the label over it when `labIn`, centred in the room.
+  const stack = (labIn: boolean): BoothMix | null => {
+    const w = Math.min(86, iw), tall = (labIn && lab ? LAB : 0) + 18 + (consoleOn ? UNDER : 0);
+    if ((labIn && !labFits) || tall > ih || w < MIX_MIN_W || (consoleOn && iw < CONSOLE_SIDE_W)) return null;
+    const top = cy - tall / 2, yBox = top + (labIn && lab ? LAB : 0) + 9;
+    return out(cx, yBox, w, 18, consoleOn ? conUnder(cx, yBox, 18) : null, labIn ? labAt(cx - labW / 2, top + 7) : labUnder);
+  };
+  // Box h tall with the mark beside it (the row centred in the room, `room` px of height to fit in), the label over it when `labIn`.
+  const row = (labIn: boolean, h: number, room = ih): BoothMix | null => {
+    const w = Math.min(86, iw - SIDE), tall = (labIn && lab ? LAB : 0) + h;
+    if (!consoleOn || (labIn && !labFits) || tall > room || w < MIX_MIN_W) return null;
+    const top = cy - tall / 2, yBox = top + (labIn && lab ? LAB : 0) + h / 2, x = cx - SIDE / 2;
+    return out(x, yBox, w, h, { x: x + w / 2 + 4 + CONSOLE_SIDE_W / 2, y: yBox - 5.5 }, labIn ? labAt(cx - labW / 2, top + 7) : labUnder);
+  };
+  // The box shrunk to the room's height (2 px clear of its walls), alone inside; the mark (if on) just outside the room.
+  const hFit = R(Math.min(18, bb.h - 4));
+  const alone = (): BoothMix | null => {
+    const w = Math.min(86, iw), h = hFit;
+    if (h < 10 || w < MIX_MIN_W) return null;
+    if (!consoleOn) return out(cx, cy, w, h, null, labUnder);
+    if (away === 0) return out(cx, cy, w, h, { x: bb.x + bb.w + 4 + CONSOLE_SIDE_W / 2, y: cy - 5.5 }, labUnder);
+    // A side wall: the label, then the mark, stacked outside the room.
+    const top = outTop((lab ? LAB : 0) + 14);
+    return out(cx, cy, w, h, { x: underX(CONSOLE_SIDE_W) + CONSOLE_SIDE_W / 2, y: top + (lab ? LAB : 0) }, lab ? labAt(underX(labW), top + 7) : null);
+  };
+  const fit = stack(true) ?? row(true, 18) ?? stack(false) ?? row(false, 18) ?? (hFit >= 11 ? row(false, hFit, bb.h - 4) : null) ?? alone();
+  if (fit) return fit;
+  // 7: nothing fits inside (a side-wall room narrower than the box) — label, box and mark stacked just outside it.
+  const w = MIX_MIN_W, top = outTop((lab ? LAB : 0) + 18 + (consoleOn ? UNDER : 0));
+  const bx = underX(Math.max(w, labW)) + Math.max(w, labW) / 2;
+  const yBox = top + (lab ? LAB : 0) + 9;
+  return out(bx, yBox, w, 18, consoleOn ? { x: bx, y: yBox + 9 + 3 } : null, labAt(bx - labW / 2, top + 7));
 }
 
 /**
@@ -161,16 +227,16 @@ export function prosGeom(s: AState, tpl?: string | null) {
   // #255: a booth that moves (the Gym Stage Booth) takes the FOH mix with it (boothMix); otherwise the FOH mix
   // stands at the template's `mix` point in the house.
   const boothPoly = keys.roles.booth && (keys.movables ?? []).some((m) => m.region === keys.roles.booth) ? regions[keys.roles.booth] : undefined;
-  const inBooth = boothPoly ? boothMix(boothPoly, C.labels, !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console)) : null;
+  const inBooth = boothPoly ? boothMix(boothPoly, C.labels, !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console), boxOf(regions[keys.roles.house])) : null;
   const mix = inBooth ? { x: inBooth.x, y: inBooth.y } : { x: cx, y: pt("mix").y };
-  const mixW = inBooth ? inBooth.w : 86;
+  const mixW = inBooth ? inBooth.w : 86, mixH = inBooth ? inBooth.h : 18;
   const yMix = mix.y;
-  const mixBox: Box = { x: R(mix.x - mixW / 2), y: R(yMix - 9), w: mixW, h: 18 };
+  const mixBox: Box = { x: R(mix.x - mixW / 2), y: R(yMix - mixH / 2), w: mixW, h: mixH };
   const moved = inBooth?.label;
   const labels = moved ? C.labels.map((l, i) => (i === moved.i ? { ...l, x: moved.x, y: moved.y } : l)) : C.labels;
   return {
-    template: id, W, H, ML, MR, MT, MB, ppi, ppf, dims, warning: planKindOf(s) === "gym" ? null : houseDims(s, id).warning,
-    mix, mixInBooth: !!boothPoly, mixBox, mixText: inBooth?.text ?? "FOH MIX",
+    template: id, W, H, ML, MR, MT, MB, ppi, ppf, dims, warning: houseDims(s, id).warning,
+    mix, mixInBooth: !!boothPoly, mixBox, mixText: inBooth?.text ?? "FOH MIX", consoleAt: inBooth?.console ?? null,
     cx, xProcL, xProcR, openW, yBack, yPlaster, yTop: pt("top").y,
     stage: { x: xProcL, y: yBack, w: openW, h: R(yPlaster - yBack) },
     xStageL: pt("stageOuterL").x, xStageR: pt("stageOuterR").x, xWingL: pt("wingL").x, xWingR: pt("wingR").x,
@@ -350,15 +416,6 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   const wing = dims.wingFt;
   const rects: Rect[] = [], lines: LineEl[] = [], circles: CircleEl[] = [], texts: TextEl[] = [], paths: PathEl[] = [];
   const handles: PlanHandle[] = [];
-  // #255: a gym-kind design's width / depth are the floor; the stage's own sizes come from the drawing's proportions.
-  const gymKind = planKindOf(s) === "gym";
-  const ftIn = (ft: number) => {
-    const inch = Math.round(ft * 12);
-    return Math.floor(inch / 12) + "'-" + (inch % 12) + '"';
-  };
-  const openLabel = gymKind ? ftIn(dims.proWidthFt) : s.width + "'-0\"";
-  const wingLabel = gymKind ? ftIn(wing) : wing + "'";
-  const depthLabel = gymKind ? ftIn(dims.stageDepthFt) : s.depth + "'-0\"";
   const depthPx = yPlaster - yBack;
   const yAt = (frac: number) => R(yBack + frac * depthPx);
   const tick = (x: number, y: number) => lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
@@ -429,12 +486,13 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(cx), y1: R(yBack), x2: R(cx), y2: R(yBackWall), stroke: "#c4c9d2", sw: 1, dash: "3 4" });
 
   const L: L = { rects, lines, circles, texts, paths };
-  mixPos(L, G.mix.x, G.yMix, G.mixInBooth ? G.mixBox.w : Math.min(openW * 0.3, 86), G.mixText);
-  if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console && G.mixInBooth) {
-    // #255: under the FOH mix box, in the booth that carries it.
-    const bx = G.mixBox, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
-    rects.push({ x: R(bcx - cw / 2), y: R(bx.y + bx.h + 3), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
-    texts.push({ x: R(bcx), y: R(bx.y + bx.h + 14), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
+  if (G.mixInBooth) mixPos(L, G.mix.x, G.yMix, G.mixBox.w, G.mixText, G.mixBox.h / 2);
+  else mixPos(L, G.mix.x, G.yMix, Math.min(openW * 0.3, 86), G.mixText);
+  if (G.mixInBooth) {
+    // #255: in (or by) the booth that carries the FOH mix — under the box, or beside it (boothMix).
+    const c = G.consoleAt, cw = Math.min(R(G.mixBox.w * 0.38), 22);
+    if (c) rects.push({ x: R(c.x - cw / 2), y: R(c.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+    if (c) texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   } else if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
     const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
     rects.push({ x: R(bcx - cw / 2), y: R(bx.y + 6), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
@@ -453,13 +511,13 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xProcL), y1: R(yWid), x2: R(xProcR), y2: R(yWid), stroke: "#8c919c", sw: 1, dash: "" });
   tick(xProcL, yWid);
   tick(xProcR, yWid);
-  texts.push({ x: R(cx), y: R(yWid - 6), t: openLabel, fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+  texts.push({ x: R(cx), y: R(yWid - 6), t: s.width + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
   if (wing > 0) {
     ([[xWingL, xProcL], [xProcR, xWingR]] as Array<[number, number]>).forEach(([a, b]) => {
       lines.push({ x1: R(a), y1: R(yWid), x2: R(b), y2: R(yWid), stroke: "#c4c9d2", sw: 0.9, dash: "" });
       tick(a, yWid);
       tick(b, yWid);
-      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wingLabel, fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wing + "'", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
     });
   }
   // dimension lines — stage depth, then house depth (left, one chain)
@@ -474,7 +532,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xStageL - 4), y1: R(yBack), x2: R(xDep - 3), y2: R(yBack), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xStageL - 4), y1: R(yPlaster), x2: R(xDep - 3), y2: R(yPlaster), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xHouseL - 4), y1: R(yBackWall), x2: R(xDep - 3), y2: R(yBackWall), stroke: "#c4c9d2", sw: 0.8, dash: "" });
-  vDim(yBack, yPlaster, depthLabel);
+  vDim(yBack, yPlaster, s.depth + "'-0\"");
   vDim(yPlaster, yBackWall, Math.round(dims.houseDepthFt) + "'-0\"");
   // dimension line — house width (bottom)
   const yHW = H - 18;
@@ -889,11 +947,6 @@ export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: st
   const family = templateEntry(id)?.family;
   if (family !== "proscenium" && family !== "church") return null;
   const G = family === "church" ? churchGeom(s, id) : prosGeom(s, id);
-  if (family === "proscenium" && (VENUES.find((v) => v.key === s.venue) || VENUES[0]).kind === "gym") {
-    // #255: a gym-kind design's walls are its own width (floor) and depth fields.
-    if (hd.side === "B") return { depth: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, LIM.depth[0], LIM.depth[1])) };
-    return { width: Math.round(clamp(G.dims.houseWidthFt + (2 * (hd.side === "L" ? -1 : 1) * pos.dx) / G.ppf, LIM.width[0], LIM.width[1])) };
-  }
   if (hd.side === "B") {
     const [lo, hi] = houseSpecFor(G.template).depthLim;
     return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };

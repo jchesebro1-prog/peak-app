@@ -1,4 +1,4 @@
-import { venueOf, type AState } from "@/app/(app)/design/quick/engine";
+import type { AState } from "@/app/(app)/design/quick/engine";
 import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
 import { CHURCH_TRADITIONAL_KEYS } from "./church-traditional.keys";
 import { GYM_STAGE_KEYS } from "./gym-stage.keys";
@@ -11,7 +11,7 @@ import type { StretchDims } from "./types";
  * Pure; safe in client components. Called without a template id every
  * function behaves exactly as #249's proscenium version.
  */
-type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt" | "venue">>;
+type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt">>;
 
 export const HOUSE_DEPTH_LIM: [number, number] = [40, 200];
 export const HOUSE_NARROW_WARNING = "The house is narrower than the stage, so its side walls slant inward.";
@@ -21,9 +21,8 @@ export const CONTEMPORARY_NAVE_WARNING = "The nave needs 12' beside the platform
 export const CONTEMPORARY_PLATFORM_DEPTH_RATIO = 2.2;
 export const CONTEMPORARY_PLATFORM_WARNING = "The pointed front needs a platform no deeper than 2.2 × its width, so the plan shortens it.";
 export const GYM_FLOOR_WARNING = "The gym floor needs room for the stage and its side rooms, so the plan widens it to fit.";
-
-/** #255: Quick Design's own Gym Stage venue (engine kind "gym") — its width / depth fields are the gym floor. */
-const isGymKind = (s: Partial<Pick<AState, "venue">>): boolean => !!s.venue && venueOf(s as AState).kind === "gym";
+/** #255 fix: the Gym Stage Booth's length along a side wall (feet) — the shallowest gym floor. */
+export const GYM_BOOTH_SIDE_FT = 21;
 
 export function stageInsideWidthFt(s: Pick<AState, "width" | "wing">): number {
   return (s.width || 0) + 2 * (s.wing || 0);
@@ -83,7 +82,9 @@ export const HOUSE_SPECS: Record<string, HouseSpec> = {
     // The stage, its two 6" side walls and a little of each side room (≥ 4').
     widthLim: (s) => [Math.ceil(stageInsideWidthFt(s)) + 9, 250],
     widthDefault: (s) => Math.max(GYM_STAGE_KEYS.defaults.houseWidthFt, Math.ceil(stageInsideWidthFt(s)) + 9),
-    depthLim: [14, 200],
+    // #255 fix: never shallower than the Booth is long on a side wall (20' + its two 6" walls = 21'), so the
+    // Booth fits on every wall it may move to and never overhangs the floor's corners.
+    depthLim: [GYM_BOOTH_SIDE_FT, 200],
     depthDefault: GYM_STAGE_KEYS.defaults.houseDepthFt,
     legacyHalf: false,
     warning: (_s, raw, widthFt) => (raw < widthFt - 1e-9 ? GYM_FLOOR_WARNING : null),
@@ -118,15 +119,12 @@ export function houseDims(s: HouseInput, id?: string | null): { widthFt: number;
   return { widthFt, depthFt, warning };
 }
 
-/** The stretch inputs for a proscenium-family template. */
+/**
+ * The stretch inputs for a proscenium-family template. #255 fix: Quick Design's Gym Stage venue maps exactly like
+ * a proscenium — width = the opening, wing = return wall → stage side wall, depth = the stage; the house fields
+ * are the gym floor — the same numbers its pricing reads.
+ */
 export function prosceniumDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string = "proscenium@1"): StretchDims {
-  if (isGymKind(s)) {
-    // #255: Quick Design's Gym Stage venue — its width/depth ARE the floor; the stage keeps the drawing's proportions (40/120, 10/120, 20').
-    const spec = houseSpecFor(id);
-    const w = Math.max(20, s.width || 0);
-    const stage = { width: w / 3, wing: w / 12 };
-    return { proWidthFt: stage.width, wingFt: stage.wing, stageDepthFt: 20, houseWidthFt: clamp(w, spec.widthLim(stage)), houseDepthFt: clamp(s.depth || 0, spec.depthLim), pit: false };
-  }
   const h = houseDims(s, id);
   return { proWidthFt: s.width, wingFt: s.wing || 0, stageDepthFt: s.depth, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: !!s.sys?.pit };
 }
@@ -146,8 +144,6 @@ export type HouseField = { key: "houseWidthFt" | "houseDepthFt"; label: string; 
 
 /** The house / nave rows a dimension panel shows for a template; null = none. */
 export function houseFields(s: HouseInput, id: string | null | undefined): { rows: HouseField[]; warning: string | null } | null {
-  // #255: the gym kind sizes its floor with its own width / depth fields.
-  if (isGymKind(s)) return null;
   const spec = id ? HOUSE_SPECS[id] : undefined;
   if (!spec) return null;
   const h = houseDims(s, id);

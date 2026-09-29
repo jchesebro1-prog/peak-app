@@ -57,9 +57,10 @@ export function battenLenFt(proWidthFt: number): number {
  *
  * CAVEAT (open question for Jeff, punch #50/#66): `AState.width` is only the
  * proscenium opening when the venue kind is "proscenium". For church / flat /
- * blackbox / arena it is wall to wall, and for gym it is sideline to sideline
- * (DIMSCHEMA in quick/engine.ts). Those kinds therefore size drapes off a
- * number that is wider than any opening. That `width -> proWidthFt` mapping
+ * blackbox / arena it is wall to wall (DIMSCHEMA in quick/engine.ts). Those
+ * kinds therefore size drapes off a number that is wider than any opening.
+ * (#255: the gym's `width` is now its stage opening too — DIMSCHEMA "Opening" —
+ * but it still prices as a non-proscenium kind: no wings added, pipe = width.) That `width -> proWidthFt` mapping
  * is UNCHANGED here on purpose (fixing it needs Jeff to say what a black
  * box's "drape width" is, and it is accepted, logged behavior — #66) — do
  * NOT branch it on venue kind.
