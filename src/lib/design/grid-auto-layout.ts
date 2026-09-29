@@ -22,7 +22,8 @@
  */
 import { clamp01, type Point } from "@/lib/annotations";
 import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
-import { churchGeom, prosGeom } from "@/app/(app)/design/quick/plan-svg";
+import { prosGeom } from "@/app/(app)/design/quick/plan-svg";
+import { legacyChurchGeom } from "./legacy-church-geom";
 import { legacyProsGeom } from "./legacy-pros-geom";
 import type { GridCurtain } from "./grid-bom";
 import type { AutoTag } from "./grid-auto-model";
@@ -41,7 +42,7 @@ export function venueFrame(a: AState, opts: { legacy?: boolean } = {}): VenueFra
     // #249: the template's own House, Booth and Catwalk, and its stage-edge curve.
     const G = prosGeom(a);
     const n = (r: Rect): Rect => ({ x: r.x / G.W, y: r.y / G.H, w: r.w / G.W, h: r.h / G.H });
-    return { stage: n(G.stage), audience: n(G.house), booth: n(G.booth), catwalk: n(G.catwalk), stageEdge: G.stageEdge.map((p) => ({ x: p.x / G.W, y: p.y / G.H })) };
+    return { stage: n(G.stage), audience: n(G.house), booth: n(G.booth), ...(G.catwalk ? { catwalk: n(G.catwalk) } : {}), stageEdge: G.stageEdge.map((p) => ({ x: p.x / G.W, y: p.y / G.H })) };
   }
   if (kind === "proscenium") {
     // A base sheet drawn before #249 keeps the old schematic's frame, so a re-fill lands on the plan the design has.
@@ -54,7 +55,7 @@ export function venueFrame(a: AState, opts: { legacy?: boolean } = {}): VenueFra
     };
   }
   if (kind === "church") {
-    const G = churchGeom(a);
+    const G = legacyChurchGeom(a);
     const r = (x: number, y: number, w: number, h: number): Rect => ({ x: x / G.W, y: y / G.H, w: w / G.W, h: h / G.H });
     return {
       stage: r(G.stage.x, G.stage.y, G.stage.w, G.stage.h),

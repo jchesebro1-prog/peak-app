@@ -1,8 +1,8 @@
 /**
  * Generated groundplans — port of the buildPlan* functions from
  * app/Quick Design.dc.html (proscenium, church, conference/flat, gym,
- * black box, arena) plus the shared dimension-line / door / booth helpers,
- * the legend builder, and the interactive wall/door handles.
+ * black box, arena) plus the shared dimension-line / FOH-mix helpers,
+ * the legend builder, and the interactive wall handles.
  *
  * The builders return primitive lists ({rects,lines,circles,texts,paths})
  * exactly like the prototype; <PlanSvg> renders them.
@@ -10,8 +10,10 @@
 
 import type * as React from "react";
 import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
-import { HOUSE_DEPTH_LIM, houseDims, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
-import { stretchProscenium } from "@/lib/design/venue-templates/proscenium";
+import { churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
+import { resolveBackground, templateEntry } from "@/lib/design/venue-templates";
+import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
+import { boxOf, canvasOf, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
 
 /* ------------------------------ primitive types ------------------------------ */
 
@@ -22,17 +24,11 @@ type TextEl = { x: number; y: number; t: string; fill: string; size: number; wei
 type PathEl = { d: string; fill: string; stroke?: string; sw?: number; dash?: string };
 
 export type PlanHandle = {
-  type: "wall" | "door";
-  side?: "L" | "R" | "B";
-  key?: "doorsL" | "doorsR" | "doorsBack";
-  idx?: number;
-  axis?: "x" | "y";
+  type: "wall";
+  side: "L" | "R" | "B";
   cx: number;
   cy: number;
-  rmX?: number;
-  rmY?: number;
-  shape: "wall" | "backWall" | "door";
-  removable?: boolean;
+  shape: "wall" | "backWall";
 };
 
 export type PlanData = {
@@ -47,8 +43,6 @@ export type PlanData = {
   legend?: Array<{ sw: React.CSSProperties; label: string }>;
   isHouse?: boolean;
   canSlideWalls?: boolean;
-  /** #249: the plan offers add/remove doors (church). */
-  hasDoors?: boolean;
 };
 
 type L = { rects: Rect[]; lines: LineEl[]; circles: CircleEl[]; texts: TextEl[]; paths: PathEl[] };
@@ -85,36 +79,6 @@ function dimV(L: L, ay: number, by: number, x: number, label: string) {
   L.texts.push({ x: R(tx), y: R(mid), t: label, fill: "#2f333a", size: sz, weight: 600, anchor: "middle", transform: "rotate(-90 " + R(tx) + " " + R(mid) + ")" });
 }
 
-/** sample doorway on a vertical wall at (x, yc); dir = +1 swings toward +x (into the room) */
-function vDoor(L: L, x: number, yc: number, dir: number, len?: number, floor?: string) {
-  len = len || 17;
-  floor = floor || "#f6f7f9";
-  const dTop = yc - len / 2;
-  const dBot = yc + len / 2;
-  L.lines.push({ x1: R(x), y1: R(dTop), x2: R(x), y2: R(dBot), stroke: floor, sw: 3, dash: "" });
-  L.lines.push({ x1: R(x - 3), y1: R(dTop), x2: R(x + 3), y2: R(dTop), stroke: "#16181d", sw: 1.4, dash: "" });
-  L.lines.push({ x1: R(x - 3), y1: R(dBot), x2: R(x + 3), y2: R(dBot), stroke: "#16181d", sw: 1.4, dash: "" });
-  const lx = R(x + dir * len * 0.84);
-  const ly = R(dBot - len * 0.52);
-  L.lines.push({ x1: R(x), y1: R(dBot), x2: lx, y2: ly, stroke: "#9aa0ab", sw: 1.3, dash: "" });
-  L.paths.push({ d: "M " + R(x + dir * len) + " " + R(dBot) + " A " + len + " " + len + " 0 0 " + (dir > 0 ? 0 : 1) + " " + lx + " " + ly, fill: "none", stroke: "#cdd1d9", sw: 0.8, dash: "3 3" });
-}
-
-/** sample doorway on a HORIZONTAL wall at (xc, y); dir = +1 swings toward +y, -1 toward -y */
-function hDoor(L: L, xc: number, y: number, dir: number, len?: number, floor?: string) {
-  len = len || 17;
-  floor = floor || "#f6f7f9";
-  const dL = xc - len / 2;
-  const dR = xc + len / 2;
-  L.lines.push({ x1: R(dL), y1: R(y), x2: R(dR), y2: R(y), stroke: floor, sw: 3, dash: "" });
-  L.lines.push({ x1: R(dL), y1: R(y - 3), x2: R(dL), y2: R(y + 3), stroke: "#16181d", sw: 1.4, dash: "" });
-  L.lines.push({ x1: R(dR), y1: R(y - 3), x2: R(dR), y2: R(y + 3), stroke: "#16181d", sw: 1.4, dash: "" });
-  const lx = R(dL + len * 0.52);
-  const ly = R(y + dir * len * 0.84);
-  L.lines.push({ x1: R(dL), y1: R(y), x2: lx, y2: ly, stroke: "#9aa0ab", sw: 1.3, dash: "" });
-  L.paths.push({ d: "M " + R(dL) + " " + R(y + dir * len) + " A " + len + " " + len + " 0 0 " + (dir > 0 ? 1 : 0) + " " + lx + " " + ly, fill: "none", stroke: "#cdd1d9", sw: 0.8, dash: "3 3" });
-}
-
 /** center FOH mix position — seats removed mid-house for the front-of-house console */
 function mixPos(L: L, cx: number, yc: number, w: number) {
   const hw = w / 2;
@@ -125,95 +89,113 @@ function mixPos(L: L, cx: number, yc: number, w: number) {
   L.texts.push({ x: R(cx), y: R(yc + 3), t: "FOH MIX", fill: "#6b7280", size: 8, weight: 600, anchor: "middle", transform: "" });
 }
 
-/** rear control / projection booth straddling the back wall, window onto the stage */
-function booth(L: L, cx: number, yTop: number, w: number, h: number, floor: string, showConsole: boolean) {
-  floor = floor || "#f6f7f9";
-  L.rects.push({ x: R(cx - w / 2), y: R(yTop), w: R(w), h: R(h), fill: floor, stroke: "#16181d", sw: 1.6, rx: 2, dash: "" });
-  L.lines.push({ x1: R(cx - w / 2 + 2), y1: R(yTop), x2: R(cx + w / 2 - 2), y2: R(yTop), stroke: SYSCOLOR.controls, sw: 1.8, dash: "3 2" });
-  if (showConsole) {
-    const cw = Math.min(R(w * 0.38), 30);
-    L.rects.push({ x: R(cx - cw / 2), y: R(yTop + 4), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
-    L.circles.push({ cx: R(cx), cy: R(yTop + 12), r: 1.8, fill: SYSCOLOR.controls });
-    L.texts.push({ x: R(cx), y: R(yTop + h - 3), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
-  } else {
-    L.texts.push({ x: R(cx), y: R(yTop + h * 0.62), t: "CONTROL BOOTH", fill: "#6b7280", size: 7.5, weight: 600, anchor: "middle", transform: "" });
-  }
-}
-
 /* ------------------------------- geometries ------------------------------- */
 
 export type ProsGeom = ReturnType<typeof prosGeom>;
 
-type Box = { x: number; y: number; w: number; h: number };
 type XY = { x: number; y: number };
-const boxOf = (pts: XY[]): Box => {
-  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-  const x = Math.min(...xs), y = Math.min(...ys);
-  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
-};
+
+/** The kind's default template when a caller names none (tests, legacy callers). */
+const templateOrDefault = (s: AState, tpl: string | null | undefined): string | null =>
+  tpl === undefined ? resolveBackground([], null, (VENUES.find((v) => v.key === s.venue) || VENUES[0]).kind) : tpl;
 
 /**
- * Shared proscenium groundplan geometry (#249): Jeff's Auditorium / PAC
- * template drawing (lib/design/venue-templates) stretched to the room and
+ * Shared proscenium groundplan geometry (#249, #255): a proscenium-family
+ * template (Jeff's Auditorium drawing by default) stretched to the room and
  * laid on the 640-px plan canvas, stage at the top. The auto plan, the Grid
  * base sheet, Quick Design's wall drag, starter Spaces and Auto fill all read
  * this, so they always agree.
  */
-export function prosGeom(s: AState) {
-  const dims = prosceniumDims(s);
-  const plan = stretchProscenium(dims);
-  const W = 640, ML = 58, MR = 138, MT = 52, MB = 44;
-  const b = plan.bounds;
-  const ppi = (W - ML - MR) / Math.max(b.maxX - b.minX, 1);
-  const ppf = ppi * 12;
-  const px = (p: XY): XY => ({ x: R(ML + (p.x - b.minX) * ppi), y: R(MT + (b.maxY - p.y) * ppi) });
-  const H = R(MT + (b.maxY - b.minY) * ppi + MB);
+export function prosGeom(s: AState, tpl?: string | null) {
+  const want = templateOrDefault(s, tpl);
+  const id = want && templateEntry(want)?.family === "proscenium" ? want : "proscenium@1";
+  const keys = keysById(id);
+  const dims = prosceniumDims(s, id);
+  const plan = stretchById(id, dims);
+  const MT = 52, MB = 44, ML = 58, MR = 138;
+  const C = canvasOf(plan, { W: 640, ML, MR, MT, MB });
+  const { W, H, ppi, ppf, px, regions } = C;
   const pt = (name: string) => px(plan.points[name]);
-  const regions: Record<string, XY[]> = {};
-  for (const [name, pts] of Object.entries(plan.regions)) regions[name] = pts.map(px);
   const xProcL = pt("proL").x, xProcR = pt("proR").x, openW = R(xProcR - xProcL);
   const yBack = pt("stageBack").y, yPlaster = pt("centre").y;
+  const cx = pt("centre").x, yMix = pt("mix").y;
+  const role = (r?: string): Box | null => (r && regions[r] ? boxOf(regions[r]) : null);
+  const mixBox: Box = { x: R(cx - 43), y: R(yMix - 9), w: 86, h: 18 };
   return {
-    W, H, ML, MR, MT, MB, ppi, ppf, dims, warning: houseDims(s).warning,
-    cx: pt("centre").x, xProcL, xProcR, openW, yBack, yPlaster, yTop: pt("top").y,
+    template: id, W, H, ML, MR, MT, MB, ppi, ppf, dims, warning: houseDims(s, id).warning,
+    cx, xProcL, xProcR, openW, yBack, yPlaster, yTop: pt("top").y,
     stage: { x: xProcL, y: yBack, w: openW, h: R(yPlaster - yBack) },
     xStageL: pt("stageOuterL").x, xStageR: pt("stageOuterR").x, xWingL: pt("wingL").x, xWingR: pt("wingR").x,
-    yBackWall: pt("backWall").y, xHouseL: pt("houseL").x, xHouseR: pt("houseR").x, yMix: pt("mix").y,
-    house: boxOf(regions.House), booth: boxOf(regions.Booth), catwalk: boxOf(regions.Catwalk), electrical: boxOf(regions["Electrical Room"]),
-    regions,
-    stageEdge: plan.lines.stageEdge.map(px),
-    catwalkLine: plan.lines.catwalk.map(px),
-    polylines: plan.polylines.map((pl) => pl.map(px)),
-    labels: plan.labels.map((l) => ({ text: l.text, ...px(l), h: R(l.h * ppi) })),
+    yBackWall: pt("backWall").y, xHouseL: pt("houseL").x, xHouseR: pt("houseR").x, yMix,
+    house: boxOf(regions[keys.roles.house]),
+    booth: role(keys.roles.booth) ?? mixBox,
+    catwalk: role(keys.roles.catwalk),
+    regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
+    stageEdge: (plan.lines.stageEdge ?? []).map(px),
+    polylines: C.polylines,
+    labels: C.labels,
     handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("backWall") },
+    fromPx: C.fromPx,
+    plan,
   };
 }
 
 export type ChurchGeom = ReturnType<typeof churchGeom>;
 
-/** shared church groundplan geometry */
-export function churchGeom(s: AState) {
-  const Wpx = 640, ML = 62, MR = 40, MT = 54;
-  const ppf = (Wpx - ML - MR) / Math.max(s.width, 1);
-  const x0 = ML, x1 = Wpx - MR, y0 = MT, cx = (x0 + x1) / 2;
-  const chancelPx = Math.min(s.depth * ppf, 270);
-  const congPx = 150, depthPx = chancelPx + congPx, y1 = y0 + depthPx;
-  const halfFront = (x1 - x0) / 2, halfBack = halfFront * 0.6, pBot = y0 + chancelPx;
-  const seatBot = y1 - 16;
-  const boothW = R((x1 - x0) * 0.42), boothH = 24, yBoothBottom = R(y1 + boothH);
-  const H = R(yBoothBottom + 22);
-  const dDef = [0.3, 0.74];
-  const doorsL = Array.isArray(s.doorsL) ? s.doorsL : dDef;
-  const doorsR = Array.isArray(s.doorsR) ? s.doorsR : dDef;
-  const doorsBack = Array.isArray(s.doorsBack) ? s.doorsBack : [0.13, 0.87];
-  return { W: Wpx, ML, MR, MT, ppf, x0, x1, y0, y1, cx, chancelPx, congPx, depthPx, halfFront, halfBack, pBot, seatBot, boothW, boothH, doorsL, doorsR, doorsBack, H, stage: { x: x0, y: y0, w: x1 - x0, h: chancelPx } };
+/**
+ * Shared church groundplan geometry (#255): a church-family template (Jeff's
+ * Church Traditional drawing by default) stretched to the platform and nave
+ * and laid on the plan canvas, platform at the top. Pews are drawn by code
+ * inside the Nave: straight rows every 3' from 6' behind the platform front to
+ * 8' short of the back wall, 4' clear of the nave's walls, split by a 5'
+ * centre aisle on the template's `aisle` point (the Entry).
+ */
+export function churchGeom(s: AState, tpl?: string | null) {
+  const want = templateOrDefault(s, tpl);
+  const id = want && templateEntry(want)?.family === "church" ? want : "church-traditional@1";
+  const keys = keysById(id);
+  const dims = churchDims(s, id);
+  const plan = stretchById(id, dims);
+  const ML = 62, MT = 54;
+  const C = canvasOf(plan, { W: 640, ML, MR: 40, MT, MB: 44 });
+  const { W, H, ppi, ppf, px, regions } = C;
+  const pt = (name: string) => px(plan.points[name]);
+  const centre = pt("centre"), mix = pt("mix"), aisle = pt("aisle");
+  const yFront = centre.y, yBack = pt("platBack").y, yNaveBack = pt("naveBack").y;
+  const mixBox: Box = { x: R(mix.x - 43), y: R(mix.y - 9), w: 86, h: 18 };
+  const platform = boxOf(regions[keys.roles.stage]);
+  const nave = boxOf(regions[keys.roles.house]);
+  const booth = keys.roles.booth && regions[keys.roles.booth] ? boxOf(regions[keys.roles.booth]) : mixBox;
+  const pews: Array<{ x1: number; x2: number; y: number }> = [];
+  const half = 2.5 * ppf;
+  // The aisle-side ends round away from the aisle, so a 0.1-px rounding never narrows it.
+  const down = (n: number) => Math.floor(n * 10 + 1e-9) / 10, up = (n: number) => Math.ceil(n * 10 - 1e-9) / 10;
+  for (let y = yFront + 6 * ppf; y <= yNaveBack - 8 * ppf + 1e-6; y += 3 * ppf) {
+    for (const [a, b] of rowSpans(regions[keys.roles.house], y)) {
+      const l = a + 4 * ppf, r = b - 4 * ppf;
+      if (Math.min(r, aisle.x - half) - l > ppf) pews.push({ x1: R(l), x2: down(Math.min(r, aisle.x - half)), y: R(y) });
+      if (r - Math.max(l, aisle.x + half) > ppf) pews.push({ x1: up(Math.max(l, aisle.x + half)), x2: R(r), y: R(y) });
+    }
+  }
+  return {
+    template: id, W, H, ppi, ppf, dims, warning: houseDims(s, id).warning,
+    cx: centre.x, yTop: MT, yBack, yFront, yNaveBack, xMin: ML,
+    platBackL: pt("platBackL"), platBackR: pt("platBackR"), platFrontL: pt("platFrontL"), platFrontR: pt("platFrontR"),
+    naveL: pt("naveL"), naveR: pt("naveR"), mix, aisle,
+    platform, nave, booth, stage: platform, pews,
+    regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
+    polylines: C.polylines, labels: C.labels,
+    handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("handleBack") },
+    fromPx: C.fromPx,
+    plan,
+  };
 }
 
 /* -------------------------------- builders -------------------------------- */
 
-function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _accent: string): PlanData {
+function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _accent: string, tpl?: string | null): PlanData {
   void _accent; // proscenium symbols draw in system colors; the accent styles only the handles (rendered by <PlanSvg>)
-  const G = prosGeom(s);
+  const G = prosGeom(s, tpl);
   const { W, H, ML, cx, yTop, yBack, yPlaster, xProcL, xProcR, openW, xStageL, xStageR, xWingL, xWingR, yBackWall, xHouseL, xHouseR, ppf, dims } = G;
   const wing = dims.wingFt;
   const rects: Rect[] = [], lines: LineEl[] = [], circles: CircleEl[] = [], texts: TextEl[] = [], paths: PathEl[] = [];
@@ -224,8 +206,8 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   const trace = (pts: XY[]) => pts.map((p, i) => (i ? "L " : "M ") + p.x + " " + p.y).join(" ");
 
   // floors, the playing area, then the room itself — Jeff's template drawing, stretched (#249)
-  paths.push({ d: trace(G.regions.Stage) + " Z", fill: "#f6f7f9", stroke: "none" });
-  paths.push({ d: trace(G.regions.House) + " Z", fill: "#f9fafb", stroke: "none" });
+  paths.push({ d: trace(G.regions[G.roles.stage]) + " Z", fill: "#f6f7f9", stroke: "none" });
+  paths.push({ d: trace(G.regions[G.roles.house]) + " Z", fill: "#f9fafb", stroke: "none" });
   paths.push({ d: "M " + R(xProcL) + " " + R(yBack) + " H " + R(xProcR) + " V " + R(yPlaster) + " H " + R(xProcL) + " Z", fill: "#ffffff", stroke: "#e3e5ea", sw: 1 });
   paths.push({ d: G.polylines.map(trace).join(" "), fill: "none", stroke: "#3a3f4a", sw: 0.9 });
   for (const l of G.labels) texts.push({ x: l.x, y: R(l.y + l.h), t: l.text, fill: "#737985", size: 8, weight: 600, anchor: "start", transform: "" }); // baseline sits on the drawing's own text baseline, so glyphs grow upward and stay clear of the wall Jeff drew them against
@@ -420,55 +402,47 @@ function buildPlanGym(s: AState, _lineSets: number, _electrics: number, accent: 
   return { W: Wpx, H: R(y1 + 28), ...L };
 }
 
-/** Church — trapezoidal chancel platform, curved pew rows, booth + doors. */
-function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accent: string): PlanData {
-  const G = churchGeom(s);
-  const { W: Wpx, x0, x1, y0, y1, cx, chancelPx, depthPx, halfFront, halfBack, pBot, seatBot, boothW, boothH, doorsL, doorsR, doorsBack, H } = G;
+/** Church — Jeff's template (#255): the drawing, the platform's systems, pews in the Nave, FOH mix, dimension chains. */
+function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accent: string, tpl?: string | null): PlanData {
+  const G = churchGeom(s, tpl);
   const L: L = { rects: [], lines: [], circles: [], texts: [], paths: [] };
   const handles: PlanHandle[] = [];
-  L.rects.push({ x: R(x0), y: R(y0), w: R(x1 - x0), h: R(depthPx), fill: "#f6f7f9", stroke: "#16181d", sw: 2, rx: 2, dash: "" });
-  L.paths.push({ d: "M " + R(cx - halfBack) + " " + R(y0) + " L " + R(cx + halfBack) + " " + R(y0) + " L " + R(cx + halfFront) + " " + R(pBot) + " L " + R(cx - halfFront) + " " + R(pBot) + " Z", fill: "#ffffff", stroke: accent, sw: 1.6, dash: "" });
-  L.texts.push({ x: R(cx), y: R(y0 + chancelPx * 0.5), t: "CHANCEL", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
-  if (s.sys.curtains) L.lines.push({ x1: R(cx - halfBack), y1: R(y0 + 4), x2: R(cx + halfBack), y2: R(y0 + 4), stroke: SYSCOLOR.curtains, sw: 2.6, dash: "4 3" });
-  if (s.sys.video) [cx - halfFront * 0.46, cx + halfFront * 0.46].forEach((x) => L.lines.push({ x1: R(x - 13), y1: R(y0 + 11), x2: R(x + 13), y2: R(y0 + 11), stroke: SYSCOLOR.video, sw: 3, dash: "" }));
+  const trace = (pts: XY[]) => pts.map((p, i) => (i ? "L " : "M ") + p.x + " " + p.y).join(" ");
+  L.paths.push({ d: trace(G.regions[G.roles.house]) + " Z", fill: "#f6f7f9", stroke: "none" });
+  L.paths.push({ d: trace(G.regions[G.roles.stage]) + " Z", fill: "#ffffff", stroke: accent, sw: 1.6 });
+  L.paths.push({ d: G.polylines.map(trace).join(" "), fill: "none", stroke: "#3a3f4a", sw: 0.9 });
+  for (const l of G.labels) L.texts.push({ x: l.x, y: R(l.y + l.h), t: l.text, fill: "#737985", size: 8, weight: 600, anchor: "start", transform: "" });
+
+  const platW = G.platBackR.x - G.platBackL.x;
+  const depthPx = G.yFront - G.yBack;
+  if (s.sys.curtains) L.lines.push({ x1: R(G.platBackL.x + 4), y1: R(G.yBack + 4), x2: R(G.platBackR.x - 4), y2: R(G.yBack + 4), stroke: SYSCOLOR.curtains, sw: 2.6, dash: "4 3" });
+  if (s.sys.video) [G.cx - platW * 0.23, G.cx + platW * 0.23].forEach((x) => L.lines.push({ x1: R(x - 13), y1: R(G.yBack + 11), x2: R(x + 13), y2: R(G.yBack + 11), stroke: SYSCOLOR.video, sw: 3, dash: "" }));
   if (s.sys.lighting)
     [0.42, 0.8].forEach((f) => {
-      const y = y0 + chancelPx * f, half = halfBack + (halfFront - halfBack) * f, dn = Math.max(3, Math.round((half * 2) / 34));
-      L.lines.push({ x1: R(cx - half), y1: R(y), x2: R(cx + half), y2: R(y), stroke: "#9aa0ab", sw: 1, dash: "2 3" });
-      for (let k = 0; k < dn; k++) L.circles.push({ cx: R(cx - half + ((k + 0.5) / dn) * half * 2), cy: R(y), r: 2.4, fill: SYSCOLOR.lighting });
+      const y = G.yBack + depthPx * f;
+      for (const [a, b] of rowSpans(G.regions[G.roles.stage], y)) {
+        const x1 = a + 6, x2 = b - 6, dn = Math.max(3, Math.round((x2 - x1) / 34));
+        L.lines.push({ x1: R(x1), y1: R(y), x2: R(x2), y2: R(y), stroke: "#9aa0ab", sw: 1, dash: "2 3" });
+        for (let k = 0; k < dn; k++) L.circles.push({ cx: R(x1 + ((k + 0.5) / dn) * (x2 - x1)), cy: R(y), r: 2.4, fill: SYSCOLOR.lighting });
+      }
     });
-  if (s.sys.audio) [cx - halfFront - 8, cx + halfFront + 8].forEach((x) => L.rects.push({ x: R(x - 5), y: R(y0 + 8), w: 10, h: 14, fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, rx: 2, dash: "" }));
-  const seatTop = pBot + 26;
-  const rows = Math.max(3, Math.min(7, Math.round((seatBot - seatTop) / 16)));
-  for (let r = 0; r < rows; r++) {
-    const yy = seatTop + (r * (seatBot - seatTop)) / Math.max(rows - 1, 1), half = (x1 - x0) * 0.5 * (0.5 + r * 0.08);
-    L.paths.push({ d: "M " + R(cx - half) + " " + R(yy) + " Q " + R(cx) + " " + R(yy + 10) + " " + R(cx + half) + " " + R(yy), fill: "none", stroke: "#cdd1d9", sw: 1.4, dash: "" });
+  if (s.sys.audio) [G.platFrontL, G.platFrontR].forEach((p, i) => L.rects.push({ x: R(p.x + (i ? 8 : -18)), y: R(p.y - 22), w: 10, h: 14, fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, rx: 2, dash: "" }));
+  for (const p of G.pews) L.lines.push({ x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: "#cdd1d9", sw: 1.4, dash: "" });
+  mixPos(L, G.mix.x, G.mix.y, Math.min((G.naveR.x - G.naveL.x) * 0.3, 86));
+  if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
+    const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
+    L.rects.push({ x: R(bcx - cw / 2), y: R(bx.y + bx.h + 3), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+    L.texts.push({ x: R(bcx), y: R(bx.y + bx.h + 14), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
-  L.lines.push({ x1: R(cx), y1: R(seatTop - 4), x2: R(cx), y2: R(seatBot + 6), stroke: "#e6e8ec", sw: 6, dash: "" });
-  L.texts.push({ x: R(cx), y: R(seatBot + 13), t: "CONGREGATION", fill: "#c4c9d2", size: 8, anchor: "middle", transform: "" });
-  const floor = "#f6f7f9", cspan = seatBot - seatTop;
-  doorsL.forEach((f) => vDoor(L, x0, seatTop + cspan * f, 1, 17, floor));
-  doorsR.forEach((f) => vDoor(L, x1, seatTop + cspan * f, -1, 17, floor));
-  doorsBack.forEach((f) => hDoor(L, x0 + (x1 - x0) * f, y1, -1, 17, floor));
-  mixPos(L, cx, R(seatTop + cspan * 0.62), Math.min((x1 - x0) * 0.3, 86));
-  L.lines.push({ x1: R(cx - boothW / 2), y1: R(y1), x2: R(cx + boothW / 2), y2: R(y1), stroke: floor, sw: 3, dash: "" });
-  const boothConsole = !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console);
-  booth(L, cx, y1, boothW, boothH, floor, boothConsole);
-  doorsL.forEach((f, i) => {
-    const dy = R(seatTop + cspan * f);
-    handles.push({ type: "door", key: "doorsL", idx: i, axis: "y", cx: R(x0), cy: dy, rmX: R(x0 - 13), rmY: R(dy - 12), shape: "door", removable: true });
-  });
-  doorsR.forEach((f, i) => {
-    const dy = R(seatTop + cspan * f);
-    handles.push({ type: "door", key: "doorsR", idx: i, axis: "y", cx: R(x1), cy: dy, rmX: R(x1 + 13), rmY: R(dy - 12), shape: "door", removable: true });
-  });
-  doorsBack.forEach((f, i) => {
-    const dx = R(x0 + (x1 - x0) * f);
-    handles.push({ type: "door", key: "doorsBack", idx: i, axis: "x", cx: dx, cy: R(y1), rmX: R(dx + 12), rmY: R(y1 + 13), shape: "door", removable: true });
-  });
-  dimH(L, x0, x1, y0 - 26, s.width + "'-0\"", false);
-  dimV(L, y0, pBot, x0 - 32, s.depth + "'-0\"");
-  return { W: Wpx, H, ...L, handles };
+  // #255: drag handles — each side wall sets nave width, the back wall nave depth
+  handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
+  handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
+  handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
+  dimH(L, G.platBackL.x, G.platBackR.x, G.yTop - 26, s.width + "'-0\"", false);
+  dimV(L, G.yBack, G.yFront, G.xMin - 32, s.depth + "'-0\"");
+  dimV(L, G.yFront, G.yNaveBack, G.xMin - 32, Math.round(G.dims.houseDepthFt) + "'-0\"");
+  dimH(L, G.naveL.x, G.naveR.x, G.H - 18, Math.round(G.dims.houseWidthFt) + "'-0\"", false);
+  return { W: G.W, H: G.H, ...L, handles };
 }
 
 /** Black box — open square room, tension grid, perimeter masking, riser blocks. */
@@ -577,7 +551,7 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
     if (sys.lighting && electrics > 0) it.push({ sw: mk("dot", C.lighting), label: "Powered electric" });
     if (sys.pit) it.push({ sw: mk("box"), label: "Orchestra pit" });
   } else if (kind === "church") {
-    it.push({ sw: mk("box"), label: "Chancel platform" });
+    it.push({ sw: mk("box"), label: "Platform" });
     if (sys.curtains) it.push({ sw: mk("dash", C.curtains), label: "Backdrop curtain" });
     if (sys.lighting) it.push({ sw: mk("dot", C.lighting), label: "Lighting position" });
     if (sys.video) it.push({ sw: mk("line", C.video), label: "Screen" });
@@ -611,20 +585,22 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
 
 /* ------------------------------- entry point ------------------------------- */
 
-export function buildPlan(s: AState, lineSets: number, electrics: number, accent: string): PlanData {
+export function buildPlan(s: AState, lineSets: number, electrics: number, accent: string, tpl?: string | null): PlanData {
   const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
   const kind: VenueKind = venue.kind || "proscenium";
+  const id = templateOrDefault(s, tpl);
+  const family = templateEntry(id)?.family;
   let p: PlanData;
-  if (kind === "church") p = buildPlanChurch(s, lineSets, electrics, accent);
+  if (family === "church" || kind === "church") p = buildPlanChurch(s, lineSets, electrics, accent, id);
+  else if (family === "proscenium") p = buildPlanProscenium(s, lineSets, electrics, accent, id);
   else if (kind === "flat") p = buildPlanFlat(s, lineSets, electrics, accent);
   else if (kind === "blackbox") p = buildPlanBlackbox(s, lineSets, electrics, accent);
   else if (kind === "gym") p = buildPlanGym(s, lineSets, electrics, accent);
   else if (kind === "arena") p = buildPlanArena(s, lineSets, electrics, accent);
-  else p = buildPlanProscenium(s, lineSets, electrics, accent);
+  else p = buildPlanProscenium(s, lineSets, electrics, accent, id);
   p.legend = legendFor(kind, s, electrics, accent);
-  p.isHouse = kind === "proscenium" || kind === "church";
-  p.canSlideWalls = kind === "proscenium";
-  p.hasDoors = kind === "church";
+  p.isHouse = family === "proscenium" || family === "church" || kind === "church";
+  p.canSlideWalls = p.isHouse;
   return p;
 }
 
@@ -643,15 +619,13 @@ export function PlanSvg({
   accent,
   interactive = false,
   onHandleDown,
-  onRemoveDoor,
   svgId,
 }: {
   plan: PlanData;
   accent: string;
-  /** render + wire the wall/door handles (Quick Design auto plan) */
+  /** render + wire the wall handles (Quick Design auto plan) */
   interactive?: boolean;
   onHandleDown?: (h: PlanHandle, e: React.PointerEvent<SVGGElement>) => void;
-  onRemoveDoor?: (key: "doorsL" | "doorsR" | "doorsBack", idx: number) => void;
   svgId?: string;
 }) {
   const p = plan;
@@ -693,33 +667,14 @@ export function PlanSvg({
                   <line x1={hd.cx - 2} y1={hd.cy - 4} x2={hd.cx - 2} y2={hd.cy + 4} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
                   <line x1={hd.cx + 2} y1={hd.cy - 4} x2={hd.cx + 2} y2={hd.cy + 4} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
                 </>
-              ) : hd.shape === "backWall" ? (
+              ) : (
                 <>
                   <rect x={hd.cx - 15} y={hd.cy - 5.5} width={30} height={11} rx={4} fill={accent} stroke="#fff" strokeWidth={1.6} />
                   <line x1={hd.cx - 4} y1={hd.cy - 2} x2={hd.cx + 4} y2={hd.cy - 2} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
                   <line x1={hd.cx - 4} y1={hd.cy + 2} x2={hd.cx + 4} y2={hd.cy + 2} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
                 </>
-              ) : (
-                <>
-                  <circle cx={hd.cx} cy={hd.cy} r={7.5} fill={accent} stroke="#fff" strokeWidth={1.6} />
-                  <line x1={hd.cx} y1={hd.cy - 3.4} x2={hd.cx} y2={hd.cy + 3.4} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
-                </>
               )}
             </g>
-            {hd.removable && hd.rmX != null && hd.rmY != null && (
-              <g
-                style={{ cursor: "pointer", touchAction: "none", pointerEvents: "auto" }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onRemoveDoor && hd.key && hd.idx != null) onRemoveDoor(hd.key, hd.idx);
-                }}
-              >
-                <circle cx={hd.rmX} cy={hd.rmY} r={6} fill="#fff" stroke="#c4554a" strokeWidth={1.3} />
-                <line x1={hd.rmX - 2.4} y1={hd.rmY - 2.4} x2={hd.rmX + 2.4} y2={hd.rmY + 2.4} stroke="#c4554a" strokeWidth={1.4} strokeLinecap="round" />
-                <line x1={hd.rmX + 2.4} y1={hd.rmY - 2.4} x2={hd.rmX - 2.4} y2={hd.rmY + 2.4} stroke="#c4554a" strokeWidth={1.4} strokeLinecap="round" />
-              </g>
-            )}
           </g>
         ))}
     </svg>
@@ -737,7 +692,7 @@ export function PlanSvg({
  * serializer over the same five primitive arrays `<PlanSvg>` already walks
  * is the entire cost of avoiding that dependency.
  *
- * Deliberately excludes `handles` — Quick Design's own interactive wall/door
+ * Deliberately excludes `handles` — Quick Design's own interactive wall
  * drag affordances. A generated Grid base sheet is a static background
  * image, like an uploaded plan; nothing on it drags.
  *
@@ -791,51 +746,25 @@ export function renderPlanSvgMarkup(plan: PlanData, accent: string): string {
 export type DragPos = { sx: number; sy: number; dx: number; dy: number };
 
 /**
- * Converts a wall / door drag into a state patch. Proscenium (#249): the side
- * walls set house width (symmetric) and the back wall house depth, from the
- * drag's DELTA at the drag-start scale — the canvas rescales as the house
+ * Converts a wall drag into a state patch (#249, #255): the side walls set
+ * house / nave width (symmetric) and the back wall house / nave depth, from
+ * the drag's DELTA at the drag-start scale — the canvas rescales as the room
  * grows, so an absolute position would chase itself. Whole feet, clamped like
- * the typed fields. Church: the prototype's absolute door drag.
+ * the typed fields.
  */
-export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos): Partial<AState> | null {
-  const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
-  const kind = venue.kind || "proscenium";
-  if (kind === "proscenium") {
-    if (hd.type !== "wall") return null;
-    const G = prosGeom(s);
-    if (hd.side === "B") {
-      const [lo, hi] = HOUSE_DEPTH_LIM;
-      return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };
-    }
-    const [lo, hi] = houseWidthLim(s);
-    const dir = hd.side === "L" ? -1 : 1;
-    return { houseWidthFt: Math.round(clamp(G.dims.houseWidthFt + (2 * dir * pos.dx) / G.ppf, lo, hi)) };
+export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: string | null): Partial<AState> | null {
+  if (hd.type !== "wall") return null;
+  const id = templateOrDefault(s, tpl);
+  const family = templateEntry(id)?.family;
+  if (family !== "proscenium" && family !== "church") return null;
+  const G = family === "church" ? churchGeom(s, id) : prosGeom(s, id);
+  if (hd.side === "B") {
+    const [lo, hi] = houseSpecFor(G.template).depthLim;
+    return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };
   }
-  if (kind !== "church" || hd.type !== "door" || !hd.key || hd.idx == null) return null;
-  const key = hd.key;
-  const G = churchGeom(s);
-  const arr = (Array.isArray(s[key]) ? (s[key] as number[]) : G[key] || []).slice();
-  if (hd.axis === "x") {
-    const lX = G.x0, rX = G.x1;
-    let frac = (pos.sx - lX) / (rX - lX);
-    const fbl = (G.cx - G.boothW / 2 - lX) / (rX - lX) - 0.02;
-    const fbr = (G.cx + G.boothW / 2 - lX) / (rX - lX) + 0.02;
-    if (frac > fbl && frac < fbr) frac = pos.sx < G.cx ? fbl : fbr;
-    arr[hd.idx] = +clamp(frac, 0.04, 0.96).toFixed(3);
-  } else {
-    const top = G.pBot + 26;
-    const bot = G.seatBot;
-    arr[hd.idx] = +clamp((pos.sy - top) / (bot - top), 0.06, 0.94).toFixed(3);
-  }
-  return { [key]: arr } as Partial<AState>;
-}
-
-/** Door arrays for add/remove door — church only; a proscenium room's entrances are in its template (#249). */
-export function currentDoors(s: AState): { doorsL: number[]; doorsR: number[]; doorsBack: number[] } {
-  const venue = VENUES.find((v) => v.key === s.venue) || VENUES[0];
-  if ((venue.kind || "proscenium") !== "church") return { doorsL: [], doorsR: [], doorsBack: [] };
-  const G = churchGeom(s);
-  return { doorsL: G.doorsL.slice(), doorsR: G.doorsR.slice(), doorsBack: G.doorsBack.slice() };
+  const [lo, hi] = houseWidthLim(s, G.template);
+  const dir = hd.side === "L" ? -1 : 1;
+  return { houseWidthFt: Math.round(clamp(G.dims.houseWidthFt + (2 * dir * pos.dx) / G.ppf, lo, hi)) };
 }
 
 export type { SysKey };

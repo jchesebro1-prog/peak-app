@@ -41,7 +41,8 @@ import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "
 import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
-import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { buildPlan, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
+import { legacyChurchGeom } from "@/lib/design/legacy-church-geom";
 import { PROSCENIUM_TEMPLATE_ID } from "@/lib/design/venue-templates/proscenium";
 import { PROSCENIUM_SPACES } from "@/lib/design/venue-templates/proscenium.keys";
 import {
@@ -394,7 +395,7 @@ export function starterSpaces(
     return PROSCENIUM_SPACES.filter((name) => G.regions[name]).map((name) => ({ sheetId, page: 1, name, points: G.regions[name].map(at) }));
   }
   if (kind === "church") {
-    const G = churchGeom(a);
+    const G = legacyChurchGeom(a);
     // churchGeom computes its booth bottom edge as a local (y1 + boothH) but
     // doesn't return it — recomputed the same way here rather than changing
     // that function's return shape for a caller outside plan-svg.tsx.

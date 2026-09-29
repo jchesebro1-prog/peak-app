@@ -225,8 +225,8 @@ export const DIMSCHEMA: Record<VenueKind, Array<{ field: DimField; label: string
     { field: "wing", label: "Stage wing width", note: "Offstage, each side" },
   ],
   church: [
-    { field: "width", label: "Stage width", note: "Front edge, wall to wall" },
-    { field: "depth", label: "Stage depth", note: "Front to back wall" },
+    { field: "width", label: "Platform width", note: "Across the back of the platform" },
+    { field: "depth", label: "Platform depth", note: "Front edge to back wall" },
     { field: "grid", label: "Ceiling height", note: "Floor to ceiling" },
   ],
   flat: [

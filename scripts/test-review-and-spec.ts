@@ -30655,16 +30655,16 @@ import { defaultAState as vt249bDefault } from "@/app/(app)/design/quick/engine"
   const noPit = vt249bMarkup(vt249bBuild({ ...a, sys: { ...a.sys, pit: false } }, 8, 3, "#3a3f4a"), "#3a3f4a");
   ok(!noPit.includes(">Pit<") && noPit.includes(">Catwalk<"), "#249 T3: with the pit off its label is gone and the rest stays");
   const G = vt249bGeom(a);
-  ok(G.W === 640 && G.xProcL < G.cx && G.cx < G.xProcR && G.yTop < G.yBack && G.yBack < G.yPlaster && G.yPlaster < G.catwalk.y && G.catwalk.y < G.yBackWall && G.booth.y >= G.yBackWall - 2, "#249 T3: stage at the top, then the catwalk, the back wall and the booth behind it");
+  ok(G.W === 640 && G.xProcL < G.cx && G.cx < G.xProcR && G.yTop < G.yBack && G.yBack < G.yPlaster && G.yPlaster < G.catwalk!.y && G.catwalk!.y < G.yBackWall && G.booth.y >= G.yBackWall - 2, "#249 T3: stage at the top, then the catwalk, the back wall and the booth behind it");
   ok(Math.abs((G.xWingR - G.xWingL) / G.ppf - 80) < 0.05 && Math.abs(G.openW / G.ppf - 50) < 0.05, "#249 T3: the canvas scale reads true — 80' wall to wall, 50' opening");
   const church = vt249bBuild({ ...a, venue: "church" }, 8, 3, "#3a3f4a");
-  ok((church.handles || []).some((h) => h.type === "door"), "#249 T3: other venue kinds keep their own plans (church still has its doors)");
+  ok(vt249bMarkup(church, "#3a3f4a").includes(">Nave<"), "#249 T3 (updated #255): church draws its own template, not the proscenium's");
   const regionBottom = (name: string) => Math.max(...G.regions[name].map((p) => p.y));
   ok(["Booth", "Electrical Room", "MISC Rooms"].every((name) => { const l = G.labels.find((x) => x.text === name)!; return l.y + l.h < regionBottom(name); }), "#249 T3: room labels sit on the drawing's own baseline, clear of the room's bottom wall");
 }
 
 /* --- #249 T4: Quick Design — house walls drag, doors gone for proscenium --- */
-import { buildPlan as vt249cBuild, currentDoors as vt249cDoors, houseDragPatch as vt249cDrag, prosGeom as vt249cGeom } from "@/app/(app)/design/quick/plan-svg";
+import { buildPlan as vt249cBuild, houseDragPatch as vt249cDrag, prosGeom as vt249cGeom } from "@/app/(app)/design/quick/plan-svg";
 import { defaultAState as vt249cDefault } from "@/app/(app)/design/quick/engine";
 {
   const a = { ...vt249cDefault(0), venue: "school", width: 50, depth: 30, wing: 15 };
@@ -30672,19 +30672,17 @@ import { defaultAState as vt249cDefault } from "@/app/(app)/design/quick/engine"
   const plan = vt249cBuild(a, 8, 3, "#3a3f4a");
   const hs = plan.handles || [];
   const side = (s: "L" | "R" | "B") => hs.find((h) => h.side === s)!;
-  ok(hs.length === 3 && hs.filter((h) => h.shape === "wall").length === 2 && side("B")?.shape === "backWall" && !hs.some((h) => h.type === "door") && !plan.hasDoors, "#249 T4: a proscenium plan offers two side-wall handles and a back-wall handle, and no doors");
+  ok(hs.length === 3 && hs.filter((h) => h.shape === "wall").length === 2 && side("B")?.shape === "backWall" && hs.every((h) => h.type === "wall"), "#249 T4: a proscenium plan offers two side-wall handles and a back-wall handle, and no doors");
   const zero = { sx: 0, sy: 0 };
   ok(vt249cDrag(a, side("R"), { ...zero, dx: 5 * G.ppf, dy: 0 })?.houseWidthFt === 90 && vt249cDrag(a, side("L"), { ...zero, dx: -5 * G.ppf, dy: 0 })?.houseWidthFt === 90, "#249 T4: dragging either side wall out 5' widens the house 10', in whole feet");
   ok(vt249cDrag(a, side("B"), { ...zero, dx: 0, dy: 12 * G.ppf })?.houseDepthFt === Math.round((9 + 817.103) / 12 + 12), "#249 T4: dragging the back wall down 12' deepens the house 12'");
   ok(vt249cDrag(a, side("R"), { ...zero, dx: 1e6, dy: 0 })?.houseWidthFt === 200 && vt249cDrag(a, side("B"), { ...zero, dx: 0, dy: -1e6 })?.houseDepthFt === 40, "#249 T4: the drag respects the same limits as the typed fields");
-  const d = vt249cDoors(a);
-  ok(d.doorsL.length === 0 && d.doorsR.length === 0 && d.doorsBack.length === 0, "#249 T4: a proscenium room has no doors to add or remove");
   const ch = { ...a, venue: "church" };
-  const door = (vt249cBuild(ch, 8, 3, "#3a3f4a").handles || []).find((h) => h.type === "door")!;
-  ok(!!door && !!vt249cDrag(ch, door, { sx: 300, sy: 200, dx: 0, dy: 0 }), "#249 T4: church doors still drag");
+  const chWall = (vt249cBuild(ch, 8, 3, "#3a3f4a").handles || []).find((h) => h.side === "R")!;
+  ok(!!chWall && vt249cDrag(ch, chWall, { sx: 0, sy: 0, dx: 0, dy: 0 })?.houseWidthFt != null, "#249 T4 (updated #255): church walls drag too — its doors are retired");
   const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
   const sip = readFileSync(join(process.cwd(), "src/components/design/scope-inputs-panel.tsx"), "utf8");
-  ok(qd.includes("plan.hasDoors") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#249 T4: Quick Design shows door buttons only where the plan has doors, and Reset house clears the house size");
+  ok(!qd.includes("addDoor") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#249 T4 (updated #255): Quick Design has no door buttons; Reset house clears the house size");
   ok(sip.includes("House width") && sip.includes("House depth") && sip.includes("houseDims(") && sip.includes("h.warning"), "#249 T4: the dimension panel shows house width, house depth and the narrow-house warning");
   const gsp = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
   ok(/showHouse\s*&&\s*venue\.kind === "proscenium"/.test(sip) && /<ScopeInputsPanel[\s\S]{0,400}?showHouse/.test(qd) && !gsp.includes("showHouse"), "#249 T4: house rows show in Quick Design only — the Grid Scope panel's base sheet is fixed at intake");
@@ -34123,4 +34121,37 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
   ok(cd.proWidthFt === 34 && cd.stageDepthFt === 22 && cd.houseWidthFt === 90 && cd.houseDepthFt === 60 && cd.pit === false, "#255 T3: church width/depth are the platform; the nave comes from the house fields");
   const f = c255T3Fields({ width: 34, wing: 0 }, "church-traditional@1")!;
   ok(f.rows.map((r) => r.label).join("|") === "Nave width|Nave depth" && c255T3Fields({ width: 50, wing: 15 }, "proscenium@1")!.rows.map((r) => r.label).join("|") === "House width|House depth" && c255T3Fields({ width: 50, wing: 0 }, null) === null, "#255 T3: house fields are labeled per template");
+}
+
+/* --- #255 T4: the church plan draws Jeff's template; pews in the Nave; no doors --- */
+import { buildPlan as c255T4Build, churchGeom as c255T4Geom, houseDragPatch as c255T4Drag, prosGeom as c255T4Pros, renderPlanSvgMarkup as c255T4Markup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T4Default, DIMSCHEMA as c255T4Dims } from "@/app/(app)/design/quick/engine";
+import { rowSpans as c255T4Rows } from "@/lib/design/venue-templates/canvas";
+{
+  const base = c255T4Default(0);
+  const a = { ...base, venue: "church", width: 34, depth: 22, sys: { ...base.sys, curtains: true, lighting: true, video: true, audio: true } };
+  const plan = c255T4Build(a, 8, 3, "#3a3f4a");
+  const svg = c255T4Markup(plan, "#3a3f4a");
+  ok(["Platform", "Apse", "Nave", "Entry", "Choir Room", "Electrical Room", "Cry Room", "Storage"].every((t) => svg.includes(">" + t + "<")), "#255 T4: the church plan shows every area of Jeff's drawing");
+  ok(!svg.includes(">CHANCEL<") && !svg.includes(">CONGREGATION<") && !svg.includes("CONTROL BOOTH"), "#255 T4: the old schematic's chancel trapezoid, congregation text and booth are gone");
+  ok(svg.includes(">34'-0&quot;<") && svg.includes(">22'-0&quot;<") && svg.includes(">80'-0&quot;<") && svg.includes(">55'-0&quot;<") && svg.includes(">FOH MIX<"), "#255 T4: platform width/depth, nave width/depth and the FOH mix still draw");
+  const G = c255T4Geom(a);
+  const inside = (p: { x: number; y: number }, poly: Array<{ x: number; y: number }>) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if (poly[i].y > p.y !== poly[j].y > p.y && p.x < ((poly[j].x - poly[i].x) * (p.y - poly[i].y)) / (poly[j].y - poly[i].y) + poly[i].x) c = !c;
+    return c;
+  };
+  ok(G.pews.length >= 20 && G.pews.every((p) => inside({ x: p.x1 + 0.5, y: p.y }, G.regions.Nave) && inside({ x: p.x2 - 0.5, y: p.y }, G.regions.Nave)), "#255 T4: pews are drawn inside the Nave");
+  ok(G.pews.every((p) => p.x2 <= G.aisle.x - 2.5 * G.ppf + 1e-6 || p.x1 >= G.aisle.x + 2.5 * G.ppf - 1e-6) && Math.abs(G.aisle.x - (G.naveL.x + G.naveR.x) / 2) < 2, "#255 T4: a 5' centre aisle lines up with the Entry");
+  ok(Math.abs((G.naveR.x - G.naveL.x) / G.ppf - 959.698 / 12) < 0.05 && Math.abs((G.platBackR.x - G.platBackL.x) / G.ppf - 34) < 0.05, "#255 T4: the canvas scale reads true — the nave and the platform measure what they should");
+  const hs = plan.handles || [];
+  ok(hs.length === 3 && hs.every((h) => h.type === "wall") && !svg.includes("doors"), "#255 T4: a church plan offers nave-wall handles and no doors");
+  const zero = { sx: 0, sy: 0 };
+  const side = (s: "L" | "R" | "B") => hs.find((h) => h.side === s)!;
+  ok(c255T4Drag(a, side("R"), { ...zero, dx: 5 * G.ppf, dy: 0 })?.houseWidthFt === 90 && c255T4Drag(a, side("B"), { ...zero, dx: 0, dy: 10 * G.ppf })?.houseDepthFt === 65, "#255 T4: dragging a church side wall sets nave width; the back wall sets nave depth");
+  ok(c255T4Drag(a, side("R"), { ...zero, dx: -1e6, dy: 0 })?.houseWidthFt === 50 && c255T4Drag(a, side("B"), { ...zero, dx: 0, dy: -1e6 })?.houseDepthFt === 20, "#255 T4: the drag clamps like the typed fields (nave ≥ platform + 16', depth ≥ 20')");
+  ok(c255T4Rows([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], 5).map(([l, r]) => `${l}-${r}`).join() === "0-10", "#255 T4: rowSpans finds where a row crosses a region");
+  ok(c255T4Dims.church.map((d) => d.label).join("|") === "Platform width|Platform depth|Ceiling height", "#255 T4: church dimensions read as the platform");
+  const pac = { ...base, venue: "pac", width: 50, depth: 30, wing: 15 };
+  ok(c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a"), "#3a3f4a") === c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "proscenium@1"), "#3a3f4a") && c255T4Pros(pac).roles.house === "House", "#255 T4: a proscenium plan with no template named draws proscenium@1, unchanged");
 }

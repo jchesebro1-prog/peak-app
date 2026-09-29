@@ -39,7 +39,7 @@ import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map"
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import type { AssemblyPickerOption } from "@/lib/fixture-assemblies";
-import { PlanSvg, buildPlan, churchGeom, currentDoors, houseDragPatch, prosGeom, type PlanHandle } from "./plan-svg";
+import { PlanSvg, buildPlan, houseDragPatch, type PlanHandle } from "./plan-svg";
 import {
   getAccentHex,
   getAccentHexServer,
@@ -445,58 +445,9 @@ export default function QuickDesignClient({
     updA({ qtyOverrides: ov });
   };
 
-  /* ---- house walls & doors (auto plan) ---- */
+  /* ---- house walls (auto plan) ---- */
 
-  const addDoor = (key: "doorsL" | "doorsR" | "doorsBack") => {
-    const g = currentDoors(a);
-    const cur = (Array.isArray(a[key]) ? (a[key] as number[]) : g[key]).slice();
-    cur.push(key === "doorsBack" ? (cur.length % 2 === 0 ? 0.1 : 0.9) : 0.55);
-    updA({ [key]: cur } as Partial<AState>);
-  };
-  const removeDoor = (key: "doorsL" | "doorsR" | "doorsBack", idx: number) => {
-    const g = currentDoors(a);
-    const cur = (Array.isArray(a[key]) ? (a[key] as number[]) : g[key]).slice();
-    cur.splice(idx, 1);
-    updA({ [key]: cur } as Partial<AState>);
-  };
-  const resetHouse = () => updA({ houseHalfFt: null, houseWidthFt: null, houseDepthFt: null, doorsL: null, doorsR: null, doorsBack: null });
-
-  // #249: proscenium walls drag RELATIVE to where the drag began (the canvas
-  // rescales as the house grows); church doors keep the prototype's absolute
-  // mapping. Deltas convert at the drag-start scale (the SVG is width:100%).
-  const dragCleanup = useRef<(() => void) | null>(null);
-  useEffect(() => () => dragCleanup.current?.(), []);
-  const onHandleDown = (hd: PlanHandle, e: ReactPointerEvent<SVGGElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const svg = (e.currentTarget as SVGGElement).ownerSVGElement;
-    if (!svg) return;
-    const s = a;
-    const kind = venueOf(s).kind;
-    const G = kind === "church" ? churchGeom(s) : prosGeom(s);
-    const r0 = svg.getBoundingClientRect();
-    const k = r0.width ? G.W / r0.width : 1;
-    const x0 = e.clientX, y0 = e.clientY;
-    const move = (ev: globalThis.PointerEvent) => {
-      const r = svg.getBoundingClientRect();
-      if (!r.width || !r.height) return;
-      const patch = houseDragPatch(s, hd, {
-        sx: ((ev.clientX - r.left) / r.width) * G.W,
-        sy: ((ev.clientY - r.top) / r.height) * G.H,
-        dx: (ev.clientX - x0) * k,
-        dy: (ev.clientY - y0) * k,
-      });
-      if (patch) setA((prev) => ({ ...prev, ...patch }));
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      dragCleanup.current = null;
-    };
-    dragCleanup.current = up;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
+  const resetHouse = () => updA({ houseHalfFt: null, houseWidthFt: null, houseDepthFt: null });
 
   /* ------------------------------ view data ------------------------------ */
 
@@ -552,6 +503,42 @@ export default function QuickDesignClient({
   );
   const riser = useMemo(() => buildRiser(a, C.dimmerRacks, C.lineSets, ACCENT_INK, ACCENT_SOFT), [a, C.dimmerRacks, C.lineSets]);
 
+  // #249/#255: house and nave walls drag RELATIVE to where the drag began (the
+  // canvas rescales as the room grows). Deltas convert at the drag-start scale
+  // (the SVG is width:100%).
+  const dragCleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => dragCleanup.current?.(), []);
+  const onHandleDown = (hd: PlanHandle, e: ReactPointerEvent<SVGGElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const svg = (e.currentTarget as SVGGElement).ownerSVGElement;
+    if (!svg) return;
+    const s = a;
+    const G = { W: plan?.W ?? 640, H: plan?.H ?? 640 }; // the handle only exists while the plan is shown
+    const r0 = svg.getBoundingClientRect();
+    const k = r0.width ? G.W / r0.width : 1;
+    const x0 = e.clientX, y0 = e.clientY;
+    const move = (ev: globalThis.PointerEvent) => {
+      const r = svg.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const patch = houseDragPatch(s, hd, {
+        sx: ((ev.clientX - r.left) / r.width) * G.W,
+        sy: ((ev.clientY - r.top) / r.height) * G.H,
+        dx: (ev.clientX - x0) * k,
+        dy: (ev.clientY - y0) * k,
+      });
+      if (patch) setA((prev) => ({ ...prev, ...patch }));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      dragCleanup.current = null;
+    };
+    dragCleanup.current = up;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const workspaceMaxW = !inputsOpen && !tierRailOpen ? "none" : "760px";
 
   /* ---- review banner meta ---- */
@@ -585,7 +572,6 @@ export default function QuickDesignClient({
   const segOff: CSSProperties = { fontFamily: UI, fontSize: 12.5, fontWeight: 500, padding: "7px 15px", borderRadius: 6, background: "transparent", color: "#9aa0ab", border: "none", cursor: "pointer" };
   const modeSeg = (on: boolean): CSSProperties => ({ fontFamily: UI, fontSize: 12, fontWeight: 600, padding: "7px 13px", borderRadius: 7, border: "none", cursor: "pointer", background: on ? "#16181d" : "transparent", color: on ? "#fff" : "#8c919c" });
   const collapseBtn: CSSProperties = { width: 24, height: 24, border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#9aa0ab", fontSize: 13, lineHeight: 1, cursor: "pointer", padding: 0, flexShrink: 0 };
-  const doorBtn: CSSProperties = { fontFamily: UI, fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: "none", borderRadius: 7, padding: "6px 11px", cursor: "pointer" };
   const ghostDoorBtn: CSSProperties = { fontFamily: UI, fontSize: 12, fontWeight: 600, color: "#9aa0ab", background: "transparent", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 11px", cursor: "pointer" };
 
   const manualMode = manualNotice;
@@ -913,21 +899,12 @@ export default function QuickDesignClient({
                   <div style={{ background: "#fbfbfc", border: "1px solid #f0f1f4", borderRadius: 12, padding: 18 }}>
                     {plan.isHouse && (
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 14, paddingBottom: 13, borderBottom: "1px solid #f0f1f4" }}>
-                        {plan.hasDoors ? (
-                          <>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginRight: 2 }}>Doors</span>
-                            <button onClick={() => addDoor("doorsL")} style={doorBtn}>+ Left wall</button>
-                            <button onClick={() => addDoor("doorsR")} style={doorBtn}>+ Right wall</button>
-                            <button onClick={() => addDoor("doorsBack")} style={doorBtn}>+ Rear wall</button>
-                          </>
-                        ) : (
-                          <span style={{ fontSize: 11, color: "#9aa0ab" }}>Drag the side or back wall to size the house</span>
-                        )}
+                        <span style={{ fontSize: 11, color: "#9aa0ab" }}>Drag the side or back wall to size the room</span>
                         <span style={{ flex: 1 }} />
-                        <button onClick={resetHouse} title="Reset the house to its default size" style={ghostDoorBtn}>Reset house</button>
+                        <button onClick={resetHouse} title="Reset the room to its default size" style={ghostDoorBtn}>Reset house</button>
                       </div>
                     )}
-                    <PlanSvg plan={plan} accent={accentHex} interactive onHandleDown={onHandleDown} onRemoveDoor={removeDoor} svgId="qd-autoplan-svg" />
+                    <PlanSvg plan={plan} accent={accentHex} interactive onHandleDown={onHandleDown} svgId="qd-autoplan-svg" />
                     <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginTop: 13, fontSize: 11, color: "#8c919c" }}>
                       {(plan.legend || []).map((lg, i) => (
                         <span key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -938,7 +915,7 @@ export default function QuickDesignClient({
                     </div>
                   </div>
                   <div style={{ fontSize: 11, color: "#9aa0ab", lineHeight: 1.5, marginTop: 15 }}>
-                    Calculated from your stage dimensions — adjust the sliders on the left and these update live. On stage-and-audience plans, drag the accent handles to slide the house walls outward or move a doorway along the wall.
+                    Calculated from your stage dimensions — adjust the sliders on the left and these update live. On stage-and-audience plans, drag the accent handles to slide the room&apos;s walls.
                   </div>
                 </div>
               )}
