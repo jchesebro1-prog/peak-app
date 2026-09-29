@@ -9653,7 +9653,8 @@ Through the stores' own write paths (records get a new revision):
 **Done — one header per project (D475).** Header card: "Apply this header to N other specs for Project No. <n>";
 New spec: known project numbers pre-fill the header. Harness checks added.
 
-**Open (Jeff):** the Theatrical Lighting Acceptable Manufacturers list per category; where the reviewer's Acoustic
+**Resolved later that day:** the Theatrical Lighting lists stay as they are (Jeff); the reviewer's Acoustic
+Shell file was a hand-edited North HS original (see the follow-up below). **Was open:** where the reviewer's Acoustic
 Shell file came from (no Fall Creek 11 61 13 spec was ever saved — the library's 1.2/G numbers 1., 2., 3.); spec
 numbers vs Bray's TOC (MasterFormat has 11 61 23 as Folding and Portable Stages; SP-1002 and SP-1004 are both
 26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61).
@@ -9665,8 +9666,8 @@ the duplicated record headings and 2.1 never printing — fixed by D478 plus com
 (StageRight Opus II basis of design, Wenger acceptable). Pit Filler 11 61 14 replaced from Jeff's StageRight ME-1000
 file (production, backup `backups/peak-backup-20260929-1554.json`): Parts 1/3 match the file (warranty 3 years, Part 3
 = Training only); PS-116114-001…004 (Clear Span) archived; new PS-116114-005…008 (same match keys, supports now
-"Pit Filler – ME-1000 Supports") + companion -009 MANUFACTURERS. Local dev DB not updated. Open: Jeff's file heads
-it "11 61 23 – Pit Filler" (kept 11 61 14); bracket Arena / 36–56" as job values?
+"Pit Filler – ME-1000 Supports") + companion -009 MANUFACTURERS. Local dev DB not updated. Jeff (same day): keep 11 61 14; Arena and
+36–56" are now job values on PS-116114-006 (rev 2); the Theatrical Lighting manufacturer lists stay as they are.
 
 ---
 
