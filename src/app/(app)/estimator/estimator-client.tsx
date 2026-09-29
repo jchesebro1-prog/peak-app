@@ -1369,6 +1369,9 @@ export default function EstimatorClient({
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
   const setSystemNarrative = (secId: string, narrative: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
+  // #262: stored raw, like narrative — partsListRows trims on export.
+  const setSystemRoom = (secId: string, room: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, room } : s)));
   const setSystemPresentation = (secId: string, presentation: "itemized" | "narrative") =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, presentation } : s)));
   const deleteSystem = (secId: string) => {
@@ -1505,7 +1508,7 @@ export default function EstimatorClient({
           manufacturerModelNumber: r.manufacturerModelNumber,
         };
       }
-      const rows = partsListRows(sections, vendorQuotes, info);
+      const rows = partsListRows(sections, vendorQuotes, info, venueRoomName);
       if (!rows.length) {
         setActionError(null);
         setActionNotice("No parts to export yet.");
@@ -2152,6 +2155,9 @@ export default function EstimatorClient({
     value: l.id,
     label: l.label + (l.city ? " · " + l.city : ""),
   }));
+  // #262: the selected venue's own name (not the "Name · City" option label) —
+  // the Room input's placeholder fallback when a system's room is blank.
+  const venueRoomName = locations.find((l) => l.id === locationId)?.label || "";
   const showContactPick = contacts.length >= 1;
   const contactOptions = [{ value: "", label: "— No contact —" }].concat(
     contacts.map((c) => ({ value: c.name, label: c.name + (c.role ? " · " + c.role : "") }))
@@ -3487,6 +3493,8 @@ export default function EstimatorClient({
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
                   onSetNarrative={(value) => setSystemNarrative(sec.id, value)}
+                  onSetRoom={(value) => setSystemRoom(sec.id, value)}
+                  defaultRoom={venueRoomName}
                   onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}

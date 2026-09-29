@@ -1,41 +1,44 @@
-import type { SpecSection, VendorQuote } from "./types";
+import type { SpecItem, SpecSection, VendorQuote } from "./types";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —
  *  every orderable part in the estimate's material systems, assemblies
  *  exploded into their components, vendor quotes into their lines, identical
- *  parts consolidated. The file's total always equals the estimate's
- *  material cost. Pure: no React, no server imports. */
+ *  parts consolidated per room + system. Σ qty × Unit Cost equals the
+ *  estimate's material cost; Σ qty × Unit Sell equals its material sell.
+ *  Pure: no React, no server imports. */
 
 /** Catalog facts for one SKU, keyed by the trimmed SKU (#262). */
 export type PartInfo = { mfr?: string; manufacturerPartNumber?: string; manufacturerModelNumber?: string; desc?: string };
 
-/** One consolidated row of the parts list (#262). `unitCost` stays unrounded;
- *  `extCost` is rounded to cents on the merged row. */
+/** One consolidated row of the parts list (#262). `unitCost`/`unitSell` stay
+ *  unrounded; `sku` and `unit` are kept for merging + the unit note, never
+ *  printed as columns. */
 export type PartsListRow = {
   manufacturer: string;
   modelNumber: string;
+  room: string;
+  system: string;
   sku: string;
   desc: string;
   qty: number;
   unit: string;
   unitCost: number;
-  extCost: number;
-  usedIn: string[];
+  unitSell: number;
+  partOf: string[];
+  notes: string[];
 };
 
 export const PARTS_CSV_HEADER: string[] = [
   "Manufacturer",
   "Model number",
-  "Peak SKU",
-  "Description",
+  "Room",
+  "System",
   "Qty",
-  "Unit",
-  "Unit cost",
-  "Extended cost",
-  "Used in",
+  "Unit Cost",
+  "Unit Sell",
+  "Description",
+  "Notes",
 ];
-
-type Entry = Omit<PartsListRow, "extCost" | "usedIn"> & { label: string };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -51,32 +54,52 @@ function modelFromInfo(info: Record<string, PartInfo>, sku: string): string {
   return p.manufacturerModelNumber?.trim() || p.manufacturerPartNumber?.trim() || sku;
 }
 
+/** Unit sell of one estimate line (#262) — a typed extended sell wins over the unit price. */
+function lineSellOf(item: SpecItem): number {
+  return typeof item.extSellOverride === "number" && Number.isFinite(item.extSellOverride)
+    ? item.extSellOverride / item.qty
+    : item.price;
+}
+
 /** Every emitted entry, in order, before consolidation (#262). */
-function expand(sections: SpecSection[], vendorQuotes: VendorQuote[], info: Record<string, PartInfo>): Entry[] {
-  const out: Entry[] = [];
+function expand(
+  sections: SpecSection[],
+  vendorQuotes: VendorQuote[],
+  info: Record<string, PartInfo>,
+  defaultRoom = ""
+): PartsListRow[] {
+  const out: PartsListRow[] = [];
   for (const section of sections) {
     if (section.kind === "labor") continue;
+    const room = section.room?.trim() || defaultRoom.trim();
+    const system = section.name;
     for (const item of section.items) {
       if (item.labor || item.laborOverhead || item.option) continue;
       if (!Number.isFinite(item.qty) || item.qty <= 0) continue;
+      const lineSell = lineSellOf(item);
+      const note = item.internalNote?.trim() || "";
+      const notes = note ? [note] : [];
 
       const vq = item.vendorQuoteId ? vendorQuotes.find((v) => v.id === item.vendorQuoteId) : undefined;
       if (vq && vq.lines.length > 0) {
         const vqName = `Vendor quote ${vq.vendor}${vq.quoteNumber ? " #" + vq.quoteNumber : ""}`;
-        const label = `${section.name} › ${vqName}`;
         let linesTotal = 0;
+        for (const line of vq.lines) if (line.qty > 0) linesTotal += line.amount;
         for (const line of vq.lines) {
           if (!(line.qty > 0)) continue;
-          linesTotal += line.amount;
           out.push({
             manufacturer: "",
             modelNumber: line.manufacturerPartNumber?.trim() || "",
+            room,
+            system,
             sku: "",
             desc: line.description,
             qty: line.qty * item.qty,
             unit: line.unit || "ea",
             unitCost: line.amount / line.qty,
-            label,
+            unitSell: linesTotal > 0 ? (lineSell * line.amount / linesTotal) / line.qty : 0,
+            partOf: [vqName],
+            notes: [...notes],
           });
         }
         // A typed vendor total (totalSource "manual") can differ from its
@@ -86,12 +109,16 @@ function expand(sections: SpecSection[], vendorQuotes: VendorQuote[], info: Reco
           out.push({
             manufacturer: "",
             modelNumber: "",
+            room,
+            system,
             sku: "",
             desc: `Cost adjustment — ${vqName} (quote total differs from its lines)`,
             qty: item.qty,
             unit: "ea",
             unitCost: item.cost - linesTotal,
-            label,
+            unitSell: 0,
+            partOf: [vqName],
+            notes: [],
           });
         }
         continue;
@@ -99,34 +126,47 @@ function expand(sections: SpecSection[], vendorQuotes: VendorQuote[], info: Reco
 
       if (item.components && item.components.length > 0) {
         const assemblyName = item.desc.split(" — ")[0].trim();
-        const label = `${section.name} › ${assemblyName}`;
-        let partsUnit = 0;
-        for (const comp of item.components) {
-          if (!(comp.qty > 0)) continue;
+        const included = item.components.filter((comp) => comp.qty > 0);
+        const partsCost = included.reduce((a, comp) => a + comp.cost * comp.qty, 0);
+        const partsList = included.reduce((a, comp) => a + comp.price * comp.qty, 0);
+        // Sell is allocated so the parts carry the line's margin and sum to
+        // the line: by cost share, else by list-price share, else nothing.
+        const sellOf = (comp: { cost: number; price: number }) =>
+          partsCost > 0 ? comp.cost * lineSell / partsCost
+            : partsList > 0 ? comp.price * lineSell / partsList
+            : 0;
+        for (const comp of included) {
           const sku = comp.sku.trim();
           const p = infoOf(info, sku);
-          partsUnit += comp.cost * comp.qty;
           out.push({
             manufacturer: p?.mfr?.trim() || "",
             modelNumber: modelFromInfo(info, sku),
+            room,
+            system,
             sku,
             desc: p?.desc || comp.label,
             qty: comp.qty * item.qty,
             unit: comp.unit || "ea",
             unitCost: comp.cost,
-            label,
+            unitSell: sellOf(comp),
+            partOf: [assemblyName],
+            notes: [...notes],
           });
         }
-        if (Math.abs(item.cost - partsUnit) > 0.005) {
+        if (Math.abs(item.cost - partsCost) > 0.005) {
           out.push({
             manufacturer: "",
             modelNumber: "",
+            room,
+            system,
             sku: "",
             desc: `Cost adjustment — ${assemblyName} (line cost differs from its parts)`,
             qty: item.qty,
             unit: "ea",
-            unitCost: item.cost - partsUnit,
-            label,
+            unitCost: item.cost - partsCost,
+            unitSell: 0,
+            partOf: [assemblyName],
+            notes: [],
           });
         }
         continue;
@@ -137,12 +177,16 @@ function expand(sections: SpecSection[], vendorQuotes: VendorQuote[], info: Reco
       out.push({
         manufacturer: item.manufacturer?.trim() || p?.mfr?.trim() || "",
         modelNumber: item.manufacturerModelNumber?.trim() || item.manufacturerPartNumber?.trim() || modelFromInfo(info, sku),
+        room,
+        system,
         sku,
         desc: item.desc,
         qty: item.qty,
         unit: item.unit || "ea",
         unitCost: item.cost,
-        label: section.name,
+        unitSell: lineSell,
+        partOf: [],
+        notes,
       });
     }
   }
@@ -159,46 +203,49 @@ export function partsListSkus(sections: SpecSection[]): string[] {
   return [...seen];
 }
 
-/** The consolidated parts list (#262) — identical parts merged, first-appearance order. */
+/** The consolidated parts list (#262) — identical parts within one room +
+ *  system merged, first-appearance order. */
 export function partsListRows(
   sections: SpecSection[],
   vendorQuotes: VendorQuote[],
-  info: Record<string, PartInfo>
+  info: Record<string, PartInfo>,
+  defaultRoom = ""
 ): PartsListRow[] {
   const rows = new Map<string, PartsListRow>();
-  for (const e of expand(sections, vendorQuotes, info)) {
+  for (const e of expand(sections, vendorQuotes, info, defaultRoom)) {
     const key = e.sku || e.modelNumber
-      ? `p|${e.manufacturer}|${e.modelNumber}|${e.sku}|${e.unit}|${round2(e.unitCost)}`
-      : `d|${e.desc}|${e.unit}|${round2(e.unitCost)}`;
+      ? `p|${e.room}|${e.system}|${e.manufacturer}|${e.modelNumber}|${e.sku}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}`
+      : `d|${e.room}|${e.system}|${e.desc}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}`;
     const row = rows.get(key);
     if (row) {
       row.qty += e.qty;
-      if (!row.usedIn.includes(e.label)) row.usedIn.push(e.label);
+      for (const x of e.partOf) if (!row.partOf.includes(x)) row.partOf.push(x);
+      for (const x of e.notes) if (!row.notes.includes(x)) row.notes.push(x);
     } else {
-      const { label, ...rest } = e;
-      rows.set(key, { ...rest, extCost: 0, usedIn: [label] });
+      rows.set(key, { ...e, partOf: [...new Set(e.partOf)], notes: [...new Set(e.notes)] });
     }
   }
-  const out = [...rows.values()];
-  for (const r of out) r.extCost = round2(r.qty * r.unitCost);
-  return out;
+  return [...rows.values()];
 }
 
-/** CSV body rows under PARTS_CSV_HEADER (#262) plus a final Total row; [] when empty. */
+/** CSV body rows under PARTS_CSV_HEADER (#262); [] when empty. Notes carries
+ *  "Part of: …", a "per <unit>" for anything not sold each, then internal notes. */
 export function partsListCsvRows(rows: PartsListRow[]): (string | number)[][] {
-  if (rows.length === 0) return [];
-  const body: (string | number)[][] = rows.map((r) => [
-    r.manufacturer,
-    r.modelNumber,
-    r.sku,
-    r.desc,
-    r.qty,
-    r.unit,
-    r.unitCost.toFixed(2),
-    r.extCost.toFixed(2),
-    r.usedIn.join("; "),
-  ]);
-  const total = rows.reduce((a, r) => a + r.extCost, 0);
-  body.push(["", "", "", "Total", "", "", "", total.toFixed(2), ""]);
-  return body;
+  return rows.map((r) => {
+    const notes: string[] = [];
+    if (r.partOf.length > 0) notes.push("Part of: " + r.partOf.join(", "));
+    if (r.unit !== "ea") notes.push("per " + r.unit);
+    notes.push(...r.notes);
+    return [
+      r.manufacturer,
+      r.modelNumber,
+      r.room,
+      r.system,
+      r.qty,
+      r.unitCost.toFixed(2),
+      r.unitSell.toFixed(2),
+      r.desc,
+      notes.join("; "),
+    ];
+  });
 }

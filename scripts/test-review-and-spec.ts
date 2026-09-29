@@ -35770,12 +35770,12 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   };
   const sections: P262Section[] = [
     {
-      id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0,
+      id: "s1", name: "Lighting", room: "Stage", kind: "materials", mfr: "", freightPct: 0,
       items: [
         it(1, "SA-F1", "Cyc light — Source Four; Clamp (Pos 1st elec)", 3, 120, { components: [comp("LAMP-A", "Source Four", 1, 100), comp("CLAMP", "Clamp", 2, 10), comp("SAFETY", "Safety cable", 0, 5)] }),
-        it(2, "SA-F2", "Wash — Clamp", 2, 25, { components: [comp("CLAMP", "Clamp", 1, 10)] }),
-        it(3, "PLAIN-1", "Plain one", 4, 7.5, { manufacturer: "Chauvet", manufacturerModelNumber: "MM-1", manufacturerPartNumber: "PN-1" }),
-        it(4, "PLAIN-2", "Plain two", 1, 20, { manufacturerPartNumber: " PN-2 " }),
+        it(2, "SA-F2", "Wash — Clamp", 2, 25, { extSellOverride: 40, components: [comp("CLAMP", "Clamp", 1, 10)] }),
+        it(3, "PLAIN-1", "Plain one", 4, 7.5, { manufacturer: "Chauvet", manufacturerModelNumber: "MM-1", manufacturerPartNumber: "PN-1", internalNote: " Hang on 1st elec " }),
+        it(4, "PLAIN-2", "Plain two", 1, 20, { manufacturerPartNumber: " PN-2 ", extSellOverride: 25 }),
         it(5, "UNKNOWN-9", "Mystery part", 2, 3),
         it(6, "CAT-ONLY", "Catalog only", 1, 11),
         it(7, "OPT-1", "Optional add", 1, 999, { option: true }),
@@ -35783,9 +35783,11 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
         it(9, "ZERO", "Zero qty", 0, 50),
         it(10, "VQ", "Acme truss package", 1, 300, { vendorQuoteId: "VQ-1" }),
         it(11, "VQ2", "Vendor quote gone", 1, 40, { vendorQuoteId: "VQ-MISSING" }),
+        it(12, "CABLE-FT", "Cable", 50, 1.5, { unit: "ft" }),
       ],
     },
-    { id: "s2", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [it(1, "LAB-1", "Install", 10, 80)] },
+    { id: "s2", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "CLAMP", "Clamp", 1, 10)] },
+    { id: "s3", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [it(1, "LAB-1", "Install", 10, 80)] },
   ];
   const vqs: P262Vq[] = [{
     id: "VQ-1", vendor: "Acme", quoteNumber: "Q-77", description: "", terms: "", notes: "", total: 300, includesFreight: false, display: "single",
@@ -35795,15 +35797,28 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
       { id: 3, description: "Nothing", qty: 0, unit: "ea", amount: 0 },
     ],
   }];
-  const rows = p262Rows(sections, vqs, info);
-  const by = (sku: string) => rows.find((r) => r.sku === sku);
-  ok(p262Header.join(",") === "Manufacturer,Model number,Peak SKU,Description,Qty,Unit,Unit cost,Extended cost,Used in", "#262 parts list: the CSV header names the nine columns");
-  ok(!["LAB-1", "LAB-X", "OPT-1", "ZERO", "SA-F1", "SA-F2", "SAFETY", "VQ"].some((s) => by(s)), "#262 parts list: labor sections, labor items, options, zero-qty items, the assembly line itself, qty-0 components and an expanded vendor-quote line never appear");
-  ok(rows.map((r) => r.sku || r.modelNumber || r.desc).join("|") === "LAMP-A|CLAMP|Cost adjustment — Wash (line cost differs from its parts)|PLAIN-1|PLAIN-2|UNKNOWN-9|CAT-ONLY|TR-10|Base plate|VQ2", "#262 parts list: rows come out in first-appearance order");
+  const rows = p262Rows(sections, vqs, info, "Main Hall");
+  const by = (sku: string, system = "Lighting") => rows.find((r) => r.sku === sku && r.system === system);
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
+  const costSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitCost, 0);
+  const sellSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitSell, 0);
+  ok(p262Header.join(",") === "Manufacturer,Model number,Room,System,Qty,Unit Cost,Unit Sell,Description,Notes", "#262 parts list: the CSV header is Jeff's nine columns, in order");
+  ok(!["LAB-1", "LAB-X", "OPT-1", "ZERO", "SA-F1", "SA-F2", "SAFETY", "VQ"].some((s) => rows.some((r) => r.sku === s)), "#262 parts list: labor sections, labor items, options, zero-qty items, the assembly line itself, qty-0 components and an expanded vendor-quote line never appear");
+  ok(rows.map((r) => r.sku || r.modelNumber || r.desc).join("|") === "LAMP-A|CLAMP|Cost adjustment — Wash (line cost differs from its parts)|PLAIN-1|PLAIN-2|UNKNOWN-9|CAT-ONLY|TR-10|Base plate|VQ2|CABLE-FT|CLAMP", "#262 parts list: rows come out in first-appearance order");
+  ok(rows.filter((r) => r.system === "Lighting").every((r) => r.room === "Stage") && by("CLAMP", "Rigging")!.room === "Main Hall", "#262 parts list: room is the section's own room, else the defaultRoom fallback");
+  ok(p262Rows([sections[1]], [], info).every((r) => r.room === ""), "#262 parts list: room is blank when neither the section nor a defaultRoom names one");
   const lamp = by("LAMP-A")!;
-  ok(lamp.qty === 3 && lamp.desc === "Source Four 750W" && lamp.manufacturer === "ETC" && lamp.modelNumber === "S4-750" && lamp.usedIn.join(";") === "Lighting › Cyc light", "#262 parts list: an assembly explodes into its components with catalog desc/mfr/model and the assembly name as Used in");
+  ok(lamp.qty === 3 && lamp.desc === "Source Four 750W" && lamp.manufacturer === "ETC" && lamp.modelNumber === "S4-750" && lamp.partOf.join(";") === "Cyc light", "#262 parts list: an assembly explodes into its components with catalog desc/mfr/model and the assembly name as Part of");
   const clamp = by("CLAMP")!;
-  ok(clamp.qty === 8 && clamp.extCost === 80 && clamp.usedIn.join(";") === "Lighting › Cyc light;Lighting › Wash" && clamp.desc === "Clamp", "#262 parts list: component qty × line qty (3 × 2 = 6) plus the same part in a second assembly (2) consolidate to one row naming both");
+  ok(clamp.qty === 8 && clamp.partOf.join(";") === "Cyc light;Wash" && clamp.desc === "Clamp", "#262 parts list: component qty × line qty (3 × 2 = 6) plus the same part in a second assembly of one system (2) consolidate to one row naming both");
+  const rigClamp = by("CLAMP", "Rigging")!;
+  ok(rigClamp !== clamp && rigClamp.qty === 1 && rigClamp.partOf.length === 0, "#262 parts list: the same part in a second system stays its own row");
+  ok(lamp.unitSell === 200 && clamp.unitSell === 20 && lamp.unitCost === 100 && clamp.unitCost === 10, "#262 parts list: component unit sell is allocated by cost share (line sell 240 over parts cost 120 → LAMP 200, CLAMP 20)");
+  ok(by("PLAIN-2")!.unitSell === 25, "#262 parts list: a line's typed extended sell (extSellOverride / qty) beats its unit price — plain and assembly (Wash 40 / 2 = 20) alike");
+  const listOnly = p262Rows([{ id: "s9", name: "Misc", kind: "materials", mfr: "", freightPct: 0, items: [
+    it(1, "SA-Z", "Zero-cost kit — A; B", 1, 40, { price: 100, components: [{ ...comp("ZA", "A", 2, 0), price: 10 }, { ...comp("ZB", "B", 1, 0), price: 30 }] }),
+  ] }], [], {});
+  ok(listOnly.find((r) => r.sku === "ZA")!.unitSell === 20 && listOnly.find((r) => r.sku === "ZB")!.unitSell === 60 && listOnly.find((r) => r.desc.startsWith("Cost adjustment"))!.unitCost === 40 && near(sellSum(listOnly), 100) && near(costSum(listOnly), 40), "#262 parts list: zero-cost components split the sell by list price, and the adjustment row carries the whole cost");
   ok(by("PLAIN-1")!.manufacturer === "Chauvet" && by("PLAIN-1")!.modelNumber === "MM-1", "#262 parts list: the item's own mfr/model beat the catalog's");
   ok(by("PLAIN-2")!.modelNumber === "PN-2", "#262 parts list: the item's own P/N (trimmed) is used when it has no model");
   ok(clamp.modelNumber === "C-CLAMP-PN" && clamp.manufacturer === "Altman", "#262 parts list: the catalog P/N is used when the catalog has no model");
@@ -35811,20 +35826,25 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(by("UNKNOWN-9")!.modelNumber === "" && by("UNKNOWN-9")!.manufacturer === "" && by("VQ2")!.modelNumber === "", "#262 parts list: an unknown SKU gets no model number; a missing vendor quote falls through to a plain line");
   const truss = rows.find((r) => r.modelNumber === "TR-10")!;
   const plate = rows.find((r) => r.desc === "Base plate")!;
-  ok(truss.qty === 4 && truss.unitCost === 50 && truss.extCost === 200 && truss.sku === "" && truss.usedIn.join(";") === "Lighting › Vendor quote Acme #Q-77" && plate.unit === "ea" && plate.unitCost === 50 && !rows.some((r) => r.desc === "Nothing"), "#262 parts list: a vendor quote expands per line at amount / qty unit cost, skipping qty-0 lines");
+  ok(truss.qty === 4 && truss.unitCost === 50 && truss.sku === "" && truss.partOf.join(";") === "Vendor quote Acme #Q-77" && plate.unit === "ea" && plate.unitCost === 50 && !rows.some((r) => r.desc === "Nothing"), "#262 parts list: a vendor quote expands per line at amount / qty unit cost, skipping qty-0 lines");
+  ok(truss.unitSell === 100 && plate.unitSell === 100, "#262 parts list: a vendor quote's line sell (600) is allocated across its lines by amount share");
   const adj = rows.find((r) => r.desc.startsWith("Cost adjustment"))!;
-  ok(adj.qty === 2 && adj.unitCost === 15 && adj.usedIn.join(";") === "Lighting › Wash" && !rows.some((r) => r.desc === "Cost adjustment — Cyc light (line cost differs from its parts)"), "#262 parts list: a cost-adjustment row appears only when the line cost differs from its parts");
+  ok(adj.qty === 2 && adj.unitCost === 15 && adj.unitSell === 0 && adj.partOf.join(";") === "Wash" && !rows.some((r) => r.desc === "Cost adjustment — Cyc light (line cost differs from its parts)"), "#262 parts list: a cost-adjustment row (no sell) appears only when the line cost differs from its parts");
+  const live = sections.filter((s) => s.kind !== "labor").flatMap((s) => s.items)
+    .filter((i) => !i.labor && !i.laborOverhead && !i.option && i.qty > 0);
+  const expectedCost = live.reduce((a, i) => a + i.cost * i.qty, 0);
+  const expectedSell = live.reduce((a, i) => a + (typeof i.extSellOverride === "number" ? i.extSellOverride : i.price * i.qty), 0);
+  ok(expectedCost === 902 && near(costSum(rows), expectedCost), "#262 parts list: Σ qty × Unit Cost equals the estimate's material cost (902.00)");
+  ok(near(sellSum(rows), expectedSell), "#262 parts list: Σ qty × Unit Sell equals the estimate's material sell");
   const csv = p262Csv(rows);
-  const expected = sections.filter((s) => s.kind !== "labor").flatMap((s) => s.items)
-    .filter((i) => !i.labor && !i.option && i.qty > 0).reduce((a, i) => a + i.cost * i.qty, 0);
-  const last = csv[csv.length - 1];
-  ok(csv.length === rows.length + 1 && last.join("|") === `|||Total||||${expected.toFixed(2)}|` && expected === 817, "#262 parts list: the CSV total equals the estimate's material cost (Σ item cost × qty, 817.00)");
-  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|CLAMP|Clamp|8|ea|10.00|80.00|Lighting › Cyc light; Lighting › Wash", "#262 parts list: a CSV row formats costs to cents and joins Used in with \"; \"");
-  ok(p262Csv([]).length === 0, "#262 parts list: an empty list has no Total row");
+  ok(csv.length === rows.length && !csv.some((r) => r.includes("Total")), "#262 parts list: the CSV has one line per row and no Total row");
+  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Stage|Lighting|8|10.00|20.00|Clamp|Part of: Cyc light, Wash", "#262 parts list: a CSV row prints Jeff's columns, cents, and \"Part of:\" in Notes");
+  ok(csv.find((r) => r[7] === "Plain one")![8] === "Hang on 1st elec" && csv.find((r) => r[7] === "Cable")![8] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
+  ok(p262Csv([]).length === 0, "#262 parts list: an empty list has no rows");
   const manualVq = p262Rows([{ id: "s3", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "", "Acme truss package", 1, 350, { vendorQuoteId: "VQ-1" })] }], vqs, {});
   const vAdj = manualVq.find((r) => r.desc.startsWith("Cost adjustment"));
-  ok(vAdj?.unitCost === 50 && vAdj.desc === "Cost adjustment — Vendor quote Acme #Q-77 (quote total differs from its lines)" && manualVq.reduce((a, r) => a + r.extCost, 0) === 350, "#262 parts list: a typed vendor total that differs from its lines adds an adjustment row, so the file still totals to the line cost");
-  ok(p262Skus(sections).join(",") === "LAMP-A,CLAMP,PLAIN-1,PLAIN-2,UNKNOWN-9,CAT-ONLY,VQ,VQ2", "#262 parts list: partsListSkus lists component SKUs, never the assembly line's own SKU (a vendor-quote line's SKU is kept — it can't see the vendor quotes)");
+  ok(vAdj?.unitCost === 50 && vAdj.unitSell === 0 && vAdj.partOf.join(";") === "Vendor quote Acme #Q-77" && vAdj.desc === "Cost adjustment — Vendor quote Acme #Q-77 (quote total differs from its lines)" && near(costSum(manualVq), 350) && near(sellSum(manualVq), 700), "#262 parts list: a typed vendor total that differs from its lines adds an adjustment row, so the file still totals to the line cost and sell");
+  ok(p262Skus(sections).join(",") === "LAMP-A,CLAMP,PLAIN-1,PLAIN-2,UNKNOWN-9,CAT-ONLY,VQ,VQ2,CABLE-FT", "#262 parts list: partsListSkus lists component SKUs, never the assembly line's own SKU (a vendor-quote line's SKU is kept — it can't see the vendor quotes)");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */

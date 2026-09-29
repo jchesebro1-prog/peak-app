@@ -174,6 +174,8 @@ export type SpecSection = {
   id: string;
   name: string;
   narrative?: string;
+  /** #262: the room this system is in, for the PM parts list; blank = the quote's venue. Internal only. */
+  room?: string;
   presentation?: "itemized" | "narrative";
   /** 'materials' | 'labor' */
   kind: string;
