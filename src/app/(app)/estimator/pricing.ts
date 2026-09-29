@@ -769,10 +769,12 @@ const TRAVEL_SKU: Record<LaborTravelKind, string> = { mileage: "MIL", hotel: "HT
  * hide them from the CUSTOMER document without a SKU-prefix guess — each
  * travel line folds back into its own mobilization line there.
  *
- * #270 keeps every number the pre-split build produced: a mobilization's
- * lines together cost exactly round2(m.cost) and sell exactly its old
- * single-line sell (the labor line takes the rounding remainder of both),
- * so estimate totals and the customer document are unchanged to the cent.
+ * #270 keeps the pre-split numbers: a mobilization's lines together cost
+ * exactly round2(m.cost) (the labor line takes the rounding remainder), and
+ * every line sells at exactly its own cost's seed — so #254/#266 tier
+ * re-pricing still recognises each one — which puts a mobilization's sell
+ * within a few cents of its old single line; the total still lands on
+ * `r.totalPrice` through the drift nudge below.
  *
  * The modal rounds its "Price · ext" total once (`r.totalPrice`) while each
  * line here rounds its own share, so bounded rounding drift (≤5¢, scaled by
@@ -798,15 +800,15 @@ export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => n
     const mobKey = group ? group + ":" + i : "mob" + idN;
     const travel = mobTravelParts(m).map((t) => ({ ...t, cost: round2(t.cost), price: price(t.cost) }));
     const travelCost = travel.reduce((a, t) => a + t.cost, 0);
-    const travelPrice = travel.reduce((a, t) => a + t.price, 0);
+    const laborCost = round2(round2(m.cost) - travelCost);
     items.push({
       id: idN,
       sku: "LAB-" + r.disc + "-" + skuN,
       desc,
       qty: 1,
       unit: "lot",
-      cost: round2(round2(m.cost) - travelCost),
-      price: round2(price(m.cost) - travelPrice),
+      cost: laborCost,
+      price: price(laborCost),
       labor: true,
       comment,
       internalNote,
