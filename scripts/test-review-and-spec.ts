@@ -36614,3 +36614,70 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   const qd267 = read267("src/app/(app)/estimator/quote-document.tsx");
   ok(qd267.includes("const sub = systemSellTotal(sec);") && qd267.includes("rows.reduce((a, cl) => a + cl.ext, 0)"), "#267: the customer document's system subtotals and labor lines read the system price");
 }
+
+/* --- #276: the parts list's Unit Sell follows the system price (typed, or rounded up to $25) --- */
+import { partsListRows as p273Rows } from "@/app/(app)/estimator/parts-csv";
+import {
+  systemFreight as p273Freight,
+  systemItemsRev as p273Rev,
+  systemSellAdjustment as p273Adj,
+  systemSellTotal as p273Total,
+} from "@/app/(app)/estimator/pricing";
+import type { SpecItem as P273Item, SpecSection as P273Section, VendorQuote as P273Vq } from "@/app/(app)/estimator/types";
+{
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
+  const sellSum = (rs: { qty: number; unitSell: number }[]) => rs.reduce((a, r) => a + r.qty * r.unitSell, 0);
+  const comp = (sku: string, qty: number, cost: number) => ({ sku, label: sku, role: "other" as const, qty, unit: "ea", cost, price: cost * 2 });
+  const items = (): P273Item[] => [
+    { id: 1, sku: "PLAIN", desc: "Plain", qty: 2, unit: "ea", cost: 250, price: 450 },
+    { id: 2, sku: "ASM", desc: "Kit — A; B", qty: 1, unit: "ea", cost: 100, price: 100.4, components: [comp("CA", 1, 40), comp("CB", 2, 30)] },
+  ];
+  const sec = (extra: Partial<P273Section> = {}): P273Section =>
+    ({ id: "s", name: "Sys", kind: "materials", mfr: "", freightPct: 2, items: items(), ...extra });
+
+  const rounded = sec({ priceRound: 25 });
+  const rr = p273Rows([rounded], [], {});
+  const plain = rr.find((r) => r.sku === "PLAIN")!;
+  const ca = rr.find((r) => r.sku === "CA")!;
+  const cb = rr.find((r) => r.sku === "CB")!;
+  ok(p273Freight(rounded) === 12 && p273Total(rounded) === 1025, "#276 parts list: fixture — items 1000.40 + freight 12.00 = 1012.40 rounds up to 1025");
+  ok(near(sellSum(rr), p273Total(rounded) - p273Freight(rounded)) && near(sellSum(rr), 1013), "#276 parts list: Σ qty × Unit Sell = the rounded system price less freight (1013.00)");
+  ok(plain.unitCost === 250 && ca.unitCost === 40 && cb.unitCost === 30, "#276 parts list: Unit Cost is unchanged by the rounding");
+  const k = 1013 / 1000.4;
+  ok(Math.abs(plain.unitSell - 450 * k) < 1e-9, "#276 parts list: a plain line's unit sell scales by price ÷ lines sell");
+  ok(Math.abs(ca.unitSell - 40.16 * k) < 1e-9 && Math.abs(cb.unitSell - 30.12 * k) < 1e-9, "#276 parts list: an assembly's components scale by the same factor");
+
+  const typed = sec({ priceRound: 25, sellOverride: 2000 });
+  const tr = p273Rows([typed], [], {});
+  ok(near(sellSum(tr), 2000 - p273Freight(typed)) && tr.find((r) => r.sku === "PLAIN")!.unitCost === 250, "#276 parts list: a typed system sell (2000) — Σ = 2000 less freight (1988.00), costs unchanged");
+
+  const legacy = p273Rows([sec()], [], {});
+  ok(legacy.find((r) => r.sku === "PLAIN")!.unitSell === 450 && Math.abs(legacy.find((r) => r.sku === "CA")!.unitSell - 40.16) < 1e-9 && near(sellSum(legacy), 1000.4), "#276 parts list: a legacy section (no priceRound, no override) keeps its lines' unit sells");
+
+  const mixed: P273Section = {
+    id: "m", name: "Mixed", kind: "materials", mfr: "", freightPct: 0, priceRound: 25,
+    items: [
+      { id: 1, sku: "MAT", desc: "Material", qty: 1, unit: "ea", cost: 400, price: 600 },
+      { id: 2, sku: "LAB", desc: "Labor", qty: 1, unit: "ea", cost: 300, price: 400.01, labor: true },
+    ],
+  };
+  const mr = p273Rows([mixed], [], {});
+  const km = (p273Rev(mixed) + p273Adj(mixed)) / p273Rev(mixed);
+  ok(mr.length === 1 && mr[0].sku === "MAT" && Math.abs(sellSum(mr) - km * 600) < 1e-9 && near(sellSum(mr), 614.99), "#276 parts list: a mixed system lists only its materials, at (rev + adj) ÷ rev × their sell");
+
+  const vqs: P273Vq[] = [{
+    id: "VQ-9", vendor: "Acme", quoteNumber: "", description: "", terms: "", notes: "", total: 110, includesFreight: false, display: "single",
+    lines: [
+      { id: 1, description: "Truss", qty: 2, unit: "ea", amount: 60 },
+      { id: 2, description: "Plate", qty: 1, unit: "ea", amount: 40 },
+    ],
+  }];
+  const vSec: P273Section = { id: "v", name: "Rig", kind: "materials", mfr: "", freightPct: 0, priceRound: 25, items: [{ id: 1, sku: "", desc: "Acme", qty: 1, unit: "ea", cost: 110, price: 101, vendorQuoteId: "VQ-9" }] };
+  const vr = p273Rows([vSec], vqs, {});
+  const vAdj = vr.find((r) => r.desc.startsWith("Cost adjustment"))!;
+  ok(near(sellSum(vr), 125) && vAdj.unitSell === 0 && vAdj.unitCost === 10 && vr.find((r) => r.desc === "Truss")!.unitCost === 30, "#276 parts list: vendor-quote lines scale to the rounded price (101 → 125); the cost-adjustment row stays at $0 sell");
+
+  const under: P273Section = { id: "u", name: "Under", kind: "materials", mfr: "", freightPct: 10, sellOverride: 5, items: [{ id: 1, sku: "U", desc: "U", qty: 1, unit: "ea", cost: 100, price: 100 }] };
+  const ur = p273Rows([under], [], {});
+  ok(ur.length === 1 && ur[0].unitSell === 0 && ur[0].unitCost === 100, "#276 parts list: a typed price below the freight lists parts at $0 sell, never negative");
+}
