@@ -10667,6 +10667,7 @@ seeded()
   .then(() => c255T6GridAsyncChecks())
   .then(() => c255T11MovablesAsyncChecks())
   .then(() => c255Rv11SanitizeAsyncChecks())
+  .then(() => c255Rv12SpacesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -35099,11 +35100,11 @@ import { venueFrame as c255T12Frame } from "@/lib/design/grid-auto-layout";
   const bd = c255T12Dims(bb);
   ok(bd.proWidthFt === 26 && bd.houseDepthFt === 24, "#255 T12: the room's own width/depth fields size it");
   const s1 = c255T12Markup(c255T12Build(bb, 8, 3, "#3a3f4a"), "#3a3f4a"), s2 = c255T12Markup(c255T12Build(conf, 8, 3, "#3a3f4a"), "#3a3f4a");
-  ok(["Blackbox", "Electrical Room", "Booth"].every((t) => s1.includes(">" + t + "<") && s2.includes(">" + t + "<")) && s1.split(">Storage<").length - 1 === 2 && s1.includes(">TENSION GRID<") && s2.includes(">PLATFORM<"), "#255 T12: Black Box and Conference draw Jeff's drawing — the conference keeps its low platform");
+  ok(["Electrical Room", "Booth", "Storage 1", "Storage 2"].every((t) => s1.includes(">" + t + "<") && s2.includes(">" + t + "<")) && s1.includes(">Blackbox<") && s2.includes(">Conference Room<") && s1.includes(">TENSION GRID<") && s2.includes(">PLATFORM<"), "#255 T12: Black Box and Conference draw Jeff's drawing — the conference keeps its low platform");
   const G = c255T12Geom(conf);
   ok(Math.abs(G.platform.y - G.room.y) < 1e-9 && G.platform.w < G.room.w && (c255T12Build(conf, 8, 3, "#3a3f4a").handles || []).filter((h) => h.type === "movable").length === 4, "#255 T12: the platform sits at the front of the room; all four rooms have drag handles");
   const o = c255T12Options(bb, "blackbox@1");
-  ok(o.items.map((m) => m.label).sort().join("|") === "Booth|Electrical Room|Storage|Storage" && o.items.every((m) => m.walls.length === 4), "#255 T12: four movable rooms, each allowed on any wall");
+  ok(o.items.map((m) => m.label).sort().join("|") === "Booth|Electrical Room|Storage 1|Storage 2" && o.items.every((m) => m.walls.length === 4), "#255 T12: four movable rooms, each allowed on any wall");
   const crowded = c255T12Options({ ...bb, movables: { booth: { wall: "bottom", t: 0.5 }, "storage-top": { wall: "bottom", t: 0.5 } } }, "blackbox@1");
   ok(crowded.warnings.some((w) => w.includes("Bottom wall")), "#255 T12: two 20' rooms on a 26' wall — the plan says they don't fit");
   const roomy = c255T12Stretch("blackbox@1", { ...K.defaults, pit: false, movables: { booth: { wall: "bottom", t: 0 }, "storage-top": { wall: "bottom", t: 1 } } });
@@ -35146,7 +35147,7 @@ import type { AutoCard as C255Rv11Card } from "@/lib/design/auto-estimate";
       const st = { ...gym, houseWidthFt: hw, houseDepthFt: hd, movables: { booth: { wall, t: 0.5 } } };
       const hs = c255Rv11Build(st, 8, 3, "#3a3f4a").handles || [];
       const mv = hs.filter((h) => h.type === "movable"), walls = hs.filter((h) => h.type === "wall");
-      ok(mv.length === 1 && walls.length === 3 && hs.indexOf(mv[0]) < hs.indexOf(walls[0]) && walls.every((w) => clear(mv[0], grip(w))), `#255 T11 review ${hw}×${hd} ${wall}: the Booth's handle is listed under the walls' and never overlaps a wall grip`);
+      ok(mv.length === 1 && walls.length === 3 && hs.indexOf(mv[0]) < hs.indexOf(walls[0]) && walls.every((w) => clear(mv[0], grip(w))), `#255 T11 review ${hw}×${hd} ${wall}: the Booth's 13-px hit circle never reaches a wall's visible grip; it is listed under the walls', so the wall wins the ≤2.8-px overlap of the invisible hit areas`);
       // The handle sits on the Booth's outer face; dragging it by nothing leaves the Booth where it is.
       const G = c255Rv11Geom(st, "gym-stage@1");
       const same = c255Rv11Drag(st, mv[0], { sx: 0, sy: 0, dx: 0, dy: 0 });
@@ -35343,4 +35344,89 @@ import { makeYMap as c255T13eY } from "@/lib/design/venue-templates/stretch";
   const base = { id: "stage", region: "Stage", home: { wall: "floorTop", anchor: { x: 0, y: 70 } }, walls: ["floorTop"] };
   ok(throws({ ...base, sized: true, bbox: { minX: 0, maxX: 1, minY: 0, maxY: 1 } }).includes("code-sized and has a bbox") && throws(base).includes("has no bbox"),
     "#255 T13 edges: a movable is drawn (bbox) or code-sized, never both or neither — named errors");
+}
+
+/* --- #255 T12 review: Auto fill stays inside the black box, Conference Room, numbered Storage rooms, plan labels --- */
+import { blackboxGeom as c255Rv12Geom, buildPlan as c255Rv12Build, renderPlanSvgMarkup as c255Rv12Markup } from "@/app/(app)/design/quick/plan-svg";
+import { compute as c255Rv12Compute, defaultAState as c255Rv12Default } from "@/app/(app)/design/quick/engine";
+import { autoEstimateCards as c255Rv12Cards } from "@/lib/design/auto-estimate";
+import type { AutoCard as C255Rv12Card } from "@/lib/design/auto-estimate";
+import type { AutoEstimate as C255Rv12Est } from "@/lib/design/grid-auto-model";
+import { EQUIPMENT_ROWS as c255Rv12Rows } from "@/lib/design/equipment-vocab";
+import type { EquipmentPriceTable as C255Rv12Table } from "@/lib/design/equipment-map";
+import { generateAutoLayout as c255Rv12Layout } from "@/lib/design/grid-auto-layout";
+import { movableOptions as c255Rv12Options, numberedRegionLabels as c255Rv12Numbered } from "@/lib/design/venue-templates/movable-options";
+{
+  const base = c255Rv12Default(0);
+  const allSys = { ...base.sys, rigging: true, curtains: true, lighting: true, audio: true, video: true, controls: true };
+  // Every equipment row priced as a part, so the fill places everything the equations call for.
+  const byTier = { good: {}, better: {}, best: {} } as C255Rv12Table["byTier"];
+  for (const d of c255Rv12Rows) for (const t of ["good", "better", "best"] as const) byTier[t][d.key] = { status: "part", ref: "C255R12-" + d.key, desc: d.label, unit: d.unit, unitCost: 1, unitSell: 1, ...(d.curtain ? { areaRate: 1, sewingPct: 0 } : {}) };
+  const table: C255Rv12Table = { margin: 0.3, byTier };
+  const BOOTH = new Set(["audio:mixerDsp", "video:processor", "video:projector"]);
+  for (const venue of ["blackbox", "concenter"])
+    for (const [w, dp] of [[49, 49], [26, 24], [80, 52], [20, 52], [80, 14]])
+      for (const tier of ["good", "best"] as const) {
+        const a = { ...base, venue, width: w, depth: dp, sys: allSys, ctrl: { ...base.ctrl, console: true } };
+        const est: C255Rv12Est = { tierByScope: { rigging: tier, curtains: tier, lighting: tier, audio: tier, video: tier }, overrides: {} };
+        const cards = c255Rv12Cards(a, est, table, {});
+        const C = c255Rv12Compute(a);
+        const G = c255Rv12Geom(a, "blackbox@1");
+        const r = { x: G.room.x / G.W, y: G.room.y / G.H, w: G.room.w / G.W, h: G.room.h / G.H };
+        const b = { x: G.booth.x / G.W, y: G.booth.y / G.H, w: G.booth.w / G.W, h: G.booth.h / G.H };
+        const inR = (q: { x: number; y: number }, R: typeof r) => q.x > R.x && q.x < R.x + R.w && q.y > R.y && q.y < R.y + R.h;
+        // A designer's edited counts well past the equations' (a 60-box array, 40 hoists) still land inside.
+        const big = cards.map((c) => ({ ...c, lines: c.lines.map((l) => (l.rowKey === "audio:lineArray" || l.rowKey === "rigging:electricHoist" ? { ...l, qty: l.rowKey === "audio:lineArray" ? 60 : 40 } : l)) })) as C255Rv12Card[];
+        for (const [tag, cs] of [["", cards], [" (edited counts)", big]] as const) {
+          const pts = c255Rv12Layout(a, cs, { electrics: C.electrics, sets: C.rigSets, template: "blackbox@1" });
+          const room = pts.filter((q) => !BOOTH.has(q.auto.rowKey)), booth = pts.filter((q) => BOOTH.has(q.auto.rowKey));
+          const out = room.filter((q) => !inR(q, r)).map((q) => q.auto.rowKey);
+          ok(room.length > 40 && !out.length && booth.length > 0 && booth.every((q) => inR(q, b)) && pts.every((q) => Number.isFinite(q.x) && Number.isFinite(q.y)), `#255 T12 review ${venue} ${w}×${dp} ${tier}${tag}: every Auto-fill point but the Booth's rows lies inside the room, the Booth's in the Booth${out.length ? " — out: " + [...new Set(out)].join(",") : ""}`);
+        }
+        if (venue === "blackbox" && tier === "good") {
+          // The rules themselves keep a normal fill inside: side lights, line arrays and legs clear the walls without the backstop.
+          const pts = c255Rv12Layout(a, cards, { electrics: C.electrics, sets: C.rigSets, template: "blackbox@1" });
+          const hung = pts.filter((q) => ["lighting:side", "curtains:legs"].includes(q.auto.rowKey) || (q.auto.rowKey === "audio:lineArray" && dp >= 24));
+          ok(hung.length > 0 && hung.every((q) => q.x > r.x + 0.015 && q.x < r.x + r.w - 0.015 && q.y < r.y + r.h - 0.0099), `#255 T12 review blackbox ${w}×${dp}: side lights, legs and line arrays hang inside the walls by the stage frame's inset`);
+        }
+      }
+  // Conference Room / Blackbox — the plan label and the Spaces; the region and role ids stay "Blackbox".
+  const bb = { ...base, venue: "blackbox", width: 26, depth: 24, sys: allSys };
+  const conf = { ...base, venue: "concenter", width: 50, depth: 30, sys: allSys };
+  const svgB = c255Rv12Markup(c255Rv12Build(bb, 8, 3, "#3a3f4a"), "#3a3f4a"), svgC = c255Rv12Markup(c255Rv12Build(conf, 8, 3, "#3a3f4a"), "#3a3f4a");
+  const gB = c255Rv12Geom(bb), gC = c255Rv12Geom(conf);
+  ok(gC.houseName === "Conference Room" && gB.houseName === "Blackbox" && svgC.includes(">Conference Room<") && !svgC.includes(">Blackbox<") && svgB.includes(">Blackbox<") && !svgB.includes(">Conference Room<") && gC.roles.house === "Blackbox" && !!gC.regions.Blackbox, "#255 T12 review: a Conference's main room reads Conference Room (its region id stays Blackbox); a black box keeps Blackbox");
+  // Storage rooms: numbered in key order — fields, aria-labels, the plan and the starter Spaces agree.
+  const o = c255Rv12Options(bb, "blackbox@1").items;
+  const st = (id: string) => o.find((m) => m.id === id)?.label;
+  ok(st("storage-top") === "Storage 1" && st("storage-right") === "Storage 2" && gB.regionLabels["storage-1"] === "Storage 1" && gB.regionLabels["storage-2"] === "Storage 2" && gB.regionLabels.Booth === "Booth", "#255 T12 review: the two Storage rooms read Storage 1 and Storage 2 in the room fields and the Spaces' names");
+  ok([svgB, svgC].every((svg) => svg.split(">Storage 1<").length === 2 && svg.split(">Storage 2<").length === 2 && !svg.includes(">Storage<")), "#255 T12 review: the plan numbers the two Storage rooms the same way");
+  const moved = c255Rv12Options({ ...bb, movables: { "storage-top": { wall: "right", t: 0 }, "storage-right": { wall: "top", t: 0 } } }, "blackbox@1").items;
+  ok(moved.find((m) => m.id === "storage-top")?.label === "Storage 1", "#255 T12 review: a Storage room keeps its number wherever it moves");
+  ok(JSON.stringify(c255Rv12Numbered({ a: "X", b: "Y", c: "X" }, ["c", "a", "b"])) === JSON.stringify({ a: "X 2", b: "Y", c: "X 1" }) && JSON.stringify(c255Rv12Numbered({ a: "X", b: "Y" }, ["a", "b"])) === JSON.stringify({ a: "X", b: "Y" }), "#255 T12 review: numberedRegionLabels numbers only repeats, in the given order");
+  // Plan labels: RISER BLOCKS above the blocks, TENSION GRID clear of the masking line, the FOH lighting bar reads FOH LX.
+  for (const [w, dp] of [[26, 24], [49, 49], [80, 14], [80, 52]]) {
+    const st2 = { ...bb, width: w, depth: dp };
+    const P = c255Rv12Build(st2, 8, 3, "#3a3f4a");
+    const G = c255Rv12Geom(st2);
+    const riser = P.texts.find((t) => t.t === "RISER BLOCKS")!;
+    const blocks = P.rects.filter((q) => q.stroke === "#3a3f4a" && q.fill === "#ffffff" && q.sw === 1.2);
+    const top = Math.min(...blocks.map((q) => q.y));
+    const tg = P.texts.find((t) => t.t === "TENSION GRID")!;
+    const mask = P.rects.find((q) => q.dash === "5 4")!;
+    const seam = top + (Math.max(...blocks.map((q) => q.y + q.h)) - top) / 2;
+    const backing = P.rects.find((q) => q.fill === "#ffffff" && q.stroke === "none" && q.y < seam && q.y + q.h > seam);
+    ok(blocks.length === 8 && ((riser.y <= top - 4 && riser.y - 8 > G.room.y + 10 && !backing) || (dp < 20 && !!backing && Math.abs(riser.y - 3 - seam) < 1 && backing.w >= riser.t.length * 5)), `#255 T12 review ${w}×${dp}: RISER BLOCKS sits in the band above the blocks, below the masking line (a shallow room: on a white backing over the seam)`);
+    ok(!!mask && tg.y - 7.5 > mask.y + 1 && tg.x < mask.x + mask.w - 2, `#255 T12 review ${w}×${dp}: TENSION GRID sits inside the masking line, never struck by it`);
+    const off = c255Rv12Build({ ...st2, sys: { ...allSys, curtains: false } }, 8, 3, "#3a3f4a").texts.find((t) => t.t === "TENSION GRID")!;
+    ok(Math.abs(off.x - (G.room.x + G.room.w - 6)) < 0.01 && Math.abs(off.y - (G.room.y + 13)) < 0.01, `#255 T12 review ${w}×${dp}: with no masking, TENSION GRID keeps its corner`);
+  }
+  const confTexts = c255Rv12Build(conf, 8, 3, "#3a3f4a").texts.map((t) => t.t);
+  ok(confTexts.includes("FOH LX") && !confTexts.includes("FOH"), "#255 T12 review: the Conference's FOH lighting bar reads FOH LX, never the FOH mix box's short form");
+}
+async function c255Rv12SpacesAsyncChecks(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const base = c255Rv12Default(0);
+  const names = (venue: string, kind: "blackbox" | "flat") => GP.starterSpaces({ ...base, venue, width: 40, depth: 30 }, kind, "sh").map((x) => x.name).join("|");
+  ok(names("blackbox", "blackbox") === "Blackbox|Electrical Room|Booth|Storage 1|Storage 2" && names("concenter", "flat") === "Conference Room|Electrical Room|Booth|Storage 1|Storage 2", "#255 T12 review: starter Spaces — Conference Room on a Conference, and Storage 1 / Storage 2");
 }

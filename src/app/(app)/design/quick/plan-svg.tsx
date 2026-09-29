@@ -14,7 +14,7 @@ import { blackboxDims, churchDims, houseDims, houseSpecFor, houseWidthLim, prosc
 import { planKindAllows, resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
 import { boxOf, canvasOf, distToPoly, inPoly, movablesPx, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
-import { movablePatch } from "@/lib/design/venue-templates/movable-options";
+import { movablePatch, numberedRegionLabels } from "@/lib/design/venue-templates/movable-options";
 import { snapMovable } from "@/lib/design/venue-templates/stretch";
 
 /* ------------------------------ primitive types ------------------------------ */
@@ -450,20 +450,25 @@ export function blackboxGeom(s: AState, tpl?: string | null) {
   // to read along the room when the room is too narrow for it across (a Storage on a side wall) — and the main room's
   // label (houseLabel) placed by each builder clear of what it draws.
   const labels: BlackboxLabel[] = C.labels.map((l, i) => (moved && i === moved.i ? { ...l, x: moved.x, y: moved.y } : { ...l }));
+  // #255 review: the main room reads "Conference Room" on a Conference (its region / role id stays "Blackbox"), and a
+  // name two rooms share is numbered ("Storage 1", "Storage 2") — the same names the room fields and starter Spaces use.
+  const houseName = planKindOf(s) === "flat" ? "Conference Room" : "Blackbox";
+  const names = { ...numberedRegionLabels(plan.regionLabels, Object.keys(keys.regions)), [keys.roles.house]: houseName };
   const inBox = (b: Box, l: { x: number; y: number }) => l.x >= b.x - 0.5 && l.x <= b.x + b.w + 0.5 && l.y >= b.y - 0.5 && l.y <= b.y + b.h + 0.5;
   for (const m of keys.movables ?? []) {
     if (m.region === keys.roles.booth || !C.regions[m.region]) continue;
     const b = boxOf(C.regions[m.region]);
     const i = C.labels.findIndex((l) => inBox(b, l));
     if (i < 0) continue;
-    const w = labels[i].text.length * LABEL_CHAR_PX, cx = R(b.x + b.w / 2), cy = R(b.y + b.h / 2);
+    const text = names[m.region] ?? labels[i].text;
+    const w = text.length * LABEL_CHAR_PX, cx = R(b.x + b.w / 2), cy = R(b.y + b.h / 2);
     const turn = w > b.w - 8 && b.h > b.w;
-    labels[i] = { ...labels[i], x: cx, y: R(cy + 3), anchor: "middle", ...(turn ? { rotate: { x: cx, y: cy } } : {}) };
+    labels[i] = { ...labels[i], text, x: cx, y: R(cy + 3), anchor: "middle", ...(turn ? { rotate: { x: cx, y: cy } } : {}) };
   }
   const houseLabel = C.labels.findIndex((l) => l.text === plan.regionLabels[keys.roles.house] && inBox(room, l));
   return {
-    template: id, W: C.W, H: C.H, ppi: C.ppi, ppf: C.ppf, dims, room, platform, booth, mix,
-    regions: C.regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
+    template: id, W: C.W, H: C.H, ppi: C.ppi, ppf: C.ppf, dims, room, platform, booth, mix, houseName,
+    regions: C.regions, regionLabels: names, spaces: keys.spaces, roles: keys.roles,
     polylines: C.polylines, labels, houseLabel, movables: movablesPx(plan, C.px), fromPx: C.fromPx, plan,
   };
 }
@@ -628,7 +633,7 @@ function buildPlanFlat(s: AState, _lineSets: number, _electrics: number, accent:
     const yBar = pBot + 22, dn = Math.max(4, Math.round(platW / 34));
     L.lines.push({ x1: R(px0), y1: R(yBar), x2: R(px1), y2: R(yBar), stroke: "#9aa0ab", sw: 1, dash: "2 3" });
     for (let k = 0; k < dn; k++) L.circles.push({ cx: R(px0 + ((k + 0.5) / dn) * platW), cy: R(yBar), r: 2.6, fill: SYSCOLOR.lighting });
-    L.texts.push({ x: R(px1 + 6), y: R(yBar + 3), t: "FOH", fill: "#8c919c", size: 7.5, anchor: "start", transform: "" });
+    L.texts.push({ x: R(px1 + 6), y: R(yBar + 3), t: "FOH LX", fill: "#8c919c", size: 7.5, anchor: "start", transform: "" });
   }
   const seatTop = pBot + (s.sys.lighting ? 40 : 28), seatBot = y1 - 16;
   const rows = Math.max(3, Math.min(8, Math.round((seatBot - seatTop) / 15)));
@@ -714,7 +719,7 @@ function blackboxBase(G: BlackboxGeom, s: AState, houseLabelAt: XY): { L: L; han
   L.paths.push({ d: G.polylines.map(trace).join(" "), fill: "none", stroke: "#3a3f4a", sw: 0.9 });
   G.labels.forEach((l, i) => {
     const t = { t: l.text, fill: "#737985", size: 8, weight: 600 };
-    if (i === G.houseLabel) L.texts.push({ ...t, x: R(houseLabelAt.x), y: R(houseLabelAt.y), anchor: "middle", transform: "" });
+    if (i === G.houseLabel) L.texts.push({ ...t, t: G.houseName, x: R(houseLabelAt.x), y: R(houseLabelAt.y), anchor: "middle", transform: "" });
     else if (l.anchor === "middle") L.texts.push({ ...t, x: l.x, y: l.y, anchor: "middle", transform: l.rotate ? "rotate(-90 " + l.rotate.x + " " + l.rotate.y + ")" : "" });
     else L.texts.push({ ...t, x: l.x, y: R(l.y + l.h), anchor: "start", transform: "" });
   });
@@ -739,12 +744,21 @@ function buildPlanBlackbox(s: AState, _lineSets: number, _electrics: number, acc
   const stepPx = Math.max(18, 8 * ppf);
   for (let x = x0 + stepPx; x < x1 - 2; x += stepPx) L.lines.push({ x1: R(x), y1: R(y0), x2: R(x), y2: R(y1), stroke: "#eceef1", sw: 0.8, dash: "" });
   for (let y = y0 + stepPx; y < y1 - 2; y += stepPx) L.lines.push({ x1: R(x0), y1: R(y), x2: R(x1), y2: R(y), stroke: "#eceef1", sw: 0.8, dash: "" });
-  L.texts.push({ x: R(x1 - 6), y: R(y0 + 13), t: "TENSION GRID", fill: "#c4c9d2", size: 7.5, anchor: "end", transform: "" });
+  // With perimeter masking on, the label moves inside the masking line so the dashed line never strikes it.
+  const tg = s.sys.curtains ? { x: x1 - 16, y: y0 + 24 } : { x: x1 - 6, y: y0 + 13 };
+  L.texts.push({ x: R(tg.x), y: R(tg.y), t: "TENSION GRID", fill: "#c4c9d2", size: 7.5, anchor: "end", transform: "" });
   if (s.sys.curtains) L.rects.push({ x: R(x0 + 10), y: R(y0 + 10), w: R(x1 - x0 - 20), h: R(depthPx - 20), fill: "none", stroke: SYSCOLOR.curtains, sw: 1.6, rx: 1, dash: "5 4" });
   for (let r = 0; r < 2; r++)
     for (let c = 0; c < 4; c++)
       L.rects.push({ x: R(bx0 + c * cellW + 1), y: R(by0 + r * cellH + 1), w: R(cellW - 2), h: R(cellH - 2), fill: "#ffffff", stroke: accent, sw: 1.2, rx: 2, dash: "" });
-  L.texts.push({ x: R(cx), y: R(by0 + bH / 2 + 3), t: "RISER BLOCKS", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
+  // Never on the bare seam between the two rows: in the band above the blocks when it has room clear of the masking
+  // line, else (a shallow room) on the seam over a white backing.
+  if (by0 - 12 >= y0 + (s.sys.curtains ? 12 : 3)) L.texts.push({ x: R(cx), y: R(by0 - 5), t: "RISER BLOCKS", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
+  else {
+    const tw = "RISER BLOCKS".length * LABEL_CHAR_PX + 6;
+    L.rects.push({ x: R(cx - tw / 2), y: R(by0 + bH / 2 - 5), w: R(tw), h: 10, fill: "#ffffff", stroke: "none", sw: 0, rx: 2, dash: "" });
+    L.texts.push({ x: R(cx), y: R(by0 + bH / 2 + 3), t: "RISER BLOCKS", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
+  }
   if (s.sys.lighting)
     [0.6, 0.8].forEach((f) => {
       const y = y0 + depthPx * f, dn = Math.max(4, Math.round((x1 - x0) / 36));

@@ -30,6 +30,27 @@ function startCorner(r: { from: Pt; to: Pt }): string {
   return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? "left corner" : "right corner") : dy > 0 ? "bottom corner" : "top corner";
 }
 
+/**
+ * #255 review: each region's display name — a label two or more regions share is numbered in the keys' region
+ * order ("Storage 1", "Storage 2"), so the dimension fields, the plan and the starter Spaces name the same room
+ * the same way. Labels no other region repeats are returned as they are.
+ */
+export function numberedRegionLabels(regionLabels: Readonly<Record<string, string>>, order: readonly string[]): Record<string, string> {
+  const ids = order.filter((id) => Object.hasOwn(regionLabels, id));
+  const count = new Map<string, number>();
+  for (const id of ids) count.set(regionLabels[id], (count.get(regionLabels[id]) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const out: Record<string, string> = { ...regionLabels };
+  for (const id of ids) {
+    const l = regionLabels[id];
+    if ((count.get(l) ?? 0) < 2) continue;
+    const n = (seen.get(l) ?? 0) + 1;
+    seen.set(l, n);
+    out[id] = `${l} ${n}`;
+  }
+  return out;
+}
+
 /** The fields movableOptions reads — a Quick Design / Grid intake state (AState or its QuickScopeInputs slice). */
 type MovableInput = Pick<AState, "width" | "wing" | "depth" | "sys"> & Partial<Pick<AState, "houseWidthFt" | "houseDepthFt" | "houseHalfFt" | "movables">>;
 
@@ -37,13 +58,14 @@ export function movableOptions(s: MovableInput, tpl: string): { items: MovableOp
   const keys = keysById(tpl);
   if (!keys.movables?.length) return { items: [], warnings: [] };
   const plan = stretchById(tpl, familyDims(s, tpl));
+  const names = numberedRegionLabels(plan.regionLabels, Object.keys(keys.regions));
   const items = keys.movables.map((m) => {
     const p = plan.movables[m.id];
     const r = p.runs[p.wall];
     const maxFt = runFt(r);
     return {
       id: m.id,
-      label: plan.regionLabels[m.region] ?? m.region,
+      label: names[m.region] ?? m.region,
       wall: p.wall,
       ft: Math.round(p.t * maxFt),
       maxFt,

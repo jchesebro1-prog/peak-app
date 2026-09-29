@@ -35,8 +35,11 @@ import { EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { allowancePartId, assemblyPartId } from "./grid-virtual-parts";
 
 export type Rect = { x: number; y: number; w: number; h: number };
-/** Normalized to the base sheet. `catwalk` / `stageEdge` exist only where the drawing's template has them (#249 Auditorium). */
-export type VenueFrame = { stage: Rect; audience: Rect; booth: Rect; catwalk?: Rect; stageEdge?: Point[] };
+/**
+ * Normalized to the base sheet. `catwalk` / `stageEdge` exist only where the drawing's template has them (#249 Auditorium).
+ * `room` (#255 review, blackbox family only): the walls every point outside the Booth stays inside.
+ */
+export type VenueFrame = { stage: Rect; audience: Rect; booth: Rect; catwalk?: Rect; stageEdge?: Point[]; room?: Rect };
 export const EACH_CAP = 120;
 
 export function venueFrame(a: AState, opts: { legacy?: boolean; template?: string | null } = {}): VenueFrame {
@@ -69,9 +72,11 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
     if (family === "blackbox") {
       const G = blackboxGeom(a, id);
       const n = W(G);
-      // Conference: the platform is the stage and the room behind it the audience; a black box plays in the whole room.
+      const room = n(G.room);
+      // Conference: the platform is the stage and the room behind it the audience; a black box plays in the whole room,
+      // its stage frame inset from the walls (blackboxStage) so the rules that hang things beside or below it stay inside.
       const aud: Rect = kind === "flat" ? { x: G.room.x, y: G.platform.y + G.platform.h, w: G.room.w, h: G.room.y + G.room.h - (G.platform.y + G.platform.h) } : G.room;
-      return { stage: n(kind === "flat" ? G.platform : G.room), audience: n(aud), booth: n(G.booth) };
+      return { stage: kind === "flat" ? n(G.platform) : blackboxStage(room), audience: n(aud), booth: n(G.booth), room };
     }
   }
   if (kind === "proscenium") {
@@ -101,6 +106,35 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
     booth: { x: 0.38, y: 0.44, w: 0.24, h: 0.09 },
   };
 }
+
+/** Line-array boxes stack two to a row, `CLUSTER_STEP` apart, starting `CLUSTER_GAP` below the stage frame (clusterPoints). */
+const CLUSTER_GAP = 0.02;
+const CLUSTER_STEP = 0.012;
+/** The most boxes the equations call for (engine: width ÷ 3, 6–24). */
+const CLUSTER_MAX_ROWS = 12;
+/** How far inside the room's walls a clamped point stays (normalized). */
+const ROOM_MARGIN = 0.01;
+
+/**
+ * #255 review: a black box's Auto-fill stage — the room inset 0.05 of the sheet's width from each side wall (side
+ * lights hang 0.02 outside the stage frame, line arrays 0.03, the rigging lot 0.02, legs 0.03 of its width) and,
+ * at the house end, by room for the deepest line-array stack the equations call for (12 rows) — never more than
+ * 0.4 of the room's depth; a stack deeper than what is left closes up (clusterPoints).
+ */
+function blackboxStage(room: Rect): Rect {
+  const side = 0.05;
+  const bottom = Math.min(CLUSTER_GAP + CLUSTER_STEP * (CLUSTER_MAX_ROWS - 1) + 0.012, 0.4 * room.h);
+  return { x: room.x + side, y: room.y, w: Math.max(0, room.w - 2 * side), h: Math.max(0, room.h - bottom) };
+}
+
+/** A point kept inside the room's walls (ROOM_MARGIN in from each). */
+function inRoom(p: Point, r: Rect): Point {
+  const m = (lo: number, hi: number, v: number) => (hi - lo > 2 * ROOM_MARGIN ? Math.min(hi - ROOM_MARGIN, Math.max(lo + ROOM_MARGIN, v)) : (lo + hi) / 2);
+  return { x: m(r.x, r.x + r.w, p.x), y: m(r.y, r.y + r.h, p.y) };
+}
+
+/** Rows that belong in the Booth room — the only points a blackbox-family fill may put outside the room. */
+const BOOTH_ROWS = new Set(["audio:mixerDsp", "video:processor", "video:projector"]);
 
 /**
  * #255: the geometry Auto fill lays out on — the intake's design, its movable rooms where the stamped sheet drew
@@ -195,12 +229,17 @@ function sidePoints(n: number, S: Rect): Point[] {
   });
 }
 
-/** Line-array boxes: alternating left / right hangs just downstage of the proscenium, stacked. */
-function clusterPoints(n: number, S: Rect): Point[] {
-  const y0 = S.y + S.h + 0.02;
+/**
+ * Line-array boxes: alternating left / right hangs just downstage of the proscenium, stacked. Inside a `room`
+ * (#255 review) a stack too deep for the space below the stage frame closes up so its last row stays inside.
+ */
+function clusterPoints(n: number, S: Rect, room?: Rect): Point[] {
+  const y0 = S.y + S.h + CLUSTER_GAP;
+  const rows = Math.ceil(n / 2);
+  const step = room && rows > 1 ? Math.min(CLUSTER_STEP, Math.max(0, (room.y + room.h - ROOM_MARGIN - y0) / (rows - 1))) : CLUSTER_STEP;
   return Array.from({ length: n }, (_, i) => ({
     x: clamp01(i % 2 === 0 ? S.x - 0.03 : S.x + S.w + 0.03),
-    y: clamp01(y0 + 0.012 * Math.floor(i / 2)),
+    y: clamp01(y0 + step * Math.floor(i / 2)),
   }));
 }
 
@@ -227,7 +266,7 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
     case "lighting:side":
       return sidePoints(n, S);
     case "audio:lineArray":
-      return clusterPoints(n, S);
+      return clusterPoints(n, S, f.room);
     case "audio:subwoofer":
       // #249: subs sit along the stage-edge curve.
       if (f.stageEdge && f.stageEdge.length > 1) return alongPath(n, f.stageEdge);
@@ -268,6 +307,10 @@ export function generateAutoLayout(
   opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>>; legacy?: boolean; template?: string | null }
 ): AutoPlacementSpec[] {
   const f = venueFrame(a, { legacy: opts.legacy, template: opts.template });
+  // #255 review: on a blackbox-family plan nothing but the Booth's rows lands outside the room — a backstop for
+  // quantities past what the rules lay out inside it (an edited count, a long run of lot markers).
+  const room = f.room;
+  const keep = (rowKey: string) => (p: Point): Point => (room && !BOOTH_ROWS.has(rowKey) ? inRoom(p, room) : p);
   const out: AutoPlacementSpec[] = [];
   const lots = new Map<SysKey, number>();
   for (const card of cards) {
@@ -286,7 +329,7 @@ export function generateAutoLayout(
         const drape = line.drape;
         const fabricSku = line.ref;
         const gridType = def.curtain.grid;
-        curtainPoints(def.itemKey, line.qty, f.stage).forEach((pt, i) =>
+        curtainPoints(def.itemKey, line.qty, f.stage).map(keep(line.rowKey)).forEach((pt, i) =>
           out.push({
             ...pt,
             partId: fabricSku,
@@ -306,10 +349,10 @@ export function generateAutoLayout(
       if (def.place === "lot" || line.qty > EACH_CAP) {
         const k = lots.get(card.scope) ?? 0;
         lots.set(card.scope, k + 1);
-        out.push({ ...lotPoint(card.scope, k, f), partId, qty: line.qty, auto });
+        out.push({ ...keep(line.rowKey)(lotPoint(card.scope, k, f)), partId, qty: line.qty, auto });
         continue;
       }
-      for (const pt of eachPoints(line, line.qty, f, opts)) out.push({ ...pt, partId, auto });
+      for (const pt of eachPoints(line, line.qty, f, opts).map(keep(line.rowKey))) out.push({ ...pt, partId, auto });
     }
   }
   return out;
