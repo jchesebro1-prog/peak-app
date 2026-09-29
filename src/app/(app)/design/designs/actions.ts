@@ -16,7 +16,7 @@ import {
   type DesignRecord,
 } from "@/lib/stores/designs";
 import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
-import { createDraftQuoteAction } from "../grid/[id]/actions";
+import { createDraftQuoteAction, renameGridDesignAction } from "../grid/[id]/actions";
 import { quickPromoteCheck } from "@/lib/stores/design-pricing";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { activeUsers } from "@/lib/users";
@@ -122,6 +122,36 @@ export async function deleteDesignAction(
   revalidatePath("/design/designs");
   revalidatePath("/design");
   return { ok: true };
+}
+
+/**
+ * Rename a design from the dashboard card (#268). A manual-layout design
+ * renames its Grid project too — the same path as the editor header
+ * (renameGridDesignAction), so the two names can never disagree. A Quick
+ * design keeps the typed name as its base; Quick Design re-appends its
+ * "— Tier design (W'×D')" suffix on its next save (stripName). Gated on
+ * `create`, like delete and the editor's own rename.
+ */
+export async function renameDesignAction(
+  id: string,
+  name: string
+): Promise<{ ok: true; record: DesignRecord } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "You can't rename designs." };
+  const clean = String(name ?? "").trim().slice(0, 200);
+  if (!clean) return { ok: false, error: "A design needs a name." };
+  const d = await getDesign(id);
+  if (!d) return { ok: false, error: "Design not found." };
+  if (d.layoutMode === "manual" && d.gridProjectId) {
+    const res = await renameGridDesignAction(d.gridProjectId, clean);
+    if (!res.ok) return { ok: false, error: res.error };
+  } else {
+    await updateDesign(id, { name: clean });
+  }
+  const rec = await getDesign(id);
+  if (!rec) return { ok: false, error: "Design not found." };
+  revalidatePath("/design/designs");
+  return { ok: true, record: rec };
 }
 
 /* ---- review & approval workflow (sandbox.js parity, session-actored) ---- */
