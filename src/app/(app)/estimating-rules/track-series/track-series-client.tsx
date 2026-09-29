@@ -151,10 +151,16 @@ export default function TrackSeriesClient({ series, parts }: { series: TrackSeri
             </button>
           </div>
           <div style={{ fontSize: 12, color: "#5b616e", marginTop: 5 }}>
-            Stick {s.stickLengthFt > 0 ? `${s.stickLengthFt}'` : "—"}
-            {s.curvedSectionFt ? ` · curved section ${s.curvedSectionFt}'` : " · no curved track"}
-            {s.minRadiusFt ? ` · min radius ${s.minRadiusFt}'` : ""} · carriers every {s.carrierSpacingIn}" · clamps/hangers every {s.hangerSpacingFt}'
-            {s.overlapFt ? ` · bi-parting overlap ${s.overlapFt}'` : ""}
+            {[
+              `Stick ${s.stickLengthFt > 0 ? `${s.stickLengthFt}'` : "—"}`,
+              s.curvedSectionFt ? `curved section ${s.curvedSectionFt}'` : "no curved track",
+              s.minRadiusFt ? `min radius ${s.minRadiusFt}'` : "",
+              `carriers every ${s.carrierSpacingIn}"`,
+              `clamps/hangers every ${s.hangerSpacingFt}'`,
+              s.overlapFt ? `bi-parting overlap ${s.overlapFt}'` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </div>
           {open === s.id ? (
             <SeriesEditor series={s} parts={parts} onClose={() => setOpen(null)} />
