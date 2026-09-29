@@ -9759,13 +9759,19 @@ modal shows the per-mobilization dollar breakdown.
 
 ---
 
-## 271. Catalog — Import price book opens as a slide-over drawer — OPEN (building)
+## 271. Catalog — Import price book opens as a slide-over drawer — DONE 2026-09-29
 
-**Reported:** Jeff (2026-09-29): "Import Price Book needs to be sidebar." Confirmed: a **slide-over drawer**. Today
-`?import=1` turns the catalog body into a third 360px grid column (`catalog/page.tsx`), squeezing the parts list.
+**Reported:** Jeff (2026-09-29): "Import Price Book needs to be sidebar." Confirmed: a **slide-over drawer**. Before,
+`?import=1` turned the catalog body into a third 360px grid column (`catalog/page.tsx`), squeezing the parts list — and
+that rail was hidden below 1040px, so import was unreachable on narrow screens.
 
-**Plan:** keep `?import=1` as the URL state; render `CatalogImportPanel` in a right-hand overlay drawer (backdrop, ✕,
-Esc, full width on phones) instead of a grid column.
+**Done.** `?import=1` now opens `CatalogImportPanel` in a right-hand drawer over the catalog (480px, full height, own
+scroll, full width under 640px) — new reusable `src/components/ui/Drawer.tsx` (`role="dialog"`, `aria-modal`, focus
+into the panel and back on close, Tab wraps; backdrop / ✕ / Esc navigate to the same URL without `import`) with
+`.pk-drawer*` styles in `globals.css` (slide-in, off under reduced motion). The import still redirects to
+`?imported=` / `?importError=`, so the drawer closes on finish and the banners show as before. Works at every width.
+Gates: tsc 0; test:specs ALL PASSED, 0 FAIL; test:smoke 168/0 (= baseline); eslint 0 errors, no new warnings;
+next build OK. Browser-verified on a scratch datadir (desktop overlay, Esc/backdrop/✕ close, 375px full width).
 
 ---
 
