@@ -54,7 +54,15 @@ import {
   travelModeChangeReason,
   type TravelOverride,
 } from "@/lib/travel-plan";
-import { normalizePriceOverride, travelLineShare } from "@/lib/service-pricing";
+import {
+  carryLift,
+  liftRateChangeReason,
+  normalizePriceOverride,
+  printedLift,
+  savedLift,
+  travelLineShare,
+} from "@/lib/service-pricing";
+import { getLiftRate } from "@/lib/service-quote-inputs";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -222,6 +230,11 @@ export async function signerFor(
   };
 }
 
+/** #275: the renewal letter's lift sentence (the PDF letter is prose). */
+function liftSentence(count: number, line: number): string {
+  return `This price includes ${count > 1 ? count + " lift rentals" : "a lift rental"} (${money(line)}).`;
+}
+
 /* ================= flame tests ================= */
 
 type FtContact = { name?: string; role?: string; email?: string } | null;
@@ -241,6 +254,8 @@ type FlameTestDoc = {
   cost?: number | null;
   /** #217: a typed total — read only to mention it; never carried. */
   priceOverride?: unknown;
+  /** #275: the saved lift rental — its count carries, at today's rate. */
+  lift?: unknown;
 };
 
 /** Customer-safe reasons why this year's flame price differs from last
@@ -294,6 +309,9 @@ export function flameChangeReasons(
     out.push(
       `the test now covering ${r.curtainsTotal} curtain${r.curtainsTotal === 1 ? "" : "s"} (was ${oldCurtains})`
     );
+  // #275: a carried lift re-priced at today's rate.
+  const liftReason = liftRateChangeReason(priorFt?.lift, r.lift);
+  if (liftReason) out.push(liftReason);
   if (generic && !out.length) return []; // → "our current rates" fallback
   if (generic) out.push("our updated pricing");
   return out;
@@ -369,8 +387,10 @@ async function ensureFlameRenewalQuote(
   const travelRates = await getTravelRates();
   // Last year's travel CHOICE (mode/crew/nights) carries; its airfare doesn't (D69: current rates).
   const travelOverride = carryTravelOverride(priorFt?.travel);
+  // #275: last year's lift count carries, re-priced at today's rate.
+  const lift = priorFt?.lift ? carryLift(priorFt.lift, await getLiftRate()) : undefined;
   const r = computeFlame(
-    { office: office || undefined, venues: venueInputs, travel: travelOverride },
+    { office: office || undefined, venues: venueInputs, travel: travelOverride, lift },
     rates,
     travelRates
   );
@@ -413,6 +433,7 @@ async function ensureFlameRenewalQuote(
       rawCost: Math.round(r.rawCost),
       baseFee: Math.round(r.baseFee),
       baseApplied: r.baseApplied,
+      ...(r.lift ? { lift: savedLift(r.lift, r) } : {}),
       cost: Math.round(r.cost),
       marginAmount: Math.round(r.marginAmount),
       autoTotal: Math.round(r.autoTotal),
@@ -542,6 +563,9 @@ async function flameLetterDoc(
         `${num1(2 * oneWayHours + inspectionHours)} hours for the visit.`,
     });
   }
+  // #275: an optional lift rental is named with its own price.
+  const ftLift = printedLift(ft, typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0);
+  if (ftLift) blocks.push({ kind: "p", text: liftSentence(ftLift.count, ftLift.line) });
 
   const contact = (quote.contact as FtContact) || ft.contact || null;
   const head = await letterheadJpeg(settings);
@@ -595,6 +619,8 @@ type InspectionDoc = {
   cost?: number | null;
   /** #217: a typed total — read only to mention it; never carried. */
   priceOverride?: unknown;
+  /** #275: the saved lift rental — its count carries, at today's rate. */
+  lift?: unknown;
 };
 
 /** Customer-safe reasons why this year's inspection price differs — rate
@@ -670,6 +696,9 @@ export function inspectionChangeReasons(
     const flip = travelModeChangeReason(priorMode, r.trip.mode);
     if (flip) out.push(flip);
   }
+  // #275: a carried lift re-priced at today's rate.
+  const liftReason = liftRateChangeReason(priorIn?.lift, r.lift);
+  if (liftReason) out.push(liftReason);
   if (generic && !out.length) return []; // → "our current rates" fallback
   if (generic) out.push("our updated pricing");
   return out;
@@ -736,12 +765,16 @@ async function ensureInspectionRenewalQuote(
   // Last year's travel CHOICE (mode/crew/nights) carries; its airfare doesn't (D69: current rates).
   const priorVenueCount = priorIn?.venues?.length || 0;
   const travelOverride = carryInspectionTravelOverride(priorIn?.travel, priorVenueCount);
+  // #275: last year's lift carries at today's rate (one rental when last
+  // year's quote combined several venues — carryLift).
+  const lift = priorIn?.lift ? carryLift(priorIn.lift, await getLiftRate(), priorVenueCount) : undefined;
   const r = computeInspection(
     {
       office: office || undefined,
       venues: [venueInput],
       level,
       travel: travelOverride,
+      lift,
       geo: {
         driveMiles: (a, b) => driveMiles(a, b, travelRates),
         driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
@@ -787,6 +820,7 @@ async function ensureInspectionRenewalQuote(
       trip: savedTrip(r.trip),
       ...(travelOverride ? { travel: travelOverride } : {}),
       laborCost: Math.round(r.laborCost),
+      ...(r.lift ? { lift: savedLift(r.lift, r) } : {}),
       cost: Math.round(r.cost),
       minFee: r.minFee,
       minApplied: r.minApplied,
@@ -914,6 +948,9 @@ async function inspectionLetterDoc(
         `roughly ${num1(2 * oneWayHours + inspectHours)} hours for the visit.`,
     });
   }
+  // #275: an optional lift rental is named with its own price.
+  const inLift = printedLift(insp, typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0);
+  if (inLift) blocks.push({ kind: "p", text: liftSentence(inLift.count, inLift.line) });
 
   const contact = (quote.contact as FtContact) || insp.contact || null;
   const head = await letterheadJpeg(settings);

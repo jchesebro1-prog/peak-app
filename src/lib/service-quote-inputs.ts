@@ -1,6 +1,7 @@
 import { coordsOf, quoteOrigin } from "@/lib/geo";
 import { getSettings } from "@/lib/settings";
-import { normalizeTestingOverride } from "@/lib/service-pricing";
+import { LIFT_RATE_FALLBACK, LIFT_SKU, normalizeTestingOverride } from "@/lib/service-pricing";
+import { getMany as getCatalogParts } from "@/lib/stores/catalog";
 import type { CustomerDoc } from "@/lib/stores/customers";
 import type { FlameTestVenueInput } from "@/lib/flametest-engine";
 import type { InspectionVenueInput } from "@/lib/inspection-engine";
@@ -87,4 +88,17 @@ export async function resolveQuoteOffice() {
   const settings = await getSettings();
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
   return quoteOrigin(offices);
+}
+
+/**
+ * #275 — the default lift rental rate for a service quote: the live
+ * `EQP-LIFT` catalog row's cost (the same row Estimator Labor prices its lift
+ * from, so one edit in the Catalog moves both), else the $750 seed. A quote
+ * can type its own rate; this is only the default and what renewals re-price
+ * a carried lift at.
+ */
+export async function getLiftRate(): Promise<number> {
+  const [row] = await getCatalogParts([LIFT_SKU]);
+  const cost = row ? Number(row.cost) : NaN;
+  return Number.isFinite(cost) && cost >= 0 ? Math.round(cost) : LIFT_RATE_FALLBACK;
 }

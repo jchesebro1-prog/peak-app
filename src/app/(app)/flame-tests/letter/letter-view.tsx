@@ -9,7 +9,7 @@ import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { TRAVEL_FLY_LINE, flightOf } from "@/lib/travel-plan";
-import { travelLineShare } from "@/lib/service-pricing";
+import { printedLift, travelLineShare } from "@/lib/service-pricing";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -77,6 +77,8 @@ type FlameTestDoc = {
   rates?: { curtainMinutes?: number; margin?: number } | null;
   total?: number | null;
   cost?: number | null;
+  /** #275: the saved lift rental ({ count, rate, cost, line }). */
+  lift?: unknown;
 };
 
 const TOOLBAR_CSS = `
@@ -297,6 +299,16 @@ export async function FlameLetterView({ id }: { id: string }) {
       desc: "Round-trip site mobilization from " + originCity,
       qty: Math.round(rtMiles) + " mi rt",
       hours: num1(travelHours) + " hrs",
+    });
+  }
+  // #275: an optional lift rental prints as its own priced line (count > 0 only).
+  const lift = printedLift(ft, travelMargin);
+  if (lift) {
+    scopeRows.push({
+      item: pad2(sr++),
+      desc: lift.label,
+      qty: money(lift.line),
+      hours: "—",
     });
   }
   scopeRows.push({

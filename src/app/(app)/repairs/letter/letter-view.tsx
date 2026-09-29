@@ -11,7 +11,7 @@ import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { flightOf, flyTravelSentence } from "@/lib/travel-plan";
-import { travelLineShare } from "@/lib/service-pricing";
+import { printedLift, travelLineShare } from "@/lib/service-pricing";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -63,6 +63,8 @@ type RepairDoc = {
   serviceCost?: number | null;
   serviceSell?: number | null;
   partsSell?: number | null;
+  /** #275: the saved lift rental ({ count, rate, cost, line }). */
+  lift?: unknown;
 };
 
 const TOOLBAR_CSS = `
@@ -236,6 +238,8 @@ export async function RepairLetterView({ id }: { id: string }) {
   const warrantyMonths =
     rp.warrantyMonths != null ? rp.warrantyMonths : DEFAULT_WARRANTY_MONTHS;
   const totalLabel = money(quote.value != null ? quote.value : rp.total || 0);
+  // #275: an optional lift rental is named, with its own price, in the cost line.
+  const lift = printedLift(rp, travelMargin);
 
   const contact = (quote.contact as RpContact) || rp.contact || null;
   const greetingName = contact && contact.name ? contact.name : "Sir or Madam";
@@ -475,8 +479,15 @@ export async function RepairLetterView({ id }: { id: string }) {
             )}
 
             <p style={{ margin: "0 0 4px" }}>
-              <strong>The above services will cost {totalLabel}.</strong> Sales/Use taxes are not
-              included.
+              <strong>The above services will cost {totalLabel}</strong>
+              {lift
+                ? ", including " +
+                  (lift.count > 1 ? lift.count + " lift rentals" : "a lift rental") +
+                  " (" +
+                  money(lift.line) +
+                  ")."
+                : "."}{" "}
+              Sales/Use taxes are not included.
             </p>
             <p style={{ margin: "0 0 13px", fontSize: "10pt", color: "#40454e" }}>
               Sales tax, if required, will be billed at the local sales tax rates in force at the

@@ -9,7 +9,8 @@ import { getRates } from "@/lib/inspection-engine";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { normalizeTravelOverride } from "@/lib/travel-plan";
-import { seedPriceOverride } from "@/lib/service-pricing";
+import { normalizeLift, seedPriceOverride } from "@/lib/service-pricing";
+import { getLiftRate } from "@/lib/service-quote-inputs";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -55,6 +56,8 @@ type InspectionDoc = {
   travel?: unknown;
   trip?: { mode?: string } | null;
   priceOverride?: unknown;
+  /** #275: the saved lift rental. */
+  lift?: unknown;
 } | null;
 
 export default async function InspectionQuotePage({
@@ -62,13 +65,14 @@ export default async function InspectionQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, customerDocs, rates, settings, travelRates] = await Promise.all([
+  const [user, sp, customerDocs, rates, settings, travelRates, liftRate] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
     getRates(),
     getSettings(),
     getTravelRates(),
+    getLiftRate(),
   ]);
 
   const editId = one(sp.id);
@@ -192,6 +196,8 @@ export default async function InspectionQuotePage({
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
       priceOverride: seedPriceOverride(editQuote.status, editQuote.value, insp && insp.priceOverride),
+      // #275: reopen with the saved lift (its own rate kept).
+      lift: normalizeLift(insp && insp.lift, liftRate) ?? null,
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
@@ -261,6 +267,7 @@ export default async function InspectionQuotePage({
         offices={offices}
         rates={rates}
         travelRates={travelRates}
+        liftRate={liftRate}
         levels={LEVELS.map((l) => ({
           key: l.key,
           label: l.label,

@@ -6,7 +6,7 @@ import { compute as computeFlame, getRates as getFlameRates } from "@/lib/flamet
 import { computeEstimate as computeInspection, getRates as getInspectionRates } from "@/lib/inspection-engine";
 import { flameVenueInputsFrom, inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
 import { savedTrip } from "@/lib/travel-plan";
-import { travelLineShare } from "@/lib/service-pricing";
+import { liftLabel, savedLift, travelLineShare, type LiftRental } from "@/lib/service-pricing";
 import type { PortalService } from "@/lib/portal-service-scope";
 
 /**
@@ -168,8 +168,16 @@ function splitProportional(rest: number, weights: number[]): number[] {
  */
 export async function priceServiceRequest(
   session: { customerId: string; name: string; email?: string },
-  req: ServiceRequest
+  req: ServiceRequest,
+  /**
+   * #275: a lift rental carried from the stored quote — passed ONLY by
+   * refreshServicePortalQuote (a staff-added lift survives a Refresh pricing,
+   * re-priced at today's rate). A customer's own Generate never passes one:
+   * portal self-quotes stay lift-free.
+   */
+  carried?: { lift?: LiftRental | null }
 ): Promise<PriceServiceResult> {
+  const lift = carried?.lift && carried.lift.count > 0 ? carried.lift : null;
   const cust = await getCustomer(session.customerId);
   if (!cust) return { ok: false, error: PICK_VENUE_COPY };
   const venueIds = new Set((cust.locations || []).map((l) => l.id).filter((id): id is string => !!id));
@@ -213,7 +221,7 @@ export async function priceServiceRequest(
       req.venues.map((v) => ({ id: v.venueId, curtains: v.count })),
       cust
     );
-    const r = computeFlame({ office: office || undefined, venues: venueInputs }, rates, travelRates);
+    const r = computeFlame({ office: office || undefined, venues: venueInputs, lift }, rates, travelRates);
 
     const { travel, rest } = travelLineShare({
       flightTotal: r.travel.total,
@@ -221,11 +229,13 @@ export async function priceServiceRequest(
       cost: r.cost,
       margin: r.effectiveMargin,
     });
-    const shares = splitProportional(rest, r.perVenue.map((v) => v.laborCost));
+    const liftAmt = Math.min(rest, r.lift ? r.liftLine : 0);
+    const shares = splitProportional(rest - liftAmt, r.perVenue.map((v) => v.laborCost));
     const lines = r.perVenue.map((v, i) => ({
       label: `Flame test — ${v.label} (${v.curtains} curtain${v.curtains === 1 ? "" : "s"})`,
       amount: shares[i] ?? 0,
     }));
+    if (r.lift) lines.push({ label: liftLabel(r.lift.count), amount: liftAmt });
 
     const subdoc = {
       rates: r.rates,
@@ -242,6 +252,7 @@ export async function priceServiceRequest(
       rawCost: Math.round(r.rawCost),
       baseFee: Math.round(r.baseFee),
       baseApplied: r.baseApplied,
+      ...(r.lift ? { lift: savedLift(r.lift, r) } : {}),
       cost: Math.round(r.cost),
       marginAmount: Math.round(r.marginAmount),
       autoTotal: Math.round(r.autoTotal),
@@ -271,7 +282,7 @@ export async function priceServiceRequest(
     cust
   );
   const r = computeInspection(
-    { office: office || undefined, venues: venueInputs, level },
+    { office: office || undefined, venues: venueInputs, level, lift },
     rates,
     travelRates
   );
@@ -282,13 +293,15 @@ export async function priceServiceRequest(
     cost: r.cost,
     margin: r.effectiveMargin,
   });
+  const liftAmt = Math.min(rest, r.lift ? r.liftLine : 0);
   const levelWord = level === 2 ? "Five-year" : "Annual";
   const venueCount = req.venues.length;
   const lines = [
     {
       label: `${levelWord} rigging inspection — ${r.lineSetsTotal} line set${r.lineSetsTotal === 1 ? "" : "s"} across ${venueCount} venue${venueCount === 1 ? "" : "s"}`,
-      amount: rest,
+      amount: rest - liftAmt,
     },
+    ...(r.lift ? [{ label: liftLabel(r.lift.count), amount: liftAmt }] : []),
   ];
 
   const subdoc = {
@@ -303,6 +316,7 @@ export async function priceServiceRequest(
     levelMult: r.levelMult,
     trip: savedTrip(r.trip),
     laborCost: Math.round(r.laborCost),
+    ...(r.lift ? { lift: savedLift(r.lift, r) } : {}),
     cost: Math.round(r.cost),
     minFee: r.minFee,
     minApplied: r.minApplied,

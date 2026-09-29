@@ -9,7 +9,12 @@ import {
   type TravelPlan,
   type TripMode,
 } from "@/lib/travel-plan";
-import { finishRepair, normalizePriceOverride } from "@/lib/service-pricing";
+import {
+  finishRepair,
+  liftCostOf,
+  normalizePriceOverride,
+  type LiftRental,
+} from "@/lib/service-pricing";
 
 export { REPAIR_RATE_DEFAULTS };
 
@@ -31,7 +36,9 @@ export { REPAIR_RATE_DEFAULTS };
  *      before parts).
  *   4. Parts — Σ(qty × cost), marked up to the parts margin:
  *      partsSell = partsCost ÷ (1 − partsMargin).
- *   5. Total = serviceSell + partsSell, rounded to the nearest $25 (or a typed total, #217).
+ *   5. Total = serviceSell + partsSell (+ an optional lift rental, #275:
+ *      count × rate at the service margin, on top of the call-out floor),
+ *      rounded to the nearest $25 (or a typed total, #217).
  *   6. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
  *      whose drive cost reaches the threshold prices as flights for at least
  *      the quote's crew (default repair_rates.flyCrew); travel-day labor bills
@@ -217,6 +224,8 @@ export type RepairEstimateOptions = {
   geo?: GeoAdapter | null;
   /** #217: a typed quote total — replaces the rounded auto total exactly. */
   priceOverride?: number | string | null;
+  /** #275: an optional lift rental (already normalized — normalizeLift). */
+  lift?: LiftRental | null;
 };
 
 export type RepairEstimate = {
@@ -255,6 +264,11 @@ export type RepairEstimate = {
   effectiveMargin: number;
   /** 1 − serviceCost ÷ serviceSell — the slider's margin, back-solved. */
   serviceMargin: number;
+  /** #275: the lift priced (null = none), its cost, margined sell and printed line. */
+  lift: LiftRental | null;
+  liftCost: number;
+  liftSell: number;
+  liftLine: number;
 };
 
 /** Pure port of compute(opts) with the rates passed in explicitly. */
@@ -296,6 +310,7 @@ export function computeEstimate(
     return { name: p.name || "Part", qty, cost, extCost: qty * cost };
   });
   const partsCost = parts.reduce((a, p) => a + p.extCost, 0);
+  const lift = opts.lift && opts.lift.count > 0 ? opts.lift : null;
 
   // #217: the call-out floor, both margins, the $25 rounding and a typed total
   // all come from finishRepair() — the same code the builder preview runs.
@@ -306,6 +321,7 @@ export function computeEstimate(
     partsCost,
     partsMargin: C.partsMargin,
     priceOverride: normalizePriceOverride(opts.priceOverride),
+    liftCost: liftCostOf(lift),
   });
 
   return {
@@ -336,6 +352,10 @@ export function computeEstimate(
     marginAmount: fin.marginAmount,
     effectiveMargin: fin.effectiveMargin,
     serviceMargin: fin.serviceMargin,
+    lift,
+    liftCost: fin.liftCost,
+    liftSell: fin.liftSell,
+    liftLine: fin.liftLine,
   };
 }
 

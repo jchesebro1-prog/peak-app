@@ -8049,3 +8049,27 @@ Jeff wants the parts list's sell to include freight. The one scaling factor per 
 sell (D479 used price less freight), so a system's listed parts sum to its whole price. Freight is spread by each
 part's share of the lines' sell rather than by the freight base (cost), matching how the #267 adjustment is spread;
 labor lines' share stays out of the file as before. Legacy systems with freight are scaled too.
+
+## D481. One lift price for the Estimator and service quotes; one rental = one lift for up to a week (#275, 2026-09-29)
+
+The service quotes' lift rental defaults to the live `EQP-LIFT` catalog cost — the row Estimator Labor already prices
+lifts from — with a $750 fallback, rather than a new Estimating Rule, so there is one lift price to keep current. The
+unit matches the Estimator's `ceil(days/5)`: one rental is one lift for up to a week. Count is per quote (not per venue),
+0–50; the rate is editable per quote in whole dollars, and a saved quote keeps its saved rate.
+
+## D482. A lift is margined with the job and sits on top of any floor (#275, 2026-09-29)
+
+The lift prices inside the shared finish functions (`service-pricing.ts`) at the job's margin — repairs at the service
+margin, not the parts margin — and is added after the base fee / minimum fee / minimum call-out, so a floor never
+absorbs it. The existing $25 rounding (up when a floor set the price) and a typed total apply to the whole; the printed
+lift amount is its own margined price in whole dollars and the service line absorbs the rounding, as it does for repair
+parts. Fly-mode travel keeps its own single line.
+
+## D483. Renewals carry the lift count at today's rate; portal self-quotes never add one (#275, 2026-09-29)
+
+A renewal carries last year's lift count re-priced at today's default rate — a typed rate does not carry, like airfare
+(D69/#208) — and a multi-venue inspection renews with one rental, since nothing records which venue needed it; a changed
+rate joins the "why the price changed" list. A customer's own portal pricing and Generate (#248) never include a lift;
+Refresh pricing keeps a lift staff added, at today's rate. The letter boilerplate's "lift rentals … may be stated
+separately" became "lift rentals not listed above", so it no longer reads as an extra charge beside a listed lift.
+

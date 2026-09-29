@@ -24,8 +24,8 @@ import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
-import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
-import { inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
+import { deriveSeededMarker, normalizeLift, normalizePriceOverride, savedLift } from "@/lib/service-pricing";
+import { getLiftRate, inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
 import { approveKeepsAcceptedPrice, sourceForSave } from "@/lib/portal-quote-mode";
 
 function quoteFailure(formData: FormData, message: string): never {
@@ -109,6 +109,9 @@ async function persist(formData: FormData): Promise<string | null> {
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
   // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
+  // #275: an optional lift rental — count × rate (blank rate = the live
+  // EQP-LIFT default); count 0 / absent = no lift.
+  const lift = normalizeLift(formData.get("lift"), await getLiftRate());
   // #217 fix wave: whether this typed total is only the D286 reopen-seed for
   // an old off-grid sent price — never something anyone actually typed — is
   // derived from the STORED quote, not a client-posted flag (a client can't
@@ -136,6 +139,7 @@ async function persist(formData: FormData): Promise<string | null> {
       level,
       travel: travelOverride,
       priceOverride,
+      lift,
       geo: {
         driveMiles: (a, b) => driveMiles(a, b, travelRates),
         driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
@@ -184,6 +188,7 @@ async function persist(formData: FormData): Promise<string | null> {
       trip: savedTrip(r.trip),
       ...(travelOverride ? { travel: travelOverride } : {}),
       laborCost: Math.round(r.laborCost),
+      ...(r.lift ? { lift: savedLift(r.lift, r) } : {}),
       cost: Math.round(r.cost),
       minFee: r.minFee,
       minApplied: r.minApplied,
