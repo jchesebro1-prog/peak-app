@@ -9817,3 +9817,15 @@ stated separately" (`src/lib/templates.ts:132`, `:312`). Only Estimator Labor pr
 rate, default rate from the `EQP-LIFT` catalog row / an Estimating Rule), priced through the same engine, tier margin
 and $25 rounding; printed as its own "Lift rental" line on the letter, quote document and PDF, and carried by renewal
 re-pricing. Portal self-quotes (#248) stay lift-free unless Jeff says otherwise.
+
+## 273. Consulting — delete a consulting project right from its list card — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29, screenshot of /design/engagements): "We also need to be able to delete on this screen?"
+Delete existed only in a consulting project's detail header.
+
+**Done.** Each card on the Consulting list gains a Delete button (the shared `ConfirmButton`: Delete → Confirm delete /
+Cancel, auto-disarms after 5 s or on Esc) running the same `removeEngagementAction` as the detail header — a soft delete
+that also removes the project's open tasks; done tasks and notes stay. A quote-originated project stays deleted (the
+quote-sync's `coveredQuoteIds()` skips it — checked by reload). The card's link now wraps only the card content, so the
+button isn't nested inside an `<a>`. Same permission as the detail header (any signed-in user). One file:
+`src/app/(app)/design/engagements/view.tsx`.
