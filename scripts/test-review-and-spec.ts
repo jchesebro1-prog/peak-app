@@ -34778,7 +34778,7 @@ import { distToPoly as c255T8fDist, inPoly as c255T8fIn } from "@/lib/design/ven
   ok(lim.clamped && Math.abs(lim.depthFt - c255T8fRatio * 20) < 1e-9 && Gd.dims.stageDepthFt === lim.depthFt && c255T8fHouse(deep, "church-contemporary@1").warning === c255T8fPlatWarn && Gd.warning === c255T8fPlatWarn && c255T8fMarkup(c255T8fBuild(deep, 8, 3, "#3a3f4a", "church-contemporary@1"), "#3a3f4a").includes(">44'-0&quot;<"), "#255 T8 fix: Contemporary shortens a platform deeper than 2.2 × its width, says so under the field, and dimensions the depth it draws");
   ok(!c255T8fStageDepth({ width: 43, wing: 0, depth: 52 }, "church-contemporary@1").clamped && c255T8fHouse({ ...deep, width: 43 }, "church-contemporary@1").warning === null && c255T8fStageDepth({ width: 20, wing: 0, depth: 52 }, "church-traditional@1").depthFt === 52, "#255 T8 fix: …only when it bites, and only for Contemporary");
 
-  // Reviews 3–4: loudspeakers clear the Nave's edges by their half-diagonal; the FOH mix box is never smaller than
+  // Reviews 3–4: loudspeakers clear the Nave's edges by their half-diagonal (#263: of the drawn 5 × 7 glyph); the FOH mix box is never smaller than
   // MIX_MIN_W and stays inside the Control Booth (with the CONSOLE mark) wherever the booth can hold them.
   const spkBad: string[] = [], mixBad: string[] = [];
   for (const w of [20, 30, 43, 60, 80]) for (const depth of [14, 23, 40]) for (const extra of [24, 78, 150]) for (const nd of [20, 40, 55, 120, 200]) for (const con of [false, true]) {
@@ -34786,7 +34786,7 @@ import { distToPoly as c255T8fDist, inPoly as c255T8fIn } from "@/lib/design/ven
     const st = { ...base, venue: "church", templateId: "church-contemporary@1", width: w, depth, houseWidthFt: nw, houseDepthFt: nd, sys: { ...base.sys, audio: true, controls: con }, ctrl: { ...base.ctrl, console: con } };
     const g = c255T8fGeom(st, "church-contemporary@1"), nave = g.regions.Nave, booth = g.regions["Control Booth"], tag = `${w}/${depth}/${nw}/${nd}${con ? "+console" : ""}`;
     for (const s of g.speakers!)
-      if (!c255T8fIn(nave, s) || c255T8fDist(nave, s) < c255T8fSpkClear - 1e-9 || ![[-5, -7], [5, -7], [-5, 7], [5, 7]].every(([dx, dy]) => c255T8fIn(nave, { x: s.x + dx, y: s.y + dy }) && !c255T8fIn(g.regions.Platform, { x: s.x + dx, y: s.y + dy }))) spkBad.push(tag);
+      if (!c255T8fIn(nave, s) || c255T8fDist(nave, s) < c255T8fSpkClear - 1e-9 || ![[-2.5, -3.5], [2.5, -3.5], [-2.5, 3.5], [2.5, 3.5]].every(([dx, dy]) => c255T8fIn(nave, { x: s.x + dx, y: s.y + dy }) && !c255T8fIn(g.regions.Platform, { x: s.x + dx, y: s.y + dy }))) spkBad.push(tag);
     const m = g.mixBox, corners = [[m.x, m.y], [m.x + m.w, m.y], [m.x, m.y + m.h], [m.x + m.w, m.y + m.h]].map(([x, y]) => ({ x, y }));
     if (m.w < c255T8fMixMin - 0.05) mixBad.push(`${tag} w ${m.w}`);
     // A nave 40' deep or more always holds the box and the mark; shallower ones hold the box alone.
@@ -35891,4 +35891,200 @@ import { quickSaveFields as c255HardSaveFields } from "@/lib/stores/design-prici
   const inLim = (f: "width" | "depth" | "grid" | "wing" | "ph", v: number) => Number.isFinite(v) && v >= c255HardLim[f][0] && v <= c255HardLim[f][1];
   ok(inLim("width", saved.width!) && inLim("depth", saved.depth!) && inLim("grid", saved.grid!), "#255 hardening: quickSaveFields clamps the top-level width/depth/grid to LIM");
   ok(inLim("width", cfg.width) && inLim("depth", cfg.depth) && inLim("grid", cfg.grid) && inLim("wing", cfg.wing) && inLim("ph", cfg.ph), "#255 hardening: quickSaveFields clamps config.width/depth/grid/wing/ph to LIM too");
+}
+
+/* --- #262: the Estimator's "Parts list (CSV)" — assemblies exploded, vendor quotes itemized, identical parts consolidated (pure) --- */
+import {
+  partsListRows as p262Rows, partsListSkus as p262Skus, partsListCsvRows as p262Csv, PARTS_CSV_HEADER as p262Header,
+  type PartInfo as P262Info,
+} from "@/app/(app)/estimator/parts-csv";
+import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P262Vq } from "@/app/(app)/estimator/types";
+{
+  const it = (id: number, sku: string, desc: string, qty: number, cost: number, extra: Partial<P262Item> = {}): P262Item =>
+    ({ id, sku, desc, qty, unit: "ea", cost, price: cost * 2, ...extra });
+  const comp = (sku: string, label: string, qty: number, cost: number) =>
+    ({ sku, label, role: "other" as const, qty, unit: "ea", cost, price: cost * 2 });
+  const info: Record<string, P262Info> = {
+    "LAMP-A": { mfr: "ETC", manufacturerModelNumber: "S4-750", manufacturerPartNumber: "7060A1003", desc: "Source Four 750W" },
+    CLAMP: { mfr: "Altman", manufacturerPartNumber: "C-CLAMP-PN" },
+    "CAT-ONLY": { mfr: "Rose" },
+    "PLAIN-1": { mfr: "Other", manufacturerModelNumber: "INFO-M" },
+  };
+  const sections: P262Section[] = [
+    {
+      id: "s1", name: "Lighting", room: "Stage", kind: "materials", mfr: "", freightPct: 0,
+      items: [
+        it(1, "SA-F1", "Cyc light — Source Four; Clamp (Pos 1st elec)", 3, 120, { components: [comp("LAMP-A", "Source Four", 1, 100), comp("CLAMP", "Clamp", 2, 10), comp("SAFETY", "Safety cable", 0, 5)] }),
+        it(2, "SA-F2", "Wash — Clamp", 2, 25, { extSellOverride: 40, components: [comp("CLAMP", "Clamp", 1, 10)] }),
+        it(3, "PLAIN-1", "Plain one", 4, 7.5, { manufacturer: "Chauvet", manufacturerModelNumber: "MM-1", manufacturerPartNumber: "PN-1", internalNote: " Hang on 1st elec " }),
+        it(4, "PLAIN-2", "Plain two", 1, 20, { manufacturerPartNumber: " PN-2 ", extSellOverride: 25 }),
+        it(5, "UNKNOWN-9", "Mystery part", 2, 3),
+        it(6, "CAT-ONLY", "Catalog only", 1, 11),
+        it(7, "OPT-1", "Optional add", 1, 999, { option: true }),
+        it(8, "LAB-X", "Labor in a materials card", 1, 500, { labor: true }),
+        it(9, "ZERO", "Zero qty", 0, 50),
+        it(10, "VQ", "Acme truss package", 1, 300, { vendorQuoteId: "VQ-1" }),
+        it(11, "VQ2", "Vendor quote gone", 1, 40, { vendorQuoteId: "VQ-MISSING" }),
+        it(12, "CABLE-FT", "Cable", 50, 1.5, { unit: "ft" }),
+      ],
+    },
+    { id: "s2", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "CLAMP", "Clamp", 1, 10)] },
+    { id: "s3", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [it(1, "LAB-1", "Install", 10, 80)] },
+  ];
+  const vqs: P262Vq[] = [{
+    id: "VQ-1", vendor: "Acme", quoteNumber: "Q-77", description: "", terms: "", notes: "", total: 300, includesFreight: false, display: "single",
+    lines: [
+      { id: 1, description: "Truss 10ft", manufacturerPartNumber: "TR-10", qty: 4, unit: "ea", amount: 200 },
+      { id: 2, description: "Base plate", qty: 2, unit: "", amount: 100 },
+      { id: 3, description: "Nothing", qty: 0, unit: "ea", amount: 0 },
+    ],
+  }];
+  const rows = p262Rows(sections, vqs, info, "Main Hall");
+  const by = (sku: string, system = "Lighting") => rows.find((r) => r.sku === sku && r.system === system);
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
+  const costSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitCost, 0);
+  const sellSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitSell, 0);
+  ok(p262Header.join(",") === "Manufacturer,Model number,Room,System,Qty,Unit Cost,Unit Sell,Description,Notes", "#262 parts list: the CSV header is Jeff's nine columns, in order");
+  ok(!["LAB-1", "LAB-X", "OPT-1", "ZERO", "SA-F1", "SA-F2", "SAFETY", "VQ"].some((s) => rows.some((r) => r.sku === s)), "#262 parts list: labor sections, labor items, options, zero-qty items, the assembly line itself, qty-0 components and an expanded vendor-quote line never appear");
+  ok(rows.map((r) => r.sku || r.modelNumber || r.desc).join("|") === "LAMP-A|CLAMP|Cost adjustment — Wash (line cost differs from its parts)|PLAIN-1|PLAIN-2|UNKNOWN-9|CAT-ONLY|TR-10|Base plate|VQ2|CABLE-FT|CLAMP", "#262 parts list: rows come out in first-appearance order");
+  ok(rows.filter((r) => r.system === "Lighting").every((r) => r.room === "Stage") && by("CLAMP", "Rigging")!.room === "Main Hall", "#262 parts list: room is the section's own room, else the defaultRoom fallback");
+  ok(p262Rows([sections[1]], [], info).every((r) => r.room === ""), "#262 parts list: room is blank when neither the section nor a defaultRoom names one");
+  const lamp = by("LAMP-A")!;
+  ok(lamp.qty === 3 && lamp.desc === "Source Four 750W" && lamp.manufacturer === "ETC" && lamp.modelNumber === "S4-750" && lamp.partOf.join(";") === "Cyc light", "#262 parts list: an assembly explodes into its components with catalog desc/mfr/model and the assembly name as Part of");
+  const clamp = by("CLAMP")!;
+  ok(clamp.qty === 8 && clamp.partOf.join(";") === "Cyc light;Wash" && clamp.desc === "Clamp", "#262 parts list: component qty × line qty (3 × 2 = 6) plus the same part in a second assembly of one system (2) consolidate to one row naming both");
+  const rigClamp = by("CLAMP", "Rigging")!;
+  ok(rigClamp !== clamp && rigClamp.qty === 1 && rigClamp.partOf.length === 0, "#262 parts list: the same part in a second system stays its own row");
+  ok(lamp.unitSell === 200 && clamp.unitSell === 20 && lamp.unitCost === 100 && clamp.unitCost === 10, "#262 parts list: component unit sell is allocated by cost share (line sell 240 over parts cost 120 → LAMP 200, CLAMP 20)");
+  ok(by("PLAIN-2")!.unitSell === 25, "#262 parts list: a line's typed extended sell (extSellOverride / qty) beats its unit price — plain and assembly (Wash 40 / 2 = 20) alike");
+  const listOnly = p262Rows([{ id: "s9", name: "Misc", kind: "materials", mfr: "", freightPct: 0, items: [
+    it(1, "SA-Z", "Zero-cost kit — A; B", 1, 40, { price: 100, components: [{ ...comp("ZA", "A", 2, 0), price: 10 }, { ...comp("ZB", "B", 1, 0), price: 30 }] }),
+  ] }], [], {});
+  ok(listOnly.find((r) => r.sku === "ZA")!.unitSell === 20 && listOnly.find((r) => r.sku === "ZB")!.unitSell === 60 && listOnly.find((r) => r.desc.startsWith("Cost adjustment"))!.unitCost === 40 && near(sellSum(listOnly), 100) && near(costSum(listOnly), 40), "#262 parts list: zero-cost components split the sell by list price, and the adjustment row carries the whole cost");
+  ok(by("PLAIN-1")!.manufacturer === "Chauvet" && by("PLAIN-1")!.modelNumber === "MM-1", "#262 parts list: the item's own mfr/model beat the catalog's");
+  ok(by("PLAIN-2")!.modelNumber === "PN-2", "#262 parts list: the item's own P/N (trimmed) is used when it has no model");
+  ok(clamp.modelNumber === "C-CLAMP-PN" && clamp.manufacturer === "Altman", "#262 parts list: the catalog P/N is used when the catalog has no model");
+  ok(by("CAT-ONLY")!.modelNumber === "CAT-ONLY" && by("CAT-ONLY")!.manufacturer === "Rose", "#262 parts list: a catalog part with no printed number falls back to its SKU");
+  ok(by("UNKNOWN-9")!.modelNumber === "" && by("UNKNOWN-9")!.manufacturer === "" && by("VQ2")!.modelNumber === "", "#262 parts list: an unknown SKU gets no model number; a missing vendor quote falls through to a plain line");
+  const truss = rows.find((r) => r.modelNumber === "TR-10")!;
+  const plate = rows.find((r) => r.desc === "Base plate")!;
+  ok(truss.qty === 4 && truss.unitCost === 50 && truss.sku === "" && truss.partOf.join(";") === "Vendor quote Acme #Q-77" && plate.unit === "ea" && plate.unitCost === 50 && !rows.some((r) => r.desc === "Nothing"), "#262 parts list: a vendor quote expands per line at amount / qty unit cost, skipping qty-0 lines");
+  ok(truss.unitSell === 100 && plate.unitSell === 100, "#262 parts list: a vendor quote's line sell (600) is allocated across its lines by amount share");
+  const adj = rows.find((r) => r.desc.startsWith("Cost adjustment"))!;
+  ok(adj.qty === 2 && adj.unitCost === 15 && adj.unitSell === 0 && adj.partOf.join(";") === "Wash" && !rows.some((r) => r.desc === "Cost adjustment — Cyc light (line cost differs from its parts)"), "#262 parts list: a cost-adjustment row (no sell) appears only when the line cost differs from its parts");
+  const live = sections.filter((s) => s.kind !== "labor").flatMap((s) => s.items)
+    .filter((i) => !i.labor && !i.laborOverhead && !i.option && i.qty > 0);
+  const expectedCost = live.reduce((a, i) => a + i.cost * i.qty, 0);
+  const expectedSell = live.reduce((a, i) => a + (typeof i.extSellOverride === "number" ? i.extSellOverride : i.price * i.qty), 0);
+  ok(expectedCost === 902 && near(costSum(rows), expectedCost), "#262 parts list: Σ qty × Unit Cost equals the estimate's material cost (902.00)");
+  ok(near(sellSum(rows), expectedSell), "#262 parts list: Σ qty × Unit Sell equals the estimate's material sell");
+  const csv = p262Csv(rows);
+  ok(csv.length === rows.length && !csv.some((r) => r.includes("Total")), "#262 parts list: the CSV has one line per row and no Total row");
+  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Stage|Lighting|8|10.00|20.00|Clamp|Part of: Cyc light, Wash", "#262 parts list: a CSV row prints Jeff's columns, cents, and \"Part of:\" in Notes");
+  ok(csv.find((r) => r[7] === "Plain one")![8] === "Hang on 1st elec" && csv.find((r) => r[7] === "Cable")![8] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
+  ok(p262Csv([]).length === 0, "#262 parts list: an empty list has no rows");
+  const manualVq = p262Rows([{ id: "s3", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "", "Acme truss package", 1, 350, { vendorQuoteId: "VQ-1" })] }], vqs, {});
+  const vAdj = manualVq.find((r) => r.desc.startsWith("Cost adjustment"));
+  ok(vAdj?.unitCost === 50 && vAdj.unitSell === 0 && vAdj.partOf.join(";") === "Vendor quote Acme #Q-77" && vAdj.desc === "Cost adjustment — Vendor quote Acme #Q-77 (quote total differs from its lines)" && near(costSum(manualVq), 350) && near(sellSum(manualVq), 700), "#262 parts list: a typed vendor total that differs from its lines adds an adjustment row, so the file still totals to the line cost and sell");
+  ok(p262Skus(sections).join(",") === "LAMP-A,CLAMP,PLAIN-1,PLAIN-2,UNKNOWN-9,CAT-ONLY,VQ,VQ2,CABLE-FT", "#262 parts list: partsListSkus lists component SKUs, never the assembly line's own SKU (a vendor-quote line's SKU is kept — it can't see the vendor quotes)");
+}
+
+/* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
+import { buildPlan as c261Build, PLAN_DIM_TEXT_SCALE as c261DimScale, PLAN_TEXT_SCALE as c261Scale, planTextSize as c261Size, renderPlanSvgMarkup as c261Markup } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c261Default, VENUES as c261Venues } from "@/app/(app)/design/quick/engine";
+{
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  ok(c261Scale === 0.85 && c261DimScale === 0.65, "#261: PLAN_TEXT_SCALE is 0.85 (labels, marks) and PLAN_DIM_TEXT_SCALE 0.65 (dimensions)");
+  ok(near(c261Size(8, 1), 6.8) && near(c261Size(6, 1), 5.1), "#261: at display scale k = 1, a room label / mark is 0.85 × its base size (8 → 6.8, 6 → 5.1)");
+  ok(near(c261Size(14, 1, "dim"), 9.1) && near(c261Size(11, 1, "dim"), 7.15), "#261: at k = 1 a dimension label is 0.65 × its base size (14 → 9.1, 11 → 7.15)");
+  ok(near(c261Size(8, 2) * 2, 6.8) && near(c261Size(14, 3, "dim") * 3, 9.1), "#261: on a wide panel (k = 2, 3) the on-screen size (viewBox size × k) holds — text no longer grows with the plan");
+  ok(near(c261Size(8, 0.5), 6.8) && near(c261Size(8, 0.5) * 0.5, 3.4), "#261: on a narrow panel (k = 0.5) the viewBox size holds, so the on-screen text shrinks with the plan as before");
+  ok([0, -1, Number.NaN, Number.POSITIVE_INFINITY].every((k) => near(c261Size(8, k), 6.8)), "#261: a zero/negative/non-finite display scale falls back to k = 1");
+  // Every venue kind: each text of base size ≥ 11 is a dimension (role "dim"); labels/marks (6–8) are not.
+  const base = c261Default(0);
+  const bad: string[] = [];
+  let dims = 0;
+  for (const v of c261Venues) {
+    const plan = c261Build({ ...base, venue: v.key }, 8, 3, "#3a3f4a");
+    for (const t of plan.texts as Array<{ t: string; size: number; role?: string }>) {
+      if (t.role === "dim") dims++;
+      if ((t.size >= 11) !== (t.role === "dim")) bad.push(`${v.key}: "${t.t}" size ${t.size} role ${t.role ?? "-"}`);
+    }
+  }
+  ok(dims > 0 && bad.length === 0, `#261: on every venue kind, exactly the 11–14 dimension labels carry role "dim"${bad.length ? " — " + bad.slice(0, 4).join(", ") : ""}`);
+  // Static markup (saved Designs, Grid base sheets, print) uses the same reduced sizes.
+  const plan = c261Build({ ...base, venue: c261Venues[0].key }, 8, 3, "#3a3f4a");
+  const sizes = [...c261Markup(plan, "#3a3f4a").matchAll(/font-size="([0-9.]+)"/g)].map((m) => Number(m[1]));
+  const want = (plan.texts as Array<{ size: number; role?: "dim" }>).map((t) => c261Size(t.size, 1, t.role));
+  ok(sizes.length === want.length && sizes.every((x, i) => Math.abs(x - want[i]) < 1e-3) && Math.max(...sizes) <= 9.1 + 1e-9, "#261: renderPlanSvgMarkup writes planTextSize(size, 1, role) (to 3 places) — no static plan text above 9.1");
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/plan-svg.tsx"), "utf8");
+  const comp = src.slice(src.indexOf("export function PlanSvg("), src.indexOf("export function renderPlanSvgMarkup("));
+  ok(/ref=\{observePlanScale\}/.test(comp) && /new ResizeObserver\(/.test(src) && /ro\.observe\(svg\)/.test(src) && /planTextSize\(1, renderedW \/ vbW\)/.test(src), "#261: <PlanSvg> observes its rendered width (ResizeObserver) and stores its display factor (from renderedWidth / viewBoxWidth) on the svg");
+  ok(/fontSize=\{planTextSize\(t\.size, 1, t\.role\)\}/.test(comp) && /calc\(\$\{planTextSize\(t\.size, 1, t\.role\)\}px \* var\(\$\{PLAN_TEXT_VAR\}, 1\)\)/.test(comp), "#261: every <PlanSvg> text sizes through planTextSize with its role (k = 1 before the first measure)");
+  ok(!/\buse(State|Effect|Ref|LayoutEffect)\b/.test(src) && !/^["']use client["']/m.test(src), "#261: plan-svg.tsx stays hook-free (no 'use client') — grid-projects.ts and grid-auto-layout.ts import it on the server");
+}
+
+/* --- #263: Quick Design plan equipment symbols draw at half size, about their own centres (D470) --- */
+import { buildPlan as c263Build, churchGeom as c263ChurchGeom, renderPlanSvgMarkup as c263Markup, SPK_CLEAR as c263SpkClear, SYMBOL_SCALE as c263Scale, symbolTransform as c263Transform } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c263Default, SYSCOLOR as c263Sys, VENUES as c263Venues } from "@/app/(app)/design/quick/engine";
+{
+  type At = { cx: number; cy: number } | undefined;
+  type El = { sym?: At; fill?: string; stroke?: string; sw?: number };
+  const S = c263Scale;
+  ok(S === 0.5, "#263: SYMBOL_SCALE is 0.5 — every equipment symbol draws at half its builder size");
+  ok(c263Transform({ cx: 100, cy: 40.5 }) === "translate(100 40.5) scale(0.5) translate(-100 -40.5)" && c263Transform(undefined) === undefined, "#263: symbolTransform scales about the symbol's own centre (translate · scale · translate back); nothing untagged gets a transform");
+  ok(Math.abs(c263SpkClear - (Math.hypot(2.5, 3.5) + 0.5)) < 1e-9, "#263: SPK_CLEAR is the drawn 5 × 7 loudspeaker glyph's half-diagonal plus 0.5 (was 10 × 14's)");
+  const base = c263Default(0);
+  const allOn = { ...base.sys, rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: true };
+  const drape = { draw: true, fullstage: true, border: true, scenerytrack: true, legs: true };
+  const cases: Array<[string, Record<string, unknown>]> = [];
+  for (const v of c263Venues) cases.push([v.key, { ...base, venue: v.key, sys: allOn, ctrl: { ...base.ctrl, console: true }, drape: { ...base.drape, ...drape } }]);
+  cases.push(["church-contemporary", { ...base, venue: "church", templateId: "church-contemporary@1", sys: allOn, ctrl: { ...base.ctrl, console: true } }]);
+  const isSymbol = (e: El, kind: string) =>
+    kind === "circles" || e.stroke === "#3155a8" || e.fill === c263Sys.controls || e.stroke === c263Sys.video;
+  const bad: string[] = [];
+  const kinds = new Set<string>();
+  for (const [tag, a] of cases) {
+    const plan = c263Build(a as never, 8, 3, "#3a3f4a", (a as { templateId?: string }).templateId);
+    let tagged = 0;
+    for (const kind of ["rects", "paths", "lines", "circles"] as const)
+      for (const e of plan[kind] as El[]) {
+        const want = isSymbol(e, kind);
+        if (want !== !!e.sym) bad.push(`${tag} ${kind} ${JSON.stringify(e).slice(0, 80)} sym=${!!e.sym}`);
+        if (e.sym) {
+          tagged++;
+          kinds.add(kind === "circles" ? "dot" : e.stroke === "#3155a8" ? "spk" : e.fill === c263Sys.controls ? "console" : "screen");
+        }
+        // Walls, seats, pews, drapes, platforms, FOH MIX box, dimension lines: never scaled.
+        if (e.sym && (e.stroke === "#3a3f4a" || e.fill === "#e6e8ec" || e.stroke === "#cdd1d9" || e.stroke === c263Sys.curtains || e.stroke === "#9aa0ab" || e.stroke === "#8c919c")) bad.push(`${tag} a non-symbol is scaled`);
+      }
+    // Both renderers: the static markup carries exactly one symbol transform per tagged element.
+    const scales = (c263Markup(plan, "#3a3f4a").match(/transform="translate\([^"]*\) scale\(0\.5\) translate\([^"]*\)"/g) || []).length;
+    if (scales !== tagged || tagged === 0) bad.push(`${tag} markup has ${scales} scaled symbols for ${tagged} tagged`);
+  }
+  ok(bad.length === 0 && ["dot", "spk", "console", "screen"].every((k) => kinds.has(k)), `#263: on every venue kind, exactly the equipment symbols (fixture / rigging dots, loudspeakers + line arrays, the console bar, screens) are tagged and renderPlanSvgMarkup scales each one${bad.length ? " — " + bad.slice(0, 3).join("; ") : ""}`);
+  // A loudspeaker glyph's on-plan box: 10 × 14 builder units → 5 × 7, centred where the layout put it.
+  const flat = c263Build({ ...base, venue: "concenter", sys: allOn } as never, 8, 3, "#3a3f4a");
+  const spk = (flat.rects as Array<{ x: number; y: number; w: number; h: number; stroke: string; sym?: At }>).filter((r) => r.stroke === "#3155a8");
+  const onPlan = spk.map((r) => ({ w: r.w * S, h: r.h * S, x: r.sym!.cx + (r.x - r.sym!.cx) * S, y: r.sym!.cy + (r.y - r.sym!.cy) * S, cx: r.x + r.w / 2, cy: r.y + r.h / 2, sx: r.sym!.cx, sy: r.sym!.cy }));
+  ok(spk.length === 2 && onPlan.every((b) => Math.abs(b.w - 5) < 1e-9 && Math.abs(b.h - 7) < 1e-9 && Math.abs(b.cx - b.sx) < 0.051 && Math.abs(b.cy - b.sy) < 0.051 && Math.abs(b.x + b.w / 2 - b.sx) < 0.051), "#263: a Conference loudspeaker draws 5 × 7 on the plan, about the centre the layout gave it");
+  const ch = { ...base, venue: "church", templateId: "church-contemporary@1", sys: allOn };
+  const chPlan = c263Build(ch as never, 8, 3, "#3a3f4a", "church-contemporary@1"), chG = c263ChurchGeom(ch as never, "church-contemporary@1");
+  const chSpk = (chPlan.paths as Array<{ stroke?: string; sym?: At }>).filter((q) => q.stroke === "#3155a8");
+  ok(chSpk.length === 2 && chSpk.every((q, i) => q.sym!.cx === chG.speakers![i].x && q.sym!.cy === chG.speakers![i].y), "#263: church loudspeakers scale about the speaker points churchGeom placed (SPK_CLEAR from the platform front and splays)");
+  const arena = c263Build({ ...base, venue: "arena", sys: allOn } as never, 8, 3, "#3a3f4a");
+  const arr = (arena.paths as Array<{ stroke?: string; sym?: At }>).filter((q) => q.stroke === "#3155a8");
+  ok(arr.length === 6 && new Set(arr.slice(0, 3).map((q) => JSON.stringify(q.sym))).size === 1 && new Set(arr.slice(3).map((q) => JSON.stringify(q.sym))).size === 1, "#263: each Arena line array's three boxes scale together about the stack's centre");
+  // Drag handles are not symbols: unchanged glyphs and a 13-unit grab radius, no symbol transform.
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/plan-svg.tsx"), "utf8");
+  const comp = src.slice(src.indexOf("export function PlanSvg("), src.indexOf("export function renderPlanSvgMarkup("));
+  const hnd = comp.slice(comp.indexOf("{interactive &&"));
+  ok(/r=\{13\} fill="transparent"/.test(hnd) && /width=\{16\} height=\{16\}/.test(hnd) && /width=\{11\} height=\{30\}/.test(hnd) && /width=\{30\} height=\{11\}/.test(hnd) && !/symbolTransform/.test(hnd), "#263: drag handles keep their size and 13-unit grab radius — never symbol-scaled");
+  ok(["r.sym", "q.sym", "l.sym", "c.sym"].every((k) => comp.includes(`transform={symbolTransform(${k})}`)) && ["r.sym", "q.sym", "l.sym", "c.sym"].every((k) => src.includes(`\${attr("transform", symbolTransform(${k}))}`)), "#263: <PlanSvg> and renderPlanSvgMarkup both put symbolTransform on every rect, path, line and circle");
+  // The legend under the plan reads like the plan: symbol swatches at half size, the rest unchanged.
+  const lg = (plan: { legend?: Array<{ sw: { width?: unknown; height?: unknown }; label: string }> }, label: string) => plan.legend!.find((l) => l.label === label)!.sw;
+  const flatLg = (label: string) => lg(flat, label);
+  const pros = c263Build({ ...base, venue: "school", sys: allOn, drape: { ...base.drape, ...drape } } as never, 8, 3, "#3a3f4a");
+  ok(flatLg("FOH lighting").width === 3.5 && flatLg("FOH lighting").height === 3.5 && flatLg("Loudspeaker").width === 4 && flatLg("Loudspeaker").height === 5 && flatLg("Screen").width === 7 && flatLg("Screen").height === 1.3, "#263: legend symbol swatches (dot, loudspeaker, screen) are half size");
+  ok(flatLg("Platform").width === 12 && flatLg("Seating").width === 8 && lg(pros, "Drape / curtain").width === 14 && lg(pros, "Line set").width === 14, "#263: legend swatches for non-symbols (platform, seating, drape, line set) are unchanged");
 }

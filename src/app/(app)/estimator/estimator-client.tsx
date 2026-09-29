@@ -89,6 +89,8 @@ import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
+import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
+import { downloadCsv, fileStem } from "../design/export";
 import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
@@ -1367,6 +1369,9 @@ export default function EstimatorClient({
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
   const setSystemNarrative = (secId: string, narrative: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
+  // #262: stored raw, like narrative — partsListRows trims on export.
+  const setSystemRoom = (secId: string, room: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, room } : s)));
   const setSystemPresentation = (secId: string, presentation: "itemized" | "narrative") =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, presentation } : s)));
   const deleteSystem = (secId: string) => {
@@ -1485,6 +1490,37 @@ export default function EstimatorClient({
     });
     pushItems(secId, next);
     return { fromCatalog, custom: next.length - fromCatalog };
+  };
+
+  const [partsBusy, setPartsBusy] = useState(false);
+  const exportPartsList = async () => {
+    if (partsBusy) return;
+    setPartsBusy(true);
+    try {
+      const skus = partsListSkus(sections);
+      const resolved = skus.length ? await resolveCatalogSkusAction(skus) : {};
+      const info: Record<string, PartInfo> = {};
+      for (const [sku, r] of Object.entries(resolved)) {
+        info[sku] = {
+          desc: r.desc,
+          mfr: r.mfr,
+          manufacturerPartNumber: r.manufacturerPartNumber,
+          manufacturerModelNumber: r.manufacturerModelNumber,
+        };
+      }
+      const rows = partsListRows(sections, vendorQuotes, info, venueRoomName);
+      if (!rows.length) {
+        setActionError(null);
+        setActionNotice("No parts to export yet.");
+        return;
+      }
+      const name = loadedId ? quoteId : projectName || quoteId;
+      downloadCsv(`${fileStem(name, "estimate")}-parts-list`, PARTS_CSV_HEADER, partsListCsvRows(rows));
+    } catch {
+      setActionError("Couldn't build the parts list — try again.");
+    } finally {
+      setPartsBusy(false);
+    }
   };
 
   /* ---- Scope draft from survey/inspection (S12/D83 — rules-based) ----
@@ -2119,6 +2155,9 @@ export default function EstimatorClient({
     value: l.id,
     label: l.label + (l.city ? " · " + l.city : ""),
   }));
+  // #262: the selected venue's own name (not the "Name · City" option label) —
+  // the Room input's placeholder fallback when a system's room is blank.
+  const venueRoomName = locations.find((l) => l.id === locationId)?.label || "";
   const showContactPick = contacts.length >= 1;
   const contactOptions = [{ value: "", label: "— No contact —" }].concat(
     contacts.map((c) => ({ value: c.name, label: c.name + (c.role ? " · " + c.role : "") }))
@@ -2344,6 +2383,26 @@ export default function EstimatorClient({
                   Draft from survey/inspection
                 </button>
               )}
+              <button
+                type="button"
+                onClick={exportPartsList}
+                disabled={partsBusy}
+                title="Model numbers, descriptions and cost for every part — assemblies broken into their parts. For purchasing."
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "9px 15px",
+                  cursor: partsBusy ? "not-allowed" : "pointer",
+                  opacity: partsBusy ? 0.6 : 1,
+                  background: "#2b2e35",
+                  color: "#cfd3da",
+                }}
+              >
+                Parts list (CSV)
+              </button>
               <button
                 type="button"
                 onClick={doSave}
@@ -3434,6 +3493,8 @@ export default function EstimatorClient({
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
                   onSetNarrative={(value) => setSystemNarrative(sec.id, value)}
+                  onSetRoom={(value) => setSystemRoom(sec.id, value)}
+                  defaultRoom={venueRoomName}
                   onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}

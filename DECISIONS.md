@@ -7860,3 +7860,77 @@ the drawing's own numbers the default 24' stage overlaps ~4' of it. The stage is
 out against the stage and every lot marker but audio's turn with it, and every lot is pulled inside the floor (its box
 inset past the corners) — never into the bowl. Six starter Spaces; the sheet calibrates from the floor's straight
 sides and stamps the stage's position with the rooms. The toolbar reads "Drag the stage or a room along the walls".
+
+## D468. Quick Design plan text is a fixed on-screen size; dimensions draw smaller (#261, 2026-09-29)
+
+Jeff: "the labels are really huge on the drawings and they need to decrease the sizes." `<PlanSvg>` draws the
+640-wide viewBox at `width: 100%` and every text's size is in viewBox units, so text grew with the panel (at a 657 px
+plan room labels read 8.2 px and dimensions 14.4 px). Quick Design caps the plan near 720 px, so the text was mostly
+too big *relative to the drawing* — the 14-unit bold dimensions worst, against 8-unit room names.
+
+`planTextSize(base, k, role)` = `base × f / max(k, 1)` viewBox units, k = rendered px per viewBox unit:
+- **Dimension labels** — `role: "dim"`, tagged at the builder on every `dimH` / `dimV` text and the proscenium's
+  width / wing / depth / house-width chains (every text of base 11–14) — f = 0.65: ~9 px on screen (14 → 9.1,
+  11 → 7.15). `dimH` / `dimV` size the line gap and centre the label for that reduced size.
+- **Room / area labels and equipment marks** (6–8) — f = 0.85: ~6.8 px (CONSOLE 5.1 px). Not smaller: 6.8 px is the
+  readability floor for the mono font.
+
+On-screen text never exceeds those sizes however wide the plan draws, and still shrinks with the plan on a narrow
+panel. `<PlanSvg>` measures its rendered width with a ResizeObserver in a callback ref (no hooks, so `plan-svg.tsx`
+stays importable from `grid-projects.ts` / `grid-auto-layout.ts` on the server) and stores `1 / max(k, 1)` as
+`--plan-text`; before the first measure it draws at k = 1. Positions, anchors and rotations are otherwise unchanged,
+and the builders' label-fit checks (`LABEL_CHAR_PX`) stay conservative since no text grows. Legend chips and other
+HTML outside the SVG are unchanged.
+
+`renderPlanSvgMarkup` writes the same reduced sizes (k = 1), so saved Designs, new Grid base sheets and print match
+Quick Design — smaller text suits a zoomable Grid sheet too. Grid base sheets already stored keep the SVG (and text
+sizes) they were generated with; only sheets generated from now on get the new sizes.
+
+## D469. The PM parts list consolidates parts and always totals to the estimate's cost (#262, 2026-09-29)
+
+Jeff asked for model number, description and cost, "tracking through" multi-part assemblies. Defaults taken without
+asking: (1) **one row per distinct part**, not one per estimate line — the PM orders by part, so identical parts
+(same manufacturer, model, SKU, unit and unit cost) merge, and a Used in column ("System › Assembly", "; "-joined)
+keeps the trail back to every assembly. A different unit cost stays a separate row. (2) **Cost, not sell** — unit
+and extended cost, no margin or freight. (3) **Base scope only** — option lines, labor lines, labor overhead and labor
+systems are left out; allowances, curtains and custom parts stay in. (4) **Reconciliation rows** — an assembly's
+components come from the line's stored `components` (what was chosen when it was configured), so when the line's cost
+has since been edited, or a vendor quote's typed total differs from its lines, a "Cost adjustment" row carries the
+difference rather than the file silently disagreeing with the estimate. (5) Model number falls back to the catalog
+SKU for a catalog part with no printed model or P/N (many SKUs are the manufacturer's number); a non-catalog part
+with none is left blank.
+
+## D470. Quick Design plan equipment symbols draw at half size, about their own centres (#263, 2026-09-29)
+
+Jeff, after #261 shrank the plan text: "The symbols are still huge and need to drastically be reduced." Every
+per-device glyph on a Quick Design plan now draws at `SYMBOL_SCALE = 0.5` of its builder size: loudspeakers
+(10 × 14 → 5 × 7) and the Arena's line-array stacks, lighting / FOH lighting / electric fixture dots and the Arena's
+rigging points, the console bar, and the screens (Conference, Church). The builders tag each one with `sym: { cx, cy }`
+— the centre it scales about (a line array's three boxes share the stack's centre) — and both renderers (`<PlanSvg>`
+and `renderPlanSvgMarkup`) put `translate(cx cy) scale(0.5) translate(-cx -cy)` on it, so positions stay exactly where
+the layout rules put them and Quick Design, saved Designs, new Grid base sheets and print match. Defaults taken
+without asking: (1) **strokes scale with the glyph** — a symbol is the same drawing, half size (no
+`vector-effect`, which would tie stroke width to screen pixels rather than the zoomable plan); (2) the **CONSOLE word
+is not scaled** — it is text, already at the #261 readability floor; only its bar is; (3) not symbols, unchanged:
+walls and room outlines, pews and seats, line sets, drapes / borders / legs / masking, platforms and riser blocks,
+dimension chains, the FOH MIX box and the drag handles (13-unit grab radius kept). The legend under the plan scales
+its symbol swatches (dot, loudspeaker, a new `screen` swatch) to match; other swatches are unchanged.
+`SPK_CLEAR` (a church loudspeaker's clearance from the Nave's edges) is now the drawn 5 × 7 glyph's half-diagonal +
+0.5 (4.8 px, was 9.1), so speakers can sit closer to the platform front and splays. The pews' clip around the
+CONSOLE mark is unchanged (the word still draws). Grid Auto fill places catalog devices, not these glyphs, and reads
+none of their sizes — unaffected. Grid base sheets already stored keep the SVG (and glyphs) they were generated with.
+
+
+## D471. The PM parts list uses Jeff's nine columns; Room is per system — amends D469 (#262, 2026-09-29)
+
+Jeff sent the exact layout: Manufacturer, Model number, Room, System, Qty, Unit Cost, Unit Sell, Description, Notes —
+that order, nothing else. So D469's Peak SKU / Unit / Extended cost / Used in columns and its Total row are gone.
+**Room** (Jeff chose a per-system field over the venue alone or a per-line field): `SpecSection.room`, typed on the
+system card in the build view, never printed for the customer; a blank room falls back to the quote's venue name, so
+estimates saved before #262 export with a room. **System** is the system card's name. Since Room and System are now
+columns, identical parts merge only within one room + system (D469 merged across the whole estimate). **Unit Sell**:
+an ordinary line's own sell (`extSellOverride / qty` when set); an assembly's or vendor quote's parts get the line's
+sell split by each part's cost share — the margin slider re-prices the line, not its stored components, so a
+component's catalog list would not add up to what the customer is charged. **Notes** carries what the dropped columns
+did: "Part of: <assembly or vendor quote>", "per <unit>" when the unit isn't "ea" (a 120 of cable needs its unit), then
+the line's internal note. D469's base-scope, cost-adjustment and model-number rules are unchanged.

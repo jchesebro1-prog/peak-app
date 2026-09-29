@@ -1243,7 +1243,16 @@ export async function searchCatalog(
   return { hits, total: scored.length };
 }
 
-export type ResolvedCatalogSku = { sku: string; desc: string; unit: string; cost: number; list: number };
+export type ResolvedCatalogSku = {
+  sku: string;
+  desc: string;
+  unit: string;
+  cost: number;
+  list: number;
+  mfr?: string;
+  manufacturerPartNumber?: string;
+  manufacturerModelNumber?: string;
+};
 
 /**
  * Bulk SKU lookup for the estimator's CSV batch-add (PUNCHLIST #112). Matches
@@ -1251,6 +1260,7 @@ export type ResolvedCatalogSku = { sku: string; desc: string; unit: string; cost
  * returns a map keyed by the SKU string exactly as the caller passed it, so
  * the importer can price catalog parts from a sku + quantity CSV. Unknown
  * SKUs are simply absent. Input is capped at 2000 SKUs per call.
+ * #262: also carries the manufacturer / printed part & model numbers for the Parts list export.
  */
 export async function resolveCatalogSkusAction(
   skus: string[]
@@ -1265,12 +1275,18 @@ export async function resolveCatalogSkusAction(
   for (const p of parts) {
     const key = (p.sku || "").trim().toLowerCase();
     if (!key || bySku.has(key)) continue;
+    const mfr = (p.mfr || "").trim();
+    const mpn = (p.manufacturerPartNumber || "").trim();
+    const mmn = (p.manufacturerModelNumber || "").trim();
     bySku.set(key, {
       sku: p.sku,
       desc: p.desc || "",
       unit: p.unit || "ea",
       cost: p.cost || 0,
       list: p.list || 0,
+      ...(mfr ? { mfr } : {}),
+      ...(mpn ? { manufacturerPartNumber: mpn } : {}),
+      ...(mmn ? { manufacturerModelNumber: mmn } : {}),
     });
   }
   for (const requested of wanted) {

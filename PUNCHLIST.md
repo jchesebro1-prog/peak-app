@@ -9534,3 +9534,60 @@ Design should carry a venue type (e.g. from a linked customer's venue).
 **From:** #255 (D463). With the console on, on naves of ~35' or less the Control Booth is a sliver and `churchGeom`'s
 CONSOLE mark can land just under it (the FOH mix box itself leaves the booth only on a 20' nave far wider than the
 platform). Keep the mark inside the booth (or beside the box) at every legal size.
+
+---
+
+## 261. Quick Design plan text stays a fixed on-screen size — DONE 2026-09-29 (D468)
+
+**Reported:** Jeff (2026-09-29): "the labels are really huge on the drawings and they need to decrease the sizes"
+(Quick Design, all plan text). Cause: `<PlanSvg>` scales its 640-wide viewBox to the panel, and every text's size is
+in viewBox units, so labels and dimensions grew with the panel — and the 14-unit bold dimensions dominated the
+drawing even at normal widths.
+
+**Done.** `<PlanSvg>` (`src/app/(app)/design/quick/plan-svg.tsx`) watches its rendered width and sizes every text
+through `planTextSize(base, k, role)`: dimension labels (tagged `role: "dim"` at the builder) ~9 px on screen, room /
+area labels and equipment marks ~6.8 px, at any width, shrinking with the plan on a narrow panel. Text positions,
+anchors and rotated labels are unchanged (dimension lines size their gap to the smaller label). Saved Designs, new Grid
+base sheets and print (`renderPlanSvgMarkup`) use the same sizes; Grid sheets already stored keep their old text.
+Legend chips are unchanged. Harness `#261`. See D468.
+
+---
+
+## 262. Estimator — Parts list (CSV) for the PM, assemblies broken into their parts — DONE 2026-09-29 (D469, D471)
+
+**Reported:** Jeff (2026-09-29): "Can estimator get a CSV export option for the PM that has model number description
+and cost. We would also need to make sure it tracks through the parts of assemblies that have multiple parts." Then
+sent the exact layout (`Dropbox/est-1009-parts-list.numbers`): "I do need exactly those columns in that order". Room:
+option 2 — a field per system.
+
+**Done.** A **Parts list (CSV)** button beside Save in the Estimator header downloads `<estimate number>-parts-list.csv`
+with exactly Jeff's columns: Manufacturer, Model number, Room, System, Qty, Unit Cost, Unit Sell, Description, Notes (no
+total row). It reads the estimate on screen, so unsaved edits are included. Each system card gains a **Room** box
+(internal only, never on the customer document); blank uses the quote's venue name, shown as its placeholder. An
+assembly line is broken into its included parts (part qty × line qty; optional add-ons at 0 left out) with the
+catalog's description, manufacturer and model number; a vendor quote is listed line by line. Unit Sell of an assembly
+or vendor-quote part is the line's sell split by cost share, so the parts carry the line's margin and add up to it.
+Notes: "Part of: <assembly>", "per <unit>" when not sold each, then the line's internal note. The same part is merged
+within one room + system. Labor, labor overhead and option lines are left out. Model number: the line's own model → its
+own mfr P/N → the catalog's model → the catalog's P/N → the catalog SKU; blank for a part not in the catalog. When an
+assembly's cost no longer matches its parts, or a vendor quote's typed total differs from its lines, a "Cost
+adjustment" row carries the difference, so Σ qty × Unit Cost is the estimate's material cost and Σ qty × Unit Sell its
+material sell (freight excluded). Pure module `src/app/(app)/estimator/parts-csv.ts`; `SpecSection.room`;
+`resolveCatalogSkusAction` also returns mfr / P/N / model number. Harness `#262`. See D469, D471.
+
+**Not in scope:** Grid quotes (flat `spec.lines`, opened in the Grid, not the Estimator) and service quotes. The spec
+builder's BOM (`src/lib/specs/quote-bom.ts`) still reads an Estimator assembly line as one row — noted, not changed.
+
+---
+
+## 263. Quick Design plan symbols drawn at half size — DONE 2026-09-29 (D470)
+
+**Reported:** Jeff (2026-09-29, after #261): "The symbols are still huge and need to drastically be reduced."
+
+**Done.** Every equipment symbol on a Quick Design plan — loudspeakers and line arrays, lighting / electric / FOH
+lighting dots, rigging points, the console bar, screens — draws at half size (`SYMBOL_SCALE = 0.5`), scaled about its
+own centre so it stays where the layout put it. Builders tag symbols with `sym: { cx, cy }`; `<PlanSvg>` and
+`renderPlanSvgMarkup` (`src/app/(app)/design/quick/plan-svg.tsx`) both apply the scale, so saved Designs, new Grid
+base sheets and print match. The legend's symbol swatches are half size too. Walls, seats, pews, drapes, platforms,
+dimensions, the FOH MIX box and drag handles are unchanged. A church loudspeaker's clearance (`SPK_CLEAR`) follows the
+smaller glyph. Grid sheets already stored keep their old glyphs; Auto fill is unaffected. Harness `#263`. See D470.

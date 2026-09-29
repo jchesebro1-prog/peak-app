@@ -97,6 +97,10 @@ export type SectionCardProps = {
   onToggleExpand: () => void;
   onRename: (name: string) => void;
   onSetNarrative: (value: string) => void;
+  /** #262: the room this system is in, for the PM parts list — internal view only. */
+  onSetRoom: (value: string) => void;
+  /** #262: the quote's venue name, shown as the Room input's placeholder when blank. */
+  defaultRoom?: string;
   onSetPresentation: (value: "itemized" | "narrative") => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
@@ -370,6 +374,17 @@ export default function SectionCard(p: SectionCardProps) {
                 <option value="narrative">Customer: narrative</option>
               </select>
               <input value={sec.narrative || ""} onChange={(e) => p.onSetNarrative(e.target.value)} onClick={(e) => e.stopPropagation()} placeholder="Brief system explanation for the quote letter" style={{ flex: 1, minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, color: "#3a3f4a" }} />
+              {/* #262: room, for the PM parts list only — never shown on the customer document. */}
+              {isInternal && (
+                <input
+                  value={sec.room || ""}
+                  onChange={(e) => p.onSetRoom(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  placeholder={p.defaultRoom ? "Room: " + p.defaultRoom : "Room"}
+                  title="Room for the PM parts list — blank uses the quote's venue"
+                  style={{ width: 150, border: "1px solid #e4e7ec", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, color: "#3a3f4a" }}
+                />
+              )}
             </div>
             {isInternal && (
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>

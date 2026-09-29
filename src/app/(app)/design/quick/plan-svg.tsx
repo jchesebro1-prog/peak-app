@@ -19,11 +19,19 @@ import { snapMovable } from "@/lib/design/venue-templates/stretch";
 
 /* ------------------------------ primitive types ------------------------------ */
 
-type Rect = { x: number; y: number; w: number; h: number; fill: string; stroke: string; sw: number; rx?: number; dash?: string };
-type LineEl = { x1: number; y1: number; x2: number; y2: number; stroke: string; sw: number; dash?: string };
-type CircleEl = { cx: number; cy: number; r: number; fill: string };
-type TextEl = { x: number; y: number; t: string; fill: string; size: number; weight?: number; anchor: string; transform?: string };
-type PathEl = { d: string; fill: string; stroke?: string; sw?: number; dash?: string };
+/**
+ * `sym` marks an equipment symbol (a loudspeaker, a fixture or rigging dot, a line-array stack, the console bar, a
+ * screen) and names the centre it scales about: both renderers draw it at SYMBOL_SCALE of its builder size there,
+ * so it stays where the layout rules put it (#263, D470). Walls, seats, pews, drapes, platforms and dimensions carry none.
+ */
+export type SymbolAt = { cx: number; cy: number };
+type Rect = { x: number; y: number; w: number; h: number; fill: string; stroke: string; sw: number; rx?: number; dash?: string; sym?: SymbolAt };
+type LineEl = { x1: number; y1: number; x2: number; y2: number; stroke: string; sw: number; dash?: string; sym?: SymbolAt };
+type CircleEl = { cx: number; cy: number; r: number; fill: string; sym?: SymbolAt };
+/** `role: "dim"` marks a dimension label (`dimH` / `dimV` / the proscenium's chains) — drawn smaller (#261, D468). */
+type TextEl = { x: number; y: number; t: string; fill: string; size: number; weight?: number; anchor: string; transform?: string; role?: TextRole };
+export type TextRole = "dim";
+type PathEl = { d: string; fill: string; stroke?: string; sw?: number; dash?: string; sym?: SymbolAt };
 
 /** A drag handle on the auto plan: a wall (`side`) sizes the room; a movable room (`key` = its id, #255) slides along the walls it may use. */
 export type PlanHandle =
@@ -66,35 +74,47 @@ export type PlanData = {
 type L = { rects: Rect[]; lines: LineEl[]; circles: CircleEl[]; texts: TextEl[]; paths: PathEl[] };
 
 const R = (n: number) => Math.round(n * 10) / 10;
+
+/** #263 (D470): Jeff — "the symbols are still huge". Every equipment symbol draws at half its builder size, outline
+ *  strokes included (the glyph is the same drawing, smaller), about its own centre. */
+export const SYMBOL_SCALE = 0.5;
+/** Tags a symbol with the centre it scales about. */
+const sym = (cx: number, cy: number): SymbolAt => ({ cx: R(cx), cy: R(cy) });
+/** The transform both renderers put on a symbol: scale by SYMBOL_SCALE about its centre; none for anything else. */
+export function symbolTransform(at: SymbolAt | undefined): string | undefined {
+  return at ? "translate(" + at.cx + " " + at.cy + ") scale(" + SYMBOL_SCALE + ") translate(" + -at.cx + " " + -at.cy + ")" : undefined;
+}
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 /* ------------------------- shared drawing helpers ------------------------- */
 
 function dimH(L: L, ax: number, bx: number, y: number, label: string, faint: boolean) {
   const sz = faint ? 11 : 14;
+  const eff = planTextSize(sz, 1, "dim"); // the size the label draws at (at most), so the line gap + centring fit it
   const col = faint ? "#c4c9d2" : "#8c919c";
   const tcol = faint ? "#9aa0ab" : "#2f333a";
   const mid = (ax + bx) / 2;
-  const half = label.length * sz * 0.32 + 4;
+  const half = label.length * eff * 0.32 + 4;
   const tick = (x: number) => L.lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
   L.lines.push({ x1: R(ax), y1: R(y), x2: R(mid - half), y2: R(y), stroke: col, sw: faint ? 0.9 : 1, dash: "" });
   L.lines.push({ x1: R(mid + half), y1: R(y), x2: R(bx), y2: R(y), stroke: col, sw: faint ? 0.9 : 1, dash: "" });
   tick(ax);
   tick(bx);
-  L.texts.push({ x: R(mid), y: R(y + sz * 0.35), t: label, fill: tcol, size: sz, weight: 600, anchor: "middle", transform: "" });
+  L.texts.push({ x: R(mid), y: R(y + eff * 0.35), t: label, fill: tcol, size: sz, weight: 600, anchor: "middle", transform: "", role: "dim" });
 }
 
 function dimV(L: L, ay: number, by: number, x: number, label: string) {
   const sz = 14;
+  const eff = planTextSize(sz, 1, "dim");
   const mid = (ay + by) / 2;
-  const half = label.length * sz * 0.32 + 4;
-  const tx = x + sz * 0.35;
+  const half = label.length * eff * 0.32 + 4;
+  const tx = x + eff * 0.35;
   const tick = (y: number) => L.lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
   L.lines.push({ x1: R(x), y1: R(ay), x2: R(x), y2: R(mid - half), stroke: "#8c919c", sw: 1, dash: "" });
   L.lines.push({ x1: R(x), y1: R(mid + half), x2: R(x), y2: R(by), stroke: "#8c919c", sw: 1, dash: "" });
   tick(ay);
   tick(by);
-  L.texts.push({ x: R(tx), y: R(mid), t: label, fill: "#2f333a", size: sz, weight: 600, anchor: "middle", transform: "rotate(-90 " + R(tx) + " " + R(mid) + ")" });
+  L.texts.push({ x: R(tx), y: R(mid), t: label, fill: "#2f333a", size: sz, weight: 600, anchor: "middle", transform: "rotate(-90 " + R(tx) + " " + R(mid) + ")", role: "dim" });
 }
 
 /** center FOH mix position — seats removed mid-house for the front-of-house console */
@@ -279,8 +299,9 @@ export type ChurchGeom = ReturnType<typeof churchGeom>;
 export const MIX_MIN_W = 26;
 /** #255 fix: the width (px) the CONSOLE mark takes beside a FOH mix box ("CONSOLE" at 6 px). */
 const CONSOLE_SIDE_W = 26;
-/** #255 fix: a loudspeaker glyph's centre stays this far (px) from the edges of the room it stands in — its half-diagonal plus 0.5. */
-export const SPK_CLEAR = Math.hypot(5, 7) + 0.5;
+/** #255 fix: a loudspeaker glyph's centre stays this far (px) from the edges of the room it stands in — its half-diagonal plus 0.5.
+ *  #263: the glyph draws at SYMBOL_SCALE (10 × 14 → 5 × 7), so the clearance is the drawn glyph's. */
+export const SPK_CLEAR = Math.hypot(5 * SYMBOL_SCALE, 7 * SYMBOL_SCALE) + 0.5;
 
 /** The nearest point to `p` (rings every 0.5 px, 5° apart, out to 80 px) inside `poly` and `clear` px from its edges; `p` when none. */
 function clearSpot(poly: XY[], p: XY, clear: number): XY {
@@ -397,7 +418,7 @@ export function churchGeom(s: AState, tpl?: string | null) {
   if (yStage >= yFront - 1) yStage = yFront;
   const stageBox: Box = { x: platBackL.x, y: yBack, w: platBackR.x - platBackL.x, h: yStage - yBack };
   // Where the loudspeakers stand, when the template says (else buildPlanChurch's Traditional notch rule). #255 fix:
-  // the glyph (10 × 14 px) stays clear of the Nave's edges — the Platform's front and the splays — so a plan drawn
+  // the glyph (10 × 14 px, drawn at SYMBOL_SCALE: 5 × 7, #263) stays clear of the Nave's edges — the Platform's front and the splays — so a plan drawn
   // at a smaller scale moves the left one to the nearest spot that clears them, and mirrors it for the right.
   const speakers = keys.points.spkL && keys.points.spkR ? [clearSpot(regions[keys.roles.house], pt("spkL"), SPK_CLEAR)].flatMap((l) => [l, { x: R(2 * centre.x - l.x), y: l.y }]) : null;
   const pews: Array<{ x1: number; x2: number; y: number }> = [];
@@ -613,7 +634,10 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     } else if (it.kind === "electric") {
       lines.push({ x1: R(xProcL), y1: y, x2: R(xProcR), y2: y, stroke: "#9aa0ab", sw: 1, dash: "2 3" });
       const dn = Math.max(3, Math.round(openW / 42));
-      for (let k = 0; k < dn; k++) circles.push({ cx: R(xProcL + ((k + 0.5) / dn) * openW), cy: y, r: 2.6, fill: cLight });
+      for (let k = 0; k < dn; k++) {
+        const x = R(xProcL + ((k + 0.5) / dn) * openW);
+        circles.push({ cx: x, cy: y, r: 2.6, fill: cLight, sym: sym(x, y) });
+      }
     } else {
       lines.push({ x1: R(xProcL), y1: y, x2: R(xProcR), y2: y, stroke: cCurt, sw: it.frac > 0.9 ? 3 : 2.6, dash: "" });
     }
@@ -635,11 +659,11 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   if (G.mixInBooth) {
     // #255: in (or by) the booth that carries the FOH mix — under the box, or beside it (boothMix).
     const c = G.consoleAt, cw = Math.min(R(G.mixBox.w * 0.38), 22);
-    if (c) rects.push({ x: R(c.x - cw / 2), y: R(c.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+    if (c) rects.push({ x: R(c.x - cw / 2), y: R(c.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "", sym: sym(c.x, c.y + 2.25) });
     if (c) texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   } else if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
     const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
-    rects.push({ x: R(bcx - cw / 2), y: R(bx.y + 6), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+    rects.push({ x: R(bcx - cw / 2), y: R(bx.y + 6), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "", sym: sym(bcx, bx.y + 8.25) });
     texts.push({ x: R(bcx), y: R(bx.y + bx.h - 6), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
 
@@ -658,13 +682,13 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xProcL), y1: R(yWid), x2: R(xProcR), y2: R(yWid), stroke: "#8c919c", sw: 1, dash: "" });
   tick(xProcL, yWid);
   tick(xProcR, yWid);
-  texts.push({ x: R(cx), y: R(yWid - 6), t: s.width + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+  texts.push({ x: R(cx), y: R(yWid - 6), t: s.width + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "", role: "dim" });
   if (wing > 0) {
     ([[xWingL, xProcL], [xProcR, xWingR]] as Array<[number, number]>).forEach(([a, b]) => {
       lines.push({ x1: R(a), y1: R(yWid), x2: R(b), y2: R(yWid), stroke: "#c4c9d2", sw: 0.9, dash: "" });
       tick(a, yWid);
       tick(b, yWid);
-      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wing + "'", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wing + "'", fill: "#8c919c", size: 11, anchor: "middle", transform: "", role: "dim" });
     });
   }
   // dimension lines — stage depth, then house depth (left, one chain)
@@ -674,7 +698,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     tick(xDep, ya);
     tick(xDep, yb);
     const ym = (ya + yb) / 2;
-    texts.push({ x: R(xDep - 7), y: R(ym), t: label, fill: "#8c919c", size: 11, anchor: "middle", transform: "rotate(-90 " + R(xDep - 7) + " " + R(ym) + ")" });
+    texts.push({ x: R(xDep - 7), y: R(ym), t: label, fill: "#8c919c", size: 11, anchor: "middle", transform: "rotate(-90 " + R(xDep - 7) + " " + R(ym) + ")", role: "dim" });
   };
   lines.push({ x1: R(xStageL - 4), y1: R(yBack), x2: R(xDep - 3), y2: R(yBack), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xStageL - 4), y1: R(yPlaster), x2: R(xDep - 3), y2: R(yPlaster), stroke: "#c4c9d2", sw: 0.8, dash: "" });
@@ -686,7 +710,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xHouseL), y1: R(yHW), x2: R(xHouseR), y2: R(yHW), stroke: "#8c919c", sw: 1, dash: "" });
   tick(xHouseL, yHW);
   tick(xHouseR, yHW);
-  texts.push({ x: R((xHouseL + xHouseR) / 2), y: R(yHW - 6), t: Math.round(dims.houseWidthFt) + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+  texts.push({ x: R((xHouseL + xHouseR) / 2), y: R(yHW - 6), t: Math.round(dims.houseWidthFt) + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "", role: "dim" });
 
   texts.push({ x: R(cx), y: R(yPlaster - 6), t: "PLASTER LINE", fill: "#8c919c", size: 8, anchor: "middle", transform: "" });
 
@@ -703,14 +727,17 @@ function buildPlanFlat(s: AState, _lineSets: number, _electrics: number, accent:
   L.rects.push({ x: P.x, y: P.y, w: P.w, h: P.h, fill: "#ffffff", stroke: accent, sw: 1.6, rx: 2, dash: "" });
   L.texts.push({ x: R(cx), y: R(P.y + P.h / 2 + 3), t: "PLATFORM", fill: "#9aa0ab", size: 8, anchor: "middle", transform: "" });
   if (s.sys.video) {
-    L.lines.push({ x1: R(cx - platW * 0.32), y1: R(y0 + 4), x2: R(cx + platW * 0.32), y2: R(y0 + 4), stroke: SYSCOLOR.video, sw: 3.4, dash: "" });
+    L.lines.push({ x1: R(cx - platW * 0.32), y1: R(y0 + 4), x2: R(cx + platW * 0.32), y2: R(y0 + 4), stroke: SYSCOLOR.video, sw: 3.4, dash: "", sym: sym(cx, y0 + 4) });
     L.texts.push({ x: R(cx), y: R(y0 + 15), t: "SCREEN", fill: SYSCOLOR.video, size: 7.5, anchor: "middle", transform: "" });
   }
-  if (s.sys.audio) [px0 - 10, px1 + 10].forEach((x) => L.rects.push({ x: R(x - 5), y: R(y0 + 6), w: 10, h: 14, fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, rx: 2, dash: "" }));
+  if (s.sys.audio) [px0 - 10, px1 + 10].forEach((x) => L.rects.push({ x: R(x - 5), y: R(y0 + 6), w: 10, h: 14, fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, rx: 2, dash: "", sym: sym(x, y0 + 13) }));
   if (s.sys.lighting) {
     const yBar = pBot + 22, dn = Math.max(4, Math.round(platW / 34));
     L.lines.push({ x1: R(px0), y1: R(yBar), x2: R(px1), y2: R(yBar), stroke: "#9aa0ab", sw: 1, dash: "2 3" });
-    for (let k = 0; k < dn; k++) L.circles.push({ cx: R(px0 + ((k + 0.5) / dn) * platW), cy: R(yBar), r: 2.6, fill: SYSCOLOR.lighting });
+    for (let k = 0; k < dn; k++) {
+      const x = R(px0 + ((k + 0.5) / dn) * platW);
+      L.circles.push({ cx: x, cy: R(yBar), r: 2.6, fill: SYSCOLOR.lighting, sym: sym(x, yBar) });
+    }
     L.texts.push({ x: R(px1 + 6), y: R(yBar + 3), t: "FOH LX", fill: "#8c919c", size: 7.5, anchor: "start", transform: "" });
   }
   const seatTop = pBot + (s.sys.lighting ? 40 : 28), seatBot = y1 - 16;
@@ -743,14 +770,17 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
   const platW = G.platBackR.x - G.platBackL.x;
   const depthPx = G.yFront - G.yBack;
   if (s.sys.curtains) L.lines.push({ x1: R(G.platBackL.x + 4), y1: R(G.yBack + 4), x2: R(G.platBackR.x - 4), y2: R(G.yBack + 4), stroke: SYSCOLOR.curtains, sw: 2.6, dash: "4 3" });
-  if (s.sys.video) [G.cx - platW * 0.23, G.cx + platW * 0.23].forEach((x) => L.lines.push({ x1: R(x - 13), y1: R(G.yBack + 11), x2: R(x + 13), y2: R(G.yBack + 11), stroke: SYSCOLOR.video, sw: 3, dash: "" }));
+  if (s.sys.video) [G.cx - platW * 0.23, G.cx + platW * 0.23].forEach((x) => L.lines.push({ x1: R(x - 13), y1: R(G.yBack + 11), x2: R(x + 13), y2: R(G.yBack + 11), stroke: SYSCOLOR.video, sw: 3, dash: "", sym: sym(x, G.yBack + 11) }));
   if (s.sys.lighting)
     [0.42, 0.8].forEach((f) => {
       const y = G.yBack + depthPx * f;
       for (const [a, b] of rowSpans(G.regions[G.roles.stage], y)) {
         const x1 = a + 6, x2 = b - 6, dn = Math.max(3, Math.round((x2 - x1) / 34));
         L.lines.push({ x1: R(x1), y1: R(y), x2: R(x2), y2: R(y), stroke: "#9aa0ab", sw: 1, dash: "2 3" });
-        for (let k = 0; k < dn; k++) L.circles.push({ cx: R(x1 + ((k + 0.5) / dn) * (x2 - x1)), cy: R(y), r: 2.4, fill: SYSCOLOR.lighting });
+        for (let k = 0; k < dn; k++) {
+          const x = R(x1 + ((k + 0.5) / dn) * (x2 - x1));
+          L.circles.push({ cx: x, cy: R(y), r: 2.4, fill: SYSCOLOR.lighting, sym: sym(x, y) });
+        }
       }
     });
   // Marks over the Nave's fill are paths, not rects: rects paint before paths, i.e. under the fill.
@@ -762,13 +792,13 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
   // Loudspeakers stand in the Nave beside the platform: centred on the template's spkL / spkR points, else (Traditional)
   // centred in the platform step's 4' notch, 2' upstage of the front edge.
   const spk = G.speakers ?? [G.platFrontL, G.platFrontR].map((p, i) => ({ x: p.x + (i ? 13 : -13), y: p.y - 2 * G.ppf }));
-  if (s.sys.audio) spk.forEach((p) => L.paths.push({ d: rbox(p.x - 5, p.y - 7, 10, 14, 2), fill: "#eef0f3", stroke: "#3155a8", sw: 1.2 }));
+  if (s.sys.audio) spk.forEach((p) => L.paths.push({ d: rbox(p.x - 5, p.y - 7, 10, 14, 2), fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, sym: sym(p.x, p.y) }));
   for (const p of G.pews) L.lines.push({ x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: "#cdd1d9", sw: 1.4, dash: "" });
   mixPos(L, G.mix.x, G.mix.y, G.mixBox.w, G.mixText, G.mixBox.h / 2);
   if (G.consoleAt) {
     // Under the FOH mix box — in the Nave, or in the booth room when the template has one (#255 fix: beside it in a booth too shallow for both).
     const cw = Math.min(R(G.mixBox.w * 0.38), 30), c = G.consoleAt;
-    L.paths.push({ d: box(c.x - cw / 2, c.y, cw, 4.5), fill: SYSCOLOR.controls, stroke: "none" });
+    L.paths.push({ d: box(c.x - cw / 2, c.y, cw, 4.5), fill: SYSCOLOR.controls, stroke: "none", sym: sym(c.x, c.y + 2.25) });
     L.texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
   // #255: each movable room drags along the walls it may use — listed before the wall handles, so the walls win overlaps.
@@ -805,7 +835,7 @@ function blackboxBase(G: BlackboxGeom, s: AState, houseLabelAt: XY): { L: L; han
     mixPos(L, G.mix.x, G.mix.y, G.mix.w, G.mix.text, G.mix.h / 2);
     const c = G.mix.console, cw = Math.min(R(G.mix.w * 0.38), 22);
     if (c && s.sys) {
-      L.rects.push({ x: R(c.x - cw / 2), y: R(c.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+      L.rects.push({ x: R(c.x - cw / 2), y: R(c.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "", sym: sym(c.x, c.y + 2.25) });
       L.texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
     }
   }
@@ -841,7 +871,10 @@ function buildPlanBlackbox(s: AState, _lineSets: number, _electrics: number, acc
     [0.6, 0.8].forEach((f) => {
       const y = y0 + depthPx * f, dn = Math.max(4, Math.round((x1 - x0) / 36));
       L.lines.push({ x1: R(x0 + 16), y1: R(y), x2: R(x1 - 16), y2: R(y), stroke: "#9aa0ab", sw: 1, dash: "2 3" });
-      for (let k = 0; k < dn; k++) L.circles.push({ cx: R(x0 + 16 + ((k + 0.5) / dn) * (x1 - x0 - 32)), cy: R(y), r: 2.4, fill: SYSCOLOR.lighting });
+      for (let k = 0; k < dn; k++) {
+        const x = R(x0 + 16 + ((k + 0.5) / dn) * (x1 - x0 - 32));
+        L.circles.push({ cx: x, cy: R(y), r: 2.4, fill: SYSCOLOR.lighting, sym: sym(x, y) });
+      }
     });
   const seatTop = by0 + bH + 30, seatBot = y1 - 18;
   if (seatBot > seatTop + 8) {
@@ -874,14 +907,16 @@ function buildPlanArena(s: AState, _lineSets: number, _electrics: number, accent
   const rn = Math.max(4, Math.round(G.stageAlong / 30));
   for (let k = 0; k < rn; k++) {
     const p = at(-hw + ((k + 0.5) / rn) * 2 * hw, hd + 8);
-    L.circles.push({ cx: p.x, cy: p.y, r: 2.4, fill: SYSCOLOR.rigging });
+    L.circles.push({ cx: p.x, cy: p.y, r: 2.4, fill: SYSCOLOR.rigging, sym: sym(p.x, p.y) });
   }
   if (s.sys.audio)
     [-1, 1].forEach((side) => {
+      // #263: the three boxes are one line-array stack — they scale together about the stack's centre (the middle box).
+      const mid = at(side * (hw + 14), -hd + 8 + 9);
       for (let i = 0; i < 3; i++) {
         // A path, not a rect: rects paint under the bowl and floor fills (paths).
         const p = at(side * (hw + 14), -hd + 8 + i * 9);
-        L.paths.push({ d: "M " + R(p.x - 4) + " " + R(p.y - 3.5) + " h 8 v 7 h -8 Z", fill: "#eef0f3", stroke: "#3155a8", sw: 1 });
+        L.paths.push({ d: "M " + R(p.x - 4) + " " + R(p.y - 3.5) + " h 8 v 7 h -8 Z", fill: "#eef0f3", stroke: "#3155a8", sw: 1, sym: sym(mid.x, mid.y) });
       }
     });
   for (const l of G.labels) {
@@ -895,7 +930,7 @@ function buildPlanArena(s: AState, _lineSets: number, _electrics: number, accent
     mixPos(L, G.mix.x, G.mix.y, G.mix.w, G.mix.text, G.mix.h / 2);
     const con = G.mix.console, cw = Math.min(R(G.mix.w * 0.38), 22);
     if (con) {
-      L.rects.push({ x: R(con.x - cw / 2), y: R(con.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+      L.rects.push({ x: R(con.x - cw / 2), y: R(con.y), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "", sym: sym(con.x, con.y + 2.25) });
       L.texts.push({ x: R(con.x), y: R(con.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
     }
   }
@@ -906,14 +941,18 @@ function buildPlanArena(s: AState, _lineSets: number, _electrics: number, accent
 
 /* ------------------------------ legend builder ------------------------------ */
 
+/** Legend swatches. The equipment symbols' own (dot, spk, screen) draw at SYMBOL_SCALE, so the legend reads like the plan (#263). */
 function sw(kind: string, accent: string): React.CSSProperties {
+  const S = SYMBOL_SCALE;
   switch (kind) {
     case "line":
       return { display: "inline-block", width: 14, height: 2.6, borderRadius: 2, background: accent };
     case "dash":
       return { display: "inline-block", width: 14, height: 0, borderTop: `1.6px dashed ${accent}` };
     case "dot":
-      return { display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: accent };
+      return { display: "inline-block", width: 7 * S, height: 7 * S, borderRadius: "50%", background: accent };
+    case "screen":
+      return { display: "inline-block", width: 14 * S, height: 2.6 * S, borderRadius: 2, background: accent };
     case "faint":
       return { display: "inline-block", width: 14, height: 1.4, background: "#cdd1d9" };
     case "box":
@@ -921,7 +960,7 @@ function sw(kind: string, accent: string): React.CSSProperties {
     case "seat":
       return { display: "inline-block", width: 8, height: 7, border: "1px solid #cdd1d9", borderRadius: 2, background: "#e6e8ec" };
     case "spk":
-      return { display: "inline-block", width: 8, height: 10, border: "1px solid #3155a8", borderRadius: 2, background: "#eef0f3" };
+      return { display: "inline-block", width: 8 * S, height: 10 * S, border: `${S}px solid #3155a8`, borderRadius: 2 * S, background: "#eef0f3" };
     default:
       return { display: "inline-block", width: 10, height: 10, background: accent };
   }
@@ -944,11 +983,11 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
     it.push({ sw: mk("box"), label: "Platform" });
     if (sys.curtains) it.push({ sw: mk("dash", C.curtains), label: "Backdrop curtain" });
     if (sys.lighting) it.push({ sw: mk("dot", C.lighting), label: "Lighting position" });
-    if (sys.video) it.push({ sw: mk("line", C.video), label: "Screen" });
+    if (sys.video) it.push({ sw: mk("screen", C.video), label: "Screen" });
     it.push({ sw: mk("faint"), label: "Pews" });
   } else if (kind === "flat") {
     it.push({ sw: mk("box"), label: "Platform" });
-    if (sys.video) it.push({ sw: mk("line", C.video), label: "Screen" });
+    if (sys.video) it.push({ sw: mk("screen", C.video), label: "Screen" });
     if (sys.lighting) it.push({ sw: mk("dot", C.lighting), label: "FOH lighting" });
     if (sys.audio) it.push({ sw: mk("spk"), label: "Loudspeaker" });
     it.push({ sw: mk("seat"), label: "Seating" });
@@ -995,6 +1034,48 @@ const MONO = "var(--font-mono), IBM Plex Mono, monospace";
  *  properties), so the static markup falls straight back to the named font. */
 const STATIC_MONO = "IBM Plex Mono, monospace";
 
+/** Plan text reads at this share of its builder size (#261, D468): Jeff found the labels too big. Room / area
+ *  labels and equipment marks (6–8) land at ~6.8 px — the mono font's readability floor. */
+export const PLAN_TEXT_SCALE = 0.85;
+/** Dimension labels (`role: "dim"`, 11–14 bold) draw smaller still — ~9 px — so they stop dominating the drawing. */
+export const PLAN_DIM_TEXT_SCALE = 0.65;
+
+/**
+ * A plan text's font size in viewBox units (#261, D468). `k` is the plan's display scale (rendered px per viewBox
+ * unit). The builders size text for k = 1; `<PlanSvg>` draws at `width: 100%`, so on a wide panel the text used to
+ * grow with the plan (dimensions reached 22–35 px). Dividing by `max(k, 1)` holds it at `base × PLAN_TEXT_SCALE`
+ * on-screen px however wide the plan draws; on a narrow panel (k < 1) it still shrinks with the plan.
+ */
+export function planTextSize(base: number, k: number, role?: TextRole): number {
+  const scale = Number.isFinite(k) && k > 0 ? k : 1;
+  return (base * (role === "dim" ? PLAN_DIM_TEXT_SCALE : PLAN_TEXT_SCALE)) / Math.max(scale, 1);
+}
+
+/** The CSS variable `<PlanSvg>`'s texts read their display factor from (`1 / max(k, 1)`); each text multiplies it by
+ *  its own `planTextSize(size, 1, role)`. */
+const PLAN_TEXT_VAR = "--plan-text";
+
+/**
+ * Callback ref (React 19 cleanup) that watches the rendered width of a `<PlanSvg>` and stores
+ * `1 / max(k, 1)` on it as `--plan-text`. A module-level function, so its identity is stable across renders;
+ * no hooks, so this file stays importable from server modules (`grid-projects.ts`, `grid-auto-layout.ts`).
+ */
+function observePlanScale(svg: SVGSVGElement | null): (() => void) | void {
+  if (!svg) return;
+  const apply = (renderedW: number) => {
+    const vbW = svg.viewBox.baseVal?.width || 0;
+    if (!(vbW > 0) || !(renderedW > 0)) return;
+    svg.style.setProperty(PLAN_TEXT_VAR, String(planTextSize(1, renderedW / vbW) / PLAN_TEXT_SCALE));
+  };
+  apply(svg.getBoundingClientRect().width);
+  if (typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver((entries) => {
+    for (const e of entries) apply(e.contentRect.width);
+  });
+  ro.observe(svg);
+  return () => ro.disconnect();
+}
+
 export function PlanSvg({
   plan,
   accent,
@@ -1013,24 +1094,25 @@ export function PlanSvg({
   return (
     <svg
       id={svgId}
+      ref={observePlanScale}
       viewBox={`0 0 ${p.W} ${p.H}`}
       preserveAspectRatio="xMidYMid meet"
       style={{ width: "100%", height: "auto", display: "block", touchAction: "none" }}
     >
       {(p.rects || []).map((r, i) => (
-        <rect key={"r" + i} x={r.x} y={r.y} width={r.w} height={r.h} fill={r.fill} stroke={r.stroke} strokeWidth={r.sw} rx={r.rx} strokeDasharray={r.dash || undefined} />
+        <rect key={"r" + i} x={r.x} y={r.y} width={r.w} height={r.h} fill={r.fill} stroke={r.stroke} strokeWidth={r.sw} rx={r.rx} strokeDasharray={r.dash || undefined} transform={symbolTransform(r.sym)} />
       ))}
       {(p.paths || []).map((q, i) => (
-        <path key={"p" + i} d={q.d} fill={q.fill} stroke={q.stroke} strokeWidth={q.sw} strokeDasharray={q.dash || undefined} />
+        <path key={"p" + i} d={q.d} fill={q.fill} stroke={q.stroke} strokeWidth={q.sw} strokeDasharray={q.dash || undefined} transform={symbolTransform(q.sym)} />
       ))}
       {(p.lines || []).map((l, i) => (
-        <line key={"l" + i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.stroke} strokeWidth={l.sw} strokeDasharray={l.dash || undefined} strokeLinecap="round" />
+        <line key={"l" + i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.stroke} strokeWidth={l.sw} strokeDasharray={l.dash || undefined} strokeLinecap="round" transform={symbolTransform(l.sym)} />
       ))}
       {(p.circles || []).map((c, i) => (
-        <circle key={"c" + i} cx={c.cx} cy={c.cy} r={c.r} fill={c.fill} />
+        <circle key={"c" + i} cx={c.cx} cy={c.cy} r={c.r} fill={c.fill} transform={symbolTransform(c.sym)} />
       ))}
       {(p.texts || []).map((t, i) => (
-        <text key={"t" + i} x={t.x} y={t.y} textAnchor={t.anchor as "start" | "middle" | "end"} transform={t.transform || undefined} fontSize={t.size} fontWeight={t.weight || 400} fill={t.fill} style={{ fontFamily: MONO }}>
+        <text key={"t" + i} x={t.x} y={t.y} textAnchor={t.anchor as "start" | "middle" | "end"} transform={t.transform || undefined} fontSize={planTextSize(t.size, 1, t.role)} fontWeight={t.weight || 400} fill={t.fill} style={{ fontFamily: MONO, fontSize: `calc(${planTextSize(t.size, 1, t.role)}px * var(${PLAN_TEXT_VAR}, 1))` }}>
           {t.t}
         </text>
       ))}
@@ -1099,28 +1181,28 @@ export function renderPlanSvgMarkup(plan: PlanData, accent: string): string {
   const rects = (p.rects || [])
     .map(
       (r) =>
-        `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${esc(r.fill)}" stroke="${esc(r.stroke)}" stroke-width="${r.sw}"${attr("rx", r.rx)}${attr("stroke-dasharray", r.dash)} />`
+        `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${esc(r.fill)}" stroke="${esc(r.stroke)}" stroke-width="${r.sw}"${attr("rx", r.rx)}${attr("stroke-dasharray", r.dash)}${attr("transform", symbolTransform(r.sym))} />`
     )
     .join("");
   const paths = (p.paths || [])
     .map(
       (q) =>
-        `<path d="${esc(q.d)}" fill="${esc(q.fill)}"${attr("stroke", q.stroke)}${attr("stroke-width", q.sw)}${attr("stroke-dasharray", q.dash)} />`
+        `<path d="${esc(q.d)}" fill="${esc(q.fill)}"${attr("stroke", q.stroke)}${attr("stroke-width", q.sw)}${attr("stroke-dasharray", q.dash)}${attr("transform", symbolTransform(q.sym))} />`
     )
     .join("");
   const lines = (p.lines || [])
     .map(
       (l) =>
-        `<line x1="${l.x1}" y1="${l.y1}" x2="${l.x2}" y2="${l.y2}" stroke="${esc(l.stroke)}" stroke-width="${l.sw}"${attr("stroke-dasharray", l.dash)} stroke-linecap="round" />`
+        `<line x1="${l.x1}" y1="${l.y1}" x2="${l.x2}" y2="${l.y2}" stroke="${esc(l.stroke)}" stroke-width="${l.sw}"${attr("stroke-dasharray", l.dash)} stroke-linecap="round"${attr("transform", symbolTransform(l.sym))} />`
     )
     .join("");
   const circles = (p.circles || [])
-    .map((c) => `<circle cx="${c.cx}" cy="${c.cy}" r="${c.r}" fill="${esc(c.fill)}" />`)
+    .map((c) => `<circle cx="${c.cx}" cy="${c.cy}" r="${c.r}" fill="${esc(c.fill)}"${attr("transform", symbolTransform(c.sym))} />`)
     .join("");
   const texts = (p.texts || [])
     .map(
       (t) =>
-        `<text x="${t.x}" y="${t.y}" text-anchor="${esc(t.anchor)}"${attr("transform", t.transform)} font-size="${t.size}" font-weight="${t.weight || 400}" fill="${esc(t.fill)}" font-family="${esc(STATIC_MONO)}">${esc(t.t)}</text>`
+        `<text x="${t.x}" y="${t.y}" text-anchor="${esc(t.anchor)}"${attr("transform", t.transform)} font-size="${+planTextSize(t.size, 1, t.role).toFixed(3)}" font-weight="${t.weight || 400}" fill="${esc(t.fill)}" font-family="${esc(STATIC_MONO)}">${esc(t.t)}</text>`
     )
     .join("");
 
