@@ -43,6 +43,8 @@ import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
+import { familyDims } from "@/lib/design/venue-templates/house-dims";
+import { stretchById } from "@/lib/design/venue-templates/templates";
 import {
   autoEstimatesOf,
   cleanLotQty,
@@ -244,6 +246,8 @@ export type GridProject = {
     autoConfig?: AState;
     /** #249/#255: the venue template id that drew the generated base sheet ("proscenium@1", "church-traditional@1", …); absent = a pre-template schematic. */
     baseSheetTemplate?: string;
+    /** #255: where the sheet's movable rooms were drawn (wall + 0..1); the sheet never moves them afterwards. */
+    baseSheetMovables?: Record<string, { wall: string; t: number }>;
   };
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
@@ -466,8 +470,13 @@ export async function generateBaseSheet(
     await addSpace(projectId, { ...sp, by });
   }
   if (id && family) {
+    // #255: stamp the template and where its movable rooms sit on this sheet (a later intake edit never moves them).
+    const placed = stretchById(id, familyDims(a, id)).movables;
+    const movables = Object.fromEntries(Object.entries(placed).map(([k, m]) => [k, { wall: m.wall, t: m.t }]));
     await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-      if (p.intake) p.intake.baseSheetTemplate = id;
+      if (!p.intake) return;
+      p.intake.baseSheetTemplate = id;
+      if (Object.keys(movables).length) p.intake.baseSheetMovables = movables;
     });
   }
   return sheet;
@@ -478,7 +487,7 @@ export async function saveGridIntake(
   input: NonNullable<GridProject["intake"]>
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.intake = { ...input, baseSheetTemplate: input.baseSheetTemplate ?? p.intake?.baseSheetTemplate };
+    p.intake = { ...input, baseSheetTemplate: input.baseSheetTemplate ?? p.intake?.baseSheetTemplate, baseSheetMovables: input.baseSheetMovables ?? p.intake?.baseSheetMovables };
     p.updatedAt = Date.now();
   });
 }

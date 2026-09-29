@@ -23,6 +23,7 @@ import {
 import { houseFields, type HouseField } from "@/lib/design/venue-templates/house-dims";
 import { effectiveTemplateFor, planKindTemplates, resolveBackground, sanitizeTemplateId, templateEntry } from "@/lib/design/venue-templates";
 import type { VenueType } from "@/lib/venue-types";
+import MovableFields from "./movable-fields";
 
 /**
  * Shared venue/size/dimensions/systems-to-include config panel
@@ -241,6 +242,7 @@ export default function ScopeInputsPanel({
                   </div>
                 ))}
                 {f?.warning && <div style={{ fontSize: 11, color: "#b4543a", lineHeight: 1.4 }}>{f.warning}</div>}
+                {showHouse && <MovableFields value={value} tpl={tplId} onChange={(patch) => update(patch as Partial<QuickScopeInputs>)} />}
               </>
             );
           })()}

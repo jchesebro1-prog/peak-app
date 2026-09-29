@@ -34,7 +34,9 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
   const inputs = project.scopeInputs;
-  const a = project.intake?.autoConfig;
+  // #255: lay out on the rooms where the stamped sheet drew them, never where the intake says now.
+  const a0 = project.intake?.autoConfig;
+  const a = a0 && project.intake?.baseSheetMovables ? { ...a0, movables: project.intake.baseSheetMovables } : a0;
   const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
   if (!inputs || !a || !est) return { ok: false, error: "This design has no Auto choices to fill from." };
   const sheetId = project.sheetIds[0];

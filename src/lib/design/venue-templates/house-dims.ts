@@ -11,7 +11,7 @@ import type { StretchDims } from "./types";
  * Pure; safe in client components. Called without a template id every
  * function behaves exactly as #249's proscenium version.
  */
-type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt">>;
+type HouseInput = Pick<AState, "width" | "wing"> & Partial<Pick<AState, "depth" | "houseWidthFt" | "houseDepthFt" | "houseHalfFt" | "movables">>;
 
 export const HOUSE_DEPTH_LIM: [number, number] = [40, 200];
 export const HOUSE_NARROW_WARNING = "The house is narrower than the stage, so its side walls slant inward.";
@@ -126,13 +126,13 @@ export function houseDims(s: HouseInput, id?: string | null): { widthFt: number;
  */
 export function prosceniumDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string = "proscenium@1"): StretchDims {
   const h = houseDims(s, id);
-  return { proWidthFt: s.width, wingFt: s.wing || 0, stageDepthFt: s.depth, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: !!s.sys?.pit };
+  return { proWidthFt: s.width, wingFt: s.wing || 0, stageDepthFt: s.depth, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: !!s.sys?.pit, movables: s.movables ?? undefined };
 }
 
 /** The stretch inputs for a church-family template: width / depth are the platform, the house fields the nave. */
 export function churchDims(s: HouseInput & Pick<AState, "depth" | "sys">, id: string): StretchDims {
   const h = houseDims(s, id);
-  return { proWidthFt: s.width, wingFt: 0, stageDepthFt: stageDepthFor(s, id).depthFt, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: false };
+  return { proWidthFt: s.width, wingFt: 0, stageDepthFt: stageDepthFor(s, id).depthFt, houseWidthFt: h.widthFt, houseDepthFt: h.depthFt, pit: false, movables: s.movables ?? undefined };
 }
 
 /** The stretch inputs for any template, by its family. */

@@ -17,6 +17,7 @@ import { effectiveTemplateFor, planKindTemplates, resolveBackground, sanitizeTem
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { VenueType } from "@/lib/venue-types";
+import MovableFields from "@/components/design/movable-fields";
 import type { IntakeCustomer } from "@/app/(app)/quotes/new/types";
 import CustomerVenueContactPicker, {
   customerChoiceOf,
@@ -350,6 +351,7 @@ export default function GridIntake({
                                 </div>
                               ))}
                               {f?.warning && <div style={{ fontSize: 11.5, color: "#b4543a", lineHeight: 1.4 }}>{f.warning}</div>}
+                              <MovableFields value={a} tpl={tplId} onChange={update} />
                             </>
                           );
                         })()}

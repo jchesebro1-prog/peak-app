@@ -66,3 +66,8 @@ export function distToPoly(poly: Pt[], p: Pt): number {
   }
   return m;
 }
+
+/** The movable rooms' centres on the canvas (#255). */
+export function movablesPx(plan: StretchedPlan, px: (p: Pt) => Pt): Array<{ id: string; centre: Pt }> {
+  return Object.entries(plan.movables).map(([id, m]) => ({ id, centre: px(m.centre) }));
+}

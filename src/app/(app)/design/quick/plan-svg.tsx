@@ -13,7 +13,9 @@ import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./en
 import { churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
 import { planKindAllows, resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
-import { boxOf, canvasOf, distToPoly, inPoly, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
+import { boxOf, canvasOf, distToPoly, inPoly, movablesPx, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
+import { movablePatch } from "@/lib/design/venue-templates/movable-options";
+import { snapMovable } from "@/lib/design/venue-templates/stretch";
 
 /* ------------------------------ primitive types ------------------------------ */
 
@@ -23,12 +25,14 @@ type CircleEl = { cx: number; cy: number; r: number; fill: string };
 type TextEl = { x: number; y: number; t: string; fill: string; size: number; weight?: number; anchor: string; transform?: string };
 type PathEl = { d: string; fill: string; stroke?: string; sw?: number; dash?: string };
 
+/** A drag handle on the auto plan: a wall (`side`) sizes the room; a movable room (`key` = its id, #255) slides along the walls it may use. */
 export type PlanHandle = {
-  type: "wall";
-  side: "L" | "R" | "B";
+  type: "wall" | "movable";
+  side?: "L" | "R" | "B";
+  key?: string;
   cx: number;
   cy: number;
-  shape: "wall" | "backWall";
+  shape: "wall" | "backWall" | "movable";
 };
 
 export type PlanData = {
@@ -249,6 +253,7 @@ export function prosGeom(s: AState, tpl?: string | null) {
     polylines: C.polylines,
     labels,
     handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("backWall") },
+    movables: movablesPx(plan, px),
     fromPx: C.fromPx,
     plan,
   };
@@ -402,6 +407,7 @@ export function churchGeom(s: AState, tpl?: string | null) {
     regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
     polylines: C.polylines, labels: C.labels,
     handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("handleBack") },
+    movables: movablesPx(plan, px),
     fromPx: C.fromPx,
     plan,
   };
@@ -503,6 +509,8 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
   handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
   handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
+  // #255: each movable room (the Gym Stage Booth) drags along the walls it may use.
+  for (const m of G.movables) handles.push({ type: "movable", key: m.id, cx: m.centre.x, cy: m.centre.y, shape: "movable" });
 
   // dimension lines — proscenium width + wings (top)
   const yWid = yTop - 26;
@@ -632,6 +640,8 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
   handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
   handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
   handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
+  // #255: each movable room (the Gym Stage Booth) drags along the walls it may use.
+  for (const m of G.movables) handles.push({ type: "movable", key: m.id, cx: m.centre.x, cy: m.centre.y, shape: "movable" });
   dimH(L, G.platBackL.x, G.platBackR.x, G.yTop - 26, s.width + "'-0\"", false);
   // #255 fix: a platform the drawing shortened (Contemporary's depth limit) prints the depth it draws.
   const platDepth = G.dims.stageDepthFt < s.depth ? Math.floor(Math.round(G.dims.stageDepthFt * 12) / 12) + "'-" + (Math.round(G.dims.stageDepthFt * 12) % 12) + '"' : s.depth + "'-0\"";
@@ -846,11 +856,17 @@ export function PlanSvg({
         (p.handles || []).map((hd, i) => (
           <g key={"h" + i}>
             <g
-              style={{ cursor: hd.shape === "wall" ? "ew-resize" : "ns-resize", touchAction: "none", pointerEvents: "auto" }}
+              style={{ cursor: hd.shape === "movable" ? "move" : hd.shape === "wall" ? "ew-resize" : "ns-resize", touchAction: "none", pointerEvents: "auto" }}
               onPointerDown={(e) => onHandleDown && onHandleDown(hd, e)}
             >
               <circle cx={hd.cx} cy={hd.cy} r={13} fill="transparent" />
-              {hd.shape === "wall" ? (
+              {hd.shape === "movable" ? (
+                <>
+                  <rect x={hd.cx - 8} y={hd.cy - 8} width={16} height={16} rx={4} fill={accent} stroke="#fff" strokeWidth={1.6} />
+                  <line x1={hd.cx - 4} y1={hd.cy} x2={hd.cx + 4} y2={hd.cy} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
+                  <line x1={hd.cx} y1={hd.cy - 4} x2={hd.cx} y2={hd.cy + 4} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
+                </>
+              ) : hd.shape === "wall" ? (
                 <>
                   <rect x={hd.cx - 5.5} y={hd.cy - 15} width={11} height={30} rx={4} fill={accent} stroke="#fff" strokeWidth={1.6} />
                   <line x1={hd.cx - 2} y1={hd.cy - 4} x2={hd.cx - 2} y2={hd.cy + 4} stroke="#fff" strokeWidth={1.4} strokeLinecap="round" />
@@ -939,14 +955,21 @@ export type DragPos = { sx: number; sy: number; dx: number; dy: number };
  * house / nave width (symmetric) and the back wall house / nave depth, from
  * the drag's DELTA at the drag-start scale — the canvas rescales as the room
  * grows, so an absolute position would chase itself. Whole feet, clamped like
- * the typed fields.
+ * the typed fields. A movable room's handle (#255) moves that room: the
+ * dropped centre snaps to the nearest wall it may use, whole feet along it.
  */
 export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: string | null): Partial<AState> | null {
-  if (hd.type !== "wall") return null;
+  if (hd.type !== "wall" && hd.type !== "movable") return null;
   const id = planTemplate(s, tpl);
   const family = templateEntry(id)?.family;
   if (family !== "proscenium" && family !== "church") return null;
   const G = family === "church" ? churchGeom(s, id) : prosGeom(s, id);
+  if (hd.type === "movable") {
+    if (!hd.key) return null;
+    // #255: a room follows the pointer (relative drag, drag-start scale) and snaps to the nearest wall it may use, whole feet.
+    const snap = snapMovable(G.plan, hd.key, G.fromPx({ x: hd.cx + pos.dx, y: hd.cy + pos.dy }));
+    return snap ? movablePatch(s, hd.key, snap) : null;
+  }
   if (hd.side === "B") {
     const [lo, hi] = houseSpecFor(G.template).depthLim;
     return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };

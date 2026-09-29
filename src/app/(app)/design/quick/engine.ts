@@ -145,6 +145,8 @@ export type AState = {
   venueType?: string | null;
   /** #255: a per-design Background override — a template id (e.g. "church-contemporary@1"); null = the venue type's Background. */
   templateId?: string | null;
+  /** #255: per-design positions of a template's movable rooms (the Gym Stage Booth, the Blackbox rooms): wall id + 0..1 along its run; absent = as drawn. */
+  movables?: Record<string, { wall: string; t: number | null }> | null;
   doorsL?: number[] | null;
   doorsR?: number[] | null;
   doorsBack?: number[] | null;

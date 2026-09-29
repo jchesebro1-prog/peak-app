@@ -438,7 +438,8 @@ export function snapMovable(plan: StretchedPlan, id: string, p: Pt): { wall: str
     const foot = add(r.from, mul(u, c + r.sMid));
     const dist = Math.hypot(p.x - foot.x, p.y - foot.y);
     const cFt = Math.min(r.hi, r.lo + Math.round((c - r.lo) / 12) * 12);
-    const t = r.hi > r.lo ? Math.round(((cFt - r.lo) / (r.hi - r.lo)) * 1e6) / 1e6 : 0.5;
+    // #255 T11: rounded only to shed float noise — t × the run in feet must stay a whole foot (1e-6 drifted 2e-6 ft on a 28'-6" run).
+    const t = r.hi > r.lo ? Math.round(((cFt - r.lo) / (r.hi - r.lo)) * 1e12) / 1e12 : 0.5;
     if (!best || dist < best.dist - 1e-9) best = { wall, t, dist };
   }
   return best && { wall: best.wall, t: best.t };

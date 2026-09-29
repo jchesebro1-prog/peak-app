@@ -10665,6 +10665,7 @@ seeded()
   .then(() => service254DefaultMarginAsyncChecks())
   .then(() => specRecordDupSectionAsyncChecks())
   .then(() => c255T6GridAsyncChecks())
+  .then(() => c255T11MovablesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -34943,4 +34944,57 @@ import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "
   const wide = { ...gDef, houseWidthFt: 180, sys: { ...gDef.sys, controls: true }, ctrl: { ...gDef.ctrl, console: true } };
   const GW = c255T10Geom(wide), svgW = c255T10Markup(c255T10Build(wide, 8, 3, "#3a3f4a"), "#3a3f4a");
   ok(GW.mixInBooth && !!GW.consoleAt && GW.mixBox.y >= GW.booth.y && GW.mixBox.y + GW.mixBox.h <= GW.booth.y + GW.booth.h && GW.consoleAt.x - 13 >= GW.booth.x + GW.booth.w && svgW.includes(">CONSOLE<") && svgW.includes(">" + GW.mixText + "<") && GW.labels.some((l) => l.text === "Booth" && l.x + 5 * c255T10fChar <= GW.booth.x), "#255 T10 fix: on a 180' floor the plan draws the FOH box in the Booth, the CONSOLE mark beside it and the label to its left");
+}
+
+/* --- #255 T11: moving the Booth — Quick Design handle, fields, Grid stamp --- */
+import { buildPlan as c255T11Build, houseDragPatch as c255T11Drag, prosGeom as c255T11Geom } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T11Default } from "@/app/(app)/design/quick/engine";
+import { movableOptions as c255T11Options, movablePatch as c255T11Patch } from "@/lib/design/venue-templates/movable-options";
+import { generateAutoLayout as c255T11Layout, venueFrame as c255T11Frame } from "@/lib/design/grid-auto-layout";
+import type { AutoCard as C255T11Card } from "@/lib/design/auto-estimate";
+{
+  const base = c255T11Default(0);
+  const a = { ...base, venue: "school", templateId: "gym-stage@1", width: 40, wing: 10, depth: 20, houseWidthFt: 120, houseDepthFt: 49.5 };
+  const o = c255T11Options(a, "gym-stage@1");
+  ok(o.items.length === 1 && o.items[0].label === "Booth" && o.items[0].wall === "back" && o.items[0].walls.map((w) => `${w.id}:${w.fits}`).join() === "back:true,left:true,right:true", "#255 T11: the Booth's fields — its wall (back, left, right) and a position");
+  ok(o.items[0].maxFt === Math.floor((1452 - 252) / 12) && o.items[0].ft === Math.round(0.5 * o.items[0].maxFt), "#255 T11: its position reads in whole feet along the wall's run");
+  const plan = c255T11Build(a, 8, 3, "#3a3f4a", "gym-stage@1");
+  const h = (plan.handles || []).find((x) => x.type === "movable" && x.key === "booth")!;
+  const G = c255T11Geom(a, "gym-stage@1");
+  ok(!!h && Math.abs(h.cx - G.movables.find((m) => m.id === "booth")!.centre.x) < 1e-9, "#255 T11: the plan offers a drag handle on the Booth");
+  const toLeft = c255T11Drag(a, h, { sx: 0, sy: 0, dx: G.handles.sideL.x - 30 - h.cx, dy: G.handles.sideL.y - h.cy }, "gym-stage@1");
+  ok(toLeft?.movables?.booth?.wall === "left" && Number.isFinite(toLeft.movables.booth.t), "#255 T11: dragging the Booth beside the left wall snaps it to that wall");
+  const moved = { ...a, ...toLeft! };
+  const G2 = c255T11Geom(moved, "gym-stage@1");
+  const bx = G2.regions.Booth.map((p) => p.x);
+  ok(Math.max(...bx) <= G2.regions["Gym Floor"].reduce((m, p) => Math.min(m, p.x), Infinity) + 1e-6, "#255 T11: …outside the left wall, turned to face the floor");
+  const ft = (t: number | null | undefined) => (t ?? 0) * c255T11Options(moved, "gym-stage@1").items[0].maxFt;
+  ok(Math.abs(ft(toLeft!.movables!.booth.t) - Math.round(ft(toLeft!.movables!.booth.t))) < 1e-6, "#255 T11: the drag lands on a whole foot");
+  ok(JSON.stringify(c255T11Patch({ movables: null }, "booth", { wall: "right", t: 0.25 })) === JSON.stringify({ movables: { booth: { wall: "right", t: 0.25 } } }), "#255 T11: a field edit patches just that room");
+  const line = (rowKey: string, ref: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref, unitCost: 1, unitSell: 1, total: qty, swapped: false });
+  const cards = [{ scope: "audio", tier: "better", lines: [line("audio:mixerDsp", "C255-MIX", 1)] }] as unknown as C255T11Card[];
+  const mix = c255T11Layout(moved, cards, { electrics: 2, sets: 6, template: "gym-stage@1" })[0];
+  const fr = c255T11Frame(moved, { template: "gym-stage@1" });
+  ok(mix.x < fr.audience.x && mix.x >= fr.booth.x - 1e-9, "#255 T11: Auto fill puts the FOH mix gear in the Booth wherever it is");
+  const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
+  ok(qd.includes("movables: null") && qd.includes('h.type === "movable"'), "#255 T11: Quick Design's toolbar shows for movable rooms, and Reset puts them home");
+}
+
+async function c255T11MovablesAsyncChecks(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const base = c255T11Default(0);
+  const a = { ...base, venue: "school", templateId: "gym-stage@1", width: 40, wing: 10, depth: 20, houseWidthFt: 120, houseDepthFt: 49.5, movables: { booth: { wall: "left", t: 0.5 } } };
+  const gp = await GP.createProject({ name: "Test255 gym booth", customer: "", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  await GP.saveGridIntake(gp.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Gym", locationName: "HS", address: "", notes: "", autoConfig: a });
+  const sheet = await GP.generateBaseSheet(gp.id, a, "#3a3f4a", "Test Harness", "gym-stage@1");
+  if (sheet) registerFixture("grid_sheets", sheet.id);
+  let p = (await GP.getProject(gp.id))!;
+  ok(p.intake?.baseSheetTemplate === "gym-stage@1" && p.intake?.baseSheetMovables?.booth?.wall === "left" && Math.abs((p.intake?.baseSheetMovables?.booth?.t ?? 0) - 0.5) < 1e-9, "#255 T11: the base sheet stamps the Booth position it was drawn with");
+  ok((p.spaces || []).some((s) => s.name === "Booth" && s.points.every((q) => q.x < 0.2)), "#255 T11: the Booth Space sits where the sheet drew it (left)");
+  await GP.saveGridIntake(gp.id, { ...p.intake!, baseSheetMovables: undefined, autoConfig: { ...a, movables: { booth: { wall: "right", t: 0.5 } } } });
+  p = (await GP.getProject(gp.id))!;
+  ok(p.intake?.baseSheetMovables?.booth?.wall === "left", "#255 T11: re-saving the intake with the Booth moved never moves the stamped sheet's Booth");
+  const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
+  ok(/baseSheetMovables/.test(fill), "#255 T11: Auto fill lays out on the stamped Booth position");
 }

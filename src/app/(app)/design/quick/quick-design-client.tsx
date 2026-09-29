@@ -454,7 +454,7 @@ export default function QuickDesignClient({
 
   /* ---- house walls (auto plan) ---- */
 
-  const resetHouse = () => updA({ houseHalfFt: null, houseWidthFt: null, houseDepthFt: null });
+  const resetHouse = () => updA({ houseHalfFt: null, houseWidthFt: null, houseDepthFt: null, movables: null });
 
   /* ------------------------------ view data ------------------------------ */
 
@@ -905,9 +905,9 @@ export default function QuickDesignClient({
               {!manualMode && view === "plan" && plan && (
                 <div>
                   <div style={{ background: "#fbfbfc", border: "1px solid #f0f1f4", borderRadius: 12, padding: 18 }}>
-                    {plan.isHouse && (
+                    {(plan.isHouse || (plan.handles || []).some((h) => h.type === "movable")) && (
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 14, paddingBottom: 13, borderBottom: "1px solid #f0f1f4" }}>
-                        <span style={{ fontSize: 11, color: "#9aa0ab" }}>Drag the side or back wall to size the room</span>
+                        <span style={{ fontSize: 11, color: "#9aa0ab" }}>{(plan.handles || []).some((h) => h.type === "movable") ? "Drag the walls to size the room, or a room along the walls" : "Drag the side or back wall to size the room"}</span>
                         <span style={{ flex: 1 }} />
                         <button onClick={resetHouse} title="Reset the room to its default size" style={ghostDoorBtn}>Reset house</button>
                       </div>
