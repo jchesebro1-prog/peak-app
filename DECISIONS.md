@@ -7899,3 +7899,24 @@ has since been edited, or a vendor quote's typed total differs from its lines, a
 difference rather than the file silently disagreeing with the estimate. (5) Model number falls back to the catalog
 SKU for a catalog part with no printed model or P/N (many SKUs are the manufacturer's number); a non-catalog part
 with none is left blank.
+
+## D470. Quick Design plan equipment symbols draw at half size, about their own centres (#263, 2026-09-29)
+
+Jeff, after #261 shrank the plan text: "The symbols are still huge and need to drastically be reduced." Every
+per-device glyph on a Quick Design plan now draws at `SYMBOL_SCALE = 0.5` of its builder size: loudspeakers
+(10 × 14 → 5 × 7) and the Arena's line-array stacks, lighting / FOH lighting / electric fixture dots and the Arena's
+rigging points, the console bar, and the screens (Conference, Church). The builders tag each one with `sym: { cx, cy }`
+— the centre it scales about (a line array's three boxes share the stack's centre) — and both renderers (`<PlanSvg>`
+and `renderPlanSvgMarkup`) put `translate(cx cy) scale(0.5) translate(-cx -cy)` on it, so positions stay exactly where
+the layout rules put them and Quick Design, saved Designs, new Grid base sheets and print match. Defaults taken
+without asking: (1) **strokes scale with the glyph** — a symbol is the same drawing, half size (no
+`vector-effect`, which would tie stroke width to screen pixels rather than the zoomable plan); (2) the **CONSOLE word
+is not scaled** — it is text, already at the #261 readability floor; only its bar is; (3) not symbols, unchanged:
+walls and room outlines, pews and seats, line sets, drapes / borders / legs / masking, platforms and riser blocks,
+dimension chains, the FOH MIX box and the drag handles (13-unit grab radius kept). The legend under the plan scales
+its symbol swatches (dot, loudspeaker, a new `screen` swatch) to match; other swatches are unchanged.
+`SPK_CLEAR` (a church loudspeaker's clearance from the Nave's edges) is now the drawn 5 × 7 glyph's half-diagonal +
+0.5 (4.8 px, was 9.1), so speakers can sit closer to the platform front and splays. The pews' clip around the
+CONSOLE mark is unchanged (the word still draws). Grid Auto fill places catalog devices, not these glyphs, and reads
+none of their sizes — unaffected. Grid base sheets already stored keep the SVG (and glyphs) they were generated with.
+

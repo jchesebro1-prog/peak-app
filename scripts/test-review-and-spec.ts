@@ -34636,7 +34636,7 @@ import { distToPoly as c255T8fDist, inPoly as c255T8fIn } from "@/lib/design/ven
   ok(lim.clamped && Math.abs(lim.depthFt - c255T8fRatio * 20) < 1e-9 && Gd.dims.stageDepthFt === lim.depthFt && c255T8fHouse(deep, "church-contemporary@1").warning === c255T8fPlatWarn && Gd.warning === c255T8fPlatWarn && c255T8fMarkup(c255T8fBuild(deep, 8, 3, "#3a3f4a", "church-contemporary@1"), "#3a3f4a").includes(">44'-0&quot;<"), "#255 T8 fix: Contemporary shortens a platform deeper than 2.2 × its width, says so under the field, and dimensions the depth it draws");
   ok(!c255T8fStageDepth({ width: 43, wing: 0, depth: 52 }, "church-contemporary@1").clamped && c255T8fHouse({ ...deep, width: 43 }, "church-contemporary@1").warning === null && c255T8fStageDepth({ width: 20, wing: 0, depth: 52 }, "church-traditional@1").depthFt === 52, "#255 T8 fix: …only when it bites, and only for Contemporary");
 
-  // Reviews 3–4: loudspeakers clear the Nave's edges by their half-diagonal; the FOH mix box is never smaller than
+  // Reviews 3–4: loudspeakers clear the Nave's edges by their half-diagonal (#263: of the drawn 5 × 7 glyph); the FOH mix box is never smaller than
   // MIX_MIN_W and stays inside the Control Booth (with the CONSOLE mark) wherever the booth can hold them.
   const spkBad: string[] = [], mixBad: string[] = [];
   for (const w of [20, 30, 43, 60, 80]) for (const depth of [14, 23, 40]) for (const extra of [24, 78, 150]) for (const nd of [20, 40, 55, 120, 200]) for (const con of [false, true]) {
@@ -34644,7 +34644,7 @@ import { distToPoly as c255T8fDist, inPoly as c255T8fIn } from "@/lib/design/ven
     const st = { ...base, venue: "church", templateId: "church-contemporary@1", width: w, depth, houseWidthFt: nw, houseDepthFt: nd, sys: { ...base.sys, audio: true, controls: con }, ctrl: { ...base.ctrl, console: con } };
     const g = c255T8fGeom(st, "church-contemporary@1"), nave = g.regions.Nave, booth = g.regions["Control Booth"], tag = `${w}/${depth}/${nw}/${nd}${con ? "+console" : ""}`;
     for (const s of g.speakers!)
-      if (!c255T8fIn(nave, s) || c255T8fDist(nave, s) < c255T8fSpkClear - 1e-9 || ![[-5, -7], [5, -7], [-5, 7], [5, 7]].every(([dx, dy]) => c255T8fIn(nave, { x: s.x + dx, y: s.y + dy }) && !c255T8fIn(g.regions.Platform, { x: s.x + dx, y: s.y + dy }))) spkBad.push(tag);
+      if (!c255T8fIn(nave, s) || c255T8fDist(nave, s) < c255T8fSpkClear - 1e-9 || ![[-2.5, -3.5], [2.5, -3.5], [-2.5, 3.5], [2.5, 3.5]].every(([dx, dy]) => c255T8fIn(nave, { x: s.x + dx, y: s.y + dy }) && !c255T8fIn(g.regions.Platform, { x: s.x + dx, y: s.y + dy }))) spkBad.push(tag);
     const m = g.mixBox, corners = [[m.x, m.y], [m.x + m.w, m.y], [m.x, m.y + m.h], [m.x + m.w, m.y + m.h]].map(([x, y]) => ({ x, y }));
     if (m.w < c255T8fMixMin - 0.05) mixBad.push(`${tag} w ${m.w}`);
     // A nave 40' deep or more always holds the box and the mark; shallower ones hold the box alone.
@@ -35880,4 +35880,69 @@ import { defaultAState as c261Default, VENUES as c261Venues } from "@/app/(app)/
   ok(/ref=\{observePlanScale\}/.test(comp) && /new ResizeObserver\(/.test(src) && /ro\.observe\(svg\)/.test(src) && /planTextSize\(1, renderedW \/ vbW\)/.test(src), "#261: <PlanSvg> observes its rendered width (ResizeObserver) and stores its display factor (from renderedWidth / viewBoxWidth) on the svg");
   ok(/fontSize=\{planTextSize\(t\.size, 1, t\.role\)\}/.test(comp) && /calc\(\$\{planTextSize\(t\.size, 1, t\.role\)\}px \* var\(\$\{PLAN_TEXT_VAR\}, 1\)\)/.test(comp), "#261: every <PlanSvg> text sizes through planTextSize with its role (k = 1 before the first measure)");
   ok(!/\buse(State|Effect|Ref|LayoutEffect)\b/.test(src) && !/^["']use client["']/m.test(src), "#261: plan-svg.tsx stays hook-free (no 'use client') — grid-projects.ts and grid-auto-layout.ts import it on the server");
+}
+
+/* --- #263: Quick Design plan equipment symbols draw at half size, about their own centres (D470) --- */
+import { buildPlan as c263Build, churchGeom as c263ChurchGeom, renderPlanSvgMarkup as c263Markup, SPK_CLEAR as c263SpkClear, SYMBOL_SCALE as c263Scale, symbolTransform as c263Transform } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c263Default, SYSCOLOR as c263Sys, VENUES as c263Venues } from "@/app/(app)/design/quick/engine";
+{
+  type At = { cx: number; cy: number } | undefined;
+  type El = { sym?: At; fill?: string; stroke?: string; sw?: number };
+  const S = c263Scale;
+  ok(S === 0.5, "#263: SYMBOL_SCALE is 0.5 — every equipment symbol draws at half its builder size");
+  ok(c263Transform({ cx: 100, cy: 40.5 }) === "translate(100 40.5) scale(0.5) translate(-100 -40.5)" && c263Transform(undefined) === undefined, "#263: symbolTransform scales about the symbol's own centre (translate · scale · translate back); nothing untagged gets a transform");
+  ok(Math.abs(c263SpkClear - (Math.hypot(2.5, 3.5) + 0.5)) < 1e-9, "#263: SPK_CLEAR is the drawn 5 × 7 loudspeaker glyph's half-diagonal plus 0.5 (was 10 × 14's)");
+  const base = c263Default(0);
+  const allOn = { ...base.sys, rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: true };
+  const drape = { draw: true, fullstage: true, border: true, scenerytrack: true, legs: true };
+  const cases: Array<[string, Record<string, unknown>]> = [];
+  for (const v of c263Venues) cases.push([v.key, { ...base, venue: v.key, sys: allOn, ctrl: { ...base.ctrl, console: true }, drape: { ...base.drape, ...drape } }]);
+  cases.push(["church-contemporary", { ...base, venue: "church", templateId: "church-contemporary@1", sys: allOn, ctrl: { ...base.ctrl, console: true } }]);
+  const isSymbol = (e: El, kind: string) =>
+    kind === "circles" || e.stroke === "#3155a8" || e.fill === c263Sys.controls || e.stroke === c263Sys.video;
+  const bad: string[] = [];
+  const kinds = new Set<string>();
+  for (const [tag, a] of cases) {
+    const plan = c263Build(a as never, 8, 3, "#3a3f4a", (a as { templateId?: string }).templateId);
+    let tagged = 0;
+    for (const kind of ["rects", "paths", "lines", "circles"] as const)
+      for (const e of plan[kind] as El[]) {
+        const want = isSymbol(e, kind);
+        if (want !== !!e.sym) bad.push(`${tag} ${kind} ${JSON.stringify(e).slice(0, 80)} sym=${!!e.sym}`);
+        if (e.sym) {
+          tagged++;
+          kinds.add(kind === "circles" ? "dot" : e.stroke === "#3155a8" ? "spk" : e.fill === c263Sys.controls ? "console" : "screen");
+        }
+        // Walls, seats, pews, drapes, platforms, FOH MIX box, dimension lines: never scaled.
+        if (e.sym && (e.stroke === "#3a3f4a" || e.fill === "#e6e8ec" || e.stroke === "#cdd1d9" || e.stroke === c263Sys.curtains || e.stroke === "#9aa0ab" || e.stroke === "#8c919c")) bad.push(`${tag} a non-symbol is scaled`);
+      }
+    // Both renderers: the static markup carries exactly one symbol transform per tagged element.
+    const scales = (c263Markup(plan, "#3a3f4a").match(/transform="translate\([^"]*\) scale\(0\.5\) translate\([^"]*\)"/g) || []).length;
+    if (scales !== tagged || tagged === 0) bad.push(`${tag} markup has ${scales} scaled symbols for ${tagged} tagged`);
+  }
+  ok(bad.length === 0 && ["dot", "spk", "console", "screen"].every((k) => kinds.has(k)), `#263: on every venue kind, exactly the equipment symbols (fixture / rigging dots, loudspeakers + line arrays, the console bar, screens) are tagged and renderPlanSvgMarkup scales each one${bad.length ? " — " + bad.slice(0, 3).join("; ") : ""}`);
+  // A loudspeaker glyph's on-plan box: 10 × 14 builder units → 5 × 7, centred where the layout put it.
+  const flat = c263Build({ ...base, venue: "concenter", sys: allOn } as never, 8, 3, "#3a3f4a");
+  const spk = (flat.rects as Array<{ x: number; y: number; w: number; h: number; stroke: string; sym?: At }>).filter((r) => r.stroke === "#3155a8");
+  const onPlan = spk.map((r) => ({ w: r.w * S, h: r.h * S, x: r.sym!.cx + (r.x - r.sym!.cx) * S, y: r.sym!.cy + (r.y - r.sym!.cy) * S, cx: r.x + r.w / 2, cy: r.y + r.h / 2, sx: r.sym!.cx, sy: r.sym!.cy }));
+  ok(spk.length === 2 && onPlan.every((b) => Math.abs(b.w - 5) < 1e-9 && Math.abs(b.h - 7) < 1e-9 && Math.abs(b.cx - b.sx) < 0.051 && Math.abs(b.cy - b.sy) < 0.051 && Math.abs(b.x + b.w / 2 - b.sx) < 0.051), "#263: a Conference loudspeaker draws 5 × 7 on the plan, about the centre the layout gave it");
+  const ch = { ...base, venue: "church", templateId: "church-contemporary@1", sys: allOn };
+  const chPlan = c263Build(ch as never, 8, 3, "#3a3f4a", "church-contemporary@1"), chG = c263ChurchGeom(ch as never, "church-contemporary@1");
+  const chSpk = (chPlan.paths as Array<{ stroke?: string; sym?: At }>).filter((q) => q.stroke === "#3155a8");
+  ok(chSpk.length === 2 && chSpk.every((q, i) => q.sym!.cx === chG.speakers![i].x && q.sym!.cy === chG.speakers![i].y), "#263: church loudspeakers scale about the speaker points churchGeom placed (SPK_CLEAR from the platform front and splays)");
+  const arena = c263Build({ ...base, venue: "arena", sys: allOn } as never, 8, 3, "#3a3f4a");
+  const arr = (arena.paths as Array<{ stroke?: string; sym?: At }>).filter((q) => q.stroke === "#3155a8");
+  ok(arr.length === 6 && new Set(arr.slice(0, 3).map((q) => JSON.stringify(q.sym))).size === 1 && new Set(arr.slice(3).map((q) => JSON.stringify(q.sym))).size === 1, "#263: each Arena line array's three boxes scale together about the stack's centre");
+  // Drag handles are not symbols: unchanged glyphs and a 13-unit grab radius, no symbol transform.
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/plan-svg.tsx"), "utf8");
+  const comp = src.slice(src.indexOf("export function PlanSvg("), src.indexOf("export function renderPlanSvgMarkup("));
+  const hnd = comp.slice(comp.indexOf("{interactive &&"));
+  ok(/r=\{13\} fill="transparent"/.test(hnd) && /width=\{16\} height=\{16\}/.test(hnd) && /width=\{11\} height=\{30\}/.test(hnd) && /width=\{30\} height=\{11\}/.test(hnd) && !/symbolTransform/.test(hnd), "#263: drag handles keep their size and 13-unit grab radius — never symbol-scaled");
+  ok(["r.sym", "q.sym", "l.sym", "c.sym"].every((k) => comp.includes(`transform={symbolTransform(${k})}`)) && ["r.sym", "q.sym", "l.sym", "c.sym"].every((k) => src.includes(`\${attr("transform", symbolTransform(${k}))}`)), "#263: <PlanSvg> and renderPlanSvgMarkup both put symbolTransform on every rect, path, line and circle");
+  // The legend under the plan reads like the plan: symbol swatches at half size, the rest unchanged.
+  const lg = (plan: { legend?: Array<{ sw: { width?: unknown; height?: unknown }; label: string }> }, label: string) => plan.legend!.find((l) => l.label === label)!.sw;
+  const flatLg = (label: string) => lg(flat, label);
+  const pros = c263Build({ ...base, venue: "school", sys: allOn, drape: { ...base.drape, ...drape } } as never, 8, 3, "#3a3f4a");
+  ok(flatLg("FOH lighting").width === 3.5 && flatLg("FOH lighting").height === 3.5 && flatLg("Loudspeaker").width === 4 && flatLg("Loudspeaker").height === 5 && flatLg("Screen").width === 7 && flatLg("Screen").height === 1.3, "#263: legend symbol swatches (dot, loudspeaker, screen) are half size");
+  ok(flatLg("Platform").width === 12 && flatLg("Seating").width === 8 && lg(pros, "Drape / curtain").width === 14 && lg(pros, "Line set").width === 14, "#263: legend swatches for non-symbols (platform, seating, drape, line set) are unchanged");
 }
