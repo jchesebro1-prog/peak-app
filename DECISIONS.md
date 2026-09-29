@@ -8043,7 +8043,7 @@ stay exact before the CSV prints to the cent. Freight is not added in: the file 
 row, so a system's parts sum to its price less freight. In a system that mixes materials and labor lines, labor's
 share of the adjustment stays with the (unlisted) labor. Unit Cost never changes.
 
-## D480. Parts-list sell carries freight — amends D479 (#278, 2026-09-29)
+## D480. Parts-list sell carries freight — amends D479 (#279, 2026-09-29)
 
 Jeff wants the parts list's sell to include freight. The one scaling factor per system becomes system price ÷ lines'
 sell (D479 used price less freight), so a system's listed parts sum to its whole price. Freight is spread by each

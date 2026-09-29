@@ -7,7 +7,7 @@ import type { SpecItem, SpecSection, VendorQuote } from "./types";
  *  parts consolidated per room + system. Σ qty × Unit Cost equals the
  *  estimate's material cost; per system, Σ qty × Unit Sell equals the
  *  system's price including freight (typed, or rounded up to $25; exact for
- *  a legacy system) less any labor lines' share (#276, #278) — freight has
+ *  a legacy system) less any labor lines' share (#276, #279) — freight has
  *  no row of its own but is carried in the parts' sell.
  *  Pure: no React, no server imports. */
 
@@ -77,7 +77,7 @@ function expand(
     if (section.kind === "labor") continue;
     const room = section.room?.trim() || defaultRoom.trim();
     const system = section.name;
-    // #278: every part's sell scales by the system's price (freight included) ÷ its lines' sell.
+    // #279: every part's sell scales by the system's price (freight included) ÷ its lines' sell.
     const rev = systemItemsRev(section);
     const k0 = rev > 0 ? Math.max(0, systemSellTotal(section)) / rev : 1;
     const k = Number.isFinite(k0) ? k0 : 1;
