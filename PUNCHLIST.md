@@ -9657,3 +9657,27 @@ New spec: known project numbers pre-fill the header. Harness checks added.
 Shell file came from (no Fall Creek 11 61 13 spec was ever saved — the library's 1.2/G numbers 1., 2., 3.); spec
 numbers vs Bray's TOC (MasterFormat has 11 61 23 as Folding and Portable Stages; SP-1002 and SP-1004 are both
 26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61).
+
+---
+
+## 266. Estimator — Copy a system to another estimate (or within this one), re-priced — DONE 2026-09-29 (D476)
+
+**Reported:** Jeff (2026-09-29): "Can we have not only the move to portion of the system estimate but also a copy to
+function so I can just say we are reusing the system and then copy it from one to another and just make sure pulls
+the reprice." Jeff chose: reprice = both (today's catalog cost, then the destination customer's tier); targets = Move's
+plus "within this estimate".
+
+**Done.** Each system card gains **Copy…** beside Move…, opening the same picker: "+ Start a new estimate from a copy",
+"Copy within this estimate", or search any estimate. The source is never changed. The copy is re-priced where it
+lands: catalog parts take today's catalog cost, and an assembly's parts are re-resolved from the Assembly Builder
+(cost overrides kept; a default-priced assembly takes the new list total). Lines that were at the source customer's
+tier land exactly at the destination customer's tier on their new cost; hand-priced lines keep their own margin on the
+new cost. Custom, curtain, allowance, vendor-quote, labor and POR lines keep their cost (still re-tiered when tiered).
+The destination tier is the target estimate's stored tier (else resolved from its customer), or the source customer's
+for a new estimate. A banner says what happened: "Copied to EST-1234 · … — 4 parts updated to today's cost · 12 lines
+re-priced to Gold". A new estimate is named "<system> (copy)"; a copy within the estimate is inserted after the source
+as "<system> (copy)" and persists on Save. Vendor-quote records travel with the same id, so source and copy share the
+attached file (vendor files are never deleted). Move now shares its persistence with Copy
+(`placeSystemInEstimate`) and is otherwise unchanged. Pure `src/app/(app)/estimator/copy-system.ts`
+(`copySectionForTarget`), `copySystemToEstimateAction`, tier helpers exported from `tier-reprice.ts`. Harness `#266`.
+See D476.

@@ -7994,3 +7994,16 @@ header save in flight). The New spec page lists known project numbers; an exact 
 the name is still blank/default — a typed name is never replaced) plus phase, issue date and prepared by, from that
 project's most recently updated spec. Rejected: a separate project-header record read live by every spec — it would
 need a new collection and would stop one spec from ever differing.
+
+## D476. A copied system is re-priced at today's catalog cost, then the destination tier (#266, 2026-09-29)
+
+Jeff picked "both" for "make sure it pulls the reprice". Order matters: the tier verdict is taken on the line's
+ORIGINAL cost and sell against the SOURCE tier (#254's own rule), then the cost moves to today's catalog, then a line
+that was at the source seed is priced at exactly the target seed on the new cost — so a later customer change can
+still recognise it. A hand-priced line (off-seed sell or ext-sell override) keeps its own margin on the new cost rather
+than its dollar sell; a line with no usable margin keeps its sell. A catalog part with no cost today (list-only) is no
+basis for re-costing and is ignored. Assemblies are re-resolved from their fixture record so per-assembly cost
+overrides survive; a component no longer in the catalog keeps the line's own numbers; an assembly still at its default
+sell (Σ component list) takes the new list total, otherwise it keeps its margin. Fixtures are never tier-priced (#254).
+Copying into an estimate that is already Sent is allowed, same as Move. Vendor-quote records are shared by id rather
+than duplicated: their Blob path is keyed by the record id and nothing deletes vendor files.
