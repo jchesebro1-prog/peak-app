@@ -49,8 +49,11 @@ function densifyPath(pts: Pt[], closed: boolean): Pt[] {
   return out.length ? out : pts.slice();
 }
 
-/** #255: a side-to-side map over half-distance a ≥ 0 (see XSpan). */
-export function makeSpanMap(spans: XSpan[], d: StretchDims): (a: number) => number {
+/**
+ * #255: a side-to-side map over half-distance a ≥ 0 (see XSpan). `face` (a profile band's mapped face: drawn
+ * half-width → mapped half-width) places "face" spans' ends.
+ */
+export function makeSpanMap(spans: XSpan[], d: StretchDims, face?: (a: number) => number): (a: number) => number {
   const proHalf = (d.proWidthFt * 12) / 2;
   const wing = Math.max(0, d.wingFt * 12);
   const houseHalf = (d.houseWidthFt * 12) / 2;
@@ -60,19 +63,26 @@ export function makeSpanMap(spans: XSpan[], d: StretchDims): (a: number) => numb
     spans.slice(0, upto).reduce((n, s, i) => n + (s.drive === drive ? len(i) : 0), 0);
   const proK = total("pro") > 0 ? proHalf / total("pro") : 1;
   const wingK = total("wing") > 0 ? wing / total("wing") : 1;
+  const firstAbsorb = spans.findIndex((s) => s.drive === "absorb");
+  if (spans.some((s, i) => s.drive === "face" && (!face || (firstAbsorb >= 0 && i > firstAbsorb))))
+    throw new Error(`venue template: a "face" span needs a profile band's face and comes before any absorb span`);
+  const ks = spans.map((s) => (s.drive === "pro" ? proK : s.drive === "wing" ? wingK : 1));
+  // "face" spans end on the mapped face; every span before them is rigid, so their starts are known in order.
+  for (let i = 0, at = 0; i < spans.length && spans[i].drive !== "absorb"; at += len(i) * ks[i], i++)
+    if (spans[i].drive === "face") ks[i] = len(i) > 0 ? Math.max(0, face!(xs[i + 1]) - at) / len(i) : 1;
   const lastAbsorb = spans.map((s) => s.drive).lastIndexOf("absorb");
   const absorbLen = lastAbsorb < 0 ? 0 : total("absorb", lastAbsorb + 1);
-  const rigid = spans
-    .slice(0, lastAbsorb + 1)
-    .reduce((n, s, i) => n + (s.drive === "pro" ? len(i) * proK : s.drive === "wing" ? len(i) * wingK : s.drive === "fixed" ? len(i) : 0), 0);
+  const rigid = spans.slice(0, lastAbsorb + 1).reduce((n, s, i) => n + (s.drive === "absorb" ? 0 : len(i) * ks[i]), 0);
   const absorbK = absorbLen > 0 ? Math.max(0, houseHalf - rigid) / absorbLen : 1;
-  const k = (s: XSpan) => (s.drive === "pro" ? proK : s.drive === "wing" ? wingK : s.drive === "absorb" ? absorbK : 1);
+  spans.forEach((s, i) => {
+    if (s.drive === "absorb") ks[i] = absorbK;
+  });
   const nx = [0];
-  spans.forEach((s, i) => nx.push(nx[i] + len(i) * k(s)));
+  spans.forEach((s, i) => nx.push(nx[i] + len(i) * ks[i]));
   const last = xs.length - 1;
   return (a: number) => {
     if (a >= xs[last]) return nx[last] + (a - xs[last]);
-    for (let i = 0; i < last; i++) if (a <= xs[i + 1]) return nx[i] + (a - xs[i]) * k(spans[i]);
+    for (let i = 0; i < last; i++) if (a <= xs[i + 1]) return nx[i] + (a - xs[i]) * ks[i];
     return a;
   };
 }
@@ -143,14 +153,29 @@ export function makeXMap(k: TemplateKeys, d: StretchDims): (x: number, y: number
     const ys = keys.map((q) => q.y), my = ys.map(Y);
     const oldHalf = keys.map((q) => q.half);
     const newHalf = keys.map((q) => (q.drive === "pro" ? proHalf : houseHalf));
-    const outside = makeSpanMap(xm.outside, d);
-    // Where the band beside the face ends: the next fixed span's start, else the last span's end.
-    const ends = [0, ...xm.outside.map((s) => s.to)];
-    const anchors = [...xm.outside.flatMap((s, i) => (s.drive === "fixed" ? [ends[i]] : [])), ends[ends.length - 1]].sort((p, q) => p - q);
+    // Per band (the rows from one key down to the next): its outside map — the key's own, else the shared one —
+    // and where the band beside the face ends: the next fixed span's start, else the last span's end.
+    const bands = keys.slice(0, -1).map((q, i) => {
+      const spans = q.outside ?? xm.outside;
+      const lo = keys[i + 1];
+      // This band's face, drawn half-width → mapped half-width (for "face" spans): the drawn row where the face
+      // reaches that half-width, mapped.
+      const face = (a: number) => {
+        if (q.half === lo.half || a < Math.min(q.half, lo.half) - 1e-9 || a > Math.max(q.half, lo.half) + 1e-9)
+          throw new Error(`venue template ${k.kind}: a "face" span ends at ${a}, where the band from y ${q.y} never reaches`);
+        return lerpDesc(Y(q.y + ((a - q.half) * (lo.y - q.y)) / (lo.half - q.half)), my, newHalf);
+      };
+      const ends = [0, ...spans.map((s) => s.to)];
+      const anchors = [...spans.flatMap((s, j) => (s.drive === "fixed" ? [ends[j]] : [])), ends[ends.length - 1]].sort((p, r) => p - r);
+      return { outside: makeSpanMap(spans, d, face), anchors };
+    });
+    // The rows at or above a key's lower neighbour belong to that key's band; below the last key, the last band.
+    const bandAt = (y: number) => bands.find((_, i) => y >= ys[i + 1]) ?? bands[bands.length - 1];
     return (x: number, y: number) => {
       const dx = x - k.cx, a = Math.abs(dx);
       const ho = lerpDesc(y, ys, oldHalf);
       const N = lerpDesc(Y(y), my, newHalf); // the mapped face's half-width at this y
+      const { outside, anchors } = bandAt(y);
       let a2: number;
       // 0.01" (the converter's rounding) counts as on the face.
       if (a <= ho + 0.01) a2 = (a * N) / ho;

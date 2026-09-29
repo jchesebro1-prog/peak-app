@@ -44,3 +44,25 @@ export function rowSpans(poly: Pt[], y: number): Array<[number, number]> {
   for (let i = 0; i + 1 < xs.length; i += 2) out.push([xs[i], xs[i + 1]]);
   return out;
 }
+
+/** #255: whether `p` lies inside `poly` (even-odd). */
+export function inPoly(poly: Pt[], p: Pt): boolean {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+
+/** #255: the distance from `p` to the nearest edge of the closed outline `poly`. */
+export function distToPoly(poly: Pt[], p: Pt): number {
+  let m = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const ab = { x: b.x - a.x, y: b.y - a.y }, L2 = ab.x ** 2 + ab.y ** 2;
+    const t = L2 ? Math.max(0, Math.min(1, ((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / L2)) : 0;
+    m = Math.min(m, Math.hypot(p.x - a.x - t * ab.x, p.y - a.y - t * ab.y));
+  }
+  return m;
+}

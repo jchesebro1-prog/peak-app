@@ -32,9 +32,13 @@ export type YDrive = "fixed" | "stageDepth" | "houseOpen";
  * pro / platform half-width, "wing" spans the wing width, "fixed" spans keep
  * their size, "absorb" spans share whatever is left to reach the house
  * half-width at the end of the last absorb span. Past the last span every
- * point rides along, so outer walls keep 6".
+ * point rides along, so outer walls keep 6". "face" spans (a profile's
+ * per-band `outside` only) end where that band's inside face reaches the same
+ * drawn half-width: the span's end maps to the mapped face there, so a wall
+ * drawn meeting the face still meets it at any size. A "face" span follows
+ * only pro / wing / fixed / face spans.
  */
-export type XDrive = "pro" | "wing" | "fixed" | "absorb";
+export type XDrive = "pro" | "wing" | "fixed" | "absorb" | "face";
 export type XSpan = { to: number; drive: XDrive };
 
 export type XMap =
@@ -46,9 +50,10 @@ export type XMap =
    * #255: a room whose inside face is a y-profile (splayed walls). Keys run top → bottom; between them the drawn
    * half-width is linear in y. A point inside the face scales by new ÷ drawn half-width — the new half-width
    * interpolated in MAPPED y, so a splayed wall stays straight whatever the front-to-back map does. Beyond the
-   * face the `outside` span map applies (the rooms behind a splay, the outer walls).
+   * face the `outside` span map applies (the rooms behind a splay, the outer walls) — or, for the rows from a key
+   * down to the next, that key's own `outside` when it has one (#255 fix: a band's rooms follow its own face).
    */
-  | { kind: "profile"; keys: Array<{ y: number; half: number; drive: "pro" | "house" }>; outside: XSpan[] };
+  | { kind: "profile"; keys: Array<{ y: number; half: number; drive: "pro" | "house"; outside?: XSpan[] }>; outside: XSpan[] };
 
 /**
  * #255: arcs that must stay true circles (an apse, a pointed stage front).

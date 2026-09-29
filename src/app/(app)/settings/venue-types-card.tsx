@@ -10,7 +10,7 @@ import {
   type BuiltInVenueKind,
   type VenueType,
 } from "@/lib/venue-types";
-import { BUILT_IN_SCHEMATIC_LABEL, defaultBackground, templateEntry, templatesFor } from "@/lib/design/venue-templates";
+import { BUILT_IN_SCHEMATIC_LABEL, defaultBackground, templatesFor } from "@/lib/design/venue-templates";
 import { saveVenueTypesAction } from "./actions";
 
 /**
@@ -183,19 +183,15 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
                   const choices = templatesFor(r.worksLike as BuiltInVenueKind);
                   return (
                     <select
-                      value={r.background}
+                      // #255 fix: a type always has its own drawing — a row saved without one shows (and saves) its kind's default.
+                      value={r.background || (choices.length ? (defaultBackground(r.worksLike as BuiltInVenueKind, r.key || null) ?? "") : "")}
                       disabled={choices.length < 2}
                       onChange={(e) => patch(i, { background: e.target.value })}
                       title={choices.length ? "The drawing this type's plans start from." : "No drawing yet for this kind — plans use the built-in schematic."}
                       style={{ ...inS, cursor: choices.length < 2 ? "not-allowed" : "pointer", background: choices.length < 2 ? "#f1f2f5" : "#fff" }}
                     >
-                      {/* Blank = this type's default drawing (saved as that drawing's id). */}
-                      {choices.length ? (
-                        <>
-                          <option value="">Venue type default ({templateEntry(defaultBackground(r.worksLike as BuiltInVenueKind, r.key || null))?.label ?? BUILT_IN_SCHEMATIC_LABEL})</option>
-                          {choices.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-                        </>
-                      ) : <option value="">{BUILT_IN_SCHEMATIC_LABEL}</option>}
+                      {/* No blank option here (#255 fix): a blank "follow the type" choice belongs to a design's own select; this IS the type's drawing. */}
+                      {choices.length ? choices.map((t) => <option key={t.id} value={t.id}>{t.label}</option>) : <option value="">{BUILT_IN_SCHEMATIC_LABEL}</option>}
                     </select>
                   );
                 })()}

@@ -13,7 +13,7 @@ import { LIM, SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from 
 import { churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
 import { resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
-import { boxOf, canvasOf, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
+import { boxOf, canvasOf, distToPoly, inPoly, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
 
 /* ------------------------------ primitive types ------------------------------ */
 
@@ -80,9 +80,8 @@ function dimV(L: L, ay: number, by: number, x: number, label: string) {
 }
 
 /** center FOH mix position — seats removed mid-house for the front-of-house console */
-function mixPos(L: L, cx: number, yc: number, w: number, text = "FOH MIX") {
+function mixPos(L: L, cx: number, yc: number, w: number, text = "FOH MIX", hh = 9) {
   const hw = w / 2;
-  const hh = 9;
   const d = "M " + R(cx - hw) + " " + R(yc - hh) + " h " + R(w) + " v " + R(hh * 2) + " h " + R(-w) + " Z";
   L.paths.push({ d, fill: "#ffffff", stroke: "none", dash: "" });
   L.paths.push({ d, fill: "none", stroke: "#9aa0ab", sw: 1.2, dash: "4 3" });
@@ -191,6 +190,25 @@ export function prosGeom(s: AState, tpl?: string | null) {
 
 export type ChurchGeom = ReturnType<typeof churchGeom>;
 
+/** #255 fix: the narrowest a FOH mix box in a booth room gets (px) — room for "FOH". */
+export const MIX_MIN_W = 26;
+/** #255 fix: the width (px) the CONSOLE mark takes beside a FOH mix box ("CONSOLE" at 6 px). */
+const CONSOLE_SIDE_W = 26;
+/** #255 fix: a loudspeaker glyph's centre stays this far (px) from the edges of the room it stands in — its half-diagonal plus 0.5. */
+export const SPK_CLEAR = Math.hypot(5, 7) + 0.5;
+
+/** The nearest point to `p` (rings every 0.5 px, 5° apart, out to 80 px) inside `poly` and `clear` px from its edges; `p` when none. */
+function clearSpot(poly: XY[], p: XY, clear: number): XY {
+  const ok = (q: XY) => inPoly(poly, q) && distToPoly(poly, q) >= clear;
+  if (ok(p)) return p;
+  for (let r = 0.5; r <= 80; r += 0.5)
+    for (let k = 0; k < 72; k++) {
+      const q = { x: R(p.x + r * Math.cos((k * 5 * Math.PI) / 180)), y: R(p.y + r * Math.sin((k * 5 * Math.PI) / 180)) };
+      if (ok(q)) return q;
+    }
+  return p;
+}
+
 /**
  * Shared church groundplan geometry (#255): a church-family template (Jeff's
  * Church Traditional drawing by default) stretched to the platform and nave
@@ -222,9 +240,56 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const mix = boothRoom
     ? { x: R(boothRoom.x + boothRoom.w / 2), y: R(Math.min(boothRoom.y + boothRoom.h * 0.45, boothRoom.y + boothRoom.h - 12 - (consoleOn ? 16 : 0))) }
     : pt("mix");
-  const room = boothPoly ? rowSpans(boothPoly, mix.y - 9).reduce((w, [l, r]) => (l <= mix.x && r >= mix.x ? Math.min(mix.x - l, r - mix.x) * 2 : w), 0) : 0;
-  const mixW = boothRoom ? Math.max(0, Math.min(boothRoom.w * 0.45, 86, room - 6)) : Math.min((naveR.x - naveL.x) * 0.3, 86);
-  const mixBox: Box = { x: R(mix.x - mixW / 2), y: R(mix.y - 9), w: R(mixW), h: 18 };
+  const roomAt = (y: number) => (boothPoly ? rowSpans(boothPoly, y).reduce((w, [l, r]) => (l <= mix.x && r >= mix.x ? Math.min(mix.x - l, r - mix.x) * 2 : w), 0) : 0);
+  let mixW = boothRoom ? Math.max(0, Math.min(boothRoom.w * 0.45, 86, roomAt(mix.y - 9) - 6)) : Math.min((naveR.x - naveL.x) * 0.3, 86);
+  // The CONSOLE mark (when on): its bar's centre x and top y — under the box by default (bar 3 px below it, the word 11 px under the bar).
+  let consoleSide = false, mixH = 18;
+  // The booth room's own label (drawn low in the room), padded — the box and the CONSOLE mark keep off it.
+  const lab = boothPoly ? C.labels.find((l) => inPoly(boothPoly, { x: l.x + (l.text.length * LABEL_CHAR_PX) / 2, y: l.y + l.h - 3 })) : undefined;
+  const labBox = lab ? { x0: lab.x - 3, x1: lab.x + lab.text.length * LABEL_CHAR_PX + 3, y0: lab.y + lab.h - 7, y1: lab.y + lab.h + 2 } : null;
+  const onLabel = (x0: number, x1: number, y0: number, y1: number) => !!labBox && x0 < labBox.x1 && x1 > labBox.x0 && y0 < labBox.y1 && y1 > labBox.y0;
+  if (boothRoom && (mixW < MIX_MIN_W || onLabel(mix.x - Math.max(mixW, 30) / 2, mix.x + Math.max(mixW, 30) / 2, mix.y - 9, mix.y + 9 + (consoleOn ? 16 : 0)))) {
+    // #255 fix: the booth is too narrow at that height, or the box would sit on the room's label (a short nave,
+    // perhaps under a wide one: a flat, wide triangle). The box moves to the height where the room is widest for
+    // it — centred in the room across the rows it spans, beside the label on the label's rows — never narrower
+    // than MIX_MIN_W, trying in turn: 18 px tall with the CONSOLE mark under it; 18 px with the mark beside it
+    // (CONSOLE_SIDE_W + 4 px more width); 12 px with the mark beside it. Nothing clear of the label: the usual
+    // spot if it was wide enough; else the same tiers over the label, then 12 px alone with the mark under it and
+    // past the room (a nave 20–30' deep). A booth too small even for that (a 20' nave ~170' wider than the
+    // platform) keeps the minimum 12-px box at its roomiest height — the only case the box leaves the room.
+    const want = Math.max(MIX_MIN_W, Math.min(boothRoom.w * 0.45, 86));
+    const runAt = (y: number) => rowSpans(boothPoly!, y).reduce((b, r) => (r[1] - r[0] > b[1] - b[0] ? r : b), [0, 0]);
+    const place = (hh: number, under: number, extra: number, avoid = true) => {
+      let best = { x: mix.x, y: mix.y, w: -Infinity, hh, side: extra > 0 };
+      for (let y = boothRoom.y + hh; y <= boothRoom.y + boothRoom.h - hh - under + 1e-9; y += 0.5) {
+        const top = runAt(y - hh), bot = runAt(y + hh + under);
+        let l = Math.max(top[0], bot[0]), r = Math.min(top[1], bot[1]);
+        if (avoid && labBox && y - hh < labBox.y1 && y + hh + under > labBox.y0) {
+          if (labBox.x0 - l >= r - labBox.x1) r = Math.min(r, labBox.x0);
+          else l = Math.max(l, labBox.x1);
+        }
+        const w = Math.min(want, r - l - 6 - extra);
+        if (w > best.w + 1e-9 || (Math.abs(w - best.w) <= 1e-9 && Math.abs(y - mix.y) < Math.abs(best.y - mix.y))) best = { ...best, x: (l + r) / 2, y, w };
+      }
+      return best;
+    };
+    const side = consoleOn ? CONSOLE_SIDE_W + 4 : 0;
+    const tiers = (avoid: boolean) => (consoleOn ? [place(9, 16, 0, avoid), place(9, 0, side, avoid), place(6, 0, side, avoid)] : [place(9, 0, 0, avoid), place(6, 0, 0, avoid)]);
+    const clear = tiers(true).find((t) => t.w >= MIX_MIN_W);
+    const any = clear || mixW >= MIX_MIN_W ? [] : [...tiers(false), ...(consoleOn ? [place(6, 0, 0, false)] : [])];
+    const best = clear ?? any.find((t) => t.w >= MIX_MIN_W) ?? any[any.length - 1];
+    if (best) {
+      if (best.w > -Infinity) Object.assign(mix, { x: R(best.x), y: R(best.y) });
+      mixW = Math.max(MIX_MIN_W, best.w);
+      mixH = 2 * best.hh;
+      consoleSide = best.side;
+      // Side by side: the row (box, 4 px, mark) centred in the room.
+      if (consoleSide) mix.x = R(mix.x - side / 2);
+    }
+  }
+  const mixBox: Box = { x: R(mix.x - mixW / 2), y: R(mix.y - mixH / 2), w: R(mixW), h: mixH };
+  const mixText = boothRoom && mixW < 7 * LABEL_CHAR_PX + 4 ? "FOH" : "FOH MIX";
+  const consoleAt = !consoleOn ? null : consoleSide ? { x: R(mixBox.x + mixBox.w + 4 + CONSOLE_SIDE_W / 2), y: R(mix.y - 5.5) } : { x: mixBox.x + mixBox.w / 2, y: mixBox.y + mixBox.h + 3 };
   const platform = boxOf(regions[keys.roles.stage]);
   const nave = boxOf(regions[keys.roles.house]);
   const booth = boothRoom ?? mixBox;
@@ -237,8 +302,10 @@ export function churchGeom(s: AState, tpl?: string | null) {
   for (let y = yBack + 0.5; y <= yFront - 0.5 && covers(y); y += 0.5) yStage = y;
   if (yStage >= yFront - 1) yStage = yFront;
   const stageBox: Box = { x: platBackL.x, y: yBack, w: platBackR.x - platBackL.x, h: yStage - yBack };
-  // Where the loudspeakers stand, when the template says (else buildPlanChurch's Traditional notch rule).
-  const speakers = keys.points.spkL && keys.points.spkR ? [pt("spkL"), pt("spkR")] : null;
+  // Where the loudspeakers stand, when the template says (else buildPlanChurch's Traditional notch rule). #255 fix:
+  // the glyph (10 × 14 px) stays clear of the Nave's edges — the Platform's front and the splays — so a plan drawn
+  // at a smaller scale moves the left one to the nearest spot that clears them, and mirrors it for the right.
+  const speakers = keys.points.spkL && keys.points.spkR ? [clearSpot(regions[keys.roles.house], pt("spkL"), SPK_CLEAR)].flatMap((l) => [l, { x: R(2 * centre.x - l.x), y: l.y }]) : null;
   const pews: Array<{ x1: number; x2: number; y: number }> = [];
   const half = 2.5 * ppf;
   // The aisle-side ends round away from the aisle, so a 0.1-px rounding never narrows it.
@@ -264,7 +331,7 @@ export function churchGeom(s: AState, tpl?: string | null) {
     template: id, W, H, ppi, ppf, dims, warning: houseDims(s, id).warning,
     cx: centre.x, yTop: MT, yBack, yFront, yNaveBack, xMin: ML,
     platBackL, platBackR, platFrontL: pt("platFrontL"), platFrontR: pt("platFrontR"),
-    naveL, naveR, mix, mixBox, aisle, speakers,
+    naveL, naveR, mix, mixBox, mixText, consoleAt, aisle, speakers,
     platform, nave, booth, stage: platform, stageBox, pews,
     regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
     polylines: C.polylines, labels: C.labels,
@@ -496,19 +563,21 @@ function buildPlanChurch(s: AState, _lineSets: number, _electrics: number, accen
   const spk = G.speakers ?? [G.platFrontL, G.platFrontR].map((p, i) => ({ x: p.x + (i ? 13 : -13), y: p.y - 2 * G.ppf }));
   if (s.sys.audio) spk.forEach((p) => L.paths.push({ d: rbox(p.x - 5, p.y - 7, 10, 14, 2), fill: "#eef0f3", stroke: "#3155a8", sw: 1.2 }));
   for (const p of G.pews) L.lines.push({ x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: "#cdd1d9", sw: 1.4, dash: "" });
-  mixPos(L, G.mix.x, G.mix.y, G.mixBox.w);
-  if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
-    // Under the FOH mix box — in the Nave, or in the booth room when the template has one.
-    const bx = G.mixBox, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
-    L.paths.push({ d: box(bcx - cw / 2, bx.y + bx.h + 3, cw, 4.5), fill: SYSCOLOR.controls, stroke: "none" });
-    L.texts.push({ x: R(bcx), y: R(bx.y + bx.h + 14), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
+  mixPos(L, G.mix.x, G.mix.y, G.mixBox.w, G.mixText, G.mixBox.h / 2);
+  if (G.consoleAt) {
+    // Under the FOH mix box — in the Nave, or in the booth room when the template has one (#255 fix: beside it in a booth too shallow for both).
+    const cw = Math.min(R(G.mixBox.w * 0.38), 30), c = G.consoleAt;
+    L.paths.push({ d: box(c.x - cw / 2, c.y, cw, 4.5), fill: SYSCOLOR.controls, stroke: "none" });
+    L.texts.push({ x: R(c.x), y: R(c.y + 11), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
   }
   // #255: drag handles — each side wall sets nave width, the back wall nave depth
   handles.push({ type: "wall", side: "L", cx: G.handles.sideL.x, cy: G.handles.sideL.y, shape: "wall" });
   handles.push({ type: "wall", side: "R", cx: G.handles.sideR.x, cy: G.handles.sideR.y, shape: "wall" });
   handles.push({ type: "wall", side: "B", cx: G.handles.back.x, cy: G.handles.back.y, shape: "backWall" });
   dimH(L, G.platBackL.x, G.platBackR.x, G.yTop - 26, s.width + "'-0\"", false);
-  dimV(L, G.yBack, G.yFront, G.xMin - 32, s.depth + "'-0\"");
+  // #255 fix: a platform the drawing shortened (Contemporary's depth limit) prints the depth it draws.
+  const platDepth = G.dims.stageDepthFt < s.depth ? Math.floor(Math.round(G.dims.stageDepthFt * 12) / 12) + "'-" + (Math.round(G.dims.stageDepthFt * 12) % 12) + '"' : s.depth + "'-0\"";
+  dimV(L, G.yBack, G.yFront, G.xMin - 32, platDepth);
   dimV(L, G.yFront, G.yNaveBack, G.xMin - 32, Math.round(G.dims.houseDepthFt) + "'-0\"");
   dimH(L, G.naveL.x, G.naveR.x, G.H - 18, Math.round(G.dims.houseWidthFt) + "'-0\"", false);
   return { W: G.W, H: G.H, ...L, handles };

@@ -24,17 +24,29 @@ export const CHURCH_CONTEMPORARY_KEYS: TemplateKeys = {
   x: {
     kind: "profile",
     // The inside face: ±255.939 at the platform's back wall and at the back wall, ±728.694 at the widest point.
+    // Behind the upper splays (#255 fix): the Green Room / Electrical Room span ends where the splay meets the B/D
+    // wall (±480.137, drawn y 51.936) lands — so that wall always ends on its splay, whatever the platform and nave
+    // depths (a fixed share of the width let a deep platform over a short nave fold the map, rooms into the
+    // Platform) — the B/D wall (→ 486.137) stays 6", the corner Storage rooms absorb out to the widest point.
     keys: [
-      { y: 276.134, half: 255.939, drive: "pro" },
+      {
+        y: 276.134,
+        half: 255.939,
+        drive: "pro",
+        outside: [
+          { to: 255.939, drive: "pro" },
+          { to: 480.137, drive: "face" },
+          { to: 486.137, drive: "fixed" },
+          { to: 728.694, drive: "absorb" },
+        ],
+      },
       { y: -196.621, half: 728.694, drive: "house" },
       { y: -669.376, half: 255.939, drive: "pro" },
     ],
-    // Behind the splays: the Green Room / Electrical Room side absorbs, the B/D wall (±480.137 → 486.137) stays 6",
-    // the corner Storage rooms absorb out to the widest point; the outer walls ride along.
+    // Behind the lower splays no wall stands square to the centreline (the F/G, H/I walls are redrawn 45° walls):
+    // the Storage / Control Booth / Cry Room side blends from the splay to the widest point; outer walls ride along.
     outside: [
       { to: 255.939, drive: "pro" },
-      { to: 480.137, drive: "absorb" },
-      { to: 486.137, drive: "fixed" },
       { to: 728.694, drive: "absorb" },
     ],
   },

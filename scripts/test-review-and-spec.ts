@@ -34514,7 +34514,10 @@ import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
   const cf = c255T3Fields({ width: 43, wing: 0 }, "church-contemporary@1")!;
   ok(cf.rows.map((r) => `${r.label}:${r.lim.join("-")}`).join("|") === "Nave width:67-250|Nave depth:20-200" && cf.rows[0].v === 121 && cf.rows[1].v === 55 && cf.warning === null, "#255 T8: the dimension panels show Nave width (platform + 24' to 250') and Nave depth (20–200') for Contemporary, at the drawing's 121' × 55'");
   ok(c255T8Effective("church", { venueType: "church", templateId: null }, types) === "church-contemporary@1" && c255T8Effective("church", { venueType: "church", templateId: "" }, types) === "church-contemporary@1", "#255 T8: clearing a design's Background (the blank option) returns it to its venue type's");
-  ok(["src/app/(app)/settings/venue-types-card.tsx", "src/components/design/scope-inputs-panel.tsx", "src/app/(app)/design/grid/[id]/grid-intake.tsx"].every((f) => /<option value="">Venue type default \(/.test(readFileSync(f, "utf8"))) && ["src/components/design/scope-inputs-panel.tsx", "src/app/(app)/design/grid/[id]/grid-intake.tsx"].every((f) => /<select value=\{sanitizeTemplateId\(venue\.kind, (value|a)\.templateId\) \?\? ""\}/.test(readFileSync(f, "utf8"))), "#255 T8: every Background select offers a blank 'Venue type default (…)' option, and the design selects show the override, not the effective drawing");
+  ok(["src/components/design/scope-inputs-panel.tsx", "src/app/(app)/design/grid/[id]/grid-intake.tsx"].every((f) => /<option value="">Venue type default \(/.test(readFileSync(f, "utf8"))) && ["src/components/design/scope-inputs-panel.tsx", "src/app/(app)/design/grid/[id]/grid-intake.tsx"].every((f) => /<select value=\{sanitizeTemplateId\(venue\.kind, (value|a)\.templateId\) \?\? ""\}/.test(readFileSync(f, "utf8"))), "#255 T8: every per-design Background select offers a blank 'Venue type default (…)' option, and shows the override, not the effective drawing");
+  // T8 fix (review 6): Settings sets a type's OWN drawing — no blank option; a row saved without one shows its kind's default.
+  const vtc = readFileSync("src/app/(app)/settings/venue-types-card.tsx", "utf8");
+  ok(!/Venue type default/.test(vtc) && /value=\{r\.background \|\| \(choices\.length \? \(defaultBackground\(/.test(vtc), "#255 T8 fix: the Settings Background select lists only drawings (no blank 'Venue type default'), showing the kind's default for a row saved without one");
 
   const base = c255T8Default(0);
   const a = { ...base, venue: "church", width: 43, depth: 23, templateId: "church-contemporary@1", sys: { ...base.sys, lighting: true, audio: true } };
@@ -34536,13 +34539,118 @@ import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
     return (
       spk.length === 2 && spk.every((s) => [[-2, 0], [8, 0], [-2, 14], [8, 14]].every(([dx, dy]) => inPoly(g.regions.Nave, +s[1] + dx, +s[2] + dy) && !inPoly(g.regions.Platform, +s[1] + dx, +s[2] + dy))) &&
       [[m.x, m.y], [m.x + m.w, m.y], [m.x, m.y + m.h], [m.x + m.w, m.y + m.h]].every(([x, y]) => inPoly(booth, x, y)) &&
-      !!con && inPoly(booth, +con[1], +con[2]) && svg.includes(">FOH MIX<")
+      !!con && inPoly(booth, +con[1], +con[2]) && svg.includes(">" + g.mixText + "<") && (g.mixText === "FOH MIX") === (m.w >= 7 * 4.9 + 4) // T8 fix: "FOH" where "FOH MIX" won't fit
     );
   });
   ok(marks, "#255 T8: Contemporary loudspeakers stand in the Nave beside the platform; the FOH mix box and the CONSOLE mark sit inside the Control Booth — default, small, wide, deep, deep-platform");
   const fr = c255T8Frame(a, { template: "church-contemporary@1" });
   ok(Math.abs(fr.booth.x - G.booth.x / G.W) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#255 T8: Auto fill sends the FOH mix gear to the Control Booth");
   ok([...c255T8Spaces].length === 11 && G.spaces.map((r) => G.regionLabels[r]).filter((t) => t === "Storage").length === 4, "#255 T8: eleven starter Spaces, four of them Storage");
+}
+
+/* --- #255 T8 fix: Contemporary never folds, the pointed front stays clear of the splays, the marks fit their rooms --- */
+import { CHURCH_CONTEMPORARY_KEYS as c255T8fKeys } from "@/lib/design/venue-templates/church-contemporary.keys";
+import { makeSpanMap as c255T8fSpan, makeXMap as c255T8fX } from "@/lib/design/venue-templates/stretch";
+import { stretchById as c255T8fStretch } from "@/lib/design/venue-templates/templates";
+import { CONTEMPORARY_PLATFORM_DEPTH_RATIO as c255T8fRatio, CONTEMPORARY_PLATFORM_WARNING as c255T8fPlatWarn, houseDims as c255T8fHouse, stageDepthFor as c255T8fStageDepth } from "@/lib/design/venue-templates/house-dims";
+import { buildPlan as c255T8fBuild, churchGeom as c255T8fGeom, MIX_MIN_W as c255T8fMixMin, renderPlanSvgMarkup as c255T8fMarkup, SPK_CLEAR as c255T8fSpkClear } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as c255T8fDefault } from "@/app/(app)/design/quick/engine";
+import { distToPoly as c255T8fDist, inPoly as c255T8fIn } from "@/lib/design/venue-templates/canvas";
+{
+  type P = { x: number; y: number };
+  const K = c255T8fKeys;
+  const selfX = (poly: P[]) => {
+    const cr = (o: P, a: P, b: P) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    for (let i = 0; i < poly.length; i++)
+      for (let j = i + 2; j < poly.length; j++) {
+        if (i === 0 && j === poly.length - 1) continue;
+        const p1 = poly[i], p2 = poly[i + 1], p3 = poly[j], p4 = poly[(j + 1) % poly.length];
+        const d1 = cr(p3, p4, p1), d2 = cr(p3, p4, p2), d3 = cr(p1, p2, p3), d4 = cr(p1, p2, p4);
+        if (((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) && ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9))) return true;
+      }
+    return false;
+  };
+  // Review 1: a legal sweep — platform 20–80' wide, 14' up to its depth limit, nave platform + 24' to 250' wide and
+  // 20–200' deep. Every row of the side-to-side map is monotonic (no fold), no room's outline reaches into the
+  // Platform or the Nave, and no outline crosses itself (review 2: the pointed front never loops past a splay).
+  const rooms = ["Backstage", "storage-1", "storage-2", "Green Room", "Electrical Room", "storage-3", "Control Booth", "storage-4", "Cry Room"];
+  const bad: string[] = [];
+  let cases = 0;
+  for (const pw of [20, 30, 43, 80]) for (const sdWant of [14, 23, 35, 52]) for (const extra of [24, 78, 170]) for (const nd of [20, 55, 200]) {
+    const nw = Math.min(250, pw + extra), sd = c255T8fStageDepth({ width: pw, wing: 0, depth: sdWant }, "church-contemporary@1").depthFt;
+    const d = { proWidthFt: pw, stageDepthFt: sd, houseWidthFt: nw, houseDepthFt: nd, wingFt: 0, pit: false };
+    const X = c255T8fX(K, d), plan = c255T8fStretch("church-contemporary@1", d), tag = `${pw}/${sd.toFixed(1)}/${nw}/${nd}`;
+    cases++;
+    let fold = 0;
+    for (let y = 405; y > -680; y -= 5) {
+      let prev = -Infinity;
+      for (let a = 0; a <= 745; a += 0.5) {
+        const m = X(K.cx + a, y) - K.cx;
+        if (m < prev - 1e-9) fold = Math.max(fold, prev - m);
+        else prev = m;
+      }
+    }
+    if (fold > 1e-6) bad.push(`${tag} folds ${fold.toFixed(3)}"`);
+    for (const r of rooms) {
+      const into = plan.regions[r].filter((p) => (c255T8fIn(plan.regions.Platform, p) || c255T8fIn(plan.regions.Nave, p)) && Math.min(c255T8fDist(plan.regions.Platform, p), c255T8fDist(plan.regions.Nave, p)) > 0.01);
+      if (into.length) bad.push(`${tag} ${r} reaches into the Platform/Nave`);
+    }
+    for (const [r, poly] of Object.entries(plan.regions)) if (selfX(poly)) bad.push(`${tag} ${r} crosses itself`);
+  }
+  ok(cases === 144 && bad.length === 0, `#255 T8 fix: over ${cases} legal Contemporary sizes the map never folds, no room reaches into the Platform or Nave, no outline crosses itself (${bad.slice(0, 3).join("; ")})`);
+  // The fold's own case (a 35'-deep platform over a 27.7' nave) now meets the B/D wall on its splay.
+  {
+    const d = { proWidthFt: 43, stageDepthFt: 35, houseWidthFt: 121, houseDepthFt: 27.7, wingFt: 0, pit: false };
+    const plan = c255T8fStretch("church-contemporary@1", d), X = c255T8fX(K, d);
+    const A = plan.map(K.walls![0].ref[0]), B = plan.map(K.walls![0].ref[1]);
+    const wallX = X(K.cx - 480.137, 200), yOnSplay = A.y + ((B.y - A.y) * (wallX - A.x)) / (B.x - A.x);
+    ok(Math.abs(plan.map({ x: K.cx - 480.137, y: 51.936 }).y - yOnSplay) < 1e-6 && Math.abs(X(K.cx - 480.137, 51.936) - wallX) < 1e-6, "#255 T8 fix: the B/D wall stays vertical and ends where it meets its splay, however deep the platform over however short a nave");
+  }
+  // The engine: a "face" span needs a profile band and must come before any absorb span.
+  const dd = { proWidthFt: 20, wingFt: 0, stageDepthFt: 20, houseWidthFt: 80, houseDepthFt: 40, pit: false };
+  let threw = 0;
+  for (const f of [() => c255T8fSpan([{ to: 10, drive: "face" }], dd), () => c255T8fSpan([{ to: 10, drive: "absorb" }, { to: 20, drive: "face" }], dd, (a) => a)])
+    try {
+      f();
+    } catch {
+      threw++;
+    }
+  const fm = c255T8fSpan([{ to: 10, drive: "pro" }, { to: 30, drive: "face" }, { to: 36, drive: "fixed" }, { to: 50, drive: "absorb" }], dd, (a) => a * 10);
+  ok(threw === 2 && Math.abs(fm(10) - 120) < 1e-9 && Math.abs(fm(30) - 300) < 1e-9 && Math.abs(fm(36) - 306) < 1e-9 && Math.abs(fm(50) - 480) < 1e-9 && Math.abs(fm(60) - 490) < 1e-9, "#255 T8 fix: a 'face' span ends on its band's mapped face, rigid spans after it keep their size, absorb spans take the rest; misuse throws");
+
+  // Review 2: the platform depth limit — a 20'-wide platform draws at most 44' deep, with the warning; Traditional has none.
+  const lim = c255T8fStageDepth({ width: 20, wing: 0, depth: 52 }, "church-contemporary@1");
+  const base = c255T8fDefault(0);
+  const deep = { ...base, venue: "church", width: 20, depth: 52, templateId: "church-contemporary@1" };
+  const Gd = c255T8fGeom(deep, "church-contemporary@1");
+  ok(lim.clamped && Math.abs(lim.depthFt - c255T8fRatio * 20) < 1e-9 && Gd.dims.stageDepthFt === lim.depthFt && c255T8fHouse(deep, "church-contemporary@1").warning === c255T8fPlatWarn && Gd.warning === c255T8fPlatWarn && c255T8fMarkup(c255T8fBuild(deep, 8, 3, "#3a3f4a", "church-contemporary@1"), "#3a3f4a").includes(">44'-0&quot;<"), "#255 T8 fix: Contemporary shortens a platform deeper than 2.2 × its width, says so under the field, and dimensions the depth it draws");
+  ok(!c255T8fStageDepth({ width: 43, wing: 0, depth: 52 }, "church-contemporary@1").clamped && c255T8fHouse({ ...deep, width: 43 }, "church-contemporary@1").warning === null && c255T8fStageDepth({ width: 20, wing: 0, depth: 52 }, "church-traditional@1").depthFt === 52, "#255 T8 fix: …only when it bites, and only for Contemporary");
+
+  // Reviews 3–4: loudspeakers clear the Nave's edges by their half-diagonal; the FOH mix box is never smaller than
+  // MIX_MIN_W and stays inside the Control Booth (with the CONSOLE mark) wherever the booth can hold them.
+  const spkBad: string[] = [], mixBad: string[] = [];
+  for (const w of [20, 30, 43, 60, 80]) for (const depth of [14, 23, 40]) for (const extra of [24, 78, 150]) for (const nd of [20, 40, 55, 120, 200]) for (const con of [false, true]) {
+    const nw = Math.min(250, w + extra);
+    const st = { ...base, venue: "church", templateId: "church-contemporary@1", width: w, depth, houseWidthFt: nw, houseDepthFt: nd, sys: { ...base.sys, audio: true, controls: con }, ctrl: { ...base.ctrl, console: con } };
+    const g = c255T8fGeom(st, "church-contemporary@1"), nave = g.regions.Nave, booth = g.regions["Control Booth"], tag = `${w}/${depth}/${nw}/${nd}${con ? "+console" : ""}`;
+    for (const s of g.speakers!)
+      if (!c255T8fIn(nave, s) || c255T8fDist(nave, s) < c255T8fSpkClear - 1e-9 || ![[-5, -7], [5, -7], [-5, 7], [5, 7]].every(([dx, dy]) => c255T8fIn(nave, { x: s.x + dx, y: s.y + dy }) && !c255T8fIn(g.regions.Platform, { x: s.x + dx, y: s.y + dy }))) spkBad.push(tag);
+    const m = g.mixBox, corners = [[m.x, m.y], [m.x + m.w, m.y], [m.x, m.y + m.h], [m.x + m.w, m.y + m.h]].map(([x, y]) => ({ x, y }));
+    if (m.w < c255T8fMixMin - 0.05) mixBad.push(`${tag} w ${m.w}`);
+    // A nave 40' deep or more always holds the box and the mark; shallower ones hold the box alone.
+    if (nd >= 40 && (!corners.every((p) => c255T8fIn(booth, p)) || (g.consoleAt && !c255T8fIn(booth, { x: g.consoleAt.x, y: g.consoleAt.y + 11 })))) mixBad.push(`${tag} leaves the booth`);
+    if (nd < 40 && !(nd === 20 && extra === 150) && !corners.every((p) => c255T8fIn(booth, p))) mixBad.push(`${tag} box leaves the booth`);
+  }
+  ok(spkBad.length === 0, `#255 T8 fix: every Contemporary loudspeaker glyph sits inside the Nave, its centre ≥ ${c255T8fSpkClear.toFixed(2)} px from the platform front and splays (${spkBad.slice(0, 3).join(", ")})`);
+  ok(mixBad.length === 0, `#255 T8 fix: the FOH mix box is never under ${c255T8fMixMin} px wide and stays in the Control Booth — with the CONSOLE mark from a 40'-deep nave up (${mixBad.slice(0, 3).join(", ")})`);
+  const flat = c255T8fGeom({ ...base, venue: "church", templateId: "church-contemporary@1", width: 70, depth: 14, houseWidthFt: 240, houseDepthFt: 20 }, "church-contemporary@1");
+  ok(flat.mixBox.w >= c255T8fMixMin && flat.mixText === "FOH" && [[0, 0], [1, 0], [0, 1], [1, 1]].every(([i, j]) => c255T8fIn(flat.regions["Control Booth"], { x: flat.mixBox.x + i * flat.mixBox.w, y: flat.mixBox.y + j * flat.mixBox.h })), "#255 T8 fix: a 14' platform in a wide, shallow nave (its booth a flat sliver) keeps a visible FOH box inside the booth, reading 'FOH' where 'FOH MIX' won't fit");
+
+  // Review 5: at the drawing's own size the Electrical Room label's glyphs (Plex Mono, 0.6 em advance, 0.7 em caps at 8 px) sit inside its room.
+  const g0 = c255T8fGeom({ ...base, venue: "church", templateId: "church-contemporary@1", width: 43, depth: 23 }, "church-contemporary@1");
+  const el = g0.labels.find((l) => l.text === "Electrical Room")!, room = g0.regions["Electrical Room"], adv = 0.6 * 8, base0 = el.y + el.h;
+  const glyphs = [{ x: el.x, y: base0 }, { x: el.x + 15 * adv, y: base0 }, { x: el.x, y: base0 - 5.6 }, { x: el.x + 15 * adv, y: base0 - 5.6 }];
+  ok(glyphs.every((p) => c255T8fIn(room, p) || c255T8fDist(room, p) < 0.5) && c255T8fIn(room, glyphs[1]) && c255T8fIn(room, glyphs[3]), "#255 T8 fix: the Electrical Room label sits inside its room at the default size — clear of its right and top walls, its first letter's foot on the diagonal wall at most");
 }
 
 /* --- #255 T6 fix: the church Auto-fill stage frame stays inside the Platform (Traditional's chancel, Contemporary's core) --- */
