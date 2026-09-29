@@ -9799,7 +9799,7 @@ typed miles win), and flag a blank mileage when the venue isn't located. Build a
 
 ---
 
-## 274. Estimator — a track configurator for curtain / traveler track rigging — OPEN (design with Jeff first)
+## 274. Estimator — a track configurator for curtain / traveler track rigging — IN PROGRESS (Phase A shipped 2026-09-29, D486)
 
 **Reported:** 2026-09-23 practice run: "Add a way to quote track rigging on Estimate." **Jeff (2026-09-29): "We need a
 track configurator."** (Not ready-made track assemblies.)
@@ -9815,6 +9815,23 @@ bi-parting vs one-way, straight vs curved); inputs (run length, overlap, stick l
 spacing, live/dead ends, operating line, floor pulley); whether parts come from the catalog (by MFR #) or a rate table
 in Estimating Rules; install labor; and whether a curtain line can carry its track in one step.
 
+
+**Designed with Jeff 2026-09-29:** catalog-part pricing; ADC first; bi-parting (cord), one-way (cord), walk-along, and
+curved runs; batten-clamp or ceiling-hanger mounting; both a standalone "+ Configure track" and an "Add track" step in
+the curtain configurator; one track line per run with its parts inside. Spec:
+`docs/superpowers/specs/2026-09-29-track-configurator-design.md`.
+
+**Phase A shipped 2026-09-29:** `src/lib/track-series.ts` (types, sanitize, can-be-active, `requiredRolesFor`),
+`src/lib/track-engine.ts` (pure quantities per spec §2), `src/lib/stores/track-series.ts` (blob `track_series`), and the
+admin page **Estimating Rules → Track series** (`/estimating-rules/track-series`, `manage_users`) with a per-role catalog
+part search — the Equipment map's picker moved to a shared `part-picker.tsx` used by both. Nothing seeded. Gates: tsc 0;
+test:specs 9048 PASS / 0 FAIL (after merging main; +104 for #274); test:smoke 169/0 (new route added); eslint 0 errors,
+no new warnings; next build OK. Browser-verified; reviewed, no findings.
+
+**Phase B (next):** `track-bom.ts` pricing, the Estimator's track modal + line (`SpecItem.track`, reopen like #269), the
+curtain configurator's Add track step.
+
+**Jeff-gated:** import the ADC price book, then create the ADC series and map each role.
 ---
 
 ## 275. Flame-test, inspection and repair quotes — a lift rental line — DONE 2026-09-29 (D481–D483)

@@ -8090,3 +8090,15 @@ labor seed margin moves (tier change, Copy system to another tier), a draft stil
 follows it whether or not any line re-priced; a hand-typed draft margin is the user's and never moves. Labor added
 before #269 has no draft and stays non-editable rather than guessing one from its lines.
 
+## D486. Track series: admin-mapped catalog parts, nothing seeded, names unique, ids never reused (#274, 2026-09-29)
+
+Track pricing reads a `track_series` blob of series records, each mapping roles (track, splice, carrier, master
+carrier, end stop, pulleys, floor block, operating line, batten clamp, ceiling hanger, curved section) to catalog SKUs,
+edited by admins (`manage_users`, like the rest of Estimating Rules) at Estimating Rules → Track series. No ADC part
+numbers are seeded — they come from the imported price book, mapped by hand. Series ids are server slugs of the name; a
+deleted series keeps a tombstone key so its id is never handed to a new series (a saved track line naming it then reads
+"This series no longer exists"). Names must be unique so the Estimator's series list is unambiguous. A series can be
+Active only when its stick length and always-required roles are mapped to parts that exist in the live catalog; losing
+a required part while editing saves it inactive rather than refusing the save. The engine also refuses runs ≤ 0 or
+> 1000', a qty outside 1–100, and trim outside 0–200' — sanity bounds beyond the spec.
+
