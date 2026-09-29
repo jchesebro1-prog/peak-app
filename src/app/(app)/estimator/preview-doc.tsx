@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import { QuotePdfViewer } from "@/components/quote-pdf/quote-pdf-viewer";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
-import { systemFreight, systemItemsRev } from "./pricing";
+import { systemFreight, systemItemsRev, systemSellTotal } from "./pricing";
 import type { PaymentTerms, SpecSection } from "./types";
 
 /**
@@ -88,7 +88,7 @@ export type PreviewProps = {
 export default function PreviewDoc(p: PreviewProps) {
   const isItemized = p.detail === "itemized";
   const sectionToggles = p.sections
-    .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0)
+    .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0)
     .map((sec) => ({ id: sec.id, name: sec.name, presentation: sec.presentation || "itemized" }));
   const pdfHref = p.savedQuoteId ? `/api/quotes/${encodeURIComponent(p.savedQuoteId)}/pdf` : null;
   const hasFile = !!p.pdf?.hasFile;

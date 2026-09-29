@@ -167,5 +167,9 @@ export function copySectionForTarget(
     return { ...withSell(it, keepMarginOnNewCost(it, it.cost, cost)), cost };
   });
 
-  return { section: { ...section, id: opts.newSectionId, items }, costsUpdated, tierRepriced, handPriced };
+  // #267: a typed system sell was the source's price for the source's costs —
+  // the copy is re-priced, so it drops it (auto again); priceRound carries.
+  const copied: SpecSection = { ...section, id: opts.newSectionId, items };
+  delete copied.sellOverride;
+  return { section: copied, costsUpdated, tierRepriced, handPriced };
 }

@@ -45,7 +45,7 @@ import { seedMarginOf } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
-import { reconcileEstimatorValue, totals } from "./pricing";
+import { reconcileEstimatorValue, sanitizeSystemSell, totals } from "./pricing";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
@@ -365,12 +365,17 @@ export async function saveQuoteAction(
   // `portalReview` open on Save — it clears only when the quote is sent
   // (setStatus already does that unconditionally), never here.
   const isPortalCatalog = savedSource === "portal-catalog";
+  // #267: a system's typed sell / $25 rounding is only kept when valid
+  // (sellOverride finite, > 0, ≤ $10M; priceRound exactly 25) — dropped
+  // otherwise, before anything prices or stores the sections.
+  const postedSections = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell) : payload.sections;
   const { sections: savedSections, anyPor, anyConfirm } = isPortalCatalog
-    ? clearPricedPor(payload.sections)
-    : { sections: payload.sections, anyPor: false, anyConfirm: false };
+    ? clearPricedPor(postedSections)
+    : { sections: postedSections, anyPor: false, anyConfirm: false };
   // #242 final: the review-limit gate auto-approves on the STORED value, so it
   // is the server's own totals() over the posted sections — a posted value
-  // that disagrees beyond rounding is replaced, never trusted.
+  // that disagrees beyond rounding is replaced, never trusted. (#267: it
+  // sanitizes each section's system sell itself, same rule as above.)
   const priced = reconcileEstimatorValue(payload.sections, { value: payload.value, margin: payload.margin });
   if (priced.adjusted) {
     console.warn("[estimator] saveQuoteAction: posted value", payload.value, "≠ recomputed", priced.value, "— stored the recomputed value");
@@ -632,7 +637,8 @@ export async function moveSystemToEstimateAction(
   vendorQuotes: VendorQuote[] = []
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
-  const moved: SpecSection = { ...section, id: "sys" + Date.now() };
+  // #267: a moved system keeps its own price — sanitized like a save.
+  const moved: SpecSection = { ...sanitizeSystemSell(section), id: "sys" + Date.now() };
   const placed = await placeSystemInEstimate(moved, target, {
     newName: moved.name + " (moved)",
     sourceContext,
@@ -875,7 +881,7 @@ export async function copySystemToEstimateAction(
       ? (PRICING_TIER_LABEL as Record<string, string>)[targetTierKey] || targetTierKey
       : null;
 
-  const copied = copySectionForTarget(section, {
+  const copied = copySectionForTarget(sanitizeSystemSell(section), {
     newSectionId: "sys" + Date.now(),
     catalog,
     fixtures,

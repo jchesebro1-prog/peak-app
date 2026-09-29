@@ -1,4 +1,5 @@
 import { curtainCost, curtainPrice, fabricAreaRateOf, type CurtainSewing } from "@/lib/design/curtain-pricing";
+import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } from "@/lib/service-pricing";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -169,6 +170,109 @@ export function systemFreight(sec: SpecSection): number {
   return Math.round(systemFreightBase(sec) * ((sec.freightPct || 0) / 100) * 100) / 100;
 }
 
+/* ---------------- #267 system sell: typed price + $25 rounding ---------------- */
+
+/** #267: the one rounding step the Estimator's system price accepts. */
+export const SYSTEM_PRICE_STEP = 25;
+
+/** #267: a typed system sell as stored — finite, > 0, ≤ PRICE_OVERRIDE_MAX
+ *  (to the cent); anything else is no override. */
+export function validSellOverride(v: unknown): number | undefined {
+  if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  const c = round2(v);
+  return c > 0 && c <= PRICE_OVERRIDE_MAX ? c : undefined;
+}
+
+/**
+ * #267: what the user typed in a system's Sell box → the override to store,
+ * or undefined to clear it (D364 parse: `$`, commas and spaces stripped, then
+ * plain digits with an optional decimal — no hex, exponent or minus; empty,
+ * 0 or junk clears).
+ */
+export function parseSellOverride(raw: string): number | undefined {
+  const s = String(raw ?? "").replace(/[$,\s]/g, "");
+  if (!/^\d+(\.\d+)?$/.test(s)) return undefined;
+  return validSellOverride(Number(s));
+}
+
+/**
+ * #267 server sanitizer for one posted section: `sellOverride` survives only
+ * when valid (else it is dropped), `priceRound` only when it is exactly
+ * SYSTEM_PRICE_STEP. Everything else on the section passes through untouched.
+ */
+export function sanitizeSystemSell<T extends SpecSection>(sec: T): T {
+  if (!sec || typeof sec !== "object") return sec;
+  const out = { ...sec } as T;
+  const o = validSellOverride(sec.sellOverride);
+  if (o == null) delete out.sellOverride;
+  else out.sellOverride = o;
+  if (sec.priceRound !== SYSTEM_PRICE_STEP) delete out.priceRound;
+  return out;
+}
+
+/** #267: the system's price from its lines alone — items + freight, unrounded. */
+export function systemComputedSell(sec: SpecSection): number {
+  return systemItemsRev(sec) + systemFreight(sec);
+}
+
+/**
+ * #267: the price the system actually sells for (items + freight) — a valid
+ * typed `sellOverride` exactly; else, when the section carries `priceRound`,
+ * the computed price rounded UP to the next multiple of it (an exact multiple
+ * stays put — Jeff: always up, never nearest); else (a pre-#267 section) the
+ * computed price exactly.
+ */
+export function systemSellTotal(sec: SpecSection): number {
+  const o = validSellOverride(sec.sellOverride);
+  if (o != null) return o;
+  const c = systemComputedSell(sec);
+  const step = sec.priceRound;
+  if (typeof step === "number" && Number.isFinite(step) && step > 0 && c > 0) return ceilToStep(c, step);
+  return c;
+}
+
+/** #267: systemSellTotal − systemComputedSell, to the cent (0 for a legacy/exact system). */
+export function systemSellAdjustment(sec: SpecSection): number {
+  return round2(systemSellTotal(sec) - systemComputedSell(sec));
+}
+
+/** #267: the section without a typed sell (the Margin sliders and Reset to auto). */
+export function clearSellOverride<T extends SpecSection>(sec: T): T {
+  if (!("sellOverride" in sec)) return sec;
+  const out = { ...sec };
+  delete out.sellOverride;
+  return out;
+}
+
+/**
+ * #267: turns the $25 round-up on for every section that has no `priceRound`
+ * yet — what the Estimator does to a new section and, on load, to a draft
+ * (or unsaved) estimate's sections. A section already carrying the field
+ * is returned as-is.
+ */
+export function withPriceRound(sections: SpecSection[]): SpecSection[] {
+  return sections.map((sec) => (sec && sec.priceRound == null ? { ...sec, priceRound: SYSTEM_PRICE_STEP } : sec));
+}
+
+/** #267: true when the system's price is a typed override. */
+export function hasSellOverride(sec: SpecSection): boolean {
+  return validSellOverride(sec.sellOverride) != null;
+}
+
+/** #267: the system's margin at its actual price — (items sell + adjustment
+ *  − items cost) ÷ (items sell + adjustment), freight left out as before. */
+export function systemMargin(sec: SpecSection): number {
+  const rev = systemItemsRev(sec) + systemSellAdjustment(sec);
+  return rev > 0 ? (rev - systemItemsCost(sec)) / rev : 0;
+}
+
+/** #267: the warning (never a block) under a typed system sell — below the
+ *  system's cost (items + freight) or under a 10% margin; null when auto. */
+export function systemSellWarning(sec: SpecSection): PriceWarning {
+  if (!hasSellOverride(sec)) return null;
+  return typedPriceWarning(systemSellTotal(sec), systemItemsCost(sec) + systemFreight(sec), systemMargin(sec));
+}
+
 export type QuoteTotals = {
   mat: number;
   lab: number;
@@ -179,6 +283,8 @@ export type QuoteTotals = {
   tax: number;
   grand: number;
   margin: number;
+  /** #267: the systems' price adjustments (typed sells + $25 rounding), already inside rev/mat/lab. */
+  adj?: number;
 };
 
 export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals {
@@ -187,8 +293,11 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     fr = 0,
     opt = 0,
     rev = 0,
-    cost = 0;
+    cost = 0,
+    adjSum = 0;
   for (const sec of sections) {
+    let secMat = 0,
+      secLab = 0;
     for (const it of sec.items) {
       const ext = lineExtSellOf(it);
       if (it.option) {
@@ -197,10 +306,27 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
       }
       rev += ext;
       cost += it.qty * it.cost;
-      if (sec.kind === "labor" || it.labor) lab += ext;
-      else mat += ext;
+      if (sec.kind === "labor" || it.labor) {
+        lab += ext;
+        secLab += ext;
+      } else {
+        mat += ext;
+        secMat += ext;
+      }
     }
     fr += systemFreight(sec);
+    // #267: the system's price adjustment rides in revenue, split between
+    // materials and labor the way the section's own lines are (a labor
+    // section → all labor; a mixed section by its lines' sell, to the cent).
+    const adj = systemSellAdjustment(sec);
+    if (adj !== 0) {
+      const base = secMat + secLab;
+      const labShare = base > 0 ? round2((adj * secLab) / base) : sec.kind === "labor" ? adj : 0;
+      lab += labShare;
+      mat += round2(adj - labShare);
+      rev += adj;
+      adjSum += adj;
+    }
   }
   const taxRate = (taxRatePct ?? 0) / 100;
   const tax = (rev + fr) * taxRate;
@@ -214,6 +340,7 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     tax,
     grand: rev + fr + tax,
     margin: rev > 0 ? (rev - cost) / rev : 0,
+    adj: round2(adjSum),
   };
 }
 
@@ -259,7 +386,7 @@ export function reconcileEstimatorValue(
   const safe: SpecSection[] = (Array.isArray(sections) ? sections : [])
     .filter((sec): sec is SpecSection => !!sec && typeof sec === "object")
     .map((sec) => ({
-      ...sec,
+      ...sanitizeSystemSell(sec),
       freightPct: n(sec.freightPct),
       items: (Array.isArray(sec.items) ? sec.items : [])
         .filter((it) => !!it && typeof it === "object")
@@ -795,7 +922,7 @@ export type CustomerLine = { item: SpecItem; ext: number } | { item: null; desc:
  * Non-labor lines and option lines are untouched (options are excluded, as
  * they already are everywhere else on this document).
  */
-export function customerLines(sec: SpecSection): CustomerLine[] {
+function customerLinesRaw(sec: SpecSection): CustomerLine[] {
   const visible = sec.items.filter((it) => !it.option);
   const overhead = visible.filter(isLaborOverheadItem);
   const rest = visible.filter((it) => !isLaborOverheadItem(it));
@@ -827,6 +954,47 @@ export function customerLines(sec: SpecSection): CustomerLine[] {
     item,
     ext: foldedById.has(item.id) ? (foldedById.get(item.id) as number) : lineExtSellOf(item),
   }));
+}
+
+/**
+ * The rows the CUSTOMER sees for a section (see `customerLinesRaw` for the
+ * labor-overhead fold), with the system's #267 price adjustment — a typed
+ * sell or the $25 round-up — spread over them so the rows plus the
+ * section's freight always add up to `systemSellTotal(sec)`.
+ */
+export function customerLines(sec: SpecSection): CustomerLine[] {
+  return absorbSellAdjustment(customerLinesRaw(sec), systemSellAdjustment(sec));
+}
+
+/**
+ * #267: spreads `adj` over the rows in proportion to their ext (whole cents),
+ * the rounding remainder landing on the largest row. A row never goes below
+ * $0: a share that would take it negative is clamped and the rest moves to
+ * the largest row (itself clamped at $0 — only an override below the
+ * system's freight can leave the rows short of the total). Rows with no
+ * sell take no share unless every row is $0, when the first row carries it.
+ */
+export function absorbSellAdjustment(lines: CustomerLine[], adj: number): CustomerLine[] {
+  const a = round2(adj);
+  if (!a || !lines.length) return lines;
+  const exts = lines.map((l) => round2(l.ext));
+  const w = exts.reduce((s, e) => s + Math.max(0, e), 0);
+  let largest = 0;
+  exts.forEach((e, i) => {
+    if (e > exts[largest]) largest = i;
+  });
+  const next = exts.slice();
+  let applied = 0;
+  if (w > 0) {
+    exts.forEach((e, i) => {
+      if (!(e > 0)) return;
+      const v = Math.max(0, round2(e + round2((a * e) / w)));
+      applied = round2(applied + (v - e));
+      next[i] = v;
+    });
+  }
+  next[largest] = Math.max(0, round2(next[largest] + round2(a - applied)));
+  return lines.map((l, i) => ({ ...l, ext: next[i] }));
 }
 
 /** h/m label — local copy of Geo.fmtTime (lib/geo is server-only). */

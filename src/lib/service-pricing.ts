@@ -38,8 +38,9 @@ export function roundToStep(x: number, step: number = PRICE_STEP): number {
  * nearest-rounding a floored total can round it back DOWN below the floor
  * (a $360 call-out would round to $350), so a floored total always rounds up.
  * The −1e-9 keeps an exact multiple (float noise aside) from bumping up.
+ * #267: also the Estimator's auto system price (always up to the next $25).
  */
-function ceilToStep(x: number, step: number = PRICE_STEP): number {
+export function ceilToStep(x: number, step: number = PRICE_STEP): number {
   if (!Number.isFinite(x)) return 0;
   if (!(step > 0)) return x;
   return Math.ceil(x / step - 1e-9) * step;

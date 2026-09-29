@@ -36392,3 +36392,156 @@ async function specProjectHeaderAsyncChecks(): Promise<void> {
   ok(!!again && again.ids.length === 0, "project header: a deleted spec is not a sibling");
   ok((await copySpecHeaderToProject("SP-NOPE-0", "Applier")) === null, "project header: an unknown source spec returns null");
 }
+
+/* ======================================================================
+   #267 — Estimator system sell: a typed system price used exactly, and the
+   auto price rounded UP to the next $25 on sections carrying priceRound.
+   ====================================================================== */
+import {
+  absorbSellAdjustment as s267Absorb,
+  clearSellOverride as s267Clear,
+  customerLines as s267CustomerLines,
+  parseSellOverride as s267Parse,
+  reconcileEstimatorValue as s267Reconcile,
+  round2 as s267Round2,
+  sanitizeSystemSell as s267Sanitize,
+  systemComputedSell as s267Computed,
+  systemFreight as s267Freight,
+  systemMargin as s267Margin,
+  systemSellAdjustment as s267Adj,
+  systemSellTotal as s267Total,
+  systemSellWarning as s267Warn,
+  totals as s267Totals,
+  withPriceRound as s267Stamp,
+} from "@/app/(app)/estimator/pricing";
+import { copySectionForTarget as s267Copy } from "@/app/(app)/estimator/copy-system";
+import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(app)/estimator/types";
+{
+  const li = (id: number, price: number, cost = 0, extra: Partial<S267Item> = {}): S267Item =>
+    ({ id, sku: "S-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost, price, ...extra });
+  const sec = (items: S267Item[], extra: Partial<S267Section> = {}): S267Section =>
+    ({ id: "s", name: "Sys", kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const R = { priceRound: 25 };
+
+  // Rounding — always UP to the next $25; an exact multiple stays put.
+  ok(s267Total(sec([li(1, 1000.01)], R)) === 1025, "#267 system sell: 1000.01 rounds up to 1025");
+  ok(s267Total(sec([li(1, 1012.49)], R)) === 1025, "#267 system sell: 1012.49 rounds up to 1025 (never nearest)");
+  ok(s267Total(sec([li(1, 1012.5)], R)) === 1025, "#267 system sell: 1012.50 rounds up to 1025");
+  ok(s267Total(sec([li(1, 1000)], R)) === 1000, "#267 system sell: an exact 1000.00 stays 1000");
+  ok(s267Total(sec([li(1, 1024.999999999)], R)) === 1025, "#267 system sell: float noise just under 1025 lands on 1025, not 1050");
+  ok(s267Total(sec([li(1, 400.0000000001)], R)) === 400, "#267 system sell: float noise just over 400 does not bump to 425");
+  ok(s267Total(sec([li(1, 3)], R)) === 25, "#267 system sell: a small priced system rounds up to one step, never $0");
+  ok(s267Total(sec([], R)) === 0 && s267Adj(sec([], R)) === 0, "#267 system sell: an empty system stays $0");
+  ok(s267Adj(sec([li(1, 1012.49)], R)) === 12.51, "#267 system sell: the adjustment is the round-up in cents (12.51)");
+
+  // Legacy section — no priceRound — prices exactly as before.
+  const legacy = sec([li(1, 1012.49), li(2, 0.33)]);
+  ok(s267Total(legacy) === s267Computed(legacy) && s267Adj(legacy) === 0, "#267 system sell: a section without priceRound is exact (no rounding, adjustment 0)");
+
+  // Freight rides inside the system price and the rounding.
+  const withFr = sec([li(1, 180, 100)], { ...R, freightPct: 10 });
+  ok(s267Freight(withFr) === 10 && s267Computed(withFr) === 190 && s267Total(withFr) === 200, "#267 system sell: items 180 + freight 10 = 190 rounds up to 200");
+
+  // A typed sell is used exactly and beats rounding.
+  ok(s267Total(sec([li(1, 1012.49)], { ...R, sellOverride: 950 })) === 950, "#267 system sell: a typed 950 is used exactly, not rounded");
+  ok(s267Total(sec([li(1, 1012.49)], { sellOverride: 1111.11 })) === 1111.11, "#267 system sell: a typed sell works on a legacy (unrounded) section too");
+  ok(s267Adj(sec([li(1, 1012.49)], { ...R, sellOverride: 950 })) === -62.49, "#267 system sell: a typed sell below computed gives a negative adjustment");
+  const bad = [-5, 0, 0.004, NaN, Infinity, 1e8, "900" as unknown as number];
+  ok(bad.every((b) => s267Total(sec([li(1, 1012.49)], { ...R, sellOverride: b })) === 1025), "#267 system sell: invalid overrides (negative, 0, under a cent, NaN, ∞, > $10M, a string) are ignored");
+
+  // Parse like D364.
+  ok(s267Parse("$1,234.50") === 1234.5 && s267Parse(" 900 ") === 900, "#267 system sell: the Sell box strips $, commas and spaces");
+  ok(["", "0", "1e3", "0x10", "-5", "abc", "12.3.4"].every((v) => s267Parse(v) === undefined), "#267 system sell: empty, 0, exponent, hex, minus and junk clear the override");
+
+  // totals() carries the adjustments — materials vs labor.
+  const mat = sec([li(1, 1000.01, 700)], { ...R, id: "m" });
+  const lab = sec([li(2, 500.4, 300, { labor: true })], { ...R, id: "l", kind: "labor" });
+  const t = s267Totals([mat, lab], 0);
+  ok(s267Round2(t.mat) === 1025 && s267Round2(t.lab) === 525, "#267 system sell: totals() puts a materials system's adjustment in mat and a labor system's in lab");
+  ok(s267Round2(t.rev) === 1550 && s267Round2(t.grand) === 1550 && t.adj === 49.59, "#267 system sell: value (grand) is the sum of the rounded system prices");
+  ok(Math.abs(t.margin - (1550 - 1000) / 1550) < 1e-9, "#267 system sell: the margin follows the rounded prices");
+  const mixed = sec([li(1, 600), li(2, 400.01, 0, { labor: true })], R);
+  const tm = s267Totals([mixed], 0);
+  ok(s267Round2(tm.lab) === 410.01 && s267Round2(tm.mat) === 614.99 && s267Round2(tm.rev) === 1025, "#267 system sell: a mixed system splits its adjustment by its lines' sell (lab 410.01 / mat 614.99)");
+  const tFr = s267Totals([withFr], 0);
+  ok(s267Round2(tFr.grand) === 200 && tFr.fr === 10 && s267Round2(tFr.rev) === 190, "#267 system sell: freight stays freight; the round-up lands in revenue");
+  const tOv = s267Totals([sec([li(1, 1000, 800)], { ...R, sellOverride: 900 })], 0);
+  ok(s267Round2(tOv.grand) === 900 && Math.abs(tOv.margin - 100 / 900) < 1e-9, "#267 system sell: a typed sell sets the value and the margin follows it");
+  const tLegacy = s267Totals([legacy], 0);
+  ok(tLegacy.grand === 1012.49 + 0.33 && tLegacy.adj === 0, "#267 system sell: totals() over legacy sections is unchanged");
+  ok(Math.abs(s267Margin(sec([li(1, 1000, 800)], { ...R, sellOverride: 900 })) - 100 / 900) < 1e-9, "#267 system sell: systemMargin reads the typed price");
+
+  // customerLines always adds up to the system price (with freight).
+  const sumRows = (rows: { ext: number }[]) => s267Round2(rows.reduce((a, r) => a + r.ext, 0));
+  const folded = sec([
+    li(1, 1428.57, 1000, { labor: true, mob: { type: "Install", days: 2, crew: 2, discipline: "Rigging" } }),
+    li(2, 200, 140, { labor: true, laborOverhead: "shop" }),
+    li(3, 333.33, 200),
+    li(4, 0, 0),
+    li(5, 99, 50, { option: true }),
+  ], R);
+  const fRows = s267CustomerLines(folded);
+  ok(s267Total(folded) === 1975 && sumRows(fRows) === 1975, "#267 system sell: customerLines (with the labor-overhead fold) sums to the rounded price (1961.90 → 1975)");
+  ok(fRows.length === 3 && fRows.every((r) => r.item?.laborOverhead == null && !r.item?.option), "#267 system sell: the overhead and option lines still never print");
+  ok(fRows.find((r) => r.item?.id === 4)!.ext === 0, "#267 system sell: a $0 line takes no share of the adjustment");
+  const fOv = { ...folded, sellOverride: 1500 };
+  const oRows = s267CustomerLines(fOv);
+  ok(sumRows(oRows) === 1500 && oRows.every((r) => r.ext >= 0), "#267 system sell: a typed price below computed spreads down and still sums exactly, no negative line");
+  const frRows = s267CustomerLines(withFr);
+  ok(s267Round2(sumRows(frRows) + s267Freight(withFr)) === s267Total(withFr), "#267 system sell: rows + the printed freight = the system price");
+  const cents = sec([li(1, 33.33), li(2, 33.33), li(3, 33.34)], { ...R, sellOverride: 100.01 });
+  const cRows = s267CustomerLines(cents);
+  ok(sumRows(cRows) === 100.01 && cRows.every((r) => Math.round(r.ext * 100) === r.ext * 100 || Math.abs(r.ext * 100 - Math.round(r.ext * 100)) < 1e-6), "#267 system sell: shares are whole cents and the remainder lands so the rows sum exactly");
+  const tiny = sec([li(1, 100, 100)], { freightPct: 10, sellOverride: 5 });
+  const tRows = s267CustomerLines(tiny);
+  ok(tRows.every((r) => r.ext >= 0), "#267 system sell: an override below the freight clamps lines at $0 (never negative)");
+  const clamp = s267Absorb([{ item: null, desc: "a", ext: 1 }, { item: null, desc: "b", ext: 1000 }], -1000.5);
+  ok(clamp.every((r) => r.ext >= 0) && sumRows(clamp) === 0.5, "#267 system sell: absorbSellAdjustment clamps and pushes the rest to the largest line");
+  ok(sumRows(s267CustomerLines(legacy)) === s267Round2(1012.49 + 0.33), "#267 system sell: a legacy section's customer lines are unchanged");
+
+  // Warnings — typed only.
+  ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 700 }))?.kind === "below-cost", "#267 system sell: a typed price under cost warns below-cost");
+  ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 850 }))?.kind === "low-margin", "#267 system sell: a typed price under a 10% margin warns low-margin");
+  ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 1000 })) === null && s267Warn(sec([li(1, 10, 800)], R)) === null, "#267 system sell: a healthy typed price, or any auto price, has no warning");
+
+  // Server sanitizer.
+  const sBad = s267Sanitize(sec([li(1, 10)], { sellOverride: -1, priceRound: 10 }));
+  ok(!("sellOverride" in sBad) && !("priceRound" in sBad), "#267 system sell: the server drops a negative override and a priceRound other than 25");
+  const sStr = s267Sanitize(sec([li(1, 10)], { sellOverride: "900" as unknown as number, priceRound: "25" as unknown as number }));
+  ok(!("sellOverride" in sStr) && !("priceRound" in sStr), "#267 system sell: string values are dropped");
+  ok(!("sellOverride" in s267Sanitize(sec([], { sellOverride: 2e7 }))) && !("sellOverride" in s267Sanitize(sec([], { sellOverride: NaN }))), "#267 system sell: > $10M and NaN are dropped");
+  const sOk = s267Sanitize(sec([li(1, 10)], { sellOverride: 900.456, priceRound: 25 }));
+  ok(sOk.sellOverride === 900.46 && sOk.priceRound === 25 && sOk.items.length === 1, "#267 system sell: a valid override (to the cent) and priceRound 25 are kept");
+  const rec = s267Reconcile([sec([li(1, 1000.01)], { ...R, sellOverride: -50 })], { value: -50, margin: 0 });
+  ok(rec.adjusted && s267Round2(rec.value) === 1025, "#267 system sell: the saved value is recomputed from the sanitized sections (bad override ignored, rounding kept)");
+  const rec2 = s267Reconcile([sec([li(1, 1000.01)], { ...R, sellOverride: 900 })], { value: 900, margin: 0.1 });
+  ok(!rec2.adjusted && rec2.value === 900, "#267 system sell: a posted value matching the typed system price is kept");
+
+  // Load stamping + clear helpers.
+  const stamped = s267Stamp([sec([]), sec([], { priceRound: 25, id: "x" })]);
+  ok(stamped[0].priceRound === 25 && stamped[1].priceRound === 25 && stamped[1].id === "x", "#267 system sell: withPriceRound stamps only sections lacking it");
+  const cl = s267Clear(sec([], { sellOverride: 10, priceRound: 25 }));
+  ok(!("sellOverride" in cl) && cl.priceRound === 25, "#267 system sell: clearSellOverride drops only the typed price");
+
+  // Copy drops the typed sell, keeps rounding.
+  const cp = s267Copy(sec([li(1, 100, 70)], { ...R, sellOverride: 500 }), {
+    newSectionId: "sysC", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3,
+  });
+  ok(!("sellOverride" in cp.section) && cp.section.priceRound === 25 && cp.section.id === "sysC", "#267 system sell: copySectionForTarget drops sellOverride and keeps priceRound");
+
+  // Wiring.
+  const read267 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const acts267 = read267("src/app/(app)/estimator/actions.ts");
+  ok(acts267.includes("payload.sections.map(sanitizeSystemSell)") && acts267.includes("reconcileEstimatorValue(payload.sections,") && acts267.includes("clearPricedPor(postedSections)"), "#267: saveQuoteAction sanitizes every posted section before pricing and storing it");
+  ok(acts267.includes("{ ...sanitizeSystemSell(section), id: \"sys\" + Date.now() }") && acts267.includes("copySectionForTarget(sanitizeSystemSell(section),"), "#267: Move and Copy sanitize the posted section too");
+  const cli267 = read267("src/app/(app)/estimator/estimator-client.tsx");
+  ok(cli267.includes("!initial.portal && (!initial.loadedId || initial.status === \"draft\")") && cli267.includes("withPriceRound(initial.sections)"), "#267: the Estimator stamps priceRound on load for drafts and unsaved estimates only");
+  ok((cli267.match(/priceRound: SYSTEM_PRICE_STEP/g) || []).length >= 3, "#267: new systems (freshSections, addSystem) carry priceRound; Round to $25 sets it");
+  ok(/const setMarginAll[\s\S]{0,200}clearSellOverride\(s\)/.test(cli267) && /const setSystemMargin[\s\S]{0,300}clearSellOverride\(s\)/.test(cli267), "#267: both margin sliders clear the typed system sell");
+  ok(cli267.includes("const sub = systemSellTotal(sec);"), "#267: the systems sidebar lists each system's actual price");
+  const card267 = read267("src/app/(app)/estimator/section-card.tsx");
+  ok(card267.includes("const subtotal = systemSellTotal(sec);") && card267.includes("p.onSetSell(e.target.value)") && !card267.includes("p.onSetMargin(String(m))"), "#267: the Sell box sets the system price, never the line margin");
+  ok(card267.includes("Reset to auto") && card267.includes("Round to ${SYSTEM_PRICE_STEP}") && card267.includes("Rounded to ${sec.priceRound}"), "#267: the card shows Reset to auto, Round to $25 and the rounding hint");
+  const qd267 = read267("src/app/(app)/estimator/quote-document.tsx");
+  ok(qd267.includes("const sub = systemSellTotal(sec);") && qd267.includes("rows.reduce((a, cl) => a + cl.ext, 0)"), "#267: the customer document's system subtotals and labor lines read the system price");
+}

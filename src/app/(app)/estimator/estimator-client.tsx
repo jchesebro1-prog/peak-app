@@ -59,10 +59,13 @@ import {
   repricedAtLineMargin,
   round2,
   short,
-  systemFreight,
-  systemItemsRev,
+  clearSellOverride,
+  parseSellOverride,
+  SYSTEM_PRICE_STEP,
+  systemSellTotal,
   totals,
   vendorTotalSeed,
+  withPriceRound,
 } from "./pricing";
 import type {
   CurtainDraft,
@@ -122,7 +125,8 @@ const TAX_RATE_PCT = 0;
  *  a lazy useState initializer before props are in scope), so it can't read
  *  the freight rule itself. */
 const freshSections = (freightPct: number): SpecSection[] => [
-  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, items: [] },
+  // #267: a new system's auto price rounds up to the next $25.
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
 ];
 
 const CSS = `
@@ -402,8 +406,17 @@ export default function EstimatorClient({
     miles: initialTravelMiles,
     rule: freightRule,
   });
-  const [sections, setSectionsState] = useState<SpecSection[]>(
-    () => initial.sections ?? freshSections(initialFreightDefault.pct)
+  /* #267: a draft (or unsaved) estimate's systems round up to the next $25
+     from this load on; a sent/won/lost quote keeps its exact prices until a
+     system's "Round to $25" is used. A portal-catalog quote is left exact —
+     its customer already saw the cart's own total. Not saved until Save. */
+  const stampPriceRoundOnLoad = !initial.portal && (!initial.loadedId || initial.status === "draft");
+  const [sections, setSectionsState] = useState<SpecSection[]>(() =>
+    initial.sections
+      ? stampPriceRoundOnLoad
+        ? withPriceRound(initial.sections)
+        : initial.sections
+      : freshSections(initialFreightDefault.pct)
   );
   /** #254 — the tier re-price banner: what the stamp just changed, and the
    *  exact sections to put back on Undo. Internal only (D87). */
@@ -822,7 +835,15 @@ export default function EstimatorClient({
     [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, sections, vendorQuotes, pdfOpts]
   );
   const docKey = useMemo(() => pdfDocKey(docInput), [docInput]);
-  const [savedDoc, setSavedDoc] = useState<PdfDocKeyInput>(docInput);
+  // #267: when the load-time $25 stamp moved a system's price, the saved PDF
+  // still shows the old one — baseline on the stored sections so the preview
+  // says "Unsaved changes" until a Save.
+  const [savedDoc, setSavedDoc] = useState<PdfDocKeyInput>(() =>
+    initial.sections &&
+    initial.sections.some((s, i) => !!sections[i] && systemSellTotal(s) !== systemSellTotal(sections[i]))
+      ? { ...docInput, sections: initial.sections }
+      : docInput
+  );
   const savedDocKey = useMemo(() => pdfDocKey(savedDoc), [savedDoc]);
   const pdfDirty = !!loadedId && docKey !== savedDocKey;
 
@@ -1347,25 +1368,39 @@ export default function EstimatorClient({
     setSections((ss) => ss.map((s) => ({ ...s, items: s.items.filter((x) => x.id !== id) })));
   };
 
+  // #267: both margin sliders re-price the lines AND drop a typed system sell.
   const setMarginAll = (v: string) => {
     const m = parseInt(v, 10) / 100;
     setSections((ss) =>
       ss.map((s) => ({
-        ...s,
+        ...clearSellOverride(s),
         items: s.items.map((it) => ({ ...it, ...repriceAtMargin(it.cost, m) })),
       }))
     );
   };
   const setSystemMargin = (secId: string, v: string) => {
-    const m = parseFloat(v) / 100; // fractional so a typed sell price hits exactly (punch #37)
+    const m = parseFloat(v) / 100;
     setSections((ss) =>
       ss.map((s) =>
         s.id === secId
-          ? { ...s, items: s.items.map((it) => ({ ...it, ...repriceAtMargin(it.cost, m) })) }
+          ? { ...clearSellOverride(s), items: s.items.map((it) => ({ ...it, ...repriceAtMargin(it.cost, m) })) }
           : s
       )
     );
   };
+  /** #267: the Sell box — a typed system price used exactly; the line prices
+   *  are untouched. Empty, 0 or junk clears it (back to auto). */
+  const setSystemSell = (secId: string, raw: string) => {
+    const o = parseSellOverride(raw);
+    setSections((ss) =>
+      ss.map((s) => (s.id !== secId ? s : o == null ? clearSellOverride(s) : { ...s, sellOverride: o }))
+    );
+  };
+  const resetSystemSell = (secId: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? clearSellOverride(s) : s)));
+  /** #267: a sent/won system opts into the $25 round-up. */
+  const roundSystemPrice = (secId: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, priceRound: SYSTEM_PRICE_STEP } : s)));
   const setFreightPct = (secId: string, val: string) => {
     let v = parseFloat(val);
     if (isNaN(v) || v < 0) v = 0;
@@ -1517,7 +1552,7 @@ export default function EstimatorClient({
     const id = "sys" + nextId();
     setSections((ss) => [
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, items: [] },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
     ]);
     setActiveId(id);
     openInputMethod("catalog", id);
@@ -3321,7 +3356,7 @@ export default function EstimatorClient({
                     </div>
                   </div>
                   {sections.map((sec) => {
-                    const sub = systemItemsRev(sec) + systemFreight(sec);
+                    const sub = systemSellTotal(sec);
                     const active = activeId === sec.id;
                     const label = sec.name
                       .split(" — ")[0]
@@ -3593,6 +3628,9 @@ export default function EstimatorClient({
                   onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
+                  onSetSell={(v) => setSystemSell(sec.id, v)}
+                  onResetSell={() => resetSystemSell(sec.id)}
+                  onRoundPrice={() => roundSystemPrice(sec.id)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
                   freightUnknown={freightDefault.unknown}
                   onInc={inc}

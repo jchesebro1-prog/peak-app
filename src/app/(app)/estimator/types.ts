@@ -185,6 +185,18 @@ export type SpecSection = {
   freightAuto?: boolean;
   /** #245: one-way drive miles the freight rule priced from (null = venue not located). */
   freightMiles?: number | null;
+  /** #267: a typed system sell (items + freight), used exactly — never
+   *  re-rounded, never pushed into the line prices; the margin follows it and
+   *  the customer document spreads the difference across the visible lines
+   *  (`customerLines`). Cleared by this system's Margin slider, the global
+   *  "Reprice every line" slider, or Reset to auto. Valid only when finite,
+   *  > 0 and ≤ PRICE_OVERRIDE_MAX; anything else is ignored (and dropped by
+   *  the server on save). Not carried by Copy (the copy's costs differ). */
+  sellOverride?: number;
+  /** #267: the step the AUTO system price rounds UP to (25 → the next $25).
+   *  Absent = the pre-#267 exact price (sent/won quotes keep it until the
+   *  user turns rounding on). The server accepts only 25. */
+  priceRound?: number;
   items: SpecItem[];
 };
 

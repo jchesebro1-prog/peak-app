@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
+import { systemSellTotal } from "./pricing";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 
 /**
@@ -107,11 +108,13 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const standingLines = (p.standingLines || []).filter((l) => l.trim());
 
   const previewSections = p.sections
-    .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0)
+    .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0)
     .map((sec, i) => {
-      const visible = sec.items.filter((x) => !x.option);
       const secFr = systemFreight(sec);
-      const sub = systemItemsRev(sec) + secFr;
+      // #267: the system's own price — a typed sell or the $25 round-up —
+      // which customerLines' rows (+ freight) always add up to.
+      const sub = systemSellTotal(sec);
+      const rows = customerLines(sec);
       return {
         id: sec.id,
         num: i + 1,
@@ -132,7 +135,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   sub: [] as { key: string; qty: number; unit: string; text: string }[],
                   qty: "" as string | number,
                   unit: "",
-                  ext: fmt(visible.reduce((a, it) => a + lineExtSellOf(it), 0)),
+                  ext: fmt(rows.reduce((a, cl) => a + cl.ext, 0)),
                 },
               ]
             : /* Never the shop & engineering / performance-bonus / allowance
@@ -140,7 +143,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                  mobilization line(s) (or another labor line, or a neutral
                  combined row) so the section subtotal is unchanged but those
                  categories never appear by name (owner request). */
-              customerLines(sec).map((cl) => {
+              rows.map((cl) => {
                 if (!cl.item) {
                   return {
                     key: "labor-overhead-combined",

@@ -2,7 +2,20 @@
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
-import { fmt, lineExtSellOf, marginColor, round2, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
+import {
+  fmt,
+  hasSellOverride,
+  lineExtSellOf,
+  marginColor,
+  round2,
+  SYSTEM_PRICE_STEP,
+  systemFreight,
+  systemItemsCost,
+  systemMargin,
+  systemSellAdjustment,
+  systemSellTotal,
+  systemSellWarning,
+} from "./pricing";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
@@ -104,6 +117,12 @@ export type SectionCardProps = {
   onSetPresentation: (value: "itemized" | "narrative") => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
+  /** #267: a typed system sell (raw text; empty/0/junk clears it). */
+  onSetSell: (v: string) => void;
+  /** #267: drop the typed system sell — back to the auto price. */
+  onResetSell: () => void;
+  /** #267: turn the $25 round-up on for a system saved without it. */
+  onRoundPrice: () => void;
   onSetFreight: (v: string) => void;
   /** #245: the current selection's distance-rule default is unknown (no
    *  locatable venue) — the freight % is pinned to the cap. Shown only for a
@@ -227,11 +246,15 @@ export default function SectionCard(p: SectionCardProps) {
   };
 
   const { sec, isInternal, cols } = p;
-  const itemsRev = systemItemsRev(sec);
   const itemsCost = systemItemsCost(sec);
   const secFreight = systemFreight(sec);
-  const subtotal = itemsRev + secFreight;
-  const sysMargin = itemsRev > 0 ? Math.round(((itemsRev - itemsCost) / itemsRev) * 100) : 0;
+  // #267: the system's actual price — a typed sell, or the auto price rounded
+  // up to the next $25 — and the margin it carries.
+  const subtotal = systemSellTotal(sec);
+  const sellAdj = systemSellAdjustment(sec);
+  const sellSet = hasSellOverride(sec);
+  const sellWarning = systemSellWarning(sec);
+  const sysMargin = Math.round(systemMargin(sec) * 100);
   const visible = sec.items.filter((x) => !x.option);
   const metaParts: string[] = [];
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
@@ -455,20 +478,80 @@ export default function SectionCard(p: SectionCardProps) {
                 <span style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".04em", textTransform: "uppercase" }}>
                   Sell
                 </span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  key={"sell-" + fmt(itemsRev)}
-                  defaultValue={fmt(itemsRev)}
-                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                  onBlur={(e) => {
-                    const target = parseFloat(e.target.value.replace(/[^0-9.-]/g, "")) || 0;
-                    const m = target > itemsCost ? Math.min(95, ((target - itemsCost) / target) * 100) : 0;
-                    p.onSetMargin(String(m));
-                  }}
-                  title="Type a target sell price for this category; the margin updates to match"
-                  style={{ width: 108, fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, border: "1px solid #dfe2e8", borderRadius: 7, padding: "5px 8px", textAlign: "right" }}
-                />
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      key={"sell-" + fmt(subtotal) + (sellSet ? "-set" : "")}
+                      defaultValue={fmt(subtotal)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      onBlur={(e) => {
+                        // #267: an unchanged box (it shows the formatted
+                        // price) is not a typed price.
+                        if (e.target.value.trim() === fmt(subtotal)) return;
+                        p.onSetSell(e.target.value);
+                      }}
+                      title="Type this system's sell price (freight included) — used exactly; the line prices stay as they are and the margin follows"
+                      aria-label="System sell price"
+                      style={{
+                        width: 108,
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        color: ACCENT_INK,
+                        border: sellSet ? "1px solid var(--accent)" : "1px solid #dfe2e8",
+                        boxShadow: sellSet ? "0 0 0 1px var(--accent)" : undefined,
+                        borderRadius: 7,
+                        padding: "5px 8px",
+                        textAlign: "right",
+                      }}
+                    />
+                    {sellSet && (
+                      <>
+                        <span
+                          title="A typed sell price — used exactly"
+                          style={{ fontSize: 9.5, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, borderRadius: 4, padding: "1px 5px", textTransform: "uppercase", letterSpacing: ".04em" }}
+                        >
+                          Set
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            p.onResetSell();
+                          }}
+                          style={{ fontSize: 11, fontWeight: 500, color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer", padding: 0, whiteSpace: "nowrap" }}
+                        >
+                          Reset to auto
+                        </button>
+                      </>
+                    )}
+                    {!sellSet && !sec.priceRound && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          p.onRoundPrice();
+                        }}
+                        title="Round this system's price up to the next $25"
+                        style={{ fontSize: 11, fontWeight: 500, color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer", padding: 0, whiteSpace: "nowrap" }}
+                      >
+                        Round to ${SYSTEM_PRICE_STEP}
+                      </button>
+                    )}
+                  </div>
+                  {!sellSet && !!sec.priceRound && sellAdj !== 0 && (
+                    <div style={{ fontSize: 10.5, color: "#8c919c", textAlign: "right" }}>
+                      Rounded to ${sec.priceRound} ({sellAdj > 0 ? "+" : "−"}{fmt(Math.abs(sellAdj))})
+                    </div>
+                  )}
+                  {sellWarning && (
+                    <div style={{ fontSize: 10.5, fontWeight: 500, color: "#b4543a", maxWidth: 260 }}>
+                      {sellWarning.text}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
