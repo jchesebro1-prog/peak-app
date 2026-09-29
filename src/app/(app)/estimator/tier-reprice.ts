@@ -52,6 +52,34 @@ export function laborSeedMarginOf(m: number | null | undefined): number {
 
 const sellAt = (cost: number, margin: number) => round2(cost / (1 - margin));
 
+/** #266 — the margin a line kind seeds at under stamp `m` (labor through its
+ *  whole-percent field, every other line through `seedMarginOf`). */
+export function tierSeedMarginFor(it: Pick<SpecItem, "labor">, m: number | null | undefined): number {
+  return it.labor ? laborSeedMarginOf(m) : seedMarginOf(m);
+}
+
+/** #266 — the sell a line seeds at on its cost under stamp `m`: the exact
+ *  price `repriceForTier` writes. */
+export function tierSeedPrice(it: Pick<SpecItem, "cost" | "labor">, m: number | null | undefined): number {
+  return sellAt(it.cost, tierSeedMarginFor(it, m));
+}
+
+/** #266 — a line the tier prices at all (not a fixture, ext-sell override,
+ *  POR, or no-cost line — `classify`'s hand/untouched gates). */
+export function isTierPriceable(it: Pick<SpecItem, "fixture" | "extSellOverride" | "por" | "cost">): boolean {
+  if (it.fixture) return false;
+  if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return false;
+  if (it.por) return false;
+  return it.cost > 0;
+}
+
+/** #266 — the line still sits at stamp `m`'s seed (within the line kind's
+ *  tolerance). Callers check `isTierPriceable` first. */
+export function isAtTierSeed(it: Pick<SpecItem, "cost" | "price" | "labor">, m: number | null | undefined): boolean {
+  const tol = it.labor ? LABOR_REPRICE_TOLERANCE : TIER_REPRICE_TOLERANCE;
+  return Math.abs(it.price - tierSeedPrice(it, m)) <= tol + 1e-9;
+}
+
 export type TierRepriceResult = {
   /** The same array (by reference) when nothing was re-priced. */
   sections: SpecSection[];
@@ -70,18 +98,8 @@ function classify(it: SpecItem, prev: number | null, next: number): Verdict {
   if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return { kind: "hand" };
   if (it.por) return { kind: "untouched" };
   if (!(it.cost > 0)) return { kind: "untouched" };
-  if (it.labor) {
-    const from = laborSeedMarginOf(prev);
-    const to = laborSeedMarginOf(next);
-    if (from === to) return { kind: "skip" };
-    return Math.abs(it.price - sellAt(it.cost, from)) <= LABOR_REPRICE_TOLERANCE + 1e-9
-      ? { kind: "reprice", price: sellAt(it.cost, to) }
-      : { kind: "hand" };
-  }
-  const from = seedMarginOf(prev);
-  return Math.abs(it.price - sellAt(it.cost, from)) <= TIER_REPRICE_TOLERANCE + 1e-9
-    ? { kind: "reprice", price: sellAt(it.cost, next) }
-    : { kind: "hand" };
+  if (it.labor && laborSeedMarginOf(prev) === laborSeedMarginOf(next)) return { kind: "skip" };
+  return isAtTierSeed(it, prev) ? { kind: "reprice", price: tierSeedPrice(it, next) } : { kind: "hand" };
 }
 
 /**

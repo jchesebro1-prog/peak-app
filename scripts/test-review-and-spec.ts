@@ -36187,3 +36187,86 @@ async function specLabelsAsyncChecks(): Promise<void> {
   const view = readFileSync(join(process.cwd(), specs, "library/records-view.tsx"), "utf8");
   ok(view.includes("recordProductName(r)") && view.includes("partNumbersSummary(r.mfrNumbers, 3)") && view.includes("Model #s"), "library: the records view shows the product name and model numbers");
 }
+
+/* ======================================================================
+   #266 — Copy a system (Estimator): a copied section is re-priced for where
+   it lands — catalog parts / fixture components at today's cost, then lines
+   at the source tier's seed moved to the target tier's seed.
+   ====================================================================== */
+import { copySectionForTarget as c266Copy, type CopyCatalogPart as C266Part, type CopyFixture as C266Fixture } from "@/app/(app)/estimator/copy-system";
+import type { SpecItem as C266Item, SpecSection as C266Section } from "@/app/(app)/estimator/types";
+{
+  const it = (id: number, sku: string, cost: number, price: number, extra: Partial<C266Item> = {}): C266Item =>
+    ({ id, sku, desc: sku, qty: 1, unit: "ea", cost, price, ...extra });
+  const comps = (prices: [number, number, number]) => [
+    { sku: "LAMP", label: "Lamp", role: "fixture" as const, qty: 1, unit: "ea", cost: 100, price: prices[0] },
+    { sku: "CABLE", label: "Cable", role: "cable" as const, qty: 2, unit: "ea", cost: 5, price: prices[1] },
+    { sku: "OPT", label: "Opt", role: "accessory" as const, qty: 0, unit: "ea", cost: 20, price: prices[2] },
+  ];
+  const section: C266Section = {
+    id: "sysOLD", name: "Stage lighting", narrative: "Front light", room: "Stage left", kind: "materials", mfr: "ETC", freightPct: 5,
+    items: [
+      it(1, "CAT-A", 100, 200),                                             // hand margin 50 %
+      it(2, "CAT-B", 100, 142.86),                                          // at the 30 % seed
+      it(3, "LAB-1", 500, 714.29, { labor: true }),                         // labor at the 30 % seed
+      it(4, "CAT-C", 40, 80, { vendorQuoteId: "vq1" }),                     // vendor, hand
+      it(5, "CAT-C", 40, 57.14, { custom: true }),                          // custom at seed
+      it(6, "CAT-C", 40, 90, { curtain: true }),                            // curtain, hand
+      it(7, "CAT-C", 40, 60, { allowance: true }),                          // allowance, hand
+      { ...it(8, "fa-1", 110, 170, { fixture: true, components: comps([150, 10, 30]) }), qty: 3 }, // default sell
+      it(9, "zzz", 110, 220, { fixture: true, fixtureId: "fa-1", components: comps([150, 10, 30]) }), // hand-priced fixture
+      it(10, "CAT-A", 100, 150, { qty: 2, extSellOverride: 400 }),          // ext override, margin 50 %
+      it(11, "NOPE", 10, 20),                                               // not in the catalog
+      it(12, "CAT-A", 100, 200, { option: true }),                          // option line, hand
+      it(13, "CAT-D", 100, 142.86),                                         // at seed, cost unchanged
+    ],
+  };
+  const catalog = new Map<string, C266Part>([
+    ["CAT-A", { sku: "CAT-A", cost: 120, list: 0 }],
+    ["CAT-B", { sku: "CAT-B", cost: 110, list: 0 }],
+    ["CAT-C", { sku: "CAT-C", cost: 50, list: 0 }],
+    ["CAT-D", { sku: "CAT-D", cost: 100.004, list: 0 }],
+    ["LAB-1", { sku: "LAB-1", cost: 999, list: 0 }],
+    ["CABLE", { sku: "CABLE", cost: 7, list: 12 }],
+    ["LAMP", { sku: "LAMP", cost: 1, list: 1 }],
+  ]);
+  const fixtures = new Map<string, C266Fixture>([
+    ["fa-1", { id: "fa-1", components: [{ sku: "LAMP", cost: 120, list: 180 }, { sku: "CABLE", cost: 0, list: 12 }, { sku: "OPT", cost: 25, list: 35 }] }],
+  ]);
+  const before = JSON.stringify(section);
+  const r = c266Copy(section, { newSectionId: "sysNEW", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: 0.2 });
+  const by = (id: number) => r.section.items.find((x) => x.id === id)!;
+  ok(JSON.stringify(section) === before, "#266 copy system: the source section is not mutated");
+  ok(r.section.id === "sysNEW" && r.section.room === "Stage left" && r.section.narrative === "Front light" && r.section.freightPct === 5 && r.section.items.length === 13, "#266 copy system: the new section id is applied and room/narrative/freight carry");
+  ok(by(1).cost === 120 && by(1).price === 240, "#266 copy system: a hand-priced catalog line takes today's cost and keeps its 50 % margin (100/200 → 120/240)");
+  ok(by(2).cost === 110 && by(2).price === 137.5, "#266 copy system: a line at the source seed lands exactly at the target seed on the new cost (110 ÷ 0.8 = 137.50)");
+  ok(by(13).cost === 100 && by(13).price === 125, "#266 copy system: a sub-cent catalog difference keeps the cost; the tier step still moves it to the target seed (125.00)");
+  ok(by(3).cost === 500 && by(3).price === 625, "#266 copy system: a labor line keeps its cost and re-tiers (500 ÷ 0.8 = 625.00)");
+  ok(by(4).cost === 40 && by(4).price === 80, "#266 copy system: a vendor-quote line keeps its cost and hand sell");
+  ok(by(5).cost === 40 && by(5).price === 50, "#266 copy system: a custom line keeps its cost; at seed it re-tiers (40 ÷ 0.8 = 50.00)");
+  ok(by(6).cost === 40 && by(6).price === 90 && by(7).cost === 40 && by(7).price === 60, "#266 copy system: curtain and allowance lines keep their cost and sell");
+  const f8 = by(8);
+  ok(f8.cost === 120 && f8.price === 204 && f8.qty === 3, "#266 copy system: a default-sell fixture re-costs from the resolved fixture (costOverride 0 beats the catalog's 7) and sells at Σ new list × qty (180 + 2 × 12 = 204)");
+  ok(f8.components!.map((c) => c.cost + "/" + c.price + "/" + c.qty).join() === "120/180/1,0/12/2,25/35/0", "#266 copy system: fixture components take the fixture's cost/list; quantities (including an optional 0) are unchanged");
+  ok(by(9).cost === 120 && by(9).price === 240, "#266 copy system: a hand-priced fixture (found by fixtureId) keeps its margin on the new cost (110/220 → 120/240)");
+  ok(by(10).cost === 120 && by(10).extSellOverride === 480 && by(10).price === 150, "#266 copy system: an ext-sell override keeps the line's extended margin (2 × 120 ÷ 0.5 = 480)");
+  ok(by(11).cost === 10 && by(11).price === 20, "#266 copy system: an unknown SKU is untouched");
+  ok(by(12).cost === 120 && by(12).price === 240 && by(12).option === true, "#266 copy system: an option line is refreshed too");
+  ok(r.costsUpdated === 6 && r.tierRepriced === 4 && r.handPriced === 7, "#266 copy system: counts — 6 costs updated, 4 re-tiered, 7 hand-priced kept (got " + [r.costsUpdated, r.tierRepriced, r.handPriced].join("/") + ")");
+
+  const same = c266Copy(section, { newSectionId: "sysS", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  const sb = (id: number) => same.section.items.find((x) => x.id === id)!;
+  ok(same.tierRepriced === 0 && same.handPriced === 0 && sb(3).price === 714.29 && sb(5).price === 57.14, "#266 copy system: the same source and target tier re-tiers nothing");
+  ok(sb(2).cost === 110 && sb(2).price === 157.14, "#266 copy system: with no tier move a seeded line stays on the source seed at its new cost (110 ÷ 0.7 = 157.14)");
+  const nullTarget = c266Copy(section, { newSectionId: "sysN", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: null });
+  ok(nullTarget.tierRepriced === 0 && nullTarget.section.items.find((x) => x.id === 3)!.price === 714.29, "#266 copy system: a null target tier is no tier move");
+  const drift: C266Section = { ...section, items: [it(1, "LAB-1", 500, 714.32, { labor: true })] };
+  const dr = c266Copy(drift, { newSectionId: "sysD", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  ok(dr.section.items[0].price === 714.32, "#266 copy system: an unmoved labor line keeps its rounding-drift sell verbatim");
+  const fb = c266Copy(section, { newSectionId: "sysF", catalog, fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.2 });
+  const f8b = fb.section.items.find((x) => x.id === 8)!;
+  ok(f8b.cost === 1 + 14 && f8b.components![2].cost === 20, "#266 copy system: with no resolved fixture, components fall back to the catalog, then the line's own numbers");
+
+  const acts = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  ok(/export async function copySystemToEstimateAction\(/.test(acts) && acts.includes('newName: moved.name + " (moved)"') && acts.includes('newName: section.name + " (copy)"'), "#266: Move and Copy share placeSystemInEstimate — '(moved)' and '(copy)' names");
+}

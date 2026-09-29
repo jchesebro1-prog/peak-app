@@ -16,6 +16,7 @@ import {
   attestApprovalAction,
   claimReviewAction,
   draftQuoteScopeAction,
+  copySystemToEstimateAction,
   moveSystemToEstimateAction,
   requestChangesAction,
   resolveCatalogSkusAction,
@@ -31,6 +32,7 @@ import {
   travelForSelectionAction,
   updateQuoteMetaAction,
   updateQuoteTaskAction,
+  type CopySystemTarget,
   type MoveSystemTarget,
   type ReviewSync,
   type StageSync,
@@ -524,7 +526,18 @@ export default function EstimatorClient({
   /** Result banner for "Move system" — never auto-navigates (the user may
    *  have other unsaved edits on the CURRENT estimate). */
   const [moveNotice, setMoveNotice] = useState<
-    { ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string } | null
+    | {
+        ok: true;
+        targetId: string;
+        targetName: string;
+        targetNumber: string;
+        /** #266: "Copied" reuses this banner; absent = the original Moved wording. */
+        verb?: "Moved" | "Copied";
+        /** #266: the re-price summary; a copy within this estimate has no targetId. */
+        detail?: string;
+      }
+    | { ok: false; error: string }
+    | null
   >(null);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
@@ -1418,6 +1431,74 @@ export default function EstimatorClient({
         setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
       } else {
         setMoveNotice({ ok: false, error: res.error || "Could not move that system." });
+      }
+    });
+  };
+
+  /** #266: "Copy…" — sibling of moveSystem. The server re-prices the copy
+   *  (today's catalog costs, then the destination customer's tier). New /
+   *  existing leave this estimate untouched; "same" appends the returned
+   *  section right after the source, unsaved until the user hits Save. */
+  const copySystem = (secId: string, target: CopySystemTarget) => {
+    const sec = sections.find((s) => s.id === secId);
+    if (!sec) return;
+    const cname = customerId
+      ? customers.find((c) => c.id === customerId)?.name || custName
+      : custName;
+    setMoveNotice(null);
+    // Vendor records are shared by id (never duplicated) — the copy points at the same ones.
+    const usedVqIds = new Set(
+      sec.items.map((it) => it.vendorQuoteId).filter((id): id is string => !!id)
+    );
+    const usedVq = vendorQuotes.filter((v) => usedVqIds.has(v.id));
+    startTransition(async () => {
+      const res = await copySystemToEstimateAction(
+        sec,
+        target,
+        {
+          customerId: customerId || null,
+          locationId: locationId || null,
+          customer: cname,
+          contactName: contactName || "",
+          tierMargin: tierMarginRef.current,
+        },
+        usedVq
+      );
+      if (!res.ok) {
+        setMoveNotice({ ok: false, error: res.error || "Could not copy that system." });
+        return;
+      }
+      const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+      const parts: string[] = [];
+      if (res.costsUpdated > 0) parts.push(`${plural(res.costsUpdated, "part")} updated to today's cost`);
+      if (res.tierRepriced > 0) {
+        const tier = res.kind === "same" ? null : res.tierLabel;
+        parts.push(`${plural(res.tierRepriced, "line")} re-priced${tier ? " to " + tier : ""}`);
+      }
+      const detail = parts.length ? parts.join(" · ") : "prices already current";
+      if (res.kind === "same") {
+        const newId = sections.some((s) => s.id === res.section.id) ? "sys" + nextId() : res.section.id;
+        const copy: SpecSection = {
+          ...res.section,
+          id: newId,
+          name: sec.name + " (copy)",
+          items: res.section.items.map((it) => ({ ...it, id: nextId() })),
+        };
+        setSections((ss) => {
+          const at = ss.findIndex((s) => s.id === secId);
+          return at < 0 ? [...ss, copy] : [...ss.slice(0, at + 1), copy, ...ss.slice(at + 1)];
+        });
+        requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(newId)));
+        setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Copied", detail });
+      } else {
+        setMoveNotice({
+          ok: true,
+          targetId: res.targetId,
+          targetName: res.targetName,
+          targetNumber: res.targetNumber,
+          verb: "Copied",
+          detail,
+        });
       }
     });
   };
@@ -2837,7 +2918,21 @@ export default function EstimatorClient({
               }}
             >
               <span>
-                {moveNotice.ok ? (
+                {moveNotice.ok && moveNotice.verb === "Copied" ? (
+                  moveNotice.targetId ? (
+                    <>
+                      Copied to {moveNotice.targetNumber} · {moveNotice.targetName} — {moveNotice.detail} —{" "}
+                      <a
+                        href={`/estimator?id=${moveNotice.targetId}`}
+                        style={{ color: "inherit", textDecoration: "underline" }}
+                      >
+                        Open {moveNotice.targetName} →
+                      </a>
+                    </>
+                  ) : (
+                    <>Copied within this estimate — {moveNotice.detail}</>
+                  )
+                ) : moveNotice.ok ? (
                   <>
                     Moved to {moveNotice.targetName} ({moveNotice.targetNumber}) —{" "}
                     <a
@@ -3525,6 +3620,11 @@ export default function EstimatorClient({
                   onMoveToExisting={(targetQuoteId) =>
                     moveSystem(sec.id, { kind: "existing", quoteId: targetQuoteId })
                   }
+                  onCopyToNew={() => copySystem(sec.id, { kind: "new" })}
+                  onCopyToExisting={(targetQuoteId) =>
+                    copySystem(sec.id, { kind: "existing", quoteId: targetQuoteId })
+                  }
+                  onCopyHere={() => copySystem(sec.id, { kind: "same" })}
                   onSearchQuotes={searchQuotes}
                 />
               ))}

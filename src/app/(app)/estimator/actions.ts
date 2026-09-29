@@ -37,7 +37,11 @@ import {
   get as getInspection,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
+import { getMany as catalogGetMany, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
+import { listFixtures } from "@/lib/stores/fixtures";
+import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
+import { copySectionForTarget, type CopyCatalogPart, type CopyFixture } from "./copy-system";
+import { seedMarginOf } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
@@ -629,11 +633,47 @@ export async function moveSystemToEstimateAction(
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
   const moved: SpecSection = { ...section, id: "sys" + Date.now() };
-  // Trust the section, not the caller's list: only records this section's own
-  // items name travel. Ids are globally unique (Date.now + random), so they
-  // are carried as-is and can never shadow a record already on the target.
-  const movedIds = vendorIdsInSections([moved]);
-  const movedVq = vendorQuoteRows(vendorQuotes).filter((vq) => movedIds.has(vq.id));
+  const placed = await placeSystemInEstimate(moved, target, {
+    newName: moved.name + " (moved)",
+    sourceContext,
+    vendorQuotes,
+    owner: user.name,
+  });
+  if (!placed.ok) return placed;
+  return { ok: true, targetId: placed.targetId, targetName: placed.targetName, targetNumber: placed.targetNumber };
+}
+
+/**
+ * Persist a system into another estimate — the shared tail of Move and Copy
+ * (#266). `placed` already carries its new section id. An existing target
+ * gains the section at the end; a new target is created as a draft for the
+ * source's customer/venue/contact, named `newName`, optionally stamped with
+ * a pricing tier (Copy). Either way value/margin are recomputed through
+ * totals(), the PDF is rescheduled, and the app is revalidated.
+ *
+ * #143 re-review: a vendor line's money is on the item, but its file, terms,
+ * notes and material list are on a VendorQuote record BESIDE the spec — so
+ * those records travel with the section. Without that the target resolved the
+ * line against whatever it already held under that id (nothing, or, worse, a
+ * different vendor's quote), and the source's next save pruned the only copy
+ * of the file away. Trust the section, not the caller's list: only records
+ * this section's own items name travel. Ids are globally unique (Date.now +
+ * random), so they are carried as-is, and a target that already holds one
+ * keeps a single record under it (the carried copy).
+ */
+async function placeSystemInEstimate(
+  placed: SpecSection,
+  target: MoveSystemTarget,
+  opts: {
+    newName: string;
+    sourceContext: { customerId: string | null; locationId: string | null; customer: string; contactName: string };
+    vendorQuotes: VendorQuote[];
+    owner: string;
+    tier?: { pricingTier: string; tierMargin: number };
+  }
+): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
+  const placedIds = vendorIdsInSections([placed]);
+  const placedVq = vendorQuoteRows(opts.vendorQuotes).filter((vq) => placedIds.has(vq.id));
 
   if (target.kind === "existing") {
     const existing = await get(target.quoteId);
@@ -644,10 +684,10 @@ export async function moveSystemToEstimateAction(
       | { sections?: SpecSection[]; mobs?: SpecMob[] }
       | null
       | undefined;
-    const mergedSections = [...(existingSpec?.sections || []), moved];
+    const mergedSections = [...(existingSpec?.sections || []), placed];
     const t = totals(mergedSections, 0);
-    const carried = movedVq.length
-      ? await storeVendorQuotes(target.quoteId, movedVq)
+    const carried = placedVq.length
+      ? await storeVendorQuotes(target.quoteId, placedVq)
       : [];
     const updated = await update(target.quoteId, {
       spec: { sections: mergedSections, mobs: existingSpec?.mobs || [] },
@@ -656,7 +696,7 @@ export async function moveSystemToEstimateAction(
       ...(carried.length
         ? {
             vendorQuotes: [
-              ...vendorQuoteRows(existing.vendorQuotes).filter((vq) => !movedIds.has(vq.id)),
+              ...vendorQuoteRows(existing.vendorQuotes).filter((vq) => !placedIds.has(vq.id)),
               ...carried,
             ],
           }
@@ -671,20 +711,21 @@ export async function moveSystemToEstimateAction(
     return { ok: true, targetId: updated.id, targetName: updated.name, targetNumber: displayQuoteNumber(updated) };
   }
 
-  const t = totals([moved], 0);
+  const t = totals([placed], 0);
   let created: Quote;
   try {
     created = await create({
-      name: moved.name + " (moved)",
-      customer: sourceContext.customer,
-      customerId: sourceContext.customerId,
-      locationId: sourceContext.locationId,
+      name: opts.newName,
+      customer: opts.sourceContext.customer,
+      customerId: opts.sourceContext.customerId,
+      locationId: opts.sourceContext.locationId,
       source: "estimator",
       status: "draft",
-      spec: { sections: [moved], mobs: [] },
+      spec: { sections: [placed], mobs: [] },
       value: t.grand,
       margin: t.margin,
-      owner: user.name,
+      owner: opts.owner,
+      ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
     });
   } catch (e) {
     return {
@@ -698,16 +739,178 @@ export async function moveSystemToEstimateAction(
   // create() promotes only the declared Quote columns — contactName rides
   // along on the doc like it does for saveQuoteAction's fresh-create path.
   const withContact = await update(created.id, {
-    contactName: sourceContext.contactName || "",
+    contactName: opts.sourceContext.contactName || "",
     // Same as saveQuoteAction's fresh-create path: the Blob path can only be
     // keyed by the real quote id, which exists for the first time here.
-    ...(movedVq.length
-      ? { vendorQuotes: await storeVendorQuotes(created.id, movedVq) }
+    ...(placedVq.length
+      ? { vendorQuotes: await storeVendorQuotes(created.id, placedVq) }
       : {}),
   } as QuotePatch);
   await scheduleQuotePdf(created.id);
   refresh();
   return { ok: true, targetId: created.id, targetName: (withContact || created).name, targetNumber: displayQuoteNumber(withContact || created) };
+}
+
+export type CopySystemTarget = MoveSystemTarget | { kind: "same" };
+
+export type CopySystemResult =
+  | { ok: true; kind: "same"; section: SpecSection; costsUpdated: number; tierRepriced: number }
+  | {
+      ok: true;
+      kind: "new" | "existing";
+      targetId: string;
+      targetName: string;
+      targetNumber: string;
+      costsUpdated: number;
+      tierRepriced: number;
+      tierLabel: string | null;
+    }
+  | { ok: false; error: string };
+
+const usableTierMargin = (m: unknown): number | null =>
+  typeof m === "number" && Number.isFinite(m) && m > 0 && m < 1 ? m : null;
+
+/**
+ * #266 — Copy a system to a new estimate, an existing one, or within this
+ * estimate ("same"). The source is never touched. The copy is RE-PRICED for
+ * where it lands (copy-system.ts): catalog parts and fixture components take
+ * today's catalog cost, then lines still at the source tier's seed move to
+ * the DESTINATION customer's tier; hand-priced lines keep their own margin
+ * on the new cost; custom, curtain, allowance, vendor-quote, labor and POR
+ * lines keep their cost.
+ *
+ * Destination tier: "same" keeps the source's stamp (no tier move); "new"
+ * resolves the source customer + contact and stamps it on the created quote
+ * (as saveQuoteAction would); "existing" reads the target's stored stamp,
+ * else resolves its customer + contact.
+ *
+ * "same" persists nothing — the client appends the returned section (and
+ * re-ids its lines) and the normal Save persists it. "new"/"existing"
+ * persist exactly like Move (placeSystemInEstimate), carrying the section's
+ * vendor-quote records under the SAME ids: their Blob files are keyed by
+ * record id and never deleted, so source and copy share the file.
+ */
+export async function copySystemToEstimateAction(
+  section: SpecSection,
+  target: CopySystemTarget,
+  sourceContext: {
+    customerId: string | null;
+    locationId: string | null;
+    customer: string;
+    contactName: string;
+    tierMargin: number | null;
+  },
+  vendorQuotes: VendorQuote[] = []
+): Promise<CopySystemResult> {
+  const user = await requireUser();
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const items = Array.isArray(section?.items) ? section.items : [];
+
+  /* Today's catalog, for only the SKUs this section names — plus, when a line
+     is a catalog-backed fixture, the resolved fixture records (costOverride
+     applied) and their own parts. */
+  const skus = new Set<string>();
+  const fixtureIds = new Set<string>();
+  for (const it of items) {
+    if (it?.sku) skus.add(it.sku);
+    const comps = Array.isArray(it?.components) ? it.components : [];
+    if (comps.length) {
+      fixtureIds.add(it.fixtureId || it.sku);
+      comps.forEach((c) => c?.sku && skus.add(c.sku));
+    }
+  }
+  let fixtureRecords: FixtureRecord[] = [];
+  if (fixtureIds.size) {
+    fixtureRecords = (await listFixtures()).filter((r) => fixtureIds.has(r.id));
+    fixtureRecords.forEach((r) => fixtureSkus(r).forEach((s) => skus.add(s)));
+  }
+  const parts = skus.size ? await catalogGetMany([...skus]) : [];
+  const catalog = new Map<string, CopyCatalogPart>();
+  for (const p of parts) {
+    const cost = Number(p.cost);
+    // A part with no real cost today is no basis for re-costing a line.
+    if (!p.sku || !(Number.isFinite(cost) && cost > 0) || catalog.has(p.sku)) continue;
+    catalog.set(p.sku, { sku: p.sku, cost, list: Number(p.list) || 0 });
+  }
+  const fixtures = new Map<string, CopyFixture>();
+  if (fixtureRecords.length) {
+    for (const a of allAssembliesFrom(fixtureRecords, parts)) {
+      fixtures.set(a.id, {
+        id: a.id,
+        // A part missing from today's catalog falls back to the line's own
+        // numbers rather than pricing at the resolver's 0.
+        components: a.components
+          .filter((c) => c.found && (c.cost > 0 || c.costOverride !== undefined))
+          .map((c) => ({ sku: c.sku, cost: c.cost, list: c.list })),
+      });
+    }
+  }
+
+  /* The destination tier. */
+  const sourceTier = usableTierMargin(sourceContext?.tierMargin);
+  let targetTier: number | null = sourceTier;
+  let targetTierKey: string | null = null;
+  let stamp: { pricingTier: string; tierMargin: number } | undefined;
+  if (target.kind === "new") {
+    const r = await resolveTier(sourceContext.customerId || null, sourceContext.contactName || "");
+    targetTier = r.margin;
+    targetTierKey = r.tier;
+    stamp = { pricingTier: r.tier, tierMargin: r.margin };
+  } else if (target.kind === "existing") {
+    const existing = await get(target.quoteId);
+    if (!existing) return { ok: false, error: "That estimate could not be found." };
+    const stored = usableTierMargin(existing.tierMargin);
+    if (stored != null) {
+      targetTier = stored;
+      targetTierKey = existing.pricingTier || null;
+    } else {
+      const r = await resolveTier(existing.customerId || null, existing.contactName || "");
+      targetTier = r.margin;
+      targetTierKey = r.tier;
+    }
+  }
+  const tierMoved = usableTierMargin(targetTier) != null && seedMarginOf(sourceTier) !== seedMarginOf(targetTier);
+  const tierLabel =
+    tierMoved && targetTierKey
+      ? (PRICING_TIER_LABEL as Record<string, string>)[targetTierKey] || targetTierKey
+      : null;
+
+  const copied = copySectionForTarget(section, {
+    newSectionId: "sys" + Date.now(),
+    catalog,
+    fixtures,
+    sourceTierMargin: sourceTier,
+    targetTierMargin: targetTier,
+  });
+
+  if (target.kind === "same") {
+    return {
+      ok: true,
+      kind: "same",
+      section: copied.section,
+      costsUpdated: copied.costsUpdated,
+      tierRepriced: copied.tierRepriced,
+    };
+  }
+
+  const placed = await placeSystemInEstimate(copied.section, target, {
+    newName: section.name + " (copy)",
+    sourceContext,
+    vendorQuotes,
+    owner: user.name,
+    tier: stamp,
+  });
+  if (!placed.ok) return placed;
+  return {
+    ok: true,
+    kind: target.kind,
+    targetId: placed.targetId,
+    targetName: placed.targetName,
+    targetNumber: placed.targetNumber,
+    costsUpdated: copied.costsUpdated,
+    tierRepriced: copied.tierRepriced,
+    tierLabel,
+  };
 }
 
 /** Header fields persisted immediately as they change (prototype behavior). */

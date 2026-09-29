@@ -140,6 +140,12 @@ export type SectionCardProps = {
   onMoveToNew: () => void;
   /** Moves this system into an already-existing estimate, by id. */
   onMoveToExisting: (targetQuoteId: string) => void;
+  /** #266: copies this system (re-priced) into a brand-new estimate. */
+  onCopyToNew: () => void;
+  /** #266: copies this system (re-priced) into an already-existing estimate, by id. */
+  onCopyToExisting: (targetQuoteId: string) => void;
+  /** #266: copies this system (re-priced) as a new card in this same estimate. */
+  onCopyHere: () => void;
   /** Live-search other estimates for the "move" picker. */
   onSearchQuotes: (query: string) => Promise<QuoteLite[]>;
 };
@@ -148,6 +154,9 @@ export default function SectionCard(p: SectionCardProps) {
   const [importMessage, setImportMessage] = useState("");
   const [linkRevealed, setLinkRevealed] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  // #266: the one picker serves both Move… and Copy…; opening either while the
+  // other is open just switches the mode.
+  const [pickerMode, setPickerMode] = useState<"move" | "copy">("move");
   const [moveQuery, setMoveQuery] = useState("");
   const [moveHits, setMoveHits] = useState<QuoteLite[]>([]);
   const [moveLoading, startMoveSearch] = useTransition();
@@ -194,6 +203,27 @@ export default function SectionCard(p: SectionCardProps) {
   const handleMoveToExisting = (targetQuoteId: string) => {
     setMoveOpen(false);
     p.onMoveToExisting(targetQuoteId);
+  };
+  const handleCopyToNew = () => {
+    setMoveOpen(false);
+    p.onCopyToNew();
+  };
+  const handleCopyToExisting = (targetQuoteId: string) => {
+    setMoveOpen(false);
+    p.onCopyToExisting(targetQuoteId);
+  };
+  const handleCopyHere = () => {
+    setMoveOpen(false);
+    p.onCopyHere();
+  };
+  const isCopy = pickerMode === "copy";
+  const togglePicker = (mode: "move" | "copy") => {
+    if (moveOpen && pickerMode === mode) {
+      setMoveOpen(false);
+    } else {
+      setPickerMode(mode);
+      setMoveOpen(true);
+    }
   };
 
   const { sec, isInternal, cols } = p;
@@ -497,12 +527,30 @@ export default function SectionCard(p: SectionCardProps) {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setMoveOpen((o) => !o);
+                  togglePicker("copy");
                 }}
                 style={{
                   fontSize: 11.5,
                   fontWeight: 500,
-                  color: moveOpen ? ACCENT_INK : "#aab0bb",
+                  color: moveOpen && isCopy ? ACCENT_INK : "#aab0bb",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                Copy…
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  togglePicker("move");
+                }}
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  color: moveOpen && !isCopy ? ACCENT_INK : "#aab0bb",
                   background: "transparent",
                   border: "none",
                   cursor: "pointer",
@@ -530,7 +578,7 @@ export default function SectionCard(p: SectionCardProps) {
             </div>
           </div>
 
-          {/* move-system picker — new sibling estimate or an existing one */}
+          {/* move/copy-system picker — new sibling estimate or an existing one (#266: copy mode adds "within this estimate") */}
           {moveOpen && (
             <div
               style={{
@@ -556,14 +604,20 @@ export default function SectionCard(p: SectionCardProps) {
                     textTransform: "uppercase",
                   }}
                 >
-                  Move this system to…
+                  {isCopy ? "Copy this system to…" : "Move this system to…"}
                 </span>
                 {addBtn("Cancel", () => setMoveOpen(false))}
               </div>
 
+              {isCopy && (
+                <div style={{ fontSize: 10.5, color: "#9aa0ab", marginBottom: 10 }}>
+                  The copy is re-priced: today&apos;s catalog costs, at the destination customer&apos;s tier.
+                </div>
+              )}
+
               <button
                 type="button"
-                onClick={handleMoveToNew}
+                onClick={isCopy ? handleCopyToNew : handleMoveToNew}
                 style={{
                   width: "100%",
                   textAlign: "left",
@@ -576,11 +630,34 @@ export default function SectionCard(p: SectionCardProps) {
                   borderRadius: 8,
                   padding: "9px 11px",
                   cursor: "pointer",
-                  marginBottom: 10,
+                  marginBottom: isCopy ? 6 : 10,
                 }}
               >
-                + Start a new estimate from this system
+                {isCopy ? "+ Start a new estimate from a copy" : "+ Start a new estimate from this system"}
               </button>
+
+              {isCopy && (
+                <button
+                  type="button"
+                  onClick={handleCopyHere}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: ACCENT_INK,
+                    background: ACCENT_SOFT,
+                    border: "1px solid transparent",
+                    borderRadius: 8,
+                    padding: "9px 11px",
+                    cursor: "pointer",
+                    marginBottom: 10,
+                  }}
+                >
+                  Copy within this estimate
+                </button>
+              )}
 
               <input
                 value={moveQuery}
@@ -601,7 +678,7 @@ export default function SectionCard(p: SectionCardProps) {
                 <button
                   key={hit.id}
                   type="button"
-                  onClick={() => handleMoveToExisting(hit.id)}
+                  onClick={() => (isCopy ? handleCopyToExisting(hit.id) : handleMoveToExisting(hit.id))}
                   style={{
                     width: "100%",
                     display: "flex",
