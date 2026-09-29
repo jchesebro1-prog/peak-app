@@ -35750,3 +35750,21 @@ import { quickSaveFields as c255HardSaveFields } from "@/lib/stores/design-prici
   ok(inLim("width", saved.width!) && inLim("depth", saved.depth!) && inLim("grid", saved.grid!), "#255 hardening: quickSaveFields clamps the top-level width/depth/grid to LIM");
   ok(inLim("width", cfg.width) && inLim("depth", cfg.depth) && inLim("grid", cfg.grid) && inLim("wing", cfg.wing) && inLim("ph", cfg.ph), "#255 hardening: quickSaveFields clamps config.width/depth/grid/wing/ph to LIM too");
 }
+
+/* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws (D468) --- */
+import { PLAN_TEXT_SCALE as c261Scale, planTextSize as c261Size } from "@/app/(app)/design/quick/plan-svg";
+{
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  ok(c261Scale === 0.85, "#261: PLAN_TEXT_SCALE is 0.85 — plan text reads at 85% of its builder size");
+  ok(near(c261Size(8, 1), 6.8) && near(c261Size(14, 1), 11.9), "#261: at display scale k = 1, a plan text is 0.85 × its base size (8 → 6.8, 14 → 11.9)");
+  ok(near(c261Size(8, 2) * 2, 6.8) && near(c261Size(14, 3) * 3, 11.9), "#261: on a wide panel (k = 2, 3) the on-screen size (viewBox size × k) stays 0.85 × base — text no longer grows with the plan");
+  ok(near(c261Size(8, 0.5), 6.8) && near(c261Size(8, 0.5) * 0.5, 3.4), "#261: on a narrow panel (k = 0.5) the viewBox size holds, so the on-screen text shrinks with the plan as before");
+  ok([0, -1, Number.NaN, Number.POSITIVE_INFINITY].every((k) => near(c261Size(8, k), 6.8)), "#261: a zero/negative/non-finite display scale falls back to k = 1");
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/plan-svg.tsx"), "utf8");
+  const comp = src.slice(src.indexOf("export function PlanSvg("), src.indexOf("export function renderPlanSvgMarkup("));
+  ok(/ref=\{observePlanScale\}/.test(comp) && /new ResizeObserver\(/.test(src) && /ro\.observe\(svg\)/.test(src) && /planTextSize\(1, renderedW \/ vbW\)/.test(src), "#261: <PlanSvg> observes its rendered width (ResizeObserver) and stores planTextSize(1, renderedWidth / viewBoxWidth) on the svg");
+  ok(/fontSize=\{planTextSize\(t\.size, 1\)\}/.test(comp) && /var\(\$\{PLAN_TEXT_VAR\}, \$\{PLAN_TEXT_SCALE\}\)/.test(comp), "#261: every <PlanSvg> text sizes through planTextSize (k = 1 before the first measure)");
+  ok(!/\buse(State|Effect|Ref|LayoutEffect)\b/.test(src) && !/^["']use client["']/m.test(src), "#261: plan-svg.tsx stays hook-free (no 'use client') — grid-projects.ts and grid-auto-layout.ts import it on the server");
+  const markup = src.slice(src.indexOf("export function renderPlanSvgMarkup("));
+  ok(/font-size="\$\{t\.size\}"/.test(markup), "#261: renderPlanSvgMarkup (Grid base sheets / print) keeps the builder's own text sizes");
+}

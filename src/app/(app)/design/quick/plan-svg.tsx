@@ -995,6 +995,44 @@ const MONO = "var(--font-mono), IBM Plex Mono, monospace";
  *  properties), so the static markup falls straight back to the named font. */
 const STATIC_MONO = "IBM Plex Mono, monospace";
 
+/** Plan text reads at this share of its builder size (#261, D468): Jeff found the labels too big. */
+export const PLAN_TEXT_SCALE = 0.85;
+
+/**
+ * A plan text's font size in viewBox units (#261, D468). `k` is the plan's display scale (rendered px per viewBox
+ * unit). The builders size text for k = 1; `<PlanSvg>` draws at `width: 100%`, so on a wide panel the text used to
+ * grow with the plan (dimensions reached 22–35 px). Dividing by `max(k, 1)` holds it at `base × PLAN_TEXT_SCALE`
+ * on-screen px however wide the plan draws; on a narrow panel (k < 1) it still shrinks with the plan.
+ */
+export function planTextSize(base: number, k: number): number {
+  const scale = Number.isFinite(k) && k > 0 ? k : 1;
+  return (base * PLAN_TEXT_SCALE) / Math.max(scale, 1);
+}
+
+/** The CSS variable `<PlanSvg>`'s texts read their size factor from (`planTextSize(1, k)`). */
+const PLAN_TEXT_VAR = "--plan-text";
+
+/**
+ * Callback ref (React 19 cleanup) that watches the rendered width of a `<PlanSvg>` and stores
+ * `planTextSize(1, k)` on it as `--plan-text`. A module-level function, so its identity is stable across renders;
+ * no hooks, so this file stays importable from server modules (`grid-projects.ts`, `grid-auto-layout.ts`).
+ */
+function observePlanScale(svg: SVGSVGElement | null): (() => void) | void {
+  if (!svg) return;
+  const apply = (renderedW: number) => {
+    const vbW = svg.viewBox.baseVal?.width || 0;
+    if (!(vbW > 0) || !(renderedW > 0)) return;
+    svg.style.setProperty(PLAN_TEXT_VAR, String(planTextSize(1, renderedW / vbW)));
+  };
+  apply(svg.getBoundingClientRect().width);
+  if (typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver((entries) => {
+    for (const e of entries) apply(e.contentRect.width);
+  });
+  ro.observe(svg);
+  return () => ro.disconnect();
+}
+
 export function PlanSvg({
   plan,
   accent,
@@ -1013,6 +1051,7 @@ export function PlanSvg({
   return (
     <svg
       id={svgId}
+      ref={observePlanScale}
       viewBox={`0 0 ${p.W} ${p.H}`}
       preserveAspectRatio="xMidYMid meet"
       style={{ width: "100%", height: "auto", display: "block", touchAction: "none" }}
@@ -1030,7 +1069,7 @@ export function PlanSvg({
         <circle key={"c" + i} cx={c.cx} cy={c.cy} r={c.r} fill={c.fill} />
       ))}
       {(p.texts || []).map((t, i) => (
-        <text key={"t" + i} x={t.x} y={t.y} textAnchor={t.anchor as "start" | "middle" | "end"} transform={t.transform || undefined} fontSize={t.size} fontWeight={t.weight || 400} fill={t.fill} style={{ fontFamily: MONO }}>
+        <text key={"t" + i} x={t.x} y={t.y} textAnchor={t.anchor as "start" | "middle" | "end"} transform={t.transform || undefined} fontSize={planTextSize(t.size, 1)} fontWeight={t.weight || 400} fill={t.fill} style={{ fontFamily: MONO, fontSize: `calc(${t.size}px * var(${PLAN_TEXT_VAR}, ${PLAN_TEXT_SCALE}))` }}>
           {t.t}
         </text>
       ))}

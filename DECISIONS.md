@@ -7860,3 +7860,17 @@ the drawing's own numbers the default 24' stage overlaps ~4' of it. The stage is
 out against the stage and every lot marker but audio's turn with it, and every lot is pulled inside the floor (its box
 inset past the corners) — never into the bowl. Six starter Spaces; the sheet calibrates from the floor's straight
 sides and stamps the stage's position with the rooms. The toolbar reads "Drag the stage or a room along the walls".
+
+## D468. Quick Design plan text is a fixed on-screen size (#261, 2026-09-29)
+
+Jeff: "the labels are really huge on the drawings and they need to decrease the sizes." `<PlanSvg>` draws the
+640-wide viewBox at `width: 100%` and every text's size is in viewBox units, so text grew with the panel: at a
+657 px plan room labels read 8.2 px and dimensions 14.4 px, and on a wide monitor or with side panels collapsed
+12–20 px and 22–35 px. `<PlanSvg>` now measures its rendered width (a ResizeObserver in a callback ref, no hooks, so
+`plan-svg.tsx` stays importable from `grid-projects.ts` / `grid-auto-layout.ts` on the server) and sizes each text
+`planTextSize(base, k) = base × 0.85 / max(k, 1)` viewBox units, k = rendered px per viewBox unit. On-screen text is
+therefore at most 0.85 × its builder size however wide the plan draws (room labels 6.8 px, dimensions 9.35–11.9 px,
+CONSOLE 5.1 px) and still shrinks with the plan on a narrow panel. Positions, anchors and rotations are untouched, and
+since the viewBox size never exceeds 0.85 × base the builders' label-fit checks (`LABEL_CHAR_PX`) stay conservative.
+Legend chips and other HTML outside the SVG are unchanged, and so is `renderPlanSvgMarkup` (Grid base sheets and
+print keep the builders' sizes; a Grid sheet is scaled by its own zoom).
