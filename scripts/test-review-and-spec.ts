@@ -37230,6 +37230,153 @@ import type { SpecItem as P273Item, SpecSection as P273Section, VendorQuote as P
 }
 
 /* ======================================================================
+   #272 — Labor: a Local mobilization fills the route's round-trip miles
+   (daily mileage no longer prices at $0 off a blank box); typed miles
+   always win; no route → blank + a modal warning; a reopened #269 draft
+   keeps its saved miles.
+   ====================================================================== */
+import {
+  applyAutoTrips as l272AutoTrips,
+  applyLocalTrip as l272Local,
+  applyTravelTripTo as l272Travel,
+  laborMob as l272Mob,
+  mobMissingMileage as l272Missing,
+  roundTripMiles as l272RT,
+  typeMobMiles as l272Type,
+  setRouteMiles as l272Use,
+} from "@/app/(app)/estimator/labor-defaults";
+import { readFileSync as l272Read } from "node:fs";
+{
+  const near = { miles: 18.4, minutes: 25, officeName: "Denver" }; // Local: RT 37
+  const far = { miles: 170.9, minutes: 190, officeName: "Denver" }; // Travel: RT 342
+  const noMiles = { miles: null, minutes: null, officeName: null };
+  const rate = l270Rate({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 60, "TVL-MIL": 0.7, "TVL-HTL": 139, "TVL-FOD": 55, "EQP-LIFT": 875.33, "SHP-PM": 65, "SHP-IN": 45, "DRF-SUB": 50 });
+
+  /* ---- seeding: defaultLaborMobs / laborMob / a newly added mobilization ---- */
+  ok(l272RT(near) === 37 && l272RT(far) === 342 && l272RT(null) === null && l272RT(noMiles) === null, "#272: roundTripMiles = round(one-way x 2), null with no route");
+  const nearMob = l270Mobs(near)[0];
+  ok(nearMob.tripType === "local" && nearMob.milesRT === "37", "#272 defaultLaborMobs: a Local trip seeds the route's round-trip miles (was blank)");
+  const farMob = l270Mobs(far)[0];
+  ok(farMob.tripType === "travel" && farMob.milesRT === "342", "#272 defaultLaborMobs: a Travel trip still seeds them (unchanged)");
+  ok(l270Mobs(null)[0].milesRT === "" && l270Mobs(noMiles)[0].milesRT === "" && l270Mobs(noMiles)[0].tripType === "local", "#272 defaultLaborMobs: no route → blank miles, Local");
+  ok(l272Mob(near, "Install", "4", "5").milesRT === "37" && l272Mob(near).tripAuto === true, "#272: a newly added mobilization (laborMob) seeds Local miles and stays on the auto rule");
+  ok(l270Mobs({ miles: 200, minutes: 60, officeName: null })[0].tripType === "local" && l270Mobs({ miles: 200, minutes: 61, officeName: null })[0].tripType === "travel", "#272: the > 60 min → Travel rule is unchanged");
+
+  /* ---- the trip-type auto rule when the customer / venue changes ---- */
+  const blankLocal = { ...l270Mobs(null)[0] }; // tripAuto true, blank miles
+  const afterNear = l272AutoTrips([blankLocal], near)[0];
+  ok(afterNear.tripType === "local" && afterNear.milesRT === "37", "#272 applyAutoTrips: a blank Local mobilization fills the route's miles");
+  const afterFar = l272AutoTrips([blankLocal], far)[0];
+  ok(afterFar.tripType === "travel" && afterFar.milesRT === "342", "#272 applyAutoTrips: a blank mobilization on a far venue flips to Travel and fills (unchanged)");
+  const typed = { ...blankLocal, milesRT: "12" };
+  ok(l272AutoTrips([typed], near)[0].milesRT === "12" && l272AutoTrips([typed], far)[0].milesRT === "12", "#272 applyAutoTrips: typed miles survive a customer/venue change");
+  ok(l272AutoTrips([{ ...typed, milesRT: "0" }], near)[0].milesRT === "0", "#272 applyAutoTrips: a typed 0 is a choice, not blank");
+  const manual = { ...blankLocal, tripAuto: false, tripType: "local" as const };
+  ok(l272AutoTrips([manual], far)[0].tripType === "local" && l272AutoTrips([manual], far)[0].milesRT === "342", "#272 applyAutoTrips: a manual Local pick keeps its TYPE; its blank miles still fill from the route");
+  ok(l272AutoTrips([blankLocal], noMiles)[0].milesRT === "" && l272AutoTrips([blankLocal], null)[0].milesRT === "", "#272 applyAutoTrips: no route leaves miles blank");
+
+  /* ---- switching a row to Local / Travel ---- */
+  const toLocal = l272Local({ ...farMob, milesRT: "" }, near);
+  ok(toLocal.tripType === "local" && toLocal.tripAuto === false && toLocal.milesRT === "37", "#272 setTripLocal: switching to Local fills blank miles and turns the auto rule off");
+  ok(l272Local(l272Type(farMob, "55"), near).milesRT === "55", "#272 setTripLocal: typed miles win");
+  ok(l272Local({ ...farMob, milesRT: "" }, null).milesRT === "" && l272Local({ ...farMob, milesRT: "" }, noMiles).milesRT === "", "#272 setTripLocal: no route → still blank");
+  const toTravel = l272Travel({ ...nearMob, milesRT: "" }, far);
+  ok(toTravel.tripType === "travel" && toTravel.tripAuto === false && toTravel.milesRT === "342" && l272Travel(l272Type(nearMob, "9"), far).milesRT === "9", "#272 applyTravelTrip: fills blank, keeps typed (unchanged behaviour)");
+
+  /* ---- no route → blank + warning ---- */
+  ok(l272Missing({ milesRT: "" }, null) && l272Missing({ milesRT: "" }, noMiles), "#272 warning: blank miles with no route is flagged");
+  ok(!l272Missing({ milesRT: "" }, near) && !l272Missing({ milesRT: "37" }, null) && !l272Missing({ milesRT: "0" }, null), "#272 warning: not flagged with a route, typed miles, or a typed 0");
+  const modal272 = l272Read("src/app/(app)/estimator/labor-modal.tsx", "utf8");
+  ok(modal272.includes("mobMissingMileage(raw, travel)") && modal272.includes("No mileage — venue not located; enter round-trip miles") && modal272.includes('data-testid="mob-no-mileage"'), "#272 warning: the Labor modal renders it per mobilization off mobMissingMileage");
+  ok(!/disabled=\{[^}]*missingMiles/.test(modal272) && modal272.includes("disabled={!valid}"), "#272 warning: never blocks Add (the button still gates on valid only)");
+
+  /* ---- wiring in the estimator client ---- */
+  const client272 = l272Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  ok(client272.includes("applyLocalTrip(m, est)") && client272.includes("applyAutoTripsToMobs(d.mobs, est)") && client272.includes("laborMob(travelEstNow())"), "#272 wiring: setTripLocal, applyAutoTrips and + Add mobilization all run the fill rule");
+  const seed272 = client272.slice(client272.indexOf("#269: reopened from a labor line"));
+  const edit272 = seed272.slice(0, seed272.indexOf("withTravelFor(customerId, locationId"));
+  ok(edit272.includes("setLaborDraft(snapshotLaborDraft(edit.draft));") && /return;\s*\}/.test(edit272), "#272 wiring: reopening a saved labor group seeds its own draft and returns BEFORE the travel reseed");
+
+  /* ---- #269: a reopened draft keeps its miles ---- */
+  const saved: L270Draft = {
+    discipline: "RIG", margin: "27",
+    mobs: [
+      { ...l270Mobs(null)[0], name: "Install", people: "2", days: "3", tripType: "local", tripAuto: true, milesRT: "61" },
+      { ...l270Mobs(null)[0], name: "Site Visit", people: "1", days: "1", tripType: "local", tripAuto: true, milesRT: "" },
+    ],
+    pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "",
+  };
+  const sec272 = { id: "sys1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as L270Sec;
+  const built = l270Build(l270Compute(saved, rate), "Rigging", (() => { let k = 900; return () => ++k; })(), "lg272");
+  const stored = l269With(sec272, "lg272", built, saved);
+  const reopened = l269Snap(l269Record(stored, "lg272")!.draft);
+  ok(reopened.mobs[0].milesRT === "61" && reopened.mobs[1].milesRT === "", "#272 #269: the stored draft round-trips its miles exactly (the reopen path applies no route)");
+  const afterVenueChange = l272AutoTrips(reopened.mobs, near);
+  ok(afterVenueChange[0].milesRT === "61", "#272 #269: a venue change on a reopened draft never overwrites its saved miles");
+  ok(afterVenueChange[1].milesRT === "37", "#272 #269: only the draft's blank box fills");
+
+  /* ---- #270: a Local mobilization with filled miles prices + lines correctly ---- */
+  const filled = { ...nearMob, name: "Site Visit", people: "1", days: "3" };
+  const mk = (m: typeof filled) => l270Compute({ discipline: "RIG", margin: "27", mobs: [m], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, rate);
+  const lc = mk(filled);
+  const blankCalc = mk({ ...filled, milesRT: "" });
+  ok(l270R2(lc.mobs[0].mileCost) === l270R2(37 * 1 * 3 * 0.7) && blankCalc.mobs[0].mileCost === 0, "#272 pricing: local mileage is RT miles x vehicles x days x $/mi (a blank box was $0)");
+  const lines272 = l270Build(lc, "Rigging", (() => { let k = 950; return () => ++k; })(), "lg272b");
+  const mile272 = lines272.filter((x) => x.laborTravel === "mileage");
+  ok(mile272.length === 1 && mile272[0].internalNote === "1 vehicle × 37 mi RT × 3 days × $0.70/mi" && mile272[0].cost === l270R2(37 * 3 * 0.7), `#272 #270: the Local mobilization inserts its own Mileage line with the per-day basis (${mile272[0]?.internalNote})`);
+  ok(lines272.every((x) => x.laborTravel !== "hotel" && x.laborTravel !== "perdiem"), "#272 #270: a Local mobilization adds no hotel / per diem lines");
+  ok(l270Build(blankCalc, "Rigging", (() => { let k = 980; return () => ++k; })(), "lg272c").every((x) => x.laborTravel !== "mileage"), "#272 #270: a blank-miles Local mobilization has no Mileage line (the silent $0 the warning now flags)");
+
+  /* ---- stale auto-filled miles follow a route change; typed miles never do ---- */
+  const newNear = { miles: 4, minutes: 12, officeName: "Denver" }; // RT 8
+  const autoFar = l270Mobs(far)[0]; // travel, 342, milesAuto
+  ok(autoFar.milesAuto === true && nearMob.milesAuto === true, "#272 flag: a route-filled seed carries milesAuto");
+  ok(l270Mobs(null)[0].milesAuto === undefined && l270Mobs(noMiles)[0].milesAuto === undefined && !("milesAuto" in l270Mobs(null)[0]), "#272 flag: a blank (no-route) seed carries no flag");
+  const farToNear = l272AutoTrips([autoFar], newNear)[0];
+  ok(farToNear.tripType === "local" && farToNear.milesRT === "8" && farToNear.milesAuto === true, "#272 route change: auto-filled 342 follows a far → near change to 8 (and flips to Local)");
+  const nearToFar = l272AutoTrips([nearMob], far)[0];
+  ok(nearToFar.tripType === "travel" && nearToFar.milesRT === "342" && nearToFar.milesAuto === true, "#272 route change: auto-filled 37 follows a near → far change to 342");
+  ok(l272AutoTrips([l272Type(autoFar, "342")], newNear)[0].milesRT === "342", "#272 route change: typed miles (even equal to the old auto value) never follow");
+  const typed0 = l272Type(autoFar, "0");
+  ok(typed0.milesRT === "0" && typed0.milesAuto === undefined && !("milesAuto" in typed0), "#272 typing: typing 0 clears the flag (no stale key left)");
+  ok(l272AutoTrips([typed0], newNear)[0].milesRT === "0", "#272 route change: a typed 0 stays 0");
+  const lost = l272AutoTrips([autoFar], noMiles)[0];
+  ok(lost.milesRT === "" && lost.milesAuto === undefined && l272Missing(lost, noMiles), "#272 route lost: auto miles are cleared and the no-mileage warning applies");
+  ok(l272AutoTrips([autoFar], null)[0].milesRT === "" && l272AutoTrips([l272Type(autoFar, "300")], null)[0].milesRT === "300", "#272 route lost: only the auto miles clear; typed miles stay");
+  const relocated = l272AutoTrips([lost], newNear)[0];
+  ok(relocated.milesRT === "8" && relocated.milesAuto === true, "#272 route regained: the cleared box fills again and is auto again");
+  const legacy = { ...l270Mobs(null)[0], milesRT: "342" }; // saved before the flag: no milesAuto key
+  ok(!("milesAuto" in legacy) && l272AutoTrips([legacy], newNear)[0].milesRT === "342" && l272AutoTrips([legacy], null)[0].milesRT === "342", "#272 legacy draft (no flag): counts as typed, never overwritten");
+  ok(l272Local({ ...autoFar }, newNear).milesRT === "8" && l272Local({ ...autoFar }, newNear).tripType === "local", "#272 trip switch: switching to Local replaces auto-filled miles with the current route's");
+  ok(l272Travel({ ...nearMob }, far).milesRT === "342" && l272Local(l272Type(autoFar, "77"), newNear).milesRT === "77", "#272 trip switch: Travel replaces auto miles too; typed miles win on either switch");
+  ok(l272Local({ ...autoFar }, noMiles).milesRT === "" && l272Local({ ...autoFar }, noMiles).milesAuto === undefined, "#272 trip switch: no route clears auto miles");
+  const usedBtn = l272Use(l272Type(nearMob, "5"), far);
+  ok(usedBtn.milesRT === "342" && usedBtn.milesAuto === true && l272Use(nearMob, noMiles) === nearMob, "#272 'Use N mi RT' button: takes the route's miles as auto; a no-route click is a no-op");
+  const clientSrc = l272Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  ok(clientSrc.includes('field === "milesRT" ? typeMobMiles(m, val)') && clientSrc.includes("setRouteMiles(m, est)"), "#272 wiring: typing in the miles box clears the flag (setMob), the Use button sets it");
+
+  /* ---- #269 round trip: flag survives the stored draft; reopen never refills ---- */
+  const savedAuto: L270Draft = {
+    discipline: "RIG", margin: "27",
+    mobs: [{ ...l270Mobs(far)[0], name: "Install", people: "2", days: "3" }, { ...l270Mobs(null)[0], name: "Training", milesRT: "12" }],
+    pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "",
+  };
+  const builtAuto = l270Build(l270Compute(savedAuto, rate), "Rigging", (() => { let k = 1000; return () => ++k; })(), "lg272d");
+  const storedAuto = l269With({ id: "sys2", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as L270Sec, "lg272d", builtAuto, savedAuto);
+  const wire = JSON.parse(JSON.stringify(l269Record(storedAuto, "lg272d")!.draft)) as L270Draft;
+  ok(wire.mobs[0].milesAuto === true && wire.mobs[0].milesRT === "342" && wire.mobs[1].milesAuto === undefined && wire.mobs[1].milesRT === "12", "#272 #269: the flag round-trips through the stored draft (JSON) — set where auto, absent where typed");
+  ok(JSON.stringify(builtAuto).indexOf("milesAuto") < 0 && builtAuto.every((x) => !("milesAuto" in x)), "#272 #269: the flag never leaks onto lines/items");
+  ok(l269Snap(wire).mobs[0].milesAuto === true, "#272 #269: reopening (snapshot) keeps miles and flag exactly");
+  const reopenedFollow = l272AutoTrips(l269Snap(wire).mobs, newNear);
+  ok(reopenedFollow[0].milesRT === "8" && reopenedFollow[1].milesRT === "12", "#272 #269: a later route change on a reopened draft follows the flag — auto miles follow, typed miles stay");
+  const legacyStored = l269With({ id: "sys3", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as L270Sec, "lg272e", builtAuto, { ...savedAuto, mobs: savedAuto.mobs.map((m) => { const { milesAuto: _f, ...rest } = m; void _f; return rest; }) });
+  const legacyMobs = l269Snap(l269Record(legacyStored, "lg272e")!.draft).mobs;
+  ok(legacyMobs.every((m) => !("milesAuto" in m)) && l272AutoTrips(legacyMobs, newNear)[0].milesRT === "342", "#272 #269: a draft saved before the flag reopens as typed and never changes on a route change");
+  const modalSrc = l272Read("src/app/(app)/estimator/labor-modal.tsx", "utf8");
+  ok(!modalSrc.includes("milesAuto"), "#272: the modal itself never touches the flag (helpers own it)");
+}
+
+/* ======================================================================
    #274 Phase A — the track configurator's parts map + quantity engine
    (docs/superpowers/specs/2026-09-29-track-configurator-design.md §1–§2):
    src/lib/track-series.ts (pure: sanitize, can-be-active, required roles),

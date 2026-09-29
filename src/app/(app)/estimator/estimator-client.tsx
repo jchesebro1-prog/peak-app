@@ -86,7 +86,18 @@ import type {
 import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { fixtureBomLine } from "./fixture-bom";
-import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
+import {
+  applyAutoTrips as applyAutoTripsToMobs,
+  applyLocalTrip,
+  applyMobType,
+  applyTravelTripTo,
+  defaultLaborMobs,
+  disciplineForSystemTitle,
+  laborMob,
+  roundTripMiles,
+  typeMobMiles,
+  setRouteMiles,
+} from "./labor-defaults";
 import {
   laborGroupEdits,
   laborGroupRecord,
@@ -2239,7 +2250,8 @@ export default function EstimatorClient({
   const setMob = (idx: number, field: keyof MobDraft, val: string) =>
     setLaborDraft((d) => ({
       ...d,
-      mobs: d.mobs.map((m, i) => (i === idx ? { ...m, [field]: val } : m)),
+      // #272: typing in the miles box makes the value the user's (clears milesAuto)
+      mobs: d.mobs.map((m, i) => (i !== idx ? m : field === "milesRT" ? typeMobMiles(m, val) : { ...m, [field]: val })),
     }));
   const setMobNameSelect = (idx: number, val: string) =>
     setLaborDraft((d) => ({
@@ -2260,40 +2272,20 @@ export default function EstimatorClient({
       ...d,
       mobs: d.mobs.map((m, i) => (i === idx ? { ...m, [field]: !m[field] } : m)),
     }));
-  const autoMilesRT = () => {
-    const est = travelEstNow();
-    return est && est.miles != null ? Math.round(est.miles * 2) : null;
-  };
   const applyAutoMiles = (idx: number) => {
-    const auto = autoMilesRT();
-    if (auto == null) return;
-    setMob(idx, "milesRT", String(auto));
+    const est = travelEstNow();
+    if (roundTripMiles(est) == null) return;
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.map((m, i) => (i === idx ? setRouteMiles(m, est) : m)) }));
   };
-  const setTripLocal = (idx: number) =>
-    setLaborDraft((d) => ({
-      ...d,
-      mobs: d.mobs.map((m, i) =>
-        i === idx ? { ...m, tripType: "local" as const, tripAuto: false } : m
-      ),
-    }));
+  // #272: the pure helpers (labor-defaults.ts) own the fill rule — blank miles
+  // fill from the route for Local and Travel alike, typed miles always win.
+  const setTripLocal = (idx: number) => {
+    const est = travelEstNow();
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.map((m, i) => (i === idx ? applyLocalTrip(m, est) : m)) }));
+  };
   const applyTravelTrip = (idx: number) => {
-    const auto = autoMilesRT();
-    setLaborDraft((d) => ({
-      ...d,
-      mobs: d.mobs.map((m, i) =>
-        i === idx
-          ? {
-              ...m,
-              tripType: "travel" as const,
-              tripAuto: false,
-              milesRT:
-                (m.milesRT === "" || m.milesRT == null) && auto != null
-                  ? String(auto)
-                  : m.milesRT,
-            }
-          : m
-      ),
-    }));
+    const est = travelEstNow();
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.map((m, i) => (i === idx ? applyTravelTripTo(m, est) : m)) }));
   };
   /** Re-apply the >1h auto trip-type when customer/venue changes mid-configure.
    *  The estimate may need fetching (punch #89), so the draft update runs in
@@ -2310,20 +2302,7 @@ export default function EstimatorClient({
     });
   };
   const applyAutoTrips = (est: TravelLite | null) => {
-    const far = !!(est && est.minutes != null && est.minutes > 60);
-    const rt = est && est.miles != null ? Math.round(est.miles * 2) : null;
-    setLaborDraft((d) => ({
-      ...d,
-      mobs: d.mobs.map((m) => {
-        if (m.tripAuto === false) return m; // manual override wins
-        const tt: "local" | "travel" = far ? "travel" : "local";
-        const miles =
-          tt === "travel" && (m.milesRT === "" || m.milesRT == null) && rt != null
-            ? String(rt)
-            : m.milesRT;
-        return { ...m, tripType: tt, milesRT: miles };
-      }),
-    }));
+    setLaborDraft((d) => ({ ...d, mobs: applyAutoTripsToMobs(d.mobs, est) }));
   };
 
   const addLabor = (secId: string) => {

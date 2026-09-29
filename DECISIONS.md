@@ -8102,3 +8102,11 @@ Active only when its stick length and always-required roles are mapped to parts 
 a required part while editing saves it inactive rather than refusing the save. The engine also refuses runs ≤ 0 or
 > 1000', a qty outside 1–100, and trim outside 0–200' — sanity bounds beyond the spec.
 
+## D487. Labor miles: route-filled miles follow the route, typed miles never move (#272, 2026-09-29)
+
+Local mobilizations now get the route's round-trip miles like Travel ones did, because local mileage bills every day and
+a blank box priced it at $0. A mobilization remembers when its miles came from the route (`milesAuto`); a later route
+change (customer/venue, including a manual Local/Travel pick) replaces those miles — or clears them, bringing back the
+no-mileage warning, when the new venue isn't located — so a far venue's 342 mi can't linger and bill per day as local.
+Anything typed (a typed 0 included) is the user's and never overwritten; drafts saved before the flag count as typed.
+

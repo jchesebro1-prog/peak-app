@@ -9783,7 +9783,7 @@ next build OK. Browser-verified on a scratch datadir (desktop overlay, Esc/backd
 
 ---
 
-## 272. Estimator Labor — Local trips never fill round-trip mileage, so daily mileage prices at $0 — OPEN (after #270)
+## 272. Estimator Labor — Local trips never fill round-trip mileage, so daily mileage prices at $0 — DONE 2026-09-29 (D487)
 
 **Reported:** 2026-09-23 practice run (re-raised 2026-09-29): "Labor — Does travel not automatically calculate? Had to
 add round trip mileage when adding for Xavier Lighting Controls."
@@ -9797,6 +9797,17 @@ prices mileage at $0; the only way in is the small apply-auto-miles hint. It als
 **Plan:** seed and re-apply the route's round-trip miles for Local mobilizations too (same "untouched only" rule —
 typed miles win), and flag a blank mileage when the venue isn't located. Build after #270 lands (same files).
 
+
+**Done.** One fill rule in pure helpers (`labor-defaults.ts`: `roundTripMiles`, `applyLocalTrip`, `applyTravelTripTo`,
+`applyAutoTrips`, `setRouteMiles`, `typeMobMiles`, `mobMissingMileage`) used by every path — new/added mobilizations,
+a customer/venue change while Labor is open, switching a row Local/Travel, and the "↺ Use N mi RT" button: a blank
+miles box fills from the route for **Local and Travel alike**, and miles the route filled carry `milesAuto` so a later
+route change **replaces** them (far → near: 342 → 8) or blanks them when the new route has none. Typed miles (a typed 0
+included), a reopened #269 draft's miles, and drafts saved before the flag are never overwritten. With no route and a
+blank box the mobilization shows "No mileage — venue not located; enter round-trip miles" (Add stays enabled). A Local
+mob now produces its #270 "Mileage — <mob>" line with the per-day basis. Gates (merged with main): tsc 0; test:specs
+9099 PASS / 0 FAIL (+51 for #272); test:smoke 168/0; eslint 0 errors, no new warnings; next build OK. Browser-verified
+the Local pre-fill + Mileage line and the no-route warning.
 ---
 
 ## 274. Estimator — a track configurator for curtain / traveler track rigging — IN PROGRESS (Phase A shipped 2026-09-29, D486)

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type CSSProperties, type MouseEvent } from "react";
 import { MOB_TYPES } from "./estimator-data";
+import { mobMissingMileage, roundTripMiles } from "./labor-defaults";
 import { computeLabor, fmt, fmtTime, mobTravelParts, round2, type RateFn, type RateSource } from "./pricing";
 import type { LaborDraft, MobDraft, TravelLite } from "./types";
 import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, Stat } from "./est-ui";
@@ -177,7 +178,7 @@ export default function LaborModal({
   const anySup = lr.mobs.some((m) => m.people > 0);
 
   // travel-derived hints (round-trip mileage + >1h auto trip type, E3/E4)
-  const autoRT = travel && travel.miles != null ? Math.round(travel.miles * 2) : null;
+  const autoRT = roundTripMiles(travel);
   const autoOffice = travel?.officeName ?? null;
   const oneWayMin = travel && travel.minutes != null ? travel.minutes : null;
   const farTravel = oneWayMin != null && oneWayMin > 60;
@@ -364,6 +365,8 @@ export default function LaborModal({
             : tripAutoFar
               ? "Auto-set to Travel · " + oneWayLabel + " each way"
               : oneWayLabel + " each way";
+        // #272: blank miles and no route to fill them — mileage would silently be $0.
+        const missingMiles = mobMissingMileage(raw, travel);
         const autoMilesShow = autoRT != null && String(raw.milesRT || "") !== String(autoRT);
 
         return (
@@ -577,6 +580,15 @@ export default function LaborModal({
                   placeholder="0"
                   style={MOBFIELD}
                 />
+                {missingMiles && (
+                  <div
+                    role="note"
+                    data-testid="mob-no-mileage"
+                    style={{ marginTop: 5, fontSize: 11, lineHeight: 1.4, color: "#a15c07", textAlign: "left" }}
+                  >
+                    No mileage — venue not located; enter round-trip miles
+                  </div>
+                )}
               </div>
               <button type="button" onClick={() => onToggleMobFlag(i, "lift")} style={segBtn(raw.lift)}>
                 Lift rental
