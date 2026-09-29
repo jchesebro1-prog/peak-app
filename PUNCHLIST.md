@@ -9442,3 +9442,95 @@ under it (one click applies it; moving the knob clears it). A new customer still
 change doesn't. A saved quote now reopens at its own saved margin (it used to reopen at the Estimating Rules
 default) and is never re-seeded on load. One pure helper, `src/lib/tier-seed.ts`. Rentals don't seed from tiers,
 so they're unchanged; consulting has no tiers. See D457.
+
+---
+
+## 255. Grid / Quick Design — venue backgrounds for church, gym stage, black box, conference and arena, chosen per venue type — DONE 2026-09-29 (D458–D467)
+
+**Reported:** Jeff (2026-09-28), sending the Church Traditional DWG: "I am going to probably switch out categories a
+bit as we build these since the layouts are changing. Can you analyze and let me know your recommendations on how we
+handle this for the scaling?" — then the room names ("You label them…"), the Contemporary, Gym Stage, Blackbox and
+Arena drawings with theirs, the venue type → drawing mapping, and "build all and push; review previews after".
+Spec: `docs/superpowers/specs/2026-09-28-church-template-design.md` (as-built notes at its end); plan:
+`docs/superpowers/plans/2026-09-28-church-template.md`.
+
+**Done.**
+- **Five new drawings** converted and built in (`docs/venue-templates/source/`, `src/lib/design/venue-templates/`):
+  `church-traditional@1`, `church-contemporary@1`, `gym-stage@1`, `blackbox@1`, `arena@1`. The drawings carry no
+  text, so Claude placed Jeff's room names through a per-kind label overlay; labels are counted; the converter shifts
+  a far-off drawing to its origin and keeps rounded-rectangle splines (D458).
+- **One engine, generalised** — span maps, true arcs (the apse keeps its 6" wall), a profile map for splayed rooms
+  with 6" diagonal walls, a mirrored y map, keep-sweep corners, movable rooms and code-sized elements; named errors
+  for bad keys (D459).
+- **Background per venue type:** Settings → Venue types gains an admin-only Background column; a plan draws the
+  design's override ?? its venue type's Background ?? the kind default; versioned ids; Grid sheets stamp theirs (D460).
+- **Church:** platform = width/depth, nave via the house fields with per-drawing defaults and limits (widened with a
+  warning, never blocked); pews by code in the Nave; church doors retired; Spaces, Auto-fill frame and calibration
+  from the drawing; unstamped church sheets keep the old frame (D461–D463).
+- **Gym Stage:** the `gymstage` type and Quick Design's Gym Stage both draw it and map like the proscenium; Quick
+  Design's gym defaults are the drawing's (D464).
+- **Movable rooms:** the Gym Stage Booth, the Blackbox's four rooms, the Arena's Booth, Electrical Room and end stage
+  — drag handles, fields, server-side sanitizing, stamped on Grid sheets; the FOH mix follows the Booth (D465).
+- **Black Box and Conference** share the Blackbox drawing ("Conference Room" on a conference); Auto fill stays inside
+  the room (D466).
+- **Arena:** a new Quick Design venue; even bowl, 13' round corners, the court keeps its share, a movable end stage
+  that Auto fill turns with — every lot marker stays on the floor (D467).
+- Renders for Jeff: `docs/venue-templates/renders/` (church-traditional ×4, church-contemporary ×4, gym-stage ×5,
+  blackbox ×3, flat ×2, arena ×6). Recipe for the next drawing: `docs/venue-templates/README.md`.
+
+**Jeff-gated.**
+- Review the renders in `docs/venue-templates/renders/` (and a real plan per venue type on the preview deploy).
+- Confirm the Arena's corner radius (13', the floor's; the bowl's 13' + bowl depth) and the Contemporary back-wall
+  rule (the back wall keeps the platform's width).
+- Confirm Traditional's upstage side lights landing in the Choir / Electrical rooms, and Contemporary's Green Room /
+  Electrical Room narrowing as the nave deepens (D462, D463).
+- Pick a Background for any custom venue types in Settings → Venue types.
+- A real-DWG check of the Gym Stage Booth positions (back / left / right walls).
+- More drawings arrive as data + keys (the README recipe) — no new engine work expected.
+
+**Follow-ups (not built).** #256 labels shrink to fit their rooms · #257 side-wall Booth annotations vs the
+house-depth chain · #258 Auto-fill side lights / rigging lot offset on very wide floors · #259 Quick Design never sets
+`venueType` · #260 Contemporary CONSOLE mark under the Control Booth on shallow naves.
+
+---
+
+## 256. Venue plans — room labels shrink to fit their rooms — OPEN
+
+**From:** #255. Room labels on the template plans are a fixed 8 px (`plan-svg.tsx`, `LABEL_CHAR_PX`), so at extreme
+sizes some overrun small rooms: Contemporary's Electrical Room / Green Room (and CONSOLE over the "Control Booth"
+label on a 160' nave), the Arena's rooms at 250' × 400' with a 60' bowl (the turned "Electrical Room" runs past its
+room), the Gym Stage Electrical Room on a 70' floor. Shrink a label to its room (with a floor size), or abbreviate.
+
+---
+
+## 257. Gym Stage — side-wall Booth annotations can cross the house-depth dimension chain — OPEN
+
+**From:** #255 (D465). On wide / shallow gym floors (≥ ~150') a side-wall Booth too narrow for the FOH mix box stacks
+its label, box and CONSOLE under the room (`boothMix` in `plan-svg.tsx`), where they can cross the house-depth chain's
+extension line at the floor's back wall. Keep that stack clear of the dimension chains.
+
+---
+
+## 258. Auto fill — side lights and the rigging lot use a fixed 0.02-canvas offset — OPEN
+
+**From:** #255. `sidePoints` and `lotPoint` in `src/lib/design/grid-auto-layout.ts` hang side lights and the rigging
+lot 0.02 of the sheet outside the stage frame, so on very wide Gym Stage floors (4' wings) they can land in Storage or
+the Electrical Room. Measure the offset in feet from the stage (or keep it inside the wings). The Arena's lots are
+already pulled onto the floor (D467); the Blackbox clamps to its room (D466).
+
+---
+
+## 259. Quick Design never sets `venueType` — OPEN
+
+**From:** #255 (D460). Quick Design has no venue picker tied to a site, so `quick/page` passes no venue kind and a
+Quick design follows its plan kind's base type's Background (`PLAN_KIND_TYPE_KEY`) unless its own Background override
+(`templateId`) is set. A custom venue type's Background therefore reaches Grid designs only. Decide whether Quick
+Design should carry a venue type (e.g. from a linked customer's venue).
+
+---
+
+## 260. Church Contemporary — the CONSOLE mark can fall just below the Control Booth on shallow naves — OPEN
+
+**From:** #255 (D463). With the console on, on naves of ~35' or less the Control Booth is a sliver and `churchGeom`'s
+CONSOLE mark can land just under it (the FOH mix box itself leaves the booth only on a 20' nave far wider than the
+platform). Keep the mark inside the booth (or beside the box) at every legal size.

@@ -7723,3 +7723,140 @@ rather than the service's own default — harmless while every service default h
 Jeff edits one. Fixed everywhere at once (`serviceMarginFor`, src/lib/pricing-tiers.ts): an untiered customer's
 service quote uses the service default everywhere (builder, save stamp, portal); renewal-created quotes carry no
 stamp and reopen as hand-set for a tiered customer (the prompt offers the tier).
+
+## D458. Drawings without text get a label overlay; labels are counted; far-off drawings shift to their origin (#255, 2026-09-28)
+
+Jeff's church, gym, black box and arena DWGs carry no text, so D431's "the labels he drew mark the areas" needed a
+source: Claude names the areas (Jeff gave the room names) in `docs/venue-templates/source/<kind>.labels.json` (text +
+top-left anchor, drawing inches), and the converter merges them into the JSON with `"added": true` (blue in the
+preview). A drawn label wins over every overlay label of its text, so a later DWG with its own text needs no overlay
+(amends D431). Required labels are counted — Contemporary needs four "Storage", Blackbox two — and a drawing short of
+one is refused (`--selftest` proves it per kind). The Blackbox drawing sits far from its origin, so the converter
+shifts it to its room's centre (`ORIGIN`, recorded in the JSON as `"origin": [-495, -573]`). A closed SPLINE that is
+an axis-aligned rounded rectangle (a straight run on every side ≥ max(12", 10 % of it), every other point in a corner
+box) is kept as a `roundRects` entry (bbox + smallest `rx`/`ry`); any other spline is flattened at 0.1". The JSON only
+records the drawing: a template draws its curves from its key lines (the Arena's are true quarter circles, D467). The
+converter rounds arc angles to 3 decimals, so an arc's end sits up to ~0.001" off its wall line; the harness's
+apse-end check tolerates 0.005" rather than the drawing being "corrected" (D436's rule).
+
+## D459. One stretch engine, generalised — never forked per drawing (#255, 2026-09-28)
+
+`stretch.ts` stays the only engine; each drawing is data (`<kind>.json`) + a hand-written `<kind>.keys.ts`. What the
+keys can now say: **span-list x maps** with a hard zone switch (blend kept for the Auditorium), a mirrored **`yMap`**;
+**true arcs** — a group scales radius and chord by a driven width (the apse, × platform width, centre on the
+centreline) or keeps each arc's sweep (the Arena's corners); arcs drawn on one centre keep one centre, so the apse wall
+stays exactly 6" at every size; a full circle maps as a similarity. A **profile map** for splayed rooms
+(Contemporary): half-widths keyed by row, `face` spans that end on the mapped splay, a per-band outside span list, and
+diagonal walls (`walls`) redrawn 6" perpendicular off their key face, with outlines, region corners and slid wall ends
+following the redraw — no fold at any legal size (swept: 705 folding rows before → 0). **Movable rooms** (D465) are
+lifted out with their lines, arcs, label and region and re-placed against a wall, and **code-sized elements** (the
+arena stage) are drawn as rectangles at a typed size. Bad keys throw a named `venue template <kind>: …` error (unknown
+drawn line, `scaleHalf` without `atY`, missing movable wall, duplicate id, zero-length wall, a sized room named after a
+drawn region). Each engine step was proven byte-identical for the earlier drawings by a golden hash sweep.
+
+## D460. Backgrounds are chosen per venue type, versioned, with a per-design override (#255, 2026-09-28)
+
+Jeff expects to rename and split venue categories, so the drawing is not tied to a code kind. A client-safe registry
+(`src/lib/design/venue-templates/index.ts`) lists each template: versioned id, family (which plan geometry draws it),
+the "works like" kinds it serves, and the kinds / type keys it is the default for. Settings → Venue types (#216) gains
+an admin-only **Background** column — the drawings for the type's "works like" kind — stored on the venue-type record
+and sanitized to that kind (an invalid or missing value reads and saves as the type's default; no "follow" state on
+the type itself). Jeff's mapping is the defaults: Auditorium and PAC `proscenium@1`, Gym Stage (`gymstage`)
+`gym-stage@1`, Church `church-traditional@1` (Contemporary selectable), Black Box and Conference `blackbox@1`, Arena
+`arena@1`. A plan draws **design override (`AState.templateId`) ?? its venue type's Background (`AState.venueType`) ??
+the kind default** (`effectiveTemplateFor`). The Grid intake sets `venueType` on the server from the picked venue's
+kind; the Quick Design panel and the Grid intake offer the override with a blank "Venue type default (…)" option,
+shown only when the kind has more than one drawing. Quick Design never sets `venueType` (it has no site), so a Quick
+design follows its plan kind's base type. Ids are versioned: a redraw ships as `<kind>@2`, and a Grid sheet keeps the
+id it was stamped with (`intake.baseSheetTemplate`, now written for every template-drawn sheet).
+
+## D461. Church inputs — width/depth are the platform, the nave reuses the house fields (#255, 2026-09-28)
+
+A church's existing `width` / `depth` keep their meaning as platform width / depth (engine `LIM` unchanged, 20–80 /
+14–52), so saved designs keep their numbers. The nave reuses #249's `houseWidthFt` / `houseDepthFt` with per-template
+labels ("Nave width" / "Nave depth"), defaults and limits: Traditional 80' × 55', width ≥ platform + 16' (8' each
+side), ≤ 200'; Contemporary 121' (at its widest) × 55', width ≥ platform + 24', ≤ 250'; depth 20'–200' for both. A
+typed nave below the minimum is widened with a warning under the fields (D432's pattern), not blocked. Contemporary's
+platform depth is capped at 2.2 × its width (past that the pointed front loops back on itself; the cap only bites
+under ~24' wide), again with a warning and the dimension showing the drawn depth.
+
+## D462. Church plans draw the template; pews by code; church doors retired (#255, 2026-09-28)
+
+Every church plan — Grid base sheet, Quick Design, saved Designs — draws its template through one template-backed
+`churchGeom()`. Pews are drawn by code inside the Nave, sized to it, with the centre aisle on the Entry, and clipped
+around the FOH mix box and the CONSOLE mark. The church door add/remove/drag (D434 kept it for church) is retired:
+every church plan is template-backed and the drawing's openings are the entrances. The old church schematic survives
+only as `legacy-church-geom.ts`, the Auto-fill frame of church Grid sheets drawn before #255 (unstamped). Traditional
+has no booth, so its FOH mix keeps today's rule (62 % down the nave); Contemporary's booth role is the Control Booth
+and the mix stands in it. Auto fill's church stage is the Platform's stage box: Traditional's chancel, Contemporary's
+core above the pointed front — so lights, hoists and the screen land on the Platform; side lights hang outside it by
+rule, which on Traditional puts the upstage pair in the Choir and Electrical rooms (Jeff to confirm). Loudspeakers and
+the CONSOLE mark are drawn as paths so they paint above the nave fill (as rects they were hidden). Labeled regions
+become the base sheet's Spaces; the sheet calibrates from the nave's inside walls.
+
+## D463. Church Contemporary specifics (#255, 2026-09-29)
+
+Jeff's labels: Backstage, Storage × 4 (B, C, F, H), Green Room, Electrical Room, Control Booth, Cry Room, Platform,
+Nave. The drawing is symmetric, so the back wall keeps the platform's width; platform depth runs back wall → the
+pointed front's tip (two true arcs meeting on the centreline, each ending on its splay). The 45° splays stay 6"
+perpendicular. The Green Room / Electrical Room band's inner wall rides the mapped splay, so those rooms widen with
+a deeper platform and narrow with a deeper nave — under 4' at a 14' platform over a nave of 140' or more (Jeff to
+review). Loudspeakers stand 4' in from each splay in the Nave, kept clear of its edges; the FOH mix box stands in the
+Control Booth, reading "FOH" when "FOH MIX" won't fit, with CONSOLE under or beside it.
+
+## D464. Gym Stage — one drawing for the gymstage type and Quick Design's Gym Stage; it maps like the proscenium (#255, 2026-09-29)
+
+Jeff: Storage left, Electrical Room right, the Booth movable along the gym's back, left and right walls. `gym-stage@1`
+is a proscenium-family template, the default for the `gymstage` type; Quick Design's Gym Stage venue (engine kind
+`gym`) draws it through `PLAN_KIND_WORKS_LIKE.gym = "proscenium"` and `PLAN_KIND_TYPE_KEY.gym = "gymstage"`, and is
+limited to gym drawings (`PLAN_KIND_TEMPLATE_TYPE`) — never the Auditorium; a proscenium design may still pick the
+gym drawing. The gym kind maps exactly like the proscenium: `width` = the opening, `wing`, `depth` = stage depth, the
+house fields = the gym floor ("Gym floor width / depth", width ≥ the stage's inside width + 9', ≤ 250'; depth 21'–200',
+21' being the Booth plus its walls on a side wall; defaults 120' × 49.5'). Its pricing kind is unchanged. Quick
+Design's gym defaults are now the drawing's (opening 40', stage depth 20', wing 10'; were 54 × 40), so a new gym
+design prices a 20'-deep stage (fewer line sets); saved gym designs keep their stored values and draw the new plan.
+The bleacher schematic builder is gone; gym Grid sheets drawn before #255 (unstamped) keep the fixed-fraction
+Auto-fill frame and their stored sheet, while their Quick Design shows the new drawing.
+
+## D465. Movable rooms (#255, 2026-09-29)
+
+Jeff named rooms that move: the Gym Stage Booth, all four Blackbox rooms, and the Arena's Booth, Electrical Room and
+end stage. A design stores `AState.movables` (`{ wall, t }` per room id); the engine places each room outside its
+wall, turned with it, keeps it off the corners and 24" (`movableGap`) from its neighbours, and — when a wall is too
+short — lays that wall's rooms out as one centred group and warns by the wall's name. Quick Design drags a room by a
+handle on the middle of its outer face (relative drag, whole feet, snapped to the nearest allowed wall; listed before
+wall handles so a wall wins an overlap); the dimension panel and the Grid intake have fields per room (wall + feet
+from a named corner). Reset house clears the rooms too; a plan with no wall handles (Blackbox, Arena) shows "Reset
+rooms", which clears only the rooms. Positions are sanitized on the server (known ids, allowed walls, finite `t`
+clamped) on the Grid intake, Scope inputs and Quick Design saves, and junk never throws. A Grid sheet stamps where its
+rooms were drawn (`intake.baseSheetMovables`) and never moves; Auto fill lays out on the stamped positions (a stamp
+from before rooms moved = home). The FOH mix gear and the mix box go in the booth-role room wherever it sits
+(`boothMix`: label, box, CONSOLE stacked, or side by side, or label outside when the room is small; "FOH" when narrow).
+Duplicate names are numbered in key order ("Storage 1", "Storage 2") on the plan, fields and Spaces.
+
+## D466. Blackbox and Conference share one drawing (#255, 2026-09-29)
+
+`blackbox@1` is the Background for both Black Box and Conference: Electrical Room left, Booth bottom, Storage top and
+right, all movable. `width` / `depth` are the room's inside size; there are no wall handles. Jeff's "Blackbox" label
+is kept on a black box, and a Conference's room reads "Conference Room" on the plan and its Space (the region id and
+the house role stay "Blackbox"). The black box plays in the whole room; the Conference keeps its platform, screen and
+seating drawn by code. Room labels are re-laid in code (centred, turned along a narrow room). Auto fill stays inside the
+room: the black box's stage frame is the room inset 0.05 of the sheet each side and, at the house end, by the deepest
+line-array stack the equations produce (0.164, ≤ 0.4 of the room); a too-deep stack closes up; every non-Booth point
+is clamped 0.01 inside the walls. Plan labels: RISER BLOCKS above the blocks (on a white backing in a shallow room),
+TENSION GRID inside the masking line, and the Conference's FOH lighting bar reads "FOH LX".
+
+## D467. Arena — even bowl, round corners, a movable end stage (#255, 2026-09-29)
+
+Quick Design gains an Arena venue (the `arena` kind existed but no venue reached it). Jeff: Seating Bowl, Arena Floor,
+Court; the Booth and Electrical Room move along the bowl's outer straights; the court stretches with the floor; the end
+stage is drawn by code and moves. `width` / `depth` are the end stage (default 40' × 24'), a code-sized movable on any
+of the floor's four edges, turned to face the floor; a stage too big for its edge shrinks to fit (length ≤ the edge's
+straight run, depth ≤ half the floor across) with a warning. Floor width / length reuse the house fields (59'–250' ×
+88'–400', default 90' × 134'); bowl depth is new (`AState.bowlDepthFt`, 0'–60', default 15'). Jeff's corners are
+irregular splines (corner runs 13'–19' inside, 17'–24' outside), so the plan draws true quarter circles: the floor's 13', the bowl's 13' + bowl
+depth on the same centre, so the bowl is an even band all round. The Court keeps its share of the floor, centred; at
+the drawing's own numbers the default 24' stage overlaps ~4' of it. The stage is the Auto-fill stage anchor: rows laid
+out against the stage and every lot marker but audio's turn with it, and every lot is pulled inside the floor (its box
+inset past the corners) — never into the bowl. Six starter Spaces; the sheet calibrates from the floor's straight
+sides and stamps the stage's position with the rooms. The toolbar reads "Drag the stage or a room along the walls".

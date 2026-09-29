@@ -85,3 +85,23 @@ the mapped centre within tolerance) and meets the back wall; side rooms never go
 absorb width, entry fixed. Settings: Background column sanitize/save/read, defaults, admin-only; venue type → template
 resolution; Grid base-sheet stamp. Plan: church builder draws the template + pews in the Nave. Four gates + next build +
 test:smoke; visual renders checked.
+
+## As built (2026-09-28)
+
+Shipped on `feat/church-template` as punch #255, decisions D458–D467. Where it differs from the above:
+- **Scope grew** from Church Traditional to five drawings: Church Contemporary (splayed walls: a profile map with 6"
+  perpendicular diagonal walls, a true pointed front, platform depth ≤ 2.2 × width — D463), Gym Stage (the `gymstage`
+  type and Quick Design's Gym Stage, mapped like the proscenium; Quick Design's gym defaults became the drawing's —
+  D464), Blackbox shared by Black Box and Conference (D466) and Arena (D467). Movable rooms (D465) came with them.
+- **Nave limits warn, never block:** a typed nave below platform + 16' (Contemporary + 24') is widened to fit with a
+  warning under the fields; Traditional's limits are ≥ platform + 16' and ≤ 200', Contemporary's ≤ 250'; nave depth
+  20'–200' (D461).
+- **Church doors are retired everywhere** — every church plan is template-backed, not just new ones; the old church
+  schematic survives only as the Auto-fill frame of unstamped Grid sheets (`legacy-church-geom.ts`, D462).
+- **The apse** keeps a 6" wall because concentric arcs share one mapped centre; the apse-end check tolerates the
+  converter's 3-decimal arc angles (0.005", D458).
+- **The Background column** shows "Built-in schematic" only for a kind with no drawing — none today. The per-design
+  override (`templateId`) and its "Venue type default" option are additions (D460).
+- **Arena corner radius:** Jeff's corners are irregular splines, so the plan draws true quarter circles — 13' for the
+  floor, 13' + bowl depth for the bowl, one centre, so the bowl is an even band (D467; Jeff to confirm).
+- **Quick Design gained an Arena venue** — the `arena` kind was unreachable before (D467).

@@ -497,6 +497,27 @@ See `.env.example`.
     Remaining is Jeff-gated: import the v1 library on production after
     `npm run db:export`, Part 1/3 boilerplate, Parking-lot specs. Punch
     item #253.
+25. ✅ **Venue templates II** (#255, D458–D467) — four more of Jeff's
+    drawings plus the arena, each converted once (a per-kind label overlay
+    names the rooms, since the DWGs carry no text) and stretched by the one
+    generalised engine (`stretch.ts` + a `<kind>.keys.ts` each): Church
+    Traditional and Contemporary (platform = width/depth, the nave via the
+    house fields; pews by code; church doors retired), Gym Stage (the
+    `gymstage` type and Quick Design's Gym Stage, mapped like the
+    proscenium), Blackbox (Black Box and Conference) and a new Quick Design
+    Arena venue (even bowl, 13' round corners, a code-drawn end stage Auto
+    fill turns with). Settings → Venue types gains an admin-only
+    **Background** column (registry `src/lib/design/venue-templates/
+    index.ts`, versioned ids); a plan draws the design's override
+    (`templateId`) ?? its venue type's Background (`venueType`) ?? the kind
+    default. **Movable rooms** (Gym Stage Booth, the Blackbox's four rooms,
+    the Arena's Booth, Electrical Room and stage) drag in Quick Design, have
+    fields on the intake, are sanitized server-side and stamped on Grid
+    sheets (`intake.baseSheetMovables`); the FOH mix follows the Booth.
+    Unstamped Grid sheets keep their old Auto-fill frame. Remaining is
+    Jeff-gated: review the renders (`docs/venue-templates/renders/`), the
+    arena corner radius and the Contemporary back-wall rule. Follow-ups
+    #256–#260. Punch item #255.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

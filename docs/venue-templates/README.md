@@ -24,6 +24,30 @@ the same text. A text required n times (e.g. four "Storage" rooms) must
 appear n times. Drawings far from their origin list an `ORIGIN` shift in the
 converter; the JSON then records `"origin"`.
 
+## Backgrounds per venue type (#255)
+
+Settings → Venue types has a **Background** column (admin-only): for each type,
+the drawings made for its "works like" kind — the registry,
+`src/lib/design/venue-templates/index.ts`. Defaults: Auditorium / PAC
+`proscenium@1`, Gym Stage `gym-stage@1`, Church `church-traditional@1`
+(Contemporary selectable), Black Box and Conference `blackbox@1`, Arena
+`arena@1`. A design's plan draws its own pick (`templateId`, Quick Design /
+Grid intake, "Venue type default" = none) ?? its venue type's Background ??
+the kind default. Quick Design's Gym Stage venue draws only gym drawings.
+Ids are versioned: a redrawn DWG ships as `<kind>@2`; Grid sheets keep the id
+(`intake.baseSheetTemplate`) and the movable-room positions
+(`intake.baseSheetMovables`) they were stamped with.
+
+## What a keys file can say
+
+Span maps (`x`: spans / blend / profile, with `face` spans for splayed
+walls; `ySpans` or a mirrored `yMap`), true arcs (`trueArcs`: radius × a
+driven width, or keep-sweep corners), diagonal walls that stay 6" (`walls`),
+movable rooms and code-sized elements (`movableWalls`, `movables`,
+`movableGap`), drawn key lines (`drawn`), duplicate labels (`regionLabels`),
+and the roles plans and Auto fill read (`roles`: stage, house, booth,
+catwalk). Bad keys throw a named `venue template <kind>: …` error.
+
 ## Setup (once per machine)
 
     brew install libredwg
@@ -52,9 +76,18 @@ lines draw the curves (the Arena's are true quarter circles, radius 13' and
 13' + the bowl). `--selftest` checks a drawing's round rects against
 `ROUND_RECTS` in the converter and that a circle or ellipse spline flattens.
 
-## Adding a venue kind
+## Adding a venue drawing
 
-1. Save Jeff's DWG as `source/<kind>.dwg`; add its required labels to `REQUIRED` in the converter.
+1. Save Jeff's DWG as `source/<kind>.dwg`; if it has no text, write
+   `source/<kind>.labels.json`; add the kind's labels to `REQUIRED` (and an
+   `ORIGIN` shift if it sits far from its origin).
 2. Convert; confirm `<kind>.png` with Jeff.
-3. Write `<kind>.keys.ts` (see `proscenium.keys.ts`) — key lines measured from the JSON.
-4. Point that kind's geometry / `buildPlan*` at the template and add a `#249`-style harness block (identity at the drawing's own size, walls keep 6", driven spans match the inputs).
+3. Write `<kind>.keys.ts` from the converted JSON (never guess a number).
+4. Register it: `templates.ts` (drawing + keys), `index.ts` (id `<kind>@1`,
+   family, works-like kinds, defaults), a house spec in `house-dims.ts` if it
+   has house / nave / floor fields.
+5. If it is a new family, add its geometry + builder in `plan-svg.tsx` and its
+   branches in `starterSpaces`, `generateBaseSheet` and `venueFrame`.
+6. Add a `#255`-style harness block (identity at the drawing's size, walls
+   keep 6", driven spans match the inputs) and renders for Jeff in
+   `renders/`.
