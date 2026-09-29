@@ -241,6 +241,7 @@ export function ConsultingView({
 /* ============================ list ================================ */
 
 function ConsultingList({ data }: { data: ConsultingData }) {
+  const router = useRouter();
   const [creating, setCreating] = useState(false);
   const active = data.engagements.filter(isOpenEngagement);
   const feeBook = data.engagements.reduce(
@@ -298,8 +299,8 @@ function ConsultingList({ data }: { data: ConsultingData }) {
             const ph = activePhase(e);
             const ms = nextMilestone(e);
             return (
-              <Link key={e.id} href={`/design/engagements/${encodeURIComponent(e.id)}`} style={{ textDecoration: "none", color: "inherit" }}>
-                <Card style={{ height: "100%" }}>
+              <Card key={e.id} style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+                <Link href={`/design/engagements/${encodeURIComponent(e.id)}`} style={{ textDecoration: "none", color: "inherit", flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <Mono>{e.id}</Mono>
                     <StatusPill tone={ENGAGEMENT_STAGE_TONE[e.status]}>{ENGAGEMENT_STATUS_LABEL[e.status]}</StatusPill>
@@ -316,8 +317,22 @@ function ConsultingList({ data }: { data: ConsultingData }) {
                       Fees: <b style={{ color: "#3a3f4a" }}>{money(fees.done)} of {money(fees.total)}</b> billed-milestone value complete
                     </div>
                   </div>
-                </Card>
-              </Link>
+                </Link>
+                {/* #273 — delete from the list, same action + confirm as the detail header */}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, paddingTop: 10, borderTop: "1px solid #f2f3f5" }}>
+                  <ConfirmButton
+                    label="Delete"
+                    confirmLabel="Confirm delete"
+                    title="Delete this consulting project (its open tasks go too)"
+                    ariaLabel={`Delete ${e.name}`}
+                    onConfirm={async () => {
+                      const res = await removeEngagementAction(e.id);
+                      if (!res.ok) throw new Error(res.error);
+                      router.refresh();
+                    }}
+                  />
+                </div>
+              </Card>
             );
           })}
         </div>
