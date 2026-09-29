@@ -30683,9 +30683,9 @@ import { defaultAState as vt249cDefault } from "@/app/(app)/design/quick/engine"
   const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
   const sip = readFileSync(join(process.cwd(), "src/components/design/scope-inputs-panel.tsx"), "utf8");
   ok(!qd.includes("addDoor") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#249 T4 (updated #255): Quick Design has no door buttons; Reset house clears the house size");
-  ok(sip.includes("House width") && sip.includes("House depth") && sip.includes("houseDims(") && sip.includes("h.warning"), "#249 T4: the dimension panel shows house width, house depth and the narrow-house warning");
+  ok(sip.includes("houseFields(") && sip.includes("f.warning"), "#249 T4 (updated #255): the dimension panel shows the template's house rows and its warning");
   const gsp = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
-  ok(/showHouse\s*&&\s*venue\.kind === "proscenium"/.test(sip) && /<ScopeInputsPanel[\s\S]{0,400}?showHouse/.test(qd) && !gsp.includes("showHouse"), "#249 T4: house rows show in Quick Design only — the Grid Scope panel's base sheet is fixed at intake");
+  ok(/showHouse \? houseFields\(/.test(sip) && /<ScopeInputsPanel[\s\S]{0,400}?showHouse/.test(qd) && !gsp.includes("showHouse"), "#249 T4: house rows show in Quick Design only — the Grid Scope panel's base sheet is fixed at intake");
 }
 
 /* --- #249 T5: Grid — starter Spaces and Auto fill on the template --- */
@@ -30746,7 +30746,7 @@ async function grid249T5AsyncChecks(): Promise<void> {
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
   ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#249 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
   const intake = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/grid-intake.tsx"), "utf8");
-  ok(intake.includes("House width") && intake.includes("House depth") && intake.includes("houseDims(") && intake.includes("h.warning"), "#249 T5: the Grid intake shows house width, house depth and the narrow-house warning");
+  ok(intake.includes("houseFields(") && intake.includes("f.warning"), "#249 T5 (updated #255): the Grid intake shows the template's house rows and its warning");
   ok(intake.includes("<FeetInput label={r.label}"), "#249 T5: the intake's house inputs are labeled for screen readers by name");
 }
 
@@ -34216,4 +34216,32 @@ import { rowSpans as c255T4Rows } from "@/lib/design/venue-templates/canvas";
   ok(c255T4Markup(c255T4Build(a, 8, 3, "#3a3f4a", null), "#3a3f4a") === svg && c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "bogus@9"), "#3a3f4a") === c255T4Markup(c255T4Build(pac, 8, 3, "#3a3f4a", "proscenium@1"), "#3a3f4a") && c255T4Pros(pac).roles.house === "House", "#255 T4 review: an unresolved template draws exactly the kind default's plan");
   const flat = { ...base, venue: "concenter" };
   ok(!c255T4Build(flat, 8, 3, "#3a3f4a", null).isHouse && !(c255T4Build(flat, 8, 3, "#3a3f4a", null).handles || []).length, "#255 T4 review: a kind with no template keeps its built-in schematic and no wall handles");
+}
+
+/* --- #255 T5: Settings → Venue types Background column; plans follow the effective template --- */
+import { mergeVenueTypes as c255T5Merge, venueTypesFrom as c255T5From } from "@/lib/venue-types";
+import { defaultBackground as c255T5Default, effectiveTemplateFor as c255T5Effective } from "@/lib/design/venue-templates";
+{
+  const seed = c255T5From(undefined);
+  ok(seed.find((t) => t.key === "proscenium")?.background === "proscenium@1" && seed.find((t) => t.key === "church")?.background === "church-traditional@1" && seed.find((t) => t.key === "arena")?.background === null, "#255 T5: nothing stored — each type starts on its kind's default Background (none for a kind without a drawing)");
+  ok(seed.find((t) => t.key === "gymstage")?.background === c255T5Default("proscenium", "gymstage"), "#255 T5: Gym Stage starts on the Background made for it, else its kind's");
+  const stored = c255T5From([{ key: "church", label: "Sanctuary", worksLike: "church", background: "proscenium@1" }, { key: "chapel", label: "Chapel", worksLike: "church", background: "church-traditional@1" }]);
+  ok(stored.find((t) => t.key === "church")?.background === "church-traditional@1" && stored.find((t) => t.key === "chapel")?.background === "church-traditional@1", "#255 T5: a stored Background not drawn for the type's kind falls back to its default; a valid one is kept");
+  const base = seed.map((t) => ({ key: t.key, label: t.label, worksLike: t.worksLike, background: t.background }));
+  const m = c255T5Merge(seed, base.map((r) => (r.key === "gymstage" ? { ...r, worksLike: "church", background: "proscenium@1" } : r)));
+  ok(m.ok && m.types.find((t) => t.key === "gymstage")?.background === "church-traditional@1", "#255 T5: re-pointing a type's works-like resets a Background that no longer fits");
+  const m2 = c255T5Merge(seed, [...base, { label: "Church — Contemporary", worksLike: "church", background: "church-traditional@1" }]);
+  ok(m2.ok && m2.types.some((t) => t.label === "Church — Contemporary" && t.background === "church-traditional@1"), "#255 T5: a new or split type saves its Background");
+  ok(c255T5Effective("church", { venueType: "chapel", templateId: null }, stored) === "church-traditional@1", "#255 T5: a design follows its venue type's Background");
+
+  const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const act = read("src/app/(app)/settings/actions.ts");
+  const fn = act.slice(act.indexOf("export async function saveVenueTypesAction"));
+  ok(fn.indexOf('requirePerm("manage_users")') > -1 && fn.indexOf('requirePerm("manage_users")') < fn.indexOf("mergeVenueTypes("), "#255 T5: saving Backgrounds is admin-only, like the rest of the card");
+  const card = read("src/app/(app)/settings/venue-types-card.tsx");
+  ok(card.includes("Background") && card.includes("templatesFor(") && card.includes("BUILT_IN_SCHEMATIC_LABEL") && card.includes("background: r.background || null"), "#255 T5: the card shows a Background per type and sends it on save");
+  const qd = read("src/app/(app)/design/quick/quick-design-client.tsx"), dc = read("src/app/(app)/design/designs/design-client.tsx");
+  ok(qd.includes("effectiveTemplateFor(") && qd.includes("buildPlan(a, gridSets(a, tierDefs), C.electrics, accentHex, bg)") && /houseDragPatch\([\s\S]{0,300}?,\s*bg\)/.test(qd) && /buildPlan\([^;]*effectiveTemplateFor\(/.test(dc), "#255 T5: Quick Design and saved Designs draw (and drag) the design's effective template");
+  const sip = read("src/components/design/scope-inputs-panel.tsx"), gi = read("src/app/(app)/design/grid/[id]/grid-intake.tsx");
+  ok(/showHouse \? houseFields\(/.test(sip) && sip.includes("templateId:") && gi.includes("houseFields(") && gi.includes("templateId:") && gi.includes("pickedVenueType"), "#255 T5: both panels show the effective template's house rows and a template choice");
 }

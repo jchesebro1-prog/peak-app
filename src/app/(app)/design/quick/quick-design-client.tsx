@@ -40,6 +40,8 @@ import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/desi
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import type { AssemblyPickerOption } from "@/lib/fixture-assemblies";
 import { PlanSvg, buildPlan, houseDragPatch, type PlanHandle } from "./plan-svg";
+import { effectiveTemplateFor } from "@/lib/design/venue-templates";
+import type { VenueType } from "@/lib/venue-types";
 import {
   getAccentHex,
   getAccentHexServer,
@@ -115,6 +117,7 @@ export default function QuickDesignClient({
   reviewerNames,
   fixtureAssemblies,
   fixturePrices,
+  venueTypes,
 }: {
   me: string;
   canApprove: boolean;
@@ -128,6 +131,8 @@ export default function QuickDesignClient({
   /** Server-priced fixture picks, keyed by fixture id (priceCell on an
    *  assembly cell — final review I3). Never a list-only sum. */
   fixturePrices: Record<string, UnitPrice>;
+  /** #255: Settings → Venue types, for each type's Background. */
+  venueTypes: VenueType[];
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -253,6 +258,8 @@ export default function QuickDesignClient({
     );
 
   const venue = venueOf(a);
+  // #255: the plan draws the design's effective template — its own pick ?? its venue type's Background ?? the kind default.
+  const bg = useMemo(() => effectiveTemplateFor(venueOf(a).kind, a, venueTypes), [a, venueTypes]);
   const suffix = nameSuffix(a);
   const linkedCustomerObj = linkedCustomer ? customers.find((c) => c.id === linkedCustomer) || null : null;
   const customerMeta = linkedCustomerObj
@@ -498,8 +505,8 @@ export default function QuickDesignClient({
   };
 
   const plan = useMemo(
-    () => (view === "plan" && !manualNotice ? buildPlan(a, gridSets(a, tierDefs), C.electrics, accentHex) : null),
-    [a, tierDefs, C.electrics, accentHex, view, manualNotice]
+    () => (view === "plan" && !manualNotice ? buildPlan(a, gridSets(a, tierDefs), C.electrics, accentHex, bg) : null),
+    [a, tierDefs, C.electrics, accentHex, view, manualNotice, bg]
   );
   const riser = useMemo(() => buildRiser(a, C.dimmerRacks, C.lineSets, ACCENT_INK, ACCENT_SOFT), [a, C.dimmerRacks, C.lineSets]);
 
@@ -526,7 +533,7 @@ export default function QuickDesignClient({
         sy: ((ev.clientY - r.top) / r.height) * G.H,
         dx: (ev.clientX - x0) * k,
         dy: (ev.clientY - y0) * k,
-      });
+      }, bg);
       if (patch) setA((prev) => ({ ...prev, ...patch }));
     };
     const up = () => {
@@ -661,6 +668,7 @@ export default function QuickDesignClient({
               fixtureAssemblies={fixtureAssemblies}
               accentHex={accentHex}
               showHouse
+              venueTypes={venueTypes}
             />
           </div>
         ) : (

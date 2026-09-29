@@ -151,6 +151,8 @@ export type IntakeLocation = {
    *  never reads them. */
   locationName?: string;
   address?: string;
+  /** #255 — the venue's type (#216 key); the Grid intake resolves its Background. Optional: the quote intake never reads it. */
+  venueKind?: string;
 };
 
 export type IntakeContact = {

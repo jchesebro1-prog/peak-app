@@ -12,7 +12,8 @@ import {
   type DimField,
 } from "@/app/(app)/design/quick/engine";
 import { coverAutoName, coverFromVenue, gridIntakeDefaults, intakeScopeInputs, UNTITLED_GRID_DESIGN } from "@/lib/design/grid-intake";
-import { HOUSE_DEPTH_LIM, houseDims, houseWidthLim } from "@/lib/design/venue-templates/house-dims";
+import { houseFields, type HouseField } from "@/lib/design/venue-templates/house-dims";
+import { effectiveTemplateFor, PLAN_KIND_WORKS_LIKE, templatesFor } from "@/lib/design/venue-templates";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { VenueType } from "@/lib/venue-types";
@@ -136,6 +137,14 @@ export default function GridIntake({
   const chosen = TRACKABLE_SYS_KEYS.filter((k) => scopeInputs.sys[k]);
   const autoName = coverAutoName(cover.venueName, cover.locationName);
   const venueChosen = (pick.locationMode === "pick" && !!pick.locationId) || pick.locationMode === "new";
+  // #255: the picked (or new) venue's type decides the Background; the server re-reads it from the saved venue.
+  const pickedVenueType =
+    pick.locationMode === "new"
+      ? pick.newLocation.venueKind || null
+      : pick.locationMode === "pick"
+        ? customers.find((c) => c.id === pick.customerId)?.locations.find((l) => l.id === pick.locationId)?.venueKind || null
+        : null;
+  const tplId = effectiveTemplateFor(venue.kind, { ...a, venueType: pickedVenueType }, venueTypes);
 
   const update = (patch: Partial<AState>) => setA((current) => ({ ...current, ...patch }));
   const setVenue = (key: string) => {
@@ -184,7 +193,7 @@ export default function GridIntake({
         locationName: cover.locationName,
         address: cover.address,
         notes,
-        autoConfig: a,
+        autoConfig: { ...a, venueType: pickedVenueType },
         ...(start === "auto" ? { estimate } : {}),
       });
       if (!saved.ok) setError(saved.error);
@@ -310,32 +319,38 @@ export default function GridIntake({
                             />
                           </div>
                         ))}
-                        {venue.kind === "proscenium" &&
-                          (() => {
-                            // #249: the house the template stretches to — the value in use (typed, or the default).
-                            const h = houseDims(a);
-                            const rows = [
-                              { key: "houseWidthFt" as const, label: "House width", note: "Inside walls, at the back of the house", v: Math.round(h.widthFt), lim: houseWidthLim(a) },
-                              { key: "houseDepthFt" as const, label: "House depth", note: "Plaster line to back wall", v: Math.round(h.depthFt), lim: HOUSE_DEPTH_LIM },
-                            ];
-                            const setHouse = (key: "houseWidthFt" | "houseDepthFt", raw: number | string, lim: [number, number]) =>
-                              update({ [key]: Math.max(lim[0], Math.min(lim[1], Math.round(Number(raw)) || lim[0])) } as Partial<AState>);
-                            return (
-                              <>
-                                {rows.map((r) => (
-                                  <div key={r.key}>
-                                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, fontWeight: 600 }}>
-                                      <span>{r.label}</span>
-                                      <FeetInput label={r.label} min={r.lim[0]} max={r.lim[1]} value={r.v} onCommit={(n) => setHouse(r.key, n, r.lim)} />
-                                    </span>
-                                    <span style={{ display: "block", color: "#9aa0ab", fontSize: 10.5, margin: "3px 0 5px" }}>{r.note}</span>
-                                    <input type="range" min={r.lim[0]} max={r.lim[1]} step={1} value={r.v} onChange={(e) => setHouse(r.key, e.target.value, r.lim)} aria-label={r.label} style={{ width: "100%", accentColor: "var(--accent)" }} />
-                                  </div>
-                                ))}
-                                {h.warning && <div style={{ fontSize: 11.5, color: "#b4543a", lineHeight: 1.4 }}>{h.warning}</div>}
-                              </>
-                            );
-                          })()}
+                        {(() => {
+                          // #249/#255: the house / nave the effective template stretches to, and a drawing choice when the kind has more than one.
+                          const choices = templatesFor(PLAN_KIND_WORKS_LIKE[venue.kind]);
+                          const f = houseFields(a, tplId);
+                          const setHouse = (key: HouseField["key"], raw: number | string, lim: [number, number]) =>
+                            update({ [key]: Math.max(lim[0], Math.min(lim[1], Math.round(Number(raw)) || lim[0])) } as Partial<AState>);
+                          return (
+                            <>
+                              {choices.length > 1 && (
+                                <label style={{ display: "block", fontSize: 12.5, fontWeight: 600 }}>
+                                  Background
+                                  <select value={tplId ?? ""} onChange={(e) => update({ templateId: e.target.value || null })} style={{ display: "block", width: "100%", marginTop: 5, fontSize: 12.5, padding: "6px 8px", border: "1px solid #e4e7ec", borderRadius: 7, background: "#fff" }}>
+                                    {choices.map((t) => (
+                                      <option key={t.id} value={t.id}>{t.label}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              )}
+                              {f?.rows.map((r) => (
+                                <div key={r.key}>
+                                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, fontWeight: 600 }}>
+                                    <span>{r.label}</span>
+                                    <FeetInput label={r.label} min={r.lim[0]} max={r.lim[1]} value={r.v} onCommit={(n) => setHouse(r.key, n, r.lim)} />
+                                  </span>
+                                  <span style={{ display: "block", color: "#9aa0ab", fontSize: 10.5, margin: "3px 0 5px" }}>{r.note}</span>
+                                  <input type="range" min={r.lim[0]} max={r.lim[1]} step={1} value={r.v} onChange={(e) => setHouse(r.key, e.target.value, r.lim)} aria-label={r.label} style={{ width: "100%", accentColor: "var(--accent)" }} />
+                                </div>
+                              ))}
+                              {f?.warning && <div style={{ fontSize: 11.5, color: "#b4543a", lineHeight: 1.4 }}>{f.warning}</div>}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div style={section}>
                         <div style={{ ...label, marginBottom: 12 }}>Venue cover page</div>

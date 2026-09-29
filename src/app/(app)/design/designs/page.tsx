@@ -8,6 +8,8 @@ import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { loadEquipmentPriceTable } from "@/lib/stores/equipment-map";
 import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
+import { getSettings } from "@/lib/settings";
+import { venueTypesFrom } from "@/lib/venue-types";
 import DesignClient from "./design-client";
 import "./design.css";
 
@@ -32,7 +34,7 @@ export default async function Page({
   const user = await requireUser();
   const sp = await searchParams;
 
-  const [designs, engagements, roster, prices, reviewerRows, templateSets, wireLabor] = await Promise.all([
+  const [designs, engagements, roster, prices, reviewerRows, templateSets, wireLabor, settings] = await Promise.all([
     getAllDesigns(),
     allEngagements(),
     activeUsers(),
@@ -40,6 +42,7 @@ export default async function Page({
     reviewers(),
     taskTemplateSetsFor("design"),
     loadWireLaborRules(),
+    getSettings(),
   ]);
   // D149/#118 — the selected design's rows from the shared tasks collection
   // (tasks.ts's designId pointer, added alongside this feature — no design
@@ -75,6 +78,7 @@ export default async function Page({
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       designTasks={designTasks}
       templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
+      venueTypes={venueTypesFrom(settings.venueTypes)}
     />
     </CanMapProvider>
   );

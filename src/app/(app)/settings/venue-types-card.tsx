@@ -7,8 +7,10 @@ import {
   BUILT_IN_VENUE_LABELS,
   VENUE_TYPE_LABEL_MAX,
   isBuiltInVenueKind,
+  type BuiltInVenueKind,
   type VenueType,
 } from "@/lib/venue-types";
+import { BUILT_IN_SCHEMATIC_LABEL, defaultBackground, templatesFor } from "@/lib/design/venue-templates";
 import { saveVenueTypesAction } from "./actions";
 
 /**
@@ -23,8 +25,8 @@ import { saveVenueTypesAction } from "./actions";
  * themselves.
  */
 
-type Row = { key: string; label: string; worksLike: string; archived: boolean };
-const rowOf = (t: VenueType): Row => ({ key: t.key, label: t.label, worksLike: t.worksLike, archived: !!t.archived });
+type Row = { key: string; label: string; worksLike: string; archived: boolean; background: string };
+const rowOf = (t: VenueType): Row => ({ key: t.key, label: t.label, worksLike: t.worksLike, archived: !!t.archived, background: t.background ?? "" });
 
 const inS: React.CSSProperties = {
   fontFamily: "var(--font-ui)",
@@ -88,7 +90,7 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
   };
   const add = () => {
     touch();
-    setRows((rs) => [...rs, { key: "", label: "", worksLike: "proscenium", archived: false }]);
+    setRows((rs) => [...rs, { key: "", label: "", worksLike: "proscenium", archived: false, background: defaultBackground("proscenium") ?? "" }]);
   };
   const remove = (i: number) => {
     touch();
@@ -99,7 +101,7 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
     setError(null);
     startTransition(async () => {
       const res = await saveVenueTypesAction(
-        rows.map((r) => ({ key: r.key || undefined, label: r.label, worksLike: r.worksLike, archived: r.archived }))
+        rows.map((r) => ({ key: r.key || undefined, label: r.label, worksLike: r.worksLike, archived: r.archived, background: r.background || null }))
       );
       if (!res.ok) {
         setError(res.error);
@@ -123,7 +125,7 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
             </span>
           </div>
           <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4, lineHeight: 1.45 }}>
-            The types offered when adding a venue. A venue&apos;s name is &ldquo;Location — Type&rdquo;. &ldquo;Works like&rdquo; sets which design and estimating defaults a type uses. Archived types are hidden from pickers; venues keep them.
+            The types offered when adding a venue. A venue&apos;s name is &ldquo;Location — Type&rdquo;. &ldquo;Works like&rdquo; sets which design and estimating defaults a type uses. Archived types are hidden from pickers; venues keep them. &ldquo;Background&rdquo; is the drawing its plans start from; a design can still pick another of the same kind.
           </div>
         </div>
         <button
@@ -164,7 +166,7 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
                 <select
                   value={r.worksLike}
                   disabled={builtIn}
-                  onChange={(e) => patch(i, { worksLike: e.target.value })}
+                  onChange={(e) => patch(i, { worksLike: e.target.value, background: defaultBackground(e.target.value as BuiltInVenueKind, r.key || null) ?? "" })}
                   title={builtIn ? "A built-in type always works like itself." : undefined}
                   style={{ ...inS, cursor: builtIn ? "not-allowed" : "pointer", background: builtIn ? "#f1f2f5" : "#fff" }}
                 >
@@ -174,6 +176,23 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#5b616e" }}>
+                Background
+                {(() => {
+                  const choices = templatesFor(r.worksLike as BuiltInVenueKind);
+                  return (
+                    <select
+                      value={r.background}
+                      disabled={choices.length < 2}
+                      onChange={(e) => patch(i, { background: e.target.value })}
+                      title={choices.length ? "The drawing this type's plans start from." : "No drawing yet for this kind — plans use the built-in schematic."}
+                      style={{ ...inS, cursor: choices.length < 2 ? "not-allowed" : "pointer", background: choices.length < 2 ? "#f1f2f5" : "#fff" }}
+                    >
+                      {choices.length ? choices.map((t) => <option key={t.id} value={t.id}>{t.label}</option>) : <option value="">{BUILT_IN_SCHEMATIC_LABEL}</option>}
+                    </select>
+                  );
+                })()}
               </label>
               <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#5b616e", cursor: "pointer" }}>
                 <input type="checkbox" checked={r.archived} onChange={(e) => patch(i, { archived: e.target.checked })} />

@@ -14,7 +14,10 @@
  *   the raw key — a spec guard enforces it.
  * - A venue's name is derived "Location — Type" (blank location → the
  *   company name) and numbered " (2)", " (3)"… against its siblings.
+ * - #255: each type carries a Background (a venue template id, lib/design/venue-templates) — sanitized to its works-like kind; absent or invalid → that kind's default (null = the built-in schematic).
  */
+
+import { sanitizeBackground } from "@/lib/design/venue-templates";
 
 export const BUILT_IN_VENUE_KINDS = ["proscenium", "church", "flat", "blackbox", "arena"] as const;
 export type BuiltInVenueKind = (typeof BUILT_IN_VENUE_KINDS)[number];
@@ -50,7 +53,7 @@ export const SEED_VENUE_TYPES: readonly VenueType[] = [
 
 /** Stored blob → a clean, ordered list. Nothing usable stored → the seed. */
 export function venueTypesFrom(raw: unknown): VenueType[] {
-  const seed = () => SEED_VENUE_TYPES.map((t) => ({ ...t }));
+  const seed = () => SEED_VENUE_TYPES.map((t) => ({ ...t, background: sanitizeBackground(t.worksLike, t.key, undefined) }));
   if (!Array.isArray(raw)) return seed();
   const out: VenueType[] = [];
   const seen = new Set<string>();
@@ -67,14 +70,14 @@ export function venueTypesFrom(raw: unknown): VenueType[] {
         ? o.worksLike
         : "proscenium";
     const order = typeof o.order === "number" && Number.isFinite(o.order) ? o.order : i;
-    const t: VenueType = { key, label, worksLike, order };
+    const t: VenueType = { key, label, worksLike, order, background: sanitizeBackground(worksLike, key, o.background) };
     if (o.archived === true) t.archived = true;
     out.push(t);
   });
   if (!out.length) return seed();
   // A built-in can be renamed or archived, never lost.
   for (const k of BUILT_IN_VENUE_KINDS) {
-    if (!seen.has(k)) out.push({ key: k, label: BUILT_IN_VENUE_LABELS[k], worksLike: k, order: Number.MAX_SAFE_INTEGER });
+    if (!seen.has(k)) out.push({ key: k, label: BUILT_IN_VENUE_LABELS[k], worksLike: k, order: Number.MAX_SAFE_INTEGER, background: sanitizeBackground(k, k, undefined) });
   }
   out.sort((a, b) => a.order - b.order);
   return out.map((t, i) => ({ ...t, order: i }));
@@ -122,7 +125,7 @@ export function slugVenueTypeKey(label: string, taken: ReadonlySet<string>): str
   for (let n = 2; ; n++) if (!taken.has(`${base}${n}`)) return `${base}${n}`;
 }
 
-export type VenueTypeInput = { key?: string; label: string; worksLike: string; archived?: boolean };
+export type VenueTypeInput = { key?: string; label: string; worksLike: string; archived?: boolean; background?: string | null };
 
 export type VenueTypeMerge =
   | { ok: true; types: VenueType[]; renamed: string[]; removed: string[] }
@@ -175,7 +178,7 @@ export function mergeVenueTypes(
     if (isBuiltInVenueKind(key)) worksLike = key;
     else if (isBuiltInVenueKind(r.worksLike)) worksLike = r.worksLike;
     else return { ok: false, error: `Pick what "${label}" works like.` };
-    const t: VenueType = { key, label, worksLike, order: out.length };
+    const t: VenueType = { key, label, worksLike, order: out.length, background: sanitizeBackground(worksLike, key, r.background) };
     if (r.archived === true) t.archived = true;
     out.push(t);
   }

@@ -20,7 +20,9 @@ import {
   type QuickScopeInputs,
   type SysKey,
 } from "@/app/(app)/design/quick/engine";
-import { HOUSE_DEPTH_LIM, houseDims, houseWidthLim } from "@/lib/design/venue-templates/house-dims";
+import { houseFields, type HouseField } from "@/lib/design/venue-templates/house-dims";
+import { effectiveTemplateFor, PLAN_KIND_WORKS_LIKE, templatesFor } from "@/lib/design/venue-templates";
+import type { VenueType } from "@/lib/venue-types";
 
 /**
  * Shared venue/size/dimensions/systems-to-include config panel
@@ -84,6 +86,7 @@ export default function ScopeInputsPanel({
   fixtureAssemblies: fixtureAssembliesProp,
   accentHex,
   showHouse = false,
+  venueTypes,
 }: {
   value: QuickScopeInputs;
   onChange: (patch: Partial<QuickScopeInputs>) => void;
@@ -100,6 +103,8 @@ export default function ScopeInputsPanel({
    * redraws live — Quick Design. The Grid's base sheet is fixed at intake,
    * so its scope panel must omit this (default false). */
   showHouse?: boolean;
+  /** #255: resolves the effective template (Quick Design); omitted = kind defaults. */
+  venueTypes?: VenueType[];
 }) {
   const [sec, setSec] = useState({ venue: true, size: true, dims: true, systems: true });
   const venue = venueOf(value);
@@ -199,39 +204,44 @@ export default function ScopeInputsPanel({
               <input type="range" min={LIM[d.field][0]} max={LIM[d.field][1]} step={2} value={value[d.field]} onChange={(e) => setDimVal(d.field, e.target.value)} style={{ width: "100%", accentColor: accentHex, cursor: "pointer" }} />
             </div>
           ))}
-          {showHouse &&
-            venue.kind === "proscenium" &&
-            (() => {
-              // #249: the house the template stretches to — shown as the value in use (typed, or the default).
-              const h = houseDims(value);
-              const rows: Array<{ key: "houseWidthFt" | "houseDepthFt"; label: string; note: string; v: number; lim: [number, number] }> = [
-                { key: "houseWidthFt", label: "House width", note: "Inside walls, at the back of the house", v: Math.round(h.widthFt), lim: houseWidthLim(value) },
-                { key: "houseDepthFt", label: "House depth", note: "Plaster line to back wall", v: Math.round(h.depthFt), lim: HOUSE_DEPTH_LIM },
-              ];
-              const setHouse = (key: "houseWidthFt" | "houseDepthFt", n: number, lim: [number, number]) =>
-                update({ [key]: clamp(Math.round(n), lim[0], lim[1]) } as Partial<QuickScopeInputs>);
-              return (
-                <>
-                  {rows.map((r) => (
-                    <div key={r.key}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
-                          <div style={{ fontSize: 11, color: "#aab0bb" }}>{r.note}</div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
-                          <button onClick={() => setHouse(r.key, r.v - 2, r.lim)} style={stepBtn}>–</button>
-                          <span style={{ fontFamily: MONO, fontSize: 14.5, fontWeight: 600, minWidth: 52, textAlign: "center" }}>{r.v} ft</span>
-                          <button onClick={() => setHouse(r.key, r.v + 2, r.lim)} style={stepBtn}>+</button>
-                        </div>
+          {(() => {
+            // #249/#255: the effective template's house / nave rows, and a drawing choice when the kind has more than one — Quick Design only (the Grid's base sheet is fixed at intake).
+            const tplId = effectiveTemplateFor(venue.kind, value, venueTypes ?? []);
+            const choices = templatesFor(PLAN_KIND_WORKS_LIKE[venue.kind]);
+            const f = showHouse ? houseFields(value, tplId) : null;
+            const setHouse = (key: HouseField["key"], n: number, lim: [number, number]) => update({ [key]: clamp(Math.round(n), lim[0], lim[1]) } as Partial<QuickScopeInputs>);
+            return (
+              <>
+                {showHouse && choices.length > 1 && (
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Background</div>
+                    <select value={tplId ?? ""} onChange={(e) => update({ templateId: e.target.value || null })} aria-label="Background drawing" style={{ width: "100%", fontSize: 12.5, padding: "6px 8px", border: "1px solid #e4e7ec", borderRadius: 7, background: "#fff" }}>
+                      {choices.map((t) => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {f?.rows.map((r) => (
+                  <div key={r.key}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
+                        <div style={{ fontSize: 11, color: "#aab0bb" }}>{r.note}</div>
                       </div>
-                      <input type="range" min={r.lim[0]} max={r.lim[1]} step={2} value={r.v} onChange={(e) => setHouse(r.key, Number(e.target.value), r.lim)} style={{ width: "100%", accentColor: accentHex, cursor: "pointer" }} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                        <button onClick={() => setHouse(r.key, r.v - 2, r.lim)} style={stepBtn}>–</button>
+                        <span style={{ fontFamily: MONO, fontSize: 14.5, fontWeight: 600, minWidth: 52, textAlign: "center" }}>{r.v} ft</span>
+                        <button onClick={() => setHouse(r.key, r.v + 2, r.lim)} style={stepBtn}>+</button>
+                      </div>
                     </div>
-                  ))}
-                  {h.warning && <div style={{ fontSize: 11, color: "#b4543a", lineHeight: 1.4 }}>{h.warning}</div>}
-                </>
-              );
-            })()}
+                    <input type="range" min={r.lim[0]} max={r.lim[1]} step={2} value={r.v} onChange={(e) => setHouse(r.key, Number(e.target.value), r.lim)} style={{ width: "100%", accentColor: accentHex, cursor: "pointer" }} />
+                  </div>
+                ))}
+                {f?.warning && <div style={{ fontSize: 11, color: "#b4543a", lineHeight: 1.4 }}>{f.warning}</div>}
+              </>
+            );
+          })()}
         </div>
       )}
 

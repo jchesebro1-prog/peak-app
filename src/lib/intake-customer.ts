@@ -34,6 +34,7 @@ export function intakeCustomersFrom(docs: CustomerDoc[]): IntakeCustomer[] {
         primary: !!l.primary,
         locationName: l.locationName || "",
         address: l.address || "",
+        venueKind: l.venueKind || "",
       })),
       contacts: (c.contacts || []).map((ct) => ({
         name: ct.name,

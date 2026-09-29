@@ -30,6 +30,8 @@ import type { EquipmentPriceTable } from "@/lib/design/equipment-map";
 import type { WireLaborRules } from "@/lib/design/wire-labor";
 import { designRefreshHint, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import { PlanSvg, buildPlan } from "../quick/plan-svg";
+import { effectiveTemplateFor } from "@/lib/design/venue-templates";
+import type { VenueType } from "@/lib/venue-types";
 import {
   getAccentHex,
   getAccentHexServer,
@@ -105,6 +107,7 @@ export default function DesignClient({
   people,
   designTasks,
   templateSets,
+  venueTypes,
 }: {
   me: string;
   canApprove: boolean;
@@ -126,6 +129,8 @@ export default function DesignClient({
   designTasks: TaskRecord[];
   /** Reusable task-template sets applicable to designs (D149, #118). */
   templateSets: { id: string; name: string }[];
+  /** #255: Settings → Venue types — a saved design's plan draws its effective template. */
+  venueTypes: VenueType[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -270,9 +275,9 @@ export default function DesignClient({
         sub: x.rev * (x.tierFixed ? 1 : td.priceMul),
         needsPart: targets[x.key]?.needsPart || 0,
       }));
-    const plan = buildPlan(s, gridSets(s, defs), C.electrics, accentHex);
+    const plan = buildPlan(s, gridSets(s, defs), C.electrics, accentHex, effectiveTemplateFor(venueOf(s).kind, s, venueTypes));
     return { s, tierLabel: td.label, rows, matRev: tot.matRev, needsPart: needsPartCount(systems), plan };
-  }, [sel, tierDefs, prices, wireLabor, accentHex]);
+  }, [sel, tierDefs, prices, wireLabor, accentHex, venueTypes]);
 
   /* --------------------------------- styles --------------------------------- */
 
