@@ -36764,7 +36764,8 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
     "#269 round-trip: the draft and the group ids survive a JSON save/load unchanged");
   ok(saved.items.filter((x) => x.labor).every((x) => l269Editable(saved, x)) && !l269Editable(saved, a), "#269 isLaborLineEditable: every line of a stored group is editable; a material line is not");
   const legacy: L270Item = { id: 77, sku: "LAB-RIG-77", desc: "Install — Rigging", qty: 1, unit: "lot", cost: 100, price: 130, labor: true, mob: { type: "Install", days: 1, crew: 1, discipline: "Rigging" } };
-  ok(!l269Editable({ ...saved, items: [...saved.items, legacy] }, legacy), "#269 isLaborLineEditable: a labor line added before #269 (no group) is not editable");
+  const withLegacy: L270Sec = { ...saved, items: [...saved.items, legacy] };
+  ok(!l269Editable(withLegacy, legacy),"#269 isLaborLineEditable: a labor line added before #269 (no group) is not editable");
   ok(l269Edits(saved, g).handEdited === 0 && l269Edits(saved, g).removed === 0, "#269 laborGroupEdits: a fresh group reads no hand edits and no removed lines");
   // Move a material line into the middle of the group, hand-edit two lines, remove another.
   const groupIdx = saved.items.findIndex((x) => x.laborGroup === g);
