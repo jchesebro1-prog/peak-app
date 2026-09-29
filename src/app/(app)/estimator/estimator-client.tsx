@@ -870,9 +870,14 @@ export default function EstimatorClient({
   const applyTierStamp = (prev: number | null, next: number, tier: string | null) => {
     const before = sectionsRef.current;
     const res = repriceForTier(before, prev, next);
+    // Any change lands — including (#269) a draft-only one, where nothing
+    // re-priced but a stored labor draft's margin followed the tier. That
+    // case applies silently: no banner, and an existing banner is left alone.
+    if (res.sections !== before) {
+      sectionsRef.current = res.sections;
+      setSectionsState(res.sections);
+    }
     if (res.repriced === 0) return;
-    sectionsRef.current = res.sections;
-    setSectionsState(res.sections);
     setTierReprice({
       before,
       repriced: res.repriced,

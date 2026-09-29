@@ -868,7 +868,11 @@ export default function SectionCard(p: SectionCardProps) {
                  vendor line. A labor line added before #269 has no draft to
                  reopen, so it only says so. */
               const laborEditable = isInternal && !!p.onEditLabor && isLaborLineEditable(sec, it);
-              const openLabor = () => {
+              const openLabor = (e: { detail: number }) => {
+                // Opens on the FIRST click only — a double-click's second
+                // click must not reopen or land on the modal (labor-modal.tsx
+                // swallows it there too).
+                if (e.detail > 1) return;
                 if (laborEditable && it.laborGroup) p.onEditLabor?.(it.laborGroup);
               };
               return (

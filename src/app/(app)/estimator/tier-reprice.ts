@@ -82,7 +82,8 @@ export function isAtTierSeed(it: Pick<SpecItem, "cost" | "price" | "labor">, m: 
 }
 
 export type TierRepriceResult = {
-  /** The same array (by reference) when nothing was re-priced. */
+  /** The same array (by reference) when nothing was re-priced and no stored
+   *  labor draft's margin moved (#269). */
   sections: SpecSection[];
   repriced: number;
   /** Lines someone priced by hand (an ext-sell override, or a sell off the
@@ -122,23 +123,24 @@ export function repriceForTier(
   let untouched = 0;
   const out = sections.map((sec) => {
     let changed = false;
-    // #269: labor groups whose lines moved — their stored draft follows.
-    const laborGroups = new Set<string>();
     const items = sec.items.map((it) => {
       const v = classify(it, prevM, next);
       if (v.kind === "hand") handPriced++;
       if (v.kind === "untouched") untouched++;
       if (v.kind !== "reprice") return it;
       repriced++;
-      if (it.labor && it.laborGroup) laborGroups.add(it.laborGroup);
       if (v.price === it.price) return it;
       changed = true;
       return { ...it, price: v.price };
     });
     const base = changed ? { ...sec, items } : sec;
-    return syncLaborDraftMargins(base, laborGroups, laborSeedMarginOf(prevM), laborSeedMarginOf(next));
+    // #269: a stored labor draft still at the previous labor seed follows to
+    // the new one even when every line of its group was kept hand-priced.
+    return syncLaborDraftMargins(base, laborSeedMarginOf(prevM), laborSeedMarginOf(next));
   });
-  return { sections: repriced ? out : sections, repriced, handPriced, untouched };
+  // A draft-only change (nothing re-priced) must still land.
+  const draftsMoved = out.some((sec, i) => sec !== sections[i]);
+  return { sections: repriced || draftsMoved ? out : sections, repriced, handPriced, untouched };
 }
 
 /** "Re-priced 14 lines to Gold (20%) · kept 2 hand-priced lines · Save to

@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties, type MouseEvent } from "react";
 import { MOB_TYPES } from "./estimator-data";
 import { computeLabor, fmt, fmtTime, mobTravelParts, round2, type RateFn, type RateSource } from "./pricing";
 import type { LaborDraft, MobDraft, TravelLite } from "./types";
@@ -20,6 +20,9 @@ import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, S
  * #269: reopened from one of those lines (`editing`), it edits that labor
  * group's stored draft, and "Update labor" rebuilds the group in place.
  */
+
+/** #269: how long after opening a double-click's second click is ignored. */
+const OPEN_GUARD_MS = 800;
 
 const MOBFIELD: CSSProperties = {
   width: "100%",
@@ -152,6 +155,19 @@ export default function LaborModal({
   onClose: () => void;
 }) {
   const lr = computeLabor(draft, rate);
+
+  // #269: when the modal mounted — a multi-click (detail > 1) landing inside
+  // it within OPEN_GUARD_MS is the tail of the double-click that opened it.
+  const openedAtRef = useRef(0);
+  useEffect(() => {
+    openedAtRef.current = Date.now();
+  }, []);
+  const swallowOpeningDoubleClick = (e: MouseEvent) => {
+    if (e.detail > 1 && Date.now() - openedAtRef.current < OPEN_GUARD_MS) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
   const valid = lr.totalCost > 0;
   const pctLabel = Math.round(lr.pct * 100) + "%";
 
@@ -213,6 +229,10 @@ export default function LaborModal({
         </button>
       }
     >
+      {/* #269: the modal opens on the first click of a line / ✎; the second
+          click of a double-click must not land on whatever control now sits
+          under the pointer (the Lift rental toggle, for one). */}
+      <div onClickCapture={swallowOpeningDoubleClick}>
       {editing && (
         <div
           role="note"
@@ -232,9 +252,10 @@ export default function LaborModal({
             <>
               {" "}
               <strong>
-                {editing.handEdited} {editing.handEdited === 1 ? "line has" : "lines have"} a hand-edited qty or price
+                {editing.handEdited} {editing.handEdited === 1 ? "line has" : "lines have"} hand edits (price, qty or
+                notes)
               </strong>{" "}
-              that will be replaced.
+              that Update will replace.
             </>
           )}
           {editing.removed > 0 && (
@@ -793,6 +814,7 @@ export default function LaborModal({
       </div>
       <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#f7f8fa", color: "#5b616e", fontSize: 11.5 }}>
         Performance bonus · 5% of {fmt(lr.baseCost)} cost = <strong style={{ color: "#16181d" }}>{fmt(lr.performanceBonus)}</strong>
+      </div>
       </div>
     </ConfigModal>
   );

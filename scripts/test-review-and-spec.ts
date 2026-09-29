@@ -36816,6 +36816,53 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   const rep = l269Reprice([src], 0.27, 0.2);
   ok(rep.repriced === built1.length && l269Record(rep.sections[0], g)!.draft.margin === "20", "#269 tier re-price (#254): re-priced labor lines move their group's stored margin to the new tier");
 
+  /* ---- #269 review fix: the draft follows the tier even when EVERY group line is hand-priced ---- */
+  const allHand: L270Sec = { ...src, items: src.items.map((x) => (x.laborGroup === g ? { ...x, price: l270R2(x.price + 7), sellOverride: true } : x)) };
+  const allHandCopy = l269Copy(allHand, { newSectionId: "sysH", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 });
+  ok(l269Record(allHandCopy.section, g)!.draft.margin === "20" && allHandCopy.section.items.filter((x) => x.laborGroup === g).every((x, i) => x.price === allHand.items.filter((y) => y.laborGroup === g)[i].price),
+    "#269 copy system: an all-hand-priced group keeps its lines' prices but its stored draft still moves to the target tier's seed (27 → 20)");
+  const allHandRep = l269Reprice([allHand], 0.27, 0.2);
+  ok(allHandRep.repriced === 0 && allHandRep.sections[0] !== allHand && l269Record(allHandRep.sections[0], g)!.draft.margin === "20" && l269Record(allHand, g)!.draft.margin === "27",
+    "#269 tier re-price: nothing re-priced, yet the new sections carry the draft moved to the new seed (a draft-only change still lands; input untouched)");
+  const typedHand: L270Sec = { ...allHand, laborGroups: { [g]: { ...allHand.laborGroups![g], draft: { ...allHand.laborGroups![g].draft, margin: "33" } } } };
+  const typedRep = l269Reprice([typedHand], 0.27, 0.2);
+  ok(typedRep.repriced === 0 && typedRep.sections[0] === typedHand && l269Record(typedRep.sections[0], g)!.draft.margin === "33",
+    "#269 tier re-price: a hand-typed draft margin (≠ the previous seed) never moves — and with nothing else changed the same sections come back");
+  ok(l269Record(l269Copy(typedHand, { newSectionId: "y", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 }).section, g)!.draft.margin === "33",
+    "#269 copy system: a hand-typed draft margin never moves, hand-priced lines or not");
+  const sameSeed = l269Reprice([allHand], 0.274, 0.27);
+  ok(sameSeed.sections[0] === allHand && l269Record(sameSeed.sections[0], g)!.draft.margin === "27",
+    "#269 tier re-price: a stamp change inside the same labor whole percent (27.4% → 27%) leaves the draft and the section alone");
+  ok(JSON.stringify(l269Copy(allHand, { newSectionId: "z", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.27 }).section.laborGroups) === JSON.stringify(allHand.laborGroups),
+    "#269 copy system: equal tiers leave the stored draft exactly as it was");
+  const cliFix = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
+    "#269 applyTierStamp: a draft-only change is applied silently (no banner) when nothing re-priced");
+
+  /* ---- #269 review fix: notes count as hand edits too ---- */
+  const noted: L270Sec = {
+    ...saved,
+    items: saved.items.map((x) =>
+      x.mob && x.laborMobKey === g + ":0" ? { ...x, comment: "Typed on the line" }
+        : x.laborOverhead === "shop" ? { ...x, internalNote: "PM note", price: l270R2(x.price + 3) }
+        : x.laborTravel === "hotel" ? { ...x, internalNote: "a different basis" }
+        : x
+    ),
+  };
+  const ne = l269Edits(noted, g);
+  ok(ne.handEdited === 2 && ne.removed === 0,
+    `#269 laborGroupEdits: a comment typed on a mobilization line and an overhead line with a note + price count as 2 hand edits (a line counts once; a travel basis note is regenerated, not typed) — got ${ne.handEdited}`);
+  const draftNoted: L270Sec = {
+    ...saved,
+    laborGroups: { [g]: { ...saved.laborGroups![g], draft: { ...saved.laborGroups![g].draft, mobs: saved.laborGroups![g].draft.mobs.map((mm, i) => (i === 0 ? { ...mm, internalNote: "  crew note " } : mm)) } } },
+    items: saved.items.map((x) => (x.mob && x.laborMobKey === g + ":0" ? { ...x, internalNote: "crew note" } : x)),
+  };
+  ok(l269Edits(draftNoted, g).handEdited === 0, "#269 laborGroupEdits: a mobilization line whose notes match its draft (trimmed) is not a hand edit");
+  const cardFix = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
+  const modalFix = readFileSync(join(process.cwd(), "src/app/(app)/estimator/labor-modal.tsx"), "utf8");
+  ok(/const openLabor = \(e: \{ detail: number \}\) => \{[\s\S]{0,300}if \(e\.detail > 1\) return;/.test(cardFix) && modalFix.includes("<div onClickCapture={swallowOpeningDoubleClick}>") && /e\.detail > 1 && Date\.now\(\) - openedAtRef\.current < OPEN_GUARD_MS/.test(modalFix),
+    "#269 double-click: the line / ✎ open on the first click only, and the modal swallows a double-click's tail for its first moments");
+
   /* ---- #262 parts list never lists labor or travel lines ---- */
   const partsRows = l269PartsRows([s1], [], {});
   ok(partsRows.length === 2 && partsRows.every((x) => x.sku === "A" || x.sku === "B"), "#270 parts list: labor, travel and overhead lines never appear (only the two material lines)");
@@ -36835,7 +36882,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   ok(card.includes("isLaborLineEditable(sec, it)") && card.includes("onClick={laborEditable ? openLabor : undefined}") && card.includes("Added before labor editing — remove and re-add to change"),
     "#269 section card: an editable labor line opens on its description and a ✎ action; a pre-#269 labor line explains why it can't");
   const modal = rd("src/app/(app)/estimator/labor-modal.tsx");
-  ok(modal.includes('{editing ? "Update labor" : "Add labor"}') && modal.includes("a hand-edited qty or price") && modal.includes('data-testid="mob-cost-breakdown"') && modal.includes("mobTravelParts(m)"),
+  ok(modal.includes('{editing ? "Update labor" : "Add labor"}') && modal.includes("hand edits (price, qty or") && modal.includes("that Update will replace.") && modal.includes('data-testid="mob-cost-breakdown"') && modal.includes("mobTravelParts(m)"),
     "#269/#270 labor modal: Update labor + the hand-edit note in edit mode; per-mobilization labor/mileage/hotel/per diem/lift dollars");
 }
 

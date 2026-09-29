@@ -87,11 +87,33 @@ function draftMargin(d: LaborDraft): number {
  *  rounding and the last line carries buildLaborItems' drift nudge (≤ 5¢). */
 const SEED_TOLERANCE = 0.05;
 
+const trimmed = (s: string | undefined) => (s || "").trim();
+
 /**
- * What an "Update labor" would overwrite (#269): lines of the group whose
- * qty or sell no longer match what the configurator produced (a typed price
- * or ext sell, a qty change, a margin slider), and how many of its lines
- * were removed since (an update brings them back).
+ * The customer comment and internal note Update would write on this line:
+ * a mobilization line takes its mobilization's comments / internal notes
+ * from the draft (matched by the `<group>:<index>` key), a travel line no
+ * comment (its internal note is the basis, regenerated from the draft at
+ * today's rates, so it is not something anyone typed), an overhead line
+ * neither. `null` note = not compared.
+ */
+function draftNotesFor(it: SpecItem, group: string, draft: LaborDraft): { comment: string; internalNote: string | null } {
+  if (it.laborTravel) return { comment: "", internalNote: null };
+  if (it.mob) {
+    const m = /:(\d+)$/.exec(it.laborMobKey || "");
+    const mob = m && it.laborMobKey === group + ":" + m[1] ? draft.mobs[Number(m[1])] : undefined;
+    return mob ? { comment: trimmed(mob.comments), internalNote: trimmed(mob.internalNote) } : { comment: trimmed(it.comment), internalNote: null };
+  }
+  return { comment: "", internalNote: "" };
+}
+
+/**
+ * What an "Update labor" would overwrite (#269): lines of the group with
+ * hand edits — a qty or sell that no longer matches what the configurator
+ * produced (a typed price or ext sell, a qty change, a margin slider), or a
+ * comment / internal note that differs from what the draft writes — and how
+ * many of its lines were removed since (an update brings them back). A line
+ * counts once however many of those it has.
  */
 export function laborGroupEdits(sec: SpecSection, group: string): { handEdited: number; removed: number } {
   const rec = laborGroupRecord(sec, group);
@@ -103,31 +125,33 @@ export function laborGroupEdits(sec: SpecSection, group: string): { handEdited: 
     if (it.sellOverride) return true;
     if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return true;
     const seed = m < 1 ? round2(it.cost / (1 - m)) : it.cost;
-    return Math.abs(it.price - seed) > SEED_TOLERANCE + 1e-9;
+    if (Math.abs(it.price - seed) > SEED_TOLERANCE + 1e-9) return true;
+    const want = draftNotesFor(it, group, rec.draft);
+    if (trimmed(it.comment) !== want.comment) return true;
+    return want.internalNote != null && trimmed(it.internalNote) !== want.internalNote;
   }).length;
   return { handEdited, removed: Math.max(0, (rec.lines || 0) - lines.length) };
 }
 
 /**
- * #254/#266: when the tier moved a group's lines to a new labor margin, the
- * stored draft follows, so a later "Update labor" rebuilds at the tier's
- * margin rather than reverting it. Only drafts still at the previous
- * whole-percent margin move (a hand-typed margin stays the user's).
+ * #254/#266: when the labor seed margin moves (a tier change in place, or a
+ * system copied to another tier), every stored draft still at the PREVIOUS
+ * seed (whole percent) follows to the next one — whether or not any of its
+ * lines were re-priced (all hand-priced lines stay, but a later "Update
+ * labor" must rebuild at the tier's margin, not revert to the old one). A
+ * draft margin typed by hand (≠ the previous seed) is the user's and stays.
+ * Equal seeds, or no drafts, return the section unchanged (same object).
  */
-export function syncLaborDraftMargins(
-  sec: SpecSection,
-  groups: ReadonlySet<string>,
-  prevMargin: number,
-  nextMargin: number
-): SpecSection {
+export function syncLaborDraftMargins(sec: SpecSection, prevMargin: number, nextMargin: number): SpecSection {
   const map = sec.laborGroups;
-  if (!map || !groups.size) return sec;
   const prevPct = Math.round(prevMargin * 100);
-  const nextPct = String(Math.round(nextMargin * 100));
+  const nextPctN = Math.round(nextMargin * 100);
+  if (!map || prevPct === nextPctN) return sec;
+  const nextPct = String(nextPctN);
   let changed = false;
   const out: Record<string, LaborGroupRecord> = {};
   for (const [k, rec] of Object.entries(map)) {
-    if (groups.has(k) && rec && rec.draft && Math.round(draftMargin(rec.draft) * 100) === prevPct && rec.draft.margin !== nextPct) {
+    if (rec && rec.draft && Math.round(draftMargin(rec.draft) * 100) === prevPct && rec.draft.margin !== nextPct) {
       out[k] = { ...rec, draft: { ...rec.draft, margin: nextPct } };
       changed = true;
     } else out[k] = rec;
