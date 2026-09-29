@@ -9594,3 +9594,28 @@ own centre so it stays where the layout put it. Builders tag symbols with `sym: 
 base sheets and print match. The legend's symbol swatches are half size too. Walls, seats, pews, drapes, platforms,
 dimensions, the FOH MIX box and drag handles are unchanged. A church loudspeaker's clearance (`SPK_CLEAR`) follows the
 smaller glyph. Grid sheets already stored keep their old glyphs; Auto fill is unaffected. Harness `#263`. See D470.
+
+---
+
+## 264. Rose Brand fabrics under Theatrical/Soft Goods refused by the Equipment map — DONE 2026-09-29 (D473)
+
+**Reported:** Jeff (2026-09-29): mapping a Grid Equipment-map curtain row to a production Rose Brand fabric
+(`RB-FAB-ENCORE-64-22-BLK` and its siblings) is refused — "RB-FAB-… is not a Fabric part". Production's price book
+files those fabrics in catalog category **Theatrical/Soft Goods**, unit **sq ft**, cost ≈ $3 per sq ft, and every
+fabric check in the app was `category === "Fabric"`. Even recategorised they would price at $0: `fabricAreaRateOf`
+never read `cost`. Jeff's call: soft goods sold per sq ft count as fabric, everywhere.
+
+**Done.** New pure, client-safe `src/lib/fabric-part.ts`: `isSqftUnit` (sq ft / SF / sq. ft. / ft² / sqft / square
+feet…) and `isFabricPart` — category Fabric, or Theatrical/Soft Goods sold per sq ft. Every fabric test now goes
+through it: the Equipment map's curtain rows (message: "… is not a fabric (category Fabric, or Theatrical/Soft Goods
+sold per sq ft)") and its suggestions, the Grid curtain picker (`isFabricRow`) and curtain swap search
+(`searchCatalog(q, "Fabric")` now matches every fabric part), the Estimator's and Lineset's fabric lists (new
+`fabricParts()` in `src/lib/stores/catalog.ts`), the portal curtain fabrics, and the catalog part editor's
+$/sq ft field + `fabricRateProblem` (now given the unit). A fabric is still never a Grid device: the palette,
+BOM accessories (`saveAccessory` reads the pricing part's unit) and the Grid library seed exclude it.
+`fabricAreaRateOf` gains a last step: `curtainAreaRate` → seed rate → `costPerSqft` → **`cost` when the unit is
+sq ft** → 0. Harness `#264`. See D473.
+
+**Left on "Fabric" on purpose:** the catalog taxonomy card's category-level exclusion and the device-type map's
+excluded head nouns (a whole category — Soft Goods also holds non-fabric parts), `scripts/inventory.ts`, the catalog
+seed, and the Lineset "no Fabric parts" message text.
