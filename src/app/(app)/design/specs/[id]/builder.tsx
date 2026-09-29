@@ -683,6 +683,7 @@ export default function Builder({
   customerOptions,
   canEdit,
   sourceQuoteNumber,
+  projectSpecCount,
   recordsById,
   recordTexts,
   systemMatchKeys,
@@ -696,6 +697,8 @@ export default function Builder({
   canEdit: boolean;
   /** #223 — the source quote's estimate number (null: no quote / unknown). */
   sourceQuoteNumber: string | null;
+  /** Other saved specs sharing this spec's project number (0 for viewers). */
+  projectSpecCount: number;
   /** Spec records (Task 9): the records this spec refers to, slim. */
   recordsById: Record<string, SlimSpecRecord>;
   /** Library title/text of each matched record — the Edit panel's start. */
@@ -765,7 +768,13 @@ export default function Builder({
           </div>
         )}
 
-        <HeaderCard doc={doc} customerOptions={customerOptions} canEdit={canEdit} sourceQuoteNumber={sourceQuoteNumber} />
+        <HeaderCard
+          doc={doc}
+          customerOptions={customerOptions}
+          canEdit={canEdit}
+          sourceQuoteNumber={sourceQuoteNumber}
+          projectSpecCount={projectSpecCount}
+        />
 
         {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} labels={doc.fillInLabels} checklist={assembled.checklist} canEdit={canEdit} />}
 

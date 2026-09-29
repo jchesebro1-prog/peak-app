@@ -8,6 +8,7 @@ import { getCompany } from "@/lib/identity/companies";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { getSection } from "@/lib/stores/spec-sections";
 import {
+  copySpecHeaderToProject,
   createSpecDocument,
   getSpecDocument,
   patchSpecDocument,
@@ -98,15 +99,22 @@ export async function createSpecDocumentAction(input: {
   customerId?: string;
   projectName?: string;
   projectNumber?: string;
+  /** Copied from a known project's other specs by the New form (blank →
+   *  the default phase / the creator's name). */
+  phase?: string;
+  preparedBy?: string;
   /** The browser's local date (YYYY-MM-DD) — the default issue date is the
-   *  creator's today, not the server's UTC today (final fix 9). */
+   *  creator's today, not the server's UTC today (final fix 9) — or the
+   *  known project's issue date. */
   issueDate?: string;
   source?: { kind: "quote"; quoteId: string } | { kind: "grid"; gridProjectId: string; quoteId: string };
 }): Promise<Result<{ id: string }> | { ok: false; error: string; sourceFailed: true }> {
   const user = await requirePerm("create");
   const projectName = String(input.projectName || "").trim();
   const projectNumber = String(input.projectNumber || "").trim();
-  const tooLong = headerTooLong([projectName, projectNumber]);
+  const phase = String(input.phase || "").trim();
+  const preparedBy = String(input.preparedBy || "").trim();
+  const tooLong = headerTooLong([projectName, projectNumber, phase, preparedBy]);
   if (tooLong) return tooLong;
   const sectionId = String(input.sectionId || "").trim();
   const section = sectionId ? await getSection(sectionId) : null;
@@ -134,9 +142,9 @@ export async function createSpecDocumentAction(input: {
     header: {
       projectName,
       projectNumber,
-      phase: DEFAULT_SPEC_PHASE,
+      phase: phase || DEFAULT_SPEC_PHASE,
       issueDate: isValidIsoDate(input.issueDate) ? input.issueDate : isoDateOf(Date.now()),
-      preparedBy: user.name,
+      preparedBy: preparedBy || user.name,
     },
     customerId: cust.customerId,
     customer: cust.customer,
@@ -158,6 +166,24 @@ export async function updateSpecHeaderAction(id: string, patch: Partial<SpecDocH
   const tooLong = headerTooLong(Object.values(clean));
   if (tooLong) return tooLong;
   return applyPatch(id, user, (d) => ({ ...d, header: { ...d.header, ...clean } }));
+}
+
+/** One header for every spec of a project: copy this spec's SAVED header
+ *  (all five fields, read from the database — never the client's values)
+ *  onto every other live spec with the same project number. */
+export async function applySpecHeaderToProjectAction(id: string): Promise<Result<{ count: number }>> {
+  const user = await requirePerm("create");
+  const source = await getSpecDocument(String(id || ""));
+  if (!source) return { ok: false, error: "Spec not found." };
+  const number = source.header.projectNumber.trim();
+  if (!number) return { ok: false, error: "Give this spec a project number first." };
+  const out = await copySpecHeaderToProject(source.id, user.name);
+  if (!out) return { ok: false, error: "Spec not found." };
+  if (out.ids.length === 0) return { ok: false, error: `No other saved spec has Project No. ${number}.` };
+  revalidatePath("/design/specs");
+  for (const t of out.ids) revalidatePath(`/design/specs/${t}`);
+  revalidatePath(`/design/specs/${source.id}`);
+  return { ok: true, count: out.ids.length };
 }
 
 export async function setSpecCustomerAction(id: string, customerId: string | null): Promise<Result> {

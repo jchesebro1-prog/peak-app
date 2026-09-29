@@ -1,5 +1,12 @@
 import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc, type Doc } from "@/db/doc-store";
-import { normalizeSpecDocument, withDownloadStamp, type SpecDocument } from "@/lib/specs/spec-document";
+import {
+  normalizeSpecDocument,
+  projectSiblings,
+  sameProjectNumber,
+  withDownloadStamp,
+  withSpecHeader,
+  type SpecDocument,
+} from "@/lib/specs/spec-document";
 
 export type { SpecDocument };
 
@@ -34,6 +41,29 @@ export async function patchSpecDocument(
     return { ...next, id, updatedAt: Date.now(), updatedBy: by } as unknown as Doc;
   });
   return out ? normalizeSpecDocument(out) : null;
+}
+
+/** Copy `sourceId`'s saved header (all five fields) onto every other live
+ *  spec with the same project number. Reads the header from the database,
+ *  never from the caller. Each target is re-checked inside its own patch, so
+ *  a spec renumbered meanwhile keeps its header. Returns the ids updated, or
+ *  null when the source spec is gone. */
+export async function copySpecHeaderToProject(
+  sourceId: string,
+  by: string
+): Promise<{ source: SpecDocument; ids: string[] } | null> {
+  const source = await getSpecDocument(sourceId);
+  if (!source) return null;
+  const ids: string[] = [];
+  for (const t of projectSiblings(await allSpecDocuments(), source)) {
+    const out = await patchSpecDocument(
+      t.id,
+      (d) => (sameProjectNumber(d.header.projectNumber, source.header.projectNumber) ? withSpecHeader(d, source.header) : d),
+      by
+    );
+    if (out && sameProjectNumber(out.header.projectNumber, source.header.projectNumber)) ids.push(t.id);
+  }
+  return { source, ids };
 }
 
 /** The Word download stamp (spec records design §5.3): only `usedRecords` +

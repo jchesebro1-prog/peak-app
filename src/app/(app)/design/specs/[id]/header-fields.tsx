@@ -3,9 +3,10 @@
 import { createContext, useContext, useRef, useState, useTransition, type CSSProperties, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CustomerCombobox, type CustomerComboboxOption } from "@/components/customer-combobox";
+import { ConfirmButton } from "@/components/confirm-button";
 import { SPEC_FILL_IN_MAX, SPEC_HEADER_MAX, type SpecDocHeader, type SpecDocSource, type SpecDocument } from "@/lib/specs/spec-document";
 import type { SpecChecklist } from "@/lib/specs/assemble-section";
-import { setSpecCustomerAction, setSpecFillInAction, updateSpecHeaderAction } from "../builder-actions";
+import { applySpecHeaderToProjectAction, setSpecCustomerAction, setSpecFillInAction, updateSpecHeaderAction } from "../builder-actions";
 
 /**
  * #205 Phase B (T5) — the builder's first two cards: the Word file's header
@@ -17,6 +18,10 @@ import { setSpecCustomerAction, setSpecFillInAction, updateSpecHeaderAction } fr
  * the preview current. PUNCHLIST #141 rule: each input seeds local state from
  * props once per mount, so a refresh after one save never clobbers typing in
  * another field.
+ *
+ * One header per project: when other saved specs share this spec's project
+ * number, "Apply this header to N other specs" copies the saved header onto
+ * all of them (after any header save still in flight lands).
  */
 
 export const CARD: CSSProperties = { padding: "16px 20px", marginBottom: 18 };
@@ -118,13 +123,21 @@ export function HeaderCard({
   customerOptions,
   canEdit,
   sourceQuoteNumber,
+  projectSpecCount = 0,
 }: {
   doc: SpecDocument;
   customerOptions: CustomerComboboxOption[];
   canEdit: boolean;
   sourceQuoteNumber?: string | null;
+  /** Other saved specs with this spec's project number. */
+  projectSpecCount?: number;
 }) {
-  const { err, pending, run } = useSave();
+  const router = useRouter();
+  const { err, pending, run, track } = useSave();
+  // Header saves in flight (true = saved). Apply waits for them, so it copies
+  // what you just typed — the server reads the saved header, never ours.
+  const headerSaves = useRef(new Set<Promise<boolean>>());
+  const [applied, setApplied] = useState("");
   const [values, setValues] = useState<SpecDocHeader>(doc.header);
   // What the server last accepted — a blur with nothing changed saves nothing.
   const saved = useRef<SpecDocHeader>(doc.header);
@@ -132,10 +145,38 @@ export function HeaderCard({
 
   const commit = (key: keyof SpecDocHeader, value: string) => {
     if (!canEdit || value.trim() === (saved.current[key] || "")) return;
+    setApplied("");
     run(
-      () => updateSpecHeaderAction(doc.id, { [key]: value }),
+      () => {
+        const p = updateSpecHeaderAction(doc.id, { [key]: value });
+        const settled = p.then(
+          (r) => r.ok,
+          () => false
+        );
+        headerSaves.current.add(settled);
+        void settled.then(() => headerSaves.current.delete(settled));
+        return p;
+      },
       () => (saved.current = { ...saved.current, [key]: value.trim() })
     );
+  };
+
+  const projectNumber = doc.header.projectNumber.trim();
+  const others = `${projectSpecCount} other ${projectSpecCount === 1 ? "spec" : "specs"}`;
+  const applyToProject = async () => {
+    setApplied("");
+    if ((await Promise.all([...headerSaves.current])).includes(false)) {
+      throw new Error("A header field didn't save — fix it, then apply.");
+    }
+    let r: Awaited<ReturnType<typeof applySpecHeaderToProjectAction>>;
+    try {
+      r = await track(() => applySpecHeaderToProjectAction(doc.id));
+    } catch {
+      throw new Error("Could not apply the header. Try again.");
+    }
+    if (!r.ok) throw new Error(r.error);
+    setApplied(`Updated ${r.count} ${r.count === 1 ? "spec" : "specs"}.`);
+    router.refresh();
   };
 
   const pickCustomer = (id: string) => {
@@ -205,6 +246,26 @@ export function HeaderCard({
           )}
         </div>
       </div>
+
+      {canEdit && projectNumber && projectSpecCount > 0 && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid #f0f1f4" }}>
+          <ConfirmButton
+            className="pk-btn-outline"
+            label={`Apply this header to ${others} for Project No. ${projectNumber}`}
+            confirmLabel={`Replace the header on ${others}`}
+            pendingLabel="Applying…"
+            disabled={pending}
+            onConfirm={applyToProject}
+          />
+          {applied ? (
+            <span role="status" style={{ fontSize: 12.5, color: "#3a3f4a" }}>
+              {applied}
+            </span>
+          ) : (
+            <span style={MUTED}>Copies the project name, number, phase, issue date and prepared by so every spec for this project prints the same header.</span>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
         <span style={MUTED}>Source: {sourceText(doc.source, sourceQuoteNumber)}</span>

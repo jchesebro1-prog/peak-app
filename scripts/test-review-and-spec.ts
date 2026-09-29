@@ -255,6 +255,7 @@ import { createSection, getSection } from "@/lib/stores/spec-sections";
 import { createArticle } from "@/lib/stores/spec-articles";
 import {
   createSpecDocument, getSpecDocument, allSpecDocuments, patchSpecDocument, removeSpecDocument,
+  copySpecHeaderToProject,
 } from "@/lib/stores/spec-documents";
 // Final fix wave item 8 — a partial library import must not blank a
 // section's omitted fields.
@@ -331,6 +332,7 @@ import {
 import {
   normalizeSpecDocument, withProduct, withoutProduct, withProductOrder, withProductHeader, bomProducts, DEFAULT_SPEC_PHASE,
   pickSpecHeaderPatch, isValidIsoDate, SPEC_FILL_IN_MAX, SPEC_HEADER_MAX, SPEC_REORDER_MAX,
+  sameProjectNumber, projectSiblings, projectHeaders, withSpecHeader,
 } from "@/lib/specs/spec-document";
 import { specRowKey } from "@/lib/specs/record-keys";
 
@@ -10579,6 +10581,7 @@ seeded()
   .then(() => gridSymbolLookAsyncChecks())
   .then(() => gridCustomItemsAsyncChecks())
   .then(() => specDocumentsAsyncChecks())
+  .then(() => specProjectHeaderAsyncChecks())
   .then(() => specDocxAsyncChecks())
   .then(() => specBuilderActionsAsyncChecks())
   .then(() => specBuilderFinalFixAsyncChecks())
@@ -36149,4 +36152,89 @@ async function specLabelsAsyncChecks(): Promise<void> {
   ok(!/window\.confirm|window\.prompt|\bconfirm\(/.test(del) && del.includes("ConfirmButton") && del.includes("deleteSpecDocumentAction") && del.includes("router.refresh()"), "list: the delete button arms a ConfirmButton, never window.confirm");
   const view = readFileSync(join(process.cwd(), specs, "library/records-view.tsx"), "utf8");
   ok(view.includes("recordProductName(r)") && view.includes("partNumbersSummary(r.mfrNumbers, 3)") && view.includes("Model #s"), "library: the records view shows the product name and model numbers");
+}
+
+// Specs — one header for every spec of a project
+{
+  ok(sameProjectNumber(" 3748 ", "3748") && sameProjectNumber("ab-12", "AB-12"), "project header: sameProjectNumber matches trimmed and case-insensitively");
+  ok(!sameProjectNumber("", "") && !sameProjectNumber("  ", "") && !sameProjectNumber(undefined, null) && !sameProjectNumber("3748", "3749"), "project header: a blank number is never a project, and different numbers differ");
+
+  const H = (projectNumber: string, projectName = "", updatedAt = 0, id = "") =>
+    normalizeSpecDocument({ id, sectionId: "ss", header: { projectName, projectNumber, phase: "Bid", issueDate: "2026-09-01", preparedBy: "Jeff" }, source: { kind: "scratch" }, updatedAt });
+  const docs = [H("3748", "Fall Creek", 10, "SP-1"), H("3748 ", "Fall Creek School District", 30, "SP-2"), H("3748", "FC", 20, "SP-3"), H("9000", "Other", 40, "SP-4"), H("", "No number", 50, "SP-5"), H("", "Also none", 60, "SP-6")];
+  const sib = projectSiblings(docs, docs[0]).map((d) => d.id).join();
+  ok(sib === "SP-2,SP-3", `project header: projectSiblings lists the other specs sharing the number, never itself (got ${sib})`);
+  ok(projectSiblings(docs, docs[4]).length === 0, "project header: a spec with no project number has no siblings, even beside other unnumbered specs");
+
+  const known = projectHeaders(docs);
+  ok(known.length === 2 && known[0].projectNumber === "9000" && known[1].projectName === "Fall Creek School District", "project header: projectHeaders gives one header per number — its most recently updated spec's — newest first, skipping blanks");
+
+  const copied = withSpecHeader(docs[0], { projectName: "Fall Creek HS", projectNumber: "3748", phase: "CD", issueDate: "2026-09-29", preparedBy: "SM" });
+  ok(copied.header.projectName === "Fall Creek HS" && copied.header.phase === "CD" && copied.header.issueDate === "2026-09-29" && copied.header.preparedBy === "SM" && copied.id === "SP-1", "project header: withSpecHeader copies all five fields and nothing else");
+
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const actions = read("src/app/(app)/design/specs/builder-actions.ts");
+  const bodyOf = (name: string) => {
+    const start = actions.indexOf(`export async function ${name}`);
+    const next = actions.indexOf("export async function", start + 1);
+    return start < 0 ? "" : actions.slice(start, next === -1 ? undefined : next);
+  };
+  const apply = bodyOf("applySpecHeaderToProjectAction");
+  ok(apply.includes('requirePerm("create")'), "project header: applySpecHeaderToProjectAction requires create");
+  ok(apply.includes("getSpecDocument(") && apply.includes("copySpecHeaderToProject(source.id, user.name)") && !/\(id: string, [a-z]/.test(apply.split("\n")[0]), "project header: apply reads the source's saved header on the server and takes no header values from the client");
+  ok(apply.includes('revalidatePath("/design/specs")') && apply.includes("for (const t of out.ids) revalidatePath("), "project header: apply revalidates the specs index and every touched spec");
+  const create = bodyOf("createSpecDocumentAction");
+  ok(create.includes("headerTooLong([projectName, projectNumber, phase, preparedBy])") && create.includes("phase || DEFAULT_SPEC_PHASE") && create.includes("preparedBy || user.name"), "project header: create caps the copied phase / prepared by and falls back to the defaults");
+
+  const card = read("src/app/(app)/design/specs/[id]/header-fields.tsx");
+  ok(card.includes("ConfirmButton") && !/window\.confirm|\bconfirm\(/.test(card), "project header: Apply arms a ConfirmButton, never window.confirm");
+  ok(card.includes("canEdit && projectNumber && projectSpecCount > 0") && card.includes("disabled={pending}"), "project header: the Apply button shows only for editors with siblings and is disabled while a header save is pending");
+  ok(card.includes("track(() => applySpecHeaderToProjectAction(doc.id))") && card.includes("headerSaves.current"), "project header: Apply counts as a save in flight (a Download waits for it) and waits for header saves first");
+  const page = read("src/app/(app)/design/specs/[id]/page.tsx");
+  ok(page.includes("projectSiblings(await allSpecDocuments(), doc).length") && page.includes("projectSpecCount={projectSpecCount}"), "project header: the builder page counts the siblings on the server");
+
+  const nw = read("src/app/(app)/design/specs/new/page.tsx");
+  ok(nw.includes("projectHeaders(specDocs)") && nw.includes("knownProjects={knownProjects}"), "project header: the New page passes the known projects");
+  const form = read("src/app/(app)/design/specs/new/new-spec-form.tsx");
+  ok(form.includes("<datalist") && form.includes("sameProjectNumber(p.projectNumber, value)") && form.includes("Header copied from Project No."), "project header: the New form offers known numbers and says when it copied a header");
+  ok(form.includes("!projectName.trim() || projectName === defaultProjectName"), "project header: the New form only replaces a blank or default project name");
+}
+
+/**
+ * DB-backed: two specs share a project number, a third has another; copying
+ * the source's header changes only the matching sibling.
+ */
+async function specProjectHeaderAsyncChecks(): Promise<void> {
+  const num = `PH-${Date.now()}`;
+  const make = async (projectName: string, projectNumber: string, phase: string) => {
+    const d = await createSpecDocument({
+      sectionId: "ss-project-header",
+      header: { projectName, projectNumber, phase, issueDate: "2026-09-01", preparedBy: "Harness" },
+      source: { kind: "scratch" },
+      products: [],
+      printQuantities: false,
+      fillIns: {},
+      createdBy: "Test Harness",
+      updatedBy: "Test Harness",
+    });
+    registerFixture("spec_documents", d.id);
+    return d;
+  };
+  const src = await make("Fall Creek High School", num, "Bid Documents");
+  const sib = await make("Fall Creek", ` ${num.toLowerCase()} `, "Construction Documents");
+  const other = await make("Somewhere Else", `${num}-X`, "Construction Documents");
+
+  const out = await copySpecHeaderToProject(src.id, "Applier");
+  ok(!!out && out.ids.length === 1 && out.ids[0] === sib.id, `project header: copySpecHeaderToProject touches only the spec sharing the number (got ${out?.ids.join()})`);
+  const sibNow = await getSpecDocument(sib.id);
+  ok(!!sibNow && sibNow.header.projectName === "Fall Creek High School" && sibNow.header.phase === "Bid Documents" && sibNow.header.projectNumber === num && sibNow.updatedBy === "Applier", "project header: the sibling gets all five fields and updatedBy");
+  const otherNow = await getSpecDocument(other.id);
+  ok(!!otherNow && otherNow.header.projectName === "Somewhere Else" && otherNow.updatedAt === other.updatedAt, "project header: a spec with a different number is untouched");
+  const srcNow = await getSpecDocument(src.id);
+  ok(!!srcNow && srcNow.updatedAt === src.updatedAt, "project header: the source spec itself is not rewritten");
+
+  await removeSpecDocument(sib.id);
+  const again = await copySpecHeaderToProject(src.id, "Applier");
+  ok(!!again && again.ids.length === 0, "project header: a deleted spec is not a sibling");
+  ok((await copySpecHeaderToProject("SP-NOPE-0", "Applier")) === null, "project header: an unknown source spec returns null");
 }
