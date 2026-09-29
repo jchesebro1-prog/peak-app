@@ -111,6 +111,7 @@ export function LibraryPicker({
                 <div>
                   <span style={SKU}>{h.specId}</span> <span style={{ fontSize: 12.5, color: "#3a3f4a" }}>{h.title}</span>
                 </div>
+                {h.product && <div style={{ fontSize: 12, fontWeight: 600, color: "#3a3f4a" }}>{h.product}</div>}
                 <div style={{ fontSize: 11.5, color: h.status === "draft" ? "#8a6d1f" : "#6b7079" }}>
                   {h.section}
                   {h.matchKey ? ` · ${h.matchKey}` : ""}

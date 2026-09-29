@@ -46,6 +46,10 @@ export type SlimSpecRecord = {
   revision: number;
   matchKey: string | null;
   section: string;
+  /** `recordProductName` — what the spec is ("Ion XE 20 · ETC"). */
+  product: string;
+  /** `partNumbersSummary` — the model numbers, shortened. */
+  models: string;
 };
 
 export type RowState = "matched" | "other-section" | "legacy" | "no-spec" | "ambiguous" | "draft" | "waived" | "none";
@@ -139,6 +143,9 @@ export function RecordRowStatus({
   const state = rowState(row);
   const m = row.match;
   const title = (id: string) => recordsById[id]?.title || id;
+  // Titles are generic categories; the product name is what tells two records apart.
+  const label = (id: string) => recordsById[id]?.product || title(id);
+  const tip = (id: string) => [`${id} — ${title(id)}`, recordsById[id]?.models].filter(Boolean).join(" · ");
 
   const quickPick = (specIds: string[], pin: boolean) =>
     specIds.length > 0 && (
@@ -150,10 +157,10 @@ export function RecordRowStatus({
             type="button"
             style={PICK_CHIP}
             disabled={!canEdit || pending}
-            title={`${id} — ${title(id)}`}
+            title={tip(id)}
             onClick={() => run(() => (pin ? pinRowToRecordAction(doc.id, row.rowKey, id) : linkRowToRecordAction(doc.id, row.rowKey, id)))}
           >
-            <span style={SKU}>{id}</span> {title(id)}
+            <span style={SKU}>{id}</span> {label(id)}
           </button>
         ))}
       </div>
@@ -282,7 +289,7 @@ export function RecordRowStatus({
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <Chip tone="warn">Draft spec</Chip>
           <span style={MUTED}>
-            <span style={SKU}>{m.specId}</span> {title(m.specId)} — approve it to print
+            <span style={SKU}>{m.specId}</span> {label(m.specId)} — approve it to print
           </span>
           {canEdit && (
             <button type="button" className="pk-btn-outline" style={{ padding: "3px 8px", fontSize: 11.5 }} disabled={pending} onClick={() => run(() => approveDraftRecordAction(m.specId))}>

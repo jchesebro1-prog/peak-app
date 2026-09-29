@@ -450,3 +450,27 @@ export const SPEC_ID_MAX = 32;
 export function isValidSpecId(id: string): boolean {
   return typeof id === "string" && id.length <= SPEC_ID_MAX && SPEC_ID_PATTERN.test(id);
 }
+
+/**
+ * What a spec IS, for lists: the basis of design without its "as manufactured
+ * by …" tail plus the manufacturer (` · ETC`); a system record's match key when
+ * it has no basis of design; else the manufacturer alone. Titles are generic
+ * (a category), so this is what tells two records apart.
+ */
+export function recordProductName(r: Pick<SpecRecord, "basisOfDesign" | "manufacturer" | "matchKey" | "kind">): string {
+  const mfr = (r.manufacturer ?? "").trim();
+  let base = (r.basisOfDesign ?? "").trim();
+  const cut = base.search(/\s+as manufactured by\b/i);
+  if (cut >= 0) base = base.slice(0, cut);
+  base = base.trim().replace(/\.+$/, "").trim();
+  if (base) return mfr && !base.toLowerCase().includes(mfr.toLowerCase()) ? `${base} · ${mfr}` : base;
+  if (r.kind === "system" && (r.matchKey ?? "").trim()) return (r.matchKey ?? "").trim();
+  return mfr;
+}
+
+/** "A, B, C, … +N" — the first `max` model numbers and how many more. */
+export function partNumbersSummary(nums: readonly string[], max = 3): string {
+  if (nums.length === 0) return "";
+  const head = nums.slice(0, max).join(", ");
+  return nums.length > max ? `${head}, … +${nums.length - max}` : head;
+}

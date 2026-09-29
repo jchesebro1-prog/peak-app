@@ -173,6 +173,7 @@ export function LinkRecordDialog({ docId, row, onClose, onDone }: { docId: strin
                 <div>
                   <span style={SKU}>{h.specId}</span> <span style={{ fontSize: 12.5, color: "#16181b" }}>{h.title}</span>
                 </div>
+                {h.product && <div style={{ fontSize: 12, fontWeight: 600, color: "#3a3f4a" }}>{h.product}</div>}
                 <div style={{ fontSize: 11.5, color: "#6b7079" }}>
                   {h.section} · {KIND_LABEL[h.kind]}
                   {h.status === "draft" && <span style={{ color: "#8a6d1f" }}> · Draft</span>}

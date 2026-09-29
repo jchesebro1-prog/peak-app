@@ -34,6 +34,7 @@ import {
   matchKeyConflict,
   normalizeSpecRecord,
   partNumberConflict,
+  recordProductName,
   validateSpecRecord,
   type RecordProblem,
   type SpecKind,
@@ -167,6 +168,8 @@ export type SpecRecordHit = {
   manufacturer: string | null;
   mfrNumbers: string[];
   matchKey: string | null;
+  /** `recordProductName` — what the spec is ("Ion XE 20 · ETC"), computed here so clients stay dumb. */
+  product: string;
 };
 
 /** Search over records (title, specId, part numbers, manufacturer, match
@@ -210,6 +213,7 @@ export async function searchSpecRecordsAction(
     manufacturer: r.manufacturer,
     mfrNumbers: r.mfrNumbers,
     matchKey: r.matchKey,
+    product: recordProductName(r),
   }));
   return { ok: true, records };
 }

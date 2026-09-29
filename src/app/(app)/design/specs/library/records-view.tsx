@@ -2,7 +2,7 @@ import Link from "next/link";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { csiKey } from "@/lib/specs/articles";
-import { KIND_LABELS, SPEC_KINDS, SPEC_STATUSES, filterSpecRecords, type SpecStatus } from "@/lib/specs/records";
+import { KIND_LABELS, SPEC_KINDS, SPEC_STATUSES, filterSpecRecords, partNumbersSummary, recordProductName, type SpecStatus } from "@/lib/specs/records";
 import { RecordsImport } from "./records-import";
 
 /**
@@ -22,7 +22,7 @@ const TH: React.CSSProperties = {
 };
 const CELL: React.CSSProperties = { fontSize: 12.5, color: "#3a3f4a" };
 const MONO: React.CSSProperties = { fontFamily: "var(--font-mono)" };
-const COLS = "130px minmax(0,1.7fr) 130px 80px 80px minmax(0,0.9fr) 70px 44px 92px";
+const COLS = "130px minmax(0,1.7fr) 130px 80px 80px minmax(0,0.9fr) minmax(0,1.2fr) 44px 92px";
 
 const STATUS_LABEL: Record<SpecStatus, string> = { draft: "Draft", ready: "Ready", archived: "Archived" };
 const STATUS_CHIP: Record<SpecStatus, { fg: string; bg: string }> = {
@@ -102,7 +102,7 @@ export default async function RecordsView({
       </div>
 
       <form action="/design/specs/library" method="GET" style={{ marginBottom: 14 }}>
-        <SearchFilterBar name="q" defaultValue={q} placeholder="Search spec id, title, part number…" ariaLabel="Search spec records" submit>
+        <SearchFilterBar name="q" defaultValue={q} placeholder="Search spec id, product, title, model #…" ariaLabel="Search spec records" submit>
           <select name="kind" defaultValue={kind} className="pk-searchbar-select" aria-label="Kind filter">
             <option value="">All kinds</option>
             {kindOptions.map((k) => (
@@ -173,14 +173,14 @@ export default async function RecordsView({
               <span style={TH}>Section</span>
               <span style={TH}>Status</span>
               <span style={TH}>Manufacturer</span>
-              <span style={{ ...TH, textAlign: "right" }}>Part #s</span>
+              <span style={TH}>Model #s</span>
               <span style={{ ...TH, textAlign: "right" }}>Rev</span>
               <span style={TH}>Updated</span>
             </div>
             {filtered.map((r) => {
               const chip = STATUS_CHIP[r.status];
               const n = r.mfrNumbers.length;
-              const partsTitle = n ? r.mfrNumbers.slice(0, 3).join(", ") + (n > 3 ? `, … (+${n - 3})` : "") : undefined;
+              const product = recordProductName(r);
               return (
                 <div
                   key={r.specId}
@@ -194,9 +194,7 @@ export default async function RecordsView({
                   </Link>
                   <span style={{ ...CELL, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {r.title || "—"}
-                    {r.kind === "system" && r.matchKey && (
-                      <span style={{ display: "block", fontSize: 11.5, fontWeight: 400, color: "#8c919c" }}>{r.matchKey}</span>
-                    )}
+                    {product && <span style={{ display: "block", fontSize: 11.5, fontWeight: 400, color: "#8c919c" }}>{product}</span>}
                   </span>
                   <span style={{ ...CELL, fontSize: 12 }}>{KIND_LABELS[r.kind]}</span>
                   <span style={{ ...CELL, ...MONO }}>{r.section || "—"}</span>
@@ -206,8 +204,8 @@ export default async function RecordsView({
                     </span>
                   </span>
                   <span style={CELL}>{r.manufacturer || "—"}</span>
-                  <span style={{ ...CELL, ...MONO, textAlign: "right", cursor: partsTitle ? "help" : undefined }} title={partsTitle}>
-                    {n || "—"}
+                  <span style={{ ...CELL, ...MONO, fontSize: 11.5, minWidth: 0, overflowWrap: "anywhere" }} title={n ? r.mfrNumbers.join(", ") : undefined}>
+                    {partNumbersSummary(r.mfrNumbers, 3) || "—"}
                   </span>
                   <span style={{ ...CELL, ...MONO, textAlign: "right" }}>{r.revision}</span>
                   <span style={{ ...CELL, fontSize: 12 }} title={r.updatedBy ? `by ${r.updatedBy}` : undefined}>

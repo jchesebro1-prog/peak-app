@@ -5,7 +5,7 @@ import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { placeProduct } from "@/lib/specs/assemble-section";
 import { articleIdForPart, csiKey } from "@/lib/specs/articles";
 import { isPlaceholderSku, specRowKey } from "@/lib/specs/record-keys";
-import { systemMatchKeys as systemMatchKeysOf, type SpecKind } from "@/lib/specs/records";
+import { partNumbersSummary, recordProductName, systemMatchKeys as systemMatchKeysOf, type SpecKind } from "@/lib/specs/records";
 import { specCustomerOptions } from "../customer-options";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import Builder, { type SpecProductRow } from "./builder";
@@ -126,7 +126,7 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
   const recordsById: Record<string, SlimSpecRecord> = {};
   for (const id of referenced) {
     const r = recordById.get(id);
-    if (r) recordsById[id] = { specId: r.specId, title: r.title, kind: r.kind, status: r.status, revision: r.revision, matchKey: r.matchKey, section: r.section };
+    if (r) recordsById[id] = { specId: r.specId, title: r.title, kind: r.kind, status: r.status, revision: r.revision, matchKey: r.matchKey, section: r.section, product: recordProductName(r), models: partNumbersSummary(r.mfrNumbers, 3) };
   }
   // Library text of each matched record — the Edit panel starts from it (or
   // from the project override the client already has on `doc`).

@@ -10670,6 +10670,7 @@ seeded()
   .then(() => c255Rv12SpacesAsyncChecks())
   .then(() => c255T14GridAsyncChecks())
   .then(() => c255StorSpacesAsyncChecks())
+  .then(() => specLabelsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -36087,4 +36088,31 @@ import { defaultAState as c263Default, SYSCOLOR as c263Sys, VENUES as c263Venues
   const pros = c263Build({ ...base, venue: "school", sys: allOn, drape: { ...base.drape, ...drape } } as never, 8, 3, "#3a3f4a");
   ok(flatLg("FOH lighting").width === 3.5 && flatLg("FOH lighting").height === 3.5 && flatLg("Loudspeaker").width === 4 && flatLg("Loudspeaker").height === 5 && flatLg("Screen").width === 7 && flatLg("Screen").height === 1.3, "#263: legend symbol swatches (dot, loudspeaker, screen) are half size");
   ok(flatLg("Platform").width === 12 && flatLg("Seating").width === 8 && lg(pros, "Drape / curtain").width === 14 && lg(pros, "Line set").width === 14, "#263: legend swatches for non-symbols (platform, seating, drape, line set) are unchanged");
+}
+
+/* ======================================================================
+   Spec labels + list delete — the Specs list deletes a saved spec; the Spec
+   Library says what each spec IS (product name, model numbers).
+   ====================================================================== */
+async function specLabelsAsyncChecks(): Promise<void> {
+  const R = await import("@/lib/specs/records");
+  const I = await import("@/lib/specs/record-import");
+  const recs = I.recordsFromJson(JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"))).records;
+  const by = (id: string) => recs.find((r) => r.specId === id)!;
+  ok(R.recordProductName(by("PS-260961-012")) === "Ion XE 20 · ETC", "labels: PS-260961-012 reads 'Ion XE 20 · ETC'");
+  ok(R.recordProductName(by("PS-260961-028")).startsWith("Lonestar Prime"), "labels: PS-260961-028 starts with 'Lonestar Prime'");
+  ok(R.recordProductName(by("PS-116123-002")) === "Stage Drapes – Main Curtain", "labels: system record PS-116123-002 reads its match key");
+  ok(R.recordProductName({ basisOfDesign: "Foo 9 as Manufactured By ACME Inc.", manufacturer: "ACME", matchKey: null, kind: "product_catalog" }) === "Foo 9 · ACME" && R.recordProductName({ basisOfDesign: "ETC Ion as manufactured by ETC", manufacturer: "etc", matchKey: null, kind: "product_catalog" }) === "ETC Ion", "labels: 'as manufactured by' tail is cut case-insensitively; a manufacturer already named is not repeated");
+  ok(R.recordProductName({ basisOfDesign: null, manufacturer: "ETC", matchKey: null, kind: "product_vendor" }) === "ETC" && R.recordProductName({ basisOfDesign: null, manufacturer: null, matchKey: null, kind: "companion" }) === "", "labels: no basis of design → manufacturer, else empty");
+  ok(R.partNumbersSummary([]) === "", "labels: partNumbersSummary of none is empty");
+  ok(R.partNumbersSummary(["A", "B"]) === "A, B" && R.partNumbersSummary(["A", "B", "C"]) === "A, B, C", "labels: partNumbersSummary shows up to three in full");
+  const many = by("PS-260961-007").mfrNumbers;
+  ok(many.length === 22 && R.partNumbersSummary(many, 3).endsWith("… +19"), "labels: PS-260961-007's 22 numbers end '… +19'");
+  const specs = "src/app/(app)/design/specs/";
+  const page = readFileSync(join(process.cwd(), specs, "page.tsx"), "utf8");
+  ok(/\{canCreate && <DeleteSpecButton id=\{d\.id\} \/>\}/.test(page) && /"90px minmax\(0,1.5fr\)[^"]* 220px"/.test(page), "list: page.tsx renders DeleteSpecButton under canCreate in a 220px last column");
+  const del = readFileSync(join(process.cwd(), specs, "delete-spec-button.tsx"), "utf8");
+  ok(!/window\.confirm|window\.prompt|\bconfirm\(/.test(del) && del.includes("ConfirmButton") && del.includes("deleteSpecDocumentAction") && del.includes("router.refresh()"), "list: the delete button arms a ConfirmButton, never window.confirm");
+  const view = readFileSync(join(process.cwd(), specs, "library/records-view.tsx"), "utf8");
+  ok(view.includes("recordProductName(r)") && view.includes("partNumbersSummary(r.mfrNumbers, 3)") && view.includes("Model #s"), "library: the records view shows the product name and model numbers");
 }
