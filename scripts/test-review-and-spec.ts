@@ -33998,3 +33998,56 @@ async function specRecordDupSectionAsyncChecks(): Promise<void> {
   const conv = readFileSync(join(process.cwd(), "scripts/venue-template-convert.py"), "utf8");
   ok(conv.includes("Counter(required)") && conv.includes('"added": True') && conv.includes("ORIGIN = {"), "#255 T1: the converter counts required labels, marks overlay labels and supports an origin shift");
 }
+/* --- #255 T2: engine — span maps, hard switch, fixed stage spans, true arcs (proscenium unchanged) --- */
+import { makeSpanMap as c255T2Span, makeXMap as c255T2X, makeYMap as c255T2Y, stretchTemplate as c255T2Stretch } from "@/lib/design/venue-templates/stretch";
+import { PROSCENIUM_KEYS as c255T2Pros } from "@/lib/design/venue-templates/proscenium.keys";
+import type { TemplateKeys as C255T2Keys, VenueTemplate as C255T2Tpl } from "@/lib/design/venue-templates/types";
+{
+  const D = (o: Partial<Record<"proWidthFt" | "wingFt" | "stageDepthFt" | "houseWidthFt" | "houseDepthFt", number>>) => ({ proWidthFt: 10, wingFt: 0, stageDepthFt: 10, houseWidthFt: 10, houseDepthFt: 10, pit: false, ...o });
+  const f = c255T2Span([{ to: 10, drive: "fixed" }, { to: 20, drive: "absorb" }], D({ houseWidthFt: 80 / 12 }));
+  ok(f(10) === 10 && Math.abs(f(15) - 25) < 1e-9 && Math.abs(f(20) - 40) < 1e-9 && Math.abs(f(25) - 45) < 1e-9, "#255 T2: an absorb span fills out to the house half-width; fixed spans keep size; beyond rides along");
+  const g = c255T2Span([{ to: 6, drive: "pro" }, { to: 9, drive: "wing" }, { to: 10, drive: "fixed" }, { to: 20, drive: "absorb" }], D({ proWidthFt: 1, wingFt: 0.5, houseWidthFt: 5 }));
+  ok(Math.abs(g(6) - 6) < 1e-9 && Math.abs(g(9) - 12) < 1e-9 && Math.abs(g(10) - 13) < 1e-9 && Math.abs(g(20) - 30) < 1e-9, "#255 T2: pro, wing, fixed and absorb spans chain outward from the centreline");
+
+  // The #249 proscenium formulas, re-derived here: the refactored engine must reproduce them exactly.
+  const old = (d: ReturnType<typeof D>, x: number, y: number) => {
+    const proHalf = (d.proWidthFt * 12) / 2, wing = d.wingFt * 12, houseHalf = (d.houseWidthFt * 12) / 2, a = Math.abs(x - 414.25);
+    const st = a <= 300 ? (a * proHalf) / 300 : a <= 480 ? proHalf + ((a - 300) * wing) / 180 : proHalf + wing + (a - 480);
+    const bk = a <= 212.25 ? a : a <= 478.605 ? 212.25 + ((a - 212.25) * (houseHalf - 212.25)) / (478.605 - 212.25) : houseHalf + (a - 478.605);
+    const t = Math.max(0, Math.min(1, (-171.833 - y) / (-171.833 + 449.992)));
+    return 414.25 + Math.sign(x - 414.25) * ((1 - t) * st + t * bk);
+  };
+  for (const d of [D({ proWidthFt: 50, wingFt: 15, stageDepthFt: 30, houseWidthFt: 79.77, houseDepthFt: 68.84 }), D({ proWidthFt: 40, wingFt: 10, stageDepthFt: 24, houseWidthFt: 60, houseDepthFt: 45 })]) {
+    const X = c255T2X(c255T2Pros, d);
+    ok([[-71.75, 200], [300, -100], [-64, -300], [894.25, -600], [700, -900]].every(([x, y]) => Math.abs(X(x, y) - old(d, x, y)) < 1e-9), `#255 T2: the proscenium side-to-side map is the #249 map (${d.proWidthFt}/${d.wingFt}/${d.houseWidthFt})`);
+  }
+  ok(c255T2Pros.roles.house === "House" && c255T2Pros.roles.booth === "Booth" && c255T2Pros.roles.catwalk === "Catwalk" && c255T2Pros.spaces.length === 8, "#255 T2: proscenium names its roles and Space order");
+
+  // A synthetic room: 0..100 × 0..50 with a semicircular apse (centre 50,50 r 30) on top; zones switch hard at y = 10.
+  const tpl: C255T2Tpl = { kind: "t", source: "t", units: "in", extents: { minX: 0, minY: 0, maxX: 100, maxY: 80 }, segments: [[0, 0, 100, 0], [0, 50, 20, 50], [80, 50, 100, 50]], arcs: [{ cx: 50, cy: 50, r: 30, a0: 0, a1: 180 }], labels: [{ text: "Apse", x: 45, y: 70, h: 5 }] };
+  const keys: C255T2Keys = {
+    kind: "t", cx: 50,
+    x: { kind: "blend", upper: [{ to: 30, drive: "pro" }, { to: 50, drive: "fixed" }], lower: [{ to: 50, drive: "fixed" }], yStart: 10, yEnd: 10 },
+    ySpans: [{ from: 50, to: 20, drive: "stageDepth" }, { from: 20, to: 0, drive: "fixed" }],
+    origin: 0, stageDepthTo: 50, houseDepthTo: 0,
+    regions: { Apse: [{ arc: { cx: 50, cy: 50, r: 30, from: 0, to: 180 } }], Room: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }] },
+    regionLabels: { Room: "Hall" }, spaces: ["Room", "Apse"], roles: { stage: "Room", house: "Room" },
+    lines: {}, points: {}, requiredLabels: ["Apse"],
+    defaults: { proWidthFt: 5, wingFt: 0, stageDepthFt: 50 / 12, houseWidthFt: 0, houseDepthFt: 0 },
+    trueArcs: [{ centres: [{ x: 50, y: 50 }], scaleHalf: 30, atY: 50, zoneMinY: 50 }],
+  };
+  const d2 = D({ proWidthFt: 10, stageDepthFt: 80 / 12 }); // pro half 30 → 60 (k = 2); stage part 30 → 60
+  const Y = c255T2Y(keys, d2), X = c255T2X(keys, d2);
+  ok(Math.abs(Y(50) - 80) < 1e-9 && Math.abs(Y(20) - 20) < 1e-9, "#255 T2: stage depth drives only its open span when the stage depth range also holds fixed spans");
+  ok(Math.abs(X(80, 11) - 110) < 1e-9 && Math.abs(X(80, 10) - 80) < 1e-9, "#255 T2: yStart === yEnd switches zones hard; the switch line belongs to the lower zone");
+  const sp = c255T2Stretch(tpl, keys, d2);
+  const arc = sp.polylines[sp.polylines.length - 1];
+  ok(arc.length > 20 && arc.every((p) => Math.abs(Math.hypot(p.x - 50, p.y - 80) - 60) < 1e-6), "#255 T2: a true arc stays a circle — radius × k, centred where its ends map");
+  ok(Math.abs(arc[0].x - 110) < 1e-6 && Math.abs(arc[0].y - 80) < 1e-6 && Math.abs(arc[arc.length - 1].x + 10) < 1e-6, "#255 T2: …and its ends land where the map sends them");
+  ok(sp.regions.Apse.filter((p) => p.y > 80 + 1e-9).every((p) => Math.abs(Math.hypot(p.x - 50, p.y - 80) - 60) < 1e-6), "#255 T2: a region bounded by a true arc follows the same circle");
+  const lab = sp.labels.find((l) => l.text === "Apse")!;
+  ok(Math.abs(lab.x - 40) < 1e-6 && Math.abs(lab.y - 120) < 1e-6, "#255 T2: a label inside a true arc's zone moves with the arc (a similarity about its centre)");
+  ok(sp.regionLabels.Room === "Hall" && sp.regionLabels.Apse === "Apse", "#255 T2: each region carries its display label (the id unless regionLabels renames it)");
+  const same = c255T2Stretch(tpl, keys, D({ proWidthFt: 5, stageDepthFt: 50 / 12 }));
+  ok(same.polylines.flat().every((p) => p.x >= -1e-9 && p.x <= 100 + 1e-9) && same.polylines[same.polylines.length - 1].every((p) => Math.abs(Math.hypot(p.x - 50, p.y - 50) - 30) < 1e-6), "#255 T2: at the drawing's own dimensions the true arc is the drawn arc");
+}

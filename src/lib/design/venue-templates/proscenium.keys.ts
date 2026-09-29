@@ -17,13 +17,17 @@ export const PROSCENIUM_SPACES = ["Stage", "Pit", "House", "Catwalk", "Center Ai
 export const PROSCENIUM_KEYS: TemplateKeys = {
   kind: "proscenium",
   cx: CX,
-  // The opening (±300") follows pro width; each wing (300 → 480, the inner wall face) follows wing width; the 6" walls ride outside.
-  stageX: { proHalf: 300, innerHalf: 480 },
-  // Booth + vestibules (±212.25) keep their size; the rest follows house width. 478.605 is half the drawing's inside width
-  // at the back (−62.959 → 894.25) — the drawing is ~3" out of square there, so the left wall lands within an inch of 6".
-  backX: { rigidHalf: 212.25, innerHalf: 478.605 },
-  // The stage map holds down to the stage edge's lowest point; the house map from where the splayed walls end.
-  blend: { yStart: -171.833, yEnd: -449.992 },
+  // #255: the #249 maps as span lists. Upstage (y ≥ −171.833, the stage edge's lowest point) the opening (±300") follows pro
+  // width and each wing (300 → 480, the inner wall face) wing width; the back of the house (y ≤ −449.992, where the splayed
+  // walls end) keeps booth + vestibules (±212.25) rigid and lets the rest follow house width. 478.605 is half the drawing's
+  // inside width at the back (−62.959 → 894.25) — ~3" out of square (D436). Blended linearly between.
+  x: {
+    kind: "blend",
+    upper: [{ to: 300, drive: "pro" }, { to: 480, drive: "wing" }],
+    lower: [{ to: 212.25, drive: "fixed" }, { to: 478.605, drive: "absorb" }],
+    yStart: -171.833,
+    yEnd: -449.992,
+  },
   ySpans: [
     { from: 375, to: 369, drive: "fixed" }, // stage back wall
     { from: 369, to: 9, drive: "stageDepth" }, // stage: back wall inner face → plaster line (30')
@@ -57,6 +61,8 @@ export const PROSCENIUM_KEYS: TemplateKeys = {
     "Electrical Room": [{ x: 626.372, y: -797.885 }, { x: 894.25, y: -797.885 }, { x: 894.25, y: -943.107 }, { x: 626.372, y: -943.107 }],
     "MISC Rooms": [{ x: -64.691, y: -803.376 }, { x: 202.885, y: -803.376 }, { x: 202.885, y: -943.107 }, { x: -64.691, y: -943.107 }],
   },
+  spaces: [...PROSCENIUM_SPACES],
+  roles: { stage: "Stage", house: "House", booth: "Booth", catwalk: "Catwalk" },
   lines: {
     plaster: [{ x: 114.25, y: 9 }, { x: 714.25, y: 9 }],
     stageEdge: [{ arc: { ...STAGE_EDGE, from: 236.31, to: 303.69 } }],
