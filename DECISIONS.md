@@ -7680,14 +7680,19 @@ largest drift measured across 13,596 generated labor lines was $0.02. Fixture li
 assembly's own component list prices, never the tier, so they are left alone and not counted. An ext-sell
 override, a POR line, a line with no cost, or any other sell is hand-priced and kept.
 
-The client applies it where `updateQuoteMetaAction` hands back the new stamp and the normal Save persists it. The
-server recomputes value (#242). A banner under the header reads "Re-priced N lines to <Tier> (<pct>%) · kept M
-hand-priced lines · Undo". Undo restores the exact sections from before the re-price; the new stamp stays,
+A customer or contact pick resolves the tier through the read-only `resolveTierAction` (contact's own tier →
+company tier → Base), on a saved quote and on a new, unsaved estimate alike, and the client re-prices against it
+in one shared block. The tier stamp is persisted only with the lines: `saveQuoteAction` resolves it server-side
+from the customer and contact being saved and writes it in the same create or update as the re-priced sections.
+The header autosave (`updateQuoteMetaAction`) no longer writes a stamp, so a stamp can never be saved ahead of the
+lines it seeded. The server recomputes value (#242). A banner under the header reads "Re-priced N lines to <Tier>
+(<pct>%) · kept M hand-priced lines · Save to keep · Undo"; "Save to keep" drops once a Save carries the re-price.
+M counts only hand-priced lines (an ext-sell override or a sell off the seed); POR, no-cost and fixture lines are
+kept without being counted. Undo restores the exact sections from before the re-price; the new stamp stays,
 because it describes the customer. Every sections edit goes through one wrapper that clears the banner. The
 automatic freight re-apply is the exception: it can land after the stamp when the venue's travel is fetched, so
-it keeps the banner and applies the same freight to the Undo snapshot. No re-priced line means no banner. Tiers
-stay internal: nothing prints on the customer document. An unsaved new estimate isn't re-stamped until its first
-save (unchanged), so nothing re-prices before then.
+it keeps the banner and applies the same freight to the Undo snapshot. No re-priced line means no new banner, and a
+banner already showing keeps its Undo. Tiers stay internal: nothing prints on the customer document.
 
 **Service builders (flame test, repair, inspection).** The margin knob follows the tier on a customer **and** a
 contact change. The seed is the contact's own tier margin, else the company's own tier margin, else the service's

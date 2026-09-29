@@ -10661,6 +10661,7 @@ seeded()
   .then(() => specLibraryScreenAsyncChecks())
   .then(() => specKeyPickersAsyncChecks())
   .then(() => specRecordsFinalReviewAsyncChecks())
+  .then(() => tier254SaveStampAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -33446,7 +33447,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   ];
   const r = t254Reprice(secs, null, 0.2);
   const it = (n: number) => r.sections[0].items.find((x) => x.id === n)!;
-  ok(r.repriced === 3 && r.kept === 4, `#254 repriceForTier: 3 seeded lines re-priced, 4 kept (got ${r.repriced}/${r.kept})`);
+  ok(r.repriced === 3 && r.handPriced === 2 && r.untouched === 2, `#254 repriceForTier: 3 seeded lines re-priced, 2 hand-priced + 2 untouched kept (got ${r.repriced}/${r.handPriced}/${r.untouched})`);
   ok(it(1).price === 125 && it(1).cost === 100, "#254 repriceForTier: a catalog line at the 30% seed moves to cost ÷ (1 − 0.20)");
   ok(it(2).price === 150, "#254 repriceForTier: a hand-priced sell is kept");
   ok(it(3).price === at(100, 0.3) && it(3).extSellOverride === 400, "#254 repriceForTier: a line with an ext-sell override is kept, override intact");
@@ -33462,31 +33463,31 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   // Identical margins → no change, same reference.
   const same = t254Reprice(secs, 0.3, 0.3);
   const sameNull = t254Reprice(secs, null, 0.3);
-  ok(same.sections === secs && same.repriced === 0 && same.kept === 0 && sameNull.sections === secs && sameNull.repriced === 0,
+  ok(same.sections === secs && same.repriced === 0 && same.handPriced === 0 && same.untouched === 0 && sameNull.sections === secs && sameNull.repriced === 0,
     "#254 repriceForTier: prev === next (incl. null vs 0.30) changes nothing and returns the same array");
   ok(t254Reprice(secs, 0.3, null).sections === secs && t254Reprice(secs, 0.3, 1).repriced === 0,
     "#254 repriceForTier: a missing or unusable next margin changes nothing");
 
   // Rounding tolerance: one cent off the seed still matches; two cents is hand-priced.
   const tol = t254Reprice([sec("sys1", [line(1, 100, t254R2(at(100, 0.3) + 0.01)), line(2, 100, t254R2(at(100, 0.3) - 0.01)), line(3, 100, t254R2(at(100, 0.3) + 0.02))])], 0.3, 0.2);
-  ok(t254Tol === 0.01 && tol.repriced === 2 && tol.kept === 1 && tol.sections[0].items[2].price === t254R2(at(100, 0.3) + 0.02),
+  ok(t254Tol === 0.01 && tol.repriced === 2 && tol.handPriced === 1 && tol.sections[0].items[2].price === t254R2(at(100, 0.3) + 0.02),
     "#254 repriceForTier: $0.01 tolerance — ±1¢ off the seed re-prices, 2¢ off is kept");
 
   // Tier → tier: lines at Gold's 20% move to Silver's 22%; a line at 30% is now hand-priced.
   const tt = t254Reprice([sec("sys1", [line(1, 80, at(80, 0.2)), line(2, 80, at(80, 0.3))])], 0.2, 0.22);
-  ok(tt.repriced === 1 && tt.kept === 1 && tt.sections[0].items[0].price === at(80, 0.22) && tt.sections[0].items[1].price === at(80, 0.3),
+  ok(tt.repriced === 1 && tt.handPriced === 1 && tt.sections[0].items[0].price === at(80, 0.22) && tt.sections[0].items[1].price === at(80, 0.3),
     "#254 repriceForTier: tier → tier re-prices only the lines at the previous tier's margin");
 
   // Nothing seeded → the same array back; an untouched section keeps its reference.
   const none = t254Reprice([sec("sys1", [line(1, 100, 150)])], 0.3, 0.2);
-  ok(none.repriced === 0 && none.kept === 1, "#254 repriceForTier: no seeded line → 0 re-priced (no banner)");
+  ok(none.repriced === 0 && none.handPriced === 1, "#254 repriceForTier: no seeded line → 0 re-priced (no banner)");
   const two = [sec("a", [line(1, 100, 150)]), sec("b", [line(2, 100, at(100, 0.3))])];
   const twoR = t254Reprice(two, null, 0.2);
   ok(twoR.sections[0] === two[0] && twoR.sections[1] !== two[1], "#254 repriceForTier: a section with nothing re-priced keeps its reference");
 
   // Fixture lines are priced from their assembly, never the tier: untouched, not counted.
   const fx = t254Reprice([sec("sys1", [line(1, 100, at(100, 0.3), { fixture: true }), line(2, 100, at(100, 0.3))])], null, 0.2);
-  ok(fx.repriced === 1 && fx.kept === 0 && fx.sections[0].items[0].price === at(100, 0.3),
+  ok(fx.repriced === 1 && fx.handPriced === 0 && fx.untouched === 1 && fx.sections[0].items[0].price === at(100, 0.3),
     "#254 repriceForTier: a fixture line (assembly-priced) is never re-priced and not counted as hand-priced");
 
   // Curtain lines: cost + sell from computeCurtain at the tier margin → re-seed through the same math.
@@ -33510,12 +33511,12 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   const lab27 = t254BuildLabor(t254ComputeLabor(draft("27"), rate), "Rigging", () => ++n254).map((x) => ({ ...x }));
   const lab20 = t254BuildLabor(t254ComputeLabor(draft("20"), rate), "Rigging", () => ++n254);
   const labR = t254Reprice([{ ...sec("sys2", lab27), kind: "labor" }], 0.274, 0.2);
-  ok(lab27.length >= 3 && labR.repriced === lab27.length && labR.kept === 0,
+  ok(lab27.length >= 3 && labR.repriced === lab27.length && labR.handPriced === 0,
     `#254 repriceForTier: every labor line built at the tier's 27% (stamp 27.4%) is re-priced, incl. the drift-nudged last line (${labR.repriced}/${lab27.length})`);
   ok(labR.sections[0].items.every((x, i) => x.price === at(x.cost, 0.2) && Math.abs(x.price - lab20[i].price) <= 0.05),
     "#254 repriceForTier: re-priced labor lands on cost ÷ (1 − 0.20), within the labor drift bound of a fresh 20% build");
   const labHand = t254Reprice([sec("sys2", lab27.map((x, i) => (i === 0 ? { ...x, price: t254R2(x.price + 25) } : x)))], 0.274, 0.2);
-  ok(labHand.kept === 1 && labHand.sections[0].items[0].price === t254R2(lab27[0].price + 25),
+  ok(labHand.handPriced === 1 && labHand.sections[0].items[0].price === t254R2(lab27[0].price + 25),
     "#254 repriceForTier: a labor line re-priced by hand in the modal (or typed) is kept");
   const lab30 = t254BuildLabor(t254ComputeLabor(draft("30"), rate), "Rigging", () => ++n254);
   ok(t254Reprice([sec("sys2", lab30)], null, 0.304).repriced === 0,
@@ -33530,11 +33531,11 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   const t254Client = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
   const t254Pure = readFileSync(join(process.cwd(), "src/app/(app)/estimator/tier-reprice.ts"), "utf8");
   const t254Persist = t254Client.slice(t254Client.indexOf("const persistMeta = "), t254Client.indexOf("const openTitle = "));
-  ok(/await updateQuoteMetaAction\(id, meta\)[\s\S]*tierMarginRef\.current = r\.tierMargin[\s\S]*applyTierStamp\(prevMargin, r\.tierMargin/.test(t254Persist),
-    "#254 wiring: persistMeta applies the helper when the meta action hands back a new stamp, against the stamp in effect before it");
+  ok(/await updateQuoteMetaAction\(id, meta\)/.test(t254Persist) && !/applyTierStamp|tierMargin/.test(t254Persist),
+    "#254 wiring (review): persistMeta no longer applies a tier stamp — picks resolve it through resolveTierFor");
   const t254Apply = t254Client.slice(t254Client.indexOf("const applyTierStamp = "), t254Client.indexOf("const persistMeta = "));
-  ok(/repriceForTier\(before, prev, next\)/.test(t254Apply) && /setSectionsState\(res\.sections\)/.test(t254Apply) && /res\.repriced === 0[\s\S]*setTierReprice\(null\)/.test(t254Apply),
-    "#254 wiring: applyTierStamp re-prices the latest sections, and no re-priced line means no banner");
+  ok(/repriceForTier\(before, prev, next\)/.test(t254Apply) && /setSectionsState\(res\.sections\)/.test(t254Apply) && /if \(res\.repriced === 0\) return;/.test(t254Apply),
+    "#254 wiring: applyTierStamp re-prices the latest sections, and no re-priced line means no new banner");
   ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
   ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);\s*setSectionsState\(v\);/.test(t254Client)
@@ -33641,4 +33642,120 @@ import {
   const s254Helper = s254Read("src/lib/tier-seed.ts");
   ok(!/from "@\/(lib\/stores|db)/.test(s254Helper) && /^import \{ PRICING_TIER_LABEL, type PricingTier \} from "@\/lib\/identity\/config";/m.test(s254Helper),
     "#254 client safety: tier-seed.ts imports only the import-free identity config");
+}
+
+
+/* ---- #254 review fixes — the tier applies to a new estimate and saves with its lines ----
+ * A customer/contact pick resolves the tier through the read-only
+ * resolveTierAction, saved quote or not, and re-prices through one client
+ * block. The stamp is persisted ONLY by saveQuoteAction (create and update),
+ * never by the header autosave. The banner names only hand-priced lines and
+ * says "Save to keep" until a Save carries the re-price. */
+{
+  const at = (cost: number, m: number) => t254R2(cost / (1 - m));
+  const sec = (items: T254Item[]): T254Sec => ({ id: "sys1", name: "sys1", kind: "materials", mfr: "", freightPct: 5, items });
+  const line = (id: number, cost: number, price: number, extra: Partial<T254Item> = {}): T254Item =>
+    ({ id, sku: "S" + id, desc: "Line " + id, qty: 1, unit: "ea", cost, price, ...extra });
+
+  // handPriced vs untouched.
+  const split = t254Reprice([sec([
+    line(1, 100, at(100, 0.3)), // seeded → re-priced
+    line(2, 100, 140), // off-seed sell → hand-priced
+    line(3, 100, at(100, 0.3), { extSellOverride: 999 }), // ext-sell override → hand-priced
+    line(4, 0, 0, { por: true }), // POR → untouched
+    line(5, 0, 42), // no cost → untouched
+    line(6, 100, at(100, 0.3), { fixture: true }), // fixture → untouched
+  ])], null, 0.2);
+  ok(split.repriced === 1 && split.handPriced === 2 && split.untouched === 3,
+    `#254 review: kept splits into handPriced (sell ≠ seed, ext-sell override) and untouched (POR / no cost / fixture) (got ${split.repriced}/${split.handPriced}/${split.untouched})`);
+  const onlyUntouched = t254Reprice([sec([line(1, 100, at(100, 0.3)), line(2, 0, 0, { por: true }), line(3, 0, 9)])], null, 0.2);
+  ok(onlyUntouched.handPriced === 0 && t254Msg(onlyUntouched.repriced, onlyUntouched.handPriced, "Gold", 0.2) === "Re-priced 1 line to Gold (20%)",
+    "#254 review: POR / no-cost lines never read as hand-priced — the kept clause is omitted at 0");
+
+  // Banner text: "Save to keep" while unsaved.
+  ok(t254Msg(14, 2, "Gold", 0.2, true) === "Re-priced 14 lines to Gold (20%) · kept 2 hand-priced lines · Save to keep"
+    && t254Msg(3, 0, "Silver", 0.22, true) === "Re-priced 3 lines to Silver (22%) · Save to keep"
+    && t254Msg(14, 2, "Gold", 0.2, false) === "Re-priced 14 lines to Gold (20%) · kept 2 hand-priced lines"
+    && t254Msg(14, 2, "Gold", 0.2) === t254Msg(14, 2, "Gold", 0.2, false),
+    "#254 review: the banner reads \"· Save to keep\" while the re-price is unsaved, and drops it once saved");
+
+  // Structural — client.
+  const c = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const between = (a: string, b: string) => c.slice(c.indexOf(a), c.indexOf(b, c.indexOf(a)));
+  const apply = between("const applyTierStamp = ", "const tierResolveSeqRef = ");
+  ok(/if \(res\.repriced === 0\) return;/.test(apply) && !/setTierReprice\(null\)/.test(apply),
+    "#254 review: a later resolution that re-prices 0 lines leaves an existing banner (and its Undo) alone");
+  ok(/handPriced: res\.handPriced/.test(apply) && /unsaved: true/.test(apply) && /seq: \+\+tierRepriceSeqRef\.current/.test(apply),
+    "#254 review: a re-price opens the banner unsaved, counting only hand-priced lines");
+  const resolveFor = between("const resolveTierFor = ", "const undoTierReprice = ");
+  ok(/await resolveTierAction\(custId, contact\)/.test(resolveFor) && !/loadedId/.test(resolveFor)
+    && /if \(seq !== tierResolveSeqRef\.current \|\| !r\.ok\) return;/.test(resolveFor)
+    && /const prev = tierMarginRef\.current;\s*tierMarginRef\.current = r\.tierMargin;\s*setTierMargin\(r\.tierMargin\);\s*applyTierStamp\(prev, r\.tierMargin, r\.pricingTier\);/.test(resolveFor),
+    "#254 review: one shared block resolves the tier with no saved-quote gate, applies only the latest ok result, and re-prices from the stamp in effect");
+  const pickC = between("const pickCustomer = ", "const pickVenue = ");
+  const pickP = between("const pickContact = ", "const onQuoteNote = ");
+  ok(/resolveTierFor\(id \|\| null, contact\)/.test(pickC) && /resolveTierFor\(customerId, name \|\| ""\)/.test(pickP),
+    "#254 review: pickCustomer and pickContact always resolve through the shared block — a new (unsaved) estimate gets its tier");
+  ok((c.match(/applyTierStamp\(/g) || []).length === 1 && (c.match(/resolveTierAction\(/g) || []).length === 1,
+    "#254 review: applyTierStamp has exactly one caller (the shared block), which is the only resolveTierAction call");
+  const save = between("const doSave = () => {", "const changeStatus = ");
+  ok(/const repriceSeqAtSave = tierRepriceSeqRef\.current;/.test(save)
+    && /if \(res\.ok\) \{[\s\S]{0,300}setTierReprice\(\(n\) => \(n && n\.unsaved && n\.seq <= repriceSeqAtSave \? \{ \.\.\.n, unsaved: false \} : n\)\)/.test(save),
+    "#254 review: a successful Save clears \"Save to keep\" only for a re-price it carried");
+  ok(/tierRepriceMessage\(tierReprice\.repriced, tierReprice\.handPriced, tierReprice\.label, tierReprice\.margin, tierReprice\.unsaved\)/.test(c),
+    "#254 review: the banner renders handPriced and the unsaved state");
+  ok(!/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(c), "#254 review: the client still imports no store/db value");
+
+  // Structural — server actions.
+  const act = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  const fn = (name: string) => act.slice(act.indexOf(`export async function ${name}(`)).split(/\nexport async function /)[0];
+  const meta = fn("updateQuoteMetaAction");
+  ok(!/pricingTier|tierMargin|resolveTier/.test(meta.replace(/\/\/[^\n]*/g, "")),
+    "#254 review: the header autosave (updateQuoteMetaAction) no longer resolves or persists the tier stamp");
+  const saveA = fn("saveQuoteAction");
+  ok(/const tier = await resolveTier\(payload\.customerId \|\| null, payload\.contactName \|\| ""\);/.test(saveA)
+    && /pricingTier: tier\.tier,\s*tierMargin: tier\.margin,/.test(saveA)
+    && /create\(\{ \.\.\.patch, owner: user\.name \}\)/.test(saveA) && /update\(loadedId, \{ \.\.\.patch, vendorQuotes: storedVendorQuotes \}/.test(saveA),
+    "#254 review: saveQuoteAction stamps the tier server-side into the one patch both create and update write");
+  const rta = fn("resolveTierAction");
+  ok(/await requireUser\(\)/.test(rta) && /resolveTier\(/.test(rta) && /ok: true, pricingTier: r\.tier, tierMargin: r\.margin, label:/.test(rta)
+    && !/\b(update|create|upsert)\(/.test(rta),
+    "#254 review: resolveTierAction is read-only — requireUser → resolveTier → { pricingTier, tierMargin, label }");
+}
+
+async function tier254SaveStampAsyncChecks(): Promise<void> {
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const CO = fixtureId(254, "save-stamp-co");
+  const at = (cost: number, m: number) => t254R2(cost / (1 - m));
+  try {
+    await upsertCustomer({ id: CO, name: "Test254 Save Stamp Co", type: "Education", pricingTier: "gold", locations: [], contacts: [] });
+    // A NEW estimate: lines seeded at the 0.30 fallback, then the customer
+    // is picked — the client re-prices against the resolution…
+    const gold = await resolveTier(CO, "");
+    ok(gold.tier === "gold" && gold.margin > 0 && gold.margin < 0.3, `#254 review: a gold company resolves to gold (${gold.margin})`);
+    const seeded: T254Sec[] = [{ id: "s1", name: "s1", kind: "materials", mfr: "", freightPct: 5, items: [
+      { id: 1, sku: "A", desc: "A", qty: 2, unit: "ea", cost: 100, price: at(100, 0.3) },
+      { id: 2, sku: "B", desc: "B", qty: 1, unit: "ea", cost: 100, price: 175 },
+    ] }];
+    const rp = t254Reprice(seeded, null, gold.margin);
+    ok(rp.repriced === 1 && rp.handPriced === 1, "#254 review: the unsaved estimate's seeded line re-prices on the pick");
+    // …and the first save writes the stamp in the same create as the lines.
+    const created = await QuoteStore.create({ name: "Test254 save stamp", customerId: CO, source: "estimator",
+      pricingTier: gold.tier, tierMargin: gold.margin, spec: { sections: rp.sections, mobs: [] } } as Parameters<typeof QuoteStore.create>[0]);
+    registerFixture("quotes", created.id);
+    const q1 = await QuoteStore.get(created.id);
+    ok(q1?.pricingTier === "gold" && q1?.tierMargin === gold.margin, "#254 review: a create save stamps the tier (was: no stamp until a later meta edit)");
+    const lines = ((q1?.spec as { sections?: T254Sec[] } | undefined)?.sections || [])[0]?.items || [];
+    ok(lines[0]?.price === at(100, gold.margin), "#254 review: the saved lines sit at the saved stamp's margin");
+    // Reopen: the stamp in effect IS the lines' margin, so the next tier change moves them.
+    const base = await resolveTier(null, "");
+    const again = t254Reprice(((q1?.spec as { sections: T254Sec[] }).sections), q1?.tierMargin ?? null, base.margin);
+    ok(again.repriced === 1 && again.sections[0].items[0].price === at(100, base.margin),
+      "#254 review: reopened, the saved stamp matches its lines — the next tier change re-prices them");
+    // An update save re-stamps from the customer being saved.
+    const q2 = await QuoteStore.update(created.id, { customerId: null, pricingTier: base.tier, tierMargin: base.margin, spec: { sections: again.sections, mobs: [] } } as Parameters<typeof QuoteStore.update>[1]);
+    ok(q2?.pricingTier === base.tier && q2?.tierMargin === base.margin, "#254 review: an update save re-stamps the tier with its lines");
+  } finally {
+    await removeCustomer(CO);
+  }
 }

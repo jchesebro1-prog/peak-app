@@ -48,6 +48,7 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import type { ReviewLimitChipData } from "@/lib/review-limits";
 
 export async function saveEstimatorCustomPartAction(input: {
@@ -369,6 +370,13 @@ export async function saveQuoteAction(
   if (priced.adjusted) {
     console.warn("[estimator] saveQuoteAction: posted value", payload.value, "≠ recomputed", priced.value, "— stored the recomputed value");
   }
+  // #254 review: the tier stamp is persisted ONLY with the lines, here, on
+  // create and update alike — resolved server-side from the customer +
+  // contact being saved (never trusted from the client). The Estimator
+  // re-prices its lines against the same resolution (resolveTierAction), so
+  // the stamp and the lines it seeded always land in the same write.
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const tier = await resolveTier(payload.customerId || null, payload.contactName || "");
   // `status` is deliberately NOT one of these fields — see the loadedId
   // branch below (security review, 2026-09-25): quotes.update() is an
   // unguarded field merge with no approval gate, no history stamp, and no
@@ -386,6 +394,8 @@ export async function saveQuoteAction(
     category: (payload.category || "").trim(),
     value: priced.value,
     margin: priced.margin,
+    pricingTier: tier.tier,
+    tierMargin: tier.margin,
     source: savedSource,
     spec: { sections: savedSections, mobs: payload.mobs },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
@@ -713,7 +723,7 @@ export async function updateQuoteMetaAction(
     category?: string;
     name?: string;
   }
-): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number; pdf?: QuotePdfView | null }> {
+): Promise<{ ok: boolean; pdf?: QuotePdfView | null }> {
   await requireUser();
   if (!id) return { ok: false };
   // Allowlist the header fields only — never forward the raw client object.
@@ -733,25 +743,10 @@ export async function updateQuoteMetaAction(
   // #160: the click-to-edit Estimator title. Blank never clears a name.
   if (typeof meta.name === "string" && meta.name.trim()) patch.name = meta.name.trim();
 
-  // Item 11 (D87): a customer/contact change re-resolves the pricing tier
-  // SERVER-side (never trusted from the client) and re-stamps the quote.
-  // The stamp SEEDS pricing tools; it never rewrites existing line prices.
-  let stamped: { pricingTier: string; tierMargin: number } | null = null;
-  if ("customerId" in meta || typeof meta.contactName === "string") {
-    const { get: getQuote } = await import("@/lib/stores/quotes");
-    const cur = await getQuote(id);
-    const effCustomerId =
-      "customerId" in meta ? (meta.customerId ?? null) : (cur?.customerId ?? null);
-    const effContact =
-      typeof meta.contactName === "string"
-        ? meta.contactName
-        : ((cur as { contactName?: string } | null)?.contactName ?? "");
-    const { resolveTier } = await import("@/lib/pricing-tiers");
-    const r = await resolveTier(effCustomerId, effContact);
-    patch.pricingTier = r.tier;
-    patch.tierMargin = r.margin;
-    stamped = { pricingTier: r.tier, tierMargin: r.margin };
-  }
+  // #254 review: the tier stamp is NOT written here any more. It is saved
+  // only with the lines (saveQuoteAction), so a header autosave can never
+  // leave a stamp that the stored lines weren't re-priced to. The Estimator
+  // resolves the tier for display/re-pricing through resolveTierAction.
 
   const q = await update(id, patch);
   // #222 fix wave 1: header fields print on the customer document — a write
@@ -760,7 +755,28 @@ export async function updateQuoteMetaAction(
   // The preview takes the scheduled state back so it shows "Updating PDF…".
   const pdf = q && q.contentChangedAt === q.updatedAt ? await scheduleQuotePdf(q.id) : undefined;
   refresh();
-  return { ok: !!q, ...(stamped ?? {}), ...(pdf ? { pdf } : {}) };
+  return { ok: !!q, ...(pdf ? { pdf } : {}) };
+}
+
+/**
+ * #254 review — read-only: the pricing tier a customer + contact resolves to
+ * (contact's own tier → company tier → Base), for the Estimator to re-price
+ * against on a pick, saved quote or not. Writes nothing: the stamp is
+ * persisted only with the lines, by saveQuoteAction.
+ */
+export async function resolveTierAction(
+  customerId: string | null,
+  contactName: string
+): Promise<{ ok: true; pricingTier: string; tierMargin: number; label: string } | { ok: false }> {
+  await requireUser();
+  try {
+    const { resolveTier } = await import("@/lib/pricing-tiers");
+    const r = await resolveTier(typeof customerId === "string" && customerId ? customerId : null, typeof contactName === "string" ? contactName : "");
+    return { ok: true, pricingTier: r.tier, tierMargin: r.margin, label: PRICING_TIER_LABEL[r.tier] || r.tier };
+  } catch (e) {
+    console.error("[estimator] resolveTierAction failed:", e);
+    return { ok: false };
+  }
 }
 
 export async function setStatusAction(

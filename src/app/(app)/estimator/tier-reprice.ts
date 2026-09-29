@@ -25,8 +25,11 @@ import type { SpecItem, SpecSection } from "./types";
  *   within LABOR_REPRICE_TOLERANCE.
  * - fixture (addFixture → fixtureBomLine) — sell is the assembly's own
  *   component list prices, never the tier; left alone and not counted.
- * - kept as hand-priced: an ext-sell override, a POR line, a line with no
- *   cost, or a sell that doesn't match the previous tier's seed.
+ * - kept, hand-priced: an ext-sell override, or a sell that doesn't match
+ *   the previous tier's seed. The banner names these.
+ * - kept, untouched: a POR line, a line with no cost, or a fixture — never
+ *   tier-priced in the first place, so the banner doesn't count them as
+ *   hand-priced (#254 review).
  */
 
 /** The client's fallback when no tier margin is stamped (addPart & co). */
@@ -53,28 +56,32 @@ export type TierRepriceResult = {
   /** The same array (by reference) when nothing was re-priced. */
   sections: SpecSection[];
   repriced: number;
-  kept: number;
+  /** Lines someone priced by hand (an ext-sell override, or a sell off the
+   *  previous seed) — the banner's "kept N hand-priced lines". */
+  handPriced: number;
+  /** Lines the tier never priced (POR, no cost, fixtures) — not in the banner. */
+  untouched: number;
 };
 
-type Verdict = { kind: "reprice"; price: number } | { kind: "kept" } | { kind: "skip" };
+type Verdict = { kind: "reprice"; price: number } | { kind: "hand" } | { kind: "untouched" } | { kind: "skip" };
 
 function classify(it: SpecItem, prev: number | null, next: number): Verdict {
-  if (it.fixture) return { kind: "skip" };
-  if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return { kind: "kept" };
-  if (it.por) return { kind: "kept" };
-  if (!(it.cost > 0)) return { kind: "kept" };
+  if (it.fixture) return { kind: "untouched" };
+  if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return { kind: "hand" };
+  if (it.por) return { kind: "untouched" };
+  if (!(it.cost > 0)) return { kind: "untouched" };
   if (it.labor) {
     const from = laborSeedMarginOf(prev);
     const to = laborSeedMarginOf(next);
     if (from === to) return { kind: "skip" };
     return Math.abs(it.price - sellAt(it.cost, from)) <= LABOR_REPRICE_TOLERANCE + 1e-9
       ? { kind: "reprice", price: sellAt(it.cost, to) }
-      : { kind: "kept" };
+      : { kind: "hand" };
   }
   const from = seedMarginOf(prev);
   return Math.abs(it.price - sellAt(it.cost, from)) <= TIER_REPRICE_TOLERANCE + 1e-9
     ? { kind: "reprice", price: sellAt(it.cost, next) }
-    : { kind: "kept" };
+    : { kind: "hand" };
 }
 
 /**
@@ -87,16 +94,19 @@ export function repriceForTier(
   prev: number | null | undefined,
   next: number | null | undefined
 ): TierRepriceResult {
-  if (next == null || !Number.isFinite(next) || !(next > 0 && next < 1)) return { sections, repriced: 0, kept: 0 };
+  const nothing = { sections, repriced: 0, handPriced: 0, untouched: 0 };
+  if (next == null || !Number.isFinite(next) || !(next > 0 && next < 1)) return nothing;
   const prevM = prev != null && Number.isFinite(prev) && prev > 0 && prev < 1 ? prev : null;
-  if (seedMarginOf(prevM) === next) return { sections, repriced: 0, kept: 0 };
+  if (seedMarginOf(prevM) === next) return nothing;
   let repriced = 0;
-  let kept = 0;
+  let handPriced = 0;
+  let untouched = 0;
   const out = sections.map((sec) => {
     let changed = false;
     const items = sec.items.map((it) => {
       const v = classify(it, prevM, next);
-      if (v.kind === "kept") kept++;
+      if (v.kind === "hand") handPriced++;
+      if (v.kind === "untouched") untouched++;
       if (v.kind !== "reprice") return it;
       repriced++;
       if (v.price === it.price) return it;
@@ -105,14 +115,24 @@ export function repriceForTier(
     });
     return changed ? { ...sec, items } : sec;
   });
-  return { sections: repriced ? out : sections, repriced, kept };
+  return { sections: repriced ? out : sections, repriced, handPriced, untouched };
 }
 
-/** "Re-priced 14 lines to Gold (20%) · kept 2 hand-priced lines" — the
- *  banner's text (the Undo button follows it). Internal only. */
-export function tierRepriceMessage(repriced: number, kept: number, tierLabel: string, margin: number): string {
+/** "Re-priced 14 lines to Gold (20%) · kept 2 hand-priced lines · Save to
+ *  keep" — the banner's text (the Undo button follows it). Only hand-priced
+ *  lines are named; "Save to keep" shows until a Save persists the re-price
+ *  (the tier stamp is saved only with the lines). Internal only. */
+export function tierRepriceMessage(
+  repriced: number,
+  handPriced: number,
+  tierLabel: string,
+  margin: number,
+  unsaved = false
+): string {
   const pct = Math.round(margin * 1000) / 10;
   const lines = (n: number) => n + (n === 1 ? " line" : " lines");
-  const head = "Re-priced " + lines(repriced) + " to " + tierLabel + " (" + pct + "%)";
-  return kept > 0 ? head + " · kept " + kept + " hand-priced " + (kept === 1 ? "line" : "lines") : head;
+  let msg = "Re-priced " + lines(repriced) + " to " + tierLabel + " (" + pct + "%)";
+  if (handPriced > 0) msg += " · kept " + handPriced + " hand-priced " + (handPriced === 1 ? "line" : "lines");
+  if (unsaved) msg += " · Save to keep";
+  return msg;
 }

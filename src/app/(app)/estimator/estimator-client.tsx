@@ -19,6 +19,7 @@ import {
   moveSystemToEstimateAction,
   requestChangesAction,
   resolveCatalogSkusAction,
+  resolveTierAction,
   saveQuoteAction,
   searchQuotesAction,
   sendToCustomerAction,
@@ -405,10 +406,18 @@ export default function EstimatorClient({
   const [tierReprice, setTierReprice] = useState<{
     before: SpecSection[];
     repriced: number;
-    kept: number;
+    /** Only hand-priced lines are named; POR / no-cost / fixtures aren't. */
+    handPriced: number;
     label: string;
     margin: number;
+    /** "· Save to keep" until a Save that started after this re-price
+     *  succeeds — the stamp is persisted only with the lines. */
+    unsaved: boolean;
+    seq: number;
   } | null>(null);
+  /** Bumped on every re-price, so a Save only clears the "Save to keep" of
+   *  a re-price it actually carried. */
+  const tierRepriceSeqRef = useRef(0);
   /** Every user edit to the sections goes through here, so the next edit
    *  clears the #254 banner (its Undo would otherwise restore over it). The
    *  tier re-price itself, Undo, and the automatic freight re-apply write
@@ -805,21 +814,45 @@ export default function EstimatorClient({
   /* ---------------- persistence ---------------- */
   /** #254 (D87 amended) — re-price the lines still at `prev`'s margin to
    *  `next`, keep hand-priced ones, and say so with Undo. The normal Save
-   *  persists it; no re-priced line → no banner (the silent stamp). */
+   *  persists it; no re-priced line → no new banner (the silent stamp), and
+   *  a banner already showing (with its Undo) stays. */
   const applyTierStamp = (prev: number | null, next: number, tier: string | null) => {
     const before = sectionsRef.current;
     const res = repriceForTier(before, prev, next);
-    if (res.repriced === 0) {
-      setTierReprice(null);
-      return;
-    }
+    if (res.repriced === 0) return;
+    sectionsRef.current = res.sections;
     setSectionsState(res.sections);
     setTierReprice({
       before,
       repriced: res.repriced,
-      kept: res.kept,
+      handPriced: res.handPriced,
       label: (tier && PRICING_TIER_LABEL[tier as PricingTier]) || tier || "Base",
       margin: next,
+      unsaved: true,
+      seq: ++tierRepriceSeqRef.current,
+    });
+  };
+  /** #254 review — the ONE place a customer/contact pick applies its tier,
+   *  saved quote or not: resolve server-side (read-only), then move the stamp
+   *  in effect and re-price against it. Only the latest pick lands, and only
+   *  a resolution that came back ok. Nothing is persisted here — Save stamps
+   *  the tier together with the re-priced lines. */
+  const tierResolveSeqRef = useRef(0);
+  const resolveTierFor = (custId: string | null, contact: string) => {
+    const seq = ++tierResolveSeqRef.current;
+    startTransition(async () => {
+      let r: Awaited<ReturnType<typeof resolveTierAction>>;
+      try {
+        r = await resolveTierAction(custId, contact);
+      } catch (e) {
+        console.error("[estimator] resolveTierAction threw:", e);
+        return;
+      }
+      if (seq !== tierResolveSeqRef.current || !r.ok) return;
+      const prev = tierMarginRef.current;
+      tierMarginRef.current = r.tierMargin;
+      setTierMargin(r.tierMargin);
+      applyTierStamp(prev, r.tierMargin, r.pricingTier);
     });
   };
   /** Undo puts back the exact sections from before the re-price; the new
@@ -835,14 +868,9 @@ export default function EstimatorClient({
     const id = loadedId;
     startTransition(async () => {
       const r = await updateQuoteMetaAction(id, meta);
-      // Customer/contact changes re-stamp the tier server-side (item 11);
-      // #254: lines still at the previous tier's margin follow the new one.
-      if (r && typeof r.tierMargin === "number") {
-        const prevMargin = tierMarginRef.current;
-        tierMarginRef.current = r.tierMargin;
-        setTierMargin(r.tierMargin);
-        applyTierStamp(prevMargin, r.tierMargin, r.pricingTier ?? null);
-      }
+      // #254 review: the header autosave never carries the tier stamp — a
+      // pick resolves it through resolveTierFor, and Save persists it with
+      // the re-priced lines.
       if (r && r.ok) {
         setSavedDoc((d) => withSavedMeta(d, meta));
         if (r.pdf) setPdf(r.pdf);
@@ -916,6 +944,7 @@ export default function EstimatorClient({
 
   const doSave = () => {
     const docAtSave = docInput;
+    const repriceSeqAtSave = tierRepriceSeqRef.current;
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
       : custName;
@@ -981,6 +1010,9 @@ export default function EstimatorClient({
           if (res.stage) setStage(res.stage);
         }
         if (res.ok) {
+          // #254: this save carried the re-price (and the server stamped the
+          // tier with it) — the banner stops asking to Save.
+          setTierReprice((n) => (n && n.unsaved && n.seq <= repriceSeqAtSave ? { ...n, unsaved: false } : n));
           setActionError(null);
           // #180 review 3 — a stale tab's status got silently refreshed;
           // shown alongside "Saved ✓", never implying the save failed.
@@ -1186,6 +1218,7 @@ export default function EstimatorClient({
       setCustName(name);
       setContactName(contact);
       persistMeta({ customerId: id || null, locationId: locId, customer: name, contactName: contact });
+      resolveTierFor(id || null, contact);
       reapplyAutoTrips(id || null, locId);
       reapplyAutoFreight(id || null, locId);
     });
@@ -1202,6 +1235,7 @@ export default function EstimatorClient({
     guardWonMeta("contact", () => {
       setContactName(name || "");
       persistMeta({ contactName: name || "" });
+      resolveTierFor(customerId, name || "");
     });
   };
   const onQuoteNote = (v: string) => {
@@ -2771,7 +2805,7 @@ export default function EstimatorClient({
               }}
             >
               <span>
-                {tierRepriceMessage(tierReprice.repriced, tierReprice.kept, tierReprice.label, tierReprice.margin)}
+                {tierRepriceMessage(tierReprice.repriced, tierReprice.handPriced, tierReprice.label, tierReprice.margin, tierReprice.unsaved)}
                 {" · "}
                 <button
                   type="button"
