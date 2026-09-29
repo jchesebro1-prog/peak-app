@@ -9385,3 +9385,38 @@ could also do the department tree long term but for now I think the first approa
 
 **Follow-ups (not built).** Nested sub-departments, per-department hero images uploaded by staff, and reordering
 categories inside a department were all explicitly out of scope (the original spec). See D442–D445.
+
+## 253. Spec Library records — Jeff's individually-written specs as a library the builder matches against — DONE 2026-09-28 (D446–D456)
+
+**Reported:** Jeff (2026-09-28): the Spec Library v1 workbook (46 specs — products, vendor items, systems and a
+companion) should be the source the spec builder prints from, matched to quote lines by part number, wildcard or
+system key. Brainstorm answers Q1–Q5 are logged in D447–D451.
+
+**Done.**
+- **Records + revisions:** `spec_records` / `spec_record_revisions` (migration 0033), one write path with an
+  append-only history and non-destructive Restore; kept by the go-live wipe (D446).
+- **Matching:** pinned → exact part number → `#` wildcard (one digit 1–5) → system match key → legacy catalog
+  text → no match with candidates (never auto-assigned); ambiguity and draft-only hits reported; one part
+  number → one ready record, enforced everywhere a record is written (D452).
+- **BOM seam:** rows carry part number / manufacturer / spec key / description, vendor quotes expand into their
+  material lines, allowance rows are kept, row identity computed on the server (D451).
+- **Builder:** matched records print as lettered entries under their Part 2 article, companions once, a sixth
+  outline level "(1)" (D448), `[bracket]` job values (D453), a final ITEMS NOT SPECIFIED article for waived rows
+  (D454); Link / Write new (saves `ready`) / Waive / Pin, project-only overrides vs. library updates, and a
+  "Library changed since your last download" flag from the per-download stamp (D447, D449).
+- **Library screen:** records are the default view of `/design/specs/library` (old content at
+  `?view=sections`), an editor with revision history and Restore, server-allocated spec ids, Import / Export
+  .xlsx in the workbook's own layout, plus `scripts/import-spec-library.ts` (D450, D455).
+- **Spec key at the source:** a Spec select on estimator custom and curtain lines and the custom-part form, and
+  an optional Spec override in the Grid curtain dialog, with the derived curtain key shown as "Auto: …" (D456).
+
+**Jeff-gated.**
+- Import the v1 library on production: `npm run db:export` first, then Design → Specs → Library → Import .xlsx
+  (`docs/specs-seed/spec-library-v1/Peak Spec Library v1.xlsx`), then build a spec from a real quote.
+- Part 1/3 boilerplate content, and the Parking-lot specs.
+
+**Follow-ups (not built).**
+- `[FILL IN: …]` inside record text needs a key scheme that can't collide with `${specId}#n` job values (D453).
+- Job-value answers orphaned by a library text edit aren't reported.
+- Two concurrent creates in one section can race the spec-id allocation (the save re-checks and retries once).
+- Ambiguity is detected only among `ready` records, not among drafts.

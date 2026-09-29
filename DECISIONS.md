@@ -7536,3 +7536,111 @@ than offered empty. "Fixture assemblies" (the index's pseudo-category for fixtur
 keyword list, so it's suggested there automatically. "Start from suggestions" stays available any time the DRAFT
 department list is empty — not just on first load — so clearing the editor back to nothing brings the button
 back too (intentional, friendlier than a one-shot offer).
+
+## D446. Spec Library records — one record per product/system/companion in `spec_records`, every prior version in `spec_record_revisions`, one write path (#253, 2026-09-28)
+
+Jeff's Spec Library v1 workbook (`docs/specs-seed/spec-library-v1/`, 46 specs) is a table of individually-written
+specs, not the D254 section/article outline, so it lands as its own collection: `spec_records` (id = the `PS-…`
+spec id) plus an append-only `spec_record_revisions` (migration 0033), field names verbatim from the brief
+(`SpecRecord`, `src/lib/specs/records.ts`). `kind` is `product_catalog` / `product_vendor` / `system` /
+`companion`; `status` is `draft` / `ready` / `archived` — only `ready` prints, `archived` never matches, a `draft`
+is reported but never printed. There is one write path, `saveSpecRecord` (`src/lib/stores/spec-records.ts`):
+content-equal saves are a no-op, any real change copies the prior version into revisions and bumps `revision`,
+and **Restore** writes the old text as a new revision (history is never rewritten). `sourceArticleId` is the
+placement — a record prints as a lettered entry under that Part 2 article; the `article` text column is kept for
+the workbook round-trip only. Both collections are in `CONFIG_COLLECTIONS`, so the go-live "Clear demo data"
+wipe keeps the library.
+
+## D447. Saved specs stay live on library edits; each Word download stamps what it used (Jeff Q1, #253, 2026-09-28)
+
+Jeff (2026-09-28 brainstorm): a saved spec reads its records live — editing the library changes every open spec
+on its next preview or download, the same way Parts 1/3 already read live (D329). Each Word download stamps
+`usedRecords` (`{ specId: revision }`) and `downloadedAt` on the spec document, and the builder flags a row
+"Library changed since your last download" when a record's revision has moved since. The stamp runs in `after()`
+(`src/app/api/spec-documents/[id]/docx/route.ts` → `stampSpecDocumentDownload`) so it never delays or fails the
+download, and it never bumps the spec's `updatedAt`/`updatedBy`.
+
+## D448. D330's real Word numbering is kept; a sixth body level "(1)" is added (Jeff Q2, #253, 2026-09-28)
+
+Jeff kept D330's single multi-level numbering definition. The hoist specs (PS-116123-008/009) nest one level
+deeper than the outline engine allowed, so `outline.ts` gains a sixth body level printed "(1)" — Word level 7,
+`(%8)` — in both the live preview and the `.docx`. Snapshot tests pin PS-260961-028, PS-260961-007 and
+PS-116123-008 (assembled lines and `document.xml`, golden + second-run identical).
+
+## D449. Specs written from the builder save as `ready`; "Write spec" now writes a Spec Library record; project-only edits are overrides (Jeff Q3, #253, 2026-09-28)
+
+Jeff: writing a spec in the builder *is* the review step (D259/D328), so a builder-written record saves `ready`
+immediately. The builder's **Write spec** now writes a Spec Library record (the catalog part editor's Spec panel
+keeps its legacy per-part editor unchanged). Each matched row offers **edit this project only** — stored on the
+spec document as `doc.overrides[specId] = { title, specText, baseRevision }`, flagged stale when the record's
+revision moves past `baseRevision` — or **update the library** (a new record revision; other specs' overrides are
+untouched). `pinRowToRecordAction` resolves an ambiguous row by pinning it to one record, and **Link** on a record
+that already holds the row's part number pins instead of adding a duplicate.
+
+## D450. The records table is the default view of Design → Specs → Library; the old content moves one click away (Jeff Q4, #253, 2026-09-28)
+
+Jeff: Spec Library records are the default view at `/design/specs/library` — a server-rendered table with search
+and kind / section / status / manufacturer filters in the URL. The existing sections/articles/templates content
+is unchanged at `?view=sections`. `/design/specs/library/records/[specId]` edits every field (kind-aware), with a
+why-note on save and a readable revision history with **Restore this version**; `/records/new` creates. Reads
+are `requireUser()`, writes `requirePerm("create")` (D260), and New / Import / Save / Restore are hidden without
+`create`. A new record's id is allocated on the server — `PS-<section digits>-<NNN+>` (pattern
+`/^PS-[0-9A-Za-z]+-\d{3,}$/`, at most 32 characters, checked on create only); editing an existing record never
+re-checks its id format, so imported ids stay editable.
+
+## D451. Vendor-quoted items stay vendor-only; the BOM seam expands vendor quotes and keeps allowance rows (Jeff Q5, #253, 2026-09-28)
+
+Jeff: a vendor-quoted item never auto-creates a catalog part — it matches a `product_vendor` record by its part
+number and nothing more. The BOM rows the builder reads (`bomFromQuote`, `src/lib/specs/quote-bom.ts`) now carry
+`mfrNumber` / `manufacturer` / `specKey` / `desc`; a vendor-quote roll-up line expands into its material lines'
+part numbers, and allowance or custom rows with no SKU are kept (they can still match by `specKey`). Row identity
+is `specRowKey` (`SKU:` / `MPN:` / `KEY:` / `DESC:` / `SPEC:`, `src/lib/specs/record-keys.ts`), computed on the
+server. Left-over reasons: a real SKU with no catalog part and no match is *not in catalog* (with candidates); a
+placeholder or empty SKU is *no match*; a catalog part with no text keeps its #205 reason plus candidates.
+
+## D452. Match order: pinned → exact part number → wildcard → system match key → legacy catalog text → no match; one part number, one ready record (#253, 2026-09-28)
+
+`record-match.ts` tries, in order: a pinned `specId`; an exact part number (the row's `mfrNumber`, its SKU, the
+SKU's text after `Mfr:`, then the catalog part's MPN/model — uppercase, whitespace-collapsed); a wildcard, where
+`#` matches exactly one digit `1`–`5`; a `system` record's match key (case- and dash-insensitive); the legacy
+catalog `specBody`; else *no match* with up to four candidates by word overlap (floor 0.1), never auto-assigned.
+Two or more `ready` records at one step is *ambiguous*; a draft-only hit reads "Has a draft spec — approve to
+use". Companions (`includeWith`) print once per section. One part number maps to one `ready` record, enforced on
+link, write-new, library save, approve and restore (pure `partNumberConflict` / `matchKeyConflict`), and the
+import planner refuses duplicates too.
+
+## D453. `[brackets]` in record text are per-job values keyed by spec id; `[FILL IN: …]` inside record text is deferred (#253, 2026-09-28)
+
+A `[bracketed]` phrase in a record's text is a job value: the builder lists it with the fill-ins, keyed
+`${specId}#n` in the spec's `fillIns` with the bracket text as its label (D332 staleness applies). Answered, the
+value prints; unanswered, the phrase prints as written; it is never written back to the library and never blocks
+a download. A `[FILL IN: …]` blank *inside record text* would collide with that key scheme, so for now it prints
+as written and the builder warns "<specId> has a [FILL IN] blank that can't be answered in the builder yet —
+edit the spec text."
+
+## D454. Waived rows print as a final "ITEMS NOT SPECIFIED" article — waived rows only (#253, 2026-09-28)
+
+A row the estimator deliberately waives (with a reason) prints as the section's last Part 2 article, ITEMS NOT
+SPECIFIED, one "<description> — <reason>" line each; in a table-style section it prints after the equipment
+table. Unmatched rows that were not waived do not print there — they stay on the builder's checklist, which
+warns without blocking (D331).
+
+## D455. Import/export is the exact "Spec Library" sheet; the production import is Jeff-gated (#253, 2026-09-28)
+
+`scripts/import-spec-library.ts` (dry run by default, `--commit`; a hosted target also needs `--yes`) and **Library → Import
+.xlsx** share one planner (`src/lib/specs/record-import.ts`); the server re-plans the uploaded file itself, and
+the server-action body limit makes about 1 MB the practical ceiling. A second import of the same file changes
+nothing (46 unchanged); records absent from a file are left alone. **Export .xlsx** writes the exact "Spec
+Library" sheet layout, so the workbook round-trips. The production import is Jeff's step: run `npm run
+db:export` first, then Library → Import .xlsx on production.
+
+## D456. `specKey` is set at the source — a Spec select on estimator custom/curtain lines, the custom-part form and the Grid curtain dialog (#253, 2026-09-28)
+
+A line with no catalog part number (acoustic shell, pit filler, drapes, hoists) matches a `system` record through
+`SpecItem.specKey` / `GridCurtain.specKey`. The options are every non-archived system record's match key
+(`systemMatchKeys`, `src/lib/specs/records.ts`), read on the server by the estimator and Grid pages and passed
+down as plain strings, so no client file imports the records store. The shared select
+(`src/components/spec-key-select.tsx`) shows "— none —" as its empty option; on a curtain, the empty option reads
+"Auto: <derived key>" from `curtainSpecKey` (the estimator from the line's description, the Grid from type +
+name), which is what the builder uses when no key is picked. An estimator curtain add defaults its key from the
+curtain name. The builder never writes a key back onto a quote line (out of scope, design §9).

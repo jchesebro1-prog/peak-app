@@ -474,6 +474,29 @@ See `.env.example`.
     shows whenever the draft list is empty. Remaining is Jeff-gated: nothing
     shows in the portal until departments are actually set up. Punch item
     #252.
+24. ✅ **Spec Library records** (#253, D446–D456) — Jeff's Spec Library
+    v1 (46 individually-written specs) becomes `spec_records` + append-only
+    `spec_record_revisions` (migration 0033; one write path
+    `saveSpecRecord`, Restore = a new revision, kept by the go-live wipe),
+    matched to BOM rows by pinned id → exact part number → `#` wildcard
+    (one digit 1–5) → system match key → legacy catalog text → no match
+    with candidates (`src/lib/specs/record-match.ts`); one part number →
+    one ready record. The builder prints matched records under their Part 2
+    article (companions once, a sixth outline level "(1)", `[bracket]` job
+    values keyed `${specId}#n`, a final ITEMS NOT SPECIFIED article for
+    waived rows), offers Link / Write new (saves `ready`) / Waive / Pin and
+    project-only overrides vs. library updates, and flags "Library changed
+    since your last download" from a per-download stamp; saved specs read
+    the library live. Records are the default view of
+    `/design/specs/library` (old content at `?view=sections`) with an
+    editor, revision history, server-allocated `PS-…` ids and Import /
+    Export .xlsx in the workbook's own layout (plus
+    `scripts/import-spec-library.ts`). A Spec select sets `specKey` at the
+    source on estimator custom/curtain lines, the custom-part form and the
+    Grid curtain dialog ("Auto: …" shows the derived curtain key).
+    Remaining is Jeff-gated: import the v1 library on production after
+    `npm run db:export`, Part 1/3 boilerplate, Parking-lot specs. Punch
+    item #253.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
