@@ -289,6 +289,7 @@ export default function LeadDrawer({
   thread,
   visitReasons,
   customers,
+  canDelete = false,
 }: {
   mode: "new" | "detail";
   vm: DrawerDetailVM | null;
@@ -299,6 +300,7 @@ export default function LeadDrawer({
   thread: LeadThreadVM;
   visitReasons: string[];
   customers: LeadCustomerLiteVM[];
+  canDelete?: boolean;
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
@@ -1210,18 +1212,20 @@ export default function LeadDrawer({
                         </button>
                       </>
                     )}
-                    <ConfirmButton
-                      className="pk-btn-danger"
-                      label="Delete"
-                      confirmLabel="Confirm delete"
-                      style={{ marginLeft: "auto", fontSize: 12.5, padding: "11px 14px" }}
-                      onConfirm={() =>
-                        refresh(async () => {
-                          await deleteLeadAction(vm.id);
-                          router.push(closeHref);
-                        })
-                      }
-                    />
+                    {canDelete && (
+                      <ConfirmButton
+                        className="pk-btn-danger"
+                        label="Delete"
+                        confirmLabel="Confirm delete"
+                        style={{ marginLeft: "auto", fontSize: 12.5, padding: "11px 14px" }}
+                        onConfirm={() =>
+                          refresh(async () => {
+                            const res = await deleteLeadAction(vm.id);
+                            if (res.ok) router.push(closeHref);
+                          })
+                        }
+                      />
+                    )}
                   </div>
                 </>
               )}

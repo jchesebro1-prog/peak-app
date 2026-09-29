@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import {
   assign,
   convert,
@@ -298,10 +299,15 @@ export async function requestSiteVisitAction(
  * cascade-deleted: once created they can outlive the lead (a visit/survey
  * backfills customerId on convert, and surveys feed the venue-assessments
  * list independently — see markLostAction's comment above), so the lead
- * does not exclusively own them.
+ * does not exclusively own them. Gated on `create`, like deleting a design,
+ * consulting project, project or company (#280).
  */
-export async function deleteLeadAction(id: string) {
-  await requireUser();
+export async function deleteLeadAction(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false as const, error: "You can't delete leads." };
+  if (!id) return { ok: false as const, error: "Missing lead id." };
   await removeLead(id);
   revalidatePath("/", "layout");
   return { ok: true as const };
