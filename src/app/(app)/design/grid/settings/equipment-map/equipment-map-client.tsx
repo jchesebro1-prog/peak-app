@@ -1,19 +1,14 @@
 "use client";
 
-import { useRef, useState, useTransition, type CSSProperties } from "react";
+import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { EquipCellInput, EquipRowInput, EquipRowStatus } from "@/lib/design/equipment-map";
 import type { AssemblyOption, EquipCellVM, EquipRowVM } from "@/lib/design/equipment-map-view";
 import { FABRIC_RATE_UNIT } from "@/lib/curtain-geom";
-import {
-  clearEquipmentRowAction,
-  saveEquipmentRowAction,
-  searchEquipmentPartsAction,
-  suggestEquipmentPartsAction,
-  type EquipPartHit,
-} from "../actions";
+import { clearEquipmentRowAction, saveEquipmentRowAction, suggestEquipmentPartsAction } from "../actions";
+import { PartPicker } from "./part-picker";
 
 const TIERS: Array<{ key: TierKey; label: string }> = [
   { key: "good", label: "Good" },
@@ -236,7 +231,9 @@ function CellEditor({
         <option value="allowance">Allowance</option>
         <option value="none">Not included</option>
       </select>
-      {value?.kind === "part" && <PartPicker rowKey={rowKey} sku={value.sku} onPick={(sku) => onChange({ kind: "part", sku })} />}
+      {value?.kind === "part" && (
+        <PartPicker sku={value.sku} onPick={(sku) => onChange({ kind: "part", sku })} onSuggest={() => suggestEquipmentPartsAction(rowKey)} />
+      )}
       {value?.kind === "assembly" && (
         <select value={value.id} onChange={(e) => onChange({ kind: "assembly", id: e.target.value })} style={INPUT}>
           <option value="">Pick an assembly…</option>
@@ -275,58 +272,6 @@ function CellEditor({
           </label>
         </>
       )}
-    </div>
-  );
-}
-
-function PartPicker({ rowKey, sku, onPick }: { rowKey: string; sku: string; onPick: (sku: string) => void }) {
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState<EquipPartHit[]>([]);
-  const [note, setNote] = useState("");
-  const [pending, start] = useTransition();
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const search = (v: string) => {
-    setQ(v);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(
-      () =>
-        start(async () => {
-          const r = await searchEquipmentPartsAction(v);
-          setHits(r.hits);
-          setNote(r.hits.length ? `${r.total} match${r.total === 1 ? "" : "es"}${r.total > r.hits.length ? " — refine to narrow" : ""}` : "No matches");
-        }),
-      250
-    );
-  };
-  const suggest = () =>
-    start(async () => {
-      const r = await suggestEquipmentPartsAction(rowKey);
-      setHits(r.hits);
-      setNote(r.hits.length ? "Suggested matches" : "No suggestions — search instead");
-    });
-  return (
-    <div style={{ display: "grid", gap: 5 }}>
-      {sku && <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{sku}</div>}
-      <div style={{ display: "flex", gap: 6 }}>
-        <input value={q} onChange={(e) => search(e.target.value)} placeholder="Search SKU, description, maker…" style={{ ...INPUT, flex: 1 }} />
-        <button type="button" onClick={suggest} style={BTN}>Suggest</button>
-      </div>
-      {pending ? <div style={{ fontSize: 11, color: "#8c919c" }}>Searching…</div> : note && <div style={{ fontSize: 11, color: "#8c919c" }}>{note}</div>}
-      {hits.map((h) => (
-        <button
-          key={h.sku}
-          type="button"
-          onClick={() => {
-            onPick(h.sku);
-            setHits([]);
-            setNote("");
-          }}
-          style={{ ...BTN, textAlign: "left", fontWeight: 500, background: h.sku === sku ? "color-mix(in srgb, var(--accent) 10%, #fff)" : "#fff" }}
-        >
-          <span style={{ fontFamily: "var(--font-mono)" }}>{h.sku}</span> — {h.desc}
-          <span style={{ color: "#8c919c" }}> · {h.category} · cost {money(h.cost)} · list {money(h.list)}</span>
-        </button>
-      ))}
     </div>
   );
 }

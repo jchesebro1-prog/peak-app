@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { GROUPS, defaultOf, value } from "@/lib/stores/pricing";
@@ -151,10 +152,25 @@ export default async function EstimatingRulesPage() {
           </div>
         </div>
       ) : (
-        <RulesEditor
-          groups={groups}
-          venueDoctrine={resolveVenueDoctrine(settings?.venueDoctrine)}
-        />
+        <>
+          <Link
+            href="/estimating-rules/track-series"
+            className="pk-card er-noprint"
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 17px", marginBottom: 14, textDecoration: "none", color: "inherit" }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Track series</div>
+              <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 2 }}>
+                The catalog part for each piece of a track system (track, carriers, clamps, pulleys…) — what the track configurator prices from.
+              </div>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>Open →</span>
+          </Link>
+          <RulesEditor
+            groups={groups}
+            venueDoctrine={resolveVenueDoctrine(settings?.venueDoctrine)}
+          />
+        </>
       )}
     </div>
   );

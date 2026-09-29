@@ -10674,6 +10674,7 @@ seeded()
   .then(() => c255T14GridAsyncChecks())
   .then(() => c255StorSpacesAsyncChecks())
   .then(() => specLabelsAsyncChecks())
+  .then(() => track274AsyncChecks())
   .then(() => lift275AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -37372,4 +37373,354 @@ import { readFileSync as l272Read } from "node:fs";
   ok(legacyMobs.every((m) => !("milesAuto" in m)) && l272AutoTrips(legacyMobs, newNear)[0].milesRT === "342", "#272 #269: a draft saved before the flag reopens as typed and never changes on a route change");
   const modalSrc = l272Read("src/app/(app)/estimator/labor-modal.tsx", "utf8");
   ok(!modalSrc.includes("milesAuto"), "#272: the modal itself never touches the flag (helpers own it)");
+}
+
+/* ======================================================================
+   #274 Phase A — the track configurator's parts map + quantity engine
+   (docs/superpowers/specs/2026-09-29-track-configurator-design.md §1–§2):
+   src/lib/track-series.ts (pure: sanitize, can-be-active, required roles),
+   src/lib/track-engine.ts (pure: TrackConfig → rows), the settings-blob store
+   src/lib/stores/track-series.ts, and Estimating Rules → Track series
+   (/estimating-rules/track-series). Registered in the async chain as
+   track274AsyncChecks(). Every SKU below is a TEST274: fixture — no real
+   part number is seeded or invented.
+   ====================================================================== */
+import {
+  TRACK_ROLES as t274Roles,
+  TRACK_SERIES_BLOB as t274Blob,
+  activationProblems as t274Problems,
+  allocateTrackSeriesId as t274AllocId,
+  canBeActive as t274CanBeActive,
+  requiredRolesFor as t274Required,
+  sanitizeTrackSeries as t274Sanitize,
+  sanitizeTrackSeriesBlob as t274SanitizeBlob,
+  type TrackRole as T274Role,
+  type TrackSeries as T274Series,
+} from "@/lib/track-series";
+import { trackQuantities as t274Qty, trackLengthFt as t274Len, type TrackConfig as T274Config } from "@/lib/track-engine";
+import {
+  deleteTrackSeries as t274Delete,
+  getTrackSeries as t274Get,
+  listTrackSeries as t274List,
+  saveTrackSeries as t274Save,
+} from "@/lib/stores/track-series";
+import { getBlob as t274GetBlob } from "@/db/doc-store";
+
+const T274_ALL_PARTS: Partial<Record<T274Role, { sku: string }>> = Object.fromEntries(t274Roles.map((r) => [r, { sku: `P-${r}` }]));
+function t274Series(over: Partial<T274Series> = {}): T274Series {
+  return {
+    id: "adc-280", name: "ADC 280", manufacturer: "ADC", stickLengthFt: 10, curvedSectionFt: 5, minRadiusFt: 8,
+    carrierSpacingIn: 12, hangerSpacingFt: 5, overlapFt: 1, parts: { ...T274_ALL_PARTS }, active: true, ...over,
+  };
+}
+function t274Cfg(over: Partial<T274Config> = {}): T274Config {
+  return { seriesId: "adc-280", operation: "oneway", runFt: 40, curved: false, mounting: "batten", qty: 1, ...over };
+}
+/** Rows as a role → qty map (absent role = 0), for readable assertions. */
+function t274Map(cfg: T274Config, s: T274Series = t274Series()): Partial<Record<T274Role, number>> & { errors: string[] } {
+  const r = t274Qty(cfg, s);
+  const out: Partial<Record<T274Role, number>> & { errors: string[] } = { errors: r.errors };
+  for (const row of r.rows) out[row.role] = row.qty;
+  return out;
+}
+const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+// ---- engine: worked examples per operation ----
+{
+  const bp = t274Map(t274Cfg({ operation: "biparting" }));
+  ok(t274Eq(bp, { errors: [], track: 5, splice: 4, carrier: 38, masterCarrier: 2, endStop: 2, battenClamp: 10, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 122 }),
+    "#274 engine: bi-parting 40' straight batten — L 41 (1' overlap) → 5 sticks, 4 splices, 40 carriers less 2 masters, 2 end stops, 10 clamps, pulleys + floor block, 122' line");
+  const ow = t274Map(t274Cfg({ operation: "oneway", mounting: "ceiling" }));
+  ok(t274Eq(ow, { errors: [], track: 4, splice: 3, carrier: 39, masterCarrier: 1, endStop: 2, ceilingHanger: 9, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 120 }),
+    "#274 engine: one-way 40' straight ceiling — no overlap (L 40) → 4 sticks, 3 splices, 39 carriers + 1 master, 9 hangers, 120' line");
+  const wa = t274Map(t274Cfg({ operation: "walkalong" }));
+  ok(t274Eq(wa, { errors: [], track: 4, splice: 3, carrier: 39, masterCarrier: 1, endStop: 2, battenClamp: 9 }),
+    "#274 engine: walk-along 40' straight batten — no pulleys, floor block or operating line");
+  const cv = t274Map(t274Cfg({ operation: "biparting", curved: true, radiusFt: 10, runFt: 20, mounting: "ceiling" }));
+  ok(t274Eq(cv, { errors: [], curved: 5, splice: 4, carrier: 18, masterCarrier: 2, endStop: 2, ceilingHanger: 6, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 82 }),
+    "#274 engine: curved bi-parting 20' arc, R10, ceiling — L 21 → 5 curved sections (5'), 4 splices, 18 + 2 masters, 6 hangers, 82' line");
+  ok(t274Len(t274Cfg({ operation: "biparting", runFt: 30 }), t274Series()) === 31 && t274Len(t274Cfg({ operation: "oneway", runFt: 30 }), t274Series()) === 30,
+    "#274 trackLengthFt: the overlap is added on bi-parting only");
+}
+
+// ---- engine: every operation × straight/curved × batten/ceiling ----
+{
+  let allOk = true;
+  const bad: string[] = [];
+  for (const operation of ["biparting", "oneway", "walkalong"] as const)
+    for (const curved of [false, true])
+      for (const mounting of ["batten", "ceiling"] as const) {
+        const m = t274Map(t274Cfg({ operation, curved, mounting, radiusFt: curved ? 12 : undefined, runFt: 24 }));
+        const cord = operation !== "walkalong";
+        const good =
+          m.errors.length === 0 &&
+          (curved ? !!m.curved && !m.track : !!m.track && !m.curved) &&
+          (mounting === "batten" ? !!m.battenClamp && !m.ceilingHanger : !!m.ceilingHanger && !m.battenClamp) &&
+          m.endStop === 2 &&
+          m.masterCarrier === (operation === "biparting" ? 2 : 1) &&
+          (cord ? m.livePulley === 1 && m.deadPulley === 1 && m.floorBlock === 1 && (m.operatingLine ?? 0) > 0
+                : !m.livePulley && !m.deadPulley && !m.floorBlock && !m.operatingLine);
+        if (!good) { allOk = false; bad.push(`${operation}/${curved ? "curved" : "straight"}/${mounting}`); }
+      }
+  ok(allOk, `#274 engine: all 12 operation × straight/curved × batten/ceiling combos emit the right piece, mounting and cord roles (${bad.join(", ") || "none wrong"})`);
+}
+
+// ---- engine: stick rounding at exact multiples; overlap only on bi-parting ----
+{
+  const exact = t274Map(t274Cfg({ runFt: 30 }));
+  ok(exact.track === 3 && exact.splice === 2, "#274 engine: a 30' run on 10' sticks is exactly 3 sticks, 2 splices (no extra stick at an exact multiple)");
+  const noisy = t274Map(t274Cfg({ runFt: 30.3 }), t274Series({ stickLengthFt: 10.1 }));
+  ok(noisy.track === 3, "#274 engine: 30.3 / 10.1 is 3 sticks — float noise at an exact multiple doesn't round up");
+  const over = t274Map(t274Cfg({ runFt: 30.01 }));
+  ok(over.track === 4 && over.splice === 3, "#274 engine: just past a multiple (30.01') rounds up to 4 sticks");
+  const bpNoOverlap = t274Map(t274Cfg({ operation: "biparting", runFt: 20 }), t274Series({ overlapFt: 0 }));
+  ok(bpNoOverlap.track === 2, "#274 engine: bi-parting with overlap 0 — 20' is 2 sticks");
+  const bpOverlap = t274Map(t274Cfg({ operation: "biparting", runFt: 20 }));
+  ok(bpOverlap.track === 3 && bpOverlap.battenClamp === 6, "#274 engine: bi-parting with a 1' overlap — 21' is 3 sticks and ceil(21/5)+1 = 6 clamps");
+  const owOverlap = t274Map(t274Cfg({ operation: "oneway", runFt: 20 }));
+  const waOverlap = t274Map(t274Cfg({ operation: "walkalong", runFt: 20 }));
+  ok(owOverlap.track === 2 && waOverlap.track === 2 && owOverlap.battenClamp === 5, "#274 engine: one-way and walk-along never add the overlap (20' → 2 sticks, 5 clamps)");
+  const exactHangers = t274Map(t274Cfg({ runFt: 20, mounting: "ceiling" }));
+  ok(exactHangers.ceilingHanger === 5, "#274 engine: hangers at an exact multiple — ceil(20/5)+1 = 5");
+}
+
+// ---- engine: carriers, masters replacing carriers, tiny runs, spacing overrides ----
+{
+  const tinyBp = t274Map(t274Cfg({ operation: "biparting", runFt: 1 }));
+  ok(!tinyBp.carrier && tinyBp.masterCarrier === 2 && tinyBp.track === 1 && !tinyBp.splice,
+    "#274 engine: a 1' bi-parting run — 1 carrier less 2 masters floors at 0 (row omitted), 2 masters, 1 stick, no splice row");
+  const tinyOw = t274Map(t274Cfg({ runFt: 0.5 }));
+  ok(!tinyOw.carrier && tinyOw.masterCarrier === 1 && tinyOw.endStop === 2, "#274 engine: a 6\" one-way run — 1 carrier replaced by the master, end stops still 2");
+  const two = t274Map(t274Cfg({ runFt: 2 }));
+  ok(two.carrier === 1 && two.masterCarrier === 1, "#274 engine: a 2' one-way run — ceil(24/12) = 2 carriers, 1 is the master");
+  const odd = t274Map(t274Cfg({ runFt: 10.5 }));
+  ok(odd.carrier === 10, "#274 engine: carriers round up — ceil(126/12) = 11, less the master = 10");
+  const spaced = t274Map(t274Cfg({ runFt: 10, carrierSpacingIn: 6, hangerSpacingFt: 2 }));
+  ok(spaced.carrier === 19 && spaced.battenClamp === 6, "#274 engine: carrier/hanger spacing overrides replace the series defaults (6\" → 20 carriers; 2' → 6 clamps)");
+  const badOverride = t274Map(t274Cfg({ runFt: 10, carrierSpacingIn: 0, hangerSpacingFt: -1 }));
+  ok(badOverride.carrier === 9 && badOverride.battenClamp === 3, "#274 engine: a zero/negative spacing override falls back to the series default");
+  const seriesDefault = t274Map(t274Cfg({ runFt: 10 }), t274Series({ carrierSpacingIn: 8 }));
+  ok(seriesDefault.carrier === 14, "#274 engine: the carrier count reads the series' default spacing (8\" → ceil(120/8) = 15, less 1 master)");
+  const carriersFromRun = t274Map(t274Cfg({ operation: "biparting", runFt: 12 }), t274Series({ overlapFt: 6 }));
+  ok(carriersFromRun.carrier === 10, "#274 engine: carriers count off the run, not the overlapped length (12' → 12 carriers less 2 masters, even with a 6' overlap)");
+}
+
+// ---- engine: × qty ----
+{
+  const one = t274Qty(t274Cfg({ operation: "biparting" }), t274Series());
+  const three = t274Qty(t274Cfg({ operation: "biparting", qty: 3 }), t274Series());
+  ok(one.rows.length === three.rows.length && one.rows.every((r, i) => three.rows[i].role === r.role && three.rows[i].qty === r.qty * 3),
+    "#274 engine: qty 3 multiplies every row, operating line included");
+}
+
+// ---- engine: operating line ----
+{
+  ok(t274Map(t274Cfg({ runFt: 10 })).operatingLine === 60, "#274 engine: operating line defaults trim to 20' — ceil(2×10 + 2×20) = 60");
+  ok(t274Map(t274Cfg({ runFt: 10, trimFt: 15.5 })).operatingLine === 51, "#274 engine: operating line ceil(2L + 2·trim) — 10' run, 15.5' trim → 51'");
+  ok(t274Map(t274Cfg({ runFt: 10.2, trimFt: 0 })).operatingLine === 21, "#274 engine: trim 0 is allowed — ceil(20.4) = 21'");
+  ok(t274Map(t274Cfg({ operation: "biparting", runFt: 10, trimFt: 10 })).operatingLine === 42, "#274 engine: bi-parting line runs the overlapped length — ceil(2×11 + 2×10) = 42");
+  ok(!t274Map(t274Cfg({ operation: "walkalong", trimFt: 30 })).operatingLine, "#274 engine: walk-along ignores trim — no operating line at all");
+  ok(t274Map(t274Cfg({ trimFt: -1 })).errors.length === 1, "#274 engine: a negative trim is refused on a cord-operated track");
+  ok(t274Map(t274Cfg({ operation: "walkalong", trimFt: -1 })).errors.length === 0, "#274 engine: trim is not validated on a walk-along (it isn't used)");
+}
+
+// ---- engine: curved refusals + input refusals ----
+{
+  const noCurve = t274Qty(t274Cfg({ curved: true, radiusFt: 10 }), t274Series({ curvedSectionFt: undefined }));
+  ok(noCurve.rows.length === 0 && noCurve.errors.some((e) => /has no curved track/.test(e)), "#274 engine: curved is refused when the series has no curved section — no rows");
+  const tight = t274Qty(t274Cfg({ curved: true, radiusFt: 6 }), t274Series());
+  ok(tight.rows.length === 0 && tight.errors.some((e) => /too tight/.test(e)), "#274 engine: curved is refused below the series' minimum radius (6' < 8')");
+  const atMin = t274Qty(t274Cfg({ curved: true, radiusFt: 8 }), t274Series());
+  ok(atMin.errors.length === 0 && atMin.rows.length > 0, "#274 engine: exactly the minimum radius is allowed");
+  const noRadius = t274Qty(t274Cfg({ curved: true }), t274Series());
+  ok(noRadius.rows.length === 0 && noRadius.errors.some((e) => /radius/.test(e)), "#274 engine: a curved run without a radius is refused");
+  const noMin = t274Qty(t274Cfg({ curved: true, radiusFt: 1 }), t274Series({ minRadiusFt: undefined }));
+  ok(noMin.errors.length === 0, "#274 engine: a series with no min radius takes any positive radius");
+  const curvedNoStick = t274Qty(t274Cfg({ curved: true, radiusFt: 10 }), t274Series({ stickLengthFt: 0 }));
+  ok(curvedNoStick.errors.length === 0, "#274 engine: a curved run doesn't need the straight stick length");
+  ok(t274Qty(t274Cfg({ runFt: 0 }), t274Series()).errors.length === 1 && t274Qty(t274Cfg({ runFt: -5 }), t274Series()).rows.length === 0, "#274 engine: a zero or negative run is refused");
+  ok(t274Qty(t274Cfg({ runFt: 1001 }), t274Series()).errors.length === 1, "#274 engine: a run over 1000' is refused");
+  ok(t274Qty(t274Cfg({ qty: 0 }), t274Series()).errors.length === 1 && t274Qty(t274Cfg({ qty: 1.5 }), t274Series()).errors.length === 1, "#274 engine: qty must be a whole number ≥ 1");
+  ok(t274Qty(t274Cfg(), t274Series({ stickLengthFt: 0 })).errors.some((e) => /stick length/.test(e)), "#274 engine: a straight run on a series with no stick length is refused");
+  ok(t274Qty(t274Cfg({ operation: "bogus" as never }), t274Series()).errors.length === 1 && t274Qty(t274Cfg({ mounting: "wall" as never }), t274Series()).errors.length === 1,
+    "#274 engine: an unknown operation or mounting (e.g. wall, out of v1 scope) is refused");
+}
+
+// ---- sanitizeTrackSeries ----
+{
+  ok(t274Sanitize(null) === null && t274Sanitize("x") === null && t274Sanitize([1]) === null, "#274 sanitize: a non-object is refused (null)");
+  const s = t274Sanitize({
+    id: "adc-280", name: "  ADC   280 ", manufacturer: " ADC ", stickLengthFt: "10", curvedSectionFt: 0, minRadiusFt: -3,
+    carrierSpacingIn: 0, hangerSpacingFt: "abc", overlapFt: -1,
+    parts: { track: { sku: " TRK-1 " }, bogus: { sku: "X" }, splice: { sku: "" }, carrier: "C-1", endStop: { sku: 42 } },
+    active: true, extra: "dropped",
+  })!;
+  ok(s.name === "ADC 280" && s.manufacturer === "ADC", "#274 sanitize: strings are trimmed and inner whitespace collapsed");
+  ok(s.stickLengthFt === 10, "#274 sanitize: a numeric string is read as a number");
+  ok(s.curvedSectionFt === undefined && s.minRadiusFt === undefined && !("curvedSectionFt" in s), "#274 sanitize: a zero/negative optional number (curved section, min radius) is dropped");
+  ok(s.carrierSpacingIn === 12 && s.hangerSpacingFt === 5 && s.overlapFt === 0, "#274 sanitize: bad spacings fall back to 12\" / 5', a negative overlap to 0");
+  ok(t274Eq(s.parts, { track: { sku: "TRK-1" } }), "#274 sanitize: unknown roles, blank SKUs and non-object/non-string entries are dropped; SKUs trimmed");
+  ok(s.active === false, "#274 sanitize: active is dropped when the series can't be active (only a track part mapped)");
+  ok(!("extra" in s), "#274 sanitize: unknown fields are dropped");
+  const big = t274Sanitize({ name: "x", stickLengthFt: 1e6, curvedSectionFt: 99, minRadiusFt: 1e4, carrierSpacingIn: 500, hangerSpacingFt: 100, overlapFt: 50 })!;
+  ok(big.stickLengthFt === 40 && big.curvedSectionFt === 40 && big.minRadiusFt === 200 && big.carrierSpacingIn === 120 && big.hangerSpacingFt === 40 && big.overlapFt === 20,
+    "#274 sanitize: numbers clamp to the sane maxima");
+  ok(t274Sanitize({ name: "x", stickLengthFt: -5 })!.stickLengthFt === 0 && t274Sanitize({ name: "x", stickLengthFt: NaN })!.stickLengthFt === 0 && t274Sanitize({ name: "x", stickLengthFt: Infinity })!.stickLengthFt === 0,
+    "#274 sanitize: a bad stick length (negative, NaN, Infinity) reads as not entered (0)");
+  ok(t274Sanitize({ name: "x", id: "Bad Id!" })!.id === "" && t274Sanitize({ name: "x", id: 7 })!.id === "", "#274 sanitize: an invalid id is dropped (the store allocates one)");
+  const full = t274Sanitize({ ...t274Series(), active: true })!;
+  ok(full.active === true, "#274 sanitize: a complete series keeps active");
+  ok(t274Sanitize({ ...t274Series(), active: "yes" })!.active === false, "#274 sanitize: active must be literally true");
+  ok(t274Sanitize({ name: "x".repeat(200) })!.name.length === 80, "#274 sanitize: the name is capped at 80 characters");
+}
+
+// ---- sanitizeTrackSeriesBlob ----
+{
+  const list = t274SanitizeBlob({
+    "zeta": { name: "Zeta 1", stickLengthFt: 8 },
+    "alpha": { id: "something-else", name: "alpha 2" },
+    "gone": null,
+    "Bad Key": { name: "Bad" },
+    "noname": { name: "   " },
+    "junk": 5,
+  });
+  ok(t274Eq(list.map((s) => s.id), ["alpha", "zeta"]), "#274 blob: deleted (null), invalid-key, blank-name and non-object entries are skipped; sorted by name case-insensitively");
+  ok(list[0].id === "alpha", "#274 blob: a record's id always equals its key");
+  ok(t274SanitizeBlob(null).length === 0 && t274SanitizeBlob([]).length === 0, "#274 blob: an empty/absent blob reads as no series");
+}
+
+// ---- activationProblems / canBeActive ----
+{
+  const blank = t274Problems({ stickLengthFt: 0, parts: {} });
+  ok(blank.length === 2 && /stick length/.test(blank[0]) && /Track, Splice clamp, Carrier, Master carrier, End stop, Batten clamp or Ceiling hanger/.test(blank[1]),
+    "#274 activation: a blank series needs the stick length and every always-required role plus one mounting role, named");
+  const req = (extra: Partial<Record<T274Role, { sku: string }>>) => ({ track: { sku: "T" }, splice: { sku: "S" }, carrier: { sku: "C" }, masterCarrier: { sku: "M" }, endStop: { sku: "E" }, ...extra });
+  ok(t274CanBeActive({ stickLengthFt: 10, parts: req({ battenClamp: { sku: "B" } }) }), "#274 activation: stick length + the five required roles + a batten clamp can be active");
+  ok(t274CanBeActive({ stickLengthFt: 10, parts: req({ ceilingHanger: { sku: "H" } }) }), "#274 activation: a ceiling hanger alone satisfies the mounting role");
+  ok(!t274CanBeActive({ stickLengthFt: 10, parts: req({}) }), "#274 activation: no mounting role → can't be active");
+  ok(!t274CanBeActive({ stickLengthFt: 0, parts: req({ battenClamp: { sku: "B" } }) }), "#274 activation: no stick length → can't be active");
+  const noSplice = t274Problems({ stickLengthFt: 10, parts: { ...req({ battenClamp: { sku: "B" } }), splice: undefined } });
+  ok(noSplice.length === 1 && /Splice clamp/.test(noSplice[0]) && !/Track,/.test(noSplice[0]), "#274 activation: names exactly the missing role (Splice clamp)");
+  ok(t274CanBeActive({ stickLengthFt: 10, parts: req({ battenClamp: { sku: "B" } }) }), "#274 activation: cord-operated roles (pulleys, floor block, line) aren't needed to be active");
+  const live = new Set(["T", "S", "C", "M", "B"]);
+  const gone = t274Problems({ stickLengthFt: 10, parts: req({ battenClamp: { sku: "B" } }) }, live);
+  ok(gone.length === 1 && /End stop/.test(gone[0]), "#274 activation: a mapped SKU missing from the live catalog counts as unmapped");
+}
+
+// ---- requiredRolesFor ----
+{
+  ok(t274Eq(t274Required({ operation: "walkalong", curved: false, mounting: "batten" }), ["track", "splice", "carrier", "masterCarrier", "endStop", "battenClamp"]),
+    "#274 requiredRolesFor: walk-along straight batten → track, splice, carrier, master, end stop, batten clamp");
+  const bpc = t274Required({ operation: "biparting", curved: true, mounting: "ceiling" });
+  ok(t274Eq(bpc, ["curved", "splice", "carrier", "masterCarrier", "endStop", "ceilingHanger", "livePulley", "deadPulley", "floorBlock", "operatingLine"]),
+    "#274 requiredRolesFor: bi-parting curved ceiling → curved section (not track), ceiling hanger (not clamp), pulleys, floor block, operating line");
+  ok(t274Required({ operation: "oneway", curved: false, mounting: "batten" }).includes("operatingLine"), "#274 requiredRolesFor: one-way is cord-operated too");
+  // Every role the engine emits for a config is in that config's required list.
+  let covered = true;
+  for (const operation of ["biparting", "oneway", "walkalong"] as const)
+    for (const curved of [false, true])
+      for (const mounting of ["batten", "ceiling"] as const) {
+        const reqd = new Set(t274Required({ operation, curved, mounting }));
+        for (const r of t274Qty(t274Cfg({ operation, curved, mounting, radiusFt: 10, runFt: 33 }), t274Series()).rows) if (!reqd.has(r.role)) covered = false;
+      }
+  ok(covered, "#274 requiredRolesFor: covers every role the engine emits, for all 12 combos");
+}
+
+// ---- allocateTrackSeriesId ----
+{
+  ok(t274AllocId("ADC 280", new Set()) === "adc-280", "#274 ids: a new series' id is a slug of its name");
+  ok(t274AllocId("ADC 280", new Set(["adc-280"])) === "adc-280-2" && t274AllocId("ADC 280", new Set(["adc-280", "adc-280-2"])) === "adc-280-3", "#274 ids: a taken slug gets -2, -3…");
+  ok(t274AllocId("!!!", new Set()) === "series", "#274 ids: a name with no letters or digits falls back to \"series\"");
+}
+
+// ---- sources: purity, admin gating, the link, part-picker reuse ----
+{
+  const rd274 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const importsOf = (src: string) => [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  const pure = [...importsOf(rd274("src/lib/track-series.ts")), ...importsOf(rd274("src/lib/track-engine.ts"))];
+  ok(pure.every((m) => m === "@/lib/track-series"), "#274 purity: track-series.ts and track-engine.ts import nothing but each other (no DB, store, or catalog)");
+  const acts = rd274("src/app/(app)/estimating-rules/track-series/actions.ts");
+  ok(acts.startsWith('"use server"') && (acts.match(/await requirePerm\("manage_users"\)/g) || []).length === 2, "#274 actions: both server actions gate on manage_users, like every Estimating Rules action");
+  ok(acts.includes("saveTrackSeries(input, user.name)"), "#274 actions: save hands the raw input to the store, which re-sanitizes it");
+  const page = rd274("src/app/(app)/estimating-rules/track-series/page.tsx");
+  ok(page.includes('can("manage_users", user.roles)') && page.includes("Admin access required"), "#274 page: admin-only, same gate + copy shape as /estimating-rules");
+  ok(page.includes("getMany(skus)") && !page.includes("listCatalog") && !/\blist\(\)/.test(page), "#274 page: reads only the mapped SKUs (one getMany), never the whole catalog");
+  ok(rd274("src/app/(app)/estimating-rules/page.tsx").includes('href="/estimating-rules/track-series"'), "#274: the Estimating Rules page links to Track series");
+  const cli = rd274("src/app/(app)/estimating-rules/track-series/track-series-client.tsx");
+  ok(cli.startsWith('"use client"') && !importsOf(cli).some((m) => /^@\/lib\/stores\/|^@\/db\//.test(m)), "#274 client: imports no store or DB module");
+  ok(cli.includes('from "@/app/(app)/design/grid/settings/equipment-map/part-picker"'), "#274 client: reuses the Equipment map's part picker");
+  const emc274 = rd274("src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx");
+  ok(emc274.includes('import { PartPicker } from "./part-picker"') && !emc274.includes("function PartPicker"), "#274: the Equipment map now uses the shared part picker (one picker, not two)");
+  ok(emc274.includes("onSuggest={() => suggestEquipmentPartsAction(rowKey)}"), "#274: the Equipment map keeps its per-row Suggest through the shared picker");
+  ok(cli.includes("NEW_SERIES_DEFAULTS.carrierSpacingIn") && cli.includes("NEW_SERIES_DEFAULTS.hangerSpacingFt") && cli.includes('stickLengthFt: "",'),
+    "#274 client: a new series pre-fills carrier 12\" / hanger 5' / overlap 0 and leaves the stick length blank");
+  ok(cli.includes("disabled={!canActivate}") && cli.includes("activationProblems("), "#274 client: the Active toggle is disabled until the series can be active, with the reasons shown");
+  const store = rd274("src/lib/stores/track-series.ts");
+  ok((store.match(/setBlob\(/g) || []).length === 2, "#274 store: only save and delete write the blob — nothing is seeded");
+  ok(rd274("scripts/smoke-routes.ts").includes('"/estimating-rules/track-series"'), "#274: the smoke run GETs /estimating-rules/track-series");
+}
+
+async function track274AsyncChecks(): Promise<void> {
+  const before = await t274List();
+  ok(Array.isArray(before) && !before.some((s) => s.name.startsWith("Test274")), "#274 store: listTrackSeries reads as a list before any test series exists");
+
+  const skuOf = (role: string) => fixtureId(274, role);
+  const roles = ["track", "splice", "carrier", "masterCarrier", "endStop", "battenClamp"] as const;
+  for (const r of roles) {
+    await d245MergeUpsert(skuOf(r), { desc: `Test274 ${r}`, category: "Test274 Track", unit: "ea", list: 20, cost: 10 });
+    registerFixture("catalog_parts", skuOf(r));
+  }
+  const mapped = Object.fromEntries(roles.map((r) => [r, { sku: skuOf(r) }]));
+  const name = "Test274 ADC 280";
+  let firstId = "";
+  let secondId = "";
+  try {
+    const created = await t274Save({ name, manufacturer: "ADC", carrierSpacingIn: 12, hangerSpacingFt: 5, overlapFt: 0, parts: {}, active: false }, "Tester");
+    ok(created.ok && created.series.id === "test274-adc-280" && !created.series.active && created.series.updatedBy === "Tester",
+      "#274 store: a new series is created with a server-allocated slug id, inactive, stamped with who saved it");
+    firstId = created.ok ? created.series.id : "";
+    ok(!!(await t274Get(firstId)), "#274 store: getTrackSeries reads it back");
+
+    const dup = await t274Save({ name: "test274 adc 280" }, "Tester");
+    ok(!dup.ok && /already a series called/.test((dup as { error: string }).error), "#274 store: a second series with the same name (case-insensitive) is refused");
+    const blank = await t274Save({ name: "  " }, "Tester");
+    ok(!blank.ok && /name/.test((blank as { error: string }).error), "#274 store: a blank name is refused");
+    const ghost = await t274Save({ id: "no-such-series", name: "Ghost" }, "Tester");
+    ok(!ghost.ok && /no longer exists/.test((ghost as { error: string }).error), "#274 store: saving to an id that doesn't exist is refused (never silently re-created)");
+
+    const earlyActive = await t274Save({ id: firstId, name, active: true, parts: mapped }, "Tester");
+    ok(!earlyActive.ok && /stick length/.test((earlyActive as { error: string }).error), "#274 store: Active is refused without a stick length, even with every part mapped");
+    const partial = await t274Save({ id: firstId, name, stickLengthFt: 10, active: true, parts: { ...mapped, endStop: undefined } }, "Tester");
+    ok(!partial.ok && /End stop/.test((partial as { error: string }).error), "#274 store: Active is refused while a required role is unmapped, naming it");
+    const stillInactive = await t274Get(firstId);
+    ok(!!stillInactive && !stillInactive.active && !stillInactive.stickLengthFt, "#274 store: a refused save writes nothing");
+
+    const good = await t274Save(
+      { id: firstId, name, manufacturer: "ADC", stickLengthFt: "10", overlapFt: 0.5, active: true, parts: { ...mapped, bogus: { sku: "X" } } },
+      "Tester"
+    );
+    ok(good.ok && good.series.active && good.series.stickLengthFt === 10 && good.series.id === firstId, "#274 store: with the stick length and required roles mapped, Active saves");
+    const reread = await t274Get(firstId);
+    ok(!!reread && reread.active && reread.overlapFt === 0.5 && !("bogus" in reread.parts) && reread.parts.battenClamp?.sku === skuOf("battenClamp"),
+      "#274 store: the saved series round-trips sanitized (unknown role dropped)");
+
+    await softDeleteDoc("catalog_parts", skuOf("endStop"));
+    const goneSku = await t274Save({ ...reread, active: true }, "Tester");
+    ok(!goneSku.ok && /End stop/.test((goneSku as { error: string }).error), "#274 store: a mapped SKU deleted from the catalog counts as unmapped — Active is refused again");
+    const inactiveOk = await t274Save({ ...reread, active: false }, "Tester");
+    ok(inactiveOk.ok && !inactiveOk.series.active, "#274 store: the same series still saves inactive");
+
+    const raw = await t274GetBlob<Record<string, unknown>>(t274Blob, {});
+    ok(!!raw[firstId] && typeof raw[firstId] === "object", "#274 store: one blob key per series id");
+
+    ok(await t274Delete(firstId), "#274 store: delete removes the series");
+    ok(!(await t274List()).some((s) => s.id === firstId) && !(await t274Get(firstId)), "#274 store: a deleted series is gone from the list");
+    ok(!(await t274Delete(firstId)) && !(await t274Delete("never-existed")), "#274 store: deleting a deleted or unknown id is refused");
+    const again = await t274Save({ name }, "Tester");
+    secondId = again.ok ? again.series.id : "";
+    ok(again.ok && again.series.id === "test274-adc-280-2", "#274 store: a deleted series' id is never reused — the same name gets -2");
+  } finally {
+    if (firstId) await t274Delete(firstId);
+    if (secondId) await t274Delete(secondId);
+  }
 }

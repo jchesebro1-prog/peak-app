@@ -9799,7 +9799,7 @@ typed miles win), and flag a blank mileage when the venue isn't located. Build a
 
 ---
 
-## 274. Estimator — a track configurator for curtain / traveler track rigging — OPEN (design with Jeff first)
+## 274. Estimator — a track configurator for curtain / traveler track rigging — IN PROGRESS (Phase A shipped 2026-09-29, D486)
 
 **Reported:** 2026-09-23 practice run: "Add a way to quote track rigging on Estimate." **Jeff (2026-09-29): "We need a
 track configurator."** (Not ready-made track assemblies.)
@@ -9815,6 +9815,23 @@ bi-parting vs one-way, straight vs curved); inputs (run length, overlap, stick l
 spacing, live/dead ends, operating line, floor pulley); whether parts come from the catalog (by MFR #) or a rate table
 in Estimating Rules; install labor; and whether a curtain line can carry its track in one step.
 
+
+**Designed with Jeff 2026-09-29:** catalog-part pricing; ADC first; bi-parting (cord), one-way (cord), walk-along, and
+curved runs; batten-clamp or ceiling-hanger mounting; both a standalone "+ Configure track" and an "Add track" step in
+the curtain configurator; one track line per run with its parts inside. Spec:
+`docs/superpowers/specs/2026-09-29-track-configurator-design.md`.
+
+**Phase A shipped 2026-09-29:** `src/lib/track-series.ts` (types, sanitize, can-be-active, `requiredRolesFor`),
+`src/lib/track-engine.ts` (pure quantities per spec §2), `src/lib/stores/track-series.ts` (blob `track_series`), and the
+admin page **Estimating Rules → Track series** (`/estimating-rules/track-series`, `manage_users`) with a per-role catalog
+part search — the Equipment map's picker moved to a shared `part-picker.tsx` used by both. Nothing seeded. Gates: tsc 0;
+test:specs 9048 PASS / 0 FAIL (after merging main; +104 for #274); test:smoke 169/0 (new route added); eslint 0 errors,
+no new warnings; next build OK. Browser-verified; reviewed, no findings.
+
+**Phase B (next):** `track-bom.ts` pricing, the Estimator's track modal + line (`SpecItem.track`, reopen like #269), the
+curtain configurator's Add track step.
+
+**Jeff-gated:** import the ADC price book, then create the ADC series and map each role.
 ---
 
 ## 275. Flame-test, inspection and repair quotes — a lift rental line — DONE 2026-09-29 (D481–D483)
@@ -9893,3 +9910,17 @@ system Σ qty × Unit Sell equals the system price — typed, rounded up to $25,
 any labor lines' share. Freight still has no row of its own; it rides in the parts' sell. This now also applies to
 sent/won systems with freight and no rounding (their parts' sell rises by the freight). Unit Cost is unchanged.
 `src/app/(app)/estimator/parts-csv.ts`. Harness `#279`. See D480.
+
+## 280. Leads — delete a lead right from its table row — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Add delete to the Leads screen too." Delete existed in the lead drawer and on
+Worklist rows, but not in the default Table view.
+
+**Done.** Each Table-view row gains a compact Delete (new `DeleteLeadButton`, the shared `ConfirmButton`: Delete →
+Confirm) running the existing `deleteLeadAction` — soft delete; linked site visits and surveys are kept. The row became
+a stretched link (an absolutely positioned `<Link>` overlay; the cells stay grid children), so clicking anywhere in the
+row still opens the lead and the button sits above the overlay; an extra 70px column holds it (and on phones). Board
+view is unchanged — a card opens the drawer, which has Delete. Like designs, consulting, projects and companies (#268,
+#273, #277, #278), deleting a lead is limited to users with `create`: `deleteLeadAction` refuses otherwise (now
+returning an error), and the table, Worklist and drawer Delete buttons are hidden from a Reviewer; the drawer only
+closes on a successful delete.

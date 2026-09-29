@@ -77,6 +77,7 @@ const ROUTES = [
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
   "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/estimating-rules",
+  "/estimating-rules/track-series", // #274 — the track configurator's parts map (admin)
   "/inspections",
   "/flame-tests",
   "/repairs",
