@@ -330,6 +330,12 @@ export type MobDraft = {
   otHrs: string;
   sup: boolean;
   milesRT: string;
+  /**
+   * #272: true while `milesRT` was filled from the route (not typed). A route
+   * change replaces auto-filled miles; typing in the box clears the flag.
+   * Absent on drafts saved before #272 — those count as typed, never overwritten.
+   */
+  milesAuto?: boolean;
   lift: boolean;
   /** Per-rental lift cost override. Blank uses the live catalog rate. */
   liftRate?: string;

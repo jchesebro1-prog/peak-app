@@ -94,6 +94,8 @@ import {
   disciplineForSystemTitle,
   laborMob,
   roundTripMiles,
+  typeMobMiles,
+  useRouteMiles,
 } from "./labor-defaults";
 import {
   laborGroupEdits,
@@ -2148,7 +2150,8 @@ export default function EstimatorClient({
   const setMob = (idx: number, field: keyof MobDraft, val: string) =>
     setLaborDraft((d) => ({
       ...d,
-      mobs: d.mobs.map((m, i) => (i === idx ? { ...m, [field]: val } : m)),
+      // #272: typing in the miles box makes the value the user's (clears milesAuto)
+      mobs: d.mobs.map((m, i) => (i !== idx ? m : field === "milesRT" ? typeMobMiles(m, val) : { ...m, [field]: val })),
     }));
   const setMobNameSelect = (idx: number, val: string) =>
     setLaborDraft((d) => ({
@@ -2169,11 +2172,10 @@ export default function EstimatorClient({
       ...d,
       mobs: d.mobs.map((m, i) => (i === idx ? { ...m, [field]: !m[field] } : m)),
     }));
-  const autoMilesRT = () => roundTripMiles(travelEstNow());
   const applyAutoMiles = (idx: number) => {
-    const auto = autoMilesRT();
-    if (auto == null) return;
-    setMob(idx, "milesRT", String(auto));
+    const est = travelEstNow();
+    if (roundTripMiles(est) == null) return;
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.map((m, i) => (i === idx ? useRouteMiles(m, est) : m)) }));
   };
   // #272: the pure helpers (labor-defaults.ts) own the fill rule — blank miles
   // fill from the route for Local and Travel alike, typed miles always win.
