@@ -5,6 +5,7 @@ import { allSpecDocuments } from "@/lib/stores/spec-documents";
 import { allSections } from "@/lib/stores/spec-sections";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { dateYear, timeAgo } from "@/lib/format";
+import { DeleteSpecButton } from "./delete-spec-button";
 import type { SpecDocSource } from "@/lib/specs/spec-document";
 
 /**
@@ -25,7 +26,7 @@ const TH: React.CSSProperties = {
 };
 const CELL: React.CSSProperties = { fontSize: 12.5, color: "#3a3f4a", minWidth: 0 };
 const MUTED: React.CSSProperties = { fontSize: 11.5, color: "#9aa0ab" };
-const GRID = "90px minmax(0,1.5fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 90px 120px";
+const GRID = "90px minmax(0,1.5fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 90px 220px";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -115,7 +116,7 @@ export default async function SpecsIndex() {
               <span style={{ ...CELL, color: "#6b7079" }} title={d.updatedBy ? `by ${d.updatedBy}` : undefined}>
                 {updatedLabel(d.updatedAt)}
               </span>
-              <span style={{ textAlign: "right" }}>
+              <span style={{ display: "inline-flex", justifyContent: "flex-end", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {section && (
                   <a
                     href={`/api/spec-documents/${encodeURIComponent(d.id)}/docx`}
@@ -126,6 +127,7 @@ export default async function SpecsIndex() {
                     Download Word
                   </a>
                 )}
+                {canCreate && <DeleteSpecButton id={d.id} />}
               </span>
             </div>
           );
