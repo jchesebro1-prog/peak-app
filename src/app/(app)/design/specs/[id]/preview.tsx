@@ -136,12 +136,17 @@ export default function Preview({ assembled }: { assembled: AssembledSection }) 
           <Lines lines={a.general} />
           {a.products.map((pr) => (
             <div key={pr.specId || pr.sku}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ minWidth: 22, flexShrink: 0 }}>{pr.label}</span>
-                <span>{pr.heading}</span>
-                {pr.overridden && <span style={{ ...BADGE, color: "#3b5b8c", background: "#e8eef8" }}>Changed for this project</span>}
-                {pr.overrideStale && <span style={{ ...BADGE, color: "#8a6d1f", background: "#fbf3dd" }}>Library updated since</span>}
-              </div>
+              {/* A flat entry (titled like its article) prints no heading —
+                  its lines are the article's own clauses. Its screen-only
+                  badges still show, on a line of their own. */}
+              {(!pr.flat || pr.overridden || pr.overrideStale) && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {!pr.flat && <span style={{ minWidth: 22, flexShrink: 0 }}>{pr.label}</span>}
+                  {!pr.flat && <span>{pr.heading}</span>}
+                  {pr.overridden && <span style={{ ...BADGE, color: "#3b5b8c", background: "#e8eef8" }}>Changed for this project</span>}
+                  {pr.overrideStale && <span style={{ ...BADGE, color: "#8a6d1f", background: "#fbf3dd" }}>Library updated since</span>}
+                </div>
+              )}
               <Lines lines={pr.lines} highlight={!!pr.specId} answered={pr.answered} />
             </div>
           ))}

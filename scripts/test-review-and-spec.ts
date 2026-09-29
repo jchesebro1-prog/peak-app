@@ -32991,7 +32991,8 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   const snap = (id: string, row: object, section = s260961) => {
     void id;
     const x = run(doc([row]), section);
-    const lines = x.part2.articles.flatMap((a) => a.products.flatMap((p) => [p.label + " " + p.heading, ...p.lines.map((l) => "  ".repeat(l.depth) + l.label + " " + l.text)]));
+    // A flat entry (titled like its article) prints no heading line.
+    const lines = x.part2.articles.flatMap((a) => a.products.flatMap((p) => [...(p.flat ? [] : [p.label + " " + p.heading]), ...p.lines.map((l) => "  ".repeat(l.depth) + l.label + " " + l.text)]));
     return lines.join("\n");
   };
   for (const [id, row, s] of [["PS-260961-028", { sku: "LS-P" }, s260961], ["PS-260961-007", { sku: "UH10001-11F" }, s260961], ["PS-116123-008", { sku: "", specKey: "Rigging Hoist – Prodigy P1" }, s116123]] as const) {
@@ -33040,7 +33041,10 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   const legacyPart = { sku: "OLD-1", desc: "Old mover", specState: "authored", specArticleId: "ar-nhs-260961-07", specTitle: "OLD MOVER", specBody: "Old text" } as never;
   const mix = A.assembleSection({ section: s260961, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map([["OLD-1", legacyPart]]), doc: doc([{ sku: "LS-P" }, { sku: "OLD-1" }]), records: recs });
   const mixP = mix.part2.articles.flatMap((x) => x.products);
-  ok(mixP.map((p) => `${p.label} ${p.specId || p.sku}`).join("|") === "A. PS-260961-028|B. OLD-1" && mix.rowMatches["SKU:OLD-1"]?.status === "legacy" && mixP[1].heading === "OLD MOVER" && mixP[1].lines[0].text === "Old text", "assembly: legacy and record entries interleave in BOM order; legacy prints exactly as before");
+  // PS-260961-028 is titled like its article, so it prints flat (its body is
+  // the article's own A., B.…) and OLD-1's letter continues after its last.
+  const n028 = mixP[0].lines.filter((l) => l.depth === 0).length;
+  ok(mixP.map((p) => `${p.label} ${p.specId || p.sku}`).join("|") === `A. PS-260961-028|${(await import("@/lib/specs/outline")).outlineLabel(0, n028 + 1)} OLD-1` && mixP[0].flat === true && !mixP[1].flat && mix.rowMatches["SKU:OLD-1"]?.status === "legacy" && mixP[1].heading === "OLD MOVER" && mixP[1].lines[0].text === "Old text", "assembly: legacy and record entries interleave in BOM order; legacy prints exactly as before");
   ok(JSON.stringify(mix.usedRecords) === '{"PS-260961-028":1}' && JSON.stringify(Object.entries(a1.usedRecords).sort()) === '[["PS-260961-011",1],["PS-260961-012",1],["PS-260961-013",1]]', "assembly: usedRecords stamps every printed record, companions included");
   // Table-style section: record rows use record manufacturer/title and the row's matched number.
   const tableSec = { ...(s260961 as object), part2Style: "table" } as never;
@@ -33059,6 +33063,71 @@ async function specRecordsAssemblyAsyncChecks(): Promise<void> {
   const fi = A.assembleSection({ section: s260961, articles: arts as never, sections: [s260961, s116123] as never, parts: new Map(), doc: doc([{ sku: "LS-P" }]), records: fiRecs });
   const fiText = fi.part2.articles.flatMap((x) => x.products).flatMap((p) => p.lines.map((l) => l.text)).join("\n");
   ok(fiText.includes("[FILL IN: years]") && fi.warnings.includes("PS-260961-028 has a [FILL IN] blank that can't be answered in the builder yet — edit the spec text.") && fi.checklist.fillInsLeft === 0 && !a2.warnings.some((w) => w.includes("[FILL IN]")), "assembly: a [FILL IN:] in record text prints as written and warns, never counted as a fill-in");
+
+  /* -- A record titled like its article prints flat: its body IS the
+   *    article's clauses (A., 1., a. …), no repeated heading. -- */
+  ok(A.titledLikeArticle("TOWERS, SIDE AND BACK WALLS", "TOWERS, SIDE AND BACK WALLS") && A.titledLikeArticle("  Towers,  side and back walls: ", "TOWERS, SIDE AND BACK WALLS") && A.titledLikeArticle("Decks.", "DECKS") && !A.titledLikeArticle("TOWERS", "TOWERS, SIDE AND BACK WALLS") && !A.titledLikeArticle("", ""), "flat entry: titles compare trimmed, whitespace-collapsed, case-insensitive, trailing colon/period ignored");
+  {
+    const s116113 = sec("11 61 13");
+    const towerArt = "ar-nhs-116113-02";
+    const flatArts = arts.map((x) => (x.id === towerArt ? { ...x, general: "Provide acoustic shell towers." } : x));
+    const tower = recs.find((r) => r.specId === "PS-116113-001")!;
+    const flatRec = { ...tower, specText: "Towers:\n  Self-supporting.\n    Steel frame.\n  Height: [24] feet.\nFinish: Black." };
+    const otherRec = { ...tower, specId: "PS-116113-091", title: "SPARE TOWER", mfrNumbers: [], matchKey: "Spare tower test", specText: "Spare:\n  One per stage." };
+    const flatRecs = [...recs.filter((r) => r.specId !== "PS-116113-001"), flatRec, otherRec];
+    const fdoc = (products: object[], extra: object = {}) => SD.normalizeSpecDocument({ id: "SP-F", sectionId: "ss-116113", header: { projectName: "P", projectNumber: "1", phase: "CD", issueDate: "2026-09-29", preparedBy: "x" }, source: { kind: "quote", id: "Q" }, products, printQuantities: false, fillIns: {}, ...extra });
+    const frun = (d: ReturnType<typeof fdoc>, rs = flatRecs) => A.assembleSection({ section: s116113, articles: flatArts as never, sections: [s260961, s116123, s116113] as never, parts: new Map(), doc: d, records: rs });
+    const outl = (p: { lines: Array<{ depth: number; label: string; text: string }> }) => p.lines.map((l) => `${l.depth}:${l.label} ${l.text}`).join("|");
+
+    const f1 = frun(fdoc([{ sku: "", specId: "PS-116113-001", fromLibrary: true }]));
+    const art1 = f1.part2.articles.find((x) => x.title === tower.article)!;
+    const fp = art1.products[0];
+    ok(!!fp && fp.flat === true && fp.heading === tower.title && fp.label === "B." && art1.general.map((l) => l.label + " " + l.text).join("|") === "A. Provide acoustic shell towers." &&
+      outl(fp) === "0:B. Towers:|1:1. Self-supporting.|2:a. Steel frame.|1:2. Height: [24] feet.|0:C. Finish: Black." &&
+      !fp.lines.some((l) => l.text === tower.title) && f1.usedRecords["PS-116113-001"] === tower.revision && f1.rowMatches["SPEC:PS-116113-001"]?.status === "matched",
+      "flat entry: no heading line; first body line lettered at article level after the General line (B.), nested lines 1./a., next top line C.");
+
+    const f2 = frun(fdoc([{ sku: "", specId: "PS-116113-001", fromLibrary: true }]), flatRecs.map((r) => (r.specId === "PS-116113-001" ? { ...r, title: "CUSTOM TOWERS" } : r)));
+    const np = f2.part2.articles.find((x) => x.title === tower.article)!.products[0];
+    ok(!np.flat && np.label === "B." && np.heading === "CUSTOM TOWERS" && outl(np) === "1:1. Towers:|2:a. Self-supporting.|3:1) Steel frame.|2:b. Height: [24] feet.|1:2. Finish: Black.",
+      "flat entry: a record with a different title still prints its heading at B. and its body one level deeper, as before");
+
+    const f3 = frun(fdoc([{ sku: "", specId: "PS-116113-001", fromLibrary: true }, { sku: "", specId: "PS-116113-091", fromLibrary: true }]));
+    const p3 = f3.part2.articles.find((x) => x.title === tower.article)!.products;
+    ok(p3.length === 2 && p3[0].flat === true && p3[0].lines.filter((l) => l.depth === 0).map((l) => l.label).join() === "B.,C." && !p3[1].flat && p3[1].label === "D." && p3[1].heading === "SPARE TOWER" && outl(p3[1]) === "1:1. Spare:|2:a. One per stage.",
+      "flat entry: flat then normal in one article letter consecutively (B., C. then D.)");
+    const f3b = frun(fdoc([{ sku: "", specId: "PS-116113-091", fromLibrary: true }, { sku: "", specId: "PS-116113-001", fromLibrary: true }]));
+    const p3b = f3b.part2.articles.find((x) => x.title === tower.article)!.products;
+    ok(p3b[0].label === "B." && !p3b[0].flat && p3b[1].flat === true && p3b[1].label === "C." && p3b[1].lines.filter((l) => l.depth === 0).map((l) => l.label).join() === "C.,D.",
+      "flat entry: a flat entry after a normal one continues its letters (B. heading, then C., D.)");
+
+    // Job-value highlights stay on the right line/span in a flat entry.
+    const f4 = frun(fdoc([{ sku: "", specId: "PS-116113-001", fromLibrary: true }], { fillIns: { "PS-116113-001#1": "30" }, fillInLabels: { "PS-116113-001#1": "24" } }));
+    const p4 = f4.part2.articles.find((x) => x.title === tower.article)!.products[0];
+    ok(p4.flat === true && p4.lines[3].text === "Height: 30 feet." && JSON.stringify(p4.answered?.[3]) === '[{"start":8,"end":10}]' && p4.answered?.length === p4.lines.length,
+      "flat entry: answered job-value spans stay aligned with the re-lettered lines");
+
+    // Word: no paragraph repeats the title as an entry heading — the one
+    // paragraph carrying it is the ART — and the first body line is a PR1.
+    const docParas = async (s: Parameters<typeof buildSectionDocx>[0]) => {
+      const xml = await (await JSZip.loadAsync(await buildSectionDocx(s))).file("word/document.xml")!.async("string");
+      return [...xml.matchAll(/<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g)].map((m) => ({
+        style: /<w:pStyle w:val="([^"]+)"/.exec(m[1])?.[1] ?? "",
+        text: [...m[1].matchAll(/<w:t\b[^>]*>([^<]*)<\/w:t>/g)].map((t) => t[1]).join(""),
+      }));
+    };
+    const paras = await docParas(f1);
+    const titled = paras.filter((p) => p.text === tower.title);
+    const artAt = paras.findIndex((p) => p.style === "ART" && p.text === tower.title);
+    ok(titled.length === 1 && titled[0].style === "ART" && artAt > 0 && paras[artAt + 1]?.style === "PR1" && paras[artAt + 1]?.text === "Provide acoustic shell towers." &&
+      paras[artAt + 2]?.style === "PR1" && paras[artAt + 2]?.text === "Towers:" && paras[artAt + 3]?.style === "PR2" && paras[artAt + 4]?.style === "PR3" && paras[artAt + 6]?.style === "PR1" && paras[artAt + 6]?.text === "Finish: Black.",
+      "flat entry: Word has no heading paragraph for it; its first body line is a PR1 after the General PR1, nested lines PR2/PR3");
+    const nParas = await docParas(f2);
+    const nAt = nParas.findIndex((p) => p.text === "CUSTOM TOWERS");
+    ok(nAt > 0 && nParas[nAt].style === "PR1" && nParas[nAt + 1]?.style === "PR2" && nParas[nAt + 1]?.text === "Towers:", "flat entry: a normal entry still writes its heading as a PR1 with its body from PR2");
+    const pv = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/[id]/preview.tsx"), "utf8");
+    ok(pv.includes("{!pr.flat && <span>{pr.heading}</span>}"), "flat entry: the preview skips the heading line for a flat entry");
+  }
 
   // spec-document: overrides / usedRecords / downloadedAt + pure edits.
   const base = doc([{ sku: "LS-P" }, { sku: "", desc: "Allowance" }]);

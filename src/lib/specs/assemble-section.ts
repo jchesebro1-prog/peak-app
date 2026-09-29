@@ -38,8 +38,17 @@ export type Placement =
 export type AssembledArticle = { num: string; title: string; lines: OutlineLine[] };
 export type AssembledProduct = {
   sku: string;
+  /** The entry's printed letter — for a flat entry, its first line's letter
+   *  ("" when it has no lines). */
   label: string;
+  /** Always the entry's title (+ quantity); the builder's own UI labels read
+   *  it. A flat entry never PRINTS it. */
   heading: string;
+  /** Titled like its article (`titledLikeArticle`): no heading line prints,
+   *  and `lines` are already the article's own clauses — depth 0 = A., with
+   *  letters continuing after the article's General lines and any earlier
+   *  entries. Absent = a normal entry (heading at A., body from depth 1). */
+  flat?: boolean;
   lines: OutlineLine[];
   /** Spec records (design §3.3): the record this entry prints, its revision,
    *  whether a project-only override replaced its text, and whether the
@@ -107,6 +116,31 @@ export type AssembledSection = {
 };
 
 const up = (s: string) => s.toUpperCase();
+
+/** Title comparison for a flat entry: trimmed, whitespace collapsed,
+ *  case-insensitive, a trailing colon/period ignored. */
+const titleKey = (s: string) =>
+  String(s || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\s:.]+$/, "")
+    .toLowerCase();
+
+/** A Part 2 entry whose title IS its article's title prints flat — its body
+ *  as the article's own clauses, no repeated heading (the architect's
+ *  layout: "2.1 TOWERS…" then "A. Towers:", never "A. TOWERS…" again). */
+export function titledLikeArticle(entryTitle: string, articleTitle: string): boolean {
+  const k = titleKey(entryTitle);
+  return k !== "" && k === titleKey(articleTitle);
+}
+
+/** Re-letter a flat entry's top-level lines to continue after `before`
+ *  clauses already printed in the article; deeper labels restart under each
+ *  parent, so they stand as parsed. */
+function continueLetters(lines: OutlineLine[], before: number): OutlineLine[] {
+  let k = before;
+  return lines.map((l) => (l.depth === 0 ? { ...l, label: outlineLabel(0, ++k) } : l));
+}
 const prefix = (sku: string) => (sku.indexOf(":") > 0 ? sku.slice(0, sku.indexOf(":")) : "");
 const tail = (sku: string) => (sku.indexOf(":") >= 0 ? sku.slice(sku.indexOf(":") + 1) : "");
 
@@ -431,17 +465,28 @@ export function assembleSection(input: {
   } else {
     const articlesOut: AssembledPart2Article[] = used.map((a, i) => {
       const general = generalFor(a.general, a.manufacturers);
-      const generalTop = general.filter((l) => l.depth === 0).length;
+      // Top-level clauses printed so far in this article: its General lines,
+      // then one per normal entry (its heading) or one per top-level line of
+      // a flat entry — so every letter continues from the one before.
+      let top = general.filter((l) => l.depth === 0).length;
+      /** An entry's printed lines + its letter; a flat entry's body was
+       *  parsed in article context and is re-lettered to continue. */
+      const outline = (lines: OutlineLine[], flat: boolean) => {
+        if (!flat) return { label: outlineLabel(0, ++top), lines };
+        const out = continueLetters(lines, top);
+        top += out.filter((l) => l.depth === 0).length;
+        return { label: out.find((l) => l.depth === 0)?.label ?? "", lines: out };
+      };
       const products: AssembledProduct[] = entries
         .filter((c) => c.articleId === a.id)
-        .map((c, j) => {
-          const label = outlineLabel(0, generalTop + j + 1);
+        .map((c) => {
           const placeholders = { manufacturers: a.manufacturers, section: sectionCtx, project };
           if (c.kind === "legacy") {
             const heading0 = c.tp.specTitle || c.part.desc || c.part.sku;
             const heading = showQty && (c.p.qty || 0) > 0 ? `${heading0} (Quantity: ${c.p.qty})` : heading0;
-            const lines = render(c.tp.specBody || "", "entry", placeholders);
-            return { sku: c.part.sku, label, heading, lines, rowKeys: [c.rowKey] };
+            const flat = titledLikeArticle(heading0, a.title);
+            const { label, lines } = outline(render(c.tp.specBody || "", flat ? "article" : "entry", placeholders), flat);
+            return { sku: c.part.sku, label, heading, ...(flat ? { flat } : {}), lines, rowKeys: [c.rowKey] };
           }
           const r = c.record;
           const t = recordText(c);
@@ -457,15 +502,20 @@ export function assembleSection(input: {
           if (finalText.includes("[FILL IN:")) {
             warnings.push(`${r.specId} has a [FILL IN] blank that can't be answered in the builder yet — edit the spec text.`);
           }
-          const lines = render(finalText, "entry", placeholders);
+          const flat = titledLikeArticle(t.title, a.title);
+          const context = flat ? "article" : "entry";
+          const { label, lines } = outline(render(finalText, context, placeholders), flat);
           // Answered values, located by rendering the same text once more
           // with marks around them (no warnings collected from this pass).
+          // Spans index each line's text only, so a flat entry's re-lettering
+          // never shifts them.
           const markedText = applyJobValues(t.specText, r.specId, doc.fillIns, labels, true);
-          const answered = markedText !== finalText ? answeredSpans(lines, renderBody(markedText, { context: "entry", placeholders }).lines) : undefined;
+          const answered = markedText !== finalText ? answeredSpans(lines, renderBody(markedText, { context, placeholders }).lines) : undefined;
           return {
             sku: c.rows[0]?.p.sku || r.specId,
             label,
             heading,
+            ...(flat ? { flat } : {}),
             lines,
             specId: r.specId,
             revision: r.revision,

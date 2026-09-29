@@ -154,7 +154,7 @@ function item(level: number, text: string, keepNext = false): Paragraph {
   return styled(PR_STYLES[Math.min(7, Math.max(2, level)) - 2], text, keepNext);
 }
 
-/** Article-context lines start at depth 0 → level 2 (A.); entry-context lines already start at depth 1. */
+/** Article-context lines (and a flat entry's) start at depth 0 → level 2 (A.); entry-context lines already start at depth 1. */
 const lines = (ls: OutlineLine[]) => ls.map((l) => item(2 + l.depth, l.text));
 
 const RULE = { style: BorderStyle.SINGLE, size: 6, color: "000000" };
@@ -197,7 +197,10 @@ function body(a: AssembledSection): Array<Paragraph | Table> {
     out.push(articleHeading(art.title), ...lines(art.general));
     // A product heading sits at level 2 (PR1) in the same list, so its
     // letter continues after the article's General clauses (B., C.…) by itself.
-    for (const p of art.products) out.push(item(2, p.heading, true), ...lines(p.lines));
+    // A flat entry (titled like its article) prints no heading: its lines are
+    // already at article depth, so its first clause is a PR1 continuing the
+    // same letters.
+    for (const p of art.products) out.push(...(p.flat ? [] : [item(2, p.heading, true)]), ...lines(p.lines));
   }
   if (a.part2.style === "table" && a.part2.rows.length > 0) {
     out.push(new Paragraph({ spacing: { after: 0 }, children: [] }), equipmentTable(a.part2.rows, a.part2.showQty));
