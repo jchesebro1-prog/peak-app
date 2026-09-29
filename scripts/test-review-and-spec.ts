@@ -32343,13 +32343,13 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
 }
 
 // ---- suggestDepartments: coverage test against the REAL production
-// category list (top ~191 categories by part count, .superpowers/sdd/
+// category list (top ~300 categories by part count, docs/catalog-fixtures/
 // prod-categories-top.txt) — name rules only (mfrs empty), exactly what
 // "Start from suggestions" sees on a first run before any staff sets up
 // Grid Equipment map-style manufacturer data. Pins the % achieved so a
 // future regression is visible, not just a threshold flip. ----
 {
-  const raw = readFileSync(join(process.cwd(), ".superpowers/sdd/prod-categories-top.txt"), "utf8").trim();
+  const raw = readFileSync(join(process.cwd(), "docs/catalog-fixtures/prod-categories-top.txt"), "utf8").trim();
   const prodCats = raw.split("\n").map((line) => {
     const [category, countStr] = line.split("|");
     return d252Cat(category, Number(countStr));
