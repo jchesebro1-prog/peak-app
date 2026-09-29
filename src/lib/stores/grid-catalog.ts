@@ -1,6 +1,7 @@
 import { list as listPricingCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import { insertDocIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
 import type { Port } from "@/lib/catalog-connect";
+import { isFabricPart } from "@/lib/fabric-part";
 import type { GridShape } from "@/lib/design/grid-symbols";
 import { keywordScopeOf } from "@/lib/design/device-types";
 
@@ -83,7 +84,7 @@ export async function listGridSymbols(seedBy = "system"): Promise<GridSymbol[]> 
   if (existing.length) return existing.sort((a, b) => a.name.localeCompare(b.name));
   const pricing = await listPricingCatalog();
   const seed = pricing
-    .filter((p) => p.category !== "Fabric" && p.category !== "Labor")
+    .filter((p) => !isFabricPart(p) && p.category !== "Labor") // #264
     .map((p) => fromPricing(p, seedBy));
   if (!seed.length) {
     const t = Date.now();
@@ -185,7 +186,7 @@ export async function ensureGridSymbolsFor(parts: CatalogPart[], by: string): Pr
   const have = new Set((await listGridSymbols(by)).map((s) => s.id));
   let added = 0;
   for (const p of parts) {
-    if (have.has(p.id) || p.category === "Fabric" || p.category === "Labor") continue;
+    if (have.has(p.id) || isFabricPart(p) || p.category === "Labor") continue;
     if (await insertDocIfAbsent<GridSymbol>("grid_catalog", fromPricing(p, by))) added += 1;
   }
   return added;

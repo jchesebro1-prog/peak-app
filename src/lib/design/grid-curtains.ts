@@ -18,6 +18,7 @@
 import { curtainCost as curtainSell } from "@/lib/curtain-pricing";
 import { fabricAreaRateOf, type CurtainSewing } from "./curtain-pricing";
 import { curtainSpecOf, type GridCurtain } from "./grid-bom";
+import { isFabricPart } from "@/lib/fabric-part";
 
 /** The catalog slice a fabric row contributes. */
 export type FabricRow = {
@@ -25,13 +26,16 @@ export type FabricRow = {
   sku: string;
   desc: string;
   category: string;
+  /** #264 — sq-ft Soft Goods count as fabric, and price at `cost` when no rate is set. */
+  unit?: string;
+  cost?: number;
   curtainAreaRate?: number;
   costPerSqft?: number;
 };
 
-/** Rows the curtain picker offers - the estimator's rule, verbatim. */
-export function isFabricRow(p: { category: string }): boolean {
-  return p.category === "Fabric";
+/** Rows the curtain picker offers - the estimator's rule (#264: isFabricPart). */
+export function isFabricRow(p: { category: string; unit?: string | null }): boolean {
+  return isFabricPart(p);
 }
 
 export type CurtainPrice = { costEach: number; priceEach: number };

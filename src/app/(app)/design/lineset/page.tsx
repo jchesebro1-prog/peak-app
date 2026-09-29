@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { all as allCustomers } from "@/lib/stores/customers";
-import { byCategory } from "@/lib/stores/catalog";
+import { fabricParts as listFabricParts } from "@/lib/stores/catalog";
 import { listDesigns, getDesign } from "@/lib/stores/studio-designs";
 import { DEFAULT_LINESET_INPUTS, type LinesetInputs } from "@/lib/design/lineset";
 import type { WeightDefaults, WeightLine } from "@/lib/design/steel";
@@ -117,7 +117,7 @@ export default async function LinesetBuilderPage({
     allCustomers(),
     listDesigns({ kind: "lineset" }),
     listDesigns({ kind: "weights" }), // legacy records stay openable here
-    byCategory("Fabric"),
+    listFabricParts(), // #264: Fabric + Theatrical/Soft Goods sold per sq ft
   ]);
   const customers = custs.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name));
   const designId = Array.isArray(sp.design) ? sp.design[0] : sp.design;

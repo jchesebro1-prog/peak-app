@@ -231,17 +231,18 @@ export function autoTargets(cards: Array<AutoCard | SellCard>): ScopeTargets {
 export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: string; unit: string; unitSell: number };
 
 /**
- * A curtain row's swap candidates (I2): a Fabric part is a candidate only
- * when fabricAreaRateOf (#227 — the catalog rate, a seed, or cost per sq ft)
- * gives it a positive rate. A list-less, cost-less fabric priced only by area
- * rate (the normal case) is still findable, and nothing here is ever an
- * assembly (a curtain row maps to a Fabric part, never a System). The area
+ * A curtain row's swap candidates (I2): a fabric part is a candidate only
+ * when fabricAreaRateOf (#227 — the catalog rate, a seed, or cost per sq ft;
+ * #264 — else `cost` on a part sold per sq ft) gives it a positive rate. A
+ * list-less, cost-less fabric priced only by area rate (the normal case) is
+ * still findable, and nothing here is ever an assembly (a curtain row maps to
+ * a fabric part, never a System). The area
  * rate is a COST basis, so it is shown as a per-sq-ft SELL through the
  * catalog margin (the same list-less rule the Equipment map prices a fabric
  * row with) — the client never sees the raw cost rate.
  */
 export function curtainSwapHits(
-  parts: ReadonlyArray<{ sku: string; desc: string; curtainAreaRate?: number; costPerSqft?: number }>,
+  parts: ReadonlyArray<{ sku: string; desc: string; curtainAreaRate?: number; costPerSqft?: number; unit?: string; cost?: number }>,
   margin: number
 ): AutoEquipHit[] {
   return parts.flatMap((p): AutoEquipHit[] => {

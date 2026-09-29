@@ -50,6 +50,7 @@ import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { reviewLimitChipFor } from "@/lib/review-limits-server";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import type { ReviewLimitChipData } from "@/lib/review-limits";
+import { isFabricPart } from "@/lib/fabric-part";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -1213,7 +1214,9 @@ export async function searchCatalog(
 
   const parts = await catalogList();
   const scored = parts
-    .filter((p) => (cat ? (p.category || "") === cat : true))
+    // #264: "Fabric" means every fabric part (isFabricPart — Fabric, or
+    // Theatrical/Soft Goods sold per sq ft); any other category is exact.
+    .filter((p) => (!cat ? true : cat === "Fabric" ? isFabricPart(p) : (p.category || "") === cat))
     .map((p) => {
       const sku = (p.sku || "").toLowerCase();
       const desc = (p.desc || "").toLowerCase();

@@ -1,6 +1,7 @@
 import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
+import { isFabricPart } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
 import type { PortalVisibility } from "@/lib/portal-visibility";
 
@@ -48,7 +49,8 @@ export function mergeProductMetadata(
  *
  * Part shape is the prototype's entry shape exactly; the document id is the
  * SKU (the parts' natural key).
- * - `category` drives filtering. Curtain fabrics are tagged "Fabric".
+ * - `category` drives filtering. Curtain fabrics are tagged "Fabric", or
+ *   "Theatrical/Soft Goods" with a sq-ft unit (#264 — see lib/fabric-part).
  * - `costPerSqft` is only present on Fabric rows; the curtain configurator
  *   uses it as the material cost basis.
  * - Labor/travel rates are tagged "Labor"; the labor configurator reads
@@ -223,6 +225,13 @@ export async function getManyAnyCase(skus: readonly string[]): Promise<CatalogPa
 export async function byCategory(category: string): Promise<CatalogPart[]> {
   const all = await list();
   return all.filter((p) => p.category === category);
+}
+
+/** Every fabric part (#264, D473): category Fabric, or Theatrical/Soft Goods
+ *  sold per sq ft — the one isFabricPart rule. */
+export async function fabricParts(): Promise<CatalogPart[]> {
+  const all = await list();
+  return all.filter(isFabricPart);
 }
 
 /** Options for a part write. `pricedAt` is the effective date to stamp WHEN

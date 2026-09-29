@@ -18,6 +18,7 @@
  */
 import type { BomLine, PartLite } from "./grid-bom";
 import { groupOfPart, isBomGroupKey, type BomGroupKey } from "./grid-bom-groups";
+import { isFabricPart } from "@/lib/fabric-part";
 
 export const ACCESSORY_QTY_MAX = 100_000;
 /** Typo/abuse guard per option, not a policy. */
@@ -179,7 +180,7 @@ export function accessoriesCost(
 }
 
 /** The palette's placeable rule (grid-palette.ts). */
-const placeable = (p: PartLite) => !p.virtual && p.category !== "Fabric" && p.category !== "Labor";
+const placeable = (p: PartLite) => !p.virtual && !isFabricPart(p) && p.category !== "Labor";
 const byName = (a: PartLite, b: PartLite) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku);
 
 /**

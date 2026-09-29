@@ -22599,7 +22599,7 @@ import { sqftRateFromLinearYard as fab227FromLinYd, sqftRateFromSquareYard as fa
   ok(frf.startsWith('"use client"') && !/from "@\/lib\/stores\/|from "@\/db|curtain-pricing"/.test(frf), "#227 catalog editor: the rate field is a client component importing no store or cost module");
   ok(frf.includes('name="curtainAreaRate"') && frf.includes('name="boltWidthIn"') && frf.includes("$/sq ft fabric"), "#227 catalog editor: it posts curtainAreaRate + boltWidthIn under the spec's label (#227 late: $/sq ft fabric)");
   const catPage227 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/page.tsx"), "utf8");
-  ok(catPage227.includes('part?.category === "Fabric" && (') && catPage227.includes("<FabricRateField"), "#227 catalog editor: only Fabric parts show the $/sq ft field");
+  ok(catPage227.includes("part && isFabricPart(part) && (") && catPage227.includes("<FabricRateField"), "#227 catalog editor: only fabric parts (#264: isFabricPart) show the $/sq ft field");
 }
 
 /* ====== #227 T3: labels — $X/sq ft fabric (#227 late; was sewn incl. making) / No $/sq ft set ====== */
@@ -22620,7 +22620,7 @@ import { curtainSwapHits as fab227Swap3 } from "@/lib/design/auto-estimate";
   const bare = fab227PriceCell3({ kind: "part", sku: "FAB227-BARE" }, drawDef, ctxOf({ sku: "FAB227-BARE", desc: "Bare", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }));
   ok(bare.status === "needs-part" && bare.reason === "FAB227-BARE: No $/sq ft set", "#227 labels: a rateless fabric on a curtain row is needs-a-part with No $/sq ft set");
   const notFabric = fab227PriceCell3({ kind: "part", sku: "FAB227-HB" }, drawDef, ctxOf({ sku: "FAB227-HB", desc: "Headblock", unit: "ea", cost: 500, list: 700, category: "Rigging Hardware" }));
-  ok(notFabric.status === "needs-part" && notFabric.reason === "FAB227-HB is not a Fabric part", "#227 labels: a non-fabric part on a curtain row says so");
+  ok(notFabric.status === "needs-part" && notFabric.reason === "FAB227-HB is not a fabric (category Fabric, or Theatrical/Soft Goods sold per sq ft)", "#227 labels: a non-fabric part on a curtain row says so");
 
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const modal = src("src/app/(app)/estimator/curtain-modal.tsx");
@@ -23458,7 +23458,8 @@ import type { PartLite as P230 } from "@/lib/design/grid-bom";
   const src230 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   for (const f of ["src/lib/design/grid-bom-groups.ts", "src/lib/design/grid-accessories.ts"]) {
     const vi = [...src230(f).matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].map((mm) => mm[1]);
-    ok(vi.every((s) => s.startsWith("./")), `#230: ${f} value-imports only sibling pure modules (${vi.join(", ")})`);
+    // #264: @/lib/fabric-part (pure, client-safe) is the one allowed non-sibling import.
+    ok(vi.every((s) => s.startsWith("./") || s === "@/lib/fabric-part"), `#230: ${f} value-imports only sibling pure modules (${vi.join(", ")})`);
   }
   const gq230 = src230("src/lib/design/grid-quote.ts");
   ok(gq230.includes("accessoryBomLines(accessories, tierCatalog)") && gq230.includes("accessoriesCost(accessories, tierCatalog)") && gq230.includes("!accessories.length"),
@@ -26292,10 +26293,10 @@ const fwbRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   // #227: the fabric rate is refused server-side off Fabric and above the ceiling.
   ok(fwbFabricProblem("Fabric", undefined) === null && fwbFabricProblem("Lighting", undefined) === null && fwbFabricProblem("Fabric", 4.85) === null && fwbFabricProblem("Fabric", fwbFabricMax) === null,
     "#227 final-B: a cleared rate, or a Fabric rate up to $500/sq ft, is fine");
-  ok(/Only a Fabric part/.test(fwbFabricProblem("Lighting", 4) || "") && /over \$500\/sq ft/.test(fwbFabricProblem("Fabric", 500.01) || ""), "#227 final-B: a non-Fabric rate and one over $500/sq ft are refused with a clear message");
+  ok(/Only a fabric part/.test(fwbFabricProblem("Lighting", 4) || "") && /over \$500\/sq ft/.test(fwbFabricProblem("Fabric", 500.01) || ""), "#227 final-B: a non-Fabric rate and one over $500/sq ft are refused with a clear message");
   const cat = fwbRd("src/app/(app)/catalog/actions.ts");
   const up = cat.slice(cat.indexOf("export async function upsertPart("), cat.indexOf("export async function importCatalog("));
-  ok(up.indexOf("fabricRateProblem(category, optional.curtainAreaRate)") > -1 && up.indexOf("fabricRateProblem(") < up.indexOf("await mergeUpsert(") && /partError=\$\{encodeURIComponent\(rateProblem\)\}/.test(up), "#227 final-B: upsertPart refuses a bad rate before it writes, back to the modal with the message");
+  ok(up.indexOf("fabricRateProblem(category, optional.curtainAreaRate, unit)") > -1 && up.indexOf("fabricRateProblem(") < up.indexOf("await mergeUpsert(") && /partError=\$\{encodeURIComponent\(rateProblem\)\}/.test(up), "#227 final-B: upsertPart refuses a bad rate before it writes, back to the modal with the message");
 
   // #219: Done banner when every owner stopped; per-owner lines say reload to retry.
   const cal = fwbRd("src/app/(app)/import/daylite/calendar/calendar-client.tsx");
@@ -36088,6 +36089,76 @@ import { defaultAState as c263Default, SYSCOLOR as c263Sys, VENUES as c263Venues
   const pros = c263Build({ ...base, venue: "school", sys: allOn, drape: { ...base.drape, ...drape } } as never, 8, 3, "#3a3f4a");
   ok(flatLg("FOH lighting").width === 3.5 && flatLg("FOH lighting").height === 3.5 && flatLg("Loudspeaker").width === 4 && flatLg("Loudspeaker").height === 5 && flatLg("Screen").width === 7 && flatLg("Screen").height === 1.3, "#263: legend symbol swatches (dot, loudspeaker, screen) are half size");
   ok(flatLg("Platform").width === 12 && flatLg("Seating").width === 8 && lg(pros, "Drape / curtain").width === 14 && lg(pros, "Line set").width === 14, "#263: legend swatches for non-symbols (platform, seating, drape, line set) are unchanged");
+}
+
+/* --- #264: Theatrical/Soft Goods sold per sq ft count as fabric everywhere; the fabric rate falls back to a sq-ft part's cost (D473) --- */
+import { isSqftUnit as c264Sqft, isFabricPart as c264IsFabric, SOFT_GOODS_CATEGORY as c264Soft } from "@/lib/fabric-part";
+import { fabricAreaRateOf as c264Rate } from "@/lib/design/curtain-pricing";
+import { priceCell as c264PriceCell, type PricingPart as C264Part } from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as c264Rows } from "@/lib/design/equipment-vocab";
+import { suggestParts as c264Suggest } from "@/lib/design/equipment-map-view";
+import { fabricRateProblem as c264RateProblem } from "@/app/(app)/catalog/part-form";
+import { isFabricRow as c264IsFabricRow } from "@/lib/design/grid-curtains";
+import { curtainSwapHits as c264Swap } from "@/lib/design/auto-estimate";
+import { paletteView as c264Palette } from "@/lib/design/grid-palette";
+import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
+{
+  ok(c264Soft === "Theatrical/Soft Goods", "#264: the soft-goods category is production's Theatrical/Soft Goods");
+  ok(["sq ft", "SQ FT", "sqft", "SF", "sq. ft.", "ft²", "ft2", "square feet", "sq-ft"].every((u) => c264Sqft(u)), "#264 isSqftUnit: sq ft / SQ FT / sqft / SF / sq. ft. / ft² / ft2 / square feet / sq-ft all read as square feet");
+  ok(["ea", "", "lin ft", "ft", "yd", "sq yd"].every((u) => !c264Sqft(u)) && !c264Sqft(undefined) && !c264Sqft(null), "#264 isSqftUnit: ea, blank, undefined, null, lin ft, ft, yd and sq yd do not");
+
+  ok(c264IsFabric({ category: "Fabric", unit: "ea" }) && c264IsFabric({ category: " Fabric ", unit: "sq ft" }) && c264IsFabric({ category: "Fabric" }), "#264 isFabricPart: category Fabric is fabric whatever its unit");
+  ok(c264IsFabric({ category: "Theatrical/Soft Goods", unit: "sq ft" }) && c264IsFabric({ category: "Theatrical/Soft Goods", unit: "SF" }), "#264 isFabricPart: Theatrical/Soft Goods sold per sq ft is fabric");
+  ok(!c264IsFabric({ category: "Theatrical/Soft Goods", unit: "ea" }) && !c264IsFabric({ category: "Theatrical/Soft Goods" }), "#264 isFabricPart: Theatrical/Soft Goods sold by the each (or no unit) is not");
+  ok(!c264IsFabric({ category: "Rigging Hardware", unit: "sq ft" }) && !c264IsFabric({ category: "", unit: "sq ft" }) && !c264IsFabric({}), "#264 isFabricPart: another category sold per sq ft is not fabric");
+  ok(c264IsFabricRow({ category: "Theatrical/Soft Goods", unit: "sq ft" }) && !c264IsFabricRow({ category: "Theatrical/Soft Goods", unit: "ea" }), "#264: the Grid curtain picker's isFabricRow delegates to isFabricPart");
+
+  ok(c264Rate({ sku: "RB-FAB-ENCORE-64-22-BLK", unit: "sq ft", cost: 2.84 }) === 2.84, "#264 fabricAreaRateOf: a sq-ft part with only a cost prices at that cost");
+  ok(c264Rate({ sku: "SG-EA", unit: "ea", cost: 120 }) === 0 && c264Rate({ sku: "SG-NOUNIT", cost: 120 }) === 0, "#264 fabricAreaRateOf: an each (or unit-less) part's cost is never an area rate");
+  ok(c264Rate({ sku: "SG-RATE", unit: "sq ft", cost: 2.84, curtainAreaRate: 3.1 }) === 3.1, "#264 fabricAreaRateOf: curtainAreaRate beats a sq-ft cost");
+  ok(c264Rate({ sku: "SG-CPS", unit: "sq ft", cost: 2.84, costPerSqft: 2.5 }) === 2.5, "#264 fabricAreaRateOf: costPerSqft beats a sq-ft cost");
+  ok(c264Rate({ sku: "RB-EN-22", unit: "sq ft", cost: 9 }) === 2.84, "#264 fabricAreaRateOf: a seed rate still beats a sq-ft cost");
+  ok(c264Rate({ sku: "SG-NEG", unit: "sq ft", cost: -1 }) === 0 && c264Rate({ sku: "SG-NAN", unit: "sq ft", cost: Number.NaN }) === 0, "#264 fabricAreaRateOf: a non-positive or non-finite cost is 0");
+
+  const drawDef = c264Rows.get("curtains:draw")!;
+  const ctxOf = (p: C264Part) => ({ parts: new Map<string, C264Part>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const rb = c264PriceCell({ kind: "part", sku: "RB-FAB-ENCORE-64-22-BLK" }, drawDef, ctxOf({ sku: "RB-FAB-ENCORE-64-22-BLK", desc: "Encore 22oz velour, black", unit: "sq ft", cost: 2.84, list: 0, category: "Theatrical/Soft Goods" }));
+  ok(rb.status === "part" && "areaRate" in rb && rb.areaRate === 2.84 && rb.ref === "RB-FAB-ENCORE-64-22-BLK", "#264 Equipment map: a curtain row mapped to a Soft Goods sq-ft part prices at its cost per sq ft (areaRate 2.84)");
+  const sgEa = c264PriceCell({ kind: "part", sku: "SG-PIPE-POCKET" }, drawDef, ctxOf({ sku: "SG-PIPE-POCKET", desc: "Pipe pocket", unit: "ea", cost: 40, list: 60, category: "Theatrical/Soft Goods" }));
+  ok(sgEa.status === "needs-part" && sgEa.reason === "SG-PIPE-POCKET is not a fabric (category Fabric, or Theatrical/Soft Goods sold per sq ft)", "#264 Equipment map: a curtain row mapped to a Soft Goods each part says it is not a fabric");
+  const asm = c264PriceCell({ kind: "assembly", id: "fa-x" }, drawDef, ctxOf({ sku: "X", desc: "x", unit: "ea", cost: 1, list: 1 }));
+  ok(asm.status === "needs-part" && asm.reason === "A curtain row maps to a fabric part", "#264 Equipment map: an assembly on a curtain row reads 'A curtain row maps to a fabric part'");
+
+  const catalog = [
+    { sku: "RB-FAB-TRAV", desc: "Traveler velour 22oz", category: "Theatrical/Soft Goods", unit: "sq ft" },
+    { sku: "SG-TRACK", desc: "Traveler track kit", category: "Theatrical/Soft Goods", unit: "ea" },
+  ];
+  const full = c264Suggest(catalog, c264Rows.get("curtains:fullstage")!, [], 8).map((p) => p.sku);
+  const track = c264Suggest(catalog, c264Rows.get("curtains:scenerytrack")!, [], 8).map((p) => p.sku);
+  ok(full.join() === "RB-FAB-TRAV", "#264 suggestParts: a curtain row suggests the Soft Goods sq-ft fabric, not the Soft Goods each part");
+  ok(track.join() === "SG-TRACK", "#264 suggestParts: a non-curtain row never suggests the Soft Goods sq-ft fabric");
+
+  const hits = c264Swap([{ sku: "RB-FAB-TRAV", desc: "Traveler velour 22oz", unit: "sq ft", cost: 2.8 }, { sku: "SG-TRACK", desc: "Traveler track kit", unit: "ea", cost: 90 }], 0.3);
+  ok(hits.length === 1 && hits[0].ref === "RB-FAB-TRAV" && hits[0].unitSell === 4, "#264 curtain swap: a Soft Goods sq-ft fabric with only a cost is a candidate (2.80 ÷ 0.7 = 4.00 sell); an each part is not");
+
+  const lite = (id: string, category: string, unit: string): C264Lite => ({ id, sku: id, desc: id, category, unit, list: 1, cost: 1 });
+  const pal = c264Palette([lite("RB-FAB-TRAV", "Theatrical/Soft Goods", "sq ft"), lite("SG-TRACK", "Theatrical/Soft Goods", "ea")], { tab: "favorites", search: "", scope: "", typeKey: "", mfr: "" }, [], ["RB-FAB-TRAV", "SG-TRACK"], []);
+  ok(pal.rows.map((r) => r.id).join() === "SG-TRACK", "#264 Grid palette: a Soft Goods sq-ft fabric is never placeable; a Soft Goods each part still is");
+
+  ok(c264RateProblem("Theatrical/Soft Goods", 2.84, "sq ft") === null, "#264 fabricRateProblem: a Soft Goods sq-ft part may carry a fabric rate");
+  ok(c264RateProblem("Theatrical/Soft Goods", 2.84, "ea") === "Only a fabric part (category Fabric, or Theatrical/Soft Goods sold per sq ft) carries a fabric $/sq ft rate — clear the rate or change the category.", "#264 fabricRateProblem: a Soft Goods each part is refused with the new message");
+  ok(c264RateProblem("Fabric", 2.84, "ea") === null && c264RateProblem("Fabric", 2.84) === null, "#264 fabricRateProblem: a Fabric part is fine whatever its unit");
+
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const est = src("src/app/(app)/estimator/page.tsx");
+  const line = src("src/app/(app)/design/lineset/page.tsx");
+  ok(est.includes("fabricParts(),") && !est.includes('byCategory("Fabric")') && line.includes("listFabricParts()") && !line.includes('byCategory("Fabric")'), "#264: the Estimator and Lineset read fabrics through fabricParts(), not byCategory(\"Fabric\")");
+  const ea = src("src/app/(app)/estimator/actions.ts");
+  ok(ea.includes('cat === "Fabric" ? isFabricPart(p)'), "#264: searchCatalog's \"Fabric\" filter (the Grid curtain swap) matches every fabric part");
+  const lib = ["src/lib/design/grid-palette.ts", "src/lib/design/grid-accessories.ts", "src/lib/stores/grid-projects.ts", "src/lib/stores/grid-catalog.ts", "src/lib/portal-catalog-index.ts", "src/lib/design/grid-curtains.ts", "src/lib/design/equipment-map.ts", "src/lib/design/equipment-map-view.ts"];
+  ok(lib.every((f) => !/category\s*[!=]==\s*"Fabric"/.test(src(f)) && src(f).includes("isFabricPart")), "#264: no Grid, portal or Equipment-map fabric test reads category === \"Fabric\" directly — all go through isFabricPart");
+  const fp = src("src/lib/fabric-part.ts");
+  ok(!/^import\s/m.test(fp) && !fp.includes('"use client"'), "#264: lib/fabric-part is dependency-free (client-safe)");
 }
 
 /* ======================================================================
