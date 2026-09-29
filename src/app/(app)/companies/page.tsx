@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
-import { deriveInitials, fallbackColor } from "@/lib/team";
+import { can, deriveInitials, fallbackColor } from "@/lib/team";
+import { DeleteCompanyButton } from "./delete-company-button";
 import { all as allCustomers, primaryLoc } from "@/lib/stores/customers";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects } from "@/lib/stores/projects";
@@ -73,6 +74,7 @@ export default async function CustomersPage({
     activeUsers(),
     getSettings(),
   ]);
+  const canDelete = can("create", me.roles);
   const fieldDefs = resolveFieldDefs(settings.customerFieldDefs);
   const venueTypes = venueTypesFrom(settings.venueTypes);
 
@@ -366,11 +368,10 @@ export default async function CustomersPage({
                   (venueN > 1 ? " · " + venueN + " venues" : "");
                 const d = travel.byId.get(c.id);
                 return (
+                  <div key={c.id} className="cu-row" style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8" }}>
                   <Link
-                    key={c.id}
                     href={`/companies/${encodeURIComponent(c.id)}`}
-                    className="cu-row"
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
+                    style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "inherit" }}
                   >
                     <span style={{ width: 38, height: 38, borderRadius: 9, background: "#f1f2f5", color: "#5b616e", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12.5, fontFamily: "var(--font-mono)", flexShrink: 0 }}>
                       {mono(c.name)}
@@ -414,6 +415,9 @@ export default async function CustomersPage({
                       </span>
                     </span>
                   </Link>
+                  {/* #278 — delete from the directory; same soft delete as the Edit dialog */}
+                  {canDelete && <DeleteCompanyButton id={c.id} name={c.name} quoteCount={quoteCount} />}
+                  </div>
                 );
               })}
               {sorted.length === 0 && (
