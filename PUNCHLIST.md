@@ -9573,3 +9573,17 @@ the difference, so the file always totals to the estimate's material cost (freig
 
 **Not in scope:** Grid quotes (flat `spec.lines`, opened in the Grid, not the Estimator) and service quotes. The spec
 builder's BOM (`src/lib/specs/quote-bom.ts`) still reads an Estimator assembly line as one row — noted, not changed.
+
+---
+
+## 263. Quick Design plan symbols drawn at half size — DONE 2026-09-29 (D470)
+
+**Reported:** Jeff (2026-09-29, after #261): "The symbols are still huge and need to drastically be reduced."
+
+**Done.** Every equipment symbol on a Quick Design plan — loudspeakers and line arrays, lighting / electric / FOH
+lighting dots, rigging points, the console bar, screens — draws at half size (`SYMBOL_SCALE = 0.5`), scaled about its
+own centre so it stays where the layout put it. Builders tag symbols with `sym: { cx, cy }`; `<PlanSvg>` and
+`renderPlanSvgMarkup` (`src/app/(app)/design/quick/plan-svg.tsx`) both apply the scale, so saved Designs, new Grid
+base sheets and print match. The legend's symbol swatches are half size too. Walls, seats, pews, drapes, platforms,
+dimensions, the FOH MIX box and drag handles are unchanged. A church loudspeaker's clearance (`SPK_CLEAR`) follows the
+smaller glyph. Grid sheets already stored keep their old glyphs; Auto fill is unaffected. Harness `#263`. See D470.
