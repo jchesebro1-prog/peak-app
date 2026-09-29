@@ -81,13 +81,21 @@ export type TrueArcGroup = {
  */
 export type WallPair = { ref: [Pt, Pt]; faces: Array<[Pt, Pt]> };
 
-/** #255: a wall a movable element can sit against — listed so the room lies on its LEFT; the element sits on its right. */
+/**
+ * #255: a wall a movable element can sit against — listed so the room lies on its LEFT; the element sits on its
+ * right. Only its two ends are mapped and the element is laid along the straight line between them, so the wall
+ * must map straight: every point along it must land on that line at any size (one straight face, not across a
+ * blend's switch, a profile's bend or a redrawn diagonal's corner). Its drawn length must not be zero.
+ */
 export type MovableWall = { from: Pt; to: Pt };
 
 /**
  * #255: a movable element — a room drawn against a wall (the Gym Stage Booth, the Blackbox rooms). Every drawn
- * segment with both ends in `bbox`, every label anchored in it and the region `region` are lifted out of the stretch
- * and re-placed afterwards against the chosen wall, keeping their drawn size, turned to face in.
+ * segment with both ends in `bbox`, every drawn arc wholly inside it, every label anchored in it and the region
+ * `region` (which must exist) are lifted out of the stretch and re-placed afterwards against the chosen wall,
+ * keeping their drawn size, turned to face in. Only those travel: key `points` and key `lines` inside `bbox` are
+ * NOT lifted — they stay where the stretch maps them — so a template keeps them outside its movables. `id`s are
+ * unique and every wall in `walls` names a `movableWalls` entry (a template breaking either throws, named).
  */
 export type Movable = {
   id: string;

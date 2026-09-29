@@ -341,7 +341,21 @@ function redrawWalls(segs: Seg[], polys: Array<Pt[] | null>, walls: WallPair[], 
   };
 }
 
-type Owned = Map<string, { segs: Array<[Pt, Pt]>; labels: TemplateLabel[] }>;
+type Owned = Map<string, { segs: Array<[Pt, Pt]>; arcs: Pt[][]; labels: TemplateLabel[] }>;
+
+/** #255: a template's movables must name real walls and regions, one id each, on walls of some length — else a named error. */
+function checkMovables(k: TemplateKeys) {
+  const who = `venue template ${k.kind}`;
+  for (const [id, w] of Object.entries(k.movableWalls ?? {}))
+    if (Math.hypot(w.to.x - w.from.x, w.to.y - w.from.y) < 1e-9) throw new Error(`${who}: movable wall "${id}" has zero length`);
+  const seen = new Set<string>();
+  for (const m of k.movables ?? []) {
+    if (seen.has(m.id)) throw new Error(`${who}: movable id "${m.id}" is used twice`);
+    seen.add(m.id);
+    for (const w of m.walls) if (!k.movableWalls?.[w]) throw new Error(`${who}: movable ${m.id} lists wall "${w}", which is not in movableWalls`);
+    if (!k.regions[m.region]) throw new Error(`${who}: movable ${m.id} names region "${m.region}" — no such region`);
+  }
+}
 
 /**
  * #255: re-place each movable element against its wall (see Movable) — its drawn size kept, on the wall's right
@@ -353,6 +367,7 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
   const out = { polylines: [] as Pt[][], labels: [] as TemplateLabel[], regions: {} as Record<string, Pt[]>, movables: {} as Record<string, PlacedMovable>, warnings: [] as string[] };
   const movs: Movable[] = k.movables ?? [];
   if (!movs.length) return out;
+  checkMovables(k);
   const gap = k.movableGap ?? 24;
   const walls: Record<string, { from: Pt; u: Pt; n: Pt; len: number; to: Pt }> = {};
   for (const [id, w] of Object.entries(k.movableWalls ?? {})) {
@@ -366,7 +381,8 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
     // Element-local coordinates: s along its home wall from the anchor, t out from the wall (outside the room).
     const local = (p: Pt) => ({ s: dot(sub(p, m.home.anchor), u0), t: dot(sub(p, m.home.anchor), n0) });
     const reg = k.regions[m.region];
-    const pts = [...(owned.get(m.id)?.segs ?? []).flat(), ...(reg ? pathPoints(reg) : [])].map(local);
+    const own = owned.get(m.id);
+    const pts = [...(own?.segs ?? []).flat(), ...(own?.arcs ?? []).flat(), ...(reg ? pathPoints(reg) : [])].map(local);
     if (!pts.length) throw new Error(`venue template ${k.kind}: movable ${m.id} owns no drawn lines and has no region`);
     const sMin = Math.min(...pts.map((q) => q.s)), sMax = Math.max(...pts.map((q) => q.s));
     const tMin = Math.min(...pts.map((q) => q.t)), tMax = Math.max(...pts.map((q) => q.t));
@@ -396,9 +412,14 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
     const fine = on.every((e, i) => e.c >= e.lo - 1e-6 && e.c <= e.hi + 1e-6 && (i === 0 || e.c - on[i - 1].c >= on[i - 1].sMax - e.sMin + gap - 1e-6));
     if (!fine) {
       out.warnings.push(`Not everything fits on the ${k.movableWallLabels?.[wid] ?? wid} wall — move a room to another wall.`);
+      // #255 T11 minors: one group — every room in order, `gap` apart — centred on the wall, so nothing overlaps and
+      // the overhang splits evenly past both corners.
+      const total = on.reduce((n, e) => n + e.sMax - e.sMin, 0) + gap * (on.length - 1);
+      let at = (walls[wid].len - total) / 2;
       for (const e of on) {
         e.fits = false;
-        if (e.hi < e.lo) e.c = (e.lo + e.hi) / 2;
+        e.c = at - e.sMin;
+        at += e.sMax - e.sMin + gap;
       }
     }
   }
@@ -409,6 +430,7 @@ function placeMovables(k: TemplateKeys, d: StretchDims, map: (p: Pt) => Pt, owne
       return add(A, add(mul(W.u, q.s), mul(W.n, q.t)));
     };
     for (const [a, b] of owned.get(e.m.id)?.segs ?? []) out.polylines.push(densifySegment(a, b).map(place));
+    for (const arc of owned.get(e.m.id)?.arcs ?? []) out.polylines.push(arc.map(place));
     for (const l of owned.get(e.m.id)?.labels ?? []) out.labels.push({ text: l.text, h: l.h, ...place(l) });
     const reg = k.regions[e.m.region];
     if (reg) out.regions[e.m.region] = densifyPath(pathPoints(reg), true).map(place);
@@ -522,7 +544,7 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   // #255: movable elements' lines, labels and regions are lifted out of the stretch and placed after it.
   const movs = k.movables ?? [];
   const ownerOf = (a: Pt, b: Pt = a) => movs.find((m) => inBox(a, m.bbox) && inBox(b, m.bbox));
-  const owned: Owned = new Map(movs.map((m) => [m.id, { segs: [], labels: [] }]));
+  const owned: Owned = new Map(movs.map((m) => [m.id, { segs: [], arcs: [], labels: [] }]));
   const movableRegions = new Set(movs.map((m) => m.region));
 
   const segPolys: Array<Pt[] | null> = t.segments.map(([x1, y1, x2, y2]) => {
@@ -579,6 +601,13 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
 
   const polylines: Pt[][] = segPolys.filter((p): p is Pt[] => !!p);
   for (const arc of t.arcs) {
+    // #255 T11 minors: an arc wholly inside a movable's box is lifted with it, like its lines.
+    const raw = arcPoints(arc, arc.a0, arc.a1);
+    const m = movs.find((mv) => raw.every((p) => inBox(p, mv.bbox)));
+    if (m) {
+      owned.get(m.id)!.arcs.push(raw);
+      continue;
+    }
     const g = groupOf(arc);
     polylines.push(g ? trueArc(arc, arc.a0, arc.a1, g).pts : arcPoints(arc, arc.a0, arc.a1).map(map));
   }

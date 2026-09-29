@@ -34998,3 +34998,59 @@ async function c255T11MovablesAsyncChecks(): Promise<void> {
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
   ok(/baseSheetMovables/.test(fill), "#255 T11: Auto fill lays out on the stamped Booth position");
 }
+
+/* --- #255 T11 review minors (Engine III): overflow as one centred group, named validation errors, lifted arcs --- */
+{
+  const tpl: C255T9Tpl = {
+    kind: "mv", source: "mv", units: "in", extents: { minX: -100, minY: -130, maxX: 100, maxY: 130 }, labels: [],
+    arcs: [{ cx: 0, cy: -115, r: 5, a0: 0, a1: 360 }],
+    segments: [[-100, -100, 100, -100], [100, -100, 100, 100], [-100, 100, 100, 100], [-100, -100, -100, 100], [-20, -130, 20, -130], [-20, -130, -20, -100], [20, -130, 20, -100], [-20, 130, 20, 130], [-20, 100, -20, 130], [20, 100, 20, 130]],
+  };
+  const all = ["bottom", "right", "top", "left"];
+  const keys: C255T9Keys = {
+    kind: "mv", cx: 0, x: { kind: "spans", spans: [{ to: 100, drive: "pro" }] },
+    ySpans: [{ from: 100, to: -100, drive: "houseOpen" }], origin: 100, stageDepthTo: 100, houseDepthTo: -100,
+    regions: { Room: [{ x: -100, y: 100 }, { x: 100, y: 100 }, { x: 100, y: -100 }, { x: -100, y: -100 }], A: [{ x: -20, y: -100 }, { x: 20, y: -100 }, { x: 20, y: -130 }, { x: -20, y: -130 }], B: [{ x: -20, y: 130 }, { x: 20, y: 130 }, { x: 20, y: 100 }, { x: -20, y: 100 }] },
+    spaces: ["Room", "A", "B"], roles: { stage: "Room", house: "Room" }, lines: {}, points: {}, requiredLabels: [],
+    defaults: { proWidthFt: 200 / 12, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 200 / 12 },
+    movableWalls: { bottom: { from: { x: -100, y: -100 }, to: { x: 100, y: -100 } }, right: { from: { x: 100, y: -100 }, to: { x: 100, y: 100 } }, top: { from: { x: 100, y: 100 }, to: { x: -100, y: 100 } }, left: { from: { x: -100, y: 100 }, to: { x: -100, y: -100 } } },
+    movables: [
+      { id: "a", region: "A", bbox: { minX: -21, maxX: 21, minY: -131, maxY: -99.5 }, home: { wall: "bottom", anchor: { x: 0, y: -100 } }, walls: all },
+      { id: "b", region: "B", bbox: { minX: -21, maxX: 21, minY: 99.5, maxY: 131 }, home: { wall: "top", anchor: { x: 0, y: 100 } }, walls: all },
+    ],
+  };
+  const D = (o: Record<string, unknown> = {}) => ({ proWidthFt: 200 / 12, wingFt: 0, stageDepthFt: 0, houseWidthFt: 0, houseDepthFt: 200 / 12, pit: false, ...o });
+  const box = (pts: Array<{ x: number; y: number }>) => ({ x0: Math.min(...pts.map((p) => p.x)), x1: Math.max(...pts.map((p) => p.x)) });
+  // A too-full wall: both rooms (40" each + a 24" gap = 104") laid out as one group centred on the run.
+  for (const wallIn of [80, 30]) {
+    const p = c255T9Stretch(tpl, keys, D({ proWidthFt: wallIn / 12, movables: { a: { wall: "bottom", t: 0.2 }, b: { wall: "bottom", t: 0.9 } } }));
+    // Order-agnostic: on a run shorter than one room its t runs backwards, so either room may come first.
+    const [A, B] = [box(p.regions.A), box(p.regions.B)].sort((u, v) => u.x0 - v.x0);
+    ok(
+      p.warnings.length === 1 && !p.movables.a.fits && !p.movables.b.fits && Math.abs(B.x0 - A.x1 - 24) < 1e-9 && Math.abs(A.x0 + B.x1) < 1e-9 && Math.abs(A.x0 + 52) < 1e-9,
+      `#255 T11 minors: a ${wallIn}" wall too short for both rooms lays them out as one centred group — 24" apart, never overlapping, the overhang split evenly past both corners`
+    );
+  }
+  // Validation: authoring mistakes throw, naming the template, the room and what's wrong.
+  const throws = (k: C255T9Keys, re: RegExp) => {
+    try {
+      c255T9Stretch(tpl, k, D());
+      return false;
+    } catch (e) {
+      return re.test(String((e as Error).message));
+    }
+  };
+  const [ma, mb] = keys.movables!;
+  ok(throws({ ...keys, movables: [{ ...ma, walls: ["bottom", "nowhere"] }, mb] }, /venue template mv: movable a.*wall "nowhere".*not in movableWalls/), "#255 T11 minors: an allowed wall that isn't in movableWalls throws, named");
+  ok(throws({ ...keys, movables: [{ ...ma, region: "Nope" }, mb] }, /venue template mv: movable a.*region "Nope".*no such region/), "#255 T11 minors: a movable whose region doesn't exist throws, named");
+  ok(throws({ ...keys, movables: [ma, { ...mb, id: "a" }] }, /venue template mv: movable id "a" is used twice/), "#255 T11 minors: two movables with one id throw, named");
+  ok(throws({ ...keys, movableWalls: { ...keys.movableWalls, top: { from: { x: 5, y: 100 }, to: { x: 5, y: 100 } } } }, /venue template mv: movable wall "top" has zero length/), "#255 T11 minors: a zero-length movable wall throws, named");
+  // A drawn arc inside a movable's box travels with it (lifted like its lines), turned with it.
+  const home = c255T9Stretch(tpl, keys, D());
+  const circle = (p: typeof home) => p.polylines.find((pl) => pl.length > 20 && pl.every((q) => Math.abs(Math.hypot(q.x - pl[0].x, q.y - pl[0].y)) <= 10 + 1e-9))!;
+  const hc = circle(home), hx = hc.map((q) => q.x), hy = hc.map((q) => q.y);
+  ok(!!hc && Math.abs(Math.min(...hx) + 5) < 1e-9 && Math.abs(Math.max(...hy) + 110) < 1e-9, "#255 T11 minors: at home a movable's own arc stays where it was drawn");
+  const left = c255T9Stretch(tpl, keys, D({ movables: { a: { wall: "left", t: 0.5 } } }));
+  const lc = circle(left), lx = lc.map((q) => q.x), ly = lc.map((q) => q.y);
+  ok(!!lc && Math.abs((Math.min(...lx) + Math.max(...lx)) / 2 + 115) < 1e-9 && Math.abs((Math.min(...ly) + Math.max(...ly)) / 2) < 1e-9 && left.polylines.length === home.polylines.length, "#255 T11 minors: moved to the left wall, the arc goes with the room (centre 15\" out from the wall, mid-run)");
+}
