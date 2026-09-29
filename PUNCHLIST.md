@@ -9681,3 +9681,18 @@ attached file (vendor files are never deleted). Move now shares its persistence 
 (`placeSystemInEstimate`) and is otherwise unchanged. Pure `src/app/(app)/estimator/copy-system.ts`
 (`copySectionForTarget`), `copySystemToEstimateAction`, tier helpers exported from `tier-reprice.ts`. Harness `#266`.
 See D476.
+
+## 268. Design Dashboard — rename and delete right on each design card — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29, screenshot of /design/designs): "I still need the ability to edit and delete from this
+screen designs." Delete existed only in the detail panel reached by clicking a card's title; nothing on this screen
+could rename a design (an "Untitled system design" stayed untitled until opened in The Grid).
+
+**Done.** Every design card gains a pencil (Rename) and a trash can (Delete) beside Open / Add to Quotes, shown to anyone
+with `create` (the same gate as the detail panel's Delete and the Grid editor's rename). Rename swaps the card title for
+an inline field (old name pre-selected; Enter saves, Esc cancels). A Grid (manual-layout) design renames through
+`renameGridDesignAction`, so its Grid project and every linked design take the same name; a Quick design stores the typed
+name, and Quick Design re-appends its "— Tier design (W'×D')" suffix on its next save. Delete arms a confirm row on the
+card ("Delete this design? Its plan sheets go too." for Grid designs) and runs the existing `deleteDesignAction`
+(cascades to the Grid project); deleting from a card no longer closes an unrelated open detail panel. Errors show under
+the card. New `renameDesignAction` in `src/app/(app)/design/designs/actions.ts`; UI in `design-client.tsx`.

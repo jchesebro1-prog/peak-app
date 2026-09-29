@@ -48,6 +48,7 @@ import {
   claimDesignReviewAction,
   deleteDesignAction,
   promoteDesignAction,
+  renameDesignAction,
   requestDesignChangesAction,
   setDesignTaskStatusAction,
   submitDesignReviewAction,
@@ -224,6 +225,9 @@ export default function DesignClient({
   // Two-step arm/confirm rather than window.confirm, which this app doesn't
   // use. Armed state is keyed by id so switching selection disarms it.
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [cardError, setCardError] = useState<{ id: string; msg: string } | null>(null);
 
   const deleteDesign = (id: string) => {
     setPromoteError(null);
@@ -231,14 +235,22 @@ export default function DesignClient({
       const res = await deleteDesignAction(id);
       if (!res.ok) {
         setPromoteError(res.error);
+        setCardError({ id, msg: res.error });
         return;
       }
       setArmedDelete(null);
       // The deleted record is gone from the server list; clearing ?id= keeps
       // the detail panel from pointing at a record that no longer exists.
-      router.push("/design/designs");
+      if (selectedId === id) router.push("/design/designs");
       router.refresh();
     });
+  };
+
+  const startRename = (d: DesignRecord) => {
+    setArmedDelete(null);
+    setCardError(null);
+    setRenaming(d.id);
+    setRenameDraft(d.name);
   };
 
   /* ----------------------------- selected detail ----------------------------- */
@@ -246,6 +258,21 @@ export default function DesignClient({
   const sel = selectedId ? designs.find((d) => d.id === selectedId) || null : null;
 
   const updateRecord = (rec: DesignRecord) => setPatched((m) => ({ ...m, [rec.id]: rec }));
+
+  const saveRename = (id: string) => {
+    const name = renameDraft.trim();
+    if (!name) return;
+    startTransition(async () => {
+      const res = await renameDesignAction(id, name);
+      if (!res.ok) {
+        setCardError({ id, msg: res.error });
+        return;
+      }
+      updateRecord(res.record);
+      setRenaming(null);
+      router.refresh();
+    });
+  };
 
   const doReview = (fn: () => Promise<{ ok: boolean; record?: DesignRecord; error?: string }>) => {
     startTransition(async () => {
@@ -693,9 +720,38 @@ export default function DesignClient({
                       <span style={budgetaryChip}>BUDGETARY</span>
                     </span>
                   </div>
-                  <Link href={`/design/designs?id=${encodeURIComponent(d.id)}`} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 38, fontSize: 14.5, fontWeight: 600, lineHeight: 1.3, marginTop: 12, color: "#16181d", textDecoration: "none" }}>
-                    {d.name}
-                  </Link>
+                  {renaming === d.id ? (
+                    <form onSubmit={(e) => { e.preventDefault(); saveRename(d.id); }} style={{ display: "flex", gap: 6, marginTop: 12, minHeight: 38, alignItems: "flex-start" }}>
+                      <input
+                        autoFocus
+                        onFocus={(e) => e.currentTarget.select()}
+                        value={renameDraft}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }}
+                        maxLength={200}
+                        aria-label="Design name"
+                        style={{ flex: 1, minWidth: 0, fontFamily: UI, fontSize: 13.5, fontWeight: 600, border: "1px solid #c4c9d2", borderRadius: 7, padding: "7px 9px", outline: "none" }}
+                      />
+                      <button
+                        type="submit"
+                        disabled={pending || !renameDraft.trim()}
+                        style={{ color: "#fff", background: ACCENT, border: "none", borderRadius: 7, padding: "7px 11px", fontSize: 12, fontWeight: 600, fontFamily: UI, cursor: pending || !renameDraft.trim() ? "default" : "pointer" }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRenaming(null)}
+                        style={{ color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "7px 11px", fontSize: 12, fontWeight: 600, fontFamily: UI, cursor: "pointer" }}
+                      >
+                        Cancel
+                      </button>
+                    </form>
+                  ) : (
+                    <Link href={`/design/designs?id=${encodeURIComponent(d.id)}`} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 38, fontSize: 14.5, fontWeight: 600, lineHeight: 1.3, marginTop: 12, color: "#16181d", textDecoration: "none" }}>
+                      {d.name}
+                    </Link>
+                  )}
                   <div style={{ fontFamily: MONO, fontSize: 10.5, color: "#aab0bb", marginTop: 5 }}>
                     {d.id} · {d.width || "?"}&apos; × {d.depth || "?"}&apos; × {d.grid || "?"}&apos;
                   </div>
@@ -728,23 +784,81 @@ export default function DesignClient({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "13px 16px" }}>
-                  <Link
-                    href={d.layoutMode === "manual" ? `/design/grid/${encodeURIComponent(d.gridProjectId || "")}` : `/design/quick?design=${encodeURIComponent(d.id)}`}
-                    className="dd-open-link"
-                    style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none", padding: "9px 14px", borderRadius: 8, border: "1px solid #e4e7ec", background: "#fff" }}
-                  >
-                    Open
-                  </Link>
-                  <button
-                    onClick={() => promoteDesign(d.id)}
-                    disabled={pending || incomplete}
-                    title={incomplete ? "Incomplete — map every item to a part before adding to Quotes" : undefined}
-                    className="dd-accent-btn"
-                    style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: incomplete ? "#c7cbd3" : ACCENT, border: "none", padding: "10px 12px", borderRadius: 8, cursor: pending || incomplete ? "default" : "pointer" }}
-                  >
-                    {d.quoteId ? "Update quote →" : "Add to Quotes →"}
-                  </button>
+                  {armedDelete === d.id ? (
+                    <>
+                      <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: "#a0442b" }}>
+                        Delete this design?
+                        {d.layoutMode === "manual" && (
+                          <span style={{ fontWeight: 400, color: "#8c919c", fontSize: 11.5 }}> Its plan sheets go too.</span>
+                        )}
+                      </span>
+                      <button
+                        onClick={() => deleteDesign(d.id)}
+                        disabled={pending}
+                        style={{ color: "#fff", background: "#a0442b", border: "1px solid #a0442b", padding: "9px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: UI, cursor: pending ? "default" : "pointer" }}
+                      >
+                        {pending ? "Deleting…" : "Delete"}
+                      </button>
+                      <button
+                        onClick={() => setArmedDelete(null)}
+                        style={{ color: "#3d424e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: UI, cursor: "pointer" }}
+                      >
+                        Keep
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Link
+                        href={d.layoutMode === "manual" ? `/design/grid/${encodeURIComponent(d.gridProjectId || "")}` : `/design/quick?design=${encodeURIComponent(d.id)}`}
+                        className="dd-open-link"
+                        style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none", padding: "9px 14px", borderRadius: 8, border: "1px solid #e4e7ec", background: "#fff" }}
+                      >
+                        Open
+                      </Link>
+                      <button
+                        onClick={() => promoteDesign(d.id)}
+                        disabled={pending || incomplete}
+                        title={incomplete ? "Incomplete — map every item to a part before adding to Quotes" : undefined}
+                        className="dd-accent-btn"
+                        style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: incomplete ? "#c7cbd3" : ACCENT, border: "none", padding: "10px 12px", borderRadius: 8, cursor: pending || incomplete ? "default" : "pointer" }}
+                      >
+                        {d.quoteId ? "Update quote →" : "Add to Quotes →"}
+                      </button>
+                      {/* #268 — rename + delete right on the card */}
+                      {canCreate && (
+                        <>
+                          <button
+                            onClick={() => startRename(d)}
+                            disabled={pending}
+                            title="Rename"
+                            aria-label="Rename design"
+                            className="dd-open-link"
+                            style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "9px 10px", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 8, fontFamily: UI, fontSize: 12.5, color: "#5b616e", cursor: "pointer" }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                              <path d="M11.5 2.5l2 2L6 12H4v-2l7.5-7.5z" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => { setRenaming(null); setCardError(null); setArmedDelete(d.id); }}
+                            disabled={pending}
+                            title={d.layoutMode === "manual" ? "Delete this design and its plan sheets" : "Delete this design"}
+                            aria-label="Delete design"
+                            className="dd-open-link"
+                            style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "9px 10px", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 8, fontFamily: UI, fontSize: 12.5, color: "#a0442b", cursor: "pointer" }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                              <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" strokeLinejoin="round" strokeLinecap="round" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
                 </div>
+                {cardError?.id === d.id && (
+                  <div style={{ padding: "0 16px 12px", fontSize: 11.5, color: "#b4543a" }}>{cardError.msg}</div>
+                )}
               </div>
             );
           })}
