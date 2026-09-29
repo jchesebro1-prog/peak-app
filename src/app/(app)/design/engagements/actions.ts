@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import {
   addAnnotation,
   addPhaseDocTo,
@@ -76,11 +77,13 @@ async function done(): Promise<{ ok: true }> {
  * tasks — see removeEngagement). Called directly from the detail header's
  * Delete control, not a form action, so it never redirects itself — the
  * client navigates to the hub on success.
+ * Gated on `create`, like deleting a design (#273).
  */
 export async function removeEngagementAction(
   engId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requireUser();
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "You can't delete consulting projects." };
   if (!engId) return { ok: false, error: "Missing project id." };
   const eng = await getEngagement(engId);
   if (!eng) return { ok: false, error: "That consulting project could not be found." };
