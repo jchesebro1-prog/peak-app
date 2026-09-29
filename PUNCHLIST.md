@@ -9729,3 +9729,56 @@ name, and Quick Design re-appends its "— Tier design (W'×D')" suffix on its n
 card ("Delete this design? Its plan sheets go too." for Grid designs) and runs the existing `deleteDesignAction`
 (cascades to the Grid project); deleting from a card no longer closes an unrelated open detail panel. Errors show under
 the card. New `renameDesignAction` in `src/app/(app)/design/designs/actions.ts`; UI in `design-client.tsx`.
+
+---
+
+## 269. Estimator — click an inserted labor line to reopen and edit it — OPEN (building)
+
+**Reported:** Jeff (2026-09-29): "Need the ability to edit the labor when you click the line item that inserted when
+finished." Today `addLabor` (`estimator-client.tsx`) pushes `buildLaborItems` output and `closeInput()` discards the
+configurator draft, so nothing about the crew/days/trip survives on the lines — the only fix is delete and re-add.
+
+**Plan:** every line from one "Add labor" shares a `laborGroup` id and the `LaborDraft` snapshot is stored with the
+group; clicking a group line reopens the Labor configurator pre-filled, **Update labor** replaces the group's lines in
+place at current rates (hand edits to those lines are replaced — said in the modal). Labor lines added before this
+change carry no draft and show no edit control. Being built alongside #270.
+
+---
+
+## 270. Estimator Labor — hotel, per diem, mileage (and lift) as their own lines — OPEN (building)
+
+**Reported:** Jeff (2026-09-29): "We also need to see hotels pre-diem and mileage costs on labor and insert that."
+Confirmed: **inserted as their own lines.** `computeMob` (`pricing.ts`) already computes `mileCost`, `hotelCost`,
+`foodCost` (per diem) and `liftCost`, but `buildLaborItems` folds them into one line per mobilization and the Labor
+modal shows only "2 veh · 3 nt lodging · per diem" with no dollars.
+
+**Plan:** each mobilization line becomes crew labor only; Mileage / Hotel / Per diem / Lift rental follow it as their
+own internal lines (tagged, with the basis shown, e.g. "2 vehicles × 340 mi RT × $0.70"). Cost unchanged to the cent.
+The customer document keeps folding them into their mobilization line, as it already folds shop/misc/bonus. The Labor
+modal shows the per-mobilization dollar breakdown.
+
+---
+
+## 271. Catalog — Import price book opens as a slide-over drawer — OPEN (building)
+
+**Reported:** Jeff (2026-09-29): "Import Price Book needs to be sidebar." Confirmed: a **slide-over drawer**. Today
+`?import=1` turns the catalog body into a third 360px grid column (`catalog/page.tsx`), squeezing the parts list.
+
+**Plan:** keep `?import=1` as the URL state; render `CatalogImportPanel` in a right-hand overlay drawer (backdrop, ✕,
+Esc, full width on phones) instead of a grid column.
+
+---
+
+## 272. Estimator Labor — Local trips never fill round-trip mileage, so daily mileage prices at $0 — OPEN (after #270)
+
+**Reported:** 2026-09-23 practice run (re-raised 2026-09-29): "Labor — Does travel not automatically calculate? Had to
+add round trip mileage when adding for Xavier Lighting Controls."
+
+**Cause (code-verified):** round-trip miles are only auto-filled when the trip is **Travel** (venue > 1 h away):
+`defaultLaborMobs` (`labor-defaults.ts:51`) seeds `milesRT` only when `far`, and `applyAutoTrips` /
+`applyTravelTrip` (`estimator-client.tsx`) fill it only for `tripType === "travel"`. A **Local** mobilization starts
+with blank miles and `computeMob` charges local mileage per day (`milesRT × vehicles × days`), so a blank box silently
+prices mileage at $0; the only way in is the small apply-auto-miles hint. It also needs a located venue.
+
+**Plan:** seed and re-apply the route's round-trip miles for Local mobilizations too (same "untouched only" rule —
+typed miles win), and flag a blank mileage when the venue isn't located. Build after #270 lands (same files).
