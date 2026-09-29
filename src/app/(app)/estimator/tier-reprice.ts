@@ -1,3 +1,4 @@
+import { syncLaborDraftMargins } from "./labor-group";
 import { round2 } from "./pricing";
 import type { SpecItem, SpecSection } from "./types";
 
@@ -121,17 +122,21 @@ export function repriceForTier(
   let untouched = 0;
   const out = sections.map((sec) => {
     let changed = false;
+    // #269: labor groups whose lines moved — their stored draft follows.
+    const laborGroups = new Set<string>();
     const items = sec.items.map((it) => {
       const v = classify(it, prevM, next);
       if (v.kind === "hand") handPriced++;
       if (v.kind === "untouched") untouched++;
       if (v.kind !== "reprice") return it;
       repriced++;
+      if (it.labor && it.laborGroup) laborGroups.add(it.laborGroup);
       if (v.price === it.price) return it;
       changed = true;
       return { ...it, price: v.price };
     });
-    return changed ? { ...sec, items } : sec;
+    const base = changed ? { ...sec, items } : sec;
+    return syncLaborDraftMargins(base, laborGroups, laborSeedMarginOf(prevM), laborSeedMarginOf(next));
   });
   return { sections: repriced ? out : sections, repriced, handPriced, untouched };
 }

@@ -27,6 +27,14 @@ export type SpecMob = {
   discipline: string;
 };
 
+/** #270: the travel costs a mobilization inserts as their own lines. */
+export type LaborTravelKind = "mileage" | "hotel" | "perdiem" | "lift";
+
+/** #269: the Labor configurator draft behind one labor group, kept once per
+ *  group on its section so any of its lines can reopen the configurator.
+ *  `lines` = how many lines it produced (to tell the user some were removed). */
+export type LaborGroupRecord = { draft: LaborDraft; lines: number };
+
 /** One quote line item — prototype field names, do not rename. */
 export type SpecItem = {
   id: number;
@@ -75,6 +83,16 @@ export type SpecItem = {
    *  folded into the mobilization line predate this flag; `isLaborOverheadItem`
    *  also recognizes their LAB-SHOP-/LAB-BONUS-/LAB-MISC- SKU prefixes. */
   laborOverhead?: "shop" | "bonus" | "misc";
+  /** #270: a mobilization's travel cost as its own internal line (mileage,
+   *  hotel, per diem, lift rental). Like `laborOverhead` the CUSTOMER
+   *  document never shows it — `customerLines` folds its sell into the
+   *  mobilization line sharing its `laborMobKey`. */
+  laborTravel?: LaborTravelKind;
+  /** #270: links a mobilization line and its travel lines (same key). */
+  laborMobKey?: string;
+  /** #269: every line one "Add labor" inserted shares this id; the draft
+   *  that built them is `SpecSection.laborGroups[id]` (labor-group.ts). */
+  laborGroup?: string;
   /** Orderable component detail for a catalog-backed fixture assembly. */
   components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number }>;
   /** Links this line to its VendorQuote record (#143) — one priced line per
@@ -198,6 +216,9 @@ export type SpecSection = {
    *  user turns rounding on). The server accepts only 25. */
   priceRound?: number;
   items: SpecItem[];
+  /** #269: labor group id → the configurator draft that built its lines.
+   *  Internal only; carried by save, move and copy like any section field. */
+  laborGroups?: Record<string, LaborGroupRecord>;
 };
 
 /* ---------------- configurator drafts (prototype state shapes) ---------------- */

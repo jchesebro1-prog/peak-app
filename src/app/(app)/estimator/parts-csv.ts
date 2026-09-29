@@ -74,7 +74,7 @@ function expand(
     const room = section.room?.trim() || defaultRoom.trim();
     const system = section.name;
     for (const item of section.items) {
-      if (item.labor || item.laborOverhead || item.option) continue;
+      if (item.labor || item.laborOverhead || item.laborTravel || item.option) continue;
       if (!Number.isFinite(item.qty) || item.qty <= 0) continue;
       const lineSell = lineSellOf(item);
       const note = item.internalNote?.trim() || "";

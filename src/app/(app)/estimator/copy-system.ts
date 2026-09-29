@@ -1,3 +1,4 @@
+import { syncLaborDraftMargins } from "./labor-group";
 import { lineMarginOf, round2 } from "./pricing";
 import {
   isAtTierSeed,
@@ -50,6 +51,7 @@ function keepsOwnCost(it: SpecItem): boolean {
   return !!(
     it.labor ||
     it.laborOverhead ||
+    it.laborTravel ||
     it.vendorQuoteId ||
     it.custom ||
     it.curtain ||
@@ -101,6 +103,8 @@ export function copySectionForTarget(
   let costsUpdated = 0;
   let tierRepriced = 0;
   let handPriced = 0;
+  /** #269: labor groups with a line moved to the target tier's labor seed. */
+  const repricedGroups = new Set<string>();
 
   const items = (section.items || []).map((it): SpecItem => {
     const comps = Array.isArray(it.components) ? it.components : [];
@@ -158,6 +162,7 @@ export function copySectionForTarget(
     if (atSeed) {
       const seedMoved = tierSeedMarginFor(it, src) !== tierSeedMarginFor(it, tgt);
       if (seedMoved) tierRepriced++;
+      if (seedMoved && it.labor && it.laborGroup) repricedGroups.add(it.laborGroup);
       // Unchanged cost and seed: keep the sell verbatim (labor's drift nudge,
       // a cent of rounding) rather than round-trip it through the formula.
       if (!costChanged && !seedMoved) return { ...it };
@@ -169,7 +174,14 @@ export function copySectionForTarget(
 
   // #267: a typed system sell was the source's price for the source's costs —
   // the copy is re-priced, so it drops it (auto again); priceRound carries.
-  const copied: SpecSection = { ...section, id: opts.newSectionId, items };
+  // #269: labor group drafts carry (the lines keep their laborGroup), their
+  // margin following the tier where the tier re-priced the group's lines.
+  const copied: SpecSection = syncLaborDraftMargins(
+    { ...section, id: opts.newSectionId, items },
+    repricedGroups,
+    laborSeedMarginOf(src),
+    laborSeedMarginOf(tgt)
+  );
   delete copied.sellOverride;
   return { section: copied, costsUpdated, tierRepriced, handPriced };
 }
