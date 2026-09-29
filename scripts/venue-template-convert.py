@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Venue templates (#249): convert a venue background drawing (DWG or DXF)
+"""Venue templates (#249, #255): convert a venue background drawing (DWG or DXF)
 into the Grid's venue-template JSON.
 
-  python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg
-  python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg --check
-  python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg --selftest
+  python scripts/venue-template-convert.py <kind> docs/venue-templates/source/<kind>.dwg
+  python scripts/venue-template-convert.py <kind> docs/venue-templates/source/<kind>.dwg --check
+  python scripts/venue-template-convert.py <kind> docs/venue-templates/source/<kind>.dwg --selftest
 
 Writes src/lib/design/venue-templates/<kind>.json and a preview PNG at
 docs/venue-templates/<kind>.png. Needs Homebrew `libredwg` (dwg2dxf) for
-.dwg input and Python `ezdxf` + `matplotlib` — see
+.dwg input and Python `ezdxf` + `matplotlib` - see
 docs/venue-templates/README.md. Refuses (exit 2) a drawing that is not in
 inches, has nothing drawable, or is missing a required label. Run from the
 repo root.
+
+Label overlay (#255): a drawing without text gets its labels from
+docs/venue-templates/source/<kind>.labels.json ({"labels": [{"text", "x",
+"y", "h"}]}, drawing inches, top-left anchor). Overlay labels are marked
+"added": true in the JSON. A label the drawing itself carries wins: every
+overlay label with that text is dropped.
 """
 import argparse
 import json
@@ -20,11 +26,17 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 
 # The labels each kind's key-lines file depends on (src/lib/design/venue-templates/<kind>.keys.ts).
+# A text listed n times must appear at least n times.
 REQUIRED = {
     "proscenium": ["Stage", "Pit", "Catwalk", "Center Aisle", "Booth", "Electrical Room", "MISC Rooms"],
+    "church-traditional": ["Platform", "Apse", "Nave", "Entry", "Choir Room", "Electrical Room", "Cry Room", "Storage"],
 }
+
+# Drawings far from their own origin are shifted by these drawing inches first (#255).
+ORIGIN = {}
 
 
 class Refused(Exception):
@@ -45,10 +57,31 @@ def r3(v):
     return round(float(v), 3) + 0.0  # + 0.0 turns -0.0 into 0.0
 
 
-def collect(doc):
+def overlay_for(source):
+    """The label overlay next to the source drawing, or [] when there is none."""
+    path = os.path.splitext(source)[0] + ".labels.json"
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        raw = json.load(f)
+    labels = raw.get("labels") if isinstance(raw, dict) else None
+    if not isinstance(labels, list):
+        raise Refused("%s must be {\"labels\": [...]}" % path)
+    for l in labels:
+        if not (isinstance(l, dict) and isinstance(l.get("text"), str) and l["text"].strip()
+                and all(isinstance(l.get(k), (int, float)) for k in ("x", "y", "h"))):
+            raise Refused("%s: every label needs text, x, y and h - got %r" % (path, l))
+    return labels
+
+
+def collect(doc, origin):
     """Every line / polyline edge / arc / label in model space, blocks exploded,
-    exact duplicates (Vectorworks exports each group twice) removed."""
+    exact duplicates (Vectorworks exports each group twice) removed, shifted by `origin`."""
+    ox, oy = origin
     segs, arcs, labels = {}, {}, []
+
+    def P(x, y):
+        return (r3(x - ox), r3(y - oy))
 
     def add_seg(a, b):
         if a == b:
@@ -63,12 +96,12 @@ def collect(doc):
             for v in e.virtual_entities():
                 visit(v)
         elif t == "LINE":
-            add_seg((r3(e.dxf.start.x), r3(e.dxf.start.y)), (r3(e.dxf.end.x), r3(e.dxf.end.y)))
+            add_seg(P(e.dxf.start.x, e.dxf.start.y), P(e.dxf.end.x, e.dxf.end.y))
         elif t in ("LWPOLYLINE", "POLYLINE"):
             if t == "LWPOLYLINE":
-                pts, closed = [(r3(x), r3(y)) for x, y in e.get_points("xy")], e.closed
+                pts, closed = [P(x, y) for x, y in e.get_points("xy")], e.closed
             else:
-                pts, closed = [(r3(v.dxf.location.x), r3(v.dxf.location.y)) for v in e.vertices], e.is_closed
+                pts, closed = [P(v.dxf.location.x, v.dxf.location.y) for v in e.vertices], e.is_closed
             if closed and pts:
                 pts.append(pts[0])
             for a, b in zip(pts, pts[1:]):
@@ -77,15 +110,17 @@ def collect(doc):
             a0, a1 = (e.dxf.start_angle % 360.0, e.dxf.end_angle % 360.0) if t == "ARC" else (0.0, 360.0)
             if a1 <= a0:
                 a1 += 360.0
-            arc = {"cx": r3(e.dxf.center.x), "cy": r3(e.dxf.center.y), "r": r3(e.dxf.radius), "a0": r3(a0), "a1": r3(a1)}
-            arcs[(round(arc["cx"], 2), round(arc["cy"], 2), round(arc["r"], 2), round(a0, 1), round(a1, 1))] = arc
+            cx, cy = P(e.dxf.center.x, e.dxf.center.y)
+            arc = {"cx": cx, "cy": cy, "r": r3(e.dxf.radius), "a0": r3(a0), "a1": r3(a1)}
+            arcs[(round(cx, 2), round(cy, 2), round(arc["r"], 2), round(a0, 1), round(a1, 1))] = arc
         elif t in ("TEXT", "MTEXT"):
             text = (e.plain_text() if t == "MTEXT" else e.dxf.text).strip()
             if text:
                 h = e.dxf.char_height if t == "MTEXT" else e.dxf.height
                 # MTEXT is anchored top-left (attachment 1, Vectorworks' export); TEXT at its baseline.
                 y_top = e.dxf.insert.y if t == "MTEXT" else e.dxf.insert.y + h
-                labels.append({"text": text, "x": r3(e.dxf.insert.x), "y": r3(y_top), "h": r3(h)})
+                x, y = P(e.dxf.insert.x, y_top)
+                labels.append({"text": text, "x": x, "y": y, "h": r3(h)})
         # WIPEOUT, HATCH, DIMENSION and everything else are dropped on purpose.
 
     for e in doc.modelspace():
@@ -93,22 +128,34 @@ def collect(doc):
     return (
         sorted(segs.values()),
         sorted(arcs.values(), key=lambda a: (a["cx"], a["cy"], a["r"], a["a0"])),
-        sorted(labels, key=lambda l: (l["text"], l["x"], l["y"])),
+        labels,
     )
 
 
-def build(kind, dxf_path, source_rel, required):
+def merge_labels(drawn, overlay, origin):
+    ox, oy = origin
+    drawn_texts = {l["text"] for l in drawn}
+    out = list(drawn)
+    for o in overlay:
+        if o["text"] in drawn_texts:
+            continue  # the drawing's own label wins
+        out.append({"text": o["text"], "x": r3(o["x"] - ox), "y": r3(o["y"] - oy), "h": r3(o["h"]), "added": True})
+    return sorted(out, key=lambda l: (l["text"], l["x"], l["y"]))
+
+
+def build(kind, dxf_path, source_rel, required, overlay, origin):
     import ezdxf
 
     doc = ezdxf.readfile(dxf_path)
     units = doc.header.get("$INSUNITS", 0)
     if units != 1:
         raise Refused("the drawing is not in inches ($INSUNITS=%s) - set the document units to inches before exporting" % units)
-    segments, arcs, labels = collect(doc)
+    segments, arcs, drawn = collect(doc, origin)
     if not segments and not arcs:
         raise Refused("nothing drawable was found (lines, polylines, arcs)")
-    have = {l["text"] for l in labels}
-    missing = [t for t in required if t not in have]
+    labels = merge_labels(drawn, overlay, origin)
+    need, have = Counter(required), Counter(l["text"] for l in labels)
+    missing = ["%s x%d (found %d)" % (t, n, have[t]) if n > 1 else t for t, n in sorted(need.items()) if have[t] < n]
     if missing:
         raise Refused("missing required label(s): " + ", ".join(missing))
     pts = [(s[0], s[1]) for s in segments] + [(s[2], s[3]) for s in segments]
@@ -121,14 +168,19 @@ def build(kind, dxf_path, source_rel, required):
         "minX": r3(min(p[0] for p in pts)), "minY": r3(min(p[1] for p in pts)),
         "maxX": r3(max(p[0] for p in pts)), "maxY": r3(max(p[1] for p in pts)),
     }
-    return {"kind": kind, "source": source_rel, "units": "in", "extents": ext, "segments": segments, "arcs": arcs, "labels": labels}
+    obj = {"kind": kind, "source": source_rel}
+    if origin != (0.0, 0.0):
+        obj["origin"] = [r3(origin[0]), r3(origin[1])]
+    obj.update({"units": "in", "extents": ext, "segments": segments, "arcs": arcs, "labels": labels})
+    return obj
 
 
 def dump(obj):
     # One segment / arc / label per line: small, stable diffs when a drawing changes.
     out = ["{"]
-    for k in ("kind", "source", "units", "extents"):
-        out.append("  %s: %s," % (json.dumps(k), json.dumps(obj[k])))
+    for k in ("kind", "source", "origin", "units", "extents"):
+        if k in obj:
+            out.append("  %s: %s," % (json.dumps(k), json.dumps(obj[k])))
     keys = ("segments", "arcs", "labels")
     for key in keys:
         rows = [json.dumps(v) for v in obj[key]]
@@ -153,31 +205,54 @@ def preview(obj, path):
         angs = [math.radians(a["a0"] + (a["a1"] - a["a0"]) * i / n) for i in range(n + 1)]
         ax.plot([a["cx"] + a["r"] * math.cos(t) for t in angs], [a["cy"] + a["r"] * math.sin(t) for t in angs], color="#3a3f4a", linewidth=0.6)
     for l in obj["labels"]:
-        ax.text(l["x"], l["y"], l["text"], fontsize=7, va="top", color="#b4543a")
+        # Blue = placed by Claude from the overlay; rust = drawn by Jeff.
+        ax.text(l["x"], l["y"], l["text"], fontsize=7, va="top", color="#3155a8" if l.get("added") else "#b4543a")
     ax.set_aspect("equal")
     ax.axis("off")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
 
-def selftest(kind, dxf, source, required, tmp):
+def selftest(kind, dxf, source, required, overlay, origin, tmp):
     import ezdxf
 
-    build(kind, dxf, source, required)  # the real drawing converts
-    doc = ezdxf.readfile(dxf)
+    build(kind, dxf, source, required, overlay, origin)  # the real drawing converts
     victim = required[-1]
-    for e in list(doc.modelspace().query("MTEXT TEXT")):
-        if (e.plain_text() if e.dxftype() == "MTEXT" else e.dxf.text).strip() == victim:
-            doc.modelspace().delete_entity(e)
-    broken = os.path.join(tmp, "broken.dxf")
-    doc.saveas(broken)
-    try:
-        build(kind, broken, source, required)
-    except Refused as e:
-        print("selftest OK - a drawing without %r is refused: %s" % (victim, e))
-        return 0
-    print("selftest FAILED - a drawing without %r converted anyway" % victim, file=sys.stderr)
-    return 1
+    if any(o["text"] == victim for o in overlay):
+        idx = max(i for i, o in enumerate(overlay) if o["text"] == victim)
+        trimmed = overlay[:idx] + overlay[idx + 1:]
+        try:
+            build(kind, dxf, source, required, trimmed, origin)
+            print("selftest FAILED - an overlay without one %r converted anyway" % victim, file=sys.stderr)
+            return 1
+        except Refused as e:
+            print("selftest OK - an overlay without one %r is refused: %s" % (victim, e))
+    else:
+        doc = ezdxf.readfile(dxf)
+        for e in list(doc.modelspace().query("MTEXT TEXT")):
+            if (e.plain_text() if e.dxftype() == "MTEXT" else e.dxf.text).strip() == victim:
+                doc.modelspace().delete_entity(e)
+        broken = os.path.join(tmp, "broken.dxf")
+        doc.saveas(broken)
+        try:
+            build(kind, broken, source, required, overlay, origin)
+            print("selftest FAILED - a drawing without %r converted anyway" % victim, file=sys.stderr)
+            return 1
+        except Refused as e:
+            print("selftest OK - a drawing without %r is refused: %s" % (victim, e))
+    single = [o for o in overlay if required.count(o["text"]) <= 1]
+    if single:
+        o = single[0]
+        doc = ezdxf.readfile(dxf)
+        doc.modelspace().add_mtext(o["text"], dxfattribs={"insert": (o["x"] + 10.0, o["y"]), "char_height": o["h"]})
+        drawn = os.path.join(tmp, "drawn.dxf")
+        doc.saveas(drawn)
+        got = [l for l in build(kind, drawn, source, required, overlay, origin)["labels"] if l["text"] == o["text"]]
+        if len(got) != 1 or got[0].get("added") or abs(got[0]["x"] - r3(o["x"] + 10.0 - origin[0])) > 0.001:
+            print("selftest FAILED - a drawn %r did not win over the overlay: %r" % (o["text"], got), file=sys.stderr)
+            return 1
+        print("selftest OK - a drawn %r wins over the overlay label" % o["text"])
+    return 0
 
 
 def main(argv):
@@ -187,20 +262,22 @@ def main(argv):
     p.add_argument("--out")
     p.add_argument("--preview")
     p.add_argument("--check", action="store_true", help="exit 1 if the committed JSON differs from a fresh conversion")
-    p.add_argument("--selftest", action="store_true", help="prove a drawing with a required label removed is refused")
+    p.add_argument("--selftest", action="store_true", help="prove a missing required label is refused and a drawn label wins")
     args = p.parse_args(argv)
     required = REQUIRED.get(args.kind)
     if required is None:
         print("unknown kind %r - add its required labels to REQUIRED" % args.kind, file=sys.stderr)
         return 2
+    origin = tuple(float(v) for v in ORIGIN.get(args.kind, (0.0, 0.0)))
     out = args.out or os.path.join("src/lib/design/venue-templates", args.kind + ".json")
     prev = args.preview or os.path.join("docs/venue-templates", args.kind + ".png")
     with tempfile.TemporaryDirectory() as tmp:
         try:
+            overlay = overlay_for(args.source)
             dxf = to_dxf(args.source, tmp)
             if args.selftest:
-                return selftest(args.kind, dxf, args.source, required, tmp)
-            obj = build(args.kind, dxf, args.source, required)
+                return selftest(args.kind, dxf, args.source, required, overlay, origin, tmp)
+            obj = build(args.kind, dxf, args.source, required, overlay, origin)
         except Refused as e:
             print("venue-template-convert: refused - " + str(e), file=sys.stderr)
             return 2

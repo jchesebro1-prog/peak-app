@@ -33985,3 +33985,16 @@ async function specRecordDupSectionAsyncChecks(): Promise<void> {
   ok(!!placed, `dup-section: LS-P places under PS-260961-028 despite the duplicate-number empty starter (leftOut: ${JSON.stringify(assembled.checklist.leftOut)})`);
 }
 
+
+/* --- #255 T1: converter — Church Traditional template with Claude's label overlay --- */
+{
+  const c255T1Read = (p: string) => JSON.parse(readFileSync(join(process.cwd(), p), "utf8"));
+  const tpl = c255T1Read("src/lib/design/venue-templates/church-traditional.json");
+  const want = ["Apse", "Choir Room", "Cry Room", "Electrical Room", "Entry", "Nave", "Platform", "Storage"];
+  ok(tpl.kind === "church-traditional" && tpl.units === "in" && tpl.source === "docs/venue-templates/source/church-traditional.dwg", "#255 T1: the Church Traditional template is converted from its committed DWG, in inches");
+  ok(tpl.segments.length === 44 && tpl.arcs.length === 2, `#255 T1: 44 distinct lines and the apse's two arcs survive the dedupe (got ${tpl.segments.length} / ${tpl.arcs.length})`);
+  ok(tpl.labels.map((l: { text: string }) => l.text).sort().join("|") === want.join("|") && tpl.labels.every((l: { added?: boolean }) => l.added === true), "#255 T1: the drawing has no text, so all eight labels come from the overlay and are marked added");
+  ok(!("origin" in tpl) && !("origin" in c255T1Read("src/lib/design/venue-templates/proscenium.json")), "#255 T1: no origin shift for drawings near their own origin");
+  const conv = readFileSync(join(process.cwd(), "scripts/venue-template-convert.py"), "utf8");
+  ok(conv.includes("Counter(required)") && conv.includes('"added": True') && conv.includes("ORIGIN = {"), "#255 T1: the converter counts required labels, marks overlay labels and supports an origin shift");
+}

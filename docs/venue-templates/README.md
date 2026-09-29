@@ -1,4 +1,4 @@
-# Venue templates (#249)
+# Venue templates (#249, #255)
 
 Background drawings for generated plans. Each venue kind has:
 
@@ -13,6 +13,17 @@ Background drawings for generated plans. Each venue kind has:
 - Label every area you want tracked with plain text inside it (e.g. "Catwalk").
 - Layers/classes don't matter; fills (wipeouts, hatches) and dimensions are ignored.
 
+## Label overlay (#255)
+
+Jeff's church and later drawings carry no text. The areas are named in
+`source/<kind>.labels.json` — `{"labels": [{"text", "x", "y", "h"}]}`, drawing
+inches, top-left anchor — and the converter merges them into the JSON with
+`"added": true` (drawn in blue in the preview). A later DWG that carries its
+own labels needs no overlay; a drawn label wins over every overlay label of
+the same text. A text required n times (e.g. four "Storage" rooms) must
+appear n times. Drawings far from their origin list an `ORIGIN` shift in the
+converter; the JSON then records `"origin"`.
+
 ## Setup (once per machine)
 
     brew install libredwg
@@ -24,6 +35,7 @@ Background drawings for generated plans. Each venue kind has:
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg --check
     ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py proscenium docs/venue-templates/source/proscenium.dwg --selftest
+    ~/.venvs/venue-templates/bin/python scripts/venue-template-convert.py church-traditional docs/venue-templates/source/church-traditional.dwg --check
 
 `--check` exits 1 if the committed JSON is not what the source converts to.
 
