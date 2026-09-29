@@ -9421,7 +9421,7 @@ system key. Brainstorm answers Q1–Q5 are logged in D447–D451.
 - Two concurrent creates in one section can race the spec-id allocation (the save re-checks and retries once).
 - Ambiguity is detected only among `ready` records, not among drafts.
 
-## 254. Customer pricing tiers re-price the quote when the customer changes — IN PROGRESS (Estimator done; service builders next)
+## 254. Customer pricing tiers re-price the quote when the customer changes — DONE 2026-09-28 (D457)
 
 **Reported:** Jeff (2026-09-28): "How do we get it so the pricing tiers automatically apply to the customer when
 we are quoting?" Proposed: re-price every line still at the previous tier's margin when the customer or contact
@@ -9435,5 +9435,10 @@ alone. A banner reads "Re-priced N lines to Gold (20%) · kept M hand-priced lin
 previous sections, and the banner clears on the next edit. Save persists it. Nothing about tiers prints on the
 customer document. See D457.
 
-**Next.** Service builders (flame test, repair, inspection): re-seed the margin knob on a customer **and** a
-contact change when it's still at the previous seed; keep a hand-set knob with a "Use <Tier>" prompt.
+**Done (service builders).** Flame test, repair and inspection re-seed the margin knob on a customer **and** a
+contact change: contact's own tier → company tier → the service's own default margin (not tier Base's 30%). A knob
+still at the previous seed follows; a hand-set knob is kept with "Kept your 25% margin — Gold is 20% · Use Gold"
+under it (one click applies it; moving the knob clears it). A new customer still clears a typed total; a contact
+change doesn't. A saved quote now reopens at its own saved margin (it used to reopen at the Estimating Rules
+default) and is never re-seeded on load. One pure helper, `src/lib/tier-seed.ts`. Rentals don't seed from tiers,
+so they're unchanged; consulting has no tiers. See D457.

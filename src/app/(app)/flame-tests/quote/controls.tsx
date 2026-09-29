@@ -24,6 +24,9 @@ import {
   type TravelPlan,
 } from "@/lib/travel-plan";
 import { ServiceTotalField } from "@/components/service-total-field";
+import { TierSeedPrompt } from "@/components/tier-seed-prompt";
+import { initialTierSeed, reseedKnob, seedFor, type TierPrompt } from "@/lib/tier-seed";
+import type { PricingTier } from "@/lib/identity/config";
 import {
   finishFlame,
   fmtPts,
@@ -59,6 +62,8 @@ export type BuilderLocation = {
 };
 export type BuilderContact = { name: string; role: string; email: string; primary: boolean   /** Personal tier margin when the contact has their own tier (item 11). */
   tierMargin?: number | null;
+  /** The contact's own tier — labels the #254 "Use <Tier>" prompt. */
+  tier?: PricingTier | null;
 };
 export type BuilderCustomer = {
   id: string;
@@ -67,6 +72,8 @@ export type BuilderCustomer = {
   contacts: BuilderContact[];
   /** Company-level tier margin fraction (item 11, D88); null → Base/global. */
   tierMargin?: number | null;
+  /** The company's own tier (null = none → the builder's default margin, #254). */
+  tier?: PricingTier | null;
 };
 export type BuilderOffice = { name: string; lat: number | null; lng: number | null; quoteDefault?: boolean };
 export type BuilderRates = {
@@ -104,6 +111,10 @@ export type BuilderInitial = {
   travel?: TravelOverride | null;
   /** #217: the typed total to reopen with (null = auto). */
   priceOverride?: number | null;
+  /** #254: the saved quote's own knob in points (absent for a new quote) — never re-seeded on load. */
+  marginPts?: number | null;
+  /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
+  stampedTierMargin?: number | null;
   /** #248 Task 4 — set only for a loaded `source === "portal-service"` quote. */
   portal?: PortalPanelData | null;
 };
@@ -325,7 +336,21 @@ export function QuoteBuilder({
   const [contactSel, setContactSel] = useState(initial.contactSel);
   const [contactManual, setContactManual] = useState(initial.contactManual);
   const [ratesOpen, setRatesOpen] = useState(false);
-  const [marginPts, setMarginPts] = useState(Math.round(baseRates.margin * 100));
+  /* #254: the knob opens at a saved quote's own margin, else the tier seed for
+     the opened customer/contact; `prevSeedPts` is the seed it last followed —
+     a knob still there is untouched and follows the next customer/contact. */
+  const [seed0] = useState(() =>
+    initialTierSeed({
+      customer: customers.find((c) => c.id === initial.customerId) || null,
+      contactName: initial.contactSel === "__other__" ? "" : initial.contactSel,
+      serviceDefault: baseRates.margin,
+      savedMarginPts: initial.marginPts,
+      stampedTierMargin: initial.stampedTierMargin,
+    })
+  );
+  const [marginPts, setMarginPts] = useState(seed0.knobPts);
+  const prevSeedPts = useRef(seed0.prevSeedPts);
+  const [tierPrompt, setTierPrompt] = useState<TierPrompt | null>(null);
   const [mileageRate, setMileageRate] = useState(baseRates.mileageRate.toFixed(2));
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
@@ -378,6 +403,24 @@ export function QuoteBuilder({
   };
   const contacts = customer?.contacts || [];
 
+  /** #254: a customer or contact change re-seeds an untouched knob from the
+   *  tier (contact → company → this service's default); a hand-set knob is
+   *  kept and the new seed is offered as a one-click prompt. */
+  function reseedTier(c: BuilderCustomer | null, contactName: string) {
+    const next = seedFor(c, contactName === "__other__" ? "" : contactName, baseRates.margin);
+    const res = reseedKnob(marginPts, prevSeedPts.current, next);
+    prevSeedPts.current = res.prevSeedPts;
+    setMarginPts(res.knobPts);
+    setTierPrompt(res.prompt);
+  }
+  function applyTierSeed() {
+    if (!tierPrompt) return;
+    setMarginPts(tierPrompt.seed.pts);
+    setPriceText("");
+    setTierPrompt(null);
+    dirty();
+  }
+
   function automaticQuoteName(c: BuilderCustomer | null, sel: Record<string, { on: boolean }>): string {
     if (!c) return "";
     const picked = c.locations.filter((l) => sel[l.id]?.on);
@@ -400,13 +443,9 @@ export function QuoteBuilder({
     const primary = c?.contacts.find((x) => x.primary) || c?.contacts[0] || null;
     setCustomerId(id);
     setCustomerQuery(c?.name || "");
-    // Seed the margin knob from the customer's tier (contact's own tier
-    // wins; item 11, D88). Still just a seed — the knob stays editable.
-    {
-      const seeded = primary?.tierMargin ?? c?.tierMargin;
-      if (seeded != null && seeded > 0 && seeded < 1)
-        setMarginPts(Math.round(seeded * 100));
-    }
+    // Re-seed the margin knob from the new customer's tier (contact's own
+    // tier wins; item 11, D88) — a hand-set knob is kept with a prompt (#254).
+    reseedTier(c, primary ? primary.name : "");
     setVenueSel(sel);
     setPriceText(""); // a new customer is a new price
     quoteNameManual.current = false;
@@ -705,6 +744,7 @@ export function QuoteBuilder({
                   const val = e.target.value;
                   const apply = () => {
                     setContactSel(val);
+                    reseedTier(customer, val); // #254 — a typed total stays
                     dirty();
                   };
                   if (!wonGuard.guard("contact", apply)) return;
@@ -1031,6 +1071,7 @@ export function QuoteBuilder({
                   onChange={(e) => {
                     setMarginPts(Math.round(+e.target.value));
                     setPriceText("");
+                    setTierPrompt(null);
                     dirty();
                   }}
                   style={{ width: "100%", accentColor: accent, cursor: "pointer", margin: "2px 0 0" }}
@@ -1047,6 +1088,7 @@ export function QuoteBuilder({
                   <span>10 pts</span>
                   <span>50 pts</span>
                 </div>
+                <TierSeedPrompt prompt={tierPrompt} onUse={applyTierSeed} accent={accent} />
                 <ServiceTotalField
                   total={total}
                   autoTotal={r?.autoTotal ?? 0}

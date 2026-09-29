@@ -106,6 +106,10 @@ export type BuilderTier = {
   margin: number;
   /** Personal margins for contacts that carry their OWN tier, by display name. */
   byContact: Record<string, number>;
+  /** The company's OWN tier (null = none set → the builder's own default, #254). */
+  tier: PricingTier | null;
+  /** The OWN tier of each contact in `byContact`, by display name (#254 prompt label). */
+  byContactTier: Record<string, PricingTier>;
 };
 
 /**
@@ -144,13 +148,19 @@ export async function builderTiers(
   for (const id of companyIds) {
     const companyTier = asTier(companies.get(id)?.pricingTier);
     const byContact: Record<string, number> = {};
+    const byContactTier: Record<string, PricingTier> = {};
     for (const p of contactsByCompany.get(id) || []) {
       const t = asTier(p.pricingTier);
-      if (t) byContact[displayName(p)] = await marginFor(t);
+      if (t) {
+        byContact[displayName(p)] = await marginFor(t);
+        byContactTier[displayName(p)] = t;
+      }
     }
     out[id] = {
       margin: companyTier ? await marginFor(companyTier) : defaultMargin,
       byContact,
+      tier: companyTier,
+      byContactTier,
     };
   }
   return out;

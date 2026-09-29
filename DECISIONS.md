@@ -7688,3 +7688,19 @@ automatic freight re-apply is the exception: it can land after the stamp when th
 it keeps the banner and applies the same freight to the Undo snapshot. No re-priced line means no banner. Tiers
 stay internal: nothing prints on the customer document. An unsaved new estimate isn't re-stamped until its first
 save (unchanged), so nothing re-prices before then.
+
+**Service builders (flame test, repair, inspection).** The margin knob follows the tier on a customer **and** a
+contact change. The seed is the contact's own tier margin, else the company's own tier margin, else the service's
+Estimating Rules default margin. Tier Base's 30% no longer seeds an untiered customer: `builderTiers` now hands the
+builders each tier key, and the pages pass a company margin only when the company has a tier of its own. A knob
+still at the previous seed moves to the new one. A hand-set knob is kept, and a line under it reads "Kept your 25%
+margin — Gold is 20% · Use Gold" ("the default is 35% · Use 35%" for an untiered customer). Clicking applies the
+seed and clears the line, like moving the slider does. A new customer still clears a typed total; a contact change
+doesn't. The rule lives in one pure helper, `src/lib/tier-seed.ts` (`seedFor`, `reseedKnob`, `initialTierSeed`).
+
+A saved service quote used to reopen with its knob at the Estimating Rules default, not at the margin it was saved
+with, so re-saving an old quote quietly re-priced it. It now reopens at its own saved knob (`<subdoc>.rates.margin`)
+and is never re-seeded on load. Its previous seed is the knob itself when the knob equals the quote's stamped tier
+margin or today's seed; otherwise it's the stamp, or today's seed when there's no stamp. A new quote opened for a
+customer (`?customer=`, inspection hand-off) opens at that customer/contact's seed rather than the flat default.
+Rentals don't seed from tiers, so they're unchanged; consulting has no tiers.

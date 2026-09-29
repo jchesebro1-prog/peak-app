@@ -33547,3 +33547,98 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   ok(["quote-document.tsx", "preview-doc.tsx", "pdf-doc-key.ts"].every((f) => !/tierReprice|PRICING_TIER_LABEL|pricingTier|tierMargin|tier-reprice/.test(readFileSync(join(process.cwd(), "src/app/(app)/estimator", f), "utf8"))),
     "#254 internal only: nothing about tiers reaches the customer document");
 }
+
+
+/* ---- #254 — service builders re-seed their margin knob from the customer's tier ----
+ * src/lib/tier-seed.ts is pure: seed = contact's own tier → company tier →
+ * the service's own default margin; an untouched knob (still at the previous
+ * seed) follows a customer OR contact change, a hand-set one is kept with a
+ * "Use <Tier>" prompt. Flame test, repair and inspection builders share it;
+ * a saved quote reopens at its own knob, never re-seeded on load (D457). */
+import {
+  seedFor as s254Seed,
+  reseedKnob as s254Reseed,
+  initialTierSeed as s254Init,
+  tierPromptText as s254Text,
+  knobPtsFrom as s254Pts,
+} from "@/lib/tier-seed";
+{
+  const acme = {
+    tierMargin: 0.2, tier: "gold" as const,
+    contacts: [
+      { name: "Eric Vance", tierMargin: 0.15, tier: "platinum" as const },
+      { name: "Dana Cole", tierMargin: null, tier: null },
+    ],
+  };
+  const plain = { tierMargin: null, tier: null, contacts: [{ name: "Pat Lee", tierMargin: 0.1, tier: "reseller" as const }, { name: "Sam Ortiz" }] };
+  const e = s254Seed(acme, "Eric Vance", 0.35);
+  ok(e.pts === 15 && e.label === "Platinum", "#254 seedFor: the contact's own tier wins over the company's");
+  const d = s254Seed(acme, "Dana Cole", 0.35);
+  ok(d.pts === 20 && d.label === "Gold", "#254 seedFor: a contact with no tier of their own falls back to the company tier");
+  ok(s254Seed(acme, "", 0.35).pts === 20 && s254Seed(acme, "Someone Typed", 0.35).pts === 20, "#254 seedFor: no contact / an unknown name → the company tier");
+  const n = s254Seed(plain, "Sam Ortiz", 0.35);
+  ok(n.pts === 35 && n.label === null, "#254 seedFor: no tier anywhere → the service's own default margin, not tier Base's 30%");
+  ok(s254Seed(plain, "Pat Lee", 0.35).pts === 10 && s254Seed(null, "", 0.4).pts === 40, "#254 seedFor: a tiered contact at an untiered company still seeds; no customer → the default");
+
+  // An untouched knob moves; a hand-set one is kept with the prompt.
+  const mv = s254Reseed(35, 35, { pts: 20, label: "Gold" });
+  ok(mv.knobPts === 20 && mv.prompt === null && mv.prevSeedPts === 20, "#254 reseedKnob: an untouched knob (at the previous seed) moves to the new seed, no prompt");
+  const kept = s254Reseed(25, 30, { pts: 20, label: "Gold" });
+  ok(kept.knobPts === 25 && kept.prevSeedPts === 20 && kept.prompt?.keptPts === 25 && kept.prompt.seed.pts === 20,
+    "#254 reseedKnob: a hand-set knob is kept, the new seed becomes the reference and is offered");
+  const t = s254Text(kept.prompt!);
+  ok(t.text === "Kept your 25% margin — Gold is 20%" && t.action === "Use Gold", "#254 prompt: the spec's wording (Kept your 25% margin — Gold is 20% · Use Gold)");
+  const td = s254Text({ keptPts: 25, seed: { pts: 35, label: null } });
+  ok(td.text === "Kept your 25% margin — the default is 35%" && td.action === "Use 35%", "#254 prompt: an untiered customer offers the service default by its percent");
+  ok(s254Reseed(20, 30, { pts: 20, label: "Gold" }).prompt === null, "#254 reseedKnob: a hand-set knob already on the new seed needs no prompt");
+
+  // A contact change re-seeds: customer (Gold 20) → contact Eric (Platinum 15) → back to Dana (Gold 20).
+  let knob = 35, prev = 35;
+  for (const [who, want] of [["", 20], ["Eric Vance", 15], ["Dana Cole", 20]] as const) {
+    const r = s254Reseed(knob, prev, s254Seed(acme, who, 0.35));
+    knob = r.knobPts; prev = r.prevSeedPts;
+    ok(knob === want && r.prompt === null, `#254 contact change re-seeds an untouched knob (${who || "company"} → ${want})`);
+  }
+
+  // Load: a saved quote reopens at its own knob, never re-seeded.
+  const fresh = s254Init({ customer: acme, contactName: "Eric Vance", serviceDefault: 0.35 });
+  ok(fresh.knobPts === 15 && fresh.prevSeedPts === 15, "#254 initialTierSeed: a new quote opens at the seed for its preselected customer/contact");
+  ok(s254Init({ customer: null, contactName: "", serviceDefault: 0.35 }).knobPts === 35, "#254 initialTierSeed: no customer → the service default");
+  const reopenStamp = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarginPts: 30, stampedTierMargin: 0.3 });
+  ok(reopenStamp.knobPts === 30 && reopenStamp.prevSeedPts === 30, "#254 initialTierSeed: a saved knob at its stamped tier margin reopens untouched (follows the next change)");
+  const reopenHand = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarginPts: 42, stampedTierMargin: 0.27 });
+  ok(reopenHand.knobPts === 42 && reopenHand.prevSeedPts === 27, "#254 initialTierSeed: a hand-set saved knob reopens as saved, the stamp is its previous seed");
+  const reopenNoStamp = s254Init({ customer: plain, contactName: "", serviceDefault: 0.35, savedMarginPts: 28, stampedTierMargin: null });
+  ok(reopenNoStamp.knobPts === 28 && reopenNoStamp.prevSeedPts === 35, "#254 initialTierSeed: no stamp → today's seed is the previous seed");
+  ok(s254Pts(0.2) === 20 && s254Pts(null) === null && s254Pts(0) === null && s254Pts(1) === null, "#254 knobPtsFrom: fraction → whole points, invalid → null");
+
+  // Structural wiring in each builder.
+  const s254Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  for (const svc of ["flame-tests", "repairs", "inspections"]) {
+    const c = s254Read(`src/app/(app)/${svc}/quote/controls.tsx`);
+    const pg = s254Read(`src/app/(app)/${svc}/quote/page.tsx`);
+    const pick = c.slice(c.indexOf("function pickCustomer("), c.indexOf("function toggleVenue("));
+    ok(/from "@\/lib\/tier-seed"/.test(c) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(c),
+      `#254 ${svc}: the builder uses the shared tier-seed helper and imports no store/db value`);
+    ok(/useState\(seed0\.knobPts\)/.test(c) && /savedMarginPts: initial\.marginPts/.test(c) && /stampedTierMargin: initial\.stampedTierMargin/.test(c)
+      && !/useState\(Math\.round\(baseRates\.margin \* 100\)\)/.test(c),
+      `#254 ${svc}: the knob opens at the saved margin / the loaded seed, tracking the previous seed`);
+    ok(/reseedTier\(c, primary \? primary\.name : ""\)/.test(pick) && /setPriceText\(""\)/.test(pick),
+      `#254 ${svc}: a customer change re-seeds through the helper and still clears a typed total`);
+    ok(/setContactSel\(val\);\s*reseedTier\(customer, val\);[^\n]*\n\s*dirty\(\);\s*\};/.test(c),
+      `#254 ${svc}: a contact change re-seeds too and leaves a typed total alone`);
+    ok(/seedFor\(c, contactName === "__other__" \? "" : contactName, baseRates\.margin\)/.test(c) && /reseedKnob\(marginPts, prevSeedPts\.current, next\)/.test(c),
+      `#254 ${svc}: the seed falls back to this service's own default margin`);
+    ok(/<TierSeedPrompt prompt=\{tierPrompt\} onUse=\{applyTierSeed\}/.test(c) && /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\s*setPriceText\(""\);\s*setTierPrompt\(null\);/.test(c)
+      && /setMarginPts\(tierPrompt\.seed\.pts\);[\s\S]{0,60}setTierPrompt\(null\);/.test(c),
+      `#254 ${svc}: the Use <Tier> prompt renders under the knob, applies the seed and clears; moving the knob clears it`);
+    ok(/marginPts: knobPtsFrom\(\w+\?\.rates\?\.margin\)/.test(pg) && /stampedTierMargin: editQuote\.tierMargin \?\? null/.test(pg)
+      && /tierMargin: tierInfo\[c\.id\]\?\.tier \? tierInfo\[c\.id\]\.margin : null/.test(pg) && /tier: tierInfo\[c\.id\]\?\.byContactTier\[ct\.name\]/.test(pg),
+      `#254 ${svc}: the page reopens the saved knob and passes only real tiers (company + contact) with their keys`);
+  }
+  const s254Tiers = s254Read("src/lib/pricing-tiers.ts");
+  ok(/tier: companyTier,\s*byContactTier,/.test(s254Tiers), "#254 builderTiers hands the company's own tier and each contact's tier key to the builders");
+  const s254Helper = s254Read("src/lib/tier-seed.ts");
+  ok(!/from "@\/(lib\/stores|db)/.test(s254Helper) && /^import \{ PRICING_TIER_LABEL, type PricingTier \} from "@\/lib\/identity\/config";/m.test(s254Helper),
+    "#254 client safety: tier-seed.ts imports only the import-free identity config");
+}

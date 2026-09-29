@@ -18,6 +18,7 @@ import { seedPriceOverride } from "@/lib/service-pricing";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
+import { knobPtsFrom } from "@/lib/tier-seed";
 import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
 import { reviewLimitChipFor } from "@/lib/review-limits-server";
@@ -52,6 +53,8 @@ type RpPart = { name?: string; qty?: number; cost?: number };
 type RpContact = { name?: string; role?: string; email?: string } | null;
 type RpSource = { kind: string; refId?: string; logId?: number; label: string };
 type RepairDoc = {
+  /** The engine rates this quote was priced with — `margin` is its knob (#254 reopen). */
+  rates?: { margin?: number } | null;
   category?: string;
   priority?: string;
   scope?: string;
@@ -121,8 +124,11 @@ export default async function RepairQuotePage({
         email: ct.email || "",
         primary: !!ct.primary,
         tierMargin: tierInfo[c.id]?.byContact[ct.name] ?? null,
+        tier: tierInfo[c.id]?.byContactTier[ct.name] ?? null,
       })),
-      tierMargin: tierInfo[c.id]?.margin ?? null,
+      // #254: only the company's OWN tier seeds the knob; none → the builder's default margin.
+      tierMargin: tierInfo[c.id]?.tier ? tierInfo[c.id].margin : null,
+      tier: tierInfo[c.id]?.tier ?? null,
   }));
 
   const offices = (Array.isArray(settings.offices) ? settings.offices : []).map((o) => ({
@@ -211,6 +217,9 @@ export default async function RepairQuotePage({
             : "",
       crewSize: String((rp && rp.crewSize) || 1),
       source: (rp && rp.source) || null,
+      // #254: reopen at the quote's own saved knob — never re-seeded on load.
+      marginPts: knobPtsFrom(rp?.rates?.margin),
+      stampedTierMargin: editQuote.tierMargin ?? null,
       travel: normalizeTravelOverride(rp && rp.travel) ?? (legacyDrive ? { mode: "drive" } : null),
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
