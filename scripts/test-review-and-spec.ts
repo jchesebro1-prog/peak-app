@@ -34098,7 +34098,7 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
       const ux = ((a.x ** 2 + a.y ** 2) * (b.y - c.y) + (b.x ** 2 + b.y ** 2) * (c.y - a.y) + (c.x ** 2 + c.y ** 2) * (a.y - b.y)) / D;
       const uy = ((a.x ** 2 + a.y ** 2) * (c.x - b.x) + (b.x ** 2 + b.y ** 2) * (a.x - c.x) + (c.x ** 2 + c.y ** 2) * (b.x - a.x)) / D;
       const r = Math.hypot(a.x - ux, a.y - uy);
-      ok(arc.every((p) => Math.abs(Math.hypot(p.x - ux, p.y - uy) - r) < 0.01) && Math.abs(r - T.arcs[i].r * k) < 1e-6 && Math.abs(ux - 4.151) < 1e-6, `#255 T3 ${tag}: apse arc ${i} stays a true circle on the centreline, radius × platform ratio`);
+      ok(arc.every((p) => Math.abs(Math.hypot(p.x - ux, p.y - uy) - r) < 0.01) && Math.abs(r - (T.arcs[0].r * k + T.arcs[i].r - T.arcs[0].r)) < 1e-6 && Math.abs(ux - 4.151) < 1e-6, `#255 T3 ${tag}: apse arc ${i} stays a true circle on the centreline — inner radius × platform ratio, the outer arc its wall beyond`);
       // 0.005": the converter stores arc angles to 3 decimals, so a drawn arc ends ~0.001" off its wall line.
       ok(Math.abs(a.y - Y(i === 0 ? 312.496 : 318.496)) < 0.005 && Math.abs(c.y - a.y) < 0.005, `#255 T3 ${tag}: apse arc ${i} meets its back-wall face`);
     }
@@ -34121,6 +34121,53 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
   ok(cd.proWidthFt === 34 && cd.stageDepthFt === 22 && cd.houseWidthFt === 90 && cd.houseDepthFt === 60 && cd.pit === false, "#255 T3: church width/depth are the platform; the nave comes from the house fields");
   const f = c255T3Fields({ width: 34, wing: 0 }, "church-traditional@1")!;
   ok(f.rows.map((r) => r.label).join("|") === "Nave width|Nave depth" && c255T3Fields({ width: 50, wing: 15 }, "proscenium@1")!.rows.map((r) => r.label).join("|") === "House width|House depth" && c255T3Fields({ width: 50, wing: 0 }, null) === null, "#255 T3: house fields are labeled per template");
+}
+
+/* --- #255 T2/T3 fix wave: concentric true arcs, full circles, registry roles, own-type default, nave default --- */
+{
+  const K = c255T3Keys, T = c255T3Data("church-traditional@1").template;
+  for (const k of [0.31, 1, 3]) {
+    const proWidthFt = (k * 616.73) / 12;
+    const d = { proWidthFt, wingFt: 0, stageDepthFt: 22, houseWidthFt: Math.max(80, proWidthFt + 20), houseDepthFt: 55, pit: false };
+    const Y = c255T3Y(K, d);
+    const [inner, outer] = c255T3Stretch("church-traditional@1", d).polylines.slice(-2);
+    const a = inner[0], b = inner[Math.floor(inner.length / 2)], c = inner[inner.length - 1];
+    const D = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    const ux = ((a.x ** 2 + a.y ** 2) * (b.y - c.y) + (b.x ** 2 + b.y ** 2) * (c.y - a.y) + (c.x ** 2 + c.y ** 2) * (a.y - b.y)) / D;
+    const uy = ((a.x ** 2 + a.y ** 2) * (c.x - b.x) + (b.x ** 2 + b.y ** 2) * (a.x - c.x) + (c.x ** 2 + c.y ** 2) * (b.x - a.x)) / D;
+    const ri = Math.hypot(a.x - ux, a.y - uy);
+    ok(outer.length > 20 && outer.every((p) => Math.abs(Math.hypot(p.x - ux, p.y - uy) - ri - 6) < 0.01) && Math.abs(ri - T.arcs[0].r * k) < 1e-6, `#255 fix k=${k}: the apse wall is 6" at every sampled angle — the two arcs share one centre`);
+    const on = (pl: typeof inner, y: number) => Math.abs(pl[0].y - y) < 0.005 && Math.abs(pl[pl.length - 1].y - y) < 0.005;
+    ok(on(inner, Y(312.496)) && on(outer, Y(318.496)), `#255 fix k=${k}: the inner arc meets the back wall's inside face, the outer arc its outside face`);
+  }
+
+  // A full circle in a true-arc group maps as a similarity; it is never the zone's reference circle.
+  const tpl: C255T2Tpl = { kind: "t", source: "t", units: "in", extents: { minX: 0, minY: 0, maxX: 100, maxY: 80 }, segments: [[0, 0, 100, 0]], arcs: [{ cx: 50, cy: 50, r: 30, a0: 0, a1: 180 }, { cx: 50, cy: 50, r: 10, a0: 0, a1: 360 }], labels: [{ text: "Font", x: 50, y: 55, h: 5 }] };
+  const keys: C255T2Keys = {
+    kind: "t", cx: 50,
+    x: { kind: "spans", spans: [{ to: 30, drive: "pro" }, { to: 50, drive: "fixed" }] },
+    ySpans: [{ from: 50, to: 20, drive: "stageDepth" }, { from: 20, to: 0, drive: "fixed" }],
+    origin: 0, stageDepthTo: 50, houseDepthTo: 0,
+    regions: { Room: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }] }, spaces: ["Room"], roles: { stage: "Room", house: "Room" },
+    lines: {}, points: {}, requiredLabels: [], defaults: { proWidthFt: 5, wingFt: 0, stageDepthFt: 50 / 12, houseWidthFt: 0, houseDepthFt: 0 },
+    trueArcs: [{ centres: [{ x: 50, y: 50 }], scaleHalf: 30, atY: 50, zoneMinY: 50 }],
+  };
+  const sp = c255T2Stretch(tpl, keys, { proWidthFt: 10, wingFt: 0, stageDepthFt: 80 / 12, houseWidthFt: 10, houseDepthFt: 10, pit: false });
+  const full = sp.polylines[sp.polylines.length - 1];
+  ok(full.length > 100 && full.every((p) => Math.abs(Math.hypot(p.x - 50, p.y - 80) - 20) < 1e-6), "#255 fix: a full circle in a true-arc group maps as a similarity about its mapped centre (radius × k)");
+  const font = sp.labels.find((l) => l.text === "Font")!;
+  ok(Math.abs(font.x - 50) < 1e-6 && Math.abs(font.y - 90) < 1e-6, "#255 fix: a zone label moves with the group's smallest partial arc, never a full circle");
+
+  for (const e of c255T3Reg) {
+    const kk = c255T3KeysById(e.id), ids = new Set(Object.keys(kk.regions));
+    ok(kk.spaces.length > 0 && kk.spaces.every((s) => ids.has(s)) && Object.values(kk.roles).every((r) => r == null || ids.has(r)), `#255 fix ${e.id}: every Space and role names one of the template's regions`);
+  }
+
+  const churchType = c255T3Seed.find((t) => t.key === "church")!;
+  const types = [...c255T3Seed.map((t) => ({ ...t, background: c255T3Default(t.worksLike, t.key) })), { ...churchType, key: "chapel", background: "proscenium@1" }];
+  ok(c255T3Resolve(types, "chapel", "church") === c255T3Default("church", "chapel"), "#255 fix: a design's own venue type with no valid Background falls back to that type's default");
+  const wide = c255T3House({ width: 65.5, wing: 0 }, "church-traditional@1");
+  ok(wide.widthFt === 82 && wide.warning === null, "#255 fix: the default nave rounds the platform up like its limit — no warning with nothing typed");
 }
 
 /* --- #255 T4: the church plan draws Jeff's template; pews in the Nave; no doors --- */

@@ -48,7 +48,7 @@ export const HOUSE_SPECS: Record<string, HouseSpec> = {
     width: { label: "Nave width", note: "Inside walls, wall to wall" },
     depth: { label: "Nave depth", note: "Platform front to the back-room wall" },
     widthLim: (s) => [Math.ceil(s.width || 0) + 16, 200],
-    widthDefault: (s) => Math.max(CHURCH_TRADITIONAL_KEYS.defaults.houseWidthFt, (s.width || 0) + 16),
+    widthDefault: (s) => Math.max(CHURCH_TRADITIONAL_KEYS.defaults.houseWidthFt, Math.ceil(s.width || 0) + 16),
     depthLim: [20, 200],
     depthDefault: CHURCH_TRADITIONAL_KEYS.defaults.houseDepthFt,
     legacyHalf: false,

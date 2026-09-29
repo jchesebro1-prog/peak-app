@@ -142,12 +142,29 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   const groupOf = (a: { cx: number; cy: number }) => groups.find((g) => g.centres.some((c) => near(c, a)));
   const scaleOf = (g: TrueArcGroup) => (X(k.cx + g.scaleHalf, g.atY) - X(k.cx, g.atY)) / g.scaleHalf;
 
-  /** A true arc: the circle through where the map sends its ends, radius × k, centre on the drawn side of the chord. */
-  const trueArc = (arc: { cx: number; cy: number; r: number }, from: number, to: number, g: TrueArcGroup) => {
-    const e0 = { x: arc.cx + arc.r * Math.cos(from * DEG), y: arc.cy + arc.r * Math.sin(from * DEG) };
-    const e1 = { x: arc.cx + arc.r * Math.cos(to * DEG), y: arc.cy + arc.r * Math.sin(to * DEG) };
+  type Circle = { cx: number; cy: number; r: number };
+  const isFull = (from: number, to: number) => Math.abs(to - from) >= 360 - 1e-9;
+  const drawnEnd = (arc: Circle, deg: number): Pt => ({ x: arc.cx + arc.r * Math.cos(deg * DEG), y: arc.cy + arc.r * Math.sin(deg * DEG) });
+  /** The sweep t0 → t1 in the drawn arc's direction. */
+  const sweep = (t0: number, t1: number, from: number, to: number) => {
+    if (to >= from) while (t1 <= t0) t1 += 360;
+    else while (t1 >= t0) t1 -= 360;
+    return t1;
+  };
+  /** A drawn arc's concentric reference: the smallest partial drawn arc on its centre (full circles never set a centre). */
+  const innermostAt = (a: { cx: number; cy: number }) =>
+    t.arcs.filter((b) => near({ x: b.cx, y: b.cy }, a) && !isFull(b.a0, b.a1)).sort((p, q) => p.r - q.r)[0];
+
+  /** The innermost arc's circle: through where the map sends its ends, radius × k, centre on the drawn side of the chord. */
+  const chordArc = (arc: Circle, from: number, to: number, g: TrueArcGroup) => {
+    const e0 = drawnEnd(arc, from), e1 = drawnEnd(arc, to);
     const m0 = map(e0), m1 = map(e1);
     const half = Math.hypot(m1.x - m0.x, m1.y - m0.y) / 2;
+    if (half < 1e-9) {
+      // No chord (a full circle, or a zero sweep): a similarity about the mapped centre.
+      const c = map({ x: arc.cx, y: arc.cy }), r = arc.r * scaleOf(g);
+      return { pts: arcPoints({ cx: c.x, cy: c.y, r }, from, to), c, r };
+    }
     // Never smaller than the chord needs; a semicircle (chord = diameter) keeps its centre on the chord exactly.
     const r = Math.max(arc.r * scaleOf(g), half);
     const side = Math.sign((e1.x - e0.x) * (arc.cy - e0.y) - (e1.y - e0.y) * (arc.cx - e0.x)) || 1;
@@ -155,9 +172,38 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
     const h = Math.sqrt(Math.max(0, (r - half) * (r + half)));
     const c = { x: (m0.x + m1.x) / 2 - uy * h * side, y: (m0.y + m1.y) / 2 + ux * h * side };
     const t0 = Math.atan2(m0.y - c.y, m0.x - c.x) / DEG;
-    let t1 = Math.atan2(m1.y - c.y, m1.x - c.x) / DEG;
-    if (to >= from) while (t1 <= t0) t1 += 360;
-    else while (t1 >= t0) t1 -= 360;
+    const t1 = sweep(t0, Math.atan2(m1.y - c.y, m1.x - c.x) / DEG, from, to);
+    return { pts: arcPoints({ cx: c.x, cy: c.y, r }, t0, t1), c, r };
+  };
+
+  /**
+   * A true arc. Arcs drawn on one centre stay concentric: the innermost sets the
+   * mapped centre and radius, every other keeps its drawn offset from it (a 6"
+   * wall stays 6"), and its ends land where its circle crosses the mapped wall
+   * line (y) its drawn ends map to. A full circle is a similarity about its centre.
+   */
+  const trueArc = (arc: Circle, from: number, to: number, g: TrueArcGroup) => {
+    if (isFull(from, to)) {
+      const c = map({ x: arc.cx, y: arc.cy }), r = arc.r * scaleOf(g);
+      return { pts: arcPoints({ cx: c.x, cy: c.y, r }, from, to), c, r };
+    }
+    const ref = innermostAt(arc);
+    const same = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+    const isRef = !ref || (same(arc.r, ref.r) && ((same(from, ref.a0) && same(to, ref.a1)) || (same(from, ref.a1) && same(to, ref.a0))));
+    if (isRef) return chordArc(arc, from, to, g);
+    const inner = chordArc(ref, ref.a0, ref.a1, g);
+    const c = inner.c, r = inner.r + (arc.r - ref.r);
+    if (r <= 0) return chordArc(arc, from, to, g);
+    const endAngle = (deg: number) => {
+      const m = map(drawnEnd(arc, deg));
+      const dy = m.y - c.y;
+      if (Math.abs(dy) > r) return Math.atan2(dy, m.x - c.x) / DEG; // the wall line misses the circle: aim at the mapped end
+      const dx = Math.sqrt(r * r - dy * dy);
+      const x = Math.abs(c.x + dx - m.x) <= Math.abs(c.x - dx - m.x) ? c.x + dx : c.x - dx;
+      return Math.atan2(dy, x - c.x) / DEG;
+    };
+    const t0 = endAngle(from);
+    const t1 = sweep(t0, endAngle(to), from, to);
     return { pts: arcPoints({ cx: c.x, cy: c.y, r }, t0, t1), c, r };
   };
 
@@ -185,9 +231,10 @@ export function stretchTemplate(t: VenueTemplate, k: TemplateKeys, d: StretchDim
   const zoneMap = (p: Pt): Pt | null => {
     for (const g of groups) {
       if (g.zoneMinY == null || p.y <= g.zoneMinY) continue;
-      const ref = t.arcs.filter((a) => near(g.centres[0], a)).sort((a, b) => a.r - b.r)[0];
+      // The group's smallest drawn circle; a full 360° circle is never the zone's reference.
+      const ref = t.arcs.filter((a) => g.centres.some((c) => near(c, a)) && !isFull(a.a0, a.a1)).sort((a, b) => a.r - b.r)[0];
       if (!ref || Math.hypot(p.x - ref.cx, p.y - ref.cy) >= ref.r) continue;
-      const m = trueArc(ref, ref.a0, ref.a1, g);
+      const m = chordArc(ref, ref.a0, ref.a1, g);
       return { x: m.c.x + ((p.x - ref.cx) * m.r) / ref.r, y: m.c.y + ((p.y - ref.cy) * m.r) / ref.r };
     }
     return null;

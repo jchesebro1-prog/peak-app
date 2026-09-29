@@ -45,9 +45,14 @@ export type XMap =
 
 /**
  * #255: arcs that must stay true circles (an apse, a pointed stage front).
- * Each arc of the group keeps its circle: its two ends go wherever the map
- * sends them and its radius scales by k — the mapped ÷ drawn length of the
- * half-width `scaleHalf`, measured at y = `atY`.
+ * The innermost (smallest partial) arc on each drawn centre keeps its circle:
+ * its two ends go wherever the map sends them and its radius scales by k — the
+ * mapped ÷ drawn length of the half-width `scaleHalf`, measured at y = `atY`.
+ * Other arcs on that centre stay concentric with it: same mapped centre, their
+ * drawn radius offset kept (a 6" wall stays 6"), ends where the circle crosses
+ * the mapped y of their drawn ends. A full 360° circle is a similarity about
+ * its mapped centre (radius × k). Arcs that are not concentric (a mirrored
+ * pointed front) belong in separate groups.
  */
 export type TrueArcGroup = {
   centres: Pt[];

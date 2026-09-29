@@ -76,8 +76,9 @@ export function sanitizeBackground(kind: BuiltInVenueKind, typeKey: string, raw:
 
 /**
  * The Background a plan of `planKind` draws for a venue of type `typeKey`:
- * that type's, when it works like this plan's kind; else the built-in type
- * for the kind; else the registry default. null = the built-in schematic.
+ * that type's (or that type's default, when its stored one is not valid),
+ * when it works like this plan's kind; else the built-in type for the kind;
+ * else the registry default. null = the built-in schematic.
  */
 export function resolveBackground(types: readonly VenueType[], typeKey: string | null | undefined, planKind: VenueKind): string | null {
   const wl = PLAN_KIND_WORKS_LIKE[planKind];
@@ -86,7 +87,8 @@ export function resolveBackground(types: readonly VenueType[], typeKey: string |
   if (!list.length) return null;
   const valid = (id: unknown): id is string => typeof id === "string" && list.some((t) => t.id === id);
   const own = typeKey ? types.find((t) => t.key === typeKey) : undefined;
-  if (own && own.worksLike === wl && valid(own.background)) return own.background;
+  // The design's own type decides when it works like this plan: its Background, else its own default.
+  if (own && own.worksLike === wl) return valid(own.background) ? own.background : defaultBackground(wl, own.key);
   const baseKey = PLAN_KIND_TYPE_KEY[planKind];
   const base = types.find((t) => t.key === baseKey);
   if (base && base.worksLike === wl && valid(base.background)) return base.background;
