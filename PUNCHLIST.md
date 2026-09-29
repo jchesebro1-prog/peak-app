@@ -9893,3 +9893,17 @@ system Σ qty × Unit Sell equals the system price — typed, rounded up to $25,
 any labor lines' share. Freight still has no row of its own; it rides in the parts' sell. This now also applies to
 sent/won systems with freight and no rounding (their parts' sell rises by the freight). Unit Cost is unchanged.
 `src/app/(app)/estimator/parts-csv.ts`. Harness `#279`. See D480.
+
+## 280. Leads — delete a lead right from its table row — DONE 2026-09-29
+
+**Reported:** Jeff (2026-09-29): "Add delete to the Leads screen too." Delete existed in the lead drawer and on
+Worklist rows, but not in the default Table view.
+
+**Done.** Each Table-view row gains a compact Delete (new `DeleteLeadButton`, the shared `ConfirmButton`: Delete →
+Confirm) running the existing `deleteLeadAction` — soft delete; linked site visits and surveys are kept. The row became
+a stretched link (an absolutely positioned `<Link>` overlay; the cells stay grid children), so clicking anywhere in the
+row still opens the lead and the button sits above the overlay; an extra 70px column holds it (and on phones). Board
+view is unchanged — a card opens the drawer, which has Delete. Like designs, consulting, projects and companies (#268,
+#273, #277, #278), deleting a lead is limited to users with `create`: `deleteLeadAction` refuses otherwise (now
+returning an error), and the table, Worklist and drawer Delete buttons are hidden from a Reviewer; the drawer only
+closes on a successful delete.
