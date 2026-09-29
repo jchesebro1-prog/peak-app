@@ -9809,33 +9809,29 @@ in Estimating Rules; install labor; and whether a curtain line can carry its tra
 
 ---
 
-## 275. Flame-test, inspection and repair quotes — a lift rental line — OPEN
+## 275. Flame-test, inspection and repair quotes — a lift rental line — DONE 2026-09-29 (D481–D483)
 
 **Reported:** 2026-09-23 practice run on Q-2047 (`/inspections/letter`): "Do we want the lift rental adder information
 listed on the quote? It currently looks like it would be a tight fit to add." **Jeff (2026-09-29): "We need lift rental
 on the quotes."**
 
-**Today:** the service engines have no lift adder at all — only the letter boilerplate says "lift rentals … may be
-stated separately" (`src/lib/templates.ts:132`, `:312`). Only Estimator Labor prices a lift (`EQP-LIFT`, $750 seed,
-`ceil(days/5)` weeks).
+**Done.** The flame-test, inspection and repair builders share a **Lift rental** panel
+(`src/components/lift-rental-panel.tsx`): rentals × rate per rental, one rental = one lift for up to a week (the
+Estimator's `ceil(days/5)` unit), 0–50, blank/0 = none, per quote. Default rate = the live `EQP-LIFT` catalog cost
+(`getLiftRate()`, `service-quote-inputs.ts`; $750 fallback), editable per quote. Priced inside the shared finish
+functions in `service-pricing.ts` that both the engines and the builder previews run — margined with the job (repairs:
+the service margin), added **on top of** any base/minimum/call-out floor, then the usual $25 rounding and typed-total
+back-solve (the service line absorbs them). Stored as `lift: {count, rate, cost, line}` only when count > 0.
+Flame/inspection letters print their own "Lift rental ×N" row; the repair letter and renewal PDFs name it in the price
+sentence; the headless-Chrome PDF follows the letter. Renewals carry last year's count at today's default rate (one
+rental for a multi-venue inspection) and cite a changed rate. Portal self-quotes stay lift-free; Refresh pricing keeps
+a staff-added lift. The `costTail` boilerplate default (`templates.ts:132`, `:312`) now says "lift rentals not listed
+above" (saved Settings → Templates overrides untouched; the Dropbox Word copies still carry the old sentence).
+Gates: tsc 0; test:specs 8872 PASS / 0 FAIL (after merging main; +74 for #275); test:smoke 168/0; eslint 0 errors, no
+new warnings; next build OK. Browser-verified: a 2-lift inspection quote saves, reopens, and prints the row; the letters
+stay at their existing page count. Reviewed: no blocking findings.
 
-**Plan (to confirm on build):** an optional Lift rental in the flame-test, inspection and repair builders (count ×
-rate, default rate from the `EQP-LIFT` catalog row / an Estimating Rule), priced through the same engine, tier margin
-and $25 rounding; printed as its own "Lift rental" line on the letter, quote document and PDF, and carried by renewal
-re-pricing. Portal self-quotes (#248) stay lift-free unless Jeff says otherwise.
-
-## 273. Consulting — delete a consulting project right from its list card — DONE 2026-09-29
-
-**Reported:** Jeff (2026-09-29, screenshot of /design/engagements): "We also need to be able to delete on this screen?"
-Delete existed only in a consulting project's detail header.
-
-**Done.** Each card on the Consulting list gains a Delete button (the shared `ConfirmButton`: Delete → Confirm delete /
-Cancel, auto-disarms after 5 s or on Esc) running the same `removeEngagementAction` as the detail header — a soft delete
-that also removes the project's open tasks; done tasks and notes stay. A quote-originated project stays deleted (the
-quote-sync's `coveredQuoteIds()` skips it — checked by reload). The card's link now wraps only the card content, so the
-button isn't nested inside an `<a>`. Follow-up (Jeff, same day): delete is limited to users with `create` (Admin,
-Manager, Estimator) like deleting a design — `removeEngagementAction` refuses otherwise, and both Delete buttons (card +
-detail header) are hidden from a Reviewer. `view.tsx`, `actions.ts`, and both engagement pages (`canDelete` prop).
+**Jeff-gated:** confirm production has an `EQP-LIFT` catalog row at the real rate (else $750 is used).
 
 ---
 
