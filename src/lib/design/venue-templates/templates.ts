@@ -2,6 +2,8 @@ import churchContemporaryRaw from "./church-contemporary.json";
 import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
 import churchTraditionalRaw from "./church-traditional.json";
 import { CHURCH_TRADITIONAL_KEYS } from "./church-traditional.keys";
+import gymStageRaw from "./gym-stage.json";
+import { GYM_STAGE_KEYS } from "./gym-stage.keys";
 import { PROSCENIUM_TEMPLATE, stretchProscenium } from "./proscenium";
 import { PROSCENIUM_KEYS } from "./proscenium.keys";
 import { stretchTemplate } from "./stretch";
@@ -37,6 +39,7 @@ const DATA: Record<string, TemplateData> = {
   "proscenium@1": { template: PROSCENIUM_TEMPLATE, keys: PROSCENIUM_KEYS, stretch: stretchProscenium },
   "church-traditional@1": memo(churchTraditionalRaw as unknown as VenueTemplate, CHURCH_TRADITIONAL_KEYS),
   "church-contemporary@1": memo(churchContemporaryRaw as unknown as VenueTemplate, CHURCH_CONTEMPORARY_KEYS),
+  "gym-stage@1": memo(gymStageRaw as unknown as VenueTemplate, GYM_STAGE_KEYS),
 };
 
 export const TEMPLATE_IDS = Object.keys(DATA);

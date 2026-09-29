@@ -24,7 +24,8 @@ export type VenueTemplateEntry = {
 };
 
 export const VENUE_TEMPLATES: readonly VenueTemplateEntry[] = [
-  { id: "proscenium@1", label: "Auditorium", family: "proscenium", worksLike: ["proscenium"], defaultForKinds: ["proscenium"], defaultForTypes: [] },
+  { id: "proscenium@1", label: "Auditorium / PAC", family: "proscenium", worksLike: ["proscenium"], defaultForKinds: ["proscenium"], defaultForTypes: [] },
+  { id: "gym-stage@1", label: "Gym Stage", family: "proscenium", worksLike: ["proscenium"], defaultForKinds: [], defaultForTypes: ["gymstage"] },
   { id: "church-traditional@1", label: "Church — Traditional", family: "church", worksLike: ["church"], defaultForKinds: ["church"], defaultForTypes: [] },
   { id: "church-contemporary@1", label: "Church — Contemporary", family: "church", worksLike: ["church"], defaultForKinds: [], defaultForTypes: [] },
 ];
@@ -37,7 +38,8 @@ export const PLAN_KIND_WORKS_LIKE: Record<VenueKind, BuiltInVenueKind | null> = 
   church: "church",
   flat: "flat",
   blackbox: "blackbox",
-  gym: null,
+  // #255: Quick Design's Gym Stage venue draws the gym drawing through the gymstage type (PLAN_KIND_TYPE_KEY) — its own fields and pricing kind are unchanged.
+  gym: "proscenium",
   arena: "arena",
 };
 

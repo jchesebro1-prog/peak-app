@@ -9,7 +9,7 @@
  */
 
 import type * as React from "react";
-import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
+import { LIM, SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./engine";
 import { churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
 import { resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
@@ -80,13 +80,13 @@ function dimV(L: L, ay: number, by: number, x: number, label: string) {
 }
 
 /** center FOH mix position — seats removed mid-house for the front-of-house console */
-function mixPos(L: L, cx: number, yc: number, w: number) {
+function mixPos(L: L, cx: number, yc: number, w: number, text = "FOH MIX") {
   const hw = w / 2;
   const hh = 9;
   const d = "M " + R(cx - hw) + " " + R(yc - hh) + " h " + R(w) + " v " + R(hh * 2) + " h " + R(-w) + " Z";
   L.paths.push({ d, fill: "#ffffff", stroke: "none", dash: "" });
   L.paths.push({ d, fill: "none", stroke: "#9aa0ab", sw: 1.2, dash: "4 3" });
-  L.texts.push({ x: R(cx), y: R(yc + 3), t: "FOH MIX", fill: "#6b7280", size: 8, weight: 600, anchor: "middle", transform: "" });
+  L.texts.push({ x: R(cx), y: R(yc + 3), t: text, fill: "#6b7280", size: 8, weight: 600, anchor: "middle", transform: "" });
 }
 
 /* ------------------------------- geometries ------------------------------- */
@@ -105,6 +105,38 @@ const planKindOf = (s: Pick<AState, "venue">): VenueKind => (VENUES.find((v) => 
  */
 export const planTemplate = (s: Pick<AState, "venue">, tpl: string | null | undefined): string | null =>
   tpl && templateEntry(tpl) ? tpl : resolveBackground([], null, planKindOf(s));
+
+/** Approximate advance of the plan's 8-px semibold mono label glyphs (px per character). */
+export const LABEL_CHAR_PX = 4.9;
+
+/**
+ * #255: the FOH mix box inside a booth room (px) — for a booth that moves (the Gym Stage Booth), wherever it
+ * sits. The room's own label, the box (18 px tall, no wider than the room less 6 px, never over 86; reading
+ * "FOH" when "FOH MIX" won't fit) and — when `consoleOn` — the CONSOLE mark under the box stack centred in
+ * the room, the label centred over the box. A room too shallow for that stack (the Booth on the back wall of
+ * a wide floor) keeps just the box (and mark), centred, and its label moves just under the room, centred.
+ * `label` = the room's label index in `labels` and its new top-left anchor (labels draw their baseline at y + h).
+ */
+export function boothMix(
+  poly: XY[],
+  labels: Array<{ text: string; x: number; y: number; h: number }>,
+  consoleOn: boolean
+): { x: number; y: number; w: number; text: string; label: { i: number; x: number; y: number } | null } {
+  const bb = boxOf(poly);
+  const i = labels.findIndex((l) => l.x >= bb.x && l.x <= bb.x + bb.w && l.y >= bb.y && l.y <= bb.y + bb.h);
+  const lab = i < 0 ? null : labels[i];
+  const under = consoleOn ? 16 : 0;
+  const w = R(Math.max(0, Math.min(bb.w - 6, 86)));
+  const text = w >= 7 * LABEL_CHAR_PX + 4 ? "FOH MIX" : "FOH";
+  const x = R(bb.x + bb.w / 2);
+  const labX = lab ? R(x - (lab.text.length * LABEL_CHAR_PX) / 2) : 0;
+  const stack = (lab ? 11 : 0) + 18 + under; // label (7 px glyphs + 4 px gap), box, console mark
+  if (!lab || stack + 6 <= bb.h) {
+    const top = bb.y + (bb.h - stack) / 2;
+    return { x, y: R(top + (lab ? 11 : 0) + 9), w, text, label: lab ? { i, x: labX, y: R(top + 7 - lab.h) } : null };
+  }
+  return { x, y: R(Math.max(bb.y + 11, bb.y + (bb.h - under) / 2)), w, text, label: { i, x: labX, y: R(bb.y + bb.h + 10 - lab.h) } };
+}
 
 /**
  * Shared proscenium groundplan geometry (#249, #255): a proscenium-family
@@ -125,11 +157,21 @@ export function prosGeom(s: AState, tpl?: string | null) {
   const pt = (name: string) => px(plan.points[name]);
   const xProcL = pt("proL").x, xProcR = pt("proR").x, openW = R(xProcR - xProcL);
   const yBack = pt("stageBack").y, yPlaster = pt("centre").y;
-  const cx = pt("centre").x, yMix = pt("mix").y;
+  const cx = pt("centre").x;
   const role = (r?: string): Box | null => (r && regions[r] ? boxOf(regions[r]) : null);
-  const mixBox: Box = { x: R(cx - 43), y: R(yMix - 9), w: 86, h: 18 };
+  // #255: a booth that moves (the Gym Stage Booth) takes the FOH mix with it (boothMix); otherwise the FOH mix
+  // stands at the template's `mix` point in the house.
+  const boothPoly = keys.roles.booth && (keys.movables ?? []).some((m) => m.region === keys.roles.booth) ? regions[keys.roles.booth] : undefined;
+  const inBooth = boothPoly ? boothMix(boothPoly, C.labels, !!(s.sys && s.sys.controls && s.ctrl && s.ctrl.console)) : null;
+  const mix = inBooth ? { x: inBooth.x, y: inBooth.y } : { x: cx, y: pt("mix").y };
+  const mixW = inBooth ? inBooth.w : 86;
+  const yMix = mix.y;
+  const mixBox: Box = { x: R(mix.x - mixW / 2), y: R(yMix - 9), w: mixW, h: 18 };
+  const moved = inBooth?.label;
+  const labels = moved ? C.labels.map((l, i) => (i === moved.i ? { ...l, x: moved.x, y: moved.y } : l)) : C.labels;
   return {
-    template: id, W, H, ML, MR, MT, MB, ppi, ppf, dims, warning: houseDims(s, id).warning,
+    template: id, W, H, ML, MR, MT, MB, ppi, ppf, dims, warning: planKindOf(s) === "gym" ? null : houseDims(s, id).warning,
+    mix, mixInBooth: !!boothPoly, mixBox, mixText: inBooth?.text ?? "FOH MIX",
     cx, xProcL, xProcR, openW, yBack, yPlaster, yTop: pt("top").y,
     stage: { x: xProcL, y: yBack, w: openW, h: R(yPlaster - yBack) },
     xStageL: pt("stageOuterL").x, xStageR: pt("stageOuterR").x, xWingL: pt("wingL").x, xWingR: pt("wingR").x,
@@ -140,7 +182,7 @@ export function prosGeom(s: AState, tpl?: string | null) {
     regions, regionLabels: plan.regionLabels, spaces: keys.spaces, roles: keys.roles,
     stageEdge: (plan.lines.stageEdge ?? []).map(px),
     polylines: C.polylines,
-    labels: C.labels,
+    labels,
     handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("backWall") },
     fromPx: C.fromPx,
     plan,
@@ -241,6 +283,15 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   const wing = dims.wingFt;
   const rects: Rect[] = [], lines: LineEl[] = [], circles: CircleEl[] = [], texts: TextEl[] = [], paths: PathEl[] = [];
   const handles: PlanHandle[] = [];
+  // #255: a gym-kind design's width / depth are the floor; the stage's own sizes come from the drawing's proportions.
+  const gymKind = planKindOf(s) === "gym";
+  const ftIn = (ft: number) => {
+    const inch = Math.round(ft * 12);
+    return Math.floor(inch / 12) + "'-" + (inch % 12) + '"';
+  };
+  const openLabel = gymKind ? ftIn(dims.proWidthFt) : s.width + "'-0\"";
+  const wingLabel = gymKind ? ftIn(wing) : wing + "'";
+  const depthLabel = gymKind ? ftIn(dims.stageDepthFt) : s.depth + "'-0\"";
   const depthPx = yPlaster - yBack;
   const yAt = (frac: number) => R(yBack + frac * depthPx);
   const tick = (x: number, y: number) => lines.push({ x1: R(x - 4), y1: R(y + 4), x2: R(x + 4), y2: R(y - 4), stroke: "#8c919c", sw: 1.2, dash: "" });
@@ -282,7 +333,9 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     for (let j = 0; j < electrics; j++) rigged.push({ frac: (electrics - j) / (electrics + 1), label: (ord[j] || j + 1 + "th") + " electric", kind: "electric" });
 
   rigged.sort((a, b) => a.frac - b.frac);
-  const labelX = xStageR + 12;
+  // Right of everything drawn beside the stage (the Auditorium's stage wall; the Gym Stage's Electrical Room).
+  const xRight = G.polylines.flat().reduce((m, p) => (p.y >= yTop - 0.5 && p.y <= yPlaster + 0.5 && p.x > m ? p.x : m), xStageR);
+  const labelX = xRight + 12;
   let lastLy = -99;
   rigged.forEach((it) => {
     const y = yAt(it.frac);
@@ -298,7 +351,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
     }
     const ly = y < lastLy + 11 ? lastLy + 11 : y;
     lastLy = ly;
-    lines.push({ x1: R(xProcR), y1: y, x2: R(xStageR + 6), y2: R(ly), stroke: "#d0d3da", sw: 0.8, dash: "" });
+    lines.push({ x1: R(xProcR), y1: y, x2: R(xRight + 6), y2: R(ly), stroke: "#d0d3da", sw: 0.8, dash: "" });
     texts.push({ x: R(labelX), y: R(ly + 3), t: it.label, fill: it.kind === "electric" ? cLight : cCurt, size: 8, anchor: "start", transform: "" });
   });
 
@@ -309,8 +362,13 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(cx), y1: R(yBack), x2: R(cx), y2: R(yBackWall), stroke: "#c4c9d2", sw: 1, dash: "3 4" });
 
   const L: L = { rects, lines, circles, texts, paths };
-  mixPos(L, cx, G.yMix, Math.min(openW * 0.3, 86));
-  if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
+  mixPos(L, G.mix.x, G.yMix, G.mixInBooth ? G.mixBox.w : Math.min(openW * 0.3, 86), G.mixText);
+  if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console && G.mixInBooth) {
+    // #255: under the FOH mix box, in the booth that carries it.
+    const bx = G.mixBox, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
+    rects.push({ x: R(bcx - cw / 2), y: R(bx.y + bx.h + 3), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
+    texts.push({ x: R(bcx), y: R(bx.y + bx.h + 14), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
+  } else if (s.sys && s.sys.controls && s.ctrl && s.ctrl.console) {
     const bx = G.booth, cw = Math.min(R(bx.w * 0.38), 30), bcx = bx.x + bx.w / 2;
     rects.push({ x: R(bcx - cw / 2), y: R(bx.y + 6), w: cw, h: 4.5, fill: SYSCOLOR.controls, stroke: "none", sw: 0, rx: 1.5, dash: "" });
     texts.push({ x: R(bcx), y: R(bx.y + bx.h - 6), t: "CONSOLE", fill: SYSCOLOR.controls, size: 6, weight: 600, anchor: "middle", transform: "" });
@@ -328,13 +386,13 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xProcL), y1: R(yWid), x2: R(xProcR), y2: R(yWid), stroke: "#8c919c", sw: 1, dash: "" });
   tick(xProcL, yWid);
   tick(xProcR, yWid);
-  texts.push({ x: R(cx), y: R(yWid - 6), t: s.width + "'-0\"", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+  texts.push({ x: R(cx), y: R(yWid - 6), t: openLabel, fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
   if (wing > 0) {
     ([[xWingL, xProcL], [xProcR, xWingR]] as Array<[number, number]>).forEach(([a, b]) => {
       lines.push({ x1: R(a), y1: R(yWid), x2: R(b), y2: R(yWid), stroke: "#c4c9d2", sw: 0.9, dash: "" });
       tick(a, yWid);
       tick(b, yWid);
-      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wing + "'", fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
+      texts.push({ x: R((a + b) / 2), y: R(yWid - 6), t: wingLabel, fill: "#8c919c", size: 11, anchor: "middle", transform: "" });
     });
   }
   // dimension lines — stage depth, then house depth (left, one chain)
@@ -349,7 +407,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   lines.push({ x1: R(xStageL - 4), y1: R(yBack), x2: R(xDep - 3), y2: R(yBack), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xStageL - 4), y1: R(yPlaster), x2: R(xDep - 3), y2: R(yPlaster), stroke: "#c4c9d2", sw: 0.8, dash: "" });
   lines.push({ x1: R(xHouseL - 4), y1: R(yBackWall), x2: R(xDep - 3), y2: R(yBackWall), stroke: "#c4c9d2", sw: 0.8, dash: "" });
-  vDim(yBack, yPlaster, s.depth + "'-0\"");
+  vDim(yBack, yPlaster, depthLabel);
   vDim(yPlaster, yBackWall, Math.round(dims.houseDepthFt) + "'-0\"");
   // dimension line — house width (bottom)
   const yHW = H - 18;
@@ -401,46 +459,6 @@ function buildPlanFlat(s: AState, _lineSets: number, _electrics: number, accent:
   dimH(L, x0, x1, y0 - 26, s.width + "'-0\"", false);
   dimV(L, y0, y1, x0 - 32, s.depth + "'-0\"");
   return { W: Wpx, H: R(seatBot + 30), ...L };
-}
-
-/** Gym stage — gymnasium floor, raised proscenium stage across the top, bleachers. */
-function buildPlanGym(s: AState, _lineSets: number, _electrics: number, accent: string): PlanData {
-  const Wpx = 640, ML = 62, MR = 40, MT = 54;
-  const ppf = (Wpx - ML - MR) / Math.max(s.width, 1);
-  const depthPx = Math.max(200, Math.min(s.depth * ppf, 440));
-  const x0 = ML, x1 = Wpx - MR, y0 = MT, y1 = y0 + depthPx, cx = (x0 + x1) / 2;
-  const L: L = { rects: [], lines: [], circles: [], texts: [], paths: [] };
-  L.rects.push({ x: R(x0), y: R(y0), w: R(x1 - x0), h: R(depthPx), fill: "#f6f7f9", stroke: "#16181d", sw: 2, rx: 2, dash: "" });
-  const stageW = (x1 - x0) * 0.6, stageH = Math.min(Math.max(s.depth * 0.18, 6) * ppf, depthPx * 0.3);
-  const stx0 = cx - stageW / 2, stx1 = cx + stageW / 2, sBot = y0 + stageH;
-  L.rects.push({ x: R(stx0), y: R(y0), w: R(stageW), h: R(stageH), fill: "#ffffff", stroke: accent, sw: 1.8, rx: 2, dash: "" });
-  L.lines.push({ x1: R(stx0), y1: R(sBot), x2: R(stx1), y2: R(sBot), stroke: accent, sw: 2.4, dash: "" });
-  L.texts.push({ x: R(cx), y: R(y0 + stageH / 2 + 3), t: "STAGE", fill: "#9aa0ab", size: 8.5, anchor: "middle", transform: "" });
-  if (s.sys.curtains) L.lines.push({ x1: R(stx0 + 4), y1: R(y0 + 5), x2: R(stx1 - 4), y2: R(y0 + 5), stroke: SYSCOLOR.curtains, sw: 2.6, dash: "4 3" });
-  if (s.sys.video) [stx0 - 14, stx1 + 14].forEach((x) => L.lines.push({ x1: R(x - 12), y1: R(y0 + 12), x2: R(x + 12), y2: R(y0 + 12), stroke: SYSCOLOR.video, sw: 3, dash: "" }));
-  if (s.sys.audio) [stx0 - 8, stx1 + 8].forEach((x) => L.rects.push({ x: R(x - 5), y: R(y0 + 7), w: 10, h: 14, fill: "#eef0f3", stroke: "#3155a8", sw: 1.2, rx: 2, dash: "" }));
-  if (s.sys.lighting) {
-    const yBar = sBot + 20, dn = Math.max(4, Math.round(stageW / 34));
-    L.lines.push({ x1: R(stx0), y1: R(yBar), x2: R(stx1), y2: R(yBar), stroke: "#9aa0ab", sw: 1, dash: "2 3" });
-    for (let k = 0; k < dn; k++) L.circles.push({ cx: R(stx0 + ((k + 0.5) / dn) * stageW), cy: R(yBar), r: 2.6, fill: SYSCOLOR.lighting });
-    L.texts.push({ x: R(stx1 + 6), y: R(yBar + 3), t: "FOH", fill: "#8c919c", size: 7.5, anchor: "start", transform: "" });
-  }
-  const flrTop = sBot + (s.sys.lighting ? 36 : 22), flrBot = y1 - 10, blW = Math.min(22, (x1 - x0) * 0.09);
-  [x0, x1 - blW].forEach((rx) => {
-    L.rects.push({ x: R(rx), y: R(flrTop), w: R(blW), h: R(flrBot - flrTop), fill: "#eceef1", stroke: "#cdd1d9", sw: 1, rx: 1, dash: "" });
-    const tiers = Math.max(3, Math.round((flrBot - flrTop) / 18));
-    for (let t = 1; t < tiers; t++) {
-      const ty = flrTop + (t * (flrBot - flrTop)) / tiers;
-      L.lines.push({ x1: R(rx), y1: R(ty), x2: R(rx + blW), y2: R(ty), stroke: "#d8dbe1", sw: 0.8, dash: "" });
-    }
-  });
-  L.texts.push({ x: R(x0 + blW + 4), y: R(flrTop + 9), t: "BLEACHERS", fill: "#c4c9d2", size: 7, anchor: "start", transform: "" });
-  const mid = (flrTop + flrBot) / 2;
-  L.lines.push({ x1: R(x0 + blW + 8), y1: R(mid), x2: R(x1 - blW - 8), y2: R(mid), stroke: "#e2e5ea", sw: 1.4, dash: "" });
-  L.texts.push({ x: R(cx), y: R(flrBot - 5), t: "GYM FLOOR", fill: "#c4c9d2", size: 8, anchor: "middle", transform: "" });
-  dimH(L, x0, x1, y0 - 26, s.width + "'-0\"", false);
-  dimV(L, y0, y1, x0 - 32, s.depth + "'-0\"");
-  return { W: Wpx, H: R(y1 + 28), ...L };
 }
 
 /** Church — Jeff's template (#255): the drawing, the platform's systems, pews in the Nave, FOH mix, dimension chains. */
@@ -613,12 +631,6 @@ function legendFor(kind: VenueKind, s: AState, electrics: number, accent: string
     if (sys.lighting) it.push({ sw: mk("dot", C.lighting), label: "FOH lighting" });
     if (sys.audio) it.push({ sw: mk("spk"), label: "Loudspeaker" });
     it.push({ sw: mk("seat"), label: "Seating" });
-  } else if (kind === "gym") {
-    it.push({ sw: mk("box"), label: "Stage platform" });
-    if (sys.curtains) it.push({ sw: mk("dash", C.curtains), label: "Main curtain" });
-    if (sys.lighting) it.push({ sw: mk("dot", C.lighting), label: "FOH lighting" });
-    if (sys.audio) it.push({ sw: mk("spk"), label: "Loudspeaker" });
-    it.push({ sw: mk("seat"), label: "Bleachers" });
   } else if (kind === "blackbox") {
     it.push({ sw: mk("faint"), label: "Tension grid" });
     if (sys.curtains) it.push({ sw: mk("dash", C.curtains), label: "Perimeter masking" });
@@ -646,9 +658,9 @@ export function buildPlan(s: AState, lineSets: number, electrics: number, accent
   else if (family === "proscenium") p = buildPlanProscenium(s, lineSets, electrics, accent, id);
   else if (kind === "flat") p = buildPlanFlat(s, lineSets, electrics, accent);
   else if (kind === "blackbox") p = buildPlanBlackbox(s, lineSets, electrics, accent);
-  else if (kind === "gym") p = buildPlanGym(s, lineSets, electrics, accent);
   else p = buildPlanArena(s, lineSets, electrics, accent);
-  p.legend = legendFor(kind, s, electrics, accent);
+  // #255: a template plan's legend is its family's (Quick Design's Gym Stage draws the proscenium-family gym drawing).
+  p.legend = legendFor(family === "proscenium" ? "proscenium" : kind, s, electrics, accent);
   p.isHouse = family === "proscenium" || family === "church";
   p.canSlideWalls = p.isHouse;
   return p;
@@ -808,6 +820,11 @@ export function houseDragPatch(s: AState, hd: PlanHandle, pos: DragPos, tpl?: st
   const family = templateEntry(id)?.family;
   if (family !== "proscenium" && family !== "church") return null;
   const G = family === "church" ? churchGeom(s, id) : prosGeom(s, id);
+  if (family === "proscenium" && (VENUES.find((v) => v.key === s.venue) || VENUES[0]).kind === "gym") {
+    // #255: a gym-kind design's walls are its own width (floor) and depth fields.
+    if (hd.side === "B") return { depth: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, LIM.depth[0], LIM.depth[1])) };
+    return { width: Math.round(clamp(G.dims.houseWidthFt + (2 * (hd.side === "L" ? -1 : 1) * pos.dx) / G.ppf, LIM.width[0], LIM.width[1])) };
+  }
   if (hd.side === "B") {
     const [lo, hi] = houseSpecFor(G.template).depthLim;
     return { houseDepthFt: Math.round(clamp(G.dims.houseDepthFt + pos.dy / G.ppf, lo, hi)) };

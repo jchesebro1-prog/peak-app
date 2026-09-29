@@ -34,6 +34,7 @@ REQUIRED = {
     "proscenium": ["Stage", "Pit", "Catwalk", "Center Aisle", "Booth", "Electrical Room", "MISC Rooms"],
     "church-traditional": ["Platform", "Apse", "Nave", "Entry", "Choir Room", "Electrical Room", "Cry Room", "Storage"],
     "church-contemporary": ["Platform", "Nave", "Backstage", "Storage", "Storage", "Storage", "Storage", "Green Room", "Electrical Room", "Control Booth", "Cry Room"],
+    "gym-stage": ["Stage", "Gym Floor", "Storage", "Electrical Room", "Booth"],
 }
 
 # Drawings far from their own origin are shifted by these drawing inches first (#255).
