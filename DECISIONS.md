@@ -8131,3 +8131,15 @@ re-pricing / Copy system treat it as an ordinary line. Update track re-prices at
 comment and internal note (the modal can't edit them). A line whose series was deleted stays on the quote and opens
 read-only rather than guessing a replacement.
 
+
+## D490. Datasheet thumbnails can run catalog-wide; failed links aren't retried in bulk (#245, 2026-09-30)
+
+Jeff asked for datasheet page-1 thumbnails to become portal product images across the whole catalog, not just quoted
+parts, so Catalog → Datasheets gains an admin "Whole catalog images" button that fetches every linked datasheet and then
+renders thumbnails with `renderThumbnailsAction({ scope: "catalog" })`. The fetch phase emits one target per unique URL
+(`catalogFetchTargets`), because one fetch already links the stored file to every part that references that URL, and it
+leaves out any link whose document already failed a fetch — a bulk run doesn't retry thousands of dead links each time,
+while a row's own Fetch still retries one. The catalog scope reads existing images from the already-loaded documents and
+links instead of an IN query over ~37k SKUs, and the quoted scope behaves exactly as before. Jeff accepted the Blob
+storage cost of holding every catalog datasheet. This depends on the earlier fix 0458add1, which exempted the pdf.js
+worker from the login gate so headless Chrome can load it and actually render page 1.

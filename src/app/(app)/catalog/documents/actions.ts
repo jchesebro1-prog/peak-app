@@ -21,13 +21,14 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { listProjects } from "@/lib/stores/grid-projects";
 import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
-import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
+import { buildFetchContext, catalogFetchTargets, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { fetchImageBytes } from "@/lib/part-docs/fetch";
 import { fileNameForFetched, sniffImageType } from "@/lib/part-docs/files";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
 import { quotedPartStats } from "@/lib/part-docs/quoted-parts";
+import { buildImageIndex } from "@/lib/part-docs/views";
 import { groupCandidatesByDatasheet, thumbnailCandidates } from "@/lib/part-docs/thumbnail-plan";
 import { renderDatasheetThumbnail } from "@/lib/part-docs/thumbnail";
 import { printOriginFor } from "@/lib/quote-pdf/origin";
@@ -249,6 +250,25 @@ export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActio
   return { ok: true, results };
 }
 
+/** Admin: "Whole catalog images" phase 1 (#245, 2026-09-30) — every
+ *  datasheet fetch target across the WHOLE catalog (Labor excluded), one per
+ *  unique URL, previously-failed links left out (catalogFetchTargets). The
+ *  button then feeds these to `fetchLinksAction` in FETCH_BATCH_SIZE chunks. */
+export async function catalogFetchTargetsAction(): Promise<DocActionResult<{ targets: FetchTarget[] }>> {
+  await requirePerm("manage_users");
+  if (!blobEnabled()) {
+    return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be fetched on this deployment." };
+  }
+  const parts = await listCatalog();
+  const bySku = new Map(parts.map((p) => [p.sku, p]));
+  const ctx = buildFetchContext(await loadPartDocsState(parts));
+  const targets = catalogFetchTargets(ctx, (sku) => {
+    const p = bySku.get(sku);
+    return !!p && p.category !== "Labor";
+  });
+  return { ok: true, targets };
+}
+
 /** "Also covers…" — after `documentId` landed on `sku`, the other parts it
  *  likely describes (the part's accessories, then its model family), minus
  *  the parts already linked to it. */
@@ -468,8 +488,15 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
  * failing never gets an image and would otherwise sort first again on
  * every retry — the batch would never finish. `failedIds` on the result is
  * what the caller folds into the next call's `skip`.
+ *
+ * `scope: "catalog"` ("Whole catalog images", 2026-09-30) widens the SKUs
+ * from the quoted parts to every catalog part (Labor still excluded) and
+ * skips the quotes/Grid/spec loads. Its images come from the already-loaded
+ * state (buildImageIndex — live links to live image documents, hidden ones
+ * included, the same rule as linkedDocumentsForParts) rather than a lookup
+ * keyed by ~37k SKUs.
  */
-export async function renderThumbnailsAction(input?: { skip?: string[] }): Promise<DocActionResult<{ done: number; failed: number; remaining: number; failedIds: string[] }>> {
+export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: "quoted" | "catalog" }): Promise<DocActionResult<{ done: number; failed: number; remaining: number; failedIds: string[] }>> {
   const user = await requirePerm("manage_users");
   if (!blobEnabled()) {
     return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be rendered on this deployment." };
@@ -490,23 +517,29 @@ export async function renderThumbnailsAction(input?: { skip?: string[] }): Promi
 
   const budget = createFetchBudget(FETCH_ACTION_BUDGET_MS);
 
-  const [parts, quotes, gridProjects, generated] = await Promise.all([
-    listCatalog(),
-    allQuotes(),
-    listProjects(),
-    allGeneratedSpecs(),
-  ]);
+  const catalogScope = input?.scope === "catalog";
+  // The quoted scope's three extra loads still run alongside the catalog list.
+  const quotedLoads = catalogScope ? null : Promise.all([allQuotes(), listProjects(), allGeneratedSpecs()]);
+  const parts = await listCatalog();
   const bySku = new Map(parts.map((p) => [p.sku, p]));
   // Labor rows are rates, not products — they never take a datasheet or an
   // image, same exclusion as this page's own quoted-parts scope.
-  const stats = quotedPartStats({ quotes, gridProjects, generated }, (sku) => {
+  const eligible = (sku: string) => {
     const p = bySku.get(sku);
     return !!p && p.category !== "Labor";
-  });
-  const skus = [...stats.keys()];
+  };
+  let skus: string[];
+  if (!quotedLoads) {
+    skus = parts.filter((p) => p.category !== "Labor").map((p) => p.sku);
+  } else {
+    const [quotes, gridProjects, generated] = await quotedLoads;
+    skus = [...quotedPartStats({ quotes, gridProjects, generated }, eligible).keys()];
+  }
 
   const state = await loadPartDocsState(parts);
-  const imagesBySku = await linkedDocumentsForParts(skus, "image");
+  const imagesBySku: Map<string, unknown[]> = catalogScope
+    ? buildImageIndex(state.documents, state.links)
+    : await linkedDocumentsForParts(skus, "image");
   const ownDatasheetBySku = new Map<string, { id: string; blobKey: string | null }>();
   for (const sku of skus) {
     const own = ownFiles(state.index, sku, "datasheet")[0];

@@ -94,6 +94,49 @@ function candidateUrls(ctx: FetchContext, t: FetchTarget): string[] {
   return [...new Set(out)];
 }
 
+/**
+ * "Whole catalog images" (#245, 2026-09-30): the datasheet fetch targets for
+ * the WHOLE catalog, not just the quoted parts this page lists. Pure — reads
+ * only the loaded context — so the harness checks it without a DB.
+ *
+ * One target per unique URL, not one per part: `fetchSlot` already shares a
+ * successful (or failed) fetch with every part that references the same
+ * (kind, URL), so a DaVinci datasheet linked to forty ETC parts needs one
+ * download, not forty — emitting forty targets would spend forty budget
+ * slots re-sharing the same document. A SKU is skipped when `eligible` says
+ * no (not a live part, a Labor rate), when it already has its own stored
+ * datasheet, or when it has no candidate URL. A URL whose known document
+ * already failed a fetch (`lastFetch.ok === false`) is dropped: a bulk run
+ * must not retry thousands of dead links every time (the row's own Fetch
+ * still retries one). A URL an earlier target already claimed is dropped
+ * too; a SKU with any URL left emits ONE target and claims ALL of its
+ * remaining URLs, since `fetchSlot` walks that SKU's whole candidate list.
+ * SKUs are visited in sorted order so the run is deterministic.
+ */
+export function catalogFetchTargets(ctx: FetchContext, eligible: (sku: string) => boolean): FetchTarget[] {
+  const kind = "datasheet" as const;
+  const skus = new Set<string>();
+  for (const [sku, slot] of ctx.state.index.docsBySku) if (slot.datasheet.some((d) => !d.blobKey && d.sourceUrl)) skus.add(sku);
+  for (const [sku, urls] of ctx.state.index.catalogUrls) if (urls.datasheet.length) skus.add(sku);
+
+  const claimed = new Set<string>();
+  const out: FetchTarget[] = [];
+  for (const sku of [...skus].sort()) {
+    if (!eligible(sku)) continue;
+    if (ownFiles(ctx.state.index, sku, kind).length) continue;
+    const t: FetchTarget = { sku, kind };
+    const urls = candidateUrls(ctx, t).filter((u) => {
+      const doc = ctx.byUrl.get(urlKey(kind, u));
+      if (doc?.lastFetch && !doc.lastFetch.ok) return false;
+      return !claimed.has(u);
+    });
+    if (!urls.length) continue;
+    out.push(t);
+    for (const u of urls) claimed.add(u);
+  }
+  return out;
+}
+
 function urlFileName(url: string): string {
   try {
     return decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "document";

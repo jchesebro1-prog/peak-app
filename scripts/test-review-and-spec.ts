@@ -29583,7 +29583,7 @@ import { groupCandidatesByDatasheet as d245GroupByDatasheet, thumbnailCandidates
   ok(d245ThumbCandidates({ skus, imagesBySku, ownDatasheetBySku, skip: new Set(["PD-c"]) }).length === call2.length, "#245 thumbnails fix2: skip also accepts a Set (renderThumbnailsAction folds the caller's array into one)");
 
   const actionSrc245 = readFileSync("src/app/(app)/catalog/documents/actions.ts", "utf8");
-  ok(/renderThumbnailsAction\(input\?: \{ skip\?: string\[\] \}\)/.test(actionSrc245), "#245 thumbnails fix2: renderThumbnailsAction accepts an optional skip list");
+  ok(/renderThumbnailsAction\(input\?: \{ skip\?: string\[\](; scope\?: "quoted" \| "catalog")? \}\)/.test(actionSrc245), "#245 thumbnails fix2: renderThumbnailsAction accepts an optional skip list");
   ok(/thumbnailCandidates\(\{ skus, imagesBySku, ownDatasheetBySku, skip: input\?\.skip \}\)/.test(actionSrc245), "#245 thumbnails fix2: the action forwards skip into thumbnailCandidates");
   ok(/failedIds\.push\(g\.datasheetId\)/.test(actionSrc245) && /return \{ ok: true, done, failed, remaining, failedIds \};/.test(actionSrc245), "#245 thumbnails fix2: the action collects and returns this call's failed datasheet ids");
 
@@ -38073,4 +38073,47 @@ import { readFileSync as mw245Read } from "node:fs";
   ok(!re.test("/pdf.worker.min.mjs"), "#245 middleware: /pdf.worker.min.mjs skips the login gate");
   ok(!re.test("/print/part-thumb/PD-x"), "#245 middleware: /print/* still skips the login gate");
   ok(re.test("/catalog/documents") && re.test("/"), "#245 middleware: app pages still go through the login gate");
+}
+
+// ---------------------------------------------------------------------------
+// #245 catalog-wide — "Whole catalog images": one datasheet fetch target per
+// unique URL across the whole catalog (catalogFetchTargets). Pure, no DB.
+// ---------------------------------------------------------------------------
+import { buildFetchContext as cw245Ctx, catalogFetchTargets as cw245Targets } from "@/lib/part-docs/fetch-links";
+import { buildCoverageIndex as cw245Coverage } from "@/lib/part-docs/coverage";
+import type { PartDocument as Cw245Doc, PartDocumentLink as Cw245Link } from "@/lib/part-docs/types";
+{
+  const doc = (id: string, kind: "datasheet" | "specsheet", url: string | null, file = false, lastFetch?: Cw245Doc["lastFetch"]): Cw245Doc => ({
+    id, kind, title: id, fileName: `${id}.pdf`, contentType: file ? "application/pdf" : "", size: file ? 1 : 0,
+    blobKey: file ? `part-docs/${id}/${id}.pdf` : null, sourceUrl: url, source: file ? "upload" : "davinci",
+    uploadedAt: 1, uploadedBy: "t", history: [], ...(lastFetch ? { lastFetch } : {}),
+  });
+  const link = (partSku: string, d: Cw245Doc): Cw245Link => ({ id: `L-${partSku}-${d.id}`, partSku, documentId: d.id, kind: d.kind, createdAt: 1, createdBy: "t" });
+  const U1 = "https://etc.example/one.pdf";
+  const U2 = "https://etc.example/two.pdf";
+  const SHARED = doc("PD-cwsharedaaaa", "datasheet", U1);
+  const OWN = doc("PD-cwownfileaaa", "datasheet", null, true);
+  const DEAD = doc("PD-cwdeadlinkaa", "datasheet", "https://etc.example/dead.pdf", false, { at: 1, ok: false, error: "404" });
+  const SPEC = doc("PD-cwspecsheeta", "specsheet", "https://etc.example/spec.pdf");
+  const documents = [SHARED, OWN, DEAD, SPEC];
+  const links = [link("SHARE1", SHARED), link("SHARE2", SHARED), link("OWNED", OWN), link("DEADSKU", DEAD), link("SPECONLY", SPEC)];
+  const parts = [
+    { sku: "OWNED", docs: [{ kind: "datasheet", url: "https://etc.example/owned-extra.pdf" }] },
+    { sku: "LABOR", docs: [{ kind: "datasheet", url: "https://etc.example/labor.pdf" }] },
+    { sku: "TWO", docs: [{ kind: "datasheet", url: U1 }, { kind: "datasheet", url: U2 }] },
+  ];
+  const state = { documents, links, accessoryLinks: [], index: cw245Coverage({ documents, links, accessoryLinks: [], parts }) };
+  const targets = cw245Targets(cw245Ctx(state), (sku) => sku !== "LABOR");
+  const skus = targets.map((t) => t.sku);
+  ok(skus.includes("SHARE1") && !skus.includes("SHARE2"), "#245 catalog-wide: two parts linked to the same link-only URL → one target");
+  ok(!skus.includes("OWNED"), "#245 catalog-wide: a part with its own stored datasheet → no target");
+  ok(!skus.includes("DEADSKU"), "#245 catalog-wide: a part whose only URL already failed a fetch → no target");
+  ok(!skus.includes("LABOR"), "#245 catalog-wide: an ineligible SKU → no target");
+  ok(skus.filter((s) => s === "TWO").length === 1, "#245 catalog-wide: a part with a claimed URL and an unclaimed one → still one target");
+  ok(!skus.includes("SPECONLY") && targets.every((t) => t.kind === "datasheet"), "#245 catalog-wide: datasheet targets only — a spec sheet link is never a target");
+  ok(skus.join(",") === "SHARE1,TWO", "#245 catalog-wide: targets come out in sorted SKU order, exactly SHARE1 then TWO");
+  const again = cw245Targets(cw245Ctx(state), (sku) => sku !== "LABOR");
+  ok(JSON.stringify(again) === JSON.stringify(targets), "#245 catalog-wide: the same state gives the same targets (deterministic)");
+  const onlyClaimed = cw245Targets(cw245Ctx(state), (sku) => sku === "SHARE1" || sku === "SHARE2");
+  ok(onlyClaimed.map((t) => t.sku).join(",") === "SHARE1", "#245 catalog-wide: a SKU whose every URL is already claimed emits nothing");
 }

@@ -22,6 +22,7 @@ import {
 import DocumentsClient from "./documents-client";
 import DavinciPrefillButton from "./davinci-prefill-button";
 import ThumbnailButton from "./thumbnail-button";
+import CatalogImagesButton from "./catalog-images-button";
 
 export const metadata = { title: "Datasheets — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -99,6 +100,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {can("manage_users", user.roles) && <DavinciPrefillButton />}
           {can("manage_users", user.roles) && <ThumbnailButton />}
+          {can("manage_users", user.roles) && <CatalogImagesButton />}
           <Link href="/catalog/documents/upload" className="pk-btn-accent" style={{ textDecoration: "none" }}>Upload many</Link>
         </div>
       </div>
