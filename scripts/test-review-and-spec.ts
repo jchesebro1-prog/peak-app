@@ -10678,6 +10678,7 @@ seeded()
   .then(() => track274bAsyncChecks())
   .then(() => lift275AsyncChecks())
   .then(() => rewards282AsyncChecks())
+  .then(() => rewards282Phase2AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -30361,7 +30362,8 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   const saveBody = ea.slice(ea.indexOf("export async function saveQuoteAction("), ea.indexOf("export async function searchQuotesAction("));
   ok(
-    saveBody.includes("reconcileEstimatorValue(payload.sections, { value: payload.value, margin: payload.margin })") &&
+    // #282 phase 2: priced over the posted sections after the system-sell sanitize + Rewards-credit clamp.
+    saveBody.includes("reconcileEstimatorValue(postedSections, { value: payload.value, margin: payload.margin })") &&
       saveBody.includes("value: priced.value,") && saveBody.includes("margin: priced.margin,") && !/^\s+value: payload\.value,$/m.test(saveBody),
     "#242 final: saveQuoteAction stores the server-recomputed value, never the posted one"
   );
@@ -36605,7 +36607,8 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   // Wiring.
   const read267 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const acts267 = read267("src/app/(app)/estimator/actions.ts");
-  ok(acts267.includes("payload.sections.map(sanitizeSystemSell)") && acts267.includes("reconcileEstimatorValue(payload.sections,") && acts267.includes("clearPricedPor(postedSections)"), "#267: saveQuoteAction sanitizes every posted section before pricing and storing it");
+  // #282 phase 2: postedSections = the sell-sanitized sections after the Rewards-credit clamp.
+  ok(acts267.includes("payload.sections.map(sanitizeSystemSell)") && acts267.includes("settleRewardCredit(sellSanitized,") && acts267.includes("reconcileEstimatorValue(postedSections,") && acts267.includes("clearPricedPor(postedSections)"), "#267: saveQuoteAction sanitizes every posted section before pricing and storing it");
   ok(acts267.includes("{ ...sanitizeSystemSell(section), id: \"sys\" + Date.now() }") && acts267.includes("copySectionForTarget(sanitizeSystemSell(section),"), "#267: Move and Copy sanitize the posted section too");
   const cli267 = read267("src/app/(app)/estimator/estimator-client.tsx");
   ok(cli267.includes("!initial.portal && (!initial.loadedId || initial.status === \"draft\")") && cli267.includes("withPriceRound(initial.sections)"), "#267: the Estimator stamps priceRound on load for drafts and unsaved estimates only");
@@ -38367,5 +38370,290 @@ async function rewards282AsyncChecks(): Promise<void> {
     for (const s of ["base", "gold", "none", "emp"]) await r282DropContact(ct(s));
     await removeCustomer(CO);
     await removeCustomer(RES);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #282 Phase 2 — Customer Rewards: the account-credit ledger (spec §4) and
+// the Estimator's Rewards credit line (spec §5, Estimator part). Pure checks
+// run here; the DB checks (earn/reverse in setStatus, starting credit,
+// available credit across open quotes, redeem) are rewards282Phase2AsyncChecks()
+// on the promise chain.
+// ---------------------------------------------------------------------------
+import {
+  availableCredit as r282bAvailable,
+  earnAmount as r282bEarnAmount,
+  entryN as r282bEntryN,
+  ledgerBalance as r282bBalance,
+  parseAdjustAmount as r282bParseAdjust,
+  quoteLedgerPlan as r282bPlan,
+  startingCreditFor as r282bStarting,
+  type LedgerEntry as R282bEntry,
+} from "@/lib/rewards/ledger";
+import {
+  NEGATIVE_LINE_ERROR as r282bNegErr,
+  isRewardCreditItem as r282bIsCredit,
+  maxApplicableCredit as r282bMaxApply,
+  quoteRewardCredit as r282bQuoteCredit,
+  rewardCreditLine as r282bLine,
+  rewardCreditOf as r282bCreditOf,
+  sanitizeRewardCredit as r282bSanitize,
+  withRewardCredit as r282bWith,
+  withoutRewardCredit as r282bWithout,
+} from "@/lib/rewards/credit-line";
+import {
+  customerLines as r282bCustomerLines,
+  reconcileEstimatorValue as r282bReconcile,
+  systemFreight as r282bFreight,
+  systemItemsRev as r282bItemsRev,
+  systemSellTotal as r282bSellTotal,
+  totals as r282bTotals,
+} from "@/app/(app)/estimator/pricing";
+import { copySectionForTarget as r282bCopy } from "@/app/(app)/estimator/copy-system";
+import { partsListRows as r282bPartsRows } from "@/app/(app)/estimator/parts-csv";
+import { repriceForTier as r282bReprice } from "@/app/(app)/estimator/tier-reprice";
+import type { SpecSection as R282bSection } from "@/app/(app)/estimator/types";
+import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
+
+{
+  // ---- ledger math ----
+  const e = (id: string, kind: R282bEntry["kind"], amount: number, quoteId?: string): R282bEntry =>
+    ({ id, companyId: "co", kind, amount, ...(quoteId ? { quoteId } : {}), at: 1, by: "T" });
+  const book = [
+    e("earn:Q:1", "earn", 100, "Q"), e("reverse:Q:1", "reverse", -100, "Q"), e("earn:Q:2", "earn", 100, "Q"),
+    e("start:co", "start", 50), e("redeem:R:1", "redeem", -30, "R"), e("unredeem:R:1", "unredeem", 30, "R"),
+    e("adjust:co:x", "adjust", -5.25), e("perk:co:1", "perk", 0),
+  ];
+  ok(r282bBalance(book) === 144.75, `#282 P2 ledger: balance = Σ amount over every kind (got ${r282bBalance(book)})`);
+  ok(r282bBalance([]) === 0 && r282bBalance([{ amount: NaN }, { amount: 10 }]) === 10, "#282 P2 ledger: empty → 0; a junk amount is ignored");
+  ok(r282bAvailable(100, [30, 20]) === 50 && r282bAvailable(10, [25]) === -15, "#282 P2 ledger: available = balance − credit parked on other open quotes");
+  ok(r282bEarnAmount(12345.67, 1.5) === 185.19 && r282bEarnAmount(1000, 0) === 0 && r282bEarnAmount(-5, 3) === 0, "#282 P2 ledger: earn = round2(value × % / 100), never negative");
+  ok(r282bEntryN("earn:TEST282:q:3") === 3 && r282bEntryN("start:co") === 0, "#282 P2 ledger: entryN reads the numbered suffix");
+
+  // ---- earn / reverse / re-win, state-based ----
+  const base = { quoteId: "Q", companyId: "co", at: 5, by: "T" };
+  const w1 = r282bPlan({ ...base, won: true, entries: [], earn: 12.5, credit: 0 });
+  ok(w1.length === 1 && w1[0].id === "earn:Q:1" && w1[0].amount === 12.5 && w1[0].kind === "earn", "#282 P2 plan: a win posts earn:<q>:1");
+  ok(r282bPlan({ ...base, won: true, entries: w1, earn: 12.5, credit: 0 }).length === 0, "#282 P2 plan: earn once per win — a replay posts nothing");
+  const u1 = r282bPlan({ ...base, won: false, entries: w1, earn: 0, credit: 0 });
+  ok(u1.length === 1 && u1[0].id === "reverse:Q:1" && u1[0].amount === -12.5, "#282 P2 plan: leaving won reverses the open earn");
+  ok(r282bPlan({ ...base, won: false, entries: [...w1, ...u1], earn: 0, credit: 0 }).length === 0, "#282 P2 plan: a reversed earn is not reversed twice");
+  const w2 = r282bPlan({ ...base, won: true, entries: [...w1, ...u1], earn: 20, credit: 0 });
+  ok(w2.length === 1 && w2[0].id === "earn:Q:2" && w2[0].amount === 20, "#282 P2 plan: re-winning posts a fresh numbered earn:<q>:2");
+  ok(r282bPlan({ ...base, won: true, entries: [], earn: 0, credit: 0 }).length === 0, "#282 P2 plan: nothing to earn (program off / 0 %) → nothing posted");
+  ok(r282bPlan({ ...base, companyId: null, won: true, entries: [], earn: 10, credit: 5 }).length === 0, "#282 P2 plan: a quote with no customer posts nothing");
+  const rd = r282bPlan({ ...base, won: true, entries: [], earn: 0, credit: 40 });
+  ok(rd.length === 1 && rd[0].id === "redeem:Q:1" && rd[0].amount === -40, "#282 P2 plan: a won quote carrying credit posts redeem:<q>:1 (negative)");
+  const ur = r282bPlan({ ...base, won: false, entries: rd, earn: 0, credit: 0 });
+  ok(ur.length === 1 && ur[0].id === "unredeem:Q:1" && ur[0].amount === 40, "#282 P2 plan: leaving won returns the redeemed credit");
+  const moved = r282bPlan({ ...base, companyId: "other", won: false, entries: w1, earn: 0, credit: 0 });
+  ok(moved[0].companyId === "co", "#282 P2 plan: a reversal lands on the earn's own company");
+
+  // ---- starting credit ----
+  const hist = [{ amount: 50000, at: 1 }, { amount: 200000, at: 5 }];
+  const s1 = r282bStarting(hist, { launchedAt: 3, retro: { ratePct: 1, capPerCustomer: 1000 } });
+  ok(s1.historySpend === 50000 && s1.proposed === 500, "#282 P2 start: only history before launchedAt counts (1 % of 50,000 = 500)");
+  const s2 = r282bStarting(hist, { retro: { ratePct: 1, capPerCustomer: 1000 } });
+  ok(s2.historySpend === 250000 && s2.proposed === 1000, "#282 P2 start: not launched → all history, capped at $1,000");
+  ok(r282bStarting(hist, { retro: { ratePct: 0, capPerCustomer: 1000 } }).proposed === 0, "#282 P2 start: 0 % → nothing");
+  ok(r282bParseAdjust("-25") === -25 && r282bParseAdjust("$1,000.456") === 1000.46 && r282bParseAdjust("0") === null && r282bParseAdjust("x") === null,
+    "#282 P2 adjust: signed, to the cent, never $0 or junk");
+
+  // ---- the credit line ----
+  const item = (id: number, price: number, qty = 1, cost = price * 0.6) => ({ id, sku: `S${id}`, desc: `Item ${id}`, qty, unit: "ea", cost, price });
+  const sec = (id: string, items: ReturnType<typeof item>[], extra: Partial<R282bSection> = {}): R282bSection =>
+    ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items, ...extra }) as R282bSection;
+  const two = [sec("a", [item(1, 600)]), sec("b", [item(2, 400)])];
+  const withC = r282bWith(two, 200, 99);
+  ok(withC[1].items.some(r282bIsCredit) && !withC[0].items.some(r282bIsCredit), "#282 P2 line: the credit line goes on the LAST system");
+  const cl = withC[1].items.find(r282bIsCredit)!;
+  ok(cl.qty === 1 && cl.cost === 0 && cl.price === -200 && cl.desc === "Rewards credit" && cl.sku === "", "#282 P2 line: qty 1, cost 0, negative price, desc \"Rewards credit\"");
+  ok(r282bCreditOf(withC) === 200 && r282bQuoteCredit({ spec: { sections: withC } }) === 200 && r282bQuoteCredit({ spec: { lines: [] } }) === 0,
+    "#282 P2 line: rewardCreditOf / quoteRewardCredit read it back (0 for a non-Estimator spec)");
+  ok(r282bCreditOf(r282bWith(withC, 50, 100)) === 50 && r282bWith(withC, 50, 100)[1].items.filter(r282bIsCredit).length === 1,
+    "#282 P2 line: re-applying replaces the one credit line");
+  ok(r282bCreditOf(r282bWith(withC, 0, 100)) === 0 && r282bCreditOf(r282bWithout(withC)) === 0, "#282 P2 line: 0 / withoutRewardCredit removes it");
+
+  // totals: net grand, never below $0; margin + system price ignore it.
+  const t0 = r282bTotals(two, 0);
+  const t1 = r282bTotals(withC, 0);
+  ok(t1.grand === 800 && t1.credit === 200 && t1.rev === t0.rev && t1.margin === t0.margin && t1.mat === t0.mat,
+    `#282 P2 totals: credit comes off the grand total only — rev, materials and margin are unchanged (grand ${t1.grand})`);
+  const big = r282bTotals(r282bWith(two, 5000, 99), 0);
+  ok(big.grand === 0 && big.credit === 1000, "#282 P2 totals: a credit above the quote's total never takes it below $0");
+  const tax = r282bTotals(withC, 10);
+  ok(tax.tax === 100 && tax.grand === 900, "#282 P2 totals: the credit applies after tax");
+  ok(r282bItemsRev(withC[1]) === 400 && r282bFreight(sec("f", [item(3, 1000, 1, 500)], { freightPct: 10 })) === 50 &&
+    r282bFreight(r282bWith([sec("f", [item(3, 1000, 1, 500)], { freightPct: 10 })], 300, 9)[0]) === 50,
+    "#282 P2 totals: a system's items sell and freight base ignore the credit line");
+  const rounded = r282bWith([sec("r", [item(4, 1010)], { priceRound: 25 })], 100, 9);
+  ok(r282bSellTotal(rounded[0]) === 1025 && r282bTotals(rounded, 0).grand === 925, "#282 P2 totals: $25 rounding happens first, the credit after it");
+  const typed = r282bWith([sec("o", [item(5, 1000)], { sellOverride: 1500 })], 100, 9);
+  ok(r282bSellTotal(typed[0]) === 1500 && r282bTotals(typed, 0).grand === 1400, "#282 P2 totals: a #267 typed system sell is untouched by the credit");
+  const rows = r282bCustomerLines(withC[1]);
+  ok(rows.length === 1 && rows.every((r) => r.item && !r282bIsCredit(r.item)), "#282 P2 document: the system's customer rows never include the credit line");
+
+  // server rules
+  const neg = r282bSanitize([sec("n", [item(6, -50)])], 1000);
+  ok(!neg.ok && neg.error === r282bNegErr, "#282 P2 server: a negative price on a non-credit line refuses the save");
+  const negQ = r282bSanitize([sec("n", [item(6, 50, -2)])], 1000);
+  ok(!negQ.ok, "#282 P2 server: a negative qty on a non-credit line refuses too");
+  const cl1 = r282bSanitize(r282bWith(two, 700, 99), 300);
+  ok(cl1.ok && cl1.credit === 300 && cl1.clamped && r282bCreditOf(cl1.sections) === 300, "#282 P2 server: the credit clamps to the available amount");
+  const cl2 = r282bSanitize(r282bWith(two, 700, 99), 0);
+  ok(cl2.ok && cl2.credit === 0 && r282bCreditOf(cl2.sections) === 0, "#282 P2 server: nothing available → the line is dropped");
+  const spread = [sec("a", [item(1, 600), r282bLine(40, 50)]), sec("b", [item(2, 400), r282bLine(60, 51)])];
+  const cl3 = r282bSanitize(spread, 1000);
+  ok(cl3.ok && cl3.credit === 100 && cl3.sections[0].items.filter(r282bIsCredit).length === 0 && cl3.sections[1].items.filter(r282bIsCredit).length === 1,
+    "#282 P2 server: several credit lines collapse into one on the last system");
+  ok(r282bMaxApply(500, 300) === 300 && r282bMaxApply(100, 300) === 100 && r282bMaxApply(-20, 300) === 0 && r282bMaxApply(500, -1) === 0,
+    "#282 P2 server: max applicable = min(available, pre-credit total), never below $0");
+  const rec = r282bReconcile(withC, { value: 999, margin: 0.5 });
+  ok(rec.adjusted && rec.value === 800, "#282 P2 server: reconcileEstimatorValue stores the net total");
+  const recNeg = r282bReconcile([sec("n", [item(6, 500), item(7, -300)])], { value: 200, margin: 0 });
+  ok(recNeg.value === 500, "#282 P2 server: reconcileEstimatorValue floors a stray negative price on a non-credit line at $0");
+
+  // copy / parts list / tier re-price ignore it
+  const copied = r282bCopy(withC[1], { newSectionId: "c", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  ok(!copied.section.items.some(r282bIsCredit) && copied.section.items.length === 1, "#282 P2 copy: Copy system drops the credit line");
+  const parts = r282bPartsRows(withC, [], {});
+  ok(parts.length === 2 && !parts.some((p) => /Rewards credit/.test(p.desc)), "#282 P2 parts list: the credit line never lands in the parts CSV");
+  const rp = r282bReprice(withC, 0.3, 0.2);
+  const rpCredit = rp.sections[1].items.find(r282bIsCredit)!;
+  ok(rpCredit.price === -200, "#282 P2 tier re-price: the credit line is never re-priced");
+
+  // spend adds the credit back
+  const sp = r282Purchases({
+    quotes: [
+      { id: "C1", customerId: "co", status: "won", value: 800, credit: 200, history: [] },
+      { id: "C2", customerId: "co", status: "won", value: 0, credit: 300, history: [] },
+    ],
+  });
+  ok(sp.find((p) => p.id === "C1")?.amount === 1000 && sp.find((p) => p.id === "C2")?.amount === 300,
+    "#282 P2 spend: a won quote counts value + the credit applied (a fully-credited quote still counts)");
+
+  // wiring
+  const docSrc = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
+  ok(/REWARD_CREDIT_DESC/.test(docSrc) && /p\.t\.credit/.test(docSrc), "#282 P2 document: the customer document prints the Rewards credit line from totals().credit");
+  const dt = r282Read("src/db/doc-tables.ts", "utf8");
+  ok(dt.includes('docTable("reward_ledger")') && dt.includes("reward_ledger: rewardLedger"), "#282 P2 wiring: reward_ledger is a registered doc table");
+  ok(!r282bSyncable.includes("reward_ledger" as never) && !CONFIG_COLLECTIONS.includes("reward_ledger" as never) && DEMO_COLLECTIONS.includes("reward_ledger" as never),
+    "#282 P2 wiring: reward_ledger is not syncable, not config — the go-live reset wipes it");
+  const mig = r282Read("drizzle/0034_reward_ledger.sql", "utf8");
+  ok(/CREATE TABLE IF NOT EXISTS "reward_ledger"/.test(mig) && /reward_ledger_seq_bump/.test(mig) && /CREATE INDEX IF NOT EXISTS "reward_ledger_seq_idx"/.test(mig),
+    "#282 P2 wiring: migration 0034 is idempotent with the seq-bump trigger");
+  const journal = JSON.parse(r282Read("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string }[] };
+  ok(journal.entries.some((x) => x.tag === "0034_reward_ledger"), "#282 P2 wiring: the journal lists 0034_reward_ledger");
+  const qSrc = r282Read("src/lib/stores/quotes.ts", "utf8");
+  ok(/opts\.bypassApprovalGate !== "historical-import"\) await reconcileRewardsSafely/.test(qSrc) && /console\.error\("\[rewards\] ledger post failed/.test(qSrc),
+    "#282 P2 wiring: setStatus posts the ledger after a real transition, never for historical-import, and logs instead of throwing");
+  const clientSrc = r282Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  ok(/if \(id !== customerId\) setSections\(\(ss\) => \(rewardCreditOf\(ss\) > 0 \? withoutRewardCredit\(ss\) : ss\)\)/.test(clientSrc),
+    "#282 P2 wiring: changing the quote's customer drops the credit line");
+}
+
+async function rewards282Phase2AsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const Q = await import("@/lib/stores/quotes");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "p2-co");
+  const OTHER = fixtureId(282, "p2-other");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const program = (enabled: boolean) => ({
+    ...r282Default,
+    enabled,
+    earnPct: { base: 2, copper: 3, silver: 4, gold: 5, platinum: 6 },
+    retro: { ratePct: 1, capPerCustomer: 1000 },
+  });
+  const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
+  const ids = async (quoteId: string) => (await L.ledgerForQuote(quoteId)).map((e) => e.id).sort().join(",");
+  const q = (slug: string, customerId: string, status: string, value: number, extra: Record<string, unknown> = {}) =>
+    createFixture("quotes", { id: fixtureId(282, slug), name: `T282 ${slug}`, customer: "", customerId, status, value, source: "estimator",
+      quoteType: "consulting", history: status === "won" ? [{ at: 1000, to: "won" }] : [], createdAt: 1, updatedAt: 1, ...extra });
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 P2 Credit Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await upsertCustomer({ id: OTHER, name: "Test282 P2 Other Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    // History: a Daylite project (before launch), 30,000 → Copper at 25k.
+    await createFixture("projects", { id: fixtureId(282, "p2-hist"), kind: "project", name: "T282 p2 hist", customer: "", customerId: CO, quoteId: null,
+      projectType: null, value: 30000, margin: 0, createdAt: 1, updatedAt: 1, startedAt: 2, stageHistory: [], source: { system: "daylite", importedAt: 1 } });
+
+    // Program OFF → a win posts nothing.
+    await setBlob("rewards_program", { ...program(false), launchedAt: null } as unknown as Record<string, unknown>);
+    await q("p2-off", CO, "sent", 5000);
+    await Q.setStatus(fixtureId(282, "p2-off"), "won", "Test", bypass);
+    ok((await ids(fixtureId(282, "p2-off"))) === "", "#282 P2 DB: program off → a win posts no earn");
+
+    // Starting credit works while the program is off (posted before launch).
+    const sb = (await L.startingCreditBoard()).find((r) => r.companyId === CO);
+    ok(!!sb && sb.historySpend === 35000 && sb.proposed === 350 && sb.posted === null,
+      `#282 P2 DB: starting-credit board proposes 1 % of all history before launch (got ${JSON.stringify(sb)})`);
+    const st1 = await L.postStartingCredit(CO, "Test");
+    registerFixture("reward_ledger", `start:${CO}`);
+    const st2 = await L.postStartingCredit(CO, "Test");
+    ok(st1.ok && !st1.already && st1.posted === 350 && st2.ok && st2.already && st2.posted === 350, "#282 P2 DB: starting credit posts once — a second Post is a no-op");
+    ok((await L.startingCreditBoard()).find((r) => r.companyId === CO)?.posted === 350, "#282 P2 DB: the board shows it as posted");
+    ok((await L.companyCredit(CO)).balance === 350, "#282 P2 DB: the balance carries the starting credit");
+
+    // Program ON → earn at the earned level at the moment of the win.
+    await R.saveRewardsProgram(program(true));
+    await q("p2-q", CO, "sent", 10000);
+    const QID = fixtureId(282, "p2-q");
+    await Q.setStatus(QID, "won", "Test", bypass);
+    // Spend before this win: 30,000 history + 5,000 (p2-off) = 35,000 → Copper 3 %.
+    const e1 = (await L.ledgerForQuote(QID)).find((e) => e.id === `earn:${QID}:1`);
+    ok(!!e1 && e1.amount === 300 && e1.companyId === CO, `#282 P2 DB: a win posts earn:<q>:1 at the earned level's % (Copper 3 % of 10,000 → ${e1?.amount})`);
+    await Q.setStatus(QID, "won", "Test", bypass);
+    ok((await ids(QID)) === `earn:${QID}:1`, "#282 P2 DB: re-saving an already-won quote posts nothing more");
+    await Q.setStatus(QID, "sent", "Test", bypass);
+    ok((await ids(QID)) === [`earn:${QID}:1`, `reverse:${QID}:1`].sort().join(","), "#282 P2 DB: un-winning posts the reversal");
+    await Q.setStatus(QID, "won", "Test", bypass);
+    ok((await ids(QID)).includes(`earn:${QID}:2`), "#282 P2 DB: re-winning posts a fresh numbered earn");
+    ok((await L.companyCredit(CO)).balance === 650, `#282 P2 DB: balance = 350 start + 300 earn (got ${(await L.companyCredit(CO)).balance})`);
+
+    // historical-import → nothing.
+    await q("p2-imp", CO, "draft", 8000);
+    await Q.setStatus(fixtureId(282, "p2-imp"), "won", "Test", { bypassApprovalGate: "historical-import" });
+    ok((await ids(fixtureId(282, "p2-imp"))) === "", "#282 P2 DB: a historical-import won row posts nothing");
+
+    // Available holds across open quotes.
+    const credited = (amt: number) => ({ spec: { sections: r282bWith([{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [
+      { id: 1, sku: "X", desc: "X", qty: 1, unit: "ea", cost: 1000, price: 2000 }] } as R282bSection], amt, 2), mobs: [] } });
+    await q("p2-open", CO, "draft", 1800, credited(200));
+    await q("p2-open-lost", CO, "lost", 1800, credited(999));
+    const c1 = await L.companyCredit(CO);
+    ok(c1.balance === 650 && c1.available === 450 && c1.onOpenQuotes === 200,
+      `#282 P2 DB: available = balance − credit on open quotes; a lost quote holds none (got ${JSON.stringify({ b: c1.balance, a: c1.available })})`);
+    ok((await L.companyCredit(CO, fixtureId(282, "p2-open"))).available === 650, "#282 P2 DB: the quote being edited doesn't hold against itself");
+    ok((await L.companyCredit(OTHER)).balance === 0, "#282 P2 DB: another company's credit is its own");
+
+    // Redeem on win, net earn, spend adds credit back.
+    const OPEN = fixtureId(282, "p2-open");
+    await Q.setStatus(OPEN, "won", "Test", bypass);
+    const oe = await L.ledgerForQuote(OPEN);
+    ok(oe.some((x) => x.id === `redeem:${OPEN}:1` && x.amount === -200), "#282 P2 DB: winning a credited quote posts redeem:<q>:1");
+    ok(oe.some((x) => x.id === `earn:${OPEN}:1` && x.amount === 54), `#282 P2 DB: the earn is on value net of credit (3 % of 1,800 → ${oe.find((x) => x.kind === "earn")?.amount})`);
+    const view = await R.companyRewards(CO);
+    ok(!!view && view.purchases.find((p) => p.id === OPEN)?.amount === 2000, "#282 P2 DB: spend counts value + credit applied");
+    await Q.setStatus(OPEN, "lost", "Test", bypass);
+    const oe2 = await L.ledgerForQuote(OPEN);
+    ok(oe2.some((x) => x.id === `unredeem:${OPEN}:1` && x.amount === 200) && oe2.some((x) => x.id === `reverse:${OPEN}:1`),
+      "#282 P2 DB: leaving won unredeems the credit and reverses the earn");
+
+    // Adjust needs a note; the board shows credit.
+    const bad = await L.postAdjustment(CO, 25, "  ", "Test");
+    ok(!bad.ok, "#282 P2 DB: an adjustment without a note is refused");
+    const adj = await L.postAdjustment(CO, -15, "goodwill correction", "Test");
+    if (adj.ok) registerFixture("reward_ledger", adj.entry.id);
+    ok(adj.ok && (await L.companyCredit(CO)).entries.some((x) => x.kind === "adjust" && x.amount === -15 && x.note === "goodwill correction"),
+      "#282 P2 DB: a signed adjustment posts with its note");
+    const cb = (await L.creditByCompany()).get(CO);
+    ok(!!cb && cb.balance === (await L.companyCredit(CO)).balance, "#282 P2 DB: the /rewards credit column matches the card's balance");
+  } finally {
+    await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
+    for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    await removeCustomer(CO);
+    await removeCustomer(OTHER);
   }
 }

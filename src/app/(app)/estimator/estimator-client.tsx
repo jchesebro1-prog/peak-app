@@ -1196,7 +1196,9 @@ export default function EstimatorClient({
           // #282 phase 2: take the server's (clamped) Rewards credit back.
           if (typeof res.rewardCredit === "number") {
             const stored = res.rewardCredit;
-            setSectionsState((ss) => (rewardCreditOf(ss) === stored ? ss : withRewardCredit(ss, stored, nextId())));
+            // Only when the server clamped it — an edit like any other.
+            if (rewardCreditOf(sectionsRef.current) !== stored)
+              setSections((ss) => withRewardCredit(ss, stored, nextId()));
             setCreditSeq((n) => n + 1);
           }
           // Server-confirmed either way (ok or refused/stale) — this IS the
