@@ -4,7 +4,8 @@
  *
  * Append-only entries, one company each. Balance = Σ amount (earn +,
  * reverse −, start +, redeem −, unredeem +, adjust ±; a `perk` entry carries
- * 0 and only records a perk use). Deterministic ids make every post
+ * 0 and only records a perk use, an `unperk` entry carries 0 and undoes one —
+ * #282 phase 4, src/lib/rewards/perks.ts). Deterministic ids make every post
  * idempotent — two writers computing the same entry insert it once:
  *
  *   earn:<quoteId>:<n>      the n-th win of a quote       (+)
@@ -13,11 +14,13 @@
  *   unredeem:<quoteId>:<n>  that spend undone             (+ the redeem)
  *   start:<companyId>       the one-time starting credit  (+)
  *   adjust:<companyId>:<t>  a staff adjustment            (±, note required)
+ *   perk:<companyId>:<perkId>:<n>   the n-th use of a perk (0)
+ *   unperk:<companyId>:<perkId>:<n> that use undone        (0)
  *
  * Pure and client-safe.
  */
 
-export const LEDGER_KINDS = ["earn", "reverse", "start", "redeem", "unredeem", "adjust", "perk"] as const;
+export const LEDGER_KINDS = ["earn", "reverse", "start", "redeem", "unredeem", "adjust", "perk", "unperk"] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
 export type LedgerEntry = {
@@ -41,6 +44,7 @@ export const LEDGER_KIND_LABEL: Record<LedgerKind, string> = {
   unredeem: "Credit returned",
   adjust: "Adjustment",
   perk: "Perk used",
+  unperk: "Perk use undone",
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
