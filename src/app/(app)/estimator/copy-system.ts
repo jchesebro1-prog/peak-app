@@ -1,3 +1,4 @@
+import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { syncLaborDraftMargins } from "./labor-group";
 import { lineMarginOf, round2 } from "./pricing";
 import {
@@ -106,7 +107,8 @@ export function copySectionForTarget(
   let tierRepriced = 0;
   let handPriced = 0;
 
-  const items = (section.items || []).map((it): SpecItem => {
+  // #282 phase 2: the Rewards credit is the source quote's — a copy never carries it.
+  const items = (section.items || []).filter((it) => !isRewardCreditItem(it)).map((it): SpecItem => {
     const comps = Array.isArray(it.components) ? it.components : [];
 
     /* #274: a track line is a tier-seeded line whose "catalog cost" is its

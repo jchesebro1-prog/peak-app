@@ -3,6 +3,7 @@ import type { BomRow } from "@/lib/bid-spec";
 import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
+import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 
 /**
  * Shared quote → BOM extraction (#205 spec builder T4), split out of the
@@ -70,7 +71,7 @@ export async function bomFromQuote(
       // Optional-scope lines are not part of the base bid; labor lines
       // (mobilizations, shop & engineering, allowance, performance bonus)
       // aren't equipment and don't belong in the bid-spec BOM either.
-      if (it.option || it.labor) continue;
+      if (it.option || it.labor || isRewardCreditItem(it)) continue;
       // A vendor-quote roll-up line is replaced by that vendor quote's own
       // material lines — that's where the actual part numbers live.
       if (it.vendorQuoteId) {

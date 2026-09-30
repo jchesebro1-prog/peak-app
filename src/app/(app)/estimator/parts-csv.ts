@@ -1,3 +1,4 @@
+import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { systemItemsRev, systemSellTotal } from "./pricing";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 
@@ -83,7 +84,7 @@ function expand(
     const k = Number.isFinite(k0) ? k0 : 1;
     const start = out.length;
     for (const item of section.items) {
-      if (item.labor || item.laborOverhead || item.laborTravel || item.option) continue;
+      if (item.labor || item.laborOverhead || item.laborTravel || item.option || isRewardCreditItem(item)) continue;
       if (!Number.isFinite(item.qty) || item.qty <= 0) continue;
       const lineSell = lineSellOf(item);
       const note = item.internalNote?.trim() || "";

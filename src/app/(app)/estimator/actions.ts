@@ -46,6 +46,15 @@ import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } f
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { reconcileEstimatorValue, sanitizeSystemSell, totals } from "./pricing";
+import {
+  maxApplicableCredit,
+  quoteRewardCredit,
+  rewardCreditOf,
+  sanitizeRewardCredit,
+  withoutRewardCredit,
+  withRewardCredit,
+} from "@/lib/rewards/credit-line";
+import { companyCredit } from "@/lib/stores/reward-ledger";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
@@ -184,6 +193,9 @@ export type SaveResult = {
   pdf?: QuotePdfView | null;
   /** #242 — the review-limit chip, re-evaluated on the server. */
   reviewLimit?: ReviewLimitChipData | null;
+  /** #282 phase 2 — the Rewards credit actually stored (after the server's
+   *  clamp), so the builder can match its credit line to it. */
+  rewardCredit?: number;
 };
 
 export type ReviewSync = {
@@ -368,7 +380,26 @@ export async function saveQuoteAction(
   // #267: a system's typed sell / $25 rounding is only kept when valid
   // (sellOverride finite, > 0, ≤ $10M; priceRound exactly 25) — dropped
   // otherwise, before anything prices or stores the sections.
-  const postedSections = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell) : payload.sections;
+  const sellSanitized = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell) : payload.sections;
+  // #282 phase 2: a negative price only on the Rewards credit line, and that
+  // line clamped to what the customer can spend here — refused, not stored,
+  // when any other line carries one.
+  const credit = await settleRewardCredit(sellSanitized, prior, payload.customerId || null, loadedId);
+  if (!credit.ok) {
+    return {
+      ok: false,
+      id: loadedId,
+      number: prior ? displayQuoteNumber(prior) : null,
+      revNum: Math.max(1, prior?.revisions?.length || 1),
+      updatedAt: prior?.updatedAt ?? Date.now(),
+      review: prior?.review ?? null,
+      status: prior?.status ?? null,
+      pipelineId: prior?.pipelineId ?? null,
+      stage: prior?.stage ?? null,
+      error: credit.error,
+    };
+  }
+  const postedSections = credit.sections;
   const { sections: savedSections, anyPor, anyConfirm } = isPortalCatalog
     ? clearPricedPor(postedSections)
     : { sections: postedSections, anyPor: false, anyConfirm: false };
@@ -376,7 +407,7 @@ export async function saveQuoteAction(
   // is the server's own totals() over the posted sections — a posted value
   // that disagrees beyond rounding is replaced, never trusted. (#267: it
   // sanitizes each section's system sell itself, same rule as above.)
-  const priced = reconcileEstimatorValue(payload.sections, { value: payload.value, margin: payload.margin });
+  const priced = reconcileEstimatorValue(postedSections, { value: payload.value, margin: payload.margin });
   if (priced.adjusted) {
     console.warn("[estimator] saveQuoteAction: posted value", payload.value, "≠ recomputed", priced.value, "— stored the recomputed value");
   }
@@ -413,7 +444,7 @@ export async function saveQuoteAction(
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
-  let statusNotice: string | undefined;
+  let statusNotice: string | undefined = credit.notice;
   let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
      system, or moving one to another estimate, would otherwise strand its
@@ -565,9 +596,57 @@ export async function saveQuoteAction(
     vendorQuotes: storedVendorQuotes,
     pdf: pdfState,
     reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
+    rewardCredit: credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
   };
+}
+
+/**
+ * #282 phase 2 — the Rewards credit a save may store (spec §5):
+ * - a negative price/qty on any line but the credit line refuses the save;
+ * - a won or lost quote keeps the credit it had (its redeem is on the
+ *   ledger — the builder can't move it; the credit follows the status);
+ * - no customer, or a customer different from the stored one, drops it;
+ * - otherwise it is clamped to the company's available credit (balance −
+ *   credit on its OTHER open quotes) and the quote's pre-credit total.
+ */
+async function settleRewardCredit(
+  sections: SpecSection[],
+  prior: Quote | null,
+  customerId: string | null,
+  loadedId: string | null
+): Promise<{ ok: true; sections: SpecSection[]; credit: number; notice?: string } | { ok: false; error: string }> {
+  if (!Array.isArray(sections)) return { ok: true, sections, credit: 0 };
+  const posted = rewardCreditOf(sections);
+  let max: number;
+  if (prior && (prior.status === "won" || prior.status === "lost")) {
+    // Locked: re-home the stored amount (the negative-line check still runs).
+    const locked = quoteRewardCredit(prior);
+    const check = sanitizeRewardCredit(sections, Number.POSITIVE_INFINITY);
+    if (!check.ok) return check;
+    const maxId = sections.reduce((m, s) => Math.max(m, ...(s?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
+    const out = withRewardCredit(check.sections, locked, maxId + 1);
+    return { ok: true, sections: out, credit: rewardCreditOf(out) };
+  }
+  if (!customerId || (prior && (prior.customerId || null) !== customerId)) max = 0;
+  else if (posted > 0) {
+    const { available } = await companyCredit(customerId, loadedId);
+    max = maxApplicableCredit(available, totals(withoutRewardCredit(sections), 0).grand);
+  } else max = 0;
+  const res = sanitizeRewardCredit(sections, max);
+  if (!res.ok) return res;
+  const notice =
+    res.clamped && res.credit > 0
+      ? `Rewards credit reduced to ${fmtMoney(res.credit)} — that's what this customer has available.`
+      : res.clamped
+      ? "Rewards credit removed — this customer has no credit available for this quote."
+      : undefined;
+  return { ok: true, sections: res.sections, credit: res.credit, ...(notice ? { notice } : {}) };
+}
+
+function fmtMoney(n: number): string {
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**
@@ -638,7 +717,9 @@ export async function moveSystemToEstimateAction(
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
   // #267: a moved system keeps its own price — sanitized like a save.
-  const moved: SpecSection = { ...sanitizeSystemSell(section), id: "sys" + Date.now() };
+  // #282 phase 2: the Rewards credit belongs to the source quote's customer —
+  // it never travels with a moved system.
+  const [moved] = withoutRewardCredit([{ ...sanitizeSystemSell(section), id: "sys" + Date.now() }]);
   const placed = await placeSystemInEstimate(moved, target, {
     newName: moved.name + " (moved)",
     sourceContext,
@@ -690,7 +771,10 @@ async function placeSystemInEstimate(
       | { sections?: SpecSection[]; mobs?: SpecMob[] }
       | null
       | undefined;
-    const mergedSections = [...(existingSpec?.sections || []), placed];
+    // #282 phase 2: the target's own Rewards credit stays on ITS last system.
+    const appended = [...(existingSpec?.sections || []), ...withoutRewardCredit([placed])];
+    const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
+    const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
     const carried = placedVq.length
       ? await storeVendorQuotes(target.quoteId, placedVq)
@@ -717,7 +801,7 @@ async function placeSystemInEstimate(
     return { ok: true, targetId: updated.id, targetName: updated.name, targetNumber: displayQuoteNumber(updated) };
   }
 
-  const t = totals([placed], 0);
+  const t = totals(withoutRewardCredit([placed]), 0);
   let created: Quote;
   try {
     created = await create({
@@ -727,7 +811,7 @@ async function placeSystemInEstimate(
       locationId: opts.sourceContext.locationId,
       source: "estimator",
       status: "draft",
-      spec: { sections: [placed], mobs: [] },
+      spec: { sections: withoutRewardCredit([placed]), mobs: [] },
       value: t.grand,
       margin: t.margin,
       owner: opts.owner,

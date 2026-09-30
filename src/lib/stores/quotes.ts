@@ -1174,6 +1174,8 @@ export async function setStatus(
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
   const sentCut = { value: false };
+  // #282 phase 2: set only when this call really transitioned the quote.
+  const moved = { value: false };
   const out = await withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
   // #222: lock before the read, so the gate and the write see one version.
@@ -1224,6 +1226,7 @@ export async function setStatus(
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
     doc.status = status;
+    moved.value = true;
     if (pipes && carriesPipeline(doc.quoteType)) {
       const pl = quotePipelineFor(pipes, doc);
       doc.pipelineId = pl.id;
@@ -1289,7 +1292,22 @@ export async function setStatus(
   // the stamp, though swallowed here, leaves the outer Postgres transaction
   // aborted, so the caller's next statement fails instead of committing.
   if (out && sentCut.value) await copySentPdfSafely(id);
+  // #282 phase 2: the Rewards ledger follows every real transition — earn +
+  // redeem on won, reverse + unredeem on leaving won. Never for an imported
+  // row (historical-import records history, it is not a sale made here), and
+  // never able to block the status change: a failure is logged, not thrown.
+  if (out && moved.value && opts.bypassApprovalGate !== "historical-import") await reconcileRewardsSafely(out, by);
   return out;
+}
+
+/** #282 phase 2: post the quote's Rewards ledger entries; log, never throw. */
+async function reconcileRewardsSafely(q: Quote, by?: string | null): Promise<void> {
+  try {
+    const { reconcileQuoteLedger } = await import("./reward-ledger");
+    await reconcileQuoteLedger(q, by || DEFAULT_ACTOR);
+  } catch (e) {
+    console.error("[rewards] ledger post failed for quote", q.id, e);
+  }
 }
 
 /**

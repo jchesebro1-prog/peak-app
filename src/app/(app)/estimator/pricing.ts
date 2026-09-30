@@ -1,5 +1,6 @@
 import { curtainCost, curtainPrice, fabricAreaRateOf, type CurtainSewing } from "@/lib/design/curtain-pricing";
 import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } from "@/lib/service-pricing";
+import { creditLineAmount, isRewardCreditItem } from "@/lib/rewards/credit-line";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -147,12 +148,19 @@ export function vendorTotalSeed(storedTotal: number, linesTotal: number): string
 
 /* ---------------- section + quote totals ---------------- */
 
+/** A line the system's own price counts: not optional, not the #282 Rewards
+ *  credit (a quote-level amount parked on the last system — `totals()`
+ *  subtracts it after tax, so no system-level rule ever sees it). */
+export function isSystemLine(x: SpecItem): boolean {
+  return !x.option && !isRewardCreditItem(x);
+}
+
 export function systemItemsRev(sec: SpecSection): number {
-  return sec.items.filter((x) => !x.option).reduce((a, x) => a + lineExtSellOf(x), 0);
+  return sec.items.filter(isSystemLine).reduce((a, x) => a + lineExtSellOf(x), 0);
 }
 
 export function systemItemsCost(sec: SpecSection): number {
-  return sec.items.filter((x) => !x.option).reduce((a, x) => a + x.qty * x.cost, 0);
+  return sec.items.filter(isSystemLine).reduce((a, x) => a + x.qty * x.cost, 0);
 }
 
 /**
@@ -163,7 +171,7 @@ export function systemItemsCost(sec: SpecSection): number {
  * the cost column.
  */
 export function systemFreightBase(sec: SpecSection): number {
-  return sec.items.filter((x) => !x.option && !x.noFreight).reduce((a, x) => a + x.qty * x.cost, 0);
+  return sec.items.filter((x) => isSystemLine(x) && !x.noFreight).reduce((a, x) => a + x.qty * x.cost, 0);
 }
 
 /** Freight is a % of the section's freight-bearing item COST. */
@@ -286,6 +294,9 @@ export type QuoteTotals = {
   margin: number;
   /** #267: the systems' price adjustments (typed sells + $25 rounding), already inside rev/mat/lab. */
   adj?: number;
+  /** #282 phase 2: the Rewards credit taken off `grand` (after tax; never
+   *  more than rev + fr + tax, so `grand` never goes below $0). 0 = none. */
+  credit?: number;
 };
 
 export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals {
@@ -295,11 +306,16 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     opt = 0,
     rev = 0,
     cost = 0,
-    adjSum = 0;
+    adjSum = 0,
+    creditSum = 0;
   for (const sec of sections) {
     let secMat = 0,
       secLab = 0;
     for (const it of sec.items) {
+      if (isRewardCreditItem(it)) {
+        creditSum += creditLineAmount(it);
+        continue;
+      }
       const ext = lineExtSellOf(it);
       if (it.option) {
         opt += ext;
@@ -331,6 +347,10 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
   }
   const taxRate = (taxRatePct ?? 0) / 100;
   const tax = (rev + fr) * taxRate;
+  const pre = rev + fr + tax;
+  // #282 phase 2: credit after tax, capped at the pre-credit total. Margin
+  // readouts stay on rev/cost — the credit is not a price the systems carry.
+  const credit = round2(Math.max(0, Math.min(creditSum, pre)));
   return {
     mat,
     lab,
@@ -339,9 +359,10 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     rev,
     cost,
     tax,
-    grand: rev + fr + tax,
+    grand: pre - credit,
     margin: rev > 0 ? (rev - cost) / rev : 0,
     adj: round2(adjSum),
+    credit,
   };
 }
 
@@ -391,13 +412,20 @@ export function reconcileEstimatorValue(
       freightPct: n(sec.freightPct),
       items: (Array.isArray(sec.items) ? sec.items : [])
         .filter((it) => !!it && typeof it === "object")
-        .map((it) => ({
-          ...it,
-          qty: n(it.qty),
-          cost: n(it.cost),
-          price: n(it.price),
-          extSellOverride: typeof it.extSellOverride === "number" && Number.isFinite(it.extSellOverride) ? it.extSellOverride : undefined,
-        })),
+        .map((it) =>
+          // #282 phase 2: a negative price is accepted ONLY on the Rewards
+          // credit line (qty 1, cost 0); anywhere else price and qty floor
+          // at 0 (the save refuses such a line before this — belt and braces).
+          isRewardCreditItem(it)
+            ? { ...it, qty: 1, cost: 0, price: Math.min(0, n(it.price)), extSellOverride: undefined, option: false }
+            : {
+                ...it,
+                qty: Math.max(0, n(it.qty)),
+                cost: n(it.cost),
+                price: Math.max(0, n(it.price)),
+                extSellOverride: typeof it.extSellOverride === "number" && Number.isFinite(it.extSellOverride) ? it.extSellOverride : undefined,
+              }
+        ),
     }));
   const t = totals(safe, 0);
   const grand = n(t.grand);
@@ -1046,7 +1074,8 @@ export type CustomerLine = { item: SpecItem; ext: number } | { item: null; desc:
  * they already are everywhere else on this document).
  */
 function customerLinesRaw(sec: SpecSection): CustomerLine[] {
-  const visible = sec.items.filter((it) => !it.option);
+  // #282 phase 2: the Rewards credit prints on its own under the totals.
+  const visible = sec.items.filter(isSystemLine);
 
   // #270: each travel line (mileage / hotel / per diem / lift) folds into the
   // mobilization line sharing its laborMobKey — sell AND cost, so that line

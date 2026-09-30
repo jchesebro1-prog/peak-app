@@ -12,8 +12,9 @@
  *     by the loader as `closedAt`) ?? `startedAt` ?? `createdAt`. Several
  *     projects pointing at the same uncounted quote count once;
  *   - every Daylite-imported repair record on the same rule.
- * `valueUnknown` (UKN) records never count. Phase 2 adds the Rewards credit
- * applied on a quote back onto its value (credit doesn't reduce spend).
+ * `valueUnknown` (UKN) records never count. A won quote counts `value` PLUS
+ * the Rewards credit applied on it (#282 phase 2 — `value` is net of credit,
+ * and credit doesn't reduce spend).
  *
  * Company-level: a purchase belongs to its `customerId`; records without one
  * are dropped (a contact's purchases already carry their company's id).
@@ -26,7 +27,10 @@ export type SpendQuote = {
   name?: string;
   customerId: string | null;
   status: string;
+  /** Net of any Rewards credit (what the customer pays). */
   value: number;
+  /** #282 phase 2: the Rewards credit applied on the quote (added back). */
+  credit?: number;
   quoteType?: string;
   source?: string;
   history?: { at: number; from?: string; to: string }[];
@@ -104,7 +108,9 @@ export function purchasesFrom(input: {
   const out: Purchase[] = [];
   const counted = new Set<string>();
   for (const q of input.quotes) {
-    if (q.deleted || q.status !== "won" || !q.customerId || !known(q)) continue;
+    const credit = typeof q.credit === "number" && Number.isFinite(q.credit) && q.credit > 0 ? q.credit : 0;
+    const gross = { value: (Number.isFinite(q.value) ? q.value : 0) + credit };
+    if (q.deleted || q.status !== "won" || !q.customerId || !known(gross)) continue;
     counted.add(q.id);
     out.push({
       kind: "quote",
@@ -112,7 +118,7 @@ export function purchasesFrom(input: {
       ref: q.ref || q.id,
       companyId: q.customerId,
       name: q.name || q.id,
-      amount: round2(q.value),
+      amount: round2(gross.value),
       at: wonAt(q),
       imported: q.source === "daylite",
       quoteType: q.quoteType || "system",

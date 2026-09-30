@@ -129,6 +129,11 @@ export type SpecItem = {
    *  them) and the customer document shows only the one line. Built by
    *  track-bom.ts `trackLine`. */
   track?: TrackConfig;
+  /** #282 phase 2: the quote's Rewards credit — one line on the LAST system,
+   *  qty 1, cost 0, negative `price` (the only line a negative price is
+   *  allowed on). Every system-level rule skips it; `totals()` subtracts it
+   *  from the grand total. See src/lib/rewards/credit-line.ts. */
+  rewardCredit?: boolean;
 };
 
 /* ---------------- vendor quotes (#143, D162) ---------------- */

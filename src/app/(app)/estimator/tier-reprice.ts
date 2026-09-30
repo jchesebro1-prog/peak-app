@@ -91,8 +91,10 @@ export function tierSeedPrice(it: Pick<SpecItem, "cost" | "labor">, m: number | 
 
 /** #266 — a line the tier prices at all (not a fixture, ext-sell override,
  *  POR, or no-cost line — `classify`'s hand/untouched gates). */
-export function isTierPriceable(it: Pick<SpecItem, "fixture" | "extSellOverride" | "por" | "cost">): boolean {
+export function isTierPriceable(it: Pick<SpecItem, "fixture" | "extSellOverride" | "por" | "cost" | "rewardCredit">): boolean {
   if (it.fixture) return false;
+  // #282 phase 2: the Rewards credit is never a tier-priced line.
+  if (it.rewardCredit) return false;
   if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return false;
   if (it.por) return false;
   return it.cost > 0;
@@ -120,6 +122,7 @@ export type TierRepriceResult = {
 type Verdict = { kind: "reprice"; price: number } | { kind: "hand" } | { kind: "untouched" } | { kind: "skip" };
 
 function classify(it: SpecItem, prev: number | null, next: number): Verdict {
+  if (it.rewardCredit) return { kind: "skip" }; // #282 phase 2: never tier-priced, never counted
   if (it.fixture) return { kind: "untouched" };
   if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return { kind: "hand" };
   if (it.por) return { kind: "untouched" };

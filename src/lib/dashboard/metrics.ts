@@ -10,6 +10,7 @@ import type { RangeKey } from "./registry";
 import { isActive, isBacklog, isDone, projectTag, type ProjectTag } from "@/lib/pipelines";
 import { knownValue, unknownCount } from "@/lib/job-value";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
+import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 
 export const DAY = 86_400_000;
 
@@ -144,7 +145,7 @@ export function equipmentSold(
     for (const s of ((q.spec as SpecLike | undefined)?.sections) || []) {
       if (s.kind === "labor") continue;
       for (const it of s.items || []) {
-        if (it.labor || it.option) continue;
+        if (it.labor || it.option || isRewardCreditItem(it)) continue;
         const sku = it.sku || "";
         const category = (sku && partCategory(sku)) || "Uncategorized";
         const qty = it.qty || 0;

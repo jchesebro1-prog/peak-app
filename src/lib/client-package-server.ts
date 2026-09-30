@@ -16,6 +16,7 @@ import { createStoredZip, type ZipFile } from "@/lib/zip";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
+import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -139,7 +140,7 @@ function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number 
       // still carry individual labor lines (mobilizations, shop &
       // engineering, allowance, performance bonus) — they're not equipment
       // and don't belong in the BOM/client package either.
-      if (section.kind === "labor" || item.labor || item.qty == null || item.qty <= 0) continue;
+      if (section.kind === "labor" || item.labor || isRewardCreditItem(item) || item.qty == null || item.qty <= 0) continue;
       const sku = String(item.sku || item.desc || "Unspecified line");
       const current = rows.get(sku);
       if (current) current.qty += item.qty;

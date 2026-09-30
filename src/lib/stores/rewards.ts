@@ -4,6 +4,7 @@ import { normalizeProject, type ProjectRecord } from "@/lib/stores/projects";
 import type { Quote } from "@/lib/stores/quotes";
 import type { RepairJobRecord } from "@/lib/stores/repair-jobs";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { quoteRewardCredit } from "@/lib/rewards/credit-line";
 import { allCompanies, getCompany, saveCompany } from "@/lib/identity/companies";
 import { contactsForCompany, saveContact } from "@/lib/identity/contacts";
 import {
@@ -76,6 +77,8 @@ function spendQuote(q: Quote): SpendQuote {
     customerId: q.customerId,
     status: q.status,
     value: q.value,
+    // #282 phase 2: credit applied on the quote counts back into spend.
+    credit: quoteRewardCredit(q),
     quoteType: q.quoteType,
     source: q.source,
     history: q.history,
@@ -118,7 +121,8 @@ function spendRepair(r: RepairJobRecord): SpendRepair {
   };
 }
 
-async function purchasesFor(companyIds: string[] | null): Promise<Purchase[]> {
+/** Counted purchases for these companies (null = every company). */
+export async function purchasesFor(companyIds: string[] | null): Promise<Purchase[]> {
   const [quotes, projects, repairs, pipes] = await Promise.all([
     companyIds ? listDocsByField<Quote>("quotes", "customerId", companyIds) : listDocs<Quote>("quotes"),
     companyIds

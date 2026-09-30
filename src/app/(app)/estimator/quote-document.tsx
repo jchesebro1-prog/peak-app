@@ -2,6 +2,7 @@ import { Fragment, type CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import { systemSellTotal } from "./pricing";
+import { REWARD_CREDIT_DESC } from "@/lib/rewards/credit-line";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks } from "./narrative";
 
@@ -673,6 +674,24 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               >
                 <span>Sales tax ({p.taxRatePct}%)</span>
                 <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.tax)}</span>
+              </div>
+            )}
+            {/* #282 phase 2: the Rewards credit, its own line after the
+                system subtotals; the Total below is already net of it. */}
+            {(p.t.credit || 0) > 0 && (
+              <div
+                className="est-reward-credit"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12.5,
+                  color: "#1f8a5b",
+                  fontWeight: 600,
+                  marginBottom: 10,
+                }}
+              >
+                <span>{REWARD_CREDIT_DESC}</span>
+                <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(p.t.credit || 0)}</span>
               </div>
             )}
             <div
