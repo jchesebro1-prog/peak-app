@@ -239,6 +239,13 @@
       "when": 1790630055458,
       "tag": "0033_spec_records",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790788796850,
+      "tag": "0034_reward_ledger",
+      "breakpoints": true
     }
   ]
 }
