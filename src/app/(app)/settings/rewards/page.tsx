@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requirePerm } from "@/lib/session";
 import { getRewardsProgram } from "@/lib/stores/rewards";
 import { RewardsProgramForm } from "./rewards-form";
+import { PerksEditor } from "./perks-editor";
 import { startingCreditBoard } from "@/lib/stores/reward-ledger";
 import { ShortList } from "@/components/short-list";
 import { creditMoney } from "@/components/rewards/credit-ui";
@@ -18,7 +19,8 @@ export const metadata = { title: "Rewards settings — Quartzite-6" };
  * is off. #282 phase 2 adds "Starting credit": every company with counted
  * history before launch (all history until the program is first turned on),
  * its proposed one-time credit — min(cap, history × rate) — and Post one /
- * Post all, each writing `start:<companyId>` exactly once.
+ * Post all, each writing `start:<companyId>` exactly once. #282 phase 4 adds
+ * "Perks": add / edit / remove / reorder perk definitions.
  */
 export default async function RewardsSettingsPage() {
   await requirePerm("manage_users");
@@ -44,6 +46,8 @@ export default async function RewardsSettingsPage() {
         earns a level above their pricing tier, Rewards suggests the move and someone with approve permission confirms it.
       </div>
       <RewardsProgramForm program={program} />
+      {/* #282 phase 4: perk definitions (their own Save). */}
+      <PerksEditor perks={program.perks} />
 
       <div className="pk-card" style={{ padding: 0, overflow: "hidden", marginTop: 22 }} id="starting-credit">
         <div

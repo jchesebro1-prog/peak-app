@@ -13,13 +13,19 @@ import type { CompanyRewardsView } from "@/lib/stores/rewards";
 import type { CompanyCredit } from "@/lib/stores/reward-ledger";
 import { creditMoney, LedgerRow } from "@/components/rewards/credit-ui";
 import { AdjustCreditForm } from "@/components/rewards/credit-actions";
+import { PerksSection } from "@/components/rewards/perks-ui";
+import type { PerkStatus, PerkUse } from "@/lib/rewards/perks";
+import type { Perk } from "@/lib/rewards/program";
+import type { PerkQuoteOption } from "@/components/rewards/perk-actions";
 
 /**
  * Company record → Rewards card (#282 Phase 1, spec §7): earned level vs the
  * company's current tier (and a suggestion with Approve/Dismiss), lifetime
  * spend, progress to the next level, the purchases that count, and (#282
  * phase 2) the account credit — balance, available (balance − credit parked
- * on open quotes), the ledger, and Adjust for admins. Perks join in phase 4.
+ * on open quotes), the ledger, and Adjust for admins. #282 phase 4: perks —
+ * availability, Mark used (create), perk history with Undo (admins); perk
+ * entries (amount 0) are left out of the credit ledger list.
  * The page renders it only while the program is on.
  */
 
@@ -45,15 +51,24 @@ export function RewardsCard({
   credit,
   canAdjust,
   quoteRefs,
+  perks,
 }: {
   view: CompanyRewardsView;
   canApprove: boolean;
   credit?: CompanyCredit | null;
   canAdjust?: boolean;
   quoteRefs?: Record<string, string>;
+  perks?: {
+    statuses: PerkStatus[];
+    uses: PerkUse[];
+    allPerks: Perk[];
+    quotes: PerkQuoteOption[];
+    canMark: boolean;
+    canUndo: boolean;
+  } | null;
 }) {
   const n = view.purchases.length;
-  const entries = credit?.entries || [];
+  const entries = (credit?.entries || []).filter((e) => e.kind !== "perk" && e.kind !== "unperk");
   return (
     <div style={card} id="rewards">
       <div
@@ -113,6 +128,19 @@ export function RewardsCard({
           <ProgressToNext earned={view.earned} next={view.next} progress={view.progress} />
         </div>
       </div>
+
+      {perks && (
+        <PerksSection
+          companyId={view.companyId}
+          statuses={perks.statuses}
+          uses={perks.uses}
+          allPerks={perks.allPerks}
+          quotes={perks.quotes}
+          quoteRefs={quoteRefs}
+          canMark={perks.canMark}
+          canUndo={perks.canUndo}
+        />
+      )}
 
       {credit && (
         <>
