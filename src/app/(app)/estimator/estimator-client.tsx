@@ -1261,6 +1261,9 @@ export default function EstimatorClient({
           }
           setActionError(null);
           applySync(r);
+          // #282 follow-up: the server cleared the credit when the quote went
+          // Lost — take the line off the open document too.
+          if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
         } finally {
           setStatusChanging(false);
         }

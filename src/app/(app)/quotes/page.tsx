@@ -1068,7 +1068,8 @@ function SelectedPanel({
             note: r.note,
             value: r.value,
           }))}
-          canRestore={q.status !== "won"}
+          canRestore={q.status !== "won" && q.status !== "lost"}
+          lockedStatus={q.status === "lost" ? "lost" : "won"}
           back={backHref}
         />
         {engagement && (

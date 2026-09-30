@@ -8,7 +8,7 @@ import {
 } from "@/db/doc-store";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
-import { withRewardCredit } from "@/lib/rewards/credit-line";
+import { grossQuoteValue, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
 import { serviceCreditSubdocKey } from "@/lib/rewards/service-credit";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { numberNewDoc } from "@/lib/stores/estimate-numbers";
@@ -866,7 +866,9 @@ async function copySentPdfSafely(id: string): Promise<void> {
  * becomes the newest revision. The recall itself is then recorded as another
  * revision, so the history reads as a continuous line rather than a jump.
  *
- * Refuses on `won` quotes. A won quote has already spawned a project, and the
+ * Refuses on `lost` quotes (#282 follow-up: a lost quote is out of the Rewards
+ * program — it carries no credit, and a recall could put one back) and on `won`
+ * quotes. A won quote has already spawned a project, and the
  * project copies `value`/`margin` (and derives every procurement line cost from
  * `value`) once at conversion and never re-reads the quote — so rewriting the
  * numbers afterwards would silently desync the two with no way to repair it
@@ -878,12 +880,13 @@ export async function restoreQuoteRevision(
   by?: string | null,
   opts: { mayApplyCredit?: boolean } = {}
 ): Promise<
-  | { ok: false; reason: "not-found" | "no-such-rev" | "won" }
+  | { ok: false; reason: "not-found" | "no-such-rev" | "won" | "lost" }
   | { ok: true; quote: Quote; creditNotice?: string }
 > {
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return { ok: false, reason: "not-found" };
   if (q.status === "won") return { ok: false, reason: "won" };
+  if (q.status === "lost") return { ok: false, reason: "lost" };
   const target = (q.revisions || []).find((r) => r.rev === rev);
   if (!target) return { ok: false, reason: "no-such-rev" };
   // #282 phase 3: the snapshot's Rewards credit is re-clamped like a save
@@ -921,6 +924,31 @@ export async function restoreQuoteRevision(
   });
   if (!updated) return { ok: false, reason: "not-found" };
   return credit.notice ? { ok: true, quote: updated, creditNotice: credit.notice } : { ok: true, quote: updated };
+}
+
+/**
+ * #282 follow-up (Jeff, 2026-09-30: "lost quotes shouldn't place into the
+ * rewards program"): strip every Rewards credit from a quote going Lost — the
+ * Estimator's credit line(s) and the service section's `rewardCredit` — and
+ * set `value` back to the gross (pre-credit) price. A no-op when the quote
+ * carries no credit. Copies what it rewrites (revisions share the payloads).
+ */
+function clearRewardCredit(doc: Quote): void {
+  const credit = quoteRewardCredit(doc);
+  if (!(credit > 0)) return;
+  const gross = grossQuoteValue(doc);
+  const key = serviceCreditSubdocKey(doc.quoteType);
+  const sub = key ? doc[key] : null;
+  if (key && sub && typeof sub === "object" && "rewardCredit" in sub) {
+    const next = { ...(sub as Record<string, unknown>) };
+    delete next.rewardCredit;
+    doc[key] = next;
+  }
+  const spec = doc.spec as { sections?: unknown } | null | undefined;
+  if (spec && typeof spec === "object" && Array.isArray(spec.sections)) {
+    doc.spec = { ...spec, sections: withoutRewardCredit(spec.sections as SpecSection[]) };
+  }
+  doc.value = gross;
 }
 
 /**
@@ -1274,6 +1302,13 @@ export async function setStatus(
     doc.history.push({ at: t, from: doc.status, to: status });
     doc.status = status;
     moved.value = true;
+    // #282 follow-up: a lost quote is out of the Rewards program — drop any
+    // credit it carried and put `value` back to the pre-credit price, so
+    // nothing stays parked on it. The ledger reconcile below keys on the
+    // entries already posted (an open redeem returns the credit), never on
+    // the quote's current credit line, so clearing it first cannot skip the
+    // unredeem.
+    if (status === "lost") clearRewardCredit(doc);
     if (pipes && carriesPipeline(doc.quoteType)) {
       const pl = quotePipelineFor(pipes, doc);
       doc.pipelineId = pl.id;

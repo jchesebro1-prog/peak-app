@@ -294,13 +294,16 @@ export type QuoteRevisionVM = {
  *
  * `canRestore` is false on won quotes: the project spawned from a won quote
  * copies value/margin once at conversion and never re-reads, so recalling a
- * revision would desync them with no repair path.
+ * revision would desync them with no repair path. It is false on lost quotes
+ * too (#282): a lost quote is out of the Rewards program, and a recall could
+ * put a credit back on it.
  */
 export function QuoteRevisions({
   id,
   number,
   revisions,
   canRestore,
+  lockedStatus,
   back,
 }: {
   id: string;
@@ -310,6 +313,8 @@ export function QuoteRevisions({
   number?: string;
   revisions: QuoteRevisionVM[];
   canRestore: boolean;
+  /** Why a recall is refused when `canRestore` is false (defaults to won). */
+  lockedStatus?: "won" | "lost";
 }) {
   const [open, setOpen] = useState(false);
   const list = revisions.slice().reverse();
@@ -438,8 +443,9 @@ export function QuoteRevisions({
                     lineHeight: 1.5,
                   }}
                 >
-                  This quote is won — a project was built from these numbers, so revisions are
-                  read-only. Recalling one would leave the project out of step with the quote.
+                  {lockedStatus === "lost"
+                    ? "This quote is lost — lost quotes are out of the Rewards program, so revisions are read-only. Reopen the quote to Sent or Draft to recall one."
+                    : "This quote is won — a project was built from these numbers, so revisions are read-only. Recalling one would leave the project out of step with the quote."}
                 </div>
               )}
               {list.map((r) => (

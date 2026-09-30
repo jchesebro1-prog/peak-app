@@ -208,8 +208,8 @@ export async function settleServiceCreditFor(i: {
  * Dropped for a portal-service quote, a quote with no customer, or a
  * revision cut under a different customer (revisions record `customerId`
  * from #282 phase 3 on; an older one is taken to be the current customer's).
- * A lost quote keeps the credit it has now (phase 2's won/lost lock; won
- * quotes refuse a recall outright). Without `create` the credit can't grow
+ * Won and lost quotes refuse a recall outright (restoreQuoteRevision), so
+ * the locked branch here is defensive. Without `create` the credit can't grow
  * past what the quote has now. Service quotes clamp in whole dollars,
  * Estimator quotes to the cent.
  */

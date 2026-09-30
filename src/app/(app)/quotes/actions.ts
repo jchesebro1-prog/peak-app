@@ -100,7 +100,8 @@ export async function saveQuoteRevisionAction(formData: FormData): Promise<void>
 /**
  * Recall an earlier revision. The store snapshots the current state before
  * applying, so this never discards work; it refuses outright on won quotes,
- * whose numbers are already baked into a project.
+ * whose numbers are already baked into a project, and on lost quotes (#282:
+ * out of the Rewards program).
  */
 export async function restoreQuoteRevisionAction(formData: FormData): Promise<void> {
   const user = await requireUser();

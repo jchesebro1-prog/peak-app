@@ -101,8 +101,10 @@ export type ServiceCreditSettle = {
 /**
  * The server's rule for the credit a service-quote save stores (#282 §5):
  *
- * - a won or lost quote keeps the credit it had (its redeem is on the ledger;
- *   the builder can't move it — phase 2's rule), whatever was posted;
+ * - a won quote keeps the credit it had (its redeem is on the ledger; the
+ *   builder can't move it — phase 2's rule), whatever was posted;
+ * - a lost quote carries none (#282 follow-up: lost quotes are out of the
+ *   program; going Lost clears the credit and a save can't put one back);
  * - a portal service quote (#248) never carries one;
  * - no customer, or a customer different from the stored quote's, drops it;
  * - otherwise it is clamped to the company's available credit (whole dollars,
@@ -151,7 +153,8 @@ export function settleCredit(i: {
 }): ServiceCreditSettle {
   const norm = i.unit === "dollars" ? normalizeServiceCredit : toCents;
   const prior = i.prior;
-  if (prior && (prior.status === "won" || prior.status === "lost")) return { credit: norm(prior.credit) };
+  if (prior && prior.status === "lost") return { credit: 0 };
+  if (prior && prior.status === "won") return { credit: norm(prior.credit) };
   const posted = norm(i.posted);
   if (!(posted > 0)) return { credit: 0 };
   if (i.source === "portal-service") return { credit: 0, notice: "Rewards credit removed — a portal quote can't carry a credit." };

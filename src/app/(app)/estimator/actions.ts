@@ -596,7 +596,8 @@ export async function saveQuoteAction(
     vendorQuotes: storedVendorQuotes,
     pdf: pdfState,
     reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
-    rewardCredit: credit.credit,
+    // #282 follow-up: a save that moved the quote to Lost cleared its credit.
+    rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
   };
@@ -605,8 +606,11 @@ export async function saveQuoteAction(
 /**
  * #282 phase 2 — the Rewards credit a save may store (spec §5):
  * - a negative price/qty on any line but the credit line refuses the save;
- * - a won or lost quote keeps the credit it had (its redeem is on the
- *   ledger — the builder can't move it; the credit follows the status);
+ * - a won quote keeps the credit it had (its redeem is on the ledger — the
+ *   builder can't move it; the credit follows the status);
+ * - a lost quote carries none (#282 follow-up: going Lost clears the credit
+ *   and a save can't put one back — the locked branch re-homes the stored
+ *   amount, which is 0);
  * - no customer drops it (the builder also drops it when the customer
  *   changes; the clamp below is always against the customer being saved);
  * - otherwise it is clamped to that company's available credit (balance −

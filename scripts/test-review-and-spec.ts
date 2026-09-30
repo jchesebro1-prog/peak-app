@@ -10682,6 +10682,7 @@ seeded()
   .then(() => rewards282Phase3AsyncChecks())
   .then(() => rewards282Phase3RestoreAsyncChecks())
   .then(() => rewards282Phase4AsyncChecks())
+  .then(() => rewards282LostAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -38719,7 +38720,8 @@ import { readFileSync as r282cRead } from "node:fs";
   ok(r282cSettle({ ...base, posted: 200 }).credit === 200 && !r282cSettle({ ...base, posted: 200 }).notice, "#282 P3 server: within available and total → stored as posted, no notice");
   const won = r282cSettle({ ...base, posted: 999, prior: { status: "won", customerId: "co", credit: 150 } });
   const lost = r282cSettle({ ...base, posted: 0, prior: { status: "lost", customerId: "co", credit: 150 } });
-  ok(won.credit === 150 && lost.credit === 150 && !won.notice, "#282 P3 server: a won or lost quote keeps its stored credit whatever is posted (phase 2's rule)");
+  ok(won.credit === 150 && !won.notice, "#282 P3 server: a won quote keeps its stored credit whatever is posted (phase 2's rule)");
+  ok(lost.credit === 0, "#282 P3 server: a lost quote carries no credit whatever is stored or posted (lost quotes are out of the program)");
   const portal = r282cSettle({ ...base, source: "portal-service" });
   ok(portal.credit === 0 && /portal/.test(portal.notice || ""), "#282 P3 server: a portal service quote never carries a credit");
   const moved = r282cSettle({ ...base, posted: 100, prior: { status: "sent", customerId: "old-co", credit: 100 } });
@@ -38944,8 +38946,8 @@ import { settleCredit as r282rSettle } from "@/lib/rewards/service-credit";
     "#282 P3 restore rule: a portal quote or a quote with no customer gets none");
   ok(r282rSettle({ ...base, posted: 100, available: 500, mayApply: false, prior: { status: "sent", customerId: "co", credit: 40 }, unit: "cents" }).credit === 40,
     "#282 P3 restore rule: without create a recall can't grow the credit past what the quote has now");
-  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 75,
-    "#282 P3 restore rule: a lost quote keeps the credit it has now (won quotes refuse a recall outright)");
+  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 0,
+    "#282 P3 restore rule: a lost quote gets none (lost and won quotes refuse a recall outright)");
 
   const qs = r282cRead("src/lib/stores/quotes.ts", "utf8");
   ok(/const credit = await restoredCreditFor\(q, target, opts\.mayApplyCredit \?\? true\);/.test(qs) &&
@@ -39322,5 +39324,186 @@ async function rewards282Phase4AsyncChecks(): Promise<void> {
     for (const x of await L.ledgerForCompany(OTHER)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
     await removeCustomer(OTHER);
+  }
+}
+
+/* ======================================================================
+   #282 lost quotes — Jeff (2026-09-30): "lost quotes shouldn't place into
+   the rewards program." Going Lost clears the credit and restores the gross
+   value; a lost quote refuses a recall, never counts, never earns, holds
+   nothing and prints no credit. Pure + wiring checks run here; the DB
+   lifecycle is rewards282LostAsyncChecks() on the promise chain.
+   ====================================================================== */
+{
+  const base = { posted: 500, total: 2500, available: 900, customerId: "co", source: "flametest", mayApply: true };
+  const lostS = r282cSettle({ ...base, prior: { status: "lost", customerId: "co", credit: 150 } });
+  ok(lostS.credit === 0, "#282 lost (pure): a lost quote settles to no credit, even if a stale amount is stored or posted");
+  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 0,
+    "#282 lost (pure): the recall re-clamp gives a lost quote none either");
+  ok(r282cSettle({ ...base, prior: { status: "won", customerId: "co", credit: 150 } }).credit === 150,
+    "#282 lost (pure): a WON quote still keeps the credit it had");
+
+  // A legacy lost row that still carries a credit never counts toward spend.
+  const sp = r282Purchases({ quotes: [{ id: "LX", customerId: "co", status: "lost", value: 1800, credit: 200, history: [{ at: 5, to: "won" }, { at: 9, from: "won", to: "lost" }] }] });
+  ok(sp.length === 0 && r282Spend(sp) === 0, "#282 lost (pure): a lost quote — even one that was won earlier — contributes nothing to lifetime spend");
+
+  const qs = r282cRead("src/lib/stores/quotes.ts", "utf8");
+  ok(/if \(q\.status === "lost"\) return \{ ok: false, reason: "lost" \};/.test(qs) && /"not-found" \| "no-such-rev" \| "won" \| "lost"/.test(qs),
+    "#282 lost wiring: restoreQuoteRevision refuses a lost quote with reason \"lost\"");
+  ok(/if \(status === "lost"\) clearRewardCredit\(doc\);/.test(qs) && /doc\.value = gross;/.test(qs),
+    "#282 lost wiring: setStatus clears the credit inside the Lost transition's own write and restores the gross value");
+  const qp = r282cRead("src/app/(app)/quotes/page.tsx", "utf8");
+  const qc = r282cRead("src/app/(app)/quotes/controls.tsx", "utf8");
+  ok(/canRestore=\{q\.status !== "won" && q\.status !== "lost"\}/.test(qp) && /lockedStatus=\{q\.status === "lost" \? "lost" : "won"\}/.test(qp) && /This quote is lost/.test(qc) && /This quote is won/.test(qc),
+    "#282 lost wiring: the Quotes hub hides Recall on a lost quote and says why (won keeps its own message)");
+  const ea = r282cRead("src/app/(app)/estimator/actions.ts", "utf8");
+  ok(/rewardCredit: q\?\.status === "lost" \? quoteRewardCredit\(q\) : credit\.credit,/.test(ea),
+    "#282 lost wiring: an Estimator save that moves the quote to Lost hands the cleared credit back to the builder");
+}
+
+async function rewards282LostAsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const Q = await import("@/lib/stores/quotes");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "lost-co");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
+  const item = { id: 1, sku: "X", desc: "X", qty: 1, unit: "ea", cost: 1000, price: 2000 };
+  const sections = (credit: number) =>
+    r282cWith([{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [item] }] as never, credit, 2);
+  const ids = async (quoteId: string) => (await L.ledgerForQuote(quoteId)).map((e) => e.id).sort().join(",");
+  const common = { customer: "", customerId: CO, history: [] as unknown[], createdAt: 1, updatedAt: 1, margin: 0.5 };
+  // Estimator-credit quote (line on spec.sections; gross 2,000, value 1,800 net of a 200 credit).
+  const est = (slug: string, status: string) =>
+    createFixture("quotes", { ...common, status, id: fixtureId(282, slug), name: `T282 ${slug}`, value: 1800, source: "estimator", quoteType: "consulting", spec: { sections: sections(200), mobs: [] } });
+  // Service-credit quote (flameTest.rewardCredit; engine total 1,000, value 850 net of a 150 credit).
+  const svc = (slug: string, status: string) =>
+    createFixture("quotes", { ...common, status, id: fixtureId(282, slug), name: `T282 ${slug}`, value: 850, source: "flametest", quoteType: "flame_test", flameTest: { total: 1000, rewardCredit: 150 } });
+  const id = (slug: string) => fixtureId(282, slug);
+  // The quote is Lost at exactly its gross price with no credit anywhere.
+  const cleared = async (qid: string, gross: number, label: string) => {
+    const x = await Q.get(qid);
+    const specItems = ((x?.spec as { sections?: { items?: { rewardCredit?: boolean }[] }[] } | null)?.sections || []).flatMap((s) => s.items || []);
+    const ft = (x?.flameTest || {}) as { rewardCredit?: number };
+    ok(!!x && x.status === "lost" && r282cQuoteCredit(x) === 0 && x.value === gross && !specItems.some((i) => i.rewardCredit) && !("rewardCredit" in ft),
+      `#282 lost DB: ${label} — credit cleared from the line and the section, value back to the gross ${gross} (got ${x?.status} / credit ${x ? r282cQuoteCredit(x) : "?"} / value ${x?.value})`);
+  };
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 Lost Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await R.saveRewardsProgram({ ...r282Default, enabled: true, earnPct: { base: 2, copper: 3, silver: 4, gold: 5, platinum: 6 }, retro: { ratePct: 1, capPerCustomer: 1000 } });
+    const adj = await L.postAdjustment(CO, 500, "lost-quotes test", "Test");
+    if (adj.ok) registerFixture("reward_ledger", adj.entry.id);
+
+    // ---- draft → lost ----
+    await est("d-est", "draft");
+    await svc("d-svc", "draft");
+    const parked = await L.companyCredit(CO);
+    ok(parked.balance === 500 && parked.onOpenQuotes === 350 && parked.available === 150,
+      `#282 lost DB: a draft parks its credit before it is lost (balance 500, held 350) (got ${JSON.stringify({ b: parked.balance, h: parked.onOpenQuotes })})`);
+    await Q.setStatus(id("d-est"), "lost", "Test");
+    await Q.setStatus(id("d-svc"), "lost", "Test");
+    await cleared(id("d-est"), 2000, "draft→lost Estimator");
+    await cleared(id("d-svc"), 1000, "draft→lost flame test");
+    ok((await ids(id("d-est"))) === "" && (await ids(id("d-svc"))) === "", "#282 lost DB: draft→lost posts no ledger entries (no earn, no redeem)");
+    const freed = await L.companyCredit(CO);
+    ok(freed.onOpenQuotes === 0 && freed.available === 500 && freed.balance === 500,
+      `#282 lost DB: nothing stays parked — the balance is whole once the drafts are lost (got ${JSON.stringify({ h: freed.onOpenQuotes, a: freed.available })})`);
+    const dEst = await Q.get(id("d-est"));
+    ok((dEst?.spec as { sections: { items: unknown[] }[] }).sections[0].items.length === 1, "#282 lost DB: only the credit line was removed — the priced line stays");
+    ok(((await Q.get(id("d-svc")))?.flameTest as { total?: number }).total === 1000, "#282 lost DB: the service section's engine total stays the pre-credit price");
+
+    // ---- sent → lost ----
+    await est("s-est", "sent");
+    await svc("s-svc", "sent");
+    await Q.setStatus(id("s-est"), "lost", "Test");
+    await Q.setStatus(id("s-svc"), "lost", "Test");
+    await cleared(id("s-est"), 2000, "sent→lost Estimator");
+    await cleared(id("s-svc"), 1000, "sent→lost flame test");
+    ok((await ids(id("s-est"))) === "" && (await ids(id("s-svc"))) === "", "#282 lost DB: sent→lost posts no ledger entries");
+
+    // ---- won → lost: earn reversed, redeemed credit returned exactly once ----
+    await est("w-est", "sent");
+    await Q.setStatus(id("w-est"), "won", "Test", bypass);
+    const wBal = (await L.companyCredit(CO)).balance;
+    ok(wBal === 500 - 200 + 36, `#282 lost DB: a won credited Estimator quote redeems 200 and earns 2 % of 1,800 → balance 336 (got ${wBal})`);
+    await Q.setStatus(id("w-est"), "lost", "Test", bypass);
+    await cleared(id("w-est"), 2000, "won→lost Estimator");
+    const wIds = await ids(id("w-est"));
+    ok(wIds === [`earn:${id("w-est")}:1`, `redeem:${id("w-est")}:1`, `reverse:${id("w-est")}:1`, `unredeem:${id("w-est")}:1`].sort().join(","),
+      `#282 lost DB: won→lost posts the reverse and the unredeem even though the credit line is already gone (got ${wIds})`);
+    ok((await L.companyCredit(CO)).balance === 500, "#282 lost DB: won→lost on an Estimator quote leaves the balance exactly whole (earn reversed, 200 returned once)");
+    await Q.setStatus(id("w-est"), "lost", "Test", bypass);
+    await Q.setStatus(id("w-est"), "sent", "Test", bypass);
+    await Q.setStatus(id("w-est"), "lost", "Test", bypass);
+    ok((await ids(id("w-est"))) === wIds && (await L.companyCredit(CO)).balance === 500,
+      "#282 lost DB: replaying Lost, reopening and losing again posts nothing more — returned once");
+
+    await svc("w-svc", "sent");
+    await Q.setStatus(id("w-svc"), "won", "Test", bypass);
+    const wsBal = (await L.companyCredit(CO)).balance;
+    ok(wsBal === 500 - 150 + 17, `#282 lost DB: a won credited flame-test quote redeems 150 and earns 2 % of 850 (got ${wsBal})`);
+    await Q.setStatus(id("w-svc"), "lost", "Test", bypass);
+    await cleared(id("w-svc"), 1000, "won→lost flame test");
+    const sIds = await ids(id("w-svc"));
+    ok(sIds.includes(`unredeem:${id("w-svc")}:1`) && sIds.includes(`reverse:${id("w-svc")}:1`) && (await L.companyCredit(CO)).balance === 500,
+      "#282 lost DB: won→lost on a service quote returns the 150 once and reverses the earn — balance whole");
+
+    // ---- lost → recall refused ----
+    await est("r-est", "sent");
+    await svc("r-svc", "sent");
+    const rE = await Q.addQuoteRevision(id("r-est"), { by: "Test", note: "with credit" });
+    const rF = await Q.addQuoteRevision(id("r-svc"), { by: "Test", note: "with credit" });
+    await Q.setStatus(id("r-est"), "lost", "Test");
+    await Q.setStatus(id("r-svc"), "lost", "Test");
+    const re = await Q.restoreQuoteRevision(id("r-est"), rE!.rev, "Test");
+    const rf = await Q.restoreQuoteRevision(id("r-svc"), rF!.rev, "Test");
+    ok(!re.ok && re.reason === "lost" && !rf.ok && rf.reason === "lost", "#282 lost DB: a lost quote refuses a recall (Estimator and service), reason \"lost\"");
+    await cleared(id("r-est"), 2000, "after the refused recall, Estimator");
+    await cleared(id("r-svc"), 1000, "after the refused recall, flame test");
+    ok((await Q.get(id("r-est")))?.revisions?.length === 1, "#282 lost DB: a refused recall snapshots nothing");
+
+    // ---- lost → reopened: no credit comes back ----
+    await Q.setStatus(id("r-est"), "sent", "Test", bypass);
+    await Q.setStatus(id("r-svc"), "draft", "Test");
+    const oe = await Q.get(id("r-est"));
+    const of = await Q.get(id("r-svc"));
+    ok(oe?.status === "sent" && r282cQuoteCredit(oe) === 0 && oe.value === 2000 && of?.status === "draft" && r282cQuoteCredit(of) === 0 && of.value === 1000,
+      "#282 lost DB: a reopened (lost → sent / draft) quote starts with no credit, at its gross price");
+    ok((await L.companyCredit(CO)).onOpenQuotes === 0, "#282 lost DB: a reopened quote parks nothing");
+    await Q.setStatus(id("r-est"), "lost", "Test");
+    await Q.setStatus(id("r-svc"), "lost", "Test");
+    // A builder save can't put a credit back on a lost quote (the server settles it to none).
+    const settled = await L.settleServiceCreditFor({ posted: 300, total: 1000, customerId: CO, source: "flametest", mayApply: true, prior: await Q.get(id("r-svc")) });
+    ok(settled.credit === 0, "#282 lost DB: a builder save posting a credit on a lost quote settles to none");
+
+    // ---- lost never counts / never earns / holds nothing / prints nothing ----
+    const lostSlugs = ["d-est", "d-svc", "s-est", "s-svc", "w-est", "w-svc", "r-est", "r-svc"];
+    const lostQuotes = await Promise.all(lostSlugs.map((s) => Q.get(id(s))));
+    ok(lostQuotes.every((x) => x?.status === "lost"), "#282 lost DB: every quote above ended Lost (setup)");
+    const view = await R.companyRewards(CO);
+    ok(!!view && !view.purchases.some((p) => lostSlugs.some((s) => p.id === id(s))), "#282 lost DB: no lost quote is a purchase — lifetime spend ignores them all");
+    ok(!!view && view.spend === 0, `#282 lost DB: the company's lifetime spend from these lost (and won-then-lost) quotes is 0 (got ${view?.spend})`);
+    const entries = await L.ledgerForCompany(CO);
+    const net = (qid: string) => entries.filter((e) => e.quoteId === qid).reduce((s, e) => s + e.amount, 0);
+    ok(lostSlugs.every((s) => net(id(s)) === 0), "#282 lost DB: every lost quote nets $0 on the ledger — nothing earned, nothing redeemed");
+    ok((await L.reconcileQuoteLedger(lostQuotes[0]!, "Test")).length === 0 && (await L.reconcileQuoteLedger(lostQuotes[4]!, "Test")).length === 0,
+      "#282 lost DB: reconciling a lost quote again posts nothing");
+    const c = await L.companyCredit(CO);
+    ok(c.onOpenQuotes === 0 && c.balance === 500 && c.available === 500, `#282 lost DB: no credit is parked on any lost quote; the balance is whole (got ${JSON.stringify({ h: c.onOpenQuotes, b: c.balance })})`);
+    ok(lostQuotes.every((x) => r282cQuoteCredit(x) === 0), "#282 lost DB: no lost quote holds any credit");
+    // The documents: Estimator totals carry no credit; service letters print no credit rows.
+    const eq = lostQuotes[4]!;
+    const t = r282bTotals((eq.spec as { sections: never[] }).sections, 0);
+    ok(t.credit === 0 && t.grand === 2000, `#282 lost doc: the Estimator document's totals() show no credit and the full 2,000 (got ${t.credit} / ${t.grand})`);
+    const fq = lostQuotes[5]!;
+    const lp = r282cLetterPrice(fq, fq.flameTest as { total?: number });
+    const markup = r282cRender(r282cEl(R282cRows, { gross: lp.gross, credit: lp.credit, net: lp.net, mono: "m" }));
+    ok(lp.credit === 0 && lp.gross === 1000 && lp.net === 1000 && markup === "", "#282 lost doc: a lost service quote's letter prices at gross with no credit rows");
+  } finally {
+    await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
+    for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    await removeCustomer(CO);
   }
 }
