@@ -10,13 +10,17 @@ import {
 } from "@/components/rewards/rewards-ui";
 import { REWARD_LEVEL_LABEL } from "@/lib/rewards/program";
 import type { CompanyRewardsView } from "@/lib/stores/rewards";
+import type { CompanyCredit } from "@/lib/stores/reward-ledger";
+import { creditMoney, LedgerRow } from "@/components/rewards/credit-ui";
+import { AdjustCreditForm } from "@/components/rewards/credit-actions";
 
 /**
  * Company record → Rewards card (#282 Phase 1, spec §7): earned level vs the
  * company's current tier (and a suggestion with Approve/Dismiss), lifetime
- * spend, progress to the next level, and the purchases that count. Credit
- * and perks join in later phases. The page renders it only while the
- * program is on.
+ * spend, progress to the next level, the purchases that count, and (#282
+ * phase 2) the account credit — balance, available (balance − credit parked
+ * on open quotes), the ledger, and Adjust for admins. Perks join in phase 4.
+ * The page renders it only while the program is on.
  */
 
 const card: CSSProperties = {
@@ -35,8 +39,21 @@ const label: CSSProperties = {
   textTransform: "uppercase",
 };
 
-export function RewardsCard({ view, canApprove }: { view: CompanyRewardsView; canApprove: boolean }) {
+export function RewardsCard({
+  view,
+  canApprove,
+  credit,
+  canAdjust,
+  quoteRefs,
+}: {
+  view: CompanyRewardsView;
+  canApprove: boolean;
+  credit?: CompanyCredit | null;
+  canAdjust?: boolean;
+  quoteRefs?: Record<string, string>;
+}) {
   const n = view.purchases.length;
+  const entries = credit?.entries || [];
   return (
     <div style={card} id="rewards">
       <div
@@ -96,6 +113,71 @@ export function RewardsCard({ view, canApprove }: { view: CompanyRewardsView; ca
           <ProgressToNext earned={view.earned} next={view.next} progress={view.progress} />
         </div>
       </div>
+
+      {credit && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "space-between",
+              gap: 18,
+              flexWrap: "wrap",
+              padding: "12px 18px 14px",
+              borderTop: "1px solid #f0f1f4",
+            }}
+          >
+            <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+              <div>
+                <div style={label}>Credit balance</div>
+                <div data-testid="reward-credit-balance" style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 600, marginTop: 6, color: "#1f8a5b" }}>
+                  {creditMoney(credit.balance)}
+                </div>
+              </div>
+              <div>
+                <div style={label}>Available</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 600, marginTop: 6, color: "#16181d" }}>
+                  {creditMoney(credit.available)}
+                </div>
+                {credit.onOpenQuotes > 0 && (
+                  <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 3 }}>
+                    {creditMoney(credit.onOpenQuotes)} applied on open quotes
+                  </div>
+                )}
+              </div>
+            </div>
+            {canAdjust && <AdjustCreditForm companyId={view.companyId} />}
+          </div>
+          <div
+            style={{
+              padding: "9px 18px 7px",
+              fontSize: 10,
+              fontWeight: 600,
+              color: "#aab0bb",
+              letterSpacing: ".05em",
+              textTransform: "uppercase",
+              background: "#fafbfc",
+              borderTop: "1px solid #f0f1f4",
+              borderBottom: "1px solid #f0f1f4",
+            }}
+          >
+            Credit ledger · {entries.length}
+          </div>
+          {entries.length > 0 ? (
+            <ShortList
+              searchPlaceholder="Search credit…"
+              items={entries.map((e) => (
+                <LedgerRow key={e.id} e={e} quoteRef={e.quoteId ? quoteRefs?.[e.quoteId] : undefined} />
+              ))}
+              searchText={entries.map((e) => [e.kind, e.quoteId || "", (e.quoteId && quoteRefs?.[e.quoteId]) || "", e.note || "", e.by].join(" "))}
+            />
+          ) : (
+            <div style={{ padding: "16px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
+              No credit yet — it posts when a quote is won.
+            </div>
+          )}
+        </>
+      )}
 
       <div
         style={{

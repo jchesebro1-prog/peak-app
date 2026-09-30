@@ -7,13 +7,15 @@ import { REWARD_LEVELS, REWARD_LEVEL_LABEL, isRewardLevel, type RewardLevel } fr
 import { ShortList } from "@/components/short-list";
 import { SuggestionActions } from "@/components/rewards/suggestion-actions";
 import { LevelBadge, rewardsMoney, tierLabel } from "@/components/rewards/rewards-ui";
+import { creditByCompany } from "@/lib/stores/reward-ledger";
+import { creditMoney } from "@/components/rewards/credit-ui";
 
 export const metadata = { title: "Rewards — Quartzite-6" };
 
 /**
  * Customer Rewards (#282 Phase 1, spec §7): customers ready to move up a
  * tier (Approve/Dismiss) and every customer with counted purchases by
- * lifetime spend, filterable by earned level. While the program is off an
+ * lifetime spend and (phase 2) credit balance, filterable by earned level. While the program is off an
  * admin sees a labeled preview (buttons inert); everyone else sees a notice.
  */
 
@@ -23,7 +25,7 @@ function one(v: string | string[] | undefined): string {
 
 const CSS = `
   .rw-row:hover { background: #fafbff; }
-  .rw-grid { display: grid; grid-template-columns: minmax(0,1.6fr) 104px 128px 118px minmax(0,1.2fr) 64px; gap: 10px; align-items: center; }
+  .rw-grid { display: grid; grid-template-columns: minmax(0,1.6fr) 104px 128px 112px 118px minmax(0,1.2fr) 64px; gap: 10px; align-items: center; }
   @media (max-width: 860px) {
     .rw-grid { grid-template-columns: minmax(0,1.6fr) 96px 104px; }
     .rw-wide { display: none !important; }
@@ -55,7 +57,7 @@ export default async function RewardsPage({
   }
 
   const preview = !program.enabled;
-  const board = await rewardsBoard(program);
+  const [board, credit] = await Promise.all([rewardsBoard(program), creditByCompany()]);
   const levelParam = one(sp.level);
   const level: RewardLevel | "all" = isRewardLevel(levelParam) ? levelParam : "all";
   const rows = level === "all" ? board : board.filter((r) => r.earned === level);
@@ -171,6 +173,7 @@ export default async function RewardsPage({
           <span style={th}>Customer</span>
           <span style={th}>Level</span>
           <span style={{ ...th, textAlign: "right" }}>Lifetime spend</span>
+          <span className="rw-wide" style={{ ...th, textAlign: "right" }}>Credit</span>
           <span className="rw-wide" style={th}>Current tier</span>
           <span className="rw-wide" style={th}>Next level</span>
           <span className="rw-wide" style={{ ...th, textAlign: "right" }}>Sales</span>
@@ -195,6 +198,18 @@ export default async function RewardsPage({
                   <LevelBadge level={r.earned} />
                 </span>
                 <span style={{ ...cell, fontFamily: "var(--font-mono)", textAlign: "right" }}>{rewardsMoney(r.spend)}</span>
+                {/* #282 phase 2: credit balance (available when some is parked on open quotes). */}
+                <span
+                  className="rw-wide"
+                  title={
+                    credit.get(r.companyId)
+                      ? `Balance ${creditMoney(credit.get(r.companyId)!.balance)} · available ${creditMoney(credit.get(r.companyId)!.available)}`
+                      : "No credit"
+                  }
+                  style={{ ...cell, fontFamily: "var(--font-mono)", textAlign: "right", color: credit.get(r.companyId)?.balance ? "#1f8a5b" : "#aab0bb" }}
+                >
+                  {credit.get(r.companyId) ? creditMoney(credit.get(r.companyId)!.balance) : "—"}
+                </span>
                 <span className="rw-wide" style={cell}>
                   {tierLabel(r.companyTier)}
                   {r.suggestion ? " ↑" : ""}

@@ -45,6 +45,7 @@ import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import { RewardsCard } from "./rewards-card";
 import { companyRewards, getRewardsProgram } from "@/lib/stores/rewards";
+import { companyCredit } from "@/lib/stores/reward-ledger";
 import EditCustomerModal from "../edit-modal";
 import VenueDialog from "../venue-dialog";
 import { DeleteVisitButton } from "../delete-visit-button";
@@ -128,7 +129,9 @@ export default async function CustomerDetailPage({
     getRewardsProgram(),
   ]);
   // #282 — the Rewards card shows only while the program is on.
-  const rewards = rewardsProgram.enabled ? await companyRewards(cust.id, rewardsProgram) : null;
+  const [rewards, rewardCredit] = rewardsProgram.enabled
+    ? await Promise.all([companyRewards(cust.id, rewardsProgram), companyCredit(cust.id)])
+    : [null, null];
 
   const edit = one(sp.edit);
   const venueTypes = venueTypesFrom(settings.venueTypes);
@@ -379,7 +382,15 @@ export default async function CustomerDetailPage({
           ))}
         </div>
 
-        {rewards && <RewardsCard view={rewards} canApprove={can("approve", me.roles)} />}
+        {rewards && (
+          <RewardsCard
+            view={rewards}
+            canApprove={can("approve", me.roles)}
+            credit={rewardCredit}
+            canAdjust={can("manage_users", me.roles)}
+            quoteRefs={Object.fromEntries(quotes.filter((q) => q.customerId === cust.id).map((q) => [q.id, displayQuoteNumber(q)]))}
+          />
+        )}
 
         {/* locations & venues */}
         <div style={card}>
