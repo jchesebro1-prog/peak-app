@@ -147,7 +147,7 @@ export function RewardsProgramForm({ program }: { program: RewardsProgram }) {
         <div style={head}>Credit earned</div>
         <div style={sub}>
           Percent of each won quote a customer earns as account credit, by their level at the time of the win (0–20 %).
-          Credit starts posting in a later release.
+          Posted when a quote is won (reversed if it leaves Won); staff spend it with Apply credit in the Estimator.
         </div>
         <div style={grid}>
           {REWARD_LEVELS.map((l) => (
