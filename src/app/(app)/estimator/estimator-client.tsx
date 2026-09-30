@@ -37,6 +37,9 @@ import {
   type ReviewSync,
   type StageSync,
 } from "./actions";
+import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
+import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
+import { RewardCreditPanel } from "./reward-credit-panel";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { ChangeTypeControl } from "@/components/quote-flow-controls";
@@ -431,6 +434,7 @@ export default function EstimatorClient({
   freightRule,
   portalStatusError,
   specKeys,
+  canApplyCredit,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -799,6 +803,33 @@ export default function EstimatorClient({
   void fixtureRates;
   const t = useMemo(() => totals(sections, TAX_RATE_PCT), [sections]);
 
+  /* #282 phase 2 — Rewards credit: the customer's balance / available
+     (re-read on customer, quote, status or a save), and what this quote
+     carries. The save clamps it again on the server. */
+  const [creditInfo, setCreditInfo] = useState<RewardCreditInfo | null>(null);
+  const [creditSeq, setCreditSeq] = useState(0);
+  useEffect(() => {
+    let live = true;
+    if (!customerId) {
+      setCreditInfo(null);
+      return;
+    }
+    rewardCreditInfoAction(customerId, loadedId || null)
+      .then((info) => {
+        if (live) setCreditInfo(info);
+      })
+      .catch(() => {
+        if (live) setCreditInfo(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [customerId, loadedId, status, creditSeq]);
+  const appliedCredit = rewardCreditOf(sections);
+  const applyCredit = (amount: number) =>
+    setSections((ss) => withRewardCredit(ss, amount, nextId()));
+  const removeCredit = () => setSections((ss) => withoutRewardCredit(ss));
+
   const isBuild = !phone && mode === "build";
   const isPreview = phone || mode === "preview";
   const isInternal = true; // build mode is the internal view (prototype view: 'internal')
@@ -1162,6 +1193,12 @@ export default function EstimatorClient({
           setRevDateMs(res.updatedAt);
           if (res.review) setReview(res.review);
           if (res.reviewLimit !== undefined) setReviewLimit(res.reviewLimit);
+          // #282 phase 2: take the server's (clamped) Rewards credit back.
+          if (typeof res.rewardCredit === "number") {
+            const stored = res.rewardCredit;
+            setSectionsState((ss) => (rewardCreditOf(ss) === stored ? ss : withRewardCredit(ss, stored, nextId())));
+            setCreditSeq((n) => n + 1);
+          }
           // Server-confirmed either way (ok or refused/stale) — this IS the
           // resync: whether the requested status applied, was refused, or
           // was left alone because this tab was stale, res.status is always
@@ -1377,6 +1414,9 @@ export default function EstimatorClient({
     const pc = c ? c.contacts.find((ct) => ct.primary) || c.contacts[0] : undefined;
     const contact = pc ? pc.name : "";
     guardWonMeta("customer", () => {
+      // #282 phase 2: Rewards credit belongs to one customer — a new
+      // customer starts with none on this quote.
+      if (id !== customerId) setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
       setCustomerId(id || null);
       setLocationId(locId);
       setCustName(name);
@@ -1483,7 +1523,8 @@ export default function EstimatorClient({
     setSections((ss) =>
       ss.map((s) => ({
         ...clearSellOverride(s),
-        items: s.items.map((it) => ({ ...it, ...repriceAtMargin(it.cost, m) })),
+        // #282 phase 2: the Rewards credit is not a priced line.
+        items: s.items.map((it) => (isRewardCreditItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })),
       }))
     );
   };
@@ -1492,7 +1533,7 @@ export default function EstimatorClient({
     setSections((ss) =>
       ss.map((s) =>
         s.id === secId
-          ? { ...clearSellOverride(s), items: s.items.map((it) => ({ ...it, ...repriceAtMargin(it.cost, m) })) }
+          ? { ...clearSellOverride(s), items: s.items.map((it) => (isRewardCreditItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })) }
           : s
       )
     );
@@ -1532,7 +1573,8 @@ export default function EstimatorClient({
   const setSystemPresentation = (secId: string, presentation: "itemized" | "narrative") =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, presentation } : s)));
   const deleteSystem = (secId: string) => {
-    const list = sections.filter((s) => s.id !== secId);
+    // #282 phase 2: the Rewards credit is the quote's — it moves to the new last system.
+    const list = withRewardCredit(sections.filter((s) => s.id !== secId), rewardCreditOf(sections), nextId());
     setSections(list);
     setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
   };
@@ -1568,7 +1610,9 @@ export default function EstimatorClient({
         movedVq
       );
       if (res.ok) {
-        const list = sections.filter((s) => s.id !== secId);
+        // #282 phase 2: the Rewards credit stays on this quote (the server
+        // never moves it with a system).
+        const list = withRewardCredit(sections.filter((s) => s.id !== secId), rewardCreditOf(sections), nextId());
         setSections(list);
         if (movedVq.length) setVendorQuotes((vs) => vs.filter((v) => !movedVqIds.has(v.id)));
         setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
@@ -3957,7 +4001,23 @@ export default function EstimatorClient({
                     <span style={{ color: "#5b616e" }}>Freight</span>
                     <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.fr)}</span>
                   </div>
+                  {(t.credit || 0) > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#1f8a5b", fontWeight: 600 }}>
+                      <span>Rewards credit</span>
+                      <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(t.credit || 0)}</span>
+                    </div>
+                  )}
                 </div>
+
+                <RewardCreditPanel
+                  info={creditInfo}
+                  applied={appliedCredit}
+                  preCreditTotal={t.grand + (t.credit || 0)}
+                  editable={canApplyCredit && (status === "draft" || status === "sent")}
+                  hasSystems={sections.length > 0}
+                  onApply={applyCredit}
+                  onRemove={removeCredit}
+                />
 
                 {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
                     attach to; a brand-new unsaved draft has nowhere for

@@ -583,4 +583,6 @@ export type EstimatorProps = {
    *  system record's match key (`systemMatchKeys`), read on the server so the
    *  client never imports the records store. */
   specKeys: string[];
+  /** #282 phase 2 — may this user apply Rewards credit (`create`)? */
+  canApplyCredit: boolean;
 };

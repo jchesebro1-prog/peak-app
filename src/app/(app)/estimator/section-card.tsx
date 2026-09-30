@@ -5,6 +5,7 @@ import type { SuggestPart } from "./estimator-data";
 import {
   fmt,
   hasSellOverride,
+  isSystemLine,
   lineExtSellOf,
   marginColor,
   round2,
@@ -269,7 +270,8 @@ export default function SectionCard(p: SectionCardProps) {
   const sellSet = hasSellOverride(sec);
   const sellWarning = systemSellWarning(sec);
   const sysMargin = Math.round(systemMargin(sec) * 100);
-  const visible = sec.items.filter((x) => !x.option);
+  // #282 phase 2: the Rewards credit line shows in the totals sidebar, not here.
+  const visible = sec.items.filter(isSystemLine);
   const metaParts: string[] = [];
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
   if (sysMargin > 0 && isInternal) metaParts.push(sysMargin + "% margin");

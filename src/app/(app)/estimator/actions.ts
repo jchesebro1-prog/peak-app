@@ -384,7 +384,7 @@ export async function saveQuoteAction(
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
   // when any other line carries one.
-  const credit = await settleRewardCredit(sellSanitized, prior, payload.customerId || null, loadedId);
+  const credit = await settleRewardCredit(sellSanitized, prior, payload.customerId || null, loadedId, can("create", user.roles));
   if (!credit.ok) {
     return {
       ok: false,
@@ -607,15 +607,18 @@ export async function saveQuoteAction(
  * - a negative price/qty on any line but the credit line refuses the save;
  * - a won or lost quote keeps the credit it had (its redeem is on the
  *   ledger — the builder can't move it; the credit follows the status);
- * - no customer, or a customer different from the stored one, drops it;
- * - otherwise it is clamped to the company's available credit (balance −
- *   credit on its OTHER open quotes) and the quote's pre-credit total.
+ * - no customer drops it (the builder also drops it when the customer
+ *   changes; the clamp below is always against the customer being saved);
+ * - otherwise it is clamped to that company's available credit (balance −
+ *   credit on its OTHER open quotes) and the quote's pre-credit total;
+ * - without `create` the credit can't grow past what the quote already had.
  */
 async function settleRewardCredit(
   sections: SpecSection[],
   prior: Quote | null,
   customerId: string | null,
-  loadedId: string | null
+  loadedId: string | null,
+  mayApply: boolean
 ): Promise<{ ok: true; sections: SpecSection[]; credit: number; notice?: string } | { ok: false; error: string }> {
   if (!Array.isArray(sections)) return { ok: true, sections, credit: 0 };
   const posted = rewardCreditOf(sections);
@@ -629,11 +632,12 @@ async function settleRewardCredit(
     const out = withRewardCredit(check.sections, locked, maxId + 1);
     return { ok: true, sections: out, credit: rewardCreditOf(out) };
   }
-  if (!customerId || (prior && (prior.customerId || null) !== customerId)) max = 0;
-  else if (posted > 0) {
+  if (!customerId || !(posted > 0)) max = 0;
+  else {
     const { available } = await companyCredit(customerId, loadedId);
     max = maxApplicableCredit(available, totals(withoutRewardCredit(sections), 0).grand);
-  } else max = 0;
+    if (!mayApply) max = Math.min(max, prior && (prior.customerId || null) === customerId ? quoteRewardCredit(prior) : 0);
+  }
   const res = sanitizeRewardCredit(sections, max);
   if (!res.ok) return res;
   const notice =

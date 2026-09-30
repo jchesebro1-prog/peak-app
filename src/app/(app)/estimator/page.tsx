@@ -440,6 +440,7 @@ export default async function EstimatorPage({
       portalStatusError={portalStatusError}
       // Spec records design §6: the Spec select's options, as plain strings.
       specKeys={systemMatchKeys(specRecords)}
+      canApplyCredit={can("create", user.roles)}
     />
   );
 }
