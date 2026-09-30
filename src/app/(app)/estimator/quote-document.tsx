@@ -423,7 +423,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                     if (!blocks.length) return "System scope and pricing are included in the total above.";
                     return blocks.map((b, bi) =>
                       b.kind === "ul" ? (
-                        <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18 }}>
+                        <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18, listStyleType: "disc" }}>
                           {b.items.map((it, ii) => (
                             <li key={ii}>{it}</li>
                           ))}
