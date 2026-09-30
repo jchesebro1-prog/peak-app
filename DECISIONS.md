@@ -8177,3 +8177,34 @@ The nav can't hide items conditionally, so Customers → Rewards is always liste
 shows admins a "Program is off — preview" with actions disabled and everyone else a notice; company cards stay hidden.
 `/rewards` lists only companies with counted purchases.
 
+## D495. Rewards credit is an add-only ledger reconciled to each quote's status (#282, 2026-09-30)
+
+`reward_ledger` entries are never edited or deleted (the go-live demo reset wipes the collection like other customer
+data). After each real `setStatus()` transition, `quoteLedgerPlan` compares the quote's existing entries with its status
+and posts only what is missing, under deterministic ids (`earn:<q>:<n>`, `redeem:<q>:<n>`, …, ON CONFLICT DO NOTHING),
+so replays and retries post nothing twice. Posting runs after the status transaction and a failure is logged, never
+thrown (inside `setQuoteStage`'s outer transaction a DB error could still abort — accepted; inserts are conflict-safe).
+Earns post only while the program is on; redeems, reversals and returned credit post even when it is off, so no
+balance keeps credit from a sale that no longer stands.
+
+## D496. Credit earns at the level before the purchase, on what the customer pays (#282, 2026-09-30)
+
+The earn rate is the earned level from lifetime spend **excluding** the quote being won — the level the customer was at
+when they bought. It applies to the quote's stored `value`, which is net of any credit applied; lifetime spend adds the
+credit back, so spending credit never lowers a customer's level.
+
+## D497. Credit comes off last, never below $0, and is locked once decided (#282, 2026-09-30)
+
+On an Estimator quote the credit is one "Rewards credit" line (no SKU, qty 1, last system; several collapse into one)
+applied after the #267 system price and $25 rounding and after tax, capped at the available balance and the pre-credit
+total; `margin` stays on the pre-credit numbers. Available = balance − credit parked on the company's other draft/sent
+quotes. Won and lost quotes keep the credit they had; a save without `create` can't raise it. The builder drops the
+line on a customer change and the server always clamps to the customer being saved.
+
+## D498. Starting credit can be posted before launch (#282, 2026-09-30)
+
+Settings → Rewards → Starting credit proposes min(cap, history × rate) per company and posts `start:<company>` once,
+even while the program is off, so balances can be ready on launch day; before `launchedAt` exists, all history counts.
+Known edges left as-is: un-winning a system quote leaves its spawned project counting as spend (D491), and the
+Estimator's local Customer-preview PDF can fail on a dev machine without Vercel Blob (the print route renders fine).
+
