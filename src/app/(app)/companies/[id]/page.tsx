@@ -43,6 +43,8 @@ import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 export const metadata = { title: "Company — Quartzite-6" };
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
+import { RewardsCard } from "./rewards-card";
+import { companyRewards, getRewardsProgram } from "@/lib/stores/rewards";
 import EditCustomerModal from "../edit-modal";
 import VenueDialog from "../venue-dialog";
 import { DeleteVisitButton } from "../delete-visit-button";
@@ -114,7 +116,7 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, projects, surveys, threads, offices, users, feedRows, settings] = await Promise.all([
+  const [quotes, projects, surveys, threads, offices, users, feedRows, settings, rewardsProgram] = await Promise.all([
     getAllQuotes(),
     getAllProjects(),
     getAllSurveys(),
@@ -123,7 +125,10 @@ export default async function CustomerDetailPage({
     activeUsers(),
     loadCustomerFeed({ id: cust.id, name: cust.name }),
     getSettings(),
+    getRewardsProgram(),
   ]);
+  // #282 — the Rewards card shows only while the program is on.
+  const rewards = rewardsProgram.enabled ? await companyRewards(cust.id, rewardsProgram) : null;
 
   const edit = one(sp.edit);
   const venueTypes = venueTypesFrom(settings.venueTypes);
@@ -373,6 +378,8 @@ export default async function CustomerDetailPage({
             </div>
           ))}
         </div>
+
+        {rewards && <RewardsCard view={rewards} canApprove={can("approve", me.roles)} />}
 
         {/* locations & venues */}
         <div style={card}>

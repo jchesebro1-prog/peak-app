@@ -25,6 +25,7 @@ export const ADMIN_SCREENS = [
   { label: "Task Templates", href: "/task-templates", desc: "Reusable checklists for projects, quotes, and designs." },
   { label: "Import / Export", href: "/import", desc: "Move records in and out of Peak." },
   { label: "Grid Settings", href: "/design/grid/settings", desc: "Symbol shapes, port rules, wire types, and install labor for The Grid." },
+  { label: "Rewards", href: "/settings/rewards", desc: "Customer reward levels, tier suggestions, and credit rates." },
 ] as const;
 
 /** Company-owned configuration screens. Catalog is a company price book,

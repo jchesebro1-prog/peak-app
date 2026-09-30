@@ -1939,17 +1939,17 @@ ok(
 // Opportunities joined as the first child (#18) — six children as of plan 02.
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 8),
-  "CRM has eight children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22), Vendors added (#122)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 9),
+  "CRM has nine children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22), Vendors added (#122), Rewards added (#282)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "opportunities,leads,myleads,companies,vendors,people,venues,field"
+      "opportunities,leads,myleads,companies,rewards,vendors,people,venues,field"
   ),
-  "CRM children are opportunities, leads, myleads, companies, vendors, people, venues, field in order",
+  "CRM children are opportunities, leads, myleads, companies, rewards, vendors, people, venues, field in order",
 );
 ok(
   parentGroupOf("companies") === "crm" &&
@@ -1986,11 +1986,11 @@ ok(
   SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,admin",
   "Settings exposes company and admin sections in order",
 );
-ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens (Grid settings build added Grid Settings)");
+ok(ADMIN_SCREENS.length === 6, "Admin lists exactly six screens (Grid settings build added Grid Settings; #282 added Rewards)");
 ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/templates,/estimating-rules,/task-templates,/import,/design/grid/settings",
-  "Admin links Templates, Estimating Rules, Task Templates, Import, Grid Settings — by their own routes",
+    "/templates,/estimating-rules,/task-templates,/import,/design/grid/settings,/settings/rewards",
+  "Admin links Templates, Estimating Rules, Task Templates, Import, Grid Settings, Rewards — by their own routes",
 );
 
 // ---- General dissolution (D99): the group is gone ----
@@ -10677,6 +10677,7 @@ seeded()
   .then(() => track274AsyncChecks())
   .then(() => track274bAsyncChecks())
   .then(() => lift275AsyncChecks())
+  .then(() => rewards282AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -38116,4 +38117,255 @@ import type { PartDocument as Cw245Doc, PartDocumentLink as Cw245Link } from "@/
   ok(JSON.stringify(again) === JSON.stringify(targets), "#245 catalog-wide: the same state gives the same targets (deterministic)");
   const onlyClaimed = cw245Targets(cw245Ctx(state), (sku) => sku === "SHARE1" || sku === "SHARE2");
   ok(onlyClaimed.map((t) => t.sku).join(",") === "SHARE1", "#245 catalog-wide: a SKU whose every URL is already claimed emits nothing");
+}
+
+// ---------------------------------------------------------------------------
+// #282 Phase 1 — Customer Rewards: program settings, lifetime spend, levels
+// and tier suggestions (spec docs/superpowers/specs/2026-09-30-customer-
+// rewards-design.md §1–§3, §7). Pure checks run here; the DB checks (the
+// loader, Dismiss, Approve) are rewards282AsyncChecks() on the promise chain.
+// ---------------------------------------------------------------------------
+import {
+  DEFAULT_REWARDS_PROGRAM as r282Default,
+  contactsToRaise as r282ContactsToRaise,
+  ladderTierOf as r282LadderTierOf,
+  levelFor as r282LevelFor,
+  levelProgress as r282Progress,
+  nextLevel as r282Next,
+  rewardsProgramErrors as r282Errors,
+  sanitizeRewardsProgram as r282Sanitize,
+  suggestionFor as r282Suggest,
+} from "@/lib/rewards/program";
+import { lifetimeSpend as r282Spend, purchasesByCompany as r282ByCo, purchasesFrom as r282Purchases, wonAt as r282WonAt } from "@/lib/rewards/spend";
+import { readFileSync as r282Read } from "node:fs";
+{
+  // ---- sanitize ----
+  const d = r282Sanitize(undefined);
+  ok(d.enabled === false && JSON.stringify(d.thresholds) === JSON.stringify(r282Default.thresholds),
+    "#282 sanitize: nothing stored → the spec defaults, disabled");
+  ok(d.thresholds.copper === 25000 && d.thresholds.silver === 75000 && d.thresholds.gold === 150000 && d.thresholds.platinum === 300000,
+    "#282 sanitize: default thresholds Copper 25k · Silver 75k · Gold 150k · Platinum 300k");
+  ok(d.earnPct.base === 0 && d.earnPct.copper === 1 && d.earnPct.silver === 1.5 && d.earnPct.gold === 2 && d.earnPct.platinum === 3,
+    "#282 sanitize: default earn % 0 / 1 / 1.5 / 2 / 3");
+  ok(d.retro.ratePct === 1 && d.retro.capPerCustomer === 1000 && d.perks.length === 0 && d.launchedAt === undefined,
+    "#282 sanitize: default retro 1 % capped at $1,000, no perks, never launched");
+  const desc = r282Sanitize({ thresholds: { copper: 50000, silver: 40000, gold: 40000, platinum: 10 } });
+  ok(desc.thresholds.copper === 50000 && desc.thresholds.silver === 50001 && desc.thresholds.gold === 50002 && desc.thresholds.platinum === 50003,
+    "#282 sanitize: thresholds are forced strictly ascending (each at least the one before + $1)");
+  const junk = r282Sanitize({ thresholds: { copper: -5, silver: "abc", gold: "$160,000", platinum: 0 } });
+  ok(junk.thresholds.copper === 25000 && junk.thresholds.silver === 75000 && junk.thresholds.gold === 160000 && junk.thresholds.platinum === 300000,
+    "#282 sanitize: a non-positive / non-numeric threshold falls back to its default; \"$160,000\" parses");
+  const clamps = r282Sanitize({ enabled: "yes", earnPct: { base: -1, copper: 50, silver: "2.345" }, retro: { ratePct: 99, capPerCustomer: -10 } });
+  ok(clamps.enabled === false, "#282 sanitize: enabled only when exactly true");
+  ok(clamps.earnPct.base === 0 && clamps.earnPct.copper === 20 && clamps.earnPct.silver === 2.35 && clamps.earnPct.gold === 2,
+    "#282 sanitize: earn % clamped to 0–20 and rounded to 2 places; a missing level keeps its default");
+  ok(clamps.retro.ratePct === 20 && clamps.retro.capPerCustomer === 0, "#282 sanitize: retro rate clamped to 20 %, a negative cap to $0");
+  const perks = r282Sanitize({ perks: [
+    { id: "p1", name: "Free focus call", level: "gold", frequency: "yearly" },
+    { id: "p1", name: "Duplicate id", level: "nope" },
+    { name: "   " },
+    { name: "No id", active: false },
+    "junk",
+  ] }).perks;
+  ok(perks.length === 3 && new Set(perks.map((p) => p.id)).size === 3, "#282 sanitize: nameless perks dropped, every perk id unique");
+  ok(perks[0].id === "p1" && perks[0].level === "gold" && perks[0].frequency === "yearly" && perks[0].active === true,
+    "#282 sanitize: a valid perk keeps its id, level and frequency; active defaults on");
+  ok(perks[1].id !== "p1" && perks[1].level === "base" && perks[1].frequency === "once", "#282 sanitize: a duplicate id is re-minted; an unknown level reads Base, frequency once");
+  ok(perks[2].active === false, "#282 sanitize: active:false survives");
+  ok(r282Sanitize({ launchedAt: 1700000000000 }).launchedAt === 1700000000000 && r282Sanitize({ launchedAt: -1 }).launchedAt === undefined,
+    "#282 sanitize: launchedAt kept only when a positive stamp");
+  // ---- validation (Settings → Rewards errors instead of silent fixes) ----
+  ok(r282Errors(r282Default).length === 0, "#282 errors: the defaults are valid");
+  ok(r282Errors({ ...r282Default, thresholds: { copper: 25000, silver: 25000, gold: 150000, platinum: 300000 } }).some((e) => /Silver must be more than Copper/.test(e)),
+    "#282 errors: an equal threshold is refused by name");
+  ok(r282Errors({ ...r282Default, earnPct: { ...r282Default.earnPct, gold: 21 } }).some((e) => /Gold earn %/.test(e)), "#282 errors: earn % over 20 refused");
+  ok(r282Errors({ ...r282Default, retro: { ratePct: 1, capPerCustomer: -1 } }).length === 1, "#282 errors: a negative cap refused");
+
+  // ---- level / next-level math ----
+  const P = r282Default;
+  ok(r282LevelFor(0, P) === "base" && r282LevelFor(24999.99, P) === "base", "#282 levelFor: under Copper → Base");
+  ok(r282LevelFor(25000, P) === "copper", "#282 levelFor: exactly the Copper threshold → Copper (≥)");
+  ok(r282LevelFor(74999, P) === "copper" && r282LevelFor(75000, P) === "silver" && r282LevelFor(150000, P) === "gold",
+    "#282 levelFor: exact Silver / Gold thresholds reach those levels");
+  ok(r282LevelFor(300000, P) === "platinum" && r282LevelFor(5e6, P) === "platinum", "#282 levelFor: Platinum at and above its threshold");
+  const n1 = r282Next(24999, P);
+  ok(n1?.level === "copper" && n1.need === 1 && n1.threshold === 25000, "#282 nextLevel: $1 short of Copper → need $1");
+  const n2 = r282Next(25000, P);
+  ok(n2?.level === "silver" && n2.need === 50000, "#282 nextLevel: at Copper exactly, the next is Silver, $50,000 away");
+  ok(r282Next(300000, P) === null, "#282 nextLevel: nothing above Platinum");
+  ok(r282Progress(0, P) === 0 && r282Progress(12500, P) === 0.5 && r282Progress(50000, P) === 0.5 && r282Progress(400000, P) === 1,
+    "#282 levelProgress: measured from the current level's threshold to the next; 1 at the top");
+
+  // ---- suggestion rules ----
+  ok(r282Suggest({ companyTier: null, earned: "copper" }) === "copper", "#282 suggest: an untiered company that earned Copper → suggest Copper");
+  ok(r282Suggest({ companyTier: "junk-tier", earned: "copper" }) === "copper" && r282LadderTierOf("junk-tier") === "base",
+    "#282 suggest: an unknown stored tier reads as Base");
+  ok(r282Suggest({ companyTier: "copper", earned: "gold" }) === "gold", "#282 suggest: jumps straight to the earned level");
+  ok(r282Suggest({ companyTier: "reseller", earned: "platinum" }) === null && r282Suggest({ companyTier: "employee", earned: "gold" }) === null,
+    "#282 suggest: Reseller and Employee companies are never suggested");
+  ok(r282Suggest({ companyTier: "gold", earned: "silver" }) === null && r282Suggest({ companyTier: "gold", earned: "gold" }) === null,
+    "#282 suggest: never down, never sideways");
+  ok(r282Suggest({ companyTier: "base", earned: "base" }) === null, "#282 suggest: Base earned on Base → nothing");
+  ok(r282Suggest({ companyTier: "copper", earned: "silver", dismissedLevel: "silver" }) === null,
+    "#282 suggest: a dismissal at the earned level hides the suggestion");
+  ok(r282Suggest({ companyTier: "copper", earned: "gold", dismissedLevel: "silver" }) === "gold",
+    "#282 suggest: a dismissal lasts only until the next level is earned");
+  const raise = r282ContactsToRaise([
+    { id: "a", pricingTier: "base" }, { id: "b", pricingTier: "copper" }, { id: "c", pricingTier: "gold" },
+    { id: "d", pricingTier: null }, { id: "e", pricingTier: "reseller" }, { id: "f", pricingTier: "employee" }, { id: "g", pricingTier: "silver" },
+  ], "silver");
+  ok(raise.map((c) => c.id).join(",") === "a,b",
+    "#282 contactsToRaise: only own ladder tiers below the new level — never an untiered, Reseller/Employee, equal or higher contact");
+
+  // ---- lifetime spend: each sale once ----
+  const H = (to: string, at: number) => ({ at, to });
+  const quotes = [
+    { id: "Q1", customerId: "co1", status: "won", value: 10000, history: [H("draft", 1), H("sent", 2), H("won", 3)], updatedAt: 99 },
+    { id: "Q2", customerId: "co1", status: "lost", value: 50000, history: [] },
+    { id: "Q3", customerId: "co1", status: "draft", value: 70000, history: [] },
+    { id: "Q4", customerId: "co1", status: "won", value: 90000, history: [], deleted: true },
+    { id: "Q5", customerId: "co1", status: "won", value: 2000, history: [H("won", 10), H("sent", 20), H("won", 30)], source: "daylite" },
+    { id: "Q6", customerId: null, status: "won", value: 1234, history: [] },
+    { id: "Q7", customerId: "co2", status: "sent", value: 800, history: [] },
+    { id: "Q8", customerId: "co2", status: "won", value: 0, history: [] },
+  ];
+  const projects = [
+    { id: "P1", customerId: "co1", quoteId: "Q1", value: 10000, startedAt: 5 },
+    { id: "P2", customerId: "co1", quoteId: null, value: 5000, closedAt: 40, startedAt: 4, imported: true },
+    { id: "P3", customerId: "co1", quoteId: null, value: 777, valueUnknown: true, startedAt: 6 },
+    { id: "P4", customerId: "co1", quoteId: null, value: 3000, startedAt: 7, deleted: true },
+    { id: "P5", customerId: "co2", quoteId: "Q7", value: 800, startedAt: 8 },
+    { id: "P6", customerId: "co2", quoteId: "Q7", value: 800, startedAt: 9 },
+    { id: "P7", customerId: "co2", quoteId: "Q8", value: 400, startedAt: 11 },
+  ];
+  const repairs = [
+    { id: "R1", customerId: "co1", quoteId: null, value: 1500, completedAt: 50, imported: true },
+    { id: "R2", customerId: "co1", quoteId: null, value: 600, imported: false },
+    { id: "R3", customerId: "co1", quoteId: "Q1", value: 10000, imported: true },
+  ];
+  const all = r282Purchases({ quotes, projects, repairs });
+  const ids = all.map((p) => p.id).sort().join(",");
+  ok(ids === "P2,P5,P7,Q1,Q5,R1", `#282 spend: counted set is exactly P2,P5,P7,Q1,Q5,R1 (got ${ids})`);
+  ok(!all.some((p) => p.id === "P1") && !all.some((p) => p.id === "R3"),
+    "#282 spend: a won quote and the project / repair it spawned count once (the quote)");
+  ok(all.some((p) => p.id === "P2" && p.imported), "#282 spend: a Daylite project with no quote counts");
+  ok(!all.some((p) => p.id === "P3"), "#282 spend: a UKN (valueUnknown) project is skipped");
+  ok(!all.some((p) => p.id === "Q4") && !all.some((p) => p.id === "P4"), "#282 spend: soft-deleted quotes and projects are skipped");
+  ok(!all.some((p) => p.id === "Q2" || p.id === "Q3" || p.id === "Q7"), "#282 spend: lost / draft / sent quotes never count");
+  ok(!all.some((p) => p.id === "Q6"), "#282 spend: a quote with no customer is left out");
+  ok(!all.some((p) => p.id === "R2"), "#282 spend: only Daylite-imported repairs count");
+  ok(all.filter((p) => p.id === "P5" || p.id === "P6").length === 1, "#282 spend: two projects on the same unwon quote count once");
+  ok(all.some((p) => p.id === "P7") && !all.some((p) => p.id === "Q8"),
+    "#282 spend: a won $0 quote isn't counted, so the project carrying the value counts instead");
+  const byCo = r282ByCo(all);
+  ok(r282Spend(byCo.get("co1") || []) === 18500, `#282 spend: co1 lifetime = 10,000 + 5,000 + 2,000 + 1,500 (got ${r282Spend(byCo.get("co1") || [])})`);
+  ok(r282Spend(byCo.get("co2") || []) === 1200, "#282 spend: co2 lifetime = 800 + 400");
+  ok(all.find((p) => p.id === "Q1")?.at === 3, "#282 spend: a won quote is dated by its history entry to won");
+  ok(r282WonAt({ history: [H("won", 10), H("sent", 20), H("won", 30)] }) === 30, "#282 wonAt: re-won → the LAST entry to won");
+  ok(r282WonAt({ history: [], updatedAt: 77, createdAt: 5 }) === 77 && r282WonAt({ createdAt: 5 }) === 5, "#282 wonAt: no won entry → updatedAt, then createdAt");
+  ok(all.find((p) => p.id === "P2")?.at === 40 && all.find((p) => p.id === "P5")?.at === 8 && all.find((p) => p.id === "R1")?.at === 50,
+    "#282 spend: a project is dated closedAt ?? startedAt; a repair by completedAt");
+  ok(all[0].at >= all[all.length - 1].at, "#282 spend: purchases come newest first");
+
+  // ---- wiring ----
+  const navSrc = r282Read("src/components/nav/nav-data.ts", "utf8");
+  ok(/key: "rewards", label: "Rewards", href: "\/rewards"/.test(navSrc) && /"\/rewards": "rewards"/.test(navSrc),
+    "#282 nav: Rewards sits in the CRM group and /rewards lights it");
+  const smokeSrc = r282Read("scripts/smoke-routes.ts", "utf8");
+  ok(smokeSrc.includes('"/rewards"') && smokeSrc.includes('"/settings/rewards"'), "#282 smoke: /rewards and /settings/rewards are smoke routes");
+}
+
+async function rewards282AsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const { getCompany: r282GetCompany } = await import("@/lib/identity/companies");
+  const { saveContact: r282SaveContact, getContact: r282GetContact, softDeleteContact: r282DropContact } = await import("@/lib/identity/contacts");
+  const { getBlob: r282GetBlob, setBlob: r282SetBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "co");
+  const RES = fixtureId(282, "reseller");
+  const ct = (s: string) => fixtureId(282, `ct-${s}`);
+  const prevRaw = await r282GetBlob<Record<string, unknown>>("rewards_program", {});
+  const prevDismiss = await r282GetBlob<Record<string, unknown>>("rewards_dismissals", {});
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 Rewards Co", type: "Education", pricingTier: "copper", locations: [], contacts: [] });
+    await upsertCustomer({ id: RES, name: "Test282 Reseller Co", type: "dealer", pricingTier: "reseller", locations: [], contacts: [] });
+    await r282SaveContact({ id: ct("base"), firstName: "T282", lastName: "Base", homeCompanyId: CO, title: "", pricingTier: "base" });
+    await r282SaveContact({ id: ct("gold"), firstName: "T282", lastName: "Gold", homeCompanyId: CO, title: "", pricingTier: "gold" });
+    await r282SaveContact({ id: ct("none"), firstName: "T282", lastName: "None", homeCompanyId: CO, title: "", pricingTier: null });
+    await r282SaveContact({ id: ct("emp"), firstName: "T282", lastName: "Employee", homeCompanyId: CO, title: "", pricingTier: "employee" });
+
+    const q = (slug: string, customerId: string, status: string, value: number, extra: Record<string, unknown> = {}) =>
+      createFixture("quotes", { id: fixtureId(282, slug), name: `T282 ${slug}`, customer: "", customerId, status, value, source: "estimator",
+        quoteType: "system", history: status === "won" ? [{ at: 1000, to: "won" }] : [], createdAt: 1, updatedAt: 1, ...extra });
+    await q("won", CO, "won", 80000);
+    await q("lost", CO, "lost", 900000);
+    await q("draft", CO, "draft", 900000);
+    await q("gone", CO, "won", 900000);
+    await softDeleteDoc("quotes", fixtureId(282, "gone"));
+    await q("res-won", RES, "won", 500000);
+    const proj = (slug: string, extra: Record<string, unknown>) =>
+      createFixture("projects", { id: fixtureId(282, slug), kind: "project", name: `T282 ${slug}`, customer: "", customerId: CO, quoteId: null,
+        projectType: null, value: 0, margin: 0, createdAt: 1, updatedAt: 1, startedAt: 2, stageHistory: [], ...extra });
+    await proj("spawned", { quoteId: fixtureId(282, "won"), value: 80000 });
+    await proj("daylite", { value: 5000, source: { system: "daylite", importedAt: 1 } });
+    await proj("ukn", { value: 400000, valueUnknown: true, source: { system: "daylite", importedAt: 1 } });
+    await createFixture("repair_jobs", { id: fixtureId(282, "rep"), title: "T282 repair", customerId: CO, quoteId: null, value: 1000,
+      source: { kind: "direct", refId: "daylite:done", label: "Daylite import" }, approvedAt: 3, completedAt: 4, createdAt: 1, updatedAt: 1 });
+    await createFixture("repair_jobs", { id: fixtureId(282, "rep-app"), title: "T282 app repair", customerId: CO, quoteId: null, value: 90000,
+      source: { kind: "direct", label: "Direct" }, approvedAt: 3, completedAt: 4, createdAt: 1, updatedAt: 1 });
+
+    // Program on (default thresholds: Silver 75k).
+    await R.saveRewardsProgram({ ...r282Default, enabled: true });
+    const prog = await R.getRewardsProgram();
+    ok(prog.enabled && typeof prog.launchedAt === "number", "#282 DB: turning the program on stamps launchedAt");
+    const firstLaunch = prog.launchedAt;
+    await R.saveRewardsProgram({ ...r282Default, enabled: false });
+    await R.saveRewardsProgram({ ...r282Default, enabled: true });
+    ok((await R.getRewardsProgram()).launchedAt === firstLaunch, "#282 DB: launchedAt never moves once stamped");
+
+    const v = await R.companyRewards(CO);
+    ok(!!v && v.spend === 86000, `#282 DB: lifetime = won quote 80,000 + Daylite project 5,000 + imported repair 1,000 (got ${v?.spend})`);
+    ok(!!v && v.purchases.length === 3 && !v.purchases.some((p) => p.id === fixtureId(282, "spawned")),
+      "#282 DB: the spawned project isn't counted twice; UKN, deleted, lost, draft and app repairs are skipped");
+    ok(v?.earned === "silver" && v.ladderTier === "copper" && v.suggestion === "silver", "#282 DB: Copper company that earned Silver → suggest Silver");
+    ok(v?.next?.level === "gold" && v.next.need === 64000, "#282 DB: next level Gold, $64,000 to go");
+    const board = await R.rewardsBoard();
+    const row = board.find((r) => r.companyId === CO);
+    ok(!!row && row.suggestion === "silver" && row.spend === 86000, "#282 DB: /rewards board lists the company with its suggestion");
+    const resRow = board.find((r) => r.companyId === RES);
+    ok(!!resRow && resRow.earned === "platinum" && resRow.suggestion === null, "#282 DB: a Reseller company earns a level but is never suggested");
+    const resApprove = await R.approveRewardSuggestion(RES);
+    ok(!resApprove.ok && (await r282GetCompany(RES))?.pricingTier === "reseller", "#282 DB: Approve refuses a Reseller company and leaves its tier alone");
+
+    // Dismiss hides it until the next level.
+    const dis = await R.dismissRewardSuggestion(CO, "Test Harness");
+    ok(dis.ok && dis.level === "silver", "#282 DB: Dismiss records the suggested level");
+    const v2 = await R.companyRewards(CO);
+    ok(v2?.suggestion === null && v2.dismissedLevel === "silver", "#282 DB: a dismissed suggestion is hidden");
+    ok(!(await R.rewardsBoard()).find((r) => r.companyId === CO)?.suggestion, "#282 DB: and leaves Ready to move up");
+
+    // Program off → Approve/Dismiss inert.
+    await R.saveRewardsProgram({ ...r282Default, enabled: false });
+    const offApprove = await R.approveRewardSuggestion(CO);
+    ok(!offApprove.ok && (await r282GetCompany(CO))?.pricingTier === "copper", "#282 DB: with the program off, Approve changes nothing");
+    await R.saveRewardsProgram({ ...r282Default, enabled: true });
+
+    // Approve: company → Silver; the Base contact rises; Gold, untiered and Employee contacts untouched.
+    const ap = await R.approveRewardSuggestion(CO);
+    ok(ap.ok && ap.level === "silver" && ap.contactsRaised === 1, `#282 DB: Approve sets Silver and raises one contact (${JSON.stringify(ap)})`);
+    ok((await r282GetCompany(CO))?.pricingTier === "silver", "#282 DB: the company's pricing tier is now Silver");
+    ok((await r282GetContact(ct("base")))?.pricingTier === "silver", "#282 DB: a contact below the new level is raised");
+    ok((await r282GetContact(ct("gold")))?.pricingTier === "gold", "#282 DB: a contact above the new level is never lowered");
+    ok((await r282GetContact(ct("none")))?.pricingTier == null, "#282 DB: an untiered contact keeps following the company");
+    ok((await r282GetContact(ct("emp")))?.pricingTier === "employee", "#282 DB: an Employee contact is never touched");
+    const again = await R.approveRewardSuggestion(CO);
+    ok(!again.ok, "#282 DB: nothing left to approve after the move");
+    ok((await R.companyRewards(CO))?.suggestion === null, "#282 DB: no suggestion once the tier matches the earned level");
+  } finally {
+    await r282SetBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
+    await r282SetBlob("rewards_dismissals", { ...prevDismiss, [CO]: null });
+    for (const s of ["base", "gold", "none", "emp"]) await r282DropContact(ct(s));
+    await removeCustomer(CO);
+    await removeCustomer(RES);
+  }
 }

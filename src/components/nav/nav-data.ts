@@ -77,6 +77,7 @@ export const NAV: NavEntry[] = [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "myleads", label: "My Leads", href: "/leads?who=mine" }, // #22 — see the EST note
       { key: "companies", label: "Companies", href: "/companies" },
+      { key: "rewards", label: "Rewards", href: "/rewards" }, // #282 — customer rewards (levels, tier suggestions)
       { key: "vendors", label: "Vendors", href: "/vendors" }, // #122 — vendor companies + price-list ledger
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
@@ -158,6 +159,7 @@ export function activeKeyFor(pathname: string): string {
     "/repairs": "repairs",
     "/rentals": "rentals",
     "/companies": "companies",
+    "/rewards": "rewards", // #282
     "/vendors": "vendors",
     "/people": "people",
     "/venues": "venues",

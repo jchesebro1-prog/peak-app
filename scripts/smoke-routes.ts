@@ -51,6 +51,8 @@ const ROUTES = [
   "/",
   "/quotes",
   "/projects",
+  "/rewards", // #282
+  "/settings/rewards", // #282
   "/estimator",
   "/design/lineset",
   /* No "/design/grid": the standalone Grid index was removed when The Grid
