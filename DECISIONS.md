@@ -8232,3 +8232,28 @@ the program is off. Tier names were "never shown to customers" (D87); they now a
 remain internal. The card sits above "Your open requests"; on the company card perks sit between the progress bar and
 the credit section.
 
+## D502. Service-quote credit is whole dollars on the quote's own section (#282, 2026-09-30)
+
+Flame-test, inspection and repair quotes price in whole dollars, so their rewards credit is too (rounded down). It lives
+as `rewardCredit` on the quote's section (`flameTest` / `inspection` / `repair`) — not a top-level field — so saved
+revisions and PDF staleness pick it up with no extra wiring. The section's `total` stays the pre-credit price; the
+quote's `value` is net, matching the Estimator (D497). Reopening a quote and the "was the price typed by hand?" check
+both use the pre-credit price (`grossQuoteValue`), so a credit never makes a sent price look off the $25 grid or turns
+into a typed total. The builder's dark "Quote total" header shows the pre-credit price; the credit box shows what the
+customer pays.
+
+## D503. Renewals never carry a credit and compare prices before credit (#282, 2026-09-30)
+
+A credit is a one-time use of the customer's balance, not part of the price: renewals start with none, and the renewal
+email's "why the price changed" compares this year's and last year's prices before credit. The "credit was reduced"
+notice shows on Save; Mark as approved still clamps the credit but shows no notice (an existing check pins that path).
+
+## D504. Deleting or recalling a quote settles its credit like any other change (#282, 2026-09-30)
+
+Soft-deleting a won quote reconciles its ledger as if it left Won — the earn is reversed and redeemed credit returned
+(there is no undelete). Recalling a revision re-clamps its credit with the same `settleCredit` rule a save uses:
+today's available credit (excluding this quote's own), the revision's pre-credit total, and $0; it is dropped on a
+portal quote, a quote with no customer, or a revision priced for a different customer (revisions now store
+`customerId`; older ones are assumed to be the current customer's); without `create` a recall can't raise it. Won quotes
+still refuse a recall; a lost quote's recall keeps its current credit.
+

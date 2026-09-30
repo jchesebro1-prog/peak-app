@@ -9971,7 +9971,7 @@ change. Spec `docs/superpowers/specs/2026-09-29-estimator-narrative-column-desig
 
 ---
 
-## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — IN PROGRESS
+## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — DONE 2026-09-30 (D491–D504)
 
 **Reported:** Jeff (2026-09-30): "Can we start building in a rewards tracker for customer purchases that works where we
 can give rewards and other benefits based on how much they have purchased." Designed with Jeff the same day (all
@@ -10014,3 +10014,23 @@ to the grant's company, staff preview via `?preview=` as before). The `PRICING_T
 to customers as reward levels. Gates: tsc 0; test:specs 9408 PASS / 0 FAIL (+81); test:smoke 173/0 (+1
 `/portal?preview=lakefront`); eslint 0 errors, no new warnings; next build OK. Browser-verified on a fresh scratch
 datadir. Reviewed: no blocking findings (portal scoping confirmed; double-click posts are deduplicated by id).
+
+**Phase 3 shipped 2026-09-30 (D502–D504):** flame-test, inspection and repair builders get a **Rewards credit** box
+under Total (`create`; only while the program is on and the customer has credit; read-only once won/lost; cleared on a
+customer change; never on portal quotes). The credit is a whole-dollar `rewardCredit` on the quote's own section
+(section `total` = pre-credit, quote `value` = net), applied after the $25 rounding, typed total and #275 lift, never
+below $0, clamped server-side on every save by the shared `settleCredit` (`src/lib/rewards/service-credit.ts`).
+`quoteRewardCredit()` (`src/lib/rewards/credit-line.ts`) now reads both the Estimator line and the service field for
+earn/redeem, available and spend. Flame/inspection letters print Quoted / Rewards credit −$X / Total; the repair letter
+says "…after a $Y rewards credit"; the PDF follows. Renewals and portal Generate/Refresh carry no credit.
+**Fixes to Phase 2:** soft-deleting a won quote reverses its earn and returns its redeemed credit; **Recall** of a
+revision (`restoreQuoteRevision`, Estimator and service) re-clamps the restored credit like a save (available now,
+pre-credit total, $0; dropped for a different customer — revisions now record `customerId`) and says so when it cuts it.
+Gates: tsc 0; test:specs 9495 PASS / 0 FAIL (+88); test:smoke 172/0; eslint 0 errors, no new warnings; next build OK.
+Browser-verified (inspection $2,450 − $300 → letter $2,150; won → $300 redeemed + $32.25 earned at Silver 1.5 %;
+delete → both reversed; repair capped at its $825 total). Reviewed, no findings.
+
+**Jeff-gated:** review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap), add
+perks, post starting credit, then turn the program on. The next production deploy applies migration 0034.
+**Open:** a **lost** quote can still be recalled to an older revision (it keeps its current credit); refusing it like a
+won quote is a one-line change if wanted.
