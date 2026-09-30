@@ -10679,6 +10679,7 @@ seeded()
   .then(() => lift275AsyncChecks())
   .then(() => rewards282AsyncChecks())
   .then(() => rewards282Phase2AsyncChecks())
+  .then(() => rewards282Phase3AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -22329,7 +22330,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(/^"use client";/.test(tf) && !/from "@\/(lib\/stores|db)\//.test(tf) && /Reset to auto/.test(tf) && /typedPriceWarning\(/.test(tf) && /rounded to the nearest \$25/.test(tf),
     "#217: the shared Total field is a client component on the pure module, with Reset to auto and the warning");
   const fp = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/page.tsx"), "utf8");
-  ok(/priceOverride: seedPriceOverride\(editQuote\.status, editQuote\.value, ft && ft\.priceOverride\),/.test(fp) &&
+  ok(/priceOverride: seedPriceOverride\(editQuote\.status, grossQuoteValue\(editQuote\), ft && ft\.priceOverride\),/.test(fp) &&
       /testing: v\.testingOverride != null \? String\(v\.testingOverride\) : ""/.test(fp),
     "#217 flame page: reopening restores the typed total and testing costs (old sent prices stay put)");
 
@@ -22395,7 +22396,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
     "#217 inspection builder: the slider follows a typed total; moving it or Reset clears the override");
   for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
     const pg = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
-    ok(new RegExp(`priceOverride: seedPriceOverride\\(editQuote\\.status, editQuote\\.value, ${sub} && ${sub}\\.priceOverride\\),`).test(pg),
+    ok(new RegExp(`priceOverride: seedPriceOverride\\(editQuote\\.status, grossQuoteValue\\(editQuote\\), ${sub} && ${sub}\\.priceOverride\\),`).test(pg),
       `#217 ${svc} page: reopening restores the typed total (old sent prices stay put)`);
   }
 
@@ -38655,5 +38656,270 @@ async function rewards282Phase2AsyncChecks(): Promise<void> {
     for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
     await removeCustomer(OTHER);
+  }
+}
+
+/* ======================================================================
+   #282 Phase 3 — Customer Rewards credit on service quotes (flame test,
+   inspection, repair). Pure rules here; the ledger, holds, soft-delete and
+   portal paths are rewards282Phase3AsyncChecks() on the promise chain.
+   ====================================================================== */
+import {
+  netServiceTotal as r282cNet,
+  normalizeServiceCredit as r282cNorm,
+  serviceLetterPrice as r282cLetterPrice,
+  serviceRewardCredit as r282cServiceCredit,
+  settleServiceCredit as r282cSettle,
+} from "@/lib/rewards/service-credit";
+import {
+  grossQuoteValue as r282cGross,
+  quoteRewardCredit as r282cQuoteCredit,
+  withRewardCredit as r282cWith,
+} from "@/lib/rewards/credit-line";
+import {
+  finishFlame as r282cFinishFlame,
+  finishInspection as r282cFinishInspection,
+  finishRepair as r282cFinishRepair,
+  seedPriceOverride as r282cSeed,
+} from "@/lib/service-pricing";
+import { LetterCreditRows as R282cRows } from "@/components/rewards/letter-credit-rows";
+import { createElement as r282cEl } from "react";
+import { renderToStaticMarkup as r282cRender } from "react-dom/server";
+import { readFileSync as r282cRead } from "node:fs";
+
+{
+  // ---- the credit comes off AFTER the engine's final total, all three types ----
+  const fl = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: 0.3, liftCost: 750 });
+  ok(fl.total === 2500 && fl.liftCost === 750 && r282cNet(fl.total, 137) === 2363,
+    `#282 P3 flame: $25 rounding (2,504.29 → 2,500, lift included) happens first, the credit after — net 2,363, never re-rounded (got ${fl.total} → ${r282cNet(fl.total, 137)})`);
+  const flT = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: 0.3, liftCost: 750, priceOverride: 3000 });
+  ok(flT.total === 3000 && r282cNet(flT.total, 137) === 2863, "#282 P3 flame: a typed total is the price the credit comes off (3,000 − 137 = 2,863)");
+  const ins = r282cFinishInspection({ cost: 800, minFee: 500, margin: 0.3, liftCost: 750 });
+  ok(ins.total === 2225 && r282cNet(ins.total, 225) === 2000,
+    `#282 P3 inspection: rounded total with a lift (2,225), then the credit (→ 2,000) (got ${ins.total})`);
+  const insT = r282cFinishInspection({ cost: 800, minFee: 500, margin: 0.3, liftCost: 750, priceOverride: 1234 });
+  ok(insT.total === 1234 && r282cNet(insT.total, 234) === 1000, "#282 P3 inspection: a typed total, then the credit");
+  const rp = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: 0.3, partsCost: 100, partsMargin: 0.25, liftCost: 750 });
+  ok(rp.total % 25 === 0 && r282cNet(rp.total, 40) === rp.total - 40, `#282 P3 repair: rounded total (${rp.total}, lift + parts included), then the credit`);
+  const rpT = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: 0.3, partsCost: 100, partsMargin: 0.25, liftCost: 750, priceOverride: 1999 });
+  ok(rpT.total === 1999 && r282cNet(rpT.total, 5000) === 0, "#282 P3 repair: a typed total, and a credit above it nets $0 — never below");
+
+  // ---- whole dollars ----
+  ok(r282cNorm("$1,250.99") === 1250 && r282cNorm(12.5) === 12 && r282cNorm("-5") === 0 && r282cNorm("abc") === 0 && r282cNorm(null) === 0 && r282cNorm(-3) === 0,
+    "#282 P3 credit: whole dollars, rounded down; junk / negative → 0");
+
+  // ---- server rule (settleServiceCredit) ----
+  const base = { posted: 500, total: 2500, available: 300.75, customerId: "co", source: "flametest", mayApply: true, prior: null };
+  const s1 = r282cSettle(base);
+  ok(s1.credit === 300 && /available/.test(s1.notice || ""), `#282 P3 server: clamped to available credit, rounded down to whole dollars (got ${JSON.stringify(s1)})`);
+  const s2 = r282cSettle({ ...base, posted: 5000, available: 9000, total: 1999 });
+  ok(s2.credit === 1999 && /below \$0/.test(s2.notice || ""), "#282 P3 server: clamped to the engine total — the net never goes below $0");
+  ok(r282cSettle({ ...base, posted: 200 }).credit === 200 && !r282cSettle({ ...base, posted: 200 }).notice, "#282 P3 server: within available and total → stored as posted, no notice");
+  const won = r282cSettle({ ...base, posted: 999, prior: { status: "won", customerId: "co", credit: 150 } });
+  const lost = r282cSettle({ ...base, posted: 0, prior: { status: "lost", customerId: "co", credit: 150 } });
+  ok(won.credit === 150 && lost.credit === 150 && !won.notice, "#282 P3 server: a won or lost quote keeps its stored credit whatever is posted (phase 2's rule)");
+  const portal = r282cSettle({ ...base, source: "portal-service" });
+  ok(portal.credit === 0 && /portal/.test(portal.notice || ""), "#282 P3 server: a portal service quote never carries a credit");
+  const moved = r282cSettle({ ...base, posted: 100, prior: { status: "sent", customerId: "old-co", credit: 100 } });
+  ok(moved.credit === 0 && /previous customer/.test(moved.notice || ""), "#282 P3 server: changing the quote's customer drops the credit");
+  ok(r282cSettle({ ...base, customerId: null }).credit === 0, "#282 P3 server: no customer → no credit");
+  const noCreate = r282cSettle({ ...base, mayApply: false });
+  ok(noCreate.credit === 0 && /create permission/.test(noCreate.notice || ""), "#282 P3 server: without create a new credit is refused");
+  const keep = r282cSettle({ ...base, posted: 200, mayApply: false, prior: { status: "sent", customerId: "co", credit: 100 } });
+  const shrink = r282cSettle({ ...base, posted: 50, mayApply: false, prior: { status: "sent", customerId: "co", credit: 100 } });
+  ok(keep.credit === 100 && shrink.credit === 50, "#282 P3 server: without create the credit can't grow past what the quote had (it can shrink)");
+  ok(r282cSettle({ ...base, posted: "-5" }).credit === 0 && !r282cSettle({ ...base, posted: "" }).notice, "#282 P3 server: junk or blank posts no credit, silently");
+
+  // ---- the one accessor ----
+  ok(r282cQuoteCredit({ quoteType: "flame_test", flameTest: { rewardCredit: 120 } }) === 120 &&
+     r282cQuoteCredit({ quoteType: "inspection", inspection: { rewardCredit: 75 } }) === 75 &&
+     r282cQuoteCredit({ quoteType: "repair", repair: { rewardCredit: 40 } }) === 40,
+    "#282 P3 accessor: quoteRewardCredit reads the service subdoc's rewardCredit for all three types");
+  ok(r282cQuoteCredit({ quoteType: "system", flameTest: { rewardCredit: 5 } }) === 0 && r282cServiceCredit({ quoteType: "flame_test", inspection: { rewardCredit: 5 } }) === 0,
+    "#282 P3 accessor: only the quote type's OWN subdoc counts");
+  const estSections = r282cWith([{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "X", desc: "X", qty: 1, unit: "ea", cost: 10, price: 900 }] }] as never, 60, 2);
+  ok(r282cQuoteCredit({ spec: { sections: estSections } }) === 60, "#282 P3 accessor: the Estimator's credit line still reads through the same function");
+  ok(r282cGross({ value: 880, quoteType: "repair", repair: { rewardCredit: 120 } }) === 1000 && r282cGross({ value: 880 }) === 880,
+    "#282 P3 accessor: grossQuoteValue = net value + the credit applied");
+  ok(r282cSeed("sent", r282cGross({ value: 2363, quoteType: "flame_test", flameTest: { rewardCredit: 137 } }), undefined) === null && r282cSeed("sent", 2363, undefined) === 2363,
+    "#282 P3 reopen: the #217 legacy-price seed reads the pre-credit price — a credit never makes a sent quote look off-grid");
+
+  // ---- letters ----
+  const lp = r282cLetterPrice({ value: 2363, quoteType: "flame_test", flameTest: { total: 2500, rewardCredit: 137 } }, { total: 2500 });
+  ok(lp.gross === 2500 && lp.credit === 137 && lp.net === 2363, "#282 P3 letter: the price splits into quoted (gross) / credit / net");
+  const lp0 = r282cLetterPrice({ value: 1000, quoteType: "inspection", inspection: { total: 1000 } }, { total: 1000 });
+  ok(lp0.gross === 1000 && lp0.credit === 0 && lp0.net === 1000, "#282 P3 letter: no credit → gross = net = value");
+  ok(r282cLetterPrice({ value: null, quoteType: "repair", repair: { rewardCredit: 100 } }, { total: 900 }).net === 800, "#282 P3 letter: a quote with no value nets its subdoc total");
+  const rows0 = r282cRender(r282cEl(R282cRows, { gross: 1000, credit: 0, net: 1000, mono: "m" }));
+  const rows1 = r282cRender(r282cEl(R282cRows, { gross: 1000, credit: 100, net: 900, mono: "m" }));
+  ok(rows0 === "" && /Rewards credit/.test(rows1) && /−\$100/.test(rows1) && /\$900/.test(rows1) && /\$1,000/.test(rows1),
+    "#282 P3 letter: the credit rows print only when the credit is > 0 (quoted price, Rewards credit −$X, total)");
+  for (const dir of ["flame-tests", "inspections"] as const) {
+    const lv = r282cRead(`src/app/(app)/${dir}/letter/letter-view.tsx`, "utf8");
+    ok(/const price = serviceLetterPrice\(quote, (ft|insp)\);/.test(lv) && /const totalLabel = money\(price\.net\);/.test(lv) &&
+       /<LetterCreditRows gross=\{price\.gross\} credit=\{price\.credit\} net=\{price\.net\} mono=\{MONO\} \/>/.test(lv) && /total: price\.gross,/.test(lv),
+      `#282 P3 ${dir} letter: prints the credit rows and the net total; the travel share reconciles to the pre-credit total`);
+  }
+  const rl = r282cRead("src/app/(app)/repairs/letter/letter-view.tsx", "utf8");
+  ok(/const totalLabel = money\(price\.net\);/.test(rl) && /\{price\.credit > 0 && \(/.test(rl) && /after a \{money\(price\.credit\)\} rewards credit/.test(rl),
+    "#282 P3 repair letter: the price sentence names the credit (\"…will cost $X after a $Y rewards credit\") only when there is one");
+  const pdfRoute = r282cRead("src/app/print/letter/[kind]/[id]/page.tsx", "utf8");
+  ok(/FlameLetterView/.test(pdfRoute) && /InspectionLetterView/.test(pdfRoute) && /RepairLetterView/.test(pdfRoute),
+    "#282 P3 PDF: the headless-Chrome print route renders the same three letter views, so the saved PDF follows");
+
+  // ---- wiring: the three save actions, builders and pages ----
+  for (const [dir, src] of [["flame-tests", /source: sourceForSave\(existingForMarker\?\.source, "flametest"\),\n    mayApply/], ["inspections", /source: sourceForSave\(existingForMarker\?\.source, "inspection"\),\n    mayApply/], ["repairs", /source: "repair",\n    mayApply/]] as const) {
+    const ac = r282cRead(`src/app/(app)/${dir}/quote/actions.ts`, "utf8");
+    ok(/const credit = await settleServiceCreditFor\(\{\n    posted: formData\.get\("rewardCredit"\),\n    total: Math\.round\(r\.total\),\n    customerId: customerId \|\| null,\n/.test(ac) &&
+       src.test(ac) && /mayApply: can\("create", user\.roles\),\n    prior: existingForMarker,\n  \}\);/.test(ac) &&
+       /value: netServiceTotal\(r\.total, credit\.credit\),/.test(ac) && /\.\.\.\(credit\.credit > 0 \? \{ rewardCredit: credit\.credit \} : \{\}\),/.test(ac) &&
+       /value: grossQuoteValue\(existingForMarker\),/.test(ac),
+      `#282 P3 ${dir} save: re-clamps the credit on the server after the engine total, stores it on the subdoc, value = net`);
+    ok(/"&credit=" \+ encodeURIComponent\(note\.creditNote\)/.test(ac), `#282 P3 ${dir} save: a clamp/drop comes back as a notice`);
+    const cc = r282cRead(`src/app/(app)/${dir}/quote/controls.tsx`, "utf8");
+    ok(/fd\.set\("rewardCredit", String\(rewardCredit\)\);/.test(cc) && /if \(id !== customerId\) setRewardCredit\(0\);/.test(cc) && /<ServiceRewardCreditPanel/.test(cc) && /canApply=\{canApplyCredit\}/.test(cc),
+      `#282 P3 ${dir} builder: posts the credit, drops it on a customer change, renders the Rewards credit control`);
+    const pg = r282cRead(`src/app/(app)/${dir}/quote/page.tsx`, "utf8");
+    ok(/rewardCredit: serviceRewardCredit\(editQuote\),/.test(pg) && /canApplyCredit=\{can\("create", user\.roles\)\}/.test(pg) && /<RewardCreditNotice message=\{one\(sp\.credit\)\} \/>/.test(pg),
+      `#282 P3 ${dir} page: reopens the saved credit; create perm gates the control; shows the server's notice`);
+  }
+  const panel = r282cRead("src/components/rewards/service-credit-panel.tsx", "utf8");
+  ok(/^"use client";/.test(panel) && /if \(p\.portal \|\| !customerId\) return null;/.test(panel) && /shownInfo\?\.enabled && available >= 1/.test(panel) && /const editable = !locked && p\.canApply;/.test(panel),
+    "#282 P3 builder control: hidden on portal quotes, shown only with the program on and credit available (or a credit already applied), editable only draft/sent with create");
+
+  // ---- renewals never carry a credit; last year's price is pre-credit ----
+  const ren = r282cRead("src/lib/renewal-outreach.ts", "utf8");
+  const ensureF = ren.slice(ren.indexOf("async function ensureFlameRenewalQuote"), ren.indexOf("async function flameLetterDoc"));
+  const ensureI = ren.slice(ren.indexOf("async function ensureInspectionRenewalQuote"), ren.indexOf("async function inspectionLetterDoc"));
+  ok(ensureF.length > 100 && ensureI.length > 100 && !/rewardCredit/.test(ensureF) && !/rewardCredit/.test(ensureI),
+    "#282 P3 renewal: neither renewal re-pricer writes a rewardCredit — a renewal never carries a credit");
+  ok(/const lastPrice = Math\.round\(\(job\.value \|\| 0\) \+ quoteRewardCredit\(prior\)\);/.test(ensureF) && /const lastPrice = Math\.round\(\(rec\.value \|\| 0\) \+ quoteRewardCredit\(prior\)\);/.test(ensureI),
+    "#282 P3 renewal: the email compares against last year's pre-credit price (a credit is not a price change)");
+  ok((ren.match(/serviceLetterPrice\(quote, (ft|insp)\)\.net/g) || []).length === 2 && (ren.match(/creditSentence\(/g) || []).length === 3,
+    "#282 P3 renewal PDF: prints the net price and names a credit staff applied on the reused quote");
+
+  // ---- soft delete runs the ledger ----
+  const qs = r282cRead("src/lib/stores/quotes.ts", "utf8");
+  ok(/export async function remove\(id: string, by\?: string \| null\): Promise<void> \{\n  const q = await getDoc<Quote>\("quotes", id\);\n  await softDeleteDoc\("quotes", id\);\n  if \(q\) await reconcileRewardsSafely\(q, by, \{ deleted: true \}\);/.test(qs),
+    "#282 P3 delete: remove() runs the same ledger plan as leaving Won, logged never thrown");
+  for (const f of ["src/app/(app)/quotes/actions.ts", "src/app/(app)/home-actions.ts"]) {
+    ok(/await removeQuote\(id, user\.name\);/.test(r282cRead(f, "utf8")), `#282 P3 delete: ${f} passes the acting user to remove()`);
+  }
+}
+
+async function rewards282Phase3AsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const Q = await import("@/lib/stores/quotes");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const { generateServiceQuote } = await import("@/lib/portal-service-quotes");
+  const { refreshPortalQuote } = await import("@/lib/portal-quotes");
+  const CO = fixtureId(282, "p3-co");
+  const PCO = fixtureId(282, "p3-portal-co");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
+  const ids = async (quoteId: string) => (await L.ledgerForQuote(quoteId)).map((e) => e.id).sort().join(",");
+  const svc = (slug: string, quoteType: "flame_test" | "inspection" | "repair", total: number, credit: number, status = "sent") => {
+    const sub = quoteType === "flame_test" ? "flameTest" : quoteType;
+    return createFixture("quotes", {
+      id: fixtureId(282, slug), name: `T282 ${slug}`, customer: "", customerId: CO, status, value: Math.max(0, total - credit),
+      source: quoteType === "flame_test" ? "flametest" : quoteType, quoteType, [sub]: { total, ...(credit > 0 ? { rewardCredit: credit } : {}) },
+      history: [], createdAt: 1, updatedAt: 1,
+    });
+  };
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 P3 Service Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await R.saveRewardsProgram({ ...r282Default, enabled: true, earnPct: { base: 2, copper: 3, silver: 4, gold: 5, platinum: 6 }, retro: { ratePct: 1, capPerCustomer: 1000 } });
+    const adj = await L.postAdjustment(CO, 500, "phase 3 test credit", "Test");
+    if (adj.ok) registerFixture("reward_ledger", adj.entry.id);
+
+    // A sent flame quote carrying 200 holds it against the company's OTHER quotes.
+    await svc("p3-flame", "flame_test", 1000, 200);
+    const FL = fixtureId(282, "p3-flame");
+    const c0 = await L.companyCredit(CO);
+    ok(c0.balance === 500 && c0.onOpenQuotes === 200 && c0.available === 300,
+      `#282 P3 DB: a service quote's credit holds against the balance like an Estimator line (got ${JSON.stringify({ b: c0.balance, a: c0.available })})`);
+
+    // The server clamp reads the live ledger.
+    const other = await L.settleServiceCreditFor({ posted: 450, total: 1000, customerId: CO, source: "inspection", mayApply: true, prior: null });
+    ok(other.credit === 300, `#282 P3 DB: a new quote clamps to available (500 − 200 held elsewhere = 300) (got ${other.credit})`);
+    const self = await L.settleServiceCreditFor({ posted: 450, total: 1000, customerId: CO, source: "flametest", mayApply: true, prior: await Q.get(FL) });
+    ok(self.credit === 450, "#282 P3 DB: re-saving the quote that holds the credit doesn't hold against itself");
+    const noPerm = await L.settleServiceCreditFor({ posted: 100, total: 1000, customerId: CO, source: "repair", mayApply: false, prior: null });
+    ok(noPerm.credit === 0 && !!noPerm.notice, "#282 P3 DB: without create the server refuses a new credit");
+    const portalSettle = await L.settleServiceCreditFor({ posted: 100, total: 1000, customerId: CO, source: "portal-service", mayApply: true, prior: null });
+    ok(portalSettle.credit === 0, "#282 P3 DB: a portal-service save never stores a credit");
+
+    // Won → redeem posted (earn on the net value); spend adds the credit back.
+    await Q.setStatus(FL, "won", "Test", bypass);
+    const e1 = await L.ledgerForQuote(FL);
+    ok(e1.some((x) => x.id === `redeem:${FL}:1` && x.amount === -200), "#282 P3 DB: winning a credited flame quote posts redeem:<q>:1");
+    ok(e1.some((x) => x.id === `earn:${FL}:1` && x.amount === 16), `#282 P3 DB: the earn is on the net value (2 % of 800 → ${e1.find((x) => x.kind === "earn")?.amount})`);
+    ok((await L.companyCredit(CO)).balance === 316, "#282 P3 DB: balance = 500 − 200 redeemed + 16 earned");
+    const view = await R.companyRewards(CO);
+    ok(!!view && view.purchases.find((p) => p.id === FL)?.amount === 1000, "#282 P3 DB: lifetime spend counts the service quote's value + credit");
+
+    // Un-win → unredeem + reverse.
+    await Q.setStatus(FL, "sent", "Test", bypass);
+    const e2 = await L.ledgerForQuote(FL);
+    ok(e2.some((x) => x.id === `unredeem:${FL}:1` && x.amount === 200) && e2.some((x) => x.id === `reverse:${FL}:1` && x.amount === -16),
+      "#282 P3 DB: leaving won returns the credit and reverses the earn");
+    ok((await L.companyCredit(CO)).balance === 500, "#282 P3 DB: back to the starting balance");
+
+    // Inspection + repair redeem through the same accessor.
+    await svc("p3-insp", "inspection", 2225, 225);
+    await svc("p3-rep", "repair", 900, 40);
+    await Q.setStatus(fixtureId(282, "p3-insp"), "won", "Test", bypass);
+    await Q.setStatus(fixtureId(282, "p3-rep"), "won", "Test", bypass);
+    ok((await L.ledgerForQuote(fixtureId(282, "p3-insp"))).some((x) => x.kind === "redeem" && x.amount === -225) &&
+       (await L.ledgerForQuote(fixtureId(282, "p3-rep"))).some((x) => x.kind === "redeem" && x.amount === -40),
+      "#282 P3 DB: inspection and repair quotes redeem their credit on win too");
+
+    // Soft-deleting a won quote reverses its earn and returns its credit.
+    await Q.setStatus(FL, "won", "Test", bypass);
+    ok((await ids(FL)).includes(`redeem:${FL}:2`) && (await ids(FL)).includes(`earn:${FL}:2`), "#282 P3 DB: re-winning posts a fresh redeem + earn");
+    const before = (await L.companyCredit(CO)).balance;
+    await Q.remove(FL, "Test");
+    const e3 = await L.ledgerForQuote(FL);
+    ok(e3.some((x) => x.id === `unredeem:${FL}:2` && x.amount === 200 && x.by === "Test") && e3.some((x) => x.id === `reverse:${FL}:2` && x.amount === -16),
+      "#282 P3 DB: soft-deleting a won quote posts unredeem + reverse (as if it left Won)");
+    ok((await L.companyCredit(CO)).balance === Math.round((before + 200 - 16) * 100) / 100, "#282 P3 DB: the deleted quote's credit is back in the balance");
+    const view2 = await R.companyRewards(CO);
+    ok(!!view2 && !view2.purchases.some((p) => p.id === FL), "#282 P3 DB: a deleted quote no longer counts toward spend");
+    const n = e3.length;
+    await Q.remove(FL, "Test");
+    ok((await L.ledgerForQuote(FL)).length === n, "#282 P3 DB: deleting again posts nothing more");
+    // A deleted draft with no ledger posts nothing.
+    await svc("p3-draft", "flame_test", 500, 50, "draft");
+    await Q.remove(fixtureId(282, "p3-draft"), "Test");
+    ok((await ids(fixtureId(282, "p3-draft"))) === "", "#282 P3 DB: deleting a never-won quote posts nothing");
+
+    // Portal: Generate carries none; Refresh pricing drops one.
+    const NOW = new Date(2026, 8, 30, 12).getTime();
+    await upsertCustomer({
+      id: PCO, name: "Test282 P3 Portal Co", type: "Education", pricingTier: "silver",
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }], contacts: [],
+    });
+    const sess = { grantId: fixtureId(282, "p3-grant"), customerId: PCO, name: "Pat Buyer", email: "pat@example.com" };
+    const gen = await generateServiceQuote(sess, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }] }, { now: NOW, schedulePdf: false });
+    if (!gen.ok) throw new Error("#282 P3 portal setup failed — " + gen.error);
+    registerFixture("quotes", gen.quoteId);
+    const pq = await Q.get(gen.quoteId);
+    ok(!!pq && r282cQuoteCredit(pq) === 0 && pq.source === "portal-service", "#282 P3 portal: a generated service self-quote carries no credit");
+    // A credit that somehow landed on it (the builder never offers one) …
+    const ft = (pq!.flameTest || {}) as Record<string, unknown>;
+    await Q.update(gen.quoteId, { flameTest: { ...ft, rewardCredit: 100 }, value: pq!.value - 100 });
+    ok(r282cQuoteCredit(await Q.get(gen.quoteId)) === 100, "#282 P3 portal: (setup) a stray credit on the portal quote");
+    const refreshed = await refreshPortalQuote(sess, gen.quoteId, NOW + 31 * 86400000);
+    const pq2 = await Q.get(gen.quoteId);
+    ok(refreshed.ok && !!pq2 && r282cQuoteCredit(pq2) === 0 && pq2.value === (pq2.flameTest as { total?: number }).total,
+      "#282 P3 portal: Refresh pricing drops the credit — the refreshed value is the engine total");
+  } finally {
+    await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
+    for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    for (const x of await L.ledgerForCompany(PCO)) registerFixture("reward_ledger", x.id);
+    await removeCustomer(CO);
+    await removeCustomer(PCO);
   }
 }
