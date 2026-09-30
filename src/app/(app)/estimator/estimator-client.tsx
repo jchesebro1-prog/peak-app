@@ -152,9 +152,12 @@ const CSS = `
 .est-input { font-family: var(--font-mono); }
 .est-scroll::-webkit-scrollbar { width: 10px; }
 .est-scroll::-webkit-scrollbar-thumb { background: #d6d9e0; border-radius: 8px; border: 3px solid #f7f8fa; }
-.est-meta::-webkit-scrollbar-thumb { background: #3a3e46; border-color: #23262d; }
-.est-meta-toggle:hover { color: #fff !important; border-color: #4a4e56 !important; }
-.est-meta-tab:hover { color: #fff !important; background: #2b2e35 !important; }
+.est-qd::-webkit-scrollbar-thumb { background: #3a3e46; border-color: #23262d; }
+.est-qd-done:hover { color: #fff !important; border-color: #4a4e56 !important; }
+.est-qd-chip:hover { color: #fff !important; border-color: #4a4e56 !important; }
+.est-qd-col + .est-qd-col { border-left: 1px solid #2b2e35; }
+.est-narr-toggle:hover { color: #16181d !important; border-color: #c4c9d2 !important; }
+.est-narr-tab:hover { color: #16181d !important; background: #f7f8fa !important; }
 .est-side-toggle:hover { color: #16181d !important; border-color: #c4c9d2 !important; }
 .est-side-tab:hover { color: #16181d !important; background: #f7f8fa !important; }
 .est-field:focus { border-color: #c4c9d2 !important; outline: none; }
@@ -179,9 +182,11 @@ const CSS = `
   .est-topright { width: 100% !important; flex-wrap: wrap !important; gap: 10px !important; justify-content: flex-start !important; }
   .est-body { flex-direction: column !important; }
   .est-side { width: 100% !important; border-right: none !important; border-bottom: 1px solid #ececf0 !important; }
-  .est-meta { width: 100% !important; order: -1; overflow: visible !important; border-left: none !important; border-bottom: 1px solid #2b2e35 !important; }
-  .est-meta-collapsed .est-meta-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
-  .est-meta-vlabel { writing-mode: horizontal-tb !important; }
+  .est-narr { width: 100% !important; order: -1; overflow: visible !important; border-left: none !important; border-bottom: 1px solid #ececf0 !important; }
+  .est-narr-collapsed .est-narr-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
+  .est-narr-vlabel { writing-mode: horizontal-tb !important; }
+  .est-qd-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .est-qd-col + .est-qd-col { border-left: none !important; border-top: 1px solid #2b2e35 !important; }
   .est-side-collapsed .est-side-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
   .est-side-vlabel { writing-mode: horizontal-tb !important; }
   .est-main { overflow: visible !important; padding: 16px 16px 48px !important; }
@@ -349,7 +354,6 @@ const META_SECTION: CSSProperties = {
 };
 const META_SUB: CSSProperties = { fontSize: 11, color: "#6b7079", marginTop: 2 };
 const META_HINT: CSSProperties = { fontSize: 10.5, color: "#6b7079", lineHeight: 1.35 };
-const META_OPEN_KEY = "quartzite.estimator.metaOpen";
 const META_HEAD: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -371,6 +375,8 @@ const META_TOGGLE: CSSProperties = {
   whiteSpace: "nowrap",
 };
 const SIDE_OPEN_KEY = "quartzite.estimator.sideOpen";
+/** #281: the narrative column's open/collapsed choice, per browser. */
+const NARR_OPEN_KEY = "quartzite.estimator.narrOpen";
 const SIDE_TOGGLE: CSSProperties = {
   fontFamily: "var(--font-ui)",
   fontSize: 11,
@@ -501,26 +507,37 @@ export default function EstimatorClient({
   // the estimator's first viewport. The bar can be expanded whenever a user
   // needs to submit, claim, decide, attest, or send the quote.
   const [reviewBarOpen, setReviewBarOpen] = useState(false);
-  /** Quote-details column (#164). Defaults open on both server and first client
+  /** Narrative column (#281). Defaults open on both server and first client
    *  render; the remembered choice is applied after mount so hydration matches. */
-  const [metaOpen, setMetaOpen] = useState(true);
+  const [narrOpen, setNarrOpen] = useState(true);
   useEffect(() => {
     try {
-      if (window.localStorage.getItem(META_OPEN_KEY) === "0") setMetaOpen(false);
+      if (window.localStorage.getItem(NARR_OPEN_KEY) === "0") setNarrOpen(false);
     } catch {
       /* storage unavailable (private mode, blocked) — stay open */
     }
   }, []);
-  const toggleMeta = () => {
-    const next = !metaOpen;
-    setMetaOpen(next);
+  const showNarr = (next: boolean) => {
+    setNarrOpen(next);
     try {
-      window.localStorage.setItem(META_OPEN_KEY, next ? "1" : "0");
+      window.localStorage.setItem(NARR_OPEN_KEY, next ? "1" : "0");
     } catch {
       /* ignore */
     }
   };
-  /** Systems rail (#168). Same hydration-safe pattern as metaOpen above. */
+  const narrRef = useRef<HTMLTextAreaElement | null>(null);
+  /** Bumped by a card's snippet — the effect focuses the textarea once the
+   *  column (and the newly active system) has rendered, caret at the end. */
+  const [narrFocusReq, setNarrFocusReq] = useState(0);
+  useEffect(() => {
+    if (!narrFocusReq) return;
+    const el = narrRef.current;
+    if (!el) return;
+    el.focus();
+    const n = el.value.length;
+    el.setSelectionRange(n, n);
+  }, [narrFocusReq]);
+  /** Systems rail (#168). Same hydration-safe pattern as narrOpen above. */
   const [sideOpen, setSideOpen] = useState(true);
   useEffect(() => {
     try {
@@ -993,6 +1010,38 @@ export default function EstimatorClient({
    * copy identical to the shared hook's.
    */
   const [wonMetaGuard, setWonMetaGuard] = useState<{ field: WonEditField; run: () => void } | null>(null);
+  /** Quote details (#164) now drop down from the top bar's chip (#281). Starts
+   *  closed on every load — not remembered. Closing is a cancel: it drops any
+   *  pending won-quote guard. */
+  const [qdOpen, setQdOpen] = useState(false);
+  const qdChipRef = useRef<HTMLButtonElement | null>(null);
+  const qdPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!qdOpen) return;
+    const close = () => {
+      setQdOpen(false);
+      setWonMetaGuard(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (qdChipRef.current?.contains(t) || qdPanelRef.current?.contains(t)) return;
+      close();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [qdOpen]);
+  const closeQd = () => {
+    setQdOpen(false);
+    setWonMetaGuard(null);
+  };
   const guardWonMeta = (field: WonEditField, run: () => void) => {
     if (status === "won") {
       setWonMetaGuard({ field, run });
@@ -2317,6 +2366,17 @@ export default function EstimatorClient({
   const contactOptions = [{ value: "", label: "— No contact —" }].concat(
     contacts.map((c) => ({ value: c.name, label: c.name + (c.role ? " · " + c.role : "") }))
   );
+  /** #281: the top bar's Quote details chip — customer · venue · attn contact. */
+  const qdChipLabel =
+    [
+      (customerId ? customers.find((c) => c.id === customerId)?.name : "") || custName,
+      venueRoomName,
+      currentContact ? "attn " + currentContact.name : "",
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Add quote details";
+  /** #281: the narrative column follows the active system (first as fallback). */
+  const narrSec = sections.find((s) => s.id === activeId) || sections[0] || null;
 
   const curtainSec = sections.find((s) => s.id === curtainFor);
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
@@ -2447,11 +2507,44 @@ export default function EstimatorClient({
                     {projectName}
                   </button>
                 )}
-                <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 2 }}>
-                  <span style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)", flexShrink: 0, whiteSpace: "nowrap" }}>
                     {quoteId} · Rev {revNum}
                   </span>
                   {loadedId && <ChangeTypeControl quoteId={loadedId} status={status} tone="dark" />}
+                  {/* #281: Quote details moved from the right column into a dropdown. */}
+                  <button
+                    ref={qdChipRef}
+                    type="button"
+                    className="est-qd-chip"
+                    onClick={() => (qdOpen ? closeQd() : setQdOpen(true))}
+                    aria-expanded={qdOpen}
+                    aria-controls="est-quote-details"
+                    title="Prepared for, venue, contact, category, quote note, assumptions, install timeframe"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                      minWidth: 0,
+                      maxWidth: 420,
+                      fontFamily: "var(--font-ui)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: qdOpen ? "#fff" : "#cfd3da",
+                      background: qdOpen ? "#2b2e35" : "transparent",
+                      border: "1px solid " + (qdOpen ? "#4a4e56" : "#3a3e46"),
+                      borderRadius: 6,
+                      padding: "2px 8px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {qdChipLabel}
+                    </span>
+                    <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 9 }}>
+                      {qdOpen ? "▴" : "▾"}
+                    </span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -2603,6 +2696,223 @@ export default function EstimatorClient({
                 Customer preview →
               </button>
             </div>
+            {qdOpen && (
+              <div
+                ref={qdPanelRef}
+                id="est-quote-details"
+                className="est-qd est-scroll"
+                role="region"
+                aria-label="Quote details"
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  zIndex: 30,
+                  maxHeight: "min(70vh, 640px)",
+                  overflowY: "auto",
+                  background: "#23262d",
+                  borderTop: "1px solid #2b2e35",
+                  borderBottom: "1px solid #2b2e35",
+                  boxShadow: "0 12px 28px rgba(0,0,0,.28)",
+                  color: "#fff",
+                }}
+              >
+                <div style={META_HEAD}>
+                  <span style={{ ...CTX_LABEL, fontWeight: 600 }}>Quote details</span>
+                  <button type="button" className="est-qd-done" onClick={closeQd} style={META_TOGGLE}>
+                    Done
+                  </button>
+                </div>
+                <div className="est-qd-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                  <div className="est-qd-col">
+                  <section style={META_SECTION}>
+                    <span style={CTX_LABEL}>Prepared for</span>
+                    <select
+                      value={customerId || ""}
+                      onChange={(e) => pickCustomer(e.target.value)}
+                      title="Linked customer — flows to the project when this quote is won"
+                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                    >
+                      {customerOptions.map((o) => (
+                        <option key={o.value || "__none"} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    {showVenuePick && (
+                      <>
+                        <span style={META_SUB}>at</span>
+                        <select
+                          value={locationId || ""}
+                          onChange={(e) => pickVenue(e.target.value)}
+                          title="Which of the customer's venues"
+                          style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                        >
+                          {venueOptions.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                    {showContactPick && (
+                      <>
+                        <span style={META_SUB}>attn</span>
+                        <select
+                          value={currentContact ? currentContact.name : ""}
+                          onChange={(e) => pickContact(e.target.value)}
+                          title="Contact this quote is prepared for"
+                          style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                        >
+                          {contactOptions.map((o) => (
+                            <option key={o.value || "__none"} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                    {wonMetaGuard && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          gap: 7,
+                          marginTop: 2,
+                          padding: "7px 9px",
+                          fontSize: 11.5,
+                          lineHeight: 1.35,
+                          color: "#e3c26e",
+                          background: "#3a331d",
+                          border: "1px solid #55471f",
+                          borderRadius: 7,
+                        }}
+                      >
+                        <span style={{ flex: 1, minWidth: 140 }}>
+                          {wonEditMessage(wonMetaGuard.field)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const run = wonMetaGuard.run;
+                            setWonMetaGuard(null);
+                            run();
+                          }}
+                          style={{
+                            fontFamily: "var(--font-ui)",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: "#16181d",
+                            background: "#e3c26e",
+                            border: "none",
+                            borderRadius: 6,
+                            padding: "4px 9px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Change
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWonMetaGuard(null)}
+                          style={{
+                            fontFamily: "var(--font-ui)",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: "#e3c26e",
+                            background: "transparent",
+                            border: "1px solid #55471f",
+                            borderRadius: 6,
+                            padding: "4px 9px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    <span style={META_SUB}>category</span>
+                    <input
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      onBlur={() => {
+                        const v = category.trim();
+                        if (v !== category) setCategory(v);
+                        if (v === categorySaved.current) return;
+                        categorySaved.current = v;
+                        persistMeta({ category: v });
+                      }}
+                      placeholder="Category"
+                      title="Quote category — shown on the Quotes hub"
+                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0, cursor: "text" }}
+                    />
+                  </section>
+                  <section style={{ ...META_SECTION, borderBottom: "none" }}>
+                    <span style={CTX_LABEL}>Suggested install timeframe</span>
+                    <select
+                      value={installTimeframe}
+                      onChange={(e) => onInstallTimeframe(e.target.value)}
+                      aria-label="Suggested install timeframe"
+                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                    >
+                      {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                    <span style={META_HINT}>Carries to the project goal when this quote is won</span>
+                  </section>
+                  </div>
+                  <div className="est-qd-col">
+                  <section style={{ ...META_SECTION, borderBottom: "none" }}>
+                    <span style={CTX_LABEL}>Quote note</span>
+                    <input
+                      className="est-notefield"
+                      value={quoteNote}
+                      onChange={(e) => onQuoteNote(e.target.value)}
+                      placeholder="Cover language printed on the quote header — e.g. Thank you for the opportunity…"
+                      style={{
+                        width: "100%",
+                        minWidth: 0,
+                        fontFamily: "var(--font-ui)",
+                        fontSize: 12.5,
+                        color: "#fff",
+                        background: "#2b2e35",
+                        border: "1px solid #3a3e46",
+                        borderRadius: 7,
+                        padding: "8px 11px",
+                      }}
+                    />
+                    <span style={META_HINT}>Shows on the PDF header</span>
+                  </section>
+                  </div>
+                  <div className="est-qd-col">
+                  <section style={{ ...META_SECTION, borderBottom: "none" }}>
+                    <span style={CTX_LABEL}>Assumptions</span>
+                    {assumptionLibrary.length > 0 && (
+                      <div style={{ display: "grid", gap: 5 }}>
+                        {assumptionLibrary.map((line) => (
+                          <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
+                            <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
+                            <span>{line}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <textarea
+                      className="est-notefield"
+                      value={assumptions}
+                      onChange={(e) => onAssumptions(e.target.value)}
+                      placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
+                      rows={3}
+                      style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
+                    />
+                    <span style={META_HINT}>Company defaults + editable exceptions</span>
+                  </section>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Daylite stage bar (Task 6) — system quotes only, none for an
@@ -3661,7 +3971,13 @@ export default function EstimatorClient({
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
-                  onSetNarrative={(value) => setSystemNarrative(sec.id, value)}
+                  onEditNarrative={() => {
+                    // #281: make this system active, open the column, focus the textarea.
+                    setActiveId(sec.id);
+                    if (!narrOpen) showNarr(true);
+                    setNarrFocusReq((n) => n + 1);
+                  }}
+                  onActivate={() => setActiveId(sec.id)}
                   onSetRoom={(value) => setSystemRoom(sec.id, value)}
                   defaultRoom={venueRoomName}
                   onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
@@ -3728,240 +4044,133 @@ export default function EstimatorClient({
               </button>
             </div>
 
-            {/* quote details — the former context bar + note rows, now a right
-                column so the systems + cards get the first viewport (#163, D218);
-                collapsible to a 36px tab, remembered per browser (#164, D219) */}
-            {metaOpen ? (
+            {/* system narrative — the right column Quote details vacated (#281);
+                a light writing surface that follows the active system;
+                collapsible to a 36px tab, remembered per browser */}
+            {narrOpen ? (
               <aside
-                className="est-meta est-scroll"
-                aria-label="Quote details"
+                className="est-narr"
+                aria-label="System narrative"
                 style={{
-                  width: 300,
-                  flexShrink: 0,
-                  minHeight: 0,
-                  overflowY: "auto",
-                  background: "#23262d",
-                  borderLeft: "1px solid #2b2e35",
-                  color: "#fff",
-                }}
-              >
-                <div style={META_HEAD}>
-                  <span style={{ ...CTX_LABEL, fontWeight: 600 }}>Quote details</span>
-                  <button
-                    type="button"
-                    className="est-meta-toggle"
-                    onClick={toggleMeta}
-                    aria-expanded={true}
-                    title="Hide quote details"
-                    style={META_TOGGLE}
-                  >
-                    Hide ›
-                  </button>
-                </div>
-                <section style={META_SECTION}>
-                  <span style={CTX_LABEL}>Prepared for</span>
-                  <select
-                    value={customerId || ""}
-                    onChange={(e) => pickCustomer(e.target.value)}
-                    title="Linked customer — flows to the project when this quote is won"
-                    style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                  >
-                    {customerOptions.map((o) => (
-                      <option key={o.value || "__none"} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  {showVenuePick && (
-                    <>
-                      <span style={META_SUB}>at</span>
-                      <select
-                        value={locationId || ""}
-                        onChange={(e) => pickVenue(e.target.value)}
-                        title="Which of the customer's venues"
-                        style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                      >
-                        {venueOptions.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </>
-                  )}
-                  {showContactPick && (
-                    <>
-                      <span style={META_SUB}>attn</span>
-                      <select
-                        value={currentContact ? currentContact.name : ""}
-                        onChange={(e) => pickContact(e.target.value)}
-                        title="Contact this quote is prepared for"
-                        style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                      >
-                        {contactOptions.map((o) => (
-                          <option key={o.value || "__none"} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </>
-                  )}
-                  {wonMetaGuard && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                        gap: 7,
-                        marginTop: 2,
-                        padding: "7px 9px",
-                        fontSize: 11.5,
-                        lineHeight: 1.35,
-                        color: "#e3c26e",
-                        background: "#3a331d",
-                        border: "1px solid #55471f",
-                        borderRadius: 7,
-                      }}
-                    >
-                      <span style={{ flex: 1, minWidth: 140 }}>
-                        {wonEditMessage(wonMetaGuard.field)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const run = wonMetaGuard.run;
-                          setWonMetaGuard(null);
-                          run();
-                        }}
-                        style={{
-                          fontFamily: "var(--font-ui)",
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: "#16181d",
-                          background: "#e3c26e",
-                          border: "none",
-                          borderRadius: 6,
-                          padding: "4px 9px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Change
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setWonMetaGuard(null)}
-                        style={{
-                          fontFamily: "var(--font-ui)",
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: "#e3c26e",
-                          background: "transparent",
-                          border: "1px solid #55471f",
-                          borderRadius: 6,
-                          padding: "4px 9px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                  <span style={META_SUB}>category</span>
-                  <input
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    onBlur={() => {
-                      const v = category.trim();
-                      if (v !== category) setCategory(v);
-                      if (v === categorySaved.current) return;
-                      categorySaved.current = v;
-                      persistMeta({ category: v });
-                    }}
-                    placeholder="Category"
-                    title="Quote category — shown on the Quotes hub"
-                    style={{ ...DARK_SELECT, width: "100%", minWidth: 0, cursor: "text" }}
-                  />
-                </section>
-
-                <section style={META_SECTION}>
-                  <span style={CTX_LABEL}>Quote note</span>
-                  <input
-                    className="est-notefield"
-                    value={quoteNote}
-                    onChange={(e) => onQuoteNote(e.target.value)}
-                    placeholder="Cover language printed on the quote header — e.g. Thank you for the opportunity…"
-                    style={{
-                      width: "100%",
-                      minWidth: 0,
-                      fontFamily: "var(--font-ui)",
-                      fontSize: 12.5,
-                      color: "#fff",
-                      background: "#2b2e35",
-                      border: "1px solid #3a3e46",
-                      borderRadius: 7,
-                      padding: "8px 11px",
-                    }}
-                  />
-                  <span style={META_HINT}>Shows on the PDF header</span>
-                </section>
-
-                <section style={META_SECTION}>
-                  <span style={CTX_LABEL}>Assumptions</span>
-                  {assumptionLibrary.length > 0 && (
-                    <div style={{ display: "grid", gap: 5 }}>
-                      {assumptionLibrary.map((line) => (
-                        <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
-                          <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
-                          <span>{line}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  <textarea
-                    className="est-notefield"
-                    value={assumptions}
-                    onChange={(e) => onAssumptions(e.target.value)}
-                    placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
-                    rows={3}
-                    style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
-                  />
-                  <span style={META_HINT}>Company defaults + editable exceptions</span>
-                </section>
-
-                <section style={{ ...META_SECTION, borderBottom: "none" }}>
-                  <span style={CTX_LABEL}>Suggested install timeframe</span>
-                  <select
-                    value={installTimeframe}
-                    onChange={(e) => onInstallTimeframe(e.target.value)}
-                    aria-label="Suggested install timeframe"
-                    style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                  >
-                    {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
-                  <span style={META_HINT}>Carries to the project goal when this quote is won</span>
-                </section>
-              </aside>
-            ) : (
-              <aside
-                className="est-meta est-meta-collapsed"
-                aria-label="Quote details (collapsed)"
-                style={{
-                  width: 36,
+                  width: 360,
                   flexShrink: 0,
                   minHeight: 0,
                   display: "flex",
                   flexDirection: "column",
-                  background: "#23262d",
-                  borderLeft: "1px solid #2b2e35",
-                  color: "#fff",
+                  gap: 10,
+                  padding: "16px 18px 18px",
+                  background: "#fff",
+                  borderLeft: "1px solid #ececf0",
                 }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "#9aa0ab",
+                        letterSpacing: ".06em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Narrative
+                    </div>
+                    {narrSec && (
+                      <div
+                        style={{
+                          marginTop: 3,
+                          fontSize: 13.5,
+                          fontWeight: 600,
+                          color: "#16181d",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {narrSec.name || "Untitled system"}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="est-narr-toggle"
+                    onClick={() => showNarr(false)}
+                    aria-expanded={true}
+                    title="Hide narrative"
+                    style={SIDE_TOGGLE}
+                  >
+                    Hide ›
+                  </button>
+                </div>
+                {narrSec ? (
+                  <>
+                    <select
+                      value={narrSec.presentation || "itemized"}
+                      onChange={(e) => setSystemPresentation(narrSec.id, e.target.value as "itemized" | "narrative")}
+                      aria-label="Customer presentation"
+                      style={{
+                        alignSelf: "flex-start",
+                        border: "1px solid #e4e7ec",
+                        borderRadius: 6,
+                        padding: "4px 6px",
+                        fontSize: 11.5,
+                        color: "#5b616e",
+                        background: "#fff",
+                      }}
+                    >
+                      <option value="itemized">Customer: itemized</option>
+                      <option value="narrative">Customer: narrative</option>
+                    </select>
+                    {(narrSec.presentation || "itemized") === "itemized" && (
+                      <div style={{ fontSize: 11, color: "#8c919c", lineHeight: 1.4 }}>
+                        Prints on the quote only in Narrative mode.
+                      </div>
+                    )}
+                    <textarea
+                      ref={narrRef}
+                      className="est-field"
+                      aria-label={"Narrative for " + (narrSec.name || "this system")}
+                      value={narrSec.narrative || ""}
+                      onChange={(e) => setSystemNarrative(narrSec.id, e.target.value)}
+                      placeholder="Explain this system for the customer — what it is, what it does, what's included…"
+                      style={{
+                        flex: 1,
+                        minHeight: 240,
+                        width: "100%",
+                        resize: "none",
+                        fontFamily: "var(--font-ui)",
+                        fontSize: 13,
+                        lineHeight: 1.55,
+                        color: "#16181d",
+                        background: "#fff",
+                        border: "1px solid #e4e7ec",
+                        borderRadius: 8,
+                        padding: "10px 12px",
+                      }}
+                    />
+                    <div style={{ fontSize: 11, color: "#8c919c", lineHeight: 1.4 }}>
+                      Blank line = new paragraph · start a line with “- ” for a bullet
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#8c919c", lineHeight: 1.45 }}>
+                    Add a system to write its narrative.
+                  </div>
+                )}
+              </aside>
+            ) : (
+              <aside
+                className="est-narr est-narr-collapsed"
+                aria-label="System narrative (collapsed)"
+                style={{ width: 36, flexShrink: 0, minHeight: 0, display: "flex", flexDirection: "column", background: "#fff", borderLeft: "1px solid #ececf0" }}
               >
                 <button
                   type="button"
-                  className="est-meta-tab"
-                  onClick={toggleMeta}
+                  className="est-narr-tab"
+                  onClick={() => showNarr(true)}
                   aria-expanded={false}
-                  title="Show quote details"
+                  title="Show narrative"
                   style={{
                     flex: 1,
                     display: "flex",
@@ -3978,7 +4187,12 @@ export default function EstimatorClient({
                   }}
                 >
                   <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>‹</span>
-                  <span className="est-meta-vlabel" style={{ ...CTX_LABEL, writingMode: "vertical-rl", whiteSpace: "nowrap" }}>Quote details</span>
+                  <span
+                    className="est-narr-vlabel"
+                    style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", writingMode: "vertical-rl", whiteSpace: "nowrap" }}
+                  >
+                    Narrative
+                  </span>
                 </button>
               </aside>
             )}

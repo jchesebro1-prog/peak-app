@@ -1,8 +1,9 @@
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import { systemSellTotal } from "./pricing";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
+import { narrativeBlocks } from "./narrative";
 
 /**
  * The customer quote document (#222) — ONE component for both places it
@@ -416,7 +417,29 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               </div>
               {ps.presentation === "narrative" ? (
                 <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
-                  {ps.narrative || "System scope and pricing are included in the total above."}
+                  {/* #281: blank line = paragraph, "- " = bullet, single breaks kept. */}
+                  {(() => {
+                    const blocks = narrativeBlocks(ps.narrative);
+                    if (!blocks.length) return "System scope and pricing are included in the total above.";
+                    return blocks.map((b, bi) =>
+                      b.kind === "ul" ? (
+                        <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18 }}>
+                          {b.items.map((it, ii) => (
+                            <li key={ii}>{it}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p key={bi} style={{ margin: bi ? "6px 0 0" : 0 }}>
+                          {b.lines.map((ln, li) => (
+                            <Fragment key={li}>
+                              {li > 0 && <br />}
+                              {ln}
+                            </Fragment>
+                          ))}
+                        </p>
+                      )
+                    );
+                  })()}
                 </div>
               ) : isItemized && showLines ? (
                 <div style={{ marginBottom: 6 }}>
