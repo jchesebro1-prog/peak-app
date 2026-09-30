@@ -2,8 +2,14 @@ import { insertDocIfAbsent, listDocs, listDocsByField } from "@/db/doc-store";
 import { allCompanies, getCompany } from "@/lib/identity/companies";
 import { levelFor, type RewardsProgram } from "@/lib/rewards/program";
 import { lifetimeSpend, purchasesByCompany } from "@/lib/rewards/spend";
-import { quoteRewardCredit } from "@/lib/rewards/credit-line";
-import { normalizeServiceCredit, settleServiceCredit, type ServiceCreditSettle } from "@/lib/rewards/service-credit";
+import { grossQuoteValue, quoteRewardCredit } from "@/lib/rewards/credit-line";
+import {
+  normalizeServiceCredit,
+  serviceCreditSubdocKey,
+  settleCredit,
+  settleServiceCredit,
+  type ServiceCreditSettle,
+} from "@/lib/rewards/service-credit";
 import {
   availableCredit,
   earnAmount,
@@ -14,7 +20,7 @@ import {
   type LedgerEntry,
 } from "@/lib/rewards/ledger";
 import { getRewardsProgram, purchasesFor } from "@/lib/stores/rewards";
-import type { Quote } from "@/lib/stores/quotes";
+import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 
 /**
  * Customer Rewards — the credit ledger store (#282 phase 2, spec §4).
@@ -191,6 +197,49 @@ export async function settleServiceCreditFor(i: {
     mayApply: i.mayApply,
     prior,
   });
+}
+
+/**
+ * #282 phase 3 — the Rewards credit a recalled revision may bring back
+ * (restoreQuoteRevision). A revision is an old priced snapshot, so its credit
+ * is re-checked exactly like a save: against the company's available credit
+ * NOW (balance − credit on its OTHER open quotes — this quote's own current
+ * credit never holds against itself), the restored pre-credit total and $0.
+ * Dropped for a portal-service quote, a quote with no customer, or a
+ * revision cut under a different customer (revisions record `customerId`
+ * from #282 phase 3 on; an older one is taken to be the current customer's).
+ * A lost quote keeps the credit it has now (phase 2's won/lost lock; won
+ * quotes refuse a recall outright). Without `create` the credit can't grow
+ * past what the quote has now. Service quotes clamp in whole dollars,
+ * Estimator quotes to the cent.
+ */
+export async function restoredCreditFor(
+  q: Quote,
+  target: QuoteRevision,
+  mayApply: boolean
+): Promise<ServiceCreditSettle & { gross: number }> {
+  const snap = { ...target, quoteType: target.quoteType ?? q.quoteType };
+  const posted = quoteRewardCredit(snap);
+  const gross = grossQuoteValue(snap);
+  const locked = q.status === "won" || q.status === "lost";
+  const customerId = q.customerId || null;
+  const needsBalance = posted > 0 && !locked && !!customerId && q.source !== "portal-service";
+  const available = needsBalance ? (await companyCredit(customerId as string, q.id)).available : 0;
+  const res = settleCredit({
+    posted,
+    total: gross,
+    available,
+    customerId,
+    source: q.source,
+    mayApply,
+    prior: {
+      status: q.status,
+      customerId: target.customerId === undefined ? customerId : target.customerId || null,
+      credit: quoteRewardCredit(q),
+    },
+    unit: serviceCreditSubdocKey(snap.quoteType) ? "dollars" : "cents",
+  });
+  return { ...res, gross };
 }
 
 /* ---------- starting credit (spec §4) ---------- */

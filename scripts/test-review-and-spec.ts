@@ -10680,6 +10680,7 @@ seeded()
   .then(() => rewards282AsyncChecks())
   .then(() => rewards282Phase2AsyncChecks())
   .then(() => rewards282Phase3AsyncChecks())
+  .then(() => rewards282Phase3RestoreAsyncChecks())
   .then(() => rewards282Phase4AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -38922,6 +38923,117 @@ async function rewards282Phase3AsyncChecks(): Promise<void> {
     for (const x of await L.ledgerForCompany(PCO)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
     await removeCustomer(PCO);
+  }
+}
+
+/* ---- #282 Phase 3 follow-up: a recalled revision's Rewards credit is
+   re-clamped like a save (restoreQuoteRevision). Pure rule here; the DB
+   recall is rewards282Phase3RestoreAsyncChecks() on the promise chain. ---- */
+import { settleCredit as r282rSettle } from "@/lib/rewards/service-credit";
+
+{
+  const base = { posted: 200.559, total: 1000, available: 150.257, customerId: "co", source: "estimator", mayApply: true, prior: { status: "sent", customerId: "co", credit: 0 } };
+  const c = r282rSettle({ ...base, unit: "cents" });
+  ok(c.credit === 150.25 && /\$150\.25/.test(c.notice || ""), `#282 P3 restore rule: an Estimator recall clamps to the cent, rounded down, and says so (got ${JSON.stringify(c)})`);
+  ok(r282rSettle({ ...base, unit: "dollars" }).credit === 150, "#282 P3 restore rule: a service recall clamps in whole dollars");
+  ok(r282rSettle({ ...base, posted: 120, unit: "cents" }).credit === 120 && !r282rSettle({ ...base, posted: 120, unit: "cents" }).notice,
+    "#282 P3 restore rule: a recalled credit still within available is kept, silently");
+  ok(r282rSettle({ ...base, posted: 5000, available: 9000, total: 1234.5, unit: "cents" }).credit === 1234.5, "#282 P3 restore rule: never above the restored pre-credit total ($0 net)");
+  ok(r282rSettle({ ...base, prior: { status: "sent", customerId: "someone-else", credit: 0 }, unit: "cents" }).credit === 0, "#282 P3 restore rule: a revision cut under another customer brings no credit back");
+  ok(r282rSettle({ ...base, source: "portal-service", unit: "dollars" }).credit === 0 && r282rSettle({ ...base, customerId: null, unit: "cents" }).credit === 0,
+    "#282 P3 restore rule: a portal quote or a quote with no customer gets none");
+  ok(r282rSettle({ ...base, posted: 100, available: 500, mayApply: false, prior: { status: "sent", customerId: "co", credit: 40 }, unit: "cents" }).credit === 40,
+    "#282 P3 restore rule: without create a recall can't grow the credit past what the quote has now");
+  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 75,
+    "#282 P3 restore rule: a lost quote keeps the credit it has now (won quotes refuse a recall outright)");
+
+  const qs = r282cRead("src/lib/stores/quotes.ts", "utf8");
+  ok(/const credit = await restoredCreditFor\(q, target, opts\.mayApplyCredit \?\? true\);/.test(qs) &&
+     /doc\.value = Math\.round\(Math\.max\(0, credit\.gross - credit\.credit\)\);/.test(qs) && /withRestoredCredit\(doc, credit\.credit\);/.test(qs) &&
+     /customerId: doc\.customerId \?\? null,/.test(qs) && /if \(q\.status === "won"\) return \{ ok: false, reason: "won" \};/.test(qs),
+    "#282 P3 restore wiring: restoreQuoteRevision re-clamps the credit, stores the net value, snapshots record customerId, won still refuses");
+  const qa = r282cRead("src/app/(app)/quotes/actions.ts", "utf8");
+  const qp = r282cRead("src/app/(app)/quotes/page.tsx", "utf8");
+  ok(/restoreQuoteRevision\(id, rev, user\.name, \{ mayApplyCredit: can\("create", user\.roles\) \}\)/.test(qa) && /"creditNotice=" \+ encodeURIComponent\(res\.creditNotice\)/.test(qa) &&
+     /const creditNotice = one\(sp\.creditNotice\) \|\| null;/.test(qp) && /back=\{backHref\}/.test(qp),
+    "#282 P3 restore wiring: Recall passes the create perm and returns to the quote row with the credit notice");
+}
+
+async function rewards282Phase3RestoreAsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const Q = await import("@/lib/stores/quotes");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "p3r-co");
+  const OTHER = fixtureId(282, "p3r-other");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const E = fixtureId(282, "p3r-est");
+  const F = fixtureId(282, "p3r-flame");
+  const H = fixtureId(282, "p3r-hold");
+  const item = { id: 1, sku: "X", desc: "X", qty: 1, unit: "ea", cost: 1000, price: 2000 };
+  const sections = (credit: number) =>
+    r282cWith([{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [item] }] as never, credit, 2);
+  const flame = (credit: number) => ({ total: 1000, ...(credit > 0 ? { rewardCredit: credit } : {}) });
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 P3 Restore Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await upsertCustomer({ id: OTHER, name: "Test282 P3 Restore Other", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await R.saveRewardsProgram({ ...r282Default, enabled: true, earnPct: { base: 2, copper: 3, silver: 4, gold: 5, platinum: 6 }, retro: { ratePct: 1, capPerCustomer: 1000 } });
+    const adj = await L.postAdjustment(CO, 500, "phase 3 restore test", "Test");
+    if (adj.ok) registerFixture("reward_ledger", adj.entry.id);
+
+    const common = { customer: "", customerId: CO, status: "sent", history: [], createdAt: 1, updatedAt: 1, margin: 0.5 };
+    await createFixture("quotes", { ...common, id: E, name: "T282 restore est", value: 1800, source: "estimator", quoteType: "system", spec: { sections: sections(200), mobs: [] } });
+    await createFixture("quotes", { ...common, id: F, name: "T282 restore flame", value: 850, source: "flametest", quoteType: "flame_test", flameTest: flame(150) });
+    const eRev = await Q.addQuoteRevision(E, { by: "Test", note: "with credit" });
+    const fRev = await Q.addQuoteRevision(F, { by: "Test", note: "with credit" });
+    ok(!!eRev && eRev.customerId === CO && r282cQuoteCredit(eRev) === 200 && !!fRev && r282cQuoteCredit({ ...fRev, quoteType: "flame_test" }) === 150,
+      "#282 P3 restore DB: a revision snapshots the credit and the customer it was priced for");
+
+    // Take the credit off both, then recall with it still available → kept.
+    await Q.update(E, { spec: { sections: sections(0), mobs: [] }, value: 2000 });
+    await Q.update(F, { flameTest: flame(0), value: 1000 });
+    const e1 = await Q.restoreQuoteRevision(E, eRev!.rev, "Test");
+    const e1q = await Q.get(E);
+    ok(e1.ok && !e1.creditNotice && r282cQuoteCredit(e1q) === 200 && e1q?.value === 1800,
+      `#282 P3 restore DB: an Estimator recall whose credit is still available keeps it (value 1,800) (got ${r282cQuoteCredit(e1q)} / ${e1q?.value})`);
+    const f1 = await Q.restoreQuoteRevision(F, fRev!.rev, "Test");
+    const f1q = await Q.get(F);
+    ok(f1.ok && !f1.creditNotice && r282cQuoteCredit(f1q) === 150 && f1q?.value === 850,
+      "#282 P3 restore DB: a service recall whose credit is still available keeps it (value 850)");
+
+    // Another open quote now holds 400 → recalls clamp to what is left.
+    await Q.update(E, { spec: { sections: sections(0), mobs: [] }, value: 2000 });
+    await Q.update(F, { flameTest: flame(0), value: 1000 });
+    await createFixture("quotes", { ...common, id: H, name: "T282 restore hold", value: 600, source: "repair", quoteType: "repair", repair: { total: 1000, rewardCredit: 400 } });
+    const e2 = await Q.restoreQuoteRevision(E, eRev!.rev, "Test");
+    const e2q = await Q.get(E);
+    ok(e2.ok && r282cQuoteCredit(e2q) === 100 && e2q?.value === 1900 && /reduced to \$100\.00/.test((e2.ok && e2.creditNotice) || ""),
+      `#282 P3 restore DB: an Estimator recall whose credit exceeds today's available clamps it (500 − 400 held = 100; value 1,900) and says so (got ${r282cQuoteCredit(e2q)} / ${e2q?.value})`);
+    const f2 = await Q.restoreQuoteRevision(F, fRev!.rev, "Test");
+    const f2q = await Q.get(F);
+    ok(f2.ok && r282cQuoteCredit(f2q) === 0 && f2q?.value === 1000 && !("rewardCredit" in ((f2q?.flameTest || {}) as object)) && /removed/.test((f2.ok && f2.creditNotice) || ""),
+      "#282 P3 restore DB: a service recall with nothing left available drops the credit (value = the engine total) and says so");
+    const c = await L.companyCredit(CO);
+    ok(c.available >= 0 && c.onOpenQuotes === 500, `#282 P3 restore DB: recalls never over-commit the balance (held ${c.onOpenQuotes} of ${c.balance})`);
+
+    // A revision cut under another customer brings no credit back.
+    await Q.update(E, { customerId: OTHER, spec: { sections: sections(0), mobs: [] }, value: 2000 });
+    const e3 = await Q.restoreQuoteRevision(E, eRev!.rev, "Test");
+    ok(e3.ok && r282cQuoteCredit(await Q.get(E)) === 0 && /previous customer/.test((e3.ok && e3.creditNotice) || ""),
+      "#282 P3 restore DB: recalling a revision priced for a different customer drops its credit");
+
+    // Won still refuses a recall.
+    await Q.update(F, { customerId: CO });
+    await Q.setStatus(F, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const fw = await Q.restoreQuoteRevision(F, fRev!.rev, "Test");
+    ok(!fw.ok && fw.reason === "won", "#282 P3 restore DB: a won quote still refuses a recall");
+  } finally {
+    await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
+    for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    for (const x of await L.ledgerForCompany(OTHER)) registerFixture("reward_ledger", x.id);
+    await removeCustomer(CO);
+    await removeCustomer(OTHER);
   }
 }
 

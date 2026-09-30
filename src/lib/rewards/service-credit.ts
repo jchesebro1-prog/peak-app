@@ -123,21 +123,51 @@ export function settleServiceCredit(i: {
   mayApply: boolean;
   prior: { status: string; customerId: string | null; credit: number } | null;
 }): ServiceCreditSettle {
+  return settleCredit({ ...i, unit: "dollars" });
+}
+
+/** Cents, rounded DOWN (never above what was asked for or is available). */
+function toCents(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.replace(/[$,\s]/g, "")) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(SERVICE_CREDIT_MAX, Math.floor(n * 100 + 1e-6) / 100);
+}
+
+/**
+ * The one credit rule behind settleServiceCredit (whole dollars) and the
+ * revision-recall re-clamp (#282 phase 3 — service quotes in whole dollars,
+ * Estimator quotes to the cent, the unit phase 2's credit line uses). Same
+ * steps as settleServiceCredit's doc above.
+ */
+export function settleCredit(i: {
+  posted: unknown;
+  total: number;
+  available: number;
+  customerId: string | null;
+  source: string;
+  mayApply: boolean;
+  prior: { status: string; customerId: string | null; credit: number } | null;
+  unit: "dollars" | "cents";
+}): ServiceCreditSettle {
+  const norm = i.unit === "dollars" ? normalizeServiceCredit : toCents;
   const prior = i.prior;
-  if (prior && (prior.status === "won" || prior.status === "lost")) return { credit: normalizeServiceCredit(prior.credit) };
-  const posted = normalizeServiceCredit(i.posted);
+  if (prior && (prior.status === "won" || prior.status === "lost")) return { credit: norm(prior.credit) };
+  const posted = norm(i.posted);
   if (!(posted > 0)) return { credit: 0 };
   if (i.source === "portal-service") return { credit: 0, notice: "Rewards credit removed — a portal quote can't carry a credit." };
   if (!i.customerId) return { credit: 0, notice: "Rewards credit removed — pick a customer first." };
   if (prior && (prior.customerId || null) !== i.customerId) {
     return { credit: 0, notice: "Rewards credit removed — it belonged to the quote's previous customer." };
   }
-  const avail = normalizeServiceCredit(i.available);
-  const total = normalizeServiceCredit(i.total);
-  const held = !i.mayApply ? (prior ? normalizeServiceCredit(prior.credit) : 0) : Number.POSITIVE_INFINITY;
+  const avail = norm(i.available);
+  const total = norm(i.total);
+  const held = !i.mayApply ? (prior ? norm(prior.credit) : 0) : Number.POSITIVE_INFINITY;
   const credit = Math.min(posted, avail, total, held);
   if (credit === posted) return { credit };
-  const dollars = `$${credit.toLocaleString("en-US")}`;
+  const dollars =
+    i.unit === "dollars"
+      ? `$${credit.toLocaleString("en-US")}`
+      : `$${credit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const why =
     credit === held && held < Math.min(avail, total)
       ? "applying Rewards credit needs create permission"

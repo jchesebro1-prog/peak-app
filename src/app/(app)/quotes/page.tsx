@@ -167,6 +167,8 @@ export default async function QuotesPage({
   // surfaced on the selected row instead of a raw thrown-exception 500.
   const statusError = one(sp.statusError) || null;
   const packageError = one(sp.packageError) || null;
+  // #282 phase 3: a Recall that reduced or removed the revision's Rewards credit.
+  const creditNotice = one(sp.creditNotice) || null;
   // #35 one-click both ways: the engagement referencing the selected quote
   // (as its source proposal OR as Peak's install bid). Selected row only.
   const selEng = selectedId ? await getEngagementForQuoteRef(selectedId) : null;
@@ -775,6 +777,7 @@ export default async function QuotesPage({
                   backHref={hrefFor({ id: q.id })}
                   statusError={statusError}
                   packageError={packageError}
+                  creditNotice={creditNotice}
                   canCreate={can("create", user.roles)}
                   reviewLimit={reviewLimit}
                 />
@@ -822,6 +825,7 @@ function SelectedPanel({
   backHref,
   statusError,
   packageError,
+  creditNotice,
   canCreate,
   reviewLimit,
 }: {
@@ -837,6 +841,8 @@ function SelectedPanel({
    *  row (punch #60). */
   statusError: string | null;
   packageError: string | null;
+  /** #282 phase 3: the Recall's Rewards credit notice (reduced / removed). */
+  creditNotice: string | null;
   /** #205 — "Spec from this quote" opens a create form; only creators see it. */
   canCreate: boolean;
   /** #242 — the owner's review-limit chip for this quote (null = none shown). */
@@ -901,6 +907,11 @@ function SelectedPanel({
           }}
         >
           {statusError}
+        </div>
+      )}
+      {creditNotice && (
+        <div role="status" data-testid="reward-credit-notice" style={{ padding: "10px 14px", marginBottom: 10, background: "#fdf6e7", border: "1px solid #f0e0b8", borderRadius: 10, fontSize: 12.5, color: "#7a5a12", fontWeight: 600 }}>
+          {creditNotice}
         </div>
       )}
       {packageError && (
@@ -1058,6 +1069,7 @@ function SelectedPanel({
             value: r.value,
           }))}
           canRestore={q.status !== "won"}
+          back={backHref}
         />
         {engagement && (
           <Link

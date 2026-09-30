@@ -8,6 +8,9 @@ import {
 } from "@/db/doc-store";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
+import { withRewardCredit } from "@/lib/rewards/credit-line";
+import { serviceCreditSubdocKey } from "@/lib/rewards/service-credit";
+import type { SpecSection } from "@/app/(app)/estimator/types";
 import { numberNewDoc } from "@/lib/stores/estimate-numbers";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
@@ -359,6 +362,9 @@ export type QuoteRevision = {
   note: string;
   /** Resolved figures as they stood when the snapshot was cut. */
   name: string;
+  /** #282 phase 3: the customer the snapshot was priced for — a recalled
+   *  Rewards credit belongs to that customer only. Absent on older revisions. */
+  customerId?: string | null;
   value: number;
   margin: number;
   /** Tier stamp frozen with the snapshot (item 11 B: per-revision). */
@@ -677,6 +683,7 @@ function snapshotOf(
     reason,
     note,
     name: doc.name,
+    customerId: doc.customerId ?? null,
     value: doc.value,
     margin: doc.margin,
     pricingTier: doc.pricingTier ?? null,
@@ -868,20 +875,31 @@ async function copySentPdfSafely(id: string): Promise<void> {
 export async function restoreQuoteRevision(
   id: string,
   rev: number,
-  by?: string | null
-): Promise<{ ok: false; reason: "not-found" | "no-such-rev" | "won" } | { ok: true; quote: Quote }> {
+  by?: string | null,
+  opts: { mayApplyCredit?: boolean } = {}
+): Promise<
+  | { ok: false; reason: "not-found" | "no-such-rev" | "won" }
+  | { ok: true; quote: Quote; creditNotice?: string }
+> {
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return { ok: false, reason: "not-found" };
   if (q.status === "won") return { ok: false, reason: "won" };
   const target = (q.revisions || []).find((r) => r.rev === rev);
   if (!target) return { ok: false, reason: "no-such-rev" };
+  // #282 phase 3: the snapshot's Rewards credit is re-clamped like a save
+  // (available now, the restored pre-credit total, $0; dropped for a portal
+  // quote / no customer / another customer's revision) before it goes back.
+  const { restoredCreditFor } = await import("./reward-ledger");
+  const credit = await restoredCreditFor(q, target, opts.mayApplyCredit ?? true);
 
   const actor = by || DEFAULT_ACTOR;
   const updated = await patchQuote(id, (doc) => {
     // 1. preserve where we are now, 2. apply the old payload, 3. record the recall.
     pushRevision(doc, actor, "manual", `Auto-saved before recalling v${rev}`);
     doc.name = target.name;
-    doc.value = Math.round(target.value);
+    // #282 phase 3: net of the re-clamped credit (the snapshot's value was net
+    // of ITS credit — `credit.gross` is its pre-credit price).
+    doc.value = Math.round(Math.max(0, credit.gross - credit.credit));
     doc.margin = target.margin;
     doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
     doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
@@ -891,6 +909,7 @@ export async function restoreQuoteRevision(
     doc.inspection = target.inspection ?? null;
     doc.consulting = target.consulting ?? null;
     doc.rental = target.rental ?? null;
+    withRestoredCredit(doc, credit.credit);
     // #143: MERGE rather than replace. The recalled spec's vendor lines need
     // their records back, but the snapshot taken one line above (the state we
     // are leaving) still references the records the CURRENT spec used — and
@@ -900,7 +919,35 @@ export async function restoreQuoteRevision(
     pushRevision(doc, actor, "manual", `Recalled v${rev}`);
     doc.updatedAt = Date.now();
   });
-  return updated ? { ok: true, quote: updated } : { ok: false, reason: "not-found" };
+  if (!updated) return { ok: false, reason: "not-found" };
+  return credit.notice ? { ok: true, quote: updated, creditNotice: credit.notice } : { ok: true, quote: updated };
+}
+
+/**
+ * #282 phase 3: put exactly `credit` of Rewards credit on a just-recalled
+ * quote — the Estimator's one credit line on the last system, or the service
+ * subdoc's `rewardCredit` (removed at 0). Copies what it rewrites: the
+ * recalled payload is shared with the revision it came from.
+ */
+function withRestoredCredit(doc: Quote, credit: number): void {
+  const key = serviceCreditSubdocKey(doc.quoteType);
+  if (key) {
+    const sub = doc[key];
+    if (!sub || typeof sub !== "object") return;
+    const next = { ...(sub as Record<string, unknown>) };
+    if (credit > 0) next.rewardCredit = credit;
+    else delete next.rewardCredit;
+    doc[key] = next;
+    return;
+  }
+  const spec = doc.spec as { sections?: unknown } | null | undefined;
+  if (!spec || typeof spec !== "object" || !Array.isArray(spec.sections)) return;
+  const sections = spec.sections as SpecSection[];
+  const maxId = sections.reduce(
+    (m, sec) => Math.max(m, ...((sec?.items || []) as { id?: unknown }[]).map((it) => (typeof it?.id === "number" ? it.id : 0))),
+    0
+  );
+  doc.spec = { ...spec, sections: withRewardCredit(sections, credit, maxId + 1) };
 }
 
 /**

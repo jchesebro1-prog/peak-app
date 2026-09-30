@@ -301,8 +301,11 @@ export function QuoteRevisions({
   number,
   revisions,
   canRestore,
+  back,
 }: {
   id: string;
+  /** #282 phase 3: the list URL a Recall returns to with a credit notice. */
+  back?: string;
   /** #223 — the estimate number the drawer names the quote by; `id` stays the key. */
   number?: string;
   revisions: QuoteRevisionVM[];
@@ -494,6 +497,7 @@ export function QuoteRevisions({
                     <form action={restoreQuoteRevisionAction} style={{ flexShrink: 0 }}>
                       <input type="hidden" name="id" value={id} />
                       <input type="hidden" name="rev" value={r.rev} />
+                      {back && <input type="hidden" name="back" value={back} />}
                       <button
                         type="submit"
                         onClick={() => setOpen(false)}
