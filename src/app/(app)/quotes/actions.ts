@@ -142,8 +142,8 @@ export async function submitQuoteForReview(formData: FormData): Promise<void> {
  * cause a healing sweep to re-spawn or recreate anything for it.
  */
 export async function deleteQuoteAction(id: string) {
-  await requireUser();
-  await removeQuote(id);
+  const user = await requireUser();
+  await removeQuote(id, user.name);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

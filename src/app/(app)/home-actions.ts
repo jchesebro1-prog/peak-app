@@ -59,8 +59,8 @@ export async function setQuoteStatusAction(
 
 /** Stage sheet "Delete" (prototype removeQuote). */
 export async function removeQuoteAction(id: string) {
-  await requireUser();
-  await removeQuote(id);
+  const user = await requireUser();
+  await removeQuote(id, user.name);
   revalidatePath("/", "layout");
 }
 

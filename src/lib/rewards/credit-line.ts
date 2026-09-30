@@ -2,7 +2,8 @@
  * Customer Rewards — the Estimator's "Rewards credit" line (#282 phase 2,
  * spec docs/superpowers/specs/2026-09-30-customer-rewards-design.md §5).
  *
- * Pure and client-safe (type-only imports). The credit is ONE `SpecItem`
+ * Pure and client-safe (type-only imports plus the pure service-credit.ts,
+ * which holds the phase 3 service-quote credit). The credit is ONE `SpecItem`
  * flagged `rewardCredit: true` on the quote's LAST system — qty 1, cost 0,
  * a negative `price`, desc "Rewards credit", no SKU. It is a quote-level
  * amount parked on a line so it rides the existing save/revision/PDF
@@ -17,6 +18,7 @@
  */
 
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import { serviceRewardCredit } from "./service-credit";
 
 export const REWARD_CREDIT_DESC = "Rewards credit";
 
@@ -46,11 +48,27 @@ export function rewardCreditOf(sections: unknown): number {
   return round2(sum);
 }
 
-/** The credit applied on a stored quote's Estimator spec (0 for every other shape). */
-export function quoteRewardCredit(q: { spec?: unknown } | null | undefined): number {
-  const spec = q?.spec;
-  if (!spec || typeof spec !== "object") return 0;
-  return rewardCreditOf((spec as { sections?: unknown }).sections);
+/**
+ * THE "credit applied" accessor for a stored quote — every ledger, hold and
+ * spend path reads this one function: the Estimator's credit line(s) on
+ * `spec.sections` (phase 2) plus a flame-test / inspection / repair quote's
+ * `<subdoc>.rewardCredit` (phase 3, service-credit.ts). 0 for any other shape.
+ */
+export function quoteRewardCredit(
+  q: { spec?: unknown; quoteType?: unknown; flameTest?: unknown; inspection?: unknown; repair?: unknown } | null | undefined
+): number {
+  if (!q) return 0;
+  const spec = q.spec;
+  const onSpec = spec && typeof spec === "object" ? rewardCreditOf((spec as { sections?: unknown }).sections) : 0;
+  return round2(onSpec + serviceRewardCredit(q));
+}
+
+/** A stored quote's price before any Rewards credit: `value` (net) + the credit applied. */
+export function grossQuoteValue(
+  q: { value?: unknown; spec?: unknown; quoteType?: unknown; flameTest?: unknown; inspection?: unknown; repair?: unknown } | null | undefined
+): number {
+  const v = typeof q?.value === "number" && Number.isFinite(q.value) ? q.value : 0;
+  return round2(v + quoteRewardCredit(q));
 }
 
 /** The sections with every credit line removed. */

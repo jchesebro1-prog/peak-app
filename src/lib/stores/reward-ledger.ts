@@ -3,6 +3,7 @@ import { allCompanies, getCompany } from "@/lib/identity/companies";
 import { levelFor, type RewardsProgram } from "@/lib/rewards/program";
 import { lifetimeSpend, purchasesByCompany } from "@/lib/rewards/spend";
 import { quoteRewardCredit } from "@/lib/rewards/credit-line";
+import { normalizeServiceCredit, settleServiceCredit, type ServiceCreditSettle } from "@/lib/rewards/service-credit";
 import {
   availableCredit,
   earnAmount,
@@ -134,10 +135,14 @@ export async function earnForWin(q: Pick<Quote, "id" | "customerId" | "value">, 
  * redeem for the credit on the quote. Not won: reverse the open earn and
  * unredeem the open redeem — corrections post even while the program is
  * off, so a balance never keeps credit from a sale that no longer stands.
- * State-based, so a replay posts nothing new.
+ * State-based, so a replay posts nothing new. `opts.deleted` (the quote was
+ * just soft-deleted, `remove()`) treats it as not won.
  */
-export async function reconcileQuoteLedger(q: Quote, by: string): Promise<LedgerEntry[]> {
-  const won = q.status === "won";
+export async function reconcileQuoteLedger(q: Quote, by: string, opts: { deleted?: boolean } = {}): Promise<LedgerEntry[]> {
+  // #282 phase 3: a soft-deleted quote no longer stands as a sale — its open
+  // earn reverses and its redeemed credit comes back, exactly as if it had
+  // left Won.
+  const won = q.status === "won" && !opts.deleted;
   const [entries, program] = await Promise.all([ledgerForQuote(q.id), getRewardsProgram()]);
   const earn = won ? await earnForWin(q, program) : 0;
   const plan = quoteLedgerPlan({
@@ -151,6 +156,41 @@ export async function reconcileQuoteLedger(q: Quote, by: string): Promise<Ledger
     by,
   });
   return plan.length ? postLedgerEntries(plan) : [];
+}
+
+/**
+ * #282 phase 3 — the Rewards credit a flame-test / inspection / repair save
+ * stores (spec §5): the posted amount re-checked against the company's
+ * available credit right now (balance − credit on its OTHER open quotes) and
+ * the engine total, by settleServiceCredit's rules. Never trusts the client
+ * amount beyond clamping it down.
+ */
+export async function settleServiceCreditFor(i: {
+  posted: unknown;
+  total: number;
+  customerId: string | null;
+  source: string;
+  mayApply: boolean;
+  prior: Quote | null;
+}): Promise<ServiceCreditSettle> {
+  const prior = i.prior
+    ? { status: i.prior.status, customerId: i.prior.customerId || null, credit: quoteRewardCredit(i.prior) }
+    : null;
+  const needsBalance =
+    normalizeServiceCredit(i.posted) > 0 &&
+    !!i.customerId &&
+    !(prior && (prior.status === "won" || prior.status === "lost")) &&
+    i.source !== "portal-service";
+  const available = needsBalance ? (await companyCredit(i.customerId as string, i.prior?.id ?? null)).available : 0;
+  return settleServiceCredit({
+    posted: i.posted,
+    total: i.total,
+    available,
+    customerId: i.customerId,
+    source: i.source,
+    mayApply: i.mayApply,
+    prior,
+  });
 }
 
 /* ---------- starting credit (spec §4) ---------- */

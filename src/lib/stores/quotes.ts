@@ -1301,10 +1301,10 @@ export async function setStatus(
 }
 
 /** #282 phase 2: post the quote's Rewards ledger entries; log, never throw. */
-async function reconcileRewardsSafely(q: Quote, by?: string | null): Promise<void> {
+async function reconcileRewardsSafely(q: Quote, by?: string | null, opts: { deleted?: boolean } = {}): Promise<void> {
   try {
     const { reconcileQuoteLedger } = await import("./reward-ledger");
-    await reconcileQuoteLedger(q, by || DEFAULT_ACTOR);
+    await reconcileQuoteLedger(q, by || DEFAULT_ACTOR, opts);
   } catch (e) {
     console.error("[rewards] ledger post failed for quote", q.id, e);
   }
@@ -1377,9 +1377,18 @@ export async function setPoReceived(id: string, on: boolean): Promise<Quote | nu
   });
 }
 
-/** Soft delete (prototype filtered the array; server keeps a tombstone for sync). */
-export async function remove(id: string): Promise<void> {
+/**
+ * Soft delete (prototype filtered the array; server keeps a tombstone for sync).
+ * #282 phase 3: a deleted quote no longer stands as a sale — its Rewards
+ * ledger runs the same plan as leaving Won (the open earn reverses, the
+ * redeemed credit comes back). There is no undelete; a quote brought back by
+ * an upsert re-posts on its next real status transition. Like setStatus, a
+ * ledger failure is logged and never blocks the delete.
+ */
+export async function remove(id: string, by?: string | null): Promise<void> {
+  const q = await getDoc<Quote>("quotes", id);
   await softDeleteDoc("quotes", id);
+  if (q) await reconcileRewardsSafely(q, by, { deleted: true });
 }
 
 /**
