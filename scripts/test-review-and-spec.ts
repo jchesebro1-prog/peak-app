@@ -10679,6 +10679,7 @@ seeded()
   .then(() => lift275AsyncChecks())
   .then(() => rewards282AsyncChecks())
   .then(() => rewards282Phase2AsyncChecks())
+  .then(() => rewards282Phase4AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -38653,6 +38654,294 @@ async function rewards282Phase2AsyncChecks(): Promise<void> {
   } finally {
     await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
     for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    await removeCustomer(CO);
+    await removeCustomer(OTHER);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #282 Phase 4 — Customer Rewards: perks (spec §6) and the portal Rewards card
+// (spec §7). Pure checks run here; the DB checks (the perks editor save, Mark
+// used / Undo, the /rewards count, the portal loader's tenant scoping) are
+// rewards282Phase4AsyncChecks() on the promise chain.
+// ---------------------------------------------------------------------------
+import {
+  PERK_YEAR_MS as r282dYear,
+  availablePerkCount as r282dCount,
+  mergePerkEdits as r282dMerge,
+  mintPerkId as r282dMint,
+  nextPerkUseN as r282dNextN,
+  perkDraftErrors as r282dDraftErrors,
+  perkSlug as r282dSlug,
+  perkStatus as r282dStatus,
+  perkStatuses as r282dStatuses,
+  perkUndoId as r282dUndoId,
+  perkUseId as r282dUseId,
+  perkUses as r282dUses,
+  portalRewardsView as r282dPortalView,
+} from "@/lib/rewards/perks";
+import { LEDGER_KIND_LABEL as r282dKindLabel, type LedgerEntry as R282dEntry } from "@/lib/rewards/ledger";
+import type { Perk as R282dPerk } from "@/lib/rewards/program";
+import { PortalRewardsCard as r282dPortalCard } from "@/app/portal/rewards-card";
+import { can as r282dCan } from "@/lib/team";
+
+/** Visible text of rendered markup (tags and attributes stripped). */
+function r282dText(html: string): string {
+  return html.replace(/<[^>]*>/g, " ").replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+}
+
+{
+  const perk = (id: string, level: R282dPerk["level"], frequency: R282dPerk["frequency"], extra: Partial<R282dPerk> = {}): R282dPerk =>
+    ({ id, name: `Perk ${id}`, description: `About ${id}`, level, frequency, active: true, ...extra });
+  const use = (perkId: string, n: number, at: number): R282dEntry =>
+    ({ id: r282dUseId("co", perkId, n), companyId: "co", kind: "perk", amount: 0, perkId, at, by: "T" });
+  const undo = (u: R282dEntry, at: number): R282dEntry =>
+    ({ id: r282dUndoId(u.id), companyId: "co", kind: "unperk", amount: 0, perkId: u.perkId, at, by: "T" });
+  const NOW = 1_800_000_000_000;
+
+  // ---- sanitize keeps perks + tombstones ----
+  const sp = r282Sanitize({ perks: [
+    { id: "a", name: "A", level: "gold", frequency: "yearly", active: true },
+    { id: "gone", name: "Gone", level: "copper", frequency: "once", active: true, removed: true },
+  ] }).perks;
+  ok(sp.length === 2 && sp[0].id === "a" && sp[0].level === "gold" && sp[0].frequency === "yearly" && sp[0].removed === undefined,
+    "#282 P4 sanitize: a live perk keeps id / level / frequency, no removed flag");
+  ok(sp[1].removed === true && sp[1].active === false, "#282 P4 sanitize: a tombstone keeps removed:true and is forced inactive");
+
+  // ---- availability ----
+  const copperOnce = perk("co1", "copper", "once");
+  const baseYearly = perk("by1", "base", "yearly");
+  ok(r282dStatus(copperOnce, { earned: "base", entries: [], now: NOW }).block === "level", "#282 P4 availability: a Copper perk is locked for a Base company");
+  ok(r282dStatus(copperOnce, { earned: "copper", entries: [], now: NOW }).available, "#282 P4 availability: earned level = perk level → available");
+  ok(r282dStatus(copperOnce, { earned: "platinum", entries: [], now: NOW }).available, "#282 P4 availability: a higher earned level unlocks it too");
+  ok(r282dStatus(perk("b", "base", "once"), { earned: "base", entries: [], now: NOW }).available, "#282 P4 availability: a Base perk is for everyone");
+  const u1 = use("co1", 1, NOW - 1000);
+  const s1 = r282dStatus(copperOnce, { earned: "copper", entries: [u1], now: NOW });
+  ok(!s1.available && s1.block === "used" && s1.lastUsedAt === NOW - 1000, "#282 P4 availability: a once perk is gone after one use");
+  ok(!r282dStatus(copperOnce, { earned: "copper", entries: [use("co1", 1, NOW - 50 * r282dYear)], now: NOW }).available,
+    "#282 P4 availability: a once perk never comes back, however long ago");
+  ok(r282dStatus(copperOnce, { earned: "copper", entries: [u1, undo(u1, NOW)], now: NOW }).available, "#282 P4 availability: an undone use frees a once perk");
+  ok(!r282dStatus(copperOnce, { earned: "copper", entries: [use("other", 1, NOW)], now: NOW }).lastUsedAt, "#282 P4 availability: another perk's use doesn't count");
+  const y1 = use("by1", 1, NOW - r282dYear + 1);
+  const sy = r282dStatus(baseYearly, { earned: "base", entries: [y1], now: NOW });
+  ok(!sy.available && sy.block === "cooldown" && sy.nextAt === y1.at + r282dYear, "#282 P4 availability: a yearly perk used 364.99 days ago waits, with its next-available date");
+  ok(r282dStatus(baseYearly, { earned: "base", entries: [use("by1", 1, NOW - r282dYear)], now: NOW }).available,
+    "#282 P4 availability: exactly 365 days later a yearly perk is available again");
+  ok(r282dStatus(baseYearly, { earned: "base", entries: [use("by1", 1, NOW - 2 * r282dYear), use("by1", 2, NOW - 10)], now: NOW }).block === "cooldown",
+    "#282 P4 availability: the LAST use sets the yearly window");
+  ok(r282dStatus(baseYearly, { earned: "base", entries: [y1, undo(y1, NOW)], now: NOW }).available, "#282 P4 availability: an undone yearly use frees it");
+  ok(r282dStatus(perk("x", "base", "once", { active: false }), { earned: "platinum", entries: [], now: NOW }).block === "inactive",
+    "#282 P4 availability: an inactive perk is never available");
+  ok(r282dStatus(perk("x", "base", "once", { active: false, removed: true }), { earned: "platinum", entries: [], now: NOW }).block === "removed",
+    "#282 P4 availability: a removed perk is never available");
+  const list = [copperOnce, baseYearly, perk("g", "gold", "once"), perk("r", "base", "once", { active: false, removed: true })];
+  ok(r282dStatuses(list, { earned: "copper", entries: [], now: NOW }).length === 3, "#282 P4 statuses: tombstones are left out");
+  ok(r282dCount(list, { earned: "copper", entries: [u1], now: NOW }) === 1, "#282 P4 count: Copper company, once perk used → only the Base yearly is available");
+
+  // ---- use ids / pairing ----
+  ok(r282dUseId("c", "p", 3) === "perk:c:p:3" && r282dUndoId("perk:c:p:3") === "unperk:c:p:3", "#282 P4 ids: perk:<co>:<perk>:<n>, undo = un + the use id");
+  ok(r282dNextN([u1, use("co1", 4, 1), use("zz", 9, 1)], "co1") === 5 && r282dNextN([], "co1") === 1, "#282 P4 ids: the next use number is max n + 1 for that perk");
+  const uses = r282dUses([u1, undo(u1, NOW), use("co1", 2, NOW + 5)]);
+  ok(uses.length === 2 && uses[0].entry.id === "perk:co:co1:2" && !uses[0].undone && uses[1].undone?.kind === "unperk",
+    "#282 P4 history: uses newest first, each paired with its undo");
+  ok(r282dKindLabel.unperk === "Perk use undone" && r282bBalance([u1, undo(u1, NOW)]) === 0, "#282 P4 ledger: unperk is a labeled kind and moves no credit");
+
+  // ---- editor merge / ids ----
+  ok(r282dSlug("Free Lift Inspection!") === "free-lift-inspection" && r282dSlug("!!!") === "perk" && r282dSlug("x".repeat(80)).length === 32,
+    "#282 P4 ids: the slug is lowercase-dashed, ≤ 32 chars, never empty");
+  const minted = r282dMint("Hello", new Set(), () => 0.5);
+  ok(/^hello-[0-9a-z]{4}$/.test(minted), `#282 P4 ids: a minted id is <slug>-<4 base36> (got ${minted})`);
+  const taken = new Set([r282dMint("Hello", new Set(), () => 0)]);
+  ok(!taken.has(r282dMint("Hello", taken, () => 0)), "#282 P4 ids: minting never returns a taken id (falls back past collisions)");
+  const stored: R282dPerk[] = [perk("keep", "copper", "once"), perk("drop", "silver", "yearly"), perk("old", "base", "once", { active: false, removed: true })];
+  const merged = r282dMerge(
+    stored,
+    [
+      { id: "new:1", name: "  Brand new  ", description: "d", level: "gold", frequency: "yearly", active: true },
+      { id: "keep", name: "Kept, renamed", description: "", level: "silver", frequency: "once", active: false },
+      { id: "old", name: "Revived?", description: "", level: "base", frequency: "once", active: true },
+      { id: "keep", name: "Dup", description: "", level: "base", frequency: "once", active: true },
+      { id: "", name: "   ", description: "", level: "base", frequency: "once", active: true },
+    ],
+    { ledgerPerkIds: ["ledger-only"], rand: () => 0.25 }
+  );
+  const byName = (n: string) => merged.find((p) => p.name === n);
+  ok(merged.length === 6, `#282 P4 merge: 4 kept/new rows + 2 tombstones, the blank row dropped (got ${merged.length})`);
+  ok(merged[0].name === "Brand new" && merged[1].id === "keep", "#282 P4 merge: display order follows the editor");
+  ok(byName("Kept, renamed")?.id === "keep" && byName("Kept, renamed")?.level === "silver" && byName("Kept, renamed")?.active === false,
+    "#282 P4 merge: a stored perk keeps its id and takes the edits");
+  ok(!!byName("Brand new") && byName("Brand new")!.id.startsWith("brand-new-"), "#282 P4 merge: a new row gets a server-minted slug id");
+  ok(byName("Revived?")?.id !== "old", "#282 P4 merge: a removed perk's id is never reused");
+  ok(byName("Dup")?.id !== "keep", "#282 P4 merge: a duplicated id is re-minted for the second row");
+  const ids = merged.map((p) => p.id);
+  ok(new Set(ids).size === ids.length && !ids.includes("ledger-only"), "#282 P4 merge: ids unique and never one the ledger references");
+  const drop = merged.find((p) => p.id === "drop");
+  ok(!!drop && drop.removed === true && drop.active === false && drop.name === "Perk drop", "#282 P4 merge: a perk left out becomes a tombstone (name kept for history)");
+  ok(merged.find((p) => p.id === "old")?.removed === true, "#282 P4 merge: stored tombstones are kept");
+  ok(r282dDraftErrors([{ name: "" }]).length === 1 && r282dDraftErrors([{ name: "x", level: "diamond" }]).length === 1 && r282dDraftErrors("x").length === 1
+    && r282dDraftErrors([{ name: "ok", level: "gold" }]).length === 0, "#282 P4 errors: a nameless row, an unknown level or a non-list is refused");
+
+  // ---- the portal view (whitelist) ----
+  const program = { ...r282Default, perks: [perk("p1", "copper", "once"), perk("p2", "gold", "once"), perk("p3", "base", "yearly", { active: false })] };
+  const pv = r282dPortalView({ program, spend: 30000, balance: -12, entries: [], now: NOW });
+  ok(JSON.stringify(Object.keys(pv).sort()) === JSON.stringify(["balance", "level", "levelLabel", "next", "perks", "progress"]),
+    "#282 P4 portal: the view carries only level, levelLabel, next, progress, balance, perks");
+  ok(pv.level === "copper" && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver" && pv.next.need === 45000,
+    "#282 P4 portal: the earned level and \"$X to <next>\"");
+  ok(pv.balance === 0, "#282 P4 portal: a negative balance shows as $0 to the customer");
+  ok(pv.perks.length === 1 && pv.perks[0].name === "Perk p1" && JSON.stringify(Object.keys(pv.perks[0]).sort()) === '["description","id","name"]',
+    "#282 P4 portal: only available perks, name + description only (no level-locked or inactive)");
+  ok(!/margin|earnPct|thresholds/i.test(JSON.stringify(pv)), "#282 P4 portal: no margin / earn % / thresholds in the view");
+  const html = symRender(symH(r282dPortalCard, { view: { ...pv, balance: 125.5 }, companyName: "Peak Systems Group" }));
+  const text = r282dText(html);
+  ok(text.includes("Copper") && text.includes("$45,000 to Silver") && text.includes("$125.50") && text.includes("Perk p1") && text.includes("About p1"),
+    `#282 P4 portal card: level, progress, credit and perks render (${text.slice(0, 160)})`);
+  ok(text.includes("Credit is applied by your Peak estimator on your next quote."), "#282 P4 portal card: says how credit is used");
+  ok(!/%/.test(text) && !/margin/i.test(text), "#282 P4 portal card: never prints a percent or a margin");
+  ok(!/<button|<form|<input/.test(html), "#282 P4 portal card: no actions");
+  const top = r282dText(symRender(symH(r282dPortalCard, { view: r282dPortalView({ program, spend: 900000, balance: 0, entries: [], now: NOW }), companyName: "Peak" })));
+  ok(top.includes("Platinum") && /top level/.test(top), "#282 P4 portal card: at the top level it says so");
+
+  // ---- wiring ----
+  const portalSrc = r282Read("src/app/portal/page.tsx", "utf8");
+  ok(/const cid = session\.customerId;/.test(portalSrc) && /portalRewards\(cid\)/.test(portalSrc) && /\{rewards && <PortalRewardsCard view=\{rewards\}/.test(portalSrc),
+    "#282 P4 wiring: the portal card loads for the grant's company (session.customerId) and renders only when the loader returns a view");
+  ok(!/portalRewards\(\s*one\(sp/.test(portalSrc) && !/portalRewards\(previewCid/.test(portalSrc), "#282 P4 wiring: never from a query param directly");
+  const actSrc = r282Read("src/app/(app)/rewards/actions.ts", "utf8");
+  const markFn = actSrc.slice(actSrc.indexOf("export async function markPerkUsedAction"));
+  ok(markFn.indexOf('can("create", me.roles)') > 0 && markFn.indexOf('can("create", me.roles)') < markFn.indexOf("await markPerkUsed("),
+    "#282 P4 wiring: Mark used checks create permission before posting");
+  const undoFn = actSrc.slice(actSrc.indexOf("export async function undoPerkUseAction"));
+  ok(undoFn.indexOf('can("manage_users", me.roles)') > 0 && undoFn.indexOf('can("manage_users", me.roles)') < undoFn.indexOf("await undoPerkUse("),
+    "#282 P4 wiring: Undo checks manage_users before posting");
+  ok(!r282dCan("create", ["Reviewer"]) && r282dCan("create", ["Estimator"]) && !r282dCan("manage_users", ["Manager"]),
+    "#282 P4 perms: a Reviewer can't Mark used; an Estimator can; only Admin can Undo");
+  const setSrc = r282Read("src/app/(app)/settings/rewards/actions.ts", "utf8");
+  ok(/export async function savePerksAction[\s\S]*?await requirePerm\("manage_users"\);[\s\S]*?saveRewardsPerks\(/.test(setSrc), "#282 P4 wiring: the perks save is admin-only and goes through saveRewardsPerks");
+  const cfgSrc = r282Read("src/lib/identity/config.ts", "utf8");
+  ok(/customers as reward levels/.test(cfgSrc) && /margins never are/.test(cfgSrc) && !/never shown to customers\./.test(cfgSrc),
+    "#282 P4 wiring: PRICING_TIERS comment — names show as reward levels, margins never");
+  ok(r282Read("scripts/smoke-routes.ts", "utf8").includes('"/portal?preview=lakefront",'), "#282 P4 smoke: /portal?preview=lakefront is a smoke route");
+}
+
+async function rewards282Phase4AsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const P = await import("@/lib/stores/reward-perks");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "p4-co");
+  const OTHER = fixtureId(282, "p4-other");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const proj = (slug: string, customerId: string, value: number) =>
+    createFixture("projects", { id: fixtureId(282, slug), kind: "project", name: `T282 ${slug}`, customer: "", customerId, quoteId: null,
+      projectType: null, value, margin: 0, createdAt: 1, updatedAt: 1, startedAt: 2, stageHistory: [], source: { system: "daylite", importedAt: 1 } });
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 P4 Perks Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await upsertCustomer({ id: OTHER, name: "Test282 P4 Other Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await proj("p4-hist", CO, 30000); // Copper
+    await proj("p4-hist-o", OTHER, 1000); // Base
+    await createFixture("quotes", { id: fixtureId(282, "p4-q"), name: "T282 p4 q", customer: "", customerId: CO, status: "draft", value: 100,
+      source: "estimator", quoteType: "consulting", history: [], createdAt: 1, updatedAt: 1 });
+    await createFixture("quotes", { id: fixtureId(282, "p4-oq"), name: "T282 p4 other q", customer: "", customerId: OTHER, status: "draft", value: 100,
+      source: "estimator", quoteType: "consulting", history: [], createdAt: 1, updatedAt: 1 });
+    await setBlob("rewards_program", { ...r282Default, enabled: false, launchedAt: null } as unknown as Record<string, unknown>);
+
+    // ---- the editor save ----
+    const s1 = await P.saveRewardsPerks([
+      { id: "new:a", name: "Copper once", description: "A copper thank-you", level: "copper", frequency: "once", active: true },
+      { id: "new:b", name: "Base yearly", description: "Every year", level: "base", frequency: "yearly", active: true },
+      { id: "new:c", name: "Gold once", description: "Gold only", level: "gold", frequency: "once", active: true },
+      { id: "new:d", name: "Copper off", description: "Inactive", level: "copper", frequency: "once", active: false },
+    ]);
+    ok(s1.ok && s1.program.perks.length === 4 && s1.program.perks.every((p) => !p.id.startsWith("new:")), "#282 P4 DB: the perks save mints server ids for new rows");
+    const prog1 = await R.getRewardsProgram();
+    ok(prog1.perks.map((p) => p.name).join("|") === "Copper once|Base yearly|Gold once|Copper off" && prog1.enabled === false,
+      "#282 P4 DB: perks stored in order; the rest of the program untouched");
+    const id = (name: string) => prog1.perks.find((p) => p.name === name)!.id;
+    const bad = await P.saveRewardsPerks([{ id: "", name: "", description: "", level: "base", frequency: "once", active: true }]);
+    ok(!bad.ok && (await R.getRewardsProgram()).perks.length === 4, "#282 P4 DB: a nameless perk refuses the save and changes nothing");
+
+    // ---- Mark used refused while the program is off ----
+    const off = await P.markPerkUsed({ companyId: CO, perkId: id("Copper once"), by: "Test" });
+    ok(!off.ok && /off/.test(off.error), "#282 P4 DB: Mark used is refused while the program is off");
+    ok((await P.portalRewards(CO)) === null, "#282 P4 DB: the portal card is hidden while the program is off");
+
+    await R.saveRewardsProgram({ ...prog1, enabled: true });
+    // ---- Mark used ----
+    const refusedLevel = await P.markPerkUsed({ companyId: CO, perkId: id("Gold once"), by: "Test" });
+    ok(!refusedLevel.ok && /level/.test(refusedLevel.error), "#282 P4 DB: a perk above the company's earned level is refused");
+    const refusedOff = await P.markPerkUsed({ companyId: CO, perkId: id("Copper off"), by: "Test" });
+    ok(!refusedOff.ok, "#282 P4 DB: an inactive perk is refused");
+    const refusedQuote = await P.markPerkUsed({ companyId: CO, perkId: id("Copper once"), quoteId: fixtureId(282, "p4-oq"), by: "Test" });
+    ok(!refusedQuote.ok && /quote/.test(refusedQuote.error), "#282 P4 DB: another company's quote can't be linked");
+    const m1 = await P.markPerkUsed({ companyId: CO, perkId: id("Copper once"), quoteId: fixtureId(282, "p4-q"), note: "  thanks  ", by: "Test" });
+    if (m1.ok) registerFixture("reward_ledger", m1.entry.id);
+    ok(m1.ok && m1.entry.id === `perk:${CO}:${id("Copper once")}:1` && m1.entry.kind === "perk" && m1.entry.amount === 0
+      && m1.entry.quoteId === fixtureId(282, "p4-q") && m1.entry.note === "thanks",
+      `#282 P4 DB: Mark used posts perk:<co>:<perk>:1 with the quote link and note (${JSON.stringify(m1)})`);
+    const m2 = await P.markPerkUsed({ companyId: CO, perkId: id("Copper once"), by: "Test" });
+    ok(!m2.ok && /already/.test(m2.error), "#282 P4 DB: a once perk can't be marked used twice");
+    ok((await L.companyCredit(CO)).balance === 0, "#282 P4 DB: a perk use moves no credit");
+
+    // yearly: used now, refused again inside the year, available after it
+    const T0 = Date.now();
+    const y1 = await P.markPerkUsed({ companyId: CO, perkId: id("Base yearly"), by: "Test", now: T0 });
+    if (y1.ok) registerFixture("reward_ledger", y1.entry.id);
+    const y2 = await P.markPerkUsed({ companyId: CO, perkId: id("Base yearly"), by: "Test", now: T0 + 364 * 86400000 });
+    ok(y1.ok && !y2.ok && /last year/.test(y2.error), "#282 P4 DB: a yearly perk is refused inside 365 days");
+    const panel = P.companyPerkPanel((await R.getRewardsProgram()).perks, "copper", await L.ledgerForCompany(CO), T0 + 1000);
+    const yst = panel.statuses.find((s) => s.perk.id === id("Base yearly"));
+    ok(!!yst && yst.block === "cooldown" && yst.nextAt === T0 + 365 * 86400000, "#282 P4 DB: the card shows the yearly perk's next-available date");
+    const y3 = await P.markPerkUsed({ companyId: CO, perkId: id("Base yearly"), by: "Test", now: T0 + 366 * 86400000 });
+    if (y3.ok) registerFixture("reward_ledger", y3.entry.id);
+    ok(y3.ok && y3.entry.id === `perk:${CO}:${id("Base yearly")}:2`, "#282 P4 DB: after 365 days the yearly perk posts its second use");
+
+    // ---- Undo ----
+    const u1 = m1.ok ? await P.undoPerkUse(CO, m1.entry.id, "Admin") : { ok: false as const, error: "no use" };
+    if (u1.ok) registerFixture("reward_ledger", u1.entry.id);
+    ok(u1.ok && u1.entry.id === `unperk:${CO}:${id("Copper once")}:1` && u1.entry.kind === "unperk", "#282 P4 DB: Undo posts unperk for that use");
+    const u2 = m1.ok ? await P.undoPerkUse(CO, m1.entry.id, "Admin") : { ok: true as const };
+    ok(!u2.ok, "#282 P4 DB: a use can't be undone twice");
+    const led = await L.ledgerForCompany(CO);
+    ok(led.some((e) => m1.ok && e.id === m1.entry.id), "#282 P4 DB: the undone use stays on the ledger (add-only)");
+    const m3 = await P.markPerkUsed({ companyId: CO, perkId: id("Copper once"), by: "Test" });
+    if (m3.ok) registerFixture("reward_ledger", m3.entry.id);
+    ok(m3.ok && m3.entry.id === `perk:${CO}:${id("Copper once")}:2`, "#282 P4 DB: after Undo the once perk can be marked used again (a fresh numbered use)");
+
+    // ---- /rewards count ----
+    const counts = await P.availablePerksByCompany([{ companyId: CO, earned: "copper" }, { companyId: OTHER, earned: "base" }], await R.getRewardsProgram(), T0 + 1000);
+    ok(counts.get(CO) === 0 && counts.get(OTHER) === 1, `#282 P4 DB: /rewards counts available perks per company (${JSON.stringify([...counts])})`);
+
+    // ---- removing a used perk keeps its name for history ----
+    const cur = await R.getRewardsProgram();
+    const s2 = await P.saveRewardsPerks(cur.perks.filter((p) => p.name !== "Copper once").map((p) => ({ ...p })));
+    ok(s2.ok && s2.program.perks.find((p) => p.id === id("Copper once"))?.removed === true, "#282 P4 DB: removing a perk tombstones it");
+    const kept = s2.ok ? s2.program.perks.filter((p) => !p.removed) : [];
+    const reAdd = await P.saveRewardsPerks([...kept, { id: id("Copper once"), name: "Copper once", description: "", level: "copper", frequency: "once", active: true }]);
+    ok(reAdd.ok && reAdd.program.perks.filter((p) => p.id === id("Copper once")).length === 1 && reAdd.program.perks.filter((p) => p.name === "Copper once").length === 2,
+      "#282 P4 DB: re-adding a removed perk mints a new id; the tombstone keeps the old one");
+    const gone = await P.markPerkUsed({ companyId: CO, perkId: id("Copper once"), by: "Test" });
+    ok(!gone.ok, "#282 P4 DB: a removed perk can't be marked used");
+
+    // ---- portal: scoped to the grant's company ----
+    const adj = await L.postAdjustment(CO, 77.25, "p4 portal credit", "Test");
+    if (adj.ok) registerFixture("reward_ledger", adj.entry.id);
+    const adjO = await L.postAdjustment(OTHER, 5, "p4 other credit", "Test");
+    if (adjO.ok) registerFixture("reward_ledger", adjO.entry.id);
+    const pv = await P.portalRewards(CO);
+    const pvO = await P.portalRewards(OTHER);
+    ok(!!pv && pv.balance === 77.25 && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver", `#282 P4 DB: the portal card shows the company's own level and balance (${JSON.stringify(pv)})`);
+    ok(!!pvO && pvO.balance === 5 && pvO.levelLabel === "Base", "#282 P4 DB: another company's portal shows only its own balance and level");
+    ok(!!pvO && !JSON.stringify(pvO).includes("77.25") && !JSON.stringify(pv).includes(CO), "#282 P4 DB: one company's balance never appears on another's card");
+    ok(!!pvO && pvO.perks.map((p) => p.name).join("|") === "Base yearly", "#282 P4 DB: portal perks are the ones available to that company");
+    const html = pv ? symRender(symH(r282dPortalCard, { view: pv, companyName: "Peak Systems Group" })) : "";
+    ok(!!html && !/%|margin/i.test(r282dText(html)), "#282 P4 DB: the rendered portal card prints no percent and no margin");
+    ok((await P.portalRewards(fixtureId(282, "p4-nobody"))) === null, "#282 P4 DB: an unknown company gets no card");
+  } finally {
+    await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null, perks: prevRaw.perks ?? [] });
+    for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    for (const x of await L.ledgerForCompany(OTHER)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
     await removeCustomer(OTHER);
   }

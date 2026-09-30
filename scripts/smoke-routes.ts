@@ -176,6 +176,9 @@ const ROUTES = [
   "/portal/catalog/quote",
   "/portal/catalog/quote?preview=lakefront",
   "/portal?preview=lakefront&generated=firm&q=Q-0",
+  // #282 phase 4 — the portal dashboard's team preview (the Rewards card
+  // renders only while the program is on; the smoke DB leaves it off).
+  "/portal?preview=lakefront",
   // #248 Task 3 — the service intake: signed out (no team-preview session
   // here, so it renders the signed-out card, same as /portal/catalog above).
   "/portal/service",
