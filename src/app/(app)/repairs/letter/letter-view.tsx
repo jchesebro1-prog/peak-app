@@ -12,6 +12,7 @@ import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { flightOf, flyTravelSentence } from "@/lib/travel-plan";
 import { printedLift, travelLineShare } from "@/lib/service-pricing";
+import { serviceLetterPrice } from "@/lib/rewards/service-credit";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -203,6 +204,9 @@ export async function RepairLetterView({ id }: { id: string }) {
       ? " (" + num1(hoursEach) + " hours × crew of " + crewSize + ")"
       : "") +
     ".";
+  // #282 phase 3: `value` is net of any Rewards credit; the travel share and
+  // lift reconcile to the pre-credit `gross`.
+  const price = serviceLetterPrice(quote, rp);
   // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
   const flight = flightOf(rp.trip);
   const travelMargin = typeof rp.rates?.margin === "number" ? rp.rates.margin : quote.margin || 0;
@@ -217,7 +221,7 @@ export async function RepairLetterView({ id }: { id: string }) {
           total:
             rp.serviceSell != null
               ? rp.serviceSell
-              : Math.max(0, (quote.value != null ? quote.value : rp.total || 0) - (rp.partsSell || 0)),
+              : Math.max(0, price.gross - (rp.partsSell || 0)),
           cost: rp.serviceCost,
           margin: travelMargin,
         }).travel
@@ -237,7 +241,7 @@ export async function RepairLetterView({ id }: { id: string }) {
 
   const warrantyMonths =
     rp.warrantyMonths != null ? rp.warrantyMonths : DEFAULT_WARRANTY_MONTHS;
-  const totalLabel = money(quote.value != null ? quote.value : rp.total || 0);
+  const totalLabel = money(price.net);
   // #275: an optional lift rental is named, with its own price, in the cost line.
   const lift = printedLift(rp, travelMargin);
 
@@ -480,6 +484,9 @@ export async function RepairLetterView({ id }: { id: string }) {
 
             <p style={{ margin: "0 0 4px" }}>
               <strong>The above services will cost {totalLabel}</strong>
+              {price.credit > 0 && (
+                <span data-testid="letter-reward-credit"> after a {money(price.credit)} rewards credit</span>
+              )}
               {lift
                 ? ", including " +
                   (lift.count > 1 ? lift.count + " lift rentals" : "a lift rental") +

@@ -10,6 +10,8 @@ import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { TRAVEL_FLY_LINE, flightOf } from "@/lib/travel-plan";
 import { printedLift, travelLineShare } from "@/lib/service-pricing";
+import { serviceLetterPrice } from "@/lib/rewards/service-credit";
+import { LetterCreditRows } from "@/components/rewards/letter-credit-rows";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -217,7 +219,10 @@ export async function FlameLetterView({ id }: { id: string }) {
   const totalHours = travelHours + inspectionHours;
   const hasTrip = rtMiles > 0;
 
-  const totalLabel = money(quote.value != null ? quote.value : ft.total || 0);
+  // #282 phase 3: `value` is net of any Rewards credit; every component line
+  // (travel share, lift) reconciles to the pre-credit `gross`.
+  const price = serviceLetterPrice(quote, ft);
+  const totalLabel = money(price.net);
 
   const contact = (quote.contact || ft.contact || null) as FtContact;
   const contactName = contact?.name || "";
@@ -286,7 +291,7 @@ export async function FlameLetterView({ id }: { id: string }) {
       qty: money(
         travelLineShare({
           flightTotal: flight.total,
-          total: quote.value != null ? quote.value : ft.total || 0,
+          total: price.gross,
           cost: ft.cost,
           margin: travelMargin,
         }).travel
@@ -652,6 +657,7 @@ export async function FlameLetterView({ id }: { id: string }) {
                 <div style={{ fontSize: "9pt", color: "#8c919c", marginTop: 6, lineHeight: 1.5 }}>
                   {priceSupport}
                 </div>
+                <LetterCreditRows gross={price.gross} credit={price.credit} net={price.net} mono={MONO} />
               </div>
               <div style={{ flexShrink: 0, display: "flex", alignItems: "baseline", gap: 5 }}>
                 <span style={{ fontFamily: MONO, fontSize: "34pt", fontWeight: 600, letterSpacing: "-.02em", color: "#111" }}>

@@ -63,6 +63,8 @@ import {
   travelLineShare,
 } from "@/lib/service-pricing";
 import { getLiftRate } from "@/lib/service-quote-inputs";
+import { quoteRewardCredit } from "@/lib/rewards/credit-line";
+import { serviceLetterPrice } from "@/lib/rewards/service-credit";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -230,6 +232,11 @@ export async function signerFor(
   };
 }
 
+/** #282 phase 3: the Rewards credit line of a renewal-letter PDF. */
+function creditSentence(p: { gross: number; credit: number; net: number }): string {
+  return `A ${money(p.credit)} rewards credit is applied to the quoted price of ${money(p.gross)}; the total below is after the credit.`;
+}
+
 /** #275: the renewal letter's lift sentence (the PDF letter is prose). */
 function liftSentence(count: number, line: number): string {
   return `This price includes ${count > 1 ? count + " lift rentals" : "a lift rental"} (${money(line)}).`;
@@ -336,12 +343,15 @@ async function ensureFlameRenewalQuote(
   job: FlameJob,
   me: string
 ): Promise<RenewalPricing> {
-  const lastPrice = Math.round(job.value || 0);
+  const prior = job.quoteId ? await getQuote(job.quoteId) : null;
+  // #282 phase 3: last year's price BEFORE any Rewards credit — the job
+  // carries the quote's net value, and a credit is not a price change.
+  // Renewals never carry a credit themselves (a fresh subdoc below).
+  const lastPrice = Math.round((job.value || 0) + quoteRewardCredit(prior));
   const existing = await byRenewalOf(job.id);
   if (existing && existing.quoteType === "flame_test")
     return { quote: existing, lastPrice, reasons: [] };
 
-  const prior = job.quoteId ? await getQuote(job.quoteId) : null;
   const priorFt =
     prior && prior.quoteType === "flame_test" && prior.flameTest
       ? (prior.flameTest as FlameTestDoc)
@@ -540,7 +550,7 @@ async function flameLetterDoc(
           venueName,
           travelLineShare({
             flightTotal: flight.total,
-            total: quote.value != null ? quote.value : ft.total || 0,
+            total: serviceLetterPrice(quote, ft).gross,
             cost: ft.cost,
             margin,
           }).travel
@@ -566,6 +576,9 @@ async function flameLetterDoc(
   // #275: an optional lift rental is named with its own price.
   const ftLift = printedLift(ft, typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0);
   if (ftLift) blocks.push({ kind: "p", text: liftSentence(ftLift.count, ftLift.line) });
+  // #282 phase 3: a Rewards credit staff applied on the quote is named.
+  const ftCredit = serviceLetterPrice(quote, ft);
+  if (ftCredit.credit > 0) blocks.push({ kind: "p", text: creditSentence(ftCredit) });
 
   const contact = (quote.contact as FtContact) || ft.contact || null;
   const head = await letterheadJpeg(settings);
@@ -589,7 +602,7 @@ async function flameLetterDoc(
       flight ? "priceLineFly" : rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
       {
         curtainsLabel,
-        price: money(quote.value != null ? quote.value : ft.total || 0),
+        price: money(serviceLetterPrice(quote, ft).net),
       }
     ),
     costTail: renderField(ov, "flame_proposal", "costTail", {}),
@@ -729,12 +742,15 @@ async function ensureInspectionRenewalQuote(
   rec: InspectionRecord,
   me: string
 ): Promise<RenewalPricing> {
-  const lastPrice = Math.round(rec.value || 0);
+  const prior = rec.quoteId ? await getQuote(rec.quoteId) : null;
+  // #282 phase 3: last year's price BEFORE any Rewards credit — the job
+  // carries the quote's net value, and a credit is not a price change.
+  // Renewals never carry a credit themselves (a fresh subdoc below).
+  const lastPrice = Math.round((rec.value || 0) + quoteRewardCredit(prior));
   const existing = await byRenewalOf(rec.id);
   if (existing && existing.quoteType === "inspection")
     return { quote: existing, lastPrice, reasons: [] };
 
-  const prior = rec.quoteId ? await getQuote(rec.quoteId) : null;
   const priorIn =
     prior && prior.quoteType === "inspection" && prior.inspection
       ? (prior.inspection as InspectionDoc)
@@ -926,7 +942,7 @@ async function inspectionLetterDoc(
           venueName,
           travelLineShare({
             flightTotal: flight.total,
-            total: quote.value != null ? quote.value : insp.total || 0,
+            total: serviceLetterPrice(quote, insp).gross,
             cost: insp.cost,
             margin,
           }).travel
@@ -951,6 +967,9 @@ async function inspectionLetterDoc(
   // #275: an optional lift rental is named with its own price.
   const inLift = printedLift(insp, typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0);
   if (inLift) blocks.push({ kind: "p", text: liftSentence(inLift.count, inLift.line) });
+  // #282 phase 3: a Rewards credit staff applied on the quote is named.
+  const inCredit = serviceLetterPrice(quote, insp);
+  if (inCredit.credit > 0) blocks.push({ kind: "p", text: creditSentence(inCredit) });
 
   const contact = (quote.contact as FtContact) || insp.contact || null;
   const head = await letterheadJpeg(settings);
@@ -975,7 +994,7 @@ async function inspectionLetterDoc(
       flight ? "priceLineFly" : rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
       {
         lineSetsLabel,
-        price: money(quote.value != null ? quote.value : insp.total || 0),
+        price: money(serviceLetterPrice(quote, insp).net),
       }
     ),
     costTail: renderField(ov, "inspection_proposal", "costTail", {}),
