@@ -51,9 +51,10 @@ export async function getRewardsProgram(): Promise<RewardsProgram> {
 
 /**
  * Save the program (already validated by the caller). Perks are whatever the
- * caller passes (Settings → Rewards passes the stored ones through until the
- * phase-4 editor lands); `launchedAt` is stamped the first time `enabled`
- * turns on and never moves after that.
+ * caller passes (the program form passes the stored ones through; the #282
+ * phase 4 Perks editor saves through stores/reward-perks.ts saveRewardsPerks);
+ * `launchedAt` is stamped the first time `enabled` turns on and never moves
+ * after that.
  */
 export async function saveRewardsProgram(input: Omit<RewardsProgram, "launchedAt">): Promise<RewardsProgram> {
   const prev = await getRewardsProgram();

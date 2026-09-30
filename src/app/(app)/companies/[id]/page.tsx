@@ -46,6 +46,7 @@ import { PortalAccessCard } from "./portal-access";
 import { RewardsCard } from "./rewards-card";
 import { companyRewards, getRewardsProgram } from "@/lib/stores/rewards";
 import { companyCredit } from "@/lib/stores/reward-ledger";
+import { companyPerkPanel } from "@/lib/stores/reward-perks";
 import EditCustomerModal from "../edit-modal";
 import VenueDialog from "../venue-dialog";
 import { DeleteVisitButton } from "../delete-visit-button";
@@ -389,6 +390,21 @@ export default async function CustomerDetailPage({
             credit={rewardCredit}
             canAdjust={can("manage_users", me.roles)}
             quoteRefs={Object.fromEntries(quotes.filter((q) => q.customerId === cust.id).map((q) => [q.id, displayQuoteNumber(q)]))}
+            perks={
+              rewardCredit
+                ? {
+                    // #282 phase 4 — availability at render time; Mark used re-checks on the server.
+                    ...companyPerkPanel(rewardsProgram.perks, rewards.earned, rewardCredit.entries),
+                    allPerks: rewardsProgram.perks,
+                    quotes: quotes
+                      .filter((q) => q.customerId === cust.id)
+                      .slice(0, 60)
+                      .map((q) => ({ id: q.id, label: `${displayQuoteNumber(q)} · ${q.name || "Quote"}`.slice(0, 80) })),
+                    canMark: can("create", me.roles),
+                    canUndo: can("manage_users", me.roles),
+                  }
+                : null
+            }
           />
         )}
 

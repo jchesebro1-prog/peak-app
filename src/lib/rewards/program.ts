@@ -36,6 +36,12 @@ export type Perk = {
   level: RewardLevel;
   frequency: PerkFrequency;
   active: boolean;
+  /**
+   * #282 phase 4: a perk removed in Settings → Rewards stays in the blob as a
+   * tombstone (always inactive, hidden from the editor) so past uses on the
+   * ledger keep their name and its id is never minted again.
+   */
+  removed?: boolean;
 };
 
 export type RewardsProgram = {
@@ -47,7 +53,7 @@ export type RewardsProgram = {
   earnPct: Record<RewardLevel, number>;
   /** One-time starting credit from history (phase 2 posts it). */
   retro: { ratePct: number; capPerCustomer: number };
-  /** Perk definitions (phase 4 edits them; phase 1 keeps whatever is stored). */
+  /** Perk definitions, in display order (Settings → Rewards → Perks, #282 phase 4). */
   perks: Perk[];
   /** Stamped the first time `enabled` turns on; never cleared. */
   launchedAt?: number;
@@ -137,13 +143,15 @@ function sanitizePerks(raw: unknown): Perk[] {
       id = `perk-${n}`;
     }
     seen.add(id);
+    const removed = o.removed === true;
     out.push({
       id,
       name,
       description: String(o.description ?? "").trim().slice(0, 1000),
       level: isRewardLevel(o.level) ? o.level : "base",
       frequency: o.frequency === "yearly" ? "yearly" : "once",
-      active: o.active !== false,
+      active: !removed && o.active !== false,
+      ...(removed ? { removed: true } : {}),
     });
   }
   return out;

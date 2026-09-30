@@ -35,6 +35,8 @@ import { portalQuotePdfPreparing, portalQuotePdfSource } from "@/lib/quote-pdf/p
 import { latestSentRevision, pdfView } from "@/lib/quote-pdf/state";
 import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectView } from "@/lib/portal-projects";
 import { getAllProjects } from "@/lib/stores/projects";
+import { portalRewards } from "@/lib/stores/reward-perks";
+import { PortalRewardsCard } from "./rewards-card";
 
 export const dynamic = "force-dynamic";
 /** #222/#245: Refresh pricing → refreshPortalQuote → scheduleQuotePdf renders
@@ -249,7 +251,7 @@ export default async function PortalPage({
 
   /* -------- tenant-scoped data (customerId comes from the grant ONLY) -------- */
   const cid = session.customerId;
-  const [cust, quotes, leads, fRenewals, iRenewals, projects, cart] = await Promise.all([
+  const [cust, quotes, leads, fRenewals, iRenewals, projects, cart, rewards] = await Promise.all([
     getCustomer(cid),
     allQuotes(),
     allLeads(),
@@ -258,6 +260,8 @@ export default async function PortalPage({
     getAllProjects(),
     // #245: the nav's Quote (N) — never read in a team preview.
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
+    // #282 phase 4: the grant's company only (null while the program is off).
+    portalRewards(cid),
   ]);
   const custName = cust?.name || "your organization";
   const venues = cust?.locations || [];
@@ -641,6 +645,9 @@ export default async function PortalPage({
           )}
         </div>
       )}
+
+      {/* #282 phase 4 — rewards: level, progress, credit, available perks (never margins) */}
+      {rewards && <PortalRewardsCard view={rewards} companyName={companyName} />}
 
       {/* open requests */}
       <div style={CARD}>

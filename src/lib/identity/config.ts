@@ -52,7 +52,9 @@ export const CHANNEL_LABELS = ["work", "mobile", "home", "other"] as const;
  * "Customer tiers" rates in the estimating-rules registry (tiers.<key>);
  * the margins themselves are admin-editable there. Jeff 2026-07-19:
  * Base 30 · Copper 27 · Silver 22 · Gold 20 · Platinum 15 · Reseller 10 ·
- * Employee 5. Default is Base; never shown to customers.
+ * Employee 5. Default is Base. The ladder NAMES (Base…Platinum) are shown to
+ * customers as reward levels on the portal's Rewards card (#282 phase 4); the
+ * margins never are, and Reseller/Employee are never shown.
  */
 export const PRICING_TIERS = [
   "base",

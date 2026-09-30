@@ -16,6 +16,7 @@ import {
   postStartingCredit,
 } from "@/lib/stores/reward-ledger";
 import { parseAdjustAmount } from "@/lib/rewards/ledger";
+import { markPerkUsed, undoPerkUse } from "@/lib/stores/reward-perks";
 
 /**
  * Customer Rewards suggestion actions (#282 Phase 1, spec §3). Both need the
@@ -119,4 +120,39 @@ export async function postAdjustmentAction(companyId: string, amount: string, no
   if (!res.ok) return res;
   refresh(id);
   return { ok: true, message: `Adjusted ${n > 0 ? "+" : "−"}$${Math.abs(n).toFixed(2)}.` };
+}
+
+/* ---------- #282 phase 4: perks ---------- */
+
+/**
+ * Company card → Mark used (`create`). The store recomputes availability
+ * (program on, level, once/yearly window, active) and checks the quote link
+ * belongs to the company — nothing is trusted from the client.
+ */
+export async function markPerkUsedAction(
+  companyId: string,
+  perkId: string,
+  quoteId: string,
+  note: string
+): Promise<CreditActionResult> {
+  const me = await requireUser();
+  if (!can("create", me.roles)) return { ok: false, error: "You need create permission to mark a perk used." };
+  const id = String(companyId || "").trim();
+  if (!id) return { ok: false, error: "Company not found." };
+  const res = await markPerkUsed({ companyId: id, perkId: String(perkId || ""), quoteId, note, by: me.name });
+  if (!res.ok) return res;
+  refresh(id);
+  return { ok: true, message: "Marked used." };
+}
+
+/** Company card → Undo a perk use (manage_users): posts an `unperk` entry; the use stays on the ledger. */
+export async function undoPerkUseAction(companyId: string, useId: string): Promise<CreditActionResult> {
+  const me = await requireUser();
+  if (!can("manage_users", me.roles)) return { ok: false, error: "Only an admin (manage users) can undo a perk use." };
+  const id = String(companyId || "").trim();
+  if (!id) return { ok: false, error: "Company not found." };
+  const res = await undoPerkUse(id, String(useId || ""), me.name);
+  if (!res.ok) return res;
+  refresh(id);
+  return { ok: true, message: "Undone." };
 }

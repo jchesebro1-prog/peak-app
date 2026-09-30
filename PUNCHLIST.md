@@ -10003,3 +10003,14 @@ re-price, Copy/Move system and dashboards ignore it; the customer document print
 total; a customer change drops it. Spend adds the credit back. Card: balance, available, ledger, Adjust; `/rewards`:
 Credit column. Gates: tsc 0; test:specs 9326 PASS / 0 FAIL (+71); test:smoke 171/0; eslint 0 errors, no new warnings;
 next build OK. Browser-verified end to end on a fresh scratch datadir (migration applied cleanly). Reviewed, no findings.
+
+**Phase 4 shipped 2026-09-30 (D499–D501):** Settings → Rewards → **Perks** editor (`manage_users`; name, description,
+unlock level Base…Platinum, once/yearly, active; server-minted ids, removed perks kept hidden); availability
+(`src/lib/rewards/perks.ts`: active, earned level ≥ perk level, once = never used, yearly = 365 days since last use);
+company card **Mark used** (`create`, optional quote of the same company + note) and admin **Undo**
+(`src/lib/stores/reward-perks.ts`); `/rewards` Perks column; **portal Rewards card** on `/portal` (level, "$X to
+<next>", credit balance, available perks — never margins, %, thresholds or notes; only while the program is on; scoped
+to the grant's company, staff preview via `?preview=` as before). The `PRICING_TIERS` comment now says level names show
+to customers as reward levels. Gates: tsc 0; test:specs 9408 PASS / 0 FAIL (+81); test:smoke 173/0 (+1
+`/portal?preview=lakefront`); eslint 0 errors, no new warnings; next build OK. Browser-verified on a fresh scratch
+datadir. Reviewed: no blocking findings (portal scoping confirmed; double-click posts are deduplicated by id).

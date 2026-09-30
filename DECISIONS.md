@@ -8208,3 +8208,27 @@ even while the program is off, so balances can be ready on launch day; before `l
 Known edges left as-is: un-winning a system quote leaves its spawned project counting as spend (D491), and the
 Estimator's local Customer-preview PDF can fail on a dev machine without Vercel Blob (the print route renders fine).
 
+## D499. Perk uses and undos are ledger entries that never touch the balance (#282, 2026-09-30)
+
+Mark used posts a `perk` entry (amount 0) numbered per company and perk (`perk:<company>:<perk>:<n>`), so a double
+click or a concurrent second request lands on the same id and posts once. Undo (`manage_users`) posts a separate
+`unperk` entry rather than editing the use, keeping the ledger add-only; balance math ignores both kinds. A perk is
+available when active, not removed, and the company's earned level ≥ its level; `once` = no un-undone use ever,
+`yearly` = 365 days after the last use (the card shows the next date). Mark used is refused while the program is off;
+Undo is allowed, as a correction.
+
+## D500. Removed perks are kept hidden so history keeps its names (#282, 2026-09-30)
+
+Perk ids are minted on the server (name slug + 4 random characters) and never reused — including ids the ledger already
+references. Removing a perk sets `removed: true` and makes it inactive instead of deleting it, so past uses still show
+its name and a new perk can't inherit its history.
+
+## D501. The portal shows reward level names, never margins; amends D87 for names only (#282, 2026-09-30)
+
+The portal Rewards card shows the **earned** level (from lifetime spend, not the pricing tier), progress to the next
+level, the credit balance (a negative balance shows as $0.00), and available perks, with "Credit is applied by your
+Peak estimator on your next quote." It never shows margins, earn %, thresholds, notes or quote links, and is hidden while
+the program is off. Tier names were "never shown to customers" (D87); they now appear as reward level names — margins
+remain internal. The card sits above "Your open requests"; on the company card perks sit between the progress bar and
+the credit section.
+
