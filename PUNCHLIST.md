@@ -9989,3 +9989,17 @@ tier, suggestion, spend, progress, counted purchases); **`/rewards`** (Ready to 
 filter; admin preview while off); **Settings → Rewards** (`/settings/rewards`, `manage_users`). Gates: tsc 0;
 test:specs 9255 PASS / 0 FAIL (+75); test:smoke 171/0 (+2 routes); eslint 0 errors, no new warnings; next build OK.
 Browser-verified on a scratch datadir. Reviewed, no findings.
+
+**Phase 2 shipped 2026-09-30 (D495–D498):** migration `0034_reward_ledger` (doc table `reward_ledger`, add-only;
+wiped by the go-live reset); pure `src/lib/rewards/ledger.ts` + store `src/lib/stores/reward-ledger.ts`. After every
+`setStatus()` transition the quote's entries are reconciled to its status — Won posts `earn` (earned level % on the net
+value) and `redeem` (credit on the quote); leaving Won posts `reverse`/`unredeem`; re-wins number fresh ids; the
+Daylite import and `historical-import` post nothing; failures are logged, never block the status. Settings → Rewards →
+**Starting credit** (Post / Post all, once per company); admin **Adjust** on the company card. Estimator **Apply
+credit** (totals sidebar, `create`): one "Rewards credit" line on the last system, ≤ available (balance − credit parked
+on the company's other open quotes) and ≤ the pre-credit total; the server clamps it and refuses a negative price on any
+other line; freight, #267 typed sell/$25 rounding (before credit), margins, parts/spec/client-package BOMs, tier
+re-price, Copy/Move system and dashboards ignore it; the customer document prints "Rewards credit −$X" and the net
+total; a customer change drops it. Spend adds the credit back. Card: balance, available, ledger, Adjust; `/rewards`:
+Credit column. Gates: tsc 0; test:specs 9326 PASS / 0 FAIL (+71); test:smoke 171/0; eslint 0 errors, no new warnings;
+next build OK. Browser-verified end to end on a fresh scratch datadir (migration applied cleanly). Reviewed, no findings.
