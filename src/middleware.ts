@@ -9,7 +9,10 @@ import { authConfig } from "./auth.config";
  * enforced inside every portal page/action via portalSession() — it is
  * exempted here so customers never see the team login. /print/* is the
  * headless-Chrome print route for saved quote PDFs (#222); it checks its own
- * 120 s signed token and 404s without one. /api/gmail/sync is the cron
+ * 120 s signed token and 404s without one. /pdf.worker.min.mjs is the
+ * public pdf.js worker (a static library file, no data) that the
+ * /print/part-thumb page loads — headless Chrome has no session, so it must
+ * be reachable without one (#245). /api/gmail/sync is the cron
  * endpoint (D74) — no session exists on a cron call, so it is exempted
  * here and guards itself with a CRON_SECRET bearer check instead.
  * /api/native/auth/* (start, exchange) run before a session exists in the
@@ -24,6 +27,6 @@ export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/recordings/upload|login|lead-intake|portal|print/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/recordings/upload|login|lead-intake|portal|print/|pdf\\.worker\\.min\\.mjs|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
   ],
 };

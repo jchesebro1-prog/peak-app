@@ -38059,3 +38059,18 @@ import { narrativeBlocks as n281Blocks } from "@/app/(app)/estimator/narrative";
   ok(eq(n281Blocks("-no space\n-5 degrees"), [{ kind: "p", lines: ["-no space", "-5 degrees"] }]),
     "#281 narrativeBlocks: \"-\" without a space stays text");
 }
+
+// ---------------------------------------------------------------------------
+// #245 fix — the pdf.js worker must be reachable without a team session
+// (headless Chrome rendering /print/part-thumb has none).
+// ---------------------------------------------------------------------------
+import { readFileSync as mw245Read } from "node:fs";
+{
+  const src = mw245Read("src/middleware.ts", "utf8");
+  const m = src.match(/matcher:\s*\[\s*"([^"]+)"/);
+  ok(!!m, "#245 middleware: matcher string found");
+  const re = new RegExp("^" + (m ? m[1].replace(/\\\\/g, "\\") : "$^") + "$");
+  ok(!re.test("/pdf.worker.min.mjs"), "#245 middleware: /pdf.worker.min.mjs skips the login gate");
+  ok(!re.test("/print/part-thumb/PD-x"), "#245 middleware: /print/* still skips the login gate");
+  ok(re.test("/catalog/documents") && re.test("/"), "#245 middleware: app pages still go through the login gate");
+}
