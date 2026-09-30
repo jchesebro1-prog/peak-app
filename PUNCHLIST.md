@@ -9968,3 +9968,14 @@ an itemized system's narrative doesn't print. It collapses to a tab like the Sys
 The printed narrative (preview, PDF, portal — one `QuoteDocument`) keeps paragraphs (blank line), line breaks and `- `
 bullets via `narrativeBlocks()` (`src/app/(app)/estimator/narrative.ts`). Still printed in Narrative mode only. No data
 change. Spec `docs/superpowers/specs/2026-09-29-estimator-narrative-column-design.md`. Harness `#281`. See D488.
+
+---
+
+## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — IN PROGRESS
+
+**Reported:** Jeff (2026-09-30): "Can we start building in a rewards tracker for customer purchases that works where we
+can give rewards and other benefits based on how much they have purchased." Designed with Jeff the same day (all
+reward kinds; won quotes + Daylite history; lifetime; suggested tier moves; % credit by level; capped retroactive
+starting credit; staff-applied credit that never expires; portal card). Spec:
+`docs/superpowers/specs/2026-09-30-customer-rewards-design.md`. Building in four phases: tracker + suggestions → credit
+→ service-quote credit → perks + portal.
