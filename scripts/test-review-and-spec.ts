@@ -38693,7 +38693,7 @@ function r282dText(html: string): string {
 {
   const perk = (id: string, level: R282dPerk["level"], frequency: R282dPerk["frequency"], extra: Partial<R282dPerk> = {}): R282dPerk =>
     ({ id, name: `Perk ${id}`, description: `About ${id}`, level, frequency, active: true, ...extra });
-  const use = (perkId: string, n: number, at: number): R282dEntry =>
+  const mkUse = (perkId: string, n: number, at: number): R282dEntry =>
     ({ id: r282dUseId("co", perkId, n), companyId: "co", kind: "perk", amount: 0, perkId, at, by: "T" });
   const undo = (u: R282dEntry, at: number): R282dEntry =>
     ({ id: r282dUndoId(u.id), companyId: "co", kind: "unperk", amount: 0, perkId: u.perkId, at, by: "T" });
@@ -38715,19 +38715,19 @@ function r282dText(html: string): string {
   ok(r282dStatus(copperOnce, { earned: "copper", entries: [], now: NOW }).available, "#282 P4 availability: earned level = perk level → available");
   ok(r282dStatus(copperOnce, { earned: "platinum", entries: [], now: NOW }).available, "#282 P4 availability: a higher earned level unlocks it too");
   ok(r282dStatus(perk("b", "base", "once"), { earned: "base", entries: [], now: NOW }).available, "#282 P4 availability: a Base perk is for everyone");
-  const u1 = use("co1", 1, NOW - 1000);
+  const u1 = mkUse("co1", 1, NOW - 1000);
   const s1 = r282dStatus(copperOnce, { earned: "copper", entries: [u1], now: NOW });
   ok(!s1.available && s1.block === "used" && s1.lastUsedAt === NOW - 1000, "#282 P4 availability: a once perk is gone after one use");
-  ok(!r282dStatus(copperOnce, { earned: "copper", entries: [use("co1", 1, NOW - 50 * r282dYear)], now: NOW }).available,
+  ok(!r282dStatus(copperOnce, { earned: "copper", entries: [mkUse("co1", 1, NOW - 50 * r282dYear)], now: NOW }).available,
     "#282 P4 availability: a once perk never comes back, however long ago");
   ok(r282dStatus(copperOnce, { earned: "copper", entries: [u1, undo(u1, NOW)], now: NOW }).available, "#282 P4 availability: an undone use frees a once perk");
-  ok(!r282dStatus(copperOnce, { earned: "copper", entries: [use("other", 1, NOW)], now: NOW }).lastUsedAt, "#282 P4 availability: another perk's use doesn't count");
-  const y1 = use("by1", 1, NOW - r282dYear + 1);
+  ok(!r282dStatus(copperOnce, { earned: "copper", entries: [mkUse("other", 1, NOW)], now: NOW }).lastUsedAt, "#282 P4 availability: another perk's use doesn't count");
+  const y1 = mkUse("by1", 1, NOW - r282dYear + 1);
   const sy = r282dStatus(baseYearly, { earned: "base", entries: [y1], now: NOW });
   ok(!sy.available && sy.block === "cooldown" && sy.nextAt === y1.at + r282dYear, "#282 P4 availability: a yearly perk used 364.99 days ago waits, with its next-available date");
-  ok(r282dStatus(baseYearly, { earned: "base", entries: [use("by1", 1, NOW - r282dYear)], now: NOW }).available,
+  ok(r282dStatus(baseYearly, { earned: "base", entries: [mkUse("by1", 1, NOW - r282dYear)], now: NOW }).available,
     "#282 P4 availability: exactly 365 days later a yearly perk is available again");
-  ok(r282dStatus(baseYearly, { earned: "base", entries: [use("by1", 1, NOW - 2 * r282dYear), use("by1", 2, NOW - 10)], now: NOW }).block === "cooldown",
+  ok(r282dStatus(baseYearly, { earned: "base", entries: [mkUse("by1", 1, NOW - 2 * r282dYear), mkUse("by1", 2, NOW - 10)], now: NOW }).block === "cooldown",
     "#282 P4 availability: the LAST use sets the yearly window");
   ok(r282dStatus(baseYearly, { earned: "base", entries: [y1, undo(y1, NOW)], now: NOW }).available, "#282 P4 availability: an undone yearly use frees it");
   ok(r282dStatus(perk("x", "base", "once", { active: false }), { earned: "platinum", entries: [], now: NOW }).block === "inactive",
@@ -38740,8 +38740,8 @@ function r282dText(html: string): string {
 
   // ---- use ids / pairing ----
   ok(r282dUseId("c", "p", 3) === "perk:c:p:3" && r282dUndoId("perk:c:p:3") === "unperk:c:p:3", "#282 P4 ids: perk:<co>:<perk>:<n>, undo = un + the use id");
-  ok(r282dNextN([u1, use("co1", 4, 1), use("zz", 9, 1)], "co1") === 5 && r282dNextN([], "co1") === 1, "#282 P4 ids: the next use number is max n + 1 for that perk");
-  const uses = r282dUses([u1, undo(u1, NOW), use("co1", 2, NOW + 5)]);
+  ok(r282dNextN([u1, mkUse("co1", 4, 1), mkUse("zz", 9, 1)], "co1") === 5 && r282dNextN([], "co1") === 1, "#282 P4 ids: the next use number is max n + 1 for that perk");
+  const uses = r282dUses([u1, undo(u1, NOW), mkUse("co1", 2, NOW + 5)]);
   ok(uses.length === 2 && uses[0].entry.id === "perk:co:co1:2" && !uses[0].undone && uses[1].undone?.kind === "unperk",
     "#282 P4 history: uses newest first, each paired with its undo");
   ok(r282dKindLabel.unperk === "Perk use undone" && r282bBalance([u1, undo(u1, NOW)]) === 0, "#282 P4 ledger: unperk is a labeled kind and moves no credit");
