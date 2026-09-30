@@ -1,4 +1,7 @@
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
+import { grossQuoteValue } from "@/lib/rewards/credit-line";
+import { serviceRewardCredit } from "@/lib/rewards/service-credit";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfView } from "@/lib/quote-pdf/state";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
@@ -22,6 +25,7 @@ import { builderTiers } from "@/lib/pricing-tiers";
 import { knobPtsFrom } from "@/lib/tier-seed";
 import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
+import { RewardCreditNotice } from "@/components/rewards/credit-notice";
 import { reviewLimitChipFor } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
 
@@ -227,9 +231,12 @@ export default async function RepairQuotePage({
       travel: normalizeTravelOverride(rp && rp.travel) ?? (legacyDrive ? { mode: "drive" } : null),
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
-      priceOverride: seedPriceOverride(editQuote.status, editQuote.value, rp && rp.priceOverride),
+      priceOverride: seedPriceOverride(editQuote.status, grossQuoteValue(editQuote), rp && rp.priceOverride),
       // #275: reopen with the saved lift (its own rate kept).
       lift: normalizeLift(rp && rp.lift, liftRate) ?? null,
+      // #282 phase 3: the Rewards credit on the saved quote (value is net of it;
+      // the typed-total seed above reads the pre-credit price).
+      rewardCredit: serviceRewardCredit(editQuote),
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
@@ -341,6 +348,7 @@ export default async function RepairQuotePage({
   return (
     <>
       <ActionError message={one(sp.err)} />
+      <RewardCreditNotice message={one(sp.credit)} />
       <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
         customers={customers}
@@ -352,6 +360,7 @@ export default async function RepairQuotePage({
         priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
         initial={initial}
         pdf={editQuote ? pdfView(editQuote.pdf, Date.now()) : null}
+        canApplyCredit={can("create", user.roles)}
         accent={settings.accent || "#7b3f8a"}
       />
     </>

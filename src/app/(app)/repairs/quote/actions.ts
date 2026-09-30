@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
@@ -31,6 +32,9 @@ import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizeLift, normalizePriceOverride, savedLift } from "@/lib/service-pricing";
+import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
+import { grossQuoteValue } from "@/lib/rewards/credit-line";
+import { netServiceTotal } from "@/lib/rewards/service-credit";
 import { getLiftRate } from "@/lib/service-quote-inputs";
 
 function quoteFailure(formData: FormData, message: string): never {
@@ -56,7 +60,7 @@ type PostedVenue = { id: string; label: string };
 type PostedPart = { name: string; qty: number; cost: number };
 
 /** Re-price + persist a repair quote; returns the saved quote id. */
-async function persist(formData: FormData): Promise<string | null> {
+async function persist(formData: FormData, out?: { creditNote?: string }): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
   const customerId = String(formData.get("customerId") || "");
@@ -169,7 +173,8 @@ async function persist(formData: FormData): Promise<string | null> {
     postedOverride: priceOverride,
     stored: existingForMarker
       ? {
-          value: existingForMarker.value,
+          // #282 phase 3: the pre-credit price — the builder's reopen-seed reads the same.
+          value: grossQuoteValue(existingForMarker),
           status: existingForMarker.status,
           priceOverride: existingRp?.priceOverride ?? null,
           priceOverrideSeeded: !!existingRp?.priceOverrideSeeded,
@@ -195,6 +200,21 @@ async function persist(formData: FormData): Promise<string | null> {
     rates,
     travelRates
   );
+
+  // #282 phase 3 (spec §5): the Rewards credit applies AFTER the engine's
+  // final total (the $25 rounding, a typed total and the lift are all in
+  // r.total). Re-checked here against the company's available credit right
+  // now — the posted amount is only ever clamped down; `create` is needed to
+  // grow it; a won/lost quote keeps its own; a customer change drops it.
+  const credit = await settleServiceCreditFor({
+    posted: formData.get("rewardCredit"),
+    total: Math.round(r.total),
+    customerId: customerId || null,
+    source: "repair",
+    mayApply: can("create", user.roles),
+    prior: existingForMarker,
+  });
+  if (out && credit.notice) out.creditNote = credit.notice;
 
   const custName = (await nameFor(customerId)) || cust?.name || "";
   const contact = contactName
@@ -222,7 +242,8 @@ async function persist(formData: FormData): Promise<string | null> {
     customer: custName,
     customerId: customerId || null,
     locationId: venueInputs[0].id ?? null,
-    value: Math.round(r.total),
+    // #282 phase 3: net of any Rewards credit (what the customer pays).
+    value: netServiceTotal(r.total, credit.credit),
     margin: r.serviceMargin,
     pricingTier: tier.tier,
     tierMargin: serviceMargin,
@@ -265,6 +286,7 @@ async function persist(formData: FormData): Promise<string | null> {
       ...(r.priceOverride != null ? { priceOverride: r.priceOverride } : {}),
       ...(r.priceOverride != null && priceOverrideSeeded ? { priceOverrideSeeded: true } : {}),
       total: Math.round(r.total),
+      ...(credit.credit > 0 ? { rewardCredit: credit.credit } : {}),
       contact,
     },
   };
@@ -285,8 +307,10 @@ async function persist(formData: FormData): Promise<string | null> {
 
 export async function saveRepairQuote(formData: FormData): Promise<void> {
   let id: string | null;
+  // #282 phase 3: set when the server clamped or dropped the Rewards credit.
+  const note: { creditNote?: string } = {};
   try {
-    id = await persist(formData);
+    id = await persist(formData, note);
   } catch (error) {
     // `persist()` opens with requireUser(), which sends an expired session to
     // /login BY throwing — a catch in the app directory must never eat that
@@ -296,7 +320,10 @@ export async function saveRepairQuote(formData: FormData): Promise<void> {
     quoteFailure(formData, "Couldn’t save the repair quote — please try again.");
   }
   revalidatePath("/", "layout");
-  if (id) redirect("/repairs/quote?id=" + encodeURIComponent(id) + "&saved=1");
+  if (id)
+    redirect(
+      "/repairs/quote?id=" + encodeURIComponent(id) + "&saved=1" + (note.creditNote ? "&credit=" + encodeURIComponent(note.creditNote) : "")
+    );
 }
 
 export async function approveRepairQuote(formData: FormData): Promise<void> {

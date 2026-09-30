@@ -14,6 +14,7 @@ import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 import { TravelModePanel } from "@/components/travel-mode-panel";
 import { LiftRentalPanel } from "@/components/lift-rental-panel";
+import { ServiceRewardCreditPanel } from "@/components/rewards/service-credit-panel";
 import {
   FLY_CREW_DEFAULTS,
   draftFromOverride,
@@ -118,6 +119,8 @@ export type BuilderInitial = {
   priceOverride?: number | null;
   /** #275: the saved lift rental (null/absent = none). */
   lift?: LiftRental | null;
+  /** #282 phase 3: the Rewards credit on the saved quote (whole dollars; 0/absent = none). */
+  rewardCredit?: number;
   /** #254: the saved quote's own knob in points (absent for a new quote) — never re-seeded on load. */
   marginPts?: number | null;
   /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
@@ -328,6 +331,7 @@ export function QuoteBuilder({
   initial,
   accent,
   pdf = null,
+  canApplyCredit = false,
 }: {
   customers: BuilderCustomer[];
   offices: BuilderOffice[];
@@ -341,6 +345,8 @@ export function QuoteBuilder({
   accent: string;
   /** #222 — the saved quote's PDF state (null for an unsaved quote). */
   pdf?: QuotePdfView | null;
+  /** #282 phase 3: the user has `create` — may apply Rewards credit. */
+  canApplyCredit?: boolean;
 }) {
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [quoteName, setQuoteName] = useState(initial.quoteName);
@@ -375,6 +381,9 @@ export function QuoteBuilder({
   const [priceText, setPriceText] = useState(
     initial.priceOverride != null ? String(initial.priceOverride) : ""
   );
+  /* #282 phase 3: the Rewards credit (whole dollars) — off after the engine's
+     total; the save re-checks it on the server. */
+  const [rewardCredit, setRewardCredit] = useState(initial.rewardCredit || 0);
   const [pending, startTransition] = useTransition();
   const wonGuard = useWonEditGuard(initial.status);
 
@@ -456,6 +465,8 @@ export function QuoteBuilder({
     reseedTier(c, primary ? primary.name : "");
     setVenueSel(sel);
     setPriceText(""); // a new customer is a new price
+    // #282 phase 3: Rewards credit belongs to one customer.
+    if (id !== customerId) setRewardCredit(0);
     setQuoteName(c ? c.name + " — Rigging inspection" : "");
     setContactSel(primary ? primary.name : "");
     setContactManual("");
@@ -551,6 +562,7 @@ export function QuoteBuilder({
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
     fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
     fd.set("lift", JSON.stringify(liftDraft));
+    fd.set("rewardCredit", String(rewardCredit));
     // #217 fix wave: no priceOverrideSeeded post — the save action derives
     // the marker itself from the stored quote, never from a client flag.
     fd.set(
@@ -1134,6 +1146,19 @@ export function QuoteBuilder({
                   onReset={resetToAuto}
                   disabled={!r}
                   accent={accent}
+                />
+                <ServiceRewardCreditPanel
+                  customerId={customerId}
+                  quoteId={editingId}
+                  status={initial.status}
+                  portal={!!initial.portal}
+                  canApply={canApplyCredit}
+                  total={r ? total : 0}
+                  credit={rewardCredit}
+                  onCredit={(c) => {
+                    setRewardCredit(c);
+                    dirty();
+                  }}
                 />
               </div>
 
