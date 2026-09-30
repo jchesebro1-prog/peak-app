@@ -9935,3 +9935,20 @@ view is unchanged — a card opens the drawer, which has Delete. Like designs, c
 #273, #277, #278), deleting a lead is limited to users with `create`: `deleteLeadAction` refuses otherwise (now
 returning an error), and the table, Worklist and drawer Delete buttons are hidden from a Reviewer; the drawer only
 closes on a successful delete.
+
+## 281. Estimator — a big narrative editor in the right column; Quote details drop down from the top bar — DONE 2026-09-29 (D488)
+
+**Reported:** Jeff (2026-09-29): "I need the side bar in the estimator to allow for adding the text for the section for
+the narrative of that section. I need a bigger box to be able to edit. I also would like the quote details to move into
+the top bar as an expander that can drop down to edit the details and then pop back into the bar."
+
+**Done.** Quote details (prepared for / venue / attn / category, install timeframe, quote note, assumptions) left the
+right column for a chip on the top bar's second line (`Customer · Venue · attn Contact ▾`, or "Add quote details"); it
+drops a three-column dark panel over the page and folds back on the chip, Done, Esc or a click outside — fields and
+saving unchanged. The right column is now a light **System narrative** editor that follows the active system (the left
+Systems list, or a click anywhere in a card): the Itemized/Narrative switch, a column-height textarea, and a hint that
+an itemized system's narrative doesn't print. It collapses to a tab like the Systems rail
+(`quartzite.estimator.narrOpen`). The card's one-line narrative box became a snippet that opens + focuses the editor.
+The printed narrative (preview, PDF, portal — one `QuoteDocument`) keeps paragraphs (blank line), line breaks and `- `
+bullets via `narrativeBlocks()` (`src/app/(app)/estimator/narrative.ts`). Still printed in Narrative mode only. No data
+change. Spec `docs/superpowers/specs/2026-09-29-estimator-narrative-column-design.md`. Harness `#281`. See D488.
