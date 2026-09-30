@@ -37724,3 +37724,27 @@ async function track274AsyncChecks(): Promise<void> {
     if (secondId) await t274Delete(secondId);
   }
 }
+
+// ---------------------------------------------------------------------------
+// #281 — estimator narrative column: the printed narrative's plain-text blocks.
+// ---------------------------------------------------------------------------
+import { narrativeBlocks as n281Blocks } from "@/app/(app)/estimator/narrative";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok(eq(n281Blocks(""), []) && eq(n281Blocks("  \n \t\n"), []) && eq(n281Blocks(undefined), []),
+    "#281 narrativeBlocks: empty / whitespace-only → no blocks (the fallback sentence prints)");
+  ok(eq(n281Blocks("One line of scope."), [{ kind: "p", lines: ["One line of scope."] }]),
+    "#281 narrativeBlocks: a single line → one paragraph");
+  ok(eq(n281Blocks("First para.\n\nSecond para."), [{ kind: "p", lines: ["First para."] }, { kind: "p", lines: ["Second para."] }]),
+    "#281 narrativeBlocks: a blank line splits two paragraphs");
+  ok(eq(n281Blocks("First para.\r\n   \r\nSecond para.\r\n"), [{ kind: "p", lines: ["First para."] }, { kind: "p", lines: ["Second para."] }]),
+    "#281 narrativeBlocks: a whitespace-only line counts as blank, and \\r\\n is normalized");
+  ok(eq(n281Blocks("Line one  \nLine two"), [{ kind: "p", lines: ["Line one", "Line two"] }]),
+    "#281 narrativeBlocks: single line breaks are kept inside a paragraph (lines trimmed at the end)");
+  ok(eq(n281Blocks("- Truss\n  - Motors \n- Cable"), [{ kind: "ul", items: ["Truss", "Motors", "Cable"] }]),
+    "#281 narrativeBlocks: a run of \"- \" lines → one bullet list, markers stripped, items trimmed");
+  ok(eq(n281Blocks("Includes:\n- Truss\n- Motors"), [{ kind: "p", lines: ["Includes:"] }, { kind: "ul", items: ["Truss", "Motors"] }]),
+    "#281 narrativeBlocks: a paragraph then bullets in one group → p then ul");
+  ok(eq(n281Blocks("-no space\n-5 degrees"), [{ kind: "p", lines: ["-no space", "-5 degrees"] }]),
+    "#281 narrativeBlocks: \"-\" without a space stays text");
+}

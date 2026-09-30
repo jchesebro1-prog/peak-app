@@ -8110,3 +8110,13 @@ change (customer/venue, including a manual Local/Travel pick) replaces those mil
 no-mileage warning, when the new venue isn't located — so a far venue's 342 mi can't linger and bill per day as local.
 Anything typed (a typed 0 included) is the user's and never overwritten; drafts saved before the flag count as typed.
 
+
+## D488. A system narrative is plain text; it still prints in Narrative mode only (#281, 2026-09-29)
+
+Jeff chose plain text over a rich-text toolbar: a blank line starts a paragraph, a line beginning `- ` prints as a
+bullet, single line breaks are kept — `narrativeBlocks()` renders it, the stored `SpecSection.narrative` stays the raw
+string, so older narratives print exactly as before (one paragraph) and nothing migrates. He also kept today's rule that
+an itemized system's narrative is not printed; the editor says so instead of printing it. Quote details moved to a
+top-bar dropdown that starts closed on every load (not remembered), and closing it cancels a pending won-quote change
+guard rather than leaving it hanging off-screen. The old `quartzite.estimator.metaOpen` preference is simply no longer
+read.
