@@ -9810,7 +9810,7 @@ mob now produces its #270 "Mileage — <mob>" line with the per-day basis. Gates
 the Local pre-fill + Mileage line and the no-route warning.
 ---
 
-## 274. Estimator — a track configurator for curtain / traveler track rigging — IN PROGRESS (Phase A shipped 2026-09-29, D486)
+## 274. Estimator — a track configurator for curtain / traveler track rigging — DONE 2026-09-30 (D486, D489)
 
 **Reported:** 2026-09-23 practice run: "Add a way to quote track rigging on Estimate." **Jeff (2026-09-29): "We need a
 track configurator."** (Not ready-made track assemblies.)
@@ -9839,8 +9839,24 @@ part search — the Equipment map's picker moved to a shared `part-picker.tsx` u
 test:specs 9048 PASS / 0 FAIL (after merging main; +104 for #274); test:smoke 169/0 (new route added); eslint 0 errors,
 no new warnings; next build OK. Browser-verified; reviewed, no findings.
 
-**Phase B (next):** `track-bom.ts` pricing, the Estimator's track modal + line (`SpecItem.track`, reopen like #269), the
-curtain configurator's Add track step.
+**Phase B shipped 2026-09-30:** `estimator/track-bom.ts` resolves the engine's rows to live catalog parts and builds one
+"lot" line (`sku TRK-<series>`, `components` = the parts, `track` = the inputs, the series' manufacturer; " (N tracks)"
+when qty > 1); an unmapped or deleted required part blocks Add by name. Each part sells by `catalogAddPrice`
+(`tier-reprice.ts`), now the one rule the catalog picker and CSV import use too. `estimator/track-modal.tsx`: series,
+operation, straight/curved + radius, run, mounting, trim, qty, label, Spacing, live stats + parts table. Each system gets
+**+ Configure track**; clicking a track line or its ✎ reopens it (#269's first-click-only rule, now a shared hook in
+`est-ui.tsx`) and **Update track** replaces it in place at today's prices, keeping its comment/note; a line whose series
+was deleted opens read-only. The curtain configurator's **Add track** pre-fills from the curtain (bi-parting at qty 2,
+run = width × qty, batten, "<name> track") and follows curtain edits until touched; the curtain line lands first.
+Tier re-price moves the parts with the line; Copy system re-costs them at today's catalog cost; the PM parts list
+explodes them; the customer document/preview/PDF show one line. Gates (merged with main incl. #281): tsc 0; test:specs
+9168 PASS / 0 FAIL (+61 for Phase B); test:smoke 169/0; eslint 0 errors, no new warnings; next build OK.
+Browser-verified on a scratch datadir (40' bi-parting batten track matched a hand calc; reopen → 50' replaced in place;
+curtain + Add track; save/reload; Copy; customer print one line; parts CSV). Reviewed, no findings.
+
+**Follow-ups (not done):** a track line on a portal-catalog quote reads as unavailable on Copy to new / Refresh pricing
+(no portal price); the spec builder's BOM lists a track as one line, not its parts; the TRACK badge clips on long
+two-line descriptions, like CURTAIN/LABOR.
 
 **Jeff-gated:** import the ADC price book, then create the ADC series and map each role.
 ---

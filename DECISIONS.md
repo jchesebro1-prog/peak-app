@@ -8120,3 +8120,14 @@ an itemized system's narrative is not printed; the editor says so instead of pri
 top-bar dropdown that starts closed on every load (not remembered), and closing it cancels a pending won-quote change
 guard rather than leaving it hanging off-screen. The old `quartzite.estimator.metaOpen` preference is simply no longer
 read.
+
+## D489. A track prints as one priced lot; its parts price like catalog adds (#274, 2026-09-30)
+
+A configured track lands as one Estimator line (`TRK-<series>`, qty 1, unit lot) carrying its parts in `components` and
+its inputs in `track`, so the customer sees one line and the PM parts list still orders every part. Each part sells by
+`catalogAddPrice` — cost at the tier seed, or list when a part has no cost — the rule the catalog picker and CSV import
+now share instead of each keeping its own, so a track line prices exactly like adding its parts by hand and tier
+re-pricing / Copy system treat it as an ordinary line. Update track re-prices at today's catalog but keeps the line's
+comment and internal note (the modal can't edit them). A line whose series was deleted stays on the quote and opens
+read-only rather than guessing a replacement.
+
