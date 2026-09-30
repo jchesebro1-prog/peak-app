@@ -8143,3 +8143,37 @@ while a row's own Fetch still retries one. The catalog scope reads existing imag
 links instead of an IN query over ~37k SKUs, and the quoted scope behaves exactly as before. Jeff accepted the Blob
 storage cost of holding every catalog datasheet. This depends on the earlier fix 0458add1, which exempted the pdf.js
 worker from the login gate so headless Chrome can load it and actually render page 1.
+
+## D491. Rewards spend counts each sale once, by customer link (#282, 2026-09-30)
+
+Lifetime spend = won quotes whose `customerId` is the company (not name matches — the company page's older "Won
+lifetime" stat also matches by name, so the two can differ) + projects, and Daylite-imported repairs, whose `quoteId`
+is empty or doesn't point to a counted won quote. A $0 won quote isn't counted, so its project carries the sale; several
+records pointing at one uncounted quote count once. App-created repairs count through their won repair quote only.
+Records with `valueUnknown` (UKN), soft-deleted rows, drafts and lost quotes never count. Quotes are dated by their last
+history entry into Won (Daylite-imported quotes carry the import day — the import recorded no real win date); projects
+by their last stage change once finished, else `startedAt`, else `createdAt` (projects have no `closedAt`).
+
+## D492. Rewards level-ups are server-computed, raise only, and reach lower contacts (#282, 2026-09-30)
+
+Approve (`approve` perm, refused while the program is off) recomputes the earned level on the server and writes the
+company tier through `saveCompany`, then raises each of its contacts whose own ladder tier (Base…Platinum) is below it
+via `saveContact` — contacts with no tier, Reseller/Employee contacts and anyone at or above the level are untouched,
+and nothing ever moves down. Open Estimator drafts re-price through the existing #254 path when the customer is next
+picked (D457 unchanged). Dismiss is stored per company in blob `rewards_dismissals` and hides the suggestion until a
+higher level is earned.
+
+## D493. Rewards program defaults are placeholders and ship off (#282, 2026-09-30)
+
+Jeff asked for best assumptions: thresholds Copper $25k, Silver $75k, Gold $150k, Platinum $300k; credit earn Base 0 %,
+Copper 1 %, Silver 1.5 %, Gold 2 %, Platinum 3 %; starting credit 1 % of pre-launch history capped at $1,000 per
+customer; no perks. The program is **disabled** until an admin turns it on in Settings → Rewards; `launchedAt` is stamped
+the first time it turns on and never moves. Reading sanitizes quietly (thresholds forced ascending, % clamped 0–20,
+caps ≥ 0, perk ids unique); the Settings save refuses bad input with a named error instead.
+
+## D494. The Rewards nav item always shows; the page handles "off" (#282, 2026-09-30)
+
+The nav can't hide items conditionally, so Customers → Rewards is always listed. While the program is off, `/rewards`
+shows admins a "Program is off — preview" with actions disabled and everyone else a notice; company cards stay hidden.
+`/rewards` lists only companies with counted purchases.
+

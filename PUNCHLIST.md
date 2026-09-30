@@ -9979,3 +9979,13 @@ reward kinds; won quotes + Daylite history; lifetime; suggested tier moves; % cr
 starting credit; staff-applied credit that never expires; portal card). Spec:
 `docs/superpowers/specs/2026-09-30-customer-rewards-design.md`. Building in four phases: tracker + suggestions → credit
 → service-quote credit → perks + portal.
+
+**Phase 1 shipped 2026-09-30 (D491–D494):** program settings (`src/lib/rewards/program.ts`, blob `rewards_program`,
+defaults off: Copper $25k · Silver $75k · Gold $150k · Platinum $300k; earn 0/1/1.5/2/3 %; retro 1 % capped $1,000);
+lifetime spend (`src/lib/rewards/spend.ts` — won quotes by `customerId` plus projects / Daylite repairs whose `quoteId`
+doesn't point to a counted won quote, each sale once, UKN/deleted/$0 skipped); loader + Approve/Dismiss
+(`src/lib/stores/rewards.ts`, `approve` perm; dismissals blob `rewards_dismissals`); company **Rewards card** (level,
+tier, suggestion, spend, progress, counted purchases); **`/rewards`** (Ready to move up + customers by spend, level
+filter; admin preview while off); **Settings → Rewards** (`/settings/rewards`, `manage_users`). Gates: tsc 0;
+test:specs 9255 PASS / 0 FAIL (+75); test:smoke 171/0 (+2 routes); eslint 0 errors, no new warnings; next build OK.
+Browser-verified on a scratch datadir. Reviewed, no findings.
