@@ -110,7 +110,12 @@ export type SectionCardProps = {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
-  onSetNarrative: (value: string) => void;
+  /** #281: the narrative is written in the estimator's right column — the
+   *  card's snippet button asks the parent to open + focus it for this system. */
+  onEditNarrative: () => void;
+  /** #281: a pointer press anywhere in the card makes this system the active
+   *  one (the narrative column follows it) — no scroll. */
+  onActivate: () => void;
   /** #262: the room this system is in, for the PM parts list — internal view only. */
   onSetRoom: (value: string) => void;
   /** #262: the quote's venue name, shown as the Room input's placeholder when blank. */
@@ -177,6 +182,8 @@ export type SectionCardProps = {
 };
 
 export default function SectionCard(p: SectionCardProps) {
+  // #281: the snippet shows the narrative's first non-blank line.
+  const narrativeSnippet = (p.sec.narrative || "").split(/\r?\n/).find((l) => l.trim())?.trim() || "";
   const [importMessage, setImportMessage] = useState("");
   const [linkRevealed, setLinkRevealed] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -298,6 +305,7 @@ export default function SectionCard(p: SectionCardProps) {
   return (
     <div
       ref={(el) => p.registerRef(sec.id, el)}
+      onPointerDown={p.onActivate}
       style={{
         background: "#fff",
         border: "1px solid #ececf0",
@@ -433,7 +441,33 @@ export default function SectionCard(p: SectionCardProps) {
                 <option value="itemized">Customer: itemized</option>
                 <option value="narrative">Customer: narrative</option>
               </select>
-              <input value={sec.narrative || ""} onChange={(e) => p.onSetNarrative(e.target.value)} onClick={(e) => e.stopPropagation()} placeholder="Brief system explanation for the quote letter" style={{ flex: 1, minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, color: "#3a3f4a" }} />
+              {/* #281: a read-only snippet — the narrative itself is written in the right column. */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  p.onEditNarrative();
+                }}
+                title="Edit this system's narrative"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  textAlign: "left",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  fontFamily: "var(--font-ui)",
+                  border: "1px solid #e4e7ec",
+                  borderRadius: 6,
+                  padding: "5px 7px",
+                  fontSize: 11.5,
+                  color: narrativeSnippet ? "#3a3f4a" : "#9aa0ab",
+                  background: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                {narrativeSnippet || "Add narrative…"}
+              </button>
               {/* #262: room, for the PM parts list only — never shown on the customer document. */}
               {isInternal && (
                 <input
