@@ -2,10 +2,12 @@ import {
   TRACK_OPERATION_LABELS,
   isCordOperated,
   mountingRole,
+  seriesSticks,
   type TrackMounting,
   type TrackOperation,
   type TrackRole,
   type TrackSeries,
+  type TrackStick,
 } from "@/lib/track-series";
 
 /**
@@ -15,7 +17,8 @@ import {
  *
  * Rules per track, then × qty:
  *   L         = runFt + (bi-parting ? series.overlapFt : 0)
- *   straight  sticks = ceil(L / stickLengthFt), splices = sticks − 1
+ *   straight  n = ceil(L / longest stick); each piece the shortest stick
+ *             ≥ L / n; splices = n − 1
  *   curved    sections = ceil(L / curvedSectionFt), splices = sections − 1;
  *             refused without curvedSectionFt, or radius < minRadiusFt
  *   carriers  ceil(runFt × 12 / carrierSpacingIn); masters 2 (bi-parting) or
@@ -23,7 +26,13 @@ import {
  *   end stops 2
  *   mounting  ceil(L / hangerSpacingFt) + 1 batten clamps or ceiling hangers
  *   cord      (bi-parting, one-way) 1 live pulley, 1 dead pulley, 1 floor
- *             block, operating line ceil(2L + 2·trim) ft (trim default 20)
+ *             block, operating line ceil(2L + 2·trim + series.lineAllowanceFt)
+ *             ft (trim default 20)
+ *   optional  (#291, only when the series maps the role) ceiling splice
+ *             replaces the splice on ceiling mounting; pipe clamp = one per
+ *             batten hanging point; lap clamp = 2 per bi-parting batten track
+ *             (series with an overlap); one-way dead-end pulley replaces the
+ *             dead pulley on one-way
  *   walk-along no pulleys, floor block or line
  */
 
@@ -48,7 +57,8 @@ export type TrackConfig = {
   label?: string;
 };
 
-export type TrackRow = { role: TrackRole; qty: number };
+/** sku/lengthFt: the straight stick the engine chose (#291) — set on the "track" row only. */
+export type TrackRow = { role: TrackRole; qty: number; sku?: string; lengthFt?: number };
 export type TrackResult = { rows: TrackRow[]; errors: string[] };
 
 export const DEFAULT_TRIM_FT = 20;
@@ -94,37 +104,49 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
     if (!(typeof radius === "number" && Number.isFinite(radius) && radius > 0)) errors.push("Enter the curve radius.");
     else if (series.minRadiusFt && radius < series.minRadiusFt)
       errors.push(`${series.name || "This series"} bends to a ${series.minRadiusFt}' radius at the tightest — ${radius}' is too tight.`);
-  } else if (!(series.stickLengthFt > 0)) {
+  } else if (!seriesSticks(series).length) {
     errors.push(`${series.name || "This series"} has no stick length — set it in Estimating Rules → Track series.`);
   }
 
   if (errors.length) return { rows: [], errors };
 
   const L = trackLengthFt(config, series);
-  const pieces = config.curved ? ceilSafe(L / series.curvedSectionFt!) : ceilSafe(L / series.stickLengthFt);
-  const splices = Math.max(0, pieces - 1);
+  const mapped = (role: TrackRole) => !!series.parts[role]?.sku;
+  let piece: TrackRow;
+  if (config.curved) {
+    piece = { role: "curved", qty: ceilSafe(L / series.curvedSectionFt!) };
+  } else {
+    const sticks = seriesSticks(series);
+    const n = ceilSafe(L / sticks[sticks.length - 1].lengthFt);
+    const stick: TrackStick = sticks.find((s) => s.lengthFt >= L / n - 1e-9) ?? sticks[sticks.length - 1];
+    piece = { role: "track", qty: n, sku: stick.sku, lengthFt: stick.lengthFt };
+  }
+  const splices = Math.max(0, piece.qty - 1);
   const carrierSpacing = spacing(config.carrierSpacingIn, series.carrierSpacingIn);
   const hangerSpacing = spacing(config.hangerSpacingFt, series.hangerSpacingFt);
   const allCarriers = ceilSafe((run * 12) / carrierSpacing);
   const masters = config.operation === "biparting" ? 2 : 1;
   const carriers = Math.max(0, allCarriers - masters);
   const mounts = ceilSafe(L / hangerSpacing) + 1;
+  const batten = config.mounting === "batten";
 
   const per: TrackRow[] = [
-    { role: config.curved ? "curved" : "track", qty: pieces },
-    { role: "splice", qty: splices },
+    piece,
+    { role: !batten && mapped("ceilingSplice") ? "ceilingSplice" : "splice", qty: splices },
     { role: "carrier", qty: carriers },
     { role: "masterCarrier", qty: masters },
     { role: "endStop", qty: 2 },
-    { role: mountingRole(config.mounting), qty: mounts },
   ];
+  if (config.operation === "biparting" && batten && series.overlapFt > 0 && mapped("lapClamp")) per.push({ role: "lapClamp", qty: 2 });
+  per.push({ role: mountingRole(config.mounting), qty: mounts });
+  if (batten && mapped("pipeClamp")) per.push({ role: "pipeClamp", qty: mounts });
   if (cord) {
     per.push(
       { role: "livePulley", qty: 1 },
-      { role: "deadPulley", qty: 1 },
+      { role: config.operation === "oneway" && mapped("deadPulleyOneWay") ? "deadPulleyOneWay" : "deadPulley", qty: 1 },
       { role: "floorBlock", qty: 1 },
-      { role: "operatingLine", qty: ceilSafe(2 * L + 2 * trim) }
+      { role: "operatingLine", qty: ceilSafe(2 * L + 2 * trim + (series.lineAllowanceFt || 0)) }
     );
   }
-  return { rows: per.filter((r) => r.qty > 0).map((r) => ({ role: r.role, qty: r.qty * qty })), errors: [] };
+  return { rows: per.filter((r) => r.qty > 0).map((r) => ({ ...r, qty: r.qty * qty })), errors: [] };
 }
