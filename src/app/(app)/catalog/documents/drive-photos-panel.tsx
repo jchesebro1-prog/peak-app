@@ -57,7 +57,7 @@ export default function DrivePhotosPanel({ view }: { view: DrivePhotosPanelView 
     return (
       <div style={{ ...box, fontSize: 12.5, color: "#5b616e" }}>
         <b>Drive photos</b> — not set up. Pick the Google account that holds <b>Peak Product Photos</b> in{" "}
-        <Link href="/settings" style={{ color: "var(--accent)" }}>Settings → Mailboxes</Link>.
+        <Link href="/settings#mailboxes" style={{ color: "var(--accent)" }}>Settings → Mailboxes</Link>.
       </div>
     );
   }
@@ -86,7 +86,7 @@ export default function DrivePhotosPanel({ view }: { view: DrivePhotosPanelView 
           <summary style={{ fontSize: 12, color: "#5b616e", cursor: "pointer" }}>Couldn&apos;t match ({view.unmatched.length}) — rename in Drive, then Sync now</summary>
           <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, color: "#5b616e", maxHeight: 220, overflowY: "auto" }}>
             {view.unmatched.map((u) => (
-              <li key={u.webViewLink || u.name}>
+              <li key={u.fileId}>
                 <a href={u.webViewLink} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>{u.name}</a> — {u.reason}
               </li>
             ))}

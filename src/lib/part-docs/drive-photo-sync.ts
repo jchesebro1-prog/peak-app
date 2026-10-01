@@ -17,7 +17,7 @@ import { blobEnabled, putBlob } from "@/lib/blob";
 import { hasDriveReadScope } from "@/lib/gmail/config";
 import { accessTokenFor, getConnectionInfo } from "@/lib/gmail/connections";
 import { DriveApiError, type DriveFetch } from "@/lib/google/drive";
-import { downloadDriveFile, findPhotosFolder, getDriveFolder, listPhotoTree, type DriveFolderRef, type DriveListedPhoto } from "@/lib/google/drive-photos";
+import { DOWNLOAD_TIMEOUT_MS, downloadDriveFile, findPhotosFolder, getDriveFolder, listPhotoTree, type DriveFolderRef, type DriveListedPhoto } from "@/lib/google/drive-photos";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { getSettings, setSettings } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
@@ -30,9 +30,19 @@ import { MAX_PART_IMAGE_BYTES, newDocumentId, partDocBlobPath } from "./types";
 export const DRIVE_PHOTO_SYNC_BLOB = "drive_photo_sync";
 const SYNC_BY = "Drive photos sync";
 /** A download + shrink + store rarely takes more than a few seconds; don't
- *  START another one with less than this left (the first always runs). */
+ *  START another one with less than this left of the budget (the first runs
+ *  anyway, unless the hard deadline below forbids it). */
 const PER_FILE_WORST_MS = 12_000;
-/** Lease slack past the budget: one in-flight file (30 s download timeout + shrink + put) can overrun it. */
+/** Hard deadline = call start + budget + this. Both callers run under a 60 s
+ *  function ceiling (the Datasheets page's and the cron route's maxDuration):
+ *  Sync now's 45 s budget + 10 s = 55 s, and the cron's ≤ 20 s budget ends by
+ *  ~50 s into the route (cronPhotoBudgetMs) + 10 s = 60 s. Nothing — not even
+ *  the first file — starts or downloads past it. */
+const HARD_DEADLINE_SLACK_MS = 10_000;
+/** Don't START any file (the first included) with less than this left before
+ *  the hard deadline: it would only be cut off mid-download. */
+const MIN_FILE_START_MS = 5_000;
+/** Lease slack past the budget: the hard deadline caps a call at budget + 10 s; this is generous on top. */
 const LEASE_SLACK_MS = 60_000;
 
 export type DrivePhotoLastRun = { at: number; imported: number; updated: number; relinked: number; failed: number; unmatched: UnmatchedPhoto[]; complete: boolean; error?: string };
@@ -44,6 +54,9 @@ export type DrivePhotoSyncDeps = {
   fetch?: DriveFetch;
   putFile?: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ pathname: string }>;
   now?: () => number;
+  /** Wall clock for the budget and hard deadline (test seam; default Date.now).
+   *  `now` stamps records and the lease. */
+  clock?: () => number;
 };
 export type DrivePhotoSyncResult =
   | { ok: true; imported: number; updated: number; relinked: number; failed: number; unmatched: number; remaining: number; changed: boolean }
@@ -153,6 +166,8 @@ function titleOf(name: string): string {
 }
 
 export async function syncDrivePhotos(budgetMs: number, deps: DrivePhotoSyncDeps = {}): Promise<DrivePhotoSyncResult> {
+  const clock = deps.clock ?? Date.now;
+  const callStart = clock();
   const now = deps.now ?? Date.now;
   const put = deps.putFile ?? putBlob;
   if (!deps.putFile && !blobEnabled()) return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — photos can't be stored on this deployment." };
@@ -163,7 +178,7 @@ export async function syncDrivePhotos(budgetMs: number, deps: DrivePhotoSyncDeps
   state.runningUntil = now() + Math.max(0, budgetMs) + LEASE_SLACK_MS;
   await saveState(state);
   try {
-    return await runSync(state, budgetMs, deps, now, put);
+    return await runSync(state, callStart, budgetMs, deps, now, clock, put);
   } finally {
     state.runningUntil = null;
     try {
@@ -176,12 +191,15 @@ export async function syncDrivePhotos(budgetMs: number, deps: DrivePhotoSyncDeps
 
 async function runSync(
   state: DrivePhotoSyncState,
+  callStart: number,
   budgetMs: number,
   deps: DrivePhotoSyncDeps,
   now: () => number,
+  clock: () => number,
   put: NonNullable<DrivePhotoSyncDeps["putFile"]>
 ): Promise<DrivePhotoSyncResult> {
-  const deadline = Date.now() + Math.max(0, budgetMs);
+  const deadline = callStart + Math.max(0, budgetMs);
+  const hardDeadline = deadline + HARD_DEADLINE_SLACK_MS;
   const f = deps.fetch;
   const fail = async (error: string): Promise<DrivePhotoSyncResult> => {
     state.lastRun = { at: now(), imported: 0, updated: 0, relinked: 0, failed: 0, unmatched: state.lastRun?.unmatched ?? [], complete: false, error };
@@ -244,7 +262,11 @@ async function runSync(
   const work = [...plan.updates.map((u) => ({ kind: "update" as const, ...u })), ...plan.imports.map((i) => ({ kind: "import" as const, ...i }))];
   let imported = 0, updated = 0, failed = 0, processed = 0;
   for (const item of stopError ? [] : work) {
-    if (processed > 0 && deadline - Date.now() < PER_FILE_WORST_MS) break;
+    const t = clock();
+    // Hard deadline first: no file at all — the first included — starts this
+    // close to it; it stays in `remaining` for the next call.
+    if (hardDeadline - t < MIN_FILE_START_MS) break;
+    if (processed > 0 && deadline - t < PER_FILE_WORST_MS) break;
     processed++;
     const prev = state.files[item.id];
     let step: Step = "download";
@@ -261,7 +283,9 @@ async function runSync(
     try {
       let bytes: Uint8Array;
       try {
-        bytes = await downloadDriveFile(token, item.id, MAX_PART_IMAGE_BYTES, f);
+        // Capped at the hard deadline; a timeout here is transient (below).
+        const timeoutMs = Math.min(DOWNLOAD_TIMEOUT_MS, hardDeadline - clock());
+        bytes = await downloadDriveFile(token, item.id, MAX_PART_IMAGE_BYTES, f, timeoutMs);
       } catch (e) {
         const problem = fileProblem(e);
         if (problem === null) throw e;

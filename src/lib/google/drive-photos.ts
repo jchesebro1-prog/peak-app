@@ -11,7 +11,7 @@ export const PHOTOS_FOLDER_NAME = "Peak Product Photos";
 export const PHOTO_MIME_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
 export const HEIC_MIME_TYPES: readonly string[] = ["image/heic", "image/heif"];
 const LIST_TIMEOUT_MS = 15_000;
-const DOWNLOAD_TIMEOUT_MS = 30_000;
+export const DOWNLOAD_TIMEOUT_MS = 30_000;
 /** A runaway tree (or a shortcut loop Drive somehow allows) stops here. */
 const MAX_FOLDERS = 500;
 
@@ -113,11 +113,20 @@ export async function listPhotoTree(token: string, rootId: string, f: DriveFetch
   return [...out.values()];
 }
 
-export async function downloadDriveFile(token: string, id: string, maxBytes: number, f: DriveFetch = realFetch): Promise<Uint8Array> {
+/** `timeoutMs` (default 30 s) lets the sync cap a download at its hard
+ *  deadline; the timeout covers the whole response, body included. */
+export async function downloadDriveFile(
+  token: string,
+  id: string,
+  maxBytes: number,
+  f: DriveFetch = realFetch,
+  timeoutMs: number = DOWNLOAD_TIMEOUT_MS
+): Promise<Uint8Array> {
   const u = new URL(`${DRIVE_API_BASE}/files/${encodeURIComponent(id)}`);
   u.searchParams.set("alt", "media");
   u.searchParams.set("supportsAllDrives", "true");
-  const res = await f(u.toString(), { method: "GET", signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS), headers: { Authorization: "Bearer " + token } });
+  const ms = Math.max(1, Math.floor(timeoutMs));
+  const res = await f(u.toString(), { method: "GET", signal: AbortSignal.timeout(ms), headers: { Authorization: "Bearer " + token } });
   if (!res.ok) throw photosDriveError(res.status, "downloading a photo", await detailOf(res));
   const declared = Number(res.headers.get("content-length") || 0);
   if (declared > maxBytes) throw new Error("over the size cap");

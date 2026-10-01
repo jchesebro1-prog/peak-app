@@ -8281,7 +8281,8 @@ and a refused upload deletes its Blob; a read failure of the upload itself does 
 Photos are dropped into a Drive folder named "Peak Product Photos" (My Drive or a Shared Drive) by people, not by the
 app. The narrower `drive.file` scope cannot see files a human added, so the sync uses a separate, read-only
 `drive.readonly` scope (`DRIVE_READONLY_SCOPE`), requested only by an explicit `?drivephotos=1` consent opt-in ("Enable
-Drive photos" in Settings → Mailboxes and on the Account page) — mailboxes connected for Gmail alone never ask for it.
+Drive photos" in Settings → Mailboxes, and on the Account page only for the user whose own mailbox is the configured
+photos account) — mailboxes connected for Gmail alone never ask for it.
 A new `catalogPhotosMailbox` setting picks which connected account the sync reads as. The sync never writes to Drive.
 Drive errors use a photos-specific message (`photosDriveError` in `drive-photos.ts`) rather than the Recordings wording.
 

@@ -11,7 +11,7 @@ export type DrivePhotosPanelView = {
   problem: string | null;
   folder: { name: string; webViewLink: string } | null;
   lastRun: { at: number; imported: number; updated: number; relinked: number; failed: number; complete: boolean; error: string | null } | null;
-  unmatched: { name: string; webViewLink: string; reason: string }[];
+  unmatched: { fileId: string; name: string; webViewLink: string; reason: string }[];
   synced: number;
   /** Set when the status reads failed — the panel shows this instead of the controls. */
   loadError?: string;
@@ -37,7 +37,7 @@ export function drivePhotosPanelView(input: {
     problem,
     folder: state.folder ? { name: state.folder.name, webViewLink: state.folder.webViewLink } : null,
     lastRun: lr ? { at: lr.at, imported: lr.imported, updated: lr.updated, relinked: lr.relinked, failed: lr.failed, complete: lr.complete, error: lr.error ?? null } : null,
-    unmatched: (lr?.unmatched ?? []).map((u) => ({ name: u.name, webViewLink: u.webViewLink, reason: u.reason })),
+    unmatched: (lr?.unmatched ?? []).map((u) => ({ fileId: u.fileId, name: u.name, webViewLink: u.webViewLink, reason: u.reason })),
     synced: Object.values(state.files).filter((f) => !!f.documentId).length,
   };
 }

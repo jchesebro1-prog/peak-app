@@ -42,6 +42,9 @@ export default async function AccountPage() {
   // calendar grant for MY personal mailbox only.
   const gmailOn = gmailEnabled();
   const myKey = personalKey(user.id);
+  // #283 — "Enable Drive photos" is offered only when MY mailbox is the one
+  // Settings → Mailboxes picked as the catalog photos account.
+  const isPhotosAccount = !!settings.catalogPhotosMailbox && settings.catalogPhotosMailbox === myKey;
   let conn: { address: string; initialImportDone: boolean; calendarOn: boolean; driveOn: boolean; photosOn: boolean } | null = null;
   if (gmailOn) {
     const { getConnectionInfo } = await import("@/lib/gmail/connections");
@@ -55,7 +58,7 @@ export default async function AccountPage() {
         // picked as the recordings archive in Settings → Recordings.
         driveOn: hasDriveScope(info.scope),
         // #283 — drive.readonly granted, so this account can be picked as the
-        // catalog photos account in Settings → Recordings.
+        // catalog photos account in Settings → Mailboxes.
         photosOn: hasDriveReadScope(info.scope),
       };
   }
@@ -213,15 +216,22 @@ export default async function AccountPage() {
               Enable Drive archive
             </a>
           )}
-          {gmailOn && conn && !conn.photosOn && (
-            <a
-              className="pk-btn-outline"
-              href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey) + "&drivephotos=1"}
-              title="Lets the catalog read the Peak Product Photos folder (read-only)"
-              style={{ flexShrink: 0, textDecoration: "none" }}
-            >
-              Enable Drive photos
-            </a>
+          {/* #283 least privilege: only the configured catalog photos account
+              is ever asked for drive.readonly. */}
+          {gmailOn && conn && isPhotosAccount && !conn.photosOn && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: "#8c919c" }}>
+                Your account is the catalog photos account — allow read-only Drive access.
+              </span>
+              <a
+                className="pk-btn-outline"
+                href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey) + "&drivephotos=1"}
+                title="Lets the catalog read the Peak Product Photos folder (read-only)"
+                style={{ flexShrink: 0, textDecoration: "none" }}
+              >
+                Enable Drive photos
+              </a>
+            </span>
           )}
           {gmailOn && conn && conn.driveOn && (
             <span style={{ fontSize: 11, fontWeight: 600, color: "#1f7a52", background: "#e8f3ee", border: "1px solid #cfe6db", padding: "3px 10px", borderRadius: 20, flexShrink: 0 }}>

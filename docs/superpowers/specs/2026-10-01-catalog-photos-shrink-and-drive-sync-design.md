@@ -54,7 +54,7 @@ human-filled folder.
 **Which account.**
 
 - A new setting `catalogPhotosMailbox: string | null`, admin-set in Settings → Mailboxes.
-- The picker sits next to the Recordings archive picker and lists connected mailboxes.
+- The picker sits in the Mailboxes card, under the connected-mailbox list, and lists connected mailboxes.
 - Each mailbox without the scope shows **Enable Drive photos** (→ `/api/gmail/connect?mailbox=…&drivephotos=1`).
 - Saving refuses a mailbox that isn't connected. A mailbox without the scope saves, but the panel says to enable it.
 
@@ -196,7 +196,10 @@ Deviations from the design above:
   are recorded and skipped until the file changes in Drive.
 - **Pending entries and a run lease (added in review):** a pending entry is saved before each create so a killed
   function cannot double-import; `runningUntil` (budget + 60 s) blocks overlapping runs.
-- **Account page:** an "Enable Drive photos" button was added on the Account page as well as Settings → Mailboxes.
+- **Account page:** an "Enable Drive photos" button was added on the Account page as well as Settings → Mailboxes —
+  shown only when the signed-in user's own mailbox is the configured photos account (least privilege).
+- **Hard deadline:** each call stops starting files, and caps any download's timeout, at call start + budget + 10 s, so
+  neither Sync now (45 s) nor the cron rider (≤ 20 s) can outrun the 60 s function ceiling.
 - **Cron rider budget:** min(20 s, time left before 50 s), skipped under 10 s or with no photos account.
 - **Known follow-ups:** a file that fails transiently every time blocks the queue behind it; quota-style 403s are read
   from message text; the unmatched list is uncapped; `webpFileName` strips any short dotted suffix.

@@ -39585,6 +39585,7 @@ async function shrinkUpload283AsyncChecks(): Promise<void> {
 // #283 — Drive photo client: folder lookup, recursive listing, all-drives params.
 // ---------------------------------------------------------------------------
 import { findPhotosFolder as dp283Find, listPhotoTree as dp283List, getDriveFolder as dp283Get, downloadDriveFile as dp283Download } from "@/lib/google/drive-photos";
+import type { DriveFetch as DriveFetch283 } from "@/lib/google/drive";
 async function drivePhotos283AsyncChecks(): Promise<void> {
   const seen: string[] = [];
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -39631,6 +39632,12 @@ async function drivePhotos283AsyncChecks(): Promise<void> {
   let tooBig = false;
   try { await dp283Download("tok", "a", 2, async () => new Response(new Uint8Array([1, 2, 3]))); } catch { tooBig = true; }
   ok(tooBig, "#283 drive: a download over the cap throws");
+  // timeoutMs caps the download (the sync passes its hard deadline here).
+  const hang: DriveFetch283 = (_url, init) => new Promise((_res, rej) => init.signal?.addEventListener("abort", () => rej(init.signal?.reason)));
+  const hangStart = Date.now();
+  let hangErr = "";
+  try { await dp283Download("tok", "a", 10, hang, 50); } catch (e) { hangErr = (e as { name?: string }).name || ""; }
+  ok(hangErr === "TimeoutError" && Date.now() - hangStart < 5_000, "#283 drive: a download times out at the timeoutMs it is given");
   let denied = "";
   try { await dp283List("tok", "F1", async () => json({ error: { message: "insufficient" } }, 403)); } catch (e) { denied = (e as Error).message; }
   ok(/Enable Drive photos/.test(denied), "#283 drive: a 403 tells the admin to use Enable Drive photos");
@@ -39729,12 +39736,19 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
   let authFailOnce = "";
   /** One-shot download outcomes per file id — a function that throws or answers. */
   const onceMedia = new Map<string, () => Response>();
+  /** Downloads that never answer — they end only when the request's signal aborts. */
+  const slowMedia = new Set<string>();
+  const mediaAsked: string[] = [];
   let putFailOnce = false;
   const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
-  const fakeDrive = async (url: string) => {
+  const fakeDrive = async (url: string, init?: RequestInit) => {
     const u = new URL(url);
     const id = decodeURIComponent(u.pathname.split("/").pop() || "");
     if (u.searchParams.get("alt") === "media") {
+      mediaAsked.push(id);
+      if (slowMedia.has(id)) {
+        return new Promise<Response>((_res, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal?.reason)));
+      }
       if (denied.has(id)) return json({ error: { message: "The download of this file is restricted." } }, 403);
       if (authFailOnce === id) { authFailOnce = ""; return json({ error: { message: "Invalid Credentials" } }, 401); }
       const once = onceMedia.get(id);
@@ -39940,6 +39954,36 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
     const q1New = (await ds283State()).files.dQ1?.documentId;
     ok(rl2.ok && rl2.imported === 1 && !!q1New && q1New !== q1Doc && (await imagesOf(ALPHA)).includes(q1New), "#283 relink: the next run imports it afresh under the new match");
 
+    // Hard deadline (call start + budget + 10 s). The clock's first reading is
+    // the call start; later readings are shifted forward by `ms`.
+    const skewed = (ms: number) => { let first = true; return () => { const t = Date.now() + (first ? 0 : ms); first = false; return t; }; };
+
+    // A download that never answers, with a zero budget: the first file still
+    // starts (~6.5 s left before the hard deadline), its timeout is capped at
+    // that deadline (not the fixed 30 s), and the stop is transient.
+    addFile("dSlow", "T283-BRAVO slow two.jpg");
+    slowMedia.add("dSlow");
+    const slowStart = Date.now();
+    const slow = await ds283Sync(0, { ...deps, clock: skewed(3_500) });
+    const slowMs = Date.now() - slowStart;
+    const stSlow = await ds283State();
+    ok(!slow.ok && /took too long/.test(slow.error) && !stSlow.files.dSlow && stSlow.lastRun?.complete === false && mediaAsked.includes("dSlow"),
+      "#283 deadline: a slow download under a tight budget stops transiently without marking the file");
+    ok(slowMs < 15_000, `#283 deadline: the slow download was cut at the hard deadline, not after 30 s (${slowMs} ms)`);
+    slowMedia.delete("dSlow");
+    files = files.filter((x) => x.id !== "dSlow");
+
+    // The hard deadline has already passed when the file loop starts: no file
+    // starts (not even the first) and it is reported as remaining.
+    addFile("dLate", "T283-BRAVO late.jpg");
+    const askedBefore = mediaAsked.length;
+    const late = await ds283Sync(0, { ...deps, clock: skewed(20_000) });
+    const stLate = await ds283State();
+    ok(late.ok && late.imported === 0 && late.failed === 0 && late.remaining === 1 && !stLate.files.dLate && mediaAsked.length === askedBefore && stLate.lastRun?.complete === false,
+      "#283 deadline: past the hard deadline no file starts, and it is reported as remaining");
+    const late2 = await ds283Sync(45_000, deps);
+    ok(late2.ok && late2.imported === 1 && late2.remaining === 0 && (await driveDocs("dLate")).length === 1, "#283 deadline: the next call imports the file the deadline held back");
+
     ok((await ds283SaveMailbox("nope@example.com")).ok === false, "#283 settings: an unknown mailbox can't be the photos account");
     ok(ds283HasRead("a https://www.googleapis.com/auth/drive.readonly b") && !ds283HasRead("https://www.googleapis.com/auth/drive.file"),
       "#283 scope: drive.readonly is detected, drive.file is not");
@@ -39977,6 +40021,7 @@ import { drivePhotosPanelView as pv283, cronPhotoBudgetMs as cb283, drivePhotosL
   });
   ok(d.problem === null && d.folder?.webViewLink === "https://drive/F" && d.synced === 1 && d.unmatched.length === 1 && d.lastRun?.error === null,
     "#283 panel: a working setup shows the folder, synced count and couldn't-match list");
+  ok(d.unmatched[0]?.fileId === "u" && d.unmatched[0]?.name === "u.jpg", "#283 panel: each couldn't-match row carries its Drive file id (the list key)");
   ok(a.loadError === undefined && d.loadError === undefined && pe283("db down").loadError === "db down" && pe283("x").synced === 0,
     "#283 panel: loadError is absent normally and carried by the degraded view");
   ok(cb283(5_000) === 0 && cb283(15_000) === 15_000 && cb283(45_000) === 20_000, "#283 cron: the photo rider gets min(20 s, time left), none under 10 s");
