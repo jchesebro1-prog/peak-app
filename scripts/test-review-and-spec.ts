@@ -10683,6 +10683,7 @@ seeded()
   .then(() => rewards282Phase3RestoreAsyncChecks())
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
+  .then(() => shrink283AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -39506,4 +39507,32 @@ async function rewards282LostAsyncChecks(): Promise<void> {
     for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
   }
+}
+
+// ---------------------------------------------------------------------------
+// #283 — shrinkImage: every catalog image becomes a ≤1600 px WebP.
+// ---------------------------------------------------------------------------
+import { shrinkImage as s283Shrink, webpFileName as s283Name, SHRINK_UNREADABLE as s283Unreadable } from "@/lib/part-docs/shrink";
+import s283Sharp from "sharp";
+async function shrink283AsyncChecks(): Promise<void> {
+  const big = await s283Sharp({ create: { width: 3000, height: 2000, channels: 3, background: { r: 200, g: 40, b: 40 } } }).png().toBuffer();
+  const a = await s283Shrink(big);
+  ok(a.ok && a.width === 1600 && a.height === 1067 && a.contentType === "image/webp", "#283 shrink: a 3000×2000 PNG comes out 1600 px wide WebP");
+  ok(a.ok && (await s283Sharp(a.bytes).metadata()).format === "webp", "#283 shrink: the bytes really are WebP");
+
+  const small = await s283Sharp({ create: { width: 400, height: 300, channels: 3, background: "#fff" } }).jpeg().toBuffer();
+  const b = await s283Shrink(small);
+  ok(b.ok && b.width === 400 && b.height === 300, "#283 shrink: a small image is never enlarged");
+
+  const rotated = await s283Sharp({ create: { width: 200, height: 100, channels: 3, background: "#000" } }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+  const c = await s283Shrink(rotated);
+  const cMeta = c.ok ? await s283Sharp(c.bytes).metadata() : null;
+  ok(c.ok && c.width === 100 && c.height === 200, "#283 shrink: an EXIF-rotated photo comes out upright");
+  ok(!!cMeta && !cMeta.exif && !cMeta.orientation, "#283 shrink: EXIF (incl. GPS/orientation) is stripped");
+
+  const bad = await s283Shrink(new Uint8Array(Buffer.from("definitely not an image")));
+  ok(!bad.ok && bad.error === s283Unreadable, "#283 shrink: garbage bytes refuse with the save-as-JPEG message");
+
+  ok(s283Name("S4LED-S3 front.JPG") === "S4LED-S3 front.webp" && s283Name("photo") === "photo.webp" && s283Name("") === "image.webp",
+    "#283 webpFileName: swaps or adds the .webp extension");
 }
