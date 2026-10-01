@@ -1271,3 +1271,75 @@ button.pk-searchbar-glass {
 @media (prefers-reduced-motion: reduce) {
   .pk-drawer-panel, .pk-drawer-backdrop { animation: none; }
 }
+
+/* ============ Settings — left-hand group menu (settings cleanup) ============ */
+.pk-settings-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.pk-settings-menu {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pk-settings-menu a {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  color: var(--ink);
+}
+.pk-settings-menu a:hover { background: #f4f5f7; }
+.pk-settings-menu a[aria-current="page"] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 22%, #fff);
+}
+.pk-settings-menu-label { display: block; font-size: 13.5px; font-weight: 600; }
+.pk-settings-menu a[aria-current="page"] .pk-settings-menu-label {
+  color: color-mix(in srgb, var(--accent) 70%, #16181d);
+}
+.pk-settings-menu-desc {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted-2);
+  margin-top: 2px;
+  line-height: 1.35;
+}
+.pk-settings-select { display: none; }
+.pk-settings-select-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.pk-settings-select select {
+  width: 100%;
+  border: 1px solid #e4e7ec;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: var(--font-ui);
+  background: #fff;
+  cursor: pointer;
+}
+.pk-settings-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.pk-settings-tile:hover { border-color: #d6d9e0 !important; }
+@media (max-width: 860px) {
+  .pk-settings-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .pk-settings-menu { display: none; }
+  .pk-settings-select { display: block; }
+  /* Team & Access: the roles column drops under the roster on narrow screens. */
+  .st-grid { grid-template-columns: minmax(0, 1fr) !important; }
+}

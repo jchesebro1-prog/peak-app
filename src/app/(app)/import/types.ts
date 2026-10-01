@@ -212,7 +212,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     color: "#3155a8",
     blurb: "People & their roles (Admin · Manager · Estimator · Reviewer).",
     dedupeLabel: "email or name",
-    viewHref: "/settings",
+    viewHref: "/settings?section=team",
     viewLabel: "View in Settings",
     fields: [
       { key: "name", header: "Full Name", label: "Full name", required: true, aliases: ["name", "full name", "employee", "person", "user"], example: "Alex Morgan" },

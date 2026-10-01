@@ -24,6 +24,7 @@ import {
 import { listConnections } from "@/lib/gmail/connections";
 import { loadPipelines, stageUsage } from "@/lib/pipelines-server";
 import SettingsClient from "./settings-client";
+import { visibleSettingsSections } from "./settings-sections";
 
 export const metadata = { title: "Settings — Quartzite-6" };
 
@@ -55,6 +56,9 @@ const SHARED_LABEL: Record<string, string> = {
 export default async function SettingsPage() {
   const me = await requireUser();
   const isAdmin = can("manage_users", me.roles);
+  // Settings cleanup: the left-menu groups this viewer may open. Every group
+  // needs manage_users today, so a non-admin gets none — and the lock card.
+  const sections = visibleSettingsSections((p) => can(p, me.roles)).map((s) => s.key);
   const settings = await getSettings();
   const users = isAdmin ? await allUsers() : [];
   const pipelines = isAdmin ? await loadPipelines() : null;
@@ -125,15 +129,15 @@ export default async function SettingsPage() {
   };
 
   return (
-    <div className="pk-content" style={{ maxWidth: 1080, padding: "26px 30px 64px" }}>
+    <div className="pk-content" style={{ maxWidth: 1200, padding: "26px 30px 64px" }}>
       <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.015em" }}>
         Settings
       </div>
       <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5, marginBottom: 22 }}>
-        Manage team members, roles, and what each person can do.
+        Company setup, sales rules, integrations, team access and data tools.
       </div>
 
-      {!isAdmin ? (
+      {!isAdmin || sections.length === 0 ? (
         <div
           className="pk-card"
           style={{ padding: "48px 24px", textAlign: "center" }}
@@ -177,6 +181,7 @@ export default async function SettingsPage() {
         </div>
       ) : (
         <SettingsClient
+          sections={sections}
           meId={me.id}
           meName={me.name}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}

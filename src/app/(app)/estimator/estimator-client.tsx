@@ -1019,7 +1019,7 @@ export default function EstimatorClient({
     });
   };
 
-  /* #285 task B — Lead estimator (`owner`) and Prepared by (`preparedBy`).
+  /* #286 task B — Lead estimator (`owner`) and Prepared by (`preparedBy`).
      Each select saves the moment it changes, through setQuotePeopleAction —
      never Save, whose allowlist deliberately excludes `owner` (the owner's
      review limit drives auto-approval). A new lead changes the next-step
@@ -1168,7 +1168,7 @@ export default function EstimatorClient({
 
   /** #284: the save itself, awaitable — the next-step control saves unsaved
    *  edits first and acts only when this resolves to a version (written, no
-   *  refusal). #285: that version is the saved quote's updatedAt, which the
+   *  refusal). #286: that version is the saved quote's updatedAt, which the
    *  control then decides; false = abort. */
   const saveNow = async (): Promise<number | false> => {
     // #254 fix wave 2: never save while a tier lookup is in flight.

@@ -5,7 +5,7 @@
  * (a hidden button is not access control — punch #60). Returns a typed
  * result whose `error` is written for the user.
  *
- * #285 (Jeff 2026-10-01): anyone who can create quotes submits one, the owner
+ * #286 (Jeff 2026-10-01): anyone who can create quotes submits one, the owner
  * or the submitter withdraws it, and an approver may approve ("Approve only
  * (owner sends)") or send any quote — the gate stamps the approver's own
  * approval (approverOnTransition).
@@ -58,7 +58,7 @@ function outcome(q: Quote | null, want: "approved" | "changes" | "none", asOf?: 
   return NO_LONGER_WAITING;
 }
 
-/** #285: Approve only on a quote that wasn't in review. It may already have
+/** #286: Approve only on a quote that wasn't in review. It may already have
  *  been "approved" (a lapsed approval), so the state alone can't tell — the
  *  decision landed only if it was stamped at or after `since`. */
 function approveOnlyOutcome(q: Quote | null, since: number, from: string, asOf?: number): ReviewOpResult {
@@ -73,7 +73,7 @@ async function approvalLapsed(q: Quote): Promise<boolean> {
   return q.review?.state === "approved" && !approvalHolds(q, await loadReviewLimitContext());
 }
 
-/** #285: the owner, or anyone who can create quotes, submits one; the actor is the submitter. */
+/** #286: the owner, or anyone who can create quotes, submits one; the actor is the submitter. */
 export async function submitQuoteForApproval(id: string, actor: ReviewActor, reviewer: string | null): Promise<ReviewOpResult> {
   const q = id ? await get(id) : null;
   if (!q) return NOT_FOUND;
@@ -98,7 +98,7 @@ export async function submitQuoteForApproval(id: string, actor: ReviewActor, rev
   return { ok: true };
 }
 
-/** #285: the owner, or whoever submitted it. */
+/** #286: the owner, or whoever submitted it. */
 export async function withdrawQuoteReview(id: string, actor: ReviewActor): Promise<ReviewOpResult> {
   const q = id ? await get(id) : null;
   if (!q) return NOT_FOUND;
@@ -116,7 +116,7 @@ async function decidable(
   if (!can("approve", actor.roles)) return { ok: false, error: "You need approve permission to decide on a quote." };
   const q = id ? await get(id) : null;
   if (!q) return NOT_FOUND;
-  // #285: Approve only also takes a draft that was never submitted, came back, or whose approval lapsed.
+  // #286: Approve only also takes a draft that was never submitted, came back, or whose approval lapsed.
   const state = q.review?.state || "none";
   const unsubmitted = approveOnly && q.status === "draft" && (state === "none" || state === "changes" || state === "approved");
   if (state !== "in_review" && !unsubmitted) return { ok: false, error: "This quote isn't waiting for approval." };
@@ -138,7 +138,7 @@ export async function approveQuoteReview(id: string, actor: ReviewActor, asOf?: 
   const v = asOf && asOf > 0 ? asOf : undefined;
   const from = d.q.review?.state || "none";
   if (from === "in_review") return outcome(await approve(id, { by: actor.name, expectUpdatedAt: v }), "approved", v);
-  // #285: Approve only (owner sends) — a non-owner approver on a draft outside review; the owner sends it.
+  // #286: Approve only (owner sends) — a non-owner approver on a draft outside review; the owner sends it.
   // The store re-checks draft-only and lapsed-only under the row lock, against the same limits.
   const since = Date.now();
   const holdsCtx = await loadReviewLimitContext();
@@ -168,7 +168,7 @@ export async function attestQuoteApproval(id: string, actor: ReviewActor, note: 
 
 /**
  * Send to customer → / Approve & send →. Anyone whose gate passes may send:
- * an approval that holds, an approver moving it (#285: their approval is
+ * an approval that holds, an approver moving it (#286: their approval is
  * stamped in the same write — approverOnTransition), or the owner's limit.
  * Needs `send` or `approve` — a pure Reviewer lacks `send` but may approve
  * and send. `asOf` (the view's updatedAt): refuse a version the sender wasn't
@@ -184,7 +184,7 @@ export async function sendQuoteToCustomer(id: string, actor: ReviewActor, asOf?:
   const gate = await checkApprovalGate(q, "sent", actor.name);
   if (!gate.ok) return gate;
   try {
-    // #285: the version check again under the row lock (an edit between the read above and the write).
+    // #286: the version check again under the row lock (an edit between the read above and the write).
     await setStatus(id, "sent", actor.name, typeof asOf === "number" && asOf > 0 ? { expectUpdatedAt: asOf } : {});
   } catch (e) {
     if (isQuoteVersionChanged(e)) return CHANGED_SINCE;

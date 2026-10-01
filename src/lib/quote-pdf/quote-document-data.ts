@@ -100,7 +100,7 @@ export function quoteDocumentDataFor(
     venueLabel: loc ? [loc.label || "", loc.city || ""].filter(Boolean).join(" — ") : "",
     // The lead estimator — "Questions? Reach out to …".
     ownerName: q.owner || companyName,
-    // #285 task B: "Prepared by" prints the quote's own preparedBy, falling
+    // #286 task B: "Prepared by" prints the quote's own preparedBy, falling
     // back to the lead estimator (owner), then the company.
     preparedByName: (q.preparedBy || "").trim() || q.owner || companyName,
     companyName,

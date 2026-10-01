@@ -57,7 +57,7 @@ export default function DrivePhotosPanel({ view }: { view: DrivePhotosPanelView 
     return (
       <div style={{ ...box, fontSize: 12.5, color: "#5b616e" }}>
         <b>Drive photos</b> — not set up. Pick the Google account that holds <b>Peak Product Photos</b> in{" "}
-        <Link href="/settings#mailboxes" style={{ color: "var(--accent)" }}>Settings → Mailboxes</Link>.
+        <Link href="/settings?section=integrations#mailboxes" style={{ color: "var(--accent)" }}>Settings → Mailboxes</Link>.
       </div>
     );
   }

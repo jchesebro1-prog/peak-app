@@ -3,7 +3,7 @@
  * #284 — the quote's one next-step control: a status pill, the primary
  * action (Submit for approval / Send to customer → / Approve & send →), Send
  * back… for approvers, and a ⋯ menu for the rest (Withdraw, Assign to…,
- * Attest approval…, Submit for approval anyway, #285 Approve only (owner
+ * Attest approval…, Submit for approval anyway, #286 Approve only (owner
  * sends)). The view is decided on the server
  * (quoteNextStepFor); this only renders it and dispatches the guarded
  * actions. Client-safe: no store, ops or session imports — only the
@@ -37,7 +37,7 @@ type Props = {
   /** Report a refusal; default = an inline red line under the control. */
   onError?: (msg: string) => void;
   /** Runs before any action (the Estimator saves unsaved edits first): resolves to the
-   *  saved quote's `updatedAt` (#285 — that version is now the one shown), or false to abort.
+   *  saved quote's `updatedAt` (#286 — that version is now the one shown), or false to abort.
    *  Skipped for the in-review decisions (Approve & send, Approve only, Send
    *  back): an approver decides the version they were shown (view.asOf), and
    *  saving first would bump updatedAt and refuse it. */
@@ -181,7 +181,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     else setErr(msg);
   };
 
-  /** `fn(shown)` gets the version the viewer is deciding: view.asOf, or — #285 —
+  /** `fn(shown)` gets the version the viewer is deciding: view.asOf, or — #286 —
    *  the pre-save's own `updatedAt`, since the viewer's just-saved edits are then
    *  the version shown. `versioned`: the action carries it. */
   const run = (fn: (shown: number) => Promise<NextStepSync>, opts: { skipBefore?: boolean; versioned?: boolean } = {}) => {
@@ -236,13 +236,13 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
       case "submit":
         return run(() => nsSubmitAction(quoteId, null));
       case "send":
-        // #285: Approve & send → decides the shown version with no pre-save (like Approve);
+        // #286: Approve & send → decides the shown version with no pre-save (like Approve);
         // a non-owner's Send carries it too (after a pre-save, the version it just stored).
         if (view.approverMode) return run(() => nsSendAction(quoteId, view.asOf), { skipBefore: true });
         if (!view.viewerIsOwner) return run((shown) => nsSendAction(quoteId, shown), { versioned: true });
         return run(() => nsSendAction(quoteId));
       case "approve":
-        // In review: the shown version, no pre-save. #285 Approve only on a draft saves the approver's edits first.
+        // In review: the shown version, no pre-save. #286 Approve only on a draft saves the approver's edits first.
         if (view.approverMode) return run(() => nsApproveAction(quoteId, view.asOf), { skipBefore: true });
         return run((shown) => nsApproveAction(quoteId, shown), { versioned: true });
       case "withdraw":
@@ -256,7 +256,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     }
   };
 
-  // #285: the phone approver mode shows the in-review actions — Approve & send, Send back, Approve only.
+  // #286: the phone approver mode shows the in-review actions — Approve & send, Send back, Approve only.
   const primary = view.primary && (!approverOnly || view.approverMode) ? view.primary : null;
   const sendBack = view.secondary.find((s) => s.action === "sendBack") || null;
   const menuItems = approverOnly ? view.secondary.filter((s) => s.action === "approve") : view.secondary.filter((s) => s.action !== "sendBack");

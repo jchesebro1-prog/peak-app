@@ -407,13 +407,13 @@ export type ReviewOpts = {
    *  `updatedAt` still equals this (the version the approver was shown);
    *  checked under the row lock. */
   expectUpdatedAt?: number;
-  /** #285: approve() only — "Approve only (owner sends)": also decide a
+  /** #286: approve() only — "Approve only (owner sends)": also decide a
    *  DRAFT that was never submitted, came back, or carries a lapsed approval
    *  (state none / changes / approved). Draft-only and lapsed-only are
    *  re-checked under the row lock (the caller checked them before it); the
    *  version check still applies. */
   allowUnsubmitted?: boolean;
-  /** #285: the review limits `approvalHolds` reads under the lock for an
+  /** #286: the review limits `approvalHolds` reads under the lock for an
    *  `allowUnsubmitted` decision (the caller's context; default none — an
    *  auto approval then holds only while unchanged against its snapshot). */
   holdsCtx?: ReviewLimitContext;
@@ -1037,7 +1037,7 @@ function withRestoredCredit(doc: Quote, credit: number): void {
 export type SetStatusOpts = {
   // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
   bypassApprovalGate?: "engine-owned-flow" | "historical-import" | "portal-firm";
-  /** #285: move only if the quote's `updatedAt` still equals this (the
+  /** #286: move only if the quote's `updatedAt` still equals this (the
    *  version the sender was shown — Approve & send →). Checked under the row
    *  lock before anything is written; a mismatch throws QuoteVersionChanged. */
   expectUpdatedAt?: number;
@@ -1112,7 +1112,7 @@ export function autoApprovedReview(
   };
 }
 
-/** #284/#285: the review record the approver moving a quote writes
+/** #284/#286: the review record the approver moving a quote writes
  *  (approverOnTransition). "self" (an approver owner, own quote) keeps #284's
  *  submittedBy/At = owner/now; "in_app" (any other approver — Send to
  *  customer → or Approve & send →) keeps the in-review record's submitter,
@@ -1154,7 +1154,7 @@ export function approverReview(
  *   limit governs new grants only;
  * - an approver moving the quote → open, with that approver's approval to
  *   write (approverOnTransition / approverReview): `self` for an approver
- *   owner (#284), `in_app` for any other approver (#285) — checked before the
+ *   owner (#284), `in_app` for any other approver (#286) — checked before the
  *   owner's review limit;
  * - else the owner's review limit: fits → open, with the auto-approval
  *   record to write in the same patch; over / blank / owner off the roster /
@@ -1178,7 +1178,7 @@ export function decideApprovalGate(
     const cur = canAutoApprove(q, ctx);
     return { ok: true, stamp: cur && autoSnapshotStale(q, cur) ? autoApprovedReview(cur, now, actor, trigger) : null };
   }
-  // #284/#285: the approver moving the quote approves it — self on their own, in_app on anyone else's.
+  // #284/#286: the approver moving the quote approves it — self on their own, in_app on anyone else's.
   const approver = approverOnTransition(q, ctx, actor);
   if (approver) return { ok: true, stamp: approverReview(approver, q, now) };
   const ev = canAutoApprove(q, ctx);
@@ -1261,10 +1261,10 @@ export function isApprovalGateRefusal(e: unknown): e is ApprovalGateRefused {
   );
 }
 
-/** #285: the brand on setStatus's `expectUpdatedAt` refusal (same pattern as APPROVAL_GATE_REFUSAL). */
+/** #286: the brand on setStatus's `expectUpdatedAt` refusal (same pattern as APPROVAL_GATE_REFUSAL). */
 export const QUOTE_VERSION_CHANGED = "quotes/version-changed" as const;
 
-/** #285: setStatus refused because the quote changed since the caller's
+/** #286: setStatus refused because the quote changed since the caller's
  *  `expectUpdatedAt` — nothing was written. Branded like ApprovalGateRefused. */
 export class QuoteVersionChanged extends Error {
   readonly quoteVersionChanged = QUOTE_VERSION_CHANGED;
@@ -1342,7 +1342,7 @@ export async function setStatus(
   await lockQuoteRow(id);
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return null;
-  // #285: Approve & send → moves only the version the sender was shown — before any write, the replay included.
+  // #286: Approve & send → moves only the version the sender was shown — before any write, the replay included.
   if (typeof opts.expectUpdatedAt === "number" && q.updatedAt !== opts.expectUpdatedAt) throw new QuoteVersionChanged();
   if (q.status === status) {
     // #170: nothing to transition, but the downstream record may still be
@@ -1371,7 +1371,7 @@ export async function setStatus(
   // legacy approval passes on its own record, so it makes exactly the DB
   // reads it made before #242 (#242 final).
   const gated = !resolveStatusGate(status, null, opts).ok;
-  // #284: a snapshot-stale approval also needs the context (the approver moving it may approve it, #285).
+  // #284: a snapshot-stale approval also needs the context (the approver moving it may approve it, #286).
   const needsLimits =
     gated && !(hasApproval(q.review) && q.review?.method !== "auto_limit" && approvalSnapshotMatches(q));
   const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
@@ -1549,7 +1549,7 @@ export async function setPoReceived(id: string, on: boolean): Promise<Quote | nu
 }
 
 /**
- * #285 task B — the quote's people: the lead estimator (`owner`) and Prepared
+ * #286 task B — the quote's people: the lead estimator (`owner`) and Prepared
  * by (`preparedBy`). Patches only those two fields plus `updatedAt`; `history`
  * is the status pipeline ({at, from, to}), so no entry is written. Both print
  * on the customer document, so patchQuote stamps `contentChangedAt`. Names are
@@ -1658,7 +1658,7 @@ export async function claimReview(
 }
 
 /** #284: an approver's decision applies only to an in-review quote still at
- *  the version they were shown (`expectUpdatedAt`, when given). #285:
+ *  the version they were shown (`expectUpdatedAt`, when given). #286:
  *  `allowUnsubmitted` (approve only) also takes none / changes / approved. */
 function decidableUnderLock(q: Quote, opts: ReviewOpts): boolean {
   const state = q.review?.state || "none";
@@ -1680,7 +1680,7 @@ export async function approve(
     // the version the approver was shown. A no-op leaves the quote unchanged;
     // the caller reads the outcome from the returned quote.
     if (!decidableUnderLock(q, opts)) return;
-    // #285: an unsubmitted quote has no record yet; a decision outside review
+    // #286: an unsubmitted quote has no record yet; a decision outside review
     // names this approver as reviewer (the old one belonged to another round).
     const inReview = q.review?.state === "in_review";
     const review = q.review || rv("none");

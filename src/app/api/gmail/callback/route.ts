@@ -28,7 +28,8 @@ import { saveConnection } from "@/lib/gmail/connections";
  */
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const settings = new URL("/settings", origin);
+  // Settings → Integrations holds the Mailboxes card (settings cleanup).
+  const settings = new URL("/settings?section=integrations", origin);
 
   const calState = verifyCalendarConnectState(req.nextUrl.searchParams.get("state") || "");
   if (calState) return finishCalendarConnect(req, origin, calState);

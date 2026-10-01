@@ -31,7 +31,7 @@ export type QuoteDocumentProps = {
   venueLabel: string;
   /** The lead estimator (`owner`) — "Questions? Reach out to …". */
   ownerName: string;
-  /** #285 task B — "Prepared by": `preparedBy`, else the owner, else the company. */
+  /** #286 task B — "Prepared by": `preparedBy`, else the owner, else the company. */
   preparedByName: string;
   companyName: string;
   /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
