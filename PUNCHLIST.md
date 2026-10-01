@@ -9971,7 +9971,7 @@ change. Spec `docs/superpowers/specs/2026-09-29-estimator-narrative-column-desig
 
 ---
 
-## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — DONE 2026-09-30 (D491–D506)
+## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — DONE 2026-09-30 (D491–D506, D511–D516)
 
 **Reported:** Jeff (2026-09-30): "Can we start building in a rewards tracker for customer purchases that works where we
 can give rewards and other benefits based on how much they have purchased." Designed with Jeff the same day (all
@@ -10075,3 +10075,19 @@ Spec: `docs/superpowers/specs/2026-10-01-catalog-photos-shrink-and-drive-sync-de
 **Follow-ups (not blocking).** A file that fails transiently every time blocks the queue behind it until it clears; 403
 reasons are read from message text (quota-style 403s); the unmatched list is not capped; `webpFileName` strips any
 short dotted suffix.
+
+**Purchase perks + perks for points (2026-10-01, D511–D516):** Jeff: "purchase perks for different tiers … under the
+perks tab" and "redeem perks for points." **Purchase perks** (Settings → Rewards, grouped by tier;
+`src/lib/rewards/purchase-perks.ts`): a customer gets every active one at or below their earned level — a staff banner
+in the Estimator and flame/inspection/repair builders ("Gold purchase perks: Free freight · Waived travel"), and "Your
+Gold rewards: …" on the portal card, the Estimator quote document and the service letters; informational, no pricing
+change, nothing while the program is off. **Perks for points:** a perk can have an unlock level (free), a `pointCost`,
+or both (free wins); once/yearly limits count every use. Redeem from the portal card (confirm; refused in staff preview;
+company from the grant only; refused if the price shown changed) or the company card (`create`); a point purchase
+debits its exact cost; redemptions await **Mark fulfilled**; admin **Undo** refunds once. One transaction under a
+per-company advisory lock (`withAdvisoryLock`, `src/db/index.ts`) per redemption — concurrent redemptions can't
+overspend. New bell group **Perks to fulfil**; `/rewards` counts free + buyable perks. Gates (merged with main incl.
+#283): tsc 0; test:specs 9784 PASS / 0 FAIL (+113 for this); test:smoke 172/0; eslint 0 errors, no new warnings;
+next build OK. Browser-verified with a real dev portal link (450 → 150 points; bell; fulfilled; Undo → 450). Reviewed:
+no blocking findings (the bell looks up company names one row at a time, like the existing document bell — fine at
+today's volume).

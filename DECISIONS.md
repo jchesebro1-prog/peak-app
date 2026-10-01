@@ -8316,3 +8316,44 @@ its reads fail. The same run rides `/api/gmail/sync`, which is already the daily
 min(20 s, time left before 50 s) — skipped under 10 s left or when no account is chosen — so no new cron entry or
 plan change is needed. A large first import therefore finishes over several runs; each call resumes where the last
 stopped.
+
+## D511. Purchase perks are per-tier, informational, and follow the earned level (#282, 2026-10-01)
+
+Purchase perks live in the program blob (`purchasePerks`, server-minted ids, removed ones kept hidden like D500). A
+customer gets every active one at a level at or below their **earned** level (lifetime spend), not their pricing tier.
+They show only while the program is on — a staff banner while quoting, and "Your <Level> rewards: …" to the customer —
+and never change a price in v1; applying one (free freight, waived travel) is the estimator's call.
+
+## D512. A perk can be free at a level, bought with points, or both (#282, 2026-10-01)
+
+`Perk.pointCost` (whole points) is optional. With an unlock level it is free once the level is reached; below it, or
+with no unlock level ("Never free" — a points-only perk with no price falls back to Base), it can be bought when the
+customer's spendable points cover the cost. Free wins when both apply. Once/yearly limits count every use, free or
+bought. Mark used remains for free perks and counts as delivered on the spot; Redeem records a claim (portal or staff)
+that needs Mark fulfilled.
+
+## D513. Spendable points are available credit rounded up; redemptions are serialized per company (#282, 2026-10-01)
+
+Spendable points = `pointsFor(balance − credit parked on open quotes)`, so a customer can spend every point they are
+shown; the balance may dip below $0 by less than $1 and no further. Each redemption (and Mark used) runs read-balance →
+check → post inside one transaction holding a per-company advisory lock (polled with a timeout, like the quote locks),
+with deterministic ids so a double click posts once. Applying credit on a quote does not take this lock, so a quote
+save racing a redemption could still overspend slightly — as before this change.
+
+## D514. Portal redemption trusts only the grant (#282, 2026-10-01)
+
+The portal Redeem action takes the company from the grant cookie, refuses staff preview and a page rendered for another
+company, re-checks availability server-side, and refuses (rather than charges) when the price or "Free" shown has
+changed since the page loaded. The portal never receives a dollar amount.
+
+## D515. Fulfilment and undo are ledger entries; undo refunds exactly once (#282, 2026-10-01)
+
+A redemption posts a `perk` entry (debit = point cost, or 0 when free). Fulfilment is a zero-amount `perk-fulfil` entry
+with a fixed id, so it posts once; Undo (admin) posts the exact negation once and is allowed even after fulfilment.
+
+## D516. "Perks to fulfil" is a shared bell group (#282, 2026-10-01)
+
+Unfulfilled redemptions show to everyone (like new customer documents), not owner-scoped, and stay listed while the
+program is off since the perk is still owed; the group can be muted in notification settings. The portal card adds
+purchase perks, "Free" / "N points" prices and a "Redeemed — we'll be in touch" list.
+
