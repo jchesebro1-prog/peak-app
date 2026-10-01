@@ -37748,7 +37748,7 @@ const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(
   const emc274 = rd274("src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx");
   ok(emc274.includes('import { PartPicker } from "./part-picker"') && !emc274.includes("function PartPicker"), "#274: the Equipment map now uses the shared part picker (one picker, not two)");
   ok(emc274.includes("onSuggest={() => suggestEquipmentPartsAction(rowKey)}"), "#274: the Equipment map keeps its per-row Suggest through the shared picker");
-  ok(cli.includes("NEW_SERIES_DEFAULTS.carrierSpacingIn") && cli.includes("NEW_SERIES_DEFAULTS.hangerSpacingFt") && cli.includes('stickLengthFt: "",'),
+  ok(cli.includes("NEW_SERIES_DEFAULTS.carrierSpacingIn") && cli.includes("NEW_SERIES_DEFAULTS.hangerSpacingFt") && cli.includes("sticks: [],"),
     "#274 client: a new series pre-fills carrier 12\" / hanger 5' / overlap 0 and leaves the stick length blank");
   ok(cli.includes("disabled={!canActivate}") && cli.includes("activationProblems("), "#274 client: the Active toggle is disabled until the series can be active, with the reasons shown");
   const store = rd274("src/lib/stores/track-series.ts");
@@ -41914,4 +41914,16 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   ok(bom.rows.some((r) => r.role === "pipeClamp" && r.sku === "PC") && bom.rows.some((r) => r.role === "lapClamp" && r.qty === 2), "#291 BOM: pipe and lap clamps are priced rows");
   const missing = t291Bom(t291Cfg({ runFt: 42 }), s, Object.fromEntries(Object.entries(parts).filter(([k]) => k !== "S-22")), 0.25);
   ok(missing.errors.some((e) => /no part for Track — map it/.test(e)), "#291 BOM: a chosen stick deleted from the catalog blocks the line, naming Track");
+}
+
+// ---- #291 wiring: every reader of a series' SKUs includes the sticks; the admin screen edits them ----
+{
+  const rd291 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd291("src/app/(app)/estimating-rules/track-series/page.tsx").includes("series.flatMap((s) => seriesSkus(s))"), "#291 page: Track series reads every mapped SKU including sticks (seriesSkus)");
+  ok(rd291("src/app/(app)/estimator/page.tsx").includes("trackSeries.flatMap((s) => seriesSkus(s))"), "#291 Estimator: the track modal's catalog parts include every stick");
+  ok(rd291("src/lib/stores/track-series.ts").includes("liveSkusOf(seriesSkus(clean))"), "#291 store: the Active check reads sticks' SKUs too");
+  const cli291 = rd291("src/app/(app)/estimating-rules/track-series/track-series-client.tsx");
+  ok(cli291.includes("Stick lengths") && cli291.includes("+ Add length") && cli291.includes("sticks: draft.sticks") && cli291.includes("TRACK_ROLES.filter((r) => r !== \"track\")"),
+    "#291 client: a Stick lengths list replaces the single stick field; the track role leaves the role list");
+  ok(cli291.includes("OPTIONAL_ROLES.includes(role)") && cli291.includes("Line tie-off allowance"), "#291 client: optional roles are marked, and the line allowance is editable");
 }
