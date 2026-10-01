@@ -10039,3 +10039,28 @@ returns the redeemed credit exactly once (the reconcile keys on posted entries).
 won ones; a save can't put credit back on a lost quote; reopening starts with none. Gates: tsc 0; test:specs 9538 PASS /
 0 FAIL (+43); test:smoke 172/0; eslint 0 errors; next build OK. A lost quote that carried credit before this keeps it
 until it is next reopened or saved (it never counted toward spend or held a balance).
+
+## 283. Catalog photos — shrink on the way in + Peak Product Photos Drive sync — DONE 2026-10-01 (D507–D510)
+
+Spec: `docs/superpowers/specs/2026-10-01-catalog-photos-shrink-and-drive-sync-design.md` (as-built notes at its end).
+
+**Done.**
+- **Shrink (D507):** every catalog image — attach/replace upload, Add image from URL, Drive, datasheet thumbnail — is
+  stored as ≤1600 px WebP q80 (EXIF-rotated, metadata stripped) via `src/lib/part-docs/shrink.ts`; image cap 10 → 25
+  MB; HEIC/corrupt refuse with a plain message.
+- **Drive sync (D508–D510):** a read-only `drive.readonly` sync of the "Peak Product Photos" folder (My Drive or Shared
+  Drives, recursive) onto catalog parts by the Upload-many filename rule; new part-document source `Drive`. Pure
+  planner, resumable per-file executor with a run lease, "Couldn't match" list, Enable Drive photos + account picker in
+  Settings → Mailboxes (and Account page), admin panel with Sync now on Catalog → Datasheets, and a rider on the daily
+  Gmail cron.
+
+**Remaining (Jeff-gated).**
+1. Google Cloud → OAuth consent screen: add `https://www.googleapis.com/auth/drive.readonly` (ideally switch the user
+   type to Internal — Workspace — which also stops 7-day token expiry under Testing).
+2. Create the "Peak Product Photos" folder (a Shared Drive is best); name photos by manufacturer part number.
+3. Settings → Mailboxes → Enable Drive photos on the chosen account and pick it as the Catalog photos account.
+4. Catalog → Datasheets → Sync now. iPhone photos must be JPEG (Settings → Camera → Formats → Most Compatible).
+
+**Follow-ups (not blocking).** A file that fails transiently every time blocks the queue behind it until it clears; 403
+reasons are read from message text (quota-style 403s); the unmatched list is not capped; `webpFileName` strips any
+short dotted suffix.

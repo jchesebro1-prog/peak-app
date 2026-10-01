@@ -518,6 +518,18 @@ See `.env.example`.
     Jeff-gated: review the renders (`docs/venue-templates/renders/`), the
     arena corner radius and the Contemporary back-wall rule. Follow-ups
     #256–#260. Punch item #255.
+26. ✅ **Catalog photos** (#283, D507–D510) — every catalog image is
+    shrunk to ≤1600 px WebP q80 on the way in (`src/lib/part-docs/shrink.ts`,
+    sharp; attach/replace, Add image from URL, Drive, datasheet thumbnails;
+    image cap 25 MB; HEIC refuses). A read-only `drive.readonly` sync
+    (`src/lib/google/drive-photos.ts`, `drive-photo-plan.ts`,
+    `drive-photo-sync.ts`) attaches the "Peak Product Photos" folder to parts
+    by the Upload-many filename rule — unmatched listed, never guessed; a
+    Drive delete keeps the app copy; source `Drive`. Runs from Sync now
+    (Catalog → Datasheets) and a rider on the daily Gmail cron; Enable Drive
+    photos + account picker in Settings → Mailboxes. Remaining is Jeff-gated:
+    add `drive.readonly` to the OAuth consent screen, create the folder,
+    enable + pick the account, Sync now. Punch item #283.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

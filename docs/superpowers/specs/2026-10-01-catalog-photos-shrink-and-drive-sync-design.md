@@ -184,3 +184,19 @@ unchanged).
 2. Create the **Peak Product Photos** folder (a Shared Drive is best).
 3. Settings → Mailboxes → **Enable Drive photos** on the chosen account and pick it as the photos account.
 4. Catalog → Datasheets → **Sync now**.
+
+## As built
+
+Deviations from the design above:
+
+- **Drive error wording:** errors use a photos-specific `photosDriveError` in `src/lib/google/drive-photos.ts`, not a
+  wording option on `driveErrorFor`.
+- **Transient vs per-file failures (added in review):** network/timeout/Blob/DB/401/408/429/5xx/rate-limit 403 stop the
+  call and retry next run without marking the file; shrink refusal, size cap, download-restricted 403, 404 and other 4xx
+  are recorded and skipped until the file changes in Drive.
+- **Pending entries and a run lease (added in review):** a pending entry is saved before each create so a killed
+  function cannot double-import; `runningUntil` (budget + 60 s) blocks overlapping runs.
+- **Account page:** an "Enable Drive photos" button was added on the Account page as well as Settings → Mailboxes.
+- **Cron rider budget:** min(20 s, time left before 50 s), skipped under 10 s or with no photos account.
+- **Known follow-ups:** a file that fails transiently every time blocks the queue behind it; quota-style 403s are read
+  from message text; the unmatched list is uncapped; `webpFileName` strips any short dotted suffix.
