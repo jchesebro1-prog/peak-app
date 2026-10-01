@@ -10228,8 +10228,8 @@ hints) were fixed and re-reviewed.
    engine against production catalog costs (40' bi-parting 280 on a batten: 2 × 22' sticks, 8 hanging + 8 pipe clamps,
    2 lap clamps, 134' of #12 — $2,024.78 cost, matched by hand).
 2. Out of scope, for Jeff: walk-along bi-parts needing 4 end stops; center pipe supports (CPS) at the overlap; curve
-   spindles/idlers on curved 140 cord runs; 220's floor pulley (ADC 1145 is not in the catalog, so a cord-operated 220
-   is blocked by name until one is mapped); pipe-clamp part numbers for 500 and 220 (ADC doesn't publish them); a
+   spindles/idlers on curved 140 cord runs; 220's floor pulley (ADC 1145 is not in the catalog — Jeff 2026-10-01: use the 2865BL, mapped;
+   a cord-operated 220 now prices); pipe-clamp part numbers for 500 and 220 (ADC doesn't publish them); a
    separate ceiling vs batten hanger spacing; 170 has no black ceiling bracket in the catalog (ceiling-mounted 170 is
    blocked by name); 500's ceiling clamp (5023-B) has no black version.
 
