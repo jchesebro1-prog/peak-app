@@ -259,3 +259,18 @@ export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: st
     images: sortImages(images).map(({ id, title, source, hidden, sort }) => ({ id, title, source, hidden, sort })),
   };
 }
+
+/**
+ * Make-primary reorder (#290): move `id` to index 0 of the image id list and
+ * keep every other id (hidden ones included) in its existing order, so the
+ * result is the full list `setImageOrder` requires. `autoBoundary` is the
+ * index where the datasheet-render thumbnails start (-1 = none); an id that
+ * is absent, or at/beyond the boundary, returns the list unchanged — an auto
+ * thumbnail always sorts after every real image (`compareImages`). Pure;
+ * never mutates its input.
+ */
+export function moveImageToFront(ids: readonly string[], id: string, autoBoundary: number): string[] {
+  const at = ids.indexOf(id);
+  if (at === -1 || (autoBoundary !== -1 && at >= autoBoundary)) return [...ids];
+  return [id, ...ids.slice(0, at), ...ids.slice(at + 1)];
+}

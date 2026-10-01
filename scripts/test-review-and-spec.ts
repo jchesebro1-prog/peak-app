@@ -42744,3 +42744,22 @@ async function packages289AsyncChecks(): Promise<void> {
     await removeCustomer(CO);
   }
 }
+
+/* ======================================================================
+   #290 Make primary — moveImageToFront (pure)
+   ====================================================================== */
+import { moveImageToFront as p290MoveToFront } from "@/lib/part-docs/views";
+{
+  const eq = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+  // ids: two real, one hidden real, then two auto thumbnails (boundary 3).
+  const ids = ["a", "b", "c-hidden", "x-auto", "y-auto"];
+  ok(eq(p290MoveToFront(ids, "b", 3), ["b", "a", "c-hidden", "x-auto", "y-auto"]), "#290 primary: a later real image moves to the front, the rest keep order");
+  ok(eq(p290MoveToFront(ids, "c-hidden", 3), ["c-hidden", "a", "b", "x-auto", "y-auto"]), "#290 primary: a hidden id is kept in the list (full id list for setImageOrder)");
+  ok(eq(p290MoveToFront(ids, "a", 3), ids), "#290 primary: the image already first leaves the order unchanged");
+  ok(eq(p290MoveToFront(ids, "zzz", 3), ids), "#290 primary: an absent id returns the list unchanged");
+  ok(eq(p290MoveToFront(ids, "x-auto", 3), ids) && eq(p290MoveToFront(ids, "y-auto", 3), ids), "#290 primary: an auto thumbnail at or beyond the boundary is refused");
+  ok(eq(p290MoveToFront(["a", "b", "c"], "c", -1), ["c", "a", "b"]), "#290 primary: boundary -1 (no auto images) lets any id move");
+  const input = ["a", "b"];
+  p290MoveToFront(input, "b", -1);
+  ok(eq(input, ["a", "b"]), "#290 primary: the input array is not mutated");
+}

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
 import { collapseList } from "@/lib/part-docs/coverage";
 import { PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocumentSource } from "@/lib/part-docs/types";
-import type { PartDocsImage, PartDocsView } from "@/lib/part-docs/views";
+import { moveImageToFront, type PartDocsImage, type PartDocsView } from "@/lib/part-docs/views";
 import AlsoCovers from "./documents/also-covers";
 import { addImageFromUrlAction, setImageDisplayAction, setImageOrderAction } from "./documents/actions";
 import SlotCell, { docHref } from "./documents/slot-cell";
@@ -93,6 +93,14 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
     persistOrder(next);
   };
 
+  /** ★ Make primary (#290): one reorder through the same full-id-list write. */
+  const makePrimary = (image: PartDocsImage) => {
+    const ids = images.map((i) => i.id);
+    const next = moveImageToFront(ids, image.id, autoBoundary);
+    const byId = new Map(images.map((i) => [i.id, i]));
+    persistOrder(next.map((id) => byId.get(id)!));
+  };
+
   const toggleHidden = (image: PartDocsImage) => run("Saving…", () => setImageDisplayAction({ documentId: image.id, sku, hidden: !image.hidden }));
 
   const dropProps = {
@@ -119,10 +127,18 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
               <a href={docHref(img.id)} target="_blank" rel="noopener noreferrer">
                 <img src={docHref(img.id)} alt={img.title} loading="lazy" style={{ width: 120, height: 90, objectFit: "cover", borderRadius: 7, border: "1px solid #e3e5ea", display: "block" }} />
               </a>
-              <div style={{ fontSize: 10.5, color: "#8c919c", margin: "3px 0" }}>{IMAGE_SOURCE_LABEL[img.source] ?? img.source}</div>
+              <div style={{ fontSize: 10.5, color: "#8c919c", margin: "3px 0" }}>
+                {IMAGE_SOURCE_LABEL[img.source] ?? img.source}
+                {i === 0 && img.source !== "datasheet-render" && (
+                  <span style={{ marginLeft: 6, padding: "0 5px", borderRadius: 4, background: "var(--accent)", color: "#fff", fontWeight: 600, fontSize: 10 }}>Primary</span>
+                )}
+              </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <button type="button" style={smallLink} disabled={!!busy || !canMoveUp(i)} onClick={() => move(i, -1)} aria-label={`Move ${img.title} up`}>↑</button>
                 <button type="button" style={smallLink} disabled={!!busy || !canMoveDown(i)} onClick={() => move(i, 1)} aria-label={`Move ${img.title} down`}>↓</button>
+                {i > 0 && groupOf(i) === "real" && (
+                  <button type="button" style={smallLink} disabled={!!busy} onClick={() => makePrimary(img)}>★ Make primary</button>
+                )}
                 <button type="button" style={smallLink} disabled={!!busy} onClick={() => toggleHidden(img)}>
                   {img.hidden ? "Show" : "Hide from customers"}
                 </button>
