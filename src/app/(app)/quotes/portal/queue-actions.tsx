@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition, type CSSProperties } from "react";
+import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import { setQuoteStatus } from "@/app/(app)/quotes/actions";
 import { approveFlameQuote } from "@/app/(app)/flame-tests/quote/actions";
@@ -35,6 +36,15 @@ const BTN: CSSProperties = {
 const APPROVE: CSSProperties = { ...BTN, color: "#fff", background: "#1f7a52", border: "none" };
 const DECLINE: CSSProperties = { ...BTN, color: "#a33a2b", background: "#fff", border: "1px solid #f3d2cc" };
 const CANCEL: CSSProperties = { ...BTN, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec" };
+
+function ApproveSubmit() {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending} style={{ ...APPROVE, opacity: pending ? 0.7 : 1 }}>
+      {pending ? "Approving…" : "Approve"}
+    </button>
+  );
+}
 
 export function QueueRowActions({
   quoteId,
@@ -122,9 +132,7 @@ export function QueueRowActions({
           <input type="hidden" name="id" value={quoteId} />
           <input type="hidden" name="status" value="won" />
           <input type="hidden" name="back" value={back} />
-          <button type="submit" style={APPROVE}>
-            Approve
-          </button>
+          <ApproveSubmit />
         </form>
       )}
       {(approve === "flame" || approve === "inspection") && (

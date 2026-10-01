@@ -74,7 +74,7 @@ export function portalBellGroups(
       .map((q) => ({
         id: q.id,
         title: q.name,
-        sub: `${q.customer || ""} — approve or decline in the quote`,
+        sub: `${q.customer || ""} — approve or decline in ${isCustomerBuiltQuote(q) ? "Portal quotes" : "the quote"}`,
         href: isCustomerBuiltQuote(q) ? portalQueueHref(q.id) : "/quotes?id=" + encodeURIComponent(q.id),
         letter: "✓",
         color: "#1f7a52",
