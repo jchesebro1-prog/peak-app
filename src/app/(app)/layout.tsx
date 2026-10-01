@@ -23,7 +23,7 @@ export default async function AppLayout({
         color: u.color,
       }))
     : [];
-  const { counts, bell } = await navData(user.name);
+  const { counts, bell } = await navData(user.name, can("approve", user.roles));
 
   return (
     <SyncProvider>

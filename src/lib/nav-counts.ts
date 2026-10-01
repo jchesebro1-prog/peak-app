@@ -1,6 +1,6 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
 import { isDone } from "@/lib/pipelines";
-import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { listDesignRecords } from "@/lib/stores/designs";
 import { getAllProjects, riskFlags } from "@/lib/stores/projects";
 import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
@@ -21,6 +21,9 @@ import { customerUploadBell } from "@/lib/document-rules";
 import { shortDate } from "@/lib/format";
 import { displayLeadNumber } from "@/lib/estimate-number";
 import { portalBellGroups } from "@/lib/portal-bell";
+import { quoteBuilderHref } from "@/lib/quote-links";
+import { approvalSnapshotMatches } from "@/lib/approval-snapshot";
+import { firstName } from "@/lib/team";
 import type {
   NavCounts,
   BellGroup,
@@ -36,7 +39,47 @@ import type {
 
 export type { BellItem, BellGroup };
 
-export async function navData(me: string): Promise<{
+/**
+ * #284 — the quote half of the approval bell. Approvers see EVERY in-review
+ * quote that isn't theirs (shared queue and assigned alike — the reviewer
+ * field is advisory), assigned-to-me first; anyone also sees a quote assigned
+ * to them by name. Owners see their drafts that came back: approved and still
+ * holding (in-app/attested — self and auto approvals happen at send), or sent
+ * back for changes. Every item opens the quote itself.
+ */
+export function quoteApprovalBell(quotes: Quote[], me: string, canApprove: boolean): { needs: BellItem[]; back: BellItem[] } {
+  const mine = (n?: string | null) => (n || "").trim().toLowerCase() === me.trim().toLowerCase();
+  const needs = quotes
+    .filter((q) => q.review?.state === "in_review" && !mine(q.owner) && (canApprove || mine(q.review.reviewer)))
+    .sort((a, b) => Number(mine(b.review?.reviewer)) - Number(mine(a.review?.reviewer)) || (a.review?.submittedAt || 0) - (b.review?.submittedAt || 0))
+    .map((q) => ({
+      id: q.id,
+      title: q.name,
+      sub: `${q.customer || ""} · from ${firstName(q.review?.submittedBy || q.owner || "")}${mine(q.review?.reviewer) ? " · assigned to you" : ""}`,
+      href: quoteBuilderHref(q),
+      letter: "Q",
+      color: "var(--accent)",
+    }));
+  const back = quotes
+    .filter((q) => mine(q.owner) && q.status === "draft")
+    .filter((q) =>
+      q.review?.state === "changes" ||
+      (q.review?.state === "approved" && (q.review.method === "in_app" || q.review.method === "attested" || !q.review.method) && approvalSnapshotMatches(q))
+    )
+    .map((q) => ({
+      id: q.id,
+      title: q.name,
+      sub: q.review?.state === "changes"
+        ? `Sent back by ${firstName(q.review.decidedBy || "")}${q.review.note ? ` — “${q.review.note}”` : ""}`
+        : `Approved — ready to send · ${firstName(q.review?.decidedBy || "")}`,
+      href: quoteBuilderHref(q),
+      letter: q.review?.state === "changes" ? "!" : "✓",
+      color: q.review?.state === "changes" ? "#b4543a" : "#1f7a52",
+    }));
+  return { needs, back };
+}
+
+export async function navData(me: string, canApprove = false): Promise<{
   counts: NavCounts;
   bell: BellGroup[];
   bellCount: number;
@@ -83,12 +126,7 @@ export async function navData(me: string): Promise<{
   const leadCount = leadFollowUps.length;
   const inboxUnread = unreadCountFrom(comms, me);
 
-  const reviewQuotes = quotes.filter(
-    (q) =>
-      q.review?.state === "in_review" &&
-      q.review?.reviewer === me &&
-      q.owner !== me
-  );
+  const approvalBell = quoteApprovalBell(quotes, me, canApprove);
   const portalAccepted = quotes.filter(
     (q) => q.portalAcceptance && q.status === "sent"
   );
@@ -124,7 +162,7 @@ export async function navData(me: string): Promise<{
   const counts: NavCounts = {
     inbox: inboxUnread,
     leads: leadCount,
-    reviews: reviewQuotes.length + reviewDesigns.length,
+    reviews: approvalBell.needs.length + reviewDesigns.length,
     projects: riskProjects.length,
     flametests: renewalRows.length,
     inspections: requestedInspections.length,
@@ -151,15 +189,8 @@ export async function navData(me: string): Promise<{
       color: "#b4543a",
     }))
   );
-  push("reviews", "Needs your review", [
-    ...reviewQuotes.map((q) => ({
-      id: q.id,
-      title: q.name,
-      sub: `${q.customer || ""} · quote`,
-      href: "/quotes",
-      letter: "Q",
-      color: "var(--accent)",
-    })),
+  push("reviews", "Needs your approval", [
+    ...approvalBell.needs,
     ...reviewDesigns.map((d) => ({
       id: d.id,
       title: d.name,
@@ -169,6 +200,7 @@ export async function navData(me: string): Promise<{
       color: "#3155a8",
     })),
   ]);
+  push("reviewBack", "Back from review", approvalBell.back);
   push(
     "surveys",
     "Survey requests to schedule",

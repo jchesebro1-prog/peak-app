@@ -64,7 +64,8 @@ export function homeAlerts(
   designsAll: DesignRecord[],
   me: string,
   now: number,
-  sheetHref: (id: string) => string
+  sheetHref: (id: string) => string,
+  canApprove = false
 ) {
   const myQuotes = quotesAll.filter((q) => q.owner === me);
   const daysSince = (ts?: number | null) => Math.floor((now - (ts || now)) / DAY);
@@ -114,7 +115,7 @@ export function homeAlerts(
   const reviewAlerts: AlertRow[] = [];
   quotesAll.forEach((q) => {
     const r = q.review;
-    if (r?.state === "in_review" && r.reviewer === me && q.owner !== me) {
+    if (r?.state === "in_review" && q.owner !== me && (canApprove || r.reviewer === me)) {
       reviewAlerts.push({
         key: `rq-${q.id}`,
         title: shortTitle(q.name) + " — awaiting your review",
@@ -123,7 +124,7 @@ export function homeAlerts(
         dot: "#3155a8",
         tagColor: "#3155a8",
         tagBg: "#e9eefb",
-        href: "/reviews",
+        href: quoteBuilderHref(q),
       });
     } else if (r?.state === "changes" && r.submittedBy === me) {
       reviewAlerts.push({
@@ -154,7 +155,7 @@ export function homeAlerts(
     }
   });
   const openReviewCount =
-    quotesAll.filter((q) => q.review?.state === "in_review" && q.review?.reviewer === me && q.owner !== me).length +
+    quotesAll.filter((q) => q.review?.state === "in_review" && q.owner !== me && (canApprove || q.review?.reviewer === me)).length +
     designsAll.filter((d) => d.review?.state === "in_review" && d.review?.reviewer === me && d.owner !== me).length;
 
   return {

@@ -39733,6 +39733,47 @@ async function approval284AsyncChecks(): Promise<void> {
   ok((await Ops.sendBackQuoteReview(id("t3-clr"), JEFF, "Recheck")).ok && (await Q.get(id("t3-clr")))?.review?.approvedAgainst == null, "#284 ops: sending back clears approvedAgainst");
   // The withdraw guard inside the patch: a decided quote is not reset.
   ok((await Q.withdrawReview(id("t3-appr")))?.review?.state === "approved", "#284 ops: the store's withdrawReview leaves a decided quote alone");
+
+  // Task 7 — bell groups.
+  const NC = await import("@/lib/nav-counts");
+  const qq = (slug: string, owner: string, review: Record<string, unknown>, status = "draft") =>
+    ({ id: id(slug), name: "T284 " + slug, customer: "Acme", owner, status, quoteType: "system", value: 200, spec: { sections: [] }, review } as never);
+  const shared = qq("b1", "Nic Trapani", { state: "in_review", reviewer: null, submittedBy: "Nic Trapani", submittedAt: 1 });
+  const toChris = qq("b2", "Nic Trapani", { state: "in_review", reviewer: "Chris Mittlesteadt", submittedBy: "Nic Trapani", submittedAt: 2 });
+  const approvedNic = qq("b3", "Nic Trapani", { state: "approved", method: "in_app", decidedBy: "Jeff Chesebro", reviewer: "Jeff Chesebro", note: "" });
+  const backNic = qq("b4", "Nic Trapani", { state: "changes", decidedBy: "Jeff Chesebro", note: "Fix it" });
+  const all = [shared, toChris, approvedNic, backNic];
+  const jeff = NC.quoteApprovalBell(all, "Jeff Chesebro", true);
+  ok(jeff.needs.length === 2 && jeff.needs.every((b) => b.href.startsWith("/estimator?id=")), "#284 bell: every approver sees shared AND assigned in-review quotes, linking to the quote");
+  const chris = NC.quoteApprovalBell(all, "Chris Mittlesteadt", true);
+  ok(chris.needs[0].id === id("b2"), "#284 bell: a quote assigned to me sorts first");
+  ok(NC.quoteApprovalBell(all, "Jena Tolksdorf", false).needs.length === 0, "#284 bell: a non-approver gets no approval items");
+  ok(NC.quoteApprovalBell(all, "Nic Trapani", true).needs.length === 0, "#284 bell: nobody is asked to approve their own quote");
+  const nic = NC.quoteApprovalBell(all, "Nic Trapani", false);
+  ok(nic.back.length === 2 && nic.back.some((b) => b.sub.includes("Approved — ready to send")) && nic.back.some((b) => b.sub.includes("Sent back")),
+    "#284 bell: the owner sees Approved — ready to send and Sent back items");
+  const sentNic = qq("b5", "Nic Trapani", { state: "approved", method: "in_app", decidedBy: "Jeff Chesebro", reviewer: "Jeff Chesebro", note: "" }, "sent");
+  ok(NC.quoteApprovalBell([sentNic], "Nic Trapani", false).back.length === 0, "#284 bell: a sent quote leaves the owner's list");
+  // Task 7 — categories, Home alerts, and the queue follow the same rule.
+  const NP = await import("@/lib/stores/notif-prefs");
+  ok(NP.CATEGORIES.some((c) => c.key === "reviews" && c.label === "Needs your approval") && NP.CATEGORIES.some((c) => c.key === "reviewBack" && c.label === "Back from review"),
+    "#284 bell: notif-prefs registers 'Needs your approval' (reviews) and 'Back from review' (reviewBack)");
+  const HM = await import("@/lib/dashboard/home-metrics");
+  const href = (x: string) => "/h/" + x;
+  const hmA = HM.homeAlerts(all as never, [], "Jeff Chesebro", 1000, href, true);
+  const hmN = HM.homeAlerts(all as never, [], "Jena Tolksdorf", 1000, href, false);
+  const hmC = HM.homeAlerts(all as never, [], "Chris Mittlesteadt", 1000, href);
+  ok(hmA.openReviewCount === 2 && hmA.alerts.filter((r) => r.key.startsWith("rq-")).every((r) => r.href.startsWith("/estimator?id=")), "#284 home: an approver's alerts list every in-review quote and link to the quote");
+  ok(hmN.openReviewCount === 0 && hmC.openReviewCount === 1, "#284 home: a non-approver sees only a quote assigned to them");
+  const QU = await import("@/lib/queue");
+  await mk("t7-q", "T284 Owner"); // shared queue
+  const jq2 = await QU.loadQueue("Jeff Chesebro");
+  const own = await QU.loadQueue("T284 Owner");
+  const row = jq2.find((i) => i.key === `quote-review:${id("t7-q")}`);
+  ok(!!row && row.title.startsWith("Approve estimate") && row.href.startsWith("/estimator?id="), "#284 queue: an approver's queue carries a shared in-review quote as 'Approve estimate …', linked to the quote");
+  ok(!own.some((i) => i.key === `quote-review:${id("t7-q")}`), "#284 queue: the owner's own quote is not in their approval queue");
+  const qsrc = readFileSync("src/lib/queue.ts", "utf8");
+  ok(!qsrc.includes("Unclaimed review: quote") && qsrc.includes("reviewers()"), "#284 queue: the old 'Unclaimed review' wording is gone and the approver set comes from reviewers()");
 }
 
 /* #284 Task 4: the next-step view model. */

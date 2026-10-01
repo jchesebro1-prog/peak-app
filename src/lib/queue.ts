@@ -8,6 +8,9 @@ import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
 import { allVisits } from "@/lib/stores/site-visits";
 import type { QueueItem } from "@/lib/queue-types";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { quoteBuilderHref } from "@/lib/quote-links";
+import { reviewers } from "@/lib/users";
+import { firstName } from "@/lib/team";
 
 /* ------------------------------------------------------------------ *
  * My Queue (D93) — one person's open commitments, DERIVED.
@@ -71,7 +74,7 @@ function assignmentHref(link: AssignmentLink, source: string): string {
  * convention for ownership across quotes, projects, and engagements).
  */
 export async function loadQueue(me: string): Promise<QueueItem[]> {
-  const [assignments, engagements, projects, quotes, flames, inspections, visits] =
+  const [assignments, engagements, projects, quotes, flames, inspections, visits, approverRows] =
     await Promise.all([
       allAssignments(),
       allEngagements(),
@@ -80,7 +83,10 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       flameRenewals({ dueOnly: true }),
       inspectionRenewals({ dueOnly: true }),
       allVisits(),
+      reviewers(),
     ]);
+  // #284 — approvers see every in-review quote; the reviewer field is advisory.
+  const meApproves = approverRows.some((u) => u.name === me);
 
   // Self-sufficiency: /api/queue's Reminders-sync cron can call loadQueue
   // before any page load has triggered the lazy migration, so legacy
@@ -108,20 +114,21 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
     });
   }
 
-  /* --- quote reviews waiting on me --- */
+  /* --- quote reviews waiting on me (#284): every approver sees every
+     in-review quote that isn't theirs; a non-approver only sees one assigned
+     to them by name. --- */
   for (const q of quotes) {
     const r = q.review;
-    if (!r || r.state !== "in_review") continue;
-    // Unclaimed reviews are everyone's problem; claimed ones are the
-    // reviewer's alone.
-    if (r.reviewer && r.reviewer !== me) continue;
+    if (!r || r.state !== "in_review" || q.owner === me) continue;
+    if (r.reviewer && r.reviewer !== me && !meApproves) continue;
+    if (!r.reviewer && !meApproves) continue;
     items.push({
       key: `quote-review:${q.id}`,
       source: "quote-review",
-      title: r.reviewer ? `Review quote ${displayQuoteNumber(q)}` : `Unclaimed review: quote ${displayQuoteNumber(q)}`,
-      context: q.customer || q.name || "",
+      title: `Approve estimate ${displayQuoteNumber(q)}`,
+      context: `${q.customer || q.name || ""} · from ${firstName(r.submittedBy || q.owner || "")}`,
       due: due(r.submittedAt),
-      href: "/reviews",
+      href: quoteBuilderHref(q),
       writable: false,
     });
   }

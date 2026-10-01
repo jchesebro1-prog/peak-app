@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
-import { firstName } from "@/lib/team";
+import { can, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import { makeDashboardData } from "@/lib/dashboard/data";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor } from "@/lib/dashboard/home-metrics";
@@ -78,7 +78,7 @@ export default async function HomePage({
   const pipe = resolvePipe(first(sp.pipe));
   const sheetHref = sheetHrefFor(pipe);
   const s = myQuoteStats(quotesAll, me);
-  const { urgentCount, openReviewCount } = homeAlerts(quotesAll, designsAll, me, now, sheetHref);
+  const { urgentCount, openReviewCount } = homeAlerts(quotesAll, designsAll, me, now, sheetHref, can("approve", user.roles));
 
   /* ---- greeting (unchanged) ---- */
   const office = appSettings.offices.find((o) => o.quoteDefault) || appSettings.offices[0];

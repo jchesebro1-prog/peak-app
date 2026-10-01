@@ -7,7 +7,7 @@
  */
 import { designBudgetLabel, designNeedsPart, designRefreshHint } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
-import { deriveInitials, fallbackColor } from "@/lib/team";
+import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { timeAgo as designTimeAgo } from "@/lib/stores/designs";
 import { stageMeta as surveyStageMeta, timeAgo as surveyTimeAgo } from "@/lib/stores/surveys";
 import {
@@ -210,7 +210,7 @@ export const HOME_RENDERERS = {
   /* ---- needs attention (page.tsx 246-335) ---- */
   "needs-attention": async (ctx) => {
     const [quotesAll, designsAll] = await Promise.all([ctx.data.quotes(), ctx.data.designs()]);
-    const { alerts } = homeAlerts(quotesAll, designsAll, ctx.user.name, ctx.now, sheetHrefFor(resolvePipe(ctx.sp.pipe)));
+    const { alerts } = homeAlerts(quotesAll, designsAll, ctx.user.name, ctx.now, sheetHrefFor(resolvePipe(ctx.sp.pipe)), can("approve", ctx.user.roles));
     return <HomeNeedsAttention alerts={alerts} />;
   },
 } satisfies Record<string, WidgetRenderer>;
