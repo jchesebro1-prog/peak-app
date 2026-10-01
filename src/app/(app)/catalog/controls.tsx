@@ -294,12 +294,12 @@ export function CatalogImportPanel({
                   outline: "none",
                 }}
               >
+                <option value="__add_new__">+ Add new manufacturer…</option>
                 {manufacturers.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
                 ))}
-                <option value="__add_new__">+ Add new manufacturer…</option>
               </select>
               {adding && (
                 <input

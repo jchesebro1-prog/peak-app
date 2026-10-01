@@ -49,8 +49,13 @@ export type CatalogParse = {
   hasMap: boolean;
 };
 
+/** The downloadable catalog template; it must round-trip through parseCatalog (#286). */
+export const CATALOG_TEMPLATE_CSV = ["MFR Part #,Description,Category,Unit,List,Cost", "EXAMPLE-001,Example catalog part,Audio/Video,ea,100.00,65.00"].join("\n") + "\n";
+
 const ALIASES: Record<keyof Omit<CatalogRow, "valid">, string[]> = {
-  sku: ["sku", "item", "itemnumber", "item number", "part", "partnumber", "part number", "partno", "itemno", "code", "catalog"],
+  sku: ["sku", "item", "itemnumber", "item number", "part", "partnumber", "part number", "partno", "itemno", "code", "catalog",
+    // #286 — the downloadable template's own header ("MFR Part #" → mfrpart) must map.
+    "mfr part #", "manufacturer part #"],
   desc: ["description", "desc", "productdescription", "product description", "name", "itemdescription", "item description", "product"],
   category: ["category", "cat", "productfamily", "product family", "family", "group", "class"],
   unit: ["unit", "uom", "units", "u/m", "um"],
@@ -206,6 +211,9 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
       const idx = header.findIndex((h) => h && al.indexOf(h) >= 0);
       map[k] = idx; // -1 when absent
     });
+    // #286 — a file keyed only by "MFR PN" has no SKU column: that column is
+    // both the catalog key and the stored manufacturerPartNumber.
+    if (map.sku < 0 && map.manufacturerPartNumber >= 0) map.sku = map.manufacturerPartNumber;
     dataRows = grid.slice(1);
     hasList = map.list >= 0;
     hasCost = map.cost >= 0;

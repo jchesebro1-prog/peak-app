@@ -4591,7 +4591,7 @@ ok(NAV.some((e) => e.kind === "group" && e.key === "crm" && e.children.some((c) 
 }
 
 /* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */
-import { parseCatalog } from "@/app/(app)/catalog/parse";
+import { parseCatalog, CATALOG_TEMPLATE_CSV } from "@/app/(app)/catalog/parse";
 
 {
   const descOnly = parseCatalog("SKU,Description\nA-1,Widget\n");
@@ -4603,6 +4603,15 @@ import { parseCatalog } from "@/app/(app)/catalog/parse";
   ok(both.hasList && both.hasCost && both.rows[0]?.cost === 6, "item 3 parseCatalog: List + Cost headers (through aliases) → both flags");
   const blankCells = parseCatalog("SKU,Description,List,Cost\nA-1,Widget,,\n");
   ok(blankCells.hasList && blankCells.hasCost && blankCells.rows[0]?.list === 0, "item 3 parseCatalog: a present column with blank cells still counts as carried (cell → 0, as before)");
+  // #286 — the downloadable template round-trips; MFR PN / MFR Part # headers key the row
+  const tpl = parseCatalog(CATALOG_TEMPLATE_CSV);
+  ok(tpl.ok && tpl.stats.valid === 1 && tpl.rows[0]?.sku === "EXAMPLE-001" && tpl.hasList && tpl.hasCost, "#286 parseCatalog: the downloadable template parses to one valid row (MFR Part # → sku)");
+  const tplUser = parseCatalog(CATALOG_TEMPLATE_CSV + "ABC-123,My part,Rigging,ea,10,5\n");
+  ok(tplUser.stats.valid === 2, "#286 parseCatalog: the template plus a user row → 2 valid rows");
+  const mfrPnOnly = parseCatalog("MFR PN,Description,List\nX-9,Thing,4\n");
+  ok(mfrPnOnly.rows[0]?.sku === "X-9" && mfrPnOnly.rows[0]?.manufacturerPartNumber === "X-9" && mfrPnOnly.rows[0]?.valid, "#286 parseCatalog: an MFR PN column alone is both sku and manufacturerPartNumber");
+  const skuAndPn = parseCatalog("SKU,MFR PN,Description\nS-1,M-1,Thing\n");
+  ok(skuAndPn.rows[0]?.sku === "S-1" && skuAndPn.rows[0]?.manufacturerPartNumber === "M-1", "#286 parseCatalog: an explicit SKU column still wins over MFR PN");
   const headerless2 = parseCatalog("A-1,Widget\nA-2,Gadget\n");
   ok(headerless2.ok && !headerless2.hasList && !headerless2.hasCost, "item 3 parseCatalog: headerless SKU,Description rows carry no price columns");
   const headerless6 = parseCatalog("A-1,Widget,Cat,ea,10,6\n");

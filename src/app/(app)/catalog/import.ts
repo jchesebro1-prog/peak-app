@@ -37,7 +37,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   const parsed = parseCatalog(input.text, input.defaultCategory);
   if (!parsed.ok) return { ok: false, error: parsed.error || "No rows found in that file." };
   const valid = parsed.rows.filter((r) => r.valid);
-  if (valid.length === 0) return { ok: false, error: "No valid rows — check the header names." };
+  if (valid.length === 0) return { ok: false, error: "No valid rows — the file needs a part-number column (MFR Part #, MFR PN or SKU) and a Description column." };
 
   // #132 — the guard runs before any upsert, so a rejected file writes nothing.
   const catalog = await listCatalog();
