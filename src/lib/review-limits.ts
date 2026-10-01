@@ -242,7 +242,7 @@ export function canAutoApprove(q: ReviewableQuote, ctx: ReviewLimitContext): Aut
 }
 
 /**
- * #284/#286 — the approver moving a quote approves it at the gated
+ * #284/#287 — the approver moving a quote approves it at the gated
  * transition. Jeff (2026-10-01): an approver may send any quote, not only
  * their own ("Jena created it but I edited and I want to review and send
  * it"). Non-null when the ACTOR — not the owner — is one active roster entry

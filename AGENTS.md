@@ -542,13 +542,13 @@ See `.env.example`.
     gross sell or priced line set changes (`approvedAgainst`,
     `src/lib/approval-snapshot.ts`). Remaining is Jeff-gated: Settings → Team
     — who holds `approve` now decides who skips review. Punch item #284.
-    ✅ Follow-up (#286, D523–D524): an approver can send any quote — Send to
+    ✅ Follow-up (#287, D523–D524): an approver can send any quote — Send to
     customer →, Approve & send (version-checked under the row lock) or ⋯
     Approve only on a draft — anyone with `create` can submit (the submitter
     can withdraw), and the Estimator gains Lead estimator (= `owner`; take
     over yourself, only an approver hands off) and Prepared by (= `preparedBy`,
     printed on the customer document and the hub row). Open: freeze both at
-    send? Punch item #286.
+    send? Punch item #287.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

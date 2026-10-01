@@ -1,6 +1,6 @@
-# #286 — Approvers send any quote; Lead estimator + Prepared by
+# #287 — Approvers send any quote; Lead estimator + Prepared by
 
-> Numbering note: first drafted as #285 / D521–D522; another session shipped #285 (Settings menu) and D521–D522 first, so this is #286 / D523–D524. Branch, test fixture ids (`T285`, `fixtureId(285, …)`) and `#285` harness labels keep the old number.
+> Numbering note: first drafted as #285 / D521–D522; another session shipped #285 (Settings menu) and D521–D522 first, so this is #287 / D523–D524. Branch, test fixture ids (`T285`, `fixtureId(285, …)`) and `#285` harness labels keep the old number.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]`.
 
@@ -32,8 +32,8 @@ quotes to assist."
   Never `git stash`. Never open `.data/pglite`.
 - **Client-safe modules** (`quote-next-step.ts`, `quote-approval-rules.ts`, `review-limits.ts`, `review-line.ts`,
   `approval-snapshot.ts`) never import a store, db, users, session or settings. The `next build` gate proves it.
-- **Harness:** `scripts/test-review-and-spec.ts`. Add new blocks at EOF with an `a286` import prefix and
-  `fixtureId(286, …)`. Register a new `async function approval286AsyncChecks()` on the promise chain right after
+- **Harness:** `scripts/test-review-and-spec.ts`. Add new blocks at EOF with an `a287` import prefix and
+  `fixtureId(287, …)`. Register a new `async function approval287AsyncChecks()` on the promise chain right after
   `approval284AsyncChecks()`.
 - **Existing #284 checks:** they encode the old owner-only rules. Retarget each to the new rule, keeping its intent and
   PASS message where still true. Never delete a check silently.
@@ -185,7 +185,7 @@ quotes to assist."
   - D523: approvers send any quote, with Approve & send and Approve only; anyone with create may submit; the submitter
     may withdraw. This amends D517/D518.
   - D524: Lead estimator = owner and Prepared by = preparedBy, with the take-over-vs-hand-off guard.
-- **PUNCHLIST:** #286 with Jeff's two quotes verbatim, DONE. **AGENTS:** a phase-status line amending item 27.
+- **PUNCHLIST:** #287 with Jeff's two quotes verbatim, DONE. **AGENTS:** a phase-status line amending item 27.
 - **Gates:** the four gates with real numbers (smoke included), plus `next build`.
 - **Browser walkthrough** on a scratch PGlite (per the #284 recipe: temporary `verify-285` entry in the MAIN checkout's
   `.claude/launch.json`, restored afterwards; dev-login via `/api/auth/callback/dev-login`; port 3285):

@@ -1,7 +1,7 @@
 /**
  * #284 — the Estimator / Quotes-hub "next step" control as a pure view model
  * (spec §1). The server evaluates `holds` (approvalHolds) and the limit chip;
- * this decides what the viewer sees. #286: a non-owner viewer gets actions
+ * this decides what the viewer sees. #287: a non-owner viewer gets actions
  * too — an approver sends or approves, a creator submits, a submitter
  * withdraws. Client-safe: imports only review-line, team and a type.
  */
@@ -18,7 +18,7 @@ export type QuoteNextStepView = {
   secondary: Array<{ action: NextStepAction; label: string }>;
   reviewers: string[];
   approverMode: boolean;
-  /** #286: the viewer owns the quote — a non-owner's Send carries `asOf`. */
+  /** #287: the viewer owns the quote — a non-owner's Send carries `asOf`. */
   viewerIsOwner: boolean;
   /** The quote's `updatedAt` when this view was computed — Approve / Send back
    *  carry it so an approver never decides a version they didn't see. */
@@ -41,9 +41,9 @@ export type NextStepInput = {
   owner: string;
   viewer: string;
   viewerCanApprove: boolean;
-  /** #286: can("create") — anyone who can create quotes may submit one. */
+  /** #287: can("create") — anyone who can create quotes may submit one. */
   viewerCanCreate: boolean;
-  /** #286: can("send") — sends an approved quote that isn't theirs. */
+  /** #287: can("send") — sends an approved quote that isn't theirs. */
   viewerCanSend: boolean;
   submittedAgo: string;
   reviewers: string[];
@@ -103,7 +103,7 @@ export function quoteNextStep(i: NextStepInput): QuoteNextStepView {
   const assign = { action: "assign" as const, label: "Assign to…" };
   const attest = { action: "attest" as const, label: "Attest approval…" };
 
-  // #286 (Jeff 2026-10-01): a non-owner approver sends or approves any draft;
+  // #287 (Jeff 2026-10-01): a non-owner approver sends or approves any draft;
   // anyone who can create quotes submits one; the submitter may withdraw.
   if (!isOwner) {
     const approveOnly = { action: "approve" as const, label: "Approve only (owner sends)" };

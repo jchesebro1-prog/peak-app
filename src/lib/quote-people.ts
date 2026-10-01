@@ -1,5 +1,5 @@
 /**
- * #286 task B — the guarded path for a quote's people (Jeff 2026-10-01: "we
+ * #287 task B — the guarded path for a quote's people (Jeff 2026-10-01: "we
  * need to add lead estimator and prepared by on the quotes to assist").
  *
  * - **Lead estimator** is the quote's `owner`: it drives the hub's owner

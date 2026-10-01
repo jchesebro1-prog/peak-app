@@ -8424,7 +8424,7 @@ sections. To keep that, a group mounts the first time it is opened and is then h
 away — switching back finds drafts intact and never starts a second geocode run.
 
 
-## D523. Approvers send any quote; anyone with create can submit (#286, 2026-10-01)
+## D523. Approvers send any quote; anyone with create can submit (#287, 2026-10-01)
 
 Amends D517/D518. Jeff could not move a quote Jena created through review or send it, though he is an approver. Now a
 non-owner approver who sends a quote stamps an `in_app` approval by them ("Approved · Jeff"), through the same gate as
@@ -8438,7 +8438,7 @@ re-checked under the lock (a sent quote or a still-holding approval is a no-op, 
 (or the owner) may submit for approval, and the submitter may withdraw as well as the owner. Sending needs `send` or
 `approve`. A non-owner, non-approver is still offered Submit, not Send, on a draft.
 
-## D524. Lead estimator and Prepared by are the quote's owner and preparedBy (#286, 2026-10-01)
+## D524. Lead estimator and Prepared by are the quote's owner and preparedBy (#287, 2026-10-01)
 
 Jeff asked for "lead estimator and prepared by on the quotes". The lead estimator is the existing `owner` (hub owner
 filter and avatar, review limits, self-approval, "Back from review"), now labelled and editable in the Estimator's

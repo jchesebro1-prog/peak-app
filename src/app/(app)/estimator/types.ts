@@ -486,9 +486,9 @@ export type InitialQuote = {
   paymentTerms: PaymentTerms;
   /** User-named quote category (#110) — "" when none. */
   category: string;
-  /** #286 task B — the Lead estimator ("" when the stored quote has none). */
+  /** #287 task B — the Lead estimator ("" when the stored quote has none). */
   owner: string;
-  /** #286 task B — Prepared by; prints on the customer document ("" falls back to the owner). */
+  /** #287 task B — Prepared by; prints on the customer document ("" falls back to the owner). */
   preparedBy: string;
   revNum: number;
   revDateMs: number;
@@ -585,8 +585,8 @@ export type EstimatorProps = {
   specKeys: string[];
   /** #282 phase 2 — may this user apply Rewards credit (`create`)? */
   canApplyCredit: boolean;
-  /** #286 task B — the signed-in user's name (the one Lead estimator they may always pick). */
+  /** #287 task B — the signed-in user's name (the one Lead estimator they may always pick). */
   viewerName: string;
-  /** #286 task B — may this user make someone else the lead estimator (`approve`)? */
+  /** #287 task B — may this user make someone else the lead estimator (`approve`)? */
   viewerCanApprove: boolean;
 };

@@ -1066,7 +1066,7 @@ export async function updateQuoteMetaAction(
   return { ok: !!q, ...(pdf ? { pdf } : {}) };
 }
 
-/** #286 task B — what setQuotePeopleAction hands back to the Estimator. */
+/** #287 task B — what setQuotePeopleAction hands back to the Estimator. */
 export type QuotePeopleSync = {
   ok: boolean;
   error?: string;
@@ -1079,7 +1079,7 @@ export type QuotePeopleSync = {
 };
 
 /**
- * #286 task B — Lead estimator (`owner`) and Prepared by (`preparedBy`),
+ * #287 task B — Lead estimator (`owner`) and Prepared by (`preparedBy`),
  * saved the moment either select changes. Deliberately NOT part of Save or
  * updateQuoteMetaAction: their allowlists exclude `owner` because the owner's
  * review limit drives auto-approval. The guard (create to change either; only

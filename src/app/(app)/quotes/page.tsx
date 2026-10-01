@@ -550,7 +550,7 @@ export default async function QuotesPage({
           const rMeta = REVIEW_CHIP[rState];
           const selected = q.id === selectedId;
           const owner = q.owner || "Unassigned";
-          // #286 task B: Prepared by joins the sub-line only when it isn't the lead estimator.
+          // #287 task B: Prepared by joins the sub-line only when it isn't the lead estimator.
           const preparedBy = (q.preparedBy || "").trim();
           const preparedNote =
             preparedBy && preparedBy.toLowerCase() !== (q.owner || "").trim().toLowerCase()

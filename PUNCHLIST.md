@@ -10146,7 +10146,7 @@ overflows on phones (pre-existing).
 
 ---
 
-## 286. Estimates — approvers send any quote; Lead estimator + Prepared by — DONE 2026-10-01 (D523–D524)
+## 287. Estimates — approvers send any quote; Lead estimator + Prepared by — DONE 2026-10-01 (D523–D524)
 
 **Reported:** Jeff (2026-10-01), on the #284 control: "I still don't like that on the estimator I can't submit it for review or progress the process using the review progress button. Xavier MS Fixtures is a prime example where Jena created it but I edited and I want to review and send it"
 
