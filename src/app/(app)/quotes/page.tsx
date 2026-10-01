@@ -6,7 +6,6 @@ import {
   timeAgo,
   STAGES,
   STAGE_LABEL,
-  approvedReviewLine,
   type Quote,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
@@ -14,16 +13,18 @@ import { loadPipelines } from "@/lib/pipelines-server";
 import { quoteStagePillLabel } from "@/lib/pipelines";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getEngagementForQuoteRef, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
-import { allUsers, reviewers } from "@/lib/users";
+import { allUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
-import { setQuoteStatus, submitQuoteForReview, createQuoteClientPackageAction } from "./actions";
+import { setQuoteStatus, createQuoteClientPackageAction } from "./actions";
 import { DeleteQuoteButton } from "./delete-quote-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { staleAutoApprovalLine } from "@/lib/review-line";
-import { reviewLimitChip, type ReviewLimitChipData } from "@/lib/review-limits";
+import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
+import { quoteNextStepFor } from "@/lib/quote-next-step-server";
+import type { QuoteNextStepView } from "@/lib/quote-next-step";
+import { reviewLimitChip } from "@/lib/review-limits";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
 import { displayQuoteNumber, quoteMatchesSearch, quoteSearchRank } from "@/lib/estimate-number";
@@ -38,13 +39,6 @@ const REVIEW_CHIP: Record<string, { label: string; ink: string; soft: string; bd
   in_review: { label: "In review", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
   approved: { label: "Approved", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da" },
   changes: { label: "Changes", ink: "#b4543a", soft: "#f7e9e5", bd: "#f0d6cd" },
-};
-
-const RB_META: Record<string, { bg: string; bd: string; ink: string; icon: string; title: string }> = {
-  none: { bg: "#f4f5f7", bd: "#e4e7ec", ink: "#5b616e", icon: "○", title: "Not submitted for review" },
-  in_review: { bg: "#eef3fc", bd: "#d4ddf3", ink: "#3155a8", icon: "◴", title: "In review" },
-  approved: { bg: "#ecf6f0", bd: "#cce9da", ink: "#1f7a52", icon: "✓", title: "Approved" },
-  changes: { bg: "#fcefe9", bd: "#f0d6cd", ink: "#b4543a", icon: "↩", title: "Changes requested" },
 };
 
 // The Status track was 96px — a user-editable stage label (Settings →
@@ -120,13 +114,12 @@ export default async function QuotesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, quotes, customers, users, reviewerRows, pipes, limitCtx] = await Promise.all([
+  const [user, sp, quotes, customers, users, pipes, limitCtx] = await Promise.all([
     requireUser(),
     searchParams,
     getAll(),
     allCustomers(),
     allUsers(),
-    reviewers(),
     loadPipelines(),
     loadReviewLimitContext(),
   ]);
@@ -247,6 +240,9 @@ export default async function QuotesPage({
   ];
 
   const filtered = scoped.filter((q) => filter === "all" || q.status === filter);
+  // #284 — only one row is expanded, so the next-step view is computed for that row alone.
+  const selectedQuote = selectedId ? filtered.find((x) => x.id === selectedId) : undefined;
+  const selectedNext = selectedQuote ? await quoteNextStepFor(selectedQuote, user) : null;
 
   /* ---- stat tiles (over the scoped set) ---- */
   const open = scoped.filter((q) => q.status === "draft" || q.status === "sent");
@@ -545,6 +541,7 @@ export default async function QuotesPage({
         </div>
 
         {filtered.map((q) => {
+          const nextStep = q.id === selectedId ? selectedNext : null;
           const reviewLimit = reviewLimitChip(q, limitCtx, me);
           // #242: a stale auto approval is not an approval — never the green badge.
           const rState = reviewLimit?.staleAuto ? "none" : q.review?.state || "none";
@@ -765,21 +762,17 @@ export default async function QuotesPage({
               {selected && (
                 <SelectedPanel
                   q={q}
-                  me={me}
                   engagement={
                     selEng
                       ? { id: selEng.id, stage: ENGAGEMENT_STATUS_LABEL[selEng.status] }
                       : null
                   }
-                  reviewerNames={reviewerRows
-                    .filter((u) => u.name !== me && u.name !== q.owner)
-                    .map((u) => u.name)}
                   backHref={hrefFor({ id: q.id })}
                   statusError={statusError}
                   packageError={packageError}
                   creditNotice={creditNotice}
                   canCreate={can("create", user.roles)}
-                  reviewLimit={reviewLimit}
+                  next={nextStep}
                 />
               )}
             </div>
@@ -819,20 +812,16 @@ export default async function QuotesPage({
  */
 function SelectedPanel({
   q,
-  me,
   engagement,
-  reviewerNames,
   backHref,
   statusError,
   packageError,
   creditNotice,
   canCreate,
-  reviewLimit,
+  next,
 }: {
   q: Quote;
-  me: string;
   engagement: { id: string; stage: string } | null;
-  reviewerNames: string[];
   /** Current list URL (filters + this row selected) — round-tripped through
    *  setQuoteStatus's hidden "back" field so a gate refusal redirects to
    *  exactly this view instead of a bare "/quotes". */
@@ -845,41 +834,9 @@ function SelectedPanel({
   creditNotice: string | null;
   /** #205 — "Spec from this quote" opens a create form; only creators see it. */
   canCreate: boolean;
-  /** #242 — the owner's review-limit chip for this quote (null = none shown). */
-  reviewLimit: ReviewLimitChipData | null;
+  /** #284 — the one next-step view (pill, primary action, ⋯ menu) for this quote and viewer. */
+  next: QuoteNextStepView | null;
 }) {
-  const stored = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
-  // #242: a stale auto approval is not an approval — read it as unsubmitted,
-  // like the gate. An unchanged quote keeps its grant (a lowered limit governs
-  // new grants only); once it changed (value raised past the snapshot, labor
-  // added, owner changed) and no longer fits the owner's current limit, it is
-  // stale (approvalHolds).
-  const staleAuto = !!reviewLimit?.staleAuto;
-  const rev = staleAuto ? { ...stored, state: "none" as const } : stored;
-  const rm = RB_META[rev.state] || RB_META.none;
-  const isOwner = q.owner === me;
-  const sentAlready = q.status === "sent" || q.status === "won" || q.status === "lost";
-  // #242 final: a SENT quote whose auto approval went stale can still be
-  // submitted for review, so it can reach Won through a real approval.
-  const staleSent = staleAuto && q.status === "sent";
-  const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);
-  const canSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");
-
-  let rbSub: string;
-  if (rev.state === "none")
-    rbSub = staleAuto && reviewLimit
-      ? staleAutoApprovalLine(reviewLimit.text)
-      : "Submit for a reviewer’s approval before sending to the customer.";
-  else if (rev.state === "in_review")
-    rbSub = rev.reviewer
-      ? "With " + firstName(rev.reviewer) + " for approval"
-      : "In the shared queue — awaiting a reviewer";
-  else if (rev.state === "approved") rbSub = approvedReviewLine(rev);
-  else
-    rbSub = rev.note
-      ? "“" + rev.note + "” — " + firstName(rev.decidedBy || "")
-      : "Returned by " + firstName(rev.decidedBy || "");
-
   const marginPct = Math.round((q.margin || 0) * 100);
 
   return (
@@ -906,7 +863,11 @@ function SelectedPanel({
             fontWeight: 600,
           }}
         >
-          {statusError}
+          <span>{statusError}</span>
+          {/* #284 — a gate refusal ("needs an approval on record") offers the next step right here */}
+          {next?.primary && statusError.includes("needs an approval on record") && (
+            <QuoteNextStep quoteId={q.id} view={{ ...next, secondary: [], pill: { ...next.pill, label: "" } }} variant="panel" />
+          )}
         </div>
       )}
       {creditNotice && (
@@ -926,116 +887,10 @@ function SelectedPanel({
           <span style={{ fontWeight: 400, fontSize: 10.5, color: "#aab0bb", marginLeft: 8 }}>was {q.id}</span>
         )}
       </div>
-      {/* review & approval banner (Estimator port) */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          flexWrap: "wrap",
-          rowGap: 11,
-          padding: "11px 14px",
-          background: rm.bg,
-          border: `1px solid ${rm.bd}`,
-          borderRadius: 10,
-        }}
-      >
-        <span
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: "50%",
-            background: "#fff",
-            border: `1px solid ${rm.bd}`,
-            color: rm.ink,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 14,
-            flexShrink: 0,
-          }}
-        >
-          {rm.icon}
-        </span>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
-          <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
-          {reviewLimit && !staleAuto && (
-            <div style={{ marginTop: 6 }}>
-              <ReviewLimitChip chip={reviewLimit} variant="inline" />
-            </div>
-          )}
-        </div>
-        {canSubmit && (
-          <form
-            action={submitQuoteForReview}
-            style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}
-          >
-            <input type="hidden" name="id" value={q.id} />
-            <select
-              name="reviewer"
-              defaultValue="queue"
-              style={{
-                fontFamily: "var(--font-ui)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "#3a3f4a",
-                background: "#fff",
-                border: "1px solid #e4e7ec",
-                borderRadius: 8,
-                padding: "8px 11px",
-                cursor: "pointer",
-              }}
-            >
-              <option value="queue">Shared queue (any reviewer)</option>
-              {reviewerNames.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              style={{
-                fontFamily: "var(--font-ui)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "#fff",
-                background: "#3155a8",
-                border: "none",
-                borderRadius: 8,
-                padding: "9px 15px",
-                cursor: "pointer",
-              }}
-            >
-              {rev.state === "changes" ? "Resubmit for review" : "Submit for review"}
-            </button>
-          </form>
-        )}
-        {canSend && (
-          <form action={setQuoteStatus}>
-            <input type="hidden" name="id" value={q.id} />
-            <input type="hidden" name="back" value={backHref} />
-            <button
-              type="submit"
-              name="status"
-              value="sent"
-              style={{
-                fontFamily: "var(--font-ui)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "#fff",
-                background: "#1f7a52",
-                border: "none",
-                borderRadius: 8,
-                padding: "9px 15px",
-                cursor: "pointer",
-              }}
-            >
-              Send to customer →
-            </button>
-          </form>
-        )}
+      {/* #284 — the same next-step control as the Estimator (pill, primary action, ⋯ menu) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "11px 16px", borderBottom: "1px solid #e4e7ec" }}>
+        {next && <QuoteNextStep quoteId={q.id} view={next} variant="panel" />}
+        {next?.strip && <span style={{ fontSize: 12.5, color: "#5b616e" }}>{next.strip}</span>}
       </div>
 
       {/* meta + status + open */}

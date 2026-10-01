@@ -30136,7 +30136,8 @@ import { reviewLimitChipFor as r242ChipFor } from "@/lib/review-limits-server";
   const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
   ok(
     hub.includes("loadReviewLimitContext()") && hub.includes("reviewLimitChip(q, limitCtx, me)") && hub.includes("<ReviewLimitChip") &&
-      hub.includes('const canSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");'),
+      // #284 task 6: the panel's Send gate moved into the shared next-step view (runtime-proven by "#284 next: within limit → Send to customer →").
+      hub.includes("quoteNextStepFor(") && hub.includes("<QuoteNextStep"),
     "#242: quotes hub rows carry the chip and Send opens for a quote within the owner's limit"
   );
   const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
@@ -30421,21 +30422,22 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   );
   const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
   ok(
-    hub.includes('const staleSent = staleAuto && q.status === "sent";') &&
-      hub.includes('const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);'),
+    // #284 task 6: the hub's own canSubmit/staleSent logic is gone — the panel renders the shared next-step control,
+    // whose view model offers Submit on a sent quote whose approval lapsed (pinned by the qnsFinal242 check above).
+    hub.includes("<QuoteNextStep") && !hub.includes("staleSent") && !hub.includes("canSubmit"),
     "#242 final: the quotes hub offers Submit for review on a sent quote whose auto approval went stale"
   );
-  const qa = readFileSync(join(process.cwd(), "src/app/(app)/quotes/actions.ts"), "utf8");
   // #284 task 3: the stale-approval rule lives in src/lib/quote-review-ops.ts (now snapshot-aware via approvalHolds); both entry points delegate to it.
   const qro = readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8");
-  const sub = qa.slice(qa.indexOf("export async function submitQuoteForReview("), qa.indexOf("export async function deleteQuoteAction("));
+  // #284 task 6: the hub's submitQuoteForReview action is deleted (the next-step actions in review-actions.ts delegate to the same op).
+  const nsa242 = readFileSync(join(process.cwd(), "src/app/(app)/quotes/review-actions.ts"), "utf8");
   ok(
-    sub.includes("submitQuoteForApproval(id, user,") &&
+    nsa242.includes("submitQuoteForApproval(") &&
       ea.includes("submitQuoteForApproval(id, user, reviewer)") &&
       qro.includes("approvalHolds(q, await loadReviewLimitContext())") &&
       qro.includes('if (q.status !== "draft" && !(lapsed && q.status === "sent"))') &&
       qro.includes('if (state !== "none" && state !== "changes" && !lapsed)'),
-    "#242 final: submitQuoteForReview accepts a stale auto approval (draft or sent), like the Estimator's submitReviewAction"
+    "#242 final: submitting for approval accepts a stale auto approval (draft or sent) — both the Estimator and the hub go through the one guarded op"
   );
 
   // 6 — limits are read only when they can matter.
@@ -39795,4 +39797,30 @@ import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
   ok(comp.includes('console.error("[QuoteNextStep]", e)') && comp.includes("That didn't go through — check your connection and try again.")
     && (ec.match(/disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length === 2,
     "#284 wiring: a thrown action reports instead of crashing, and the control is disabled while a status change or tier lookup is in flight");
+}
+
+// #284 task 6 — the Quotes hub panel + Reviews page wiring (source-text checks).
+{
+  const hub = readFileSync("src/app/(app)/quotes/page.tsx", "utf8");
+  const rvp = readFileSync("src/app/(app)/reviews/page.tsx", "utf8");
+  const qa = readFileSync("src/app/(app)/quotes/actions.ts", "utf8");
+  ok(hub.includes("<QuoteNextStep") && hub.includes("quoteNextStepFor(") && !hub.includes("action={submitQuoteForReview}") && !hub.includes("Shared queue (any reviewer)"),
+    "#284 hub: the Quotes panel renders the shared QuoteNextStep (no old review banner or Shared-queue picker)");
+  ok(/canClaim:[^\n]*kind !== "Quote"/.test(rvp), "#284 reviews: Claim is dropped for quotes (Designs and Engagements keep it)");
+  const myQ = rvp.slice(rvp.indexOf("const myQueue ="), rvp.indexOf("const unclaimed ="));
+  ok(/!x\.review\.reviewer/.test(myQ) && /x\.kind === "Quote"/.test(myQ), "#284 reviews: My queue includes unassigned quotes (any approver can decide one); other kinds keep the assigned-only rule");
+  ok(hub.includes("statusError.includes(\"needs an approval on record\")") && hub.includes("pill: { ...next.pill, label: \"\" }"),
+    "#284 hub: a gate refusal offers the primary next-step action beside the message");
+  ok(!/submitQuoteForReview/.test(qa) && !readdirRecursive284("src").some((f) => readFileSync(f, "utf8").includes("submitQuoteForReview")),
+    "#284 hub: the submitQuoteForReview server action is deleted — nothing in src calls it (the guarded next-step actions replace it)");
+}
+import { readdirSync as readdirSync284 } from "node:fs";
+function readdirRecursive284(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync284(dir, { withFileTypes: true })) {
+    const f = join(dir, e.name);
+    if (e.isDirectory()) out.push(...readdirRecursive284(f));
+    else if (/\.(ts|tsx)$/.test(e.name)) out.push(f);
+  }
+  return out;
 }

@@ -16,7 +16,6 @@ import {
 } from "@/lib/stores/quotes";
 import { createQuoteClientPackage } from "@/lib/client-package-server";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
-import { submitQuoteForApproval } from "@/lib/quote-review-ops";
 
 /**
  * The Quotes hub's form actions (quotes/page.tsx + controls.tsx): status
@@ -118,14 +117,6 @@ export async function restoreQuoteRevisionAction(formData: FormData): Promise<vo
     const safe = back.startsWith("/quotes") ? back : "/quotes";
     redirect(safe + (safe.includes("?") ? "&" : "?") + "creditNotice=" + encodeURIComponent(res.creditNotice));
   }
-}
-
-export async function submitQuoteForReview(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  const id = String(formData.get("id") || "");
-  const reviewer = String(formData.get("reviewer") || "queue");
-  await submitQuoteForApproval(id, user, reviewer !== "queue" ? reviewer : null);
-  revalidatePath("/", "layout");
 }
 
 /**

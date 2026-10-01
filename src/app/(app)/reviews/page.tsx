@@ -152,7 +152,12 @@ export default async function ReviewsPage({
   ];
 
   const inReview = all.filter((x) => x.review.state === "in_review");
-  const myQueue = inReview.filter((x) => x.review.reviewer === me);
+  // #284: any approver can decide an in-review quote, so an unassigned quote is in every
+  // approver's queue (their own excepted — they can't approve their own). Designs and
+  // engagement phases keep the claim model: only the ones assigned to you.
+  const myQueue = inReview.filter((x) =>
+    x.kind === "Quote" ? x.review.reviewer === me || (!x.review.reviewer && x.owner !== me) : x.review.reviewer === me
+  );
   const unclaimed = inReview.filter((x) => !x.review.reviewer);
   const mySubs = all.filter(
     (x) => x.review.submittedBy === me && x.review.state !== "none"
@@ -217,7 +222,8 @@ export default async function ReviewsPage({
       note: r.note && r.state === "changes" ? r.note : "",
       openHref: x.openHref,
       canDecide: canApprove && tab !== "mine" && r.state === "in_review" && !isMine,
-      canClaim: canApprove && tab === "unclaimed" && !r.reviewer && !isMine,
+      // #284: quotes have no Claim — any approver decides them; Designs and Engagements keep it.
+      canClaim: canApprove && tab === "unclaimed" && !r.reviewer && !isMine && x.kind !== "Quote",
     };
   });
 
