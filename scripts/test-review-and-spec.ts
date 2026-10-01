@@ -10685,6 +10685,7 @@ seeded()
   .then(() => rewards282LostAsyncChecks())
   .then(() => shrink283AsyncChecks())
   .then(() => shrinkUpload283AsyncChecks())
+  .then(() => drivePhotos283AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -39567,4 +39568,59 @@ async function shrinkUpload283AsyncChecks(): Promise<void> {
 
   const gone = await su283("PD-283cccccccccc", { ...file, blobKey: "part-docs/PD-283cccccccccc/missing.jpg" }, deps);
   ok(!gone.ok && !removed.includes("part-docs/PD-283cccccccccc/missing.jpg"), "#283 upload: a blob that can't be read is refused without deleting");
+}
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photo client: folder lookup, recursive listing, all-drives params.
+// ---------------------------------------------------------------------------
+import { findPhotosFolder as dp283Find, listPhotoTree as dp283List, getDriveFolder as dp283Get, downloadDriveFile as dp283Download } from "@/lib/google/drive-photos";
+async function drivePhotos283AsyncChecks(): Promise<void> {
+  const seen: string[] = [];
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const folderHit = { id: "F1", name: "Peak Product Photos", driveId: "SD1", webViewLink: "https://drive/F1" };
+  const one = async (url: string) => { seen.push(url); return json({ files: [folderHit] }); };
+  const r1 = await dp283Find("tok", one);
+  ok(r1.ok && r1.folder.id === "F1" && r1.folder.driveId === "SD1", "#283 drive: one folder named Peak Product Photos is found");
+  ok(seen.some((u) => u.includes("corpora=allDrives") && u.includes("includeItemsFromAllDrives=true") && u.includes("supportsAllDrives=true")),
+    "#283 drive: the folder search covers My Drive and Shared Drives");
+  const none = await dp283Find("tok", async () => json({ files: [] }));
+  ok(!none.ok && /No folder named Peak Product Photos/.test(none.error), "#283 drive: no folder → a clear message");
+  const many = await dp283Find("tok", async () => json({ files: [folderHit, { ...folderHit, id: "F2", webViewLink: "https://drive/F2" }] }));
+  ok(!many.ok && /Found 2 folders named Peak Product Photos/.test(many.error) && many.error.includes("https://drive/F2"), "#283 drive: several folders → rename the extras, with links");
+
+  // Tree: F1 → (a.jpg, Sub [page 1: b.png, page 2: c.heic + doc], F1 again via a second parent)
+  const pages: Record<string, unknown> = {
+    "F1|": { files: [
+      { id: "a", name: "S4LED-S3.jpg", mimeType: "image/jpeg", md5Checksum: "m-a", size: "1000", webViewLink: "https://drive/a" },
+      { id: "SUB", name: "ETC", mimeType: "application/vnd.google-apps.folder" },
+      { id: "F1", name: "loop", mimeType: "application/vnd.google-apps.folder" },
+    ] },
+    "SUB|": { files: [{ id: "b", name: "x.png", mimeType: "image/png", md5Checksum: "m-b", size: "20", webViewLink: "https://drive/b" }], nextPageToken: "P2" },
+    "SUB|P2": { files: [
+      { id: "c", name: "y.heic", mimeType: "image/heic", md5Checksum: "m-c", size: "30", webViewLink: "https://drive/c" },
+      { id: "d", name: "notes", mimeType: "application/vnd.google-apps.document" },
+    ] },
+  };
+  const tree = async (url: string) => {
+    const u = new URL(url);
+    const q = u.searchParams.get("q") || "";
+    const parent = (q.match(/'([^']+)' in parents/) || [])[1] || "";
+    return json(pages[`${parent}|${u.searchParams.get("pageToken") || ""}`] ?? { files: [] });
+  };
+  const listed = await dp283List("tok", "F1", tree);
+  ok(listed.map((p) => p.id).sort().join(",") === "a,b,c", "#283 drive: photos are listed recursively across pages; docs ignored; a repeated folder is walked once");
+  ok(listed.find((p) => p.id === "a")?.size === 1000 && listed.find((p) => p.id === "a")?.md5 === "m-a", "#283 drive: size and md5 come through");
+
+  const gone = await dp283Get("tok", "F9", async () => json({ error: { message: "nf" } }, 404));
+  const trashed = await dp283Get("tok", "F1", async () => json({ ...folderHit, mimeType: "application/vnd.google-apps.folder", trashed: true }));
+  ok(gone === null && trashed === null, "#283 drive: a vanished or trashed folder reads as null");
+
+  const bytes = await dp283Download("tok", "a", 10, async () => new Response(new Uint8Array([1, 2, 3])));
+  ok(bytes.byteLength === 3, "#283 drive: download returns the bytes");
+  let tooBig = false;
+  try { await dp283Download("tok", "a", 2, async () => new Response(new Uint8Array([1, 2, 3]))); } catch { tooBig = true; }
+  ok(tooBig, "#283 drive: a download over the cap throws");
+  let denied = "";
+  try { await dp283List("tok", "F1", async () => json({ error: { message: "insufficient" } }, 403)); } catch (e) { denied = (e as Error).message; }
+  ok(/Enable Drive photos/.test(denied), "#283 drive: a 403 tells the admin to use Enable Drive photos");
 }
