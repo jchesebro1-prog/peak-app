@@ -31,6 +31,8 @@ export type ClientPackageItem = {
   /** Fixture SKUs on this package whose datasheet covers this part. */
   datasheetCoveredBy: string[];
   specsheet: PackageDocRef | null;
+  /** The part's own manual, or the fixture manual covering it (#290). */
+  manual: PackageDocRef | null;
   spec: { sectionId: string; body: string } | null;
 };
 
@@ -40,7 +42,7 @@ export type ClientPackageManifest = {
   optionId: string;
   bom: BomRow[];
   items: ClientPackageItem[];
-  /** Every datasheet / spec sheet the package carries, ONCE, with the SKUs it serves. */
+  /** Every datasheet / spec sheet / manual the package carries, ONCE, with the SKUs it serves. */
   documents: PackageDocument[];
   /** Items whose datasheet is a fixture's — the gap report's "covered by <fixture>". */
   covered: Array<{ sku: string; by: string[]; note: string }>;
@@ -137,6 +139,7 @@ export function buildClientPackageManifest(
         datasheet: null,
         datasheetCoveredBy: [],
         specsheet: null,
+        manual: null,
         spec: null,
       });
       gaps.push({ kind: "missing-catalog", sku: row.sku, description: row.desc, qty: row.qty, catalogId: null });
@@ -158,6 +161,7 @@ export function buildClientPackageManifest(
       datasheet: partDocs?.datasheet ?? null,
       datasheetCoveredBy: partDocs?.datasheetCoveredBy ?? [],
       specsheet: partDocs?.specsheet ?? null,
+      manual: partDocs?.manual ?? null,
       spec,
     });
     if (!partDocs?.datasheetOk) gaps.push({ kind: "missing-datasheet", sku: part.sku, description: part.desc, qty: row.qty, catalogId: part.id });

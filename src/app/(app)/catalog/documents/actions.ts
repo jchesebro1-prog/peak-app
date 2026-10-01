@@ -130,7 +130,7 @@ export async function attachUploadedDocumentAction(input: {
 }): Promise<DocActionResult<{ documentId: string; linked: number }>> {
   const user = await requireUser();
   if (!isDocumentId(input.documentId)) return { ok: false, error: "Not a document id." };
-  if (!isPartDocKind(input.kind)) return { ok: false, error: "Pick Datasheet or Spec sheet." };
+  if (!isPartDocKind(input.kind)) return { ok: false, error: "Pick Datasheet, Spec sheet, Manual or Image." };
   const skus = await liveSkus(input.skus || []);
   if (!skus.length) return { ok: false, error: "Those parts are no longer in the catalog." };
   // A document already existing under this id is not this upload's blob to
@@ -216,7 +216,7 @@ export async function setNotNeededAction(skus: string[], kind: PartDocKind, on: 
   await requireUser();
   // Not-needed is a coverage-slot concept only (#245) — narrows kind to
   // DocSlotKind for setDocNotNeeded below; an image is never "not needed".
-  if (!isDocSlotKind(kind)) return { ok: false, error: "Pick Datasheet or Spec sheet." };
+  if (!isDocSlotKind(kind)) return { ok: false, error: "Pick Datasheet, Spec sheet or Manual." };
   const changed = await setDocNotNeeded((skus || []).slice(0, MAX_SKUS_PER_CALL), kind, !!on);
   revalidate();
   return { ok: true, changed };

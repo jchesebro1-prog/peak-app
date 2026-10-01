@@ -32,6 +32,7 @@ export async function GET(
       ...item,
       datasheet: item.datasheet ? { ...item.datasheet, url: url(item.datasheet.documentId) } : null,
       specsheet: item.specsheet ? { ...item.specsheet, url: url(item.specsheet.documentId) } : null,
+      manual: item.manual ? { ...item.manual, url: url(item.manual.documentId) } : null,
     })),
   });
 }

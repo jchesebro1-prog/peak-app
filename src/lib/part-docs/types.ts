@@ -9,41 +9,40 @@
  * accessory. Spec: docs/superpowers/specs/2026-09-25-part-documents-design.md §5.
  */
 
-export type PartDocKind = "datasheet" | "specsheet" | "image";
+export type PartDocKind = "datasheet" | "specsheet" | "manual" | "image";
 
-/** The two coverage slots — a datasheet/spec-sheet document can satisfy a
- *  part's requirement; an image never can (#245). Existing screens iterate
- *  this (not ALL_PART_DOC_KINDS) so they keep showing exactly these two
- *  columns without change. */
-export const DOC_SLOT_KINDS = ["datasheet", "specsheet"] as const;
+/** The coverage slots — a datasheet/spec-sheet/manual document can satisfy
+ *  a part's requirement; an image never can (#245). Existing screens iterate
+ *  this (not ALL_PART_DOC_KINDS) so they show exactly these columns. #290
+ *  added `manual` (PDF only). */
+export const DOC_SLOT_KINDS = ["datasheet", "specsheet", "manual"] as const;
 
-/** The narrow two-value type every coverage-slot function is keyed by —
- *  distinct from the wider `PartDocKind` so a `Record`/switch keyed by it
- *  stays exhaustive with only "datasheet" and "specsheet" (#245). */
+/** The narrow slot type every coverage-slot function is keyed by — distinct
+ *  from the wider `PartDocKind` so a `Record`/switch keyed by it stays
+ *  exhaustive without "image" (#245). */
 export type DocSlotKind = (typeof DOC_SLOT_KINDS)[number];
 
 /** Every part-document kind, coverage slots plus the gallery-only `image`
  *  kind (#245). */
-export const ALL_PART_DOC_KINDS = ["datasheet", "specsheet", "image"] as const;
+export const ALL_PART_DOC_KINDS = ["datasheet", "specsheet", "manual", "image"] as const;
 
-/** Alias of DOC_SLOT_KINDS — kept so every pre-#245 call site keeps today's
- *  two slots unchanged. Typed to the narrow DocSlotKind (not the wider
- *  PartDocKind) so iterating it never introduces "image" into a two-key
+/** Alias of DOC_SLOT_KINDS — typed to the narrow DocSlotKind (not the wider
+ *  PartDocKind) so iterating it never introduces "image" into a slot-keyed
  *  Record or a DocumentRow index. */
 export const PART_DOC_KINDS: readonly DocSlotKind[] = DOC_SLOT_KINDS;
-export const PART_DOC_KIND_LABEL: Record<PartDocKind, string> = { datasheet: "Datasheet", specsheet: "Spec sheet", image: "Image" };
+export const PART_DOC_KIND_LABEL: Record<PartDocKind, string> = { datasheet: "Datasheet", specsheet: "Spec sheet", manual: "Manual", image: "Image" };
 
 export function isPartDocKind(v: unknown): v is PartDocKind {
-  return v === "datasheet" || v === "specsheet" || v === "image";
+  return isDocSlotKind(v) || v === "image";
 }
 
-/** Narrower than isPartDocKind (#245 review fix): true only for the two
+/** Narrower than isPartDocKind (#245 review fix): true only for the
  *  coverage-slot kinds. `fetchLinksAction` and `setNotNeededAction` are both
  *  slot-only operations — an image kind slipping past a check built on the
  *  wider isPartDocKind would let a client ask to "fetch" or "mark not
  *  needed" an image, neither of which the image slot supports. */
 export function isDocSlotKind(v: unknown): v is DocSlotKind {
-  return v === "datasheet" || v === "specsheet";
+  return (DOC_SLOT_KINDS as readonly unknown[]).includes(v);
 }
 
 /** `drive` (#283) — an image imported from the Peak Product Photos Drive folder. */
@@ -119,7 +118,7 @@ export type AccessoryPair = {
 };
 
 /** Per-kind "this part needs no document" marks, stored on the catalog part. */
-export type DocNotNeeded = { datasheet?: true; specsheet?: true };
+export type DocNotNeeded = { datasheet?: true; specsheet?: true; manual?: true };
 
 /** Upload and fetch ceiling (§6). */
 export const MAX_PART_DOC_BYTES = 25 * 1024 * 1024;

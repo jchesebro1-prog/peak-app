@@ -10,13 +10,13 @@ import { linkedDocuments, ownFiles } from "./coverage";
 import { fetchDocumentBytes } from "./fetch";
 import { checkDocumentBytes, fileNameForFetched } from "./files";
 import type { PartDocsState } from "./load";
-import { MAX_FETCH_TIMEOUT_MS, newDocumentId, partDocBlobPath, type DocSlotKind, type PartDocKind, type PartDocument } from "./types";
+import { DOC_SLOT_KINDS, MAX_FETCH_TIMEOUT_MS, newDocumentId, partDocBlobPath, type DocSlotKind, type PartDocKind, type PartDocument } from "./types";
 
 /**
  * "Fetch from links" (#207, spec §3/§6). Server-only. For one part and one
  * kind: try each URL the part has but hasn't fetched — its link-only
  * documents first, then the catalog's own Datasheet/Guide Spec/DaVinci
- * URLs — download it through the SSRF guard, check the bytes, store the file
+ * (datasheet and, #290, manual) URLs — download it through the SSRF guard, check the bytes, store the file
  * privately and attach it. A URL already fetched for ANY part is reused, not
  * downloaded again, and a successful (or, review fix wave 1 M2, a FAILED)
  * fetch is shared with every part that referenced the same URL AND KIND: one
@@ -77,8 +77,7 @@ export function buildFetchContext(state: PartDocsState): FetchContext {
     s.add(sku);
   };
   for (const [sku, urls] of state.index.catalogUrls) {
-    for (const u of urls.datasheet) add("datasheet", u, sku);
-    for (const u of urls.specsheet) add("specsheet", u, sku);
+    for (const kind of DOC_SLOT_KINDS) for (const u of urls[kind]) add(kind, u, sku);
   }
   for (const l of state.links) {
     const d = state.index.docsById.get(l.documentId);

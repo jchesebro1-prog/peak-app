@@ -8,7 +8,7 @@ import { pricingContextFor } from "@/lib/portal-pricing";
 import { browseCatalog, portalBrowseAllowed, PORTAL_BROWSE_RATE_COPY, quotedBeforeShelf } from "@/lib/portal-catalog-browse";
 import { portalIndex } from "@/lib/portal-catalog-index";
 import { partDetailFor } from "@/lib/portal-part-detail";
-import { CATALOG_PAGE_SIZE, parseCatalogParams } from "@/lib/portal-catalog-view";
+import { CATALOG_PAGE_SIZE, parseCatalogParams, showQuotedBeforeShelf } from "@/lib/portal-catalog-view";
 import { PortalShell } from "../shell";
 import { PortalSignedOut } from "../signed-out";
 import { portalNav } from "../nav";
@@ -71,11 +71,10 @@ export default async function PortalCatalogPage({
   }
   const params = parseCatalogParams(sp);
   const ctx = await pricingContextFor(session);
-  const browsing = !params.q && !params.mfr.length && !params.cat.length;
   const [cust, result, shelf, cart, detail, ix] = await Promise.all([
     getCustomer(cid),
     browseCatalog({ ...params, pageSize: CATALOG_PAGE_SIZE }, ctx),
-    browsing && params.page === 1 ? quotedBeforeShelf(ctx) : Promise.resolve([]),
+    showQuotedBeforeShelf(params) ? quotedBeforeShelf(ctx) : Promise.resolve([]),
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
     params.part ? partDetailFor(ctx, params.part) : Promise.resolve(null),
     portalIndex(),

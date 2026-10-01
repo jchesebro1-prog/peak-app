@@ -1,12 +1,13 @@
 import {
   COVERED_COLLAPSE,
+  SLOT_NOUN,
   slotCoverage,
   type CoverageIndex,
   type DocRef,
   type SlotCoverage,
 } from "./coverage";
 import type { QuotedPartStat } from "./quoted-parts";
-import { compareImages, type DocSlotKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
+import { compareImages, DOC_SLOT_KINDS, type DocSlotKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
 
 /**
  * Serializable view models for the Datasheets page and the part editor
@@ -129,10 +130,16 @@ export type DocumentRow = {
   category: string;
   quotes: number;
   lastQuotedAt: number | null;
-  datasheet: SlotView;
-  specsheet: SlotView;
   image: ImageSlotView;
-};
+} & Record<DocSlotKind, SlotView>;
+
+/** One SlotView per coverage slot (#290: iterate DOC_SLOT_KINDS, never a
+ *  hard-coded pair). */
+function slotViews(index: CoverageIndex, sku: string, descOf: (sku: string) => string): Record<DocSlotKind, SlotView> {
+  const out = {} as Record<DocSlotKind, SlotView>;
+  for (const k of DOC_SLOT_KINDS) out[k] = slotViewFor(index, sku, k, descOf);
+  return out;
+}
 
 export type RowPart = { sku: string; desc: string; category: string; mfr?: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string };
 
@@ -145,17 +152,17 @@ export function documentRow(stat: QuotedPartStat, part: RowPart, index: Coverage
     category: part.category || "",
     quotes: stat.quotes,
     lastQuotedAt: stat.lastQuotedAt,
-    datasheet: slotViewFor(index, part.sku, "datasheet", descOf),
-    specsheet: slotViewFor(index, part.sku, "specsheet", descOf),
+    ...slotViews(index, part.sku, descOf),
     image: imageSlotView(images),
   };
 }
 
-export type DocumentsShow = "all" | "missing-datasheet" | "missing-specsheet" | "missing-image" | "link" | "covered";
+export type DocumentsShow = "all" | "missing-datasheet" | "missing-specsheet" | "missing-manual" | "missing-image" | "link" | "covered";
 export const DOCUMENTS_SHOW: Array<{ value: DocumentsShow; label: string }> = [
   { value: "all", label: "All quoted parts" },
   { value: "missing-datasheet", label: "Missing datasheet" },
   { value: "missing-specsheet", label: "Missing spec sheet" },
+  { value: "missing-manual", label: "Missing manual" },
   { value: "missing-image", label: "Missing image" },
   { value: "link", label: "Link to fetch" },
   { value: "covered", label: "Covered by a fixture" },
@@ -179,9 +186,10 @@ export function documentRowMatches(r: DocumentRow, f: DocumentsFilter): boolean 
   if (f.cat && r.category !== f.cat) return false;
   if (f.show === "missing-datasheet" && viewSatisfied(r.datasheet)) return false;
   if (f.show === "missing-specsheet" && viewSatisfied(r.specsheet)) return false;
+  if (f.show === "missing-manual" && viewSatisfied(r.manual)) return false;
   if (f.show === "missing-image" && r.image.count > 0) return false;
-  if (f.show === "link" && r.datasheet.state !== "link-only" && r.specsheet.state !== "link-only") return false;
-  if (f.show === "covered" && r.datasheet.state !== "covered" && r.specsheet.state !== "covered") return false;
+  if (f.show === "link" && !DOC_SLOT_KINDS.some((k) => r[k].state === "link-only")) return false;
+  if (f.show === "covered" && !DOC_SLOT_KINDS.some((k) => r[k].state === "covered")) return false;
   if (f.q) {
     const hay = `${r.sku} ${r.mfr} ${r.model} ${r.desc}`.toLowerCase();
     if (!f.q.toLowerCase().split(/\s+/).filter(Boolean).every((t) => hay.includes(t))) return false;
@@ -192,7 +200,7 @@ export function documentRowMatches(r: DocumentRow, f: DocumentsFilter): boolean 
 /** "412 of 1,180 quoted parts have a datasheet" (spec §3). */
 export function progressLine(rows: readonly DocumentRow[], kind: DocSlotKind): string {
   const done = rows.filter((r) => viewSatisfied(r[kind])).length;
-  const noun = kind === "datasheet" ? "a datasheet" : "a spec sheet";
+  const noun = `a ${SLOT_NOUN[kind]}`;
   return `${done.toLocaleString("en-US")} of ${rows.length.toLocaleString("en-US")} quoted parts have ${noun}`;
 }
 
@@ -218,7 +226,7 @@ export type PartDocsImage = { id: string; title: string; source: PartDocumentSou
 export type PartDocsView = {
   sku: string;
   slots: Record<DocSlotKind, SlotView>;
-  /** Every document linked to this part, either kind, newest first. */
+  /** Every document linked to this part, any slot kind, newest first. */
   documents: PartDocRow[];
   /** Fixtures whose documents cover this part, and for which kinds. */
   coveredBy: Array<PartRef & { kinds: PartDocKind[] }>;
@@ -230,7 +238,7 @@ export type PartDocsView = {
 
 export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: string) => string, images: readonly ImageRef[] = []): PartDocsView {
   const linked = index.docsBySku.get(sku);
-  const documents = [...(linked?.datasheet ?? []), ...(linked?.specsheet ?? [])]
+  const documents = DOC_SLOT_KINDS.flatMap((k) => linked?.[k] ?? [])
     .sort((a, b) => b.uploadedAt - a.uploadedAt)
     .map((d) => ({
       id: d.id,
@@ -247,12 +255,12 @@ export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: st
   const coveredBy: PartDocsView["coveredBy"] = [];
   for (const p of index.parentsOf.get(sku) ?? []) {
     if (p.ownDatasheet) continue;
-    const kinds = (["datasheet", "specsheet"] as const).filter((k) => (index.docsBySku.get(p.parentSku)?.[k] ?? []).some((d) => !!d.blobKey));
+    const kinds = DOC_SLOT_KINDS.filter((k) => (index.docsBySku.get(p.parentSku)?.[k] ?? []).some((d) => !!d.blobKey));
     if (kinds.length) coveredBy.push({ sku: p.parentSku, desc: descOf(p.parentSku), kinds: [...kinds] });
   }
   return {
     sku,
-    slots: { datasheet: slotViewFor(index, sku, "datasheet", descOf), specsheet: slotViewFor(index, sku, "specsheet", descOf) },
+    slots: slotViews(index, sku, descOf),
     documents,
     coveredBy,
     accessories: (index.childrenOf.get(sku) ?? []).map((s) => ({ sku: s, desc: descOf(s) })),

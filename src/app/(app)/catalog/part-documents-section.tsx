@@ -129,7 +129,7 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
               </a>
               <div style={{ fontSize: 10.5, color: "#8c919c", margin: "3px 0" }}>
                 {IMAGE_SOURCE_LABEL[img.source] ?? img.source}
-                {i === 0 && img.source !== "datasheet-render" && (
+                {i === 0 && img.source !== "datasheet-render" && !img.hidden && (
                   <span style={{ marginLeft: 6, padding: "0 5px", borderRadius: 4, background: "var(--accent)", color: "#fff", fontWeight: 600, fontSize: 10 }}>Primary</span>
                 )}
               </div>
@@ -187,7 +187,7 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
 }
 
 /**
- * The part editor's Documents section (#207, spec §3): the two slots (same
+ * The part editor's Documents section (#207, spec §3): the three slots (same
  * cell as the Datasheets page), every document linked to the part with its
  * replaced versions, and the computed "Covered by" / "Covers" context from
  * the accessory graph. Any signed-in user (spec §2.4).
@@ -207,7 +207,7 @@ export default function PartDocumentsSection({ view }: { view: PartDocsView }) {
     <div>
       <div style={H}>Documents</div>
       {justUploaded && <AlsoCovers {...justUploaded} onDone={() => setJustUploaded(null)} />}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
         {PART_DOC_KINDS.map((k) => (
           <div key={k}>
             <div style={{ fontSize: 11.5, fontWeight: 600, color: "#5b616e", marginBottom: 4 }}>{PART_DOC_KIND_LABEL[k]}</div>

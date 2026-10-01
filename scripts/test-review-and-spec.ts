@@ -16313,7 +16313,7 @@ import type { PartDocument as PdDoc, PartDocumentLink as PdLink, PartAccessoryLi
   const c = collapseList([1, 2, 3, 4, 5, 6, 7]);
   ok(c.shown.length === 5 && c.more === 2 && collapseList([1, 2]).more === 0, "part docs coverage: collapseList shows 5 and counts the rest");
   ok(coveredLabel(1, "datasheet") === "Covered on 1 fixture datasheet" && coveredLabel(3, "specsheet") === "Covered on 3 fixture spec sheets", "part docs coverage: the covered label pluralizes");
-  ok(urlKindOf("cut-sheet") === "datasheet" && urlKindOf("guide-spec") === "specsheet" && urlKindOf("manual") === null, "part docs coverage: URL kinds map to slots");
+  ok(urlKindOf("cut-sheet") === "datasheet" && urlKindOf("guide-spec") === "specsheet" && urlKindOf("manual") === "manual" && urlKindOf("other") === null, "part docs coverage: URL kinds map to slots (#290: manual feeds the manual slot; other feeds none)");
 }
 
 {
@@ -27868,7 +27868,7 @@ import { isPartDocKind as d245IsKind, maxBytesFor as d245Max, PART_DOC_KINDS as 
   ok(d245Sniff(svg) === null && d245Sniff(pdf) === null, "#245 images: SVG and PDF are never images");
   ok(d245IsKind("image") && !d245IsKind("photo"), "#245 images: image is a part-document kind");
   ok(d245Max("image") === 25 * 1024 * 1024 && d245Max("datasheet") === 25 * 1024 * 1024, "#245 images: 25 MB image cap (#283 raised it from 10 MB), datasheets keep 25 MB");
-  ok(!(d245Kinds as readonly string[]).includes("image"), "#245 images: coverage slots stay datasheet + spec sheet");
+  ok(!(d245Kinds as readonly string[]).includes("image"), "#245 images: the coverage slots never include image (#290: datasheet, spec sheet, manual)");
 }
 
 import {
@@ -42762,4 +42762,140 @@ import { moveImageToFront as p290MoveToFront } from "@/lib/part-docs/views";
   const input = ["a", "b"];
   p290MoveToFront(input, "b", -1);
   ok(eq(input, ["a", "b"]), "#290 primary: the input array is not mutated");
+}
+
+/* ======================================================================
+   #290 Manual document type — a third coverage slot (spec Part 3 §3.2).
+   All pure: types/files/kind guessing, coverage, views + filters, the
+   client package, fetch candidates, and the portal doc meta.
+   ====================================================================== */
+import {
+  ALL_PART_DOC_KINDS as m290AllKinds, DOC_SLOT_KINDS as m290SlotKinds, PART_DOC_KIND_LABEL as m290Label,
+  isDocSlotKind as m290IsSlot, isPartDocKind as m290IsKind, maxBytesFor as m290Max, MAX_PART_DOC_BYTES as m290Cap,
+} from "@/lib/part-docs/types";
+import { ALLOWED_TYPES as m290Allowed, acceptFor as m290Accept, checkDocumentBytes as m290Check, mustBeFilesCopy as m290MustBe } from "@/lib/part-docs/files";
+import { guessKind as m290Guess } from "@/lib/part-docs/filename-match";
+import { buildCoverageIndex as m290Build, coveredLabel as m290Covered, slotCoverage as m290Slot, urlKindOf as m290UrlKind } from "@/lib/part-docs/coverage";
+import { DOCUMENTS_SHOW as m290Show, documentRow as m290Row, documentRowMatches as m290Matches, parseDocumentsFilter as m290Parse, partDocsView as m290PartView, progressLine as m290Progress } from "@/lib/part-docs/views";
+import { packageEntryName as m290Entry, resolvePackageDocs as m290Pkg } from "@/lib/part-docs/package";
+import { buildFetchContext as m290FetchCtx, catalogFetchTargets as m290CatTargets } from "@/lib/part-docs/fetch-links";
+import { portalDocMetaOf as m290DocMeta, portalHasCustomerDocument as m290Browsable, servableDocIdsFrom as m290Servable } from "@/lib/portal-catalog-index";
+import { PORTAL_DOC_KIND_LABEL as m290PortalLabel, toPartDocVM as m290DocVM } from "@/lib/portal-part-view";
+import type { PartDocument as M290Doc, PartDocumentLink as M290Link } from "@/lib/part-docs/types";
+{
+  const eq = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+  // Types.
+  ok(eq(m290SlotKinds, ["datasheet", "specsheet", "manual"]), "#290 manual: DOC_SLOT_KINDS is datasheet, specsheet, manual");
+  ok(m290Label.manual === "Manual" && m290IsSlot("manual") && m290IsKind("manual") && (m290AllKinds as readonly string[]).includes("manual"), "#290 manual: manual is a labelled slot kind and a part-document kind");
+  ok(!m290IsSlot("image") && m290Max("manual") === m290Cap && m290Cap === 25 * 1024 * 1024, "#290 manual: the 25 MB document cap; image is still not a slot");
+  // Files.
+  ok(eq(m290Allowed.manual, ["pdf"]) && m290Accept("manual") === ".pdf,application/pdf", "#290 manual: a manual is PDF only (allowed types + accept)");
+  const pdf = pdDocBytes("%PDF-1.7\n");
+  const okPdf = m290Check("manual", pdf);
+  ok(okPdf.ok && okPdf.contentType === "application/pdf", "#290 manual: a PDF manual passes the byte check");
+  const wordManual = m290Check("manual", pdDocx());
+  ok(!wordManual.ok && wordManual.error === "Manuals must be PDF files.", "#290 manual: a Word manual is refused naming manuals");
+  const wordDs = m290Check("datasheet", pdDocx());
+  ok(!wordDs.ok && wordDs.error === "Datasheets must be PDF files.", "#290 manual: a Word datasheet still names datasheets");
+  ok(m290MustBe("datasheet") === "Datasheets must be PDF files." && m290MustBe("manual") === "Manuals must be PDF files." && m290MustBe("specsheet") === "Spec sheets must be PDF or Word files.",
+    "#290 manual: the per-kind refusal copy names the right kind");
+  const html = m290Check("manual", pdDocBytes("<!DOCTYPE html>"));
+  ok(!html.ok && html.error === "That file is not a PDF.", "#290 manual: a non-PDF manual is 'not a PDF'");
+  // Kind guessing.
+  ok(m290Guess("X manual.pdf") === "manual" && m290Guess("S4 User Guide.pdf") === "manual" && m290Guess("user_guide.PDF") === "manual", "#290 manual: guessKind — manual / user guide → manual");
+  ok(m290Guess("Owner's Guide.pdf") === "manual" && m290Guess("owners-guide.pdf") === "manual" && m290Guess("Install Instructions.pdf") === "manual" && m290Guess("Quick Start.pdf") === "manual", "#290 manual: guessKind — owner's guide / instructions / quick start → manual");
+  ok(m290Guess("S4LED Guide Spec.pdf") === "specsheet" && m290Guess("guide spec.pdf") === "specsheet", "#290 manual: guessKind — 'guide spec' stays a spec sheet");
+  ok(m290Guess("S4LED Datasheet.pdf") === "datasheet" && m290Guess("photo.png") === "image" && m290Guess("Manual.docx") === "specsheet", "#290 manual: guessKind — datasheet/image unchanged; Word still → spec sheet (a manual is PDF only)");
+
+  // Coverage.
+  const doc = (id: string, kind: M290Doc["kind"] | "bogus", file: boolean, url: string | null = null): M290Doc => ({
+    id, kind: kind as M290Doc["kind"], title: id, fileName: `${id}.pdf`, contentType: "application/pdf", size: 1,
+    blobKey: file ? `part-docs/${id}/${id}.pdf` : null, sourceUrl: url, source: file ? "upload" : "davinci", uploadedAt: 1, uploadedBy: "t", history: [],
+  });
+  const link = (partSku: string, d: M290Doc): M290Link => ({ id: `L-${partSku}-${d.id}`, partSku, documentId: d.id, kind: d.kind, createdAt: 1, createdBy: "t" });
+  const MAN = doc("PD-man290aaaa", "manual", true);
+  const MANLINK = doc("PD-manlink290", "manual", false, "https://mfr.example/linked-manual.pdf");
+  const DS = doc("PD-ds290aaaaa", "datasheet", true);
+  const BOGUS = doc("PD-bogus290aa", "bogus", true);
+  let threw = false;
+  let ix: ReturnType<typeof m290Build> | null = null;
+  try {
+    ix = m290Build({
+      documents: [MAN, MANLINK, DS, BOGUS],
+      links: [link("FIXM", MAN), link("FIXM", DS), link("LINKM", MANLINK), link("FIXM", BOGUS)],
+      accessoryLinks: [
+        { id: "a1", parentSku: "FIXM", accessorySku: "LENSM", source: "assembly" },
+        { id: "a2", parentSku: "FIXM", accessorySku: "OPTM", source: "assembly", ownDatasheet: true },
+      ],
+      parts: [
+        { sku: "CATM", docs: [{ kind: "manual", url: "https://mfr.example/catalog-manual.pdf" }] },
+        { sku: "NNM", docNotNeeded: { manual: true } },
+      ],
+    });
+  } catch {
+    threw = true;
+  }
+  ok(!threw && !!ix, "#290 manual: a document of an unknown kind never throws in buildCoverageIndex");
+  if (ix) {
+    ok(m290UrlKind("manual") === "manual", "#290 manual: urlKindOf maps 'manual'");
+    ok(m290Slot(ix, "FIXM", "manual").state === "own", "#290 manual: an own manual file is 'own'");
+    const lens = m290Slot(ix, "LENSM", "manual");
+    ok(lens.state === "covered" && lens.parents.join(",") === "FIXM", "#290 manual: an accessory is covered by its fixture's manual");
+    ok(m290Slot(ix, "OPTM", "manual").state === "missing", "#290 manual: an ownDatasheet pair never covers a manual");
+    const cat = m290Slot(ix, "CATM", "manual");
+    ok(cat.state === "link-only" && cat.urls.join(",") === "https://mfr.example/catalog-manual.pdf" && m290Slot(ix, "CATM", "datasheet").state === "missing",
+      "#290 manual: a catalog docs entry of kind manual is a manual candidate URL, never a datasheet");
+    ok(m290Slot(ix, "NNM", "manual").state === "not-needed" && m290Slot(ix, "NNM", "datasheet").state === "missing", "#290 manual: a manual-only not-needed mark is kept and satisfies only manual");
+    ok(m290Covered(1, "manual") === "Covered on 1 fixture manual" && m290Covered(3, "manual") === "Covered on 3 fixture manuals", "#290 manual: coveredLabel names manuals");
+
+    // Views + filters.
+    const descOf = () => "";
+    const stat = (sku: string) => ({ sku, quotes: 1, lastQuotedAt: 1, grid: 0, bidSpecs: 0 });
+    const rows = ["FIXM", "LENSM", "LINKM", "NNM", "CATM", "OPTM"].map((s) => m290Row(stat(s), { sku: s, desc: s, category: "" }, ix!, descOf));
+    ok(rows[0].manual.state === "own" && rows[1].manual.state === "covered", "#290 manual: a documents row carries the manual slot");
+    ok(m290Show.some((s) => s.value === "missing-manual" && s.label === "Missing manual") && m290Parse({ show: "missing-manual" }).show === "missing-manual", "#290 manual: the Missing manual filter exists and parses");
+    const f = (show: string) => rows.filter((r) => m290Matches(r, m290Parse({ show }))).map((r) => r.sku).join(",");
+    ok(f("missing-manual") === "LINKM,CATM,OPTM", "#290 manual: Missing manual = link-only or missing manual");
+    ok(f("link").split(",").includes("CATM") && f("covered").split(",").includes("LENSM"), "#290 manual: the link and covered filters see the manual slot");
+    ok(m290Progress(rows, "manual") === "3 of 6 quoted parts have a manual", "#290 manual: the progress line reads 'N of M quoted parts have a manual'");
+    const pv = m290PartView(ix, "FIXM", descOf);
+    ok(pv.slots.manual?.state === "own" && pv.documents.some((d) => d.kind === "manual") && !pv.documents.some((d) => d.id === BOGUS.id), "#290 manual: the part editor view has a manual slot and lists the manual document");
+    const lv = m290PartView(ix, "LENSM", descOf);
+    ok(lv.coveredBy.length === 1 && lv.coveredBy[0].kinds.includes("manual") && lv.coveredBy[0].kinds.includes("datasheet"), "#290 manual: 'Covered by' names the manual kind");
+
+    // Client package.
+    const pkg = m290Pkg(ix, ["FIXM", "LENSM"]);
+    ok(pkg.bySku.get("FIXM")?.manual?.documentId === MAN.id && pkg.bySku.get("LENSM")?.manual?.documentId === MAN.id, "#290 manual: the client package carries the manual (own and covered)");
+    ok(pkg.documents.filter((d) => d.kind === "manual").length === 1, "#290 manual: a shared manual is listed once in the package");
+    ok(m290Entry({ documentId: MAN.id, kind: "manual", name: "S4 Manual.pdf" }, new Set(), (s) => s.replace(/\s+/g, "_")) === "manuals/S4_Manual.pdf", "#290 manual: manuals go under manuals/ in the zip");
+
+    // Fetch candidates.
+    const ctx = m290FetchCtx({ documents: [MAN, MANLINK, DS, BOGUS], links: [], accessoryLinks: [], index: ix });
+    ok(ctx.skusByUrl.get("manual\u0000https://mfr.example/catalog-manual.pdf")?.has("CATM") === true, "#290 manual: buildFetchContext includes catalog manual URLs under the manual kind");
+    ok(!m290CatTargets(ctx, () => true).some((t) => t.sku === "CATM"), "#290 manual: the whole-catalog fetch still targets datasheets only");
+
+    // Portal.
+    const meta = m290DocMeta(MAN);
+    ok(meta?.kind === "manual" && meta.pdf === true && meta.title === MAN.title, "#290 manual: the portal doc meta includes a manual");
+    ok(m290DocMeta(doc("PD-img290aaaa", "image", true)) === null, "#290 manual: an image is not a portal document");
+    const served = m290Servable(ix, new Map(), ["LENSM"]);
+    ok(served.has(MAN.id) && served.has(DS.id), "#290 manual: a covering fixture's manual is servable in the portal");
+    const manOnly = m290Build({ documents: [MAN], links: [link("ONLYM", MAN)], accessoryLinks: [], parts: [] });
+    ok(!m290Browsable(manOnly, "ONLYM") && m290Browsable(ix, "FIXM"), "#290 manual: a manual alone never satisfies the portal browse rule (datasheet/spec sheet only)");
+    ok(m290DocVM({ id: "x", kind: "manual", title: "M", pdf: true }).kind === "manual", "#290 manual: the sidebar view model keeps a manual (no coercion to datasheet)");
+    ok(m290PortalLabel.manual === "Manual" && m290PortalLabel.datasheet === "Datasheet" && m290PortalLabel.specsheet === "Spec sheet", "#290 manual: the portal sidebar labels a manual 'Manual'");
+  }
+  ok(rd288src("scripts/smoke-routes.ts").includes('"/catalog/documents?show=missing-manual"'), "#290 manual: smoke covers /catalog/documents?show=missing-manual");
+}
+
+/* ======================================================================
+   #290 polish — the "Parts you've quoted before" shelf stays off the
+   Packages & Assemblies page (pure).
+   ====================================================================== */
+import { showQuotedBeforeShelf as s290Shelf, parseCatalogParams as s290Params } from "@/lib/portal-catalog-view";
+{
+  ok(s290Shelf(s290Params({})) === true, "#290 shelf: the landing shows the quoted-before shelf");
+  ok(s290Shelf(s290Params({ dept: "packages" })) === false, "#290 shelf: ?dept=packages hides the quoted-before shelf");
+  ok(s290Shelf(s290Params({ dept: "lighting" })) === true, "#290 shelf: a part department still shows it");
+  ok(s290Shelf(s290Params({ q: "s4" })) === false && s290Shelf(s290Params({ page: "2" })) === false && s290Shelf(s290Params({ cat: "Lighting" })) === false, "#290 shelf: a search, a filter or page 2 hides it (unchanged)");
 }

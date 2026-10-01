@@ -69,14 +69,22 @@ export function matchFileName(fileName: string, index: FilenameIndex): FilenameM
   return { keys: [], skus: [], confidence: "none" };
 }
 
-/** Image when the extension is PNG/JPEG/WebP (#245); else spec sheet when
- *  the name says spec/guide/specification or the file is Word; otherwise
+/** Manual names (#290, verbatim from the spec): checked before the
+ *  spec-sheet name rule, so "User Guide" is a manual while "Guide Spec"
+ *  stays a spec sheet. */
+const MANUAL_NAME = /manual|user[\s_-]*guide|owner'?s[\s_-]*guide|instruction|quick[\s_-]*start/i;
+
+/** Image when the extension is PNG/JPEG/WebP (#245); spec sheet when the
+ *  file is Word (a manual is PDF only, #290); else manual when the name
+ *  says manual/user guide/owner's guide/instructions/quick start (#290);
+ *  else spec sheet when the name says spec/guide/specification; otherwise
  *  Datasheet (spec §3). */
 export function guessKind(fileName: string): PartDocKind {
   const name = String(fileName ?? "").toLowerCase();
   if (/\.(png|jpe?g|webp)$/i.test(name)) return "image";
   if (/\.docx?$/.test(name)) return "specsheet";
   const base = name.replace(/\.[a-z0-9]{1,5}$/, "");
+  if (MANUAL_NAME.test(base)) return "manual";
   return /spec|guide/.test(base) ? "specsheet" : "datasheet";
 }
 

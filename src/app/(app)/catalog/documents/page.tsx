@@ -134,6 +134,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
         <span>{progressLine(all, "datasheet")}</span>
         <span style={{ color: "#6b7079" }}>{progressLine(all, "specsheet")}</span>
+        <span style={{ color: "#6b7079" }}>{progressLine(all, "manual")}</span>
       </div>
 
       <form method="get" action="/catalog/documents" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>

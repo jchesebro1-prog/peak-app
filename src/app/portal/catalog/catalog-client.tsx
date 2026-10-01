@@ -13,6 +13,7 @@ import { PartSidebar } from "./part-sidebar";
 import {
   catalogHref,
   pagerItems,
+  showQuotedBeforeShelf,
   toggleValue,
   CATALOG_PAGE_SIZE,
   type CatalogParams,
@@ -465,7 +466,7 @@ export function CatalogClient({
         )}
 
         <section style={{ minWidth: 0 }} aria-busy={pending}>
-          {browsing && shelf.length > 0 && (
+          {showQuotedBeforeShelf(params) && shelf.length > 0 && (
             <div style={{ marginBottom: 26 }}>
               <div className="pc-section-head">
                 <div className="pc-section-title">Parts you&rsquo;ve quoted before</div>

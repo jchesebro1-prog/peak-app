@@ -1,4 +1,5 @@
 import type { SearchEntry, SearchQuery } from "@/lib/portal-search";
+import { PACKAGES_DEPT } from "@/lib/portal-departments";
 
 /**
  * Portal catalog browse page — pure, client-safe helpers (#245 Task 10,
@@ -83,6 +84,14 @@ function cleanList(v: unknown): string[] {
 function cleanPage(v: unknown): number {
   const n = Math.floor(Number(v));
   return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+/** "Parts you've quoted before" shows on the first page of a plain browse
+ *  (no search, no facet) — and never on the Packages & Assemblies page
+ *  (#290 polish: that page lists packages only, so a parts shelf above it
+ *  reads as out of place). */
+export function showQuotedBeforeShelf(p: Pick<CatalogParams, "q" | "mfr" | "cat" | "page" | "dept">): boolean {
+  return !p.q && !p.mfr.length && !p.cat.length && p.page === 1 && p.dept !== PACKAGES_DEPT.id;
 }
 
 /** `?q=&mfr=&cat=&page=&part=&dept=` (mfr/cat may repeat) → clean params. */

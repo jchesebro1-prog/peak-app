@@ -1,5 +1,5 @@
 import { slotCoverage, type CoverageIndex } from "./coverage";
-import type { PartDocKind } from "./types";
+import type { DocSlotKind, PartDocKind } from "./types";
 
 /**
  * Which documents a client package carries (#207, spec §3 "Client
@@ -20,6 +20,8 @@ export type PackageSkuDocs = {
   /** True when no datasheet is needed (own, covered, or marked not needed). */
   datasheetOk: boolean;
   specsheet: PackageDocRef | null;
+  /** The part's own manual, or a fixture manual covering it (#290). */
+  manual: PackageDocRef | null;
 };
 
 export function resolvePackageDocs(
@@ -37,27 +39,31 @@ export function resolvePackageDocs(
   };
   for (const sku of context) {
     if (!index) {
-      bySku.set(sku, { datasheet: null, datasheetCoveredBy: [], datasheetOk: false, specsheet: null });
+      bySku.set(sku, { datasheet: null, datasheetCoveredBy: [], datasheetOk: false, specsheet: null, manual: null });
       continue;
     }
     const ds = slotCoverage(index, sku, "datasheet", context);
-    const ss = slotCoverage(index, sku, "specsheet", context);
     const firstFile = (s: typeof ds) => (s.state === "own" || s.state === "covered" ? s.docs[0] ?? null : null);
     const dsDoc = firstFile(ds);
-    const ssDoc = firstFile(ss);
+    const ssDoc = firstFile(slotCoverage(index, sku, "specsheet", context));
+    const mnDoc = firstFile(slotCoverage(index, sku, "manual", context));
     bySku.set(sku, {
       datasheet: dsDoc ? take("datasheet", sku, dsDoc.id, dsDoc.fileName) : null,
       datasheetCoveredBy: ds.state === "covered" ? ds.parents : [],
       datasheetOk: ds.state === "own" || ds.state === "covered" || ds.state === "not-needed",
       specsheet: ssDoc ? take("specsheet", sku, ssDoc.id, ssDoc.fileName) : null,
+      manual: mnDoc ? take("manual", sku, mnDoc.id, mnDoc.fileName) : null,
     });
   }
   return { bySku, documents: [...documents.values()] };
 }
 
+/** The zip folder per slot kind (#290: manuals get their own). */
+const PACKAGE_FOLDER: Record<DocSlotKind, string> = { datasheet: "datasheets", specsheet: "specsheets", manual: "manuals" };
+
 /** A zip entry name per document, unique within one package. */
 export function packageEntryName(doc: Pick<PackageDocument, "documentId" | "kind" | "name">, used: Set<string>, safe: (s: string) => string): string {
-  const folder = doc.kind === "datasheet" ? "datasheets" : "specsheets";
+  const folder = doc.kind === "image" ? "images" : PACKAGE_FOLDER[doc.kind];
   let name = `${folder}/${safe(doc.name)}`;
   if (used.has(name)) name = `${folder}/${doc.documentId}-${safe(doc.name)}`;
   used.add(name);

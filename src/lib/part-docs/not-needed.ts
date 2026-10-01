@@ -1,5 +1,5 @@
 import { get as getPart, mergeUpsert } from "@/lib/stores/catalog";
-import type { DocNotNeeded, DocSlotKind } from "./types";
+import { DOC_SLOT_KINDS, type DocNotNeeded, type DocSlotKind } from "./types";
 
 /**
  * Set or clear a part's "not needed" mark for one kind (#207, spec §4 step 2).
@@ -18,7 +18,7 @@ export async function setDocNotNeeded(skus: readonly string[], kind: DocSlotKind
     const next: DocNotNeeded = { ...current };
     if (on) next[kind] = true;
     else delete next[kind];
-    await mergeUpsert(sku, { docNotNeeded: next.datasheet || next.specsheet ? next : undefined });
+    await mergeUpsert(sku, { docNotNeeded: DOC_SLOT_KINDS.some((k) => next[k]) ? next : undefined });
     changed++;
   }
   return changed;

@@ -1,4 +1,4 @@
-import type { DocNotNeeded, DocSlotKind, PartAccessoryLink, PartDocument, PartDocumentLink } from "./types";
+import { DOC_SLOT_KINDS, isDocSlotKind, type DocNotNeeded, type DocSlotKind, type PartAccessoryLink, type PartDocument, type PartDocumentLink } from "./types";
 
 /**
  * The coverage rule (#207, spec §4) — pure, so the to-do page, the part
@@ -13,7 +13,7 @@ import type { DocNotNeeded, DocSlotKind, PartAccessoryLink, PartDocument, PartDo
  *  3. Else P is an accessory of parents that have their own K document →
  *     "covered". With a context (the SKUs on one quote), only parents present
  *     in it count; none present → P is not covered on that quote. A pair
- *     marked `ownDatasheet` never covers (for either kind — D271).
+ *     marked `ownDatasheet` never covers (for any kind — D271; #290 manuals too).
  *  4. Else P has only a URL nobody has fetched → "link-only" (not satisfied).
  *  5. Else → "missing".
  */
@@ -27,7 +27,7 @@ export type CoveragePartInput = {
   productMetadata?: { datasheets?: Array<{ kind: string; sourceUrl?: string }> };
 };
 
-type ByKind<T> = { datasheet: T[]; specsheet: T[] };
+type ByKind<T> = Record<DocSlotKind, T[]>;
 
 export type CoverageIndex = {
   docsById: Map<string, PartDocument>;
@@ -53,15 +53,20 @@ export type SlotCoverage =
 
 export type SlotState = SlotCoverage["state"];
 
+/** The lower-case noun for a slot — "datasheet", "spec sheet", "manual". */
+export const SLOT_NOUN: Record<DocSlotKind, string> = { datasheet: "datasheet", specsheet: "spec sheet", manual: "manual" };
+
 /** "Covered on N fixture datasheets" lists at most this many before collapsing (§4). */
 export const COVERED_COLLAPSE = 5;
 
-const empty = <T,>(): ByKind<T> => ({ datasheet: [], specsheet: [] });
+const empty = <T,>(): ByKind<T> => ({ datasheet: [], specsheet: [], manual: [] });
 
-/** Which slot a catalog-held URL feeds. Manuals and "other" feed neither. */
+/** Which slot a catalog-held URL feeds; "other" feeds none (#290: a
+ *  "manual" URL feeds the manual slot). */
 export function urlKindOf(kind: string): DocSlotKind | null {
   if (kind === "datasheet" || kind === "cut-sheet") return "datasheet";
   if (kind === "guide-spec") return "specsheet";
+  if (kind === "manual") return "manual";
   return null;
 }
 
@@ -83,7 +88,9 @@ export function buildCoverageIndex(input: {
   for (const l of input.links) {
     const doc = docsById.get(l.documentId);
     if (!doc) continue; // a link to a removed document covers nothing
-    if (doc.kind === "image") continue; // images never cover or satisfy a slot (#245)
+    // Images never cover or satisfy a slot (#245); a kind this build doesn't
+    // know (a stale or hand-edited row) is skipped rather than thrown on (#290).
+    if (!isDocSlotKind(doc.kind)) continue;
     const key = `${l.partSku}\u0000${doc.id}`;
     if (seenLink.has(key)) continue;
     seenLink.add(key);
@@ -114,10 +121,10 @@ export function buildCoverageIndex(input: {
   const notNeeded = new Map<string, DocNotNeeded>();
   const catalogUrls = new Map<string, ByKind<string>>();
   for (const part of input.parts) {
-    if (part.docNotNeeded && (part.docNotNeeded.datasheet || part.docNotNeeded.specsheet)) notNeeded.set(part.sku, part.docNotNeeded);
+    if (part.docNotNeeded && DOC_SLOT_KINDS.some((k) => part.docNotNeeded?.[k])) notNeeded.set(part.sku, part.docNotNeeded);
     const known = new Set<string>();
     const linked = docsBySku.get(part.sku);
-    for (const d of [...(linked?.datasheet ?? []), ...(linked?.specsheet ?? [])]) if (d.sourceUrl) known.add(d.sourceUrl);
+    if (linked) for (const k of DOC_SLOT_KINDS) for (const d of linked[k]) if (d.sourceUrl) known.add(d.sourceUrl);
     let urls: ByKind<string> | null = null;
     const add = (kind: DocSlotKind | null, url: string | undefined) => {
       const u = (url || "").trim();
@@ -126,7 +133,8 @@ export function buildCoverageIndex(input: {
       if (!urls) urls = empty();
       urls[kind].push(u);
     };
-    for (const d of part.docs ?? []) add(d.kind === "datasheet" ? "datasheet" : null, d.url);
+    // DaVinci links: datasheets and (#290) manuals; anything else feeds no slot.
+    for (const d of part.docs ?? []) add(d.kind === "datasheet" || d.kind === "manual" ? d.kind : null, d.url);
     for (const d of part.productMetadata?.datasheets ?? []) add(urlKindOf(d.kind), d.sourceUrl);
     if (urls) catalogUrls.set(part.sku, urls);
   }
@@ -200,6 +208,6 @@ export function collapseList<T>(items: readonly T[], max = COVERED_COLLAPSE): { 
 
 /** "Covered on 1 fixture datasheet" / "Covered on 3 fixture spec sheets". */
 export function coveredLabel(n: number, kind: DocSlotKind): string {
-  const noun = kind === "datasheet" ? "datasheet" : "spec sheet";
+  const noun = SLOT_NOUN[kind];
   return `Covered on ${n} fixture ${noun}${n === 1 ? "" : "s"}`;
 }

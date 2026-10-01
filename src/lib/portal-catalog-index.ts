@@ -4,7 +4,7 @@ import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { coveringParents, ownFiles, slotCoverage, type CoverageIndex } from "@/lib/part-docs/coverage";
 import { buildImageIndex, type ImageRef } from "@/lib/part-docs/views";
-import { DOC_SLOT_KINDS } from "@/lib/part-docs/types";
+import { DOC_SLOT_KINDS, isDocSlotKind, type DocSlotKind, type PartDocument } from "@/lib/part-docs/types";
 import { loadPortalRules } from "@/lib/freight-rule-load";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
@@ -81,7 +81,7 @@ export type PortalIndex = {
    *  §7). Built once per index build, not per request, by the pure
    *  `servableDocIdsFrom` below: for every quotable (non-hidden) SKU, its
    *  own visible images with a stored file, plus its own and covering-
-   *  parents' datasheet/spec-sheet documents with a stored file (never
+   *  parents' datasheet/spec-sheet/manual documents with a stored file (never
    *  through an image — only a datasheet or spec sheet "covers" a child
    *  part, and an `ownDatasheet` accessory pair opts a child back out of
    *  that coverage). "Hidden" excludes an image whose LINK is marked
@@ -89,9 +89,10 @@ export type PortalIndex = {
    *  (part-docs/types.ts `PartDocumentLink`), so there's no "hidden
    *  datasheet link" case to filter here at all. */
   servableDocIds: Set<string>;
-  /** Kind + title of every datasheet/spec-sheet id any `IndexedPart.datasheetIds`
-   *  names (#245 Task 11 — the part sidebar's Documents list). */
-  docMeta: Map<string, { kind: "datasheet" | "specsheet"; title: string; pdf: boolean }>;
+  /** Kind + title of every datasheet/spec-sheet/manual id any
+   *  `IndexedPart.datasheetIds` names (#245 Task 11 — the part sidebar's
+   *  Documents list; #290 adds manuals). */
+  docMeta: Map<string, PortalDocMeta>;
   /** Internal labor/travel rows left on "auto" (#245 Task 11 fix round 1) —
    *  NOT quotable, searchable, browsable or doc-servable on their own, but a
    *  fixture may carry one as a component (e.g. shop fabrication), so fixture
@@ -190,8 +191,35 @@ export function countRecentQuotesBySku(
   return out;
 }
 
-/** Datasheet/spec-sheet documents with a stored file a customer can open:
- *  the part's own, then those of parents whose documents cover it. */
+/** One sidebar document's kind + title (#245 Task 11; #290 adds manual). */
+export type PortalDocMeta = { kind: DocSlotKind; title: string; pdf: boolean };
+
+/** A slot document's sidebar meta, or null for an image or an unknown kind
+ *  (#290: pure, so the harness checks a manual without a DB). */
+export function portalDocMetaOf(d: Pick<PartDocument, "kind" | "title" | "fileName" | "contentType">): PortalDocMeta | null {
+  if (!isDocSlotKind(d.kind)) return null;
+  const pdf = (d.contentType || "").toLowerCase() === "application/pdf" || /\.pdf$/i.test(d.fileName || "");
+  return { kind: d.kind, title: (d.title || d.fileName || "").trim(), pdf };
+}
+
+/** The slots that count as "has a datasheet" for the browse rule (spec
+ *  §1.3). #290 decision: a manual alone does NOT make a part browsable — the
+ *  rule stays datasheet/spec sheet, as it was before manuals existed. */
+const BROWSE_DOC_KINDS: readonly DocSlotKind[] = ["datasheet", "specsheet"];
+
+/** "Has a datasheet" for the browse rule (spec §1.3) = a document a
+ *  customer can actually open in the datasheet or spec-sheet slot, own or
+ *  covered by a parent's — a "not needed" mark satisfies the staff slot but
+ *  gives the customer nothing to read. Pure (#290). */
+export function portalHasCustomerDocument(index: CoverageIndex, sku: string): boolean {
+  return BROWSE_DOC_KINDS.some((kind) => {
+    const st = slotCoverage(index, sku, kind).state;
+    return st === "own" || st === "covered";
+  });
+}
+
+/** Datasheet/spec-sheet/manual documents with a stored file a customer can
+ *  open: the part's own, then those of parents whose documents cover it. */
 function datasheetIdsFor(index: CoverageIndex, sku: string): string[] {
   const ids = new Set<string>();
   for (const kind of DOC_SLOT_KINDS) {
@@ -208,7 +236,7 @@ function datasheetIdsFor(index: CoverageIndex, sku: string): string[] {
  * For every SKU in `liveSkus` (quotable — already filtered to non-hidden
  * parts by the caller): its own visible (not-hidden-link) images that have
  * a stored file, plus `datasheetIdsFor` — its own and covering-parents'
- * datasheet/spec-sheet documents with a stored file. `ownFiles` (used by
+ * datasheet/spec-sheet/manual documents with a stored file. `ownFiles` (used by
  * both `datasheetIdsFor` and here) already requires `blobKey`, so a
  * link-only document (fetched URL, no bytes yet) never appears in either
  * set; `coveringParents` already excludes an `ownDatasheet` accessory pair
@@ -254,14 +282,7 @@ async function buildIndex(): Promise<Built> {
     const imageIds = (images.get(p.sku) ?? [])
       .filter((r) => !r.hidden && !!state.index.docsById.get(r.id)?.blobKey)
       .map((r) => r.id);
-    // "Has a datasheet" for the browse rule (spec §1.3) = a document a
-    // customer can actually open in EITHER slot (datasheet or spec sheet),
-    // own or covered by a parent's — a "not needed" mark satisfies the staff
-    // slot but gives the customer nothing to read.
-    const hasDatasheet = DOC_SLOT_KINDS.some((kind) => {
-      const st = slotCoverage(state.index, p.sku, kind).state;
-      return st === "own" || st === "covered";
-    });
+    const hasDatasheet = portalHasCustomerDocument(state.index, p.sku);
     const f: VisibilityFacts = {
       visibility,
       hasVisibleImage: imageIds.length > 0,
@@ -293,10 +314,8 @@ async function buildIndex(): Promise<Built> {
     for (const id of ip.datasheetIds) {
       if (docMeta.has(id)) continue;
       const d = state.index.docsById.get(id);
-      if (d && (d.kind === "datasheet" || d.kind === "specsheet")) {
-        const pdf = (d.contentType || "").toLowerCase() === "application/pdf" || /\.pdf$/i.test(d.fileName || "");
-        docMeta.set(id, { kind: d.kind, title: (d.title || d.fileName || "").trim(), pdf });
-      }
+      const meta = d ? portalDocMetaOf(d) : null;
+      if (meta) docMeta.set(id, meta);
     }
     if (isFabricPart(p)) {
       const rate = fabricAreaRateOf(p);

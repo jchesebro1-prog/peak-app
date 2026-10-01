@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { catalogHref, type CatalogParams, type TileVM } from "@/lib/portal-catalog-view";
-import { PART_UNAVAILABLE_COPY, type PartDetail, type PartDetailPart, type PartDocVM } from "@/lib/portal-part-view";
+import { PART_UNAVAILABLE_COPY, PORTAL_DOC_KIND_LABEL, type PartDetail, type PartDetailPart, type PartDocVM } from "@/lib/portal-part-view";
 import { AskQuestion } from "./ask-question";
 import { FixtureConfig } from "./fixture-config";
 import { AddedNote, docSrc, money, PreviewHint, QtyStepper, useAddToQuote } from "./panel-ui";
@@ -242,7 +242,7 @@ function Documents({ docs, previewCid }: { docs: PartDocVM[]; previewCid: string
         {docs.map((d, i) => {
           const isOpen = open === d.id;
           const src = docSrc(d.id, previewCid);
-          const kind = d.kind === "specsheet" ? "Spec sheet" : "Datasheet";
+          const kind = PORTAL_DOC_KIND_LABEL[d.kind] ?? "Datasheet";
           // Only a PDF opens inline — a .doc/.docx would download inside the
           // iframe, so it gets a new-tab link instead.
           if (!d.pdf) {

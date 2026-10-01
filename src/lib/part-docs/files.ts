@@ -18,16 +18,18 @@ export const CONTENT_TYPES: Record<SniffedType, string> = {
 };
 
 /** What each slot accepts: a datasheet is a PDF; a spec sheet is PDF or Word
- *  (§2.2); an image is PNG, JPEG, or WebP (#245) — never SVG. */
+ *  (§2.2); a manual is a PDF (#290); an image is PNG, JPEG, or WebP (#245) —
+ *  never SVG. */
 export const ALLOWED_TYPES: Record<PartDocKind, readonly SniffedType[]> = {
   datasheet: ["pdf"],
   specsheet: ["pdf", "doc", "docx"],
+  manual: ["pdf"],
   image: ["png", "jpeg", "webp"],
 };
 
 /** The `accept` attribute for a slot's file input. */
 export function acceptFor(kind: PartDocKind): string {
-  if (kind === "datasheet") return ".pdf,application/pdf";
+  if (kind === "datasheet" || kind === "manual") return ".pdf,application/pdf";
   if (kind === "image") return ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp";
   return ".pdf,.doc,.docx,application/pdf,application/msword," + CONTENT_TYPES.docx;
 }
@@ -93,6 +95,22 @@ export function sniffImageType(b: Uint8Array): "image/png" | "image/jpeg" | "ima
   return null;
 }
 
+/** "Datasheets must be PDF files." — the refusal for a sniffable file of a
+ *  type the slot doesn't take, naming the slot's own kind (#290: it used to
+ *  say "Datasheets" for every kind). */
+export function mustBeFilesCopy(kind: PartDocKind): string {
+  switch (kind) {
+    case "datasheet":
+      return "Datasheets must be PDF files.";
+    case "manual":
+      return "Manuals must be PDF files.";
+    case "specsheet":
+      return "Spec sheets must be PDF or Word files.";
+    case "image":
+      return "Images must be PNG, JPEG, or WebP files.";
+  }
+}
+
 /** Refusal text for bytes a slot does not accept, or null when they fit. */
 export function checkDocumentBytes(kind: PartDocKind, bytes: Uint8Array): { ok: true; type: SniffedType; contentType: string } | { ok: false; error: string } {
   if (kind === "image") {
@@ -102,8 +120,8 @@ export function checkDocumentBytes(kind: PartDocKind, bytes: Uint8Array): { ok: 
     return { ok: true, type, contentType: imageType };
   }
   const type = sniffDocumentType(bytes);
-  if (!type) return { ok: false, error: kind === "datasheet" ? "That file is not a PDF." : "That file is not a PDF or Word document." };
-  if (!ALLOWED_TYPES[kind].includes(type)) return { ok: false, error: "Datasheets must be PDF files." };
+  if (!type) return { ok: false, error: ALLOWED_TYPES[kind].includes("doc") ? "That file is not a PDF or Word document." : "That file is not a PDF." };
+  if (!ALLOWED_TYPES[kind].includes(type)) return { ok: false, error: mustBeFilesCopy(kind) };
   return { ok: true, type, contentType: CONTENT_TYPES[type] };
 }
 

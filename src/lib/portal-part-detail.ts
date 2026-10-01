@@ -8,6 +8,7 @@ import {
   cleanFixtureOptions,
   GOES_WITH_MAX,
   PART_UNAVAILABLE_COPY,
+  PORTAL_DOC_KIND_LABEL,
   toFixtureDetailVM,
   toPartDetailVM,
   type PartDetail,
@@ -30,7 +31,7 @@ function docsFor(ix: PortalIndex, ids: readonly string[]): PartDocVM[] {
   const out: PartDocVM[] = [];
   for (const id of ids) {
     const m = ix.docMeta.get(id);
-    if (m) out.push({ id, kind: m.kind, title: m.title || (m.kind === "specsheet" ? "Spec sheet" : "Datasheet"), pdf: m.pdf });
+    if (m) out.push({ id, kind: m.kind, title: m.title || PORTAL_DOC_KIND_LABEL[m.kind], pdf: m.pdf });
   }
   return out;
 }

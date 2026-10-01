@@ -261,6 +261,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string): Promis
       datasheet: docs?.datasheet ?? null,
       datasheetCoveredBy: docs?.datasheetCoveredBy ?? [],
       specsheet: docs?.specsheet ?? null,
+      manual: docs?.manual ?? null,
     };
   });
   const gaps: ClientPackageGap[] = matched.rows.filter((row) => row.bucket !== "ready").map((row) => ({ kind: row.bucket === "no-match" ? "missing-catalog" : "missing-spec", sku: row.row.sku, description: row.row.desc, qty: row.row.qty, catalogId: row.part?.id || null }));

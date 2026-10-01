@@ -75,6 +75,7 @@ const ROUTES = [
   "/catalog",
   "/catalog/documents", // #207 — the Datasheets to-do list
   "/catalog/documents?show=missing-datasheet",
+  "/catalog/documents?show=missing-manual", // #290 — the Manual slot's filter
   "/catalog/documents/upload", // #207 — bulk drop
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
   "/catalog/departments", // #252 — the portal department tree editor (admin)

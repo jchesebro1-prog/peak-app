@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
-import { FETCH_BATCH_SIZE, PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocKind } from "@/lib/part-docs/types";
+import { FETCH_BATCH_SIZE, PART_DOC_KINDS, PART_DOC_KIND_LABEL, type DocSlotKind } from "@/lib/part-docs/types";
 import type { DocumentRow } from "@/lib/part-docs/views";
 import type { FetchOutcome, FetchTarget } from "@/lib/part-docs/fetch-links";
 import AlsoCovers from "./also-covers";
@@ -19,7 +19,8 @@ import {
 
 /**
  * The Datasheets to-do table (#207, spec §3): one row per quoted part,
- * most-quoted first, two slot cells, multi-select with bulk actions.
+ * most-quoted first, one cell per slot (datasheet, spec sheet, manual —
+ * #290) plus the image cell, multi-select with bulk actions.
  *
  * `fetchLinksAction` now runs under a shared wall-clock budget (45s, under
  * the page's 60s maxDuration): a target the budget ran out of room to even
@@ -44,7 +45,7 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [justUploaded, setJustUploaded] = useState<{ sku: string; documentId: string; fileName: string } | null>(null);
-  const [bulkKind, setBulkKind] = useState<PartDocKind>("datasheet");
+  const [bulkKind, setBulkKind] = useState<DocSlotKind>("datasheet");
   const [progress, setProgress] = useState<string | null>(null);
   const [failures, setFailures] = useState<FetchOutcome[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +141,7 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
           <b style={{ fontSize: 12.5 }}>{picked.length} selected</b>
           <button type="button" className="pk-btn-outline" onClick={fetchSelected}>Fetch links</button>
           <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-            <select aria-label="Kind to mark" value={bulkKind} onChange={(e) => setBulkKind(e.target.value as PartDocKind)} style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7, border: "1px solid #dfe2e8" }}>
+            <select aria-label="Kind to mark" value={bulkKind} onChange={(e) => setBulkKind(e.target.value as DocSlotKind)} style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7, border: "1px solid #dfe2e8" }}>
               {PART_DOC_KINDS.map((k) => <option key={k} value={k}>{PART_DOC_KIND_LABEL[k]}</option>)}
             </select>
             <button type="button" className="pk-btn-outline" onClick={markNotNeeded}>Mark not needed</button>
@@ -180,7 +181,7 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
       )}
 
       <div className="pk-card" style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 880 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
           <thead>
             <tr>
               <th style={{ ...TH, width: 28 }}>
@@ -194,8 +195,9 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
               <th style={TH}>Part</th>
               <th style={{ ...TH, textAlign: "right" }}>Quoted</th>
               <th style={TH}>Last quoted</th>
-              <th style={TH}>Datasheet</th>
-              <th style={TH}>Spec sheet</th>
+              {PART_DOC_KINDS.map((k) => (
+                <th key={k} style={TH}>{PART_DOC_KIND_LABEL[k]}</th>
+              ))}
               <th style={TH}>Image</th>
             </tr>
           </thead>
@@ -224,7 +226,7 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={7} style={{ ...TD, textAlign: "center", color: "#8c919c", padding: 28 }}>Nothing matches these filters.</td>
+                <td colSpan={5 + PART_DOC_KINDS.length} style={{ ...TD, textAlign: "center", color: "#8c919c", padding: 28 }}>Nothing matches these filters.</td>
               </tr>
             )}
           </tbody>

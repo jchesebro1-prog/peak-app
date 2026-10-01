@@ -16,12 +16,14 @@ type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 export function preflight(file: File, kind: PartDocKind): string | null {
   const cap = maxBytesFor(kind);
   if (file.size > cap) return `${file.name} is over ${Math.round(cap / (1024 * 1024))} MB.`;
+  // A datasheet and (#290) a manual are PDF only.
+  const pdfOnly = kind === "datasheet" || kind === "manual";
   const ok =
-    kind === "datasheet" ? /\.pdf$/i.test(file.name) :
+    pdfOnly ? /\.pdf$/i.test(file.name) :
     kind === "image" ? /\.(png|jpe?g|webp)$/i.test(file.name) :
     /\.(pdf|docx?)$/i.test(file.name);
   if (!ok) {
-    return kind === "datasheet" ? `${file.name} is not a PDF.`
+    return pdfOnly ? `${file.name} is not a PDF.`
       : kind === "image" ? `${file.name} is not a PNG, JPEG, or WebP image.`
       : `${file.name} is not a PDF or Word file.`;
   }
