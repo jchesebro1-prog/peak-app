@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
+import { CATALOG_TEMPLATE_CSV } from "@/app/(app)/catalog/parse";
 
 /** Download the canonical catalog import shape. */
 export async function GET() {
   await requireUser();
-  const csv = [
-    "MFR Part #,Description,Category,Unit,List,Cost",
-    "EXAMPLE-001,Example catalog part,Audio/Video,ea,100.00,65.00",
-  ].join("\n") + "\n";
-
-  return new NextResponse(csv, {
+  return new NextResponse(CATALOG_TEMPLATE_CSV, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": 'attachment; filename="catalog-import-template.csv"',

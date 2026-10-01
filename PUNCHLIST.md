@@ -10143,3 +10143,14 @@ both Gmail OAuth return paths now target their group. Gates: tsc 0; test:specs 9
 179/0 (+7 group routes); eslint clean on changed files; next build OK. Browser-verified (every group, one save each, old
 links, phone dropdown, non-admin lock card). Reviewed, no bugs. Not changed: the Locations "Quote origin" badge still
 overflows on phones (pre-existing).
+
+## 286. Catalog import — the downloaded template refused its own header; Add manufacturer first — DONE 2026-10-01
+
+Jeff: filled in the sample file from "↓ Download CSV template" and the import refused it ("check the header names").
+Root cause: the template's first column is `MFR Part #`, which the price-book parser normalizes to `mfrpart` — no
+alias matched, so every row had a blank SKU and was dropped. A column headed `MFR PN` (which the upload card invites)
+failed the same way: it mapped only to the stored manufacturer part number, never the SKU. Fix: `MFR Part #` /
+`Manufacturer Part #` are SKU aliases; a file with an MFR PN column and no SKU column keys rows by MFR PN; the
+template CSV is one exported constant (`CATALOG_TEMPLATE_CSV`) that a spec check parses, so it can't drift again; the
+no-valid-rows error names the columns it needs. "+ Add new manufacturer…" is now the first Manufacturer option.
+Gates: tsc 0; test:specs 9971 PASS / 0 FAIL (+4); eslint clean on changed src files.
