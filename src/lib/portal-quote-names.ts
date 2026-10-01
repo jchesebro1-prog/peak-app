@@ -25,7 +25,7 @@ const GRAPHEMES: { segment(s: string): Iterable<{ segment: string }> } | null =
  *  grapheme cluster (an emoji family, a flag, a base + combining mark) — a
  *  cluster that doesn't fit whole is dropped. Falls back to code points where
  *  Intl.Segmenter is unavailable. */
-function capGraphemes(s: string, max: number): string {
+export function capGraphemes(s: string, max: number): string {
   if (!GRAPHEMES) return Array.from(s).slice(0, max).join("");
   let out = "";
   let used = 0;

@@ -22,7 +22,23 @@ export type TileVM = {
   unitPrice: number | null;
   por: boolean;
   unit: string;
+  /** #289: fixture tiles only — the "Package" badge and "Includes N parts". */
+  badge?: "Package";
+  subline?: string;
 };
+
+/** #289: the lines a package includes — its required lines (qty > 0), the
+ *  light engine and lens among them; optional add-ons are not included.
+ *  The fixture sidebar lists exactly these (toFixtureDetailVM's `fixed`),
+ *  and the tile's "Includes N parts" counts them. */
+export function includedLines<L extends { required: boolean }>(lines: readonly L[]): L[] {
+  return lines.filter((l) => l.required);
+}
+
+/** "Includes N parts" ("1 part" for one). */
+export function includesPartsLabel(n: number): string {
+  return `Includes ${n} ${n === 1 ? "part" : "parts"}`;
+}
 
 /** Spec §3.1: 48 per page, numbered paging. */
 export const CATALOG_PAGE_SIZE = 48;
@@ -179,11 +195,14 @@ export function quotedBeforeSkus(
 type TileIdentity = Pick<SearchEntry, "key" | "kind" | "title" | "sku" | "mfr" | "category">;
 type TileMedia = { imageIds?: readonly string[]; datasheetIds?: readonly string[]; unit?: string } | null | undefined;
 type TilePrice = { unitPrice: number | null; por: boolean } | null | undefined;
+type TileFixture = { lines: readonly { required: boolean }[] } | null | undefined;
 
 /** One result tile — an explicit whitelist (never a spread), sell only. A
- *  missing price reads as "Price on request". */
-export function toTileVM(e: TileIdentity, media: TileMedia, price: TilePrice): TileVM {
+ *  missing price reads as "Price on request". A fixture tile (#289) gets the
+ *  "Package" badge, and "Includes N parts" when its index fixture is given. */
+export function toTileVM(e: TileIdentity, media: TileMedia, price: TilePrice, fixture?: TileFixture): TileVM {
   const unitPrice = price && !price.por && typeof price.unitPrice === "number" ? price.unitPrice : null;
+  const n = fixture ? includedLines(fixture.lines).length : 0;
   return {
     key: String(e.key),
     kind: e.kind === "fixture" ? "fixture" : "part",
@@ -196,5 +215,6 @@ export function toTileVM(e: TileIdentity, media: TileMedia, price: TilePrice): T
     unitPrice,
     por: unitPrice == null,
     unit: e.kind === "fixture" ? "ea" : String(media?.unit || "ea"),
+    ...(e.kind === "fixture" ? { badge: "Package" as const, ...(n > 0 ? { subline: includesPartsLabel(n) } : {}) } : {}),
   };
 }

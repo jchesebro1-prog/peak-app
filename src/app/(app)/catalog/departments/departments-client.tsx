@@ -229,8 +229,9 @@ export default function DepartmentsClient({
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Catalog categories</div>
             <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4 }}>
-              Every category the portal carries, including fixture assemblies. Pick a department for each — a
-              category picked here elsewhere moves the moment you choose it.
+              Every part category the portal carries — fixture assemblies show in the portal&rsquo;s own Packages
+              &amp; Assemblies section. Pick a department for each — a category picked here elsewhere moves the
+              moment you choose it.
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

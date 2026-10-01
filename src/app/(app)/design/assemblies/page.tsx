@@ -51,7 +51,14 @@ export default async function AssemblyBuilderPage({
   }));
 
   // #289: the portal categories already in use — the builder's datalist.
-  const portalCategories = [...new Set(fixtures.map((f) => f.portalCategory).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b));
+  const portalCategories = [
+    ...new Set(
+      fixtures
+        .filter((f) => f.kind === "fixture")
+        .map((f) => f.portalCategory)
+        .filter((c): c is string => !!c)
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 
   return (
     <div className="pk-content" style={{ maxWidth: 1080 }}>

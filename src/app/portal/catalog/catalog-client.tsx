@@ -36,6 +36,8 @@ type Result = {
   pages: number;
   mfrFacets: Facet[];
   catFacets: Facet[];
+  /** #289: hits by kind — Packages & Assemblies first, then Parts. */
+  groups: { packages: number; parts: number };
 };
 
 const CSS = `
@@ -74,6 +76,9 @@ const CSS = `
   .pc-title { font-size: 13px; font-weight: 600; line-height: 1.35; color: #16181d; text-decoration: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 35px; }
   .pc-title:hover { color: var(--accent); }
   .pc-sku { font-family: var(--font-mono); font-size: 10.5px; color: #aab0bb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc-badge { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; line-height: 14px; }
+  .pc-subline { font-size: 11px; color: #5b616e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc-group + .pc-group { margin-top: 22px; }
   .pc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 9px; }
   .pc-price { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: #16181d; white-space: nowrap; }
   .pc-price small { font-family: var(--font-ui); font-size: 11px; font-weight: 500; color: #8c919c; }
@@ -186,11 +191,11 @@ function Tile({
         )}
       </Link>
       <div className="pc-tile-body">
-        <div className="pc-mfr">{t.kind === "fixture" ? "Fixture assembly" : t.mfr}</div>
+        <div className="pc-mfr">{t.badge ? <span className="pc-badge">{t.badge}</span> : t.mfr}</div>
         <Link href={href} scroll={false} className="pc-title" title={t.title}>
           {t.title}
         </Link>
-        <div className="pc-sku">{t.kind === "fixture" ? [t.mfr, t.sku].filter(Boolean).join(" · ") : t.sku}</div>
+        {t.kind === "fixture" ? <div className="pc-subline">{t.subline}</div> : <div className="pc-sku">{t.sku}</div>}
         <div className="pc-foot">
           {t.unitPrice != null ? (
             <span className="pc-price">
@@ -531,6 +536,35 @@ export function CatalogClient({
                   </Link>
                 </div>
               )}
+            </div>
+          ) : !dept && result.groups.packages > 0 ? (
+            // #289: no department → Packages & Assemblies first, then Parts,
+            // each headed with its own count (one search, one pager).
+            <div style={{ opacity: pending ? 0.55 : 1 }}>
+              {(
+                [
+                  { kind: "fixture", count: result.groups.packages },
+                  { kind: "part", count: result.groups.parts },
+                ] as const
+              ).map((g) => {
+                const items = result.entries.filter((t) => t.kind === g.kind);
+                if (!items.length) return null;
+                return (
+                  <div key={g.kind} className="pc-group">
+                    <div className="pc-section-head">
+                      <div className="pc-section-sub" style={{ fontWeight: 600, color: "#5b616e" }}>
+                        {g.kind === "fixture" ? <>Packages &amp; Assemblies</> : <>Parts</>}
+                      </div>
+                      <div className="pc-section-sub">{g.count.toLocaleString("en-US")}</div>
+                    </div>
+                    <div className="pc-grid">
+                      {items.map((t) => (
+                        <Tile key={t.key} t={t} params={params} previewCid={previewCid} onToast={setToast} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="pc-grid" style={{ opacity: pending ? 0.55 : 1 }}>
