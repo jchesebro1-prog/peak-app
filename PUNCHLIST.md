@@ -9971,7 +9971,7 @@ change. Spec `docs/superpowers/specs/2026-09-29-estimator-narrative-column-desig
 
 ---
 
-## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — DONE 2026-09-30 (D491–D504)
+## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — DONE 2026-09-30 (D491–D505)
 
 **Reported:** Jeff (2026-09-30): "Can we start building in a rewards tracker for customer purchases that works where we
 can give rewards and other benefits based on how much they have purchased." Designed with Jeff the same day (all
@@ -10032,5 +10032,10 @@ delete → both reversed; repair capped at its $825 total). Reviewed, no finding
 
 **Jeff-gated:** review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap), add
 perks, post starting credit, then turn the program on. The next production deploy applies migration 0034.
-**Open:** a **lost** quote can still be recalled to an older revision (it keeps its current credit); refusing it like a
-won quote is a one-line change if wanted.
+**Lost quotes out of the program (2026-09-30, D505):** Jeff: "lost quotes shouldn't place into the rewards program."
+Marking a quote Lost (`setStatus`, every path) strips its credit — the Estimator line(s) and the service section's
+`rewardCredit` — and sets `value` back to the gross price in the same write; won → lost still reverses the earn and
+returns the redeemed credit exactly once (the reconcile keys on posted entries). Recall is refused on lost quotes like
+won ones; a save can't put credit back on a lost quote; reopening starts with none. Gates: tsc 0; test:specs 9538 PASS /
+0 FAIL (+43); test:smoke 172/0; eslint 0 errors; next build OK. A lost quote that carried credit before this keeps it
+until it is next reopened or saved (it never counted toward spend or held a balance).

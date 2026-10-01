@@ -8257,3 +8257,11 @@ portal quote, a quote with no customer, or a revision priced for a different cus
 `customerId`; older ones are assumed to be the current customer's); without `create` a recall can't raise it. Won quotes
 still refuse a recall; a lost quote's recall keeps its current credit.
 
+## D505. Lost quotes are out of the Rewards program — amends D497/D504 (#282, 2026-09-30)
+
+Jeff: "lost quotes shouldn't place into the rewards program." A lost quote never counts toward spend, never earns, and
+now carries no credit: the move to Lost removes the credit (Estimator line and service field) and restores the gross
+`value` in the same write, releasing it to the customer's balance (won → lost also reverses the earn and returns the
+redeem via the ledger). Recall is refused on lost quotes as on won ones, and `settleCredit` gives a lost quote no credit.
+Won quotes still keep the credit they had (D497).
+
