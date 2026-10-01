@@ -10685,6 +10685,7 @@ seeded()
   .then(() => rewards282LostAsyncChecks())
   .then(() => approval284AsyncChecks())
   .then(() => approval285AsyncChecks())
+  .then(() => people285AsyncChecks())
   .then(() => approval284FinalAsyncChecks())
   .then(() => rewards282PointsAsyncChecks())
   .then(() => rewards282PerksPointsAsyncChecks())
@@ -24994,11 +24995,11 @@ import { fixtureId as fixtureId222, registerFixture as registerFixture222 } from
   const d = quoteDocumentDataFor(q as never, cust as never, { companyName: "Peak", logoDark: null });
   ok(d.custName === "Civic Center" && d.venueLabel === "Theater — Denver" && d.hasAttn && d.attnLine === "Pat Lee · TD", "#222 quoteDocumentDataFor: customer, venue and attn exactly as the Estimator preview shows them");
   ok(d.revNum === 2 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision, date, saved pdfOptions, terms");
-  ok(d.t.grand === 0 && d.sections.length === 0 && d.ownerName === "Jeff Chesebro" && d.companyName === "Peak", "#222 quoteDocumentDataFor: totals from saved sections, owner, company");
+  ok(d.t.grand === 0 && d.sections.length === 0 && d.ownerName === "Jeff Chesebro" && d.preparedByName === "Jeff Chesebro" && d.companyName === "Peak", "#222 quoteDocumentDataFor: totals from saved sections, owner, company");
   const bare = quoteDocumentDataFor({ id: "Q-10", name: "", customer: "Walk-in", customerId: null, owner: "", updatedAt: 5, createdAt: 5 } as never, null, { companyName: "", logoDark: null });
   ok(
     bare.custName === "Walk-in" && bare.venueLabel === "" && !bare.hasAttn && bare.revNum === 1 && bare.paymentTerms === "Unknown" &&
-      bare.companyName === "Peak Systems Group" && bare.ownerName === "Peak Systems Group",
+      bare.companyName === "Peak Systems Group" && bare.ownerName === "Peak Systems Group" && bare.preparedByName === "Peak Systems Group",
     "#222 quoteDocumentDataFor: an unlinked quote falls back without inventing data"
   );
 }
@@ -30687,12 +30688,13 @@ async function portal245FinalReviewAsyncChecks(): Promise<void> {
   registerFixture("quotes", gen.quoteId);
   const madeQuote = await q222Get(gen.quoteId);
   ok(madeQuote?.owner === owner && madeQuote?.preparedBy === owner, "#245 final review fix: Generate sets preparedBy to the account owner's name alongside owner, so quoteOwnerName()'s fallback has the same name to try");
-  // The customer document's own "Prepared by" line is sourced from `owner`
-  // (quote-document-data.ts ownerName), not preparedBy — confirm that's
-  // still what feeds it, so this fix is understood for what it actually
-  // changes (the review-limit owner lookup), not assumed to fix the print.
+  // #285 task B retarget: the customer document's "Prepared by" line now
+  // prints `preparedBy` (preparedByName, owner fallback); `owner` still feeds
+  // ownerName ("Questions? Reach out to …"). This fix's real effect is still
+  // the review-limit owner lookup — and, since #285, the printed line too.
   const qdDataSrc245 = readFileSync(join(process.cwd(), "src/lib/quote-pdf/quote-document-data.ts"), "utf8");
-  ok(/ownerName: q\.owner \|\| companyName/.test(qdDataSrc245), "#245 final review: confirms the printed 'Prepared by' line's real source field is `owner`, not `preparedBy`");
+  ok(/ownerName: q\.owner \|\| companyName/.test(qdDataSrc245) && qdDataSrc245.includes('preparedByName: (q.preparedBy || "").trim() || q.owner || companyName'),
+    "#245 final review (retargeted #285 B): the printed 'Prepared by' line's source is `preparedBy` with an owner fallback; `owner` still feeds ownerName");
 
   // Unowned company: owner stays "" (buildQuote's own store default is never
   // overwritten with another blank) — preparedBy is left untouched too.
@@ -41495,4 +41497,118 @@ async function approval285AsyncChecks(): Promise<void> {
   await mk("own-nocreate", { review: { ...none, state: "changes", decidedBy: "Chris Mittlesteadt", note: "Fix it" } });
   const ownNo = await Ops.submitQuoteForApproval(id("own-nocreate"), { name: "T285 Jena", roles: ["Reviewer"] }, null);
   ok(ownNo.ok && (await Q.get(id("own-nocreate")))?.review?.state === "in_review", `#285 fix: the owner resubmits even without create (got "${err(ownNo)}")`);
+}
+
+/* ======================================================================
+   #285 task B — Lead estimator (`owner`) + Prepared by (`preparedBy`) on the
+   Estimator, the customer document and the Quotes hub (Jeff 2026-10-01: "we
+   need to add lead estimator and prepared by on the quotes to assist").
+   Escalation guard: anyone with create may take a quote (lead = themselves);
+   only an approver may make someone else the lead. DB checks are
+   people285AsyncChecks() on the chain.
+   ====================================================================== */
+import { quoteDocumentDataFor as p285DocData } from "@/lib/quote-pdf/quote-document-data";
+{
+  const base = { id: "Q-285", name: "", customer: "Walk-in", customerId: null, updatedAt: 5, createdAt: 5 };
+  const both = p285DocData({ ...base, owner: "Nic Trapani", preparedBy: "Jena Tolksdorf" } as never, null, { companyName: "Peak", logoDark: null });
+  ok(both.preparedByName === "Jena Tolksdorf" && both.ownerName === "Nic Trapani", "#285 B document: Prepared by prints preparedBy; the lead estimator stays ownerName");
+  const noPrep = p285DocData({ ...base, owner: "Nic Trapani", preparedBy: "  " } as never, null, { companyName: "Peak", logoDark: null });
+  ok(noPrep.preparedByName === "Nic Trapani", "#285 B document: a blank preparedBy falls back to the owner");
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const docSrc = src("src/app/(app)/estimator/quote-document.tsx");
+  ok(docSrc.includes("<div style={microLabel}>Prepared by</div>\n              <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>")
+    && docSrc.includes("Questions? Reach out to {p.ownerName}"),
+    "#285 B document: the Prepared by block prints preparedByName; Questions? still names the lead estimator");
+  const hub = src("src/app/(app)/quotes/page.tsx");
+  ok(hub.includes("{displayQuoteNumber(q)} · {owner}{preparedNote}") && hub.includes("` · prepared by ${firstName(preparedBy)}`")
+    && hub.includes('preparedBy.toLowerCase() !== (q.owner || "").trim().toLowerCase()'),
+    "#285 B hub: the row sub-line adds 'prepared by <first name>' only when it differs from the lead estimator");
+  const acts = src("src/app/(app)/estimator/actions.ts");
+  const meta = acts.slice(acts.indexOf("export async function updateQuoteMetaAction"), acts.indexOf("export type QuotePeopleSync"));
+  ok(meta.length > 0 && !/patch\.owner\b/.test(meta) && !/patch\.preparedBy\b/.test(meta), "#285 B: the header autosave's allowlist still excludes owner (and preparedBy)");
+  const save = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
+  ok(save.length > 0 && !/patch\.owner\s*=/.test(save) && !/owner:\s*(input|body|data|args)\./.test(save) && save.includes("create({ ...patch, owner: user.name })"),
+    "#285 B: Save never writes owner from the client — only a new quote's creator");
+  const people = acts.slice(acts.indexOf("export async function setQuotePeopleAction"));
+  ok(people.includes("await requireUser()") && people.includes("setQuotePeopleAs(id, user,") && people.includes("quoteNextStepFor(q, user)") && people.includes("scheduleQuotePdf(q.id)"),
+    "#285 B action: setQuotePeopleAction runs the guarded op as the session user, returns the fresh next step and re-renders the PDF");
+  const est = src("src/app/(app)/estimator/estimator-client.tsx");
+  ok(est.includes('<span style={CTX_LABEL}>Lead estimator</span>') && est.includes('<span style={{ ...CTX_LABEL, marginTop: 4 }}>Prepared by</span>')
+    && est.includes("const r = await setQuotePeopleAction(id, patch);") && est.includes("if (r.next !== undefined) setNext(r.next ?? null);")
+    && est.includes("setActionError(r.error ||"),
+    "#285 B Estimator: Lead estimator + Prepared by selects save through setQuotePeopleAction, refresh the next step, errors to the banner");
+  ok(est.includes("const locked = !viewerCanApprove && !samePerson(o.value, viewerName) && o.value !== ownerValue;")
+    && (est.match(/Only an approver can hand a quote to someone else/g) || []).length === 2,
+    "#285 B Estimator: a non-approver sees other names disabled (titled) and keeps their own");
+  const page = src("src/app/(app)/estimator/page.tsx");
+  ok(page.includes('viewerCanApprove={can("approve", user.roles)}') && page.includes('preparedBy: q.preparedBy || "",') && page.includes("preparedBy: userName,"),
+    "#285 B page: the Estimator gets the viewer's approve flag and the stored preparedBy (a new quote: its creator)");
+}
+
+async function people285AsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const P = await import("@/lib/quote-people");
+  const id = (slug: string) => fixtureId(285, "people-" + slug);
+  const mk = (slug: string, extra: Record<string, unknown> = {}) =>
+    createFixture("quotes", {
+      id: id(slug), name: `T285 people ${slug}`, customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner: "Jena Tolksdorf", preparedBy: "Jena Tolksdorf", value: 200, margin: 0.5, history: [], createdAt: 1, updatedAt: 1,
+      spec: { sections: [], mobs: [] },
+      ...extra,
+    } as never);
+  const err = (r: { ok: boolean; error?: string }) => (r.ok ? "" : (r as { error: string }).error);
+  const NIC = { name: "Nic Trapani", roles: ["Estimator"] };
+  const JEFF = { name: "Jeff Chesebro", roles: ["Admin", "Estimator"] };
+
+  await mk("self");
+  const self = await P.setQuotePeopleAs(id("self"), NIC, { owner: "Nic Trapani" });
+  const selfQ = await Q.get(id("self"));
+  ok(self.ok && selfQ?.owner === "Nic Trapani" && selfQ.preparedBy === "Jena Tolksdorf" && (selfQ.updatedAt ?? 0) > 1,
+    `#285 B DB: a non-approver makes themselves the lead estimator (got "${err(self)}")`);
+  ok(selfQ?.contentChangedAt === selfQ?.updatedAt && !(selfQ?.history || []).length,
+    "#285 B DB: the change stamps contentChangedAt (the PDF re-renders) and writes no status history");
+
+  await mk("other");
+  const other = await P.setQuotePeopleAs(id("other"), NIC, { owner: "Jeff Chesebro" });
+  const otherQ = await Q.get(id("other"));
+  ok(!other.ok && err(other) === "Only an approver can make someone else the lead estimator." && otherQ?.owner === "Jena Tolksdorf" && otherQ.updatedAt === 1,
+    `#285 B DB: a non-approver making someone else the lead is refused, nothing written (got "${err(other)}")`);
+
+  await mk("approver");
+  const appr = await P.setQuotePeopleAs(id("approver"), JEFF, { owner: "Nic Trapani" });
+  ok(appr.ok && (await Q.get(id("approver")))?.owner === "Nic Trapani", `#285 B DB: an approver makes someone else the lead (got "${err(appr)}")`);
+
+  await mk("unknown");
+  const unk = await P.setQuotePeopleAs(id("unknown"), JEFF, { owner: "T285 Nobody" });
+  const unkPrep = await P.setQuotePeopleAs(id("unknown"), JEFF, { preparedBy: "" });
+  ok(!unk.ok && err(unk) === "Pick someone on the team." && !unkPrep.ok && err(unkPrep) === "Pick someone on the team." && (await Q.get(id("unknown")))?.updatedAt === 1,
+    `#285 B DB: an unknown (or blank) name → "Pick someone on the team." (got "${err(unk)}" / "${err(unkPrep)}")`);
+
+  await mk("prep");
+  const prep = await P.setQuotePeopleAs(id("prep"), NIC, { preparedBy: "Jason Keagy" });
+  const prepQ = await Q.get(id("prep"));
+  ok(prep.ok && prepQ?.preparedBy === "Jason Keagy" && prepQ.owner === "Jena Tolksdorf", `#285 B DB: Prepared by may be any active team member (got "${err(prep)}")`);
+
+  await mk("case");
+  const cs = await P.setQuotePeopleAs(id("case"), NIC, { owner: "  nic TRAPANI ", preparedBy: "jason keagy" });
+  const csQ = await Q.get(id("case"));
+  ok(cs.ok && csQ?.owner === "Nic Trapani" && csQ.preparedBy === "Jason Keagy" && cs.ok && cs.owner === "Nic Trapani",
+    `#285 B DB: case-insensitive, trimmed input is stored with the roster spelling (got "${csQ?.owner}" / "${csQ?.preparedBy}")`);
+
+  // A blank owner falls back to preparedBy for the review limit — Prepared by can't hand the quote off either.
+  await mk("blank", { owner: "" });
+  const blankOther = await P.setQuotePeopleAs(id("blank"), NIC, { preparedBy: "Jeff Chesebro" });
+  ok(!blankOther.ok && err(blankOther) === "Only an approver can make someone else the lead estimator." && (await Q.get(id("blank")))?.preparedBy === "Jena Tolksdorf",
+    `#285 B DB: on a blank-owner quote a non-approver can't move the effective owner through Prepared by (got "${err(blankOther)}")`);
+  const blankSelf = await P.setQuotePeopleAs(id("blank"), NIC, { preparedBy: "Nic Trapani" });
+  ok(blankSelf.ok && (await Q.get(id("blank")))?.preparedBy === "Nic Trapani", "#285 B DB: …but may name themselves");
+
+  await mk("nocreate");
+  const noCreate = await P.setQuotePeopleAs(id("nocreate"), { name: "Jeff Chesebro", roles: ["Reviewer"] }, { preparedBy: "Jeff Chesebro" });
+  ok(!noCreate.ok && (await Q.get(id("nocreate")))?.preparedBy === "Jena Tolksdorf", `#285 B DB: without create nothing changes (got "${err(noCreate)}")`);
+
+  await mk("noop");
+  const noop = await P.setQuotePeopleAs(id("noop"), NIC, { owner: "jena tolksdorf" });
+  ok(noop.ok && !noop.changed && (await Q.get(id("noop")))?.updatedAt === 1, "#285 B DB: re-picking the same person writes nothing");
 }

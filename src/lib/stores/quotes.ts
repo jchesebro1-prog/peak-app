@@ -1549,6 +1549,25 @@ export async function setPoReceived(id: string, on: boolean): Promise<Quote | nu
 }
 
 /**
+ * #285 task B — the quote's people: the lead estimator (`owner`) and Prepared
+ * by (`preparedBy`). Patches only those two fields plus `updatedAt`; `history`
+ * is the status pipeline ({at, from, to}), so no entry is written. Both print
+ * on the customer document, so patchQuote stamps `contentChangedAt`. Names are
+ * validated by the caller (src/lib/quote-people.ts) — never call this with
+ * raw client input.
+ */
+export async function setQuotePeople(
+  id: string,
+  people: { owner?: string; preparedBy?: string }
+): Promise<Quote | null> {
+  return patchQuote(id, (doc) => {
+    if (typeof people.owner === "string") doc.owner = people.owner;
+    if (typeof people.preparedBy === "string") doc.preparedBy = people.preparedBy;
+    doc.updatedAt = Date.now();
+  });
+}
+
+/**
  * Soft delete (prototype filtered the array; server keeps a tombstone for sync).
  * #282 phase 3: a deleted quote no longer stands as a sale — its Rewards
  * ledger runs the same plan as leaving Won (the open earn reverses, the

@@ -58,6 +58,7 @@ import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { isFabricPart } from "@/lib/fabric-part";
+import { setQuotePeopleAs } from "@/lib/quote-people";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -1063,6 +1064,45 @@ export async function updateQuoteMetaAction(
   const pdf = q && q.contentChangedAt === q.updatedAt ? await scheduleQuotePdf(q.id) : undefined;
   refresh();
   return { ok: !!q, ...(pdf ? { pdf } : {}) };
+}
+
+/** #285 task B — what setQuotePeopleAction hands back to the Estimator. */
+export type QuotePeopleSync = {
+  ok: boolean;
+  error?: string;
+  /** The stored names after the call (unchanged on a refusal). */
+  owner: string;
+  preparedBy: string;
+  /** The next-step control re-evaluated — a new lead estimator changes its buttons. */
+  next: QuoteNextStepView | null;
+  pdf?: QuotePdfView | null;
+};
+
+/**
+ * #285 task B — Lead estimator (`owner`) and Prepared by (`preparedBy`),
+ * saved the moment either select changes. Deliberately NOT part of Save or
+ * updateQuoteMetaAction: their allowlists exclude `owner` because the owner's
+ * review limit drives auto-approval. The guard (create to change either; only
+ * an approver hands a quote to someone else) lives in setQuotePeopleAs.
+ */
+export async function setQuotePeopleAction(
+  id: string,
+  people: { owner?: string; preparedBy?: string }
+): Promise<QuotePeopleSync> {
+  const user = await requireUser();
+  const input = people && typeof people === "object" ? people : {};
+  const r = await setQuotePeopleAs(id, user, {
+    ...("owner" in input ? { owner: input.owner } : {}),
+    ...("preparedBy" in input ? { preparedBy: input.preparedBy } : {}),
+  });
+  const q = r.ok ? r.quote : await get(id);
+  const next = q ? await quoteNextStepFor(q, user) : null;
+  if (!r.ok) return { ok: false, error: r.error, owner: r.owner, preparedBy: r.preparedBy, next };
+  // Both names print on the customer document — re-render it (as a header
+  // autosave does) when this write changed them.
+  const pdf = r.changed && q && q.contentChangedAt === q.updatedAt ? await scheduleQuotePdf(q.id) : undefined;
+  if (r.changed) refresh();
+  return { ok: true, owner: r.owner, preparedBy: r.preparedBy, next, ...(pdf ? { pdf } : {}) };
 }
 
 /**

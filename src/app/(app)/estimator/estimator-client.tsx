@@ -20,6 +20,7 @@ import {
   searchQuotesAction,
   setQuotePipelineAction,
   setQuoteStageAction,
+  setQuotePeopleAction,
   setQuoteTaskStatusAction,
   setStatusAction,
   travelForSelectionAction,
@@ -420,6 +421,8 @@ export default function EstimatorClient({
   portalStatusError,
   specKeys,
   canApplyCredit,
+  viewerName,
+  viewerCanApprove,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -1015,6 +1018,59 @@ export default function EstimatorClient({
       }
     });
   };
+
+  /* #285 task B — Lead estimator (`owner`) and Prepared by (`preparedBy`).
+     Each select saves the moment it changes, through setQuotePeopleAction —
+     never Save, whose allowlist deliberately excludes `owner` (the owner's
+     review limit drives auto-approval). A new lead changes the next-step
+     control, so its fresh view comes back with the names; both names print
+     on the customer document, so a change re-renders the PDF. */
+  const [owner, setOwner] = useState(initial.owner);
+  const [preparedBy, setPreparedBy] = useState(initial.preparedBy);
+  const [peopleBusy, setPeopleBusy] = useState(false);
+  const changePeople = (patch: { owner?: string; preparedBy?: string }) => {
+    if (!loadedId) return;
+    const id = loadedId;
+    const before = { owner, preparedBy };
+    if (patch.owner !== undefined) setOwner(patch.owner);
+    if (patch.preparedBy !== undefined) setPreparedBy(patch.preparedBy);
+    setPeopleBusy(true);
+    startTransition(async () => {
+      try {
+        const r = await setQuotePeopleAction(id, patch);
+        setOwner(r.owner);
+        setPreparedBy(r.preparedBy);
+        if (r.next !== undefined) setNext(r.next ?? null);
+        setGateRefused(false);
+        if (r.ok) {
+          setActionError(null);
+          if (r.pdf) setPdf(r.pdf);
+        } else {
+          setActionError(r.error || "That change did not go through — nothing was written.");
+        }
+      } catch {
+        setOwner(before.owner);
+        setPreparedBy(before.preparedBy);
+        setActionError("Couldn't change the lead estimator or Prepared by — try again.");
+      } finally {
+        setPeopleBusy(false);
+      }
+    });
+  };
+  const samePerson = (a: string, b: string) => !!a.trim() && a.trim().toLowerCase() === b.trim().toLowerCase();
+  /** The active team, plus the stored name when it isn't on it (an import, or
+   *  someone who left) so the select still shows who is on the quote. */
+  const peopleOptions = (current: string) => {
+    const names = people.map((p) => p.name);
+    const extra = !current.trim()
+      ? [{ value: "", label: "— none —" }]
+      : names.some((n) => samePerson(n, current))
+        ? []
+        : [{ value: current, label: `${current} (not on the team)` }];
+    return [...extra, ...names.map((n) => ({ value: n, label: n }))];
+  };
+  const ownerValue = people.find((p) => samePerson(p.name, owner))?.name ?? owner;
+  const preparedValue = people.find((p) => samePerson(p.name, preparedBy))?.name ?? preparedBy;
 
   const openTitle = () => {
     titleOpenRef.current = true;
@@ -2899,6 +2955,53 @@ export default function EstimatorClient({
                       title="Quote category — shown on the Quotes hub"
                       style={{ ...DARK_SELECT, width: "100%", minWidth: 0, cursor: "text" }}
                     />
+                  </section>
+                  <section style={META_SECTION}>
+                    <span style={CTX_LABEL}>Lead estimator</span>
+                    <select
+                      value={ownerValue}
+                      onChange={(e) => changePeople({ owner: e.target.value })}
+                      disabled={!loadedId || peopleBusy}
+                      aria-label="Lead estimator"
+                      title={
+                        viewerCanApprove
+                          ? "Owns the quote — their review limit applies and it lists under them on the Quotes hub"
+                          : "Only an approver can hand a quote to someone else"
+                      }
+                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
+                    >
+                      {peopleOptions(ownerValue).map((o) => {
+                        const locked = !viewerCanApprove && !samePerson(o.value, viewerName) && o.value !== ownerValue;
+                        return (
+                          <option
+                            key={o.value || "__none"}
+                            value={o.value}
+                            disabled={locked || !o.value}
+                            title={locked ? "Only an approver can hand a quote to someone else" : undefined}
+                          >
+                            {o.label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <span style={{ ...CTX_LABEL, marginTop: 4 }}>Prepared by</span>
+                    <select
+                      value={preparedValue}
+                      onChange={(e) => changePeople({ preparedBy: e.target.value })}
+                      disabled={!loadedId || peopleBusy}
+                      aria-label="Prepared by"
+                      title="Prints under Prepared by on the customer document"
+                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
+                    >
+                      {peopleOptions(preparedValue).map((o) => (
+                        <option key={o.value || "__none"} value={o.value} disabled={!o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span style={META_HINT}>
+                      {loadedId ? "Saved as you pick" : "Save the quote to change these"}
+                    </span>
                   </section>
                   <section style={{ ...META_SECTION, borderBottom: "none" }}>
                     <span style={CTX_LABEL}>Suggested install timeframe</span>

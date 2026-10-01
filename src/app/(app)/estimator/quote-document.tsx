@@ -29,7 +29,10 @@ export type QuoteDocumentProps = {
   projectName: string;
   /** "Label — City" for the selected customer venue ("" when none). */
   venueLabel: string;
+  /** The lead estimator (`owner`) — "Questions? Reach out to …". */
   ownerName: string;
+  /** #285 task B — "Prepared by": `preparedBy`, else the owner, else the company. */
+  preparedByName: string;
   companyName: string;
   /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
   logoDark: string | null;
@@ -321,7 +324,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
             </div>
             <div>
               <div style={microLabel}>Prepared by</div>
-              <div style={{ fontWeight: 600 }}>{p.ownerName}</div>
+              <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>
               <div style={{ color: "#5b616e" }}>{p.companyName}</div>
             </div>
           </div>

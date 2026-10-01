@@ -550,6 +550,12 @@ export default async function QuotesPage({
           const rMeta = REVIEW_CHIP[rState];
           const selected = q.id === selectedId;
           const owner = q.owner || "Unassigned";
+          // #285 task B: Prepared by joins the sub-line only when it isn't the lead estimator.
+          const preparedBy = (q.preparedBy || "").trim();
+          const preparedNote =
+            preparedBy && preparedBy.toLowerCase() !== (q.owner || "").trim().toLowerCase()
+              ? ` · prepared by ${firstName(preparedBy)}`
+              : "";
           return (
             <div key={q.id}>
               <Link
@@ -699,7 +705,7 @@ export default async function QuotesPage({
                       marginTop: 3,
                     }}
                   >
-                    {displayQuoteNumber(q)} · {owner}
+                    {displayQuoteNumber(q)} · {owner}{preparedNote}
                   </div>
                 </div>
                 <div

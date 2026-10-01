@@ -128,6 +128,8 @@ async function initialFrom(
       paymentTerms: "Unknown",
       category: "",
       owner: userName,
+      // #285 task B: a new quote is prepared by its creator (buildQuote's default).
+      preparedBy: userName,
       revNum: 1,
       revDateMs: Date.now(),
       pricingTier: null,
@@ -185,7 +187,11 @@ async function initialFrom(
     installTimeframe: q.installTimeframe || "TBD",
     paymentTerms: q.paymentTerms || "Unknown",
     category: q.category || "",
-    owner: q.owner || userName,
+    // #285 task B: the stored names — the Lead estimator / Prepared by
+    // selects show who is on the quote, never the viewer standing in for a
+    // blank (a blank prints the owner, then the company, on the document).
+    owner: q.owner || "",
+    preparedBy: q.preparedBy || "",
     // Real priced revisions (item 24). This used to count `history`, which is
     // the status pipeline — so the printed "Rev N" climbed every time a quote
     // moved draft → sent → won, with no revision having been taken.
@@ -438,6 +444,10 @@ export default async function EstimatorPage({
       // Spec records design §6: the Spec select's options, as plain strings.
       specKeys={systemMatchKeys(specRecords)}
       canApplyCredit={can("create", user.roles)}
+      // #285 task B: the Lead estimator select — the viewer may always take
+      // the quote; only an approver may hand it to someone else.
+      viewerName={user.name}
+      viewerCanApprove={can("approve", user.roles)}
     />
   );
 }
