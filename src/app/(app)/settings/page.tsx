@@ -134,7 +134,7 @@ export default async function SettingsPage() {
         Settings
       </div>
       <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5, marginBottom: 22 }}>
-        Manage team members, roles, and what each person can do.
+        Company setup, sales rules, integrations, team access and data tools.
       </div>
 
       {!isAdmin || sections.length === 0 ? (
