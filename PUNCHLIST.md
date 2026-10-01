@@ -10198,3 +10198,19 @@ src files.
 **Remaining.**
 1. Browser check on production through the team preview of a real grant (name at Generate, rename, My quotes, queue).
 2. Peak-sent acceptances still use the Quotes hub link (D528).
+
+---
+
+## 289. Portal catalog — Packages & Assemblies section; departments hold parts only — DONE 2026-10-01 (D529–D531)
+
+**Done.** Assemblies gain a **Portal category** (Design → Assemblies); the portal catalog gets a reserved
+**Packages & Assemblies** section — a landing tile, `?dept=packages` scoping and a Packages-then-Parts search split —
+with a "Package" badge and "Includes N parts" on each package tile. Departments now hold parts only, and the old
+"Fixture assemblies" pseudo-category is retired. Spec: `docs/superpowers/specs/2026-10-01-portal-quotes-packages-manuals-design.md`
+Part 2. No migrations.
+
+Gates: tsc 0; test:specs 10,264 PASS / ALL PASSED; test:smoke ALL PASSED (including `?dept=packages`); `next build` OK.
+
+**Remaining (Jeff-gated).**
+1. Set a Portal category on each assembly in Design → Assemblies so packages group sensibly; until then all show under
+   "Other packages".
