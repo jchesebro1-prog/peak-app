@@ -364,7 +364,7 @@ async function buildIndex(): Promise<Built> {
       sku: f.lightEngineSku,
       mfr: engine.mfr,
       category: packageCategoryOf(fx.portalCategory),
-      haystack: buildHaystack([f.label, f.description, f.lightEngineSku]),
+      haystack: buildHaystack([f.label, f.description, f.lightEngineSku, fx.portalCategory]),
       browsable: true,
       rank: 1000,
     });

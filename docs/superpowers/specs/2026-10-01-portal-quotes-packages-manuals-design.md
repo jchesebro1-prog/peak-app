@@ -272,9 +272,10 @@ Shipped on `feat/289-portal-packages` (D529–D531, punch #289). Deviations from
 
 - **"Includes 1 part" is singular.** The tile pluralises as "1 part" / "N parts"; N is the included lines the sidebar
   lists (`includedLines`), labour component rows counted.
-- **Landing and breadcrumb copy with no departments configured.** The landing heading reads "Browse" (it reads
-  "Departments" when department tiles exist), and `?dept=packages` shows "All products" / "Search all products" in place
-  of "All departments" / "Search all departments".
+- **Landing and breadcrumb copy follows whether departments are configured.** `browseCatalog` reports
+  `hasDepartments`. The landing heading reads "Departments" when they are and "Browse" when not; `?dept=packages` shows
+  "All departments" / "Search all departments" when they are, and "All products" / "Search all products" only when no
+  departments are configured.
 - **Groups only when there is a package hit.** The Packages & Assemblies / Parts split renders only with no department
   chosen and at least one package result; otherwise results render as before, with no empty "Packages (0)" heading.
 - **Thumbnail tie-break.** Every fixture ranks 1000, so the tile's thumbnail is the first fixture with an engine image

@@ -290,6 +290,7 @@ export function CatalogClient({
   fabrics,
   dept,
   tiles,
+  hasDepartments,
 }: {
   params: CatalogParams;
   previewCid: string;
@@ -306,6 +307,10 @@ export function CatalogClient({
    *  departments are configured). */
   dept: { id: string; name: string } | null;
   tiles: DeptTileVM[];
+  /** #289: any departments configured — decides the breadcrumb's root
+   *  ("All departments" vs "All products") on the Packages page and the
+   *  landing heading. */
+  hasDepartments: boolean;
 }) {
   const router = useRouter();
   const [toast, setToast] = useState<Toast | null>(null);
@@ -359,8 +364,8 @@ export function CatalogClient({
     navigate(catalogHref(params, { [field]: toggleValue(params[field], value), page: 1 }, previewCid), "push");
 
   const browsing = !params.q && !params.mfr.length && !params.cat.length;
-  const hasDeptTiles = tiles.some((t) => t.id !== "packages");
-  const noDepts = dept?.id === "packages";
+  const hasDeptTiles = hasDepartments;
+  const noDepts = dept?.id === "packages" && !hasDepartments;
   const facetCount = params.mfr.length + params.cat.length;
   // Nothing to filter (an empty browse set, or a search with no hits and no
   // facet picked) → no rail, and the results take the full width.

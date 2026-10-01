@@ -1,6 +1,6 @@
 import type { CatalogPart } from "@/lib/stores/catalog";
 import { effectivePriceDate, type PriceDateSettings } from "./catalog-books";
-import { capGraphemes } from "./portal-quote-names";
+import { capGraphemes, INVISIBLE_STRIP } from "./portal-quote-names";
 
 export const ASSEMBLY_ROLES = [
   "fixture", "lens", "mount", "accessory", "cable", "power", "data", "lamp", "other",
@@ -439,12 +439,14 @@ const text = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
 /** #289: the longest portal category a fixture can carry. */
 export const PORTAL_CATEGORY_MAX = 60;
 
-/** #289: trim, collapse whitespace runs, cap at 60 characters — code points,
+/** #289: line-break controls → space, then invisible/control characters
+ *  stripped (`INVISIBLE_STRIP`, as portal quote names), whitespace runs
+ *  collapsed, trimmed, cap at 60 characters — code points,
  *  never splitting a grapheme (`capGraphemes`, as portal quote names); a cut
  *  that lands on a space is trimmed — empty → undefined. */
 export function cleanPortalCategory(raw: unknown): string | undefined {
   if (raw == null) return undefined;
-  const c = capGraphemes(String(raw).replace(/\s+/g, " ").trim(), PORTAL_CATEGORY_MAX).trimEnd();
+  const c = capGraphemes(String(raw).replace(/[\t-\r\u0085]/g, " ").replace(INVISIBLE_STRIP, "").replace(/\s+/g, " ").trim(), PORTAL_CATEGORY_MAX).trimEnd();
   return c || undefined;
 }
 

@@ -62,6 +62,10 @@ export type CatalogResult = {
    *  browsable (#289, departments or not), then the department tiles ([]
    *  when no departments are configured). */
   tiles: DeptTileVM[];
+  /** #289: whether any departments are configured — the Packages page's
+   *  breadcrumb and dead-end link read "All departments" when they are and
+   *  "All products" when not. */
+  hasDepartments: boolean;
 };
 
 export type SearchPortalCatalogResult = { ok: true; result: CatalogResult } | { ok: false; error: string };
@@ -108,6 +112,7 @@ export async function browseCatalog(query: unknown, ctx: PortalPricingContext): 
     groups: r.groups,
     dept,
     tiles,
+    hasDepartments: departments.length > 0,
   };
 }
 

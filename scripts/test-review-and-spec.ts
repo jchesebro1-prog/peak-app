@@ -42288,6 +42288,10 @@ async function category289AsyncChecks(): Promise<void> {
 }
 {
   ok(c289Clean("  Lighting \t  packages\n") === "Lighting packages", "#289 category: cleanPortalCategory trims and collapses whitespace");
+  ok(c289Clean("Light\u0007ing\u202Epack\u200Bages\uFEFF\u2066s\u2069") === "Lightingpackagess", "#289 category: control and bidi/zero-width/BOM characters are stripped");
+  ok(c289Clean("\u202E\u200B\u0000") === undefined, "#289 category: a category of only invisible characters → undefined");
+  ok(c289Clean("a\u200Db") === "a\u200Db" && c289Clean("a\u200Cb") === "a\u200Cb", "#289 category: ZWJ and ZWNJ are kept");
+  ok(c289Clean("a" + "\u200B".repeat(5) + "b ") === "ab", "#289 category: stripping happens before collapse and trim");
   ok(c289Clean("   ") === undefined && c289Clean("") === undefined && c289Clean(null) === undefined && c289Clean(undefined) === undefined,
     "#289 category: empty / blank / null → undefined");
   ok(c289Clean("x".repeat(80)) === "x".repeat(60), "#289 category: capped at 60 characters");
@@ -42499,6 +42503,10 @@ async function packages289AsyncChecks(): Promise<void> {
     ok(ea?.category === pkgCat, "#289 packages: the real index files a fixture under its portalCategory");
     ok(eb?.category === "Other packages", "#289 packages: the real index files an uncategorised fixture under \"Other packages\"");
 
+    const byCat = d245Search(ix.entries, { q: "lighting packages", mfr: [], cat: [], page: 1, pageSize: 48 });
+    ok(byCat.entries.some((e) => e.key === "fixture:" + FXA) && !byCat.entries.some((e) => e.key === "fixture:" + FXB),
+      "#289 packages: a package's portalCategory is searchable — \"lighting packages\" finds the package filed there and not the uncategorised one");
+
     // the editor's save: known categories come from parts only
     const saved = await d252Save([{ name: "Test289 Dept", categories: [partCat, pkgCat, "Other packages", "Fixture assemblies"] }]);
     ok(saved.ok && d252Eq(saved.value[0].categories, [partCat]), "#289 packages: saveDepartments keeps part categories only — package categories and \"Fixture assemblies\" are dropped");
@@ -42512,7 +42520,14 @@ async function packages289AsyncChecks(): Promise<void> {
       const ta = inPkg.result.entries.find((t) => t.key === "fixture:" + FXA);
       ok(ta?.badge === "Package" && ta.subline === "Includes 2 parts", "#289 packages: a real package tile reads Package / Includes 2 parts (engine + cable; the add-on isn't counted)");
       ok(inPkg.result.tiles.length === 0, "#289 packages: no landing tiles inside a department");
+      ok(inPkg.result.hasDepartments === true, "#289 packages: with departments configured, browse under packages reports hasDepartments (the breadcrumb reads \"All departments\")");
     }
+    const cleared = await d252Save([]);
+    ok(cleared.ok, "#289 packages: saveDepartments accepts an empty list");
+    const noDeptPkg = await d245SearchFor({ grantId: fixtureId(289, "pkg-grant"), customerId: CO, name: "", email: "" }, { q: "Test289", dept: "packages", pageSize: 48 });
+    ok(noDeptPkg.ok && noDeptPkg.result.hasDepartments === false && noDeptPkg.result.dept?.id === "packages", "#289 packages: with no departments configured, hasDepartments is false and packages still resolves");
+    const resaved = await d252Save([{ id: saved.ok ? saved.value[0].id : undefined, name: "Test289 Dept", categories: [partCat] }]);
+    if (resaved.ok && saved.ok) saved.value = resaved.value;
     const inDept = await d245SearchFor(sess, { q: "Test289", dept: saved.ok ? saved.value[0].id : "", pageSize: 48 });
     ok(inDept.ok && inDept.result.entries.length === 3 && inDept.result.entries.every((t) => t.kind === "part"), "#289 packages: a real department's browse holds its parts and none of the packages");
     const split = await d245SearchFor(sess, { q: "Test289", pageSize: 48 });
