@@ -9971,7 +9971,7 @@ change. Spec `docs/superpowers/specs/2026-09-29-estimator-narrative-column-desig
 
 ---
 
-## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — DONE 2026-09-30 (D491–D505)
+## 282. Customer Rewards — lifetime purchases earn levels, account credit and perks — DONE 2026-09-30 (D491–D506)
 
 **Reported:** Jeff (2026-09-30): "Can we start building in a rewards tracker for customer purchases that works where we
 can give rewards and other benefits based on how much they have purchased." Designed with Jeff the same day (all
@@ -10039,6 +10039,17 @@ returns the redeemed credit exactly once (the reconcile keys on posted entries).
 won ones; a save can't put credit back on a lost quote; reopening starts with none. Gates: tsc 0; test:specs 9538 PASS /
 0 FAIL (+43); test:smoke 172/0; eslint 0 errors; next build OK. A lost quote that carried credit before this keeps it
 until it is next reopened or saved (it never counted toward spend or held a balance).
+
+**Points on the customer side (2026-10-01, D506):** Jeff: "in the back end it would be dollar total, but in the
+customer end it would just be points … round the points up to the nearest point." 1 point = $1, rounded up
+(`src/lib/rewards/points.ts`: `pointsFor`, `formatPoints`). The portal card shows "N points" (its view model carries no
+dollar balance) with progress still in dollars ("$X more in purchases to reach <level>") and "Points are applied by your
+Peak estimator on your next quote."; the Estimator customer document reads "Rewards points applied (N pts)" with −$ in
+the price column; flame/inspection letters "Rewards points (N pts)"; the repair letter "…after applying N rewards points
+($Y)"; the renewal PDF names points. Staff screens show both ("$300 · 300 pts"). Earns and starting credit post whole
+dollars rounded up (starting credit rounds up, then caps); applied credit is whole dollars rounded down (client and
+server). Gates: tsc 0; test:specs 9580 PASS / 0 FAIL (+43); test:smoke 172/0; eslint 0 errors; next build OK.
+Browser-verified; reviewed, no findings.
 
 ## 283. Catalog photos — shrink on the way in + Peak Product Photos Drive sync — DONE 2026-10-01 (D507–D510)
 

@@ -1,7 +1,11 @@
+import { rewardPointsRowLabel } from "@/lib/rewards/points";
+
 /**
  * #282 phase 3 — the flame-test and inspection proposal letters' Rewards
  * credit rows, inside the engagement-fee box: the quoted price, "Rewards
- * credit −$X" and the net total. Renders nothing without a credit, so a
+ * points (300 pts) −$X" and the net total (#282 points follow-up — the
+ * customer sees points, 1 point = $1; the dollars stay in the price column so
+ * the total adds up). Renders nothing without a credit, so a
  * letter with no credit is unchanged. The headless-Chrome PDF renders the
  * same letter view, so it follows. Server component — no state.
  */
@@ -26,7 +30,7 @@ export function LetterCreditRows({
         <span style={{ fontFamily: mono }}>{money(gross)}</span>
       </div>
       <div style={{ ...row, color: "#1f7a52", fontWeight: 600 }}>
-        <span>Rewards credit</span>
+        <span>{rewardPointsRowLabel(credit)}</span>
         <span style={{ fontFamily: mono }}>−{money(credit)}</span>
       </div>
       <div style={{ ...row, color: "#111", fontWeight: 700 }}>

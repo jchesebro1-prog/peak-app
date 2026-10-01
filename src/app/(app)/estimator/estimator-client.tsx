@@ -40,6 +40,7 @@ import {
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import { RewardCreditPanel } from "./reward-credit-panel";
+import { pointsLabel } from "@/lib/rewards/points";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { ChangeTypeControl } from "@/components/quote-flow-controls";
@@ -4008,7 +4009,7 @@ export default function EstimatorClient({
                   </div>
                   {(t.credit || 0) > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#1f8a5b", fontWeight: 600 }}>
-                      <span>Rewards credit</span>
+                      <span>Rewards credit · {pointsLabel(t.credit || 0)}</span>
                       <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(t.credit || 0)}</span>
                     </div>
                   )}

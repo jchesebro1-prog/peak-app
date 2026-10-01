@@ -17,8 +17,15 @@
  *   perk:<companyId>:<perkId>:<n>   the n-th use of a perk (0)
  *   unperk:<companyId>:<perkId>:<n> that use undone        (0)
  *
+ * Amounts are dollars. Earns and starting credit post WHOLE dollars (rounded
+ * up) and an applied credit is whole dollars (rounded down), so the points a
+ * customer sees (points.ts, 1 point = $1) match; reversals and unredeems
+ * mirror their entry exactly. Only a staff adjustment may carry cents.
+ *
  * Pure and client-safe.
  */
+
+import { roundDownDollars, roundUpDollars } from "./points";
 
 export const LEDGER_KINDS = ["earn", "reverse", "start", "redeem", "unredeem", "adjust", "perk", "unperk"] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
@@ -73,10 +80,14 @@ export function availableCredit(balance: number, openQuoteCredits: number[]): nu
   return round2(balance - openQuoteCredits.reduce((s, c) => s + (Number.isFinite(c) ? c : 0), 0));
 }
 
-/** round2(value × pct / 100), never negative. */
+/**
+ * value × pct / 100 in WHOLE dollars, rounded UP (#282 points follow-up: the
+ * customer sees points — 1 point = $1, rounded up — so the ledger posts whole
+ * dollars and the two never drift). Never negative.
+ */
 export function earnAmount(value: number, pct: number): number {
   if (!Number.isFinite(value) || !Number.isFinite(pct) || value <= 0 || pct <= 0) return 0;
-  return round2((value * pct) / 100);
+  return roundUpDollars((value * pct) / 100);
 }
 
 /** The open (not yet undone) `kind` entry for a quote, with its undo kind. */
@@ -143,8 +154,9 @@ export function quoteLedgerPlan(input: {
 
 /**
  * The one-time starting credit (spec §4): history dated before `launchedAt`
- * (all history when the program never launched), min(cap, round2(spend ×
- * rate / 100)).
+ * (all history when the program never launched), spend × rate / 100 rounded
+ * UP to whole dollars, then capped (#282 points follow-up — whole dollars so
+ * the customer's points match; a fractional cap counts as its whole dollars).
  */
 export function startingCreditFor(
   purchases: { amount: number; at: number }[],
@@ -152,8 +164,8 @@ export function startingCreditFor(
 ): { historySpend: number; proposed: number } {
   const cut = program.launchedAt;
   const historySpend = round2(purchases.filter((p) => cut == null || p.at < cut).reduce((s, p) => s + p.amount, 0));
-  const raw = round2((historySpend * program.retro.ratePct) / 100);
-  return { historySpend, proposed: round2(Math.max(0, Math.min(program.retro.capPerCustomer, raw))) };
+  const raw = roundUpDollars((historySpend * program.retro.ratePct) / 100);
+  return { historySpend, proposed: Math.max(0, Math.min(roundDownDollars(program.retro.capPerCustomer), raw)) };
 }
 
 /** A staff adjustment's amount: a finite, non-zero number to the cent within ±$1M; else null. */

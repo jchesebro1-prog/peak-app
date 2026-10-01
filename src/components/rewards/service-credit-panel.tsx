@@ -4,6 +4,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { netServiceTotal, normalizeServiceCredit } from "@/lib/rewards/service-credit";
 import { fmtDollars } from "@/lib/service-pricing";
+import { dollarsAndPoints } from "@/lib/rewards/points";
 
 /**
  * #282 phase 3 — the "Rewards credit" control shared by the flame-test,
@@ -15,16 +16,14 @@ import { fmtDollars } from "@/lib/service-pricing";
  * comes off AFTER the engine's total (after the $25 rounding, a typed total
  * and a lift), so the builder's Total field keeps showing the pre-credit
  * price and this box shows what the customer pays. The save clamps again on
- * the server.
+ * the server. Amounts show as "$300 · 300 pts" — the customer sees the
+ * credit as points (#282 points follow-up, 1 point = $1).
  *
  * Shown only while the program is on and the customer has credit available
  * (or the quote already carries some); editable on a draft/sent quote for
  * anyone with `create`; read-only once won or lost (its redeem is on the
  * ledger). Never on a portal service quote (#248).
  */
-
-const money2 = (n: number) =>
-  "$" + (Math.round((n || 0) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function ServiceRewardCreditPanel(p: {
   customerId: string;
@@ -107,11 +106,11 @@ export function ServiceRewardCreditPanel(p: {
         <>
           <div style={row}>
             <span style={{ color: "#5b616e" }}>Balance</span>
-            <span style={{ fontFamily: "var(--font-mono)" }}>{money2(shownInfo.balance)}</span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>{dollarsAndPoints(shownInfo.balance)}</span>
           </div>
           <div style={row}>
             <span style={{ color: "#5b616e" }}>Available for this quote</span>
-            <span style={{ fontFamily: "var(--font-mono)" }}>{money2(available)}</span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>{dollarsAndPoints(available)}</span>
           </div>
         </>
       )}
@@ -119,7 +118,7 @@ export function ServiceRewardCreditPanel(p: {
         <>
           <div style={{ ...row, color: "#1f8a5b", fontWeight: 600 }}>
             <span>Rewards credit</span>
-            <span style={{ fontFamily: "var(--font-mono)" }}>−{fmtDollars(applied)}</span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>−{dollarsAndPoints(applied)}</span>
           </div>
           <div style={{ ...row, fontWeight: 700, fontSize: 13.5, marginBottom: 0 }}>
             <span>Customer pays</span>

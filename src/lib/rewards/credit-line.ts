@@ -19,6 +19,7 @@
 
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { serviceRewardCredit } from "./service-credit";
+import { roundDownDollars } from "./points";
 
 export const REWARD_CREDIT_DESC = "Rewards credit";
 
@@ -111,15 +112,30 @@ export function withRewardCredit<T extends SpecSection>(sections: T[], amount: n
   );
 }
 
-/** What can go on this quote: available credit, never more than its pre-credit total. */
+/**
+ * What can go on this quote: available credit, never more than its
+ * pre-credit total — in WHOLE dollars, rounded down (#282 points follow-up:
+ * the customer sees the credit as points, 1 point = $1, so an applied credit
+ * is always a whole number of points). New balances are whole dollars, so
+ * this is exact; a legacy cents balance (or a staff Adjust to the cent)
+ * leaves its cents on the balance.
+ */
 export function maxApplicableCredit(available: number, preCreditTotal: number): number {
   const a = Number.isFinite(available) ? available : 0;
   const t = Number.isFinite(preCreditTotal) ? preCreditTotal : 0;
-  return round2(Math.max(0, Math.min(a, t)));
+  return roundDownDollars(Math.min(a, t));
 }
 
 export type SanitizedCredit<T> =
-  | { ok: true; sections: T[]; credit: number; posted: number; clamped: boolean }
+  | {
+      ok: true;
+      sections: T[];
+      credit: number;
+      posted: number;
+      clamped: boolean;
+      /** Only the whole-dollar rounding cut it (a legacy cents credit). */
+      rounded: boolean;
+    }
   | { ok: false; error: string };
 
 export const NEGATIVE_LINE_ERROR =
@@ -130,7 +146,8 @@ export const NEGATIVE_LINE_ERROR =
  * quantity is accepted ONLY on a `rewardCredit` line (anything else refuses
  * the save); every credit line collapses into one on the last system,
  * clamped to `maxCredit` (available credit, capped at the quote's
- * pre-credit total — the caller computes it). `maxCredit` ≤ 0 removes it.
+ * pre-credit total — the caller computes it) in whole dollars, rounded
+ * down (#282 points follow-up). `maxCredit` ≤ 0 removes it.
  */
 export function sanitizeRewardCredit<T extends SpecSection>(sections: T[], maxCredit: number): SanitizedCredit<T> {
   for (const s of sections) {
@@ -144,8 +161,11 @@ export function sanitizeRewardCredit<T extends SpecSection>(sections: T[], maxCr
     }
   }
   const posted = rewardCreditOf(sections);
-  const cap = round2(Math.max(0, Number.isFinite(maxCredit) ? maxCredit : 0));
-  const credit = Math.min(posted, cap);
+  // #282 points follow-up: whole dollars, rounded down (never above what was
+  // posted or what is available).
+  const whole = roundDownDollars(posted);
+  const cap = maxCredit === Number.POSITIVE_INFINITY ? whole : roundDownDollars(Number.isFinite(maxCredit) ? maxCredit : 0);
+  const credit = Math.min(whole, cap);
   let maxId = 0;
   for (const s of sections) for (const it of s?.items || []) if (typeof it?.id === "number" && it.id > maxId) maxId = it.id;
   return {
@@ -154,5 +174,6 @@ export function sanitizeRewardCredit<T extends SpecSection>(sections: T[], maxCr
     credit,
     posted,
     clamped: credit < posted,
+    rounded: credit < posted && credit === whole,
   };
 }

@@ -6,6 +6,7 @@ import { PerksEditor } from "./perks-editor";
 import { startingCreditBoard } from "@/lib/stores/reward-ledger";
 import { ShortList } from "@/components/short-list";
 import { creditMoney } from "@/components/rewards/credit-ui";
+import { dollarsAndPoints } from "@/lib/rewards/points";
 import { rewardsMoney } from "@/components/rewards/rewards-ui";
 import { PostAllStartingCreditButton, PostStartingCreditButton } from "@/components/rewards/credit-actions";
 import { yearAwareDate } from "@/lib/format";
@@ -66,7 +67,8 @@ export default async function RewardsSettingsPage() {
             <div style={{ fontSize: 12, color: "#8c919c", marginTop: 3, lineHeight: 1.5 }}>
               One-time credit from history{" "}
               {program.launchedAt ? `before the program launched (${yearAwareDate(program.launchedAt)})` : "(all history — the program hasn't launched yet)"}:{" "}
-              {program.retro.ratePct}% of it, capped at {creditMoney(program.retro.capPerCustomer)} per customer. Each company is posted once.
+              {program.retro.ratePct}% of it, rounded up to whole dollars, capped at {creditMoney(program.retro.capPerCustomer)} per customer.
+              Each company is posted once. Customers see credit as points (1 point = $1).
             </div>
           </div>
           <PostAllStartingCreditButton count={unposted.length} />
@@ -90,12 +92,12 @@ export default async function RewardsSettingsPage() {
                     {r.name}
                   </Link>
                   <span style={{ display: "block", fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
-                    {rewardsMoney(r.historySpend)} history · proposed {creditMoney(r.proposed)}
+                    {rewardsMoney(r.historySpend)} history · proposed {dollarsAndPoints(r.proposed)}
                   </span>
                 </span>
                 {r.posted != null ? (
                   <span style={{ fontSize: 12, fontWeight: 600, color: "#1f8a5b", whiteSpace: "nowrap" }}>
-                    Posted {creditMoney(r.posted)}
+                    Posted {dollarsAndPoints(r.posted)}
                   </span>
                 ) : r.proposed > 0 ? (
                   <PostStartingCreditButton companyId={r.companyId} />

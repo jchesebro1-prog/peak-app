@@ -125,21 +125,15 @@ export function settleServiceCredit(i: {
   mayApply: boolean;
   prior: { status: string; customerId: string | null; credit: number } | null;
 }): ServiceCreditSettle {
-  return settleCredit({ ...i, unit: "dollars" });
-}
-
-/** Cents, rounded DOWN (never above what was asked for or is available). */
-function toCents(raw: unknown): number {
-  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.replace(/[$,\s]/g, "")) : NaN;
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(SERVICE_CREDIT_MAX, Math.floor(n * 100 + 1e-6) / 100);
+  return settleCredit(i);
 }
 
 /**
- * The one credit rule behind settleServiceCredit (whole dollars) and the
- * revision-recall re-clamp (#282 phase 3 — service quotes in whole dollars,
- * Estimator quotes to the cent, the unit phase 2's credit line uses). Same
- * steps as settleServiceCredit's doc above.
+ * The one credit rule behind settleServiceCredit and the revision-recall
+ * re-clamp — whole dollars, rounded down, for every quote type (#282 points
+ * follow-up: the customer sees a credit as points, 1 point = $1; Estimator
+ * quotes used to clamp to the cent). Same steps as settleServiceCredit's doc
+ * above.
  */
 export function settleCredit(i: {
   posted: unknown;
@@ -149,9 +143,8 @@ export function settleCredit(i: {
   source: string;
   mayApply: boolean;
   prior: { status: string; customerId: string | null; credit: number } | null;
-  unit: "dollars" | "cents";
 }): ServiceCreditSettle {
-  const norm = i.unit === "dollars" ? normalizeServiceCredit : toCents;
+  const norm = normalizeServiceCredit;
   const prior = i.prior;
   if (prior && prior.status === "lost") return { credit: 0 };
   if (prior && prior.status === "won") return { credit: norm(prior.credit) };
@@ -167,10 +160,7 @@ export function settleCredit(i: {
   const held = !i.mayApply ? (prior ? norm(prior.credit) : 0) : Number.POSITIVE_INFINITY;
   const credit = Math.min(posted, avail, total, held);
   if (credit === posted) return { credit };
-  const dollars =
-    i.unit === "dollars"
-      ? `$${credit.toLocaleString("en-US")}`
-      : `$${credit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const dollars = `$${credit.toLocaleString("en-US")}`;
   const why =
     credit === held && held < Math.min(avail, total)
       ? "applying Rewards credit needs create permission"

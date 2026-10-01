@@ -646,7 +646,7 @@ export default async function PortalPage({
         </div>
       )}
 
-      {/* #282 phase 4 — rewards: level, progress, credit, available perks (never margins) */}
+      {/* #282 phase 4 — rewards: level, progress, points (never a dollar balance), available perks (never margins) */}
       {rewards && <PortalRewardsCard view={rewards} companyName={companyName} />}
 
       {/* open requests */}
