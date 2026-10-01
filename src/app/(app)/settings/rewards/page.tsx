@@ -32,7 +32,7 @@ export default async function RewardsSettingsPage() {
   return (
     <div className="pk-content" style={{ maxWidth: 760, margin: "0 auto" }}>
       <Link
-        href="/settings?section=admin"
+        href="/settings?section=sales"
         style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "#8c919c", textDecoration: "none", marginBottom: 16 }}
       >
         ‹ Settings

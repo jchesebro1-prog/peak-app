@@ -34,7 +34,8 @@ import { authorizeUrl, signCalendarConnectState, signState } from "@/lib/gmail/o
  */
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const settings = new URL("/settings", origin);
+  // Settings → Integrations holds the Mailboxes card (settings cleanup).
+  const settings = new URL("/settings?section=integrations", origin);
 
   if (req.nextUrl.searchParams.get("purpose") === "calendar-connect") {
     return startCalendarConnect(req, origin);
