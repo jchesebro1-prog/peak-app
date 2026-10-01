@@ -8265,3 +8265,15 @@ now carries no credit: the move to Lost removes the credit (Estimator line and s
 redeem via the ledger). Recall is refused on lost quotes as on won ones, and `settleCredit` gives a lost quote no credit.
 Won quotes still keep the credit they had (D497).
 
+## D506. Customers see rewards as points; the books stay in dollars (#282, 2026-10-01)
+
+1 point = $1. Every customer-facing rewards number goes through `pointsFor` (round up; ≤ 0 → 0): the portal card (its
+view model holds points, never the dollar balance; it shows the full balance, including credit parked on open quotes),
+quote documents, service letters and renewal PDFs. Progress to the next level stays in dollars because it measures
+purchases, not rewards. To keep points and dollars from drifting, earns and starting credit post whole dollars rounded
+up (a cap with cents counts as its whole dollars), applied credit is whole dollars rounded down — older cents credit on
+draft/sent Estimator quotes rounds down on its next save with a notice; won quotes keep their exact credit — and
+reversals mirror the original entry exactly. Revision recall now re-checks credit in whole dollars for every quote type.
+Cents can still exist from pre-change postings or a staff Adjust to the cent: the customer then sees one point more than
+can be applied to a quote.
+
