@@ -99,7 +99,8 @@ function isRateLimited(message: string): boolean {
  * A download failure that is the FILE's own problem → the message recorded
  * on it. The planner then skips that file until it changes in Drive, so this
  * is reserved for what a retry can't fix: a download-restricted file (403),
- * a file gone from Drive (404), one over the size cap. Everything else — a
+ * a file gone from Drive (404), any other 4xx but 401/429, one over the size
+ * cap. Everything else — a
  * network error or timeout, 401, 429, 5xx, a rate-limit 403 — is null:
  * transient, the call stops and the next run retries the file.
  */
@@ -109,6 +110,12 @@ function fileProblem(e: unknown): string | null {
     if (e.status === 403 && !isRateLimited(e.message)) {
       const said = /Google said: (.+)$/.exec(e.message)?.[1];
       return "Drive won't let this account download this file (403)." + (said ? ` Google said: ${said}` : "");
+    }
+    // Any other 4xx (400, 410, 416…) is about this file, not the run — one
+    // odd file must not wedge every sync. 401/429 stay transient (above: 403).
+    if (e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429 && e.status !== 403) {
+      const detail = (/^Drive API \d+ while [^:]*: (.+)$/.exec(e.message)?.[1] || e.message).slice(0, 200);
+      return `Drive refused this file (${e.status}): ${detail}`;
     }
     return null;
   }

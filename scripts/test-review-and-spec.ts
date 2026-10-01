@@ -39867,6 +39867,15 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
       "#283 sync: a 404 on the download is recorded as that file's own error");
     files = files.filter((x) => x.id !== "dGone");
 
+    addFile("dOdd", "T283-BRAVO odd.jpg");
+    addFile("dOk", "T283-BRAVO okay.jpg");
+    onceMedia.set("dOdd", () => json({ error: { message: "Invalid Value" } }, 400));
+    const odd = await ds283Sync(45_000, deps);
+    const stOdd = await ds283State();
+    ok(odd.ok && odd.failed === 1 && odd.imported === 1 && odd.remaining === 0 && stOdd.files.dOdd?.error === "Drive refused this file (400): Invalid Value" && !!stOdd.files.dOk?.documentId && !stOdd.lastRun?.error,
+      "#283 sync: a 400 on one file's download fails only that file; the other imports and the run isn't stopped");
+    files = files.filter((x) => x.id !== "dOdd");
+
     addFile("dQ1", "T283-BRAVO q1.jpg");
     addFile("dQ2", "T283-BRAVO q2.jpg");
     onceMedia.set("dQ2", () => json({ error: { message: "Rate Limit Exceeded" } }, 429));
