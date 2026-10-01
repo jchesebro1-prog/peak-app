@@ -1567,6 +1567,8 @@ export async function submitForReview(
 /** #284: the owner pulls an in-review quote back to not submitted. */
 export async function withdrawReview(id: string): Promise<Quote | null> {
   return patchQuote(id, (q) => {
+    // Re-checked under the row lock: an approver may have decided since the caller looked.
+    if (q.review?.state !== "in_review") return;
     q.review = rv("none");
     q.updatedAt = Date.now();
   });

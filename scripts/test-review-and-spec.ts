@@ -39640,8 +39640,10 @@ async function approval284AsyncChecks(): Promise<void> {
   await mk("t3", "T284 Owner", { review: none });
   ok(!(await Ops.submitQuoteForApproval(id("t3"), JEFF, null)).ok, "#284 ops: a non-owner cannot submit someone else's quote");
   ok((await Ops.submitQuoteForApproval(id("t3"), NIC, null)).ok && (await Q.get(id("t3")))?.review?.state === "in_review", "#284 ops: the owner submits (shared queue)");
-  ok(!(await Ops.submitQuoteForApproval(id("t3"), NIC, null)).ok, "#284 ops: submitting twice is refused");
-  ok(!(await Ops.approveQuoteReview(id("t3"), NIC)).ok, "#284 ops: approve needs the approve permission");
+  const twice = await Ops.submitQuoteForApproval(id("t3"), NIC, null);
+  ok(!twice.ok && twice.error === "This quote is already waiting for approval.", `#284 ops: submitting twice is refused with its reason (got ${JSON.stringify(twice)})`);
+  const noPerm = await Ops.approveQuoteReview(id("t3"), NIC);
+  ok(!noPerm.ok && noPerm.error === "You need approve permission to decide on a quote.", `#284 ops: approve needs the approve permission, with its reason (got ${JSON.stringify(noPerm)})`);
   ok((await Ops.withdrawQuoteReview(id("t3"), NIC)).ok && (await Q.get(id("t3")))?.review?.state === "none", "#284 ops: the owner withdraws back to not submitted");
   ok(!(await Ops.withdrawQuoteReview(id("t3"), NIC)).ok, "#284 ops: withdraw only from in review");
   await Ops.submitQuoteForApproval(id("t3"), NIC, null);
@@ -39657,4 +39659,58 @@ async function approval284AsyncChecks(): Promise<void> {
   ok((await Ops.sendQuoteToCustomer(id("t3"), NIC)).ok && (await Q.get(id("t3")))?.status === "sent", "#284 ops: the owner sends an approved quote");
   await mk("t3-own", "Jeff Chesebro", { review: { ...none, state: "in_review", submittedBy: "Jeff Chesebro" } });
   ok(!(await Ops.approveQuoteReview(id("t3-own"), JEFF)).ok, "#284 ops: nobody approves their own submitted quote through the queue");
+
+  // Task 3 fix round 1 — reasons and the paths the first pass left unpinned.
+  const err = (r: { ok: boolean; error?: string }) => (r.ok ? "" : (r as { error: string }).error);
+  // (a) a snapshot-stale approval on a SENT quote may be resubmitted; an intact one may not.
+  await mk("t3-stale", "T284 Owner", { review: none, status: "draft" });
+  await Ops.submitQuoteForApproval(id("t3-stale"), NIC, null);
+  await Ops.approveQuoteReview(id("t3-stale"), JEFF);
+  await edit(id("t3-stale"), (d) => { d.status = "sent"; });
+  const intact = await Ops.submitQuoteForApproval(id("t3-stale"), NIC, null);
+  ok(!intact.ok && err(intact) === "Only a draft quote can be submitted for approval.", `#284 ops: an intact approval on a sent quote cannot be resubmitted (got "${err(intact)}")`);
+  await edit(id("t3-stale"), (d) => { (d.spec as Sec).sections[0].items[0].qty = 3; d.value = 300; });
+  const resub = await Ops.submitQuoteForApproval(id("t3-stale"), NIC, null);
+  ok(resub.ok && (await Q.get(id("t3-stale")))?.review?.state === "in_review", "#284 ops: a sent quote whose approval went snapshot-stale can be resubmitted by its owner");
+  // An approved DRAFT with an intact approval: already approved.
+  await mk("t3-appr", "T284 Owner", { review: none });
+  await Ops.submitQuoteForApproval(id("t3-appr"), NIC, null);
+  await Ops.approveQuoteReview(id("t3-appr"), JEFF);
+  const again = await Ops.submitQuoteForApproval(id("t3-appr"), NIC, null);
+  ok(!again.ok && err(again) === "This quote is already approved.", `#284 ops: an approved draft cannot be resubmitted (got "${err(again)}")`);
+  // (b) decisions need an in-review quote.
+  await mk("t3-idle", "T284 Owner", { review: none });
+  const idleA = await Ops.approveQuoteReview(id("t3-idle"), JEFF);
+  const idleS = await Ops.sendBackQuoteReview(id("t3-idle"), JEFF, "Nope");
+  ok(!idleA.ok && err(idleA) === "This quote isn't waiting for approval." && !idleS.ok && err(idleS) === "This quote isn't waiting for approval.", "#284 ops: approve and send back on a quote that is not in review are refused");
+  // (c) only the owner withdraws.
+  await mk("t3-wd", "T284 Owner");
+  const wd = await Ops.withdrawQuoteReview(id("t3-wd"), JEFF);
+  ok(!wd.ok && err(wd) === "Only the quote's owner can withdraw it." && (await Q.get(id("t3-wd")))?.review?.state === "in_review", "#284 ops: a non-owner cannot withdraw");
+  // (d) already sent.
+  const resent = await Ops.sendQuoteToCustomer(id("t3"), NIC);
+  ok(!resent.ok && err(resent) === "This quote has already been sent.", `#284 ops: sending an already-sent quote is refused (got "${err(resent)}")`);
+  // (e) attest.
+  await mk("t3-att", "T284 Owner", { review: none });
+  const SOMEONE = { name: "T284 Someone", roles: ["Estimator"] };
+  const blank = await Ops.attestQuoteApproval(id("t3-att"), NIC, "   ");
+  ok(!blank.ok && (await Q.get(id("t3-att")))?.review?.state === "none", "#284 ops: attest with a blank note is refused");
+  const notOwner = await Ops.attestQuoteApproval(id("t3-att"), SOMEONE, "Phone call with Nic");
+  ok(!notOwner.ok && err(notOwner) === "Only the quote's owner can attest an approval on it.", "#284 ops: a non-owner without approve cannot attest");
+  const att = await Ops.attestQuoteApproval(id("t3-att"), NIC, "Phone call with Nic");
+  const attQ = await Q.get(id("t3-att"));
+  ok(att.ok && attQ?.review?.state === "approved" && attQ.review.method === "attested" && !!attQ.review.approvedAgainst, "#284 ops: the owner attests with a note — method attested, snapshot stamped");
+  await mk("t3-att-ch", "T284 Owner", { review: { ...none, state: "changes", decidedBy: "Jeff Chesebro", note: "Fix it" } });
+  const attCh = await Ops.attestQuoteApproval(id("t3-att-ch"), NIC, "Phone call with Nic");
+  ok(!attCh.ok && (await Q.get(id("t3-att-ch")))?.review?.state === "changes", "#284 ops: a quote with changes requested cannot be attested");
+  // (f) send back clears the approval snapshot.
+  await mk("t3-clr", "T284 Owner", { review: none });
+  await Ops.submitQuoteForApproval(id("t3-clr"), NIC, null);
+  await Ops.approveQuoteReview(id("t3-clr"), JEFF);
+  ok(!!(await Q.get(id("t3-clr")))?.review?.approvedAgainst, "#284 ops: approve stamped the snapshot (precondition)");
+  await edit(id("t3-clr"), (d) => { (d.spec as Sec).sections[0].items[0].qty = 4; d.value = 400; });
+  await Ops.submitQuoteForApproval(id("t3-clr"), NIC, null);
+  ok((await Ops.sendBackQuoteReview(id("t3-clr"), JEFF, "Recheck")).ok && (await Q.get(id("t3-clr")))?.review?.approvedAgainst == null, "#284 ops: sending back clears approvedAgainst");
+  // The withdraw guard inside the patch: a decided quote is not reset.
+  ok((await Q.withdrawReview(id("t3-appr")))?.review?.state === "approved", "#284 ops: the store's withdrawReview leaves a decided quote alone");
 }
