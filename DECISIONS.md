@@ -8500,3 +8500,38 @@ new sent revision ("Renamed by customer", the same `scheduleQuotePdf` → `addQu
 order Refresh pricing uses), because the customer's PDF is the latest sent revision's copy; without it the customer
 never saw the new name, and a rename inside the post-Generate render window left the sent revision with no PDF at all.
 A draft rename only reschedules the PDF.
+
+## D529. A track series maps several stick lengths; each track buys equal pieces (#291, 2026-10-01)
+
+ADC sells track in even footages up to a maximum unspliced piece and splits a longer track into equal pieces (its own
+example: 35' ships as two 18' pieces). A series now carries `sticks` — every straight length it is mapped for — and the
+engine takes `n = ceil(leg ÷ longest)` pieces per leg, each the shortest mapped stick that covers `leg ÷ n`. `sticks` is
+the source of truth: sanitize derives `stickLengthFt` (the longest) and `parts.track` (its SKU), so every #274 reader
+and an instant rollback keep working, and a #274 series without `sticks` reads as one stick and prices exactly as before.
+
+## D530. Four optional roles, priced only when mapped (#291, 2026-10-01)
+
+Ceiling splice clamp (replaces the splice on ceiling mounting — 2824-A vs 2824, 2624 vs 1724), pipe clamp (one per batten
+hanging point, alongside the hanging clamp — ADC never includes them), lap clamp (2 per bi-parting batten track when the
+series overlaps; ADC: suspended-only) and one-way dead-end pulley (replaces the bi-part dead end on one-way — 1404-A).
+None is required for Active, so a series that leaves them blank prices as #274 did. Explicit roles were chosen over a
+generic "add-on parts per role" because the lap-clamp and swap rules can't be expressed as add-ons.
+
+## D531. The operating line's tie-off allowance is a per-series number, not a constant (#291, 2026-10-01)
+
+ADC's manual-line rule is 2 × width + 2 × height + 10'. The +10' is `lineAllowanceFt` on the series (default 0, clamp
+50; the ADC series carry 10) rather than a change to the engine's formula, so a non-ADC series and every saved #274
+line length are untouched. Deviates from the #291 spec draft, which hard-coded +10; the spec is updated.
+
+## D532. A lapped bi-parting track is two legs (#291 final review, 2026-10-01)
+
+ADC builds a bi-part with a center overlap (280/170/140/500) as two separate legs lapped by lap clamps; a stick never
+crosses the center and the legs are never spliced to each other. When `operation` is bi-parting and the series'
+`overlapFt` is above 0, the engine now splits `L` into two legs of `L ÷ 2` and counts sticks, splices and hanging points
+per leg (`legs × (ceil(leg ÷ span) + 1)` — ADC supports both ends of every leg). A single-channel bi-part (overlap 0 —
+220, 132) stays one run. This corrects #274, which split the overlapped length as one run (a 50' run priced 3 × 18'
+with 2 splices — unbuildable as two 26' legs; now 4 × 14'). #274's worked examples were recomputed (e.g. the 40'
+bi-parting fixture: 5 → 6 sticks, 10 → 12 clamps). No track series existed in production, so no saved line changes.
+Operating line, carriers, masters, end stops and pulleys are unchanged — one continuous line still runs both legs.
+Also from the final review: the Active check refuses a series any of whose stick SKUs left the catalog (not only the
+longest), and a missing stick names its length ("no part for Track (18' stick)").

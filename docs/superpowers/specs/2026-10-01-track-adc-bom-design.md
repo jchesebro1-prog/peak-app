@@ -21,6 +21,7 @@ six current series: 280 Silent Steel, 170 BeSteel, 140 Rig-I-Flex, 500 Patriarc,
 - **Splices differ by mounting** for 280 (2824 suspended / 2824-A ceiling) and 170 (1724 / 2624).
 - 140's **dead-end pulley differs** by operation (1404 bi-part / 1404-A one-way).
 - Operating line, manual: **2 × width + 2 × height + 10'**.
+- Hanging points: **ceil(leg ÷ max span) + 1 per leg**; a lapped bi-part is two legs.
 
 ## Design
 
@@ -53,16 +54,24 @@ SKU; a mapped SKU since deleted from the catalog blocks the line by name, as eve
 
 Per track, then × qty (unchanged rules not repeated):
 
-- **Straight:** `n = ceil(L / longest)`; every piece is the **shortest mapped stick ≥ L / n**; one `track` row carries
-  that stick's SKU and length (`TrackRow` gains optional `sku` and `lengthFt`). Splices `n − 1`.
-  42' of 280 (12–24' sticks) → 2 × 22'. 35' → 2 × 18'. One 20' stick only → 3 × 20' (as today).
+- **Legs (final review, D532):** a *lapped* bi-parting track (`biparting` and `overlapFt > 0` — 280/170/140/500) is two
+  separate legs of `L / 2`, lapped at center; a stick never crosses the center and the legs are never spliced to each
+  other. Everything else (one-way, walk-along, a single-channel bi-part with overlap 0 — 220, 132) is one leg of `L`.
+- **Straight:** per leg `n = ceil(leg / longest)`; every piece is the **shortest mapped stick ≥ leg / n**; one `track`
+  row carries that stick's SKU and length (`TrackRow` gains optional `sku` and `lengthFt`), qty `legs × n`. Splices
+  `legs × (n − 1)`. Curved: per leg `ceil(leg / curvedSectionFt)` sections, same leg rule.
+  40' bi-parting 280 (2' overlap, 12–24' sticks) → legs of 21' → 2 × 22', no splice. 50' → legs of 26' → 4 × 14',
+  2 splices. 35' one-way → 2 × 18' (ADC's example). One 20' stick only → #274's ceil(L / 20) per leg.
+- **Hanging points:** `legs × (ceil(leg / hangerSpacing) + 1)` — both ends of each leg supported (ADC).
 - **Splice role:** `ceilingSplice` when mounting is ceiling and it is mapped, else `splice`. Curved runs too.
-- **Pipe clamps:** batten + mapped → qty = mounting count.
+- **Pipe clamps:** batten + mapped → qty = hanging points.
 - **Lap clamps:** bi-parting + batten + `overlapFt > 0` + mapped → 2.
 - **Dead-end pulley:** one-way + `deadPulleyOneWay` mapped → it, else `deadPulley`.
-- **Operating line:** `ceil(2L + 2 × trim + 10)` (was `2L + 2 × trim`).
+- **Operating line:** `ceil(2L + 2 × trim + lineAllowanceFt)` — a per-series tie-off allowance (default 0; the ADC
+  series carry 10, ADC's "+ 10'"), so a non-ADC series and every #274 line length are unchanged (D531).
 
-Still pure: "mapped" is read from `series.parts`, never the catalog.
+Still pure: "mapped" is read from `series.parts`, never the catalog. The Active check additionally refuses a series
+whose stick SKU (any length, not only the longest) is no longer in the catalog.
 
 ### 4. Pricing + Estimator — `estimator/track-bom.ts`, `track-modal.tsx`
 
@@ -79,9 +88,9 @@ Still pure: "mapped" is read from `series.parts`, never the catalog.
 
 ### 6. Tests (`scripts/test-review-and-spec.ts`, the #274 block)
 
-Engine: 35' → 2 × 18'; 42' → 2 × 22'; one-stick series unchanged; ceiling splice swap mapped/unmapped; pipe clamps per
+Engine: 35' → 2 × 18'; bi-parting 40' → 2 legs → 2 × 22'; bi-parting 50' → 4 × 14'; one-stick series unchanged; ceiling splice swap mapped/unmapped; pipe clamps per
 point (batten only); lap clamps (bi-parting batten only, none on ceiling, none at overlap 0, none unmapped); one-way dead
-end swap; operating line +10'. Sanitize: sticks cleaned/sorted/deduped, derived `stickLengthFt` + `parts.track`, legacy
+end swap; operating line + the series allowance. Sanitize: sticks cleaned/sorted/deduped, derived `stickLengthFt` + `parts.track`, legacy
 shape read as one stick, new roles kept. BOM: track row priced from its own SKU; "Track (22' stick)" label.
 
 ### 7. Then the fill (production, after deploy)
