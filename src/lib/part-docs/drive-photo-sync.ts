@@ -4,8 +4,10 @@
  * token, find (or re-find) the folder, list the tree, plan
  * (drive-photo-plan.ts), apply relinks, then download → shrink → store →
  * record each import/update under the wall-clock budget. State (folder,
- * per-file md5/document/parts, last run) is one settings blob, saved after
- * every file so a killed function loses nothing. Never writes to Drive.
+ * per-file md5/document/parts, last run, run lease) is one settings blob,
+ * saved after every file so a killed function loses nothing. A transient
+ * failure ends the call and the file is retried next run; only a problem
+ * with the file itself is recorded on it. Never writes to Drive.
  *
  * Several photos may match one part — each is its own image document, all
  * linked to it (a part's gallery).
@@ -32,7 +34,9 @@ const SYNC_BY = "Drive photos sync";
 const PER_FILE_WORST_MS = 12_000;
 
 export type DrivePhotoLastRun = { at: number; imported: number; updated: number; relinked: number; failed: number; unmatched: UnmatchedPhoto[]; complete: boolean; error?: string };
-export type DrivePhotoSyncState = { folder: DriveFolderRef | null; files: Record<string, DrivePhotoFileState>; lastRun: DrivePhotoLastRun | null };
+/** `runningUntil` is the run lease: a call refuses while another's is in the
+ *  future, and clears its own when it ends (an expired one is ignored). */
+export type DrivePhotoSyncState = { folder: DriveFolderRef | null; files: Record<string, DrivePhotoFileState>; lastRun: DrivePhotoLastRun | null; runningUntil?: number | null };
 export type DrivePhotoSyncDeps = {
   token?: string;
   fetch?: DriveFetch;
@@ -49,12 +53,13 @@ export async function getDrivePhotoSyncState(): Promise<DrivePhotoSyncState> {
     folder: (raw.folder as DriveFolderRef | null) ?? null,
     files: (raw.files as Record<string, DrivePhotoFileState>) ?? {},
     lastRun: (raw.lastRun as DrivePhotoLastRun | null) ?? null,
+    runningUntil: typeof raw.runningUntil === "number" ? raw.runningUntil : null,
   };
 }
 
-/** setBlob merges top-level keys, so all three are written every time. */
+/** setBlob merges top-level keys, so every key is written every time. */
 async function saveState(state: DrivePhotoSyncState): Promise<void> {
-  await setBlob(DRIVE_PHOTO_SYNC_BLOB, { folder: state.folder, files: state.files, lastRun: state.lastRun });
+  await setBlob(DRIVE_PHOTO_SYNC_BLOB, { folder: state.folder, files: state.files, lastRun: state.lastRun, runningUntil: state.runningUntil ?? null });
 }
 
 /** Settings → Mailboxes picker save (the action wraps this with requirePerm).
@@ -84,12 +89,54 @@ async function resolveToken(): Promise<{ token: string } | { error: string }> {
   return token ? { token } : { error: `Couldn't get a Google token for ${info.address} — reconnect it in Settings → Mailboxes.` };
 }
 
-/** Errors that end the whole call: auth (401), rate limit (429), Google
- *  down (5xx). A 403 on one download is per-file — Drive answers 403 for a
- *  download-restricted file and for per-user rate limits. (A 403 finding or
- *  listing the folder fails the call before the per-file loop.) */
-function isFatal(e: unknown): boolean {
-  return e instanceof DriveApiError && (e.status === 401 || e.status === 429 || e.status >= 500);
+/** Google's 403 rate limits (rateLimitExceeded / userRateLimitExceeded —
+ *  photosDriveError appends Google's text to the message). */
+function isRateLimited(message: string): boolean {
+  return /rate ?limit/i.test(message);
+}
+
+/**
+ * A download failure that is the FILE's own problem → the message recorded
+ * on it. The planner then skips that file until it changes in Drive, so this
+ * is reserved for what a retry can't fix: a download-restricted file (403),
+ * a file gone from Drive (404), one over the size cap. Everything else — a
+ * network error or timeout, 401, 429, 5xx, a rate-limit 403 — is null:
+ * transient, the call stops and the next run retries the file.
+ */
+function fileProblem(e: unknown): string | null {
+  if (e instanceof DriveApiError) {
+    if (e.status === 404) return "The file disappeared from Drive before it could be downloaded (404).";
+    if (e.status === 403 && !isRateLimited(e.message)) {
+      const said = /Google said: (.+)$/.exec(e.message)?.[1];
+      return "Drive won't let this account download this file (403)." + (said ? ` Google said: ${said}` : "");
+    }
+    return null;
+  }
+  if (e instanceof Error && e.message === "over the size cap") return e.message;
+  return null;
+}
+
+type Step = "download" | "store" | "record";
+const STEP_TEXT: Record<Step, string> = { download: "downloading", store: "storing", record: "saving" };
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** The run's stop message for a transient failure — Google's or the error's own text kept. */
+function transientMessage(e: unknown, step: Step, name: string): string {
+  if (e instanceof DriveApiError) {
+    if (e.status === 403) {
+      const said = /Google said: (.+)$/.exec(e.message)?.[1];
+      return "Drive is rate-limiting (403) — the rest will sync next time." + (said ? ` Google said: ${said}` : "");
+    }
+    return e.message;
+  }
+  const errName = (e as { name?: unknown } | null)?.name;
+  if (step === "download" && (errName === "TimeoutError" || errName === "AbortError")) {
+    return `Drive took too long sending "${name}" (${errorText(e)}) — the rest will sync next time.`;
+  }
+  return `Stopped while ${STEP_TEXT[step]} "${name}": ${errorText(e)} — the rest will sync next time.`;
 }
 
 function titleOf(name: string): string {
@@ -98,12 +145,35 @@ function titleOf(name: string): string {
 
 export async function syncDrivePhotos(budgetMs: number, deps: DrivePhotoSyncDeps = {}): Promise<DrivePhotoSyncResult> {
   const now = deps.now ?? Date.now;
-  const deadline = Date.now() + Math.max(0, budgetMs);
-  const f = deps.fetch;
   const put = deps.putFile ?? putBlob;
   if (!deps.putFile && !blobEnabled()) return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — photos can't be stored on this deployment." };
 
   const state = await getDrivePhotoSyncState();
+  // The run lease: Sync now and the cron must not work the same files at once.
+  if ((state.runningUntil ?? 0) > now()) return { ok: false, error: "A photo sync is already running — try again in a minute." };
+  state.runningUntil = now() + Math.max(0, budgetMs) + 20_000;
+  await saveState(state);
+  try {
+    return await runSync(state, budgetMs, deps, now, put);
+  } finally {
+    state.runningUntil = null;
+    try {
+      await saveState(state);
+    } catch {
+      // Couldn't clear it: the lease runs out on its own.
+    }
+  }
+}
+
+async function runSync(
+  state: DrivePhotoSyncState,
+  budgetMs: number,
+  deps: DrivePhotoSyncDeps,
+  now: () => number,
+  put: NonNullable<DrivePhotoSyncDeps["putFile"]>
+): Promise<DrivePhotoSyncResult> {
+  const deadline = Date.now() + Math.max(0, budgetMs);
+  const f = deps.fetch;
   const fail = async (error: string): Promise<DrivePhotoSyncResult> => {
     state.lastRun = { at: now(), imported: 0, updated: 0, relinked: 0, failed: 0, unmatched: state.lastRun?.unmatched ?? [], complete: false, error };
     await saveState(state);
@@ -136,49 +206,88 @@ export async function syncDrivePhotos(budgetMs: number, deps: DrivePhotoSyncDeps
   const matchByName = new Map<string, PhotoMatch>(matchFileRows(names, parts).map((r) => [r.fileName, { confidence: r.confidence, skus: r.skus }]));
   const plan = planDrivePhotoSync(listing, state.files, (name) => matchByName.get(name) ?? { confidence: "none", skus: [] }, MAX_PART_IMAGE_BYTES);
 
-  let relinked = 0;
+  let relinked = 0, relinksDone = 0, stopError = "";
   for (const r of plan.relinks) {
-    if (r.add.length) await attachDocument(r.documentId, r.add, SYNC_BY, now());
-    for (const sku of r.remove) await detachDocument(r.documentId, sku);
-    state.files[r.fileId] = { md5: r.md5, documentId: r.documentId, skus: r.skus, at: now() };
-    relinked++;
+    try {
+      if (!(await getDocument(r.documentId))) {
+        // Removed in the app: forget the file, so the next run imports it afresh.
+        delete state.files[r.fileId];
+      } else {
+        if (r.add.length) await attachDocument(r.documentId, r.add, SYNC_BY, now());
+        for (const sku of r.remove) await detachDocument(r.documentId, sku);
+        state.files[r.fileId] = { md5: r.md5, documentId: r.documentId, skus: r.skus, at: now() };
+        relinked++;
+      }
+      relinksDone++;
+    } catch (e) {
+      stopError = `Stopped while relinking renamed photos: ${errorText(e)} — the rest will sync next time.`;
+      break;
+    }
   }
-  if (relinked) await saveState(state);
+  if (relinksDone) {
+    try {
+      await saveState(state);
+    } catch (e) {
+      stopError ||= `Stopped while saving relinked photos: ${errorText(e)} — the rest will sync next time.`;
+    }
+  }
 
   const work = [...plan.updates.map((u) => ({ kind: "update" as const, ...u })), ...plan.imports.map((i) => ({ kind: "import" as const, ...i }))];
-  let imported = 0, updated = 0, failed = 0, processed = 0, stopError = "";
-  for (const item of work) {
+  let imported = 0, updated = 0, failed = 0, processed = 0;
+  for (const item of stopError ? [] : work) {
     if (processed > 0 && deadline - Date.now() < PER_FILE_WORST_MS) break;
     processed++;
     const prev = state.files[item.id];
-    /** A document created this iteration — remembered even if a later step
-     *  fails, so the next change to the file updates it instead of orphaning it. */
-    let createdId: string | null = null;
-    const recordError = (error: string) => {
-      const documentId = createdId ?? prev?.documentId ?? null;
-      state.files[item.id] = { md5: item.md5, documentId, skus: createdId ? [] : prev?.skus ?? [], error, at: now() };
+    let step: Step = "download";
+    /** True once a pending entry naming the new document is on disk — from
+     *  then on that entry (not `prev`) is what a retry must start from. */
+    let pendingSaved = false;
+    /** The file's own problem: recorded, and skipped until it changes in Drive. */
+    const recordError = async (error: string) => {
+      state.files[item.id] = { md5: item.md5, documentId: prev?.documentId ?? null, skus: prev?.skus ?? [], error, at: now() };
+      step = "record";
+      await saveState(state);
       failed++;
     };
     try {
-      const bytes = await downloadDriveFile(token, item.id, MAX_PART_IMAGE_BYTES, f);
+      let bytes: Uint8Array;
+      try {
+        bytes = await downloadDriveFile(token, item.id, MAX_PART_IMAGE_BYTES, f);
+      } catch (e) {
+        const problem = fileProblem(e);
+        if (problem === null) throw e;
+        await recordError(problem);
+        continue;
+      }
       const shrunk = await shrinkImage(bytes);
       if (!shrunk.ok) {
-        recordError(shrunk.error);
-        await saveState(state);
+        await recordError(shrunk.error);
         continue;
       }
       const fileName = webpFileName(item.name);
+      step = "record";
       // An update whose document was removed in the app starts a fresh one.
       const existing = item.kind === "update" ? await getDocument(item.documentId) : null;
       const documentId = existing ? existing.id : newDocumentId();
+      step = "store";
       const stored = await put(partDocBlobPath(documentId, fileName), shrunk.bytes, shrunk.contentType);
+      step = "record";
       const file = { blobKey: stored.pathname, fileName, contentType: shrunk.contentType, size: shrunk.bytes.byteLength };
+      let outcome: "imported" | "updated";
       if (existing && item.kind === "update") {
         if (!(await replaceDocumentFile(existing.id, file, SYNC_BY, now()))) throw new Error("Could not update the document.");
         if (item.add.length) await attachDocument(existing.id, item.add, SYNC_BY, now());
         for (const sku of item.remove) await detachDocument(existing.id, sku);
-        updated++;
+        outcome = "updated";
       } else {
+        // Remember the new document's id BEFORE creating it. md5 "" reads as
+        // changed, so if this function is killed from here on, the next run
+        // takes the update path and getDocument decides: the document exists
+        // → its file is replaced and its parts linked; it was never created →
+        // a fresh one. Either way, never a second copy.
+        state.files[item.id] = { md5: "", documentId, skus: [], at: now() };
+        await saveState(state);
+        pendingSaved = true;
         const created = await createDocument({
           id: documentId,
           kind: "image",
@@ -191,25 +300,29 @@ export async function syncDrivePhotos(budgetMs: number, deps: DrivePhotoSyncDeps
           at: now(),
         });
         if (!created) throw new Error("Could not record the document.");
-        createdId = created.id;
         await attachDocument(created.id, item.skus, SYNC_BY, now());
-        imported++;
+        outcome = "imported";
       }
       // Success always writes a fresh entry without `error`.
       state.files[item.id] = { md5: item.md5, documentId, skus: [...item.skus], at: now() };
       await saveState(state);
+      if (outcome === "imported") imported++;
+      else updated++;
     } catch (e) {
-      if (isFatal(e)) {
-        stopError = (e as Error).message;
-        processed--;
-        break;
+      // Transient (network, timeout, 401/429/5xx, a rate-limit 403, Blob or
+      // database trouble): nothing is recorded against the file, so the next
+      // Sync now / cron retries it. A pending entry already saved stays.
+      if (!pendingSaved) {
+        if (prev) state.files[item.id] = prev;
+        else delete state.files[item.id];
       }
-      recordError(e instanceof Error ? e.message : "Couldn't import this photo.");
-      await saveState(state);
+      stopError = transientMessage(e, step, item.name);
+      processed--;
+      break;
     }
   }
 
-  const remaining = work.length - processed;
+  const remaining = work.length - processed + (plan.relinks.length - relinksDone);
   state.lastRun = { at: now(), imported, updated, relinked, failed, unmatched: plan.unmatched, complete: remaining === 0 && !stopError, ...(stopError ? { error: stopError } : {}) };
   await saveState(state);
   const changed = imported + updated + relinked > 0;

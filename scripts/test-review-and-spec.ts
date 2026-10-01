@@ -39684,8 +39684,9 @@ import { syncDrivePhotos as ds283Sync, getDrivePhotoSyncState as ds283State, sav
 import { hasDriveReadScope as ds283HasRead } from "@/lib/gmail/config";
 import { matchFileRows as ds283Match } from "@/lib/part-docs/filename-match";
 import { list as ds283ListCatalog } from "@/lib/stores/catalog";
-import { getDocument as ds283GetDoc, linkedDocumentsForParts as ds283Linked, documentLinkId as ds283LinkId } from "@/lib/stores/part-documents";
-import { setBlob as ds283SetBlob } from "@/db/doc-store";
+import { getDocument as ds283GetDoc, linkedDocumentsForParts as ds283Linked, documentLinkId as ds283LinkId, allDocuments as ds283AllDocs, createDocument as ds283Create } from "@/lib/stores/part-documents";
+import { setBlob as ds283SetBlob, softDeleteDoc as ds283SoftDelete } from "@/db/doc-store";
+import { newDocumentId as ds283NewDocId } from "@/lib/part-docs/types";
 async function drivePhotoSync283AsyncChecks(): Promise<void> {
   // Fixture SKUs: normalizeSku drops the `TEST283:` prefix, so their match
   // keys are T283ALPHA / T283BRAVO / T283LABOR — what the file names carry.
@@ -39698,7 +39699,7 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
   registerFixture("catalog_parts", BRAVO);
   await upsertPart({ id: LABOR, sku: LABOR, desc: "TEST283 labor fixture", category: "Labor", unit: "hr", list: 10, cost: 5 });
   registerFixture("catalog_parts", LABOR);
-  await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null });
+  await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null, runningUntil: null });
 
   const NONSENSE = "random.jpg";
   const matchable = (await ds283ListCatalog()).filter((p) => p.category !== "Labor");
@@ -39716,6 +39717,9 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
   let mediaBytes: Uint8Array<ArrayBuffer> = jpegBody;
   const denied = new Set<string>();
   let authFailOnce = "";
+  /** One-shot download outcomes per file id — a function that throws or answers. */
+  const onceMedia = new Map<string, () => Response>();
+  let putFailOnce = false;
   const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
   const fakeDrive = async (url: string) => {
     const u = new URL(url);
@@ -39723,6 +39727,8 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
     if (u.searchParams.get("alt") === "media") {
       if (denied.has(id)) return json({ error: { message: "The download of this file is restricted." } }, 403);
       if (authFailOnce === id) { authFailOnce = ""; return json({ error: { message: "Invalid Credentials" } }, 401); }
+      const once = onceMedia.get(id);
+      if (once) { onceMedia.delete(id); return once(); }
       return new Response(mediaBytes);
     }
     const q = u.searchParams.get("q") || "";
@@ -39732,7 +39738,7 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
   };
   const stored: string[] = [];
   const storedBytes: Buffer[] = [];
-  const deps = { token: "tok", fetch: fakeDrive, putFile: async (p: string, b: Buffer) => { stored.push(p); storedBytes.push(b); return { pathname: p }; }, now: () => 1_700_000_000_000 };
+  const deps = { token: "tok", fetch: fakeDrive, putFile: async (p: string, b: Buffer) => { if (putFailOnce) { putFailOnce = false; throw new Error("blob store down"); } stored.push(p); storedBytes.push(b); return { pathname: p }; }, now: () => 1_700_000_000_000 };
   const imagesOf = async (sku: string) => ((await ds283Linked([sku], "image")).get(sku) ?? []).map((d) => d.id).sort();
   try {
     const r1 = await ds283Sync(45_000, deps);
@@ -39783,7 +39789,8 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
     const r7 = await ds283Sync(45_000, deps);
     const st7 = await ds283State();
     ok(r7.ok && r7.failed === 1 && r7.imported === 2 && r7.remaining === 0, "#283 sync: a 403 on one file's download fails only that file; the others import");
-    ok(/403/.test(st7.files.dDeny?.error || "") && st7.files.dDeny.documentId === null, "#283 sync: the 403 is recorded as that file's error");
+    ok(/^Drive won't let this account download this file \(403\)\. Google said: The download of this file is restricted\.$/.test(st7.files.dDeny?.error || "") && st7.files.dDeny.documentId === null,
+      "#283 sync: a plain 403 is recorded as that file's own error (file-specific text, Google's reason kept)");
     const tops = [st7.files.dTop?.documentId, st7.files.dTop2?.documentId];
     ok(tops.every(Boolean) && tops[0] !== tops[1] && (await imagesOf(ALPHA)).join() === [...tops].sort().join(), "#283 sync: two photos of the same part both import and both link to it");
 
@@ -39801,6 +39808,111 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
     ok(rest.ok && rest.imported === 1 && rest.remaining === 0 && (await ds283State()).lastRun?.complete === true, "#283 sync: the next call finishes the rest");
     ok((await imagesOf(BRAVO)).length === 3, "#283 sync: BRAVO now has its renamed photo plus both new ones");
 
+    // Fix round 1 — transient failures end the call without marking the file;
+    // the next run retries it. Only the file's own problems are recorded.
+    const T0 = deps.now();
+    const driveDocs = async (fileId: string) => (await ds283AllDocs()).filter((d) => d.source === "drive" && d.sourceRef === fileId);
+    const addFile = (id: string, name: string) => {
+      files = [...files, { id, name, mimeType: "image/jpeg", md5Checksum: "m-" + id, size: "8", webViewLink: "https://drive/" + id }];
+    };
+
+    ok((await ds283State()).runningUntil == null, "#283 lease: a finished run leaves no lease behind");
+    await ds283SetBlob(ds283Blob, { runningUntil: T0 + 60_000 });
+    const lastRunBefore = JSON.stringify((await ds283State()).lastRun);
+    const leased = await ds283Sync(45_000, deps);
+    const stLeased = await ds283State();
+    ok(!leased.ok && /already running/.test(leased.error) && stLeased.runningUntil === T0 + 60_000 && JSON.stringify(stLeased.lastRun) === lastRunBefore,
+      "#283 lease: a live lease refuses the call and touches nothing");
+    await ds283SetBlob(ds283Blob, { runningUntil: T0 - 1 });
+    const expired = await ds283Sync(45_000, deps);
+    ok(expired.ok && (await ds283State()).runningUntil == null, "#283 lease: an expired lease is ignored, and the run clears its own");
+
+    addFile("dNet", "T283-BRAVO net.jpg");
+    onceMedia.set("dNet", () => { throw new TypeError("fetch failed"); });
+    const net1 = await ds283Sync(45_000, deps);
+    const stNet = await ds283State();
+    ok(!net1.ok && /fetch failed/.test(net1.error) && !stNet.files.dNet && stNet.lastRun?.complete === false && /fetch failed/.test(stNet.lastRun?.error || ""),
+      "#283 transient: a network TypeError on a download stops the call without marking the file failed");
+    const net2 = await ds283Sync(45_000, deps);
+    ok(net2.ok && net2.imported === 1 && net2.failed === 0 && (await driveDocs("dNet")).length === 1, "#283 transient: the next run imports the file the network dropped");
+
+    addFile("dTime", "T283-BRAVO time.jpg");
+    onceMedia.set("dTime", () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); });
+    const time1 = await ds283Sync(45_000, deps);
+    ok(!time1.ok && /took too long/.test(time1.error) && !(await ds283State()).files.dTime, "#283 transient: a download timeout stops the call without marking the file failed");
+    const time2 = await ds283Sync(45_000, deps);
+    ok(time2.ok && time2.imported === 1 && (await driveDocs("dTime")).length === 1, "#283 transient: the next run imports the timed-out file");
+
+    addFile("dPut", "T283-BRAVO put.jpg");
+    putFailOnce = true;
+    const storedBefore = stored.length;
+    const put1 = await ds283Sync(45_000, deps);
+    ok(!put1.ok && /blob store down/.test(put1.error) && !(await ds283State()).files.dPut && stored.length === storedBefore && (await driveDocs("dPut")).length === 0,
+      "#283 transient: a Blob put that throws stops the call without marking the file failed");
+    const put2 = await ds283Sync(45_000, deps);
+    ok(put2.ok && put2.imported === 1 && (await driveDocs("dPut")).length === 1, "#283 transient: the next run stores and imports it — one document");
+
+    addFile("dRate", "T283-BRAVO rate.jpg");
+    onceMedia.set("dRate", () => json({ error: { message: "User Rate Limit Exceeded. (userRateLimitExceeded)" } }, 403));
+    const rate1 = await ds283Sync(45_000, deps);
+    ok(!rate1.ok && /403/.test(rate1.error) && /userRateLimitExceeded/.test(rate1.error) && !(await ds283State()).files.dRate,
+      "#283 transient: a 403 carrying userRateLimitExceeded is a rate limit, not the file's problem");
+    const rate2 = await ds283Sync(45_000, deps);
+    ok(rate2.ok && rate2.imported === 1, "#283 transient: the rate-limited file imports on the next run");
+
+    addFile("dGone", "T283-BRAVO gone.jpg");
+    onceMedia.set("dGone", () => json({ error: { message: "File not found: dGone." } }, 404));
+    const gone = await ds283Sync(45_000, deps);
+    ok(gone.ok && gone.failed === 1 && (await ds283State()).files.dGone?.error === "The file disappeared from Drive before it could be downloaded (404).",
+      "#283 sync: a 404 on the download is recorded as that file's own error");
+    files = files.filter((x) => x.id !== "dGone");
+
+    addFile("dQ1", "T283-BRAVO q1.jpg");
+    addFile("dQ2", "T283-BRAVO q2.jpg");
+    onceMedia.set("dQ2", () => json({ error: { message: "Rate Limit Exceeded" } }, 429));
+    const q1 = await ds283Sync(45_000, deps);
+    const stQ = await ds283State();
+    ok(q1.ok && q1.imported === 1 && q1.remaining === 1 && !!stQ.files.dQ1?.documentId && !stQ.files.dQ2 && stQ.lastRun?.complete === false && /429/.test(stQ.lastRun?.error || ""),
+      "#283 transient: a 429 after one imported file answers ok with the rest remaining and the stop recorded");
+    const q2 = await ds283Sync(45_000, deps);
+    ok(q2.ok && q2.imported === 1 && q2.remaining === 0 && (await ds283State()).lastRun?.complete === true, "#283 transient: the next run imports the file the 429 stopped");
+
+    // Killed function, point A: the pending entry was saved, the document never created.
+    addFile("dKA", "T283-ALPHA kill a.jpg");
+    const neverCreated = ds283NewDocId();
+    await ds283SetBlob(ds283Blob, { files: { ...(await ds283State()).files, dKA: { md5: "", documentId: neverCreated, skus: [], at: T0 } } });
+    const ka = await ds283Sync(45_000, deps);
+    const kaDocs = await driveDocs("dKA");
+    const kaId = (await ds283State()).files.dKA?.documentId;
+    ok(ka.ok && ka.imported === 1 && kaDocs.length === 1 && kaDocs[0].id === kaId && kaId !== neverCreated && !(await ds283GetDoc(neverCreated)),
+      "#283 kill: killed after the pending save — the next run creates exactly one document");
+    ok((await imagesOf(ALPHA)).includes(kaId || "?") && (await ds283State()).files.dKA?.md5 === "m-dKA", "#283 kill: that document is linked and the file's entry is complete");
+
+    // Killed function, point B: the document was created, the final state save never happened.
+    addFile("dKB", "T283-ALPHA kill b.jpg");
+    const createdBeforeKill = ds283NewDocId();
+    await ds283Create({ id: createdBeforeKill, kind: "image", title: "T283-ALPHA kill b", fileName: "T283-ALPHA kill b.webp", contentType: "image/webp", size: 8,
+      blobKey: `part-docs/${createdBeforeKill}/T283-ALPHA kill b.webp`, sourceUrl: "https://drive/dKB", source: "drive", sourceRef: "dKB", by: "Drive photos sync", at: T0 });
+    await ds283SetBlob(ds283Blob, { files: { ...(await ds283State()).files, dKB: { md5: "", documentId: createdBeforeKill, skus: [], at: T0 } } });
+    const kb = await ds283Sync(45_000, deps);
+    const kbDocs = await driveDocs("dKB");
+    ok(kb.ok && kb.updated === 1 && kb.imported === 0 && kbDocs.length === 1 && kbDocs[0].id === createdBeforeKill && (await ds283State()).files.dKB?.documentId === createdBeforeKill,
+      "#283 kill: killed after the create — the next run reuses that document, no duplicate");
+    ok((await imagesOf(ALPHA)).includes(createdBeforeKill) && (await ds283State()).files.dKB?.md5 === "m-dKB", "#283 kill: the reused document is linked and the file's entry is complete");
+
+    // A rename whose document was deleted in the app isn't counted as a relink;
+    // the file is forgotten and imported fresh next run.
+    const q1Doc = (await ds283State()).files.dQ1!.documentId!;
+    registerFixture("part_documents", q1Doc);
+    for (const sku of [ALPHA, BRAVO]) registerFixture("part_document_links", ds283LinkId(sku, q1Doc));
+    await ds283SoftDelete("part_documents", q1Doc);
+    files = files.map((x) => (x.id === "dQ1" ? { ...x, name: "T283-ALPHA q1.jpg" } : x));
+    const rl1 = await ds283Sync(45_000, deps);
+    ok(rl1.ok && rl1.relinked === 0 && !(await ds283State()).files.dQ1, "#283 relink: a renamed photo whose document was deleted isn't counted, and its entry is dropped");
+    const rl2 = await ds283Sync(45_000, deps);
+    const q1New = (await ds283State()).files.dQ1?.documentId;
+    ok(rl2.ok && rl2.imported === 1 && !!q1New && q1New !== q1Doc && (await imagesOf(ALPHA)).includes(q1New), "#283 relink: the next run imports it afresh under the new match");
+
     ok((await ds283SaveMailbox("nope@example.com")).ok === false, "#283 settings: an unknown mailbox can't be the photos account");
     ok(ds283HasRead("a https://www.googleapis.com/auth/drive.readonly b") && !ds283HasRead("https://www.googleapis.com/auth/drive.file"),
       "#283 scope: drive.readonly is detected, drive.file is not");
@@ -39811,6 +39923,6 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
       registerFixture("part_documents", f.documentId);
       for (const sku of [ALPHA, BRAVO, LABOR]) registerFixture("part_document_links", ds283LinkId(sku, f.documentId));
     }
-    await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null });
+    await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null, runningUntil: null });
   }
 }
