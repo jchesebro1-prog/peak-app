@@ -581,5 +581,15 @@ See `.env.example`.
     pseudo-category is retired. Remaining is Jeff-gated: set a Portal
     category on each assembly. Punch item #289.
 
+31. ✅ **Make primary photo + Manual documents** (#290, D536–D538) — the
+    part editor's Images gallery gains ★ Make primary (a pure front-move,
+    one order write, Primary tag); **Manual** is a third part-document slot
+    (PDF only, 25 MB) with accessory coverage, a Missing manual filter,
+    Datasheets-page column, manual fetch candidates, a portal sidebar entry
+    and a client-package Manuals folder. A manual alone never makes a part
+    portal-browsable; Displays API, DaVinci pre-fill and thumbnail targets
+    stay datasheet-only. Remaining: a "Manual URL" import column. Punch
+    item #290.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

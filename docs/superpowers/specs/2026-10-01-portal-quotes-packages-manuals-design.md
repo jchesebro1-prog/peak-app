@@ -281,3 +281,21 @@ Shipped on `feat/289-portal-packages` (D533–D535, punch #289). Deviations from
 - **Thumbnail tie-break.** Every fixture ranks 1000, so the tile's thumbnail is the first fixture with an engine image
   in rank-then-title order, matching the packages page.
 - **Gates:** tsc 0; test:specs 10,264 PASS; test:smoke ALL PASSED (incl. `dept=packages`); `next build` OK.
+
+## As built — Part 3
+
+Shipped on `feat/290-primary-photo-manual` (D536–D538, punch #290). Deviations from §3:
+
+- **Primary tag only on a real, visible first image.** It is not shown when the first image is a datasheet-render or
+  hidden, and it does not move to the next visible image.
+- **A Word file is still guessed as a spec sheet.** The Word-extension rule runs before the manual name rule, so
+  "Manual.docx" stays a spec sheet; a manual is PDF only.
+- **A manual alone does not make a part browsable in the portal.** The browse rule stays datasheet or spec sheet; the
+  portal tile's document icon does show for a manual-only part.
+- **Datasheet-only paths unchanged:** Displays API, DaVinci pre-fill, catalog-wide thumbnail targets; the client
+  package gap report does not flag a missing manual.
+- **Added:** the "Parts you've quoted before" shelf is hidden on the Packages page (`showQuotedBeforeShelf`).
+- **Two older checks updated:** #207 `urlKindOf("manual")` now maps to `"manual"`; the #245 message now names three
+  coverage slots.
+- **Datasheets table** minWidth is 1080 for the extra column; it scrolls horizontally on narrow screens.
+- **Gates:** tsc 0; test:specs 10,373 PASS / ALL PASSED; test:smoke 187/187; `next build` OK.

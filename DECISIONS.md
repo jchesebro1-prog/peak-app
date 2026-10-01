@@ -8563,3 +8563,31 @@ own totals, but only when there is at least one package hit; with none, results 
 carries a "Package" badge and "Includes N parts", where N is exactly the included lines the sidebar lists
 (`includedLines`, labour component rows counted; one line reads "1 part"). With no departments configured the landing
 heading reads "Browse" and the dead-end breadcrumb reads "All products" / "Search all products".
+
+## D536. Make primary is a pure front-move through the one order write (#290, 2026-10-01)
+
+The part editor's Images gallery gains **★ Make primary** on every real image that is not already first (never on a
+datasheet-render thumbnail). A pure helper, `moveImageToFront(ids, id, autoBoundary)`, moves the id to index 0 of the
+real-image group only: an id absent, already first, or at or beyond the auto boundary comes back as an unchanged copy,
+and the input is never mutated. The gallery then persists the full id list, hidden images included, through the same
+order write the up/down arrows use, so there is no new action. The **Primary** tag shows on the first image when it is
+a real, visible one; the portal tile and gallery already read the first visible image, so nothing else changes.
+
+## D537. Manual is a third document slot kind (#290, 2026-10-01)
+
+`PartDocKind` gains `"manual"` and `DOC_SLOT_KINDS` becomes datasheet, spec sheet, manual (PDF only, 25 MB), so every
+slot-generic path picks it up: coverage views, the Datasheets page column, **Missing manual** filter and "N of M quoted
+parts have a manual" line, Upload many, bulk Fetch / Mark not needed / Attach existing, the part editor's three slots,
+the portal sidebar and the client package's Manuals folder. Accessory coverage applies exactly as it does to spec
+sheets, `ownDatasheet` opt-out included (D271). Catalog `docs` links with `kind: "manual"` are now manual fetch
+candidates, `guessKind` tests the manual name regex before the spec-sheet name rule, and upload errors name the kind
+("Manuals must be PDF files."). A coverage record of an unknown kind is skipped instead of throwing. No migration.
+
+## D538. What the Manual type deliberately leaves alone (#290, 2026-10-01)
+
+A manual alone never makes a part portal-browsable: the browse rule (`portalHasCustomerDocument`) stays pinned to
+datasheet or spec sheet. The Displays API, the DaVinci pre-fill and the catalog-wide thumbnail targets stay
+datasheet-only, and the client-package gap report still flags only a missing datasheet, not a missing manual. A Word
+file named like a manual (`Manual.docx`) still guesses spec sheet, because the Word-extension rule runs first and a
+manual is PDF only. Separately, the portal's "Parts you've quoted before" shelf is no longer loaded or shown on the
+Packages page (`showQuotedBeforeShelf`: no search or filters, page 1, department not `packages`).

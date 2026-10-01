@@ -10246,3 +10246,19 @@ Gates: tsc 0; test:specs 10,264 PASS / ALL PASSED; test:smoke ALL PASSED (includ
 **Remaining (Jeff-gated).**
 1. Set a Portal category on each assembly in Design → Assemblies so packages group sensibly; until then all show under
    "Other packages".
+
+## 290. Catalog — Make primary photo + Manual document type — DONE 2026-10-01 (D536–D538)
+
+**Done.** The part editor's Images gallery gains **★ Make primary** (one full-id-list order write, a Primary tag on the
+first real, visible image). **Manual** becomes a third document slot beside Datasheet and Spec sheet (PDF only, 25 MB),
+with accessory coverage, a Missing manual filter, progress line and Datasheets-page column, catalog manual URLs as fetch
+candidates, name guessing, a portal sidebar entry and a Manuals folder in client packages. A manual alone does not make
+a part portal-browsable, and the Packages page no longer shows the "quoted before" shelf. Spec:
+`docs/superpowers/specs/2026-10-01-portal-quotes-packages-manuals-design.md` Part 3. No migrations.
+
+Gates: tsc 0; test:specs 10,373 PASS / ALL PASSED; test:smoke 187/187 ALL PASSED (including
+`/catalog/documents?show=missing-manual`); `next build` OK.
+
+**Follow-ups.**
+1. A "Manual URL" catalog import column fed by the photo-sourcing manifest's `manual_url`.
+2. Not exercised end to end: real manual URL fetching and manual PDF upload to Blob (both need DB and Blob).
