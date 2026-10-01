@@ -1,8 +1,9 @@
 /**
  * #284 — the Estimator / Quotes-hub "next step" control as a pure view model
  * (spec §1). The server evaluates `holds` (approvalHolds) and the limit chip;
- * this decides what the viewer sees. Client-safe: imports only review-line,
- * team and a type.
+ * this decides what the viewer sees. #285: a non-owner viewer gets actions
+ * too — an approver sends or approves, a creator submits, a submitter
+ * withdraws. Client-safe: imports only review-line, team and a type.
  */
 import { firstName } from "@/lib/team";
 import { approvedReviewLine, staleApprovalLine, staleAutoApprovalLine } from "@/lib/review-line";
@@ -17,6 +18,8 @@ export type QuoteNextStepView = {
   secondary: Array<{ action: NextStepAction; label: string }>;
   reviewers: string[];
   approverMode: boolean;
+  /** #285: the viewer owns the quote — a non-owner's Send carries `asOf`. */
+  viewerIsOwner: boolean;
   /** The quote's `updatedAt` when this view was computed — Approve / Send back
    *  carry it so an approver never decides a version they didn't see. */
   asOf: number;
@@ -38,6 +41,10 @@ export type NextStepInput = {
   owner: string;
   viewer: string;
   viewerCanApprove: boolean;
+  /** #285: can("create") — anyone who can create quotes may submit one. */
+  viewerCanCreate: boolean;
+  /** #285: can("send") — sends an approved quote that isn't theirs. */
+  viewerCanSend: boolean;
   submittedAgo: string;
   reviewers: string[];
   /** The quote's `updatedAt` (0 when unknown). */
@@ -88,20 +95,35 @@ export function quoteNextStep(i: NextStepInput): QuoteNextStepView {
   }
 
   const view = (primary: QuoteNextStepView["primary"], secondary: QuoteNextStepView["secondary"] = [], approverMode = false): QuoteNextStepView =>
-    ({ pill, strip, primary, secondary, reviewers, approverMode, asOf: i.asOf ?? 0 });
+    ({ pill, strip, primary, secondary, reviewers, approverMode, viewerIsOwner: isOwner, asOf: i.asOf ?? 0 });
 
   if (closed) return { ...view(null), strip: null };
-
-  // A non-owner approver decides an in-review quote (assigned or shared — the reviewer field is advisory).
-  if (!isOwner) {
-    if (state === "in_review" && i.viewerCanApprove)
-      return view({ action: "approve", label: "Approve" }, [{ action: "sendBack", label: "Send back…" }], true);
-    return view(null);
-  }
 
   const submit = { action: "submit" as const, label: state === "changes" || state === "stale" ? "Resubmit for approval" : "Submit for approval" };
   const assign = { action: "assign" as const, label: "Assign to…" };
   const attest = { action: "attest" as const, label: "Attest approval…" };
+
+  // #285 (Jeff 2026-10-01): a non-owner approver sends or approves any draft;
+  // anyone who can create quotes submits one; the submitter may withdraw.
+  if (!isOwner) {
+    const approveOnly = { action: "approve" as const, label: "Approve only (owner sends)" };
+    const withdraw = state === "in_review" && same(r.submittedBy || "", i.viewer) ? [{ action: "withdraw" as const, label: "Withdraw" }] : [];
+    // A sent quote whose approval lapsed: Won through the status menu stamps the approver.
+    if (sent) return view(null);
+    // In review (assigned or shared — the reviewer field is advisory).
+    if (state === "in_review") {
+      if (i.viewerCanApprove)
+        return view({ action: "send", label: "Approve & send →" }, [{ action: "sendBack", label: "Send back…" }, approveOnly, ...withdraw], true);
+      return view(null, withdraw);
+    }
+    if (state === "approved")
+      return i.viewerCanApprove || i.viewerCanSend ? view({ action: "send", label: "Send to customer →" }) : view(null);
+    // none, changes or stale, draft
+    if (i.viewerCanApprove)
+      return view({ action: "send", label: "Send to customer →" }, [approveOnly, { action: "submit", label: "Submit for approval" }, assign]);
+    if (i.viewerCanCreate) return view(submit, [assign]);
+    return view(null);
+  }
 
   if (sent) {
     // #242 final carried forward: a lapsed approval on a sent quote can be resubmitted / attested so it can reach Won.

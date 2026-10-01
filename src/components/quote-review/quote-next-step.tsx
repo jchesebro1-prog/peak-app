@@ -1,9 +1,10 @@
 "use client";
 /**
  * #284 — the quote's one next-step control: a status pill, the primary
- * action (Submit for approval / Send to customer → / Approve), Send back…
- * for approvers, and a ⋯ menu for the rest (Withdraw, Assign to…, Attest
- * approval…, Submit for approval anyway). The view is decided on the server
+ * action (Submit for approval / Send to customer → / Approve & send →), Send
+ * back… for approvers, and a ⋯ menu for the rest (Withdraw, Assign to…,
+ * Attest approval…, Submit for approval anyway, #285 Approve only (owner
+ * sends)). The view is decided on the server
  * (quoteNextStepFor); this only renders it and dispatches the guarded
  * actions. Client-safe: no store, ops or session imports — only the
  * "use server" actions file and types. The modals portal to document.body
@@ -29,15 +30,16 @@ type Props = {
   view: QuoteNextStepView;
   /** "toolbar" = the Estimator's dark header; "panel" = light surfaces (hub, phone). */
   variant: "toolbar" | "panel";
-  /** Show only the approver's Approve / Send back (the Estimator's phone preview). */
+  /** Show only the approver's Approve & send / Send back / Approve only (the Estimator's phone preview). */
   approverOnly?: boolean;
   /** Called with every server result; default = router.refresh(). */
   onSync?: (r: NextStepSync) => void;
   /** Report a refusal; default = an inline red line under the control. */
   onError?: (msg: string) => void;
   /** Runs before any action (the Estimator saves unsaved edits first); return false to abort.
-   *  Skipped for Approve / Send back: an approver decides the version they were
-   *  shown (view.asOf), and saving first would bump updatedAt and refuse it. */
+   *  Skipped for the in-review decisions (Approve & send, Approve only, Send
+   *  back): an approver decides the version they were shown (view.asOf), and
+   *  saving first would bump updatedAt and refuse it. */
   beforeAction?: () => Promise<boolean>;
   /** Pill suffix " · as last saved" while the form has unsaved edits. */
   savedOnly?: boolean;
@@ -178,19 +180,23 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     else setErr(msg);
   };
 
-  const run = (fn: () => Promise<NextStepSync>, opts: { skipBefore?: boolean } = {}) => {
+  /** `versioned` (#285): the action carries view.asOf unless the pre-save ran —
+   *  `fn(saved)` — since the viewer's own just-saved edits are then the version shown. */
+  const run = (fn: (saved: boolean) => Promise<NextStepSync>, opts: { skipBefore?: boolean; versioned?: boolean } = {}) => {
     setMenu("closed");
     setErr(null);
     startTransition(async () => {
       try {
         if (!opts.skipBefore && beforeAction && !(await beforeAction())) return;
-        const res = await fn();
-        // A refused Approve / Send back keeps the version the approver was shown:
+        const saved = !opts.skipBefore && !!beforeAction;
+        const res = await fn(saved);
+        // A refused versioned action keeps the version the viewer was shown:
         // handing the fresh asOf to an onSync caller (the Estimator keeps its form;
         // only a reload shows the new content) would let a second click decide
         // content this screen never loaded. The default router.refresh re-renders
         // the page with the current version, so it needs no such guard.
-        const r = !res.ok && opts.skipBefore && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res;
+        const keepShown = !!opts.skipBefore || (!!opts.versioned && !saved);
+        const r = !res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res;
         if (!r.ok) report(r.error || "That didn't go through.");
         (onSync ?? (() => router.refresh()))(r);
       } catch (e) {
@@ -224,9 +230,15 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
       case "submit":
         return run(() => nsSubmitAction(quoteId, null));
       case "send":
+        // #285: Approve & send → decides the shown version with no pre-save (like Approve);
+        // a non-owner's Send carries it too, unless the pre-save just stored their edits.
+        if (view.approverMode) return run(() => nsSendAction(quoteId, view.asOf), { skipBefore: true });
+        if (!view.viewerIsOwner) return run((saved) => nsSendAction(quoteId, saved ? undefined : view.asOf), { versioned: true });
         return run(() => nsSendAction(quoteId));
       case "approve":
-        return run(() => nsApproveAction(quoteId, view.asOf), { skipBefore: true });
+        // In review: the shown version, no pre-save. #285 Approve only on a draft saves the approver's edits first.
+        if (view.approverMode) return run(() => nsApproveAction(quoteId, view.asOf), { skipBefore: true });
+        return run((saved) => nsApproveAction(quoteId, saved ? undefined : view.asOf), { versioned: true });
       case "withdraw":
         return run(() => nsWithdrawAction(quoteId));
       case "assign":
@@ -238,9 +250,10 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     }
   };
 
-  const primary = view.primary && (!approverOnly || view.primary.action === "approve") ? view.primary : null;
+  // #285: the phone approver mode shows the in-review actions — Approve & send, Send back, Approve only.
+  const primary = view.primary && (!approverOnly || view.approverMode) ? view.primary : null;
   const sendBack = view.secondary.find((s) => s.action === "sendBack") || null;
-  const menuItems = approverOnly ? [] : view.secondary.filter((s) => s.action !== "sendBack");
+  const menuItems = approverOnly ? view.secondary.filter((s) => s.action === "approve") : view.secondary.filter((s) => s.action !== "sendBack");
   const tone = TONE[view.pill.tone] || TONE.draft;
   const showPill = !approverOnly && view.pill.label !== "";
   const busy = pending || !!disabled;

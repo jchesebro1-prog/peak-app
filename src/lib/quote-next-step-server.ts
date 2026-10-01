@@ -16,6 +16,8 @@ export async function quoteNextStepFor(q: Quote, viewer: { name: string; roles: 
     owner: (q.owner || q.preparedBy || "").trim(),
     viewer: viewer.name,
     viewerCanApprove: can("approve", viewer.roles),
+    viewerCanCreate: can("create", viewer.roles),
+    viewerCanSend: can("send", viewer.roles),
     submittedAgo: q.review?.submittedAt ? timeAgo(q.review.submittedAt) : "",
     reviewers: approvers.map((u) => u.name),
     asOf: typeof q.updatedAt === "number" ? q.updatedAt : 0,

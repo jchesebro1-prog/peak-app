@@ -10684,6 +10684,7 @@ seeded()
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
   .then(() => approval284AsyncChecks())
+  .then(() => approval285AsyncChecks())
   .then(() => approval284FinalAsyncChecks())
   .then(() => rewards282PointsAsyncChecks())
   .then(() => rewards282PerksPointsAsyncChecks())
@@ -30021,7 +30022,8 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
   ok(
     (ea.match(/checkApprovalGate\(cur/g) || []).length === 1 && !ea.includes("requireApprovalToAdvance(cur") &&
       (qro242.match(/checkApprovalGate\(q, "sent"/g) || []).length === 1 && !qro242.includes("requireApprovalToAdvance(") &&
-      ra242.includes("sendQuoteToCustomer(id, user)"),
+      // #285: nsSendAction passes the view's asOf through.
+      ra242.includes("sendQuoteToCustomer(id, user, asOf)"),
     "#242: setStatusAction and sendToCustomerAction pre-check with checkApprovalGate (limits applied), not the bare review predicate"
   );
   const approveBody = qs.slice(qs.indexOf("export async function approve("), qs.indexOf("export async function resetToSeed("));
@@ -30419,7 +30421,8 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   ok(
     // #284 final: the Estimator's sendToCustomerAction was deleted; nsSendAction (review-actions.ts) is the Send entry point.
     /setStatus\(id, "sent", actor\.name\)/.test(readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8")) &&
-      readFileSync(join(process.cwd(), "src/app/(app)/quotes/review-actions.ts"), "utf8").includes("sendQuoteToCustomer(id, user)"),
+      // #285: nsSendAction passes the view's asOf through.
+      readFileSync(join(process.cwd(), "src/app/(app)/quotes/review-actions.ts"), "utf8").includes("sendQuoteToCustomer(id, user, asOf)"),
     "#242 final: sendToCustomerAction passes the actor to setStatus"
   );
   const home = readFileSync(join(process.cwd(), "src/app/(app)/home-actions.ts"), "utf8");
@@ -30518,11 +30521,14 @@ async function reviewLimitsFinal242AsyncChecks(): Promise<void> {
     ok((await r242SetStatus(t.id, "won", owner.name))?.status === "won", "#242 final store: an attested approval on a stale sent quote reaches Won too");
 
     // 5 — the actor lands on the snapshot and the banner.
+    // #285: the seeded Jena Tolksdorf holds approve, and an approver moving the
+    // quote now stamps their own in_app approval before the owner's limit is
+    // read — so the trigger here is a non-approver (off the roster) named Jena.
     const j = await mk("jena");
-    await r242SetStatus(j.id, "sent", "Jena Tolksdorf");
+    await r242SetStatus(j.id, "sent", "Jena T285");
     const reJ = await r242Get(j.id);
     ok(
-      reJ?.review.decidedBy === owner.name && reJ.review.auto?.triggeredBy === "Jena Tolksdorf" && reJ.review.auto.trigger === "sent" &&
+      reJ?.review.decidedBy === owner.name && reJ.review.auto?.triggeredBy === "Jena T285" && reJ.review.auto.trigger === "sent" &&
         r242Line(reJ.review).endsWith(" — sent by Jena"),
       "#242 final store: an auto approval triggered by someone else records them and the banner says 'sent by Jena'"
     );
@@ -39623,7 +39629,8 @@ import { staleApprovalLine as a284StaleLine, approvedReviewLine as a284ApprovedL
 }
 
 /* #284 Task 2: self-approval in the gate. */
-import { canSelfApprove as a284CanSelf } from "@/lib/review-limits";
+// #285: canSelfApprove became approverOnTransition (the ACTOR's approve flag; "self" when the actor owns the quote).
+import { approverOnTransition as a284CanSelf } from "@/lib/review-limits";
 import { decideApprovalGate as a284Decide } from "@/lib/stores/quotes";
 {
   const roster = [
@@ -39635,8 +39642,8 @@ import { decideApprovalGate as a284Decide } from "@/lib/stores/quotes";
     quoteType: "system", value: 500, owner, preparedBy: owner, spec: { sections: [] },
     review: { state, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
   });
-  ok(a284CanSelf(q("Jeff Chesebro") as never, ctx, "Jeff Chesebro") === "Jeff Chesebro", "#284 self: an approver owner moving their own quote self-approves");
-  ok(a284CanSelf(q("Jeff Chesebro") as never, ctx, "Nic Trapani") === null, "#284 self: someone else moving an approver's quote does not");
+  ok(a284CanSelf(q("Jeff Chesebro") as never, ctx, "Jeff Chesebro")?.method === "self", "#284 self: an approver owner moving their own quote self-approves");
+  ok(a284CanSelf(q("Jeff Chesebro") as never, ctx, "Nic Trapani") === null, "#284 self: a non-approver moving an approver's quote does not (#285: an approver actor would, as in_app)");
   ok(a284CanSelf(q("Nic Trapani") as never, ctx, "Nic Trapani") === null, "#284 self: an owner without approve does not");
   ok(a284CanSelf(q("Jeff Chesebro", "changes") as never, ctx, "Jeff Chesebro") === null, "#284 self: changes requested blocks self-approval");
   const d = a284Decide("sent", q("Jeff Chesebro") as never, ctx, {}, 1000, "Jeff Chesebro");
@@ -39700,7 +39707,8 @@ async function approval284AsyncChecks(): Promise<void> {
   const JEFF = { name: "Jeff Chesebro", roles: ["Admin"] };
   const none = { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null };
   await mk("t3", "T284 Owner", { review: none });
-  ok(!(await Ops.submitQuoteForApproval(id("t3"), JEFF, null)).ok, "#284 ops: a non-owner cannot submit someone else's quote");
+  // #285: anyone with create may submit — the refusal is now for someone without create.
+  ok(!(await Ops.submitQuoteForApproval(id("t3"), { name: "T284 Reviewer", roles: ["Reviewer"] }, null)).ok, "#284 ops: someone without create cannot submit someone else's quote (#285)");
   ok((await Ops.submitQuoteForApproval(id("t3"), NIC, null)).ok && (await Q.get(id("t3")))?.review?.state === "in_review", "#284 ops: the owner submits (shared queue)");
   const twice = await Ops.submitQuoteForApproval(id("t3"), NIC, null);
   ok(!twice.ok && twice.error === "This quote is already waiting for approval.", `#284 ops: submitting twice is refused with its reason (got ${JSON.stringify(twice)})`);
@@ -39741,14 +39749,16 @@ async function approval284AsyncChecks(): Promise<void> {
   const again = await Ops.submitQuoteForApproval(id("t3-appr"), NIC, null);
   ok(!again.ok && err(again) === "This quote is already approved.", `#284 ops: an approved draft cannot be resubmitted (got "${err(again)}")`);
   // (b) decisions need an in-review quote.
+  // #285: Approve only now takes an unsubmitted DRAFT (approval285AsyncChecks); a quote that isn't a draft still isn't approvable.
   await mk("t3-idle", "T284 Owner", { review: none });
-  const idleA = await Ops.approveQuoteReview(id("t3-idle"), JEFF);
+  await mk("t3-idle-sent", "T284 Owner", { review: none, status: "sent" });
+  const idleA = await Ops.approveQuoteReview(id("t3-idle-sent"), JEFF);
   const idleS = await Ops.sendBackQuoteReview(id("t3-idle"), JEFF, "Nope");
-  ok(!idleA.ok && err(idleA) === "This quote isn't waiting for approval." && !idleS.ok && err(idleS) === "This quote isn't waiting for approval.", "#284 ops: approve and send back on a quote that is not in review are refused");
-  // (c) only the owner withdraws.
+  ok(!idleA.ok && err(idleA) === "This quote isn't waiting for approval." && !idleS.ok && err(idleS) === "This quote isn't waiting for approval.", "#284 ops: approve on a sent quote and send back on a quote that is not in review are refused (#285)");
+  // (c) only the owner withdraws — #285: or whoever submitted it.
   await mk("t3-wd", "T284 Owner");
   const wd = await Ops.withdrawQuoteReview(id("t3-wd"), JEFF);
-  ok(!wd.ok && err(wd) === "Only the quote's owner can withdraw it." && (await Q.get(id("t3-wd")))?.review?.state === "in_review", "#284 ops: a non-owner cannot withdraw");
+  ok(!wd.ok && err(wd) === "Only the quote's owner or the person who submitted it can withdraw it." && (await Q.get(id("t3-wd")))?.review?.state === "in_review", "#284 ops: a non-owner (who didn't submit it) cannot withdraw");
   // (d) already sent.
   const resent = await Ops.sendQuoteToCustomer(id("t3"), NIC);
   ok(!resent.ok && err(resent) === "This quote has already been sent.", `#284 ops: sending an already-sent quote is refused (got "${err(resent)}")`);
@@ -39870,8 +39880,9 @@ import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
   ok(x.primary === null && acts(x) === "withdraw" && x.pill.label === "In review · any approver" && x.pill.title === "Submitted by Nic, 2h ago",
     "#284 next: owner, in review → waiting pill + Withdraw");
   x = v({ review: R("in_review", { reviewer: "Jeff Chesebro" }), viewer: "Chris Mittlesteadt", viewerCanApprove: true });
-  ok(x.primary?.action === "approve" && x.primary.label === "Approve" && acts(x) === "sendBack" && x.secondary[0].label === "Send back…" && x.approverMode && x.pill.label === "In review · with Jeff",
-    "#284 next: any approver (even when assigned to someone else) gets Approve · Send back…");
+  // #285: the approver's primary became Approve & send →, with ⋯ Approve only (owner sends).
+  ok(x.primary?.action === "send" && x.primary.label === "Approve & send →" && acts(x) === "sendBack,approve" && x.secondary[0].label === "Send back…" && x.approverMode && x.pill.label === "In review · with Jeff",
+    "#284 next: any approver (even when assigned to someone else) gets Approve & send → · Send back… (#285)");
   x = v({ review: R("in_review"), viewer: "Jena Tolksdorf", viewerCanApprove: false });
   ok(x.primary === null && x.secondary.length === 0 && !x.approverMode, "#284 next: a bystander sees the pill only");
   x = v({ review: R("changes", { decidedBy: "Jeff Chesebro", note: "Fix the rigging math" }) });
@@ -41092,7 +41103,8 @@ import { quoteAwaitsApprovalBy as a284fAwaits, quoteBackFromReview as a284fBack 
   const comp = src284f("src/components/quote-review/quote-next-step.tsx");
   ok(comp.includes("nsApproveAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendBackAction(quoteId, text, view.asOf), { skipBefore: true }")
     && comp.includes("if (!opts.skipBefore && beforeAction && !(await beforeAction())) return;")
-    && comp.includes("!res.ok && opts.skipBefore && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res"),
+    && comp.includes("!res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res")
+    && comp.includes("const keepShown = !!opts.skipBefore || (!!opts.versioned && !saved);"),
     "#284 final: the next-step control decides the version shown (asOf), skips the pre-save for Approve / Send back, and a refusal keeps the shown asOf");
   const ra = src284f("src/app/(app)/quotes/review-actions.ts");
   ok(ra.includes("approveQuoteReview(id, user, asOf)") && ra.includes("sendBackQuoteReview(id, user, note, asOf)") && !ra.includes("reviewLimit"),
@@ -41182,4 +41194,261 @@ async function approval284FinalAsyncChecks(): Promise<void> {
   ok(!own.ok && (await Q.get(id("blank-owner")))?.review?.state === "in_review", "#284 final DB: the preparer of a blank-owner quote cannot approve it through the queue");
   ok((await Ops.withdrawQuoteReview(id("blank-owner"), JEFF)).ok && (await Q.get(id("blank-owner")))?.review?.state === "none",
     "#284 final DB: …and can withdraw it as its owner");
+}
+
+/* ======================================================================
+   #285 task A — approvers send or approve any quote; anyone who can create
+   quotes submits one (Jeff 2026-10-01: "Jena created it but I edited and I
+   want to review and send it"). The gate stamps the ACTOR's approval
+   (approverOnTransition: "self" for an approver owner, "in_app" for any
+   other approver); the DB checks are approval285AsyncChecks() on the chain.
+   ====================================================================== */
+import { approverOnTransition as a285OnTransition } from "@/lib/review-limits";
+import { decideApprovalGate as a285Decide } from "@/lib/stores/quotes";
+import { quoteNextStep as a285Next } from "@/lib/quote-next-step";
+import { quoteBackFromReview as a285Back } from "@/lib/quote-approval-rules";
+{
+  const roster = [
+    { id: "u1", name: "Jeff Chesebro", status: "active", canApprove: true },
+    { id: "u2", name: "Nic Trapani", status: "active", canApprove: false },
+  ];
+  const ctx = { limits: {}, roster };
+  const rev = (state: string, o: Record<string, unknown> = {}) =>
+    ({ state, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null, ...o });
+  const q = (owner: string, review = rev("none")) => ({ quoteType: "system", value: 500, owner, preparedBy: owner, spec: { sections: [] }, review });
+
+  // approverOnTransition — the ACTOR's approve flag, owner or not.
+  const own = a285OnTransition(q("Jeff Chesebro") as never, ctx, "Jeff Chesebro");
+  ok(own?.method === "self" && own.by === "Jeff Chesebro", "#285 gate: an approver owner moving their own quote is a self approval");
+  const other = a285OnTransition(q("T285 Jena") as never, ctx, "Jeff Chesebro");
+  ok(other?.method === "in_app" && other.by === "Jeff Chesebro", "#285 gate: an approver moving someone else's quote is an in-app approval by the approver");
+  ok(a285OnTransition(q("T285 Jena") as never, ctx, "Nic Trapani") === null && a285OnTransition(q("Nic Trapani") as never, ctx, "Nic Trapani") === null,
+    "#285 gate: a non-approver (owner or not) gets nothing");
+  ok(a285OnTransition(q("T285 Jena") as never, ctx, "T285 Nic") === null && a285OnTransition(q("T285 Jena") as never, ctx, "") === null && a285OnTransition(q("T285 Jena") as never, ctx, null) === null,
+    "#285 gate: an actor off the roster (or blank) is never an approver at the gate");
+  const ch = rev("changes", { decidedBy: "Chris Mittlesteadt", note: "Fix it" });
+  ok(a285OnTransition(q("Jeff Chesebro", ch) as never, ctx, "Jeff Chesebro") === null,
+    "#285 gate: changes requested still blocks an approver owner's self approval");
+  ok(a285OnTransition(q("T285 Jena", ch) as never, ctx, "Jeff Chesebro")?.method === "in_app",
+    "#285 gate: a non-owner approver may override another approver's send-back (a fresh decision)");
+  ok(a285OnTransition(q(" jeff chesebro ") as never, ctx, "Jeff Chesebro")?.method === "self", "#285 gate: the owner match is trimmed and case-insensitive");
+
+  // decideApprovalGate — the stamp.
+  const d = a285Decide("sent", q("T285 Jena") as never, ctx, {}, 1000, "Jeff Chesebro");
+  ok(d.ok && d.stamp?.state === "approved" && d.stamp.method === "in_app" && d.stamp.decidedBy === "Jeff Chesebro" && d.stamp.reviewer === "Jeff Chesebro"
+    && d.stamp.decidedAt === 1000 && !!d.stamp.approvedAgainst && d.stamp.auto == null,
+    "#285 gate: an approver sending someone else's quote stamps method in_app, decidedBy = reviewer = the actor, with a snapshot");
+  ok(d.ok && d.stamp?.submittedBy === null && d.stamp.submittedAt === null, "#285 gate: an unsubmitted quote's in_app stamp has no submitter");
+  const inRev = a285Decide("sent", q("T285 Jena", rev("in_review", { submittedBy: "T285 Nic", submittedAt: 7, reviewer: "Chris Mittlesteadt" })) as never, ctx, {}, 1000, "Jeff Chesebro");
+  ok(inRev.ok && inRev.stamp?.submittedBy === "T285 Nic" && inRev.stamp.submittedAt === 7 && inRev.stamp.reviewer === "Jeff Chesebro",
+    "#285 gate: Approve & send keeps the in-review record's submitter");
+  const fromCh = a285Decide("sent", q("T285 Jena", rev("changes", { submittedBy: "T285 Nic", submittedAt: 7, decidedBy: "Chris Mittlesteadt" })) as never, ctx, {}, 1000, "Jeff Chesebro");
+  ok(fromCh.ok && fromCh.stamp?.method === "in_app" && fromCh.stamp.submittedBy === null && fromCh.stamp.note === "",
+    "#285 gate: an in_app stamp over a send-back starts a clean record (no stale submitter or note)");
+  const self = a285Decide("sent", q("Jeff Chesebro") as never, ctx, {}, 1000, "Jeff Chesebro");
+  ok(self.ok && self.stamp?.method === "self" && self.stamp.submittedBy === "Jeff Chesebro" && self.stamp.submittedAt === 1000,
+    "#285 gate: a self stamp keeps today's submittedBy/At = owner/now");
+  const lim = { limits: { u2: { system_plain: 10_000 } }, roster };
+  const order = a285Decide("sent", q("Nic Trapani") as never, lim as never, {}, 1000, "Jeff Chesebro");
+  ok(order.ok && order.stamp?.method === "in_app", "#285 gate: an approver actor is checked before the owner's auto limit");
+  ok(a285Decide("sent", q("Nic Trapani") as never, lim as never, {}, 1000, "Nic Trapani").ok
+    && (a285Decide("sent", q("Nic Trapani") as never, lim as never, {}, 1000, "Nic Trapani") as { stamp: { method: string } }).stamp.method === "auto_limit",
+    "#285 gate: a non-approver still falls through to the owner's limit");
+  const holding = q("T285 Jena", rev("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt" }));
+  const h = a285Decide("sent", holding as never, ctx, {}, 1000, "Jeff Chesebro");
+  ok(h.ok && h.stamp === null, "#285 gate: an approval that still holds is not re-stamped by the approver who sends it");
+  const refused = a285Decide("sent", q("T285 Jena") as never, ctx, {}, 1000, "T285 Nic");
+  ok(!refused.ok && refused.error.includes("needs an approval on record"), "#285 gate: a non-roster actor sending an unapproved quote is refused");
+  const lapsedSent = { ...q("T285 Jena", rev("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt", approvedAgainst: { sell: 999, linesKey: "x" } })), status: "sent" };
+  const won = a285Decide("won", lapsedSent as never, ctx, {}, 1000, "Jeff Chesebro");
+  ok(won.ok && won.stamp?.method === "in_app" && won.stamp.decidedBy === "Jeff Chesebro", "#285 gate: an approver marking a lapsed sent quote Won (status menu) stamps their approval");
+
+  // quoteNextStep — the non-owner rows.
+  const R = (state: string, o: Record<string, unknown> = {}) => ({ state, reviewer: null, submittedBy: "T285 Jena", decidedBy: null, note: "", method: null, ...o });
+  const base = {
+    status: "draft", review: R("none"), holds: false, chip: null, owner: "T285 Jena", viewer: "Jeff Chesebro",
+    viewerCanApprove: true, viewerCanCreate: true, viewerCanSend: true, submittedAgo: "", reviewers: ["Jeff Chesebro", "Chris Mittlesteadt"], asOf: 42,
+  };
+  const v = (o: Record<string, unknown>) => a285Next({ ...base, ...o } as never);
+  const sec = (x: ReturnType<typeof a285Next>) => x.secondary.map((s) => `${s.action}:${s.label}`).join("|");
+  const draftMenu = "approve:Approve only (owner sends)|submit:Submit for approval|assign:Assign to…";
+  let x = v({});
+  ok(x.primary?.action === "send" && x.primary.label === "Send to customer →" && sec(x) === draftMenu && !x.approverMode && !x.viewerIsOwner,
+    `#285 next: Jeff views Jena's draft → Send to customer → · Approve only · Submit (got ${x.primary?.label} / ${sec(x)})`);
+  x = v({ review: R("changes", { decidedBy: "Chris Mittlesteadt", note: "Fix it" }) });
+  ok(x.primary?.label === "Send to customer →" && sec(x) === draftMenu, "#285 next: an approver on someone else's send-back gets the same draft row");
+  x = v({ review: R("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt" }), holds: false });
+  ok(x.primary?.label === "Send to customer →" && sec(x) === draftMenu && x.pill.label === "Approval cleared", "#285 next: …and on a lapsed approval");
+  x = v({ review: R("in_review", { reviewer: "Chris Mittlesteadt" }) });
+  ok(x.primary?.action === "send" && x.primary.label === "Approve & send →" && sec(x) === "sendBack:Send back…|approve:Approve only (owner sends)" && x.approverMode,
+    `#285 next: an approver on an in-review quote → Approve & send → · Send back… · ⋯ Approve only (got ${sec(x)})`);
+  x = v({ review: R("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt" }), holds: true });
+  ok(x.primary?.label === "Send to customer →" && x.secondary.length === 0, "#285 next: an approver on an approved, holding draft → Send to customer →");
+  x = v({ review: R("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt" }), holds: true, viewerCanApprove: false });
+  ok(x.primary?.label === "Send to customer →" && x.secondary.length === 0, "#285 next: a sender (not approver) on an approved, holding draft → Send to customer →");
+  x = v({ review: R("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt" }), holds: true, viewerCanApprove: false, viewerCanSend: false });
+  ok(x.primary === null, "#285 next: neither approve nor send → no Send on an approved draft");
+  x = v({ viewerCanApprove: false });
+  ok(x.primary?.action === "submit" && x.primary.label === "Submit for approval" && sec(x) === "assign:Assign to…", "#285 next: a creator (not approver) on someone else's draft → Submit for approval · ⋯ Assign to…");
+  x = v({ viewerCanApprove: false, review: R("changes", { decidedBy: "Chris Mittlesteadt" }) });
+  ok(x.primary?.label === "Resubmit for approval" && sec(x) === "assign:Assign to…", "#285 next: …Resubmit after a send-back");
+  x = v({ viewerCanApprove: false, review: R("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt" }), holds: false });
+  ok(x.primary?.label === "Resubmit for approval", "#285 next: …and after a lapsed approval");
+  x = v({ viewerCanApprove: false, viewerCanCreate: false, viewerCanSend: false });
+  ok(x.primary === null && x.secondary.length === 0, "#285 next: no create, approve or send → pill only");
+  x = v({ viewerCanApprove: false, review: R("in_review", { submittedBy: "Jeff Chesebro" }) });
+  ok(x.primary === null && sec(x) === "withdraw:Withdraw" && !x.approverMode, "#285 next: the submitter (not owner) of an in-review quote → ⋯ Withdraw");
+  x = v({ viewerCanApprove: false, review: R("in_review", { submittedBy: "T285 Jena" }) });
+  ok(x.primary === null && x.secondary.length === 0, "#285 next: a non-approver who didn't submit it → pill only");
+  x = v({ review: R("in_review", { submittedBy: "Jeff Chesebro" }) });
+  ok(x.primary?.label === "Approve & send →" && sec(x) === "sendBack:Send back…|approve:Approve only (owner sends)|withdraw:Withdraw",
+    "#285 next: an approver who submitted it also gets ⋯ Withdraw");
+  x = v({ status: "sent", review: R("approved", { method: "in_app", decidedBy: "Chris Mittlesteadt" }), holds: false });
+  ok(x.primary === null && x.secondary.length === 0, "#285 next: a sent quote with a lapsed approval → nothing for a non-owner approver (Won via the status menu stamps them)");
+  x = v({ owner: "Jeff Chesebro", review: R("changes", { decidedBy: "Chris Mittlesteadt", note: "Fix it" }) });
+  ok(x.primary?.action === "submit" && x.primary.label === "Resubmit for approval" && x.viewerIsOwner, "#285 next: an approver owner in changes keeps Resubmit");
+  x = v({ owner: "Jeff Chesebro" });
+  ok(x.primary?.label === "Send to customer →" && sec(x) === "submit:Submit for approval anyway", "#285 next: the approver owner's own draft is unchanged");
+
+  // "Back from review": an Approve only (in_app by a non-owner approver) lists for the owner while it is a draft.
+  const approveOnly = { owner: "T285 Jena", status: "draft", review: { state: "approved", method: "in_app", decidedBy: "Jeff Chesebro" } };
+  ok(a285Back(approveOnly, "T285 Jena") === "approved" && a285Back({ ...approveOnly, status: "sent" }, "T285 Jena") === null,
+    "#285 bell: an Approve only on a draft is 'back from review' for the owner; a send leaves the list");
+
+  // Wiring the pure rules can't reach.
+  const src285 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const comp = src285("src/components/quote-review/quote-next-step.tsx");
+  ok(comp.includes("nsSendAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendAction(quoteId, saved ? undefined : view.asOf), { versioned: true }")
+    && comp.includes("nsApproveAction(quoteId, saved ? undefined : view.asOf), { versioned: true }"),
+    "#285 control: Approve & send decides the shown version without a pre-save; a non-owner Send / Approve only carry asOf unless the pre-save just stored the viewer's edits");
+  ok(comp.includes("(!approverOnly || view.approverMode)") && comp.includes('approverOnly ? view.secondary.filter((s) => s.action === "approve")'),
+    "#285 control: the phone approver mode shows Approve & send, Send back and Approve only");
+  const ra = src285("src/app/(app)/quotes/review-actions.ts");
+  ok(ra.includes("export async function nsSendAction(id: string, asOf?: number)") && ra.includes("sendQuoteToCustomer(id, user, asOf)"), "#285 actions: nsSendAction passes asOf through");
+  const srv = src285("src/lib/quote-next-step-server.ts");
+  ok(srv.includes('viewerCanCreate: can("create", viewer.roles)') && srv.includes('viewerCanSend: can("send", viewer.roles)'), "#285 server: the view's create/send flags come from can()");
+  ok(!src285("src/lib/review-limits.ts").includes("export function canSelfApprove"), "#285 gate: canSelfApprove is replaced by approverOnTransition");
+}
+
+async function approval285AsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const Ops = await import("@/lib/quote-review-ops");
+  const { upsertDoc: a285Upsert } = await import("@/db/doc-store");
+  const id = (slug: string) => fixtureId(285, slug);
+  const item = { id: 1, sku: "A-1", desc: "Truss", qty: 2, unit: "ea", cost: 50, price: 100 };
+  const none = { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null };
+  const mk = (slug: string, extra: Record<string, unknown> = {}) =>
+    createFixture("quotes", {
+      id: id(slug), name: `T285 ${slug}`, customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner: "T285 Jena", preparedBy: "T285 Jena", value: 200, margin: 0.5, history: [], createdAt: 1, updatedAt: 1,
+      spec: { sections: [{ id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [item] }], mobs: [] },
+      review: none,
+      ...extra,
+    } as never);
+  const edit = async (qid: string, fn: (d: Record<string, unknown>) => void) => {
+    const d = JSON.parse(JSON.stringify(await Q.get(qid))) as Record<string, unknown>;
+    fn(d);
+    await a285Upsert("quotes", d as never);
+  };
+  type Sec = { sections: { items: { qty: number }[] }[] };
+  const err = (r: { ok: boolean; error?: string }) => (r.ok ? "" : (r as { error: string }).error);
+  const CHANGED = "This quote changed since you opened it — reload to review the current version.";
+  const JEFF = { name: "Jeff Chesebro", roles: ["Admin", "Estimator"] };
+  const NIC = { name: "T285 Nic", roles: ["Estimator"] };
+  const JENA = { name: "T285 Jena", roles: ["Estimator"] };
+  const STRANGER = { name: "T285 Stranger", roles: ["Estimator"] };
+
+  // Send to customer → on Jena's unsubmitted draft.
+  await mk("send");
+  const s = await Ops.sendQuoteToCustomer(id("send"), JEFF);
+  const sq = await Q.get(id("send"));
+  ok(s.ok && sq?.status === "sent" && sq.review?.state === "approved" && sq.review.method === "in_app" && sq.review.decidedBy === "Jeff Chesebro"
+    && sq.review.reviewer === "Jeff Chesebro" && !!sq.review.approvedAgainst,
+    `#285 DB: Jeff sends Jena's unsubmitted draft → sent, approved in_app by Jeff (got "${err(s)}")`);
+  // …over another approver's send-back.
+  await mk("send-ch", { review: { ...none, state: "changes", decidedBy: "Chris Mittlesteadt", note: "Fix it" } });
+  const sc = await Ops.sendQuoteToCustomer(id("send-ch"), JEFF);
+  ok(sc.ok && (await Q.get(id("send-ch")))?.review?.method === "in_app", "#285 DB: an approver's send overrides another approver's send-back");
+
+  // Anyone who can create submits; the submitter withdraws.
+  await mk("submit");
+  const sub = await Ops.submitQuoteForApproval(id("submit"), NIC, null);
+  const subQ = await Q.get(id("submit"));
+  ok(sub.ok && subQ?.review?.state === "in_review" && subQ.review.submittedBy === "T285 Nic", `#285 DB: a non-approver non-owner submits; submittedBy = the actor (got "${err(sub)}")`);
+  const strangerWd = await Ops.withdrawQuoteReview(id("submit"), STRANGER);
+  ok(!strangerWd.ok && err(strangerWd) === "Only the quote's owner or the person who submitted it can withdraw it." && (await Q.get(id("submit")))?.review?.state === "in_review",
+    `#285 DB: someone who neither owns nor submitted it cannot withdraw (got "${err(strangerWd)}")`);
+  ok((await Ops.withdrawQuoteReview(id("submit"), NIC)).ok && (await Q.get(id("submit")))?.review?.state === "none", "#285 DB: the submitter withdraws");
+  await Ops.submitQuoteForApproval(id("submit"), NIC, null);
+  ok((await Ops.withdrawQuoteReview(id("submit"), JENA)).ok && (await Q.get(id("submit")))?.review?.state === "none", "#285 DB: the owner still withdraws someone else's submission");
+  const noCreate = await Ops.submitQuoteForApproval(id("submit"), { name: "T285 Rev", roles: ["Reviewer"] }, null);
+  ok(!noCreate.ok && err(noCreate) === "You need create permission to submit a quote for approval." && (await Q.get(id("submit")))?.review?.state === "none",
+    `#285 DB: someone without create cannot submit (got "${err(noCreate)}")`);
+
+  // Approve only (owner sends).
+  await mk("only");
+  const only = await Ops.approveQuoteReview(id("only"), JEFF);
+  const onlyQ = await Q.get(id("only"));
+  ok(only.ok && onlyQ?.status === "draft" && onlyQ.review?.state === "approved" && onlyQ.review.method === "in_app" && onlyQ.review.decidedBy === "Jeff Chesebro" && !!onlyQ.review.approvedAgainst,
+    `#285 DB: Approve only on an unsubmitted draft → approved, still a draft (got "${err(only)}")`);
+  ok((await Ops.sendQuoteToCustomer(id("only"), JENA)).ok && (await Q.get(id("only")))?.status === "sent", "#285 DB: …and the owner sends it");
+  await mk("only-ch", { review: { ...none, state: "changes", decidedBy: "Chris Mittlesteadt", note: "Fix it" } });
+  const onlyCh = await Ops.approveQuoteReview(id("only-ch"), JEFF);
+  const onlyChQ = await Q.get(id("only-ch"));
+  ok(onlyCh.ok && onlyChQ?.review?.state === "approved" && onlyChQ.review.note === "" && onlyChQ.review.reviewer === "Jeff Chesebro",
+    "#285 DB: Approve only over a send-back → approved, the send-back note cleared");
+  await edit(id("only-ch"), (d) => { (d.spec as Sec).sections[0].items[0].qty = 3; d.value = 300; });
+  const lapsedBefore = (await Q.get(id("only-ch")))!.review!.decidedAt!;
+  const reOnly = await Ops.approveQuoteReview(id("only-ch"), JEFF);
+  const reOnlyQ = await Q.get(id("only-ch"));
+  ok(reOnly.ok && (reOnlyQ?.review?.decidedAt ?? 0) >= lapsedBefore && reOnlyQ?.review?.approvedAgainst?.sell === 300,
+    "#285 DB: Approve only re-approves a lapsed approval on a draft (new snapshot)");
+  const intact = await Ops.approveQuoteReview(id("only-ch"), JEFF);
+  ok(!intact.ok && err(intact) === "This quote is already approved.", `#285 DB: Approve only on an approval that still holds is refused (got "${err(intact)}")`);
+  await mk("only-own", { owner: "Jeff Chesebro", preparedBy: "Jeff Chesebro" });
+  const ownOnly = await Ops.approveQuoteReview(id("only-own"), JEFF);
+  ok(!ownOnly.ok && (await Q.get(id("only-own")))?.review?.state === "none", "#285 DB: Approve only is not for the approver's own quote");
+  await mk("only-sent", { status: "sent" });
+  const sentOnly = await Ops.approveQuoteReview(id("only-sent"), JEFF);
+  ok(!sentOnly.ok && err(sentOnly) === "This quote isn't waiting for approval." && (await Q.get(id("only-sent")))?.review?.state === "none",
+    `#285 DB: Approve only on a sent quote is refused (got "${err(sentOnly)}")`);
+  await mk("only-asof");
+  await Q.update(id("only-asof"), { scopeNarrative: "Jena kept editing" } as never);
+  const onlyStale = await Ops.approveQuoteReview(id("only-asof"), JEFF, 1);
+  ok(!onlyStale.ok && err(onlyStale) === CHANGED && (await Q.get(id("only-asof")))?.review?.state === "none",
+    `#285 DB: Approve only with a stale asOf is refused and writes nothing (got "${err(onlyStale)}")`);
+  ok((await Q.approve(id("only-asof"), { by: "Jeff Chesebro" }))?.review?.state === "none", "#285 DB: the store's approve() without allowUnsubmitted still needs in review");
+
+  // Approve & send.
+  await mk("ans", { review: { ...none, state: "in_review", submittedBy: "T285 Nic", submittedAt: 9 } });
+  await Q.update(id("ans"), { scopeNarrative: "Jena kept editing" } as never);
+  const shown = 1;
+  const before = await Q.get(id("ans"));
+  const stale = await Ops.sendQuoteToCustomer(id("ans"), JEFF, shown);
+  const after = await Q.get(id("ans"));
+  ok(!stale.ok && err(stale) === CHANGED && after?.status === "draft" && after.review?.state === "in_review" && after.updatedAt === before?.updatedAt,
+    `#285 DB: Approve & send with a stale asOf is refused, nothing written (got "${err(stale)}")`);
+  const ans = await Ops.sendQuoteToCustomer(id("ans"), JEFF, after!.updatedAt);
+  const ansQ = await Q.get(id("ans"));
+  ok(ans.ok && ansQ?.status === "sent" && ansQ.review?.method === "in_app" && ansQ.review.decidedBy === "Jeff Chesebro" && ansQ.review.submittedBy === "T285 Nic",
+    `#285 DB: Approve & send with the current asOf → sent, in_app by Jeff, submitter kept (got "${err(ans)}")`);
+
+  // A pure Reviewer (approve, no send) may approve & send; neither permission may not.
+  await mk("rev", { review: { ...none, state: "in_review", submittedBy: "T285 Jena", submittedAt: 9 } });
+  const pure = await Ops.sendQuoteToCustomer(id("rev"), { name: "Jeff Chesebro", roles: ["Reviewer"] });
+  ok(pure.ok && (await Q.get(id("rev")))?.status === "sent", `#285 DB: a pure Reviewer without send can approve & send (got "${err(pure)}")`);
+  await mk("noperm");
+  const noPerm = await Ops.sendQuoteToCustomer(id("noperm"), { name: "Jeff Chesebro", roles: [] });
+  ok(!noPerm.ok && err(noPerm) === "You need send or approve permission to send a quote." && (await Q.get(id("noperm")))?.status === "draft",
+    `#285 DB: neither send nor approve → refused (got "${err(noPerm)}")`);
+
+  // The gate reads the ACTOR's approve flag from the roster by name: off-roster is never an approver.
+  await mk("offroster");
+  const off = await Ops.sendQuoteToCustomer(id("offroster"), { name: "T285 Nic", roles: ["Admin"] });
+  const offQ = await Q.get(id("offroster"));
+  ok(!off.ok && err(off).includes("needs an approval on record") && offQ?.status === "draft" && offQ.review?.state === "none",
+    `#285 DB: an off-roster actor holding Admin roles is still refused at the gate (got "${err(off)}")`);
+  const nonAppr = await Ops.sendQuoteToCustomer(id("offroster"), NIC);
+  ok(!nonAppr.ok && err(nonAppr).includes("needs an approval on record"), "#285 DB: a non-approver sender cannot send someone else's unapproved draft");
 }

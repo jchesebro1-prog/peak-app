@@ -61,7 +61,8 @@ export async function nsAttestAction(id: string, note: string): Promise<NextStep
   const user = await requireUser();
   return after(id, user, await attestQuoteApproval(id, user, note));
 }
-export async function nsSendAction(id: string): Promise<NextStepSync> {
+/** #285: `asOf` — Approve & send →, or a non-owner's Send, decides the version shown. */
+export async function nsSendAction(id: string, asOf?: number): Promise<NextStepSync> {
   const user = await requireUser();
-  return after(id, user, await sendQuoteToCustomer(id, user));
+  return after(id, user, await sendQuoteToCustomer(id, user, asOf));
 }

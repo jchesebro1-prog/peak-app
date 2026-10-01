@@ -34,8 +34,9 @@ import {
   approvalHolds,
   autoSnapshotStale,
   canAutoApprove,
-  canSelfApprove,
+  approverOnTransition,
   NO_REVIEW_LIMITS,
+  quoteOwnerName,
   type AutoApprovalEval,
   type AutoApprovalSnapshot,
   type ReviewLimitContext,
@@ -406,6 +407,12 @@ export type ReviewOpts = {
    *  `updatedAt` still equals this (the version the approver was shown);
    *  checked under the row lock. */
   expectUpdatedAt?: number;
+  /** #285: approve() only — "Approve only (owner sends)": also decide a quote
+   *  that was never submitted, came back, or carries a lapsed approval
+   *  (state none / changes / approved). The caller (approveQuoteReview) has
+   *  checked it is a draft, the actor a non-owner approver, and an approved
+   *  one lapsed; the version check still applies under the lock. */
+  allowUnsubmitted?: boolean;
 };
 
 function rv(state: ReviewState, o: Partial<QuoteReview> = {}): QuoteReview {
@@ -1097,17 +1104,28 @@ export function autoApprovedReview(
   };
 }
 
-/** #284: the review record a self-approval writes (approver owner, own quote). */
-export function selfApprovedReview(owner: string, q: GateQuote, now: number): QuoteReview {
+/** #284/#285: the review record the approver moving a quote writes
+ *  (approverOnTransition). "self" (an approver owner, own quote) keeps #284's
+ *  submittedBy/At = owner/now; "in_app" (any other approver — Send to
+ *  customer → or Approve & send →) keeps the in-review record's submitter,
+ *  else none. Either way the approver is decidedBy and reviewer. */
+export function approverReview(
+  approver: { by: string; method: "self" | "in_app" },
+  q: GateQuote,
+  now: number
+): QuoteReview {
+  const r = q.review;
+  const inReview = r?.state === "in_review";
+  const self = approver.method === "self";
   return {
     state: "approved",
-    reviewer: null,
-    submittedBy: owner,
-    submittedAt: now,
-    decidedBy: owner,
+    reviewer: approver.by,
+    submittedBy: self ? quoteOwnerName(q) || approver.by : inReview ? r?.submittedBy || null : null,
+    submittedAt: self ? now : inReview ? r?.submittedAt || null : null,
+    decidedBy: approver.by,
     decidedAt: now,
     note: "",
-    method: "self",
+    method: approver.method,
     auto: null,
     approvedAgainst: approvalFingerprint(q),
   };
@@ -1126,8 +1144,10 @@ export function selfApprovedReview(owner: string, q: GateQuote, now: number): Qu
  *   re-stamped. A limit raised or lowered in Settings on an unchanged quote
  *   never re-stamps (#242 final) — the grant keeps its decidedAt; a lowered
  *   limit governs new grants only;
- * - an approver owner moving their own quote → open, with a `self` approval
- *   to write (#284) — checked before the owner's review limit;
+ * - an approver moving the quote → open, with that approver's approval to
+ *   write (approverOnTransition / approverReview): `self` for an approver
+ *   owner (#284), `in_app` for any other approver (#285) — checked before the
+ *   owner's review limit;
  * - else the owner's review limit: fits → open, with the auto-approval
  *   record to write in the same patch; over / blank / owner off the roster /
  *   changes requested → today's refusal sentence, verbatim.
@@ -1150,9 +1170,9 @@ export function decideApprovalGate(
     const cur = canAutoApprove(q, ctx);
     return { ok: true, stamp: cur && autoSnapshotStale(q, cur) ? autoApprovedReview(cur, now, actor, trigger) : null };
   }
-  // #284: an approver's own quote, moved by its owner, approves itself.
-  const selfOwner = canSelfApprove(q, ctx, actor);
-  if (selfOwner) return { ok: true, stamp: selfApprovedReview(selfOwner, q, now) };
+  // #284/#285: the approver moving the quote approves it — self on their own, in_app on anyone else's.
+  const approver = approverOnTransition(q, ctx, actor);
+  if (approver) return { ok: true, stamp: approverReview(approver, q, now) };
   const ev = canAutoApprove(q, ctx);
   if (ev) return { ok: true, stamp: autoApprovedReview(ev, now, actor, trigger) };
   return open;
@@ -1324,7 +1344,7 @@ export async function setStatus(
   // legacy approval passes on its own record, so it makes exactly the DB
   // reads it made before #242 (#242 final).
   const gated = !resolveStatusGate(status, null, opts).ok;
-  // #284: a snapshot-stale approval also needs the context (the owner may self-approve).
+  // #284: a snapshot-stale approval also needs the context (the approver moving it may approve it, #285).
   const needsLimits =
     gated && !(hasApproval(q.review) && q.review?.method !== "auto_limit" && approvalSnapshotMatches(q));
   const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
@@ -1592,9 +1612,12 @@ export async function claimReview(
 }
 
 /** #284: an approver's decision applies only to an in-review quote still at
- *  the version they were shown (`expectUpdatedAt`, when given). */
+ *  the version they were shown (`expectUpdatedAt`, when given). #285:
+ *  `allowUnsubmitted` (approve only) also takes none / changes / approved. */
 function decidableUnderLock(q: Quote, opts: ReviewOpts): boolean {
-  if (q.review?.state !== "in_review") return false;
+  const state = q.review?.state || "none";
+  const ok = state === "in_review" || (!!opts.allowUnsubmitted && (state === "none" || state === "changes" || state === "approved"));
+  if (!ok) return false;
   return typeof opts.expectUpdatedAt !== "number" || q.updatedAt === opts.expectUpdatedAt;
 }
 
@@ -1607,10 +1630,13 @@ export async function approve(
     // the version the approver was shown. A no-op leaves the quote unchanged;
     // the caller reads the outcome from the returned quote.
     if (!decidableUnderLock(q, opts)) return;
-    const review = q.review;
+    // #285: an unsubmitted quote has no record yet; a decision outside review
+    // names this approver as reviewer (the old one belonged to another round).
+    const inReview = q.review?.state === "in_review";
+    const review = q.review || rv("none");
     review.state = "approved";
     review.decidedBy = opts.by || null;
-    review.reviewer = review.reviewer || review.decidedBy;
+    review.reviewer = (inReview && review.reviewer) || review.decidedBy;
     review.decidedAt = Date.now();
     review.note = opts.note || "";
     review.auto = null;

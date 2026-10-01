@@ -242,20 +242,28 @@ export function canAutoApprove(q: ReviewableQuote, ctx: ReviewLimitContext): Aut
 }
 
 /**
- * #284 — an approver's own quote approves itself at the gated transition
- * (Jeff 2026-10-01: "Approvers' own quotes are treated as approved"). Only
- * when the person MOVING the quote is its owner, the owner holds `approve` on
- * the live roster, and no reviewer asked for changes (same block as attest /
- * auto, #60). Returns the owner's name, or null.
+ * #284/#285 — the approver moving a quote approves it at the gated
+ * transition. Jeff (2026-10-01): an approver may send any quote, not only
+ * their own ("Jena created it but I edited and I want to review and send
+ * it"). Non-null when the ACTOR — not the owner — is one active roster entry
+ * holding `approve`; an actor off the roster is never an approver here.
+ * `method` is "self" when the actor owns the quote (quoteOwnerName), else
+ * "in_app". Changes requested blocks only "self" (same block as attest /
+ * auto, #60): a non-owner approver deciding to send is a fresh approver
+ * decision and may override another approver's send-back.
  */
-export function canSelfApprove(q: ReviewableQuote, ctx: ReviewLimitContext, actor: string | null): string | null {
-  if (q.review?.state === "changes") return null;
-  const owner = quoteOwnerName(q);
+export function approverOnTransition(
+  q: ReviewableQuote,
+  ctx: ReviewLimitContext,
+  actor: string | null
+): { by: string; method: "self" | "in_app" } | null {
   const who = (actor || "").trim();
-  if (!owner || !who || owner.toLowerCase() !== who.toLowerCase()) return null;
-  const id = resolveOwnerId(owner, ctx.roster);
-  if (!id) return null;
-  return ctx.roster.find((u) => u.id === id)?.canApprove ? owner : null;
+  const id = resolveOwnerId(who, ctx.roster);
+  if (!id || !ctx.roster.find((u) => u.id === id)?.canApprove) return null;
+  const owner = quoteOwnerName(q).toLowerCase();
+  const self = owner !== "" && owner === who.toLowerCase();
+  if (self && q.review?.state === "changes") return null;
+  return { by: who, method: self ? "self" : "in_app" };
 }
 
 /**
