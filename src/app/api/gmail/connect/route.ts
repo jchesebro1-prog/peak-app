@@ -6,6 +6,7 @@ import {
   CALENDAR_READONLY_SCOPE,
   CALENDAR_SCOPE,
   DRIVE_SCOPE,
+  DRIVE_READONLY_SCOPE,
   TASKS_SCOPE,
   gmailEnabled,
   googleConfigured,
@@ -66,7 +67,8 @@ export async function GET(req: NextRequest) {
 
   const state = signState({ mailboxKey, userId: me.id });
   const hint = ownsPersonal ? me.email : undefined;
-  // ?calendar=1 (D77) / ?tasks=1 (D146) / ?drive=1 (Recordings §5.1) —
+  // ?calendar=1 (D77) / ?tasks=1 (D146) / ?drive=1 (Recordings §5.1) /
+  // ?drivephotos=1 (#283) —
   // Settings' "Enable calendar" / "Enable Google Tasks sync" / "Enable Drive
   // archive" opt-ins: same consent flow, the extra scope(s)
   // appended. Both may be present at once (e.g. a second opt-in after the
@@ -79,6 +81,9 @@ export async function GET(req: NextRequest) {
   // ?drive=1 — "Enable Drive archive" (Recordings spec §5.1): drive.file so
   // the nightly archive job can file recordings under this Google account.
   if (req.nextUrl.searchParams.get("drive") === "1") extraScopes.push(DRIVE_SCOPE);
+  // ?drivephotos=1 — "Enable Drive photos" (#283): read-only Drive so the
+  // Peak Product Photos sync can see files people drop in that folder.
+  if (req.nextUrl.searchParams.get("drivephotos") === "1") extraScopes.push(DRIVE_READONLY_SCOPE);
   return NextResponse.redirect(authorizeUrl(state, hint, extraScopes));
 }
 

@@ -38088,6 +38088,16 @@ import { readFileSync as mw245Read } from "node:fs";
 }
 
 // ---------------------------------------------------------------------------
+// #283 — ?drivephotos=1 asks Google for drive.readonly.
+// ---------------------------------------------------------------------------
+import { readFileSync as c283Read } from "node:fs";
+{
+  const src = c283Read("src/app/api/gmail/connect/route.ts", "utf8");
+  ok(/searchParams\.get\("drivephotos"\)\s*===\s*"1"\)\s*extraScopes\.push\(DRIVE_READONLY_SCOPE\)/.test(src),
+    "#283 connect: ?drivephotos=1 adds drive.readonly to the consent request");
+}
+
+// ---------------------------------------------------------------------------
 // #245 catalog-wide — "Whole catalog images": one datasheet fetch target per
 // unique URL across the whole catalog (catalogFetchTargets). Pure, no DB.
 // ---------------------------------------------------------------------------

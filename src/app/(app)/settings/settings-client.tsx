@@ -30,6 +30,7 @@ import {
   searchAddressAction,
   setDefaultQuoteOfficeAction,
   setRecordingsArchiveMailboxAction,
+  setCatalogPhotosMailboxAction,
   setRecordingsBetaUsersAction,
   setRolesAction,
   setUserStatusAction,
@@ -154,6 +155,13 @@ type RecordingsVM = {
   mailboxes: { key: string; address: string; connectedBy: string; driveOn: boolean }[];
 };
 
+/** #283 — Catalog photos (Google Drive) account picker. */
+type CatalogPhotosVM = {
+  mailbox: string | null;
+  /** Every connected mailbox; `readOn` = grant carries drive.readonly. */
+  mailboxes: { key: string; address: string; connectedBy: string; readOn: boolean }[];
+};
+
 const INTEGRATION_ANCHOR = Object.fromEntries(INTEGRATION_CARDS.map((c) => [c.key, c.key])) as Record<
   (typeof INTEGRATION_CARDS)[number]["key"],
   string
@@ -174,6 +182,7 @@ export default function SettingsClient({
   meName,
   gmail,
   recordings,
+  catalogPhotos,
   settings,
   intakeCatalog,
   visitReasons,
@@ -194,6 +203,7 @@ export default function SettingsClient({
   meName: string;
   gmail: { enabled: boolean; mailboxes: MailboxVM[]; redirectUri: string; redirectWarning: string | null };
   recordings: RecordingsVM;
+  catalogPhotos: CatalogPhotosVM;
   settings: {
     companyName: string;
     accent: string;
@@ -280,6 +290,8 @@ export default function SettingsClient({
 
   // ---- Recordings archive account + pilot gate (spec §1.3 / §5.1) ----
   const [archiveMailbox, setArchiveMailbox] = useState<string>(recordings.archiveMailbox ?? "");
+  const [photosMailbox, setPhotosMailbox] = useState(catalogPhotos.mailbox ?? "");
+  const photosDirty = (photosMailbox || null) !== (catalogPhotos.mailbox ?? null);
   const archiveDirty = (recordings.archiveMailbox ?? "") !== archiveMailbox;
   const [betaUsers, setBetaUsers] = useState<string[]>(recordings.betaUsers);
   const betaDirty =
@@ -1641,6 +1653,58 @@ export default function SettingsClient({
                     </a>
                   </div>
                 ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
+          <label style={labelStyle}>Catalog photos account (Google Drive)</label>
+          <div style={{ fontSize: 12, color: "#8c919c", lineHeight: 1.5, marginBottom: 8 }}>
+            Photos in this account&apos;s <b>Peak Product Photos</b> folder (and its subfolders) sync into the catalog,
+            matched by part number in the file name. Read-only — nothing in Drive is ever changed.
+          </div>
+          {catalogPhotos.mailboxes.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#9aa0ab", lineHeight: 1.5 }}>
+              No connected mailboxes yet — connect one under Mailboxes above, then pick it here.
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <select value={photosMailbox} onChange={(e) => setPhotosMailbox(e.target.value)} style={{ ...inputStyle, maxWidth: 420, cursor: "pointer" }}>
+                <option value="">— not configured —</option>
+                {catalogPhotos.mailboxes.map((mb) => (
+                  <option key={mb.key} value={mb.key}>
+                    {mb.address}
+                    {mb.connectedBy ? ` (${mb.connectedBy})` : ""}
+                    {mb.readOn ? " · Drive photos on" : " · needs Drive photos"}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="pk-btn-accent"
+                disabled={!photosDirty}
+                style={!photosDirty ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                onClick={() => run(() => setCatalogPhotosMailboxAction(photosMailbox || null))}
+              >
+                Save
+              </button>
+            </div>
+          )}
+          {catalogPhotos.mailboxes.some((mb) => !mb.readOn) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+              {catalogPhotos.mailboxes.filter((mb) => !mb.readOn).map((mb) => (
+                <div key={mb.key} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "#8c919c" }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{mb.address}</span>
+                  <span>needs read-only Drive access before it can sync photos</span>
+                  <a
+                    className="pk-btn-outline"
+                    href={"/api/gmail/connect?mailbox=" + encodeURIComponent(mb.key) + "&drivephotos=1"}
+                    title="Re-runs the Google consent with read-only Drive added"
+                    style={{ flexShrink: 0, textDecoration: "none" }}
+                  >
+                    Enable Drive photos
+                  </a>
+                </div>
+              ))}
             </div>
           )}
         </div>
