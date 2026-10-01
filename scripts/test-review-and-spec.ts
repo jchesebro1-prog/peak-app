@@ -10683,6 +10683,7 @@ seeded()
   .then(() => rewards282Phase3RestoreAsyncChecks())
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
+  .then(() => rewards282PointsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -39010,7 +39011,7 @@ async function rewards282Phase3RestoreAsyncChecks(): Promise<void> {
     await createFixture("quotes", { ...common, id: H, name: "T282 restore hold", value: 600, source: "repair", quoteType: "repair", repair: { total: 1000, rewardCredit: 400 } });
     const e2 = await Q.restoreQuoteRevision(E, eRev!.rev, "Test");
     const e2q = await Q.get(E);
-    ok(e2.ok && r282cQuoteCredit(e2q) === 100 && e2q?.value === 1900 && /reduced to \$100\.00/.test((e2.ok && e2.creditNotice) || ""),
+    ok(e2.ok && r282cQuoteCredit(e2q) === 100 && e2q?.value === 1900 && /reduced to \$100 /.test((e2.ok && e2.creditNotice) || ""),
       `#282 P3 restore DB: an Estimator recall whose credit exceeds today's available clamps it (500 − 400 held = 100; value 1,900) and says so (got ${r282cQuoteCredit(e2q)} / ${e2q?.value})`);
     const f2 = await Q.restoreQuoteRevision(F, fRev!.rev, "Test");
     const f2q = await Q.get(F);
@@ -39505,5 +39506,187 @@ async function rewards282LostAsyncChecks(): Promise<void> {
     await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
     for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
+  }
+}
+
+/* ======================================================================
+   #282 points — customers see Rewards credit as POINTS (Jeff 2026-10-01:
+   "in the back end it would be dollar total, but in the customer end it
+   would just be points … round the points up"). 1 point = $1, rounded up.
+   Postings are whole dollars (earn + starting credit round up, an applied
+   credit rounds down) so points and dollars never drift; the portal card,
+   the Estimator customer document and the service letters print points;
+   staff surfaces print "$300 · 300 pts". Pure checks here; the DB checks are
+   rewards282PointsAsyncChecks() on the promise chain.
+   ====================================================================== */
+import {
+  dollarsAndPoints as r282pDollarsPts,
+  formatPoints as r282pFormat,
+  formatPointsShort as r282pShort,
+  pointsFor as r282pPoints,
+  rewardPointsAppliedLabel as r282pApplied,
+  rewardPointsPhrase as r282pPhrase,
+  rewardPointsRowLabel as r282pRow,
+} from "@/lib/rewards/points";
+import { RewardCreditPanel as r282pEstPanel } from "@/app/(app)/estimator/reward-credit-panel";
+
+{
+  // ---- the helper ----
+  ok(r282pPoints(0) === 0 && r282pPoints(0.01) === 1 && r282pPoints(125.5) === 126 && r282pPoints(300) === 300 && r282pPoints(-5) === 0,
+    "#282 points: pointsFor rounds UP (0 → 0, 0.01 → 1, 125.5 → 126, 300 → 300, negative → 0)");
+  ok(r282pPoints((10000 * 1.1) / 100) === 110 && r282pPoints(NaN) === 0, "#282 points: float noise (110.00000000000001) is 110, junk is 0");
+  ok(r282pFormat(1) === "1 point" && r282pFormat(0) === "0 points" && r282pFormat(1234) === "1,234 points" && r282pShort(300) === "300 pts" && r282pShort(1) === "1 pt",
+    "#282 points: formatPoints singular/plural (\"1 point\", \"1,234 points\"); short form \"300 pts\"");
+  ok(r282pApplied(300) === "Rewards points applied (300 pts)" && r282pApplied(12.5) === "Rewards points applied (13 pts)" && r282pRow(300) === "Rewards points (300 pts)" &&
+     r282pPhrase(300) === "300 rewards points" && r282pPhrase(1) === "1 rewards point",
+    "#282 points: the document / letter labels round up and read as points");
+  ok(r282pDollarsPts(300) === "$300 · 300 pts" && r282pDollarsPts(12.5) === "$12.50 · 13 pts" && r282pDollarsPts(-5) === "−$5 · 0 pts" && r282pDollarsPts(1) === "$1 · 1 pt",
+    "#282 points: staff label = dollars with points alongside (\"$300 · 300 pts\")");
+
+  // ---- whole-dollar postings ----
+  ok(r282bEarnAmount(12345, 1.5) === 186 && r282bEarnAmount(10000, 1.1) === 110 && r282bEarnAmount(1000, 2) === 20 && r282bEarnAmount(50, 0.5) === 1,
+    "#282 points: earn posts whole dollars rounded up (185.175 → 186; 110 stays 110; 0.25 → 1)");
+  const hist = [{ amount: 12345, at: 1 }];
+  ok(r282bStarting(hist, { retro: { ratePct: 1, capPerCustomer: 1000 } }).proposed === 124, "#282 points: starting credit rounds up to whole dollars (123.45 → 124)");
+  ok(r282bStarting(hist, { retro: { ratePct: 1, capPerCustomer: 100 } }).proposed === 100, "#282 points: starting credit rounds up THEN caps (124 → cap 100)");
+  ok(r282bStarting([{ amount: 500000, at: 1 }], { retro: { ratePct: 1, capPerCustomer: 1000.75 } }).proposed === 1000,
+    "#282 points: a fractional cap counts as its whole dollars, so the posting stays whole");
+
+  // ---- the Estimator apply clamp, whole dollars ----
+  ok(r282bMaxApply(500.75, 1000) === 500 && r282bMaxApply(1000, 999.5) === 999 && r282bMaxApply(300, 1000) === 300 && r282bMaxApply(0.4, 1000) === 0,
+    "#282 points: max applicable credit is whole dollars, rounded down (a legacy cents balance keeps its cents)");
+  const item = (id: number, price: number) => ({ id, sku: `S${id}`, desc: `Item ${id}`, qty: 1, unit: "ea", cost: price * 0.6, price });
+  const one = [{ id: "a", name: "a", kind: "materials", mfr: "", freightPct: 0, items: [item(1, 1000)] } as R282bSection];
+  const legacy = r282bSanitize(r282bWith(one, 250.5, 9), 1000);
+  ok(legacy.ok && legacy.credit === 250 && legacy.rounded && legacy.clamped && r282bCreditOf(legacy.sections) === 250,
+    "#282 points: the server clamp rounds a posted cents credit down to whole dollars and flags it as rounding only");
+  const capped = r282bSanitize(r282bWith(one, 700, 9), 300.9);
+  ok(capped.ok && capped.credit === 300 && capped.clamped && !capped.rounded, "#282 points: clamped to the available amount, in whole dollars");
+  const exact = r282bSanitize(r282bWith(one, 200, 9), 1000);
+  ok(exact.ok && exact.credit === 200 && !exact.clamped && !exact.rounded, "#282 points: a whole-dollar credit within available passes untouched");
+  const estAct = r282Read("src/app/(app)/estimator/actions.ts", "utf8");
+  ok(/res\.rounded && res\.credit > 0\s*\n\s*\? `Rewards credit rounded down to whole dollars/.test(estAct) && /max = maxApplicableCredit\(available, totals\(withoutRewardCredit\(sections\), 0\)\.grand\);/.test(estAct),
+    "#282 points: the Estimator save clamps with the whole-dollar max and names a rounding-only cut");
+  const panelSrc = r282Read("src/app/(app)/estimator/reward-credit-panel.tsx", "utf8");
+  ok(/const amount = typed \? normalizeServiceCredit\(typed\) : max;/.test(panelSrc) && /inputMode="numeric"/.test(panelSrc),
+    "#282 points: the Apply credit control takes whole dollars (a typed 12.75 applies 12)");
+  const panelText = r282dText(r282cRender(r282cEl(r282pEstPanel, {
+    info: { enabled: true, balance: 300, available: 300 }, applied: 0, preCreditTotal: 1000, editable: true, hasSystems: true, onApply: () => {}, onRemove: () => {},
+  })));
+  ok(panelText.includes("Balance $300 · 300 pts") && panelText.includes("Available for this quote $300 · 300 pts"),
+    `#282 points: the Estimator Apply credit panel (staff) shows dollars and points (${panelText.slice(0, 140)})`);
+
+  // ---- the portal view carries points, never the dollar balance ----
+  const pv = r282dPortalView({ program: { ...r282Default, perks: [] }, spend: 30000, balance: 125.01, entries: [], now: Date.now() });
+  ok(pv.points === 126 && !("balance" in pv) && !JSON.stringify(pv).includes("125.01"), "#282 points: the portal view carries points (125.01 → 126) and no dollar balance");
+  ok(r282dPortalView({ program: { ...r282Default, perks: [] }, spend: 0, balance: -40, entries: [], now: Date.now() }).points === 0, "#282 points: a negative balance is 0 points");
+  const card = r282dText(r282cRender(r282cEl(r282dPortalCard, { view: { ...pv, points: 1 }, companyName: "Peak" })));
+  ok(card.includes("Rewards points") && card.includes("1 point") && !card.includes("1 points") && card.includes("more in purchases to reach Silver") &&
+     card.includes("Points are applied by your Peak estimator on your next quote.") && !/credit/i.test(card),
+    `#282 points: the portal card shows points (singular), dollar progress, and never a credit balance (${card.slice(0, 160)})`);
+
+  // ---- customer documents print points, never "Rewards credit $" ----
+  const rows = r282dText(r282cRender(r282cEl(R282cRows, { gross: 1300, credit: 300, net: 1000, mono: "m" })));
+  ok(rows.includes("Rewards points (300 pts) −$300") && rows.includes("Total $1,000") && !/Rewards credit/.test(rows),
+    `#282 points: the flame/inspection letter row reads "Rewards points (300 pts) −$300" and the net total (${rows})`);
+  const qd = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
+  ok(/<span>\{rewardPointsAppliedLabel\(p\.t\.credit \|\| 0\)\}<\/span>\s*\n\s*<span style=\{\{ fontFamily: "var\(--font-mono\)" \}\}>−\{fmt\(p\.t\.credit \|\| 0\)\}<\/span>/.test(qd),
+    "#282 points: the Estimator customer document prints \"Rewards points applied (N pts)\" with −$ in the price column (preview + print route share it)");
+  const rl = r282Read("src/app/(app)/repairs/letter/letter-view.tsx", "utf8");
+  ok(/after applying \{rewardPointsPhrase\(price\.credit\)\} \(\{money\(price\.credit\)\}\)/.test(rl), "#282 points: the repair letter reads \"…will cost $X after applying N rewards points ($Y)\"");
+  const ren = r282Read("src/lib/renewal-outreach.ts", "utf8");
+  ok(/Applied to the quoted price of \$\{money\(p\.gross\)\}: \$\{rewardPointsPhrase\(p\.credit\)\} \(\$\{money\(p\.credit\)\}\)\. The total below is after the points\./.test(ren),
+    "#282 points: the renewal-letter PDF names points, not a rewards credit");
+  for (const f of [
+    "src/app/(app)/estimator/quote-document.tsx",
+    "src/components/rewards/letter-credit-rows.tsx",
+    "src/app/(app)/repairs/letter/letter-view.tsx",
+    "src/app/(app)/flame-tests/letter/letter-view.tsx",
+    "src/app/(app)/inspections/letter/letter-view.tsx",
+    "src/lib/renewal-outreach.ts",
+    "src/app/portal/rewards-card.tsx",
+  ]) {
+    const src = r282Read(f, "utf8");
+    ok(!/["'`>]\s*Rewards credit|rewards credit is applied|REWARD_CREDIT_DESC/i.test(src), `#282 points: ${f} prints no "Rewards credit" wording to the customer`);
+  }
+
+  // ---- staff surfaces keep dollars and add points ----
+  const sc = r282Read("src/app/(app)/companies/[id]/rewards-card.tsx", "utf8");
+  ok(/\{dollarsAndPoints\(credit\.balance\)\}/.test(sc) && /\{dollarsAndPoints\(credit\.available\)\}/.test(sc), "#282 points: the company Rewards card shows balance and available as \"$X · N pts\"");
+  const rw = r282Read("src/app/(app)/rewards/page.tsx", "utf8");
+  ok(/dollarsAndPoints\(credit\.get\(r\.companyId\)!\.balance\) : "—"/.test(rw), "#282 points: /rewards Credit column shows dollars and points");
+  const st = r282Read("src/app/(app)/settings/rewards/page.tsx", "utf8");
+  ok(/proposed \{dollarsAndPoints\(r\.proposed\)\}/.test(st) && /Posted \{dollarsAndPoints\(r\.posted\)\}/.test(st), "#282 points: Settings → Starting credit shows dollars and points");
+  const sp = r282Read("src/components/rewards/service-credit-panel.tsx", "utf8");
+  ok(/\{dollarsAndPoints\(shownInfo\.balance\)\}/.test(sp) && /\{dollarsAndPoints\(available\)\}/.test(sp) && /−\{dollarsAndPoints\(applied\)\}/.test(sp),
+    "#282 points: the service builders' credit box shows dollars and points");
+}
+
+async function rewards282PointsAsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const P = await import("@/lib/stores/reward-perks");
+  const Q = await import("@/lib/stores/quotes");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "pts-co");
+  const BIG = fixtureId(282, "pts-big");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const program = (enabled: boolean) => ({
+    ...r282Default,
+    enabled,
+    earnPct: { base: 0, copper: 1.5, silver: 2, gold: 2.5, platinum: 3 },
+    retro: { ratePct: 1.5, capPerCustomer: 1000 },
+  });
+  const project = (slug: string, customerId: string, value: number) =>
+    createFixture("projects", { id: fixtureId(282, slug), kind: "project", name: `T282 ${slug}`, customer: "", customerId, quoteId: null,
+      projectType: null, value, margin: 0, createdAt: 1, updatedAt: 1, startedAt: 2, stageHistory: [], source: { system: "daylite", importedAt: 1 } });
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 Points Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await upsertCustomer({ id: BIG, name: "Test282 Points Big Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await project("pts-hist", CO, 30033);
+    await project("pts-big-hist", BIG, 100000);
+
+    // Starting credit (posted before launch): 1.5 % of 30,033 = 450.495 → 451; 1,500 → capped 1,000.
+    await setBlob("rewards_program", { ...program(false), launchedAt: null } as unknown as Record<string, unknown>);
+    const row = (await L.startingCreditBoard()).find((r) => r.companyId === CO);
+    ok(!!row && row.proposed === 451, `#282 points DB: starting credit proposes whole dollars, rounded up (450.495 → ${row?.proposed})`);
+    const st = await L.postStartingCredit(CO, "Test");
+    registerFixture("reward_ledger", `start:${CO}`);
+    ok(st.ok && st.posted === 451, "#282 points DB: the posted starting credit is whole dollars");
+    const stB = await L.postStartingCredit(BIG, "Test");
+    registerFixture("reward_ledger", `start:${BIG}`);
+    ok(stB.ok && stB.posted === 1000, "#282 points DB: starting credit rounds up, then caps at the cap");
+
+    // Earn: Copper (30,033 ≥ 25,000) 1.5 % of 12,345 = 185.175 → 186.
+    await R.saveRewardsProgram(program(true));
+    const QID = fixtureId(282, "pts-q");
+    await createFixture("quotes", { id: QID, name: "T282 pts-q", customer: "", customerId: CO, status: "sent", value: 12345, source: "estimator",
+      quoteType: "consulting", history: [], createdAt: 1, updatedAt: 1 });
+    await Q.setStatus(QID, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const earn = (await L.ledgerForQuote(QID)).find((e) => e.kind === "earn");
+    ok(!!earn && earn.amount === 186, `#282 points DB: a win earns whole dollars, rounded up (185.175 → ${earn?.amount})`);
+    await Q.setStatus(QID, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const rev = (await L.ledgerForQuote(QID)).find((e) => e.kind === "reverse");
+    ok(!!rev && rev.amount === -186, "#282 points DB: the reversal mirrors the earn exactly (no re-rounding)");
+    await Q.setStatus(QID, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    ok((await L.companyCredit(CO)).balance === 451 + 186, "#282 points DB: balance stays whole dollars after earn / reverse / re-win");
+
+    // A legacy cents amount (an admin Adjust to the cent): points round up, applying rounds down.
+    const adj = await L.postAdjustment(CO, 12.5, "points test cents", "Test");
+    if (adj.ok) registerFixture("reward_ledger", adj.entry.id);
+    const c = await L.companyCredit(CO);
+    ok(c.balance === 649.5 && r282bMaxApply(c.available, 1000.5) === 649, "#282 points DB: a cents balance applies its whole dollars only (649.50 → $649 max)");
+    const pv = await P.portalRewards(CO);
+    ok(!!pv && pv.points === 650 && !("balance" in pv) && !JSON.stringify(pv).includes("649.5"), `#282 points DB: the portal view shows 650 points and never the dollar balance (${JSON.stringify(pv)})`);
+    const pvB = await P.portalRewards(BIG);
+    ok(!!pvB && pvB.points === 1000 && pvB.next?.levelLabel === "Gold" && pvB.next.need === 50000,
+      "#282 points DB: points for the starting credit; progress to the next level stays dollars of purchases");
+  } finally {
+    await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
+    for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    for (const x of await L.ledgerForCompany(BIG)) registerFixture("reward_ledger", x.id);
+    await removeCustomer(CO);
+    await removeCustomer(BIG);
   }
 }
