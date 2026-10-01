@@ -10119,3 +10119,27 @@ Spec: `docs/superpowers/specs/2026-10-01-estimate-submit-for-approval-design.md`
 **Follow-ups (deferred).** The service (flame / repair / inspection), rental and consulting builders adopt
 `QuoteNextStep` (they keep "Mark as approved" and their own flows); the Estimator's five old review actions and the
 synced `reviewLimit` are now uncalled and can be removed; a concurrent save in flight does not disable the control.
+
+---
+
+## 285. Settings — a left menu of seven groups; Rewards gets a button — DONE 2026-10-01 (D521–D522)
+
+**Reported:** Jeff (2026-10-01): "We need to get this [Rewards] on the company settings page, at least a button. I also
+would like to see the company settings page cleaned up, it is becoming a lot and messy." He chose a left-hand menu of
+groups.
+
+**Done.** `/settings?section=<key>` with a sticky left menu (a "Settings group" dropdown under 860px); only the chosen
+group's cards show. **Company** (default): ★ Rewards + Catalog tiles, Branding & logos, Locations, Federal holidays,
+Dashboard defaults · **Sales & Rewards**: ★ Rewards, Catalog, Estimating Rules, Templates tiles, Review limits,
+Pipelines, Customer fields · **Field & Venues**: Venue types, Site intake types, Site-visit reasons · **Consulting**:
+phase menu (+ weights), disciplines, assumptions library · **Integrations**: Mailboxes (+ Drive photos), Recordings ·
+**Team & Access**: Team & Roles · **Data & Tools**: Import / Export, Task Templates, Grid Settings tiles, Document
+categories, Beta & go-live tools. A pure move: every card keeps its controls, actions and copy; `settings-client.tsx`
+went from ~3,100 lines to a ~220-line shell plus `src/app/(app)/settings/groups/*`; `SETTINGS_SCREENS` / `GROUP_LINKS`
+/ `SETTINGS_CARDS` in `settings-sections.ts` replace `ADMIN_SCREENS` / `COMPANY_SCREENS`. Permissions unchanged (every
+group needs `manage_users`, as the page did). Old links: `?section=admin` → Team & Access, `general` → Company,
+`/settings#mailboxes` / `#recordings` → Integrations scrolled to the card; the Rewards back link, Datasheets, Import and
+both Gmail OAuth return paths now target their group. Gates: tsc 0; test:specs 9967 PASS / 0 FAIL (+36); test:smoke
+179/0 (+7 group routes); eslint clean on changed files; next build OK. Browser-verified (every group, one save each, old
+links, phone dropdown, non-admin lock card). Reviewed, no bugs. Not changed: the Locations "Quote origin" badge still
+overflows on phones (pre-existing).

@@ -8407,3 +8407,19 @@ from review" bell items, matching to-dos, and Home alerts, all linking to the qu
 (`src/lib/quote-approval-rules.ts`) feeds the bell, the to-do list and Home, so the three agree; Home therefore shows
 approvers every in-review quote that isn't theirs, the same as the bell (a deliberate deviation from the plan's
 literal Home rule). Send-back notes are capped. No email.
+
+## D521. Settings is grouped by job, and old links land in the right group (#285, 2026-10-01)
+
+Settings splits into seven groups (Company, Sales & Rewards, Field & Venues, Consulting, Integrations, Team & Access,
+Data & Tools) chosen from a left menu; Company stays the default so bare `/settings` is unchanged. `?section=admin` opens
+Team & Access (the roster is what an admin opening that link expects); the `#mailboxes` / `#recordings` anchors switch to
+Integrations and scroll. The only non-move edits: the Locations hint now names "Data & Tools → Geocode addresses", the
+old "Company tools"/"Admin" link cards became tile rows, the Team roles column drops under the roster on phones, the page
+widens from 1080 to 1200px for the menu, and the page subtitle describes every group.
+
+## D522. A Settings group stays mounted once opened (#285, 2026-10-01)
+
+Before the split every card lived in one component, so an unsaved draft or a running geocode survived switching
+sections. To keep that, a group mounts the first time it is opened and is then hidden, not unmounted, when you switch
+away — switching back finds drafts intact and never starts a second geocode run.
+
