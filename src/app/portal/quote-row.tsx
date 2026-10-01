@@ -187,7 +187,7 @@ export function PortalQuoteRow({
                 customerId={cid}
                 categories={acceptCategories}
                 disabled={preview}
-                doneHref={mine ? "/portal/my-quotes" : "/portal"}
+                doneHref={mine ? "/portal/my-quotes?show=accepted" : "/portal"}
               />
             )}
           </div>

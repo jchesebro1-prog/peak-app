@@ -4,7 +4,8 @@
 // parameters so the harness can test every boundary without a clock or a DB.
 import type { Quote } from "@/lib/stores/quotes";
 import type { BellItem } from "@/components/nav/nav-data";
-import { quoteBuilderHref } from "@/lib/quote-links";
+import { portalQueueHref } from "@/lib/portal-quote-queue";
+import { isCustomerBuiltQuote } from "@/lib/portal-quote-names";
 
 /** "New portal quotes" only surfaces a firm generation from the last 3 days. */
 const GENERATED_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -27,12 +28,18 @@ function mineOrUnassigned(owner: string, me: string): boolean {
  *   inspection quotes generated from the customer's own service intake) —
  *   both portal sources land here.
  * Both are mine-or-unassigned only, matching every other bell group.
+ * - `accepted` (#288) — "Portal acceptances to confirm": every sent quote a
+ *   customer accepted in the portal, any owner (unchanged from nav-counts).
+ * #288 (spec §1.7): every item links the staff Portal quotes queue,
+ * `/quotes/portal?focus=<id>`, not the builder or the hub — except a
+ * Peak-sent estimate the customer accepted: the queue lists customer-built
+ * quotes only, so that one keeps its Quotes-hub link.
  */
 export function portalBellGroups(
   quotes: Quote[],
   me: string,
   now: number
-): { review: BellItem[]; generated: BellItem[] } {
+): { review: BellItem[]; generated: BellItem[]; accepted: BellItem[] } {
   const review = quotes.filter(
     (q) => q.source === "portal-catalog" && !!q.portalReview && mineOrUnassigned(q.owner, me)
   );
@@ -50,7 +57,7 @@ export function portalBellGroups(
       id: q.id,
       title: q.name,
       sub: `${q.customer || ""} · waiting on a Peak price${q.owner ? "" : " · unassigned"}`,
-      href: quoteBuilderHref(q),
+      href: portalQueueHref(q.id),
       letter: "Q",
       color: "var(--accent)",
     })),
@@ -58,9 +65,19 @@ export function portalBellGroups(
       id: q.id,
       title: q.name,
       sub: `${q.customer || ""} · customer-generated${q.owner ? "" : " · unassigned"}`,
-      href: quoteBuilderHref(q),
+      href: portalQueueHref(q.id),
       letter: "Q",
       color: "#1f7a52",
     })),
+    accepted: quotes
+      .filter((q) => q.portalAcceptance && q.status === "sent")
+      .map((q) => ({
+        id: q.id,
+        title: q.name,
+        sub: `${q.customer || ""} — approve or decline in the quote`,
+        href: isCustomerBuiltQuote(q) ? portalQueueHref(q.id) : "/quotes?id=" + encodeURIComponent(q.id),
+        letter: "✓",
+        color: "#1f7a52",
+      })),
   };
 }

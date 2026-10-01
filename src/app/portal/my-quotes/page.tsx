@@ -92,7 +92,7 @@ export default async function PortalMyQuotesPage({
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
   ]);
   const custName = cust?.name || "your organization";
-  const view = myQuotesView(quotes, cid, filter, Date.now());
+  const view = myQuotesView(quotes, cid, filter);
   // The banner names the generated quote's estimate number — looked up among
   // THIS customer's listed, customer-built quotes only, so a hand-edited ?q=
   // shows nothing.

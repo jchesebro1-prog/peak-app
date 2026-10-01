@@ -34,6 +34,8 @@ export const NAV: NavEntry[] = [
     mobileLabel: "EST",
     children: [
       { key: "quotes", label: "Quotes", href: "/quotes" },
+      /* #288 (spec §1.7): the staff work queue of customer-built portal quotes. */
+      { key: "portal-quotes", label: "Portal quotes", href: "/quotes/portal" },
       /* #22 Mine/All nav children — querystring hrefs render verbatim.
        * KNOWN cosmetic limitations (accepted, logged in PUNCHLIST #22):
        * activeKeyFor is pathname-only, so a My-X child never lights its own
@@ -139,6 +141,9 @@ export function activeKeyFor(pathname: string): string {
   // /design → designoverview fallback below would otherwise light every
   // /design/specs/* route as the Design overview tab.
   if (pathname.startsWith("/design/specs")) return "specs";
+  // #288: the Portal quotes queue — before the "/quotes" segment map below,
+  // which would otherwise light every /quotes/* route as Quotes.
+  if (pathname === "/quotes/portal" || pathname.startsWith("/quotes/portal/")) return "portal-quotes";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/queue": "queue",

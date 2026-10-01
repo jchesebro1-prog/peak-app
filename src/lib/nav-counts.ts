@@ -131,9 +131,6 @@ export async function navData(me: string, canApprove = false): Promise<{
   const inboxUnread = unreadCountFrom(comms, me);
 
   const approvalBell = quoteApprovalBell(quotes, me, canApprove);
-  const portalAccepted = quotes.filter(
-    (q) => q.portalAcceptance && q.status === "sent"
-  );
   const reviewDesigns = designs.filter(
     (d) =>
       d.review?.state === "in_review" &&
@@ -280,25 +277,15 @@ export async function navData(me: string, canApprove = false): Promise<{
       color: r.priority === "emergency" ? "#8a2f22" : "#b4543a",
     }))
   );
-  push(
-    "portal",
-    "Portal acceptances to confirm",
-    portalAccepted.map((q) => ({
-      id: q.id,
-      title: q.name,
-      sub: `${q.customer || ""} — approve or decline in the quote`,
-      href: "/quotes?id=" + encodeURIComponent(q.id),
-      letter: "✓",
-      color: "#1f7a52",
-    }))
-  );
-  // #245 (spec §8.2) — two derived groups over the same quotes already
-  // fetched above; no extra table scan, no writer, no Leads-queue record.
-  const { review: portalReviewItems, generated: portalNewItems } = portalBellGroups(
-    quotes,
-    me,
-    Date.now()
-  );
+  // #245 (spec §8.2) — derived groups over the same quotes already fetched
+  // above; no extra table scan, no writer, no Leads-queue record. #288: all
+  // three link the staff Portal quotes queue (/quotes/portal?focus=<id>).
+  const {
+    review: portalReviewItems,
+    generated: portalNewItems,
+    accepted: portalAcceptedItems,
+  } = portalBellGroups(quotes, me, Date.now());
+  push("portal", "Portal acceptances to confirm", portalAcceptedItems);
   push("portalReview", "Portal quotes to review", portalReviewItems);
   push("portalNew", "New portal quotes", portalNewItems);
   push(

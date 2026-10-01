@@ -63,8 +63,8 @@ export function AcceptDialog({
   categories: Array<{ key: string; label: string }>;
   disabled?: boolean;
   /** #288: where the customer lands after accepting — Home ("/portal") or
-   *  My quotes ("/portal/my-quotes"); both show the accepted banner. */
-  doneHref?: "/portal" | "/portal/my-quotes";
+   *  My quotes' Accepted filter; both show the accepted banner. */
+  doneHref?: "/portal" | "/portal/my-quotes?show=accepted";
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -133,7 +133,7 @@ export function AcceptDialog({
         setBusy(false);
         return;
       }
-      router.push(doneHref + "?accepted=1" + (attachFailed ? "&filewarn=1" : ""));
+      router.push(doneHref + (doneHref.includes("?") ? "&" : "?") + "accepted=1" + (attachFailed ? "&filewarn=1" : ""));
     } catch {
       setError("Couldn't accept this quote — check your connection and try again.");
       setBusy(false);

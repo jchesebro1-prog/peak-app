@@ -147,6 +147,10 @@ const ROUTES = [
   "/rentals",
   "/rentals/board",
   "/quotes/new",
+  // #288 — the staff Portal quotes queue: default (Needs action), and a
+  // filtered + searched view focused on a quote id that isn't there.
+  "/quotes/portal",
+  "/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0",
   "/flame-tests/scheduling",
   "/flame-tests/report/options",
   "/inspections/scheduling",

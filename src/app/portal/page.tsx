@@ -3,7 +3,7 @@ import Link from "next/link";
 import { getSettings } from "@/lib/settings";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
-import { homePortalQuotes, myQuotesView } from "@/lib/portal-my-quotes";
+import { homePortalQuotes, myQuotesCounts } from "@/lib/portal-my-quotes";
 import { getAll as allLeads, OPEN_STAGES, type LeadStage } from "@/lib/stores/leads";
 import {
   renewals as flameRenewals,
@@ -211,10 +211,10 @@ export default async function PortalPage({
   // #288: Home lists the Peak-sent estimates only — the published quotes the
   // team sent (portalListsQuote: never an internal draft, never imported
   // Daylite history) minus the customer-built ones, which live under My
-  // quotes (homePortalQuotes). The My quotes card counts those.
+  // quotes (homePortalQuotes). The My quotes card counts those (myQuotesCounts).
   const published = homePortalQuotes(quotes, cid);
   const quoteGroups = groupPortalQuotes(published);
-  const mine = myQuotesView(quotes, cid, "open", Date.now()).counts;
+  const mine = myQuotesCounts(quotes, cid);
   const mineTotal = mine.open + mine.accepted + mine.closed;
 
   // #220: project history, app-era only (never Daylite imports), through the

@@ -2849,8 +2849,8 @@ ok(accentContrast("#b4543a") === "#fff", "red accent carries white text");
 const d117Est = NAV.find((e) => e.kind === "group" && e.key === "est");
 ok(
   !!(d117Est && d117Est.kind === "group" &&
-    d117Est.children.map((c) => c.key).join(",") === "quotes,myquotes,estimator,reviews,catalog"),
-  "EST = Quotes, My Quotes, Estimator, Reviews, Catalog in order (#22, #213)",
+    d117Est.children.map((c) => c.key).join(",") === "quotes,portal-quotes,myquotes,estimator,reviews,catalog"),
+  "EST = Quotes, Portal quotes, My Quotes, Estimator, Reviews, Catalog in order (#22, #213, #288)",
 );
 ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
 ok(
@@ -41943,6 +41943,7 @@ import {
   homePortalQuotes as n288Home,
   myQuotesView as n288View,
   parseMyQuotesFilter as n288Filter,
+  myQuotesCounts as n288Counts,
   portalQuoteTypeLabel as n288TypeLabel,
 } from "@/lib/portal-my-quotes";
 {
@@ -41972,19 +41973,20 @@ import {
     { ...base, id: "other-co", customerId: "c2", source: "portal-catalog", status: "sent", createdAt: 700, updatedAt: 700 },
     { ...base, id: "svc-recalled", source: "portal-service", quoteType: "flame_test", status: "draft", createdAt: 800, updatedAt: 800 },
   ];
-  const open = n288View(qs, "c1", "open", NOW);
+  const open = n288View(qs, "c1", "open");
   ok(eq(open.rows.map((r) => r.q.id), ["sent-firm", "expired", "draft-rev", "legacy"]),
     "#288 my-quotes: Open = draft / sent / under review / expired, newest built first (createdAt), customer-built and listed only");
-  ok(open.rows.find((r) => r.q.id === "expired")?.expired === true && open.rows.find((r) => r.q.id === "sent-firm")?.expired === false,
-    "#288 my-quotes: an Open firm quote past validUntil is flagged expired (still Open, refreshable)");
-  ok(eq(n288View(qs, "c1", "accepted", NOW).rows.map((r) => r.q.id), ["accepted", "won"]), "#288 my-quotes: Accepted = portalAcceptance set, or won");
-  ok(eq(n288View(qs, "c1", "closed", NOW).rows.map((r) => r.q.id), ["lost"]), "#288 my-quotes: Closed = lost / declined");
+  // #288 Task 3 (Task 2 review): the row derives expiry itself (canAcceptPortal), so the view model carries no `expired`.
+  ok(open.rows.some((r) => r.q.id === "expired") && open.rows.every((r) => !("expired" in r)) && /acceptGate\.reason === "expired"/.test(rd288src("src/app/portal/quote-row.tsx")),
+    "#288 my-quotes: an Open firm quote past validUntil stays Open (refreshable); the shared row derives 'expired' itself, the view model doesn't");
+  ok(eq(n288View(qs, "c1", "accepted").rows.map((r) => r.q.id), ["accepted", "won"]), "#288 my-quotes: Accepted = portalAcceptance set, or won");
+  ok(eq(n288View(qs, "c1", "closed").rows.map((r) => r.q.id), ["lost"]), "#288 my-quotes: Closed = lost / declined");
   ok(eq(open.counts, { open: 4, accepted: 2, closed: 1 }) && open.filter === "open", "#288 my-quotes: counts per filter cover every listed customer-built quote");
-  ok(!n288View(qs, "c1", "open", NOW).rows.concat(n288View(qs, "c1", "accepted", NOW).rows, n288View(qs, "c1", "closed", NOW).rows).some((r) => ["peak", "other-co", "svc-recalled"].includes(r.q.id)),
+  ok(!n288View(qs, "c1", "open").rows.concat(n288View(qs, "c1", "accepted").rows, n288View(qs, "c1", "closed").rows).some((r) => ["peak", "other-co", "svc-recalled"].includes(r.q.id)),
     "#288 my-quotes: never a Peak-sent quote, another customer's quote, or a staff-recalled service draft (portalListsQuote)");
-  ok(open.rows.find((r) => r.q.id === "sent-firm")?.renamable === true && n288View(qs, "c1", "accepted", NOW).rows.every((r) => !r.renamable) && n288View(qs, "c1", "closed", NOW).rows.every((r) => !r.renamable),
+  ok(open.rows.find((r) => r.q.id === "sent-firm")?.renamable === true && n288View(qs, "c1", "accepted").rows.every((r) => !r.renamable) && n288View(qs, "c1", "closed").rows.every((r) => !r.renamable),
     "#288 my-quotes: Open rows are renamable; Accepted and Closed rows are not");
-  ok(n288View(qs, "", "open", NOW).rows.length === 0, "#288 my-quotes: no customer id lists nothing");
+  ok(n288View(qs, "", "open").rows.length === 0, "#288 my-quotes: no customer id lists nothing");
   ok(n288Filter("accepted") === "accepted" && n288Filter("closed") === "closed" && n288Filter("open") === "open" && n288Filter("") === "open" && n288Filter("bogus") === "open",
     "#288 my-quotes: ?show= parses open|accepted|closed, default open");
   ok(n288TypeLabel({ source: "portal-catalog" }) === "Catalog" && n288TypeLabel({ source: "portal-service", quoteType: "flame_test" }) === "Flame test" &&
@@ -41993,6 +41995,24 @@ import {
 
   // ---- Home lists Peak-sent only ----
   ok(eq(n288Home(qs, "c1").map((q) => q.id), ["peak"]), "#288 home: Home's list excludes customer-built quotes (and other customers'), keeping Peak-sent estimates");
+  // #288 Task 3 (Task 2 review): Home still goes through portalListsQuote — a
+  // plain customerId filter would let an internal draft or Daylite history in.
+  const homeExtra = [
+    ...qs,
+    { ...base, id: "peak-draft", source: "estimator", status: "draft", createdAt: 950, updatedAt: 950 },
+    { ...base, id: "daylite", source: "daylite", status: "sent", createdAt: 960, updatedAt: 960 },
+  ];
+  ok(eq(n288Home(homeExtra, "c1").map((q) => q.id), ["peak"]), "#288 home: Home excludes a Peak internal draft and an imported Daylite quote (portalListsQuote, not a bare customerId filter)");
+  ok(eq(n288Counts(qs, "c1"), { open: 4, accepted: 2, closed: 1 }) && eq(n288Counts(qs, ""), { open: 0, accepted: 0, closed: 0 }),
+    "#288 home: myQuotesCounts counts the listed customer-built quotes per filter without building rows");
+  ok(/myQuotesCounts\(quotes, cid\)/.test(rd288src("src/app/portal/page.tsx")) && !/myQuotesView\(/.test(rd288src("src/app/portal/page.tsx")),
+    "#288 home: the My quotes card uses myQuotesCounts, not myQuotesView");
+  const mqSrc = rd288src("src/lib/portal-my-quotes.ts");
+  ok(!/portalReview\?:/.test(mqSrc.slice(mqSrc.indexOf("export type MyQuoteFields"), mqSrc.indexOf("};", mqSrc.indexOf("export type MyQuoteFields")))),
+    "#288 my-quotes: MyQuoteFields drops the unused portalReview field");
+  ok(rd288src("src/app/portal/quote-row.tsx").includes('doneHref={mine ? "/portal/my-quotes?show=accepted" : "/portal"}') &&
+      /doneHref \+ \(doneHref\.includes\("\?"\) \? "&" : "\?"\) \+ "accepted=1"/.test(rd288src("src/app/portal/accept-dialog.tsx")),
+    "#288 my-quotes: accepting from My quotes lands on /portal/my-quotes?show=accepted&accepted=1 (Home unchanged)");
 
   // ---- Task 1 review follow-ups ----
   const AT = Date.UTC(2026, 9, 1, 15);
@@ -42038,4 +42058,145 @@ function rd288src(p: string): string {
   } catch {
     return "";
   }
+}
+
+/* ======================================================================
+   #288 Task 3 — the staff Portal quotes work queue at /quotes/portal
+   (spec §1.7): the pure status classifier + filter/sort/count view model,
+   the nav entry, and the three portal bell groups linking to
+   /quotes/portal?focus=<id>.
+   ====================================================================== */
+import {
+  portalQueueStatus as q288Status,
+  portalQueueView as q288View,
+  portalQueueHref as q288Href,
+  parsePortalQueueFilter as q288Filter,
+  parsePortalQueueType as q288Type,
+  PORTAL_QUEUE_STATUS_LABEL as q288Labels,
+} from "@/lib/portal-quote-queue";
+import { portalBellGroups as q288Bell } from "@/lib/portal-bell";
+import { NAV as q288NAV, activeKeyFor as q288Active } from "@/components/nav/nav-data";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const NOW = Date.UTC(2026, 9, 1, 15);
+  const base = {
+    customerId: "c1", customer: "Acme Theatre", owner: "", name: "Quote", portalAcceptance: null, portalReview: null, portalFirm: null,
+    portalDecline: null, quoteType: undefined as string | undefined, value: 1000,
+  };
+  const acc = { at: 1, by: "Pat", byEmail: "p@x" };
+  const qs = [
+    { ...base, id: "Q-review", name: "Spring musical", source: "portal-catalog", status: "draft", createdAt: 100, portalReview: { requestedAt: 1, reasons: [] } },
+    { ...base, id: "Q-acc-cat", name: "Gym rigging", source: "portal-catalog", status: "sent", createdAt: 200, estNo: 1042, portalAcceptance: acc },
+    { ...base, id: "Q-acc-flm", name: "Fall flame", source: "portal-service", quoteType: "flame_test", status: "sent", createdAt: 150, portalAcceptance: acc, portalFirm: { generatedAt: 1, validUntil: NOW - 5 } },
+    { ...base, id: "Q-acc-insp", name: "L1 check", source: "portal-service", quoteType: "inspection", status: "sent", createdAt: 120, portalAcceptance: acc },
+    { ...base, id: "Q-sent", name: "Valid firm", source: "portal-catalog", status: "sent", createdAt: 400, portalFirm: { generatedAt: 1, validUntil: NOW } },
+    { ...base, id: "Q-expired", name: "Old firm", customer: "Lakefront HS", source: "portal-service", quoteType: "flame_test", status: "sent", createdAt: 300, portalFirm: { generatedAt: 1, validUntil: NOW - 1 } },
+    { ...base, id: "Q-won", name: "Done deal", source: "portal-catalog", status: "won", createdAt: 500, portalAcceptance: acc },
+    { ...base, id: "Q-lost", name: "Lost one", source: "portal-service", quoteType: "inspection", status: "lost", createdAt: 600 },
+    { ...base, id: "Q-draft", name: "Recalled", source: "portal-service", quoteType: "flame_test", status: "draft", createdAt: 700 },
+    { ...base, id: "Q-legacy", name: "Legacy", source: "portal-self-serve", status: "draft", createdAt: 50 },
+    { ...base, id: "Q-peak", name: "Peak estimate", source: "estimator", status: "sent", createdAt: 800, portalAcceptance: acc },
+    { ...base, id: "Q-dl", name: "History", source: "daylite", status: "won", createdAt: 900 },
+  ];
+  const byId = (id: string) => qs.find((q) => q.id === id)!;
+
+  // ---- status classifier ----
+  ok(q288Status(byId("Q-review"), NOW) === "review", "#288 queue: portalReview and not sent → Needs review");
+  ok(q288Status({ ...byId("Q-review"), status: "sent" }, NOW) === "sent", "#288 queue: a review quote staff have sent is no longer Needs review");
+  ok(q288Status(byId("Q-acc-cat"), NOW) === "accepted" && q288Status(byId("Q-acc-flm"), NOW) === "accepted",
+    "#288 queue: portalAcceptance set and status sent → Accepted — confirm (even past validUntil)");
+  ok(q288Status(byId("Q-sent"), NOW) === "sent", "#288 queue: a firm quote at exactly validUntil is still Sent");
+  ok(q288Status(byId("Q-expired"), NOW) === "expired", "#288 queue: a firm quote past portalFirm.validUntil, not accepted → Expired");
+  ok(q288Status(byId("Q-expired"), NOW - 10) === "sent", "#288 queue: expiry is measured against the `now` passed in");
+  ok(q288Status(byId("Q-won"), NOW) === "won" && q288Status(byId("Q-lost"), NOW) === "lost" && q288Status(byId("Q-draft"), NOW) === "draft",
+    "#288 queue: Won / Lost / Draft (a won quote with an old portalAcceptance is Won, not Accepted — confirm)");
+  ok(eq(q288Labels, { review: "Needs review", accepted: "Accepted — confirm", sent: "Sent", expired: "Expired", won: "Won", lost: "Lost", draft: "Draft" }),
+    "#288 queue: status labels read Needs review / Accepted — confirm / Sent / Expired / Won / Lost / Draft");
+
+  // ---- default view: Needs action, customer-built only ----
+  const v = q288View(qs, { now: NOW });
+  ok(v.status === "action" && eq(v.rows.map((r) => r.q.id), ["Q-acc-cat", "Q-acc-flm", "Q-acc-insp", "Q-review"]),
+    "#288 queue: the default filter is Needs action = Needs review ∪ Accepted — confirm, newest first");
+  const all = q288View(qs, { now: NOW, status: "all" });
+  ok(!all.rows.some((r) => r.q.id === "Q-peak" || r.q.id === "Q-dl") && all.rows.length === 10,
+    "#288 queue: only customer-built quotes (portal-catalog / portal-service / portal-self-serve) are listed — never a Peak or Daylite quote");
+  ok(eq(all.rows.map((r) => r.q.id), ["Q-acc-cat", "Q-acc-flm", "Q-acc-insp", "Q-review", "Q-draft", "Q-lost", "Q-won", "Q-sent", "Q-expired", "Q-legacy"]),
+    "#288 queue: sort is Needs action first, then newest (createdAt) first");
+  ok(eq(all.counts, { action: 4, all: 10, review: 1, accepted: 3, sent: 1, expired: 1, won: 1, lost: 1, draft: 2 }),
+    "#288 queue: counts per status chip, plus Needs action and All");
+  ok(eq(q288View(qs, { now: NOW, status: "expired" }).rows.map((r) => r.q.id), ["Q-expired"]) && eq(q288View(qs, { now: NOW, status: "draft" }).rows.map((r) => r.q.id), ["Q-draft", "Q-legacy"]),
+    "#288 queue: a single status filter lists only that status");
+
+  // ---- type filter + search ----
+  ok(eq(q288View(qs, { now: NOW, status: "all", type: "flame_test" }).rows.map((r) => r.q.id), ["Q-acc-flm", "Q-draft", "Q-expired"]),
+    "#288 queue: type filter Flame test");
+  ok(eq(q288View(qs, { now: NOW, status: "all", type: "inspection" }).rows.map((r) => r.q.id), ["Q-acc-insp", "Q-lost"]),
+    "#288 queue: type filter Inspection");
+  ok(eq(q288View(qs, { now: NOW, status: "all", type: "catalog" }).rows.map((r) => r.q.id), ["Q-acc-cat", "Q-review", "Q-won", "Q-sent", "Q-legacy"]),
+    "#288 queue: type filter Catalog (portal catalog + legacy self-serve)");
+  const tv = q288View(qs, { now: NOW, status: "all", type: "flame_test" });
+  ok(tv.counts.all === 3 && tv.counts.action === 1 && tv.type === "flame_test", "#288 queue: counts follow the type filter");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "spring" }).rows.map((r) => r.q.id), ["Q-review"]), "#288 queue: search matches the quote name");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "lakefront" }).rows.map((r) => r.q.id), ["Q-expired"]), "#288 queue: search matches the company");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "Riverside", companyOf: (q) => (q.id === "Q-sent" ? "Riverside PAC" : q.customer) }).rows.map((r) => r.q.id), ["Q-sent"]),
+    "#288 queue: search matches the resolved company name the page passes in");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "EST-1042" }).rows.map((r) => r.q.id), ["Q-acc-cat"]) && eq(q288View(qs, { now: NOW, status: "all", q: "1042" }).rows.map((r) => r.q.id), ["Q-acc-cat"]),
+    "#288 queue: search matches the Est # (EST-1042 or 1042)");
+
+  // ---- row facts + actions ----
+  const row = (id: string) => all.rows.find((r) => r.q.id === id)!;
+  ok(row("Q-acc-cat").approve === "catalog" && row("Q-acc-flm").approve === "flame" && row("Q-acc-insp").approve === "inspection",
+    "#288 queue: Approve routes catalog → setQuoteStatus(won), flame → approveFlameQuote, inspection → approveInspectionQuote");
+  ok(row("Q-acc-cat").decline && row("Q-acc-flm").decline && !row("Q-sent").decline && row("Q-sent").approve === null && row("Q-review").approve === null,
+    "#288 queue: Approve / Decline only on Accepted — confirm rows");
+  ok(row("Q-acc-flm").typeLabel === "Flame test" && row("Q-acc-insp").typeLabel === "Inspection" && row("Q-review").typeLabel === "Catalog" && row("Q-expired").statusLabel === "Expired",
+    "#288 queue: type labels Catalog / Flame test / Inspection, status label per row");
+  ok(row("Q-acc-cat").estNo === "EST-1042" && row("Q-review").estNo === "Q-review", "#288 queue: Est # through displayQuoteNumber (id when unnumbered)");
+
+  // ---- focus ----
+  const f = q288View(qs, { now: NOW, status: "expired", focus: "Q-won" });
+  ok(f.status === "all" && f.rows.some((r) => r.q.id === "Q-won") && f.rows.length === 10, "#288 queue: ?focus= forces the status filter to All");
+  ok(q288Filter("") === "action" && q288Filter("bogus") === "action" && q288Filter("expired") === "expired" && q288Filter("all") === "all" && q288Type("inspection") === "inspection" && q288Type("x") === "all",
+    "#288 queue: ?status= defaults to Needs action; ?type= defaults to all");
+  ok(q288Href("Q 1") === "/quotes/portal?focus=Q%201", "#288 queue: portalQueueHref is /quotes/portal?focus=<id>");
+
+  // ---- bell ----
+  const ME = "Pat Staff";
+  const bell = q288Bell(
+    [
+      { ...base, id: "B-rev", source: "portal-catalog", status: "draft", portalReview: { requestedAt: 1, reasons: [] }, createdAt: 1 },
+      { ...base, id: "B-new", source: "portal-service", quoteType: "flame_test", status: "sent", portalFirm: { generatedAt: NOW - 1000, validUntil: NOW + 1 }, createdAt: 1 },
+      { ...base, id: "B-acc", source: "portal-catalog", status: "sent", portalAcceptance: acc, owner: "Someone Else", createdAt: 1 },
+      { ...base, id: "B-peak", source: "estimator", status: "sent", portalAcceptance: acc, createdAt: 1 },
+    ] as never,
+    ME,
+    NOW
+  );
+  ok(bell.review[0]?.href === "/quotes/portal?focus=B-rev" && bell.generated[0]?.href === "/quotes/portal?focus=B-new" && bell.accepted[0]?.href === "/quotes/portal?focus=B-acc",
+    "#288 bell: Portal quotes to review / New portal quotes / Portal acceptances to confirm all link /quotes/portal?focus=<id>");
+  ok(bell.accepted.length === 2 && bell.accepted[0]?.sub.startsWith("Acme Theatre"), "#288 bell: acceptances to confirm list every accepted sent quote (any owner, any source), as before");
+  ok(bell.accepted[1]?.id === "B-peak" && bell.accepted[1]?.href === "/quotes?id=B-peak",
+    "#288 bell: an accepted Peak-sent estimate (not in the customer-built queue) keeps its Quotes-hub link");
+  const navCounts = rd288src("src/lib/nav-counts.ts");
+  ok(!navCounts.includes('"/quotes?id=" + encodeURIComponent(q.id)') && /accepted: portalAcceptedItems/.test(navCounts),
+    "#288 bell: nav-counts takes the acceptances group from portalBellGroups (no more /quotes?id= link)");
+
+  // ---- nav ----
+  const est = q288NAV.find((e) => e.kind === "group" && e.key === "est");
+  const kids = est && est.kind === "group" ? est.children : [];
+  const pq = kids.find((c) => c.key === "portal-quotes");
+  ok(pq?.label === "Portal quotes" && pq?.href === "/quotes/portal" && kids.findIndex((c) => c.key === "portal-quotes") === kids.findIndex((c) => c.key === "quotes") + 1,
+    "#288 nav: Estimating gets Portal quotes → /quotes/portal, right after Quotes");
+  ok(q288Active("/quotes/portal") === "portal-quotes" && q288Active("/quotes") === "quotes" && q288Active("/quotes/new") === "quotes",
+    "#288 nav: /quotes/portal lights Portal quotes; /quotes and its other sub-routes still light Quotes");
+
+  // ---- wiring ----
+  const page = rd288src("src/app/(app)/quotes/portal/page.tsx");
+  ok(/requireUser\(\)/.test(page) && /portalQueueView\(/.test(page) && /quoteBuilderHref\(/.test(page) && /money\(q\.value/.test(page) && /id=\{"row-" \+ /.test(page),
+    "#288 queue page: requireUser, the pure view, Open via quoteBuilderHref, the hub's q.value total, row-<id> anchors");
+  const qa = rd288src("src/app/(app)/quotes/portal/queue-actions.tsx");
+  ok(qa.startsWith('"use client"') && /setQuoteStatus/.test(qa) && /approveFlameQuote/.test(qa) && /approveInspectionQuote/.test(qa) && /declinePortalAcceptanceAction\(/.test(qa) && !/from "@\/lib\/stores\//.test(qa),
+    "#288 queue actions: a client component reusing setQuoteStatus / approveFlameQuote / approveInspectionQuote / declinePortalAcceptanceAction, no store import");
+  ok(rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal"') && rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0"'),
+    "#288 smoke: /quotes/portal and a filtered + focused view");
 }

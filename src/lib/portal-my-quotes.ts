@@ -8,7 +8,6 @@
  * - `homePortalQuotes` — Home's list: everything else the portal lists (the
  *   Peak-sent estimates), newest activity first as before.
  */
-import { canAcceptPortal } from "@/lib/portal-quote-mode";
 import { isCustomerBuiltQuote, isPortalRenamable } from "@/lib/portal-quote-names";
 import { portalListsQuote } from "@/lib/stores/quotes";
 
@@ -30,7 +29,6 @@ export type MyQuoteFields = {
   createdAt?: number;
   updatedAt?: number;
   portalAcceptance?: unknown;
-  portalReview?: { requestedAt: number; reasons: string[] } | null;
   portalFirm?: { validUntil: number } | null;
 };
 
@@ -51,26 +49,37 @@ export function portalQuoteTypeLabel(q: { source?: string | null; quoteType?: st
   return "Catalog";
 }
 
-export type MyQuoteRow<T> = { q: T; expired: boolean; renamable: boolean };
+export type MyQuoteRow<T> = { q: T; renamable: boolean };
 
+/** The customer-built quotes this customer's portal lists. */
+function listedCustomerBuilt<T extends MyQuoteFields>(quotes: readonly T[], cid: string): T[] {
+  return quotes.filter((q) => !!cid && isCustomerBuiltQuote(q) && portalListsQuote(q as Parameters<typeof portalListsQuote>[0], cid));
+}
+
+function countBuckets(mine: readonly MyQuoteFields[]): Record<MyQuotesFilter, number> {
+  const counts: Record<MyQuotesFilter, number> = { open: 0, accepted: 0, closed: 0 };
+  for (const q of mine) counts[myQuoteBucket(q)]++;
+  return counts;
+}
+
+/** Home's My quotes card: counts per filter, no rows built. */
+export function myQuotesCounts(quotes: readonly MyQuoteFields[], cid: string): Record<MyQuotesFilter, number> {
+  return countBuckets(listedCustomerBuilt(quotes, cid));
+}
+
+/** My quotes: the rows for one filter, newest built first, plus every
+ *  filter's count. Expiry is the shared row's own call (canAcceptPortal). */
 export function myQuotesView<T extends MyQuoteFields>(
   quotes: readonly T[],
   cid: string,
-  filter: MyQuotesFilter,
-  now: number
+  filter: MyQuotesFilter
 ): { filter: MyQuotesFilter; rows: MyQuoteRow<T>[]; counts: Record<MyQuotesFilter, number> } {
-  const mine = quotes.filter((q) => !!cid && isCustomerBuiltQuote(q) && portalListsQuote(q as Parameters<typeof portalListsQuote>[0], cid));
-  const counts: Record<MyQuotesFilter, number> = { open: 0, accepted: 0, closed: 0 };
-  for (const q of mine) counts[myQuoteBucket(q)]++;
+  const mine = listedCustomerBuilt(quotes, cid);
   const rows = mine
     .filter((q) => myQuoteBucket(q) === filter)
     .sort((a, b) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0))
-    .map((q) => ({
-      q,
-      expired: q.status === "sent" && !q.portalAcceptance && canAcceptPortal(q, now).reason === "expired",
-      renamable: isPortalRenamable(q),
-    }));
-  return { filter, rows, counts };
+    .map((q) => ({ q, renamable: isPortalRenamable(q) }));
+  return { filter, rows, counts: countBuckets(mine) };
 }
 
 /** Home's quote list: what the portal lists for this customer minus the
