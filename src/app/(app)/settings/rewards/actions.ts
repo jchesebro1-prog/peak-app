@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { getRewardsProgram, saveRewardsProgram } from "@/lib/stores/rewards";
 import { rewardsProgramErrors, sanitizeRewardsProgram, type RewardsProgram } from "@/lib/rewards/program";
-import { saveRewardsPerks } from "@/lib/stores/reward-perks";
+import { saveRewardsPerks, saveRewardsPurchasePerks } from "@/lib/stores/reward-perks";
 import type { PerkDraft } from "@/lib/rewards/perks";
+import type { PurchasePerkDraft } from "@/lib/rewards/purchase-perks";
 
 /**
  * Settings → Rewards save (#282 Phase 1). Admin-only. Typed mistakes come
@@ -22,13 +23,14 @@ export async function saveRewardsProgramAction(
   const errs = rewardsProgramErrors(input);
   if (errs.length) return { ok: false, error: errs.join(" ") };
   const prev = await getRewardsProgram();
-  const clean = sanitizeRewardsProgram({ ...input, perks: prev.perks });
+  const clean = sanitizeRewardsProgram({ ...input, perks: prev.perks, purchasePerks: prev.purchasePerks });
   const program = await saveRewardsProgram({
     enabled: clean.enabled,
     thresholds: clean.thresholds,
     earnPct: clean.earnPct,
     retro: clean.retro,
     perks: prev.perks,
+    purchasePerks: prev.purchasePerks,
   });
   revalidatePath("/", "layout");
   return { ok: true, program };
@@ -45,6 +47,20 @@ export async function savePerksAction(
 ): Promise<{ ok: true; program: RewardsProgram } | { ok: false; error: string }> {
   await requirePerm("manage_users");
   const res = await saveRewardsPerks(drafts);
+  if (res.ok) revalidatePath("/", "layout");
+  return res;
+}
+
+/**
+ * Settings → Rewards → Perks → Purchase perks save (#282 perks+points).
+ * Admin-only. Every tier's list in one save; ids are server-minted, removed
+ * ones kept as tombstones. The rest of the program is untouched.
+ */
+export async function savePurchasePerksAction(
+  drafts: PurchasePerkDraft[]
+): Promise<{ ok: true; program: RewardsProgram } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const res = await saveRewardsPurchasePerks(drafts);
   if (res.ok) revalidatePath("/", "layout");
   return res;
 }

@@ -33,14 +33,42 @@ export type Perk = {
   id: string;
   name: string;
   description: string;
-  level: RewardLevel;
+  /**
+   * The level at which the perk is FREE (Base = every customer). #282
+   * perks+points: null = never free — a points-only perk, which then must
+   * carry a `pointCost`.
+   */
+  level: RewardLevel | null;
   frequency: PerkFrequency;
   active: boolean;
+  /**
+   * #282 perks+points (Jeff 2026-10-01): the perk's price in rewards points
+   * (whole points ≥ 1; 1 point = $1 of credit). Below its unlock level (or
+   * with no unlock level) a customer may buy it with points; once the level
+   * is reached it is free. Absent = not for sale.
+   */
+  pointCost?: number;
   /**
    * #282 phase 4: a perk removed in Settings → Rewards stays in the blob as a
    * tombstone (always inactive, hidden from the editor) so past uses on the
    * ledger keep their name and its id is never minted again.
    */
+  removed?: boolean;
+};
+
+/**
+ * #282 perks+points (Jeff 2026-10-01): a standing benefit on every purchase at
+ * a level ("Free freight", "Waived travel") — informational in v1, never used
+ * up, never priced. A customer has every active purchase perk at a level ≤
+ * their earned level (src/lib/rewards/purchase-perks.ts). Ids are minted on
+ * the server and never reused; a removed one stays as a tombstone, like perks.
+ */
+export type PurchasePerk = {
+  id: string;
+  level: ThresholdLevel;
+  name: string;
+  description: string;
+  active: boolean;
   removed?: boolean;
 };
 
@@ -55,6 +83,8 @@ export type RewardsProgram = {
   retro: { ratePct: number; capPerCustomer: number };
   /** Perk definitions, in display order (Settings → Rewards → Perks, #282 phase 4). */
   perks: Perk[];
+  /** Purchase perks by tier (Settings → Rewards → Perks → Purchase perks, #282 perks+points). */
+  purchasePerks: PurchasePerk[];
   /** Stamped the first time `enabled` turns on; never cleared. */
   launchedAt?: number;
 };
@@ -66,6 +96,7 @@ export const DEFAULT_REWARDS_PROGRAM: RewardsProgram = {
   earnPct: { base: 0, copper: 1, silver: 1.5, gold: 2, platinum: 3 },
   retro: { ratePct: 1, capPerCustomer: 1000 },
   perks: [],
+  purchasePerks: [],
 };
 
 export const EARN_PCT_MAX = 20;
@@ -84,6 +115,17 @@ function clamp(n: number, lo: number, hi: number): number {
 
 export function isRewardLevel(v: unknown): v is RewardLevel {
   return typeof v === "string" && (REWARD_LEVELS as readonly string[]).includes(v);
+}
+
+export function isThresholdLevel(v: unknown): v is ThresholdLevel {
+  return typeof v === "string" && (THRESHOLD_LEVELS as readonly string[]).includes(v);
+}
+
+/** A perk's point price: a whole number of points ≥ 1 (capped at 1,000,000), else undefined. */
+export function sanitizePointCost(v: unknown): number | undefined {
+  const n = num(v);
+  if (n == null || n < 1) return undefined;
+  return Math.min(1_000_000, Math.round(n));
 }
 
 /** Ladder rank (base 0 … platinum 4); -1 for anything off-ladder. */
@@ -144,12 +186,54 @@ function sanitizePerks(raw: unknown): Perk[] {
     }
     seen.add(id);
     const removed = o.removed === true;
+    const pointCost = sanitizePointCost(o.pointCost);
+    // #282 perks+points: no unlock level (null / "none") = points-only —
+    // valid only with a point price; without one it reads Base, as before.
+    const level = isRewardLevel(o.level)
+      ? o.level
+      : pointCost != null && (o.level === null || o.level === PERK_POINTS_ONLY)
+        ? null
+        : "base";
     out.push({
       id,
       name,
       description: String(o.description ?? "").trim().slice(0, 1000),
-      level: isRewardLevel(o.level) ? o.level : "base",
+      level,
       frequency: o.frequency === "yearly" ? "yearly" : "once",
+      active: !removed && o.active !== false,
+      ...(pointCost != null ? { pointCost } : {}),
+      ...(removed ? { removed: true } : {}),
+    });
+  }
+  return out;
+}
+
+/** The editor's value for "no unlock level — points only". */
+export const PERK_POINTS_ONLY = "none";
+
+/** #282 perks+points: purchase perks — named, a threshold level, unique ids, tombstones kept (forced inactive). */
+function sanitizePurchasePerks(raw: unknown): PurchasePerk[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PurchasePerk[] = [];
+  const seen = new Set<string>();
+  for (const p of raw.slice(0, 500)) {
+    if (!p || typeof p !== "object") continue;
+    const o = p as Record<string, unknown>;
+    const name = String(o.name ?? "").trim().slice(0, 120);
+    if (!name || !isThresholdLevel(o.level)) continue;
+    let id = String(o.id ?? "").trim().slice(0, 60);
+    if (!id || seen.has(id)) {
+      let n = out.length + 1;
+      while (seen.has(`purchase-perk-${n}`)) n++;
+      id = `purchase-perk-${n}`;
+    }
+    seen.add(id);
+    const removed = o.removed === true;
+    out.push({
+      id,
+      level: o.level,
+      name,
+      description: String(o.description ?? "").trim().slice(0, 1000),
       active: !removed && o.active !== false,
       ...(removed ? { removed: true } : {}),
     });
@@ -195,6 +279,7 @@ export function sanitizeRewardsProgram(raw: unknown): RewardsProgram {
       capPerCustomer: round2(Math.max(0, cap ?? d.retro.capPerCustomer)),
     },
     perks: sanitizePerks(r.perks),
+    purchasePerks: sanitizePurchasePerks(r.purchasePerks),
   };
   const launched = num(r.launchedAt);
   if (launched != null && launched > 0) out.launchedAt = launched;

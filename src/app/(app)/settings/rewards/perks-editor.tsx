@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { REWARD_LEVELS, REWARD_LEVEL_LABEL, type Perk } from "@/lib/rewards/program";
+import { PERK_POINTS_ONLY, REWARD_LEVELS, REWARD_LEVEL_LABEL, type Perk } from "@/lib/rewards/program";
 import { PERK_FREQUENCY_LABEL, perkDraftErrors, type PerkDraft } from "@/lib/rewards/perks";
 import { savePerksAction } from "./actions";
 
@@ -23,9 +23,10 @@ function rowsOf(perks: Perk[]): Row[] {
       id: p.id,
       name: p.name,
       description: p.description,
-      level: p.level,
+      level: p.level ?? PERK_POINTS_ONLY,
       frequency: p.frequency,
       active: p.active,
+      pointCost: p.pointCost != null ? String(p.pointCost) : "",
     }));
 }
 
@@ -37,6 +38,7 @@ const strip = (rows: Row[]): PerkDraft[] =>
     level: r.level,
     frequency: r.frequency,
     active: r.active,
+    pointCost: r.pointCost == null ? "" : String(r.pointCost).trim(),
   }));
 
 const field: CSSProperties = {
@@ -92,7 +94,7 @@ export function PerksEditor({ perks }: { perks: Perk[] }) {
     touch();
     seq += 1;
     const key = `new:${Date.now().toString(36)}${seq}`;
-    setRows((cur) => [...cur, { key, id: key, name: "", description: "", level: "base", frequency: "once", active: true }]);
+    setRows((cur) => [...cur, { key, id: key, name: "", description: "", level: "base", frequency: "once", active: true, pointCost: "" }]);
   };
 
   const onSave = () => {
@@ -121,9 +123,10 @@ export function PerksEditor({ perks }: { perks: Perk[] }) {
       <div style={{ padding: "14px 18px 12px", borderBottom: "1px solid #f0f1f4" }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Perks</div>
         <div style={{ fontSize: 12, color: "#8c919c", marginTop: 3, lineHeight: 1.5 }}>
-          Benefits a customer unlocks at a reward level (Base = every customer). Staff mark a perk used on the company
-          record; a once perk is then gone, a yearly perk comes back 365 days after its last use. Available perks show in
-          the customer portal (name and description).
+          Benefits a customer unlocks at a reward level (Base = every customer) — free once the level is reached. Give a
+          perk a point price and customers below that level (or every customer, for a points-only perk) can buy it with
+          their rewards points (1 point = $1 of credit). Customers redeem perks in the portal; staff Redeem or Mark used on
+          the company record. A once perk is then gone, a yearly perk comes back 365 days after its last use.
           {removedCount > 0 && ` ${removedCount} removed ${removedCount === 1 ? "perk is" : "perks are"} kept for past uses.`}
         </div>
       </div>
@@ -133,7 +136,7 @@ export function PerksEditor({ perks }: { perks: Perk[] }) {
       ) : (
         rows.map((r, i) => (
           <div key={r.key} data-testid="perk-row" style={{ padding: "14px 18px", borderBottom: "1px solid #f0f1f4", opacity: r.active ? 1 : 0.7 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,0.8fr)", gap: 12 }}>
               <label>
                 <span style={lbl}>Name</span>
                 <input
@@ -158,6 +161,7 @@ export function PerksEditor({ perks }: { perks: Perk[] }) {
                       {l === "base" ? "Base (everyone)" : REWARD_LEVEL_LABEL[l]}
                     </option>
                   ))}
+                  <option value={PERK_POINTS_ONLY}>Never free (points only)</option>
                 </select>
               </label>
               <label>
@@ -171,6 +175,17 @@ export function PerksEditor({ perks }: { perks: Perk[] }) {
                   <option value="once">{PERK_FREQUENCY_LABEL.once}</option>
                   <option value="yearly">{PERK_FREQUENCY_LABEL.yearly}</option>
                 </select>
+              </label>
+              <label>
+                <span style={lbl}>Point price</span>
+                <input
+                  style={{ ...field, fontFamily: "var(--font-mono)" }}
+                  value={r.pointCost == null ? "" : String(r.pointCost)}
+                  inputMode="numeric"
+                  placeholder="Not for sale"
+                  aria-label={`Perk ${i + 1} point price`}
+                  onChange={(e) => patch(r.key, { pointCost: e.target.value })}
+                />
               </label>
             </div>
             <label style={{ display: "block", marginTop: 10 }}>

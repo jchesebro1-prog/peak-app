@@ -66,10 +66,16 @@ export function RewardsCard({
     quotes: PerkQuoteOption[];
     canMark: boolean;
     canUndo: boolean;
+    /** #282 perks+points: spendable points (pointsFor(available credit)). */
+    points?: number;
   } | null;
 }) {
   const n = view.purchases.length;
-  const entries = (credit?.entries || []).filter((e) => e.kind !== "perk" && e.kind !== "unperk");
+  // Perk entries are listed under Perks; a perk bought with points (and its
+  // refund) moves the balance, so it lists here too (#282 perks+points).
+  const entries = (credit?.entries || []).filter(
+    (e) => !((e.kind === "perk" || e.kind === "unperk") && !e.amount) && e.kind !== "perk-fulfil"
+  );
   return (
     <div style={card} id="rewards">
       <div
@@ -140,6 +146,7 @@ export function RewardsCard({
           quoteRefs={quoteRefs}
           canMark={perks.canMark}
           canUndo={perks.canUndo}
+          points={perks.points}
         />
       )}
 

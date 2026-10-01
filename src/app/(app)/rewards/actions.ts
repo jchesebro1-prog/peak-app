@@ -16,7 +16,15 @@ import {
   postStartingCredit,
 } from "@/lib/stores/reward-ledger";
 import { parseAdjustAmount } from "@/lib/rewards/ledger";
-import { markPerkUsed, undoPerkUse } from "@/lib/stores/reward-perks";
+import {
+  fulfilPerkRedemption,
+  markPerkUsed,
+  purchasePerksForCompany,
+  redeemPerk,
+  undoPerkUse,
+} from "@/lib/stores/reward-perks";
+import { formatPoints } from "@/lib/rewards/points";
+import { purchasePerksBannerText } from "@/lib/rewards/purchase-perks";
 
 /**
  * Customer Rewards suggestion actions (#282 Phase 1, spec §3). Both need the
@@ -60,6 +68,10 @@ export type RewardCreditInfo = {
   balance: number;
   /** balance − credit on the company's OTHER open quotes (not `quoteId`). */
   available: number;
+  /** #282 perks+points: the staff banner text ("Gold purchase perks: …"), "" when none. */
+  purchasePerks?: string;
+  /** #282 perks+points: the customer this answer is for (a stale answer shows nothing). */
+  customerId?: string;
 };
 
 /**
@@ -70,9 +82,9 @@ export async function rewardCreditInfoAction(customerId: string | null, quoteId:
   await requireUser();
   const program = await getRewardsProgram();
   const id = String(customerId || "").trim();
-  if (!program.enabled || !id) return { enabled: program.enabled, balance: 0, available: 0 };
-  const c = await companyCredit(id, quoteId || null);
-  return { enabled: true, balance: c.balance, available: c.available };
+  if (!program.enabled || !id) return { enabled: program.enabled, balance: 0, available: 0, purchasePerks: "" };
+  const [c, pp] = await Promise.all([companyCredit(id, quoteId || null), purchasePerksForCompany(id)]);
+  return { enabled: true, balance: c.balance, available: c.available, purchasePerks: purchasePerksBannerText(pp), customerId: id };
 }
 
 export type CreditActionResult = { ok: true; message: string } | { ok: false; error: string };
@@ -154,5 +166,65 @@ export async function undoPerkUseAction(companyId: string, useId: string): Promi
   const res = await undoPerkUse(id, String(useId || ""), me.name);
   if (!res.ok) return res;
   refresh(id);
-  return { ok: true, message: "Undone." };
+  // #282 perks+points: an undone redemption leaves the bell's "Perks to fulfil".
+  revalidatePath("/", "layout");
+  return { ok: true, message: res.entry.amount > 0 ? `Undone — ${formatPoints(res.entry.amount)} refunded.` : "Undone." };
+}
+
+/* ---------- #282 perks+points: redeem, fulfil, purchase perks ---------- */
+
+/**
+ * Company card → Redeem (`create`): free at the perk's unlock level, else
+ * bought with the company's points. `expectMode` / `expectPoints` are what
+ * the card showed — the store refuses when the server's answer differs, and
+ * recomputes everything (level, window, points) under the company's lock.
+ */
+export async function redeemPerkAction(
+  companyId: string,
+  perkId: string,
+  expectMode: "free" | "points",
+  expectPoints: number | null,
+  note: string
+): Promise<CreditActionResult> {
+  const me = await requireUser();
+  if (!can("create", me.roles)) return { ok: false, error: "You need create permission to redeem a perk." };
+  const id = String(companyId || "").trim();
+  if (!id) return { ok: false, error: "Company not found." };
+  const res = await redeemPerk({
+    companyId: id,
+    perkId: String(perkId || ""),
+    via: "staff",
+    by: me.name,
+    note,
+    expect: { mode: expectMode === "points" ? "points" : "free", pointCost: expectPoints == null ? null : Number(expectPoints) },
+  });
+  if (!res.ok) return res;
+  refresh(id);
+  revalidatePath("/", "layout");
+  return { ok: true, message: res.entry.redeemed === "points" ? `Redeemed for ${formatPoints(-res.entry.amount)}.` : "Redeemed." };
+}
+
+/** Company card → Mark fulfilled (`create`): records that a redemption was delivered (once). */
+export async function fulfilPerkAction(companyId: string, useId: string): Promise<CreditActionResult> {
+  const me = await requireUser();
+  if (!can("create", me.roles)) return { ok: false, error: "You need create permission to mark a perk fulfilled." };
+  const id = String(companyId || "").trim();
+  if (!id) return { ok: false, error: "Company not found." };
+  const res = await fulfilPerkRedemption(id, String(useId || ""), me.name);
+  if (!res.ok) return res;
+  refresh(id);
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Marked fulfilled." };
+}
+
+/**
+ * The staff purchase-perks banner (flame / inspection / repair builders):
+ * "Gold purchase perks: Free freight · Waived travel" for the customer picked
+ * now, or "" (program off, no customer, none earned). The Estimator gets the
+ * same text through rewardCreditInfoAction. Informational — v1 never changes
+ * a price.
+ */
+export async function purchasePerksBannerAction(customerId: string | null): Promise<string> {
+  await requireUser();
+  return purchasePerksBannerText(await purchasePerksForCompany(customerId));
 }

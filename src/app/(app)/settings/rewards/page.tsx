@@ -3,6 +3,7 @@ import { requirePerm } from "@/lib/session";
 import { getRewardsProgram } from "@/lib/stores/rewards";
 import { RewardsProgramForm } from "./rewards-form";
 import { PerksEditor } from "./perks-editor";
+import { PurchasePerksEditor } from "./purchase-perks-editor";
 import { startingCreditBoard } from "@/lib/stores/reward-ledger";
 import { ShortList } from "@/components/short-list";
 import { creditMoney } from "@/components/rewards/credit-ui";
@@ -49,6 +50,8 @@ export default async function RewardsSettingsPage() {
       <RewardsProgramForm program={program} />
       {/* #282 phase 4: perk definitions (their own Save). */}
       <PerksEditor perks={program.perks} />
+      {/* #282 perks+points: standing purchase perks by tier (their own Save). */}
+      <PurchasePerksEditor purchasePerks={program.purchasePerks} />
 
       <div className="pk-card" style={{ padding: 0, overflow: "hidden", marginTop: 22 }} id="starting-credit">
         <div

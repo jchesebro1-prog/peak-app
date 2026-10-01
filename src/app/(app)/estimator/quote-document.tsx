@@ -64,6 +64,10 @@ export type QuoteDocumentProps = {
    *  anyway; scoped here so an ordinary Estimator quote's own $0 lines (an
    *  intentional freebie, not price-on-request) are never relabeled. */
   isPortalCatalog?: boolean;
+  /** #282 perks+points — "Your Gold rewards: Free freight · Waived travel"
+   *  under the totals; absent/"" when the program is off or the customer has
+   *  no purchase perks (the print route loads it). */
+  rewardsLine?: string;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -713,6 +717,15 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 {fmt(p.t.grand)}
               </span>
             </div>
+            {p.rewardsLine && (
+              <div
+                className="est-rewards-line"
+                data-testid="doc-purchase-perks"
+                style={{ marginTop: 8, fontSize: 11, color: "#1f7a52", fontWeight: 600, lineHeight: 1.5, textAlign: "right" }}
+              >
+                {p.rewardsLine}
+              </div>
+            )}
             {standingLines.length > 0 && (
               <div className="est-standing" style={{ marginTop: 8, fontSize: 11, color: "#5b616e", lineHeight: 1.6, textAlign: "right" }}>
                 {standingLines.map((line) => (

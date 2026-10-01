@@ -251,6 +251,34 @@ export async function withQuoteLock<T>(quoteId: string, fn: () => Promise<T>): P
   });
 }
 
+/** Advisory-lock namespace for a company's Rewards balance (#282 perks+points). */
+export const REWARDS_LOCK_NAMESPACE = 282;
+
+/**
+ * Run `fn` inside a transaction holding the Postgres advisory lock
+ * `(namespace, hashtext(key))` — the same bounded-poll shape as
+ * `withQuoteLock` (#180), for any other read-check-insert that has no unique
+ * constraint to lean on. #282 perks+points uses it per company so two
+ * simultaneous point redemptions can't both read the same balance and
+ * overspend it: the second waits, then re-reads the first's committed entry.
+ * A hash collision only makes two unrelated keys wait for each other. Joins
+ * an already-open transaction (the lock then lives until it commits).
+ * Throws after `QUOTE_LOCK_TIMEOUT_MS` rather than hang the request.
+ */
+export async function withAdvisoryLock<T>(namespace: number, key: string, fn: () => Promise<T>): Promise<T> {
+  return withTransaction(async () => {
+    const db = await getDb();
+    const deadline = Date.now() + QUOTE_LOCK_TIMEOUT_MS;
+    for (;;) {
+      const result = await db.execute(sql`select pg_try_advisory_xact_lock(${namespace}, hashtext(${key})) as got`);
+      if (firstRow<{ got: boolean }>(result)?.got) break;
+      if (Date.now() >= deadline) throw new Error(`withAdvisoryLock: timed out after ${QUOTE_LOCK_TIMEOUT_MS}ms waiting for lock ${namespace}:${key}.`);
+      await new Promise((resolve) => setTimeout(resolve, QUOTE_LOCK_POLL_MS));
+    }
+    return fn();
+  });
+}
+
 /**
  * Run `fn` with the ambient transaction context EXITED (#172).
  *

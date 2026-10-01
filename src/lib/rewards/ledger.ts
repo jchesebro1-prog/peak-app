@@ -14,8 +14,13 @@
  *   unredeem:<quoteId>:<n>  that spend undone             (+ the redeem)
  *   start:<companyId>       the one-time starting credit  (+)
  *   adjust:<companyId>:<t>  a staff adjustment            (±, note required)
- *   perk:<companyId>:<perkId>:<n>   the n-th use of a perk (0)
- *   unperk:<companyId>:<perkId>:<n> that use undone        (0)
+ *   perk:<companyId>:<perkId>:<n>   the n-th use of a perk (0, or −pointCost when bought with points)
+ *   unperk:<companyId>:<perkId>:<n> that use undone        (−the use: refunds the points exactly)
+ *   fulfil:perk:<companyId>:<perkId>:<n>  a redemption fulfilled by staff (0)
+ *
+ * #282 perks+points: a perk use with `redeemed` set is a REDEMPTION (portal or
+ * staff Redeem) that staff still have to deliver — `perk-fulfil` records the
+ * delivery; a use without it is a staff "Mark used" (delivered on the spot).
  *
  * Amounts are dollars. Earns and starting credit post WHOLE dollars (rounded
  * up) and an applied credit is whole dollars (rounded down), so the points a
@@ -27,7 +32,7 @@
 
 import { roundDownDollars, roundUpDollars } from "./points";
 
-export const LEDGER_KINDS = ["earn", "reverse", "start", "redeem", "unredeem", "adjust", "perk", "unperk"] as const;
+export const LEDGER_KINDS = ["earn", "reverse", "start", "redeem", "unredeem", "adjust", "perk", "unperk", "perk-fulfil"] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
 export type LedgerEntry = {
@@ -39,6 +44,16 @@ export type LedgerEntry = {
   quoteId?: string;
   perkId?: string;
   note?: string;
+  /**
+   * #282 perks+points — on a `perk` entry: set for a REDEMPTION ("free" =
+   * claimed at its unlock level, "points" = bought, `amount` = −pointCost),
+   * which staff must still fulfil; absent for a staff Mark used.
+   */
+  redeemed?: "free" | "points";
+  /** #282 perks+points — who redeemed: the customer in the portal, or staff on the company card. */
+  via?: "portal" | "staff";
+  /** #282 perks+points — on a `perk-fulfil` entry: the redemption (perk use id) it fulfils. */
+  useId?: string;
   at: number;
   by: string;
 };
@@ -52,7 +67,18 @@ export const LEDGER_KIND_LABEL: Record<LedgerKind, string> = {
   adjust: "Adjustment",
   perk: "Perk used",
   unperk: "Perk use undone",
+  "perk-fulfil": "Perk fulfilled",
 };
+
+/**
+ * The credit ledger's row label (#282 perks+points): a perk bought with points
+ * and its refund move the balance, so they list with the credit entries.
+ */
+export function ledgerEntryLabel(e: Pick<LedgerEntry, "kind" | "amount">): string {
+  if (e.kind === "perk" && e.amount < 0) return "Perk redeemed for points";
+  if (e.kind === "unperk" && e.amount > 0) return "Perk points refunded";
+  return LEDGER_KIND_LABEL[e.kind] ?? e.kind;
+}
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 

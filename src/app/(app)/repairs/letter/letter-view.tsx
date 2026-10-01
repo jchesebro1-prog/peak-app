@@ -14,6 +14,8 @@ import { flightOf, flyTravelSentence } from "@/lib/travel-plan";
 import { printedLift, travelLineShare } from "@/lib/service-pricing";
 import { serviceLetterPrice } from "@/lib/rewards/service-credit";
 import { rewardPointsPhrase } from "@/lib/rewards/points";
+import { purchasePerksSentence } from "@/lib/rewards/purchase-perks";
+import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -251,6 +253,8 @@ export async function RepairLetterView({ id }: { id: string }) {
 
   const owner = quote.owner || "Jeff Chesebro";
   const users = await allUsers();
+  // #282 perks+points — the customer's standing purchase perks (null while off / none).
+  const perksSentence = purchasePerksSentence(await purchasePerksForCompany(quote.customerId));
   const u = users.find((x) => x.name === owner) || null;
   const signerTitle = (u && u.roles && u.roles.length ? u.roles[0] : "") || "Estimator";
   const signerEmail = (u && u.email) || "";
@@ -504,6 +508,12 @@ export async function RepairLetterView({ id }: { id: string }) {
               Sales tax, if required, will be billed at the local sales tax rates in force at the
               time of billing.
             </p>
+            {/* #282 perks+points — one sentence naming the customer's purchase perks (program on only). */}
+            {perksSentence && (
+              <p data-testid="letter-purchase-perks" style={{ margin: "0 0 13px", fontSize: "10pt", color: "#1f7a52", fontWeight: 600 }}>
+                {perksSentence}
+              </p>
+            )}
             <p style={{ margin: "0 0 18px", fontSize: "10pt", color: "#40454e" }}>
               {renderField(settings.templates, "repairs_proposal", "warranty", { warrantyMonths })}
             </p>

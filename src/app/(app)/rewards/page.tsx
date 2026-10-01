@@ -60,7 +60,8 @@ export default async function RewardsPage({
   const preview = !program.enabled;
   const [board, credit] = await Promise.all([rewardsBoard(program), creditByCompany()]);
   // #282 phase 4: perks available to each customer right now.
-  const perkCounts = await availablePerksByCompany(board, program);
+  // #282 perks+points: free + buyable with the company's available points.
+  const perkCounts = await availablePerksByCompany(board, program, undefined, credit);
   const levelParam = one(sp.level);
   const level: RewardLevel | "all" = isRewardLevel(levelParam) ? levelParam : "all";
   const rows = level === "all" ? board : board.filter((r) => r.earned === level);
