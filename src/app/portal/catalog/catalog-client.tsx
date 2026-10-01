@@ -195,7 +195,7 @@ function Tile({
         <Link href={href} scroll={false} className="pc-title" title={t.title}>
           {t.title}
         </Link>
-        {t.kind === "fixture" ? <div className="pc-subline">{t.subline}</div> : <div className="pc-sku">{t.sku}</div>}
+        {t.kind === "fixture" ? (t.subline ? <div className="pc-subline">{t.subline}</div> : null) : <div className="pc-sku">{t.sku}</div>}
         <div className="pc-foot">
           {t.unitPrice != null ? (
             <span className="pc-price">
@@ -359,6 +359,8 @@ export function CatalogClient({
     navigate(catalogHref(params, { [field]: toggleValue(params[field], value), page: 1 }, previewCid), "push");
 
   const browsing = !params.q && !params.mfr.length && !params.cat.length;
+  const hasDeptTiles = tiles.some((t) => t.id !== "packages");
+  const noDepts = dept?.id === "packages";
   const facetCount = params.mfr.length + params.cat.length;
   // Nothing to filter (an empty browse set, or a search with no hits and no
   // facet picked) → no rail, and the results take the full width.
@@ -373,7 +375,7 @@ export function CatalogClient({
       {dept && (
         <nav aria-label="Breadcrumb" style={{ fontSize: 12.5, marginBottom: 10 }}>
           <Link href={catalogHref(params, { dept: "" }, previewCid)} scroll={false} style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
-            All departments
+            {noDepts ? "All products" : "All departments"}
           </Link>
           <span style={{ color: "#aab0bb", margin: "0 6px" }}>›</span>
           <span style={{ color: "#5b616e", fontWeight: 600 }}>{dept.name}</span>
@@ -475,7 +477,7 @@ export function CatalogClient({
           {tiles.length > 0 && (
             <div style={{ marginBottom: 26 }}>
               <div className="pc-section-head">
-                <div className="pc-section-title">Departments</div>
+                <div className="pc-section-title">{hasDeptTiles ? "Departments" : "Browse"}</div>
               </div>
               <div className="pc-dept-grid">
                 {tiles.map((t) => (
@@ -532,7 +534,7 @@ export function CatalogClient({
               {dept && (
                 <div style={{ marginTop: 10 }}>
                   <Link href={catalogHref(params, { dept: "" }, previewCid)} scroll={false} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
-                    Search all departments
+                    {noDepts ? "Search all products" : "Search all departments"}
                   </Link>
                 </div>
               )}
