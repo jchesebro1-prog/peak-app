@@ -550,5 +550,16 @@ See `.env.example`.
     printed on the customer document and the hub row). Open: freeze both at
     send? Punch item #287.
 
+28. ✅ **Portal quote names, My quotes, Portal quotes queue** (#288,
+    D525–D528) — customers name a quote at Generate (default "<venue> —
+    <date>", Chicago date, 120-char cap, service "+ N more") and rename it
+    until accepted (30/h, PDF re-rendered); `/portal/my-quotes` lists the
+    customer-built quotes (Open/Accepted/Closed), Home only Peak-sent ones,
+    nav Home · Catalog · Service · My quotes · Cart. Staff
+    `/quotes/portal` (Estimating → Portal quotes) is the work queue —
+    status/type chips, search, Needs action default, Approve/Decline through
+    the existing actions, bell links focus the row. Peak-sent acceptances
+    keep their hub link. Punch item #288.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

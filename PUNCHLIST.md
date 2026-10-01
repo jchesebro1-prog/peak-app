@@ -10180,3 +10180,21 @@ Plan: `docs/superpowers/plans/2026-10-01-approver-send-and-lead-estimator.md`.
 1. Should the lead estimator / Prepared by freeze after send? Today both can change on a sent quote (a PDF re-render
    moves the printed revision date).
 2. Settings → Team still decides who can approve, and so who can send others' quotes; check who holds `approve`.
+
+---
+
+## 288. Portal — customer-named quotes, My quotes, staff Portal quotes queue — DONE 2026-10-01 (D525–D528)
+
+**Done.** A customer names each quote at Generate (default "<venue> — <date>", service "+ N more") and can rename it
+until it is accepted; the portal gains **My quotes** (customer-built quotes, Open / Accepted / Closed) while Home shows
+only Peak-sent quotes, and the nav is Home · Catalog · Service · My quotes · Cart. Staff get **Estimating → Portal
+quotes** (`/quotes/portal`): status and type chips, search, Needs action by default, Approve / Decline through the
+existing actions, and bell links that focus the row. Spec: `docs/superpowers/specs/2026-10-01-portal-quotes-packages-manuals-design.md`
+Part 1. No migrations.
+
+Gates: tsc 0; test:specs 10,176 PASS / 0 FAIL; test:smoke 184 PASS / 0 FAIL; `next build` OK; eslint 0 errors on changed
+src files.
+
+**Remaining.**
+1. Browser check on production through the team preview of a real grant (name at Generate, rename, My quotes, queue).
+2. Peak-sent acceptances still use the Quotes hub link (D528).

@@ -249,3 +249,19 @@ Everything slot-generic picks it up; every hard-coded place is updated.
 - **Docs per part:** DECISIONS entries plus a PUNCHLIST entry, with numbers recomputed from origin/main right before
   writing.
 - **No migrations:** quotes and fixtures are JSON docs, and the new fields are optional.
+
+## As built — Part 1
+
+Shipped on `feat/288-portal-quotes` (D525–D528, punch #288). Deviations from the sections above:
+
+- **Peak-sent acceptances keep their hub link.** The queue lists customer-built quotes only (§1.7), so the bell's
+  "Portal acceptances to confirm" links a Peak-sent estimate to `/quotes?id=<id>`; customer-built ones link
+  `/quotes/portal?focus=<id>`.
+- **Flame / inspection Approve redirects to the builder.** It calls the existing engine-owned action, which redirects
+  to that builder (`?id=…&approved=1`); catalog Approve stays on the queue.
+- **Approve is offered only where the existing action can succeed:** any accepted catalog row; flame and inspection
+  only when `approveKeepsAcceptedPrice` holds, otherwise the row shows Open only.
+- **Legacy `portal-self-serve` Decline is refused inline.** `declinePortalAcceptance` accepts only `portal-catalog`
+  and `portal-service`; the action's own message shows on the row.
+- **Name box keeps typed names:** the default recomputes on venue change only until the customer types their own.
+- **Gates:** tsc 0; test:specs 10,176 PASS; test:smoke 184 PASS / 0 FAIL; `next build` OK.
