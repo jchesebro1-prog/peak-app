@@ -22,7 +22,7 @@ import { shortDate } from "@/lib/format";
 import { displayLeadNumber } from "@/lib/estimate-number";
 import { portalBellGroups } from "@/lib/portal-bell";
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { approvalSnapshotMatches } from "@/lib/approval-snapshot";
+import { quoteAwaitsApprovalBy, quoteBackFromReview, sameName } from "@/lib/quote-approval-rules";
 import { firstName } from "@/lib/team";
 import type {
   NavCounts,
@@ -48,34 +48,33 @@ export type { BellItem, BellGroup };
  * back for changes. Every item opens the quote itself.
  */
 export function quoteApprovalBell(quotes: Quote[], me: string, canApprove: boolean): { needs: BellItem[]; back: BellItem[] } {
-  const mine = (n?: string | null) => (n || "").trim().toLowerCase() === me.trim().toLowerCase();
   const needs = quotes
-    .filter((q) => q.review?.state === "in_review" && !mine(q.owner) && (canApprove || mine(q.review.reviewer)))
-    .sort((a, b) => Number(mine(b.review?.reviewer)) - Number(mine(a.review?.reviewer)) || (a.review?.submittedAt || 0) - (b.review?.submittedAt || 0))
+    .filter((q) => quoteAwaitsApprovalBy(q, me, canApprove))
+    .sort((a, b) => Number(sameName(b.review?.reviewer, me)) - Number(sameName(a.review?.reviewer, me)) || (a.review?.submittedAt || 0) - (b.review?.submittedAt || 0))
     .map((q) => ({
       id: q.id,
       title: q.name,
-      sub: `${q.customer || ""} · from ${firstName(q.review?.submittedBy || q.owner || "")}${mine(q.review?.reviewer) ? " · assigned to you" : ""}`,
+      sub: `${q.customer || ""} · from ${firstName(q.review?.submittedBy || q.owner || "")}${sameName(q.review?.reviewer, me) ? " · assigned to you" : ""}`,
       href: quoteBuilderHref(q),
       letter: "Q",
       color: "var(--accent)",
     }));
-  const back = quotes
-    .filter((q) => mine(q.owner) && q.status === "draft")
-    .filter((q) =>
-      q.review?.state === "changes" ||
-      (q.review?.state === "approved" && (q.review.method === "in_app" || q.review.method === "attested" || !q.review.method) && approvalSnapshotMatches(q))
-    )
-    .map((q) => ({
+  const back = quotes.flatMap((q) => {
+    const kind = quoteBackFromReview(q, me);
+    if (!kind) return [];
+    const note = (q.review?.note || "").trim();
+    const shown = note.length > 80 ? note.slice(0, 79).trimEnd() + "…" : note;
+    return [{
       id: q.id,
       title: q.name,
-      sub: q.review?.state === "changes"
-        ? `Sent back by ${firstName(q.review.decidedBy || "")}${q.review.note ? ` — “${q.review.note}”` : ""}`
+      sub: kind === "changes"
+        ? `Sent back by ${firstName(q.review?.decidedBy || "")}${shown ? ` — “${shown}”` : ""}`
         : `Approved — ready to send · ${firstName(q.review?.decidedBy || "")}`,
       href: quoteBuilderHref(q),
-      letter: q.review?.state === "changes" ? "!" : "✓",
-      color: q.review?.state === "changes" ? "#b4543a" : "#1f7a52",
-    }));
+      letter: kind === "changes" ? "!" : "✓",
+      color: kind === "changes" ? "#b4543a" : "#1f7a52",
+    }];
+  });
   return { needs, back };
 }
 

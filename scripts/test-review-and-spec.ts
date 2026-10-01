@@ -39774,6 +39774,37 @@ async function approval284AsyncChecks(): Promise<void> {
   ok(!own.some((i) => i.key === `quote-review:${id("t7-q")}`), "#284 queue: the owner's own quote is not in their approval queue");
   const qsrc = readFileSync("src/lib/queue.ts", "utf8");
   ok(!qsrc.includes("Unclaimed review: quote") && qsrc.includes("reviewers()"), "#284 queue: the old 'Unclaimed review' wording is gone and the approver set comes from reviewers()");
+  // Task 7 fix round 1 — one shared predicate module, tested directly and through the bell.
+  const RU = await import("@/lib/quote-approval-rules");
+  ok(RU.sameName("nic trapani ", "Nic Trapani") && !RU.sameName("", "") && !RU.sameName(null, "Nic") && !RU.sameName("Nic", undefined), "#284 rules: sameName trims, ignores case, and never matches a blank");
+  const inRev = { state: "in_review", reviewer: null, submittedBy: "Nic Trapani", submittedAt: 1 };
+  ok(RU.quoteAwaitsApprovalBy({ owner: "Nic Trapani", review: inRev }, "Jeff Chesebro", true) && !RU.quoteAwaitsApprovalBy({ owner: "Nic Trapani", review: inRev }, "Jena Tolksdorf", false)
+    && !RU.quoteAwaitsApprovalBy({ owner: "Nic Trapani", review: { ...inRev, state: "approved" } }, "Jeff Chesebro", true),
+    "#284 rules: quoteAwaitsApprovalBy — approvers see in-review quotes, non-approvers do not, other states never");
+  ok(RU.quoteAwaitsApprovalBy({ owner: "Nic Trapani", review: { ...inRev, reviewer: "chris mittlesteadt " } }, "Chris Mittlesteadt", false), "#284 rules: a non-approver assigned by name (case/space-insensitive) awaits approval");
+  ok(!RU.quoteAwaitsApprovalBy({ owner: " NIC trapani", review: inRev }, "Nic Trapani", true), "#284 rules: an owner whose name differs only in case or whitespace is still the owner");
+  ok(RU.quoteAwaitsApprovalBy({ owner: "", review: inRev }, "Jeff Chesebro", true) && !RU.quoteAwaitsApprovalBy({ owner: "", review: inRev }, "", false), "#284 rules: a blank owner never matches me (a blank name is not 'mine')");
+  ok(RU.quoteBackFromReview({ owner: "", status: "draft", review: { state: "changes" } }, "") === null && RU.quoteBackFromReview({ owner: "", status: "draft", review: { state: "changes" } }, "Nic") === null,
+    "#284 rules: a quote with a blank owner is never treated as mine");
+  ok(RU.quoteBackFromReview({ owner: "Nic Trapani", status: "draft", review: { state: "changes" } }, "nic trapani") === "changes"
+    && RU.quoteBackFromReview({ owner: "Nic Trapani", status: "sent", review: { state: "changes" } }, "Nic Trapani") === null
+    && RU.quoteBackFromReview({ owner: "Nic Trapani", status: "draft", review: { state: "approved", method: "self" } }, "Nic Trapani") === null
+    && RU.quoteBackFromReview({ owner: "Nic Trapani", status: "draft", review: { state: "approved", method: "auto_limit" } }, "Nic Trapani") === null,
+    "#284 rules: quoteBackFromReview — draft owner only; self/auto approvals happen at send, so they are not 'back'");
+  const attested = qq("b6", "Nic Trapani", { state: "approved", method: "attested", decidedBy: "Nic Trapani", note: "Phone call" });
+  ok(NC.quoteApprovalBell([attested], "Nic Trapani", false).back.length === 1 && RU.quoteBackFromReview(attested as never, "Nic Trapani") === "approved", "#284 bell: an attested approval is a 'back' item");
+  const stale = qq("b7", "Nic Trapani", { state: "approved", method: "in_app", decidedBy: "Jeff Chesebro", note: "", approvedAgainst: { sell: 999, linesKey: "x" } });
+  ok(NC.quoteApprovalBell([stale], "Nic Trapani", false).back.length === 0, "#284 bell: an approval whose snapshot no longer matches (sell changed) is not a 'back' item");
+  const assignedToChris = NC.quoteApprovalBell([toChris], "Chris Mittlesteadt", false);
+  ok(assignedToChris.needs.length === 1 && assignedToChris.needs[0].sub.includes("assigned to you"), "#284 bell: a non-approver assigned a quote by name sees it, marked assigned to you");
+  ok(NC.quoteApprovalBell([shared], "nic trapani ", true).needs.length === 0, "#284 bell: owner match is case/whitespace-insensitive");
+  const longNote = "x".repeat(200);
+  const longBack = NC.quoteApprovalBell([qq("b8", "Nic Trapani", { state: "changes", decidedBy: "Jeff Chesebro", note: longNote })], "Nic Trapani", false).back[0];
+  ok(longBack.sub.includes("…") && longBack.sub.length < 130 && !longBack.sub.includes("x".repeat(81)), "#284 bell: a long send-back note is capped at 80 characters with an ellipsis");
+  const rsrc = readFileSync("src/lib/quote-approval-rules.ts", "utf8");
+  ok(!/from "@\/(lib\/stores|db|lib\/users|lib\/session|lib\/settings)/.test(rsrc), "#284 rules: quote-approval-rules.ts is client-safe (no store/db/users/session import)");
+  const usedBy = ["src/lib/nav-counts.ts", "src/lib/queue.ts", "src/lib/dashboard/home-metrics.ts"].every((f) => readFileSync(f, "utf8").includes("quote-approval-rules"));
+  ok(usedBy, "#284 rules: the bell, the queue and Home all use the shared predicates");
 }
 
 /* #284 Task 4: the next-step view model. */

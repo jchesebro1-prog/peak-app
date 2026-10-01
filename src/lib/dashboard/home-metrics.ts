@@ -4,6 +4,7 @@ import { firstName } from "@/lib/team";
 import type { DesignRecord } from "@/lib/stores/designs";
 import type { Quote, QuoteStatus } from "@/lib/stores/quotes";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import { quoteAwaitsApprovalBy } from "@/lib/quote-approval-rules";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 const DAY = 86_400_000;
@@ -115,7 +116,7 @@ export function homeAlerts(
   const reviewAlerts: AlertRow[] = [];
   quotesAll.forEach((q) => {
     const r = q.review;
-    if (r?.state === "in_review" && q.owner !== me && (canApprove || r.reviewer === me)) {
+    if (r && quoteAwaitsApprovalBy(q, me, canApprove)) {
       reviewAlerts.push({
         key: `rq-${q.id}`,
         title: shortTitle(q.name) + " — awaiting your review",
@@ -155,7 +156,7 @@ export function homeAlerts(
     }
   });
   const openReviewCount =
-    quotesAll.filter((q) => q.review?.state === "in_review" && q.owner !== me && (canApprove || q.review?.reviewer === me)).length +
+    quotesAll.filter((q) => quoteAwaitsApprovalBy(q, me, canApprove)).length +
     designsAll.filter((d) => d.review?.state === "in_review" && d.review?.reviewer === me && d.owner !== me).length;
 
   return {

@@ -11,6 +11,7 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { reviewers } from "@/lib/users";
 import { firstName } from "@/lib/team";
+import { quoteAwaitsApprovalBy, sameName } from "@/lib/quote-approval-rules";
 
 /* ------------------------------------------------------------------ *
  * My Queue (D93) — one person's open commitments, DERIVED.
@@ -86,7 +87,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       reviewers(),
     ]);
   // #284 — approvers see every in-review quote; the reviewer field is advisory.
-  const meApproves = approverRows.some((u) => u.name === me);
+  const meApproves = approverRows.some((u) => sameName(u.name, me));
 
   // Self-sufficiency: /api/queue's Reminders-sync cron can call loadQueue
   // before any page load has triggered the lazy migration, so legacy
@@ -119,9 +120,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
      to them by name. --- */
   for (const q of quotes) {
     const r = q.review;
-    if (!r || r.state !== "in_review" || q.owner === me) continue;
-    if (r.reviewer && r.reviewer !== me && !meApproves) continue;
-    if (!r.reviewer && !meApproves) continue;
+    if (!r || !quoteAwaitsApprovalBy(q, me, meApproves)) continue;
     items.push({
       key: `quote-review:${q.id}`,
       source: "quote-review",
