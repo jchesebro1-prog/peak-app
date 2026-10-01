@@ -10686,6 +10686,7 @@ seeded()
   .then(() => shrink283AsyncChecks())
   .then(() => shrinkUpload283AsyncChecks())
   .then(() => drivePhotos283AsyncChecks())
+  .then(() => drivePhotoSync283AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -39674,4 +39675,142 @@ import { planDrivePhotoSync as pp283 } from "@/lib/part-docs/drive-photo-plan";
   ok(/HEIC/.test(reasons.heic) && /over 25 MB/.test(reasons.big), "#283 plan: HEIC and over-cap files are listed, not imported");
   ok(!!reasons.knownNowNone && !plan.relinks.some((r) => r.fileId === "knownNowNone") && !plan.updates.some((u) => u.id === "knownNowNone"),
     "#283 plan: a known file renamed to something unmatched is only listed — its links stay");
+}
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photo sync executor (PGlite + fake Drive + fake Blob).
+// ---------------------------------------------------------------------------
+import { syncDrivePhotos as ds283Sync, getDrivePhotoSyncState as ds283State, saveCatalogPhotosMailbox as ds283SaveMailbox, DRIVE_PHOTO_SYNC_BLOB as ds283Blob } from "@/lib/part-docs/drive-photo-sync";
+import { hasDriveReadScope as ds283HasRead } from "@/lib/gmail/config";
+import { matchFileRows as ds283Match } from "@/lib/part-docs/filename-match";
+import { list as ds283ListCatalog } from "@/lib/stores/catalog";
+import { getDocument as ds283GetDoc, linkedDocumentsForParts as ds283Linked, documentLinkId as ds283LinkId } from "@/lib/stores/part-documents";
+import { setBlob as ds283SetBlob } from "@/db/doc-store";
+async function drivePhotoSync283AsyncChecks(): Promise<void> {
+  // Fixture SKUs: normalizeSku drops the `TEST283:` prefix, so their match
+  // keys are T283ALPHA / T283BRAVO / T283LABOR — what the file names carry.
+  const ALPHA = fixtureId(283, "T283-ALPHA");
+  const BRAVO = fixtureId(283, "T283-BRAVO");
+  const LABOR = fixtureId(283, "T283-LABOR");
+  await upsertPart({ id: ALPHA, sku: ALPHA, desc: "TEST283 alpha fixture", category: "Lighting", unit: "ea", list: 10, cost: 5 });
+  registerFixture("catalog_parts", ALPHA);
+  await upsertPart({ id: BRAVO, sku: BRAVO, desc: "TEST283 bravo fixture", category: "Lighting", unit: "ea", list: 10, cost: 5 });
+  registerFixture("catalog_parts", BRAVO);
+  await upsertPart({ id: LABOR, sku: LABOR, desc: "TEST283 labor fixture", category: "Labor", unit: "hr", list: 10, cost: 5 });
+  registerFixture("catalog_parts", LABOR);
+  await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null });
+
+  const NONSENSE = "random.jpg";
+  const matchable = (await ds283ListCatalog()).filter((p) => p.category !== "Labor");
+  const [mAlpha, mNonsense] = ds283Match(["T283-ALPHA front.jpg", NONSENSE], matchable);
+  ok(mAlpha.confidence === "high" && mAlpha.skus.join() === ALPHA, "#283 sync setup: \"T283-ALPHA front.jpg\" matches only the ALPHA fixture part");
+  ok(mNonsense.confidence === "none", `#283 sync setup: "${NONSENSE}" matches no part in this catalog`);
+
+  const jpeg = await s283Sharp({ create: { width: 2000, height: 1000, channels: 3, background: "#0a0" } }).jpeg().toBuffer();
+  let files: Array<Record<string, unknown>> = [
+    { id: "dA", name: "T283-ALPHA front.jpg", mimeType: "image/jpeg", md5Checksum: "m1", size: String(jpeg.byteLength), webViewLink: "https://drive/dA" },
+    { id: "dL", name: "T283-LABOR.jpg", mimeType: "image/jpeg", md5Checksum: "mL", size: String(jpeg.byteLength), webViewLink: "https://drive/dL" },
+    { id: "dX", name: NONSENSE, mimeType: "image/jpeg", md5Checksum: "mX", size: "10", webViewLink: "https://drive/dX" },
+  ];
+  const jpegBody = new Uint8Array(jpeg);
+  let mediaBytes: Uint8Array<ArrayBuffer> = jpegBody;
+  const denied = new Set<string>();
+  let authFailOnce = "";
+  const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
+  const fakeDrive = async (url: string) => {
+    const u = new URL(url);
+    const id = decodeURIComponent(u.pathname.split("/").pop() || "");
+    if (u.searchParams.get("alt") === "media") {
+      if (denied.has(id)) return json({ error: { message: "The download of this file is restricted." } }, 403);
+      if (authFailOnce === id) { authFailOnce = ""; return json({ error: { message: "Invalid Credentials" } }, 401); }
+      return new Response(mediaBytes);
+    }
+    const q = u.searchParams.get("q") || "";
+    if (q.startsWith("name =")) return json({ files: [{ id: "ROOT", name: "Peak Product Photos", webViewLink: "https://drive/ROOT" }] });
+    if (u.pathname.endsWith("/files/ROOT")) return json({ id: "ROOT", name: "Peak Product Photos", mimeType: "application/vnd.google-apps.folder", webViewLink: "https://drive/ROOT" });
+    return json({ files });
+  };
+  const stored: string[] = [];
+  const storedBytes: Buffer[] = [];
+  const deps = { token: "tok", fetch: fakeDrive, putFile: async (p: string, b: Buffer) => { stored.push(p); storedBytes.push(b); return { pathname: p }; }, now: () => 1_700_000_000_000 };
+  const imagesOf = async (sku: string) => ((await ds283Linked([sku], "image")).get(sku) ?? []).map((d) => d.id).sort();
+  try {
+    const r1 = await ds283Sync(45_000, deps);
+    const st1 = await ds283State();
+    ok(r1.ok && r1.imported === 1 && r1.unmatched === 2, "#283 sync: a matched photo imports; Labor and nameless files are listed");
+    ok(!!st1.folder && st1.folder.id === "ROOT" && st1.files.dA?.documentId != null, "#283 sync: the folder and the imported file are remembered");
+    ok(!!st1.lastRun && st1.lastRun.complete && st1.lastRun.unmatched.map((u) => u.fileId).sort().join() === "dL,dX", "#283 sync: the last run is recorded, with its unmatched files");
+    const docId = st1.files.dA!.documentId!;
+    const doc = await ds283GetDoc(docId);
+    ok(!!doc && doc.kind === "image" && doc.source === "drive" && doc.sourceRef === "dA" && doc.contentType === "image/webp" && doc.fileName === "T283-ALPHA front.webp",
+      "#283 sync: the image document is a shrunk Drive-sourced WebP");
+    ok(!!doc && doc.blobKey === stored[0] && stored[0].startsWith(`part-docs/${docId}/`) && doc.sourceUrl === "https://drive/dA", "#283 sync: the stored file sits under the document's own blob path");
+    const meta1 = await s283Sharp(storedBytes[0]).metadata();
+    ok(meta1.format === "webp" && meta1.width === 1600, "#283 sync: the stored bytes are the shrunk 1600 px WebP");
+    ok((await imagesOf(ALPHA)).join() === docId && (await imagesOf(LABOR)).length === 0, "#283 sync: it is linked to the matched part (never the Labor part)");
+
+    const r2 = await ds283Sync(45_000, deps);
+    ok(r2.ok && r2.imported === 0 && r2.updated === 0 && r2.relinked === 0 && stored.length === 1 && !r2.changed, "#283 sync: a second run with nothing changed does nothing");
+
+    files = files.map((f) => (f.id === "dA" ? { ...f, md5Checksum: "m2" } : f));
+    const r3 = await ds283Sync(45_000, deps);
+    const doc3 = await ds283GetDoc(docId);
+    ok(r3.ok && r3.updated === 1 && (await ds283State()).files.dA.documentId === docId && stored.length === 2, "#283 sync: a changed photo replaces the same document's file");
+    ok(!!doc3 && doc3.history.length === 1 && doc3.blobKey === stored[1], "#283 sync: the old file moves to the document's history");
+
+    files = files.map((f) => (f.id === "dA" ? { ...f, name: "T283-BRAVO.jpg" } : f));
+    const r4 = await ds283Sync(45_000, deps);
+    ok(r4.ok && r4.relinked === 1 && (await ds283State()).files.dA.skus.join() === BRAVO && stored.length === 2, "#283 sync: a renamed photo moves to the newly matched part");
+    ok((await imagesOf(BRAVO)).join() === docId && (await imagesOf(ALPHA)).length === 0, "#283 sync: the renamed photo's link moved from ALPHA to BRAVO");
+
+    files = [...files, { id: "dBad", name: "T283-ALPHA back.jpg", mimeType: "image/jpeg", md5Checksum: "mb", size: "8", webViewLink: "https://drive/dBad" }];
+    mediaBytes = new Uint8Array(Buffer.from("not an image"));
+    const r5 = await ds283Sync(45_000, deps);
+    const r6 = await ds283Sync(45_000, deps);
+    ok(r5.ok && r5.failed === 1 && r6.ok && r6.failed === 0, "#283 sync: a broken file fails once and isn't retried until it changes");
+    ok(!!(await ds283State()).files.dBad?.error && (await ds283State()).files.dBad.documentId === null, "#283 sync: the broken file's error is remembered, with no document");
+    mediaBytes = jpegBody;
+
+    // A 403 on one download is that file's problem (download-restricted /
+    // per-user limit), not the run's; two photos of one part both link.
+    denied.add("dDeny");
+    files = [
+      ...files,
+      { id: "dDeny", name: "T283-ALPHA side.jpg", mimeType: "image/jpeg", md5Checksum: "md", size: "8", webViewLink: "https://drive/dDeny" },
+      { id: "dTop", name: "T283-ALPHA top.jpg", mimeType: "image/jpeg", md5Checksum: "mt", size: "8", webViewLink: "https://drive/dTop" },
+      { id: "dTop2", name: "T283-ALPHA top 2.jpg", mimeType: "image/jpeg", md5Checksum: "mt2", size: "8", webViewLink: "https://drive/dTop2" },
+    ];
+    const r7 = await ds283Sync(45_000, deps);
+    const st7 = await ds283State();
+    ok(r7.ok && r7.failed === 1 && r7.imported === 2 && r7.remaining === 0, "#283 sync: a 403 on one file's download fails only that file; the others import");
+    ok(/403/.test(st7.files.dDeny?.error || "") && st7.files.dDeny.documentId === null, "#283 sync: the 403 is recorded as that file's error");
+    const tops = [st7.files.dTop?.documentId, st7.files.dTop2?.documentId];
+    ok(tops.every(Boolean) && tops[0] !== tops[1] && (await imagesOf(ALPHA)).join() === [...tops].sort().join(), "#283 sync: two photos of the same part both import and both link to it");
+
+    // A 401 ends the call: nothing recorded against the file, it retries next time.
+    authFailOnce = "dAuth";
+    files = [...files, { id: "dAuth", name: "T283-BRAVO back.jpg", mimeType: "image/jpeg", md5Checksum: "ma", size: "8", webViewLink: "https://drive/dAuth" }];
+    const r8 = await ds283Sync(45_000, deps);
+    const st8 = await ds283State();
+    ok(!r8.ok && /401/.test(r8.error) && !st8.files.dAuth && st8.lastRun?.complete === false && /401/.test(st8.lastRun?.error || ""), "#283 sync: a 401 stops the run without marking the file failed");
+
+    files = [...files, { id: "dEcho", name: "T283-BRAVO left.jpg", mimeType: "image/jpeg", md5Checksum: "me", size: "8", webViewLink: "https://drive/dEcho" }];
+    const tight = await ds283Sync(0, { ...deps });
+    ok(tight.ok && tight.imported === 1 && tight.remaining === 1 && (await ds283State()).lastRun?.complete === false, "#283 sync: a zero budget still answers — one file, the rest left for next time");
+    const rest = await ds283Sync(45_000, deps);
+    ok(rest.ok && rest.imported === 1 && rest.remaining === 0 && (await ds283State()).lastRun?.complete === true, "#283 sync: the next call finishes the rest");
+    ok((await imagesOf(BRAVO)).length === 3, "#283 sync: BRAVO now has its renamed photo plus both new ones");
+
+    ok((await ds283SaveMailbox("nope@example.com")).ok === false, "#283 settings: an unknown mailbox can't be the photos account");
+    ok(ds283HasRead("a https://www.googleapis.com/auth/drive.readonly b") && !ds283HasRead("https://www.googleapis.com/auth/drive.file"),
+      "#283 scope: drive.readonly is detected, drive.file is not");
+  } finally {
+    const st = await ds283State();
+    for (const f of Object.values(st.files)) {
+      if (!f.documentId) continue;
+      registerFixture("part_documents", f.documentId);
+      for (const sku of [ALPHA, BRAVO, LABOR]) registerFixture("part_document_links", ds283LinkId(sku, f.documentId));
+    }
+    await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null });
+  }
 }

@@ -46,7 +46,8 @@ export function isDocSlotKind(v: unknown): v is DocSlotKind {
   return v === "datasheet" || v === "specsheet";
 }
 
-export type PartDocumentSource = "upload" | "fetch" | "davinci" | "legacy" | "datasheet-render";
+/** `drive` (#283) — an image imported from the Peak Product Photos Drive folder. */
+export type PartDocumentSource = "upload" | "drive" | "fetch" | "davinci" | "legacy" | "datasheet-render";
 
 /** A file this document used to hold. Replacing never deletes the blob (§2.4). */
 export type PartDocumentHistoryEntry = {
@@ -135,6 +136,7 @@ export function maxBytesFor(kind: PartDocKind): number {
  *  used only as `compareImages`'s tertiary tiebreak (below). */
 export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
   upload: 0,
+  drive: 0,
   fetch: 1,
   davinci: 2,
   "datasheet-render": 3,
@@ -147,7 +149,7 @@ export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
  *   1. an auto-generated datasheet-render thumbnail always sorts after
  *      every real image, regardless of its own `sort`;
  *   2. then explicit `sort` ascending (missing sorts last, +∞);
- *   3. then IMAGE_SOURCE_RANK (upload, fetch, davinci, legacy);
+ *   3. then IMAGE_SOURCE_RANK (upload/drive, fetch, davinci, legacy);
  *   4. then upload time.
  *  Shared by the store's customer-facing read (`visibleImagesForParts`) and
  *  the staff view builder (`src/lib/part-docs/views.ts`) so both order a
