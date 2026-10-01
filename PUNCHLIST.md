@@ -10091,3 +10091,31 @@ overspend. New bell group **Perks to fulfil**; `/rewards` counts free + buyable 
 next build OK. Browser-verified with a real dev portal link (450 → 150 points; bell; fulfilled; Undo → 450). Reviewed:
 no blocking findings (the bell looks up company names one row at a time, like the existing document bell — fine at
 today's volume).
+
+## 284. Estimates — submit for approval is one clear control — DONE 2026-10-01 (D517–D520)
+
+Jeff: "Estimates need to be able to submit for approval, there is no clear way to do this right now and the workflow
+seems clunky."
+
+Spec: `docs/superpowers/specs/2026-10-01-estimate-submit-for-approval-design.md`. Plan:
+`docs/superpowers/plans/2026-10-01-estimate-submit-for-approval.md`.
+
+**Done.**
+- **One next-step control (D517):** `QuoteNextStep` in the Estimator toolbar, the Quotes hub and the phone preview
+  replaces the collapsible review bar — Submit / Resubmit for approval, Approve · Send back…, Send to customer →,
+  Withdraw, Attest approval…, Assign to… — with a status pill (In review · any approver, Approved · Jeff, Attested,
+  Self-approved, Auto-approved, Approval cleared). The gate banner has a Submit for approval button; Claim is gone for
+  quotes (designs and engagements keep it).
+- **Self-approval (D518):** an owner holding `approve` sends their own quotes without review, stamped `method: "self"`.
+- **Stale approvals (D519):** a gross-sell or priced-line change clears an approval (derived from `approvedAgainst`);
+  wording edits and Rewards credit do not; `auto_limit` keeps its #242 rule.
+- **Routing + notifications (D520):** submissions go to every approver; approve / send back claims implicitly; bell
+  "Needs your approval" / "Back from review", to-dos and Home alerts, all from `src/lib/quote-approval-rules.ts`.
+
+**Remaining (Jeff-gated).**
+1. Settings → Team: review who holds `approve`. It now decides who skips review on their own quotes. The seed roster
+   gives everyone but Jeff all four roles, so any environment seeded that way lets Nic and the others self-approve.
+
+**Follow-ups (deferred).** The service (flame / repair / inspection), rental and consulting builders adopt
+`QuoteNextStep` (they keep "Mark as approved" and their own flows); the Estimator's five old review actions and the
+synced `reviewLimit` are now uncalled and can be removed; a concurrent save in flight does not disable the control.

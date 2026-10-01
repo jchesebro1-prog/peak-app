@@ -531,5 +531,17 @@ See `.env.example`.
     add `drive.readonly` to the OAuth consent screen, create the folder,
     enable + pick the account, Sync now. Punch item #283.
 
+27. ✅ **Estimate submit-for-approval** (#284, D517–D520) — one
+    `QuoteNextStep` control (Estimator toolbar, Quotes hub, phone preview)
+    replaces the collapsible review bar: Submit / Resubmit for approval,
+    Approve · Send back…, Send to customer →, Withdraw, with a status pill
+    and a gate-banner button; Claim is gone for quotes. A submission goes to
+    every approver (approving claims implicitly; bell, to-dos and Home read
+    `src/lib/quote-approval-rules.ts`); an owner holding `approve`
+    self-approves on send (`method: "self"`); an approval goes stale when the
+    gross sell or priced line set changes (`approvedAgainst`,
+    `src/lib/approval-snapshot.ts`). Remaining is Jeff-gated: Settings → Team
+    — who holds `approve` now decides who skips review. Punch item #284.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

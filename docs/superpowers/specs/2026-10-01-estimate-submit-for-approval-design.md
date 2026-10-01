@@ -81,7 +81,7 @@ text and an optional strip message:
   header renders `QuoteNextStep` in approver mode only (Approve · Send back…), so an
   approver can act from a bell tap. Owners still build/submit on desktop.
 - Unsaved edits: primary actions that depend on the saved quote (submit, send,
-  approve) save first, as Send to customer does today; the pill appends
+  approve) work from the saved quote — the Estimator saves unsaved edits first (saveNow); the pill appends
   " · as last saved" while dirty (existing `savedOnly` behavior).
 
 ### 2. Store rules (`src/lib/stores/quotes.ts`, server-enforced)
@@ -92,14 +92,14 @@ text and an optional strip message:
   `auto_limit` today (granted at the gated transition, not on save). Wording in
   `review-line.ts`: "Self-approved by Jeff". The owner's `approve` permission is read
   from the live team roster at transition time.
-- **Approval snapshot + staleness.** Every approval (`in_app`, `attested`, `self`,
-  `auto_limit`) records `approvedAgainst: { sell: number; linesKey: string }` where
+- **Approval snapshot + staleness.** In-app, attested and self approvals record
+  `approvedAgainst: { sell: number; linesKey: string }` where
   `sell` is the quote's sell total and `linesKey` is a stable fingerprint of the line
   set (part id/custom key, qty, unit sell — sorted, hashed). Narrative, notes, terms,
   customer-facing wording and section titles are excluded.
   `hasApproval()` becomes: state `approved` **and** (no snapshot — legacy, still valid
   **or** snapshot matches the quote's current sell + linesKey). `auto_limit` keeps its
-  existing `approvalHolds()` check in addition (still fits the limit).
+  existing `approvalHolds()` check in addition (still fits the limit). `auto_limit` approvals keep their #242 snapshot rule unchanged (no `approvedAgainst`).
   Stale approvals are **derived, not stored** (same principle as D92's
   `approvalIsStale`); the review record is not rewritten on save. A stale approval
   reads as needing approval everywhere (gate, hub, Reviews, bell).
@@ -154,8 +154,8 @@ sending directly (self-approved); plus a post-approval price edit clearing appro
 
 ## Decisions to log
 
-D506 — next-step control replaces the review bar (Estimator + hub).
-D507 — approvers self-approve their own quotes (`method: "self"`).
-D508 — approvals go stale on sell-total / line-set change (derived snapshot).
-D509 — submit routes to all approvers; implicit claim; in-app notifications only.
+D517 — next-step control replaces the review bar (Estimator + hub).
+D518 — approvers self-approve their own quotes (`method: "self"`).
+D519 — approvals go stale on sell-total / line-set change (derived snapshot).
+D520 — submit routes to all approvers; implicit claim; in-app notifications only.
 (Recompute numbers from origin/main immediately before writing DECISIONS.md.)

@@ -8357,3 +8357,46 @@ Unfulfilled redemptions show to everyone (like new customer documents), not owne
 program is off since the perk is still owed; the group can be muted in notification settings. The portal card adds
 purchase perks, "Free" / "N points" prices and a "Redeemed — we'll be in touch" list.
 
+
+## D517. One next-step control replaces the Estimator review bar and the hub claim (#284, 2026-10-01)
+
+Jeff: "Estimates need to be able to submit for approval, there is no clear way to do this right now and the workflow
+seems clunky." The Estimator's collapsible review bar and the Quotes hub's separate review actions become one
+`QuoteNextStep` control that shows the single action the viewer can take now — Submit for approval / Resubmit for
+approval, Approve · Send back…, Send to customer →, Withdraw, Attest approval…, Assign to… — plus an always-visible
+status pill. The red gate banner (a send blocked by the approval gate) carries a "Submit for approval" button, and an
+approver opening a quote from the bell can Approve or Send back from the phone preview. The owner can withdraw an
+in-review quote. Claim is gone from the Estimator, the Quotes hub and the Reviews page for quotes (submitting and
+approving claim implicitly, D520); designs and engagements keep Claim. The hub's `submitQuoteForReview` had no callers
+once the control landed and was deleted. The modals render through a portal so they cover the nav, and the Estimator
+saves unsaved edits first (`saveNow`) before submitting, approving or sending. The status model is unchanged (D236);
+the service builders' "Mark as approved" and the portal bypasses are untouched, and moving them onto `QuoteNextStep`
+is a deferred follow-up.
+
+## D518. Approvers self-approve their own quotes; the seed roster makes that broad (#284, 2026-10-01)
+
+An owner who holds `approve` skips review: moving their own quote to sent or won with no live approval stamps
+`method: "self"` ("Self-approved · Jeff"), read from the live team roster at transition time. The check runs before the
+review limit, and a quote with changes requested blocks it (a send-back is not waved through by the owner). Flag for
+Jeff: the seed roster gives every user except Jeff all four roles, so on any environment where Nic and the others
+hold `approve` they also skip review when they send their own quotes. Settings → Team is the control; whoever should
+need sign-off must not hold `approve`.
+
+## D519. Approvals go stale when the sell or the line set changes (#284, 2026-10-01)
+
+In-app, attested and self approvals record `approvedAgainst: { sell, linesKey }` — the gross (pre-Rewards-credit) sell
+and a stable fingerprint of the priced line set (`src/lib/approval-snapshot.ts`). Wording, narrative, notes, terms,
+section titles and Rewards credit lines are excluded, so editing text keeps the approval and applying points does not
+clear it. Staleness is derived, never stored: `hasApproval()` is true for an approved record with no snapshot
+(legacy) or one matching the quote now; otherwise the pill reads "Approval cleared", the strip explains why and the
+button becomes "Resubmit for approval". `auto_limit` approvals keep their #242 rule (re-checked against the limit)
+and carry no `approvedAgainst`.
+
+## D520. A submission goes to every approver; claiming is implicit; notifications are in-app only (#284, 2026-10-01)
+
+Submit for approval lands in front of every approver; the reviewer field is advisory ("In review · with Jeff"), and
+approving or sending back claims the quote implicitly. Notifications are in-app only: "Needs your approval" and "Back
+from review" bell items, matching to-dos, and Home alerts, all linking to the quote. One rule set
+(`src/lib/quote-approval-rules.ts`) feeds the bell, the to-do list and Home, so the three agree; Home therefore shows
+approvers every in-review quote that isn't theirs, the same as the bell (a deliberate deviation from the plan's
+literal Home rule). Send-back notes are capped. No email.
