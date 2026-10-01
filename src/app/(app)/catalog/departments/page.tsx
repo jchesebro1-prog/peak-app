@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { portalIndex } from "@/lib/portal-catalog-index";
 import { getDepartments } from "@/lib/stores/portal-departments";
-import { suggestDepartments } from "@/lib/portal-departments";
+import { partCategoryStats, suggestDepartments } from "@/lib/portal-departments";
 import DepartmentsEditor from "./departments-editor";
 
 export const metadata = { title: "Departments — Quartzite-6" };
@@ -11,10 +11,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * Catalog → Departments (#252, spec pick 7): the named grouping of catalog
- * categories that drives the portal's department tree. Every raw category
- * the portal index carries (including the "Fixture assemblies" pseudo-
- * category, spec pick 6) is offered with its part count; suggestions are
- * computed here so "Start from suggestions" needs no round trip.
+ * categories that drives the portal's department tree. Every part category
+ * the portal index carries is offered with its part count — #289:
+ * departments hold parts only; fixture assemblies browse under the portal's
+ * own Packages & Assemblies section instead. Suggestions are computed here
+ * so "Start from suggestions" needs no round trip.
  */
 export default async function DepartmentsPage() {
   const user = await requireUser();
@@ -33,22 +34,11 @@ export default async function DepartmentsPage() {
   }
 
   const [ix, departments] = await Promise.all([portalIndex(), getDepartments()]);
-  // Per category: its total part count, and a part count per manufacturer
+  // Per part category (#289: parts only): its part count, and a part count per manufacturer
   // (suggestDepartments' (k) dominant-manufacturer fallback reads this —
   // production categories are mostly bare brand product-family names, so
   // name keywords alone classify only a fraction of them).
-  const stats = new Map<string, { count: number; mfrs: Record<string, number> }>();
-  for (const e of ix.entries) {
-    const cat = e.category || "—";
-    const s = stats.get(cat) ?? { count: 0, mfrs: {} };
-    s.count++;
-    const mfr = e.mfr || "—";
-    s.mfrs[mfr] = (s.mfrs[mfr] ?? 0) + 1;
-    stats.set(cat, s);
-  }
-  const categoryStats = [...stats.entries()]
-    .map(([category, s]) => ({ category, count: s.count, mfrs: s.mfrs }))
-    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+  const categoryStats = partCategoryStats(ix.entries);
   const suggestions = suggestDepartments(categoryStats);
   // The client only ever needs category + count (the row list, the filter,
   // the bulk-move helper) — manufacturer data is what suggestDepartments

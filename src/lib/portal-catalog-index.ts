@@ -20,6 +20,8 @@ import {
   type VisibilityFacts,
 } from "@/lib/portal-visibility";
 import { buildHaystack, type SearchEntry } from "@/lib/portal-search";
+import { cleanPortalCategory } from "@/lib/fixture-assemblies";
+import { OTHER_PACKAGES_CATEGORY } from "@/lib/portal-departments";
 
 /**
  * The portal's catalog index (#245, spec §1/§3/§8) — SERVER ONLY.
@@ -138,6 +140,13 @@ async function built(opts?: { fresh?: boolean }): Promise<Built> {
   } finally {
     if (building === p) building = null;
   }
+}
+
+/** #289: a fixture's portal catalog category — its cleaned `portalCategory`,
+ *  else "Other packages". Fixtures browse under Packages & Assemblies,
+ *  grouped by this; departments never hold them. */
+export function packageCategoryOf(portalCategory: unknown): string {
+  return cleanPortalCategory(portalCategory) || OTHER_PACKAGES_CATEGORY;
 }
 
 /** The cached index (5 min per process); `fresh` forces a rebuild. */
@@ -354,8 +363,8 @@ async function buildIndex(): Promise<Built> {
       title: f.label,
       sku: f.lightEngineSku,
       mfr: engine.mfr,
-      category: "Fixture assemblies",
-      haystack: buildHaystack([f.label, f.description, f.lightEngineSku]),
+      category: packageCategoryOf(fx.portalCategory),
+      haystack: buildHaystack([f.label, f.description, f.lightEngineSku, fx.portalCategory]),
       browsable: true,
       rank: 1000,
     });

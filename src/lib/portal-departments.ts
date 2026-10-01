@@ -17,6 +17,17 @@ export type Department = { id: string; name: string; categories: string[] };
  *  claims. Its id is reserved — sanitizeDepartments refuses it as a real id. */
 export const OTHER_DEPT: { id: "other"; name: "Other" } = { id: "other", name: "Other" };
 
+/** #289: the built-in Packages & Assemblies section — every portal fixture
+ *  assembly, grouped by its own `portalCategory`. Never stored and never a
+ *  configured department; resolves whether or not any departments exist.
+ *  Its id is reserved like "other". Departments hold parts only. */
+export const PACKAGES_DEPT: { id: "packages"; name: "Packages & Assemblies" } = { id: "packages", name: "Packages & Assemblies" };
+
+/** #289: the index category of a fixture with no `portalCategory`. */
+export const OTHER_PACKAGES_CATEGORY = "Other packages";
+
+const RESERVED_IDS = new Set<string>([OTHER_DEPT.id, PACKAGES_DEPT.id]);
+
 export const MAX_DEPARTMENTS = 30;
 const NAME_MAX = 40;
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -45,7 +56,8 @@ function slugify(name: string): string {
  *
  * An id supplied by the caller is kept (renames keep the id — spec pick 1);
  * a row with no id (new department) gets a fresh slug of its name, deduped
- * against every id already used. "other" can never be claimed as a real id.
+ * against every id already used. "other" and "packages" (#289) can never be
+ * claimed as a real id.
  */
 export function sanitizeDepartments(
   raw: unknown,
@@ -63,7 +75,7 @@ export function sanitizeDepartments(
   const suppliedIds = new Set<string>();
   for (const row of raw) {
     const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
-    if (typeof r.id === "string" && ID_RE.test(r.id) && r.id !== OTHER_DEPT.id) suppliedIds.add(r.id);
+    if (typeof r.id === "string" && ID_RE.test(r.id) && !RESERVED_IDS.has(r.id)) suppliedIds.add(r.id);
   }
 
   const ids = new Set<string>();
@@ -79,12 +91,12 @@ export function sanitizeDepartments(
     const lower = name.toLowerCase();
     if (names.has(lower)) return { ok: false, error: `Two departments are called "${name}".` };
 
-    let id = typeof r.id === "string" && ID_RE.test(r.id) && r.id !== OTHER_DEPT.id ? r.id : "";
+    let id = typeof r.id === "string" && ID_RE.test(r.id) && !RESERVED_IDS.has(r.id) ? r.id : "";
     if (!id) {
       const base = slugify(name);
-      let candidate = base === OTHER_DEPT.id ? `${base}-2` : base;
+      let candidate = RESERVED_IDS.has(base) ? `${base}-2` : base;
       let n = 2;
-      while (ids.has(candidate) || suppliedIds.has(candidate) || candidate === OTHER_DEPT.id) candidate = `${base}-${n++}`;
+      while (ids.has(candidate) || suppliedIds.has(candidate) || RESERVED_IDS.has(candidate)) candidate = `${base}-${n++}`;
       id = candidate;
     }
     if (ids.has(id)) return { ok: false, error: "The same department appears twice." };
@@ -125,20 +137,25 @@ export function departmentOfCategory(depts: readonly Department[]): Map<string, 
  *  and a phantom Other (matching everything, since nothing is assigned)
  *  would otherwise still turn on the department UI for a stray `?dept=other`. */
 export function resolveDept(departments: readonly Department[], deptId: string | null | undefined): { id: string; name: string } | null {
+  // #289: Packages & Assemblies is built in — it resolves with or without
+  // configured departments.
+  if (deptId === PACKAGES_DEPT.id) return { id: PACKAGES_DEPT.id, name: PACKAGES_DEPT.name };
   if (!deptId || !departments.length) return null;
   if (deptId === OTHER_DEPT.id) return { id: OTHER_DEPT.id, name: OTHER_DEPT.name };
   const d = departments.find((x) => x.id === deptId);
   return d ? { id: d.id, name: d.name } : null;
 }
 
-/** The resolved category filter for a department — an allow-list for a real
- *  department, or a deny-list (every assigned category) for Other. Returns
- *  null for no department / an invalid id (search runs unrestricted). */
-export type DeptFilter = { mode: "include" | "exclude"; categories: Set<string> };
+/** The resolved filter for a department — an allow-list of categories for a
+ *  real department, a deny-list (every assigned category) for Other, or
+ *  "packages" (#289: fixtures only, any category). Returns null for no
+ *  department / an invalid id (search runs unrestricted). */
+export type DeptFilter = { mode: "include" | "exclude"; categories: Set<string> } | { mode: "packages" };
 
 export function departmentFilterFor(departments: readonly Department[], deptId: string | null | undefined): DeptFilter | null {
   const resolved = resolveDept(departments, deptId);
   if (!resolved) return null;
+  if (resolved.id === PACKAGES_DEPT.id) return { mode: "packages" };
   if (resolved.id === OTHER_DEPT.id) {
     const assigned = new Set<string>();
     for (const d of departments) for (const c of d.categories) assigned.add(c);
@@ -148,20 +165,55 @@ export function departmentFilterFor(departments: readonly Department[], deptId: 
   return { mode: "include", categories: new Set(dept.categories) };
 }
 
+/** The category half of a department filter. A bare category never matches
+ *  "packages" — that filter is decided by kind (`entryMatchesDept`). */
 export function matchesDeptFilter(category: string, filter: DeptFilter): boolean {
+  if (filter.mode === "packages") return false;
   const cat = category || "—";
   return filter.mode === "include" ? filter.categories.has(cat) : !filter.categories.has(cat);
 }
 
-type DeptRestrictable = { category: string };
+/** A row's kind (absent = a part, the #252 shape) and category. */
+type DeptRestrictable = { kind?: "part" | "fixture"; category: string };
 
-/** `entries` narrowed to one department (or Other); unchanged when `deptId`
- *  doesn't resolve to anything. Pure — the same rule searchCatalog's `dept`
- *  filter applies, exposed standalone for direct use/testing. */
+/** #289: departments hold parts only. "packages" keeps fixtures (any
+ *  category); a configured department or Other keeps parts by category and
+ *  never a fixture — so a saved department still listing the old "Fixture
+ *  assemblies" category is harmless, it matches nothing. */
+export function entryMatchesDept(e: DeptRestrictable, filter: DeptFilter): boolean {
+  if (filter.mode === "packages") return e.kind === "fixture";
+  return e.kind !== "fixture" && matchesDeptFilter(e.category, filter);
+}
+
+/** `entries` narrowed to one department (or Other, or packages); unchanged
+ *  when `deptId` doesn't resolve to anything. Pure — the same rule
+ *  searchCatalog's `dept` filter applies, exposed standalone for direct
+ *  use/testing. */
 export function restrictToDept<T extends DeptRestrictable>(entries: readonly T[], deptId: string | null | undefined, departments: readonly Department[]): T[] {
   const filter = departmentFilterFor(departments, deptId);
   if (!filter) return [...entries];
-  return entries.filter((e) => matchesDeptFilter(e.category, filter));
+  return entries.filter((e) => entryMatchesDept(e, filter));
+}
+
+/** #289: the Departments editor's category list and its save's known
+ *  categories — part entries only (a fixture's category is its portal
+ *  category, which belongs to Packages & Assemblies, never a department).
+ *  Per category: its part count and a part count per manufacturer (the
+ *  suggestions' dominant-manufacturer fallback); biggest first. */
+export function partCategoryStats(entries: readonly Pick<SearchEntry, "kind" | "category" | "mfr">[]): CategoryStat[] {
+  const stats = new Map<string, { count: number; mfrs: Record<string, number> }>();
+  for (const e of entries) {
+    if (e.kind !== "part") continue;
+    const cat = e.category || "—";
+    const s = stats.get(cat) ?? { count: 0, mfrs: {} };
+    s.count++;
+    const mfr = e.mfr || "—";
+    s.mfrs[mfr] = (s.mfrs[mfr] ?? 0) + 1;
+    stats.set(cat, s);
+  }
+  return [...stats.entries()]
+    .map(([category, s]) => ({ category, count: s.count, mfrs: s.mfrs }))
+    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
 }
 
 /**
@@ -262,7 +314,7 @@ const NAME_RULES: readonly NameRule[] = [
   },
   {
     dept: "lighting",
-    re: /source four|source ?4|\bcolorsource\b|\beos\b|\birideon\b|fos\/4|\barcsystem\b|\bdesire\b|\bdesono\b|\blens tubes?\b|\bhog\b|\bmac\b|\bexterior (wash|dot|linear)\b|\bluma\b|\bunison\b|\becho\b|\bparadigm\b|\bsensor\b|\bmosaic\b|\bpharos\b|\bsohrana\b|\bstatic lights?\b|\beffect lights?\b|\bfixture assemblies\b|\bhigh end systems\b|\bcity theatrical\b/i,
+    re: /source four|source ?4|\bcolorsource\b|\beos\b|\birideon\b|fos\/4|\barcsystem\b|\bdesire\b|\bdesono\b|\blens tubes?\b|\bhog\b|\bmac\b|\bexterior (wash|dot|linear)\b|\bluma\b|\bunison\b|\becho\b|\bparadigm\b|\bsensor\b|\bmosaic\b|\bpharos\b|\bsohrana\b|\bstatic lights?\b|\beffect lights?\b|\bhigh end systems\b|\bcity theatrical\b/i,
   },
   {
     dept: "cable-connectors",
@@ -409,11 +461,34 @@ export type DeptTileSource = Pick<SearchEntry, "key" | "kind" | "category" | "br
 export type DeptTileVM = { id: string; name: string; count: number; imageId: string | null };
 
 /**
+ * #289: the landing's Packages & Assemblies tile — null when no fixture is
+ * browsable. `count` is every browsable fixture; the thumbnail is the image
+ * of the top-ranked fixture that has one, in the order the packages page
+ * lists them (rank, then title). The caller's `imageIdOf` maps a
+ * `fixture:<id>` key to its light engine's image.
+ */
+export function packagesTile(
+  entries: readonly Pick<SearchEntry, "key" | "kind" | "browsable" | "rank" | "title">[],
+  imageIdOf: (key: string) => string | null
+): DeptTileVM | null {
+  const fixtures = entries.filter((e) => e.kind === "fixture" && e.browsable);
+  if (!fixtures.length) return null;
+  const ordered = [...fixtures].sort((a, b) => b.rank - a.rank || a.title.localeCompare(b.title));
+  let imageId: string | null = null;
+  for (const e of ordered) {
+    imageId = imageIdOf(e.key);
+    if (imageId) break;
+  }
+  return { id: PACKAGES_DEPT.id, name: PACKAGES_DEPT.name, count: fixtures.length, imageId };
+}
+
+/**
  * Portal landing tiles (spec pick 5): one per configured department, plus
  * Other when it would be non-empty, in department order with Other last.
- * `count` is every browsable entry (part or fixture) in the department;
- * the thumbnail is the highest-ranked browsable PART with an image (spec's
- * own wording — fixtures never contribute a department thumbnail).
+ * `count` is every browsable PART in the department — #289: departments
+ * hold parts only, so a fixture never counts toward a department or Other
+ * (it lives under Packages & Assemblies, `packagesTile`); the thumbnail is
+ * the highest-ranked browsable part with an image.
  * `[]` when no departments are configured (spec pick 3 — the tree is
  * additive) or when a department (Other included) has no browsable members.
  */
@@ -432,11 +507,11 @@ export function departmentTiles(departments: readonly Department[], entries: rea
   buckets.set(OTHER_DEPT.id, { id: OTHER_DEPT.id, name: OTHER_DEPT.name, count: 0, best: null });
 
   for (const e of entries) {
-    if (!e.browsable) continue;
+    if (!e.browsable || e.kind !== "part") continue;
     const deptId = catMap.get(e.category) ?? OTHER_DEPT.id;
     const bucket = buckets.get(deptId)!;
     bucket.count++;
-    if (e.kind === "part" && imageIdOf(e.key) && (!bucket.best || e.rank > bucket.best.rank)) bucket.best = e;
+    if (imageIdOf(e.key) && (!bucket.best || e.rank > bucket.best.rank)) bucket.best = e;
   }
 
   const out: DeptTileVM[] = [];

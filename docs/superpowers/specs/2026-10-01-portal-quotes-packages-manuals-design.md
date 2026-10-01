@@ -265,3 +265,19 @@ Shipped on `feat/288-portal-quotes` (D525–D528, punch #288). Deviations from t
   and `portal-service`; the action's own message shows on the row.
 - **Name box keeps typed names:** the default recomputes on venue change only until the customer types their own.
 - **Gates:** tsc 0; test:specs 10,176 PASS; test:smoke 184 PASS / 0 FAIL; `next build` OK.
+
+## As built — Part 2
+
+Shipped on `feat/289-portal-packages` (D533–D535, punch #289). Deviations from §2:
+
+- **"Includes 1 part" is singular.** The tile pluralises as "1 part" / "N parts"; N is the included lines the sidebar
+  lists (`includedLines`), labour component rows counted.
+- **Landing and breadcrumb copy follows whether departments are configured.** `browseCatalog` reports
+  `hasDepartments`. The landing heading reads "Departments" when they are and "Browse" when not; `?dept=packages` shows
+  "All departments" / "Search all departments" when they are, and "All products" / "Search all products" only when no
+  departments are configured.
+- **Groups only when there is a package hit.** The Packages & Assemblies / Parts split renders only with no department
+  chosen and at least one package result; otherwise results render as before, with no empty "Packages (0)" heading.
+- **Thumbnail tie-break.** Every fixture ranks 1000, so the tile's thumbnail is the first fixture with an engine image
+  in rank-then-title order, matching the packages page.
+- **Gates:** tsc 0; test:specs 10,264 PASS; test:smoke ALL PASSED (incl. `dept=packages`); `next build` OK.

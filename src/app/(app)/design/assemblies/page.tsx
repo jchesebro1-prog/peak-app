@@ -50,6 +50,16 @@ export default async function AssemblyBuilderPage({
     ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
   }));
 
+  // #289: the portal categories already in use — the builder's datalist.
+  const portalCategories = [
+    ...new Set(
+      fixtures
+        .filter((f) => f.kind === "fixture")
+        .map((f) => f.portalCategory)
+        .filter((c): c is string => !!c)
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+
   return (
     <div className="pk-content" style={{ maxWidth: 1080 }}>
       <Link href="/design" style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>← Design</Link>
@@ -57,7 +67,7 @@ export default async function AssemblyBuilderPage({
       <p style={{ color: "#8c919c", fontSize: 13, margin: "0 0 16px", maxWidth: 700 }}>
         Fixtures and systems in one list. Everything prices from the live catalog — a price-list import re-prices them at once.
       </p>
-      <FixtureBuilder initial={fixtures} parts={hits} priceListEffective={settings.priceListEffective || {}} coverage={coverage} />
+      <FixtureBuilder initial={fixtures} parts={hits} priceListEffective={settings.priceListEffective || {}} coverage={coverage} portalCategories={portalCategories} />
     </div>
   );
 }

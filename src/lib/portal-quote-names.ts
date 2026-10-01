@@ -14,7 +14,7 @@ const CUSTOMER_BUILT_SOURCES = new Set(["portal-catalog", "portal-service", "por
  *  (U+202A–202E) and isolates (U+2066–2069), the zero-width space (U+200B)
  *  and the BOM (U+FEFF), plus control characters. ZWNJ / ZWJ (U+200C/200D)
  *  stay — scripts and emoji sequences need them. */
-const STRIP = /[\p{Cc}\u200B\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
+export const INVISIBLE_STRIP = /[\p{Cc}\u200B\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
 
 const GRAPHEMES: { segment(s: string): Iterable<{ segment: string }> } | null =
   typeof Intl !== "undefined" && typeof (Intl as { Segmenter?: unknown }).Segmenter === "function"
@@ -25,7 +25,7 @@ const GRAPHEMES: { segment(s: string): Iterable<{ segment: string }> } | null =
  *  grapheme cluster (an emoji family, a flag, a base + combining mark) — a
  *  cluster that doesn't fit whole is dropped. Falls back to code points where
  *  Intl.Segmenter is unavailable. */
-function capGraphemes(s: string, max: number): string {
+export function capGraphemes(s: string, max: number): string {
   if (!GRAPHEMES) return Array.from(s).slice(0, max).join("");
   let out = "";
   let used = 0;
@@ -39,14 +39,14 @@ function capGraphemes(s: string, max: number): string {
 }
 
 /** Trimmed, control characters and invisible bidi / zero-width / BOM
- *  characters stripped (STRIP), inner whitespace collapsed, capped at 120
+ *  characters stripped (INVISIBLE_STRIP), inner whitespace collapsed, capped at 120
  *  characters (code points) without splitting a grapheme. Anything that
  *  isn't a string → "". */
 export function cleanPortalQuoteName(raw: unknown): string {
   if (typeof raw !== "string") return "";
   const flat = raw
     .replace(/\s+/g, " ")
-    .replace(STRIP, "")
+    .replace(INVISIBLE_STRIP, "")
     .replace(/\s+/g, " ")
     .trim();
   return capGraphemes(flat, PORTAL_QUOTE_NAME_MAX).trim();

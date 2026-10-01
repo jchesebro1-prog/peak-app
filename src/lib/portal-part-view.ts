@@ -1,10 +1,10 @@
 import type { IndexedFixture } from "@/lib/portal-catalog-index";
-import type { TileVM } from "@/lib/portal-catalog-view";
+import { includedLines, type TileVM } from "@/lib/portal-catalog-view";
 
 /**
  * Portal part sidebar — pure, client-safe shapes + helpers (#245 Task 11,
- * spec §3.2 / §8.3). No server imports (type-only above), so the sidebar
- * components use it directly.
+ * spec §3.2 / §8.3). Imports only pure modules (no stores, no server code),
+ * so the sidebar components use it directly.
  *
  * `PartDetail` is SELL-ONLY: the builders below copy an explicit whitelist,
  * so an `IndexedPart` handed in (which carries cost, list, note and the
@@ -154,7 +154,7 @@ export function toFixtureDetailVM(
     unitPrice: s.unitPrice,
     por: price ? s.por : false,
     unavailable: !price,
-    fixed: fx.lines.filter((l) => l.required).map((l) => ({ sku: String(l.sku), label: String(l.label || l.sku), qty: Number(l.qty) || 1 })),
+    fixed: includedLines(fx.lines).map((l) => ({ sku: String(l.sku), label: String(l.label || l.sku), qty: Number(l.qty) || 1 })),
     addOns: fx.lines
       .filter((l) => !l.required)
       .map((l) => {

@@ -127,6 +127,7 @@ export default async function PortalCatalogPage({
         fabrics={ix.fabrics}
         dept={result.dept}
         tiles={result.tiles}
+        hasDepartments={result.hasDepartments}
       />
     </PortalShell>
   );

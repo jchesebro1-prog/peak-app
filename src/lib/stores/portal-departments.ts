@@ -1,5 +1,5 @@
 import { getBlob, setBlob } from "@/db/doc-store";
-import { sanitizeDepartments, type Department } from "@/lib/portal-departments";
+import { partCategoryStats, sanitizeDepartments, type Department } from "@/lib/portal-departments";
 import { portalIndex } from "@/lib/portal-catalog-index";
 
 /**
@@ -21,7 +21,7 @@ export async function getDepartments(): Promise<Department[]> {
 
 /**
  * The Departments editor's save (spec pick 7). Reads the live catalog
- * categories itself (via the portal index — #252 fix round 1 moved this out
+ * part categories itself (via the portal index — #252 fix round 1 moved this out
  * of the caller, src/app/(app)/catalog/departments/actions.ts, so any future
  * caller gets the same defensive drop for free) and hands them to
  * sanitizeDepartments as `knownCategories`, which drops anything the catalog
@@ -35,9 +35,9 @@ export async function getDepartments(): Promise<Department[]> {
  */
 export async function saveDepartments(input: unknown): Promise<{ ok: true; value: Department[] } | { ok: false; error: string }> {
   const ix = await portalIndex();
-  const known = new Set<string>();
-  for (const e of ix.entries) known.add(e.category || "—");
-  const res = sanitizeDepartments(input, [...known]);
+  // #289: departments hold parts only — package (fixture) categories are
+  // never known here, so a stale "Fixture assemblies" drops on save.
+  const res = sanitizeDepartments(input, partCategoryStats(ix.entries).map((s) => s.category));
   if (!res.ok) return res;
   await setBlob(DEPARTMENTS_BLOB, { departments: res.value });
   return res;

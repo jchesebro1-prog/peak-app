@@ -49,7 +49,7 @@ export function PartSidebar({
     };
   }, [router, closeHref]);
 
-  const label = !detail ? "Catalog" : detail.kind === "fixture" ? "Fixture assembly" : "Part details";
+  const label = !detail ? "Catalog" : detail.kind === "fixture" ? "Package" : "Part details";
 
   return (
     <>
@@ -84,7 +84,7 @@ export function PartSidebar({
             <>
               <Gallery images={detail.images} hasDocs={detail.docs.length > 0} previewCid={previewCid} />
               <div>
-                <div className="ps-mfr">{detail.mfr || (detail.kind === "fixture" ? "Fixture assembly" : "")}</div>
+                <div className="ps-mfr">{detail.mfr || (detail.kind === "fixture" ? "Package" : "")}</div>
                 <h2 id="ps-title" className="ps-title">
                   {detail.title}
                 </h2>

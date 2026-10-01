@@ -15,6 +15,7 @@ import {
   type HeadLine,
   type ResolvedFixture,
   type SystemScope,
+  PORTAL_CATEGORY_MAX,
 } from "@/lib/fixture-assemblies";
 import { dateYear } from "@/lib/format";
 import { Typeahead } from "@/components/search/typeahead";
@@ -32,6 +33,8 @@ export type Draft = {
   kind: FixtureKind;
   label: string;
   description: string;
+  /** #289 — fixture kind only; blank = "Other packages" in the portal. */
+  portalCategory: string;
   scope: SystemScope | "";
   lightEngineSku: string;
   lightEngineLine: HeadLine;
@@ -48,7 +51,7 @@ export type Draft = {
 
 export function emptyDraft(kind: FixtureKind): Draft {
   return {
-    id: null, kind, label: "", description: "", scope: "",
+    id: null, kind, label: "", description: "", portalCategory: "", scope: "",
     lightEngineSku: "", lightEngineLine: {}, lensSku: "", lensLine: {},
     lamp: "", position: "", circuit: "",
     lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [],
@@ -57,7 +60,7 @@ export function emptyDraft(kind: FixtureKind): Draft {
 
 export function draftFromRecord(r: FixtureRecord): Draft {
   return {
-    id: r.id, kind: r.kind, label: r.label, description: r.description || "", scope: r.scope || "",
+    id: r.id, kind: r.kind, label: r.label, description: r.description || "", portalCategory: r.portalCategory || "", scope: r.scope || "",
     lightEngineSku: r.lightEngineSku || "", lightEngineLine: r.lightEngineLine || {},
     lensSku: r.lensSku || "", lensLine: r.lensLine || {},
     lamp: r.lamp || "", position: r.position || "", circuit: r.circuit || "",
@@ -74,7 +77,7 @@ export function draftFromRecord(r: FixtureRecord): Draft {
 
 export function draftToInput(d: Draft): FixtureInput {
   return {
-    id: d.id, kind: d.kind, label: d.label, description: d.description, scope: d.scope || undefined,
+    id: d.id, kind: d.kind, label: d.label, description: d.description, portalCategory: d.portalCategory, scope: d.scope || undefined,
     lightEngineSku: d.lightEngineSku, lensSku: d.lensSku || null, lightEngineLine: d.lightEngineLine, lensLine: d.lensLine,
     lamp: d.lamp, position: d.position, circuit: d.circuit, lines: d.lines, parts: d.parts,
   };
@@ -277,7 +280,7 @@ function LineBox({ title, lines, onLines, bySku, onPickPart, names, chipFor }: {
   );
 }
 
-export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel }: {
+export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel, portalCategories = [] }: {
   draft: Draft;
   onChange: (next: Draft) => void;
   bySku: ReadonlyMap<string, PartHit>;
@@ -290,6 +293,8 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
   error: string | null;
   onSave: () => void;
   onCancel: () => void;
+  /** #289 — the portal categories already used across fixtures (sorted, unique) — the Portal category datalist. */
+  portalCategories?: string[];
 }) {
   const set = (patch: Partial<Draft>) => onChange({ ...draft, ...patch });
   const names = draft.legacy?.names || {};
@@ -321,6 +326,21 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
         <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : isHardware ? "e.g. Chain wrap" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>
         <label style={LABEL}>Description<textarea value={draft.description} onChange={(e) => set({ description: e.target.value })} placeholder="Customer-facing description" rows={2} style={{ ...FIELD, marginTop: 5, resize: "vertical" }} /></label>
+        {!isParts && (
+          <label style={LABEL}>Portal category
+            <input
+              value={draft.portalCategory}
+              onChange={(e) => set({ portalCategory: e.target.value })}
+              list="portal-category-options"
+              maxLength={PORTAL_CATEGORY_MAX}
+              placeholder="e.g. Lighting packages"
+              style={{ ...FIELD, marginTop: 5 }}
+            />
+            <datalist id="portal-category-options">
+              {portalCategories.map((c) => <option key={c} value={c} />)}
+            </datalist>
+          </label>
+        )}
         {isHardware ? null : isSystem ? (
           <label style={LABEL}>Scope
             <select value={draft.scope} onChange={(e) => set({ scope: e.target.value as SystemScope | "" })} style={{ ...FIELD, marginTop: 5 }}>

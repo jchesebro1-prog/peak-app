@@ -4,9 +4,9 @@
 import type { PortalSession } from "@/lib/portal";
 import { portalIndex, type PortalIndex } from "@/lib/portal-catalog-index";
 import { cleanDeptId, cleanSearchQuery, quotedBeforeSkus, toTileVM, type TileVM } from "@/lib/portal-catalog-view";
-import { departmentFilterFor, departmentTiles, resolveDept, type DeptTileVM } from "@/lib/portal-departments";
+import { departmentFilterFor, departmentTiles, packagesTile, resolveDept, type DeptTileVM } from "@/lib/portal-departments";
 import { priceFixture, priceSku, pricingContextFor, type PortalPricingContext } from "@/lib/portal-pricing";
-import { searchCatalog, type Facet, type SearchEntry, type SearchQuery } from "@/lib/portal-search";
+import { searchCatalog, type Facet, type SearchEntry, type SearchGroups, type SearchQuery } from "@/lib/portal-search";
 import { rateLimit } from "@/lib/rate-limit";
 import { getAll as getAllQuotes, portalListsQuote } from "@/lib/stores/quotes";
 import { getDepartments } from "@/lib/stores/portal-departments";
@@ -50,12 +50,22 @@ export type CatalogResult = {
   pages: number;
   mfrFacets: Facet[];
   catFacets: Facet[];
+  /** #289: hits by kind — Packages & Assemblies (fixtures) head the
+   *  results, Parts follow; counted over every page. */
+  groups: SearchGroups;
   /** The active department (#252), resolved — null when none is selected
-   *  or the `?dept=` id doesn't resolve to a real department/"other". */
+   *  or the `?dept=` id doesn't resolve to a real department/"other"/
+   *  "packages" (#289, which resolves with or without departments). */
   dept: { id: string; name: string } | null;
-  /** Department tiles for the true landing page only (no q/mfr/cat, page 1,
-   *  no dept); [] otherwise, and [] when no departments are configured. */
+  /** Landing tiles for the true landing page only (no q/mfr/cat, page 1,
+   *  no dept), [] otherwise: Packages & Assemblies first when any fixture is
+   *  browsable (#289, departments or not), then the department tiles ([]
+   *  when no departments are configured). */
   tiles: DeptTileVM[];
+  /** #289: whether any departments are configured — the Packages page's
+   *  breadcrumb and dead-end link read "All departments" when they are and
+   *  "All products" when not. */
+  hasDepartments: boolean;
 };
 
 export type SearchPortalCatalogResult = { ok: true; result: CatalogResult } | { ok: false; error: string };
@@ -68,7 +78,7 @@ export async function tilesFor(entries: readonly SearchEntry[], ix: PortalIndex,
         const fx = ix.fixtures.get(e.key.slice("fixture:".length));
         const engine = fx ? ix.parts.get(fx.lightEngineSku) : undefined;
         const price = fx ? await priceFixture(fx.id, {}, ctx) : null;
-        return toTileVM(e, engine, price);
+        return toTileVM(e, engine, price, fx);
       }
       return toTileVM(e, ix.parts.get(e.sku), await priceSku(e.sku, ctx));
     })
@@ -85,7 +95,13 @@ export async function browseCatalog(query: unknown, ctx: PortalPricingContext): 
   const q: SearchQuery = filter ? { ...sq, dept: filter } : sq;
   const r = searchCatalog(ix.entries, q);
   const landing = !sq.q && !sq.mfr.length && !sq.cat.length && sq.page === 1 && !dept;
-  const tiles = landing ? departmentTiles(departments, ix.entries, (key) => ix.parts.get(key)?.imageIds[0] ?? null) : [];
+  // A part's thumbnail is its first image; a package's is its light engine's.
+  const imageIdOf = (key: string) => {
+    const sku = key.startsWith("fixture:") ? ix.fixtures.get(key.slice("fixture:".length))?.lightEngineSku : key;
+    return (sku && ix.parts.get(sku)?.imageIds[0]) || null;
+  };
+  const pkgTile = landing ? packagesTile(ix.entries, imageIdOf) : null;
+  const tiles = landing ? [...(pkgTile ? [pkgTile] : []), ...departmentTiles(departments, ix.entries, imageIdOf)] : [];
   return {
     entries: await tilesFor(r.entries, ix, ctx),
     total: r.total,
@@ -93,8 +109,10 @@ export async function browseCatalog(query: unknown, ctx: PortalPricingContext): 
     pages: r.pages,
     mfrFacets: r.mfrFacets,
     catFacets: r.catFacets,
+    groups: r.groups,
     dept,
     tiles,
+    hasDepartments: departments.length > 0,
   };
 }
 

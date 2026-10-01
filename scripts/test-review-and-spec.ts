@@ -10712,6 +10712,8 @@ seeded()
   .then(() => drivePhotos283AsyncChecks())
   .then(() => drivePhotoSync283AsyncChecks())
   .then(() => rename288AsyncChecks())
+  .then(() => category289AsyncChecks())
+  .then(() => packages289AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32368,13 +32370,14 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
 }
 {
   const cats = [
-    d252Cat("Drapes - I.F.R.", 19), d252Cat("Fixture assemblies", 30), d252Cat("Cable & Connectors", 12),
+    d252Cat("Drapes - I.F.R.", 19), d252Cat("Source Four", 30), d252Cat("Cable & Connectors", 12),
     d252Cat("Fog Machines", 8), d252Cat("Mounting Hardware", 6), d252Cat("Nothing Matches Here", 3),
   ];
   const sug = d252Suggest(cats);
   const byId = new Map(sug.map((d) => [d.id, d]));
   ok(!!byId.get("drapery")?.categories.includes("Drapes - I.F.R."), "#252 suggestDepartments: Drapery picks up an I.F.R. drape category by name");
-  ok(!!byId.get("lighting")?.categories.includes("Fixture assemblies"), "#252 suggestDepartments: Lighting picks up the Fixture assemblies pseudo-category (spec pick 6)");
+  // #289: the "Fixture assemblies" pseudo-category is gone (departments hold parts only) — Lighting is pinned by a real ETC family instead.
+  ok(!!byId.get("lighting")?.categories.includes("Source Four"), "#252 suggestDepartments: Lighting picks up an ETC Source Four category (#289: was the retired Fixture assemblies pseudo-category)");
   ok(!!byId.get("cable-connectors")?.categories.includes("Cable & Connectors"), "#252 suggestDepartments: Cable & Connectors matches its own name");
   ok(!!byId.get("mounts-hardware")?.categories.includes("Mounting Hardware"), "#252 suggestDepartments: Mounts & Hardware picks up mounting hardware");
   ok(!sug.some((d) => d.categories.includes("Fog Machines")), "#252 suggestDepartments: a category matching no rule (Fog Machines — no Atmospherics department in the rebuild) is dropped, not forced into a bucket");
@@ -32393,7 +32396,7 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
   // priority order — confirm against a set hitting every department.
   const everyDept = d252Suggest([
     d252Cat("CEILING RECESSED TENSIONED PROJ. SCREENS", 3035), d252Cat("Drapes - I.F.R.", 19),
-    d252Cat("Fixture assemblies", 30), d252Cat("Tesira", 105), d252Cat("HDMI Cables", 93),
+    d252Cat("Source Four", 30), d252Cat("Tesira", 105), d252Cat("HDMI Cables", 93),
     d252Cat("LED Video", 88), d252Cat("Touch Panels", 16), d252Cat("Hoists & Motors", 6),
     d252Cat("Patch Cables", 18), d252Cat("Power Sequencer", 18), d252Cat("Mounting Hardware", 6),
   ]);
@@ -32417,7 +32420,7 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
   pin("VCM: Projector Custom Mounts", "mounts-hardware", "same projector-mount exception");
   pin("KITP: Projector Kits", "video-displays", "a bare 'projector' with no mount reads as Video & Displays");
   pin("HDMI Cables", "cable-connectors", "cable beats hdmi — Cable & Connectors is checked ahead of Video & Displays");
-  pin("Fixture assemblies", "lighting", "spec pick 6 pseudo-category");
+  pin("Source Four", "lighting", "ETC Source Four (#289: replaces the retired Fixture assemblies pseudo-category pin)");
   pin("Drapes - I.F.R.", "drapery", "I.F.R. drape");
   pin("StageScreen Dress Kit With Case - 20oz. (567g) Velour", "drapery", "dress kit/velour beats 'StageScreen'");
   pin("FocalPoint Dress Kit Skirt - Velour", "drapery", "dress kit/skirt/velour beats 'FocalPoint'");
@@ -32590,8 +32593,8 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
   const rig = tiles.find((t) => t.id === "rigging")!;
   ok(rig.count === 2, "#252 departmentTiles: count = browsable entries only (R3 excluded)");
   ok(rig.imageId === "img-r2", "#252 departmentTiles: thumbnail = the highest-ranked browsable PART with an image (R2 over R1)");
-  const light = tiles.find((t) => t.id === "lighting")!;
-  ok(light.count === 1 && light.imageId === null, "#252 departmentTiles: a fixture entry counts but never supplies the thumbnail image");
+  // #289: departments hold parts only — Lighting's only member is a fixture, so it gets no tile.
+  ok(!tiles.some((t) => t.id === "lighting"), "#252 departmentTiles: a fixture entry never counts toward a department (#289: was \"counts but never supplies the thumbnail\")");
   ok(!tiles.some((t) => t.id === "other"), "#252 departmentTiles: Other is hidden when every category is claimed (nothing left over)");
 
   const withLeftover = d252Tiles(depts, [...entries, src({ key: "C1", category: "Cable & Connectors", browsable: true, rank: 1 })], () => null);
@@ -32616,7 +32619,8 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
     for (const g of groups) {
       const filter = d252FilterFor(depts, g.id);
       if (!filter) continue;
-      const members = ents.filter((e) => e.browsable && d252Matches(e.category, filter));
+      // #289: departments hold parts only — the reference skips fixtures too.
+      const members = ents.filter((e) => e.browsable && e.kind === "part" && d252Matches(e.category, filter));
       if (!members.length) continue;
       let best: D251Entry | null = null;
       for (const e of members) {
@@ -42450,4 +42454,293 @@ import { NAV as q288NAV, activeKeyFor as q288Active } from "@/components/nav/nav
   }
   ok(rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal"') && rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0"'),
     "#288 smoke: /quotes/portal and a filtered + focused view");
+}
+
+/* ======================================================================
+   #289 Task 5 — portalCategory on fixture assemblies (spec Part 2 §2.1):
+   the pure cleaner, sanitizeFixtureInput (kept on a fixture, dropped for
+   system/hardware), updateFixture clearing it when the input omits it
+   (OPTIONAL_FIXTURE_FIELDS), and the builder wiring.
+   ====================================================================== */
+import { cleanPortalCategory as c289Clean, sanitizeFixtureInput as c289Sanitize } from "@/lib/fixture-assemblies";
+async function category289AsyncChecks(): Promise<void> {
+  const Fx = await import("@/lib/stores/fixtures");
+  const snap = { cost: 0, price: 0, pricedAt: null };
+  const made = [] as string[];
+  try {
+    const keep = c289Sanitize({ kind: "fixture", label: "Test289 Cat", description: "", lightEngineSku: "T289-ENG", portalCategory: "  Lighting   packages " });
+    if (!keep.ok) throw new Error("unreachable");
+    const rec = await Fx.createFixture(keep.value, "T289", snap, 1_700_000_000_000);
+    made.push(rec.id);
+    registerFixture("subassemblies", rec.id);
+    ok((await Fx.getFixture(rec.id))?.portalCategory === "Lighting packages", "#289 category: a saved fixture reads its portalCategory back");
+    const omit = c289Sanitize({ kind: "fixture", label: "Test289 Cat", description: "", lightEngineSku: "T289-ENG" });
+    if (!omit.ok) throw new Error("unreachable");
+    const upd = await Fx.updateFixture(rec, omit.value, "T289", snap, 1_700_000_100_000);
+    ok(upd.portalCategory === undefined && (await Fx.getFixture(rec.id))?.portalCategory === undefined,
+      "#289 category: updateFixture clears portalCategory when the input omits it (no stale carry-forward)");
+    const again = c289Sanitize({ kind: "fixture", label: "Test289 Cat", description: "", lightEngineSku: "T289-ENG", portalCategory: "Control" });
+    if (!again.ok) throw new Error("unreachable");
+    const upd2 = await Fx.updateFixture(upd, again.value, "T289", snap, 1_700_000_200_000);
+    ok(upd2.portalCategory === "Control", "#289 category: updateFixture sets a new portalCategory");
+  } finally {
+    for (const id of made) registerFixture("subassemblies", id);
+  }
+}
+{
+  ok(c289Clean("  Lighting \t  packages\n") === "Lighting packages", "#289 category: cleanPortalCategory trims and collapses whitespace");
+  ok(c289Clean("Light\u0007ing\u202Epack\u200Bages\uFEFF\u2066s\u2069") === "Lightingpackagess", "#289 category: control and bidi/zero-width/BOM characters are stripped");
+  ok(c289Clean("\u202E\u200B\u0000") === undefined, "#289 category: a category of only invisible characters → undefined");
+  ok(c289Clean("a\u200Db") === "a\u200Db" && c289Clean("a\u200Cb") === "a\u200Cb", "#289 category: ZWJ and ZWNJ are kept");
+  ok(c289Clean("a" + "\u200B".repeat(5) + "b ") === "ab", "#289 category: stripping happens before collapse and trim");
+  ok(c289Clean("   ") === undefined && c289Clean("") === undefined && c289Clean(null) === undefined && c289Clean(undefined) === undefined,
+    "#289 category: empty / blank / null → undefined");
+  ok(c289Clean("x".repeat(80)) === "x".repeat(60), "#289 category: capped at 60 characters");
+  ok(c289Clean("a".repeat(59) + "  b") === "a".repeat(59), "#289 category: the cap applies after whitespace collapse, and a trailing space is trimmed");
+  const fx = c289Sanitize({ kind: "fixture", label: "F", description: "", lightEngineSku: "E", portalCategory: " Lighting packages " });
+  ok(fx.ok && fx.value.portalCategory === "Lighting packages", "#289 category: sanitizeFixtureInput keeps it (cleaned) on a fixture");
+  const fxBlank = c289Sanitize({ kind: "fixture", label: "F", description: "", lightEngineSku: "E", portalCategory: "  " });
+  ok(fxBlank.ok && !("portalCategory" in fxBlank.value), "#289 category: a blank category is absent from a fixture's clean value");
+  const sys = c289Sanitize({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 1 }], portalCategory: "Lighting packages" });
+  ok(sys.ok && !("portalCategory" in sys.value), "#289 category: dropped for a system");
+  const hw = c289Sanitize({ kind: "hardware", label: "H", description: "", parts: [{ sku: "A", qty: 1 }], portalCategory: "Lighting packages" });
+  ok(hw.ok && !("portalCategory" in hw.value), "#289 category: dropped for hardware");
+  const form = rd288src("src/app/(app)/design/assemblies/fixture-form.tsx");
+  const pg = rd288src("src/app/(app)/design/assemblies/page.tsx");
+  const bld = rd288src("src/app/(app)/design/assemblies/fixture-builder.tsx");
+  ok(/portalCategory: string/.test(form) && /portalCategory: r\.portalCategory \|\| ""/.test(form) && /portalCategory: d\.portalCategory/.test(form) &&
+      /Portal category/.test(form) && /<datalist id=/.test(form) && /e\.g\. Lighting packages/.test(form) && /portalCategories/.test(form),
+    "#289 category: the form's Draft, draftFromRecord, draftToInput, input, datalist and placeholder");
+  ok(/portalCategories/.test(pg) && /portalCategories/.test(bld),
+    "#289 category: the page passes the existing categories through the builder to the form");
+}
+
+/* ======================================================================
+   #289 Task 6 — Packages & Assemblies in the portal catalog (spec Part 2
+   §2.2–2.3): the index category from portalCategory ("Other packages"
+   fallback), the reserved "packages" department, departments holding parts
+   only (filter, facets, tiles, the editor's known categories), ?dept=packages
+   browse/search scoping, the landing tile (present / absent), the no-dept
+   search split, and the "Package" tile/sidebar labels. Registered in the
+   async chain as packages289AsyncChecks().
+   ====================================================================== */
+import {
+  PACKAGES_DEPT as p289Dept,
+  OTHER_PACKAGES_CATEGORY as p289OtherPkgs,
+  entryMatchesDept as p289EntryMatches,
+  packagesTile as p289PkgTile,
+  partCategoryStats as p289PartStats,
+} from "@/lib/portal-departments";
+import { includedLines as p289Included } from "@/lib/portal-catalog-view";
+import { packageCategoryOf as p289CategoryOf } from "@/lib/portal-catalog-index";
+{
+  const fx = (over: Partial<D251Entry>): D251Entry => d252Entry({ kind: "fixture", mfr: "ETC", browsable: true, rank: 1000, ...over });
+  const pt = (over: Partial<D251Entry>): D251Entry => d252Entry({ kind: "part", ...over });
+
+  ok(p289Dept.id === "packages" && p289Dept.name === "Packages & Assemblies", "#289 packages: PACKAGES_DEPT is { id: \"packages\", name: \"Packages & Assemblies\" }");
+  ok(p289OtherPkgs === "Other packages", "#289 packages: the category fallback is \"Other packages\"");
+
+  // index category from portalCategory (pure step of the index build)
+  ok(p289CategoryOf(" Lighting   packages ") === "Lighting packages", "#289 packages: a fixture's index category is its cleaned portalCategory");
+  ok(p289CategoryOf(undefined) === "Other packages" && p289CategoryOf("   ") === "Other packages", "#289 packages: no / blank portalCategory → \"Other packages\"");
+
+  // "packages" is reserved
+  const claim = d252Sanitize([{ id: "packages", name: "Sneaky", categories: [] }], null);
+  ok(claim.ok && claim.value[0].id !== "packages", "#289 packages: sanitizeDepartments refuses \"packages\" as a real department id");
+  const named = d252Sanitize([{ name: "Packages", categories: [] }], null);
+  ok(named.ok && named.value[0].id === "packages-2", "#289 packages: a new department named \"Packages\" slugs past the reserved id (packages-2)");
+
+  const depts: D251Dept[] = [
+    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware"] },
+    { id: "lighting", name: "Lighting", categories: ["Fixtures", "Fixture assemblies", "Lighting packages"] },
+  ];
+  ok(d252Resolve(depts, "packages")?.name === "Packages & Assemblies", "#289 packages: resolveDept(\"packages\") → Packages & Assemblies");
+  ok(d252Resolve([], "packages")?.id === "packages", "#289 packages: ?dept=packages resolves even with no departments configured");
+  ok(d252FilterFor([], "packages")?.mode === "packages", "#289 packages: departmentFilterFor(\"packages\") → the packages filter, departments or not");
+
+  const lit = d252FilterFor(depts, "lighting")!;
+  const oth = d252FilterFor(depts, "other")!;
+  const pkg = d252FilterFor(depts, "packages")!;
+  ok(!p289EntryMatches({ kind: "fixture", category: "Lighting packages" }, lit) && !p289EntryMatches({ kind: "fixture", category: "Fixture assemblies" }, lit),
+    "#289 packages: a fixture never matches a configured department, even one listing its category (a stale \"Fixture assemblies\" matches nothing)");
+  ok(!p289EntryMatches({ kind: "fixture", category: "Unassigned packages" }, oth), "#289 packages: a fixture never falls into Other");
+  ok(p289EntryMatches({ kind: "part", category: "Fixtures" }, lit) && p289EntryMatches({ category: "Cable" }, oth), "#289 packages: parts (and kind-less rows) still match by category");
+  ok(p289EntryMatches({ kind: "fixture", category: "Anything" }, pkg) && !p289EntryMatches({ kind: "part", category: "Lighting packages" }, pkg),
+    "#289 packages: the packages filter keeps fixtures only");
+  ok(!d252Matches("Lighting packages", pkg), "#289 packages: a bare category never matches the packages filter");
+  const rows = [{ kind: "fixture" as const, category: "Lighting packages" }, { kind: "part" as const, category: "Fixtures" }, { kind: "part" as const, category: "Cable" }];
+  ok(d252Restrict(rows, "packages", depts).length === 1 && d252Restrict(rows, "packages", depts)[0].kind === "fixture", "#289 packages: restrictToDept(\"packages\") → fixtures only");
+  ok(d252Restrict(rows, "other", depts).length === 1 && d252Restrict(rows, "other", depts)[0].category === "Cable", "#289 packages: restrictToDept(Other) excludes fixtures");
+
+  // searchCatalog scoping, facets and the split
+  const all: D251Entry[] = [
+    fx({ key: "fixture:A", sku: "ENG-A", title: "Alpha kit", category: "Lighting packages", mfr: "ETC", haystack: " alpha kit eng a " }),
+    fx({ key: "fixture:B", sku: "ENG-B", title: "Bravo kit", category: "Other packages", mfr: "Chauvet", haystack: " bravo kit eng b " }),
+    pt({ key: "P1", sku: "P1", title: "Pipe clamp", category: "Rigging Hardware", mfr: "ETC", haystack: " p1 pipe clamp ", rank: 5000 }),
+    pt({ key: "P2", sku: "P2", title: "Par can", category: "Fixtures", mfr: "ETC", haystack: " p2 par can kit ", rank: 3 }),
+  ];
+  const q0 = { q: "", mfr: [] as string[], cat: [] as string[], page: 1, pageSize: 48 };
+  const inPkg = d252Search(all, { ...q0, dept: pkg });
+  ok(inPkg.total === 2 && inPkg.entries.every((e) => e.kind === "fixture"), "#289 packages: ?dept=packages shows only fixtures");
+  ok(d252Eq(inPkg.catFacets.map((f) => f.value).sort(), ["Lighting packages", "Other packages"]), "#289 packages: under packages the Category facet lists their portal categories only");
+  ok(d252Eq(inPkg.mfrFacets.map((f) => f.value).sort(), ["Chauvet", "ETC"]) && inPkg.mfrFacets.find((f) => f.value === "ETC")?.count === 1, "#289 packages: Manufacturer facets count fixtures only under packages");
+  const pkgSearch = d252Search(all, { ...q0, q: "kit", dept: pkg });
+  ok(pkgSearch.total === 2 && pkgSearch.entries.every((e) => e.kind === "fixture"), "#289 packages: search inside packages is scoped to fixtures (the part matching \"kit\" stays out)");
+  const deadEnd = d252Search(all, { ...q0, q: "clamp", dept: pkg });
+  ok(deadEnd.total === 0 && d252Search(all, { ...q0, q: "clamp" }).total === 1, "#289 packages: a dead-end search inside packages finds the part with no department (the Search all departments link's premise)");
+  const inLit = d252Search(all, { ...q0, dept: lit });
+  ok(inLit.total === 1 && inLit.entries[0].key === "P2" && !inLit.catFacets.some((f) => f.value === "Lighting packages"), "#289 packages: a real department's results and Category facet hold parts only");
+  const inOther = d252Search(all, { ...q0, dept: oth });
+  ok(inOther.total === 0 && inOther.catFacets.length === 0, "#289 packages: Other's results and facets hold parts only (no \"Other packages\")");
+  const noDept = d252Search(all, q0);
+  ok(noDept.total === 4 && d252Eq(noDept.groups, { packages: 2, parts: 2 }), "#289 packages: with no department the result carries the packages / parts split counts");
+  ok(d252Eq(noDept.entries.map((e) => e.key), ["fixture:A", "fixture:B", "P1", "P2"]), "#289 packages: packages come first, then parts — even a part ranked above every fixture");
+  ok(d252Eq(d252Search(all, { ...q0, q: "kit" }).groups, { packages: 2, parts: 1 }), "#289 packages: the split counts the one search's hits by kind");
+  ok(d252Eq(inPkg.groups, { packages: 2, parts: 0 }) && d252Eq(inLit.groups, { packages: 0, parts: 1 }), "#289 packages: a department's split counts its single kind");
+  ok(noDept.catFacets.some((f) => f.value === "Lighting packages") && noDept.catFacets.some((f) => f.value === "Fixtures"), "#289 packages: facets stay as they are with no department (both kinds)");
+
+  // department tiles count parts only; the packages tile
+  const tileDepts: D251Dept[] = [{ id: "lighting", name: "Lighting", categories: ["Fixtures", "Lighting packages"] }];
+  const tEntries: D251Entry[] = [
+    fx({ key: "fixture:A", title: "Alpha kit", category: "Lighting packages" }),
+    fx({ key: "fixture:B", title: "Bravo kit", category: "Unclaimed packages" }),
+    fx({ key: "fixture:C", title: "Charlie kit", category: "Unclaimed packages", browsable: false }),
+    pt({ key: "P2", category: "Fixtures", rank: 3 }),
+  ];
+  const t2 = d252Tiles(tileDepts, tEntries, () => null);
+  ok(t2.length === 1 && t2[0].id === "lighting" && t2[0].count === 1, "#289 packages: department tiles count parts only; Other gets no tile from fixtures alone");
+  ok(d252Tiles(tileDepts, tEntries.filter((e) => e.kind === "fixture"), () => null).length === 0, "#289 packages: a department whose only members are fixtures gets no tile");
+  const imgs: Record<string, string> = { "fixture:B": "img-b", "fixture:A": "img-a" };
+  const pTile = p289PkgTile(tEntries, (k) => imgs[k] ?? null);
+  ok(!!pTile && pTile.id === "packages" && pTile.name === "Packages & Assemblies" && pTile.count === 2, "#289 packages: the landing tile counts browsable fixtures (C excluded)");
+  ok(pTile?.imageId === "img-a", "#289 packages: the landing tile's thumbnail is the top-ranked fixture's image (rank, then title — Alpha before Bravo)");
+  const pTile2 = p289PkgTile([fx({ key: "fixture:A", title: "Alpha kit", rank: 1 }), fx({ key: "fixture:B", title: "Bravo kit", rank: 9 })], (k) => imgs[k] ?? null);
+  ok(pTile2?.imageId === "img-b", "#289 packages: a higher-ranked fixture's image wins");
+  ok(p289PkgTile([fx({ key: "fixture:A", title: "Alpha kit" })], () => null)?.imageId === null, "#289 packages: no fixture image → no thumbnail");
+  ok(p289PkgTile([pt({ key: "P2" }), fx({ key: "fixture:C", browsable: false })], () => "img") === null, "#289 packages: no browsable fixture → no landing tile");
+
+  // editor known categories: parts only
+  const stats = p289PartStats([
+    pt({ category: "Fixtures", mfr: "ETC" }), pt({ category: "Fixtures", mfr: "ETC" }), pt({ category: "", mfr: "" }),
+    fx({ category: "Lighting packages" }), fx({ category: "Other packages" }),
+  ]);
+  ok(d252Eq(stats.map((s) => s.category), ["Fixtures", "—"]) && stats[0].count === 2 && stats[0].mfrs.ETC === 2,
+    "#289 packages: partCategoryStats (the editor's known categories) reads part entries only — no package categories, no \"Fixture assemblies\"");
+
+  // the suggestion no longer offers "Fixture assemblies"
+  ok(d252Suggest([d252Cat("Fixture assemblies", 30)]).length === 0, "#289 packages: suggestions drop the \"fixture assemblies\" term — that pseudo-category is gone");
+
+  // tile VM: Package badge + Includes N parts (N = the sidebar's included lines)
+  const lines = [
+    { slot: "lightEngine", sku: "E", label: "Engine", qty: 1, required: true },
+    { slot: "lens", sku: "L", label: "Lens", qty: 1, required: true },
+    { slot: "power", sku: "C", label: "Cable", qty: 2, required: true },
+    { slot: "accessories", sku: "X", label: "Clamp", qty: 0, required: false },
+  ];
+  ok(p289Included(lines).length === 3, "#289 packages: includedLines = the required lines (engine and lens count; an add-on doesn't)");
+  const fxVm = d245FixtureVM({ id: "A", label: "Alpha", description: "", lightEngineSku: "E", lensSku: "L", lines }, "ETC", null, () => null, { images: [], docs: [] });
+  ok(fxVm.fixed.length === p289Included(lines).length, "#289 packages: N is exactly the number of included lines the fixture sidebar lists");
+  const tv = d245Tile({ key: "fixture:A", kind: "fixture", title: "Alpha", sku: "E", mfr: "ETC", category: "Lighting packages" }, null, null, { lines });
+  ok(tv.badge === "Package" && tv.subline === "Includes 3 parts", "#289 packages: a fixture tile carries the Package badge and \"Includes 3 parts\"");
+  const tv1 = d245Tile({ key: "fixture:Z", kind: "fixture", title: "Solo", sku: "E", mfr: "", category: "Other packages" }, null, null, { lines: lines.slice(0, 1) });
+  ok(tv1.subline === "Includes 1 part", "#289 packages: one included line reads \"Includes 1 part\"");
+  const tpart = d245Tile({ key: "P", kind: "part", title: "P", sku: "P", mfr: "", category: "" }, null, null);
+  ok(!("badge" in tpart) && !("subline" in tpart), "#289 packages: a part tile carries no badge or subline");
+
+  // UI + wiring sources
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const cc = rd("src/app/portal/catalog/catalog-client.tsx");
+  ok(!cc.includes("Fixture assembly") && /t\.badge/.test(cc) && /t\.subline/.test(cc) && cc.includes("Packages &amp; Assemblies") && /result\.groups/.test(cc) && />\s*Parts\s*</.test(cc),
+    "#289 packages: catalog-client renders the badge, the subline and the two headed groups (Packages & Assemblies, Parts)");
+  const sb = rd("src/app/portal/catalog/part-sidebar.tsx");
+  ok(!sb.includes("Fixture assembly") && /"Package"/.test(sb), "#289 packages: the fixture sidebar labels read \"Package\"");
+  const ixSrc = rd("src/lib/portal-catalog-index.ts");
+  ok(!ixSrc.includes('"Fixture assemblies"') && /packageCategoryOf\(fx\.portalCategory\)/.test(ixSrc), "#289 packages: the index files a fixture under packageCategoryOf(portalCategory)");
+  const br = rd("src/lib/portal-catalog-browse.ts");
+  ok(/packagesTile\(/.test(br) && /groups/.test(br), "#289 packages: browseCatalog adds the packages tile and passes the split through");
+  ok(/partCategoryStats\(/.test(rd("src/app/(app)/catalog/departments/page.tsx")) && /partCategoryStats\(/.test(rd("src/lib/stores/portal-departments.ts")),
+    "#289 packages: the Departments editor and its save derive categories from parts only");
+  ok(rd("scripts/smoke-routes.ts").includes('"/portal/catalog?dept=packages"'), "#289 packages: smoke covers /portal/catalog?dept=packages");
+  ok(/fixtures\s*\.filter\(\(f\) => f\.kind === "fixture"\)/.test(rd("src/app/(app)/design/assemblies/page.tsx")), "#289 category: the builder's datalist reads fixture-kind records only");
+}
+{
+  // Task 5 review follow-up: the 60 cap counts code points and never splits a grapheme
+  ok(c289Clean("😀".repeat(70)) === "😀".repeat(60), "#289 category: the 60 cap counts code points (60 emoji, not 30)");
+  ok(c289Clean("a".repeat(59) + "👨‍👩‍👧") === "a".repeat(59), "#289 category: an emoji family that doesn't fit whole is dropped, never split");
+  ok(c289Clean("a".repeat(59) + "é") === "a".repeat(59), "#289 category: a base + combining mark that doesn't fit whole is dropped");
+}
+
+async function packages289AsyncChecks(): Promise<void> {
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const savedDepts = await getBlob<Record<string, unknown>>("portal_departments", {});
+  const ENG = fixtureId(289, "pkg-engine");
+  const CBL = fixtureId(289, "pkg-cable");
+  const ADD = fixtureId(289, "pkg-addon");
+  const FXA = fixtureId(289, "pkg-kit-a");
+  const FXB = fixtureId(289, "pkg-kit-b");
+  const CO = fixtureId(289, "pkg-co");
+  const partCat = "Test289 PkgPartCat";
+  const pkgCat = "Test289 Lighting packages";
+  try {
+    await d245MergeUpsert(ENG, { desc: "Test289 Pkg Engine", category: partCat, unit: "ea", list: 30, cost: 10, mfr: "Test289 Mfr", portalVisibility: "show" });
+    await d245MergeUpsert(CBL, { desc: "Test289 Pkg Cable", category: partCat, unit: "ea", list: 8, cost: 4, portalVisibility: "show" });
+    await d245MergeUpsert(ADD, { desc: "Test289 Pkg Addon", category: partCat, unit: "ea", list: 8, cost: 4, portalVisibility: "show" });
+    for (const s of [ENG, CBL, ADD]) registerFixture("catalog_parts", s);
+    await createFixture("subassemblies", {
+      id: FXA, kind: "fixture", label: "Test289 Alpha Package", description: "", lightEngineSku: ENG, lensSku: null, portalCategory: pkgCat,
+      lines: { data: [], power: [{ sku: CBL, qty: 2, label: "" }], mounting: [], accessories: [{ sku: ADD, qty: 0, label: "" }] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    await createFixture("subassemblies", {
+      id: FXB, kind: "fixture", label: "Test289 Bravo Package", description: "", lightEngineSku: ENG, lensSku: null,
+      lines: { data: [], power: [], mounting: [], accessories: [] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    await upsertCustomer({ id: CO, name: "Test289 Pkg Co", type: "Education", locations: [], contacts: [] });
+    d245Invalidate();
+    const ix = await d245Index({ fresh: true });
+    const ea = ix.entries.find((e) => e.key === "fixture:" + FXA);
+    const eb = ix.entries.find((e) => e.key === "fixture:" + FXB);
+    ok(ea?.category === pkgCat, "#289 packages: the real index files a fixture under its portalCategory");
+    ok(eb?.category === "Other packages", "#289 packages: the real index files an uncategorised fixture under \"Other packages\"");
+
+    const byCat = d245Search(ix.entries, { q: "lighting packages", mfr: [], cat: [], page: 1, pageSize: 48 });
+    ok(byCat.entries.some((e) => e.key === "fixture:" + FXA) && !byCat.entries.some((e) => e.key === "fixture:" + FXB),
+      "#289 packages: a package's portalCategory is searchable — \"lighting packages\" finds the package filed there and not the uncategorised one");
+
+    // the editor's save: known categories come from parts only
+    const saved = await d252Save([{ name: "Test289 Dept", categories: [partCat, pkgCat, "Other packages", "Fixture assemblies"] }]);
+    ok(saved.ok && d252Eq(saved.value[0].categories, [partCat]), "#289 packages: saveDepartments keeps part categories only — package categories and \"Fixture assemblies\" are dropped");
+
+    const sess = { grantId: fixtureId(289, "pkg-grant"), customerId: CO, name: "", email: "" };
+    const inPkg = await d245SearchFor(sess, { q: "Test289", dept: "packages", pageSize: 48 });
+    ok(inPkg.ok && inPkg.result.dept?.id === "packages" && inPkg.result.dept.name === "Packages & Assemblies", "#289 packages: ?dept=packages resolves for the breadcrumb (\"Packages & Assemblies\")");
+    if (inPkg.ok) {
+      ok(inPkg.result.entries.length === 2 && inPkg.result.entries.every((t) => t.kind === "fixture"), "#289 packages: browse under packages returns only the fixtures");
+      ok(inPkg.result.catFacets.some((f) => f.value === pkgCat) && !inPkg.result.catFacets.some((f) => f.value === partCat), "#289 packages: the Category facet under packages lists portal categories");
+      const ta = inPkg.result.entries.find((t) => t.key === "fixture:" + FXA);
+      ok(ta?.badge === "Package" && ta.subline === "Includes 2 parts", "#289 packages: a real package tile reads Package / Includes 2 parts (engine + cable; the add-on isn't counted)");
+      ok(inPkg.result.tiles.length === 0, "#289 packages: no landing tiles inside a department");
+      ok(inPkg.result.hasDepartments === true, "#289 packages: with departments configured, browse under packages reports hasDepartments (the breadcrumb reads \"All departments\")");
+    }
+    const cleared = await d252Save([]);
+    ok(cleared.ok, "#289 packages: saveDepartments accepts an empty list");
+    const noDeptPkg = await d245SearchFor({ grantId: fixtureId(289, "pkg-grant"), customerId: CO, name: "", email: "" }, { q: "Test289", dept: "packages", pageSize: 48 });
+    ok(noDeptPkg.ok && noDeptPkg.result.hasDepartments === false && noDeptPkg.result.dept?.id === "packages", "#289 packages: with no departments configured, hasDepartments is false and packages still resolves");
+    const resaved = await d252Save([{ id: saved.ok ? saved.value[0].id : undefined, name: "Test289 Dept", categories: [partCat] }]);
+    if (resaved.ok && saved.ok) saved.value = resaved.value;
+    const inDept = await d245SearchFor(sess, { q: "Test289", dept: saved.ok ? saved.value[0].id : "", pageSize: 48 });
+    ok(inDept.ok && inDept.result.entries.length === 3 && inDept.result.entries.every((t) => t.kind === "part"), "#289 packages: a real department's browse holds its parts and none of the packages");
+    const split = await d245SearchFor(sess, { q: "Test289", pageSize: 48 });
+    ok(split.ok && d252Eq(split.result.groups, { packages: 2, parts: 3 }) && split.result.entries[0].kind === "fixture" && split.result.entries[1].kind === "fixture",
+      "#289 packages: a search with no department splits packages (first) and parts, with counts");
+    const landing = await d245SearchFor(sess, { pageSize: 48 });
+    const browsableFx = ix.entries.filter((e) => e.kind === "fixture" && e.browsable).length;
+    ok(landing.ok && landing.result.tiles[0]?.id === "packages" && landing.result.tiles[0].count === browsableFx,
+      "#289 packages: the landing shows the Packages & Assemblies tile first, counting browsable fixtures");
+  } finally {
+    await setBlob("portal_departments", savedDepts);
+    d245Invalidate();
+    await removeCustomer(CO);
+  }
 }

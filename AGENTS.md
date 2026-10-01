@@ -572,5 +572,14 @@ See `.env.example`.
     → Track series edits the stick list. Researched against ADC Catalog 52
     and the series binders. Punch item #291.
 
+30. ✅ **Portal Packages & Assemblies** (#289, D533–D535) — fixture
+    assemblies carry an optional **Portal category** (Design → Assemblies;
+    "Other packages" when blank); the portal catalog gains a reserved
+    `packages` department — a landing tile, `?dept=packages` scoping and a
+    Packages-then-Parts search split, with a "Package" badge and "Includes N
+    parts" on tiles. Departments hold parts only; the "Fixture assemblies"
+    pseudo-category is retired. Remaining is Jeff-gated: set a Portal
+    category on each assembly. Punch item #289.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -8535,3 +8535,31 @@ bi-parting fixture: 5 → 6 sticks, 10 → 12 clamps). No track series existed i
 Operating line, carriers, masters, end stops and pulleys are unchanged — one continuous line still runs both legs.
 Also from the final review: the Active check refuses a series any of whose stick SKUs left the catalog (not only the
 longest), and a missing stick names its length ("no part for Track (18' stick)").
+
+## D533. A portal category on each assembly, with an "Other packages" fallback (#289, 2026-10-01)
+
+A fixture-kind assembly gains an optional `portalCategory` (Design → Assemblies, next to Description, backed by a
+datalist of the categories already in use). It is cleaned to collapsed whitespace, trimmed and capped at 60 characters
+without splitting a grapheme (`capGraphemes`), dropped for system and hardware kinds, and cleared when an update omits
+it. The portal index uses it as the package's category, and a package with none files under **Other packages**
+(`packageCategoryOf`), which replaces the old "Fixture assemblies" label. Until staff set categories, every package
+therefore shows under one heading.
+
+## D534. Packages & Assemblies is a reserved department; departments hold parts only (#289, 2026-10-01)
+
+`"packages"` is a reserved department id like `"other"`: `sanitizeDepartments` never accepts it, and a department named
+"Packages" gets a fresh slug. A configured department or Other now matches part entries only, in its filter, Category
+facets, tile counts and the editor's known categories (`partCategoryStats`), so a fixture can never fall into one. The
+"Fixture assemblies" pseudo-category and its suggestion term are retired; a saved department that still lists it matches
+nothing and drops it on the next save, so no migration is needed. `?dept=packages` shows fixtures only, in any category,
+whether or not any departments are configured.
+
+## D535. Packages tile, scoped browse and search split in the portal catalog (#289, 2026-10-01)
+
+When at least one package is browsable, the landing shows a **Packages & Assemblies** tile first (count of browsable
+fixtures, thumbnail from the first fixture with an image in rank-then-title order) that links to `?dept=packages`.
+With no department chosen, search results sort Packages first, then Parts, and render as two headed groups with their
+own totals, but only when there is at least one package hit; with none, results render as before. A package tile
+carries a "Package" badge and "Includes N parts", where N is exactly the included lines the sidebar lists
+(`includedLines`, labour component rows counted; one line reads "1 part"). With no departments configured the landing
+heading reads "Browse" and the dead-end breadcrumb reads "All products" / "Search all products".
