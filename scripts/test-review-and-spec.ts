@@ -39624,3 +39624,54 @@ async function drivePhotos283AsyncChecks(): Promise<void> {
   try { await dp283List("tok", "F1", async () => json({ error: { message: "insufficient" } }, 403)); } catch (e) { denied = (e as Error).message; }
   ok(/Enable Drive photos/.test(denied), "#283 drive: a 403 tells the admin to use Enable Drive photos");
 }
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photo sync planner (pure).
+// ---------------------------------------------------------------------------
+import { planDrivePhotoSync as pp283 } from "@/lib/part-docs/drive-photo-plan";
+{
+  const photo = (id: string, name: string, md5 = "m-" + id, extra: Partial<{ mimeType: string; size: number }> = {}) =>
+    ({ id, name, mimeType: extra.mimeType ?? "image/jpeg", md5, size: extra.size ?? 100, webViewLink: "https://drive/" + id });
+  const match = (name: string) =>
+    name.startsWith("AMB") ? { confidence: "ambiguous" as const, skus: ["P1", "P2"] }
+    : name.startsWith("NONE") ? { confidence: "none" as const, skus: [] }
+    : { confidence: "high" as const, skus: name.startsWith("TWO") ? ["P1", "P2"] : ["P1"] };
+  const at = 1;
+  const plan = pp283(
+    [
+      photo("new", "S4.jpg"),
+      photo("same", "S4.jpg", "m-same"),
+      photo("changed", "S4.jpg", "m-new"),
+      photo("renamed", "TWO.jpg", "m-renamed"),
+      photo("failed", "S4.jpg", "m-failed"),
+      photo("failedChanged", "S4.jpg", "m-fixed"),
+      photo("amb", "AMB.jpg"),
+      photo("none", "NONE.jpg"),
+      photo("heic", "S4.heic", "m-h", { mimeType: "image/heic" }),
+      photo("big", "S4.jpg", "m-big", { size: 999 }),
+      photo("knownNowNone", "NONE-renamed.jpg", "m-k"),
+      photo("new", "S4.jpg"),
+    ],
+    {
+      same: { md5: "m-same", documentId: "PD-1", skus: ["P1"], at },
+      changed: { md5: "m-old", documentId: "PD-2", skus: ["P1", "P9"], at },
+      renamed: { md5: "m-renamed", documentId: "PD-3", skus: ["P1"], at },
+      failed: { md5: "m-failed", documentId: null, skus: [], error: "bad", at },
+      failedChanged: { md5: "m-broken", documentId: null, skus: [], error: "bad", at },
+      knownNowNone: { md5: "m-k", documentId: "PD-4", skus: ["P7"], at },
+    },
+    match,
+    500
+  );
+  ok(plan.imports.map((p) => p.id).sort().join(",") === "failedChanged,new", "#283 plan: new files (and a failed file that changed) import, a listing duplicate once");
+  ok(plan.updates.length === 1 && plan.updates[0].id === "changed" && plan.updates[0].documentId === "PD-2" && plan.updates[0].remove.join() === "P9",
+    "#283 plan: a changed file updates its document and drops parts it no longer matches");
+  ok(plan.relinks.length === 1 && plan.relinks[0].fileId === "renamed" && plan.relinks[0].add.join() === "P2" && plan.relinks[0].remove.length === 0,
+    "#283 plan: a renamed-but-unchanged file relinks");
+  ok(plan.retryLater === 1 && plan.unchanged === 1, "#283 plan: a failed unchanged file waits; an unchanged file is skipped");
+  const reasons = Object.fromEntries(plan.unmatched.map((u) => [u.fileId, u.reason]));
+  ok(/several parts: P1, P2/.test(reasons.amb) && /no part number/.test(reasons.none), "#283 plan: ambiguous and no-match files are listed with reasons");
+  ok(/HEIC/.test(reasons.heic) && /over 25 MB/.test(reasons.big), "#283 plan: HEIC and over-cap files are listed, not imported");
+  ok(!!reasons.knownNowNone && !plan.relinks.some((r) => r.fileId === "knownNowNone") && !plan.updates.some((u) => u.id === "knownNowNone"),
+    "#283 plan: a known file renamed to something unmatched is only listed — its links stay");
+}
