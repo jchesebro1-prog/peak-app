@@ -88,10 +88,8 @@ export default function SettingsClient({
     if (section !== "integrations") return;
     const anchor = integrationAnchor(window.location.hash);
     if (!anchor) return;
-    const id = requestAnimationFrame(() =>
-      document.getElementById(anchor)?.scrollIntoView({ block: "start" })
-    );
-    return () => cancelAnimationFrame(id);
+    const id = setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ block: "start" }), 0);
+    return () => clearTimeout(id);
   }, [section]);
 
   const menu = SETTINGS_SECTIONS.filter((s) => sections.includes(s.key));
