@@ -8453,3 +8453,50 @@ goes to the lead. The hub row reads "EST-1015 · Nic · prepared by Jena" when t
 in-app approval: approvals are content-bound (D519: sell and priced lines), not person-bound, and an `auto_limit`
 approval re-evaluates against the new owner's limit. Left open for Jeff: both fields can still change after a quote is
 sent (a PDF re-render moves the printed revision date); freezing them at send is a one-line guard if he wants it.
+
+## D525. Portal quotes are named by the customer, with a Chicago-dated default (#288, 2026-10-01)
+
+A customer-built quote (source `portal-catalog`, `portal-service` or `portal-self-serve`) carries a name the customer
+chose at Generate. The default is "<venue> — <Mon D, YYYY>" (company name when the venue label is blank, "Quote" if
+that is blank too); a service quote reads "<first venue> — <date>" or "<first venue> + N more — <date>". The date is
+formatted in America/Chicago, and the 120-character cap truncates only the label, so the date always survives.
+Cleaning (`cleanPortalQuoteName`, `src/lib/portal-quote-names.ts`) collapses whitespace, strips control and format
+characters, trims and caps. Rename is allowed only on a customer-built, unaccepted, not-closed quote, is rate-limited
+to 30 an hour per grant (refunded when the write fails), and re-renders the PDF because the name is printed on it.
+
+## D526. My quotes lists what the customer built; Home lists what Peak sent (#288, 2026-10-01)
+
+`/portal/my-quotes` lists only customer-built quotes (the three sources above) with Open / Accepted / Closed chips
+(default Open); Home lists only Peak-sent quotes and shows a My quotes card with the open count. The portal nav reads
+Home · Catalog · Service · My quotes · Cart (N) ("Quote" became "Cart", same href). Generate redirects to My quotes
+with the generated banner, and accepting a customer-built quote lands on My quotes' Accepted chip, while accepting a
+Peak-sent one still lands on Home. The split is one definition, `isCustomerBuiltQuote`, used by both views, the
+rename guard and the staff queue, so a quote can never appear in both lists.
+
+## D527. Staff Portal quotes queue at /quotes/portal (#288, 2026-10-01)
+
+Estimating gains **Portal quotes** right after Quotes: every customer-built quote with a derived status (Needs review,
+Accepted — confirm, Sent, Expired, Won, Lost, Draft). The default chip is Needs action (review plus accepted-to-confirm),
+and type chips and a search (name, Est #, company) narrow it; a `?focus=<id>` link forces All, scrolls to the row and
+highlights it. Approve and Decline reuse the existing actions with no new pricing or approval path: catalog Approve is
+the `setQuoteStatus` form behind the approval gate, flame and inspection Approve is the builder's own engine-owned
+approve, and Decline is `declinePortalAcceptance`. All three bell groups (including "Portal acceptances to confirm",
+moved into `portalBellGroups`) link to the queue.
+
+## D528. Where the #288 queue deliberately differs from the spec (#288, 2026-10-01)
+
+(1) A Peak-sent estimate a customer accepted on Home is not in the queue (it lists customer-built only), so its bell
+entry keeps its `/quotes?id=` hub link rather than a `?focus=` link to a row that is not there. (2) Flame and
+inspection Approve calls the existing action, which redirects to that builder (`?id=…&approved=1`) instead of
+returning to the queue; catalog Approve stays on the queue. (3) Approve is offered only where the existing action can
+succeed: any accepted catalog row, but flame and inspection only when `approveKeepsAcceptedPrice` holds; otherwise the
+row shows Open only. (4) Decline works only for `portal-catalog` and `portal-service`, so a legacy `portal-self-serve`
+row offers Approve but no Decline (final review).
+
+Final review: a customer rename bumps `updatedAt`, so a staff Approve sent with `expectUpdatedAt` on a review draft the
+customer renamed meanwhile is refused as stale, and the Estimator (which has no conflict check) can write an open
+builder's old name back over the customer's; both are accepted as rare and recoverable. A rename of a sent quote cuts a
+new sent revision ("Renamed by customer", the same `scheduleQuotePdf` → `addQuoteRevision` → `copySentRevisionPdf`
+order Refresh pricing uses), because the customer's PDF is the latest sent revision's copy; without it the customer
+never saw the new name, and a rename inside the post-Generate render window left the sent revision with no PDF at all.
+A draft rename only reschedules the PDF.

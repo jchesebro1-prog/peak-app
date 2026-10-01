@@ -147,6 +147,10 @@ const ROUTES = [
   "/rentals",
   "/rentals/board",
   "/quotes/new",
+  // #288 — the staff Portal quotes queue: default (Needs action), and a
+  // filtered + searched view focused on a quote id that isn't there.
+  "/quotes/portal",
+  "/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0",
   "/flame-tests/scheduling",
   "/flame-tests/report/options",
   "/inspections/scheduling",
@@ -183,6 +187,11 @@ const ROUTES = [
   "/portal/catalog/quote",
   "/portal/catalog/quote?preview=lakefront",
   "/portal?preview=lakefront&generated=firm&q=Q-0",
+  // #288: My quotes — signed out, and a team preview (read-only) with the
+  // Generate banner flag (moved here from /portal) and a filter.
+  "/portal/my-quotes",
+  "/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0",
+  "/portal/my-quotes?preview=lakefront&show=accepted",
   // #282 phase 4 — the portal dashboard's team preview (the Rewards card
   // renders only while the program is on; the smoke DB leaves it off).
   "/portal?preview=lakefront",

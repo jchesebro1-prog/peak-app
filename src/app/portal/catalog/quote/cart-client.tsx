@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { CustomerQuoteView, SellLine } from "@/lib/portal-pricing";
 import { cartReviewReasonLine } from "@/lib/portal-quote-mode";
+import { defaultCatalogQuoteName, PORTAL_QUOTE_NAME_MAX } from "@/lib/portal-quote-names";
 import { generateQuote, removeCartLine, setCartVenue, updateCartLine } from "../actions";
 import { PANEL_CSS } from "../panel-css";
 import { money, QtyStepper } from "../panel-ui";
@@ -16,7 +17,9 @@ import { money, QtyStepper } from "../panel-ui";
  * reads as an amount + the venue's miles — never a %.
  */
 
-export type CartVenue = { id: string; label: string };
+/** `label` is what the picker shows; `nameLabel` is what the default quote
+ *  name uses (#288 — the venue's label, without city/state). */
+export type CartVenue = { id: string; label: string; nameLabel: string };
 
 const REVIEW_LINE = "All quotes are subject to Peak review and approval.";
 const TAX_LINE = "Plus applicable sales tax.";
@@ -64,6 +67,9 @@ const CSS = `
   .pq-review { color: #8a6d1f; background: #fbf3dd; border-color: #f0e2bd; }
   .pq-reason { font-size: 12.5px; color: #5b616e; }
   .pq-fine { font-size: 11.5px; color: #8c919c; line-height: 1.55; }
+  .pq-name { padding: 16px 20px 14px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #f0f1f4; }
+  .pq-name label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8c919c; }
+  .pq-name input { font: 500 14px var(--font-ui); color: #16181d; padding: 10px 12px; border: 1px solid #d6d9e0; border-radius: 9px; background: #fff; max-width: 480px; }
   .pq-go { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; padding: 0 20px 18px; }
   .pq-go-why { font-size: 12.5px; color: #8c919c; }
   .pq-btn { font: 600 14px var(--font-ui); color: #fff; background: var(--accent); border: none; border-radius: 10px; padding: 12px 20px; cursor: pointer; }
@@ -162,6 +168,8 @@ export function CartClient({
   readOnly,
   blocked,
   catalogHref,
+  customerName,
+  nameAt,
 }: {
   view: CustomerQuoteView;
   venues: CartVenue[];
@@ -169,8 +177,22 @@ export function CartClient({
   readOnly: boolean;
   blocked: string | null;
   catalogHref: string;
+  /** #288: the customer's company name — the default name with no venue. */
+  customerName: string;
+  /** #288: the instant the default name's date is taken from (server render). */
+  nameAt: number;
 }) {
   const router = useRouter();
+  // #288 "Name this quote": pre-filled with the default for the cart's venue
+  // and recomputed when the venue changes — unless the customer typed their
+  // own name, which then stays. Blank on Generate → the server's default.
+  const defaultName = defaultCatalogQuoteName(venues.find((v) => v.id === locationId)?.nameLabel ?? null, customerName, nameAt);
+  const [name, setName] = useState(defaultName);
+  const [seenDefault, setSeenDefault] = useState(defaultName);
+  if (seenDefault !== defaultName) {
+    setSeenDefault(defaultName);
+    if (name === seenDefault) setName(defaultName);
+  }
   const [pending, start] = useTransition();
   const [generating, startGenerate] = useTransition();
   const [error, setError] = useState("");
@@ -192,8 +214,8 @@ export function CartClient({
     setError("");
     startGenerate(async () => {
       try {
-        // Success redirects to /portal; only a refusal comes back.
-        const r = await generateQuote();
+        // Success redirects to /portal/my-quotes; only a refusal comes back.
+        const r = await generateQuote(name);
         if (r && !r.ok) {
           setError(r.error);
           router.refresh();
@@ -307,6 +329,18 @@ export function CartClient({
             {error}
           </div>
         )}
+        <div className="pq-name">
+          <label htmlFor="pq-name">Name this quote</label>
+          <input
+            id="pq-name"
+            type="text"
+            value={name}
+            maxLength={PORTAL_QUOTE_NAME_MAX}
+            disabled={readOnly || busy}
+            placeholder={defaultName}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
         <div className="pq-go">
           {blocked && <span className="pq-go-why">{blocked}</span>}
           <button type="button" className="pq-btn" disabled={!!blocked || busy} onClick={generate}>

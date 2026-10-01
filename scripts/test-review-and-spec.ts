@@ -2849,8 +2849,8 @@ ok(accentContrast("#b4543a") === "#fff", "red accent carries white text");
 const d117Est = NAV.find((e) => e.kind === "group" && e.key === "est");
 ok(
   !!(d117Est && d117Est.kind === "group" &&
-    d117Est.children.map((c) => c.key).join(",") === "quotes,myquotes,estimator,reviews,catalog"),
-  "EST = Quotes, My Quotes, Estimator, Reviews, Catalog in order (#22, #213)",
+    d117Est.children.map((c) => c.key).join(",") === "quotes,portal-quotes,myquotes,estimator,reviews,catalog"),
+  "EST = Quotes, Portal quotes, My Quotes, Estimator, Reviews, Catalog in order (#22, #213, #288)",
 );
 ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
 ok(
@@ -9349,7 +9349,11 @@ import { exportObjectsFor } from "@/app/(app)/import/registry";
   // canAcceptPortal, which also refuses a firm quote past validUntil — the
   // reviewer-found bug this task closes. The list filter (Daylite/tenant
   // scoping) is unchanged.
-  ok(/\.filter\(\(q\) => portalListsQuote\(q, cid\)\)/.test(portalPage) && /canAcceptPortal\(q, Date\.now\(\)\)/.test(portalPage), "#187 review 2 (superseded by #245 Task 13): the portal page lists through portalListsQuote and gates Accept through canAcceptPortal (adds the validUntil check)");
+  // #288 Task 2: Home lists through homePortalQuotes (portalListsQuote minus
+  // the customer-built quotes) and the row moved to the shared quote-row.tsx.
+  const portalRow = readFileSync(join(process.cwd(), "src/app/portal/quote-row.tsx"), "utf8");
+  const portalMine = readFileSync(join(process.cwd(), "src/lib/portal-my-quotes.ts"), "utf8");
+  ok(/homePortalQuotes\(quotes, cid\)/.test(portalPage) && /portalListsQuote\(q as Parameters<typeof portalListsQuote>\[0\], cid\)/.test(portalMine) && /canAcceptPortal\(q, Date\.now\(\)\)/.test(portalRow), "#187 review 2 (superseded by #245 Task 13, #288): the portal page lists through portalListsQuote (homePortalQuotes) and the shared row gates Accept through canAcceptPortal (adds the validUntil check)");
   // acceptPortalQuote no longer inlines the gate — every tenant/Daylite/
   // already-accepted/expired/review check now lives once in acceptPortal
   // (portal-quotes.ts), exercised end to end by portal245AcceptAsyncChecks.
@@ -10707,6 +10711,7 @@ seeded()
   .then(() => shrinkUpload283AsyncChecks())
   .then(() => drivePhotos283AsyncChecks())
   .then(() => drivePhotoSync283AsyncChecks())
+  .then(() => rename288AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25794,7 +25799,8 @@ async function quotePdfCoalesce222AsyncChecks(): Promise<void> {
 
 /* ============ #220 Task 6 — portal quotes Open/History + projects ============ */
 {
-  const portal220 = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8");
+  // #288 Task 2: the quote row moved to the shared src/app/portal/quote-row.tsx.
+  const portal220 = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8") + readFileSync(join(process.cwd(), "src/app/portal/quote-row.tsx"), "utf8");
   ok(portal220.includes("resolvePortalViewer(") && !portal220.includes("getOptionalUser"), "#220 portal page: the team-preview rule is the shared resolvePortalViewer");
   ok(portal220.includes("groupPortalQuotes(published)") && portal220.includes("portalQuotePdfSource(q, cid)") && portal220.includes("Document being prepared"), "#220 portal quotes: grouped Open/History, each row opens its PDF or says it's being prepared");
   ok(portal220.includes("isAppEraProject(p)") && portal220.includes("portalProjectView(p,") && portal220.includes("Your projects"), "#220 portal projects: app-era only, through the whitelist view");
@@ -27242,7 +27248,7 @@ function e223Src(rel: string): string {
   const pkg = e223Src("src/lib/client-package-server.ts");
   ok(pkg.includes('{ label: "Quote", value: displayQuoteNumber(quote) }') && pkg.includes("client-packages/quote-${safeName(quote.id)}/"), "#223 client package prints the number; its Blob path keeps the id");
   ok(e223Src("src/lib/stores/repair-jobs.ts").includes('"From quote " + displayQuoteNumber(q)'), "#223 a repair job's source label names the quote's number");
-  ok(e223Src("src/app/portal/page.tsx").includes('displayQuoteNumber(q) + " · "'), "#223 portal lists quotes by number");
+  ok(e223Src("src/app/portal/quote-row.tsx").includes('displayQuoteNumber(q) + " · "'), "#223 portal lists quotes by number (the shared row, #288)");
   // #222's saved-PDF download routes name the file by number; the file is still looked up by id.
   const teamPdf = e223Src("src/app/api/quotes/[id]/pdf/route.ts");
   const portalPdf = e223Src("src/app/portal/quotes/[id]/pdf/route.ts");
@@ -28626,17 +28632,18 @@ import {
 
   // #248 Task 3 added a Service item between Catalog and Quote — reindexed
   // here rather than left pinned to the pre-#248 shape.
+  // #288 added My quotes before the cart item and renamed "Quote" → "Cart".
   const nav = d245Nav("catalog", { cartCount: 3 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "Quote"]) && nav[1].active === true && !nav[0].active && nav[3].badge === 3 && nav[3].href === "/portal/catalog/quote",
-    "#245 nav: Home · Catalog · Service · Quote (N), Catalog active");
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]) && nav[1].active === true && !nav[0].active && nav[4].badge === 3 && nav[4].href === "/portal/catalog/quote",
+    "#245 nav: Home · Catalog · Service · My quotes · Cart (N), Catalog active");
   const pvNav = d245Nav("home", { previewCid: "c 1" });
   ok(
     pvNav[0].href === "/portal?preview=c%201" &&
       pvNav[1].href === "/portal/catalog?preview=c%201" &&
       pvNav[2].href === "/portal/service?preview=c%201" &&
-      pvNav[3].disabled === true &&
-      pvNav[3].badge === undefined,
-    "#245 nav: a team preview carries ?preview= (Home/Catalog/Service), shows no cart count and disables Quote"
+      pvNav[4].disabled === true &&
+      pvNav[4].badge === undefined,
+    "#245 nav: a team preview carries ?preview= (Home/Catalog/Service), shows no cart count and disables Cart"
   );
 }
 
@@ -29156,8 +29163,8 @@ async function portal245GenerateAsyncChecks(): Promise<void> {
     const secs = ((qf?.spec as { sections?: D242Section[] } | null)?.sections ?? []) as D242Section[];
     ok(!!qf && qf.status === "sent" && qf.source === "portal-catalog" && typeof qf.estNo === "number", "#245 generate firm: sent at once, source portal-catalog, numbered on insert");
     ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview, "#245 generate firm: portalFirm good for 30 days from generation; no review stamp");
-    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1" && qf?.name === "Portal quote — " + (hall?.label || hall?.locationName || "Venue"),
-      "#245 generate firm: owned by the company's owner, attn the grant's name, for the picked venue");
+    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1" && qf?.name === n288Catalog(hall?.label || hall?.locationName || null, cust?.name || "", NOW),
+      "#245 generate firm: owned by the company's owner, attn the grant's name, for the picked venue (#288: default name '<venue> — <date>')");
     ok(secs.length === 1 && secs[0].freightPct === 4 && secs[0].freightMiles === 450 && secs[0].items.length === 1 && secs[0].items[0].sku === P && secs[0].items[0].cost === 70,
       "#245 generate firm: 450 mi → freight 4 %; the spec keeps cost for staff and leaves the unavailable line out");
     ok(!!qf && qf.value === Math.round(d245Totals(secs, 0).grand) && qf.value > 0, "#245 generate firm: value = the Estimator's totals().grand");
@@ -31287,7 +31294,7 @@ async function portal248GenerateAsyncChecks(): Promise<void> {
         ft246.venues.find((v) => v.id === "v2")?.curtains === 6,
       "#248 generate flame: the flameTest subdoc saves both venues' curtain counts"
     );
-    ok(qf?.name === "Flame test — Main Hall, Black Box", "#248 generate flame: name is 'Flame test — <venues>'");
+    ok(qf?.name === "Main Hall + 1 more — Sep 28, 2026", "#248 generate flame: name is the #288 default '<first venue> + N more — <date>'");
     ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"),
       "#248 generate flame: sent through setStatus (history + sent revision)");
     ok(!!qf && QuoteStore.portalListsQuote(qf, CO) && QuoteStore.portalCanAcceptQuote(qf, CO), "#248 generate flame: listed and acceptable for its customer");
@@ -31304,7 +31311,7 @@ async function portal248GenerateAsyncChecks(): Promise<void> {
     const insp246 = (qi?.inspection || {}) as { level?: number; venues?: Array<{ id?: string; lineSets?: number }> };
     ok(insp246.level === 2 && insp246.venues?.find((v) => v.id === "v1")?.lineSets === 25,
       "#248 generate inspection: the inspection subdoc's level is 2 and saves the line-set count");
-    ok(qi?.name === "Inspection (Five-year) — Main Hall", "#248 generate inspection: name is 'Inspection (Five-year) — <venues>'");
+    ok(qi?.name === "Main Hall — Sep 28, 2026", "#248 generate inspection: name is the #288 default '<venue> — <date>'");
 
     // Owner fallback: a company with no owner → unassigned.
     const noOwnerSess = { grantId: fixtureId(248, "gen-grant-noowner"), customerId: CO2, name: "Rae Two", email: "rae@example.com" };
@@ -41926,4 +41933,477 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   ok(cli291.includes("Stick lengths") && cli291.includes("+ Add length") && cli291.includes("sticks: draft.sticks") && cli291.includes("TRACK_ROLES.filter((r) => r !== \"track\")"),
     "#291 client: a Stick lengths list replaces the single stick field; the track role leaves the role list");
   ok(cli291.includes("OPTIONAL_ROLES.includes(role)") && cli291.includes("Line tie-off allowance"), "#291 client: optional roles are marked, and the line allowance is editable");
+}
+
+/* ======================================================================
+   #288 Task 1 — customer-named portal quotes (spec §1.1–§1.4, §1.8).
+   Pure: default names, name cleaning, the customer-built / renamable rules.
+   DB: Generate with a typed / blank name, renamePortalQuote (success + PDF
+   rescheduled through the #222 PDF-state seam, every refusal). Registered
+   in the async chain as rename288AsyncChecks().
+   ====================================================================== */
+import {
+  PORTAL_QUOTE_NAME_MAX as n288Max,
+  cleanPortalQuoteName as n288Clean,
+  defaultCatalogQuoteName as n288Catalog,
+  defaultServiceQuoteName as n288Service,
+  isCustomerBuiltQuote as n288Built,
+  isPortalRenamable as n288Renamable,
+  portalQuoteDate as n288Date,
+} from "@/lib/portal-quote-names";
+import { renamePortalQuote as n288Rename } from "@/lib/portal-quotes";
+import { latestSentRevision as n288LatestSent, pendingPdf as n288PendingPdf, portalPdfSource as n288PdfSource, revisionAwaitingPdf as n288Awaiting } from "@/lib/quote-pdf/state";
+import { rateLimit as n288RateLimit } from "@/lib/rate-limit";
+{
+  const AT = Date.UTC(2026, 9, 1, 15);
+  ok(n288Date(AT) === "Oct 1, 2026", "#288 names: the date reads Mon D, YYYY (en-US)");
+  ok(n288Date(Date.UTC(2026, 9, 2, 3)) === "Oct 1, 2026", "#288 names: the date is America/Chicago (03:00 UTC Oct 2 is still Oct 1 there)");
+  ok(n288Catalog("Main Hall", "Acme School", AT) === "Main Hall — Oct 1, 2026", "#288 names: catalog with a venue → '<venue> — <date>'");
+  ok(n288Catalog(null, "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: catalog without a venue → '<company> — <date>'");
+  ok(n288Catalog("", "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: catalog with a blank venue label → the company name");
+  ok(n288Service(["Main Hall"], "Acme School", AT) === "Main Hall — Oct 1, 2026", "#288 names: service, one venue → '<venue> — <date>'");
+  ok(n288Service(["Main Hall", "Black Box", "Gym"], "Acme School", AT) === "Main Hall + 2 more — Oct 1, 2026", "#288 names: service, three venues → '<first> + 2 more — <date>'");
+  ok(n288Service([], "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: service, no venues → the company name");
+  ok(n288Max === 120, "#288 names: the cap is 120 characters");
+  ok(n288Clean("   Spring   musical \n 2027  ") === "Spring musical 2027", "#288 names: cleaning trims and collapses inner whitespace");
+  ok(n288Clean("Spring\u0007 musical\u0000") === "Spring musical", "#288 names: cleaning strips control characters");
+  ok(n288Clean("x".repeat(200)).length === 120, "#288 names: 200 characters are capped at 120");
+  ok(n288Clean("   ") === "" && n288Clean("\u0007") === "" && n288Clean(undefined) === "" && n288Clean(42) === "", "#288 names: blank (or not a string) cleans to ''");
+  ok(n288Catalog("V".repeat(200), "Acme", AT).length <= 120, "#288 names: a default name obeys the same 120 cap");
+  ok(n288Built({ source: "portal-catalog" }) && n288Built({ source: "portal-service" }) && n288Built({ source: "portal-self-serve" }),
+    "#288 isCustomerBuiltQuote: portal-catalog, portal-service and legacy portal-self-serve are customer-built");
+  ok(!n288Built({ source: "estimator" }) && !n288Built({}) && !n288Built({ source: null }), "#288 isCustomerBuiltQuote: estimator / no source is Peak-sent");
+  const sent = { source: "portal-catalog", status: "sent", portalAcceptance: null };
+  ok(n288Renamable(sent) && n288Renamable({ ...sent, status: "draft" }), "#288 isPortalRenamable: a sent (or review-draft) customer-built quote is renamable");
+  ok(!n288Renamable({ ...sent, portalAcceptance: { at: 1, by: "x", byEmail: "x@y" } }), "#288 isPortalRenamable: an accepted quote (portalAcceptance set) is not");
+  ok(!n288Renamable({ ...sent, status: "won" }) && !n288Renamable({ ...sent, status: "lost" }), "#288 isPortalRenamable: won / lost are not");
+  ok(!n288Renamable({ ...sent, source: "estimator" }), "#288 isPortalRenamable: a Peak-sent quote is not");
+
+  const rd288 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const pa = rd288("src/app/portal/actions.ts");
+  const wrap = pa.slice(pa.indexOf("export async function renamePortalQuoteAction"));
+  ok(pa.includes("export async function renamePortalQuoteAction(") && /portalSession\(\)\.catch\(\(\) => null\)/.test(wrap.slice(0, 400)) && /renamePortalQuoteFor\(session, /.test(wrap.slice(0, 600)),
+    "#288 rename action: a thin wrapper — portalSession().catch(() => null), then the session-taking lib body");
+  ok(/export async function generateQuote\(name\?: unknown\)/.test(rd288("src/app/portal/catalog/actions.ts")) && /generatePortalQuote\(session, \{ name: /.test(rd288("src/app/portal/catalog/actions.ts")),
+    "#288 catalog generate action: accepts and forwards an optional name");
+  ok(/generateServiceQuote\(session, \{ \.\.\.req, name: /.test(rd288("src/app/portal/service/actions.ts")), "#288 service generate action: forwards an optional name");
+}
+
+async function rename288AsyncChecks(): Promise<void> {
+  const P = fixtureId(288, "name-part");
+  const CO = fixtureId(288, "name-co");
+  const CO_X = fixtureId(288, "name-co-other");
+  const G = fixtureId(288, "name-grant");
+  const GX = fixtureId(288, "name-grant-other");
+  for (const g of [G, GX]) registerFixture("portal_carts", g);
+  const NOW = Date.UTC(2026, 9, 1, 15);
+  const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+  const gen = async (name?: string) => {
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    const r = await d245Generate(sess, { now: NOW, schedulePdf: false, ...(name !== undefined ? { name } : {}) });
+    if (r.ok) registerFixture("quotes", r.quoteId);
+    return r;
+  };
+  try {
+    const owner = (await activeUsers())[0]?.name || "";
+    await d245MergeUpsert(P, { desc: "Test288 Name Part", category: "Test288 Cat", unit: "ea", list: 100, cost: 60 });
+    registerFixture("catalog_parts", P);
+    await upsertCustomer({ id: CO, name: "Test288 Name Co", type: "Education", pricingTier: "silver", owner,
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }], contacts: [] });
+    await upsertCustomer({ id: CO_X, name: "Test288 Other Co", type: "Education", locations: [{ id: "x1", label: "Other Hall", primary: true, venueKind: "proscenium", travelMiles: 50 }], contacts: [] });
+    d245Invalidate();
+
+    // Generate — a typed name is cleaned and stored; blank → the default.
+    const named = await gen("  Spring   musical  ");
+    const qn = named.ok ? await d245GetQuote(named.quoteId) : null;
+    ok(named.ok && qn?.name === "Spring musical", "#288 generate: a typed name is stored cleaned ('Spring musical')");
+    const blank = await gen("   ");
+    const qb = blank.ok ? await d245GetQuote(blank.quoteId) : null;
+    ok(blank.ok && qb?.name === n288Catalog("Main Hall", "Test288 Name Co", NOW) && qb?.name === "Main Hall — Oct 1, 2026",
+      "#288 generate: a blank name stores the default '<venue> — <date>'");
+    const omitted = await gen();
+    const qo = omitted.ok ? await d245GetQuote(omitted.quoteId) : null;
+    ok(omitted.ok && qo?.name === "Main Hall — Oct 1, 2026", "#288 generate: no name at all also stores the default");
+
+    // Rename — success, and the PDF is rescheduled (#222 seam: outside a
+    // request scheduleQuotePdf marks an existing PDF stale for the newer save).
+    if (named.ok) {
+      await q222UpdatePdf(named.quoteId, (cur) => n288PendingPdf(cur, 2_000, 2_000));
+      const r = await n288Rename(sess, named.quoteId, "  Fall\u0007 play  ");
+      const after = await d245GetQuote(named.quoteId);
+      ok(r.ok && r.name === "Fall play" && after?.name === "Fall play", "#288 rename: a sent customer-built quote takes the cleaned new name");
+      ok(after?.pdf?.status === "pending" && after.pdf.stale === true && after.pdf.savedAt > 2_000, "#288 rename: the quote's PDF is rescheduled (marked for a newer save)");
+
+      // Refusals — none changes the name.
+      const blankR = await n288Rename(sess, named.quoteId, " \u0007 ");
+      ok(!blankR.ok && blankR.error === "Give your quote a name.", "#288 rename: a blank name (after cleaning) is refused");
+      const pv = await n288Rename({ ...sess, grantId: "preview" }, named.quoteId, "Preview name");
+      ok(!pv.ok && pv.error === d245ExpiredCopy, "#288 rename: a team preview (grantId preview) never renames");
+      const none = await n288Rename(null, named.quoteId, "No session");
+      ok(!none.ok && none.error === d245ExpiredCopy, "#288 rename: no session → the expired-link copy");
+      const other = await n288Rename({ grantId: GX, customerId: CO_X, name: "Ola", email: "o@example.com" }, named.quoteId, "Not mine");
+      ok(!other.ok && other.error === "We couldn't find that quote.", "#288 rename: another customer's session can't rename this quote");
+      ok((await d245GetQuote(named.quoteId))?.name === "Fall play", "#288 rename: refused renames leave the name untouched");
+    }
+    if (blank.ok) {
+      await QuoteStore.update(blank.quoteId, { portalAcceptance: { at: NOW, by: "Pat Buyer", byEmail: "pat@example.com" } });
+      const acc = await n288Rename(sess, blank.quoteId, "Too late");
+      ok(!acc.ok && acc.error === "This quote was accepted — it can't be renamed now." && (await d245GetQuote(blank.quoteId))?.name === "Main Hall — Oct 1, 2026",
+        "#288 rename: an accepted quote is refused");
+    }
+    const peak = await QuoteStore.create({ name: "Peak estimate", customer: "Test288 Name Co", customerId: CO, owner, source: "estimator" });
+    registerFixture("quotes", peak.id);
+    await q222SetStatus(peak.id, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+    const peakQ = await d245GetQuote(peak.id);
+    const pr = await n288Rename(sess, peak.id, "Mine now");
+    ok(!!peakQ && d245Lists(peakQ, CO) && !pr.ok && pr.error === "Only quotes you built here can be renamed." && (await d245GetQuote(peak.id))?.name === "Peak estimate",
+      "#288 rename: a Peak-sent quote (listed, but not customer-built) is refused");
+
+    // #288 Task 2 (Task 1 review follow-ups): won / lost read as closed, not
+    // "accepted"; a failed write refunds the rate-limit token.
+    if (omitted.ok) {
+      await QuoteStore.update(omitted.quoteId, { status: "lost" });
+      const lost = await n288Rename(sess, omitted.quoteId, "Too late");
+      ok(!lost.ok && lost.error === "This quote is closed and can't be renamed.", "#288 rename: a lost quote (no portalAcceptance) says it's closed");
+      await QuoteStore.update(omitted.quoteId, { status: "won" });
+      const won = await n288Rename(sess, omitted.quoteId, "Too late");
+      ok(!won.ok && won.error === "This quote is closed and can't be renamed.", "#288 rename: a won quote (no portalAcceptance) says it's closed");
+    }
+    if (named.ok) {
+      const GR = fixtureId(288, "name-grant-refund");
+      const key = "portal-rename:" + GR;
+      for (let i = 0; i < 29; i++) n288RateLimit(key, 30, 3_600_000);
+      const failed = await n288Rename({ ...sess, grantId: GR }, named.quoteId, "Write fails", {
+        updateQuote: async () => {
+          throw new Error("boom");
+        },
+      });
+      ok(!failed.ok && failed.error === "Couldn't rename this quote — try again." && (await d245GetQuote(named.quoteId))?.name === "Fall play",
+        "#288 rename: a write that throws is reported and leaves the name");
+      ok(n288RateLimit(key, 30, 3_600_000).ok, "#288 rename: a write that throws refunds its rate-limit token (the 30th slot is still free)");
+    }
+    // #288 final review: the customer's PDF of a sent quote is the latest
+    // sent revision's copy (portalPdfSource), so a rename of a sent quote cuts
+    // a new sent revision — owed a copy from the rename's own save — exactly
+    // as Refresh pricing does. A draft rename cuts no revision.
+    if (named.ok) {
+      const before = await d245GetQuote(named.quoteId);
+      const prevSent = n288LatestSent(before?.revisions);
+      const r = await n288Rename(sess, named.quoteId, "Winter gala");
+      const after = await d245GetQuote(named.quoteId);
+      const sentRev = n288LatestSent(after?.revisions);
+      ok(r.ok && before?.status === "sent" && !!prevSent && !!sentRev && sentRev.rev > prevSent.rev && sentRev.by === "Customer portal" && sentRev.note === "Renamed by customer" && sentRev.name === "Winter gala",
+        "#288 rename: renaming a sent quote cuts a new sent revision carrying the new name ('Renamed by customer')");
+      ok(!!after?.pdf && !!sentRev && n288Awaiting(sentRev, after.pdf.savedAt) && !!after && n288PdfSource(after) === null && after.status === "sent",
+        "#288 rename: the new sent revision is owed a copy from the rename's save (portalPdfSource waits for it, never the pre-rename copy)");
+    }
+    const draft = await QuoteStore.create({ name: "Test288 review draft", customer: "Test288 Name Co", customerId: CO, owner, source: "portal-catalog", portalReview: { requestedAt: NOW, reasons: [] } });
+    registerFixture("quotes", draft.id);
+    const draftBefore = (await d245GetQuote(draft.id))?.revisions?.length ?? 0;
+    const dr = await n288Rename(sess, draft.id, "Renamed draft");
+    const draftAfter = await d245GetQuote(draft.id);
+    ok(dr.ok && draftAfter?.name === "Renamed draft" && draftAfter.status === "draft" && (draftAfter.revisions?.length ?? 0) === draftBefore,
+      "#288 rename: renaming a review draft adds no revision (it was never sent)");
+  } finally {
+    d245Invalidate();
+    await removeCustomer(CO);
+    await removeCustomer(CO_X);
+  }
+}
+
+/* ======================================================================
+   #288 Task 2 — My quotes (spec §1.5), Home shows Peak-sent estimates only
+   and the nav gains My quotes + Cart (§1.6), the Name box at Generate
+   (§1.3). Pure: portalNav, the myQuotesView / homePortalQuotes view models,
+   and the Task 1 review follow-ups (date-safe default names, \p{Cf}).
+   ====================================================================== */
+import { portalNav as n288Nav } from "@/app/portal/nav";
+import {
+  homePortalQuotes as n288Home,
+  myQuotesView as n288View,
+  parseMyQuotesFilter as n288Filter,
+  myQuotesCounts as n288Counts,
+  portalQuoteTypeLabel as n288TypeLabel,
+} from "@/lib/portal-my-quotes";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  // ---- nav ----
+  const nav = n288Nav("my-quotes", { cartCount: 2 });
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]), "#288 nav: Home · Catalog · Service · My quotes · Cart, in that order");
+  ok(nav[3]?.href === "/portal/my-quotes" && nav[3]?.active === true && nav.filter((n) => n.active).length === 1, "#288 nav: My quotes links /portal/my-quotes and is the one active item on 'my-quotes'");
+  ok(nav[4]?.href === "/portal/catalog/quote" && nav[4]?.badge === 2 && !nav[4]?.disabled, "#288 nav: Cart keeps the cart href and its (N) badge");
+  ok(n288Nav("quote", { cartCount: 0 })[4]?.active === true && !n288Nav("home")[3]?.active, "#288 nav: 'quote' still marks Cart active; Home doesn't mark My quotes");
+  const pv = n288Nav("my-quotes", { previewCid: "c 1" });
+  ok(pv[3]?.href === "/portal/my-quotes?preview=c%201" && !pv[3]?.disabled && pv[3]?.active === true, "#288 nav: in a team preview My quotes stays enabled and carries ?preview=");
+  ok(pv[4]?.disabled === true && pv[4]?.badge === undefined && pv[4]?.label === "Cart", "#288 nav: in a team preview Cart is disabled with no count");
+
+  // ---- my-quotes view model ----
+  const NOW = Date.UTC(2026, 9, 1, 15);
+  const base = { customerId: "c1", portalAcceptance: null, portalReview: null, portalFirm: null, quoteType: undefined as string | undefined };
+  const qs = [
+    { ...base, id: "draft-rev", source: "portal-catalog", status: "draft", createdAt: 100, updatedAt: 900, portalReview: { requestedAt: 1, reasons: [] } },
+    { ...base, id: "sent-firm", source: "portal-catalog", status: "sent", createdAt: 400, updatedAt: 400, portalFirm: { generatedAt: 1, validUntil: NOW + 1 } },
+    { ...base, id: "expired", source: "portal-service", quoteType: "flame_test", status: "sent", createdAt: 300, updatedAt: 300, portalFirm: { generatedAt: 1, validUntil: NOW - 1 } },
+    { ...base, id: "accepted", source: "portal-catalog", status: "sent", createdAt: 500, updatedAt: 500, portalAcceptance: { at: 1, by: "Pat", byEmail: "p@x" } },
+    { ...base, id: "won", source: "portal-service", quoteType: "inspection", status: "won", createdAt: 200, updatedAt: 200 },
+    { ...base, id: "lost", source: "portal-catalog", status: "lost", createdAt: 250, updatedAt: 250 },
+    { ...base, id: "legacy", source: "portal-self-serve", status: "draft", createdAt: 50, updatedAt: 50 },
+    { ...base, id: "peak", source: "estimator", status: "sent", createdAt: 600, updatedAt: 600 },
+    { ...base, id: "other-co", customerId: "c2", source: "portal-catalog", status: "sent", createdAt: 700, updatedAt: 700 },
+    { ...base, id: "svc-recalled", source: "portal-service", quoteType: "flame_test", status: "draft", createdAt: 800, updatedAt: 800 },
+  ];
+  const open = n288View(qs, "c1", "open");
+  ok(eq(open.rows.map((r) => r.q.id), ["sent-firm", "expired", "draft-rev", "legacy"]),
+    "#288 my-quotes: Open = draft / sent / under review / expired, newest built first (createdAt), customer-built and listed only");
+  // #288 Task 3 (Task 2 review): the row derives expiry itself (canAcceptPortal), so the view model carries no `expired`.
+  ok(open.rows.some((r) => r.q.id === "expired") && open.rows.every((r) => !("expired" in r)) && /acceptGate\.reason === "expired"/.test(rd288src("src/app/portal/quote-row.tsx")),
+    "#288 my-quotes: an Open firm quote past validUntil stays Open (refreshable); the shared row derives 'expired' itself, the view model doesn't");
+  ok(eq(n288View(qs, "c1", "accepted").rows.map((r) => r.q.id), ["accepted", "won"]), "#288 my-quotes: Accepted = portalAcceptance set, or won");
+  ok(eq(n288View(qs, "c1", "closed").rows.map((r) => r.q.id), ["lost"]), "#288 my-quotes: Closed = lost / declined");
+  ok(eq(open.counts, { open: 4, accepted: 2, closed: 1 }) && open.filter === "open", "#288 my-quotes: counts per filter cover every listed customer-built quote");
+  ok(!n288View(qs, "c1", "open").rows.concat(n288View(qs, "c1", "accepted").rows, n288View(qs, "c1", "closed").rows).some((r) => ["peak", "other-co", "svc-recalled"].includes(r.q.id)),
+    "#288 my-quotes: never a Peak-sent quote, another customer's quote, or a staff-recalled service draft (portalListsQuote)");
+  ok(open.rows.find((r) => r.q.id === "sent-firm")?.renamable === true && n288View(qs, "c1", "accepted").rows.every((r) => !r.renamable) && n288View(qs, "c1", "closed").rows.every((r) => !r.renamable),
+    "#288 my-quotes: Open rows are renamable; Accepted and Closed rows are not");
+  ok(n288View(qs, "", "open").rows.length === 0, "#288 my-quotes: no customer id lists nothing");
+  ok(n288Filter("accepted") === "accepted" && n288Filter("closed") === "closed" && n288Filter("open") === "open" && n288Filter("") === "open" && n288Filter("bogus") === "open",
+    "#288 my-quotes: ?show= parses open|accepted|closed, default open");
+  ok(n288TypeLabel({ source: "portal-catalog" }) === "Catalog" && n288TypeLabel({ source: "portal-service", quoteType: "flame_test" }) === "Flame test" &&
+      n288TypeLabel({ source: "portal-service", quoteType: "inspection" }) === "Inspection" && n288TypeLabel({ source: "portal-self-serve" }) === "Estimate",
+    "#288 my-quotes: type labels Catalog / Flame test / Inspection (legacy self-serve: Estimate)");
+
+  // ---- Home lists Peak-sent only ----
+  ok(eq(n288Home(qs, "c1").map((q) => q.id), ["peak"]), "#288 home: Home's list excludes customer-built quotes (and other customers'), keeping Peak-sent estimates");
+  // #288 Task 3 (Task 2 review): Home still goes through portalListsQuote — a
+  // plain customerId filter would let an internal draft or Daylite history in.
+  const homeExtra = [
+    ...qs,
+    { ...base, id: "peak-draft", source: "estimator", status: "draft", createdAt: 950, updatedAt: 950 },
+    { ...base, id: "daylite", source: "daylite", status: "sent", createdAt: 960, updatedAt: 960 },
+  ];
+  ok(eq(n288Home(homeExtra, "c1").map((q) => q.id), ["peak"]), "#288 home: Home excludes a Peak internal draft and an imported Daylite quote (portalListsQuote, not a bare customerId filter)");
+  ok(eq(n288Counts(qs, "c1"), { open: 4, accepted: 2, closed: 1 }) && eq(n288Counts(qs, ""), { open: 0, accepted: 0, closed: 0 }),
+    "#288 home: myQuotesCounts counts the listed customer-built quotes per filter without building rows");
+  ok(/myQuotesCounts\(quotes, cid\)/.test(rd288src("src/app/portal/page.tsx")) && !/myQuotesView\(/.test(rd288src("src/app/portal/page.tsx")),
+    "#288 home: the My quotes card uses myQuotesCounts, not myQuotesView");
+  const mqSrc = rd288src("src/lib/portal-my-quotes.ts");
+  ok(!/portalReview\?:/.test(mqSrc.slice(mqSrc.indexOf("export type MyQuoteFields"), mqSrc.indexOf("};", mqSrc.indexOf("export type MyQuoteFields")))),
+    "#288 my-quotes: MyQuoteFields drops the unused portalReview field");
+  ok(rd288src("src/app/portal/quote-row.tsx").includes('doneHref={mine ? "/portal/my-quotes?show=accepted" : "/portal"}') &&
+      /doneHref \+ \(doneHref\.includes\("\?"\) \? "&" : "\?"\) \+ "accepted=1"/.test(rd288src("src/app/portal/accept-dialog.tsx")),
+    "#288 my-quotes: accepting from My quotes lands on /portal/my-quotes?show=accepted&accepted=1 (Home unchanged)");
+
+  // ---- Task 1 review follow-ups ----
+  const AT = Date.UTC(2026, 9, 1, 15);
+  const longCat = n288Catalog("V".repeat(200), "Acme", AT);
+  ok(longCat.length === 120 && longCat.endsWith("V — Oct 1, 2026"), "#288 names: a long venue label is truncated so the default still ends with the full date");
+  const longCo = n288Catalog(null, "C".repeat(300), AT);
+  ok(longCo.length === 120 && longCo.endsWith("C — Oct 1, 2026"), "#288 names: a long company name is truncated before the date, not the date");
+  const longSvc = n288Service(["S".repeat(200), "B", "G"], "Acme", AT);
+  ok(longSvc.length === 120 && longSvc.endsWith("S + 2 more — Oct 1, 2026"), "#288 names: a long first venue keeps ' + N more — <date>' whole");
+  ok(n288Clean("Spring\u200B musical\u202E\uFEFF") === "Spring musical", "#288 names: cleaning strips zero-width space, bidi overrides and the BOM");
+  ok(n288Clean("a\u202Ab\u202Bc\u202Cd\u202De\u202Ef\u2066g\u2067h\u2068i\u2069j") === "abcdefghij", "#288 names: every bidi embedding / override / isolate (U+202A–202E, U+2066–2069) is stripped");
+  const fam = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
+  ok(n288Clean("Family " + fam + " night") === "Family " + fam + " night", "#288 names: a ZWJ emoji family keeps its joiners (U+200D) intact");
+  ok(n288Clean("Ro\u200Cman") === "Ro\u200Cman", "#288 names: ZWNJ (U+200C) is kept");
+  const flag = "\u{1F1FA}\u{1F1F8}";
+  ok(n288Clean("x".repeat(119) + flag) === "x".repeat(119) && n288Clean("x".repeat(118) + flag) === "x".repeat(118) + flag,
+    "#288 names: the 120 cap never splits a flag — one that doesn't fit whole is dropped, one that fits is kept");
+  ok(n288Clean("y".repeat(117) + fam) === "y".repeat(117), "#288 names: the 120 cap never splits a ZWJ family (dropped whole)");
+  const rp = rd288src("src/lib/portal-quotes.ts");
+  const renameBody = rp.slice(rp.indexOf("export async function renamePortalQuote("));
+  ok(!renameBody.slice(0, 2500).includes("scheduleQuotePdf?:") && !/RenamePortalQuoteDeps = \{ scheduleQuotePdf/.test(rp), "#288 rename: the unused scheduleQuotePdf test seam is gone");
+  ok(/benign/i.test(renameBody.slice(0, 2500)), "#288 rename: the check-then-write notes its benign race");
+  {
+    const body = renameBody.slice(0, renameBody.indexOf("\n}\n"));
+    const iSched = body.lastIndexOf("await scheduleQuotePdf(q.id)");
+    const iRev = body.indexOf('await addQuoteRevision(q.id, { by: "Customer portal", reason: "sent", note: "Renamed by customer" })');
+    const iCopy = body.indexOf("await copySentRevisionPdf(q.id).catch(");
+    ok(iSched > 0 && iRev > iSched && iCopy > iRev && /status === "sent"/.test(body),
+      "#288 rename: a sent quote reschedules its PDF, then cuts the sent revision, then copies the PDF onto it (Refresh pricing's order)");
+  }
+
+  // ---- wiring ----
+  const cart = rd288src("src/app/portal/catalog/quote/cart-client.tsx");
+  const svc = rd288src("src/app/portal/service/service-form.tsx");
+  for (const [label, s] of [["cart", cart], ["service form", svc]] as const) {
+    ok(s.includes("Name this quote") && !/from "@\/lib\/stores\//.test(s) && /from "@\/lib\/portal-quote-names"/.test(s),
+      `#288 ${label}: a "Name this quote" box, defaulted from the pure portal-quote-names module (no store import)`);
+  }
+  ok(/generateQuote\(name\)/.test(cart) && /generateServiceAction\(req, name\)/.test(svc), "#288 name box: Generate sends the typed name (catalog + service)");
+  ok(/redirect\(`\/portal\/my-quotes\?generated=\$\{r\.mode\}&q=/.test(rd288src("src/app/portal/catalog/actions.ts")) &&
+      /redirect\(`\/portal\/my-quotes\?generated=firm&q=/.test(rd288src("src/app/portal/service/actions.ts")),
+    "#288 generate: both flows land on /portal/my-quotes?generated=…&q=…");
+  const home = rd288src("src/app/portal/page.tsx");
+  ok(/homePortalQuotes\(quotes, cid\)/.test(home) && home.includes("My quotes") && home.includes("View all →") && !home.includes("generatedRaw"),
+    "#288 home: lists through homePortalQuotes, adds the My quotes card, and no longer shows the generated banner");
+  const mq = rd288src("src/app/portal/my-quotes/page.tsx");
+  const qrow = rd288src("src/app/portal/quote-row.tsx");
+  ok(/myQuotesView\(/.test(mq) && /portalNav\("my-quotes"/.test(mq) && /generated === "firm"/.test(mq) && /resolvePortalViewer\(/.test(mq) && /preview=\{preview\}/.test(mq) &&
+      /mine\?\.renamable && !preview \?/.test(qrow) && /<RenameQuote /.test(qrow),
+    "#288 my-quotes page: the view model, the nav item, the generated banner, the shared viewer rule, Rename hidden in preview");
+  ok(/portalQuoteTypeLabel\(q\) \+ " · " \+ portalQuoteDate\(q\.createdAt \|\| q\.updatedAt\)/.test(qrow) && /import \{ portalQuoteDate \} from "@\/lib\/portal-quote-names"/.test(qrow),
+    "#288 my-quotes: the row's date is portalQuoteDate (America/Chicago), matching the default name");
+  ok(rd288src("src/app/portal/rename-quote.tsx").startsWith('"use client"') && /renamePortalQuoteAction\(/.test(rd288src("src/app/portal/rename-quote.tsx")) && /router\.refresh\(\)/.test(rd288src("src/app/portal/rename-quote.tsx")),
+    "#288 rename control: a client component calling renamePortalQuoteAction, then router.refresh()");
+  ok(rd288src("scripts/smoke-routes.ts").includes('"/portal/my-quotes"') && rd288src("scripts/smoke-routes.ts").includes('"/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0"'),
+    "#288 smoke: /portal/my-quotes (signed out) and its team preview with a generated banner");
+}
+function rd288src(p: string): string {
+  try {
+    return readFileSync(join(process.cwd(), p), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/* ======================================================================
+   #288 Task 3 — the staff Portal quotes work queue at /quotes/portal
+   (spec §1.7): the pure status classifier + filter/sort/count view model,
+   the nav entry, and the three portal bell groups linking to
+   /quotes/portal?focus=<id>.
+   ====================================================================== */
+import {
+  portalQueueStatus as q288Status,
+  portalQueueView as q288View,
+  portalQueueHref as q288Href,
+  parsePortalQueueFilter as q288Filter,
+  parsePortalQueueType as q288Type,
+  PORTAL_QUEUE_STATUS_LABEL as q288Labels,
+} from "@/lib/portal-quote-queue";
+import { portalBellGroups as q288Bell } from "@/lib/portal-bell";
+import { NAV as q288NAV, activeKeyFor as q288Active } from "@/components/nav/nav-data";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const NOW = Date.UTC(2026, 9, 1, 15);
+  const base = {
+    customerId: "c1", customer: "Acme Theatre", owner: "", name: "Quote", portalAcceptance: null, portalReview: null, portalFirm: null,
+    portalDecline: null, quoteType: undefined as string | undefined, value: 1000,
+  };
+  const acc = { at: 1, by: "Pat", byEmail: "p@x" };
+  const qs = [
+    { ...base, id: "Q-review", name: "Spring musical", source: "portal-catalog", status: "draft", createdAt: 100, portalReview: { requestedAt: 1, reasons: [] } },
+    { ...base, id: "Q-acc-cat", name: "Gym rigging", source: "portal-catalog", status: "sent", createdAt: 200, estNo: 1042, portalAcceptance: acc },
+    { ...base, id: "Q-acc-flm", name: "Fall flame", source: "portal-service", quoteType: "flame_test", status: "sent", createdAt: 150, portalAcceptance: acc, portalFirm: { generatedAt: 1, validUntil: NOW - 5 } },
+    { ...base, id: "Q-acc-insp", name: "L1 check", source: "portal-service", quoteType: "inspection", status: "sent", createdAt: 120, portalAcceptance: acc },
+    { ...base, id: "Q-sent", name: "Valid firm", source: "portal-catalog", status: "sent", createdAt: 400, portalFirm: { generatedAt: 1, validUntil: NOW } },
+    { ...base, id: "Q-expired", name: "Old firm", customer: "Lakefront HS", source: "portal-service", quoteType: "flame_test", status: "sent", createdAt: 300, portalFirm: { generatedAt: 1, validUntil: NOW - 1 } },
+    { ...base, id: "Q-won", name: "Done deal", source: "portal-catalog", status: "won", createdAt: 500, portalAcceptance: acc },
+    { ...base, id: "Q-lost", name: "Lost one", source: "portal-service", quoteType: "inspection", status: "lost", createdAt: 600 },
+    { ...base, id: "Q-draft", name: "Recalled", source: "portal-service", quoteType: "flame_test", status: "draft", createdAt: 700 },
+    { ...base, id: "Q-legacy", name: "Legacy", source: "portal-self-serve", status: "draft", createdAt: 50 },
+    { ...base, id: "Q-peak", name: "Peak estimate", source: "estimator", status: "sent", createdAt: 800, portalAcceptance: acc },
+    { ...base, id: "Q-dl", name: "History", source: "daylite", status: "won", createdAt: 900 },
+  ];
+  const byId = (id: string) => qs.find((q) => q.id === id)!;
+
+  // ---- status classifier ----
+  ok(q288Status(byId("Q-review"), NOW) === "review", "#288 queue: portalReview and not sent → Needs review");
+  ok(q288Status({ ...byId("Q-review"), status: "sent" }, NOW) === "sent", "#288 queue: a review quote staff have sent is no longer Needs review");
+  ok(q288Status(byId("Q-acc-cat"), NOW) === "accepted" && q288Status(byId("Q-acc-flm"), NOW) === "accepted",
+    "#288 queue: portalAcceptance set and status sent → Accepted — confirm (even past validUntil)");
+  ok(q288Status(byId("Q-sent"), NOW) === "sent", "#288 queue: a firm quote at exactly validUntil is still Sent");
+  ok(q288Status(byId("Q-expired"), NOW) === "expired", "#288 queue: a firm quote past portalFirm.validUntil, not accepted → Expired");
+  ok(q288Status(byId("Q-expired"), NOW - 10) === "sent", "#288 queue: expiry is measured against the `now` passed in");
+  ok(q288Status(byId("Q-won"), NOW) === "won" && q288Status(byId("Q-lost"), NOW) === "lost" && q288Status(byId("Q-draft"), NOW) === "draft",
+    "#288 queue: Won / Lost / Draft (a won quote with an old portalAcceptance is Won, not Accepted — confirm)");
+  ok(eq(q288Labels, { review: "Needs review", accepted: "Accepted — confirm", sent: "Sent", expired: "Expired", won: "Won", lost: "Lost", draft: "Draft" }),
+    "#288 queue: status labels read Needs review / Accepted — confirm / Sent / Expired / Won / Lost / Draft");
+
+  // ---- default view: Needs action, customer-built only ----
+  const v = q288View(qs, { now: NOW });
+  ok(v.status === "action" && eq(v.rows.map((r) => r.q.id), ["Q-acc-cat", "Q-acc-flm", "Q-acc-insp", "Q-review"]),
+    "#288 queue: the default filter is Needs action = Needs review ∪ Accepted — confirm, newest first");
+  const all = q288View(qs, { now: NOW, status: "all" });
+  ok(!all.rows.some((r) => r.q.id === "Q-peak" || r.q.id === "Q-dl") && all.rows.length === 10,
+    "#288 queue: only customer-built quotes (portal-catalog / portal-service / portal-self-serve) are listed — never a Peak or Daylite quote");
+  ok(eq(all.rows.map((r) => r.q.id), ["Q-acc-cat", "Q-acc-flm", "Q-acc-insp", "Q-review", "Q-draft", "Q-lost", "Q-won", "Q-sent", "Q-expired", "Q-legacy"]),
+    "#288 queue: sort is Needs action first, then newest (createdAt) first");
+  ok(eq(all.counts, { action: 4, all: 10, review: 1, accepted: 3, sent: 1, expired: 1, won: 1, lost: 1, draft: 2 }),
+    "#288 queue: counts per status chip, plus Needs action and All");
+  ok(eq(q288View(qs, { now: NOW, status: "expired" }).rows.map((r) => r.q.id), ["Q-expired"]) && eq(q288View(qs, { now: NOW, status: "draft" }).rows.map((r) => r.q.id), ["Q-draft", "Q-legacy"]),
+    "#288 queue: a single status filter lists only that status");
+
+  // ---- type filter + search ----
+  ok(eq(q288View(qs, { now: NOW, status: "all", type: "flame_test" }).rows.map((r) => r.q.id), ["Q-acc-flm", "Q-draft", "Q-expired"]),
+    "#288 queue: type filter Flame test");
+  ok(eq(q288View(qs, { now: NOW, status: "all", type: "inspection" }).rows.map((r) => r.q.id), ["Q-acc-insp", "Q-lost"]),
+    "#288 queue: type filter Inspection");
+  ok(eq(q288View(qs, { now: NOW, status: "all", type: "catalog" }).rows.map((r) => r.q.id), ["Q-acc-cat", "Q-review", "Q-won", "Q-sent", "Q-legacy"]),
+    "#288 queue: type filter Catalog (portal catalog + legacy self-serve)");
+  const tv = q288View(qs, { now: NOW, status: "all", type: "flame_test" });
+  ok(tv.counts.all === 3 && tv.counts.action === 1 && tv.type === "flame_test", "#288 queue: counts follow the type filter");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "spring" }).rows.map((r) => r.q.id), ["Q-review"]), "#288 queue: search matches the quote name");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "lakefront" }).rows.map((r) => r.q.id), ["Q-expired"]), "#288 queue: search matches the company");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "Riverside", companyOf: (q) => (q.id === "Q-sent" ? "Riverside PAC" : q.customer) }).rows.map((r) => r.q.id), ["Q-sent"]),
+    "#288 queue: search matches the resolved company name the page passes in");
+  ok(eq(q288View(qs, { now: NOW, status: "all", q: "EST-1042" }).rows.map((r) => r.q.id), ["Q-acc-cat"]) && eq(q288View(qs, { now: NOW, status: "all", q: "1042" }).rows.map((r) => r.q.id), ["Q-acc-cat"]),
+    "#288 queue: search matches the Est # (EST-1042 or 1042)");
+
+  // ---- row facts + actions ----
+  const row = (id: string) => all.rows.find((r) => r.q.id === id)!;
+  ok(row("Q-acc-cat").approve === "catalog" && row("Q-acc-flm").approve === "flame" && row("Q-acc-insp").approve === "inspection",
+    "#288 queue: Approve routes catalog → setQuoteStatus(won), flame → approveFlameQuote, inspection → approveInspectionQuote");
+  ok(row("Q-acc-cat").decline && row("Q-acc-flm").decline && !row("Q-sent").decline && row("Q-sent").approve === null && row("Q-review").approve === null,
+    "#288 queue: Approve / Decline only on Accepted — confirm rows");
+  {
+    const legacyAcc = q288View([{ ...base, id: "Q-legacy-acc", name: "Old accept", source: "portal-self-serve", status: "sent", createdAt: 10, portalAcceptance: acc }], { now: NOW, status: "all" }).rows[0];
+    ok(legacyAcc?.status === "accepted" && legacyAcc.approve === "catalog" && legacyAcc.decline === false,
+      "#288 queue: an accepted legacy portal-self-serve quote can be approved but offers no Decline");
+  }
+  ok(row("Q-acc-flm").typeLabel === "Flame test" && row("Q-acc-insp").typeLabel === "Inspection" && row("Q-review").typeLabel === "Catalog" && row("Q-expired").statusLabel === "Expired",
+    "#288 queue: type labels Catalog / Flame test / Inspection, status label per row");
+  ok(row("Q-acc-cat").estNo === "EST-1042" && row("Q-review").estNo === "Q-review", "#288 queue: Est # through displayQuoteNumber (id when unnumbered)");
+
+  // ---- focus ----
+  const f = q288View(qs, { now: NOW, status: "expired", focus: "Q-won" });
+  ok(f.status === "all" && f.rows.some((r) => r.q.id === "Q-won") && f.rows.length === 10, "#288 queue: ?focus= forces the status filter to All");
+  ok(q288Filter("") === "action" && q288Filter("bogus") === "action" && q288Filter("expired") === "expired" && q288Filter("all") === "all" && q288Type("inspection") === "inspection" && q288Type("x") === "all",
+    "#288 queue: ?status= defaults to Needs action; ?type= defaults to all");
+  ok(q288Href("Q 1") === "/quotes/portal?focus=Q%201", "#288 queue: portalQueueHref is /quotes/portal?focus=<id>");
+
+  // ---- bell ----
+  const ME = "Pat Staff";
+  const bell = q288Bell(
+    [
+      { ...base, id: "B-rev", source: "portal-catalog", status: "draft", portalReview: { requestedAt: 1, reasons: [] }, createdAt: 1 },
+      { ...base, id: "B-new", source: "portal-service", quoteType: "flame_test", status: "sent", portalFirm: { generatedAt: NOW - 1000, validUntil: NOW + 1 }, createdAt: 1 },
+      { ...base, id: "B-acc", source: "portal-catalog", status: "sent", portalAcceptance: acc, owner: "Someone Else", createdAt: 1 },
+      { ...base, id: "B-peak", source: "estimator", status: "sent", portalAcceptance: acc, createdAt: 1 },
+    ] as never,
+    ME,
+    NOW
+  );
+  ok(bell.review[0]?.href === "/quotes/portal?focus=B-rev" && bell.generated[0]?.href === "/quotes/portal?focus=B-new" && bell.accepted[0]?.href === "/quotes/portal?focus=B-acc",
+    "#288 bell: Portal quotes to review / New portal quotes / Portal acceptances to confirm all link /quotes/portal?focus=<id>");
+  ok(bell.accepted.length === 2 && bell.accepted[0]?.sub.startsWith("Acme Theatre"), "#288 bell: acceptances to confirm list every accepted sent quote (any owner, any source), as before");
+  ok(bell.accepted[1]?.id === "B-peak" && bell.accepted[1]?.href === "/quotes?id=B-peak",
+    "#288 bell: an accepted Peak-sent estimate (not in the customer-built queue) keeps its Quotes-hub link");
+  const navCounts = rd288src("src/lib/nav-counts.ts");
+  ok(!navCounts.includes('"/quotes?id=" + encodeURIComponent(q.id)') && /accepted: portalAcceptedItems/.test(navCounts),
+    "#288 bell: nav-counts takes the acceptances group from portalBellGroups (no more /quotes?id= link)");
+
+  // ---- nav ----
+  const est = q288NAV.find((e) => e.kind === "group" && e.key === "est");
+  const kids = est && est.kind === "group" ? est.children : [];
+  const pq = kids.find((c) => c.key === "portal-quotes");
+  ok(pq?.label === "Portal quotes" && pq?.href === "/quotes/portal" && kids.findIndex((c) => c.key === "portal-quotes") === kids.findIndex((c) => c.key === "quotes") + 1,
+    "#288 nav: Estimating gets Portal quotes → /quotes/portal, right after Quotes");
+  ok(q288Active("/quotes/portal") === "portal-quotes" && q288Active("/quotes") === "quotes" && q288Active("/quotes/new") === "quotes",
+    "#288 nav: /quotes/portal lights Portal quotes; /quotes and its other sub-routes still light Quotes");
+
+  // ---- wiring ----
+  const page = rd288src("src/app/(app)/quotes/portal/page.tsx");
+  ok(/requireUser\(\)/.test(page) && /portalQueueView\(/.test(page) && /quoteBuilderHref\(/.test(page) && /money\(q\.value/.test(page) && /id=\{"row-" \+ /.test(page),
+    "#288 queue page: requireUser, the pure view, Open via quoteBuilderHref, the hub's q.value total, row-<id> anchors");
+  const qa = rd288src("src/app/(app)/quotes/portal/queue-actions.tsx");
+  ok(qa.startsWith('"use client"') && /setQuoteStatus/.test(qa) && /approveFlameQuote/.test(qa) && /approveInspectionQuote/.test(qa) && /declinePortalAcceptanceAction\(/.test(qa) && !/from "@\/lib\/stores\//.test(qa),
+    "#288 queue actions: a client component reusing setQuoteStatus / approveFlameQuote / approveInspectionQuote / declinePortalAcceptanceAction, no store import");
+  {
+    const svcApprove = qa.slice(qa.indexOf("const approveService"), qa.indexOf("const submitDecline"));
+    ok(/start\(async \(\) => \{[\s\S]*await \(approve === "flame" \? approveFlameQuote\(fd\) : approveInspectionQuote\(fd\)\);[\s\S]*router\.refresh\(\);/.test(svcApprove),
+      "#288 queue actions: a flame / inspection Approve refreshes the row once the action resolves (incl. a stale no-op)");
+  }
+  ok(rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal"') && rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0"'),
+    "#288 smoke: /quotes/portal and a filtered + focused view");
 }

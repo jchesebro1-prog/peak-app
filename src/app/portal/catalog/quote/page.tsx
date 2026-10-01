@@ -67,8 +67,18 @@ export default async function PortalCartPage({
 
   const [cust, cart, ctx] = await Promise.all([getCustomer(cid), getCart(session.grantId, cid), pricingContextFor(session)]);
   const custName = cust?.name || "your organization";
+  // `nameLabel` is the venue label Generate names the quote by (#288 —
+  // `label || locationName`, the same resolution generatePortalQuote uses).
   const venues: CartVenue[] = (cust?.locations || []).flatMap((l) =>
-    l.id ? [{ id: l.id, label: [l.label || l.locationName || "Venue", [l.city, l.state].filter(Boolean).join(", ")].filter(Boolean).join(" — ") }] : []
+    l.id
+      ? [
+          {
+            id: l.id,
+            label: [l.label || l.locationName || "Venue", [l.city, l.state].filter(Boolean).join(", ")].filter(Boolean).join(" — "),
+            nameLabel: l.label || l.locationName || "",
+          },
+        ]
+      : []
   );
   // A venue that's no longer the customer's reads as none picked.
   const locationId = cart.locationId && venues.some((v) => v.id === cart.locationId) ? cart.locationId : "";
@@ -121,6 +131,8 @@ export default async function PortalCartPage({
         readOnly={preview}
         blocked={blocked}
         catalogHref={preview ? `/portal/catalog?preview=${encodeURIComponent(cid)}` : "/portal/catalog"}
+        customerName={cust?.name || ""}
+        nameAt={Date.now()}
       />
     </PortalShell>
   );

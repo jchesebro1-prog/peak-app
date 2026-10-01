@@ -10,6 +10,7 @@ import type { PortalSession } from "@/lib/portal";
 import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
 import { cartLinesFromSpec, priceCart, pricingContextFor } from "@/lib/portal-pricing";
 import { canAcceptPortal, firmValidUntil, looksLikeCardNumber, PURCHASE_METHODS } from "@/lib/portal-quote-mode";
+import { cleanPortalQuoteName, defaultCatalogQuoteName, isCustomerBuiltQuote, isPortalRenamable } from "@/lib/portal-quote-names";
 import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-pricing";
 import { carryLift } from "@/lib/service-pricing";
 import { getLiftRate } from "@/lib/service-quote-inputs";
@@ -88,11 +89,13 @@ function writable(session: PortalSession | null): session is PortalSession {
  * numbered draft stamped `portalReview`, waiting on Peak; no lead or queue
  * record (§8.2 — the staff bell derives it). Either way the quote is owned by
  * the company's account owner ("" = unassigned) and the cart empties.
- * "No longer available" lines are left out.
+ * "No longer available" lines are left out. #288: `name` is the customer's
+ * own name for it — cleaned; blank (or absent) means the default
+ * "<venue> — <Mon D, YYYY>".
  */
 export async function generatePortalQuote(
   session: PortalSession | null,
-  opts: { now?: number; schedulePdf?: boolean; deps?: GeneratePortalQuoteDeps } = {}
+  opts: { now?: number; schedulePdf?: boolean; deps?: GeneratePortalQuoteDeps; name?: string } = {}
 ): Promise<GenerateResult> {
   const clearCartImpl = opts.deps?.clearCart ?? clearCart;
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
@@ -119,7 +122,7 @@ export async function generatePortalQuote(
     const now = opts.now ?? Date.now();
     const t = totals(p.sections, 0);
     const created = await createQuote({
-      name: "Portal quote — " + (venue.label || venue.locationName || "Venue"),
+      name: cleanPortalQuoteName(opts.name) || defaultCatalogQuoteName(venue.label || venue.locationName || null, cust.name, now),
       customer: cust.name,
       customerId,
       locationId: venue.id,
@@ -525,4 +528,82 @@ export async function declinePortalAcceptance(
     console.error("declinePortalAcceptance failed", quoteId, e);
     return { ok: false, error: DECLINE_FAIL_COPY };
   }
+}
+
+
+/* ======================================================================
+   #288 (spec §1.4) — the customer renames a quote they built. The
+   "use server" wrapper is renamePortalQuoteAction in
+   src/app/portal/actions.ts; this body takes the session it read.
+   ====================================================================== */
+
+export const RENAME_BLANK_COPY = "Give your quote a name.";
+export const RENAME_NOT_BUILT_COPY = "Only quotes you built here can be renamed.";
+export const RENAME_ACCEPTED_COPY = "This quote was accepted — it can't be renamed now.";
+/** Won / lost with no `portalAcceptance` — decided, not "accepted" (#288 Task 2). */
+export const RENAME_CLOSED_COPY = "This quote is closed and can't be renamed.";
+const RENAME_RATE_COPY = "You've renamed quotes several times this hour — try again later.";
+const RENAME_FAIL_COPY = "Couldn't rename this quote — try again.";
+const RENAME_LIMIT = 30;
+const RENAME_WINDOW_MS = 60 * 60 * 1000;
+
+/** Test seam: lets a DB check force the write to throw (to prove the
+ *  rate-limit refund) without touching any other dependency. */
+export type RenamePortalQuoteDeps = { updateQuote?: typeof updateQuote };
+
+/**
+ * Refused for a preview / unwritable session, a blank name (after
+ * cleaning), a quote not listed for this customer, a Peak-sent quote and an
+ * accepted (or won / lost) one. `name` is a printed content field
+ * (QUOTE_CONTENT_FIELDS), so the PDF is rescheduled after the write, exactly
+ * as Generate does; a sent quote also cuts a new sent revision (Refresh
+ * pricing's shape) so the customer's PDF shows the new name. A write that
+ * fails refunds its rate-limit token.
+ */
+export async function renamePortalQuote(
+  session: PortalSession | null,
+  quoteId: string,
+  name: string,
+  deps: RenamePortalQuoteDeps = {}
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  const clean = cleanPortalQuoteName(name);
+  if (!clean) return { ok: false, error: RENAME_BLANK_COPY };
+  const q = typeof quoteId === "string" && quoteId ? await getQuote(quoteId) : null;
+  if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  if (!isCustomerBuiltQuote(q)) return { ok: false, error: RENAME_NOT_BUILT_COPY };
+  if (!isPortalRenamable(q)) return { ok: false, error: q.portalAcceptance ? RENAME_ACCEPTED_COPY : RENAME_CLOSED_COPY };
+  if (q.name === clean) return { ok: true, name: clean };
+  const rlKey = "portal-rename:" + session.grantId;
+  if (!rateLimit(rlKey, RENAME_LIMIT, RENAME_WINDOW_MS).ok) {
+    return { ok: false, error: RENAME_RATE_COPY };
+  }
+  // Check-then-write: an accept (or a staff decision) landing between the
+  // read above and this write is benign — it only means the name changed a
+  // moment after acceptance; nothing priced or signed depends on it.
+  let updated: Quote | null;
+  try {
+    updated = await (deps.updateQuote ?? updateQuote)(q.id, { name: clean });
+  } catch (e) {
+    rateLimitRefund(rlKey);
+    console.error("renamePortalQuote failed", quoteId, e);
+    return { ok: false, error: RENAME_FAIL_COPY };
+  }
+  if (!updated) {
+    rateLimitRefund(rlKey);
+    return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  }
+  // scheduleQuotePdf never throws (it logs and returns null).
+  await scheduleQuotePdf(q.id);
+  if (updated.status === "sent") {
+    // #288 final review: the customer's PDF of a sent quote is the latest
+    // sent revision's copy (portalPdfSource), so — exactly as Refresh pricing
+    // does — cut a new sent revision for this save and copy the PDF onto it
+    // once it renders. Without it the customer keeps the old name, and a
+    // rename inside the post-Generate render window would leave the original
+    // sent revision with no copy at all.
+    await addQuoteRevision(q.id, { by: "Customer portal", reason: "sent", note: "Renamed by customer" });
+    await copySentRevisionPdf(q.id).catch((e) => console.error("renamePortalQuote: sent-revision copy failed", q.id, e));
+  }
+  return { ok: true, name: clean };
 }

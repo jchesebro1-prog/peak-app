@@ -10,6 +10,7 @@ import {
   acceptPortal,
   copyToCart,
   refreshPortalQuote as refreshPortalQuoteFor,
+  renamePortalQuote as renamePortalQuoteFor,
 } from "@/lib/portal-quotes";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { portalRedeemPerk } from "@/lib/stores/reward-perks";
@@ -118,18 +119,30 @@ export async function refreshPortalQuote(quoteId: string): Promise<{ ok: true; m
   return r;
 }
 
+/** Rename a quote the customer built (#288, spec §1.4). Every check — the
+ *  session, tenant scoping, customer-built, not accepted, the name itself,
+ *  the rate limit — lives in `renamePortalQuote`. */
+export async function renamePortalQuoteAction(quoteId: string, name: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const session = await portalSession().catch(() => null);
+  const r = await renamePortalQuoteFor(session, String(quoteId ?? ""), String(name ?? ""));
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+
 /**
  * Copy to new quote (#245 Task 13, spec §4.6) — appends the quote's lines to
  * the grant's cart, then lands on the cart page to review/Generate. A plain
  * `<form action>` (no client JS needed), so a refusal redirects with a query
  * param instead of returning a value — matches `submitPortalRequest` above.
  */
-export async function copyQuoteToCart(quoteId: string): Promise<void> {
+export async function copyQuoteToCart(quoteId: string, from?: unknown): Promise<void> {
   const session = await portalSession().catch(() => null);
   const r = await copyToCart(session, quoteId);
   if (!r.ok) {
     console.error("copyQuoteToCart refused", quoteId, r.error);
-    redirect("/portal?copyerr=1");
+    // #288: a My quotes row reports the refusal there. `from` is bound by
+    // the page, but only the one known value picks the other landing.
+    redirect(from === "my-quotes" ? "/portal/my-quotes?copyerr=1" : "/portal?copyerr=1");
   }
   revalidatePath("/portal/catalog/quote");
   revalidatePath("/portal/catalog");

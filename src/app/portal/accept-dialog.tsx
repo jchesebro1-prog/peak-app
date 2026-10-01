@@ -14,7 +14,8 @@ import { acceptPortalQuote } from "./actions";
  * server re-checks it with a Luhn match, this is guidance only) and an
  * optional PO file. A file that fails to upload/finalize never blocks
  * acceptance (controller decision 5) — the customer lands on
- * /portal?accepted=1 either way, with a note when the file didn't attach.
+ * /portal?accepted=1 (or My quotes' — `doneHref`, #288) either way, with a
+ * note when the file didn't attach.
  */
 
 const OPEN_BTN: CSSProperties = {
@@ -55,11 +56,15 @@ export function AcceptDialog({
   customerId,
   categories,
   disabled,
+  doneHref = "/portal",
 }: {
   quoteId: string;
   customerId: string;
   categories: Array<{ key: string; label: string }>;
   disabled?: boolean;
+  /** #288: where the customer lands after accepting — Home ("/portal") or
+   *  My quotes' Accepted filter; both show the accepted banner. */
+  doneHref?: "/portal" | "/portal/my-quotes?show=accepted";
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -128,7 +133,7 @@ export function AcceptDialog({
         setBusy(false);
         return;
       }
-      router.push("/portal?accepted=1" + (attachFailed ? "&filewarn=1" : ""));
+      router.push(doneHref + (doneHref.includes("?") ? "&" : "?") + "accepted=1" + (attachFailed ? "&filewarn=1" : ""));
     } catch {
       setError("Couldn't accept this quote — check your connection and try again.");
       setBusy(false);
