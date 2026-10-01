@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Native/WASM database drivers must not be bundled by the server compiler.
   // #222: headless Chrome for saved quote PDFs — never bundled.
-  serverExternalPackages: ["@electric-sql/pglite", "postgres", "puppeteer-core", "@sparticuz/chromium"],
+  serverExternalPackages: ["@electric-sql/pglite", "postgres", "puppeteer-core", "@sparticuz/chromium", "sharp"],
   // #134 (D157): the catalog importers cap uploads at 1 MB themselves
   // (lib/catalog-import-guard) and surface the refusal through the Catalog
   // page's importError banner. Server actions default to a 1 MB request

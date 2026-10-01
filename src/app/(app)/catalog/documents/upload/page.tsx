@@ -4,6 +4,10 @@ import { blobEnabled } from "@/lib/blob";
 import BulkDrop from "./bulk-drop";
 
 export const metadata = { title: "Upload datasheets — Quartzite-6" };
+// #283 — the confirm action reads each upload (up to 25 MB) back from Blob and
+// shrinks images with sharp before recording it; give it the same 60 s
+// function ceiling as the Datasheets page.
+export const maxDuration = 60;
 
 /** Bulk drop (#207, spec §3): drop a folder, review the matches, confirm. */
 export default async function BulkUploadPage() {

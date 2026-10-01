@@ -5,6 +5,9 @@ import { syncAllGoogleTasks } from "@/lib/google/tasks-sync";
 import { reconcileRecordings } from "@/lib/krisp/reconcile";
 import { archiveRecordings } from "@/lib/krisp/archive";
 import { ensureVendorAssignments } from "@/lib/vendor-tasks";
+import { getSettings } from "@/lib/settings";
+import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
+import { cronPhotoBudgetMs } from "@/lib/part-docs/drive-photo-view";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
@@ -36,8 +39,11 @@ export const maxDuration = 60;
  *
  * #122 adds ensureVendorAssignments() the same way — the vendor spec's
  * "daily cron" is this route.
+ *
+ * #283 adds the Peak Product Photos sync the same way.
  */
 export async function GET(req: Request): Promise<NextResponse> {
+  const started = Date.now();
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     return NextResponse.json({ error: "cron not configured" }, { status: 503 });
@@ -78,5 +84,21 @@ export async function GET(req: Request): Promise<NextResponse> {
     vendors = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors });
+  // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
+  // budgeted against a 45 s cutoff (the sync's hard deadline is budget +
+  // 10 s, leaving ~5 s under the 60 s ceiling for the last shrink + store),
+  // skipped when under 10 s is left (cronPhotoBudgetMs), and skipped quietly
+  // when no photos account is set. Own try/catch like the other riders.
+  let drivePhotos: unknown;
+  try {
+    if (!(await getSettings()).catalogPhotosMailbox) drivePhotos = { skipped: "no photos account" };
+    else {
+      const budget = cronPhotoBudgetMs(45_000 - (Date.now() - started));
+      drivePhotos = budget > 0 ? await syncDrivePhotos(budget) : { skipped: "no time left" };
+    }
+  } catch (err) {
+    drivePhotos = { error: (err as Error).message };
+  }
+
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, drivePhotos });
 }

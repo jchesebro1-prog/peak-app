@@ -145,7 +145,7 @@ export default function BulkDrop() {
         style={{ padding: 28, textAlign: "center", border: over ? "2px dashed var(--accent)" : "2px dashed #d7dbe2", marginBottom: 14 }}
       >
         <div style={{ fontSize: 14, fontWeight: 600 }}>Drop a folder or files here</div>
-        <div style={{ fontSize: 12, color: "#8c919c", margin: "6px 0 12px" }}>PDF, DOC, DOCX, PNG, JPEG, WebP · up to 25 MB each (images up to 10 MB)</div>
+        <div style={{ fontSize: 12, color: "#8c919c", margin: "6px 0 12px" }}>PDF, DOC, DOCX, PNG, JPEG, WebP · up to 25 MB each · photos are shrunk to web size automatically</div>
         <label className="pk-btn-outline" style={{ cursor: "pointer", marginRight: 8 }}>
           Choose files
           <input type="file" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => { const f = [...(e.target.files || [])]; e.target.value = ""; addFiles(f); }} />

@@ -57,6 +57,8 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   recordingsArchiveFolderId: null,
   recordingsArchiveFolders: {},
   recordingsBetaUsers: [],
+  // #283 — Peak Product Photos sync account (Settings → Mailboxes).
+  catalogPhotosMailbox: null,
   offices: [
     {
       id: "hq",

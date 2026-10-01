@@ -16,6 +16,7 @@ import {
   gmailEnabled,
   hasCalendarScope,
   hasDriveScope,
+  hasDriveReadScope,
   hasTasksScope,
   redirectHostMismatch,
   SHARED_KEYS,
@@ -116,6 +117,13 @@ export default async function SettingsPage() {
     })),
   };
 
+  // #283 — Catalog photos: the photos-account picklist over every connected
+  // mailbox, flagged by whether its grant carries drive.readonly.
+  const catalogPhotos = {
+    mailbox: settings.catalogPhotosMailbox ?? null,
+    mailboxes: connections.map((c) => ({ key: c.mailboxKey, address: c.address, connectedBy: c.connectedBy, readOn: hasDriveReadScope(c.scope) })),
+  };
+
   return (
     <div className="pk-content" style={{ maxWidth: 1080, padding: "26px 30px 64px" }}>
       <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.015em" }}>
@@ -173,6 +181,7 @@ export default async function SettingsPage() {
           meName={me.name}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}
           recordings={recordings}
+          catalogPhotos={catalogPhotos}
           pipelines={pipelines!}
           pipelineUsage={pipelineUsage}
           settings={{

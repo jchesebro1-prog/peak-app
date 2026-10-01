@@ -12,6 +12,7 @@ import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { carriesBypass, chromeLaunch, landedOnRequested, RENDER_LAUNCH_TIMEOUT_MS, RENDER_STEP_TIMEOUT_MS } from "@/lib/quote-pdf/render";
 import { signPrintToken } from "@/lib/quote-pdf/token";
 import { attachDocument, createDocument, getDocument } from "@/lib/stores/part-documents";
+import { shrinkImage } from "./shrink";
 import { isDocumentId, newDocumentId, partDocBlobPath, safeDocFileName } from "./types";
 
 export type RenderThumbnailResult = { ok: true; documentId: string } | { ok: false; error: string };
@@ -127,11 +128,16 @@ export async function renderDatasheetThumbnail(
     return { ok: false, error: e instanceof Error ? e.message : "Could not render the thumbnail." };
   }
 
+  // #283 — store the thumbnail as WebP like every other image; a shrink
+  // failure (never expected for Chrome's own PNG) falls back to the PNG.
+  const shrunk = await shrinkImage(png);
+  const outBytes = shrunk.ok ? shrunk.bytes : png;
+  const outType = shrunk.ok ? shrunk.contentType : "image/png";
   const newId = newDocumentId();
-  const fileName = `${safeDocFileName(datasheet.title || "datasheet")}-thumb.png`;
+  const fileName = `${safeDocFileName(datasheet.title || "datasheet")}-thumb.${shrunk.ok ? "webp" : "png"}`;
   let stored: { pathname: string };
   try {
-    stored = await putFile(partDocBlobPath(newId, fileName), png, "image/png");
+    stored = await putFile(partDocBlobPath(newId, fileName), outBytes, outType);
   } catch {
     return { ok: false, error: "Could not store the file." };
   }
@@ -140,8 +146,8 @@ export async function renderDatasheetThumbnail(
     kind: "image",
     title: `${datasheet.title} (page 1)`,
     fileName,
-    contentType: "image/png",
-    size: png.byteLength,
+    contentType: outType,
+    size: outBytes.byteLength,
     blobKey: stored.pathname,
     sourceUrl: null,
     source: "datasheet-render",
