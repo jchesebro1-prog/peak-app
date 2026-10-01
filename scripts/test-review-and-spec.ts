@@ -1898,8 +1898,9 @@ ok(new Set(NAV_KEYS).size === NAV_KEYS.length,
 import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 import {
   resolveSettingsSection,
-  ADMIN_SCREENS,
+  GROUP_LINKS,
   SETTINGS_SECTIONS,
+  SETTINGS_SCREENS,
 } from "@/app/(app)/settings/settings-sections";
 
 ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
@@ -1976,22 +1977,26 @@ ok(
   "Reports is present in HOME_TABS with its own route",
 );
 
-// ---- General dissolution (D99): Settings sections + Admin ----
+// ---- General dissolution (D99) → settings cleanup (Oct 1): Settings groups ----
+// D99's two sections (company, admin) became seven left-menu groups; the
+// full shape is pinned in the "settings cleanup" block near the end.
 ok(resolveSettingsSection(undefined) === "company", "no ?section= defaults to company");
 ok(resolveSettingsSection("nope") === "company", "an unknown ?section= falls back to company");
-ok(resolveSettingsSection("team") === "company", "a removed ?section=team falls back to company");
-ok(resolveSettingsSection("admin") === "admin", "?section=admin is honored");
-ok(resolveSettingsSection(["admin", "team"]) === "admin", "an array ?section= takes the first value");
+ok(resolveSettingsSection("team") === "team", "?section=team is a real group again (Team & Access)");
+ok(resolveSettingsSection("admin") === "team", "the retired ?section=admin lands on Team & Access");
+ok(resolveSettingsSection(["sales", "team"]) === "sales", "an array ?section= takes the first value");
 ok(
-  SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,admin",
-  "Settings exposes company and admin sections in order",
+  SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,sales,field,consulting,integrations,team,data",
+  "Settings exposes seven groups in menu order",
 );
-ok(ADMIN_SCREENS.length === 6, "Admin lists exactly six screens (Grid settings build added Grid Settings; #282 added Rewards)");
-ok(
-  ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/templates,/estimating-rules,/task-templates,/import,/design/grid/settings,/settings/rewards",
-  "Admin links Templates, Estimating Rules, Task Templates, Import, Grid Settings, Rewards — by their own routes",
-);
+{
+  const linked = new Set(Object.values(GROUP_LINKS).flatMap((l) => l.map((x) => x.href)));
+  ok(
+    ["/templates", "/estimating-rules", "/task-templates", "/import", "/design/grid/settings", "/settings/rewards", "/catalog"].every((h) => linked.has(h)) &&
+      linked.size === Object.keys(SETTINGS_SCREENS).length,
+    "every old Admin / Company screen link (Templates, Estimating Rules, Task Templates, Import, Grid Settings, Rewards, Catalog) is still linked from a group",
+  );
+}
 
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
@@ -24151,7 +24156,7 @@ async function venues216AsyncChecks(): Promise<void> {
   const body = sa.slice(s, sa.indexOf("\nexport ", s + 10));
   ok(s > 0 && body.includes('requirePerm("manage_users")') && body.includes("mergeVenueTypes(") && body.includes("countSitesByVenueKind(res.removed)") && body.includes("setSettings({ venueTypes: res.types })"),
     "#216 T3: saveVenueTypesAction is admin-only, merges, refuses in-use removals, stores the list");
-  ok(v216Read("src/app/(app)/settings/settings-client.tsx").includes("<VenueTypesCard") && v216Read("src/app/(app)/settings/page.tsx").includes("venueTypes={venueTypesFrom(settings.venueTypes)}"),
+  ok(v216Read("src/app/(app)/settings/groups/field.tsx").includes("<VenueTypesCard") && v216Read("src/app/(app)/settings/page.tsx").includes("venueTypes={venueTypesFrom(settings.venueTypes)}"),
     "#216 T3: Settings renders the card from the resolved list");
 }
 
@@ -24757,7 +24762,7 @@ import {
 
 {
   const src218s = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(src218s("src/app/(app)/settings/settings-client.tsx").includes("<DocumentCategoriesCard"), "#218 settings: the Document categories card is on Settings → Admin");
+  ok(src218s("src/app/(app)/settings/groups/data.tsx").includes("<DocumentCategoriesCard"), "#218 settings: the Document categories card is on Settings → Data & Tools (was Admin)");
   const sa = src218s("src/app/(app)/settings/actions.ts");
   ok(/export async function saveDocumentCategoriesAction[\s\S]{0,400}await requirePerm\("manage_users"\)[\s\S]{0,400}mergeDocumentCategories\(/.test(sa), "#218 settings: saving categories is admin-only and goes through mergeDocumentCategories");
 }
@@ -26156,7 +26161,7 @@ import { resolveDocumentCategories as fwaResolveCats, mergeDocumentCategories as
   const reset = sa.slice(sa.indexOf("export async function clearDemoDataAction"));
   ok(/await clearDemoData\(\);\s*await clearDemoDocumentFiles\(\);/.test(reset), "#218 final: the reset action sweeps the document files after the rows");
   ok(fwaRd("src/lib/blob.ts").includes("export async function deleteBlobsUnder(prefix: string)"), "#218 final: blob.ts pages list() under a prefix and deletes");
-  ok(fwaRd("src/app/(app)/settings/settings-client.tsx").includes("key={documentCategories.map((c) => `${c.key}:${c.label}:${c.archived ? 1 : 0}`).join(\"|\")}"),
+  ok(fwaRd("src/app/(app)/settings/groups/data.tsx").includes("key={documentCategories.map((c) => `${c.key}:${c.label}:${c.archived ? 1 : 0}`).join(\"|\")}"),
     "#218 final: the Document categories card remounts on a label or archive change");
   const dr = fwaRd("src/app/api/documents/[id]/route.ts");
   ok(/catch \(e\) \{[\s\S]*if \(isBlobNotFound\(e\)\) return missing\(\);/.test(dr) && dr.includes('new Response("File missing", { status: 404'), "#218 final: a Blob not-found maps to 404 File missing");
@@ -26367,7 +26372,7 @@ const fwbRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(/const termsText = \(pay\.terms \|\| ""\)\.trim\(\);/.test(letter) && /\{termsText && \(/.test(letter) && !/\{pay\.terms && \(/.test(letter), "#225 final-B: the Terms heading prints only for non-blank terms");
 
   // #216: Saved note survives a save (card keyed by type keys only); raw unlisted key.
-  const sc = fwbRd("src/app/(app)/settings/settings-client.tsx");
+  const sc = fwbRd("src/app/(app)/settings/groups/field.tsx");
   ok(/<VenueTypesCard\s+key=\{venueTypes\.map\(\(t\) => t\.key\)\.join\("\|"\)\}/.test(sc), "#216 final-B: the Venue types card is keyed by type keys only, so a rename save keeps it mounted");
   const vc = fwbRd("src/app/(app)/settings/venue-types-card.tsx");
   ok(/if \(serverSig !== seenSig\)/.test(vc) && /justSaved && !dirty/.test(vc), "#216 final-B: the card adopts the refreshed list without remounting, so ✓ Saved shows");
@@ -29916,10 +29921,10 @@ import { applyLimitCells as r242Apply } from "@/lib/review-limits";
   const st = readFileSync(join(process.cwd(), "src/lib/settings.ts"), "utf8");
   ok(st.includes('reviewLimits?: import("@/lib/review-limits").ReviewLimits;'), "#242: AppSettingsData declares reviewLimits");
   const pg = readFileSync(join(process.cwd(), "src/app/(app)/settings/page.tsx"), "utf8");
-  const sc = readFileSync(join(process.cwd(), "src/app/(app)/settings/settings-client.tsx"), "utf8");
+  const sc = readFileSync(join(process.cwd(), "src/app/(app)/settings/groups/sales.tsx"), "utf8");
   ok(
     pg.includes("reviewLimits={reviewLimitsFrom(settings.reviewLimits)}") && sc.includes("<ReviewLimitsCard") && sc.includes("reviewLimits: ReviewLimits;"),
-    "#242: Settings → Admin renders the Review limits card from the stored blob"
+    "#242: Settings → Sales & Rewards renders the Review limits card from the stored blob"
   );
   const card = readFileSync(join(process.cwd(), "src/app/(app)/settings/review-limits-card.tsx"), "utf8");
   ok(
@@ -41182,4 +41187,148 @@ async function approval284FinalAsyncChecks(): Promise<void> {
   ok(!own.ok && (await Q.get(id("blank-owner")))?.review?.state === "in_review", "#284 final DB: the preparer of a blank-owner quote cannot approve it through the queue");
   ok((await Ops.withdrawQuoteReview(id("blank-owner"), JEFF)).ok && (await Q.get(id("blank-owner")))?.review?.state === "none",
     "#284 final DB: …and can withdraw it as its owner");
+}
+
+/* --- settings cleanup (Oct 1, Jeff: "get Rewards on the company settings
+ * page… cleaned up, it is becoming a lot and messy") — a left-hand menu of
+ * seven groups; ?section=<key> shows only that group's cards. */
+import {
+  SETTINGS_SECTIONS as scSections,
+  SETTINGS_CARDS as scCards,
+  GROUP_LINKS as scLinks,
+  INTEGRATION_CARDS as scIntegrations,
+  SECTION_ALIASES as scAliases,
+  cardsIn as scCardsIn,
+  integrationAnchor as scAnchor,
+  resolveSettingsSection as scResolve,
+  settingsHref as scHref,
+  visibleSettingsSections as scVisible,
+} from "@/app/(app)/settings/settings-sections";
+import { can as scCan, ROLES as scRoles } from "@/lib/team";
+import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
+{
+  const rd = (p: string) => scRead(join(process.cwd(), p), "utf8");
+  const groupKeys = scSections.map((s) => s.key);
+
+  // ---- every old card is reachable in exactly one group ----
+  const OLD_CARDS = [
+    "branding", "locations", "federalHolidays", "dashboardDefaults", "reviewLimits", "pipelines", "customerFields",
+    "venueTypes", "intakeCatalog", "visitReasons", "consultingPhases", "consultingDisciplines", "consultingAssumptions",
+    "mailboxes", "recordings", "team", "documentCategories", "beta",
+  ];
+  const cardKeys = scCards.map((c) => c.key as string);
+  ok(cardKeys.length === new Set(cardKeys).size, "settings cleanup: no card is registered twice");
+  ok(OLD_CARDS.every((k) => cardKeys.filter((x) => x === k).length === 1) && cardKeys.length === OLD_CARDS.length,
+    `settings cleanup: all ${OLD_CARDS.length} pre-cleanup cards are registered, each in exactly one group`);
+  ok(scCards.every((c) => (groupKeys as string[]).includes(c.group)), "settings cleanup: every card's group is a real menu group");
+  ok(groupKeys.every((g) => scCardsIn(g).length + scLinks[g].length > 0), "settings cleanup: no group is empty");
+  ok(scCardsIn("company").join(",") === "branding,locations,federalHolidays,dashboardDefaults" &&
+    scCardsIn("sales").join(",") === "reviewLimits,pipelines,customerFields" &&
+    scCardsIn("field").join(",") === "venueTypes,intakeCatalog,visitReasons" &&
+    scCardsIn("consulting").join(",") === "consultingPhases,consultingDisciplines,consultingAssumptions" &&
+    scCardsIn("integrations").join(",") === "mailboxes,recordings" &&
+    scCardsIn("team").join(",") === "team" &&
+    scCardsIn("data").join(",") === "documentCategories,beta",
+    "settings cleanup: each group holds Jeff's cards in order");
+
+  // Source proof: each card's marker renders from exactly one group file — the registered one.
+  const groupDir = "src/app/(app)/settings/groups";
+  const groupSrc: Record<string, string> = {};
+  for (const g of groupKeys) groupSrc[g] = rd(`${groupDir}/${g}.tsx`);
+  const MARKER: Record<string, string> = {
+    branding: ">Branding</div>",
+    locations: ">Locations</div>",
+    federalHolidays: ">Federal holidays</div>",
+    dashboardDefaults: '<DashboardLayoutEditor mode="company"',
+    reviewLimits: "<ReviewLimitsCard",
+    pipelines: "<PipelinesCard",
+    customerFields: "<CustomerFieldsCard",
+    venueTypes: "<VenueTypesCard",
+    intakeCatalog: ">Site intake — type catalog</div>",
+    visitReasons: ">Site visits — reason picklist</div>",
+    consultingPhases: ">Consulting — phase menu</div>",
+    consultingDisciplines: ">Consulting — disciplines</div>",
+    consultingAssumptions: ">Consulting — assumptions library</div>",
+    mailboxes: "id={INTEGRATION_ANCHOR.mailboxes}",
+    recordings: "id={INTEGRATION_ANCHOR.recordings}",
+    team: ">Team members</span>",
+    documentCategories: "<DocumentCategoriesCard",
+    beta: ">Beta</div>",
+  };
+  const misplaced = scCards.filter((c) => {
+    const holders = groupKeys.filter((g) => groupSrc[g].includes(MARKER[c.key]));
+    return holders.length !== 1 || holders[0] !== c.group;
+  });
+  ok(misplaced.length === 0, `settings cleanup: every card renders from exactly its own group file (misplaced: ${misplaced.map((c) => c.key).join(",") || "none"})`);
+  ok(groupSrc.consulting.includes("Save weights") && groupSrc.integrations.includes("setCatalogPhotosMailboxAction(") &&
+    groupSrc.data.includes("Clear demo data (go-live)") && groupSrc.data.includes("Recordings pilot") && groupSrc.data.includes("Feedback email") &&
+    groupSrc.company.includes('kind="logoLight"') && groupSrc.company.includes("Add location"),
+    "settings cleanup: the sub-cards move with their parents (phase weights, Drive photos account, go-live, pilot, feedback email, logos, location modal)");
+  const shell = rd("src/app/(app)/settings/settings-client.tsx");
+  ok(shell.split("\n").length < 400 && !/<section className="pk-card"/.test(shell),
+    "settings cleanup: settings-client.tsx is a shell — no cards left in it");
+  ok(scReadDir(join(process.cwd(), groupDir)).filter((f) => f.endsWith(".tsx")).sort().join(",") ===
+    "company.tsx,consulting.tsx,data.tsx,field.tsx,integrations.tsx,sales.tsx,shared.tsx,team.tsx",
+    "settings cleanup: one component file per group (+ shared.tsx)");
+  ok(/hidden=\{s\.key !== section\}/.test(shell) && /if \(!visited\.includes\(section\)\) setVisited/.test(shell),
+    "settings cleanup: only the selected group shows; groups opened earlier stay mounted (hidden) so drafts and the geocode run survive a switch");
+
+  // ---- section param resolution incl. aliases ----
+  ok(groupKeys.every((g) => scResolve(g) === g), "settings cleanup: every group key resolves to itself");
+  ok(scResolve("general") === "company" && scAliases.general === "company", "settings cleanup: ?section=general → company (pre-D99 alias kept)");
+  ok(scResolve("admin") === "team" && scAliases.admin === "team", "settings cleanup: ?section=admin → team");
+  ok(scResolve(undefined) === "company" && scResolve(null) === "company" && scResolve("") === "company" && scResolve("rewards") === "company",
+    "settings cleanup: missing/unknown ?section= → company");
+  ok(scResolve(["admin", "sales"]) === "team", "settings cleanup: an array ?section= resolves its first value through the aliases");
+  ok(scResolve("data", { visible: ["company", "sales"] }) === "company" && scResolve("sales", { visible: ["company", "sales"] }) === "sales",
+    "settings cleanup: a group the viewer can't open falls back to the first visible group");
+  ok(scHref("company") === "/settings" && scHref("sales") === "/settings?section=sales", "settings cleanup: company keeps the bare /settings URL; other groups carry ?section=");
+
+  // ---- anchors map to Integrations ----
+  ok(scIntegrations.every((c) => scCards.find((x) => x.key === c.key)?.group === "integrations"),
+    "settings cleanup: both INTEGRATION_CARDS anchors are cards in the Integrations group");
+  ok(scAnchor("#mailboxes") === "mailboxes" && scAnchor("recordings") === "recordings" && scAnchor("#team") === null && scAnchor("") === null && scAnchor(null) === null,
+    "settings cleanup: integrationAnchor reads #mailboxes / #recordings and nothing else");
+  ok(scResolve(undefined, { hash: "#mailboxes" }) === "integrations" && scResolve(undefined, { hash: "#recordings" }) === "integrations" &&
+    scResolve("company", { hash: "#recordings" }) === "integrations" && scResolve(undefined, { hash: "#nope" }) === "company",
+    "settings cleanup: /settings#mailboxes and #recordings land on Integrations");
+  ok(scHref("integrations", "mailboxes") === "/settings?section=integrations#mailboxes", "settings cleanup: settingsHref builds the anchored Integrations link");
+  ok(/integrationAnchor\(window\.location\.hash\)/.test(shell) && /qs\.set\("section", "integrations"\)/.test(shell) && /scrollIntoView/.test(shell),
+    "settings cleanup: the client turns a bare #mailboxes/#recordings into ?section=integrations and scrolls the card into view");
+  ok(rd("src/app/(app)/catalog/documents/drive-photos-panel.tsx").includes('href="/settings?section=integrations#mailboxes"'),
+    "settings cleanup: Catalog → Datasheets' Drive photos hint links straight to Integrations → Mailboxes");
+  ok(["connect", "callback"].every((r) => rd(`src/app/api/gmail/${r}/route.ts`).includes('new URL("/settings?section=integrations", origin)')),
+    "settings cleanup: the Gmail OAuth routes return admins to Settings → Integrations (with ?gmail=)");
+
+  // ---- permissions: a non-admin sees no admin-only group ----
+  ok(scSections.every((s) => s.perm === "manage_users"), "settings cleanup: every group stays manage_users-gated, as the whole page was");
+  ok(scVisible((p) => scCan(p, ["Admin"])).length === scSections.length, "settings cleanup: an Admin sees all seven groups");
+  ok(scRoles.filter((r) => r !== "Admin").every((r) => scVisible((p) => scCan(p, [r])).length === 0) && scVisible(() => false).length === 0,
+    "settings cleanup: Manager, Estimator and Reviewer see no Settings group");
+  const page = rd("src/app/(app)/settings/page.tsx");
+  ok(page.includes("visibleSettingsSections((p) => can(p, me.roles))") && page.includes("{!isAdmin || sections.length === 0 ? (") &&
+    page.includes("Admin access required") && page.includes("sections={sections}"),
+    "settings cleanup: the page computes the viewer's groups server-side and shows the lock card when there are none");
+  ok(page.includes("const users = isAdmin ? await allUsers() : [];") && page.includes("const pipelines = isAdmin ? await loadPipelines() : null;") &&
+    page.includes("const connections = isAdmin && gmailOn ? await listConnections() : [];"),
+    "settings cleanup: admin-only data (roster, pipelines, mailbox connections) still loads only for admins");
+
+  // ---- Rewards button on Company and Sales & Rewards ----
+  ok(scLinks.company.some((l) => l.href === "/settings/rewards") && scLinks.sales.some((l) => l.href === "/settings/rewards"),
+    "settings cleanup: ★ Rewards is a shortcut on Company and on Sales & Rewards");
+  ok(scLinks.company.map((l) => l.href).join(",") === "/settings/rewards,/catalog" &&
+    scLinks.sales.map((l) => l.href).join(",") === "/settings/rewards,/catalog,/estimating-rules,/templates" &&
+    scLinks.data.map((l) => l.href).join(",") === "/import,/task-templates,/design/grid/settings",
+    "settings cleanup: shortcut rows — Company: Rewards, Catalog; Sales: Rewards, Catalog, Estimating Rules, Templates; Data: Import, Task Templates, Grid Settings");
+  ok(groupSrc.company.includes("<LinkTiles screens={GROUP_LINKS.company} />") && groupSrc.sales.includes("<LinkTiles screens={GROUP_LINKS.sales} />") &&
+    groupSrc.data.includes("<LinkTiles screens={GROUP_LINKS.data} />"),
+    "settings cleanup: each group renders its own shortcut row");
+  ok(scLinks.company[0].mark === "★", "settings cleanup: the Rewards tile carries the ★ mark");
+
+  // ---- old links ----
+  ok(rd("src/app/(app)/settings/rewards/page.tsx").includes('href="/settings?section=sales"'), "settings cleanup: Settings → Rewards' back link returns to Sales & Rewards");
+  ok(rd("src/app/(app)/import/types.ts").includes('viewHref: "/settings?section=team"'), "settings cleanup: Import's Team members 'View in Settings' opens Team & Access");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(groupKeys.every((g) => smoke.includes(`"/settings?section=${g}"`)) && smoke.includes('"/settings?section=admin"'),
+    "settings cleanup: smoke covers every group route plus the retired ?section=admin");
 }

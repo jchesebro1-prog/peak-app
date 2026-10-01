@@ -98,7 +98,14 @@ const ROUTES = [
   "/reports",
   "/reviews",
   "/settings",
-  "/settings?section=admin",
+  "/settings?section=admin", // retired D99 Admin section → Team & Access (settings cleanup)
+  "/settings?section=company", // settings cleanup — one route per left-menu group
+  "/settings?section=sales",
+  "/settings?section=field",
+  "/settings?section=consulting",
+  "/settings?section=integrations",
+  "/settings?section=team",
+  "/settings?section=data",
   "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
   "/design/grid/settings/equipment-map", // #211 Equipment map tab (admin; read-only on load)
   "/design/specs/new", // #205 spec builder (T5) — the New spec form
