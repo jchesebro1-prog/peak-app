@@ -243,6 +243,10 @@ export type FixtureRecord = {
   description: string;
   /** System only. */
   scope?: SystemScope;
+  /** Fixture only (#289): the portal catalog's "Packages & Assemblies" group
+   *  this assembly lists under. Absent → "Other packages". Cleaned by
+   *  `cleanPortalCategory`; always absent on a system / hardware record. */
+  portalCategory?: string;
   /** Fixture: required. System: "". */
   lightEngineSku: string;
   lensSku: string | null;
@@ -420,6 +424,8 @@ export type FixtureInput = {
   lamp?: string;
   position?: string;
   circuit?: string;
+  /** #289 — fixture kind only; cleaned by `cleanPortalCategory`. */
+  portalCategory?: string;
   lines?: Partial<Record<FixtureBox, FixtureLine[]>>;
   parts?: FixtureLine[];
 };
@@ -428,6 +434,17 @@ export type FixtureInput = {
 export type CleanFixture = Omit<FixtureRecord, "id" | "snapshot" | "needsReview" | "legacy" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy">;
 
 const text = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+
+/** #289: the longest portal category a fixture can carry. */
+export const PORTAL_CATEGORY_MAX = 60;
+
+/** #289: trim, collapse whitespace runs, cap at 60 characters (a cut that
+ *  lands on a space is trimmed), empty → undefined. */
+export function cleanPortalCategory(raw: unknown): string | undefined {
+  if (raw == null) return undefined;
+  const c = String(raw).replace(/\s+/g, " ").trim().slice(0, PORTAL_CATEGORY_MAX).trimEnd();
+  return c || undefined;
+}
 
 function cleanLine(raw: unknown): FixtureLine | null {
   if (!raw || typeof raw !== "object") return null;
@@ -537,6 +554,7 @@ export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFi
   const lamp = text(i.lamp, 120);
   const position = text(i.position, 120);
   const circuit = text(i.circuit, 120);
+  const portalCategory = cleanPortalCategory(i.portalCategory);
   return {
     ok: true,
     value: {
@@ -550,6 +568,7 @@ export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFi
       ...(lamp ? { lamp } : {}),
       ...(position ? { position } : {}),
       ...(circuit ? { circuit } : {}),
+      ...(portalCategory ? { portalCategory } : {}),
       lines,
     },
   };

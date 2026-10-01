@@ -14,7 +14,7 @@ const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", 
 const EDIT_BTN = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 } as const;
 
 /** #210 — the one Assemblies list (fixtures + systems) and its form. */
-export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage }: {
+export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage, portalCategories }: {
   initial: FixtureRecord[];
   /** The server's priced seed — every part currently referenced by a saved
    *  fixture (I1, fix wave 1), never the whole catalog. Grown locally below
@@ -23,6 +23,8 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   priceListEffective: Record<string, number>;
   /** #207 — each saved line's datasheet coverage, keyed by pairKey(). */
   coverage: Record<string, MemberCoverage>;
+  /** #289 — the portal categories already used across fixtures, sorted + unique. */
+  portalCategories: string[];
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -149,6 +151,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
           onPickPart={mergePart}
           live={live}
           coverage={coverage}
+          portalCategories={portalCategories}
           busy={busy}
           error={error}
           onSave={save}

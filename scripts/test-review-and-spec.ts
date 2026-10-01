@@ -10712,6 +10712,7 @@ seeded()
   .then(() => drivePhotos283AsyncChecks())
   .then(() => drivePhotoSync283AsyncChecks())
   .then(() => rename288AsyncChecks())
+  .then(() => category289AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -42249,4 +42250,59 @@ import { NAV as q288NAV, activeKeyFor as q288Active } from "@/components/nav/nav
   }
   ok(rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal"') && rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0"'),
     "#288 smoke: /quotes/portal and a filtered + focused view");
+}
+
+/* ======================================================================
+   #289 Task 5 — portalCategory on fixture assemblies (spec Part 2 §2.1):
+   the pure cleaner, sanitizeFixtureInput (kept on a fixture, dropped for
+   system/hardware), updateFixture clearing it when the input omits it
+   (OPTIONAL_FIXTURE_FIELDS), and the builder wiring.
+   ====================================================================== */
+import { cleanPortalCategory as c289Clean, sanitizeFixtureInput as c289Sanitize } from "@/lib/fixture-assemblies";
+async function category289AsyncChecks(): Promise<void> {
+  const Fx = await import("@/lib/stores/fixtures");
+  const snap = { cost: 0, price: 0, pricedAt: null };
+  const made = [] as string[];
+  try {
+    const keep = c289Sanitize({ kind: "fixture", label: "Test289 Cat", description: "", lightEngineSku: "T289-ENG", portalCategory: "  Lighting   packages " });
+    if (!keep.ok) throw new Error("unreachable");
+    const rec = await Fx.createFixture(keep.value, "T289", snap, 1_700_000_000_000);
+    made.push(rec.id);
+    registerFixture("subassemblies", rec.id);
+    ok((await Fx.getFixture(rec.id))?.portalCategory === "Lighting packages", "#289 category: a saved fixture reads its portalCategory back");
+    const omit = c289Sanitize({ kind: "fixture", label: "Test289 Cat", description: "", lightEngineSku: "T289-ENG" });
+    if (!omit.ok) throw new Error("unreachable");
+    const upd = await Fx.updateFixture(rec, omit.value, "T289", snap, 1_700_000_100_000);
+    ok(upd.portalCategory === undefined && (await Fx.getFixture(rec.id))?.portalCategory === undefined,
+      "#289 category: updateFixture clears portalCategory when the input omits it (no stale carry-forward)");
+    const again = c289Sanitize({ kind: "fixture", label: "Test289 Cat", description: "", lightEngineSku: "T289-ENG", portalCategory: "Control" });
+    if (!again.ok) throw new Error("unreachable");
+    const upd2 = await Fx.updateFixture(upd, again.value, "T289", snap, 1_700_000_200_000);
+    ok(upd2.portalCategory === "Control", "#289 category: updateFixture sets a new portalCategory");
+  } finally {
+    for (const id of made) registerFixture("subassemblies", id);
+  }
+}
+{
+  ok(c289Clean("  Lighting \t  packages\n") === "Lighting packages", "#289 category: cleanPortalCategory trims and collapses whitespace");
+  ok(c289Clean("   ") === undefined && c289Clean("") === undefined && c289Clean(null) === undefined && c289Clean(undefined) === undefined,
+    "#289 category: empty / blank / null → undefined");
+  ok(c289Clean("x".repeat(80)) === "x".repeat(60), "#289 category: capped at 60 characters");
+  ok(c289Clean("a".repeat(59) + "  b") === "a".repeat(59), "#289 category: the cap applies after whitespace collapse, and a trailing space is trimmed");
+  const fx = c289Sanitize({ kind: "fixture", label: "F", description: "", lightEngineSku: "E", portalCategory: " Lighting packages " });
+  ok(fx.ok && fx.value.portalCategory === "Lighting packages", "#289 category: sanitizeFixtureInput keeps it (cleaned) on a fixture");
+  const fxBlank = c289Sanitize({ kind: "fixture", label: "F", description: "", lightEngineSku: "E", portalCategory: "  " });
+  ok(fxBlank.ok && !("portalCategory" in fxBlank.value), "#289 category: a blank category is absent from a fixture's clean value");
+  const sys = c289Sanitize({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 1 }], portalCategory: "Lighting packages" });
+  ok(sys.ok && !("portalCategory" in sys.value), "#289 category: dropped for a system");
+  const hw = c289Sanitize({ kind: "hardware", label: "H", description: "", parts: [{ sku: "A", qty: 1 }], portalCategory: "Lighting packages" });
+  ok(hw.ok && !("portalCategory" in hw.value), "#289 category: dropped for hardware");
+  const form = rd288src("src/app/(app)/design/assemblies/fixture-form.tsx");
+  const pg = rd288src("src/app/(app)/design/assemblies/page.tsx");
+  const bld = rd288src("src/app/(app)/design/assemblies/fixture-builder.tsx");
+  ok(/portalCategory: string/.test(form) && /portalCategory: r\.portalCategory \|\| ""/.test(form) && /portalCategory: d\.portalCategory/.test(form) &&
+      /Portal category/.test(form) && /<datalist id=/.test(form) && /e\.g\. Lighting packages/.test(form) && /portalCategories/.test(form),
+    "#289 category: the form's Draft, draftFromRecord, draftToInput, input, datalist and placeholder");
+  ok(/portalCategories/.test(pg) && /portalCategories/.test(bld),
+    "#289 category: the page passes the existing categories through the builder to the form");
 }
