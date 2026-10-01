@@ -44,10 +44,11 @@ export async function priceServiceAction(req: ServiceRequest): Promise<PriceServ
 }
 
 /** Generate (spec §2, §3): on success redirects to the #245 banner
- *  (`/portal?generated=firm&q=<id>`); only a refusal comes back. */
-export async function generateServiceAction(req: ServiceRequest): Promise<{ ok: false; error: string }> {
+ *  (`/portal?generated=firm&q=<id>`); only a refusal comes back. #288: an
+ *  optional customer name for the quote (blank → the default). */
+export async function generateServiceAction(req: ServiceRequest, name?: unknown): Promise<{ ok: false; error: string }> {
   const session = await portalSession().catch(() => null);
-  const r = await generateServiceQuote(session, req);
+  const r = await generateServiceQuote(session, { ...req, name: typeof name === "string" ? name : undefined });
   if (!r.ok) return r;
   revalidatePath("/portal");
   revalidatePath("/portal/service");

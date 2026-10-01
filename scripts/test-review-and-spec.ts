@@ -10707,6 +10707,7 @@ seeded()
   .then(() => shrinkUpload283AsyncChecks())
   .then(() => drivePhotos283AsyncChecks())
   .then(() => drivePhotoSync283AsyncChecks())
+  .then(() => rename288AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -29156,8 +29157,8 @@ async function portal245GenerateAsyncChecks(): Promise<void> {
     const secs = ((qf?.spec as { sections?: D242Section[] } | null)?.sections ?? []) as D242Section[];
     ok(!!qf && qf.status === "sent" && qf.source === "portal-catalog" && typeof qf.estNo === "number", "#245 generate firm: sent at once, source portal-catalog, numbered on insert");
     ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview, "#245 generate firm: portalFirm good for 30 days from generation; no review stamp");
-    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1" && qf?.name === "Portal quote — " + (hall?.label || hall?.locationName || "Venue"),
-      "#245 generate firm: owned by the company's owner, attn the grant's name, for the picked venue");
+    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1" && qf?.name === n288Catalog(hall?.label || hall?.locationName || null, cust?.name || "", NOW),
+      "#245 generate firm: owned by the company's owner, attn the grant's name, for the picked venue (#288: default name '<venue> — <date>')");
     ok(secs.length === 1 && secs[0].freightPct === 4 && secs[0].freightMiles === 450 && secs[0].items.length === 1 && secs[0].items[0].sku === P && secs[0].items[0].cost === 70,
       "#245 generate firm: 450 mi → freight 4 %; the spec keeps cost for staff and leaves the unavailable line out");
     ok(!!qf && qf.value === Math.round(d245Totals(secs, 0).grand) && qf.value > 0, "#245 generate firm: value = the Estimator's totals().grand");
@@ -31287,7 +31288,7 @@ async function portal248GenerateAsyncChecks(): Promise<void> {
         ft246.venues.find((v) => v.id === "v2")?.curtains === 6,
       "#248 generate flame: the flameTest subdoc saves both venues' curtain counts"
     );
-    ok(qf?.name === "Flame test — Main Hall, Black Box", "#248 generate flame: name is 'Flame test — <venues>'");
+    ok(qf?.name === "Main Hall + 1 more — Sep 28, 2026", "#248 generate flame: name is the #288 default '<first venue> + N more — <date>'");
     ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"),
       "#248 generate flame: sent through setStatus (history + sent revision)");
     ok(!!qf && QuoteStore.portalListsQuote(qf, CO) && QuoteStore.portalCanAcceptQuote(qf, CO), "#248 generate flame: listed and acceptable for its customer");
@@ -31304,7 +31305,7 @@ async function portal248GenerateAsyncChecks(): Promise<void> {
     const insp246 = (qi?.inspection || {}) as { level?: number; venues?: Array<{ id?: string; lineSets?: number }> };
     ok(insp246.level === 2 && insp246.venues?.find((v) => v.id === "v1")?.lineSets === 25,
       "#248 generate inspection: the inspection subdoc's level is 2 and saves the line-set count");
-    ok(qi?.name === "Inspection (Five-year) — Main Hall", "#248 generate inspection: name is 'Inspection (Five-year) — <venues>'");
+    ok(qi?.name === "Main Hall — Sep 28, 2026", "#248 generate inspection: name is the #288 default '<venue> — <date>'");
 
     // Owner fallback: a company with no owner → unassigned.
     const noOwnerSess = { grantId: fixtureId(248, "gen-grant-noowner"), customerId: CO2, name: "Rae Two", email: "rae@example.com" };
@@ -41769,4 +41770,133 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
   const smoke = rd("scripts/smoke-routes.ts");
   ok(groupKeys.every((g) => smoke.includes(`"/settings?section=${g}"`)) && smoke.includes('"/settings?section=admin"'),
     "settings cleanup: smoke covers every group route plus the retired ?section=admin");
+}
+
+/* ======================================================================
+   #288 Task 1 — customer-named portal quotes (spec §1.1–§1.4, §1.8).
+   Pure: default names, name cleaning, the customer-built / renamable rules.
+   DB: Generate with a typed / blank name, renamePortalQuote (success + PDF
+   rescheduled through the #222 PDF-state seam, every refusal). Registered
+   in the async chain as rename288AsyncChecks().
+   ====================================================================== */
+import {
+  PORTAL_QUOTE_NAME_MAX as n288Max,
+  cleanPortalQuoteName as n288Clean,
+  defaultCatalogQuoteName as n288Catalog,
+  defaultServiceQuoteName as n288Service,
+  isCustomerBuiltQuote as n288Built,
+  isPortalRenamable as n288Renamable,
+  portalQuoteDate as n288Date,
+} from "@/lib/portal-quote-names";
+import { renamePortalQuote as n288Rename } from "@/lib/portal-quotes";
+import { pendingPdf as n288PendingPdf } from "@/lib/quote-pdf/state";
+{
+  const AT = Date.UTC(2026, 9, 1, 15);
+  ok(n288Date(AT) === "Oct 1, 2026", "#288 names: the date reads Mon D, YYYY (en-US)");
+  ok(n288Date(Date.UTC(2026, 9, 2, 3)) === "Oct 1, 2026", "#288 names: the date is America/Chicago (03:00 UTC Oct 2 is still Oct 1 there)");
+  ok(n288Catalog("Main Hall", "Acme School", AT) === "Main Hall — Oct 1, 2026", "#288 names: catalog with a venue → '<venue> — <date>'");
+  ok(n288Catalog(null, "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: catalog without a venue → '<company> — <date>'");
+  ok(n288Catalog("", "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: catalog with a blank venue label → the company name");
+  ok(n288Service(["Main Hall"], "Acme School", AT) === "Main Hall — Oct 1, 2026", "#288 names: service, one venue → '<venue> — <date>'");
+  ok(n288Service(["Main Hall", "Black Box", "Gym"], "Acme School", AT) === "Main Hall + 2 more — Oct 1, 2026", "#288 names: service, three venues → '<first> + 2 more — <date>'");
+  ok(n288Service([], "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: service, no venues → the company name");
+  ok(n288Max === 120, "#288 names: the cap is 120 characters");
+  ok(n288Clean("   Spring   musical \n 2027  ") === "Spring musical 2027", "#288 names: cleaning trims and collapses inner whitespace");
+  ok(n288Clean("Spring\u0007 musical\u0000") === "Spring musical", "#288 names: cleaning strips control characters");
+  ok(n288Clean("x".repeat(200)).length === 120, "#288 names: 200 characters are capped at 120");
+  ok(n288Clean("   ") === "" && n288Clean("\u0007") === "" && n288Clean(undefined) === "" && n288Clean(42) === "", "#288 names: blank (or not a string) cleans to ''");
+  ok(n288Catalog("V".repeat(200), "Acme", AT).length <= 120, "#288 names: a default name obeys the same 120 cap");
+  ok(n288Built({ source: "portal-catalog" }) && n288Built({ source: "portal-service" }) && n288Built({ source: "portal-self-serve" }),
+    "#288 isCustomerBuiltQuote: portal-catalog, portal-service and legacy portal-self-serve are customer-built");
+  ok(!n288Built({ source: "estimator" }) && !n288Built({}) && !n288Built({ source: null }), "#288 isCustomerBuiltQuote: estimator / no source is Peak-sent");
+  const sent = { source: "portal-catalog", status: "sent", portalAcceptance: null };
+  ok(n288Renamable(sent) && n288Renamable({ ...sent, status: "draft" }), "#288 isPortalRenamable: a sent (or review-draft) customer-built quote is renamable");
+  ok(!n288Renamable({ ...sent, portalAcceptance: { at: 1, by: "x", byEmail: "x@y" } }), "#288 isPortalRenamable: an accepted quote (portalAcceptance set) is not");
+  ok(!n288Renamable({ ...sent, status: "won" }) && !n288Renamable({ ...sent, status: "lost" }), "#288 isPortalRenamable: won / lost are not");
+  ok(!n288Renamable({ ...sent, source: "estimator" }), "#288 isPortalRenamable: a Peak-sent quote is not");
+
+  const rd288 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const pa = rd288("src/app/portal/actions.ts");
+  const wrap = pa.slice(pa.indexOf("export async function renamePortalQuoteAction"));
+  ok(pa.includes("export async function renamePortalQuoteAction(") && /portalSession\(\)\.catch\(\(\) => null\)/.test(wrap.slice(0, 400)) && /renamePortalQuoteFor\(session, /.test(wrap.slice(0, 600)),
+    "#288 rename action: a thin wrapper — portalSession().catch(() => null), then the session-taking lib body");
+  ok(/export async function generateQuote\(name\?: unknown\)/.test(rd288("src/app/portal/catalog/actions.ts")) && /generatePortalQuote\(session, \{ name: /.test(rd288("src/app/portal/catalog/actions.ts")),
+    "#288 catalog generate action: accepts and forwards an optional name");
+  ok(/generateServiceQuote\(session, \{ \.\.\.req, name: /.test(rd288("src/app/portal/service/actions.ts")), "#288 service generate action: forwards an optional name");
+}
+
+async function rename288AsyncChecks(): Promise<void> {
+  const P = fixtureId(288, "name-part");
+  const CO = fixtureId(288, "name-co");
+  const CO_X = fixtureId(288, "name-co-other");
+  const G = fixtureId(288, "name-grant");
+  const GX = fixtureId(288, "name-grant-other");
+  for (const g of [G, GX]) registerFixture("portal_carts", g);
+  const NOW = Date.UTC(2026, 9, 1, 15);
+  const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+  const gen = async (name?: string) => {
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    const r = await d245Generate(sess, { now: NOW, schedulePdf: false, ...(name !== undefined ? { name } : {}) });
+    if (r.ok) registerFixture("quotes", r.quoteId);
+    return r;
+  };
+  try {
+    const owner = (await activeUsers())[0]?.name || "";
+    await d245MergeUpsert(P, { desc: "Test288 Name Part", category: "Test288 Cat", unit: "ea", list: 100, cost: 60 });
+    registerFixture("catalog_parts", P);
+    await upsertCustomer({ id: CO, name: "Test288 Name Co", type: "Education", pricingTier: "silver", owner,
+      locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }], contacts: [] });
+    await upsertCustomer({ id: CO_X, name: "Test288 Other Co", type: "Education", locations: [{ id: "x1", label: "Other Hall", primary: true, venueKind: "proscenium", travelMiles: 50 }], contacts: [] });
+    d245Invalidate();
+
+    // Generate — a typed name is cleaned and stored; blank → the default.
+    const named = await gen("  Spring   musical  ");
+    const qn = named.ok ? await d245GetQuote(named.quoteId) : null;
+    ok(named.ok && qn?.name === "Spring musical", "#288 generate: a typed name is stored cleaned ('Spring musical')");
+    const blank = await gen("   ");
+    const qb = blank.ok ? await d245GetQuote(blank.quoteId) : null;
+    ok(blank.ok && qb?.name === n288Catalog("Main Hall", "Test288 Name Co", NOW) && qb?.name === "Main Hall — Oct 1, 2026",
+      "#288 generate: a blank name stores the default '<venue> — <date>'");
+    const omitted = await gen();
+    const qo = omitted.ok ? await d245GetQuote(omitted.quoteId) : null;
+    ok(omitted.ok && qo?.name === "Main Hall — Oct 1, 2026", "#288 generate: no name at all also stores the default");
+
+    // Rename — success, and the PDF is rescheduled (#222 seam: outside a
+    // request scheduleQuotePdf marks an existing PDF stale for the newer save).
+    if (named.ok) {
+      await q222UpdatePdf(named.quoteId, (cur) => n288PendingPdf(cur, 2_000, 2_000));
+      const r = await n288Rename(sess, named.quoteId, "  Fall\u0007 play  ");
+      const after = await d245GetQuote(named.quoteId);
+      ok(r.ok && r.name === "Fall play" && after?.name === "Fall play", "#288 rename: a sent customer-built quote takes the cleaned new name");
+      ok(after?.pdf?.status === "pending" && after.pdf.stale === true && after.pdf.savedAt > 2_000, "#288 rename: the quote's PDF is rescheduled (marked for a newer save)");
+
+      // Refusals — none changes the name.
+      const blankR = await n288Rename(sess, named.quoteId, " \u0007 ");
+      ok(!blankR.ok && blankR.error === "Give your quote a name.", "#288 rename: a blank name (after cleaning) is refused");
+      const pv = await n288Rename({ ...sess, grantId: "preview" }, named.quoteId, "Preview name");
+      ok(!pv.ok && pv.error === d245ExpiredCopy, "#288 rename: a team preview (grantId preview) never renames");
+      const none = await n288Rename(null, named.quoteId, "No session");
+      ok(!none.ok && none.error === d245ExpiredCopy, "#288 rename: no session → the expired-link copy");
+      const other = await n288Rename({ grantId: GX, customerId: CO_X, name: "Ola", email: "o@example.com" }, named.quoteId, "Not mine");
+      ok(!other.ok && other.error === "We couldn't find that quote.", "#288 rename: another customer's session can't rename this quote");
+      ok((await d245GetQuote(named.quoteId))?.name === "Fall play", "#288 rename: refused renames leave the name untouched");
+    }
+    if (blank.ok) {
+      await QuoteStore.update(blank.quoteId, { portalAcceptance: { at: NOW, by: "Pat Buyer", byEmail: "pat@example.com" } });
+      const acc = await n288Rename(sess, blank.quoteId, "Too late");
+      ok(!acc.ok && acc.error === "This quote was accepted — it can't be renamed now." && (await d245GetQuote(blank.quoteId))?.name === "Main Hall — Oct 1, 2026",
+        "#288 rename: an accepted quote is refused");
+    }
+    const peak = await QuoteStore.create({ name: "Peak estimate", customer: "Test288 Name Co", customerId: CO, owner, source: "estimator" });
+    registerFixture("quotes", peak.id);
+    await q222SetStatus(peak.id, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+    const peakQ = await d245GetQuote(peak.id);
+    const pr = await n288Rename(sess, peak.id, "Mine now");
+    ok(!!peakQ && d245Lists(peakQ, CO) && !pr.ok && pr.error === "Only quotes you built here can be renamed." && (await d245GetQuote(peak.id))?.name === "Peak estimate",
+      "#288 rename: a Peak-sent quote (listed, but not customer-built) is refused");
+  } finally {
+    d245Invalidate();
+    await removeCustomer(CO);
+    await removeCustomer(CO_X);
+  }
 }

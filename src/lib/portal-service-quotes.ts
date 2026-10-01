@@ -14,6 +14,7 @@
 import { loadPortalRules } from "@/lib/freight-rule-load";
 import type { PortalSession } from "@/lib/portal";
 import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
+import { cleanPortalQuoteName, defaultServiceQuoteName } from "@/lib/portal-quote-names";
 import { sendPortalFirm } from "@/lib/portal-quotes";
 import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-pricing";
 import type { PortalService } from "@/lib/portal-service-scope";
@@ -62,7 +63,9 @@ export async function serviceRequestFromQuoteId(customerId: string, quoteId: str
 }
 
 /** "Flame test — A, B" / "Inspection (Annual|Five-year) — A, B", truncated
- *  to 120 chars (controller decision). Pure. */
+ *  to 120 chars (controller decision). Pure. #288: no longer the stored
+ *  name — a generated quote takes the customer's name or
+ *  defaultServiceQuoteName; the type shows through the quote's type chip. */
 export function serviceQuoteName(service: PortalService, venueLabels: string[]): string {
   const joined = venueLabels.join(", ");
   const base =
@@ -84,11 +87,13 @@ const inFlight = new Set<string>();
  * order: a refusal (expired session, bad venues/counts, a venue that isn't
  * this customer's own) never spends a Generate token and never makes a
  * quote — only a request that actually prices does. `schedulePdf: false`
- * is for the spec harness (no request to render a PDF in).
+ * is for the spec harness (no request to render a PDF in). #288: `req.name`
+ * is the customer's own name for it — cleaned; blank (or absent) means the
+ * default "<first venue>[ + N more] — <Mon D, YYYY>".
  */
 export async function generateServiceQuote(
   session: PortalSession | null,
-  req: ServiceRequest,
+  req: ServiceRequest & { name?: string },
   opts: { now?: number; schedulePdf?: boolean } = {}
 ): Promise<GenerateServiceResult> {
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
@@ -115,7 +120,7 @@ export async function generateServiceQuote(
 
     const now = opts.now ?? Date.now();
     const labels = req.venues.map((v) => venueLabel(cust, v.venueId));
-    const name = serviceQuoteName(req.service, labels);
+    const name = cleanPortalQuoteName(req.name) || defaultServiceQuoteName(labels, cust.name, now);
     const quoteType = req.service.kind === "flame" ? "flame_test" : "inspection";
 
     const created = await createQuote({

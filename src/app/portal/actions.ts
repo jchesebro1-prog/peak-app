@@ -10,6 +10,7 @@ import {
   acceptPortal,
   copyToCart,
   refreshPortalQuote as refreshPortalQuoteFor,
+  renamePortalQuote as renamePortalQuoteFor,
 } from "@/lib/portal-quotes";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { portalRedeemPerk } from "@/lib/stores/reward-perks";
@@ -114,6 +115,16 @@ export async function acceptPortalQuote(input: {
 export async function refreshPortalQuote(quoteId: string): Promise<{ ok: true; mode: "firm" | "review" } | { ok: false; error: string }> {
   const session = await portalSession().catch(() => null);
   const r = await refreshPortalQuoteFor(session, quoteId);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+
+/** Rename a quote the customer built (#288, spec §1.4). Every check — the
+ *  session, tenant scoping, customer-built, not accepted, the name itself,
+ *  the rate limit — lives in `renamePortalQuote`. */
+export async function renamePortalQuoteAction(quoteId: string, name: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const session = await portalSession().catch(() => null);
+  const r = await renamePortalQuoteFor(session, String(quoteId ?? ""), String(name ?? ""));
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }
