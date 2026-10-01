@@ -17,6 +17,9 @@ export type QuoteNextStepView = {
   secondary: Array<{ action: NextStepAction; label: string }>;
   reviewers: string[];
   approverMode: boolean;
+  /** The quote's `updatedAt` when this view was computed — Approve / Send back
+   *  carry it so an approver never decides a version they didn't see. */
+  asOf: number;
 };
 type ReviewIn = {
   state: string;
@@ -37,6 +40,8 @@ export type NextStepInput = {
   viewerCanApprove: boolean;
   submittedAgo: string;
   reviewers: string[];
+  /** The quote's `updatedAt` (0 when unknown). */
+  asOf?: number;
 };
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase() && a.trim() !== "";
@@ -72,7 +77,8 @@ export function quoteNextStep(i: NextStepInput): QuoteNextStepView {
     strip = r.note ? "“" + r.note + "” — " + firstName(r.decidedBy || "") : "Returned by " + firstName(r.decidedBy || "");
   } else if (state === "approved") {
     pill = { label: approvedPill(r), tone: "approved", title: "" };
-    strip = closed ? null : approvedReviewLine({ method: r.method ?? null, decidedBy: r.decidedBy, reviewer: r.reviewer, note: r.note, auto: (r.auto as never) ?? null });
+    // A sent quote is past "ready to send"; a won/lost one has no strip at all.
+    strip = closed || sent ? null : approvedReviewLine({ method: r.method ?? null, decidedBy: r.decidedBy, reviewer: r.reviewer, note: r.note, auto: (r.auto as never) ?? null });
   } else if (state === "stale") {
     pill = { label: "Approval cleared", tone: "stale", title: "" };
     strip = r.method === "auto_limit" ? staleAutoApprovalLine(i.chip?.text || "needs review") : staleApprovalLine({ method: r.method ?? null, decidedBy: r.decidedBy, reviewer: r.reviewer, note: r.note });
@@ -82,7 +88,7 @@ export function quoteNextStep(i: NextStepInput): QuoteNextStepView {
   }
 
   const view = (primary: QuoteNextStepView["primary"], secondary: QuoteNextStepView["secondary"] = [], approverMode = false): QuoteNextStepView =>
-    ({ pill, strip, primary, secondary, reviewers, approverMode });
+    ({ pill, strip, primary, secondary, reviewers, approverMode, asOf: i.asOf ?? 0 });
 
   if (closed) return { ...view(null), strip: null };
 

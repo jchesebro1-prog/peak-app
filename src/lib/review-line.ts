@@ -89,3 +89,31 @@ export function staleAutoApprovalLine(chipText: string): string {
 export function staleApprovalLine(review: ApprovedReviewLike): string {
   return "Approval cleared — the price or lines changed since " + firstName(review.decidedBy || review.reviewer || "") + " approved it";
 }
+
+/** #284 final review: the line for an approval on record that no longer holds
+ *  (`holds` = approvalHolds) — an auto_limit one reads through #242's
+ *  staleAutoApprovalLine (with the chip's sentence), any other through
+ *  staleApprovalLine. Undefined when the review isn't approved or still holds. */
+export function lapsedApprovalLine(
+  review: (ApprovedReviewLike & { state?: string }) | null | undefined,
+  holds: boolean,
+  chipText: string
+): string | undefined {
+  if (!review || review.state !== "approved" || holds) return undefined;
+  return review.method === "auto_limit" ? staleAutoApprovalLine(chipText) : staleApprovalLine(review);
+}
+
+/** #284 final review: the review state a list chip shows — an approval that no
+ *  longer holds reads as not approved ("none"), everywhere. */
+export function shownReviewState(state: string | null | undefined, holds: boolean): string {
+  return state === "approved" && !holds ? "none" : state || "none";
+}
+
+/** #284 final review: the Reviews history line for an approval that holds.
+ *  Auto and self approvals phrase through approvedReviewLine (neither carries
+ *  "ready to send"); in-app / attested / legacy keep "Approved by X" — the
+ *  history lists sent quotes too, where "ready to send" would be wrong. */
+export function reviewHistoryApprovedLine(review: ApprovedReviewLike): string {
+  if (review.method === "auto_limit" || review.method === "self") return approvedReviewLine(review);
+  return "Approved by " + firstName(review.decidedBy || review.reviewer || "");
+}

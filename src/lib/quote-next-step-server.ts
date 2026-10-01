@@ -18,5 +18,6 @@ export async function quoteNextStepFor(q: Quote, viewer: { name: string; roles: 
     viewerCanApprove: can("approve", viewer.roles),
     submittedAgo: q.review?.submittedAt ? timeAgo(q.review.submittedAt) : "",
     reviewers: approvers.map((u) => u.name),
+    asOf: typeof q.updatedAt === "number" ? q.updatedAt : 0,
   });
 }

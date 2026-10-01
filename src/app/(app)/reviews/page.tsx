@@ -9,8 +9,9 @@ import ReviewList, { type ReviewItem } from "./review-list";
 import { designBudgetLabel } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { autoApprovalLine, staleAutoApprovalLine } from "@/lib/review-line";
-import { approvalHolds, reviewLimitChip } from "@/lib/review-limits";
+import { lapsedApprovalLine, reviewHistoryApprovedLine } from "@/lib/review-line";
+import { approvalHolds, quoteOwnerName, reviewLimitChip } from "@/lib/review-limits";
+import { sameName } from "@/lib/quote-approval-rules";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import type { ReviewKind } from "./actions";
 import { displayQuoteNumber } from "@/lib/estimate-number";
@@ -60,9 +61,12 @@ type RawItem = {
   review: QuoteReview;
   ts: number;
   openHref: string;
-  /** #242 — set when a quote's auto approval no longer holds (approvalHolds):
-   *  the banner line the quote panel shows; the item reads as needing review. */
+  /** #242 / #284 — set when a quote's approval no longer holds (approvalHolds,
+   *  any method): the banner line the quote panel shows; the item reads as
+   *  needing review. */
   staleLine?: string;
+  /** #284: a quote's updatedAt — Approve / Request changes decide this version only. */
+  asOf?: number;
 };
 
 export default async function ReviewsPage({
@@ -96,13 +100,13 @@ export default async function ReviewsPage({
     decidedAt: null,
     note: "",
   };
-  // #242: an auto approval that no longer holds (the same approvalHolds rule
-  // as the gate and the quote panel) reads as needing review, never
-  // "Auto-approved — within …".
+  // #242 / #284: an approval that no longer holds (the same approvalHolds rule
+  // as the gate and the quote panel) reads as needing review — a stale auto
+  // approval never "Auto-approved — within …", a stale in-app / attested /
+  // self one never "Approved by …".
   const staleLineOf = (q: (typeof quotes)[number]): string | undefined => {
-    const r = q.review;
-    if (r?.state !== "approved" || r.method !== "auto_limit" || approvalHolds(q, limitCtx)) return undefined;
-    return staleAutoApprovalLine(reviewLimitChip(q, limitCtx, me)?.text || "needs review");
+    if (q.review?.state !== "approved" || approvalHolds(q, limitCtx)) return undefined;
+    return lapsedApprovalLine(q.review, false, reviewLimitChip(q, limitCtx, me)?.text || "needs review");
   };
   const all: RawItem[] = [
     ...quotes.map((q) => ({
@@ -110,12 +114,14 @@ export default async function ReviewsPage({
       id: q.id,
       displayId: displayQuoteNumber(q),
       name: q.name,
-      owner: q.owner,
+      // #284: one owner identity (owner, else preparedBy) — the same as the next-step ops.
+      owner: quoteOwnerName(q),
       value: q.value || 0,
       review: q.review || NONE,
       ts: q.updatedAt || 0,
       openHref: quoteBuilderHref(q),
       staleLine: staleLineOf(q),
+      asOf: q.updatedAt || 0,
     })),
     ...designs.map((d) => ({
       kind: "Design" as const,
@@ -156,7 +162,7 @@ export default async function ReviewsPage({
   // approver's queue (their own excepted — they can't approve their own). Designs and
   // engagement phases keep the claim model: only the ones assigned to you.
   const myQueue = inReview.filter((x) =>
-    x.kind === "Quote" ? x.review.reviewer === me || (!x.review.reviewer && x.owner !== me) : x.review.reviewer === me
+    x.kind === "Quote" ? x.review.reviewer === me || (!x.review.reviewer && !sameName(x.owner, me)) : x.review.reviewer === me
   );
   const unclaimed = inReview.filter((x) => !x.review.reviewer);
   const mySubs = all.filter(
@@ -183,13 +189,7 @@ export default async function ReviewsPage({
     let metaLine: string;
     if (tab === "mine") {
       if (x.staleLine) metaLine = x.staleLine + " · " + timeAgo(r.decidedAt);
-      else if (r.state === "approved")
-        metaLine =
-          (r.method === "auto_limit"
-            ? autoApprovalLine(r)
-            : "Approved by " + firstName(r.decidedBy || r.reviewer || "")) +
-          " · " +
-          timeAgo(r.decidedAt);
+      else if (r.state === "approved") metaLine = reviewHistoryApprovedLine(r) + " · " + timeAgo(r.decidedAt);
       else if (r.state === "changes")
         metaLine =
           "Changes requested by " + firstName(r.decidedBy || "") + " · " + timeAgo(r.decidedAt);
@@ -206,7 +206,7 @@ export default async function ReviewsPage({
         timeAgo(r.submittedAt) +
         (r.reviewer ? "" : " · unclaimed");
     }
-    const isMine = x.owner === me;
+    const isMine = sameName(x.owner, me);
     return {
       kind: x.kind,
       id: x.id,
@@ -224,6 +224,7 @@ export default async function ReviewsPage({
       canDecide: canApprove && tab !== "mine" && r.state === "in_review" && !isMine,
       // #284: quotes have no Claim — any approver decides them; Designs and Engagements keep it.
       canClaim: canApprove && tab === "unclaimed" && !r.reviewer && !isMine && x.kind !== "Quote",
+      asOf: x.asOf ?? 0,
     };
   });
 

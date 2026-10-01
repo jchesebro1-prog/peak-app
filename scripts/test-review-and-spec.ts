@@ -10684,6 +10684,7 @@ seeded()
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
   .then(() => approval284AsyncChecks())
+  .then(() => approval284FinalAsyncChecks())
   .then(() => rewards282PointsAsyncChecks())
   .then(() => rewards282PerksPointsAsyncChecks())
   .then(() => shrink283AsyncChecks())
@@ -30014,11 +30015,13 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
   );
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   // #284 task 3: sendToCustomerAction's pre-check moved into src/lib/quote-review-ops.ts.
+  // #284 final: the Estimator's sendToCustomerAction was deleted (no callers); Send goes through nsSendAction in review-actions.ts.
   const qro242 = readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8");
+  const ra242 = readFileSync(join(process.cwd(), "src/app/(app)/quotes/review-actions.ts"), "utf8");
   ok(
     (ea.match(/checkApprovalGate\(cur/g) || []).length === 1 && !ea.includes("requireApprovalToAdvance(cur") &&
       (qro242.match(/checkApprovalGate\(q, "sent"/g) || []).length === 1 && !qro242.includes("requireApprovalToAdvance(") &&
-      ea.includes("sendQuoteToCustomer(id, user)"),
+      ra242.includes("sendQuoteToCustomer(id, user)"),
     "#242: setStatusAction and sendToCustomerAction pre-check with checkApprovalGate (limits applied), not the bare review predicate"
   );
   const approveBody = qs.slice(qs.indexOf("export async function approve("), qs.indexOf("export async function resetToSeed("));
@@ -30094,11 +30097,14 @@ async function reviewLimits242AsyncChecks(): Promise<void> {
     ok(refusedD && (await r242Get(d2.id))?.status === "sent", "#242 store: after a lowered limit, a CHANGED quote is re-checked against the new limit and refused");
 
     const e2 = await mk("inapp", { value: 90000 });
+    // #284 final: approve() decides only an in-review quote (re-checked under the row lock) — submit first.
+    await r242Submit(e2.id, { by: owner.name, reviewer: null });
     await r242Approve(e2.id, { by: "Jeff Chesebro" });
     await r242SetStatus(e2.id, "sent", "Test");
     const reE = await r242Get(e2.id);
     ok(reE?.status === "sent" && reE.review.method === "in_app" && reE.review.auto == null, "#242 store: an in-app approval sends exactly as today — no auto stamp");
 
+    await r242Submit(c.id, { by: owner.name, reviewer: null });
     await r242Approve(c.id, { by: "Jeff Chesebro" });
     const reC = await r242Get(c.id);
     ok(reC?.review.method === "in_app" && reC.review.auto === null, "#242 store: approving over a stale auto approval clears its snapshot");
@@ -30147,7 +30153,8 @@ import { reviewLimitChipFor as r242ChipFor } from "@/lib/review-limits-server";
     "#242: quotes hub rows carry the chip and Send opens for a quote within the owner's limit"
   );
   const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
-  ok(rvw.includes("autoApprovalLine(r)"), "#242: Reviews history names an auto approval with the limit sentence");
+  // #284 final: the history line goes through reviewHistoryApprovedLine (auto → autoApprovalLine; runtime-pinned in the #284 final block).
+  ok(rvw.includes("reviewHistoryApprovedLine(r)"), "#242: Reviews history names an auto approval with the limit sentence");
   for (const p of ["flame-tests/quote", "repairs/quote", "inspections/quote", "rentals/quote", "design/engagements/quote"]) {
     const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/page.tsx`), "utf8");
     ok(src.includes("reviewLimitChipFor(") && src.includes("<ReviewLimitChip chip={reviewLimit}"), `#242: the ${p} builder shows the review-limit chip`);
@@ -30247,9 +30254,16 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
 
     const ch = await mk("changes", owner.name);
     await r242SetStatus(ch.id, "sent", "Test");
+    // #284 final: requestChanges() decides only an in-review quote — over a standing auto approval it is a no-op;
+    // through review (submit, then send back) the auto snapshot is cleared as before.
+    await r242RequestChanges(ch.id, { by: "Jeff Chesebro", note: "Tighten scope" });
+    const reCh0 = await r242Get(ch.id);
+    ok(reCh0?.review.state === "approved" && reCh0.review.method === "auto_limit", "#284 final store: requestChanges on an auto approval that isn't in review leaves it unchanged");
+    await r242Submit(ch.id, { by: owner.name, reviewer: null });
     await r242RequestChanges(ch.id, { by: "Jeff Chesebro", note: "Tighten scope" });
     const reCh = await r242Get(ch.id);
     ok(reCh?.review.state === "changes" && reCh.review.auto === null, "#242 store: requestChanges over an auto approval clears its snapshot");
+
   } finally {
     await r242SetUserStatus(leaver.id, "active");
     await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
@@ -30262,11 +30276,13 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
   ok(
     // #284 task 5: syncOf / stageSyncOf take the viewer as a user (name + roles) so they can also evaluate the next step.
     ea.includes("async function syncOf(id: string, user: { name: string; roles: string[] })") && ea.includes("async function stageSyncOf(id: string, user: { name: string; roles: string[] })") &&
-      (ea.match(/reviewLimitChipFor\(/g) || []).length >= 3,
+      // #284 final: the chip rides on the next-step view (quoteNextStepFor evaluates it); the unread reviewLimit field is gone.
+    (ea.match(/next: q \? await quoteNextStepFor\(q, user\) : null,/g) || []).length >= 3,
     "#242 estimator: syncOf / stageSyncOf / the save result re-evaluate the chip on the server"
   );
   ok(!/return (syncOf|stageSyncOf)\(id\);/.test(ea), "#242 estimator: every sync names its viewer (the chip says 'your' only to the owner)");
-  ok((ea.match(/reviewLimit\?: ReviewLimitChipData \| null;/g) || []).length === 3 && ea.includes("reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,"), "#242 estimator: SaveResult, ReviewSync and StageSync carry reviewLimit");
+  // #284 final: nothing read the reviewLimit field, so it was dropped; the chip reaches the client as next.strip.
+  ok((ea.match(/next\?: QuoteNextStepView \| null;/g) || []).length === 3 && !ea.includes("reviewLimit"), "#242 estimator: SaveResult, ReviewSync and StageSync carry the chip (via next)");
   const pg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
   // #284 task 5: the chip rides on the next-step view (its strip) — the page evaluates quoteNextStepFor for the viewer.
   const qnsServer242 = readFileSync(join(process.cwd(), "src/lib/quote-next-step-server.ts"), "utf8");
@@ -30313,11 +30329,13 @@ import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip"
     "#242 fix: the Estimator chip says 'as last saved' while the form has unsaved changes");
   const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
   const iChip = hub.indexOf("const reviewLimit = reviewLimitChip(q, limitCtx, me);");
-  const iState = hub.indexOf('const rState = reviewLimit?.staleAuto ? "none" : q.review?.state || "none";');
+  // #284 final: any approval that no longer holds (approvalHolds — stale auto limit or a changed snapshot) reads as not approved.
+  const iState = hub.indexOf("const rState = shownReviewState(q.review?.state, approvalHolds(q, limitCtx));");
   ok(iChip > 0 && iState > iChip, "#242 fix: a stale auto approval never shows the hub row's green Approved badge");
   const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
   ok(
-    rvw.includes("approvalHolds(q, limitCtx)") && rvw.includes("staleAutoApprovalLine(") && rvw.includes("loadReviewLimitContext()") &&
+    // #284 final: lapsedApprovalLine phrases a stale auto approval through staleAutoApprovalLine (and any other through staleApprovalLine).
+    rvw.includes("approvalHolds(q, limitCtx)") && rvw.includes("lapsedApprovalLine(") && rvw.includes("loadReviewLimitContext()") &&
       rvw.includes('state: x.staleLine ? "none" : r.state,'),
     "#242 fix: Reviews history reads a stale auto approval as needing review (approvalHolds), never 'Auto-approved'"
   );
@@ -30399,7 +30417,9 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   );
   // #284 task 3: sendToCustomerAction delegates to sendQuoteToCustomer in src/lib/quote-review-ops.ts.
   ok(
-    /setStatus\(id, "sent", actor\.name\)/.test(readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8")) && ea.includes("sendQuoteToCustomer(id, user)"),
+    // #284 final: the Estimator's sendToCustomerAction was deleted; nsSendAction (review-actions.ts) is the Send entry point.
+    /setStatus\(id, "sent", actor\.name\)/.test(readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8")) &&
+      readFileSync(join(process.cwd(), "src/app/(app)/quotes/review-actions.ts"), "utf8").includes("sendQuoteToCustomer(id, user)"),
     "#242 final: sendToCustomerAction passes the actor to setStatus"
   );
   const home = readFileSync(join(process.cwd(), "src/app/(app)/home-actions.ts"), "utf8");
@@ -30439,7 +30459,8 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const nsa242 = readFileSync(join(process.cwd(), "src/app/(app)/quotes/review-actions.ts"), "utf8");
   ok(
     nsa242.includes("submitQuoteForApproval(") &&
-      ea.includes("submitQuoteForApproval(id, user, reviewer)") &&
+      // #284 final: the Estimator's submitReviewAction was deleted (no callers) — nsSubmitAction is the one entry point.
+      nsa242.includes("submitQuoteForApproval(id, user, reviewer)") &&
       qro.includes("approvalHolds(q, await loadReviewLimitContext())") &&
       qro.includes('if (q.status !== "draft" && !(lapsed && q.status === "sent"))') &&
       qro.includes('if (state !== "none" && state !== "changes" && !lapsed)'),
@@ -39561,8 +39582,8 @@ async function rewards282LostAsyncChecks(): Promise<void> {
 /* ======================================================================
    #284 — estimate submit-for-approval. Task 1: approval fingerprint.
    ====================================================================== */
-import { approvalFingerprint as a284Fp, approvalSnapshotMatches as a284Matches, isStaleSnapshotApproval as a284Stale } from "@/lib/approval-snapshot";
-import { approvalHolds as a284Holds, NO_REVIEW_LIMITS as a284NoLimits } from "@/lib/review-limits";
+import { approvalFingerprint as a284Fp, approvalSnapshotMatches as a284Matches } from "@/lib/approval-snapshot";
+import { approvalHolds as a284Holds, NO_REVIEW_LIMITS as a284NoLimits, reviewKindOf as a284KindOf } from "@/lib/review-limits";
 import { staleApprovalLine as a284StaleLine, approvedReviewLine as a284ApprovedLine } from "@/lib/review-line";
 {
   const item = (o: Record<string, unknown> = {}) => ({ id: 1, sku: "A-1", desc: "Truss", qty: 2, unit: "ea", cost: 50, price: 100, ...o });
@@ -39587,8 +39608,12 @@ import { staleApprovalLine as a284StaleLine, approvedReviewLine as a284ApprovedL
   ok(!a284Matches(approved(quote([item({ qty: 3 })], 300), fp)), "#284 fp: a priced change no longer matches");
   ok(!a284Matches(approved(quote([item()], 250), fp)), "#284 fp: a changed sell alone no longer matches");
   ok(a284Matches(approved(quote([item({ qty: 3 })], 300), null)), "#284 fp: a legacy approval (no snapshot) always matches");
-  ok(a284Stale(approved(quote([item({ qty: 3 })], 300), fp)) && !a284Stale(approved(base, fp)), "#284 fp: isStaleSnapshotApproval is true only for a changed, snapshotted, non-auto approval");
-  ok(!a284Stale(approved(quote([item({ qty: 3 })], 300), fp, "auto_limit")), "#284 fp: an auto_limit approval is never snapshot-stale (its own #242 rule governs)");
+  // Final review: isStaleSnapshotApproval was deleted (unused — approvalHolds is the one rule); the intent is pinned through approvalHolds.
+  {
+    const changed = quote([item({ qty: 3 })], 300, { owner: "Jeff Chesebro" });
+    const autoQ = { ...changed, review: { ...approved(changed, fp, "auto_limit").review, auto: { kind: a284KindOf(changed as never), limit: 1000, value: 300 } } };
+    ok(a284Holds(autoQ as never, a284NoLimits), "#284 fp: an auto_limit approval is never snapshot-stale (its own #242 rule governs)");
+  }
   ok(a284Holds(approved(base, fp) as never, a284NoLimits) && !a284Holds(approved(quote([item({ qty: 3 })], 300), fp) as never, a284NoLimits),
     "#284 fp: approvalHolds honours the snapshot for in-app approvals");
   ok(!a284Holds(approved(quote([item({ qty: 3 })], 300), fp, "attested") as never, a284NoLimits), "#284 fp: …and for attested approvals");
@@ -40997,4 +41022,164 @@ import { drivePhotosPanelView as pv283, cronPhotoBudgetMs as cb283, drivePhotosL
   ok(a.loadError === undefined && d.loadError === undefined && pe283("db down").loadError === "db down" && pe283("x").synced === 0,
     "#283 panel: loadError is absent normally and carried by the degraded view");
   ok(cb283(5_000) === 0 && cb283(15_000) === 15_000 && cb283(45_000) === 20_000, "#283 cron: the photo rider gets min(20 s, time left), none under 10 s");
+}
+
+/* ======================================================================
+   #284 final review — sent strip, stale approvals everywhere, locked
+   decisions, asOf, dead endpoints, one owner identity, reviewer check.
+   ====================================================================== */
+import { quoteNextStep as a284fNext } from "@/lib/quote-next-step";
+import { lapsedApprovalLine as a284fLapsed, shownReviewState as a284fShown, reviewHistoryApprovedLine as a284fHistory } from "@/lib/review-line";
+import { quoteAwaitsApprovalBy as a284fAwaits, quoteBackFromReview as a284fBack } from "@/lib/quote-approval-rules";
+{
+  const R = (state: string, o: Record<string, unknown> = {}) => ({ state, reviewer: null, submittedBy: "Nic Trapani", decidedBy: null, note: "", method: null, ...o });
+  const base = { status: "draft", review: R("none"), holds: false, chip: null, owner: "Nic Trapani", viewer: "Nic Trapani", viewerCanApprove: false, submittedAgo: "", reviewers: ["Jeff Chesebro"] };
+  const v = (o: Record<string, unknown>) => a284fNext({ ...base, ...o } as never);
+
+  // 1 — a sent quote is past "ready to send".
+  ok(v({ status: "sent", review: R("approved", { decidedBy: "Jeff Chesebro", method: "in_app" }), holds: true }).strip === null,
+    "#284 final: a sent quote with a holding in-app approval has no strip (never 'ready to send')");
+  ok(v({ status: "sent", review: R("approved", { decidedBy: "Nic Trapani", method: "attested", note: "Phone call with Jeff" }), holds: true }).strip === null,
+    "#284 final: a sent quote with a holding attested approval has no strip");
+  ok((v({ status: "draft", review: R("approved", { decidedBy: "Jeff Chesebro", method: "in_app" }), holds: true }).strip || "").includes("ready to send"),
+    "#284 final: an approved DRAFT still reads 'ready to send to the customer'");
+
+  // 4 — the view carries the version it was computed against.
+  ok(v({ asOf: 1234 }).asOf === 1234 && v({}).asOf === 0, "#284 final: QuoteNextStepView.asOf is the input's updatedAt (0 when unknown)");
+
+  // 2 — stale approvals read as not approved everywhere (pure helpers the hub chip and Reviews page use).
+  const inApp = { state: "approved", method: "in_app" as const, decidedBy: "Jeff Chesebro", reviewer: null, note: "" };
+  ok(a284fShown("approved", false) === "none" && a284fShown("approved", true) === "approved" && a284fShown("in_review", false) === "in_review" && a284fShown(undefined, false) === "none",
+    "#284 final: shownReviewState — an approval that no longer holds shows as none; everything else passes through");
+  ok(a284fLapsed(inApp, false, "x") === "Approval cleared — the price or lines changed since Jeff approved it",
+    "#284 final: lapsedApprovalLine — a stale in-app approval gets the cleared line");
+  ok(a284fLapsed({ ...inApp, method: "self" }, false, "x") === "Approval cleared — the price or lines changed since Jeff approved it"
+    && (a284fLapsed({ ...inApp, method: "attested" }, false, "x") || "").startsWith("Approval cleared"),
+    "#284 final: lapsedApprovalLine — self and attested approvals clear the same way");
+  ok(a284fLapsed({ ...inApp, method: "auto_limit" }, false, "Over Nic's $25,000 limit") === "Auto-approval no longer applies — over Nic's $25,000 limit",
+    "#284 final: lapsedApprovalLine — a stale auto approval keeps #242's line");
+  ok(a284fLapsed(inApp, true, "x") === undefined && a284fLapsed({ ...inApp, state: "in_review" }, false, "x") === undefined && a284fLapsed(null, false, "x") === undefined,
+    "#284 final: lapsedApprovalLine — nothing for a holding approval or a non-approved review");
+  ok(a284fHistory({ ...inApp, method: "self" }) === "Self-approved by Jeff", "#284 final: Reviews history names a self approval through approvedReviewLine");
+  ok(a284fHistory(inApp) === "Approved by Jeff" && a284fHistory({ ...inApp, method: null }) === "Approved by Jeff",
+    "#284 final: Reviews history keeps 'Approved by' for in-app / legacy (no 'ready to send' on sent quotes)");
+  ok(a284fHistory({ ...inApp, method: "auto_limit", auto: { kind: "rental", limit: "none", value: 10 } }).startsWith("Auto-approved — Jeff has no review limit"),
+    "#284 final: Reviews history names an auto approval with the limit sentence");
+
+  // 9 — one owner identity: a blank owner falls back to preparedBy.
+  const blank = { owner: "", preparedBy: "Nic Trapani", status: "draft", value: 1, review: { state: "in_review", reviewer: null } };
+  ok(!a284fAwaits(blank, "Nic Trapani", true) && a284fAwaits(blank, "Jeff Chesebro", true),
+    "#284 final: quoteAwaitsApprovalBy treats preparedBy as the owner when owner is blank (never your own quote)");
+  ok(a284fBack({ ...blank, review: { state: "changes", reviewer: null } }, "Nic Trapani") === "changes",
+    "#284 final: quoteBackFromReview finds a blank-owner quote's preparer");
+
+  // Source pins: wiring the pure rules can't reach.
+  const src284f = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const hub = src284f("src/app/(app)/quotes/page.tsx");
+  ok(hub.includes("const rState = shownReviewState(q.review?.state, approvalHolds(q, limitCtx));"),
+    "#284 final: the Quotes hub list chip reads any approval that no longer holds as not approved");
+  const rvp = src284f("src/app/(app)/reviews/page.tsx");
+  ok(rvp.includes("lapsedApprovalLine(q.review, false,") && rvp.includes("reviewHistoryApprovedLine(r)") && rvp.includes("owner: quoteOwnerName(q),")
+    && rvp.includes("const isMine = sameName(x.owner, me);") && rvp.includes("asOf: q.updatedAt || 0,"),
+    "#284 final: the Reviews page shows the stale line for any lapsed approval, one owner identity, and each quote row's asOf");
+  const rva = src284f("src/app/(app)/reviews/actions.ts");
+  ok(rva.includes(`if (kind === "Quote") return { ok: false, error: "Quotes don't need claiming — approve or send back directly." };`)
+    && rva.includes("approveQuoteReview(id, user, asOf)") && rva.includes("sendBackQuoteReview(id, user, clean, asOf)"),
+    "#284 final: Reviews refuses to claim a quote and passes asOf to approve / send back");
+  const rl = src284f("src/app/(app)/reviews/review-list.tsx");
+  ok(rl.includes("approveReviewAction(it.kind, it.id, it.asOf)") && rl.includes("requestChangesAction(target.kind, target.id, note, target.asOf)"),
+    "#284 final: the Reviews list sends the row's asOf");
+  const comp = src284f("src/components/quote-review/quote-next-step.tsx");
+  ok(comp.includes("nsApproveAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendBackAction(quoteId, text, view.asOf), { skipBefore: true }")
+    && comp.includes("if (!opts.skipBefore && beforeAction && !(await beforeAction())) return;")
+    && comp.includes("!res.ok && opts.skipBefore && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res"),
+    "#284 final: the next-step control decides the version shown (asOf), skips the pre-save for Approve / Send back, and a refusal keeps the shown asOf");
+  const ra = src284f("src/app/(app)/quotes/review-actions.ts");
+  ok(ra.includes("approveQuoteReview(id, user, asOf)") && ra.includes("sendBackQuoteReview(id, user, note, asOf)") && !ra.includes("reviewLimit"),
+    "#284 final: the next-step actions pass asOf; the unread reviewLimit payload is gone");
+  const ea = src284f("src/app/(app)/estimator/actions.ts");
+  ok(["submitReviewAction", "claimReviewAction", "approveReviewAction", "requestChangesAction", "sendToCustomerAction", "attestApprovalAction"].every((n) => !ea.includes("export async function " + n))
+    && !ea.includes("quote-review-ops") && !ea.includes("reviewLimit"),
+    "#284 final: the Estimator's dead review endpoints are deleted (the next-step actions are the one entry point)");
+  const qro = src284f("src/lib/quote-review-ops.ts");
+  ok(qro.includes("quoteOwnerName(q)") && qro.includes('return outcome(await withdrawReview(id), "none");'),
+    "#284 final: the ops share quoteOwnerName and verify withdraw's outcome from the store");
+  const qs = src284f("src/lib/stores/quotes.ts");
+  ok(qs.includes("record-only: it does NOT check whether the approval still holds"), "#284 final: hasApproval's docstring says it is record-only");
+}
+
+async function approval284FinalAsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const Ops = await import("@/lib/quote-review-ops");
+  const id = (slug: string) => fixtureId(284, "final-" + slug);
+  const item = { id: 1, sku: "A-1", desc: "Truss", qty: 2, unit: "ea", cost: 50, price: 100 };
+  const none = { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null };
+  const inReview = { ...none, state: "in_review", submittedBy: "T284 Owner", submittedAt: 1 };
+  const mk = (slug: string, extra: Record<string, unknown> = {}) =>
+    createFixture("quotes", {
+      id: id(slug), name: `T284 final ${slug}`, customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner: "T284 Owner", preparedBy: "T284 Owner", value: 200, margin: 0.5, history: [], createdAt: 1, updatedAt: 1,
+      spec: { sections: [{ id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [item] }], mobs: [] },
+      review: inReview,
+      ...extra,
+    } as never);
+  const err = (r: { ok: boolean; error?: string }) => (r.ok ? "" : (r as { error: string }).error);
+  const OWNER = { name: "T284 Owner", roles: ["Estimator"] };
+  const JEFF = { name: "Jeff Chesebro", roles: ["Admin"] };
+
+  // 3 — the store's approve / requestChanges re-check state under the row lock.
+  await mk("idle", { review: none });
+  const idleA = await Q.approve(id("idle"), { by: "Jeff Chesebro" });
+  ok(idleA?.review?.state === "none" && !idleA.review.approvedAgainst && idleA.review.decidedBy == null && idleA.updatedAt === 1,
+    "#284 final DB: approve() on a quote that isn't in review leaves it unchanged");
+  await mk("decided", { review: { ...none, state: "approved", method: "in_app", decidedBy: "Jeff Chesebro", decidedAt: 5 } });
+  const decidedS = await Q.requestChanges(id("decided"), { by: "T284 Someone", note: "Late" });
+  ok(decidedS?.review?.state === "approved" && decidedS.review.decidedBy === "Jeff Chesebro" && decidedS.review.note === "" && decidedS.updatedAt === 1,
+    "#284 final DB: requestChanges() on a decided quote leaves it unchanged");
+  const decidedA = await Q.approve(id("decided"), { by: "T284 Someone" });
+  ok(decidedA?.review?.decidedBy === "Jeff Chesebro" && decidedA.review.decidedAt === 5, "#284 final DB: approve() never re-decides an approved quote");
+
+  // 4 — an approver decides only the version they were shown.
+  await mk("asof");
+  const shown = (await Q.get(id("asof")))!.updatedAt;
+  await Q.update(id("asof"), { scopeNarrative: "owner kept editing" } as never);
+  const now = (await Q.get(id("asof")))!.updatedAt;
+  ok(now !== shown, "#284 final DB: the owner's save bumped updatedAt (precondition)");
+  const staleA = await Ops.approveQuoteReview(id("asof"), JEFF, shown);
+  ok(!staleA.ok && err(staleA) === "This quote changed since you opened it — reload to review the current version." && (await Q.get(id("asof")))?.review?.state === "in_review",
+    `#284 final DB: approving with an old asOf is refused and leaves the quote in review (got "${err(staleA)}")`);
+  const staleS = await Ops.sendBackQuoteReview(id("asof"), JEFF, "Fix it", shown);
+  ok(!staleS.ok && err(staleS) === "This quote changed since you opened it — reload to review the current version." && (await Q.get(id("asof")))?.review?.state === "in_review",
+    "#284 final DB: sending back with an old asOf is refused too");
+  const storeStale = await Q.approve(id("asof"), { by: "Jeff Chesebro", expectUpdatedAt: shown });
+  ok(storeStale?.review?.state === "in_review", "#284 final DB: the store's expectUpdatedAt check holds under the lock");
+  const fresh = await Ops.approveQuoteReview(id("asof"), JEFF, now);
+  ok(fresh.ok && (await Q.get(id("asof")))?.review?.state === "approved", "#284 final DB: approving with the current asOf succeeds");
+  await mk("asof-sb");
+  const sbNow = (await Q.get(id("asof-sb")))!.updatedAt;
+  ok((await Ops.sendBackQuoteReview(id("asof-sb"), JEFF, "Recheck", sbNow)).ok && (await Q.get(id("asof-sb")))?.review?.state === "changes",
+    "#284 final DB: sending back with the current asOf succeeds");
+  // Without asOf (an older caller) the version check is skipped, state still re-checked.
+  await mk("no-asof");
+  ok((await Ops.approveQuoteReview(id("no-asof"), JEFF)).ok, "#284 final DB: approve without asOf still works");
+
+  // 10 — "Assign to" names an active approver from the list.
+  await mk("assign", { review: none });
+  const bogus = await Ops.submitQuoteForApproval(id("assign"), OWNER, "Not A Person");
+  ok(!bogus.ok && err(bogus) === "Pick an approver from the list." && (await Q.get(id("assign")))?.review?.state === "none",
+    `#284 final DB: assigning to someone who isn't an active approver is refused (got "${err(bogus)}")`);
+  const nonApprover = await Ops.submitQuoteForApproval(id("assign"), OWNER, "T284 Owner");
+  ok(!nonApprover.ok && err(nonApprover) === "Pick an approver from the list.", "#284 final DB: a name that isn't an approver is refused");
+  const good = await Ops.submitQuoteForApproval(id("assign"), OWNER, "  jeff chesebro ");
+  const assigned = await Q.get(id("assign"));
+  ok(good.ok && assigned?.review?.state === "in_review" && assigned.review.reviewer === "Jeff Chesebro",
+    "#284 final DB: assigning to an active approver records their roster name");
+
+  // 9 — one owner identity in the ops: a blank owner falls back to preparedBy.
+  await mk("blank-owner", { owner: "", preparedBy: "Jeff Chesebro", review: { ...inReview, submittedBy: "Jeff Chesebro" } });
+  const own = await Ops.approveQuoteReview(id("blank-owner"), JEFF);
+  ok(!own.ok && (await Q.get(id("blank-owner")))?.review?.state === "in_review", "#284 final DB: the preparer of a blank-owner quote cannot approve it through the queue");
+  ok((await Ops.withdrawQuoteReview(id("blank-owner"), JEFF)).ok && (await Q.get(id("blank-owner")))?.review?.state === "none",
+    "#284 final DB: …and can withdraw it as its owner");
 }

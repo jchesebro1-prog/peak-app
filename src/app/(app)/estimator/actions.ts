@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import {
-  claimReview,
   create,
   get,
   getAll,
@@ -55,16 +54,7 @@ import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
-import { reviewLimitChipFor } from "@/lib/review-limits-server";
-import {
-  approveQuoteReview,
-  attestQuoteApproval,
-  sendBackQuoteReview,
-  sendQuoteToCustomer,
-  submitQuoteForApproval,
-} from "@/lib/quote-review-ops";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
-import type { ReviewLimitChipData } from "@/lib/review-limits";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { isFabricPart } from "@/lib/fabric-part";
@@ -195,8 +185,6 @@ export type SaveResult = {
   notice?: string;
   /** #222 — the saved PDF's state after this save (pending when a render was scheduled). */
   pdf?: QuotePdfView | null;
-  /** #242 — the review-limit chip, re-evaluated on the server. */
-  reviewLimit?: ReviewLimitChipData | null;
   /** #284 — the next-step view after this save (a first save is what makes
    *  the control appear; an edit can clear an approval). */
   next?: QuoteNextStepView | null;
@@ -212,8 +200,6 @@ export type ReviewSync = {
   /** Set on `ok: false` — a typed, UI-displayable reason (punch #60: never a
    *  raw thrown exception for an expected rejection like "not yet approved"). */
   error?: string;
-  /** #242 — the review-limit chip, re-evaluated on the server. */
-  reviewLimit?: ReviewLimitChipData | null;
   /** #284 — the next-step control's view, re-evaluated for this viewer. */
   next?: QuoteNextStepView | null;
   /** #284 — set on `ok: false` when the approval gate itself refused, so the
@@ -231,7 +217,6 @@ async function syncOf(id: string, user: { name: string; roles: string[] }): Prom
     ok: !!q,
     review: q?.review ?? null,
     status: q?.status ?? null,
-    reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
     next: q ? await quoteNextStepFor(q, user) : null,
   };
 }
@@ -245,8 +230,6 @@ export type StageSync = {
   pipelineId: string | null;
   stage: string | null;
   error?: string;
-  /** #242 — the review-limit chip, re-evaluated on the server. */
-  reviewLimit?: ReviewLimitChipData | null;
   /** #284 — see ReviewSync.next / gateRefused. */
   next?: QuoteNextStepView | null;
   gateRefused?: boolean;
@@ -260,7 +243,6 @@ async function stageSyncOf(id: string, user: { name: string; roles: string[] }):
     review: q?.review ?? null,
     pipelineId: q?.pipelineId ?? null,
     stage: q?.stage ?? null,
-    reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
     next: q ? await quoteNextStepFor(q, user) : null,
   };
 }
@@ -612,7 +594,6 @@ export async function saveQuoteAction(
     stage: q?.stage ?? null,
     vendorQuotes: storedVendorQuotes,
     pdf: pdfState,
-    reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
     next: q ? await quoteNextStepFor(q, user) : null,
     // #282 follow-up: a save that moved the quote to Lost cleared its credit.
     rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
@@ -1242,85 +1223,6 @@ export async function setQuotePipelineAction(id: string, pipelineId: string): Pr
   }
   refresh();
   return stageSyncOf(id, user);
-}
-
-export async function submitReviewAction(
-  id: string,
-  reviewer: string | null
-): Promise<ReviewSync> {
-  const user = await requireUser();
-  const r = await submitQuoteForApproval(id, user, reviewer);
-  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
-  refresh();
-  return syncOf(id, user);
-}
-
-export async function claimReviewAction(id: string): Promise<ReviewSync> {
-  const user = await requireUser();
-  if (!id || !can("approve", user.roles))
-    return { ok: false, review: null, status: null };
-  await claimReview(id, user.name);
-  refresh();
-  return syncOf(id, user);
-}
-
-export async function approveReviewAction(id: string): Promise<ReviewSync> {
-  const user = await requireUser();
-  const r = await approveQuoteReview(id, user);
-  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
-  refresh();
-  return syncOf(id, user);
-}
-
-export async function requestChangesAction(
-  id: string,
-  note: string
-): Promise<ReviewSync> {
-  const user = await requireUser();
-  const r = await sendBackQuoteReview(id, user, note);
-  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
-  refresh();
-  return syncOf(id, user);
-}
-
-/**
- * "Send to customer →" — moves the approved quote to sent (prototype port).
- *
- * Punch #60 (D84 hole): this used to be `requireUser()` and nothing else —
- * ANY signed-in user could send an unreviewed quote, because the review gate
- * was UI-only (the button was just hidden). Now it requires an approval
- * record — in-app (someone with `approve` used the review queue) OR
- * attested (the estimator self-approved with a mandatory note naming who
- * reviewed it and how, e.g. a phone call). See `requireApprovalToAdvance`.
- */
-export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
-  const user = await requireUser();
-  const r = await sendQuoteToCustomer(id, user);
-  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
-  refresh();
-  return syncOf(id, user);
-}
-
-/**
- * Attested approval (punch #60): the estimator approves their OWN quote by
- * naming who actually reviewed it and how (a phone call, a Teams review,
- * etc.) rather than routing it through the in-app review queue. Deliberately
- * NOT gated on `can("approve", ...)` — real reviews here often happen
- * verbally and the estimator is frequently a different person from the
- * reviewer, so a hard permission gate would block legitimate work. The note
- * is the only thing that makes the approval attributable to a named human,
- * so it is mandatory and validated server-side (`validateAttestationNote`) —
- * an empty or whitespace-only note is rejected, not silently accepted.
- */
-export async function attestApprovalAction(
-  id: string,
-  note: string
-): Promise<ReviewSync> {
-  const user = await requireUser();
-  const r = await attestQuoteApproval(id, user, note);
-  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
-  refresh();
-  return syncOf(id, user);
 }
 
 /* ============================================================

@@ -24,7 +24,8 @@ import { quoteBuilderHref } from "@/lib/quote-links";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
-import { reviewLimitChip } from "@/lib/review-limits";
+import { approvalHolds, reviewLimitChip } from "@/lib/review-limits";
+import { shownReviewState } from "@/lib/review-line";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
 import { displayQuoteNumber, quoteMatchesSearch, quoteSearchRank } from "@/lib/estimate-number";
@@ -543,8 +544,9 @@ export default async function QuotesPage({
         {filtered.map((q) => {
           const nextStep = q.id === selectedId ? selectedNext : null;
           const reviewLimit = reviewLimitChip(q, limitCtx, me);
-          // #242: a stale auto approval is not an approval — never the green badge.
-          const rState = reviewLimit?.staleAuto ? "none" : q.review?.state || "none";
+          // #242 / #284: an approval that no longer holds (stale auto limit or a
+          // changed price/line set) is not an approval — never the green badge.
+          const rState = shownReviewState(q.review?.state, approvalHolds(q, limitCtx));
           const rMeta = REVIEW_CHIP[rState];
           const selected = q.id === selectedId;
           const owner = q.owner || "Unassigned";

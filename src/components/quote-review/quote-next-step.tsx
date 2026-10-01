@@ -35,7 +35,9 @@ type Props = {
   onSync?: (r: NextStepSync) => void;
   /** Report a refusal; default = an inline red line under the control. */
   onError?: (msg: string) => void;
-  /** Runs before any action (the Estimator saves unsaved edits first); return false to abort. */
+  /** Runs before any action (the Estimator saves unsaved edits first); return false to abort.
+   *  Skipped for Approve / Send back: an approver decides the version they were
+   *  shown (view.asOf), and saving first would bump updatedAt and refuse it. */
   beforeAction?: () => Promise<boolean>;
   /** Pill suffix " · as last saved" while the form has unsaved edits. */
   savedOnly?: boolean;
@@ -176,13 +178,19 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     else setErr(msg);
   };
 
-  const run = (fn: () => Promise<NextStepSync>) => {
+  const run = (fn: () => Promise<NextStepSync>, opts: { skipBefore?: boolean } = {}) => {
     setMenu("closed");
     setErr(null);
     startTransition(async () => {
       try {
-        if (beforeAction && !(await beforeAction())) return;
-        const r = await fn();
+        if (!opts.skipBefore && beforeAction && !(await beforeAction())) return;
+        const res = await fn();
+        // A refused Approve / Send back keeps the version the approver was shown:
+        // handing the fresh asOf to an onSync caller (the Estimator keeps its form;
+        // only a reload shows the new content) would let a second click decide
+        // content this screen never loaded. The default router.refresh re-renders
+        // the page with the current version, so it needs no such guard.
+        const r = !res.ok && opts.skipBefore && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res;
         if (!r.ok) report(r.error || "That didn't go through.");
         (onSync ?? (() => router.refresh()))(r);
       } catch (e) {
@@ -207,7 +215,8 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     if (!text || !modal) return;
     const m = modal;
     closeModal();
-    run(() => (m === "sendBack" ? nsSendBackAction(quoteId, text) : nsAttestAction(quoteId, text)));
+    if (m === "sendBack") run(() => nsSendBackAction(quoteId, text, view.asOf), { skipBefore: true });
+    else run(() => nsAttestAction(quoteId, text));
   };
 
   const dispatch = (action: NextStepAction) => {
@@ -217,7 +226,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
       case "send":
         return run(() => nsSendAction(quoteId));
       case "approve":
-        return run(() => nsApproveAction(quoteId));
+        return run(() => nsApproveAction(quoteId, view.asOf), { skipBefore: true });
       case "withdraw":
         return run(() => nsWithdrawAction(quoteId));
       case "assign":

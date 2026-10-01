@@ -402,6 +402,10 @@ export type ReviewOpts = {
   by?: string | null;
   reviewer?: string | null;
   note?: string;
+  /** #284: approve / requestChanges only — decide only if the quote's
+   *  `updatedAt` still equals this (the version the approver was shown);
+   *  checked under the row lock. */
+  expectUpdatedAt?: number;
 };
 
 function rv(state: ReviewState, o: Partial<QuoteReview> = {}): QuoteReview {
@@ -419,12 +423,13 @@ function rv(state: ReviewState, o: Partial<QuoteReview> = {}): QuoteReview {
 }
 
 /**
- * True once a quote carries a live approval RECORD — in-app or attested
- * (punch #60). This is the single predicate both `sendToCustomerAction` and
- * `setStatusAction("won")` must consult server-side; a hidden button is not
- * access control. Requesting changes or resubmitting moves `state` off
- * "approved", which correctly revokes a stale approval — a prior decision
- * doesn't authorize sending a since-edited quote.
+ * True once a quote carries an approval RECORD (`state === "approved"`, any
+ * method) — record-only: it does NOT check whether the approval still holds.
+ * What the approval gate and every "is this approved?" surface consult is
+ * `approvalHolds` (src/lib/review-limits.ts), which is snapshot-aware: an
+ * in-app / attested / self approval lapses when the price or priced lines
+ * change (#284 approvedAgainst), an auto_limit one per #242's rule.
+ * Requesting changes or resubmitting moves `state` off "approved".
  */
 export function hasApproval(review: QuoteReview | null | undefined): boolean {
   return !!review && review.state === "approved";
@@ -1586,12 +1591,23 @@ export async function claimReview(
   });
 }
 
+/** #284: an approver's decision applies only to an in-review quote still at
+ *  the version they were shown (`expectUpdatedAt`, when given). */
+function decidableUnderLock(q: Quote, opts: ReviewOpts): boolean {
+  if (q.review?.state !== "in_review") return false;
+  return typeof opts.expectUpdatedAt !== "number" || q.updatedAt === opts.expectUpdatedAt;
+}
+
 export async function approve(
   id: string,
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
   return patchQuote(id, (q) => {
-    const review = q.review || rv("in_review");
+    // #284: re-checked under the row lock — only an in-review quote, and only
+    // the version the approver was shown. A no-op leaves the quote unchanged;
+    // the caller reads the outcome from the returned quote.
+    if (!decidableUnderLock(q, opts)) return;
+    const review = q.review;
     review.state = "approved";
     review.decidedBy = opts.by || null;
     review.reviewer = review.reviewer || review.decidedBy;
@@ -1647,7 +1663,9 @@ export async function requestChanges(
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
   return patchQuote(id, (q) => {
-    const review = q.review || rv("in_review");
+    // #284: same under-lock re-check as approve().
+    if (!decidableUnderLock(q, opts)) return;
+    const review = q.review;
     review.state = "changes";
     review.decidedBy = opts.by || null;
     review.reviewer = review.reviewer || review.decidedBy;

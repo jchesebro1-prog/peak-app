@@ -8368,8 +8368,13 @@ status pill. The red gate banner (a send blocked by the approval gate) carries a
 approver opening a quote from the bell can Approve or Send back from the phone preview. The owner can withdraw an
 in-review quote. Claim is gone from the Estimator, the Quotes hub and the Reviews page for quotes (submitting and
 approving claim implicitly, D520); designs and engagements keep Claim. The hub's `submitQuoteForReview` had no callers
-once the control landed and was deleted. The modals render through a portal so they cover the nav, and the Estimator
-saves unsaved edits first (`saveNow`) before submitting, approving or sending. The status model is unchanged (D236);
+once the control landed and was deleted, as were the Estimator's own uncalled review endpoints
+(`submitReviewAction`, `claimReviewAction`, `approveReviewAction`, `requestChangesAction`, `sendToCustomerAction`,
+`attestApprovalAction`). The modals render through a portal so they cover the nav, and the Estimator saves unsaved
+edits first (`saveNow`) before submitting, attesting or sending. Approve and Send back do not save first: they carry
+the view's `asOf` (the quote's `updatedAt` when the approver was shown it), and the store refuses under the row lock
+when the quote changed since ("This quote changed since you opened it — reload to review the current version.") or
+is no longer in review — the owner can keep saving while a quote waits. The status model is unchanged (D236);
 the service builders' "Mark as approved" and the portal bypasses are untouched, and moving them onto `QuoteNextStep`
 is a deferred follow-up.
 
@@ -8380,16 +8385,18 @@ An owner who holds `approve` skips review: moving their own quote to sent or won
 review limit, and a quote with changes requested blocks it (a send-back is not waved through by the owner). Flag for
 Jeff: the seed roster gives every user except Jeff all four roles, so on any environment where Nic and the others
 hold `approve` they also skip review when they send their own quotes. Settings → Team is the control; whoever should
-need sign-off must not hold `approve`.
+need sign-off must not hold `approve`. A self-approval overwrites an in-review record when an approver-owner sends a
+quote they had submitted, so its queue entry closes.
 
 ## D519. Approvals go stale when the sell or the line set changes (#284, 2026-10-01)
 
 In-app, attested and self approvals record `approvedAgainst: { sell, linesKey }` — the gross (pre-Rewards-credit) sell
 and a stable fingerprint of the priced line set (`src/lib/approval-snapshot.ts`). Wording, narrative, notes, terms,
 section titles and Rewards credit lines are excluded, so editing text keeps the approval and applying points does not
-clear it. Staleness is derived, never stored: `hasApproval()` is true for an approved record with no snapshot
-(legacy) or one matching the quote now; otherwise the pill reads "Approval cleared", the strip explains why and the
-button becomes "Resubmit for approval". `auto_limit` approvals keep their #242 rule (re-checked against the limit)
+clear it. Staleness is derived, never stored: `approvalHolds()` (`src/lib/review-limits.ts`, what the gate and every
+list chip consult) is true for an approved record with no snapshot (legacy) or one matching the quote now; otherwise
+the pill reads "Approval cleared", the strip explains why and the button becomes "Resubmit for approval".
+`hasApproval()` is record-only (state is approved) and does not check the snapshot. `auto_limit` approvals keep their #242 rule (re-checked against the limit)
 and carry no `approvedAgainst`.
 
 ## D520. A submission goes to every approver; claiming is implicit; notifications are in-app only (#284, 2026-10-01)

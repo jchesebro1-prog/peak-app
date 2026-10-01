@@ -28,6 +28,9 @@ export type ReviewItem = {
   openHref: string;
   canClaim: boolean;
   canDecide: boolean;
+  /** #284: a quote's `updatedAt` when this row was built — Approve / Request
+   *  changes decide only that version (0 for designs and engagement phases). */
+  asOf: number;
 };
 
 /* ---- prototype token maps (Reviews.dc.html stateMeta / kindMeta) ---- */
@@ -55,7 +58,7 @@ export default function ReviewList({
   emptySub: string;
 }) {
   const router = useRouter();
-  const [rc, setRc] = useState<{ kind: ReviewKind; id: string; ownerFirst: string } | null>(null);
+  const [rc, setRc] = useState<{ kind: ReviewKind; id: string; ownerFirst: string; asOf: number } | null>(null);
   const [rcNote, setRcNote] = useState("");
   const [toast, setToast] = useState("");
   const [pending, startTransition] = useTransition();
@@ -91,7 +94,7 @@ export default function ReviewList({
     setRc(null);
     setRcNote("");
     run(
-      () => requestChangesAction(target.kind, target.id, note),
+      () => requestChangesAction(target.kind, target.id, note, target.asOf),
       "Sent back for changes."
     );
   };
@@ -312,7 +315,7 @@ export default function ReviewList({
                     <button
                       type="button"
                       onClick={() =>
-                        setRc({ kind: it.kind, id: it.id, ownerFirst: it.ownerFirst })
+                        setRc({ kind: it.kind, id: it.id, ownerFirst: it.ownerFirst, asOf: it.asOf })
                       }
                       style={{
                         fontFamily: "var(--font-ui)",
@@ -333,7 +336,7 @@ export default function ReviewList({
                       className="rv-approve"
                       onClick={() =>
                         run(
-                          () => approveReviewAction(it.kind, it.id),
+                          () => approveReviewAction(it.kind, it.id, it.asOf),
                           "Approved — owner can now send to customer."
                         )
                       }

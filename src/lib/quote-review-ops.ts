@@ -20,14 +20,36 @@ import {
   statusFailureMessage,
   type Quote,
 } from "@/lib/stores/quotes";
-import { approvalHolds } from "@/lib/review-limits";
+import { approvalHolds, quoteOwnerName } from "@/lib/review-limits";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
+import { reviewers as approverRows } from "@/lib/users";
 
 export type ReviewActor = { name: string; roles: string[] };
 export type ReviewOpResult = { ok: true } | { ok: false; error: string };
 
 const NOT_FOUND: { ok: false; error: string } = { ok: false, error: "Quote not found." };
-const isOwner = (q: Quote, a: ReviewActor) => (q.owner || "").trim().toLowerCase() === a.name.trim().toLowerCase();
+const NO_LONGER_WAITING: { ok: false; error: string } = {
+  ok: false,
+  error: "This quote is no longer waiting for approval — reload to see its current state.",
+};
+const CHANGED_SINCE: { ok: false; error: string } = {
+  ok: false,
+  error: "This quote changed since you opened it — reload to review the current version.",
+};
+/** One owner identity everywhere (owner, else preparedBy — quoteOwnerName). */
+const isOwner = (q: Quote, a: ReviewActor) => {
+  const o = quoteOwnerName(q).toLowerCase();
+  return o !== "" && o === a.name.trim().toLowerCase();
+};
+
+/** The store re-checks state (and version) under the row lock; a decision that
+ *  didn't land is reported from the quote it returned. */
+function outcome(q: Quote | null, want: "approved" | "changes" | "none", asOf?: number): ReviewOpResult {
+  if (!q) return NOT_FOUND;
+  if ((q.review?.state || "none") === want) return { ok: true };
+  if (q.review?.state === "in_review" && typeof asOf === "number" && asOf > 0 && q.updatedAt !== asOf) return CHANGED_SINCE;
+  return NO_LONGER_WAITING;
+}
 
 /** Approved on record but no longer counting (stale auto limit, or #284 snapshot). */
 async function approvalLapsed(q: Quote): Promise<boolean> {
@@ -45,7 +67,15 @@ export async function submitQuoteForApproval(id: string, actor: ReviewActor, rev
     return { ok: false, error: "Only a draft quote can be submitted for approval." };
   if (state !== "none" && state !== "changes" && !lapsed)
     return { ok: false, error: state === "in_review" ? "This quote is already waiting for approval." : "This quote is already approved." };
-  await submitForReview(id, { by: actor.name, reviewer: reviewer || null });
+  // "Assign to…" names an active approver from the list — never free text.
+  let assignee: string | null = null;
+  if (reviewer && reviewer.trim()) {
+    const want = reviewer.trim().toLowerCase();
+    const match = (await approverRows()).find((u) => u.name.trim().toLowerCase() === want);
+    if (!match) return { ok: false, error: "Pick an approver from the list." };
+    assignee = match.name;
+  }
+  await submitForReview(id, { by: actor.name, reviewer: assignee });
   return { ok: true };
 }
 
@@ -54,8 +84,7 @@ export async function withdrawQuoteReview(id: string, actor: ReviewActor): Promi
   if (!q) return NOT_FOUND;
   if (!isOwner(q, actor)) return { ok: false, error: "Only the quote's owner can withdraw it." };
   if (q.review?.state !== "in_review") return { ok: false, error: "This quote isn't waiting for approval." };
-  await withdrawReview(id);
-  return { ok: true };
+  return outcome(await withdrawReview(id), "none");
 }
 
 async function decidable(id: string, actor: ReviewActor): Promise<{ ok: true; q: Quote } | { ok: false; error: string }> {
@@ -68,20 +97,26 @@ async function decidable(id: string, actor: ReviewActor): Promise<{ ok: true; q:
   return { ok: true, q };
 }
 
-export async function approveQuoteReview(id: string, actor: ReviewActor): Promise<ReviewOpResult> {
+/**
+ * `asOf` is the quote's `updatedAt` when the approver's view was computed
+ * (QuoteNextStepView.asOf / the Reviews row): the owner can keep saving while
+ * a quote is in review, so a decision applies only to the version shown.
+ * Omitted (or 0) skips the version check.
+ */
+export async function approveQuoteReview(id: string, actor: ReviewActor, asOf?: number): Promise<ReviewOpResult> {
   const d = await decidable(id, actor);
   if (!d.ok) return d;
-  await approve(id, { by: actor.name });
-  return { ok: true };
+  const v = asOf && asOf > 0 ? asOf : undefined;
+  return outcome(await approve(id, { by: actor.name, expectUpdatedAt: v }), "approved", v);
 }
 
-export async function sendBackQuoteReview(id: string, actor: ReviewActor, note: string): Promise<ReviewOpResult> {
+export async function sendBackQuoteReview(id: string, actor: ReviewActor, note: string, asOf?: number): Promise<ReviewOpResult> {
   const clean = (note || "").trim();
   if (!clean) return { ok: false, error: "Say what needs to change." };
   const d = await decidable(id, actor);
   if (!d.ok) return d;
-  await requestChanges(id, { by: actor.name, note: clean });
-  return { ok: true };
+  const v = asOf && asOf > 0 ? asOf : undefined;
+  return outcome(await requestChanges(id, { by: actor.name, note: clean, expectUpdatedAt: v }), "changes", v);
 }
 
 export async function attestQuoteApproval(id: string, actor: ReviewActor, note: string): Promise<ReviewOpResult> {

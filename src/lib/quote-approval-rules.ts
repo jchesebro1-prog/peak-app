@@ -3,9 +3,10 @@
  * the nav bell, the Home alerts and the My Queue list so they cannot drift.
  *
  * Pure and CLIENT-SAFE: no store, db, settings, users or session imports
- * (only the pure approval-snapshot helper).
+ * (only the pure approval-snapshot helper and review-limits' quoteOwnerName).
  */
 import { approvalSnapshotMatches, type FingerprintInput } from "@/lib/approval-snapshot";
+import { quoteOwnerName } from "@/lib/review-limits";
 
 type Review = {
   state?: string;
@@ -16,6 +17,8 @@ type Review = {
 
 export type ApprovalRuleQuote = FingerprintInput & {
   owner?: string | null;
+  /** The owner falls back to preparedBy (quoteOwnerName) — one identity with the ops. */
+  preparedBy?: string | null;
   status?: string;
   review?: Review | null;
 };
@@ -34,7 +37,7 @@ export function sameName(a?: string | null, b?: string | null): boolean {
  */
 export function quoteAwaitsApprovalBy(q: ApprovalRuleQuote, me: string, canApprove: boolean): boolean {
   const r = q.review;
-  return r?.state === "in_review" && !sameName(q.owner, me) && (canApprove || sameName(r.reviewer, me));
+  return r?.state === "in_review" && !sameName(quoteOwnerName(q), me) && (canApprove || sameName(r.reviewer, me));
 }
 
 /**
@@ -43,7 +46,7 @@ export function quoteAwaitsApprovalBy(q: ApprovalRuleQuote, me: string, canAppro
  * send, and a stale snapshot no longer holds).
  */
 export function quoteBackFromReview(q: ApprovalRuleQuote, me: string): "approved" | "changes" | null {
-  if (!sameName(q.owner, me) || q.status !== "draft") return null;
+  if (!sameName(quoteOwnerName(q), me) || q.status !== "draft") return null;
   const r = q.review;
   if (r?.state === "changes") return "changes";
   if (r?.state === "approved" && (r.method === "in_app" || r.method === "attested" || !r.method) && approvalSnapshotMatches(q)) return "approved";

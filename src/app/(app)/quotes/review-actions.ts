@@ -7,8 +7,6 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { get, type QuoteReview, type QuoteStatus } from "@/lib/stores/quotes";
-import { reviewLimitChipFor } from "@/lib/review-limits-server";
-import type { ReviewLimitChipData } from "@/lib/review-limits";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import {
@@ -26,7 +24,7 @@ export type NextStepSync = {
   error?: string;
   review: QuoteReview | null;
   status: QuoteStatus | null;
-  reviewLimit?: ReviewLimitChipData | null;
+  /** The re-evaluated next-step view (its strip carries the #242 limit chip). */
   next: QuoteNextStepView | null;
 };
 
@@ -38,7 +36,6 @@ async function after(id: string, user: { name: string; roles: string[] }, r: Rev
     ...(r.ok ? {} : { error: r.error }),
     review: q?.review ?? null,
     status: q?.status ?? null,
-    reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
     next: q ? await quoteNextStepFor(q, user) : null,
   };
 }
@@ -51,13 +48,14 @@ export async function nsWithdrawAction(id: string): Promise<NextStepSync> {
   const user = await requireUser();
   return after(id, user, await withdrawQuoteReview(id, user));
 }
-export async function nsApproveAction(id: string): Promise<NextStepSync> {
+/** `asOf` = the view's `asOf` (the quote's updatedAt the approver was shown). */
+export async function nsApproveAction(id: string, asOf?: number): Promise<NextStepSync> {
   const user = await requireUser();
-  return after(id, user, await approveQuoteReview(id, user));
+  return after(id, user, await approveQuoteReview(id, user, asOf));
 }
-export async function nsSendBackAction(id: string, note: string): Promise<NextStepSync> {
+export async function nsSendBackAction(id: string, note: string, asOf?: number): Promise<NextStepSync> {
   const user = await requireUser();
-  return after(id, user, await sendBackQuoteReview(id, user, note));
+  return after(id, user, await sendBackQuoteReview(id, user, note, asOf));
 }
 export async function nsAttestAction(id: string, note: string): Promise<NextStepSync> {
   const user = await requireUser();

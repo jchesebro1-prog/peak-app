@@ -79,9 +79,3 @@ export function approvalSnapshotMatches(q: FingerprintInput & { review?: ReviewW
   const cur = approvalFingerprint(q);
   return Math.abs(cur.sell - a.sell) < 0.005 && cur.linesKey === a.linesKey;
 }
-
-/** An in-app / attested / self approval the quote has since moved away from. */
-export function isStaleSnapshotApproval(q: FingerprintInput & { review?: ReviewWithSnapshot | null }): boolean {
-  const r = q.review;
-  return !!r && r.state === "approved" && r.method !== "auto_limit" && !approvalSnapshotMatches(q);
-}
