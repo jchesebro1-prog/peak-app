@@ -10,13 +10,14 @@ export const PORTAL_QUOTE_NAME_MAX = 120;
  *  `portal-self-serve` (the retired estimate builder) counts too. */
 const CUSTOMER_BUILT_SOURCES = new Set(["portal-catalog", "portal-service", "portal-self-serve"]);
 
-/** Trimmed, control characters stripped, inner whitespace collapsed, capped
- *  at 120 characters (code points). Anything that isn't a string → "". */
+/** Trimmed, control and format characters (\p{Cc}, \p{Cf} — zero-width,
+ *  bidi overrides, BOM) stripped, inner whitespace collapsed, capped at 120
+ *  characters (code points). Anything that isn't a string → "". */
 export function cleanPortalQuoteName(raw: unknown): string {
   if (typeof raw !== "string") return "";
   const flat = raw
     .replace(/\s+/g, " ")
-    .replace(/\p{Cc}/gu, "")
+    .replace(/[\p{Cc}\p{Cf}]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
   return Array.from(flat).slice(0, PORTAL_QUOTE_NAME_MAX).join("").trim();
@@ -34,8 +35,13 @@ export function portalQuoteDate(at: number): string {
   return DATE_FORMAT.format(new Date(at));
 }
 
-function withDate(label: string, at: number): string {
-  return cleanPortalQuoteName(`${label} — ${portalQuoteDate(at)}`);
+/** "<label><suffix> — <date>", with only `label` cut to fit the 120 cap — the
+ *  suffix (" + N more") and the date always survive whole. */
+function withDate(label: string, at: number, suffix = ""): string {
+  const tail = `${suffix} — ${portalQuoteDate(at)}`;
+  const room = Math.max(1, PORTAL_QUOTE_NAME_MAX - Array.from(tail).length);
+  const cut = Array.from(label).slice(0, room).join("").trim();
+  return cleanPortalQuoteName(cut + tail);
 }
 
 /** Catalog cart: "<venue label> — <date>", or "<company> — <date>" with no venue. */
@@ -50,7 +56,7 @@ export function defaultServiceQuoteName(venueLabels: string[], companyName: stri
   const first = cleanPortalQuoteName(venueLabels[0]);
   if (!first) return withDate(cleanPortalQuoteName(companyName) || "Quote", at);
   const more = venueLabels.length - 1;
-  return withDate(more > 0 ? `${first} + ${more} more` : first, at);
+  return withDate(first, at, more > 0 ? ` + ${more} more` : "");
 }
 
 /** The ONE definition of a customer-built quote (spec §1.1). */

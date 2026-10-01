@@ -131,8 +131,8 @@ export async function removeCartLine(lineId: string): Promise<CartEditResult> {
 
 /**
  * Generate quote (spec §4.2/§4.3): the SERVER prices the grant's cart and
- * makes the quote; on success the customer lands on /portal with a banner
- * naming its estimate number. Its saved PDF renders in after() — the cart
+ * makes the quote; on success the customer lands on /portal/my-quotes (#288)
+ * with a banner naming its estimate number. Its saved PDF renders in after() — the cart
  * page exports `maxDuration = 120` for it (#222).
  */
 export async function generateQuote(name?: unknown): Promise<{ ok: false; error: string }> {
@@ -141,7 +141,8 @@ export async function generateQuote(name?: unknown): Promise<{ ok: false; error:
   const r = await generatePortalQuote(session, { name: typeof name === "string" ? name : undefined });
   if (!r.ok) return r;
   revalidatePath("/portal");
+  revalidatePath("/portal/my-quotes");
   revalidatePath("/portal/catalog/quote");
   revalidatePath("/portal/catalog");
-  redirect(`/portal?generated=${r.mode}&q=${encodeURIComponent(r.quoteId)}`);
+  redirect(`/portal/my-quotes?generated=${r.mode}&q=${encodeURIComponent(r.quoteId)}`);
 }

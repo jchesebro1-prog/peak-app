@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getSettings } from "@/lib/settings";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { get as getCustomer } from "@/lib/stores/customers";
+import { getCart } from "@/lib/stores/portal-carts";
 import { serviceScopeFor, type PortalService } from "@/lib/portal-service-scope";
 import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-pricing";
 import { serviceRequestFromQuoteId } from "@/lib/portal-service-quotes";
@@ -67,7 +68,12 @@ export default async function PortalServicePage({
   const fromReq = parsed.fromQuoteId ? await serviceRequestFromQuoteId(cid, parsed.fromQuoteId) : null;
   const service: PortalService = fromReq?.service ?? parsed.service ?? { kind: "flame" };
 
-  const [cust, scope] = await Promise.all([getCustomer(cid), serviceScopeFor(cid, service)]);
+  const [cust, scope, cart] = await Promise.all([
+    getCustomer(cid),
+    serviceScopeFor(cid, service),
+    // #288: the nav's Cart (N) — never read in a team preview.
+    preview ? Promise.resolve(null) : getCart(session.grantId, cid),
+  ]);
   const custName = cust?.name || "your organization";
 
   const presetCounts = new Map((fromReq?.venues ?? []).map((v) => [v.venueId, v.count]));
@@ -101,7 +107,7 @@ export default async function PortalServicePage({
       companyName={companyName}
       logoLight={settings.logoLight || null}
       person={{ name: session.name, customer: custName }}
-      nav={portalNav("service", preview ? { previewCid: cid } : {})}
+      nav={portalNav("service", preview ? { previewCid: cid } : { cartCount: cart?.lines.length ?? 0 })}
     >
       {preview && (
         <div
@@ -136,6 +142,8 @@ export default async function PortalServicePage({
         initialError={initialPriced && !initialPriced.ok ? initialPriced.error : null}
         preview={preview}
         previewCid={preview ? cid : ""}
+        customerName={cust?.name || ""}
+        nameAt={Date.now()}
       />
     </PortalShell>
   );

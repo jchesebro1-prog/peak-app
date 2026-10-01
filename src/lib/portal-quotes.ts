@@ -540,19 +540,23 @@ export async function declinePortalAcceptance(
 export const RENAME_BLANK_COPY = "Give your quote a name.";
 export const RENAME_NOT_BUILT_COPY = "Only quotes you built here can be renamed.";
 export const RENAME_ACCEPTED_COPY = "This quote was accepted — it can't be renamed now.";
+/** Won / lost with no `portalAcceptance` — decided, not "accepted" (#288 Task 2). */
+export const RENAME_CLOSED_COPY = "This quote is closed and can't be renamed.";
 const RENAME_RATE_COPY = "You've renamed quotes several times this hour — try again later.";
 const RENAME_FAIL_COPY = "Couldn't rename this quote — try again.";
 const RENAME_LIMIT = 30;
 const RENAME_WINDOW_MS = 60 * 60 * 1000;
 
-export type RenamePortalQuoteDeps = { scheduleQuotePdf?: typeof scheduleQuotePdf };
+/** Test seam: lets a DB check force the write to throw (to prove the
+ *  rate-limit refund) without touching any other dependency. */
+export type RenamePortalQuoteDeps = { updateQuote?: typeof updateQuote };
 
 /**
  * Refused for a preview / unwritable session, a blank name (after
  * cleaning), a quote not listed for this customer, a Peak-sent quote and an
  * accepted (or won / lost) one. `name` is a printed content field
  * (QUOTE_CONTENT_FIELDS), so the PDF is rescheduled after the write, exactly
- * as Generate does.
+ * as Generate does. A write that fails refunds its rate-limit token.
  */
 export async function renamePortalQuote(
   session: PortalSession | null,
@@ -566,18 +570,28 @@ export async function renamePortalQuote(
   const q = typeof quoteId === "string" && quoteId ? await getQuote(quoteId) : null;
   if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
   if (!isCustomerBuiltQuote(q)) return { ok: false, error: RENAME_NOT_BUILT_COPY };
-  if (!isPortalRenamable(q)) return { ok: false, error: RENAME_ACCEPTED_COPY };
+  if (!isPortalRenamable(q)) return { ok: false, error: q.portalAcceptance ? RENAME_ACCEPTED_COPY : RENAME_CLOSED_COPY };
   if (q.name === clean) return { ok: true, name: clean };
-  if (!rateLimit("portal-rename:" + session.grantId, RENAME_LIMIT, RENAME_WINDOW_MS).ok) {
+  const rlKey = "portal-rename:" + session.grantId;
+  if (!rateLimit(rlKey, RENAME_LIMIT, RENAME_WINDOW_MS).ok) {
     return { ok: false, error: RENAME_RATE_COPY };
   }
+  // Check-then-write: an accept (or a staff decision) landing between the
+  // read above and this write is benign — it only means the name changed a
+  // moment after acceptance; nothing priced or signed depends on it.
+  let updated: Quote | null;
   try {
-    const updated = await updateQuote(q.id, { name: clean });
-    if (!updated) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
-    await (deps.scheduleQuotePdf ?? scheduleQuotePdf)(q.id);
-    return { ok: true, name: clean };
+    updated = await (deps.updateQuote ?? updateQuote)(q.id, { name: clean });
   } catch (e) {
+    rateLimitRefund(rlKey);
     console.error("renamePortalQuote failed", quoteId, e);
     return { ok: false, error: RENAME_FAIL_COPY };
   }
+  if (!updated) {
+    rateLimitRefund(rlKey);
+    return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  }
+  // scheduleQuotePdf never throws (it logs and returns null).
+  await scheduleQuotePdf(q.id);
+  return { ok: true, name: clean };
 }

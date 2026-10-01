@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { PortalService } from "@/lib/portal-service-scope";
 import type { ServiceCustomerView } from "@/lib/portal-service-pricing";
+import { defaultServiceQuoteName, PORTAL_QUOTE_NAME_MAX } from "@/lib/portal-quote-names";
 import { generateServiceAction, priceServiceAction } from "./actions";
 
 /**
@@ -14,8 +15,9 @@ import { generateServiceAction, priceServiceAction } from "./actions";
  * different history per service/level); venue ticks and counts are local
  * state, debounced 300 ms into a live server re-price with a sequence guard
  * so a stale response can never overwrite a newer one. Generate wraps
- * `generateServiceAction`, which redirects to the #245 `/portal` banner on
- * success — only a refusal ever comes back here.
+ * `generateServiceAction`, which redirects to the `/portal/my-quotes`
+ * banner on success (#288) — only a refusal ever comes back here. A "Name
+ * this quote" box (#288) above Generate defaults from the ticked venues.
  *
  * Verbatim copy (#248 global constraints) is duplicated as local constants
  * rather than imported — a "use client" module can't pull named values out
@@ -87,6 +89,10 @@ const CSS = `
   .psv-total span:last-child { font-family: var(--font-mono); font-size: 17px; font-weight: 600; }
   .psv-fine { font-size: 11.5px; color: #8c919c; line-height: 1.55; }
   .psv-err { margin: 0 20px 14px; padding: 10px 12px; font-size: 12.5px; font-weight: 600; color: #a33a2b; background: #fdf0ee; border: 1px solid #f3d2cc; border-radius: 8px; }
+  .psv-name { padding: 16px 20px 14px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #f0f1f4; }
+  .psv-name label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8c919c; }
+  .psv-name input { font: 500 14px var(--font-ui); color: #16181d; padding: 10px 12px; border: 1px solid #d6d9e0; border-radius: 9px; background: #fff; max-width: 480px; }
+  .psv-name input:disabled { background: #f7f8fa; color: #8c919c; }
   .psv-go { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; padding: 0 20px 18px; }
   .psv-go-why { font-size: 12.5px; color: #8c919c; }
   .psv-btn { font: 600 14px var(--font-ui); color: #fff; background: var(--accent); border: none; border-radius: 10px; padding: 12px 20px; cursor: pointer; }
@@ -162,6 +168,8 @@ export function ServiceForm({
   initialError,
   preview,
   previewCid = "",
+  customerName,
+  nameAt,
 }: {
   service: PortalService;
   venues: ServiceFormVenue[];
@@ -169,6 +177,10 @@ export function ServiceForm({
   initialError: string | null;
   preview: boolean;
   previewCid?: string;
+  /** #288: the customer's company name — the default name with no venue. */
+  customerName: string;
+  /** #288: the instant the default name's date is taken from (server render). */
+  nameAt: number;
 }) {
   const router = useRouter();
   const serviceKey = serviceKeyOf(service);
@@ -185,6 +197,21 @@ export function ServiceForm({
     setRows(buildRows(venues, service));
     setView(initialView);
     setError(initialError || "");
+  }
+
+  // #288 "Name this quote": defaults from the ticked venues (in list order —
+  // the order Generate sends them), recomputed as they change unless the
+  // customer typed their own. Blank on Generate → the server's default.
+  const defaultName = defaultServiceQuoteName(
+    rows.filter((r) => r.selected).map((r) => r.label),
+    customerName,
+    nameAt
+  );
+  const [name, setName] = useState(defaultName);
+  const [seenDefault, setSeenDefault] = useState(defaultName);
+  if (seenDefault !== defaultName) {
+    setSeenDefault(defaultName);
+    if (name === seenDefault) setName(defaultName);
   }
 
   const [pricing, startPricing] = useTransition();
@@ -249,8 +276,8 @@ export function ServiceForm({
     };
     startGenerate(async () => {
       try {
-        // Success redirects to /portal; only a refusal comes back.
-        const r = await generateServiceAction(req);
+        // Success redirects to /portal/my-quotes; only a refusal comes back.
+        const r = await generateServiceAction(req, name);
         if (r && !r.ok) {
           setGenError(r.error);
           router.refresh();
@@ -390,6 +417,18 @@ export function ServiceForm({
             {genError}
           </div>
         )}
+        <div className="psv-name">
+          <label htmlFor="psv-name">Name this quote</label>
+          <input
+            id="psv-name"
+            type="text"
+            value={name}
+            maxLength={PORTAL_QUOTE_NAME_MAX}
+            disabled={preview || busy}
+            placeholder={defaultName}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
         <div className="psv-go">
           {blocked && <span className="psv-go-why">{blocked}</span>}
           <button type="button" className="psv-btn" disabled={!!blocked || busy} onClick={generate}>
