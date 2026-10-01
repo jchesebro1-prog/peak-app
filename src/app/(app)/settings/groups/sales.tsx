@@ -34,16 +34,16 @@ export function SalesGroup({
   return (
     <>
       <LinkTiles screens={GROUP_LINKS.sales} />
-            <ReviewLimitsCard
-              key={JSON.stringify(reviewLimits)}
-              people={users.filter((u) => u.status === "active").map((u) => ({ id: u.id, name: u.name }))}
-              limits={reviewLimits}
-            />
-          <PipelinesCard pipelines={pipelines} usage={pipelineUsage} />
-          <CustomerFieldsCard
-            key={customerFieldDefs.map((d) => d.id).join("|")}
-            defs={customerFieldDefs}
-          />
+      <ReviewLimitsCard
+        key={JSON.stringify(reviewLimits)}
+        people={users.filter((u) => u.status === "active").map((u) => ({ id: u.id, name: u.name }))}
+        limits={reviewLimits}
+      />
+      <PipelinesCard pipelines={pipelines} usage={pipelineUsage} />
+      <CustomerFieldsCard
+        key={customerFieldDefs.map((d) => d.id).join("|")}
+        defs={customerFieldDefs}
+      />
     </>
   );
 }
