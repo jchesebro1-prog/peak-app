@@ -13,6 +13,8 @@ export type DrivePhotosPanelView = {
   lastRun: { at: number; imported: number; updated: number; relinked: number; failed: number; complete: boolean; error: string | null } | null;
   unmatched: { name: string; webViewLink: string; reason: string }[];
   synced: number;
+  /** Set when the status reads failed — the panel shows this instead of the controls. */
+  loadError?: string;
 };
 
 export function drivePhotosPanelView(input: {
@@ -38,6 +40,11 @@ export function drivePhotosPanelView(input: {
     unmatched: (lr?.unmatched ?? []).map((u) => ({ name: u.name, webViewLink: u.webViewLink, reason: u.reason })),
     synced: Object.values(state.files).filter((f) => !!f.documentId).length,
   };
+}
+
+/** The degraded panel when reading its status failed — the page still renders. */
+export function drivePhotosLoadErrorView(message: string): DrivePhotosPanelView {
+  return { configured: false, account: null, problem: null, folder: null, lastRun: null, unmatched: [], synced: 0, loadError: message };
 }
 
 /** Daily cron rider budget: what's left before ~50 s, capped at 20 s;

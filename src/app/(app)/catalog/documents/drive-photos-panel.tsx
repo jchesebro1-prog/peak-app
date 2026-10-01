@@ -20,25 +20,39 @@ export default function DrivePhotosPanel({ view }: { view: DrivePhotosPanelView 
     start(async () => {
       setMsg(null);
       let imported = 0, updated = 0, relinked = 0, failed = 0;
-      for (;;) {
-        const r = await syncDrivePhotosAction();
-        if (!r.ok) {
-          // Includes "A photo sync is already running" — shown as a plain status, not a crash.
-          setMsg({ ok: false, text: r.error });
-          break;
+      const totals = () => `${imported} new · ${updated} updated`;
+      try {
+        for (;;) {
+          const r = await syncDrivePhotosAction();
+          if (!r.ok) {
+            // Includes "A photo sync is already running" — shown as a plain message, not a crash.
+            setMsg({ ok: false, text: imported + updated + relinked > 0 ? `${r.error} (so far: ${totals()}${relinked ? ` · ${relinked} moved` : ""})` : r.error });
+            break;
+          }
+          imported += r.imported; updated += r.updated; relinked += r.relinked; failed += r.failed;
+          const progressed = r.imported + r.updated + r.failed + r.relinked > 0;
+          if (r.remaining <= 0 || !progressed) {
+            setMsg({ ok: true, text: `${imported} new · ${updated} updated · ${relinked} moved${failed ? ` · ${failed} couldn't be read` : ""}${r.unmatched ? ` · ${r.unmatched} couldn't be matched` : ""}.` });
+            break;
+          }
+          setMsg({ ok: true, text: `Syncing… ${imported + updated} done, ${r.remaining} to go` });
         }
-        imported += r.imported; updated += r.updated; relinked += r.relinked; failed += r.failed;
-        const progressed = r.imported + r.updated + r.failed > 0;
-        if (r.remaining <= 0 || !progressed) {
-          setMsg({ ok: true, text: `${imported} new · ${updated} updated · ${relinked} moved${failed ? ` · ${failed} couldn't be read` : ""}${r.unmatched ? ` · ${r.unmatched} couldn't be matched` : ""}.` });
-          break;
-        }
-        setMsg({ ok: true, text: `Syncing… ${imported + updated} done, ${r.remaining} to go` });
+      } catch (e) {
+        // A thrown action call (network drop, function timeout): keep the totals.
+        const reason = e instanceof Error ? e.message : String(e);
+        setMsg({ ok: false, text: `Stopped after ${totals()} — ${reason}; press Sync now to continue.` });
       }
       router.refresh();
     });
 
   const box: React.CSSProperties = { border: "1px solid #e3e5ea", borderRadius: 10, padding: "12px 14px", margin: "0 0 14px", background: "#fff" };
+  if (view.loadError) {
+    return (
+      <div role="alert" style={{ ...box, fontSize: 12.5, color: "#b4543a" }}>
+        <b>Drive photos</b> — Couldn&apos;t load Drive photo status — {view.loadError}
+      </div>
+    );
+  }
   if (!view.configured) {
     return (
       <div style={{ ...box, fontSize: 12.5, color: "#5b616e" }}>

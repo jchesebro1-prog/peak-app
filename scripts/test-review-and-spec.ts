@@ -39957,7 +39957,7 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
 // ---------------------------------------------------------------------------
 // #283 — Drive photos panel view + cron budget (pure).
 // ---------------------------------------------------------------------------
-import { drivePhotosPanelView as pv283, cronPhotoBudgetMs as cb283 } from "@/lib/part-docs/drive-photo-view";
+import { drivePhotosPanelView as pv283, cronPhotoBudgetMs as cb283, drivePhotosLoadErrorView as pe283 } from "@/lib/part-docs/drive-photo-view";
 {
   const empty = { folder: null, files: {}, lastRun: null };
   const a = pv283({ mailboxKey: null, connection: null, state: empty });
@@ -39977,5 +39977,7 @@ import { drivePhotosPanelView as pv283, cronPhotoBudgetMs as cb283 } from "@/lib
   });
   ok(d.problem === null && d.folder?.webViewLink === "https://drive/F" && d.synced === 1 && d.unmatched.length === 1 && d.lastRun?.error === null,
     "#283 panel: a working setup shows the folder, synced count and couldn't-match list");
+  ok(a.loadError === undefined && d.loadError === undefined && pe283("db down").loadError === "db down" && pe283("x").synced === 0,
+    "#283 panel: loadError is absent normally and carried by the degraded view");
   ok(cb283(5_000) === 0 && cb283(15_000) === 15_000 && cb283(45_000) === 20_000, "#283 cron: the photo rider gets min(20 s, time left), none under 10 s");
 }

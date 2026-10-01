@@ -10,7 +10,7 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { getSettings } from "@/lib/settings";
 import { getDrivePhotoSyncState } from "@/lib/part-docs/drive-photo-sync";
 import { getConnectionInfo } from "@/lib/gmail/connections";
-import { drivePhotosPanelView, type DrivePhotosPanelView } from "@/lib/part-docs/drive-photo-view";
+import { drivePhotosLoadErrorView, drivePhotosPanelView, type DrivePhotosPanelView } from "@/lib/part-docs/drive-photo-view";
 import { ensureFixturesConverted } from "@/lib/fixtures-migrate";
 import { quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
 import {
@@ -65,10 +65,14 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   // #283 — Drive photos panel (admins only).
   let drivePhotos: DrivePhotosPanelView | null = null;
   if (can("manage_users", user.roles)) {
-    const [settings, syncState] = await Promise.all([getSettings(), getDrivePhotoSyncState()]);
-    const key = settings.catalogPhotosMailbox ?? null;
-    const info = key ? await getConnectionInfo(key) : null;
-    drivePhotos = drivePhotosPanelView({ mailboxKey: key, connection: info ? { address: info.address, scope: info.scope ?? null } : null, state: syncState });
+    try {
+      const [settings, syncState] = await Promise.all([getSettings(), getDrivePhotoSyncState()]);
+      const key = settings.catalogPhotosMailbox ?? null;
+      const info = key ? await getConnectionInfo(key) : null;
+      drivePhotos = drivePhotosPanelView({ mailboxKey: key, connection: info ? { address: info.address, scope: info.scope ?? null } : null, state: syncState });
+    } catch (e) {
+      drivePhotos = drivePhotosLoadErrorView(e instanceof Error ? e.message : String(e));
+    }
   }
 
   const bySku = new Map(parts.map((p) => [p.sku, p]));
