@@ -10223,7 +10223,10 @@ a whole-branch review whose findings (two-leg bi-parts, Active checks every stic
 hints) were fixed and re-reviewed.
 
 **Remaining.**
-1. Production fill — six ADC Black series through the screen's own save action, each checked in the Estimator.
+1. ~~Production fill~~ — **done 2026-10-01**: ADC 280 / 170 / 140 / 500 / 220 / 132 Black saved Active in production
+   through the screen's own save action (ids `adc-280-black` … `adc-132-black`, 90 live SKUs), each priced with the real
+   engine against production catalog costs (40' bi-parting 280 on a batten: 2 × 22' sticks, 8 hanging + 8 pipe clamps,
+   2 lap clamps, 134' of #12 — $2,024.78 cost, matched by hand).
 2. Out of scope, for Jeff: walk-along bi-parts needing 4 end stops; center pipe supports (CPS) at the overlap; curve
    spindles/idlers on curved 140 cord runs; 220's floor pulley (ADC 1145 is not in the catalog, so a cord-operated 220
    is blocked by name until one is mapped); pipe-clamp part numbers for 500 and 220 (ADC doesn't publish them); a
