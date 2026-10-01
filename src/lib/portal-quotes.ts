@@ -556,7 +556,9 @@ export type RenamePortalQuoteDeps = { updateQuote?: typeof updateQuote };
  * cleaning), a quote not listed for this customer, a Peak-sent quote and an
  * accepted (or won / lost) one. `name` is a printed content field
  * (QUOTE_CONTENT_FIELDS), so the PDF is rescheduled after the write, exactly
- * as Generate does. A write that fails refunds its rate-limit token.
+ * as Generate does; a sent quote also cuts a new sent revision (Refresh
+ * pricing's shape) so the customer's PDF shows the new name. A write that
+ * fails refunds its rate-limit token.
  */
 export async function renamePortalQuote(
   session: PortalSession | null,
@@ -593,5 +595,15 @@ export async function renamePortalQuote(
   }
   // scheduleQuotePdf never throws (it logs and returns null).
   await scheduleQuotePdf(q.id);
+  if (updated.status === "sent") {
+    // #288 final review: the customer's PDF of a sent quote is the latest
+    // sent revision's copy (portalPdfSource), so — exactly as Refresh pricing
+    // does — cut a new sent revision for this save and copy the PDF onto it
+    // once it renders. Without it the customer keeps the old name, and a
+    // rename inside the post-Generate render window would leave the original
+    // sent revision with no copy at all.
+    await addQuoteRevision(q.id, { by: "Customer portal", reason: "sent", note: "Renamed by customer" });
+    await copySentRevisionPdf(q.id).catch((e) => console.error("renamePortalQuote: sent-revision copy failed", q.id, e));
+  }
   return { ok: true, name: clean };
 }

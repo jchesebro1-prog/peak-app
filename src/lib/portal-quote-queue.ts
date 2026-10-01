@@ -152,7 +152,9 @@ export function portalQueueView<T extends PortalQueueFields>(
       estNo: displayQuoteNumber(q),
       needsAction: st === "review" || accepted,
       approve: accepted ? approveFor(q, t) : null,
-      decline: accepted,
+      // Legacy portal-self-serve acceptances predate the Decline flow
+      // (declinePortalAcceptance) — approve only.
+      decline: accepted && q.source !== "portal-self-serve",
     });
   }
 

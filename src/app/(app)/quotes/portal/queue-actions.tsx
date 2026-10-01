@@ -67,7 +67,12 @@ export function QueueRowActions({
   const approveService = () => {
     const fd = new FormData();
     fd.set("editingId", quoteId);
-    start(() => (approve === "flame" ? approveFlameQuote(fd) : approveInspectionQuote(fd)));
+    start(async () => {
+      await (approve === "flame" ? approveFlameQuote(fd) : approveInspectionQuote(fd));
+      // A stale approve (already won, or no longer accepted) returns without
+      // redirecting — refresh so the row shows what actually happened.
+      router.refresh();
+    });
   };
 
   const submitDecline = () => {

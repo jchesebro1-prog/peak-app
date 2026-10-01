@@ -8490,5 +8490,13 @@ entry keeps its `/quotes?id=` hub link rather than a `?focus=` link to a row tha
 inspection Approve calls the existing action, which redirects to that builder (`?id=…&approved=1`) instead of
 returning to the queue; catalog Approve stays on the queue. (3) Approve is offered only where the existing action can
 succeed: any accepted catalog row, but flame and inspection only when `approveKeepsAcceptedPrice` holds; otherwise the
-row shows Open only. (4) Decline works only for `portal-catalog` and `portal-service`; on a legacy `portal-self-serve`
-quote it is refused inline with the action's own message.
+row shows Open only. (4) Decline works only for `portal-catalog` and `portal-service`, so a legacy `portal-self-serve`
+row offers Approve but no Decline (final review).
+
+Final review: a customer rename bumps `updatedAt`, so a staff Approve sent with `expectUpdatedAt` on a review draft the
+customer renamed meanwhile is refused as stale, and the Estimator (which has no conflict check) can write an open
+builder's old name back over the customer's; both are accepted as rare and recoverable. A rename of a sent quote cuts a
+new sent revision ("Renamed by customer", the same `scheduleQuotePdf` → `addQuoteRevision` → `copySentRevisionPdf`
+order Refresh pricing uses), because the customer's PDF is the latest sent revision's copy; without it the customer
+never saw the new name, and a rename inside the post-Generate render window left the sent revision with no PDF at all.
+A draft rename only reschedules the PDF.

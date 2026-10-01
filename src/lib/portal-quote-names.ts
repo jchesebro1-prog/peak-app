@@ -10,17 +10,46 @@ export const PORTAL_QUOTE_NAME_MAX = 120;
  *  `portal-self-serve` (the retired estimate builder) counts too. */
 const CUSTOMER_BUILT_SOURCES = new Set(["portal-catalog", "portal-service", "portal-self-serve"]);
 
-/** Trimmed, control and format characters (\p{Cc}, \p{Cf} — zero-width,
- *  bidi overrides, BOM) stripped, inner whitespace collapsed, capped at 120
- *  characters (code points). Anything that isn't a string → "". */
+/** Invisible characters a name never needs: bidi embeddings / overrides
+ *  (U+202A–202E) and isolates (U+2066–2069), the zero-width space (U+200B)
+ *  and the BOM (U+FEFF), plus control characters. ZWNJ / ZWJ (U+200C/200D)
+ *  stay — scripts and emoji sequences need them. */
+const STRIP = /[\p{Cc}\u200B\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
+
+const GRAPHEMES: { segment(s: string): Iterable<{ segment: string }> } | null =
+  typeof Intl !== "undefined" && typeof (Intl as { Segmenter?: unknown }).Segmenter === "function"
+    ? new Intl.Segmenter("en", { granularity: "grapheme" })
+    : null;
+
+/** The longest prefix of `s` of at most `max` code points that never splits a
+ *  grapheme cluster (an emoji family, a flag, a base + combining mark) — a
+ *  cluster that doesn't fit whole is dropped. Falls back to code points where
+ *  Intl.Segmenter is unavailable. */
+function capGraphemes(s: string, max: number): string {
+  if (!GRAPHEMES) return Array.from(s).slice(0, max).join("");
+  let out = "";
+  let used = 0;
+  for (const { segment } of GRAPHEMES.segment(s)) {
+    const n = Array.from(segment).length;
+    if (used + n > max) break;
+    out += segment;
+    used += n;
+  }
+  return out;
+}
+
+/** Trimmed, control characters and invisible bidi / zero-width / BOM
+ *  characters stripped (STRIP), inner whitespace collapsed, capped at 120
+ *  characters (code points) without splitting a grapheme. Anything that
+ *  isn't a string → "". */
 export function cleanPortalQuoteName(raw: unknown): string {
   if (typeof raw !== "string") return "";
   const flat = raw
     .replace(/\s+/g, " ")
-    .replace(/[\p{Cc}\p{Cf}]/gu, "")
+    .replace(STRIP, "")
     .replace(/\s+/g, " ")
     .trim();
-  return Array.from(flat).slice(0, PORTAL_QUOTE_NAME_MAX).join("").trim();
+  return capGraphemes(flat, PORTAL_QUOTE_NAME_MAX).trim();
 }
 
 const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
@@ -40,7 +69,7 @@ export function portalQuoteDate(at: number): string {
 function withDate(label: string, at: number, suffix = ""): string {
   const tail = `${suffix} — ${portalQuoteDate(at)}`;
   const room = Math.max(1, PORTAL_QUOTE_NAME_MAX - Array.from(tail).length);
-  const cut = Array.from(label).slice(0, room).join("").trim();
+  const cut = capGraphemes(label, room).trim();
   return cleanPortalQuoteName(cut + tail);
 }
 

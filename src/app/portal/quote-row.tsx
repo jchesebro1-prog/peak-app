@@ -4,6 +4,7 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 import type { Quote } from "@/lib/stores/quotes";
 import { canAcceptPortal } from "@/lib/portal-quote-mode";
 import { portalQuoteTypeLabel } from "@/lib/portal-my-quotes";
+import { portalQuoteDate } from "@/lib/portal-quote-names";
 import { portalQuotePdfPreparing, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
 import { latestSentRevision, pdfView } from "@/lib/quote-pdf/state";
 import { copyQuoteToCart } from "./actions";
@@ -141,7 +142,7 @@ export function PortalQuoteRow({
     q.name
   );
   const meta = mine
-    ? displayQuoteNumber(q) + " · " + portalQuoteTypeLabel(q) + " · " + fmtDate(q.createdAt || q.updatedAt)
+    ? displayQuoteNumber(q) + " · " + portalQuoteTypeLabel(q) + " · " + portalQuoteDate(q.createdAt || q.updatedAt)
     : displayQuoteNumber(q) + " · " + fmtDate(q.updatedAt);
   return (
     <div style={{ borderBottom: "1px solid #f5f6f8" }}>
