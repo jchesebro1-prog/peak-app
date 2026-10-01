@@ -58,7 +58,7 @@ export const TRACK_SERIES_GONE = "This series no longer exists.";
 /** Where every role's part is mapped — named in every "no part" error. */
 export const TRACK_SERIES_HOME = "Estimating Rules → Track series";
 
-const MOUNT_ROLES: ReadonlySet<TrackRole> = new Set(["battenClamp", "ceilingHanger"]);
+const MOUNT_ROLES: ReadonlySet<TrackRole> = new Set(["battenClamp", "ceilingHanger", "pipeClamp"]);
 
 function partOf(parts: ReadonlyMap<string, TrackPart> | Record<string, TrackPart>, sku: string): TrackPart | undefined {
   if (!sku) return undefined;
@@ -92,8 +92,10 @@ export function trackBom(
   let costed = 0; // Σ cost × qty of parts that have a cost (sold at the seed)
   let listed = 0; // Σ list × qty of parts with no cost (sold at list)
   const rows = q.rows.map((r): TrackBomRow => {
-    const label = TRACK_ROLE_NAMES[r.role];
-    const sku = roleSku(series, r.role);
+    const name = TRACK_ROLE_NAMES[r.role];
+    // #291: the engine names the stick it chose; every other role reads the series map.
+    const label = r.role === "track" && r.lengthFt ? `${name} (${fmtFt(r.lengthFt)} stick)` : name;
+    const sku = r.sku || roleSku(series, r.role);
     const part = partOf(parts, sku);
     if (!part) {
       errors.push(`${series.name} has no part for ${label} — map it in ${TRACK_SERIES_HOME}.`);

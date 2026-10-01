@@ -10201,7 +10201,36 @@ src files.
 
 ---
 
-## 289. Portal catalog — Packages & Assemblies section; departments hold parts only — DONE 2026-10-01 (D529–D531)
+## 291. Track configurator — prices ADC's real bill of materials — DONE 2026-10-01 (D529–D532)
+
+**Reported:** Jeff (2026-10-01): "Help me by taking the catalog for track and helping me map the track parts and auto
+fill that — use the web and ADC." The ADC price book is in the production catalog (1,190 ADC parts, category Track), but
+#274's one-part-per-role series under-priced ADC's real BOM. Jeff chose **upgrade first, then fill**, black finish,
+1-1/2" sch 40 battens, and six series (280, 170, 140, 500, 220, 132). Research: ADC Catalog 52, adctracks.com part
+pages and the series submittal/installation binders. Spec: `docs/superpowers/specs/2026-10-01-track-adc-bom-design.md`.
+
+**Done.** A series maps **several stick lengths** and each track buys equal pieces, the shortest stick that covers its
+share (D529); four **optional roles** — ceiling splice, pipe clamp per batten point, lap clamps on a bi-parting batten
+track, one-way dead-end pulley — priced only when mapped (D530); a per-series **operating-line tie-off allowance**
+(D531); and a **lapped bi-part is two legs** — sticks, splices and hanging points per leg (D532, corrects #274).
+Estimating Rules → Track series edits a Stick lengths list (hints for an incomplete or duplicate row; Save waits),
+marks the optional roles, and the Active check refuses any stick SKU no longer in the catalog. The Estimator's parts
+table reads "Track (22' stick)". No migrations (the `track_series` blob gains optional fields).
+
+Gates: tsc 0; test:specs 10,238 PASS / 0 FAIL (50 for #291; base 10,227 after merging #288); test:smoke 184 PASS /
+0 FAIL; `next build` OK; eslint 0 problems on the 7 changed src files. Subagent-built (2 tasks), each task reviewed, then
+a whole-branch review whose findings (two-leg bi-parts, Active checks every stick, stick named in the error, stick-row
+hints) were fixed and re-reviewed.
+
+**Remaining.**
+1. Production fill — six ADC Black series through the screen's own save action, each checked in the Estimator.
+2. Out of scope, for Jeff: walk-along bi-parts needing 4 end stops; center pipe supports (CPS) at the overlap; curve
+   spindles/idlers on curved 140 cord runs; 220's floor pulley (ADC 1145 is not in the catalog, so a cord-operated 220
+   is blocked by name until one is mapped); pipe-clamp part numbers for 500 and 220 (ADC doesn't publish them); a
+   separate ceiling vs batten hanger spacing; 170 has no black ceiling bracket in the catalog (ceiling-mounted 170 is
+   blocked by name); 500's ceiling clamp (5023-B) has no black version.
+
+## 289. Portal catalog — Packages & Assemblies section; departments hold parts only — DONE 2026-10-01 (D533–D535)
 
 **Done.** Assemblies gain a **Portal category** (Design → Assemblies); the portal catalog gets a reserved
 **Packages & Assemblies** section — a landing tile, `?dept=packages` scoping and a Packages-then-Parts search split —

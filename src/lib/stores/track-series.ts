@@ -6,6 +6,7 @@ import {
   allocateTrackSeriesId,
   sanitizeTrackSeries,
   sanitizeTrackSeriesBlob,
+  seriesSkus,
   type TrackSeries,
 } from "@/lib/track-series";
 
@@ -63,7 +64,7 @@ export async function saveTrackSeries(input: unknown, by: string, now = Date.now
   if (existing.some((s) => s.id !== clean.id && s.name.toLowerCase() === lower)) return { ok: false, error: `There is already a series called "${clean.name}".` };
 
   if (requestedActive) {
-    const live = await liveSkusOf(Object.values(clean.parts).map((p) => p!.sku));
+    const live = await liveSkusOf(seriesSkus(clean));
     const problems = activationProblems(clean, live);
     if (problems.length) return { ok: false, error: `Can't mark it active yet: ${problems.join(" ")}` };
   }

@@ -268,7 +268,7 @@ Shipped on `feat/288-portal-quotes` (D525–D528, punch #288). Deviations from t
 
 ## As built — Part 2
 
-Shipped on `feat/289-portal-packages` (D529–D531, punch #289). Deviations from §2:
+Shipped on `feat/289-portal-packages` (D533–D535, punch #289). Deviations from §2:
 
 - **"Includes 1 part" is singular.** The tile pluralises as "1 part" / "N parts"; N is the included lines the sidebar
   lists (`includedLines`), labour component rows counted.

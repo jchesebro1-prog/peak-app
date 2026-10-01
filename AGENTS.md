@@ -561,7 +561,18 @@ See `.env.example`.
     the existing actions, bell links focus the row. Peak-sent acceptances
     keep their hub link. Punch item #288.
 
-29. ✅ **Portal Packages & Assemblies** (#289, D529–D531) — fixture
+29. ✅ **Track configurator — ADC's real BOM** (#291, D529–D532) — a track
+    series maps several stick lengths (`sticks`; each leg buys equal pieces,
+    the shortest stick that covers its share; sanitize derives
+    `stickLengthFt`/`parts.track` from the longest), four optional roles
+    priced only when mapped (ceiling splice, pipe clamp per batten point,
+    lap clamps on a bi-parting batten track, one-way dead end), a per-series
+    operating-line tie-off allowance, and a lapped bi-part (overlap > 0) is
+    two legs — sticks, splices and hanging points per leg. Estimating Rules
+    → Track series edits the stick list. Researched against ADC Catalog 52
+    and the series binders. Punch item #291.
+
+30. ✅ **Portal Packages & Assemblies** (#289, D533–D535) — fixture
     assemblies carry an optional **Portal category** (Design → Assemblies;
     "Other packages" when blank); the portal catalog gains a reserved
     `packages` department — a landing tile, `?dept=packages` scoping and a

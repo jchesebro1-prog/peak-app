@@ -23,6 +23,7 @@ import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
+import { seriesSkus } from "@/lib/track-series";
 import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
@@ -322,7 +323,7 @@ export default async function EstimatorPage({
   // #274: the live catalog part behind every SKU a track series maps (the
   // catalog rows are already loaded); a mapped SKU absent here was deleted,
   // and the track modal treats it as unmapped.
-  const trackSkus = new Set(trackSeries.flatMap((s) => Object.values(s.parts).map((p) => p?.sku || "")).filter(Boolean));
+  const trackSkus = new Set(trackSeries.flatMap((s) => seriesSkus(s)));
   const trackParts: Record<string, TrackPart> = {};
   for (const p of catalogRows) {
     if (!trackSkus.has(p.sku)) continue;

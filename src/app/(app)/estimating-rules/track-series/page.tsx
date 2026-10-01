@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getMany } from "@/lib/stores/catalog";
 import { listTrackSeries } from "@/lib/stores/track-series";
+import { seriesSkus } from "@/lib/track-series";
 import TrackSeriesClient, { type PartInfo } from "./track-series-client";
 
 export const metadata = { title: "Track series — Estimating Rules — Quartzite-6" };
@@ -38,7 +39,7 @@ export default async function TrackSeriesPage() {
   }
 
   const series = await listTrackSeries();
-  const skus = [...new Set(series.flatMap((s) => Object.values(s.parts).map((p) => p!.sku)))];
+  const skus = [...new Set(series.flatMap((s) => seriesSkus(s)))];
   const parts: Record<string, PartInfo> = {};
   for (const p of skus.length ? await getMany(skus) : []) {
     parts[p.sku] = { desc: p.desc, cost: p.cost || 0, unit: p.unit || "ea", mfr: p.mfr || "" };

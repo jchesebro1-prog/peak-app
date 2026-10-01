@@ -9,9 +9,13 @@ import {
   CORD_ROLES,
   MOUNTING_ROLES,
   NEW_SERIES_DEFAULTS,
+  OPTIONAL_ROLES,
+  TRACK_LIMITS,
   TRACK_ROLES,
   TRACK_ROLE_LABELS,
   activationProblems,
+  sanitizeTrackSeries,
+  seriesSticks,
   type TrackRole,
   type TrackSeries,
 } from "@/lib/track-series";
@@ -32,14 +36,25 @@ function roleNeed(role: TrackRole): string {
   if (MOUNTING_ROLES.includes(role)) return "One mounting required";
   if (CORD_ROLES.includes(role)) return "Cord-operated tracks";
   if (role === "curved") return "Curved runs";
+  if (role === "ceilingSplice") return "Optional — ceiling mounting";
+  if (role === "pipeClamp") return "Optional — batten mounting";
+  if (role === "lapClamp") return "Optional — bi-parting on a batten";
+  if (role === "deadPulleyOneWay") return "Optional — one-way";
   return "";
 }
+
+/** One stick-length row; `id` is a client-only key (never saved) so removing a row never shifts another's state. */
+type StickRow = { id: string; lengthFt: string; sku: string };
+
+let stickSeq = 0;
+const newStickRow = (lengthFt = "", sku = ""): StickRow => ({ id: `stick-${++stickSeq}`, lengthFt, sku });
 
 type Draft = {
   id: string;
   name: string;
   manufacturer: string;
-  stickLengthFt: string;
+  sticks: StickRow[];
+  lineAllowanceFt: string;
   curvedSectionFt: string;
   minRadiusFt: string;
   carrierSpacingIn: string;
@@ -57,7 +72,8 @@ function draftOf(s: TrackSeries | null): Draft {
       id: "",
       name: "",
       manufacturer: "",
-      stickLengthFt: "",
+      sticks: [],
+      lineAllowanceFt: "",
       curvedSectionFt: "",
       minRadiusFt: "",
       carrierSpacingIn: String(NEW_SERIES_DEFAULTS.carrierSpacingIn),
@@ -68,12 +84,13 @@ function draftOf(s: TrackSeries | null): Draft {
     };
   }
   const parts: Partial<Record<TrackRole, string>> = {};
-  for (const r of TRACK_ROLES) if (s.parts[r]?.sku) parts[r] = s.parts[r]!.sku;
+  for (const r of TRACK_ROLES) if (r !== "track" && s.parts[r]?.sku) parts[r] = s.parts[r]!.sku;
   return {
     id: s.id,
     name: s.name,
     manufacturer: s.manufacturer,
-    stickLengthFt: str(s.stickLengthFt),
+    sticks: seriesSticks(s).map((x) => newStickRow(String(x.lengthFt), x.sku)),
+    lineAllowanceFt: str(s.lineAllowanceFt),
     curvedSectionFt: str(s.curvedSectionFt),
     minRadiusFt: str(s.minRadiusFt),
     carrierSpacingIn: String(s.carrierSpacingIn),
@@ -124,7 +141,7 @@ export default function TrackSeriesClient({ series, parts }: { series: TrackSeri
         <div className="pk-card" style={{ padding: "40px 24px", textAlign: "center" }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>No track series yet</div>
           <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6, lineHeight: 1.55 }}>
-            Add a series (e.g. ADC 280), enter its stick length and map each piece to a catalog part. Nothing is mapped for you.
+            Add a series (e.g. ADC 280), enter its stick lengths and map each piece to a catalog part. Nothing is mapped for you.
           </div>
         </div>
       )}
@@ -152,12 +169,17 @@ export default function TrackSeriesClient({ series, parts }: { series: TrackSeri
           </div>
           <div style={{ fontSize: 12, color: "#5b616e", marginTop: 5 }}>
             {[
-              `Stick ${s.stickLengthFt > 0 ? `${s.stickLengthFt}'` : "—"}`,
+              (() => {
+                const st = seriesSticks(s);
+                if (!st.length) return "Stick —";
+                return st.length === 1 ? `Stick ${st[0].lengthFt}'` : `Sticks ${st[0].lengthFt}'–${st[st.length - 1].lengthFt}' (${st.length} lengths)`;
+              })(),
               s.curvedSectionFt ? `curved section ${s.curvedSectionFt}'` : "no curved track",
               s.minRadiusFt ? `min radius ${s.minRadiusFt}'` : "",
               `carriers every ${s.carrierSpacingIn}"`,
               `clamps/hangers every ${s.hangerSpacingFt}'`,
               s.overlapFt ? `bi-parting overlap ${s.overlapFt}'` : "",
+              s.lineAllowanceFt ? `line +${s.lineAllowanceFt}' tie-off` : "",
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -166,7 +188,15 @@ export default function TrackSeriesClient({ series, parts }: { series: TrackSeri
             <SeriesEditor series={s} parts={parts} onClose={() => setOpen(null)} />
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 210px) minmax(0, 1fr)", gap: "3px 12px", fontSize: 12, marginTop: 10 }}>
-              {TRACK_ROLES.filter((r) => s.parts[r]).map((r) => (
+              {seriesSticks(s).map((st) => (
+                <div key={`stick-${st.lengthFt}`} style={{ display: "contents" }}>
+                  <div style={{ color: "#737985" }}>Track {st.lengthFt}&apos; stick</div>
+                  <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <PartLine sku={st.sku} info={parts[st.sku]} />
+                  </div>
+                </div>
+              ))}
+              {TRACK_ROLES.filter((r) => r !== "track" && s.parts[r]).map((r) => (
                 <div key={r} style={{ display: "contents" }}>
                   <div style={{ color: "#737985" }}>{TRACK_ROLE_LABELS[r]}</div>
                   <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -174,7 +204,7 @@ export default function TrackSeriesClient({ series, parts }: { series: TrackSeri
                   </div>
                 </div>
               ))}
-              {!Object.keys(s.parts).length && <div style={{ color: "#a0442b", gridColumn: "1 / -1" }}>No parts mapped yet.</div>}
+              {!Object.keys(s.parts).length && !seriesSticks(s).length && <div style={{ color: "#a0442b", gridColumn: "1 / -1" }}>No parts mapped yet.</div>}
             </div>
           )}
           {s.updatedBy && open !== s.id && (
@@ -192,7 +222,7 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
   const router = useRouter();
   const [draft, setDraft] = useState<Draft>(() => draftOf(series));
   const [known, setKnown] = useState<Record<string, PartInfo>>(parts);
-  const [picking, setPicking] = useState<TrackRole | null>(null);
+  const [picking, setPicking] = useState<TrackRole | `stick:${string}` | null>(null);
   const [error, setError] = useState("");
   const [pending, start] = useTransition();
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
@@ -204,29 +234,56 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
       return { ...d, parts: next };
     });
 
+  const setStick = (id: string, patch: Partial<Omit<StickRow, "id">>) =>
+    setDraft((d) => ({ ...d, sticks: d.sticks.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  const removeStick = (id: string) => {
+    setDraft((d) => ({ ...d, sticks: d.sticks.filter((x) => x.id !== id) }));
+    if (picking === `stick:${id}`) setPicking(null);
+  };
+
+  // Per-row hints, read the way sanitize reads a stick (positive, clamped): a row
+  // missing its length or part, or repeating an earlier length, would be dropped on save.
+  const seenLengths = new Set<number>();
+  const stickHints = new Map<string, string>();
+  for (const st of draft.sticks) {
+    const n = Number(st.lengthFt.trim() === "" ? NaN : st.lengthFt);
+    const len = Number.isFinite(n) && n > 0 ? Math.min(n, TRACK_LIMITS.stickLengthFt) : 0;
+    const needs = [!(len > 0) ? "Needs a length" : "", !st.sku ? "Needs a part" : ""].filter(Boolean);
+    if (needs.length) stickHints.set(st.id, needs.join(" · "));
+    else if (seenLengths.has(len)) stickHints.set(st.id, "Duplicate length — only the first is kept");
+    else seenLengths.add(len);
+  }
+  const hintValues = [...stickHints.values()];
+  const saveBlock = hintValues.some((h) => h.startsWith("Needs"))
+    ? "Finish or remove the incomplete stick length."
+    : hintValues.length
+      ? "Remove the duplicate stick length."
+      : "";
+
+  // The save payload; the activation preview runs it through the same sanitize the server does.
+  const payload = {
+    ...(draft.id ? { id: draft.id } : {}),
+    name: draft.name,
+    manufacturer: draft.manufacturer,
+    sticks: draft.sticks.map(({ lengthFt, sku }) => ({ lengthFt, sku })),
+    lineAllowanceFt: draft.lineAllowanceFt,
+    curvedSectionFt: draft.curvedSectionFt,
+    minRadiusFt: draft.minRadiusFt,
+    carrierSpacingIn: draft.carrierSpacingIn,
+    hangerSpacingFt: draft.hangerSpacingFt,
+    overlapFt: draft.overlapFt,
+    parts: Object.fromEntries(Object.entries(draft.parts).filter(([r, sku]) => r !== "track" && sku).map(([r, sku]) => [r, { sku }])),
+  };
   const liveSkus = new Set(Object.keys(known));
-  const partMap: Partial<Record<TrackRole, { sku: string }>> = {};
-  for (const [r, sku] of Object.entries(draft.parts)) if (sku) partMap[r as TrackRole] = { sku };
-  const problems = activationProblems({ stickLengthFt: Number(draft.stickLengthFt) || 0, parts: partMap }, liveSkus);
+  const clean = sanitizeTrackSeries({ ...payload, active: false });
+  const problems = clean ? activationProblems(clean, liveSkus) : ["Nothing to save."];
   const canActivate = problems.length === 0;
   const active = draft.active && canActivate;
 
   const save = () =>
     start(async () => {
       setError("");
-      const r = await saveTrackSeriesAction({
-        ...(draft.id ? { id: draft.id } : {}),
-        name: draft.name,
-        manufacturer: draft.manufacturer,
-        stickLengthFt: draft.stickLengthFt,
-        curvedSectionFt: draft.curvedSectionFt,
-        minRadiusFt: draft.minRadiusFt,
-        carrierSpacingIn: draft.carrierSpacingIn,
-        hangerSpacingFt: draft.hangerSpacingFt,
-        overlapFt: draft.overlapFt,
-        parts: partMap,
-        active,
-      });
+      const r = await saveTrackSeriesAction({ ...payload, active });
       if (!r.ok) setError(r.error);
       else {
         onClose();
@@ -234,7 +291,7 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
       }
     });
 
-  const field = (label: string, key: "stickLengthFt" | "curvedSectionFt" | "minRadiusFt" | "carrierSpacingIn" | "hangerSpacingFt" | "overlapFt", unit: string, placeholder = "") => (
+  const field = (label: string, key: "lineAllowanceFt" | "curvedSectionFt" | "minRadiusFt" | "carrierSpacingIn" | "hangerSpacingFt" | "overlapFt", unit: string, placeholder = "") => (
     <label style={{ display: "block" }}>
       <div style={LABEL}>{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -257,17 +314,60 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
         </label>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginTop: 10 }}>
-        {field("Stick length", "stickLengthFt", "ft", "from the maker's data")}
         {field("Curved section", "curvedSectionFt", "ft", "blank = no curves")}
         {field("Min radius", "minRadiusFt", "ft")}
         {field("Carrier spacing", "carrierSpacingIn", "in")}
         {field("Clamp / hanger spacing", "hangerSpacingFt", "ft")}
         {field("Bi-parting overlap", "overlapFt", "ft")}
+        {field("Line tie-off allowance", "lineAllowanceFt", "ft", "ADC: 10")}
+      </div>
+
+      <div style={{ ...LABEL, marginTop: 16 }}>Stick lengths</div>
+      <div style={{ display: "grid", gap: 6 }}>
+        {draft.sticks.map((st) => (
+          <div key={st.id} style={{ border: "1px solid #eef0f3", borderRadius: 9, padding: "8px 10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <input type="number" min={0} step="any" value={st.lengthFt} placeholder="ft" aria-label="Stick length (ft)" onChange={(e) => setStick(st.id, { lengthFt: e.target.value })} style={{ ...INPUT, width: 80 }} />
+              <span style={{ fontSize: 12, color: "#8c919c" }}>ft</span>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
+                <PartLine sku={st.sku} info={known[st.sku]} />
+              </span>
+              <button type="button" style={BTN} onClick={() => setPicking(picking === `stick:${st.id}` ? null : `stick:${st.id}`)}>
+                {picking === `stick:${st.id}` ? "Done" : st.sku ? "Change" : "Map part"}
+              </button>
+              <button type="button" style={BTN} aria-label="Remove this length" onClick={() => removeStick(st.id)}>
+                ×
+              </button>
+            </div>
+            {stickHints.has(st.id) && <div style={{ fontSize: 11, color: "#a0442b", marginTop: 5 }}>{stickHints.get(st.id)}</div>}
+            {picking === `stick:${st.id}` && (
+              <div style={{ marginTop: 8 }}>
+                <PartPicker
+                  sku={st.sku}
+                  showSku={false}
+                  onPick={(picked, hit) => {
+                    setKnown((k) => ({ ...k, [picked]: { desc: hit.desc, cost: hit.cost, unit: hit.unit, mfr: "" } }));
+                    setStick(st.id, { sku: picked });
+                    setPicking(null);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+        {draft.sticks.length < TRACK_LIMITS.sticks && (
+          <div>
+            <button type="button" style={BTN} onClick={() => setDraft((d) => ({ ...d, sticks: [...d.sticks, newStickRow()] }))}>
+              + Add length
+            </button>
+            <span style={{ fontSize: 11, color: "#9aa0ab", marginLeft: 8 }}>Each track buys equal pieces: the shortest stick that covers its share of the length.</span>
+          </div>
+        )}
       </div>
 
       <div style={{ ...LABEL, marginTop: 16 }}>Parts</div>
       <div style={{ display: "grid", gap: 6 }}>
-        {TRACK_ROLES.map((role) => {
+        {TRACK_ROLES.filter((r) => r !== "track").map((role) => {
           const sku = draft.parts[role] || "";
           return (
             <div key={role} style={{ border: "1px solid #eef0f3", borderRadius: 9, padding: "8px 10px" }}>
@@ -275,7 +375,7 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
                 <span style={{ fontSize: 12.5, fontWeight: 650, minWidth: 170 }}>{TRACK_ROLE_LABELS[role]}</span>
                 {roleNeed(role) && <span style={{ fontSize: 10.5, color: "#9aa0ab" }}>{roleNeed(role)}</span>}
                 <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
-                  <PartLine sku={sku} info={known[sku]} />
+                  {OPTIONAL_ROLES.includes(role) && !sku ? <span style={{ color: "#9aa0ab" }}>Not used</span> : <PartLine sku={sku} info={known[sku]} />}
                 </span>
                 <button type="button" style={BTN} onClick={() => setPicking(picking === role ? null : role)}>
                   {picking === role ? "Done" : sku ? "Change" : "Map part"}
@@ -318,12 +418,13 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
 
       {error && <div style={{ color: "#a0442b", fontSize: 12, marginTop: 8 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
-        <button type="button" onClick={save} disabled={pending} style={PRIMARY}>
+        <button type="button" onClick={save} disabled={pending || !!saveBlock} style={saveBlock ? { ...PRIMARY, opacity: 0.5, cursor: "not-allowed" } : PRIMARY}>
           {pending ? "Saving…" : series ? "Save series" : "Add series"}
         </button>
         <button type="button" onClick={onClose} style={BTN}>
           Cancel
         </button>
+        {saveBlock && <span style={{ fontSize: 11.5, color: "#a0442b" }}>{saveBlock}</span>}
         <span style={{ flex: 1 }} />
         {series && (
           <ConfirmButton
