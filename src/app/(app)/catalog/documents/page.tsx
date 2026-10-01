@@ -7,6 +7,10 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { listProjects } from "@/lib/stores/grid-projects";
 import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { loadPartDocsState } from "@/lib/part-docs/load";
+import { getSettings } from "@/lib/settings";
+import { getDrivePhotoSyncState } from "@/lib/part-docs/drive-photo-sync";
+import { getConnectionInfo } from "@/lib/gmail/connections";
+import { drivePhotosPanelView, type DrivePhotosPanelView } from "@/lib/part-docs/drive-photo-view";
 import { ensureFixturesConverted } from "@/lib/fixtures-migrate";
 import { quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
 import {
@@ -23,6 +27,7 @@ import DocumentsClient from "./documents-client";
 import DavinciPrefillButton from "./davinci-prefill-button";
 import ThumbnailButton from "./thumbnail-button";
 import CatalogImagesButton from "./catalog-images-button";
+import DrivePhotosPanel from "./drive-photos-panel";
 
 export const metadata = { title: "Datasheets — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -56,6 +61,15 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
     ensureFixturesConverted(),
   ]);
   const state = await loadPartDocsState(parts);
+
+  // #283 — Drive photos panel (admins only).
+  let drivePhotos: DrivePhotosPanelView | null = null;
+  if (can("manage_users", user.roles)) {
+    const [settings, syncState] = await Promise.all([getSettings(), getDrivePhotoSyncState()]);
+    const key = settings.catalogPhotosMailbox ?? null;
+    const info = key ? await getConnectionInfo(key) : null;
+    drivePhotos = drivePhotosPanelView({ mailboxKey: key, connection: info ? { address: info.address, scope: info.scope ?? null } : null, state: syncState });
+  }
 
   const bySku = new Map(parts.map((p) => [p.sku, p]));
   // Labor rows are rates, not products — they never take a datasheet.
@@ -104,6 +118,8 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           <Link href="/catalog/documents/upload" className="pk-btn-accent" style={{ textDecoration: "none" }}>Upload many</Link>
         </div>
       </div>
+
+      {drivePhotos && <DrivePhotosPanel view={drivePhotos} />}
 
       {!blobEnabled() && (
         <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "#fdf3df", border: "1px solid #f3e0b5", color: "#9a6b12", fontSize: 12.5 }}>

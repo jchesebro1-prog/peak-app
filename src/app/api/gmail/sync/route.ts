@@ -5,6 +5,9 @@ import { syncAllGoogleTasks } from "@/lib/google/tasks-sync";
 import { reconcileRecordings } from "@/lib/krisp/reconcile";
 import { archiveRecordings } from "@/lib/krisp/archive";
 import { ensureVendorAssignments } from "@/lib/vendor-tasks";
+import { getSettings } from "@/lib/settings";
+import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
+import { cronPhotoBudgetMs } from "@/lib/part-docs/drive-photo-view";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
@@ -36,8 +39,11 @@ export const maxDuration = 60;
  *
  * #122 adds ensureVendorAssignments() the same way — the vendor spec's
  * "daily cron" is this route.
+ *
+ * #283 adds the Peak Product Photos sync the same way.
  */
 export async function GET(req: Request): Promise<NextResponse> {
+  const started = Date.now();
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     return NextResponse.json({ error: "cron not configured" }, { status: 503 });
@@ -78,5 +84,20 @@ export async function GET(req: Request): Promise<NextResponse> {
     vendors = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors });
+  // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
+  // skipped if the Gmail/riders above left under 10 s of the 60 s ceiling
+  // (cronPhotoBudgetMs keeps a ~10 s margin under 50 s), and skipped quietly
+  // when no photos account is set. Own try/catch like the other riders.
+  let drivePhotos: unknown;
+  try {
+    if (!(await getSettings()).catalogPhotosMailbox) drivePhotos = { skipped: "no photos account" };
+    else {
+      const budget = cronPhotoBudgetMs(50_000 - (Date.now() - started));
+      drivePhotos = budget > 0 ? await syncDrivePhotos(budget) : { skipped: "no time left" };
+    }
+  } catch (err) {
+    drivePhotos = { error: (err as Error).message };
+  }
+
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, drivePhotos });
 }

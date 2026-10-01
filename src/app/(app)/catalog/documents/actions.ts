@@ -38,6 +38,7 @@ import { RENDER_WORST_CASE_MS } from "@/lib/quote-pdf/render";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
+import { syncDrivePhotos, type DrivePhotoSyncResult } from "@/lib/part-docs/drive-photo-sync";
 import {
   FETCH_ACTION_BUDGET_MS,
   FETCH_BATCH_SIZE,
@@ -592,4 +593,14 @@ export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: 
     revalidatePath("/catalog");
   }
   return { ok: true, done, failed, remaining, failedIds };
+}
+
+/** Admin "Sync now" (#283): one budgeted Peak Product Photos pass; the panel
+ *  loops while `remaining > 0` and a call made progress. */
+export async function syncDrivePhotosAction(): Promise<DrivePhotoSyncResult> {
+  await requirePerm("manage_users");
+  const r = await syncDrivePhotos(FETCH_ACTION_BUDGET_MS);
+  revalidate();
+  revalidatePath("/catalog");
+  return r;
 }

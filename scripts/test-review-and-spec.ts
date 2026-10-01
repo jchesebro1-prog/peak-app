@@ -39953,3 +39953,29 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
     await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null, runningUntil: null });
   }
 }
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photos panel view + cron budget (pure).
+// ---------------------------------------------------------------------------
+import { drivePhotosPanelView as pv283, cronPhotoBudgetMs as cb283 } from "@/lib/part-docs/drive-photo-view";
+{
+  const empty = { folder: null, files: {}, lastRun: null };
+  const a = pv283({ mailboxKey: null, connection: null, state: empty });
+  ok(!a.configured && a.problem === null && a.lastRun === null, "#283 panel: no account → not configured");
+  const b = pv283({ mailboxKey: "shared:x", connection: null, state: empty });
+  ok(b.configured && /isn't connected/.test(b.problem || ""), "#283 panel: a disconnected account is flagged");
+  const c = pv283({ mailboxKey: "personal:u1", connection: { address: "jeff@peak.com", scope: "https://www.googleapis.com/auth/drive.file" }, state: empty });
+  ok(c.account === "jeff@peak.com" && /Enable Drive photos/.test(c.problem || ""), "#283 panel: an account without drive.readonly is flagged");
+  const d = pv283({
+    mailboxKey: "personal:u1",
+    connection: { address: "jeff@peak.com", scope: "https://www.googleapis.com/auth/drive.readonly" },
+    state: {
+      folder: { id: "F", driveId: null, name: "Peak Product Photos", webViewLink: "https://drive/F" },
+      files: { a: { md5: "1", documentId: "PD-1", skus: ["X"], at: 1 }, b: { md5: "2", documentId: null, skus: [], error: "bad", at: 1 } },
+      lastRun: { at: 5, imported: 1, updated: 0, relinked: 0, failed: 1, unmatched: [{ fileId: "u", name: "u.jpg", webViewLink: "https://drive/u", reason: "no part number found in the name" }], complete: true },
+    },
+  });
+  ok(d.problem === null && d.folder?.webViewLink === "https://drive/F" && d.synced === 1 && d.unmatched.length === 1 && d.lastRun?.error === null,
+    "#283 panel: a working setup shows the folder, synced count and couldn't-match list");
+  ok(cb283(5_000) === 0 && cb283(15_000) === 15_000 && cb283(45_000) === 20_000, "#283 cron: the photo rider gets min(20 s, time left), none under 10 s");
+}
