@@ -14,13 +14,25 @@
  *   unredeem:<quoteId>:<n>  that spend undone             (+ the redeem)
  *   start:<companyId>       the one-time starting credit  (+)
  *   adjust:<companyId>:<t>  a staff adjustment            (±, note required)
- *   perk:<companyId>:<perkId>:<n>   the n-th use of a perk (0)
- *   unperk:<companyId>:<perkId>:<n> that use undone        (0)
+ *   perk:<companyId>:<perkId>:<n>   the n-th use of a perk (0, or −pointCost when bought with points)
+ *   unperk:<companyId>:<perkId>:<n> that use undone        (−the use: refunds the points exactly)
+ *   fulfil:perk:<companyId>:<perkId>:<n>  a redemption fulfilled by staff (0)
+ *
+ * #282 perks+points: a perk use with `redeemed` set is a REDEMPTION (portal or
+ * staff Redeem) that staff still have to deliver — `perk-fulfil` records the
+ * delivery; a use without it is a staff "Mark used" (delivered on the spot).
+ *
+ * Amounts are dollars. Earns and starting credit post WHOLE dollars (rounded
+ * up) and an applied credit is whole dollars (rounded down), so the points a
+ * customer sees (points.ts, 1 point = $1) match; reversals and unredeems
+ * mirror their entry exactly. Only a staff adjustment may carry cents.
  *
  * Pure and client-safe.
  */
 
-export const LEDGER_KINDS = ["earn", "reverse", "start", "redeem", "unredeem", "adjust", "perk", "unperk"] as const;
+import { roundDownDollars, roundUpDollars } from "./points";
+
+export const LEDGER_KINDS = ["earn", "reverse", "start", "redeem", "unredeem", "adjust", "perk", "unperk", "perk-fulfil"] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
 export type LedgerEntry = {
@@ -32,6 +44,16 @@ export type LedgerEntry = {
   quoteId?: string;
   perkId?: string;
   note?: string;
+  /**
+   * #282 perks+points — on a `perk` entry: set for a REDEMPTION ("free" =
+   * claimed at its unlock level, "points" = bought, `amount` = −pointCost),
+   * which staff must still fulfil; absent for a staff Mark used.
+   */
+  redeemed?: "free" | "points";
+  /** #282 perks+points — who redeemed: the customer in the portal, or staff on the company card. */
+  via?: "portal" | "staff";
+  /** #282 perks+points — on a `perk-fulfil` entry: the redemption (perk use id) it fulfils. */
+  useId?: string;
   at: number;
   by: string;
 };
@@ -45,7 +67,18 @@ export const LEDGER_KIND_LABEL: Record<LedgerKind, string> = {
   adjust: "Adjustment",
   perk: "Perk used",
   unperk: "Perk use undone",
+  "perk-fulfil": "Perk fulfilled",
 };
+
+/**
+ * The credit ledger's row label (#282 perks+points): a perk bought with points
+ * and its refund move the balance, so they list with the credit entries.
+ */
+export function ledgerEntryLabel(e: Pick<LedgerEntry, "kind" | "amount">): string {
+  if (e.kind === "perk" && e.amount < 0) return "Perk redeemed for points";
+  if (e.kind === "unperk" && e.amount > 0) return "Perk points refunded";
+  return LEDGER_KIND_LABEL[e.kind] ?? e.kind;
+}
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -73,10 +106,14 @@ export function availableCredit(balance: number, openQuoteCredits: number[]): nu
   return round2(balance - openQuoteCredits.reduce((s, c) => s + (Number.isFinite(c) ? c : 0), 0));
 }
 
-/** round2(value × pct / 100), never negative. */
+/**
+ * value × pct / 100 in WHOLE dollars, rounded UP (#282 points follow-up: the
+ * customer sees points — 1 point = $1, rounded up — so the ledger posts whole
+ * dollars and the two never drift). Never negative.
+ */
 export function earnAmount(value: number, pct: number): number {
   if (!Number.isFinite(value) || !Number.isFinite(pct) || value <= 0 || pct <= 0) return 0;
-  return round2((value * pct) / 100);
+  return roundUpDollars((value * pct) / 100);
 }
 
 /** The open (not yet undone) `kind` entry for a quote, with its undo kind. */
@@ -143,8 +180,9 @@ export function quoteLedgerPlan(input: {
 
 /**
  * The one-time starting credit (spec §4): history dated before `launchedAt`
- * (all history when the program never launched), min(cap, round2(spend ×
- * rate / 100)).
+ * (all history when the program never launched), spend × rate / 100 rounded
+ * UP to whole dollars, then capped (#282 points follow-up — whole dollars so
+ * the customer's points match; a fractional cap counts as its whole dollars).
  */
 export function startingCreditFor(
   purchases: { amount: number; at: number }[],
@@ -152,8 +190,8 @@ export function startingCreditFor(
 ): { historySpend: number; proposed: number } {
   const cut = program.launchedAt;
   const historySpend = round2(purchases.filter((p) => cut == null || p.at < cut).reduce((s, p) => s + p.amount, 0));
-  const raw = round2((historySpend * program.retro.ratePct) / 100);
-  return { historySpend, proposed: round2(Math.max(0, Math.min(program.retro.capPerCustomer, raw))) };
+  const raw = roundUpDollars((historySpend * program.retro.ratePct) / 100);
+  return { historySpend, proposed: Math.max(0, Math.min(roundDownDollars(program.retro.capPerCustomer), raw)) };
 }
 
 /** A staff adjustment's amount: a finite, non-zero number to the cent within ±$1M; else null. */

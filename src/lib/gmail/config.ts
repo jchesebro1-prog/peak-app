@@ -77,6 +77,16 @@ export function hasDriveScope(scope: string | null | undefined): boolean {
   return (scope || "").split(/\s+/).includes(DRIVE_SCOPE);
 }
 
+/** #283 — read-only Drive for the Peak Product Photos sync. drive.file
+ *  (above) only sees files the app itself created, so it can't read a
+ *  folder people fill by hand. Opt-in per mailbox via ?drivephotos=1. */
+export const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+
+/** Does a stored grant include drive.readonly? */
+export function hasDriveReadScope(scope: string | null | undefined): boolean {
+  return (scope || "").split(/\s+/).includes(DRIVE_READONLY_SCOPE);
+}
+
 /**
  * Read-only Calendar scope for D148's "connect an additional Google account
  * to subscribe to its calendars" feature (Calendar tab only). Distinct from

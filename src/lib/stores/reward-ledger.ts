@@ -5,7 +5,6 @@ import { lifetimeSpend, purchasesByCompany } from "@/lib/rewards/spend";
 import { grossQuoteValue, quoteRewardCredit } from "@/lib/rewards/credit-line";
 import {
   normalizeServiceCredit,
-  serviceCreditSubdocKey,
   settleCredit,
   settleServiceCredit,
   type ServiceCreditSettle,
@@ -210,8 +209,8 @@ export async function settleServiceCreditFor(i: {
  * from #282 phase 3 on; an older one is taken to be the current customer's).
  * Won and lost quotes refuse a recall outright (restoreQuoteRevision), so
  * the locked branch here is defensive. Without `create` the credit can't grow
- * past what the quote has now. Service quotes clamp in whole dollars,
- * Estimator quotes to the cent.
+ * past what the quote has now. Every quote type clamps in whole dollars,
+ * rounded down (#282 points follow-up — 1 point = $1).
  */
 export async function restoredCreditFor(
   q: Quote,
@@ -237,7 +236,6 @@ export async function restoredCreditFor(
       customerId: target.customerId === undefined ? customerId : target.customerId || null,
       credit: quoteRewardCredit(q),
     },
-    unit: serviceCreditSubdocKey(snap.quoteType) ? "dollars" : "cents",
   });
   return { ...res, gross };
 }

@@ -394,7 +394,8 @@ export default async function CustomerDetailPage({
               rewardCredit
                 ? {
                     // #282 phase 4 — availability at render time; Mark used re-checks on the server.
-                    ...companyPerkPanel(rewardsProgram.perks, rewards.earned, rewardCredit.entries),
+                    // #282 perks+points: points to spend = pointsFor(available credit).
+                    ...companyPerkPanel(rewardsProgram.perks, rewards.earned, rewardCredit.entries, undefined, rewardCredit.available),
                     allPerks: rewardsProgram.perks,
                     quotes: quotes
                       .filter((q) => q.customerId === cust.id)

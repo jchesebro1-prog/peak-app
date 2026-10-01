@@ -44,6 +44,7 @@ export const CATEGORIES = [
   { key: "portalNew",   label: "New portal quotes",             desc: "Firm quotes customers generated in the last 3 days." },
   { key: "tasks",       label: "Tasks assigned to you or overdue", desc: "Open tasks assigned to you, plus any task past its due date." },
   { key: "documents",   label: "New documents from customers", desc: "Files customers sent through the portal that nobody on the team has opened yet." },
+  { key: "perks",       label: "Perks to fulfil",              desc: "Rewards perks customers (or staff) redeemed that nobody has marked fulfilled yet." },
 ] as const;
 
 export type NotifCategoryKey = (typeof CATEGORIES)[number]["key"];

@@ -150,6 +150,9 @@ export type AppSettingsData = {
    *  of the mailbox whose Google account owns the archive; null = not
    *  configured, the nightly archive job waits. */
   recordingsArchiveMailbox: string | null;
+  /** #283 — connection key of the mailbox whose Google account can read the
+   *  Peak Product Photos folder (drive.readonly); null = not set. */
+  catalogPhotosMailbox: string | null;
   /** Cached Drive id of the root `Peak Recordings` folder (spec §5.2). */
   recordingsArchiveFolderId: string | null;
   /** Cached per-customer Drive subfolder ids, keyed by customerId (spec §5.2). */

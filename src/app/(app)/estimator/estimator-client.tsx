@@ -33,6 +33,8 @@ import {
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import { RewardCreditPanel } from "./reward-credit-panel";
+import { PurchasePerksBanner } from "@/components/rewards/purchase-perks-banner";
+import { pointsLabel } from "@/lib/rewards/points";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { ChangeTypeControl } from "@/components/quote-flow-controls";
@@ -3153,6 +3155,10 @@ export default function EstimatorClient({
             </div>
           )}
 
+          {/* #282 perks+points — the customer's standing purchase perks
+              (informational; only the answer for the customer picked now). */}
+          {customerId && creditInfo?.customerId === customerId && <PurchasePerksBanner text={creditInfo.purchasePerks} />}
+
           {/* "Move system" result banner — success links to the target
               estimate without auto-navigating (this estimate may have
               other unsaved edits); failure surfaces the server's reason. */}
@@ -3496,7 +3502,7 @@ export default function EstimatorClient({
                   </div>
                   {(t.credit || 0) > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#1f8a5b", fontWeight: 600 }}>
-                      <span>Rewards credit</span>
+                      <span>Rewards credit · {pointsLabel(t.credit || 0)}</span>
                       <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(t.credit || 0)}</span>
                     </div>
                   )}

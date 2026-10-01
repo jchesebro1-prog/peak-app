@@ -2,7 +2,7 @@ import { Fragment, type CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import { systemSellTotal } from "./pricing";
-import { REWARD_CREDIT_DESC } from "@/lib/rewards/credit-line";
+import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks } from "./narrative";
 
@@ -64,6 +64,10 @@ export type QuoteDocumentProps = {
    *  anyway; scoped here so an ordinary Estimator quote's own $0 lines (an
    *  intentional freebie, not price-on-request) are never relabeled. */
   isPortalCatalog?: boolean;
+  /** #282 perks+points — "Your Gold rewards: Free freight · Waived travel"
+   *  under the totals; absent/"" when the program is off or the customer has
+   *  no purchase perks (the print route loads it). */
+  rewardsLine?: string;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -677,7 +681,10 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               </div>
             )}
             {/* #282 phase 2: the Rewards credit, its own line after the
-                system subtotals; the Total below is already net of it. */}
+                system subtotals; the Total below is already net of it.
+                #282 points follow-up: the customer sees it as points
+                ("Rewards points applied (300 pts)") with the dollars in the
+                price column, so the total still adds up. */}
             {(p.t.credit || 0) > 0 && (
               <div
                 className="est-reward-credit"
@@ -690,7 +697,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   marginBottom: 10,
                 }}
               >
-                <span>{REWARD_CREDIT_DESC}</span>
+                <span>{rewardPointsAppliedLabel(p.t.credit || 0)}</span>
                 <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(p.t.credit || 0)}</span>
               </div>
             )}
@@ -710,6 +717,15 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 {fmt(p.t.grand)}
               </span>
             </div>
+            {p.rewardsLine && (
+              <div
+                className="est-rewards-line"
+                data-testid="doc-purchase-perks"
+                style={{ marginTop: 8, fontSize: 11, color: "#1f7a52", fontWeight: 600, lineHeight: 1.5, textAlign: "right" }}
+              >
+                {p.rewardsLine}
+              </div>
+            )}
             {standingLines.length > 0 && (
               <div className="est-standing" style={{ marginTop: 8, fontSize: 11, color: "#5b616e", lineHeight: 1.6, textAlign: "right" }}>
                 {standingLines.map((line) => (

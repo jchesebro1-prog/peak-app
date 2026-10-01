@@ -10684,6 +10684,12 @@ seeded()
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
   .then(() => approval284AsyncChecks())
+  .then(() => rewards282PointsAsyncChecks())
+  .then(() => rewards282PerksPointsAsyncChecks())
+  .then(() => shrink283AsyncChecks())
+  .then(() => shrinkUpload283AsyncChecks())
+  .then(() => drivePhotos283AsyncChecks())
+  .then(() => drivePhotoSync283AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27835,7 +27841,7 @@ import { isPartDocKind as d245IsKind, maxBytesFor as d245Max, PART_DOC_KINDS as 
   ok(d245Sniff(png) === "image/png" && d245Sniff(jpg) === "image/jpeg" && d245Sniff(webp) === "image/webp", "#245 images: PNG/JPEG/WebP magic bytes recognised");
   ok(d245Sniff(svg) === null && d245Sniff(pdf) === null, "#245 images: SVG and PDF are never images");
   ok(d245IsKind("image") && !d245IsKind("photo"), "#245 images: image is a part-document kind");
-  ok(d245Max("image") === 10 * 1024 * 1024 && d245Max("datasheet") === 25 * 1024 * 1024, "#245 images: 10 MB image cap, datasheets keep 25 MB");
+  ok(d245Max("image") === 25 * 1024 * 1024 && d245Max("datasheet") === 25 * 1024 * 1024, "#245 images: 25 MB image cap (#283 raised it from 10 MB), datasheets keep 25 MB");
   ok(!(d245Kinds as readonly string[]).includes("image"), "#245 images: coverage slots stay datasheet + spec sheet");
 }
 
@@ -27992,7 +27998,7 @@ ok(guessKind("photo.webp") === "image" && guessKind("PHOTO.WEBP") === "image", "
 async function portal245ImagesTask4AsyncChecks(): Promise<void> {
   // verifyUploadedBlob refuses an over-cap image using the same fake-deps
   // injection the Task-1 upload tests use, and deletes the blob — the
-  // image cap is MAX_PART_IMAGE_BYTES (10 MB), tighter than a datasheet's.
+  // image cap is MAX_PART_IMAGE_BYTES (25 MB since #283).
   const removed: string[] = [];
   const fakeImage = (bytes: Uint8Array, size: number) => ({
     head: async () => ({ bytes, size }),
@@ -28002,9 +28008,9 @@ async function portal245ImagesTask4AsyncChecks(): Promise<void> {
   const ID = "PD-imagebig0001";
   const big = await verifyUploadedBlob(
     { documentId: ID, blobPathname: `part-docs/${ID}/big.png`, fileName: "big.png", kind: "image" },
-    fakeImage(pngBytes, 11 * 1024 * 1024)
+    fakeImage(pngBytes, 26 * 1024 * 1024)
   );
-  ok(!big.ok && big.error === "That file is over 10 MB." && removed.includes(`part-docs/${ID}/big.png`), "#245 images upload: an 11 MB image is refused (10 MB cap, not the 25 MB doc cap) and its blob deleted");
+  ok(!big.ok && big.error === "That file is over 25 MB." && removed.includes(`part-docs/${ID}/big.png`), "#245 images upload: a 26 MB image is refused (25 MB cap since #283) and its blob deleted");
 
   const ok10mb = await verifyUploadedBlob(
     { documentId: ID, blobPathname: `part-docs/${ID}/ok.jpg`, fileName: "photo.jpg", kind: "image" },
@@ -38117,6 +38123,16 @@ import { readFileSync as mw245Read } from "node:fs";
 }
 
 // ---------------------------------------------------------------------------
+// #283 — ?drivephotos=1 asks Google for drive.readonly.
+// ---------------------------------------------------------------------------
+import { readFileSync as c283Read } from "node:fs";
+{
+  const src = c283Read("src/app/api/gmail/connect/route.ts", "utf8");
+  ok(/searchParams\.get\("drivephotos"\)\s*===\s*"1"\)\s*extraScopes\.push\(DRIVE_READONLY_SCOPE\)/.test(src),
+    "#283 connect: ?drivephotos=1 adds drive.readonly to the consent request");
+}
+
+// ---------------------------------------------------------------------------
 // #245 catalog-wide — "Whole catalog images": one datasheet fetch target per
 // unique URL across the whole catalog (catalogFetchTargets). Pure, no DB.
 // ---------------------------------------------------------------------------
@@ -38464,7 +38480,7 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
   ok(r282bBalance(book) === 144.75, `#282 P2 ledger: balance = Σ amount over every kind (got ${r282bBalance(book)})`);
   ok(r282bBalance([]) === 0 && r282bBalance([{ amount: NaN }, { amount: 10 }]) === 10, "#282 P2 ledger: empty → 0; a junk amount is ignored");
   ok(r282bAvailable(100, [30, 20]) === 50 && r282bAvailable(10, [25]) === -15, "#282 P2 ledger: available = balance − credit parked on other open quotes");
-  ok(r282bEarnAmount(12345.67, 1.5) === 185.19 && r282bEarnAmount(1000, 0) === 0 && r282bEarnAmount(-5, 3) === 0, "#282 P2 ledger: earn = round2(value × % / 100), never negative");
+  ok(r282bEarnAmount(12345.67, 1.5) === 186 && r282bEarnAmount(1000, 0) === 0 && r282bEarnAmount(-5, 3) === 0, "#282 P2 ledger: earn = value × % / 100 rounded UP to whole dollars (points follow-up), never negative");
   ok(r282bEntryN("earn:TEST282:q:3") === 3 && r282bEntryN("start:co") === 0, "#282 P2 ledger: entryN reads the numbered suffix");
 
   // ---- earn / reverse / re-win, state-based ----
@@ -38571,7 +38587,7 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
 
   // wiring
   const docSrc = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
-  ok(/REWARD_CREDIT_DESC/.test(docSrc) && /p\.t\.credit/.test(docSrc), "#282 P2 document: the customer document prints the Rewards credit line from totals().credit");
+  ok(/rewardPointsAppliedLabel\(p\.t\.credit \|\| 0\)/.test(docSrc) && !/REWARD_CREDIT_DESC/.test(docSrc), "#282 P2 document: the customer document prints the credit line from totals().credit — as points (points follow-up)");
   const dt = r282Read("src/db/doc-tables.ts", "utf8");
   ok(dt.includes('docTable("reward_ledger")') && dt.includes("reward_ledger: rewardLedger"), "#282 P2 wiring: reward_ledger is a registered doc table");
   ok(!r282bSyncable.includes("reward_ledger" as never) && !CONFIG_COLLECTIONS.includes("reward_ledger" as never) && DEMO_COLLECTIONS.includes("reward_ledger" as never),
@@ -38789,8 +38805,8 @@ import { readFileSync as r282cRead } from "node:fs";
   ok(r282cLetterPrice({ value: null, quoteType: "repair", repair: { rewardCredit: 100 } }, { total: 900 }).net === 800, "#282 P3 letter: a quote with no value nets its subdoc total");
   const rows0 = r282cRender(r282cEl(R282cRows, { gross: 1000, credit: 0, net: 1000, mono: "m" }));
   const rows1 = r282cRender(r282cEl(R282cRows, { gross: 1000, credit: 100, net: 900, mono: "m" }));
-  ok(rows0 === "" && /Rewards credit/.test(rows1) && /−\$100/.test(rows1) && /\$900/.test(rows1) && /\$1,000/.test(rows1),
-    "#282 P3 letter: the credit rows print only when the credit is > 0 (quoted price, Rewards credit −$X, total)");
+  ok(rows0 === "" && /Rewards points \(100 pts\)/.test(rows1) && !/Rewards credit/.test(rows1) && /−\$100/.test(rows1) && /\$900/.test(rows1) && /\$1,000/.test(rows1),
+    "#282 P3 letter: the credit rows print only when the credit is > 0 (quoted price, Rewards points (N pts) −$X, total)");
   for (const dir of ["flame-tests", "inspections"] as const) {
     const lv = r282cRead(`src/app/(app)/${dir}/letter/letter-view.tsx`, "utf8");
     ok(/const price = serviceLetterPrice\(quote, (ft|insp)\);/.test(lv) && /const totalLabel = money\(price\.net\);/.test(lv) &&
@@ -38798,8 +38814,8 @@ import { readFileSync as r282cRead } from "node:fs";
       `#282 P3 ${dir} letter: prints the credit rows and the net total; the travel share reconciles to the pre-credit total`);
   }
   const rl = r282cRead("src/app/(app)/repairs/letter/letter-view.tsx", "utf8");
-  ok(/const totalLabel = money\(price\.net\);/.test(rl) && /\{price\.credit > 0 && \(/.test(rl) && /after a \{money\(price\.credit\)\} rewards credit/.test(rl),
-    "#282 P3 repair letter: the price sentence names the credit (\"…will cost $X after a $Y rewards credit\") only when there is one");
+  ok(/const totalLabel = money\(price\.net\);/.test(rl) && /\{price\.credit > 0 && \(/.test(rl) && /after applying \{rewardPointsPhrase\(price\.credit\)\} \(\{money\(price\.credit\)\}\)/.test(rl),
+    "#282 P3 repair letter: the price sentence names the points (\"…will cost $X after applying N rewards points ($Y)\") only when there is one");
   const pdfRoute = r282cRead("src/app/print/letter/[kind]/[id]/page.tsx", "utf8");
   ok(/FlameLetterView/.test(pdfRoute) && /InspectionLetterView/.test(pdfRoute) && /RepairLetterView/.test(pdfRoute),
     "#282 P3 PDF: the headless-Chrome print route renders the same three letter views, so the saved PDF follows");
@@ -38968,18 +38984,18 @@ import { settleCredit as r282rSettle } from "@/lib/rewards/service-credit";
 
 {
   const base = { posted: 200.559, total: 1000, available: 150.257, customerId: "co", source: "estimator", mayApply: true, prior: { status: "sent", customerId: "co", credit: 0 } };
-  const c = r282rSettle({ ...base, unit: "cents" });
-  ok(c.credit === 150.25 && /\$150\.25/.test(c.notice || ""), `#282 P3 restore rule: an Estimator recall clamps to the cent, rounded down, and says so (got ${JSON.stringify(c)})`);
-  ok(r282rSettle({ ...base, unit: "dollars" }).credit === 150, "#282 P3 restore rule: a service recall clamps in whole dollars");
-  ok(r282rSettle({ ...base, posted: 120, unit: "cents" }).credit === 120 && !r282rSettle({ ...base, posted: 120, unit: "cents" }).notice,
+  // #282 points follow-up: every recall clamps in whole dollars (Estimator quotes used to clamp to the cent).
+  const c = r282rSettle(base);
+  ok(c.credit === 150 && /\$150\b/.test(c.notice || ""), `#282 P3 restore rule: a recall clamps in whole dollars, rounded down, and says so (got ${JSON.stringify(c)})`);
+  ok(r282rSettle({ ...base, posted: 120 }).credit === 120 && !r282rSettle({ ...base, posted: 120 }).notice,
     "#282 P3 restore rule: a recalled credit still within available is kept, silently");
-  ok(r282rSettle({ ...base, posted: 5000, available: 9000, total: 1234.5, unit: "cents" }).credit === 1234.5, "#282 P3 restore rule: never above the restored pre-credit total ($0 net)");
-  ok(r282rSettle({ ...base, prior: { status: "sent", customerId: "someone-else", credit: 0 }, unit: "cents" }).credit === 0, "#282 P3 restore rule: a revision cut under another customer brings no credit back");
-  ok(r282rSettle({ ...base, source: "portal-service", unit: "dollars" }).credit === 0 && r282rSettle({ ...base, customerId: null, unit: "cents" }).credit === 0,
+  ok(r282rSettle({ ...base, posted: 5000, available: 9000, total: 1234.5 }).credit === 1234, "#282 P3 restore rule: never above the restored pre-credit total (whole dollars, so ≥ $0 net)");
+  ok(r282rSettle({ ...base, prior: { status: "sent", customerId: "someone-else", credit: 0 } }).credit === 0, "#282 P3 restore rule: a revision cut under another customer brings no credit back");
+  ok(r282rSettle({ ...base, source: "portal-service" }).credit === 0 && r282rSettle({ ...base, customerId: null }).credit === 0,
     "#282 P3 restore rule: a portal quote or a quote with no customer gets none");
-  ok(r282rSettle({ ...base, posted: 100, available: 500, mayApply: false, prior: { status: "sent", customerId: "co", credit: 40 }, unit: "cents" }).credit === 40,
+  ok(r282rSettle({ ...base, posted: 100, available: 500, mayApply: false, prior: { status: "sent", customerId: "co", credit: 40 } }).credit === 40,
     "#282 P3 restore rule: without create a recall can't grow the credit past what the quote has now");
-  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 0,
+  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 } }).credit === 0,
     "#282 P3 restore rule: a lost quote gets none (lost and won quotes refuse a recall outright)");
 
   const qs = r282cRead("src/lib/stores/quotes.ts", "utf8");
@@ -39043,7 +39059,7 @@ async function rewards282Phase3RestoreAsyncChecks(): Promise<void> {
     await createFixture("quotes", { ...common, id: H, name: "T282 restore hold", value: 600, source: "repair", quoteType: "repair", repair: { total: 1000, rewardCredit: 400 } });
     const e2 = await Q.restoreQuoteRevision(E, eRev!.rev, "Test");
     const e2q = await Q.get(E);
-    ok(e2.ok && r282cQuoteCredit(e2q) === 100 && e2q?.value === 1900 && /reduced to \$100\.00/.test((e2.ok && e2.creditNotice) || ""),
+    ok(e2.ok && r282cQuoteCredit(e2q) === 100 && e2q?.value === 1900 && /reduced to \$100 /.test((e2.ok && e2.creditNotice) || ""),
       `#282 P3 restore DB: an Estimator recall whose credit exceeds today's available clamps it (500 − 400 held = 100; value 1,900) and says so (got ${r282cQuoteCredit(e2q)} / ${e2q?.value})`);
     const f2 = await Q.restoreQuoteRevision(F, fRev!.rev, "Test");
     const f2q = await Q.get(F);
@@ -39197,19 +39213,20 @@ function r282dText(html: string): string {
   // ---- the portal view (whitelist) ----
   const program = { ...r282Default, perks: [perk("p1", "copper", "once"), perk("p2", "gold", "once"), perk("p3", "base", "yearly", { active: false })] };
   const pv = r282dPortalView({ program, spend: 30000, balance: -12, entries: [], now: NOW });
-  ok(JSON.stringify(Object.keys(pv).sort()) === JSON.stringify(["balance", "level", "levelLabel", "next", "perks", "progress"]),
-    "#282 P4 portal: the view carries only level, levelLabel, next, progress, balance, perks");
+  ok(JSON.stringify(Object.keys(pv).sort()) === JSON.stringify(["level", "levelLabel", "next", "pending", "perks", "points", "progress", "purchasePerks"]),
+    "#282 P4 portal: the view carries only level, levelLabel, next, progress, points, perks (+ perks+points: purchasePerks, pending) — no dollar balance");
   ok(pv.level === "copper" && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver" && pv.next.need === 45000,
     "#282 P4 portal: the earned level and \"$X to <next>\"");
-  ok(pv.balance === 0, "#282 P4 portal: a negative balance shows as $0 to the customer");
-  ok(pv.perks.length === 1 && pv.perks[0].name === "Perk p1" && JSON.stringify(Object.keys(pv.perks[0]).sort()) === '["description","id","name"]',
-    "#282 P4 portal: only available perks, name + description only (no level-locked or inactive)");
+  ok(pv.points === 0, "#282 P4 portal: a negative balance shows as 0 points to the customer");
+  ok(pv.perks.length === 1 && pv.perks[0].name === "Perk p1" && JSON.stringify(Object.keys(pv.perks[0]).sort()) === '["description","id","mode","name","pointCost"]'
+    && pv.perks[0].mode === "free" && pv.perks[0].pointCost === null,
+    "#282 P4 portal: only available perks, name + description (+ perks+points: Free / point price) — no level-locked or inactive");
   ok(!/margin|earnPct|thresholds/i.test(JSON.stringify(pv)), "#282 P4 portal: no margin / earn % / thresholds in the view");
-  const html = symRender(symH(r282dPortalCard, { view: { ...pv, balance: 125.5 }, companyName: "Peak Systems Group" }));
+  const html = symRender(symH(r282dPortalCard, { view: { ...pv, points: 126 }, companyName: "Peak Systems Group" }));
   const text = r282dText(html);
-  ok(text.includes("Copper") && text.includes("$45,000 to Silver") && text.includes("$125.50") && text.includes("Perk p1") && text.includes("About p1"),
-    `#282 P4 portal card: level, progress, credit and perks render (${text.slice(0, 160)})`);
-  ok(text.includes("Credit is applied by your Peak estimator on your next quote."), "#282 P4 portal card: says how credit is used");
+  ok(text.includes("Copper") && text.includes("$45,000 more in purchases to reach Silver") && text.includes("126 points") && text.includes("Perk p1") && text.includes("About p1"),
+    `#282 P4 portal card: level, dollar progress, points and perks render (${text.slice(0, 160)})`);
+  ok(text.includes("Points are applied by your Peak estimator on your next quote."), "#282 P4 portal card: says how points are used");
   ok(!/%/.test(text) && !/margin/i.test(text), "#282 P4 portal card: never prints a percent or a margin");
   ok(!/<button|<form|<input/.test(html), "#282 P4 portal card: no actions");
   const top = r282dText(symRender(symH(r282dPortalCard, { view: r282dPortalView({ program, spend: 900000, balance: 0, entries: [], now: NOW }), companyName: "Peak" })));
@@ -39344,8 +39361,8 @@ async function rewards282Phase4AsyncChecks(): Promise<void> {
     if (adjO.ok) registerFixture("reward_ledger", adjO.entry.id);
     const pv = await P.portalRewards(CO);
     const pvO = await P.portalRewards(OTHER);
-    ok(!!pv && pv.balance === 77.25 && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver", `#282 P4 DB: the portal card shows the company's own level and balance (${JSON.stringify(pv)})`);
-    ok(!!pvO && pvO.balance === 5 && pvO.levelLabel === "Base", "#282 P4 DB: another company's portal shows only its own balance and level");
+    ok(!!pv && pv.points === 78 && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver", `#282 P4 DB: the portal card shows the company's own level and points, rounded up (${JSON.stringify(pv)})`);
+    ok(!!pvO && pvO.points === 5 && pvO.levelLabel === "Base", "#282 P4 DB: another company's portal shows only its own points and level");
     ok(!!pvO && !JSON.stringify(pvO).includes("77.25") && !JSON.stringify(pv).includes(CO), "#282 P4 DB: one company's balance never appears on another's card");
     ok(!!pvO && pvO.perks.map((p) => p.name).join("|") === "Base yearly", "#282 P4 DB: portal perks are the ones available to that company");
     const html = pv ? symRender(symH(r282dPortalCard, { view: pv, companyName: "Peak Systems Group" })) : "";
@@ -39371,7 +39388,7 @@ async function rewards282Phase4AsyncChecks(): Promise<void> {
   const base = { posted: 500, total: 2500, available: 900, customerId: "co", source: "flametest", mayApply: true };
   const lostS = r282cSettle({ ...base, prior: { status: "lost", customerId: "co", credit: 150 } });
   ok(lostS.credit === 0, "#282 lost (pure): a lost quote settles to no credit, even if a stale amount is stored or posted");
-  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 0,
+  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 } }).credit === 0,
     "#282 lost (pure): the recall re-clamp gives a lost quote none either");
   ok(r282cSettle({ ...base, prior: { status: "won", customerId: "co", credit: 150 } }).credit === 150,
     "#282 lost (pure): a WON quote still keeps the credit it had");
@@ -39895,4 +39912,1089 @@ function readdirRecursive284(dir: string): string[] {
     else if (/\.(ts|tsx)$/.test(e.name)) out.push(f);
   }
   return out;
+}
+
+/* ======================================================================
+   #282 points — customers see Rewards credit as POINTS (Jeff 2026-10-01:
+   "in the back end it would be dollar total, but in the customer end it
+   would just be points … round the points up"). 1 point = $1, rounded up.
+   Postings are whole dollars (earn + starting credit round up, an applied
+   credit rounds down) so points and dollars never drift; the portal card,
+   the Estimator customer document and the service letters print points;
+   staff surfaces print "$300 · 300 pts". Pure checks here; the DB checks are
+   rewards282PointsAsyncChecks() on the promise chain.
+   ====================================================================== */
+import {
+  dollarsAndPoints as r282pDollarsPts,
+  formatPoints as r282pFormat,
+  formatPointsShort as r282pShort,
+  pointsFor as r282pPoints,
+  rewardPointsAppliedLabel as r282pApplied,
+  rewardPointsPhrase as r282pPhrase,
+  rewardPointsRowLabel as r282pRow,
+} from "@/lib/rewards/points";
+import { RewardCreditPanel as r282pEstPanel } from "@/app/(app)/estimator/reward-credit-panel";
+
+{
+  // ---- the helper ----
+  ok(r282pPoints(0) === 0 && r282pPoints(0.01) === 1 && r282pPoints(125.5) === 126 && r282pPoints(300) === 300 && r282pPoints(-5) === 0,
+    "#282 points: pointsFor rounds UP (0 → 0, 0.01 → 1, 125.5 → 126, 300 → 300, negative → 0)");
+  ok(r282pPoints((10000 * 1.1) / 100) === 110 && r282pPoints(NaN) === 0, "#282 points: float noise (110.00000000000001) is 110, junk is 0");
+  ok(r282pFormat(1) === "1 point" && r282pFormat(0) === "0 points" && r282pFormat(1234) === "1,234 points" && r282pShort(300) === "300 pts" && r282pShort(1) === "1 pt",
+    "#282 points: formatPoints singular/plural (\"1 point\", \"1,234 points\"); short form \"300 pts\"");
+  ok(r282pApplied(300) === "Rewards points applied (300 pts)" && r282pApplied(12.5) === "Rewards points applied (13 pts)" && r282pRow(300) === "Rewards points (300 pts)" &&
+     r282pPhrase(300) === "300 rewards points" && r282pPhrase(1) === "1 rewards point",
+    "#282 points: the document / letter labels round up and read as points");
+  ok(r282pDollarsPts(300) === "$300 · 300 pts" && r282pDollarsPts(12.5) === "$12.50 · 13 pts" && r282pDollarsPts(-5) === "−$5 · 0 pts" && r282pDollarsPts(1) === "$1 · 1 pt",
+    "#282 points: staff label = dollars with points alongside (\"$300 · 300 pts\")");
+
+  // ---- whole-dollar postings ----
+  ok(r282bEarnAmount(12345, 1.5) === 186 && r282bEarnAmount(10000, 1.1) === 110 && r282bEarnAmount(1000, 2) === 20 && r282bEarnAmount(50, 0.5) === 1,
+    "#282 points: earn posts whole dollars rounded up (185.175 → 186; 110 stays 110; 0.25 → 1)");
+  const hist = [{ amount: 12345, at: 1 }];
+  ok(r282bStarting(hist, { retro: { ratePct: 1, capPerCustomer: 1000 } }).proposed === 124, "#282 points: starting credit rounds up to whole dollars (123.45 → 124)");
+  ok(r282bStarting(hist, { retro: { ratePct: 1, capPerCustomer: 100 } }).proposed === 100, "#282 points: starting credit rounds up THEN caps (124 → cap 100)");
+  ok(r282bStarting([{ amount: 500000, at: 1 }], { retro: { ratePct: 1, capPerCustomer: 1000.75 } }).proposed === 1000,
+    "#282 points: a fractional cap counts as its whole dollars, so the posting stays whole");
+
+  // ---- the Estimator apply clamp, whole dollars ----
+  ok(r282bMaxApply(500.75, 1000) === 500 && r282bMaxApply(1000, 999.5) === 999 && r282bMaxApply(300, 1000) === 300 && r282bMaxApply(0.4, 1000) === 0,
+    "#282 points: max applicable credit is whole dollars, rounded down (a legacy cents balance keeps its cents)");
+  const item = (id: number, price: number) => ({ id, sku: `S${id}`, desc: `Item ${id}`, qty: 1, unit: "ea", cost: price * 0.6, price });
+  const one = [{ id: "a", name: "a", kind: "materials", mfr: "", freightPct: 0, items: [item(1, 1000)] } as R282bSection];
+  const legacy = r282bSanitize(r282bWith(one, 250.5, 9), 1000);
+  ok(legacy.ok && legacy.credit === 250 && legacy.rounded && legacy.clamped && r282bCreditOf(legacy.sections) === 250,
+    "#282 points: the server clamp rounds a posted cents credit down to whole dollars and flags it as rounding only");
+  const capped = r282bSanitize(r282bWith(one, 700, 9), 300.9);
+  ok(capped.ok && capped.credit === 300 && capped.clamped && !capped.rounded, "#282 points: clamped to the available amount, in whole dollars");
+  const exact = r282bSanitize(r282bWith(one, 200, 9), 1000);
+  ok(exact.ok && exact.credit === 200 && !exact.clamped && !exact.rounded, "#282 points: a whole-dollar credit within available passes untouched");
+  const estAct = r282Read("src/app/(app)/estimator/actions.ts", "utf8");
+  ok(/res\.rounded && res\.credit > 0\s*\n\s*\? `Rewards credit rounded down to whole dollars/.test(estAct) && /max = maxApplicableCredit\(available, totals\(withoutRewardCredit\(sections\), 0\)\.grand\);/.test(estAct),
+    "#282 points: the Estimator save clamps with the whole-dollar max and names a rounding-only cut");
+  const panelSrc = r282Read("src/app/(app)/estimator/reward-credit-panel.tsx", "utf8");
+  ok(/const amount = typed \? normalizeServiceCredit\(typed\) : max;/.test(panelSrc) && /inputMode="numeric"/.test(panelSrc),
+    "#282 points: the Apply credit control takes whole dollars (a typed 12.75 applies 12)");
+  const panelText = r282dText(r282cRender(r282cEl(r282pEstPanel, {
+    info: { enabled: true, balance: 300, available: 300 }, applied: 0, preCreditTotal: 1000, editable: true, hasSystems: true, onApply: () => {}, onRemove: () => {},
+  })));
+  ok(panelText.includes("Balance $300 · 300 pts") && panelText.includes("Available for this quote $300 · 300 pts"),
+    `#282 points: the Estimator Apply credit panel (staff) shows dollars and points (${panelText.slice(0, 140)})`);
+
+  // ---- the portal view carries points, never the dollar balance ----
+  const pv = r282dPortalView({ program: { ...r282Default, perks: [] }, spend: 30000, balance: 125.01, entries: [], now: Date.now() });
+  ok(pv.points === 126 && !("balance" in pv) && !JSON.stringify(pv).includes("125.01"), "#282 points: the portal view carries points (125.01 → 126) and no dollar balance");
+  ok(r282dPortalView({ program: { ...r282Default, perks: [] }, spend: 0, balance: -40, entries: [], now: Date.now() }).points === 0, "#282 points: a negative balance is 0 points");
+  const card = r282dText(r282cRender(r282cEl(r282dPortalCard, { view: { ...pv, points: 1 }, companyName: "Peak" })));
+  ok(card.includes("Rewards points") && card.includes("1 point") && !card.includes("1 points") && card.includes("more in purchases to reach Silver") &&
+     card.includes("Points are applied by your Peak estimator on your next quote.") && !/credit/i.test(card),
+    `#282 points: the portal card shows points (singular), dollar progress, and never a credit balance (${card.slice(0, 160)})`);
+
+  // ---- customer documents print points, never "Rewards credit $" ----
+  const rows = r282dText(r282cRender(r282cEl(R282cRows, { gross: 1300, credit: 300, net: 1000, mono: "m" })));
+  ok(rows.includes("Rewards points (300 pts) −$300") && rows.includes("Total $1,000") && !/Rewards credit/.test(rows),
+    `#282 points: the flame/inspection letter row reads "Rewards points (300 pts) −$300" and the net total (${rows})`);
+  const qd = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
+  ok(/<span>\{rewardPointsAppliedLabel\(p\.t\.credit \|\| 0\)\}<\/span>\s*\n\s*<span style=\{\{ fontFamily: "var\(--font-mono\)" \}\}>−\{fmt\(p\.t\.credit \|\| 0\)\}<\/span>/.test(qd),
+    "#282 points: the Estimator customer document prints \"Rewards points applied (N pts)\" with −$ in the price column (preview + print route share it)");
+  const rl = r282Read("src/app/(app)/repairs/letter/letter-view.tsx", "utf8");
+  ok(/after applying \{rewardPointsPhrase\(price\.credit\)\} \(\{money\(price\.credit\)\}\)/.test(rl), "#282 points: the repair letter reads \"…will cost $X after applying N rewards points ($Y)\"");
+  const ren = r282Read("src/lib/renewal-outreach.ts", "utf8");
+  ok(/Applied to the quoted price of \$\{money\(p\.gross\)\}: \$\{rewardPointsPhrase\(p\.credit\)\} \(\$\{money\(p\.credit\)\}\)\. The total below is after the points\./.test(ren),
+    "#282 points: the renewal-letter PDF names points, not a rewards credit");
+  for (const f of [
+    "src/app/(app)/estimator/quote-document.tsx",
+    "src/components/rewards/letter-credit-rows.tsx",
+    "src/app/(app)/repairs/letter/letter-view.tsx",
+    "src/app/(app)/flame-tests/letter/letter-view.tsx",
+    "src/app/(app)/inspections/letter/letter-view.tsx",
+    "src/lib/renewal-outreach.ts",
+    "src/app/portal/rewards-card.tsx",
+  ]) {
+    const src = r282Read(f, "utf8");
+    ok(!/["'`>]\s*Rewards credit|rewards credit is applied|REWARD_CREDIT_DESC/i.test(src), `#282 points: ${f} prints no "Rewards credit" wording to the customer`);
+  }
+
+  // ---- staff surfaces keep dollars and add points ----
+  const sc = r282Read("src/app/(app)/companies/[id]/rewards-card.tsx", "utf8");
+  ok(/\{dollarsAndPoints\(credit\.balance\)\}/.test(sc) && /\{dollarsAndPoints\(credit\.available\)\}/.test(sc), "#282 points: the company Rewards card shows balance and available as \"$X · N pts\"");
+  const rw = r282Read("src/app/(app)/rewards/page.tsx", "utf8");
+  ok(/dollarsAndPoints\(credit\.get\(r\.companyId\)!\.balance\) : "—"/.test(rw), "#282 points: /rewards Credit column shows dollars and points");
+  const st = r282Read("src/app/(app)/settings/rewards/page.tsx", "utf8");
+  ok(/proposed \{dollarsAndPoints\(r\.proposed\)\}/.test(st) && /Posted \{dollarsAndPoints\(r\.posted\)\}/.test(st), "#282 points: Settings → Starting credit shows dollars and points");
+  const sp = r282Read("src/components/rewards/service-credit-panel.tsx", "utf8");
+  ok(/\{dollarsAndPoints\(shownInfo\.balance\)\}/.test(sp) && /\{dollarsAndPoints\(available\)\}/.test(sp) && /−\{dollarsAndPoints\(applied\)\}/.test(sp),
+    "#282 points: the service builders' credit box shows dollars and points");
+}
+
+async function rewards282PointsAsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const P = await import("@/lib/stores/reward-perks");
+  const Q = await import("@/lib/stores/quotes");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "pts-co");
+  const BIG = fixtureId(282, "pts-big");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const program = (enabled: boolean) => ({
+    ...r282Default,
+    enabled,
+    earnPct: { base: 0, copper: 1.5, silver: 2, gold: 2.5, platinum: 3 },
+    retro: { ratePct: 1.5, capPerCustomer: 1000 },
+  });
+  const project = (slug: string, customerId: string, value: number) =>
+    createFixture("projects", { id: fixtureId(282, slug), kind: "project", name: `T282 ${slug}`, customer: "", customerId, quoteId: null,
+      projectType: null, value, margin: 0, createdAt: 1, updatedAt: 1, startedAt: 2, stageHistory: [], source: { system: "daylite", importedAt: 1 } });
+  try {
+    await upsertCustomer({ id: CO, name: "Test282 Points Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await upsertCustomer({ id: BIG, name: "Test282 Points Big Co", type: "Education", pricingTier: null, locations: [], contacts: [] });
+    await project("pts-hist", CO, 30033);
+    await project("pts-big-hist", BIG, 100000);
+
+    // Starting credit (posted before launch): 1.5 % of 30,033 = 450.495 → 451; 1,500 → capped 1,000.
+    await setBlob("rewards_program", { ...program(false), launchedAt: null } as unknown as Record<string, unknown>);
+    const row = (await L.startingCreditBoard()).find((r) => r.companyId === CO);
+    ok(!!row && row.proposed === 451, `#282 points DB: starting credit proposes whole dollars, rounded up (450.495 → ${row?.proposed})`);
+    const st = await L.postStartingCredit(CO, "Test");
+    registerFixture("reward_ledger", `start:${CO}`);
+    ok(st.ok && st.posted === 451, "#282 points DB: the posted starting credit is whole dollars");
+    const stB = await L.postStartingCredit(BIG, "Test");
+    registerFixture("reward_ledger", `start:${BIG}`);
+    ok(stB.ok && stB.posted === 1000, "#282 points DB: starting credit rounds up, then caps at the cap");
+
+    // Earn: Copper (30,033 ≥ 25,000) 1.5 % of 12,345 = 185.175 → 186.
+    await R.saveRewardsProgram(program(true));
+    const QID = fixtureId(282, "pts-q");
+    await createFixture("quotes", { id: QID, name: "T282 pts-q", customer: "", customerId: CO, status: "sent", value: 12345, source: "estimator",
+      quoteType: "consulting", history: [], createdAt: 1, updatedAt: 1 });
+    await Q.setStatus(QID, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const earn = (await L.ledgerForQuote(QID)).find((e) => e.kind === "earn");
+    ok(!!earn && earn.amount === 186, `#282 points DB: a win earns whole dollars, rounded up (185.175 → ${earn?.amount})`);
+    await Q.setStatus(QID, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const rev = (await L.ledgerForQuote(QID)).find((e) => e.kind === "reverse");
+    ok(!!rev && rev.amount === -186, "#282 points DB: the reversal mirrors the earn exactly (no re-rounding)");
+    await Q.setStatus(QID, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    ok((await L.companyCredit(CO)).balance === 451 + 186, "#282 points DB: balance stays whole dollars after earn / reverse / re-win");
+
+    // A legacy cents amount (an admin Adjust to the cent): points round up, applying rounds down.
+    const adj = await L.postAdjustment(CO, 12.5, "points test cents", "Test");
+    if (adj.ok) registerFixture("reward_ledger", adj.entry.id);
+    const c = await L.companyCredit(CO);
+    ok(c.balance === 649.5 && r282bMaxApply(c.available, 1000.5) === 649, "#282 points DB: a cents balance applies its whole dollars only (649.50 → $649 max)");
+    const pv = await P.portalRewards(CO);
+    ok(!!pv && pv.points === 650 && !("balance" in pv) && !JSON.stringify(pv).includes("649.5"), `#282 points DB: the portal view shows 650 points and never the dollar balance (${JSON.stringify(pv)})`);
+    const pvB = await P.portalRewards(BIG);
+    ok(!!pvB && pvB.points === 1000 && pvB.next?.levelLabel === "Gold" && pvB.next.need === 50000,
+      "#282 points DB: points for the starting credit; progress to the next level stays dollars of purchases");
+  } finally {
+    await setBlob("rewards_program", { ...prevRaw, enabled: prevRaw.enabled === true, launchedAt: prevRaw.launchedAt ?? null });
+    for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
+    for (const x of await L.ledgerForCompany(BIG)) registerFixture("reward_ledger", x.id);
+    await removeCustomer(CO);
+    await removeCustomer(BIG);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #282 perks+points — Customer Rewards follow-up (Jeff 2026-10-01): purchase
+// perks by tier (standing, informational: staff banner, portal card, quote
+// document / letters) and perks redeemable for points (free at the unlock
+// level, else bought with spendable points; per-company lock; Mark fulfilled;
+// Undo refunds; staff bell "Perks to fulfil"). Pure checks run here; the DB
+// checks are rewards282PerksPointsAsyncChecks() on the promise chain.
+// ---------------------------------------------------------------------------
+import {
+  customerPurchasePerks as r282eCustomerPP,
+  mergePurchasePerkEdits as r282eMergePP,
+  purchasePerkDraftErrors as r282ePPErrors,
+  purchasePerksAt as r282ePPAt,
+  purchasePerksBannerText as r282eBanner,
+  purchasePerksDocLine as r282eDocLine,
+  purchasePerksSentence as r282eSentence,
+} from "@/lib/rewards/purchase-perks";
+import {
+  perkFulfilId as r282eFulfilId,
+  perkRedemptionEntry as r282eRedeemEntry,
+  unfulfilledRedemptions as r282eUnfulfilled,
+} from "@/lib/rewards/perks";
+import { ledgerEntryLabel as r282eEntryLabel } from "@/lib/rewards/ledger";
+import { perkBellItems as r282eBellItems } from "@/lib/rewards/perk-bell";
+import { CATEGORIES as r282eNotifCats } from "@/lib/stores/notif-prefs";
+import type { PurchasePerk as R282ePP } from "@/lib/rewards/program";
+
+{
+  const NOW = 1_800_000_000_000;
+  const perk = (id: string, level: R282dPerk["level"], frequency: R282dPerk["frequency"], extra: Partial<R282dPerk> = {}): R282dPerk =>
+    ({ id, name: `Perk ${id}`, description: `About ${id}`, level, frequency, active: true, ...extra });
+  const use = (perkId: string, n: number, at: number, extra: Partial<R282dEntry> = {}): R282dEntry =>
+    ({ id: r282dUseId("co", perkId, n), companyId: "co", kind: "perk", amount: 0, perkId, at, by: "T", ...extra });
+  const undo = (u: R282dEntry, at: number): R282dEntry =>
+    ({ id: r282dUndoId(u.id), companyId: "co", kind: "unperk", amount: u.amount < 0 ? -u.amount : 0, perkId: u.perkId, at, by: "T" });
+  const fulfil = (u: R282dEntry, at: number): R282dEntry =>
+    ({ id: r282eFulfilId(u.id), companyId: "co", kind: "perk-fulfil", amount: 0, perkId: u.perkId, useId: u.id, at, by: "T" });
+
+  // ---- sanitize: purchase perks ----
+  const sp = r282Sanitize({ purchasePerks: [
+    { id: "ff", name: " Free freight ", level: "gold", description: "On every order", active: true },
+    { id: "ff", name: "Dup id", level: "gold" },
+    { id: "b", name: "Base one", level: "base" },
+    { id: "x", name: "Unknown", level: "diamond" },
+    { id: "n", name: "", level: "silver" },
+    { id: "gone", name: "Gone", level: "copper", active: true, removed: true },
+    "junk",
+  ] });
+  ok(sp.purchasePerks.length === 3, `#282 perks+points sanitize: nameless, Base-level, unknown-level and junk purchase perks dropped (got ${sp.purchasePerks.length})`);
+  ok(sp.purchasePerks[0].id === "ff" && sp.purchasePerks[0].name === "Free freight" && sp.purchasePerks[0].level === "gold" && sp.purchasePerks[0].active === true,
+    "#282 perks+points sanitize: a purchase perk keeps id / trimmed name / level, active by default");
+  ok(sp.purchasePerks[1].id !== "ff" && new Set(sp.purchasePerks.map((p) => p.id)).size === 3, "#282 perks+points sanitize: purchase-perk ids unique (a duplicate is re-minted)");
+  ok(sp.purchasePerks[2].removed === true && sp.purchasePerks[2].active === false, "#282 perks+points sanitize: a purchase-perk tombstone is kept, forced inactive");
+  ok(Array.isArray(r282Sanitize(undefined).purchasePerks) && r282Sanitize(undefined).purchasePerks.length === 0 && r282Default.purchasePerks.length === 0,
+    "#282 perks+points sanitize: no purchase perks by default");
+
+  // ---- sanitize: point prices ----
+  const pc = r282Sanitize({ perks: [
+    { id: "a", name: "A", level: "platinum", pointCost: "300" },
+    { id: "b", name: "B", level: "none", pointCost: 99.6 },
+    { id: "c", name: "C", level: "none" },
+    { id: "d", name: "D", level: "gold", pointCost: 0 },
+    { id: "e", name: "E", level: null, pointCost: -5 },
+  ] }).perks;
+  ok(pc[0].pointCost === 300 && pc[0].level === "platinum", "#282 perks+points sanitize: a point price parses to whole points alongside an unlock level");
+  ok(pc[1].level === null && pc[1].pointCost === 100, "#282 perks+points sanitize: points-only (level none) keeps a null level; the price rounds to whole points");
+  ok(pc[2].level === "base" && pc[2].pointCost === undefined, "#282 perks+points sanitize: \"none\" without a price falls back to Base (never an unreachable perk)");
+  ok(pc[3].pointCost === undefined && pc[4].pointCost === undefined && pc[4].level === "base", "#282 perks+points sanitize: a price below 1 point is dropped");
+
+  // ---- editor errors / merges ----
+  ok(r282dDraftErrors([{ name: "x", level: "none", pointCost: "" }]).some((e) => /points-only/.test(e)), "#282 perks+points errors: a points-only perk needs a price");
+  ok(r282dDraftErrors([{ name: "x", level: "gold", pointCost: "2.5" }]).some((e) => /whole number/.test(e))
+    && r282dDraftErrors([{ name: "x", level: "gold", pointCost: "0" }]).length === 1, "#282 perks+points errors: a price must be whole points ≥ 1");
+  ok(r282dDraftErrors([{ name: "x", level: "none", pointCost: "1,500" }]).length === 0 && r282dDraftErrors([{ name: "x", level: "gold", pointCost: "" }]).length === 0,
+    "#282 perks+points errors: a points-only perk with a price, or a level perk with none, is fine");
+  const mp = r282dMerge([], [
+    { id: "new:1", name: "Lift", description: "", level: "platinum", frequency: "once", active: true, pointCost: "300" },
+    { id: "new:2", name: "Swag", description: "", level: "none", frequency: "yearly", active: true, pointCost: "100" },
+  ], { rand: () => 0.3 });
+  ok(mp[0].pointCost === 300 && mp[0].level === "platinum" && mp[1].level === null && mp[1].pointCost === 100,
+    "#282 perks+points merge: the perks editor keeps point prices and points-only levels");
+  ok(r282ePPErrors([{ name: "", level: "gold" }]).length === 1 && r282ePPErrors([{ name: "x", level: "base" }]).length === 1 && r282ePPErrors("x").length === 1
+    && r282ePPErrors([{ name: "x", level: "copper" }]).length === 0, "#282 perks+points errors: a purchase perk needs a name and a Copper…Platinum level");
+  const storedPP: R282ePP[] = [
+    { id: "keep", level: "gold", name: "Free freight", description: "", active: true },
+    { id: "drop", level: "silver", name: "Old", description: "", active: true },
+  ];
+  const mpp = r282eMergePP(storedPP, [
+    { id: "new:a", level: "platinum", name: "Dedicated PM", description: "", active: true },
+    { id: "keep", level: "gold", name: "Free freight (ground)", description: "d", active: true },
+    { id: "new:b", level: "copper", name: "Priority", description: "", active: false },
+  ], { takenIds: ["perk-taken"], rand: () => 0.4 });
+  ok(mpp.map((p) => p.level).join(",") === "copper,gold,platinum,silver" && mpp[3].removed === true && mpp[3].id === "drop",
+    `#282 perks+points merge: purchase perks save grouped by tier, a left-out one becomes a tombstone (${mpp.map((p) => p.level + ":" + p.id).join(",")})`);
+  ok(mpp[1].id === "keep" && mpp[1].name === "Free freight (ground)" && mpp[0].id.startsWith("priority-") && mpp[0].active === false,
+    "#282 perks+points merge: a stored purchase perk keeps its id; a new one gets a server-minted slug id");
+
+  // ---- a customer's purchase perks (≤ earned level) and their text ----
+  const ppList: R282ePP[] = [
+    { id: "g1", level: "gold", name: "Free freight", description: "", active: true },
+    { id: "c1", level: "copper", name: "Priority scheduling", description: "", active: true },
+    { id: "p1", level: "platinum", name: "Dedicated PM", description: "", active: true },
+    { id: "g2", level: "gold", name: "Waived travel", description: "", active: true },
+    { id: "g3", level: "gold", name: "Off", description: "", active: false },
+    { id: "g4", level: "gold", name: "Removed", description: "", active: false, removed: true },
+  ];
+  ok(r282ePPAt(ppList, "gold").map((p) => p.name).join("|") === "Priority scheduling|Free freight|Waived travel",
+    "#282 perks+points: purchase perks = every active one at a level ≤ earned, lower tiers first");
+  ok(r282ePPAt(ppList, "base").length === 0 && r282ePPAt(ppList, "platinum").length === 4, "#282 perks+points: Base earns none; Platinum gets every tier");
+  const gold = r282eCustomerPP({ enabled: true, purchasePerks: ppList }, "gold");
+  ok(!!gold && gold.levelLabel === "Gold" && gold.perks.length === 3, "#282 perks+points: a Gold customer's purchase perks");
+  ok(r282eCustomerPP({ enabled: false, purchasePerks: ppList }, "gold") === null, "#282 perks+points: nothing while the program is off");
+  ok(r282eCustomerPP({ enabled: true, purchasePerks: ppList }, "base") === null && r282eCustomerPP({ enabled: true, purchasePerks: [] }, "platinum") === null,
+    "#282 perks+points: nothing when the customer has none");
+  ok(r282eBanner(gold) === "Gold purchase perks: Priority scheduling · Free freight · Waived travel", `#282 perks+points banner text (${r282eBanner(gold)})`);
+  ok(r282eDocLine(gold) === "Your Gold rewards: Priority scheduling · Free freight · Waived travel", `#282 perks+points document line (${r282eDocLine(gold)})`);
+  ok(r282eSentence(gold) === "As a Gold rewards customer, your purchase perks include Priority scheduling, Free freight and Waived travel.",
+    `#282 perks+points repair-letter sentence (${r282eSentence(gold)})`);
+  ok(r282eBanner(null) === "" && r282eDocLine(null) === "" && r282eSentence(null) === "", "#282 perks+points: no banner / line / sentence without purchase perks");
+  const one = r282eCustomerPP({ enabled: true, purchasePerks: ppList }, "copper");
+  ok(r282eSentence(one) === "As a Copper rewards customer, your purchase perks include Priority scheduling.", "#282 perks+points: one perk reads as a plain sentence");
+
+  // ---- availability: free vs buyable vs both ----
+  const platOr300 = perk("plat", "platinum", "once", { pointCost: 300 });
+  const ptsOnly = perk("pts", null, "yearly", { pointCost: 100 });
+  const goldFree = perk("gf", "gold", "once");
+  const st = (p: R282dPerk, earned: R282dPerk["level"] & string, points: number, entries: R282dEntry[] = []) =>
+    r282dStatus(p, { earned: earned as never, entries, now: NOW, points });
+  ok(st(platOr300, "gold", 300).mode === "points" && st(platOr300, "gold", 300).available, "#282 perks+points: below its level, a priced perk is buyable when the points cover it");
+  const short = st(platOr300, "gold", 299);
+  ok(!short.available && short.block === "points" && short.short === 1, "#282 perks+points: one point short → blocked \"points\", 1 short");
+  ok(st(platOr300, "platinum", 0).mode === "free" && st(platOr300, "platinum", 5000).mode === "free", "#282 perks+points: at its level it is free — free wins over points");
+  ok(st(goldFree, "silver", 99999).block === "level", "#282 perks+points: a perk with no price stays level-locked whatever the points");
+  ok(st(ptsOnly, "platinum", 99).block === "points" && st(ptsOnly, "platinum", 100).mode === "points", "#282 perks+points: a points-only perk is never free, even at Platinum");
+  ok(r282dStatus(platOr300, { earned: "gold", entries: [], now: NOW }).block === "points", "#282 perks+points: no points given = 0 points");
+  const bought = use("plat", 1, NOW - 10, { amount: -300, redeemed: "points" });
+  ok(st(platOr300, "platinum", 0, [bought]).block === "used" && st(platOr300, "gold", 9999, [bought]).block === "used",
+    "#282 perks+points: once — a BOUGHT use blocks the free use too, and vice versa");
+  ok(st(platOr300, "gold", 9999, [use("plat", 1, NOW - 10)]).block === "used", "#282 perks+points: once — a Mark used counts against buying it");
+  ok(st(platOr300, "gold", 300, [bought, undo(bought, NOW - 5)]).available, "#282 perks+points: an undone purchase frees the perk again");
+  const yb = use("pts", 1, NOW - 10, { amount: -100, redeemed: "points" });
+  ok(st(ptsOnly, "base", 500, [yb]).block === "cooldown" && st(ptsOnly, "base", 500, [use("pts", 1, NOW - r282dYear, { amount: -100, redeemed: "points" })]).mode === "points",
+    "#282 perks+points: yearly counts bought uses (365 days from the last one)");
+  ok(r282dCount([platOr300, ptsOnly, goldFree], { earned: "gold", entries: [], now: NOW, points: 300 }) === 3
+    && r282dCount([platOr300, ptsOnly, goldFree], { earned: "gold", entries: [], now: NOW, points: 150 }) === 2,
+    "#282 perks+points: the available count is free + buyable");
+
+  // ---- the redemption entry ----
+  const r1 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 450, now: NOW, via: "portal", by: "Pat (portal)" });
+  ok(r1.ok && r1.entry.id === "perk:co:plat:1" && r1.entry.kind === "perk" && r1.entry.amount === -300 && r1.entry.redeemed === "points" && r1.entry.via === "portal",
+    `#282 perks+points: a points redemption debits exactly pointCost dollars (${JSON.stringify(r1)})`);
+  const r2 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" });
+  ok(r2.ok && r2.entry.amount === 0 && r2.entry.redeemed === "free", "#282 perks+points: a free redemption debits nothing");
+  const r3 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 299.5, now: NOW, via: "staff", by: "S" });
+  ok(r3.ok && r282bBalance([{ amount: 299.5 }, r3.entry]) === -0.5, "#282 perks+points: $299.50 shows as 300 points and buys a 300-point perk — the balance dips < $1");
+  const r4 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 299, now: NOW, via: "staff", by: "S" });
+  ok(!r4.ok && /1 point short/.test(r4.error), "#282 perks+points: 299 points can't buy 300 — so it can never dip a full $1");
+  const r5 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 500, now: NOW, via: "staff", by: "S", expect: { mode: "free", pointCost: null } });
+  const r6 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 500, now: NOW, via: "staff", by: "S", expect: { mode: "points", pointCost: 250 } });
+  ok(!r5.ok && !r6.ok, "#282 perks+points: refused when the shown Free / price no longer matches (never a surprise charge)");
+  ok(!r282eRedeemEntry({ perk: { ...platOr300, removed: true }, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" }).ok
+    && !r282eRedeemEntry({ perk: { ...platOr300, active: false }, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" }).ok
+    && !r282eRedeemEntry({ perk: null, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" }).ok,
+    "#282 perks+points: removed / inactive / unknown perks can't be redeemed");
+
+  // ---- ledger: balance, labels, undo refund, fulfilment ----
+  ok(r282bBalance([{ amount: 450 }, bought, undo(bought, NOW)]) === 450 && undo(bought, NOW).amount === 300, "#282 perks+points ledger: Undo refunds exactly what the purchase debited");
+  ok(r282eEntryLabel(bought) === "Perk redeemed for points" && r282eEntryLabel(undo(bought, NOW)) === "Perk points refunded" && r282eEntryLabel(use("x", 1, 1)) === "Perk used"
+    && r282dKindLabel["perk-fulfil"] === "Perk fulfilled", "#282 perks+points ledger: labels for a bought perk, its refund and a fulfilment");
+  const free1 = use("gf", 1, NOW - 3, { redeemed: "free", via: "portal" });
+  const marked = use("gf2", 1, NOW - 2);
+  const done = use("pts", 2, NOW - 1, { amount: -100, redeemed: "points" });
+  const unf = r282eUnfulfilled([bought, undo(bought, NOW), free1, marked, done, fulfil(done, NOW)]);
+  ok(unf.length === 1 && unf[0].entry.id === free1.id, "#282 perks+points: to fulfil = redemptions not undone and not fulfilled (a Mark used never needs fulfilling)");
+  ok(r282eFulfilId("perk:co:p:1") === "fulfil:perk:co:p:1", "#282 perks+points: the fulfilment id is fulfil:<use id> — one per redemption");
+  const pu = r282dUses([done, fulfil(done, NOW)]);
+  ok(pu[0].fulfilled?.kind === "perk-fulfil", "#282 perks+points: uses pair their fulfilment");
+
+  // ---- the bell group ----
+  const items = r282eBellItems(
+    [
+      { companyId: "c1", useId: "perk:c1:p:1", perkName: "Lift inspection", at: 1, via: "portal", points: 300 },
+      { companyId: "c2", useId: "perk:c2:p:1", perkName: "Swag", at: 1, via: "staff", points: 0 },
+      { companyId: "gone", useId: "perk:gone:p:1", perkName: "X", at: 1, via: null, points: 0 },
+    ],
+    ["Acme HS", "Beta PAC", ""]
+  );
+  ok(items.length === 2 && items[0].title === "Lift inspection — Acme HS" && /portal · 300 points/.test(items[0].sub) && items[0].href === "/companies/c1#rewards"
+    && /free/.test(items[1].sub), `#282 perks+points bell: one item per unfulfilled redemption, a vanished company dropped (${JSON.stringify(items)})`);
+  ok(r282eNotifCats.some((c) => c.key === "perks" && c.label === "Perks to fulfil"), "#282 perks+points bell: \"Perks to fulfil\" is a notification category");
+
+  // ---- the portal view: points, never dollars ----
+  const program = { ...r282Default, enabled: true, perks: [platOr300, ptsOnly, goldFree], purchasePerks: ppList };
+  const pv = r282dPortalView({ program, spend: 160000, balance: 450, available: 350, entries: [free1], now: NOW });
+  ok(pv.perks.map((p) => `${p.id}:${p.mode}:${p.pointCost}`).join("|") === "plat:points:300|pts:points:100",
+    `#282 perks+points portal: buyable perks priced in points against AVAILABLE credit; a used once perk gone (${JSON.stringify(pv.perks)})`);
+  ok(pv.points === 450, "#282 perks+points portal: the points balance still shows the whole balance");
+  ok(pv.purchasePerks?.levelLabel === "Gold" && pv.purchasePerks.perks.map((p) => p.name).join("|") === "Priority scheduling|Free freight|Waived travel",
+    "#282 perks+points portal: \"Your Gold purchase perks\"");
+  ok(pv.pending.length === 1 && pv.pending[0].name === "Perk gf", "#282 perks+points portal: redemptions being fulfilled are listed");
+  ok(!JSON.stringify(pv).includes("$") && !/amount|balance|dollar/i.test(JSON.stringify(pv)), "#282 perks+points portal: the view carries no dollar amount or dollar balance");
+  const pvOff = r282dPortalView({ program: { ...program, enabled: false }, spend: 160000, balance: 0, entries: [], now: NOW });
+  ok(pvOff.purchasePerks === null, "#282 perks+points portal: purchase perks only while the program is on");
+  const html = symRender(symH(r282dPortalCard, { view: pv, companyName: "Peak" }));
+  const text = r282dText(html);
+  ok(text.includes("Your Gold purchase perks") && text.includes("Free freight") && text.includes("300 points") && text.includes("100 points")
+    && text.includes("Redeemed — we'll be in touch"), `#282 perks+points portal card: purchase perks, point prices and pending redemptions render (${text.slice(0, 200)})`);
+  ok(!/\$300|\$100|\$450/.test(text), "#282 perks+points portal card: no dollar amount for points");
+
+  // ---- wiring ----
+  const portalAct = r282Read("src/app/portal/actions.ts", "utf8");
+  const fn = portalAct.slice(portalAct.indexOf("export async function redeemPortalPerk"));
+  ok(/resolvePortalViewer\(/.test(fn) && /portalRedeemPerk\(viewer/.test(fn) && !/companyId:\s*input\.companyId\s*\|\|\s*session/.test(fn),
+    "#282 perks+points wiring: the portal Redeem resolves the viewer from the grant cookie / preview and goes through portalRedeemPerk");
+  const store = r282Read("src/lib/stores/reward-perks.ts", "utf8");
+  const portalFn = store.slice(store.indexOf("export async function portalRedeemPerk"));
+  ok(/if \(viewer\.preview\)/.test(portalFn) && /companyId: s\.customerId/.test(portalFn), "#282 perks+points wiring: preview refused; the company is always the session's grant");
+  const redeemFn = store.slice(store.indexOf("export async function redeemPerk"), store.indexOf("export async function fulfilPerkRedemption"));
+  ok(/withCompanyRewardsLock\(companyId/.test(redeemFn) && redeemFn.indexOf("perkContext(") > redeemFn.indexOf("withCompanyRewardsLock("),
+    "#282 perks+points wiring: Redeem reads the balance INSIDE the company's lock");
+  ok(/pg_try_advisory_xact_lock\(\$\{namespace\}, hashtext\(\$\{key\}\)\)/.test(r282Read("src/db/index.ts", "utf8")), "#282 perks+points wiring: the lock is a transaction-scoped advisory lock");
+  const act = r282Read("src/app/(app)/rewards/actions.ts", "utf8");
+  const rf = act.slice(act.indexOf("export async function redeemPerkAction"));
+  ok(rf.indexOf('can("create", me.roles)') > 0 && rf.indexOf('can("create", me.roles)') < rf.indexOf("await redeemPerk("), "#282 perks+points wiring: staff Redeem checks create first");
+  const ff = act.slice(act.indexOf("export async function fulfilPerkAction"));
+  ok(ff.indexOf('can("create", me.roles)') > 0 && ff.indexOf('can("create", me.roles)') < ff.indexOf("await fulfilPerkRedemption("), "#282 perks+points wiring: Mark fulfilled checks create first");
+  ok(/push\("perks", "Perks to fulfil"/.test(r282Read("src/lib/nav-counts.ts", "utf8")), "#282 perks+points wiring: the bell pushes \"Perks to fulfil\"");
+  for (const f of ["src/app/(app)/flame-tests/quote/controls.tsx", "src/app/(app)/inspections/quote/controls.tsx", "src/app/(app)/repairs/quote/controls.tsx"]) {
+    ok(/<ServicePurchasePerksBanner customerId=\{customerId\} \/>/.test(r282Read(f, "utf8")), `#282 perks+points wiring: ${f.split("/")[2]} shows the purchase-perks banner`);
+  }
+  const est = r282Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  ok(/creditInfo\?\.customerId === customerId && <PurchasePerksBanner text=\{creditInfo\.purchasePerks\}/.test(est), "#282 perks+points wiring: the Estimator banner shows only the current customer's answer");
+  for (const f of ["src/components/rewards/purchase-perks-banner.tsx", "src/app/(app)/settings/rewards/purchase-perks-editor.tsx", "src/app/portal/redeem-perk-button.tsx", "src/components/rewards/perk-actions.tsx"]) {
+    ok(!/from "@\/lib\/stores\//.test(r282Read(f, "utf8")), `#282 perks+points wiring: client component ${f.split("/").pop()} imports no server store`);
+  }
+  ok(/rewardsLine=\{purchasePerksDocLine\(perks\)\}/.test(r282Read("src/app/print/quote/[id]/page.tsx", "utf8")), "#282 perks+points wiring: the quote PDF route prints the purchase-perks line");
+  for (const f of ["src/app/(app)/flame-tests/letter/letter-view.tsx", "src/app/(app)/inspections/letter/letter-view.tsx"]) {
+    ok(/purchasePerksDocLine\(await purchasePerksForCompany\(quote\.customerId\)\)/.test(r282Read(f, "utf8")), `#282 perks+points wiring: ${f.split("/")[2]} letter prints the line`);
+  }
+  ok(/purchasePerksSentence\(await purchasePerksForCompany\(quote\.customerId\)\)/.test(r282Read("src/app/(app)/repairs/letter/letter-view.tsx", "utf8")), "#282 perks+points wiring: the repair letter says one sentence");
+}
+
+async function rewards282PerksPointsAsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const P = await import("@/lib/stores/reward-perks");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "pp-co"); // Gold
+  const OTHER = fixtureId(282, "pp-other"); // Base
+  const RACE = fixtureId(282, "pp-race"); // concurrency
+  const RACE2 = fixtureId(282, "pp-race2");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const proj = (slug: string, customerId: string, value: number) =>
+    createFixture("projects", { id: fixtureId(282, slug), kind: "project", name: `T282 ${slug}`, customer: "", customerId, quoteId: null,
+      projectType: null, value, margin: 0, createdAt: 1, updatedAt: 1, startedAt: 2, stageHistory: [], source: { system: "daylite", importedAt: 1 } });
+  const bal = async (id: string) => (await L.companyCredit(id)).balance;
+  try {
+    for (const [id, name] of [[CO, "Gold"], [OTHER, "Other"], [RACE, "Race"], [RACE2, "Race2"]]) {
+      await upsertCustomer({ id, name: `Test282 PP ${name} Co`, type: "Education", pricingTier: null, locations: [], contacts: [] });
+    }
+    await proj("pp-hist", CO, 160000); // Gold
+    await proj("pp-hist-o", OTHER, 1000); // Base
+    await proj("pp-hist-r", RACE, 1000);
+    await proj("pp-hist-r2", RACE2, 1000);
+    await setBlob("rewards_program", { ...r282Default, enabled: false, launchedAt: null, perks: [], purchasePerks: [] } as unknown as Record<string, unknown>);
+
+    // ---- purchase perks: save, by level, only while on ----
+    const sp = await P.saveRewardsPurchasePerks([
+      { id: "new:1", level: "gold", name: "Free freight", description: "Ground freight on every order", active: true },
+      { id: "new:2", level: "copper", name: "Priority scheduling", description: "", active: true },
+      { id: "new:3", level: "platinum", name: "Dedicated PM", description: "", active: true },
+      { id: "new:4", level: "gold", name: "Waived travel", description: "", active: true },
+    ]);
+    ok(sp.ok && sp.program.purchasePerks.length === 4 && sp.program.purchasePerks.every((p) => !p.id.startsWith("new:"))
+      && sp.program.purchasePerks.map((p) => p.level).join(",") === "copper,gold,gold,platinum", "#282 perks+points DB: purchase perks save with server ids, grouped by tier");
+    ok(!(await P.saveRewardsPurchasePerks([{ id: "", level: "base", name: "x", description: "", active: true }])).ok, "#282 perks+points DB: a Base purchase perk is refused");
+    ok((await P.purchasePerksForCompany(CO)) === null, "#282 perks+points DB: no purchase perks while the program is off");
+    const prog0 = await R.getRewardsProgram();
+    await R.saveRewardsProgram({ ...prog0, enabled: true });
+    const ppCo = await P.purchasePerksForCompany(CO);
+    ok(r282eBanner(ppCo) === "Gold purchase perks: Priority scheduling · Free freight · Waived travel", `#282 perks+points DB: a Gold customer's banner (${r282eBanner(ppCo)})`);
+    ok((await P.purchasePerksForCompany(OTHER)) === null && (await P.purchasePerksForCompany("")) === null, "#282 perks+points DB: a Base customer (or none) gets no banner / line");
+    // The customer document prints the line only when given one (QuoteDocument imports a .jpg this
+    // harness can't load — see #245 — so its source is read instead of rendered).
+    const qdSrc = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
+    ok(/\{p\.rewardsLine && \(/.test(qdSrc) && /\{p\.rewardsLine\}/.test(qdSrc) && r282eDocLine(await P.purchasePerksForCompany(OTHER)) === "",
+      "#282 perks+points DB: the quote document prints the rewards line only when the customer has one");
+
+    // ---- perks with points ----
+    const s1 = await P.saveRewardsPerks([
+      { id: "new:a", name: "Lift inspection", description: "One free lift inspection", level: "platinum", frequency: "once", active: true, pointCost: "300" },
+      { id: "new:b", name: "Swag box", description: "", level: "none", frequency: "yearly", active: true, pointCost: "100" },
+      { id: "new:c", name: "Gold thank-you", description: "", level: "gold", frequency: "once", active: true },
+      { id: "new:d", name: "Big one", description: "", level: "none", frequency: "once", active: true, pointCost: "200" },
+    ]);
+    ok(s1.ok, "#282 perks+points DB: perks with point prices save");
+    const prog = await R.getRewardsProgram();
+    ok(prog.purchasePerks.length === 4 && prog.enabled, "#282 perks+points DB: saving perks keeps purchase perks and the switch");
+    const id = (n: string) => prog.perks.find((p) => p.name === n)!.id;
+    const adj = await L.postAdjustment(CO, 450, "pp test credit", "Test");
+    ok(adj.ok && (await bal(CO)) === 450, "#282 perks+points DB: starting balance $450");
+
+    // Mark used can't take a perk that would cost points.
+    const mu = await P.markPerkUsed({ companyId: CO, perkId: id("Lift inspection"), by: "Test" });
+    ok(!mu.ok && /level/.test(mu.error) && /Redeem/.test(mu.error), "#282 perks+points DB: Mark used refuses a perk the company would have to buy");
+
+    // Redeem for points (staff).
+    const r1 = await P.redeemPerk({ companyId: CO, perkId: id("Lift inspection"), via: "staff", by: "Test", expect: { mode: "points", pointCost: 300 } });
+    ok(r1.ok && r1.entry.amount === -300 && r1.entry.redeemed === "points" && (await bal(CO)) === 150, `#282 perks+points DB: Redeem deducts exactly 300 (${JSON.stringify(r1)})`);
+    const r1b = await P.redeemPerk({ companyId: CO, perkId: id("Lift inspection"), via: "staff", by: "Test" });
+    ok(!r1b.ok && /already/.test(r1b.error) && (await bal(CO)) === 150, "#282 perks+points DB: a once perk can't be redeemed twice");
+    const r2 = await P.redeemPerk({ companyId: CO, perkId: id("Big one"), via: "staff", by: "Test" });
+    ok(!r2.ok && /short/.test(r2.error) && (await bal(CO)) === 150, "#282 perks+points DB: refused when short of points; nothing posted");
+    const r3 = await P.redeemPerk({ companyId: CO, perkId: id("Gold thank-you"), via: "staff", by: "Test" });
+    ok(r3.ok && r3.entry.amount === 0 && r3.entry.redeemed === "free" && (await bal(CO)) === 150, "#282 perks+points DB: a free redemption moves no credit");
+    const r4 = await P.redeemPerk({ companyId: CO, perkId: id("Swag box"), via: "staff", by: "Test", expect: { mode: "free", pointCost: null } });
+    ok(!r4.ok && (await bal(CO)) === 150, "#282 perks+points DB: refused when the card showed Free but it now costs points");
+
+    // ---- Undo refunds exactly once ----
+    const u1 = r1.ok ? await P.undoPerkUse(CO, r1.entry.id, "Admin") : { ok: false as const, error: "" };
+    ok(u1.ok && u1.entry.amount === 300 && (await bal(CO)) === 450, "#282 perks+points DB: Undo refunds the 300 points");
+    const u2 = r1.ok ? await P.undoPerkUse(CO, r1.entry.id, "Admin") : { ok: true as const };
+    ok(!u2.ok && (await bal(CO)) === 450, "#282 perks+points DB: a second Undo refunds nothing");
+    const r5 = await P.redeemPerk({ companyId: CO, perkId: id("Lift inspection"), via: "staff", by: "Test" });
+    ok(r5.ok && r5.entry.id.endsWith(":2") && (await bal(CO)) === 150, "#282 perks+points DB: after Undo the perk can be bought again (a fresh numbered use)");
+
+    // ---- fulfil ----
+    const toFulfil = await P.perksToFulfil();
+    const mine = toFulfil.filter((t) => t.companyId === CO);
+    ok(mine.length === 2 && mine.some((t) => t.points === 300) && mine.some((t) => t.points === 0) && !mine.some((t) => r1.ok && t.useId === r1.entry.id),
+      `#282 perks+points DB: the bell lists unfulfilled redemptions — not the undone one (${JSON.stringify(mine)})`);
+    const f1 = r5.ok ? await P.fulfilPerkRedemption(CO, r5.entry.id, "Test") : { ok: false as const, error: "" };
+    ok(f1.ok && f1.entry.kind === "perk-fulfil" && f1.entry.amount === 0 && r5.ok && f1.entry.id === `fulfil:${r5.entry.id}` && (await bal(CO)) === 150,
+      "#282 perks+points DB: Mark fulfilled posts fulfil:<use> (amount 0)");
+    const f2 = r5.ok ? await P.fulfilPerkRedemption(CO, r5.entry.id, "Test") : { ok: true as const };
+    ok(!f2.ok, "#282 perks+points DB: a redemption is fulfilled once");
+    ok(!(r1.ok ? await P.fulfilPerkRedemption(CO, r1.entry.id, "Test") : { ok: true }).ok, "#282 perks+points DB: an undone redemption can't be fulfilled");
+    ok(!(await P.perksToFulfil()).some((t) => r5.ok && t.useId === r5.entry.id), "#282 perks+points DB: a fulfilled redemption leaves the bell");
+
+    // ---- portal: scoped to the grant, refused in preview ----
+    const sessionFor = (customerId: string) => ({ grantId: "g-test", customerId, name: "Pat" });
+    const pPrev = await P.portalRedeemPerk({ session: sessionFor(CO), preview: true }, { perkId: id("Swag box"), companyId: CO });
+    ok(!pPrev.ok && /preview/.test(pPrev.error), "#282 perks+points DB: portal Redeem refused in a team preview");
+    ok(!(await P.portalRedeemPerk({ session: null, preview: false }, { perkId: id("Swag box") })).ok, "#282 perks+points DB: portal Redeem refused without a session");
+    const pX = await P.portalRedeemPerk({ session: sessionFor(OTHER), preview: false }, { perkId: id("Swag box"), companyId: CO });
+    ok(!pX.ok && (await bal(CO)) === 150, "#282 perks+points DB: another company's id is rejected (the session's grant wins; nothing posted on either)");
+    const pOk = await P.portalRedeemPerk({ session: sessionFor(CO), preview: false }, { perkId: id("Swag box"), companyId: CO, expect: { mode: "points", pointCost: 100 } });
+    ok(pOk.ok && pOk.entry.companyId === CO && pOk.entry.via === "portal" && pOk.entry.by === "Pat (portal)" && (await bal(CO)) === 50,
+      "#282 perks+points DB: portal Redeem posts on the grant's company, via portal");
+    ok((await P.perksToFulfil()).some((t) => pOk.ok && t.useId === pOk.entry.id && t.via === "portal"), "#282 perks+points DB: a portal redemption shows on the bell");
+    const pv = await P.portalRewards(CO);
+    ok(!!pv && pv.points === 50 && pv.purchasePerks?.levelLabel === "Gold" && pv.pending.length >= 1 && !JSON.stringify(pv).includes("$"),
+      `#282 perks+points DB: the portal view — points, purchase perks, pending, no dollars (${JSON.stringify(pv)})`);
+    const pvO = await P.portalRewards(OTHER);
+    ok(!!pvO && pvO.purchasePerks === null && !JSON.stringify(pvO).includes(CO), "#282 perks+points DB: another company's view stays its own");
+
+    // ---- /rewards counts free + buyable ----
+    const credit = await L.creditByCompany();
+    const counts = await P.availablePerksByCompany([{ companyId: CO, earned: "gold" }, { companyId: OTHER, earned: "base" }], await R.getRewardsProgram(), undefined, credit);
+    ok(counts.get(CO) === 0 && counts.get(OTHER) === 0, `#282 perks+points DB: /rewards counts (${JSON.stringify([...counts])})`);
+    await L.postAdjustment(OTHER, 250, "pp other", "Test");
+    const counts2 = await P.availablePerksByCompany([{ companyId: OTHER, earned: "base" }], await R.getRewardsProgram(), undefined, await L.creditByCompany());
+    ok(counts2.get(OTHER) === 2, `#282 perks+points DB: a Base company with 250 points can buy the 100- and 200-point perks, not the 300 one (${counts2.get(OTHER)})`);
+
+    // ---- concurrency: two redemptions against one balance can't overspend ----
+    await L.postAdjustment(RACE, 350, "race", "Test");
+    const [a, b] = await Promise.all([
+      P.redeemPerk({ companyId: RACE, perkId: id("Lift inspection"), via: "portal", by: "A" }),
+      P.redeemPerk({ companyId: RACE, perkId: id("Big one"), via: "staff", by: "B" }),
+    ]);
+    const raceBal = await bal(RACE);
+    ok([a, b].filter((x) => x.ok).length === 1 && (raceBal === 50 || raceBal === 150),
+      `#282 perks+points DB: two different perks redeemed at once against 350 points — exactly one posts (balance ${raceBal})`);
+    await L.postAdjustment(RACE2, 1000, "race2", "Test");
+    const same = await Promise.all([1, 2, 3].map(() => P.redeemPerk({ companyId: RACE2, perkId: id("Lift inspection"), via: "portal", by: "X" })));
+    ok(same.filter((x) => x.ok).length === 1 && (await bal(RACE2)) === 700, "#282 perks+points DB: the same once perk redeemed three times at once posts once");
+
+    // ---- refused while the program is off ----
+    await R.saveRewardsProgram({ ...(await R.getRewardsProgram()), enabled: false });
+    const off = await P.redeemPerk({ companyId: OTHER, perkId: id("Swag box"), via: "staff", by: "Test" });
+    ok(!off.ok && /off/.test(off.error), "#282 perks+points DB: Redeem refused while the program is off");
+    ok((await P.purchasePerksForCompany(CO)) === null, "#282 perks+points DB: purchase perks disappear while the program is off");
+  } finally {
+    await setBlob("rewards_program", {
+      ...prevRaw,
+      enabled: prevRaw.enabled === true,
+      launchedAt: prevRaw.launchedAt ?? null,
+      perks: prevRaw.perks ?? [],
+      purchasePerks: prevRaw.purchasePerks ?? [],
+    });
+    for (const c of [CO, OTHER, RACE, RACE2]) {
+      for (const x of await L.ledgerForCompany(c)) registerFixture("reward_ledger", x.id);
+      await removeCustomer(c);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #283 — shrinkImage: every catalog image becomes a ≤1600 px WebP.
+// ---------------------------------------------------------------------------
+import { shrinkImage as s283Shrink, webpFileName as s283Name, SHRINK_UNREADABLE as s283Unreadable } from "@/lib/part-docs/shrink";
+import s283Sharp from "sharp";
+async function shrink283AsyncChecks(): Promise<void> {
+  const big = await s283Sharp({ create: { width: 3000, height: 2000, channels: 3, background: { r: 200, g: 40, b: 40 } } }).png().toBuffer();
+  const a = await s283Shrink(big);
+  ok(a.ok && a.width === 1600 && a.height === 1067 && a.contentType === "image/webp", "#283 shrink: a 3000×2000 PNG comes out 1600 px wide WebP");
+  ok(a.ok && (await s283Sharp(a.bytes).metadata()).format === "webp", "#283 shrink: the bytes really are WebP");
+
+  const small = await s283Sharp({ create: { width: 400, height: 300, channels: 3, background: "#fff" } }).jpeg().toBuffer();
+  const b = await s283Shrink(small);
+  ok(b.ok && b.width === 400 && b.height === 300, "#283 shrink: a small image is never enlarged");
+
+  const rotated = await s283Sharp({ create: { width: 200, height: 100, channels: 3, background: "#000" } }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+  const c = await s283Shrink(rotated);
+  const cMeta = c.ok ? await s283Sharp(c.bytes).metadata() : null;
+  ok(c.ok && c.width === 100 && c.height === 200, "#283 shrink: an EXIF-rotated photo comes out upright");
+  ok(!!cMeta && !cMeta.exif && !cMeta.orientation, "#283 shrink: EXIF (incl. GPS/orientation) is stripped");
+
+  const bad = await s283Shrink(new Uint8Array(Buffer.from("definitely not an image")));
+  ok(!bad.ok && bad.error === s283Unreadable, "#283 shrink: garbage bytes refuse with the save-as-JPEG message");
+
+  ok(s283Name("S4LED-S3 front.JPG") === "S4LED-S3 front.webp" && s283Name("photo") === "photo.webp" && s283Name("") === "image.webp",
+    "#283 webpFileName: swaps or adds the .webp extension");
+}
+
+// ---------------------------------------------------------------------------
+// #283 — an uploaded image is swapped for its shrunk copy; a bad one is deleted.
+// ---------------------------------------------------------------------------
+import { shrinkStoredImage as su283 } from "@/lib/part-docs/shrink-upload";
+import { blobPathBelongsTo as su283Belongs } from "@/lib/part-docs/types";
+async function shrinkUpload283AsyncChecks(): Promise<void> {
+  const photo = await s283Sharp({ create: { width: 2400, height: 1800, channels: 3, background: "#369" } }).jpeg().toBuffer();
+  const store = new Map<string, Uint8Array>([["part-docs/PD-283aaaaaaaaa/orig.jpg", photo]]);
+  const removed: string[] = [];
+  const deps = {
+    read: async (p: string) => store.get(p) ?? null,
+    put: async (p: string, bytes: Buffer) => { store.set(p, bytes); return { pathname: p }; },
+    remove: async (p: string) => { removed.push(p); store.delete(p); },
+  };
+  const file = { blobKey: "part-docs/PD-283aaaaaaaaa/orig.jpg", fileName: "orig.jpg", contentType: "image/jpeg", size: photo.byteLength };
+  ok(su283Belongs(file.blobKey, "PD-283aaaaaaaaa"), "#283 upload: the fake blob keys are real part-doc paths");
+  const r = await su283("PD-283aaaaaaaaa", file, deps);
+  ok(r.ok && r.file.contentType === "image/webp" && r.file.fileName === "orig.webp" && r.file.size < photo.byteLength,
+    "#283 upload: the stored file becomes a smaller WebP");
+  ok(r.ok && r.file.blobKey !== file.blobKey && removed.includes(file.blobKey) && store.has(r.file.blobKey),
+    "#283 upload: the shrunk copy is stored and the original upload deleted");
+
+  const badKey = "part-docs/PD-283bbbbbbbbb/x.png";
+  store.set(badKey, new Uint8Array(Buffer.from("nope")));
+  const bad = await su283("PD-283bbbbbbbbb", { ...file, blobKey: badKey, fileName: "x.png" }, deps);
+  ok(!bad.ok && removed.includes(badKey), "#283 upload: an unreadable upload is refused and its blob deleted");
+
+  const gone = await su283("PD-283cccccccccc", { ...file, blobKey: "part-docs/PD-283cccccccccc/missing.jpg" }, deps);
+  ok(!gone.ok && !removed.includes("part-docs/PD-283cccccccccc/missing.jpg"), "#283 upload: a blob that can't be read is refused without deleting");
+}
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photo client: folder lookup, recursive listing, all-drives params.
+// ---------------------------------------------------------------------------
+import { findPhotosFolder as dp283Find, listPhotoTree as dp283List, getDriveFolder as dp283Get, downloadDriveFile as dp283Download } from "@/lib/google/drive-photos";
+import type { DriveFetch as DriveFetch283 } from "@/lib/google/drive";
+async function drivePhotos283AsyncChecks(): Promise<void> {
+  const seen: string[] = [];
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const folderHit = { id: "F1", name: "Peak Product Photos", driveId: "SD1", webViewLink: "https://drive/F1" };
+  const one = async (url: string) => { seen.push(url); return json({ files: [folderHit] }); };
+  const r1 = await dp283Find("tok", one);
+  ok(r1.ok && r1.folder.id === "F1" && r1.folder.driveId === "SD1", "#283 drive: one folder named Peak Product Photos is found");
+  ok(seen.some((u) => u.includes("corpora=allDrives") && u.includes("includeItemsFromAllDrives=true") && u.includes("supportsAllDrives=true")),
+    "#283 drive: the folder search covers My Drive and Shared Drives");
+  const none = await dp283Find("tok", async () => json({ files: [] }));
+  ok(!none.ok && /No folder named Peak Product Photos/.test(none.error), "#283 drive: no folder → a clear message");
+  const many = await dp283Find("tok", async () => json({ files: [folderHit, { ...folderHit, id: "F2", webViewLink: "https://drive/F2" }] }));
+  ok(!many.ok && /Found 2 folders named Peak Product Photos/.test(many.error) && many.error.includes("https://drive/F2"), "#283 drive: several folders → rename the extras, with links");
+
+  // Tree: F1 → (a.jpg, Sub [page 1: b.png, page 2: c.heic + doc], F1 again via a second parent)
+  const pages: Record<string, unknown> = {
+    "F1|": { files: [
+      { id: "a", name: "S4LED-S3.jpg", mimeType: "image/jpeg", md5Checksum: "m-a", size: "1000", webViewLink: "https://drive/a" },
+      { id: "SUB", name: "ETC", mimeType: "application/vnd.google-apps.folder" },
+      { id: "F1", name: "loop", mimeType: "application/vnd.google-apps.folder" },
+    ] },
+    "SUB|": { files: [{ id: "b", name: "x.png", mimeType: "image/png", md5Checksum: "m-b", size: "20", webViewLink: "https://drive/b" }], nextPageToken: "P2" },
+    "SUB|P2": { files: [
+      { id: "c", name: "y.heic", mimeType: "image/heic", md5Checksum: "m-c", size: "30", webViewLink: "https://drive/c" },
+      { id: "d", name: "notes", mimeType: "application/vnd.google-apps.document" },
+    ] },
+  };
+  const tree = async (url: string) => {
+    const u = new URL(url);
+    const q = u.searchParams.get("q") || "";
+    const parent = (q.match(/'([^']+)' in parents/) || [])[1] || "";
+    return json(pages[`${parent}|${u.searchParams.get("pageToken") || ""}`] ?? { files: [] });
+  };
+  const listed = await dp283List("tok", "F1", tree);
+  ok(listed.map((p) => p.id).sort().join(",") === "a,b,c", "#283 drive: photos are listed recursively across pages; docs ignored; a repeated folder is walked once");
+  ok(listed.find((p) => p.id === "a")?.size === 1000 && listed.find((p) => p.id === "a")?.md5 === "m-a", "#283 drive: size and md5 come through");
+
+  const gone = await dp283Get("tok", "F9", async () => json({ error: { message: "nf" } }, 404));
+  const trashed = await dp283Get("tok", "F1", async () => json({ ...folderHit, mimeType: "application/vnd.google-apps.folder", trashed: true }));
+  ok(gone === null && trashed === null, "#283 drive: a vanished or trashed folder reads as null");
+
+  const bytes = await dp283Download("tok", "a", 10, async () => new Response(new Uint8Array([1, 2, 3])));
+  ok(bytes.byteLength === 3, "#283 drive: download returns the bytes");
+  let tooBig = false;
+  try { await dp283Download("tok", "a", 2, async () => new Response(new Uint8Array([1, 2, 3]))); } catch { tooBig = true; }
+  ok(tooBig, "#283 drive: a download over the cap throws");
+  // timeoutMs caps the download (the sync passes its hard deadline here).
+  const hang: DriveFetch283 = (_url, init) => new Promise((_res, rej) => init.signal?.addEventListener("abort", () => rej(init.signal?.reason)));
+  const hangStart = Date.now();
+  let hangErr = "";
+  try { await dp283Download("tok", "a", 10, hang, 50); } catch (e) { hangErr = (e as { name?: string }).name || ""; }
+  ok(hangErr === "TimeoutError" && Date.now() - hangStart < 5_000, "#283 drive: a download times out at the timeoutMs it is given");
+  let denied = "";
+  try { await dp283List("tok", "F1", async () => json({ error: { message: "insufficient" } }, 403)); } catch (e) { denied = (e as Error).message; }
+  ok(/Enable Drive photos/.test(denied), "#283 drive: a 403 tells the admin to use Enable Drive photos");
+}
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photo sync planner (pure).
+// ---------------------------------------------------------------------------
+import { planDrivePhotoSync as pp283 } from "@/lib/part-docs/drive-photo-plan";
+{
+  const photo = (id: string, name: string, md5 = "m-" + id, extra: Partial<{ mimeType: string; size: number }> = {}) =>
+    ({ id, name, mimeType: extra.mimeType ?? "image/jpeg", md5, size: extra.size ?? 100, webViewLink: "https://drive/" + id });
+  const match = (name: string) =>
+    name.startsWith("AMB") ? { confidence: "ambiguous" as const, skus: ["P1", "P2"] }
+    : name.startsWith("NONE") ? { confidence: "none" as const, skus: [] }
+    : { confidence: "high" as const, skus: name.startsWith("TWO") ? ["P1", "P2"] : ["P1"] };
+  const at = 1;
+  const plan = pp283(
+    [
+      photo("new", "S4.jpg"),
+      photo("same", "S4.jpg", "m-same"),
+      photo("changed", "S4.jpg", "m-new"),
+      photo("renamed", "TWO.jpg", "m-renamed"),
+      photo("failed", "S4.jpg", "m-failed"),
+      photo("failedChanged", "S4.jpg", "m-fixed"),
+      photo("amb", "AMB.jpg"),
+      photo("none", "NONE.jpg"),
+      photo("heic", "S4.heic", "m-h", { mimeType: "image/heic" }),
+      photo("big", "S4.jpg", "m-big", { size: 999 }),
+      photo("knownNowNone", "NONE-renamed.jpg", "m-k"),
+      photo("new", "S4.jpg"),
+    ],
+    {
+      same: { md5: "m-same", documentId: "PD-1", skus: ["P1"], at },
+      changed: { md5: "m-old", documentId: "PD-2", skus: ["P1", "P9"], at },
+      renamed: { md5: "m-renamed", documentId: "PD-3", skus: ["P1"], at },
+      failed: { md5: "m-failed", documentId: null, skus: [], error: "bad", at },
+      failedChanged: { md5: "m-broken", documentId: null, skus: [], error: "bad", at },
+      knownNowNone: { md5: "m-k", documentId: "PD-4", skus: ["P7"], at },
+    },
+    match,
+    500
+  );
+  ok(plan.imports.map((p) => p.id).sort().join(",") === "failedChanged,new", "#283 plan: new files (and a failed file that changed) import, a listing duplicate once");
+  ok(plan.updates.length === 1 && plan.updates[0].id === "changed" && plan.updates[0].documentId === "PD-2" && plan.updates[0].remove.join() === "P9",
+    "#283 plan: a changed file updates its document and drops parts it no longer matches");
+  ok(plan.relinks.length === 1 && plan.relinks[0].fileId === "renamed" && plan.relinks[0].add.join() === "P2" && plan.relinks[0].remove.length === 0,
+    "#283 plan: a renamed-but-unchanged file relinks");
+  ok(plan.retryLater === 1 && plan.unchanged === 1, "#283 plan: a failed unchanged file waits; an unchanged file is skipped");
+  const reasons = Object.fromEntries(plan.unmatched.map((u) => [u.fileId, u.reason]));
+  ok(/several parts: P1, P2/.test(reasons.amb) && /no part number/.test(reasons.none), "#283 plan: ambiguous and no-match files are listed with reasons");
+  ok(/HEIC/.test(reasons.heic) && /over 25 MB/.test(reasons.big), "#283 plan: HEIC and over-cap files are listed, not imported");
+  ok(!!reasons.knownNowNone && !plan.relinks.some((r) => r.fileId === "knownNowNone") && !plan.updates.some((u) => u.id === "knownNowNone"),
+    "#283 plan: a known file renamed to something unmatched is only listed — its links stay");
+}
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photo sync executor (PGlite + fake Drive + fake Blob).
+// ---------------------------------------------------------------------------
+import { syncDrivePhotos as ds283Sync, getDrivePhotoSyncState as ds283State, saveCatalogPhotosMailbox as ds283SaveMailbox, DRIVE_PHOTO_SYNC_BLOB as ds283Blob } from "@/lib/part-docs/drive-photo-sync";
+import { hasDriveReadScope as ds283HasRead } from "@/lib/gmail/config";
+import { matchFileRows as ds283Match } from "@/lib/part-docs/filename-match";
+import { list as ds283ListCatalog } from "@/lib/stores/catalog";
+import { getDocument as ds283GetDoc, linkedDocumentsForParts as ds283Linked, documentLinkId as ds283LinkId, allDocuments as ds283AllDocs, createDocument as ds283Create } from "@/lib/stores/part-documents";
+import { setBlob as ds283SetBlob, softDeleteDoc as ds283SoftDelete } from "@/db/doc-store";
+import { newDocumentId as ds283NewDocId } from "@/lib/part-docs/types";
+async function drivePhotoSync283AsyncChecks(): Promise<void> {
+  // Fixture SKUs: normalizeSku drops the `TEST283:` prefix, so their match
+  // keys are T283ALPHA / T283BRAVO / T283LABOR — what the file names carry.
+  const ALPHA = fixtureId(283, "T283-ALPHA");
+  const BRAVO = fixtureId(283, "T283-BRAVO");
+  const LABOR = fixtureId(283, "T283-LABOR");
+  await upsertPart({ id: ALPHA, sku: ALPHA, desc: "TEST283 alpha fixture", category: "Lighting", unit: "ea", list: 10, cost: 5 });
+  registerFixture("catalog_parts", ALPHA);
+  await upsertPart({ id: BRAVO, sku: BRAVO, desc: "TEST283 bravo fixture", category: "Lighting", unit: "ea", list: 10, cost: 5 });
+  registerFixture("catalog_parts", BRAVO);
+  await upsertPart({ id: LABOR, sku: LABOR, desc: "TEST283 labor fixture", category: "Labor", unit: "hr", list: 10, cost: 5 });
+  registerFixture("catalog_parts", LABOR);
+  await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null, runningUntil: null });
+
+  const NONSENSE = "random.jpg";
+  const matchable = (await ds283ListCatalog()).filter((p) => p.category !== "Labor");
+  const [mAlpha, mNonsense] = ds283Match(["T283-ALPHA front.jpg", NONSENSE], matchable);
+  ok(mAlpha.confidence === "high" && mAlpha.skus.join() === ALPHA, "#283 sync setup: \"T283-ALPHA front.jpg\" matches only the ALPHA fixture part");
+  ok(mNonsense.confidence === "none", `#283 sync setup: "${NONSENSE}" matches no part in this catalog`);
+
+  const jpeg = await s283Sharp({ create: { width: 2000, height: 1000, channels: 3, background: "#0a0" } }).jpeg().toBuffer();
+  let files: Array<Record<string, unknown>> = [
+    { id: "dA", name: "T283-ALPHA front.jpg", mimeType: "image/jpeg", md5Checksum: "m1", size: String(jpeg.byteLength), webViewLink: "https://drive/dA" },
+    { id: "dL", name: "T283-LABOR.jpg", mimeType: "image/jpeg", md5Checksum: "mL", size: String(jpeg.byteLength), webViewLink: "https://drive/dL" },
+    { id: "dX", name: NONSENSE, mimeType: "image/jpeg", md5Checksum: "mX", size: "10", webViewLink: "https://drive/dX" },
+  ];
+  const jpegBody = new Uint8Array(jpeg);
+  let mediaBytes: Uint8Array<ArrayBuffer> = jpegBody;
+  const denied = new Set<string>();
+  let authFailOnce = "";
+  /** One-shot download outcomes per file id — a function that throws or answers. */
+  const onceMedia = new Map<string, () => Response>();
+  /** Downloads that never answer — they end only when the request's signal aborts. */
+  const slowMedia = new Set<string>();
+  const mediaAsked: string[] = [];
+  let putFailOnce = false;
+  const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
+  const fakeDrive = async (url: string, init?: RequestInit) => {
+    const u = new URL(url);
+    const id = decodeURIComponent(u.pathname.split("/").pop() || "");
+    if (u.searchParams.get("alt") === "media") {
+      mediaAsked.push(id);
+      if (slowMedia.has(id)) {
+        return new Promise<Response>((_res, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal?.reason)));
+      }
+      if (denied.has(id)) return json({ error: { message: "The download of this file is restricted." } }, 403);
+      if (authFailOnce === id) { authFailOnce = ""; return json({ error: { message: "Invalid Credentials" } }, 401); }
+      const once = onceMedia.get(id);
+      if (once) { onceMedia.delete(id); return once(); }
+      return new Response(mediaBytes);
+    }
+    const q = u.searchParams.get("q") || "";
+    if (q.startsWith("name =")) return json({ files: [{ id: "ROOT", name: "Peak Product Photos", webViewLink: "https://drive/ROOT" }] });
+    if (u.pathname.endsWith("/files/ROOT")) return json({ id: "ROOT", name: "Peak Product Photos", mimeType: "application/vnd.google-apps.folder", webViewLink: "https://drive/ROOT" });
+    return json({ files });
+  };
+  const stored: string[] = [];
+  const storedBytes: Buffer[] = [];
+  const deps = { token: "tok", fetch: fakeDrive, putFile: async (p: string, b: Buffer) => { if (putFailOnce) { putFailOnce = false; throw new Error("blob store down"); } stored.push(p); storedBytes.push(b); return { pathname: p }; }, now: () => 1_700_000_000_000 };
+  const imagesOf = async (sku: string) => ((await ds283Linked([sku], "image")).get(sku) ?? []).map((d) => d.id).sort();
+  try {
+    const r1 = await ds283Sync(45_000, deps);
+    const st1 = await ds283State();
+    ok(r1.ok && r1.imported === 1 && r1.unmatched === 2, "#283 sync: a matched photo imports; Labor and nameless files are listed");
+    ok(!!st1.folder && st1.folder.id === "ROOT" && st1.files.dA?.documentId != null, "#283 sync: the folder and the imported file are remembered");
+    ok(!!st1.lastRun && st1.lastRun.complete && st1.lastRun.unmatched.map((u) => u.fileId).sort().join() === "dL,dX", "#283 sync: the last run is recorded, with its unmatched files");
+    const docId = st1.files.dA!.documentId!;
+    const doc = await ds283GetDoc(docId);
+    ok(!!doc && doc.kind === "image" && doc.source === "drive" && doc.sourceRef === "dA" && doc.contentType === "image/webp" && doc.fileName === "T283-ALPHA front.webp",
+      "#283 sync: the image document is a shrunk Drive-sourced WebP");
+    ok(!!doc && doc.blobKey === stored[0] && stored[0].startsWith(`part-docs/${docId}/`) && doc.sourceUrl === "https://drive/dA", "#283 sync: the stored file sits under the document's own blob path");
+    const meta1 = await s283Sharp(storedBytes[0]).metadata();
+    ok(meta1.format === "webp" && meta1.width === 1600, "#283 sync: the stored bytes are the shrunk 1600 px WebP");
+    ok((await imagesOf(ALPHA)).join() === docId && (await imagesOf(LABOR)).length === 0, "#283 sync: it is linked to the matched part (never the Labor part)");
+
+    const r2 = await ds283Sync(45_000, deps);
+    ok(r2.ok && r2.imported === 0 && r2.updated === 0 && r2.relinked === 0 && stored.length === 1 && !r2.changed, "#283 sync: a second run with nothing changed does nothing");
+
+    files = files.map((f) => (f.id === "dA" ? { ...f, md5Checksum: "m2" } : f));
+    const r3 = await ds283Sync(45_000, deps);
+    const doc3 = await ds283GetDoc(docId);
+    ok(r3.ok && r3.updated === 1 && (await ds283State()).files.dA.documentId === docId && stored.length === 2, "#283 sync: a changed photo replaces the same document's file");
+    ok(!!doc3 && doc3.history.length === 1 && doc3.blobKey === stored[1], "#283 sync: the old file moves to the document's history");
+
+    files = files.map((f) => (f.id === "dA" ? { ...f, name: "T283-BRAVO.jpg" } : f));
+    const r4 = await ds283Sync(45_000, deps);
+    ok(r4.ok && r4.relinked === 1 && (await ds283State()).files.dA.skus.join() === BRAVO && stored.length === 2, "#283 sync: a renamed photo moves to the newly matched part");
+    ok((await imagesOf(BRAVO)).join() === docId && (await imagesOf(ALPHA)).length === 0, "#283 sync: the renamed photo's link moved from ALPHA to BRAVO");
+
+    files = [...files, { id: "dBad", name: "T283-ALPHA back.jpg", mimeType: "image/jpeg", md5Checksum: "mb", size: "8", webViewLink: "https://drive/dBad" }];
+    mediaBytes = new Uint8Array(Buffer.from("not an image"));
+    const r5 = await ds283Sync(45_000, deps);
+    const r6 = await ds283Sync(45_000, deps);
+    ok(r5.ok && r5.failed === 1 && r6.ok && r6.failed === 0, "#283 sync: a broken file fails once and isn't retried until it changes");
+    ok(!!(await ds283State()).files.dBad?.error && (await ds283State()).files.dBad.documentId === null, "#283 sync: the broken file's error is remembered, with no document");
+    mediaBytes = jpegBody;
+
+    // A 403 on one download is that file's problem (download-restricted /
+    // per-user limit), not the run's; two photos of one part both link.
+    denied.add("dDeny");
+    files = [
+      ...files,
+      { id: "dDeny", name: "T283-ALPHA side.jpg", mimeType: "image/jpeg", md5Checksum: "md", size: "8", webViewLink: "https://drive/dDeny" },
+      { id: "dTop", name: "T283-ALPHA top.jpg", mimeType: "image/jpeg", md5Checksum: "mt", size: "8", webViewLink: "https://drive/dTop" },
+      { id: "dTop2", name: "T283-ALPHA top 2.jpg", mimeType: "image/jpeg", md5Checksum: "mt2", size: "8", webViewLink: "https://drive/dTop2" },
+    ];
+    const r7 = await ds283Sync(45_000, deps);
+    const st7 = await ds283State();
+    ok(r7.ok && r7.failed === 1 && r7.imported === 2 && r7.remaining === 0, "#283 sync: a 403 on one file's download fails only that file; the others import");
+    ok(/^Drive won't let this account download this file \(403\)\. Google said: The download of this file is restricted\.$/.test(st7.files.dDeny?.error || "") && st7.files.dDeny.documentId === null,
+      "#283 sync: a plain 403 is recorded as that file's own error (file-specific text, Google's reason kept)");
+    const tops = [st7.files.dTop?.documentId, st7.files.dTop2?.documentId];
+    ok(tops.every(Boolean) && tops[0] !== tops[1] && (await imagesOf(ALPHA)).join() === [...tops].sort().join(), "#283 sync: two photos of the same part both import and both link to it");
+
+    // A 401 ends the call: nothing recorded against the file, it retries next time.
+    authFailOnce = "dAuth";
+    files = [...files, { id: "dAuth", name: "T283-BRAVO back.jpg", mimeType: "image/jpeg", md5Checksum: "ma", size: "8", webViewLink: "https://drive/dAuth" }];
+    const r8 = await ds283Sync(45_000, deps);
+    const st8 = await ds283State();
+    ok(!r8.ok && /401/.test(r8.error) && !st8.files.dAuth && st8.lastRun?.complete === false && /401/.test(st8.lastRun?.error || ""), "#283 sync: a 401 stops the run without marking the file failed");
+
+    files = [...files, { id: "dEcho", name: "T283-BRAVO left.jpg", mimeType: "image/jpeg", md5Checksum: "me", size: "8", webViewLink: "https://drive/dEcho" }];
+    const tight = await ds283Sync(0, { ...deps });
+    ok(tight.ok && tight.imported === 1 && tight.remaining === 1 && (await ds283State()).lastRun?.complete === false, "#283 sync: a zero budget still answers — one file, the rest left for next time");
+    const rest = await ds283Sync(45_000, deps);
+    ok(rest.ok && rest.imported === 1 && rest.remaining === 0 && (await ds283State()).lastRun?.complete === true, "#283 sync: the next call finishes the rest");
+    ok((await imagesOf(BRAVO)).length === 3, "#283 sync: BRAVO now has its renamed photo plus both new ones");
+
+    // Fix round 1 — transient failures end the call without marking the file;
+    // the next run retries it. Only the file's own problems are recorded.
+    const T0 = deps.now();
+    const driveDocs = async (fileId: string) => (await ds283AllDocs()).filter((d) => d.source === "drive" && d.sourceRef === fileId);
+    const addFile = (id: string, name: string) => {
+      files = [...files, { id, name, mimeType: "image/jpeg", md5Checksum: "m-" + id, size: "8", webViewLink: "https://drive/" + id }];
+    };
+
+    ok((await ds283State()).runningUntil == null, "#283 lease: a finished run leaves no lease behind");
+    await ds283SetBlob(ds283Blob, { runningUntil: T0 + 60_000 });
+    const lastRunBefore = JSON.stringify((await ds283State()).lastRun);
+    const leased = await ds283Sync(45_000, deps);
+    const stLeased = await ds283State();
+    ok(!leased.ok && /already running/.test(leased.error) && stLeased.runningUntil === T0 + 60_000 && JSON.stringify(stLeased.lastRun) === lastRunBefore,
+      "#283 lease: a live lease refuses the call and touches nothing");
+    await ds283SetBlob(ds283Blob, { runningUntil: T0 - 1 });
+    const expired = await ds283Sync(45_000, deps);
+    ok(expired.ok && (await ds283State()).runningUntil == null, "#283 lease: an expired lease is ignored, and the run clears its own");
+
+    addFile("dNet", "T283-BRAVO net.jpg");
+    onceMedia.set("dNet", () => { throw new TypeError("fetch failed"); });
+    const net1 = await ds283Sync(45_000, deps);
+    const stNet = await ds283State();
+    ok(!net1.ok && /fetch failed/.test(net1.error) && !stNet.files.dNet && stNet.lastRun?.complete === false && /fetch failed/.test(stNet.lastRun?.error || ""),
+      "#283 transient: a network TypeError on a download stops the call without marking the file failed");
+    const net2 = await ds283Sync(45_000, deps);
+    ok(net2.ok && net2.imported === 1 && net2.failed === 0 && (await driveDocs("dNet")).length === 1, "#283 transient: the next run imports the file the network dropped");
+
+    addFile("dTime", "T283-BRAVO time.jpg");
+    onceMedia.set("dTime", () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); });
+    const time1 = await ds283Sync(45_000, deps);
+    ok(!time1.ok && /took too long/.test(time1.error) && !(await ds283State()).files.dTime, "#283 transient: a download timeout stops the call without marking the file failed");
+    const time2 = await ds283Sync(45_000, deps);
+    ok(time2.ok && time2.imported === 1 && (await driveDocs("dTime")).length === 1, "#283 transient: the next run imports the timed-out file");
+
+    addFile("dPut", "T283-BRAVO put.jpg");
+    putFailOnce = true;
+    const storedBefore = stored.length;
+    const put1 = await ds283Sync(45_000, deps);
+    ok(!put1.ok && /blob store down/.test(put1.error) && !(await ds283State()).files.dPut && stored.length === storedBefore && (await driveDocs("dPut")).length === 0,
+      "#283 transient: a Blob put that throws stops the call without marking the file failed");
+    const put2 = await ds283Sync(45_000, deps);
+    ok(put2.ok && put2.imported === 1 && (await driveDocs("dPut")).length === 1, "#283 transient: the next run stores and imports it — one document");
+
+    addFile("dRate", "T283-BRAVO rate.jpg");
+    onceMedia.set("dRate", () => json({ error: { message: "User Rate Limit Exceeded. (userRateLimitExceeded)" } }, 403));
+    const rate1 = await ds283Sync(45_000, deps);
+    ok(!rate1.ok && /403/.test(rate1.error) && /userRateLimitExceeded/.test(rate1.error) && !(await ds283State()).files.dRate,
+      "#283 transient: a 403 carrying userRateLimitExceeded is a rate limit, not the file's problem");
+    const rate2 = await ds283Sync(45_000, deps);
+    ok(rate2.ok && rate2.imported === 1, "#283 transient: the rate-limited file imports on the next run");
+
+    addFile("dGone", "T283-BRAVO gone.jpg");
+    onceMedia.set("dGone", () => json({ error: { message: "File not found: dGone." } }, 404));
+    const gone = await ds283Sync(45_000, deps);
+    ok(gone.ok && gone.failed === 1 && (await ds283State()).files.dGone?.error === "The file disappeared from Drive before it could be downloaded (404).",
+      "#283 sync: a 404 on the download is recorded as that file's own error");
+    files = files.filter((x) => x.id !== "dGone");
+
+    addFile("dOdd", "T283-BRAVO odd.jpg");
+    addFile("dOk", "T283-BRAVO okay.jpg");
+    onceMedia.set("dOdd", () => json({ error: { message: "Invalid Value" } }, 400));
+    const odd = await ds283Sync(45_000, deps);
+    const stOdd = await ds283State();
+    ok(odd.ok && odd.failed === 1 && odd.imported === 1 && odd.remaining === 0 && stOdd.files.dOdd?.error === "Drive refused this file (400): Invalid Value" && !!stOdd.files.dOk?.documentId && !stOdd.lastRun?.error,
+      "#283 sync: a 400 on one file's download fails only that file; the other imports and the run isn't stopped");
+    files = files.filter((x) => x.id !== "dOdd");
+
+    addFile("d408", "T283-BRAVO slow.jpg");
+    onceMedia.set("d408", () => json({ error: { message: "Request Timeout" } }, 408));
+    const t408 = await ds283Sync(45_000, deps);
+    ok(!t408.ok && /408/.test(t408.error) && !(await ds283State()).files.d408 && /408/.test((await ds283State()).lastRun?.error || ""),
+      "#283 transient: a 408 on a download stops the call without marking the file failed");
+    const t408b = await ds283Sync(45_000, deps);
+    ok(t408b.ok && t408b.imported === 1 && t408b.failed === 0, "#283 transient: the next run imports the file the 408 stopped");
+
+    addFile("dQ1", "T283-BRAVO q1.jpg");
+    addFile("dQ2", "T283-BRAVO q2.jpg");
+    onceMedia.set("dQ2", () => json({ error: { message: "Rate Limit Exceeded" } }, 429));
+    const q1 = await ds283Sync(45_000, deps);
+    const stQ = await ds283State();
+    ok(q1.ok && q1.imported === 1 && q1.remaining === 1 && !!stQ.files.dQ1?.documentId && !stQ.files.dQ2 && stQ.lastRun?.complete === false && /429/.test(stQ.lastRun?.error || ""),
+      "#283 transient: a 429 after one imported file answers ok with the rest remaining and the stop recorded");
+    const q2 = await ds283Sync(45_000, deps);
+    ok(q2.ok && q2.imported === 1 && q2.remaining === 0 && (await ds283State()).lastRun?.complete === true, "#283 transient: the next run imports the file the 429 stopped");
+
+    // Killed function, point A: the pending entry was saved, the document never created.
+    addFile("dKA", "T283-ALPHA kill a.jpg");
+    const neverCreated = ds283NewDocId();
+    await ds283SetBlob(ds283Blob, { files: { ...(await ds283State()).files, dKA: { md5: "", documentId: neverCreated, skus: [], at: T0 } } });
+    const ka = await ds283Sync(45_000, deps);
+    const kaDocs = await driveDocs("dKA");
+    const kaId = (await ds283State()).files.dKA?.documentId;
+    ok(ka.ok && ka.imported === 1 && kaDocs.length === 1 && kaDocs[0].id === kaId && kaId !== neverCreated && !(await ds283GetDoc(neverCreated)),
+      "#283 kill: killed after the pending save — the next run creates exactly one document");
+    ok((await imagesOf(ALPHA)).includes(kaId || "?") && (await ds283State()).files.dKA?.md5 === "m-dKA", "#283 kill: that document is linked and the file's entry is complete");
+
+    // Killed function, point B: the document was created, the final state save never happened.
+    addFile("dKB", "T283-ALPHA kill b.jpg");
+    const createdBeforeKill = ds283NewDocId();
+    await ds283Create({ id: createdBeforeKill, kind: "image", title: "T283-ALPHA kill b", fileName: "T283-ALPHA kill b.webp", contentType: "image/webp", size: 8,
+      blobKey: `part-docs/${createdBeforeKill}/T283-ALPHA kill b.webp`, sourceUrl: "https://drive/dKB", source: "drive", sourceRef: "dKB", by: "Drive photos sync", at: T0 });
+    await ds283SetBlob(ds283Blob, { files: { ...(await ds283State()).files, dKB: { md5: "", documentId: createdBeforeKill, skus: [], at: T0 } } });
+    const kb = await ds283Sync(45_000, deps);
+    const kbDocs = await driveDocs("dKB");
+    ok(kb.ok && kb.updated === 1 && kb.imported === 0 && kbDocs.length === 1 && kbDocs[0].id === createdBeforeKill && (await ds283State()).files.dKB?.documentId === createdBeforeKill,
+      "#283 kill: killed after the create — the next run reuses that document, no duplicate");
+    ok((await imagesOf(ALPHA)).includes(createdBeforeKill) && (await ds283State()).files.dKB?.md5 === "m-dKB", "#283 kill: the reused document is linked and the file's entry is complete");
+
+    // A rename whose document was deleted in the app isn't counted as a relink;
+    // the file is forgotten and imported fresh next run.
+    const q1Doc = (await ds283State()).files.dQ1!.documentId!;
+    registerFixture("part_documents", q1Doc);
+    for (const sku of [ALPHA, BRAVO]) registerFixture("part_document_links", ds283LinkId(sku, q1Doc));
+    await ds283SoftDelete("part_documents", q1Doc);
+    files = files.map((x) => (x.id === "dQ1" ? { ...x, name: "T283-ALPHA q1.jpg" } : x));
+    const rl1 = await ds283Sync(45_000, deps);
+    ok(rl1.ok && rl1.relinked === 0 && !(await ds283State()).files.dQ1, "#283 relink: a renamed photo whose document was deleted isn't counted, and its entry is dropped");
+    const rl2 = await ds283Sync(45_000, deps);
+    const q1New = (await ds283State()).files.dQ1?.documentId;
+    ok(rl2.ok && rl2.imported === 1 && !!q1New && q1New !== q1Doc && (await imagesOf(ALPHA)).includes(q1New), "#283 relink: the next run imports it afresh under the new match");
+
+    // Hard deadline (call start + budget + 10 s). The clock's first reading is
+    // the call start; later readings are shifted forward by `ms`.
+    const skewed = (ms: number) => { let first = true; return () => { const t = Date.now() + (first ? 0 : ms); first = false; return t; }; };
+
+    // A download that never answers, with a zero budget: the first file still
+    // starts (~6.5 s left before the hard deadline), its timeout is capped at
+    // that deadline (not the fixed 30 s), and the stop is transient.
+    addFile("dSlow", "T283-BRAVO slow two.jpg");
+    slowMedia.add("dSlow");
+    const slowStart = Date.now();
+    const slow = await ds283Sync(0, { ...deps, clock: skewed(3_500) });
+    const slowMs = Date.now() - slowStart;
+    const stSlow = await ds283State();
+    ok(!slow.ok && /took too long/.test(slow.error) && !stSlow.files.dSlow && stSlow.lastRun?.complete === false && mediaAsked.includes("dSlow"),
+      "#283 deadline: a slow download under a tight budget stops transiently without marking the file");
+    ok(slowMs < 15_000, `#283 deadline: the slow download was cut at the hard deadline, not after 30 s (${slowMs} ms)`);
+    slowMedia.delete("dSlow");
+    files = files.filter((x) => x.id !== "dSlow");
+
+    // The hard deadline has already passed when the file loop starts: no file
+    // starts (not even the first) and it is reported as remaining.
+    addFile("dLate", "T283-BRAVO late.jpg");
+    const askedBefore = mediaAsked.length;
+    const late = await ds283Sync(0, { ...deps, clock: skewed(20_000) });
+    const stLate = await ds283State();
+    ok(late.ok && late.imported === 0 && late.failed === 0 && late.remaining === 1 && !stLate.files.dLate && mediaAsked.length === askedBefore && stLate.lastRun?.complete === false,
+      "#283 deadline: past the hard deadline no file starts, and it is reported as remaining");
+    const late2 = await ds283Sync(45_000, deps);
+    ok(late2.ok && late2.imported === 1 && late2.remaining === 0 && (await driveDocs("dLate")).length === 1, "#283 deadline: the next call imports the file the deadline held back");
+
+    ok((await ds283SaveMailbox("nope@example.com")).ok === false, "#283 settings: an unknown mailbox can't be the photos account");
+    ok(ds283HasRead("a https://www.googleapis.com/auth/drive.readonly b") && !ds283HasRead("https://www.googleapis.com/auth/drive.file"),
+      "#283 scope: drive.readonly is detected, drive.file is not");
+  } finally {
+    const st = await ds283State();
+    for (const f of Object.values(st.files)) {
+      if (!f.documentId) continue;
+      registerFixture("part_documents", f.documentId);
+      for (const sku of [ALPHA, BRAVO, LABOR]) registerFixture("part_document_links", ds283LinkId(sku, f.documentId));
+    }
+    await ds283SetBlob(ds283Blob, { folder: null, files: {}, lastRun: null, runningUntil: null });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #283 — Drive photos panel view + cron budget (pure).
+// ---------------------------------------------------------------------------
+import { drivePhotosPanelView as pv283, cronPhotoBudgetMs as cb283, drivePhotosLoadErrorView as pe283 } from "@/lib/part-docs/drive-photo-view";
+{
+  const empty = { folder: null, files: {}, lastRun: null };
+  const a = pv283({ mailboxKey: null, connection: null, state: empty });
+  ok(!a.configured && a.problem === null && a.lastRun === null, "#283 panel: no account → not configured");
+  const b = pv283({ mailboxKey: "shared:x", connection: null, state: empty });
+  ok(b.configured && /isn't connected/.test(b.problem || ""), "#283 panel: a disconnected account is flagged");
+  const c = pv283({ mailboxKey: "personal:u1", connection: { address: "jeff@peak.com", scope: "https://www.googleapis.com/auth/drive.file" }, state: empty });
+  ok(c.account === "jeff@peak.com" && /Enable Drive photos/.test(c.problem || ""), "#283 panel: an account without drive.readonly is flagged");
+  const d = pv283({
+    mailboxKey: "personal:u1",
+    connection: { address: "jeff@peak.com", scope: "https://www.googleapis.com/auth/drive.readonly" },
+    state: {
+      folder: { id: "F", driveId: null, name: "Peak Product Photos", webViewLink: "https://drive/F" },
+      files: { a: { md5: "1", documentId: "PD-1", skus: ["X"], at: 1 }, b: { md5: "2", documentId: null, skus: [], error: "bad", at: 1 } },
+      lastRun: { at: 5, imported: 1, updated: 0, relinked: 0, failed: 1, unmatched: [{ fileId: "u", name: "u.jpg", webViewLink: "https://drive/u", reason: "no part number found in the name" }], complete: true },
+    },
+  });
+  ok(d.problem === null && d.folder?.webViewLink === "https://drive/F" && d.synced === 1 && d.unmatched.length === 1 && d.lastRun?.error === null,
+    "#283 panel: a working setup shows the folder, synced count and couldn't-match list");
+  ok(d.unmatched[0]?.fileId === "u" && d.unmatched[0]?.name === "u.jpg", "#283 panel: each couldn't-match row carries its Drive file id (the list key)");
+  ok(a.loadError === undefined && d.loadError === undefined && pe283("db down").loadError === "db down" && pe283("x").synced === 0,
+    "#283 panel: loadError is absent normally and carried by the degraded view");
+  ok(cb283(5_000) === 0 && cb283(15_000) === 15_000 && cb283(45_000) === 20_000, "#283 cron: the photo rider gets min(20 s, time left), none under 10 s");
 }

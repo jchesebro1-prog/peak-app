@@ -11,6 +11,8 @@ import {
   copyToCart,
   refreshPortalQuote as refreshPortalQuoteFor,
 } from "@/lib/portal-quotes";
+import { resolvePortalViewer } from "@/lib/portal-viewer";
+import { portalRedeemPerk } from "@/lib/stores/reward-perks";
 
 /**
  * Portal mutations (IDEAS #47). SECURITY: these run for ANONYMOUS visitors —
@@ -132,6 +134,34 @@ export async function copyQuoteToCart(quoteId: string): Promise<void> {
   revalidatePath("/portal/catalog/quote");
   revalidatePath("/portal/catalog");
   redirect("/portal/catalog/quote");
+}
+
+/**
+ * #282 perks+points — the portal Rewards card's Redeem. The company is the
+ * grant's own (resolvePortalViewer → portalSession), never a client value:
+ * `companyId` is only what the card was rendered for, and a mismatch is
+ * refused (a stale page after switching grants). A team preview resolves as
+ * `preview` and is refused. The store re-checks the program, the perk, its
+ * level / once-yearly window and the points under the company's lock, and
+ * refuses if what the button showed ("Free" / "N points") is no longer true.
+ */
+export async function redeemPortalPerk(input: {
+  perkId: string;
+  companyId: string;
+  mode: "free" | "points";
+  pointCost: number | null;
+  previewCid?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const viewer = await resolvePortalViewer(String(input.previewCid || "")).catch(() => ({ session: null, preview: false }));
+  const r = await portalRedeemPerk(viewer, {
+    perkId: String(input.perkId || ""),
+    companyId: String(input.companyId || ""),
+    expect: { mode: input.mode === "points" ? "points" : "free", pointCost: input.pointCost == null ? null : Number(input.pointCost) },
+  });
+  if (!r.ok) return r;
+  // The card re-renders with the new balance; the staff bell gains "Perks to fulfil".
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 export async function portalSignOut(): Promise<void> {

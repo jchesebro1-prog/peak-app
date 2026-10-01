@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LEDGER_KIND_LABEL, type LedgerEntry } from "@/lib/rewards/ledger";
+import { ledgerEntryLabel, type LedgerEntry } from "@/lib/rewards/ledger";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { yearAwareDate } from "@/lib/format";
 
@@ -27,7 +27,7 @@ export function LedgerRow({ e, quoteRef }: { e: LedgerEntry; quoteRef?: string }
     <>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>
-          {LEDGER_KIND_LABEL[e.kind] ?? e.kind}
+          {ledgerEntryLabel(e)}
           {e.quoteId ? ` · ${quoteRef || e.quoteId}` : ""}
         </span>
         <span style={{ display: "block", fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>

@@ -24,6 +24,8 @@ import { portalBellGroups } from "@/lib/portal-bell";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { quoteAwaitsApprovalBy, quoteBackFromReview, sameName } from "@/lib/quote-approval-rules";
 import { firstName } from "@/lib/team";
+import { perksToFulfil } from "@/lib/stores/reward-perks";
+import { perkBellItems } from "@/lib/rewards/perk-bell";
 import type {
   NavCounts,
   BellGroup,
@@ -97,6 +99,7 @@ export async function navData(me: string, canApprove = false): Promise<{
     taskRows,
     prefs,
     unseenDocs,
+    perkRedemptions,
   ] = await Promise.all([
     allQuotes(),
     // Fix wave 3 (I3): the badge needs review / owner only — a plain record
@@ -115,6 +118,8 @@ export async function navData(me: string, canApprove = false): Promise<{
     getPrefs(me),
     // #218 — one SQL-filtered read (source = customer AND seenByTeamAt IS NULL), usually empty.
     unseenCustomerDocuments(),
+    // #282 perks+points — one SQL-filtered read of perk ledger entries (usually few).
+    perksToFulfil(),
   ]);
   // Everything below is derived from the arrays already fetched above — no
   // extra table scans. Previously these re-fetched inspections+repairs
@@ -338,6 +343,11 @@ export async function navData(me: string, canApprove = false): Promise<{
     letter: "D",
     color: "#3155a8",
   }] : [])));
+
+  // #282 perks+points — redemptions (portal or staff Redeem) nobody has marked
+  // fulfilled yet; Mark fulfilled (or an admin Undo) on the company card clears one.
+  const perkNames = await Promise.all(perkRedemptions.map((r) => customerNameFor(r.companyId)));
+  push("perks", "Perks to fulfil", perkBellItems(perkRedemptions, perkNames));
 
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
   return { counts, bell: groups, bellCount };

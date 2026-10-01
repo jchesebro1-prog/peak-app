@@ -785,6 +785,17 @@ export async function setRecordingsArchiveMailboxAction(mailboxKey: string | nul
   return { ok: true as const };
 }
 
+/** #283 — pick the mailbox whose Google account reads Peak Product Photos.
+ *  Must be connected; drive.readonly may be granted before or after. */
+export async function setCatalogPhotosMailboxAction(mailboxKey: string | null) {
+  await requirePerm("manage_users");
+  const { saveCatalogPhotosMailbox } = await import("@/lib/part-docs/drive-photo-sync");
+  const r = await saveCatalogPhotosMailbox(mailboxKey);
+  if (!r.ok) return { ok: false as const, error: r.error };
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /** Pilot gate (Settings → Beta): user ids allowed to see Record; [] = everyone. */
 export async function setRecordingsBetaUsersAction(userIds: string[]) {
   await requirePerm("manage_users");

@@ -12,6 +12,8 @@ import { TRAVEL_FLY_LINE, flightOf } from "@/lib/travel-plan";
 import { printedLift, travelLineShare } from "@/lib/service-pricing";
 import { serviceLetterPrice } from "@/lib/rewards/service-credit";
 import { LetterCreditRows } from "@/components/rewards/letter-credit-rows";
+import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
+import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -230,6 +232,8 @@ export async function FlameLetterView({ id }: { id: string }) {
 
   const owner = quote.owner || "Jeff Chesebro";
   const users = await allUsers();
+  // #282 perks+points — "Your Gold rewards: …" under the fee (program on, customer has purchase perks).
+  const rewardsLine = purchasePerksDocLine(await purchasePerksForCompany(quote.customerId));
   const u = users.find((x) => x.name === owner) || null;
   const signerTitle = (u && u.roles && u.roles.length ? u.roles[0] : "") || "Estimator";
   const signerEmail = (u && u.email) || "";
@@ -668,6 +672,12 @@ export async function FlameLetterView({ id }: { id: string }) {
                 </span>
               </div>
             </div>
+
+            {rewardsLine && (
+              <div className="pk-keep" data-testid="letter-purchase-perks" style={{ marginBottom: 8, fontSize: "9pt", color: "#1f7a52", fontWeight: 600 }}>
+                {rewardsLine}
+              </div>
+            )}
 
             {portalExtras.standingLines.length > 0 && (
               <div className="pk-keep" style={{ marginBottom: 8, fontSize: "8.5pt", color: "#8c919c", lineHeight: 1.6 }}>

@@ -8265,3 +8265,95 @@ now carries no credit: the move to Lost removes the credit (Estimator line and s
 redeem via the ledger). Recall is refused on lost quotes as on won ones, and `settleCredit` gives a lost quote no credit.
 Won quotes still keep the credit they had (D497).
 
+## D506. Customers see rewards as points; the books stay in dollars (#282, 2026-10-01)
+
+1 point = $1. Every customer-facing rewards number goes through `pointsFor` (round up; ≤ 0 → 0): the portal card (its
+view model holds points, never the dollar balance; it shows the full balance, including credit parked on open quotes),
+quote documents, service letters and renewal PDFs. Progress to the next level stays in dollars because it measures
+purchases, not rewards. To keep points and dollars from drifting, earns and starting credit post whole dollars rounded
+up (a cap with cents counts as its whole dollars), applied credit is whole dollars rounded down — older cents credit on
+draft/sent Estimator quotes rounds down on its next save with a notice; won quotes keep their exact credit — and
+reversals mirror the original entry exactly. Revision recall now re-checks credit in whole dollars for every quote type.
+Cents can still exist from pre-change postings or a staff Adjust to the cent: the customer then sees one point more than
+can be applied to a quote.
+
+
+## D507. Every catalog image is shrunk to 1600 px WebP on the way in; the image cap is 25 MB; HEIC refuses (#283, 2026-10-01)
+
+Catalog photos arrive from phones at 5–12 MB. `src/lib/part-docs/shrink.ts` (sharp, now a direct dependency) caps the
+longest side at 1600 px (never enlarging), applies the EXIF rotation, and re-encodes as WebP quality 80 with metadata
+stripped. It runs at every entry point — attach/replace uploads (`shrink-upload.ts` swaps the browser's Blob upload for
+its shrunk copy), Add image from URL, Drive sync and datasheet thumbnails (WebP, PNG fallback) — so no path stores an
+original. The image cap rises 10 → 25 MB because the cap now guards the input, not what is stored; datasheets and spec
+sheets are never shrunk. HEIC and corrupt files refuse with "Couldn't read this image — save it as JPEG, PNG or WebP."
+and a refused upload deletes its Blob; a read failure of the upload itself does not.
+
+## D508. Peak Product Photos syncs read-only through `drive.readonly` on a chosen mailbox (#283, 2026-10-01)
+
+Photos are dropped into a Drive folder named "Peak Product Photos" (My Drive or a Shared Drive) by people, not by the
+app. The narrower `drive.file` scope cannot see files a human added, so the sync uses a separate, read-only
+`drive.readonly` scope (`DRIVE_READONLY_SCOPE`), requested only by an explicit `?drivephotos=1` consent opt-in ("Enable
+Drive photos" in Settings → Mailboxes, and on the Account page only for the user whose own mailbox is the configured
+photos account) — mailboxes connected for Gmail alone never ask for it.
+A new `catalogPhotosMailbox` setting picks which connected account the sync reads as. The sync never writes to Drive.
+Drive errors use a photos-specific message (`photosDriveError` in `drive-photos.ts`) rather than the Recordings wording.
+
+## D509. Sync semantics: Upload-many filename rule, nothing guessed, Drive never deletes app data (#283, 2026-10-01)
+
+A file attaches to a part by the same filename rule as Catalog → Datasheets → Upload many; Labor-category parts are
+never targets. Ambiguous matches, no match, HEIC and files over 25 MB are listed in a "Couldn't match" list and never
+guessed. Deleting a file in Drive keeps the app's copy. A known file renamed to something unmatched keeps its existing
+links (it is only listed); a rename that now matches other parts relinks. Transient failures (network, timeout, Blob,
+DB, 401/408/429/5xx, rate-limit 403) stop the call and retry next run without marking the file; file-specific failures
+(shrink refusal, size cap, download-restricted 403, 404, other 4xx) are recorded and skipped until the file changes in
+Drive. State (`drive_photo_sync` blob) is saved after every file, and a pending entry is written before each create so a
+killed function cannot import the same file twice; a run lease (`runningUntil` = budget + 60 s) stops overlapping runs.
+
+## D510. Sync runs from Sync now and a rider on the daily Gmail cron (#283, 2026-10-01)
+
+Admins start a run from the Drive photos panel on Catalog → Datasheets (Sync now); the panel degrades to a message if
+its reads fail. The same run rides `/api/gmail/sync`, which is already the daily cron on Hobby, with a budget of
+min(20 s, time left before 50 s) — skipped under 10 s left or when no account is chosen — so no new cron entry or
+plan change is needed. A large first import therefore finishes over several runs; each call resumes where the last
+stopped.
+
+## D511. Purchase perks are per-tier, informational, and follow the earned level (#282, 2026-10-01)
+
+Purchase perks live in the program blob (`purchasePerks`, server-minted ids, removed ones kept hidden like D500). A
+customer gets every active one at a level at or below their **earned** level (lifetime spend), not their pricing tier.
+They show only while the program is on — a staff banner while quoting, and "Your <Level> rewards: …" to the customer —
+and never change a price in v1; applying one (free freight, waived travel) is the estimator's call.
+
+## D512. A perk can be free at a level, bought with points, or both (#282, 2026-10-01)
+
+`Perk.pointCost` (whole points) is optional. With an unlock level it is free once the level is reached; below it, or
+with no unlock level ("Never free" — a points-only perk with no price falls back to Base), it can be bought when the
+customer's spendable points cover the cost. Free wins when both apply. Once/yearly limits count every use, free or
+bought. Mark used remains for free perks and counts as delivered on the spot; Redeem records a claim (portal or staff)
+that needs Mark fulfilled.
+
+## D513. Spendable points are available credit rounded up; redemptions are serialized per company (#282, 2026-10-01)
+
+Spendable points = `pointsFor(balance − credit parked on open quotes)`, so a customer can spend every point they are
+shown; the balance may dip below $0 by less than $1 and no further. Each redemption (and Mark used) runs read-balance →
+check → post inside one transaction holding a per-company advisory lock (polled with a timeout, like the quote locks),
+with deterministic ids so a double click posts once. Applying credit on a quote does not take this lock, so a quote
+save racing a redemption could still overspend slightly — as before this change.
+
+## D514. Portal redemption trusts only the grant (#282, 2026-10-01)
+
+The portal Redeem action takes the company from the grant cookie, refuses staff preview and a page rendered for another
+company, re-checks availability server-side, and refuses (rather than charges) when the price or "Free" shown has
+changed since the page loaded. The portal never receives a dollar amount.
+
+## D515. Fulfilment and undo are ledger entries; undo refunds exactly once (#282, 2026-10-01)
+
+A redemption posts a `perk` entry (debit = point cost, or 0 when free). Fulfilment is a zero-amount `perk-fulfil` entry
+with a fixed id, so it posts once; Undo (admin) posts the exact negation once and is allowed even after fulfilment.
+
+## D516. "Perks to fulfil" is a shared bell group (#282, 2026-10-01)
+
+Unfulfilled redemptions show to everyone (like new customer documents), not owner-scoped, and stay listed while the
+program is off since the perk is still owed; the group can be muted in notification settings. The portal card adds
+purchase perks, "Free" / "N points" prices and a "Redeemed — we'll be in touch" list.
+

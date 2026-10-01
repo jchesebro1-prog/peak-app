@@ -6,6 +6,8 @@ import { verifyPrintToken } from "@/lib/quote-pdf/token";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
+import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
+import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Quote", robots: { index: false, follow: false } };
@@ -35,11 +37,16 @@ export default async function PrintQuotePage({
   if (!tokenOk(t, "quote", id)) notFound();
   const q = await getQuote(id);
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
-  const [cust, settings] = await Promise.all([getCustomer(q.customerId), getSettings()]);
+  const [cust, settings, perks] = await Promise.all([
+    getCustomer(q.customerId),
+    getSettings(),
+    // #282 perks+points — the customer's purchase perks line (program on only).
+    purchasePerksForCompany(q.customerId),
+  ]);
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>
-      <QuoteDocument {...quoteDocumentDataFor(q, cust, settings)} />
+      <QuoteDocument {...quoteDocumentDataFor(q, cust, settings)} rewardsLine={purchasePerksDocLine(perks)} />
     </main>
   );
 }
