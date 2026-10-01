@@ -6,9 +6,11 @@
  * approval…, Submit for approval anyway). The view is decided on the server
  * (quoteNextStepFor); this only renders it and dispatches the guarded
  * actions. Client-safe: no store, ops or session imports — only the
- * "use server" actions file and types.
+ * "use server" actions file and types. The modals portal to document.body
+ * so a sticky toolbar's stacking context (z 20) can't trap them under the nav.
  */
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -37,6 +39,8 @@ type Props = {
   beforeAction?: () => Promise<boolean>;
   /** Pill suffix " · as last saved" while the form has unsaved edits. */
   savedOnly?: boolean;
+  /** Disables every button (the Estimator: a status change or tier lookup is in flight). */
+  disabled?: boolean;
 };
 
 const TONE: Record<NextStepTone, { bg: string; ink: string }> = {
@@ -136,7 +140,7 @@ const confirmBtn = (enabled: boolean, on: string, off: string): CSSProperties =>
   cursor: enabled ? "pointer" : "not-allowed",
 });
 
-export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, onError, beforeAction, savedOnly }: Props) {
+export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, onError, beforeAction, savedOnly, disabled }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [menu, setMenu] = useState<"closed" | "menu" | "assign">("closed");
@@ -144,6 +148,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
   const [note, setNote] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const menuRef = useRef<HTMLSpanElement>(null);
+  const titleId = useId();
 
   // The ⋯ menu closes on an outside click and on Escape; Escape also closes a modal.
   useEffect(() => {
@@ -175,10 +180,16 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     setMenu("closed");
     setErr(null);
     startTransition(async () => {
-      if (beforeAction && !(await beforeAction())) return;
-      const r = await fn();
-      if (!r.ok) report(r.error || "That didn't go through.");
-      (onSync ?? (() => router.refresh()))(r);
+      try {
+        if (beforeAction && !(await beforeAction())) return;
+        const r = await fn();
+        if (!r.ok) report(r.error || "That didn't go through.");
+        (onSync ?? (() => router.refresh()))(r);
+      } catch (e) {
+        // A dropped connection or a thrown action must not reach the error boundary.
+        console.error("[QuoteNextStep]", e);
+        report("That didn't go through — check your connection and try again.");
+      }
     });
   };
 
@@ -223,6 +234,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
   const menuItems = approverOnly ? [] : view.secondary.filter((s) => s.action !== "sendBack");
   const tone = TONE[view.pill.tone] || TONE.draft;
   const showPill = !approverOnly && view.pill.label !== "";
+  const busy = pending || !!disabled;
   const dots: CSSProperties =
     variant === "toolbar"
       ? { background: "#2b2e35", color: "#cfd3da" }
@@ -251,14 +263,14 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
         {primary && (
           <button
             type="button"
-            disabled={pending}
+            disabled={busy}
             onClick={() => dispatch(primary.action)}
             style={{
               ...BTN,
               color: "#fff",
               background: primary.action === "submit" ? "#3155a8" : "#1f7a52",
-              cursor: pending ? "not-allowed" : "pointer",
-              opacity: pending ? 0.6 : 1,
+              cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.6 : 1,
             }}
           >
             {primary.label}
@@ -267,7 +279,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
         {sendBack && (
           <button
             type="button"
-            disabled={pending}
+            disabled={busy}
             onClick={() => dispatch("sendBack")}
             style={{
               ...BTN,
@@ -275,8 +287,8 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
               background: "#f9ece8",
               border: "1px solid #f0d6cd",
               padding: "8px 14px",
-              cursor: pending ? "not-allowed" : "pointer",
-              opacity: pending ? 0.6 : 1,
+              cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.6 : 1,
             }}
           >
             {sendBack.label}
@@ -289,14 +301,14 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
               aria-haspopup="menu"
               aria-expanded={menu !== "closed"}
               aria-label="More approval actions"
-              disabled={pending}
+              disabled={busy}
               onClick={() => setMenu((m) => (m === "closed" ? "menu" : "closed"))}
               style={{
                 ...BTN,
                 ...dots,
                 padding: "9px 12px",
-                cursor: pending ? "not-allowed" : "pointer",
-                opacity: pending ? 0.6 : 1,
+                cursor: busy ? "not-allowed" : "pointer",
+                opacity: busy ? 0.6 : 1,
               }}
             >
               ⋯
@@ -321,7 +333,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
               >
                 {menu === "menu" &&
                   menuItems.map((s) => (
-                    <button key={s.action} type="button" role="menuitem" onClick={() => dispatch(s.action)} style={MENU_ITEM}>
+                    <button key={s.action} type="button" role="menuitem" disabled={busy} onClick={() => dispatch(s.action)} style={MENU_ITEM}>
                       {s.label}
                     </button>
                   ))}
@@ -336,6 +348,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
                           key={name}
                           type="button"
                           role="menuitem"
+                          disabled={busy}
                           onClick={() => run(() => nsSubmitAction(quoteId, name))}
                           style={MENU_ITEM}
                         >
@@ -352,10 +365,27 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
       </span>
       {err && <span style={{ fontSize: 12, fontWeight: 600, color: "#9a2f22" }}>{err}</span>}
 
-      {modal && (
-        <div className="est-modalwrap" onClick={closeModal} style={OVERLAY}>
-          <div className="est-modal" onClick={(e) => e.stopPropagation()} style={CARD}>
-            <div style={HEAD}>{modal === "sendBack" ? "Send back for changes" : "Attest approval"}</div>
+      {modal &&
+        typeof document !== "undefined" &&
+        createPortal(
+        <div
+          className="est-modalwrap"
+          onClick={(e) => {
+            // React bubbles portal events to the control's ancestors (the toolbar) — stop here.
+            e.stopPropagation();
+            closeModal();
+          }}
+          style={OVERLAY}
+        >
+          <div
+            className="est-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            onClick={(e) => e.stopPropagation()}
+            style={CARD}
+          >
+            <div id={titleId} style={HEAD}>{modal === "sendBack" ? "Send back for changes" : "Attest approval"}</div>
             <div style={{ padding: "20px 22px" }}>
               <div style={INTRO}>
                 {modal === "sendBack"
@@ -378,15 +408,16 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
               <button
                 type="button"
                 onClick={confirmModal}
-                disabled={!note.trim()}
-                style={modal === "sendBack" ? confirmBtn(!!note.trim(), "#b4543a", "#dba99b") : confirmBtn(!!note.trim(), "#1f7a52", "#9cc7ae")}
+                disabled={!note.trim() || busy}
+                style={modal === "sendBack" ? confirmBtn(!!note.trim() && !busy, "#b4543a", "#dba99b") : confirmBtn(!!note.trim() && !busy, "#1f7a52", "#9cc7ae")}
               >
                 {modal === "sendBack" ? "Send back for changes" : "Record approval"}
               </button>
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 }

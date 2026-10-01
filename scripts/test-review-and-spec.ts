@@ -39790,4 +39790,9 @@ import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
   ok(!/from "@\/lib\/stores\//.test(comp) && !/from "@\/lib\/quote-review-ops"/.test(comp), "#284 wiring: the client component imports no store or server module");
   ok(ra.startsWith('"use server"') && ["nsSubmitAction", "nsWithdrawAction", "nsApproveAction", "nsSendBackAction", "nsAttestAction", "nsSendAction"].every((n) => ra.includes("export async function " + n)),
     "#284 wiring: the six next-step server actions exist");
+  ok(comp.includes('from "react-dom"') && comp.includes("createPortal(") && comp.includes("document.body") && comp.includes('aria-modal="true"'),
+    "#284 wiring: the modals portal to document.body (a sticky toolbar's stacking context can't trap them under the nav)");
+  ok(comp.includes('console.error("[QuoteNextStep]", e)') && comp.includes("That didn't go through — check your connection and try again.")
+    && (ec.match(/disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length === 2,
+    "#284 wiring: a thrown action reports instead of crashing, and the control is disabled while a status change or tier lookup is in flight");
 }

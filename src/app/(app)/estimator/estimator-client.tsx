@@ -2709,8 +2709,15 @@ export default function EstimatorClient({
                   view={next}
                   variant="toolbar"
                   savedOnly={pdfDirty}
+                  disabled={statusChanging || tierResolving}
                   beforeAction={pdfDirty ? saveNow : undefined}
-                  onSync={(r) => applySync(r)}
+                  onSync={(r) => {
+                    applySync(r);
+                    if (r.ok) {
+                      setActionError(null);
+                      setGateRefused(false);
+                    }
+                  }}
                   onError={(m) => {
                     setActionError(m);
                     setGateRefused(false);
@@ -3071,6 +3078,7 @@ export default function EstimatorClient({
                   quoteId={loadedId}
                   view={{ ...next, secondary: [], pill: { ...next.pill, label: "" } }}
                   variant="panel"
+                  disabled={statusChanging || tierResolving}
                   beforeAction={pdfDirty ? saveNow : undefined}
                   onSync={(r) => {
                     applySync(r);
@@ -3079,7 +3087,10 @@ export default function EstimatorClient({
                       setGateRefused(false);
                     }
                   }}
-                  onError={(m) => setActionError(m)}
+                  onError={(m) => {
+                    setActionError(m);
+                    setGateRefused(false);
+                  }}
                 />
               )}
               <button
@@ -3978,7 +3989,19 @@ export default function EstimatorClient({
               shows its own inline error line. */}
           {phone && loadedId && next?.approverMode && (
             <div style={{ padding: "10px 14px", borderBottom: "1px solid #e4e7ec", background: "#fff" }}>
-              <QuoteNextStep quoteId={loadedId} view={next} variant="panel" approverOnly onSync={(r) => applySync(r)} />
+              <QuoteNextStep
+                quoteId={loadedId}
+                view={next}
+                variant="panel"
+                approverOnly
+                onSync={(r) => {
+                  applySync(r);
+                  if (r.ok) {
+                    setActionError(null);
+                    setGateRefused(false);
+                  }
+                }}
+              />
             </div>
           )}
           <PreviewDoc
