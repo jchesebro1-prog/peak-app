@@ -241,14 +241,19 @@ function cleanSticks(v: unknown): TrackStick[] {
  * Everything that stops a series from being Active (spec §1): a stick length,
  * and a part for track, splice, carrier, master carrier, end stop and at least
  * one mounting role. When `liveSkus` is given, a mapped SKU that isn't in it
- * (deleted from the catalog) counts as unmapped. Empty list = can be active.
+ * (deleted from the catalog) counts as unmapped — and (#291) so does every
+ * stick whose SKU isn't in it: one problem per dead stick, in length order.
+ * Empty list = can be active.
  */
 export function activationProblems(
-  series: Pick<TrackSeries, "stickLengthFt" | "parts">,
+  series: Pick<TrackSeries, "stickLengthFt" | "parts" | "sticks">,
   liveSkus?: ReadonlySet<string>
 ): string[] {
   const problems: string[] = [];
-  if (!(series.stickLengthFt > 0)) problems.push("Enter the stick length.");
+  if (!(series.stickLengthFt > 0)) problems.push("Add a stick length and map its part.");
+  if (liveSkus)
+    for (const st of [...(series.sticks ?? [])].sort((a, b) => a.lengthFt - b.lengthFt))
+      if (!liveSkus.has(st.sku)) problems.push(`Stick ${st.lengthFt}' — ${st.sku} is no longer in the catalog.`);
   const mapped = (role: TrackRole) => {
     const sku = roleSku(series, role);
     return !!sku && (!liveSkus || liveSkus.has(sku));
@@ -259,7 +264,7 @@ export function activationProblems(
   return problems;
 }
 
-export function canBeActive(series: Pick<TrackSeries, "stickLengthFt" | "parts">, liveSkus?: ReadonlySet<string>): boolean {
+export function canBeActive(series: Pick<TrackSeries, "stickLengthFt" | "parts" | "sticks">, liveSkus?: ReadonlySet<string>): boolean {
   return activationProblems(series, liveSkus).length === 0;
 }
 

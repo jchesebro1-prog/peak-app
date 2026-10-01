@@ -37531,8 +37531,8 @@ const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(
 // ---- engine: worked examples per operation ----
 {
   const bp = t274Map(t274Cfg({ operation: "biparting" }));
-  ok(t274Eq(bp, { errors: [], track: 5, splice: 4, carrier: 38, masterCarrier: 2, endStop: 2, battenClamp: 10, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 122 }),
-    "#274 engine: bi-parting 40' straight batten — L 41 (1' overlap) → 5 sticks, 4 splices, 40 carriers less 2 masters, 2 end stops, 10 clamps, pulleys + floor block, 122' line");
+  ok(t274Eq(bp, { errors: [], track: 6, splice: 4, carrier: 38, masterCarrier: 2, endStop: 2, battenClamp: 12, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 122 }),
+    "#274 engine (#291 legs): bi-parting 40' straight batten — L 41 (1' overlap) → 2 legs of 20.5' → ceil(20.5/10) = 3 sticks each = 6 sticks, 2 × (3−1) = 4 splices, 40 carriers less 2 masters, 2 end stops, 2 × (ceil(20.5/5)+1) = 12 clamps, pulleys + floor block, ceil(2×41 + 2×20) = 122' line");
   const ow = t274Map(t274Cfg({ operation: "oneway", mounting: "ceiling" }));
   ok(t274Eq(ow, { errors: [], track: 4, splice: 3, carrier: 39, masterCarrier: 1, endStop: 2, ceilingHanger: 9, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 120 }),
     "#274 engine: one-way 40' straight ceiling — no overlap (L 40) → 4 sticks, 3 splices, 39 carriers + 1 master, 9 hangers, 120' line");
@@ -37540,8 +37540,8 @@ const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(
   ok(t274Eq(wa, { errors: [], track: 4, splice: 3, carrier: 39, masterCarrier: 1, endStop: 2, battenClamp: 9 }),
     "#274 engine: walk-along 40' straight batten — no pulleys, floor block or operating line");
   const cv = t274Map(t274Cfg({ operation: "biparting", curved: true, radiusFt: 10, runFt: 20, mounting: "ceiling" }));
-  ok(t274Eq(cv, { errors: [], curved: 5, splice: 4, carrier: 18, masterCarrier: 2, endStop: 2, ceilingHanger: 6, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 82 }),
-    "#274 engine: curved bi-parting 20' arc, R10, ceiling — L 21 → 5 curved sections (5'), 4 splices, 18 + 2 masters, 6 hangers, 82' line");
+  ok(t274Eq(cv, { errors: [], curved: 6, splice: 4, carrier: 18, masterCarrier: 2, endStop: 2, ceilingHanger: 8, livePulley: 1, deadPulley: 1, floorBlock: 1, operatingLine: 82 }),
+    "#274 engine (#291 legs): curved bi-parting 20' arc, R10, ceiling — L 21 → 2 legs of 10.5' → ceil(10.5/5) = 3 curved sections each = 6, 2 × (3−1) = 4 splices, 18 + 2 masters, 2 × (ceil(10.5/5)+1) = 8 hangers, ceil(2×21 + 2×20) = 82' line");
   ok(t274Len(t274Cfg({ operation: "biparting", runFt: 30 }), t274Series()) === 31 && t274Len(t274Cfg({ operation: "oneway", runFt: 30 }), t274Series()) === 30,
     "#274 trackLengthFt: the overlap is added on bi-parting only");
 }
@@ -37579,7 +37579,7 @@ const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(
   const bpNoOverlap = t274Map(t274Cfg({ operation: "biparting", runFt: 20 }), t274Series({ overlapFt: 0 }));
   ok(bpNoOverlap.track === 2, "#274 engine: bi-parting with overlap 0 — 20' is 2 sticks");
   const bpOverlap = t274Map(t274Cfg({ operation: "biparting", runFt: 20 }));
-  ok(bpOverlap.track === 3 && bpOverlap.battenClamp === 6, "#274 engine: bi-parting with a 1' overlap — 21' is 3 sticks and ceil(21/5)+1 = 6 clamps");
+  ok(bpOverlap.track === 4 && bpOverlap.battenClamp === 8, "#274 engine (#291 legs): bi-parting with a 1' overlap — L 21 → 2 legs of 10.5' → ceil(10.5/10) = 2 sticks each = 4 sticks, 2 × (ceil(10.5/5)+1) = 8 clamps");
   const owOverlap = t274Map(t274Cfg({ operation: "oneway", runFt: 20 }));
   const waOverlap = t274Map(t274Cfg({ operation: "walkalong", runFt: 20 }));
   ok(owOverlap.track === 2 && waOverlap.track === 2 && owOverlap.battenClamp === 5, "#274 engine: one-way and walk-along never add the overlap (20' → 2 sticks, 5 clamps)");
@@ -37590,8 +37590,8 @@ const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(
 // ---- engine: carriers, masters replacing carriers, tiny runs, spacing overrides ----
 {
   const tinyBp = t274Map(t274Cfg({ operation: "biparting", runFt: 1 }));
-  ok(!tinyBp.carrier && tinyBp.masterCarrier === 2 && tinyBp.track === 1 && !tinyBp.splice,
-    "#274 engine: a 1' bi-parting run — 1 carrier less 2 masters floors at 0 (row omitted), 2 masters, 1 stick, no splice row");
+  ok(!tinyBp.carrier && tinyBp.masterCarrier === 2 && tinyBp.track === 2 && !tinyBp.splice,
+    "#274 engine (#291 legs): a 1' bi-parting run — 1 carrier less 2 masters floors at 0 (row omitted), 2 masters, L 2 → 2 legs of 1' → 1 stick each = 2 sticks, 2 × (1−1) = 0 splices (no splice row)");
   const tinyOw = t274Map(t274Cfg({ runFt: 0.5 }));
   ok(!tinyOw.carrier && tinyOw.masterCarrier === 1 && tinyOw.endStop === 2, "#274 engine: a 6\" one-way run — 1 carrier replaced by the master, end stops still 2");
   const two = t274Map(t274Cfg({ runFt: 2 }));
@@ -37887,25 +37887,25 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
 
 // ---- pricing: a fully mapped series ----
 {
-  // bi-parting 40' straight batten: 5 sticks, 4 splices, 38 carriers, 2 masters, 2 end stops, 10 clamps, 2 pulleys, floor block, 122' line.
+  // bi-parting 40' straight batten (#291: two lapped legs of 20.5'): 6 sticks, 4 splices, 38 carriers, 2 masters, 2 end stops, 12 clamps, 2 pulleys, floor block, 122' line.
   const cfg = t274Cfg({ operation: "biparting", label: "Main drape track" });
-  const cost = 5 * 50 + 4 * 5 + 38 * 2 + 2 * 12 + 2 * 4 + 10 * 6 + 30 + 30 + 40 + 122 * 0.5; // 599
+  const cost = 6 * 50 + 4 * 5 + 38 * 2 + 2 * 12 + 2 * 4 + 12 * 6 + 30 + 30 + 40 + 122 * 0.5; // 300+20+76+24+8+72+30+30+40+61 = 661
   const bom = t274bBom(cfg, t274Series(), t274bParts(), 0.25);
-  ok(bom.errors.length === 0 && t274bNear(bom.cost, cost) && bom.cost === 599, "#274B pricing: a mapped bi-parting 40' batten track costs the catalog cost × qty of every part (599)");
-  ok(bom.price === t274bR2(599 / 0.75), "#274B pricing: the line sells at the tier seed on its cost when every part has a cost (599 ÷ 0.75 = 798.67)");
+  ok(bom.errors.length === 0 && t274bNear(bom.cost, cost) && bom.cost === 661, "#274B pricing: a mapped bi-parting 40' batten track costs the catalog cost × qty of every part (6×50 + 4×5 + 38×2 + 2×12 + 2×4 + 12×6 + 30 + 30 + 40 + 122×0.5 = 661)");
+  ok(bom.price === t274bR2(661 / 0.75), "#274B pricing: the line sells at the tier seed on its cost when every part has a cost (661 ÷ 0.75 = 881.33)");
   const carrier = bom.rows.find((r) => r.role === "carrier")!;
   ok(carrier.qty === 38 && carrier.price === t274bAddPrice(2, 4, 0.25) && carrier.price === 2.67 && carrier.ext === t274bR2(2.67 * 38),
     "#274B pricing: each part is priced exactly as a catalog-picker add (catalogAddPrice — cost at the tier seed: carrier $2 → $2.67)");
   ok(bom.trackLengthFt === 41 && bom.rows.length === 10, "#274B pricing: track length 41' (40' run + 1' overlap), 10 part rows");
   const noTier = t274bBom(cfg, t274Series(), t274bParts(), null);
-  ok(noTier.price === t274bR2(599 / 0.7), "#274B pricing: no tier stamp → the 0.30 fallback addPart uses (855.71)");
+  ok(noTier.price === t274bR2(661 / 0.7), "#274B pricing: no tier stamp → the 0.30 fallback addPart uses (661 ÷ 0.7 = 944.29)");
 
   const res = t274bLine(cfg, t274Series(), t274bParts(), 0.25);
   ok(res.ok, "#274B line: a mapped series yields a line");
   if (res.ok) {
     const it = res.item;
-    ok(it.qty === 1 && it.unit === "lot" && it.cost === 599 && it.price === 798.67 && it.manufacturer === "ADC" && it.sku === "TRK-ADC-280",
-      "#274B line: qty 1, unit lot, cost/price = the parts' sums, manufacturer from the series");
+    ok(it.qty === 1 && it.unit === "lot" && it.cost === 661 && it.price === 881.33 && it.manufacturer === "ADC" && it.sku === "TRK-ADC-280",
+      "#274B line: qty 1, unit lot, cost/price = the parts' sums (661 / 661 ÷ 0.75 = 881.33), manufacturer from the series");
     ok(it.desc === "Main drape track — ADC 280 bi-parting track, 40' run", `#274B line: desc "<label> — <series> <operation> track, <run>' run" (got "${it.desc}")`);
     ok(t274Eq(it.track, t274bClean(cfg)) && it.track!.label === "Main drape track", "#274B line: the inputs ride on the line as `track` (a clean TrackConfig) so it reopens");
     ok((it.components || []).length === 10 && it.components!.every((c) => c.sku.startsWith("P-") && c.cost === t274bParts()[c.sku].cost && c.price === t274bAddPrice(c.cost, t274bParts()[c.sku].list, 0.25)),
@@ -38009,8 +38009,8 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
     const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [seeded, hand] };
     const out = t274bReprice([sec], 0.25, 0.2);
     const [s1, s2] = out.sections[0].items;
-    ok(out.repriced === 1 && out.handPriced === 1 && s1.price === t274bR2(599 / 0.8) && s2.price === 1000,
-      "#274B tier: a tier change re-prices a track line still at the seed (599 ÷ 0.8) and keeps a hand-priced one");
+    ok(out.repriced === 1 && out.handPriced === 1 && s1.price === t274bR2(661 / 0.8) && s2.price === 1000,
+      "#274B tier: a tier change re-prices a track line still at the seed (661 ÷ 0.8 = 826.25) and keeps a hand-priced one");
     ok(s1.components!.find((c) => c.sku === "P-carrier")!.price === 2.5 && t274Eq(s1.track, seeded.track) && s2.components === hand.components,
       "#274B tier: the re-priced line's parts re-seed with it (carrier $2 → $2.50); the kept line's parts untouched");
     ok(t274Eq(t274bReseed([{ sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }], 0.2)[0], { sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }),
@@ -38023,24 +38023,24 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   const res = t274bLine(t274Cfg({ operation: "biparting" }), t274Series(), t274bParts(), 0.25);
   if (res.ok) {
     const seeded: T274bItem = { ...res.item, id: 1, comment: "c" };
-    const hand: T274bItem = { ...res.item, id: 2, extSellOverride: 1198 }; // 50 % on 599
+    const hand: T274bItem = { ...res.item, id: 2, extSellOverride: 1322 }; // 50 % on 661 (661 × 2)
     const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 5, items: [seeded, hand] };
     // Today: carriers went from $2 to $3.
     const catalog = new Map<string, T274bCopyPart>(Object.values(t274bParts()).map((p) => [p.sku, { sku: p.sku, cost: p.sku === "P-carrier" ? 3 : p.cost, list: p.list }]));
     const same = t274bCopy(sec, { newSectionId: "s2", catalog, fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.25 });
     const [c1, c2] = same.section.items;
-    ok(c1.cost === 599 + 38 && c1.price === t274bR2(637 / 0.75) && same.costsUpdated === 2,
-      "#274B copy: a track line takes today's catalog cost for its parts (carrier $2 → $3: 599 → 637) and stays at the tier seed");
+    ok(c1.cost === 661 + 38 && c1.price === t274bR2(699 / 0.75) && same.costsUpdated === 2,
+      "#274B copy: a track line takes today's catalog cost for its parts (carrier $2 → $3 on 38 carriers: 661 + 38 = 699; 699 ÷ 0.75 = 932) and stays at the tier seed");
     ok(c1.components!.find((c) => c.sku === "P-carrier")!.cost === 3 && c1.components!.find((c) => c.sku === "P-carrier")!.price === 4 && t274Eq(c1.track, seeded.track) && c1.comment === "c",
       "#274B copy: its parts carry today's cost + catalog-add sell; `track` and notes carry over");
-    ok(c2.cost === 637 && c2.extSellOverride === t274bR2(637 * 2) && c2.price === hand.price,
-      "#274B copy: a hand-priced (typed ext sell) track line keeps its own margin on the new cost");
+    ok(c2.cost === 699 && c2.extSellOverride === t274bR2(699 * 2) && c2.price === hand.price,
+      "#274B copy: a hand-priced (typed ext sell) track line keeps its own margin on the new cost (50 %: 699 × 2 = 1398)");
     const moved = t274bCopy(sec, { newSectionId: "s3", catalog, fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.2 });
-    ok(moved.section.items[0].price === t274bR2(637 / 0.8) && moved.tierRepriced === 1 && moved.section.items[0].components!.find((c) => c.sku === "P-carrier")!.price === 3.75,
-      "#274B copy: copied to another tier, a seeded track line lands at the target tier's seed, parts too");
+    ok(moved.section.items[0].price === t274bR2(699 / 0.8) && moved.tierRepriced === 1 && moved.section.items[0].components!.find((c) => c.sku === "P-carrier")!.price === 3.75,
+      "#274B copy: copied to another tier, a seeded track line lands at the target tier's seed (699 ÷ 0.8 = 873.75), parts too");
     const noCat = t274bCopy(sec, { newSectionId: "s4", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.25 });
-    ok(noCat.section.items[0].cost === 599 && noCat.section.items[0].price === seeded.price && noCat.costsUpdated === 0,
-      "#274B copy: parts missing from today's catalog keep their own cost — the line is unchanged");
+    ok(noCat.section.items[0].cost === 661 && noCat.section.items[0].price === seeded.price && noCat.costsUpdated === 0,
+      "#274B copy: parts missing from today's catalog keep their own cost — the line is unchanged (661)");
   } else ok(false, "#274B copy: fixture line priced");
 }
 
@@ -38057,8 +38057,8 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
       "#274B parts list: the track line explodes into its 10 parts at their quantities, 'part of' the track's label");
     const trackCost = trackRows.reduce((a, r) => a + r.qty * r.unitCost, 0);
     const trackSell = trackRows.reduce((a, r) => a + r.qty * r.unitSell, 0);
-    ok(t274bNear(trackCost, 599) && t274bNear(trackSell, track.price) && !rows.some((r) => /Cost adjustment/.test(r.desc)),
-      "#274B parts list: the parts carry the line's cost and sell exactly (no cost-adjustment row)");
+    ok(t274bNear(trackCost, 661) && t274bNear(trackSell, track.price) && !rows.some((r) => /Cost adjustment/.test(r.desc)),
+      "#274B parts list: the parts carry the line's cost (661) and sell exactly (no cost-adjustment row)");
     const cust = t274bCustomerLines(sec);
     ok(cust.length === 2 && cust[1].item === track && t274bNear(cust[1].ext, track.price), "#274B customer: the curtain and its track are two rows — the track is ONE line, never its parts");
   } else ok(false, "#274B parts list: fixture line priced");
@@ -41792,6 +41792,7 @@ import {
   TRACK_ROLES as t291Roles,
   TRACK_ROLE_LABELS as t291Labels,
   activationProblems as t291Problems,
+  canBeActive as t291CanBeActive,
   requiredRolesFor as t291Required,
   sanitizeTrackSeries as t291Sanitize,
   seriesSkus as t291Skus,
@@ -41800,7 +41801,7 @@ import {
   type TrackSeries as T291Series,
 } from "@/lib/track-series";
 import { trackQuantities as t291Qty, type TrackConfig as T291Config } from "@/lib/track-engine";
-import { trackBom as t291Bom } from "@/app/(app)/estimator/track-bom";
+import { trackBom as t291Bom, trackLine as t291Line } from "@/app/(app)/estimator/track-bom";
 import type { TrackPart as T291Part } from "@/app/(app)/estimator/types";
 
 const T291_STICKS = [12, 14, 16, 18, 20, 22, 24].map((l) => ({ lengthFt: l, sku: `S-${l}` }));
@@ -41852,6 +41853,16 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   ok(JSON.stringify(t291Skus(t291All({ pipeClamp: { sku: "PC" } })).sort()) === JSON.stringify([...T291_STICKS.map((x) => x.sku), ...Object.values(T291_BASE_PARTS).map((p) => p!.sku), "PC"].sort()),
     "#291 seriesSkus: every mapped part plus every stick, once each");
   ok(t291Problems(t291Series()).length === 0, "#291 activation: a sticks-only series (no hand-set stickLengthFt) can be active");
+  const all = t291Series();
+  const live = new Set(t291Skus(all));
+  live.delete("S-12");
+  const dead = t291Problems(all, live);
+  ok(JSON.stringify(dead) === JSON.stringify(["Stick 12' — S-12 is no longer in the catalog."]) && !t291CanBeActive(all, live),
+    `#291 activation: a stick whose SKU left the catalog blocks Active by name, even when the longest stick is live (got ${JSON.stringify(dead)})`);
+  live.add("S-12");
+  ok(t291Problems(all, live).length === 0 && t291CanBeActive(all, live), "#291 activation: with every stick's SKU live, no problem");
+  ok(/stick length/.test(t291Problems({ stickLengthFt: 0, parts: {} })[0]) && t291Problems({ stickLengthFt: 0, parts: {} })[0] === "Add a stick length and map its part.",
+    "#291 activation: the no-stick message says to add a length and map its part");
 }
 
 // ---- stick choice ----
@@ -41865,7 +41876,8 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   ok(t291Map(t291Cfg({ runFt: 24 }), t291Series()).stick === "24:S-24" && t291Map(t291Cfg({ runFt: 24 }), t291Series()).splice === undefined,
     "#291 sticks: exactly the longest stick is one piece, no splice");
   const bp = t291Map(t291Cfg({ operation: "biparting", runFt: 40 }), t291Series());
-  ok(bp.stick === "22:S-22" && bp.track === 2, "#291 sticks: bi-parting adds the 2' overlap first — 42' → 2 × 22'");
+  ok(bp.stick === "22:S-22" && bp.track === 2 && bp.splice === undefined,
+    "#291 sticks: bi-parting adds the 2' overlap first, then splits into two lapped legs — L 42 → 2 legs of 21' → ceil(21/24) = 1 × 22' per leg = 2 sticks, 2 × (1−1) = 0 splices (no splice row)");
   const gappy = t291Series({ sticks: [{ lengthFt: 16, sku: "S-16" }, { lengthFt: 20, sku: "S-20" }] });
   ok(t291Map(t291Cfg({ runFt: 42 }), gappy).stick === "16:S-16" && t291Map(t291Cfg({ runFt: 42 }), gappy).track === 3,
     "#291 sticks: 500's 16'/20' — 42' → 3 pieces of 14' → three 16' sticks");
@@ -41884,12 +41896,16 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   ok(!plain.pipeClamp && !plain.lapClamp && !plain.ceilingSplice && !plain.deadPulleyOneWay, "#291 optional: unmapped optional roles emit nothing");
   const full = t291All({ pipeClamp: { sku: "PC" }, lapClamp: { sku: "LC" }, ceilingSplice: { sku: "CS" }, deadPulleyOneWay: { sku: "DO" } });
   const bpBatten = t291Map(t291Cfg({ operation: "biparting", runFt: 40 }), full);
-  ok(bpBatten.pipeClamp === bpBatten.battenClamp && bpBatten.battenClamp === 7 && bpBatten.lapClamp === 2 && bpBatten.splice === 1 && !bpBatten.ceilingSplice && bpBatten.deadPulley === 1 && !bpBatten.deadPulleyOneWay,
-    "#291 optional: bi-parting batten — one pipe clamp per hanging point (ceil(42/7)+1 = 7), 2 lap clamps, suspended splice, bi-part dead end");
+  ok(bpBatten.pipeClamp === bpBatten.battenClamp && bpBatten.battenClamp === 8 && bpBatten.pipeClamp === 8 && bpBatten.lapClamp === 2 && !bpBatten.splice && !bpBatten.ceilingSplice && bpBatten.deadPulley === 1 && !bpBatten.deadPulleyOneWay,
+    "#291 optional: bi-parting batten — L 42 → 2 legs of 21': one pipe clamp per hanging point (2 × (ceil(21/7)+1) = 8), 2 lap clamps, no splice (one 22' stick per leg), bi-part dead end");
   const bpCeil = t291Map(t291Cfg({ operation: "biparting", runFt: 40, mounting: "ceiling" }), full);
-  ok(!bpCeil.pipeClamp && !bpCeil.lapClamp && bpCeil.ceilingSplice === 1 && !bpCeil.splice && bpCeil.ceilingHanger === 7,
-    "#291 optional: ceiling — no pipe or lap clamps, the ceiling splice replaces the splice");
-  ok(t291Map(t291Cfg({ operation: "biparting", runFt: 40, mounting: "ceiling" }), t291Series()).splice === 1, "#291 optional: ceiling without a ceiling splice mapped falls back to the splice");
+  ok(!bpCeil.pipeClamp && !bpCeil.lapClamp && bpCeil.ceilingHanger === 8 && !bpCeil.ceilingSplice && !bpCeil.splice,
+    "#291 optional: ceiling 40' bi-part — no pipe or lap clamps, 2 × (ceil(21/7)+1) = 8 hangers, and no splice row of either kind (one 22' stick per leg)");
+  const bpCeilLong = t291Map(t291Cfg({ operation: "biparting", runFt: 60, mounting: "ceiling" }), full);
+  ok(bpCeilLong.stick === "16:S-16" && bpCeilLong.track === 4 && bpCeilLong.ceilingSplice === 2 && !bpCeilLong.splice && bpCeilLong.ceilingHanger === 12 && !bpCeilLong.pipeClamp && !bpCeilLong.lapClamp,
+    "#291 optional: ceiling 60' bi-part — L 62 → 2 legs of 31' → ceil(31/24) = 2 × 16' per leg = 4 sticks; the ceiling splice replaces the splice: 2 × (2−1) = 2; 2 × (ceil(31/7)+1) = 12 hangers");
+  ok(t291Map(t291Cfg({ operation: "biparting", runFt: 60, mounting: "ceiling" }), t291Series()).splice === 2,
+    "#291 optional: ceiling without a ceiling splice mapped falls back to the splice (60' bi-part: 2 legs × (2−1) = 2)");
   ok(!t291Map(t291Cfg({ operation: "biparting", runFt: 40 }), t291Sanitize({ ...full, overlapFt: 0 })!).lapClamp, "#291 optional: no lap clamps when the series has no overlap (single-channel bi-part)");
   const ow = t291Map(t291Cfg({ operation: "oneway" }), full);
   ok(ow.deadPulleyOneWay === 1 && !ow.deadPulley && !ow.lapClamp && ow.pipeClamp === ow.battenClamp, "#291 optional: one-way uses the one-way dead end, no lap clamps, still pipe clamps");
@@ -41898,7 +41914,25 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   const curvedCeil = t291Map(t291Cfg({ operation: "walkalong", curved: true, radiusFt: 10, runFt: 20, mounting: "ceiling" }), t291Sanitize({ ...full, curvedSectionFt: 5, parts: { ...full.parts, curved: { sku: "CV" } } })!);
   ok(curvedCeil.curved === 4 && curvedCeil.ceilingSplice === 3 && !curvedCeil.splice, "#291 optional: curved ceiling runs use the ceiling splice too");
   const two = t291Qty(t291Cfg({ operation: "biparting", runFt: 40, qty: 2 }), full).rows;
-  ok(two.find((r) => r.role === "lapClamp")!.qty === 4 && two.find((r) => r.role === "pipeClamp")!.qty === 14, "#291 optional: × qty multiplies lap and pipe clamps");
+  ok(two.find((r) => r.role === "lapClamp")!.qty === 4 && two.find((r) => r.role === "pipeClamp")!.qty === 16,
+    "#291 optional: × qty multiplies lap and pipe clamps (2 tracks × 2 lap = 4; 2 tracks × 2 legs × (ceil(21/7)+1) = 16 pipe clamps)");
+}
+
+// ---- lapped bi-parts are two legs (#291 final review) ----
+{
+  const full = t291All({ pipeClamp: { sku: "PC" }, lapClamp: { sku: "LC" }, ceilingSplice: { sku: "CS" } });
+  const fifty = t291Map(t291Cfg({ operation: "biparting", runFt: 50 }), full);
+  ok(fifty.stick === "14:S-14" && fifty.track === 4 && fifty.splice === 2 && !fifty.ceilingSplice && fifty.battenClamp === 10 && fifty.pipeClamp === 10 && fifty.lapClamp === 2,
+    "#291 legs: 50' bi-parting batten — L 52 → 2 legs of 26' → ceil(26/24) = 2 × 14' per leg = 4 sticks (S-14), 2 × (2−1) = 2 splices, 2 × (ceil(26/7)+1) = 10 batten (and pipe) clamps, 2 lap clamps");
+  const flat = t291Map(t291Cfg({ operation: "biparting", runFt: 40 }), t291Sanitize({ ...full, overlapFt: 0 })!);
+  ok(flat.stick === "20:S-20" && flat.track === 2 && flat.splice === 1 && flat.battenClamp === 7 && flat.pipeClamp === 7 && !flat.lapClamp,
+    "#291 legs: a single-channel bi-part (overlap 0) stays one run — L 40 → ceil(40/24) = 2 × 20', 1 splice, ceil(40/7)+1 = 7 clamps, no lap clamps");
+  for (const operation of ["oneway", "walkalong"] as const) {
+    const lapped = t291Map(t291Cfg({ operation, runFt: 40 }), full);
+    const flatSeries = t291Map(t291Cfg({ operation, runFt: 40 }), t291Sanitize({ ...full, overlapFt: 0 })!);
+    ok(lapped.stick === "20:S-20" && lapped.track === 2 && lapped.splice === 1 && lapped.battenClamp === 7 && !lapped.lapClamp && JSON.stringify(lapped) === JSON.stringify(flatSeries),
+      `#291 legs: ${operation} ignores the series overlap — L 40 → one run of 2 × 20', 1 splice, ceil(40/7)+1 = 7 clamps, identical on an overlap-0 series`);
+  }
 }
 
 // ---- operating line allowance ----
@@ -41920,7 +41954,11 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
     "#291 BOM: the track row is priced from the stick the engine chose (2 × S-22 at $220) and labelled with its length");
   ok(bom.rows.some((r) => r.role === "pipeClamp" && r.sku === "PC") && bom.rows.some((r) => r.role === "lapClamp" && r.qty === 2), "#291 BOM: pipe and lap clamps are priced rows");
   const missing = t291Bom(t291Cfg({ runFt: 42 }), s, Object.fromEntries(Object.entries(parts).filter(([k]) => k !== "S-22")), 0.25);
-  ok(missing.errors.some((e) => /no part for Track — map it/.test(e)), "#291 BOM: a chosen stick deleted from the catalog blocks the line, naming Track");
+  ok(missing.errors.some((e) => /has no part for Track \(22' stick\) — map it in /.test(e)) && missing.rows.find((r) => r.role === "track")!.label === "Track (22' stick)",
+    "#291 BOM: a chosen stick deleted from the catalog blocks the line, naming the stick (Track (22' stick))");
+  const line = t291Line(t291Cfg({ operation: "biparting", runFt: 40 }), s, parts, 0.25);
+  ok(line.ok && line.item.components!.find((c) => c.sku === "PC")!.role === "mount" && line.item.components!.find((c) => c.sku === "LC")!.role === "other",
+    "#291 BOM: pipe clamps are mounting components (role 'mount'), like batten clamps");
 }
 
 // ---- #291 wiring: every reader of a series' SKUs includes the sticks; the admin screen edits them ----
@@ -41928,11 +41966,17 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   const rd291 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   ok(rd291("src/app/(app)/estimating-rules/track-series/page.tsx").includes("series.flatMap((s) => seriesSkus(s))"), "#291 page: Track series reads every mapped SKU including sticks (seriesSkus)");
   ok(rd291("src/app/(app)/estimator/page.tsx").includes("trackSeries.flatMap((s) => seriesSkus(s))"), "#291 Estimator: the track modal's catalog parts include every stick");
-  ok(rd291("src/lib/stores/track-series.ts").includes("liveSkusOf(seriesSkus(clean))"), "#291 store: the Active check reads sticks' SKUs too");
   const cli291 = rd291("src/app/(app)/estimating-rules/track-series/track-series-client.tsx");
   ok(cli291.includes("Stick lengths") && cli291.includes("+ Add length") && cli291.includes("sticks: draft.sticks") && cli291.includes("TRACK_ROLES.filter((r) => r !== \"track\")"),
     "#291 client: a Stick lengths list replaces the single stick field; the track role leaves the role list");
   ok(cli291.includes("OPTIONAL_ROLES.includes(role)") && cli291.includes("Line tie-off allowance"), "#291 client: optional roles are marked, and the line allowance is editable");
+  ok(cli291.includes('"Needs a length"') && cli291.includes('"Needs a part"') && cli291.includes('"Duplicate length — only the first is kept"') &&
+      cli291.includes("disabled={pending || !!saveBlock}") && cli291.includes("{saveBlock && <span"),
+    "#291 client: an incomplete or duplicate stick row is hinted inline, and Save is disabled with the reason shown beside it");
+  ok(cli291.includes("sanitizeTrackSeries({ ...payload, active: false })") && cli291.includes("activationProblems(clean, liveSkus)") && !cli291.includes("goodSticks"),
+    "#291 client: the activation preview is the pure sanitize of the save payload, checked by the one activationProblems rule");
+  ok(cli291.includes("key={st.id}") && /const removeStick = [\s\S]*?if \(picking === `stick:\$\{id\}`\) setPicking\(null\);/.test(cli291) && !cli291.includes("key={i}"),
+    "#291 client: stick rows are keyed by a stable client id; removing a row clears an open picker on it");
 }
 
 /* ======================================================================

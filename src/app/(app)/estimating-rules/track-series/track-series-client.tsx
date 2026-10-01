@@ -14,6 +14,7 @@ import {
   TRACK_ROLES,
   TRACK_ROLE_LABELS,
   activationProblems,
+  sanitizeTrackSeries,
   seriesSticks,
   type TrackRole,
   type TrackSeries,
@@ -42,11 +43,17 @@ function roleNeed(role: TrackRole): string {
   return "";
 }
 
+/** One stick-length row; `id` is a client-only key (never saved) so removing a row never shifts another's state. */
+type StickRow = { id: string; lengthFt: string; sku: string };
+
+let stickSeq = 0;
+const newStickRow = (lengthFt = "", sku = ""): StickRow => ({ id: `stick-${++stickSeq}`, lengthFt, sku });
+
 type Draft = {
   id: string;
   name: string;
   manufacturer: string;
-  sticks: { lengthFt: string; sku: string }[];
+  sticks: StickRow[];
   lineAllowanceFt: string;
   curvedSectionFt: string;
   minRadiusFt: string;
@@ -82,7 +89,7 @@ function draftOf(s: TrackSeries | null): Draft {
     id: s.id,
     name: s.name,
     manufacturer: s.manufacturer,
-    sticks: seriesSticks(s).map((x) => ({ lengthFt: String(x.lengthFt), sku: x.sku })),
+    sticks: seriesSticks(s).map((x) => newStickRow(String(x.lengthFt), x.sku)),
     lineAllowanceFt: str(s.lineAllowanceFt),
     curvedSectionFt: str(s.curvedSectionFt),
     minRadiusFt: str(s.minRadiusFt),
@@ -215,7 +222,7 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
   const router = useRouter();
   const [draft, setDraft] = useState<Draft>(() => draftOf(series));
   const [known, setKnown] = useState<Record<string, PartInfo>>(parts);
-  const [picking, setPicking] = useState<TrackRole | `stick:${number}` | null>(null);
+  const [picking, setPicking] = useState<TrackRole | `stick:${string}` | null>(null);
   const [error, setError] = useState("");
   const [pending, start] = useTransition();
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
@@ -227,37 +234,56 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
       return { ...d, parts: next };
     });
 
-  const setStick = (i: number, patch: Partial<{ lengthFt: string; sku: string }>) =>
-    setDraft((d) => ({ ...d, sticks: d.sticks.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
+  const setStick = (id: string, patch: Partial<Omit<StickRow, "id">>) =>
+    setDraft((d) => ({ ...d, sticks: d.sticks.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  const removeStick = (id: string) => {
+    setDraft((d) => ({ ...d, sticks: d.sticks.filter((x) => x.id !== id) }));
+    if (picking === `stick:${id}`) setPicking(null);
+  };
 
-  // The longest mapped stick stands in for the series' single `track` part, as the server derives it.
-  const goodSticks = draft.sticks.map((x) => ({ lengthFt: Number(x.lengthFt) || 0, sku: x.sku })).filter((x) => x.lengthFt > 0 && x.sku).sort((a, b) => a.lengthFt - b.lengthFt);
-  const longest = goodSticks[goodSticks.length - 1];
+  // Per-row hints, read the way sanitize reads a stick (positive, clamped): a row
+  // missing its length or part, or repeating an earlier length, would be dropped on save.
+  const seenLengths = new Set<number>();
+  const stickHints = new Map<string, string>();
+  for (const st of draft.sticks) {
+    const n = Number(st.lengthFt.trim() === "" ? NaN : st.lengthFt);
+    const len = Number.isFinite(n) && n > 0 ? Math.min(n, TRACK_LIMITS.stickLengthFt) : 0;
+    const needs = [!(len > 0) ? "Needs a length" : "", !st.sku ? "Needs a part" : ""].filter(Boolean);
+    if (needs.length) stickHints.set(st.id, needs.join(" · "));
+    else if (seenLengths.has(len)) stickHints.set(st.id, "Duplicate length — only the first is kept");
+    else seenLengths.add(len);
+  }
+  const hintValues = [...stickHints.values()];
+  const saveBlock = hintValues.some((h) => h.startsWith("Needs"))
+    ? "Finish or remove the incomplete stick length."
+    : hintValues.length
+      ? "Remove the duplicate stick length."
+      : "";
+
+  // The save payload; the activation preview runs it through the same sanitize the server does.
+  const payload = {
+    ...(draft.id ? { id: draft.id } : {}),
+    name: draft.name,
+    manufacturer: draft.manufacturer,
+    sticks: draft.sticks.map(({ lengthFt, sku }) => ({ lengthFt, sku })),
+    lineAllowanceFt: draft.lineAllowanceFt,
+    curvedSectionFt: draft.curvedSectionFt,
+    minRadiusFt: draft.minRadiusFt,
+    carrierSpacingIn: draft.carrierSpacingIn,
+    hangerSpacingFt: draft.hangerSpacingFt,
+    overlapFt: draft.overlapFt,
+    parts: Object.fromEntries(Object.entries(draft.parts).filter(([r, sku]) => r !== "track" && sku).map(([r, sku]) => [r, { sku }])),
+  };
   const liveSkus = new Set(Object.keys(known));
-  const partMap: Partial<Record<TrackRole, { sku: string }>> = {};
-  for (const [r, sku] of Object.entries(draft.parts)) if (sku) partMap[r as TrackRole] = { sku };
-  if (longest) partMap.track = { sku: longest.sku };
-  const problems = activationProblems({ stickLengthFt: longest?.lengthFt ?? 0, parts: partMap }, liveSkus);
+  const clean = sanitizeTrackSeries({ ...payload, active: false });
+  const problems = clean ? activationProblems(clean, liveSkus) : ["Nothing to save."];
   const canActivate = problems.length === 0;
   const active = draft.active && canActivate;
 
   const save = () =>
     start(async () => {
       setError("");
-      const r = await saveTrackSeriesAction({
-        ...(draft.id ? { id: draft.id } : {}),
-        name: draft.name,
-        manufacturer: draft.manufacturer,
-        sticks: draft.sticks,
-        lineAllowanceFt: draft.lineAllowanceFt,
-        curvedSectionFt: draft.curvedSectionFt,
-        minRadiusFt: draft.minRadiusFt,
-        carrierSpacingIn: draft.carrierSpacingIn,
-        hangerSpacingFt: draft.hangerSpacingFt,
-        overlapFt: draft.overlapFt,
-        parts: Object.fromEntries(Object.entries(partMap).filter(([r]) => r !== "track")),
-        active,
-      });
+      const r = await saveTrackSeriesAction({ ...payload, active });
       if (!r.ok) setError(r.error);
       else {
         onClose();
@@ -298,29 +324,30 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
 
       <div style={{ ...LABEL, marginTop: 16 }}>Stick lengths</div>
       <div style={{ display: "grid", gap: 6 }}>
-        {draft.sticks.map((st, i) => (
-          <div key={i} style={{ border: "1px solid #eef0f3", borderRadius: 9, padding: "8px 10px" }}>
+        {draft.sticks.map((st) => (
+          <div key={st.id} style={{ border: "1px solid #eef0f3", borderRadius: 9, padding: "8px 10px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <input type="number" min={0} step="any" value={st.lengthFt} placeholder="ft" aria-label="Stick length (ft)" onChange={(e) => setStick(i, { lengthFt: e.target.value })} style={{ ...INPUT, width: 80 }} />
+              <input type="number" min={0} step="any" value={st.lengthFt} placeholder="ft" aria-label="Stick length (ft)" onChange={(e) => setStick(st.id, { lengthFt: e.target.value })} style={{ ...INPUT, width: 80 }} />
               <span style={{ fontSize: 12, color: "#8c919c" }}>ft</span>
               <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
                 <PartLine sku={st.sku} info={known[st.sku]} />
               </span>
-              <button type="button" style={BTN} onClick={() => setPicking(picking === `stick:${i}` ? null : `stick:${i}`)}>
-                {picking === `stick:${i}` ? "Done" : st.sku ? "Change" : "Map part"}
+              <button type="button" style={BTN} onClick={() => setPicking(picking === `stick:${st.id}` ? null : `stick:${st.id}`)}>
+                {picking === `stick:${st.id}` ? "Done" : st.sku ? "Change" : "Map part"}
               </button>
-              <button type="button" style={BTN} aria-label="Remove this length" onClick={() => setDraft((d) => ({ ...d, sticks: d.sticks.filter((_, j) => j !== i) }))}>
+              <button type="button" style={BTN} aria-label="Remove this length" onClick={() => removeStick(st.id)}>
                 ×
               </button>
             </div>
-            {picking === `stick:${i}` && (
+            {stickHints.has(st.id) && <div style={{ fontSize: 11, color: "#a0442b", marginTop: 5 }}>{stickHints.get(st.id)}</div>}
+            {picking === `stick:${st.id}` && (
               <div style={{ marginTop: 8 }}>
                 <PartPicker
                   sku={st.sku}
                   showSku={false}
                   onPick={(picked, hit) => {
                     setKnown((k) => ({ ...k, [picked]: { desc: hit.desc, cost: hit.cost, unit: hit.unit, mfr: "" } }));
-                    setStick(i, { sku: picked });
+                    setStick(st.id, { sku: picked });
                     setPicking(null);
                   }}
                 />
@@ -330,7 +357,7 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
         ))}
         {draft.sticks.length < TRACK_LIMITS.sticks && (
           <div>
-            <button type="button" style={BTN} onClick={() => setDraft((d) => ({ ...d, sticks: [...d.sticks, { lengthFt: "", sku: "" }] }))}>
+            <button type="button" style={BTN} onClick={() => setDraft((d) => ({ ...d, sticks: [...d.sticks, newStickRow()] }))}>
               + Add length
             </button>
             <span style={{ fontSize: 11, color: "#9aa0ab", marginLeft: 8 }}>Each track buys equal pieces: the shortest stick that covers its share of the length.</span>
@@ -391,12 +418,13 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
 
       {error && <div style={{ color: "#a0442b", fontSize: 12, marginTop: 8 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
-        <button type="button" onClick={save} disabled={pending} style={PRIMARY}>
+        <button type="button" onClick={save} disabled={pending || !!saveBlock} style={saveBlock ? { ...PRIMARY, opacity: 0.5, cursor: "not-allowed" } : PRIMARY}>
           {pending ? "Saving…" : series ? "Save series" : "Add series"}
         </button>
         <button type="button" onClick={onClose} style={BTN}>
           Cancel
         </button>
+        {saveBlock && <span style={{ fontSize: 11.5, color: "#a0442b" }}>{saveBlock}</span>}
         <span style={{ flex: 1 }} />
         {series && (
           <ConfirmButton

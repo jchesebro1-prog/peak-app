@@ -58,7 +58,7 @@ export const TRACK_SERIES_GONE = "This series no longer exists.";
 /** Where every role's part is mapped — named in every "no part" error. */
 export const TRACK_SERIES_HOME = "Estimating Rules → Track series";
 
-const MOUNT_ROLES: ReadonlySet<TrackRole> = new Set(["battenClamp", "ceilingHanger"]);
+const MOUNT_ROLES: ReadonlySet<TrackRole> = new Set(["battenClamp", "ceilingHanger", "pipeClamp"]);
 
 function partOf(parts: ReadonlyMap<string, TrackPart> | Record<string, TrackPart>, sku: string): TrackPart | undefined {
   if (!sku) return undefined;
@@ -98,7 +98,7 @@ export function trackBom(
     const sku = r.sku || roleSku(series, r.role);
     const part = partOf(parts, sku);
     if (!part) {
-      errors.push(`${series.name} has no part for ${name} — map it in ${TRACK_SERIES_HOME}.`);
+      errors.push(`${series.name} has no part for ${label} — map it in ${TRACK_SERIES_HOME}.`);
       return { role: r.role, label, sku: "", desc: sku ? `${sku} — no longer in the catalog` : "No part mapped", qty: r.qty, unit: "", cost: 0, price: 0, ext: 0, missing: true };
     }
     const unitCost = Number(part.cost) || 0;

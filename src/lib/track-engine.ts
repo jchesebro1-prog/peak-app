@@ -17,14 +17,20 @@ import {
  *
  * Rules per track, then × qty:
  *   L         = runFt + (bi-parting ? series.overlapFt : 0)
- *   straight  n = ceil(L / longest stick); each piece the shortest stick
- *             ≥ L / n; splices = n − 1
- *   curved    sections = ceil(L / curvedSectionFt), splices = sections − 1;
- *             refused without curvedSectionFt, or radius < minRadiusFt
+ *   legs      (#291) 2 for a lapped bi-part (bi-parting on a series with an
+ *             overlap — ADC builds it as two legs lapped at center by lap
+ *             clamps; a stick never crosses the center and the legs are never
+ *             spliced to each other), else 1; leg = L / legs
+ *   straight  per leg n = ceil(leg / longest stick); each piece the shortest
+ *             stick ≥ leg / n; sticks = legs × n; splices = legs × (n − 1)
+ *   curved    per leg n = ceil(leg / curvedSectionFt); sections = legs × n,
+ *             splices = legs × (n − 1); refused without curvedSectionFt, or
+ *             radius < minRadiusFt
  *   carriers  ceil(runFt × 12 / carrierSpacingIn); masters 2 (bi-parting) or
  *             1, each replacing one ordinary carrier (floor 0)
  *   end stops 2
- *   mounting  ceil(L / hangerSpacingFt) + 1 batten clamps or ceiling hangers
+ *   mounting  legs × (ceil(leg / hangerSpacingFt) + 1) batten clamps or
+ *             ceiling hangers — hanging points per leg, both ends supported
  *   cord      (bi-parting, one-way) 1 live pulley, 1 dead pulley, 1 floor
  *             block, operating line ceil(2L + 2·trim + series.lineAllowanceFt)
  *             ft (trim default 20)
@@ -111,23 +117,28 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
   if (errors.length) return { rows: [], errors };
 
   const L = trackLengthFt(config, series);
+  // #291: a lapped bi-part is two legs that meet at center; neither a stick nor a splice crosses it.
+  const legs = config.operation === "biparting" && series.overlapFt > 0 ? 2 : 1;
+  const leg = L / legs;
   const mapped = (role: TrackRole) => !!series.parts[role]?.sku;
   let piece: TrackRow;
+  let nLeg: number;
   if (config.curved) {
-    piece = { role: "curved", qty: ceilSafe(L / series.curvedSectionFt!) };
+    nLeg = ceilSafe(leg / series.curvedSectionFt!);
+    piece = { role: "curved", qty: legs * nLeg };
   } else {
     const sticks = seriesSticks(series);
-    const n = ceilSafe(L / sticks[sticks.length - 1].lengthFt);
-    const stick: TrackStick = sticks.find((s) => s.lengthFt >= L / n - 1e-9) ?? sticks[sticks.length - 1];
-    piece = { role: "track", qty: n, sku: stick.sku, lengthFt: stick.lengthFt };
+    nLeg = ceilSafe(leg / sticks[sticks.length - 1].lengthFt);
+    const stick: TrackStick = sticks.find((s) => s.lengthFt >= leg / nLeg - 1e-9) ?? sticks[sticks.length - 1];
+    piece = { role: "track", qty: legs * nLeg, sku: stick.sku, lengthFt: stick.lengthFt };
   }
-  const splices = Math.max(0, piece.qty - 1);
+  const splices = legs * Math.max(0, nLeg - 1);
   const carrierSpacing = spacing(config.carrierSpacingIn, series.carrierSpacingIn);
   const hangerSpacing = spacing(config.hangerSpacingFt, series.hangerSpacingFt);
   const allCarriers = ceilSafe((run * 12) / carrierSpacing);
   const masters = config.operation === "biparting" ? 2 : 1;
   const carriers = Math.max(0, allCarriers - masters);
-  const mounts = ceilSafe(L / hangerSpacing) + 1;
+  const mounts = legs * (ceilSafe(leg / hangerSpacing) + 1);
   const batten = config.mounting === "batten";
 
   const per: TrackRow[] = [
