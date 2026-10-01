@@ -156,10 +156,12 @@ export async function markPerkUsed(input: {
     // not-yet-unlocked perk reads as blocked.
     const st = perkStatuses([perk], { earned: ctx.earned, entries: ctx.entries, now })[0];
     if (!st.available || st.mode !== "free") {
-      const msg = perkBlockMessage(st);
+      // A priced perk below its level reads as "points" here (no points in
+      // the context) — say what it is: not free for them, buy it via Redeem.
+      const forSale = st.pointCost != null && (st.block === "points" || st.block === "level");
       return {
         ok: false as const,
-        error: st.block === "level" && st.pointCost != null ? `${msg} Use Redeem to spend points on it.` : msg,
+        error: forSale ? "This company hasn't earned that perk's level — use Redeem to spend points on it." : perkBlockMessage(st),
       };
     }
     const planned = perkRedemptionEntry({

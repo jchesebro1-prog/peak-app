@@ -61,8 +61,6 @@ const tierHead: CSSProperties = {
   borderBottom: "1px solid #f0f1f4",
 };
 
-let seq = 0;
-
 export function PurchasePerksEditor({ purchasePerks }: { purchasePerks: PurchasePerk[] }) {
   const router = useRouter();
   const [saved, setSaved] = useState<Row[]>(() => rowsOf(purchasePerks));
@@ -99,9 +97,14 @@ export function PurchasePerksEditor({ purchasePerks }: { purchasePerks: Purchase
   };
   const add = (level: ThresholdLevel) => {
     touch();
-    seq += 1;
-    const key = `new:${Date.now().toString(36)}${seq}`;
-    setRows((cur) => [...ordered(cur), { key, id: key, level, name: "", description: "", active: true }]);
+    // A temporary key unique within this editor; the server mints the real id.
+    setRows((cur) => {
+      const taken = new Set(cur.map((r) => r.key));
+      let n = cur.length + 1;
+      while (taken.has(`new:${n}`)) n++;
+      const key = `new:${n}`;
+      return [...ordered(cur), { key, id: key, level, name: "", description: "", active: true }];
+    });
   };
 
   const onSave = () => {

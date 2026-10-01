@@ -10684,6 +10684,7 @@ seeded()
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
   .then(() => rewards282PointsAsyncChecks())
+  .then(() => rewards282PerksPointsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -39165,13 +39166,14 @@ function r282dText(html: string): string {
   // ---- the portal view (whitelist) ----
   const program = { ...r282Default, perks: [perk("p1", "copper", "once"), perk("p2", "gold", "once"), perk("p3", "base", "yearly", { active: false })] };
   const pv = r282dPortalView({ program, spend: 30000, balance: -12, entries: [], now: NOW });
-  ok(JSON.stringify(Object.keys(pv).sort()) === JSON.stringify(["level", "levelLabel", "next", "perks", "points", "progress"]),
-    "#282 P4 portal: the view carries only level, levelLabel, next, progress, points, perks (no dollar balance — points follow-up)");
+  ok(JSON.stringify(Object.keys(pv).sort()) === JSON.stringify(["level", "levelLabel", "next", "pending", "perks", "points", "progress", "purchasePerks"]),
+    "#282 P4 portal: the view carries only level, levelLabel, next, progress, points, perks (+ perks+points: purchasePerks, pending) — no dollar balance");
   ok(pv.level === "copper" && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver" && pv.next.need === 45000,
     "#282 P4 portal: the earned level and \"$X to <next>\"");
   ok(pv.points === 0, "#282 P4 portal: a negative balance shows as 0 points to the customer");
-  ok(pv.perks.length === 1 && pv.perks[0].name === "Perk p1" && JSON.stringify(Object.keys(pv.perks[0]).sort()) === '["description","id","name"]',
-    "#282 P4 portal: only available perks, name + description only (no level-locked or inactive)");
+  ok(pv.perks.length === 1 && pv.perks[0].name === "Perk p1" && JSON.stringify(Object.keys(pv.perks[0]).sort()) === '["description","id","mode","name","pointCost"]'
+    && pv.perks[0].mode === "free" && pv.perks[0].pointCost === null,
+    "#282 P4 portal: only available perks, name + description (+ perks+points: Free / point price) — no level-locked or inactive");
   ok(!/margin|earnPct|thresholds/i.test(JSON.stringify(pv)), "#282 P4 portal: no margin / earn % / thresholds in the view");
   const html = symRender(symH(r282dPortalCard, { view: { ...pv, points: 126 }, companyName: "Peak Systems Group" }));
   const text = r282dText(html);
@@ -39688,5 +39690,403 @@ async function rewards282PointsAsyncChecks(): Promise<void> {
     for (const x of await L.ledgerForCompany(BIG)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
     await removeCustomer(BIG);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #282 perks+points — Customer Rewards follow-up (Jeff 2026-10-01): purchase
+// perks by tier (standing, informational: staff banner, portal card, quote
+// document / letters) and perks redeemable for points (free at the unlock
+// level, else bought with spendable points; per-company lock; Mark fulfilled;
+// Undo refunds; staff bell "Perks to fulfil"). Pure checks run here; the DB
+// checks are rewards282PerksPointsAsyncChecks() on the promise chain.
+// ---------------------------------------------------------------------------
+import {
+  customerPurchasePerks as r282eCustomerPP,
+  mergePurchasePerkEdits as r282eMergePP,
+  purchasePerkDraftErrors as r282ePPErrors,
+  purchasePerksAt as r282ePPAt,
+  purchasePerksBannerText as r282eBanner,
+  purchasePerksDocLine as r282eDocLine,
+  purchasePerksSentence as r282eSentence,
+} from "@/lib/rewards/purchase-perks";
+import {
+  perkFulfilId as r282eFulfilId,
+  perkRedemptionEntry as r282eRedeemEntry,
+  unfulfilledRedemptions as r282eUnfulfilled,
+} from "@/lib/rewards/perks";
+import { ledgerEntryLabel as r282eEntryLabel } from "@/lib/rewards/ledger";
+import { perkBellItems as r282eBellItems } from "@/lib/rewards/perk-bell";
+import { CATEGORIES as r282eNotifCats } from "@/lib/stores/notif-prefs";
+import type { PurchasePerk as R282ePP } from "@/lib/rewards/program";
+
+{
+  const NOW = 1_800_000_000_000;
+  const perk = (id: string, level: R282dPerk["level"], frequency: R282dPerk["frequency"], extra: Partial<R282dPerk> = {}): R282dPerk =>
+    ({ id, name: `Perk ${id}`, description: `About ${id}`, level, frequency, active: true, ...extra });
+  const use = (perkId: string, n: number, at: number, extra: Partial<R282dEntry> = {}): R282dEntry =>
+    ({ id: r282dUseId("co", perkId, n), companyId: "co", kind: "perk", amount: 0, perkId, at, by: "T", ...extra });
+  const undo = (u: R282dEntry, at: number): R282dEntry =>
+    ({ id: r282dUndoId(u.id), companyId: "co", kind: "unperk", amount: u.amount < 0 ? -u.amount : 0, perkId: u.perkId, at, by: "T" });
+  const fulfil = (u: R282dEntry, at: number): R282dEntry =>
+    ({ id: r282eFulfilId(u.id), companyId: "co", kind: "perk-fulfil", amount: 0, perkId: u.perkId, useId: u.id, at, by: "T" });
+
+  // ---- sanitize: purchase perks ----
+  const sp = r282Sanitize({ purchasePerks: [
+    { id: "ff", name: " Free freight ", level: "gold", description: "On every order", active: true },
+    { id: "ff", name: "Dup id", level: "gold" },
+    { id: "b", name: "Base one", level: "base" },
+    { id: "x", name: "Unknown", level: "diamond" },
+    { id: "n", name: "", level: "silver" },
+    { id: "gone", name: "Gone", level: "copper", active: true, removed: true },
+    "junk",
+  ] });
+  ok(sp.purchasePerks.length === 3, `#282 perks+points sanitize: nameless, Base-level, unknown-level and junk purchase perks dropped (got ${sp.purchasePerks.length})`);
+  ok(sp.purchasePerks[0].id === "ff" && sp.purchasePerks[0].name === "Free freight" && sp.purchasePerks[0].level === "gold" && sp.purchasePerks[0].active === true,
+    "#282 perks+points sanitize: a purchase perk keeps id / trimmed name / level, active by default");
+  ok(sp.purchasePerks[1].id !== "ff" && new Set(sp.purchasePerks.map((p) => p.id)).size === 3, "#282 perks+points sanitize: purchase-perk ids unique (a duplicate is re-minted)");
+  ok(sp.purchasePerks[2].removed === true && sp.purchasePerks[2].active === false, "#282 perks+points sanitize: a purchase-perk tombstone is kept, forced inactive");
+  ok(Array.isArray(r282Sanitize(undefined).purchasePerks) && r282Sanitize(undefined).purchasePerks.length === 0 && r282Default.purchasePerks.length === 0,
+    "#282 perks+points sanitize: no purchase perks by default");
+
+  // ---- sanitize: point prices ----
+  const pc = r282Sanitize({ perks: [
+    { id: "a", name: "A", level: "platinum", pointCost: "300" },
+    { id: "b", name: "B", level: "none", pointCost: 99.6 },
+    { id: "c", name: "C", level: "none" },
+    { id: "d", name: "D", level: "gold", pointCost: 0 },
+    { id: "e", name: "E", level: null, pointCost: -5 },
+  ] }).perks;
+  ok(pc[0].pointCost === 300 && pc[0].level === "platinum", "#282 perks+points sanitize: a point price parses to whole points alongside an unlock level");
+  ok(pc[1].level === null && pc[1].pointCost === 100, "#282 perks+points sanitize: points-only (level none) keeps a null level; the price rounds to whole points");
+  ok(pc[2].level === "base" && pc[2].pointCost === undefined, "#282 perks+points sanitize: \"none\" without a price falls back to Base (never an unreachable perk)");
+  ok(pc[3].pointCost === undefined && pc[4].pointCost === undefined && pc[4].level === "base", "#282 perks+points sanitize: a price below 1 point is dropped");
+
+  // ---- editor errors / merges ----
+  ok(r282dDraftErrors([{ name: "x", level: "none", pointCost: "" }]).some((e) => /points-only/.test(e)), "#282 perks+points errors: a points-only perk needs a price");
+  ok(r282dDraftErrors([{ name: "x", level: "gold", pointCost: "2.5" }]).some((e) => /whole number/.test(e))
+    && r282dDraftErrors([{ name: "x", level: "gold", pointCost: "0" }]).length === 1, "#282 perks+points errors: a price must be whole points ≥ 1");
+  ok(r282dDraftErrors([{ name: "x", level: "none", pointCost: "1,500" }]).length === 0 && r282dDraftErrors([{ name: "x", level: "gold", pointCost: "" }]).length === 0,
+    "#282 perks+points errors: a points-only perk with a price, or a level perk with none, is fine");
+  const mp = r282dMerge([], [
+    { id: "new:1", name: "Lift", description: "", level: "platinum", frequency: "once", active: true, pointCost: "300" },
+    { id: "new:2", name: "Swag", description: "", level: "none", frequency: "yearly", active: true, pointCost: "100" },
+  ], { rand: () => 0.3 });
+  ok(mp[0].pointCost === 300 && mp[0].level === "platinum" && mp[1].level === null && mp[1].pointCost === 100,
+    "#282 perks+points merge: the perks editor keeps point prices and points-only levels");
+  ok(r282ePPErrors([{ name: "", level: "gold" }]).length === 1 && r282ePPErrors([{ name: "x", level: "base" }]).length === 1 && r282ePPErrors("x").length === 1
+    && r282ePPErrors([{ name: "x", level: "copper" }]).length === 0, "#282 perks+points errors: a purchase perk needs a name and a Copper…Platinum level");
+  const storedPP: R282ePP[] = [
+    { id: "keep", level: "gold", name: "Free freight", description: "", active: true },
+    { id: "drop", level: "silver", name: "Old", description: "", active: true },
+  ];
+  const mpp = r282eMergePP(storedPP, [
+    { id: "new:a", level: "platinum", name: "Dedicated PM", description: "", active: true },
+    { id: "keep", level: "gold", name: "Free freight (ground)", description: "d", active: true },
+    { id: "new:b", level: "copper", name: "Priority", description: "", active: false },
+  ], { takenIds: ["perk-taken"], rand: () => 0.4 });
+  ok(mpp.map((p) => p.level).join(",") === "copper,gold,platinum,silver" && mpp[3].removed === true && mpp[3].id === "drop",
+    `#282 perks+points merge: purchase perks save grouped by tier, a left-out one becomes a tombstone (${mpp.map((p) => p.level + ":" + p.id).join(",")})`);
+  ok(mpp[1].id === "keep" && mpp[1].name === "Free freight (ground)" && mpp[0].id.startsWith("priority-") && mpp[0].active === false,
+    "#282 perks+points merge: a stored purchase perk keeps its id; a new one gets a server-minted slug id");
+
+  // ---- a customer's purchase perks (≤ earned level) and their text ----
+  const ppList: R282ePP[] = [
+    { id: "g1", level: "gold", name: "Free freight", description: "", active: true },
+    { id: "c1", level: "copper", name: "Priority scheduling", description: "", active: true },
+    { id: "p1", level: "platinum", name: "Dedicated PM", description: "", active: true },
+    { id: "g2", level: "gold", name: "Waived travel", description: "", active: true },
+    { id: "g3", level: "gold", name: "Off", description: "", active: false },
+    { id: "g4", level: "gold", name: "Removed", description: "", active: false, removed: true },
+  ];
+  ok(r282ePPAt(ppList, "gold").map((p) => p.name).join("|") === "Priority scheduling|Free freight|Waived travel",
+    "#282 perks+points: purchase perks = every active one at a level ≤ earned, lower tiers first");
+  ok(r282ePPAt(ppList, "base").length === 0 && r282ePPAt(ppList, "platinum").length === 4, "#282 perks+points: Base earns none; Platinum gets every tier");
+  const gold = r282eCustomerPP({ enabled: true, purchasePerks: ppList }, "gold");
+  ok(!!gold && gold.levelLabel === "Gold" && gold.perks.length === 3, "#282 perks+points: a Gold customer's purchase perks");
+  ok(r282eCustomerPP({ enabled: false, purchasePerks: ppList }, "gold") === null, "#282 perks+points: nothing while the program is off");
+  ok(r282eCustomerPP({ enabled: true, purchasePerks: ppList }, "base") === null && r282eCustomerPP({ enabled: true, purchasePerks: [] }, "platinum") === null,
+    "#282 perks+points: nothing when the customer has none");
+  ok(r282eBanner(gold) === "Gold purchase perks: Priority scheduling · Free freight · Waived travel", `#282 perks+points banner text (${r282eBanner(gold)})`);
+  ok(r282eDocLine(gold) === "Your Gold rewards: Priority scheduling · Free freight · Waived travel", `#282 perks+points document line (${r282eDocLine(gold)})`);
+  ok(r282eSentence(gold) === "As a Gold rewards customer, your purchase perks include Priority scheduling, Free freight and Waived travel.",
+    `#282 perks+points repair-letter sentence (${r282eSentence(gold)})`);
+  ok(r282eBanner(null) === "" && r282eDocLine(null) === "" && r282eSentence(null) === "", "#282 perks+points: no banner / line / sentence without purchase perks");
+  const one = r282eCustomerPP({ enabled: true, purchasePerks: ppList }, "copper");
+  ok(r282eSentence(one) === "As a Copper rewards customer, your purchase perks include Priority scheduling.", "#282 perks+points: one perk reads as a plain sentence");
+
+  // ---- availability: free vs buyable vs both ----
+  const platOr300 = perk("plat", "platinum", "once", { pointCost: 300 });
+  const ptsOnly = perk("pts", null, "yearly", { pointCost: 100 });
+  const goldFree = perk("gf", "gold", "once");
+  const st = (p: R282dPerk, earned: R282dPerk["level"] & string, points: number, entries: R282dEntry[] = []) =>
+    r282dStatus(p, { earned: earned as never, entries, now: NOW, points });
+  ok(st(platOr300, "gold", 300).mode === "points" && st(platOr300, "gold", 300).available, "#282 perks+points: below its level, a priced perk is buyable when the points cover it");
+  const short = st(platOr300, "gold", 299);
+  ok(!short.available && short.block === "points" && short.short === 1, "#282 perks+points: one point short → blocked \"points\", 1 short");
+  ok(st(platOr300, "platinum", 0).mode === "free" && st(platOr300, "platinum", 5000).mode === "free", "#282 perks+points: at its level it is free — free wins over points");
+  ok(st(goldFree, "silver", 99999).block === "level", "#282 perks+points: a perk with no price stays level-locked whatever the points");
+  ok(st(ptsOnly, "platinum", 99).block === "points" && st(ptsOnly, "platinum", 100).mode === "points", "#282 perks+points: a points-only perk is never free, even at Platinum");
+  ok(r282dStatus(platOr300, { earned: "gold", entries: [], now: NOW }).block === "points", "#282 perks+points: no points given = 0 points");
+  const bought = use("plat", 1, NOW - 10, { amount: -300, redeemed: "points" });
+  ok(st(platOr300, "platinum", 0, [bought]).block === "used" && st(platOr300, "gold", 9999, [bought]).block === "used",
+    "#282 perks+points: once — a BOUGHT use blocks the free use too, and vice versa");
+  ok(st(platOr300, "gold", 9999, [use("plat", 1, NOW - 10)]).block === "used", "#282 perks+points: once — a Mark used counts against buying it");
+  ok(st(platOr300, "gold", 300, [bought, undo(bought, NOW - 5)]).available, "#282 perks+points: an undone purchase frees the perk again");
+  const yb = use("pts", 1, NOW - 10, { amount: -100, redeemed: "points" });
+  ok(st(ptsOnly, "base", 500, [yb]).block === "cooldown" && st(ptsOnly, "base", 500, [use("pts", 1, NOW - r282dYear, { amount: -100, redeemed: "points" })]).mode === "points",
+    "#282 perks+points: yearly counts bought uses (365 days from the last one)");
+  ok(r282dCount([platOr300, ptsOnly, goldFree], { earned: "gold", entries: [], now: NOW, points: 300 }) === 3
+    && r282dCount([platOr300, ptsOnly, goldFree], { earned: "gold", entries: [], now: NOW, points: 150 }) === 2,
+    "#282 perks+points: the available count is free + buyable");
+
+  // ---- the redemption entry ----
+  const r1 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 450, now: NOW, via: "portal", by: "Pat (portal)" });
+  ok(r1.ok && r1.entry.id === "perk:co:plat:1" && r1.entry.kind === "perk" && r1.entry.amount === -300 && r1.entry.redeemed === "points" && r1.entry.via === "portal",
+    `#282 perks+points: a points redemption debits exactly pointCost dollars (${JSON.stringify(r1)})`);
+  const r2 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" });
+  ok(r2.ok && r2.entry.amount === 0 && r2.entry.redeemed === "free", "#282 perks+points: a free redemption debits nothing");
+  const r3 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 299.5, now: NOW, via: "staff", by: "S" });
+  ok(r3.ok && r282bBalance([{ amount: 299.5 }, r3.entry]) === -0.5, "#282 perks+points: $299.50 shows as 300 points and buys a 300-point perk — the balance dips < $1");
+  const r4 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 299, now: NOW, via: "staff", by: "S" });
+  ok(!r4.ok && /1 point short/.test(r4.error), "#282 perks+points: 299 points can't buy 300 — so it can never dip a full $1");
+  const r5 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 500, now: NOW, via: "staff", by: "S", expect: { mode: "free", pointCost: null } });
+  const r6 = r282eRedeemEntry({ perk: platOr300, companyId: "co", earned: "gold", entries: [], available: 500, now: NOW, via: "staff", by: "S", expect: { mode: "points", pointCost: 250 } });
+  ok(!r5.ok && !r6.ok, "#282 perks+points: refused when the shown Free / price no longer matches (never a surprise charge)");
+  ok(!r282eRedeemEntry({ perk: { ...platOr300, removed: true }, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" }).ok
+    && !r282eRedeemEntry({ perk: { ...platOr300, active: false }, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" }).ok
+    && !r282eRedeemEntry({ perk: null, companyId: "co", earned: "platinum", entries: [], available: 0, now: NOW, via: "staff", by: "S" }).ok,
+    "#282 perks+points: removed / inactive / unknown perks can't be redeemed");
+
+  // ---- ledger: balance, labels, undo refund, fulfilment ----
+  ok(r282bBalance([{ amount: 450 }, bought, undo(bought, NOW)]) === 450 && undo(bought, NOW).amount === 300, "#282 perks+points ledger: Undo refunds exactly what the purchase debited");
+  ok(r282eEntryLabel(bought) === "Perk redeemed for points" && r282eEntryLabel(undo(bought, NOW)) === "Perk points refunded" && r282eEntryLabel(use("x", 1, 1)) === "Perk used"
+    && r282dKindLabel["perk-fulfil"] === "Perk fulfilled", "#282 perks+points ledger: labels for a bought perk, its refund and a fulfilment");
+  const free1 = use("gf", 1, NOW - 3, { redeemed: "free", via: "portal" });
+  const marked = use("gf2", 1, NOW - 2);
+  const done = use("pts", 2, NOW - 1, { amount: -100, redeemed: "points" });
+  const unf = r282eUnfulfilled([bought, undo(bought, NOW), free1, marked, done, fulfil(done, NOW)]);
+  ok(unf.length === 1 && unf[0].entry.id === free1.id, "#282 perks+points: to fulfil = redemptions not undone and not fulfilled (a Mark used never needs fulfilling)");
+  ok(r282eFulfilId("perk:co:p:1") === "fulfil:perk:co:p:1", "#282 perks+points: the fulfilment id is fulfil:<use id> — one per redemption");
+  const pu = r282dUses([done, fulfil(done, NOW)]);
+  ok(pu[0].fulfilled?.kind === "perk-fulfil", "#282 perks+points: uses pair their fulfilment");
+
+  // ---- the bell group ----
+  const items = r282eBellItems(
+    [
+      { companyId: "c1", useId: "perk:c1:p:1", perkName: "Lift inspection", at: 1, via: "portal", points: 300 },
+      { companyId: "c2", useId: "perk:c2:p:1", perkName: "Swag", at: 1, via: "staff", points: 0 },
+      { companyId: "gone", useId: "perk:gone:p:1", perkName: "X", at: 1, via: null, points: 0 },
+    ],
+    ["Acme HS", "Beta PAC", ""]
+  );
+  ok(items.length === 2 && items[0].title === "Lift inspection — Acme HS" && /portal · 300 points/.test(items[0].sub) && items[0].href === "/companies/c1#rewards"
+    && /free/.test(items[1].sub), `#282 perks+points bell: one item per unfulfilled redemption, a vanished company dropped (${JSON.stringify(items)})`);
+  ok(r282eNotifCats.some((c) => c.key === "perks" && c.label === "Perks to fulfil"), "#282 perks+points bell: \"Perks to fulfil\" is a notification category");
+
+  // ---- the portal view: points, never dollars ----
+  const program = { ...r282Default, enabled: true, perks: [platOr300, ptsOnly, goldFree], purchasePerks: ppList };
+  const pv = r282dPortalView({ program, spend: 160000, balance: 450, available: 350, entries: [free1], now: NOW });
+  ok(pv.perks.map((p) => `${p.id}:${p.mode}:${p.pointCost}`).join("|") === "plat:points:300|pts:points:100",
+    `#282 perks+points portal: buyable perks priced in points against AVAILABLE credit; a used once perk gone (${JSON.stringify(pv.perks)})`);
+  ok(pv.points === 450, "#282 perks+points portal: the points balance still shows the whole balance");
+  ok(pv.purchasePerks?.levelLabel === "Gold" && pv.purchasePerks.perks.map((p) => p.name).join("|") === "Priority scheduling|Free freight|Waived travel",
+    "#282 perks+points portal: \"Your Gold purchase perks\"");
+  ok(pv.pending.length === 1 && pv.pending[0].name === "Perk gf", "#282 perks+points portal: redemptions being fulfilled are listed");
+  ok(!JSON.stringify(pv).includes("$") && !/amount|balance|dollar/i.test(JSON.stringify(pv)), "#282 perks+points portal: the view carries no dollar amount or dollar balance");
+  const pvOff = r282dPortalView({ program: { ...program, enabled: false }, spend: 160000, balance: 0, entries: [], now: NOW });
+  ok(pvOff.purchasePerks === null, "#282 perks+points portal: purchase perks only while the program is on");
+  const html = symRender(symH(r282dPortalCard, { view: pv, companyName: "Peak" }));
+  const text = r282dText(html);
+  ok(text.includes("Your Gold purchase perks") && text.includes("Free freight") && text.includes("300 points") && text.includes("100 points")
+    && text.includes("Redeemed — we'll be in touch"), `#282 perks+points portal card: purchase perks, point prices and pending redemptions render (${text.slice(0, 200)})`);
+  ok(!/\$300|\$100|\$450/.test(text), "#282 perks+points portal card: no dollar amount for points");
+
+  // ---- wiring ----
+  const portalAct = r282Read("src/app/portal/actions.ts", "utf8");
+  const fn = portalAct.slice(portalAct.indexOf("export async function redeemPortalPerk"));
+  ok(/resolvePortalViewer\(/.test(fn) && /portalRedeemPerk\(viewer/.test(fn) && !/companyId:\s*input\.companyId\s*\|\|\s*session/.test(fn),
+    "#282 perks+points wiring: the portal Redeem resolves the viewer from the grant cookie / preview and goes through portalRedeemPerk");
+  const store = r282Read("src/lib/stores/reward-perks.ts", "utf8");
+  const portalFn = store.slice(store.indexOf("export async function portalRedeemPerk"));
+  ok(/if \(viewer\.preview\)/.test(portalFn) && /companyId: s\.customerId/.test(portalFn), "#282 perks+points wiring: preview refused; the company is always the session's grant");
+  const redeemFn = store.slice(store.indexOf("export async function redeemPerk"), store.indexOf("export async function fulfilPerkRedemption"));
+  ok(/withCompanyRewardsLock\(companyId/.test(redeemFn) && redeemFn.indexOf("perkContext(") > redeemFn.indexOf("withCompanyRewardsLock("),
+    "#282 perks+points wiring: Redeem reads the balance INSIDE the company's lock");
+  ok(/pg_try_advisory_xact_lock\(\$\{namespace\}, hashtext\(\$\{key\}\)\)/.test(r282Read("src/db/index.ts", "utf8")), "#282 perks+points wiring: the lock is a transaction-scoped advisory lock");
+  const act = r282Read("src/app/(app)/rewards/actions.ts", "utf8");
+  const rf = act.slice(act.indexOf("export async function redeemPerkAction"));
+  ok(rf.indexOf('can("create", me.roles)') > 0 && rf.indexOf('can("create", me.roles)') < rf.indexOf("await redeemPerk("), "#282 perks+points wiring: staff Redeem checks create first");
+  const ff = act.slice(act.indexOf("export async function fulfilPerkAction"));
+  ok(ff.indexOf('can("create", me.roles)') > 0 && ff.indexOf('can("create", me.roles)') < ff.indexOf("await fulfilPerkRedemption("), "#282 perks+points wiring: Mark fulfilled checks create first");
+  ok(/push\("perks", "Perks to fulfil"/.test(r282Read("src/lib/nav-counts.ts", "utf8")), "#282 perks+points wiring: the bell pushes \"Perks to fulfil\"");
+  for (const f of ["src/app/(app)/flame-tests/quote/controls.tsx", "src/app/(app)/inspections/quote/controls.tsx", "src/app/(app)/repairs/quote/controls.tsx"]) {
+    ok(/<ServicePurchasePerksBanner customerId=\{customerId\} \/>/.test(r282Read(f, "utf8")), `#282 perks+points wiring: ${f.split("/")[2]} shows the purchase-perks banner`);
+  }
+  const est = r282Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  ok(/creditInfo\?\.customerId === customerId && <PurchasePerksBanner text=\{creditInfo\.purchasePerks\}/.test(est), "#282 perks+points wiring: the Estimator banner shows only the current customer's answer");
+  for (const f of ["src/components/rewards/purchase-perks-banner.tsx", "src/app/(app)/settings/rewards/purchase-perks-editor.tsx", "src/app/portal/redeem-perk-button.tsx", "src/components/rewards/perk-actions.tsx"]) {
+    ok(!/from "@\/lib\/stores\//.test(r282Read(f, "utf8")), `#282 perks+points wiring: client component ${f.split("/").pop()} imports no server store`);
+  }
+  ok(/rewardsLine=\{purchasePerksDocLine\(perks\)\}/.test(r282Read("src/app/print/quote/[id]/page.tsx", "utf8")), "#282 perks+points wiring: the quote PDF route prints the purchase-perks line");
+  for (const f of ["src/app/(app)/flame-tests/letter/letter-view.tsx", "src/app/(app)/inspections/letter/letter-view.tsx"]) {
+    ok(/purchasePerksDocLine\(await purchasePerksForCompany\(quote\.customerId\)\)/.test(r282Read(f, "utf8")), `#282 perks+points wiring: ${f.split("/")[2]} letter prints the line`);
+  }
+  ok(/purchasePerksSentence\(await purchasePerksForCompany\(quote\.customerId\)\)/.test(r282Read("src/app/(app)/repairs/letter/letter-view.tsx", "utf8")), "#282 perks+points wiring: the repair letter says one sentence");
+}
+
+async function rewards282PerksPointsAsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture, registerFixture } = await import("./test-fixtures");
+  const R = await import("@/lib/stores/rewards");
+  const L = await import("@/lib/stores/reward-ledger");
+  const P = await import("@/lib/stores/reward-perks");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const CO = fixtureId(282, "pp-co"); // Gold
+  const OTHER = fixtureId(282, "pp-other"); // Base
+  const RACE = fixtureId(282, "pp-race"); // concurrency
+  const RACE2 = fixtureId(282, "pp-race2");
+  const prevRaw = await getBlob<Record<string, unknown>>("rewards_program", {});
+  const proj = (slug: string, customerId: string, value: number) =>
+    createFixture("projects", { id: fixtureId(282, slug), kind: "project", name: `T282 ${slug}`, customer: "", customerId, quoteId: null,
+      projectType: null, value, margin: 0, createdAt: 1, updatedAt: 1, startedAt: 2, stageHistory: [], source: { system: "daylite", importedAt: 1 } });
+  const bal = async (id: string) => (await L.companyCredit(id)).balance;
+  try {
+    for (const [id, name] of [[CO, "Gold"], [OTHER, "Other"], [RACE, "Race"], [RACE2, "Race2"]]) {
+      await upsertCustomer({ id, name: `Test282 PP ${name} Co`, type: "Education", pricingTier: null, locations: [], contacts: [] });
+    }
+    await proj("pp-hist", CO, 160000); // Gold
+    await proj("pp-hist-o", OTHER, 1000); // Base
+    await proj("pp-hist-r", RACE, 1000);
+    await proj("pp-hist-r2", RACE2, 1000);
+    await setBlob("rewards_program", { ...r282Default, enabled: false, launchedAt: null, perks: [], purchasePerks: [] } as unknown as Record<string, unknown>);
+
+    // ---- purchase perks: save, by level, only while on ----
+    const sp = await P.saveRewardsPurchasePerks([
+      { id: "new:1", level: "gold", name: "Free freight", description: "Ground freight on every order", active: true },
+      { id: "new:2", level: "copper", name: "Priority scheduling", description: "", active: true },
+      { id: "new:3", level: "platinum", name: "Dedicated PM", description: "", active: true },
+      { id: "new:4", level: "gold", name: "Waived travel", description: "", active: true },
+    ]);
+    ok(sp.ok && sp.program.purchasePerks.length === 4 && sp.program.purchasePerks.every((p) => !p.id.startsWith("new:"))
+      && sp.program.purchasePerks.map((p) => p.level).join(",") === "copper,gold,gold,platinum", "#282 perks+points DB: purchase perks save with server ids, grouped by tier");
+    ok(!(await P.saveRewardsPurchasePerks([{ id: "", level: "base", name: "x", description: "", active: true }])).ok, "#282 perks+points DB: a Base purchase perk is refused");
+    ok((await P.purchasePerksForCompany(CO)) === null, "#282 perks+points DB: no purchase perks while the program is off");
+    const prog0 = await R.getRewardsProgram();
+    await R.saveRewardsProgram({ ...prog0, enabled: true });
+    const ppCo = await P.purchasePerksForCompany(CO);
+    ok(r282eBanner(ppCo) === "Gold purchase perks: Priority scheduling · Free freight · Waived travel", `#282 perks+points DB: a Gold customer's banner (${r282eBanner(ppCo)})`);
+    ok((await P.purchasePerksForCompany(OTHER)) === null && (await P.purchasePerksForCompany("")) === null, "#282 perks+points DB: a Base customer (or none) gets no banner / line");
+    // The customer document prints the line only when given one (QuoteDocument imports a .jpg this
+    // harness can't load — see #245 — so its source is read instead of rendered).
+    const qdSrc = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
+    ok(/\{p\.rewardsLine && \(/.test(qdSrc) && /\{p\.rewardsLine\}/.test(qdSrc) && r282eDocLine(await P.purchasePerksForCompany(OTHER)) === "",
+      "#282 perks+points DB: the quote document prints the rewards line only when the customer has one");
+
+    // ---- perks with points ----
+    const s1 = await P.saveRewardsPerks([
+      { id: "new:a", name: "Lift inspection", description: "One free lift inspection", level: "platinum", frequency: "once", active: true, pointCost: "300" },
+      { id: "new:b", name: "Swag box", description: "", level: "none", frequency: "yearly", active: true, pointCost: "100" },
+      { id: "new:c", name: "Gold thank-you", description: "", level: "gold", frequency: "once", active: true },
+      { id: "new:d", name: "Big one", description: "", level: "none", frequency: "once", active: true, pointCost: "200" },
+    ]);
+    ok(s1.ok, "#282 perks+points DB: perks with point prices save");
+    const prog = await R.getRewardsProgram();
+    ok(prog.purchasePerks.length === 4 && prog.enabled, "#282 perks+points DB: saving perks keeps purchase perks and the switch");
+    const id = (n: string) => prog.perks.find((p) => p.name === n)!.id;
+    const adj = await L.postAdjustment(CO, 450, "pp test credit", "Test");
+    ok(adj.ok && (await bal(CO)) === 450, "#282 perks+points DB: starting balance $450");
+
+    // Mark used can't take a perk that would cost points.
+    const mu = await P.markPerkUsed({ companyId: CO, perkId: id("Lift inspection"), by: "Test" });
+    ok(!mu.ok && /level/.test(mu.error) && /Redeem/.test(mu.error), "#282 perks+points DB: Mark used refuses a perk the company would have to buy");
+
+    // Redeem for points (staff).
+    const r1 = await P.redeemPerk({ companyId: CO, perkId: id("Lift inspection"), via: "staff", by: "Test", expect: { mode: "points", pointCost: 300 } });
+    ok(r1.ok && r1.entry.amount === -300 && r1.entry.redeemed === "points" && (await bal(CO)) === 150, `#282 perks+points DB: Redeem deducts exactly 300 (${JSON.stringify(r1)})`);
+    const r1b = await P.redeemPerk({ companyId: CO, perkId: id("Lift inspection"), via: "staff", by: "Test" });
+    ok(!r1b.ok && /already/.test(r1b.error) && (await bal(CO)) === 150, "#282 perks+points DB: a once perk can't be redeemed twice");
+    const r2 = await P.redeemPerk({ companyId: CO, perkId: id("Big one"), via: "staff", by: "Test" });
+    ok(!r2.ok && /short/.test(r2.error) && (await bal(CO)) === 150, "#282 perks+points DB: refused when short of points; nothing posted");
+    const r3 = await P.redeemPerk({ companyId: CO, perkId: id("Gold thank-you"), via: "staff", by: "Test" });
+    ok(r3.ok && r3.entry.amount === 0 && r3.entry.redeemed === "free" && (await bal(CO)) === 150, "#282 perks+points DB: a free redemption moves no credit");
+    const r4 = await P.redeemPerk({ companyId: CO, perkId: id("Swag box"), via: "staff", by: "Test", expect: { mode: "free", pointCost: null } });
+    ok(!r4.ok && (await bal(CO)) === 150, "#282 perks+points DB: refused when the card showed Free but it now costs points");
+
+    // ---- Undo refunds exactly once ----
+    const u1 = r1.ok ? await P.undoPerkUse(CO, r1.entry.id, "Admin") : { ok: false as const, error: "" };
+    ok(u1.ok && u1.entry.amount === 300 && (await bal(CO)) === 450, "#282 perks+points DB: Undo refunds the 300 points");
+    const u2 = r1.ok ? await P.undoPerkUse(CO, r1.entry.id, "Admin") : { ok: true as const };
+    ok(!u2.ok && (await bal(CO)) === 450, "#282 perks+points DB: a second Undo refunds nothing");
+    const r5 = await P.redeemPerk({ companyId: CO, perkId: id("Lift inspection"), via: "staff", by: "Test" });
+    ok(r5.ok && r5.entry.id.endsWith(":2") && (await bal(CO)) === 150, "#282 perks+points DB: after Undo the perk can be bought again (a fresh numbered use)");
+
+    // ---- fulfil ----
+    const toFulfil = await P.perksToFulfil();
+    const mine = toFulfil.filter((t) => t.companyId === CO);
+    ok(mine.length === 2 && mine.some((t) => t.points === 300) && mine.some((t) => t.points === 0) && !mine.some((t) => r1.ok && t.useId === r1.entry.id),
+      `#282 perks+points DB: the bell lists unfulfilled redemptions — not the undone one (${JSON.stringify(mine)})`);
+    const f1 = r5.ok ? await P.fulfilPerkRedemption(CO, r5.entry.id, "Test") : { ok: false as const, error: "" };
+    ok(f1.ok && f1.entry.kind === "perk-fulfil" && f1.entry.amount === 0 && r5.ok && f1.entry.id === `fulfil:${r5.entry.id}` && (await bal(CO)) === 150,
+      "#282 perks+points DB: Mark fulfilled posts fulfil:<use> (amount 0)");
+    const f2 = r5.ok ? await P.fulfilPerkRedemption(CO, r5.entry.id, "Test") : { ok: true as const };
+    ok(!f2.ok, "#282 perks+points DB: a redemption is fulfilled once");
+    ok(!(r1.ok ? await P.fulfilPerkRedemption(CO, r1.entry.id, "Test") : { ok: true }).ok, "#282 perks+points DB: an undone redemption can't be fulfilled");
+    ok(!(await P.perksToFulfil()).some((t) => r5.ok && t.useId === r5.entry.id), "#282 perks+points DB: a fulfilled redemption leaves the bell");
+
+    // ---- portal: scoped to the grant, refused in preview ----
+    const sessionFor = (customerId: string) => ({ grantId: "g-test", customerId, name: "Pat" });
+    const pPrev = await P.portalRedeemPerk({ session: sessionFor(CO), preview: true }, { perkId: id("Swag box"), companyId: CO });
+    ok(!pPrev.ok && /preview/.test(pPrev.error), "#282 perks+points DB: portal Redeem refused in a team preview");
+    ok(!(await P.portalRedeemPerk({ session: null, preview: false }, { perkId: id("Swag box") })).ok, "#282 perks+points DB: portal Redeem refused without a session");
+    const pX = await P.portalRedeemPerk({ session: sessionFor(OTHER), preview: false }, { perkId: id("Swag box"), companyId: CO });
+    ok(!pX.ok && (await bal(CO)) === 150, "#282 perks+points DB: another company's id is rejected (the session's grant wins; nothing posted on either)");
+    const pOk = await P.portalRedeemPerk({ session: sessionFor(CO), preview: false }, { perkId: id("Swag box"), companyId: CO, expect: { mode: "points", pointCost: 100 } });
+    ok(pOk.ok && pOk.entry.companyId === CO && pOk.entry.via === "portal" && pOk.entry.by === "Pat (portal)" && (await bal(CO)) === 50,
+      "#282 perks+points DB: portal Redeem posts on the grant's company, via portal");
+    ok((await P.perksToFulfil()).some((t) => pOk.ok && t.useId === pOk.entry.id && t.via === "portal"), "#282 perks+points DB: a portal redemption shows on the bell");
+    const pv = await P.portalRewards(CO);
+    ok(!!pv && pv.points === 50 && pv.purchasePerks?.levelLabel === "Gold" && pv.pending.length >= 1 && !JSON.stringify(pv).includes("$"),
+      `#282 perks+points DB: the portal view — points, purchase perks, pending, no dollars (${JSON.stringify(pv)})`);
+    const pvO = await P.portalRewards(OTHER);
+    ok(!!pvO && pvO.purchasePerks === null && !JSON.stringify(pvO).includes(CO), "#282 perks+points DB: another company's view stays its own");
+
+    // ---- /rewards counts free + buyable ----
+    const credit = await L.creditByCompany();
+    const counts = await P.availablePerksByCompany([{ companyId: CO, earned: "gold" }, { companyId: OTHER, earned: "base" }], await R.getRewardsProgram(), undefined, credit);
+    ok(counts.get(CO) === 0 && counts.get(OTHER) === 0, `#282 perks+points DB: /rewards counts (${JSON.stringify([...counts])})`);
+    await L.postAdjustment(OTHER, 250, "pp other", "Test");
+    const counts2 = await P.availablePerksByCompany([{ companyId: OTHER, earned: "base" }], await R.getRewardsProgram(), undefined, await L.creditByCompany());
+    ok(counts2.get(OTHER) === 2, `#282 perks+points DB: a Base company with 250 points can buy the 100- and 200-point perks, not the 300 one (${counts2.get(OTHER)})`);
+
+    // ---- concurrency: two redemptions against one balance can't overspend ----
+    await L.postAdjustment(RACE, 350, "race", "Test");
+    const [a, b] = await Promise.all([
+      P.redeemPerk({ companyId: RACE, perkId: id("Lift inspection"), via: "portal", by: "A" }),
+      P.redeemPerk({ companyId: RACE, perkId: id("Big one"), via: "staff", by: "B" }),
+    ]);
+    const raceBal = await bal(RACE);
+    ok([a, b].filter((x) => x.ok).length === 1 && (raceBal === 50 || raceBal === 150),
+      `#282 perks+points DB: two different perks redeemed at once against 350 points — exactly one posts (balance ${raceBal})`);
+    await L.postAdjustment(RACE2, 1000, "race2", "Test");
+    const same = await Promise.all([1, 2, 3].map(() => P.redeemPerk({ companyId: RACE2, perkId: id("Lift inspection"), via: "portal", by: "X" })));
+    ok(same.filter((x) => x.ok).length === 1 && (await bal(RACE2)) === 700, "#282 perks+points DB: the same once perk redeemed three times at once posts once");
+
+    // ---- refused while the program is off ----
+    await R.saveRewardsProgram({ ...(await R.getRewardsProgram()), enabled: false });
+    const off = await P.redeemPerk({ companyId: OTHER, perkId: id("Swag box"), via: "staff", by: "Test" });
+    ok(!off.ok && /off/.test(off.error), "#282 perks+points DB: Redeem refused while the program is off");
+    ok((await P.purchasePerksForCompany(CO)) === null, "#282 perks+points DB: purchase perks disappear while the program is off");
+  } finally {
+    await setBlob("rewards_program", {
+      ...prevRaw,
+      enabled: prevRaw.enabled === true,
+      launchedAt: prevRaw.launchedAt ?? null,
+      perks: prevRaw.perks ?? [],
+      purchasePerks: prevRaw.purchasePerks ?? [],
+    });
+    for (const c of [CO, OTHER, RACE, RACE2]) {
+      for (const x of await L.ledgerForCompany(c)) registerFixture("reward_ledger", x.id);
+      await removeCustomer(c);
+    }
   }
 }
