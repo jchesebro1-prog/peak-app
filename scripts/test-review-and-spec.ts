@@ -39876,6 +39876,14 @@ async function drivePhotoSync283AsyncChecks(): Promise<void> {
       "#283 sync: a 400 on one file's download fails only that file; the other imports and the run isn't stopped");
     files = files.filter((x) => x.id !== "dOdd");
 
+    addFile("d408", "T283-BRAVO slow.jpg");
+    onceMedia.set("d408", () => json({ error: { message: "Request Timeout" } }, 408));
+    const t408 = await ds283Sync(45_000, deps);
+    ok(!t408.ok && /408/.test(t408.error) && !(await ds283State()).files.d408 && /408/.test((await ds283State()).lastRun?.error || ""),
+      "#283 transient: a 408 on a download stops the call without marking the file failed");
+    const t408b = await ds283Sync(45_000, deps);
+    ok(t408b.ok && t408b.imported === 1 && t408b.failed === 0, "#283 transient: the next run imports the file the 408 stopped");
+
     addFile("dQ1", "T283-BRAVO q1.jpg");
     addFile("dQ2", "T283-BRAVO q2.jpg");
     onceMedia.set("dQ2", () => json({ error: { message: "Rate Limit Exceeded" } }, 429));

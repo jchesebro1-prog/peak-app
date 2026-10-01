@@ -32,6 +32,8 @@ const SYNC_BY = "Drive photos sync";
 /** A download + shrink + store rarely takes more than a few seconds; don't
  *  START another one with less than this left (the first always runs). */
 const PER_FILE_WORST_MS = 12_000;
+/** Lease slack past the budget: one in-flight file (30 s download timeout + shrink + put) can overrun it. */
+const LEASE_SLACK_MS = 60_000;
 
 export type DrivePhotoLastRun = { at: number; imported: number; updated: number; relinked: number; failed: number; unmatched: UnmatchedPhoto[]; complete: boolean; error?: string };
 /** `runningUntil` is the run lease: a call refuses while another's is in the
@@ -99,7 +101,7 @@ function isRateLimited(message: string): boolean {
  * A download failure that is the FILE's own problem → the message recorded
  * on it. The planner then skips that file until it changes in Drive, so this
  * is reserved for what a retry can't fix: a download-restricted file (403),
- * a file gone from Drive (404), any other 4xx but 401/429, one over the size
+ * a file gone from Drive (404), any other 4xx but 401/408/429, one over the size
  * cap. Everything else — a
  * network error or timeout, 401, 429, 5xx, a rate-limit 403 — is null:
  * transient, the call stops and the next run retries the file.
@@ -112,8 +114,8 @@ function fileProblem(e: unknown): string | null {
       return "Drive won't let this account download this file (403)." + (said ? ` Google said: ${said}` : "");
     }
     // Any other 4xx (400, 410, 416…) is about this file, not the run — one
-    // odd file must not wedge every sync. 401/429 stay transient (above: 403).
-    if (e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429 && e.status !== 403) {
+    // odd file must not wedge every sync. 401/408/429 stay transient (above: 403).
+    if (e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 408 && e.status !== 429 && e.status !== 403) {
       const detail = (/^Drive API \d+ while [^:]*: (.+)$/.exec(e.message)?.[1] || e.message).slice(0, 200);
       return `Drive refused this file (${e.status}): ${detail}`;
     }
@@ -158,7 +160,7 @@ export async function syncDrivePhotos(budgetMs: number, deps: DrivePhotoSyncDeps
   const state = await getDrivePhotoSyncState();
   // The run lease: Sync now and the cron must not work the same files at once.
   if ((state.runningUntil ?? 0) > now()) return { ok: false, error: "A photo sync is already running — try again in a minute." };
-  state.runningUntil = now() + Math.max(0, budgetMs) + 20_000;
+  state.runningUntil = now() + Math.max(0, budgetMs) + LEASE_SLACK_MS;
   await saveState(state);
   try {
     return await runSync(state, budgetMs, deps, now, put);
