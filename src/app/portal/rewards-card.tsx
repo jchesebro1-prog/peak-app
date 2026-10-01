@@ -1,11 +1,13 @@
 import type { CSSProperties } from "react";
 import type { PortalRewardsView } from "@/lib/rewards/perks";
+import { formatPoints } from "@/lib/rewards/points";
 
 /**
  * Customer portal → Rewards card (#282 phase 4, spec §7). Renders ONLY the
  * whitelisted PortalRewardsView (src/lib/rewards/perks.ts): the reward level
- * name, progress to the next level, the credit balance and the available
- * perks' name + description. No margins, no percentages, no actions. The
+ * name, progress to the next level (dollars of purchases), the rewards
+ * balance as POINTS (#282 points follow-up — never a dollar balance) and the
+ * available perks' name + description. No margins, no percentages, no actions. The
  * page renders it only while the program is on, for the grant's company.
  * Pure presentational — no data access here.
  */
@@ -37,9 +39,6 @@ const LABEL: CSSProperties = {
 function dollars(n: number): string {
   return "$" + Math.round(n || 0).toLocaleString("en-US");
 }
-function cents(n: number): string {
-  return "$" + (Math.round((n || 0) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 export function PortalRewardsCard({ view, companyName }: { view: PortalRewardsView; companyName: string }) {
   const width = Math.round(Math.max(0, Math.min(1, view.progress)) * 1000) / 10;
@@ -67,18 +66,21 @@ export function PortalRewardsCard({ view, companyName }: { view: PortalRewardsVi
             <div style={{ width: `${width}%`, height: "100%", background: "var(--accent)", borderRadius: 6 }} />
           </div>
           <div style={{ fontSize: 12, color: "#5b616e", marginTop: 6 }}>
-            {view.next ? `${dollars(view.next.need)} to ${view.next.levelLabel}` : "You've reached our top level"}
+            {view.next ? `${dollars(view.next.need)} more in purchases to reach ${view.next.levelLabel}` : "You've reached our top level"}
           </div>
         </div>
         <div>
-          <div style={LABEL}>Credit balance</div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 600, marginTop: 6, color: view.balance > 0 ? "#1f7a52" : "#16181d" }}>
-            {cents(view.balance)}
+          <div style={LABEL}>Rewards points</div>
+          <div
+            data-testid="portal-rewards-points"
+            style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 600, marginTop: 6, color: view.points > 0 ? "#1f7a52" : "#16181d" }}
+          >
+            {formatPoints(view.points)}
           </div>
         </div>
       </div>
       <div style={{ padding: "0 20px 12px", fontSize: 12, color: "#8c919c" }}>
-        Credit is applied by your Peak estimator on your next quote.
+        Points are applied by your Peak estimator on your next quote.
       </div>
       {view.perks.length > 0 && (
         <div>

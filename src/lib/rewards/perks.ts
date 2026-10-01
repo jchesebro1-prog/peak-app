@@ -27,6 +27,7 @@ import {
   type RewardsProgram,
 } from "./program";
 import { entryN, type LedgerEntry } from "./ledger";
+import { pointsFor } from "./points";
 
 export const PERK_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -209,9 +210,10 @@ export function mergePerkEdits(
 
 /**
  * Exactly what a customer may see — a whitelist: the reward level NAME,
- * progress to the next level, the credit balance and the available perks'
- * name + description. Never a margin, an earn %, a tier's pricing or
- * another company's anything.
+ * progress to the next level (in dollars of purchases), the credit balance
+ * as POINTS and the available perks' name + description. Never a margin, an
+ * earn %, a tier's pricing, the dollar balance (#282 points follow-up — the
+ * customer side is points only) or another company's anything.
  */
 export type PortalRewardsView = {
   level: RewardLevel;
@@ -220,8 +222,8 @@ export type PortalRewardsView = {
   next: { levelLabel: string; need: number } | null;
   /** 0–1. */
   progress: number;
-  /** Never below $0 on the customer's side. */
-  balance: number;
+  /** The credit balance in points (1 point = $1, rounded up; never below 0). */
+  points: number;
   perks: { id: string; name: string; description: string }[];
 };
 
@@ -242,7 +244,7 @@ export function portalRewardsView(input: {
     levelLabel: REWARD_LEVEL_LABEL[level],
     next: next ? { levelLabel: REWARD_LEVEL_LABEL[next.level], need: next.need } : null,
     progress: levelProgress(input.spend, input.program),
-    balance: Math.max(0, Math.round((input.balance || 0) * 100) / 100),
+    points: pointsFor(input.balance || 0),
     perks,
   };
 }

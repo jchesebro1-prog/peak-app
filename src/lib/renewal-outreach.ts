@@ -65,6 +65,7 @@ import {
 import { getLiftRate } from "@/lib/service-quote-inputs";
 import { quoteRewardCredit } from "@/lib/rewards/credit-line";
 import { serviceLetterPrice } from "@/lib/rewards/service-credit";
+import { rewardPointsPhrase } from "@/lib/rewards/points";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -232,9 +233,10 @@ export async function signerFor(
   };
 }
 
-/** #282 phase 3: the Rewards credit line of a renewal-letter PDF. */
+/** #282 phase 3: the Rewards credit line of a renewal-letter PDF — as points
+ *  on the customer's side (#282 points follow-up, 1 point = $1). */
 function creditSentence(p: { gross: number; credit: number; net: number }): string {
-  return `A ${money(p.credit)} rewards credit is applied to the quoted price of ${money(p.gross)}; the total below is after the credit.`;
+  return `Applied to the quoted price of ${money(p.gross)}: ${rewardPointsPhrase(p.credit)} (${money(p.credit)}). The total below is after the points.`;
 }
 
 /** #275: the renewal letter's lift sentence (the PDF letter is prose). */

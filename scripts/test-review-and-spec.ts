@@ -38431,7 +38431,7 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
   ok(r282bBalance(book) === 144.75, `#282 P2 ledger: balance = Σ amount over every kind (got ${r282bBalance(book)})`);
   ok(r282bBalance([]) === 0 && r282bBalance([{ amount: NaN }, { amount: 10 }]) === 10, "#282 P2 ledger: empty → 0; a junk amount is ignored");
   ok(r282bAvailable(100, [30, 20]) === 50 && r282bAvailable(10, [25]) === -15, "#282 P2 ledger: available = balance − credit parked on other open quotes");
-  ok(r282bEarnAmount(12345.67, 1.5) === 185.19 && r282bEarnAmount(1000, 0) === 0 && r282bEarnAmount(-5, 3) === 0, "#282 P2 ledger: earn = round2(value × % / 100), never negative");
+  ok(r282bEarnAmount(12345.67, 1.5) === 186 && r282bEarnAmount(1000, 0) === 0 && r282bEarnAmount(-5, 3) === 0, "#282 P2 ledger: earn = value × % / 100 rounded UP to whole dollars (points follow-up), never negative");
   ok(r282bEntryN("earn:TEST282:q:3") === 3 && r282bEntryN("start:co") === 0, "#282 P2 ledger: entryN reads the numbered suffix");
 
   // ---- earn / reverse / re-win, state-based ----
@@ -38538,7 +38538,7 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
 
   // wiring
   const docSrc = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
-  ok(/REWARD_CREDIT_DESC/.test(docSrc) && /p\.t\.credit/.test(docSrc), "#282 P2 document: the customer document prints the Rewards credit line from totals().credit");
+  ok(/rewardPointsAppliedLabel\(p\.t\.credit \|\| 0\)/.test(docSrc) && !/REWARD_CREDIT_DESC/.test(docSrc), "#282 P2 document: the customer document prints the credit line from totals().credit — as points (points follow-up)");
   const dt = r282Read("src/db/doc-tables.ts", "utf8");
   ok(dt.includes('docTable("reward_ledger")') && dt.includes("reward_ledger: rewardLedger"), "#282 P2 wiring: reward_ledger is a registered doc table");
   ok(!r282bSyncable.includes("reward_ledger" as never) && !CONFIG_COLLECTIONS.includes("reward_ledger" as never) && DEMO_COLLECTIONS.includes("reward_ledger" as never),
@@ -38756,8 +38756,8 @@ import { readFileSync as r282cRead } from "node:fs";
   ok(r282cLetterPrice({ value: null, quoteType: "repair", repair: { rewardCredit: 100 } }, { total: 900 }).net === 800, "#282 P3 letter: a quote with no value nets its subdoc total");
   const rows0 = r282cRender(r282cEl(R282cRows, { gross: 1000, credit: 0, net: 1000, mono: "m" }));
   const rows1 = r282cRender(r282cEl(R282cRows, { gross: 1000, credit: 100, net: 900, mono: "m" }));
-  ok(rows0 === "" && /Rewards credit/.test(rows1) && /−\$100/.test(rows1) && /\$900/.test(rows1) && /\$1,000/.test(rows1),
-    "#282 P3 letter: the credit rows print only when the credit is > 0 (quoted price, Rewards credit −$X, total)");
+  ok(rows0 === "" && /Rewards points \(100 pts\)/.test(rows1) && !/Rewards credit/.test(rows1) && /−\$100/.test(rows1) && /\$900/.test(rows1) && /\$1,000/.test(rows1),
+    "#282 P3 letter: the credit rows print only when the credit is > 0 (quoted price, Rewards points (N pts) −$X, total)");
   for (const dir of ["flame-tests", "inspections"] as const) {
     const lv = r282cRead(`src/app/(app)/${dir}/letter/letter-view.tsx`, "utf8");
     ok(/const price = serviceLetterPrice\(quote, (ft|insp)\);/.test(lv) && /const totalLabel = money\(price\.net\);/.test(lv) &&
@@ -38765,8 +38765,8 @@ import { readFileSync as r282cRead } from "node:fs";
       `#282 P3 ${dir} letter: prints the credit rows and the net total; the travel share reconciles to the pre-credit total`);
   }
   const rl = r282cRead("src/app/(app)/repairs/letter/letter-view.tsx", "utf8");
-  ok(/const totalLabel = money\(price\.net\);/.test(rl) && /\{price\.credit > 0 && \(/.test(rl) && /after a \{money\(price\.credit\)\} rewards credit/.test(rl),
-    "#282 P3 repair letter: the price sentence names the credit (\"…will cost $X after a $Y rewards credit\") only when there is one");
+  ok(/const totalLabel = money\(price\.net\);/.test(rl) && /\{price\.credit > 0 && \(/.test(rl) && /after applying \{rewardPointsPhrase\(price\.credit\)\} \(\{money\(price\.credit\)\}\)/.test(rl),
+    "#282 P3 repair letter: the price sentence names the points (\"…will cost $X after applying N rewards points ($Y)\") only when there is one");
   const pdfRoute = r282cRead("src/app/print/letter/[kind]/[id]/page.tsx", "utf8");
   ok(/FlameLetterView/.test(pdfRoute) && /InspectionLetterView/.test(pdfRoute) && /RepairLetterView/.test(pdfRoute),
     "#282 P3 PDF: the headless-Chrome print route renders the same three letter views, so the saved PDF follows");
@@ -38935,18 +38935,18 @@ import { settleCredit as r282rSettle } from "@/lib/rewards/service-credit";
 
 {
   const base = { posted: 200.559, total: 1000, available: 150.257, customerId: "co", source: "estimator", mayApply: true, prior: { status: "sent", customerId: "co", credit: 0 } };
-  const c = r282rSettle({ ...base, unit: "cents" });
-  ok(c.credit === 150.25 && /\$150\.25/.test(c.notice || ""), `#282 P3 restore rule: an Estimator recall clamps to the cent, rounded down, and says so (got ${JSON.stringify(c)})`);
-  ok(r282rSettle({ ...base, unit: "dollars" }).credit === 150, "#282 P3 restore rule: a service recall clamps in whole dollars");
-  ok(r282rSettle({ ...base, posted: 120, unit: "cents" }).credit === 120 && !r282rSettle({ ...base, posted: 120, unit: "cents" }).notice,
+  // #282 points follow-up: every recall clamps in whole dollars (Estimator quotes used to clamp to the cent).
+  const c = r282rSettle(base);
+  ok(c.credit === 150 && /\$150\b/.test(c.notice || ""), `#282 P3 restore rule: a recall clamps in whole dollars, rounded down, and says so (got ${JSON.stringify(c)})`);
+  ok(r282rSettle({ ...base, posted: 120 }).credit === 120 && !r282rSettle({ ...base, posted: 120 }).notice,
     "#282 P3 restore rule: a recalled credit still within available is kept, silently");
-  ok(r282rSettle({ ...base, posted: 5000, available: 9000, total: 1234.5, unit: "cents" }).credit === 1234.5, "#282 P3 restore rule: never above the restored pre-credit total ($0 net)");
-  ok(r282rSettle({ ...base, prior: { status: "sent", customerId: "someone-else", credit: 0 }, unit: "cents" }).credit === 0, "#282 P3 restore rule: a revision cut under another customer brings no credit back");
-  ok(r282rSettle({ ...base, source: "portal-service", unit: "dollars" }).credit === 0 && r282rSettle({ ...base, customerId: null, unit: "cents" }).credit === 0,
+  ok(r282rSettle({ ...base, posted: 5000, available: 9000, total: 1234.5 }).credit === 1234, "#282 P3 restore rule: never above the restored pre-credit total (whole dollars, so ≥ $0 net)");
+  ok(r282rSettle({ ...base, prior: { status: "sent", customerId: "someone-else", credit: 0 } }).credit === 0, "#282 P3 restore rule: a revision cut under another customer brings no credit back");
+  ok(r282rSettle({ ...base, source: "portal-service" }).credit === 0 && r282rSettle({ ...base, customerId: null }).credit === 0,
     "#282 P3 restore rule: a portal quote or a quote with no customer gets none");
-  ok(r282rSettle({ ...base, posted: 100, available: 500, mayApply: false, prior: { status: "sent", customerId: "co", credit: 40 }, unit: "cents" }).credit === 40,
+  ok(r282rSettle({ ...base, posted: 100, available: 500, mayApply: false, prior: { status: "sent", customerId: "co", credit: 40 } }).credit === 40,
     "#282 P3 restore rule: without create a recall can't grow the credit past what the quote has now");
-  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 0,
+  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 } }).credit === 0,
     "#282 P3 restore rule: a lost quote gets none (lost and won quotes refuse a recall outright)");
 
   const qs = r282cRead("src/lib/stores/quotes.ts", "utf8");
@@ -39164,19 +39164,19 @@ function r282dText(html: string): string {
   // ---- the portal view (whitelist) ----
   const program = { ...r282Default, perks: [perk("p1", "copper", "once"), perk("p2", "gold", "once"), perk("p3", "base", "yearly", { active: false })] };
   const pv = r282dPortalView({ program, spend: 30000, balance: -12, entries: [], now: NOW });
-  ok(JSON.stringify(Object.keys(pv).sort()) === JSON.stringify(["balance", "level", "levelLabel", "next", "perks", "progress"]),
-    "#282 P4 portal: the view carries only level, levelLabel, next, progress, balance, perks");
+  ok(JSON.stringify(Object.keys(pv).sort()) === JSON.stringify(["level", "levelLabel", "next", "perks", "points", "progress"]),
+    "#282 P4 portal: the view carries only level, levelLabel, next, progress, points, perks (no dollar balance — points follow-up)");
   ok(pv.level === "copper" && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver" && pv.next.need === 45000,
     "#282 P4 portal: the earned level and \"$X to <next>\"");
-  ok(pv.balance === 0, "#282 P4 portal: a negative balance shows as $0 to the customer");
+  ok(pv.points === 0, "#282 P4 portal: a negative balance shows as 0 points to the customer");
   ok(pv.perks.length === 1 && pv.perks[0].name === "Perk p1" && JSON.stringify(Object.keys(pv.perks[0]).sort()) === '["description","id","name"]',
     "#282 P4 portal: only available perks, name + description only (no level-locked or inactive)");
   ok(!/margin|earnPct|thresholds/i.test(JSON.stringify(pv)), "#282 P4 portal: no margin / earn % / thresholds in the view");
-  const html = symRender(symH(r282dPortalCard, { view: { ...pv, balance: 125.5 }, companyName: "Peak Systems Group" }));
+  const html = symRender(symH(r282dPortalCard, { view: { ...pv, points: 126 }, companyName: "Peak Systems Group" }));
   const text = r282dText(html);
-  ok(text.includes("Copper") && text.includes("$45,000 to Silver") && text.includes("$125.50") && text.includes("Perk p1") && text.includes("About p1"),
-    `#282 P4 portal card: level, progress, credit and perks render (${text.slice(0, 160)})`);
-  ok(text.includes("Credit is applied by your Peak estimator on your next quote."), "#282 P4 portal card: says how credit is used");
+  ok(text.includes("Copper") && text.includes("$45,000 more in purchases to reach Silver") && text.includes("126 points") && text.includes("Perk p1") && text.includes("About p1"),
+    `#282 P4 portal card: level, dollar progress, points and perks render (${text.slice(0, 160)})`);
+  ok(text.includes("Points are applied by your Peak estimator on your next quote."), "#282 P4 portal card: says how points are used");
   ok(!/%/.test(text) && !/margin/i.test(text), "#282 P4 portal card: never prints a percent or a margin");
   ok(!/<button|<form|<input/.test(html), "#282 P4 portal card: no actions");
   const top = r282dText(symRender(symH(r282dPortalCard, { view: r282dPortalView({ program, spend: 900000, balance: 0, entries: [], now: NOW }), companyName: "Peak" })));
@@ -39311,8 +39311,8 @@ async function rewards282Phase4AsyncChecks(): Promise<void> {
     if (adjO.ok) registerFixture("reward_ledger", adjO.entry.id);
     const pv = await P.portalRewards(CO);
     const pvO = await P.portalRewards(OTHER);
-    ok(!!pv && pv.balance === 77.25 && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver", `#282 P4 DB: the portal card shows the company's own level and balance (${JSON.stringify(pv)})`);
-    ok(!!pvO && pvO.balance === 5 && pvO.levelLabel === "Base", "#282 P4 DB: another company's portal shows only its own balance and level");
+    ok(!!pv && pv.points === 78 && pv.levelLabel === "Copper" && pv.next?.levelLabel === "Silver", `#282 P4 DB: the portal card shows the company's own level and points, rounded up (${JSON.stringify(pv)})`);
+    ok(!!pvO && pvO.points === 5 && pvO.levelLabel === "Base", "#282 P4 DB: another company's portal shows only its own points and level");
     ok(!!pvO && !JSON.stringify(pvO).includes("77.25") && !JSON.stringify(pv).includes(CO), "#282 P4 DB: one company's balance never appears on another's card");
     ok(!!pvO && pvO.perks.map((p) => p.name).join("|") === "Base yearly", "#282 P4 DB: portal perks are the ones available to that company");
     const html = pv ? symRender(symH(r282dPortalCard, { view: pv, companyName: "Peak Systems Group" })) : "";
@@ -39338,7 +39338,7 @@ async function rewards282Phase4AsyncChecks(): Promise<void> {
   const base = { posted: 500, total: 2500, available: 900, customerId: "co", source: "flametest", mayApply: true };
   const lostS = r282cSettle({ ...base, prior: { status: "lost", customerId: "co", credit: 150 } });
   ok(lostS.credit === 0, "#282 lost (pure): a lost quote settles to no credit, even if a stale amount is stored or posted");
-  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 }, unit: "cents" }).credit === 0,
+  ok(r282rSettle({ ...base, posted: 999, prior: { status: "lost", customerId: "co", credit: 75 } }).credit === 0,
     "#282 lost (pure): the recall re-clamp gives a lost quote none either");
   ok(r282cSettle({ ...base, prior: { status: "won", customerId: "co", credit: 150 } }).credit === 150,
     "#282 lost (pure): a WON quote still keeps the credit it had");

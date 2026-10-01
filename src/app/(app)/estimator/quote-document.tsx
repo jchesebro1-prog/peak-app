@@ -2,7 +2,7 @@ import { Fragment, type CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import { systemSellTotal } from "./pricing";
-import { REWARD_CREDIT_DESC } from "@/lib/rewards/credit-line";
+import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks } from "./narrative";
 
@@ -677,7 +677,10 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               </div>
             )}
             {/* #282 phase 2: the Rewards credit, its own line after the
-                system subtotals; the Total below is already net of it. */}
+                system subtotals; the Total below is already net of it.
+                #282 points follow-up: the customer sees it as points
+                ("Rewards points applied (300 pts)") with the dollars in the
+                price column, so the total still adds up. */}
             {(p.t.credit || 0) > 0 && (
               <div
                 className="est-reward-credit"
@@ -690,7 +693,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   marginBottom: 10,
                 }}
               >
-                <span>{REWARD_CREDIT_DESC}</span>
+                <span>{rewardPointsAppliedLabel(p.t.credit || 0)}</span>
                 <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(p.t.credit || 0)}</span>
               </div>
             )}

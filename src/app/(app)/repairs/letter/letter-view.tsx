@@ -13,6 +13,7 @@ import { getTravelRates } from "@/lib/stores/pricing";
 import { flightOf, flyTravelSentence } from "@/lib/travel-plan";
 import { printedLift, travelLineShare } from "@/lib/service-pricing";
 import { serviceLetterPrice } from "@/lib/rewards/service-credit";
+import { rewardPointsPhrase } from "@/lib/rewards/points";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -485,7 +486,10 @@ export async function RepairLetterView({ id }: { id: string }) {
             <p style={{ margin: "0 0 4px" }}>
               <strong>The above services will cost {totalLabel}</strong>
               {price.credit > 0 && (
-                <span data-testid="letter-reward-credit"> after a {money(price.credit)} rewards credit</span>
+                <span data-testid="letter-reward-credit">
+                  {" "}
+                  after applying {rewardPointsPhrase(price.credit)} ({money(price.credit)})
+                </span>
               )}
               {lift
                 ? ", including " +

@@ -8,7 +8,7 @@ import { ShortList } from "@/components/short-list";
 import { SuggestionActions } from "@/components/rewards/suggestion-actions";
 import { LevelBadge, rewardsMoney, tierLabel } from "@/components/rewards/rewards-ui";
 import { creditByCompany } from "@/lib/stores/reward-ledger";
-import { creditMoney } from "@/components/rewards/credit-ui";
+import { dollarsAndPoints } from "@/lib/rewards/points";
 import { availablePerksByCompany } from "@/lib/stores/reward-perks";
 
 export const metadata = { title: "Rewards — Quartzite-6" };
@@ -207,12 +207,12 @@ export default async function RewardsPage({
                   className="rw-wide"
                   title={
                     credit.get(r.companyId)
-                      ? `Balance ${creditMoney(credit.get(r.companyId)!.balance)} · available ${creditMoney(credit.get(r.companyId)!.available)}`
+                      ? `Balance ${dollarsAndPoints(credit.get(r.companyId)!.balance)} · available ${dollarsAndPoints(credit.get(r.companyId)!.available)}`
                       : "No credit"
                   }
                   style={{ ...cell, fontFamily: "var(--font-mono)", textAlign: "right", color: credit.get(r.companyId)?.balance ? "#1f8a5b" : "#aab0bb" }}
                 >
-                  {credit.get(r.companyId) ? creditMoney(credit.get(r.companyId)!.balance) : "—"}
+                  {credit.get(r.companyId) ? dollarsAndPoints(credit.get(r.companyId)!.balance) : "—"}
                 </span>
                 <span
                   className="rw-wide"

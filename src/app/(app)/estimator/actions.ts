@@ -614,7 +614,8 @@ export async function saveQuoteAction(
  * - no customer drops it (the builder also drops it when the customer
  *   changes; the clamp below is always against the customer being saved);
  * - otherwise it is clamped to that company's available credit (balance −
- *   credit on its OTHER open quotes) and the quote's pre-credit total;
+ *   credit on its OTHER open quotes) and the quote's pre-credit total, in
+ *   whole dollars rounded down (#282 points follow-up — 1 point = $1);
  * - without `create` the credit can't grow past what the quote already had.
  */
 async function settleRewardCredit(
@@ -644,8 +645,12 @@ async function settleRewardCredit(
   }
   const res = sanitizeRewardCredit(sections, max);
   if (!res.ok) return res;
+  // #282 points follow-up: the credit is whole dollars (points); a legacy
+  // cents credit is rounded down on its next save and says so.
   const notice =
-    res.clamped && res.credit > 0
+    res.rounded && res.credit > 0
+      ? `Rewards credit rounded down to whole dollars (${fmtMoney(res.credit)}) — credit applies as whole points.`
+      : res.clamped && res.credit > 0
       ? `Rewards credit reduced to ${fmtMoney(res.credit)} — that's what this customer has available.`
       : res.clamped
       ? "Rewards credit removed — this customer has no credit available for this quote."

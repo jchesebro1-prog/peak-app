@@ -12,6 +12,7 @@ import { REWARD_LEVEL_LABEL } from "@/lib/rewards/program";
 import type { CompanyRewardsView } from "@/lib/stores/rewards";
 import type { CompanyCredit } from "@/lib/stores/reward-ledger";
 import { creditMoney, LedgerRow } from "@/components/rewards/credit-ui";
+import { dollarsAndPoints } from "@/lib/rewards/points";
 import { AdjustCreditForm } from "@/components/rewards/credit-actions";
 import { PerksSection } from "@/components/rewards/perks-ui";
 import type { PerkStatus, PerkUse } from "@/lib/rewards/perks";
@@ -159,13 +160,13 @@ export function RewardsCard({
               <div>
                 <div style={label}>Credit balance</div>
                 <div data-testid="reward-credit-balance" style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 600, marginTop: 6, color: "#1f8a5b" }}>
-                  {creditMoney(credit.balance)}
+                  {dollarsAndPoints(credit.balance)}
                 </div>
               </div>
               <div>
                 <div style={label}>Available</div>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 600, marginTop: 6, color: "#16181d" }}>
-                  {creditMoney(credit.available)}
+                  {dollarsAndPoints(credit.available)}
                 </div>
                 {credit.onOpenQuotes > 0 && (
                   <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 3 }}>
