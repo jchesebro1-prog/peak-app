@@ -85,14 +85,15 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
-  // skipped if the Gmail/riders above left under 10 s of the 60 s ceiling
-  // (cronPhotoBudgetMs keeps a ~10 s margin under 50 s), and skipped quietly
+  // budgeted against a 45 s cutoff (the sync's hard deadline is budget +
+  // 10 s, leaving ~5 s under the 60 s ceiling for the last shrink + store),
+  // skipped when under 10 s is left (cronPhotoBudgetMs), and skipped quietly
   // when no photos account is set. Own try/catch like the other riders.
   let drivePhotos: unknown;
   try {
     if (!(await getSettings()).catalogPhotosMailbox) drivePhotos = { skipped: "no photos account" };
     else {
-      const budget = cronPhotoBudgetMs(50_000 - (Date.now() - started));
+      const budget = cronPhotoBudgetMs(45_000 - (Date.now() - started));
       drivePhotos = budget > 0 ? await syncDrivePhotos(budget) : { skipped: "no time left" };
     }
   } catch (err) {

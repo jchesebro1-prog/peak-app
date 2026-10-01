@@ -47,7 +47,7 @@ export function drivePhotosLoadErrorView(message: string): DrivePhotosPanelView 
   return { configured: false, account: null, problem: null, folder: null, lastRun: null, unmatched: [], synced: 0, loadError: message };
 }
 
-/** Daily cron rider budget: what's left before ~50 s, capped at 20 s;
+/** Daily cron rider budget: what's left before the caller's cutoff (45 s in the cron route), capped at 20 s;
  *  skipped entirely under 10 s (one photo needs a few seconds). */
 export function cronPhotoBudgetMs(msLeft: number): number {
   if (msLeft < 10_000) return 0;
