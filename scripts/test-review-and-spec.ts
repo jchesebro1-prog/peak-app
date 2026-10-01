@@ -14499,8 +14499,10 @@ async function statusRefusalAsyncChecks(): Promise<void> {
     join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"),
     "utf8"
   );
+  // #284 task 5: doSave's body moved into the awaitable saveNow (doSave now
+  // just runs it in a transition) — the slice starts there and still covers both.
   const doSaveBody = estimatorClientSrc.slice(
-    estimatorClientSrc.indexOf("const doSave = ()"),
+    estimatorClientSrc.indexOf("const saveNow = async (): Promise<boolean> =>"),
     estimatorClientSrc.indexOf("const changeStatus = (v: QuoteStatus)")
   );
   ok(doSaveBody.length > 0, "#181 fixture: doSave is still where the test expects it");
@@ -30251,25 +30253,34 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
 {
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   ok(
-    ea.includes("async function syncOf(id: string, viewer: string)") && ea.includes("async function stageSyncOf(id: string, viewer: string)") &&
+    // #284 task 5: syncOf / stageSyncOf take the viewer as a user (name + roles) so they can also evaluate the next step.
+    ea.includes("async function syncOf(id: string, user: { name: string; roles: string[] })") && ea.includes("async function stageSyncOf(id: string, user: { name: string; roles: string[] })") &&
       (ea.match(/reviewLimitChipFor\(/g) || []).length >= 3,
     "#242 estimator: syncOf / stageSyncOf / the save result re-evaluate the chip on the server"
   );
   ok(!/return (syncOf|stageSyncOf)\(id\);/.test(ea), "#242 estimator: every sync names its viewer (the chip says 'your' only to the owner)");
   ok((ea.match(/reviewLimit\?: ReviewLimitChipData \| null;/g) || []).length === 3 && ea.includes("reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,"), "#242 estimator: SaveResult, ReviewSync and StageSync carry reviewLimit");
   const pg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
-  ok(pg.includes("reviewLimitChipFor(q, user.name)") && pg.includes("reviewLimit={reviewLimit}"), "#242 estimator: the page evaluates the saved quote's chip for the viewer");
+  // #284 task 5: the chip rides on the next-step view (its strip) — the page evaluates quoteNextStepFor for the viewer.
+  const qnsServer242 = readFileSync(join(process.cwd(), "src/lib/quote-next-step-server.ts"), "utf8");
+  ok(pg.includes("quoteNextStepFor(q, user)") && pg.includes("next={next}") && qnsServer242.includes("chip: reviewLimitChip(q, ctx, viewer.name),"),
+    "#242 estimator: the page evaluates the saved quote's chip for the viewer");
   const ty = readFileSync(join(process.cwd(), "src/app/(app)/estimator/types.ts"), "utf8");
-  ok(ty.includes("reviewLimit: ReviewLimitChipData | null;"), "#242 estimator: EstimatorProps.reviewLimit");
+  const qns242 = readFileSync(join(process.cwd(), "src/lib/quote-next-step.ts"), "utf8");
+  // #284 task 5: EstimatorProps.reviewLimit became EstimatorProps.next (the chip is its strip).
+  ok(ty.includes("next: QuoteNextStepView | null;") && !ty.includes("reviewLimit: ReviewLimitChipData | null;"), "#242 estimator: EstimatorProps.reviewLimit");
   const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
   ok(
-    !/from "@\/(lib\/stores|db|lib\/review-limits-server)/.test(ec.replace(/import type[^;]+;/g, "")) && ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline"'),
+    // #284 task 5: the chip shows as the always-visible strip under the toolbar (next.strip), not an inline ReviewLimitChip.
+    !/from "@\/(lib\/stores|db|lib\/review-limits-server|lib\/quote-next-step-server|lib\/quote-review-ops)/.test(ec.replace(/import type[^;]+;/g, "")) && ec.includes("{next.strip}"),
     "#242 estimator: the client renders the server-evaluated chip without importing a store or the server module"
   );
   ok(
-    ec.includes('const rbCanSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");') &&
-      ec.includes("if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);") &&
-      ec.includes("if (res.reviewLimit !== undefined) setReviewLimit(res.reviewLimit);") && ec.includes("staleAutoApprovalLine(reviewLimit.text)"),
+    // #284 task 5: the rules moved to src/lib/quote-next-step.ts; every sync/save refreshes the next-step view (which carries the chip).
+    qns242.includes('if (i.viewerCanApprove || i.chip?.tone === "within")') && qns242.includes('return view({ action: "send", label: "Send to customer →" }') &&
+      qns242.includes('staleAutoApprovalLine(i.chip?.text || "needs review")') &&
+      ec.includes("if (r.next !== undefined) setNext(r.next ?? null);") &&
+      ec.includes("if (res.next !== undefined) setNext(res.next ?? null);"),
     "#242 estimator: Send opens within the limit, a stale auto approval reads as unsubmitted, every sync refreshes the chip"
   );
 }
@@ -30289,7 +30300,10 @@ import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip"
     ok(src.includes("<ReviewLimitChip chip={reviewLimit} savedOnly />"), `#242 fix: the ${p} builder chip says it reflects the last save`);
   }
   const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
-  ok(ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline" savedOnly={pdfDirty} />'), "#242 fix: the Estimator chip says 'as last saved' while the form has unsaved changes");
+  // #284 task 5: the Estimator's state now reads on the next-step pill — the toolbar control gets savedOnly={pdfDirty}.
+  const qnsComp242 = readFileSync(join(process.cwd(), "src/components/quote-review/quote-next-step.tsx"), "utf8");
+  ok(/<QuoteNextStep\s+quoteId=\{loadedId\}\s+view=\{next\}\s+variant="toolbar"\s+savedOnly=\{pdfDirty\}/.test(ec) && qnsComp242.includes('(savedOnly ? " · as last saved" : "")'),
+    "#242 fix: the Estimator chip says 'as last saved' while the form has unsaved changes");
   const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
   const iChip = hub.indexOf("const reviewLimit = reviewLimitChip(q, limitCtx, me);");
   const iState = hub.indexOf('const rState = reviewLimit?.staleAuto ? "none" : q.review?.state || "none";');
@@ -30397,10 +30411,12 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
 
   // 1 — a stale auto approval on a SENT quote reopens Submit / Attest.
   const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  // #284 task 5: the rule moved to src/lib/quote-next-step.ts, which the Estimator renders through <QuoteNextStep>
+  // (runtime-proven by "#284 next: a sent quote whose approval lapsed can be resubmitted (to reach Won)").
+  const qnsFinal242 = readFileSync(join(process.cwd(), "src/lib/quote-next-step.ts"), "utf8");
   ok(
-    ec.includes('const staleSent = staleAuto && status === "sent";') &&
-      ec.includes('const rbCanSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);') &&
-      ec.includes('isOwner && rev.state !== "approved" && rev.state !== "changes" && (!sentAlready || staleSent);'),
+    qnsFinal242.includes('return state === "stale" && !i.viewerCanApprove ? view(submit, [assign, attest]) : view(null);') &&
+      ec.includes("<QuoteNextStep"),
     "#242 final: the Estimator offers Submit for review and Attest on a sent quote whose auto approval went stale"
   );
   const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
@@ -33978,7 +33994,8 @@ import {
     "#254 review: pickCustomer and pickContact always resolve through the shared block — a new (unsaved) estimate gets its tier");
   ok((c.match(/applyTierStamp\(/g) || []).length === 1 && (c.match(/resolveTierAction\(/g) || []).length === 1,
     "#254 review: applyTierStamp has exactly one caller (the shared block), which is the only resolveTierAction call");
-  const save = between("const doSave = () => {", "const changeStatus = ");
+  // #284 task 5: the save body lives in the awaitable saveNow; doSave runs it in a transition.
+  const save = between("const saveNow = async (): Promise<boolean> => {", "const changeStatus = ");
   ok(/const repriceSeqAtSave = tierRepriceSeqRef\.current;/.test(save)
     && /if \(res\.id\) \{[\s\S]{0,400}setTierReprice\(\(n\) => \(n && n\.unsaved && n\.seq <= repriceSeqAtSave \? \{ \.\.\.n, unsaved: false \} : n\)\)/.test(save)
     && (save.match(/unsaved: false/g) || []).length === 1,
@@ -33989,7 +34006,8 @@ import {
     && /tierResolvingRef\.current = true;\s*setTierResolving\(true\);/.test(resolveFor)
     && /\} finally \{\s*(\/\/[^\n]*\n\s*)*if \(seq === tierResolveSeqRef\.current\) \{\s*tierResolvingRef\.current = false;\s*setTierResolving\(false\);/.test(resolveFor),
     "#254 wave 2: a tier lookup marks Save pending until the LATEST lookup settles (ok, refused or thrown)");
-  ok(/^\s*\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return;/.test(save.slice("const doSave = () => {".length)),
+  ok(/^\s*\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return false;/.test(save.slice("const saveNow = async (): Promise<boolean> => {".length))
+    && /const doSave = \(\) => \{\s*if \(tierResolvingRef\.current\) return;/.test(save),
     "#254 wave 2: doSave refuses to run while a tier lookup is in flight (pick then immediate Save can't stamp ahead of its lines)");
   ok(/onClick=\{doSave\}\s*disabled=\{statusChanging \|\| tierResolving\}/.test(c) && /onSave=\{doSave\}\s*saveDisabled=\{statusChanging \|\| tierResolving\}/.test(c),
     "#254 wave 2: both Save buttons are disabled while a tier lookup is in flight");
@@ -39756,4 +39774,20 @@ import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
   ok(x.primary?.action === "submit" && acts(x) === "assign,attest", "#284 next: a sent quote whose approval lapsed can be resubmitted (to reach Won)");
   x = v({ status: "won", review: R("approved", { method: "in_app", decidedBy: "Jeff Chesebro" }), holds: true });
   ok(x.primary === null && x.strip === null, "#284 next: won/lost show the pill only");
+}
+
+// #284 task 5 — the next-step control's wiring (source-text checks).
+{
+  const ec = readFileSync("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  const comp = existsSync("src/components/quote-review/quote-next-step.tsx") ? readFileSync("src/components/quote-review/quote-next-step.tsx", "utf8") : "";
+  const ra = existsSync("src/app/(app)/quotes/review-actions.ts") ? readFileSync("src/app/(app)/quotes/review-actions.ts", "utf8") : "";
+  ok(!ec.includes("reviewBarOpen") && !ec.includes("Show review status"), "#284 wiring: the collapsible review bar is gone from the Estimator");
+  ok(ec.includes("<QuoteNextStep") && (ec.match(/<QuoteNextStep/g) || []).length >= 2, "#284 wiring: the Estimator renders QuoteNextStep (toolbar + phone approver)");
+  ok(ec.includes("gateRefused"), "#284 wiring: the gate-refusal banner knows it was the gate");
+  ok(!ec.includes("claimReviewAction") && !ec.includes("Claim review") && !comp.includes("Claim"),
+    "#284 wiring: Claim is gone from the Estimator (any approver decides an in-review quote; the reviewer is advisory)");
+  ok(comp.startsWith('"use client"') && comp.includes("Send back for changes") && comp.includes("Record approval"), "#284 wiring: the component owns the Send back and Attest modals");
+  ok(!/from "@\/lib\/stores\//.test(comp) && !/from "@\/lib\/quote-review-ops"/.test(comp), "#284 wiring: the client component imports no store or server module");
+  ok(ra.startsWith('"use server"') && ["nsSubmitAction", "nsWithdrawAction", "nsApproveAction", "nsSendBackAction", "nsAttestAction", "nsSendAction"].every((n) => ra.includes("export async function " + n)),
+    "#284 wiring: the six next-step server actions exist");
 }

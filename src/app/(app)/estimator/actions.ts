@@ -9,6 +9,7 @@ import {
   get,
   getAll,
   checkApprovalGate,
+  isApprovalGateRefusal,
   retireReplacedDraftSafely,
   setStatus,
   setQuoteStage,
@@ -64,6 +65,8 @@ import {
 } from "@/lib/quote-review-ops";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import type { ReviewLimitChipData } from "@/lib/review-limits";
+import { quoteNextStepFor } from "@/lib/quote-next-step-server";
+import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { isFabricPart } from "@/lib/fabric-part";
 
 export async function saveEstimatorCustomPartAction(input: {
@@ -194,6 +197,9 @@ export type SaveResult = {
   pdf?: QuotePdfView | null;
   /** #242 — the review-limit chip, re-evaluated on the server. */
   reviewLimit?: ReviewLimitChipData | null;
+  /** #284 — the next-step view after this save (a first save is what makes
+   *  the control appear; an edit can clear an approval). */
+  next?: QuoteNextStepView | null;
   /** #282 phase 2 — the Rewards credit actually stored (after the server's
    *  clamp), so the builder can match its credit line to it. */
   rewardCredit?: number;
@@ -208,19 +214,25 @@ export type ReviewSync = {
   error?: string;
   /** #242 — the review-limit chip, re-evaluated on the server. */
   reviewLimit?: ReviewLimitChipData | null;
+  /** #284 — the next-step control's view, re-evaluated for this viewer. */
+  next?: QuoteNextStepView | null;
+  /** #284 — set on `ok: false` when the approval gate itself refused, so the
+   *  banner can offer the next step (Submit for approval) right there. */
+  gateRefused?: boolean;
 };
 
 function refresh() {
   revalidatePath("/", "layout");
 }
 
-async function syncOf(id: string, viewer: string): Promise<ReviewSync> {
+async function syncOf(id: string, user: { name: string; roles: string[] }): Promise<ReviewSync> {
   const q = await get(id);
   return {
     ok: !!q,
     review: q?.review ?? null,
     status: q?.status ?? null,
-    reviewLimit: q ? await reviewLimitChipFor(q, viewer) : null,
+    reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
+    next: q ? await quoteNextStepFor(q, user) : null,
   };
 }
 
@@ -235,9 +247,12 @@ export type StageSync = {
   error?: string;
   /** #242 — the review-limit chip, re-evaluated on the server. */
   reviewLimit?: ReviewLimitChipData | null;
+  /** #284 — see ReviewSync.next / gateRefused. */
+  next?: QuoteNextStepView | null;
+  gateRefused?: boolean;
 };
 
-async function stageSyncOf(id: string, viewer: string): Promise<StageSync> {
+async function stageSyncOf(id: string, user: { name: string; roles: string[] }): Promise<StageSync> {
   const q = await get(id);
   return {
     ok: !!q,
@@ -245,7 +260,8 @@ async function stageSyncOf(id: string, viewer: string): Promise<StageSync> {
     review: q?.review ?? null,
     pipelineId: q?.pipelineId ?? null,
     stage: q?.stage ?? null,
-    reviewLimit: q ? await reviewLimitChipFor(q, viewer) : null,
+    reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
+    next: q ? await quoteNextStepFor(q, user) : null,
   };
 }
 
@@ -597,6 +613,7 @@ export async function saveQuoteAction(
     vendorQuotes: storedVendorQuotes,
     pdf: pdfState,
     reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
+    next: q ? await quoteNextStepFor(q, user) : null,
     // #282 follow-up: a save that moved the quote to Lost cleared its credit.
     rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
     ...(statusError ? { error: statusError } : {}),
@@ -1109,6 +1126,7 @@ export async function setStatusAction(
         review: cur?.review ?? null,
         status: cur?.status ?? null,
         error: gate.error,
+        gateRefused: true,
       };
     }
   }
@@ -1124,10 +1142,11 @@ export async function setStatusAction(
       // impossible — so what this backstop actually catches is a DEFECT, and
       // it must read (and log) as one rather than as a policy refusal.
       error: statusFailureMessage(e, `estimator/actions setStatusAction(${status}): setStatus threw`),
+      gateRefused: isApprovalGateRefusal(e),
     };
   }
   refresh();
-  return syncOf(id, user.name);
+  return syncOf(id, user);
 }
 
 /**
@@ -1173,6 +1192,7 @@ export async function setQuoteStageAction(id: string, stageId: string): Promise<
       // #174: only the approval gate's own refusal reaches the user verbatim;
       // anything else is a defect — logged, shown as the generic line.
       error: statusFailureMessage(e, `estimator/actions setQuoteStageAction(${stageId}): setQuoteStage threw`),
+      gateRefused: isApprovalGateRefusal(e),
     };
   }
   // setQuoteStage also refuses by returning null (no throw) — a stage id
@@ -1192,7 +1212,7 @@ export async function setQuoteStageAction(id: string, stageId: string): Promise<
     };
   }
   refresh();
-  return stageSyncOf(id, user.name);
+  return stageSyncOf(id, user);
 }
 
 /**
@@ -1216,7 +1236,7 @@ export async function setQuotePipelineAction(id: string, pipelineId: string): Pr
     };
   }
   refresh();
-  return stageSyncOf(id, user.name);
+  return stageSyncOf(id, user);
 }
 
 export async function submitReviewAction(
@@ -1225,9 +1245,9 @@ export async function submitReviewAction(
 ): Promise<ReviewSync> {
   const user = await requireUser();
   const r = await submitQuoteForApproval(id, user, reviewer);
-  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
+  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
   refresh();
-  return syncOf(id, user.name);
+  return syncOf(id, user);
 }
 
 export async function claimReviewAction(id: string): Promise<ReviewSync> {
@@ -1236,15 +1256,15 @@ export async function claimReviewAction(id: string): Promise<ReviewSync> {
     return { ok: false, review: null, status: null };
   await claimReview(id, user.name);
   refresh();
-  return syncOf(id, user.name);
+  return syncOf(id, user);
 }
 
 export async function approveReviewAction(id: string): Promise<ReviewSync> {
   const user = await requireUser();
   const r = await approveQuoteReview(id, user);
-  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
+  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
   refresh();
-  return syncOf(id, user.name);
+  return syncOf(id, user);
 }
 
 export async function requestChangesAction(
@@ -1253,9 +1273,9 @@ export async function requestChangesAction(
 ): Promise<ReviewSync> {
   const user = await requireUser();
   const r = await sendBackQuoteReview(id, user, note);
-  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
+  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
   refresh();
-  return syncOf(id, user.name);
+  return syncOf(id, user);
 }
 
 /**
@@ -1271,9 +1291,9 @@ export async function requestChangesAction(
 export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   const user = await requireUser();
   const r = await sendQuoteToCustomer(id, user);
-  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
+  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
   refresh();
-  return syncOf(id, user.name);
+  return syncOf(id, user);
 }
 
 /**
@@ -1293,9 +1313,9 @@ export async function attestApprovalAction(
 ): Promise<ReviewSync> {
   const user = await requireUser();
   const r = await attestQuoteApproval(id, user, note);
-  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
+  if (!r.ok) return { ...(await syncOf(id, user)), ok: false, error: r.error };
   refresh();
-  return syncOf(id, user.name);
+  return syncOf(id, user);
 }
 
 /* ============================================================

@@ -14,7 +14,7 @@ import {
   travelForName,
   type CustomerDoc,
 } from "@/lib/stores/customers";
-import { reviewers as reviewerUsers, activeUsers } from "@/lib/users";
+import { activeUsers } from "@/lib/users";
 import { getSettings, type Office } from "@/lib/settings";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { get as getSurvey } from "@/lib/stores/surveys";
@@ -34,7 +34,7 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type {
   AiSource,
   CustomerLite,
@@ -267,12 +267,11 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries] =
+  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries] =
     await Promise.all([
       fabricParts(),
       byCategory("Labor"),
       allCustomers(),
-      reviewerUsers(),
       getSettings(),
       getFixtureRates(),
       activeUsers(),
@@ -406,8 +405,9 @@ export default async function EstimatorPage({
     travel["name|" + initial.custName] = lite(await travelForName(initial.custName));
   }
 
-  // #242: the owner's review-limit chip for the saved quote (none for a new one).
-  const reviewLimit = q ? await reviewLimitChipFor(q, user.name) : null;
+  // #284: the next-step control (Submit for approval / Approve / Send …) —
+  // it carries the #242 review-limit chip for the viewer as its strip.
+  const next = q ? await quoteNextStepFor(q, user) : null;
 
   return (
     <EstimatorClient
@@ -427,10 +427,7 @@ export default async function EstimatorPage({
       blobUploads={blobEnabled()}
       customers={customers}
       travel={travel}
-      reviewers={reviewerRows.map((u) => u.name)}
-      me={user.name}
-      canApprove={can("approve", user.roles)}
-      reviewLimit={reviewLimit}
+      next={next}
       aiSource={aiSource}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       quoteTasks={quoteTasks}

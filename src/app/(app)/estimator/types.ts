@@ -7,7 +7,7 @@ import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemb
 import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
 import type { CurtainRequest } from "@/lib/portal-cart-types";
-import type { ReviewLimitChipData } from "@/lib/review-limits";
+import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
 
@@ -553,13 +553,10 @@ export type EstimatorProps = {
   customers: CustomerLite[];
   /** Keys: `${customerId}|${locationId}` and `${customerId}|` (primary) and `name|${custName}`. */
   travel: Record<string, TravelLite>;
-  /** Names of users with the approve permission (Users.reviewers()). */
-  reviewers: string[];
-  me: string;
-  canApprove: boolean;
-  /** #242 — the saved quote's review-limit chip, evaluated on the server
-   *  (null for a new quote or when the owner has no limit for its kind). */
-  reviewLimit: ReviewLimitChipData | null;
+  /** #284 — the next-step control's view for this viewer (null for a new
+   *  quote). Replaces the review bar's reviewers / me / canApprove props and
+   *  carries the #242 review-limit chip as its strip. */
+  next: QuoteNextStepView | null;
   /** Linked survey/inspection to assemble the scope from, or null
    *  (S12/D83 — rules-based, no AI gate). */
   aiSource: AiSource | null;

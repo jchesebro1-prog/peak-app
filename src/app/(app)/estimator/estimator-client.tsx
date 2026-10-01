@@ -2,33 +2,26 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
-import { firstName } from "@/lib/team";
-import { approvedReviewLine, staleAutoApprovalLine } from "@/lib/review-line";
-import { ReviewLimitChip } from "@/components/review-limit-chip";
-import type { ReviewLimitChipData } from "@/lib/review-limits";
-import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
+import type { QuoteStatus } from "@/lib/stores/quotes";
+import type { QuoteNextStepView } from "@/lib/quote-next-step";
+import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
+import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import {
   addQuoteTaskAction,
   removeQuoteTaskAction,
   applyQuoteTemplateAction,
-  approveReviewAction,
-  attestApprovalAction,
-  claimReviewAction,
   draftQuoteScopeAction,
   copySystemToEstimateAction,
   moveSystemToEstimateAction,
-  requestChangesAction,
   resolveCatalogSkusAction,
   resolveTierAction,
   saveQuoteAction,
   searchQuotesAction,
-  sendToCustomerAction,
   setQuotePipelineAction,
   setQuoteStageAction,
   setQuoteTaskStatusAction,
   setStatusAction,
-  submitReviewAction,
   travelForSelectionAction,
   updateQuoteMetaAction,
   updateQuoteTaskAction,
@@ -321,13 +314,6 @@ function computeNid(secs: SpecSection[] | null): number {
   return n;
 }
 
-const rbMeta: Record<string, { bg: string; bd: string; ink: string; icon: string; title: string }> = {
-  none: { bg: "#f4f5f7", bd: "#e4e7ec", ink: "#5b616e", icon: "○", title: "Not submitted for review" },
-  in_review: { bg: "#eef3fc", bd: "#d4ddf3", ink: "#3155a8", icon: "◴", title: "In review" },
-  approved: { bg: "#ecf6f0", bd: "#cce9da", ink: "#1f7a52", icon: "✓", title: "Approved" },
-  changes: { bg: "#fcefe9", bd: "#f0d6cd", ink: "#b4543a", icon: "↩", title: "Changes requested" },
-};
-
 const STATUS_DOT: Record<string, string> = {
   draft: "#c98a2b",
   sent: "#3155a8",
@@ -422,10 +408,7 @@ export default function EstimatorClient({
   blobUploads,
   customers,
   travel,
-  reviewers,
-  me,
-  canApprove,
-  reviewLimit: initialReviewLimit,
+  next: initialNext,
   aiSource,
   people,
   quoteTasks,
@@ -514,18 +497,16 @@ export default function EstimatorClient({
    *  in-flight change apart from a stale tab that never heard about a
    *  change made elsewhere. */
   const [baseStatus, setBaseStatus] = useState<QuoteStatus>(initial.status);
-  const [review, setReview] = useState<QuoteReview>(initial.review);
-  /** #242 — the server-evaluated review-limit chip; every sync/save refreshes it. */
-  const [reviewLimit, setReviewLimit] = useState<ReviewLimitChipData | null>(initialReviewLimit);
+  /** #284 — the server-evaluated next-step control (pill, primary action, ⋯);
+   *  every sync/save refreshes it. It carries the #242 limit chip as its strip. */
+  const [next, setNext] = useState<QuoteNextStepView | null>(initialNext);
+  /** #284 — the actionError banner came from the approval gate, so it offers the next step. */
+  const [gateRefused, setGateRefused] = useState(false);
   /* Daylite stage bar (Task 6) — quoteType never changes client-side (no UI
      changes it), so it stays a plain const rather than state. */
   const quoteType = initial.quoteType;
   const [pipelineId, setPipelineId] = useState(initial.pipelineId);
   const [stage, setStage] = useState(initial.stage);
-  // Keep the review status visible without making its action controls consume
-  // the estimator's first viewport. The bar can be expanded whenever a user
-  // needs to submit, claim, decide, attest, or send the quote.
-  const [reviewBarOpen, setReviewBarOpen] = useState(false);
   /** Narrative column (#281). Defaults open on both server and first client
    *  render; the remembered choice is applied after mount so hydration matches. */
   const [narrOpen, setNarrOpen] = useState(true);
@@ -574,11 +555,6 @@ export default function EstimatorClient({
       /* ignore */
     }
   };
-  const [reviewerSel, setReviewerSel] = useState("queue");
-  const [rcOpen, setRcOpen] = useState(false);
-  const [rcNote, setRcNote] = useState("");
-  const [attestOpen, setAttestOpen] = useState(false);
-  const [attestNote, setAttestNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   /** #180 review 3 — an informational note from the server that isn't a
    *  failure: e.g. a stale tab's status display was refreshed because
@@ -1109,9 +1085,8 @@ export default function EstimatorClient({
     run();
   };
 
-  const applySync = (r: ReviewSync) => {
-    if (r.review) setReview(r.review);
-    if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);
+  const applySync = (r: ReviewSync | NextStepSync) => {
+    if (r.next !== undefined) setNext(r.next ?? null);
     // Server-confirmed — this is what makes baseStatus trustworthy for the
     // next save's stale-tab check (#180 review 2).
     if (r.status) {
@@ -1124,8 +1099,7 @@ export default function EstimatorClient({
    *  a stage move can also change status/review (setQuoteStage runs setStatus
    *  underneath when the tag changes), so all four fields sync together. */
   const applyStageSync = (r: StageSync) => {
-    if (r.review) setReview(r.review);
-    if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);
+    if (r.next !== undefined) setNext(r.next ?? null);
     if (r.status) {
       setStatus(r.status);
       setBaseStatus(r.status);
@@ -1134,9 +1108,11 @@ export default function EstimatorClient({
     if (r.stage) setStage(r.stage);
   };
 
-  const doSave = () => {
+  /** #284: the save itself, awaitable — the next-step control saves unsaved
+   *  edits first and acts only when this returns true (written, no refusal). */
+  const saveNow = async (): Promise<boolean> => {
     // #254 fix wave 2: never save while a tier lookup is in flight.
-    if (tierResolvingRef.current) return;
+    if (tierResolvingRef.current) return false;
     const docAtSave = docInput;
     const repriceSeqAtSave = tierRepriceSeqRef.current;
     const cname = customerId
@@ -1144,7 +1120,8 @@ export default function EstimatorClient({
       : custName;
     const mobs: SpecMob[] = [];
     sections.forEach((sec) => sec.items.forEach((it) => it.mob && mobs.push(it.mob)));
-    startTransition(async () => {
+    // (the former startTransition body — doSave below still runs it in one)
+    {
       try {
         const res = await saveQuoteAction(loadedId, {
           name: projectName,
@@ -1191,8 +1168,7 @@ export default function EstimatorClient({
           if (res.vendorQuotes) setVendorQuotes(res.vendorQuotes);
           setRevNum(res.revNum);
           setRevDateMs(res.updatedAt);
-          if (res.review) setReview(res.review);
-          if (res.reviewLimit !== undefined) setReviewLimit(res.reviewLimit);
+          if (res.next !== undefined) setNext(res.next ?? null);
           // #282 phase 2: take the server's (clamped) Rewards credit back.
           if (typeof res.rewardCredit === "number") {
             const stored = res.rewardCredit;
@@ -1217,17 +1193,21 @@ export default function EstimatorClient({
         }
         if (res.ok) {
           setActionError(null);
+          setGateRefused(false);
           // #180 review 3 — a stale tab's status got silently refreshed;
           // shown alongside "Saved ✓", never implying the save failed.
           setActionNotice(res.notice || null);
           setJustSaved(true);
           if (savedTimer.current) clearTimeout(savedTimer.current);
           savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
+          return !!res.id;
         } else {
           // The gate's own message (statusFailureMessage, D230) — the quote
           // itself saved; only the requested status advance was refused.
           setActionNotice(null);
           setActionError(res.error || "That save did not go through — nothing was written.");
+          setGateRefused(false);
+          return false;
         }
       } catch (e) {
         /* #143 re-review: a save that THROWS — a rejected request body, a
@@ -1235,10 +1215,18 @@ export default function EstimatorClient({
            did nothing: no "Saved" flash, no banner, and every edit still
            only in memory. Say so instead. */
         console.error("[estimator] save failed:", e);
+        setGateRefused(false);
         setActionError(
           "That save did not go through — nothing was written. Check your connection, or remove a large vendor-quote attachment, and try again."
         );
+        return false;
       }
+    }
+  };
+  const doSave = () => {
+    if (tierResolvingRef.current) return;
+    startTransition(async () => {
+      await saveNow();
     });
   };
 
@@ -1257,9 +1245,11 @@ export default function EstimatorClient({
             // surface why, instead of silently pretending it worked.
             setStatus(prevStatus);
             setActionError(r.error || "That status change was rejected.");
+            setGateRefused(!!r.gateRefused);
             return;
           }
           setActionError(null);
+          setGateRefused(false);
           applySync(r);
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
@@ -1291,9 +1281,11 @@ export default function EstimatorClient({
           setStage(prevStage);
           setStatus(prevStatus);
           setActionError(r.error || "That stage change was rejected.");
+          setGateRefused(!!r.gateRefused);
           return;
         }
         setActionError(null);
+        setGateRefused(false);
         applyStageSync(r);
       } finally {
         setStatusChanging(false);
@@ -1321,77 +1313,12 @@ export default function EstimatorClient({
         setPipelineId(prevPipelineId);
         setStage(prevStage);
         setActionError(r.error || "That pipeline change was rejected.");
+        setGateRefused(false);
         return;
       }
       setActionError(null);
+      setGateRefused(false);
       applyStageSync(r);
-    });
-  };
-
-  /* ---------------- review & approval ---------------- */
-  const submitReview = () => {
-    if (!loadedId) return;
-    const id = loadedId;
-    const sel = reviewerSel;
-    startTransition(async () => {
-      applySync(await submitReviewAction(id, sel && sel !== "queue" ? sel : null));
-    });
-  };
-  const claimReviewNow = () => {
-    if (!loadedId) return;
-    const id = loadedId;
-    startTransition(async () => {
-      applySync(await claimReviewAction(id));
-    });
-  };
-  const approveNow = () => {
-    if (!loadedId) return;
-    const id = loadedId;
-    startTransition(async () => {
-      applySync(await approveReviewAction(id));
-    });
-  };
-  const submitRc = () => {
-    if (!rcNote.trim() || !loadedId) return;
-    const id = loadedId;
-    const note = rcNote.trim();
-    setRcOpen(false);
-    setRcNote("");
-    startTransition(async () => {
-      applySync(await requestChangesAction(id, note));
-    });
-  };
-  /** Attested approval (punch #60): the estimator names who reviewed the
-   *  quote and how (phone call, Teams, etc.) instead of routing it through
-   *  the in-app review queue. The note is mandatory — enforced server-side,
-   *  re-checked here only so the "Record approval" button can stay disabled. */
-  const submitAttest = () => {
-    if (!attestNote.trim() || !loadedId) return;
-    const id = loadedId;
-    const note = attestNote.trim();
-    setAttestOpen(false);
-    setAttestNote("");
-    startTransition(async () => {
-      const r = await attestApprovalAction(id, note);
-      if (!r.ok) {
-        setActionError(r.error || "That attested approval could not be recorded.");
-        return;
-      }
-      setActionError(null);
-      applySync(r);
-    });
-  };
-  const sendCustomer = () => {
-    if (!loadedId) return;
-    const id = loadedId;
-    startTransition(async () => {
-      const r = await sendToCustomerAction(id);
-      if (!r.ok) {
-        setActionError(r.error || "This quote could not be sent to the customer.");
-        return;
-      }
-      setActionError(null);
-      applySync(r);
     });
   };
 
@@ -1783,6 +1710,7 @@ export default function EstimatorClient({
       const rows = partsListRows(sections, vendorQuotes, info, venueRoomName);
       if (!rows.length) {
         setActionError(null);
+        setGateRefused(false);
         setActionNotice("No parts to export yet.");
         return;
       }
@@ -1790,6 +1718,7 @@ export default function EstimatorClient({
       downloadCsv(`${fileStem(name, "estimate")}-parts-list`, PARTS_CSV_HEADER, partsListCsvRows(rows));
     } catch {
       setActionError("Couldn't build the parts list — try again.");
+      setGateRefused(false);
     } finally {
       setPartsBusy(false);
     }
@@ -2430,61 +2359,6 @@ export default function EstimatorClient({
     closeInput(); // discards → reseeds freshLabor for this system
   };
 
-  /* ---------------- review banner view-model ---------------- */
-  const owner = initial.owner || me;
-  const isOwner = owner === me;
-  // #242: a stale auto approval (the quote changed and no longer fits its
-  // owner's current limit — value raised, labor added, owner changed) is not
-  // an approval — the bar reads it as unsubmitted so Submit / Attest reopen,
-  // exactly as the server gate does. The server decides staleness
-  // (approvalHolds); this only reads the chip it sent.
-  const staleAuto = !!reviewLimit?.staleAuto;
-  const rev = staleAuto ? { ...review, state: "none" as const } : review || { state: "none" };
-  const rm = rbMeta[rev.state] || rbMeta.none;
-  let rbSub: string;
-  if (rev.state === "none")
-    rbSub = staleAuto && reviewLimit
-      ? staleAutoApprovalLine(reviewLimit.text)
-      : "Submit for a reviewer’s approval before sending to the customer.";
-  else if (rev.state === "in_review")
-    rbSub = rev.reviewer
-      ? "With " + firstName(rev.reviewer) + " for approval"
-      : "In the shared queue — awaiting a reviewer";
-  // Punch #77: one shared phrasing for both surfaces. When the quotes list had
-  // its own copy of this, it silently dropped the attestation detail. Imported
-  // from @/lib/review-line, NOT from @/lib/stores/quotes — that would pull the
-  // doc store into this client bundle and 500 the page.
-  else if (rev.state === "approved") rbSub = approvedReviewLine(rev);
-  else
-    rbSub = rev.note
-      ? "“" + rev.note + "” — " + firstName(rev.decidedBy || "")
-      : "Returned by " + firstName(rev.decidedBy || "");
-  const reviewerOptions = [{ value: "queue", label: "Shared queue (any reviewer)" }].concat(
-    reviewers.filter((n) => n !== me && n !== owner).map((n) => ({ value: n, label: n }))
-  );
-  const sentAlready = status === "sent" || status === "won" || status === "lost";
-  // #242 final: a SENT quote whose auto approval went stale can still be
-  // submitted for review or attested, so it can reach Won through a real
-  // approval (the gate refuses Won until it has one).
-  const staleSent = staleAuto && status === "sent";
-  const rbCanSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);
-  const rbSubmitLabel = rev.state === "changes" ? "Resubmit for review" : "Submit for review";
-  const rbCanDecide = canApprove && rev.state === "in_review" && !isOwner;
-  const rbCanClaim = canApprove && rev.state === "in_review" && !rev.reviewer && !isOwner;
-  // #242: Send also opens when the quote fits the owner's review limit — the
-  // server gate auto-approves it on the way to sent.
-  const rbCanSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");
-  // Punch #60: the estimator can self-approve any time it isn't already
-  // approved or sent — a stand-in for a review that happened by phone/Teams
-  // rather than in the app. Available regardless of canApprove: this is
-  // deliberately NOT a permission gate (see attestApprovalAction).
-  // `changes` is excluded (Jeff 2026-08-01): a reviewer who formally asked for
-  // changes can't be attested past — resubmit for review instead. The server
-  // enforces this too (canAttestApproval); hiding it here is only convenience.
-  const rbCanAttest =
-    isOwner && rev.state !== "approved" && rev.state !== "changes" && (!sentAlready || staleSent);
-  const showReviewBar = !!loadedId;
-
   /* ---------------- Daylite stage bar (Task 6) ---------------- */
   // No bar for an unsaved new quote (no id to move), and none for a quote
   // type that carries no pipeline (service quotes build their own screens).
@@ -2828,6 +2702,21 @@ export default function EstimatorClient({
               >
                 {justSaved ? "Saved ✓" : "Save"}
               </button>
+              {/* #284 — the one next-step control: pill · Submit / Approve / Send → · ⋯ */}
+              {loadedId && next && (
+                <QuoteNextStep
+                  quoteId={loadedId}
+                  view={next}
+                  variant="toolbar"
+                  savedOnly={pdfDirty}
+                  beforeAction={pdfDirty ? saveNow : undefined}
+                  onSync={(r) => applySync(r)}
+                  onError={(m) => {
+                    setActionError(m);
+                    setGateRefused(false);
+                  }}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setMode("preview")}
@@ -3150,210 +3039,11 @@ export default function EstimatorClient({
             </div>
           )}
 
-          {/* review & approval banner */}
-          {showReviewBar && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: reviewBarOpen ? "initial" : "flex-end",
-                gap: 14,
-                flexWrap: "wrap",
-                rowGap: 11,
-                padding: reviewBarOpen ? "11px 22px" : "7px 22px",
-                background: rm.bg,
-                borderBottom: "1px solid " + rm.bd,
-                flexShrink: 0,
-              }}
-            >
-              {reviewBarOpen && (
-                <>
-                  <span
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: "50%",
-                      background: "#fff",
-                      border: "1px solid " + rm.bd,
-                      color: rm.ink,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {rm.icon}
-                  </span>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
-                    <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
-                  </div>
-                </>
-              )}
-              {/* #242: evaluated on the last save — say so while the form has unsaved edits. */}
-              {reviewLimit && !staleAuto && <ReviewLimitChip chip={reviewLimit} variant="inline" savedOnly={pdfDirty} />}
-              <button
-                type="button"
-                aria-expanded={reviewBarOpen}
-                aria-controls="estimator-review-actions"
-                onClick={() => setReviewBarOpen((open) => !open)}
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: 650,
-                  color: rm.ink,
-                  background: "rgba(255,255,255,.68)",
-                  border: "1px solid " + rm.bd,
-                  borderRadius: 7,
-                  padding: "7px 10px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {reviewBarOpen ? "Collapse review status" : "Show review status"} {reviewBarOpen ? "⌃" : "⌄"}
-              </button>
-              {reviewBarOpen && (
-                <div id="estimator-review-actions" style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                {rbCanSubmit && (
-                  <>
-                    <select
-                      value={reviewerSel}
-                      onChange={(e) => setReviewerSel(e.target.value)}
-                      style={{
-                        fontFamily: "var(--font-ui)",
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: "#3a3f4a",
-                        background: "#fff",
-                        border: "1px solid #e4e7ec",
-                        borderRadius: 8,
-                        padding: "8px 11px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {reviewerOptions.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={submitReview}
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: "#fff",
-                        background: "#3155a8",
-                        border: "none",
-                        borderRadius: 8,
-                        padding: "9px 15px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {rbSubmitLabel}
-                    </button>
-                  </>
-                )}
-                {rbCanClaim && (
-                  <button
-                    type="button"
-                    onClick={claimReviewNow}
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "#3155a8",
-                      background: "#e9eefb",
-                      border: "1px solid #d4ddf3",
-                      borderRadius: 8,
-                      padding: "8px 13px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Claim review
-                  </button>
-                )}
-                {rbCanDecide && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRcOpen(true);
-                        setRcNote("");
-                      }}
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: "#b4543a",
-                        background: "#f9ece8",
-                        border: "1px solid #f0d6cd",
-                        borderRadius: 8,
-                        padding: "8px 13px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Request changes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={approveNow}
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: "#fff",
-                        background: "#1f7a52",
-                        border: "none",
-                        borderRadius: 8,
-                        padding: "9px 15px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Approve
-                    </button>
-                  </>
-                )}
-                {rbCanAttest && (
-                  <button
-                    type="button"
-                    title="Reviewed by phone, on a call, or otherwise off-platform? Record it here — a note naming who reviewed it is required."
-                    onClick={() => {
-                      setAttestOpen(true);
-                      setAttestNote("");
-                    }}
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "#1f7a52",
-                      background: "#ecf6f0",
-                      border: "1px solid #cce9da",
-                      borderRadius: 8,
-                      padding: "8px 13px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Attest approval…
-                  </button>
-                )}
-                {rbCanSend && (
-                  <button
-                    type="button"
-                    onClick={sendCustomer}
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "#fff",
-                      background: "#1f7a52",
-                      border: "none",
-                      borderRadius: 8,
-                      padding: "9px 15px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Send to customer →
-                  </button>
-                )}
-                </div>
-              )}
+          {/* #284 — the next step's note (a send-back note, the limit chip, an
+              approval line), always visible; the actions live in the toolbar. */}
+          {loadedId && next?.strip && (
+            <div style={{ padding: "7px 22px", fontSize: 12.5, color: "#5b616e", background: "#f8f9fb", borderBottom: "1px solid #e4e7ec", flexShrink: 0 }}>
+              {next.strip}
             </div>
           )}
 
@@ -3375,9 +3065,29 @@ export default function EstimatorClient({
               }}
             >
               <span>{actionError}</span>
+              {/* #284: the gate refused Sent/Won — offer the way through right here. */}
+              {gateRefused && loadedId && next?.primary && next.primary.action !== "approve" && (
+                <QuoteNextStep
+                  quoteId={loadedId}
+                  view={{ ...next, secondary: [], pill: { ...next.pill, label: "" } }}
+                  variant="panel"
+                  beforeAction={pdfDirty ? saveNow : undefined}
+                  onSync={(r) => {
+                    applySync(r);
+                    if (r.ok) {
+                      setActionError(null);
+                      setGateRefused(false);
+                    }
+                  }}
+                  onError={(m) => setActionError(m)}
+                />
+              )}
               <button
                 type="button"
-                onClick={() => setActionError(null)}
+                onClick={() => {
+                  setActionError(null);
+                  setGateRefused(false);
+                }}
                 style={{
                   fontSize: 12.5,
                   fontWeight: 600,
@@ -3554,239 +3264,6 @@ export default function EstimatorClient({
               >
                 Dismiss
               </button>
-            </div>
-          )}
-
-          {/* attested-approval modal (punch #60) */}
-          {attestOpen && (
-            <div
-              className="est-modalwrap"
-              onClick={() => {
-                setAttestOpen(false);
-                setAttestNote("");
-              }}
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(16,22,30,.5)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 28,
-                zIndex: 80,
-              }}
-            >
-              <div
-                className="est-modal"
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  width: 460,
-                  maxWidth: "100%",
-                  background: "#fff",
-                  borderRadius: 15,
-                  boxShadow: "0 24px 70px rgba(0,0,0,.34)",
-                  overflow: "hidden",
-                  color: "#16181d",
-                }}
-              >
-                <div
-                  style={{
-                    padding: "17px 22px",
-                    borderBottom: "1px solid #f0f1f4",
-                    fontSize: 16,
-                    fontWeight: 600,
-                  }}
-                >
-                  Attest approval
-                </div>
-                <div style={{ padding: "20px 22px" }}>
-                  <div
-                    style={{ fontSize: 12.5, color: "#5b616e", marginBottom: 11, lineHeight: 1.5 }}
-                  >
-                    Reviews here often happen by phone or on a call, not in the app. If that
-                    already happened, name who reviewed it and how — this note is required and
-                    becomes the approval record.
-                  </div>
-                  <textarea
-                    className="est-field"
-                    value={attestNote}
-                    onChange={(e) => setAttestNote(e.target.value)}
-                    placeholder='e.g. "Reviewed by Jeff on a Teams call, 2026-08-01"'
-                    style={{
-                      width: "100%",
-                      minHeight: 96,
-                      border: "1px solid #e4e7ec",
-                      borderRadius: 9,
-                      padding: "11px 13px",
-                      fontSize: 13.5,
-                      fontFamily: "var(--font-ui)",
-                      resize: "vertical",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    gap: 9,
-                    padding: "14px 22px",
-                    borderTop: "1px solid #f0f1f4",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAttestOpen(false);
-                      setAttestNote("");
-                    }}
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#5b616e",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: "10px 12px",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submitAttest}
-                    disabled={!attestNote.trim()}
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#fff",
-                      background: attestNote.trim() ? "#1f7a52" : "#9cc7ae",
-                      border: "none",
-                      borderRadius: 9,
-                      padding: "10px 18px",
-                      cursor: attestNote.trim() ? "pointer" : "not-allowed",
-                    }}
-                  >
-                    Record approval
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* request-changes modal */}
-          {rcOpen && (
-            <div
-              className="est-modalwrap"
-              onClick={() => {
-                setRcOpen(false);
-                setRcNote("");
-              }}
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(16,22,30,.5)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 28,
-                zIndex: 80,
-              }}
-            >
-              <div
-                className="est-modal"
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  width: 460,
-                  maxWidth: "100%",
-                  background: "#fff",
-                  borderRadius: 15,
-                  boxShadow: "0 24px 70px rgba(0,0,0,.34)",
-                  overflow: "hidden",
-                  color: "#16181d",
-                }}
-              >
-                <div
-                  style={{
-                    padding: "17px 22px",
-                    borderBottom: "1px solid #f0f1f4",
-                    fontSize: 16,
-                    fontWeight: 600,
-                  }}
-                >
-                  Request changes
-                </div>
-                <div style={{ padding: "20px 22px" }}>
-                  <div
-                    style={{ fontSize: 12.5, color: "#5b616e", marginBottom: 11, lineHeight: 1.5 }}
-                  >
-                    Tell the estimator what needs to change before this can be approved.
-                  </div>
-                  <textarea
-                    className="est-field"
-                    value={rcNote}
-                    onChange={(e) => setRcNote(e.target.value)}
-                    placeholder="e.g. Re-check the rigging load math and add the pit filler line."
-                    style={{
-                      width: "100%",
-                      minHeight: 96,
-                      border: "1px solid #e4e7ec",
-                      borderRadius: 9,
-                      padding: "11px 13px",
-                      fontSize: 13.5,
-                      fontFamily: "var(--font-ui)",
-                      resize: "vertical",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    gap: 9,
-                    padding: "14px 22px",
-                    borderTop: "1px solid #f0f1f4",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRcOpen(false);
-                      setRcNote("");
-                    }}
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#5b616e",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: "10px 12px",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submitRc}
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#fff",
-                      background: "#b4543a",
-                      border: "none",
-                      borderRadius: 9,
-                      padding: "10px 18px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Send back for changes
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
@@ -4495,38 +3972,48 @@ export default function EstimatorClient({
 
       {/* ===================== PREVIEW MODE (the saved customer PDF, #222) ===================== */}
       {isPreview && (
-        <PreviewDoc
-          phone={phone}
-          canBuild={!phone}
-          onBack={() => setMode("build")}
-          savedQuoteId={loadedId}
-          pdf={pdf}
-          onPdf={setPdf}
-          dirty={pdfDirty}
-          onSave={doSave}
-          saveDisabled={statusChanging || tierResolving}
-          sections={sections}
-          setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
-          detail={detail}
-          setDetail={setDetail}
-          pdfQty={pdfQty}
-          pdfNotes={pdfNotes}
-          pdfPrices={pdfPrices}
-          pdfCover={pdfCover}
-          pdfTerms={pdfTerms}
-          pdfOptions={pdfOptions}
-          paymentTerms={paymentTerms}
-          paymentTermsOptions={PAYMENT_TERMS}
-          setPaymentTerms={setPaymentTerms}
-          togglePdf={(flag) => {
-            if (flag === "pdfQty") setPdfQty((v) => !v);
-            else if (flag === "pdfNotes") setPdfNotes((v) => !v);
-            else if (flag === "pdfPrices") setPdfPrices((v) => !v);
-            else if (flag === "pdfCover") setPdfCover((v) => !v);
-            else if (flag === "pdfOptions") setPdfOptions((v) => !v);
-            else setPdfTerms((v) => !v);
-          }}
-        />
+        <>
+          {/* #284 — an approver on a phone can decide right from the preview.
+              The build-mode error banner isn't rendered here, so the control
+              shows its own inline error line. */}
+          {phone && loadedId && next?.approverMode && (
+            <div style={{ padding: "10px 14px", borderBottom: "1px solid #e4e7ec", background: "#fff" }}>
+              <QuoteNextStep quoteId={loadedId} view={next} variant="panel" approverOnly onSync={(r) => applySync(r)} />
+            </div>
+          )}
+          <PreviewDoc
+            phone={phone}
+            canBuild={!phone}
+            onBack={() => setMode("build")}
+            savedQuoteId={loadedId}
+            pdf={pdf}
+            onPdf={setPdf}
+            dirty={pdfDirty}
+            onSave={doSave}
+            saveDisabled={statusChanging || tierResolving}
+            sections={sections}
+            setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
+            detail={detail}
+            setDetail={setDetail}
+            pdfQty={pdfQty}
+            pdfNotes={pdfNotes}
+            pdfPrices={pdfPrices}
+            pdfCover={pdfCover}
+            pdfTerms={pdfTerms}
+            pdfOptions={pdfOptions}
+            paymentTerms={paymentTerms}
+            paymentTermsOptions={PAYMENT_TERMS}
+            setPaymentTerms={setPaymentTerms}
+            togglePdf={(flag) => {
+              if (flag === "pdfQty") setPdfQty((v) => !v);
+              else if (flag === "pdfNotes") setPdfNotes((v) => !v);
+              else if (flag === "pdfPrices") setPdfPrices((v) => !v);
+              else if (flag === "pdfCover") setPdfCover((v) => !v);
+              else if (flag === "pdfOptions") setPdfOptions((v) => !v);
+              else setPdfTerms((v) => !v);
+            }}
+          />
+        </>
       )}
     </div>
   );
