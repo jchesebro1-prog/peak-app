@@ -34,6 +34,7 @@ import {
   approvalHolds,
   autoSnapshotStale,
   canAutoApprove,
+  canSelfApprove,
   NO_REVIEW_LIMITS,
   type AutoApprovalEval,
   type AutoApprovalSnapshot,
@@ -1091,6 +1092,22 @@ export function autoApprovedReview(
   };
 }
 
+/** #284: the review record a self-approval writes (approver owner, own quote). */
+export function selfApprovedReview(owner: string, q: GateQuote, now: number): QuoteReview {
+  return {
+    state: "approved",
+    reviewer: null,
+    submittedBy: owner,
+    submittedAt: now,
+    decidedBy: owner,
+    decidedAt: now,
+    note: "",
+    method: "self",
+    auto: null,
+    approvedAgainst: approvalFingerprint(q),
+  };
+}
+
 /**
  * #242 — the ONE approval decision every sent/won transition makes (setStatus,
  * and the estimator's two typed pre-checks through checkApprovalGate). Pure:
@@ -1104,6 +1121,8 @@ export function autoApprovedReview(
  *   re-stamped. A limit raised or lowered in Settings on an unchanged quote
  *   never re-stamps (#242 final) — the grant keeps its decidedAt; a lowered
  *   limit governs new grants only;
+ * - an approver owner moving their own quote → open, with a `self` approval
+ *   to write (#284) — checked before the owner's review limit;
  * - else the owner's review limit: fits → open, with the auto-approval
  *   record to write in the same patch; over / blank / owner off the roster /
  *   changes requested → today's refusal sentence, verbatim.
@@ -1126,6 +1145,9 @@ export function decideApprovalGate(
     const cur = canAutoApprove(q, ctx);
     return { ok: true, stamp: cur && autoSnapshotStale(q, cur) ? autoApprovedReview(cur, now, actor, trigger) : null };
   }
+  // #284: an approver's own quote, moved by its owner, approves itself.
+  const selfOwner = canSelfApprove(q, ctx, actor);
+  if (selfOwner) return { ok: true, stamp: selfApprovedReview(selfOwner, q, now) };
   const ev = canAutoApprove(q, ctx);
   if (ev) return { ok: true, stamp: autoApprovedReview(ev, now, actor, trigger) };
   return open;
@@ -1137,9 +1159,13 @@ export function decideApprovalGate(
  * sendToCustomerAction). Same decision setStatus makes; writes nothing —
  * setStatus stamps the approval in its own write.
  */
-export async function checkApprovalGate(q: Quote | null, status: "sent" | "won"): Promise<ApprovalGateResult> {
+export async function checkApprovalGate(
+  q: Quote | null,
+  status: "sent" | "won",
+  actor: string | null = null
+): Promise<ApprovalGateResult> {
   if (!q) return requireApprovalToAdvance(null, status === "won" ? "won" : "send");
-  const d = decideApprovalGate(status, q, await loadReviewLimitContext());
+  const d = decideApprovalGate(status, q, await loadReviewLimitContext(), {}, Date.now(), actor);
   return d.ok ? { ok: true } : d;
 }
 

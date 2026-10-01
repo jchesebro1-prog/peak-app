@@ -39548,6 +39548,32 @@ import { staleApprovalLine as a284StaleLine, approvedReviewLine as a284ApprovedL
   ok(a284ApprovedLine({ method: "self", decidedBy: "Jeff Chesebro", reviewer: null, note: "" }) === "Self-approved by Jeff", "#284 fp: the self-approval sentence");
 }
 
+/* #284 Task 2: self-approval in the gate. */
+import { canSelfApprove as a284CanSelf } from "@/lib/review-limits";
+import { decideApprovalGate as a284Decide } from "@/lib/stores/quotes";
+{
+  const roster = [
+    { id: "u1", name: "Jeff Chesebro", status: "active", canApprove: true },
+    { id: "u2", name: "Nic Trapani", status: "active", canApprove: false },
+  ];
+  const ctx = { limits: {}, roster };
+  const q = (owner: string, state = "none") => ({
+    quoteType: "system", value: 500, owner, preparedBy: owner, spec: { sections: [] },
+    review: { state, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+  });
+  ok(a284CanSelf(q("Jeff Chesebro") as never, ctx, "Jeff Chesebro") === "Jeff Chesebro", "#284 self: an approver owner moving their own quote self-approves");
+  ok(a284CanSelf(q("Jeff Chesebro") as never, ctx, "Nic Trapani") === null, "#284 self: someone else moving an approver's quote does not");
+  ok(a284CanSelf(q("Nic Trapani") as never, ctx, "Nic Trapani") === null, "#284 self: an owner without approve does not");
+  ok(a284CanSelf(q("Jeff Chesebro", "changes") as never, ctx, "Jeff Chesebro") === null, "#284 self: changes requested blocks self-approval");
+  const d = a284Decide("sent", q("Jeff Chesebro") as never, ctx, {}, 1000, "Jeff Chesebro");
+  ok(d.ok && d.stamp?.method === "self" && d.stamp.decidedBy === "Jeff Chesebro" && !!d.stamp.approvedAgainst, "#284 self: the gate stamps a self approval with a snapshot");
+  const d2 = a284Decide("sent", q("Nic Trapani") as never, ctx, {}, 1000, "Nic Trapani");
+  ok(!d2.ok && d2.error.includes("needs an approval on record"), "#284 self: a non-approver with no limit is still refused");
+  const lim = { limits: { u1: { system_plain: 10_000 } }, roster };
+  const d3 = a284Decide("sent", q("Jeff Chesebro") as never, lim as never, {}, 1000, "Jeff Chesebro");
+  ok(d3.ok && d3.stamp?.method === "self", "#284 self: self-approval wins over an auto_limit grant for an approver owner");
+}
+
 async function approval284AsyncChecks(): Promise<void> {
   const { fixtureId, createFixture } = await import("./test-fixtures");
   const Q = await import("@/lib/stores/quotes");
@@ -39584,4 +39610,13 @@ async function approval284AsyncChecks(): Promise<void> {
   await edit(id("t1-wording"), (d) => { (d.spec as Sec).sections[0].items[0].desc = "Truss, black"; d.scopeNarrative = "new words"; });
   const sent = await Q.setStatus(id("t1-wording"), "sent", "T284 Nobody");
   ok(sent?.status === "sent", "#284 DB: a wording-only edit keeps the approval — Send goes through");
+
+  // Task 2 — self-approval end to end through setStatus (seeded roster: Jeff = Admin).
+  await mk("t2-self", "Jeff Chesebro", { review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null } });
+  const s2 = await Q.setStatus(id("t2-self"), "sent", "Jeff Chesebro");
+  ok(s2?.status === "sent" && s2.review?.method === "self" && s2.review.decidedBy === "Jeff Chesebro", "#284 DB: Jeff sending his own draft self-approves it");
+  await mk("t2-other", "Jeff Chesebro", { review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null } });
+  let r2 = false;
+  try { await Q.setStatus(id("t2-other"), "sent", "T284 Somebody"); } catch (e) { r2 = Q.isApprovalGateRefusal(e); }
+  ok(r2, "#284 DB: someone else sending Jeff's quote does not self-approve it");
 }

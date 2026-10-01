@@ -96,7 +96,13 @@ export type ReviewableQuote = {
   review?: ReviewLike | null;
 };
 type KindInput = Pick<ReviewableQuote, "quoteType" | "spec" | "flameTest" | "repair" | "inspection">;
-export type RosterEntry = { id: string; name: string; status: string };
+export type RosterEntry = {
+  id: string;
+  name: string;
+  status: string;
+  /** #284: the person holds the `approve` permission (live roster). */
+  canApprove?: boolean;
+};
 export type ReviewLimitContext = { limits: ReviewLimits; roster: readonly RosterEntry[] };
 export const NO_REVIEW_LIMITS: ReviewLimitContext = { limits: {}, roster: [] };
 
@@ -233,6 +239,23 @@ export function canAutoApprove(q: ReviewableQuote, ctx: ReviewLimitContext): Aut
   if (q.review?.state === "changes") return null;
   const ev = evaluateReviewLimit(q, ctx);
   return ev.fits ? (ev as AutoApprovalEval) : null;
+}
+
+/**
+ * #284 — an approver's own quote approves itself at the gated transition
+ * (Jeff 2026-10-01: "Approvers' own quotes are treated as approved"). Only
+ * when the person MOVING the quote is its owner, the owner holds `approve` on
+ * the live roster, and no reviewer asked for changes (same block as attest /
+ * auto, #60). Returns the owner's name, or null.
+ */
+export function canSelfApprove(q: ReviewableQuote, ctx: ReviewLimitContext, actor: string | null): string | null {
+  if (q.review?.state === "changes") return null;
+  const owner = quoteOwnerName(q);
+  const who = (actor || "").trim();
+  if (!owner || !who || owner.toLowerCase() !== who.toLowerCase()) return null;
+  const id = resolveOwnerId(owner, ctx.roster);
+  if (!id) return null;
+  return ctx.roster.find((u) => u.id === id)?.canApprove ? owner : null;
 }
 
 /**

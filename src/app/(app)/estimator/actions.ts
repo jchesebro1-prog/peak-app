@@ -1101,7 +1101,7 @@ export async function setStatusAction(
     const cur = await get(id);
     // #242: the same decision setStatus makes — an approval that still holds,
     // or the quote owner's review limit.
-    const gate = await checkApprovalGate(cur, status);
+    const gate = await checkApprovalGate(cur, status, user.name);
     if (!gate.ok) {
       return {
         ok: false,
@@ -1273,7 +1273,7 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   const user = await requireUser();
   if (!id) return { ok: false, review: null, status: null };
   const cur = await get(id);
-  const gate = await checkApprovalGate(cur, "sent");
+  const gate = await checkApprovalGate(cur, "sent", user.name);
   if (!gate.ok) {
     return {
       ok: false,

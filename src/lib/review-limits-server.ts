@@ -4,7 +4,7 @@
  * the database); client components receive a ReviewLimitChipData prop.
  */
 import { getSettings } from "@/lib/settings";
-import { allUsers } from "@/lib/users";
+import { allUsers, userCan } from "@/lib/users";
 import {
   reviewLimitChip,
   reviewLimitsFrom,
@@ -21,7 +21,7 @@ export async function loadReviewLimitContext(): Promise<ReviewLimitContext> {
   const users = await allUsers();
   return {
     limits: reviewLimitsFrom(settings.reviewLimits),
-    roster: users.map((u) => ({ id: u.id, name: u.name, status: u.status })),
+    roster: users.map((u) => ({ id: u.id, name: u.name, status: u.status, canApprove: userCan(u, "approve") })),
   };
 }
 
