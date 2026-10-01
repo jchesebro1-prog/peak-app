@@ -19,7 +19,7 @@ const ALLOWED_IMAGE_CONTENT_TYPES = new Set(["image/png", "image/jpeg", "image/w
 
 /**
  * Portal customer document route (#245 Task 9, spec §7): a part document
- * (image, datasheet, or spec sheet) is served ONLY when it's linked (not
+ * (image, datasheet, spec sheet, or manual) is served ONLY when it's linked (not
  * hidden) to a part the customer can quote, or — datasheets/spec sheets
  * only, never images — covers such a part through the accessory graph.
  * That rule is precomputed once per index build as `servableDocIds`

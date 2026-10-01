@@ -10262,3 +10262,13 @@ Gates: tsc 0; test:specs 10,373 PASS / ALL PASSED; test:smoke 187/187 ALL PASSED
 **Follow-ups.**
 1. A "Manual URL" catalog import column fed by the photo-sourcing manifest's `manual_url`.
 2. Not exercised end to end: real manual URL fetching and manual PDF upload to Blob (both need DB and Blob).
+
+**Rollback hazard.** Never instant-rollback past #290 once a manual document exists: pre-#290 code throws building the
+coverage index on any `kind: "manual"` document (portal catalog, Datasheets page, part editor, Specs coverage, client
+packages, Displays API). Also do not create or fetch manuals on a preview deploy before #290 is on production (previews
+share the production DB).
+
+**For Jeff.** Production ETC parts filled from DaVinci carry manual URLs in `docs`, so after deploy their Manual cells
+read "Link only" and those rows appear under "Link to fetch"; a bulk Fetch links now also downloads manuals (larger
+files, more of the 45 s budget per run). Watch item: client packages now include manuals (often 10-25 MB) in the
+in-memory zip.

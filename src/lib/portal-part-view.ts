@@ -93,12 +93,17 @@ export function cleanFixtureOptions(
   return out;
 }
 
-/** A sidebar document, cleaned field by field. The kind is kept as-is
- *  when known (#290: no longer coerces a manual — or anything else not a
- *  spec sheet — to "datasheet"); an unknown kind falls back to datasheet. */
-export function toPartDocVM(d: PartDocVM): PartDocVM {
-  const kind: PartDocVM["kind"] = Object.prototype.hasOwnProperty.call(PORTAL_DOC_KIND_LABEL, d.kind) ? d.kind : "datasheet";
-  return { id: String(d.id), kind, title: String(d.title || ""), pdf: d.pdf === true };
+/** A sidebar document, cleaned field by field. Only datasheet, spec sheet
+ *  and manual reach a customer (#290): any other kind returns null (dropped,
+ *  never coerced to "datasheet"). */
+export function toPartDocVM(d: PartDocVM): PartDocVM | null {
+  if (!Object.prototype.hasOwnProperty.call(PORTAL_DOC_KIND_LABEL, d.kind)) return null;
+  return { id: String(d.id), kind: d.kind, title: String(d.title || ""), pdf: d.pdf === true };
+}
+
+/** The customer-visible document list: cleaned, unknown kinds filtered out. */
+export function customerPartDocs(docs: readonly PartDocVM[]): PartDocVM[] {
+  return docs.flatMap((d) => toPartDocVM(d) ?? []);
 }
 
 type Price = { unitPrice: number | null; por: boolean } | null | undefined;
@@ -132,7 +137,7 @@ export function toPartDetailVM(p: PartSource, price: Price, docs: readonly PartD
     unitPrice: s.unitPrice,
     por: s.por,
     images: [...(p.imageIds ?? [])].map(String),
-    docs: docs.map(toPartDocVM),
+    docs: customerPartDocs(docs),
     specText: typeof p.specText === "string" && p.specText.trim() ? p.specText : null,
     goesWith: goesWith.slice(0, GOES_WITH_MAX),
   };
@@ -170,6 +175,6 @@ export function toFixtureDetailVM(
         return { key: fixtureOptionKey(l), sku: String(l.sku), label: String(l.label || l.sku), unitPrice: a.unitPrice, por: a.por };
       }),
     images: [...media.images].map(String),
-    docs: media.docs.map(toPartDocVM),
+    docs: customerPartDocs(media.docs),
   };
 }

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
 import { collapseList } from "@/lib/part-docs/coverage";
 import { PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocumentSource } from "@/lib/part-docs/types";
-import { moveImageToFront, type PartDocsImage, type PartDocsView } from "@/lib/part-docs/views";
+import { moveImageToFront, primaryImageIndex, type PartDocsImage, type PartDocsView } from "@/lib/part-docs/views";
 import AlsoCovers from "./documents/also-covers";
 import { addImageFromUrlAction, setImageDisplayAction, setImageOrderAction } from "./documents/actions";
 import SlotCell, { docHref } from "./documents/slot-cell";
@@ -81,6 +81,7 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
   // one.
   const autoBoundary = images.findIndex((img) => img.source === "datasheet-render");
   const groupOf = (i: number): "real" | "auto" => (autoBoundary === -1 || i < autoBoundary ? "real" : "auto");
+  const primaryIdx = primaryImageIndex(images, autoBoundary);
   const canMoveUp = (i: number) => i > 0 && groupOf(i - 1) === groupOf(i);
   const canMoveDown = (i: number) => i < images.length - 1 && groupOf(i + 1) === groupOf(i);
 
@@ -129,14 +130,14 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
               </a>
               <div style={{ fontSize: 10.5, color: "#8c919c", margin: "3px 0" }}>
                 {IMAGE_SOURCE_LABEL[img.source] ?? img.source}
-                {i === 0 && img.source !== "datasheet-render" && !img.hidden && (
+                {i === primaryIdx && (
                   <span style={{ marginLeft: 6, padding: "0 5px", borderRadius: 4, background: "var(--accent)", color: "#fff", fontWeight: 600, fontSize: 10 }}>Primary</span>
                 )}
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <button type="button" style={smallLink} disabled={!!busy || !canMoveUp(i)} onClick={() => move(i, -1)} aria-label={`Move ${img.title} up`}>↑</button>
                 <button type="button" style={smallLink} disabled={!!busy || !canMoveDown(i)} onClick={() => move(i, 1)} aria-label={`Move ${img.title} down`}>↓</button>
-                {i > 0 && groupOf(i) === "real" && (
+                {i !== primaryIdx && groupOf(i) === "real" && !img.hidden && (
                   <button type="button" style={smallLink} disabled={!!busy} onClick={() => makePrimary(img)}>★ Make primary</button>
                 )}
                 <button type="button" style={smallLink} disabled={!!busy} onClick={() => toggleHidden(img)}>

@@ -43,7 +43,7 @@ const PAGE = 200;
 /**
  * Catalog → Datasheets (#207, spec §3): the to-do list. Every part Peak has
  * ever quoted (any quote status, any Grid placement, any bid spec), most
- * quoted first, with a Datasheet and a Spec sheet slot each. One load of
+ * quoted first, with a Datasheet, a Spec sheet and a Manual slot each. One load of
  * every collection per request; everything below is single-pass Maps.
  */
 export default async function DocumentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {

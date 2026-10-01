@@ -42748,7 +42748,7 @@ async function packages289AsyncChecks(): Promise<void> {
 /* ======================================================================
    #290 Make primary — moveImageToFront (pure)
    ====================================================================== */
-import { moveImageToFront as p290MoveToFront } from "@/lib/part-docs/views";
+import { moveImageToFront as p290MoveToFront, primaryImageIndex as p290PrimaryIdx } from "@/lib/part-docs/views";
 {
   const eq = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
   // ids: two real, one hidden real, then two auto thumbnails (boundary 3).
@@ -42762,6 +42762,10 @@ import { moveImageToFront as p290MoveToFront } from "@/lib/part-docs/views";
   const input = ["a", "b"];
   p290MoveToFront(input, "b", -1);
   ok(eq(input, ["a", "b"]), "#290 primary: the input array is not mutated");
+  const pi = (hid: boolean[], boundary: number) => p290PrimaryIdx(hid.map((hidden) => ({ hidden })), boundary);
+  ok(pi([false, false], -1) === 0, "#290 primary: the first visible real image is the primary");
+  ok(pi([true, false, false], -1) === 1, "#290 primary: a hidden first image passes the tag to the first visible real one");
+  ok(pi([true, true, false], 2) === -1 && pi([], -1) === -1, "#290 primary: no visible real image (only hidden/auto, or none) has no primary");
 }
 
 /* ======================================================================
@@ -42780,7 +42784,7 @@ import { DOCUMENTS_SHOW as m290Show, documentRow as m290Row, documentRowMatches 
 import { packageEntryName as m290Entry, resolvePackageDocs as m290Pkg } from "@/lib/part-docs/package";
 import { buildFetchContext as m290FetchCtx, catalogFetchTargets as m290CatTargets } from "@/lib/part-docs/fetch-links";
 import { portalDocMetaOf as m290DocMeta, portalHasCustomerDocument as m290Browsable, servableDocIdsFrom as m290Servable } from "@/lib/portal-catalog-index";
-import { PORTAL_DOC_KIND_LABEL as m290PortalLabel, toPartDocVM as m290DocVM } from "@/lib/portal-part-view";
+import { PORTAL_DOC_KIND_LABEL as m290PortalLabel, toPartDocVM as m290DocVM, customerPartDocs as m290CustDocs } from "@/lib/portal-part-view";
 import type { PartDocument as M290Doc, PartDocumentLink as M290Link } from "@/lib/part-docs/types";
 {
   const eq = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -42882,7 +42886,9 @@ import type { PartDocument as M290Doc, PartDocumentLink as M290Link } from "@/li
     ok(served.has(MAN.id) && served.has(DS.id), "#290 manual: a covering fixture's manual is servable in the portal");
     const manOnly = m290Build({ documents: [MAN], links: [link("ONLYM", MAN)], accessoryLinks: [], parts: [] });
     ok(!m290Browsable(manOnly, "ONLYM") && m290Browsable(ix, "FIXM"), "#290 manual: a manual alone never satisfies the portal browse rule (datasheet/spec sheet only)");
-    ok(m290DocVM({ id: "x", kind: "manual", title: "M", pdf: true }).kind === "manual", "#290 manual: the sidebar view model keeps a manual (no coercion to datasheet)");
+    ok(m290DocVM({ id: "x", kind: "manual", title: "M", pdf: true })?.kind === "manual", "#290 manual: the sidebar view model keeps a manual (no coercion to datasheet)");
+    ok(m290DocVM({ id: "x", kind: "image" as never, title: "I", pdf: true }) === null && m290DocVM({ id: "x", kind: "bogus" as never, title: "B", pdf: false }) === null, "#290 manual: an unknown doc kind is dropped from the customer view, not coerced to datasheet");
+    ok(m290CustDocs([{ id: "a", kind: "datasheet", title: "", pdf: true }, { id: "b", kind: "weird" as never, title: "", pdf: true }, { id: "c", kind: "manual", title: "", pdf: true }]).map((d) => d.id).join() === "a,c", "#290 manual: customerPartDocs keeps only datasheet/specsheet/manual");
     ok(m290PortalLabel.manual === "Manual" && m290PortalLabel.datasheet === "Datasheet" && m290PortalLabel.specsheet === "Spec sheet", "#290 manual: the portal sidebar labels a manual 'Manual'");
   }
   ok(rd288src("scripts/smoke-routes.ts").includes('"/catalog/documents?show=missing-manual"'), "#290 manual: smoke covers /catalog/documents?show=missing-manual");

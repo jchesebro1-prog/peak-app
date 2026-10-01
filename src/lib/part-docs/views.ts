@@ -282,3 +282,15 @@ export function moveImageToFront(ids: readonly string[], id: string, autoBoundar
   if (at === -1 || (autoBoundary !== -1 && at >= autoBoundary)) return [...ids];
   return [id, ...ids.slice(0, at), ...ids.slice(at + 1)];
 }
+
+/**
+ * Index of the image the customer portal leads with (#290): the first
+ * non-hidden REAL image — a datasheet-render thumbnail (index at/beyond
+ * `autoBoundary`, -1 = none) never counts. -1 when there is none. The
+ * editor's Primary tag marks exactly this image.
+ */
+export function primaryImageIndex(images: readonly { hidden?: boolean }[], autoBoundary: number): number {
+  const end = autoBoundary === -1 ? images.length : autoBoundary;
+  for (let i = 0; i < end; i++) if (!images[i].hidden) return i;
+  return -1;
+}

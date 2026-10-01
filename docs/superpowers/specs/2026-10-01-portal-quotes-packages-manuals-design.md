@@ -286,8 +286,11 @@ Shipped on `feat/289-portal-packages` (D533–D535, punch #289). Deviations from
 
 Shipped on `feat/290-primary-photo-manual` (D536–D538, punch #290). Deviations from §3:
 
-- **Primary tag only on a real, visible first image.** It is not shown when the first image is a datasheet-render or
-  hidden, and it does not move to the next visible image.
+- **Primary tag marks the first visible real image.** A hidden first image passes the tag to the next visible real one;
+  a datasheet-render thumbnail never carries it, and ★ Make primary is not offered on hidden images.
+- **Unknown document kinds are dropped in the customer view**, not coerced to datasheet.
+- **Rollback hazard:** never instant-rollback past #290 once a manual document exists (pre-#290 code throws building
+  the coverage index on any manual); no manuals on a preview deploy before #290 is on production.
 - **A Word file is still guessed as a spec sheet.** The Word-extension rule runs before the manual name rule, so
   "Manual.docx" stays a spec sheet; a manual is PDF only.
 - **A manual alone does not make a part browsable in the portal.** The browse rule stays datasheet or spec sheet; the

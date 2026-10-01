@@ -8570,8 +8570,9 @@ The part editor's Images gallery gains **★ Make primary** on every real image 
 datasheet-render thumbnail). A pure helper, `moveImageToFront(ids, id, autoBoundary)`, moves the id to index 0 of the
 real-image group only: an id absent, already first, or at or beyond the auto boundary comes back as an unchanged copy,
 and the input is never mutated. The gallery then persists the full id list, hidden images included, through the same
-order write the up/down arrows use, so there is no new action. The **Primary** tag shows on the first image when it is
-a real, visible one; the portal tile and gallery already read the first visible image, so nothing else changes.
+order write the up/down arrows use, so there is no new action. The **Primary** tag marks the first visible real image
+(`primaryImageIndex`: the first non-hidden image before the datasheet-render boundary), the same image the portal tile
+and gallery lead with, and ★ Make primary is not offered on hidden images or on the image already tagged.
 
 ## D537. Manual is a third document slot kind (#290, 2026-10-01)
 
@@ -8583,11 +8584,18 @@ sheets, `ownDatasheet` opt-out included (D271). Catalog `docs` links with `kind:
 candidates, `guessKind` tests the manual name regex before the spec-sheet name rule, and upload errors name the kind
 ("Manuals must be PDF files."). A coverage record of an unknown kind is skipped instead of throwing. No migration.
 
+**Rollback hazard: never instant-rollback past #290 once a manual document exists.** Pre-#290 code throws while building
+the coverage index on any `kind: "manual"` document (portal catalog, Datasheets page, part editor, Specs coverage,
+client packages, Displays API). Do not create or fetch manuals on a preview deploy before #290 is on production: previews
+share the production DB.
+
 ## D538. What the Manual type deliberately leaves alone (#290, 2026-10-01)
 
 A manual alone never makes a part portal-browsable: the browse rule (`portalHasCustomerDocument`) stays pinned to
 datasheet or spec sheet. The Displays API, the DaVinci pre-fill and the catalog-wide thumbnail targets stay
 datasheet-only, and the client-package gap report still flags only a missing datasheet, not a missing manual. A Word
 file named like a manual (`Manual.docx`) still guesses spec sheet, because the Word-extension rule runs first and a
-manual is PDF only. Separately, the portal's "Parts you've quoted before" shelf is no longer loaded or shown on the
+manual is PDF only. In the customer view an unknown document kind is dropped, not coerced to datasheet
+(`toPartDocVM` returns null; `customerPartDocs` filters), so only datasheet, spec sheet and manual reach a customer.
+Separately, the portal's "Parts you've quoted before" shelf is no longer loaded or shown on the
 Packages page (`showQuotedBeforeShelf`: no search or filters, page 1, department not `packages`).
