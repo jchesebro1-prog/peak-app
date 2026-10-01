@@ -1564,6 +1564,14 @@ export async function submitForReview(
   });
 }
 
+/** #284: the owner pulls an in-review quote back to not submitted. */
+export async function withdrawReview(id: string): Promise<Quote | null> {
+  return patchQuote(id, (q) => {
+    q.review = rv("none");
+    q.updatedAt = Date.now();
+  });
+}
+
 export async function claimReview(
   id: string,
   by?: string | null
@@ -1640,6 +1648,7 @@ export async function requestChanges(
     const review = q.review || rv("in_review");
     review.state = "changes";
     review.decidedBy = opts.by || null;
+    review.reviewer = review.reviewer || review.decidedBy;
     review.decidedAt = Date.now();
     review.note = opts.note || "";
     review.auto = null;

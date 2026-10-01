@@ -4,13 +4,10 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import {
-  approve,
-  attestApproval,
   claimReview,
   create,
   get,
   getAll,
-  requestChanges,
   checkApprovalGate,
   retireReplacedDraftSafely,
   setStatus,
@@ -19,10 +16,7 @@ import {
   statusFailureMessage,
   resolveSaveStatusChange,
   STAGES,
-  submitForReview,
   update,
-  validateAttestationNote,
-  canAttestApproval,
   type Quote,
   type QuoteReview,
   type QuoteStatus,
@@ -61,6 +55,13 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import {
+  approveQuoteReview,
+  attestQuoteApproval,
+  sendBackQuoteReview,
+  sendQuoteToCustomer,
+  submitQuoteForApproval,
+} from "@/lib/quote-review-ops";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import type { ReviewLimitChipData } from "@/lib/review-limits";
 import { isFabricPart } from "@/lib/fabric-part";
@@ -1223,8 +1224,8 @@ export async function submitReviewAction(
   reviewer: string | null
 ): Promise<ReviewSync> {
   const user = await requireUser();
-  if (!id) return { ok: false, review: null, status: null };
-  await submitForReview(id, { by: user.name, reviewer: reviewer || null });
+  const r = await submitQuoteForApproval(id, user, reviewer);
+  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
   refresh();
   return syncOf(id, user.name);
 }
@@ -1240,9 +1241,8 @@ export async function claimReviewAction(id: string): Promise<ReviewSync> {
 
 export async function approveReviewAction(id: string): Promise<ReviewSync> {
   const user = await requireUser();
-  if (!id || !can("approve", user.roles))
-    return { ok: false, review: null, status: null };
-  await approve(id, { by: user.name });
+  const r = await approveQuoteReview(id, user);
+  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
   refresh();
   return syncOf(id, user.name);
 }
@@ -1252,9 +1252,8 @@ export async function requestChangesAction(
   note: string
 ): Promise<ReviewSync> {
   const user = await requireUser();
-  if (!id || !can("approve", user.roles) || !(note || "").trim())
-    return { ok: false, review: null, status: null };
-  await requestChanges(id, { by: user.name, note: note.trim() });
+  const r = await sendBackQuoteReview(id, user, note);
+  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
   refresh();
   return syncOf(id, user.name);
 }
@@ -1271,32 +1270,8 @@ export async function requestChangesAction(
  */
 export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   const user = await requireUser();
-  if (!id) return { ok: false, review: null, status: null };
-  const cur = await get(id);
-  const gate = await checkApprovalGate(cur, "sent", user.name);
-  if (!gate.ok) {
-    return {
-      ok: false,
-      review: cur?.review ?? null,
-      status: cur?.status ?? null,
-      error: gate.error,
-    };
-  }
-  // setStatus() also enforces this same gate internally now (punch #60
-  // follow-up — moved into the store so every caller inherits it); the
-  // try/catch is a backstop that should never actually fire given the
-  // pre-check above, not a second source of truth.
-  try {
-    await setStatus(id, "sent", user.name);
-  } catch (e) {
-    return {
-      ok: false,
-      review: cur?.review ?? null,
-      status: cur?.status ?? null,
-      // #174: same backstop, same reasoning as setStatusAction above.
-      error: statusFailureMessage(e, "estimator/actions sendToCustomerAction: setStatus(sent) threw"),
-    };
-  }
+  const r = await sendQuoteToCustomer(id, user);
+  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
   refresh();
   return syncOf(id, user.name);
 }
@@ -1317,48 +1292,8 @@ export async function attestApprovalAction(
   note: string
 ): Promise<ReviewSync> {
   const user = await requireUser();
-  if (!id) return { ok: false, review: null, status: null };
-  const cur = await get(id);
-  if (!cur) return { ok: false, review: null, status: null, error: "Quote not found." };
-  // Punch #60: ownership is enforced HERE, on the server — not by hiding the
-  // button. The UI only offers "Attest approval" to the quote's owner
-  // (`rbCanAttest`), but a hidden control is not an access control; that was
-  // the original defect. Attesting is self-approval, so it is limited to the
-  // estimator whose quote it is. Anyone holding `approve` may also attest —
-  // they could approve it outright through the review queue anyway.
-  if (cur.owner !== user.name && !can("approve", user.roles)) {
-    return {
-      ok: false,
-      review: cur.review ?? null,
-      status: cur.status ?? null,
-      error: "Only the quote's owner can attest an approval on it.",
-    };
-  }
-  // Punch #60 (Jeff 2026-08-01): attestation records an OFF-platform review;
-  // it is not a way around an in-app one. A formal "request changes" blocks
-  // it until the author resubmits.
-  const attestable = canAttestApproval(cur.review ?? null);
-  if (!attestable.ok) {
-    return {
-      ok: false,
-      review: cur.review ?? null,
-      status: cur.status ?? null,
-      error: attestable.error,
-    };
-  }
-  const validated = validateAttestationNote(note);
-  if (!validated.ok) {
-    return {
-      ok: false,
-      review: cur.review ?? null,
-      status: cur.status ?? null,
-      error: validated.error,
-    };
-  }
-  const updated = await attestApproval(id, { by: user.name, note: validated.note });
-  if (!updated) {
-    return { ok: false, review: null, status: null, error: "Quote not found." };
-  }
+  const r = await attestQuoteApproval(id, user, note);
+  if (!r.ok) return { ...(await syncOf(id, user.name)), ok: false, error: r.error };
   refresh();
   return syncOf(id, user.name);
 }

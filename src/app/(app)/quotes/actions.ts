@@ -7,7 +7,6 @@ import { can } from "@/lib/team";
 import {
   get,
   setStatus,
-  submitForReview,
   addQuoteRevision,
   restoreQuoteRevision,
   remove as removeQuote,
@@ -17,8 +16,7 @@ import {
 } from "@/lib/stores/quotes";
 import { createQuoteClientPackage } from "@/lib/client-package-server";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
-import { isStaleAutoApproval } from "@/lib/review-limits";
-import { loadReviewLimitContext } from "@/lib/review-limits-server";
+import { submitQuoteForApproval } from "@/lib/quote-review-ops";
 
 /**
  * The Quotes hub's form actions (quotes/page.tsx + controls.tsx): status
@@ -126,21 +124,7 @@ export async function submitQuoteForReview(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") || "");
   const reviewer = String(formData.get("reviewer") || "queue");
-  const q = id ? await get(id) : null;
-  if (!q) return;
-  // Server-side mirror of the Estimator's rbCanSubmit gate: owner only,
-  // from draft, when not already in review / approved. #242 final: an auto
-  // approval that no longer holds is not an approval — it may be submitted,
-  // from draft or from sent (so a stale sent quote can still reach Won).
-  if (q.owner !== user.name) return;
-  const state = q.review?.state || "none";
-  const staleAuto = state === "approved" && q.review?.method === "auto_limit" && isStaleAutoApproval(q, await loadReviewLimitContext());
-  if (q.status !== "draft" && !(staleAuto && q.status === "sent")) return;
-  if (state !== "none" && state !== "changes" && !staleAuto) return;
-  await submitForReview(id, {
-    by: user.name,
-    reviewer: reviewer !== "queue" ? reviewer : null,
-  });
+  await submitQuoteForApproval(id, user, reviewer !== "queue" ? reviewer : null);
   revalidatePath("/", "layout");
 }
 

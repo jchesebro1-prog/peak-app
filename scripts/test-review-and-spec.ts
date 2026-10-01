@@ -30005,8 +30005,12 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
     "#242: setStatus consults decideApprovalGate and writes the stamp inside the status patch"
   );
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  // #284 task 3: sendToCustomerAction's pre-check moved into src/lib/quote-review-ops.ts.
+  const qro242 = readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8");
   ok(
-    (ea.match(/checkApprovalGate\(cur/g) || []).length === 2 && !ea.includes("requireApprovalToAdvance(cur"),
+    (ea.match(/checkApprovalGate\(cur/g) || []).length === 1 && !ea.includes("requireApprovalToAdvance(cur") &&
+      (qro242.match(/checkApprovalGate\(q, "sent"/g) || []).length === 1 && !qro242.includes("requireApprovalToAdvance(") &&
+      ea.includes("sendQuoteToCustomer(id, user)"),
     "#242: setStatusAction and sendToCustomerAction pre-check with checkApprovalGate (limits applied), not the bare review predicate"
   );
   const approveBody = qs.slice(qs.indexOf("export async function approve("), qs.indexOf("export async function resetToSeed("));
@@ -30372,7 +30376,11 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
       saveBody.includes("value: priced.value,") && saveBody.includes("margin: priced.margin,") && !/^\s+value: payload\.value,$/m.test(saveBody),
     "#242 final: saveQuoteAction stores the server-recomputed value, never the posted one"
   );
-  ok(/setStatus\(id, "sent", user\.name\)/.test(ea), "#242 final: sendToCustomerAction passes the actor to setStatus");
+  // #284 task 3: sendToCustomerAction delegates to sendQuoteToCustomer in src/lib/quote-review-ops.ts.
+  ok(
+    /setStatus\(id, "sent", actor\.name\)/.test(readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8")) && ea.includes("sendQuoteToCustomer(id, user)"),
+    "#242 final: sendToCustomerAction passes the actor to setStatus"
+  );
   const home = readFileSync(join(process.cwd(), "src/app/(app)/home-actions.ts"), "utf8");
   const inbox = readFileSync(join(process.cwd(), "src/app/(app)/inbox/actions.ts"), "utf8");
   ok(home.includes("setQuoteStatus(id, status as QuoteStatus, user.name)") && inbox.includes('setQuoteStatus(quote.id, "sent", me)'), "#242 final: Home's stage move and the renewal send pass the actor");
@@ -30402,11 +30410,15 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
     "#242 final: the quotes hub offers Submit for review on a sent quote whose auto approval went stale"
   );
   const qa = readFileSync(join(process.cwd(), "src/app/(app)/quotes/actions.ts"), "utf8");
+  // #284 task 3: the stale-approval rule lives in src/lib/quote-review-ops.ts (now snapshot-aware via approvalHolds); both entry points delegate to it.
+  const qro = readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8");
   const sub = qa.slice(qa.indexOf("export async function submitQuoteForReview("), qa.indexOf("export async function deleteQuoteAction("));
   ok(
-    sub.includes("isStaleAutoApproval(q, await loadReviewLimitContext())") &&
-      sub.includes('if (q.status !== "draft" && !(staleAuto && q.status === "sent")) return;') &&
-      sub.includes('if (state !== "none" && state !== "changes" && !staleAuto) return;'),
+    sub.includes("submitQuoteForApproval(id, user,") &&
+      ea.includes("submitQuoteForApproval(id, user, reviewer)") &&
+      qro.includes("approvalHolds(q, await loadReviewLimitContext())") &&
+      qro.includes('if (q.status !== "draft" && !(lapsed && q.status === "sent"))') &&
+      qro.includes('if (state !== "none" && state !== "changes" && !lapsed)'),
     "#242 final: submitQuoteForReview accepts a stale auto approval (draft or sent), like the Estimator's submitReviewAction"
   );
 
@@ -39619,4 +39631,30 @@ async function approval284AsyncChecks(): Promise<void> {
   let r2 = false;
   try { await Q.setStatus(id("t2-other"), "sent", "T284 Somebody"); } catch (e) { r2 = Q.isApprovalGateRefusal(e); }
   ok(r2, "#284 DB: someone else sending Jeff's quote does not self-approve it");
+
+  // Task 3 — guarded ops.
+  const Ops = await import("@/lib/quote-review-ops");
+  const NIC = { name: "T284 Owner", roles: ["Estimator"] };
+  const JEFF = { name: "Jeff Chesebro", roles: ["Admin"] };
+  const none = { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null };
+  await mk("t3", "T284 Owner", { review: none });
+  ok(!(await Ops.submitQuoteForApproval(id("t3"), JEFF, null)).ok, "#284 ops: a non-owner cannot submit someone else's quote");
+  ok((await Ops.submitQuoteForApproval(id("t3"), NIC, null)).ok && (await Q.get(id("t3")))?.review?.state === "in_review", "#284 ops: the owner submits (shared queue)");
+  ok(!(await Ops.submitQuoteForApproval(id("t3"), NIC, null)).ok, "#284 ops: submitting twice is refused");
+  ok(!(await Ops.approveQuoteReview(id("t3"), NIC)).ok, "#284 ops: approve needs the approve permission");
+  ok((await Ops.withdrawQuoteReview(id("t3"), NIC)).ok && (await Q.get(id("t3")))?.review?.state === "none", "#284 ops: the owner withdraws back to not submitted");
+  ok(!(await Ops.withdrawQuoteReview(id("t3"), NIC)).ok, "#284 ops: withdraw only from in review");
+  await Ops.submitQuoteForApproval(id("t3"), NIC, null);
+  const sb = await Ops.sendBackQuoteReview(id("t3"), JEFF, "  ");
+  ok(!sb.ok, "#284 ops: send back needs a note");
+  ok((await Ops.sendBackQuoteReview(id("t3"), JEFF, "Fix the rigging math")).ok, "#284 ops: an approver sends it back");
+  const back = await Q.get(id("t3"));
+  ok(back?.review?.state === "changes" && back.review.reviewer === "Jeff Chesebro", "#284 ops: send back on an unassigned review records the approver as reviewer (implicit claim)");
+  ok((await Ops.submitQuoteForApproval(id("t3"), NIC, null)).ok, "#284 ops: resubmit after changes");
+  ok((await Ops.approveQuoteReview(id("t3"), JEFF)).ok, "#284 ops: an approver approves");
+  const ap = await Q.get(id("t3"));
+  ok(ap?.review?.state === "approved" && ap.review.method === "in_app" && ap.review.reviewer === "Jeff Chesebro", "#284 ops: approve claims implicitly");
+  ok((await Ops.sendQuoteToCustomer(id("t3"), NIC)).ok && (await Q.get(id("t3")))?.status === "sent", "#284 ops: the owner sends an approved quote");
+  await mk("t3-own", "Jeff Chesebro", { review: { ...none, state: "in_review", submittedBy: "Jeff Chesebro" } });
+  ok(!(await Ops.approveQuoteReview(id("t3-own"), JEFF)).ok, "#284 ops: nobody approves their own submitted quote through the queue");
 }

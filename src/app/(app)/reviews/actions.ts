@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { approve, claimReview, requestChanges } from "@/lib/stores/quotes";
+import { claimReview } from "@/lib/stores/quotes";
+import { approveQuoteReview, sendBackQuoteReview } from "@/lib/quote-review-ops";
 import {
   approveDesign,
   claimDesignReview,
@@ -55,7 +56,10 @@ export async function approveReviewAction(
 ): Promise<ActionResult> {
   const user = await requireApprover();
   if (!user) return { ok: false, error: "You need review permission to approve." };
-  if (kind === "Quote") await approve(id, { by: user.name });
+  if (kind === "Quote") {
+    const r = await approveQuoteReview(id, user);
+    if (!r.ok) return r;
+  }
   else if (kind === "Engagement") {
     const [engId, phaseId] = id.split(":");
     // Freeze the artifacts BEFORE flipping state: an approval that cannot
@@ -81,7 +85,10 @@ export async function requestChangesAction(
     return { ok: false, error: "You need review permission to request changes." };
   const clean = (note || "").trim();
   if (!clean) return { ok: false, error: "A note is required." };
-  if (kind === "Quote") await requestChanges(id, { by: user.name, note: clean });
+  if (kind === "Quote") {
+    const r = await sendBackQuoteReview(id, user, clean);
+    if (!r.ok) return r;
+  }
   else if (kind === "Engagement") {
     const [engId, phaseId] = id.split(":");
     await requestPhaseChanges(engId, phaseId, user.name, clean);
