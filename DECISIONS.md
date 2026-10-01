@@ -8423,3 +8423,33 @@ Before the split every card lived in one component, so an unsaved draft or a run
 sections. To keep that, a group mounts the first time it is opened and is then hidden, not unmounted, when you switch
 away — switching back finds drafts intact and never starts a second geocode run.
 
+
+## D523. Approvers send any quote; anyone with create can submit (#286, 2026-10-01)
+
+Amends D517/D518. Jeff could not move a quote Jena created through review or send it, though he is an approver. Now a
+non-owner approver who sends a quote stamps an `in_app` approval by them ("Approved · Jeff"), through the same gate as
+before: `approverOnTransition()` (`src/lib/review-limits.ts`) replaces `canSelfApprove` and returns `"self"` for the
+owner-approver and `"in_app"` for any other roster approver; only `"self"` is blocked by changes requested, so a
+non-owner approver may override another approver's send-back. On an in-review quote the approver sees **Approve &
+send**; the send carries the version shown (`asOf`) and `setStatus` re-checks it under its row lock
+(`expectUpdatedAt`), so an edit made after the approver opened the quote refuses the send instead of approving
+content they did not see. On a draft, ⋯ **Approve only (owner sends)** approves without sending; it is draft-only and
+re-checked under the lock (a sent quote or a still-holding approval is a no-op, refused by name). Anyone with `create`
+(or the owner) may submit for approval, and the submitter may withdraw as well as the owner. Sending needs `send` or
+`approve`. A non-owner, non-approver is still offered Submit, not Send, on a draft.
+
+## D524. Lead estimator and Prepared by are the quote's owner and preparedBy (#286, 2026-10-01)
+
+Jeff asked for "lead estimator and prepared by on the quotes". The lead estimator is the existing `owner` (hub owner
+filter and avatar, review limits, self-approval, "Back from review"), now labelled and editable in the Estimator's
+Quote details; Prepared by is the existing `preparedBy`, stored since the prototype but never shown or edited. Edits go
+through `setQuotePeopleAs` (`src/lib/quote-people.ts`), never the Save allowlist, so a client save can't write
+`owner`. Auto-approval reads the owner's review limit, so the guard is: anyone with `create` may make **themselves**
+the lead (take over), only an approver may make **someone else** the lead (hand off). A blank owner falls back to
+`preparedBy` for review limits, so the same guard applies to the effective owner and a non-approver can't hand off a
+blank-owner quote through Prepared by. Names must be active team members, stored with the roster spelling. The
+customer document prints `preparedBy` under "Prepared by" (falling back to owner, then company); "Questions?" still
+goes to the lead. The hub row reads "EST-1015 · Nic · prepared by Jena" when they differ. Changing the lead keeps an
+in-app approval: approvals are content-bound (D519: sell and priced lines), not person-bound, and an `auto_limit`
+approval re-evaluates against the new owner's limit. Left open for Jeff: both fields can still change after a quote is
+sent (a PDF re-render moves the printed revision date); freezing them at send is a one-line guard if he wants it.

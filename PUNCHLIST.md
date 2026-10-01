@@ -10143,3 +10143,29 @@ both Gmail OAuth return paths now target their group. Gates: tsc 0; test:specs 9
 179/0 (+7 group routes); eslint clean on changed files; next build OK. Browser-verified (every group, one save each, old
 links, phone dropdown, non-admin lock card). Reviewed, no bugs. Not changed: the Locations "Quote origin" badge still
 overflows on phones (pre-existing).
+
+---
+
+## 286. Estimates — approvers send any quote; Lead estimator + Prepared by — DONE 2026-10-01 (D523–D524)
+
+**Reported:** Jeff (2026-10-01), on the #284 control: "I still don't like that on the estimator I can't submit it for review or progress the process using the review progress button. Xavier MS Fixtures is a prime example where Jena created it but I edited and I want to review and send it"
+
+Then: "Also we need to add lead estimator and prepared by on the quotes to assist"
+
+Plan: `docs/superpowers/plans/2026-10-01-approver-send-and-lead-estimator.md`.
+
+**Done.**
+- **Approvers send any quote (D523):** an approver viewing someone else's draft sees **Send to customer →**
+  (stamped "Approved · <approver>"), ⋯ **Approve only (owner sends)** and **Submit for approval**; on an in-review
+  quote, **Approve & send →**, **Send back…** and ⋯ Approve only. The send and the approve carry the version shown and
+  refuse if the quote changed under the row lock. Anyone with `create` can submit for approval; the submitter can
+  withdraw. A non-owner approver may override another approver's send-back.
+- **Lead estimator + Prepared by (D524):** two selects in the Estimator's Quote details. The lead is the quote's
+  `owner`; anyone with `create` can take it over, only an approver can hand it to someone else (blank-owner fallback
+  included). Prepared by is any active team member. The customer document prints Prepared by, "Questions?" goes to the
+  lead, and the Quotes hub row adds "· prepared by <first name>" when they differ.
+
+**Follow-ups.**
+1. Should the lead estimator / Prepared by freeze after send? Today both can change on a sent quote (a PDF re-render
+   moves the printed revision date).
+2. Settings → Team still decides who can approve, and so who can send others' quotes; check who holds `approve`.

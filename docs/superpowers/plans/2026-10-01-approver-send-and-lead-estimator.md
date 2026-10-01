@@ -1,5 +1,7 @@
 # #286 — Approvers send any quote; Lead estimator + Prepared by
 
+> Numbering note: first drafted as #285 / D521–D522; another session shipped #285 (Settings menu) and D521–D522 first, so this is #286 / D523–D524. Branch, test fixture ids (`T285`, `fixtureId(285, …)`) and `#285` harness labels keep the old number.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]`.
 
 **Jeff (2026-10-01), on the #284 control:** "I still don't like that on the estimator I can't submit it for review or
@@ -179,7 +181,7 @@ quotes to assist."
   - Save's allowlist still excludes `owner`.
 
 ### Task C: Docs + gates + browser + ship
-- **DECISIONS** (recompute numbers from origin/main first; last is D520):
+- **DECISIONS** (recompute numbers from origin/main first; last is D522):
   - D523: approvers send any quote, with Approve & send and Approve only; anyone with create may submit; the submitter
     may withdraw. This amends D517/D518.
   - D524: Lead estimator = owner and Prepared by = preparedBy, with the take-over-vs-hand-off guard.
