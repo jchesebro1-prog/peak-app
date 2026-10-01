@@ -123,8 +123,8 @@ export type DocNotNeeded = { datasheet?: true; specsheet?: true };
 /** Upload and fetch ceiling (§6). */
 export const MAX_PART_DOC_BYTES = 25 * 1024 * 1024;
 
-/** Image cap (#245) — tighter than the datasheet/spec-sheet ceiling. */
-export const MAX_PART_IMAGE_BYTES = 10 * 1024 * 1024;
+/** Image cap (#245; #283 raised 10 → 25 MB — images are shrunk on the way in, so this only bounds what's read into memory). */
+export const MAX_PART_IMAGE_BYTES = 25 * 1024 * 1024;
 
 /** The byte ceiling for a slot's kind (#245). */
 export function maxBytesFor(kind: PartDocKind): number {

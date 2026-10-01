@@ -50,7 +50,7 @@ export async function fetchDocumentBytes(rawUrl: string, deps: FetchDeps = {}): 
   return { ok: true, file: { bytes: got.bytes, contentDisposition: got.contentDisposition, finalUrl: got.finalUrl } };
 }
 
-/** This caller's own wording — the tighter 10 MB image cap gets its own
+/** This caller's own wording — the image cap (25 MB since #283) gets its own
  *  "over N MB" text rather than reusing PART_DOC_ERROR_TEXT's 25 MB one. */
 const PART_IMAGE_ERROR_TEXT: Required<GuardedFetchErrorText> = {
   httpStatus: (status) => `The link returned HTTP ${status}.`,
@@ -61,7 +61,7 @@ const PART_IMAGE_ERROR_TEXT: Required<GuardedFetchErrorText> = {
 
 /** "Add image from URL" (#245) — the same guarded download as
  *  fetchDocumentBytes, over the same guardedFetchBytes core, but with an
- *  image accept header and the tighter MAX_PART_IMAGE_BYTES cap. The caller
+ *  image accept header and the MAX_PART_IMAGE_BYTES cap. The caller
  *  still sniffs the real bytes (sniffImageType) — a server's Content-Type
  *  header is never trusted either. */
 export async function fetchImageBytes(rawUrl: string, deps: FetchDeps = {}): Promise<{ ok: true; file: FetchedFile } | { ok: false; error: string }> {

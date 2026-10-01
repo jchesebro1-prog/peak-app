@@ -23,6 +23,8 @@ import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, catalogFetchTargets, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { fetchImageBytes } from "@/lib/part-docs/fetch";
+import { shrinkStoredImage } from "@/lib/part-docs/shrink-upload";
+import { shrinkImage, webpFileName } from "@/lib/part-docs/shrink";
 import { fileNameForFetched, sniffImageType } from "@/lib/part-docs/files";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
@@ -140,10 +142,17 @@ export async function attachUploadedDocumentAction(input: {
 
   const checked = await verifyUploadedBlob(input);
   if (!checked.ok) return checked;
+  // #283 — images are stored shrunk (≤1600 px WebP); the full-size upload is deleted.
+  let file = checked.file;
+  if (input.kind === "image") {
+    const shrunk = await shrinkStoredImage(input.documentId, file);
+    if (!shrunk.ok) return shrunk;
+    file = shrunk.file;
+  }
   const doc = await createDocument({
     id: input.documentId,
     kind: input.kind,
-    ...checked.file,
+    ...file,
     sourceUrl: null,
     source: "upload",
     by: user.name,
@@ -168,7 +177,13 @@ export async function replaceDocumentFileAction(input: {
   if (input.blobPathname === doc.blobKey || (doc.history || []).some((h) => h.blobKey === input.blobPathname)) return { ok: false, error: "That file is already on this document." };
   const checked = await verifyUploadedBlob({ ...input, kind: doc.kind });
   if (!checked.ok) return checked;
-  await replaceDocumentFile(doc.id, checked.file, user.name);
+  let file = checked.file;
+  if (doc.kind === "image") {
+    const shrunk = await shrinkStoredImage(doc.id, file);
+    if (!shrunk.ok) return shrunk;
+    file = shrunk.file;
+  }
+  await replaceDocumentFile(doc.id, file, user.name);
   revalidate();
   return { ok: true };
 }
@@ -417,8 +432,8 @@ export async function setImageOrderAction(input: { sku: string; documentIds: str
 
 /** "Add image from URL" (#245) — download it through the same guarded fetch
  *  (SSRF guard, redirect re-validation) `fetchSlot` uses for datasheets, but
- *  with an image accept header and the tighter 10 MB image cap
- *  (fetchImageBytes); check the real bytes with `sniffImageType` (a
+ *  with an image accept header and the 25 MB image cap, then shrunk to a
+ *  ≤1600 px WebP (#283) (fetchImageBytes); check the real bytes with `sniffImageType` (a
  *  server's Content-Type header is never trusted); store it and attach it
  *  as a new image document, linked to `sku`. */
 export async function addImageFromUrlAction(input: { sku: string; url: string }): Promise<DocActionResult<{ documentId: string }>> {
@@ -435,11 +450,13 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
   const imageType = sniffImageType(got.file.bytes);
   if (!imageType) return { ok: false, error: "That link is not a PNG, JPEG, or WebP image." };
 
+  const shrunk = await shrinkImage(got.file.bytes);
+  if (!shrunk.ok) return { ok: false, error: shrunk.error };
   const documentId = newDocumentId();
-  const fileName = fileNameForFetched(got.file.contentDisposition, got.file.finalUrl, "image", imageType === "image/png" ? "png" : imageType === "image/jpeg" ? "jpeg" : "webp");
+  const fileName = webpFileName(fileNameForFetched(got.file.contentDisposition, got.file.finalUrl, "image", imageType === "image/png" ? "png" : imageType === "image/jpeg" ? "jpeg" : "webp"));
   let stored: { pathname: string };
   try {
-    stored = await putBlob(partDocBlobPath(documentId, fileName), Buffer.from(got.file.bytes), imageType);
+    stored = await putBlob(partDocBlobPath(documentId, fileName), shrunk.bytes, shrunk.contentType);
   } catch {
     return { ok: false, error: "Could not store the file." };
   }
@@ -447,8 +464,8 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
     id: documentId,
     kind: "image",
     fileName,
-    contentType: imageType,
-    size: got.file.bytes.byteLength,
+    contentType: shrunk.contentType,
+    size: shrunk.bytes.byteLength,
     blobKey: stored.pathname,
     sourceUrl: url,
     source: "fetch",

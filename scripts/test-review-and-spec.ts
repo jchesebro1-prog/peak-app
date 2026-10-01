@@ -10684,6 +10684,7 @@ seeded()
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
   .then(() => shrink283AsyncChecks())
+  .then(() => shrinkUpload283AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27833,7 +27834,7 @@ import { isPartDocKind as d245IsKind, maxBytesFor as d245Max, PART_DOC_KINDS as 
   ok(d245Sniff(png) === "image/png" && d245Sniff(jpg) === "image/jpeg" && d245Sniff(webp) === "image/webp", "#245 images: PNG/JPEG/WebP magic bytes recognised");
   ok(d245Sniff(svg) === null && d245Sniff(pdf) === null, "#245 images: SVG and PDF are never images");
   ok(d245IsKind("image") && !d245IsKind("photo"), "#245 images: image is a part-document kind");
-  ok(d245Max("image") === 10 * 1024 * 1024 && d245Max("datasheet") === 25 * 1024 * 1024, "#245 images: 10 MB image cap, datasheets keep 25 MB");
+  ok(d245Max("image") === 25 * 1024 * 1024 && d245Max("datasheet") === 25 * 1024 * 1024, "#245 images: 25 MB image cap (#283 raised it from 10 MB), datasheets keep 25 MB");
   ok(!(d245Kinds as readonly string[]).includes("image"), "#245 images: coverage slots stay datasheet + spec sheet");
 }
 
@@ -27990,7 +27991,7 @@ ok(guessKind("photo.webp") === "image" && guessKind("PHOTO.WEBP") === "image", "
 async function portal245ImagesTask4AsyncChecks(): Promise<void> {
   // verifyUploadedBlob refuses an over-cap image using the same fake-deps
   // injection the Task-1 upload tests use, and deletes the blob — the
-  // image cap is MAX_PART_IMAGE_BYTES (10 MB), tighter than a datasheet's.
+  // image cap is MAX_PART_IMAGE_BYTES (25 MB since #283).
   const removed: string[] = [];
   const fakeImage = (bytes: Uint8Array, size: number) => ({
     head: async () => ({ bytes, size }),
@@ -28000,9 +28001,9 @@ async function portal245ImagesTask4AsyncChecks(): Promise<void> {
   const ID = "PD-imagebig0001";
   const big = await verifyUploadedBlob(
     { documentId: ID, blobPathname: `part-docs/${ID}/big.png`, fileName: "big.png", kind: "image" },
-    fakeImage(pngBytes, 11 * 1024 * 1024)
+    fakeImage(pngBytes, 26 * 1024 * 1024)
   );
-  ok(!big.ok && big.error === "That file is over 10 MB." && removed.includes(`part-docs/${ID}/big.png`), "#245 images upload: an 11 MB image is refused (10 MB cap, not the 25 MB doc cap) and its blob deleted");
+  ok(!big.ok && big.error === "That file is over 25 MB." && removed.includes(`part-docs/${ID}/big.png`), "#245 images upload: a 26 MB image is refused (25 MB cap since #283) and its blob deleted");
 
   const ok10mb = await verifyUploadedBlob(
     { documentId: ID, blobPathname: `part-docs/${ID}/ok.jpg`, fileName: "photo.jpg", kind: "image" },
@@ -39535,4 +39536,35 @@ async function shrink283AsyncChecks(): Promise<void> {
 
   ok(s283Name("S4LED-S3 front.JPG") === "S4LED-S3 front.webp" && s283Name("photo") === "photo.webp" && s283Name("") === "image.webp",
     "#283 webpFileName: swaps or adds the .webp extension");
+}
+
+// ---------------------------------------------------------------------------
+// #283 — an uploaded image is swapped for its shrunk copy; a bad one is deleted.
+// ---------------------------------------------------------------------------
+import { shrinkStoredImage as su283 } from "@/lib/part-docs/shrink-upload";
+import { blobPathBelongsTo as su283Belongs } from "@/lib/part-docs/types";
+async function shrinkUpload283AsyncChecks(): Promise<void> {
+  const photo = await s283Sharp({ create: { width: 2400, height: 1800, channels: 3, background: "#369" } }).jpeg().toBuffer();
+  const store = new Map<string, Uint8Array>([["part-docs/PD-283aaaaaaaaa/orig.jpg", photo]]);
+  const removed: string[] = [];
+  const deps = {
+    read: async (p: string) => store.get(p) ?? null,
+    put: async (p: string, bytes: Buffer) => { store.set(p, bytes); return { pathname: p }; },
+    remove: async (p: string) => { removed.push(p); store.delete(p); },
+  };
+  const file = { blobKey: "part-docs/PD-283aaaaaaaaa/orig.jpg", fileName: "orig.jpg", contentType: "image/jpeg", size: photo.byteLength };
+  ok(su283Belongs(file.blobKey, "PD-283aaaaaaaaa"), "#283 upload: the fake blob keys are real part-doc paths");
+  const r = await su283("PD-283aaaaaaaaa", file, deps);
+  ok(r.ok && r.file.contentType === "image/webp" && r.file.fileName === "orig.webp" && r.file.size < photo.byteLength,
+    "#283 upload: the stored file becomes a smaller WebP");
+  ok(r.ok && r.file.blobKey !== file.blobKey && removed.includes(file.blobKey) && store.has(r.file.blobKey),
+    "#283 upload: the shrunk copy is stored and the original upload deleted");
+
+  const badKey = "part-docs/PD-283bbbbbbbbb/x.png";
+  store.set(badKey, new Uint8Array(Buffer.from("nope")));
+  const bad = await su283("PD-283bbbbbbbbb", { ...file, blobKey: badKey, fileName: "x.png" }, deps);
+  ok(!bad.ok && removed.includes(badKey), "#283 upload: an unreadable upload is refused and its blob deleted");
+
+  const gone = await su283("PD-283cccccccccc", { ...file, blobKey: "part-docs/PD-283cccccccccc/missing.jpg" }, deps);
+  ok(!gone.ok && !removed.includes("part-docs/PD-283cccccccccc/missing.jpg"), "#283 upload: a blob that can't be read is refused without deleting");
 }
