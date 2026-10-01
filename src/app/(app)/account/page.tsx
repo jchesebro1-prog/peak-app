@@ -4,6 +4,7 @@ import {
   gmailEnabled,
   hasCalendarScope,
   hasDriveScope,
+  hasDriveReadScope,
   personalKey,
 } from "@/lib/gmail/config";
 import { getKrispConnectionInfo } from "@/lib/krisp/connections";
@@ -41,7 +42,7 @@ export default async function AccountPage() {
   // calendar grant for MY personal mailbox only.
   const gmailOn = gmailEnabled();
   const myKey = personalKey(user.id);
-  let conn: { address: string; initialImportDone: boolean; calendarOn: boolean; driveOn: boolean } | null = null;
+  let conn: { address: string; initialImportDone: boolean; calendarOn: boolean; driveOn: boolean; photosOn: boolean } | null = null;
   if (gmailOn) {
     const { getConnectionInfo } = await import("@/lib/gmail/connections");
     const info = await getConnectionInfo(myKey);
@@ -53,6 +54,9 @@ export default async function AccountPage() {
         // Recordings spec §5.1 — drive.file granted, so this account can be
         // picked as the recordings archive in Settings → Recordings.
         driveOn: hasDriveScope(info.scope),
+        // #283 — drive.readonly granted, so this account can be picked as the
+        // catalog photos account in Settings → Recordings.
+        photosOn: hasDriveReadScope(info.scope),
       };
   }
 
@@ -175,7 +179,8 @@ export default async function AccountPage() {
                   ? conn.address +
                     (conn.initialImportDone ? " · history imported" : " · use Send / Receive in the Inbox to import history") +
                     (conn.calendarOn ? " · calendar on" : "") +
-                    (conn.driveOn ? " · Drive archive on" : "")
+                    (conn.driveOn ? " · Drive archive on" : "") +
+                    (conn.photosOn ? " · Drive photos on" : "")
                   : "Connect your own Gmail so the Inbox sends and receives as you — and your dashboard calendar lights up."}
             </div>
           </div>
@@ -206,6 +211,16 @@ export default async function AccountPage() {
               style={{ flexShrink: 0, textDecoration: "none" }}
             >
               Enable Drive archive
+            </a>
+          )}
+          {gmailOn && conn && !conn.photosOn && (
+            <a
+              className="pk-btn-outline"
+              href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey) + "&drivephotos=1"}
+              title="Lets the catalog read the Peak Product Photos folder (read-only)"
+              style={{ flexShrink: 0, textDecoration: "none" }}
+            >
+              Enable Drive photos
             </a>
           )}
           {gmailOn && conn && conn.driveOn && (
