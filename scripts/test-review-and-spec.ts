@@ -14509,8 +14509,9 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   );
   // #284 task 5: doSave's body moved into the awaitable saveNow (doSave now
   // just runs it in a transition) — the slice starts there and still covers both.
+  // #285 fix round 1: saveNow resolves to the saved updatedAt (or false), not a boolean.
   const doSaveBody = estimatorClientSrc.slice(
-    estimatorClientSrc.indexOf("const saveNow = async (): Promise<boolean> =>"),
+    estimatorClientSrc.indexOf("const saveNow = async (): Promise<number | false> =>"),
     estimatorClientSrc.indexOf("const changeStatus = (v: QuoteStatus)")
   );
   ok(doSaveBody.length > 0, "#181 fixture: doSave is still where the test expects it");
@@ -30420,7 +30421,8 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   // #284 task 3: sendToCustomerAction delegates to sendQuoteToCustomer in src/lib/quote-review-ops.ts.
   ok(
     // #284 final: the Estimator's sendToCustomerAction was deleted; nsSendAction (review-actions.ts) is the Send entry point.
-    /setStatus\(id, "sent", actor\.name\)/.test(readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8")) &&
+    // #285 fix round 1: setStatus also takes { expectUpdatedAt } (Approve & send's version check under the lock).
+    /setStatus\(id, "sent", actor\.name[,)]/.test(readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8")) &&
       // #285: nsSendAction passes the view's asOf through.
       readFileSync(join(process.cwd(), "src/app/(app)/quotes/review-actions.ts"), "utf8").includes("sendQuoteToCustomer(id, user, asOf)"),
     "#242 final: sendToCustomerAction passes the actor to setStatus"
@@ -34030,7 +34032,8 @@ import {
   ok((c.match(/applyTierStamp\(/g) || []).length === 1 && (c.match(/resolveTierAction\(/g) || []).length === 1,
     "#254 review: applyTierStamp has exactly one caller (the shared block), which is the only resolveTierAction call");
   // #284 task 5: the save body lives in the awaitable saveNow; doSave runs it in a transition.
-  const save = between("const saveNow = async (): Promise<boolean> => {", "const changeStatus = ");
+  // #285 fix round 1: saveNow resolves to the saved updatedAt (or false).
+  const save = between("const saveNow = async (): Promise<number | false> => {", "const changeStatus = ");
   ok(/const repriceSeqAtSave = tierRepriceSeqRef\.current;/.test(save)
     && /if \(res\.id\) \{[\s\S]{0,400}setTierReprice\(\(n\) => \(n && n\.unsaved && n\.seq <= repriceSeqAtSave \? \{ \.\.\.n, unsaved: false \} : n\)\)/.test(save)
     && (save.match(/unsaved: false/g) || []).length === 1,
@@ -34041,7 +34044,7 @@ import {
     && /tierResolvingRef\.current = true;\s*setTierResolving\(true\);/.test(resolveFor)
     && /\} finally \{\s*(\/\/[^\n]*\n\s*)*if \(seq === tierResolveSeqRef\.current\) \{\s*tierResolvingRef\.current = false;\s*setTierResolving\(false\);/.test(resolveFor),
     "#254 wave 2: a tier lookup marks Save pending until the LATEST lookup settles (ok, refused or thrown)");
-  ok(/^\s*\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return false;/.test(save.slice("const saveNow = async (): Promise<boolean> => {".length))
+  ok(/^\s*\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return false;/.test(save.slice("const saveNow = async (): Promise<number | false> => {".length))
     && /const doSave = \(\) => \{\s*if \(tierResolvingRef\.current\) return;/.test(save),
     "#254 wave 2: doSave refuses to run while a tier lookup is in flight (pick then immediate Save can't stamp ahead of its lines)");
   ok(/onClick=\{doSave\}\s*disabled=\{statusChanging \|\| tierResolving\}/.test(c) && /onSave=\{doSave\}\s*saveDisabled=\{statusChanging \|\| tierResolving\}/.test(c),
@@ -41102,9 +41105,10 @@ import { quoteAwaitsApprovalBy as a284fAwaits, quoteBackFromReview as a284fBack 
     "#284 final: the Reviews list sends the row's asOf");
   const comp = src284f("src/components/quote-review/quote-next-step.tsx");
   ok(comp.includes("nsApproveAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendBackAction(quoteId, text, view.asOf), { skipBefore: true }")
-    && comp.includes("if (!opts.skipBefore && beforeAction && !(await beforeAction())) return;")
-    && comp.includes("!res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res")
-    && comp.includes("const keepShown = !!opts.skipBefore || (!!opts.versioned && !saved);"),
+    // #285 fix round 1: the pre-save resolves to the saved updatedAt, which becomes the version shown.
+    && comp.includes("if (!opts.skipBefore && beforeAction) {") && comp.includes("if (savedAt === false) return;")
+    && comp.includes("!res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: shown } } : res")
+    && comp.includes("const keepShown = !!opts.skipBefore || !!opts.versioned;"),
     "#284 final: the next-step control decides the version shown (asOf), skips the pre-save for Approve / Send back, and a refusal keeps the shown asOf");
   const ra = src284f("src/app/(app)/quotes/review-actions.ts");
   ok(ra.includes("approveQuoteReview(id, user, asOf)") && ra.includes("sendBackQuoteReview(id, user, note, asOf)") && !ra.includes("reviewLimit"),
@@ -41318,9 +41322,11 @@ import { quoteBackFromReview as a285Back } from "@/lib/quote-approval-rules";
   // Wiring the pure rules can't reach.
   const src285 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const comp = src285("src/components/quote-review/quote-next-step.tsx");
-  ok(comp.includes("nsSendAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendAction(quoteId, saved ? undefined : view.asOf), { versioned: true }")
-    && comp.includes("nsApproveAction(quoteId, saved ? undefined : view.asOf), { versioned: true }"),
-    "#285 control: Approve & send decides the shown version without a pre-save; a non-owner Send / Approve only carry asOf unless the pre-save just stored the viewer's edits");
+  ok(comp.includes("nsSendAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendAction(quoteId, shown), { versioned: true }")
+    && comp.includes("nsApproveAction(quoteId, shown), { versioned: true }") && comp.includes("beforeAction?: () => Promise<number | false>;"),
+    "#285 control: Approve & send decides the shown version without a pre-save; a non-owner Send / Approve only carry asOf — after a pre-save, the version it saved");
+  ok(src285("src/app/(app)/estimator/estimator-client.tsx").includes("return res.id ? res.updatedAt : false;"),
+    "#285 control: the Estimator's saveNow resolves to the saved quote's updatedAt (the version the control then decides)");
   ok(comp.includes("(!approverOnly || view.approverMode)") && comp.includes('approverOnly ? view.secondary.filter((s) => s.action === "approve")'),
     "#285 control: the phone approver mode shows Approve & send, Send back and Approve only");
   const ra = src285("src/app/(app)/quotes/review-actions.ts");
@@ -41451,4 +41457,42 @@ async function approval285AsyncChecks(): Promise<void> {
     `#285 DB: an off-roster actor holding Admin roles is still refused at the gate (got "${err(off)}")`);
   const nonAppr = await Ops.sendQuoteToCustomer(id("offroster"), NIC);
   ok(!nonAppr.ok && err(nonAppr).includes("needs an approval on record"), "#285 DB: a non-approver sender cannot send someone else's unapproved draft");
+
+  // Fix round 1 — the store re-checks draft-only and lapsed-only under the row lock.
+  await mk("lock-sent", { status: "sent" });
+  const lockSent = await Q.approve(id("lock-sent"), { by: "Jeff Chesebro", allowUnsubmitted: true });
+  ok(lockSent?.review?.state === "none" && lockSent.updatedAt === 1, "#285 fix: store approve-only on a quote that was sent meanwhile is a no-op");
+  await mk("lock-holds", { review: { ...none, state: "approved", method: "in_app", decidedBy: "Chris Mittlesteadt", decidedAt: 5 } });
+  const lockHolds = await Q.approve(id("lock-holds"), { by: "Jeff Chesebro", allowUnsubmitted: true });
+  ok(lockHolds?.review?.decidedBy === "Chris Mittlesteadt" && lockHolds.review.decidedAt === 5 && lockHolds.updatedAt === 1,
+    "#285 fix: store approve-only on a draft whose approval still holds is a no-op");
+  // The op reports a no-op from the store as a refusal (the race: sent between the op's check and the write).
+  await mk("lock-race");
+  const pre = await Q.get(id("lock-race")); // what the op's pre-check saw: a draft
+  await edit(id("lock-race"), (d) => { d.status = "sent"; }); // sent before the locked write
+  const raced = await Q.approve(id("lock-race"), { by: "Jeff Chesebro", allowUnsubmitted: true });
+  ok(pre?.status === "draft" && raced?.status === "sent" && raced.review?.state === "none",
+    "#285 fix: a quote sent between the op's check and the locked write is left unapproved");
+  const raceOp = await Ops.approveQuoteReview(id("lock-race"), JEFF);
+  ok(!raceOp.ok && (await Q.get(id("lock-race")))?.review?.state === "none", `#285 fix: …and approve-only on it refuses (got "${err(raceOp)}")`);
+
+  // Fix round 1 — Approve & send's version check also runs under setStatus's row lock.
+  await mk("lock-send", { review: { ...none, state: "in_review", submittedBy: "T285 Nic", submittedAt: 9 } });
+  let changed = false;
+  try { await Q.setStatus(id("lock-send"), "sent", "Jeff Chesebro", { expectUpdatedAt: 999 }); } catch (e) { changed = Q.isQuoteVersionChanged(e); }
+  const lockSend = await Q.get(id("lock-send"));
+  ok(changed && lockSend?.status === "draft" && lockSend.review?.state === "in_review" && lockSend.updatedAt === 1 && !(lockSend.history || []).length,
+    "#285 fix: setStatus with a stale expectUpdatedAt throws QuoteVersionChanged and writes nothing");
+  ok(!Q.isApprovalGateRefusal(new Q.QuoteVersionChanged()) && Q.isQuoteVersionChanged(new Q.QuoteVersionChanged()),
+    "#285 fix: the version refusal is its own brand, not the gate's");
+  const okSend = await Q.setStatus(id("lock-send"), "sent", "Jeff Chesebro", { expectUpdatedAt: 1 });
+  ok(okSend?.status === "sent" && okSend.review?.method === "in_app", "#285 fix: setStatus with the current expectUpdatedAt moves and stamps the approver");
+  const qro285 = readFileSync(join(process.cwd(), "src/lib/quote-review-ops.ts"), "utf8");
+  ok(qro285.includes("{ expectUpdatedAt: asOf }") && qro285.includes("if (isQuoteVersionChanged(e)) return CHANGED_SINCE;"),
+    "#285 fix: sendQuoteToCustomer threads asOf into setStatus and reports a version refusal with the changed-since sentence");
+
+  // Fix round 1 — the owner resubmits without create.
+  await mk("own-nocreate", { review: { ...none, state: "changes", decidedBy: "Chris Mittlesteadt", note: "Fix it" } });
+  const ownNo = await Ops.submitQuoteForApproval(id("own-nocreate"), { name: "T285 Jena", roles: ["Reviewer"] }, null);
+  ok(ownNo.ok && (await Q.get(id("own-nocreate")))?.review?.state === "in_review", `#285 fix: the owner resubmits even without create (got "${err(ownNo)}")`);
 }

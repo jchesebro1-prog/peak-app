@@ -36,11 +36,12 @@ type Props = {
   onSync?: (r: NextStepSync) => void;
   /** Report a refusal; default = an inline red line under the control. */
   onError?: (msg: string) => void;
-  /** Runs before any action (the Estimator saves unsaved edits first); return false to abort.
+  /** Runs before any action (the Estimator saves unsaved edits first): resolves to the
+   *  saved quote's `updatedAt` (#285 — that version is now the one shown), or false to abort.
    *  Skipped for the in-review decisions (Approve & send, Approve only, Send
    *  back): an approver decides the version they were shown (view.asOf), and
    *  saving first would bump updatedAt and refuse it. */
-  beforeAction?: () => Promise<boolean>;
+  beforeAction?: () => Promise<number | false>;
   /** Pill suffix " · as last saved" while the form has unsaved edits. */
   savedOnly?: boolean;
   /** Disables every button (the Estimator: a status change or tier lookup is in flight). */
@@ -180,23 +181,28 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     else setErr(msg);
   };
 
-  /** `versioned` (#285): the action carries view.asOf unless the pre-save ran —
-   *  `fn(saved)` — since the viewer's own just-saved edits are then the version shown. */
-  const run = (fn: (saved: boolean) => Promise<NextStepSync>, opts: { skipBefore?: boolean; versioned?: boolean } = {}) => {
+  /** `fn(shown)` gets the version the viewer is deciding: view.asOf, or — #285 —
+   *  the pre-save's own `updatedAt`, since the viewer's just-saved edits are then
+   *  the version shown. `versioned`: the action carries it. */
+  const run = (fn: (shown: number) => Promise<NextStepSync>, opts: { skipBefore?: boolean; versioned?: boolean } = {}) => {
     setMenu("closed");
     setErr(null);
     startTransition(async () => {
       try {
-        if (!opts.skipBefore && beforeAction && !(await beforeAction())) return;
-        const saved = !opts.skipBefore && !!beforeAction;
-        const res = await fn(saved);
+        let shown = view.asOf;
+        if (!opts.skipBefore && beforeAction) {
+          const savedAt = await beforeAction();
+          if (savedAt === false) return;
+          shown = savedAt;
+        }
+        const res = await fn(shown);
         // A refused versioned action keeps the version the viewer was shown:
         // handing the fresh asOf to an onSync caller (the Estimator keeps its form;
         // only a reload shows the new content) would let a second click decide
         // content this screen never loaded. The default router.refresh re-renders
         // the page with the current version, so it needs no such guard.
-        const keepShown = !!opts.skipBefore || (!!opts.versioned && !saved);
-        const r = !res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: view.asOf } } : res;
+        const keepShown = !!opts.skipBefore || !!opts.versioned;
+        const r = !res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: shown } } : res;
         if (!r.ok) report(r.error || "That didn't go through.");
         (onSync ?? (() => router.refresh()))(r);
       } catch (e) {
@@ -231,14 +237,14 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
         return run(() => nsSubmitAction(quoteId, null));
       case "send":
         // #285: Approve & send → decides the shown version with no pre-save (like Approve);
-        // a non-owner's Send carries it too, unless the pre-save just stored their edits.
+        // a non-owner's Send carries it too (after a pre-save, the version it just stored).
         if (view.approverMode) return run(() => nsSendAction(quoteId, view.asOf), { skipBefore: true });
-        if (!view.viewerIsOwner) return run((saved) => nsSendAction(quoteId, saved ? undefined : view.asOf), { versioned: true });
+        if (!view.viewerIsOwner) return run((shown) => nsSendAction(quoteId, shown), { versioned: true });
         return run(() => nsSendAction(quoteId));
       case "approve":
         // In review: the shown version, no pre-save. #285 Approve only on a draft saves the approver's edits first.
         if (view.approverMode) return run(() => nsApproveAction(quoteId, view.asOf), { skipBefore: true });
-        return run((saved) => nsApproveAction(quoteId, saved ? undefined : view.asOf), { versioned: true });
+        return run((shown) => nsApproveAction(quoteId, shown), { versioned: true });
       case "withdraw":
         return run(() => nsWithdrawAction(quoteId));
       case "assign":

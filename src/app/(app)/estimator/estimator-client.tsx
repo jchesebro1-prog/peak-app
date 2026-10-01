@@ -1111,8 +1111,10 @@ export default function EstimatorClient({
   };
 
   /** #284: the save itself, awaitable — the next-step control saves unsaved
-   *  edits first and acts only when this returns true (written, no refusal). */
-  const saveNow = async (): Promise<boolean> => {
+   *  edits first and acts only when this resolves to a version (written, no
+   *  refusal). #285: that version is the saved quote's updatedAt, which the
+   *  control then decides; false = abort. */
+  const saveNow = async (): Promise<number | false> => {
     // #254 fix wave 2: never save while a tier lookup is in flight.
     if (tierResolvingRef.current) return false;
     const docAtSave = docInput;
@@ -1202,7 +1204,7 @@ export default function EstimatorClient({
           setJustSaved(true);
           if (savedTimer.current) clearTimeout(savedTimer.current);
           savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
-          return !!res.id;
+          return res.id ? res.updatedAt : false;
         } else {
           // The gate's own message (statusFailureMessage, D230) — the quote
           // itself saved; only the requested status advance was refused.

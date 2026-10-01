@@ -407,12 +407,16 @@ export type ReviewOpts = {
    *  `updatedAt` still equals this (the version the approver was shown);
    *  checked under the row lock. */
   expectUpdatedAt?: number;
-  /** #285: approve() only — "Approve only (owner sends)": also decide a quote
-   *  that was never submitted, came back, or carries a lapsed approval
-   *  (state none / changes / approved). The caller (approveQuoteReview) has
-   *  checked it is a draft, the actor a non-owner approver, and an approved
-   *  one lapsed; the version check still applies under the lock. */
+  /** #285: approve() only — "Approve only (owner sends)": also decide a
+   *  DRAFT that was never submitted, came back, or carries a lapsed approval
+   *  (state none / changes / approved). Draft-only and lapsed-only are
+   *  re-checked under the row lock (the caller checked them before it); the
+   *  version check still applies. */
   allowUnsubmitted?: boolean;
+  /** #285: the review limits `approvalHolds` reads under the lock for an
+   *  `allowUnsubmitted` decision (the caller's context; default none — an
+   *  auto approval then holds only while unchanged against its snapshot). */
+  holdsCtx?: ReviewLimitContext;
 };
 
 function rv(state: ReviewState, o: Partial<QuoteReview> = {}): QuoteReview {
@@ -1033,6 +1037,10 @@ function withRestoredCredit(doc: Quote, credit: number): void {
 export type SetStatusOpts = {
   // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
   bypassApprovalGate?: "engine-owned-flow" | "historical-import" | "portal-firm";
+  /** #285: move only if the quote's `updatedAt` still equals this (the
+   *  version the sender was shown — Approve & send →). Checked under the row
+   *  lock before anything is written; a mismatch throws QuoteVersionChanged. */
+  expectUpdatedAt?: number;
 };
 
 /**
@@ -1253,6 +1261,23 @@ export function isApprovalGateRefusal(e: unknown): e is ApprovalGateRefused {
   );
 }
 
+/** #285: the brand on setStatus's `expectUpdatedAt` refusal (same pattern as APPROVAL_GATE_REFUSAL). */
+export const QUOTE_VERSION_CHANGED = "quotes/version-changed" as const;
+
+/** #285: setStatus refused because the quote changed since the caller's
+ *  `expectUpdatedAt` — nothing was written. Branded like ApprovalGateRefused. */
+export class QuoteVersionChanged extends Error {
+  readonly quoteVersionChanged = QUOTE_VERSION_CHANGED;
+  constructor() {
+    super("This quote changed since you opened it — reload to review the current version.");
+    this.name = "QuoteVersionChanged";
+  }
+}
+
+export function isQuoteVersionChanged(e: unknown): e is QuoteVersionChanged {
+  return typeof e === "object" && e !== null && (e as { quoteVersionChanged?: unknown }).quoteVersionChanged === QUOTE_VERSION_CHANGED;
+}
+
 /** What a user sees when `setStatus` failed for a reason that is not theirs. */
 export const STATUS_CHANGE_FAILED =
   "Couldn’t apply that status change — the error has been logged. Please try again.";
@@ -1317,6 +1342,8 @@ export async function setStatus(
   await lockQuoteRow(id);
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return null;
+  // #285: Approve & send → moves only the version the sender was shown — before any write, the replay included.
+  if (typeof opts.expectUpdatedAt === "number" && q.updatedAt !== opts.expectUpdatedAt) throw new QuoteVersionChanged();
   if (q.status === status) {
     // #170: nothing to transition, but the downstream record may still be
     // MISSING. This early return is the layer that actually gated the bug —
@@ -1616,7 +1643,11 @@ export async function claimReview(
  *  `allowUnsubmitted` (approve only) also takes none / changes / approved. */
 function decidableUnderLock(q: Quote, opts: ReviewOpts): boolean {
   const state = q.review?.state || "none";
-  const ok = state === "in_review" || (!!opts.allowUnsubmitted && (state === "none" || state === "changes" || state === "approved"));
+  const ok =
+    state === "in_review" ||
+    (!!opts.allowUnsubmitted &&
+      q.status === "draft" &&
+      (state === "none" || state === "changes" || (state === "approved" && !approvalHolds(q, opts.holdsCtx ?? NO_REVIEW_LIMITS))));
   if (!ok) return false;
   return typeof opts.expectUpdatedAt !== "number" || q.updatedAt === opts.expectUpdatedAt;
 }

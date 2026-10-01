@@ -20,6 +20,7 @@ import {
   attestApproval,
   setStatus,
   checkApprovalGate,
+  isQuoteVersionChanged,
   canAttestApproval,
   validateAttestationNote,
   statusFailureMessage,
@@ -72,11 +73,12 @@ async function approvalLapsed(q: Quote): Promise<boolean> {
   return q.review?.state === "approved" && !approvalHolds(q, await loadReviewLimitContext());
 }
 
-/** #285: anyone who can create quotes submits one (not only its owner); the actor is the submitter. */
+/** #285: the owner, or anyone who can create quotes, submits one; the actor is the submitter. */
 export async function submitQuoteForApproval(id: string, actor: ReviewActor, reviewer: string | null): Promise<ReviewOpResult> {
-  if (!can("create", actor.roles)) return { ok: false, error: "You need create permission to submit a quote for approval." };
   const q = id ? await get(id) : null;
   if (!q) return NOT_FOUND;
+  if (!isOwner(q, actor) && !can("create", actor.roles))
+    return { ok: false, error: "You need create permission to submit a quote for approval." };
   const state = q.review?.state || "none";
   const lapsed = await approvalLapsed(q);
   // #242 final carried forward: a lapsed approval on a SENT quote may be resubmitted so it can still reach Won.
@@ -137,8 +139,10 @@ export async function approveQuoteReview(id: string, actor: ReviewActor, asOf?: 
   const from = d.q.review?.state || "none";
   if (from === "in_review") return outcome(await approve(id, { by: actor.name, expectUpdatedAt: v }), "approved", v);
   // #285: Approve only (owner sends) — a non-owner approver on a draft outside review; the owner sends it.
+  // The store re-checks draft-only and lapsed-only under the row lock, against the same limits.
   const since = Date.now();
-  return approveOnlyOutcome(await approve(id, { by: actor.name, expectUpdatedAt: v, allowUnsubmitted: true }), since, from, v);
+  const holdsCtx = await loadReviewLimitContext();
+  return approveOnlyOutcome(await approve(id, { by: actor.name, expectUpdatedAt: v, allowUnsubmitted: true, holdsCtx }), since, from, v);
 }
 
 export async function sendBackQuoteReview(id: string, actor: ReviewActor, note: string, asOf?: number): Promise<ReviewOpResult> {
@@ -180,8 +184,10 @@ export async function sendQuoteToCustomer(id: string, actor: ReviewActor, asOf?:
   const gate = await checkApprovalGate(q, "sent", actor.name);
   if (!gate.ok) return gate;
   try {
-    await setStatus(id, "sent", actor.name);
+    // #285: the version check again under the row lock (an edit between the read above and the write).
+    await setStatus(id, "sent", actor.name, typeof asOf === "number" && asOf > 0 ? { expectUpdatedAt: asOf } : {});
   } catch (e) {
+    if (isQuoteVersionChanged(e)) return CHANGED_SINCE;
     return { ok: false, error: statusFailureMessage(e, "quote-review-ops sendQuoteToCustomer: setStatus(sent) threw") };
   }
   return { ok: true };
