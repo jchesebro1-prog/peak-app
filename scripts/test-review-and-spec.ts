@@ -10683,6 +10683,7 @@ seeded()
   .then(() => rewards282Phase3RestoreAsyncChecks())
   .then(() => rewards282Phase4AsyncChecks())
   .then(() => rewards282LostAsyncChecks())
+  .then(() => approval284AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -30413,10 +30414,10 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const ss = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
   ok(
-    ss.includes('const needsLimits = gated && (!hasApproval(q.review) || q.review?.method === "auto_limit");') &&
+    /const needsLimits =\s*gated && !\(hasApproval\(q\.review\) && q\.review\?\.method !== "auto_limit" && approvalSnapshotMatches\(q\)\);/.test(ss) &&
       ss.includes("const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;") &&
       ss.includes("decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null)"),
-    "#242 final: setStatus loads review limits only for an unapproved or auto-approved quote, and passes the actor"
+    "#242 final: setStatus loads review limits only for an unapproved or auto-approved quote, and passes the actor (#284: snapshot-aware)"
   );
 
   // D396 note.
@@ -39506,4 +39507,81 @@ async function rewards282LostAsyncChecks(): Promise<void> {
     for (const x of await L.ledgerForCompany(CO)) registerFixture("reward_ledger", x.id);
     await removeCustomer(CO);
   }
+}
+
+/* ======================================================================
+   #284 — estimate submit-for-approval. Task 1: approval fingerprint.
+   ====================================================================== */
+import { approvalFingerprint as a284Fp, approvalSnapshotMatches as a284Matches, isStaleSnapshotApproval as a284Stale } from "@/lib/approval-snapshot";
+import { approvalHolds as a284Holds, NO_REVIEW_LIMITS as a284NoLimits } from "@/lib/review-limits";
+import { staleApprovalLine as a284StaleLine, approvedReviewLine as a284ApprovedLine } from "@/lib/review-line";
+{
+  const item = (o: Record<string, unknown> = {}) => ({ id: 1, sku: "A-1", desc: "Truss", qty: 2, unit: "ea", cost: 50, price: 100, ...o });
+  const quote = (items: unknown[], value = 200, extra: Record<string, unknown> = {}) => ({
+    quoteType: "system", value, spec: { sections: [{ id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items }] }, ...extra,
+  });
+  const base = quote([item()]);
+  const fp = a284Fp(base);
+  ok(fp.sell === 200 && typeof fp.linesKey === "string" && fp.linesKey.length > 0, "#284 fp: fingerprint carries the gross sell and a non-empty lines key");
+  ok(a284Fp(quote([item({ desc: "Truss — black" })])).linesKey === fp.linesKey, "#284 fp: a description-only edit keeps the lines key");
+  ok(a284Fp(quote([item({ qty: 3 })], 300)).linesKey !== fp.linesKey, "#284 fp: a qty change changes the lines key");
+  ok(a284Fp(quote([item({ sku: "B-2" })])).linesKey !== fp.linesKey, "#284 fp: swapping the part (same total) changes the lines key");
+  ok(a284Fp(quote([item(), item({ id: 2, sku: "C-3", qty: 1, price: 0 })])).linesKey !== fp.linesKey, "#284 fp: adding a line changes the lines key");
+  const twoA = quote([item(), item({ id: 2, sku: "C-3" })], 400);
+  const twoB = quote([item({ id: 2, sku: "C-3" }), item()], 400);
+  ok(a284Fp(twoA).linesKey === a284Fp(twoB).linesKey, "#284 fp: line order does not matter");
+  ok(a284Fp({ quoteType: "flame_test", value: 1000, spec: null }).sell === 1000, "#284 fp: a service quote fingerprints on its sell alone");
+  const approved = (q: Record<string, unknown>, snap: { sell: number; linesKey: string } | null, method = "in_app") =>
+    ({ ...q, review: { state: "approved", method, decidedBy: "Jeff Chesebro", reviewer: "Jeff Chesebro", note: "", approvedAgainst: snap } });
+  ok(a284Matches(approved(base, fp)), "#284 fp: an unchanged quote matches its snapshot");
+  ok(a284Matches(approved(quote([item({ desc: "x" })]), fp)), "#284 fp: a wording edit still matches");
+  ok(!a284Matches(approved(quote([item({ qty: 3 })], 300), fp)), "#284 fp: a priced change no longer matches");
+  ok(!a284Matches(approved(quote([item()], 250), fp)), "#284 fp: a changed sell alone no longer matches");
+  ok(a284Matches(approved(quote([item({ qty: 3 })], 300), null)), "#284 fp: a legacy approval (no snapshot) always matches");
+  ok(a284Stale(approved(quote([item({ qty: 3 })], 300), fp)) && !a284Stale(approved(base, fp)), "#284 fp: isStaleSnapshotApproval is true only for a changed, snapshotted, non-auto approval");
+  ok(!a284Stale(approved(quote([item({ qty: 3 })], 300), fp, "auto_limit")), "#284 fp: an auto_limit approval is never snapshot-stale (its own #242 rule governs)");
+  ok(a284Holds(approved(base, fp) as never, a284NoLimits) && !a284Holds(approved(quote([item({ qty: 3 })], 300), fp) as never, a284NoLimits),
+    "#284 fp: approvalHolds honours the snapshot for in-app approvals");
+  ok(!a284Holds(approved(quote([item({ qty: 3 })], 300), fp, "attested") as never, a284NoLimits), "#284 fp: …and for attested approvals");
+  ok(a284StaleLine({ method: "in_app", decidedBy: "Jeff Chesebro", reviewer: null, note: "" }) === "Approval cleared — the price or lines changed since Jeff approved it",
+    "#284 fp: the stale-approval sentence");
+  ok(a284ApprovedLine({ method: "self", decidedBy: "Jeff Chesebro", reviewer: null, note: "" }) === "Self-approved by Jeff", "#284 fp: the self-approval sentence");
+}
+
+async function approval284AsyncChecks(): Promise<void> {
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const { upsertDoc: a284Upsert } = await import("@/db/doc-store");
+  const id = (slug: string) => fixtureId(284, slug);
+  const item = { id: 1, sku: "A-1", desc: "Truss", qty: 2, unit: "ea", cost: 50, price: 100 };
+  const mk = (slug: string, owner: string, extra: Record<string, unknown> = {}) =>
+    createFixture("quotes", {
+      id: id(slug), name: `T284 ${slug}`, customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner, preparedBy: owner, value: 200, margin: 0.5, history: [], createdAt: 1, updatedAt: 1,
+      spec: { sections: [{ id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [item] }], mobs: [] },
+      review: { state: "in_review", reviewer: null, submittedBy: owner, submittedAt: 1, decidedBy: null, decidedAt: null, note: "", method: null },
+      ...extra,
+    } as never);
+  // patchQuote is module-private; edit the stored doc directly (same write path the fixtures use).
+  const edit = async (qid: string, fn: (d: Record<string, unknown>) => void) => {
+    const cur = (await Q.get(qid)) as unknown as Record<string, unknown>;
+    const d = JSON.parse(JSON.stringify(cur)) as Record<string, unknown>;
+    fn(d);
+    await a284Upsert("quotes", d as never);
+  };
+  type Sec = { sections: { items: { qty: number; desc: string }[] }[] };
+
+  // Task 1 — approve() stamps the snapshot; a priced edit makes the gate refuse.
+  await mk("t1-approve", "T284 Nobody");
+  const a = await Q.approve(id("t1-approve"), { by: "Jeff Chesebro" });
+  ok(!!a?.review?.approvedAgainst && a.review.approvedAgainst.sell === 200, "#284 DB: approve() stamps approvedAgainst with the gross sell");
+  await edit(id("t1-approve"), (d) => { (d.spec as Sec).sections[0].items[0].qty = 3; d.value = 300; });
+  let refused = false;
+  try { await Q.setStatus(id("t1-approve"), "sent", "T284 Nobody"); } catch (e) { refused = Q.isApprovalGateRefusal(e); }
+  ok(refused, "#284 DB: after a priced edit the old approval no longer opens Send");
+  await mk("t1-wording", "T284 Nobody");
+  await Q.approve(id("t1-wording"), { by: "Jeff Chesebro" });
+  await edit(id("t1-wording"), (d) => { (d.spec as Sec).sections[0].items[0].desc = "Truss, black"; d.scopeNarrative = "new words"; });
+  const sent = await Q.setStatus(id("t1-wording"), "sent", "T284 Nobody");
+  ok(sent?.status === "sent", "#284 DB: a wording-only edit keeps the approval — Send goes through");
 }

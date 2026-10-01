@@ -40,6 +40,7 @@ import {
   type ReviewLimitContext,
 } from "@/lib/review-limits";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
+import { approvalFingerprint, approvalSnapshotMatches, type ApprovalSnapshot } from "@/lib/approval-snapshot";
 
 export { normalizeQuotePipeline };
 
@@ -144,11 +145,13 @@ export type ReviewState = "none" | "in_review" | "approved" | "changes";
  *   Admin → Review limits) when it moved to sent/won, so the gate approved
  *   it itself. It counts while the quote is unchanged against its snapshot,
  *   or still fits the owner's current limit — approvalHolds().
+ * - "self" — #284: the owner holds `approve` and moved their own quote to
+ *   sent/won; stamped by the gate, like auto_limit.
  * Absent/null on legacy docs decided before this field existed (seed data,
  * pre-punch-60 approvals) — those are still valid approvals, just with an
  * unknown method.
  */
-export type ApprovalMethod = "in_app" | "attested" | "auto_limit";
+export type ApprovalMethod = "in_app" | "attested" | "auto_limit" | "self";
 
 export type QuoteReview = {
   state: ReviewState;
@@ -164,6 +167,10 @@ export type QuoteReview = {
    *  owner's limit and the quote value at that moment. Null/absent on every
    *  other approval (approve / attest / request changes clear it). */
   auto?: AutoApprovalSnapshot | null;
+  /** #284: what an in_app / attested / self approval was granted against
+   *  (gross sell + priced-lines key). Null/absent on legacy approvals and on
+   *  auto_limit (which keeps its own `auto` snapshot). */
+  approvedAgainst?: ApprovalSnapshot | null;
 };
 
 export type QuoteHistoryEntry = {
@@ -406,6 +413,7 @@ function rv(state: ReviewState, o: Partial<QuoteReview> = {}): QuoteReview {
     decidedAt: o.decidedAt || null,
     note: o.note || "",
     method: o.method ?? null,
+    approvedAgainst: o.approvedAgainst ?? null,
   };
 }
 
@@ -1072,6 +1080,7 @@ export function autoApprovedReview(
     decidedAt: now,
     note: "",
     method: "auto_limit",
+    approvedAgainst: null,
     auto: {
       kind: ev.kind,
       limit: ev.limit,
@@ -1284,7 +1293,9 @@ export async function setStatus(
   // legacy approval passes on its own record, so it makes exactly the DB
   // reads it made before #242 (#242 final).
   const gated = !resolveStatusGate(status, null, opts).ok;
-  const needsLimits = gated && (!hasApproval(q.review) || q.review?.method === "auto_limit");
+  // #284: a snapshot-stale approval also needs the context (the owner may self-approve).
+  const needsLimits =
+    gated && !(hasApproval(q.review) && q.review?.method !== "auto_limit" && approvalSnapshotMatches(q));
   const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
   const gate = decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null);
   // #174: a TYPED refusal. The gate is the only throw here whose message is
@@ -1552,6 +1563,7 @@ export async function approve(
     review.note = opts.note || "";
     review.auto = null;
     review.method = "in_app";
+    review.approvedAgainst = approvalFingerprint(q);
     q.review = review;
     q.updatedAt = Date.now();
   });
@@ -1588,6 +1600,7 @@ export async function attestApproval(
     review.note = note;
     review.auto = null;
     review.method = "attested";
+    review.approvedAgainst = approvalFingerprint(q);
     q.review = review;
     q.updatedAt = Date.now();
   });
@@ -1604,6 +1617,7 @@ export async function requestChanges(
     review.decidedAt = Date.now();
     review.note = opts.note || "";
     review.auto = null;
+    review.approvedAgainst = null;
     q.review = review;
     q.updatedAt = Date.now();
   });

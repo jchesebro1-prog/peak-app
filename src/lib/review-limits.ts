@@ -17,6 +17,7 @@
 import { normalizePriceOverride } from "@/lib/service-pricing";
 import { isLaborSku } from "@/lib/design/wire-labor";
 import { firstName } from "@/lib/team";
+import { approvalSnapshotMatches } from "@/lib/approval-snapshot";
 import { money } from "@/lib/format";
 
 /* ---------------- kinds ---------------- */
@@ -80,6 +81,7 @@ export type ReviewLike = {
   method?: string | null;
   decidedBy?: string | null;
   auto?: AutoApprovalSnapshot | null;
+  approvedAgainst?: { sell: number; linesKey: string } | null;
 };
 export type ReviewableQuote = {
   quoteType?: string | null;
@@ -249,8 +251,9 @@ export function autoSnapshotUnchanged(q: ReviewableQuote): boolean {
   return reviewKindOf(q) === a.kind;
 }
 
-/** Does the quote's approval count right now? In-app, attested and legacy
- *  approvals: exactly as hasApproval. An auto_limit approval holds while the
+/** Does the quote's approval count right now? In-app, attested, self and
+ *  legacy approvals: hold while the quote matches its #284 snapshot
+ *  (approval-snapshot.ts); no snapshot = legacy, holds. An auto_limit approval holds while the
  *  quote is unchanged against its snapshot (autoSnapshotUnchanged) — even if
  *  the owner's limit was lowered or the owner left the roster afterwards: a
  *  lowered limit governs NEW grants only. Once the quote changed (value
@@ -259,7 +262,7 @@ export function autoSnapshotUnchanged(q: ReviewableQuote): boolean {
 export function approvalHolds(q: ReviewableQuote, ctx: ReviewLimitContext): boolean {
   const r = q.review;
   if (!r || r.state !== "approved") return false;
-  if (r.method !== "auto_limit") return true;
+  if (r.method !== "auto_limit") return approvalSnapshotMatches(q);
   return autoSnapshotUnchanged(q) || evaluateReviewLimit(q, ctx).fits;
 }
 

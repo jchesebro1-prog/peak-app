@@ -25,7 +25,7 @@ import { money } from "@/lib/format";
  * wrong. Change the wording here and both surfaces move together.
  */
 export type ApprovedReviewLike = {
-  method?: "in_app" | "attested" | "auto_limit" | null;
+  method?: "in_app" | "attested" | "auto_limit" | "self" | null;
   decidedBy: string | null;
   reviewer: string | null;
   note: string;
@@ -48,6 +48,7 @@ export type ApprovedReviewLike = {
  */
 export function approvedReviewLine(review: ApprovedReviewLike): string {
   if (review.method === "auto_limit") return autoApprovalLine(review);
+  if (review.method === "self") return "Self-approved by " + firstName(review.decidedBy || "");
   return review.method === "attested"
     ? "Attested by " +
         firstName(review.decidedBy || "") +
@@ -81,4 +82,10 @@ export function autoApprovalLine(review: ApprovedReviewLike): string {
 export function staleAutoApprovalLine(chipText: string): string {
   const t = chipText || "needs review";
   return "Auto-approval no longer applies — " + t.charAt(0).toLowerCase() + t.slice(1);
+}
+
+/** #284: an in-app / attested / self approval the quote has since moved away
+ *  from (price or priced lines changed) — it no longer counts. */
+export function staleApprovalLine(review: ApprovedReviewLike): string {
+  return "Approval cleared — the price or lines changed since " + firstName(review.decidedBy || review.reviewer || "") + " approved it";
 }
