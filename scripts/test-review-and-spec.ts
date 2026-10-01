@@ -39714,3 +39714,46 @@ async function approval284AsyncChecks(): Promise<void> {
   // The withdraw guard inside the patch: a decided quote is not reset.
   ok((await Q.withdrawReview(id("t3-appr")))?.review?.state === "approved", "#284 ops: the store's withdrawReview leaves a decided quote alone");
 }
+
+/* #284 Task 4: the next-step view model. */
+import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
+{
+  const R = (state: string, o: Record<string, unknown> = {}) => ({ state, reviewer: null, submittedBy: "Nic Trapani", decidedBy: null, note: "", method: null, ...o });
+  const base = { status: "draft", review: R("none"), holds: false, chip: null, owner: "Nic Trapani", viewer: "Nic Trapani", viewerCanApprove: false, submittedAgo: "2h ago", reviewers: ["Jeff Chesebro", "Chris Mittlesteadt"] };
+  const v = (o: Record<string, unknown>) => a284Next({ ...base, ...o } as never);
+  const acts = (x: ReturnType<typeof a284Next>) => x.secondary.map((s) => s.action).join(",");
+
+  let x = v({});
+  ok(x.primary?.action === "submit" && x.primary.label === "Submit for approval" && acts(x) === "assign,attest" && x.pill.label === "Not submitted",
+    "#284 next: owner, draft, no route → Submit for approval · ⋯ Assign to…, Attest approval…");
+  ok(x.reviewers.join(",") === "Jeff Chesebro,Chris Mittlesteadt", "#284 next: Assign to… lists approvers other than the owner");
+  x = v({ chip: { tone: "within", text: "Within your limit — approves automatically", short: "Within limit", staleAuto: false } });
+  ok(x.primary?.action === "send" && x.primary.label === "Send to customer →" && acts(x) === "submit" && x.secondary[0].label === "Submit for approval anyway"
+    && x.strip === "Within your limit — approves automatically", "#284 next: within limit → Send to customer → · ⋯ Submit for approval anyway");
+  x = v({ owner: "Jeff Chesebro", viewer: "Jeff Chesebro", viewerCanApprove: true });
+  ok(x.primary?.action === "send" && !x.reviewers.includes("Jeff Chesebro"), "#284 next: an approver owner gets Send to customer → straight away");
+  x = v({ review: R("in_review") });
+  ok(x.primary === null && acts(x) === "withdraw" && x.pill.label === "In review · any approver" && x.pill.title === "Submitted by Nic, 2h ago",
+    "#284 next: owner, in review → waiting pill + Withdraw");
+  x = v({ review: R("in_review", { reviewer: "Jeff Chesebro" }), viewer: "Chris Mittlesteadt", viewerCanApprove: true });
+  ok(x.primary?.action === "approve" && x.primary.label === "Approve" && acts(x) === "sendBack" && x.secondary[0].label === "Send back…" && x.approverMode && x.pill.label === "In review · with Jeff",
+    "#284 next: any approver (even when assigned to someone else) gets Approve · Send back…");
+  x = v({ review: R("in_review"), viewer: "Jena Tolksdorf", viewerCanApprove: false });
+  ok(x.primary === null && x.secondary.length === 0 && !x.approverMode, "#284 next: a bystander sees the pill only");
+  x = v({ review: R("changes", { decidedBy: "Jeff Chesebro", note: "Fix the rigging math" }) });
+  ok(x.primary?.action === "submit" && x.primary.label === "Resubmit for approval" && acts(x) === "assign" && x.pill.label === "Changes requested · Jeff"
+    && x.strip === "“Fix the rigging math” — Jeff", "#284 next: changes → Resubmit for approval, strip carries the note, no attest");
+  x = v({ review: R("approved", { decidedBy: "Jeff Chesebro", method: "in_app" }), holds: true });
+  ok(x.primary?.action === "send" && x.pill.label === "Approved · Jeff" && x.strip === "Approved by Jeff — ready to send to the customer", "#284 next: approved → Send to customer →");
+  x = v({ review: R("approved", { decidedBy: "Nic Trapani", method: "attested", note: "Jeff on a call" }), holds: true });
+  ok(x.pill.label === "Attested · Nic", "#284 next: attested pill");
+  x = v({ review: R("approved", { decidedBy: "Jeff Chesebro", method: "in_app" }), holds: false });
+  ok(x.primary?.action === "submit" && x.primary.label === "Resubmit for approval" && x.pill.label === "Approval cleared" && x.pill.tone === "stale"
+    && x.strip === "Approval cleared — the price or lines changed since Jeff approved it", "#284 next: a stale approval reads as cleared → Resubmit");
+  x = v({ status: "sent", review: R("approved", { decidedBy: "Nic Trapani", method: "self" }), holds: true });
+  ok(x.primary === null && x.secondary.length === 0 && x.pill.label === "Self-approved · Nic", "#284 next: a sent quote has no next step");
+  x = v({ status: "sent", review: R("approved", { decidedBy: "Jeff Chesebro", method: "in_app" }), holds: false });
+  ok(x.primary?.action === "submit" && acts(x) === "assign,attest", "#284 next: a sent quote whose approval lapsed can be resubmitted (to reach Won)");
+  x = v({ status: "won", review: R("approved", { method: "in_app", decidedBy: "Jeff Chesebro" }), holds: true });
+  ok(x.primary === null && x.strip === null, "#284 next: won/lost show the pill only");
+}
