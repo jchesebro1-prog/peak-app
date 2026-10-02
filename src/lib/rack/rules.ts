@@ -6,15 +6,18 @@
  *
  * Absent = unknown, never zero (D576 aside: blank/vent/shelf watts read 0 W).
  */
-import { canPlace, laneCountOf, lanesIntersect, laneSpan, occupiedSpan, overlapSpan, placementFacts, ruRangeLabel } from "./layout";
+import { canPlace, heightForPart, laneCountOf, lanesIntersect, laneSpan, occupiedSpan, overlapSpan, place, placementFacts, resize, ruRangeLabel, update } from "./layout";
 import { rackFactsOf } from "./part-facts";
 import {
   BTU_PER_WATT,
   CIRCUIT_VOLTS,
   HEAT_WATTS_PER_WINDOW,
   HEAT_WINDOW_RU,
+  RACK_MAX_PLACEMENTS,
+  type PlacementOverride,
   type RackConfig,
   type RackDataField,
+  type RackEdit,
   type RackFace,
   type RackIssue,
   type RackLayout,
@@ -60,6 +63,84 @@ export function firstFit(
     }
   }
   return null;
+}
+
+/** The width class a placement's lane count stands for (firstFit's `width`). */
+const widthOfLanes = (n: RackPlacement["laneCount"]): RackWidthClass | undefined => (n === 2 ? "half" : n === 3 ? "third" : undefined);
+
+/**
+ * Up to `count` copies of a placement, each at `firstFit` for its height, face
+ * and width — one edit, so one undo. Copies keep sku, label, optional and
+ * overrides; a shelf's devices are not copied, and a device copied off a shelf
+ * lands in the rack itself. `placed` says how many fit.
+ */
+export function duplicatePlacement(
+  layout: RackLayout,
+  id: string,
+  count: number,
+  newId: () => string
+): ({ ok: true; layout: RackLayout } | { ok: false; reason: string }) & { placed: number } {
+  const cur = layout.placements.find((q) => q.id === id);
+  if (!cur) return { ok: false, reason: "That placement isn't in the rack.", placed: 0 };
+  const want = Math.max(1, Math.min(RACK_MAX_PLACEMENTS, Math.floor(Number.isFinite(count) ? count : 1)));
+  const width = widthOfLanes(cur.laneCount);
+  let out = layout;
+  let placed = 0;
+  for (let i = 0; i < want && out.placements.length < RACK_MAX_PLACEMENTS; i++) {
+    const fit = firstFit(out, cur.ruHeight, cur.face, width);
+    if (!fit) break;
+    const copy: RackPlacement = {
+      id: newId(),
+      kind: cur.kind,
+      ruStart: fit.ruStart,
+      ruHeight: cur.ruHeight,
+      face: cur.face,
+      ...(cur.sku !== undefined ? { sku: cur.sku } : {}),
+      ...(cur.label ? { label: cur.label } : {}),
+      ...(width ? { lane: fit.lane, laneCount: cur.laneCount } : {}),
+      ...(cur.optional ? { optional: true } : {}),
+      ...(cur.override ? { override: structuredClone(cur.override) } : {}),
+    };
+    const r = place(out, copy);
+    if (!r.ok) break;
+    out = r.layout;
+    placed++;
+  }
+  if (placed === 0) {
+    const reason = layout.placements.length >= RACK_MAX_PLACEMENTS ? `A rack can hold at most ${RACK_MAX_PLACEMENTS} placements.` : "No room for a copy — the rack is full.";
+    return { ok: false, reason, placed };
+  }
+  return { ok: true, layout: out, placed };
+}
+
+export type OverrideNumberKey = "ruHeight" | "depthIn" | "weightLb" | "powerWatts";
+
+/**
+ * Set (a number) or clear (`undefined`) one numeric override. A height override
+ * re-resolves the placement's RU height (override > catalog > 1) and is refused
+ * if it no longer fits; clearing the last override drops the override object.
+ * A slot without a part (reserved) has no catalog height: its height is set directly.
+ */
+export function setPlacementOverride(
+  layout: RackLayout,
+  id: string,
+  key: OverrideNumberKey,
+  value: number | undefined,
+  lookup?: RackPartLookup
+): RackEdit {
+  const cur = layout.placements.find((q) => q.id === id);
+  if (!cur) return { ok: false, reason: "That placement isn't in the rack." };
+  if (value !== undefined) {
+    if (!Number.isFinite(value) || value < 0) return { ok: false, reason: "Enter a number of 0 or more." };
+    if (key === "ruHeight" && (!Number.isInteger(value) || value < 1)) return { ok: false, reason: "Height must be a whole number of RU." };
+  }
+  if (key === "ruHeight" && !cur.sku) return value === undefined ? { ok: true, layout } : resize(layout, id, value);
+  const ov: PlacementOverride = { ...(cur.override ?? {}) };
+  if (value === undefined) delete ov[key];
+  else ov[key] = value;
+  const patched = update(layout, id, { override: Object.keys(ov).length ? ov : undefined });
+  if (!patched.ok || key !== "ruHeight") return patched;
+  return resize(patched.layout, id, heightForPart(cur.sku ? lookup?.(cur.sku) : undefined, ov.ruHeight));
 }
 
 /** RU positions (1..ruCount) covered on one face by top-level placements passing `keep`. */

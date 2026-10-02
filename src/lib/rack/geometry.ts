@@ -7,9 +7,9 @@
  * them. No React, no store/db imports.
  */
 import { textExtent, type Shape } from "@/lib/curtain-cut-sheets/shapes";
-import { childrenOf, laneSpan, occupiedSpan, placementFacts } from "./layout";
+import { childrenOf, laneSpan, occupiedSpan, placementFacts, ruRangeLabel } from "./layout";
 import { ruLabel } from "./rules";
-import { RU_IN, type RackConfig, type RackFace, type RackLayout, type RackPartLookup, type RackPlacement } from "./types";
+import { RU_IN, type RackConfig, type RackFace, type RackLayout, type RackPartInfo, type RackPartLookup, type RackPlacement } from "./types";
 
 export const RACK_GEOM = { railIn: 1.6, panelIn: 19, marginIn: 0.6, labelSize: 0.55, ruNumberSize: 0.45 } as const;
 
@@ -195,4 +195,69 @@ export function rackGeometry(
   }
 
   return { viewBox: { w: W, h: H }, shapes, slots };
+}
+
+/* ---------- interaction helpers (the shared RackElevation component) ---------- */
+
+/**
+ * Screen-reader text for a placement: "RU 12–13, front: QSC CXD4.3". The name is
+ * the drawn label's first line (label > "Reserved — future" > catalog description > SKU).
+ * Pass `layout` so a shelf reads its extended span (D575).
+ */
+export function slotAriaLabel(p: RackPlacement, info: RackPartInfo | undefined, config: RackConfig, layout?: RackLayout): string {
+  const span = (layout ? occupiedSpan(layout, p) : null) ?? { lo: p.ruStart, hi: p.ruStart + p.ruHeight - 1 };
+  const clean = (s: string | undefined) => (s ? oneLine(s) : "");
+  const name = clean(p.label) || (p.kind === "reserved" ? RESERVED_TEXT : clean(info?.desc) || clean(p.sku) || "Unnamed part");
+  return `${ruRangeLabel(config, span.lo, span.hi)}, ${p.face}: ${name}${p.optional ? " (optional)" : ""}`;
+}
+
+/**
+ * The snapped `ruStart` for a part of `ruHeight` RU under a pointer at `yIn`
+ * (drawing inches, y down). The ghost centers on the pointer's RU row and is
+ * clamped to the rack. `title` must match how the drawing was rendered.
+ */
+export function ruFromPointer(yIn: number, config: Pick<RackConfig, "ruCount">, ruHeight: number, opts?: { title?: boolean }): number {
+  const { ruCount } = config;
+  const top = RACK_GEOM.marginIn + (opts?.title ? TITLE_BAND : 0);
+  const row = Math.min(ruCount - 1, Math.max(0, Math.floor((yIn - top) / RU_IN)));
+  const pointerRu = ruCount - row;
+  const h = Math.max(1, Math.round(ruHeight));
+  return Math.max(1, Math.min(ruCount - h + 1, pointerRu - Math.floor((h - 1) / 2)));
+}
+
+/** The lane (0-based) under a pointer at `xIn` for a part `laneCount` lanes wide, clamped. */
+export function laneFromPointer(xIn: number, laneCount: 1 | 2 | 3): 0 | 1 | 2 {
+  const x0 = RACK_GEOM.marginIn + RACK_GEOM.railIn;
+  const lane = Math.floor(((xIn - x0) / RACK_GEOM.panelIn) * laneCount);
+  return Math.max(0, Math.min(laneCount - 1, lane)) as 0 | 1 | 2;
+}
+
+/** The slot under a point. A shelf's slot contains its devices', which come after it — so the last hit wins. */
+export function slotAt(slots: readonly RackSlot[], x: number, y: number): RackSlot | null {
+  for (let i = slots.length - 1; i >= 0; i--) {
+    const s = slots[i];
+    if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) return s;
+  }
+  return null;
+}
+
+/** The box a part of `ruHeight` RU at `ruStart` in `lane` of `laneCount` would draw — same rounding as a placed slot. */
+export function ghostRect(
+  config: Pick<RackConfig, "ruCount">,
+  ruStart: number,
+  ruHeight: number,
+  lane: number,
+  laneCount: 1 | 2 | 3,
+  opts?: { title?: boolean }
+): { x: number; y: number; w: number; h: number } {
+  const { marginIn, railIn, panelIn } = RACK_GEOM;
+  const top = marginIn + (opts?.title ? TITLE_BAND : 0);
+  const hi = ruStart + ruHeight - 1;
+  const x0 = marginIn + railIn;
+  return rounded({
+    x: x0 + (lane / laneCount) * panelIn + INSET,
+    y: top + (config.ruCount - hi) * RU_IN + INSET,
+    w: panelIn / laneCount - 2 * INSET,
+    h: ruHeight * RU_IN - 2 * INSET,
+  });
 }

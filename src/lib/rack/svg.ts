@@ -6,7 +6,7 @@
  */
 import type { Fill, Shape, Stroke } from "@/lib/curtain-cut-sheets/shapes";
 import { fmt, rackGeometry, type RackGeometryOpts } from "./geometry";
-import type { RackLayout, RackPartLookup } from "./types";
+import type { RackConfig, RackFace, RackLayout, RackPartLookup } from "./types";
 
 const SW: Record<Stroke, number> = { thin: 0.6, med: 1, heavy: 1.6 }; // screen px
 const SW_ABS: Record<Stroke, number> = { thin: 0.02, med: 0.035, heavy: 0.06 }; // inches
@@ -85,4 +85,17 @@ export function shapesToSvg(
 export function renderRackElevationSvg(layout: RackLayout, lookup: RackPartLookup, opts: RackGeometryOpts): string {
   const g = rackGeometry(layout, lookup, opts);
   return shapesToSvg(g.shapes, g.viewBox, { title: opts.title, idPrefix: opts.idPrefix, strokeMode: opts.strokeMode });
+}
+
+/**
+ * The one entry point the builder sidebar and the printed rack sheets share:
+ * a face's elevation with screen strokes, and the rear view ghosting deep front gear.
+ */
+export function elevationSvgFor(
+  layout: RackLayout,
+  lookup: RackPartLookup,
+  face: RackFace,
+  opts: { numbering?: RackConfig["numbering"]; idPrefix?: string; title?: string } = {}
+): string {
+  return renderRackElevationSvg(layout, lookup, { ...opts, face, ghostOppositeFace: face === "rear", strokeMode: "screen" });
 }

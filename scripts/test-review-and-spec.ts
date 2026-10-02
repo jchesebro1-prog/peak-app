@@ -44487,6 +44487,107 @@ import { readFileSync as c296cRead } from "node:fs";
   ok(copied.items[0].rackId === "SA-RACK-A" && copied.items[0].sku === "SA-RACK-A", "#296 rack consumers: Copy system keeps rackId on a rack line");
 }
 
+/* ===== #296 — rack elevation component ===== */
+import * as c296eGeo from "@/lib/rack/geometry";
+import * as c296eSvgMod from "@/lib/rack/svg";
+import * as c296eRules from "@/lib/rack/rules";
+import { existsSync as c296eExists, readFileSync as c296eRead } from "node:fs";
+import type { RackPlacement as C296ePlacement, RackLayout as C296eLayout, RackPartInfo as C296eInfo, RackConfig as C296eConfig } from "@/lib/rack/types";
+{
+  type Fn = (...a: never[]) => unknown;
+  const geo = c296eGeo as unknown as Record<string, Fn | undefined>;
+  const svgm = c296eSvgMod as unknown as Record<string, Fn | undefined>;
+  const rules = c296eRules as unknown as Record<string, Fn | undefined>;
+  const call = <T,>(f: Fn | undefined, ...a: unknown[]): T | undefined => {
+    if (typeof f !== "function") return undefined;
+    try { return (f as unknown as (...x: unknown[]) => T)(...a); } catch { return undefined; }
+  };
+  const P = (o: Partial<C296ePlacement> & { id: string }): C296ePlacement => ({ kind: "device", sku: "S", ruStart: 1, ruHeight: 1, face: "front", ...o, id: "RP-" + o.id });
+  const cfg = (o: Partial<C296eConfig> = {}): C296eConfig => ({ ruCount: 42, widthIn: 19, numbering: "bottom-up", ...o });
+  const L = (ps: C296ePlacement[], c: Partial<C296eConfig> = {}): C296eLayout => ({ config: cfg(c), placements: ps });
+  const look = (sku: string): C296eInfo | undefined =>
+    sku === "CXD" ? { sku, desc: "Power amp", mfr: "QSC", found: true, ruHeight: 2, depthIn: 18 } : sku === "S" ? { sku, desc: "Thing", found: true } : undefined;
+
+  // ---- slotAriaLabel ----
+  const amp = P({ id: "A", sku: "CXD", label: "QSC CXD4.3", ruStart: 12, ruHeight: 2 });
+  ok(call<string>(geo.slotAriaLabel, amp, look("CXD"), cfg()) === "RU 12–13, front: QSC CXD4.3", "#296 rack component: slotAriaLabel reads \"RU 12–13, front: QSC CXD4.3\"");
+  ok(call<string>(geo.slotAriaLabel, P({ id: "B", sku: "CXD", ruStart: 3, ruHeight: 2, face: "rear" }), look("CXD"), cfg()) === "RU 3–4, rear: Power amp", "#296 rack component: slotAriaLabel falls back to the catalog description and names the rear face");
+  ok(call<string>(geo.slotAriaLabel, P({ id: "R", kind: "reserved", sku: undefined, ruStart: 5, ruHeight: 4 }), undefined, cfg()) === "RU 5–8, front: Reserved — future", "#296 rack component: a reserved slot reads Reserved — future");
+  ok(call<string>(geo.slotAriaLabel, P({ id: "O", sku: "ZZ", ruStart: 7, optional: true }), undefined, cfg()) === "RU 7, front: ZZ (optional)", "#296 rack component: an unknown SKU reads the SKU and an optional placement says so");
+  ok(call<string>(geo.slotAriaLabel, amp, look("CXD"), cfg({ numbering: "top-down" })) === "RU 30–31, front: QSC CXD4.3", "#296 rack component: slotAriaLabel follows top-down numbering");
+  const shelf = P({ id: "SH", kind: "shelf", sku: "SHELF", label: "Shelf", ruStart: 10, ruHeight: 1 });
+  const kid = P({ id: "K", sku: "S", label: "Mixer", ruStart: 10, ruHeight: 3, shelfId: "RP-SH" });
+  ok(call<string>(geo.slotAriaLabel, shelf, undefined, cfg(), L([shelf, kid])) === "RU 10–12, front: Shelf", "#296 rack component: with the layout, a shelf's label covers its extended span");
+
+  // ---- ruFromPointer ----
+  const M = c296eGeo.RACK_GEOM.marginIn;
+  const rowY = (c: C296eConfig, ru: number, title = false) => M + (title ? 1.2 : 0) + (c.ruCount - ru) * 1.75 + 0.875;
+  const c12 = cfg({ ruCount: 12 });
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 5), c12, 1) === 5, "#296 rack component: ruFromPointer — the RU row under the pointer for a 1U part");
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 5), c12, 3) === 4, "#296 rack component: ruFromPointer centers a 3U ghost on the pointer");
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 5), c12, 2) === 5, "#296 rack component: ruFromPointer puts a 2U ghost's bottom row under the pointer");
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 12), c12, 4) === 9 && call<number>(geo.ruFromPointer, -50, c12, 4) === 9, "#296 rack component: ruFromPointer clamps to the top of the rack");
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 1), c12, 3) === 1 && call<number>(geo.ruFromPointer, 9999, c12, 1) === 1, "#296 rack component: ruFromPointer clamps to RU 1");
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 5, true), c12, 1, { title: true }) === 5 && call<number>(geo.ruFromPointer, rowY(c12, 5, true), c12, 1) === 4, "#296 rack component: ruFromPointer accounts for the title band only when asked");
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 5), cfg({ ruCount: 2 }), 4) === 1, "#296 rack component: ruFromPointer returns RU 1 when the part is taller than the rack");
+
+  // ---- laneFromPointer / slotAt / ghostRect ----
+  const x0 = M + c296eGeo.RACK_GEOM.railIn;
+  ok(call<number>(geo.laneFromPointer, x0 + 1, 2) === 0 && call<number>(geo.laneFromPointer, x0 + 18, 2) === 1 && call<number>(geo.laneFromPointer, x0 + 9.6, 3) === 1, "#296 rack component: laneFromPointer splits the 19 in panel into lanes");
+  ok(call<number>(geo.laneFromPointer, -5, 3) === 0 && call<number>(geo.laneFromPointer, 999, 3) === 2 && call<number>(geo.laneFromPointer, x0 + 18, 1) === 0, "#296 rack component: laneFromPointer clamps to the lanes that exist");
+  const g = c296eGeo.rackGeometry(L([shelf, kid, amp]), look, { face: "front" });
+  const kidSlot = g.slots.find((s) => s.placementId === "RP-K")!;
+  const shelfSlot = g.slots.find((s) => s.placementId === "RP-SH")!;
+  const hit = call<{ placementId: string }>(geo.slotAt, g.slots, kidSlot.x + kidSlot.w / 2, kidSlot.y + kidSlot.h / 2);
+  ok(hit?.placementId === "RP-K", "#296 rack component: slotAt prefers the shelf's device over the shelf that contains it");
+  ok(call<{ placementId: string }>(geo.slotAt, g.slots, shelfSlot.x + 0.1, shelfSlot.y + shelfSlot.h - 0.1)?.placementId === "RP-SH" && call(geo.slotAt, g.slots, 0, 0) == null, "#296 rack component: slotAt finds the shelf tray and nothing off the panel");
+  const ampSlot = g.slots.find((s) => s.placementId === "RP-A")!;
+  const gr = call<{ x: number; y: number; w: number; h: number }>(geo.ghostRect, cfg(), 12, 2, 0, 1);
+  ok(!!gr && Math.abs(gr.x - ampSlot.x) < 0.002 && Math.abs(gr.y - ampSlot.y) < 0.002 && Math.abs(gr.w - ampSlot.w) < 0.002 && Math.abs(gr.h - ampSlot.h) < 0.002, "#296 rack component: ghostRect lands exactly on the drawn box for the same RU span");
+  const half = call<{ x: number; w: number }>(geo.ghostRect, cfg(), 1, 1, 1, 2);
+  ok(!!half && Math.abs(half.x - (x0 + 9.5 + 0.04)) < 0.002 && Math.abs(half.w - (9.5 - 0.08)) < 0.002, "#296 rack component: ghostRect draws the right half lane");
+
+  // ---- elevationSvgFor ----
+  const lay = L([amp, P({ id: "D", sku: "CXD", ruStart: 20, ruHeight: 2, face: "rear" })]);
+  const want = c296eSvgMod.renderRackElevationSvg(lay, look, { face: "rear", ghostOppositeFace: true, idPrefix: "rk-x", strokeMode: "screen" });
+  ok(call<string>(svgm.elevationSvgFor, lay, look, "rear", { idPrefix: "rk-x" }) === want, "#296 rack component: elevationSvgFor(rear) = renderRackElevationSvg with the opposite-face ghost and screen strokes");
+  ok(call<string>(svgm.elevationSvgFor, lay, look, "front", { idPrefix: "rk-x", title: "Rack A", numbering: "top-down" }) === c296eSvgMod.renderRackElevationSvg(lay, look, { face: "front", ghostOppositeFace: false, idPrefix: "rk-x", strokeMode: "screen", title: "Rack A", numbering: "top-down" }), "#296 rack component: elevationSvgFor(front) passes title and numbering and draws no ghost");
+
+  // ---- duplicatePlacement / setPlacementOverride (PlacementMenu's pure halves) ----
+  let seq = 0;
+  const nid = () => "RP-N" + ++seq;
+  const small = L([P({ id: "A", sku: "CXD", label: "Amp", ruStart: 1, ruHeight: 2, optional: true, override: { weightLb: 30 } })], { ruCount: 6 });
+  const dup = call<{ ok: boolean; layout?: C296eLayout; placed: number }>(rules.duplicatePlacement, small, "RP-A", 4, nid);
+  const copies = dup?.layout?.placements.filter((p) => p.id.startsWith("RP-N")) ?? [];
+  ok(!!dup && dup.ok && dup.placed === 2 && copies.length === 2 && copies.map((p) => p.ruStart).join() === "3,5", "#296 rack component: duplicating ×4 in a 6U rack places 2 copies by first fit");
+  ok(copies.length === 2 && copies.every((p) => p.sku === "CXD" && p.label === "Amp" && p.optional === true && p.override?.weightLb === 30 && p.ruHeight === 2 && p.face === "front"), "#296 rack component: copies keep sku, label, optional and overrides");
+  const full = call<{ ok: boolean; placed: number; reason?: string }>(rules.duplicatePlacement, dup?.layout ?? small, "RP-A", 1, nid);
+  ok(!!full && !full.ok && full.placed === 0 && full.reason === "No room for a copy — the rack is full.", "#296 rack component: duplicating into a full rack is refused with a reason");
+  const ov = call<{ ok: boolean; layout?: C296eLayout }>(rules.setPlacementOverride, small, "RP-A", "ruHeight", 3, look);
+  const ovP = ov?.layout?.placements[0];
+  ok(!!ov && ov.ok && ovP?.ruHeight === 3 && ovP.override?.ruHeight === 3 && ovP.override.weightLb === 30, "#296 rack component: overriding the height resizes the placement and keeps other overrides");
+  const clr = call<{ ok: boolean; layout?: C296eLayout }>(rules.setPlacementOverride, ov?.layout ?? small, "RP-A", "ruHeight", undefined, look);
+  ok(!!clr && clr.ok && clr.layout?.placements[0].ruHeight === 2 && clr.layout.placements[0].override?.ruHeight === undefined, "#296 rack component: a blank height override returns to the catalog height");
+  const clrAll = call<{ ok: boolean; layout?: C296eLayout }>(rules.setPlacementOverride, small, "RP-A", "weightLb", undefined, look);
+  ok(!!clrAll && clrAll.ok && clrAll.layout?.placements[0].override === undefined, "#296 rack component: clearing the last override removes the override object");
+  const tooTall = call<{ ok: boolean; reason?: string }>(rules.setPlacementOverride, small, "RP-A", "ruHeight", 9, look);
+  ok(!!tooTall && !tooTall.ok && /6 RU/.test(tooTall.reason ?? ""), "#296 rack component: a height override that doesn't fit is refused by the engine");
+
+  // ---- source checks ----
+  const src = (f: string) => { const p = join(process.cwd(), f); return c296eExists(p) ? c296eRead(p, "utf8") : ""; };
+  const files = ["src/components/rack/RackElevation.tsx", "src/components/rack/useRackEditor.ts", "src/components/rack/PlacementMenu.tsx", "src/components/rack/elevation-overlay.tsx"];
+  const texts = files.map(src);
+  ok(texts[0] !== "" && texts[1] !== "" && texts[2] !== "", "#296 rack component: RackElevation, useRackEditor and PlacementMenu exist");
+  const valueImport = /^import\s+(?!type\b)[^;]*from\s+["']@\/(lib\/stores|db)(\/[^"']*)?["']/m;
+  ok(texts.every((t) => !valueImport.test(t)), "#296 rack component: no component file value-imports from @/lib/stores or @/db");
+  ok(texts[0].startsWith('"use client"') && texts[2].startsWith('"use client"') && (texts[3] === "" || texts[3].startsWith('"use client"')), "#296 rack component: the components are client components");
+  ok(texts[0].includes("elevationSvgFor(") && (texts[0] + texts[3]).includes("aria-label") && (texts[0] + texts[3]).includes("slotAriaLabel("), "#296 rack component: RackElevation draws through elevationSvgFor and labels each slot");
+  ok(/import\s*\{[^}]*\bcommit\b[^}]*\}\s*from\s*["']@\/lib\/rack\/history["']/.test(texts[1]) && /\bundo\b/.test(texts[1].match(/import\s*\{[^}]*\}\s*from\s*["']@\/lib\/rack\/history["']/)?.[0] ?? "") && /\bredo\b/.test(texts[1].match(/import\s*\{[^}]*\}\s*from\s*["']@\/lib\/rack\/history["']/)?.[0] ?? ""), "#296 rack component: useRackEditor imports commit, undo and redo from @/lib/rack/history");
+  ok(texts[0].includes('RACK_PART_MIME = "application/x-rack-part"'), "#296 rack component: RackElevation exports the picker drop MIME type");
+  ok(!/#b08d4a/i.test(texts.join("\n")) && (texts[0] + texts[3]).includes("var(--accent)"), "#296 rack component: the accent comes from var(--accent), never a hardcoded hex");
+  ok(texts[2].includes("createPortal(") && texts[2].includes("duplicatePlacement(") && texts[2].includes("Escape"), "#296 rack component: PlacementMenu portals to the body, duplicates through firstFit and closes on Escape");
+}
+
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert } = await import("@/lib/stores/catalog");
