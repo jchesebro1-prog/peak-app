@@ -119,7 +119,7 @@ These are deliberate. Each one is logged in DECISIONS at docs time (Task 6).
   path; the nonce (32 random bytes, base64url) lives only on the quote doc. The secret is `process.env.AUTH_SECRET`, the
   same as the print token. Rotating `AUTH_SECRET` kills every link, by design.
 - **Verify fails closed** on: no secret; no stored link; `stored.expiresAt <= 0` (revoked); a token not matching
-  `/^(\d{1,15})\.([A-Za-z0-9_-]{43})$/`; `exp !== stored.expiresAt`; `now > exp`; `exp − now > 366 days`; a non-finite
+  `/^([1-9]\d{0,14})\.([A-Za-z0-9_-]{43})$/`; `exp !== stored.expiresAt`; `now > exp`; `exp − now > 366 days`; a non-finite
   clock; a MAC mismatch, compared with `timingSafeEqual` (constant time).
 - **Expiry:** 60 days by default (`SHARE_DEFAULT_TTL_MS`). **Revoke** writes a fresh nonce **and** `expiresAt: 0`, so
   every earlier token fails twice over.
@@ -468,7 +468,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
  */
 export const SHARE_DEFAULT_TTL_MS = 60 * 86_400_000;
 export const SHARE_MAX_TTL_MS = 366 * 86_400_000;
-export const SHARE_TOKEN_RE = /^(\d{1,15})\.([A-Za-z0-9_-]{43})$/;
+export const SHARE_TOKEN_RE = /^([1-9]\d{0,14})\.([A-Za-z0-9_-]{43})$/;
 
 /** 32 random bytes, base64url (43 chars). Rotated on every revoke. */
 export function newShareNonce(): string {

@@ -45208,7 +45208,7 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   ok(!n293tVerify(S, n293tSign(S, "Q-1", nonce, far), "Q-1", { nonce, expiresAt: far }, NOW), "#293t token: a TTL over 366 days ✗");
   const mac = tok.split(".")[1];
   ok(!n293tVerify(S, exp + "." + (mac[0] === "A" ? "B" : "A") + mac.slice(1), "Q-1", stored, NOW), "#293t token: a tampered MAC ✗");
-  ok(["", "abc", exp + ".short", "x" + tok, tok + "A", tok.replace(".", "-")].every((t) => !n293tVerify(S, t, "Q-1", stored, NOW)), "#293t token: malformed tokens ✗");
+  ok(["", "abc", exp + ".short", "x" + tok, "0" + tok, "00" + tok, tok + "A", tok.replace(".", "-")].every((t) => !n293tVerify(S, t, "Q-1", stored, NOW)), "#293t token: malformed tokens ✗");
   ok(!n293tVerify(S, tok, "Q-1", stored, NaN) && !n293tVerify(S, tok, "Q-1", stored, Infinity), "#293t token: a non-finite clock fails closed");
   ok(!n293tVerify("", tok, "Q-1", stored, NOW) && !n293tVerify(S, tok, "Q-1", null, NOW) && !n293tVerify("other-secret", tok, "Q-1", stored, NOW) &&
      !n293tVerify(S, tok, "Q-1", { nonce: "", expiresAt: exp }, NOW),

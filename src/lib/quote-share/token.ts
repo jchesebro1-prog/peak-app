@@ -13,7 +13,9 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
  */
 export const SHARE_DEFAULT_TTL_MS = 60 * 86_400_000;
 export const SHARE_MAX_TTL_MS = 366 * 86_400_000;
-export const SHARE_TOKEN_RE = /^(\d{1,15})\.([A-Za-z0-9_-]{43})$/;
+/** No leading zero on the expiry: one expiry has exactly one spelling, so
+ *  "0" + a valid token never verifies. */
+export const SHARE_TOKEN_RE = /^([1-9]\d{0,14})\.([A-Za-z0-9_-]{43})$/;
 
 /** 32 random bytes, base64url (43 chars). Rotated on every revoke. */
 export function newShareNonce(): string {
