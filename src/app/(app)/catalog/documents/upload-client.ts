@@ -51,14 +51,19 @@ async function putFile(file: File, documentId: string): Promise<Result<{ pathnam
   }
 }
 
-/** A new shared document, linked to `skus`. */
-export async function uploadNewDocument(file: File, kind: PartDocKind, skus: string[]): Promise<Result<{ documentId: string }>> {
+/** A new shared document, linked to `skus`. `opts.sheet` marks a photo-sheet dropped file. */
+export async function uploadNewDocument(
+  file: File,
+  kind: PartDocKind,
+  skus: string[],
+  opts: { sheet?: { fileName: string; primarySkus: string[] } } = {}
+): Promise<Result<{ documentId: string }>> {
   const refused = preflight(file, kind);
   if (refused) return { ok: false, error: refused };
   const documentId = newDocumentId();
   const put = await putFile(file, documentId);
   if (!put.ok) return put;
-  const r = await attachUploadedDocumentAction({ documentId, blobPathname: put.pathname, fileName: file.name, kind, skus });
+  const r = await attachUploadedDocumentAction({ documentId, blobPathname: put.pathname, fileName: file.name, kind, skus, ...(opts.sheet ? { sheet: opts.sheet } : {}) });
   return r.ok ? { ok: true, documentId: r.documentId } : r;
 }
 

@@ -43185,3 +43185,16 @@ async function photoSheetImportAsyncChecks(): Promise<void> {
     // fixture rows are torn down by teardownFixtures()
   }
 }
+
+/* ======================================================================
+   Photo sheet — wiring (source checks; actions need a session).
+   ====================================================================== */
+{
+  const src = (p: string) => readFileSync(p, "utf8");
+  const acts = src("src/app/(app)/catalog/documents/photos/actions.ts");
+  ok(/requirePerm\("create"\)/.test(acts) && acts.includes("MAX_SHEET_BYTES") && acts.includes("FETCH_ACTION_BUDGET_MS"), "photo sheet wiring: actions are create-gated, size-capped and budgeted");
+  const route = src("src/app/(app)/catalog/documents/photos/export/route.ts");
+  ok(route.includes("buildPhotoSheetExport") && route.includes("spreadsheetml"), "photo sheet wiring: the export route returns an xlsx");
+  const attach = src("src/app/(app)/catalog/documents/actions.ts");
+  ok(/source: sheet \? "sheet" : "upload"/.test(attach) && attach.includes("placeSheetImage"), "photo sheet wiring: a dropped sheet photo is recorded as source sheet and placed");
+}

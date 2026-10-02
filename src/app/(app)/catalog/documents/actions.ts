@@ -53,6 +53,7 @@ import {
 } from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
+import { placeSheetImage } from "@/lib/part-docs/photo-sheet-import";
 
 /**
  * Part documents (#207) — every write from the Datasheets page, the bulk
@@ -127,6 +128,8 @@ export async function attachUploadedDocumentAction(input: {
   fileName: string;
   kind: PartDocKind;
   skus: string[];
+  /** A photo-sheet dropped file (#photo sheet): recorded as source "sheet" and placed. */
+  sheet?: { fileName: string; primarySkus: string[] };
 }): Promise<DocActionResult<{ documentId: string; linked: number }>> {
   const user = await requireUser();
   if (!isDocumentId(input.documentId)) return { ok: false, error: "Not a document id." };
@@ -150,16 +153,22 @@ export async function attachUploadedDocumentAction(input: {
     if (!shrunk.ok) return shrunk;
     file = shrunk.file;
   }
+  const sheet = input.kind === "image" && input.sheet && String(input.sheet.fileName || "").trim() ? input.sheet : null;
   const doc = await createDocument({
     id: input.documentId,
     kind: input.kind,
     ...file,
     sourceUrl: null,
-    source: "upload",
+    source: sheet ? "sheet" : "upload",
+    ...(sheet ? { sourceRef: `file:${String(sheet.fileName).trim().slice(0, 255)}` } : {}),
     by: user.name,
   });
   if (!doc) return { ok: false, error: "That document already exists — use Replace." };
   const linked = await attachDocument(doc.id, skus, user.name);
+  if (sheet) {
+    const primary = new Set((sheet.primarySkus || []).map(String));
+    for (const sku of skus) await placeSheetImage(doc.id, sku, primary.has(sku));
+  }
   revalidate();
   return { ok: true, documentId: doc.id, linked };
 }
