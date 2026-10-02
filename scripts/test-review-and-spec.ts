@@ -10714,6 +10714,7 @@ seeded()
   .then(() => rename288AsyncChecks())
   .then(() => category289AsyncChecks())
   .then(() => packages289AsyncChecks())
+  .then(() => curtain292AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -43363,4 +43364,57 @@ import { cutSheetCssVars as c292CssVars, cutSheetModel as c292Model, plainDescri
   const multiModel = c292Model(multi, { ...ctx, style: "client" });
   ok(multiModel.sizes.length === 2 && multiModel.description.startsWith("Three Main Drape panels in 2 sizes") && multiModel.sizes.reduce((a, s) => a + s.qty, 0) === 3,
     "#292 model: several sizes read as a count in the sentence and each size is a row");
+}
+
+/* ======================================================================
+   #292 Task 5 — Curtain mounts store + Estimating Rules screen + catalog
+   fabric facts (weight, basis, flame rating).
+   ====================================================================== */
+import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProblem, optionalPartFields as c292PartFields } from "@/app/(app)/catalog/part-form";
+{
+  const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
+  const full = c292PartFields(fd({ oz: "25", ozBasis: "sq-yd", flameRating: "  NFPA 701 (IFR)  " }));
+  ok(full.oz === 25 && full.ozBasis === "sq-yd" && full.flameRating === "NFPA 701 (IFR)", "#292 catalog: weight (oz), basis and flame rating are read when submitted");
+  const blank = c292PartFields(fd({ oz: "", ozBasis: "lin-yd", flameRating: "" }));
+  ok("oz" in blank && blank.oz === undefined && blank.ozBasis === undefined && "flameRating" in blank && blank.flameRating === undefined,
+    "#292 catalog: a submitted blank clears (basis clears with a blank oz)");
+  ok(!("flameRating" in c292PartFields(fd({ desc: "x" }))) && c292PartFields(fd({ flameRating: "x".repeat(200) })).flameRating?.length === c292FlameMax && c292FlameMax === 120,
+    "#292 catalog: absent fields stay out of the patch; a rating is capped at 120 chars");
+  ok(c292FactsProblem("Hardware", "ea", { flameRating: "NFPA 701" }) !== null && c292FactsProblem("Fabric", "yd", { flameRating: "NFPA 701", oz: 25 }) === null && c292FactsProblem("Hardware", "ea", {}) === null,
+    "#292 catalog: only a fabric part carries weight / flame rating");
+}
+{
+  const rd292 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd292("src/app/(app)/estimating-rules/page.tsx").includes('href="/estimating-rules/curtain-mounts"'), "#292 source: Estimating Rules links Curtain mounts");
+  const acts = rd292("src/app/(app)/estimating-rules/curtain-mounts/actions.ts");
+  ok(acts.includes('requirePerm("manage_users")') && !acts.includes("requireUser("), "#292 source: the Curtain mounts action is manage_users-only");
+  ok(rd292("src/app/(app)/estimating-rules/curtain-mounts/page.tsx").includes('can("manage_users"'), "#292 source: the Curtain mounts page gates on manage_users");
+  ok(!/@\/lib\/stores\//.test(rd292("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx")), "#292 source: the Curtain mounts client imports no server store");
+  ok(rd292("scripts/smoke-routes.ts").includes('"/estimating-rules/curtain-mounts"'), "#292 source: smoke covers /estimating-rules/curtain-mounts");
+}
+
+async function curtain292AsyncChecks(): Promise<void> {
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const { CURTAIN_MOUNTS_BLOB } = await import("@/lib/curtain-mounts");
+  const { listCurtainMounts, saveCurtainMount } = await import("@/lib/stores/curtain-mounts");
+  const before = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
+  const TIE = fid(292, "tie-line");
+  await mergeUpsert(TIE, { desc: "Test292 Tie line", category: "Test292 Hardware", unit: "ea", list: 2, cost: 1 });
+  reg("catalog_parts", TIE);
+  try {
+    const saved = await saveCurtainMount("tie-batten", [{ sku: TIE, rule: { kind: "perMark", qty: 1 } }, { sku: "", rule: { kind: "perCurtain", qty: 1 } }], "Tester");
+    ok(saved.ok && saved.hardware.rows.length === 1 && saved.hardware.updatedBy === "Tester", "#292 store: saveCurtainMount saves sanitized rows, stamped with who saved them");
+    const back = await listCurtainMounts();
+    ok(back["tie-batten"]?.rows[0]?.sku === TIE && back["tie-batten"]?.rows[0]?.rule.kind === "perMark", "#292 store: listCurtainMounts reads the row back");
+    const gone = await saveCurtainMount("tie-batten", [{ sku: "NO-SUCH-292", rule: { kind: "perCurtain", qty: 1 } }], "Tester");
+    ok(!gone.ok && gone.error.includes("NO-SUCH-292"), "#292 store: a SKU missing from the catalog is refused by name");
+    const other = await saveCurtainMount("track-other", [], "Tester");
+    ok(!other.ok, "#292 store: track-other (or any unknown id) is refused");
+    // Task 6 appends the loadCutSheets checks here.
+  } finally {
+    const after = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
+    await setBlob(CURTAIN_MOUNTS_BLOB, Object.fromEntries(Object.keys(after).map((k) => [k, Object.prototype.hasOwnProperty.call(before, k) ? before[k] : null])));
+  }
 }
