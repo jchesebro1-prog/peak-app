@@ -591,7 +591,7 @@ See `.env.example`.
     stay datasheet-only. Remaining: a "Manual URL" import column. Punch
     item #290.
 
-32. ✅ **Narrative-first client preview — Slices 1–2** (#293, D539–D545, D549–D552) —
+32. ✅ **Narrative-first client preview — Slices 1–3** (#293, D539–D545, D549–D552, D565–D572) —
     key products on a system (★ per line; `SpecSection.keyProducts`
     anchored to line id + sku, sanitized server-side, remapped on Copy
     here), write-once product paragraphs on the catalog part
@@ -604,7 +604,11 @@ See `.env.example`.
     (sent/won systems from the latest sent revision; 5-minute index
     invalidated by setStatus/remove), Load system (re-priced through
     Copy system's shared `copy-pricing.ts`, vendor lines left out) and
-    append-only Merge narrative. Slice 3 (client link) follows. Spec `docs/superpowers/specs/2026-10-01-narrative-client-preview-design.md`.
+    append-only Merge narrative. Slice 3 puts the latest SENT version online: `/portal/quotes/[id]` and a signed no-login
+    `/share/quote/[id]/[token]` (HMAC over a stored nonce, 60 days, Revoke rotates; Send to copy), one
+    `onlineEstimateState` rule, a server-side Narrative / BOM toggle, `layout="web"`, scoped photo routes, revisions
+    freezing the printed header (`docFields`) and the sent PDF's Rev/date; the print route joins the shared loader
+    after #292 merges. Spec `docs/superpowers/specs/2026-10-01-narrative-client-preview-design.md`.
 
 33. ✅ **Curtain cut sheets** (#292, D553–D564) — every curtain type on a
     system quote gets a deterministic cut sheet (CS-1, CS-2…): front

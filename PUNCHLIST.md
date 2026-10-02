@@ -10273,7 +10273,7 @@ read "Link only" and those rows appear under "Link to fetch"; a bulk Fetch links
 files, more of the 45 s budget per run). Watch item: client packages now include manuals (often 10-25 MB) in the
 in-memory zip.
 
-## 293. Estimates — narrative-first client preview (key products, saved paragraphs, intros, appendix) — Slices 1–2 DONE 2026-10-01 (D539–D545, D549–D552)
+## 293. Estimates — narrative-first client preview (key products, saved paragraphs, intros, appendix) — Slices 1–3 DONE 2026-10-02 (D539–D545, D549–D552, D565–D572)
 
 **Slice 1 done.**
 - **Key products.** Any eligible line can be starred into a key product (★ on the row, or + Key product in the
@@ -10315,7 +10315,38 @@ Browser: Browser-verified on a scratch datadir: built and won an estimate with a
 listed it (Won, 1 line, 1 key product); Load placed it as a new system with its line, intro and starred key product
 (room dropped) and the 'Loaded … from EST-1009' banner; Merge narrative from the ⋯ menu appended the intro to an empty
 system and reported the key product it couldn't anchor; no console errors.
-**Slice 3.** Portal estimate page, signed share link, Narrative / BOM toggle (spec §5, §8.3).
+**Slice 3 DONE (D565–D572).**
+- **Portal estimate page** `/portal/quotes/<id>`: the latest SENT version online, Narrative / BOM toggle, Download
+  PDF, "This estimate is closed." on a lost quote, "being revised" (no content) when recalled. Portal rows open it.
+- **Client link** (customer preview → Client link): Copy client link (60 days, same link until revoked), Revoke. Needs
+  Send; a never-sent or recalled quote can't get one.
+- **Share page** `/share/quote/<id>/<token>`: no login, read-only, the same document and toggle, no PDF link; one
+  "This link isn't active" card for every failure; no-referrer, noindex, never cached by the service worker.
+- **Photos** stream through scoped routes serving only what the sent version prints. New revisions freeze the printed
+  header (`docFields`), and the Rev number and issue date online match the sent PDF.
+- **Plan:** `docs/superpowers/plans/2026-10-01-narrative-slice3.md`.
+
+Gates: tsc 0; test:specs 11,050 PASS / 0 FAIL (424 for #293 slice 3); test:smoke 197/197 ALL PASSED (6 new routes);
+`next build` OK; eslint 0 errors on the changed files (1 pre-existing warning, quote-row.tsx:118).
+Browser: Browser-verified on a scratch datadir: sent a narrative estimate; the preview sidebar's Client link → Copy
+client link minted a link (expires in 60 days); opened with no login (curl, no cookies) it rendered the sent estimate
+with Narrative/BOM toggle, Referrer-Policy no-referrer and X-Robots-Tag noindex, and no internal fields in the HTML or
+payload; the BOM view itemized the line; the portal page (staff preview) showed the same sent version with Download
+PDF; Revoke (inline two-step) made the old link, a wrong quote id and a garbage token all show the same 'This link
+isn't active' 200 card; a re-created link worked; recalling the quote to draft made it show 'being revised' with no
+content.
+
+**Rollout.** Copy client links from PRODUCTION only: preview deploys share the production database, so a link minted
+on a preview points at a preview URL.
+
+**Rollback.** Removing Slice 3 removes the routes: copied links 404 until it's redeployed. `docFields` and `shareLink`
+are additive JSONB that older code ignores. Rotating `AUTH_SECRET` also kills every link.
+
+**Follow-ups.**
+- Move the print route onto the shared loader after #292 merges (D568).
+- The sent PDF's own rule that the first and second send both print "Rev 1" is separate from the online Rev stamp
+  (D567); revisit it.
+- The online header date is Chicago time while the document body uses server time (UTC on Vercel); align them.
 
 **For Jeff.**
 - Open questions in spec §12: photo side, datasheet thumbnails as photos, default presentation, who manages intros.
@@ -10325,6 +10356,13 @@ system and reported the key product it couldn't anchor; no console errors.
 - Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.
 - Portal-built quotes are excluded from the library — keep that?
 - Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
+- Client links: copy them from production only. Preview deploys share the production DB, so a link copied there
+  carries the preview origin.
+- Spec §12 q4: is 60 days right for a client link?
+- View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?
+- The online header says "sent <date>" using the PDF's issue date.
+- Cut sheets stay PDF-only online; the online pages don't show them. Want them online too?
+- The BOM toggle shows quantities and descriptions even when the estimate was sent narrative-only.
 
 ## 292. Curtains — a cut sheet for every curtain type, for submittals and estimates — DONE 2026-10-01 (D553-D564)
 

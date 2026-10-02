@@ -8790,3 +8790,89 @@ instance wait up to about 75 s.
 The loader reads fabrics with `getMany` by the ids the curtains name. A category query runs only for legacy name
 matching, and categories with stray spaces are not matched by the SQL filter, so a legacy line that names such a fabric
 reads as unmatched rather than guessed.
+
+## D565. The client share link: an HMAC over a stored nonce, 60 days, Revoke rotates (#293, 2026-10-02)
+
+Token `<exp>.<base64url HMAC-SHA256(AUTH_SECRET, "share:quote:<id>:<nonce>:<exp>")>`, domain-separated from the print
+token. The 32-byte nonce lives only on the quote (`shareLink`), so a nonce alone can't make a token. Verify fails
+closed (no secret, revoked, malformed, exp not matching the stored one, expired, over 366 days, MAC mismatch via
+`timingSafeEqual`), and `exp` must not start with 0 (a leading-zero spelling of the same number would otherwise
+verify); the print-PDF token got the same tightening. Default 60 days; Copy again returns the same link; Revoke
+rotates the nonce AND writes expiry 0. `shareLink` is written only by `patchShareLink`, which mints its own nonce and
+never bumps `updatedAt` (that is the printed date, the portal sort key and the approval version check; a share link
+is not the document). `update()` strips `shareLink`, so a stale Estimator tab can't revive a revoked link. Create and
+revoke need `send`, answered inline ("Needs the Send permission.", the D542 idiom) rather than through `requirePerm`'s
+redirect; the status read returns the path only to `send` holders, since copying a public link is a form of sending.
+Rotating `AUTH_SECRET` kills every link.
+
+## D566. One loader, one online rule, every miss is the same 200 card (#293, 2026-10-02)
+
+The portal and share pages use one loader that fails closed unless it is handed a sent revision object of this quote.
+Web pages render the latest SENT revision only, never the live draft. `onlineEstimateState`: a system quote with a
+sent revision, status sent/won/lost; lost renders the document marked "This estimate is closed."; back in draft after
+a send renders "This estimate is being revised" with no content and no PDF. The portal page uses
+`portalOnlineEstimateState` (same customer, not Daylite history, then the rule), because `portalListsQuote` hides
+staff drafts and would have said "isn't available" about a recalled quote. Every share failure (bad token, revoked,
+expired, unknown quote, never sent, service quote, rate limit) is one identical "This link isn't active…" card with
+HTTP 200; an App Router page can't answer 429 (the photo routes can and do, 60/min/IP). No view tracking: a public GET
+never writes.
+
+## D567. Rev number and issue date online match what the sent PDF printed (#293, 2026-10-02)
+
+The PDF generator brackets the print route's read and records a `{revNo, issuedAt}` stamp on the saved PDF when the
+quote did not move during the render; the once-only copy onto the sent revision freezes it into `docFields`. If the
+quote moved mid-render it re-renders once when at least 30 s of render time remain (elapsed at most 70 s, hard-stopped
+by an AbortSignal at 120 - 20 - elapsed). Revisions sent before this deploy have no stamp and fall back to "revisions
+before it, then `pdfSavedAt`, else `rev.at`"; so an Estimator save-with-Sent resend from before the deploy may show
+Rev N-1 online while its PDF says Rev N. PDFs print exactly as before. The PDF's own rule that the first and second
+send both print Rev 1 is a separate follow-up, not changed here.
+
+## D568. Revisions freeze the printed header; the print route stays on its own calls (#293, 2026-10-02)
+
+Every new revision carries `docFields` (customer, venue, contact, cover note, assumptions, timeframe, prepared by,
+owner, terms, payment terms, `pdfOptions`, `portalFirm`, source), so the web page prints the header as it was sent;
+`contactName` freezes as `null` when absent so the document still falls back to the primary contact (a frozen `""`
+would drop the Attn line). Recall ignores it. `quoteAsOfRevision` + `loadQuoteDocumentProps` render the revision's
+body, header, Rev N and date; older revisions without `docFields` read the live header. The print route is NOT moved
+onto the loader: #292 rewrites that route's load block and three harness pins hold its literal calls, so the two are
+built from the same pure pieces (`quoteDocumentDataFor`, `purchasePerksDocLine`, the photos module) and a harness check
+pins them to the same calls. Converging the print route onto the loader is a follow-up after #292 merges.
+
+## D569. Narrative / BOM is a server-side view transform (#293, 2026-10-02)
+
+`bomViewProps` lives in `quote-document-view.ts`, not `quote-document.tsx`, because the latter imports a `.jpg` the
+harness can't load. Every system is itemized, quantities and descriptions on, prices as the quote chose, appendix off.
+The toggle shows whenever the body left a system un-itemized: a narrative system, or any system under By section
+(a departure from the spec's "a narrative system"; By section also differs from the BOM). The toggle is two links; no
+client component receives quote data. Product notes: the BOM view shows quantities and descriptions even when the
+estimate was sent narrative-only, and cut sheets stay PDF-only online (`pdfCutSheets` is ignored by `QuoteDocument`).
+
+## D570. `layout="web"`, scoped photos, no Referer, no SW cache (#293, 2026-10-02)
+
+`layout="web"` is fluid to 740 px with `QUOTE_WEB_CSS` (phone padding under 600 px, stacked header/signature grids,
+photo above its paragraph under 480 px, sheet chrome over 760 px); without it the document is byte-identical.
+Photos reach pages only through two routes (portal, share) that serve ids the latest sent revision prints
+(PNG/JPEG/WebP, nosniff, private 1 h, ETag on id + blobKey hash); the page builds them from a function
+`photos: { href(docId) }` because the portal's team preview needs `?preview=<cid>` on every URL. `/share/*` answers
+`Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex, nofollow`; middleware exempts only the `share/` prefix; the
+service worker bypasses `/share/` entirely (its cache-first image branch would otherwise keep showing photos after a
+revoke, and token URLs would sit in Cache Storage). A browser may still show a share photo from its own HTTP cache for
+up to an hour after a revoke; those are catalog photos, not quote data.
+
+## D571. Client link lives in the customer preview only (#293, 2026-10-02)
+
+The Client link block (Copy client link, Expires ... created by ..., Revoke with an inline two-step confirm) sits in
+the customer preview sidebar. The toolbar ⋯ is `QuoteNextStep`'s server-evaluated approval menu shared with the Quotes
+hub, and adding to it would mean editing `estimator-client.tsx`, which #292 edits, so the spec's toolbar copy is left
+out. `shareLinkView` lives in `links.ts`, not `view.ts`, and takes no origin: it signs the token, which needs
+`node:crypto`, and `view.ts` must stay client-safe; the browser prefixes `window.location.origin`. `ClientLinkPanel`
+re-reads on window focus so a link revoked in another tab shows as gone.
+
+## D572. Slice 3 known residuals and test reach (#293, 2026-10-02)
+
+Accepted: a small timing difference between "unknown quote" and "bad token" (quote ids are sequential anyway; 60/min/IP
+bounds it); the link nonce reaches signed-in staff browsers through `/api/sync/pull` (not exploitable without
+`AUTH_SECRET`); the online header date is Chicago time while the document body uses server time (UTC on Vercel), a
+follow-up. Smoke can't reach the rendered document, since no seeded quote has a sent revision: it covers the 200 cards
+and compiles the six new routes, and the document path is covered by harness renders, loader DB checks and the browser
+check.
