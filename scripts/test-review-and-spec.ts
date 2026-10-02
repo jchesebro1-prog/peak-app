@@ -10714,6 +10714,7 @@ seeded()
   .then(() => rename288AsyncChecks())
   .then(() => category289AsyncChecks())
   .then(() => packages289AsyncChecks())
+  .then(() => photoSheetIoAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -43051,4 +43052,44 @@ import { planDrivePhotoSync as phsDrivePlan } from "@/lib/part-docs/drive-photo-
   const claimed = phsDrivePlan(listing, {}, hit, 25 * 1024 * 1024, new Set(["c1"]));
   ok(free.imports.length === 1 && claimed.imports.length === 0 && claimed.unchanged === 1 && claimed.unmatched.length === 0,
     "photo sheet: a Drive file a sheet imported is never imported again by the Drive sync");
+}
+
+/* ======================================================================
+   Photo sheet — workbook I/O, context and export (PGlite).
+   ====================================================================== */
+import { readSheetFile as phsRead, writePhotoSheet as phsWrite, loadPhotoSheetContext as phsCtx, buildPhotoSheetExport as phsBuildExport } from "@/lib/part-docs/photo-sheet-io";
+import { getBlob as phsGetBlob, setBlob as phsSetBlob } from "@/db/doc-store";
+async function photoSheetIoAsyncChecks(): Promise<void> {
+  const rows = phsExport(PHS_PARTS, new Set(["SKU-A", "SKU-B"]), new Map(), new Map());
+  const buf = await phsWrite(rows, new Map([[2, "Added 1"]]));
+  const back = await phsRead(buf, "sheet.xlsx");
+  const parsed = back.ok ? phsRows(back.grid) : null;
+  ok(!!parsed && parsed.ok && parsed.rows.length === 2 && parsed.rows[0].sku === rows[0].sku && parsed.rows[0].status === "Added 1" && parsed.rows[1].mfrPart === "S4-ALPHA",
+    "photo sheet io: an exported workbook reads back the same rows (status override applied)");
+  const csv = await phsRead(Buffer.from("SKU,Photo 1\nSKU-D,https://m/d.jpg\n"), "sheet.csv");
+  ok(csv.ok && csv.grid[0].join() === "SKU,Photo 1" && csv.grid[1][1] === "https://m/d.jpg", "photo sheet io: a .csv reads into the same grid shape");
+  const junk = await phsRead(Buffer.from("not a workbook"), "x.xlsx");
+  ok(!junk.ok, "photo sheet io: an unreadable workbook is refused");
+
+  const ALPHA = fixtureId("PHS", "IO-ALPHA");
+  await upsertPart({ id: ALPHA, sku: ALPHA, desc: "PHS io alpha", category: "PhsIoCat", unit: "ea", list: 10, cost: 5, mfr: "PhsMfr", manufacturerPartNumber: "PHSIOALPHA01" });
+  registerFixture("catalog_parts", ALPHA);
+  const noDrive = async () => ({ files: null, reason: "Drive photos aren't connected" }) as const;
+  const ctx = await phsCtx(noDrive);
+  const mm = ctx.match({ manufacturer: "phsmfr", mfrPart: "PHSIOALPHA01", sku: "" });
+  ok(mm.kind === "matched" && mm.sku === ALPHA && ctx.drive === null && ctx.driveReason === "Drive photos aren't connected", "photo sheet io: the context matches catalog parts and carries the Drive reason");
+
+  // Written straight to the blob: saveDepartments validates categories against
+  // the cached portal index, which a fresh fixture part isn't in.
+  const prev = await phsGetBlob<Record<string, unknown>>("portal_departments", {});
+  try {
+    const before = await phsBuildExport(noDrive);
+    ok(!before.some((r) => r.sku === ALPHA), "photo sheet export: an unquoted part outside any portal department is left out");
+    await phsSetBlob("portal_departments", { departments: [{ id: "phs-dept", name: "PHS Dept", categories: ["PhsIoCat"] }] });
+    const after = await phsBuildExport(noDrive);
+    const row = after.find((r) => r.sku === ALPHA);
+    ok(!!row && row.status === "Missing" && row.mfrPart === "PHSIOALPHA01" && row.manufacturer === "PhsMfr", "photo sheet export: a part in a portal department is listed, Missing");
+  } finally {
+    await phsSetBlob("portal_departments", { departments: prev.departments ?? [] });
+  }
 }
