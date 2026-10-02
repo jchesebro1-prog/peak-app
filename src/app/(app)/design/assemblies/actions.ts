@@ -11,6 +11,7 @@ import { setOwnDatasheet, syncAccessoryLinks } from "@/lib/stores/part-accessory
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import type { PartHit } from "./fixture-form";
+import { rackFactsOf } from "@/lib/rack/part-facts";
 
 const revalidateConsumers = () => {
   // #245: fixtures and the accessory graph feed the portal catalog index —
@@ -46,6 +47,7 @@ export async function searchAssemblyPartsAction(query: string, limit = 40): Prom
       list: h.list,
       cost: h.cost,
       ...(h.pricedAt ? { pricedAt: h.pricedAt } : {}),
+      rack: h.rack && Object.keys(rackFactsOf(h.rack)).length ? rackFactsOf(h.rack) : undefined,
     })),
     total,
   };

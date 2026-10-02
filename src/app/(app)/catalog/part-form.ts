@@ -3,6 +3,8 @@
  */
 import { normalizeVisibility } from "@/lib/portal-visibility";
 import { isFabricPart } from "@/lib/fabric-part";
+import { cleanRackFacts, rackFactsFromForm } from "@/lib/rack/part-facts";
+import type { RackPartFacts } from "@/lib/rack/types";
 
 function num(v: FormDataEntryValue | null): number {
   const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
@@ -31,7 +33,7 @@ export type OptionalPartFields = {
   oz?: number;
   ozBasis?: "lin-yd" | "sq-yd";
   flameRating?: string;
-};
+} & RackPartFacts;
 
 export const FLAME_RATING_MAX = 120;
 
@@ -60,7 +62,18 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
     const v = normalizeVisibility(fd.get("portalVisibility"));
     out.portalVisibility = v === "auto" ? undefined : v;
   }
+  // #296: rack data — same rule (only submitted keys; a blank clears). An
+  // invalid value is dropped here; rackFactsProblem refuses the save first.
+  const rack = cleanRackFacts(rackFactsFromForm(fd));
+  if (rack.ok) Object.assign(out, rack.patch);
   return out;
+}
+
+/** #296: server-side gate for the Rack data section. null = fine (or the form
+ *  carries no rack fields); else the message the part modal shows. */
+export function rackFactsProblem(fd: FormData): string | null {
+  const r = cleanRackFacts(rackFactsFromForm(fd));
+  return r.ok ? null : r.error;
 }
 
 /** A sane ceiling for a sewn fabric's $/sq ft (#227 final wave B) — the real

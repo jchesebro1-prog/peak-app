@@ -58,6 +58,7 @@ import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { isFabricPart } from "@/lib/fabric-part";
+import { rackFactsOf } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 
 export async function saveEstimatorCustomPartAction(input: {
@@ -1409,6 +1410,7 @@ export async function searchCatalog(
     list: p.list || 0,
     mfr: p.mfr || "",
     ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
+    rack: Object.keys(rackFactsOf(p)).length ? rackFactsOf(p) : undefined,
   }));
   return { hits, total: scored.length };
 }

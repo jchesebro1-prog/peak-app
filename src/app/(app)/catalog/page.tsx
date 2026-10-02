@@ -29,6 +29,8 @@ import { buildImageIndex, imagesFor, partDocsView, type PartDocsView } from "@/l
 import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
 import FabricRateField from "./fabric-rate-field";
+import RackDataField from "./rack-data-field";
+import { rackFactsOf } from "@/lib/rack/part-facts";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
 import { loadPortalRules } from "@/lib/freight-rule-load";
@@ -951,6 +953,13 @@ function PartFormModal({
                   fallbackRate={fabricAreaRateOf({ sku: part.sku, costPerSqft: part.costPerSqft, unit: part.unit, cost: part.cost })}
                   inputStyle={inputStyle}
                 />
+              </div>
+            )}
+            {part && (
+              <div style={{ marginTop: 13, marginBottom: 4 }}>
+                {/* key={part.sku}: the modal is reused across parts (see the
+                    fabric block above), so the uncontrolled inputs must remount. */}
+                <RackDataField key={part.sku} initial={rackFactsOf(part)} />
               </div>
             )}
             <div style={{ marginTop: 13, marginBottom: 4 }}>

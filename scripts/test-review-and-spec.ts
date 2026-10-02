@@ -43623,6 +43623,41 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
     "#292 fix: Add track while editing mints ct-<line id>-<nonce> instead of reusing a stale or shared key");
 }
 
+/* ===== #296 — catalog rack fields ===== */
+import { cleanRackFacts as c296Clean, rackFactsOf as c296FactsOf, rackDataCoverage as c296Coverage, rackPartInfo as c296Info, rackFactsFromForm as c296FromForm } from "@/lib/rack/part-facts";
+import { optionalPartFields as c296PartFields, rackFactsProblem as c296Problem } from "@/app/(app)/catalog/part-form";
+{
+  const a = c296Clean({ ruHeight: "2", depthIn: "15.5", powerWatts: "0", airflow: "front-to-rear", rackWidth: "half" });
+  ok(a.ok && a.patch.ruHeight === 2 && a.patch.depthIn === 15.5 && a.patch.powerWatts === 0 && a.patch.airflow === "front-to-rear" && a.patch.rackWidth === "half", "#296 catalog: rack facts parse, 0 W kept as measured");
+  ok(a.ok && !("weightLb" in a.patch), "#296 catalog: an absent key stays out of the patch (never blanks)");
+  const b = c296Clean({ weightLb: "" });
+  ok(b.ok && "weightLb" in b.patch && b.patch.weightLb === undefined, "#296 catalog: a submitted blank clears the field");
+  ok(!c296Clean({ ruHeight: "0" }).ok && !c296Clean({ ruHeight: "1.3" }).ok && c296Clean({ ruHeight: "0.5" }).ok, "#296 catalog: RU height > 0 in half-RU steps");
+  ok(!c296Clean({ depthIn: "-1" }).ok && !c296Clean({ airflow: "up" }).ok && !c296Clean({ rackMount: "wall" }).ok, "#296 catalog: negatives and bad enums refused");
+  const n = c296Clean({ rackNotes: "  needs 1U vent above " + "x".repeat(300) });
+  ok(n.ok && typeof n.patch.rackNotes === "string" && (n.patch.rackNotes as string).length === 200 && (n.patch.rackNotes as string).startsWith("needs"), "#296 catalog: notes trimmed and capped at 200");
+  ok(JSON.stringify(c296FactsOf({ ruHeight: 2, airflow: "up" as never, weightLb: -3 })) === JSON.stringify({ ruHeight: 2 }), "#296 catalog: rackFactsOf drops invalid stored values");
+  const look = (s: string) => s === "A" ? c296Info({ sku: "A", desc: "Amp", ruHeight: 2, powerWatts: 300 }, "A") : s === "B" ? c296Info({ sku: "B", desc: "DSP" }, "B") : undefined;
+  const cov = c296Coverage(["A", "B", "A"], look);
+  ok(cov.total === 2 && cov.missing.ruHeight.join() === "B" && cov.missing.depthIn.join() === "A,B" && cov.missing.powerWatts.join() === "B", "#296 catalog: coverage lists distinct parts missing each field");
+  ok(c296Info(undefined, "ZZ").found === false && c296Info(undefined, "ZZ").sku === "ZZ", "#296 catalog: unknown SKU resolves found:false");
+  const fd = new FormData(); fd.set("rack_ruHeight", "1"); fd.set("rack_airflow", "side");
+  const pf = c296PartFields(fd);
+  ok(pf.ruHeight === 1 && pf.airflow === "side" && !("weightLb" in pf), "#296 catalog: part form carries only submitted rack fields");
+  ok(Object.keys(c296FromForm(new FormData())).length === 0, "#296 catalog: an editor without the rack section submits nothing");
+  const bad = new FormData(); bad.set("rack_ruHeight", "0");
+  ok(c296Problem(bad)?.startsWith("Rack data: RU height must be") === true && c296Problem(new FormData()) === null && c296Problem(fd) === null, "#296 catalog: rackFactsProblem names the bad field; null when no rack fields");
+  const e = c296Clean({ airflow: "up" });
+  ok(!e.ok && e.error === "Rack data: airflow must be one of front-to-rear, rear-to-front, side, passive.", "#296 catalog: enum error text");
+  const e2 = c296Clean({ ruHeight: "1.3" });
+  ok(!e2.ok && e2.error === "Rack data: RU height must be a positive number in half-RU steps.", "#296 catalog: RU error text");
+  const rd296 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd296("src/app/(app)/catalog/page.tsx").includes("<RackDataField"), "#296 source: the part editor renders the Rack data section");
+  ok(rd296("src/app/(app)/estimator/actions.ts").includes("rackFactsOf("), "#296 source: catalog search hits carry rack facts");
+  ok(rd296("src/app/(app)/design/assemblies/actions.ts").includes("rackFactsOf("), "#296 source: assembly part hits carry rack facts");
+  ok(rd296("src/app/(app)/catalog/actions.ts").includes("rackFactsProblem("), "#296 source: upsertPart gates rack facts");
+}
+
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert } = await import("@/lib/stores/catalog");

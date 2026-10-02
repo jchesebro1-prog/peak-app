@@ -1,3 +1,4 @@
+import type { RackPartFacts } from "@/lib/rack/types";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
 import type { TaskRecord } from "@/lib/stores/tasks";
@@ -436,6 +437,8 @@ export type CatalogHit = {
   list: number;
   mfr: string;
   pricedAt?: number;
+  /** #296 — rack data when the part carries any (omitted otherwise). */
+  rack?: RackPartFacts;
 };
 
 /** A page of catalog search results (total = matches before the display cap). */
