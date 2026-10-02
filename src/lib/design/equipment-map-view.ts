@@ -102,7 +102,7 @@ function cellVM(def: EquipRowDef, tier: TierKey, map: EquipmentMap, ctx: EquipPr
     const f = ctx.fixtures.get(cell.id);
     return {
       tier, kind: "assembly", title: f?.label ?? cell.id,
-      detail: f ? (f.kind === "system" ? `System · ${f.scope ?? "Other"}` : f.kind === "hardware" ? "Hardware" : "Fixture") : "",
+      detail: f ? (f.kind === "system" ? `System · ${f.scope ?? "Other"}` : f.kind === "rack" ? `Rack · ${f.scope ?? "Other"}` : f.kind === "hardware" ? "Hardware" : "Fixture") : "",
       unitCost: priced?.unitCost ?? null, unitSell: priced?.unitSell ?? null,
       perSqft, problem, input: { kind: "assembly", id: cell.id },
     };
@@ -151,7 +151,7 @@ export function assemblyOptions(fixtures: Iterable<FixtureRecord>, ctx: EquipPri
     const r = resolveFixture(f, ctx.parts);
     out.push({
       id: f.id, label: f.label, kind: f.kind,
-      scope: f.kind === "system" ? f.scope ?? "Other" : f.kind === "hardware" ? "" : "Lighting",
+      scope: f.kind === "system" || f.kind === "rack" ? f.scope ?? "Other" : f.kind === "hardware" ? "" : "Lighting",
       unitCost: r.cost, unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, ctx.margin),
     });
   }

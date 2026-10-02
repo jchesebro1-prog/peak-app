@@ -2376,7 +2376,7 @@ export default function EstimatorClient({
     if (!line) return;
     const qty = Math.max(1, Number.parseInt(d.qty, 10) || 1);
     pushItems(secId, [
-      { id: nextId(), sku: assembly.id, desc: line.desc, qty, unit: "ea", cost: line.cost, price: line.price, fixture: true, components: line.components },
+      { id: nextId(), sku: assembly.id, desc: line.desc, qty, unit: "ea", cost: line.cost, price: line.price, fixture: true, components: line.components, ...(line.rackId ? { rackId: line.rackId } : {}) },
     ]);
     closeInput();
   };

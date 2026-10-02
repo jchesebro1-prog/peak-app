@@ -22978,7 +22978,7 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
   const ff = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/fixture-form.tsx"), "utf8");
   ok(ff.includes('const isParts = draft.kind !== "fixture"') && ff.includes("isHardware"), "#228: the form edits hardware as one parts list");
   const emc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
-  ok(emc.includes('a.kind === "hardware" ? "Hardware"') && emc.includes("Assembly (fixture, system or hardware)"), "#228: the map picker labels hardware assemblies");
+  ok(emc.includes('a.kind === "hardware" ? "Hardware"') && emc.includes("Assembly (fixture, system, hardware or rack)"), "#228: the map picker labels hardware assemblies");
 }
 
 /* --- #246: the Estimator's "+ Add assembly" lists every assembly — fixtures, systems and hardware (pure + source) --- */
@@ -44403,6 +44403,88 @@ async function rack296SheetAsyncChecks(): Promise<void> {
   ok(zero[0].status === "updated" && zero[1].status === "unchanged" && (await get(B))?.powerWatts === 0, "#296 sheet apply: 0 W is a real value and a SKU listed twice compares against the first row");
   const noSku = await applyRackRows([row(2, "", { "Power (W)": "1" })]);
   ok(noSku[0].status === "invalid", "#296 sheet apply: a row without a SKU is invalid");
+}
+
+/* ===== #296 — rack consumers ===== */
+import { allAssembliesFrom as c296cFrom, type FixtureRecord as C296cRecord } from "@/lib/fixture-assemblies";
+import { assemblyPartId as c296cAsmId, gridSpecBomRows as c296cSpecRows, virtualPartsFor as c296cVirtual } from "@/lib/design/grid-virtual-parts";
+import { assemblyOptions as c296cOpts, equipmentMapView as c296cView } from "@/lib/design/equipment-map-view";
+import type { EquipmentMap as C296cMap } from "@/lib/design/equipment-map";
+import { assemblySwapCandidates as c296cCand, scopeLabelOf as c296cScopeLabel } from "@/lib/design/auto-estimate";
+import { fixtureBomLine as c296cBom } from "@/app/(app)/estimator/fixture-bom";
+import { partsListRows as c296cPartsRows } from "@/app/(app)/estimator/parts-csv";
+import { copySectionForTarget as c296cCopy } from "@/app/(app)/estimator/copy-system";
+import type { SpecSection as C296cSection } from "@/app/(app)/estimator/types";
+import { readFileSync as c296cRead } from "node:fs";
+{
+  const rackLayout = (): C296kLayout => c296kL(
+    c296kP({ id: "BLK", kind: "blank", sku: "BLK", ruStart: 11, label: "1U blank" }),
+    c296kP({ id: "A1", ruStart: 1, label: "Power amp" }),
+    c296kP({ id: "A2", ruStart: 3 }),
+    c296kP({ id: "A3", ruStart: 5 }),
+    c296kP({ id: "A4", ruStart: 7 }),
+  );
+  const audioRack = c296kRec({ id: "SA-RACK-A", label: "Audio rack", scope: "Audio", rack: rackLayout() });
+  const controlsRack = c296kRec({ id: "SA-RACK-C", label: "Controls rack", scope: "Controls", rack: rackLayout() });
+  const emptyRack = c296kRec({ id: "SA-RACK-E", label: "Unpriced rack", scope: "Audio", parts: [{ sku: "NOPE", qty: 1 }], rack: c296kL(c296kP({ id: "Z", sku: "NOPE2" })) });
+  const fixtureRec = c296kRec({ id: "SA-FX", kind: "fixture", label: "Wash", scope: undefined, rack: undefined, parts: [{ sku: "AMP", qty: 1 }], lightEngineSku: "AMP" });
+  const fixtures = new Map<string, C296cRecord>([audioRack, controlsRack, emptyRack].map((r) => [r.id, r]));
+  const ctx = { parts: c296kCat, fixtures, margin: 0.3 };
+
+  // ---- Grid virtual parts ----
+  const vps = c296cVirtual([c296cAsmId("SA-RACK-A"), c296cAsmId("SA-RACK-C"), c296cAsmId("SA-RACK-E")], {}, ctx);
+  const byId = new Map(vps.map((v) => [v.sku, v]));
+  ok(byId.get("SA-RACK-A")?.gridScope === "Audio", "#296 rack consumers: an Audio rack draws on the Audio layer");
+  ok(byId.get("SA-RACK-C")?.gridScope === "Unscoped", "#296 rack consumers: a Controls rack draws on Unscoped, like a Controls system");
+  ok(byId.get("SA-RACK-A")?.list === 4 * 150 + 8 + 600 && byId.get("SA-RACK-A")?.cost === 805 && !byId.get("SA-RACK-A")?.virtualDead, "#296 rack consumers: a rack virtual part carries its resolved sell and cost");
+  const dead = byId.get("SA-RACK-E");
+  ok(dead?.virtualDead === true && dead.desc === "Unpriced rack (assembly has no priced parts)" && dead.list === 0, "#296 rack consumers: a rack with no priced parts is dead and named");
+
+  // ---- bid-spec BOM rows ----
+  const rows = c296cSpecRows([{ sku: c296cAsmId("SA-RACK-A"), desc: "Audio rack", qty: 2 }], (id) => fixtures.get(id));
+  const qtyOf = (sku: string) => rows.filter((r) => r.sku === sku).reduce((n, r) => n + r.qty, 0);
+  ok(qtyOf("AMP") === 8 && qtyOf("BLK") === 2 && qtyOf("FRAME") === 2 && rows.length === 3, "#296 rack consumers: gridSpecBomRows expands an asm: rack into its parts and placement SKUs, qty × line qty");
+  ok(rows.find((r) => r.sku === "AMP")?.desc === "Power amp (Audio rack)", "#296 rack consumers: an expanded rack row names its assembly");
+
+  // ---- Auto-estimate swap candidates ----
+  const cands = [{ kind: "rack" as const, scope: "Audio", id: "ra" }, { kind: "rack" as const, scope: "Controls", id: "rc" }, { kind: "system" as const, scope: "Audio", id: "sa" }, { kind: "fixture" as const, id: "fx" }, { kind: "hardware" as const, id: "hw" }];
+  ok(c296cCand(cands, c296cScopeLabel("audio")).map((f) => f.id).join(",") === "ra,sa", "#296 rack consumers: an Audio rack is a swap candidate on the Audio row only");
+  ok(!c296cCand(cands, c296cScopeLabel("video")).some((f) => f.id === "ra") && !c296cCand(cands, c296cScopeLabel("lighting")).some((f) => f.id === "ra") && !c296cCand(cands, c296cScopeLabel("rigging")).some((f) => f.id === "ra"), "#296 rack consumers: …and on no other row");
+  const aa = c296cRead(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+  ok(aa.includes("desc: `${f.label} (${f.kind})`"), "#296 rack consumers: a swap hit reads \"(rack)\" for a rack — the description appends the assembly's kind");
+
+  // ---- Equipment map ----
+  const map: C296cMap = { "rigging:chainWrap": { tiers: { good: { kind: "assembly", id: "SA-RACK-A" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } };
+  const cell = c296cView(map, ctx, {}).find((row) => row.key === "rigging:chainWrap")!.cells[0];
+  ok(cell.detail === "Rack · Audio" && cell.title === "Audio rack", "#296 rack consumers: the map cell detail reads \"Rack · Audio\"");
+  const opts = c296cOpts([audioRack, fixtureRec], ctx);
+  ok(opts.find((o) => o.id === "SA-RACK-A")?.kind === "rack" && opts.find((o) => o.id === "SA-RACK-A")?.scope === "Audio" && opts.find((o) => o.id === "SA-FX")?.scope === "Lighting", "#296 rack consumers: the picker lists a rack under its own scope");
+  const noScopeRack = c296cOpts([c296kRec({ id: "SA-RACK-N", scope: undefined })], ctx);
+  ok(noScopeRack[0].scope === "Other", "#296 rack consumers: a rack with no scope reads Other");
+  const emc = c296cRead(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
+  ok(emc.includes("Assembly (fixture, system, hardware or rack)") && emc.includes('a.kind === "rack" ? `Rack (${a.scope})`'), "#296 rack consumers: the map picker caption and option label name racks");
+
+  // ---- Estimator line ----
+  const asm = c296cFrom([audioRack, fixtureRec], c296kCat);
+  const rackAsm = asm.find((a) => a.id === "SA-RACK-A")!;
+  const fxAsm = asm.find((a) => a.id === "SA-FX")!;
+  const draft = { componentQty: {}, position: "", circuit: "" };
+  const rackLine = c296cBom(rackAsm, draft);
+  ok(rackLine?.rackId === "SA-RACK-A" && rackLine.price === 1208 && rackLine.cost === 805, "#296 rack consumers: fixtureBomLine on a rack carries rackId and the resolved totals");
+  const fxLine = c296cBom(fxAsm, draft);
+  ok(!!fxLine && !("rackId" in fxLine), "#296 rack consumers: fixtureBomLine on a fixture has no rackId");
+  const ec = c296cRead(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(ec.includes("...(line.rackId ? { rackId: line.rackId } : {})"), "#296 rack consumers: the Estimator line gets rackId from the BOM line");
+  const ty = c296cRead(join(process.cwd(), "src/app/(app)/estimator/types.ts"), "utf8");
+  ok(/rackId\?: string;/.test(ty), "#296 rack consumers: SpecItem declares rackId");
+
+  const item = { id: 1, sku: rackAsm.id, desc: rackLine!.desc, qty: 1, unit: "ea", cost: rackLine!.cost, price: rackLine!.price, fixture: true, components: rackLine!.components, rackId: rackLine!.rackId };
+  const sec: C296cSection = { id: "s1", name: "Audio", kind: "materials", mfr: "", freightPct: 0, items: [item] };
+  const csv = c296cPartsRows([sec], [], {});
+  ok(csv.find((r) => r.sku === "AMP")?.qty === 4 && csv.find((r) => r.sku === "BLK")?.qty === 1 && csv.find((r) => r.sku === "FRAME")?.qty === 1, "#296 rack consumers: the parts CSV lists a rack line's amp × 4, blank and frame");
+  ok(csv.find((r) => r.sku === "AMP")?.partOf.join() === rackAsm.name, "#296 rack consumers: each parts row is Part of the rack");
+  const copied = c296cCopy(sec, { newSectionId: "s2", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section;
+  ok(copied.items[0].rackId === "SA-RACK-A" && copied.items[0].sku === "SA-RACK-A", "#296 rack consumers: Copy system keeps rackId on a rack line");
 }
 
 async function curtain292AsyncChecks(): Promise<void> {

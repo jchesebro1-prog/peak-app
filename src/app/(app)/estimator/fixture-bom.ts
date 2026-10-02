@@ -12,6 +12,8 @@ export type FixtureBomLine = {
   cost: number;
   price: number;
   components: NonNullable<SpecItem["components"]>;
+  /** #296 (D578) — set when the assembly is a rack. */
+  rackId?: string;
 };
 
 /** #246 — only a fixture has a hang position / circuit. An assembly with no
@@ -69,5 +71,5 @@ export function fixtureBomLine(
     })),
   });
   if (pc.length) desc += " (" + pc.join(" / ") + ")";
-  return { desc, cost, price, components };
+  return { desc, cost, price, components, ...(assembly.kind === "rack" ? { rackId: assembly.id } : {}) };
 }

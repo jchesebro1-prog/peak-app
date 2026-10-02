@@ -123,6 +123,8 @@ export type SpecItem = {
    *  Estimator fixture line (fixture-bom.ts) never sets these. */
   fixtureId?: string;
   fixtureOptions?: Record<string, number>;
+  /** #296 — the rack assembly this line was configured from (D578). */
+  rackId?: string;
   /** #245 Task 13 — the free-text curtain request this line was priced from
    *  (portal-pricing.ts priceCurtain), carried the same way as `fixtureId`
    *  above so the line can be rebuilt into a cart line. */

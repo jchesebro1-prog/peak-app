@@ -262,12 +262,13 @@ export function partSwapHits(
 }
 
 /**
- * Which fixtures/systems/hardware are swap candidates for a scope (M1, #228):
+ * Which fixtures/systems/hardware/racks are swap candidates for a scope (M1, #228):
  * a System assembly only when its own scope matches the card's (`f.scope`,
  * the capitalized SysKey label — "Lighting", "Audio", …); a Fixture assembly
  * only on a Lighting row, the one scope where a bare light fixture is a
  * sensible swap for an equation line; a Hardware assembly only on a Rigging
- * row (terminations, chain wraps).
+ * row (terminations, chain wraps); a Rack assembly (#296) like a System, by
+ * its own scope.
  */
 export function assemblySwapCandidates<F extends { kind: FixtureKind; scope?: string }>(
   fixtures: ReadonlyArray<F>,

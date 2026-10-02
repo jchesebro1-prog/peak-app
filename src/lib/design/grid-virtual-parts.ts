@@ -1,7 +1,7 @@
 /**
  * Virtual parts (#211, D306) — pure. Auto places assemblies and confirmed
  * allowances as ORDINARY placements whose partId is a virtual id:
- *   asm:<fixtureId>          a fixture, System or Hardware assembly (#210, #228)
+ *   asm:<fixtureId>          a fixture, System, Hardware or Rack assembly (#210, #228)
  *   allow:<rowKey>:<tier>    a confirmed Equipment map allowance
  * The server resolves each id LIVE into a PartLite (desc, unit, list = sell,
  * cost, scope) appended to the page's parts, so the BOM, space rollups, riser,
@@ -101,7 +101,7 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
         unit: "ea",
         list: dead ? 0 : r.sell > 0 ? r.sell : sellFromCost(cost, ctx.margin),
         cost,
-        gridScope: f?.kind === "system" ? SYSTEM_SCOPE_LAYER[f.scope || ""] ?? UNSCOPED : f?.kind === "hardware" ? hardwareLayerFor(f.id, map) : "Lighting",
+        gridScope: f?.kind === "system" || f?.kind === "rack" ? SYSTEM_SCOPE_LAYER[f.scope || ""] ?? UNSCOPED : f?.kind === "hardware" ? hardwareLayerFor(f.id, map) : "Lighting",
         kind: "device",
         virtual: true,
         ...(dead ? { virtualDead: true as const } : {}),
