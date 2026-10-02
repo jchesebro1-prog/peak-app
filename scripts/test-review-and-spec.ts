@@ -42987,3 +42987,38 @@ function c292Sec(id: string, items: Array<Partial<C292Item> & { id: number }>): 
   ok(dl.links.get(dupe.items[0])?.id === 14 && !dl.links.has(dupe.items[1]) && dl.duplicates.length === 1 && dl.duplicates[0] === dupe.items[1],
     "#292 link: two curtains on one key — the first links, the second is flagged");
 }
+
+// ---- #292 task 2: geometry + mount details ----
+import { elevation as c292Elev, ftIn as c292FtIn, pickScale as c292Pick, topMarks as c292Marks } from "@/lib/curtain-cut-sheets/geometry";
+import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/lib/curtain-cut-sheets/mount-details";
+// ---- geometry ----
+{
+  const m20 = c292Marks(20, 12);
+  ok(m20.count === 21 && m20.spacingIn === 12, "#292 geometry: topMarks(20, 12) → 21 marks at 12\"");
+  const m205 = c292Marks(20.5, 12);
+  ok(m205.count === 22 && m205.spacingIn <= 12 && Math.abs(m205.spacingIn * 21 - 246) < 1e-9, "#292 geometry: topMarks(20.5, 12) → 22 marks at ≤ 12\", both ends marked");
+  ok(c292Marks(0, 12).count === 0 && c292Marks(20, 0).count === 0, "#292 geometry: topMarks of a zero width (or spacing) is 0 marks");
+  ok([c292FtIn(21.5), c292FtIn(18), c292FtIn(0.75), c292FtIn(10.999), c292FtIn(6.0208)].join("|") === `21'-6"|18'-0"|0'-9"|11'-0"|6'-0 1/4"`,
+    "#292 geometry: ftIn rounds to the nearest 1/4\" (spec §2.4 cases)");
+  ok(c292Pick([{ widthFt: 20, heightFt: 18 }], { wIn: 6, hIn: 4 }).label === `1/8"=1'-0"`, "#292 geometry: pickScale picks the largest architectural scale that fits");
+  ok(c292Pick([{ widthFt: 2, heightFt: 2 }], { wIn: 6, hIn: 4 }).label === `1"=1'-0"`, "#292 geometry: a small drop draws at 1\"=1'-0\"");
+  ok(c292Pick([{ widthFt: 200, heightFt: 100 }], { wIn: 6, hIn: 4 }).label === `1/16"=1'-0"`, "#292 geometry: an oversize drop falls back to the smallest scale");
+  const base = { fullnessPct: 50, top: "grommets" as const, bottom: "chain" as const, markSpacingIn: 12, markLabel: "Grommets" as const, box: { wIn: 4.6, hIn: 3.9 } };
+  const three = [{ widthFt: 20, heightFt: 18, qty: 2 }, { widthFt: 10, heightFt: 18, qty: 1 }, { widthFt: 6, heightFt: 18, qty: 4 }];
+  const e3 = c292Elev({ ...base, sizes: three });
+  const texts = (e: { shapes: Array<{ kind: string; text?: string }> }) => e.shapes.filter((s) => s.kind === "text").map((s) => s.text as string);
+  ok(e3.shapes.filter((s) => s.tag === "panel").length === 3 && !texts(e3).some((t) => t.startsWith("Typical")), "#292 geometry: up to 3 sizes are drawn side by side");
+  ok(e3.shapes.filter((s) => s.tag === "mark").length === 21 + 11 + 7 && texts(e3).includes(`Grommets @ 12" o.c. max (21)`) && texts(e3).includes("Qty 2"),
+    "#292 geometry: a grommet at every mark per panel, the o.c. label, and each size's qty");
+  const e4 = c292Elev({ ...base, sizes: [...three, { widthFt: 4, heightFt: 18, qty: 1 }] });
+  ok(e4.shapes.filter((s) => s.tag === "panel").length === 1 && texts(e4).includes("Typical — 4 sizes, see schedule"), "#292 geometry: 4+ sizes draw only the largest, captioned Typical");
+  const flat = c292Elev({ ...base, fullnessPct: 0, sizes: three });
+  ok(flat.shapes.every((s) => s.tag !== "pleat") && e3.shapes.some((s) => s.tag === "pleat"), "#292 geometry: pleat lines only when there is fullness");
+}
+// ---- mount details ----
+{
+  const keys = [...c292MountTypes.map((t) => t.id), "track-other" as const];
+  ok(keys.every((k) => { const d = c292Detail(k); return !!d.title && d.shapes.length > 0 && d.labels.length >= 1; }), "#292 details: every mount type (and track-other) has a titled detail with ≥ 1 label");
+  ok(c292Detail("track-other").note === c292OtherNote && c292OtherNote === "Track mounting per manufacturer's instructions" && !c292Detail("tie-batten").note,
+    "#292 details: track-other carries the manufacturer's-instructions note");
+}
