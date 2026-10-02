@@ -12,8 +12,7 @@ no AI, and no number that isn't already on the quote, in the catalog or in Estim
 
 ## Decisions
 
-These become DECISIONS.md entries **D539+**. The exact numbers are assigned at docs time; recompute them from
-`origin/main` right before writing.
+Logged as DECISIONS.md D553-D564 (2026-10-01).
 
 1. **One sheet per curtain type.**
    - A type is: same name (trimmed, case-insensitive) + fabric + fullness + top finish + bottom finish + mount.
