@@ -3,6 +3,7 @@
  * coverage helper. Pure (no store/db imports) — client components import it.
  * Absent = unknown, never zero; 0 means "measured, none".
  */
+import { isInternalCategory } from "@/lib/portal-visibility";
 import {
   AIRFLOWS,
   MOUNT_FACES,
@@ -138,23 +139,34 @@ export function rackFactsOrUndefined(part: Partial<RackPartFacts> | null | undef
   return Object.keys(f).length ? f : undefined;
 }
 
-/** A part as the rack engine sees it; an unknown SKU resolves `found: false`. */
+/**
+ * A part as the rack engine sees it; an unknown SKU resolves `found: false`.
+ * Pass the catalog `category` so an internal row (Labor — see
+ * `isInternalCategory`) comes back `internal: true`.
+ */
 export function rackPartInfo(
-  part: ({ sku: string; desc: string; mfr?: string } & Partial<RackPartFacts>) | undefined,
+  part: ({ sku: string; desc: string; mfr?: string; category?: string | null } & Partial<RackPartFacts>) | undefined,
   sku: string
 ): RackPartInfo {
   if (!part) return { sku, desc: "", found: false };
-  return { ...rackFactsOf(part), sku: part.sku || sku, desc: part.desc, ...(part.mfr ? { mfr: part.mfr } : {}), found: true };
+  return {
+    ...rackFactsOf(part),
+    sku: part.sku || sku,
+    desc: part.desc,
+    ...(part.mfr ? { mfr: part.mfr } : {}),
+    found: true,
+    ...(isInternalCategory(part.category) ? { internal: true } : {}),
+  };
 }
 
 const COVERAGE_FIELDS: readonly RackDataField[] = ["ruHeight", "depthIn", "weightLb", "powerWatts"];
 
-/** Distinct SKUs and which of them lack each rack field. An unknown SKU lacks all four. */
+/** Distinct SKUs and which of them lack each rack field. An unknown SKU lacks all four; an internal (labor) row isn't counted. */
 export function rackDataCoverage(
   skus: readonly string[],
   lookup: RackPartLookup
 ): { total: number; missing: Record<RackDataField, string[]> } {
-  const distinct = [...new Set(skus)];
+  const distinct = [...new Set(skus)].filter((sku) => !lookup(sku)?.internal);
   const missing: Record<RackDataField, string[]> = { ruHeight: [], depthIn: [], weightLb: [], powerWatts: [] };
   for (const sku of distinct) {
     const info = lookup(sku);

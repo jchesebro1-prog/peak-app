@@ -31,12 +31,17 @@ export async function svgToPng(svg: string, widthPx = 1400): Promise<Buffer | nu
     const draw = (markup: string) => sharp(Buffer.from(markup, "utf8")).flatten({ background: "#ffffff" });
     // A server without fonts (Vercel's Lambda image) draws blank labels instead of failing:
     // if the drawing is pixel-identical with every <text> removed, nothing was lettered.
-    const [withText, withoutText] = await Promise.all([draw(sized).raw().toBuffer(), draw(sized.replace(TEXT_EL, "")).raw().toBuffer()]);
-    if (withText.equals(withoutText)) {
-      console.warn("rack raster: no fonts — falling back to the PDF pointer");
+    const [withText, withoutText] = await Promise.all([
+      draw(sized).raw().toBuffer({ resolveWithObject: true }),
+      draw(sized.replace(TEXT_EL, "")).raw().toBuffer(),
+    ]);
+    if (withText.data.equals(withoutText)) {
+      console.warn("[rack] elevation raster: no fonts — falling back to the PDF pointer");
       return null;
     }
-    return await draw(sized).png().toBuffer();
+    // Encode the pixels already drawn (no third SVG render).
+    const { width, height, channels } = withText.info;
+    return await sharp(withText.data, { raw: { width, height, channels } }).png().toBuffer();
   } catch (e) {
     console.warn(`[rack] elevation raster failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;

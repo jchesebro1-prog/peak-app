@@ -36,6 +36,7 @@ export async function loadRackForSheets(id: string, now: number = Date.now()): P
   const [parts, settings] = await Promise.all([skus.length ? getMany(skus) : Promise.resolve([]), getSettings()]);
   const bySku = new Map(parts.map((p) => [p.sku, p] as const));
   // Every referenced SKU resolves: a SKU missing from the catalog is found:false.
+  // The catalog row carries its `category`, so a Labor row resolves `internal` (left out of totals/datasheets).
   const infos = new Map<string, RackPartInfo>(skus.map((sku) => [sku, rackPartInfo(bySku.get(sku), sku)] as const));
   const lookup: RackPartLookup = (sku) => infos.get(sku);
   return {

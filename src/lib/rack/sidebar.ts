@@ -40,7 +40,7 @@ export type SidebarArmed = {
 
 export type RackDrop = { ruStart: number; face: RackFace; lane: 0 | 1 | 2; shelfId?: string };
 
-type HitLike = { sku: string; desc: string; mfr?: string; rack?: RackPartFacts };
+type HitLike = { sku: string; desc: string; mfr?: string; category?: string; rack?: RackPartFacts };
 
 /** The engine's lookup over the parts the builder has loaded. A SKU not loaded yet is undefined (unknown, never "not in the catalog"). */
 export function lookupFromHits(bySku: ReadonlyMap<string, HitLike>): RackPartLookup {
@@ -50,7 +50,7 @@ export function lookupFromHits(bySku: ReadonlyMap<string, HitLike>): RackPartLoo
     if (!hit) return undefined;
     let info = memo.get(sku);
     if (!info) {
-      info = rackPartInfo({ sku: hit.sku, desc: hit.desc, ...(hit.mfr ? { mfr: hit.mfr } : {}), ...(hit.rack ?? {}) }, sku);
+      info = rackPartInfo({ sku: hit.sku, desc: hit.desc, ...(hit.mfr ? { mfr: hit.mfr } : {}), ...(hit.category ? { category: hit.category } : {}), ...(hit.rack ?? {}) }, sku);
       memo.set(sku, info);
     }
     return info;

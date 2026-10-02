@@ -44883,7 +44883,7 @@ import type { RackPartInfo as C296sInfo, RackPlacement as C296sPlacement, RackLa
   ok(sub.rackLevel.map((r) => `${r.qty}|${r.sku}|${r.weightLb}|${r.watts}`).join() === "1|FRM-1|80|0,1|PDU-1|6|0" && sub.rackLevel[0].desc === "Rack frame" && sub.rackLevel[1].mfr === "Powerco",
     "#296 rack submittal: rack-level rows keep list order and skip qty-0 parts");
   ok(sub.power.lines[0] === "At least 600 W typical (1 part unknown)", "#296 rack submittal: power line 1 says \"At least\" with the unknown count: " + sub.power.lines[0]);
-  ok(sub.power.lines.join(" / ") === "At least 600 W typical (1 part unknown) / 1,000 W maximum / 2,047 BTU/hr / 5.0 A at 120 V / PDU capacity 1,800 W — 33% loaded / 185.5 lb",
+  ok(sub.power.lines.join(" / ") === "At least 600 W typical (1 part unknown) / At least 1,000 W maximum / At least 2,047 BTU/hr / At least 5.0 A at 120 V / PDU capacity 1,800 W — at least 33% loaded / 185.5 lb",
     "#296 rack submittal: power lines are exact: " + sub.power.lines.join(" / "));
   ok(sub.power.circuitAmps === 5 && sub.power.capacityWatts === 1800 && sub.power.loadPct === 33, "#296 rack submittal: power summary numbers");
   ok(sub.datasheetSkus.join() === "DSP-B,PATCH-P,AMP-A,SW-C,REC-H,SHELF-D,TX-E,BLK-1,UPS-G,FRM-1,PDU-1", "#296 rack submittal: datasheet SKUs are distinct, in schedule order then rack-level, never reserved: " + sub.datasheetSkus.join());
@@ -44998,7 +44998,7 @@ import type { RackPartInfo as C296pInfo, RackLayout as C296pLayout, RackIssue as
   const val = (l: string) => rows.find((r) => r.label === l)?.value;
   ok(rows.map((r) => r.label).join("|") === "RU used|RU free|RU reserved|Weight|Typical power|Maximum power|Heat|Current at 120 V|PDU capacity", "#296 rack sheets: totals grid rows in order, PDU last when known");
   ok(val("Typical power")?.startsWith("At least ") === true && val("Heat")?.startsWith("At least ") === true && val("Weight")?.startsWith("At least ") === true && val("Current at 120 V")?.endsWith(" A") === true, "#296 rack sheets: unknown watts / weight read 'At least'");
-  ok(val("RU used") === `${sub.totals.ruUsed} of 12` && val("PDU capacity") === `1,800 W — ${sub.power.loadPct}% loaded`, "#296 rack sheets: RU used reads 'n of N'; PDU capacity with % loaded");
+  ok(val("RU used") === `${sub.totals.ruUsed} of 12` && val("PDU capacity") === `1,800 W — at least ${sub.power.loadPct}% loaded`, "#296 rack sheets: RU used reads 'n of N'; PDU capacity with % loaded (at least, watts unknown)");
   const known = c296pSub({ label: "R", rack: { config: L.config, placements: [L.placements[0]] }, parts: [] } as never, look);
   const kr = c296pRows(known);
   ok(!kr.some((r) => r.label === "PDU capacity") && kr.find((r) => r.label === "Typical power")?.value === "400 W" && kr.find((r) => r.label === "Weight")?.value === "30 lb", "#296 rack sheets: fully known totals print plain; no PDU row without a capacity");
@@ -45213,7 +45213,7 @@ async function rack296PackageAsyncChecks(): Promise<void> {
   const stripped = svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/g, "");
   ok(svg.includes("<text") && !stripped.includes("<text"), "#296 rack package (fix 2): fixture sanity — the elevation has text, the stripped copy none");
   ok(png === null || (await c296qPng(stripped)) === null, "#296 rack package (fix 2): an SVG whose text draws nothing (stripped, as with no fonts) returns null");
-  ok(rd296q("src/lib/rack/raster.ts").includes(".raw().toBuffer()") && rd296q("src/lib/rack/raster.ts").includes("rack raster: no fonts — falling back to the PDF pointer"), "#296 rack package (fix 2 source): svgToPng compares raw pixels with and without text");
+  ok(rd296q("src/lib/rack/raster.ts").includes(".raw().toBuffer()") && rd296q("src/lib/rack/raster.ts").includes("[rack] elevation raster: no fonts — falling back to the PDF pointer"), "#296 rack package (fix 2 source): svgToPng compares raw pixels with and without text");
   ok(c296qPngSize(Buffer.from("nope")) === null, "#296 rack package: pngSize rejects a non-PNG");
 
   // A tiny real PNG (sharp is a dependency), 100 × 300 px.
@@ -45242,6 +45242,143 @@ async function rack296PackageAsyncChecks(): Promise<void> {
   const plain = await xml(base);
   ok(!plain.includes("27 11 16") && !plain.includes("<w:tbl>") && !plain.includes("<w:drawing>") && !plain.includes("see racks/"), "#296 rack package: a rack-free spec has no rack section");
   ok(plain === (await xml({ ...base, racks: [] })), "#296 rack package: racks: [] renders the same document as no racks");
+}
+
+/* ===== #296 — final review fixes ===== */
+import {
+  emptyRackLayout as c296fEmpty, place as c296fPlace, move as c296fMove, update as c296fUpdate, canPlace as c296fCan,
+  sanitizeRackLayout as c296fSanitize,
+} from "@/lib/rack/layout";
+import { totals as c296fTotals, validate as c296fValidate } from "@/lib/rack/rules";
+import { rackPartInfo as c296fInfo, rackDataCoverage as c296fCoverage } from "@/lib/rack/part-facts";
+import { rackSubmittal as c296fSub, racksInQuote as c296fInQuote, scheduleCsv as c296fCsv } from "@/lib/rack/submittal";
+import { rackTotalsRows as c296fRows } from "@/lib/rack/sheet-format";
+import { lookupFromHits as c296fFromHits } from "@/lib/rack/sidebar";
+import { sanitizeFixtureInput as c296fSanitizeFixture, resolveFixture as c296fResolve, type FixtureRecord as C296fRecord } from "@/lib/fixture-assemblies";
+import type { RackLayout as C296fLayout, RackPlacement as C296fPlacement, RackEdit as C296fEdit, RackPartInfo as C296fPartInfo } from "@/lib/rack/types";
+{
+  const lay = (e: C296fEdit): C296fLayout => { if (!e.ok) throw new Error("#296 final: expected an ok edit, got " + e.reason); return e.layout; };
+  const why = (e: C296fEdit) => (e.ok ? "" : e.reason);
+  const P = (o: Partial<C296fPlacement> & { id: string }): C296fPlacement => ({ kind: "device", sku: "D", ruStart: 2, ruHeight: 1, face: "front", ...o });
+
+  // 1. A shelf edit never strands the devices on it.
+  const half = lay(c296fPlace(lay(c296fPlace(c296fEmpty(10), P({ id: "RP-S", kind: "shelf", sku: "SH", lane: 0, laneCount: 2 }))), P({ id: "RP-C", lane: 0, laneCount: 2, shelfId: "RP-S" })));
+  const mv = c296fMove(half, "RP-S", { lane: 1 });
+  ok(!mv.ok && why(mv) === "Move the devices on this shelf first.", "#296 final: moving a half shelf to the other lane with a device on it is refused: " + why(mv));
+  const narrow = c296fUpdate(half, "RP-S", { laneCount: 3, lane: 0 });
+  ok(!narrow.ok && why(narrow) === "Move the devices on this shelf first.", "#296 final: narrowing a half shelf to a third under its device is refused");
+  const full = lay(c296fPlace(lay(c296fPlace(c296fEmpty(10), P({ id: "RP-F", kind: "shelf", sku: "SH" }))), P({ id: "RP-K", lane: 1, laneCount: 2, shelfId: "RP-F" })));
+  const toLeft = c296fUpdate(full, "RP-F", { laneCount: 2, lane: 0 });
+  ok(!toLeft.ok && why(toLeft) === "Move the devices on this shelf first.", "#296 final: a full shelf can't become the half its device isn't on");
+  const toRight = c296fUpdate(full, "RP-F", { laneCount: 2, lane: 1 });
+  ok(toRight.ok && c296fSanitize(toRight.layout).ok, "#296 final: a full shelf can become the half its device sits on, and it sanitizes");
+  const widen = c296fUpdate(half, "RP-S", { laneCount: undefined, lane: undefined });
+  ok(widen.ok && c296fSanitize(widen.layout).ok, "#296 final: widening a shelf keeps its devices inside and sanitizes");
+  const up = c296fMove(half, "RP-S", { ruStart: 6 });
+  ok(up.ok && up.layout.placements.find((p) => p.id === "RP-C")?.ruStart === 6 && c296fSanitize(up.layout).ok, "#296 final: moving a shelf's RU still re-seats its device and sanitizes");
+  const bare = lay(c296fPlace(c296fEmpty(10), P({ id: "RP-E", kind: "shelf", sku: "SH", lane: 0, laneCount: 2 })));
+  ok(c296fMove(bare, "RP-E", { lane: 1 }).ok && c296fUpdate(bare, "RP-E", { laneCount: 3, lane: 2 }).ok, "#296 final: an empty shelf changes lane and width freely");
+  const stranded: C296fLayout = { ...half, placements: half.placements.map((p) => (p.id === "RP-S" ? { ...p, lane: 1 as const } : p)) };
+  const sc = c296fCan(stranded, stranded.placements.find((p) => p.id === "RP-S")!);
+  ok(!sc.ok && sc.code === "shelf" && sc.reason === "Move the devices on this shelf first.", "#296 final: canPlace refuses the stranding shelf with code shelf");
+  const strandedErrs = c296fValidate(stranded).filter((i) => i.level === "error");
+  ok(strandedErrs.length === 1 && strandedErrs[0].placementIds.join() === "RP-C" && strandedErrs[0].message.endsWith("Wider than the shelf."), "#296 final: validate still reports a stranded device once, on the device");
+  // Property: every accepted shelf move / width edit round-trips through sanitize.
+  let accepted = 0, refused = 0, broken = 0;
+  for (const base of [half, full])
+    for (const id of ["RP-S", "RP-F"]) {
+      if (!base.placements.some((p) => p.id === id)) continue;
+      for (const laneCount of [undefined, 2, 3] as const)
+        for (const lane of [undefined, 0, 1, 2] as const)
+          for (const ruStart of [1, 2, 5, 9]) {
+            const a = c296fUpdate(base, id, { laneCount, lane });
+            const edits = [a, a.ok ? c296fMove(a.layout, id, { ruStart }) : a, c296fMove(base, id, { lane: lane ?? 0, ruStart })];
+            for (const e of edits) {
+              if (!e.ok) { refused++; continue; }
+              accepted++;
+              if (!c296fSanitize(e.layout).ok) broken++;
+            }
+          }
+    }
+  ok(accepted > 0 && refused > 0 && broken === 0, `#296 final: every accepted shelf edit sanitizes (${accepted} accepted, ${refused} refused, ${broken} broken)`);
+
+  // 5. A long catalog SKU keeps every character (cap 160 = the fixture form's cleanLine).
+  const sku150 = "S".repeat(150);
+  const longOk = c296fSanitize({ config: { ruCount: 10, widthIn: 19, numbering: "bottom-up" }, placements: [P({ id: "RP-L", sku: sku150, ruStart: 1 })] });
+  const longCut = c296fSanitize({ config: { ruCount: 10, widthIn: 19, numbering: "bottom-up" }, placements: [P({ id: "RP-L", sku: "T".repeat(200), ruStart: 1 })] });
+  ok(longOk.ok && longOk.value.placements[0].sku === sku150 && longCut.ok && longCut.value.placements[0].sku?.length === 160, "#296 final: placement SKUs keep up to 160 characters");
+
+  // Shared catalog for 2–4.
+  type Row = { sku: string; desc: string; category?: string; cost?: number; list?: number } & Partial<C296fPartInfo>;
+  const rows: Row[] = [
+    { sku: "AMP", desc: "Amp", category: "Audio", ruHeight: 1, depthIn: 10, weightLb: 20, powerWatts: 300, cost: 100, list: 150 },
+    { sku: "MYS", desc: "Mystery", ruHeight: 1 },
+    { sku: "PDU-1", desc: "Rack PDU", weightLb: 5, powerWatts: 0, powerCapacityWatts: 1800, cost: 40, list: 60 },
+    { sku: "PDU-2", desc: "Spare PDU", weightLb: 6, powerWatts: 0, powerCapacityWatts: 2000 },
+    { sku: "UNK", desc: "Unknown optional" },
+    { sku: "LAB", desc: "Rack build labor", category: "Labor", cost: 50, list: 90 },
+  ];
+  const bySku = new Map(rows.map((r) => [r.sku, r] as const));
+  const look = (sku: string) => c296fInfo(bySku.get(sku), sku);
+  const rackL = (...ps: C296fPlacement[]): C296fLayout => ({ config: { ruCount: 12, widthIn: 19, numbering: "bottom-up" }, placements: ps });
+  const amp = P({ id: "RP-A", sku: "AMP", ruStart: 1 });
+  const mys = P({ id: "RP-M", sku: "MYS", ruStart: 2 });
+
+  // 2. qty-0 (optional) rack-level parts: "with options" only.
+  const t0 = c296fTotals(rackL(amp), look, [{ sku: "PDU-1", qty: 0 }]);
+  ok(t0.capacityWatts === null && t0.watts === 300 && t0.weightLb === 20 && t0.withOptions.weightLb === 25, "#296 final: an optional (qty 0) PDU adds no capacity, only its with-options weight: " + JSON.stringify({ c: t0.capacityWatts, w: t0.withOptions.weightLb }));
+  const tU = c296fTotals(rackL(amp), look, [{ sku: "UNK", qty: 0 }]);
+  ok(tU.unknownWatts === 0 && tU.unknownWeight === 0 && tU.missingData.length === 0, "#296 final: a qty-0 part with unknown data raises no unknowns or missing data");
+  const partsAll = [{ sku: "PDU-1", qty: 1 }, { sku: "PDU-2", qty: 0 }, { sku: "UNK", qty: 0 }];
+  const sidebarT = c296fTotals(rackL(amp, mys), look, partsAll);
+  const subT = c296fSub({ label: "R", rack: rackL(amp, mys), parts: partsAll } as never, look).totals;
+  ok(sidebarT.capacityWatts === 1800 && sidebarT.capacityWatts === subT.capacityWatts && sidebarT.unknownWatts === subT.unknownWatts && sidebarT.unknownWeight === subT.unknownWeight
+    && JSON.stringify(sidebarT.missingData) === JSON.stringify(subT.missingData),
+    "#296 final: the sidebar's all-parts totals and the submittal's qty > 0 totals agree on capacity, unknowns and missing data: " + JSON.stringify({ s: [sidebarT.capacityWatts, sidebarT.unknownWatts, sidebarT.missingData.length], p: [subT.capacityWatts, subT.unknownWatts, subT.missingData.length] }));
+  ok(sidebarT.watts === subT.watts && sidebarT.weightLb === subT.weightLb && sidebarT.withOptions.weightLb === subT.withOptions.weightLb + 6, "#296 final: the optional PDU only shows in the sidebar's with-options weight");
+
+  // 3. Labor (internal) parts: priced, but no equipment data anywhere.
+  ok(look("LAB").internal === true && c296fInfo({ sku: "X", desc: "x", category: " labor " }, "X").internal === true && !("internal" in look("AMP")) && !("internal" in look("NOPE")),
+    "#296 final: rackPartInfo marks a Labor-category row internal (case/space-insensitive), nothing else");
+  ok(c296fFromHits(new Map([["LAB", { sku: "LAB", desc: "Labor", category: "Labor" }]]))("LAB")?.internal === true, "#296 final: the builder's lookup (lookupFromHits) carries the category through");
+  const labT = c296fTotals(rackL(amp), look, [{ sku: "LAB", qty: 2 }, { sku: "PDU-1", qty: 1 }]);
+  ok(labT.unknownWatts === 0 && labT.unknownWeight === 0 && labT.missingData.length === 0 && labT.weightLb === 25, "#296 final: a labor rack-level part raises no unknowns and adds no weight: " + JSON.stringify(labT.missingData));
+  const labSub = c296fSub({ label: "R", rack: rackL(amp), parts: [{ sku: "LAB", qty: 2 }, { sku: "PDU-1", qty: 1 }] } as never, look);
+  ok(!labSub.rackLevel.some((r) => r.sku === "LAB") && labSub.rackLevel.map((r) => r.sku).join() === "PDU-1", "#296 final: labor prints no rack-level schedule row");
+  ok(!labSub.datasheetSkus.includes("LAB") && !labSub.gaps.some((g) => g.sku === "LAB") && !c296fCsv(labSub).includes("LAB"), "#296 final: labor is not in datasheetSkus, gaps or the schedule CSV");
+  ok(labSub.power.lines.every((l) => !l.startsWith("At least")), "#296 final: labor never makes the power sheet hedge: " + labSub.power.lines.join(" / "));
+  const cov = c296fCoverage(["AMP", "LAB", "MYS"], look);
+  ok(cov.total === 2 && cov.missing.weightLb.join() === "MYS" && !cov.missing.powerWatts.includes("LAB"), "#296 final: rackDataCoverage leaves labor out");
+  const fx = c296fSanitizeFixture({ kind: "rack", label: "R", scope: "Audio", parts: [{ sku: "LAB", qty: 2 }, { sku: "PDU-1", qty: 1 }], rack: rackL(amp) });
+  if (!fx.ok) throw new Error("#296 final: bad fixture — " + fx.error);
+  const priced = c296fResolve({ id: "SA-F296", ...fx.value } as C296fRecord, bySku as never);
+  const labLine = priced.parts.find((p) => p.sku === "LAB");
+  ok(!!labLine && labLine.qty === 2 && labLine.cost === 50 && priced.cost === 2 * 50 + 40 + 100, "#296 final: resolveFixture still prices labor: " + JSON.stringify({ cost: priced.cost, lab: labLine }));
+
+  // 4. The power sheet hedges every watts-derived line while watts are unknown.
+  const pdu = [{ sku: "PDU-1", qty: 1 }];
+  const hedged = c296fSub({ label: "R", rack: rackL(amp, mys), parts: pdu } as never, look);
+  ok(hedged.power.lines.join(" / ") === "At least 300 W typical (1 part unknown) / At least 300 W maximum / At least 1,024 BTU/hr / At least 2.5 A at 120 V / PDU capacity 1,800 W — at least 17% loaded / At least 25 lb",
+    "#296 final: with unknown watts, maximum / BTU / amps / % loaded all read at least: " + hedged.power.lines.join(" / "));
+  ok(c296fRows(hedged).find((r) => r.label === "PDU capacity")?.value === "1,800 W — at least 17% loaded", "#296 final: the totals grid's PDU row hedges the same way");
+  const plain = c296fSub({ label: "R", rack: rackL(amp), parts: pdu } as never, look);
+  ok(plain.power.lines.join(" / ") === "300 W typical / 300 W maximum / 1,024 BTU/hr / 2.5 A at 120 V / PDU capacity 1,800 W — 17% loaded / 25 lb" && c296fRows(plain).find((r) => r.label === "PDU capacity")?.value === "1,800 W — 17% loaded",
+    "#296 final: with every watt known, nothing hedges: " + plain.power.lines.join(" / "));
+
+  // 6. One rack id length: 60 in the route and in racksInQuote.
+  const id60 = "SA-" + "A".repeat(60), id61 = "SA-" + "B".repeat(61), id45 = "SA-" + "C".repeat(45);
+  ok(c296fInQuote([{ rackId: id45 }, { rackId: id60 }, { rackId: id61 }], () => ({ kind: "rack" })).join() === `${id45},${id60}`, "#296 final: racksInQuote accepts ids up to 60 characters after SA-, refuses 61");
+  const rdf = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rdf("src/lib/rack/submittal.ts").includes("/^SA-[A-Z0-9-]{1,60}$/") && !rdf("src/lib/rack/submittal.ts").includes("{1,40}") && rdf("src/app/api/racks/[id]/submittal/route.ts").includes("/^SA-[A-Z0-9-]{1,60}$/"), "#296 final: the route and racksInQuote share the {1,60} id length");
+
+  // 7. Raster: one SVG render with text, one without, the PNG encoded from the first; warnings tagged [rack].
+  const raster = rdf("src/lib/rack/raster.ts");
+  ok((raster.match(/draw\(sized\)/g) ?? []).length === 1 && raster.includes("resolveWithObject: true") && raster.includes("raw: { width, height, channels }"), "#296 final: svgToPng encodes the PNG from the first raw buffer (no third raster pass)");
+  const warns = [...raster.matchAll(/console\.warn\(([`"])(.*?)\1/g)].map((m) => m[2]);
+  ok(warns.length === 2 && warns.every((w) => w.startsWith("[rack] ")), "#296 final: every raster warning starts [rack]: " + warns.join(" | "));
+
+  // 8. The rack form's help text stays accurate.
+  ok(rdf("src/app/(app)/design/assemblies/fixture-form.tsx").includes("Labor prices with the rack but stays out of its weight, power and submittal."), "#296 final: the rack help text says labor prices but stays out of the rack totals");
 }
 
 async function curtain292AsyncChecks(): Promise<void> {

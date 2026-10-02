@@ -234,6 +234,8 @@ export function validate(layout: RackLayout, lookup?: RackPartLookup): RackIssue
   for (const p of placements) {
     const r = canPlace(layout, p, { nameOf: label });
     if (r.ok || r.code === "overlap" || r.code === "shelf-sibling") continue;
+    // A shelf stranding a device is reported once, on the device ("Wider than the shelf.").
+    if (r.code === "shelf" && p.kind === "shelf" && !p.shelfId) continue;
     const shelf = p.shelfId ? byId.get(p.shelfId) : undefined;
     if (r.code === "shelf-clearance" && shelfOverlaps(shelf)) continue;
     if (r.code === "shelf-bounds" && shelfOutOfBounds(shelf)) continue;
@@ -400,6 +402,7 @@ export function totals(
     .sort((a, b) => b.s.hi - a.s.hi || (a.p.face === b.p.face ? 0 : a.p.face === "front" ? -1 : 1) || a.k - b.k);
   for (const { p } of order) {
     if (!p.sku || !real(p)) continue;
+    if (lookup(p.sku)?.internal) continue; // a labor/travel row: RU only, no weight, power or data
     const f = placementFacts(p, lookup);
     const passive = PASSIVE.has(p.kind);
     const panel = p.kind === "blank" || p.kind === "vent"; // a panel's height and depth don't matter
@@ -414,11 +417,18 @@ export function totals(
   }
   for (const { sku, qty } of rackParts ?? []) {
     const info = lookup(sku);
+    if (info?.internal) continue; // labor/travel prices but weighs and draws nothing
     const f = rackFactsOf(info);
+    const max = f.maxPowerWatts !== undefined && f.powerWatts !== undefined ? Math.max(f.maxPowerWatts, f.powerWatts) : (f.maxPowerWatts ?? f.powerWatts);
+    // qty 0 = an optional add-on (D574): one unit toward "with options" when its data is known —
+    // never capacity, never an unknown or missing-data row (the printed submittal lists only qty > 0).
+    if (!(qty > 0)) {
+      addUp(true, 1, f.weightLb, f.powerWatts, max);
+      continue;
+    }
     const lbl = info?.desc || sku;
     if (f.weightLb === undefined) flag(sku, lbl, "weightLb");
     if (f.powerWatts === undefined) flag(sku, lbl, "powerWatts");
-    const max = f.maxPowerWatts !== undefined && f.powerWatts !== undefined ? Math.max(f.maxPowerWatts, f.powerWatts) : (f.maxPowerWatts ?? f.powerWatts);
     addUp(false, qty, f.weightLb, f.powerWatts, max);
     if (f.powerCapacityWatts !== undefined) capacity = (capacity ?? 0) + f.powerCapacityWatts * qty;
   }

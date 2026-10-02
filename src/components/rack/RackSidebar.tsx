@@ -65,7 +65,7 @@ const DEFAULT_SCALE = 12;
 type Menu = { id: string; at: { x: number; y: number }; ret: HTMLElement | SVGElement | null };
 
 const inField = (t: EventTarget | null) => t instanceof Element && !!t.closest("input, select, textarea");
-const infoOf = (hit: RackPickerHit) => rackPartInfo({ sku: hit.sku, desc: hit.desc, ...(hit.mfr ? { mfr: hit.mfr } : {}), ...(hit.rack ?? {}) }, hit.sku);
+const infoOf = (hit: RackPickerHit) => rackPartInfo({ sku: hit.sku, desc: hit.desc, ...(hit.mfr ? { mfr: hit.mfr } : {}), ...(hit.category ? { category: hit.category } : {}), ...(hit.rack ?? {}) }, hit.sku);
 
 function loadPrefs(): SidebarPrefs {
   try {

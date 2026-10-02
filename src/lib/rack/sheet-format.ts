@@ -6,7 +6,7 @@
  */
 import { DEFAULT_TZ } from "@/lib/venue-availability";
 import { RACK_FACT_LABEL } from "./part-facts";
-import { formatBtu, formatLb, formatWatts, type RackSubmittal } from "./submittal";
+import { formatBtu, formatLb, formatWatts, pduLoad, type RackSubmittal } from "./submittal";
 import { CIRCUIT_VOLTS, type RackIssue, type RackMissing } from "./types";
 
 export const RACK_SHEET_UNKNOWN = "—";
@@ -58,7 +58,7 @@ export function rackTotalsRows(s: RackSubmittal): Array<{ label: string; value: 
   if (s.power.capacityWatts !== null) {
     rows.push({
       label: "PDU capacity",
-      value: s.power.loadPct !== null ? `${formatWatts(s.power.capacityWatts)} — ${s.power.loadPct}% loaded` : formatWatts(s.power.capacityWatts),
+      value: s.power.loadPct !== null ? `${formatWatts(s.power.capacityWatts)} — ${pduLoad(s.power.loadPct, w)}` : formatWatts(s.power.capacityWatts),
     });
   }
   return rows;

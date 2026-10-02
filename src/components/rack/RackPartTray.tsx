@@ -10,7 +10,7 @@ import { usePartSearch } from "@/app/(app)/design/assemblies/use-part-search";
 import type { RackDefaults } from "@/lib/rack/defaults";
 import type { RackPartFacts } from "@/lib/rack/types";
 
-export type RackPickerHit = { sku: string; desc: string; mfr?: string; rack?: RackPartFacts };
+export type RackPickerHit = { sku: string; desc: string; mfr?: string; category?: string; rack?: RackPartFacts };
 
 export type TrayMode =
   | { kind: "device" }

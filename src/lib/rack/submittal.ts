@@ -61,6 +61,10 @@ export function formatBtu(n: number): string {
 export function formatLb(n: number): string {
   return `${num1(n)} lb`;
 }
+/** "33% loaded", or "at least 33% loaded" while any part's watts are unknown. */
+export function pduLoad(loadPct: number, unknownWatts: number): string {
+  return `${unknownWatts > 0 ? "at least " : ""}${loadPct}% loaded`;
+}
 
 /* ---------- the model ---------- */
 
@@ -121,7 +125,9 @@ export function rackSubmittal(rec: Pick<FixtureRecord, "label" | "scope" | "rack
     };
   });
 
-  const rackLevel: RackLevelRow[] = parts.map((l) => {
+  // Labor/travel rows (internal) price in the Estimator but are no equipment: no row, datasheet or gap.
+  const isInternal = (sku: string) => !!lookup(sku)?.internal;
+  const rackLevel: RackLevelRow[] = parts.filter((l) => !isInternal(l.sku)).map((l) => {
     const info = lookup(l.sku);
     const f = rackFactsOf(info);
     return { qty: l.qty, mfr: info?.mfr || "", sku: l.sku, desc: l.label || info?.desc || l.sku, weightLb: orNull(f.weightLb), watts: orNull(f.powerWatts) };
@@ -133,21 +139,23 @@ export function rackSubmittal(rec: Pick<FixtureRecord, "label" | "scope" | "rack
   // Power, heat and weight in plain sentences.
   const cap = t.capacityWatts;
   const loadPct = cap !== null && cap > 0 ? Math.round((t.watts / cap) * 100) : null;
+  // Every watts-derived figure hedges "At least" while any part's watts are unknown (as the sheet's totals grid does).
+  const hedge = t.unknownWatts > 0 ? "At least " : "";
   const lines = [
     t.unknownWatts > 0
       ? `At least ${formatWatts(t.watts)} typical (${t.unknownWatts} part${t.unknownWatts === 1 ? "" : "s"} unknown)`
       : `${formatWatts(t.watts)} typical`,
-    `${formatWatts(t.maxWatts)} maximum`,
-    formatBtu(t.btuHr),
-    `${t.amps.toFixed(1)} A at ${CIRCUIT_VOLTS} V`,
-    ...(cap !== null && loadPct !== null ? [`PDU capacity ${formatWatts(cap)} — ${loadPct}% loaded`] : []),
+    `${hedge}${formatWatts(t.maxWatts)} maximum`,
+    `${hedge}${formatBtu(t.btuHr)}`,
+    `${hedge}${t.amps.toFixed(1)} A at ${CIRCUIT_VOLTS} V`,
+    ...(cap !== null && loadPct !== null ? [`PDU capacity ${formatWatts(cap)} — ${pduLoad(loadPct, t.unknownWatts)}`] : []),
     t.unknownWeight > 0 ? `At least ${formatLb(t.weightLb)}` : formatLb(t.weightLb),
   ];
 
   const datasheetSkus: string[] = [];
   const seenSku = new Set<string>();
   for (const sku of [...schedule.filter((r) => !r.reserved).map((r) => r.sku), ...rackLevel.map((r) => r.sku)]) {
-    if (!sku || seenSku.has(sku)) continue;
+    if (!sku || seenSku.has(sku) || isInternal(sku)) continue;
     seenSku.add(sku);
     datasheetSkus.push(sku);
   }
@@ -221,7 +229,8 @@ export function racksInGrid(partIds: Iterable<string>, fixtureOf: KindOf): strin
   return out;
 }
 
-const FIXTURE_ID = /^SA-[A-Z0-9-]{1,40}$/;
+/** = the submittal route's RACK_ID: one id length everywhere a rack id is read. */
+const FIXTURE_ID = /^SA-[A-Z0-9-]{1,60}$/;
 
 /** Distinct rack ids on a quote's items (`rackId`, else `fixtureId`). Items have no save-time sanitizer, so every id is validated here. */
 export function racksInQuote(items: ReadonlyArray<{ rackId?: unknown; fixtureId?: unknown }>, fixtureOf: KindOf): string[] {

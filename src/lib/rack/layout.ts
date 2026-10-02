@@ -32,7 +32,7 @@ const KINDS: readonly PlacementKind[] = ["device", "shelf", "blank", "vent", "re
 const ID_RE = /^RP-[A-Z0-9-]{1,40}$/;
 const LABEL_MAX = 160;
 const NOTES_MAX = 200;
-const SKU_MAX = 80;
+const SKU_MAX = 160; // = the fixture form's cleanLine cap, so a long catalog SKU never truncates (and prices at $0)
 
 /** Which rule a placement broke — validate() reports it as the issue code. */
 export type PlaceFailCode = "height" | "bounds" | "sku" | "lane" | "shelf" | "overlap" | "shelf-sibling" | "shelf-width" | "shelf-bounds" | "shelf-clearance";
@@ -194,6 +194,14 @@ export function canPlace(layout: RackLayout, p: RackPlacement, opts?: CanPlaceOp
         return { ok: false, reason: `Too tall for the shelf — ${taken.size} RU above it ${taken.size === 1 ? "is" : "are"} taken.`, code: "shelf-clearance" };
     }
     return { ok: true };
+  }
+
+  // 4b. a top-level shelf keeps every device on it inside its own lanes —
+  // a shelf move/width edit that would strand one is refused (sanitize would refuse it later).
+  if (p.kind === "shelf") {
+    const kids = layout.placements.filter((q) => q.shelfId === p.id && q.id !== opts?.ignoreId);
+    if (kids.some((c) => { const cl = laneSpan(c); return cl[0] < myLanes[0] - EPS || cl[1] > myLanes[1] + EPS; }))
+      return { ok: false, reason: "Move the devices on this shelf first.", code: "shelf" };
   }
 
   // 5. overlap with other top-level placements on the same face

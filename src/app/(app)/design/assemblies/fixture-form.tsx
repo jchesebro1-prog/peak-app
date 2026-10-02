@@ -264,7 +264,7 @@ function LineBox({ title, lines, onLines, bySku, onPickPart, names, chipFor }: {
 /** Stable identity: the sidebar re-syncs its copy when this prop changes. */
 export const NO_RACK_DEFAULTS: RackDefaults = {};
 const RACK_SIZES = Array.from({ length: RACK_RU_MAX - RACK_RU_MIN + 1 }, (_, k) => RACK_RU_MIN + k);
-const RACK_HELP = "Lay out devices in the rack on the right. Rack-level parts (frame, rails, PDUs, casters, fans, cable management, labor) go in the parts list — they take no RU.";
+const RACK_HELP = "Lay out devices in the rack on the right. Rack-level parts (frame, rails, PDUs, casters, fans, cable management, labor) go in the parts list — they take no RU. Labor prices with the rack but stays out of its weight, power and submittal.";
 
 export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel, portalCategories = [], rackDefaults = NO_RACK_DEFAULTS, onSaveRackDefaults }: {
   draft: Draft;

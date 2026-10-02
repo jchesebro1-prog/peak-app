@@ -35,8 +35,13 @@ export type RackPartFacts = {
 export const RACK_FACT_KEYS = ["rackMount", "ruHeight", "rackWidth", "depthIn", "weightLb", "powerWatts", "maxPowerWatts", "powerCapacityWatts", "mountFace", "airflow", "rackNotes"] as const;
 export type RackFactKey = (typeof RACK_FACT_KEYS)[number];
 
-/** A part as the rack engine sees it. `found: false` = SKU not in the catalog. */
-export type RackPartInfo = RackPartFacts & { sku: string; desc: string; mfr?: string; found: boolean };
+/**
+ * A part as the rack engine sees it. `found: false` = SKU not in the catalog.
+ * `internal` = an internal catalog row (a labor/travel rate, see
+ * `isInternalCategory`): it prices like any part but has no weight, power or
+ * datasheet, so totals, the submittal and coverage leave it out.
+ */
+export type RackPartInfo = RackPartFacts & { sku: string; desc: string; mfr?: string; found: boolean; internal?: boolean };
 export type RackPartLookup = (sku: string) => RackPartInfo | undefined;
 
 export type RackFace = "front" | "rear";
