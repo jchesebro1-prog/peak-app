@@ -83,6 +83,7 @@ const ROUTES = [
   "/catalog/rack-data/export", // #296 — the rack data CSV download
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
   "/catalog/departments", // #252 — the portal department tree editor (admin)
+  "/catalog/manufacturers", // Manufacturer section Part 1
   "/estimating-rules",
   "/estimating-rules/track-series", // #274 — the track configurator's parts map (admin)
   "/estimating-rules/curtain-mounts", // #292 — curtain-mount hardware (admin)

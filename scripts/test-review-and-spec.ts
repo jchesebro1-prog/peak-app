@@ -48618,3 +48618,21 @@ async function mfrStoreAsyncChecks(): Promise<void> {
   ok((await mfsList()).filter((m) => m.key === "racemfr").length === 1, "mfr images: two concurrent first-creates for one key leave exactly one record");
   ok(mfsReadFile("src/app/(app)/catalog/documents/actions.ts", "utf8").includes('source !== "manufacturer"'), "mfr images: searchDocumentsAction filters manufacturer-source documents (source check)");
 }
+
+/* ======================================================================
+   Manufacturer images — page rows + upload-many matcher (pure).
+   ====================================================================== */
+import { manufacturerRows as mfrRows, matchManufacturerFile as mfrMatch } from "@/lib/manufacturer-rows";
+{
+  const parts = [
+    { sku: "A1", mfr: "ETC", category: "Lighting" }, { sku: "A2", mfr: "E.T.C.", category: "Lighting" }, { sku: "A3", mfr: "ETC", category: "Lighting" },
+    { sku: "B1", mfr: "Allen and Heath", category: "Audio" }, { sku: "B2", mfr: "Allen & Heath", category: "Audio" },
+    { sku: "L1", mfr: "ETC", category: "Labor" }, { sku: "N1", mfr: "", category: "Lighting" },
+  ];
+  const rows = mfrRows(parts, (s) => s === "A1", [{ key: "etc", imageDocumentId: "PD-1" }]);
+  const etc = rows.find((r) => r.key === "etc");
+  ok(rows[0].key === "etc" && !!etc && etc.name === "ETC" && etc.spellings.join() === "E.T.C." && etc.parts === 3 && etc.withoutPhoto === 2 && etc.imageDocumentId === "PD-1", "mfr images: rows group spellings by key, count parts (no Labor) and parts without a photo, carry the image");
+  ok(rows.some((r) => r.key === "allenandheath") && rows.some((r) => r.key === "allenheath") && !rows.some((r) => r.key === ""), "mfr images: '&' vs 'and' stay separate rows (Part 2 merges); blank manufacturers are left out");
+  ok(mfrMatch("ETC.jpg", rows) === "etc" && mfrMatch("e.t.c.PNG", rows) === "etc" && mfrMatch("Allen and Heath.webp", rows) === "allenandheath", "mfr images: a file name matches a manufacturer by key, any case or punctuation");
+  ok(mfrMatch("ETC Lighting.jpg", rows) === null && mfrMatch("photo.jpg", rows) === null, "mfr images: a file name never matches by substring");
+}
