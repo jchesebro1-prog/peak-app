@@ -58,6 +58,35 @@ export function sanitizeMountRows(raw: unknown): MountHardwareRow[] {
   return out;
 }
 
+export type MountRowsCheck = { ok: true; rows: MountHardwareRow[] } | { ok: false; error: string };
+
+/**
+ * Strict form of sanitizeMountRows for a SAVE: names the first row that would
+ * be dropped (blank part, bad quantity, bad every-ft) or the row cap, so a bad
+ * row is refused instead of vanishing under a "Saved." message. Pure; the
+ * Curtain mounts client runs the same check before submitting.
+ */
+export function validateMountRows(raw: unknown): MountRowsCheck {
+  const list = Array.isArray(raw) ? raw : [];
+  if (list.length > MOUNT_ROWS_MAX) return { ok: false, error: `At most ${MOUNT_ROWS_MAX} rows per mount type.` };
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i] && typeof list[i] === "object" ? (list[i] as Record<string, unknown>) : null;
+    const sku = typeof row?.sku === "string" ? row.sku.trim() : "";
+    const name = `Row ${i + 1}${sku ? ` (${sku})` : ""}`;
+    if (!sku) return { ok: false, error: `${name}: pick a part.` };
+    const rule = row?.rule && typeof row.rule === "object" ? (row.rule as Record<string, unknown>) : null;
+    const qty = num(rule?.qty);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > MOUNT_QTY_MAX) return { ok: false, error: `${name}: quantity must be a number above 0 (up to ${MOUNT_QTY_MAX}).` };
+    if (rule?.kind === "perFtWidth") {
+      const everyFt = num(rule.everyFt);
+      if (!Number.isFinite(everyFt) || everyFt <= 0) return { ok: false, error: `${name}: "every N feet" must be a number above 0.` };
+    } else if (rule?.kind !== "perCurtain" && rule?.kind !== "perMark") {
+      return { ok: false, error: `${name}: unknown quantity rule.` };
+    }
+  }
+  return { ok: true, rows: sanitizeMountRows(list) };
+}
+
 export function sanitizeCurtainMounts(raw: unknown): Partial<Record<CurtainMountTypeId, CurtainMountHardware>> {
   const out: Partial<Record<CurtainMountTypeId, CurtainMountHardware>> = {};
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};

@@ -4,7 +4,7 @@ import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/app/(app)/design/grid/settings/equipment-map/part-picker";
 import { ShapeSvg } from "@/components/cutsheets/shape-svg";
-import { MOUNT_RULE_LABELS, type CurtainMountHardware, type MountQtyRule } from "@/lib/curtain-mounts";
+import { MOUNT_RULE_LABELS, validateMountRows, type CurtainMountHardware, type MountQtyRule } from "@/lib/curtain-mounts";
 import { mountDetail, MOUNT_DETAIL_VIEWBOX } from "@/lib/curtain-cut-sheets/mount-details";
 import { CURTAIN_MOUNT_TYPES, type CurtainMountTypeId } from "@/lib/curtain-cut-sheets/vocab";
 import { saveCurtainMountAction } from "./actions";
@@ -18,7 +18,7 @@ const BTN: CSSProperties = { border: "1px solid #dfe2e8", background: "#fff", bo
 const toDraft = (hw: CurtainMountHardware | undefined): Draft[] =>
   (hw?.rows ?? []).map((r) => ({ sku: r.sku, kind: r.rule.kind, qty: String(r.rule.qty), everyFt: r.rule.kind === "perFtWidth" ? String(r.rule.everyFt) : "" }));
 const toRows = (d: Draft[]) =>
-  d.filter((r) => r.sku).map((r) => ({ sku: r.sku, rule: r.kind === "perFtWidth" ? { kind: r.kind, qty: r.qty, everyFt: r.everyFt } : { kind: r.kind, qty: r.qty } }));
+  d.map((r) => ({ sku: r.sku, rule: r.kind === "perFtWidth" ? { kind: r.kind, qty: r.qty, everyFt: r.everyFt } : { kind: r.kind, qty: r.qty } }));
 
 export default function CurtainMountsClient({ mounts, parts }: { mounts: Partial<Record<CurtainMountTypeId, CurtainMountHardware>>; parts: Record<string, MountPartInfo> }) {
   return (
@@ -38,12 +38,25 @@ function MountCard({ id, label, initial, parts }: { id: CurtainMountTypeId; labe
   const [pending, start] = useTransition();
   const detail = mountDetail(id);
   const set = (i: number, patch: Partial<Draft>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const save = () =>
+  const save = () => {
+    const submitted = toRows(rows);
+    const checked = validateMountRows(submitted);
+    if (!checked.ok) {
+      setMsg({ ok: false, text: checked.error });
+      return;
+    }
     start(async () => {
-      const r = await saveCurtainMountAction(id, toRows(rows));
-      setMsg(r.ok ? { ok: true, text: "Saved." } : { ok: false, text: r.error });
-      if (r.ok) router.refresh();
+      const r = await saveCurtainMountAction(id, submitted);
+      if (!r.ok) {
+        setMsg({ ok: false, text: r.error });
+        return;
+      }
+      // The draft becomes exactly what was stored.
+      setRows(checked.rows.map((x) => ({ sku: x.sku, kind: x.rule.kind, qty: String(x.rule.qty), everyFt: x.rule.kind === "perFtWidth" ? String(x.rule.everyFt) : "" })));
+      setMsg({ ok: true, text: "Saved." });
+      router.refresh();
     });
+  };
   return (
     <div className="pk-card" style={{ padding: "16px 18px", display: "grid", gridTemplateColumns: "120px 1fr", gap: 16 }}>
       <ShapeSvg idPrefix={`mount-${id}`} shapes={detail.shapes} labels={[]} viewBox={`0 0 ${MOUNT_DETAIL_VIEWBOX.w} ${MOUNT_DETAIL_VIEWBOX.h}`} hatch={6} style={{ width: 120, height: 150 }} title={detail.title} />

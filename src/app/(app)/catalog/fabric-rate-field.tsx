@@ -59,7 +59,7 @@ export default function FabricRateField({
   const [rate, setRate] = useState(asText(initialRate));
   const [bolt, setBolt] = useState(asText(initialBoltWidthIn));
   const [oz, setOz] = useState(asText(initialOz));
-  const [ozBasis, setOzBasis] = useState<"lin-yd" | "sq-yd">(initialOzBasis ?? "lin-yd");
+  const [ozBasis, setOzBasis] = useState<"" | "lin-yd" | "sq-yd">(initialOzBasis ?? "");
   const [flame, setFlame] = useState(initialFlameRating ?? "");
   const [perLinYd, setPerLinYd] = useState("");
   const [perSqYd, setPerSqYd] = useState("");
@@ -106,7 +106,8 @@ export default function FabricRateField({
         </div>
         <div>
           <div style={LBL}>Weight basis</div>
-          <select name="ozBasis" value={ozBasis} onChange={(e) => setOzBasis(e.target.value as "lin-yd" | "sq-yd")} style={inputStyle}>
+          <select name="ozBasis" value={ozBasis} onChange={(e) => setOzBasis(e.target.value as "" | "lin-yd" | "sq-yd")} style={inputStyle}>
+            <option value="">Not set</option>
             <option value="lin-yd">per linear yard</option>
             <option value="sq-yd">per square yard</option>
           </select>

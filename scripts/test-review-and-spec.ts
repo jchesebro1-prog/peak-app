@@ -43378,6 +43378,8 @@ import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProble
   const blank = c292PartFields(fd({ oz: "", ozBasis: "lin-yd", flameRating: "" }));
   ok("oz" in blank && blank.oz === undefined && blank.ozBasis === undefined && "flameRating" in blank && blank.flameRating === undefined,
     "#292 catalog: a submitted blank clears (basis clears with a blank oz)");
+  const noBasis = c292PartFields(fd({ oz: "25", ozBasis: "" }));
+  ok(noBasis.oz === 25 && "ozBasis" in noBasis && noBasis.ozBasis === undefined, "#292 catalog: a part with oz and a blank (Not set) basis posts no basis — none is stamped");
   ok(!("flameRating" in c292PartFields(fd({ desc: "x" }))) && c292PartFields(fd({ flameRating: "x".repeat(200) })).flameRating?.length === c292FlameMax && c292FlameMax === 120,
     "#292 catalog: absent fields stay out of the patch; a rating is capped at 120 chars");
   ok(c292FactsProblem("Hardware", "ea", { flameRating: "NFPA 701" }) !== null && c292FactsProblem("Fabric", "yd", { flameRating: "NFPA 701", oz: 25 }) === null && c292FactsProblem("Hardware", "ea", {}) === null,
@@ -43389,7 +43391,13 @@ import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProble
   const acts = rd292("src/app/(app)/estimating-rules/curtain-mounts/actions.ts");
   ok(acts.includes('requirePerm("manage_users")') && !acts.includes("requireUser("), "#292 source: the Curtain mounts action is manage_users-only");
   ok(rd292("src/app/(app)/estimating-rules/curtain-mounts/page.tsx").includes('can("manage_users"'), "#292 source: the Curtain mounts page gates on manage_users");
-  ok(!/@\/lib\/stores\//.test(rd292("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx")), "#292 source: the Curtain mounts client imports no server store");
+  {
+    const mountsClient = rd292("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx");
+    ok(!/@\/lib\/stores\/|@\/db|curtain-cut-sheets\/(load|collect)/.test(mountsClient), "#292 source: the Curtain mounts client imports no server store, db, or cut-sheet load/collect module");
+    ok(mountsClient.includes("validateMountRows(") && mountsClient.includes("setRows(checked.rows"), "#292 source: the Curtain mounts client validates before submit and resets its draft to the saved rows");
+    const frf = rd292("src/app/(app)/catalog/fabric-rate-field.tsx");
+    ok(frf.includes('<option value="">Not set</option>') && frf.includes('initialOzBasis ?? ""'), "#292 source: the weight-basis select has a Not set option, selected when the part has no basis");
+  }
   ok(rd292("scripts/smoke-routes.ts").includes('"/estimating-rules/curtain-mounts"'), "#292 source: smoke covers /estimating-rules/curtain-mounts");
 }
 
@@ -43404,14 +43412,27 @@ async function curtain292AsyncChecks(): Promise<void> {
   await mergeUpsert(TIE, { desc: "Test292 Tie line", category: "Test292 Hardware", unit: "ea", list: 2, cost: 1 });
   reg("catalog_parts", TIE);
   try {
-    const saved = await saveCurtainMount("tie-batten", [{ sku: TIE, rule: { kind: "perMark", qty: 1 } }, { sku: "", rule: { kind: "perCurtain", qty: 1 } }], "Tester");
-    ok(saved.ok && saved.hardware.rows.length === 1 && saved.hardware.updatedBy === "Tester", "#292 store: saveCurtainMount saves sanitized rows, stamped with who saved them");
+    const saved = await saveCurtainMount("tie-batten", [{ sku: ` ${TIE} `, rule: { kind: "perMark", qty: "1" } }], "Tester");
+    ok(saved.ok && saved.hardware.rows.length === 1 && saved.hardware.rows[0].sku === TIE && saved.hardware.updatedBy === "Tester", "#292 store: saveCurtainMount saves sanitized rows, stamped with who saved them");
     const back = await listCurtainMounts();
     ok(back["tie-batten"]?.rows[0]?.sku === TIE && back["tie-batten"]?.rows[0]?.rule.kind === "perMark", "#292 store: listCurtainMounts reads the row back");
     const gone = await saveCurtainMount("tie-batten", [{ sku: "NO-SUCH-292", rule: { kind: "perCurtain", qty: 1 } }], "Tester");
     ok(!gone.ok && gone.error.includes("NO-SUCH-292"), "#292 store: a SKU missing from the catalog is refused by name");
     const other = await saveCurtainMount("track-other", [], "Tester");
     ok(!other.ok, "#292 store: track-other (or any unknown id) is refused");
+    const bad = async (rows: unknown[], needle: string, label: string) => {
+      const r = await saveCurtainMount("tie-batten", rows, "Tester2");
+      const stored = await listCurtainMounts();
+      ok(!r.ok && r.error.includes(needle) && stored["tie-batten"]?.rows.length === 1 && stored["tie-batten"]?.updatedBy === "Tester", `#292 store: ${label} is refused by row and the stored blob is unchanged`);
+    };
+    const goodRow = { sku: TIE, rule: { kind: "perMark", qty: 1 } };
+    await bad([goodRow, { sku: TIE, rule: { kind: "perCurtain", qty: "abc" } }], "Row 2 (" + TIE + "): quantity", "a non-numeric quantity");
+    await bad([{ sku: TIE, rule: { kind: "perCurtain", qty: 0 } }], "Row 1", "a zero quantity");
+    await bad([{ sku: TIE, rule: { kind: "perCurtain", qty: 5000 } }], "Row 1", "an over-cap quantity");
+    await bad([{ sku: TIE, rule: { kind: "perFtWidth", qty: 1, everyFt: 0 } }], "every N feet", "an invalid every-ft");
+    await bad([goodRow, { sku: "", rule: { kind: "perCurtain", qty: 1 } }], "Row 2: pick a part", "a blank part row");
+    const resaved = await saveCurtainMount("tie-batten", [goodRow, { sku: TIE, rule: { kind: "perFtWidth", qty: 2, everyFt: 4 } }], "Tester3");
+    ok(resaved.ok && resaved.hardware.rows.length === 2 && (await listCurtainMounts())["tie-batten"]?.rows.length === 2, "#292 store: a fully valid submission saves every row");
     // Task 6 appends the loadCutSheets checks here.
   } finally {
     const after = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
