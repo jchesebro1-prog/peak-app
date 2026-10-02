@@ -43117,3 +43117,162 @@ import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/
   }
   ok(bad.length === 0, `#292 details fix: every callout and in-drawing text fits the 240 × 300 viewBox at 0.6 em/char${bad.length ? " — " + bad.join("; ") : ""}`);
 }
+
+// ---- #292 task 3: curtain-mount rules + collector ----
+import { mountRowQty as c292RowQty, sanitizeCurtainMounts as c292SanitizeMounts } from "@/lib/curtain-mounts";
+import { countCutSheetTypes as c292Count, GRID_DESIGN_GONE as c292GridGone } from "@/lib/curtain-cut-sheets/estimator-curtains";
+import { collectCurtainTypes as c292CollectTypes, type CollectInput as C292Input } from "@/lib/curtain-cut-sheets/collect";
+import { curtainCost as c292CurtainCost } from "@/lib/design/curtain-pricing";
+import { computeSetWeight as c292SetWeight, DEFAULT_WEIGHTS as c292Weights, fabricFromPart as c292FabFrom } from "@/lib/design/steel";
+import { CHAIN_JACK as c292ChainJack } from "@/lib/design/goods";
+import type { TrackSeries as C292Series } from "@/lib/track-series";
+
+const C292_FABS = [
+  { sku: "FAB-CH25", desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54, flameRating: "NFPA 701 (IFR)" },
+  { sku: "FAB-EN22", desc: "Encore Velour 22 oz", oz: 22, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
+  { sku: "FAB-NOOZ", desc: "Mystery Scrim" },
+];
+const C292_SERIES = [{ id: "adc-280-black", name: "ADC 280 Black", manufacturer: "ADC", stickLengthFt: 22, carrierSpacingIn: 12, hangerSpacingFt: 7, overlapFt: 2, parts: {}, active: true }] as C292Series[];
+const C292_DESC = "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness";
+const c292Ci = (over: Record<string, unknown> = {}) => ({ name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "9", width: "21.5", height: "18", fullness: "50" as const, ...over });
+const c292Cur = (id: number, over: Partial<C292Item> = {}): Partial<C292Item> & { id: number } => ({ id, desc: C292_DESC, qty: 2, curtain: true, ...over });
+const c292Trk = (id: number, over: Partial<C292Item> = {}): Partial<C292Item> & { id: number } => ({
+  id, sku: "TRK-ADC-280-BLACK", desc: "Main track", unit: "lot", track: { ...C292_TRACK },
+  components: [
+    { sku: "ADC-280-22", label: "Track (22' stick)", role: "other", qty: 4, unit: "ea", cost: 1, price: 2 },
+    { sku: "ADC-2802", label: "Carrier", role: "other", qty: 40, unit: "ea", cost: 1, price: 2 },
+  ],
+  ...over,
+});
+const c292Collect = (sections: C292Section[], extra: Partial<C292Input> = {}) =>
+  c292CollectTypes({ quote: { spec: { sections, mobs: [] } }, fabrics: C292_FABS, trackSeries: C292_SERIES, mounts: {}, partInfo: new Map(), grid: null, ...extra });
+
+// ---- mount rules ----
+{
+  ok(c292RowQty({ kind: "perCurtain", qty: 2 }, { widthFt: 21.5, marks: 23 }) === 2, "#292 mounts: perCurtain is qty per curtain");
+  ok(c292RowQty({ kind: "perFtWidth", qty: 1, everyFt: 5 }, { widthFt: 21.5, marks: 23 }) === 5, "#292 mounts: perFtWidth is qty × ceil(W ÷ everyFt)");
+  ok(c292RowQty({ kind: "perMark", qty: 1 }, { widthFt: 21.5, marks: 23 }) === 23, "#292 mounts: perMark is qty × top-finish marks");
+  const s = c292SanitizeMounts({
+    "tie-batten": { rows: [
+      { sku: " TIE ", rule: { kind: "perMark", qty: "1" } }, { sku: "", rule: { kind: "perCurtain", qty: 1 } },
+      { sku: "A", rule: { kind: "bogus", qty: 1 } }, { sku: "B", rule: { kind: "perCurtain", qty: 0 } },
+      { sku: "C", rule: { kind: "perCurtain", qty: 1001 } }, { sku: "D", rule: { kind: "perFtWidth", qty: 1, everyFt: 0 } },
+    ] },
+    "track-other": { rows: [{ sku: "X", rule: { kind: "perCurtain", qty: 1 } }] },
+    nonsense: { rows: [] },
+    "wall-hookloop": { rows: Array.from({ length: 40 }, (_, i) => ({ sku: `W${i}`, rule: { kind: "perCurtain", qty: 1 } })) },
+  });
+  ok(s["tie-batten"]?.rows.length === 1 && s["tie-batten"].rows[0].sku === "TIE" && s["tie-batten"].rows[0].rule.qty === 1,
+    "#292 mounts: sanitize drops blank SKUs, unknown rule kinds, qty ≤ 0 / > 1,000 and everyFt ≤ 0; trims SKUs, reads numeric strings");
+  ok(!("track-other" in s) && !("nonsense" in s) && s["wall-hookloop"]?.rows.length === 30, "#292 mounts: sanitize drops unknown mount ids (track-other included) and caps a type at 30 rows");
+}
+// ---- collector: Estimator ----
+{
+  const structured = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "edited by hand", curtainInputs: c292Ci() })])]);
+  ok(structured.types.length === 1 && structured.unreadable.length === 0 && structured.types[0].sizes[0].widthFt === 21.5, "#292 collect: curtainInputs are read before the desc");
+  ok(structured.types[0].totalQty === 2, "#292 collect: the line qty wins over curtainInputs.qty (informational only)");
+  const merged = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci() }), c292Cur(2, { qty: 3 })])]);
+  ok(merged.types.length === 1 && merged.types[0].totalQty === 5 && merged.types[0].sizes.length === 1 && merged.types[0].sizes[0].qty === 5,
+    "#292 collect: identical curtains merge into one type (qty summed, sizes merged)");
+  const split = c292Collect([c292Sec("s1", [
+    c292Cur(1),
+    c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 75% fullness" }),
+    c292Cur(3, { curtainInputs: c292Ci({ bottomFinish: "hem" }) }),
+    c292Cur(4, { curtainInputs: c292Ci({ mountType: "wall-hookloop" }) }),
+  ])]);
+  ok(split.types.length === 4, "#292 collect: a different fullness, bottom finish or mount splits into its own type");
+  const opt = c292Collect([c292Sec("s1", [c292Cur(1, { option: true }), c292Cur(2)])]);
+  ok(opt.types.length === 1 && opt.types[0].totalQty === 2 && opt.skippedOptional.length === 1, "#292 collect: an optional curtain line gets no sheet and is listed as left out");
+  const bad = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Main Drape (black)" }), c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 0'W × 18'H, 50% fullness" })])]);
+  ok(bad.types.length === 0 && bad.unreadable.map((u) => u.reason).join("|") === "Can't read size — edit the curtain|Size is 0 — edit the curtain",
+    "#292 collect: an unparseable or zero-size line is unreadable, never guessed");
+  const order = c292Collect([
+    c292Sec("s1", [c292Cur(1, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" }), c292Cur(2)]),
+    c292Sec("s2", [c292Cur(3, { desc: "Border — Charisma Velour 25 oz, 40'W × 5'H, 50% fullness" })]),
+  ]);
+  ok(order.types.map((t) => `${t.sheetNo}:${t.title}`).join() === "CS-1:Legs,CS-2:Main Drape,CS-3:Border", "#292 collect: CS numbers follow section order, then line order");
+  const twins = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" }), c292Cur(2, { desc: "Legs — Encore Velour 22 oz, 6'W × 18'H, 50% fullness" })])]);
+  ok(twins.types.map((t) => t.title).join("|") === "Legs (Charisma Velour 25 oz)|Legs (Encore Velour 22 oz)", "#292 collect: colliding titles get the fabric appended");
+}
+// ---- collector: hardware ----
+{
+  const tracked = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])]);
+  const t = tracked.types[0];
+  ok(t.curtains[0].mount.source === "track" && t.curtains[0].mount.key === "track-batten" && t.markSpacingIn === 12,
+    "#292 collect: a linked track gives the mount (from track.mounting) and the series' carrier spacing");
+  ok(t.hardware.find((h) => h.sku === "ADC-2802")?.qty === 40 && t.hardware.every((h) => h.from === "track"),
+    "#292 collect: track hardware is the line's stored components, counted once for a qty-2 curtain on one track");
+  const over = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2, { track: { ...C292_TRACK, carrierSpacingIn: 18 } })])]);
+  ok(over.types[0].markSpacingIn === 18, "#292 collect: a line's carrier-spacing override beats the series default");
+  const two = c292Collect([c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1" }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3" })])]);
+  ok(two.types.length === 1 && two.types[0].hardware.find((h) => h.sku === "ADC-2802")?.qty === 80, "#292 collect: two tracks in one type sum their components by SKU");
+  const gone = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])], { trackSeries: [] });
+  ok(gone.types[0].hardware.length === 2 && gone.types[0].warnings.includes("Track series no longer exists — hardware as quoted."),
+    "#292 collect: a deleted series keeps the stored components and warns");
+  const mounts = { "tie-batten": { rows: [
+    { sku: "TIE", rule: { kind: "perMark" as const, qty: 1 } },
+    { sku: "CLAMP", rule: { kind: "perFtWidth" as const, qty: 1, everyFt: 5 } },
+    { sku: "KIT", rule: { kind: "perCurtain" as const, qty: 2 } },
+  ] } };
+  const partInfo = new Map([["TIE", { desc: "Tie line", unit: "ea" }]]);
+  const ruled = c292Collect([c292Sec("s1", [c292Cur(1)])], { mounts, partInfo });
+  const q = (sku: string) => ruled.types[0].hardware.find((h) => h.sku === sku)?.qty;
+  ok(q("TIE") === 46 && q("CLAMP") === 10 && q("KIT") === 4 && ruled.types[0].hardware.find((h) => h.sku === "TIE")?.desc === "Tie line",
+    "#292 collect: mount rules × curtain qty — 23 marks × 2 ties, ceil(21.5 ÷ 5) × 2 clamps, 2 × 2 kits");
+  const none = c292Collect([c292Sec("s1", [c292Cur(1)])]);
+  ok(none.types[0].hardware.length === 0 && none.types[0].warnings.includes("No hardware listed for Tie-line to pipe batten — Estimating Rules → Curtain mounts"),
+    "#292 collect: a mount type with no rows warns and lists no hardware");
+  ok(none.types[0].warnings.some((w) => w.startsWith("Mount assumed:")), "#292 collect: a defaulted mount is flagged as assumed");
+}
+// ---- collector: weight + area ----
+{
+  const t = c292Collect([c292Sec("s1", [c292Cur(1)])]).types[0];
+  const fab = c292FabFrom({ desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 })!;
+  const want = c292SetWeight({ name: "Main Drape", fabResolved: fab, w: 21.5, h: 18, full: 50, qty: 1, chain: c292ChainJack, batten: 0, mode: "dead" }, c292Weights).goods;
+  ok(t.weightLbEach[0] === want && t.weightLbTotal === (want as number) * 2, "#292 collect: weight is computeSetWeight(...).goods for the same inputs (× qty for the total)");
+  const hem = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "hem" }) })])]).types[0];
+  ok(Math.abs((t.weightLbEach[0] as number) - (hem.weightLbEach[0] as number) - 0.14 * 21.5) < 1e-9, "#292 collect: chain vs hem differs by the jack-chain weight (0.14 lb/ft × W)");
+  const noOz = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Main Drape — Mystery Scrim, 21.5'W × 18'H, 50% fullness" })])]).types[0];
+  ok(noOz.weightLbEach[0] === null && noOz.weightLbTotal === null && noOz.warnings.includes("Weight not set for Mystery Scrim — Catalog"), "#292 collect: a fabric with no oz weighs null and warns");
+  const area = c292CurtainCost({ finishedWidthFt: 21.5, finishedHeightFt: 18, fullnessPct: 50, qty: 1 }, { fabricRate: 0, sewingPct: 0 }).sewnAreaSqft;
+  ok(t.sewnAreaSqftEach[0] === area && t.sewnAreaSqftTotal === area * 2, "#292 collect: sewn area is curtainCost(...).sewnAreaSqft");
+}
+// ---- collector: Grid ----
+{
+  const main = { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "FAB-CH25" };
+  const project = {
+    options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }, { id: "opt-b", name: "Alt", quoteId: null, createdAt: 2 }],
+    placements: [
+      { id: "p1", optionId: "opt-a", curtain: main },
+      { id: "p2", optionId: "opt-a", curtain: { type: "Border" as const, name: "Border 1", widthFt: 40, heightFt: 5, fullnessPct: 50, fabricSku: "FAB-CH25", topFinish: "pipe-pocket" as const, bottomFinish: "chain" as const, mountType: "wall-hookloop" as const } },
+      { id: "p3", optionId: "opt-b", curtain: { ...main, name: "Other option" } },
+      { id: "p4", optionId: "opt-a" },
+    ],
+    routes: [],
+  };
+  const spec = { kind: "grid", gridProjectId: "GRD-1", gridOptionId: "opt-a", lines: [
+    { sku: "CURTAIN", desc: c292CurtainDesc(main, "Charisma Velour 25 oz"), qty: 1, unit: "ea", price: 1, ext: 1 },
+    { sku: "CURTAIN", desc: "Main (hand edited)", qty: 1, unit: "ea", price: 1, ext: 1 },
+  ] };
+  const grid = (p: typeof project | null, s: object = spec) => c292CollectTypes({ quote: { spec: s }, fabrics: C292_FABS, trackSeries: [], mounts: {}, partInfo: new Map(), grid: { project: p as never } });
+  const live = grid(project);
+  const m = live.types.find((t) => t.title === "Main")!;
+  const b = live.types.find((t) => t.title === "Border 1")!;
+  ok(live.types.length === 2 && m.curtains[0].mount.key === "track-batten" && m.curtains[0].mount.source === "assumed" && m.curtains[0].bottomFinish === "chain",
+    "#292 collect: Grid placements of the quote's option become types, with the Grid type defaults marked assumed");
+  ok(b.curtains[0].topFinish === "pipe-pocket" && b.curtains[0].mount.key === "wall-hookloop" && b.curtains[0].mount.source === "picked", "#292 collect: a placement's stored finishes and mount win over the defaults");
+  const goneProject = grid(null);
+  ok(goneProject.notes.includes(c292GridGone) && goneProject.types.length === 1 && goneProject.unreadable.length === 1, "#292 collect: a deleted Grid project falls back to the quoted lines");
+  const goneOption = grid(project, { ...spec, gridOptionId: "opt-zz" });
+  ok(goneOption.notes.includes(c292GridGone) && goneOption.types.length === 1, "#292 collect: a deleted option falls back to the quoted lines too");
+  const orphan = { options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }], placements: [{ id: "p9", optionId: "opt-gone", curtain: main }], routes: [] };
+  const orphanRead = c292CollectTypes({ quote: { spec }, fabrics: C292_FABS, trackSeries: [], mounts: {}, partInfo: new Map(), grid: { project: orphan as never } });
+  ok(orphanRead.types.length === 1 && orphan.placements[0].optionId === "opt-gone",
+    "#292 collect: an orphan placement reads as the first option (ensureOptions) without mutating the caller's project");
+}
+// ---- the preview count ----
+{
+  const secs = [c292Sec("s1", [c292Cur(1), c292Cur(2, { qty: 1 }), c292Cur(3, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" })])];
+  ok(c292Count({ sections: secs }, C292_FABS, C292_SERIES) === c292Collect(secs).types.length && c292Count({ sections: secs }, C292_FABS, C292_SERIES) === 2,
+    "#292 collect: countCutSheetTypes (client-safe) equals the collector's type count");
+}
