@@ -232,7 +232,7 @@ export function validate(layout: RackLayout, lookup?: RackPartLookup): RackIssue
     return !r.ok && r.code === "bounds";
   };
   for (const p of placements) {
-    const r = canPlace(layout, p);
+    const r = canPlace(layout, p, { nameOf: label });
     if (r.ok || r.code === "overlap" || r.code === "shelf-sibling") continue;
     const shelf = p.shelfId ? byId.get(p.shelfId) : undefined;
     if (r.code === "shelf-clearance" && shelfOverlaps(shelf)) continue;

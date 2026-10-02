@@ -44656,12 +44656,14 @@ import type { RackPlacement as C296ePlacement, RackLayout as C296eLayout, RackPa
   ok(/pointerEvents: armed \? "none" : "auto"/.test(ov1) && ov1.includes("group-focus-visible:"), "#296 rack component: the kebab ignores the pointer while armed and has a visible focus style");
   ok(!ov1.includes("narrows it") && ov1.includes('aria-live="off"') && !ov1.includes('role="status"'), "#296 rack component: no dead multi-select branch; the red caption is not announced (the <title> carries it)");
   ok(texts[0].includes("data-rack-elevation") && texts[2].includes('closest<HTMLElement>("[data-rack-elevation]")') && texts[2].includes("removedRef.current = true"), "#296 rack component: after Remove, focus falls back to the elevation panel");
-  ok(texts[0].includes("shelfId?: string") && ov1.includes("reparent(layout, p.id, to)"), "#296 rack component: onPlace/onMove carry shelfId and the drag ghost checks through reparent");
+  ok(texts[0].includes("shelfId?: string") && /reparent\(layout, p\.id, to(, \w+)?\)/.test(ov1), "#296 rack component: onPlace/onMove carry shelfId and the drag ghost checks through reparent");
 }
 
 /* ===== #296 — rack builder ===== */
 import * as c296bSide from "@/lib/rack/sidebar";
 import * as c296bDefaults from "@/lib/rack/defaults";
+import * as c296bLayout from "@/lib/rack/layout";
+import * as c296bRules from "@/lib/rack/rules";
 import { existsSync as c296bExists, readFileSync as c296bRead } from "node:fs";
 import type { RackPlacement as C296bPlacement, RackLayout as C296bLayout, RackPartInfo as C296bInfo } from "@/lib/rack/types";
 {
@@ -44772,6 +44774,36 @@ import type { RackPlacement as C296bPlacement, RackLayout as C296bLayout, RackPa
   ok(sb.includes("useRackEditor(") || ff.includes("useRackEditor("), "#296 rack builder: rack edits go through useRackEditor (undo/redo)");
   ok(/export async function saveRackDefaultsAction[\s\S]{0,400}requireUser\(\)[\s\S]{0,200}can\("create", user\.roles\)[\s\S]{0,120}Needs the Create permission\./.test(act), "#296 rack builder: saveRackDefaultsAction checks can(\"create\") after requireUser");
   ok(pg.includes("getRackDefaults(") && pg.includes("rackFactsOrUndefined("), "#296 rack builder: the page passes rack defaults and rack facts on its seed");
+  // ---- fix round 1 ----
+  ok(call(side.rackRowCounts, L([P({ id: "A", sku: "AMP" }), P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 3 }), P({ id: "B", kind: "blank", sku: "BLK", ruStart: 5 }), P({ id: "V", kind: "vent", sku: "VNT", ruStart: 6 }), P({ id: "R", kind: "reserved", sku: undefined, ruStart: 7 })]), [{ sku: "FRAME", qty: 1 }, { sku: "PDU", qty: 2 }, { sku: "FAN", qty: 0 }]) === "2 devices · 2 rack-level parts", "#296 rack builder: rackRowCounts counts devices (no blanks/vents/reserved) and rack-level parts with qty > 0");
+  ok(call(side.rackRowCounts, L([P({ id: "A", sku: "AMP" })]), [{ sku: "F", qty: 1 }]) === "1 device · 1 rack-level part" && call(side.rackRowCounts, undefined, undefined) === "0 devices · 0 rack-level parts", "#296 rack builder: rackRowCounts singular and empty wording");
+  ok(call(side.pickKeepsArmed, { sku: "SHELF" }, "device", "SHELF") === true && call(side.pickKeepsArmed, { sku: "SHELF" }, "shelf", "SHELF") === false && call(side.pickKeepsArmed, { sku: "SHELF" }, "device", "AMP") === false && call(side.pickKeepsArmed, null, "device", "AMP") === false && call(side.pickKeepsArmed, { sku: "AMP", byDrag: true }, "device", "AMP") === false, "#296 rack builder: a device-mode pick of the already-armed SKU keeps its armed kind");
+  const nm = (p: C296bPlacement) => (p.sku === "AMP" ? "QSC power amp" : p.label || p.sku || "a reserved slot");
+  const occ = L([P({ id: "A", sku: "AMP", ruStart: 5 })]);
+  const probe = P({ id: "Z", sku: "S", ruStart: 5 });
+  const dflt = c296bLayout.canPlace(occ, probe);
+  const named = c296bLayout.canPlace(occ, probe, { nameOf: nm });
+  ok(!dflt.ok && dflt.reason === "Overlaps AMP at RU 5." && !named.ok && named.reason === "Overlaps QSC power amp at RU 5.", "#296 rack builder: canPlace's nameOf names the other placement; the default stays label ?? sku");
+  const pl = c296bLayout.place(occ, probe, { nameOf: nm });
+  const mv = c296bLayout.move(L([P({ id: "A", sku: "AMP", ruStart: 5 }), P({ id: "B", ruStart: 7 })]), "RP-B", { ruStart: 5 }, { nameOf: nm });
+  const rpe = c296bLayout.reparent(L([P({ id: "A", sku: "AMP", ruStart: 5 }), P({ id: "B", ruStart: 7 })]), "RP-B", { ruStart: 5 }, { nameOf: nm });
+  ok(!pl.ok && pl.reason.includes("QSC power amp") && !mv.ok && mv.reason.includes("QSC power amp") && !rpe.ok && rpe.reason.includes("QSC power amp"), "#296 rack builder: place, move and reparent pass nameOf through to the refusal");
+  const namer = c296bLayout.placementNamer((s: string) => (s === "AMP" ? { sku: s, desc: "QSC power amp", found: true } : undefined));
+  ok(namer(P({ id: "A", sku: "AMP" })) === "QSC power amp" && namer(P({ id: "A", sku: "AMP", label: "Main amp" })) === "Main amp" && namer(P({ id: "X", sku: "ZZ" })) === "ZZ" && namer(P({ id: "R", kind: "reserved", sku: undefined })) === "a reserved slot", "#296 rack builder: placementNamer reads label → catalog name → SKU → a reserved slot");
+  const ke = run(call(side.keyEdit, L([P({ id: "A", sku: "AMP", ruStart: 5 }), P({ id: "B", ruStart: 4 })]), ["RP-B"], "ArrowUp", { nameOf: nm }), L([P({ id: "A", sku: "AMP", ruStart: 5 }), P({ id: "B", ruStart: 4 })]));
+  ok(!!ke && !ke.ok && ke.reason === "Overlaps QSC power amp at RU 5.", "#296 rack builder: keyEdit's refusal names the part by its catalog name");
+  const tall2 = L([P({ id: "A", sku: "AMP", ruStart: 5 }), P({ id: "B", sku: "S", ruStart: 5, face: "front", ruHeight: 1, lane: 0, laneCount: 1, label: undefined })]);
+  const vi = c296bRules.validate(tall2, (s: string) => (s === "AMP" ? { sku: s, desc: "QSC power amp", found: true } : s === "S" ? { sku: s, desc: "Thing", found: true } : undefined));
+  ok(vi.some((i) => i.code === "overlap" && i.message.includes("QSC power amp")) && !vi.some((i) => /\bAMP\b/.test(i.message)), "#296 rack builder: validate names overlapping parts by catalog name when it has a lookup");
+  const ovl = src("src/components/rack/elevation-overlay.tsx");
+  const el = src("src/components/rack/RackElevation.tsx");
+  ok(ovl.includes("placementNamer(lookup)") && /canPlace\(layout, probe, names\)/.test(ovl) && ovl.includes("data-placement-id="), "#296 rack builder: the overlay's ghost names parts and tags each slot with its placement id");
+  ok(/if \(hoverLayout !== layout\)[\s\S]{0,120}setHover\(null\)/.test(el), "#296 rack builder: a layout change clears the stale hover ghost");
+  ok(sb.includes("lg:max-h-[calc(100vh-260px)]") && sb.includes("lg:sticky") && sb.includes("data-placement-id=") && sb.includes("pickKeepsArmed(") && sb.includes("place(l, p, names)") && sb.includes("reparent(l, id, to, names)"), "#296 rack builder: the elevation scrolls on its own beside a sticky sidebar, keeps the selection in view, guards double picks and names parts");
+  ok(/!defs\.blankSku \? \([\s\S]{0,160}Set a default blank panel first\./.test(sb), "#296 rack builder: a disabled Fill blanks shows a visible hint");
+  ok(sb.includes("editor.error !== props.shownElsewhere") && ff.includes("shownElsewhere={rackConfigError}") && ff.includes("rackFieldError === rackEditor.error"), "#296 rack builder: a refused rack-size change shows once and clears with the editor's error");
+  ok(fb.includes("rackRowCounts(rec.rack, rec.parts)"), "#296 rack builder: rack rows count devices and rack-level parts");
+  ok(ff.includes('flexShrink: 0 }}>Cancel</button>'), "#296 rack builder: the form header keeps Cancel on the title row");
 }
 
 async function rack296DefaultsAsyncChecks(): Promise<void> {

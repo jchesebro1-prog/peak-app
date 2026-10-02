@@ -37,6 +37,9 @@ const SKU_MAX = 80;
 /** Which rule a placement broke — validate() reports it as the issue code. */
 export type PlaceFailCode = "height" | "bounds" | "sku" | "lane" | "shelf" | "overlap" | "shelf-sibling" | "shelf-width" | "shelf-bounds" | "shelf-clearance";
 type Check = { ok: true } | { ok: false; reason: string; code: PlaceFailCode };
+/** How a refusal names the other placement (default: label, else SKU, else "a reserved slot"). The UI passes the catalog name. */
+export type RackNameOpts = { nameOf?: (p: RackPlacement) => string };
+export type CanPlaceOpts = RackNameOpts & { ignoreId?: string };
 type Span = { lo: number; hi: number };
 
 /* ---------- small helpers ---------- */
@@ -63,6 +66,11 @@ export function ruRangeLabel(config: Pick<RackConfig, "ruCount" | "numbering">, 
 }
 
 const labelOf = (p: RackPlacement) => p.label || p.sku || "a reserved slot";
+
+/** The UI's names in refusals: the placement's label, else the catalog description, else its SKU. */
+export function placementNamer(lookup?: RackPartLookup): (p: RackPlacement) => string {
+  return (p) => p.label || (p.sku && lookup ? lookup(p.sku)?.desc : undefined) || p.sku || "a reserved slot";
+}
 
 /** Resolved rack facts for a placement: override > catalog > unknown. */
 export function placementFacts(
@@ -133,7 +141,7 @@ export function overlapSpan(layout: RackLayout, a: RackPlacement, b: RackPlaceme
   return { lo: Math.max(as.lo, bs.lo), hi: Math.min(as.hi, bs.hi) };
 }
 
-export function canPlace(layout: RackLayout, p: RackPlacement, opts?: { ignoreId?: string }): Check {
+export function canPlace(layout: RackLayout, p: RackPlacement, opts?: CanPlaceOpts): Check {
   const { ruCount } = layout.config;
   const others = layout.placements.filter((q) => q.id !== p.id && q.id !== opts?.ignoreId);
 
@@ -192,7 +200,7 @@ export function canPlace(layout: RackLayout, p: RackPlacement, opts?: { ignoreId
   for (const q of others) {
     const o = overlapSpan(layout, p, q);
     if (!o) continue;
-    return { ok: false, reason: `Overlaps ${labelOf(q)} at ${ruRangeLabel(layout.config, o.lo, o.hi)}.`, code: "overlap" };
+    return { ok: false, reason: `Overlaps ${(opts?.nameOf ?? labelOf)(q)} at ${ruRangeLabel(layout.config, o.lo, o.hi)}.`, code: "overlap" };
   }
   return { ok: true };
 }
@@ -225,22 +233,22 @@ function replaced(layout: RackLayout, next: RackPlacement): RackLayout {
   return out;
 }
 
-function commit(layout: RackLayout, next: RackPlacement): RackEdit {
-  const check = canPlace(layout, next);
+function commit(layout: RackLayout, next: RackPlacement, opts?: RackNameOpts): RackEdit {
+  const check = canPlace(layout, next, opts);
   return check.ok ? { ok: true, layout: replaced(layout, next) } : check;
 }
 
-export function place(layout: RackLayout, p: RackPlacement): RackEdit {
+export function place(layout: RackLayout, p: RackPlacement, opts?: RackNameOpts): RackEdit {
   if (layout.placements.some((q) => q.id === p.id)) return { ok: false, reason: `Two placements share the id ${p.id}.` };
   const next = normalized(layout, p);
-  const check = canPlace(layout, next);
+  const check = canPlace(layout, next, opts);
   if (!check.ok) return check;
   const out = structuredClone(layout);
   out.placements.push(next);
   return { ok: true, layout: out };
 }
 
-export function move(layout: RackLayout, id: string, to: { ruStart?: number; face?: RackFace; lane?: 0 | 1 | 2 }): RackEdit {
+export function move(layout: RackLayout, id: string, to: { ruStart?: number; face?: RackFace; lane?: 0 | 1 | 2 }, opts?: RackNameOpts): RackEdit {
   const cur = layout.placements.find((q) => q.id === id);
   if (!cur) return NOT_FOUND;
   const next = structuredClone(cur);
@@ -249,7 +257,7 @@ export function move(layout: RackLayout, id: string, to: { ruStart?: number; fac
     if (to.ruStart !== undefined) next.ruStart = to.ruStart;
     if (to.face !== undefined) next.face = to.face;
   }
-  return commit(layout, next);
+  return commit(layout, next, opts);
 }
 
 /**
@@ -259,10 +267,10 @@ export function move(layout: RackLayout, id: string, to: { ruStart?: number; fac
  * so a tall device can leave its shelf into the rows its own clearance held.
  * List order is kept.
  */
-export function reparent(layout: RackLayout, id: string, to: { ruStart?: number; face?: RackFace; lane?: 0 | 1 | 2; shelfId?: string }): RackEdit {
+export function reparent(layout: RackLayout, id: string, to: { ruStart?: number; face?: RackFace; lane?: 0 | 1 | 2; shelfId?: string }, opts?: RackNameOpts): RackEdit {
   const cur = layout.placements.find((q) => q.id === id);
   if (!cur) return NOT_FOUND;
-  if (!to.shelfId && !cur.shelfId) return move(layout, id, to);
+  if (!to.shelfId && !cur.shelfId) return move(layout, id, to, opts);
   const next = structuredClone(cur);
   if (to.lane !== undefined) next.lane = to.lane;
   if (to.shelfId) next.shelfId = to.shelfId;
@@ -273,7 +281,7 @@ export function reparent(layout: RackLayout, id: string, to: { ruStart?: number;
   }
   const without: RackLayout = { ...layout, placements: layout.placements.filter((q) => q.id !== id) };
   const seated = normalized(without, next);
-  const check = canPlace(without, seated);
+  const check = canPlace(without, seated, opts);
   return check.ok ? { ok: true, layout: replaced(layout, seated) } : check;
 }
 
@@ -287,17 +295,17 @@ export function remove(layout: RackLayout, id: string): RackEdit {
   return { ok: true, layout: out };
 }
 
-export function resize(layout: RackLayout, id: string, ruHeight: number): RackEdit {
+export function resize(layout: RackLayout, id: string, ruHeight: number, opts?: RackNameOpts): RackEdit {
   const cur = layout.placements.find((q) => q.id === id);
   if (!cur) return NOT_FOUND;
-  return commit(layout, { ...structuredClone(cur), ruHeight });
+  return commit(layout, { ...structuredClone(cur), ruHeight }, opts);
 }
 
 type Patchable = "optional" | "override" | "costOverride" | "notes" | "label" | "lane" | "laneCount" | "face" | "sku";
 const PATCHABLE: ReadonlySet<string> = new Set<Patchable>(["optional", "override", "costOverride", "notes", "label", "lane", "laneCount", "face", "sku"]);
 
 /** Patch fields; a key present with `undefined` clears it. A child's face stays its shelf's. */
-export function update(layout: RackLayout, id: string, patch: Partial<Pick<RackPlacement, Patchable>>): RackEdit {
+export function update(layout: RackLayout, id: string, patch: Partial<Pick<RackPlacement, Patchable>>, opts?: RackNameOpts): RackEdit {
   const cur = layout.placements.find((q) => q.id === id);
   if (!cur) return NOT_FOUND;
   const next = structuredClone(cur) as Record<string, unknown>;
@@ -306,7 +314,7 @@ export function update(layout: RackLayout, id: string, patch: Partial<Pick<RackP
     if (v === undefined) delete next[k];
     else next[k] = v;
   }
-  return commit(layout, normalized(layout, next as RackPlacement));
+  return commit(layout, normalized(layout, next as RackPlacement), opts);
 }
 
 export function newPlacementId(now: number, seq: number): string {

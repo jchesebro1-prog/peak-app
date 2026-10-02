@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { wholeRu } from "@/lib/rack/drag";
 import { ghostRect, placementTarget, RACK_GEOM, slotAriaLabel, type RackSlot, type RackTarget } from "@/lib/rack/geometry";
-import { canPlace, laneCountOf, occupiedSpan, place, reparent } from "@/lib/rack/layout";
+import { canPlace, laneCountOf, occupiedSpan, place, placementNamer, reparent } from "@/lib/rack/layout";
 import { RU_IN, type PlacementKind, type RackEdit, type RackFace, type RackIssue, type RackLayout, type RackPartLookup, type RackPlacement, type RackWidthClass } from "@/lib/rack/types";
 
 export type { RackTarget } from "@/lib/rack/geometry";
@@ -108,6 +108,8 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
   }, [dragging]);
 
   const byId = useMemo(() => new Map(layout.placements.map((p) => [p.id, p])), [layout]);
+  // Refusals name parts the way people read them (label → catalog name → SKU).
+  const names = useMemo(() => ({ nameOf: placementNamer(lookup) }), [lookup]);
   const selected = useMemo(() => new Set(selection), [selection]);
   const issueBy = useMemo(() => {
     const m = new Map<string, { level: RackIssue["level"]; messages: string[] }>();
@@ -151,10 +153,10 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
   const dragCheck = (p: RackPlacement, g: DragGhost): { probe: RackPlacement; check: RackEdit } => {
     const n = p.laneCount ?? 1;
     const to = { ruStart: g.ruStart, face, ...(n > 1 ? { lane: g.lane } : {}), ...(g.shelfId ? { shelfId: g.shelfId } : {}) };
-    if (!g.copy) return { probe: { ...p, ...to }, check: reparent(layout, p.id, to) };
+    if (!g.copy) return { probe: { ...p, ...to }, check: reparent(layout, p.id, to, names) };
     const probe: RackPlacement = { ...p, ...to, id: GHOST_ID };
     if (!g.shelfId) delete probe.shelfId;
-    return { probe, check: place(layout, probe) };
+    return { probe, check: place(layout, probe, names) };
   };
 
   /* ---- the ghost being drawn (a drag wins over an armed hover) ---- */
@@ -169,7 +171,7 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
     }
     if (hover && armed && edit) {
       const probe = armedProbe(armed, face, hover);
-      return { rect: ghostRect(layout.config, probe.ruStart, probe.ruHeight, probe.lane ?? 0, probe.laneCount ?? 1), check: canPlace(layout, probe) };
+      return { rect: ghostRect(layout.config, probe.ruStart, probe.ruHeight, probe.lane ?? 0, probe.laneCount ?? 1), check: canPlace(layout, probe, names) };
     }
     return null;
   })();
@@ -315,6 +317,7 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
         return (
           <rect
             key={s.placementId}
+            data-placement-id={s.placementId}
             x={s.x}
             y={s.y}
             width={s.w}

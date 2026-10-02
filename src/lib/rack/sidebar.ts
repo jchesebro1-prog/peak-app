@@ -4,7 +4,7 @@
  * and the text the totals footer prints. No React, no store/db imports.
  */
 import { wholeRu } from "./drag";
-import { heightForPart, laneCountOf, move, remove, resize, sanitizeRackLayout, update } from "./layout";
+import { heightForPart, laneCountOf, move, remove, resize, sanitizeRackLayout, update, type RackNameOpts } from "./layout";
 import { autoFillBlanks } from "./rules";
 import { rackPartInfo, RACK_FACT_LABEL } from "./part-facts";
 import {
@@ -112,14 +112,14 @@ export function copyOf(p: RackPlacement, to: RackDrop, id: string): RackPlacemen
 }
 
 /** Swap a placement's part; its height follows the new part unless the placement overrides it. */
-export function replacePart(layout: RackLayout, id: string, info: RackPartInfo | undefined, sku: string): RackEdit {
+export function replacePart(layout: RackLayout, id: string, info: RackPartInfo | undefined, sku: string, opts?: RackNameOpts): RackEdit {
   const cur = layout.placements.find((p) => p.id === id);
   if (!cur) return { ok: false, reason: "That placement isn't in the rack." };
   if (cur.kind === "reserved") return { ok: false, reason: "A reserved slot has no part." };
-  const swapped = update(layout, id, { sku });
+  const swapped = update(layout, id, { sku }, opts);
   if (!swapped.ok) return swapped;
   const h = heightForPart(info, cur.override?.ruHeight);
-  return h === cur.ruHeight ? swapped : resize(swapped.layout, id, h);
+  return h === cur.ruHeight ? swapped : resize(swapped.layout, id, h, opts);
 }
 
 /**
@@ -128,7 +128,7 @@ export function replacePart(layout: RackLayout, id: string, info: RackPartInfo |
  * placement 1 RU (a shelf's device doesn't move on its own); Delete/Backspace
  * remove every selected placement, a shelf's devices before the shelf.
  */
-export function keyEdit(layout: RackLayout, selection: readonly string[], key: string): ((l: RackLayout) => RackEdit) | null {
+export function keyEdit(layout: RackLayout, selection: readonly string[], key: string, opts?: RackNameOpts): ((l: RackLayout) => RackEdit) | null {
   if (key === "ArrowUp" || key === "ArrowDown") {
     if (selection.length !== 1) return null;
     const p = layout.placements.find((q) => q.id === selection[0]);
@@ -136,7 +136,7 @@ export function keyEdit(layout: RackLayout, selection: readonly string[], key: s
     const step = key === "ArrowUp" ? 1 : -1;
     return (l) => {
       const cur = l.placements.find((q) => q.id === p.id);
-      return cur ? move(l, cur.id, { ruStart: cur.ruStart + step }) : { ok: false, reason: "That placement isn't in the rack." };
+      return cur ? move(l, cur.id, { ruStart: cur.ruStart + step }, opts) : { ok: false, reason: "That placement isn't in the rack." };
     };
   }
   if (key === "Delete" || key === "Backspace") {
@@ -155,6 +155,22 @@ export function keyEdit(layout: RackLayout, selection: readonly string[], key: s
     };
   }
   return null;
+}
+
+/**
+ * A pick from the picker in device mode of the part that is already armed (a
+ * double-click, say) keeps what it is armed as — the second click of a Shelf
+ * pick must not re-arm the shelf as a device.
+ */
+export function pickKeepsArmed(armed: Pick<SidebarArmed, "sku"> & { byDrag?: boolean } | null, mode: string, sku: string): boolean {
+  return mode === "device" && !!armed && !armed.byDrag && armed.sku === sku;
+}
+
+/** A rack row's counts: devices = placements with a part except blanks and vents; rack-level parts = parts lines with qty > 0. */
+export function rackRowCounts(layout: RackLayout | undefined, parts: ReadonlyArray<{ qty: number }> | undefined): string {
+  const devices = (layout?.placements ?? []).filter((p) => !!p.sku && p.kind !== "blank" && p.kind !== "vent").length;
+  const rackLevel = (parts ?? []).filter((l) => l.qty > 0).length;
+  return `${devices} device${devices === 1 ? "" : "s"} · ${rackLevel} rack-level part${rackLevel === 1 ? "" : "s"}`;
 }
 
 /** The selection with ids no longer in the layout dropped (after an undo, a remove…). */

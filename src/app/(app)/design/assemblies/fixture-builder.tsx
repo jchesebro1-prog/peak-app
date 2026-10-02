@@ -6,7 +6,7 @@ import { dateYear } from "@/lib/format";
 import { resolveFixture, toSkuMap, type FixtureKind, type FixtureRecord } from "@/lib/fixture-assemblies";
 import type { MemberCoverage } from "@/lib/part-docs/assembly-graph";
 import { totals as rackTotals } from "@/lib/rack/rules";
-import { lookupFromHits, rackRowSummary } from "@/lib/rack/sidebar";
+import { lookupFromHits, rackRowCounts, rackRowSummary } from "@/lib/rack/sidebar";
 import type { RackDefaults } from "@/lib/rack/defaults";
 import { ConfirmButton } from "@/components/confirm-button";
 import { deleteFixtureAction, saveFixtureAction, saveRackDefaultsAction } from "./actions";
@@ -235,7 +235,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
                     {rec.description && <div style={{ color: "#737985", fontSize: 12, marginTop: 4 }}>{rec.description}</div>}
                     <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 4 }}>
                       {rackLine ? `${rackLine} · ` : ""}
-                      {rec.kind !== "fixture" ? `${l.parts.length} part${l.parts.length === 1 ? "" : "s"}` : head}
+                      {rec.kind === "rack" ? rackRowCounts(rec.rack, rec.parts) : rec.kind !== "fixture" ? `${l.parts.length} part${l.parts.length === 1 ? "" : "s"}` : head}
                       {optional ? ` · ${optional} optional add-on${optional === 1 ? "" : "s"}` : ""}
                       {` · updated ${dateYear(rec.updatedAt)} by ${rec.updatedBy || "—"}`}
                     </div>

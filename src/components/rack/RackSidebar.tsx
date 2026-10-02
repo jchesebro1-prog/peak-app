@@ -8,8 +8,8 @@
  * writes the layout back into the form draft — Save sends it. Collapsible;
  * open state and width are a per-viewer convenience in localStorage.
  */
-import { useEffect, useMemo, useState } from "react";
-import { newPlacementId, place, reparent } from "@/lib/rack/layout";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { newPlacementId, place, placementNamer, reparent } from "@/lib/rack/layout";
 import { rackDataCoverage, rackPartInfo } from "@/lib/rack/part-facts";
 import { totals as rackTotals, validate } from "@/lib/rack/rules";
 import { rackGeometry } from "@/lib/rack/geometry";
@@ -22,6 +22,7 @@ import {
   fillBlanksEdit,
   keyEdit,
   liveSelection,
+  pickKeepsArmed,
   placementFromArmed,
   RACK_SIDEBAR_KEY,
   readSidebarPrefs,
@@ -46,6 +47,8 @@ export type RackSidebarProps<H extends RackPickerHit> = {
   editor: RackEditor;
   newId: () => string;
   title: string;
+  /** An error the form already shows beside its own fields (a refused rack-size change) — not repeated here. */
+  shownElsewhere?: string | null;
   lookup: RackPartLookup;
   partSearch: (q: string) => Promise<H[]>;
   /** A picker hit was used — merge it into the builder's parts so it prices and looks up. */
@@ -57,6 +60,8 @@ export type RackSidebarProps<H extends RackPickerHit> = {
 };
 
 type View = RackFace | "both";
+/** px per inch at most: a 42U rack is ~900 px tall — legible labels, and its own scroll area keeps the rest in reach. */
+const DEFAULT_SCALE = 12;
 type Menu = { id: string; at: { x: number; y: number }; ret: HTMLElement | SVGElement | null };
 
 const inField = (t: EventTarget | null) => t instanceof Element && !!t.closest("input, select, textarea");
@@ -100,9 +105,25 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
   const totals = useMemo(() => rackTotals(layout, lookup, props.rackParts), [layout, lookup, props.rackParts]);
   const issues = useMemo(() => validate(layout, lookup), [layout, lookup]);
   const coverage = useMemo(() => rackDataCoverage(coverageSkus(layout), lookup), [layout, lookup]);
+  // Refusals name parts by label → catalog name → SKU.
+  const names = useMemo(() => ({ nameOf: placementNamer(lookup) }), [lookup]);
   const vbw = useMemo(() => rackGeometry(layout, lookup, { face: "front" }).viewBox.w, [layout, lookup]);
   const inner = prefs.width - 34;
-  const scale = Math.max(5, Math.min(14, (view === "both" ? (inner - 16) / 2 : inner) / vbw));
+  const scale = Math.max(5, Math.min(DEFAULT_SCALE, (view === "both" ? (inner - 16) / 2 : inner) / vbw));
+
+  // Keep the selected placement in view inside the elevation's scroll area (no page jump).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const focusId = selection.length === 1 ? selection[0] : null;
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box || !focusId) return;
+    const el = box.querySelector(`[data-placement-id="${CSS.escape(focusId)}"]`);
+    if (!el) return;
+    const b = box.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (r.top < b.top) box.scrollTop -= b.top - r.top + 8;
+    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom + 8;
+  }, [focusId, layout]);
 
   const setPrefsAndSave = (p: SidebarPrefs) => {
     setPrefs(p);
@@ -143,6 +164,8 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
 
   const onPick = (hit: H) => {
     props.onPickPart?.(hit);
+    // A double-click on the hit just armed (e.g. as a shelf) keeps it armed as it is.
+    if (pickKeepsArmed(armed, mode.kind, hit.sku)) return;
     const info = infoOf(hit);
     switch (mode.kind) {
       case "device":
@@ -159,7 +182,7 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
         break;
       case "replace": {
         const id = mode.id;
-        editor.apply((l) => replacePart(l, id, info, hit.sku));
+        editor.apply((l) => replacePart(l, id, info, hit.sku, names));
         break;
       }
     }
@@ -182,7 +205,7 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
       else editor.undo();
       return;
     }
-    const edit = keyEdit(layout, selection, e.key);
+    const edit = keyEdit(layout, selection, e.key, names);
     if (!edit) return;
     e.preventDefault();
     if (editor.apply(edit) && (e.key === "Delete" || e.key === "Backspace")) setSelection([]);
@@ -231,6 +254,7 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
       id="rack-sidebar"
       aria-label="Rack layout"
       className="pk-card relative w-full lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:w-[var(--rk-w)] lg:overflow-y-auto"
+      data-rack-sidebar=""
       style={{ padding: 16, ...({ "--rk-w": `${prefs.width}px` } as React.CSSProperties) }}
     >
       <div
@@ -307,7 +331,8 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
             : "Pick a part, then click a slot — or drag it onto the rack."}
       </div>
 
-      <div className="overflow-x-auto">
+      {/* Its own scroll area on lg+, so the header, tray and totals stay reachable beside a 42U drawing. */}
+      <div ref={scrollRef} className="overflow-x-auto lg:max-h-[calc(100vh-260px)] lg:overflow-y-auto" data-rack-scroll="">
         <RackElevation
           layout={layout}
           lookup={lookup}
@@ -320,13 +345,13 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
           onPlace={(drop) => {
             if (!armed) return;
             const p = placementFromArmed(armed, drop, newId());
-            editor.apply((l) => place(l, p));
+            editor.apply((l) => place(l, p, names));
           }}
           onMove={(id, to, copy) =>
             editor.apply((l) => {
-              if (!copy) return reparent(l, id, to);
+              if (!copy) return reparent(l, id, to, names);
               const p = l.placements.find((q) => q.id === id);
-              return p ? place(l, copyOf(p, to, newId())) : { ok: false, reason: "That placement isn't in the rack." };
+              return p ? place(l, copyOf(p, to, newId()), names) : { ok: false, reason: "That placement isn't in the rack." };
             })
           }
           onSelect={setSelection}
@@ -335,7 +360,7 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
         />
       </div>
 
-      {editor.error ? (
+      {editor.error && editor.error !== props.shownElsewhere ? (
         <div role="alert" className="mt-2 text-xs" style={{ color: "var(--red)" }}>
           {editor.error}
         </div>
@@ -360,6 +385,11 @@ export function RackSidebar<H extends RackPickerHit>(props: RackSidebarProps<H>)
         >
           Fill blanks
         </button>
+        {!defs.blankSku ? (
+          <span className="text-xs" style={{ color: "var(--muted-2)" }}>
+            Set a default blank panel first.
+          </span>
+        ) : null}
       </div>
 
       <RackTotalsPanel totals={totals} coverage={coverage} issues={issues} onSelectIssue={setSelection} />

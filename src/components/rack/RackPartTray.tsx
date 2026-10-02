@@ -72,7 +72,7 @@ export function RackPartTray<H extends RackPickerHit>(props: {
           onChange={(e) => setQuery(e.target.value)}
           autoComplete="off"
         />
-        <ul className="m-0 mt-1 grid max-h-56 list-none gap-0.5 overflow-y-auto p-0" aria-label="Matching parts">
+        <ul className="m-0 mt-1 grid max-h-44 list-none gap-0.5 overflow-y-auto p-0" aria-label="Matching parts">
           {items.length === 0 ? (
             <li className="px-1 py-1 text-xs" style={{ color: "var(--muted)" }}>
               {emptyText}

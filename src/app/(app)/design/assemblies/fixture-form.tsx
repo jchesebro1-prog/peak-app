@@ -316,11 +316,13 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
     });
     setRackFieldError(ok ? null : fail.reason || "That change wasn't made.");
   };
+  // Shown once, beside the fields; it goes away with the editor's error (any later successful edit, undo or redo).
+  const rackConfigError = rackFieldError && rackFieldError === rackEditor.error ? rackFieldError : null;
 
   const body = (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-        <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
           <h2 style={{ fontSize: 17, margin: 0 }}>{draft.id ? `Edit ${noun}` : `New ${noun}`}</h2>
           <p style={{ margin: "5px 0 18px", color: "#737985", fontSize: 12.5 }}>
             {isSystem
@@ -332,7 +334,7 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
                   : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}
           </p>
         </div>
-        <button type="button" onClick={onCancel} style={{ border: 0, background: "transparent", color: "#737985", cursor: "pointer", fontSize: 12 }}>Cancel</button>
+        <button type="button" onClick={onCancel} style={{ border: 0, background: "transparent", color: "#737985", cursor: "pointer", fontSize: 12, flexShrink: 0 }}>Cancel</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
         <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : isHardware ? "e.g. Chain wrap" : isRack ? "e.g. AV head-end rack" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>
@@ -389,7 +391,7 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
                 <option value="top-down">Top-down (RU 1 at the top)</option>
               </select>
             </label>
-            {rackFieldError && <div role="alert" style={{ gridColumn: "1 / -1", color: "#a0442b", fontSize: 12 }}>{rackFieldError}</div>}
+            {rackConfigError && <div role="alert" style={{ gridColumn: "1 / -1", color: "#a0442b", fontSize: 12 }}>{rackConfigError}</div>}
           </>
         )}
         {draft.kind === "fixture" && (
@@ -486,6 +488,7 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
         editor={rackEditor}
         newId={newId}
         title={draft.label}
+        shownElsewhere={rackConfigError}
         lookup={rackLookup}
         partSearch={searchAssemblyHits}
         onPickPart={onPickPart}

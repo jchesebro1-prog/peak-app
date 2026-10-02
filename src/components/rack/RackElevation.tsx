@@ -63,6 +63,12 @@ function FacePanel(props: RackElevationProps & { panelFace: RackFace; idPrefix: 
   const { layout, lookup, panelFace: face, idPrefix, caption, mode, armed, onPlace } = props;
   const scale = props.scale ?? 14;
   const [hover, setHover] = useState<RackTarget | null>(null);
+  // A layout change (a placement, an undo…) makes the hover ghost's probe stale: drop it until the pointer moves again.
+  const [hoverLayout, setHoverLayout] = useState(layout);
+  if (hoverLayout !== layout) {
+    setHoverLayout(layout);
+    if (hover) setHover(null);
+  }
   // dangerouslySetInnerHTML is safe here: svg.ts is our own serializer and escapes every text and attribute value.
   const svg = useMemo(() => elevationSvgFor(layout, lookup, face, { idPrefix }), [layout, lookup, face, idPrefix]);
   const geom = useMemo(() => rackGeometry(layout, lookup, { face }), [layout, lookup, face]);
