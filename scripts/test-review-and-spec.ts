@@ -43061,6 +43061,24 @@ import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/
   const sixPanel = six.shapes.find((s) => s.tag === "panel" && s.kind === "rect") as { x: number; w: number };
   ok(sixBottom.length === 1 && sixBottom.every((t) => { const x = c292TextExtent(t); return x.x0 >= sixPanel.x - 1e-9 && x.x1 <= sixPanel.x + sixPanel.w + 1e-9; }),
     "#292 geometry fix: the bottom-finish label fits inside a 6 ft panel");
+  // fix round 2: every bottom-finish label stays inside ITS OWN panel at the multi-size scale (sz(6) alone picks 1/8", which never needs the two-line branch)
+  const bottomIn = (e: ReturnType<typeof c292Elev>) => {
+    const panels = e.shapes.filter((s): s is Extract<typeof s, { kind: "rect" }> => s.kind === "rect" && s.tag === "panel");
+    const labels = textsOf(e.shapes).filter((t) => t.anchor === "middle" && /^(Chain|Pipe|Hem)/.test(t.text));
+    const bad = panels.filter((p) => {
+      const mine = labels.filter((t) => t.x >= p.x - 1e-9 && t.x <= p.x + p.w + 1e-9);
+      return mine.length !== 1 || c292TextExtent(mine[0]).x0 < p.x - 1e-9 || c292TextExtent(mine[0]).x1 > p.x + p.w + 1e-9;
+    });
+    return { panels: panels.length, labels, bad: bad.length };
+  };
+  for (const [name, input] of cases) {
+    if (input.sizes.length > 3) continue;
+    const r = bottomIn(c292Elev(input));
+    ok(r.bad === 0 && r.labels.length === r.panels, `#292 geometry fix 2: each panel carries exactly one bottom label inside its own x-range (${name})`);
+  }
+  const narrow = bottomIn(c292Elev({ ...base, sizes: sz(20, 10, 6) }));
+  ok(narrow.labels.length === 3 && narrow.labels[2].text === "Chain\npocket" && narrow.labels[0].text === "Chain pocket",
+    "#292 geometry fix 2: at 20/10/6 the 6 ft panel's label is the two-line form (the narrow-panel branch is exercised)");
   const e4 = c292Elev({ ...base, sizes: [...sz(20, 10, 6, 4), { widthFt: 0, heightFt: 5 }] });
   ok(textsOf(e4.shapes).some((t) => t.text === "Typical — 4 sizes, see schedule"), "#292 geometry fix: the Typical caption counts drawn sizes, not zero-size entries");
   const cap = textsOf(e4.shapes).find((t) => t.text.startsWith("Typical"))!;
@@ -43074,6 +43092,8 @@ import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/
     "#292 geometry fix: topMarks caps at 2000 marks and treats spacing below 1\" as 1\"");
   const wildElev = c292Elev({ ...base, markSpacingIn: 0.001, sizes: sz(20) });
   ok(wildElev.shapes.filter((s) => s.tag === "mark").length <= 2000, "#292 geometry fix: an absurd mark spacing never draws more than 2000 grommets");
+  ok(textsOf(wildElev.shapes).some((t) => t.text === `Grommets @ 1" o.c. max (${c292Marks(20, 0.001).count})`),
+    "#292 geometry fix 2: the o.c. label prints the clamped 1\" spacing, consistent with the drawn marks");
 }
 {
   const keys = [...c292MountTypes.map((t) => t.id), "track-other" as const];

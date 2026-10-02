@@ -77,6 +77,8 @@ export function pickScale(sizes: readonly SizedPanel[], box: { wIn: number; hIn:
 /** Smallest mark spacing honored, in, and the most marks one panel ever draws (a runaway input never hangs a render). */
 export const MIN_MARK_SPACING_IN = 1;
 export const MAX_MARKS = 2000;
+/** Smallest bottom-finish label drawn, in; a label that cannot fit at this size is omitted. */
+export const MIN_LABEL_IN = 0.07;
 
 /** Evenly spaced marks, both ends always marked: count = ceil(W·12 ÷ s) + 1, at W·12 ÷ (count − 1) ≤ s (until the caps). */
 export function topMarks(widthFt: number, maxSpacingIn: number): { count: number; spacingIn: number } {
@@ -128,7 +130,7 @@ export function elevation(input: {
         const x2 = x + (m.spacingIn / 12) * s;
         const dy = y - 0.1;
         // the full o.c. label prints once (first panel); the rest carry only their count
-        const full = `${input.markLabel} @ ${inchLabel(input.markSpacingIn)} o.c. max (${m.count})`;
+        const full = `${input.markLabel} @ ${inchLabel(Math.max(MIN_MARK_SPACING_IN, input.markSpacingIn))} o.c. max (${m.count})`;
         const label = pi === 0 ? full : `(${m.count})`;
         const raise = pi === 0 && panels.length > 1 && textExtent({ x, text: full, size: ELEV_TEXT_IN }).x1 > x + w + ELEV_GAP_IN - 0.05;
         shapes.push(
@@ -158,7 +160,7 @@ export function elevation(input: {
       for (const text of lines) {
         const longest = Math.max(...text.split("\n").map((l) => l.length));
         const size = Math.min(base, room / (longest * 0.6));
-        if (size < 0.055) continue;
+        if (size < MIN_LABEL_IN) continue;
         const nl = text.split("\n").length;
         shapes.push({ kind: "text", x: x + w / 2, y: by - 0.04 - (nl - 1) * size * 1.15, text, size, anchor: "middle" });
         break;
