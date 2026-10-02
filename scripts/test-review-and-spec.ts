@@ -43305,3 +43305,62 @@ const c292Collect = (sections: C292Section[], extra: Partial<C292Input> = {}) =>
   ok(c292Count({ sections: secs }, C292_FABS, C292_SERIES) === c292Collect(secs).types.length && c292Count({ sections: secs }, C292_FABS, C292_SERIES) === 2,
     "#292 collect: countCutSheetTypes (client-safe) equals the collector's type count");
 }
+// ---- #292 task 4: the sheet model ----
+import { cutSheetCssVars as c292CssVars, cutSheetModel as c292Model, plainDescription as c292Plain, quoteRevisionRows as c292RevRows } from "@/lib/curtain-cut-sheets/model";
+{
+  const t = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])]).types[0];
+  ok(c292Plain(t) === `Two Main Drape panels, each 21'-6" wide × 18'-0" tall finished, sewn from Charisma Velour 25 oz with 50% fullness. The top has webbing with grommets every 12", hung from carriers on an ADC 280 Black track mounted to a pipe batten; the bottom has a chain pocket so the curtain hangs straight.`,
+    "#292 model: plainDescription is the fixed deterministic sentence (spec §2.6 sample)");
+  const rows = c292RevRows([
+    { rev: 2, at: 20, reason: "sent", note: "" }, { rev: 1, at: 10, reason: "manual", note: "First pass" }, { rev: 3, at: 30, reason: "manual", note: "" },
+  ]);
+  ok(rows.map((r) => `${r.letter}:${r.label}`).join("|") === "A:First pass|B:Issued to customer|C:Pricing snapshot", "#292 model: quoteRevisionRows letters A, B… in rev order; sent reads Issued to customer");
+  const ctx = {
+    quote: { id: "Q-1", number: "EST-1042", name: "Main stage", customer: "Lakefront HS", venue: "Auditorium — Lakefront", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "Jeff Chesebro", index: 1, total: 1, now: 1,
+  };
+  const sub = c292Model(t, { ...ctx, style: "submittal" });
+  ok(sub.titleBlock?.sheet.number === "CS-1" && sub.titleBlock.project.id === "EST-1042" && sub.titleBlock.status === "— Preliminary" && sub.titleBlock.optionName === null &&
+      sub.titleBlock.scale === `Elev ${sub.elevation.scale} · Detail NTS` && sub.titleBlock.drawnBy === "Jeff Chesebro",
+    "#292 model: the Submittal title block is filled from the quote (estimate #, CS-n, Preliminary with no revisions)");
+  ok(sub.materials.map((m) => m.label).join() === "Fabric,Flame rating,Fullness,Finished size,Top finish,Bottom finish,Sewn area,Weight,Qty" &&
+      sub.materials[0].value === `Charisma Velour 25 oz · 25 oz/lin yd, 54" bolt` && sub.materials[2].value === "50% (1.5×)",
+    "#292 model: materials rows in spec order, with the catalog weight basis");
+  ok(sub.hardware.some((h) => h.sku === "ADC-2802") && sub.description === "", "#292 model: Submittal carries the hardware table");
+  const cli = c292Model(t, { ...ctx, style: "client" });
+  const json = JSON.stringify(cli);
+  ok(cli.titleBlock === null && cli.hardware.length === 0 && cli.materials.length === 0 && !/"sku"|"cost"|"price"/.test(json) && !json.includes("ADC-2802") && cli.description.startsWith("Two Main Drape"),
+    "#292 model: the Client model has no SKU or cost fields — elevation, description, sizes and mount only");
+  const v = c292CssVars();
+  ok(v["--dw-w"] === "11in" && v["--dw-h"] === "8.5in" && v["--dw-strip"] === "2.1in", "#292 model: cut-sheet CSS variables are Letter landscape");
+
+  // review rounds: weight note, blank facts, and facts that differ between merged members
+  const weightRow = (m: typeof sub) => m.materials.find((r) => r.label === "Weight");
+  const pp = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "pipe-pocket" }) })])]).types[0];
+  const ppRow = weightRow(c292Model(pp, { ...ctx, style: "submittal" }));
+  ok(!!ppRow && ppRow.value.includes("lb") && ppRow.value.includes("Bottom pipe not included") && !weightRow(sub)?.value.includes("Bottom pipe"),
+    "#292 model: a pipe-pocket bottom prints its weight note beside the weight; a chain bottom prints none");
+  const noOz = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ fabricSku: "FAB-NOOZ", fabricName: "Mystery Scrim", bottomFinish: "pipe-pocket" }) })])]).types[0];
+  const noOzModel = c292Model(noOz, { ...ctx, style: "submittal" });
+  ok(noOz.weightLbTotal === null && noOz.weightNote === "Bottom pipe not included" && !weightRow(noOzModel) && !JSON.stringify(noOzModel.materials).includes("Bottom pipe"),
+    "#292 model: with no weight there is no Weight row — and no note next to a blank weight");
+  const c0 = t.curtains[0];
+  const blankFab = { ...t, curtains: [{ ...c0, fabric: null, fabricText: "" }] };
+  const blankModel = c292Model(blankFab, { ...ctx, style: "submittal" });
+  ok(!blankModel.materials.some((r) => r.label === "Fabric" || r.label === "Flame rating") && !/—|specified|undefined|null/.test(blankModel.materials.map((r) => r.value).join("|")),
+    "#292 model: a blank fabric prints no Fabric row and no stand-in text");
+  const blankDesc = c292Plain(blankFab);
+  ok(blankDesc.startsWith(`Two Main Drape panels, each 21'-6" wide × 18'-0" tall finished, with 50% fullness.`) && !/specified|undefined|null/.test(blankDesc),
+    "#292 model: a blank fabric is left out of the plain description (no stand-in)");
+  const colored = (a?: string, b?: string) => c292Model({ ...t, curtains: [{ ...c0, color: a }, { ...c0, color: b }] }, { ...ctx, style: "submittal" }).materials.find((r) => r.label === "Color")?.value;
+  ok(colored("Black", "Black") === "Black" && colored("Black", "Navy") === undefined && colored("Black", undefined) === undefined && colored(undefined, undefined) === undefined,
+    "#292 model: Color prints only when every member of the type agrees on it");
+  const otherDesc = c292Plain({ ...t, curtains: [{ ...c0, mount: { ...c0.mount, key: "track-other" as const } }] });
+  ok(otherDesc.includes("hung from carriers on an ADC 280 Black track") && !otherDesc.includes("its supports") && !otherDesc.includes("mounted to"),
+    "#292 model: an unknown track mounting names no place (no stand-in)");
+  ok(!JSON.stringify(sub).includes("biparting") && !JSON.stringify(cli).includes("biparting"), "#292 model: a track operation is never printed (it is not part of the type key)");
+  const multi = c292Collect([c292Sec("s1", [c292Cur(1), c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 10'W × 18'H, 50% fullness", qty: 1 })])]).types[0];
+  const multiModel = c292Model(multi, { ...ctx, style: "client" });
+  ok(multiModel.sizes.length === 2 && multiModel.description.startsWith("Three Main Drape panels in 2 sizes") && multiModel.sizes.reduce((a, s) => a + s.qty, 0) === 3,
+    "#292 model: several sizes read as a count in the sentence and each size is a row");
+}
