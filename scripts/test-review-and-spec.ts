@@ -44134,9 +44134,15 @@ import type { RackPlacement as C296gPlacement, RackLayout as C296gLayout, RackPa
   const shelf = slotRect(gs, "SHELF").r;
   const c1 = slotRect(gs, "C1").r;
   const c2 = slotRect(gs, "C2").r;
-  ok(shelf.fill === "tone" && near(shelf.h, 1.75 - 0.08, 1e-9), "#296 rack geometry: the shelf rect is its own tray height, toned");
-  ok(near(c1.y + c1.h, shelf.y, 1e-9) && near(c2.y + c2.h, shelf.y, 1e-9) && near(c1.h, 2 * 1.75 - 0.08, 1e-9) && near(c2.h, 1.75 - 0.08, 1e-9), "#296 rack geometry: shelf devices sit on the tray top, each its own height");
-  ok(c1.x < c2.x && near(c1.w, 9.42, 1e-9) && c1.y < shelf.y, "#296 rack geometry: shelf devices use their own lanes and rise above the tray");
+  const band = rects(gs.shapes).find((r) => near(r.h, 0.25, 1e-9))!;
+  ok(shelf.fill === "none" && shelf.stroke === "med" && near(shelf.h, 2 * 1.75 - 0.08, 1e-9) && near(shelf.y, M + (12 - 4) * 1.75 + 0.04, 1e-9), "#296 rack geometry: the shelf is an unfilled outline over its whole occupied span (tray RU plus the extension)");
+  ok(band.fill === "tone" && near(band.y + band.h, shelf.y + shelf.h, 1e-9) && band.x === shelf.x && band.w === shelf.w, "#296 rack geometry: the tray is a 0.25 in toned band at the bottom of the shelf span");
+  ok(near(c2.y + c2.h, band.y - 0.04, 1e-9) && near(c2.h, 1.75 - 0.08, 1e-9) && near(c1.y + c1.h, band.y - 0.04, 1e-9), "#296 rack geometry: a shelf child sits on the tray at the bottom of the shelf span");
+  ok([c1, c2].every((c) => c.y >= shelf.y - 1e-9 && c.y + c.h <= shelf.y + shelf.h + 1e-9), "#296 rack geometry: a shelf child never extends above the shelf's occupied span");
+  ok(near(c1.y, shelf.y, 1e-9) && c1.h < 2 * 1.75 - 0.08, "#296 rack geometry: a child as tall as the whole span is trimmed to clear the tray band");
+  ok(c1.x < c2.x && near(c1.w, 9.42, 1e-9), "#296 rack geometry: shelf devices use their own lanes");
+  const empty = c296gGeom(L([P({ id: "SHELF", kind: "shelf", sku: "SH1", ruStart: 3 })]), look, { face: "front" });
+  ok(texts(empty.shapes).some((t) => t.text === "SH1") && empty.slots.length === 1, "#296 rack geometry: an empty shelf carries its own label");
   ok(gs.slots.map((s) => s.placementId).join() === "RP-SHELF,RP-C1,RP-C2", "#296 rack geometry: slots follow placement order, children after their shelf");
   ok(c296gGeom(sl, look, { face: "rear" }).slots.length === 0, "#296 rack geometry: shelf and its devices leave the other face alone");
 
@@ -44166,6 +44172,13 @@ import type { RackPlacement as C296gPlacement, RackLayout as C296gLayout, RackPa
   const raw = c296gShapesToSvg([{ kind: "text", x: 1, y: 2, text: "a\nb<", size: 0.5 }, { kind: "line", x1: 0, y1: 0, x2: 1, y2: 1, stroke: "heavy" }], { w: 4, h: 3 }, { className: 'a"b' });
   ok(raw.includes('class="a&quot;b"') && raw.includes("<tspan") && raw.includes("b&lt;") && raw.includes('stroke-width="1.6"') && raw.includes('viewBox="0 0 4 3"'), "#296 rack geometry: shapesToSvg escapes the class, breaks lines into tspans, heavy is 1.6 px");
   ok(c296gSvg(L([P({ id: "A", label: "x\u0001y" })]), look, { face: "front" }).includes(">xy<"), "#296 rack geometry: control characters never reach the markup");
+  const dashed = L([P({ id: "O", optional: true }), P({ id: "Q", kind: "reserved", sku: undefined, ruStart: 2 })]);
+  const sc = c296gSvg(dashed, look, { face: "front" });
+  const ab = c296gSvg(dashed, look, { face: "front", strokeMode: "absolute" });
+  ok(sc === c296gSvg(dashed, look, { face: "front", strokeMode: "screen" }) && sc.includes('stroke-width="1" vector-effect') && sc.includes('stroke-dasharray="4 3"'), "#296 rack geometry: strokeMode screen is the default — px widths, non-scaling, 4 3 dashes");
+  ok(!ab.includes("vector-effect") && ab.includes('stroke-width="0.035"') && ab.includes('stroke-width="0.02"') && ab.includes('stroke-dasharray="0.25 0.18"') && !ab.includes('stroke-dasharray="4 3"') && !ab.includes('stroke-width="1"'), "#296 rack geometry: strokeMode absolute — user-unit widths and dashes, no vector-effect");
+  ok(ab.includes('viewBox="0 0 ') && c296gShapesToSvg([{ kind: "line", x1: 0, y1: 0, x2: 1, y2: 1, stroke: "heavy", dash: true }], { w: 1, h: 1 }, { strokeMode: "absolute" }).includes('stroke-width="0.06"'), "#296 rack geometry: absolute mode through shapesToSvg, heavy is 0.06 in");
+  ok((sc.match(/paint-order="stroke"/g) ?? []).length === 1 && sc.includes('stroke="#fff"') && !c296gSvg(L([P({ id: "A" })]), look, { face: "front" }).includes("paint-order"), "#296 rack geometry: only reserved text gets a white halo");
 }
 
 async function rack296SheetAsyncChecks(): Promise<void> {

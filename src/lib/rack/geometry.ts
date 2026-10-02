@@ -7,7 +7,7 @@
  * them. No React, no store/db imports.
  */
 import { textExtent, type Shape } from "@/lib/curtain-cut-sheets/shapes";
-import { childrenOf, laneSpan, placementFacts } from "./layout";
+import { childrenOf, laneSpan, occupiedSpan, placementFacts } from "./layout";
 import { ruLabel } from "./rules";
 import { RU_IN, type RackConfig, type RackFace, type RackLayout, type RackPartLookup, type RackPlacement } from "./types";
 
@@ -18,6 +18,7 @@ const TITLE_BAND = 1.2;
 const TITLE_SIZE = 0.7;
 const LABEL_PAD = 0.3;
 const RESERVED_TEXT = "Reserved — future";
+const TRAY_IN = 0.25; // the shelf tray band, at the bottom of the shelf's occupied span
 
 export type RackSlot = { placementId: string; x: number; y: number; w: number; h: number; face: RackFace };
 export type RackGeometryOpts = {
@@ -27,7 +28,11 @@ export type RackGeometryOpts = {
   title?: string;
   /** Prefix for the hatch pattern id, so several SVGs can share a page. Used by `svg.ts`. */
   idPrefix?: string;
+  /** "screen" (default): non-scaling px strokes. "absolute": user-unit strokes for rasterizers that ignore vector-effect. Used by `svg.ts`. */
+  strokeMode?: "screen" | "absolute";
 };
+/** A text shape that wants a white halo so it stays legible over hatching (read by `svg.ts`). */
+export type RackTextShape = Extract<Shape, { kind: "text" }> & { halo?: true };
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -116,12 +121,13 @@ export function rackGeometry(
     const size2 = labelSize * 0.8;
     const t1 = fitText(line1, labelSize, maxW);
     const t2 = l2 && l2 !== line1 ? fitText(l2, size2, maxW) : null;
+    const halo = p.kind === "reserved" ? ({ halo: true } as const) : {};
     if (t1 && t2) {
       const y1 = cy - 0.08;
-      shapes.push({ kind: "text", x: cx, y: y1, text: t1, size: labelSize, anchor: "middle" });
+      shapes.push({ kind: "text", x: cx, y: y1, text: t1, size: labelSize, anchor: "middle", ...halo } as RackTextShape);
       shapes.push({ kind: "text", x: cx, y: y1 + size2 * 1.4, text: t2, size: size2, anchor: "middle" });
     } else if (t1) {
-      shapes.push({ kind: "text", x: cx, y: cy + labelSize * 0.35, text: t1, size: labelSize, anchor: "middle" });
+      shapes.push({ kind: "text", x: cx, y: cy + labelSize * 0.35, text: t1, size: labelSize, anchor: "middle", ...halo } as RackTextShape);
     }
   };
 
@@ -152,13 +158,26 @@ export function rackGeometry(
   /* ---- this face: top-level placements, a shelf's devices right after it ---- */
   for (const p of layout.placements) {
     if (p.shelfId || p.face !== opts.face) continue;
-    const tray = spanRect(p, p.ruStart, p.ruStart + p.ruHeight - 1);
-    drawBox(p, tray, opts.face);
-    if (p.kind !== "shelf") continue;
-    for (const c of childrenOf(layout, p.id)) {
+    if (p.kind !== "shelf") {
+      drawBox(p, spanRect(p, p.ruStart, p.ruStart + p.ruHeight - 1), opts.face);
+      continue;
+    }
+    // A shelf is the outline of everything the engine reserves for it (D575: its own
+    // rows, plus the extension for a tall device); the tray is a thin band at the bottom.
+    const span = occupiedSpan(layout, p)!;
+    const box = spanRect(p, span.lo, span.hi);
+    const bandTop = box.y + box.h - TRAY_IN;
+    shapes.push({ kind: "rect", x: box.x, y: box.y, w: box.w, h: box.h, stroke: "med", fill: "none", ...(p.optional ? { dash: true } : {}) });
+    shapes.push({ kind: "rect", x: box.x, y: bandTop, w: box.w, h: TRAY_IN, stroke: "thin", fill: "tone" });
+    const kids = childrenOf(layout, p.id);
+    if (kids.length === 0) drawLabel(p, { ...box, h: box.h - TRAY_IN });
+    slots.push({ placementId: p.id, x: box.x, y: box.y, w: box.w, h: box.h, face: opts.face });
+    for (const c of kids) {
       const { x, w } = laneX(c);
-      const h = c.ruHeight * RU_IN - 2 * INSET;
-      drawBox(c, { x, y: tray.y - h, w, h }, opts.face); // sits on the tray's top edge
+      const cell = c.ruHeight * RU_IN;
+      // Bottom on the tray band; a device as tall as the whole span is trimmed to clear it.
+      const y = Math.max(box.y, bandTop - cell + INSET);
+      drawBox(c, { x, y, w, h: bandTop - INSET - y }, opts.face);
     }
   }
 
