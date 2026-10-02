@@ -10718,6 +10718,8 @@ seeded()
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
   .then(() => narrativeFinal293AsyncChecks())
+  .then(() => systemLibrary293sAsyncChecks())
+  .then(() => systemLibrary293sFinalFixAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -38103,7 +38105,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   ok(modal.includes("useSwallowOpeningDoubleClick()") && modal.includes("onClickCapture={swallowOpeningDoubleClick}") && modal.includes('"Update track" : "Add track"') && modal.includes("No track series yet — set one up in"),
     "#274B modal: swallows the opening double-click, Update/Add track, and the empty-state link to Track series");
   ok(curtainModal.includes("Add track") && curtainModal.includes("<TrackFields draft={track}"), "#274B curtain modal: the Add track toggle shows the track fields");
-  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(acts), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
+  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(src("src/app/(app)/estimator/copy-pricing.ts")), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
   ok(page.includes("listTrackSeries()") && page.includes("trackSeries={trackSeries}") && page.includes("trackParts={trackParts}"), "#274B page: the Estimator loads the series and their live catalog parts");
 }
 
@@ -44680,4 +44682,464 @@ async function cutSheetFinal292AsyncChecks(): Promise<void> {
   ok(!!uri && uri.startsWith("data:image/webp;base64,") && meta?.width === CUT_SHEET_PHOTO_EDGE_PX && meta?.height === CUT_SHEET_PHOTO_EDGE_PX / 2 && CUT_SHEET_PHOTO_EDGE_PX <= 400,
     "#292 final #8: an inlined cut-sheet photo is shrunk to the tile (~400 px WebP), not the stored 1600 px");
   ok((await cutSheetPhotoDataUrl(Buffer.from("not an image"))) === null, "#292 final #8: a photo that can't be shrunk is skipped");
+}
+
+/* ======================================================================
+   #293 slice 2 — pure rules: the system library (which quotes and
+   systems are indexed, search + ranking, hits, keys, the Load pick and
+   placement, notices) and Merge narrative.
+   ====================================================================== */
+import {
+  systemLibraryEntries as n293sEntries, searchSystemLibrary as n293sSearch, toLibraryHit as n293sHit,
+  parseLibraryKey as n293sParseKey, librarySourceOf as n293sSource, librarySectionForLoad as n293sForLoad,
+  placeLoadedSection as n293sPlace, loadNotice as n293sLoadNotice, libraryRowMeta as n293sRowMeta,
+  libraryRowCounts as n293sRowCounts, LIBRARY_SNIPPET as n293sSnip, LIBRARY_SEARCH_LIMIT as n293sLimit,
+  LIBRARY_GONE as n293sGone, type SystemLibraryEntry as N293sEntry,
+} from "@/lib/narrative/system-library";
+import { mergeNarrative as n293sMerge, mergeNotice as n293sMergeNotice } from "@/lib/narrative/merge";
+import type { Quote as N293sQuote } from "@/lib/stores/quotes";
+import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)/estimator/types";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const it = (id: number, sku: string, extra: Partial<N293sItem> = {}): N293sItem =>
+    ({ id, sku, desc: "Desc " + sku, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293sItem);
+  const sec = (id: string, name: string, items: N293sItem[], extra: Partial<N293sSec> = {}): N293sSec =>
+    ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const rev = (n: number, reason: "manual" | "sent", at: number, sections: N293sSec[], tierMargin = 0.3) =>
+    ({ rev: n, at, by: "t", reason, note: "", name: "Rev " + n, value: 0, margin: 0, status: "sent", tierMargin, spec: { sections, mobs: [] } });
+  const quote = (id: string, status: string, extra: Record<string, unknown> = {}): N293sQuote =>
+    ({ id, name: "Quote " + id, customer: "Denorm " + id, customerId: null, locationId: null, value: 0, margin: 0, status,
+       source: "estimator", quoteType: "system", owner: "t", createdAt: 1, updatedAt: 1000, spec: null, ...extra } as unknown as N293sQuote);
+
+  // ---- which quotes and systems are indexed ----
+  const lighting = sec("sysA", "Main Lighting", [
+    it(1, "ETC-S4"),
+    it(2, "CUSTOM-X", { custom: true }),
+    it(3, "", { rewardCredit: true, qty: 1, price: -50 }),
+    it(5, "VQ-1", { vendorQuoteId: "vq1", desc: "Vendor rig" }),
+  ], {
+    narrative: "  Our lighting.  ", presentation: "narrative", room: "Stage left",
+    keyProducts: [
+      { lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true },
+      { lineKey: "9", sku: "GONE", text: "x", photo: true },
+      { lineKey: "5", sku: "VQ-1", text: "Vendor para", photo: true },
+    ],
+  });
+  const QS = quote("QS", "sent", {
+    customerId: "C1", estNo: 1005, updatedAt: 9000,
+    spec: { sections: [sec("sysLive", "Live only edit", [it(1, "LIVE")])], mobs: [] },
+    revisions: [
+      rev(1, "manual", 1000, [sec("sysOld", "Old manual", [it(1, "OLD")])]),
+      rev(2, "sent", 5000, [lighting, sec("sysL", "Labor", [it(4, "LAB", { labor: true })], { kind: "labor" }), sec("sysE", "Empty", [])]),
+      rev(3, "manual", 6000, [sec("sysLater", "Later manual", [it(1, "LATER")])]),
+    ],
+  });
+  const QD = quote("QD", "draft", { revisions: [rev(1, "sent", 4000, [sec("d", "Recalled draft", [it(1, "D")])])] });
+  const QL = quote("QL", "lost", { revisions: [rev(1, "sent", 4000, [sec("l", "Lost one", [it(1, "L")])])] });
+  const QDL = quote("QDL", "won", { source: "daylite", spec: { sections: [sec("h", "History", [it(1, "H")])] } });
+  const QF = quote("QF", "sent", { quoteType: "flame_test", revisions: [rev(1, "sent", 4000, [sec("f", "Flame", [it(1, "F")])])] });
+  const QW = quote("QW", "won", { updatedAt: 3000, spec: { sections: [sec("sysW", "Rigging", [it(1, "RIG-1")])], mobs: [] } });
+  const QA = quote("QA", "sent", { quoteType: undefined, revisions: [rev(1, "sent", 7000, [sec("sysA2", "Audio", [it(1, "SPK-1")])])] });
+  const QX = quote("QX", "sent", { spec: { sections: [sec("x", "Never cut", [it(1, "X")])] } });
+  const QJ = quote("QJ", "won", { spec: "junk" });
+  const names = new Map([["C1", "Lakefront HS"]]);
+  const all = n293sEntries([QS, QD, QL, QDL, QF, QW, QA, QX, QJ], names);
+
+  ok(eq(all.map((e) => e.key), ["QW:live:sysW", "QA:1:sysA2", "QS:2:sysA"]),
+    "#293s library: sent + won system quotes only (draft, lost, Daylite, flame, never-sent and junk specs skipped); won first, then newest");
+  const s = all.find((e) => e.quoteId === "QS")!;
+  ok(s.systemName === "Main Lighting" && s.rev === 2 && s.at === 5000 && s.status === "sent",
+    "#293s library: a sent quote indexes its LATEST SENT revision — not the live edit, not a later manual revision");
+  ok(s.customer === "Lakefront HS" && s.estNumber === "EST-1005" && s.quoteName === "Quote QS" && s.intro === "Our lighting." && s.presentation === "narrative",
+    "#293s library: customer from the directory name, estimate number, trimmed intro, presentation");
+  ok(s.lineCount === 3 && eq(s.skus, ["ETC-S4", "CUSTOM-X", "VQ-1"]),
+    "#293s library: the Rewards credit line is excluded from counts and skus");
+  ok(eq(s.keyProducts.map((k) => k.sku), ["ETC-S4", "VQ-1"]) && s.keyProducts[0].heading === "Desc ETC-S4",
+    "#293s library: only resolved key products are indexed, with their printed heading");
+  ok(!all.some((e) => e.sectionId === "sysL" || e.sectionId === "sysE"), "#293s library: labor and empty systems are skipped");
+  const w = all.find((e) => e.quoteId === "QW")!;
+  ok(w.rev === null && w.at === 3000 && w.status === "won" && w.customer === "Denorm QW", "#293s library: won-without-send uses the live spec and updatedAt; the denormalized customer is the fallback");
+  ok(n293sSource(QD) === null && n293sSource(QL) === null && n293sSource(QDL) === null && n293sSource(QF) === null && n293sSource(QX) === null && n293sSource(QS)?.tierMargin === 0.3,
+    "#293s library: librarySourceOf is null for draft / lost / Daylite / service / never-sent; a revision carries its tierMargin");
+
+  // ---- search and ranking ----
+  ok(eq(n293sSearch(all, "lighting lakefront").map((e) => e.key), ["QS:2:sysA"]), "#293s search: every token must match somewhere (name + customer)");
+  ok(eq(n293sSearch(all, "etc-s4").map((e) => e.key), ["QS:2:sysA"]) && eq(n293sSearch(all, "vendor rig").map((e) => e.key), ["QS:2:sysA"]),
+    "#293s search: matches a sku or a line description, case-insensitively");
+  ok(n293sSearch(all, "EST-1005").length === 1 && n293sSearch(all, "quote qa").length === 1, "#293s search: matches the estimate number and the quote name");
+  ok(n293sSearch(all, "lighting rigging").length === 0, "#293s search: tokens AND, they don't OR");
+  ok(eq(n293sSearch(all, "").map((e) => e.key), ["QW:live:sysW", "QA:1:sysA2", "QS:2:sysA"]), "#293s search: an empty query lists everything won → sent → newest");
+  const QT = quote("QT", "sent", { revisions: [rev(1, "sent", 4000, [
+    sec("b", "Audio", [it(1, "CBL", { desc: "Speaker cable" })]),
+    sec("a", "Speakers", [it(1, "SPK")]),
+  ])] });
+  ok(eq(n293sSearch(n293sEntries([QT], new Map()), "speaker").map((e) => e.sectionId), ["a", "b"]),
+    "#293s search: with equal status and date, a system-name match ranks before a lines-only match");
+  ok(eq(n293sSearch(all, "", { hasNarrative: true }).map((e) => e.key), ["QS:2:sysA"]), "#293s search: Has narrative keeps systems with an intro or key products");
+  const many = Array.from({ length: 60 }, (_, i) => quote("QM" + i, "won", { updatedAt: i, spec: { sections: [sec("m", "Many " + i, [it(1, "M")])] } }));
+  const manyEntries = n293sEntries(many, new Map());
+  ok(n293sLimit === 50 && n293sSearch(manyEntries, "").length === 50 && n293sSearch(manyEntries, "", { limit: 3 }).length === 3,
+    "#293s search: 50 by default, a smaller limit honored");
+
+  // ---- hits never carry text bodies ----
+  const longIntro = sec("sysLong", "Long", [it(1, "LNG")], { narrative: "word ".repeat(80) });
+  const hit = n293sHit(n293sEntries([quote("QH", "won", { spec: { sections: [longIntro] } })], new Map())[0]);
+  ok(!("intro" in hit) && !("keyProducts" in hit) && !("skus" in hit) && !("descs" in hit) && hit.introSnippet.length <= n293sSnip && n293sSnip === 140,
+    "#293s hits: the list gets a ≤140-char intro snippet and counts — never the intro, block texts, skus or descriptions");
+  const sHit = n293sHit(s);
+  ok(sHit.keyProductCount === 2 && sHit.keyProductSnippets[0].sku === "ETC-S4" && sHit.keyProductSnippets[0].snippet === "S4 para" && sHit.lineCount === 3,
+    "#293s hits: key-product count and per-block snippets");
+
+  // ---- keys ----
+  ok(eq(n293sParseKey("Q-2041:3:sys12"), { quoteId: "Q-2041", rev: 3, sectionId: "sys12" }) && eq(n293sParseKey("Q-dl-9:live:sysA"), { quoteId: "Q-dl-9", rev: null, sectionId: "sysA" }),
+    "#293s keys: quoteId:rev:sectionId, with live for won-without-send");
+  ok(n293sParseKey("bad") === null && n293sParseKey("Q:x:y") === null && n293sParseKey("") === null, "#293s keys: malformed keys parse to null");
+
+  // ---- the Load pick ----
+  const pick = n293sForLoad(QS, "sysA")!;
+  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2]) && pick.vendorLinesDropped === 1 && pick.source.tierMargin === 0.3,
+    "#293s load: vendor-quote lines and the Rewards credit are left out (counted); the snapshot's tier is the source tier");
+  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
+    "#293s load: blocks on dropped or missing lines go, room (job-specific) goes, the narrative carries");
+  ok(n293sForLoad(QS, "sysL") === null && n293sForLoad(QS, "nope") === null && n293sForLoad(QD, "d") === null && n293sForLoad(QS, "sysLive") === null,
+    "#293s load: labor, unknown, draft and live-only-after-send systems are refused");
+  ok(n293sGone === "That estimate is no longer available", "#293s load: the gone message is the spec's copy");
+
+  // ---- placement on the client ----
+  let n = 500;
+  const placed = n293sPlace({ ...pick.section, freightAuto: true, freightPct: 9 }, { id: "sys777", nextId: () => ++n, autoFreightPct: 4 });
+  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }]),
+    "#293s place: fresh section id, items re-id'd through nextId, blocks follow their lines");
+  ok(placed.freightPct === 4 && n293sPlace({ ...pick.section, freightPct: 9 }, { id: "s", nextId: () => ++n, autoFreightPct: 4 }).freightPct === 9,
+    "#293s place: an auto-freight system takes this estimate's default; a hand-set freight is kept");
+  ok(!("keyProducts" in n293sPlace(sec("z", "Z", [it(1, "Z")]), { id: "s", nextId: () => ++n, autoFreightPct: 0 })), "#293s place: no blocks → no key (back-compat shape)");
+
+  // ---- notices and row text ----
+  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesDropped: 1 }) ===
+    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line left out", "#293s notice: Load reports cost moves and left-out vendor lines");
+  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesDropped: 0 }) ===
+    "Loaded A from Q-1 · 1 part updated to today's cost · 2 lines re-priced to this estimate's tier", "#293s notice: singular/plural and the tier move");
+  const rowHit = { ...sHit, status: "won" as const, at: Date.UTC(2026, 8, 15, 18) };
+  ok(n293sRowMeta(rowHit) === "Lakefront HS · EST-1005 · Won · Sep 15, 2026" && n293sRowCounts(sHit) === "3 lines · 2 key products",
+    "#293s rows: customer · EST · Won|Sent · date, then line and key-product counts");
+
+  // ---- Merge narrative ----
+  const target = sec("t", "Target", [it(10, "ETC-S4"), it(11, "SPK"), it(12, "OPT", { option: true }), it(13, "SPK")], {
+    narrative: "Existing intro.", keyProducts: [{ lineKey: "11", sku: "SPK", text: "mine", photo: true }],
+  });
+  const S1 = { systemName: "A", intro: "Our lighting.", keyProducts: [
+    { sku: "ETC-S4", text: "S4 para", photo: false }, { sku: "SPK", text: "x", photo: true },
+    { sku: "OPT", text: "o", photo: true }, { sku: "NOPE", text: "n", photo: true },
+  ] };
+  const S2 = { systemName: "B", intro: "  Our \n lighting. ", keyProducts: [{ sku: "ETC-S4", text: "again", photo: true }] };
+  const S3 = { systemName: "C", intro: "Second intro.", keyProducts: [] };
+  const m = n293sMerge(target, [S1, S2, S3], { intro: true, products: true });
+  ok(m.section.narrative === "Existing intro.\n\nOur lighting.\n\nSecond intro." && m.introsAppended === 2,
+    "#293s merge: intros append after a blank line; one already present (after whitespace normalization) is skipped");
+  ok(eq(m.section.keyProducts, [{ lineKey: "11", sku: "SPK", text: "mine", photo: true }, { lineKey: "10", sku: "ETC-S4", text: "S4 para", photo: false }]) && m.productsAdded === 1,
+    "#293s merge: a block anchors to the first eligible unmarked line with its sku, carrying text and photo");
+  ok(eq(m.skippedPresent, ["SPK", "ETC-S4"]) && eq(m.skippedNoLine, ["OPT", "NOPE"]) && m.skippedFull.length === 0,
+    "#293s merge: already featured → skippedPresent; no eligible line (an option, or absent) → skippedNoLine — never invented");
+  ok(n293sMergeNotice(m) === "Added intro from 2 systems · 1 key product · skipped 2 already featured · 2 not on this system (add the part first): OPT, NOPE",
+    "#293s merge: the notice reads as the spec writes it");
+  ok(n293sMergeNotice({ ...m, introsAppended: 2, productsAdded: 4, skippedPresent: ["a", "b"], skippedNoLine: ["X", "Y", "Z"], skippedFull: [], introsTooLong: 0 }) ===
+    "Added intro from 2 systems · 4 key products · skipped 2 already featured · 3 not on this system (add the part first): X, Y, Z", "#293s merge: the spec's example notice");
+  ok(n293sMerge(sec("e", "E", [it(1, "A")]), [S3], { intro: true, products: true }).section.narrative === "Second intro.", "#293s merge: into an empty narrative, no leading blank line");
+  const introOff = n293sMerge(target, [S1], { intro: false, products: true });
+  const prodOff = n293sMerge(target, [S1], { intro: true, products: false });
+  ok(introOff.section.narrative === "Existing intro." && introOff.productsAdded === 1 && eq(prodOff.section.keyProducts, target.keyProducts) && prodOff.introsAppended === 1,
+    "#293s merge: Intro and Key products can each be turned off");
+  const fullItems = Array.from({ length: 21 }, (_, i) => it(i + 1, "F" + i));
+  const full = sec("f", "Full", fullItems, { keyProducts: fullItems.slice(0, 20).map((x) => ({ lineKey: String(x.id), sku: x.sku, text: "", photo: true })) });
+  const fm = n293sMerge(full, [{ systemName: "X", intro: "", keyProducts: [{ sku: "F20", text: "t", photo: true }] }], { intro: true, products: true });
+  ok(eq(fm.skippedFull, ["F20"]) && fm.skippedNoLine.length === 0 && !fm.changed && /over the 20-product limit/.test(n293sMergeNotice(fm)),
+    "#293s merge: at MAX_KEY_PRODUCTS the overflow is reported as over the limit, not as a missing part");
+  const same = n293sMerge(target, [{ systemName: "Y", intro: "Existing intro.", keyProducts: [{ sku: "SPK", text: "", photo: true }] }], { intro: true, products: true });
+  ok(!same.changed && same.section === target && n293sMergeNotice({ ...same, skippedPresent: [] }) === "Nothing to merge — this system already has it all",
+    "#293s merge: nothing to add → the same object, changed false");
+  const long = n293sMerge(sec("g", "G", [it(1, "A")], { narrative: "x".repeat(7990) }), [{ systemName: "L", intro: "y".repeat(20), keyProducts: [] }], { intro: true, products: false });
+  ok(long.introsTooLong === 1 && !long.changed, "#293s merge: an intro that would push the narrative past MAX_INTRO is skipped and counted");
+
+  // ---- client-safety of the pure modules ----
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const serverImport = (src: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/session|lib\/blob|lib\/narrative\/(library|photos|system-library-index|load-system))/m.test(src);
+  ok(!serverImport(rd("src/lib/narrative/system-library.ts")) && !serverImport(rd("src/lib/narrative/merge.ts")),
+    "#293s pure: system-library.ts and merge.ts value-import no store, db, session, blob or server-only narrative module (client-safe)");
+}
+
+/* ======================================================================
+   #293 slice 2 — server: the copy-pricing helper shared by Copy and Load,
+   the Load core (re-reads the quote, re-prices, drops vendor lines), the
+   index cache and its invalidation, and the three library actions.
+   ====================================================================== */
+import { systemLibraryIndex as n293sIndex, invalidateSystemLibrary as n293sInvalidate } from "@/lib/narrative/system-library-index";
+import { loadLibrarySystem as n293sLoad } from "@/lib/narrative/load-system";
+import {
+  create as n293sQCreate, update as n293sQUpdate, addQuoteRevision as n293sQAddRev, remove as n293sQRemove,
+} from "@/lib/stores/quotes";
+import { mergeUpsert as n293sMergeUpsert } from "@/lib/stores/catalog";
+import { tierSeedPrice as n293sSeed } from "@/app/(app)/estimator/tier-reprice";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("), acts.indexOf("\n}\n", acts.indexOf("export async function copySystemToEstimateAction(")));
+  ok(copyFn.includes("const { catalog, fixtures } = await copyPricingFor(items);") && !copyFn.includes("listFixtures(") && copyFn.includes("copySectionForTarget(sanitizeSystemSell(section),"),
+    "#293s copy-pricing: Copy system loads today's catalog + fixtures through the shared copyPricingFor helper");
+  const cp = rd("src/app/(app)/estimator/copy-pricing.ts");
+  ok(cp.includes("export async function copyPricingFor(") && cp.includes("allAssembliesFrom(fixtureRecords, parts)") && cp.includes("c.found && (c.cost > 0 || c.costOverride !== undefined)"),
+    "#293s copy-pricing: the helper keeps #266's fixture resolution and the missing-part fallback");
+  const ls = rd("src/lib/narrative/load-system.ts");
+  ok(ls.includes("copyPricingFor(picked.section.items)") && ls.includes("copySectionForTarget(sanitizeSystemSell(picked.section),") && ls.includes("invalidateSystemLibrary()"),
+    "#293s load: Load re-prices through the same helper + copySectionForTarget, and a gone key invalidates the index");
+  const la = rd("src/app/(app)/estimator/library-actions.ts");
+  ok(/^"use server";/.test(la) && ["searchSystemLibraryAction", "getSystemLibraryEntryAction", "loadLibrarySystemAction"].every((f) => la.includes(`export async function ${f}(`)) &&
+     (la.match(/await requireUser\(\);/g) || []).length === 3 && !la.includes("requirePerm("),
+    "#293s actions: the three library actions are server actions, each behind requireUser (spec §4.1)");
+  ok(la.includes(".map(toLibraryHit)") && la.includes("LIBRARY_QUERY_MAX"), "#293s actions: search answers hits only (no text bodies) and caps the query");
+  ok(la.includes("limit: LIBRARY_SEARCH_LIMIT") && !/limit:\s*opts/.test(la),
+    "#293s actions: search passes the pure search a fixed finite integer limit (never a client-supplied or NaN one)");
+  const qs = rd("src/lib/stores/quotes.ts");
+  const setStatusFn = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("async function reconcileRewardsSafely("));
+  const removeFn = qs.slice(qs.indexOf("export async function remove("), qs.indexOf("\n}\n", qs.indexOf("export async function remove(")));
+  ok(setStatusFn.includes("if (out && moved.value) await invalidateSystemLibrarySafely();") && removeFn.includes("await invalidateSystemLibrarySafely();"),
+    "#293s index: every real status transition and a quote delete invalidate the library");
+  ok(qs.includes('await import("@/lib/narrative/system-library-index")'), "#293s index: quotes.ts reaches the index by dynamic import (no import cycle)");
+  const ix = rd("src/lib/narrative/system-library-index.ts");
+  ok(ix.includes("const TTL_MS = 5 * 60 * 1000;") && ix.includes("generation++"), "#293s index: a 5-minute per-process cache with a generation guard (portalIndex idiom)");
+}
+
+async function systemLibrary293sAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "lib-part");
+  const QID = fixtureId(293, "lib-sent");
+  const QDRAFT = fixtureId(293, "lib-draft");
+  const QWON = fixtureId(293, "lib-won-gone");
+  await n293sMergeUpsert(P, { desc: "Test293 Lib part", category: "Test293 Cat", unit: "ea", list: 200, cost: 120 });
+  registerFixture("catalog_parts", P);
+  const seeded = n293sSeed({ cost: 100 }, 0.3);
+  const section = {
+    id: "sysLib", name: "Test293 Library Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
+    presentation: "narrative", narrative: "Library intro 293.", room: "Stage left",
+    items: [
+      { id: 1, sku: P, desc: "Lib part", qty: 2, unit: "ea", cost: 100, price: seeded },
+      { id: 2, sku: "VQ-293", desc: "Vendor gear", qty: 1, unit: "ea", cost: 50, price: 80, vendorQuoteId: "vq-293" },
+    ],
+    keyProducts: [{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }],
+  } as unknown as N293sSec;
+
+  // A sent quote, then a post-send edit that must never reach the library.
+  await n293sQCreate({ id: QID, name: "#293 lib", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QID);
+  await n293sQUpdate(QID, { status: "sent" });
+  await n293sQAddRev(QID, { by: "Test", reason: "sent", note: "Sent to customer" });
+  await n293sQUpdate(QID, { spec: { sections: [{ ...section, name: "Test293 Edited after send", narrative: "Leaked" }], mobs: [] } });
+  // A draft with the same system.
+  await n293sQCreate({ id: QDRAFT, name: "#293 lib draft", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [{ ...section, name: "Test293 Draft only" }], mobs: [] } });
+  registerFixture("quotes", QDRAFT);
+
+  n293sInvalidate();
+  const idx = await n293sIndex();
+  const mine = idx.filter((e) => e.quoteId === QID);
+  ok(mine.length === 1 && mine[0].key === `${QID}:1:sysLib` && mine[0].systemName === "Test293 Library Lighting" && mine[0].intro === "Library intro 293.",
+    "#293s index (DB): a sent quote edited after send is indexed from its sent revision");
+  ok(!idx.some((e) => e.quoteId === QDRAFT) && !idx.some((e) => e.systemName === "Test293 Edited after send"), "#293s index (DB): drafts and post-send edits never appear");
+
+  // The cache holds until invalidated; quotes.remove() invalidates on its own.
+  await n293sQCreate({ id: QWON, name: "#293 lib won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QWON);
+  await n293sQUpdate(QWON, { status: "won" });
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): a cached index doesn't see a quote written without a status transition");
+  n293sInvalidate();
+  ok((await n293sIndex()).some((e) => e.key === `${QWON}:live:sysLib`), "#293s index (DB): after invalidation a won-without-send quote is indexed from its live spec");
+
+  // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
+  const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
+  ok(r.ok && r.section.items.length === 1 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesDropped === 1,
+    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line left out");
+  ok(r.ok && r.section.name === "Test293 Library Lighting" && r.section.narrative === "Library intro 293." && r.section.presentation === "narrative" &&
+     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
+    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry; the vendor line's block and the room don't");
+  ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
+  const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
+  ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
+  ok(!(await n293sLoad("garbage", 0.2)).ok, "#293s load (DB): a malformed key is refused");
+  // Final review: warm the index right before remove(), so the drop below is remove()'s own invalidation.
+  ok((await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): the won quote is listed in a warm index right before remove()");
+  await n293sQRemove(QWON);
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): deleting a quote drops it from the library (remove invalidates)");
+  const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2);
+  ok(!gone.ok && gone.error === "That estimate is no longer available", "#293s load (DB): a deleted quote's entry is refused with the spec's message");
+}
+
+/* ======================================================================
+   #293 slice 2 — library modal + Load wiring (client components; proven
+   by source like the other client checks — React isn't mounted here).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const clientImportsServer = (s: string) =>
+    /^import (?!type)[^\n]*from "(@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/narrative\/(library|photos|system-library-index|load-system))|\.\/copy-pricing)/m.test(s);
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/^"use client";/.test(modal) && !clientImportsServer(modal) && !clientImportsServer(cli),
+    "#293s UI: the library modal is a client module; neither it nor the Estimator value-imports a store or server-only module");
+  ok(modal.includes("searchSystemLibraryAction(") && modal.includes("getSystemLibraryEntryAction(") && modal.includes("loadLibrarySystemAction(") && modal.includes("Has narrative"),
+    "#293s UI: the modal searches, reads one entry for the detail pane, and loads; the Has narrative chip filters");
+  ok(modal.includes("libraryRowMeta(h)") && modal.includes("libraryRowCounts(h)") && modal.includes("No sent or won systems match.") && modal.includes("Pick a system to see its intro and key products."),
+    "#293s UI: rows show customer · EST · status · date and counts; empty states");
+  ok(modal.includes("Re-priced at today's catalog and this estimate's tier. Vendor-quote lines are left out.") && modal.includes("Load system"),
+    "#293s UI: Load says how it prices");
+  ok(modal.includes("mergeNarrative(p.target, sources, opts)") && modal.includes("mergeNotice(preview)") && modal.includes("Tick one or more systems to merge.") && modal.includes(">Merge<"),
+    "#293s UI: merge mode previews with mergeNarrative before applying");
+  ok((modal.match(/\} catch \{/g) || []).length >= 3 && !modal.includes("window.confirm"), "#293s UI: every server await in the modal is caught (a throw can't unmount the Estimator)");
+  ok(cli.includes("+ From library…") && cli.includes("<SystemLibraryModal") && cli.includes('mode="load"') && cli.includes("tierMargin={tierMargin}"),
+    "#293s UI: + From library… opens the modal in load mode with this estimate's tier");
+  const place = cli.slice(cli.indexOf("const placeLibrarySystem = "), cli.indexOf("const pushItems = "));
+  ok(place.includes("placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct })") && place.includes("selectSystem(newId)") && place.includes('verb: "Loaded"') && place.includes("loadNotice(res)"),
+    "#293s UI: a loaded system gets fresh ids (blocks remapped), lands after the active system, is selected, and the notice reports the re-price");
+  ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded";') && cli.includes('moveNotice.ok && moveNotice.verb === "Loaded" ?'), "#293s UI: the result banner shows the Load notice");
+}
+
+/* ======================================================================
+   #293 slice 2 — library modal review fixes (a failed first search, a
+   failed entry fetch, and a Load closed mid-flight).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  const list = modal.slice(modal.indexOf('aria-label="Library systems"'), modal.indexOf('aria-label="Selected system"'));
+  ok(modal.includes("setSearchFailed(true)") && modal.includes("}, [query, hasNarrative, attempt]);") &&
+    list.includes("searchFailed ?") && list.indexOf("searchFailed ?") < list.indexOf("hits === null ?") && list.includes("setAttempt((n) => n + 1)") && list.includes("Retry"),
+    "#293s modal fix: a failed search shows a Retry state in the list instead of a stuck Searching…");
+  const fc = modal.slice(modal.indexOf("const focus = "), modal.indexOf("const toggle = "));
+  const fcCatch = fc.slice(fc.indexOf("} catch {"));
+  ok(fcCatch.includes("setPicked((ks) => ks.filter((k) => k !== key))") && fcCatch.includes("setFocusKey((f) => (f === key ? null : f))") && fcCatch.includes("setErr(FAILED)") &&
+    (fc.match(/setFocusKey\(\(f\) => \(f === key \? null : f\)\)/g) || []).length >= 2,
+    "#293s modal fix: a failed or gone entry fetch unticks the row and clears the detail pane (no Loading… forever, Merge never pinned)");
+  ok(modal.includes('if (e.key === "Escape" && !pending) p.onClose();') && (modal.match(/disabled=\{pending\} onClick=\{p\.onClose\}/g) || []).length >= 3,
+    "#293s modal fix: Close, Cancel and Esc are disabled while a Load is in flight, so a cancelled Load can't land after the modal closed");
+}
+
+/* ======================================================================
+   #293 slice 2 — Merge narrative wiring (narrative column ⋯ menu; the
+   card has no ⋯ menu, so the column that owns the narrative hosts it).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  ok(col.includes("Merge narrative from library…") && col.includes('<SystemLibraryModal mode="merge" target={sec}'),
+    "#293s merge UI: ⋯ → Merge narrative from library… opens the library in merge mode for this system");
+  const apply = col.slice(col.indexOf("const applyMerge = "), col.indexOf("return (", col.indexOf("const applyMerge = ")));
+  ok(apply.includes("p.onChange((s) => mergeNarrative(s, sources, opts).section)") && apply.includes("setNotice(mergeNotice(r))") && apply.includes("if (r.changed)"),
+    "#293s merge UI: applies through onChange on the live section (setSections) and reports what was added and skipped");
+  ok(/^"use client";/.test(col) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos|system-library-index|load-system))/m.test(col),
+    "#293s merge UI: the column still imports no server-only module");
+}
+
+/* ======================================================================
+   #293 slice 2 — final review fixes: customer-built portal quotes stay out
+   of the library; a loaded section never keeps another venue's freight;
+   setStatus and remove() really invalidate (checked against a WARM index);
+   a malformed Load key leaves the index warm; a no-tier target prices at
+   the Estimator's fallback seed, not the source customer's tier.
+   ====================================================================== */
+import { setStatus as n293fSetStatus } from "@/lib/stores/quotes";
+import { TIER_FALLBACK_MARGIN as n293fFallback, usableTierMargin as n293fUsable } from "@/app/(app)/estimator/tier-reprice";
+{
+  const it = (id: number, sku: string, extra: Partial<N293sItem> = {}): N293sItem =>
+    ({ id, sku, desc: "Desc " + sku, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293sItem);
+  const sec = (id: string, name: string, items: N293sItem[], extra: Partial<N293sSec> = {}): N293sSec =>
+    ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const sentRev = (sections: N293sSec[]) =>
+    ({ rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "Rev 1", value: 0, margin: 0, status: "sent", tierMargin: 0.3, spec: { sections, mobs: [] } });
+  const quote = (id: string, source: string, extra: Record<string, unknown> = {}): N293sQuote =>
+    ({ id, name: "Quote " + id, customer: "C", customerId: null, locationId: null, value: 0, margin: 0, status: "sent",
+       source, quoteType: "system", owner: "t", createdAt: 1, updatedAt: 1000, spec: null,
+       revisions: [sentRev([sec("s1", "Portal system", [it(1, "PART-1")])])], ...extra } as unknown as N293sQuote);
+
+  ok(!!n293sSource(quote("Qest", "estimator")), "#293s final: control — a sent estimator system quote IS in the library");
+  ok(n293sSource(quote("Qpc", "portal-catalog")) === null, "#293s final: a sent portal-catalog (customer-built) quote is not indexed");
+  ok(n293sSource(quote("Qps", "portal-service")) === null && n293sSource(quote("Qps2", "portal-service", { quoteType: "flame_test" })) === null,
+    "#293s final: a sent portal-service (customer-built) quote is not indexed");
+  ok(n293sSource(quote("Qpw", "portal-catalog", { status: "won" })) === null && n293sSource(quote("Qss", "portal-self-serve")) === null,
+    "#293s final: a won portal-catalog quote and a legacy portal-self-serve quote are not indexed either");
+  ok(n293sEntries([quote("Qpc", "portal-catalog"), quote("Qps", "portal-service"), quote("Qest", "estimator")], new Map()).every((e) => e.quoteId === "Qest"),
+    "#293s final: the library lists the estimator quote and neither portal quote");
+
+  const withMiles = quote("Qmi", "estimator", {
+    revisions: [sentRev([sec("s1", "Copied from a portal quote", [it(1, "PART-1")], { freightPct: 7, freightAuto: false, freightMiles: 412 })])],
+  });
+  const lm = n293sForLoad(withMiles, "s1");
+  ok(!!lm && lm.section.freightAuto === true && !("freightMiles" in lm.section),
+    "#293s final: a section carrying freightMiles loads with freightAuto true and no freightMiles (no other venue's freight)");
+  const noMiles = quote("Qnm", "estimator", { revisions: [sentRev([sec("s1", "Hand freight", [it(1, "PART-1")], { freightPct: 7, freightAuto: false })])] });
+  const ln = n293sForLoad(noMiles, "s1");
+  ok(!!ln && ln.section.freightAuto === false && ln.section.freightPct === 7, "#293s final: control — a section without freightMiles keeps its own freight settings");
+
+  ok(n293fUsable(0.2) === 0.2 && n293fUsable(null) === null && n293fUsable(0) === null && n293fUsable(1) === null && n293fUsable(NaN) === null && n293fUsable("0.2") === null,
+    "#293s final: the shared usableTierMargin keeps its rule (0 < m < 1, finite number)");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const ls = rd("src/lib/narrative/load-system.ts");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  ok(ls.includes("usableTierMargin(targetTierMargin) ?? TIER_FALLBACK_MARGIN") && !ls.includes("const usableTier") &&
+     !acts.includes("const usableTierMargin") && acts.includes("usableTierMargin } from \"./tier-reprice\""),
+    "#293s final: Load and Copy share one usableTierMargin; Load falls back to TIER_FALLBACK_MARGIN");
+  const malformed = ls.indexOf("if (!k) return { ok: false, error: LIBRARY_GONE };");
+  ok(malformed > 0 && malformed < ls.indexOf("invalidateSystemLibrary();"), "#293s final: a malformed key returns before the gone-key invalidation");
+}
+
+async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "lib-final-part");
+  const QW = fixtureId(293, "lib-final-won");
+  const QPC = fixtureId(293, "lib-final-portal-catalog");
+  const QPS = fixtureId(293, "lib-final-portal-service");
+  await n293sMergeUpsert(P, { desc: "Test293 Final part", category: "Test293 Cat", unit: "ea", list: 200, cost: 120 });
+  registerFixture("catalog_parts", P);
+  const section = {
+    id: "sysFin", name: "Test293 Final Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
+    items: [{ id: 1, sku: P, desc: "Final part", qty: 2, unit: "ea", cost: 100, price: n293sSeed({ cost: 100 }, 0.2) }],
+  } as unknown as N293sSec;
+
+  // ---- setStatus invalidates on its own: warm (absent) → real draft→won → listed, no explicit invalidate ----
+  await n293sQCreate({ id: QW, name: "#293 final won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.2, spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QW);
+  n293sInvalidate();
+  const warm = await n293sIndex();
+  ok(!warm.some((e) => e.quoteId === QW) && (await n293sIndex()) === warm, "#293s final (DB): the index is warm and the draft fixture is absent");
+  await n293fSetStatus(QW, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+  const afterWon = await n293sIndex();
+  ok(afterWon !== warm && afterWon.some((e) => e.key === `${QW}:live:sysFin`),
+    "#293s final (DB): a real setStatus(won) invalidates the warm index — the quote appears without an explicit invalidate");
+
+  // ---- a malformed key leaves a warm index warm; a parsed-but-gone key invalidates ----
+  const warm2 = await n293sIndex();
+  const bad1 = await n293sLoad("garbage", 0.2);
+  const bad2 = await n293sLoad("a:b:c:d", 0.2);
+  ok(!bad1.ok && !bad2.ok && (await n293sIndex()) === warm2, "#293s final (DB): a malformed key is refused and the warm index stays cached");
+  const goneKey = await n293sLoad(`${fixtureId(293, "lib-final-never")}:live:sysFin`, 0.2);
+  ok(!goneKey.ok && goneKey.error === n293sGone && (await n293sIndex()) !== warm2, "#293s final (DB): control — a parsed key whose quote is gone does invalidate");
+
+  // ---- a target with no tier prices at the Estimator's fallback seed, not the source's 0.2 ----
+  const nt = await n293sLoad(`${QW}:live:sysFin`, null);
+  ok(nt.ok && nt.section.items[0].cost === 120 && nt.section.items[0].price === n293sSeed({ cost: 120 }, n293fFallback) &&
+     nt.section.items[0].price !== n293sSeed({ cost: 120 }, 0.2) && nt.tierRepriced === 1,
+    `#293s final (DB): Load into a no-tier estimate prices at TIER_FALLBACK_MARGIN (${n293fFallback}), not the source customer's 0.2`);
+
+  // ---- remove() invalidates on its own: warm (listed) → remove → gone ----
+  const warm3 = await n293sIndex();
+  ok(warm3.some((e) => e.quoteId === QW) && (await n293sIndex()) === warm3, "#293s final (DB): the won fixture is listed in a warm index before remove()");
+  await n293sQRemove(QW);
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QW), "#293s final (DB): remove() drops it from the warm index without an explicit invalidate");
+
+  // ---- customer-built portal quotes, sent, are never indexed ----
+  for (const [id, source] of [[QPC, "portal-catalog"], [QPS, "portal-service"]] as const) {
+    await n293sQCreate({ id, name: "#293 final " + source, customer: "Spec fixture", owner: "spec", quoteType: "system", source, tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+    registerFixture("quotes", id);
+    await n293sQUpdate(id, { status: "sent" });
+    await n293sQAddRev(id, { by: "Test", reason: "sent", note: "Sent to customer" });
+  }
+  n293sInvalidate();
+  const pidx = await n293sIndex();
+  ok(!pidx.some((e) => e.quoteId === QPC) && !pidx.some((e) => e.quoteId === QPS), "#293s final (DB): sent portal-catalog and portal-service quotes are not in the library");
+  const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3);
+  ok(!pl.ok && pl.error === n293sGone, "#293s final (DB): a portal quote's system can't be loaded by key");
 }

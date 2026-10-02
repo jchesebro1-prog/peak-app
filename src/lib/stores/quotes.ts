@@ -1468,6 +1468,12 @@ export async function setStatus(
   // row (historical-import records history, it is not a sale made here), and
   // never able to block the status change: a failure is logged, not thrown.
   if (out && moved.value && opts.bypassApprovalGate !== "historical-import") await reconcileRewardsSafely(out, by);
+  // #293 slice 2: same outer-transaction caveat as the copy above — inside
+  // setQuoteStage's transaction this invalidation fires BEFORE commit, so a
+  // rebuild that runs concurrently can cache the pre-transition state for up
+  // to the 5-minute TTL. Accepted: the library is a reference list, and Load
+  // re-reads the quote and re-picks its snapshot as of now.
+  if (out && moved.value) await invalidateSystemLibrarySafely();
   return out;
 }
 
@@ -1478,6 +1484,17 @@ async function reconcileRewardsSafely(q: Quote, by?: string | null, opts: { dele
     await reconcileQuoteLedger(q, by || DEFAULT_ACTOR, opts);
   } catch (e) {
     console.error("[rewards] ledger post failed for quote", q.id, e);
+  }
+}
+
+/** #293 slice 2: the system library indexes sent/won quotes — a real status
+ *  transition or a delete can add or remove entries. Dynamic import: the
+ *  index imports this store. Never throws. */
+async function invalidateSystemLibrarySafely(): Promise<void> {
+  try {
+    (await import("@/lib/narrative/system-library-index")).invalidateSystemLibrary();
+  } catch (e) {
+    console.error("[system-library] invalidate failed", e);
   }
 }
 
@@ -1579,6 +1596,7 @@ export async function remove(id: string, by?: string | null): Promise<void> {
   const q = await getDoc<Quote>("quotes", id);
   await softDeleteDoc("quotes", id);
   if (q) await reconcileRewardsSafely(q, by, { deleted: true });
+  await invalidateSystemLibrarySafely();
 }
 
 /**

@@ -8655,3 +8655,42 @@ the footer, and totals are unchanged. (Spec decision 10.)
 - Draft narrative force-refreshes the system's library rows and refuses to write ("Could not load the library") if any
   cannot load.
 - The Draft confirm offers Replace / Fill blanks / Cancel.
+
+## D549. The system library is computed, never curated (#293 slice 2, 2026-10-01)
+
+What is indexed: sent and won system quotes (`quoteType` "system" or absent), read from the latest sent revision. A won
+quote that was never sent uses its live spec. Never indexed: Daylite history, lost quotes, drafts, post-send edits,
+service quotes, labor systems, and systems that are empty without the Rewards credit. Customer-built portal quotes
+(sources `portal-catalog`, `portal-service` and the retired `portal-self-serve`) are not in the library either — a
+default taken without asking; Jeff can reverse it. Ranking is won, then sent, then newest, then name match. Hits carry
+140-character snippets, never text bodies. The index is a 5-minute per-process cache, invalidated by every real
+`setStatus` transition and by `remove()`; a malformed library key never invalidates. When `setStatus` runs inside
+`setQuoteStage`'s outer transaction the index can stay stale for up to 5 minutes (a known window); Load re-checks as of
+now, so a stale row never loads wrong content. (Spec decision 11, §2.4, §4.1.)
+
+## D550. Load system reuses Copy system's pricing (#293 slice 2, 2026-10-01)
+
+The catalog and fixture loading moved to `estimator/copy-pricing.ts` (`copyPricingFor`), shared by Copy and Load; the
+`#274B` source check now reads that file, the one harness pin retargeted. The server re-reads the quote and picks the
+snapshot by the library rule as of now, so a re-sent quote loads its newest sent revision. Left out: vendor-quote lines
+(counted), blocks on dropped or missing lines, the Rewards credit and `room`. Placement: ids are re-minted client-side
+with blocks remapped, and the system lands after the active one. A loaded section never keeps a portal section's
+distance-based freight: `freightMiles` is removed and `freightAuto` is on, so freight follows this estimate's auto
+default. A target estimate with no tier prices loads lines at the Estimator's fallback seed (`usableTierMargin`, now
+shared, moved to `estimator/tier-reprice.ts`). A gone key answers "That estimate is no longer available" and
+invalidates the index. (Spec decision 12, §4.2.)
+
+## D551. Merge narrative is append-only (#293 slice 2, 2026-10-01)
+
+Intros are deduped after whitespace normalization; an intro that would pass `MAX_INTRO` is skipped and counted. A block
+anchors to the first eligible unmarked line with its sku, and is never invented. Overflow at `MAX_KEY_PRODUCTS` is
+reported separately (`skippedFull`), a deviation from the spec's `skippedNoLine`, so the notice never tells staff to
+"add the part first" for a full system. Merge never switches presentation. (Spec decision 13, §2.5.)
+
+## D552. Where the library lives in the UI (#293 slice 2, 2026-10-01)
+
+**+ From library…** sits under the cards column's **+ Add system**, because the rail's own button reads "+ Add" and has
+no room. **Merge narrative from library…** is in the narrative column's ⋯ menu, because the system card has no ⋯ menu
+(spec §4.2 assumed one). One modal serves both modes; Has narrative starts on in merge mode. While a Load is in flight,
+Close, Cancel and Esc are disabled; a failed search shows Retry; a failed entry unticks. The Load notice reuses the
+move/copy banner (`verb: "Loaded"`).

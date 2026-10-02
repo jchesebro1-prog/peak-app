@@ -114,6 +114,8 @@ import SectionCard, { type InputKind } from "./section-card";
 import NarrativeColumn from "./narrative-column";
 import { useKeyProductLibrary } from "./use-key-product-library";
 import { fillEmptyKeyProductText, isKeyProductEligible, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
+import SystemLibraryModal from "./system-library-modal";
+import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
@@ -530,6 +532,8 @@ export default function EstimatorClient({
   const [narrOpen, setNarrOpen] = useState(true);
   /** #293 — the system-intro library; the intro actions answer with the new list. */
   const [intros, setIntros] = useState(narrativeIntros);
+  /** #293 slice 2: the system library modal (Load system). */
+  const [libraryOpen, setLibraryOpen] = useState(false);
   useEffect(() => {
     try {
       if (window.localStorage.getItem(NARR_OPEN_KEY) === "0") setNarrOpen(false);
@@ -596,7 +600,7 @@ export default function EstimatorClient({
         targetName: string;
         targetNumber: string;
         /** #266: "Copied" reuses this banner; absent = the original Moved wording. */
-        verb?: "Moved" | "Copied";
+        verb?: "Moved" | "Copied" | "Loaded";
         /** #266: the re-price summary; a copy within this estimate has no targetId. */
         detail?: string;
       }
@@ -1729,6 +1733,21 @@ export default function EstimatorClient({
     setActiveId(id);
     openInputMethod("catalog", id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(id)));
+  };
+  /** #293 slice 2: Load system — the server re-read and re-priced the library
+   *  system (today's catalog, this estimate's tier, vendor-quote lines left
+   *  out). Here it gets fresh ids (blocks follow), lands after the active
+   *  system like Copy here, and is selected; Save persists it. */
+  const placeLibrarySystem = (res: LoadedLibrarySystem) => {
+    const newId = "sys" + nextId();
+    const placed = placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct });
+    setSections((ss) => {
+      const at = ss.findIndex((s) => s.id === activeId);
+      return at < 0 ? [...ss, placed] : [...ss.slice(0, at + 1), placed, ...ss.slice(at + 1)];
+    });
+    setLibraryOpen(false);
+    requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(newId)));
+    setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Loaded", detail: loadNotice(res) });
   };
 
   const pushItems = (secId: string, items: SpecItem[]) =>
@@ -3372,7 +3391,9 @@ export default function EstimatorClient({
               }}
             >
               <span>
-                {moveNotice.ok && moveNotice.verb === "Copied" ? (
+                {moveNotice.ok && moveNotice.verb === "Loaded" ? (
+                  <>{moveNotice.detail}</>
+                ) : moveNotice.ok && moveNotice.verb === "Copied" ? (
                   moveNotice.targetId ? (
                     <>
                       Copied to {moveNotice.targetNumber} · {moveNotice.targetName} — {moveNotice.detail} —{" "}
@@ -3899,6 +3920,30 @@ export default function EstimatorClient({
               >
                 + Add system
               </button>
+              <button
+                type="button"
+                className="est-addsys est-addlib"
+                onClick={() => setLibraryOpen(true)}
+                title="Load a system from a sent or won estimate — re-priced for this one"
+                style={{
+                  width: "100%",
+                  marginTop: 8,
+                  padding: 10,
+                  background: "#fff",
+                  border: "1px dashed #d6d9e0",
+                  borderRadius: 12,
+                  color: "#8c919c",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  fontFamily: "var(--font-ui)",
+                  cursor: "pointer",
+                }}
+              >
+                + From library…
+              </button>
+              {libraryOpen && (
+                <SystemLibraryModal mode="load" tierMargin={tierMargin} onLoaded={placeLibrarySystem} onClose={() => setLibraryOpen(false)} />
+              )}
             </div>
 
             {/* system narrative — the right column Quote details vacated (#281);
