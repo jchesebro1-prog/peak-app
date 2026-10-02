@@ -101,6 +101,7 @@ export const specRecordRevisions = docTable("spec_record_revisions"); // Spec Li
 export const documents = docTable("documents"); // Documents (#218) — company/venue/project files in private Blob, shared both ways through the portal; migration 0029_documents
 export const portalCarts = docTable("portal_carts"); // Portal catalog (#245) — one cart per portal grant; never a quote row until Generate; migration 0032_portal_carts
 export const rewardLedger = docTable("reward_ledger"); // Customer Rewards (#282 phase 2) — append-only account-credit entries, one company each, deterministic ids (spec 2026-09-30-customer-rewards-design.md §4); migration 0034_reward_ledger
+export const manufacturers = docTable("manufacturers"); // Manufacturer section Part 1 — one record per mfrKey with its image (an unlinked part_documents image); spec 2026-10-02-manufacturer-images-placeholders-design.md; migration 0035_manufacturers
 
 export const DOC_TABLES = {
   quotes,
@@ -144,6 +145,7 @@ export const DOC_TABLES = {
   spec_records: specRecords,
   spec_record_revisions: specRecordRevisions,
   reward_ledger: rewardLedger,
+  manufacturers,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;

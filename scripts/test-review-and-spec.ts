@@ -10770,6 +10770,7 @@ seeded()
   .then(() => onlineDoc293tAsyncChecks())
   .then(() => portalPage293tAsyncChecks())
   .then(() => finalFix293tAsyncChecks())
+  .then(() => mfrStoreAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -48572,4 +48573,40 @@ import { existsSync as mfiExists } from "node:fs";
   ok(mfiIsCustom("Custom Parts") && mfiIsCustom(" custom parts ") && !mfiIsCustom("Lighting") && !mfiIsCustom(null), "mfr images: the Custom Parts category marks a custom catalog part");
   ok(mfiFallbackSrc({ kind: "placeholder", name: "coming-soon" }, (id) => "/d/" + id) === "/placeholders/coming-soon.webp" && mfiFallbackSrc({ kind: "image", documentId: "X", label: "" }, (id) => "/d/" + id) === "/d/X", "mfr images: fallbackSrc maps placeholders to static files and images through the caller's doc URL");
   ok(Object.values(mfiSrc).every((s) => mfiExists("public" + s)), "mfr images: all four placeholder files ship in public/placeholders");
+}
+
+/* ======================================================================
+   Manufacturer images — the manufacturers store (PGlite).
+   ====================================================================== */
+import { listManufacturers as mfsList, manufacturerByKey as mfsByKey, setManufacturerImage as mfsSet, removeManufacturerImage as mfsRemove, manufacturerImageLookup as mfsLookup } from "@/lib/stores/manufacturers";
+import { createDocument as mfsCreateDoc, visibleImagesForParts as mfsVisible } from "@/lib/stores/part-documents";
+import { searchDocumentsAction as mfsSearch } from "@/app/(app)/catalog/documents/actions";
+import { readFileSync as mfsReadFile } from "node:fs";
+async function mfrStoreAsyncChecks(): Promise<void> {
+  const mkDoc = async (title: string) => {
+    const d = await mfsCreateDoc({ kind: "image", title, fileName: title + ".webp", contentType: "image/webp", size: 10, blobKey: null, sourceUrl: null, source: "manufacturer", sourceRef: "mfr:testmfrimg", by: "mfr test" });
+    if (d) registerFixture("part_documents", d.id);
+    return d!;
+  };
+  const a = await mkDoc("TestMfrImg logo A");
+  const m1 = await mfsSet({ name: "TestMfrImg", documentId: a.id, by: "mfr test" });
+  registerFixture("manufacturers", m1.id);
+  ok(/^MF-[0-9a-f]{10}$/.test(m1.id) && m1.key === "testmfrimg" && m1.imageDocumentId === a.id && m1.imageHistory.length === 0, "mfr images: the first image creates the record lazily, keyed by mfrKey");
+  const b = await mkDoc("TestMfrImg logo B");
+  const m2 = await mfsSet({ name: "Test-Mfr Img", documentId: b.id, by: "mfr test" });
+  ok(m2.id === m1.id && m2.imageDocumentId === b.id && m2.imageHistory[0] === a.id, "mfr images: a second spelling with the same key updates the same record; the old image moves to history");
+  ok((await mfsList()).filter((m) => m.key === "testmfrimg").length === 1, "mfr images: one record per key");
+  const m3 = await mfsRemove("testmfrimg", "mfr test");
+  ok(!!m3 && m3.imageDocumentId === null && m3.imageHistory.slice(0, 2).join() === [b.id, a.id].join(), "mfr images: remove clears the image and keeps it in history");
+  await mfsSet({ name: "TestMfrImg", documentId: b.id, by: "mfr test" });
+  const look = mfsLookup(await mfsList());
+  ok(look("TEST MFR IMG") === b.id && look("Nobody") === null, "mfr images: the lookup matches any spelling with the same key");
+  ok((await mfsByKey("testmfrimg"))?.imageDocumentId === b.id, "mfr images: manufacturerByKey reads the record");
+  const SKU = fixtureId("MFI", "PART-1");
+  await upsertPart({ id: SKU, sku: SKU, desc: "mfr img part", category: "Lighting", unit: "ea", list: 1, cost: 1, mfr: "TestMfrImg" });
+  registerFixture("catalog_parts", SKU);
+  ok(!((await mfsVisible([SKU])).get(SKU)?.length), "mfr images: an unlinked manufacturer image never appears in a part's images");
+  const hits = await mfsSearch("TestMfrImg logo").catch(() => null);
+  ok(hits === null || (hits.ok && !hits.hits.some((h) => h.id === a.id || h.id === b.id)), "mfr images: attach-existing search never offers a manufacturer image");
+  ok(mfsReadFile("src/app/(app)/catalog/documents/actions.ts", "utf8").includes('source !== "manufacturer"'), "mfr images: searchDocumentsAction filters manufacturer-source documents (source check)");
 }
