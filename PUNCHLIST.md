@@ -10497,9 +10497,9 @@ What shipped:
   `/api/racks/[id]/submittal` (Chrome PDFs, schedule.csv, merged datasheets with a gap cover, 00-gaps.txt; `?part=csv`
   for the CSV alone); client packages get `racks/<rack>/` and the D94 spec an Equipment Racks section (27 11 16).
 
-Gates (final head, merged with main): tsc 0; test:specs __SPECS__ PASS / 0 FAIL (baseline 11,159); eslint 0 errors /
+Gates (final head, merged with main): tsc 0; test:specs 11,775 PASS (616 for #296) / 0 FAIL (baseline 11,159); eslint 0 errors /
 89 warnings with `--ignore-pattern scripts/test-review-and-spec.ts` (bare `eslint` crashes on that 46k-line file with a
-react-hooks RangeError — pre-existing on main, flagged separately); `next build` OK; test:smoke __SMOKE__ ALL PASSED.
+react-hooks RangeError — pre-existing on main, flagged separately); `next build` OK; test:smoke 204/204 ALL PASSED.
 Browser (scratch datadir, test parts seeded into the scratch DB only): built a rack by click and drag, half-width
 pairs, a shelf with two half-width receivers, overlap refusal with reason, arrow-key move, undo/redo, Delete, default
 blank + Fill blanks, save/reopen; the Estimator lists it under Racks at the builder's price; the staff submittal page
