@@ -48608,5 +48608,13 @@ async function mfrStoreAsyncChecks(): Promise<void> {
   ok(!((await mfsVisible([SKU])).get(SKU)?.length), "mfr images: an unlinked manufacturer image never appears in a part's images");
   const hits = await mfsSearch("TestMfrImg logo").catch(() => null);
   ok(hits === null || (hits.ok && !hits.hits.some((h) => h.id === a.id || h.id === b.id)), "mfr images: attach-existing search never offers a manufacturer image");
+  const rx = await mkDoc("RaceMfr logo X");
+  const ry = await mkDoc("RaceMfr logo Y");
+  const [r1] = await Promise.all([
+    mfsSet({ name: "RaceMfr", documentId: rx.id, by: "mfr test" }),
+    mfsSet({ name: "Race-Mfr", documentId: ry.id, by: "mfr test" }),
+  ]);
+  registerFixture("manufacturers", r1.id);
+  ok((await mfsList()).filter((m) => m.key === "racemfr").length === 1, "mfr images: two concurrent first-creates for one key leave exactly one record");
   ok(mfsReadFile("src/app/(app)/catalog/documents/actions.ts", "utf8").includes('source !== "manufacturer"'), "mfr images: searchDocumentsAction filters manufacturer-source documents (source check)");
 }

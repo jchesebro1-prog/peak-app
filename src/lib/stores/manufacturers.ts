@@ -1,5 +1,5 @@
 // SERVER ONLY — the manufacturers collection (Manufacturer section Part 1).
-import { randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { listDocs, upsertDoc } from "@/db/doc-store";
 import { mfrKey } from "@/lib/catalog-books";
 
@@ -24,7 +24,8 @@ export type Manufacturer = {
 };
 
 const COLL = "manufacturers" as const;
-const newId = () => "MF-" + randomBytes(5).toString("hex");
+/** Derived from the key, so a duplicate first-create race lands on one row. */
+const idForKey = (key: string) => "MF-" + createHash("sha1").update(key).digest("hex").slice(0, 10);
 
 function clean(raw: Record<string, unknown>): Manufacturer {
   return {
@@ -60,7 +61,7 @@ export async function setManufacturerImage(input: { name: string; documentId: st
   const at = input.at ?? Date.now();
   const cur = await manufacturerByKey(key);
   if (!cur) {
-    return save({ id: newId(), key, name: input.name.trim(), imageDocumentId: input.documentId, imageHistory: [], createdAt: at, updatedAt: at, updatedBy: input.by });
+    return save({ id: idForKey(key), key, name: input.name.trim(), imageDocumentId: input.documentId, imageHistory: [], createdAt: at, updatedAt: at, updatedBy: input.by });
   }
   const history = cur.imageDocumentId && cur.imageDocumentId !== input.documentId ? [cur.imageDocumentId, ...cur.imageHistory] : cur.imageHistory;
   return save({ ...cur, imageDocumentId: input.documentId, imageHistory: history, updatedAt: at, updatedBy: input.by });
