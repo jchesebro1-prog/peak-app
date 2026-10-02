@@ -22,6 +22,9 @@ import { saveProductParagraphAction, upsertSystemIntroAction } from "./narrative
 import type { KeyProductLibrary } from "./use-key-product-library";
 import { MAX_INTRO_TITLE, type SystemIntro } from "@/lib/narrative/intros";
 import NarrativeIntrosModal from "./narrative-intros-modal";
+import SystemLibraryModal from "./system-library-modal";
+import { mergeNarrative, mergeNotice, type MergeOpts } from "@/lib/narrative/merge";
+import type { SystemLibraryEntry } from "@/lib/narrative/system-library";
 
 /**
  * #293 — the narrative column's body (the #281 aside keeps its header and
@@ -66,6 +69,7 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [saveAsTitle, setSaveAsTitle] = useState<string | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [draftAsk, setDraftAsk] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, startBusy] = useTransition();
@@ -138,6 +142,15 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
     });
   };
 
+  /** #293 slice 2: Merge narrative — append-only; never invents a line.
+   *  Applied through onChange (setSections) on the live section. */
+  const applyMerge = (sources: SystemLibraryEntry[], opts: MergeOpts) => {
+    const r = mergeNarrative(sec, sources, opts);
+    if (r.changed) p.onChange((s) => mergeNarrative(s, sources, opts).section);
+    setMergeOpen(false);
+    setNotice(mergeNotice(r));
+  };
+
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -159,7 +172,7 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
           Draft narrative
         </button>
         <div style={{ position: "relative" }}>
-          <button type="button" style={BTN} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)} title="Intro library">⋯</button>
+          <button type="button" style={BTN} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)} title="Narrative library">⋯</button>
           {menuOpen && (
             <div role="menu" style={{ position: "absolute", right: 0, top: "110%", zIndex: 20, background: "#fff", border: "1px solid #ececf0", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,.1)", padding: 4, display: "flex", flexDirection: "column", minWidth: 160 }}>
               <button
@@ -181,6 +194,14 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
                 onClick={() => { setMenuOpen(false); setManageOpen(true); }}
               >
                 Manage intros…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                style={{ ...BTN, background: "transparent", textAlign: "left" }}
+                onClick={() => { setMenuOpen(false); setMergeOpen(true); }}
+              >
+                Merge narrative from library…
               </button>
             </div>
           )}
@@ -205,6 +226,9 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
       {notice && <div style={{ ...HINT, color: "#3a3f4a" }}>{notice}</div>}
       {manageOpen && (
         <NarrativeIntrosModal intros={p.intros} canWrite={p.canWriteLibrary} onIntros={p.onIntros} onClose={() => setManageOpen(false)} />
+      )}
+      {mergeOpen && (
+        <SystemLibraryModal mode="merge" target={sec} onMerge={applyMerge} onClose={() => setMergeOpen(false)} />
       )}
       <select
         value={sec.presentation || "itemized"}

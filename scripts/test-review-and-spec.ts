@@ -43898,3 +43898,19 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   ok(modal.includes('if (e.key === "Escape" && !pending) p.onClose();') && (modal.match(/disabled=\{pending\} onClick=\{p\.onClose\}/g) || []).length >= 3,
     "#293s modal fix: Close, Cancel and Esc are disabled while a Load is in flight, so a cancelled Load can't land after the modal closed");
 }
+
+/* ======================================================================
+   #293 slice 2 — Merge narrative wiring (narrative column ⋯ menu; the
+   card has no ⋯ menu, so the column that owns the narrative hosts it).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  ok(col.includes("Merge narrative from library…") && col.includes('<SystemLibraryModal mode="merge" target={sec}'),
+    "#293s merge UI: ⋯ → Merge narrative from library… opens the library in merge mode for this system");
+  const apply = col.slice(col.indexOf("const applyMerge = "), col.indexOf("return (", col.indexOf("const applyMerge = ")));
+  ok(apply.includes("p.onChange((s) => mergeNarrative(s, sources, opts).section)") && apply.includes("setNotice(mergeNotice(r))") && apply.includes("if (r.changed)"),
+    "#293s merge UI: applies through onChange on the live section (setSections) and reports what was added and skipped");
+  ok(/^"use client";/.test(col) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos|system-library-index|load-system))/m.test(col),
+    "#293s merge UI: the column still imports no server-only module");
+}
