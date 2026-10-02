@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fmt, round2 } from "./pricing";
 import { VENDOR_ATTACHMENT_BUDGET, type VendorDraft, type VendorLineDraft } from "./types";
-import { parseMaterialCsv, parseMoney, VENDOR_CSV_TEMPLATE } from "./material-csv";
+import { parseMaterialCsv, parseMoney, readCsvFile, summarizeCsvErrors, VENDOR_CSV_TEMPLATE } from "./material-csv";
 import { VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 
@@ -299,11 +299,12 @@ export default function VendorQuoteModal({
     : null;
 
   const readCsv = (file: File) => {
-    file.text().then((text) => {
+    // readCsvFile, not file.text(): Excel saves UTF-16 and Windows-1252 too.
+    readCsvFile(file).then((text) => {
       // costOnly: a vendor's list quotes cost, not sell (#143).
       const res = parseMaterialCsv(text, { costOnly: true });
       if (!res.items.length) {
-        setCsvNote(res.errors.join(" ") || "No material rows found in that file.");
+        setCsvNote(summarizeCsvErrors(res.errors) || "No material rows found in that file.");
         return;
       }
       onLoadLines(
@@ -323,7 +324,7 @@ export default function VendorQuoteModal({
       setCsvNote(
         `${res.items.length} material line${res.items.length === 1 ? "" : "s"} added to the list${skipped}.`
       );
-    });
+    }).catch(() => setCsvNote("Could not read that file."));
   };
 
   return (
@@ -527,7 +528,7 @@ export default function VendorQuoteModal({
               Load from CSV
               <input
                 type="file"
-                accept=".csv,text/csv,text/tab-separated-values"
+                accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
                 style={{ display: "none" }}
                 onChange={(e) => {
                   const input = e.currentTarget;

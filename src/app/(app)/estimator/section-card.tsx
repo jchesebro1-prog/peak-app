@@ -22,7 +22,7 @@ import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { isLaborLineEditable } from "./labor-group";
 import CatalogPicker from "./catalog-picker";
 import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
-import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "./material-csv";
+import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, readCsvFile, summarizeCsvErrors, type ImportedMaterial } from "./material-csv";
 import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
 
 /**
@@ -1438,17 +1438,18 @@ export default function SectionCard(p: SectionCardProps) {
                       Select CSV file
                       <input
                         type="file"
-                        accept=".csv,text/csv,text/tab-separated-values"
+                        accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
                         style={{ display: "none" }}
                         onChange={(event) => {
                           const input = event.currentTarget;
                           const file = input.files?.[0];
                           if (!file) return;
-                          file.text().then(async (text) => {
+                          // readCsvFile, not file.text(): Excel saves UTF-16 and Windows-1252 too.
+                          readCsvFile(file).then(async (text) => {
                             const result = parseMaterialCsv(text);
                             input.value = "";
                             if (!result.items.length) {
-                              setImportMessage(result.errors.join(" "));
+                              setImportMessage(summarizeCsvErrors(result.errors) || "No material rows found in that file.");
                               return;
                             }
                             setImportMessage("Importing\u2026");
@@ -1460,6 +1461,9 @@ export default function SectionCard(p: SectionCardProps) {
                             } catch {
                               setImportMessage(`Import failed; nothing was added${skipped}.`);
                             }
+                          }).catch(() => {
+                            input.value = "";
+                            setImportMessage("Could not read that file.");
                           });
                         }}
                       />

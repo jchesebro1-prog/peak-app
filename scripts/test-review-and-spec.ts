@@ -207,7 +207,7 @@ import {
   assemblyUnitTotals,
   resolveFixtureAssemblies,
 } from "@/lib/fixture-assemblies";
-import { MATERIAL_CSV_TEMPLATE, VENDOR_CSV_TEMPLATE, parseMaterialCsv, parseMoney } from "@/app/(app)/estimator/material-csv";
+import { MATERIAL_CSV_TEMPLATE, VENDOR_CSV_TEMPLATE, decodeCsvBytes, parseMaterialCsv, parseMoney, summarizeCsvErrors } from "@/app/(app)/estimator/material-csv";
 import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import {
   GRID_SHEET_MAX_BYTES,
@@ -785,6 +785,44 @@ ok(
   "#143 a SKU cannot stand in for a missing amount in costOnly mode — a $0 row would deflate the vendor total"
 );
 ok(parseMoney("$12,450.00") === 12450 && !Number.isFinite(parseMoney("abc")), "#143 money parses as printed on a vendor quote");
+/* --- vendor/material CSV saved from Excel --- */
+// File.text() decoded every one of these as UTF-8: Excel's "UTF-16 Unicode
+// Text" save came back with a NUL between characters, so every amount was NaN
+// and every row was rejected with the same sentence.
+const excelRows = [
+  ["description", "quantity", "unit", "amount"],
+  ['"1/4in wire rope, 7x19 galvanized"', "120", "ft", "222.00"],
+  ['"Shackle, 3/8in screw pin"', "40", "ea", "168.00"],
+  ["Turnbuckle", "8", "ea", "96.00"],
+];
+const excelText = (delim: string, eol: string) => excelRows.map((r) => r.join(delim)).join(eol) + eol;
+const excelParse = (buf: Buffer) => parseMaterialCsv(decodeCsvBytes(buf), { costOnly: true });
+const utf16Tabbed = excelParse(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(excelText("\t", "\r\n"), "utf16le")]));
+ok(
+  utf16Tabbed.items.length === 3 && utf16Tabbed.errors.length === 0 &&
+    utf16Tabbed.items[0]?.qty === 120 && utf16Tabbed.items[0]?.cost === 222,
+  "Excel UTF-16 Unicode Text (LE BOM, tab-delimited, CRLF) loads every row"
+);
+ok(excelParse(Buffer.from(excelText("\t", "\r\n"), "utf16le")).items.length === 3, "UTF-16LE without a BOM is sniffed and loads every row");
+ok(
+  excelParse(Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(excelText(",", "\r\n"), "utf16le").swap16()])).items.length === 3,
+  "UTF-16BE with a BOM loads every row"
+);
+ok(
+  excelParse(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(excelText(",", "\r\n"), "utf8")])).items.length === 3,
+  "Excel CSV UTF-8 (BOM, CRLF) loads every row"
+);
+ok(excelParse(Buffer.from(excelText(",", "\r"), "utf8")).items.length === 3, "Excel Macintosh CSV (bare \\r line endings) loads every row");
+const cp1252 = excelParse(Buffer.from(excelText(",", "\r\n").replace("Turnbuckle", "Turnbuckle café"), "latin1"));
+ok(
+  cp1252.items.length === 3 && cp1252.items[2]?.desc.includes("é") === true,
+  "Excel's plain Comma Separated Values (Windows-1252) keeps an é in a description"
+);
+const sameReason = summarizeCsvErrors([2, 3, 4].map((n) => `Row ${n}: a description with a positive amount, plus a positive quantity, are required.`));
+ok(
+  sameReason.split("Row 2").length === 2 && !sameReason.includes("Row 3") && sameReason.includes("2 more rows") && summarizeCsvErrors([]) === "",
+  "summarizeCsvErrors says a repeated row error once, with a count of the rest"
+);
 const freightSec: EstimatorSpecSection = {
   id: "sys1", name: "Rigging", kind: "materials", mfr: "", freightPct: 10,
   items: [

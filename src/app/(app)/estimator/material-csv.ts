@@ -90,6 +90,71 @@ export function parseMoney(value: string): number {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+/**
+ * Bytes → text the way Excel actually saves a CSV. `File.text()` always
+ * decodes UTF-8, which turns Excel's "UTF-16 Unicode Text" save (tab-
+ * delimited, UTF-16LE with an FF FE BOM) into a NUL between every character:
+ * the header still matches, but every quantity and amount reads as NaN and
+ * every row is rejected. Excel's plain "Comma Separated Values" save is
+ * Windows-1252, not UTF-8, so an "é" would otherwise come out as "�".
+ */
+export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let text: string;
+  if (b.length >= 2 && b[0] === 0xff && b[1] === 0xfe) {
+    text = new TextDecoder("utf-16le").decode(b.subarray(2));
+  } else if (b.length >= 2 && b[0] === 0xfe && b[1] === 0xff) {
+    text = new TextDecoder("utf-16be").decode(b.subarray(2));
+  } else if (b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) {
+    text = new TextDecoder("utf-8").decode(b.subarray(3));
+  } else {
+    // No BOM: UTF-16 text that is mostly ASCII has a zero in every other byte.
+    const sample = b.subarray(0, Math.min(b.length, 512));
+    let evenZero = 0;
+    let oddZero = 0;
+    for (let i = 0; i < sample.length; i++) {
+      if (sample[i] === 0) {
+        if (i % 2) oddZero++;
+        else evenZero++;
+      }
+    }
+    const pairs = Math.floor(sample.length / 2);
+    const le = pairs > 0 && oddZero / pairs >= 0.3 && evenZero / pairs < 0.1;
+    const be = pairs > 0 && evenZero / pairs >= 0.3 && oddZero / pairs < 0.1;
+    if (le) text = new TextDecoder("utf-16le").decode(b);
+    else if (be) text = new TextDecoder("utf-16be").decode(b);
+    else {
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(b);
+      } catch {
+        text = new TextDecoder("windows-1252").decode(b);
+      }
+    }
+  }
+  return text.replace(/^\ufeff/, "");
+}
+
+/** Read an uploaded CSV through decodeCsvBytes instead of `File.text()`. */
+export function readCsvFile(file: Blob): Promise<string> {
+  return file.arrayBuffer().then(decodeCsvBytes);
+}
+
+/**
+ * One message for a file whose rows were all rejected. Joining every row's
+ * error repeated the same sentence once per row — on an Excel save that
+ * failed every row, a wall of identical text that hid the one real problem.
+ */
+export function summarizeCsvErrors(errors: string[]): string {
+  if (!errors.length) return "";
+  if (errors.length === 1) return errors[0];
+  const more = errors.length - 1;
+  const reason = (e: string) => e.replace(/^Row \d+:\s*/, "");
+  const same = errors.every((e) => reason(e) === reason(errors[0]));
+  return same
+    ? `${errors[0]} (${more} more row${more === 1 ? "" : "s"} with the same kind of problem.)`
+    : `${errors[0]} (+${more} more row${more === 1 ? "" : "s"} skipped.)`;
+}
+
 export type MaterialCsvOptions = {
   /**
    * #143: a vendor's own material list quotes COST, not sell. In that mode a
@@ -102,7 +167,11 @@ export type MaterialCsvOptions = {
 };
 
 export function parseMaterialCsv(text: string, opts: MaterialCsvOptions = {}): MaterialCsvResult {
-  const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
+  // Excel's "Macintosh CSV" save ends lines with a bare \r.
+  const lines = String(text || "")
+    .replace(/^\ufeff/, "")
+    .split(/\r\n|\r|\n/)
+    .filter((line) => line.trim());
   if (lines.length < 2) return { items: [], errors: ["Choose a CSV with a header row and at least one material row."] };
   const delimiter = lines[0].includes("\t") ? "\t" : ",";
   const headers = splitLine(lines[0], delimiter);
