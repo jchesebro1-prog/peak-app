@@ -94,7 +94,7 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
             setNotice(NO_LIBRARY);
             return;
           }
-          if (okSkus.some((s) => !(s in rows))) {
+          if (okSkus.some((s) => !Object.hasOwn(rows, s))) {
             setNotice(NO_LIBRARY);
             return;
           }

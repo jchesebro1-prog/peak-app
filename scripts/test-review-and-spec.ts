@@ -43520,7 +43520,7 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
   ok(doSave.includes("library.setRow(kp.sku, { ...row, paragraph: out.stale.paragraph, paragraphUpdatedAt: out.stale.updatedAt })"),
     "#293 fix Save to library: a stale answer refreshes the cached row (chip + Use library text)");
   const draftSrc = col.slice(col.indexOf("const draft = "), col.indexOf("const saveAsIntro = "));
-  ok(draftSrc.includes("await p.library.refresh(okSkus)") && draftSrc.includes("okSkus.some((s) => !(s in rows))") && col.includes('const NO_LIBRARY = "Could not load the library";') &&
+  ok(draftSrc.includes("await p.library.refresh(okSkus)") && draftSrc.includes("okSkus.some((s) => !Object.hasOwn(rows, s))") && col.includes('const NO_LIBRARY = "Could not load the library";') &&
      draftSrc.indexOf("setNotice(NO_LIBRARY)") > -1 && draftSrc.indexOf("setNotice(NO_LIBRARY)") < draftSrc.indexOf("draftNarrative("),
     "#293 fix Draft: force-refreshes the library and aborts (no write) with “Could not load the library” when any sku has no row");
   const refreshSrc = hook.slice(hook.indexOf("const refresh = useCallback("), hook.indexOf("const setRow = useCallback("));
@@ -43546,4 +43546,21 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
   };
   ok(Object.values(clients).every((src) => /^"use client";/.test(src) && !clientImportsServer(src)) && !clientImportsServer(card) && !clientImportsServer(cli),
     "#293 fix: narrative-column.tsx and every #293 client module value-import no store, db, blob, session or server-only narrative module");
+}
+
+/* #293 slice 1 — final review fixes (round 2): the sku cap agrees with the
+   star, and "is the row loaded" checks ignore inherited property names. */
+import { isKeyProductEligible as n293gEligible, keyProductStar as n293gStar } from "@/app/(app)/estimator/narrative";
+import type { SpecItem as N293gItem, SpecSection as N293gSec } from "@/app/(app)/estimator/types";
+{
+  const line = (sku: string): N293gItem => ({ id: 1, sku, desc: "Line", qty: 1, unit: "ea", cost: 10, price: 20 } as N293gItem);
+  const section: N293gSec = { id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [] } as N293gSec;
+  ok(n293gEligible(line("A".repeat(128))) && n293gStar(section, line("A".repeat(128))) === "off", "#293 fix sku cap: a 128-char sku is still eligible");
+  ok(!n293gEligible(line("A".repeat(129))) && n293gStar(section, line("A".repeat(129))) === "none",
+    "#293 fix sku cap: a 129-char sku is not eligible (star none), so a starred block can't vanish on save");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const colSrc = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const cliSrc = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(colSrc.includes("!Object.hasOwn(rows, s)") && !colSrc.includes("(s in rows)") && cliSrc.includes("Object.hasOwn(kpLib.rows, sku)") && !cliSrc.includes("sku in kpLib.rows"),
+    "#293 fix: row-loaded checks use Object.hasOwn (an sku named like an inherited property is not a loaded row)");
 }

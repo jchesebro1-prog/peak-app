@@ -70,7 +70,13 @@ export type ParagraphSaveResponse =
   | { ok: true; row: KeyProductLibraryRow }
   | { ok: false; error: string; stale?: { paragraph: string | null; updatedAt: number | null } };
 
-const skuOf = (it: Pick<SpecItem, "sku"> | null | undefined): string => (it && typeof it.sku === "string" ? it.sku.trim() : "");
+/** sanitizeKeyProducts caps a stored sku at this length, so a longer one can
+ *  never round-trip a save — such a line is not eligible (no star). */
+const MAX_SKU = 128;
+const skuOf = (it: Pick<SpecItem, "sku"> | null | undefined): string => {
+  const s = it && typeof it.sku === "string" ? it.sku.trim() : "";
+  return s.length > MAX_SKU ? "" : s;
+};
 
 /** A line that can be featured: a real sku, and not labor / overhead /
  *  travel / the Rewards credit / an option (options print under Optional
@@ -121,7 +127,7 @@ export function sanitizeKeyProducts(raw: unknown): KeyProduct[] {
     if (!r || typeof r !== "object" || Array.isArray(r)) continue;
     const o = r as Record<string, unknown>;
     const lineKey = strOf(o.lineKey).trim().slice(0, 32);
-    const sku = strOf(o.sku).trim().slice(0, 128);
+    const sku = strOf(o.sku).trim().slice(0, MAX_SKU);
     if (!lineKey || !sku || keys.has(lineKey) || skus.has(sku)) continue;
     keys.add(lineKey);
     skus.add(sku);

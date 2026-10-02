@@ -2489,7 +2489,7 @@ export default function EstimatorClient({
     const sku = it ? it.sku.trim() : "";
     const text = (sku && kpLib.rows[sku]?.paragraph) || "";
     updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));
-    if (!sku || sku in kpLib.rows) return;
+    if (!sku || Object.hasOwn(kpLib.rows, sku)) return;
     void kpLib
       .ensure([sku])
       .then((rows) => {
