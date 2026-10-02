@@ -21,13 +21,25 @@ const fullnessOf = (v: string): CurtainRequest["fullness"] => (FULLNESS as reado
  * The modal draft for an existing curtain line: curtainInputs, else the parsed
  * desc, else the name only (W/H blank). `fabrics` (optional) lets a legacy
  * line's printed fabric name resolve back to its SKU instead of falling back
- * to the default fabric.
+ * to the default fabric. A stored vendor cost seeds the override. A legacy
+ * line (no curtainInputs) whose stored cost differs from `makeItCost(draft)`
+ * (the Estimator's computeCurtain cost) seeds the override with that stored
+ * cost, so Update curtain never silently re-prices it.
  */
 export function curtainDraftFromLine(
   it: SpecItem,
   fallbackFabric: string,
-  fabrics: ReadonlyArray<{ sku: string; name: string }> = []
+  fabrics: ReadonlyArray<{ sku: string; name: string }> = [],
+  makeItCost?: (d: CurtainDraft) => number
 ): CurtainDraft {
+  const d = curtainDraftOf(it, fallbackFabric, fabrics);
+  if (it.curtainInputs || !makeItCost) return d;
+  const cost = Number(it.cost);
+  if (!Number.isFinite(cost) || cost <= 0 || Math.abs(makeItCost(d) - cost) < 0.005) return d;
+  return { ...d, vendorCostOverride: String(cost) };
+}
+
+function curtainDraftOf(it: SpecItem, fallbackFabric: string, fabrics: ReadonlyArray<{ sku: string; name: string }>): CurtainDraft {
   const qty = String(Math.max(1, Math.round(Number(it.qty)) || 1));
   const ci = it.curtainInputs;
   const finishes = {
@@ -36,7 +48,11 @@ export function curtainDraftFromLine(
     mountType: ci && isMountTypeId(ci.mountType) ? ci.mountType : ASSUMED_MOUNT,
   };
   const base = { hang: "Pipe", bottom: "Chain", qty, ...finishes };
-  if (ci) return { ...base, name: ci.name || "", fabric: ci.fabricSku || fallbackFabric, width: String(ci.width ?? ""), height: String(ci.height ?? ""), fullness: fullnessOf(String(ci.fullness ?? "0")) };
+  if (ci) {
+    const d: CurtainDraft = { ...base, name: ci.name || "", fabric: ci.fabricSku || fallbackFabric, width: String(ci.width ?? ""), height: String(ci.height ?? ""), fullness: fullnessOf(String(ci.fullness ?? "0")) };
+    if (typeof ci.vendorCost === "string" && ci.vendorCost.trim()) d.vendorCostOverride = ci.vendorCost.trim();
+    return d;
+  }
   const p = parseEstimatorCurtainDesc(it.desc || "", new Set(fabrics.map((f) => f.name)));
   if (p) {
     const fabric = fabrics.find((f) => f.name === p.fabricName)?.sku || fallbackFabric;
@@ -61,12 +77,15 @@ export function curtainInputsOf(d: CurtainDraft, fab: { sku: string; name: strin
   if (isTopFinish(d.topFinish)) curtainInputs.topFinish = d.topFinish;
   if (isBottomFinish(d.bottomFinish)) curtainInputs.bottomFinish = d.bottomFinish;
   if (isMountTypeId(d.mountType)) curtainInputs.mountType = d.mountType;
+  // Staff-only: the vendor cost Update curtain re-prices at (never in a customer cart).
+  const vendorCost = (d.vendorCostOverride ?? "").trim();
+  if (vendorCost) curtainInputs.vendorCost = vendorCost;
   return curtainInputs;
 }
 
 /**
- * The curtain line Update curtain writes — the same line addCurtain builds
- * inline (estimator-client.tsx; harness-pinned there), desc format included.
+ * The one curtain line builder: addCurtain (estimator-client.tsx) and Update
+ * curtain both write through it, desc format included.
  */
 export function curtainItem(d: CurtainDraft, c: Pick<CurtainCalc, "fab" | "costEach" | "priceEach">, ids: { id: number; sku: string; trackKey?: string }): SpecItem {
   const name = (d.name || "").trim();
@@ -97,7 +116,9 @@ export function applyCurtainEdit(sec: SpecSection, lineId: number, item: SpecIte
   if (!track) return next;
   const at = next.items.findIndex((it) => it.id === lineId);
   const curtain = next.items[at];
-  const key = curtain.curtainTrackKey || newCurtainTrackKey(lineId);
+  // Only called when the curtain has no linked track: a key it still carries
+  // may be stale or shared, so mint its own.
+  const key = newCurtainTrackKey(lineId);
   const items = next.items.slice();
   items[at] = { ...curtain, curtainTrackKey: key };
   items.splice(at + 1, 0, { ...track, curtainTrackKey: key });

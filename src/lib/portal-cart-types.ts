@@ -24,6 +24,9 @@ export type CurtainRequest = {
   bottomFinish?: CurtainBottomFinish;
   /** Used only when no track is linked. */
   mountType?: CurtainMountTypeId;
+  /** #292 — staff Estimator only: the line's Rose Brand vendor cost (each), kept so Update curtain re-prices at it.
+   *  Never copied into a customer cart (cleanCurtainRequest whitelists fields; cartLinesFromSpec strips it). */
+  vendorCost?: string;
 };
 
 export type CartLine = {

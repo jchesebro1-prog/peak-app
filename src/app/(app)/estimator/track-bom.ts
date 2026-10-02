@@ -7,6 +7,7 @@ import {
   type TrackRole,
   type TrackSeries,
 } from "@/lib/track-series";
+import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { round2 } from "./pricing";
 import { catalogAddPrice, seedMarginOf } from "./tier-reprice";
 import type { CurtainDraft, SpecItem, SpecSection, TrackDraft, TrackPart } from "./types";
@@ -199,9 +200,11 @@ export function replaceTrackLine(sec: SpecSection, lineId: number, item: Omit<Sp
 /**
  * #292 Update curtain: the curtain line `lineId` replaced IN PLACE by `item`
  * (re-priced at today's rates). Kept from the old line: id, lineOrder, SKU,
- * customer comment, internal note, optional flag, curtain-track key, spec key,
- * and por / portalConfirm (clearPricedPor still decides those on Save). A line
- * no longer there is appended instead. Pure.
+ * customer comment, internal note, optional flag, curtain-track key, a
+ * user-pinned spec key (one that differs from the old name's derived key — a
+ * name-derived key follows the new name instead), and por / portalConfirm
+ * (clearPricedPor still decides those on Save). A line no longer there is
+ * appended instead. Pure.
  */
 export function replaceCurtainLine(sec: SpecSection, lineId: number, item: SpecItem): SpecSection {
   const at = sec.items.findIndex((it) => it.id === lineId);
@@ -209,10 +212,13 @@ export function replaceCurtainLine(sec: SpecSection, lineId: number, item: SpecI
   const old = sec.items[at];
   const next: SpecItem = { ...item, id: old.id, sku: old.sku || item.sku };
   if (typeof old.lineOrder === "number") next.lineOrder = old.lineOrder;
-  for (const k of ["comment", "internalNote", "curtainTrackKey", "specKey"] as const) {
+  for (const k of ["comment", "internalNote", "curtainTrackKey"] as const) {
     if (old[k]) next[k] = old[k];
     else delete next[k];
   }
+  const oldName = old.curtainInputs?.name ?? (old.desc || "").split(" — ")[0].trim();
+  if (old.specKey && old.specKey !== curtainSpecKey(undefined, oldName)) next.specKey = old.specKey;
+  else if (!item.specKey) delete next.specKey;
   for (const k of ["option", "por", "portalConfirm"] as const) {
     if (old[k]) next[k] = true;
     else delete next[k];

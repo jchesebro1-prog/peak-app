@@ -131,7 +131,8 @@ import {
   trackLine,
   type CurtainTrackPrefill,
 } from "./track-bom";
-import { applyCurtainEdit, curtainDraftFromLine, curtainInputsOf, curtainItem } from "./curtain-line";
+import { applyCurtainEdit, curtainDraftFromLine, curtainItem } from "./curtain-line";
+import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/curtain-cut-sheets/vocab";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
 import VendorQuoteModal, {
   vendorDraftTotal,
@@ -243,9 +244,9 @@ const freshCurtain = (fabricSku: string): CurtainDraft => ({
   width: "",
   fullness: "50",
   bottom: "Chain",
-  topFinish: "grommets",
-  bottomFinish: "chain",
-  mountType: "tie-batten",
+  topFinish: DEFAULT_TOP_FINISH,
+  bottomFinish: DEFAULT_BOTTOM_FINISH,
+  mountType: ASSUMED_MOUNT,
 });
 
 const freshFixture = (): FixtureDraft => {
@@ -2036,7 +2037,7 @@ export default function EstimatorClient({
     if (!it?.curtain) return;
     const linked = linkCurtainTracks(sections).links.get(it);
     closeInput();
-    curtainEditRef.current = { lineId, draft: curtainDraftFromLine(it, defaultFabric, fabrics), linkedTrack: linked?.track ? String(linked.track.mounting) : null };
+    curtainEditRef.current = { lineId, draft: curtainDraftFromLine(it, defaultFabric, fabrics, (d) => computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined).costEach), linkedTrack: linked?.track ? String(linked.track.mounting) : null };
     openInputMethod("curtain", secId);
   };
 
@@ -2290,9 +2291,6 @@ export default function EstimatorClient({
       closeInput();
       return;
     }
-    let qty = parseInt(d.qty, 10);
-    if (isNaN(qty) || qty < 1) qty = 1;
-    const dims = (parseFloat(d.width) || 0) + "'W × " + (parseFloat(d.height) || 0) + "'H";
     const idN = nextId();
     const skuN = nextId();
     if (track) track.id = nextId();
@@ -2301,16 +2299,8 @@ export default function EstimatorClient({
     if (track) track.curtainTrackKey = key;
     pushItems(secId, [
       {
-        id: idN,
-        sku: "CRT-" + skuN,
-        desc: name + " — " + c.fab.name + ", " + dims + ", " + d.fullness + "% fullness",
-        qty,
-        unit: "ea",
-        cost: c.costEach,
-        price: c.priceEach,
+        ...curtainItem(d, c, { id: idN, sku: "CRT-" + skuN, trackKey: key }),
         curtain: true,
-        curtainInputs: curtainInputsOf(d, c.fab),
-        curtainTrackKey: key,
         specKey: curtainSpecKey(undefined, name) || undefined,
       },
       ...(track ? [track] : []),

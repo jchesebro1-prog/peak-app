@@ -43480,6 +43480,82 @@ import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292Repla
   ok(/cleanCurtainFinishes\(/.test(rd292c("src/app/(app)/design/grid/[id]/actions.ts")), "#292 source: placeCurtainAction validates finishes/mount through cleanCurtainFinishes");
 }
 
+// ---- #292 task 7 fix round 1: vendor cost survives Update, one curtain line builder, key/specKey edge cases ----
+import { computeCurtain as c292Compute } from "@/app/(app)/estimator/pricing";
+import { cleanCurtainRequest as c292CleanReq } from "@/lib/portal-cart-rules";
+import { cartLinesFromSpec as c292CartLines } from "@/lib/portal-pricing";
+import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
+{
+  const SK_MAIN = c292SpecKey(undefined, "Main Drape");
+  const SK_BORDER = c292SpecKey(undefined, "Border 1");
+  const fabs = [{ sku: "T292-FAB", name: "Charisma Velour 25 oz", costPerSqft: 0, curtainAreaRate: 2 }];
+  const sew = { sewingPct: 10 };
+  const mk = (d: Parameters<typeof c292Compute>[0]) => c292Compute(d, fabs, sew, 0.3).costEach;
+  const base = { name: "Main Drape", hang: "Pipe", fabric: "T292-FAB", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
+
+  // 1. a Rose Brand vendor cost round-trips draft → line → Edit → Update with the same cost and price
+  const vd = { ...base, vendorCostOverride: "412.5" };
+  const vc = c292Compute(vd, fabs, sew, 0.3);
+  const vItem = c292Item(vd, vc, { id: 7, sku: "CRT-8" });
+  const vBack = c292DraftFrom(vItem, "FAB-X", fabs, mk);
+  const vc2 = c292Compute(vBack, fabs, sew, 0.3);
+  const vItem2 = c292Item(vBack, vc2, { id: 7, sku: "CRT-8" });
+  ok(vc.costEach === 412.5 && vItem.curtainInputs?.vendorCost === "412.5" && vBack.vendorCostOverride === "412.5" && vItem2.cost === vItem.cost && vItem2.price === vItem.price && vItem2.curtainInputs?.vendorCost === "412.5",
+    "#292 fix: a vendor cost override round-trips draft → line → Update with identical cost and price");
+  ok(c292Item(base, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined && c292Item({ ...base, vendorCostOverride: "  " }, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined,
+    "#292 fix: a blank vendor cost stores nothing");
+
+  // legacy lines (no curtainInputs): a stored cost that isn't today's make-it cost is kept as the override
+  const legacyCost = 999.99;
+  const legacyLine: C292Item = { id: 3, sku: "CRT-3", desc: C292_DESC, qty: 2, unit: "ea", cost: legacyCost, price: 1428.56, curtain: true };
+  const lDraft = c292DraftFrom(legacyLine, "FAB-X", fabs, mk);
+  const lItem = c292Item(lDraft, c292Compute(lDraft, fabs, sew, 0.3), { id: 3, sku: "" });
+  ok(lDraft.vendorCostOverride === String(legacyCost) && lItem.cost === legacyCost,
+    "#292 fix: a legacy line whose cost ≠ the computed make-it cost keeps its cost after Update");
+  const sameCost = mk({ ...base, fabric: "T292-FAB" });
+  const lSame = c292DraftFrom({ ...legacyLine, cost: sameCost }, "FAB-X", fabs, mk);
+  ok(lSame.vendorCostOverride === undefined && lSame.fabric === "T292-FAB", "#292 fix: a legacy line already at today's make-it cost gets no override");
+  ok(c292DraftFrom(legacyLine, "FAB-X", fabs).fabric === "T292-FAB" && c292DraftFrom(legacyLine, "FAB-X").fabric === "FAB-X",
+    "#292 fix: a legacy line's printed fabric name resolves back to its SKU when fabrics are passed (default fabric otherwise)");
+
+  // the portal never sees a vendor cost
+  const clean = c292CleanReq({ name: "Main", fabricSku: "T292-FAB", qty: 1, width: "20", height: "18", fullness: "50", vendorCost: "5", topFinish: "hem" }, fabs);
+  ok(clean.ok && !("vendorCost" in clean.curtain) && !("topFinish" in clean.curtain), "#292 fix: cleanCurtainRequest drops vendorCost (and the staff finishes)");
+  const cartLines = c292CartLines([c292Sec("s", [{ ...vItem, id: 7 }])]);
+  ok(cartLines.length === 1 && !!cartLines[0].curtainInputs && !("vendorCost" in cartLines[0].curtainInputs) && cartLines[0].curtainInputs.width === "21.5" && vItem.curtainInputs?.vendorCost === "412.5",
+    "#292 fix: cartLinesFromSpec strips vendorCost from a staff curtain line (source line untouched)");
+
+  // 2. the add path builds its line through curtainItem — identical to the pre-#292 inline line
+  const ac = c292Compute(base, fabs, sew, 0.3);
+  const added = { ...c292Item(base, ac, { id: 11, sku: "CRT-12", trackKey: undefined }), curtain: true, specKey: c292SpecKey(undefined, "Main Drape") || undefined };
+  const oldDesc = "Main Drape" + " — " + ac.fab.name + ", " + (parseFloat(base.width) || 0) + "'W × " + (parseFloat(base.height) || 0) + "'H, " + base.fullness + "% fullness";
+  ok(added.desc === oldDesc && added.desc === C292_DESC && added.qty === 2 && added.unit === "ea" && added.cost === ac.costEach && added.price === ac.priceEach && added.id === 11 && added.sku === "CRT-12" && !!SK_MAIN && added.specKey === SK_MAIN && !("curtainTrackKey" in added),
+    "#292 fix: a freshly added curtain line keeps the pre-#292 desc/qty/cost/price (no track → no key)");
+  const qtyBad = c292Item({ ...base, qty: "0" }, ac, { id: 1, sku: "CRT-2" });
+  ok(qtyBad.qty === 1 && c292Item(base, ac, { id: 1, sku: "CRT-2", trackKey: "ct-1" }).curtainTrackKey === "ct-1", "#292 fix: curtainItem clamps qty to 1 and keys a tracked add");
+  const estSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const addSrc = estSrc.slice(estSrc.indexOf("const addCurtain = "), estSrc.indexOf("const setFixture = "));
+  ok(/\.\.\.curtainItem\(d, c, \{ id: idN, sku: "CRT-" \+ skuN, trackKey: key \}\)/.test(addSrc) && !/desc: name \+/.test(addSrc), "#292 source: addCurtain builds its line through curtainItem (no inline desc)");
+
+  // 3. rename: a name-derived specKey follows the new name; a pinned one stays
+  const derivedOld: C292Item = { ...vItem, id: 41, specKey: c292SpecKey(undefined, "Main Drape") || undefined };
+  const renamed = c292Item({ ...base, name: "Border 1" }, ac, { id: 41, sku: "" });
+  renamed.specKey = c292SpecKey(undefined, "Border 1") || undefined;
+  const r1 = c292ReplaceCurtain(c292Sec("s", [derivedOld]), 41, renamed).items[0];
+  const r2 = c292ReplaceCurtain(c292Sec("s", [{ ...derivedOld, specKey: "Pinned" }]), 41, renamed).items[0];
+  const r3 = c292ReplaceCurtain(c292Sec("s", [derivedOld]), 41, { ...renamed, specKey: undefined }).items[0];
+  const r4 = c292ReplaceCurtain(c292Sec("s", [{ ...derivedOld, specKey: undefined }]), 41, renamed).items[0];
+  ok(!!SK_BORDER && SK_BORDER !== SK_MAIN && derivedOld.specKey === SK_MAIN && r1.specKey === SK_BORDER && r2.specKey === "Pinned" && !("specKey" in r3) && r4.specKey === SK_BORDER,
+    "#292 fix: rename re-derives a name-derived specKey, keeps a pinned one");
+  const legacyRename = c292ReplaceCurtain(c292Sec("s", [{ ...legacyLine, id: 41, specKey: SK_MAIN ?? undefined }]), 41, renamed).items[0];
+  ok(legacyRename.specKey === SK_BORDER, "#292 fix: a legacy line's derived specKey (name read from its desc) follows a rename");
+
+  // Add track while editing mints the curtain's own key, never a stale/shared one
+  const stale = c292ApplyEdit(c292Sec("s", [{ ...vItem, id: 50, curtainTrackKey: "ct-7" }, { id: 7, curtain: true, curtainTrackKey: "ct-7" }]), 50, { ...vItem }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(stale.items[0].curtainTrackKey === "ct-50" && stale.items[1].id === 99 && stale.items[1].curtainTrackKey === "ct-50" && stale.items[2].curtainTrackKey === "ct-7",
+    "#292 fix: Add track while editing mints ct-<line id> instead of reusing a stale or shared key");
+}
+
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert } = await import("@/lib/stores/catalog");
