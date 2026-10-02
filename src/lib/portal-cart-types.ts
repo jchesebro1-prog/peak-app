@@ -5,6 +5,8 @@
  * from the catalog index each time the cart is priced.
  */
 
+import type { CurtainBottomFinish, CurtainMountTypeId, CurtainTopFinish } from "@/lib/curtain-cut-sheets/vocab";
+
 /** A customer's curtain request — free-text dimensions, always price on request. */
 export type CurtainRequest = {
   name: string;
@@ -17,6 +19,11 @@ export type CurtainRequest = {
   width: string;
   height: string;
   fullness: "0" | "50" | "75" | "100";
+  /** #292 — staff Estimator only; the portal never sets these and cleanCurtainRequest never copies them into a cart. */
+  topFinish?: CurtainTopFinish;
+  bottomFinish?: CurtainBottomFinish;
+  /** Used only when no track is linked. */
+  mountType?: CurtainMountTypeId;
 };
 
 export type CartLine = {

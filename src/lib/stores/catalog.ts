@@ -95,6 +95,8 @@ export type CatalogPart = {
    *  the catalog part editor or imported as "Fabric $/sq ft"; read only
    *  through fabricAreaRateOf. Distinct from raw costPerSqft. */
   curtainAreaRate?: number;
+  /** #292 — Fabric parts only: flame rating as printed on cut sheets (e.g. "NFPA 701 (IFR)"), ≤ 120 chars. Written only through mergeUpsert. */
+  flameRating?: string;
   /** Labor rows — 'RIG' | 'LIG' | 'AUD' | 'VID' picks the rate set. */
   discipline?: string;
   /** Labor rows — 'labor' | 'ot' | 'sup' | 'shop' | 'travel' | 'equip'. */

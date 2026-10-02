@@ -92,6 +92,8 @@ export type SpecItem = {
   laborTravel?: LaborTravelKind;
   /** #270: links a mobilization line and its travel lines (same key). */
   laborMobKey?: string;
+  /** #292: shared by a curtain line and the track line that hangs it (laborMobKey idiom) — "ct-<curtain line id at add time>". */
+  curtainTrackKey?: string;
   /** #269: every line one "Add labor" inserted shares this id; the draft
    *  that built them is `SpecSection.laborGroups[id]` (labor-group.ts). */
   laborGroup?: string;

@@ -9,6 +9,8 @@
 // Type-only — catalog-connect is itself pure/dependency-free, so this never
 // drags anything heavier into the client bundle (erased at compile time).
 import type { Port } from "@/lib/catalog-connect";
+// Type-only (#292) — vocab.ts imports GridCurtainType back, also type-only.
+import type { CurtainBottomFinish, CurtainMountTypeId, CurtainTopFinish } from "@/lib/curtain-cut-sheets/vocab";
 // Type-only, and curtain-geom is the CUSTOMER-SAFE mirror (no cost basis, no
 // margin) - importing it here keeps this module client-safe.
 import type { CurtainSpec } from "@/lib/curtain-geom";
@@ -133,6 +135,10 @@ export type GridCurtain = {
    *  records design §6) — set when a designer needs a drape kind the name/
    *  type keywords don't resolve to. */
   specKey?: string;
+  /** #292 — cut-sheet finishes + mount, set by the drop dialog; absent = GRID_CURTAIN_DEFAULTS for the type. */
+  topFinish?: CurtainTopFinish;
+  bottomFinish?: CurtainBottomFinish;
+  mountType?: CurtainMountTypeId;
 };
 
 /** Placement slice the curtain BOM needs. */

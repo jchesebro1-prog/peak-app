@@ -42905,3 +42905,85 @@ import { showQuotedBeforeShelf as s290Shelf, parseCatalogParams as s290Params } 
   ok(s290Shelf(s290Params({ dept: "lighting" })) === true, "#290 shelf: a part department still shows it");
   ok(s290Shelf(s290Params({ q: "s4" })) === false && s290Shelf(s290Params({ page: "2" })) === false && s290Shelf(s290Params({ cat: "Lighting" })) === false, "#290 shelf: a search, a filter or page 2 hides it (unchanged)");
 }
+
+/* ============================================================================
+   #292 — curtain cut sheets: one sheet per curtain TYPE (elevation, mounting
+   detail, materials, hardware), read from Estimator or Grid quotes. Pure
+   checks run here; DB checks run in curtain292AsyncChecks() (registered on
+   the promise chain after packages289AsyncChecks).
+   ============================================================================ */
+import {
+  ASSUMED_MOUNT as c292Assumed,
+  CURTAIN_MOUNT_TYPES as c292MountTypes,
+  GRID_CURTAIN_DEFAULTS as c292GridDefaults,
+  cleanCurtainFinishes as c292CleanFinishes,
+  isMountTypeId as c292IsMount,
+  mountTypeForTrackMounting as c292MountFor,
+} from "@/lib/curtain-cut-sheets/vocab";
+import { parseEstimatorCurtainDesc as c292ParseEst, parseGridCurtainDesc as c292ParseGrid } from "@/lib/curtain-cut-sheets/parse";
+import { linkCurtainTracks as c292Link, newCurtainTrackKey as c292Key } from "@/lib/curtain-cut-sheets/track-link";
+import { curtainDesc as c292CurtainDesc, type GridCurtain as C292GridCurtain } from "@/lib/design/grid-bom";
+import type { SpecItem as C292Item, SpecSection as C292Section } from "@/app/(app)/estimator/types";
+
+const C292_TRACK = { seriesId: "adc-280-black", operation: "biparting" as const, runFt: 40, curved: false, mounting: "batten" as const, qty: 1 };
+function c292Sec(id: string, items: Array<Partial<C292Item> & { id: number }>): C292Section {
+  return {
+    id, name: id, kind: "materials", mfr: "", freightPct: 0,
+    items: items.map((it) => ({ sku: "X", desc: "x", qty: 1, unit: "ea", cost: 0, price: 0, ...it }) as C292Item),
+  };
+}
+
+// ---- vocabulary ----
+{
+  ok(c292MountFor("batten") === "track-batten" && c292MountFor("ceiling") === "track-ceiling" && c292MountFor("structure") === "track-structure",
+    "#292 vocab: batten / ceiling / structure mountings map to their mount types");
+  ok(c292MountFor("rafter") === "track-other" && c292MountFor("") === "track-other",
+    "#292 vocab: any other mounting string is track-other (a third TrackMounting never breaks)");
+  ok(c292MountTypes.map((t) => t.id).join() === "track-batten,track-ceiling,track-structure,tie-batten,wall-hookloop" && !c292IsMount("track-other") && c292IsMount("tie-batten"),
+    "#292 vocab: five pickable mount types; track-other is never pickable");
+  ok(c292Assumed === "tie-batten" && c292GridDefaults.Draw.mount === "track-batten" && c292GridDefaults.Border.bottom === "hem" && c292GridDefaults.Leg.mount === "tie-batten" && c292GridDefaults.Full.bottom === "chain",
+    "#292 vocab: assumed mount is tie-batten; Grid type defaults per spec §1.4");
+  const cf = c292CleanFinishes({ topFinish: "pipe-pocket", bottomFinish: "velcro", mountType: "track-other" });
+  ok(cf.topFinish === "pipe-pocket" && !("bottomFinish" in cf) && !("mountType" in cf) && Object.keys(c292CleanFinishes(null)).length === 0,
+    "#292 vocab: cleanCurtainFinishes keeps valid values and drops bad or absent ones (never refuses)");
+}
+// ---- parsers ----
+{
+  const fabs = new Set(["Charisma Velour 25 oz", "Encore Velour 22 oz"]);
+  const a = c292ParseEst("Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness", fabs);
+  ok(!!a && a.name === "Main Drape" && a.fabricName === "Charisma Velour 25 oz" && a.widthFt === 21.5 && a.heightFt === 18 && a.fullnessPct === 50,
+    "#292 parse: the exact addCurtain desc round-trips, decimals included");
+  const flat = c292ParseEst("Cyc — Encore Velour 22 oz, 40'W × 20'H, 0% fullness", fabs);
+  ok(!!flat && flat.fullnessPct === 0, "#292 parse: 0% fullness reads as flat");
+  const dash = c292ParseEst("Legs — Stage Left — Encore Velour 22 oz, 6'W × 20'H, 50% fullness", fabs);
+  ok(!!dash && dash.name === "Legs — Stage Left" && dash.fabricName === "Encore Velour 22 oz", "#292 parse: a name containing ' — ' splits at the known fabric");
+  const unknown = c292ParseEst("Legs — Stage Left — Mystery Cloth, 6'W × 20'H, 50% fullness", fabs);
+  ok(!!unknown && unknown.name === "Legs" && unknown.fabricName === "Stage Left — Mystery Cloth", "#292 parse: with no known fabric it splits at the first ' — '");
+  ok(c292ParseEst("Main Drape (black), 20 x 18 ft", fabs) === null && c292ParseEst("Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H", fabs) === null && c292ParseEst("", fabs) === null,
+    "#292 parse: a hand-edited desc reads as null, never a guess");
+  const g: C292GridCurtain = { type: "Leg", name: "SL Leg", widthFt: 6, heightFt: 20.5, fullnessPct: 50, fabricSku: "FAB-1" };
+  const gp = c292ParseGrid(c292CurtainDesc(g, "Encore Velour 22 oz"));
+  ok(!!gp && gp.name === "SL Leg" && gp.gridType === "Leg" && gp.widthFt === 6 && gp.heightFt === 20.5 && gp.fullnessPct === 50 && gp.fabricName === "Encore Velour 22 oz",
+    "#292 parse: curtainDesc round-trips through parseGridCurtainDesc (% fullness)");
+  const gf = c292ParseGrid(c292CurtainDesc({ ...g, type: "Full", fullnessPct: 0 }));
+  ok(!!gf && gf.fullnessPct === 0 && gf.gridType === "Full" && gf.fabricName === "FAB-1", "#292 parse: a flat Grid curtain round-trips (the fabric SKU when no name)");
+  ok(c292ParseGrid("Truss 12in box · 10 ft") === null && c292ParseGrid("SL Leg (Tab) · 6×20 ft · flat · X") === null, "#292 parse: a non-curtain Grid line reads as null");
+}
+// ---- track link ----
+{
+  const cur = (id: number, extra: Partial<C292Item> = {}) => ({ id, curtain: true, ...extra });
+  const trk = (id: number, extra: Partial<C292Item> = {}) => ({ id, track: { ...C292_TRACK }, ...extra });
+  ok(c292Key(41) === "ct-41", "#292 link: newCurtainTrackKey is ct-<line id>");
+  const s1 = c292Sec("a", [cur(1, { curtainTrackKey: "ct-41" })]);
+  const s2 = c292Sec("b", [{ id: 9 }, trk(2, { curtainTrackKey: "ct-41" })]);
+  ok(c292Link([s1, s2]).links.get(s1.items[0])?.id === 2, "#292 link: a shared key matches across sections");
+  const adj = c292Sec("c", [cur(3), trk(4)]);
+  ok(c292Link([adj]).links.get(adj.items[0])?.id === 4, "#292 link: a key-less curtain links to the track line right after it");
+  ok(c292Link([c292Sec("d", [cur(5)]), c292Sec("e", [trk(6)])]).links.size === 0, "#292 link: no adjacency fallback across sections");
+  ok(c292Link([c292Sec("f", [cur(7), { id: 8 }, trk(9)])]).links.size === 0, "#292 link: no fallback past a non-track line");
+  ok(c292Link([c292Sec("g", [cur(10), trk(11, { curtainTrackKey: "ct-99" })])]).links.size === 0, "#292 link: no fallback onto a track that carries its own key");
+  const dupe = c292Sec("h", [cur(12, { curtainTrackKey: "ct-12" }), cur(13, { curtainTrackKey: "ct-12" }), trk(14, { curtainTrackKey: "ct-12" })]);
+  const dl = c292Link([dupe]);
+  ok(dl.links.get(dupe.items[0])?.id === 14 && !dl.links.has(dupe.items[1]) && dl.duplicates.length === 1 && dl.duplicates[0] === dupe.items[1],
+    "#292 link: two curtains on one key — the first links, the second is flagged");
+}
