@@ -10521,3 +10521,57 @@ wave 4); rear elevation in the docx; rack-data export default scope includes lab
 **Rollback.** Safe. Racks live in the existing `subassemblies` doc table as `kind: "rack"`; pre-#296 code coerces an
 unknown kind to `fixture`, so a rolled-back deploy would show racks as broken fixtures (no light engine) without
 crashing. Catalog rack keys are ignored by old code. The `rack_defaults` blob is unused by old code. No migrations.
+
+## 297. Catalog — manufacturer images + placeholders (Manufacturer section, Part 1) — DONE 2026-10-02 (D583–D587)
+
+**Reported by Jeff 2026-10-02:** placeholder images for items that have no photo, and manufacturer-specific images. The
+full Manufacturer section was split into three parts: Part 1 (this item — images and placeholders), Part 2 (merge
+spelling aliases into one manufacturer) and Part 3 (the rest of the manufacturer record). Spec:
+`docs/superpowers/specs/2026-10-02-manufacturer-images-placeholders-design.md`; plan alongside it under
+`docs/superpowers/plans/`. One migration, `0035_manufacturers` (additive); no new dependencies.
+
+What shipped:
+- **Four placeholders** in `public/placeholders/` (Jeff's WebP files, unchanged): Allowance, Custom Device, Contact Us,
+  Image Coming Soon, and one pure fallback rule (`src/lib/part-image-fallback.ts`). **Portal:** own photo → Allowance →
+  Custom Device → manufacturer image → Contact Us (price on request) → Image Coming Soon; never blank. **Documents:** own
+  photo → Allowance → Custom Device → manufacturer image → nothing (full width, as before). A fallback is never stored
+  on a part and never counts as a photo (D583).
+- **Catalog → Manufacturers** (`/catalog/manufacturers`, visible to anyone signed in): one row per manufacturer key with
+  its spellings, part count and parts-without-photo count, filter (all / no image / has image) and search; Upload,
+  Replace and Remove per row, and **Upload many** (pick or drop files or a folder, review table, strictly sequential
+  upload). Set, Remove and Upload many need `create`. Images are shrunk to ≤1600 px WebP like every catalog image.
+- **Storage:** an unlinked `part_documents` record, source `manufacturer`, `sourceRef: "mfr:<key>"` (D584), in a new
+  `manufacturers` table keyed by `mfrKey` with deterministic `MF-` ids, created lazily; replacing keeps the old document
+  in `imageHistory`, Remove keeps the document (D585).
+- **Portal:** catalog tiles, the part and fixture sidebar gallery, Goes-with rows and department tiles show the chain.
+- **Documents:** the estimate PDF's key-product blocks, the online estimate, client packages and the curtain cut-sheet
+  photos fall back to the manufacturer image; allowance and custom quote lines can now carry a key product through a
+  `line:<id>` token and print the kind's placeholder (D586). `/placeholders/` is exempt from the team-login middleware so
+  portal customers, print routes and the share page can load it (D587).
+
+Gates (final head): tsc 0 errors; eslint 0 errors on every source file the branch touched (2 pre-existing warnings: the
+`Date.now` in `catalog/page.tsx` and an `<img>` in the part-documents section); test:specs 11,839 PASS (64 `mfr images:`
+checks) / 0 FAIL, ALL PASSED (baseline 11,775); test:smoke 205/205 ALL PASSED including `/catalog/manufacturers`;
+`npm run build` exit 0 (`.next` deleted after). Not exercised end to end: the set / remove / Upload many server actions
+(they need a real Blob token; typechecked, built, and the page GET is in smoke) and the portal tile on a real grant.
+
+**For Jeff.**
+1. Upload the manufacturer images: Catalog → Manufacturers, Upload per row or **Upload many**. Upload many matches each
+   file name (without its extension) to a manufacturer name **exactly**, ignoring case, spaces and punctuation — a file
+   called `shure.png` lands on Shure, `shure-wireless.png` lands on nothing and you pick the row by hand. "Allen & Heath"
+   and "Allen and Heath" are separate manufacturers until Part 2 merges aliases, so upload to each spelling.
+2. Nothing changes for a part until its manufacturer has an image; until then portal tiles show Contact Us (price on
+   request) or Image Coming Soon, and documents print full width as before.
+3. Look at one portal catalog tile with no photo and one estimate PDF with an allowance key product on a preview deploy
+   (a preview writes the production DB, so do not upload there unless you mean it).
+
+**Rollback.** Safe; the migration is additive. The `manufacturers` table is ignored by pre-#297 code. A document with the
+new source `manufacturer` reads as an unknown `PartDocumentSource` on old code: `IMAGE_SOURCE_RANK` gives `undefined`, the
+rank difference is `NaN`, which is falsy, so image ordering falls through to upload time (the #294 behavior), and the
+Documents section label shows the raw word "manufacturer". Because a manufacturer document has no links, no part, portal
+gallery, Photo sheet or package reads it; the one place old code can show it is the part editor's Attach existing search
+(by title or file name), where attaching it just links it to that part. `line:<id>` key-product blocks on old code:
+`resolveKeyProducts` finds the line by id, compares the line's real sku (empty for an allowance or custom line) to
+`line:<id>`, and reads the block "changed", so the block is **not printed** on the estimate and the editor flags it; the
+stored text is kept (sanitize keeps it) and prints again when the code is rolled forward. Nothing throws. The placeholder
+files are just static assets.
