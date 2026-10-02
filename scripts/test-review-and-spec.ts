@@ -45487,12 +45487,86 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
       `#293t never rendered (${label}): no cost, margin, tier, internal note, vendor terms/notes, link, room, review, history, nonce or PDF path`);
   }
 
+  // Task 3 review (hardening, Task 4 commit 1): the never-rendered salt, widened — component cost,
+  // sellOverride, labor groups, a vendor attachment, approvedAgainst, emails, shop/bonus/travel labor
+  // names, Rewards-credit internals, and an EARLIER sent revision plus a later manual one and a live
+  // edit, each with its own salted spec. The document is the latest sent revision as the pages build
+  // it (quoteAsOfRevision → quoteDocumentDataFor), rendered layout="web" as Narrative and as BOM.
+  {
+    const vq = (salt: string) => [{ id: "VQ-S", vendor: "Acme", quoteNumber: "Q1", description: "Motors", display: "itemized", link: `https://v.example/VLINK-${salt}`,
+      attachment: { name: `ATTACHNAME-${salt}.pdf`, mime: "application/pdf", blobPath: `vendor-quotes/ATTACHBLOB-${salt}.pdf`, dataUrl: `data:application/pdf;base64,ATTACHDATA-${salt}` },
+      lines: [{ id: 1, description: "Motor", qty: 1, unit: "ea", amount: 27182.81 }], terms: `TERMS-${salt}`, notes: `NOTES-${salt}`, total: 27182.81, includesFreight: false }];
+    const spec = (intro: string, salt: string) => ({ sections: [
+      { id: "n", name: "Narr", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: intro,
+        laborGroups: { "lg-1": { draft: { note: `LABORGROUP-${salt}`, crew: [{ role: `CREWROLE-${salt}` }] }, lines: 1 } },
+        items: [
+          { id: 1, sku: "S1", desc: "Line one", qty: 1, unit: "ea", cost: 31337.77, price: 50000, sellOverride: true,
+            internalNote: `INTERNAL-${salt}`, link: `https://x.example/LINK-${salt}`, room: `ROOM-${salt}`,
+            components: [{ sku: `COMPSKU-${salt}`, label: `COMPLABEL-${salt}`, role: "track", qty: 2, unit: "ea", cost: 13579.24, price: 24680.13 }] },
+          { id: 4, sku: "LAB-INSTALL", desc: "Installation", qty: 1, unit: "ea", cost: 1000, price: 2000, labor: true, laborGroup: "lg-1" },
+          { id: 5, sku: "LAB-SHOP-1", desc: `SHOPLINE-${salt}`, qty: 1, unit: "ea", cost: 100, price: 300, labor: true, laborOverhead: "shop" },
+          { id: 6, sku: "LAB-BONUS-1", desc: `BONUSLINE-${salt}`, qty: 1, unit: "ea", cost: 100, price: 300, labor: true, laborOverhead: "bonus" },
+          { id: 7, sku: "LAB-TRAVEL-1", desc: `TRAVELLINE-${salt}`, qty: 1, unit: "ea", cost: 100, price: 300, labor: true, laborTravel: "hotel", laborMobKey: "m-gone" },
+        ],
+        keyProducts: [{ lineKey: "1", sku: "S1", text: "Para.", photo: false }] },
+      { id: "i", name: "Items", kind: "materials", mfr: "", freightPct: 0, sellOverride: 61000,
+        items: [
+          { id: 2, sku: "VQ", desc: "Vendor", qty: 1, unit: "ea", cost: 27182.81, price: 40000, vendorQuoteId: "VQ-S", internalNote: `INTERNAL2-${salt}` },
+          { id: 3, sku: "P3", desc: "Plain part", qty: 1, unit: "ea", cost: 11000.11, price: 20000 },
+          { id: 8, sku: "", desc: `REWARDDESC-${salt}`, qty: 1, unit: "ea", cost: 0, price: -300, rewardCredit: true },
+        ] },
+    ] });
+    const df = (note: string, owner: string) => ({ customer: "Walk-in", locationId: null, contactName: null, quoteNote: note, assumptions: "", installTimeframe: "",
+      preparedBy: "", owner, termsText: "", paymentTerms: "Net 30", pdfOptions: { pdfItemizedAppendix: true, pdfNotes: true }, portalFirm: null, source: "estimator" });
+    const AT2 = Date.UTC(2026, 9, 1, 15);
+    const early = { rev: 1, at: AT2 - 86_400_000, by: "early.SECRET-293@peak.test", reason: "sent", note: "EARLYREVNOTE-SECRET-293", name: "EARLYNAME-SECRET-293", value: 99999.91,
+      margin: 0.4242, pricingTier: "TIER-SECRET-293", tierMargin: 0.3737, status: "sent", spec: spec("EARLYINTRO-SECRET-293", "EARLY-SECRET-293"), vendorQuotes: vq("EARLYVQ-SECRET-293"),
+      pdfBlobPath: "quotes/EARLYPDF-SECRET-293.pdf", docFields: df("EARLYNOTE-SECRET-293", "EARLYOWNER-SECRET-293") };
+    const sent = { rev: 2, at: AT2, by: "sender.SECRET-293@peak.test", reason: "sent", note: "REVNOTE-SECRET-293", name: "Second sent", value: 120000,
+      margin: 0.4242, pricingTier: "TIER-SECRET-293", tierMargin: 0.3737, status: "sent", spec: spec("Intro two 293t.", "REV2-SECRET-293"), vendorQuotes: vq("REV2VQ-SECRET-293"),
+      pdfBlobPath: "quotes/REV2PDF-SECRET-293.pdf", docFields: df("Note two 293t.", "Pat") };
+    const later = { ...sent, rev: 3, at: AT2 + 1000, reason: "manual", name: "LATERNAME-SECRET-293", spec: spec("LATERINTRO-SECRET-293", "LATER-SECRET-293"),
+      vendorQuotes: vq("LATERVQ-SECRET-293"), docFields: df("LATERNOTE-SECRET-293", "LATEROWNER-SECRET-293") };
+    const secret2 = {
+      id: "Q-293TW", name: "LIVENAME-SECRET-293", customer: "Walk-in", customerId: "c-293tw", owner: "Pat", ownerEmail: "owner.SECRET-293@peak.test", preparedBy: "",
+      contact: { name: "Dana", email: "contact.SECRET-293@x.test" }, createdAt: AT2, updatedAt: AT2 + 2000, quoteNote: "LIVENOTE-SECRET-293", assumptions: "", paymentTerms: "Net 30",
+      margin: 0.4242, tierMargin: 0.3737, pricingTier: "TIER-SECRET-293", status: "sent", source: "estimator", quoteType: "system",
+      review: { state: "approved", reviewer: "reviewer.SECRET-293@peak.test", submittedBy: "submit.SECRET-293@peak.test", submittedAt: 1, decidedBy: "decide.SECRET-293@peak.test", decidedAt: 1,
+        note: "REVIEW-SECRET-293", method: "in_app", approvedAgainst: { sell: 86420.97, linesKey: "APPROVED-SECRET-293" } },
+      history: [{ at: 1, to: "sent", note: "HISTORY-SECRET-293" }],
+      portalAcceptance: { at: 1, by: "Dana", byEmail: "accept.SECRET-293@x.test", notes: "ACCEPTNOTES-SECRET-293", purchaseMethod: "po", poDocumentId: "DOC-SECRET-293" },
+      rewardLedger: [{ kind: "earn", amount: 4242, note: "LEDGER-SECRET-293" }], rewardsCredit: { posted: 300, note: "CREDITNOTE-SECRET-293" },
+      shareLink: { nonce: "NONCE-SECRET-293", expiresAt: 1, createdAt: 1, createdBy: "x" }, pdf: { blobPath: "quotes/BLOB-SECRET-293.pdf" },
+      spec: spec("LIVEINTRO-SECRET-293", "LIVE-SECRET-293"), vendorQuotes: vq("LIVEVQ-SECRET-293"), pdfOptions: {},
+      revisions: [early, sent, later],
+    } as unknown as N293tQuote;
+    const asSent = n293tAsOf(secret2, (secret2.revisions as N293tRev[])[1]);
+    const cust = { name: "Walk-in Co", locations: [], contacts: [{ name: "Dana", role: "Director", email: "dana.SECRET-293@x.test", primary: true }] };
+    const props2 = n293tDocData(asSent, cust as never, { companyName: "Peak Systems Group", logoDark: null });
+    const views = [["Narrative", p293Render({ ...props2, layout: "web" })], ["BOM", p293Render({ ...n293tBom(props2), layout: "web" })]] as const;
+    for (const [label, html] of views) {
+      const leaks = [
+        /SECRET-293/.test(html) && "a salted string",
+        ["31,337.77", "27,182.81", "13,579.24", "24,680.13", "11,000.11", "86,420.97", "99,999.91"].find((n) => html.includes(n)) && "a cost / approval / earlier-revision figure",
+        (/\b42(\.\d+)?%/.test(html) || /\b37(\.\d+)?%/.test(html)) && "a margin as a percent",
+        (html.includes("0.4242") || html.includes("0.3737") || html.includes("42.42") || html.includes("37.37")) && "a raw margin",
+        /override/i.test(html) && "sell-override wording",
+      ].filter(Boolean);
+      ok(leaks.length === 0 && html.includes('class="est-doc est-web"') && (label === "BOM" || html.includes("Intro two 293t.")) && html.includes("Note two 293t.") && html.includes("Rewards points applied"),
+        `#293t never rendered, widened (${label}, web): the sent revision only — no component cost, sellOverride, labor group, vendor attachment, approval snapshot, email, shop/bonus/travel line, Rewards-credit internals, earlier/later revision or live edit (leaks: ${leaks.join(", ") || "none"})`);
+    }
+    ok(views[1][1].includes("Line one") && views[1][1].includes("Plain part"), "#293t never rendered, widened: the BOM view still itemizes the sent lines (the salt check above ran on a real BOM)");
+  }
+
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const loader = rd("src/lib/quote-pdf/document-loader.ts");
   const print = rd("src/app/print/quote/[id]/page.tsx");
   ok(["quoteDocumentDataFor(", "purchasePerksForCompany(", "purchasePerksDocLine(", "keyProductPhotoDataUris(", "getCustomer(", "getSettings("].every((c) => loader.includes(c) && print.includes(c)),
     "#293t loader: the web loader and the print route build the document from the same calls (no drift until the print route moves onto the loader)");
   ok(loader.includes("quoteAsOfRevision(q, opts.revision)") && loader.includes("keyProductPhotoDocs("), "#293t loader: a revision renders as sent; web photos are the printed docs as scoped URLs");
+  ok(loader.includes('if (opts.photos !== "inline" && !webRevisionOk(q, opts.revision)) return null;') && loader.includes('rev.reason === "sent"') && loader.includes("q.revisions.includes(rev)") &&
+     loader.includes("Promise<QuoteDocumentProps | null>"),
+    "#293t loader: the web path fails closed — only a sent revision that is this quote's own object renders; anything else is null");
   const pr = rd("src/lib/quote-share/photo-response.ts");
   ok(pr.includes("keyProductPhotoDocs(revisionSections(rev))") && pr.includes("PHOTO_TYPES.has(doc.contentType)") && pr.includes('"x-content-type-options": "nosniff"') &&
      pr.includes('"private, max-age=3600"') && pr.includes('createHash("sha1").update(doc.blobKey)'),
@@ -45549,7 +45623,9 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   const q = (await n293tQGet(QID))!;
   const st = n293tState(q);
   if (st.kind !== "ok") { ok(false, "#293t loader (DB): fixture quote is ok"); return; }
-  const props = await n293tLoad(q, { revision: st.rev, photos: { href: (id) => `/t/photo/${id}` } });
+  const loaded = await n293tLoad(q, { revision: st.rev, photos: { href: (id) => `/t/photo/${id}` } });
+  if (!loaded) { ok(false, "#293t loader (DB): the sent revision loads"); return; }
+  const props = loaded;
   ok(props.projectName === "#293t loader" && props.quoteNote === "Sent note" && props.revNum === st.rev.rev && props.revDateMs === st.rev.at,
     "#293t loader (DB): the sent version — its name, cover note, Rev N and date — not the edit made after sending");
   ok(props.keyProductPhotos?.[P]?.src === `/t/photo/${narrDoc.id}` && !props.keyProductPhotos?.[P2], "#293t loader (DB): a printed photo becomes its scoped URL; an itemized system's block has none");
@@ -45558,8 +45634,19 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   ok(html.includes("Sent intro 293t.") && html.includes("Para 293t.") && !html.includes("Leaked intro 293t.") && !html.includes("Edited after send") && !html.includes("Never prints") &&
      html.includes(`src="/t/photo/${narrDoc.id}"`),
     "#293t loader (DB): a quote edited after sending shows the SENT version online, photo included");
-  const liveProps = await n293tLoad(q, { photos: { href: (id) => `/t/photo/${id}` } });
-  ok(liveProps.projectName === "Edited after send", "#293t loader (DB): without a revision it renders the live quote (the print route's behaviour)");
+  // Task 3 review (hardening): the web path fails CLOSED — no revision, a revision that isn't this
+  // quote's own, or one that isn't a sent one is refused (null), never the live quote. Only the
+  // print path ("inline") still renders the live quote without a revision.
+  const webHref = { href: (id: string) => `/t/photo/${id}` };
+  const noRev = await n293tLoad(q, { revision: undefined as unknown as N293tRev, photos: webHref });
+  const nullRev = await n293tLoad(q, { revision: null as unknown as N293tRev, photos: webHref });
+  ok(noRev === null && nullRev === null, "#293t loader (DB): a web page with no revision is refused (null) — never the live quote");
+  const manual = { ...st.rev, reason: "manual" as const };
+  const foreign = await n293tLoad(q, { revision: { ...st.rev }, photos: webHref });
+  const notSent = await n293tLoad({ ...q, revisions: [...(q.revisions || []), manual] }, { revision: manual, photos: webHref });
+  ok(foreign === null && notSent === null, "#293t loader (DB): a web page given a revision that isn't this quote's own, or isn't a sent one, is refused");
+  const liveProps = await n293tLoad(q, { photos: "inline" });
+  ok(liveProps?.projectName === "Edited after send", "#293t loader (DB): the print path (inline) without a revision still renders the live quote");
 
   ok((await n293tPhotoFor(st.rev, narrDoc.id))?.id === narrDoc.id, "#293t photos (DB): the sent revision's printed photo is servable");
   ok((await n293tPhotoFor(st.rev, itemDoc.id)) === null && (await n293tPhotoFor(st.rev, "PD-no-such")) === null && (await n293tPhotoFor(st.rev, "")) === null,
@@ -45582,4 +45669,24 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   ok(n293tRevSections(st.rev).some((s) => s.narrative === "Sent intro 293t.") && !n293tRevSections(st.rev).some((s) => s.narrative === "Leaked intro 293t.") &&
      (edited.spec as { sections: { narrative?: string }[] }).sections.some((s) => s.narrative === "Leaked intro 293t."),
     "#293t photos (DB): the photo set is read from the sent revision's sections, not the edited live quote");
+
+  // Task 3 review (hardening): two SENT revisions through the real store — the loader renders the
+  // latest one only; the earlier revision's salted name, note, intro and line never reach the page.
+  const Q2 = fixtureId(293, "t-doc-two-revs");
+  const sec2 = (intro: string, line: string) => [{ id: "n", name: "Test293t Two", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: intro,
+    items: [{ id: 1, sku: P, desc: line, qty: 1, unit: "ea", cost: 5, price: 10, internalNote: "INTERNAL-SECRET-293" }], keyProducts: [] }];
+  await n293tQCreate({ id: Q2, name: "EARLYNAME-SECRET-293", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", quoteNote: "EARLYNOTE-SECRET-293",
+    spec: { sections: sec2("EARLYINTRO-SECRET-293", "EARLYLINE-SECRET-293"), mobs: [] } });
+  registerFixture("quotes", Q2);
+  await n293tQUpdate(Q2, { status: "sent" });
+  await n293tQAddRev(Q2, { by: "Test", reason: "sent", note: "First" });
+  await n293tQUpdate(Q2, { name: "Two revs 293t", quoteNote: "Second note 293t.", spec: { sections: sec2("Second intro 293t.", "Second line 293t"), mobs: [] } });
+  await n293tQAddRev(Q2, { by: "Test", reason: "sent", note: "Second" });
+  const q2 = (await n293tQGet(Q2))!;
+  const st2 = n293tState(q2);
+  const p2 = st2.kind === "ok" ? await n293tLoad(q2, { revision: st2.rev, photos: webHref }) : null;
+  const h2 = p2 ? [p293Render({ ...p2, layout: "web" }), p293Render({ ...n293tBom(p2), layout: "web" })].join("\n") : "";
+  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 2 &&
+     h2.includes("Second intro 293t.") && h2.includes("Second note 293t.") && h2.includes("Second line 293t") && !/SECRET-293/.test(h2),
+    "#293t loader (DB): with two sent revisions the page renders the latest only — nothing of the earlier one, no internal note (Narrative + BOM, web)");
 }

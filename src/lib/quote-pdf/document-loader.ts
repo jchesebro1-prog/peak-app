@@ -23,9 +23,24 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
  * frozen header (docFields; the live header on pre-#293 revisions).
  * Photos: "inline" = data URIs (the print route's way); { href } = scoped
  * URLs the photo routes serve.
+ *
+ * Fails CLOSED for the web pages: with { href } photos it renders only a
+ * SENT revision that is one of this quote's own (the very object from
+ * `q.revisions`), and returns null otherwise — never the live quote. The
+ * caller then shows its generic card. "inline" keeps the print route's
+ * behaviour (no revision = the live quote).
  */
 
 export type DocPhotos = "inline" | { href: (docId: string) => string };
+
+export type LoadQuoteDocumentOpts =
+  | { revision?: QuoteRevision | null; photos: "inline" }
+  | { revision: QuoteRevision; photos: { href: (docId: string) => string } };
+
+/** A web page may render only a sent revision of this very quote. */
+function webRevisionOk(q: Quote, rev: QuoteRevision | null | undefined): boolean {
+  return !!rev && rev.reason === "sent" && Array.isArray(q.revisions) && q.revisions.includes(rev);
+}
 
 /** sku → { src: href(docId), alt } for the printed photo-on blocks. Never throws. */
 export async function keyProductPhotoLinks(sections: SpecSection[], href: (docId: string) => string): Promise<Record<string, { src: string; alt: string }>> {
@@ -40,7 +55,8 @@ export async function keyProductPhotoLinks(sections: SpecSection[], href: (docId
   }
 }
 
-export async function loadQuoteDocumentProps(q: Quote, opts: { revision?: QuoteRevision | null; photos: DocPhotos }): Promise<QuoteDocumentProps> {
+export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOpts): Promise<QuoteDocumentProps | null> {
+  if (opts.photos !== "inline" && !webRevisionOk(q, opts.revision)) return null;
   const src = opts.revision ? quoteAsOfRevision(q, opts.revision) : q;
   const [cust, settings, perks] = await Promise.all([
     getCustomer(src.customerId),
