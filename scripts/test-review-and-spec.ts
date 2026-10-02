@@ -42973,3 +42973,69 @@ const PHS_PARTS: PhsPart[] = [
   ok(phsPlace(ord, "n", false).join() === "a,n,r", "photo sheet place: a non-primary appends at the end of the real photos");
   ok([...phsClaims([shd, drv, sh])].join() === "f2", "photo sheet claims: only sheet-imported Drive files are claimed");
 }
+
+/* ======================================================================
+   Photo sheet — the planner (photo-sheet-plan.ts).
+   ====================================================================== */
+import { planPhotoSheet as phsPlan, resultStatuses as phsStatuses, planCounts as phsCounts } from "@/lib/part-docs/photo-sheet-plan";
+import { HEIC_REASON as phsHeic, OVER_CAP_REASON as phsOverCap } from "@/lib/part-docs/drive-photo-plan";
+{
+  const m = phsMatcher(PHS_PARTS);
+  const dfile = (id: string, name: string, mimeType = "image/jpeg", size = 100) => ({ id, name, mimeType, md5: "m", size, webViewLink: `https://drive/${id}` });
+  const drive = [dfile("d1", "Front.jpg"), dfile("d2", "dup.jpg"), dfile("d3", "dup.jpg"), dfile("d4", "phone.heic", "image/heic"), dfile("d5", "Shared.png"), dfile("d6", "pic.jpg", "image/heic")];
+  const imgs = new Map<string, PhsImage[]>([["SKU-A", [
+    { id: "PD-a1", source: "fetch", sourceUrl: "https://m/a1.jpg", fileName: "a1.webp" },
+    { id: "PD-a2", source: "upload", sourceUrl: null, fileName: "old.webp" },
+  ]]]);
+  const parsed = phsRows([PHS_H,
+    ["ETC", "S4-ALPHA", "", "", "", "", "https://m/a1.jpg", "OLD.webp", "https://m/new.jpg", ""],
+    ["ETC", "S4-BRAVO", "", "", "", "", "front.JPG", "ftp://x/y.jpg", "drop1.jpg", ""],
+    ["ADC", "280", "", "", "", "", "https://m/new.jpg", "", "", ""],
+    ["", "", "SKU-D", "", "", "", "https://m/new.jpg", "dup.jpg", "phone.heic", ""],
+    ["", "", "SKU-C1", "", "", "", "Shared.png", "missing.jpg", "big.jpg", ""],
+    ["", "", "SKU-C2", "", "", "", "pic.jpg", "C:\\photos\\drop1.jpg", "", ""],
+  ]);
+  const rows = phsImportRows(parsed.ok ? parsed.rows : []);
+  const input = {
+    rows, match: m, imagesBySku: imgs,
+    imageByUrl: new Map([["https://m/a1.jpg", "PD-a1"]]), imageByDriveId: new Map([["d5", "PD-shared"]]),
+    dropped: [{ name: "DROP1.jpg", size: 10 }, { name: "big.jpg", size: 26 * 1024 * 1024 }],
+    drive, driveReason: "Drive photos aren't connected",
+  };
+  const plan = phsPlan(input);
+  const doc = (key: string) => plan.docs.find((d) => d.key === key);
+  const prob = (row: number, slot: number | null) => plan.problems.find((p) => p.rowNumber === row && p.slot === slot);
+
+  ok(plan.skipped.filter((s) => s.rowNumber === 2).map((s) => s.slot).join() === "1,2", "photo sheet plan: a URL already on the part and an exported file name (any case) skip");
+  const nu = doc("url:https://m/new.jpg");
+  ok(!!nu && nu.via === "url" && nu.existingId === null && nu.links.map((l) => `${l.sku}:${l.primary}:${l.rowNumber}:${l.slot}`).join() === "SKU-A:false:2:3,SKU-D:true:5:1",
+    "photo sheet plan: one URL on two rows is one shared document; Photo 1 marks primary per part");
+  const d1 = doc("drive:d1");
+  ok(!!d1 && d1.via === "drive" && d1.links[0].sku === "SKU-B" && d1.links[0].primary, "photo sheet plan: a file name finds a Drive file case-insensitively");
+  ok(prob(3, 2)?.reason === "not an http(s) URL", "photo sheet plan: a non-http scheme is a problem");
+  const dr = doc("file:drop1.jpg");
+  ok(!!dr && dr.via === "dropped" && dr.name === "DROP1.jpg" && dr.links.map((l) => l.sku).join() === "SKU-B,SKU-C2", "photo sheet plan: a dropped file wins (any case, a Windows path's base name) and is shared");
+  ok(/ambiguous/.test(prob(4, null)?.reason ?? "") && !plan.docs.some((d) => d.links.some((l) => l.rowNumber === 4)), "photo sheet plan: an ambiguous row is one row problem and plans nothing");
+  ok(prob(5, 2)?.reason === "2 Drive files share this name", "photo sheet plan: duplicate Drive names are a problem, never a guess");
+  ok(prob(5, 3)?.reason === phsHeic && prob(7, 1)?.reason === phsHeic, "photo sheet plan: HEIC refuses by name and by Drive type");
+  const sh = doc("drive:d5");
+  ok(!!sh && sh.via === "drive" && sh.existingId === "PD-shared" && sh.links[0].sku === "SKU-C1", "photo sheet plan: a Drive file already in the catalog is linked, not re-imported");
+  ok(prob(6, 2)?.reason === "not dropped and not in Peak Product Photos" && prob(6, 3)?.reason === phsOverCap, "photo sheet plan: a missing file and an over-cap dropped file are problems");
+  ok(plan.matched === 5, "photo sheet plan: matched counts matched rows");
+  const c = phsCounts(plan);
+  ok(c.add === plan.docs.reduce((n, d) => n + d.links.length, 0) && c.skip === plan.skipped.length && c.problems === plan.problems.length, "photo sheet plan: counts add links, skips and problems");
+
+  const noDrive = phsPlan({ ...input, drive: null });
+  ok(noDrive.problems.find((p) => p.rowNumber === 3 && p.slot === 1)?.reason === "not dropped, and Drive photos aren't connected", "photo sheet plan: without Drive, a file name says why");
+
+  const st = phsStatuses(plan, [
+    { key: "url:https://m/new.jpg", ok: true },
+    { key: "drive:d1", ok: false, error: "Drive download failed: boom" },
+    { key: "file:drop1.jpg", ok: true },
+    { key: "drive:d5", ok: true },
+  ]);
+  ok(st.get(2) === "Added 1; Skipped 2 (already attached)", "photo sheet status: added + skipped counts");
+  ok(st.get(3) === "Photo 1: Drive download failed: boom; Photo 2: not an http(s) URL; Added 1", "photo sheet status: problems and failures by slot, then counts");
+  ok(/^ambiguous/.test(st.get(4) ?? ""), "photo sheet status: a row problem stands alone");
+  ok(phsStatuses(plan, []).get(5)?.includes("Photo 1: not imported") === true, "photo sheet status: a planned photo with no outcome says not imported");
+}
