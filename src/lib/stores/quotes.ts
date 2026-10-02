@@ -303,6 +303,21 @@ export type Quote = {
    *  Absent until the first such change (a new quote renders what it was
    *  created with). */
   contentChangedAt?: number;
+  /** #293 slice 3 (spec §1.6) — the client share link. Server-written only
+   *  (patchShareLink); never in QUOTE_CONTENT_FIELDS, never snapshotted,
+   *  never copied by buildQuote. Browsers get a ShareLinkView, never the nonce. */
+  shareLink?: QuoteShareLink | null;
+};
+
+/** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
+export type QuoteShareLink = {
+  /** 32 random bytes, base64url — rotated on revoke. */
+  nonce: string;
+  expiresAt: number;
+  createdAt: number;
+  createdBy: string;
+  revokedAt?: number | null;
+  revokedBy?: string | null;
 };
 
 /**
@@ -344,6 +359,27 @@ export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
   const rec = (q || {}) as Record<string, unknown>;
   return JSON.stringify(QUOTE_CONTENT_FIELDS.map((k) => rec[k] ?? null));
 }
+
+/** #293 slice 3 (spec §1.5) — the non-payload fields the customer document
+ *  prints, frozen with every new revision so the online page shows the
+ *  version that was sent. `contactName` is null when the quote had none
+ *  (the document then reads the primary contact, as the live quote does).
+ *  Recall ignores it: restoreQuoteRevision copies named payload fields only. */
+export type QuoteRevisionDocFields = {
+  customer: string;
+  locationId: string | null;
+  contactName: string | null;
+  quoteNote: string;
+  assumptions: string;
+  installTimeframe: string;
+  preparedBy: string;
+  owner: string;
+  termsText: string;
+  paymentTerms: string | null;
+  pdfOptions: QuotePdfOptions | null;
+  portalFirm: Quote["portalFirm"] | null;
+  source: string;
+};
 
 /**
  * An immutable snapshot of a quote's priced state (punch item 24). Modelled on
@@ -396,6 +432,9 @@ export type QuoteRevision = {
    *  An annex stamped once after the snapshot is cut; the priced fields above
    *  are still never rewritten. */
   pdfBlobPath?: string;
+  /** #293 slice 3 — the printed header fields as they stood (absent on
+   *  revisions cut before #293; the online page then reads the live ones). */
+  docFields?: QuoteRevisionDocFields;
 };
 
 export type ReviewOpts = {
@@ -693,6 +732,26 @@ export async function update(
 
 /* ---- revisions (punch item 24) ---- */
 
+/** #293 slice 3 — the header fields a revision freezes (spec §1.5). Pure. */
+export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
+  const d = doc as Quote & { paymentTerms?: string | null };
+  return {
+    customer: d.customer || "",
+    locationId: d.locationId ?? null,
+    contactName: typeof d.contactName === "string" ? d.contactName : null,
+    quoteNote: d.quoteNote || "",
+    assumptions: d.assumptions || "",
+    installTimeframe: d.installTimeframe || "",
+    preparedBy: d.preparedBy || "",
+    owner: d.owner || "",
+    termsText: d.termsText || "",
+    paymentTerms: typeof d.paymentTerms === "string" ? d.paymentTerms : null,
+    pdfOptions: d.pdfOptions ?? null,
+    portalFirm: d.portalFirm ?? null,
+    source: d.source || "",
+  };
+}
+
 /** Build a snapshot of a quote's current priced state. Pure. */
 function snapshotOf(
   doc: Quote,
@@ -722,6 +781,8 @@ function snapshotOf(
     consulting: doc.consulting ?? null,
     rental: doc.rental ?? null,
     vendorQuotes: doc.vendorQuotes ?? null,
+    // #293 slice 3: what the customer document's header printed.
+    docFields: revisionDocFields(doc),
   };
 }
 

@@ -64,9 +64,15 @@ export function rateLimitRefund(key: string): void {
   else hits.set(key, recent);
 }
 
+/** Best-effort client IP from proxy headers (empty string if unknown) — for
+ *  callers holding only headers, e.g. a page's `await headers()` (#293). */
+export function clientIpFromHeaders(h: Pick<Headers, "get">): string {
+  const fwd = h.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0]!.trim();
+  return h.get("x-real-ip")?.trim() || "";
+}
+
 /** Best-effort client IP from proxy headers (empty string if unknown). */
 export function clientIp(req: Request): string {
-  const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  return req.headers.get("x-real-ip")?.trim() || "";
+  return clientIpFromHeaders(req.headers);
 }

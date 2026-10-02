@@ -45168,3 +45168,142 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
   ok(/copySectionForTarget\(sanitizeSystemSell\(picked\.section\)/.test(rd("src/lib/narrative/load-system.ts")),
     "Merge #292x293s Load: loadLibrarySystem builds the loaded section through copySectionForTarget (which re-keys pairs)");
 }
+
+/* ======================================================================
+   #293 slice 3 — pure rules: the share token, the online-estimate state,
+   the sent-version view of a quote, the BOM view, the client-IP helper
+   and the revision docFields annex.
+   ====================================================================== */
+import {
+  SHARE_DEFAULT_TTL_MS as n293tTtl, SHARE_MAX_TTL_MS as n293tMaxTtl, SHARE_TOKEN_RE as n293tTokenRe,
+  newShareNonce as n293tNonce, signShareToken as n293tSign, verifyShareToken as n293tVerify,
+} from "@/lib/quote-share/token";
+import {
+  onlineEstimateState as n293tState, shareEligibility as n293tElig, quoteAsOfRevision as n293tAsOf,
+  onlineHeaderLine as n293tHeader, sharePath as n293tPath, onlineView as n293tView, ONLINE_COPY as n293tCopy,
+} from "@/lib/quote-share/view";
+import { bomViewProps as n293tBom, offersBomView as n293tOffersBom } from "@/app/(app)/estimator/quote-document-view";
+import { clientIp as n293tIp, clientIpFromHeaders as n293tIpH } from "@/lib/rate-limit";
+import { signPrintToken as n293tSignPrint, verifyPrintToken as n293tVerifyPrint } from "@/lib/quote-pdf/token";
+import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type QuoteRevision as N293tRev } from "@/lib/stores/quotes";
+{
+  const S = "test-secret-293t";
+  const NOW = 1_800_000_000_000;
+
+  // ---- token ----
+  const nonce = n293tNonce();
+  ok(/^[A-Za-z0-9_-]{43}$/.test(nonce) && n293tNonce() !== nonce, "#293t token: a nonce is 32 random bytes, base64url, fresh each call");
+  ok(n293tTtl === 60 * 86_400_000 && n293tMaxTtl === 366 * 86_400_000, "#293t token: 60-day default, 366-day ceiling");
+  const exp = NOW + n293tTtl;
+  const stored = { nonce, expiresAt: exp };
+  const tok = n293tSign(S, "Q-1", nonce, exp);
+  ok(n293tTokenRe.test(tok) && tok.startsWith(exp + "."), "#293t token: <exp>.<43-char base64url MAC>");
+  ok(n293tVerify(S, tok, "Q-1", stored, NOW) && n293tVerify(S, tok, "Q-1", stored, exp), "#293t token: sign → verify (valid up to and including exp)");
+  ok(!n293tVerify(S, tok, "Q-2", stored, NOW), "#293t token: another quote id ✗");
+  ok(!n293tVerify(S, tok, "Q-1", { nonce: n293tNonce(), expiresAt: exp }, NOW), "#293t token: a rotated nonce ✗");
+  ok(!n293tVerify(S, tok, "Q-1", { nonce, expiresAt: 0 }, NOW), "#293t token: revoked (expiresAt 0) ✗");
+  ok(!n293tVerify(S, tok, "Q-1", { nonce, expiresAt: exp + 1 }, NOW), "#293t token: exp ≠ stored expiry ✗");
+  ok(!n293tVerify(S, tok, "Q-1", stored, exp + 1), "#293t token: expired ✗");
+  const far = NOW + n293tMaxTtl + 1;
+  ok(!n293tVerify(S, n293tSign(S, "Q-1", nonce, far), "Q-1", { nonce, expiresAt: far }, NOW), "#293t token: a TTL over 366 days ✗");
+  const mac = tok.split(".")[1];
+  ok(!n293tVerify(S, exp + "." + (mac[0] === "A" ? "B" : "A") + mac.slice(1), "Q-1", stored, NOW), "#293t token: a tampered MAC ✗");
+  ok(["", "abc", exp + ".short", "x" + tok, tok + "A", tok.replace(".", "-")].every((t) => !n293tVerify(S, t, "Q-1", stored, NOW)), "#293t token: malformed tokens ✗");
+  ok(!n293tVerify(S, tok, "Q-1", stored, NaN) && !n293tVerify(S, tok, "Q-1", stored, Infinity), "#293t token: a non-finite clock fails closed");
+  ok(!n293tVerify("", tok, "Q-1", stored, NOW) && !n293tVerify(S, tok, "Q-1", null, NOW) && !n293tVerify("other-secret", tok, "Q-1", stored, NOW) &&
+     !n293tVerify(S, tok, "Q-1", { nonce: "", expiresAt: exp }, NOW),
+    "#293t token: no secret, no stored link, the wrong secret or an empty nonce ✗");
+  const printTok = n293tSignPrint(S, "quote", "Q-1", NOW);
+  ok(!n293tVerify(S, printTok, "Q-1", { nonce, expiresAt: Number(printTok.split(".")[0]) }, NOW),
+    "#293t token: a print token never verifies as a share token, even with the stored expiry forced to match");
+  ok(!n293tVerifyPrint(S, n293tSign(S, "Q-1", nonce, NOW + 60_000), "quote", "Q-1", NOW), "#293t token: a share token never verifies as a print token");
+  ok(n293tPath("Q-1", tok) === "/share/quote/Q-1/" + tok, "#293t token: the share path");
+
+  // ---- online state ----
+  const rev = (n: number, reason: "manual" | "sent", at: number, extra: Record<string, unknown> = {}) =>
+    ({ rev: n, at, by: "t", reason, note: "", name: "Sent name", value: 500, margin: 0.3, status: "sent", spec: { sections: [{ id: "rev" + n }] }, ...extra }) as unknown as N293tRev;
+  const quote = (status: string, revisions: N293tRev[], extra: Record<string, unknown> = {}) =>
+    ({ id: "Q-9", name: "Live name", customer: "Walk-in", customerId: "c1", locationId: "loc-live", value: 900, margin: 0.2, status, source: "estimator",
+       quoteType: "system", owner: "Live Owner", createdAt: 1, updatedAt: 9_000, history: [], review: {}, spec: { sections: [{ id: "live" }] },
+       quoteNote: "Live note", pdfOptions: { detail: "itemized" }, vendorQuotes: [{ id: "vq-live" }], revisions, ...extra }) as unknown as N293tQuote;
+  const sent = rev(2, "sent", 5000);
+  const revs = [rev(1, "manual", 1000), sent, rev(3, "manual", 7000)];
+  ok(n293tState(quote("draft", [])).kind === "unavailable" && n293tState(quote("sent", [rev(1, "manual", 1)])).kind === "unavailable",
+    "#293t state: never sent (no sent revision) → unavailable");
+  const st = n293tState(quote("sent", revs));
+  ok(st.kind === "ok" && st.rev.rev === 2 && !st.closed, "#293t state: sent → ok on the LATEST SENT revision, never a later manual one");
+  const lost = n293tState(quote("lost", revs));
+  const won = n293tState(quote("won", revs));
+  ok(lost.kind === "ok" && lost.closed && won.kind === "ok" && !won.closed, "#293t state: lost → ok + closed; won → ok, no banner");
+  ok(n293tState(quote("draft", revs)).kind === "revising", "#293t state: recalled to draft after a send → revising");
+  ok(["flame_test", "repair", "inspection", "consulting", "rental"].every((t) => n293tState(quote("sent", revs, { quoteType: t })).kind === "unavailable") &&
+     n293tState(quote("sent", revs, { quoteType: undefined })).kind === "ok",
+    "#293t state: service, consulting and rental quotes → unavailable; an absent quoteType is a system quote");
+  ok(n293tElig(quote("sent", revs)) === "ok" && n293tElig(quote("draft", revs)) === "revising" && n293tElig(quote("draft", [])) === "not-sent" &&
+     n293tElig(quote("sent", revs, { quoteType: "flame_test" })) === "not-shareable",
+    "#293t eligibility: ok / revising / not-sent / not-shareable");
+
+  // ---- the sent version of a quote ----
+  const df = { customer: "Sent Cust", locationId: "loc-sent", contactName: "Sent Contact", quoteNote: "Sent note", assumptions: "Sent assumptions",
+    installTimeframe: "Q4", preparedBy: "Sent Preparer", owner: "Sent Owner", termsText: "Sent terms", paymentTerms: "Net 30",
+    pdfOptions: { detail: "sectioned" }, portalFirm: null, source: "estimator" };
+  const withDf = rev(2, "sent", 5000, { docFields: df, spec: { sections: [{ id: "sentSec" }] }, vendorQuotes: [{ id: "vq-sent" }] });
+  const live = quote("sent", [rev(1, "manual", 1000), withDf, rev(3, "manual", 7000)], { shareLink: { nonce: "N", expiresAt: 1, createdAt: 1, createdBy: "x" } });
+  const a = n293tAsOf(live, withDf);
+  ok(a.name === "Sent name" && a.value === 500 && (a.spec as { sections: { id: string }[] }).sections[0].id === "sentSec" &&
+     (a.vendorQuotes as { id: string }[])[0].id === "vq-sent" && a.updatedAt === 5000 && a.revisions?.length === 2,
+    "#293t as-sent: the revision's name, spec, vendor quotes, value, date and rev number win over the live quote");
+  ok(a.quoteNote === "Sent note" && a.owner === "Sent Owner" && a.preparedBy === "Sent Preparer" && a.locationId === "loc-sent" &&
+     (a.pdfOptions as { detail: string }).detail === "sectioned",
+    "#293t as-sent: docFields win over the live header fields");
+  ok(a.shareLink === null, "#293t as-sent: the share link never rides into the document data");
+  const b = n293tAsOf(live, sent);
+  ok(b.quoteNote === "Live note" && (b.pdfOptions as { detail: string }).detail === "itemized" && b.name === "Sent name",
+    "#293t as-sent: a revision cut before #293 (no docFields) reads the live header and the revision's body");
+  ok(live.quoteNote === "Live note" && live.revisions?.length === 3 && live.name === "Live name", "#293t as-sent: the live quote is never mutated");
+  const day = new Date(5000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
+  ok(n293tHeader({ ...live, estNo: 1005 } as N293tQuote, withDf) === "EST-1005 · Rev 2 · sent " + day, "#293t header: EST-#### · Rev N · sent <date>");
+  ok(n293tView("bom") === "bom" && n293tView(["bom", "x"]) === "bom" && n293tView("x") === "narrative" && n293tView(undefined) === "narrative",
+    "#293t view param: ?view=bom, anything else is the narrative");
+
+  // ---- revision docFields ----
+  const frozen = n293tDocFields({ ...live, contactName: undefined, paymentTerms: "Net 30", termsText: "T", portalFirm: { generatedAt: 1, validUntil: 2 } } as unknown as N293tQuote);
+  ok(frozen.quoteNote === "Live note" && frozen.owner === "Live Owner" && frozen.locationId === "loc-live" && frozen.paymentTerms === "Net 30" &&
+     frozen.termsText === "T" && frozen.portalFirm?.validUntil === 2 && frozen.source === "estimator" && (frozen.pdfOptions as { detail: string } | null)?.detail === "itemized",
+    "#293t docFields: the printed header fields are copied");
+  ok(frozen.contactName === null, "#293t docFields: an absent contact freezes as null (the document then uses the primary contact, as live)");
+  const bare = n293tDocFields({ id: "Q-x", customer: "", status: "draft" } as unknown as N293tQuote);
+  ok(bare.pdfOptions === null && bare.portalFirm === null && bare.paymentTerms === null && bare.locationId === null && bare.quoteNote === "",
+    "#293t docFields: absent fields read as null / empty");
+  ok(!("shareLink" in frozen) && !("margin" in frozen) && !("tierMargin" in frozen) && !("review" in frozen), "#293t docFields: nothing internal is frozen");
+
+  // ---- BOM view ----
+  const narr = p293Props({ pdfOptions: { detail: "sectioned", pdfQty: false, pdfNotes: false, pdfPrices: false, pdfItemizedAppendix: true } });
+  const bom = n293tBom(narr);
+  ok(bom.detail === "itemized" && bom.pdfQty && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
+     bom.sections.every((s) => s.presentation === "itemized"),
+    "#293t BOM view: every system itemized, quantities and descriptions on, prices kept as chosen, appendix off");
+  ok(narr.sections.some((s) => s.presentation === "narrative") && narr.detail === "sectioned", "#293t BOM view: the input props are not mutated");
+  const narrHtml = p293Render(p293Props());
+  const bomHtml = p293Render(n293tBom(p293Props()));
+  ok(narrHtml.includes("Intro para.") && !narrHtml.includes(">Line 5<") && bomHtml.includes(">Line 5<") && !bomHtml.includes("Intro para."),
+    "#293t BOM view: the narrative system's intro gives way to its itemized lines");
+  const allItemized = p293Sections().map((s) => ({ ...s, presentation: "itemized" as const }));
+  ok(n293tOffersBom(p293Sections(), "itemized") && !n293tOffersBom(allItemized, "itemized") && n293tOffersBom(allItemized, "sectioned"),
+    "#293t BOM view: the toggle is offered only when the body left some system un-itemized");
+
+  // ---- client IP ----
+  const h = new Headers({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1", "x-real-ip": "198.51.100.1" });
+  ok(n293tIpH(h) === "203.0.113.9" && n293tIp(new Request("http://x/", { headers: h })) === "203.0.113.9", "#293t ip: the first x-forwarded-for hop, from headers or a Request");
+  ok(n293tIpH(new Headers({ "x-real-ip": " 198.51.100.1 " })) === "198.51.100.1" && n293tIpH(new Headers()) === "", "#293t ip: x-real-ip fallback, else empty");
+
+  // ---- copy ----
+  ok(n293tCopy.shareInactive === "This link isn’t active. Ask your Peak rep for a new one." &&
+     n293tCopy.revising === "This estimate is being revised — your Peak rep will send the updated version." &&
+     n293tCopy.closed === "This estimate is closed." && n293tCopy.portalUnavailable === "This estimate isn’t available online.",
+    "#293t copy: the customer-facing cards read as specified");
+  const viewSrc = readFileSync(join(process.cwd(), "src/lib/quote-share/view.ts"), "utf8");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/quote-pdf\/state"|@\/lib\/estimate-number")/m.test(viewSrc), "#293t view.ts stays client-safe: value imports only state + estimate-number");
+  const tokSrc = readFileSync(join(process.cwd(), "src/lib/quote-share/token.ts"), "utf8");
+  ok(tokSrc.includes("timingSafeEqual(want, have)") && tokSrc.includes("`share:quote:${quoteId}:${nonce}:${exp}`"), "#293t token: constant-time compare over the share: domain");
+}
