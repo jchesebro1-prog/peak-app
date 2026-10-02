@@ -297,7 +297,7 @@ See `.env.example`.
     (`src/lib/fixtures-migrate.ts`, `npm run fixtures:convert`) keeps
     `fa-…`/`SA-…` ids, leaves `settings.fixtureAssemblies` as a backup,
     and moves the accessory graph to one `fixture:<id>` scope. Estimator
-    and Quick Design read fixtures through `fixtureAssembliesFrom()` with
+    and Quick Design read fixtures through `allAssembliesFrom()` with
     identical totals. Remaining is Jeff-gated: run the conversion on
     production and review any "needs review" fixtures. Decisions
     D294–D300; punch item #210.
@@ -639,6 +639,30 @@ See `.env.example`.
     photo; never deletes or replaces, and never re-adds a photo someone
     removed from a part. Remaining is Jeff-gated: try one manufacturer on
     production (file names from Drive need the #283 setup). Punch item #294.
+
+35. ✅ **Equipment racks** (#296, D573–D582) — a fourth assembly kind,
+    `rack`, in the Assembly Builder (`/design/assemblies` → Racks): a rack
+    form (scope, 1–60 RU, depth, numbering, rack-level parts) beside an RU
+    sidebar built on one shared, controlled `RackElevation`
+    (`src/components/rack/`; arm-and-place, drag, shelves with half/third
+    lanes, keyboard, undo/redo, Fill blanks, live RU/weight/W/BTU/amps with
+    "at least" when data is unknown). All rules live in the pure engine
+    `src/lib/rack/` (`layout.ts` placement/sanitize/reparent, `rules.ts`
+    validate/totals/firstFit, `geometry.ts` + `svg.ts` — ONE elevation SVG
+    used by the sidebar and the printed sheets). Catalog parts gain optional
+    rack data (RU, width, depth, weight, W, max W, outlet capacity, mount
+    face, airflow; absent = unknown, never zero) in the part editor and an
+    additive CSV at `/catalog/rack-data`. A rack prices like any assembly
+    (placements grouped by SKU for the Estimator, D574), draws on its
+    scope's Grid layer, and an Estimator rack line carries `rackId`.
+    Submittal: `/design/assemblies/rack/[id]` (elevation, schedule,
+    power/heat), a streamed zip at `/api/racks/[id]/submittal` (Chrome PDFs
+    via the signed `/print/rack/[id]`, schedule.csv, pdf-lib-merged
+    datasheets with a gap cover), a `racks/` folder in client packages and an
+    Equipment Racks section (27 11 16) in the package's D94 spec. Not in the
+    portal. Remaining is Jeff-gated: fill rack data for the gear Peak specs
+    (Rack data sheet), set the default blank/vent panels, and check a zip and
+    a package .docx on a preview deploy. Punch item #296.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

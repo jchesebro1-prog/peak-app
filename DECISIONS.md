@@ -8907,3 +8907,82 @@ bounds it); the link nonce reaches signed-in staff browsers through `/api/sync/p
 follow-up. Smoke can't reach the rendered document, since no seeded quote has a sent revision: it covers the 200 cards
 and compiles the six new routes, and the document path is covered by harness renders, loader DB checks and the browser
 check.
+
+## D573. Rack spec defaults adopted for the open questions (#296, 2026-10-02)
+
+Spec set `docs/superpowers/specs/2026-10-01-rack-*.md` (RK-1..RK-4 locked by Jeff) left open questions with
+defaults; all were taken as written. A rack holds catalog SKUs only (no nested assemblies; a template rack is a
+duplicated record). Scope is required, from `SYSTEM_SCOPES`, and picks the Grid layer like a System. The schedule ships
+as PDF + CSV. 23 in racks are stored (`widthIn: 23`, with an adapter warning) but the UI offers 19 in only. The layout is
+whole-RU: a catalog `ruHeight` of 0.5 is laid out rounded up, with a warning. 1–60 RU, default 42. Heat warning: more
+than 1500 W in any 10 contiguous RU with no vent panel. The D94 section is labelled "27 11 16 — Communications Racks,
+Frames and Enclosures" until Jeff confirms the CSI number.
+
+## D574. Placements group by SKU for the Estimator (#296, 2026-10-02)
+
+The Estimator keys component quantities by SKU, so `fixtureLineParts` emits rack-level parts first, then one line per
+placed SKU in RU order: qty = non-optional placements of that SKU; a SKU whose placements are all optional becomes a
+qty-0 add-on; per-placement `costOverride`s average into the line's unit cost (the total is exact). A SKU may not be
+both placed and a rack-level part (save error). A SKU with some optional and some included placements gets a warning:
+the optional copies are not offered as a separate add-on.
+
+## D575. Shelves (#296, 2026-10-02)
+
+A shelf occupies its own RU. Devices on it (`shelfId`) take no RU of their own and sit in lanes inside the shelf's
+lanes ("Wider than the shelf." otherwise). When the tallest device is taller than the shelf, the difference extends the
+shelf's occupied span upward, and that space must be free. A device with no known height is a warning. A shelf with
+devices can't be removed, and its width/lane can't change, until they are moved ("Move the devices on this shelf
+first.").
+
+## D576. Rack data fields, passive parts and outlet capacity (#296, 2026-10-02)
+
+Beyond the spec's field list, catalog parts get `powerCapacityWatts` (PDU/UPS outlet capacity) for the power page's
+"PDU capacity … — N% loaded" line. Blank, vent and shelf placements with unknown watts count as 0 W and are never
+flagged; blanks and vents are not flagged for depth or catalog RU height either (weight still counts). Every other
+unknown value is excluded from the sums and makes the figure read "at least …" — keyed off `totals.unknownWatts` /
+`unknownWeight` everywhere (sidebar, list row, power sheet), never off the missing-data list length.
+
+## D577. pdf-lib for the datasheet package; sharp for the .docx elevation (#296, 2026-10-02)
+
+No PDF merge existed, so `pdf-lib` 1.17.1 (exact pin) merges each placed part's datasheet behind a cover index that
+lists every gap ("No datasheet on file.", "Left out — package size limit", unreadable/unmergeable PDFs); caps 25 MB per
+document, 60 MB total; reads stop 15 s after the 90 s render deadline. The zip is streamed in 256 KB chunks (a buffered
+function response is capped near 4.5 MB on Vercel). The D94 docx embeds a PNG of the front elevation rasterized by
+`sharp` from the same SVG with absolute strokes; if rasterizing fails, or the server has no fonts (the drawing with and
+without its text comes out pixel-identical), the section points to `racks/<rack>/elevation.pdf` instead.
+
+## D578. Quote lines carry rackId; submittals read the rack live (#296, 2026-10-02)
+
+An Estimator line built from a rack carries `rackId`. There is no item sanitizer, so `racksInQuote` validates the id
+(`/^SA-[A-Z0-9-]{1,60}$/`, kind rack) at read time. Client packages and submittals read the rack record live — there is
+no frozen layout per quote, same as Grid `asm:` parts. Quote packages now expand a rack line into its members (through
+`gridSpecBomRows`), so the rack's equipment reaches `datasheets/` and the spec instead of an `SA-` gap.
+
+## D579. Default blank and vent panels (#296, 2026-10-02)
+
+One settings blob `rack_defaults` stores `{ defaults: { blankSku?, ventSku? } }` — nested because `setBlob` merges
+top-level keys, so a flat shape could never clear a SKU. Set from the sidebar's Rack hardware tray by anyone with
+`create` (`saveRackDefaultsAction`).
+
+## D580. Placement face in the Both view (#296, 2026-10-02)
+
+The spec said parts land on the front "when both". The sidebar instead lands a part on the panel it was dropped on,
+because that is the panel the ghost was checked against; a part whose catalog `mountFace` is rear always lands on the
+rear.
+
+## D581. Internal parts and optional rack-level parts in rack outputs (#296, 2026-10-02)
+
+Rack-level parts in an internal category (Labor, via the portal's `isInternalCategory` rule) are priced as usual but
+left out of rack totals, missing-data counts, the schedule's rack-level table, the datasheet package and gaps, and they
+are skipped when an assembly is expanded into a parts list (`gridSpecBomRows`'s optional `isInternal`, passed by the Grid
+package, the quote package and the bid-spec door). Rack-level parts with qty 0 (optional add-ons) count only toward the
+"with options" figures, never toward outlet capacity or unknown counts, so the screen and the printed submittal agree.
+
+## D582. Rack v1 residuals and follow-ups (#296, 2026-10-02)
+
+Not in v1: the standalone D94 spec route (`/api/spec/[id]/docx`) has no racks section (client packages do); the docx
+shows the front elevation only (rear devices are in the table); the Grid's Device Layouts / Enclosure view adopting the
+shared `RackElevation` (spec wave 4); racks in the portal; a cable/patch schedule; datasheet extraction from Part
+Documents. Known: reserved slots print as a gray tone (the shared screen SVG's thin hatch); the sheet footer prints once
+per sheet, not per page of a long schedule; the rack-data export's default scope includes labor SKUs; a stored layout
+that fails current rules opens flagged "needs review" and its config fields refuse until it is fixed.

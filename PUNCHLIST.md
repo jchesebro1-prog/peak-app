@@ -10472,3 +10472,52 @@ file with every amount blank shows one message, "(2 more rows with the same kind
 Gates: tsc 0; test:specs 11,159 PASS / 0 FAIL (+7, on the #294 head); test:smoke 197/197 ALL PASSED; eslint 0 on the changed src files.
 
 ---
+
+## 296. Design — equipment racks in the Assembly Builder (RU sidebar, rack data, submittal set) — DONE 2026-10-02 (D573–D582)
+
+**Asked by Jeff 2026-10-01** (brainstorm, locked decisions RK-1..RK-4): a new `rack` assembly kind with a sidebar
+rack-unit editor that builds the rack, rack data on catalog parts, one shared rack-elevation component, and outputs that
+carry the layout into a submittal. Specs: `docs/superpowers/specs/2026-10-01-rack-*.md` (handoff
+`2026-10-01-rack-00-handoff.md`). **Plan:** `docs/superpowers/plans/2026-10-02-rack-assembly.md` (13 tasks, each
+task-reviewed, plus a whole-branch review and fix round). No migrations; one new dependency (`pdf-lib` 1.17.1).
+
+What shipped:
+- **Catalog rack data** (part editor → Rack data; additive CSV at `/catalog/rack-data`, blank cells never erase):
+  rack mount, RU height, width (full/half/third/23 in), depth, weight, typical/max watts, outlet capacity, mount face,
+  airflow, notes. Absent = unknown, never zero.
+- **Rack engine** `src/lib/rack/`: placement rules (bounds, same-face/lane overlap, half/third lanes, shelves with
+  clearance), reparent/move/remove, validate (depth clash, airflow, heat, unknown SKU, height mismatch), totals (RU,
+  lb, W, max W, BTU/hr, amps at 120 V, outlet capacity, "at least" when unknown), undo history.
+- **Builder** `/design/assemblies` → Racks: rack form + RU sidebar (`src/components/rack/`): arm-and-place, drag
+  (Alt copies), shelves, keyboard (arrows, Delete, ⌘Z/⇧⌘Z), placement menu (face, lanes, overrides, optional,
+  replace, duplicate ×N), default blank/vent panels + Fill blanks, live totals/issues/coverage chips.
+- **Quoting**: a rack prices like any assembly (Estimator, Quick Design, Grid on its scope's layer); an Estimator rack
+  line carries `rackId`; quote packages expand rack members. Not in the portal.
+- **Submittal**: `/design/assemblies/rack/[id]` (elevation · schedule · power/heat, Print); zip at
+  `/api/racks/[id]/submittal` (Chrome PDFs, schedule.csv, merged datasheets with a gap cover, 00-gaps.txt; `?part=csv`
+  for the CSV alone); client packages get `racks/<rack>/` and the D94 spec an Equipment Racks section (27 11 16).
+
+Gates (final head, merged with main): tsc 0; test:specs __SPECS__ PASS / 0 FAIL (baseline 11,159); eslint 0 errors /
+89 warnings with `--ignore-pattern scripts/test-review-and-spec.ts` (bare `eslint` crashes on that 46k-line file with a
+react-hooks RangeError — pre-existing on main, flagged separately); `next build` OK; test:smoke __SMOKE__ ALL PASSED.
+Browser (scratch datadir, test parts seeded into the scratch DB only): built a rack by click and drag, half-width
+pairs, a shelf with two half-width receivers, overlap refusal with reason, arrow-key move, undo/redo, Delete, default
+blank + Fill blanks, save/reopen; the Estimator lists it under Racks at the builder's price; the staff submittal page
+renders; a real zip (443 KB, 5.3 s) held all six files with three real Chrome PDFs.
+
+**For Jeff.**
+1. Fill rack data for the gear Peak specs: Catalog → Datasheets → Rack data sheet (download, fill, upload, Preview,
+   Import). Enter **0 W** for passive rack-level parts (frame, rails, casters, blanks) or totals keep reading "at least".
+2. Open a rack and set the default blank and vent panels (Rack hardware tray), so Fill blanks works.
+3. On a preview deploy (it writes the production DB), download one rack's zip with real datasheets (confirms the
+   streamed zip and the datasheet merge) and build one client package with a rack (check the .docx elevation image has
+   its RU numbers and labels; if the server has no fonts it says "see racks/…/elevation.pdf" instead).
+4. Confirm the CSI number for the rack section (D573 uses 27 11 16).
+
+**Follow-ups (not logged as items yet):** the standalone D94 spec route has no racks section and still lists an
+Estimator assembly line as one `SA-` row; Grid Device Layouts / Enclosure adopting the shared `RackElevation` (spec
+wave 4); rear elevation in the docx; rack-data export default scope includes labor SKUs (see D582).
+
+**Rollback.** Safe. Racks live in the existing `subassemblies` doc table as `kind: "rack"`; pre-#296 code coerces an
+unknown kind to `fixture`, so a rolled-back deploy would show racks as broken fixtures (no light engine) without
+crashing. Catalog rack keys are ignored by old code. The `rack_defaults` blob is unused by old code. No migrations.
