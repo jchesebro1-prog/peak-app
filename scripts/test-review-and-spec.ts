@@ -43849,3 +43849,32 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2);
   ok(!gone.ok && gone.error === "That estimate is no longer available", "#293s load (DB): a deleted quote's entry is refused with the spec's message");
 }
+
+/* ======================================================================
+   #293 slice 2 — library modal + Load wiring (client components; proven
+   by source like the other client checks — React isn't mounted here).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const clientImportsServer = (s: string) =>
+    /^import (?!type)[^\n]*from "(@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/narrative\/(library|photos|system-library-index|load-system))|\.\/copy-pricing)/m.test(s);
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/^"use client";/.test(modal) && !clientImportsServer(modal) && !clientImportsServer(cli),
+    "#293s UI: the library modal is a client module; neither it nor the Estimator value-imports a store or server-only module");
+  ok(modal.includes("searchSystemLibraryAction(") && modal.includes("getSystemLibraryEntryAction(") && modal.includes("loadLibrarySystemAction(") && modal.includes("Has narrative"),
+    "#293s UI: the modal searches, reads one entry for the detail pane, and loads; the Has narrative chip filters");
+  ok(modal.includes("libraryRowMeta(h)") && modal.includes("libraryRowCounts(h)") && modal.includes("No sent or won systems match.") && modal.includes("Pick a system to see its intro and key products."),
+    "#293s UI: rows show customer · EST · status · date and counts; empty states");
+  ok(modal.includes("Re-priced at today's catalog and this estimate's tier. Vendor-quote lines are left out.") && modal.includes("Load system"),
+    "#293s UI: Load says how it prices");
+  ok(modal.includes("mergeNarrative(p.target, sources, opts)") && modal.includes("mergeNotice(preview)") && modal.includes("Tick one or more systems to merge.") && modal.includes(">Merge<"),
+    "#293s UI: merge mode previews with mergeNarrative before applying");
+  ok((modal.match(/\} catch \{/g) || []).length >= 3 && !modal.includes("window.confirm"), "#293s UI: every server await in the modal is caught (a throw can't unmount the Estimator)");
+  ok(cli.includes("+ From library…") && cli.includes("<SystemLibraryModal") && cli.includes('mode="load"') && cli.includes("tierMargin={tierMargin}"),
+    "#293s UI: + From library… opens the modal in load mode with this estimate's tier");
+  const place = cli.slice(cli.indexOf("const placeLibrarySystem = "), cli.indexOf("const pushItems = "));
+  ok(place.includes("placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct })") && place.includes("selectSystem(newId)") && place.includes('verb: "Loaded"') && place.includes("loadNotice(res)"),
+    "#293s UI: a loaded system gets fresh ids (blocks remapped), lands after the active system, is selected, and the notice reports the re-price");
+  ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded";') && cli.includes('moveNotice.ok && moveNotice.verb === "Loaded" ?'), "#293s UI: the result banner shows the Load notice");
+}
