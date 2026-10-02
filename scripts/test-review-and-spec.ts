@@ -10717,6 +10717,7 @@ seeded()
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
   .then(() => narrativeFinal293AsyncChecks())
+  .then(() => systemLibrary293sAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -38102,7 +38103,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   ok(modal.includes("useSwallowOpeningDoubleClick()") && modal.includes("onClickCapture={swallowOpeningDoubleClick}") && modal.includes('"Update track" : "Add track"') && modal.includes("No track series yet — set one up in"),
     "#274B modal: swallows the opening double-click, Update/Add track, and the empty-state link to Track series");
   ok(curtainModal.includes("Add track") && curtainModal.includes("<TrackFields draft={track}"), "#274B curtain modal: the Add track toggle shows the track fields");
-  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(acts), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
+  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(src("src/app/(app)/estimator/copy-pricing.ts")), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
   ok(page.includes("listTrackSeries()") && page.includes("trackSeries={trackSeries}") && page.includes("trackParts={trackParts}"), "#274B page: the Estimator loads the series and their live catalog parts");
 }
 
@@ -43746,4 +43747,105 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
   const serverImport = (src: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/session|lib\/blob|lib\/narrative\/(library|photos|system-library-index|load-system))/m.test(src);
   ok(!serverImport(rd("src/lib/narrative/system-library.ts")) && !serverImport(rd("src/lib/narrative/merge.ts")),
     "#293s pure: system-library.ts and merge.ts value-import no store, db, session, blob or server-only narrative module (client-safe)");
+}
+
+/* ======================================================================
+   #293 slice 2 — server: the copy-pricing helper shared by Copy and Load,
+   the Load core (re-reads the quote, re-prices, drops vendor lines), the
+   index cache and its invalidation, and the three library actions.
+   ====================================================================== */
+import { systemLibraryIndex as n293sIndex, invalidateSystemLibrary as n293sInvalidate } from "@/lib/narrative/system-library-index";
+import { loadLibrarySystem as n293sLoad } from "@/lib/narrative/load-system";
+import {
+  create as n293sQCreate, update as n293sQUpdate, addQuoteRevision as n293sQAddRev, remove as n293sQRemove,
+} from "@/lib/stores/quotes";
+import { mergeUpsert as n293sMergeUpsert } from "@/lib/stores/catalog";
+import { tierSeedPrice as n293sSeed } from "@/app/(app)/estimator/tier-reprice";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("), acts.indexOf("\n}\n", acts.indexOf("export async function copySystemToEstimateAction(")));
+  ok(copyFn.includes("const { catalog, fixtures } = await copyPricingFor(items);") && !copyFn.includes("listFixtures(") && copyFn.includes("copySectionForTarget(sanitizeSystemSell(section),"),
+    "#293s copy-pricing: Copy system loads today's catalog + fixtures through the shared copyPricingFor helper");
+  const cp = rd("src/app/(app)/estimator/copy-pricing.ts");
+  ok(cp.includes("export async function copyPricingFor(") && cp.includes("allAssembliesFrom(fixtureRecords, parts)") && cp.includes("c.found && (c.cost > 0 || c.costOverride !== undefined)"),
+    "#293s copy-pricing: the helper keeps #266's fixture resolution and the missing-part fallback");
+  const ls = rd("src/lib/narrative/load-system.ts");
+  ok(ls.includes("copyPricingFor(picked.section.items)") && ls.includes("copySectionForTarget(sanitizeSystemSell(picked.section),") && ls.includes("invalidateSystemLibrary()"),
+    "#293s load: Load re-prices through the same helper + copySectionForTarget, and a gone key invalidates the index");
+  const la = rd("src/app/(app)/estimator/library-actions.ts");
+  ok(/^"use server";/.test(la) && ["searchSystemLibraryAction", "getSystemLibraryEntryAction", "loadLibrarySystemAction"].every((f) => la.includes(`export async function ${f}(`)) &&
+     (la.match(/await requireUser\(\);/g) || []).length === 3 && !la.includes("requirePerm("),
+    "#293s actions: the three library actions are server actions, each behind requireUser (spec §4.1)");
+  ok(la.includes(".map(toLibraryHit)") && la.includes("LIBRARY_QUERY_MAX"), "#293s actions: search answers hits only (no text bodies) and caps the query");
+  ok(la.includes("limit: LIBRARY_SEARCH_LIMIT") && !/limit:\s*opts/.test(la),
+    "#293s actions: search passes the pure search a fixed finite integer limit (never a client-supplied or NaN one)");
+  const qs = rd("src/lib/stores/quotes.ts");
+  const setStatusFn = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("async function reconcileRewardsSafely("));
+  const removeFn = qs.slice(qs.indexOf("export async function remove("), qs.indexOf("\n}\n", qs.indexOf("export async function remove(")));
+  ok(setStatusFn.includes("if (out && moved.value) await invalidateSystemLibrarySafely();") && removeFn.includes("await invalidateSystemLibrarySafely();"),
+    "#293s index: every real status transition and a quote delete invalidate the library");
+  ok(qs.includes('await import("@/lib/narrative/system-library-index")'), "#293s index: quotes.ts reaches the index by dynamic import (no import cycle)");
+  const ix = rd("src/lib/narrative/system-library-index.ts");
+  ok(ix.includes("const TTL_MS = 5 * 60 * 1000;") && ix.includes("generation++"), "#293s index: a 5-minute per-process cache with a generation guard (portalIndex idiom)");
+}
+
+async function systemLibrary293sAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "lib-part");
+  const QID = fixtureId(293, "lib-sent");
+  const QDRAFT = fixtureId(293, "lib-draft");
+  const QWON = fixtureId(293, "lib-won-gone");
+  await n293sMergeUpsert(P, { desc: "Test293 Lib part", category: "Test293 Cat", unit: "ea", list: 200, cost: 120 });
+  registerFixture("catalog_parts", P);
+  const seeded = n293sSeed({ cost: 100 }, 0.3);
+  const section = {
+    id: "sysLib", name: "Test293 Library Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
+    presentation: "narrative", narrative: "Library intro 293.", room: "Stage left",
+    items: [
+      { id: 1, sku: P, desc: "Lib part", qty: 2, unit: "ea", cost: 100, price: seeded },
+      { id: 2, sku: "VQ-293", desc: "Vendor gear", qty: 1, unit: "ea", cost: 50, price: 80, vendorQuoteId: "vq-293" },
+    ],
+    keyProducts: [{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }],
+  } as unknown as N293sSec;
+
+  // A sent quote, then a post-send edit that must never reach the library.
+  await n293sQCreate({ id: QID, name: "#293 lib", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QID);
+  await n293sQUpdate(QID, { status: "sent" });
+  await n293sQAddRev(QID, { by: "Test", reason: "sent", note: "Sent to customer" });
+  await n293sQUpdate(QID, { spec: { sections: [{ ...section, name: "Test293 Edited after send", narrative: "Leaked" }], mobs: [] } });
+  // A draft with the same system.
+  await n293sQCreate({ id: QDRAFT, name: "#293 lib draft", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [{ ...section, name: "Test293 Draft only" }], mobs: [] } });
+  registerFixture("quotes", QDRAFT);
+
+  n293sInvalidate();
+  const idx = await n293sIndex();
+  const mine = idx.filter((e) => e.quoteId === QID);
+  ok(mine.length === 1 && mine[0].key === `${QID}:1:sysLib` && mine[0].systemName === "Test293 Library Lighting" && mine[0].intro === "Library intro 293.",
+    "#293s index (DB): a sent quote edited after send is indexed from its sent revision");
+  ok(!idx.some((e) => e.quoteId === QDRAFT) && !idx.some((e) => e.systemName === "Test293 Edited after send"), "#293s index (DB): drafts and post-send edits never appear");
+
+  // The cache holds until invalidated; quotes.remove() invalidates on its own.
+  await n293sQCreate({ id: QWON, name: "#293 lib won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QWON);
+  await n293sQUpdate(QWON, { status: "won" });
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): a cached index doesn't see a quote written without a status transition");
+  n293sInvalidate();
+  ok((await n293sIndex()).some((e) => e.key === `${QWON}:live:sysLib`), "#293s index (DB): after invalidation a won-without-send quote is indexed from its live spec");
+
+  // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
+  const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
+  ok(r.ok && r.section.items.length === 1 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesDropped === 1,
+    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line left out");
+  ok(r.ok && r.section.name === "Test293 Library Lighting" && r.section.narrative === "Library intro 293." && r.section.presentation === "narrative" &&
+     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
+    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry; the vendor line's block and the room don't");
+  ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
+  const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
+  ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
+  ok(!(await n293sLoad("garbage", 0.2)).ok, "#293s load (DB): a malformed key is refused");
+  await n293sQRemove(QWON);
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): deleting a quote drops it from the library (remove invalidates)");
+  const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2);
+  ok(!gone.ok && gone.error === "That estimate is no longer available", "#293s load (DB): a deleted quote's entry is refused with the spec's message");
 }

@@ -32,10 +32,9 @@ import {
   get as getInspection,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import { getMany as catalogGetMany, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
-import { listFixtures } from "@/lib/stores/fixtures";
-import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
-import { copySectionForTarget, type CopyCatalogPart, type CopyFixture } from "./copy-system";
+import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
+import { copySectionForTarget } from "./copy-system";
+import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
@@ -914,46 +913,8 @@ export async function copySystemToEstimateAction(
   const { resolveTier } = await import("@/lib/pricing-tiers");
   const items = Array.isArray(section?.items) ? section.items : [];
 
-  /* Today's catalog, for only the SKUs this section names — plus, when a line
-     is a catalog-backed fixture, the resolved fixture records (costOverride
-     applied) and their own parts. */
-  const skus = new Set<string>();
-  const fixtureIds = new Set<string>();
-  for (const it of items) {
-    if (it?.sku) skus.add(it.sku);
-    const comps = Array.isArray(it?.components) ? it.components : [];
-    if (comps.length) {
-      // #274: a track line's parts are plain catalog parts — no fixture record.
-      if (!it.track) fixtureIds.add(it.fixtureId || it.sku);
-      comps.forEach((c) => c?.sku && skus.add(c.sku));
-    }
-  }
-  let fixtureRecords: FixtureRecord[] = [];
-  if (fixtureIds.size) {
-    fixtureRecords = (await listFixtures()).filter((r) => fixtureIds.has(r.id));
-    fixtureRecords.forEach((r) => fixtureSkus(r).forEach((s) => skus.add(s)));
-  }
-  const parts = skus.size ? await catalogGetMany([...skus]) : [];
-  const catalog = new Map<string, CopyCatalogPart>();
-  for (const p of parts) {
-    const cost = Number(p.cost);
-    // A part with no real cost today is no basis for re-costing a line.
-    if (!p.sku || !(Number.isFinite(cost) && cost > 0) || catalog.has(p.sku)) continue;
-    catalog.set(p.sku, { sku: p.sku, cost, list: Number(p.list) || 0 });
-  }
-  const fixtures = new Map<string, CopyFixture>();
-  if (fixtureRecords.length) {
-    for (const a of allAssembliesFrom(fixtureRecords, parts)) {
-      fixtures.set(a.id, {
-        id: a.id,
-        // A part missing from today's catalog falls back to the line's own
-        // numbers rather than pricing at the resolver's 0.
-        components: a.components
-          .filter((c) => c.found && (c.cost > 0 || c.costOverride !== undefined))
-          .map((c) => ({ sku: c.sku, cost: c.cost, list: c.list })),
-      });
-    }
-  }
+  // #293 slice 2: today's catalog + resolved fixtures — shared with Load system.
+  const { catalog, fixtures } = await copyPricingFor(items);
 
   /* The destination tier. */
   const sourceTier = usableTierMargin(sourceContext?.tierMargin);
