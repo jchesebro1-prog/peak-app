@@ -10273,7 +10273,7 @@ read "Link only" and those rows appear under "Link to fetch"; a bulk Fetch links
 files, more of the 45 s budget per run). Watch item: client packages now include manuals (often 10-25 MB) in the
 in-memory zip.
 
-## 293. Estimates — narrative-first client preview (key products, saved paragraphs, intros, appendix) — Slice 1 DONE 2026-10-01 (D539–D545)
+## 293. Estimates — narrative-first client preview (key products, saved paragraphs, intros, appendix) — Slices 1–2 DONE 2026-10-01 (D539–D545, D549–D552)
 
 **Slice 1 done.**
 - **Key products.** Any eligible line can be starred into a key product (★ on the row, or + Key product in the
@@ -10298,7 +10298,23 @@ was not exercised in a browser — local dev has no Blob store; harness-covered.
 **Rollback.** No hazard: pre-#293 code ignores `keyProducts` and drops the appendix key on its next save, which is
 harmless.
 
-**Slice 2 (next).** System library, Load system, Merge narrative (spec §4, §8.2).
+**Slice 2 done (D549–D552).**
+- **System library.** + From library… (under + Add system) searches every system on a sent or won estimate, read
+  from its latest sent revision, by name, customer, EST number, sku or description. Won comes first, then newest.
+  Drafts, post-send edits, lost quotes, customer-built portal quotes and Daylite history never appear.
+- **Load system** adds the system re-priced at today's catalog and this estimate's tier (Copy system's own pricing,
+  now shared through `copy-pricing.ts`). Its narrative and key products carry; vendor-quote lines are left out and
+  counted.
+- **Merge narrative** (narrative column ⋯) appends intros and anchors key products onto lines this system already
+  has, with a preview, and reports what it skipped.
+- **Plan:** `docs/superpowers/plans/2026-10-01-narrative-slice2.md`.
+
+Gates: tsc 0; test:specs 10,626 PASS / 0 FAIL (96 for #293 slice 2); test:smoke 187/187 ALL PASSED; `next build` OK;
+eslint 0 on the 12 changed src files.
+Browser: Browser-verified on a scratch datadir: built and won an estimate with a key product + intro; '+ From library…'
+listed it (Won, 1 line, 1 key product); Load placed it as a new system with its line, intro and starred key product
+(room dropped) and the 'Loaded … from EST-1009' banner; Merge narrative from the ⋯ menu appended the intro to an empty
+system and reported the key product it couldn't anchor; no console errors.
 **Slice 3.** Portal estimate page, signed share link, Narrative / BOM toggle (spec §5, §8.3).
 
 **For Jeff.**
@@ -10306,3 +10322,6 @@ harmless.
 - Toggle title says "every narrative system's" though By-section prints every system — reword?
 - Paragraphs live on catalog parts, so take `npm run db:export` before Clear catalog price list or the go-live wipe.
 - Preview deploys share the production DB, so a paragraph or intro saved on a preview is a production write.
+- Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.
+- Portal-built quotes are excluded from the library — keep that?
+- Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
