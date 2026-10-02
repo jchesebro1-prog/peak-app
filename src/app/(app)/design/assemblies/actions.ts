@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { clampPickerLimit, fixtureSkus, resolveFixture, sanitizeFixtureInput, type FixtureInput } from "@/lib/fixture-assemblies";
@@ -10,6 +11,8 @@ import { fixturePairs, fixtureRef } from "@/lib/part-docs/assembly-graph";
 import { setOwnDatasheet, syncAccessoryLinks } from "@/lib/stores/part-accessory-links";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
+import { saveRackDefaults } from "@/lib/stores/rack-defaults";
+import type { RackDefaults } from "@/lib/rack/defaults";
 import type { PartHit } from "./fixture-form";
 
 const revalidateConsumers = () => {
@@ -108,4 +111,14 @@ export async function setOwnDatasheetAction(parentSku: string, accessorySku: str
   revalidatePath("/design/assemblies");
   revalidatePath("/catalog/documents");
   return { ok: true };
+}
+
+/** #296 (D579) — the rack tray's default blank and vent SKUs (one
+ *  `rack_defaults` blob). Anyone with Create; returns what was stored. */
+export async function saveRackDefaultsAction(input: RackDefaults): Promise<{ ok: true; value: RackDefaults } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "Needs the Create permission." };
+  const value = await saveRackDefaults(input);
+  revalidatePath("/design/assemblies");
+  return { ok: true, value };
 }

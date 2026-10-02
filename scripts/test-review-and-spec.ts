@@ -10757,6 +10757,7 @@ seeded()
   .then(() => photoSheetFinalAsyncChecks())
   .then(() => rack296SheetAsyncChecks())
   .then(() => rack296KindAsyncChecks())
+  .then(() => rack296DefaultsAsyncChecks())
   .then(() => curtain292AsyncChecks())
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
@@ -44656,6 +44657,138 @@ import type { RackPlacement as C296ePlacement, RackLayout as C296eLayout, RackPa
   ok(!ov1.includes("narrows it") && ov1.includes('aria-live="off"') && !ov1.includes('role="status"'), "#296 rack component: no dead multi-select branch; the red caption is not announced (the <title> carries it)");
   ok(texts[0].includes("data-rack-elevation") && texts[2].includes('closest<HTMLElement>("[data-rack-elevation]")') && texts[2].includes("removedRef.current = true"), "#296 rack component: after Remove, focus falls back to the elevation panel");
   ok(texts[0].includes("shelfId?: string") && ov1.includes("reparent(layout, p.id, to)"), "#296 rack component: onPlace/onMove carry shelfId and the drag ghost checks through reparent");
+}
+
+/* ===== #296 — rack builder ===== */
+import * as c296bSide from "@/lib/rack/sidebar";
+import * as c296bDefaults from "@/lib/rack/defaults";
+import { existsSync as c296bExists, readFileSync as c296bRead } from "node:fs";
+import type { RackPlacement as C296bPlacement, RackLayout as C296bLayout, RackPartInfo as C296bInfo } from "@/lib/rack/types";
+{
+  type Fn = (...a: never[]) => unknown;
+  const side = c296bSide as unknown as Record<string, Fn | undefined>;
+  const defs = c296bDefaults as unknown as Record<string, Fn | undefined>;
+  const call = <T,>(f: Fn | undefined, ...a: unknown[]): T | undefined => {
+    if (typeof f !== "function") return undefined;
+    try { return (f as unknown as (...x: unknown[]) => T)(...a); } catch { return undefined; }
+  };
+  const P = (o: Partial<C296bPlacement> & { id: string }): C296bPlacement => ({ kind: "device", sku: "S", ruStart: 1, ruHeight: 1, face: "front", ...o, id: "RP-" + o.id });
+  const L = (ps: C296bPlacement[], ruCount = 12): C296bLayout => ({ config: { ruCount, widthIn: 19, numbering: "bottom-up" }, placements: ps });
+  type Edit = { ok: true; layout: C296bLayout } | { ok: false; reason: string };
+  const run = (f: ((l: C296bLayout) => Edit) | null | undefined, l: C296bLayout): Edit | undefined => (f ? f(l) : undefined);
+
+  // ---- sanitizeRackDefaults ----
+  const sd = (v: unknown) => call<Record<string, unknown>>(defs.sanitizeRackDefaults, v);
+  ok(JSON.stringify(sd({ blankSku: "  BLK-1U ", ventSku: "VNT-1U", extra: "x" })) === JSON.stringify({ blankSku: "BLK-1U", ventSku: "VNT-1U" }), "#296 rack builder: sanitizeRackDefaults keeps the two trimmed SKUs and drops other keys");
+  ok(JSON.stringify(sd({ blankSku: "x".repeat(81), ventSku: "   " })) === "{}" && JSON.stringify(sd({ blankSku: "x".repeat(80) })) === JSON.stringify({ blankSku: "x".repeat(80) }), "#296 rack builder: a SKU over 80 characters or blank is dropped; 80 is kept");
+  ok(JSON.stringify(sd(null)) === "{}" && JSON.stringify(sd([1])) === "{}" && JSON.stringify(sd({ blankSku: 12 })) === "{}", "#296 rack builder: sanitizeRackDefaults drops non-objects and non-string SKUs");
+  ok((c296bDefaults as Record<string, unknown>).RACK_DEFAULTS_BLOB === "rack_defaults", "#296 rack builder: the defaults live in the rack_defaults blob (D579)");
+
+  // ---- armFromPart / armPanel / armReserved / dropFace ----
+  const info = (o: Partial<C296bInfo> = {}): C296bInfo => ({ sku: "AMP", desc: "Power amp", found: true, ...o });
+  const a1 = call<Record<string, unknown>>(side.armFromPart, info({ ruHeight: 1.5, rackWidth: "half" }), "front");
+  ok(a1?.sku === "AMP" && a1.kind === "device" && a1.ruHeight === 2 && a1.width === "half" && a1.face === "front" && a1.rearOnly === false, "#296 rack builder: armFromPart takes whole-RU height and rack width from the catalog");
+  const a2 = call<Record<string, unknown>>(side.armFromPart, info(), "both");
+  ok(a2?.ruHeight === 1 && a2.width === "full" && a2.face === "front", "#296 rack builder: an unknown height arms 1U, unknown width full, and Both views arm the front");
+  const a3 = call<Record<string, unknown>>(side.armFromPart, info({ mountFace: "rear" }), "front");
+  ok(a3?.face === "rear" && a3.rearOnly === true && call<Record<string, unknown>>(side.armFromPart, info(), "rear")?.face === "rear", "#296 rack builder: a rear-mount part arms the rear; in the rear view everything arms the rear");
+  ok(call<Record<string, unknown>>(side.armFromPart, info(), "front", "shelf")?.kind === "shelf", "#296 rack builder: the Shelf tray arms kind shelf");
+  const pv = call<Record<string, unknown>>(side.armPanel, "vent", "VNT", info({ sku: "VNT", ruHeight: 2, rackWidth: "half" }), "front");
+  ok(pv?.kind === "vent" && pv.sku === "VNT" && pv.ruHeight === 2 && pv.width === "full" && call<Record<string, unknown>>(side.armPanel, "blank", "BLK", undefined, "front")?.ruHeight === 1, "#296 rack builder: a blank/vent arms the default SKU, 1U unless the catalog says otherwise, full width");
+  const rv = call<Record<string, unknown>>(side.armReserved, 99, 12, "front");
+  ok(rv?.kind === "reserved" && rv.ruHeight === 12 && call<Record<string, unknown>>(side.armReserved, 0, 12, "front")?.ruHeight === 1, "#296 rack builder: a reserved slot arms the asked height clamped to 1–ruCount");
+  ok(call(side.dropFace, { rearOnly: true }, "front") === "rear" && call(side.dropFace, { rearOnly: false }, "rear") === "rear" && call(side.dropFace, { rearOnly: false }, "front") === "front", "#296 rack builder: dropFace — rear-mount parts land rear, everything else on the panel dropped on");
+
+  // ---- placementFromArmed / copyOf ----
+  const armedHalf = { sku: "AMP", kind: "device", ruHeight: 2, width: "half", label: "Power amp", face: "front", rearOnly: false };
+  const pf = call<C296bPlacement>(side.placementFromArmed, armedHalf, { ruStart: 5, face: "rear", lane: 1 }, "RP-N1");
+  ok(!!pf && pf.id === "RP-N1" && pf.sku === "AMP" && pf.ruStart === 5 && pf.ruHeight === 2 && pf.face === "rear" && pf.lane === 1 && pf.laneCount === 2 && pf.label === undefined && pf.shelfId === undefined, "#296 rack builder: placementFromArmed builds the placement at the drop (no copied catalog label)");
+  const pr = call<C296bPlacement>(side.placementFromArmed, { sku: "", kind: "reserved", ruHeight: 3, width: "full", face: "front", rearOnly: false }, { ruStart: 2, face: "front", lane: 0 }, "RP-N2");
+  ok(!!pr && pr.kind === "reserved" && !("sku" in pr) && pr.laneCount === undefined && pr.ruHeight === 3, "#296 rack builder: a reserved placement carries no SKU");
+  const ps = call<C296bPlacement>(side.placementFromArmed, { ...armedHalf, width: "full" }, { ruStart: 4, face: "front", lane: 0, shelfId: "RP-SH" }, "RP-N3");
+  ok(ps?.shelfId === "RP-SH", "#296 rack builder: a drop on a shelf places the device on it");
+  const src0 = P({ id: "A", sku: "AMP", ruStart: 1, ruHeight: 2, laneCount: 2, lane: 0, shelfId: "RP-SH", optional: true, notes: "n" });
+  const cp = call<C296bPlacement>(side.copyOf, src0, { ruStart: 8, face: "rear", lane: 1 }, "RP-C1");
+  ok(!!cp && cp.id === "RP-C1" && cp.ruStart === 8 && cp.face === "rear" && cp.lane === 1 && cp.shelfId === undefined && cp.optional === true && cp.notes === "n" && src0.id === "RP-A", "#296 rack builder: copyOf moves the copy off the shelf, keeps its fields and leaves the source alone");
+
+  // ---- keyEdit ----
+  const lay = L([P({ id: "A", ruStart: 3, ruHeight: 2 }), P({ id: "B", ruStart: 6 }), P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 9 }), P({ id: "K", ruStart: 9, shelfId: "RP-SH" })]);
+  const up = run(call(side.keyEdit, lay, ["RP-A"], "ArrowUp"), lay);
+  ok(!!up && up.ok && up.layout.placements.find((p) => p.id === "RP-A")?.ruStart === 4, "#296 rack builder: ArrowUp moves the selected placement up 1 RU");
+  const down = run(call(side.keyEdit, lay, ["RP-A"], "ArrowDown"), lay);
+  ok(!!down && down.ok && down.layout.placements.find((p) => p.id === "RP-A")?.ruStart === 2, "#296 rack builder: ArrowDown moves it down 1 RU");
+  const blocked = run(call(side.keyEdit, lay, ["RP-A"], "ArrowUp"), L([P({ id: "A", ruStart: 3, ruHeight: 2 }), P({ id: "B", ruStart: 5 })]));
+  ok(!!blocked && !blocked.ok && /Overlaps/.test(blocked.reason), "#296 rack builder: a blocked arrow move is refused with the engine's reason");
+  ok(call(side.keyEdit, lay, ["RP-K"], "ArrowUp") === null && call(side.keyEdit, lay, ["RP-A", "RP-B"], "ArrowUp") === null && call(side.keyEdit, lay, [], "Delete") === null && call(side.keyEdit, lay, ["RP-A"], "x") === null, "#296 rack builder: arrows ignore a shelf's device and multi-select; other keys do nothing");
+  const del = run(call(side.keyEdit, lay, ["RP-SH", "RP-K"], "Delete"), lay);
+  ok(!!del && del.ok && !del.layout.placements.some((p) => p.id === "RP-SH" || p.id === "RP-K") && del.layout.placements.length === 2, "#296 rack builder: Delete removes a shelf's device before the shelf");
+  const delShelf = run(call(side.keyEdit, lay, ["RP-SH"], "Backspace"), lay);
+  ok(!!delShelf && !delShelf.ok && delShelf.reason === "Remove the 1 device on this shelf first.", "#296 rack builder: Backspace on a loaded shelf shows the engine's reason");
+  ok(JSON.stringify(call(side.liveSelection, lay, ["RP-A", "RP-GONE"])) === JSON.stringify(["RP-A"]), "#296 rack builder: liveSelection drops ids no longer in the rack");
+
+  // ---- setRackConfig / fillBlanksEdit / replacePart ----
+  const tall = L([P({ id: "T", ruStart: 30, ruHeight: 2 })], 42);
+  const shrink = call<Edit>(side.setRackConfig, tall, { ruCount: 24 });
+  ok(!!shrink && !shrink.ok && /RU 30–31, front\): Doesn't fit — the rack has 24 RU\./.test(shrink.reason), "#296 rack builder: shrinking below the highest occupied RU is refused with the engine's message");
+  const grow = call<Edit>(side.setRackConfig, tall, { ruCount: 44, numbering: "top-down", depthIn: 30 });
+  ok(!!grow && grow.ok && grow.layout.config.ruCount === 44 && grow.layout.config.numbering === "top-down" && grow.layout.config.depthIn === 30 && tall.config.ruCount === 42, "#296 rack builder: size, numbering and depth change through setRackConfig without mutating");
+  const nodepth = call<Edit>(side.setRackConfig, grow && grow.ok ? grow.layout : tall, { depthIn: null });
+  ok(!!nodepth && nodepth.ok && nodepth.layout.config.depthIn === undefined && call<Edit>(side.setRackConfig, tall, { ruCount: 61 })?.ok === false, "#296 rack builder: a blank depth clears it; 61 RU is refused");
+  let n = 0;
+  const fill = call<Edit>(side.fillBlanksEdit, L([P({ id: "A", ruStart: 1, ruHeight: 2 })], 4), "BLK", () => "RP-F" + n++);
+  ok(!!fill && fill.ok && fill.layout.placements.filter((p) => p.kind === "blank").length === 2, "#296 rack builder: Fill blanks covers every free front RU");
+  const again = fill && fill.ok ? call<Edit>(side.fillBlanksEdit, fill.layout, "BLK", () => "RP-G" + n++) : undefined;
+  ok(!!again && !again.ok && again.reason === "Every RU on the front is already covered.", "#296 rack builder: Fill blanks on a covered rack says so");
+  const rep = call<Edit>(side.replacePart, lay, "RP-B", info({ sku: "BIG", ruHeight: 2 }), "BIG");
+  ok(!!rep && rep.ok && rep.layout.placements.find((p) => p.id === "RP-B")?.sku === "BIG" && rep.layout.placements.find((p) => p.id === "RP-B")?.ruHeight === 2, "#296 rack builder: Replace part swaps the SKU and takes the new part's height");
+
+  // ---- text + lookup + prefs ----
+  ok(call(side.atLeast, 120, "W", 0) === "120 W" && call(side.atLeast, 120.5, "lb", 2) === "at least 120.5 lb (2 parts unknown)" && call(side.atLeast, 5, "W", 1) === "at least 5 W (1 part unknown)", "#296 rack builder: atLeast reads \"at least … (n parts unknown)\" only when parts are unknown");
+  ok(call(side.rackRowSummary, { ruUsed: 12, ruCount: 42, watts: 340, unknownWatts: 0 }) === "12/42 RU · 340 W" && call(side.rackRowSummary, { ruUsed: 3, ruCount: 42, watts: 1200, unknownWatts: 1 }) === "3/42 RU · ≥ 1,200 W", "#296 rack builder: the row summary reads \"12/42 RU · 340 W\", \"≥ \" when watts are unknown");
+  ok(JSON.stringify(call(side.coverageChips, { missing: { ruHeight: ["a", "b", "c"], depthIn: [], weightLb: ["a"], powerWatts: [] } })) === JSON.stringify(["3 parts missing RU height", "1 part missing weight"]), "#296 rack builder: coverage chips read \"3 parts missing RU height\"");
+  const lk = call<(s: string) => C296bInfo | undefined>(side.lookupFromHits, new Map([["AMP", { sku: "AMP", desc: "Power amp", mfr: "QSC", rack: { ruHeight: 2, powerWatts: 0 } }]]));
+  ok(!!lk && lk("AMP")?.found === true && lk("AMP")?.ruHeight === 2 && lk("AMP")?.powerWatts === 0 && lk("AMP")?.mfr === "QSC" && lk("NOPE") === undefined, "#296 rack builder: lookupFromHits carries rack facts; a SKU not loaded is undefined");
+  const rp = (s: string | null) => call<{ open: boolean; width: number }>(side.readSidebarPrefs, s);
+  ok(rp(null)?.open === true && rp(null)?.width === 420 && rp("{bad")?.width === 420 && rp(JSON.stringify({ open: false, width: 9999 }))?.open === false && rp(JSON.stringify({ open: false, width: 9999 }))?.width === 760 && rp(JSON.stringify({ width: 10 }))?.width === 320, "#296 rack builder: sidebar prefs default open at 420 px and clamp the width");
+  ok((c296bSide as Record<string, unknown>).RACK_SIDEBAR_KEY === "pk-rack-sidebar", "#296 rack builder: the sidebar remembers itself under pk-rack-sidebar");
+
+  // ---- source checks ----
+  const src = (f: string) => { const p = join(process.cwd(), f); return c296bExists(p) ? c296bRead(p, "utf8") : ""; };
+  const fb = src("src/app/(app)/design/assemblies/fixture-builder.tsx");
+  const ff = src("src/app/(app)/design/assemblies/fixture-form.tsx");
+  const act = src("src/app/(app)/design/assemblies/actions.ts");
+  const pg = src("src/app/(app)/design/assemblies/page.tsx");
+  const sb = src("src/components/rack/RackSidebar.tsx");
+  const rackFiles = [sb, src("src/components/rack/RackTotalsPanel.tsx"), src("src/components/rack/RackPartTray.tsx"), src("src/app/(app)/design/assemblies/use-part-search.ts")];
+  ok(/\[\s*"all",\s*"fixture",\s*"system",\s*"hardware",\s*"rack"\s*\]/.test(fb) && fb.includes('start("rack")'), "#296 rack builder: the builder has a Racks tab and a Rack choice in + New assembly");
+  ok(fb.includes("Rack · ") && fb.includes("This rack's stored layout didn't pass the current rules — open it and save to fix.") && fb.includes("rackRowSummary("), "#296 rack builder: rack rows show \"Rack · <scope>\", a rack-specific review tooltip and the RU/W summary");
+  ok(fb.includes('"beforeunload"'), "#296 rack builder: an unsaved draft guards navigation with beforeunload");
+  ok(ff.includes("<RackSidebar") && ff.includes("Rack-level parts") && ff.includes("lg:grid-cols-[1fr_auto]"), "#296 rack builder: the rack form mounts RackSidebar beside the Rack-level parts box");
+  ok(/draft\.kind === "fixture" && \(\s*<>\s*<PartPicker\s+label="Light engine"/.test(ff), "#296 rack builder: the light-engine fields are guarded by kind === \"fixture\"");
+  ok(ff.includes("Lay out devices in the rack on the right. Rack-level parts (frame, rails, PDUs, casters, fans, cable management, labor) go in the parts list — they take no RU.") && ff.includes("e.g. AV head-end rack"), "#296 rack builder: the rack form's help text and placeholder");
+  ok(sb !== "" && sb.startsWith('"use client"') && sb.includes("<RackElevation") && sb.includes("<PlacementMenu"), "#296 rack builder: RackSidebar is a client component mounting RackElevation and PlacementMenu");
+  const valueImport = /^import\s+(?!type\b)[^;]*from\s+["']@\/(lib\/stores|db)(\/[^"']*)?["']/m;
+  ok(rackFiles.every((t) => !valueImport.test(t)) && !valueImport.test(ff) && !valueImport.test(fb), "#296 rack builder: no sidebar/form file value-imports from @/lib/stores or @/db");
+  ok(sb.includes("useRackEditor(") || ff.includes("useRackEditor("), "#296 rack builder: rack edits go through useRackEditor (undo/redo)");
+  ok(/export async function saveRackDefaultsAction[\s\S]{0,400}requireUser\(\)[\s\S]{0,200}can\("create", user\.roles\)[\s\S]{0,120}Needs the Create permission\./.test(act), "#296 rack builder: saveRackDefaultsAction checks can(\"create\") after requireUser");
+  ok(pg.includes("getRackDefaults(") && pg.includes("rackFactsOrUndefined("), "#296 rack builder: the page passes rack defaults and rack facts on its seed");
+}
+
+async function rack296DefaultsAsyncChecks(): Promise<void> {
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const { getRackDefaults, saveRackDefaults } = await import("@/lib/stores/rack-defaults");
+  const before = await getBlob<Record<string, unknown>>("rack_defaults", {});
+  try {
+    const saved = await saveRackDefaults({ blankSku: "  T296-BLK ", ventSku: "T296-VNT", junk: 1 });
+    ok(saved.blankSku === "T296-BLK" && saved.ventSku === "T296-VNT" && !("junk" in saved), "#296 rack builder: saveRackDefaults stores the cleaned defaults");
+    const back = await getRackDefaults();
+    ok(back.blankSku === "T296-BLK" && back.ventSku === "T296-VNT", "#296 rack builder: getRackDefaults reads them back");
+    await saveRackDefaults({ blankSku: "T296-BLK2" });
+    const cleared = await getRackDefaults();
+    ok(cleared.blankSku === "T296-BLK2" && cleared.ventSku === undefined, "#296 rack builder: a save replaces the defaults — a dropped vent SKU clears");
+  } finally {
+    await setBlob("rack_defaults", { defaults: (before as { defaults?: unknown }).defaults ?? {} });
+  }
 }
 
 async function curtain292AsyncChecks(): Promise<void> {

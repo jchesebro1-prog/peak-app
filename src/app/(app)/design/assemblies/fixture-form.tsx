@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   FIXTURE_BOXES,
   FIXTURE_BOX_LABEL,
@@ -18,12 +18,18 @@ import {
   PORTAL_CATEGORY_MAX,
 } from "@/lib/fixture-assemblies";
 import { dateYear } from "@/lib/format";
-import type { RackPartFacts } from "@/lib/rack/types";
+import { emptyRackLayout, newPlacementId } from "@/lib/rack/layout";
+import { lookupFromHits, setRackConfig, type RackConfigPatch } from "@/lib/rack/sidebar";
+import type { RackDefaults } from "@/lib/rack/defaults";
+import { RACK_RU_MAX, RACK_RU_MIN, type RackLayout, type RackPartFacts } from "@/lib/rack/types";
+import { RackSidebar } from "@/components/rack/RackSidebar";
+import { useRackEditor } from "@/components/rack/useRackEditor";
 import { Typeahead } from "@/components/search/typeahead";
 import { passAllFilter, stableRank } from "@/lib/search/typeahead-rank";
 import { pairKey, type MemberCoverage } from "@/lib/part-docs/assembly-graph";
 import MemberCoverageChip from "./member-coverage";
 import { searchAssemblyPartsAction } from "./actions";
+import { usePartSearch } from "./use-part-search";
 
 /** The catalog slice the builder searches and prices from (#210). Cost is
  *  included: the footer shows the live included cost, as Subassemblies did. */
@@ -48,6 +54,8 @@ export type Draft = {
   parts: FixtureLine[];
   /** A converted record's stored names — fallback display for a missing part. */
   legacy?: FixtureRecord["legacy"];
+  /** #296 — rack kind only: the RU layout the sidebar edits. */
+  rack?: RackLayout;
 };
 
 export function emptyDraft(kind: FixtureKind): Draft {
@@ -56,6 +64,7 @@ export function emptyDraft(kind: FixtureKind): Draft {
     lightEngineSku: "", lightEngineLine: {}, lensSku: "", lensLine: {},
     lamp: "", position: "", circuit: "",
     lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [],
+    ...(kind === "rack" ? { rack: emptyRackLayout() } : {}),
   };
 }
 
@@ -73,6 +82,7 @@ export function draftFromRecord(r: FixtureRecord): Draft {
     },
     parts: [...(r.parts || [])],
     ...(r.legacy ? { legacy: r.legacy } : {}),
+    ...(r.kind === "rack" ? { rack: r.rack ?? emptyRackLayout() } : {}),
   };
 }
 
@@ -81,6 +91,7 @@ export function draftToInput(d: Draft): FixtureInput {
     id: d.id, kind: d.kind, label: d.label, description: d.description, portalCategory: d.portalCategory, scope: d.scope || undefined,
     lightEngineSku: d.lightEngineSku, lensSku: d.lensSku || null, lightEngineLine: d.lightEngineLine, lensLine: d.lensLine,
     lamp: d.lamp, position: d.position, circuit: d.circuit, lines: d.lines, parts: d.parts,
+    ...(d.kind === "rack" ? { rack: d.rack ?? emptyRackLayout() } : {}),
   };
 }
 
@@ -90,6 +101,7 @@ export function draftResolvable(d: Draft): FixtureResolvable {
     lightEngineSku: d.lightEngineSku, lensSku: d.lensSku || null,
     lightEngineLine: d.lightEngineLine, lensLine: d.lensLine, lines: d.lines, parts: d.parts,
     ...(d.legacy ? { legacy: d.legacy } : {}),
+    ...(d.kind === "rack" ? { rack: d.rack ?? emptyRackLayout(), ...(d.scope ? { scope: d.scope } : {}) } : {}),
   };
 }
 
@@ -125,42 +137,8 @@ function PartRow({ part }: { part: PartHit }) {
   );
 }
 
-/**
- * Debounce + stale-response guard for a server-searched picker (#121/I1) —
- * the same pattern as the Estimator's catalog-picker.tsx, generalized:
- * `items`/`pending` are DERIVED from whether `resultQuery` (what the last
- * completed search answered) still matches the live `query`, rather than
- * reset with their own setState calls — an empty/changed query needs no
- * effect-body state write, it just falls out of the comparison below.
- */
-function usePartSearch(bySku: ReadonlyMap<string, PartHit>) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PartHit[]>([]);
-  const [resultQuery, setResultQuery] = useState("");
-  const seq = useRef(0);
-
-  useEffect(() => {
-    const q = query.trim();
-    if (!q) return;
-    const my = ++seq.current;
-    const t = setTimeout(() => {
-      searchAssemblyPartsAction(q).then((res) => {
-        if (my !== seq.current) return; // a newer keystroke superseded this request
-        setResults(res.hits);
-        setResultQuery(q);
-      });
-    }, 220);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  const trimmed = query.trim();
-  const fresh = trimmed !== "" && resultQuery === trimmed;
-  const items = fresh ? results : [];
-  const pending = trimmed !== "" && !fresh;
-  const emptyText = pending ? "Searching…" : trimmed ? "No parts match." : "Start typing to search the catalog.";
-  const resolveSelected = (key: string) => bySku.get(key) ?? null;
-  return { query, setQuery, items, emptyText, resolveSelected };
-}
+/** The pickers' server search (#210 fix wave 1, I1). */
+export const searchAssemblyHits = (q: string): Promise<PartHit[]> => searchAssemblyPartsAction(q).then((r) => r.hits);
 
 /** Catalog part picker (#121, I1): a debounced server search
  *  (searchAssemblyPartsAction) over the live catalog, never a client-side
@@ -174,7 +152,8 @@ function PartPicker({ label, bySku, value, onPick, clearOnPick = false }: {
   onPick: (hit: PartHit) => void;
   clearOnPick?: boolean;
 }) {
-  const { setQuery, items, emptyText, resolveSelected } = usePartSearch(bySku);
+  const { setQuery, items, emptyText } = usePartSearch(searchAssemblyHits);
+  const resolveSelected = (key: string) => bySku.get(key) ?? null;
   return (
     <div>
       <label style={LABEL}>{label}</label>
@@ -281,7 +260,12 @@ function LineBox({ title, lines, onLines, bySku, onPickPart, names, chipFor }: {
   );
 }
 
-export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel, portalCategories = [] }: {
+/** Stable identity: the sidebar re-syncs its copy when this prop changes. */
+export const NO_RACK_DEFAULTS: RackDefaults = {};
+const RACK_SIZES = Array.from({ length: RACK_RU_MAX - RACK_RU_MIN + 1 }, (_, k) => RACK_RU_MIN + k);
+const RACK_HELP = "Lay out devices in the rack on the right. Rack-level parts (frame, rails, PDUs, casters, fans, cable management, labor) go in the parts list — they take no RU.";
+
+export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel, portalCategories = [], rackDefaults = NO_RACK_DEFAULTS, onSaveRackDefaults }: {
   draft: Draft;
   onChange: (next: Draft) => void;
   bySku: ReadonlyMap<string, PartHit>;
@@ -296,21 +280,45 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
   onCancel: () => void;
   /** #289 — the portal categories already used across fixtures (sorted, unique) — the Portal category datalist. */
   portalCategories?: string[];
+  /** #296 (D579) — the rack tray's default blank / vent SKUs and how to change them. */
+  rackDefaults?: RackDefaults;
+  onSaveRackDefaults?: (d: RackDefaults) => Promise<{ ok: true; value: RackDefaults } | { ok: false; error: string }>;
 }) {
   const set = (patch: Partial<Draft>) => onChange({ ...draft, ...patch });
   const names = draft.legacy?.names || {};
   const isSystem = draft.kind === "system";
   const isHardware = draft.kind === "hardware";
-  /** #228: a system and a hardware assembly are one parts list; only a fixture has a light engine and boxes. */
+  const isRack = draft.kind === "rack";
+  /** #228: a system and a hardware assembly are one parts list; only a fixture has a light engine and boxes. #296: so is a rack's rack-level parts. */
   const isParts = draft.kind !== "fixture";
-  const noun = isSystem ? "system" : isHardware ? "hardware assembly" : "fixture";
+  const noun = isSystem ? "system" : isHardware ? "hardware assembly" : isRack ? "rack" : "fixture";
   const engine = draft.lightEngineSku;
   const chipFor = !isParts && engine
     ? (sku: string) => (sku === engine ? null : <MemberCoverageChip parentSku={engine} accessorySku={sku} coverage={coverage[pairKey(engine, sku)]} />)
     : undefined;
   const optional = live.parts.filter((p) => !p.included).length;
-  return (
-    <section className="pk-card" style={{ padding: 20, marginBottom: 20 }}>
+
+  // #296 — the rack layout's undo history lives with this open form (the
+  // builder keys the form per open); every committed edit writes the draft.
+  const seq = useRef(0);
+  const newId = () => newPlacementId(Date.now(), seq.current++);
+  const rackEditor = useRackEditor(draft.rack ?? emptyRackLayout(), { onChange: (l) => set({ rack: l }), newId });
+  const rackLookup = useMemo(() => lookupFromHits(bySku), [bySku]);
+  const rackParts = useMemo(() => draft.parts.map((l) => ({ sku: l.sku, qty: l.qty })), [draft.parts]);
+  const [rackFieldError, setRackFieldError] = useState<string | null>(null);
+  const rackConfig = rackEditor.layout.config;
+  const changeRack = (patch: RackConfigPatch) => {
+    const fail = { reason: "" };
+    const ok = rackEditor.apply((l) => {
+      const r = setRackConfig(l, patch);
+      if (!r.ok) fail.reason = r.reason;
+      return r;
+    });
+    setRackFieldError(ok ? null : fail.reason || "That change wasn't made.");
+  };
+
+  const body = (
+    <>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
         <div>
           <h2 style={{ fontSize: 17, margin: 0 }}>{draft.id ? `Edit ${noun}` : `New ${noun}`}</h2>
@@ -319,13 +327,15 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
               ? "A bundle of catalog parts under one scope — a mixer, DSP & amps; a video switcher; a distro system."
               : isHardware
                 ? "A bundle of catalog hardware — a chain wrap, a batten or beginning termination. It has no scope of its own: on the plan it follows the Equipment map row it is mapped on (Rigging by default)."
-                : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}
+                : isRack
+                  ? RACK_HELP
+                  : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}
           </p>
         </div>
         <button type="button" onClick={onCancel} style={{ border: 0, background: "transparent", color: "#737985", cursor: "pointer", fontSize: 12 }}>Cancel</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
-        <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : isHardware ? "e.g. Chain wrap" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>
+        <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : isHardware ? "e.g. Chain wrap" : isRack ? "e.g. AV head-end rack" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>
         <label style={LABEL}>Description<textarea value={draft.description} onChange={(e) => set({ description: e.target.value })} placeholder="Customer-facing description" rows={2} style={{ ...FIELD, marginTop: 5, resize: "vertical" }} /></label>
         {!isParts && (
           <label style={LABEL}>Portal category
@@ -342,14 +352,47 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
             </datalist>
           </label>
         )}
-        {isHardware ? null : isSystem ? (
+        {(isSystem || isRack) && (
           <label style={LABEL}>Scope
-            <select value={draft.scope} onChange={(e) => set({ scope: e.target.value as SystemScope | "" })} style={{ ...FIELD, marginTop: 5 }}>
+            <select value={draft.scope} required onChange={(e) => set({ scope: e.target.value as SystemScope | "" })} style={{ ...FIELD, marginTop: 5 }}>
               <option value="">— Pick a scope —</option>
               {SYSTEM_SCOPES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
-        ) : (
+        )}
+        {isRack && (
+          <>
+            <label style={LABEL}>Rack size
+              <select value={rackConfig.ruCount} onChange={(e) => changeRack({ ruCount: Number(e.target.value) })} style={{ ...FIELD, marginTop: 5 }}>
+                {RACK_SIZES.map((n) => <option key={n} value={n}>{n} RU</option>)}
+              </select>
+            </label>
+            <label style={LABEL}>Rack depth (in, optional)
+              <input
+                key={`depth-${rackConfig.depthIn ?? ""}`}
+                type="number"
+                min={0}
+                step={0.25}
+                defaultValue={rackConfig.depthIn ?? ""}
+                placeholder="e.g. 30"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v === String(rackConfig.depthIn ?? "")) return;
+                  changeRack({ depthIn: v === "" ? null : Number(v) });
+                }}
+                style={{ ...FIELD, marginTop: 5 }}
+              />
+            </label>
+            <label style={LABEL}>RU numbering
+              <select value={rackConfig.numbering} onChange={(e) => changeRack({ numbering: e.target.value === "top-down" ? "top-down" : "bottom-up" })} style={{ ...FIELD, marginTop: 5 }}>
+                <option value="bottom-up">Bottom-up (RU 1 at the bottom)</option>
+                <option value="top-down">Top-down (RU 1 at the top)</option>
+              </select>
+            </label>
+            {rackFieldError && <div role="alert" style={{ gridColumn: "1 / -1", color: "#a0442b", fontSize: 12 }}>{rackFieldError}</div>}
+          </>
+        )}
+        {draft.kind === "fixture" && (
           <>
             <PartPicker
               label="Light engine"
@@ -404,7 +447,7 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
       )}
       <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: isParts ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 14 }}>
         {isParts ? (
-          <LineBox title="Parts" lines={draft.parts} onLines={(next) => set({ parts: next })} bySku={bySku} onPickPart={onPickPart} names={names} />
+          <LineBox title={isRack ? "Rack-level parts" : "Parts"} lines={draft.parts} onLines={(next) => set({ parts: next })} bySku={bySku} onPickPart={onPickPart} names={names} />
         ) : (
           FIXTURE_BOXES.map((box) => (
             <LineBox
@@ -432,6 +475,24 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
         </button>
       </div>
       {error && <div role="alert" style={{ marginTop: 10, color: "#a0442b", fontSize: 12 }}>{error}</div>}
-    </section>
+    </>
+  );
+
+  if (!isRack) return <section className="pk-card" style={{ padding: 20, marginBottom: 20 }}>{body}</section>;
+  return (
+    <div className="mb-5 grid items-start gap-5 lg:grid-cols-[1fr_auto]">
+      <section className="pk-card min-w-0" style={{ padding: 20 }}>{body}</section>
+      <RackSidebar
+        editor={rackEditor}
+        newId={newId}
+        title={draft.label}
+        lookup={rackLookup}
+        partSearch={searchAssemblyHits}
+        onPickPart={onPickPart}
+        defaults={rackDefaults}
+        onSaveDefaults={onSaveRackDefaults ?? (async () => ({ ok: false as const, error: "Defaults can't be changed here." }))}
+        rackParts={rackParts}
+      />
+    </div>
   );
 }

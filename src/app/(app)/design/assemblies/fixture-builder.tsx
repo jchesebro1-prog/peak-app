@@ -1,20 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
 import { resolveFixture, toSkuMap, type FixtureKind, type FixtureRecord } from "@/lib/fixture-assemblies";
 import type { MemberCoverage } from "@/lib/part-docs/assembly-graph";
+import { totals as rackTotals } from "@/lib/rack/rules";
+import { lookupFromHits, rackRowSummary } from "@/lib/rack/sidebar";
+import type { RackDefaults } from "@/lib/rack/defaults";
 import { ConfirmButton } from "@/components/confirm-button";
-import { deleteFixtureAction, saveFixtureAction } from "./actions";
-import FixtureForm, { draftFromRecord, draftResolvable, draftToInput, emptyDraft, money, pricesNote, type Draft, type PartHit } from "./fixture-form";
+import { deleteFixtureAction, saveFixtureAction, saveRackDefaultsAction } from "./actions";
+import FixtureForm, { NO_RACK_DEFAULTS, draftFromRecord, draftResolvable, draftToInput, emptyDraft, money, pricesNote, type Draft, type PartHit } from "./fixture-form";
 
 type Filter = "all" | FixtureKind;
 const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems", hardware: "Hardware", rack: "Racks" };
 const EDIT_BTN = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 } as const;
 
+const REVIEW_TIP = {
+  rack: "This rack's stored layout didn't pass the current rules — open it and save to fix.",
+  other: "Converted from an assembly with no fixture-role part — its first part became the light engine. Check it and save.",
+} as const;
+
 /** #210 — the one Assemblies list (fixtures + systems) and its form. */
-export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage, portalCategories }: {
+export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage, portalCategories, rackDefaults = NO_RACK_DEFAULTS }: {
   initial: FixtureRecord[];
   /** The server's priced seed — every part currently referenced by a saved
    *  fixture (I1, fix wave 1), never the whole catalog. Grown locally below
@@ -25,6 +33,8 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   coverage: Record<string, MemberCoverage>;
   /** #289 — the portal categories already used across fixtures, sorted + unique. */
   portalCategories: string[];
+  /** #296 (D579) — the rack tray's default blank / vent SKUs. */
+  rackDefaults?: RackDefaults;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -37,6 +47,8 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   const [error, setError] = useState<string | null>(null);
   // Final review M10: a rejected delete is shown on the list, not swallowed.
   const [listError, setListError] = useState<string | null>(null);
+  // #296: a fresh form (and so a fresh rack undo history) per open.
+  const [formKey, setFormKey] = useState(0);
 
   // Session-grown parts: the server seed plus every hit a picker has turned
   // up (I1). A fresh seed from the server (after save/delete → router.refresh)
@@ -60,8 +72,18 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   });
 
   const bySku = useMemo(() => toSkuMap(parts), [parts]);
+  const rackLookup = useMemo(() => lookupFromHits(bySku), [bySku]);
   const settings = useMemo(() => ({ priceListEffective }), [priceListEffective]);
-  const rows = useMemo(() => initial.map((rec) => ({ rec, live: resolveFixture(rec, bySku, settings) })), [initial, bySku, settings]);
+  const rows = useMemo(
+    () =>
+      initial.map((rec) => ({
+        rec,
+        live: resolveFixture(rec, bySku, settings),
+        // #296: "12/42 RU · 340 W" from the catalog's rack data ("≥ " when watts are unknown).
+        rackLine: rec.kind === "rack" && rec.rack ? rackRowSummary(rackTotals(rec.rack, rackLookup, rec.parts ?? [])) : null,
+      })),
+    [initial, bySku, settings, rackLookup]
+  );
   const counts: Record<Filter, number> = {
     all: rows.length,
     fixture: rows.filter((r) => r.rec.kind === "fixture").length,
@@ -73,10 +95,22 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   const live = draft ? resolveFixture(draftResolvable(draft), bySku, settings) : null;
   const dirty = draft != null && draftOrigin != null && JSON.stringify(draft) !== draftOrigin;
 
+  // #296: leaving the page with unsaved changes asks first (any kind).
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
   const start = (kind: FixtureKind) => {
     setChoosing(false);
     setError(null);
     const next = emptyDraft(kind);
+    setFormKey((k) => k + 1);
     setDraft(next);
     setDraftOrigin(JSON.stringify(next));
   };
@@ -84,6 +118,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
     setChoosing(false);
     setError(null);
     const next = draftFromRecord(rec);
+    setFormKey((k) => k + 1);
     setDraft(next);
     setDraftOrigin(JSON.stringify(next));
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -118,7 +153,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div role="tablist" aria-label="Show" style={{ display: "inline-flex", background: "#f1f2f5", borderRadius: 9, padding: 3 }}>
-          {(["all", "fixture", "system", "hardware"] as const).map((f) => (
+          {(["all", "fixture", "system", "hardware", "rack"] as const).map((f) => (
             <button
               key={f}
               type="button"
@@ -137,6 +172,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
             <button type="button" className="pk-btn-outline" onClick={() => start("fixture")}>Fixture</button>
             <button type="button" className="pk-btn-outline" onClick={() => start("system")}>System</button>
             <button type="button" className="pk-btn-outline" onClick={() => start("hardware")}>Hardware</button>
+            <button type="button" className="pk-btn-outline" onClick={() => start("rack")}>Rack</button>
             <button type="button" onClick={() => setChoosing(false)} style={{ border: 0, background: "transparent", color: "#8c919c", cursor: "pointer", fontSize: 12 }}>Cancel</button>
           </div>
         ) : (
@@ -146,6 +182,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
 
       {draft && live && (
         <FixtureForm
+          key={formKey}
           draft={draft}
           onChange={setDraft}
           bySku={bySku}
@@ -153,6 +190,8 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
           live={live}
           coverage={coverage}
           portalCategories={portalCategories}
+          rackDefaults={rackDefaults}
+          onSaveRackDefaults={saveRackDefaultsAction}
           busy={busy}
           error={error}
           onSave={save}
@@ -167,10 +206,10 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
         </div>
         {listError && <div role="alert" style={{ margin: "0 0 10px", color: "#a0442b", fontSize: 12 }}>{listError}</div>}
         {shown.length === 0 ? (
-          <p style={{ color: "#8c919c", fontSize: 13 }}>No assemblies yet — build the first fixture, system or hardware assembly from your catalog.</p>
+          <p style={{ color: "#8c919c", fontSize: 13 }}>No assemblies yet — build the first fixture, system, hardware assembly or rack from your catalog.</p>
         ) : (
           <div style={{ display: "grid", gap: 0 }}>
-            {shown.map(({ rec, live: l }) => {
+            {shown.map(({ rec, live: l, rackLine }) => {
               const was = rec.snapshot?.cost;
               const drift = was != null && Math.abs(was - l.cost) >= 0.005;
               // M3: the badge dates from when the snapshot was priced, not
@@ -185,16 +224,17 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
                     <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                       <span style={{ fontSize: 13.5, fontWeight: 700 }}>{rec.label}</span>
                       <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#737985", background: "#f2f4f7", borderRadius: 999, padding: "2px 8px" }}>
-                        {rec.kind === "system" ? `System · ${rec.scope || "—"}` : rec.kind === "hardware" ? "Hardware" : "Fixture"}
+                        {rec.kind === "system" ? `System · ${rec.scope || "—"}` : rec.kind === "rack" ? `Rack · ${rec.scope || "—"}` : rec.kind === "hardware" ? "Hardware" : "Fixture"}
                       </span>
                       {rec.needsReview && (
-                        <span title="Converted from an assembly with no fixture-role part — its first part became the light engine. Check it and save." style={{ fontSize: 10.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dc", borderRadius: 999, padding: "2px 8px" }}>
+                        <span title={rec.kind === "rack" ? REVIEW_TIP.rack : REVIEW_TIP.other} style={{ fontSize: 10.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dc", borderRadius: 999, padding: "2px 8px" }}>
                           needs review
                         </span>
                       )}
                     </div>
                     {rec.description && <div style={{ color: "#737985", fontSize: 12, marginTop: 4 }}>{rec.description}</div>}
                     <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 4 }}>
+                      {rackLine ? `${rackLine} · ` : ""}
                       {rec.kind !== "fixture" ? `${l.parts.length} part${l.parts.length === 1 ? "" : "s"}` : head}
                       {optional ? ` · ${optional} optional add-on${optional === 1 ? "" : "s"}` : ""}
                       {` · updated ${dateYear(rec.updatedAt)} by ${rec.updatedBy || "—"}`}
