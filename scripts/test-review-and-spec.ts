@@ -45854,6 +45854,7 @@ import { sentDocumentStamp as n293tFSent } from "@/lib/quote-share/view";
 import { patchShareLink as n293tFPatchLink, setStatus as n293tFSetStatus, updateQuotePdf as n293tFUpdatePdf } from "@/lib/stores/quotes";
 import { generateQuotePdf as n293tFGenerate } from "@/lib/quote-pdf/generate";
 import { PDF_FUNCTION_BUDGET_MS as n293tFBudgetMs, stampRerenderFits as n293tFRerenderFits } from "@/lib/quote-pdf/generate";
+import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293tFRerenderDeadline } from "@/lib/quote-pdf/generate";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const SET = { companyName: "Peak Systems Group", logoDark: null };
@@ -45930,11 +45931,14 @@ import { PDF_FUNCTION_BUDGET_MS as n293tFBudgetMs, stampRerenderFits as n293tFRe
   ok(n293tFBudgetMs === 120_000 && PDF_COALESCE_MS222 + RENDER_WORST_CASE_MS222 + PDF_UPLOAD_ALLOWANCE_MS222 <= n293tFBudgetMs &&
      PDF_COALESCE_MS222 + 2 * RENDER_WORST_CASE_MS222 + PDF_UPLOAD_ALLOWANCE_MS222 > n293tFBudgetMs,
     "#293t fix round 2: one worst-case render fits the 120 s budget, two never do — so the re-render is gated on time left");
-  ok(n293tFRerenderFits(PDF_COALESCE_MS222) && n293tFRerenderFits(n293tFBudgetMs - RENDER_WORST_CASE_MS222 - PDF_UPLOAD_ALLOWANCE_MS222) &&
-     !n293tFRerenderFits(n293tFBudgetMs - RENDER_WORST_CASE_MS222 - PDF_UPLOAD_ALLOWANCE_MS222 + 1) && !n293tFRerenderFits(Number.NaN) && !n293tFRerenderFits(-1),
-    "#293t fix round 2: a re-render runs only while elapsed + a worst-case render + the upload allowance ≤ 120 s");
-  ok(gen.includes("isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(clock() - startedAt)") && gen.includes("{ signal: AbortSignal.timeout(") &&
-     (gen.match(/await render\(/g) || []).length === 2,
+  ok(n293tFRerenderMinMs === 30_000 && n293tFRerenderFits(PDF_COALESCE_MS222) && n293tFRerenderFits(60_000) && n293tFRerenderFits(70_000) &&
+     !n293tFRerenderFits(70_001) && !n293tFRerenderFits(71_000) && !n293tFRerenderFits(Number.NaN) && !n293tFRerenderFits(-1),
+    "#293t fix round 2b: a re-render runs while elapsed + RERENDER_MIN_MS (30 s) + the upload allowance ≤ 120 s — up to 70 s in");
+  ok(n293tFRerenderDeadline(60_000) === 40_000 && n293tFRerenderDeadline(70_000) === n293tFRerenderMinMs && n293tFRerenderDeadline(PDF_COALESCE_MS222) === 96_000 &&
+     PDF_COALESCE_MS222 + n293tFRerenderDeadline(PDF_COALESCE_MS222) + PDF_UPLOAD_ALLOWANCE_MS222 === n293tFBudgetMs,
+    "#293t fix round 2b: the re-render's hard stop is 120 − 20 − elapsed (60 s in → 40 s), so render 2 can never eat the upload allowance");
+  ok(gen.includes("isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(elapsed)") && gen.includes("(stampRerenderDeadlineMs(elapsed))") &&
+     gen.includes("AbortSignal.timeout(ms)") && (gen.match(/await render\(/g) || []).length === 2,
     "#293t fix round 2: the generator re-renders at most once, only for a still-pending save with budget left, under a deadline signal");
   const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
   ok(qdd.includes("const stamp = documentRevStamp(q);") && qdd.includes("revNum: stamp.revNum,") && qdd.includes("revDateMs: stamp.revDateMs,") &&
@@ -46119,9 +46123,39 @@ async function finalFix293tAsyncChecks(): Promise<void> {
         const { id, savedAt } = await mkRace("late");
         const log: R2Seen[] = [];
         let clockCalls = 0;
-        const res = await n293tFGenerate({ quoteId: id, savedAt, origin, secret, render: r2Render(id, log, (n) => n === 1), now: () => (clockCalls++ === 0 ? 0 : 10_001) });
-        ok(log.length === 1 && res?.status === "ready" && !res.printed,
-          "#293t fix round 2 (DB): too little budget left for a worst-case re-render → no second Chrome run, no stamp (the pages derive)");
+        const asked: number[] = [];
+        const res = await n293tFGenerate({
+          quoteId: id, savedAt, origin, secret, render: r2Render(id, log, (n) => n === 1),
+          now: () => (clockCalls++ === 0 ? 0 : 71_000), deadlineSignal: (ms) => { asked.push(ms); return new AbortController().signal; },
+        });
+        ok(log.length === 1 && asked.length === 0 && res?.status === "ready" && !res.printed,
+          "#293t fix round 2b (DB): 71 s in, under 30 s of render time left → no second Chrome run, no stamp (the pages derive)");
+      }
+      {
+        const { id, savedAt } = await mkRace("sixty");
+        const log: R2Seen[] = [];
+        let clockCalls = 0;
+        const asked: number[] = [];
+        const res = await n293tFGenerate({
+          quoteId: id, savedAt, origin, secret, render: r2Render(id, log, (n) => n === 1),
+          now: () => (clockCalls++ === 0 ? 0 : 60_000), deadlineSignal: (ms) => { asked.push(ms); return new AbortController().signal; },
+        });
+        ok(log.length === 2 && log[1].signal && asked.join(",") === "40000" && res?.status === "ready" && res.printed?.revNum === log[1].revNum && res.printed.revDateMs === log[1].revDateMs,
+          `#293t fix round 2b (DB): 60 s in → the re-render runs with a 40 s hard stop and its stamp is recorded (asked ${asked.join(",")})`);
+      }
+      {
+        const { id, savedAt } = await mkRace("aborted");
+        const log: R2Seen[] = [];
+        const res = await n293tFGenerate({
+          quoteId: id, savedAt, origin, secret,
+          render: async (url, opts) => {
+            if (opts?.signal?.aborted) { log.push({ revNum: -1, revDateMs: -1, signal: true, body: "aborted" }); throw new Error("The render was cancelled."); }
+            return r2Render(id, log, (n) => n === 1)(url, opts);
+          },
+          deadlineSignal: () => AbortSignal.abort(),
+        });
+        ok(log.length === 2 && log[1].body === "aborted" && res?.status === "ready" && !res.printed && (await fileOf(id)) === "%PDF-1.4 293tf-r2 render 1",
+          "#293t fix round 2b (DB): a re-render stopped at its deadline keeps render 1's file, ready and unstamped");
       }
       {
         const { id, savedAt } = await mkRace("fail");

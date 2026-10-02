@@ -1,6 +1,6 @@
 import { get as getQuote, setRevisionPdfPath, updateQuotePdf } from "@/lib/stores/quotes";
 import { isAppOrigin, originFrom } from "./origin";
-import { renderPrintRouteToPdf, RENDER_WORST_CASE_MS } from "./render";
+import { renderPrintRouteToPdf } from "./render";
 import {
   canHavePdf,
   documentRevStamp,
@@ -62,6 +62,8 @@ export type GenerateInput = {
   sleep?: (ms: number) => Promise<void>;
   /** Spec-harness seam for the budget clock (the stamp re-render's gate); defaults to Date.now. */
   now?: () => number;
+  /** Spec-harness seam for the re-render's hard stop; defaults to AbortSignal.timeout. */
+  deadlineSignal?: (ms: number) => AbortSignal;
 };
 
 /**
@@ -84,16 +86,30 @@ export const PDF_UPLOAD_ALLOWANCE_MS = 20_000;
 export const PDF_FUNCTION_BUDGET_MS = 120_000;
 
 /**
- * #293 slice 3 — may a render whose stamp was lost to a mid-render write run
- * Chrome once more? Two worst-case renders never fit (4 s coalesce + 2 × 90 s
- * + 20 s upload = 204 s > 120 s), so the second one runs only while a whole
- * worst-case render plus the upload allowance still fits in what is left of
- * the budget (elapsed ≤ 120 − 90 − 20 = 10 s, coalescing wait included);
- * otherwise the stamp stays unrecorded and the online pages derive it.
- * Measured from generateQuotePdf's start, like the #222 T5 budget.
+ * #293 slice 3 — the least render time worth a stamp re-render (fix round 2b).
+ * Two worst-case renders never fit (4 s coalesce + 2 × 90 s + 20 s upload =
+ * 204 s > 120 s), and gating on a whole worst case would leave a 10 s window a
+ * cold Chrome on Vercel rarely meets. So the re-render runs while at least
+ * this much render time is left before the upload allowance, and is hard-
+ * stopped at that point (stampRerenderDeadlineMs) — the budget holds whatever
+ * Chrome does: coalesce + render 1 + render 2 (≤ the deadline) + upload ≤ 120 s.
+ */
+export const RERENDER_MIN_MS = 30_000;
+
+/**
+ * May a render whose stamp was lost to a mid-render write run Chrome once
+ * more? Only while elapsed + RERENDER_MIN_MS + the upload allowance ≤ 120 s
+ * (elapsed ≤ 120 − 20 − 30 = 70 s, coalescing wait included); otherwise the
+ * stamp stays unrecorded and the online pages derive it. Elapsed is measured
+ * from generateQuotePdf's start, like the #222 T5 budget.
  */
 export function stampRerenderFits(elapsedMs: number): boolean {
-  return Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs + RENDER_WORST_CASE_MS + PDF_UPLOAD_ALLOWANCE_MS <= PDF_FUNCTION_BUDGET_MS;
+  return Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs + RERENDER_MIN_MS + PDF_UPLOAD_ALLOWANCE_MS <= PDF_FUNCTION_BUDGET_MS;
+}
+
+/** The re-render's hard stop: what is left of the budget before the upload allowance (≥ RERENDER_MIN_MS when it fits). */
+export function stampRerenderDeadlineMs(elapsedMs: number): number {
+  return Math.max(1, PDF_FUNCTION_BUDGET_MS - PDF_UPLOAD_ALLOWANCE_MS - elapsedMs);
 }
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -183,15 +199,17 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
       // mid-render is the Send click itself (a send never waits for the PDF),
       // and an unstamped copy makes the online pages guess the Rev. So when
       // the quote moved (and this save still owns the pending state), render
-      // once more against the quote as it is now — only if a whole worst-case
-      // render still fits the budget (stampRerenderFits), and stopped at the
-      // deadline regardless. Settle/supersede is unchanged: the settle below
+      // once more against the quote as it is now — only while RERENDER_MIN_MS
+      // of render time is left before the upload allowance (stampRerenderFits,
+      // elapsed ≤ 70 s), hard-stopped at that allowance (stampRerenderDeadlineMs)
+      // so the 120 s budget holds whatever Chrome does. Settle/supersede is unchanged: the settle below
       // still compares-and-sets on this savedAt. A second move, a failed or
       // stopped re-render → render 1's file, no stamp (the pages derive).
-      if (!printed && first.after && isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(clock() - startedAt)) {
-        const deadlineMs = PDF_FUNCTION_BUDGET_MS - PDF_UPLOAD_ALLOWANCE_MS - (clock() - startedAt);
+      const elapsed = clock() - startedAt;
+      if (!printed && first.after && isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(elapsed)) {
+        const signal = (input.deadlineSignal ?? ((ms: number) => AbortSignal.timeout(ms)))(stampRerenderDeadlineMs(elapsed));
         try {
-          const again = await render(printUrl(), { signal: AbortSignal.timeout(Math.max(1, deadlineMs)) });
+          const again = await render(printUrl(), { signal });
           const second = await printedStamp(quoteId, first.after);
           bytes = again;
           printed = second.stamp;
