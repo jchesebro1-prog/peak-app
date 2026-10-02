@@ -10714,6 +10714,8 @@ seeded()
   .then(() => rename288AsyncChecks())
   .then(() => category289AsyncChecks())
   .then(() => packages289AsyncChecks())
+  .then(() => narrative293AsyncChecks())
+  .then(() => narrativePhotos293AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -43095,4 +43097,166 @@ import type { KeyProduct as N293Kp, SpecItem as N293Item, SpecSection as N293Sec
     "#293 intros: the 200 cap refuses a new intro but still allows edits");
   ok(eq(n293SanList([null, { id: "NI-aaaaaaaa", title: "A", text: "a", updatedAt: 1, updatedBy: "x" }, { id: "bad", title: "B", text: "b" }]).map((i) => i.id), ["NI-aaaaaaaa"]),
     "#293 intros: the stored list is shape-cleaned on read");
+}
+
+/* ======================================================================
+   #293 slice 1 — server layer: the product paragraph write (mergeUpsert
+   only), the intros blob, the library rows, key-product photos (primary
+   image, live parts only, inlining caps), and save-path sanitization.
+   ====================================================================== */
+import { saveProductParagraph as n293SaveParagraph, mergeUpsert as n293MergeUpsert, get as n293GetPart, remove as n293RemovePart } from "@/lib/stores/catalog";
+import { listIntros as n293ListIntros, upsertIntro as n293UpsertIntro, deleteIntro as n293DeleteIntro } from "@/lib/stores/narrative-intros";
+import { keyProductLibrary as n293Library } from "@/lib/narrative/library";
+import { inlinePhotos as n293Inline, keyProductPhotoDocs as n293PhotoDocs } from "@/lib/narrative/photos";
+import {
+  attachDocument as n293Attach, createDocument as n293CreateDoc, documentLinkId as n293LinkId,
+  setDocumentLinkDisplay as n293SetDisplay, setImageOrder as n293SetOrder,
+} from "@/lib/stores/part-documents";
+import { create as n293QCreate, get as n293QGet, addQuoteRevision as n293QAddRev } from "@/lib/stores/quotes";
+import type { PartDocument as N293Doc } from "@/lib/part-docs/types";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  ok(acts.includes("payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts)"), "#293 save: saveQuoteAction sanitizes every posted section's keyProducts beside sanitizeSystemSell");
+  ok(acts.includes('withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })])'), "#293 move: a moved system's keyProducts are sanitized");
+  const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("));
+  ok(/section = withSanitizedKeyProducts\(section\);/.test(copyFn.slice(0, 1200)), "#293 copy: a copied system's keyProducts are sanitized before copySectionForTarget");
+  const na = rd("src/app/(app)/estimator/narrative-actions.ts");
+  ok(/^"use server";/.test(na) && ["keyProductLibraryAction", "saveProductParagraphAction", "upsertSystemIntroAction", "deleteSystemIntroAction"].every((f) => na.includes(`export async function ${f}(`)),
+    "#293 actions: the four narrative actions live in one \"use server\" file");
+  ok((na.match(/can\("create", user\.roles\)/g) || []).length === 3 && !/requirePerm\(/.test(na), "#293 actions: all three library writes refuse without Create (with a message, not a redirect)");
+  ok(rd("src/lib/stores/catalog.ts").includes("narrativeText: body") && /mergeUpsert\(key, \{ narrativeText: body, narrativeUpdatedAt:/.test(rd("src/lib/stores/catalog.ts")),
+    "#293 paragraph: the write goes through mergeUpsert only");
+}
+
+async function narrative293AsyncChecks(): Promise<void> {
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const savedIntros = await getBlob<Record<string, unknown>>("narrative_intros", {});
+  const P1 = fixtureId(293, "kp-part");
+  const PDEL = fixtureId(293, "kp-part-gone");
+  const QID = fixtureId(293, "kp-quote");
+  try {
+    // ---- product paragraph: mergeUpsert only, price and spec untouched ----
+    await n293MergeUpsert(P1, { desc: "Test293 Fresnel", category: "Test293 Cat", unit: "ea", list: 200, cost: 120, specTitle: "FRESNEL", specBody: "1. Spec body" });
+    registerFixture("catalog_parts", P1);
+    const before = await n293GetPart(P1);
+    const r1 = await n293SaveParagraph(P1, "  A bright, even wash.\r\n\r\n- Quiet  ", "Tester", { now: 5_000 });
+    const after = await n293GetPart(P1);
+    ok(r1.ok && after?.narrativeText === "A bright, even wash.\n\n- Quiet" && after.narrativeUpdatedAt === 5_000 && after.narrativeUpdatedBy === "Tester",
+      "#293 paragraph: saveProductParagraph writes narrativeText / At / By (trimmed, line breaks normalized)");
+    ok(!!before && !!after && after.cost === before.cost && after.list === before.list && after.pricedAt === before.pricedAt && after.specBody === "1. Spec body" && after.specTitle === "FRESNEL",
+      "#293 paragraph: cost, list, pricedAt and the spec fields are unchanged");
+    await n293MergeUpsert(P1, { cost: 130, list: 210 }); // a price-book style patch
+    ok((await n293GetPart(P1))?.narrativeText === "A bright, even wash.\n\n- Quiet", "#293 paragraph: a later price patch through mergeUpsert leaves the paragraph intact");
+    const stale = await n293SaveParagraph(P1, "Newer", "Other", { expectUpdatedAt: 1 });
+    ok(!stale.ok && stale.stale?.updatedAt === 5_000 && stale.stale?.paragraph === "A bright, even wash.\n\n- Quiet", "#293 paragraph: a stale expectUpdatedAt is refused with the current text and stamp");
+    const fresh = await n293SaveParagraph(P1, "Newer", "Other", { expectUpdatedAt: 5_000, now: 6_000 });
+    ok(fresh.ok && (await n293GetPart(P1))?.narrativeText === "Newer", "#293 paragraph: a matching expectUpdatedAt writes");
+    ok(!(await n293SaveParagraph(P1, "   ", "T")).ok && !(await n293SaveParagraph(P1, "x".repeat(4001), "T")).ok, "#293 paragraph: empty and over-length text are refused");
+    ok(!(await n293SaveParagraph(fixtureId(293, "no-such-sku"), "Text", "T")).ok, "#293 paragraph: a sku not in the catalog (custom) is refused");
+    await n293MergeUpsert(PDEL, { desc: "Test293 Gone", category: "Test293 Cat", unit: "ea", list: 1, cost: 1 });
+    registerFixture("catalog_parts", PDEL);
+    await n293RemovePart(PDEL);
+    ok(!(await n293SaveParagraph(PDEL, "Text", "T")).ok, "#293 paragraph: a soft-deleted part is refused");
+
+    // ---- intros blob ----
+    await setBlob("narrative_intros", { intros: [] });
+    const a = await n293UpsertIntro({ title: "Test293 Rigging", text: "Our rigging systems…" }, "Tester");
+    ok(a.ok && /^NI-[0-9a-z]{8}$/.test(a.id || "") && (await n293ListIntros()).some((i) => i.id === a.id && i.updatedBy === "Tester"), "#293 intros: upsertIntro mints an id and round-trips through the blob");
+    const dup = await n293UpsertIntro({ title: "test293 rigging", text: "x" }, "Tester");
+    ok(!dup.ok, "#293 intros: a duplicate title is refused by the store");
+    if (a.ok && a.id) {
+      const e = await n293UpsertIntro({ id: a.id, title: "Test293 Rigging", text: "Edited" }, "Lee");
+      ok(e.ok && (await n293ListIntros()).find((i) => i.id === a.id)?.text === "Edited", "#293 intros: an edit keeps the id");
+      const d = await n293DeleteIntro(a.id, "Lee");
+      ok(d.ok && !(await n293ListIntros()).some((i) => i.id === a.id), "#293 intros: deleteIntro removes it");
+    }
+
+    // ---- the quote save path stores sanitized blocks; a revision snapshots them ----
+    const { withSanitizedKeyProducts } = await import("@/app/(app)/estimator/narrative");
+    const posted = { id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative" as const,
+      items: [{ id: 1, sku: P1, desc: "Fresnel", qty: 2, unit: "ea", cost: 120, price: 200 }],
+      keyProducts: [{ lineKey: 1, sku: ` ${P1} `, text: "  Para  ", photo: "x", junk: true }, { lineKey: "1", sku: "DUP" }] } as unknown as N293Sec;
+    const stored = [posted].map(withSanitizedKeyProducts);
+    await n293QCreate({ id: QID, name: "#293 kp", customer: "Spec fixture", owner: "spec", quoteType: "system", spec: { sections: stored, mobs: [] } });
+    registerFixture("quotes", QID);
+    const back = ((await n293QGet(QID))?.spec as { sections?: N293Sec[] } | null)?.sections?.[0];
+    // jsonb stores object keys in its own order, so compare with sorted keys.
+    const canon = (v: unknown) => JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x));
+    ok(canon(back?.keyProducts) === canon([{ lineKey: "1", sku: P1, text: "Para", photo: true }]), "#293 save: messy posted keyProducts are stored sanitized");
+    const rev = await n293QAddRev(QID, { by: "Test", note: "#293" });
+    const revSec = (rev?.spec as { sections?: N293Sec[] } | null)?.sections?.[0];
+    ok(canon(revSec?.keyProducts) === canon(back?.keyProducts), "#293 save: addQuoteRevision snapshots keyProducts with the spec");
+  } finally {
+    await setBlob("narrative_intros", { intros: Array.isArray(savedIntros.intros) ? savedIntros.intros : [] });
+  }
+}
+
+async function narrativePhotos293AsyncChecks(): Promise<void> {
+  const P1 = fixtureId(293, "ph-part");
+  const P2 = fixtureId(293, "ph-hidden");
+  const P3 = fixtureId(293, "ph-gone");
+  const CUSTOM = fixtureId(293, "ph-custom");
+  for (const [sku, desc] of [[P1, "Test293 Photo part"], [P2, "Test293 Hidden-only"], [P3, "Test293 Deleted"]]) {
+    await n293MergeUpsert(sku, { desc, category: "Test293 Cat", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", sku);
+  }
+  await n293SaveParagraph(P1, "Library text for the photo part.", "Tester");
+  const mk = async (fileName: string, contentType: string) => {
+    const d = await n293CreateDoc({ kind: "image", fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-293/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#293 photos: fixture document failed to create");
+    registerFixture("part_documents", d.id);
+    return d;
+  };
+  const first = await mk("first.jpg", "image/jpeg");
+  const second = await mk("second.webp", "image/webp");
+  const hidden = await mk("hidden.png", "image/png");
+  const gone = await mk("gone.png", "image/png");
+  for (const [doc, sku] of [[first, P1], [second, P1], [hidden, P2], [gone, P3]] as const) {
+    await n293Attach(doc.id, [sku], "Test");
+    registerFixture("part_document_links", n293LinkId(sku, doc.id));
+  }
+  ok(await n293SetOrder(P1, [second.id, first.id]), "#293 photos fixture: Make primary moves the second image first");
+  ok(await n293SetDisplay(hidden.id, P2, { hidden: true }), "#293 photos fixture: P2's only image is hidden");
+  await n293RemovePart(P3);
+
+  const item = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 5, price: 10 });
+  const kp = (id: number, sku: string, photo = true) => ({ lineKey: String(id), sku, text: "t", photo });
+  const sections = [
+    { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", items: [item(1, P1), item(2, P2), item(3, P3)], keyProducts: [kp(1, P1), kp(2, P2), kp(3, P3)] },
+    { id: "b", name: "B", kind: "materials", mfr: "", freightPct: 0, items: [item(1, P2)], keyProducts: [kp(1, P2)] },
+  ] as unknown as N293Sec[];
+  const docs = await n293PhotoDocs(sections);
+  ok([...docs.keys()].join(",") === P1 && docs.get(P1)?.id === second.id,
+    "#293 photos: the primary visible image (visibleImagesForParts [0]); none for a hidden-only part or a soft-deleted part");
+  ok((await n293PhotoDocs([{ ...sections[0], keyProducts: [kp(1, P1, false)] }] as unknown as N293Sec[])).size === 0, "#293 photos: photo off → no photo doc");
+
+  const libRows = await n293Library([P1, P2, CUSTOM, P1, "  "]);
+  ok(Object.keys(libRows).sort().join(",") === [CUSTOM, P1, P2].sort().join(","), "#293 library: one row per distinct, non-blank sku");
+  ok(libRows[P1].inCatalog && libRows[P1].paragraph === "Library text for the photo part." && libRows[P1].photoDocId === second.id && libRows[P1].desc === "Test293 Photo part",
+    "#293 library: a catalog part's row carries its paragraph, description and primary photo");
+  ok(libRows[P2].inCatalog && libRows[P2].paragraph === null && libRows[P2].photoDocId === null, "#293 library: no paragraph → null; hidden-only images → no photo");
+  ok(!libRows[CUSTOM].inCatalog && libRows[CUSTOM].paragraph === null, "#293 library: a custom sku reads Not in catalog");
+
+  // inlinePhotos — fake reader, every cap.
+  const d = (id: string, contentType: string, size: number, blobKey: string | null = id): N293Doc =>
+    ({ id, kind: "image", title: "T-" + id, fileName: id, contentType, size, blobKey, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] });
+  const bytes: Record<string, Uint8Array | "throw" | null> = { a: new Uint8Array(10), f: new Uint8Array(5), g: new Uint8Array(20), d: null, e: "throw" };
+  const reads: string[] = [];
+  const read = async (key: string) => { reads.push(key); const b = bytes[key]; if (b === "throw") throw new Error("blob down"); return b ?? null; };
+  const map = new Map<string, N293Doc>([
+    ["A", d("a", "image/png", 10)], ["B", d("b", "image/svg+xml", 10)], ["C", d("c", "image/jpeg", 99)], ["D", d("d", "image/webp", 1)],
+    ["E", d("e", "image/png", 1)], ["F", d("f", "image/png", 5)], ["G", d("g", "image/png", 1)], ["H", d("h", "image/png", 1, null)],
+  ]);
+  const warn = console.warn;
+  console.warn = () => {};
+  let out: Record<string, { src: string; alt: string }> = {};
+  try {
+    out = await n293Inline(map, read, { perImage: 16, total: 12, concurrency: 2 });
+  } finally {
+    console.warn = warn;
+  }
+  ok(Object.keys(out).join(",") === "A" && out.A.src === "data:image/png;base64," + Buffer.from(new Uint8Array(10)).toString("base64") && out.A.alt === "T-a",
+    "#293 inline: a PNG within caps becomes a data URI; SVG, oversize, missing, unreadable, over-total and blob-less photos are skipped");
+  ok(!reads.includes("b") && !reads.includes("c") && !reads.includes("h"), "#293 inline: disallowed types, a stored size over the cap and a missing blobKey are never read");
 }
