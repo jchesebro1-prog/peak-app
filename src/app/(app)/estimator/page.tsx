@@ -23,6 +23,7 @@ import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
+import { listIntros } from "@/lib/stores/narrative-intros";
 import { seriesSkus } from "@/lib/track-series";
 import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
@@ -274,7 +275,7 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries] =
+  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros] =
     await Promise.all([
       fabricParts(),
       byCategory("Labor"),
@@ -289,6 +290,7 @@ export default async function EstimatorPage({
       loadFreightRule(),
       allSpecRecords(),
       listTrackSeries(),
+      listIntros(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -449,6 +451,10 @@ export default async function EstimatorPage({
       // the quote; only an approver may hand it to someone else.
       viewerName={user.name}
       viewerCanApprove={can("approve", user.roles)}
+      // #293: Save to library / intros — the Spec panel's audience (#205).
+      canWriteNarrativeLibrary={can("create", user.roles)}
+      // #293: the system-intro library for the narrative column's intro select.
+      narrativeIntros={narrativeIntros}
     />
   );
 }

@@ -591,5 +591,17 @@ See `.env.example`.
     stay datasheet-only. Remaining: a "Manual URL" import column. Punch
     item #290.
 
+32. ✅ **Narrative-first client preview — Slice 1** (#293, D539–D545) —
+    key products on a system (★ per line; `SpecSection.keyProducts`
+    anchored to line id + sku, sanitized server-side, remapped on Copy
+    here), write-once product paragraphs on the catalog part
+    (`narrativeText`, mergeUpsert only; Save to library + the part
+    editor's Narrative paragraph), a `narrative_intros` blob of reusable
+    system intros, Draft narrative (copy only — D89), the customer PDF
+    printing each block with the part's primary photo floated right
+    (data URIs; byte-identical without blocks), and Show on PDF →
+    Itemized appendix. Slices 2 (system library) and 3 (client link)
+    follow. Spec `docs/superpowers/specs/2026-10-01-narrative-client-preview-design.md`.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

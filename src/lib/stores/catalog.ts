@@ -4,6 +4,7 @@ import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
 import type { PortalVisibility } from "@/lib/portal-visibility";
+import { MAX_PARAGRAPH } from "@/app/(app)/estimator/narrative";
 
 export type CatalogProductMetadata = {
   productFamily?: string;
@@ -195,6 +196,14 @@ export type CatalogPart = {
    *  enricher patch object carries this key, so a price-book import,
    *  DaVinci enrich, or ports-rule apply never clears a stored override. */
   portalVisibility?: PortalVisibility;
+  /** #293: the part's write-once customer paragraph (plain text, D488 rules)
+   *  — sales prose for the Estimator's narrative, distinct from specBody (CSI
+   *  Part 2 spec language). Written ONLY through mergeUpsert by
+   *  saveProductParagraph — no importer, enricher or price-book patch carries
+   *  these keys, so imports never clear it. A quote keeps its own copy. */
+  narrativeText?: string;
+  narrativeUpdatedAt?: number;
+  narrativeUpdatedBy?: string;
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */
@@ -305,6 +314,42 @@ export async function mergeUpsert(
     sku,
   };
   return writePart(existing, merged as Omit<CatalogPart, "id"> & { id?: string }, opts);
+}
+
+export type ProductParagraphResult =
+  | { ok: true; part: CatalogPart }
+  | { ok: false; error: string; stale?: { paragraph: string | null; updatedAt: number | null } };
+
+/**
+ * #293 — save a part's library paragraph ("Save to library" in the Estimator,
+ * and the part editor's Narrative paragraph). mergeUpsert, never upsert: only
+ * the three narrative keys are written, so price, pricedAt, spec text, ports,
+ * documents… ride along untouched. `expectUpdatedAt` (when given) must equal
+ * the stored narrativeUpdatedAt (null = "there was none") — otherwise the
+ * caller re-asks "changed since you loaded it". A soft-deleted or unknown sku
+ * is refused (custom lines can't have a library paragraph).
+ */
+export async function saveProductParagraph(
+  sku: string,
+  text: string,
+  by: string,
+  opts: { expectUpdatedAt?: number | null; now?: number } = {}
+): Promise<ProductParagraphResult> {
+  const key = String(sku || "").trim();
+  const body = String(text ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!body) return { ok: false, error: "Write the paragraph first." };
+  if (body.length > MAX_PARAGRAPH) return { ok: false, error: `Keep the paragraph under ${MAX_PARAGRAPH.toLocaleString("en-US")} characters.` };
+  const part = key ? await get(key) : null;
+  if (!part) return { ok: false, error: "Only catalog parts have a library paragraph." };
+  if (opts.expectUpdatedAt !== undefined && (part.narrativeUpdatedAt ?? null) !== opts.expectUpdatedAt) {
+    return {
+      ok: false,
+      error: "The library paragraph changed since you loaded it.",
+      stale: { paragraph: part.narrativeText ?? null, updatedAt: part.narrativeUpdatedAt ?? null },
+    };
+  }
+  const saved = await mergeUpsert(key, { narrativeText: body, narrativeUpdatedAt: opts.now ?? Date.now(), narrativeUpdatedBy: by });
+  return { ok: true, part: saved };
 }
 
 /** Explicit go-live reset for the pricing catalog only. Grid symbols and all

@@ -23,6 +23,7 @@ import { isLaborLineEditable } from "./labor-group";
 import CatalogPicker from "./catalog-picker";
 import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "./material-csv";
+import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
 
 /**
  * One system card — header (badge / rename / cost / price), per-system margin
@@ -147,6 +148,8 @@ export type SectionCardProps = {
   onSetSpecKey: (id: number, v: string) => void;
   onMoveItem: (id: number, direction: -1 | 1) => void;
   onRemoveItem: (id: number) => void;
+  /** #293: ★ — mark / unmark this line as a key product (narrative block). */
+  onToggleKeyProduct: (itemId: number) => void;
   onToggleCatalog: () => void;
   onToggleCurtain: () => void;
   onToggleFixture: () => void;
@@ -904,6 +907,7 @@ export default function SectionCard(p: SectionCardProps) {
                     : null)
                 : null;
               const ext = lineExtSellOf(it);
+              const kpStar = keyProductStar(sec, it);
               const lineMargin = ext > 0 ? (ext - it.qty * it.cost) / ext : 0;
               /* #269: a labor line from a stored group reopens the Labor
                  configurator — its description and an Edit link, like a
@@ -934,7 +938,7 @@ export default function SectionCard(p: SectionCardProps) {
               return (
                 <div
                   key={it.id}
-                  className="est-row"
+                  className={"est-row" + (kpStar === "on" ? " est-row-kp" : "")}
                   style={{
                     display: "grid",
                     gridTemplateColumns: cols,
@@ -1313,6 +1317,28 @@ export default function SectionCard(p: SectionCardProps) {
                     )}
                     {curtainEditable && (
                       <button type="button" className="est-action-btn" onClick={openLine} title="Edit curtain — reopens the curtain configurator" aria-label={`Edit curtain ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
+                    {kpStar !== "none" && (
+                      <button
+                        type="button"
+                        className="est-action-btn"
+                        onClick={() => p.onToggleKeyProduct(it.id)}
+                        disabled={kpStar === "full" || kpStar === "dupSku"}
+                        aria-pressed={kpStar === "on"}
+                        aria-label="Key product — featured in the narrative"
+                        title={
+                          kpStar === "on"
+                            ? "Key product — featured in the narrative"
+                            : kpStar === "full"
+                            ? `Up to ${MAX_KEY_PRODUCTS} key products per system`
+                            : kpStar === "dupSku"
+                            ? "This part is already a key product on another line"
+                            : "Mark as a key product — feature it in the narrative"
+                        }
+                        style={{ ...ACTION_BTN, color: kpStar === "on" ? "var(--accent)" : ACTION_BTN.color, cursor: kpStar === "full" || kpStar === "dupSku" ? "not-allowed" : "pointer" }}
+                      >
+                        {kpStar === "on" ? "★" : "☆"}
+                      </button>
                     )}
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={ACTION_BTN}>↑</button>
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={ACTION_BTN}>↓</button>

@@ -10,6 +10,7 @@ import type { CurtainRequest } from "@/lib/portal-cart-types";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
+import type { SystemIntro } from "@/lib/narrative/intros";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -202,6 +203,21 @@ export function vendorAttachmentLoad(quotes: VendorQuote[]): number {
   return quotes.reduce((a, v) => a + (v.attachment?.dataUrl?.length || 0), 0);
 }
 
+/** #293: a product the customer narrative features — its paragraph prints
+ *  (Narrative presentation only) with the part's photo floated beside it.
+ *  Anchored to one line of THIS section: item ids are unique per section
+ *  only (computeNid / placeSystemInEstimate keeps ids on Copy-to-existing). */
+export type KeyProduct = {
+  /** String(SpecItem.id) of a line in THIS section. */
+  lineKey: string;
+  /** The line's sku when marked — resolution requires it to still match. */
+  sku: string;
+  /** The paragraph as it prints: plain text, narrativeBlocks() rules (D488). */
+  text: string;
+  /** Print the part's primary photo beside the paragraph. */
+  photo: boolean;
+};
+
 /** One system card. */
 export type SpecSection = {
   id: string;
@@ -234,6 +250,9 @@ export type SpecSection = {
   /** #269: labor group id → the configurator draft that built its lines.
    *  Internal only; carried by save, move and copy like any section field. */
   laborGroups?: Record<string, LaborGroupRecord>;
+  /** #293: ordered; at most one block per lineKey and per sku. Absent on
+   *  every pre-#293 section (which therefore prints exactly as before). */
+  keyProducts?: KeyProduct[];
 };
 
 /* ---------------- configurator drafts (prototype state shapes) ---------------- */
@@ -599,4 +618,8 @@ export type EstimatorProps = {
   viewerName: string;
   /** #287 task B — may this user make someone else the lead estimator (`approve`)? */
   viewerCanApprove: boolean;
+  /** #293 — may this user save product paragraphs / system intros (`create`)? */
+  canWriteNarrativeLibrary: boolean;
+  /** #293 — the system-intro library (Settings blob `narrative_intros`). */
+  narrativeIntros: SystemIntro[];
 };

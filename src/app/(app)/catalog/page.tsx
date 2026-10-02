@@ -19,6 +19,7 @@ import { claimOwnerByKey, resolveCatalogOwner } from "@/lib/vendor-status";
 import { CatalogOwnerCard } from "./catalog-owner-card";
 import PortsEditor from "./ports-editor";
 import SpecPanel, { type SpecPanelArticle, type SpecPanelTemplate } from "./spec-panel";
+import NarrativeParagraphPanel from "./narrative-paragraph-panel";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
@@ -1057,6 +1058,18 @@ function PartFormModal({
                     the previously-edited part into this one — a latent
                     cross-part write. Force a fresh instance per part. */}
                 <SpecPanel key={part.sku} part={part} articles={specArticles} templates={specTemplates} defaultArticleId={defaultArticleId} />
+              </div>
+            )}
+
+            {/* #293 — the part's Narrative paragraph (Estimator key products).
+                Same audience as the Spec panel; the write is enforced by
+                saveProductParagraphAction (Create). */}
+            {canCreate && editing && part && (
+              <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
+                <NarrativeParagraphPanel
+                  key={part.sku}
+                  part={{ sku: part.sku, narrativeText: part.narrativeText, narrativeUpdatedAt: part.narrativeUpdatedAt, narrativeUpdatedBy: part.narrativeUpdatedBy }}
+                />
               </div>
             )}
 

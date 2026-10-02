@@ -12,11 +12,14 @@ export type QuotePdfOptions = {
   pdfCover: boolean;
   pdfTerms: boolean;
   pdfOptions: boolean;
+  /** #293: print every system the body didn't itemize again, in full, after
+   *  the signature block. Off by default; absent on older quotes → off. */
+  pdfItemizedAppendix: boolean;
   /** #292 — append Client-style curtain cut sheets after the estimate. Off by default. */
   pdfCutSheets: boolean;
 };
 
-export const PDF_TOGGLE_KEYS = ["pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions", "pdfCutSheets"] as const;
+export const PDF_TOGGLE_KEYS = ["pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions", "pdfItemizedAppendix", "pdfCutSheets"] as const;
 
 export const DEFAULT_PDF_OPTIONS: QuotePdfOptions = {
   detail: "itemized",
@@ -26,6 +29,7 @@ export const DEFAULT_PDF_OPTIONS: QuotePdfOptions = {
   pdfCover: true,
   pdfTerms: true,
   pdfOptions: true,
+  pdfItemizedAppendix: false,
   pdfCutSheets: false,
 };
 

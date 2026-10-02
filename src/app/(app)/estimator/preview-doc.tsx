@@ -55,7 +55,7 @@ const actionLink: CSSProperties = {
   border: "none",
 };
 
-export type PdfToggle = "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfCutSheets";
+export type PdfToggle = "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfItemizedAppendix" | "pdfCutSheets";
 
 export type PreviewProps = {
   phone: boolean;
@@ -79,6 +79,7 @@ export type PreviewProps = {
   pdfCover: boolean;
   pdfTerms: boolean;
   pdfOptions: boolean;
+  pdfItemizedAppendix: boolean;
   pdfCutSheets: boolean;
   /** #292 — sheets the saved PDF would append (countCutSheetTypes over the live sections). */
   cutSheetCount: number;
@@ -167,6 +168,14 @@ export default function PreviewDoc(p: PreviewProps) {
             </button>
             <button type="button" onClick={() => p.togglePdf("pdfOptions")} style={p.pdfOptions ? segOn : segOff}>
               {(p.pdfOptions ? "✓ " : "") + "Options"}
+            </button>
+            <button
+              type="button"
+              onClick={() => p.togglePdf("pdfItemizedAppendix")}
+              style={p.pdfItemizedAppendix ? segOn : segOff}
+              title="Print every narrative system's full line list after the signature"
+            >
+              {(p.pdfItemizedAppendix ? "✓ " : "") + "Itemized appendix"}
             </button>
             <button type="button" onClick={() => p.togglePdf("pdfTerms")} style={p.pdfTerms ? segOn : segOff}>
               {(p.pdfTerms ? "✓ " : "") + "Terms"}
