@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { QuotePdfViewer } from "@/components/quote-pdf/quote-pdf-viewer";
+import { ClientLinkPanel } from "./client-link-panel";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { systemFreight, systemItemsRev, systemSellTotal } from "./pricing";
 import type { PaymentTerms, SpecSection } from "./types";
@@ -253,6 +254,7 @@ export default function PreviewDoc(p: PreviewProps) {
           ) : (
             <span style={{ ...actionLink, color: "#9aa0ab", background: "#f1f2f5", cursor: "default" }}>Download PDF</span>
           )}
+          {p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}
         </aside>
         <div
           className="est-scroll est-docwrap"

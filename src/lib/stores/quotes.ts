@@ -21,6 +21,7 @@ import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { canHavePdf, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import {
   carriesPipeline,
   firstStage,
@@ -725,7 +726,11 @@ export async function update(
 ): Promise<Quote | null> {
   return patchQuote(id, (q) => {
     // #223: an allocated number never changes — a patch cannot carry one.
-    Object.assign(q, withoutEstimateFields(patch), { updatedAt: Date.now() });
+    const clean: Partial<Quote> = withoutEstimateFields(patch);
+    // #293 slice 3: the share link is patchShareLink's alone — a stale client
+    // patch (an editor holding the pre-revoke doc) can't revive a revoked link.
+    delete clean.shareLink;
+    Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
 }
@@ -930,6 +935,49 @@ export async function setRevisionPdfPath(id: string, rev: number, path: string):
     });
     return hit;
   });
+}
+
+/**
+ * #293 slice 3 — what patchShareLink may do (spec §1.6, §5.5). Neither op
+ * carries a token secret, a key or a lifetime — the store mints those itself,
+ * so no caller can choose or replay one. `allow` re-checks eligibility under
+ * the row lock; `now` is the clock (a parameter for tests).
+ */
+export type ShareLinkOp = { kind: "create"; by: string; now: number; allow: (doc: Quote) => boolean } | { kind: "revoke"; by: string; now: number };
+
+/**
+ * #293 slice 3 — the ONLY writer of `Quote.shareLink`. Under the row lock
+ * (patchQuote), so "is a link already active?" and the write are one
+ * compare-and-set. Create: an active link is left as is (re-copy = the same
+ * link); otherwise a fresh nonce and a 60-day expiry. Revoke: a fresh nonce
+ * AND expiry 0, so every earlier token fails twice over and nothing can bring
+ * it back. Never bumps the document's printed date (the link isn't the
+ * document) and never changes content (shareLink isn't a
+ * QUOTE_CONTENT_FIELDS member). `wrote` = a new link record was stored.
+ */
+export async function patchShareLink(id: string, op: ShareLinkOp): Promise<{ quote: Quote; wrote: boolean } | null> {
+  const at = Number.isFinite(op.now) ? op.now : Date.now();
+  let wrote = false;
+  const quote = await patchQuote(id, (doc) => {
+    const prev = doc.shareLink ?? null;
+    if (op.kind === "revoke") {
+      doc.shareLink = {
+        nonce: newShareNonce(),
+        expiresAt: 0,
+        createdAt: prev?.createdAt ?? at,
+        createdBy: prev?.createdBy ?? op.by,
+        revokedAt: at,
+        revokedBy: op.by,
+      };
+      wrote = true;
+      return;
+    }
+    if (!op.allow(doc)) return;
+    if (prev && typeof prev.nonce === "string" && prev.nonce && prev.expiresAt > at) return; // already active — the same link
+    doc.shareLink = { nonce: newShareNonce(), expiresAt: at + SHARE_DEFAULT_TTL_MS, createdAt: at, createdBy: op.by, revokedAt: null, revokedBy: null };
+    wrote = true;
+  });
+  return quote ? { quote, wrote } : null;
 }
 
 /** After a send commits: copy the current PDF onto the new sent revision (#222).

@@ -10720,6 +10720,7 @@ seeded()
   .then(() => narrativeFinal293AsyncChecks())
   .then(() => systemLibrary293sAsyncChecks())
   .then(() => systemLibrary293sFinalFixAsyncChecks())
+  .then(() => shareLinks293tAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -45306,4 +45307,135 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/quote-pdf\/state"|@\/lib\/estimate-number")/m.test(viewSrc), "#293t view.ts stays client-safe: value imports only state + estimate-number");
   const tokSrc = readFileSync(join(process.cwd(), "src/lib/quote-share/token.ts"), "utf8");
   ok(tokSrc.includes("timingSafeEqual(want, have)") && tokSrc.includes("`share:quote:${quoteId}:${nonce}:${exp}`"), "#293t token: constant-time compare over the share: domain");
+}
+
+/* ======================================================================
+   #293 slice 3 — share links: the store write (no updatedAt bump, no
+   content change), create / re-copy / revoke, resolve for the public page,
+   the status a browser sees, the actions and the Client link panel.
+   ====================================================================== */
+import {
+  ensureShareLink as n293tEnsure, revokeShareLink as n293tRevoke, resolveSharedQuote as n293tResolve,
+  shareLinkStatus as n293tStatus, shareLinkView as n293tLinkView, SHARE_ID_MAX as n293tIdMax,
+} from "@/lib/quote-share/links";
+import {
+  create as n293tQCreate, update as n293tQUpdate, addQuoteRevision as n293tQAddRev, get as n293tQGet,
+  buildQuote as n293tBuild, QUOTE_CONTENT_FIELDS as n293tContentFields,
+} from "@/lib/stores/quotes";
+{
+  ok(!(n293tContentFields as readonly string[]).includes("shareLink"), "#293t links: shareLink is not a content field (a link never re-renders the PDF)");
+  ok(n293tBuild("Q-x", { shareLink: { nonce: "n", expiresAt: 9, createdAt: 1, createdBy: "x" } } as never, "system", null, 1).shareLink === undefined,
+    "#293t links: buildQuote never copies a share link");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/share-actions.ts");
+  ok(/^"use server";/.test(acts) && ["shareLinkStatusAction", "getShareLinkAction", "revokeShareLinkAction"].every((f) => acts.includes(`export async function ${f}(`)) &&
+     (acts.match(/await requireUser\(\);/g) || []).length === 3 && (acts.match(/can\("send", user\.roles\)/g) || []).length === 3 && !acts.includes("requirePerm("),
+    "#293t actions: three server actions, each behind requireUser; create, revoke and the path need Send (answered inline, never a redirect)");
+  ok(!/^export (?!async function)/m.test(acts), "#293t actions: a \"use server\" file exports only async functions");
+  const panel = rd("src/app/(app)/estimator/client-link-panel.tsx");
+  ok(/^"use client";/.test(panel) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/quote-share\/(token|links|photo-response)|lib\/quote-pdf\/(document-loader|portal-access|quote-document-data|token))/m.test(panel),
+    "#293t panel: a client component with no server-only value import");
+  ok(!panel.includes("window.confirm") && !/(^|[^\w.])confirm\(/m.test(panel) && panel.includes("ONLINE_COPY.revokeConfirm") && panel.includes("navigator.clipboard.writeText("),
+    "#293t panel: Revoke confirms inline; Copy writes the clipboard (with a manual fallback)");
+  ok(panel.includes("Copy client link") && panel.includes("Client link") && panel.includes("created by") && (panel.match(/catch \{/g) || []).length >= 3,
+    "#293t panel: copy, expiry line, and every action await wrapped in try/catch");
+  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(pd.includes('import { ClientLinkPanel } from "./client-link-panel";') && pd.includes("{p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}"),
+    "#293t preview: the Client link block sits in the customer preview sidebar");
+  const qs = rd("src/lib/stores/quotes.ts");
+  const psl = qs.slice(qs.indexOf("export async function patchShareLink("), qs.indexOf("\n}\n", qs.indexOf("export async function patchShareLink(")));
+  ok(psl.includes("patchQuote(id,") && !psl.includes("updatedAt"), "#293t links: patchShareLink writes under the row lock and never touches updatedAt");
+  // Task-1 review (binding): the store mints the nonce and the expiry; no caller can hand one in, and no other writer touches shareLink.
+  const opSrc = qs.slice(qs.indexOf("export type ShareLinkOp"), qs.indexOf(";\n", qs.indexOf("export type ShareLinkOp")));
+  ok(opSrc.length > 0 && !/\b(nonce|expiresAt)\b/.test(opSrc) && psl.includes("newShareNonce()") && psl.includes("SHARE_DEFAULT_TTL_MS"),
+    "#293t links: patchShareLink takes no nonce or expiry — it mints the nonce (newShareNonce) and the 60-day expiry itself");
+  ok((qs.match(/\.shareLink = /g) || []).length === (psl.match(/\.shareLink = /g) || []).length && (psl.match(/\.shareLink = /g) || []).length >= 2,
+    "#293t links: patchShareLink is the only shareLink writer in the quotes store");
+  const lk = rd("src/lib/quote-share/links.ts");
+  ok(!lk.includes("newShareNonce") && !/\bshareLink\s*=/.test(lk), "#293t links: links.ts never mints a nonce or writes shareLink itself");
+  const upd = qs.slice(qs.indexOf("export async function update("), qs.indexOf("\n}\n", qs.indexOf("export async function update(")));
+  ok(upd.includes("delete clean.shareLink;"), "#293t links: update() drops a caller's shareLink (a stale client write can't revive a revoked link)");
+}
+
+async function shareLinks293tAsyncChecks(): Promise<void> {
+  const S = "test-secret-293t";
+  const QS = fixtureId(293, "t-share-sent");
+  const QD = fixtureId(293, "t-share-draft");
+  const QF = fixtureId(293, "t-share-flame");
+  const sec = { id: "sysT", name: "Test293t Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "T293T", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+  await n293tQCreate({ id: QS, name: "#293t share", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", quoteNote: "Sent note 293t", spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QS);
+  await n293tQCreate({ id: QD, name: "#293t draft", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QD);
+  await n293tQCreate({ id: QF, name: "#293t flame", customer: "Spec fixture", owner: "spec", quoteType: "flame_test", source: "estimator" });
+  registerFixture("quotes", QF);
+
+  // A never-sent quote can't get a link, and nothing is written.
+  const never = await n293tEnsure(QD, "Tester", { secret: S });
+  ok(!never.ok && never.error === n293tCopy.notSent && !(await n293tQGet(QD))?.shareLink, "#293t links (DB): a never-sent quote is refused and nothing is written");
+  const flame = await n293tEnsure(QF, "Tester", { secret: S });
+  ok(!flame.ok && flame.error === n293tCopy.notShareable, "#293t links (DB): a service quote is refused");
+  ok(!(await n293tEnsure(QS, "Tester", { secret: "" })).ok, "#293t links (DB): no AUTH_SECRET → refused");
+
+  // Send it: the new revision carries docFields.
+  await n293tQUpdate(QS, { status: "sent" });
+  const rev = await n293tQAddRev(QS, { by: "Test", reason: "sent", note: "Sent to customer" });
+  ok(rev?.docFields?.quoteNote === "Sent note 293t" && rev.docFields.owner === "spec" && rev.docFields.source === "estimator",
+    "#293t docFields (DB): a new revision freezes the printed header fields");
+
+  const before = (await n293tQGet(QS))!;
+  const now = Date.now();
+  const made = await n293tEnsure(QS, "Tester", { secret: S, now });
+  ok(made.ok && made.link.active && made.link.expiresAt === now + 60 * 86_400_000 && made.link.createdBy === "Tester" &&
+     !!made.link.path && made.link.path.startsWith(`/share/quote/${encodeURIComponent(QS)}/`) && /\/\d+\.[A-Za-z0-9_-]{43}$/.test(made.link.path),
+    "#293t links (DB): Copy client link creates a 60-day link");
+  ok(made.ok && !("nonce" in made.link), "#293t links (DB): the browser view never carries the nonce");
+  const after = (await n293tQGet(QS))!;
+  ok(after.updatedAt === before.updatedAt && after.contentChangedAt === before.contentChangedAt, "#293t links (DB): creating a link moves neither updatedAt nor contentChangedAt");
+  const again = await n293tEnsure(QS, "Someone else", { secret: S, now: now + 1000 });
+  ok(made.ok && again.ok && again.link.path === made.link.path && again.link.createdBy === "Tester", "#293t links (DB): copying again gives the same link");
+  const tok = made.ok ? made.link.path!.split("/").pop()! : "";
+
+  // Resolve (the public page's read).
+  const hit = await n293tResolve(QS, tok, { secret: S, now });
+  ok(hit?.state.kind === "ok" && hit.state.rev.rev === rev?.rev, "#293t resolve (DB): a valid token opens the latest sent revision");
+  ok((await n293tResolve(QS, tok, { secret: S, now: now + 61 * 86_400_000 })) === null, "#293t resolve (DB): an expired link → null");
+  ok((await n293tResolve(QD, tok, { secret: S, now })) === null, "#293t resolve (DB): another quote's id → null");
+  ok((await n293tResolve(QS, tok.slice(0, -1) + (tok.endsWith("A") ? "B" : "A"), { secret: S, now })) === null, "#293t resolve (DB): a tampered token → null");
+  ok((await n293tResolve("Q".repeat(n293tIdMax + 1), tok, { secret: S, now })) === null && (await n293tResolve(QS, "not-a-token", { secret: S, now })) === null,
+    "#293t resolve (DB): an oversize id or malformed token → null");
+
+  // What a browser sees.
+  const st = n293tStatus((await n293tQGet(QS))!, false, S, now);
+  const stSend = n293tStatus((await n293tQGet(QS))!, true, S, now);
+  ok(st.state === "ok" && st.link?.active === true && st.link.path === null && stSend.link?.path === (made.ok ? made.link.path : "x"),
+    "#293t status (DB): the path is shown only to a Send holder");
+
+  // Recalled to draft → revising; a link can't be created; the old one shows the card.
+  await n293tQUpdate(QS, { status: "draft" });
+  ok((await n293tResolve(QS, tok, { secret: S, now }))?.state.kind === "revising", "#293t resolve (DB): recalled to draft → revising");
+  const refused = await n293tEnsure(QS, "Tester", { secret: S, now });
+  ok(!refused.ok && refused.error === n293tCopy.revisingStaff, "#293t links (DB): a recalled quote can't get a new link");
+  await n293tQUpdate(QS, { status: "lost" });
+  const closed = await n293tResolve(QS, tok, { secret: S, now });
+  ok(closed?.state.kind === "ok" && closed.state.closed, "#293t resolve (DB): a lost quote still opens, marked closed");
+
+  // Revoke: the nonce rotates, expiry 0, the old token dies; a new copy is a new link.
+  const oldNonce = (await n293tQGet(QS))!.shareLink!.nonce;
+  const rv = await n293tRevoke(QS, "Revoker", { now: now + 2000 });
+  const revoked = (await n293tQGet(QS))!;
+  ok(rv.ok && revoked.shareLink!.expiresAt === 0 && revoked.shareLink!.nonce !== oldNonce && revoked.shareLink!.revokedBy === "Revoker" && revoked.shareLink!.revokedAt === now + 2000,
+    "#293t revoke (DB): rotates the nonce, sets expiry 0, records who and when");
+  ok((await n293tResolve(QS, tok, { secret: S, now })) === null && n293tLinkView(revoked, S, now)?.active === false, "#293t revoke (DB): the old link stops working at once");
+  // A stale client write (an editor holding the pre-revoke doc) can't put the old link back.
+  await n293tQUpdate(QS, { shareLink: { ...revoked.shareLink!, nonce: oldNonce, expiresAt: now + 60 * 86_400_000, revokedAt: null, revokedBy: null } } as never);
+  const afterStale = (await n293tQGet(QS))!;
+  ok(afterStale.shareLink!.nonce === revoked.shareLink!.nonce && afterStale.shareLink!.expiresAt === 0 && (await n293tResolve(QS, tok, { secret: S, now })) === null,
+    "#293t revoke (DB): update() carrying the old link leaves it revoked — the old token stays dead");
+  await n293tQUpdate(QD, { shareLink: { nonce: "forged", expiresAt: now + 1000, createdAt: now, createdBy: "x" } } as never);
+  ok(!(await n293tQGet(QD))?.shareLink, "#293t links (DB): update() never writes a share link");
+  await n293tQUpdate(QS, { status: "sent" });
+  const fresh = await n293tEnsure(QS, "Tester", { secret: S, now: now + 3000 });
+  ok(fresh.ok && made.ok && fresh.link.path !== made.link.path, "#293t revoke (DB): Copy client link after a revoke makes a new link");
+  ok(!(await n293tRevoke(fixtureId(293, "t-share-never"), "x")).ok, "#293t revoke (DB): an unknown quote is refused");
 }
