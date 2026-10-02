@@ -43775,7 +43775,7 @@ import type { RackPlacement as C296Placement, RackLayout as C296Layout, RackEdit
   ok(JSON.stringify(c296Span(LS2, LS2.placements[0])) === JSON.stringify({ lo: 5, hi: 7 }), "#296 rack layout: a taller child extends the shelf's span upward");
   ok(why(c296Can(LS2, P({ id: "D", ruStart: 6 }))) === "Overlaps Shelf at RU 6." && c296Can(LS2, P({ id: "D", ruStart: 8 })).ok && c296Can(LS2, P({ id: "D", ruStart: 6, face: "rear" })).ok, "#296 rack layout: the extended span blocks a device directly above on that face only");
   const LD = withP(shelf, P({ id: "D", label: "Switch", ruStart: 6 }));
-  ok(why(c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 2 }))) === "Too tall for the shelf — 1 RU above it are taken." && c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 1 })).ok, "#296 rack layout: a too-tall child under a device is refused; one that fits is allowed");
+  ok(why(c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 2 }))) === "Too tall for the shelf — 1 RU above it is taken." && c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 1 })).ok, "#296 rack layout: a too-tall child under a device is refused; one that fits is allowed");
   ok(why(c296Can(withP(shelf, P({ id: "D", ruStart: 7, ruHeight: 2 })), P({ id: "C", shelfId: "RP-S", ruHeight: 4 }))) === "Too tall for the shelf — 2 RU above it are taken.", "#296 rack layout: the clearance count names how many RU are taken");
   ok(why(c296Can(withP(shelf), P({ id: "C", shelfId: "RP-GONE" }))) === "That shelf isn't in the rack." && why(c296Can(withP(P({ id: "D", ruStart: 5 })), P({ id: "C", shelfId: "RP-D" }))) === "That shelf isn't in the rack.", "#296 rack layout: a child needs an existing shelf");
   ok(!c296Can(withP(shelf), P({ id: "C", kind: "shelf", shelfId: "RP-S" })).ok, "#296 rack layout: a shelf cannot sit on a shelf");
@@ -43867,7 +43867,9 @@ import type { RackPlacement as C296rPlacement, RackLayout as C296rLayout, RackPa
     SIDE: { desc: "Switch", ruHeight: 1, depthIn: 10, weightLb: 6, powerWatts: 50, airflow: "side" },
     HALF: { desc: "Receiver", ruHeight: 1.5, depthIn: 8, weightLb: 4, powerWatts: 10 },
     NOW: { desc: "Mystery box", ruHeight: 1, depthIn: 8, weightLb: 3 },
-    BLANK: { desc: "Blank 1U", ruHeight: 1, depthIn: 1, weightLb: 0.5 },
+    BLANK: { desc: "Blank 1U", weightLb: 0.5 },
+    BLANK0: { desc: "Blank, no data" },
+    VENT0: { desc: "Vent, no data" },
     VENT: { desc: "Vent 1U", ruHeight: 1, depthIn: 1, weightLb: 1 },
     SHELF: { desc: "Shelf", ruHeight: 1, depthIn: 14, weightLb: 6 },
     NORU: { desc: "Wireless rx", depthIn: 6, weightLb: 2, powerWatts: 12 },
@@ -43920,11 +43922,20 @@ import type { RackPlacement as C296rPlacement, RackLayout as C296rLayout, RackPa
   ok(c296rValidate(L([P({ id: "T", ruStart: 41, ruHeight: 2 })])).length === 0, "#296 rack rules: a 2U at RU 41 is in bounds");
   ok(c296rValidate(L([P({ id: "C", shelfId: "RP-GONE", ruStart: 3 })])).map((i) => i.code).join() === "shelf", "#296 rack rules: a child without its shelf is a shelf error");
   ok(c296rValidate(L([P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 3 }), P({ id: "C", shelfId: "RP-SH", ruStart: 3 })])).length === 0, "#296 rack rules: a child on a real shelf is fine");
+  const errs = (l: C296rLayout) => c296rValidate(l).filter((i) => i.level === "error");
+  const sib = errs(L([P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 3 }), P({ id: "C1", shelfId: "RP-SH", ruStart: 3 }), P({ id: "C2", shelfId: "RP-SH", ruStart: 3 })]));
+  ok(sib.length === 1 && sib[0].code === "shelf" && sib[0].placementIds.join() === "RP-C1,RP-C2" && sib[0].message === "S (RU 3, front): S already sits there on the shelf.", "#296 rack rules: two children in one shelf spot are one error listing both");
+  ok(errs(L([P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 3 }), P({ id: "C1", shelfId: "RP-SH", ruStart: 3, lane: 0, laneCount: 2 }), P({ id: "C2", shelfId: "RP-SH", ruStart: 3, lane: 1, laneCount: 2 })])).length === 0, "#296 rack rules: children side by side on a shelf are fine");
+  const tall = errs(L([P({ id: "SH", kind: "shelf", sku: "SHELF", label: "Shelf", ruStart: 5 }), P({ id: "D", label: "Switch", ruStart: 6 }), P({ id: "C", shelfId: "RP-SH", ruStart: 5, ruHeight: 2 })]));
+  ok(tall.length === 1 && tall[0].code === "overlap" && tall[0].placementIds.join() === "RP-SH,RP-D" && tall[0].message === "Shelf (RU 5–6, front): Overlaps Switch at RU 6.", "#296 rack rules: a too-tall child is reported once, as the shelf overlapping the device above");
+  const past = errs(L([P({ id: "SH", kind: "shelf", sku: "SHELF", label: "Shelf", ruStart: 41 }), P({ id: "C", shelfId: "RP-SH", ruStart: 41, ruHeight: 3 })]));
+  ok(past.length === 1 && past[0].code === "bounds" && past[0].placementIds.join() === "RP-SH" && past[0].message === "Shelf (RU 41–43, front): Doesn't fit — the rack has 42 RU.", "#296 rack rules: a child pushing its shelf past the top is one bounds error, on the shelf");
   ok(c296rValidate(L([P({ id: "D", sku: undefined })])).map((i) => i.code).join() === "sku" && c296rValidate(L([P({ id: "R", kind: "reserved", sku: undefined })])).length === 0, "#296 rack rules: a device without a SKU is a sku error; a reserved slot is not");
 
   // validate — catalog warnings
   const unk = of(L([P({ id: "G1", sku: "GONE", ruStart: 5 }), P({ id: "G2", sku: "GONE", ruStart: 9 }), P({ id: "Z", sku: "ZZZ", ruStart: 20 })]), "unknown-sku");
-  ok(unk.length === 2 && unk[0].level === "warning" && unk[0].placementIds.join() === "RP-G1,RP-G2" && unk[0].message === "GONE isn't in the catalog — it prices at $0 unless overridden." && unk[1].message.startsWith("ZZZ "), "#296 rack rules: unknown-sku warns once per SKU, listing every placement");
+  ok(unk.length === 1 && unk[0].level === "warning" && unk[0].placementIds.join() === "RP-G1,RP-G2" && unk[0].message === "GONE isn't in the catalog — it prices at $0 unless overridden.", "#296 rack rules: unknown-sku warns once per SKU, listing every placement");
+  ok(of(L([P({ id: "Z", sku: "ZZZ", ruStart: 20 })]), "unknown-sku").length === 0, "#296 rack rules: a SKU the lookup hasn't resolved (undefined) raises no unknown-sku");
   ok(of(L([P({ id: "A", sku: "AMP", ruHeight: 2 })]), "unknown-sku").length === 0 && c296rValidate(L([P({ id: "G", sku: "GONE" })])).length === 0, "#296 rack rules: a catalog SKU, or no lookup at all, raises no unknown-sku");
   const hm = of(L([P({ id: "A", sku: "AMP", ruHeight: 3 })]), "height-mismatch");
   ok(hm.length === 1 && hm[0].message === "Amp: the catalog says 2 RU.", "#296 rack rules: height-mismatch names the catalog height");
@@ -43951,12 +43962,16 @@ import type { RackPlacement as C296rPlacement, RackLayout as C296rLayout, RackPa
   ok(of(L([P({ id: "A", sku: "AMP", ruStart: 1, ruHeight: 2 }), P({ id: "F", sku: "FAN", ruStart: 3, face: "rear" })]), "airflow").length === 0 && of(L([P({ id: "A", sku: "AMP", ruStart: 1, ruHeight: 2 }), P({ id: "B", sku: "AMP", ruStart: 3, ruHeight: 2 })]), "airflow").length === 0 && of(L([P({ id: "F", sku: "FAN", ruStart: 1 }), P({ id: "S", sku: "SIDE", ruStart: 2 })]), "airflow").length === 0, "#296 rack rules: no airflow for a rear neighbour, matching flows, or rear-to-front beside side");
   ok(of(L([P({ id: "A", sku: "AMP", ruStart: 1, ruHeight: 2 }), P({ id: "N", sku: "NOW", ruStart: 3 })]), "airflow").length === 0, "#296 rack rules: unknown airflow raises no airflow warning");
   const heat = of(L([P({ id: "H1", sku: "HOT", ruStart: 1, ruHeight: 2 }), P({ id: "H2", sku: "HOT", ruStart: 3, ruHeight: 2 }), P({ id: "H3", sku: "HOT", ruStart: 5, ruHeight: 2 })]), "heat");
-  ok(heat.length === 1 && heat[0].message === "2,400 W in RU 1–13 with no vent panel." && heat[0].placementIds.join() === "RP-H1,RP-H2,RP-H3", "#296 rack rules: overlapping hot windows merge into one heat warning with the peak watts");
+  ok(heat.length === 1 && heat[0].message === "2,400 W in RU 1–6 with no vent panel." && heat[0].placementIds.join() === "RP-H1,RP-H2,RP-H3", "#296 rack rules: overlapping hot windows merge into one heat warning with the peak watts, printed over the heaters' RU");
+  const probe = of(L([P({ id: "H1", sku: "HOT", ruStart: 1, ruHeight: 2 }), P({ id: "H5", sku: "HOT", ruStart: 5, ruHeight: 2 }), P({ id: "H12", sku: "HOT", ruStart: 12, ruHeight: 2 })]), "heat");
+  ok(probe.length === 1 && probe[0].message === "1,600 W in RU 1–13 with no vent panel." && probe[0].placementIds.join() === "RP-H1,RP-H5,RP-H12", "#296 rack rules: 800 W amps at RU 1 / 5 / 12 are one heat warning");
+  const gap = of(L([P({ id: "A", sku: "HOT", ruStart: 1 }), P({ id: "B", sku: "HOT", ruStart: 5 }), P({ id: "C", sku: "HOT", ruStart: 12 })]), "heat");
+  ok(gap.length === 1 && gap[0].message === "1,600 W in RU 1–12 with no vent panel.", "#296 rack rules: hot windows that overlap in RU merge even when a window between them is cool");
   const twoHot = [P({ id: "H1", sku: "HOT", ruStart: 1, ruHeight: 2 }), P({ id: "H2", sku: "HOT", ruStart: 3, ruHeight: 2 })];
-  ok(of(L([...twoHot, P({ id: "V", kind: "vent", sku: "VENT", ruStart: 11 })]), "heat")[0]?.message === "1,600 W in RU 1–10 with no vent panel.", "#296 rack rules: a vent clears only the windows it sits in");
+  ok(of(L([...twoHot, P({ id: "V", kind: "vent", sku: "VENT", ruStart: 11 })]), "heat")[0]?.message === "1,600 W in RU 1–4 with no vent panel.", "#296 rack rules: a vent clears only the windows it sits in");
   ok(of(L([...twoHot, P({ id: "V", kind: "vent", sku: "VENT", ruStart: 5, face: "rear" })]), "heat").length === 0, "#296 rack rules: a vent on either face clears the heat window");
   ok(of(L([twoHot[0], { ...twoHot[1], optional: true }]), "heat").length === 0 && of(L([twoHot[0], P({ id: "H2", sku: "HOT", ruStart: 12, ruHeight: 2 })]), "heat").length === 0, "#296 rack rules: optional watts and devices more than 10 RU apart raise no heat");
-  ok(of(L([...twoHot, P({ id: "H5", sku: "HOT", ruStart: 30, ruHeight: 2 }), P({ id: "H6", sku: "HOT", ruStart: 32, ruHeight: 2 })]), "heat").map((i) => i.message).join(" | ") === "1,600 W in RU 1–11 with no vent panel. | 1,600 W in RU 23–40 with no vent panel.", "#296 rack rules: separate hot runs warn separately");
+  ok(of(L([...twoHot, P({ id: "H5", sku: "HOT", ruStart: 30, ruHeight: 2 }), P({ id: "H6", sku: "HOT", ruStart: 32, ruHeight: 2 })]), "heat").map((i) => i.message).join(" | ") === "1,600 W in RU 1–4 with no vent panel. | 1,600 W in RU 30–33 with no vent panel.", "#296 rack rules: separate hot runs warn separately");
   const mix = of(L([P({ id: "A", sku: "AMP", ruStart: 1, ruHeight: 2 }), P({ id: "B", sku: "AMP", ruStart: 3, ruHeight: 2, optional: true })]), "optional-mixed");
   ok(mix.length === 1 && mix[0].placementIds.join() === "RP-A,RP-B" && mix[0].message === "AMP: the Estimator offers optional add-ons per part — 1 optional of 2 placed will not show as a separate add-on.", "#296 rack rules: D574 — a SKU both optional and included warns");
   ok(of(L([P({ id: "A", sku: "AMP", ruStart: 1, ruHeight: 2, optional: true }), P({ id: "B", sku: "AMP", ruStart: 3, ruHeight: 2, optional: true })]), "optional-mixed").length === 0 && of(L([P({ id: "A", sku: "AMP", ruStart: 1, ruHeight: 2 }), P({ id: "B", sku: "AMP", ruStart: 3, ruHeight: 2 })]), "optional-mixed").length === 0, "#296 rack rules: all-optional or all-included raises no optional-mixed");
@@ -43978,7 +43993,12 @@ import type { RackPlacement as C296rPlacement, RackLayout as C296rLayout, RackPa
   ok(t.weightLb === 38.5 && t.watts === 420 && t.maxWatts === 420 && t.amps === 3.5 && t.btuHr === Math.round(420 * 3.412), "#296 rack rules: included weight, watts, amps, BTU (unknown watts add nothing)");
   ok(t.withOptions.weightLb === 78.5 && t.withOptions.watts === 1220 && t.withOptions.btuHr === 4163, "#296 rack rules: optional placements count only in withOptions");
   ok(t.missingData.length === 1 && t.missingData[0].sku === "NOW" && t.missingData[0].label === "Mystery box" && t.missingData[0].fields.join() === "powerWatts", "#296 rack rules: unknown watts are listed in missingData, not read as zero");
-  ok(!t.missingData.some((m) => m.sku === "BLANK") && t.capacityWatts === null, "#296 rack rules: D576 — a blank with unknown watts is never flagged; no capacity reads null");
+  ok(!t.missingData.some((m) => m.sku === "BLANK") && t.capacityWatts === null, "#296 rack rules: D576 — a blank with unknown watts, height and depth is never flagged; no capacity reads null");
+  ok(t.unknownWatts === 1 && t.unknownWeight === 0, "#296 rack rules: unknownWatts / unknownWeight count distinct SKUs lacking each figure");
+  const pan = c296rTotals(L([P({ id: "B", kind: "blank", sku: "BLANK0", ruStart: 1 }), P({ id: "B2", kind: "blank", sku: "BLANK0", ruStart: 2 }), P({ id: "V", kind: "vent", sku: "VENT0", ruStart: 3 }), P({ id: "S", kind: "shelf", sku: "BLANK0", ruStart: 4 })]), look);
+  ok(pan.missingData.map((m) => m.sku + ":" + m.fields.join("/")).join() === "BLANK0:ruHeight/depthIn/weightLb,VENT0:weightLb" && pan.unknownWatts === 0 && pan.unknownWeight === 2, "#296 rack rules: blanks and vents are flagged only for weight; a shelf still for height and depth");
+  const panOnly = c296rTotals(L([P({ id: "B", kind: "blank", sku: "BLANK0", ruStart: 1 }), P({ id: "V", kind: "vent", sku: "VENT0", ruStart: 3 })]), look);
+  ok(panOnly.missingData.map((m) => m.sku + ":" + m.fields.join("/")).join() === "VENT0:weightLb,BLANK0:weightLb", "#296 rack rules: a blank or vent lacking everything is flagged for weight only");
   ok(JSON.stringify(tl) === tBefore, "#296 rack rules: totals leaves its input unchanged");
   const kw = c296rTotals(L([P({ id: "H", sku: "HOT", ruHeight: 2, override: { powerWatts: 1000 } })]), look);
   ok(kw.watts === 1000 && kw.btuHr === 3412 && kw.amps === 8.3, "#296 rack rules: 1000 W is 3412 BTU/hr and 8.3 A");
@@ -43987,6 +44007,7 @@ import type { RackPlacement as C296rPlacement, RackLayout as C296rLayout, RackPa
   ok(c296rTotals(L([]), look, [{ sku: "PDU2", qty: 2 }]).capacityWatts === 3000, "#296 rack rules: capacity from a rack-level PDU part alone");
   const miss = c296rTotals(L([P({ id: "N1", sku: "NORU", ruStart: 1 }), P({ id: "G", sku: "GONE", ruStart: 30 }), P({ id: "N2", sku: "NORU", ruStart: 5, override: { ruHeight: 1 } })]), look, [{ sku: "ZZZ", qty: 1 }]);
   ok(miss.missingData.map((m) => m.sku).join() === "GONE,NORU,ZZZ" && miss.missingData[0].fields.join() === "ruHeight,depthIn,weightLb,powerWatts" && miss.missingData[1].fields.join() === "ruHeight" && miss.missingData[2].fields.join() === "weightLb,powerWatts", "#296 rack rules: missingData is one row per SKU, top to bottom, then rack parts (weight/watts only)");
+  ok(miss.unknownWatts === 2 && miss.unknownWeight === 2, "#296 rack rules: unknown counts include rack-level parts");
 
   // history
   const h0 = c296rHistOf(L([]));

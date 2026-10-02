@@ -107,10 +107,8 @@ function spanOf(layout: RackLayout, p: RackPlacement): Span {
   return occupiedSpan(layout, p) ?? { lo: p.ruStart, hi: p.ruStart };
 }
 
-const isUnknownSku = (sku: string, lookup: RackPartLookup) => {
-  const info = lookup(sku);
-  return !info || info.found === false;
-};
+/** Only a resolved `found: false` is "not in the catalog"; undefined means not loaded yet. */
+const isUnknownSku = (sku: string, lookup: RackPartLookup) => lookup(sku)?.found === false;
 
 export function validate(layout: RackLayout, lookup?: RackPartLookup): RackIssue[] {
   const { config, placements } = layout;
@@ -123,16 +121,32 @@ export function validate(layout: RackLayout, lookup?: RackPartLookup): RackIssue
     return `${label(p)} (${ruRangeLabel(config, s.lo, s.hi)}, ${p.face})`;
   };
 
-  // Geometry errors: canPlace against the rest; overlaps once per pair.
+  // Geometry errors: canPlace against the rest, each physical problem once.
+  // Overlaps and children sharing a shelf spot are reported per pair; a child
+  // too tall for its shelf extends the shelf's span (D575), so its clearance or
+  // bounds failure is reported on the shelf unless the shelf side stays silent.
+  const byId = new Map(placements.map((p) => [p.id, p]));
+  const shelfOverlaps = (shelf?: RackPlacement) => !!shelf && placements.some((q) => q !== shelf && overlapSpan(layout, shelf, q));
+  const shelfOutOfBounds = (shelf?: RackPlacement) => {
+    const r = shelf ? canPlace(layout, shelf) : { ok: true as const };
+    return !r.ok && r.code === "bounds";
+  };
   for (const p of placements) {
     const r = canPlace(layout, p);
-    if (!r.ok && r.code !== "overlap") add("error", r.code, [p], `${where(p)}: ${r.reason}`, spanOf(layout, p).lo);
+    if (r.ok || r.code === "overlap" || r.code === "shelf-sibling") continue;
+    const shelf = p.shelfId ? byId.get(p.shelfId) : undefined;
+    if (r.code === "shelf-clearance" && shelfOverlaps(shelf)) continue;
+    if (r.code === "shelf-bounds" && shelfOutOfBounds(shelf)) continue;
+    const code = r.code === "shelf-bounds" ? "bounds" : r.code === "shelf-clearance" ? "shelf" : r.code;
+    add("error", code, [p], `${where(p)}: ${r.reason}`, spanOf(layout, p).lo);
   }
   for (let i = 0; i < placements.length; i++)
     for (let j = i + 1; j < placements.length; j++) {
       const [a, b] = [placements[i], placements[j]];
       const o = overlapSpan(layout, a, b);
       if (o) add("error", "overlap", [a, b], `${where(a)}: Overlaps ${label(b)} at ${ruRangeLabel(config, o.lo, o.hi)}.`, o.lo);
+      if (a.shelfId && a.shelfId === b.shelfId && lanesTouch(a, b))
+        add("error", "shelf", [a, b], `${where(a)}: ${label(b)} already sits there on the shelf.`, spanOf(layout, a).lo);
     }
 
   // Catalog-driven warnings.
@@ -209,25 +223,25 @@ export function validate(layout: RackLayout, lookup?: RackPartLookup): RackIssue
   const vents = placements.filter((p) => p.kind === "vent" && !p.shelfId).map((p) => occupiedSpan(layout, p)!);
   const win = Math.min(HEAT_WINDOW_RU, config.ruCount);
   const hits = (s: Span, lo: number, hi: number) => s.lo <= hi && lo <= s.hi;
-  type Run = { first: number; last: number; max: number };
-  let run = null as Run | null;
-  const flush = () => {
-    if (!run) return;
-    const lo = run.first;
-    const hi = run.last + win - 1;
-    const ps = heaters.filter((h) => hits(h.s, lo, hi)).map((h) => h.p);
-    add("warning", "heat", ps, `${fmt(run.max)} W in ${ruRangeLabel(config, lo, hi)} with no vent panel.`, lo);
-    run = null;
-  };
+  // Hot windows merge by RU range (overlapping ranges become one warning).
+  const runs: { lo: number; hi: number; max: number }[] = [];
   for (let s = 1; s + win - 1 <= config.ruCount; s++) {
     const e = s + win - 1;
     const sum = heaters.reduce((t, h) => (hits(h.s, s, e) ? t + h.w : t), 0);
-    const hot = sum > HEAT_WATTS_PER_WINDOW && !vents.some((v) => hits(v, s, e));
-    const cur = run as Run | null;
-    if (hot) run = cur ? { first: cur.first, last: s, max: Math.max(cur.max, sum) } : { first: s, last: s, max: sum };
-    else flush();
+    if (sum <= HEAT_WATTS_PER_WINDOW || vents.some((v) => hits(v, s, e))) continue;
+    const last = runs[runs.length - 1];
+    if (last && s <= last.hi) {
+      last.hi = Math.max(last.hi, e);
+      last.max = Math.max(last.max, sum);
+    } else runs.push({ lo: s, hi: e, max: sum });
   }
-  flush();
+  for (const r of runs) {
+    const hs = heaters.filter((h) => hits(h.s, r.lo, r.hi));
+    // Print only the RU the contributing heaters actually occupy.
+    const lo = Math.max(r.lo, Math.min(...hs.map((h) => h.s.lo)));
+    const hi = Math.min(r.hi, Math.max(...hs.map((h) => h.s.hi)));
+    add("warning", "heat", hs.map((h) => h.p), `${fmt(r.max)} W in ${ruRangeLabel(config, lo, hi)} with no vent panel.`, lo);
+  }
 
   // D574: the Estimator offers optional per part, not per placement.
   const skus = [...new Set(placements.filter((p) => p.sku).map((p) => p.sku!))];
@@ -288,9 +302,10 @@ export function totals(
     if (!p.sku || !real(p)) continue;
     const f = placementFacts(p, lookup);
     const passive = PASSIVE.has(p.kind);
+    const panel = p.kind === "blank" || p.kind === "vent"; // a panel's height and depth don't matter
     const lbl = label(p);
-    if (f.catalogRuHeight === undefined && p.override?.ruHeight === undefined) flag(p.sku, lbl, "ruHeight");
-    if (f.depthIn === undefined) flag(p.sku, lbl, "depthIn");
+    if (!panel && f.catalogRuHeight === undefined && p.override?.ruHeight === undefined) flag(p.sku, lbl, "ruHeight");
+    if (!panel && f.depthIn === undefined) flag(p.sku, lbl, "depthIn");
     if (f.weightLb === undefined) flag(p.sku, lbl, "weightLb");
     if (f.powerWatts === undefined && !passive) flag(p.sku, lbl, "powerWatts");
     addUp(!!p.optional, 1, f.weightLb, f.powerWatts, f.maxPowerWatts);
@@ -330,5 +345,7 @@ export function totals(
     capacityWatts: capacity === null ? null : round1(capacity),
     byFace,
     missingData,
+    unknownWatts: missingData.filter((m) => m.fields.includes("powerWatts")).length,
+    unknownWeight: missingData.filter((m) => m.fields.includes("weightLb")).length,
   };
 }

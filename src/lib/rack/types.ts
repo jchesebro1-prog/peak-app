@@ -71,5 +71,7 @@ export type RackTotals = {
   capacityWatts: number | null;
   byFace: { front: number; rear: number };   // RU positions occupied per face
   missingData: RackMissing[];                 // one row per distinct SKU
+  unknownWatts: number;                       // distinct SKUs counted with unknown watts (non-passive) — totals read "at least"
+  unknownWeight: number;                      // distinct SKUs lacking weight
 };
 export type RackEdit = { ok: true; layout: RackLayout } | { ok: false; reason: string };

@@ -35,7 +35,7 @@ const NOTES_MAX = 200;
 const SKU_MAX = 80;
 
 /** Which rule a placement broke — validate() reports it as the issue code. */
-export type PlaceFailCode = "height" | "bounds" | "sku" | "lane" | "shelf" | "overlap";
+export type PlaceFailCode = "height" | "bounds" | "sku" | "lane" | "shelf" | "overlap" | "shelf-sibling" | "shelf-bounds" | "shelf-clearance";
 type Check = { ok: true } | { ok: false; reason: string; code: PlaceFailCode };
 type Span = { lo: number; hi: number };
 
@@ -167,9 +167,9 @@ export function canPlace(layout: RackLayout, p: RackPlacement, opts?: { ignoreId
     if (layout.placements.some((q) => q.shelfId === p.id)) return { ok: false, reason: "A device on a shelf can't hold other devices.", code: "shelf" };
     const siblings = others.filter((q) => q.shelfId === shelf.id);
     if (siblings.some((s) => lanesIntersect(laneSpan(s), myLanes)))
-      return { ok: false, reason: "Another device already sits there on the shelf.", code: "shelf" };
+      return { ok: false, reason: "Another device already sits there on the shelf.", code: "shelf-sibling" };
     const ext = shelfSpan(shelf, [...siblings, p]);
-    if (ext.hi > ruCount) return { ok: false, reason: `Doesn't fit — the rack has ${ruCount} RU.`, code: "bounds" };
+    if (ext.hi > ruCount) return { ok: false, reason: `Doesn't fit — the rack has ${ruCount} RU.`, code: "shelf-bounds" };
     const above = shelf.ruStart + shelf.ruHeight;
     if (ext.hi >= above) {
       const shelfLanes = laneSpan(shelf);
@@ -180,7 +180,8 @@ export function canPlace(layout: RackLayout, p: RackPlacement, opts?: { ignoreId
         if (!qs) continue;
         for (let ru = Math.max(qs.lo, above); ru <= Math.min(qs.hi, ext.hi); ru++) taken.add(ru);
       }
-      if (taken.size) return { ok: false, reason: `Too tall for the shelf — ${taken.size} RU above it are taken.`, code: "shelf" };
+      if (taken.size)
+        return { ok: false, reason: `Too tall for the shelf — ${taken.size} RU above it ${taken.size === 1 ? "is" : "are"} taken.`, code: "shelf-clearance" };
     }
     return { ok: true };
   }
