@@ -10,7 +10,7 @@ import { placeNewImage, type ImportRow } from "./photo-sheet";
 import { loadPhotoSheetContext, type ListDrive } from "./photo-sheet-io";
 import { planPhotoSheet, type DroppedFile, type PlannedDoc, type SheetDocOutcome } from "./photo-sheet-plan";
 import { shrinkImage, webpFileName } from "./shrink";
-import { MAX_PART_IMAGE_BYTES, newDocumentId, partDocBlobPath } from "./types";
+import { MAX_FETCH_TIMEOUT_MS, MAX_PART_IMAGE_BYTES, newDocumentId, partDocBlobPath } from "./types";
 import { buildImageIndex } from "./views";
 
 /**
@@ -25,12 +25,20 @@ import { buildImageIndex } from "./views";
 /** A fetch + shrink + store rarely takes more than a few seconds; don't
  *  START another with less than this left (the first always runs). */
 const PER_DOC_WORST_MS = 12_000;
+/** The page's maxDuration is 60 s and the budget is 45 s: this much past the
+ *  budget is the most one call may run, and no photo — the first included —
+ *  starts with less than MIN_DOC_START_MS of it left. Same numbers as
+ *  drive-photo-sync's hard deadline. */
+const HARD_DEADLINE_SLACK_MS = 10_000;
+const MIN_DOC_START_MS = 5_000;
 
 export type PhotoSheetDeps = {
   listDrive?: ListDrive;
   downloadDrive?: (fileId: string, timeoutMs: number) => Promise<Uint8Array>;
-  fetchImage?: (url: string) => ReturnType<typeof fetchImageBytes>;
+  fetchImage?: (url: string, timeoutMs: number) => ReturnType<typeof fetchImageBytes>;
   putFile?: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ pathname: string }>;
+  /** Removes a stored file when its document can't be recorded (default: deleteBlob). */
+  deleteFile?: (pathname: string) => Promise<void>;
   clock?: () => number;
   now?: () => number;
 };
@@ -38,13 +46,14 @@ export type SheetBatchInput = { rows: ImportRow[]; dropped: DroppedFile[]; faile
 export type SheetBatchResult = { ok: true; outcomes: SheetDocOutcome[]; remaining: number } | { ok: false; error: string };
 
 /** Put a just-linked image where the sheet asked: front for Photo 1, else
- *  last among real photos. One order write (setImageOrder, D536). */
-export async function placeSheetImage(documentId: string, sku: string, primary: boolean): Promise<void> {
+ *  last among real photos. One order write (setImageOrder, D536); false when
+ *  the order couldn't be written. */
+export async function placeSheetImage(documentId: string, sku: string, primary: boolean): Promise<boolean> {
   const links = (await documentLinksForParts([sku])).filter((l) => l.kind === "image");
   const docs = await getDocuments(links.map((l) => l.documentId));
   const ordered = buildImageIndex(docs, links).get(sku) ?? [];
-  if (!ordered.some((i) => i.id === documentId)) return;
-  await setImageOrder(sku, placeNewImage(ordered, documentId, primary));
+  if (!ordered.some((i) => i.id === documentId)) return true;
+  return setImageOrder(sku, placeNewImage(ordered, documentId, primary));
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -54,9 +63,11 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
   const clock = deps.clock ?? Date.now;
   const now = deps.now ?? Date.now;
   const deadline = clock() + Math.max(0, budgetMs);
+  const hardDeadline = deadline + HARD_DEADLINE_SLACK_MS;
   const put = deps.putFile ?? putBlob;
   if (!deps.putFile && !blobEnabled()) return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — photos can't be stored on this deployment." };
-  const fetchImage = deps.fetchImage ?? ((url: string) => fetchImageBytes(url));
+  const deleteFile = deps.deleteFile ?? deleteBlob;
+  const fetchImage = deps.fetchImage ?? ((url: string, timeoutMs: number) => fetchImageBytes(url, { timeoutMs }));
 
   const ctx = await loadPhotoSheetContext(deps.listDrive);
   const plan = planPhotoSheet({
@@ -79,25 +90,31 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
     return downloadDriveFile(token, fileId, MAX_PART_IMAGE_BYTES, undefined, timeoutMs);
   });
 
-  const link = async (documentId: string, d: PlannedDoc) => {
+  /** True when every placement wrote its order. */
+  const link = async (documentId: string, d: PlannedDoc): Promise<boolean> => {
     const skus = [...new Set(d.links.map((l) => l.sku))];
     const primary = new Set(d.links.filter((l) => l.primary).map((l) => l.sku));
     await attachDocument(documentId, skus, by, now());
-    for (const sku of skus) await placeSheetImage(documentId, sku, primary.has(sku));
+    let placed = true;
+    for (const sku of skus) if (!(await placeSheetImage(documentId, sku, primary.has(sku)))) placed = false;
+    return placed;
   };
+  const linked = async (documentId: string, d: PlannedDoc): Promise<SheetDocOutcome> =>
+    (await link(documentId, d))
+      ? { key: d.key, ok: true, documentId }
+      : { key: d.key, ok: true, documentId, error: "attached, but couldn't reorder the part's photos" };
 
   const importOne = async (d: Exclude<PlannedDoc, { via: "dropped" }>): Promise<SheetDocOutcome> => {
     const fail = (error: string): SheetDocOutcome => ({ key: d.key, ok: false, error });
     if (d.existingId) {
-      await link(d.existingId, d);
-      return { key: d.key, ok: true, documentId: d.existingId };
+      return linked(d.existingId, d);
     }
     let bytes: Uint8Array;
     let baseName: string;
     let sourceUrl: string | null;
     let sourceRef: string | undefined;
     if (d.via === "url") {
-      const got = await fetchImage(d.url);
+      const got = await fetchImage(d.url, Math.min(MAX_FETCH_TIMEOUT_MS, hardDeadline - clock()));
       if (!got.ok) return fail(got.error);
       const type = sniffImageType(got.file.bytes);
       if (!type) return fail("That link is not a PNG, JPEG, or WebP image.");
@@ -106,7 +123,7 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
       sourceUrl = d.url;
     } else {
       try {
-        bytes = await downloadDrive(d.file.id, Math.min(DOWNLOAD_TIMEOUT_MS, Math.max(5_000, deadline + 10_000 - clock())));
+        bytes = await downloadDrive(d.file.id, Math.min(DOWNLOAD_TIMEOUT_MS, hardDeadline - clock()));
       } catch (e) {
         return fail(`Drive download failed: ${errorText(e)}`);
       }
@@ -119,32 +136,39 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
     const documentId = newDocumentId();
     const fileName = webpFileName(baseName);
     const stored = await put(partDocBlobPath(documentId, fileName), shrunk.bytes, shrunk.contentType);
-    const created = await createDocument({
-      id: documentId,
-      kind: "image",
-      title: titleOf(baseName),
-      fileName,
-      contentType: shrunk.contentType,
-      size: shrunk.bytes.byteLength,
-      blobKey: stored.pathname,
-      sourceUrl,
-      source: "sheet",
-      ...(sourceRef ? { sourceRef } : {}),
-      by,
-      at: now(),
-    });
+    let created: Awaited<ReturnType<typeof createDocument>> = null;
+    try {
+      created = await createDocument({
+        id: documentId,
+        kind: "image",
+        title: titleOf(baseName),
+        fileName,
+        contentType: shrunk.contentType,
+        size: shrunk.bytes.byteLength,
+        blobKey: stored.pathname,
+        sourceUrl,
+        source: "sheet",
+        ...(sourceRef ? { sourceRef } : {}),
+        by,
+        at: now(),
+      });
+    } catch {
+      created = null;
+    }
     if (!created) {
-      if (!deps.putFile) await deleteBlob(stored.pathname).catch(() => undefined);
+      // The file is stored but nothing points at it: take it back out.
+      await deleteFile(stored.pathname).catch(() => undefined);
       return fail("Could not record the document.");
     }
-    await link(created.id, d);
-    return { key: d.key, ok: true, documentId: created.id };
+    return linked(created.id, d);
   };
 
   const outcomes: SheetDocOutcome[] = [];
   let processed = 0;
   for (const d of work) {
-    if (processed > 0 && deadline - clock() < PER_DOC_WORST_MS) break;
+    const t = clock();
+    if (hardDeadline - t < MIN_DOC_START_MS) break;
+    if (processed > 0 && deadline - t < PER_DOC_WORST_MS) break;
     processed++;
     try {
       outcomes.push(await importOne(d));

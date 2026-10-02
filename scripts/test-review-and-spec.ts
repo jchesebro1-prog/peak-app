@@ -43164,6 +43164,23 @@ async function photoSheetImportAsyncChecks(): Promise<void> {
     const r4 = await phsRun({ rows: more, dropped: [], failedKeys: [] }, "PHS test", 45_000, deps);
     ok(r4.ok && r4.outcomes.length === 1 && r4.outcomes[0].ok && r4.remaining === 0, "photo sheet import: the next call picks up the rest");
     for (const o of [...(r3.ok ? r3.outcomes : []), ...(r4.ok ? r4.outcomes : [])]) if (o.documentId) registerFixture("part_documents", o.documentId);
+
+    // Hard deadline: a clock already inside the last 5 s before budget + 10 s
+    // starts nothing — not even the first photo — and leaves it all remaining.
+    const hardRows = grid([["PhsMfr", "PHSXALPHA01", "", "", "", "", "", "https://img.test/h1.jpg", "https://img.test/h2.jpg", ""]]);
+    let hardCalls = 0;
+    const fetchedBefore = fetched.length;
+    const late = { ...deps, clock: () => (hardCalls++ === 0 ? 0 : 51_000) };
+    const r5 = await phsRun({ rows: hardRows, dropped: [], failedKeys: [] }, "PHS test", 45_000, late);
+    ok(r5.ok && r5.outcomes.length === 0 && r5.remaining === 2 && fetched.length === fetchedBefore, "photo sheet import: inside the hard deadline's last 5 s nothing starts, everything stays remaining");
+
+    // Every network wait is capped at the time left before the hard deadline.
+    const timeouts: number[] = [];
+    let capCalls = 0;
+    const capped = { ...deps, clock: () => (capCalls++ === 0 ? 0 : 40_000), fetchImage: async (url: string, timeoutMs: number) => { timeouts.push(timeoutMs); return fetchImage(url); } };
+    const r6 = await phsRun({ rows: grid([["PhsMfr", "PHSXALPHA01", "", "", "", "", "", "https://img.test/h1.jpg", "", ""]]), dropped: [], failedKeys: [] }, "PHS test", 45_000, capped);
+    if (r6.ok) for (const o of r6.outcomes) if (o.documentId) registerFixture("part_documents", o.documentId);
+    ok(r6.ok && r6.outcomes.length === 1 && r6.outcomes[0].ok && timeouts.length === 1 && timeouts[0] <= 15_000 && timeouts[0] > 0, "photo sheet import: the fetch timeout is capped at the time left before the hard deadline");
   } finally {
     // fixture rows are torn down by teardownFixtures()
   }
