@@ -1,6 +1,7 @@
 "use client";
 
 import { computeCurtain, fmt } from "./pricing";
+import { curtainDraftValid } from "./curtain-line";
 import type { CurtainDraft, FabricOpt, TrackDraft, TrackPart } from "./types";
 import { fabricRateLabel } from "@/lib/curtain-geom";
 import type { TrackSeries } from "@/lib/track-series";
@@ -88,7 +89,7 @@ export default function CurtainModal({
   const trackSeriesRow = track ? trackSeries.find((s) => s.id === track.seriesId) || null : null;
   const tb = track ? trackBom(trackConfigFromDraft(track), trackSeriesRow, trackParts, margin) : null;
   const trackOk = !tb || (!tb.errors.length && tb.price > 0);
-  const valid = (draft.name || "").trim().length > 0 && cc.priceEach > 0 && trackOk;
+  const valid = curtainDraftValid(draft, cc.priceEach) && trackOk;
 
   return (
     <ConfigModal
@@ -149,6 +150,11 @@ export default function CurtainModal({
           onChange={(e) => onSet("fabric", e.target.value)}
           style={{ ...FIELD, background: "#fff", cursor: "pointer" }}
         >
+          {!draft.fabric && (
+            <option value="" disabled>
+              Pick a fabric…
+            </option>
+          )}
           {fabrics.map((f) => (
             <option key={f.sku} value={f.sku}>
               {f.name + "  ·  " + ((f.curtainAreaRate ?? 0) > 0 ? "cost " : "") + fabricRateLabel(f.curtainAreaRate)}
@@ -270,6 +276,9 @@ export default function CurtainModal({
           placeholder="e.g. 2080"
           style={NUMFIELD}
         />
+        {editing && (draft.vendorCostOverride ?? "").trim() !== "" && (
+          <div style={{ marginTop: 4, fontSize: 11.5, color: "#8c919c" }}>Kept from the quote — clear it to re-price at today&rsquo;s rates</div>
+        )}
       </div>
 
       {/* #274: Add track */}

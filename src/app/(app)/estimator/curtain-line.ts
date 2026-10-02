@@ -24,7 +24,12 @@ const fullnessOf = (v: string): CurtainRequest["fullness"] => (FULLNESS as reado
  * to the default fabric. A stored vendor cost seeds the override. A legacy
  * line (no curtainInputs) whose stored cost differs from `makeItCost(draft)`
  * (the Estimator's computeCurtain cost) seeds the override with that stored
- * cost, so Update curtain never silently re-prices it.
+ * cost, so Update curtain never silently re-prices it — except when the desc
+ * didn't parse (W/H blank): that line can't be updated at all until the sizes
+ * are typed, so nothing is seeded. A parsed desc whose fabric name matches no
+ * current fabric leaves `fabric` blank (when `fabrics` is passed) so the user
+ * must pick one before Update is enabled, rather than printing the default
+ * fabric's name beside a cost it wasn't priced on.
  */
 export function curtainDraftFromLine(
   it: SpecItem,
@@ -34,9 +39,19 @@ export function curtainDraftFromLine(
 ): CurtainDraft {
   const d = curtainDraftOf(it, fallbackFabric, fabrics);
   if (it.curtainInputs || !makeItCost) return d;
+  if (!(parseFloat(d.width) > 0) || !(parseFloat(d.height) > 0)) return d;
   const cost = Number(it.cost);
   if (!Number.isFinite(cost) || cost <= 0 || Math.abs(makeItCost(d) - cost) < 0.005) return d;
   return { ...d, vendorCostOverride: String(cost) };
+}
+
+/**
+ * Whether a curtain draft may be added / updated: named, a fabric picked, a
+ * real width and height (an unreadable legacy line must never become 0'×0'),
+ * and a positive price. The modal's Update/Add button and addCurtain share it.
+ */
+export function curtainDraftValid(d: CurtainDraft, priceEach: number): boolean {
+  return (d.name || "").trim().length > 0 && !!(d.fabric || "").trim() && parseFloat(d.width) > 0 && parseFloat(d.height) > 0 && priceEach > 0;
 }
 
 function curtainDraftOf(it: SpecItem, fallbackFabric: string, fabrics: ReadonlyArray<{ sku: string; name: string }>): CurtainDraft {
@@ -55,7 +70,8 @@ function curtainDraftOf(it: SpecItem, fallbackFabric: string, fabrics: ReadonlyA
   }
   const p = parseEstimatorCurtainDesc(it.desc || "", new Set(fabrics.map((f) => f.name)));
   if (p) {
-    const fabric = fabrics.find((f) => f.name === p.fabricName)?.sku || fallbackFabric;
+    // No match among the current fabrics → blank (the user picks); the default only when no fabric list was given.
+    const fabric = fabrics.find((f) => f.name === p.fabricName)?.sku || (fabrics.length ? "" : fallbackFabric);
     return { ...base, name: p.name, fabric, width: String(p.widthFt), height: String(p.heightFt), fullness: fullnessOf(String(p.fullnessPct)) };
   }
   return { ...base, name: (it.desc || "").split(" — ")[0].trim(), fabric: fallbackFabric, width: "", height: "", fullness: "50" };

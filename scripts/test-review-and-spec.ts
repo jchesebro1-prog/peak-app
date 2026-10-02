@@ -43446,7 +43446,7 @@ import { readdirSync as c292Readdir } from "node:fs";
 }
 
 // ---- #292 task 7: Edit curtain, structured curtain lines + keys, finishes/mount ----
-import { applyCurtainEdit as c292ApplyEdit, curtainDraftFromLine as c292DraftFrom, curtainItem as c292Item } from "@/app/(app)/estimator/curtain-line";
+import { applyCurtainEdit as c292ApplyEdit, curtainDraftFromLine as c292DraftFrom, curtainDraftValid as c292DraftValid, curtainItem as c292Item } from "@/app/(app)/estimator/curtain-line";
 import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292ReplaceTrack } from "@/app/(app)/estimator/track-bom";
 {
   const draft = { name: "Main Drape", hang: "Pipe", fabric: "FAB-CH25", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
@@ -43517,6 +43517,23 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
   ok(lSame.vendorCostOverride === undefined && lSame.fabric === "T292-FAB", "#292 fix: a legacy line already at today's make-it cost gets no override");
   ok(c292DraftFrom(legacyLine, "FAB-X", fabs).fabric === "T292-FAB" && c292DraftFrom(legacyLine, "FAB-X").fabric === "FAB-X",
     "#292 fix: a legacy line's printed fabric name resolves back to its SKU when fabrics are passed (default fabric otherwise)");
+
+  // round 2: an unreadable legacy curtain can never be Updated to 0×0; a legacy fabric that matches nothing must be picked
+  const unreadLine: C292Item = { id: 4, sku: "CRT-4", desc: "Main Drape — hand edited", qty: 1, unit: "ea", cost: 1800, price: 2571.43, curtain: true };
+  const uDraft = c292DraftFrom(unreadLine, "FAB-X", fabs, mk);
+  ok(uDraft.vendorCostOverride === undefined && uDraft.width === "" && uDraft.height === "" && !c292DraftValid(uDraft, 1800),
+    "#292 fix2: an unreadable legacy line seeds no override and its draft is refused (Update disabled)");
+  ok(!c292DraftValid({ ...uDraft, width: "20" }, 100) && !c292DraftValid({ ...uDraft, height: "18" }, 100) && !c292DraftValid({ ...uDraft, width: "0", height: "18" }, 100),
+    "#292 fix2: a curtain needs both a width and a height above 0 to be valid");
+  ok(c292DraftValid({ ...base }, 150) && !c292DraftValid({ ...base }, 0) && !c292DraftValid({ ...base, name: " " }, 150) && !c292DraftValid({ ...base, fabric: "" }, 150),
+    "#292 fix2: a complete draft is valid; a missing name, fabric or price is not");
+  ok(lDraft.vendorCostOverride === String(legacyCost) && c292DraftValid(lDraft, 1428.56), "#292 fix2: a parseable legacy line still seeds its cost and stays valid");
+  const otherFabLine: C292Item = { ...legacyLine, desc: C292_DESC.replace("Charisma Velour 25 oz", "Discontinued Cloth") };
+  const oDraft = c292DraftFrom(otherFabLine, "FAB-X", fabs, mk);
+  ok(oDraft.fabric === "" && oDraft.width === "21.5" && !c292DraftValid(oDraft, 100) && c292DraftValid({ ...oDraft, fabric: "T292-FAB" }, 100),
+    "#292 fix2: a legacy line whose fabric matches no current fabric leaves it unpicked until the user picks one");
+  const rdM = readFileSync(join(process.cwd(), "src/app/(app)/estimator/curtain-modal.tsx"), "utf8");
+  ok(/curtainDraftValid\(draft, cc\.priceEach\)/.test(rdM) && rdM.includes("Kept from the quote"), "#292 source: the modal's valid check is curtainDraftValid, and the kept-cost hint shows");
 
   // the portal never sees a vendor cost
   const clean = c292CleanReq({ name: "Main", fabricSku: "T292-FAB", qty: 1, width: "20", height: "18", fullness: "50", vendorCost: "5", topFinish: "hem" }, fabs);

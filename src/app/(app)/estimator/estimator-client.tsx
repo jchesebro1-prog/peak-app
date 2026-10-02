@@ -131,7 +131,7 @@ import {
   trackLine,
   type CurtainTrackPrefill,
 } from "./track-bom";
-import { applyCurtainEdit, curtainDraftFromLine, curtainItem } from "./curtain-line";
+import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
 import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/curtain-cut-sheets/vocab";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
 import VendorQuoteModal, {
@@ -2274,7 +2274,7 @@ export default function EstimatorClient({
     const d = curtainDraft;
     const name = (d.name || "").trim();
     const c = computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined);
-    if (!name || c.priceEach <= 0) return;
+    if (!name || !curtainDraftValid(d, c.priceEach)) return;
     // #274: Add track — the curtain's track line follows it; a track with a
     // blocking error blocks the whole add (the modal already disables it).
     let track: SpecItem | null = null;
