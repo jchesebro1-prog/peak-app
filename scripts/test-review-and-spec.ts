@@ -10715,6 +10715,7 @@ seeded()
   .then(() => category289AsyncChecks())
   .then(() => packages289AsyncChecks())
   .then(() => photoSheetIoAsyncChecks())
+  .then(() => photoSheetImportAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -43091,5 +43092,79 @@ async function photoSheetIoAsyncChecks(): Promise<void> {
     ok(!!row && row.status === "Missing" && row.mfrPart === "PHSIOALPHA01" && row.manufacturer === "PhsMfr", "photo sheet export: a part in a portal department is listed, Missing");
   } finally {
     await phsSetBlob("portal_departments", { departments: prev.departments ?? [] });
+  }
+}
+
+/* ======================================================================
+   Photo sheet — executor (PGlite + fake fetch/Drive/Blob).
+   ====================================================================== */
+import { runPhotoSheetBatch as phsRun } from "@/lib/part-docs/photo-sheet-import";
+import { visibleImagesForParts as phsVisible, createDocument as phsCreateDoc, attachDocument as phsAttach, allDocuments as phsAllDocs } from "@/lib/stores/part-documents";
+async function photoSheetImportAsyncChecks(): Promise<void> {
+  const ALPHA = fixtureId("PHS", "X-ALPHA");
+  const BRAVO = fixtureId("PHS", "X-BRAVO");
+  for (const [id, mpn] of [[ALPHA, "PHSXALPHA01"], [BRAVO, "PHSXBRAVO01"]] as const) {
+    await upsertPart({ id, sku: id, desc: `PHS ${mpn}`, category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "PhsMfr", manufacturerPartNumber: mpn });
+    registerFixture("catalog_parts", id);
+  }
+  const old = await phsCreateDoc({ kind: "image", fileName: "old.webp", contentType: "image/webp", size: 1, blobKey: null, sourceUrl: null, source: "upload", by: "PHS test" });
+  if (old) { registerFixture("part_documents", old.id); await phsAttach(old.id, [ALPHA], "PHS test"); }
+
+  const jpeg = new Uint8Array(await s283Sharp({ create: { width: 2000, height: 1000, channels: 3, background: "#06c" } }).jpeg().toBuffer());
+  const fetched: string[] = [];
+  const fetchImage = async (url: string) => {
+    fetched.push(url);
+    if (url.endsWith("/gone.jpg")) return { ok: false as const, error: "The link returned HTTP 404." };
+    if (url.endsWith("/page")) return { ok: true as const, file: { bytes: new TextEncoder().encode("<html></html>"), contentDisposition: null, finalUrl: url } };
+    return { ok: true as const, file: { bytes: jpeg, contentDisposition: null, finalUrl: url } };
+  };
+  const listDrive = async () => ({ files: [{ id: "PHSd1", name: "bravo front.jpg", mimeType: "image/jpeg", md5: "m", size: jpeg.byteLength, webViewLink: "https://drive/PHSd1" }] });
+  const stored: string[] = [];
+  const deps = {
+    fetchImage, listDrive,
+    downloadDrive: async () => jpeg,
+    putFile: async (p: string) => { stored.push(p); return { pathname: p }; },
+    now: () => 1_700_000_000_000,
+  };
+  const grid = (lines: string[][]) => { const p = phsRows([PHS_H, ...lines]); return phsImportRows(p.ok ? p.rows : []); };
+  const rows = grid([
+    ["PhsMfr", "PHSXALPHA01", "", "", "", "", "https://img.test/alpha.jpg", "https://img.test/gone.jpg", "", ""],
+    ["PhsMfr", "PHSXBRAVO01", "", "", "", "", "bravo front.jpg", "https://img.test/page", "https://img.test/alpha.jpg", ""],
+  ]);
+  const order = async (sku: string) => ((await phsVisible([sku])).get(sku) ?? []).map((d) => d.id);
+  const docsBefore = (await phsAllDocs()).length;
+  try {
+    const r1 = await phsRun({ rows, dropped: [], failedKeys: [] }, "PHS test", 45_000, deps);
+    ok(r1.ok && r1.remaining === 0 && r1.outcomes.length === 4 && r1.outcomes.filter((o) => o.ok).length === 2, "photo sheet import: two photos land, two fail, nothing remains");
+    const out = (key: string) => (r1.ok ? r1.outcomes.find((o) => o.key === key) : undefined);
+    ok(out("url:https://img.test/gone.jpg")?.error === "The link returned HTTP 404." && out("url:https://img.test/page")?.error === "That link is not a PNG, JPEG, or WebP image.",
+      "photo sheet import: a failed fetch and a non-image keep their reasons and don't stop the batch");
+    const alphaId = out("url:https://img.test/alpha.jpg")?.documentId ?? "";
+    const driveId = out("drive:PHSd1")?.documentId ?? "";
+    for (const id of [alphaId, driveId]) if (id) registerFixture("part_documents", id);
+    ok(fetched.filter((u) => u.endsWith("/alpha.jpg")).length === 1, "photo sheet import: a URL on two rows is fetched once");
+    const all = await phsAllDocs();
+    const a = all.find((d) => d.id === alphaId);
+    const dr = all.find((d) => d.id === driveId);
+    ok(!!a && a.source === "sheet" && a.sourceUrl === "https://img.test/alpha.jpg" && a.contentType === "image/webp" && a.fileName.endsWith(".webp"), "photo sheet import: a URL photo is a shrunk WebP, source sheet");
+    ok(!!dr && dr.source === "sheet" && dr.sourceRef === "drive:PHSd1" && dr.sourceUrl === "https://drive/PHSd1", "photo sheet import: a Drive photo records its Drive file");
+    ok((await order(ALPHA)).join() === [alphaId, old?.id].join(), "photo sheet import: a new Photo 1 becomes the part's primary");
+    ok((await order(BRAVO)).join() === [driveId, alphaId].join(), "photo sheet import: Photo 3 appends after Photo 1; the shared photo links to both parts");
+    ok(stored.length === 2 && stored.every((p) => p.startsWith("part-docs/")), "photo sheet import: two files stored under part-doc paths");
+
+    const failedKeys = r1.ok ? r1.outcomes.filter((o) => !o.ok).map((o) => o.key) : [];
+    const r2 = await phsRun({ rows, dropped: [], failedKeys }, "PHS test", 45_000, deps);
+    ok(r2.ok && r2.outcomes.length === 0 && r2.remaining === 0 && (await phsAllDocs()).length === docsBefore + 2, "photo sheet import: a re-import skips what landed and creates nothing");
+
+    let t = 0;
+    const slow = { ...deps, clock: () => (t += 40_000) };
+    const more = grid([["PhsMfr", "PHSXALPHA01", "", "", "", "", "", "", "https://img.test/a2.jpg", ""], ["PhsMfr", "PHSXBRAVO01", "", "", "", "", "", "https://img.test/b2.jpg", "", ""]]);
+    const r3 = await phsRun({ rows: more, dropped: [], failedKeys: [] }, "PHS test", 45_000, slow);
+    ok(r3.ok && r3.outcomes.length === 1 && r3.remaining === 1, "photo sheet import: the budget stops a batch after the first photo");
+    const r4 = await phsRun({ rows: more, dropped: [], failedKeys: [] }, "PHS test", 45_000, deps);
+    ok(r4.ok && r4.outcomes.length === 1 && r4.outcomes[0].ok && r4.remaining === 0, "photo sheet import: the next call picks up the rest");
+    for (const o of [...(r3.ok ? r3.outcomes : []), ...(r4.ok ? r4.outcomes : [])]) if (o.documentId) registerFixture("part_documents", o.documentId);
+  } finally {
+    // fixture rows are torn down by teardownFixtures()
   }
 }
