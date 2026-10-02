@@ -43270,6 +43270,35 @@ const c292Collect = (sections: C292Section[], extra: Partial<C292Input> = {}) =>
   ok(orphanRead.types.length === 1 && orphan.placements[0].optionId === "opt-gone",
     "#292 collect: an orphan placement reads as the first option (ensureOptions) without mutating the caller's project");
 }
+// ---- task 3 fix round 1: type key carries hardware source + spacing; qty ≤ 0; pipe-pocket note ----
+{
+  const sp = (n: number) => ({ ...C292_TRACK, carrierSpacingIn: n });
+  const spacing = c292Collect([c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) })])]);
+  ok(spacing.types.length === 2 && spacing.types.map((t) => t.markSpacingIn).join() === "12,18", "#292 collect fix: identical curtains on the same series at 12\" vs 18\" carrier spacing are two types");
+  const emptyTrack = c292Collect([c292Sec("s1", [
+    c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: { ...C292_TRACK, seriesId: "" } }),
+    c292Cur(3, { curtainInputs: c292Ci({ mountType: "track-batten" }) }),
+  ])], { trackSeries: [] });
+  ok(emptyTrack.types.length === 2, "#292 collect fix: a track line with an empty seriesId and a picked no-track curtain of the same mount are two types");
+  ok(c292Count({ sections: [c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) })])] }, C292_FABS, C292_SERIES) === 2,
+    "#292 collect fix: countCutSheetTypes stays in step with the new key");
+  const mixed = c292Collect([c292Sec("s1", [
+    c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }),
+    c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) }),
+    c292Cur(5, { curtainTrackKey: "ct-5" }), c292Trk(6, { curtainTrackKey: "ct-5", track: { ...C292_TRACK, seriesId: "" } }),
+    c292Cur(7, { curtainInputs: c292Ci({ mountType: "track-batten" }) }),
+    c292Cur(8, { curtainInputs: c292Ci({ mountType: "wall-hookloop" }) }),
+    c292Cur(9),
+  ])]);
+  ok(mixed.types.every((t) => new Set(t.curtains.map((c) => c.mount.source === "track" ? `track:${c.mount.track?.seriesId}:${c.mount.track?.carrierSpacingIn}` : "rules")).size === 1),
+    "#292 collect fix: within every type all members share one hardware source and one carrier spacing");
+  const zero = c292Collect([c292Sec("s1", [c292Cur(1, { qty: 0 }), c292Cur(2, { qty: -3 }), c292Cur(3, { qty: 0.4 }), c292Cur(4, { qty: 2.6 }), c292Cur(5, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness", qty: 0 })])]);
+  ok(zero.types.length === 1 && zero.types[0].totalQty === 4 && zero.skippedOptional.length === 3, "#292 collect fix: qty ≤ 0 lines are left out (not a sheet, listed as skipped); a fractional qty > 0 never prints below 1 (0.4 → 1, 2.6 → 3)");
+  ok(c292Count({ sections: [c292Sec("s1", [c292Cur(1, { qty: 0 })])] }, C292_FABS, C292_SERIES) === 0, "#292 collect fix: countCutSheetTypes does not count a qty 0 line");
+  const pp = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "pipe-pocket" }) }), c292Cur(2)])]);
+  ok(pp.types.length === 2 && pp.types[0].weightNote === "Bottom pipe not included" && pp.types[1].weightNote === undefined,
+    "#292 collect fix: a pipe-pocket bottom carries weightNote \"Bottom pipe not included\"; chain and hem carry none");
+}
 // ---- the preview count ----
 {
   const secs = [c292Sec("s1", [c292Cur(1), c292Cur(2, { qty: 1 }), c292Cur(3, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" })])];

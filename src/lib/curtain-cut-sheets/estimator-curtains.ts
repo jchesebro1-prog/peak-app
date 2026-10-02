@@ -60,7 +60,6 @@ export type CurtainsRead = {
 export type GridProjectLite = {
   options?: GridOption[];
   placements?: Array<{ id: string; optionId?: string; curtain?: GridCurtain | null }>;
-  routes?: Array<{ optionId?: string }>;
 };
 
 const empty = (): CurtainsRead => ({ curtains: [], unreadable: [], skippedOptional: [], notes: [] });
@@ -73,6 +72,13 @@ function num(v: unknown): number {
 function positiveOr(v: unknown, fallback: number): number {
   const n = num(v);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+/** A line's qty: ≤ 0 → null (left out, never printed as 1); fractional rounds but never below 1; unreadable → 1. */
+function lineQty(v: unknown): number | null {
+  const n = num(v);
+  if (!Number.isFinite(n)) return 1;
+  if (n <= 0) return null;
+  return Math.max(1, Math.round(n));
 }
 function fabricOf(row: CurtainFabricRow | null | undefined): CutSheetFabric | null {
   if (!row) return null;
@@ -95,7 +101,8 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
     for (const it of sec.items || []) {
       if (!it.curtain || isRewardCreditItem(it)) continue;
       const lineRef: CurtainLineRef = { ref: `${sec.id}/line-${it.id}`, where: sec.name || "System", desc: it.desc || "", sectionId: sec.id, lineId: it.id };
-      if (it.option) {
+      const qty = lineQty(it.qty);
+      if (it.option || qty == null) {
         read.skippedOptional.push(lineRef);
         continue;
       }
@@ -158,7 +165,7 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
         widthFt: w,
         heightFt: h,
         fullnessPct: Number.isFinite(full) && full > 0 ? full : 0,
-        qty: Math.max(1, Math.round(Number(it.qty)) || 1),
+        qty,
         topFinish: ci && isTopFinish(ci.topFinish) ? ci.topFinish : DEFAULT_TOP_FINISH,
         bottomFinish: ci && isBottomFinish(ci.bottomFinish) ? ci.bottomFinish : DEFAULT_BOTTOM_FINISH,
         mount,
@@ -220,6 +227,11 @@ export function gridCurtains(spec: { gridOptionId?: unknown; lines?: unknown }, 
       read.unreadable.push({ ...lineRef, reason: problem || CURTAIN_UNREADABLE });
       return;
     }
+    const qty = lineQty(l.qty);
+    if (qty == null) {
+      read.skippedOptional.push(lineRef);
+      return;
+    }
     const d = GRID_CURTAIN_DEFAULTS[p.gridType];
     read.curtains.push({
       ...lineRef,
@@ -230,7 +242,7 @@ export function gridCurtains(spec: { gridOptionId?: unknown; lines?: unknown }, 
       widthFt: p.widthFt,
       heightFt: p.heightFt,
       fullnessPct: p.fullnessPct,
-      qty: Math.max(1, Math.round(num(l.qty)) || 1),
+      qty,
       topFinish: d.top,
       bottomFinish: d.bottom,
       mount: { key: d.mount, source: "assumed" },
@@ -247,7 +259,12 @@ export function readCurtains(spec: unknown, fabrics: readonly CurtainFabricRow[]
   return empty();
 }
 
-/** lower(trim(name)) | fabric sku-or-text | fullness | top | bottom | mountKey | trackSeriesId-or-"". Size is NOT part of the type. */
+/**
+ * lower(trim(name)) | fabric sku-or-text | fullness | top | bottom | mountKey | hardware source.
+ * The last element is `track:<seriesId>:<carrierSpacingIn>` for a track-backed mount and "" for the
+ * mount-rules path, so every type has exactly one hardware source and one spacing (an empty-seriesId
+ * track never collides with a picked mount). Size is NOT part of the type.
+ */
 export function curtainTypeKey(c: CutSheetCurtain): string {
   return [
     c.name.trim().toLowerCase(),
@@ -256,11 +273,11 @@ export function curtainTypeKey(c: CutSheetCurtain): string {
     c.topFinish,
     c.bottomFinish,
     c.mount.key,
-    c.mount.track?.seriesId ?? "",
+    c.mount.track ? `track:${c.mount.track.seriesId}:${c.mount.track.carrierSpacingIn}` : "",
   ].join("|");
 }
 
-/** The number of cut sheets a quote will print — the Estimator preview's chip and hint card. */
+/** The number of cut sheets a quote will print, counted from the Estimator quote's sections (or, for a Grid quote, its quoted CURTAIN lines — project: null) — the Estimator preview's chip and hint card. */
 export function countCutSheetTypes(spec: unknown, fabrics: readonly CurtainFabricRow[], trackSeries: readonly TrackSeries[]): number {
   return new Set(readCurtains(spec, fabrics, trackSeries, null).curtains.map(curtainTypeKey)).size;
 }

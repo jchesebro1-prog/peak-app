@@ -32,7 +32,10 @@ export type CurtainType = {
   weightLbEach: Array<number | null>;
   weightLbTotal: number | null;
   warnings: string[];
+  /** Printed beside the weight; set when the weight leaves something out. */
+  weightNote?: string;
 };
+export const PIPE_POCKET_WEIGHT_NOTE = "Bottom pipe not included";
 export type CollectInput = {
   quote: { spec?: unknown };
   fabrics: readonly CurtainFabricRow[];
@@ -146,7 +149,9 @@ export function collectCurtainTypes(input: CollectInput): CollectResult {
       if (!first.fabric.flameRating) warnings.push(`Flame rating not set for ${first.fabric.name} — Catalog`);
     }
     if (curtains.some((c) => c.mount.source === "assumed")) warnings.push(`Mount assumed: ${MOUNT_KEY_LABELS[first.mount.key]} — pick one on the curtain`);
-    return { key, sheetNo: `CS-${i + 1}`, title, curtains, sizes, totalQty, markSpacingIn, hardware, sewnAreaSqftEach, sewnAreaSqftTotal, weightLbEach, weightLbTotal, warnings };
+    // a pipe-pocket bottom weighs as no chain (the bottom pipe is not in computeSetWeight) — flag it, never invent a number
+    const weightNote = first.bottomFinish === "pipe-pocket" ? PIPE_POCKET_WEIGHT_NOTE : undefined;
+    return { key, sheetNo: `CS-${i + 1}`, title, curtains, sizes, totalQty, markSpacingIn, hardware, sewnAreaSqftEach, sewnAreaSqftTotal, weightLbEach, weightLbTotal, warnings, ...(weightNote ? { weightNote } : {}) };
   });
   return { types, unreadable: read.unreadable, skippedOptional: read.skippedOptional, notes: read.notes };
 }
