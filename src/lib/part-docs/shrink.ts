@@ -17,11 +17,13 @@ export type ShrinkResult =
   | { ok: true; bytes: Buffer; contentType: "image/webp"; width: number; height: number }
   | { ok: false; error: string };
 
-export async function shrinkImage(input: Uint8Array): Promise<ShrinkResult> {
+/** `maxEdge` (default SHRINK_MAX_EDGE) — #292 cut sheets shrink a photo tile further before inlining it. */
+export async function shrinkImage(input: Uint8Array, opts: { maxEdge?: number } = {}): Promise<ShrinkResult> {
+  const edge = opts.maxEdge && opts.maxEdge > 0 ? Math.min(opts.maxEdge, SHRINK_MAX_EDGE) : SHRINK_MAX_EDGE;
   try {
     const { data, info } = await sharp(input, { failOn: "error", limitInputPixels: SHRINK_MAX_INPUT_PIXELS })
       .rotate()
-      .resize({ width: SHRINK_MAX_EDGE, height: SHRINK_MAX_EDGE, fit: "inside", withoutEnlargement: true })
+      .resize({ width: edge, height: edge, fit: "inside", withoutEnlargement: true })
       .webp({ quality: SHRINK_WEBP_QUALITY })
       .toBuffer({ resolveWithObject: true });
     return { ok: true, bytes: data, contentType: "image/webp", width: info.width, height: info.height };

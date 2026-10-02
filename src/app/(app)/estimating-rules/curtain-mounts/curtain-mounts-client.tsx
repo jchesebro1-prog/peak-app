@@ -4,7 +4,7 @@ import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/app/(app)/design/grid/settings/equipment-map/part-picker";
 import { ShapeSvg } from "@/components/cutsheets/shape-svg";
-import { MOUNT_RULE_LABELS, validateMountRows, type CurtainMountHardware, type MountQtyRule } from "@/lib/curtain-mounts";
+import { BLANK_MOUNT_DRAFT, isPristineMountDraft, MOUNT_RULE_LABELS, validateMountRows, type CurtainMountHardware, type MountQtyRule } from "@/lib/curtain-mounts";
 import { mountDetail, MOUNT_DETAIL_VIEWBOX } from "@/lib/curtain-cut-sheets/mount-details";
 import { CURTAIN_MOUNT_TYPES, type CurtainMountTypeId } from "@/lib/curtain-cut-sheets/vocab";
 import { saveCurtainMountAction } from "./actions";
@@ -39,7 +39,8 @@ function MountCard({ id, label, initial, parts }: { id: CurtainMountTypeId; labe
   const detail = mountDetail(id);
   const set = (i: number, patch: Partial<Draft>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const save = () => {
-    const submitted = toRows(rows);
+    // An untouched "+ Add part" row is simply left out; a half-filled one still refuses.
+    const submitted = toRows(rows.filter((r) => !isPristineMountDraft(r)));
     const checked = validateMountRows(submitted);
     if (!checked.ok) {
       setMsg({ ok: false, text: checked.error });
@@ -86,7 +87,7 @@ function MountCard({ id, label, initial, parts }: { id: CurtainMountTypeId; labe
           </div>
         ))}
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-          <button type="button" style={BTN} onClick={() => setRows((rs) => [...rs, { sku: "", kind: "perCurtain", qty: "1", everyFt: "" }])}>+ Add part</button>
+          <button type="button" style={BTN} onClick={() => setRows((rs) => [...rs, { ...BLANK_MOUNT_DRAFT }])}>+ Add part</button>
           <button type="button" style={{ ...BTN, background: "#16181d", color: "#fff", borderColor: "#16181d" }} disabled={pending} onClick={save}>{pending ? "Saving…" : "Save"}</button>
           {msg && <span style={{ fontSize: 12, color: msg.ok ? "#2f7a4a" : "#a0442b" }}>{msg.text}</span>}
         </div>

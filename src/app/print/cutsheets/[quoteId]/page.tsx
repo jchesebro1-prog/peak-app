@@ -28,7 +28,8 @@ export default async function PrintCutSheetsPage({
   if (!tokenOk(first(sp.t), quoteId)) notFound();
   const style = first(sp.style) === "client" ? "client" : "submittal";
   const sheet = first(sp.sheet) || "";
-  const loaded = await loadCutSheets(quoteId, { images: style === "client" ? "data" : "none" });
+  // One sheet (a client-package render) reads only its own photos.
+  const loaded = await loadCutSheets(quoteId, { images: style === "client" ? "data" : "none", sheet: sheet || undefined });
   if (!loaded.ok) notFound();
   const models = loaded.models[style].filter((m) => !sheet || m.sheetNo === sheet);
   if (!models.length) notFound();

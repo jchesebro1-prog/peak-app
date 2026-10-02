@@ -1,4 +1,5 @@
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { remapCurtainTrackKeys } from "@/lib/curtain-cut-sheets/track-link";
 import { syncLaborDraftMargins } from "./labor-group";
 import { lineMarginOf, round2 } from "./pricing";
 import {
@@ -201,8 +202,10 @@ export function copySectionForTarget(
   // #269: labor group drafts carry (the lines keep their laborGroup); a
   // draft still at the source tier's labor seed follows to the target's,
   // hand-priced lines or not.
+  // #292: the copy's curtain/track pairs get fresh shared keys, so a copy in
+  // the same estimate never shares a key with its source.
   const copied: SpecSection = syncLaborDraftMargins(
-    { ...section, id: opts.newSectionId, items },
+    { ...section, id: opts.newSectionId, items: remapCurtainTrackKeys(items) },
     laborSeedMarginOf(src),
     laborSeedMarginOf(tgt)
   );

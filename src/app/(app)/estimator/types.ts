@@ -296,6 +296,9 @@ export type CurtainDraft = {
   mountType?: string;
   /** Real vendor (Rose Brand) unit cost; when set, overrides the make-it cost. */
   vendorCostOverride?: string;
+  /** #292 — the override Edit curtain SEEDED from the line (curtainDraftFromLine); the
+   *  "Kept from the quote" hint shows only while the field still holds it. Never stored. */
+  seededVendorCost?: string;
 };
 
 /** #274: the track configurator's form (strings while editing, like every

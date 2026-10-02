@@ -112,3 +112,11 @@ export function mountRowQty(rule: MountQtyRule, curtain: { widthFt: number; mark
       return rule.qty * Math.max(0, curtain.marks);
   }
 }
+
+/** The row "+ Add part" adds on the Curtain mounts screen. */
+export const BLANK_MOUNT_DRAFT = { sku: "", kind: "perCurtain", qty: "1", everyFt: "" } as const;
+
+/** An "+ Add part" row nobody touched — dropped before validation (final review #11); a partly filled row still refuses (client and server). */
+export function isPristineMountDraft(r: { sku: string; kind: string; qty: string; everyFt: string }): boolean {
+  return r.sku.trim() === "" && r.kind === BLANK_MOUNT_DRAFT.kind && r.qty.trim() === BLANK_MOUNT_DRAFT.qty && r.everyFt.trim() === "";
+}

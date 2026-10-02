@@ -37,7 +37,8 @@ export type CurtainType = {
 };
 export const PIPE_POCKET_WEIGHT_NOTE = "Bottom pipe not included";
 export type CollectInput = {
-  quote: { spec?: unknown };
+  /** `id` lets a Grid quote saved before gridOptionId find its option by quoteId. */
+  quote: { id?: string; spec?: unknown };
   fabrics: readonly CurtainFabricRow[];
   trackSeries: readonly TrackSeries[];
   mounts: Partial<Record<CurtainMountTypeId, CurtainMountHardware>>;
@@ -115,7 +116,7 @@ function ruleHardware(curtains: CutSheetCurtain[], spacingIn: number, input: Col
 }
 
 export function collectCurtainTypes(input: CollectInput): CollectResult {
-  const read = readCurtains(input.quote.spec, input.fabrics, input.trackSeries, input.grid?.project ?? null);
+  const read = readCurtains(input.quote.spec, input.fabrics, input.trackSeries, input.grid?.project ?? null, input.quote.id);
   const groups = new Map<string, CutSheetCurtain[]>();
   for (const c of read.curtains) {
     const k = curtainTypeKey(c);
@@ -148,7 +149,7 @@ export function collectCurtainTypes(input: CollectInput): CollectResult {
     const sewnAreaSqftTotal = curtains.reduce((a, c, j) => a + sewnAreaSqftEach[j] * c.qty, 0);
     const weightLbEach = curtains.map(weightEach);
     const weightLbTotal = weightLbEach.some((w) => w == null) ? null : curtains.reduce((a, c, j) => a + (weightLbEach[j] as number) * c.qty, 0);
-    if (!first.fabric) warnings.push(`Fabric not in the catalog: ${first.fabricText || "—"} — Catalog`);
+    if (!first.fabric) warnings.push(`Fabric not in the catalog: ${first.fabricText || first.fabricRef || "—"} — Catalog`);
     else {
       if (weightLbTotal == null) warnings.push(`Weight not set for ${first.fabric.name} — Catalog`);
       if (!first.fabric.flameRating) warnings.push(`Flame rating not set for ${first.fabric.name} — Catalog`);

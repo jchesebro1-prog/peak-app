@@ -29,7 +29,11 @@ const fullnessOf = (v: string): CurtainRequest["fullness"] => (FULLNESS as reado
  * are typed, so nothing is seeded. A parsed desc whose fabric name matches no
  * current fabric leaves `fabric` blank (when `fabrics` is passed) so the user
  * must pick one before Update is enabled, rather than printing the default
- * fabric's name beside a cost it wasn't priced on.
+ * fabric's name beside a cost it wasn't priced on. Likewise an unreadable
+ * desc, and a curtainInputs with no fabric SKU (a portal "recommend one"
+ * curtain) that no current fabric name matches, seed "" — never the default
+ * (final review #9). `fallbackFabric` is used only when no fabric list is
+ * passed for a parsed desc.
  */
 export function curtainDraftFromLine(
   it: SpecItem,
@@ -37,12 +41,20 @@ export function curtainDraftFromLine(
   fabrics: ReadonlyArray<{ sku: string; name: string }> = [],
   makeItCost?: (d: CurtainDraft) => number
 ): CurtainDraft {
-  const d = curtainDraftOf(it, fallbackFabric, fabrics);
+  const d = seeded(curtainDraftOf(it, fallbackFabric, fabrics));
   if (it.curtainInputs || !makeItCost) return d;
   if (!(parseFloat(d.width) > 0) || !(parseFloat(d.height) > 0)) return d;
   const cost = Number(it.cost);
   if (!Number.isFinite(cost) || cost <= 0 || Math.abs(makeItCost(d) - cost) < 0.005) return d;
-  return { ...d, vendorCostOverride: String(cost) };
+  return { ...d, vendorCostOverride: String(cost), seededVendorCost: String(cost) };
+}
+
+const seeded = (d: CurtainDraft): CurtainDraft => (d.vendorCostOverride ? { ...d, seededVendorCost: d.vendorCostOverride } : d);
+
+/** "Kept from the quote" — only while the cost field still holds the value Edit curtain seeded, never for a typed one. */
+export function curtainCostKept(d: CurtainDraft): boolean {
+  const v = (d.vendorCostOverride ?? "").trim();
+  return v !== "" && v === (d.seededVendorCost ?? "").trim();
 }
 
 /**
@@ -64,7 +76,8 @@ function curtainDraftOf(it: SpecItem, fallbackFabric: string, fabrics: ReadonlyA
   };
   const base = { hang: "Pipe", bottom: "Chain", qty, ...finishes };
   if (ci) {
-    const d: CurtainDraft = { ...base, name: ci.name || "", fabric: ci.fabricSku || fallbackFabric, width: String(ci.width ?? ""), height: String(ci.height ?? ""), fullness: fullnessOf(String(ci.fullness ?? "0")) };
+    const fabric = ci.fabricSku || (ci.fabricName ? fabrics.find((f) => f.name === ci.fabricName)?.sku : undefined) || "";
+    const d: CurtainDraft = { ...base, name: ci.name || "", fabric, width: String(ci.width ?? ""), height: String(ci.height ?? ""), fullness: fullnessOf(String(ci.fullness ?? "0")) };
     if (typeof ci.vendorCost === "string" && ci.vendorCost.trim()) d.vendorCostOverride = ci.vendorCost.trim();
     return d;
   }
@@ -74,7 +87,7 @@ function curtainDraftOf(it: SpecItem, fallbackFabric: string, fabrics: ReadonlyA
     const fabric = fabrics.find((f) => f.name === p.fabricName)?.sku || (fabrics.length ? "" : fallbackFabric);
     return { ...base, name: p.name, fabric, width: String(p.widthFt), height: String(p.heightFt), fullness: fullnessOf(String(p.fullnessPct)) };
   }
-  return { ...base, name: (it.desc || "").split(" — ")[0].trim(), fabric: fallbackFabric, width: "", height: "", fullness: "50" };
+  return { ...base, name: (it.desc || "").split(" — ")[0].trim(), fabric: "", width: "", height: "", fullness: "50" };
 }
 
 /** The structured inputs a curtain line stores (`SpecItem.curtainInputs`), read back by Edit curtain and the cut sheets. */

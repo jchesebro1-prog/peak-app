@@ -4,6 +4,7 @@ import { getSettings } from "@/lib/settings";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { PrintButton } from "@/components/letter/print-button";
 import { CutSheetPages, CLIENT_PRINT_CSS, SUBMITTAL_PRINT_CSS } from "@/components/cutsheets/cut-sheet-pages";
+import { curtainEditLink } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
 import { CUT_SHEETS_NONE, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
 
@@ -30,7 +31,6 @@ export default async function CutSheetsPage({ searchParams }: { searchParams: Pr
   }
   const { quote, result, models, photos } = loaded;
   const back = quoteBuilderHref(quote);
-  const editHref = `/estimator?id=${encodeURIComponent(quote.id)}`;
   const curtains = result.types.reduce((a, t) => a + t.totalQty, 0);
   const href = (s: CutSheetStyle) => `/estimator/cut-sheets?id=${encodeURIComponent(quote.id)}&style=${s}`;
   const warnings = result.types.flatMap((t) => t.warnings.map((w) => `${t.sheetNo} ${t.title}: ${w}`));
@@ -52,12 +52,15 @@ export default async function CutSheetsPage({ searchParams }: { searchParams: Pr
       {hasPanel && (
         <div className="pk-card pk-no-print" style={{ padding: "14px 18px", margin: "12px 0 18px", fontSize: 13, lineHeight: 1.55 }}>
           {result.notes.map((n) => <div key={n} style={{ color: "#8a6d1f" }}>{n}</div>)}
-          {result.unreadable.map((u) => (
-            <div key={u.ref}>
-              {`${u.where} — ${u.desc}: ${u.reason} `}
-              <Link href={editHref} style={LINK}>Edit the curtain →</Link>
-            </div>
-          ))}
+          {result.unreadable.map((u) => {
+            const edit = curtainEditLink(u, quote);
+            return (
+              <div key={u.ref}>
+                {`${u.where} — ${u.desc}: ${u.reason} `}
+                <Link href={edit.href} style={LINK}>{edit.label}</Link>
+              </div>
+            );
+          })}
           {result.skippedOptional.map((o) => <div key={o.ref} style={{ color: "#5b616e" }}>{`Left out: ${o.where} — ${o.desc}`}</div>)}
           {warnings.map((w) => <div key={w} style={{ color: "#8a6d1f" }}>{w}</div>)}
         </div>

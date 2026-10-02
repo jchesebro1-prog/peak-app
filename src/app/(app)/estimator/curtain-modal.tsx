@@ -1,7 +1,7 @@
 "use client";
 
 import { computeCurtain, fmt } from "./pricing";
-import { curtainDraftValid } from "./curtain-line";
+import { curtainCostKept, curtainDraftValid } from "./curtain-line";
 import type { CurtainDraft, FabricOpt, TrackDraft, TrackPart } from "./types";
 import { fabricRateLabel } from "@/lib/curtain-geom";
 import type { TrackSeries } from "@/lib/track-series";
@@ -276,7 +276,7 @@ export default function CurtainModal({
           placeholder="e.g. 2080"
           style={NUMFIELD}
         />
-        {editing && (draft.vendorCostOverride ?? "").trim() !== "" && (
+        {editing && curtainCostKept(draft) && (
           <div style={{ marginTop: 4, fontSize: 11.5, color: "#8c919c" }}>Kept from the quote — clear it to re-price at today&rsquo;s rates</div>
         )}
       </div>

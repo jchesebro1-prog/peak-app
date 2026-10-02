@@ -42977,7 +42977,7 @@ function c292Sec(id: string, items: Array<Partial<C292Item> & { id: number }>): 
 {
   const cur = (id: number, extra: Partial<C292Item> = {}) => ({ id, curtain: true, ...extra });
   const trk = (id: number, extra: Partial<C292Item> = {}) => ({ id, track: { ...C292_TRACK }, ...extra });
-  ok(c292Key(41) === "ct-41", "#292 link: newCurtainTrackKey is ct-<line id>");
+  ok(c292Key(41, () => "n0") === "ct-41-n0" && /^ct-41-[0-9a-z]{6,}$/.test(c292Key(41)), "#292 link: newCurtainTrackKey is ct-<line id>-<nonce> (final review #1)");
   const s1 = c292Sec("a", [cur(1, { curtainTrackKey: "ct-41" })]);
   const s2 = c292Sec("b", [{ id: 9 }, trk(2, { curtainTrackKey: "ct-41" })]);
   ok(c292Link([s1, s2]).links.get(s1.items[0])?.id === 2, "#292 link: a shared key matches across sections");
@@ -43471,7 +43471,7 @@ import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292Repla
   ok(replaced.id === 41 && replaced.lineOrder === 3 && replaced.comment === "c" && replaced.internalNote === "n" && replaced.option === true && replaced.curtainTrackKey === "ct-41" && replaced.specKey === "SK" && replaced.por === true && replaced.portalConfirm === true && replaced.sku === "CRT-OLD" && replaced.desc === "new",
     "#292 edit: replaceCurtainLine keeps id, order, notes, option, key, specKey, por/portalConfirm and SKU");
   const withTrack = c292ApplyEdit(c292Sec("s", [{ ...it, id: 50, curtainTrackKey: undefined }, { id: 51 }]), 50, { ...it, curtainTrackKey: undefined }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
-  ok(withTrack.items.map((x) => x.id).join() === "50,99,51" && withTrack.items[0].curtainTrackKey === "ct-50" && withTrack.items[1].curtainTrackKey === "ct-50",
+  ok(withTrack.items.map((x) => x.id).join() === "50,99,51" && !!withTrack.items[0].curtainTrackKey?.startsWith("ct-50-") && withTrack.items[1].curtainTrackKey === withTrack.items[0].curtainTrackKey,
     "#292 edit: Add track while editing inserts a keyed track line right after the curtain");
   const t2 = c292ReplaceTrack(c292Sec("s", [{ id: 5, track: { ...C292_TRACK }, curtainTrackKey: "ct-4" }]), 5, { sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
   ok(t2.items[0].curtainTrackKey === "ct-4", "#292 edit: Update track keeps the curtain-track key");
@@ -43572,8 +43572,8 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
 
   // Add track while editing mints the curtain's own key, never a stale/shared one
   const stale = c292ApplyEdit(c292Sec("s", [{ ...vItem, id: 50, curtainTrackKey: "ct-7" }, { id: 7, curtain: true, curtainTrackKey: "ct-7" }]), 50, { ...vItem }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
-  ok(stale.items[0].curtainTrackKey === "ct-50" && stale.items[1].id === 99 && stale.items[1].curtainTrackKey === "ct-50" && stale.items[2].curtainTrackKey === "ct-7",
-    "#292 fix: Add track while editing mints ct-<line id> instead of reusing a stale or shared key");
+  ok(!!stale.items[0].curtainTrackKey?.startsWith("ct-50-") && stale.items[1].id === 99 && stale.items[1].curtainTrackKey === stale.items[0].curtainTrackKey && stale.items[2].curtainTrackKey === "ct-7",
+    "#292 fix: Add track while editing mints ct-<line id>-<nonce> instead of reusing a stale or shared key");
 }
 
 async function curtain292AsyncChecks(): Promise<void> {
@@ -43640,6 +43640,7 @@ async function curtain292AsyncChecks(): Promise<void> {
     await setBlob(CURTAIN_MOUNTS_BLOB, Object.fromEntries(Object.keys(after).map((k) => [k, Object.prototype.hasOwnProperty.call(before, k) ? before[k] : null])));
   }
   await cutSheetPackage292Checks();
+  await cutSheetFinal292AsyncChecks();
 }
 
 // ---- #292 task 8: signed print route, estimate-PDF toggle, client package ----
@@ -43716,7 +43717,7 @@ import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
   ok(builders.every((b) => b.indexOf("cutSheetDeadline(Date.now())") > 0 && b.indexOf("cutSheetDeadline(Date.now())") < b.indexOf("blobEnabled()") && /addCutSheets\([^;]*\{ deadline: cutSheetsBy \}\)/.test(b)),
     "#292 source: each package builder takes its cut-sheet deadline at the start of the build and threads it into addCutSheets");
   const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
-  ok(/rejectAfter\(render\(url, \{ timeoutMs: renderTimeoutMs\(opts\.deadline, now\(\)\) \}\), opts\.deadline - now\(\)\)/.test(ps) && ps.indexOf("signPrintToken(") > ps.indexOf("CUT_SHEET_MIN_RENDER_MS) {"),
+  ok(/rejectAfter\(render\(url, \{ timeoutMs: renderTimeoutMs\(opts\.deadline, now\(\)\), signal: abort\.signal \}\), opts\.deadline - now\(\)\)/.test(ps) && ps.indexOf("signPrintToken(") > ps.indexOf("CUT_SHEET_MIN_RENDER_MS || abort.signal.aborted) {"),
     "#292 source: each render gets a step cap and a hard wait cap from the deadline, and its token is signed right before it");
   const idx = srv.split("\n").filter((l) => l.includes("00-package-index.json"));
   ok(idx.length === 2 && idx.every((l) => l.includes("cutSheets: { sheets: cutSheets.sheets }") && !/unreadable/.test(l)) && /cutSheetsUnreadable: built\.cutSheets\.unreadable/.test(rd("src/app/(app)/design/grid/[id]/actions.ts")),
@@ -43724,7 +43725,7 @@ import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
   const now = 1_700_000_000_000;
   ok(!c292Verify("s3cret", c292Sign("s3cret", "cutsheets", "Q-1", now), "quote", "Q-1", now), "#292 token: a cutsheets token does not verify as a quote token");
   const qpr = rd("src/app/print/quote/[id]/page.tsx");
-  ok(/settleWithin\(loadCutSheets\(id, \{ images: "data" \}\), CUT_SHEET_APPEND_LOAD_MS\)/.test(qpr) && c292Dl.CUT_SHEET_APPEND_LOAD_MS <= 10_000,
+  ok(/settleWithin\(loadCutSheets\(id, \{ images: "data" \}\), CUT_SHEET_APPEND_LOAD_MS, `\[cutsheets\] estimate PDF \$\{id\}`\)/.test(qpr) && c292Dl.CUT_SHEET_APPEND_LOAD_MS <= 10_000,
     "#292 source: the estimate print route waits at most a few seconds for appended cut sheets, then prints without them");
   const pv = rd("src/app/(app)/estimator/preview-doc.tsx");
   ok(/cut sheet\$\{p\.cutSheetCount === 1 \? "" : "s"\} \(Client style\)/.test(pv) && !/cut sheet page/.test(pv), "#292 preview: the chip counts cut sheets (types), not pages");
@@ -43757,7 +43758,7 @@ async function cutSheetPackage292Checks(): Promise<void> {
       deadline: D, load: okLoad(), now: () => (calls++ === 0 ? D - 10_000 : D - 30),
       render: (_u, o) => { seen.push(o.timeoutMs); return new Promise<Buffer>(() => undefined); },
     });
-    ok(seen.length === 1 && seen[0] === 30 && files.length === 0 && gaps.length === 2 && gaps.every((g) => g.kind === "missing-cutsheet" && g.description.endsWith(P.CUT_SHEET_LATE))
+    ok(seen.length === 1 && seen[0] === 30 && files.length === 0 && gaps.length === 2 && gaps.every((g) => g.kind === "missing-cutsheet" && g.description.endsWith(P.CUT_SHEET_ON_REQUEST))
       && out.sheets.every((s) => s.file === null) && Date.now() - started < 5_000,
       "#292 package: a render past the deadline is abandoned as a gap, a render with too little time left is skipped, and Chrome gets only the time left");
     const gaps2: ClientPackageGap292[] = [];
@@ -43769,11 +43770,11 @@ async function cutSheetPackage292Checks(): Promise<void> {
     });
     const tok = url ? new URL(url).searchParams.get("t") || "" : "";
     ok(files2.length === 1 && files2[0].name === "cutsheets/CS-1-Main_Velour.pdf" && c292Verify(process.env.AUTH_SECRET || "", tok, "cutsheets", "Q-292", Date.now())
-      && gaps2.length === 1 && gaps2[0].description === `Legs — ${P.CUT_SHEET_RENDER_FAILED}` && !gaps2[0].description.includes("secret"),
+      && gaps2.length === 1 && gaps2[0].description === `Legs — ${P.CUT_SHEET_ON_REQUEST}` && !gaps2[0].description.includes("secret"),
       "#292 package: a rendered sheet lands under cutsheets/ with its own cutsheets token; a raw render error never reaches the customer's index");
     const g3: ClientPackageGap292[] = [];
     await P.addCutSheets("Q-292", { error: "Set QUOTE_PDF_ORIGIN — a production server off Vercel won’t print" }, [], g3, { deadline: Date.now() + 60_000, load: okLoad() });
-    ok(g3.length === 2 && g3.every((g) => g.description.endsWith(P.CUT_SHEET_RENDER_FAILED) && !g.description.includes("QUOTE_PDF_ORIGIN")),
+    ok(g3.length === 2 && g3.every((g) => g.description.endsWith(P.CUT_SHEET_ON_REQUEST) && !g.description.includes("QUOTE_PDF_ORIGIN")),
       "#292 package: a staff-only print-origin error maps to the fixed customer-safe reason");
     const run = async (load: Parameters<typeof P.addCutSheets>[4]["load"]) => {
       const g: ClientPackageGap292[] = [];
@@ -43785,7 +43786,7 @@ async function cutSheetPackage292Checks(): Promise<void> {
     const allBad = await run(okLoad([], [{ reason: "Can't read size — edit the curtain" }]));
     const none = await run(okLoad([], []));
     ok(gone.length === 1 && gone[0].kind === "missing-cutsheet" && gone[0].description === P.CUT_SHEET_QUOTE_GONE
-      && allBad.length === 1 && allBad[0].description === P.CUT_SHEET_ALL_UNREADABLE && wrong.length === 0 && none.length === 0,
+      && allBad.length === 1 && allBad[0].description === P.CUT_SHEETS_ON_REQUEST && wrong.length === 0 && none.length === 0,
       "#292 package: a deleted quote or all-unreadable curtains leave one missing-cutsheet gap; no curtains (or not a system quote) leaves none");
   } finally {
     console.warn = warn;
@@ -44450,4 +44451,233 @@ import type { SpecItem as N293gItem, SpecSection as N293gSec } from "@/app/(app)
   const cliSrc = rd("src/app/(app)/estimator/estimator-client.tsx");
   ok(colSrc.includes("!Object.hasOwn(rows, s)") && !colSrc.includes("(s in rows)") && cliSrc.includes("Object.hasOwn(kpLib.rows, sku)") && !cliSrc.includes("sku in kpLib.rows"),
     "#293 fix: row-loaded checks use Object.hasOwn (an sku named like an inherited property is not a loaded row)");
+}
+
+/* ============================================================================
+   #292 final review fix wave — unique curtain↔track keys, narrowed fabric
+   reads, an abortable Chrome queue, Grid edit links/fabric names/legacy
+   options, customer-neutral gap wording, shrunk photos, blank fabric seeds,
+   the Grid editor's unreadable note, and pristine mount rows. Async checks
+   run in cutSheetFinal292AsyncChecks() (called from curtain292AsyncChecks).
+   ============================================================================ */
+import { newCurtainTrackKey as f292Key, remapCurtainTrackKeys as f292Remap, linkCurtainTracks as f292Link } from "@/lib/curtain-cut-sheets/track-link";
+import {
+  curtainEditLink as f292EditLink, curtainFabricLookups as f292Lookups, cutSheetsUnreadableNote as f292Note,
+  curtainTypeKey as f292TypeKey, gridCurtains as f292Grid, readCurtains as f292Read, GRID_DESIGN_GONE as f292Gone,
+} from "@/lib/curtain-cut-sheets/estimator-curtains";
+import { copySectionForTarget as f292Copy } from "@/app/(app)/estimator/copy-system";
+import { curtainCostKept as f292Kept, curtainDraftFromLine as f292DraftFrom } from "@/app/(app)/estimator/curtain-line";
+import { BLANK_MOUNT_DRAFT as f292Blank, isPristineMountDraft as f292Pristine } from "@/lib/curtain-mounts";
+import { curtainDesc as f292CurtainDesc } from "@/lib/design/grid-bom";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const cur = (id: number, extra: Partial<C292Item> = {}) => ({ id, curtain: true, desc: C292_DESC, qty: 1, ...extra });
+  const trk = (id: number, extra: Partial<C292Item> = {}) => ({ id, track: { ...C292_TRACK }, ...extra });
+
+  // #1 (a) new keys are globally unique
+  const keys = new Set(Array.from({ length: 500 }, () => f292Key(100)));
+  ok(keys.size === 500 && [...keys].every((k) => /^ct-100-[0-9a-z]+$/.test(k)), "#292 final #1: 500 keys minted for the same line id are all distinct (ct-<id>-<nonce>)");
+
+  // #1 (b) a copied section's pairs get fresh shared keys; the input is untouched
+  let n = 0;
+  const srcItems = c292Sec("s", [cur(1, { curtainTrackKey: "ct-1" }), trk(2, { curtainTrackKey: "ct-1" }), cur(3, { curtainTrackKey: "ct-3" }), trk(4, { curtainTrackKey: "ct-3" }), { id: 5 }]).items;
+  const remapped = f292Remap(srcItems, (id) => `new-${id}-${n++}`);
+  ok(remapped[0].curtainTrackKey === "new-1-0" && remapped[1].curtainTrackKey === "new-1-0" && remapped[2].curtainTrackKey === "new-3-1" && remapped[3].curtainTrackKey === "new-3-1"
+    && !("curtainTrackKey" in remapped[4]) && srcItems[0].curtainTrackKey === "ct-1",
+    "#292 final #1: remapCurtainTrackKeys gives each pair one fresh shared key and never mutates the source");
+  const source = c292Sec("sysA", [cur(1, { curtainTrackKey: "ct-1" }), trk(2, { curtainTrackKey: "ct-1" })]);
+  const copied = f292Copy(source, { newSectionId: "sysB", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section;
+  const cl = f292Link([source, copied]);
+  ok(copied.items[0].curtainTrackKey !== "ct-1" && copied.items[0].curtainTrackKey === copied.items[1].curtainTrackKey
+    && cl.links.get(source.items[0]) === source.items[1] && cl.links.get(copied.items[0]) === copied.items[1] && cl.duplicates.length === 0,
+    "#292 final #1: Copy here — the copy's curtain/track pair gets a fresh key and both systems keep their own track link");
+  const readBoth = f292Read({ sections: [source, copied] }, C292_FABS, C292_SERIES, null);
+  ok(readBoth.curtains.length === 2 && readBoth.curtains.every((c) => c.mount.source === "track"), "#292 final #1: neither the source nor the copy falls back to the assumed tie-batten mount");
+  ok(rd("src/app/(app)/estimator/copy-system.ts").includes("items: remapCurtainTrackKeys(items)"), "#292 source: copySectionForTarget re-keys the copied pairs (Copy here, to new, to existing)");
+
+  // #1 (c) already-saved collisions: same-section tracks win
+  const a = c292Sec("a", [cur(1, { curtainTrackKey: "ct-5" }), trk(2, { curtainTrackKey: "ct-5" })]);
+  const b = c292Sec("b", [cur(3, { curtainTrackKey: "ct-5" }), trk(4, { curtainTrackKey: "ct-5" })]);
+  const ab = f292Link([a, b]);
+  ok(ab.links.get(a.items[0]) === a.items[1] && ab.links.get(b.items[0]) === b.items[1] && ab.duplicates.length === 0,
+    "#292 final #1: two sections sharing a legacy key each link their own same-section track");
+  const lone = c292Sec("x", [cur(6, { curtainTrackKey: "ct-5" })]);
+  const lb = f292Link([lone, b]);
+  ok(lb.links.get(b.items[0]) === b.items[1] && !lb.links.has(lone.items[0]) && lb.duplicates[0] === lone.items[0],
+    "#292 final #1: a curtain whose key has no track in its own section never steals another section's linked track (flagged instead)");
+  const cross = f292Link([c292Sec("p", [cur(7, { curtainTrackKey: "ct-q" })]), c292Sec("q", [trk(8, { curtainTrackKey: "ct-q" })])]);
+  ok(cross.links.size === 1 && cross.duplicates.length === 0, "#292 final #1: a free keyed track in another section still links (the pre-collision rule)");
+
+  // #2 fabric lookups mirror the adapters
+  const structured = f292Lookups({ sections: [c292Sec("s", [cur(1, { curtainInputs: c292Ci() as never })])] }, null);
+  const legacy = f292Lookups({ sections: [c292Sec("s", [cur(1)])] }, null);
+  const noSku = f292Lookups({ sections: [c292Sec("s", [cur(1, { curtainInputs: c292Ci({ fabricSku: "" }) as never })])] }, null);
+  ok(structured.skus.join() === "FAB-CH25" && !structured.byName && structured.byNameIfMissing.join() === "FAB-CH25" && legacy.byName && legacy.skus.length === 0 && noSku.byName,
+    "#292 final #2: structured curtains name their fabric SKUs; a legacy desc or a name-only curtain needs the fabric list by name");
+  const gridProject = { options: [{ id: "opt-a", name: "A", quoteId: "Q-7", createdAt: 1 }], placements: [{ id: "p1", optionId: "opt-a", curtain: { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "FAB-EN22" } }] };
+  const gl = f292Lookups({ kind: "grid", gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: "x" }] }, gridProject);
+  const gGone = f292Lookups({ kind: "grid", gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: "x" }] }, null);
+  ok(gl.skus.join() === "FAB-EN22" && !gl.byName && gGone.byName && gGone.skus.length === 0, "#292 final #2: a live Grid option names its placements' fabric SKUs; quoted lines need names");
+  const ld = rd("src/lib/curtain-cut-sheets/load.ts");
+  ok(!/fabricParts\(\)/.test(ld) && !/\blist\(\)/.test(ld) && /cutSheetFabricRows\(curtainFabricLookups\(quote\.spec, project, quote\.id\)\)/.test(ld),
+    "#292 final #2: loadCutSheets never reads the whole catalog — only the fabric rows its curtains name");
+  ok(/loadCutSheets\(quoteId, \{ images: style === "client" \? "data" : "none", sheet: sheet \|\| undefined \}\)/.test(rd("src/app/print/cutsheets/[quoteId]/page.tsx")),
+    "#292 final #2: a one-sheet print route (each package render) reads only its own sheet's photos");
+
+  // #4 edit links
+  const gq = { id: "Q-9", quoteType: "system", spec: { kind: "grid", gridProjectId: "GRD-1", gridOptionId: "opt-a" } };
+  ok(f292EditLink({ ref: "s1/line-4", sectionId: "s1" }, gq).href === "/estimator?id=Q-9"
+    && f292EditLink({ ref: "placement-p1" }, gq).href === "/design/grid/GRD-1?option=opt-a"
+    && f292EditLink({ ref: "line-2" }, gq).href === "/estimator?id=Q-9" && f292EditLink({ ref: "line-2" }, gq).label !== "Edit the curtain →",
+    "#292 final #4: Edit the curtain → only for Estimator rows; a Grid placement opens its design; quoted lines open the quote");
+  const csPage = rd("src/app/(app)/estimator/cut-sheets/page.tsx");
+  ok(csPage.includes("curtainEditLink(u, quote)") && !csPage.includes("editHref"), "#292 final #4: the Cut sheets page builds each row's link through curtainEditLink");
+
+  // #5 a Grid fabric that left the catalog never prints its SKU
+  const goneCurtain = { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "GONE-1" };
+  const proj5 = { options: [{ id: "opt-a", name: "A", quoteId: null, createdAt: 1 }], placements: [{ id: "p1", optionId: "opt-a", curtain: goneCurtain }, { id: "p2", optionId: "opt-a", curtain: { ...goneCurtain, fabricSku: "GONE-2" } }] };
+  const named = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain, "Old Velour") }] }, proj5, C292_FABS);
+  const unnamed = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain) }] }, proj5, C292_FABS);
+  const live = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain, "Charisma Velour 25 oz") }] }, proj5, C292_FABS);
+  ok(named.curtains[0].fabricText === "Old Velour" && named.curtains[0].fabricRef === "GONE-1" && named.curtains[1].fabricText === "" && unnamed.curtains.every((c) => c.fabricText === "")
+    && live.curtains.every((c) => c.fabricText === "") && f292TypeKey(unnamed.curtains[0]) !== f292TypeKey(unnamed.curtains[1]),
+    "#292 final #5: a gone Grid fabric prints its quoted name or nothing (never the SKU); two gone fabrics stay separate types");
+
+  // #6 a Grid quote saved before gridOptionId finds its option by quoteId
+  const proj6 = { options: [{ id: "opt-a", name: "A", quoteId: "Q-OTHER", createdAt: 1 }, { id: "opt-b", name: "B", quoteId: "Q-6", createdAt: 2 }],
+    placements: [{ id: "p1", optionId: "opt-a", curtain: { ...goneCurtain, name: "A side" } }, { id: "p2", optionId: "opt-b", curtain: { ...goneCurtain, name: "B side", fabricSku: "FAB-CH25" } }] };
+  const old6 = f292Read({ kind: "grid", lines: [] }, C292_FABS, [], proj6, "Q-6");
+  const legacy6 = f292Read({ kind: "grid", lines: [] }, C292_FABS, [], { quoteId: "Q-L", placements: [{ id: "p1", curtain: { ...goneCurtain, fabricSku: "FAB-CH25" } }] }, "Q-L");
+  ok(old6.notes.length === 0 && old6.curtains.map((c) => c.name).join() === "B side" && legacy6.notes.length === 0 && legacy6.curtains.length === 1
+    && f292Read({ kind: "grid", lines: [] }, C292_FABS, [], proj6).notes.includes(f292Gone) && f292Read({ kind: "grid", gridOptionId: "opt-zz", lines: [] }, C292_FABS, [], proj6, "Q-6").notes.includes(f292Gone),
+    "#292 final #6: no gridOptionId → the option whose quoteId is this quote (or a pre-options project's own quote); a named option that's gone still reads the quoted lines");
+
+  // #7 customer-neutral wording, and the header says what is enforced
+  const P = c292Pkg;
+  const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
+  ok(P.CUT_SHEET_ON_REQUEST === "Cut sheet available on request" && !/print from|edit the/i.test(P.CUT_SHEET_ON_REQUEST + P.CUT_SHEETS_ON_REQUEST)
+    && /work BEFORE the cut\s+\* sheets[\s\S]{0,120}is not bounded/.test(ps) && /loadCutSheets runs once, before any deadline check/.test(ps) && /past the deadline every remaining sheet\s+\* becomes a gap/.test(ps),
+    "#292 final #7: the zip's gap reason is a neutral 'available on request'; the header states exactly what the deadline bounds");
+  ok(P.cutSheetGapReason(Object.assign(new Error("x"), { name: "AbortError" })) === P.CUT_SHEET_LATE, "#292 final #3: an aborted render logs as late");
+
+  // #9 blank fabric seeds + the kept-cost hint only for a seeded cost
+  const fabs9 = [{ sku: "T292-FAB", name: "Charisma Velour 25 oz" }];
+  const unread9 = f292DraftFrom({ id: 1, sku: "C", desc: "Main — hand edited", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X", fabs9);
+  const rec9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ fabricSku: "", fabricName: "" }) as never }, "FAB-X", fabs9);
+  const byName9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ fabricSku: "" }) as never }, "FAB-X", fabs9);
+  ok(unread9.fabric === "" && rec9.fabric === "" && byName9.fabric === "T292-FAB", "#292 final #9: an unreadable line or a 'recommend one' curtain seeds no fabric (staff pick); a name-only one resolves by name");
+  const seeded9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ vendorCost: "412.5" }) as never }, "FAB-X", fabs9);
+  ok(f292Kept(seeded9) && !f292Kept({ ...seeded9, vendorCostOverride: "500" }) && !f292Kept({ ...seeded9, vendorCostOverride: "", seededVendorCost: "" }) && !f292Kept({ ...unread9, vendorCostOverride: "300" }),
+    "#292 final #9: 'Kept from the quote' only while the cost field holds the seeded value, never for a typed one");
+  ok(rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{editing && curtainCostKept(draft) && ("), "#292 final #9: the modal's kept-cost hint reads curtainCostKept");
+
+  // #10 the Grid editor shows the unreadable curtains
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(f292Note(1) === "1 curtain couldn't be read for cut sheets — edit it, then rebuild" && f292Note(3).startsWith("3 curtains couldn't")
+    && ed.includes("setPackageUnreadable(result.cutSheetsUnreadable)") && ed.includes("cutSheetsUnreadableNote(packageUnreadable.length)"),
+    "#292 final #10: the Grid editor's package result names how many curtains the cut sheets couldn't read");
+
+  // #11 pristine "+ Add part" rows are dropped before validation
+  ok(f292Pristine({ ...f292Blank }) && !f292Pristine({ ...f292Blank, qty: "2" }) && !f292Pristine({ ...f292Blank, sku: "X" }) && !f292Pristine({ ...f292Blank, kind: "perMark" }),
+    "#292 final #11: only an untouched Add part row counts as pristine");
+  const mc = rd("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx");
+  ok(/toRows\(rows\.filter\(\(r\) => !isPristineMountDraft\(r\)\)\)/.test(mc) && mc.indexOf("isPristineMountDraft(r)") < mc.indexOf("validateMountRows(submitted)"),
+    "#292 final #11: the Curtain mounts screen drops pristine rows before validating (the server still refuses partial rows)");
+}
+
+async function cutSheetFinal292AsyncChecks(): Promise<void> {
+  const P = c292Pkg;
+  const { enqueueRender, renderPrintRouteToPdf } = await import("@/lib/quote-pdf/render");
+  const { cutSheetFabricRows, cutSheetPhotoDataUrl, CUT_SHEET_PHOTO_EDGE_PX } = await import("@/lib/curtain-cut-sheets/load");
+  const sharp = (await import("sharp")).default;
+
+  // #3 aborted before its turn: never runs, rejected at once, the queue moves on
+  let release!: () => void;
+  const blocker = enqueueRender(() => new Promise<string>((r) => { release = () => r("first"); }));
+  const ctl = new AbortController();
+  let launched = 0;
+  const queued = enqueueRender(async () => { launched++; return "never"; }, ctl.signal);
+  const order: string[] = [];
+  const after = enqueueRender(async () => { order.push("after"); return "after"; });
+  const t0 = Date.now();
+  ctl.abort();
+  const rejected = await queued.then(() => false, (e: unknown) => e instanceof Error && e.name === "AbortError");
+  ok(rejected && Date.now() - t0 < 1_000 && launched === 0, "#292 final #3: a queued render aborted before its turn rejects at once (AbortError) and never runs");
+  release();
+  ok((await blocker) === "first" && (await after) === "after" && launched === 0 && order.join() === "after",
+    "#292 final #3: the aborted slot passes straight on — the next render (no signal) still runs");
+  const pre = new AbortController();
+  pre.abort();
+  let ranPre = false;
+  ok(await enqueueRender(async () => { ranPre = true; return 1; }, pre.signal).then(() => false, () => true) && !ranPre, "#292 final #3: an already-aborted signal never launches the task");
+  const mid = new AbortController();
+  let sawAbort = false;
+  const running = enqueueRender((signal) => new Promise<number>((_, reject) => {
+    signal?.addEventListener("abort", () => { sawAbort = true; reject(new Error("browser closed")); });
+  }), mid.signal);
+  setTimeout(() => mid.abort(), 20);
+  ok(await running.then(() => false, () => true) && sawAbort, "#292 final #3: a running render receives the abort (render.ts closes its browser)");
+  const seq: number[] = [];
+  await Promise.all([1, 2, 3].map((i) => enqueueRender(async () => { seq.push(i); await new Promise((r) => setTimeout(r, 5)); seq.push(-i); })));
+  ok(seq.join() === "1,-1,2,-2,3,-3", "#292 final #3: without a signal the queue still runs one render at a time, in order");
+  const src = readFileSync(join(process.cwd(), "src/lib/quote-pdf/render.ts"), "utf8");
+  ok(/if \(!opts\.signal\) return enqueueRender\(\(\) => renderOnce\(url, timeout\)\);/.test(src) && renderPrintRouteToPdf.length === 1,
+    "#292 final #3: a caller with no signal takes the unchanged queue path");
+
+  // #3 the package passes a deadline signal, and abandons it when done
+  const warn = console.warn;
+  const logged: string[] = [];
+  console.warn = (...a: unknown[]) => { logged.push(a.map(String).join(" ")); };
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) process.env.AUTH_SECRET = "test292-secret";
+  try {
+    let sig: AbortSignal | undefined;
+    let loads = 0;
+    const types = [{ sheetNo: "CS-1", title: "Main", totalQty: 1 }, { sheetNo: "CS-2", title: "Legs", totalQty: 4 }];
+    const gaps: ClientPackageGap292[] = [];
+    await P.addCutSheets("Q-F292", { origin: "https://app.example" }, [], gaps, {
+      deadline: Date.now() + 60_000,
+      load: async () => { loads++; return { ok: true as const, result: { types: types as never, unreadable: [] } }; },
+      render: async (_u, o) => { sig = o.signal; if (_u.includes("CS-2")) throw new Error("spawn ENOENT"); return Buffer.from("%PDF"); },
+    });
+    ok(loads === 1 && !!sig && sig.aborted && gaps.length === 1 && gaps[0].description === `Legs — ${P.CUT_SHEET_ON_REQUEST}`
+      && logged.some((l) => l.includes("CS-2") && l.includes(P.CUT_SHEET_RENDER_FAILED)),
+      "#292 final #2/#3/#7: one load for the package, each render gets the deadline signal (aborted once the package is done), and the staff reason goes to the log only");
+  } finally {
+    console.warn = warn;
+    if (!secret) delete process.env.AUTH_SECRET;
+  }
+
+  // #2 the estimate append never drops cut sheets silently
+  const seen: string[] = [];
+  console.warn = (...a: unknown[]) => { seen.push(a.map(String).join(" ")); };
+  try {
+    const hung = await c292Dl.settleWithin(new Promise<number>(() => undefined), 10, "[cutsheets] estimate PDF Q-1");
+    const failed = await c292Dl.settleWithin(Promise.reject(new Error("boom")), 1_000, "[cutsheets] estimate PDF Q-2");
+    const quiet = await c292Dl.settleWithin(Promise.resolve(5), 1_000, "[cutsheets] estimate PDF Q-3");
+    ok(hung === null && failed === null && quiet === 5 && seen.length === 2 && seen[0].includes("Q-1") && seen[0].includes("not loaded within 10 ms") && seen[1].includes("Q-2") && seen[1].includes("boom"),
+      "#292 final #2: a timed-out or failed appended load logs one console.warn each; a loaded one logs nothing");
+  } finally {
+    console.warn = warn;
+  }
+
+  // #2 fabric rows: by SKU only, the fabric categories only when a name lookup is needed
+  type Part = import("@/lib/stores/catalog").CatalogPart;
+  const part = (sku: string, category = "Fabric", unit = "sqft") => ({ id: sku, sku, desc: sku + " desc", category, unit, cost: 1, list: 2 }) as unknown as Part;
+  let cat = 0;
+  const asked: string[][] = [];
+  const reader = { getMany: async (s: readonly string[]) => { asked.push([...s]); return s.filter((x) => x !== "MISSING").map((x) => (x === "BOLT" ? part(x, "Hardware", "ea") : part(x))); }, byCategory: async () => { cat++; return [part("F-1"), part("F-2")]; } };
+  const r1 = await cutSheetFabricRows({ skus: ["F-1", "BOLT"], byName: false, byNameIfMissing: ["F-1"] }, reader);
+  ok(r1.map((p) => p.sku).join() === "F-1" && cat === 0 && asked[0].join() === "F-1,BOLT", "#292 final #2: structured curtains read their fabric SKUs only (a non-fabric part is dropped), never the fabric list");
+  const r2 = await cutSheetFabricRows({ skus: ["MISSING"], byName: false, byNameIfMissing: ["MISSING"] }, reader);
+  const r3 = await cutSheetFabricRows({ skus: [], byName: true, byNameIfMissing: [] }, reader);
+  ok(cat === 2 && r2.map((p) => p.sku).join() === "F-1,F-2" && r3.length === 2, "#292 final #2: the fabric categories are read only when a curtain must be matched by fabric name");
+
+  // #8 photos inline at tile size
+  const big = await sharp({ create: { width: 1600, height: 800, channels: 3, background: { r: 200, g: 40, b: 40 } } }).png().toBuffer();
+  const uri = await cutSheetPhotoDataUrl(big);
+  const meta = uri ? await sharp(Buffer.from(uri.split(",")[1], "base64")).metadata() : null;
+  ok(!!uri && uri.startsWith("data:image/webp;base64,") && meta?.width === CUT_SHEET_PHOTO_EDGE_PX && meta?.height === CUT_SHEET_PHOTO_EDGE_PX / 2 && CUT_SHEET_PHOTO_EDGE_PX <= 400,
+    "#292 final #8: an inlined cut-sheet photo is shrunk to the tile (~400 px WebP), not the stored 1600 px");
+  ok((await cutSheetPhotoDataUrl(Buffer.from("not an image"))) === null, "#292 final #8: a photo that can't be shrunk is skipped");
 }
