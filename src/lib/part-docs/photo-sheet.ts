@@ -97,6 +97,28 @@ export function toImportRows(rows: readonly PhotoSheetRow[]): ImportRow[] {
     .map((r) => ({ rowNumber: r.rowNumber, manufacturer: r.manufacturer, mfrPart: r.mfrPart, sku: r.sku, photos: [...r.photos] }));
 }
 
+/** Server actions cap request bodies at 1200 KB; each import call also carries dropped names and failedKeys, so rows get well under it. */
+export const IMPORT_CHUNK_CHARS = 400_000;
+
+/** Greedy, order-preserving split of import rows into JSON-size-bounded chunks; one over-limit row is its own chunk. */
+export function chunkImportRows(rows: readonly ImportRow[], maxChars: number): ImportRow[][] {
+  const chunks: ImportRow[][] = [];
+  let cur: ImportRow[] = [];
+  let size = 2;
+  for (const row of rows) {
+    const n = JSON.stringify(row).length + 1;
+    if (cur.length && size + n > maxChars) {
+      chunks.push(cur);
+      cur = [];
+      size = 2;
+    }
+    cur.push(row);
+    size += n;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
 export type SheetPart = { sku: string; desc: string; category: string; mfr?: string; manufacturerPartNumber?: string; manufacturerModelNumber?: string };
 export type RowMatch = { kind: "matched"; sku: string } | { kind: "none" } | { kind: "ambiguous"; skus: string[] };
 export type PartMatcher = (row: Pick<ImportRow, "manufacturer" | "mfrPart" | "sku">) => RowMatch;

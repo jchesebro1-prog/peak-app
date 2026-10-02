@@ -120,6 +120,28 @@ export function planCounts(plan: PhotoSheetPlan): { add: number; skip: number; p
   return { add: plan.docs.reduce((n, d) => n + d.links.length, 0), skip: plan.skipped.length, problems: plan.problems.length };
 }
 
+/** One outcome per key: a not-ok outcome wins over an ok one (worst wins), otherwise the first is kept. Order follows first appearance. */
+export function mergeOutcomes(outcomes: readonly SheetDocOutcome[]): SheetDocOutcome[] {
+  const byKey = new Map<string, SheetDocOutcome>();
+  for (const o of outcomes) {
+    const prev = byKey.get(o.key);
+    if (!prev || (prev.ok && !o.ok)) byKey.set(o.key, o);
+  }
+  return [...byKey.values()];
+}
+
+/** Photo links (doc × part) that landed vs. didn't — a doc with no outcome counts as not imported. */
+export function linkTotals(plan: PhotoSheetPlan, outcomes: readonly SheetDocOutcome[]): { added: number; failed: number } {
+  const byKey = new Map(outcomes.map((o) => [o.key, o] as const));
+  let added = 0;
+  let failed = 0;
+  for (const d of plan.docs) {
+    if (byKey.get(d.key)?.ok) added += d.links.length;
+    else failed += d.links.length;
+  }
+  return { added, failed };
+}
+
 /** Status column text per row for the results sheet: problems and failures
  *  by slot (a row problem first), then "Added N", then "Skipped N (already attached)". */
 export function resultStatuses(plan: PhotoSheetPlan, outcomes: readonly SheetDocOutcome[]): Map<number, string> {
@@ -135,8 +157,11 @@ export function resultStatuses(plan: PhotoSheetPlan, outcomes: readonly SheetDoc
   for (const d of plan.docs) {
     const o = byKey.get(d.key);
     for (const l of d.links) {
-      if (o?.ok) at(l.rowNumber).added++;
-      else at(l.rowNumber).notes.push({ slot: l.slot, text: `Photo ${l.slot}: ${o ? o.error || "failed" : "not imported"}` });
+      if (o?.ok) {
+        at(l.rowNumber).added++;
+        // A placement warning on an otherwise-landed photo still shows in Status.
+        if (o.error) at(l.rowNumber).notes.push({ slot: l.slot, text: `Photo ${l.slot}: ${o.error}` });
+      } else at(l.rowNumber).notes.push({ slot: l.slot, text: `Photo ${l.slot}: ${o ? o.error || "failed" : "not imported"}` });
     }
   }
   const out = new Map<number, string>();

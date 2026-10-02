@@ -43198,3 +43198,50 @@ async function photoSheetImportAsyncChecks(): Promise<void> {
   const attach = src("src/app/(app)/catalog/documents/actions.ts");
   ok(/source: sheet \? "sheet" : "upload"/.test(attach) && attach.includes("placeSheetImage"), "photo sheet wiring: a dropped sheet photo is recorded as source sheet and placed");
 }
+
+/* ======================================================================
+   Photo sheet — fix round 1: chunking, outcome merge, placement warnings.
+   ====================================================================== */
+import { chunkImportRows as phs7Chunk, IMPORT_CHUNK_CHARS as phs7Max, type ImportRow as Phs7Row } from "@/lib/part-docs/photo-sheet";
+import { mergeOutcomes as phs7Merge, linkTotals as phs7Totals, resultStatuses as phs7Statuses, type PhotoSheetPlan as Phs7Plan } from "@/lib/part-docs/photo-sheet-plan";
+{
+  const row = (n: number, pad = 0): Phs7Row => ({ rowNumber: n, manufacturer: "M", mfrPart: "P" + n, sku: "", photos: ["x".repeat(pad), "", ""] });
+  ok(phs7Max === 400_000, "photo sheet chunks: the import chunk limit leaves room in the 1200 KB body");
+  ok(phs7Chunk([], 1000).length === 0, "photo sheet chunks: empty input is no chunks");
+  const small = [row(1), row(2), row(3)];
+  ok(phs7Chunk(small, 400_000).length === 1 && phs7Chunk(small, 400_000)[0].length === 3, "photo sheet chunks: rows under the limit stay in one chunk");
+  const each = JSON.stringify(row(1, 200)).length + 1;
+  const big = [1, 2, 3, 4, 5].map((n) => row(n, 200));
+  const split = phs7Chunk(big, each * 2 + 2);
+  ok(split.length === 3 && split.map((c) => c.length).join() === "2,2,1", "photo sheet chunks: splits by size");
+  ok(split.flat().map((r) => r.rowNumber).join() === "1,2,3,4,5", "photo sheet chunks: order is preserved");
+  const mixed = phs7Chunk([row(1), row(2, 5000), row(3)], 1000);
+  ok(mixed.length === 3 && mixed[1].length === 1 && mixed[1][0].rowNumber === 2, "photo sheet chunks: an over-limit row is its own chunk");
+
+  const merged = phs7Merge([
+    { key: "a", ok: true, documentId: "D1" },
+    { key: "b", ok: false, error: "first" },
+    { key: "a", ok: false, error: "late failure" },
+    { key: "b", ok: true },
+    { key: "c", ok: true, documentId: "D3" },
+    { key: "c", ok: true, documentId: "D4" },
+  ]);
+  ok(merged.length === 3 && merged.find((o) => o.key === "a")?.ok === false && merged.find((o) => o.key === "a")?.error === "late failure", "photo sheet outcomes: a not-ok outcome beats an ok one for the same key");
+  ok(merged.find((o) => o.key === "b")?.error === "first" && merged.find((o) => o.key === "c")?.documentId === "D3", "photo sheet outcomes: otherwise the first outcome is kept");
+
+  const link = (sku: string, rowNumber: number, slot: number) => ({ sku, primary: slot === 1, rowNumber, slot });
+  const plan: Phs7Plan = {
+    docs: [
+      { key: "url:a", via: "url", url: "a", existingId: null, links: [link("S1", 2, 1), link("S2", 3, 1)] },
+      { key: "url:b", via: "url", url: "b", existingId: null, links: [link("S1", 2, 2), link("S3", 4, 1)] },
+      { key: "url:c", via: "url", url: "c", existingId: null, links: [link("S4", 5, 1)] },
+    ],
+    skipped: [], problems: [], matched: 4,
+  };
+  const t = phs7Totals(plan, [{ key: "url:a", ok: true }, { key: "url:b", ok: false, error: "boom" }]);
+  ok(t.added === 2 && t.failed === 3, "photo sheet totals: failed counts links of failed docs and docs with no outcome");
+  const st = phs7Statuses(plan, [{ key: "url:a", ok: true, error: "placed late — reorder in the part editor" }, { key: "url:b", ok: true }, { key: "url:c", ok: true }]);
+  ok(st.get(2) === "Photo 1: placed late — reorder in the part editor; Added 2" && st.get(3) === "Photo 1: placed late — reorder in the part editor; Added 1",
+    "photo sheet status: an ok outcome with a warning still counts as Added and shows the note");
+  ok(st.get(4) === "Added 1", "photo sheet status: an ok outcome without a warning has no note");
+}

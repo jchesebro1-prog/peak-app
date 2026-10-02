@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { MAX_SHEET_BYTES, toImportRows, type PhotoSheetRow } from "@/lib/part-docs/photo-sheet";
-import { planCounts, resultStatuses, type PhotoSheetPlan, type SheetDocOutcome } from "@/lib/part-docs/photo-sheet-plan";
+import { chunkImportRows, IMPORT_CHUNK_CHARS, MAX_SHEET_BYTES, toImportRows, type PhotoSheetRow } from "@/lib/part-docs/photo-sheet";
+import { linkTotals, mergeOutcomes, planCounts, resultStatuses, type PhotoSheetPlan, type SheetDocOutcome } from "@/lib/part-docs/photo-sheet-plan";
 import { uploadNewDocument } from "../upload-client";
 import { importPhotoSheetBatchAction, photoSheetResultsAction, planPhotoSheetAction } from "./actions";
 
@@ -17,27 +17,7 @@ type Phase = "pick" | "planning" | "preview" | "importing" | "done";
 const box: React.CSSProperties = { border: "1px solid #e6e8ee", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 };
 const label: React.CSSProperties = { display: "block", fontSize: 12.5, fontWeight: 600, margin: "0 0 6px" };
 
-/** Server actions cap request bodies at 1200 KB — keep each import call's rows well under it. */
-const MAX_CHUNK_CHARS = 600_000;
-
-/** Greedy, order-preserving split of the import rows into JSON-size-bounded chunks. */
-function chunkRows<T>(rows: readonly T[], maxChars = MAX_CHUNK_CHARS): T[][] {
-  const chunks: T[][] = [];
-  let cur: T[] = [];
-  let size = 2;
-  for (const row of rows) {
-    const n = JSON.stringify(row).length + 1;
-    if (cur.length && size + n > maxChars) {
-      chunks.push(cur);
-      cur = [];
-      size = 2;
-    }
-    cur.push(row);
-    size += n;
-  }
-  if (cur.length) chunks.push(cur);
-  return chunks;
-}
+const msg = (e: unknown) => `The server didn't answer — try again.${e instanceof Error && e.message ? ` (${e.message})` : ""}`;
 
 export default function PhotoSheetClient() {
   const [phase, setPhase] = useState<Phase>("pick");
@@ -60,7 +40,14 @@ export default function PhotoSheetClient() {
     const form = new FormData();
     form.set("sheet", sheet);
     form.set("dropped", JSON.stringify(dropped()));
-    const r = await planPhotoSheetAction(form);
+    let r;
+    try {
+      r = await planPhotoSheetAction(form);
+    } catch (e) {
+      setError(msg(e));
+      setPhase("pick");
+      return;
+    }
     if (!r.ok) {
       setError(r.error);
       setPhase("pick");
@@ -77,20 +64,26 @@ export default function PhotoSheetClient() {
     setError("");
     const all: SheetDocOutcome[] = [];
     const failedKeys: string[] = [];
-    const chunks = chunkRows(toImportRows(rows));
+    const chunks = chunkImportRows(toImportRows(rows), IMPORT_CHUNK_CHARS);
     // A photo shared across chunks is safe: the server re-plans each call and
     // links an already-imported photo instead of fetching it again.
     chunkLoop: for (const importRows of chunks) {
       for (;;) {
         setProgress(`Fetching linked and Drive photos… ${all.filter((o) => o.ok).length} done`);
-        const r = await importPhotoSheetBatchAction({ rows: importRows, dropped: dropped(), failedKeys });
+        let r;
+        try {
+          r = await importPhotoSheetBatchAction({ rows: importRows, dropped: dropped(), failedKeys });
+        } catch (e) {
+          setError(msg(e));
+          break chunkLoop;
+        }
         if (!r.ok) {
           setError(r.error);
           break chunkLoop;
         }
         all.push(...r.outcomes);
         failedKeys.push(...r.outcomes.filter((o) => !o.ok).map((o) => o.key));
-        setOutcomes([...all]);
+        setOutcomes(mergeOutcomes(all));
         if (r.remaining === 0 || r.outcomes.length === 0) break;
       }
     }
@@ -106,11 +99,15 @@ export default function PhotoSheetClient() {
       }
       const skus = [...new Set(d.links.map((l) => l.sku))];
       const primarySkus = [...new Set(d.links.filter((l) => l.primary).map((l) => l.sku))];
-      const r = await uploadNewDocument(file, "image", skus, { sheet: { fileName: d.name, primarySkus } });
-      all.push(r.ok ? { key: d.key, ok: true, documentId: r.documentId } : { key: d.key, ok: false, error: r.error });
-      setOutcomes([...all]);
+      try {
+        const r = await uploadNewDocument(file, "image", skus, { sheet: { fileName: d.name, primarySkus } });
+        all.push(r.ok ? { key: d.key, ok: true, documentId: r.documentId } : { key: d.key, ok: false, error: r.error });
+      } catch (e) {
+        all.push({ key: d.key, ok: false, error: e instanceof Error && e.message ? e.message : "the upload didn't finish" });
+      }
+      setOutcomes(mergeOutcomes(all));
     }
-    setOutcomes([...all]);
+    setOutcomes(mergeOutcomes(all));
     setProgress("");
     setPhase("done");
   };
@@ -120,7 +117,12 @@ export default function PhotoSheetClient() {
     const form = new FormData();
     form.set("sheet", sheet);
     form.set("statuses", JSON.stringify([...resultStatuses(plan, outcomes)]));
-    const r = await photoSheetResultsAction(form);
+    let r;
+    try {
+      r = await photoSheetResultsAction(form);
+    } catch (e) {
+      return setError(msg(e));
+    }
     if (!r.ok) return setError(r.error);
     const bytes = Uint8Array.from(atob(r.base64), (c) => c.charCodeAt(0));
     const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
@@ -139,8 +141,7 @@ export default function PhotoSheetClient() {
     setError("");
   };
 
-  const added = plan ? plan.docs.filter((d) => outcomes.find((o) => o.key === d.key)?.ok).reduce((n, d) => n + d.links.length, 0) : 0;
-  const failed = outcomes.filter((o) => !o.ok).length;
+  const { added, failed } = plan ? linkTotals(plan, outcomes) : { added: 0, failed: 0 };
 
   return (
     <div>
@@ -207,7 +208,7 @@ export default function PhotoSheetClient() {
           {phase === "done" && (
             <div>
               <p style={{ fontSize: 13, margin: "0 0 10px" }}>
-                Added <b>{added}</b> photo link{added === 1 ? "" : "s"}{failed ? <> · <b>{failed}</b> photo{failed === 1 ? "" : "s"} failed</> : null}. The results sheet has a Status for every row — fix any problems and upload it again.
+                Added <b>{added}</b> photo link{added === 1 ? "" : "s"}{failed ? <> · <b>{failed}</b> didn&apos;t land</> : null}. The results sheet has a Status for every row — fix any problems and upload it again.
               </p>
               <button type="button" className="pk-btn-outline" onClick={downloadResults}>Download results sheet</button>
             </div>
