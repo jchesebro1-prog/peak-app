@@ -48551,3 +48551,25 @@ async function finalFix293tAsyncChecks(): Promise<void> {
     }
   });
 }
+
+/* ======================================================================
+   Manufacturer images — the pure fallback rule (part-image-fallback.ts).
+   ====================================================================== */
+import { portalFallback as mfiPortal, documentFallback as mfiDoc, PLACEHOLDER_SRC as mfiSrc, isCustomCategory as mfiIsCustom, fallbackSrc as mfiFallbackSrc } from "@/lib/part-image-fallback";
+import { existsSync as mfiExists } from "node:fs";
+{
+  const img = (m: string) => (m.trim().toLowerCase() === "etc" ? "PD-etc-logo" : null);
+  const p = (i: Parameters<typeof mfiPortal>[0]) => JSON.stringify(mfiPortal(i, img));
+  const d = (i: Parameters<typeof mfiDoc>[0]) => JSON.stringify(mfiDoc(i, img));
+  ok(p({ allowance: true, mfr: "ETC" }) === JSON.stringify({ kind: "placeholder", name: "allowance" }), "mfr images: an allowance shows the Allowance placeholder even with a manufacturer image");
+  ok(p({ custom: true, mfr: "ETC" }) === JSON.stringify({ kind: "placeholder", name: "custom-device" }), "mfr images: a custom item shows Custom Device even with a manufacturer image");
+  ok(p({ mfr: "ETC", por: true }) === JSON.stringify({ kind: "image", documentId: "PD-etc-logo", label: "ETC" }), "mfr images: a manufacturer image beats Contact Us");
+  ok(p({ mfr: "Chauvet", por: true }) === JSON.stringify({ kind: "placeholder", name: "contact-us" }), "mfr images: price on request without a manufacturer image shows Contact Us");
+  ok(p({ mfr: "", por: false }) === JSON.stringify({ kind: "placeholder", name: "coming-soon" }) && p({}) === JSON.stringify({ kind: "placeholder", name: "coming-soon" }), "mfr images: nothing else applies → Image Coming Soon");
+  ok(d({ allowance: true }) === JSON.stringify({ kind: "placeholder", name: "allowance" }) && d({ custom: true }) === JSON.stringify({ kind: "placeholder", name: "custom-device" }), "mfr images: documents print the kind placeholders");
+  ok(d({ mfr: "ETC" }) === JSON.stringify({ kind: "image", documentId: "PD-etc-logo", label: "ETC" }), "mfr images: documents print the manufacturer image");
+  ok(mfiDoc({ mfr: "Chauvet", por: true }, img) === null && mfiDoc({}, img) === null, "mfr images: documents never print Contact Us or Coming Soon");
+  ok(mfiIsCustom("Custom Parts") && mfiIsCustom(" custom parts ") && !mfiIsCustom("Lighting") && !mfiIsCustom(null), "mfr images: the Custom Parts category marks a custom catalog part");
+  ok(mfiFallbackSrc({ kind: "placeholder", name: "coming-soon" }, (id) => "/d/" + id) === "/placeholders/coming-soon.webp" && mfiFallbackSrc({ kind: "image", documentId: "X", label: "" }, (id) => "/d/" + id) === "/d/X", "mfr images: fallbackSrc maps placeholders to static files and images through the caller's doc URL");
+  ok(Object.values(mfiSrc).every((s) => mfiExists("public" + s)), "mfr images: all four placeholder files ship in public/placeholders");
+}
