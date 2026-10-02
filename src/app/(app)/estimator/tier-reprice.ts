@@ -44,6 +44,11 @@ export const TIER_REPRICE_TOLERANCE = 0.01;
 /** Labor's last line carries buildLaborItems' rounding-drift nudge (≤ 5¢). */
 export const LABOR_REPRICE_TOLERANCE = 0.05;
 
+/** A stamped tier margin, or null when it isn't one (0 < m < 1). Shared by
+ *  Copy system (#266) and Load system (#293 slice 2). */
+export const usableTierMargin = (m: unknown): number | null =>
+  typeof m === "number" && Number.isFinite(m) && m > 0 && m < 1 ? m : null;
+
 /** The margin a material line was seeded at — the stamp, else 0.30. */
 export function seedMarginOf(m: number | null | undefined): number {
   return m != null && Number.isFinite(m) && m > 0 && m < 1 ? m : TIER_FALLBACK_MARGIN;

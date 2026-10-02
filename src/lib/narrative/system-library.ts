@@ -16,8 +16,8 @@ import {
  * #293 slice 2 — the system library: every system on a SENT or WON system
  * quote, read from that quote's latest sent revision (a won quote with no
  * sent revision uses its live spec). Computed, never curated — drafts,
- * post-send edits, lost quotes, Daylite history and service quotes never
- * appear. Pure and client-safe: the server index, the Load core, the
+ * post-send edits, lost quotes, Daylite history, service quotes and customer-built
+ * portal quotes never appear. Pure and client-safe: the server index, the Load core, the
  * library modal and the harness all share it.
  */
 
@@ -86,12 +86,20 @@ export type LoadedLibrarySystem = {
 };
 export type LoadLibrarySystemResult = LoadedLibrarySystem | { ok: false; error: string };
 
+/** Quotes a customer built in the portal (#245 catalog, #248 service, and
+ *  the retired self-serve builder) — the same set portal-quote-names.ts
+ *  calls customer-built, inlined because this module must stay client-safe.
+ *  Their systems are the customer's picks, not Peak's work, so they never
+ *  join the library (a default Jeff can reverse). */
+const PORTAL_BUILT_SOURCES: ReadonlySet<string> = new Set(["portal-catalog", "portal-service", "portal-self-serve"]);
+
 /** Which snapshot of this quote the library reads, or null when the quote
  *  isn't in the library. The Daylite test mirrors isImportedHistoryQuote
  *  (stores/quotes.ts) — inlined because this module must stay client-safe. */
 export function librarySourceOf(q: Quote): LibrarySource | null {
   if (!q || typeof q !== "object") return null;
   if (q.source === "daylite") return null;
+  if (typeof q.source === "string" && PORTAL_BUILT_SOURCES.has(q.source)) return null;
   if ((q.quoteType || "system") !== "system") return null;
   if (q.status !== "sent" && q.status !== "won") return null;
   const sent = latestSentRevision(Array.isArray(q.revisions) ? q.revisions : []);
@@ -227,6 +235,12 @@ export function librarySectionForLoad(
   const keptIds = new Set(kept.map((it) => String(it.id)));
   const base: SpecSection = { ...sec, items: kept };
   delete base.room;
+  // Freight priced from another venue's drive miles (only portal-built
+  // sections carry freightMiles) never travels: auto freight re-applies here.
+  if ("freightMiles" in base) {
+    delete base.freightMiles;
+    base.freightAuto = true;
+  }
   const kps = sanitizeKeyProducts(sec.keyProducts).filter((k) => keptIds.has(k.lineKey));
   return { section: withKeyProducts(base, kps), source, vendorLinesDropped: items.length - kept.length };
 }

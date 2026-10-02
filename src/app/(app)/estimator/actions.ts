@@ -35,7 +35,7 @@ import {
 import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import { copySectionForTarget } from "./copy-system";
 import { copyPricingFor } from "./copy-pricing";
-import { seedMarginOf } from "./tier-reprice";
+import { seedMarginOf, usableTierMargin } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
@@ -871,9 +871,6 @@ export type CopySystemResult =
       tierLabel: string | null;
     }
   | { ok: false; error: string };
-
-const usableTierMargin = (m: unknown): number | null =>
-  typeof m === "number" && Number.isFinite(m) && m > 0 && m < 1 ? m : null;
 
 /**
  * #266 — Copy a system to a new estimate, an existing one, or within this

@@ -10718,6 +10718,7 @@ seeded()
   .then(() => narrativePhotos293AsyncChecks())
   .then(() => narrativeFinal293AsyncChecks())
   .then(() => systemLibrary293sAsyncChecks())
+  .then(() => systemLibrary293sFinalFixAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -43844,6 +43845,8 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
   ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
   ok(!(await n293sLoad("garbage", 0.2)).ok, "#293s load (DB): a malformed key is refused");
+  // Final review: warm the index right before remove(), so the drop below is remove()'s own invalidation.
+  ok((await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): the won quote is listed in a warm index right before remove()");
   await n293sQRemove(QWON);
   ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): deleting a quote drops it from the library (remove invalidates)");
   const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2);
@@ -43913,4 +43916,113 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
     "#293s merge UI: applies through onChange on the live section (setSections) and reports what was added and skipped");
   ok(/^"use client";/.test(col) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos|system-library-index|load-system))/m.test(col),
     "#293s merge UI: the column still imports no server-only module");
+}
+
+/* ======================================================================
+   #293 slice 2 — final review fixes: customer-built portal quotes stay out
+   of the library; a loaded section never keeps another venue's freight;
+   setStatus and remove() really invalidate (checked against a WARM index);
+   a malformed Load key leaves the index warm; a no-tier target prices at
+   the Estimator's fallback seed, not the source customer's tier.
+   ====================================================================== */
+import { setStatus as n293fSetStatus } from "@/lib/stores/quotes";
+import { TIER_FALLBACK_MARGIN as n293fFallback, usableTierMargin as n293fUsable } from "@/app/(app)/estimator/tier-reprice";
+{
+  const it = (id: number, sku: string, extra: Partial<N293sItem> = {}): N293sItem =>
+    ({ id, sku, desc: "Desc " + sku, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293sItem);
+  const sec = (id: string, name: string, items: N293sItem[], extra: Partial<N293sSec> = {}): N293sSec =>
+    ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const sentRev = (sections: N293sSec[]) =>
+    ({ rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "Rev 1", value: 0, margin: 0, status: "sent", tierMargin: 0.3, spec: { sections, mobs: [] } });
+  const quote = (id: string, source: string, extra: Record<string, unknown> = {}): N293sQuote =>
+    ({ id, name: "Quote " + id, customer: "C", customerId: null, locationId: null, value: 0, margin: 0, status: "sent",
+       source, quoteType: "system", owner: "t", createdAt: 1, updatedAt: 1000, spec: null,
+       revisions: [sentRev([sec("s1", "Portal system", [it(1, "PART-1")])])], ...extra } as unknown as N293sQuote);
+
+  ok(!!n293sSource(quote("Qest", "estimator")), "#293s final: control — a sent estimator system quote IS in the library");
+  ok(n293sSource(quote("Qpc", "portal-catalog")) === null, "#293s final: a sent portal-catalog (customer-built) quote is not indexed");
+  ok(n293sSource(quote("Qps", "portal-service")) === null && n293sSource(quote("Qps2", "portal-service", { quoteType: "flame_test" })) === null,
+    "#293s final: a sent portal-service (customer-built) quote is not indexed");
+  ok(n293sSource(quote("Qpw", "portal-catalog", { status: "won" })) === null && n293sSource(quote("Qss", "portal-self-serve")) === null,
+    "#293s final: a won portal-catalog quote and a legacy portal-self-serve quote are not indexed either");
+  ok(n293sEntries([quote("Qpc", "portal-catalog"), quote("Qps", "portal-service"), quote("Qest", "estimator")], new Map()).every((e) => e.quoteId === "Qest"),
+    "#293s final: the library lists the estimator quote and neither portal quote");
+
+  const withMiles = quote("Qmi", "estimator", {
+    revisions: [sentRev([sec("s1", "Copied from a portal quote", [it(1, "PART-1")], { freightPct: 7, freightAuto: false, freightMiles: 412 })])],
+  });
+  const lm = n293sForLoad(withMiles, "s1");
+  ok(!!lm && lm.section.freightAuto === true && !("freightMiles" in lm.section),
+    "#293s final: a section carrying freightMiles loads with freightAuto true and no freightMiles (no other venue's freight)");
+  const noMiles = quote("Qnm", "estimator", { revisions: [sentRev([sec("s1", "Hand freight", [it(1, "PART-1")], { freightPct: 7, freightAuto: false })])] });
+  const ln = n293sForLoad(noMiles, "s1");
+  ok(!!ln && ln.section.freightAuto === false && ln.section.freightPct === 7, "#293s final: control — a section without freightMiles keeps its own freight settings");
+
+  ok(n293fUsable(0.2) === 0.2 && n293fUsable(null) === null && n293fUsable(0) === null && n293fUsable(1) === null && n293fUsable(NaN) === null && n293fUsable("0.2") === null,
+    "#293s final: the shared usableTierMargin keeps its rule (0 < m < 1, finite number)");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const ls = rd("src/lib/narrative/load-system.ts");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  ok(ls.includes("usableTierMargin(targetTierMargin) ?? TIER_FALLBACK_MARGIN") && !ls.includes("const usableTier") &&
+     !acts.includes("const usableTierMargin") && acts.includes("usableTierMargin } from \"./tier-reprice\""),
+    "#293s final: Load and Copy share one usableTierMargin; Load falls back to TIER_FALLBACK_MARGIN");
+  const malformed = ls.indexOf("if (!k) return { ok: false, error: LIBRARY_GONE };");
+  ok(malformed > 0 && malformed < ls.indexOf("invalidateSystemLibrary();"), "#293s final: a malformed key returns before the gone-key invalidation");
+}
+
+async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "lib-final-part");
+  const QW = fixtureId(293, "lib-final-won");
+  const QPC = fixtureId(293, "lib-final-portal-catalog");
+  const QPS = fixtureId(293, "lib-final-portal-service");
+  await n293sMergeUpsert(P, { desc: "Test293 Final part", category: "Test293 Cat", unit: "ea", list: 200, cost: 120 });
+  registerFixture("catalog_parts", P);
+  const section = {
+    id: "sysFin", name: "Test293 Final Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
+    items: [{ id: 1, sku: P, desc: "Final part", qty: 2, unit: "ea", cost: 100, price: n293sSeed({ cost: 100 }, 0.2) }],
+  } as unknown as N293sSec;
+
+  // ---- setStatus invalidates on its own: warm (absent) → real draft→won → listed, no explicit invalidate ----
+  await n293sQCreate({ id: QW, name: "#293 final won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.2, spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QW);
+  n293sInvalidate();
+  const warm = await n293sIndex();
+  ok(!warm.some((e) => e.quoteId === QW) && (await n293sIndex()) === warm, "#293s final (DB): the index is warm and the draft fixture is absent");
+  await n293fSetStatus(QW, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+  const afterWon = await n293sIndex();
+  ok(afterWon !== warm && afterWon.some((e) => e.key === `${QW}:live:sysFin`),
+    "#293s final (DB): a real setStatus(won) invalidates the warm index — the quote appears without an explicit invalidate");
+
+  // ---- a malformed key leaves a warm index warm; a parsed-but-gone key invalidates ----
+  const warm2 = await n293sIndex();
+  const bad1 = await n293sLoad("garbage", 0.2);
+  const bad2 = await n293sLoad("a:b:c:d", 0.2);
+  ok(!bad1.ok && !bad2.ok && (await n293sIndex()) === warm2, "#293s final (DB): a malformed key is refused and the warm index stays cached");
+  const goneKey = await n293sLoad(`${fixtureId(293, "lib-final-never")}:live:sysFin`, 0.2);
+  ok(!goneKey.ok && goneKey.error === n293sGone && (await n293sIndex()) !== warm2, "#293s final (DB): control — a parsed key whose quote is gone does invalidate");
+
+  // ---- a target with no tier prices at the Estimator's fallback seed, not the source's 0.2 ----
+  const nt = await n293sLoad(`${QW}:live:sysFin`, null);
+  ok(nt.ok && nt.section.items[0].cost === 120 && nt.section.items[0].price === n293sSeed({ cost: 120 }, n293fFallback) &&
+     nt.section.items[0].price !== n293sSeed({ cost: 120 }, 0.2) && nt.tierRepriced === 1,
+    `#293s final (DB): Load into a no-tier estimate prices at TIER_FALLBACK_MARGIN (${n293fFallback}), not the source customer's 0.2`);
+
+  // ---- remove() invalidates on its own: warm (listed) → remove → gone ----
+  const warm3 = await n293sIndex();
+  ok(warm3.some((e) => e.quoteId === QW) && (await n293sIndex()) === warm3, "#293s final (DB): the won fixture is listed in a warm index before remove()");
+  await n293sQRemove(QW);
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QW), "#293s final (DB): remove() drops it from the warm index without an explicit invalidate");
+
+  // ---- customer-built portal quotes, sent, are never indexed ----
+  for (const [id, source] of [[QPC, "portal-catalog"], [QPS, "portal-service"]] as const) {
+    await n293sQCreate({ id, name: "#293 final " + source, customer: "Spec fixture", owner: "spec", quoteType: "system", source, tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+    registerFixture("quotes", id);
+    await n293sQUpdate(id, { status: "sent" });
+    await n293sQAddRev(id, { by: "Test", reason: "sent", note: "Sent to customer" });
+  }
+  n293sInvalidate();
+  const pidx = await n293sIndex();
+  ok(!pidx.some((e) => e.quoteId === QPC) && !pidx.some((e) => e.quoteId === QPS), "#293s final (DB): sent portal-catalog and portal-service quotes are not in the library");
+  const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3);
+  ok(!pl.ok && pl.error === n293sGone, "#293s final (DB): a portal quote's system can't be loaded by key");
 }
