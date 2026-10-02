@@ -43731,8 +43731,11 @@ import type { RackPlacement as C296Placement, RackLayout as C296Layout, RackEdit
   const look = (sku: string) => sku === "AMP" ? { sku, desc: "Amp", found: true, ruHeight: 2, depthIn: 15, weightLb: 30, powerWatts: 200, airflow: "front-to-rear" as const, rackWidth: "half" as const } : undefined;
   const f1 = c296Facts(P({ sku: "AMP", override: { weightLb: 25 } }), look);
   ok(f1.weightLb === 25 && f1.depthIn === 15 && f1.powerWatts === 200 && f1.maxPowerWatts === 200 && f1.airflow === "front-to-rear" && f1.rackWidth === "half" && f1.catalogRuHeight === 2, "#296 rack layout: placementFacts — override > catalog, maxPowerWatts falls back to powerWatts");
+  const f3 = c296Facts(P({ sku: "AMP", override: { powerWatts: 500 } }), (sku) => ({ ...look(sku)!, maxPowerWatts: 300 }));
+  const f4 = c296Facts(P({ sku: "AMP" }), (sku) => ({ ...look(sku)!, maxPowerWatts: 300 }));
+  ok(f3.powerWatts === 500 && f3.maxPowerWatts === 500 && f4.maxPowerWatts === 300, "#296 rack layout: placementFacts — max power never reads below the resolved typical draw");
   const f2 = c296Facts(P({ sku: "NOPE" }), look);
-  ok(f2.rackWidth === "full" && !("weightLb" in f2 && f2.weightLb !== undefined) && f2.powerWatts === undefined && f2.maxPowerWatts === undefined, "#296 rack layout: placementFacts — unknown stays unknown, width defaults to full");
+  ok(f2.rackWidth === "full" && f2.weightLb === undefined && f2.powerWatts === undefined && f2.maxPowerWatts === undefined, "#296 rack layout: placementFacts — unknown stays unknown, width defaults to full");
   ok(c296RuLabel(E.config, 12, 12) === "RU 12" && c296RuLabel(E.config, 12, 13) === "RU 12–13" && c296RuLabel({ ...E.config, numbering: "top-down" }, 1, 2) === "RU 41–42", "#296 rack layout: ruRangeLabel honours numbering, en dash, low→high");
 
   // bounds
@@ -43798,6 +43801,9 @@ import type { RackPlacement as C296Placement, RackLayout as C296Layout, RackEdit
   ok(why(c296Update(halfL, "RP-H", { laneCount: 1 })) === "That lane doesn't exist for this width.", "#296 rack layout: update re-checks a laneCount change");
   ok(why(c296Update(L1, "RP-A", { sku: "" })) === "Pick a part for this slot." && lay(c296Update(L1, "RP-A", { sku: "NEW" })).placements[0].sku === "NEW", "#296 rack layout: update re-checks a SKU change");
   const opt = lay(c296Update(L1, "RP-A", { optional: true, notes: "spare" }));
+  const ign = lay(c296Update(LS, "RP-C1", { kind: "reserved" } as never));
+  const ign2 = lay(c296Update(L1, "RP-A", { shelfId: "RP-S", id: "RP-Q", ruStart: 30 } as never));
+  ok(ign.placements.find((p) => p.id === "RP-C1")!.kind === "device" && !("shelfId" in ign2.placements[0]) && ign2.placements[0].id === "RP-A" && ign2.placements[0].ruStart === 10, "#296 rack layout: update ignores keys outside the patchable set (kind, shelfId, id, ruStart)");
   ok(opt.placements[0].optional === true && opt.placements[0].notes === "spare" && !("optional" in lay(c296Update(opt, "RP-A", { optional: undefined })).placements[0]), "#296 rack layout: update sets and clears fields");
   ok(why(c296Place(L1, P({ id: "A", ruStart: 30 }))) !== "" && !c296Place(L1, P({ id: "A", ruStart: 30 })).ok, "#296 rack layout: place refuses a duplicate id");
 
@@ -43838,6 +43844,9 @@ import type { RackPlacement as C296Placement, RackLayout as C296Layout, RackEdit
   }
   const orphan = c296Sanitize(withP(P({ id: "C", label: "Mic rx", shelfId: "RP-GONE", ruStart: 3 })));
   ok(!orphan.ok && orphan.error.endsWith(": That shelf isn't in the rack.") && orphan.error.startsWith("Mic rx ("), "#296 rack layout: sanitize refuses a child whose shelf is missing");
+  const lowSku = c296Sanitize(withP(P({ id: "A", sku: "dbx-260", ruStart: 10 }), P({ id: "B", ruStart: 10 })));
+  const lowRes = c296Sanitize(withP(P({ id: "A", kind: "reserved", sku: undefined, ruStart: 10 }), P({ id: "B", ruStart: 10 })));
+  ok(!lowSku.ok && lowSku.error.startsWith("dbx-260 (RU 10, front): ") && !lowRes.ok && lowRes.error.startsWith("A reserved slot (RU 10, front): "), "#296 rack layout: sanitize prints a label/SKU verbatim and capitalizes only the reserved fallback");
   const childFirst = c296Sanitize(withP(P({ id: "C", shelfId: "RP-S" }), shelf));
   ok(childFirst.ok, "#296 rack layout: sanitize validates a child after its shelf regardless of array order");
 }

@@ -83,7 +83,10 @@ export function placementFacts(
     depthIn: o.depthIn ?? cat.depthIn,
     weightLb: o.weightLb ?? cat.weightLb,
     powerWatts,
-    maxPowerWatts: cat.maxPowerWatts ?? powerWatts,
+    maxPowerWatts:
+      cat.maxPowerWatts !== undefined && powerWatts !== undefined
+        ? Math.max(cat.maxPowerWatts, powerWatts)
+        : (cat.maxPowerWatts ?? powerWatts),
     airflow: cat.airflow,
     rackWidth: o.rackWidth ?? cat.rackWidth ?? "full",
     catalogRuHeight: cat.ruHeight,
@@ -255,6 +258,7 @@ export function resize(layout: RackLayout, id: string, ruHeight: number): RackEd
 }
 
 type Patchable = "optional" | "override" | "costOverride" | "notes" | "label" | "lane" | "laneCount" | "face" | "sku";
+const PATCHABLE: ReadonlySet<string> = new Set<Patchable>(["optional", "override", "costOverride", "notes", "label", "lane", "laneCount", "face", "sku"]);
 
 /** Patch fields; a key present with `undefined` clears it. A child's face stays its shelf's. */
 export function update(layout: RackLayout, id: string, patch: Partial<Pick<RackPlacement, Patchable>>): RackEdit {
@@ -262,6 +266,7 @@ export function update(layout: RackLayout, id: string, patch: Partial<Pick<RackP
   if (!cur) return NOT_FOUND;
   const next = structuredClone(cur) as Record<string, unknown>;
   for (const [k, v] of Object.entries(structuredClone(patch))) {
+    if (!PATCHABLE.has(k)) continue; // id, kind, shelfId, ruStart, ruHeight never change here
     if (v === undefined) delete next[k];
     else next[k] = v;
   }
@@ -374,8 +379,7 @@ export function sanitizeRackLayout(input: unknown): { ok: true; value: RackLayou
     const r = canPlace(layout, p);
     if (!r.ok) {
       const span = occupiedSpan(layout, p) ?? { lo: p.ruStart, hi: p.ruStart };
-      const name = labelOf(p);
-      const lead = name.charAt(0).toUpperCase() + name.slice(1);
+      const lead = p.label || p.sku || "A reserved slot";
       return { ok: false, error: `${lead} (${ruRangeLabel(config, span.lo, span.hi)}, ${p.face}): ${r.reason}` };
     }
   }
