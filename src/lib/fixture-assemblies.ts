@@ -1,6 +1,8 @@
 import type { CatalogPart } from "@/lib/stores/catalog";
 import { effectivePriceDate, type PriceDateSettings } from "./catalog-books";
 import { capGraphemes, INVISIBLE_STRIP } from "./portal-quote-names";
+import { sanitizeRackLayout } from "./rack/layout";
+import type { RackLayout, RackPlacement } from "./rack/types";
 
 export const ASSEMBLY_ROLES = [
   "fixture", "lens", "mount", "accessory", "cable", "power", "data", "lamp", "other",
@@ -226,8 +228,10 @@ export type SystemScope = (typeof SYSTEM_SCOPES)[number];
 
 /** #228: "hardware" is a parts-list assembly (like a system) with no scope of
  *  its own — e.g. a Chain Wrap batten termination. On the plan it draws on
- *  the Equipment map row it is mapped on (grid-virtual-parts hardwareLayerFor). */
-export type FixtureKind = "fixture" | "system" | "hardware";
+ *  the Equipment map row it is mapped on (grid-virtual-parts hardwareLayerFor).
+ *  #296: "rack" is an equipment rack — a scoped parts list (like a system)
+ *  plus an RU layout whose placed devices price as grouped parts (D574). */
+export type FixtureKind = "fixture" | "system" | "hardware" | "rack";
 
 /** One part line. qty ≥ 0; 0 = a compatible optional add-on (off by default). */
 export type FixtureLine = { sku: string; label?: string; qty: number; costOverride?: number };
@@ -242,7 +246,7 @@ export type FixtureRecord = {
   kind: FixtureKind;
   label: string;
   description: string;
-  /** System only. */
+  /** System and rack. */
   scope?: SystemScope;
   /** Fixture only (#289): the portal catalog's "Packages & Assemblies" group
    *  this assembly lists under. Absent → "Other packages". Cleaned by
@@ -258,8 +262,11 @@ export type FixtureRecord = {
   circuit?: string;
   /** Fixture boxes (all four always present; empty for a system). */
   lines: Record<FixtureBox, FixtureLine[]>;
-  /** System and hardware — the one parts list. */
+  /** System, hardware and rack — the one parts list (a rack's rack-level
+   *  parts: frame, rails, PDU…; may be empty). */
   parts?: FixtureLine[];
+  /** #296 — rack only: the RU layout. Placed devices live here, never in `parts`. */
+  rack?: RackLayout;
   /** Build-time numbers for the "was $X" badge (price = included sell). */
   snapshot?: { cost: number; price: number; pricedAt: number | null };
   /** Converted from an assembly with no fixture-role member (spec §3). */
@@ -273,12 +280,13 @@ export type FixtureRecord = {
   legacy?: { from: "assembly" | "subassembly"; names?: Record<string, string> };
 };
 
-export type FixtureSlot = "lightEngine" | "lens" | FixtureBox | "parts";
+/** #296: "rack" = a rack placement group (one per SKU). */
+export type FixtureSlot = "lightEngine" | "lens" | FixtureBox | "parts" | "rack";
 
 export type FixtureCatalogPart = { sku: string; desc: string; unit?: string; cost: number; list: number; mfr?: string; pricedAt?: number };
 
 export type FixtureResolvable = Pick<FixtureRecord, "id" | "kind" | "label" | "lightEngineSku" | "lensSku" | "lines"> &
-  Partial<Pick<FixtureRecord, "lightEngineLine" | "lensLine" | "parts" | "legacy" | "position" | "circuit">>;
+  Partial<Pick<FixtureRecord, "lightEngineLine" | "lensLine" | "parts" | "legacy" | "position" | "circuit" | "rack" | "scope">>;
 
 export type ResolvedFixturePart = {
   slot: FixtureSlot;
@@ -332,13 +340,69 @@ function headToLine(sku: string, head?: HeadLine): FixtureLine {
   };
 }
 
+/** One priced line. A rack placement group (slot "rack") also carries the
+ *  per-placement cost overrides its unit cost averages over (D574) —
+ *  resolveFixture resolves them once the catalog cost is known. */
+export type FixtureLinePart = { slot: FixtureSlot; line: FixtureLine; costOverrides?: Array<number | undefined> };
+
+const FACE_ORDER = { front: 0, rear: 1 } as const;
+const validOverride = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+
+/**
+ * #296 (D574) — a rack's priced lines: its rack-level parts, then one group
+ * per placed SKU (any placement with a SKU — devices, shelves, blanks, vents,
+ * shelf children; reserved slots have none) in first-appearance RU order
+ * (RU low → high, front before rear, then lane; a shelf child sits at its
+ * shelf's RU). qty = the SKU's non-optional placements; all optional → qty 0
+ * (an optional add-on). `costOverrides` covers the included placements, or
+ * every placement when none is included. Label = the first placement's.
+ */
+function rackLines(r: Pick<FixtureResolvable, "parts" | "rack">): FixtureLinePart[] {
+  const out: FixtureLinePart[] = (r.parts || []).map((line) => ({ slot: "parts" as const, line }));
+  const placements = Array.isArray(r.rack?.placements) ? r.rack.placements : [];
+  const byId = new Map(placements.map((p) => [p.id, p] as const));
+  const ruOf = (p: RackPlacement) => {
+    const shelf = p.shelfId ? byId.get(p.shelfId) : undefined;
+    return Number((shelf ?? p).ruStart) || 0;
+  };
+  const sorted = placements
+    .filter((p) => p.kind !== "reserved" && typeof p.sku === "string" && p.sku.trim() !== "")
+    .map((p, i) => ({ p, i, ru: ruOf(p) }))
+    .sort((a, b) =>
+      a.ru - b.ru ||
+      (FACE_ORDER[a.p.face] ?? 0) - (FACE_ORDER[b.p.face] ?? 0) ||
+      (a.p.lane ?? 0) - (b.p.lane ?? 0) ||
+      a.i - b.i
+    );
+  const groups = new Map<string, RackPlacement[]>();
+  for (const { p } of sorted) {
+    const g = groups.get(p.sku!);
+    if (g) g.push(p);
+    else groups.set(p.sku!, [p]);
+  }
+  for (const [sku, group] of groups) {
+    const included = group.filter((p) => !p.optional);
+    const priced = included.length ? included : group;
+    const label = group[0].label;
+    out.push({
+      slot: "rack",
+      line: { sku, ...(label ? { label } : {}), qty: included.length },
+      costOverrides: priced.map((p) => validOverride(p.costOverride)),
+    });
+  }
+  return out;
+}
+
 /** Every priced line in form order: light engine, lens, then the four boxes
- *  (fixture) — or the one parts list (system). */
+ *  (fixture) — or the one parts list (system, hardware) — or a rack's parts
+ *  then its placement groups (#296). */
 export function fixtureLineParts(
-  r: Pick<FixtureResolvable, "kind" | "lightEngineSku" | "lensSku" | "lines" | "lightEngineLine" | "lensLine" | "parts">
-): Array<{ slot: FixtureSlot; line: FixtureLine }> {
+  r: Pick<FixtureResolvable, "kind" | "lightEngineSku" | "lensSku" | "lines" | "lightEngineLine" | "lensLine" | "parts" | "rack">
+): FixtureLinePart[] {
+  if (r.kind === "rack") return rackLines(r);
   if (r.kind !== "fixture") return (r.parts || []).map((line) => ({ slot: "parts" as const, line }));
-  const out: Array<{ slot: FixtureSlot; line: FixtureLine }> = [];
+  const out: FixtureLinePart[] = [];
   if (r.lightEngineSku) out.push({ slot: "lightEngine", line: headToLine(r.lightEngineSku, r.lightEngineLine) });
   if (r.lensSku) out.push({ slot: "lens", line: headToLine(r.lensSku, r.lensLine) });
   for (const box of FIXTURE_BOXES) for (const line of r.lines?.[box] || []) out.push({ slot: box, line });
@@ -365,11 +429,16 @@ export function resolveFixture(
   const bySku = toSkuMap(catalog);
   const names = r.legacy?.names || {};
   const missing: string[] = [];
-  const parts = fixtureLineParts(r).map(({ slot, line }): ResolvedFixturePart => {
+  const parts = fixtureLineParts(r).map(({ slot, line, costOverrides }): ResolvedFixturePart => {
     const p = bySku.get(line.sku);
     if (!p && line.sku && !missing.includes(line.sku)) missing.push(line.sku);
-    const override =
-      typeof line.costOverride === "number" && Number.isFinite(line.costOverride) && line.costOverride >= 0 ? line.costOverride : undefined;
+    // #296 (D574): a rack group's unit cost is the mean of (override ??
+    // catalog cost) over its placements — set only when one has an override.
+    const override = costOverrides
+      ? costOverrides.some((o) => o !== undefined)
+        ? costOverrides.reduce<number>((sum, o) => sum + (o ?? (Number(p?.cost) || 0)), 0) / costOverrides.length
+        : undefined
+      : validOverride(line.costOverride);
     const qty = Math.max(0, Number(line.qty) || 0);
     return {
       slot,
@@ -429,6 +498,8 @@ export type FixtureInput = {
   portalCategory?: string;
   lines?: Partial<Record<FixtureBox, FixtureLine[]>>;
   parts?: FixtureLine[];
+  /** #296 — rack kind only; cleaned by `sanitizeRackLayout`. */
+  rack?: unknown;
 };
 
 /** A sanitized record body — the store adds id, stamps, snapshot. */
@@ -524,12 +595,31 @@ const tooManyLines = `An assembly can have at most ${FIXTURE_MAX_LINES} lines.`;
 
 export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFixture } | { ok: false; error: string } {
   const i = (input && typeof input === "object" ? input : {}) as FixtureInput;
-  const kind: FixtureKind = i.kind === "system" ? "system" : i.kind === "hardware" ? "hardware" : "fixture";
+  const kind: FixtureKind = i.kind === "system" ? "system" : i.kind === "hardware" ? "hardware" : i.kind === "rack" ? "rack" : "fixture";
   const label = text(i.label, 160);
   if (!label) return { ok: false, error: "Add a label." };
   const description = text(i.description, 2000);
   const lines: Record<FixtureBox, FixtureLine[]> = { data: [], power: [], mounting: [], accessories: [] };
   const cleanList = (raw: unknown) => (Array.isArray(raw) ? raw : []).map(cleanLine).filter((l): l is FixtureLine => !!l);
+  if (kind === "rack") {
+    // #296: a scoped parts list (may be empty) + the RU layout. Placement
+    // SKUs aren't subject to the one-line-per-SKU rule — they group (D574) —
+    // but a SKU can't be both placed and a rack-level part.
+    const scope = SYSTEM_SCOPES.find((s) => s === i.scope);
+    if (!scope) return { ok: false, error: "Pick a scope for the rack." };
+    const parts = cleanList(i.parts);
+    if (parts.length > FIXTURE_MAX_LINES) return { ok: false, error: tooManyLines };
+    const dup = duplicateSkuError(parts);
+    if (dup) return { ok: false, error: dup };
+    const layout = sanitizeRackLayout(i.rack);
+    if (!layout.ok) return { ok: false, error: `Rack: ${layout.error}` };
+    const rack = layout.value;
+    const placed = new Set(rack.placements.map((p) => p.sku).filter((sku): sku is string => !!sku));
+    if (!placed.size && !parts.length) return { ok: false, error: "Add at least one device or rack-level part to the rack." };
+    const both = parts.find((l) => placed.has(l.sku));
+    if (both) return { ok: false, error: `${both.sku} is placed in the rack — remove it from the rack-level parts.` };
+    return { ok: true, value: { kind, label, description, scope, lightEngineSku: "", lensSku: null, lines, parts, rack } };
+  }
   if (kind === "system" || kind === "hardware") {
     // #228: hardware has the system's parts list but never a scope of its own.
     const scope = kind === "system" ? SYSTEM_SCOPES.find((s) => s === i.scope) : undefined;
@@ -586,6 +676,7 @@ const SLOT_ROLE: Record<FixtureSlot, AssemblyRole> = {
   mounting: "mount",
   accessories: "accessory",
   parts: "other",
+  rack: "other",
 };
 
 /** One record → the Estimator/Quick Design shape: id → id, label → name,
@@ -622,6 +713,7 @@ export const ASSEMBLY_GROUPS: ReadonlyArray<{ kind: FixtureKind; label: string }
   { kind: "fixture", label: "Fixtures" },
   { kind: "system", label: "Systems" },
   { kind: "hardware", label: "Hardware" },
+  { kind: "rack", label: "Racks" },
 ];
 
 /** #246/#247 — a picker's rows split into ASSEMBLY_GROUPS order, empty groups
@@ -638,17 +730,17 @@ export function groupAssemblies<T extends { kind?: FixtureKind }>(
  *  list): no components, just what the grouped <select> shows. */
 export type AssemblyPickerOption = { id: string; name: string; kind?: FixtureKind; scope?: SystemScope };
 
-/** #246/#247 — a picker option's text: a system names its scope. */
+/** #246/#247 — a picker option's text: a system (and #296 a rack) names its scope. */
 export function assemblyOptionLabel(item: Pick<AssemblyPickerOption, "name" | "kind" | "scope">): string {
-  return item.kind === "system" && item.scope ? `${item.name} (${item.scope})` : item.name;
+  return (item.kind === "system" || item.kind === "rack") && item.scope ? `${item.name} (${item.scope})` : item.name;
 }
 
 /**
  * #246/#247 — the whole Assembly Builder list for both pickers (the
  * Estimator's "+ Add assembly" and Quick Design's lighting fixture picker):
- * fixtures, then systems, then hardware (ASSEMBLY_GROUPS), each keeping the
- * input order (listFixtures sorts by label). Every row carries its `kind`,
- * and a system its `scope`. Only a fixture carries a default hang position /
+ * fixtures, then systems, then hardware, then racks (ASSEMBLY_GROUPS), each
+ * keeping the input order (listFixtures sorts by label). Every row carries
+ * its `kind`, and a system or rack its `scope`. Only a fixture carries a default hang position /
  * circuit. Pure. (Replaced the fixtures-only `fixtureAssembliesFrom`, #247.)
  */
 export function allAssembliesFrom(
@@ -667,7 +759,7 @@ export function allAssembliesFrom(
           ...(kind === "fixture" && position ? { position } : {}),
           ...(kind === "fixture" && circuit ? { circuit } : {}),
           kind,
-          ...(kind === "system" && r.scope ? { scope: r.scope } : {}),
+          ...((kind === "system" || kind === "rack") && r.scope ? { scope: r.scope } : {}),
         };
       })
   );

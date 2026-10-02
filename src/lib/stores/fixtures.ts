@@ -71,7 +71,7 @@ export async function createFixture(value: CleanFixture, by: string, snapshot: F
  *  — every optional field, even when absent from this save, so a cleared
  *  optional (lamp, position, circuit…) is never resurrected from the stored
  *  row just because it shares a name with the new shape. */
-const OPTIONAL_FIXTURE_FIELDS = ["scope", "lightEngineLine", "lensLine", "lamp", "position", "circuit", "portalCategory", "parts"] as const;
+const OPTIONAL_FIXTURE_FIELDS = ["scope", "lightEngineLine", "lensLine", "lamp", "position", "circuit", "portalCategory", "parts", "rack"] as const;
 
 /** Replace the record body; keep id, kind, created stamps and provenance —
  *  and every legacy-only key `value` doesn't know about (options,

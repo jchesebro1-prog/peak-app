@@ -10,7 +10,7 @@ import { deleteFixtureAction, saveFixtureAction } from "./actions";
 import FixtureForm, { draftFromRecord, draftResolvable, draftToInput, emptyDraft, money, pricesNote, type Draft, type PartHit } from "./fixture-form";
 
 type Filter = "all" | FixtureKind;
-const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems", hardware: "Hardware" };
+const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems", hardware: "Hardware", rack: "Racks" };
 const EDIT_BTN = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 } as const;
 
 /** #210 — the one Assemblies list (fixtures + systems) and its form. */
@@ -67,6 +67,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
     fixture: rows.filter((r) => r.rec.kind === "fixture").length,
     system: rows.filter((r) => r.rec.kind === "system").length,
     hardware: rows.filter((r) => r.rec.kind === "hardware").length,
+    rack: rows.filter((r) => r.rec.kind === "rack").length,
   };
   const shown = rows.filter((r) => filter === "all" || r.rec.kind === filter);
   const live = draft ? resolveFixture(draftResolvable(draft), bySku, settings) : null;

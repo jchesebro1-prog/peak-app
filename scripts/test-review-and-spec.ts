@@ -10756,6 +10756,7 @@ seeded()
   .then(() => photoSheetImportAsyncChecks())
   .then(() => photoSheetFinalAsyncChecks())
   .then(() => rack296SheetAsyncChecks())
+  .then(() => rack296KindAsyncChecks())
   .then(() => curtain292AsyncChecks())
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
@@ -23003,7 +23004,7 @@ import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(a
   const all = e246From(recs, cat);
   ok(all.map((a) => `${a.kind}:${a.id}`).join(",") === "fixture:SA-F1,fixture:SA-F2,system:SA-S1,system:SA-S2,hardware:SA-H1",
     "#246: allAssembliesFrom returns fixtures, then systems, then hardware — each in the input (label) order, every row carrying its kind");
-  ok(e246Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware", "#246: the picker's groups are Fixtures / Systems / Hardware");
+  ok(e246Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware,Racks", "#246: the picker's groups are Fixtures / Systems / Hardware (+ #296 Racks)");
   const s1 = all.find((a) => a.id === "SA-S1")!;
   ok(s1.scope === "Lighting" && s1.name === "Stage wash package" && s1.components.length === 1 && s1.components[0].role === "other" && s1.components[0].defaultQty === 4 && s1.components[0].list === 200,
     "#246: a system resolves in the same shape — its scope, its parts list as components");
@@ -23061,7 +23062,7 @@ import { defaultAState as q247Default } from "@/app/(app)/design/quick/engine";
   const groups = q247Group([...list.map(({ id, name, kind }) => ({ id, name, kind })), ...legacy]);
   ok(groups.map((g) => `${g.label}:${g.items.map((i) => i.id).join("+")}`).join(",") === "Fixtures:SA-Q47F+legacy,Systems:SA-Q47S+SA-Q47Z,Hardware:SA-Q47H"
     && q247Group([{ id: "h", name: "H", kind: "hardware" as const }]).map((g) => g.label).join(",") === "Hardware"
-    && q247Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware",
+    && q247Groups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware,Racks",
     "#247: groupAssemblies — Fixtures / Systems / Hardware in order, a kind-less row reads as a fixture, empty groups dropped");
   ok(q247Label({ name: "Stage wash package", kind: "system", scope: "Lighting" }) === "Stage wash package (Lighting)" && q247Label({ name: "Pipe clamp kit", kind: "hardware" }) === "Pipe clamp kit" && q247Label({ name: "Par wash" }) === "Par wash",
     "#247: a system option names its scope, the Estimator's format; fixtures and hardware show the bare name");
@@ -44200,6 +44201,180 @@ import type { RackPlacement as C296gPlacement, RackLayout as C296gLayout, RackPa
   ok(!ab.includes("vector-effect") && ab.includes('stroke-width="0.035"') && ab.includes('stroke-width="0.02"') && ab.includes('stroke-dasharray="0.25 0.18"') && !ab.includes('stroke-dasharray="4 3"') && !ab.includes('stroke-width="1"'), "#296 rack geometry: strokeMode absolute — user-unit widths and dashes, no vector-effect");
   ok(ab.includes('viewBox="0 0 ') && c296gShapesToSvg([{ kind: "line", x1: 0, y1: 0, x2: 1, y2: 1, stroke: "heavy", dash: true }], { w: 1, h: 1 }, { strokeMode: "absolute" }).includes('stroke-width="0.06"'), "#296 rack geometry: absolute mode through shapesToSvg, heavy is 0.06 in");
   ok((sc.match(/paint-order="stroke"/g) ?? []).length === 1 && sc.includes('stroke="#fff"') && !c296gSvg(L([P({ id: "A" })]), look, { face: "front" }).includes("paint-order"), "#296 rack geometry: only reserved text gets a white halo");
+}
+
+/* ===== #296 — rack kind ===== */
+import {
+  sanitizeFixtureInput as c296kSanitize, resolveFixture as c296kResolve, fixtureSkus as c296kSkus, allAssembliesFrom as c296kFrom,
+  groupAssemblies as c296kGroup, assemblyOptionLabel as c296kOptLabel, ASSEMBLY_GROUPS as c296kGroups,
+  type FixtureRecord as C296kRecord, type CleanFixture as C296kClean,
+} from "@/lib/fixture-assemblies";
+import { normalizeFixtureRow as c296kNormalize } from "@/lib/fixtures-convert";
+import { emptyRackLayout as c296kEmpty, sanitizeRackLayout as c296kSanitizeLayout } from "@/lib/rack/layout";
+import type { RackPlacement as C296kPlacement, RackLayout as C296kLayout } from "@/lib/rack/types";
+const c296kP = (o: Partial<C296kPlacement>): C296kPlacement => ({ kind: "device", sku: "AMP", ruStart: 1, ruHeight: 1, face: "front", ...o, id: "RP-" + (o.id ?? "X") });
+const c296kL = (...ps: C296kPlacement[]): C296kLayout => ({ config: { ruCount: 42, widthIn: 19, numbering: "bottom-up" }, placements: ps });
+/** 4 × amp + 1 optional amp + 1 reserved + 1 blank (the brief's pricing rack). */
+const c296kPricingLayout = (): C296kLayout => c296kL(
+  c296kP({ id: "BLK", kind: "blank", sku: "BLK", ruStart: 11, label: "1U blank" }),
+  c296kP({ id: "A1", ruStart: 1, label: "Power amp" }),
+  c296kP({ id: "A2", ruStart: 3 }),
+  c296kP({ id: "A3", ruStart: 5 }),
+  c296kP({ id: "A4", ruStart: 7 }),
+  c296kP({ id: "A5", ruStart: 9, optional: true }),
+  c296kP({ id: "RES", kind: "reserved", sku: undefined, ruStart: 10, label: "Future" }),
+);
+/** The sanitized (canonical key order) JSON of a layout. */
+const c296kCanon = (l: C296kLayout): string => { const r = c296kSanitizeLayout(l); if (!r.ok) throw new Error("#296 rack kind: bad test layout — " + r.error); return JSON.stringify(r.value); };
+const c296kRec = (o: Partial<C296kRecord> = {}): C296kRecord => ({
+  id: "SA-RACK", kind: "rack", label: "Main rack", description: "", scope: "Audio", lightEngineSku: "", lensSku: null,
+  lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "FRAME", qty: 1 }], rack: c296kPricingLayout(),
+  createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t", ...o,
+});
+const c296kCat = new Map([
+  ["AMP", { sku: "AMP", desc: "Amplifier", unit: "ea", cost: 100, list: 150 }],
+  ["BLK", { sku: "BLK", desc: "Blank panel", unit: "ea", cost: 5, list: 8 }],
+  ["FRAME", { sku: "FRAME", desc: "Rack frame", unit: "ea", cost: 400, list: 600 }],
+  ["OPT", { sku: "OPT", desc: "Optional thing", unit: "ea", cost: 30, list: 45 }],
+]);
+{
+  // ---- sanitize ----
+  const good = { kind: "rack", label: "Rack A", scope: "Audio", description: "", parts: [{ sku: "FRAME", qty: 1 }], rack: c296kPricingLayout() };
+  const err = (input: unknown) => { const r = c296kSanitize(input); return r.ok ? "" : r.error; };
+  ok(err({ ...good, label: "  " }) === "Add a label.", "#296 rack kind: a missing label is refused");
+  ok(err({ ...good, label: "", scope: "" }) === "Add a label.", "#296 rack kind: label is checked before scope");
+  ok(err({ ...good, scope: "" }) === "Pick a scope for the rack." && err({ ...good, scope: "Nope" }) === "Pick a scope for the rack.", "#296 rack kind: a missing or unknown scope is refused");
+  ok(err({ ...good, parts: [], rack: c296kEmpty() }) === "Add at least one device or rack-level part to the rack.", "#296 rack kind: an empty rack (no placements, no parts) is refused");
+  ok(err({ ...good, parts: [], rack: c296kL(c296kP({ id: "R", kind: "reserved", sku: undefined })) }) === "Add at least one device or rack-level part to the rack.", "#296 rack kind: a rack holding only reserved slots is still empty");
+  const partsOnly = c296kSanitize({ ...good, rack: c296kEmpty() });
+  ok(partsOnly.ok && partsOnly.value.rack?.placements.length === 0 && partsOnly.value.parts?.length === 1, "#296 rack kind: rack-level parts alone save");
+  const placedOnly = c296kSanitize({ ...good, parts: [] });
+  ok(placedOnly.ok && placedOnly.value.parts?.length === 0, "#296 rack kind: placements alone save with an empty parts list");
+  ok(err({ ...good, rack: undefined }) === "Rack: That isn't a rack layout.", "#296 rack kind: a missing layout is refused with the Rack: prefix");
+  const overlap = err({ ...good, rack: c296kL(c296kP({ id: "A", label: "Amp A" }), c296kP({ id: "B", label: "Amp B" })) });
+  ok(overlap === "Rack: Amp A (RU 1, front): Overlaps Amp B at RU 1.", "#296 rack kind: an invalid placement is refused naming the placement — " + overlap);
+  ok(err({ ...good, rack: c296kL(c296kP({ id: "A", face: "side" as never })) }) === "Rack: Placement RP-A has an invalid face.", "#296 rack kind: a malformed placement passes the layout error through");
+  const many = c296kL(...Array.from({ length: 301 }, (_, i) => c296kP({ id: "R" + i, kind: "reserved", sku: undefined })));
+  ok(err({ ...good, rack: many }) === "Rack: A rack can hold at most 300 placements.", "#296 rack kind: 301 placements are refused");
+  ok(err({ ...good, parts: [{ sku: "FRAME", qty: 1, label: "Frame" }, { sku: "FRAME", qty: 2 }] }) === "FRAME (Frame) is on two lines — keep one line and set its quantity there.", "#296 rack kind: a duplicate SKU in the rack-level parts is refused");
+  ok(err({ ...good, parts: Array.from({ length: 201 }, (_, i) => ({ sku: "P" + i, qty: 1 })) }) === "An assembly can have at most 200 lines.", "#296 rack kind: more than 200 rack-level parts are refused");
+  const four = c296kSanitize({ ...good, parts: [] });
+  ok(four.ok && four.value.rack?.placements.filter((p) => p.sku === "AMP").length === 5, "#296 rack kind: the same SKU on several placements is accepted (D574)");
+  ok(err({ ...good, parts: [{ sku: "AMP", qty: 1 }] }) === "AMP is placed in the rack — remove it from the rack-level parts.", "#296 rack kind: a SKU both placed and a rack-level part is refused");
+  ok(err({ ...good, parts: [{ sku: "FRAME", qty: 1 }, { sku: "FRAME", qty: 1 }], rack: undefined }).startsWith("FRAME is on two lines"), "#296 rack kind: parts are checked before the layout");
+  const rt = c296kSanitize({ ...good, parts: [{ sku: " FRAME ", qty: -2 }], portalCategory: "Racks", lightEngineSku: "X", lines: { data: [{ sku: "D", qty: 1 }] } });
+  ok(rt.ok && rt.value.kind === "rack" && rt.value.scope === "Audio" && rt.value.lightEngineSku === "" && rt.value.lensSku === null
+      && JSON.stringify(rt.value.lines) === JSON.stringify({ data: [], power: [], mounting: [], accessories: [] })
+      && JSON.stringify(rt.value.parts) === JSON.stringify([{ sku: "FRAME", qty: 0 }]) && !("portalCategory" in rt.value)
+      && JSON.stringify(rt.value.rack) === c296kCanon(c296kPricingLayout()), "#296 rack kind: kind rack round-trips — scope, parts (qty ≥ 0), the layout; no boxes, head or portal category");
+  const twice = rt.ok ? c296kSanitize({ ...rt.value }) : rt;
+  ok(twice.ok && rt.ok && JSON.stringify(twice.value) === JSON.stringify(rt.value), "#296 rack kind: a second sanitize pass is identical");
+  ok(err({ ...good, kind: "bogus" }) === "Pick a light engine from the catalog.", "#296 rack kind: an unknown kind still coerces to fixture");
+  const sysStill = c296kSanitize({ kind: "system", label: "S", scope: "Audio", parts: [{ sku: "A", qty: 1 }], rack: c296kPricingLayout() });
+  ok(sysStill.ok && sysStill.value.kind === "system" && !("rack" in sysStill.value), "#296 rack kind: a system never carries a rack layout");
+  ok(err({ kind: "system", label: "S", parts: [{ sku: "A", qty: 1 }] }) === "Pick a scope for the system." && err({ kind: "hardware", label: "H", parts: [] }) === "Add at least one part to the hardware assembly.", "#296 rack kind: system and hardware messages are unchanged");
+
+  // ---- pricing ----
+  const r = c296kResolve(c296kRec(), c296kCat);
+  ok(r.parts.map((p) => `${p.slot}:${p.sku}:${p.qty}`).join(",") === "parts:FRAME:1,rack:AMP:4,rack:BLK:1", "#296 rack kind: rack-level parts first, then placements grouped by SKU in RU order; reserved skipped");
+  ok(r.cost === 4 * 100 + 5 + 400 && r.sell === 4 * 150 + 8 + 600 && r.cost === 805 && r.sell === 1208, "#296 rack kind: 4 amps + blank + frame cost $805, sell $1,208 (the optional amp adds nothing)");
+  const amp = r.parts.find((p) => p.sku === "AMP")!;
+  ok(amp.label === "Power amp" && amp.cost === 100 && amp.sell === 150 && amp.included && amp.costOverride === undefined, "#296 rack kind: a group is labelled by its first placement and prices from the catalog");
+  ok(r.parts.find((p) => p.sku === "BLK")?.label === "1U blank", "#296 rack kind: a blank with a SKU prices like a device");
+  ok(r.missing.length === 0 && r.kind === "rack", "#296 rack kind: nothing missing; the resolved kind is rack");
+  ok(c296kSkus(c296kRec()).join(",") === "FRAME,AMP,BLK", "#296 rack kind: fixtureSkus lists rack-level parts and placement SKUs, once");
+
+  const ov = c296kPricingLayout();
+  ov.placements.find((p) => p.id === "RP-A3")!.costOverride = 80;
+  const r2 = c296kResolve(c296kRec({ rack: ov }), c296kCat);
+  const amp2 = r2.parts.find((p) => p.sku === "AMP")!;
+  ok(r2.cost === 785 && r2.sell === 1208 && amp2.cost === 95 && amp2.costOverride === 95, "#296 rack kind: a $80 override on 1 of 4 amps averages to $95 a unit — cost drops by $20, sell unchanged");
+  const ovOpt = c296kPricingLayout();
+  ovOpt.placements.find((p) => p.id === "RP-A5")!.costOverride = 10;
+  const r2b = c296kResolve(c296kRec({ rack: ovOpt }), c296kCat);
+  ok(r2b.cost === 805 && r2b.parts.find((p) => p.sku === "AMP")?.costOverride === undefined, "#296 rack kind: an override on an optional placement doesn't move the included unit cost");
+
+  const extra = c296kPricingLayout();
+  extra.placements.push(c296kP({ id: "G", sku: "GONE", ruStart: 12, label: "Mystery box" }), c296kP({ id: "O1", sku: "OPT", ruStart: 13, optional: true }), c296kP({ id: "O2", sku: "OPT", ruStart: 14, optional: true, costOverride: 20 }));
+  const r3 = c296kResolve(c296kRec({ rack: extra }), c296kCat);
+  const gone = r3.parts.find((p) => p.sku === "GONE")!;
+  ok(!gone.found && gone.cost === 0 && gone.sell === 0 && gone.qty === 1 && r3.missing.join(",") === "GONE" && r3.cost === 805 && r3.sell === 1208, "#296 rack kind: a missing placement SKU prices $0 and is listed in missing");
+  const opt = r3.parts.find((p) => p.sku === "OPT")!;
+  ok(opt.qty === 0 && !opt.included && opt.cost === 25 && opt.sell === 45 && opt.costOverride === 25, "#296 rack kind: an all-optional SKU is a qty-0 add-on, averaged over all its placements");
+  const goneOv = c296kL(c296kP({ id: "G1", sku: "GONE", costOverride: 50 }), c296kP({ id: "G2", sku: "GONE", ruStart: 2 }));
+  const r3b = c296kResolve(c296kRec({ rack: goneOv, parts: [] }), c296kCat);
+  ok(r3b.cost === 50 && r3b.parts[0].cost === 25, "#296 rack kind: a missing SKU averages an override with catalog cost 0");
+
+  const order = c296kResolve(c296kRec({ parts: [], rack: c296kL(
+    c296kP({ id: "X", sku: "X", face: "rear" }),
+    c296kP({ id: "Y", sku: "Y" }),
+    c296kP({ id: "B", sku: "B", ruStart: 3, lane: 1, laneCount: 2 }),
+    c296kP({ id: "A", sku: "A", ruStart: 3, lane: 0, laneCount: 2 }),
+    c296kP({ id: "D6", sku: "D6", ruStart: 6 }),
+    c296kP({ id: "CH", sku: "CH", ruStart: 40, shelfId: "RP-SH", lane: 1, laneCount: 2 }),
+    c296kP({ id: "SH", kind: "shelf", sku: "SH", ruStart: 5 }),
+  ) }), c296kCat);
+  ok(order.parts.map((p) => p.sku).join(",") === "Y,X,A,B,SH,CH,D6", "#296 rack kind: groups follow RU, then front before rear, then lane; a shelf child sits at its shelf's RU");
+
+  // ---- grouping, labels, Estimator components ----
+  const sys = c296kRec({ id: "SA-SYS", kind: "system", label: "Amp system", rack: undefined, parts: [{ sku: "AMP", qty: 2 }] });
+  const hw = c296kRec({ id: "SA-HW", kind: "hardware", label: "Chain wrap", scope: undefined, rack: undefined, parts: [{ sku: "BLK", qty: 1 }] });
+  const list = c296kFrom([c296kRec(), hw, sys], c296kCat);
+  ok(list.map((a) => `${a.kind}:${a.id}`).join(",") === "system:SA-SYS,hardware:SA-HW,rack:SA-RACK", "#296 rack kind: allAssembliesFrom lists racks after hardware");
+  const rackRow = list.find((a) => a.id === "SA-RACK")!;
+  ok(rackRow.scope === "Audio" && rackRow.position === undefined && list.find((a) => a.id === "SA-HW")?.scope === undefined, "#296 rack kind: a rack row carries its scope (hardware still doesn't)");
+  const ampC = rackRow.components.find((c) => c.sku === "AMP")!;
+  ok(ampC.defaultQty === 4 && ampC.role === "other" && ampC.cost === 100 && ampC.list === 150 && rackRow.components.map((c) => c.sku).join(",") === "FRAME,AMP,BLK", "#296 rack kind: toResolvedAssembly — amp component defaultQty 4, role other");
+  const ovRow = c296kFrom([c296kRec({ rack: ov })], c296kCat)[0];
+  ok(ovRow.components.find((c) => c.sku === "AMP")?.costOverride === 95, "#296 rack kind: the averaged override reaches the Estimator component");
+  ok(c296kGroups.map((g) => g.label).join(",") === "Fixtures,Systems,Hardware,Racks", "#296 rack kind: ASSEMBLY_GROUPS ends with Racks");
+  const g = c296kGroup([{ kind: "rack" as const }, { kind: "system" as const }]);
+  ok(g.map((x) => x.label).join(",") === "Systems,Racks", "#296 rack kind: groupAssemblies puts racks under their own group");
+  ok(c296kOptLabel({ name: "Main rack", kind: "rack", scope: "Audio" }) === "Main rack (Audio)" && c296kOptLabel({ name: "Main rack", kind: "rack" }) === "Main rack", "#296 rack kind: assemblyOptionLabel names a rack's scope like a system's");
+
+  // ---- stored-row normalization ----
+  const row = { ...c296kRec(), id: "SA-RACK" } as unknown as Record<string, unknown> & { id: string };
+  const n1 = c296kNormalize(row);
+  ok(n1.kind === "rack" && JSON.stringify(n1.rack) === c296kCanon(c296kPricingLayout()) && n1.parts?.length === 1 && !n1.needsReview, "#296 rack kind: normalizeFixtureRow keeps kind rack, its layout and parts");
+  const badRack = c296kL(c296kP({ id: "A", label: "Amp A" }), c296kP({ id: "B", label: "Amp B" }));
+  const n2 = c296kNormalize({ ...row, rack: badRack });
+  ok(n2.kind === "rack" && n2.rack?.placements.length === 2 && n2.rack.placements[1].label === "Amp B" && n2.needsReview === true, "#296 rack kind: an invalid stored layout is kept and flagged for review");
+  const n3 = c296kNormalize({ ...row, rack: "junk" });
+  ok(JSON.stringify(n3.rack) === JSON.stringify(c296kEmpty()) && n3.needsReview === true, "#296 rack kind: a stored rack that isn't a layout reads as an empty 42 RU rack, flagged for review");
+  const n4 = c296kNormalize({ ...row, rack: { config: { ruCount: 999, widthIn: 23, numbering: "top-down" }, placements: [c296kP({ id: "A" }), "x"] } });
+  ok(n4.rack?.config.ruCount === 60 && n4.rack.config.widthIn === 23 && n4.rack.config.numbering === "top-down" && n4.rack.placements.length === 1 && n4.needsReview === true, "#296 rack kind: a broken config is shape-cleaned, placements kept");
+  const n5 = c296kNormalize({ ...row, kind: "bogus" });
+  ok(n5.kind === "fixture", "#296 rack kind: an unknown stored kind still normalizes to fixture");
+  const sysClean: C296kClean | null = (() => { const s = c296kSanitize({ kind: "system", label: "S", scope: "Audio", parts: [{ sku: "A", qty: 1 }] }); return s.ok ? s.value : null; })();
+  ok(!!sysClean && sysClean.kind === "system", "#296 rack kind: CleanFixture still types a system");
+
+  // ---- sources ----
+  const rd296k = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd296k("src/app/(app)/design/assemblies/actions.ts").includes(`"An assembly can't change kind after it's created."`), "#296 rack kind: the kind-change refusal names no kind list");
+  ok(/OPTIONAL_FIXTURE_FIELDS = \[[^\]]*"rack"/.test(rd296k("src/lib/stores/fixtures.ts")), "#296 rack kind: rack is an optional field the store never resurrects");
+  ok(/fx\.kind !== "fixture"/.test(rd296k("src/lib/portal-catalog-index.ts")), "#296 rack kind: racks stay out of the portal index");
+}
+
+async function rack296KindAsyncChecks(): Promise<void> {
+  const Fx = await import("@/lib/stores/fixtures");
+  const { registerFixture: reg } = await import("./test-fixtures");
+  const snap = { cost: 0, price: 0, pricedAt: null };
+  const clean = c296kSanitize({ kind: "rack", label: "Test296 Rack", description: "", scope: "Video", parts: [{ sku: "T296-FRAME", qty: 1 }], rack: c296kPricingLayout() });
+  if (!clean.ok) throw new Error("#296 rack kind: expected a clean rack, got " + clean.error);
+  const rec = await Fx.createFixture(clean.value, "T296", snap, 1_700_296_000_000);
+  reg("subassemblies", rec.id);
+  const back = await Fx.getFixture(rec.id);
+  ok(back?.kind === "rack" && back.scope === "Video" && JSON.stringify(back.rack) === c296kCanon(c296kPricingLayout()) && back.parts?.[0]?.sku === "T296-FRAME", "#296 rack kind: createFixture → getFixture returns kind rack with its layout");
+  const fx = c296kSanitize({ kind: "fixture", label: "Test296 Not a rack", description: "", lightEngineSku: "T296-ENG" });
+  if (!fx.ok) throw new Error("unreachable");
+  const upd = await Fx.updateFixture(back!, fx.value, "T296", snap, 1_700_296_100_000);
+  ok(upd.kind === "rack" && (await Fx.getFixture(rec.id))?.kind === "rack", "#296 rack kind: updateFixture with a fixture body keeps kind rack");
+  const moved = c296kL(c296kP({ id: "A1", ruStart: 20, label: "Moved amp" }));
+  const re = c296kSanitize({ kind: "rack", label: "Test296 Rack", description: "", scope: "Video", parts: [], rack: moved });
+  if (!re.ok) throw new Error("unreachable");
+  await Fx.updateFixture((await Fx.getFixture(rec.id))!, re.value, "T296", snap, 1_700_296_200_000);
+  const again = await Fx.getFixture(rec.id);
+  ok(again?.kind === "rack" && JSON.stringify(again.rack) === c296kCanon(moved) && again.parts?.length === 0, "#296 rack kind: a re-save replaces the layout");
 }
 
 async function rack296SheetAsyncChecks(): Promise<void> {

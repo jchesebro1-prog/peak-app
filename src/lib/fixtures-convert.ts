@@ -9,6 +9,8 @@ import {
   type FixtureRecord,
   type HeadLine,
 } from "./fixture-assemblies";
+import { emptyRackLayout, sanitizeRackLayout } from "./rack/layout";
+import { RACK_RU_DEFAULT, RACK_RU_MAX, RACK_RU_MIN, type RackLayout, type RackPlacement } from "./rack/types";
 
 /**
  * #210 conversion — pure. The Assemblies tab's `settings.fixtureAssemblies`
@@ -139,13 +141,42 @@ export function subassemblyToFixture(s: LegacySubassembly): FixtureRecord {
   };
 }
 
+/**
+ * #296 — a stored rack layout, read. A valid one comes back sanitized; an
+ * invalid one is never dropped: a shape-cleaned copy (config clamped, every
+ * object placement kept as stored) comes back flagged for review, and a
+ * value that isn't a layout at all reads as an empty rack, flagged.
+ */
+function readStoredRack(raw: unknown): { rack: RackLayout; needsReview: boolean } {
+  const clean = sanitizeRackLayout(raw);
+  if (clean.ok) return { rack: clean.value, needsReview: false };
+  const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  if (!isObj(raw) || !isObj(raw.config) || !Array.isArray(raw.placements)) return { rack: emptyRackLayout(), needsReview: true };
+  const c = raw.config;
+  const ru = Number(c.ruCount);
+  return {
+    rack: {
+      config: {
+        ruCount: Number.isFinite(ru) ? Math.min(RACK_RU_MAX, Math.max(RACK_RU_MIN, Math.round(ru))) : RACK_RU_DEFAULT,
+        widthIn: c.widthIn === 23 ? 23 : 19,
+        ...(typeof c.depthIn === "number" && Number.isFinite(c.depthIn) && c.depthIn > 0 ? { depthIn: c.depthIn } : {}),
+        numbering: c.numbering === "top-down" ? "top-down" : "bottom-up",
+      },
+      placements: raw.placements.filter(isObj) as unknown as RackPlacement[],
+    },
+    needsReview: true,
+  };
+}
+
 /** Any stored row → a FixtureRecord (legacy rows convert in memory). */
 export function normalizeFixtureRow(row: RawFixtureRow): FixtureRecord {
   if (isLegacySubassembly(row)) return subassemblyToFixture(row as unknown as LegacySubassembly);
   const r = row as unknown as FixtureRecord;
   const lines = emptyBoxes();
   for (const box of FIXTURE_BOXES) if (Array.isArray(r.lines?.[box])) lines[box] = r.lines[box];
-  const kind: FixtureRecord["kind"] = r.kind === "system" ? "system" : r.kind === "hardware" ? "hardware" : "fixture";
+  const kind: FixtureRecord["kind"] =
+    r.kind === "system" ? "system" : r.kind === "hardware" ? "hardware" : r.kind === "rack" ? "rack" : "fixture";
+  const stored = kind === "rack" ? readStoredRack(r.rack) : null;
   return {
     ...r,
     kind,
@@ -155,6 +186,7 @@ export function normalizeFixtureRow(row: RawFixtureRow): FixtureRecord {
     lensSku: r.lensSku || null,
     lines,
     ...(kind !== "fixture" ? { parts: Array.isArray(r.parts) ? r.parts : [] } : {}),
+    ...(stored ? { rack: stored.rack, ...(stored.needsReview ? { needsReview: true } : {}) } : {}),
   };
 }
 
