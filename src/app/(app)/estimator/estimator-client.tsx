@@ -614,10 +614,12 @@ export default function EstimatorClient({
   const [pdfOptions, setPdfOptions] = useState(initial.pdfOptions.pdfOptions);
   const [pdfPrices, setPdfPrices] = useState(initial.pdfOptions.pdfPrices);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
+  /** #293: carried so a save does not drop the stored choice; the toggle UI lands with the preview task. */
+  const [pdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
-    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions }),
-    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions]
+    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix }),
+    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix]
   );
   const [activeId, setActiveId] = useState<string | null>(
     () => (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.id ?? null

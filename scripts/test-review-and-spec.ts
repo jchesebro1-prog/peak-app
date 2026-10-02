@@ -42905,3 +42905,194 @@ import { showQuotedBeforeShelf as s290Shelf, parseCatalogParams as s290Params } 
   ok(s290Shelf(s290Params({ dept: "lighting" })) === true, "#290 shelf: a part department still shows it");
   ok(s290Shelf(s290Params({ q: "s4" })) === false && s290Shelf(s290Params({ page: "2" })) === false && s290Shelf(s290Params({ cat: "Lighting" })) === false, "#290 shelf: a search, a filter or page 2 hides it (unchanged)");
 }
+/* ======================================================================
+   #293 slice 1 — pure rules: key products (eligibility, resolve,
+   sanitize, remap, star/edit helpers, chip, Draft narrative, printable
+   blocks), the Itemized appendix option, and the system-intro library.
+   ====================================================================== */
+import {
+  MAX_KEY_PRODUCTS as n293MaxKp, MAX_PARAGRAPH as n293MaxPara, MAX_INTRO as n293MaxIntro, MAX_LIBRARY_SKUS as n293MaxLib,
+  isKeyProductEligible as n293Eligible, resolveKeyProducts as n293Resolve, sanitizeKeyProducts as n293Sanitize,
+  withKeyProducts as n293WithKps, withSanitizedKeyProducts as n293WithSanitized, remapKeyProducts as n293Remap,
+  keyProductStar as n293Star, toggleKeyProduct as n293Toggle, markKeyProduct as n293Mark, moveKeyProduct as n293Move,
+  removeKeyProduct as n293Remove, patchKeyProduct as n293Patch, reanchorKeyProduct as n293Reanchor,
+  unmarkedEligibleLines as n293Unmarked, keyProductChip as n293Chip, KEY_PRODUCT_CHIP_LABEL as n293ChipLabel,
+  draftNarrative as n293Draft, draftOverwrites as n293Overwrites, printableKeyProducts as n293Printable,
+  photoSkusOf as n293PhotoSkus, type LibraryInfo as N293Lib,
+} from "@/app/(app)/estimator/narrative";
+import { DEFAULT_PDF_OPTIONS as n293DefPdf, PDF_TOGGLE_KEYS as n293ToggleKeys, normalizePdfOptions as n293NormPdf } from "@/lib/quote-pdf/pdf-options";
+import { copySectionForTarget as n293Copy } from "@/app/(app)/estimator/copy-system";
+import { repriceForTier as n293Reprice } from "@/app/(app)/estimator/tier-reprice";
+import { withRewardCredit as n293WithCredit } from "@/lib/rewards/credit-line";
+import { sanitizeSystemSell as n293SanSell } from "@/app/(app)/estimator/pricing";
+import {
+  applyIntroOp as n293Apply, newIntroId as n293NewId, sanitizeIntro as n293SanIntro, sanitizeIntroList as n293SanList,
+  MAX_INTROS as n293MaxIntros, MAX_INTRO_TITLE as n293MaxTitle, INTRO_ID_RE as n293IntroRe, type SystemIntro as N293Intro,
+} from "@/lib/narrative/intros";
+import type { KeyProduct as N293Kp, SpecItem as N293Item, SpecSection as N293Sec } from "@/app/(app)/estimator/types";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const it = (id: number, extra: Partial<N293Item> = {}): N293Item => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293Item);
+  const sec = (items: N293Item[], extra: Partial<N293Sec> = {}): N293Sec => ({ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const kp = (lineKey: string, sku: string, text = "", photo = true): N293Kp => ({ lineKey, sku, text, photo });
+  const lib = (o: Record<string, N293Lib>) => new Map(Object.entries(o));
+
+  // Limits.
+  ok(n293MaxKp === 20 && n293MaxPara === 4000 && n293MaxIntro === 8000 && n293MaxLib === 200, "#293 limits: 20 key products, 4,000-char paragraph, 8,000-char intro, 200 skus per library read");
+
+  // Eligibility.
+  ok(n293Eligible(it(1)) && n293Eligible(it(2, { custom: true })) && n293Eligible(it(3, { allowance: true })) && n293Eligible(it(4, { vendorQuoteId: "VQ-1" })) && n293Eligible(it(5, { curtain: true })),
+    "#293 eligible: plain catalog, custom, allowance-with-sku, vendor and curtain lines can be key products");
+  ok(!n293Eligible(it(1, { labor: true })) && !n293Eligible(it(1, { laborOverhead: "shop" })) && !n293Eligible(it(1, { laborTravel: "mileage" })) &&
+     !n293Eligible(it(1, { rewardCredit: true })) && !n293Eligible(it(1, { option: true })) && !n293Eligible(it(1, { sku: "   " })),
+    "#293 eligible: labor, overhead, travel, Rewards credit, option and blank-sku lines are not");
+
+  // Resolve.
+  const rs = n293Resolve(sec([it(1), it(2), it(3, { option: true })], { keyProducts: [kp("1", "SKU-1"), kp("9", "X"), kp("2", "OTHER"), kp("3", "SKU-3")] }));
+  ok(rs.map((r) => r.status).join(",") === "ok,missing,changed,ineligible", "#293 resolve: ok / missing (line removed) / changed (same id, other sku) / ineligible (became an option)");
+  ok(n293Resolve(sec([it(1)])).length === 0, "#293 resolve: a section without keyProducts resolves to nothing");
+
+  // Sanitize.
+  const messy: unknown[] = [
+    null, "x", 7, ["arr"], { lineKey: "", sku: "A" }, { lineKey: "4", sku: "  " },
+    { lineKey: " 1 ", sku: " SKU-1 ", text: "  hi\r\nthere  ", photo: "yes", junk: 1 },
+    { lineKey: "1", sku: "SKU-9", text: "dup line" },
+    { lineKey: "2", sku: "SKU-1", text: "dup sku" },
+    { lineKey: 7, sku: "SKU-7", text: "x".repeat(n293MaxPara + 50), photo: false },
+    { lineKey: "99", sku: "GONE", text: "kept although unresolved" },
+  ];
+  const clean = n293Sanitize(messy);
+  ok(eq(clean, [
+    { lineKey: "1", sku: "SKU-1", text: "hi\nthere", photo: true },
+    { lineKey: "7", sku: "SKU-7", text: "x".repeat(n293MaxPara), photo: false },
+    { lineKey: "99", sku: "GONE", text: "kept although unresolved", photo: true },
+  ]), "#293 sanitize: drops non-objects / missing lineKey or sku, trims, defaults photo to true, strips unknown keys, caps text, dedupes by lineKey then sku, keeps unresolved blocks");
+  ok(clean.every((k) => eq(Object.keys(k), ["lineKey", "sku", "text", "photo"])), "#293 sanitize: exactly four keys per block");
+  ok(n293Sanitize(Array.from({ length: 30 }, (_, i) => ({ lineKey: String(i), sku: "S" + i }))).length === n293MaxKp && eq(n293Sanitize("nope"), []),
+    "#293 sanitize: caps the count at MAX_KEY_PRODUCTS; a non-array is []");
+
+  // withKeyProducts / withSanitizedKeyProducts.
+  const bare = sec([it(1)]);
+  ok(n293WithSanitized(bare) === bare, "#293 save: a section without keyProducts passes through untouched (same object — back-compat exact)");
+  ok(!("keyProducts" in n293WithKps(sec([it(1)], { keyProducts: [kp("1", "SKU-1")] }), [])) && !("keyProducts" in n293WithKps(bare, undefined)),
+    "#293 withKeyProducts: an empty list removes the key");
+  ok(eq(n293WithSanitized(sec([it(1)], { keyProducts: messy as N293Kp[] })).keyProducts, clean) && !("keyProducts" in n293WithSanitized(sec([it(1)], { keyProducts: [null] as unknown as N293Kp[] }))),
+    "#293 save: messy blocks are cleaned; all-invalid blocks drop the key");
+
+  // Remap.
+  ok(eq(n293Remap([kp("1", "A"), kp("2", "B"), kp("3", "C")], new Map([[1, 101], [2, 102]]))?.map((k) => k.lineKey), ["101", "102"]) && n293Remap(undefined, new Map()) === undefined,
+    "#293 remap: ids follow the map, unmapped blocks drop, undefined passes through");
+
+  // Star / toggle / mark.
+  const s2 = sec([it(1), it(2), it(3, { sku: "SKU-2" }), it(4, { option: true })]);
+  ok(n293Star(s2, s2.items[0]) === "off" && n293Star(s2, s2.items[3]) === "none", "#293 star: an eligible unmarked line is off; an option line has no star");
+  const on1 = n293Toggle(s2, 1, "Library para");
+  ok(eq(on1.keyProducts, [{ lineKey: "1", sku: "SKU-1", text: "Library para", photo: true }]) && n293Star(on1, on1.items[0]) === "on", "#293 star: toggling on appends a block with the library text, photo on");
+  ok(!("keyProducts" in n293Toggle(on1, 1, "")), "#293 star: toggling off removes the block (and the key when it was the last)");
+  const on2 = n293Toggle(s2, 2, "");
+  ok(n293Star(on2, on2.items[2]) === "dupSku" && n293Mark(on2, 3, "") === on2, "#293 star: a second line with the same sku is disabled and cannot be marked");
+  const full = sec(Array.from({ length: 21 }, (_, i) => it(i + 1)));
+  let f = full;
+  for (let i = 1; i <= 20; i++) f = n293Mark(f, i, "");
+  ok(f.keyProducts!.length === 20 && n293Star(f, f.items[20]) === "full" && n293Mark(f, 21, "") === f, "#293 star: at MAX_KEY_PRODUCTS the star is disabled");
+
+  // Move / remove / patch / reanchor / picker.
+  const three = n293Mark(n293Mark(n293Mark(sec([it(1), it(2), it(3)]), 1, ""), 2, ""), 3, "");
+  ok(eq(n293Move(three, 0, 1).keyProducts!.map((k) => k.lineKey), ["2", "1", "3"]) && n293Move(three, 0, -1) === three, "#293 move: ↓ swaps; out of range is a no-op");
+  ok(eq(n293Remove(three, 1).keyProducts!.map((k) => k.lineKey), ["1", "3"]), "#293 remove: removes by index");
+  const patched = n293Patch(three, 0, { text: "y".repeat(n293MaxPara + 9), photo: false });
+  ok(patched.keyProducts![0].text.length === n293MaxPara && patched.keyProducts![0].photo === false, "#293 patch: text capped, photo toggled");
+  const swapped = { ...three, items: three.items.map((x) => (x.id === 2 ? { ...x, sku: "NEW-2" } : x)) };
+  ok(n293Reanchor(swapped, 1).keyProducts![1].sku === "NEW-2" && n293Reanchor(three, 1) === three, "#293 re-anchor: a changed block adopts the line's new sku; an ok block is untouched");
+  ok(eq(n293Unmarked(n293Mark(s2, 1, "")).map((x) => x.id), [2]), "#293 picker: lists eligible unmarked lines, one per sku");
+
+  // Chip.
+  const row = (paragraph: string | null, inCatalog = true): N293Lib => ({ inCatalog, desc: "Cat", paragraph });
+  ok(n293Chip(kp("1", "A", "x"), undefined) === null && n293Chip(kp("1", "A", "x"), row(null, false)) === "custom" && n293Chip(kp("1", "A", "x"), row(null)) === "needs" &&
+     n293Chip(kp("1", "A", " Same "), row("Same")) === "library" && n293Chip(kp("1", "A", "Other"), row("Same")) === "edited",
+    "#293 chip: not loaded / Not in catalog / Needs a paragraph / From library / Edited");
+  ok(n293ChipLabel.needs === "Needs a paragraph" && n293ChipLabel.library === "From library" && n293ChipLabel.edited === "Edited" && n293ChipLabel.custom === "Not in catalog", "#293 chip: labels are the spec's copy");
+
+  // Draft narrative.
+  const d0 = sec([it(1), it(2), it(3), it(4, { sku: "CUSTOM-4", desc: "Hand-made truss" })], {
+    narrative: "",
+    keyProducts: [kp("1", "SKU-1"), kp("2", "SKU-2", "Written by hand"), kp("3", "SKU-3"), kp("4", "CUSTOM-4"), kp("9", "GONE", "keep me")],
+  });
+  const L = lib({
+    "SKU-1": row("Library one."), "SKU-2": row("Library two."),
+    "SKU-3": { inCatalog: true, desc: "Cat desc 3", paragraph: null },
+    "CUSTOM-4": { inCatalog: false, desc: "", paragraph: null },
+  });
+  const blanks = n293Draft(d0, "Intro text", L, "blanks");
+  const texts = (s: N293Sec) => s.keyProducts!.map((k) => k.text);
+  ok(blanks.section.narrative === "Intro text" && eq(texts(blanks.section), ["Library one.", "Written by hand", "Cat desc 3", "Hand-made truss", "keep me"]),
+    "#293 draft (blanks): intro fills an empty narrative; library paragraph, else catalog description, else the line's description; written text and unresolved blocks are left alone");
+  ok(eq(blanks.needsParagraph, ["SKU-3", "CUSTOM-4"]) && blanks.section.presentation === "narrative" && blanks.changed, "#293 draft: reports skus with no library paragraph and switches to Narrative");
+  const replace = n293Draft({ ...d0, narrative: "Old intro" }, "Intro text", L, "replace");
+  ok(replace.section.narrative === "Intro text" && texts(replace.section)[1] === "Library two.", "#293 draft (replace): overwrites the intro and written block text");
+  ok(n293Draft({ ...d0, narrative: "Old intro" }, null, L, "replace").section.narrative === "Old intro", "#293 draft: no chosen intro leaves the narrative alone");
+  ok(n293Draft({ ...d0, narrative: "Kept" }, "Intro text", L, "blanks").section.narrative === "Kept", "#293 draft (blanks): a written intro is kept");
+  const again = n293Draft(replace.section, "Intro text", L, "replace");
+  ok(!again.changed && again.section === replace.section, "#293 draft: changed is false (same object) when nothing differs");
+  ok(n293Overwrites(d0, "Intro text", L) && !n293Overwrites(sec([it(1)], { keyProducts: [kp("1", "SKU-1")] }), "Intro", L) && n293Overwrites(sec([it(1)], { narrative: "Mine" }), "Intro", L),
+    "#293 draft: asks before overwriting written text, not before filling blanks");
+
+  // Printable blocks.
+  const pr = n293Printable(sec([it(1, { allowance: true, desc: "Rigging hardware" }), it(2), it(3, { option: true })], {
+    keyProducts: [kp("2", "SKU-2", "Two.\n\n- a\n- b", false), kp("1", "SKU-1"), kp("3", "SKU-3", "opt"), kp("9", "GONE", "gone")],
+  }));
+  ok(eq(pr.map((p) => p.sku), ["SKU-2", "SKU-1"]) && pr[1].heading === "Budget allowance — Rigging hardware" && pr[0].heading === "Line 2",
+    "#293 printable: order kept, unresolved excluded, heading = desc with the allowance prefix");
+  ok(eq(pr[0].blocks, [{ kind: "p", lines: ["Two."] }, { kind: "ul", items: ["a", "b"] }]) && pr[0].photo === false && eq(pr[1].blocks, []),
+    "#293 printable: text split by narrativeBlocks; empty text prints the heading only");
+  ok(eq(n293PhotoSkus([
+    sec([it(1), it(2)], { presentation: "narrative", keyProducts: [kp("1", "SKU-1"), kp("2", "SKU-2", "", false)] }),
+    sec([it(1)], { id: "s2", presentation: "narrative", keyProducts: [kp("1", "SKU-1")] }),
+    sec([it(5)], { id: "s3", keyProducts: [kp("5", "SKU-5")] }),
+  ]), ["SKU-1"]), "#293 photos: only narrative systems' printable blocks with photo on, deduped");
+
+  // Blocks travel as-is on every path that keeps ids.
+  const carried = sec([it(1)], { keyProducts: [kp("1", "SKU-1", "t")] });
+  ok(eq(n293SanSell(carried).keyProducts, carried.keyProducts), "#293 carry: sanitizeSystemSell keeps keyProducts");
+  ok(eq(n293Copy(carried, { newSectionId: "s9", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section.keyProducts, carried.keyProducts),
+    "#293 carry: Copy to another estimate (copySectionForTarget) keeps keyProducts and ids");
+  ok(eq(n293WithCredit([carried], 50, 99)[0].keyProducts, carried.keyProducts), "#293 carry: withRewardCredit keeps keyProducts");
+  ok(eq(n293Reprice([carried], 0.25, 0.2).sections[0].keyProducts, carried.keyProducts), "#293 carry: tier re-price keeps keyProducts");
+
+  // Itemized appendix option.
+  ok(n293DefPdf.pdfItemizedAppendix === false && (n293ToggleKeys as readonly string[]).includes("pdfItemizedAppendix"), "#293 pdf options: Itemized appendix defaults off and is a toggle key");
+  ok(n293NormPdf(undefined).pdfItemizedAppendix === false && n293NormPdf({ pdfItemizedAppendix: true }).pdfItemizedAppendix === true && n293NormPdf({ pdfItemizedAppendix: "yes" }).pdfItemizedAppendix === false,
+    "#293 pdf options: absent → false, true kept, a non-boolean → false");
+
+  // Intros (pure).
+  ok(n293NewId(() => 0) === "NI-00000000" && n293NewId(() => 0.9999) === "NI-zzzzzzzz" && n293IntroRe.test(n293NewId(Math.random)), "#293 intros: NI- + 8 base36 chars");
+  const I = (id: string, title: string, text = "Body"): N293Intro => ({ id, title, text, updatedAt: 1, updatedBy: "t" });
+  const list = [I("NI-aaaaaaaa", "Rigging"), I("NI-bbbbbbbb", "Audio")];
+  const bad = (r: ReturnType<typeof n293SanIntro>, re: RegExp) => !r.ok && re.test(r.error);
+  ok(bad(n293SanIntro({ title: "  ", text: "x" }, list), /title/i) && bad(n293SanIntro({ title: "t".repeat(n293MaxTitle + 1), text: "x" }, list), /120/) &&
+     bad(n293SanIntro({ title: "T", text: "   " }, list), /text/i) && bad(n293SanIntro({ title: "T", text: "x".repeat(n293MaxIntro + 1) }, list), /8,000/),
+    "#293 intros: empty title, long title, empty text and long text are refused");
+  ok(bad(n293SanIntro({ title: "rigging", text: "x" }, list), /already exists/) && n293SanIntro({ id: "NI-aaaaaaaa", title: "RIGGING", text: "x" }, list).ok,
+    "#293 intros: a duplicate title (case-insensitive) is refused, except the intro itself");
+  const s = n293SanIntro({ title: " Lighting ", text: " a\r\nb " }, list);
+  ok(s.ok && s.value.title === "Lighting" && s.value.text === "a\nb" && s.value.id === null, "#293 intros: trims and normalizes line breaks");
+  ok(bad(n293SanIntro({ id: "bogus", title: "X", text: "y" }, list), /no longer exists/), "#293 intros: a malformed id is refused");
+  let n = 0;
+  const mint = () => ["NI-aaaaaaaa", "NI-cccccccc"][n++] ?? "NI-dddddddd";
+  const add = n293Apply(list, { kind: "upsert", intro: { title: "Lighting", text: "Wash" } }, 50, "Pat", mint);
+  ok(add.ok && add.id === "NI-cccccccc" && eq(add.list.map((i) => i.title), ["Audio", "Lighting", "Rigging"]) && add.list.find((i) => i.id === "NI-cccccccc")!.updatedBy === "Pat",
+    "#293 intros: upsert-new mints a fresh id (skipping a collision), stamps by/at, sorts by title");
+  const edit = n293Apply(list, { kind: "upsert", intro: { id: "NI-aaaaaaaa", title: "Rigging", text: "New body" } }, 60, "Lee", mint);
+  ok(edit.ok && edit.id === "NI-aaaaaaaa" && edit.list.find((i) => i.id === "NI-aaaaaaaa")!.text === "New body" && edit.list.length === 2, "#293 intros: upsert-existing keeps the id");
+  const gone = n293Apply(list, { kind: "upsert", intro: { id: "NI-zzzzzzzz", title: "Q", text: "q" } }, 60, "Lee", mint);
+  ok(!gone.ok && /no longer exists/.test(gone.error), "#293 intros: upserting a deleted intro is refused");
+  const del = n293Apply(list, { kind: "delete", id: "NI-bbbbbbbb" }, 70, "Lee", mint);
+  const delUnknown = n293Apply(list, { kind: "delete", id: "NI-zzzzzzzz" }, 70, "Lee", mint);
+  ok(del.ok && eq(del.list.map((i) => i.id), ["NI-aaaaaaaa"]) && delUnknown.ok && delUnknown.list.length === 2, "#293 intros: delete removes; deleting an unknown id is a no-op");
+  const many = Array.from({ length: n293MaxIntros }, (_, i) => I("NI-" + String(i).padStart(8, "0"), "T" + i));
+  const capped = n293Apply(many, { kind: "upsert", intro: { title: "One more", text: "x" } }, 1, "t", () => "NI-zzzzzzzz");
+  ok(!capped.ok && /200/.test(capped.error) && n293Apply(many, { kind: "upsert", intro: { id: many[0].id, title: "T0", text: "edit" } }, 1, "t", mint).ok,
+    "#293 intros: the 200 cap refuses a new intro but still allows edits");
+  ok(eq(n293SanList([null, { id: "NI-aaaaaaaa", title: "A", text: "a", updatedAt: 1, updatedBy: "x" }, { id: "bad", title: "B", text: "b" }]).map((i) => i.id), ["NI-aaaaaaaa"]),
+    "#293 intros: the stored list is shape-cleaned on read");
+}
