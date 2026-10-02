@@ -8992,13 +8992,14 @@ that fails current rules opens flagged "needs review" and its config fields refu
 A part with no photo of its own now shows a fallback in a fixed order, from one pure rule
 (`src/lib/part-image-fallback.ts`). **Portal:** own photo → Allowance placeholder → Custom Device placeholder →
 manufacturer image → Contact Us (price on request) → Image Coming Soon; it never returns nothing. **Documents** (the
-estimate PDF, the online estimate, client packages, cut sheets): own photo → Allowance → Custom Device → manufacturer
+estimate PDF, the online estimate, cut sheets): own photo → Allowance → Custom Device → manufacturer
 image → nothing, and the block prints full width as before. Documents never print Contact Us or Image Coming Soon: a
 customer-facing proposal that says "image coming soon" next to a priced product reads as unfinished, and "Contact us"
 is a portal sales prompt that means nothing on a page the customer already holds. A fallback is never stored on a part
 and never counts as a photo — photo counts, the Photo sheet, the Datasheets to-do and portal visibility read only linked
 images. The Allowance/Custom rule keys on the quote line's `allowance` / `custom` flags and the catalog category
-`Custom Parts`; POR is the portal's `por`.
+`Custom Parts`; POR is the portal's `por`. Client packages are not in either chain: a package carries no estimate PDF,
+and its cut sheets print submittal style with no photos (`images: "none"`).
 
 ## D584. Manufacturer images are unlinked `part_documents` (#297, 2026-10-02)
 
@@ -9022,14 +9023,17 @@ many matches `mfrKey(file name without extension) === key` exactly, never by sub
 
 ## D586. Allowance and custom key products anchor on `line:<id>` (#297, 2026-10-02)
 
-An allowance or custom quote line has no catalog sku, so a #293 key-product block could never feature one. A block on
-such a line now takes `KeyProduct.sku = "line:" + line id` (`keyProductSkuOf` in `narrative.ts`); real-sku lines are
-unchanged. A line token gets no library row, no Save to library, no Draft and no catalog photo read — the text is always
+A line with no usable sku could never carry a #293 key-product block. A block now takes `KeyProduct.sku = "line:" +
+line id` (`keyProductSkuOf` in `narrative.ts`) on such a line: an allowance line, or a custom line whose trimmed sku is
+blank, too long, or a generic placeholder the Estimator writes ("CUSTOM", "AI" — `isPlaceholderSku`, any case). A
+custom line saved to the catalog ("add to catalog", category Custom Parts) keeps its real sku and anchors on it like any
+catalog part — its own photo and library paragraph load, and with no photo it prints the Custom Device placeholder
+(never the manufacturer image). Every other real-sku line is unchanged. A line token gets no library row, no Save to library, no Draft and no catalog photo read — the text is always
 hand-written — and Copy remaps it to `line:<newId>`. It prints the kind's placeholder (Allowance or Custom Device)
 beside the paragraph, with the existing Photo toggle. A block saved before this on such a line's real sku still resolves
 (`anchorsOn`), but because the chain puts the placeholder ahead of the manufacturer image, an older allowance/custom
 block that used to print full width now prints its placeholder. Merge narrative skips a `line:` source block and no
-longer lets a real-sku block land on an allowance/custom line.
+longer lets a real-sku block land on a tokenized line.
 
 ## D587. `/placeholders/` is exempt from team auth (#297, 2026-10-02)
 

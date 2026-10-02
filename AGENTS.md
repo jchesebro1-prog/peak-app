@@ -674,9 +674,11 @@ See `.env.example`.
     sets, replaces or removes its image (Upload many matches file names to
     names exactly); the image is an unlinked `part_documents` record, source
     `manufacturer`, kept in `manufacturers.imageHistory` (migration 0035,
-    deterministic `MF-` ids, lazy). Allowance/custom quote lines can carry a
-    key product via a `line:<id>` token that prints the kind's placeholder;
-    cut sheets use the same fallback. Remaining is Jeff-gated: upload the
+    deterministic `MF-` ids, lazy). Allowance lines and custom lines with no
+    real sku (blank, CUSTOM, AI) carry a key product via a `line:<id>` token
+    that prints the kind's placeholder; a custom line saved to the catalog
+    anchors on its sku (own photo, else Custom Device); cut sheets use the
+    same fallback. Remaining is Jeff-gated: upload the
     manufacturer images. Punch item #297.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults

@@ -10544,14 +10544,16 @@ What shipped:
   `manufacturers` table keyed by `mfrKey` with deterministic `MF-` ids, created lazily; replacing keeps the old document
   in `imageHistory`, Remove keeps the document (D585).
 - **Portal:** catalog tiles, the part and fixture sidebar gallery, Goes-with rows and department tiles show the chain.
-- **Documents:** the estimate PDF's key-product blocks, the online estimate, client packages and the curtain cut-sheet
-  photos fall back to the manufacturer image; allowance and custom quote lines can now carry a key product through a
-  `line:<id>` token and print the kind's placeholder (D586). `/placeholders/` is exempt from the team-login middleware so
+- **Documents:** the estimate PDF's key-product blocks, the online estimate and the curtain cut-sheet photos fall back
+  to the manufacturer image (client packages carry no estimate PDF and print cut sheets submittal style, no photos);
+  allowance lines and custom lines with no real sku (blank, CUSTOM, AI) can now carry a key product through a
+  `line:<id>` token and print the kind's placeholder, while a custom line saved to the catalog anchors on its own sku —
+  own photo and library paragraph, else Custom Device (D586). `/placeholders/` is exempt from the team-login middleware so
   portal customers, print routes and the share page can load it (D587).
 
 Gates (final head): tsc 0 errors; eslint 0 errors on every source file the branch touched (2 pre-existing warnings: the
-`Date.now` in `catalog/page.tsx` and an `<img>` in the part-documents section); test:specs 11,839 PASS (64 `mfr images:`
-checks) / 0 FAIL, ALL PASSED (baseline 11,775); test:smoke 205/205 ALL PASSED including `/catalog/manufacturers`;
+`Date.now` in `catalog/page.tsx` and an `<img>` in the part-documents section); test:specs 11,857 PASS (82 `mfr images:`
+checks) / 0 FAIL, ALL PASSED (baseline 11,775; 11,839 before the final-review fixes); test:smoke 205/205 ALL PASSED including `/catalog/manufacturers`;
 `npm run build` exit 0 (`.next` deleted after). Not exercised end to end: the set / remove / Upload many server actions
 (they need a real Blob token; typechecked, built, and the page GET is in smoke) and the portal tile on a real grant.
 
@@ -10571,7 +10573,8 @@ rank difference is `NaN`, which is falsy, so image ordering falls through to upl
 Documents section label shows the raw word "manufacturer". Because a manufacturer document has no links, no part, portal
 gallery, Photo sheet or package reads it; the one place old code can show it is the part editor's Attach existing search
 (by title or file name), where attaching it just links it to that part. `line:<id>` key-product blocks on old code:
-`resolveKeyProducts` finds the line by id, compares the line's real sku (empty for an allowance or custom line) to
-`line:<id>`, and reads the block "changed", so the block is **not printed** on the estimate and the editor flags it; the
-stored text is kept (sanitize keeps it) and prints again when the code is rolled forward. Nothing throws. The placeholder
-files are just static assets.
+`resolveKeyProducts` finds the line by id, compares the line's real sku (empty, or a generic CUSTOM / AI, for a
+tokenized line) to `line:<id>`, and reads the block "changed", so the block is **not printed** on the estimate and the editor flags it; the
+stored text is kept (sanitize keeps it) and prints again when the code is rolled forward. A custom line saved to the catalog
+anchors on its real sku, so old code resolves and prints its block exactly as #293 did (own photo, no placeholder).
+Nothing throws. The placeholder files are just static assets.
