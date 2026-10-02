@@ -43637,3 +43637,53 @@ async function curtain292AsyncChecks(): Promise<void> {
     await setBlob(CURTAIN_MOUNTS_BLOB, Object.fromEntries(Object.keys(after).map((k) => [k, Object.prototype.hasOwnProperty.call(before, k) ? before[k] : null])));
   }
 }
+
+// ---- #292 task 8: signed print route, estimate-PDF toggle, client package ----
+import { DEFAULT_PDF_OPTIONS as c292PdfDefaults, PDF_TOGGLE_KEYS as c292PdfKeys, normalizePdfOptions as c292NormPdf } from "@/lib/quote-pdf/pdf-options";
+import { signPrintToken as c292Sign, verifyPrintToken as c292Verify } from "@/lib/quote-pdf/token";
+import { cutSheetFileName as c292FileName } from "@/lib/curtain-cut-sheets/package-sheets";
+import { CutSheetPages as C292Pages } from "@/components/cutsheets/cut-sheet-pages";
+import { createElement as c292El } from "react";
+import { renderToStaticMarkup as c292Render } from "react-dom/server";
+{
+  ok(c292PdfDefaults.pdfCutSheets === false && (c292PdfKeys as readonly string[]).includes("pdfCutSheets") && c292NormPdf(undefined).pdfCutSheets === false && c292NormPdf({ pdfCutSheets: true }).pdfCutSheets === true,
+    "#292 pdf: pdfCutSheets defaults off, is a toggle key, and a stored true is kept");
+  const now = 1_700_000_000_000;
+  const tok = c292Sign("s3cret", "cutsheets", "Q-1", now);
+  ok(c292Verify("s3cret", tok, "cutsheets", "Q-1", now) && !c292Verify("s3cret", tok, "cutsheets", "Q-2", now), "#292 token: a cutsheets token verifies for its own quote id only");
+  ok(!c292Verify("s3cret", c292Sign("s3cret", "quote", "Q-1", now), "cutsheets", "Q-1", now), "#292 token: a quote token does not verify as cutsheets");
+  ok(c292FileName("CS-2", "Legs (Encore Velour 22 oz)") === "cutsheets/CS-2-Legs_Encore_Velour_22_oz.pdf", "#292 package: one Submittal PDF per type under cutsheets/");
+  const rd292d = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pr = rd292d("src/app/print/cutsheets/[quoteId]/page.tsx");
+  const prBody = pr.slice(pr.indexOf("export default"));
+  ok(/verifyPrintToken\([^)]*"cutsheets"/.test(pr) && prBody.indexOf("tokenOk(") >= 0 && prBody.indexOf("tokenOk(") < prBody.indexOf("loadCutSheets("),
+    "#292 source: the print route verifies a cutsheets token before loadCutSheets");
+  const pkg = rd292d("src/lib/client-package-server.ts");
+  ok(pkg.includes("addCutSheets(") && rd292d("src/lib/curtain-cut-sheets/package-sheets.ts").includes("cutsheets/"), "#292 source: client packages write the cutsheets/ folder");
+  ok(/pdfCutSheets/.test(rd292d("src/app/print/quote/[id]/page.tsx")) && /CutSheetPages/.test(rd292d("src/app/print/quote/[id]/page.tsx")), "#292 source: the estimate print route appends Client pages behind pdfCutSheets");
+  ok(!/curtain-cut-sheets\/(collect|load|package-sheets)/.test(rd292d("src/app/(app)/estimator/estimator-client.tsx") + rd292d("src/app/(app)/estimator/preview-doc.tsx")),
+    "#292 source: the Estimator client never imports the collector, loader or package helper (bundle/boundary)");
+
+  // Render level: a fixture quote with curtains, rendered in BOTH styles, prints sheet CS-1.
+  const types = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2), c292Cur(3, { desc: "Legs — Encore Velour 22 oz, 6'W × 20'H, 50% fullness", qty: 4 })])]).types;
+  const ctx8 = {
+    quote: { id: "Q-1", number: "EST-1042", name: "Main stage", customer: "Lakefront HS", venue: "Auditorium — Lakefront", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "Jeff Chesebro", total: types.length, now: 1,
+  };
+  const html = (style: "submittal" | "client") =>
+    c292Render(c292El(C292Pages, { models: types.map((t, i) => c292Model(t, { ...ctx8, style, index: i + 1 })), style, photos: new Map<string, string[]>() }));
+  const subHtml = html("submittal");
+  const cliHtml = html("client");
+  ok(types.length === 2 && subHtml.includes('data-sheet="CS-1"') && subHtml.includes('data-sheet="CS-2"') && subHtml.includes("ADC-2802"),
+    "#292 render: the Submittal set renders one sheet per type (CS-1, CS-2) with the hardware table");
+  ok(cliHtml.includes('data-sheet="CS-1"') && cliHtml.includes('data-sheet="CS-2"') && cliHtml.includes("pk-cs-client") && !cliHtml.includes("ADC-2802"),
+    "#292 render: the Client set renders CS-1 and CS-2 with no SKUs");
+
+  // Client sheets break AFTER every sheet but the last (Submittal pattern) — an appended set never prints a blank page.
+  const css = rd292d("src/app/globals.css");
+  const clientRule = /\.pk-cs-client \{[^}]*\}/.exec(css)?.[0] ?? "";
+  ok(!!clientRule && !/break-before/.test(clientRule) && /\.pk-cs-set \.pk-cs-client \{[^}]*break-after: page/.test(css) && /\.pk-cs-set \.pk-cs-client:last-child \{[^}]*break-after: auto/.test(css),
+    "#292 css: Client sheets break after each sheet except the last, never before");
+  const qpr = rd292d("src/app/print/quote/[id]/page.tsx");
+  ok(/breakBefore: "page"/.test(qpr) && /CLIENT_PRINT_CSS/.test(qpr), "#292 source: the appended Client set starts on its own page and carries the Client print resets");
+}

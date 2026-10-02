@@ -134,6 +134,7 @@ import {
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
 import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/curtain-cut-sheets/vocab";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
+import { countCutSheetTypes } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import VendorQuoteModal, {
   vendorDraftTotal,
   vendorDraftTotalSource,
@@ -619,12 +620,15 @@ export default function EstimatorClient({
   const [pdfTerms, setPdfTerms] = useState(initial.pdfOptions.pdfTerms);
   const [pdfOptions, setPdfOptions] = useState(initial.pdfOptions.pdfOptions);
   const [pdfPrices, setPdfPrices] = useState(initial.pdfOptions.pdfPrices);
+  const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
-    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions }),
-    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions]
+    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfCutSheets }),
+    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfCutSheets]
   );
+  /** #292 — how many cut sheets the saved PDF would append (client-safe count; never collect.ts). */
+  const cutSheetCount = useMemo(() => countCutSheetTypes({ sections }, fabrics.map((f) => ({ sku: f.sku, desc: f.name })), trackSeries), [sections, fabrics, trackSeries]);
   const [activeId, setActiveId] = useState<string | null>(
     () => (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.id ?? null
   );
@@ -4184,6 +4188,8 @@ export default function EstimatorClient({
             pdfCover={pdfCover}
             pdfTerms={pdfTerms}
             pdfOptions={pdfOptions}
+            pdfCutSheets={pdfCutSheets}
+            cutSheetCount={cutSheetCount}
             paymentTerms={paymentTerms}
             paymentTermsOptions={PAYMENT_TERMS}
             setPaymentTerms={setPaymentTerms}
@@ -4193,6 +4199,7 @@ export default function EstimatorClient({
               else if (flag === "pdfPrices") setPdfPrices((v) => !v);
               else if (flag === "pdfCover") setPdfCover((v) => !v);
               else if (flag === "pdfOptions") setPdfOptions((v) => !v);
+              else if (flag === "pdfCutSheets") setPdfCutSheets((v) => !v);
               else setPdfTerms((v) => !v);
             }}
           />

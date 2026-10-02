@@ -84,6 +84,8 @@ import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { partForGrid } from "@/lib/design/grid-part-lookup";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
+import { headers } from "next/headers";
+import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
 import { isGridLayer } from "@/lib/design/grid-scopes";
@@ -432,8 +434,10 @@ export async function createClientPackageAction(
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
+  const h = await headers();
+  const printWhere = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
   try {
-    const built = await createClientPackage(project, user.name, optionId);
+    const built = await createClientPackage(project, user.name, optionId, { printWhere });
     revalidatePath(editorPath(projectId));
     return {
       ok: true,

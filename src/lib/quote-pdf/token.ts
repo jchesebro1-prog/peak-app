@@ -12,8 +12,9 @@ export const PRINT_TOKEN_TTL_MS = 120_000;
 
 /** Every print route this token can gate — the four quote/letter kinds
  *  (`PdfKind`, unwidened: other code still switches on it exhaustively) plus
- *  #245's datasheet-thumbnail render, which prints no quote. */
-export type PrintTokenKind = PdfKind | "part-thumb";
+ *  #245's datasheet-thumbnail render and #292's cut sheets, neither of which
+ *  prints a quote document. */
+export type PrintTokenKind = PdfKind | "part-thumb" | "cutsheets";
 
 function mac(secret: string, kind: PrintTokenKind, id: string, exp: number): string {
   return createHmac("sha256", secret).update(`print:${kind}:${id}:${exp}`).digest("base64url");

@@ -1138,7 +1138,7 @@ button.pk-searchbar-glass {
 @media screen { .pk-cs-set[data-style="submittal"] { zoom: 0.85; } }
 .pk-cs-grid { display: grid; grid-template-columns: 60fr 40fr; grid-template-rows: 55% 45%; gap: 0.12in; height: 100%; }
 .pk-cs-cell { min-width: 0; min-height: 0; overflow: hidden; }
-.pk-cs-client { width: 8.5in; box-sizing: border-box; padding: 0.6in; background: #fff; color: #16181d; font-family: var(--font-ui), system-ui, sans-serif; font-size: 10pt; line-height: 1.45; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.1); break-before: page; page-break-before: always; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.pk-cs-client { width: 8.5in; box-sizing: border-box; padding: 0.6in; background: #fff; color: #16181d; font-family: var(--font-ui), system-ui, sans-serif; font-size: 10pt; line-height: 1.45; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.1); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .pk-cs-head { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); padding-bottom: 6pt; margin-bottom: 10pt; font-size: 9pt; color: #5b616e; }
 .pk-cs-title { font-size: 16pt; font-weight: 700; margin: 0 0 8pt; }
 .pk-cs-desc { margin: 8pt 0 12pt; }
@@ -1148,6 +1148,8 @@ button.pk-searchbar-glass {
 @media print {
   .pk-cs-set .pk-drawing-sheet { box-shadow: none !important; break-after: page; page-break-after: always; }
   .pk-cs-set .pk-drawing-sheet:last-child { break-after: auto; page-break-after: auto; }
+  .pk-cs-set .pk-cs-client { break-after: page; page-break-after: always; }
+  .pk-cs-set .pk-cs-client:last-child { break-after: auto; page-break-after: auto; }
 }
 
 /* Login */

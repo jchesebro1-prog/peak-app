@@ -12,9 +12,11 @@ export type QuotePdfOptions = {
   pdfCover: boolean;
   pdfTerms: boolean;
   pdfOptions: boolean;
+  /** #292 — append Client-style curtain cut sheets after the estimate. Off by default. */
+  pdfCutSheets: boolean;
 };
 
-export const PDF_TOGGLE_KEYS = ["pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions"] as const;
+export const PDF_TOGGLE_KEYS = ["pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions", "pdfCutSheets"] as const;
 
 export const DEFAULT_PDF_OPTIONS: QuotePdfOptions = {
   detail: "itemized",
@@ -24,6 +26,7 @@ export const DEFAULT_PDF_OPTIONS: QuotePdfOptions = {
   pdfCover: true,
   pdfTerms: true,
   pdfOptions: true,
+  pdfCutSheets: false,
 };
 
 export function normalizePdfOptions(raw: unknown): QuotePdfOptions {

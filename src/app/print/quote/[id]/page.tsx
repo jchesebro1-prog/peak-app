@@ -8,6 +8,9 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
+import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
+import { CutSheetPages, CLIENT_PRINT_CSS } from "@/components/cutsheets/cut-sheet-pages";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Quote", robots: { index: false, follow: false } };
@@ -37,16 +40,25 @@ export default async function PrintQuotePage({
   if (!tokenOk(t, "quote", id)) notFound();
   const q = await getQuote(id);
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
-  const [cust, settings, perks] = await Promise.all([
+  const [cust, settings, perks, cutSheets] = await Promise.all([
     getCustomer(q.customerId),
     getSettings(),
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(q.customerId),
+    // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure never breaks the PDF.
+    normalizePdfOptions(q.pdfOptions).pdfCutSheets ? loadCutSheets(id, { images: "data" }).catch(() => null) : null,
   ]);
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>
       <QuoteDocument {...quoteDocumentDataFor(q, cust, settings)} rewardsLine={purchasePerksDocLine(perks)} />
+      {/* #292 — its own page after the estimate; the Client resets (width/padding) ride along. */}
+      {cutSheets?.ok && cutSheets.models.client.length > 0 && (
+        <div style={{ breakBefore: "page" }}>
+          <style>{CLIENT_PRINT_CSS}</style>
+          <CutSheetPages models={cutSheets.models.client} style="client" photos={cutSheets.photos} />
+        </div>
+      )}
     </main>
   );
 }

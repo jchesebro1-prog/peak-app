@@ -17,6 +17,8 @@ import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { addCutSheets, NO_PRINT_ORIGIN, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
+import { ensureOptions, optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -178,6 +180,7 @@ export async function createClientPackage(
   project: GridProject,
   by: string,
   requestedOptionId?: string | null,
+  opts: { printWhere?: PrintWhere } = {},
 ): Promise<BuiltClientPackage> {
   if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
@@ -214,8 +217,15 @@ export async function createClientPackage(
     }
     if (bytes) files.push({ name: `drawings/plan-${String(index + 1).padStart(2, "0")}-${safeName(sheet.name)}`, data: bytes });
   }
+  // #292 — cut sheets for the option's quote; a design with curtains but no quote gets one gap.
+  const optId = resolveOptionId(project, requestedOptionId);
+  const optQuoteId = ensureOptions(project).options.find((o) => o.id === optId)?.quoteId ?? null;
+  let cutSheets: Awaited<ReturnType<typeof addCutSheets>> = { sheets: [], unreadable: [] };
+  if (optQuoteId) cutSheets = await addCutSheets(optQuoteId, opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps);
+  else if (optionSlice(project, optId).placements.some((p) => !!p.curtain))
+    gaps.push({ kind: "missing-cutsheet", sku: "CS", description: "Add this design to Quotes to include cut sheets", qty: 0, catalogId: null });
   const publicManifest = { ...manifest, gaps };
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, cutSheets, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const zip = createStoredZip(files);
   const fileName = `${packageName}.zip`;
   const stored = await putBlob(`client-packages/${safeName(project.id)}/${fileName}`, zip, "application/zip");
@@ -232,7 +242,7 @@ export async function createClientPackage(
 }
 
 /** Build the same package from a quote when it has not yet become a Grid project. */
-export async function createQuoteClientPackage(quote: Quote, by: string): Promise<BuiltClientPackage> {
+export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere } = {}): Promise<BuiltClientPackage> {
   if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
@@ -279,7 +289,8 @@ export async function createQuoteClientPackage(quote: Quote, by: string): Promis
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
   }, files, gaps);
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  const cutSheets = await addCutSheets(quote.id, opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps);
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, cutSheets, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const fileName = `${packageName}.zip`;
   const stored = await putBlob(`client-packages/quote-${safeName(quote.id)}/${fileName}`, createStoredZip(files), "application/zip");
   const record = await saveClientPackage({ projectId: `quote:${quote.id}`, fileName, blobPath: stored.pathname, createdBy: by, itemCount: items.length, datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length, gapCount: gaps.length });
