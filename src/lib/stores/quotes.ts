@@ -987,7 +987,7 @@ export async function patchShareLink(id: string, op: ShareLinkOp): Promise<{ quo
   const quote = await patchQuote(id, (doc) => {
     const prev = doc.shareLink ?? null;
     if (op.kind === "revoke") {
-      if (!prev) return; // nothing to revoke — no write
+      if (!prev) return; // nothing to revoke — no link minted, doc unchanged (patchDoc still rewrites the row; revokeShareLink returns before this)
       doc.shareLink = {
         nonce: newShareNonce(),
         expiresAt: 0,
