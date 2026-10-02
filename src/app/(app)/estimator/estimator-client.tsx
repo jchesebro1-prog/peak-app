@@ -428,6 +428,7 @@ export default function EstimatorClient({
   viewerName,
   viewerCanApprove,
   canWriteNarrativeLibrary,
+  narrativeIntros,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -520,6 +521,8 @@ export default function EstimatorClient({
   /** Narrative column (#281). Defaults open on both server and first client
    *  render; the remembered choice is applied after mount so hydration matches. */
   const [narrOpen, setNarrOpen] = useState(true);
+  /** #293 — the system-intro library; the intro actions answer with the new list. */
+  const [intros, setIntros] = useState(narrativeIntros);
   useEffect(() => {
     try {
       if (window.localStorage.getItem(NARR_OPEN_KEY) === "0") setNarrOpen(false);
@@ -3894,11 +3897,14 @@ export default function EstimatorClient({
                 </div>
                 {narrSec ? (
                   <NarrativeColumn
+                    key={narrSec.id}
                     sec={narrSec}
                     narrRef={narrRef}
                     onChange={(fn) => updateSection(narrSec.id, fn)}
                     library={kpLib}
                     canWriteLibrary={canWriteNarrativeLibrary}
+                    intros={intros}
+                    onIntros={setIntros}
                   />
                 ) : (
                   <div style={{ fontSize: 12, color: "#8c919c", lineHeight: 1.45 }}>

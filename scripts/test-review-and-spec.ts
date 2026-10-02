@@ -43362,3 +43362,26 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
     "#293 UI: Copy here remaps blocks to the new item ids; the column and ★ are wired");
   ok(rd("src/app/(app)/estimator/page.tsx").includes('canWriteNarrativeLibrary={can("create", user.roles)}'), "#293 UI: Save to library is offered per the Create permission");
 }
+
+/* ======================================================================
+   #293 slice 1 — intros, Draft narrative and the part editor's Narrative
+   paragraph (client wiring, by source).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const clientImportsServer = (s: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos))/m.test(s);
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const modal = rd("src/app/(app)/estimator/narrative-intros-modal.tsx");
+  const panel = rd("src/app/(app)/catalog/narrative-paragraph-panel.tsx");
+  ok([modal, panel].every((s) => /^"use client";/.test(s) && !clientImportsServer(s)), "#293 UI: the intros modal and the part-editor panel are client modules importing no store");
+  ok(col.includes("Draft narrative") && col.includes("draftOverwrites(") && col.includes("draftNarrative(") && col.includes("Replace what") && col.includes("Fill blanks only") && col.includes("Switched to Narrative") && col.includes("still need"),
+    "#293 Draft: asks Replace / Fill blanks / Cancel before overwriting, switches to Narrative, reports skus still needing a paragraph");
+  ok(col.includes("Save as intro") && col.includes("Manage intros") && col.includes("Needs the Create permission") && col.includes("— none —") && col.includes("upsertSystemIntroAction("),
+    "#293 intros: the intro select, Save as intro and Manage intros (disabled without Create)");
+  ok(modal.includes("upsertSystemIntroAction(") && modal.includes("deleteSystemIntroAction(") && !modal.includes("window.confirm"), "#293 intros: the modal edits and deletes (inline confirm)");
+  ok(rd("src/app/(app)/estimator/page.tsx").includes("listIntros()") && rd("src/app/(app)/estimator/page.tsx").includes("narrativeIntros={narrativeIntros}"), "#293 intros: the Estimator page loads the intro library");
+  ok(panel.includes("Narrative paragraph") && panel.includes("saveProductParagraphAction(") && panel.includes("changed since you loaded it") && !/\bname=/.test(panel),
+    "#293 part editor: the Narrative paragraph panel saves through the same action, stale-checked, and leaks no field into the part form");
+  const cat = rd("src/app/(app)/catalog/page.tsx");
+  ok(/canCreate && editing && part && \([\s\S]{0,400}<NarrativeParagraphPanel\s+key=\{part\.sku\}/.test(cat), "#293 part editor: the panel mounts for Create users editing a part");
+}

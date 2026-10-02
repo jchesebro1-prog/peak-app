@@ -10,6 +10,7 @@ import type { CurtainRequest } from "@/lib/portal-cart-types";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
+import type { SystemIntro } from "@/lib/narrative/intros";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -609,4 +610,6 @@ export type EstimatorProps = {
   viewerCanApprove: boolean;
   /** #293 — may this user save product paragraphs / system intros (`create`)? */
   canWriteNarrativeLibrary: boolean;
+  /** #293 — the system-intro library (Settings blob `narrative_intros`). */
+  narrativeIntros: SystemIntro[];
 };

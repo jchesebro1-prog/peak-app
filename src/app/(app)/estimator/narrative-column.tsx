@@ -5,6 +5,8 @@ import type { SpecItem, SpecSection } from "./types";
 import {
   KEY_PRODUCT_CHIP_LABEL,
   MAX_PARAGRAPH,
+  draftNarrative,
+  draftOverwrites,
   keyProductChip,
   markKeyProduct,
   moveKeyProduct,
@@ -16,8 +18,10 @@ import {
   type KeyProductChip,
   type KeyProductResolution,
 } from "./narrative";
-import { saveProductParagraphAction } from "./narrative-actions";
+import { saveProductParagraphAction, upsertSystemIntroAction } from "./narrative-actions";
 import type { KeyProductLibrary } from "./use-key-product-library";
+import { MAX_INTRO_TITLE, type SystemIntro } from "@/lib/narrative/intros";
+import NarrativeIntrosModal from "./narrative-intros-modal";
 
 /**
  * #293 — the narrative column's body (the #281 aside keeps its header and
@@ -34,6 +38,9 @@ export type NarrativeColumnProps = {
   onChange: (fn: (s: SpecSection) => SpecSection) => void;
   library: KeyProductLibrary;
   canWriteLibrary: boolean;
+  /** #293: the system-intro library (loaded server-side, updated by the actions). */
+  intros: SystemIntro[];
+  onIntros: (list: SystemIntro[]) => void;
 };
 
 const LABEL: CSSProperties = { fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".06em", textTransform: "uppercase" };
@@ -46,6 +53,7 @@ const CHIP_TONE: Record<KeyProductChip, CSSProperties> = {
   custom: { background: "#f1f2f5", color: "#8c919c" },
 };
 const STRIP: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11.5, fontWeight: 600, color: "#b4543a", background: "#fbecea", borderRadius: 6, padding: "6px 8px" };
+const FAILED = "Could not reach the server. Try again.";
 const ASK: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 11.5, color: "#3a3f4a", background: "#fbf3dd", borderRadius: 6, padding: "6px 8px" };
 
 export default function NarrativeColumn(p: NarrativeColumnProps) {
@@ -53,8 +61,130 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
   const res = resolveKeyProducts(sec);
   const hasKps = res.length > 0;
   const pickable = unmarkedEligibleLines(sec);
+  const [introId, setIntroId] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [saveAsTitle, setSaveAsTitle] = useState<string | null>(null);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [draftAsk, setDraftAsk] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [busy, startBusy] = useTransition();
+  const chosen = p.intros.find((i) => i.id === introId) || null;
+  const NEEDS_CREATE = "Needs the Create permission";
+  const hasIntroText = !!(sec.narrative || "").trim();
+
+  /** Draft narrative: copies saved text only — never generates (D89).
+   *  Every server await is caught: a throw inside startTransition reaches
+   *  the error boundary and would unmount the Estimator. */
+  const draft = (mode: "replace" | "blanks" | null) =>
+    startBusy(async () => {
+      setNotice("");
+      try {
+        const okSkus = resolveKeyProducts(sec).filter((r) => r.status === "ok").map((r) => r.kp.sku);
+        const rows = await p.library.ensure(okSkus);
+        const lib = new Map(Object.entries(rows));
+        const introText = chosen ? chosen.text : null;
+        if (mode == null && draftOverwrites(sec, introText, lib)) {
+          setDraftAsk(true);
+          return;
+        }
+        setDraftAsk(false);
+        const m = mode ?? "replace";
+        const r = draftNarrative(sec, introText, lib, m);
+        if (r.changed) p.onChange((s) => draftNarrative(s, introText, lib, m).section);
+        const parts: string[] = [];
+        if ((sec.presentation || "itemized") !== "narrative") parts.push("Switched to Narrative");
+        const n = r.needsParagraph.length;
+        if (n) parts.push(`${n} ${n === 1 ? "product still needs" : "products still need"} a paragraph`);
+        if (!r.changed) parts.push("Nothing to change");
+        setNotice(parts.join(" · "));
+      } catch {
+        setNotice(FAILED);
+      }
+    });
+
+  const saveAsIntro = () => {
+    const title = (saveAsTitle || "").trim();
+    const text = sec.narrative || "";
+    startBusy(async () => {
+      setNotice("");
+      try {
+        const r = await upsertSystemIntroAction({ title, text });
+        if (!r.ok) return setNotice(r.error);
+        p.onIntros(r.intros);
+        if (r.id) setIntroId(r.id);
+        setSaveAsTitle(null);
+        setNotice("Saved as intro");
+      } catch {
+        setNotice(FAILED);
+      }
+    });
+  };
+
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <select
+          aria-label="System intro"
+          value={introId}
+          onChange={(e) => setIntroId(e.target.value)}
+          style={{ flex: "1 1 140px", minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11.5, color: "#5b616e", background: "#fff" }}
+        >
+          <option value="">— none —</option>
+          {p.intros.map((i) => (
+            <option key={i.id} value={i.id}>{i.title}</option>
+          ))}
+        </select>
+        <button type="button" style={BTN} disabled={busy} onClick={() => draft(null)} title="Copy the chosen intro and each key product's saved paragraph onto this system">
+          Draft narrative
+        </button>
+        <div style={{ position: "relative" }}>
+          <button type="button" style={BTN} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)} title="Intro library">⋯</button>
+          {menuOpen && (
+            <div role="menu" style={{ position: "absolute", right: 0, top: "110%", zIndex: 20, background: "#fff", border: "1px solid #ececf0", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,.1)", padding: 4, display: "flex", flexDirection: "column", minWidth: 160 }}>
+              <button
+                type="button"
+                role="menuitem"
+                style={{ ...BTN, background: "transparent", textAlign: "left", opacity: p.canWriteLibrary && hasIntroText ? 1 : 0.5 }}
+                disabled={!p.canWriteLibrary || !hasIntroText}
+                title={!p.canWriteLibrary ? NEEDS_CREATE : !hasIntroText ? "Write an intro first" : ""}
+                onClick={() => { setMenuOpen(false); setSaveAsTitle(""); }}
+              >
+                Save as intro…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                style={{ ...BTN, background: "transparent", textAlign: "left", opacity: p.canWriteLibrary ? 1 : 0.5 }}
+                disabled={!p.canWriteLibrary}
+                title={p.canWriteLibrary ? "" : NEEDS_CREATE}
+                onClick={() => { setMenuOpen(false); setManageOpen(true); }}
+              >
+                Manage intros…
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      {saveAsTitle !== null && (
+        <div style={ASK}>
+          <input aria-label="Intro title" autoFocus value={saveAsTitle} maxLength={MAX_INTRO_TITLE} placeholder="Intro title" onChange={(e) => setSaveAsTitle(e.target.value)}
+            style={{ flex: 1, minWidth: 120, border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 12 }} />
+          <button type="button" style={BTN} disabled={busy || !saveAsTitle.trim()} onClick={saveAsIntro}>Save</button>
+          <button type="button" style={BTN} onClick={() => setSaveAsTitle(null)}>Cancel</button>
+        </div>
+      )}
+      {draftAsk && (
+        <div style={ASK}>
+          <span>This system already has written text.</span>
+          <button type="button" style={BTN} disabled={busy} onClick={() => draft("replace")}>Replace what&apos;s written</button>
+          <button type="button" style={BTN} disabled={busy} onClick={() => draft("blanks")}>Fill blanks only</button>
+          <button type="button" style={BTN} onClick={() => setDraftAsk(false)}>Cancel</button>
+        </div>
+      )}
+      {notice && <div style={{ ...HINT, color: "#3a3f4a" }}>{notice}</div>}
+      {manageOpen && (
+        <NarrativeIntrosModal intros={p.intros} canWrite={p.canWriteLibrary} onIntros={p.onIntros} onClose={() => setManageOpen(false)} />
+      )}
       <select
         value={sec.presentation || "itemized"}
         onChange={(e) => {
