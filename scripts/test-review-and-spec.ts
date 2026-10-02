@@ -45013,7 +45013,8 @@ import type { RackPartInfo as C296pInfo, RackLayout as C296pLayout, RackIssue as
 }
 
 /* ===== #296 — rack submittal zip ===== */
-import { datasheetCoverLines as c296zCover, mergeDatasheets as c296zMerge, rackSubmittalFiles as c296zFiles, RACK_SUBMITTAL_DEADLINE_MS as c296zDeadline } from "@/lib/rack/submittal-server";
+import { datasheetCoverLines as c296zCover, mergeDatasheets as c296zMerge, rackSubmittalFiles as c296zFiles, RACK_SUBMITTAL_DEADLINE_MS as c296zDeadline,
+  RACK_DATASHEET_ALLOWANCE_MS as c296zDsAllow, RACK_SUBMITTAL_FINISH_ALLOWANCE_MS as c296zFinish, RACK_SUBMITTAL_MAX_DURATION_MS as c296zMaxDur } from "@/lib/rack/submittal-server";
 import { PDFDocument as C296zPdf } from "pdf-lib";
 {
   const lines = c296zCover([
@@ -45038,7 +45039,15 @@ import { PDFDocument as C296zPdf } from "pdf-lib";
   ok(route.includes("requireUser(") && route.includes("export const maxDuration = 120") && route.includes('export const dynamic = "force-dynamic"'), "#296 rack zip: the route requires a user, maxDuration = 120, force-dynamic");
   ok(route.includes('"csv"') && route.includes("part") && route.includes("/^SA-[A-Z0-9-]{1,60}$/") && route.includes("text(RACK_NOT_FOUND, 404)") && rdz("src/lib/rack/submittal-server.ts").includes('RACK_NOT_FOUND = "Rack not found."'), "#296 rack zip: the route handles ?part=csv, validates the id and 404s an unknown rack");
   ok(route.includes("printOriginFor(") && route.includes("text(where.error, 503)") && route.includes("private, no-store") && route.includes("00-gaps.txt"), "#296 rack zip: the route resolves the print origin (503 on error), never caches, writes 00-gaps.txt");
-  ok(route.indexOf("requireUser(") < route.indexOf("loadRackForSheets(") || route.indexOf("requireUser(") < route.indexOf("rackSubmittalFiles("), "#296 rack zip: the user check runs before any read");
+  const getBody = route.slice(route.indexOf("export async function GET"));
+  const ru = getBody.indexOf("await requireUser();");
+  ok(ru > 0 && ru < getBody.indexOf("await params") && ru < getBody.indexOf("loadRackForSheets(") && ru < getBody.indexOf("rackSubmittalFiles(") && ru < getBody.indexOf("try {") && getBody.indexOf("const started = Date.now();") < ru,
+    "#296 rack zip: started is read, then the user check runs before the try, the params and any read");
+  ok(!route.includes("decodeURIComponent(") && getBody.indexOf("RACK_ID.test(id)") < getBody.indexOf("loadRackForSheets("), "#296 rack zip: the id regex runs on the raw param (a malformed escape is a 404, not a 500)");
+  ok(route.includes("new Response(chunked(zip)") && route.includes("new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)") && route.includes("256 * 1024"), "#296 rack zip: the zip streams in 256 KB slices over a no-copy view");
+  const maxDurZ = /export const maxDuration = (\d+)/.exec(route)?.[1];
+  ok(Number(maxDurZ) * 1000 === c296zMaxDur && c296zDeadline + c296zDsAllow + c296zFinish <= c296zMaxDur && c296zFinish >= 10_000,
+    "#296 rack zip: render deadline + datasheet allowance + finish allowance (>= 10 s) fit inside the route's maxDuration");
   ok(/"\/api\/racks\/\[id\]\/submittal": \["\.\/node_modules\/@sparticuz\/chromium\/bin\/\*\*"\]/.test(rdz("next.config.ts")), "#296 rack zip: next.config.ts ships Chrome with the submittal route");
   ok(/"pdf-lib": "1\.17\.1"/.test(rdz("package.json")), "#296 rack zip: pdf-lib is pinned");
   ok(rdz("scripts/smoke-routes.ts").includes("/api/racks/SA-NOPE/submittal?part=csv"), "#296 rack zip: smoke covers the route's not-found path");

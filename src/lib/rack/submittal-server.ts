@@ -35,6 +35,10 @@ export const RACK_SUBMITTAL_DEADLINE_MS = 90_000;
 export const RACK_MIN_RENDER_MS = 5_000;
 /** Datasheet reads may run this long past the render deadline. */
 export const RACK_DATASHEET_ALLOWANCE_MS = 15_000;
+/** After the datasheet reads: the merge, the zip and the first response bytes. */
+export const RACK_SUBMITTAL_FINISH_ALLOWANCE_MS = 10_000;
+/** The route's maxDuration (120 s); the harness checks the budgets above fit inside it. */
+export const RACK_SUBMITTAL_MAX_DURATION_MS = 120_000;
 /** One datasheet file over this is left out. */
 export const RACK_DATASHEET_MAX_BYTES = 25 * 1024 * 1024;
 /** All datasheet files together; past it the rest are left out. */

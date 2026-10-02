@@ -14,6 +14,20 @@ const RACK_ID = /^SA-[A-Z0-9-]{1,60}$/;
 const text = (body: string, status: number) =>
   new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" } });
 
+const CHUNK = 256 * 1024;
+/** A body as a stream of 256 KB slices over one no-copy view of the buffer. */
+function chunked(buf: Buffer): ReadableStream<Uint8Array> {
+  const view = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  let at = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (at >= view.byteLength) return controller.close();
+      controller.enqueue(view.subarray(at, Math.min(at + CHUNK, view.byteLength)));
+      at += CHUNK;
+    },
+  });
+}
+
 /**
  * #296 — a rack's submittal for staff. Default: a zip of `<rack>/` with the
  * elevation, schedule and power/heat PDFs (headless Chrome through the signed
@@ -21,12 +35,13 @@ const text = (body: string, status: number) =>
  * `?part=csv`: just the schedule CSV (no Chrome).
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const started = Date.now();
   // Outside the try: a signed-out request redirects to the login page.
   await requireUser();
-  const started = Date.now();
   try {
-    const { id: raw } = await params;
-    const id = decodeURIComponent(raw);
+    // The raw param, never decoded: a rack id has nothing to escape, and a
+    // malformed escape is just an unknown rack.
+    const { id } = await params;
     if (!RACK_ID.test(id)) return text(RACK_NOT_FOUND, 404);
     const url = new URL(request.url);
 
@@ -34,7 +49,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       const data = await loadRackForSheets(id);
       if (!data) return text(RACK_NOT_FOUND, 404);
       const folder = safeName(data.rec.label || data.rec.id);
-      return new Response(scheduleCsv(data.submittal), {
+      return new Response(chunked(Buffer.from(scheduleCsv(data.submittal), "utf8")), {
         headers: {
           "content-type": "text/csv; charset=utf-8",
           "content-disposition": attachmentDisposition(`${folder}-schedule.csv`),
@@ -53,7 +68,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       { name: `${built.folder}/00-gaps.txt`, data: Buffer.from((gapLines.length ? gapLines.join("\n") : "No gaps.") + "\n", "utf8") },
       ...built.files.map((f) => ({ name: `${built.folder}/${f.name}`, data: f.data })),
     ]);
-    return new Response(new Uint8Array(zip), {
+    // Streamed: a buffered function response is capped (~4.5 MB on Vercel) and real datasheets pass that.
+    return new Response(chunked(zip), {
       headers: {
         "content-type": "application/zip",
         "content-disposition": attachmentDisposition(`${built.folder}-submittal.zip`),
