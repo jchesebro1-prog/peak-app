@@ -44024,6 +44024,150 @@ import type { RackPlacement as C296rPlacement, RackLayout as C296rLayout, RackPa
   ok(c296rCap === 100 && hc.past.length === 100 && hc.past[0].config.ruCount === 50 && hc.present.config.ruCount === 150, "#296 rack rules: history keeps the last 100 steps");
 }
 
+/* ===== #296 — rack geometry ===== */
+import { rackGeometry as c296gGeom, RACK_GEOM as c296gG } from "@/lib/rack/geometry";
+import { renderRackElevationSvg as c296gSvg, shapesToSvg as c296gShapesToSvg } from "@/lib/rack/svg";
+import type { Shape as C296gShape } from "@/lib/curtain-cut-sheets/shapes";
+import { textExtent as c296gExtent } from "@/lib/curtain-cut-sheets/shapes";
+import type { RackPlacement as C296gPlacement, RackLayout as C296gLayout, RackPartInfo as C296gInfo } from "@/lib/rack/types";
+{
+  const near = (a: number, b: number, e = 0.011) => Math.abs(a - b) <= e;
+  const P = (o: Partial<C296gPlacement> & { id: string }): C296gPlacement => ({ kind: "device", sku: "S", ruStart: 1, ruHeight: 1, face: "front", ...o, id: "RP-" + o.id });
+  const L = (ps: C296gPlacement[], cfg: Partial<C296gLayout["config"]> = {}): C296gLayout => ({ config: { ruCount: 12, widthIn: 19, numbering: "bottom-up", ...cfg }, placements: ps });
+  const look = (sku: string): C296gInfo | undefined =>
+    sku === "AMP" ? { sku, desc: "Power amp", mfr: "Acme", found: true, ruHeight: 2, depthIn: 18 }
+    : sku === "SHORT" ? { sku, desc: "Short thing", found: true, depthIn: 4 }
+    : sku === "ANTENNA" ? { sku, desc: "A very long description of a device that cannot possibly fit", mfr: "Contoso", found: true }
+    : undefined;
+  const rects = (shapes: readonly C296gShape[]) => shapes.filter((s): s is Extract<C296gShape, { kind: "rect" }> => s.kind === "rect");
+  const texts = (shapes: readonly C296gShape[]) => shapes.filter((s): s is Extract<C296gShape, { kind: "text" }> => s.kind === "text");
+  const slotRect = (g: ReturnType<typeof c296gGeom>, id: string) => {
+    const sl = g.slots.find((x) => x.placementId === "RP-" + id)!;
+    return { sl, r: rects(g.shapes).find((r) => r.x === sl.x && r.y === sl.y && r.w === sl.w && r.h === sl.h)! };
+  };
+  const M = c296gG.marginIn;
+
+  // empty 42U
+  const e = c296gGeom(L([], { ruCount: 42 }), look, { face: "front" });
+  const W = 2 * M + 2 * c296gG.railIn + c296gG.panelIn;
+  ok(near(e.viewBox.h, 2 * 0.6 + 42 * 1.75, 1e-9) && near(e.viewBox.w, W, 1e-9) && e.slots.length === 0, "#296 rack geometry: empty 42U — viewBox is 2 × margin + 42 × 1.75 high, and no slots");
+  const nums = texts(e.shapes);
+  ok(nums.length === 84 && nums.filter((t) => t.x < M + c296gG.railIn).length === 42, "#296 rack geometry: 84 RU numbers, 42 per rail");
+  const boldSet = new Set(nums.filter((t) => t.bold).map((t) => t.text));
+  ok([...boldSet].sort().join() === [10, 15, 20, 25, 30, 35, 40, 5].map(String).sort().join() && nums.filter((t) => t.bold).length === 16, "#296 rack geometry: every 5th RU number is bold");
+  const n1 = nums.find((t) => t.text === "1")!;
+  const n42 = nums.find((t) => t.text === "42")!;
+  ok(n1.y > n42.y && n1.y < e.viewBox.h - M && n1.anchor === "middle", "#296 rack geometry: RU 1 is the bottom number, centered in its rail");
+  ok(e.shapes.filter((s) => s.kind === "line" && s.stroke === "thin" && s.x1 < M + c296gG.railIn).length === 41, "#296 rack geometry: a hairline between RU rows on each rail");
+
+  // title band
+  const tg = c296gGeom(L([], { ruCount: 4 }), look, { face: "front", title: "Rack 1 — front" });
+  ok(near(tg.viewBox.h, 2 * 0.6 + 4 * 1.75 + 1.2, 1e-9) && texts(tg.shapes).some((t) => t.text === "Rack 1 — front" && t.bold), "#296 rack geometry: a title adds a 1.2 in band with the title text");
+
+  // 2U device at RU 1 sits on the panel bottom
+  const g1 = c296gGeom(L([P({ id: "A", sku: "AMP", ruHeight: 2 })]), look, { face: "front" });
+  const a = slotRect(g1, "A");
+  const panelBottom = M + 12 * 1.75;
+  ok(near(a.r.y + a.r.h, panelBottom - 0.04, 1e-9) && near(a.r.h, 2 * 1.75 - 0.08, 1e-9) && a.r.stroke === "med" && a.r.fill === "none" && !a.r.dash, "#296 rack geometry: a 2U device at RU 1 ends 0.04 above the panel bottom; device is unfilled, med stroke");
+  ok(near(a.r.x, M + c296gG.railIn + 0.04, 1e-9) && near(a.r.w, 19 - 0.08, 1e-9), "#296 rack geometry: a full-width device spans the panel less the inset");
+  const t = texts(g1.shapes).filter((s) => s.x > M + c296gG.railIn + 1 && s.x < M + c296gG.railIn + 18);
+  ok(t.length === 2 && t[0].text === "Power amp" && t[1].text === "Acme AMP" && t[1].size < t[0].size && near(t[1].size, 0.8 * c296gG.labelSize, 1e-9), "#296 rack geometry: 2U device label = description plus a smaller 'mfr sku' line");
+  const g1b = c296gGeom(L([P({ id: "A", sku: "AMP", ruHeight: 1 })]), look, { face: "front" });
+  ok(texts(g1b.shapes).filter((s) => s.size === c296gG.labelSize).length === 1, "#296 rack geometry: a 1U device has only the first label line");
+  const g1c = c296gGeom(L([P({ id: "A", sku: "AMP", ruHeight: 2, label: "Main amp" })]), look, { face: "front" });
+  ok(texts(g1c.shapes).some((s) => s.text === "Main amp") && !texts(g1c.shapes).some((s) => s.text === "Power amp"), "#296 rack geometry: a placement label wins over the catalog description");
+
+  // half-width pair
+  const g2 = c296gGeom(L([P({ id: "L", laneCount: 2, lane: 0 }), P({ id: "R", laneCount: 2, lane: 1 })]), look, { face: "front" });
+  const hl = slotRect(g2, "L").r;
+  const hr = slotRect(g2, "R").r;
+  ok(near(hl.w, 9.5, 0.1) && near(hr.w, 9.5, 0.1) && hl.x < hr.x && near(hl.x + hl.w + 0.08, hr.x, 1e-9) && hl.y === hr.y, "#296 rack geometry: a half-width pair draws two ~9.5 in rects side by side");
+  const g2t = c296gGeom(L([P({ id: "T", laneCount: 3, lane: 2 })]), look, { face: "front" });
+  ok(near(slotRect(g2t, "T").r.w, 19 / 3 - 0.08, 1e-9), "#296 rack geometry: a third-width lane is a third of the panel");
+
+  // optional / blank / vent / reserved
+  const g3 = c296gGeom(L([
+    P({ id: "O", optional: true, ruStart: 1 }),
+    P({ id: "B", kind: "blank", sku: "BLK", ruStart: 2 }),
+    P({ id: "V", kind: "vent", sku: "VNT", ruStart: 3 }),
+    P({ id: "R", kind: "reserved", sku: undefined, ruStart: 4, ruHeight: 2 }),
+  ]), look, { face: "front" });
+  ok(slotRect(g3, "O").r.dash === true && !slotRect(g3, "B").r.dash, "#296 rack geometry: an optional placement is dashed");
+  ok(slotRect(g3, "B").r.fill === "tone" && slotRect(g3, "V").r.fill === "tone", "#296 rack geometry: blank and vent panels are toned");
+  const vs = slotRect(g3, "V");
+  const slats = g3.shapes.filter((s) => s.kind === "line" && s.tag === "band");
+  ok(slats.length === 3 && slats.every((s) => s.kind === "line" && s.y1 > vs.sl.y && s.y1 < vs.sl.y + vs.sl.h && s.x1 > vs.sl.x && s.x2 < vs.sl.x + vs.sl.w && s.y1 === s.y2), "#296 rack geometry: a vent adds three short horizontal lines tagged band, inside its rect");
+  ok(slotRect(g3, "R").r.fill === "hatch" && texts(g3.shapes).some((s) => s.text === "Reserved — future"), "#296 rack geometry: reserved is hatched and reads 'Reserved — future'");
+  ok(g3.slots.length === 4, "#296 rack geometry: one slot per drawn placement");
+
+  // faces
+  const lf = L([P({ id: "F" }), P({ id: "RR", face: "rear", ruStart: 2 })]);
+  const gf = c296gGeom(lf, look, { face: "front" });
+  const gr = c296gGeom(lf, look, { face: "rear" });
+  ok(gf.slots.map((s) => s.placementId).join() === "RP-F" && gr.slots.map((s) => s.placementId).join() === "RP-RR" && gr.slots[0].face === "rear", "#296 rack geometry: a rear placement is absent from front and present in rear");
+
+  // numbering
+  const td = c296gGeom(L([], { ruCount: 42 }), look, { face: "front", numbering: "top-down" });
+  const tn = texts(td.shapes);
+  ok(tn.find((x) => x.text === "1")!.y < tn.find((x) => x.text === "42")!.y, "#296 rack geometry: top-down numbering puts 1 at the top");
+  const tdCfg = c296gGeom(L([], { ruCount: 42, numbering: "top-down" }), look, { face: "front" });
+  ok(texts(tdCfg.shapes).find((x) => x.text === "1")!.y < texts(tdCfg.shapes).find((x) => x.text === "42")!.y, "#296 rack geometry: the rack's own numbering applies when opts.numbering is absent");
+  const bdTop = tn.filter((x) => x.bold).map((x) => x.text);
+  ok(bdTop.length === 16 && bdTop.includes("5") && bdTop.includes("40"), "#296 rack geometry: bold follows the displayed numbers, not the stored RU");
+
+  // ghosting
+  const gl = L([P({ id: "DEEP", face: "rear", sku: "AMP" }), P({ id: "SH", face: "rear", sku: "SHORT", ruStart: 2 }), P({ id: "UNK", face: "rear", sku: "NOPE", ruStart: 3 }), P({ id: "BLK", face: "rear", kind: "blank", sku: "X", ruStart: 4 })], { depthIn: 30 });
+  const count = (o: { ghostOppositeFace?: boolean }, l: C296gLayout) => rects(c296gGeom(l, look, { face: "front", ...o }).shapes).filter((r) => r.dash && r.stroke === "thin");
+  const gh = count({ ghostOppositeFace: true }, gl);
+  ok(gh.length === 2 && gh.every((r) => r.fill === undefined) && count({}, gl).length === 0, "#296 rack geometry: ghosting draws deep (> half the rack) and unknown-depth opposite devices only, dashed thin, no fill");
+  ok(texts(c296gGeom(gl, look, { face: "front", ghostOppositeFace: true }).shapes).length === 24 && c296gGeom(gl, look, { face: "front", ghostOppositeFace: true }).slots.length === 0, "#296 rack geometry: ghosts carry no label and no slot");
+  const noDepth = { ...gl, config: { ...gl.config, depthIn: undefined } };
+  ok(count({ ghostOppositeFace: true }, noDepth).length === 1, "#296 rack geometry: with no rack depth only unknown-depth devices ghost");
+
+  // shelves
+  const sl = L([
+    P({ id: "SHELF", kind: "shelf", sku: "SH1", ruStart: 3, ruHeight: 1 }),
+    P({ id: "C1", sku: "AMP", ruStart: 3, ruHeight: 2, shelfId: "RP-SHELF", laneCount: 2, lane: 0 }),
+    P({ id: "C2", sku: "S", ruStart: 3, ruHeight: 1, shelfId: "RP-SHELF", laneCount: 2, lane: 1 }),
+  ]);
+  const gs = c296gGeom(sl, look, { face: "front" });
+  const shelf = slotRect(gs, "SHELF").r;
+  const c1 = slotRect(gs, "C1").r;
+  const c2 = slotRect(gs, "C2").r;
+  ok(shelf.fill === "tone" && near(shelf.h, 1.75 - 0.08, 1e-9), "#296 rack geometry: the shelf rect is its own tray height, toned");
+  ok(near(c1.y + c1.h, shelf.y, 1e-9) && near(c2.y + c2.h, shelf.y, 1e-9) && near(c1.h, 2 * 1.75 - 0.08, 1e-9) && near(c2.h, 1.75 - 0.08, 1e-9), "#296 rack geometry: shelf devices sit on the tray top, each its own height");
+  ok(c1.x < c2.x && near(c1.w, 9.42, 1e-9) && c1.y < shelf.y, "#296 rack geometry: shelf devices use their own lanes and rise above the tray");
+  ok(gs.slots.map((s) => s.placementId).join() === "RP-SHELF,RP-C1,RP-C2", "#296 rack geometry: slots follow placement order, children after their shelf");
+  ok(c296gGeom(sl, look, { face: "rear" }).slots.length === 0, "#296 rack geometry: shelf and its devices leave the other face alone");
+
+  // truncation
+  const gt = c296gGeom(L([P({ id: "N", sku: "ANTENNA", ruHeight: 2, laneCount: 3, lane: 0 })]), look, { face: "front" });
+  const lbl = texts(gt.shapes).filter((s) => s.size <= c296gG.labelSize && s.x > M + c296gG.railIn && s.x < M + c296gG.railIn + c296gG.panelIn);
+  const nr = slotRect(gt, "N").r;
+  ok(lbl.length === 2 && lbl[0].text.endsWith("…") && lbl[0].text.length < "A very long description of a device that cannot possibly fit".length, "#296 rack geometry: a long label is cut with '…'");
+  ok(lbl.every((s) => { const x = c296gExtent(s); return x.x1 - x.x0 <= nr.w - 0.3 + 1e-9 && x.x0 >= nr.x && x.x1 <= nr.x + nr.w; }), "#296 rack geometry: every label line fits its rect width less 0.3");
+  const tiny = c296gGeom(L([P({ id: "N", sku: "ANTENNA", laneCount: 3, lane: 0, override: undefined, label: "Wide" })]), look, { face: "front" });
+  ok(texts(tiny.shapes).some((s) => s.text === "Wide"), "#296 rack geometry: a short label is left whole");
+
+  // SVG serializer
+  const lx = L([P({ id: "A", sku: "AMP", ruHeight: 2, label: "Tom <b>&\"'s</b> rack" }), P({ id: "Q", kind: "reserved", sku: undefined, ruStart: 4 })]);
+  const s1 = c296gSvg(lx, look, { face: "front", title: "A & B <rack>" });
+  const s2 = c296gSvg(structuredClone(lx), look, { face: "front", title: "A & B <rack>" });
+  ok(s1 === s2, "#296 rack geometry: same input renders the same string");
+  ok(s1.includes("Tom &lt;b&gt;&amp;&quot;&#39;s&lt;/b&gt; rack") && !s1.includes("<b>") && s1.includes("<title>A &amp; B &lt;rack&gt;</title>"), "#296 rack geometry: text and title escape & < > \" '");
+  ok(s1.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ') && s1.endsWith("</svg>") && s1.includes('font-family="Arial, Helvetica, sans-serif"') && s1.includes('role="img"') && s1.includes('vector-effect="non-scaling-stroke"') && s1.includes('stroke-width="1"'), "#296 rack geometry: svg root, font, role and non-scaling strokes");
+  ok(s1.includes("<defs><pattern id=\"rk-hatch\"") && s1.includes('fill="url(#rk-hatch)"') && (s1.match(/<pattern /g) ?? []).length === 1, "#296 rack geometry: one hatch pattern when a reserved placement exists");
+  const noRes = c296gSvg(L([P({ id: "A" })]), look, { face: "front" });
+  ok(!noRes.includes("<pattern") && !noRes.includes("<defs>") && !noRes.includes("<title>"), "#296 rack geometry: no hatch defs and no <title> when unused");
+  const pre = c296gSvg(lx, look, { face: "front", idPrefix: "rk2" });
+  ok(pre.includes('id="rk2-hatch"') && pre.includes("url(#rk2-hatch)") && !pre.includes("rk-hatch"), "#296 rack geometry: idPrefix renames the hatch pattern");
+  ok(!/\d\.\d{4,}/.test(s1) && !/NaN|undefined/.test(s1), "#296 rack geometry: numbers are rounded to 3 places and nothing prints NaN");
+  ok(s1.includes('stroke-dasharray="4 3"') === false && c296gSvg(L([P({ id: "O", optional: true })]), look, { face: "front" }).includes('stroke-dasharray="4 3"'), "#296 rack geometry: dash only on dashed shapes");
+  const raw = c296gShapesToSvg([{ kind: "text", x: 1, y: 2, text: "a\nb<", size: 0.5 }, { kind: "line", x1: 0, y1: 0, x2: 1, y2: 1, stroke: "heavy" }], { w: 4, h: 3 }, { className: 'a"b' });
+  ok(raw.includes('class="a&quot;b"') && raw.includes("<tspan") && raw.includes("b&lt;") && raw.includes('stroke-width="1.6"') && raw.includes('viewBox="0 0 4 3"'), "#296 rack geometry: shapesToSvg escapes the class, breaks lines into tspans, heavy is 1.6 px");
+  ok(c296gSvg(L([P({ id: "A", label: "x\u0001y" })]), look, { face: "front" }).includes(">xy<"), "#296 rack geometry: control characters never reach the markup");
+}
+
 async function rack296SheetAsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert, get } = await import("@/lib/stores/catalog");

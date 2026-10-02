@@ -1,0 +1,166 @@
+/**
+ * #296 — pure rack elevation geometry. One placement list → a flat `Shape[]`
+ * in inches (y grows downward, RU 1 at the bottom) that `svg.ts` serializes;
+ * the builder sidebar and the printed submittal draw the SAME string.
+ *
+ * Span, lane and shelf rules come from `layout.ts` — nothing here re-derives
+ * them. No React, no store/db imports.
+ */
+import { textExtent, type Shape } from "@/lib/curtain-cut-sheets/shapes";
+import { childrenOf, laneSpan, placementFacts } from "./layout";
+import { ruLabel } from "./rules";
+import { RU_IN, type RackConfig, type RackFace, type RackLayout, type RackPartLookup, type RackPlacement } from "./types";
+
+export const RACK_GEOM = { railIn: 1.6, panelIn: 19, marginIn: 0.6, labelSize: 0.55, ruNumberSize: 0.45 } as const;
+
+const INSET = 0.04;
+const TITLE_BAND = 1.2;
+const TITLE_SIZE = 0.7;
+const LABEL_PAD = 0.3;
+const RESERVED_TEXT = "Reserved — future";
+
+export type RackSlot = { placementId: string; x: number; y: number; w: number; h: number; face: RackFace };
+export type RackGeometryOpts = {
+  face: RackFace;
+  numbering?: RackConfig["numbering"];
+  ghostOppositeFace?: boolean;
+  title?: string;
+  /** Prefix for the hatch pattern id, so several SVGs can share a page. Used by `svg.ts`. */
+  idPrefix?: string;
+};
+
+type Rect = { x: number; y: number; w: number; h: number };
+
+/** Collapse whitespace so a pasted label can't add line breaks to a one-line text shape. */
+const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/** `text` shortened with "…" until `textExtent` fits `maxW`; null when even "…" doesn't fit. */
+function fitText(text: string, size: number, maxW: number): string | null {
+  const width = (t: string) => {
+    const e = textExtent({ x: 0, text: t, size, anchor: "middle" });
+    return e.x1 - e.x0;
+  };
+  if (width(text) <= maxW) return text;
+  const chars = Array.from(text);
+  for (let n = chars.length - 1; n >= 0; n--) {
+    const cand = chars.slice(0, n).join("").trimEnd() + "…";
+    if (width(cand) <= maxW) return cand;
+  }
+  return null;
+}
+
+export function rackGeometry(
+  layout: RackLayout,
+  lookup: RackPartLookup,
+  opts: RackGeometryOpts
+): { viewBox: { w: number; h: number }; shapes: Shape[]; slots: RackSlot[] } {
+  const { config } = layout;
+  const { railIn, panelIn, marginIn, labelSize, ruNumberSize } = RACK_GEOM;
+  const ruCount = config.ruCount;
+  const numbering = opts.numbering ?? config.numbering;
+  const numCfg = { ruCount, numbering };
+
+  const top = marginIn + (opts.title ? TITLE_BAND : 0);
+  const bodyH = ruCount * RU_IN;
+  const W = 2 * marginIn + 2 * railIn + panelIn;
+  const H = top + bodyH + marginIn;
+  const panelX0 = marginIn + railIn;
+  const panelX1 = panelX0 + panelIn;
+  const rightRailX = panelX1;
+  const ruTop = (ru: number) => top + (ruCount - ru) * RU_IN; // top edge of RU `ru`
+
+  const shapes: Shape[] = [];
+  const slots: RackSlot[] = [];
+
+  /* ---- title, frame, rails ---- */
+  if (opts.title) {
+    const t = fitText(oneLine(opts.title), TITLE_SIZE, W - 2 * marginIn);
+    if (t) shapes.push({ kind: "text", x: W / 2, y: marginIn + TITLE_BAND / 2 + TITLE_SIZE * 0.2, text: t, size: TITLE_SIZE, anchor: "middle", bold: true });
+  }
+  shapes.push({ kind: "rect", x: marginIn, y: top, w: railIn, h: bodyH, stroke: "med", fill: "none" });
+  shapes.push({ kind: "rect", x: rightRailX, y: top, w: railIn, h: bodyH, stroke: "med", fill: "none" });
+  shapes.push({ kind: "rect", x: panelX0, y: top, w: panelIn, h: bodyH, stroke: "thin", fill: "none" });
+  for (let r = 1; r < ruCount; r++) {
+    const y = top + r * RU_IN;
+    shapes.push({ kind: "line", x1: marginIn, y1: y, x2: marginIn + railIn, y2: y, stroke: "thin" });
+    shapes.push({ kind: "line", x1: rightRailX, y1: y, x2: rightRailX + railIn, y2: y, stroke: "thin" });
+  }
+  for (let ru = 1; ru <= ruCount; ru++) {
+    const n = ruLabel(numCfg, ru);
+    const y = ruTop(ru) + RU_IN / 2 + ruNumberSize * 0.35;
+    const bold = n % 5 === 0;
+    shapes.push({ kind: "text", x: marginIn + railIn / 2, y, text: String(n), size: ruNumberSize, anchor: "middle", bold });
+    shapes.push({ kind: "text", x: rightRailX + railIn / 2, y, text: String(n), size: ruNumberSize, anchor: "middle", bold });
+  }
+
+  /* ---- placement boxes ---- */
+  const laneX = (p: RackPlacement): { x: number; w: number } => {
+    const [a, b] = laneSpan(p);
+    return { x: panelX0 + a * panelIn + INSET, w: (b - a) * panelIn - 2 * INSET };
+  };
+  const spanRect = (p: RackPlacement, lo: number, hi: number): Rect => {
+    const { x, w } = laneX(p);
+    return { x, y: ruTop(hi) + INSET, w, h: (hi - lo + 1) * RU_IN - 2 * INSET };
+  };
+
+  const drawLabel = (p: RackPlacement, r: Rect) => {
+    if (p.kind === "vent") return; // identified by its slats
+    const info = p.sku ? lookup(p.sku) : undefined;
+    const clean = (s: string | undefined) => (s ? oneLine(s) : "");
+    const line1 = clean(p.label) || (p.kind === "reserved" ? RESERVED_TEXT : clean(info?.desc) || clean(p.sku));
+    if (!line1) return;
+    const maxW = r.w - LABEL_PAD;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    const l2 = p.kind !== "reserved" && p.ruHeight >= 2 ? `${clean(info?.mfr)} ${clean(p.sku)}`.trim() : "";
+    const size2 = labelSize * 0.8;
+    const t1 = fitText(line1, labelSize, maxW);
+    const t2 = l2 && l2 !== line1 ? fitText(l2, size2, maxW) : null;
+    if (t1 && t2) {
+      const y1 = cy - 0.08;
+      shapes.push({ kind: "text", x: cx, y: y1, text: t1, size: labelSize, anchor: "middle" });
+      shapes.push({ kind: "text", x: cx, y: y1 + size2 * 1.4, text: t2, size: size2, anchor: "middle" });
+    } else if (t1) {
+      shapes.push({ kind: "text", x: cx, y: cy + labelSize * 0.35, text: t1, size: labelSize, anchor: "middle" });
+    }
+  };
+
+  const drawBox = (p: RackPlacement, r: Rect, face: RackFace) => {
+    const fill = p.kind === "device" ? "none" : p.kind === "reserved" ? "hatch" : "tone";
+    shapes.push({ kind: "rect", x: r.x, y: r.y, w: r.w, h: r.h, stroke: "med", fill, ...(p.optional ? { dash: true } : {}) });
+    if (p.kind === "vent") {
+      for (const f of [0.25, 0.5, 0.75]) {
+        const y = r.y + r.h * f;
+        shapes.push({ kind: "line", x1: r.x + r.w * 0.15, y1: y, x2: r.x + r.w * 0.85, y2: y, stroke: "thin", tag: "band" });
+      }
+    }
+    drawLabel(p, r);
+    slots.push({ placementId: p.id, x: r.x, y: r.y, w: r.w, h: r.h, face });
+  };
+
+  /* ---- the opposite face, faintly, when its devices run deep ---- */
+  if (opts.ghostOppositeFace) {
+    for (const p of layout.placements) {
+      if (p.shelfId || p.face === opts.face || p.kind !== "device") continue;
+      const depth = placementFacts(p, lookup).depthIn;
+      if (depth !== undefined && !(config.depthIn !== undefined && depth > config.depthIn / 2)) continue;
+      const r = spanRect(p, p.ruStart, p.ruStart + p.ruHeight - 1);
+      shapes.push({ kind: "rect", x: r.x, y: r.y, w: r.w, h: r.h, stroke: "thin", dash: true });
+    }
+  }
+
+  /* ---- this face: top-level placements, a shelf's devices right after it ---- */
+  for (const p of layout.placements) {
+    if (p.shelfId || p.face !== opts.face) continue;
+    const tray = spanRect(p, p.ruStart, p.ruStart + p.ruHeight - 1);
+    drawBox(p, tray, opts.face);
+    if (p.kind !== "shelf") continue;
+    for (const c of childrenOf(layout, p.id)) {
+      const { x, w } = laneX(c);
+      const h = c.ruHeight * RU_IN - 2 * INSET;
+      drawBox(c, { x, y: tray.y - h, w, h }, opts.face); // sits on the tray's top edge
+    }
+  }
+
+  return { viewBox: { w: W, h: H }, shapes, slots };
+}
