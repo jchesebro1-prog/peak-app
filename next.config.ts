@@ -24,7 +24,8 @@ const nextConfig: NextConfig = {
   // dashboard and Quick Design (promoting a Quick-layout design schedules
   // one); The Grid's project editor (creating/re-promoting a draft quote
   // schedules one); and the Flame Tests / Inspections dashboards (one-click
-  // renewal outreach re-prices and re-renders a quote before it's mailed).
+  // renewal outreach re-prices and re-renders a quote before it's mailed),
+  // plus #296's rack submittal download (renders its three sheets).
   // Routes that only call markQuotePdfStale (the CSV importer) or
   // copySentRevisionPdf (a send stamping a quote sent) never invoke Chrome
   // themselves, so they're deliberately left out.
@@ -42,6 +43,7 @@ const nextConfig: NextConfig = {
     "/design/grid/[id]": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/flame-tests": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/inspections": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/api/racks/[id]/submittal": ["./node_modules/@sparticuz/chromium/bin/**"],
   },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy

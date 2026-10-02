@@ -336,6 +336,9 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — no rack is seeded, so the staff submittal preview is checked on its
   // not-found path: the module compiles and an unknown id is a clean 404, not a 500.
   { route: "/design/assemblies/rack/SA-NOPE", expectNotFound: true },
+  // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
+  { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
+  { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },
 ];
 
 let fail = 0;

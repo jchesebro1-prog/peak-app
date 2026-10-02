@@ -10758,6 +10758,7 @@ seeded()
   .then(() => rack296SheetAsyncChecks())
   .then(() => rack296KindAsyncChecks())
   .then(() => rack296DefaultsAsyncChecks())
+  .then(() => rack296ZipAsyncChecks())
   .then(() => curtain292AsyncChecks())
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
@@ -45009,6 +45010,107 @@ import type { RackPartInfo as C296pInfo, RackLayout as C296pLayout, RackIssue as
   ];
   ok(c296pIssues(iss).map((i) => i.message).join("|") === "E one|W one|W two", "#296 rack sheets: warnings list errors first, order kept");
   ok(c296pMissing({ sku: "MYS-1", label: "Mystery box", fields: ["depthIn", "weightLb", "powerWatts"] }) === "Mystery box (MYS-1): Depth (in), Weight (lb), Power (W)" && c296pMissing({ sku: "X", label: "X", fields: ["ruHeight"] }) === "X: RU height", "#296 rack sheets: missing-data lines use the catalog field labels");
+}
+
+/* ===== #296 — rack submittal zip ===== */
+import { datasheetCoverLines as c296zCover, mergeDatasheets as c296zMerge, rackSubmittalFiles as c296zFiles, RACK_SUBMITTAL_DEADLINE_MS as c296zDeadline } from "@/lib/rack/submittal-server";
+import { PDFDocument as C296zPdf } from "pdf-lib";
+{
+  const lines = c296zCover([
+    { sku: "AMP-A", label: "Power amp", pageCount: 3 },
+    { sku: "GONE", label: "Mystery", pageCount: null, reason: "Not in the catalog." },
+    { sku: "DSP-B, SW-C", label: "DSP; Switch", pageCount: 2 },
+    { sku: "BAD", label: "Broken PDF", pageCount: null, reason: "Datasheet PDF could not be merged." },
+  ], "MDF rack — datasheets", 1);
+  ok(lines[0] === "MDF rack — datasheets", "#296 rack zip: the cover title comes first");
+  const inc = lines.indexOf("Included"), not = lines.indexOf("Not included");
+  ok(inc > 0 && not > inc, "#296 rack zip: the cover lists Included before Not included");
+  ok(lines[inc + 1] === "AMP-A — Power amp — page 2" && lines[inc + 2] === "DSP-B, SW-C — DSP; Switch — page 5", "#296 rack zip: index lines in order, page numbers start after one cover page: " + lines.join(" | "));
+  ok(lines.slice(not + 1).join("|") === "GONE — Mystery — Not in the catalog.|BAD — Broken PDF — Datasheet PDF could not be merged.", "#296 rack zip: gaps are listed with their reason, in order");
+  const two = c296zCover([{ sku: "AMP-A", label: "Power amp", pageCount: 3 }, { sku: "X", label: "X", pageCount: 1 }], "R — datasheets", 2);
+  ok(two.includes("AMP-A — Power amp — page 3") && two.includes("X — X — page 6"), "#296 rack zip: page numbers are offset by the cover page count");
+  const none = c296zCover([{ sku: "Q", label: "Q", pageCount: null, reason: "No datasheet on file." }], "R — datasheets", 1);
+  ok(none[none.indexOf("Included") + 1] === "None." && none.includes("Q — Q — No datasheet on file."), "#296 rack zip: no datasheets reads None. and still lists the gap");
+
+  ok(c296zDeadline === 90_000, "#296 rack zip: the render deadline is 90 s");
+  const rdz = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const route = rdz("src/app/api/racks/[id]/submittal/route.ts");
+  ok(route.includes("requireUser(") && route.includes("export const maxDuration = 120") && route.includes('export const dynamic = "force-dynamic"'), "#296 rack zip: the route requires a user, maxDuration = 120, force-dynamic");
+  ok(route.includes('"csv"') && route.includes("part") && route.includes("/^SA-[A-Z0-9-]{1,60}$/") && route.includes("text(RACK_NOT_FOUND, 404)") && rdz("src/lib/rack/submittal-server.ts").includes('RACK_NOT_FOUND = "Rack not found."'), "#296 rack zip: the route handles ?part=csv, validates the id and 404s an unknown rack");
+  ok(route.includes("printOriginFor(") && route.includes("text(where.error, 503)") && route.includes("private, no-store") && route.includes("00-gaps.txt"), "#296 rack zip: the route resolves the print origin (503 on error), never caches, writes 00-gaps.txt");
+  ok(route.indexOf("requireUser(") < route.indexOf("loadRackForSheets(") || route.indexOf("requireUser(") < route.indexOf("rackSubmittalFiles("), "#296 rack zip: the user check runs before any read");
+  ok(/"\/api\/racks\/\[id\]\/submittal": \["\.\/node_modules\/@sparticuz\/chromium\/bin\/\*\*"\]/.test(rdz("next.config.ts")), "#296 rack zip: next.config.ts ships Chrome with the submittal route");
+  ok(/"pdf-lib": "1\.17\.1"/.test(rdz("package.json")), "#296 rack zip: pdf-lib is pinned");
+  ok(rdz("scripts/smoke-routes.ts").includes("/api/racks/SA-NOPE/submittal?part=csv"), "#296 rack zip: smoke covers the route's not-found path");
+}
+
+async function c296zTinyPdf(pages: number): Promise<Buffer> {
+  const d = await C296zPdf.create();
+  for (let i = 0; i < pages; i++) d.addPage([200, 200]);
+  return Buffer.from(await d.save());
+}
+
+async function rack296ZipAsyncChecks(): Promise<void> {
+  // mergeDatasheets: two real PDFs, a missing one and a corrupt one.
+  const one = await c296zTinyPdf(1), two = await c296zTinyPdf(2);
+  const failed: string[] = [];
+  const merged = await c296zMerge([
+    { sku: "A", label: "Amp", bytes: one },
+    { sku: "N", label: "Nothing", bytes: null, reason: "No datasheet on file." },
+    { sku: "C", label: "Corrupt", bytes: Buffer.from("not a pdf at all") },
+    { sku: "B", label: "Box", bytes: two },
+  ], "Test rack — datasheets", (e) => failed.push(e.sku));
+  const back = await C296zPdf.load(merged);
+  ok(back.getPageCount() === 1 + 1 + 2, "#296 rack zip: merged = one cover page + 1 + 2 datasheet pages, got " + back.getPageCount());
+  ok(failed.join() === "C", "#296 rack zip: a corrupt PDF is reported as a gap, not thrown");
+  const many = Array.from({ length: 70 }, (_, i) => ({ sku: `S-${i}`, label: "A long part name ".repeat(i % 3 ? 1 : 12), bytes: null, reason: "No datasheet on file." }));
+  const big = await C296zPdf.load(await c296zMerge([{ sku: "A", label: "Amp", bytes: one }, ...many], "Long — datasheets"));
+  ok(big.getPageCount() >= 3, "#296 rack zip: a long gap list spills onto more cover pages, got " + big.getPageCount());
+  const odd = await c296zMerge([{ sku: "Ω-1 → ≤", label: "Ünïcode ✓ 中文", bytes: null, reason: "No datasheet on file." }], "Rack ☃ — datasheets");
+  ok((await C296zPdf.load(odd)).getPageCount() === 1, "#296 rack zip: characters Helvetica can't draw are replaced, never thrown");
+
+  // rackSubmittalFiles against a real rack record.
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const Fx = await import("@/lib/stores/fixtures");
+  const AMP = fid(296, "zip-amp"), DSP = fid(296, "zip-dsp");
+  await mergeUpsert(AMP, { desc: "Test296 Zip amp", category: "Test296", unit: "ea", list: 1, cost: 1, ruHeight: 2, powerWatts: 300 });
+  reg("catalog_parts", AMP);
+  await mergeUpsert(DSP, { desc: "Test296 Zip DSP", category: "Test296", unit: "ea", list: 1, cost: 1, ruHeight: 1 });
+  reg("catalog_parts", DSP);
+  const layout = c296kL(c296kP({ id: "A", sku: AMP, ruStart: 1, ruHeight: 2 }), c296kP({ id: "D", sku: DSP, ruStart: 4 }));
+  const clean = c296kSanitize({ kind: "rack", label: "Test296 Zip Rack", description: "", scope: "Audio", parts: [], rack: layout });
+  if (!clean.ok) throw new Error("#296 rack zip: expected a clean rack, got " + clean.error);
+  const rec = await Fx.createFixture(clean.value, "T296", { cost: 0, price: 0, pricedAt: null }, 1_700_296_300_000);
+  reg("subassemblies", rec.id);
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) process.env.AUTH_SECRET = "test296-secret";
+  try {
+    const urls: string[] = [];
+    const ok1 = await c296zFiles(rec.id, { origin: "http://x" }, { deadline: Date.now() + 60_000, render: async (u) => { urls.push(u); return one; }, datasheets: true });
+    ok(ok1.ok && ok1.files.map((f) => f.name).join() === "elevation.pdf,schedule.pdf,power-heat.pdf,schedule.csv,datasheets.pdf", "#296 rack zip: files are exactly the three sheets, the CSV and the datasheets: " + (ok1.ok ? ok1.files.map((f) => f.name).join() : ok1.error));
+    ok(ok1.ok && ok1.folder === "Test296_Zip_Rack", "#296 rack zip: the folder is a safe name from the rack label");
+    ok(urls.length === 3 && urls.every((u) => u.startsWith(`http://x/print/rack/${encodeURIComponent(rec.id)}?sheet=`) && /[?&]t=/.test(u)) && urls.map((u) => new URL(u).searchParams.get("sheet")).join() === "elevation,schedule,power", "#296 rack zip: each sheet renders from the signed print route, in order");
+    const gapSkus = ok1.ok ? ok1.gaps.filter((g) => g.kind === "missing-datasheet").map((g) => g.sku).sort().join() : "";
+    ok(gapSkus === [AMP, DSP].sort().join(), "#296 rack zip: parts with no datasheet on file are missing-datasheet gaps: " + gapSkus);
+    ok(ok1.ok && ok1.gaps.some((g) => g.kind === "missing-data" && g.sku === DSP), "#296 rack zip: the model's missing-data gaps carry through");
+    const ds = ok1.ok ? ok1.files.find((f) => f.name === "datasheets.pdf") : undefined;
+    ok(!!ds && (await C296zPdf.load(ds.data)).getPageCount() === 1, "#296 rack zip: with no datasheets on file the PDF is just the cover listing the gaps");
+    const csv = ok1.ok ? ok1.files.find((f) => f.name === "schedule.csv")?.data.toString("utf8") ?? "" : "";
+    ok(csv.includes(AMP) && csv.includes("Model/SKU"), "#296 rack zip: schedule.csv carries the schedule");
+
+    const ok2 = await c296zFiles(rec.id, { origin: "http://x" }, { deadline: Date.now() + 60_000, render: async () => { throw new Error("no chrome"); } });
+    ok(ok2.ok && ok2.files.map((f) => f.name).join() === "schedule.csv,datasheets.pdf", "#296 rack zip: failed renders leave the sheets out, CSV and datasheets stay");
+    ok(ok2.ok && ok2.gaps.filter((g) => g.kind === "missing-data" && g.sku === "" && g.detail.endsWith("PDF could not be rendered — open the preview page and use Print.")).length === 3, "#296 rack zip: each failed render is a named gap");
+    const ok3 = await c296zFiles(rec.id, { origin: "http://x" }, { deadline: Date.now() + 1_000, render: async () => one });
+    ok(ok3.ok && !ok3.files.some((f) => f.name.endsWith(".pdf") && f.name !== "datasheets.pdf") && ok3.gaps.filter((g) => g.label && g.sku === "" && g.kind === "missing-data").length === 3, "#296 rack zip: no render starts with less than the minimum time left");
+    const ok4 = await c296zFiles(rec.id, { error: "No print address" }, { deadline: Date.now() + 60_000, render: async () => one, datasheets: false });
+    ok(ok4.ok && ok4.files.map((f) => f.name).join() === "schedule.csv", "#296 rack zip: datasheets: false skips the merged PDF; no print address skips the sheets");
+    const miss = await c296zFiles("SA-TEST296-NOPE", { origin: "http://x" }, { deadline: Date.now() + 60_000, render: async () => one });
+    ok(!miss.ok && miss.error === "Rack not found.", "#296 rack zip: an unknown rack id is not found");
+  } finally {
+    if (!secret) delete process.env.AUTH_SECRET;
+  }
 }
 
 async function curtain292AsyncChecks(): Promise<void> {
