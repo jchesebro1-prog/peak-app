@@ -10,6 +10,7 @@ import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
+import { CUT_SHEET_APPEND_LOAD_MS, settleWithin } from "@/lib/curtain-cut-sheets/deadline";
 import { CutSheetPages, CLIENT_PRINT_CSS } from "@/components/cutsheets/cut-sheet-pages";
 
 export const dynamic = "force-dynamic";
@@ -45,8 +46,8 @@ export default async function PrintQuotePage({
     getSettings(),
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(q.customerId),
-    // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure never breaks the PDF.
-    normalizePdfOptions(q.pdfOptions).pdfCutSheets ? loadCutSheets(id, { images: "data" }).catch(() => null) : null,
+    // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF.
+    normalizePdfOptions(q.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS) : null,
   ]);
   return (
     <main>

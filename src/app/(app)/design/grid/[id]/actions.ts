@@ -86,6 +86,7 @@ import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { headers } from "next/headers";
 import { printOriginFor } from "@/lib/quote-pdf/origin";
+import type { CutSheetsAdded } from "@/lib/curtain-cut-sheets/package-sheets";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
 import { isGridLayer } from "@/lib/design/grid-scopes";
@@ -430,7 +431,7 @@ export async function linkLinesetDesignAction(
 export async function createClientPackageAction(
   projectId: string,
   optionId: string | null,
-): Promise<{ ok: true; packageId: string; url: string; gapCount: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; packageId: string; url: string; gapCount: number; cutSheetsUnreadable: CutSheetsAdded["unreadable"] } | { ok: false; error: string }> {
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
@@ -444,6 +445,7 @@ export async function createClientPackageAction(
       packageId: built.record.id,
       url: `/api/client-packages/${encodeURIComponent(built.record.id)}`,
       gapCount: built.gaps.length,
+      cutSheetsUnreadable: built.cutSheets.unreadable, // #292 — staff-only; kept out of the zip's index
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The client package could not be built." };

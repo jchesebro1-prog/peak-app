@@ -43636,6 +43636,7 @@ async function curtain292AsyncChecks(): Promise<void> {
     const after = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
     await setBlob(CURTAIN_MOUNTS_BLOB, Object.fromEntries(Object.keys(after).map((k) => [k, Object.prototype.hasOwnProperty.call(before, k) ? before[k] : null])));
   }
+  await cutSheetPackage292Checks();
 }
 
 // ---- #292 task 8: signed print route, estimate-PDF toggle, client package ----
@@ -43687,3 +43688,106 @@ import { renderToStaticMarkup as c292Render } from "react-dom/server";
   const qpr = rd292d("src/app/print/quote/[id]/page.tsx");
   ok(/breakBefore: "page"/.test(qpr) && /CLIENT_PRINT_CSS/.test(qpr), "#292 source: the appended Client set starts on its own page and carries the Client print resets");
 }
+
+// ---- #292 task 8 fix round 1: bounded package renders, safe estimate append, customer-safe index ----
+import * as c292Pkg from "@/lib/curtain-cut-sheets/package-sheets";
+import * as c292Dl from "@/lib/curtain-cut-sheets/deadline";
+import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const P = c292Pkg;
+  const maxDur = [rd("src/app/(app)/quotes/page.tsx"), rd("src/app/(app)/design/grid/[id]/page.tsx")].map((t) => /export const maxDuration = (\d+);/.exec(t)?.[1]);
+  ok(maxDur.every((v) => Number(v) * 1000 === P.PACKAGE_MAX_DURATION_MS)
+    && P.CUT_SHEET_MIN_RENDER_MS > 0 && P.CUT_SHEET_MIN_RENDER_MS < P.CUT_SHEET_DEADLINE_MS
+    && P.CUT_SHEET_DEADLINE_MS + P.PACKAGE_FINISH_ALLOWANCE_MS + 10_000 <= P.PACKAGE_MAX_DURATION_MS,
+    "#292 package budget: pre-cut-sheet work + every render (each cut at the deadline) + the finish allowance stays 10 s inside the pages' 120 s maxDuration");
+  const D = 1_000_000;
+  ok(P.renderTimeoutMs(D, D - 100_000) === c292StepMs && P.renderTimeoutMs(D, D - 7_000) === 7_000 && P.renderTimeoutMs(D, D + 5) === 1 && P.cutSheetDeadline(10) === 10 + P.CUT_SHEET_DEADLINE_MS,
+    "#292 package budget: a render's Chrome step cap is the normal cap or the time left, whichever is less (never below 1 ms)");
+  ok(P.cutSheetGapReason(new c292Dl.CutSheetDeadlineError()) === P.CUT_SHEET_LATE
+    && P.cutSheetGapReason(Object.assign(new Error("Navigation timeout of 30000 ms exceeded"), { name: "TimeoutError" })) === P.CUT_SHEET_LATE
+    && P.cutSheetGapReason(new Error("spawn /opt/chrome ENOENT")) === P.CUT_SHEET_RENDER_FAILED && P.CUT_SHEET_RENDER_FAILED === "Couldn't be rendered — print from Cut sheets",
+    "#292 package: a render error becomes a fixed customer-safe reason (timeout → late, anything else → couldn't be rendered)");
+  const srv = rd("src/lib/client-package-server.ts");
+  const builders = ["export async function createClientPackage(", "export async function createQuoteClientPackage("].map((h) => srv.slice(srv.indexOf(h), srv.indexOf("\n}\n", srv.indexOf(h))));
+  ok(builders.every((b) => b.indexOf("cutSheetDeadline(Date.now())") > 0 && b.indexOf("cutSheetDeadline(Date.now())") < b.indexOf("blobEnabled()") && /addCutSheets\([^;]*\{ deadline: cutSheetsBy \}\)/.test(b)),
+    "#292 source: each package builder takes its cut-sheet deadline at the start of the build and threads it into addCutSheets");
+  const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
+  ok(/rejectAfter\(render\(url, \{ timeoutMs: renderTimeoutMs\(opts\.deadline, now\(\)\) \}\), opts\.deadline - now\(\)\)/.test(ps) && ps.indexOf("signPrintToken(") > ps.indexOf("CUT_SHEET_MIN_RENDER_MS) {"),
+    "#292 source: each render gets a step cap and a hard wait cap from the deadline, and its token is signed right before it");
+  const idx = srv.split("\n").filter((l) => l.includes("00-package-index.json"));
+  ok(idx.length === 2 && idx.every((l) => l.includes("cutSheets: { sheets: cutSheets.sheets }") && !/unreadable/.test(l)) && /cutSheetsUnreadable: built\.cutSheets\.unreadable/.test(rd("src/app/(app)/design/grid/[id]/actions.ts")),
+    "#292 package: the zip's index lists the sheets but never the staff-only unreadable reasons; the Grid action still returns them");
+  const now = 1_700_000_000_000;
+  ok(!c292Verify("s3cret", c292Sign("s3cret", "cutsheets", "Q-1", now), "quote", "Q-1", now), "#292 token: a cutsheets token does not verify as a quote token");
+  const qpr = rd("src/app/print/quote/[id]/page.tsx");
+  ok(/settleWithin\(loadCutSheets\(id, \{ images: "data" \}\), CUT_SHEET_APPEND_LOAD_MS\)/.test(qpr) && c292Dl.CUT_SHEET_APPEND_LOAD_MS <= 10_000,
+    "#292 source: the estimate print route waits at most a few seconds for appended cut sheets, then prints without them");
+  const pv = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(/cut sheet\$\{p\.cutSheetCount === 1 \? "" : "s"\} \(Client style\)/.test(pv) && !/cut sheet page/.test(pv), "#292 preview: the chip counts cut sheets (types), not pages");
+}
+
+async function cutSheetPackage292Checks(): Promise<void> {
+  const P = c292Pkg;
+  const { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } = await import("@/lib/curtain-cut-sheets/model");
+  const t0 = Date.now();
+  ok(await c292Dl.settleWithin(new Promise<number>(() => undefined), 20) === null && Date.now() - t0 < 2_000
+    && await c292Dl.settleWithin(Promise.reject(new Error("x")), 1_000) === null && await c292Dl.settleWithin(Promise.resolve(7), 1_000) === 7,
+    "#292 estimate append: a hung or failed cut-sheet load settles to null (estimate prints without it); a fast one passes through");
+  const types = [{ sheetNo: "CS-1", title: "Main (Velour)", totalQty: 1 }, { sheetNo: "CS-2", title: "Legs", totalQty: 4 }];
+  const okLoad = (t = types, unreadable: unknown[] = []) => async () => ({ ok: true as const, result: { types: t as never, unreadable: unreadable as never } });
+  const where = { origin: "https://app.example" };
+  const warn = console.warn;
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) process.env.AUTH_SECRET = "test292-secret";
+  console.warn = () => undefined;
+  try {
+    // A render that never answers: the first starts with 10 s left, the clock jumps to 30 ms left, so it is cut at
+    // the deadline; the second has too little time to start. Both become gaps and nothing waits on Chrome.
+    const D = Date.now() + 60_000;
+    let calls = 0;
+    const seen: number[] = [];
+    const files: ZipFile292[] = [];
+    const gaps: ClientPackageGap292[] = [];
+    const started = Date.now();
+    const out = await P.addCutSheets("Q-292", where, files, gaps, {
+      deadline: D, load: okLoad(), now: () => (calls++ === 0 ? D - 10_000 : D - 30),
+      render: (_u, o) => { seen.push(o.timeoutMs); return new Promise<Buffer>(() => undefined); },
+    });
+    ok(seen.length === 1 && seen[0] === 30 && files.length === 0 && gaps.length === 2 && gaps.every((g) => g.kind === "missing-cutsheet" && g.description.endsWith(P.CUT_SHEET_LATE))
+      && out.sheets.every((s) => s.file === null) && Date.now() - started < 5_000,
+      "#292 package: a render past the deadline is abandoned as a gap, a render with too little time left is skipped, and Chrome gets only the time left");
+    const gaps2: ClientPackageGap292[] = [];
+    const files2: ZipFile292[] = [];
+    let url = "";
+    await P.addCutSheets("Q-292", where, files2, gaps2, {
+      deadline: Date.now() + 60_000, load: okLoad(),
+      render: async (u, o) => { if (u.includes("CS-2")) throw new Error("spawn /opt/secret-chrome ENOENT"); url = u; ok(o.timeoutMs === c292StepMs, "#292 package: an early render gets the normal Chrome step cap"); return Buffer.from("%PDF"); },
+    });
+    const tok = url ? new URL(url).searchParams.get("t") || "" : "";
+    ok(files2.length === 1 && files2[0].name === "cutsheets/CS-1-Main_Velour.pdf" && c292Verify(process.env.AUTH_SECRET || "", tok, "cutsheets", "Q-292", Date.now())
+      && gaps2.length === 1 && gaps2[0].description === `Legs — ${P.CUT_SHEET_RENDER_FAILED}` && !gaps2[0].description.includes("secret"),
+      "#292 package: a rendered sheet lands under cutsheets/ with its own cutsheets token; a raw render error never reaches the customer's index");
+    const g3: ClientPackageGap292[] = [];
+    await P.addCutSheets("Q-292", { error: "Set QUOTE_PDF_ORIGIN — a production server off Vercel won’t print" }, [], g3, { deadline: Date.now() + 60_000, load: okLoad() });
+    ok(g3.length === 2 && g3.every((g) => g.description.endsWith(P.CUT_SHEET_RENDER_FAILED) && !g.description.includes("QUOTE_PDF_ORIGIN")),
+      "#292 package: a staff-only print-origin error maps to the fixed customer-safe reason");
+    const run = async (load: Parameters<typeof P.addCutSheets>[4]["load"]) => {
+      const g: ClientPackageGap292[] = [];
+      await P.addCutSheets("Q-292", where, [], g, { deadline: Date.now() + 60_000, load, render: async () => Buffer.from("%PDF") });
+      return g;
+    };
+    const gone = await run(async () => ({ ok: false as const, error: CUT_SHEETS_NO_QUOTE }));
+    const wrong = await run(async () => ({ ok: false as const, error: CUT_SHEETS_WRONG_TYPE }));
+    const allBad = await run(okLoad([], [{ reason: "Can't read size — edit the curtain" }]));
+    const none = await run(okLoad([], []));
+    ok(gone.length === 1 && gone[0].kind === "missing-cutsheet" && gone[0].description === P.CUT_SHEET_QUOTE_GONE
+      && allBad.length === 1 && allBad[0].description === P.CUT_SHEET_ALL_UNREADABLE && wrong.length === 0 && none.length === 0,
+      "#292 package: a deleted quote or all-unreadable curtains leave one missing-cutsheet gap; no curtains (or not a system quote) leaves none");
+  } finally {
+    console.warn = warn;
+    if (!secret) delete process.env.AUTH_SECRET;
+  }
+}
+type ZipFile292 = import("@/lib/zip").ZipFile;
+type ClientPackageGap292 = import("@/lib/client-package").ClientPackageGap;

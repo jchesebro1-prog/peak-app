@@ -182,7 +182,7 @@ export default function PreviewDoc(p: PreviewProps) {
             </button>
             {p.pdfCutSheets && p.cutSheetCount > 0 && (
               <div style={{ fontSize: 11.5, color: "#5b616e", lineHeight: 1.45, padding: "2px 4px" }}>
-                {`+ ${p.cutSheetCount} cut sheet page${p.cutSheetCount === 1 ? "" : "s"} (Client style) print after the estimate — `}
+                {`+ ${p.cutSheetCount} cut sheet${p.cutSheetCount === 1 ? "" : "s"} (Client style) print after the estimate — `}
                 {p.savedQuoteId ? (
                   <a href={`/estimator/cut-sheets?id=${encodeURIComponent(p.savedQuoteId)}&style=client`} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
                     View cut sheets →
