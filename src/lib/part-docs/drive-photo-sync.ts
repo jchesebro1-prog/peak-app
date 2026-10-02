@@ -21,9 +21,10 @@ import { DOWNLOAD_TIMEOUT_MS, downloadDriveFile, findPhotosFolder, getDriveFolde
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { getSettings, setSettings } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
-import { attachDocument, createDocument, detachDocument, getDocument, replaceDocumentFile } from "@/lib/stores/part-documents";
+import { allDocuments, attachDocument, createDocument, detachDocument, getDocument, replaceDocumentFile } from "@/lib/stores/part-documents";
 import { planDrivePhotoSync, type DrivePhotoFileState, type PhotoMatch, type UnmatchedPhoto } from "./drive-photo-plan";
 import { matchFileRows } from "./filename-match";
+import { sheetDriveClaims } from "./photo-sheet";
 import { shrinkImage, webpFileName } from "./shrink";
 import { MAX_PART_IMAGE_BYTES, newDocumentId, partDocBlobPath } from "./types";
 
@@ -102,6 +103,32 @@ async function resolveToken(): Promise<{ token: string } | { error: string }> {
     token = null;
   }
   return token ? { token } : { error: `Couldn't get a Google token for ${info.address} — reconnect it in Settings → Mailboxes.` };
+}
+
+/** The Drive photos account's token for a photo-sheet import, or null. */
+export async function drivePhotosToken(): Promise<string | null> {
+  const t = await resolveToken();
+  return "token" in t ? t.token : null;
+}
+
+/** The Peak Product Photos listing for a photo-sheet plan or export. Never
+ *  writes sync state; a reason (lower-case, reads after "not dropped, and")
+ *  instead of a listing when Drive can't be read. */
+export async function listDrivePhotosForSheet(): Promise<{ files: DriveListedPhoto[] } | { files: null; reason: string }> {
+  const t = await resolveToken();
+  if ("error" in t) return { files: null, reason: "Drive photos aren't connected" };
+  try {
+    const state = await getDrivePhotoSyncState();
+    let folder = state.folder ? await getDriveFolder(t.token, state.folder.id) : null;
+    if (!folder) {
+      const found = await findPhotosFolder(t.token);
+      if (!found.ok) return { files: null, reason: "the Peak Product Photos folder wasn't found" };
+      folder = found.folder;
+    }
+    return { files: await listPhotoTree(t.token, folder.id) };
+  } catch {
+    return { files: null, reason: "Peak Product Photos couldn't be read" };
+  }
 }
 
 /** Google's 403 rate limits (rateLimitExceeded / userRateLimitExceeded —
@@ -231,7 +258,8 @@ async function runSync(
   const parts = (await listCatalog()).filter((p) => p.category !== "Labor");
   const names = [...new Set(listing.map((p) => p.name))];
   const matchByName = new Map<string, PhotoMatch>(matchFileRows(names, parts).map((r) => [r.fileName, { confidence: r.confidence, skus: r.skus }]));
-  const plan = planDrivePhotoSync(listing, state.files, (name) => matchByName.get(name) ?? { confidence: "none", skus: [] }, MAX_PART_IMAGE_BYTES);
+  const claimed = sheetDriveClaims(await allDocuments());
+  const plan = planDrivePhotoSync(listing, state.files, (name) => matchByName.get(name) ?? { confidence: "none", skus: [] }, MAX_PART_IMAGE_BYTES, claimed);
 
   let relinked = 0, relinksDone = 0, stopError = "";
   for (const r of plan.relinks) {

@@ -43039,3 +43039,16 @@ import { HEIC_REASON as phsHeic, OVER_CAP_REASON as phsOverCap } from "@/lib/par
   ok(/^ambiguous/.test(st.get(4) ?? ""), "photo sheet status: a row problem stands alone");
   ok(phsStatuses(plan, []).get(5)?.includes("Photo 1: not imported") === true, "photo sheet status: a planned photo with no outcome says not imported");
 }
+
+/* ======================================================================
+   Photo sheet — the Drive sync leaves sheet-imported Drive files alone.
+   ====================================================================== */
+import { planDrivePhotoSync as phsDrivePlan } from "@/lib/part-docs/drive-photo-plan";
+{
+  const listing = [{ id: "c1", name: "PHSALPHA01.jpg", mimeType: "image/jpeg", md5: "m", size: 10, webViewLink: "https://drive/c1" }];
+  const hit = () => ({ confidence: "high" as const, skus: ["X"] });
+  const free = phsDrivePlan(listing, {}, hit, 25 * 1024 * 1024);
+  const claimed = phsDrivePlan(listing, {}, hit, 25 * 1024 * 1024, new Set(["c1"]));
+  ok(free.imports.length === 1 && claimed.imports.length === 0 && claimed.unchanged === 1 && claimed.unmatched.length === 0,
+    "photo sheet: a Drive file a sheet imported is never imported again by the Drive sync");
+}

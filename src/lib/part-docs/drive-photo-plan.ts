@@ -3,6 +3,7 @@
  * folder listing, the remembered per-file state and a name → parts matcher
  * (the Upload-many filename rule). The executor (drive-photo-sync.ts) only
  * carries the plan out. Per file, first rule wins:
+ *  0. Claimed by a photo-sheet import (sheetDriveClaims) → unchanged.
  *  1. HEIC / over the cap / ambiguous / no match → unmatched (listed with a
  *     reason). A KNOWN file that is now unmatched keeps its document and
  *     links untouched — it is only listed.
@@ -47,7 +48,9 @@ export function planDrivePhotoSync(
   listing: readonly DriveListedPhoto[],
   files: Readonly<Record<string, DrivePhotoFileState>>,
   matchOf: (name: string) => PhotoMatch,
-  maxBytes: number
+  maxBytes: number,
+  /** Drive file ids a photo-sheet import owns (`sheetDriveClaims`) — left alone. */
+  claimed: ReadonlySet<string> = new Set()
 ): DrivePhotoPlan {
   const plan: DrivePhotoPlan = { imports: [], updates: [], relinks: [], unmatched: [], retryLater: 0, unchanged: 0 };
   const seen = new Set<string>();
@@ -55,6 +58,7 @@ export function planDrivePhotoSync(
   for (const photo of sorted) {
     if (seen.has(photo.id)) continue;
     seen.add(photo.id);
+    if (claimed.has(photo.id)) { plan.unchanged++; continue; }
     const unmatched = (reason: string) => plan.unmatched.push({ fileId: photo.id, name: photo.name, webViewLink: photo.webViewLink, reason });
     if (HEIC.has(photo.mimeType)) { unmatched(HEIC_REASON); continue; }
     if (photo.size > maxBytes) { unmatched(OVER_CAP_REASON); continue; }
