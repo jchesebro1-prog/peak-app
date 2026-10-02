@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import {
   carriesPipeline,
@@ -306,7 +306,10 @@ export type Quote = {
   contentChangedAt?: number;
   /** #293 slice 3 (spec §1.6) — the client share link. Server-written only
    *  (patchShareLink); never in QUOTE_CONTENT_FIELDS, never snapshotted,
-   *  never copied by buildQuote. Browsers get a ShareLinkView, never the nonce. */
+   *  never copied by buildQuote. The Client link panel gets a ShareLinkView,
+   *  never the nonce — but /api/sync/pull ships whole quote docs (nonce
+   *  included) to active team users, like `pdf.blobPath`. That is not a
+   *  credential on its own: a token can't be made without AUTH_SECRET. */
   shareLink?: QuoteShareLink | null;
 };
 
@@ -380,6 +383,13 @@ export type QuoteRevisionDocFields = {
   pdfOptions: QuotePdfOptions | null;
   portalFirm: Quote["portalFirm"] | null;
   source: string;
+  /** #293 slice 3 — the Rev N and the date the revision's PDF printed
+   *  (QuotePdfState.printed), stamped once with the PDF copy
+   *  (setRevisionPdfPath). Absent until then, when the render couldn't be
+   *  sure of them, and on older revisions — the online page then derives
+   *  them (sentDocumentStamp). Never part of the header spread. */
+  revNo?: number;
+  issuedAt?: number;
 };
 
 /**
@@ -433,6 +443,9 @@ export type QuoteRevision = {
    *  An annex stamped once after the snapshot is cut; the priced fields above
    *  are still never rewritten. */
   pdfBlobPath?: string;
+  /** #293 slice 3 — the `savedAt` of the file copied onto this revision,
+   *  stamped with `pdfBlobPath` (absent on copies made before #293). */
+  pdfSavedAt?: number;
   /** #293 slice 3 — the printed header fields as they stood (absent on
    *  revisions cut before #293; the online page then reads the live ones). */
   docFields?: QuoteRevisionDocFields;
@@ -921,8 +934,16 @@ export async function updateQuotePdf(
   });
 }
 
-/** Stamp a revision's PDF copy once (#222). False when the revision is gone or already has one. */
-export async function setRevisionPdfPath(id: string, rev: number, path: string): Promise<boolean> {
+/** Stamp a revision's PDF copy once (#222). False when the revision is gone or already has one.
+ *  #293 slice 3: in the same once-only write, the copied file's `savedAt` and
+ *  — when the render recorded them — the Rev N and date it printed, frozen
+ *  into the revision's docFields so the online pages print the same. */
+export async function setRevisionPdfPath(
+  id: string,
+  rev: number,
+  path: string,
+  file: { savedAt?: number; printed?: DocumentRevStamp | null } = {}
+): Promise<boolean> {
   return withTransaction(async () => {
     await lockQuoteRow(id);
     let hit = false;
@@ -930,6 +951,11 @@ export async function setRevisionPdfPath(id: string, rev: number, path: string):
       const r = (doc.revisions || []).find((x) => x.rev === rev);
       if (r && !r.pdfBlobPath) {
         r.pdfBlobPath = path;
+        if (typeof file.savedAt === "number" && Number.isFinite(file.savedAt)) r.pdfSavedAt = file.savedAt;
+        const p = file.printed;
+        if (r.docFields && p && Number.isSafeInteger(p.revNum) && p.revNum >= 1 && Number.isFinite(p.revDateMs)) {
+          r.docFields = { ...r.docFields, revNo: p.revNum, issuedAt: p.revDateMs };
+        }
         hit = true;
       }
     });
@@ -961,6 +987,7 @@ export async function patchShareLink(id: string, op: ShareLinkOp): Promise<{ quo
   const quote = await patchQuote(id, (doc) => {
     const prev = doc.shareLink ?? null;
     if (op.kind === "revoke") {
+      if (!prev) return; // nothing to revoke — no write
       doc.shareLink = {
         nonce: newShareNonce(),
         expiresAt: 0,

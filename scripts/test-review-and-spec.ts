@@ -10723,6 +10723,7 @@ seeded()
   .then(() => shareLinks293tAsyncChecks())
   .then(() => onlineDoc293tAsyncChecks())
   .then(() => portalPage293tAsyncChecks())
+  .then(() => finalFix293tAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -45250,7 +45251,8 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   const df = { customer: "Sent Cust", locationId: "loc-sent", contactName: "Sent Contact", quoteNote: "Sent note", assumptions: "Sent assumptions",
     installTimeframe: "Q4", preparedBy: "Sent Preparer", owner: "Sent Owner", termsText: "Sent terms", paymentTerms: "Net 30",
     pdfOptions: { detail: "sectioned" }, portalFirm: null, source: "estimator" };
-  const withDf = rev(2, "sent", 5000, { docFields: df, spec: { sections: [{ id: "sentSec" }] }, vendorQuotes: [{ id: "vq-sent" }] });
+  // Final fix 1: the Rev/date stamp the PDF copy freezes (here the PDF printed Rev 2, dated 5000).
+  const withDf = rev(2, "sent", 5000, { docFields: { ...df, revNo: 2, issuedAt: 5000 }, spec: { sections: [{ id: "sentSec" }] }, vendorQuotes: [{ id: "vq-sent" }] });
   const live = quote("sent", [rev(1, "manual", 1000), withDf, rev(3, "manual", 7000)], { shareLink: { nonce: "N", expiresAt: 1, createdAt: 1, createdBy: "x" } });
   const a = n293tAsOf(live, withDf);
   ok(a.name === "Sent name" && a.value === 500 && (a.spec as { sections: { id: string }[] }).sections[0].id === "sentSec" &&
@@ -45687,7 +45689,8 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   const st2 = n293tState(q2);
   const p2 = st2.kind === "ok" ? await n293tLoad(q2, { revision: st2.rev, photos: webHref }) : null;
   const h2 = p2 ? [p293Render({ ...p2, layout: "web" }), p293Render({ ...n293tBom(p2), layout: "web" })].join("\n") : "";
-  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 2 &&
+  // Final fix 1: no PDF was copied, so Rev N follows the PDF's counting rule (1 revision before it).
+  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 1 &&
      h2.includes("Second intro 293t.") && h2.includes("Second note 293t.") && h2.includes("Second line 293t") && !/SECRET-293/.test(h2),
     "#293t loader (DB): with two sent revisions the page renders the latest only — nothing of the earlier one, no internal note (Narrative + BOM, web)");
 }
@@ -45809,7 +45812,7 @@ async function portalPage293tAsyncChecks(): Promise<void> {
     "#293t share page: read-only, and it never reads or sets a session");
   ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(rd("src/app/share/layout.tsx")), "#293t share page: server-rendered, with its own minimal layout");
   const photo = rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts");
-  ok(photo.indexOf("rateLimit(") < photo.indexOf("resolveSharedQuote(") && photo.includes('"share-photo:" + clientIp(req)') && photo.includes("SHARE_PHOTO_PER_MIN") &&
+  ok(photo.indexOf("rateLimit(") < photo.indexOf("resolveSharedQuote(") && photo.includes('"share-photo:" + (clientIp(req) || "unknown")') && photo.includes("SHARE_PHOTO_PER_MIN") &&
      photo.includes("servePhotoForRevision(req, hit.state.rev, docId)") && photo.includes('hit.state.kind !== "ok"'),
     "#293t share photos: rate-limited per IP, the same token check as the page, only the sent revision's printed photos");
   const cfg = rd("next.config.ts");
@@ -45819,17 +45822,255 @@ async function portalPage293tAsyncChecks(): Promise<void> {
   const sw = rd("public/sw.js");
   ok(sw.includes('requested.pathname.startsWith("/share/")') && sw.includes('target.pathname.startsWith("/share/")'), "#293t service worker: a share page (its token in the URL) is never cached");
   const smoke = rd("scripts/smoke-routes.ts");
-  ok(smoke.includes(`"/share/quote/Q-2041/0.${"A".repeat(43)}",`) && smoke.includes('"/share/quote/Q-2041/not-a-token",'), "#293t smoke: a well-formed but invalid token and a malformed one are smoke routes (both 200 cards)");
+  ok(smoke.includes(`"/share/quote/Q-2041/1.${"A".repeat(43)}",`) && smoke.includes('"/share/quote/Q-2041/not-a-token",'), "#293t smoke: a well-formed but invalid token (passes the shape check, fails the HMAC verify) and a malformed one are smoke routes (both 200 cards)");
   // Beyond the plan's checks: the loader fails closed (null) → the same one card; no-IP
   // requests share one fixed "unknown" bucket; the as-sent quote and the link record never
   // reach the page; and the fetch handler never serves or stores a /share/ response.
   ok(page.includes("!docProps") && page.indexOf("loadQuoteDocumentProps(") < page.indexOf("ONLINE_COPY.shareInactive") && page.includes("revision: ok.rev"),
     "#293t share page: pinned to the sent revision, and a loader that fails closed shows the same one card");
-  ok(page.includes('clientIpFromHeaders(await headers()) || "unknown"') && photo.includes('.replace(/^share-photo:$/, "share-photo:unknown")'),
+  ok(page.includes('clientIpFromHeaders(await headers()) || "unknown"') && photo.includes('"share-photo:" + (clientIp(req) || "unknown")'),
     "#293t share rate limits: a request with no client IP counts against one fixed \"unknown\" key");
   ok(!/quoteAsOfRevision|shareLink|generateMetadata/.test(page) && !/quoteAsOfRevision|shareLink/.test(photo),
     "#293t share page: no as-sent quote outside the loader, no link record, fixed metadata");
   ok(sw.includes('if (sameOrigin && url.pathname.startsWith("/share/")) return;') &&
      sw.indexOf('url.pathname.startsWith("/share/")') < sw.indexOf('req.mode === "navigate"'),
     "#293t service worker: share pages and share photos bypass the worker entirely (no cache-first image copy of a token URL)");
+}
+
+/* ======================================================================
+   #293 slice 3 — final review fix wave: the online pages print the Rev N
+   and date the sent PDF printed (recorded at render, frozen with the copy,
+   derived by the PDF's counting rule otherwise); Revoke with no link writes
+   nothing; a refused create writes nothing; the print token's leading zero;
+   the share photo key; the smoke token; the nonce comments; the Client link
+   panel's re-read on focus.
+   ====================================================================== */
+import {
+  documentRevStamp as n293tFStamp, settlePdf as n293tFSettle, pendingPdf as n293tFPending, latestSentRevision as n293tFLatestSent,
+  type QuotePdfState as N293tFPdf,
+} from "@/lib/quote-pdf/state";
+import { sentDocumentStamp as n293tFSent } from "@/lib/quote-share/view";
+import { patchShareLink as n293tFPatchLink, setStatus as n293tFSetStatus, updateQuotePdf as n293tFUpdatePdf } from "@/lib/stores/quotes";
+import { generateQuotePdf as n293tFGenerate } from "@/lib/quote-pdf/generate";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const SET = { companyName: "Peak Systems Group", logoDark: null };
+  const DAY = 86_400_000;
+  const chicago = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
+  const df = { customer: "C", locationId: null, contactName: null, quoteNote: "", assumptions: "", installTimeframe: "", preparedBy: "", owner: "Pat",
+    termsText: "", paymentTerms: null, pdfOptions: null, portalFirm: null, source: "estimator" };
+  const r = (n: number, reason: "manual" | "sent", at: number, extra: Record<string, unknown> = {}) =>
+    ({ rev: n, at, by: "t", reason, note: "", name: "N", value: 1, margin: 0, status: "sent", spec: { sections: [] }, ...extra }) as unknown as N293tRev;
+  const qf = (revisions: N293tRev[], extra: Record<string, unknown> = {}) =>
+    ({ id: "Q-F", name: "N", customer: "C", customerId: null, value: 1, margin: 0, status: "sent", source: "estimator", quoteType: "system", owner: "Pat",
+       createdAt: 7, updatedAt: 99 * DAY, history: [], review: {}, estNo: 1007, revisions, ...extra }) as unknown as N293tQuote;
+
+  // ---- one counting rule: what quoteDocumentDataFor prints is documentRevStamp ----
+  const cases = [qf([]), qf([r(1, "sent", 1), r(2, "manual", 2), r(3, "sent", 3)]), qf([r(1, "sent", 1)], { updatedAt: 0 })];
+  ok(cases.every((q) => { const d = n293tDocData(q, null, SET); const s = n293tFStamp(q); return s.revNum === d.revNum && s.revDateMs === d.revDateMs; }) &&
+     n293tFStamp(cases[1]).revNum === 3 && n293tFStamp(cases[2]).revDateMs === 7,
+    "#293t final 1: documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (revisions so far, at least 1; updatedAt, else createdAt)");
+  const ready: N293tFPdf = { status: "ready", at: 10, savedAt: 5, blobPath: "p", printed: { revNum: 2, revDateMs: 5 } };
+  const pend = n293tFPending(ready, 20, 21);
+  const settled = n293tFSettle(pend, 20, { ok: true, blobPath: "p2", printed: { revNum: 3, revDateMs: 20 } }, 30);
+  const bare = n293tFSettle(pend, 20, { ok: true, blobPath: "p2" }, 30);
+  ok(!("printed" in pend) && settled?.printed?.revNum === 3 && settled.printed.revDateMs === 20 && !!bare && !("printed" in bare),
+    "#293t final 1: a settled file records what it printed; a new save's pending state never carries the old file's stamp");
+
+  // ---- the online stamp: frozen when recorded, derived by the PDF rule otherwise ----
+  const fz = r(3, "sent", 9 * DAY, { docFields: { ...df, revNo: 2, issuedAt: 4 * DAY } });
+  const three = [r(1, "sent", DAY), r(2, "manual", 2 * DAY)];
+  const s1 = n293tFSent(qf([...three, fz]), fz);
+  ok(s1.revNo === 2 && s1.issuedAt === 4 * DAY, "#293t final 1: a revision with a frozen stamp prints exactly it");
+  const noStamp = r(3, "sent", 9 * DAY, { docFields: df, pdfSavedAt: 6 * DAY });
+  const old = r(3, "sent", 9 * DAY);
+  const s2 = n293tFSent(qf([...three, noStamp]), noStamp);
+  const s3 = n293tFSent(qf([...three, old]), old);
+  ok(s2.revNo === 2 && s2.issuedAt === 6 * DAY && s3.revNo === 2 && s3.issuedAt === 9 * DAY,
+    "#293t final 1: without a stamp — Rev = the revisions before it, date = the copied file's savedAt, else the revision's own date");
+  const first = r(1, "sent", 3 * DAY);
+  const s4 = n293tFSent(qf([first]), first);
+  ok(s4.revNo === 1 && s4.issuedAt === 3 * DAY, "#293t final 1: a first send with no stamp derives Rev 1 (the PDF's floor of 1)");
+
+  // ---- recall + edit + resend on a later day: the web pages print the PDF's Rev and date ----
+  const T1 = Date.UTC(2026, 9, 1, 18), T2 = Date.UTC(2026, 9, 5, 18), T3 = Date.UTC(2026, 9, 8, 18);
+  const rev1 = r(1, "sent", T1, { docFields: { ...df, revNo: 1, issuedAt: T1 - 60_000 } });
+  // Day 5: recalled + edited + saved → the render reads revisions [rev1], updatedAt T2.
+  const pdfProps = n293tDocData(qf([rev1], { updatedAt: T2, status: "draft" }), null, SET);
+  // Day 8: sent from the hub → rev 2 cut; its copy freezes what that file printed.
+  const rev2 = r(2, "sent", T3, { docFields: { ...df, revNo: pdfProps.revNum, issuedAt: pdfProps.revDateMs }, pdfSavedAt: T2 + 5 });
+  const live = qf([rev1, rev2], { updatedAt: T3 + DAY });
+  const webProps = n293tDocData(n293tAsOf(live, rev2), null, SET);
+  const hdr = n293tHeader(live, rev2);
+  ok(pdfProps.revNum === 1 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
+    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev 1 and save date, not rev 2 / the send day");
+  ok(hdr === `EST-1007 · Rev 1 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
+    "#293t final 1: the online header line names the PDF's Rev and date too");
+  const firstWeb = n293tDocData(n293tAsOf(qf([rev1]), rev1), null, SET);
+  ok(firstWeb.revNum === 1 && firstWeb.revDateMs === T1 - 60_000 && n293tHeader(qf([rev1]), rev1) === `EST-1007 · Rev 1 · sent ${chicago(T1 - 60_000)}`,
+    "#293t final 1: first send — the online pages and the PDF say the same Rev and date");
+  const oldRevs = [r(1, "sent", T1), r(2, "manual", T2), r(3, "sent", T3)];
+  const oldWeb = n293tDocData(n293tAsOf(qf(oldRevs), oldRevs[2]), null, SET);
+  ok(oldWeb.revNum === 2 && oldWeb.revDateMs === T3, "#293t final 1: an old revision without the fields derives the PDF counting rule (2 revisions before it) and its own date");
+  const headerOnly = n293tAsOf(live, rev2) as unknown as Record<string, unknown>;
+  ok(!("revNo" in headerOnly) && !("issuedAt" in headerOnly), "#293t final 1: the stamp never leaks into the as-sent quote's header fields");
+
+  // ---- the writers ----
+  const qs = rd("src/lib/stores/quotes.ts");
+  const srp = qs.slice(qs.indexOf("export async function setRevisionPdfPath("), qs.indexOf("\n}\n", qs.indexOf("export async function setRevisionPdfPath(")));
+  ok(srp.includes("if (r && !r.pdfBlobPath) {") && srp.includes("revNo: p.revNum, issuedAt: p.revDateMs") && srp.includes("r.pdfSavedAt = file.savedAt"),
+    "#293t final 1: the stamp is frozen once, in the same write as the revision's PDF copy");
+  const gen = rd("src/lib/quote-pdf/generate.ts");
+  ok(gen.includes('const printed = kind === "quote" ? await printedStamp(quoteId, q) : null;') && gen.includes("{ ok: true, blobPath: path, printed }") &&
+     gen.includes("{ savedAt: pdf.savedAt, printed: pdf.printed ?? null }"),
+    "#293t final 1: the generator records what a quote file printed and the sent-revision copy carries it");
+  const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
+  ok(qdd.includes("const stamp = documentRevStamp(q);") && qdd.includes("revNum: stamp.revNum,") && qdd.includes("revDateMs: stamp.revDateMs,") &&
+     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };"),
+    "#293t final 1: the PDF's Rev/date rule is unchanged, now named once (documentRevStamp)");
+
+  // ---- item 7: the print token's leading zero ----
+  const S = "test-secret-293tf";
+  const NOW = 1_800_000_000_000;
+  const pt = n293tSignPrint(S, "quote", "Q-1", NOW);
+  ok(n293tVerifyPrint(S, pt, "quote", "Q-1", NOW) && !n293tVerifyPrint(S, "0" + pt, "quote", "Q-1", NOW) && !n293tVerifyPrint(S, "00" + pt, "quote", "Q-1", NOW),
+    "#293t final 7: a print token with a leading zero on its expiry never verifies (one expiry, one spelling)");
+
+  // ---- items 2, 3, 5, 8, 9: wiring ----
+  ok(rd("scripts/smoke-routes.ts").includes(`"/share/quote/Q-2041/1.${"A".repeat(43)}",`), "#293t final 2: the smoke share token passes the shape check (reaches the DB read + HMAC verify)");
+  ok(rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts").includes('rateLimit("share-photo:" + (clientIp(req) || "unknown"), SHARE_PHOTO_PER_MIN, 60_000)'),
+    "#293t final 3: the share photo key is share-photo:<ip>, or share-photo:unknown, built like the page's");
+  const lk = rd("src/lib/quote-share/links.ts");
+  ok(lk.includes("let refusal = null as string | null;"), "#293t final 5: the create refusal keeps its string type across the callback");
+  ok(lk.includes("if (!cur.shareLink) return { ok: true };") && lk.indexOf("if (!cur.shareLink) return { ok: true };") < lk.indexOf('patchShareLink(quoteId, { kind: "revoke"') &&
+     qs.includes("if (!prev) return; // nothing to revoke — no write"),
+    "#293t final 4: Revoke on a quote with no link returns before any write (and the store refuses to mint one)");
+  const tokSrc = rd("src/lib/quote-share/token.ts");
+  ok(!tokSrc.includes("lives only in the database") && tokSrc.includes("/api/sync/pull ships whole quote") && qs.includes("/api/sync/pull ships whole quote docs (nonce"),
+    "#293t final 8: the nonce comments say staff browsers can see it via /api/sync/pull — and that it is no credential without AUTH_SECRET");
+  const panel = rd("src/app/(app)/estimator/client-link-panel.tsx");
+  ok(panel.includes('window.addEventListener("focus", refresh);') && panel.includes('document.addEventListener("visibilitychange", refresh);') &&
+     panel.includes('window.removeEventListener("focus", refresh);') && (panel.match(/await reload\(\);/g) || []).length >= 4 && !panel.includes("window.confirm"),
+    "#293t final 9: the Client link panel re-reads its status on focus and after its own actions (listeners cleaned up; confirms stay inline)");
+}
+
+async function finalFix293tAsyncChecks(): Promise<void> {
+  // ---- item 4 + 6: Revoke with no link, and a refused create, write nothing ----
+  const QN = fixtureId(293, "t-final-nolink");
+  await n293tQCreate({ id: QN, name: "#293t no link", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator" });
+  registerFixture("quotes", QN);
+  const before = JSON.stringify(await n293tQGet(QN));
+  const rv = await n293tRevoke(QN, "Revoker");
+  ok(rv.ok && JSON.stringify(await n293tQGet(QN)) === before, "#293t final 4 (DB): Revoke on a quote that never had a link succeeds and writes nothing");
+  const direct = await n293tFPatchLink(QN, { kind: "revoke", by: "x", now: Date.now() });
+  ok(direct?.wrote === false && !direct.quote.shareLink, "#293t final 4 (DB): the store's revoke path mints nothing when there is no link");
+
+  await withPdfEnv222(async () => {
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    delete process.env.VERCEL;
+    const root = mkdtempSync(join(tmpdir(), "quote-pdfs-293tf-"));
+    process.env.QUOTE_PDF_DIR = root;
+    try {
+      const origin = "http://print.test";
+      const secret = "spec-secret-293tf";
+      const sec = { id: "sysF", name: "Test293tF", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "T293TF", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+      const SET = { companyName: "Peak Systems Group", logoDark: null };
+      const webHref = { href: (id: string) => `/t/photo/${id}` };
+      const tick = () => new Promise<void>((res) => setTimeout(res, 5));
+      // What the print route prints, read at render time — exactly its own call.
+      const render = (id: string, seen: { v: { revNum: number; revDateMs: number } | null }, during?: () => Promise<unknown>) => async () => {
+        if (during) await during();
+        const d = n293tDocData((await n293tQGet(id))!, null, SET);
+        seen.v = { revNum: d.revNum, revDateMs: d.revDateMs };
+        return Buffer.from("%PDF-1.4 293tf");
+      };
+      const saveAndRender = async (id: string, seen: { v: { revNum: number; revDateMs: number } | null }, during?: () => Promise<unknown>) => {
+        const savedAt = Date.now();
+        await n293tFUpdatePdf(id, (cur) => n293tFPending(cur, savedAt, savedAt));
+        await n293tFGenerate({ quoteId: id, savedAt, origin, secret, render: render(id, seen, during) });
+        return savedAt;
+      };
+      const web = async (id: string) => {
+        const q = (await n293tQGet(id))!;
+        const st = n293tState(q);
+        if (st.kind !== "ok") return null;
+        const props = await n293tLoad(q, { revision: st.rev, photos: webHref });
+        return props ? { q, rev: st.rev, props, header: n293tHeader(q, st.rev) } : null;
+      };
+      const send = (id: string) => n293tFSetStatus(id, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+
+      // 1. Send from the hub after a save (the render ran BEFORE the cut) — first send.
+      const QA = fixtureId(293, "t-final-hub");
+      await n293tQCreate({ id: QA, name: "#293tF hub", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+      registerFixture("quotes", QA);
+      await n293tQUpdate(QA, { quoteNote: "First note 293tF" });
+      const seen1 = { v: null as { revNum: number; revDateMs: number } | null };
+      await saveAndRender(QA, seen1);
+      const pdf1 = (await n293tQGet(QA))?.pdf;
+      ok(!!seen1.v && pdf1?.status === "ready" && pdf1.printed?.revNum === seen1.v.revNum && pdf1.printed.revDateMs === seen1.v.revDateMs,
+        "#293t final 1 (DB): the generator records exactly the Rev + date the print route printed");
+      await tick();
+      await send(QA);
+      const w1 = await web(QA);
+      ok(!!w1 && !!seen1.v && !!w1.rev.pdfBlobPath && w1.rev.docFields?.revNo === seen1.v.revNum && w1.rev.docFields?.issuedAt === seen1.v.revDateMs &&
+         w1.props.revNum === seen1.v.revNum && w1.props.revDateMs === seen1.v.revDateMs && w1.header.includes(` · Rev ${seen1.v.revNum} · `),
+        "#293t final 1 (DB): first send — the copy freezes the PDF's Rev + date and the online document + header print them");
+
+      // 2. Recall, edit, save, then send again from the hub: the PDF still says Rev 1 (rendered before rev 2 was cut).
+      await n293tFSetStatus(QA, "draft", "spec");
+      await tick();
+      await n293tQUpdate(QA, { quoteNote: "Second note 293tF" });
+      const seen2 = { v: null as { revNum: number; revDateMs: number } | null };
+      const saved2 = await saveAndRender(QA, seen2);
+      await tick();
+      await send(QA);
+      const w2 = await web(QA);
+      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 1 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
+         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 1 · ") && w2.props.quoteNote === "Second note 293tF",
+        "#293t final 1 (DB): recall + edit + resend — the online pages print the PDF's Rev 1 and save date, not the revision's own Rev 2 / send time");
+
+      // 3. Save + send in one action (the render runs AFTER the cut): the PDF says Rev 2 — and so do the pages.
+      const QB = fixtureId(293, "t-final-onesave");
+      await n293tQCreate({ id: QB, name: "#293tF one save", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+      registerFixture("quotes", QB);
+      await send(QB);
+      await n293tFSetStatus(QB, "draft", "spec");
+      await tick();
+      await n293tQUpdate(QB, { quoteNote: "One-save note 293tF" });
+      const savedB = Date.now();
+      await n293tFUpdatePdf(QB, (cur) => n293tFPending(cur, savedB, savedB));
+      await send(QB); // the cut lands while the render is still pending
+      const seen3 = { v: null as { revNum: number; revDateMs: number } | null };
+      await n293tFGenerate({ quoteId: QB, savedAt: savedB, origin, secret, render: render(QB, seen3) });
+      const w3 = await web(QB);
+      ok(!!w3 && !!seen3.v && seen3.v.revNum === 2 && w3.rev.rev === 2 && w3.rev.docFields?.revNo === 2 && w3.props.revNum === 2 &&
+         w3.props.revDateMs === seen3.v.revDateMs && w3.header.includes(" · Rev 2 · "),
+        "#293t final 1 (DB): save + send in one action — the render after the cut prints Rev 2, and the pages follow the PDF, not a fixed rule");
+
+      // 4. A write lands during the render: nothing is recorded; the pages derive (revisions before it, the file's savedAt).
+      const QC = fixtureId(293, "t-final-race");
+      await n293tQCreate({ id: QC, name: "#293tF race", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+      registerFixture("quotes", QC);
+      await n293tQUpdate(QC, { quoteNote: "Race note 293tF" });
+      const seen4 = { v: null as { revNum: number; revDateMs: number } | null };
+      const savedC = await saveAndRender(QC, seen4, async () => { await tick(); await n293tQUpdate(QC, { category: "Rigging" } as never); });
+      const pdf4 = (await n293tQGet(QC))?.pdf;
+      ok(pdf4?.status === "ready" && !pdf4.printed, "#293t final 1 (DB): a write during the render → no stamp recorded (never a guess)");
+      await tick();
+      await send(QC);
+      const w4 = await web(QC);
+      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
+        "#293t final 1 (DB): an unstamped copy derives the PDF counting rule — Rev 1, the copied file's savedAt");
+
+      // 6. A refused create writes nothing — even over an expired link.
+      const made = await n293tEnsure(QA, "Tester", { secret });
+      const linkBefore = JSON.stringify((await n293tQGet(QA))?.shareLink);
+      const refused = await n293tFPatchLink(QA, { kind: "create", by: "x", now: Date.now() + 400 * DAY, allow: () => false });
+      ok(made.ok && refused?.wrote === false && JSON.stringify((await n293tQGet(QA))?.shareLink) === linkBefore,
+        "#293t final 6 (DB): patchShareLink create with allow() false writes nothing and leaves the link unchanged");
+      ok(n293tFLatestSent((await n293tQGet(QA))?.revisions)?.rev === 2, "#293t final (DB): fixture sanity — the hub quote's latest sent revision is rev 2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 }

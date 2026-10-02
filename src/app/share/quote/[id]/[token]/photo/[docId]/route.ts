@@ -12,8 +12,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string; token: string; docId: string }> }) {
   const { id, token, docId } = await ctx.params;
-  const rlKey = ("share-photo:" + clientIp(req)).replace(/^share-photo:$/, "share-photo:unknown");
-  if (!rateLimit(rlKey, SHARE_PHOTO_PER_MIN, 60_000).ok) return new Response("Too many requests", { status: 429 });
+  if (!rateLimit("share-photo:" + (clientIp(req) || "unknown"), SHARE_PHOTO_PER_MIN, 60_000).ok) return new Response("Too many requests", { status: 429 });
   const hit = await resolveSharedQuote(id, token);
   if (!hit || hit.state.kind !== "ok") return new Response("Not found", { status: 404 });
   return servePhotoForRevision(req, hit.state.rev, docId);

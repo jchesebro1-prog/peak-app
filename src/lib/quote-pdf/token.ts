@@ -30,7 +30,9 @@ export function verifyPrintToken(secret: string, token: string, kind: PrintToken
   if (!secret || typeof token !== "string") return false;
   // A NaN clock makes both expiry comparisons false — fail closed instead.
   if (!Number.isFinite(nowMs)) return false;
-  const m = /^(\d{1,15})\.([A-Za-z0-9_-]{43})$/.exec(token);
+  // No leading zero on the expiry (#293 slice 3 final fix): one expiry has
+  // exactly one spelling, so "0" + a valid token never verifies.
+  const m = /^([1-9]\d{0,14})\.([A-Za-z0-9_-]{43})$/.exec(token);
   if (!m) return false;
   const exp = Number(m[1]);
   if (!Number.isSafeInteger(exp) || nowMs > exp || exp - nowMs > PRINT_TOKEN_TTL_MS) return false;

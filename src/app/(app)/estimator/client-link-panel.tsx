@@ -9,7 +9,9 @@ import { ONLINE_COPY, type ShareLinkStatus } from "@/lib/quote-share/view";
  * client link (the same link until it expires or is revoked), its expiry and
  * creator, and Revoke behind an inline confirm. The link opens the latest
  * SENT version, so a never-sent or recalled quote has no Copy. Reads its own
- * status on mount — no quote data comes from the Estimator.
+ * status on mount, again whenever the window regains focus (a send made
+ * elsewhere while the preview is open enables Copy without reopening it) and
+ * after its own actions — no quote data comes from the Estimator.
  */
 
 const FAILED = "Could not reach the server. Try again.";
@@ -46,8 +48,23 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
         if (live) setErr(FAILED);
       }
     );
+    // Re-read on focus: the quote may have been sent (or recalled) elsewhere
+    // while this preview stayed open. A failed re-read keeps what's shown.
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      shareLinkStatusAction(quoteId).then(
+        (r) => {
+          if (live && r.ok) setStatus(r.status);
+        },
+        () => undefined
+      );
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
       live = false;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, [quoteId]);
 
@@ -75,6 +92,7 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
       }
       if (!r.ok) {
         setErr(r.error);
+        await reload();
         return;
       }
       const link = r.link;
@@ -91,6 +109,7 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
         setManualUrl(url);
         setNote(ONLINE_COPY.copyManual);
       }
+      await reload();
     });
 
   const revoke = () =>
@@ -106,6 +125,7 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
       }
       if (!r.ok) {
         setErr(r.error);
+        await reload();
         return;
       }
       setConfirmRevoke(false);

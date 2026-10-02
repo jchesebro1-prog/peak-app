@@ -3,6 +3,7 @@ import { isAppOrigin, originFrom } from "./origin";
 import { renderPrintRouteToPdf } from "./render";
 import {
   canHavePdf,
+  documentRevStamp,
   latestSentRevision,
   pdfIsCurrent,
   pdfKindForQuoteType,
@@ -10,6 +11,7 @@ import {
   printPathFor,
   revisionAwaitingPdf,
   settlePdf,
+  type DocumentRevStamp,
   type PdfOutcome,
   type QuotePdfState,
 } from "./state";
@@ -92,6 +94,22 @@ function isPendingFor(cur: QuotePdfState | null | undefined, savedAt: number): c
   return !!cur && cur.status === "pending" && cur.savedAt === savedAt;
 }
 
+/**
+ * #293 slice 3 — the Rev N and date the file just rendered printed: the
+ * print route's own rule (documentRevStamp, via quoteDocumentDataFor) over the
+ * quote it read mid-render. Read before and after the render; both values only
+ * ever grow (revisions are append-only, updatedAt moves forward), so equal
+ * readings mean the print route saw exactly them. A write that landed during
+ * the render → null: nothing is recorded rather than a guess.
+ */
+async function printedStamp(quoteId: string, before: Parameters<typeof documentRevStamp>[0]): Promise<DocumentRevStamp | null> {
+  const after = await getQuote(quoteId).catch(() => null);
+  if (!after) return null;
+  const a = documentRevStamp(before);
+  const b = documentRevStamp(after);
+  return a.revNum === b.revNum && a.revDateMs === b.revDateMs ? a : null;
+}
+
 /** Settle only a state still pending for this save; anything else is superseded. */
 function settleIfPending(cur: QuotePdfState | null, savedAt: number, outcome: PdfOutcome): QuotePdfState | undefined {
   return isPendingFor(cur, savedAt) ? settlePdf(cur, savedAt, outcome, Date.now()) : undefined;
@@ -131,10 +149,11 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
     } catch (e) {
       return await settleFailed(reason(e));
     }
+    const printed = kind === "quote" ? await printedStamp(quoteId, q) : null;
     const path = await store.put(pdfStoragePath(quoteId, String(savedAt)), bytes);
     let res: Awaited<ReturnType<typeof updateQuotePdf>>;
     try {
-      res = await updatePdf(quoteId, (cur) => settleIfPending(cur, savedAt, { ok: true, blobPath: path }));
+      res = await updatePdf(quoteId, (cur) => settleIfPending(cur, savedAt, { ok: true, blobPath: path, printed }));
     } catch (e) {
       // The settle never committed, so nothing records this file — drop it
       // before recording the failure (the last good file stays current).
@@ -191,7 +210,9 @@ export async function copySentRevisionPdf(quoteId: string): Promise<string | nul
   const bytes = await store.read(pdf.blobPath);
   if (!bytes) return null;
   const path = await store.put(pdfStoragePath(quoteId, `rev-${rev.rev}`), bytes);
-  if (!(await setRevisionPdfPath(quoteId, rev.rev, path))) {
+  // #293 slice 3: the copy carries what the file printed (Rev N + date) onto
+  // the revision, so the online pages print exactly the customer's PDF.
+  if (!(await setRevisionPdfPath(quoteId, rev.rev, path, { savedAt: pdf.savedAt, printed: pdf.printed ?? null }))) {
     const now = await getQuote(quoteId);
     const kept = (now?.revisions || []).find((r) => r.rev === rev.rev)?.pdfBlobPath;
     if (kept !== path) await store.remove(path).catch(() => undefined);

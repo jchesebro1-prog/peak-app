@@ -55,22 +55,62 @@ export function shareEligibility(q: StateFields): ShareEligibility {
   return s.kind === "ok" ? "ok" : s.kind === "revising" ? "revising" : "not-sent";
 }
 
-/** The quote as it was sent (spec §5.1): the revision's priced payload, its
- *  frozen header (docFields; the live header on revisions cut before #293),
- *  its date as the document date, and the revision list cut at it so the
- *  document's Rev N is the revision's. Never mutates `q`. */
-export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
+/**
+ * The Rev N and date the sent revision's PDF printed (#293 slice 3, final
+ * fix 1) — the online pages print exactly these, so a customer holding both
+ * the PDF and the link sees one Rev and one date. Frozen with the PDF copy
+ * (docFields.revNo / issuedAt, from what the render recorded —
+ * QuotePdfState.printed). A revision without them (its PDF not copied yet,
+ * a render that couldn't be sure, or one cut before this) derives them by
+ * the PDF's own counting rule as of the save the PDF was made from: the
+ * revisions before this one (at least 1), and that save's date (the copied
+ * file's savedAt when recorded, else the revision's own date). Pure.
+ */
+export function sentDocumentStamp(
+  q: Pick<Quote, "revisions">,
+  rev: Pick<QuoteRevision, "rev" | "at" | "docFields" | "pdfSavedAt">
+): { revNo: number; issuedAt: number } {
+  const df = rev.docFields;
   const revs = Array.isArray(q.revisions) ? q.revisions : [];
   const idx = revs.findIndex((r) => r.rev === rev.rev);
+  const before = idx >= 0 ? idx : Math.max(0, rev.rev - 1);
+  const revNo = typeof df?.revNo === "number" && Number.isSafeInteger(df.revNo) && df.revNo >= 1 ? df.revNo : Math.max(1, before);
+  const issuedAt =
+    typeof df?.issuedAt === "number" && Number.isFinite(df.issuedAt) && df.issuedAt > 0
+      ? df.issuedAt
+      : typeof rev.pdfSavedAt === "number" && Number.isFinite(rev.pdfSavedAt) && rev.pdfSavedAt > 0
+        ? rev.pdfSavedAt
+        : rev.at;
+  return { revNo, issuedAt };
+}
+
+/** A revision's frozen header fields, without the Rev/date stamp (those
+ *  reach the document through `updatedAt` and the revision count only). */
+function headerFields(df: QuoteRevision["docFields"]): Partial<Quote> {
+  if (!df) return {};
+  const out: Record<string, unknown> = { ...df };
+  delete out.revNo;
+  delete out.issuedAt;
+  return out as Partial<Quote>;
+}
+
+/** The quote as it was sent (spec §5.1): the revision's priced payload, its
+ *  frozen header (docFields; the live header on revisions cut before #293),
+ *  and the Rev N + date its PDF printed (sentDocumentStamp) — as the
+ *  document date and a revision list cut to that count, which is how
+ *  quoteDocumentDataFor reads them. Never mutates `q`. */
+export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
+  const revs = Array.isArray(q.revisions) ? q.revisions : [];
+  const { revNo, issuedAt } = sentDocumentStamp(q, rev);
   return {
     ...q,
-    ...(rev.docFields ?? {}),
+    ...headerFields(rev.docFields),
     name: rev.name,
     spec: rev.spec ?? null,
     vendorQuotes: rev.vendorQuotes ?? null,
     value: rev.value,
-    updatedAt: rev.at,
-    revisions: idx >= 0 ? revs.slice(0, idx + 1) : revs,
+    updatedAt: issuedAt,
+    revisions: revs.slice(0, revNo),
     shareLink: null,
   } as unknown as Quote;
 }
@@ -78,9 +118,14 @@ export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
 const chicagoDate = (ms: number) =>
   new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
 
-/** "EST-1005 · Rev 2 · sent Oct 1, 2026". */
-export function onlineHeaderLine(q: Pick<Quote, "id" | "estNo" | "estSuffix" | "quoteType">, rev: Pick<QuoteRevision, "rev" | "at">): string {
-  return `${displayQuoteNumber(q)} · Rev ${rev.rev} · sent ${chicagoDate(rev.at)}`;
+/** "EST-1005 · Rev 2 · sent Oct 1, 2026" — the Rev and date the sent PDF
+ *  printed (sentDocumentStamp), never the revision's own number and time. */
+export function onlineHeaderLine(
+  q: Pick<Quote, "id" | "estNo" | "estSuffix" | "quoteType" | "revisions">,
+  rev: Pick<QuoteRevision, "rev" | "at" | "docFields" | "pdfSavedAt">
+): string {
+  const { revNo, issuedAt } = sentDocumentStamp(q, rev);
+  return `${displayQuoteNumber(q)} · Rev ${revNo} · sent ${chicagoDate(issuedAt)}`;
 }
 
 export function sharePath(quoteId: string, token: string): string {

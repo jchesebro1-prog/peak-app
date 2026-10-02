@@ -5,8 +5,10 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
  * print token (src/lib/quote-pdf/token.ts), domain-separated ("share:" vs
  * "print:") and keyed to a per-quote nonce stored on the quote
  * (Quote.shareLink): `<exp>.<base64url HMAC-SHA256(secret,
- * "share:quote:<id>:<nonce>:<exp>")>`. The nonce lives only in the database,
- * so a token can't be made without AUTH_SECRET, and dies the moment the
+ * "share:quote:<id>:<nonce>:<exp>")>`. The nonce is stored on the quote doc
+ * — never sent to the Client link panel, but /api/sync/pull ships whole quote
+ * docs (nonce included) to active team users. That is not a credential: a
+ * token can't be made without AUTH_SECRET. A token dies the moment the
  * nonce rotates (Revoke) or the stored expiry changes. Pure: the secret and
  * the clock are parameters. Server-only (node:crypto) — never import from a
  * client component.

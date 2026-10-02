@@ -64,7 +64,9 @@ export async function ensureShareLink(quoteId: string, by: string, opts: { now?:
   const live = shareLinkView(cur, secret, now);
   if (live?.active) return { ok: true, link: live };
   // Re-checked under the row lock: a recall or a parallel create since the read.
-  let refusal: string | null = null;
+  // Widened by hand: TS doesn't see the callback's assignment, and an
+  // annotated `null` initialiser would narrow `refusal` to null below.
+  let refusal = null as string | null;
   const res = await patchShareLink(quoteId, {
     kind: "create",
     by,
@@ -80,8 +82,12 @@ export async function ensureShareLink(quoteId: string, by: string, opts: { now?:
   return link?.active ? { ok: true, link } : { ok: false, error: ONLINE_COPY.gone };
 }
 
-/** Revoke: a fresh nonce and expiry 0 — every earlier token fails twice over. */
+/** Revoke: a fresh nonce and expiry 0 — every earlier token fails twice over.
+ *  A quote that never had a link has nothing to revoke: no write. */
 export async function revokeShareLink(quoteId: string, by: string, opts: { now?: number } = {}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const cur = await getQuote(quoteId);
+  if (!cur) return { ok: false, error: ONLINE_COPY.gone };
+  if (!cur.shareLink) return { ok: true };
   const res = await patchShareLink(quoteId, { kind: "revoke", by, now: opts.now ?? Date.now() });
   return res ? { ok: true } : { ok: false, error: ONLINE_COPY.gone };
 }
