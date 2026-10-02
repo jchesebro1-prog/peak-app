@@ -591,5 +591,16 @@ See `.env.example`.
     stay datasheet-only. Remaining: a "Manual URL" import column. Punch
     item #290.
 
+32. ✅ **Catalog photo sheet** (#294, D546–D548) — Catalog → Datasheets →
+    Photo sheet (`/catalog/documents/photos`): export an .xlsx with one row
+    per quoted or portal part (Manufacturer · MFR Part # · SKU · … · Photo
+    1–3 · Status), fill in image links or file names (Photo 1 becomes the
+    primary), upload it with any photos it names, Preview, Import, and get a
+    results sheet back. Rows match on Manufacturer + MFR P/N with SKU as
+    tie-break, never guessed; a new `sheet` image source; 45 s resumable
+    batches, rows chunked under 600 KB, sheet ≤ 800 KB / 5,000 rows; never
+    deletes or replaces. Remaining is Jeff-gated: try one manufacturer on
+    production (file names from Drive need the #283 setup). Punch item #294.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

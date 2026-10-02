@@ -10272,3 +10272,32 @@ share the production DB).
 read "Link only" and those rows appear under "Link to fetch"; a bulk Fetch links now also downloads manuals (larger
 files, more of the 45 s budget per run). Watch item: client packages now include manuals (often 10-25 MB) in the
 in-memory zip.
+
+## 294. Catalog — photo sheet (export, fill in URLs or file names, import by MFR part #) — DONE 2026-10-01 (D546–D548)
+
+**Done.** Catalog → Datasheets gains a **Photo sheet** page (`/catalog/documents/photos`). Download an .xlsx with one row
+per quoted or portal part (never Labor; parts with no photo first, then Manufacturer, then MFR Part #): Manufacturer ·
+MFR Part # · SKU · Description · Category · Photos now · Photo 1–3 · Status. Put an image link or a photo's file name in
+Photo 1–3 (Photo 1 becomes the primary photo; 2 and 3 append), upload the sheet with any photos it names, Preview
+(nothing is written; problems are listed by row), then Import. Rows match a part on Manufacturer + MFR P/N (or M/N) with
+SKU as the tie-break and are never guessed. URLs are fetched and shrunk like every catalog image; names resolve to a
+dropped file first, else the Peak Product Photos Drive folder. Imports run in 45 s resumable batches, never delete or
+replace an image, and a re-upload of the same sheet is a no-op. A results sheet comes back with a Status per row.
+
+**Reported by Jeff 2026-10-01:** "an easy spreadsheet model for tracking and importing photos into the catalog all
+linked to manufacturer part number". Spec: `docs/superpowers/specs/2026-10-01-catalog-photo-sheet-design.md`. **Plan:**
+`docs/superpowers/plans/2026-10-01-catalog-photo-sheet.md`. No migrations.
+
+Gates: tsc 0; eslint 0 problems on the touched files; test:specs 10,440 PASS / ALL PASSED; test:smoke 189/189 ALL
+PASSED (including `/catalog/documents/photos` and `/catalog/documents/photos/export`); `next build` OK (both routes in
+the table). Not exercised in a browser or against Blob / Drive locally — harness-covered.
+
+**For Jeff.** Export a real sheet in production and try one manufacturer first. File-name cells that should come from
+Drive only work once the #283 Drive photo setup is done (OAuth scope, folder, enabled account); otherwise drop the photos
+with the upload. A sheet is capped at 800 KB / 5,000 rows — split a bigger catalog by manufacturer.
+
+**Rollback.** Safe. Pre-#294 code does not break on a `source: "sheet"` image document: `IMAGE_SOURCE_RANK` has no entry,
+so the rank difference is NaN, which is falsy in `compareImages`, and ties fall through to upload time instead of
+source rank; the gallery shows the raw label `sheet` instead of "Sheet". One side effect: the old Drive photo sync does
+not know sheet-claimed Drive files, so a rolled-back deploy could import such a file a second time as a duplicate `drive`
+image (additive, deletable). No migrations to undo.

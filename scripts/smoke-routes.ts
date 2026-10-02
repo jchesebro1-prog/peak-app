@@ -77,6 +77,8 @@ const ROUTES = [
   "/catalog/documents?show=missing-datasheet",
   "/catalog/documents?show=missing-manual", // #290 — the Manual slot's filter
   "/catalog/documents/upload", // #207 — bulk drop
+  "/catalog/documents/photos", // photo sheet — export, upload, preview, import
+  "/catalog/documents/photos/export", // photo sheet — the .xlsx download
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
   "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/estimating-rules",

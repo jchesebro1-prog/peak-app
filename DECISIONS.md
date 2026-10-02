@@ -8599,3 +8599,28 @@ manual is PDF only. In the customer view an unknown document kind is dropped, no
 (`toPartDocVM` returns null; `customerPartDocs` filters), so only datasheet, spec sheet and manual reach a customer.
 Separately, the portal's "Parts you've quoted before" shelf is no longer loaded or shown on the
 Packages page (`showQuotedBeforeShelf`: no search or filters, page 1, department not `packages`).
+
+## D546. Photo sheet: one row per part, Photo 1–3, Photo 1 is the primary (#294, 2026-10-01)
+
+The sheet has one row per part with three photo slots, not one row per photo — it reads like the catalog and a part is a
+single line to fill in. Photo 1 is the primary: a new Photo 1 moves to the front of the part's real images; Photos 2 and 3
+append at the end of the real-image group; datasheet-render thumbnails always stay last. Rows match a part on
+Manufacturer + MFR Part # (normalized, against MFR P/N or M/N) with SKU narrowing a tie, and SKU alone matches by SKU.
+Exactly one part matches or the row is a listed problem — it never guesses.
+
+## D547. A new image source `sheet`, and how it avoids double imports (#294, 2026-10-01)
+
+Images added from a sheet carry `source: "sheet"` (label "Sheet") with `sourceRef` `drive:<fileId>` for a Drive item or
+`file:<name>` for a dropped file; `sourceUrl` is the URL (URL items) or the Drive `webViewLink`. The Drive photo sync
+treats sheet-claimed Drive files as unchanged, so a file is never imported twice, and an existing image document with the
+same URL or Drive file is linked to the part rather than re-fetched. `sheet` shares rank 0 with upload and drive in
+`IMAGE_SOURCE_RANK`.
+
+## D548. Photo sheet size caps, batching and resumability (#294, 2026-10-01)
+
+A sheet is capped at 800 KB and 5,000 rows, since server actions cap request bodies at 1,200 KB and the results sheet
+re-sends the file. The browser sends import rows in chunks whose JSON stays under 600 KB, and dropped photos upload one
+at a time straight to Blob. Every 45 s server batch re-plans from the database, so an interrupted import resumes where it
+stopped and a re-upload of the same sheet is a no-op; a hard deadline at the budget plus 10 s, as in the Drive sync,
+stops a hung fetch. A placement warning on a stored photo is a success, not a failure. Import never deletes, replaces or
+hides an image.
