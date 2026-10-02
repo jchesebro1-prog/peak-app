@@ -86,9 +86,10 @@ the document's `fileName`); otherwise the document's `fileName`. Informational
 
 ### Upload
 The person picks the filled sheet and (optionally) drops image files. The
-**sheet file** goes to a server action as `FormData` (refused over 1 MB —
-exceljs is server-only, and a quoted+portal sheet is far smaller) and is read
-there. **Dropped images are not uploaded yet** — only their names and sizes go
+**sheet file** goes to a server action as `FormData` (refused over 800 KB —
+exceljs is server-only, the same file is re-sent to build the results sheet,
+and server actions cap bodies at 1200 KB) and is read there. Batch calls send
+back only the rows that carry photos, trimmed to the match + photo fields. **Dropped images are not uploaded yet** — only their names and sizes go
 to the planner. Dropped HEIC files and files over 25 MB are refused up front
 with the existing `preflight`.
 
@@ -192,7 +193,7 @@ baseline) plus `next build` (client page importing actions).
   missing-first ordering; slot sources written; Photos now excludes
   datasheet-render thumbnails.
 - **Sheet parse:** header aliasing/case, extra columns ignored, `.csv` and
-  `.xlsx` give the same rows, >1 MB refused.
+  `.xlsx` give the same rows, >800 KB refused.
 - **Executor:** fake fetch/Drive/store — budget stops and resumes from cursor;
   per-item failure doesn't stop the batch; Photo 1 front-move through
   `setImageOrder`; Photo 2/3 append.
