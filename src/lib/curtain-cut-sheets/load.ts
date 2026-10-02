@@ -9,7 +9,8 @@ import { fabricPartsByCategory, getMany, type CatalogPart } from "@/lib/stores/c
 import { listCurtainMounts } from "@/lib/stores/curtain-mounts";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getProject } from "@/lib/stores/grid-projects";
-import { visibleImagesForParts } from "@/lib/stores/part-documents";
+import { listManufacturers, manufacturerImageLookup } from "@/lib/stores/manufacturers";
+import { getDocuments, visibleImagesForParts } from "@/lib/stores/part-documents";
 import { get as getQuote, type Quote } from "@/lib/stores/quotes";
 import { listTrackSeries } from "@/lib/stores/track-series";
 import { getSettings } from "@/lib/settings";
@@ -97,6 +98,38 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
   return { ok: true, quote, result, models, photos };
 }
 
+/**
+ * Each sku's one photo document: its own first visible image, else its
+ * manufacturer's image (document chain — cut sheets never print a placeholder,
+ * so a part with neither is absent). The manufacturer list is only read when
+ * some sku has no image of its own; a fallback must be a live image with bytes.
+ */
+export async function cutSheetPhotoDocs(skus: readonly string[]): Promise<Map<string, PartDocument>> {
+  const out = new Map<string, PartDocument>();
+  if (!skus.length) return out;
+  const images = await visibleImagesForParts(skus);
+  const bare: string[] = [];
+  for (const sku of skus) {
+    const own = images.get(sku)?.[0];
+    if (own) out.set(sku, own);
+    else bare.push(sku);
+  }
+  if (!bare.length) return out;
+  const imageIdFor = manufacturerImageLookup(await listManufacturers());
+  const idBySku = new Map<string, string>();
+  for (const p of await getMany(bare)) {
+    const id = p.mfr ? imageIdFor(p.mfr) : null;
+    if (id) idBySku.set(p.sku, id);
+  }
+  if (!idBySku.size) return out;
+  const docs = new Map((await getDocuments([...idBySku.values()])).map((d) => [d.id, d]));
+  for (const [sku, id] of idBySku) {
+    const d = docs.get(id);
+    if (d && d.kind === "image" && d.blobKey) out.set(sku, d);
+  }
+  return out;
+}
+
 /** Per sheet: the fabric SKU, then the hardware SKUs — first visible image each, at most 6. A failed read drops that photo, never the page. */
 async function cutSheetPhotos(result: CollectResult, mode: "url" | "data", sheet?: string): Promise<Map<string, string[]>> {
   const wanted = new Map(
@@ -105,14 +138,14 @@ async function cutSheetPhotos(result: CollectResult, mode: "url" | "data", sheet
       .map((t) => [t.sheetNo, [...new Set([t.curtains[0].fabric?.sku, ...t.hardware.map((h) => h.sku)].filter((s): s is string => !!s))]] as const)
   );
   const all = [...new Set([...wanted.values()].flat())];
-  const images = all.length ? await visibleImagesForParts(all) : new Map<string, PartDocument[]>();
+  const images = await cutSheetPhotoDocs(all);
   const cache = new Map<string, string | null>();
   const out = new Map<string, string[]>();
   for (const [sheet, skus] of wanted) {
     const urls: string[] = [];
     for (const sku of skus) {
       if (urls.length >= CUT_SHEET_PHOTOS_MAX) break;
-      const doc = images.get(sku)?.[0];
+      const doc = images.get(sku);
       if (!doc) continue;
       let src = cache.get(doc.id);
       if (src === undefined) {

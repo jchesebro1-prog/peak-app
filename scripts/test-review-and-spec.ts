@@ -10773,6 +10773,7 @@ seeded()
   .then(() => mfrStoreAsyncChecks())
   .then(() => mfrPortalAsyncChecks())
   .then(() => mfrDocsAsyncChecks())
+  .then(() => mfrCutSheetAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -48794,4 +48795,35 @@ async function mfrDocsAsyncChecks(): Promise<void> {
   const lib = await mfdLibrary([SKU, SKU2, "line:7"]);
   ok(lib[SKU]?.photoDocId === null && lib[SKU]?.fallbackDocId === doc!.id && lib[SKU]?.fallbackLabel === "MfdBrand", "mfr images: the narrative column learns what will print instead");
   ok(lib[SKU2]?.photoDocId === own!.id && lib[SKU2]?.fallbackDocId === null && lib[SKU2]?.fallbackLabel === null && !("line:7" in lib), "mfr images: a part with a photo has no fallback; a line token gets no library row");
+}
+
+/* ======================================================================
+   Manufacturer images — curtain cut sheets (PGlite).
+   ====================================================================== */
+import { cutSheetPhotoDocs as mfcPhotoDocs } from "@/lib/curtain-cut-sheets/load";
+import { setManufacturerImage as mfcSetImg } from "@/lib/stores/manufacturers";
+import { createDocument as mfcCreateDoc, attachDocument as mfcAttach } from "@/lib/stores/part-documents";
+async function mfrCutSheetAsyncChecks(): Promise<void> {
+  const A = fixtureId("MFC", "PART-A");
+  const B = fixtureId("MFC", "PART-B");
+  const C = fixtureId("MFC", "PART-C");
+  for (const [sku, mfr] of [[A, "MfcBrand"], [B, "MfcBrand"], [C, "MfcNoImage"]] as const) {
+    await upsertPart({ id: sku, sku, desc: "mfr cut part " + sku, category: "Fabric", unit: "yd", list: 10, cost: 5, mfr });
+    registerFixture("catalog_parts", sku);
+  }
+  const mk = async (title: string, source: string, blobKey: string | null) => {
+    const d = await mfcCreateDoc({ kind: "image", title, fileName: title + ".webp", contentType: "image/webp", size: 10, blobKey, sourceUrl: null, source, sourceRef: source === "manufacturer" ? "mfr:mfcbrand" : undefined, by: "mfr test" } as never);
+    if (d) registerFixture("part_documents", d.id);
+    return d!;
+  };
+  const mdoc = await mk("MfcBrand (manufacturer)", "manufacturer", "part-docs/c/m.webp");
+  const own = await mk("MfcOwn", "upload", "part-docs/c/o.webp");
+  await mfcAttach(own.id, [B], "mfr test");
+  const m = await mfcSetImg({ name: "MfcBrand", documentId: mdoc.id, by: "mfr test" });
+  registerFixture("manufacturers", m.id);
+  const docs = await mfcPhotoDocs([A, B, C]);
+  ok(docs.get(A)?.id === mdoc.id, "mfr images: a cut-sheet sku with no photo resolves its manufacturer image document");
+  ok(docs.get(B)?.id === own.id, "mfr images: a cut-sheet sku keeps its own photo over the manufacturer image");
+  ok(!docs.has(C), "mfr images: a cut-sheet sku whose manufacturer has no image has no photo (no placeholder)");
+  ok((await mfcPhotoDocs([])).size === 0, "mfr images: no skus, no photos");
 }
