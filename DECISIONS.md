@@ -8605,7 +8605,7 @@ Packages page (`showQuotedBeforeShelf`: no search or filters, page 1, department
 The sheet has one row per part with three photo slots, not one row per photo — it reads like the catalog and a part is a
 single line to fill in. Photo 1 is the primary: a new Photo 1 moves to the front of the part's real images; Photos 2 and 3
 append at the end of the real-image group; datasheet-render thumbnails always stay last. Rows match a part on
-Manufacturer + MFR Part # (normalized, against MFR P/N or M/N) with SKU narrowing a tie, and SKU alone matches by SKU.
+Manufacturer + MFR Part # (normalized, against the part's SKU, MFR P/N or M/N — a SKU is very often the manufacturer number) with SKU narrowing a tie, and SKU alone matches by SKU.
 Exactly one part matches or the row is a listed problem — it never guesses. An MFR Part # with neither a Manufacturer
 nor a SKU is never matched on its own ("fill in Manufacturer or SKU").
 

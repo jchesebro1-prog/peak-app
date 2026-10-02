@@ -75,7 +75,9 @@ the document's `fileName`); otherwise the document's `fileName`. Informational
 **Row → part matching (import):**
 1. Normalize Manufacturer (trim, case-insensitive) and MFR Part #
    (`normalizeSku`). Candidates = parts whose manufacturer matches and whose
-   normalized MFR P/N **or** MFR M/N equals it.
+   normalized SKU, MFR P/N **or** MFR M/N equals it (a part's SKU is very
+   often its manufacturer number; the export's MFR Part # cell falls back to
+   the SKU).
 2. If SKU is filled, it narrows the candidates (and a SKU alone, with MFR
    Part # blank, matches by SKU).
 3. Exactly one candidate → matched. Zero → Problem "no matching part".

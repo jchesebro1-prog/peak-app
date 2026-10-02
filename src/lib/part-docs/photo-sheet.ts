@@ -128,8 +128,9 @@ export type SheetPart = { sku: string; desc: string; category: string; mfr?: str
 export type RowMatch = { kind: "matched"; sku: string } | { kind: "none" } | { kind: "ambiguous"; skus: string[] } | { kind: "needs-key" };
 export type PartMatcher = (row: Pick<ImportRow, "manufacturer" | "mfrPart" | "sku">) => RowMatch;
 
-/** Manufacturer + MFR P/N (or M/N), normalized like the filename rule; SKU
- *  narrows; a SKU-only row matches by SKU. An MFR Part # alone (no
+/** Manufacturer + MFR Part #, normalized like the filename rule against the
+ *  part's SKU, MFR P/N or MFR M/N (a part's SKU is very often its manufacturer
+ *  number); the SKU column narrows; a SKU-only row matches by SKU. An MFR Part # alone (no
  *  Manufacturer, no SKU) is never matched — `needs-key`. Labor is never a target. */
 export function buildPartMatcher(parts: readonly SheetPart[]): PartMatcher {
   const byKey = new Map<string, SheetPart[]>();
@@ -141,7 +142,7 @@ export function buildPartMatcher(parts: readonly SheetPart[]): PartMatcher {
   };
   for (const p of parts) {
     if (p.category === "Labor") continue;
-    for (const k of new Set([normalizeSku(p.manufacturerPartNumber || ""), normalizeSku(p.manufacturerModelNumber || "")])) if (k) push(byKey, k, p);
+    for (const k of new Set([normalizeSku(p.sku), normalizeSku(p.manufacturerPartNumber || ""), normalizeSku(p.manufacturerModelNumber || "")])) if (k) push(byKey, k, p);
     push(bySku, lower(p.sku), p);
   }
   return (row) => {
@@ -204,7 +205,7 @@ export function exportRows(
       return {
         rowNumber: 0,
         manufacturer: p.mfr ?? "",
-        mfrPart: p.manufacturerPartNumber || p.manufacturerModelNumber || "",
+        mfrPart: p.manufacturerPartNumber || p.manufacturerModelNumber || p.sku,
         sku: p.sku,
         description: p.desc,
         category: p.category,

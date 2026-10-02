@@ -43382,3 +43382,17 @@ async function photoSheetFinalAsyncChecks(): Promise<void> {
   ok(r3.ok && r3.outcomes.length === 1 && r3.outcomes[0].ok && r3.outcomes[0].documentId === docId && fetched.length === fetchesBefore, "photo sheet final: another part naming the same URL links the existing photo without a fetch");
   ok((await ids(B)).join() === docId && !(await ids(A)).includes(docId), "photo sheet final: linking it to the other part leaves the first part's detach alone");
 }
+
+/* ======================================================================
+   Photo sheet — MFR Part # also matches the part's SKU (#294 fix).
+   ====================================================================== */
+{
+  const rbParts: PhsPart[] = [{ sku: "RB-BOBNET", desc: "Bobbinet", category: "Fabric", mfr: "Rose Brand" }];
+  const rbm = phsMatcher(rbParts);
+  const r1 = rbm({ manufacturer: "Rose Brand", mfrPart: "rb-bobnet", sku: "" });
+  const r2 = rbm({ manufacturer: "rose brand", mfrPart: "RB BOBNET", sku: "" });
+  ok(r1.kind === "matched" && r1.sku === "RB-BOBNET" && r2.kind === "matched" && r2.sku === "RB-BOBNET", "photo sheet match: MFR Part # matches the part's SKU (manufacturer + normalized)");
+  ok(rbm({ manufacturer: "", mfrPart: "RB-BOBNET", sku: "" }).kind === "needs-key", "photo sheet match: a SKU-valued MFR Part # alone still needs a manufacturer or SKU");
+  const rbRows = phsExport(rbParts, new Set(["RB-BOBNET"]), new Map(), new Map());
+  ok(rbRows.length === 1 && rbRows[0].mfrPart === "RB-BOBNET", "photo sheet export: MFR Part # falls back to the SKU");
+}
