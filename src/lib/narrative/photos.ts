@@ -1,7 +1,8 @@
 import { getMany } from "@/lib/stores/catalog";
-import { visibleImagesForParts } from "@/lib/stores/part-documents";
+import { getDocuments, visibleImagesForParts } from "@/lib/stores/part-documents";
+import { listManufacturers, manufacturerImageLookup } from "@/lib/stores/manufacturers";
 import { getBlobStream } from "@/lib/blob";
-import { photoSkusOf } from "@/app/(app)/estimator/narrative";
+import { manufacturerFallbackSkusOf, photoSkusOf } from "@/app/(app)/estimator/narrative";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { PartDocument } from "@/lib/part-docs/types";
 
@@ -11,6 +12,14 @@ import type { PartDocument } from "@/lib/part-docs/types";
  * image the portal tile shows; a datasheet-render thumbnail only when the
  * part has no real image). Only live catalog parts (a soft-deleted part
  * prints its paragraph with no photo).
+ *
+ * Manufacturer section Part 1 — the document chain: own photo → (allowance /
+ * custom placeholder, printed by QuoteDocument from a plain /placeholders/
+ * URL, never read here) → the part's manufacturer image (an unlinked
+ * part_documents image) → nothing (full width). A `line:<id>` block never
+ * reaches this read. The online photo routes serve exactly what this returns
+ * for the latest sent revision, so a manufacturer image is servable there
+ * with no other change.
  *
  * The print route has no session, so the PDF embeds photos as data URIs —
  * no second authenticated fetch, no token in an <img> URL. PNG/JPEG/WebP
@@ -32,7 +41,8 @@ export const PHOTO_INLINE_DEADLINE_MS = 8000;
 export type PhotoReader = (blobKey: string, maxBytes: number, signal?: AbortSignal) => Promise<Uint8Array | null>;
 export type PhotoCaps = { perImage: number; total: number; concurrency: number; deadlineMs?: number };
 
-/** sku → primary visible image doc, for the photo-on blocks of narrative systems. */
+/** sku → primary visible image doc (else the manufacturer's image), for the
+ *  photo-on blocks of narrative systems. */
 export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<string, PartDocument>> {
   const skus = photoSkusOf(sections);
   const out = new Map<string, PartDocument>();
@@ -42,6 +52,26 @@ export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<
   for (const sku of skus) {
     const doc = live.has(sku) ? images.get(sku)?.[0] : undefined;
     if (doc) out.set(sku, doc);
+  }
+  // No photo of its own: the part's manufacturer image (never for a legacy
+  // allowance/custom block — its placeholder comes first).
+  const fallbackOk = new Set(manufacturerFallbackSkusOf(sections));
+  const missing = skus.filter((s) => live.has(s) && !out.has(s) && fallbackOk.has(s));
+  if (missing.length) {
+    const look = manufacturerImageLookup(await listManufacturers());
+    const want = new Map<string, string>();
+    for (const p of parts) {
+      if (!missing.includes(p.sku)) continue;
+      const id = p.mfr ? look(p.mfr) : null;
+      if (id) want.set(p.sku, id);
+    }
+    if (want.size) {
+      const byId = new Map((await getDocuments([...new Set(want.values())])).map((d) => [d.id, d]));
+      for (const [sku, id] of want) {
+        const d = byId.get(id);
+        if (d && d.kind === "image") out.set(sku, d);
+      }
+    }
   }
   return out;
 }

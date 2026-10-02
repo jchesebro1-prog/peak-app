@@ -113,7 +113,7 @@ import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import NarrativeColumn from "./narrative-column";
 import { useKeyProductLibrary } from "./use-key-product-library";
-import { fillEmptyKeyProductText, isKeyProductEligible, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
+import { fillEmptyKeyProductText, isKeyProductEligible, isLineToken, keyProductSkuOf, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
 import SystemLibraryModal from "./system-library-modal";
 import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
@@ -2522,8 +2522,16 @@ export default function EstimatorClient({
       .join(" · ") || "Add quote details";
   /** #281: the narrative column follows the active system (first as fallback). */
   const narrSec = sections.find((s) => s.id === activeId) || sections[0] || null;
-  /** #293: the active system's eligible skus — the library cache prefetches them. */
-  const narrSkus = useMemo(() => (narrSec ? narrSec.items.filter(isKeyProductEligible).map((it) => it.sku.trim()) : []), [narrSec]);
+  /** #293: the active system's eligible skus — the library cache prefetches them.
+   *  An allowance/custom line anchors on a `line:<id>` token (no library row);
+   *  a block saved on such a line's real sku before that still prefetches. */
+  const narrSkus = useMemo(
+    () =>
+      narrSec
+        ? [...narrSec.items.filter(isKeyProductEligible).map(keyProductSkuOf), ...(narrSec.keyProducts || []).map((k) => k.sku)].filter((k) => !!k && !isLineToken(k))
+        : [],
+    [narrSec]
+  );
   const kpLib = useKeyProductLibrary(narrSkus);
   const updateSection = (secId: string, fn: (s: SpecSection) => SpecSection) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? fn(s) : s)));
@@ -2534,7 +2542,9 @@ export default function EstimatorClient({
    *  (functional updater on the live section, so nothing typed is lost). */
   const toggleKeyProductLine = (secId: string, itemId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((i) => i.id === itemId);
-    const sku = it ? it.sku.trim() : "";
+    // A line token (allowance/custom line) has no library paragraph to copy.
+    const anchor = it ? keyProductSkuOf(it) : "";
+    const sku = isLineToken(anchor) ? "" : anchor;
     const text = (sku && kpLib.rows[sku]?.paragraph) || "";
     updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));
     if (!sku || Object.hasOwn(kpLib.rows, sku)) return;

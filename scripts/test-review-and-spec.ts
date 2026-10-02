@@ -10772,6 +10772,7 @@ seeded()
   .then(() => finalFix293tAsyncChecks())
   .then(() => mfrStoreAsyncChecks())
   .then(() => mfrPortalAsyncChecks())
+  .then(() => mfrDocsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -48673,4 +48674,124 @@ async function mfrPortalAsyncChecks(): Promise<void> {
   ok(tile.imageId === null && tile.fallback?.kind === "image", "mfr images: a tile without a photo carries the fallback");
   const withPhoto = mfpTile({ key: SKU, kind: "part", title: "t", sku: SKU, mfr: "MfpBrand", category: "Lighting" }, { imageIds: ["PD-own"] }, { unitPrice: 12, por: false }, undefined, { kind: "placeholder", name: "coming-soon" });
   ok(withPhoto.fallback === null && withPhoto.imageId === "PD-own", "mfr images: a tile with its own photo has no fallback");
+}
+
+/* ======================================================================
+   Manufacturer images — key products for allowance/custom lines (pure).
+   ====================================================================== */
+import { isKeyProductEligible as mfdElig, keyProductStar as mfdStar, toggleKeyProduct as mfdToggle, printableKeyProducts as mfdPrintable, remapKeyProducts as mfdRemap, photoSkusOf as mfdPhotoSkus, isLineToken as mfdIsLine, sanitizeKeyProducts as mfdSanitize, resolveKeyProducts as mfdResolve, reanchorKeyProduct as mfdReanchor, fillEmptyKeyProductText as mfdFill, draftNarrative as mfdDraft, draftOverwrites as mfdOverwrites, manufacturerFallbackSkusOf as mfdMfrSkus, keyProductSkuOf as mfdSkuOf, unmarkedEligibleLines as mfdUnmarked } from "@/app/(app)/estimator/narrative";
+import { mergeNarrative as mfdMerge } from "@/lib/narrative/merge";
+{
+  const sec = { id: 1, name: "Sys", presentation: "narrative", items: [
+    { id: 11, sku: "", desc: "Lighting allowance", qty: 1, allowance: true },
+    { id: 12, sku: "CUSTOM", desc: "Custom truss", qty: 1, custom: true },
+    { id: 13, sku: "CUSTOM", desc: "Custom bracket", qty: 1, custom: true },
+  ], keyProducts: [] } as never;
+  ok(mfdElig((sec as { items: never[] }).items[0]) && mfdElig((sec as { items: never[] }).items[1]), "mfr images: allowance and custom lines can be key products");
+  ok(mfdUnmarked(sec).length === 3, "mfr images: the + Key product picker lists each allowance/custom line, even two CUSTOM lines");
+  let s = mfdToggle(sec, 11, ""); s = mfdToggle(s, 12, ""); s = mfdToggle(s, 13, "");
+  const kps = (s as { keyProducts: { sku: string; lineKey: string }[] }).keyProducts;
+  ok(kps.map((k) => k.sku).join() === "line:11,line:12,line:13", "mfr images: their blocks anchor on line tokens, so two CUSTOM lines can both be featured");
+  ok(mfdSanitize(kps).length === 3 && mfdIsLine("line:11") && !mfdIsLine("S4-19") && !mfdIsLine("line:") && !mfdIsLine("line:1a") && !mfdIsLine(undefined as never), "mfr images: line tokens survive sanitize");
+  const pr = mfdPrintable(s);
+  ok(pr.map((p) => p.placeholder).join() === "allowance,custom-device,custom-device", "mfr images: printable blocks carry their placeholder");
+  ok(mfdStar(s, (s as unknown as { items: never[] }).items[0]) === "on", "mfr images: the star reads on for a featured allowance line");
+  ok(mfdPhotoSkus([s]).every((k) => !mfdIsLine(k)), "mfr images: line tokens never trigger a catalog photo read");
+  const re = mfdRemap(kps as never, new Map([[11, 21], [12, 22], [13, 23]]));
+  ok(re?.map((k) => `${k.lineKey}:${k.sku}`).join() === "21:line:21,22:line:22,23:line:23", "mfr images: a remap rewrites the line token with the new id");
+}
+{
+  // Priced lines so the system prints in the body (photoSkusOf reads only those).
+  const L = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10, price: 25, ...extra });
+  const legacy = { id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "", items: [L(1, { allowance: true }), L(2), L(3, { allowance: true, sku: "" }), L(4, { custom: true })],
+    keyProducts: [
+      { lineKey: "1", sku: "SKU-1", text: "Legacy allowance block", photo: true },
+      { lineKey: "2", sku: "SKU-2", text: "Catalog block", photo: true },
+      { lineKey: "3", sku: "line:3", text: "", photo: true },
+      { lineKey: "4", sku: "line:4", text: "Hand-written custom text", photo: true },
+    ] } as never;
+  const res = mfdResolve(legacy);
+  ok(res.map((r) => r.status).join() === "ok,ok,ok,ok", "mfr images: a saved block on an allowance line's real sku still resolves (exactly as before)");
+  ok(mfdPhotoSkus([legacy]).join() === "SKU-1,SKU-2", "mfr images: photo reads cover real skus only, legacy ones included");
+  ok(mfdMfrSkus([legacy]).join() === "SKU-2", "mfr images: a placeholder block never takes the manufacturer image (allowance/custom come first in the chain)");
+  ok(mfdSkuOf(L(1, { allowance: true }) as never) === "line:1" && mfdSkuOf(L(2) as never) === "SKU-2", "mfr images: keyProductSkuOf is the anchor a new block takes");
+  ok(mfdFill(legacy, 3, "line:3", "Library text") === legacy, "mfr images: a line token never takes library text");
+  const d = mfdDraft(legacy, null, new Map([["SKU-1", { inCatalog: true, desc: "d1", paragraph: "P1" }], ["SKU-2", { inCatalog: true, desc: "d2", paragraph: null }]]), "replace");
+  const dk = (d.section.keyProducts || []) as { sku: string; text: string }[];
+  ok(dk[2].text === "" && dk[3].text === "Hand-written custom text" && !d.needsParagraph.some((k) => mfdIsLine(k)) && d.needsParagraph.join() === "SKU-2",
+    "mfr images: Draft narrative leaves line-token blocks untouched and never counts them as needing a paragraph");
+  const onlyLine = { ...(legacy as object), presentation: "narrative", narrative: "x", keyProducts: [(legacy as { keyProducts: unknown[] }).keyProducts[3]] } as never;
+  ok(!mfdOverwrites(onlyLine, null, new Map()), "mfr images: Draft never asks before overwriting a line-token block (it never writes one)");
+  // A line token whose line stopped being allowance/custom: changed → Re-anchor adopts the real sku.
+  const flipped = { ...(legacy as object), items: [L(1, { allowance: true }), L(2), L(3), L(4, { custom: true })] } as never;
+  ok(mfdResolve(flipped)[2].status === "changed", "mfr images: a line token on a line that is no longer allowance/custom reads changed");
+  ok(((mfdReanchor(flipped, 2).keyProducts || []) as { sku: string }[])[2].sku === "SKU-3", "mfr images: Re-anchor adopts the line's real sku");
+  // Merge: a library line token never matches a line elsewhere and counts nowhere.
+  const tgt = { id: "t", name: "T", kind: "materials", mfr: "", freightPct: 0, items: [L(4, { custom: true }), L(5)] } as never;
+  const m = mfdMerge(tgt, [{ systemName: "Src", intro: "", keyProducts: [{ sku: "line:4", text: "x", photo: true }, { sku: "SKU-5", text: "five", photo: true }] }], { intro: false, products: true });
+  ok(m.productsAdded === 1 && !m.skippedNoLine.length && !m.skippedPresent.length && !m.skippedFull.length && ((m.section.keyProducts || []) as { sku: string }[]).map((k) => k.sku).join() === "SKU-5",
+    "mfr images: Merge narrative skips line-token blocks without counting them");
+}
+
+/* ======================================================================
+   Manufacturer images — the document prints the placeholder (render).
+   ====================================================================== */
+import { qd293Props as mfdQdProps, qd293Sections as mfdQdSections, renderQuoteDocument293 as mfdQdRender } from "./qd293-cases";
+{
+  const secs = mfdQdSections();
+  secs[1].items = [...secs[1].items, { id: 9, sku: "", desc: "Fixture allowance", qty: 1, unit: "ea", cost: 10, price: 25, allowance: true } as never, { id: 10, sku: "CUSTOM", desc: "Custom bracket", qty: 1, unit: "ea", cost: 10, price: 25, custom: true } as never];
+  secs[1].keyProducts = [
+    { lineKey: "5", sku: "SKU-5", text: "Five.", photo: true },
+    { lineKey: "9", sku: "line:9", text: "Allowance para.", photo: true },
+    { lineKey: "10", sku: "line:10", text: "Custom para.", photo: true },
+    { lineKey: "6", sku: "SKU-6", text: "Six, no photo.", photo: true },
+  ];
+  const html = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" } } });
+  ok(html.includes('src="/placeholders/allowance.webp"') && html.includes('src="/placeholders/custom-device.webp"') && html.includes('src="data:image/png;base64,QUFB"'),
+    "mfr images: an allowance/custom key product prints its placeholder; a catalog photo still prints");
+  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 3 && html.includes("Budget allowance — Fixture allowance"), "mfr images: placeholders float like a photo; a catalog block with no photo prints full width");
+  secs[1].keyProducts = secs[1].keyProducts.map((k) => ({ ...k, photo: false }));
+  const off = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: {} });
+  ok(!off.includes("/placeholders/") && (off.match(/class="est-kp"/g) || []).length === 4, "mfr images: Photo off drops the placeholder too");
+}
+{
+  const mw = readFileSync("src/middleware.ts", "utf8");
+  ok(/\|placeholders\//.test(mw), "mfr images: /placeholders/ is public, so the print route, share page and portal (no team session) can load them");
+  const col = readFileSync("src/app/(app)/estimator/narrative-column.tsx", "utf8");
+  ok(col.includes("Prints the Allowance placeholder") && col.includes("Prints the Custom Device placeholder") && col.includes("Prints the manufacturer image (") && col.includes("No photo — prints full width"),
+    "mfr images: the narrative column says what will print");
+}
+
+/* ======================================================================
+   Manufacturer images — documents fall back to the manufacturer image (PGlite).
+   ====================================================================== */
+import { keyProductPhotoDocs as mfdPhotoDocs } from "@/lib/narrative/photos";
+import { keyProductLibrary as mfdLibrary } from "@/lib/narrative/library";
+import { setManufacturerImage as mfdSetImg } from "@/lib/stores/manufacturers";
+import { createDocument as mfdCreateDoc, attachDocument as mfdAttach } from "@/lib/stores/part-documents";
+async function mfrDocsAsyncChecks(): Promise<void> {
+  const SKU = fixtureId("MFD", "PART-1");
+  const SKU2 = fixtureId("MFD", "PART-2");
+  await upsertPart({ id: SKU, sku: SKU, desc: "mfr doc part", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "MfdBrand" });
+  registerFixture("catalog_parts", SKU);
+  await upsertPart({ id: SKU2, sku: SKU2, desc: "mfr doc part 2", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "MfdBrand" });
+  registerFixture("catalog_parts", SKU2);
+  const doc = await mfdCreateDoc({ kind: "image", title: "MfdBrand (manufacturer)", fileName: "m.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/y/m.webp", sourceUrl: null, source: "manufacturer", sourceRef: "mfr:mfdbrand", by: "mfr test" });
+  if (doc) registerFixture("part_documents", doc.id);
+  const own = await mfdCreateDoc({ kind: "image", title: "Own photo", fileName: "o.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/z/o.webp", sourceUrl: null, source: "upload", by: "mfr test" } as never);
+  if (own) registerFixture("part_documents", own.id);
+  await mfdAttach(own!.id, [SKU2], "mfr test");
+  const m = await mfdSetImg({ name: "MfdBrand", documentId: doc!.id, by: "mfr test" });
+  registerFixture("manufacturers", m.id);
+  const L = (id: number, sku: string, extra: Record<string, unknown> = {}) => ({ id, sku, desc: "d" + id, qty: 1, unit: "ea", cost: 50, price: 100, ...extra });
+  const sec = { id: "s1", name: "S", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "", items: [L(5, SKU), L(6, SKU2), L(7, "", { allowance: true })],
+    keyProducts: [{ lineKey: "5", sku: SKU, text: "Para", photo: true }, { lineKey: "6", sku: SKU2, text: "Own", photo: true }, { lineKey: "7", sku: "line:7", text: "Allow", photo: true }] } as never;
+  const docs = await mfdPhotoDocs([sec]);
+  ok(docs.get(SKU)?.id === doc!.id, "mfr images: a key product with no photo resolves its manufacturer image document");
+  ok(docs.get(SKU2)?.id === own!.id && docs.size === 2 && ![...docs.keys()].some((k) => k.startsWith("line:")), "mfr images: a part's own photo wins; a line token reads nothing");
+  const legacySec = { ...(sec as object), items: [L(5, SKU, { allowance: true })], keyProducts: [{ lineKey: "5", sku: SKU, text: "Legacy", photo: true }] } as never;
+  ok(!(await mfdPhotoDocs([legacySec])).has(SKU), "mfr images: a legacy allowance block on a catalog sku with no photo prints the allowance placeholder, not the manufacturer image");
+  const lib = await mfdLibrary([SKU, SKU2, "line:7"]);
+  ok(lib[SKU]?.photoDocId === null && lib[SKU]?.fallbackDocId === doc!.id && lib[SKU]?.fallbackLabel === "MfdBrand", "mfr images: the narrative column learns what will print instead");
+  ok(lib[SKU2]?.photoDocId === own!.id && lib[SKU2]?.fallbackDocId === null && lib[SKU2]?.fallbackLabel === null && !("line:7" in lib), "mfr images: a part with a photo has no fallback; a line token gets no library row");
 }

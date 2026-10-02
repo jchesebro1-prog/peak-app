@@ -14,7 +14,10 @@ import { authConfig } from "./auth.config";
  * own HMAC token (lib/quote-share) and never reads either session. /pdf.worker.min.mjs is the
  * public pdf.js worker (a static library file, no data) that the
  * /print/part-thumb page loads — headless Chrome has no session, so it must
- * be reachable without one (#245). /api/gmail/sync is the cron
+ * be reachable without one (#245). /placeholders/ holds the four static
+ * placeholder images (Manufacturer section Part 1) that the portal, the
+ * share page and the headless-Chrome print route show without a team
+ * session. /api/gmail/sync is the cron
  * endpoint (D74) — no session exists on a cron call, so it is exempted
  * here and guards itself with a CRON_SECRET bearer check instead.
  * /api/native/auth/* (start, exchange) run before a session exists in the
@@ -29,6 +32,6 @@ export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/recordings/upload|login|lead-intake|portal|print/|share/|pdf\\.worker\\.min\\.mjs|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/recordings/upload|login|lead-intake|portal|print/|share/|pdf\\.worker\\.min\\.mjs|placeholders/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
   ],
 };

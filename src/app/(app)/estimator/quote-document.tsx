@@ -6,6 +6,7 @@ import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
 import { appendixSystemIds } from "./quote-document-view";
+import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 
 /**
  * The customer quote document (#222) — ONE component for both places it
@@ -633,7 +634,11 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                       <>
                         {renderNarrativeBlocks(blocks)}
                         {ps.keyProducts.map((kp, ki) => {
-                          const photo = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
+                          // Own photo (or its manufacturer's image) first; an allowance /
+                          // custom line with neither prints its placeholder (a public
+                          // /placeholders/ URL — same origin for print, share and portal).
+                          const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
+                          const photo = own ?? (kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : undefined);
                           return (
                             <div key={"kp-" + kp.sku} className="est-kp" style={{ display: "flow-root", marginTop: blocks.length || ki ? 12 : 0 }}>
                               {photo ? (
