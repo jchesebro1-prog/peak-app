@@ -312,6 +312,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?size=d", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?option=opt-does-not-exist&size=b", reject: "no longer exists" },
+  // #292 — curtain cut sheets (both styles; an unknown id renders "Quote not found." with a 200).
+  { route: "/estimator/cut-sheets?id=Q-2041" },
+  { route: "/estimator/cut-sheets?id=Q-2041&style=client" },
+  { route: "/estimator/cut-sheets?id=Q-0000", reject: "Application error" },
 ];
 
 let fail = 0;

@@ -1132,6 +1132,24 @@ button.pk-searchbar-glass {
   }
 }
 
+/* Curtain cut sheets (#292). Submittal reuses .pk-drawing-sheet with its own
+   Letter-landscape variables (cutSheetCssVars); Client is Letter portrait. */
+.pk-cs-set { display: flex; flex-direction: column; align-items: center; gap: 28px; padding-bottom: 40px; }
+@media screen { .pk-cs-set[data-style="submittal"] { zoom: 0.85; } }
+.pk-cs-grid { display: grid; grid-template-columns: 60fr 40fr; grid-template-rows: 55% 45%; gap: 0.12in; height: 100%; }
+.pk-cs-cell { min-width: 0; min-height: 0; overflow: hidden; }
+.pk-cs-client { width: 8.5in; box-sizing: border-box; padding: 0.6in; background: #fff; color: #16181d; font-family: var(--font-ui), system-ui, sans-serif; font-size: 10pt; line-height: 1.45; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.1); break-before: page; page-break-before: always; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.pk-cs-head { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); padding-bottom: 6pt; margin-bottom: 10pt; font-size: 9pt; color: #5b616e; }
+.pk-cs-title { font-size: 16pt; font-weight: 700; margin: 0 0 8pt; }
+.pk-cs-desc { margin: 8pt 0 12pt; }
+.pk-cs-row { display: flex; gap: 0.3in; align-items: flex-start; }
+.pk-cs-photos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12pt; }
+.pk-cs-photos img { width: 1.1in; height: 1.1in; object-fit: contain; border: 1px solid #e4e7ec; border-radius: 4px; background: #fff; }
+@media print {
+  .pk-cs-set .pk-drawing-sheet { box-shadow: none !important; break-after: page; page-break-after: always; }
+  .pk-cs-set .pk-drawing-sheet:last-child { break-after: auto; page-break-after: auto; }
+}
+
 /* Login */
 .pk-login {
   min-height: 100vh;

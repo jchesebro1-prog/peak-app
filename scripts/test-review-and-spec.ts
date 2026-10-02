@@ -43371,6 +43371,7 @@ import { cutSheetCssVars as c292CssVars, cutSheetModel as c292Model, plainDescri
    fabric facts (weight, basis, flame rating).
    ====================================================================== */
 import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProblem, optionalPartFields as c292PartFields } from "@/app/(app)/catalog/part-form";
+import { readdirSync as c292Readdir } from "node:fs";
 {
   const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
   const full = c292PartFields(fd({ oz: "25", ozBasis: "sq-yd", flameRating: "  NFPA 701 (IFR)  " }));
@@ -43430,6 +43431,20 @@ import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProble
     "#292 weight: the Fabric row prints oz only with its basis — an unset basis drops the oz figure, never prints 'lin yd'");
 }
 
+// ---- #292 task 6: loader, renderer, Cut sheets page, Quotes hub entry ----
+{
+  const rd292b = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd292b("src/app/(app)/quotes/page.tsx").includes("/estimator/cut-sheets?id="), "#292 source: the Quotes hub action strip links Cut sheets");
+  const pg = rd292b("src/app/(app)/estimator/cut-sheets/page.tsx");
+  ok(pg.includes("requireUser()") && pg.includes("loadCutSheets("), "#292 source: the Cut sheets page is requireUser-gated and reads through loadCutSheets");
+  const smoke = rd292b("scripts/smoke-routes.ts");
+  ok(smoke.includes('"/estimator/cut-sheets?id=Q-2041"') && smoke.includes('"/estimator/cut-sheets?id=Q-2041&style=client"') && smoke.includes('"/estimator/cut-sheets?id=Q-0000", reject: "Application error"'),
+    "#292 source: smoke covers both styles and the missing-quote page");
+  const libDir = join(process.cwd(), "src/lib/curtain-cut-sheets");
+  const libSrc = c292Readdir(libDir).map((f) => readFileSync(join(libDir, f), "utf8")).join("\n");
+  ok(!/@anthropic-ai|@\/lib\/ai\b|from "@\/lib\/ai\//.test(libSrc), "#292 source: src/lib/curtain-cut-sheets imports no Anthropic SDK and no lib/ai (deterministic)");
+}
+
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert } = await import("@/lib/stores/catalog");
@@ -43462,7 +43477,33 @@ async function curtain292AsyncChecks(): Promise<void> {
     await bad([goodRow, { sku: "", rule: { kind: "perCurtain", qty: 1 } }], "Row 2: pick a part", "a blank part row");
     const resaved = await saveCurtainMount("tie-batten", [goodRow, { sku: TIE, rule: { kind: "perFtWidth", qty: 2, everyFt: 4 } }], "Tester3");
     ok(resaved.ok && resaved.hardware.rows.length === 2 && (await listCurtainMounts())["tie-batten"]?.rows.length === 2, "#292 store: a fully valid submission saves every row");
-    // Task 6 appends the loadCutSheets checks here.
+    const { createFixture } = await import("./test-fixtures");
+    const { loadCutSheets } = await import("@/lib/curtain-cut-sheets/load");
+    const FAB = fid(292, "fabric");
+    await mergeUpsert(FAB, { desc: "Test292 Velour 25 oz", category: "Fabric", unit: "yd", list: 10, cost: 5, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 });
+    reg("catalog_parts", FAB);
+    const QID = fid(292, "quote");
+    const ci = { name: "Test292 Main", fabricSku: FAB, fabricName: "Test292 Velour 25 oz", qty: "1", width: "20", height: "18", fullness: "50" };
+    const track = (key: string, id: number) => ({
+      id, sku: "TRK-X", desc: "track", qty: 1, unit: "lot", cost: 1, price: 2, curtainTrackKey: key,
+      track: { seriesId: "test292-gone", operation: "oneway", runFt: 20, curved: false, mounting: "batten", qty: 1 },
+      components: [{ sku: "T292-CARRIER", label: "Carrier", role: "other", qty: 20, unit: "ea", cost: 1, price: 2 }],
+    });
+    await createFixture("quotes", {
+      id: QID, name: "T292 cut sheets", customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner: "Tester", preparedBy: "Tester", value: 0, margin: 0, history: [], createdAt: 1, updatedAt: 1,
+      spec: { sections: [{ id: "s1", name: "Drapery", kind: "materials", mfr: "", freightPct: 0, items: [
+        { id: 1, sku: "CRT-1", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: ci, curtainTrackKey: "ct-1" }, track("ct-1", 2),
+        { id: 3, sku: "CRT-3", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: ci, curtainTrackKey: "ct-3" }, track("ct-3", 4),
+      ] }], mobs: [] },
+    } as never);
+    const loaded = await loadCutSheets(QID, { images: "none" });
+    ok(loaded.ok && loaded.result.types.length === 1 && loaded.result.types[0].totalQty === 2 && loaded.result.types[0].hardware.find((h) => h.sku === "T292-CARRIER")?.qty === 40,
+      "#292 load: two identical keyed curtain lines read as one type with both tracks' components");
+    ok(loaded.ok && loaded.models.submittal[0].titleBlock?.sheet.number === "CS-1" && loaded.models.client[0].description.startsWith("Two Test292 Main panels") && loaded.photos.size === 0,
+      "#292 load: both styles are modelled; no photos when images are 'none'");
+    const missing = await loadCutSheets(fid(292, "no-such-quote"), { images: "none" });
+    ok(!missing.ok && missing.error === "Quote not found.", "#292 load: an unknown quote id reads 'Quote not found.'");
   } finally {
     const after = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
     await setBlob(CURTAIN_MOUNTS_BLOB, Object.fromEntries(Object.keys(after).map((k) => [k, Object.prototype.hasOwnProperty.call(before, k) ? before[k] : null])));
