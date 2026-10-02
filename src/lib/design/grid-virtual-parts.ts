@@ -21,6 +21,7 @@ import { isLaborSku } from "./wire-labor";
 import { EQUIP_TIERS, NOT_INCLUDED, cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
 import { GRID_SCOPE_OF_SYS, UNSCOPED, type GridLayer } from "./grid-scopes";
 import { resolveFixture, type FixtureCatalogPart, type FixtureResolvable } from "@/lib/fixture-assemblies";
+import { isInternalCategory } from "@/lib/portal-visibility";
 
 export const ASSEMBLY_PART_PREFIX = "asm:";
 export const ALLOWANCE_PART_PREFIX = "allow:";
@@ -149,9 +150,21 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
  *    row under its quoted description, for the person to map or waive.
  * Every other line passes through unchanged.
  */
+/**
+ * `isInternal` for `gridSpecBomRows`, from catalog rows the caller already
+ * holds: a SKU whose row's category is internal (Labor — `isInternalCategory`).
+ */
+export function internalSkuCheck(parts: Iterable<{ sku: string; category?: unknown }>): (sku: string) => boolean {
+  const internal = new Set<string>();
+  for (const p of parts) if (p && isInternalCategory(p.category)) internal.add(p.sku);
+  return (sku) => internal.has(sku);
+}
+
 export function gridSpecBomRows(
   lines: ReadonlyArray<{ sku?: string; desc?: string; qty?: number; allowance?: boolean; specKey?: string }>,
-  fixtureOf: (id: string) => FixtureResolvable | null | undefined
+  fixtureOf: (id: string) => FixtureResolvable | null | undefined,
+  /** #296: a member SKU this flags (an internal catalog row — labor) is left out of an assembly's expansion. */
+  isInternal?: (sku: string) => boolean
 ): Array<{ sku: string; desc: string; qty: number; specKey?: string }> {
   const rows: Array<{ sku: string; desc: string; qty: number; specKey?: string }> = [];
   for (const l of lines) {
@@ -166,7 +179,11 @@ export function gridSpecBomRows(
       const f = fixtureOf(ref.id);
       const members = f ? resolveFixture(f, new Map<string, FixtureCatalogPart>()).parts.filter((m) => m.included && m.sku) : [];
       if (f && members.length) {
-        for (const m of members) rows.push({ sku: m.sku, desc: `${m.label} (${f.label})`, qty: qty * m.qty });
+        // #232 / #296: labor is a service line, not a product — a labor member (Grid labor id or an internal catalog row) is left out.
+        for (const m of members) {
+          if (isLaborSku(m.sku) || isInternal?.(m.sku)) continue;
+          rows.push({ sku: m.sku, desc: `${m.label} (${f.label})`, qty: qty * m.qty });
+        }
         continue;
       }
       rows.push({ sku: "", desc: desc || f?.label || ref.id, qty });

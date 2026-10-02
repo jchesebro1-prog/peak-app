@@ -45178,7 +45178,7 @@ import type { AssembledSpec as C296qSpec } from "@/lib/bid-spec";
   ok(JSON.stringify(c296qQuoteBom(qSpec(plainItems), rackOf)) === JSON.stringify(c296qQuoteBom(qSpec(plainItems)))
     && JSON.stringify(c296qQuoteBom(qSpec(plainItems))) === JSON.stringify([{ sku: "AMP-1", desc: "Amp", qty: 3 }, { sku: "CBL-1", desc: "Cable", qty: 3 }]),
     "#296 rack package (fix 1): a rack-free quote's BOM is unchanged");
-  ok(rd296q("src/lib/client-package-server.ts").indexOf("const rackFixtures") < rd296q("src/lib/client-package-server.ts").indexOf("const bom = quoteBom(quote, (id) => rackFixtures.get(id));"), "#296 rack package (fix 1 source): the rack fixtures load before the quote BOM");
+  ok(rd296q("src/lib/client-package-server.ts").indexOf("const rackFixtures") < rd296q("src/lib/client-package-server.ts").indexOf("const bom = quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog));"), "#296 rack package (fix 1 source): the rack fixtures load before the quote BOM");
   const none = c296qEntries([]);
   ok(none.files.length === 0 && none.index.length === 0 && none.gaps.length === 0, "#296 rack package: no racks, nothing added");
 
@@ -45379,6 +45379,62 @@ import type { RackLayout as C296fLayout, RackPlacement as C296fPlacement, RackEd
 
   // 8. The rack form's help text stays accurate.
   ok(rdf("src/app/(app)/design/assemblies/fixture-form.tsx").includes("Labor prices with the rack but stays out of its weight, power and submittal."), "#296 final: the rack help text says labor prices but stays out of the rack totals");
+}
+
+/* ===== #296 — final review fixes (fix 2: labor members out of BOM expansion) ===== */
+import { gridSpecBomRows as c296f2Rows, internalSkuCheck as c296f2Check } from "@/lib/design/grid-virtual-parts";
+import { quoteBom as c296f2QuoteBom } from "@/lib/client-package-server";
+{
+  const rec = (id: string, parts: { sku: string; qty: number; label?: string }[]) => ({
+    id, kind: "rack" as const, label: "MDF rack", lightEngineSku: "", lensSku: "", lines: { data: [], power: [], mounting: [], accessories: [] }, parts,
+    rack: { config: { ruCount: 12, widthIn: 19 as const, numbering: "bottom-up" as const }, placements: [
+      { id: "RP-1", kind: "device" as const, sku: "AMP-1", ruStart: 1, ruHeight: 2, face: "front" as const },
+      { id: "RP-2", kind: "device" as const, sku: "DSP-1", ruStart: 3, ruHeight: 1, face: "front" as const },
+    ] },
+  });
+  const racks = new Map([
+    ["SA-F2A", rec("SA-F2A", [{ sku: "FRM-1", qty: 1 }, { sku: "LAB-1", qty: 3 }])],
+    ["SA-F2B", rec("SA-F2B", [{ sku: "LAB-1", qty: 2 }])],
+  ]);
+  racks.get("SA-F2B")!.rack.placements = [];
+  const fixtureOf = (id: string) => racks.get(id);
+  const catalog = [
+    { sku: "AMP-1", category: "Audio" }, { sku: "DSP-1", category: "Audio" }, { sku: "FRM-1", category: "Racks" },
+    { sku: "LAB-1", category: "Labor" }, { sku: "LAB-2", category: " LABOR " }, { sku: "NOCAT" },
+  ];
+  const isInternal = c296f2Check(catalog);
+  ok(isInternal("LAB-1") && isInternal("LAB-2") && !isInternal("AMP-1") && !isInternal("NOCAT") && !isInternal("GONE"), "#296 final fix 2: internalSkuCheck flags Labor-category rows only (trimmed, any case)");
+
+  const lines = [{ sku: "asm:SA-F2A", desc: "MDF rack", qty: 2 }, { sku: "CBL-9", desc: "Cable", qty: 5 }];
+  const today = JSON.stringify([
+    { sku: "FRM-1", desc: "FRM-1 (MDF rack)", qty: 2 }, { sku: "LAB-1", desc: "LAB-1 (MDF rack)", qty: 6 },
+    { sku: "AMP-1", desc: "AMP-1 (MDF rack)", qty: 2 }, { sku: "DSP-1", desc: "DSP-1 (MDF rack)", qty: 2 },
+    { sku: "CBL-9", desc: "Cable", qty: 5 },
+  ]);
+  const omitted = c296f2Rows(lines, fixtureOf);
+  ok(JSON.stringify(omitted) === today, "#296 final fix 2: gridSpecBomRows without isInternal reproduces today's output exactly: " + JSON.stringify(omitted));
+  const withCheck = c296f2Rows(lines, fixtureOf, isInternal);
+  ok(!withCheck.some((r) => r.sku === "LAB-1") && JSON.stringify(withCheck) === JSON.stringify(omitted.filter((r) => r.sku !== "LAB-1")),
+    "#296 final fix 2: an asm: rack with a labor rack-level part expands without it; every other member and line is unchanged: " + JSON.stringify(withCheck));
+  ok(c296f2Rows([{ sku: "asm:SA-F2B", desc: "Labor-only rack", qty: 1 }], fixtureOf, isInternal).length === 0, "#296 final fix 2: a rack whose only member is labor expands to nothing (no SKU-less gap row)");
+  const gridLabor = new Map([["SA-F2C", rec("SA-F2C", [{ sku: "labor:audio", qty: 1 }])]]);
+  ok(!c296f2Rows([{ sku: "asm:SA-F2C", qty: 1 }], (id) => gridLabor.get(id)).some((r) => r.sku === "labor:audio"), "#296 final fix 2: a Grid labor id (isLaborSku) is left out of an assembly's members too");
+
+  // The quote BOM's rack expansion goes through the same rows.
+  const qSpec = (items: unknown[]) => ({ spec: { sections: [{ kind: "materials", items }] } }) as never;
+  const quote = qSpec([{ sku: "SA-F2A", desc: "MDF rack", qty: 1, rackId: "SA-F2A" }, { sku: "AMP-1", desc: "Amp", qty: 1 }]);
+  const qToday = JSON.stringify([{ sku: "FRM-1", desc: "FRM-1 (MDF rack)", qty: 1 }, { sku: "LAB-1", desc: "LAB-1 (MDF rack)", qty: 3 }, { sku: "AMP-1", desc: "AMP-1 (MDF rack)", qty: 2 }, { sku: "DSP-1", desc: "DSP-1 (MDF rack)", qty: 1 }]);
+  ok(JSON.stringify(c296f2QuoteBom(quote, fixtureOf)) === qToday, "#296 final fix 2: quoteBom without isInternal is unchanged: " + JSON.stringify(c296f2QuoteBom(quote, fixtureOf)));
+  ok(JSON.stringify(c296f2QuoteBom(quote, fixtureOf, isInternal)) === JSON.stringify(JSON.parse(qToday).filter((r: { sku: string }) => r.sku !== "LAB-1")), "#296 final fix 2: quoteBom with isInternal drops the rack's labor member only");
+  const onlyLabor = c296f2QuoteBom(qSpec([{ sku: "SA-F2B", desc: "Labor-only rack", qty: 1, rackId: "SA-F2B" }]), fixtureOf, isInternal);
+  ok(onlyLabor.length === 0, "#296 final fix 2: a labor-only rack adds no BOM row (not even its SA- line): " + JSON.stringify(onlyLabor));
+
+  // Every caller builds the check from catalog rows (the bid-spec door reads the member SKUs once).
+  const rd2 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd2("src/lib/client-package.ts").includes("gridSpecBomRows(deviceLines, (id) => fixtureOf?.(id), internalSkuCheck(catalog))"), "#296 final fix 2 (source): the Grid client package passes internalSkuCheck(catalog)");
+  ok(rd2("src/lib/client-package-server.ts").includes("quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog))"), "#296 final fix 2 (source): the quote client package passes internalSkuCheck(catalog)");
+  const qb = rd2("src/lib/specs/quote-bom.ts");
+  ok(qb.includes("await getMany(memberSkus)") && qb.includes("gridSpecBomRows(gridLines, (id) => fixtures.get(id), isInternal)"), "#296 final fix 2 (source): the bid-spec door reads member SKUs once and passes isInternal");
 }
 
 async function curtain292AsyncChecks(): Promise<void> {

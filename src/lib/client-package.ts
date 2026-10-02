@@ -5,7 +5,7 @@ import { hasPrintableSpec } from "@/lib/specs/articles";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { resolvePackageDocs, type PackageDocRef, type PackageDocument } from "@/lib/part-docs/package";
 import { placementQty } from "@/lib/design/grid-bom";
-import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
+import { gridSpecBomRows, internalSkuCheck, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import type { FixtureResolvable } from "@/lib/fixture-assemblies";
 
 export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec" | "missing-cutsheet" | "missing-rack";
@@ -113,7 +113,8 @@ export function buildClientPackageManifest(
   // with no included parts — is not equipment the customer can buy. It goes
   // to the gap report only (one line per name, units summed), never the BOM.
   const unresolved = new Map<string, BomRow>();
-  for (const row of gridSpecBomRows(deviceLines, (id) => fixtureOf?.(id))) {
+  // #296: an assembly's labor members (internal catalog rows) are no equipment — not in the BOM.
+  for (const row of gridSpecBomRows(deviceLines, (id) => fixtureOf?.(id), internalSkuCheck(catalog))) {
     if (row.sku) addBom(bomMap, row.sku, row);
     else addBom(unresolved, row.desc, row);
   }

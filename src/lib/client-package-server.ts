@@ -20,7 +20,7 @@ import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { ensureOptions, optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import type { FixtureRecord, FixtureResolvable } from "@/lib/fixture-assemblies";
-import { gridSpecBomRows } from "@/lib/design/grid-virtual-parts";
+import { gridSpecBomRows, internalSkuCheck } from "@/lib/design/grid-virtual-parts";
 import { emptyRackLayout } from "@/lib/rack/layout";
 import { loadRackForSheets } from "@/lib/rack/load";
 import { rackPackageEntries, type RackIndexEntry, type RackRun } from "@/lib/rack/package";
@@ -152,6 +152,8 @@ function roughQuoteDrawing(quote: Quote, packageName: string): Buffer {
 export function quoteBom(
   quote: Pick<Quote, "spec">,
   rackOf?: (id: string) => FixtureResolvable | null | undefined,
+  /** #296: rack members this flags (internal catalog rows — labor) stay out of the BOM. */
+  isInternal?: (sku: string) => boolean,
 ): Array<{ sku: string; desc: string; qty: number }> {
   const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number; labor?: boolean; rackId?: unknown }> }> } | null | undefined;
   const rows = new Map<string, { sku: string; desc: string; qty: number }>();
@@ -164,8 +166,9 @@ export function quoteBom(
       if (section.kind === "labor" || item.labor || isRewardCreditItem(item) || item.qty == null || item.qty <= 0) continue;
       const rack = rackOf && typeof item.rackId === "string" ? rackOf(item.rackId) : null;
       if (rack?.kind === "rack") {
-        const members = gridSpecBomRows([{ sku: `asm:${item.rackId}`, desc: String(item.desc || ""), qty: item.qty }], rackOf!);
-        if (members.length && members.every((m) => m.sku)) {
+        const members = gridSpecBomRows([{ sku: `asm:${item.rackId}`, desc: String(item.desc || ""), qty: item.qty }], rackOf!, isInternal);
+        // A rack with no members comes back as one SKU-less row; [] means every member was labor (nothing to list).
+        if (members.every((m) => m.sku)) {
           for (const m of members) {
             const current = rows.get(m.sku);
             if (current) current.qty += m.qty;
@@ -352,7 +355,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   // #296 — fixtures once, before the BOM: rack lines expand into their members (live, D578).
   const qItems = quoteItems(quote);
   const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
-  const bom = quoteBom(quote, (id) => rackFixtures.get(id));
+  const bom = quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog));
   const matched = matchBom(bom, catalog);
   const sections = await allSections();
   const spec = assemble(matched.rows, sections, {

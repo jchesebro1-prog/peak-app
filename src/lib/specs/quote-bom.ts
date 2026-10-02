@@ -1,6 +1,8 @@
 import { getDoc } from "@/db/doc-store";
 import type { BomRow } from "@/lib/bid-spec";
-import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
+import { gridSpecBomRows, internalSkuCheck, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
+import { fixtureSkus } from "@/lib/fixture-assemblies";
+import { getMany } from "@/lib/stores/catalog";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
@@ -98,7 +100,14 @@ export async function bomFromQuote(
   const fixtures = gridLines.some((l) => parseVirtualPartId(String(l.sku || "").trim())?.kind === "assembly")
     ? new Map((await listFixtures()).map((f) => [f.id, f]))
     : new Map();
-  for (const it of gridSpecBomRows(gridLines, (id) => fixtures.get(id))) push(it);
+  // #296: one catalog read over the assemblies' member SKUs, so labor members (internal rows) stay out.
+  const memberSkus = [...new Set(gridLines.flatMap((l) => {
+    const ref = parseVirtualPartId(String(l.sku || "").trim());
+    const f = ref?.kind === "assembly" ? fixtures.get(ref.id) : undefined;
+    return f ? fixtureSkus(f) : [];
+  }))];
+  const isInternal = internalSkuCheck(memberSkus.length ? await getMany(memberSkus) : []);
+  for (const it of gridSpecBomRows(gridLines, (id) => fixtures.get(id), isInternal)) push(it);
   if (!rows.length) {
     return { ok: false, error: `Quote ${quoteId} has no equipment lines to specify.` };
   }
