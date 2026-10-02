@@ -122,7 +122,7 @@ export async function listDrivePhotosForSheet(): Promise<{ files: DriveListedPho
     let folder = state.folder ? await getDriveFolder(t.token, state.folder.id) : null;
     if (!folder) {
       const found = await findPhotosFolder(t.token);
-      if (!found.ok) return { files: null, reason: "the Peak Product Photos folder wasn't found" };
+      if (!found.ok) return { files: null, reason: "the Peak Product Photos folder couldn't be identified" };
       folder = found.folder;
     }
     return { files: await listPhotoTree(t.token, folder.id) };

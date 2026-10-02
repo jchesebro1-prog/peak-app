@@ -64,6 +64,15 @@ export async function listDocs<T extends Doc = Doc>(
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
 
+/** Soft-deleted rows only, by id — what a writer that must never revive a
+ *  human's delete (the photo sheet's detached links) reads. */
+export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName): Promise<T[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const rows = await db.select().from(t).where(eq(t.deleted, true)).orderBy(asc(t.id));
+  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+}
+
 /**
  * Candidate rows whose JSON contains `query` (case-insensitive), capped at
  * `limit`. Filters in SQL so global search never materializes a whole table

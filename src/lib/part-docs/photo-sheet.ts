@@ -14,6 +14,7 @@ export const PHOTO_SHEET_HEADERS = ["Manufacturer", "MFR Part #", "SKU", "Descri
 export const MAX_SHEET_ROWS = 5000;
 /** Server actions cap bodies at 1200 KB, and the results sheet re-sends the file. */
 export const MAX_SHEET_BYTES = 800 * 1024;
+export const SHEET_TOO_BIG = "That sheet is over 800 KB — delete the rows you didn't fill in (or split it) and upload again.";
 
 export type PhotoSheetRow = {
   /** The row's own number in the sheet (the header is row 1). */
@@ -79,7 +80,10 @@ export function rowsFromGrid(grid: readonly (readonly string[])[]): { ok: true; 
     if (!row.manufacturer && !row.mfrPart && !row.sku && row.photos.every((p) => !p)) continue;
     rows.push(row);
   }
-  if (rows.length > MAX_SHEET_ROWS) return { ok: false, error: `That sheet has ${rows.length} rows — split it into sheets of ${MAX_SHEET_ROWS} or fewer.` };
+  // Only rows with a Photo value count: an untouched export with a few cells
+  // filled passes however long it is.
+  const filled = rows.filter((r) => r.photos.some(Boolean)).length;
+  if (filled > MAX_SHEET_ROWS) return { ok: false, error: `That sheet has ${filled} rows with photos — split it into sheets of ${MAX_SHEET_ROWS} or fewer.` };
   return { ok: true, rows };
 }
 
@@ -120,11 +124,13 @@ export function chunkImportRows(rows: readonly ImportRow[], maxChars: number): I
 }
 
 export type SheetPart = { sku: string; desc: string; category: string; mfr?: string; manufacturerPartNumber?: string; manufacturerModelNumber?: string };
-export type RowMatch = { kind: "matched"; sku: string } | { kind: "none" } | { kind: "ambiguous"; skus: string[] };
+/** `needs-key`: an MFR Part # with neither Manufacturer nor SKU — never matched on its own. */
+export type RowMatch = { kind: "matched"; sku: string } | { kind: "none" } | { kind: "ambiguous"; skus: string[] } | { kind: "needs-key" };
 export type PartMatcher = (row: Pick<ImportRow, "manufacturer" | "mfrPart" | "sku">) => RowMatch;
 
 /** Manufacturer + MFR P/N (or M/N), normalized like the filename rule; SKU
- *  narrows; a SKU-only row matches by SKU. Labor is never a target. */
+ *  narrows; a SKU-only row matches by SKU. An MFR Part # alone (no
+ *  Manufacturer, no SKU) is never matched — `needs-key`. Labor is never a target. */
 export function buildPartMatcher(parts: readonly SheetPart[]): PartMatcher {
   const byKey = new Map<string, SheetPart[]>();
   const bySku = new Map<string, SheetPart[]>();
@@ -143,8 +149,9 @@ export function buildPartMatcher(parts: readonly SheetPart[]): PartMatcher {
     const sku = lower(row.sku);
     let cands: SheetPart[];
     if (key) {
-      cands = byKey.get(key) ?? [];
       const mfr = lower(row.manufacturer);
+      if (!mfr && !sku) return { kind: "needs-key" };
+      cands = byKey.get(key) ?? [];
       if (mfr) cands = cands.filter((p) => lower(p.mfr) === mfr);
       if (sku) cands = cands.filter((p) => lower(p.sku) === sku);
     } else if (sku) {

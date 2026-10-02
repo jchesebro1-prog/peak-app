@@ -166,7 +166,7 @@ export async function attachUploadedDocumentAction(input: {
   if (!doc) return { ok: false, error: "That document already exists — use Replace." };
   const linked = await attachDocument(doc.id, skus, user.name);
   if (sheet) {
-    const primary = new Set((sheet.primarySkus || []).map(String));
+    const primary = new Set(Array.isArray(sheet.primarySkus) ? sheet.primarySkus.map(String) : []);
     for (const sku of skus) await placeSheetImage(doc.id, sku, primary.has(sku));
   }
   revalidate();

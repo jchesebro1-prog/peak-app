@@ -4,6 +4,7 @@ import {
   getDocRows,
   insertDocIfAbsent,
   insertDocsIfAbsent,
+  listDeletedDocs,
   listDocs,
   listDocsByField,
   patchDoc,
@@ -55,6 +56,11 @@ export async function getDocument(id: string): Promise<PartDocument | null> {
 /** Live links only (detached rows are soft-deleted). */
 export async function allDocumentLinks(): Promise<PartDocumentLink[]> {
   return listDocs<PartDocumentLink>("part_document_links");
+}
+
+/** Detached links (soft-deleted rows) — a re-run must never revive one. */
+export async function detachedDocumentLinks(): Promise<PartDocumentLink[]> {
+  return listDeletedDocs<PartDocumentLink>("part_document_links");
 }
 
 export type NewPartDocument = {

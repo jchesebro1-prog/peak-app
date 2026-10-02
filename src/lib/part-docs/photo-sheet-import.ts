@@ -2,7 +2,7 @@
 import { blobEnabled, deleteBlob, putBlob } from "@/lib/blob";
 import { DOWNLOAD_TIMEOUT_MS, downloadDriveFile } from "@/lib/google/drive-photos";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
-import { attachDocument, createDocument, documentLinksForParts, getDocuments, setImageOrder } from "@/lib/stores/part-documents";
+import { attachDocument, createDocument, documentLinksForParts, getDocument, getDocuments, setImageOrder } from "@/lib/stores/part-documents";
 import { drivePhotosToken } from "./drive-photo-sync";
 import { fetchImageBytes } from "./fetch";
 import { fileNameForFetched, sniffImageType } from "./files";
@@ -23,7 +23,9 @@ import { buildImageIndex } from "./views";
  */
 
 /** A fetch + shrink + store rarely takes more than a few seconds; don't
- *  START another with less than this left (the first always runs). */
+ *  START another with less than this left of the budget. The first photo
+ *  ignores this, but not the hard deadline below — that can stop even the
+ *  first. */
 const PER_DOC_WORST_MS = 12_000;
 /** The page's maxDuration is 60 s and the budget is 45 s: this much past the
  *  budget is the most one call may run, and no photo — the first included —
@@ -76,6 +78,7 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
     imagesBySku: ctx.imagesBySku,
     imageByUrl: ctx.imageByUrl,
     imageByDriveId: ctx.imageByDriveId,
+    removedBySku: ctx.removedBySku,
     dropped: input.dropped,
     drive: ctx.drive,
     driveReason: ctx.driveReason,
@@ -137,6 +140,7 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
     const fileName = webpFileName(baseName);
     const stored = await put(partDocBlobPath(documentId, fileName), shrunk.bytes, shrunk.contentType);
     let created: Awaited<ReturnType<typeof createDocument>> = null;
+    let threw = false;
     try {
       created = await createDocument({
         id: documentId,
@@ -153,7 +157,18 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
         at: now(),
       });
     } catch {
-      created = null;
+      threw = true;
+    }
+    // A throw can come after the insert committed (the response was lost):
+    // if the document is there, its file is in use — keep it and link it.
+    // If even that check fails, keep the file: an orphaned blob is cheaper
+    // than a document pointing at nothing.
+    if (!created && threw) {
+      try {
+        created = await getDocument(documentId);
+      } catch {
+        return fail("Could not record the document.");
+      }
     }
     if (!created) {
       // The file is stored but nothing points at it: take it back out.

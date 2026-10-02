@@ -10716,6 +10716,7 @@ seeded()
   .then(() => packages289AsyncChecks())
   .then(() => photoSheetIoAsyncChecks())
   .then(() => photoSheetImportAsyncChecks())
+  .then(() => photoSheetFinalAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -42932,8 +42933,9 @@ const PHS_PARTS: PhsPart[] = [
   ok(!bad.ok && /Photo 1/.test(bad.error), "photo sheet parse: a sheet without Photo 1 + MFR Part #/SKU is refused");
   const skuOnly = phsRows([["SKU", "Photo 1", "Notes"], ["SKU-D", "x.jpg", "ignored"]]);
   ok(skuOnly.ok && skuOnly.rows[0].sku === "SKU-D" && skuOnly.rows[0].photos[0] === "x.jpg" && skuOnly.rows[0].mfrPart === "", "photo sheet parse: SKU + Photo 1 is enough; unknown columns are ignored");
-  const many = phsRows([PHS_H, ...Array.from({ length: 5001 }, (_, i) => ["M", `P${i}`, "", "", "", "", "", "", "", ""])]);
-  ok(!many.ok && /5000/.test(many.error), "photo sheet parse: more than 5000 rows is refused");
+  // Final review I2: only rows with a Photo value count toward the cap (was: every non-blank row).
+  const many = phsRows([PHS_H, ...Array.from({ length: 5001 }, (_, i) => ["M", `P${i}`, "", "", "", "", `https://x/${i}.jpg`, "", "", ""])]);
+  ok(!many.ok && /5000/.test(many.error), "photo sheet parse: more than 5000 rows with a photo is refused");
 
   const grid = phsGrid(g.ok ? g.rows : [], new Map([[2, "Added 1"]]));
   ok(grid[0].join("|") === PHS_H.join("|") && grid[1][9] === "Added 1" && grid[1][6] === "https://x/a.jpg", "photo sheet grid: header row + a status override lands in Status");
@@ -42943,8 +42945,9 @@ const PHS_PARTS: PhsPart[] = [
   const pick = (manufacturer: string, mfrPart: string, sku: string) => m({ manufacturer, mfrPart, sku });
   const a = pick("etc", "s4alpha", "");
   ok(a.kind === "matched" && a.sku === "SKU-A", "photo sheet match: manufacturer (any case) + normalized MFR P/N");
+  // Final review I3: an MFR Part # with neither Manufacturer nor SKU is never matched (was: ambiguous).
   const amb = pick("", "S4-ALPHA", "");
-  ok(amb.kind === "ambiguous" && amb.skus.sort().join() === "SKU-A,SKU-D", "photo sheet match: the same MFR P/N at two manufacturers is ambiguous without a manufacturer");
+  ok(amb.kind === "needs-key", "photo sheet match: an MFR P/N without a manufacturer or SKU needs a key");
   const b = pick("ETC", "S4-BRAVO", "");
   ok(b.kind === "matched" && b.sku === "SKU-B", "photo sheet match: the MFR model number counts");
   const c2 = pick("ADC", "280", "sku-c2");
@@ -42952,7 +42955,7 @@ const PHS_PARTS: PhsPart[] = [
   ok(pick("ADC", "280", "").kind === "ambiguous", "photo sheet match: a tie without SKU stays ambiguous");
   const d = pick("", "", "SKU-D");
   ok(d.kind === "matched" && d.sku === "SKU-D", "photo sheet match: a SKU-only row matches by SKU");
-  ok(pick("ETC", "NOPE", "").kind === "none" && pick("", "LAB1", "").kind === "none" && pick("", "", "").kind === "none", "photo sheet match: unknown, Labor and empty rows match nothing");
+  ok(pick("ETC", "NOPE", "").kind === "none" && pick("", "LAB1", "").kind === "needs-key" && pick("", "", "").kind === "none", "photo sheet match: unknown and empty rows match nothing; a bare MFR P/N needs a key");
 
   const drv: PhsImage = { id: "PD-1", source: "drive", sourceRef: "f1", sourceUrl: "https://drive/f1", fileName: "front.webp" };
   const sh: PhsImage = { id: "PD-2", source: "sheet", sourceRef: "file:Back.JPG", sourceUrl: null, fileName: "Back.webp" };
@@ -43244,4 +43247,138 @@ import { mergeOutcomes as phs7Merge, linkTotals as phs7Totals, resultStatuses as
   ok(st.get(2) === "Photo 1: placed late — reorder in the part editor; Added 2" && st.get(3) === "Photo 1: placed late — reorder in the part editor; Added 1",
     "photo sheet status: an ok outcome with a warning still counts as Added and shows the note");
   ok(st.get(4) === "Added 1", "photo sheet status: an ok outcome without a warning has no note");
+}
+
+/* ======================================================================
+   Photo sheet — final review fixes (I1–I3, M3, M4, M6, M9).
+   ====================================================================== */
+import { buildPartMatcher as phsfMatcher, rowsFromGrid as phsfRows, toImportRows as phsfImportRows, PHOTO_SHEET_HEADERS as phsfHeaders, type SheetImage as PhsfImage } from "@/lib/part-docs/photo-sheet";
+import { planPhotoSheet as phsfPlan, failedKeysForChunk as phsfFailedKeys, REMOVED_REASON as phsfRemoved, NEEDS_KEY_REASON as phsfNeedsKey, type PhotoSheetPlan as PhsfPlan } from "@/lib/part-docs/photo-sheet-plan";
+{
+  const H = [...phsfHeaders];
+  const blank = ["", "", "", "", "", "", "", "", "", ""];
+  // I2: an untouched export of any length passes; only filled rows count.
+  const long = phsfRows([H, ...Array.from({ length: 6000 }, (_, i) => (i % 2000 === 0 ? ["M", `P${i}`, "", "", "", "", `https://x/${i}.jpg`, "", "", ""] : ["M", `P${i}`, "", "", "", "0", "", "", "", "Missing"]))]);
+  ok(long.ok && long.rows.length === 6000 && phsfImportRows(long.rows).length === 3, "photo sheet final: a 6000-row sheet with 3 filled rows parses");
+  const full = phsfRows([H, ...Array.from({ length: 5001 }, (_, i) => ["", "", `S${i}`, "", "", "", "", "", `f${i}.jpg`, ""]), blank]);
+  ok(!full.ok && /5001/.test(full.error), "photo sheet final: 5001 rows with a photo are refused");
+
+  // I3: MFR Part # alone never matches; a SKU-only row still does.
+  const parts = [
+    { sku: "PF-A", desc: "A", category: "Lighting", mfr: "ETC", manufacturerPartNumber: "PF100" },
+    { sku: "PF-B", desc: "B", category: "Lighting", mfr: "ETC", manufacturerPartNumber: "PF200" },
+    { sku: "PF-C", desc: "C", category: "Lighting", mfr: "ETC", manufacturerPartNumber: "PF300" },
+    { sku: "PF-L", desc: "L", category: "Labor", manufacturerPartNumber: "PFLAB" },
+  ];
+  const m = phsfMatcher(parts);
+  ok(m({ manufacturer: "", mfrPart: "PF100", sku: "" }).kind === "needs-key", "photo sheet final: a unique MFR P/N alone still needs a Manufacturer or SKU");
+  const viaSku = m({ manufacturer: "", mfrPart: "PF100", sku: "pf-a" });
+  ok(viaSku.kind === "matched" && viaSku.sku === "PF-A", "photo sheet final: MFR P/N + SKU matches without a manufacturer");
+  const skuOnly = m({ manufacturer: "", mfrPart: "", sku: "PF-B" });
+  ok(skuOnly.kind === "matched" && skuOnly.sku === "PF-B", "photo sheet final: a SKU-only row still matches by SKU");
+  ok(m({ manufacturer: "ETC", mfrPart: "PFLAB", sku: "" }).kind === "none" && m({ manufacturer: "", mfrPart: "", sku: "PF-L" }).kind === "none", "photo sheet final: Labor never matches, with a manufacturer or by SKU");
+
+  const removed: PhsfImage[] = [
+    { id: "PD-ru", source: "sheet", sourceUrl: "https://img.test/Gone.jpg", fileName: "Gone.webp" },
+    { id: "PD-rd", source: "sheet", sourceRef: "drive:dr1", sourceUrl: "https://drive/dr1", fileName: "old drive.webp" },
+    { id: "PD-rf", source: "sheet", sourceRef: "file:Dropped.JPG", sourceUrl: null, fileName: "Dropped.webp" },
+  ];
+  const shownA: PhsfImage[] = [{ id: "PD-s1", source: "fetch", sourceUrl: "https://img.test/Path/Pic.jpg", fileName: "pic.webp" }, { id: "PD-s2", source: "upload", sourceUrl: null, fileName: "Kept.webp" }];
+  const rows = phsfImportRows((() => {
+    const p = phsfRows([H,
+      ["ETC", "PF100", "", "", "", "", "https://img.test/Gone.jpg", "old drive.jpg", "dropped.jpg", ""],
+      ["ETC", "PF200", "", "", "", "", "https://img.test/Gone.jpg", "", "", ""],
+      ["", "PF300", "", "", "", "", "https://img.test/x.jpg", "", "", ""],
+      ["ETC", "PF100", "", "", "", "", "https://img.test/path/pic.jpg", "kept.WEBP", "https://img.test/Path/Pic.jpg", ""],
+      ["ETC", "PF200", "", "", "", "", "https://img.test/dup.jpg", "", "https://img.test/dup.jpg", ""],
+    ]);
+    return p.ok ? p.rows : [];
+  })());
+  const plan = phsfPlan({
+    rows, match: m,
+    imagesBySku: new Map([["PF-A", shownA]]),
+    imageByUrl: new Map([["https://img.test/Gone.jpg", "PD-ru"]]),
+    imageByDriveId: new Map([["dr1", "PD-rd"]]),
+    removedBySku: new Map([["PF-A", removed]]),
+    dropped: [{ name: "Dropped.jpg", size: 10 }],
+    drive: [{ id: "dr1", name: "old drive.jpg", mimeType: "image/jpeg", md5: "m", size: 10, webViewLink: "https://drive/dr1" }],
+    driveReason: "",
+  });
+  const prob = (row: number, slot: number | null) => plan.problems.find((p) => p.rowNumber === row && p.slot === slot)?.reason;
+  ok(prob(2, 1) === phsfRemoved && prob(2, 2) === phsfRemoved, "photo sheet final: a URL or Drive file removed from this part is a problem, not a re-link");
+  ok(prob(2, 3) === phsfRemoved, "photo sheet final: a dropped file whose earlier copy was removed from this part is a problem");
+  ok(!plan.docs.some((d) => d.links.some((l) => l.sku === "PF-A" && l.rowNumber === 2)), "photo sheet final: nothing is planned for a removed photo");
+  const shared = plan.docs.find((d) => d.key === "url:https://img.test/Gone.jpg");
+  ok(!!shared && shared.via === "url" && shared.existingId === "PD-ru" && shared.links.map((l) => l.sku).join() === "PF-B", "photo sheet final: another part naming the removed photo still gets it linked");
+  ok(prob(4, null) === phsfNeedsKey && !plan.docs.some((d) => d.links.some((l) => l.rowNumber === 4)), "photo sheet final: a bare MFR P/N row is one row problem — fill in Manufacturer or SKU");
+  // M4: URLs compare exactly, file names in any case.
+  ok(plan.docs.some((d) => d.key === "url:https://img.test/path/pic.jpg" && d.links.some((l) => l.sku === "PF-A" && l.slot === 1)), "photo sheet final: a URL differing only in path case is planned as an add");
+  ok(plan.skipped.filter((s) => s.rowNumber === 5).map((s) => s.slot).join() === "2,3", "photo sheet final: a file name skips in any case; the exact URL skips");
+  // M3: the same photo twice for one part — one link, the repeat cell is a skip.
+  const dup = plan.docs.find((d) => d.key === "url:https://img.test/dup.jpg");
+  ok(!!dup && dup.links.length === 1 && dup.links[0].slot === 1 && plan.skipped.some((s) => s.rowNumber === 6 && s.slot === 3 && s.sku === "PF-B"), "photo sheet final: a repeated cell for the same part is recorded as a skip");
+
+  // M9: only failed keys this chunk's rows plan travel with it.
+  const lk = (rowNumber: number) => ({ sku: "S", primary: false, rowNumber, slot: 1 });
+  const fk: PhsfPlan = { docs: [
+    { key: "url:a", via: "url", url: "a", existingId: null, links: [lk(2), lk(9)] },
+    { key: "url:b", via: "url", url: "b", existingId: null, links: [lk(3)] },
+    { key: "url:c", via: "url", url: "c", existingId: null, links: [lk(4)] },
+  ], skipped: [], problems: [], matched: 3 };
+  ok(phsfFailedKeys(fk, [9, 4], ["url:a", "url:b", "url:c", "url:a", "url:z"]).join() === "url:a,url:c", "photo sheet final: a chunk carries only its own failed keys, once each");
+  ok(phsfFailedKeys(fk, [5], ["url:a"]).length === 0, "photo sheet final: a chunk with none of the failed docs carries no failed keys");
+}
+
+import { readSheetFile as phsfRead, loadPhotoSheetContext as phsfCtx } from "@/lib/part-docs/photo-sheet-io";
+import { runPhotoSheetBatch as phsfRun } from "@/lib/part-docs/photo-sheet-import";
+import { detachDocument as phsfDetach, visibleImagesForParts as phsfVisible, detachedDocumentLinks as phsfDetached } from "@/lib/stores/part-documents";
+async function photoSheetFinalAsyncChecks(): Promise<void> {
+  // M6: a hyperlinked cell reads as its link, not its display text.
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Photos");
+  ws.addRow([...phsfHeaders]);
+  ws.addRow(["M", "P1", "", "", "", "", "", "", "", ""]);
+  ws.getCell("G2").value = { text: "Photo", hyperlink: "https://img.test/x.jpg" };
+  ws.getCell("H2").value = { text: "Mail", hyperlink: "mailto:a@b.test" };
+  const read = await phsfRead(Buffer.from(await wb.xlsx.writeBuffer()), "linked.xlsx");
+  ok(read.ok && read.grid[1][6] === "https://img.test/x.jpg", "photo sheet final: a hyperlinked Photo cell reads as its http(s) link");
+  ok(read.ok && read.grid[1][7] === "Mail", "photo sheet final: a non-http hyperlink keeps its display text");
+
+  // I1: a photo detached from a part is never revived by a re-run.
+  const A = fixtureId("PHSF", "RM-ALPHA");
+  const B = fixtureId("PHSF", "RM-BRAVO");
+  for (const [id, mpn] of [[A, "PHSFRMALPHA01"], [B, "PHSFRMBRAVO01"]] as const) {
+    await upsertPart({ id, sku: id, desc: `PHSF ${mpn}`, category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "PhsfMfr", manufacturerPartNumber: mpn });
+    registerFixture("catalog_parts", id);
+  }
+  const jpeg = new Uint8Array(await s283Sharp({ create: { width: 40, height: 20, channels: 3, background: "#c60" } }).jpeg().toBuffer());
+  const fetched: string[] = [];
+  const deps = {
+    fetchImage: async (url: string) => { fetched.push(url); return { ok: true as const, file: { bytes: jpeg, contentDisposition: null, finalUrl: url } }; },
+    listDrive: async () => ({ files: [] }),
+    putFile: async (p: string) => ({ pathname: p }),
+    now: () => 1_700_000_000_000,
+  };
+  const URL_ = "https://img.test/phsf-removed.jpg";
+  const rowsFor = (mpn: string) => { const p = phsfRows([[...phsfHeaders], ["PhsfMfr", mpn, "", "", "", "", URL_, "", "", ""]]); return phsfImportRows(p.ok ? p.rows : []); };
+  const ids = async (sku: string) => ((await phsfVisible([sku])).get(sku) ?? []).map((d) => d.id);
+
+  const r1 = await phsfRun({ rows: rowsFor("PHSFRMALPHA01"), dropped: [], failedKeys: [] }, "PHSF test", 45_000, deps);
+  const docId = r1.ok ? r1.outcomes[0]?.documentId ?? "" : "";
+  if (docId) registerFixture("part_documents", docId);
+  ok(r1.ok && r1.outcomes.length === 1 && r1.outcomes[0].ok && (await ids(A)).join() === docId, "photo sheet final: the first import links the photo to the part");
+  ok(await phsfDetach(docId, A), "photo sheet final: the photo is detached from the part");
+
+  const ctx = await phsfCtx(deps.listDrive);
+  ok((ctx.removedBySku.get(A) ?? []).some((i) => i.id === docId) && (await phsfDetached()).some((l) => l.documentId === docId && l.partSku === A), "photo sheet final: the context carries the part's detached photo");
+  const fetchesBefore = fetched.length;
+  const r2 = await phsfRun({ rows: rowsFor("PHSFRMALPHA01"), dropped: [], failedKeys: [] }, "PHSF test", 45_000, deps);
+  ok(r2.ok && r2.outcomes.length === 0 && r2.remaining === 0 && fetched.length === fetchesBefore, "photo sheet final: a re-run of the same row imports nothing");
+  ok(!(await ids(A)).includes(docId), "photo sheet final: the detached link stays detached");
+  const replan = phsfPlan({ rows: rowsFor("PHSFRMALPHA01"), match: ctx.match, imagesBySku: ctx.imagesBySku, imageByUrl: ctx.imageByUrl, imageByDriveId: ctx.imageByDriveId, removedBySku: ctx.removedBySku, dropped: [], drive: ctx.drive, driveReason: ctx.driveReason });
+  ok(replan.problems.length === 1 && replan.problems[0].reason === phsfRemoved, "photo sheet final: Preview lists the removed photo as a problem");
+
+  const r3 = await phsfRun({ rows: rowsFor("PHSFRMBRAVO01"), dropped: [], failedKeys: [] }, "PHSF test", 45_000, deps);
+  ok(r3.ok && r3.outcomes.length === 1 && r3.outcomes[0].ok && r3.outcomes[0].documentId === docId && fetched.length === fetchesBefore, "photo sheet final: another part naming the same URL links the existing photo without a fetch");
+  ok((await ids(B)).join() === docId && !(await ids(A)).includes(docId), "photo sheet final: linking it to the other part leaves the first part's detach alone");
 }

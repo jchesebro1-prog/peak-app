@@ -37,8 +37,14 @@ export type PlanInput = {
   drive: readonly DriveListedPhoto[] | null;
   /** Why `drive` is null, e.g. "Drive photos aren't connected". */
   driveReason: string;
+  /** Each part's images a person detached (soft-deleted links, live documents):
+   *  a cell naming one is a problem — a detach is never undone by a re-run. */
+  removedBySku?: ReadonlyMap<string, readonly SheetImage[]>;
 };
 export type SheetDocOutcome = { key: string; ok: boolean; error?: string; documentId?: string };
+
+export const REMOVED_REASON = "removed from this part earlier — re-add it in the part editor";
+export const NEEDS_KEY_REASON = "fill in Manufacturer or SKU";
 
 const HEIC_NAME = /\.(heic|heif)$/i;
 const HEIC_MIME = new Set(["image/heic", "image/heif"]);
@@ -59,8 +65,10 @@ export function planPhotoSheet(input: PlanInput): PhotoSheetPlan {
       plan.docs.push(doc);
     }
     const same = doc.links.find((l) => l.sku === link.sku);
-    if (same) same.primary ||= link.primary;
-    else doc.links.push(link);
+    if (!same) return void doc.links.push(link);
+    // The same photo named twice for one part: one link; the repeat cell is a skip.
+    same.primary ||= link.primary;
+    plan.skipped.push({ rowNumber: link.rowNumber, slot: link.slot, sku: link.sku });
   };
 
   for (const row of input.rows) {
@@ -68,14 +76,24 @@ export function planPhotoSheet(input: PlanInput): PhotoSheetPlan {
     if (!values.some(Boolean)) continue;
     const m = input.match(row);
     if (m.kind !== "matched") {
-      const reason = m.kind === "ambiguous" ? `ambiguous — fill the SKU column (${m.skus.slice(0, 5).join(", ")}${m.skus.length > 5 ? ", …" : ""})` : "no matching part";
+      const reason =
+        m.kind === "ambiguous"
+          ? `ambiguous — fill the SKU column (${m.skus.slice(0, 5).join(", ")}${m.skus.length > 5 ? ", …" : ""})`
+          : m.kind === "needs-key"
+            ? NEEDS_KEY_REASON
+            : "no matching part";
       plan.problems.push({ rowNumber: row.rowNumber, slot: null, value: "", reason });
       continue;
     }
     plan.matched++;
     const sku = m.sku;
     const imgs = input.imagesBySku.get(sku) ?? [];
-    const shown = new Set(imgs.map((i) => slotSource(i, driveNames).toLowerCase()));
+    const shown = sourceSet(imgs.map((i) => slotSource(i, driveNames)));
+    const removed = input.removedBySku?.get(sku) ?? [];
+    const removedShown = sourceSet(removed.map((i) => slotSource(i, driveNames)));
+    const removedUrls = new Set(removed.map((i) => i.sourceUrl).filter((u): u is string => !!u));
+    const removedDrive = new Set(removed.map(driveIdOf).filter((d): d is string => !!d));
+    const removedDropped = new Set(removed.map((i) => droppedNameOf(i)?.toLowerCase()).filter((n): n is string => !!n));
 
     values.forEach((v, i) => {
       if (!v) return;
@@ -83,10 +101,12 @@ export function planPhotoSheet(input: PlanInput): PhotoSheetPlan {
       const link: PlannedLink = { sku, primary: slot === 1, rowNumber: row.rowNumber, slot };
       const problem = (reason: string) => plan.problems.push({ rowNumber: row.rowNumber, slot, value: v, reason });
       const skip = () => plan.skipped.push({ rowNumber: row.rowNumber, slot, sku });
-      if (shown.has(v.toLowerCase())) return skip();
+      if (shown(v)) return skip();
+      if (removedShown(v)) return problem(REMOVED_REASON);
 
       if (HTTP.test(v)) {
         if (imgs.some((img) => img.sourceUrl === v)) return skip();
+        if (removedUrls.has(v)) return problem(REMOVED_REASON);
         return addLink(`url:${v}`, () => ({ key: `url:${v}`, via: "url", url: v, existingId: input.imageByUrl.get(v) ?? null, links: [] }), link);
       }
       if (OTHER_SCHEME.test(v)) return problem("not an http(s) URL");
@@ -97,6 +117,7 @@ export function planPhotoSheet(input: PlanInput): PhotoSheetPlan {
       if (dropped) {
         if (dropped.size > MAX_PART_IMAGE_BYTES) return problem(OVER_CAP_REASON);
         if (imgs.some((img) => droppedNameOf(img)?.toLowerCase() === dropped.name.toLowerCase())) return skip();
+        if (removedDropped.has(dropped.name.toLowerCase())) return problem(REMOVED_REASON);
         const key = `file:${dropped.name.toLowerCase()}`;
         return addLink(key, () => ({ key, via: "dropped", name: dropped.name, links: [] }), link);
       }
@@ -109,11 +130,27 @@ export function planPhotoSheet(input: PlanInput): PhotoSheetPlan {
       if (HEIC_MIME.has(file.mimeType)) return problem(HEIC_REASON);
       if (file.size > MAX_PART_IMAGE_BYTES) return problem(OVER_CAP_REASON);
       if (imgs.some((img) => driveIdOf(img) === file.id)) return skip();
+      if (removedDrive.has(file.id)) return problem(REMOVED_REASON);
       const key = `drive:${file.id}`;
       return addLink(key, () => ({ key, via: "drive", file, existingId: input.imageByDriveId.get(file.id) ?? null, links: [] }), link);
     });
   }
   return plan;
+}
+
+/** "Is this cell one of these slot sources?" — http(s) values compare
+ *  exactly (a URL's path is case-sensitive), file names in any case. */
+function sourceSet(sources: readonly string[]): (v: string) => boolean {
+  const exact = new Set(sources);
+  const names = new Set(sources.filter((s) => !HTTP.test(s)).map((s) => s.toLowerCase()));
+  return (v) => (HTTP.test(v) ? exact.has(v) : names.has(v.toLowerCase()));
+}
+
+/** The failed keys worth sending with one chunk: only docs this chunk's rows plan. */
+export function failedKeysForChunk(plan: PhotoSheetPlan, rowNumbers: Iterable<number>, failedKeys: readonly string[]): string[] {
+  const rows = new Set(rowNumbers);
+  const keys = new Set(plan.docs.filter((d) => d.links.some((l) => rows.has(l.rowNumber))).map((d) => d.key));
+  return [...new Set(failedKeys)].filter((k) => keys.has(k));
 }
 
 export function planCounts(plan: PhotoSheetPlan): { add: number; skip: number; problems: number } {

@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { chunkImportRows, IMPORT_CHUNK_CHARS, MAX_SHEET_BYTES, toImportRows, type PhotoSheetRow } from "@/lib/part-docs/photo-sheet";
-import { linkTotals, mergeOutcomes, planCounts, resultStatuses, type PhotoSheetPlan, type SheetDocOutcome } from "@/lib/part-docs/photo-sheet-plan";
+import { chunkImportRows, IMPORT_CHUNK_CHARS, MAX_SHEET_BYTES, SHEET_TOO_BIG, toImportRows, type PhotoSheetRow } from "@/lib/part-docs/photo-sheet";
+import { failedKeysForChunk, linkTotals, mergeOutcomes, planCounts, resultStatuses, type PhotoSheetPlan, type SheetDocOutcome } from "@/lib/part-docs/photo-sheet-plan";
 import { uploadNewDocument } from "../upload-client";
 import { importPhotoSheetBatchAction, photoSheetResultsAction, planPhotoSheetAction } from "./actions";
 
@@ -16,6 +16,24 @@ import { importPhotoSheetBatchAction, photoSheetResultsAction, planPhotoSheetAct
 type Phase = "pick" | "planning" | "preview" | "importing" | "done";
 const box: React.CSSProperties = { border: "1px solid #e6e8ee", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 };
 const label: React.CSSProperties = { display: "block", fontSize: 12.5, fontWeight: 600, margin: "0 0 6px" };
+
+/** The results request re-sends the sheet (≤ 800 KB) in a 1200 KB body:
+ *  each status is capped, and once the statuses pass this size the rest of
+ *  the rows keep the Status they were uploaded with. */
+const STATUS_MAX_CHARS = 200;
+const STATUSES_MAX_JSON = 350_000;
+function cappedStatuses(statuses: ReadonlyMap<number, string>): Array<[number, string]> {
+  const out: Array<[number, string]> = [];
+  let size = 2;
+  for (const [row, text] of statuses) {
+    const entry: [number, string] = [row, text.length > STATUS_MAX_CHARS ? `${text.slice(0, STATUS_MAX_CHARS - 1)}…` : text];
+    const n = JSON.stringify(entry).length + 1;
+    if (size + n > STATUSES_MAX_JSON) break;
+    out.push(entry);
+    size += n;
+  }
+  return out;
+}
 
 const msg = (e: unknown) => `The server didn't answer — try again.${e instanceof Error && e.message ? ` (${e.message})` : ""}`;
 
@@ -34,7 +52,7 @@ export default function PhotoSheetClient() {
 
   const preview = async () => {
     if (!sheet) return;
-    if (sheet.size > MAX_SHEET_BYTES) return setError(`That sheet is over ${Math.round(MAX_SHEET_BYTES / 1024)} KB — split it into smaller sheets.`);
+    if (sheet.size > MAX_SHEET_BYTES) return setError(SHEET_TOO_BIG);
     setError("");
     setPhase("planning");
     const form = new FormData();
@@ -72,7 +90,7 @@ export default function PhotoSheetClient() {
         setProgress(`Fetching linked and Drive photos… ${all.filter((o) => o.ok).length} done`);
         let r;
         try {
-          r = await importPhotoSheetBatchAction({ rows: importRows, dropped: dropped(), failedKeys });
+          r = await importPhotoSheetBatchAction({ rows: importRows, dropped: dropped(), failedKeys: failedKeysForChunk(plan, importRows.map((row) => row.rowNumber), failedKeys) });
         } catch (e) {
           setError(msg(e));
           break chunkLoop;
@@ -116,7 +134,7 @@ export default function PhotoSheetClient() {
     if (!sheet || !plan) return;
     const form = new FormData();
     form.set("sheet", sheet);
-    form.set("statuses", JSON.stringify([...resultStatuses(plan, outcomes)]));
+    form.set("statuses", JSON.stringify(cappedStatuses(resultStatuses(plan, outcomes))));
     let r;
     try {
       r = await photoSheetResultsAction(form);

@@ -7,7 +7,7 @@ import { departmentOfCategory } from "@/lib/portal-departments";
 import { list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { listProjects } from "@/lib/stores/grid-projects";
-import { allDocumentLinks, allDocuments } from "@/lib/stores/part-documents";
+import { allDocumentLinks, allDocuments, detachedDocumentLinks } from "@/lib/stores/part-documents";
 import { getDepartments } from "@/lib/stores/portal-departments";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { listDrivePhotosForSheet } from "./drive-photo-sync";
@@ -41,13 +41,23 @@ export async function readSheetFile(buf: Buffer, fileName: string): Promise<{ ok
   ws.eachRow({ includeEmpty: false }, (row, n) => {
     const cells: string[] = [];
     row.eachCell({ includeEmpty: true }, (cell, col) => {
-      cells[col - 1] = cellText(cell.value);
+      cells[col - 1] = sheetCellText(cell.value);
     });
     for (let i = 0; i < cells.length; i++) cells[i] ??= "";
     grid[n - 1] = cells;
   });
   for (let i = 0; i < grid.length; i++) grid[i] ??= [];
   return { ok: true, grid };
+}
+
+/** A hyperlinked cell ("Photo" → https://…) reads as its http(s) link, not
+ *  its display text; everything else reads as the shared cellText does. */
+function sheetCellText(v: ExcelJS.CellValue): string {
+  if (v && typeof v === "object" && "hyperlink" in v) {
+    const link = String((v as { hyperlink?: unknown }).hyperlink ?? "").trim();
+    if (/^https?:\/\//i.test(link)) return link;
+  }
+  return cellText(v);
 }
 
 /** One "Photos" sheet: bold, frozen header; widths sized for the content. */
@@ -68,23 +78,35 @@ export type PhotoSheetContext = {
   imagesBySku: Map<string, SheetImage[]>;
   imageByUrl: Map<string, string>;
   imageByDriveId: Map<string, string>;
+  /** Each part's images a person detached (live documents only). */
+  removedBySku: Map<string, SheetImage[]>;
   drive: DriveListedPhoto[] | null;
   driveReason: string;
   driveNames: Map<string, string>;
 };
 
 export async function loadPhotoSheetContext(listDrive: ListDrive = listDrivePhotosForSheet): Promise<PhotoSheetContext> {
-  const [parts, documents, links, driveList] = await Promise.all([listCatalog(), allDocuments(), allDocumentLinks(), listDrive()]);
+  const [parts, documents, links, detached, driveList] = await Promise.all([listCatalog(), allDocuments(), allDocumentLinks(), detachedDocumentLinks(), listDrive()]);
   const docsById = new Map(documents.map((d) => [d.id, d] as const));
+  const sheetImage = (d: (typeof documents)[number]): SheetImage => ({ id: d.id, source: d.source, sourceUrl: d.sourceUrl, ...(d.sourceRef ? { sourceRef: d.sourceRef } : {}), fileName: d.fileName });
   const imagesBySku = new Map<string, SheetImage[]>();
   for (const [sku, refs] of buildImageIndex(documents, links)) {
     const real: SheetImage[] = [];
     for (const r of refs) {
       const d = docsById.get(r.id);
       if (!d || d.source === "datasheet-render") continue;
-      real.push({ id: d.id, source: d.source, sourceUrl: d.sourceUrl, ...(d.sourceRef ? { sourceRef: d.sourceRef } : {}), fileName: d.fileName });
+      real.push(sheetImage(d));
     }
     if (real.length) imagesBySku.set(sku, real);
+  }
+  // A detached link stays detached: the planner refuses a cell naming one.
+  const removedBySku = new Map<string, SheetImage[]>();
+  for (const l of detached) {
+    const d = docsById.get(l.documentId);
+    if (!d || d.kind !== "image" || d.source === "datasheet-render") continue;
+    const list = removedBySku.get(l.partSku);
+    if (list) list.push(sheetImage(d));
+    else removedBySku.set(l.partSku, [sheetImage(d)]);
   }
   const imageByUrl = new Map<string, string>();
   const imageByDriveId = new Map<string, string>();
@@ -101,6 +123,7 @@ export async function loadPhotoSheetContext(listDrive: ListDrive = listDrivePhot
     imagesBySku,
     imageByUrl,
     imageByDriveId,
+    removedBySku,
     drive,
     driveReason: driveList.files ? "" : driveList.reason,
     driveNames: new Map((drive ?? []).map((f) => [f.id, f.name] as const)),

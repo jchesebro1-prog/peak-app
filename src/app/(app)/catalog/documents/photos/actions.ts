@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { MAX_SHEET_BYTES, MAX_SHEET_ROWS, PHOTO_SLOTS, rowsFromGrid, type ImportRow, type PhotoSheetRow } from "@/lib/part-docs/photo-sheet";
+import { MAX_SHEET_BYTES, SHEET_TOO_BIG, MAX_SHEET_ROWS, PHOTO_SLOTS, rowsFromGrid, type ImportRow, type PhotoSheetRow } from "@/lib/part-docs/photo-sheet";
 import { loadPhotoSheetContext, readSheetFile, writePhotoSheet } from "@/lib/part-docs/photo-sheet-io";
 import { runPhotoSheetBatch, type SheetBatchInput, type SheetBatchResult } from "@/lib/part-docs/photo-sheet-import";
 import { planPhotoSheet, type DroppedFile, type PhotoSheetPlan } from "@/lib/part-docs/photo-sheet-plan";
@@ -13,7 +13,7 @@ import { FETCH_ACTION_BUDGET_MS } from "@/lib/part-docs/types";
 async function readUploadedSheet(form: FormData): Promise<{ ok: true; rows: PhotoSheetRow[] } | { ok: false; error: string }> {
   const file = form.get("sheet");
   if (!(file instanceof File) || !file.size) return { ok: false, error: "Pick the filled photo sheet (.xlsx or .csv)." };
-  if (file.size > MAX_SHEET_BYTES) return { ok: false, error: `That sheet is over ${Math.round(MAX_SHEET_BYTES / 1024)} KB — split it into smaller sheets.` };
+  if (file.size > MAX_SHEET_BYTES) return { ok: false, error: SHEET_TOO_BIG };
   const read = await readSheetFile(Buffer.from(await file.arrayBuffer()), file.name);
   if (!read.ok) return read;
   return rowsFromGrid(read.grid);
@@ -48,7 +48,7 @@ export async function planPhotoSheetAction(form: FormData): Promise<{ ok: true; 
     dropped = [];
   }
   const ctx = await loadPhotoSheetContext();
-  const plan = planPhotoSheet({ rows: parsed.rows, match: ctx.match, imagesBySku: ctx.imagesBySku, imageByUrl: ctx.imageByUrl, imageByDriveId: ctx.imageByDriveId, dropped, drive: ctx.drive, driveReason: ctx.driveReason });
+  const plan = planPhotoSheet({ rows: parsed.rows, match: ctx.match, imagesBySku: ctx.imagesBySku, imageByUrl: ctx.imageByUrl, imageByDriveId: ctx.imageByDriveId, removedBySku: ctx.removedBySku, dropped, drive: ctx.drive, driveReason: ctx.driveReason });
   return { ok: true, rows: parsed.rows, plan, driveReason: ctx.driveReason };
 }
 
