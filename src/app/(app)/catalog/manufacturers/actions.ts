@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
-import { createDocument } from "@/lib/stores/part-documents";
+import { createDocument, getDocument } from "@/lib/stores/part-documents";
 import { removeManufacturerImage, setManufacturerImage } from "@/lib/stores/manufacturers";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 import { shrinkStoredImage } from "@/lib/part-docs/shrink-upload";
@@ -24,6 +24,9 @@ export async function setManufacturerImageAction(input: { name: string; document
   const name = String(input?.name ?? "").trim().slice(0, 200);
   if (!mfrKey(name)) return { ok: false, error: "Pick a manufacturer." };
   if (!isDocumentId(input?.documentId)) return { ok: false, error: "Not a document id." };
+  // A document already under this id is not this upload's blob to touch (see attachUploadedDocumentAction):
+  // verifyUploadedBlob's refusal and shrinkStoredImage both delete blobs, so this check must run first.
+  if (await getDocument(input.documentId)) return { ok: false, error: "That document already exists — try again." };
   const checked = await verifyUploadedBlob({ documentId: input.documentId, blobPathname: input.blobPathname, fileName: input.fileName, kind: "image" });
   if (!checked.ok) return checked;
   const shrunk = await shrinkStoredImage(input.documentId, checked.file);

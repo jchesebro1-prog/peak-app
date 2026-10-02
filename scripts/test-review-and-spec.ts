@@ -48636,3 +48636,10 @@ import { manufacturerRows as mfrRows, matchManufacturerFile as mfrMatch } from "
   ok(mfrMatch("ETC.jpg", rows) === "etc" && mfrMatch("e.t.c.PNG", rows) === "etc" && mfrMatch("Allen and Heath.webp", rows) === "allenandheath", "mfr images: a file name matches a manufacturer by key, any case or punctuation");
   ok(mfrMatch("ETC Lighting.jpg", rows) === null && mfrMatch("photo.jpg", rows) === null, "mfr images: a file name never matches by substring");
 }
+
+{
+  const src = readFileSync("src/app/(app)/catalog/manufacturers/actions.ts", "utf8");
+  const g = src.indexOf("getDocument(input.documentId)");
+  const v = src.indexOf("verifyUploadedBlob({");
+  ok(g > 0 && v > 0 && g < v, "mfr images: the set-image action refuses an existing document before touching any blob");
+}

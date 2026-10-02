@@ -21,7 +21,7 @@ export default async function ManufacturersPage() {
   const parts = await listCatalog();
   const [state, records] = await Promise.all([loadPartDocsState(parts), listManufacturers()]);
   const images = buildImageIndex(state.documents, state.links);
-  const rows = manufacturerRows(parts, (sku) => (images.get(sku) ?? []).some((r) => r.source !== "datasheet-render"), records);
+  const rows = manufacturerRows(parts, (sku) => (images.get(sku) ?? []).some((r) => !r.hidden && r.source !== "datasheet-render"), records);
   const canEdit = can("create", user.roles);
   return (
     <div className="pk-content" style={{ maxWidth: 1100 }}>

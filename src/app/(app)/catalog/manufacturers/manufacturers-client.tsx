@@ -72,6 +72,7 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
   const [progress, setProgress] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const [ignored, setIgnored] = useState(0);
+  const [dropError, setDropError] = useState<string | null>(null);
 
   const byKey = useMemo(() => new Map(rows.map((r) => [r.key, r] as const)), [rows]);
   const shown = useMemo(() => {
@@ -117,6 +118,7 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
   };
 
   const addMany = (files: File[]) => {
+    setDropError(null);
     const imgs = files.filter((f) => IMAGE_FILE.test(f.name));
     setIgnored(files.length - imgs.length);
     setMany(imgs.map((file, i) => ({ id: `${Date.now()}-${i}`, file, key: matchManufacturerFile(file.name, rows), status: "pending" as const })));
@@ -160,7 +162,7 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
             try {
               addMany(await filesFromDrop(e.dataTransfer));
             } catch {
-              setProgress(null);
+              setDropError("Couldn't read those files — try choosing them instead.");
             }
           }}
           className="pk-card"
@@ -176,6 +178,8 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
           </label>
         </div>
       )}
+
+      {dropError && <div role="alert" style={{ fontSize: 12.5, color: "#b4543a", marginBottom: 10 }}>{dropError}</div>}
 
       {!!many.length && (
         <div className="pk-card" style={{ padding: 0, overflowX: "auto", marginBottom: 16 }}>
