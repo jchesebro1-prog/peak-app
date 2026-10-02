@@ -34,7 +34,9 @@ const LABEL_MAX = 160;
 const NOTES_MAX = 200;
 const SKU_MAX = 80;
 
-type Check = { ok: true } | { ok: false; reason: string };
+/** Which rule a placement broke — validate() reports it as the issue code. */
+export type PlaceFailCode = "height" | "bounds" | "sku" | "lane" | "shelf" | "overlap";
+type Check = { ok: true } | { ok: false; reason: string; code: PlaceFailCode };
 type Span = { lo: number; hi: number };
 
 /* ---------- small helpers ---------- */
@@ -49,7 +51,7 @@ export function laneSpan(p: Pick<RackPlacement, "lane" | "laneCount">): [number,
   return [l / n, (l + 1) / n];
 }
 
-const lanesIntersect = (a: [number, number], b: [number, number]) => a[0] < b[1] - EPS && b[0] < a[1] - EPS;
+export const lanesIntersect = (a: [number, number], b: [number, number]) => a[0] < b[1] - EPS && b[0] < a[1] - EPS;
 const spansIntersect = (a: Span, b: Span) => a.lo <= b.hi && b.lo <= a.hi;
 
 /** Display RU range: "RU 12" / "RU 12–13", honouring the rack's numbering (printed low→high). */
@@ -122,43 +124,52 @@ export function occupiedSpan(layout: RackLayout, p: RackPlacement): Span | null 
 
 /* ---------- rules ---------- */
 
+/** The RU range where two top-level placements collide (same face, spans and lanes intersect); null if they don't. */
+export function overlapSpan(layout: RackLayout, a: RackPlacement, b: RackPlacement): Span | null {
+  if (a.shelfId || b.shelfId || a.face !== b.face) return null;
+  const as = occupiedSpan(layout, a);
+  const bs = occupiedSpan(layout, b);
+  if (!as || !bs || !spansIntersect(as, bs) || !lanesIntersect(laneSpan(a), laneSpan(b))) return null;
+  return { lo: Math.max(as.lo, bs.lo), hi: Math.min(as.hi, bs.hi) };
+}
+
 export function canPlace(layout: RackLayout, p: RackPlacement, opts?: { ignoreId?: string }): Check {
   const { ruCount } = layout.config;
   const others = layout.placements.filter((q) => q.id !== p.id && q.id !== opts?.ignoreId);
 
   // 1. whole RU height
-  if (!Number.isInteger(p.ruHeight) || p.ruHeight < 1) return { ok: false, reason: "Height must be a whole number of RU." };
+  if (!Number.isInteger(p.ruHeight) || p.ruHeight < 1) return { ok: false, reason: "Height must be a whole number of RU.", code: "height" };
 
   // 2. in bounds (top-level only; a shelf counts its clearance)
   if (!p.shelfId) {
     const span = occupiedSpan(layout, p)!;
     if (!Number.isInteger(p.ruStart) || span.lo < 1 || span.hi > ruCount)
-      return { ok: false, reason: `Doesn't fit — the rack has ${ruCount} RU.` };
+      return { ok: false, reason: `Doesn't fit — the rack has ${ruCount} RU.`, code: "bounds" };
   }
 
   // 3. a part for every slot but reserved
   const hasSku = typeof p.sku === "string" && p.sku.trim() !== "";
-  if (p.kind !== "reserved" && !hasSku) return { ok: false, reason: "Pick a part for this slot." };
-  if (p.kind === "reserved" && p.sku !== undefined) return { ok: false, reason: "A reserved slot has no part." };
+  if (p.kind !== "reserved" && !hasSku) return { ok: false, reason: "Pick a part for this slot.", code: "sku" };
+  if (p.kind === "reserved" && p.sku !== undefined) return { ok: false, reason: "A reserved slot has no part.", code: "sku" };
 
   // 6. the lane exists for this width (checked before any lane comparison)
   const n = p.laneCount ?? 1;
   const lane = p.lane ?? 0;
   if (![1, 2, 3].includes(n) || !Number.isInteger(lane) || lane < 0 || lane >= n)
-    return { ok: false, reason: "That lane doesn't exist for this width." };
+    return { ok: false, reason: "That lane doesn't exist for this width.", code: "lane" };
   const myLanes = laneSpan(p);
 
   // 4. shelf children
   if (p.shelfId) {
     const shelf = others.find((q) => q.id === p.shelfId);
-    if (!shelf || shelf.kind !== "shelf" || shelf.shelfId) return { ok: false, reason: "That shelf isn't in the rack." };
-    if (p.kind === "shelf") return { ok: false, reason: "A shelf can't sit on another shelf." };
-    if (layout.placements.some((q) => q.shelfId === p.id)) return { ok: false, reason: "A device on a shelf can't hold other devices." };
+    if (!shelf || shelf.kind !== "shelf" || shelf.shelfId) return { ok: false, reason: "That shelf isn't in the rack.", code: "shelf" };
+    if (p.kind === "shelf") return { ok: false, reason: "A shelf can't sit on another shelf.", code: "shelf" };
+    if (layout.placements.some((q) => q.shelfId === p.id)) return { ok: false, reason: "A device on a shelf can't hold other devices.", code: "shelf" };
     const siblings = others.filter((q) => q.shelfId === shelf.id);
     if (siblings.some((s) => lanesIntersect(laneSpan(s), myLanes)))
-      return { ok: false, reason: "Another device already sits there on the shelf." };
+      return { ok: false, reason: "Another device already sits there on the shelf.", code: "shelf" };
     const ext = shelfSpan(shelf, [...siblings, p]);
-    if (ext.hi > ruCount) return { ok: false, reason: `Doesn't fit — the rack has ${ruCount} RU.` };
+    if (ext.hi > ruCount) return { ok: false, reason: `Doesn't fit — the rack has ${ruCount} RU.`, code: "bounds" };
     const above = shelf.ruStart + shelf.ruHeight;
     if (ext.hi >= above) {
       const shelfLanes = laneSpan(shelf);
@@ -169,19 +180,16 @@ export function canPlace(layout: RackLayout, p: RackPlacement, opts?: { ignoreId
         if (!qs) continue;
         for (let ru = Math.max(qs.lo, above); ru <= Math.min(qs.hi, ext.hi); ru++) taken.add(ru);
       }
-      if (taken.size) return { ok: false, reason: `Too tall for the shelf — ${taken.size} RU above it are taken.` };
+      if (taken.size) return { ok: false, reason: `Too tall for the shelf — ${taken.size} RU above it are taken.`, code: "shelf" };
     }
     return { ok: true };
   }
 
   // 5. overlap with other top-level placements on the same face
-  const mine = occupiedSpan(layout, p)!;
   for (const q of others) {
-    if (q.shelfId || q.face !== p.face) continue;
-    const qs = occupiedSpan(layout, q);
-    if (!qs || !spansIntersect(mine, qs) || !lanesIntersect(laneSpan(q), myLanes)) continue;
-    const ru = ruRangeLabel(layout.config, Math.max(mine.lo, qs.lo), Math.min(mine.hi, qs.hi));
-    return { ok: false, reason: `Overlaps ${labelOf(q)} at ${ru}.` };
+    const o = overlapSpan(layout, p, q);
+    if (!o) continue;
+    return { ok: false, reason: `Overlaps ${labelOf(q)} at ${ruRangeLabel(layout.config, o.lo, o.hi)}.`, code: "overlap" };
   }
   return { ok: true };
 }
