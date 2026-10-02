@@ -114,6 +114,8 @@ import SectionCard, { type InputKind } from "./section-card";
 import NarrativeColumn from "./narrative-column";
 import { useKeyProductLibrary } from "./use-key-product-library";
 import { fillEmptyKeyProductText, isKeyProductEligible, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
+import SystemLibraryModal from "./system-library-modal";
+import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
@@ -134,6 +136,10 @@ import {
   trackLine,
   type CurtainTrackPrefill,
 } from "./track-bom";
+import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
+import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/curtain-cut-sheets/vocab";
+import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
+import { countCutSheetTypes } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import VendorQuoteModal, {
   vendorDraftTotal,
   vendorDraftTotalSource,
@@ -245,6 +251,9 @@ const freshCurtain = (fabricSku: string): CurtainDraft => ({
   width: "",
   fullness: "50",
   bottom: "Chain",
+  topFinish: DEFAULT_TOP_FINISH,
+  bottomFinish: DEFAULT_BOTTOM_FINISH,
+  mountType: ASSUMED_MOUNT,
 });
 
 const freshFixture = (): FixtureDraft => {
@@ -523,6 +532,8 @@ export default function EstimatorClient({
   const [narrOpen, setNarrOpen] = useState(true);
   /** #293 — the system-intro library; the intro actions answer with the new list. */
   const [intros, setIntros] = useState(narrativeIntros);
+  /** #293 slice 2: the system library modal (Load system). */
+  const [libraryOpen, setLibraryOpen] = useState(false);
   useEffect(() => {
     try {
       if (window.localStorage.getItem(NARR_OPEN_KEY) === "0") setNarrOpen(false);
@@ -589,7 +600,7 @@ export default function EstimatorClient({
         targetName: string;
         targetNumber: string;
         /** #266: "Copied" reuses this banner; absent = the original Moved wording. */
-        verb?: "Moved" | "Copied";
+        verb?: "Moved" | "Copied" | "Loaded";
         /** #266: the re-price summary; a copy within this estimate has no targetId. */
         detail?: string;
       }
@@ -622,12 +633,15 @@ export default function EstimatorClient({
   const [pdfOptions, setPdfOptions] = useState(initial.pdfOptions.pdfOptions);
   const [pdfPrices, setPdfPrices] = useState(initial.pdfOptions.pdfPrices);
   const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
+  const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
-    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix }),
-    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix]
+    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets }),
+    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets]
   );
+  /** #292 — how many cut sheets the saved PDF would append (client-safe count; never collect.ts). */
+  const cutSheetCount = useMemo(() => countCutSheetTypes({ sections }, fabrics.map((f) => ({ sku: f.sku, desc: f.name })), trackSeries), [sections, fabrics, trackSeries]);
   const [activeId, setActiveId] = useState<string | null>(
     () => (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.id ?? null
   );
@@ -696,6 +710,9 @@ export default function EstimatorClient({
   type TrackEdit = { lineId: number; readOnly: { components: SpecItem["components"]; cost: number; price: number } | null };
   const trackEditRef = useRef<(TrackEdit & { draft: TrackDraft }) | null>(null);
   const [trackEdit, setTrackEdit] = useState<TrackEdit | null>(null);
+  /* #292: Edit curtain — the same close-then-seed dance as the track edit. */
+  const curtainEditRef = useRef<{ lineId: number; draft: CurtainDraft; linkedTrack: string | null } | null>(null);
+  const [curtainEdit, setCurtainEdit] = useState<{ lineId: number; linkedTrack: string | null } | null>(null);
   /* #274: the curtain modal's Add track form (null = off) and the pre-fill
      it last took from the curtain, so untouched fields follow the curtain. */
   const [curtainTrack, setCurtainTrack] = useState<TrackDraft | null>(null);
@@ -832,7 +849,7 @@ export default function EstimatorClient({
      and wrap onto a second grid row. #269: 84px internally, room for the
      labor lines' ✎ Edit labor button beside them. #293: +20px for the ★
      key-product toggle — five 20px buttons + 1px gaps (✎ ★ ↑ ↓ × on a
-     labor or track line) need 104px in BOTH views. */
+     labor, track or curtain line) need 104px in BOTH views. */
   const cols = isInternal
     ? "minmax(150px,1.3fr) 104px 92px 136px 116px 104px"
     : "minmax(150px,1.3fr) 104px 136px 116px 104px";
@@ -1717,6 +1734,21 @@ export default function EstimatorClient({
     openInputMethod("catalog", id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(id)));
   };
+  /** #293 slice 2: Load system — the server re-read and re-priced the library
+   *  system (today's catalog, this estimate's tier, vendor-quote lines left
+   *  out). Here it gets fresh ids (blocks follow), lands after the active
+   *  system like Copy here, and is selected; Save persists it. */
+  const placeLibrarySystem = (res: LoadedLibrarySystem) => {
+    const newId = "sys" + nextId();
+    const placed = placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct });
+    setSections((ss) => {
+      const at = ss.findIndex((s) => s.id === activeId);
+      return at < 0 ? [...ss, placed] : [...ss.slice(0, at + 1), placed, ...ss.slice(at + 1)];
+    });
+    setLibraryOpen(false);
+    requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(newId)));
+    setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Loaded", detail: loadNotice(res) });
+  };
 
   const pushItems = (secId: string, items: SpecItem[]) =>
     setSections((ss) =>
@@ -1878,6 +1910,8 @@ export default function EstimatorClient({
     else if (kind === "curtain") {
       setCurtainDraft(freshCurtain(defaultFabric));
       setCurtainTrack(null);
+      curtainEditRef.current = null;
+      setCurtainEdit(null);
     } else if (kind === "track") {
       // #274: an abandoned track edit must not seed the next "+ Configure track".
       trackEditRef.current = null;
@@ -1902,7 +1936,10 @@ export default function EstimatorClient({
   const seedDraft = (kind: InputKind, secId: string) => {
     if (kind === "custom") setCustomDraft(freshCustom());
     else if (kind === "curtain") {
-      setCurtainDraft(freshCurtain(defaultFabric));
+      const edit = curtainEditRef.current;
+      curtainEditRef.current = null;
+      setCurtainEdit(edit ? { lineId: edit.lineId, linkedTrack: edit.linkedTrack } : null);
+      setCurtainDraft(edit ? edit.draft : freshCurtain(defaultFabric));
       setCurtainTrack(null);
     } else if (kind === "track") {
       /* #274: reopened from a track line — its stored config, consumed and
@@ -2029,6 +2066,16 @@ export default function EstimatorClient({
       readOnly: gone ? { components: it.components, cost: it.cost, price: it.price } : null,
     };
     openInputMethod("track", secId);
+  };
+
+  /** #292: reopen the curtain configurator on a curtain line. */
+  const openCurtainEdit = (secId: string, lineId: number) => {
+    const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
+    if (!it?.curtain) return;
+    const linked = linkCurtainTracks(sections).links.get(it);
+    closeInput();
+    curtainEditRef.current = { lineId, draft: curtainDraftFromLine(it, defaultFabric, fabrics, (d) => computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined).costEach), linkedTrack: linked?.track ? String(linked.track.mounting) : null };
+    openInputMethod("curtain", secId);
   };
 
   /** #274: Add track pushes one track line; Update track replaces the line
@@ -2264,7 +2311,7 @@ export default function EstimatorClient({
     const d = curtainDraft;
     const name = (d.name || "").trim();
     const c = computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined);
-    if (!name || c.priceEach <= 0) return;
+    if (!name || !curtainDraftValid(d, c.priceEach)) return;
     // #274: Add track — the curtain's track line follows it; a track with a
     // blocking error blocks the whole add (the modal already disables it).
     let track: SpecItem | null = null;
@@ -2274,21 +2321,22 @@ export default function EstimatorClient({
       if (!res.ok) return;
       track = { ...res.item, id: 0 };
     }
-    let qty = parseInt(d.qty, 10);
-    if (isNaN(qty) || qty < 1) qty = 1;
-    const dims = (parseFloat(d.width) || 0) + "'W × " + (parseFloat(d.height) || 0) + "'H";
+    if (curtainEdit) {
+      if (track) track.id = nextId();
+      const item = curtainItem(d, c, { id: curtainEdit.lineId, sku: "" });
+      setSections((ss) => ss.map((s) => (s.id === secId ? applyCurtainEdit(s, curtainEdit.lineId, item, curtainEdit.linkedTrack ? null : track) : s)));
+      closeInput();
+      return;
+    }
     const idN = nextId();
     const skuN = nextId();
     if (track) track.id = nextId();
+    // #292: a curtain added with its track shares one key with it.
+    const key = track ? newCurtainTrackKey(idN) : undefined;
+    if (track) track.curtainTrackKey = key;
     pushItems(secId, [
       {
-        id: idN,
-        sku: "CRT-" + skuN,
-        desc: name + " — " + c.fab.name + ", " + dims + ", " + d.fullness + "% fullness",
-        qty,
-        unit: "ea",
-        cost: c.costEach,
-        price: c.priceEach,
+        ...curtainItem(d, c, { id: idN, sku: "CRT-" + skuN, trackKey: key }),
         curtain: true,
         specKey: curtainSpecKey(undefined, name) || undefined,
       },
@@ -2822,6 +2870,27 @@ export default function EstimatorClient({
                   }}
                 />
               )}
+              {loadedId && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const href = `/estimator/cut-sheets?id=${encodeURIComponent(loadedId)}`;
+                    if (!pdfDirty) {
+                      window.open(href, "_blank", "noopener");
+                      return;
+                    }
+                    // Opened inside the click so it isn't popup-blocked; navigated after the save lands.
+                    const w = window.open("", "_blank");
+                    const saved = await saveNow();
+                    if (!w) return;
+                    if (saved === false) w.close();
+                    else w.location.href = href;
+                  }}
+                  style={{ fontFamily: "var(--font-ui)", fontSize: 13, fontWeight: 600, color: "#cfd3da", background: "#2b2e35", padding: "9px 14px", borderRadius: 8, border: "none", cursor: "pointer" }}
+                >
+                  Cut sheets
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setMode("preview")}
@@ -3322,7 +3391,9 @@ export default function EstimatorClient({
               }}
             >
               <span>
-                {moveNotice.ok && moveNotice.verb === "Copied" ? (
+                {moveNotice.ok && moveNotice.verb === "Loaded" ? (
+                  <>{moveNotice.detail}</>
+                ) : moveNotice.ok && moveNotice.verb === "Copied" ? (
                   moveNotice.targetId ? (
                     <>
                       Copied to {moveNotice.targetNumber} · {moveNotice.targetName} — {moveNotice.detail} —{" "}
@@ -3814,6 +3885,7 @@ export default function EstimatorClient({
                   onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
                   onEditLabor={(group) => openLaborEdit(sec.id, group)}
                   onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
+                  onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
                   onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
@@ -3848,6 +3920,30 @@ export default function EstimatorClient({
               >
                 + Add system
               </button>
+              <button
+                type="button"
+                className="est-addsys est-addlib"
+                onClick={() => setLibraryOpen(true)}
+                title="Load a system from a sent or won estimate — re-priced for this one"
+                style={{
+                  width: "100%",
+                  marginTop: 8,
+                  padding: 10,
+                  background: "#fff",
+                  border: "1px dashed #d6d9e0",
+                  borderRadius: 12,
+                  color: "#8c919c",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  fontFamily: "var(--font-ui)",
+                  cursor: "pointer",
+                }}
+              >
+                + From library…
+              </button>
+              {libraryOpen && (
+                <SystemLibraryModal mode="load" tierMargin={tierMargin} onLoaded={placeLibrarySystem} onClose={() => setLibraryOpen(false)} />
+              )}
             </div>
 
             {/* system narrative — the right column Quote details vacated (#281);
@@ -3969,6 +4065,8 @@ export default function EstimatorClient({
           {curtainFor && (
             <CurtainModal
               secName={curtainSec ? curtainSec.name : ""}
+              editing={!!curtainEdit}
+              linkedTrack={curtainEdit?.linkedTrack ?? null}
               draft={curtainDraft}
               fabrics={fabrics}
               sewingPct={curtainSewingPct}
@@ -4136,6 +4234,8 @@ export default function EstimatorClient({
             pdfTerms={pdfTerms}
             pdfOptions={pdfOptions}
             pdfItemizedAppendix={pdfItemizedAppendix}
+            pdfCutSheets={pdfCutSheets}
+            cutSheetCount={cutSheetCount}
             paymentTerms={paymentTerms}
             paymentTermsOptions={PAYMENT_TERMS}
             setPaymentTerms={setPaymentTerms}
@@ -4146,6 +4246,7 @@ export default function EstimatorClient({
               else if (flag === "pdfCover") setPdfCover((v) => !v);
               else if (flag === "pdfOptions") setPdfOptions((v) => !v);
               else if (flag === "pdfItemizedAppendix") setPdfItemizedAppendix((v) => !v);
+              else if (flag === "pdfCutSheets") setPdfCutSheets((v) => !v);
               else setPdfTerms((v) => !v);
             }}
           />

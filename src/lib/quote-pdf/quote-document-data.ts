@@ -5,6 +5,7 @@ import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { totals } from "@/app/(app)/estimator/pricing";
 import { PAYMENT_TERMS, type PaymentTerms, type SpecSection, type VendorQuote } from "@/app/(app)/estimator/types";
 import { normalizePdfOptions } from "./pdf-options";
+import { documentRevStamp } from "./state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
@@ -88,11 +89,14 @@ export function quoteDocumentDataFor(
   const paymentTerms: PaymentTerms = (PAYMENT_TERMS as readonly string[]).includes(q.paymentTerms || "")
     ? (q.paymentTerms as PaymentTerms)
     : "Unknown";
+  // #293 slice 3: Rev = revisions so far, date = last update — the one rule
+  // (state.ts) the generator also uses to record what a file printed.
+  const stamp = documentRevStamp(q);
   return {
     // #223 — the document prints the estimate number (the id when unnumbered).
     quoteId: displayQuoteNumber(q),
-    revNum: Math.max(1, q.revisions?.length || 1),
-    revDateMs: q.updatedAt || q.createdAt || 0,
+    revNum: stamp.revNum,
+    revDateMs: stamp.revDateMs,
     custName: (q.customerId && cust?.name) || q.customer || "",
     hasAttn: current ? true : !!contactName,
     attnLine: current ? current.name + (current.role ? " · " + current.role : "") : contactName,

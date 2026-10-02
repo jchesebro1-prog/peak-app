@@ -10717,9 +10717,16 @@ seeded()
   .then(() => photoSheetIoAsyncChecks())
   .then(() => photoSheetImportAsyncChecks())
   .then(() => photoSheetFinalAsyncChecks())
+  .then(() => curtain292AsyncChecks())
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
   .then(() => narrativeFinal293AsyncChecks())
+  .then(() => systemLibrary293sAsyncChecks())
+  .then(() => systemLibrary293sFinalFixAsyncChecks())
+  .then(() => shareLinks293tAsyncChecks())
+  .then(() => onlineDoc293tAsyncChecks())
+  .then(() => portalPage293tAsyncChecks())
+  .then(() => finalFix293tAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -38105,7 +38112,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   ok(modal.includes("useSwallowOpeningDoubleClick()") && modal.includes("onClickCapture={swallowOpeningDoubleClick}") && modal.includes('"Update track" : "Add track"') && modal.includes("No track series yet — set one up in"),
     "#274B modal: swallows the opening double-click, Update/Add track, and the empty-state link to Track series");
   ok(curtainModal.includes("Add track") && curtainModal.includes("<TrackFields draft={track}"), "#274B curtain modal: the Add track toggle shows the track fields");
-  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(acts), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
+  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(src("src/app/(app)/estimator/copy-pricing.ts")), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
   ok(page.includes("listTrackSeries()") && page.includes("trackSeries={trackSeries}") && page.includes("trackParts={trackParts}"), "#274B page: the Estimator loads the series and their live catalog parts");
 }
 
@@ -42911,6 +42918,893 @@ import { showQuotedBeforeShelf as s290Shelf, parseCatalogParams as s290Params } 
   ok(s290Shelf(s290Params({ dept: "lighting" })) === true, "#290 shelf: a part department still shows it");
   ok(s290Shelf(s290Params({ q: "s4" })) === false && s290Shelf(s290Params({ page: "2" })) === false && s290Shelf(s290Params({ cat: "Lighting" })) === false, "#290 shelf: a search, a filter or page 2 hides it (unchanged)");
 }
+
+/* ============================================================================
+   #292 — curtain cut sheets: one sheet per curtain TYPE (elevation, mounting
+   detail, materials, hardware), read from Estimator or Grid quotes. Pure
+   checks run here; DB checks run in curtain292AsyncChecks() (registered on
+   the promise chain after packages289AsyncChecks).
+   ============================================================================ */
+import {
+  ASSUMED_MOUNT as c292Assumed,
+  CURTAIN_MOUNT_TYPES as c292MountTypes,
+  GRID_CURTAIN_DEFAULTS as c292GridDefaults,
+  cleanCurtainFinishes as c292CleanFinishes,
+  isMountTypeId as c292IsMount,
+  mountTypeForTrackMounting as c292MountFor,
+} from "@/lib/curtain-cut-sheets/vocab";
+import { parseEstimatorCurtainDesc as c292ParseEst, parseGridCurtainDesc as c292ParseGrid } from "@/lib/curtain-cut-sheets/parse";
+import { linkCurtainTracks as c292Link, newCurtainTrackKey as c292Key } from "@/lib/curtain-cut-sheets/track-link";
+import { curtainDesc as c292CurtainDesc, type GridCurtain as C292GridCurtain } from "@/lib/design/grid-bom";
+import type { SpecItem as C292Item, SpecSection as C292Section } from "@/app/(app)/estimator/types";
+
+const C292_TRACK = { seriesId: "adc-280-black", operation: "biparting" as const, runFt: 40, curved: false, mounting: "batten" as const, qty: 1 };
+function c292Sec(id: string, items: Array<Partial<C292Item> & { id: number }>): C292Section {
+  return {
+    id, name: id, kind: "materials", mfr: "", freightPct: 0,
+    items: items.map((it) => ({ sku: "X", desc: "x", qty: 1, unit: "ea", cost: 0, price: 0, ...it }) as C292Item),
+  };
+}
+
+// ---- vocabulary ----
+{
+  ok(c292MountFor("batten") === "track-batten" && c292MountFor("ceiling") === "track-ceiling" && c292MountFor("structure") === "track-structure",
+    "#292 vocab: batten / ceiling / structure mountings map to their mount types");
+  ok(c292MountFor("rafter") === "track-other" && c292MountFor("") === "track-other",
+    "#292 vocab: any other mounting string is track-other (a third TrackMounting never breaks)");
+  ok(c292MountTypes.map((t) => t.id).join() === "track-batten,track-ceiling,track-structure,tie-batten,wall-hookloop" && !c292IsMount("track-other") && c292IsMount("tie-batten"),
+    "#292 vocab: five pickable mount types; track-other is never pickable");
+  ok(c292Assumed === "tie-batten" && c292GridDefaults.Draw.mount === "track-batten" && c292GridDefaults.Border.bottom === "hem" && c292GridDefaults.Leg.mount === "tie-batten" && c292GridDefaults.Full.bottom === "chain",
+    "#292 vocab: assumed mount is tie-batten; Grid type defaults per spec §1.4");
+  const cf = c292CleanFinishes({ topFinish: "pipe-pocket", bottomFinish: "velcro", mountType: "track-other" });
+  ok(cf.topFinish === "pipe-pocket" && !("bottomFinish" in cf) && !("mountType" in cf) && Object.keys(c292CleanFinishes(null)).length === 0,
+    "#292 vocab: cleanCurtainFinishes keeps valid values and drops bad or absent ones (never refuses)");
+}
+// ---- parsers ----
+{
+  const fabs = new Set(["Charisma Velour 25 oz", "Encore Velour 22 oz"]);
+  const a = c292ParseEst("Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness", fabs);
+  ok(!!a && a.name === "Main Drape" && a.fabricName === "Charisma Velour 25 oz" && a.widthFt === 21.5 && a.heightFt === 18 && a.fullnessPct === 50,
+    "#292 parse: the exact addCurtain desc round-trips, decimals included");
+  const flat = c292ParseEst("Cyc — Encore Velour 22 oz, 40'W × 20'H, 0% fullness", fabs);
+  ok(!!flat && flat.fullnessPct === 0, "#292 parse: 0% fullness reads as flat");
+  const dash = c292ParseEst("Legs — Stage Left — Encore Velour 22 oz, 6'W × 20'H, 50% fullness", fabs);
+  ok(!!dash && dash.name === "Legs — Stage Left" && dash.fabricName === "Encore Velour 22 oz", "#292 parse: a name containing ' — ' splits at the known fabric");
+  const unknown = c292ParseEst("Legs — Stage Left — Mystery Cloth, 6'W × 20'H, 50% fullness", fabs);
+  ok(!!unknown && unknown.name === "Legs" && unknown.fabricName === "Stage Left — Mystery Cloth", "#292 parse: with no known fabric it splits at the first ' — '");
+  ok(c292ParseEst("Main Drape (black), 20 x 18 ft", fabs) === null && c292ParseEst("Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H", fabs) === null && c292ParseEst("", fabs) === null,
+    "#292 parse: a hand-edited desc reads as null, never a guess");
+  const g: C292GridCurtain = { type: "Leg", name: "SL Leg", widthFt: 6, heightFt: 20.5, fullnessPct: 50, fabricSku: "FAB-1" };
+  const gp = c292ParseGrid(c292CurtainDesc(g, "Encore Velour 22 oz"));
+  ok(!!gp && gp.name === "SL Leg" && gp.gridType === "Leg" && gp.widthFt === 6 && gp.heightFt === 20.5 && gp.fullnessPct === 50 && gp.fabricName === "Encore Velour 22 oz",
+    "#292 parse: curtainDesc round-trips through parseGridCurtainDesc (% fullness)");
+  const gf = c292ParseGrid(c292CurtainDesc({ ...g, type: "Full", fullnessPct: 0 }));
+  ok(!!gf && gf.fullnessPct === 0 && gf.gridType === "Full" && gf.fabricName === "FAB-1", "#292 parse: a flat Grid curtain round-trips (the fabric SKU when no name)");
+  ok(c292ParseGrid("Truss 12in box · 10 ft") === null && c292ParseGrid("SL Leg (Tab) · 6×20 ft · flat · X") === null, "#292 parse: a non-curtain Grid line reads as null");
+}
+// ---- track link ----
+{
+  const cur = (id: number, extra: Partial<C292Item> = {}) => ({ id, curtain: true, ...extra });
+  const trk = (id: number, extra: Partial<C292Item> = {}) => ({ id, track: { ...C292_TRACK }, ...extra });
+  ok(c292Key(41, () => "n0") === "ct-41-n0" && /^ct-41-[0-9a-z]{6,}$/.test(c292Key(41)), "#292 link: newCurtainTrackKey is ct-<line id>-<nonce> (final review #1)");
+  const s1 = c292Sec("a", [cur(1, { curtainTrackKey: "ct-41" })]);
+  const s2 = c292Sec("b", [{ id: 9 }, trk(2, { curtainTrackKey: "ct-41" })]);
+  ok(c292Link([s1, s2]).links.get(s1.items[0])?.id === 2, "#292 link: a shared key matches across sections");
+  const adj = c292Sec("c", [cur(3), trk(4)]);
+  ok(c292Link([adj]).links.get(adj.items[0])?.id === 4, "#292 link: a key-less curtain links to the track line right after it");
+  ok(c292Link([c292Sec("d", [cur(5)]), c292Sec("e", [trk(6)])]).links.size === 0, "#292 link: no adjacency fallback across sections");
+  ok(c292Link([c292Sec("f", [cur(7), { id: 8 }, trk(9)])]).links.size === 0, "#292 link: no fallback past a non-track line");
+  ok(c292Link([c292Sec("g", [cur(10), trk(11, { curtainTrackKey: "ct-99" })])]).links.size === 0, "#292 link: no fallback onto a track that carries its own key");
+  const dupe = c292Sec("h", [cur(12, { curtainTrackKey: "ct-12" }), cur(13, { curtainTrackKey: "ct-12" }), trk(14, { curtainTrackKey: "ct-12" })]);
+  const dl = c292Link([dupe]);
+  ok(dl.links.get(dupe.items[0])?.id === 14 && !dl.links.has(dupe.items[1]) && dl.duplicates.length === 1 && dl.duplicates[0] === dupe.items[1],
+    "#292 link: two curtains on one key — the first links, the second is flagged");
+}
+
+// ---- #292 task 2: geometry + mount details ----
+import { elevation as c292Elev, ftIn as c292FtIn, inchLabel as c292InchLabel, pickScale as c292Pick, topMarks as c292Marks } from "@/lib/curtain-cut-sheets/geometry";
+import { textExtent as c292TextExtent } from "@/lib/curtain-cut-sheets/shapes";
+import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/lib/curtain-cut-sheets/mount-details";
+// ---- geometry ----
+{
+  const m20 = c292Marks(20, 12);
+  ok(m20.count === 21 && m20.spacingIn === 12, "#292 geometry: topMarks(20, 12) → 21 marks at 12\"");
+  const m205 = c292Marks(20.5, 12);
+  ok(m205.count === 22 && m205.spacingIn <= 12 && Math.abs(m205.spacingIn * 21 - 246) < 1e-9, "#292 geometry: topMarks(20.5, 12) → 22 marks at ≤ 12\", both ends marked");
+  ok(c292Marks(0, 12).count === 0 && c292Marks(20, 0).count === 0, "#292 geometry: topMarks of a zero width (or spacing) is 0 marks");
+  ok([c292FtIn(21.5), c292FtIn(18), c292FtIn(0.75), c292FtIn(10.999), c292FtIn(6.0208)].join("|") === `21'-6"|18'-0"|0'-9"|11'-0"|6'-0 1/4"`,
+    "#292 geometry: ftIn rounds to the nearest 1/4\" (spec §2.4 cases)");
+  ok(c292Pick([{ widthFt: 20, heightFt: 18 }], { wIn: 6, hIn: 4 }).label === `1/8"=1'-0"`, "#292 geometry: pickScale picks the largest architectural scale that fits");
+  ok(c292Pick([{ widthFt: 2, heightFt: 2 }], { wIn: 6, hIn: 4 }).label === `1"=1'-0"`, "#292 geometry: a small drop draws at 1\"=1'-0\"");
+  ok(c292Pick([{ widthFt: 200, heightFt: 100 }], { wIn: 6, hIn: 4 }).label === `1/16"=1'-0"`, "#292 geometry: an oversize drop falls back to the smallest scale");
+  const base = { fullnessPct: 50, top: "grommets" as const, bottom: "chain" as const, markSpacingIn: 12, markLabel: "Grommets" as const, box: { wIn: 4.6, hIn: 3.9 } };
+  const three = [{ widthFt: 20, heightFt: 18, qty: 2 }, { widthFt: 10, heightFt: 18, qty: 1 }, { widthFt: 6, heightFt: 18, qty: 4 }];
+  const e3 = c292Elev({ ...base, sizes: three });
+  const texts = (e: { shapes: Array<{ kind: string; text?: string }> }) => e.shapes.filter((s) => s.kind === "text").map((s) => s.text as string);
+  ok(e3.shapes.filter((s) => s.tag === "panel").length === 3 && !texts(e3).some((t) => t.startsWith("Typical")), "#292 geometry: up to 3 sizes are drawn side by side");
+  ok(e3.shapes.filter((s) => s.tag === "mark").length === 21 + 11 + 7 && texts(e3).includes(`Grommets @ 12" o.c. max (21)`) && texts(e3).includes("Qty 2"),
+    "#292 geometry: a grommet at every mark per panel, the o.c. label, and each size's qty");
+  const e4 = c292Elev({ ...base, sizes: [...three, { widthFt: 4, heightFt: 18, qty: 1 }] });
+  ok(e4.shapes.filter((s) => s.tag === "panel").length === 1 && texts(e4).includes("Typical — 4 sizes, see schedule"), "#292 geometry: 4+ sizes draw only the largest, captioned Typical");
+  const flat = c292Elev({ ...base, fullnessPct: 0, sizes: three });
+  ok(flat.shapes.every((s) => s.tag !== "pleat") && e3.shapes.some((s) => s.tag === "pleat"), "#292 geometry: pleat lines only when there is fullness");
+}
+// ---- mount details ----
+{
+  const keys = [...c292MountTypes.map((t) => t.id), "track-other" as const];
+  ok(keys.every((k) => { const d = c292Detail(k); return !!d.title && d.shapes.length > 0 && d.labels.length >= 1; }), "#292 details: every mount type (and track-other) has a titled detail with ≥ 1 label");
+  ok(c292Detail("track-other").note === c292OtherNote && c292OtherNote === "Track mounting per manufacturer's instructions" && !c292Detail("tie-batten").note,
+    "#292 details: track-other carries the manufacturer's-instructions note");
+}
+// ---- #292 task 2 fix round 1: label fit + no label collisions ----
+{
+  const base = { fullnessPct: 50, top: "grommets" as const, bottom: "chain" as const, markSpacingIn: 12, markLabel: "Grommets" as const, box: { wIn: 4.6, hIn: 3.9 } };
+  const sz = (...w: number[]) => w.map((widthFt, i) => ({ widthFt, heightFt: 18, qty: i + 1 }));
+  type C292Text = { kind: "text"; x: number; y: number; text: string; size: number; anchor?: "start" | "middle" | "end"; rotate?: number };
+  const textsOf = (shapes: readonly { kind: string }[]) => shapes.filter((s): s is C292Text => s.kind === "text");
+  const overlaps = (shapes: readonly { kind: string }[]) => {
+    const flat = textsOf(shapes).filter((t) => !t.rotate);
+    for (let i = 0; i < flat.length; i++) {
+      for (let j = i + 1; j < flat.length; j++) {
+        if (Math.abs(flat[i].y - flat[j].y) > 1e-6) continue;
+        const a = c292TextExtent(flat[i]);
+        const b = c292TextExtent(flat[j]);
+        if (a.x0 < b.x1 - 1e-9 && b.x0 < a.x1 - 1e-9) return `${flat[i].text} / ${flat[j].text}`;
+      }
+    }
+    return "";
+  };
+  const cases: Array<[string, Parameters<typeof c292Elev>[0]]> = [
+    ["20/10/6 grommets+chain", { ...base, sizes: sz(20, 10, 6) }],
+    ["4 sizes (typical)", { ...base, sizes: sz(20, 10, 6, 4) }],
+    ["20/10/6 pipe pockets", { ...base, top: "pipe-pocket", bottom: "pipe-pocket", sizes: sz(20, 10, 6) }],
+    ["30/8/4 hook-loop hem", { ...base, top: "hook-loop", bottom: "hem", sizes: sz(30, 8, 4) }],
+    ["tall narrow first", { ...base, sizes: [{ widthFt: 6, heightFt: 40, qty: 1 }, { widthFt: 30, heightFt: 10, qty: 1 }, { widthFt: 5, heightFt: 5, qty: 1 }] }],
+    ["Carriers 6\" spacing", { ...base, markLabel: "Carriers", markSpacingIn: 6, sizes: sz(20, 10, 6) }],
+  ];
+  for (const [name, input] of cases) {
+    const e = c292Elev(input);
+    ok(overlaps(e.shapes) === "", `#292 geometry fix: no two text shapes on a baseline overlap in x (${name})${overlaps(e.shapes) ? " — " + overlaps(e.shapes) : ""}`);
+  }
+  const e3 = c292Elev({ ...base, sizes: sz(20, 10, 6) });
+  const t3 = textsOf(e3.shapes).map((t) => t.text);
+  ok(t3.filter((t) => t.includes("o.c.")).length === 1 && t3.includes("(11)") && t3.includes("(7)"), "#292 geometry fix: the o.c. spacing label prints once; the other panels carry only their count");
+  const six = c292Elev({ ...base, sizes: sz(6) });
+  const sixBottom = textsOf(six.shapes).filter((t) => /Chain|pocket/.test(t.text));
+  const sixPanel = six.shapes.find((s) => s.tag === "panel" && s.kind === "rect") as { x: number; w: number };
+  ok(sixBottom.length === 1 && sixBottom.every((t) => { const x = c292TextExtent(t); return x.x0 >= sixPanel.x - 1e-9 && x.x1 <= sixPanel.x + sixPanel.w + 1e-9; }),
+    "#292 geometry fix: the bottom-finish label fits inside a 6 ft panel");
+  // fix round 2: every bottom-finish label stays inside ITS OWN panel at the multi-size scale (sz(6) alone picks 1/8", which never needs the two-line branch)
+  const bottomIn = (e: ReturnType<typeof c292Elev>) => {
+    const panels = e.shapes.filter((s): s is Extract<typeof s, { kind: "rect" }> => s.kind === "rect" && s.tag === "panel");
+    const labels = textsOf(e.shapes).filter((t) => t.anchor === "middle" && /^(Chain|Pipe|Hem)/.test(t.text));
+    const bad = panels.filter((p) => {
+      const mine = labels.filter((t) => t.x >= p.x - 1e-9 && t.x <= p.x + p.w + 1e-9);
+      return mine.length !== 1 || c292TextExtent(mine[0]).x0 < p.x - 1e-9 || c292TextExtent(mine[0]).x1 > p.x + p.w + 1e-9;
+    });
+    return { panels: panels.length, labels, bad: bad.length };
+  };
+  for (const [name, input] of cases) {
+    if (input.sizes.length > 3) continue;
+    const r = bottomIn(c292Elev(input));
+    ok(r.bad === 0 && r.labels.length === r.panels, `#292 geometry fix 2: each panel carries exactly one bottom label inside its own x-range (${name})`);
+  }
+  const narrow = bottomIn(c292Elev({ ...base, sizes: sz(20, 10, 6) }));
+  ok(narrow.labels.length === 3 && narrow.labels[2].text === "Chain\npocket" && narrow.labels[0].text === "Chain pocket",
+    "#292 geometry fix 2: at 20/10/6 the 6 ft panel's label is the two-line form (the narrow-panel branch is exercised)");
+  const e4 = c292Elev({ ...base, sizes: [...sz(20, 10, 6, 4), { widthFt: 0, heightFt: 5 }] });
+  ok(textsOf(e4.shapes).some((t) => t.text === "Typical — 4 sizes, see schedule"), "#292 geometry fix: the Typical caption counts drawn sizes, not zero-size entries");
+  const cap = textsOf(e4.shapes).find((t) => t.text.startsWith("Typical"))!;
+  const qty = textsOf(e4.shapes).find((t) => t.text.startsWith("Qty"))!;
+  ok(cap.y - qty.y >= 0.085 * 1.4, "#292 geometry fix: the Typical caption sits clear below the Qty line");
+  ok([c292InchLabel(0.25), c292InchLabel(0.5), c292InchLabel(12), c292InchLabel(11.75), c292InchLabel(0), c292InchLabel(1.25)].join("|") === `1/4"|1/2"|12"|11 3/4"|0"|1 1/4"`,
+    "#292 geometry fix: inchLabel drops a zero whole number before a fraction");
+  const wild = c292Marks(1000, 0.001);
+  const huge = c292Marks(10000, 1);
+  ok(wild.count === 2000 && huge.count === 2000 && c292Marks(20, 0.001).count === 241,
+    "#292 geometry fix: topMarks caps at 2000 marks and treats spacing below 1\" as 1\"");
+  const wildElev = c292Elev({ ...base, markSpacingIn: 0.001, sizes: sz(20) });
+  ok(wildElev.shapes.filter((s) => s.tag === "mark").length <= 2000, "#292 geometry fix: an absurd mark spacing never draws more than 2000 grommets");
+  ok(textsOf(wildElev.shapes).some((t) => t.text === `Grommets @ 1" o.c. max (${c292Marks(20, 0.001).count})`),
+    "#292 geometry fix 2: the o.c. label prints the clamped 1\" spacing, consistent with the drawn marks");
+}
+{
+  const keys = [...c292MountTypes.map((t) => t.id), "track-other" as const];
+  const W = 240;
+  const H = 300;
+  const labelSize = 9; // ShapeSvg's default labelSize
+  const bad: string[] = [];
+  for (const k of keys) {
+    const d = c292Detail(k);
+    for (const l of d.labels) {
+      const e = c292TextExtent({ x: l.x, text: l.text, size: labelSize, anchor: l.anchor });
+      const lines = l.text.split("\n").length;
+      const bottom = l.y + (lines - 1) * labelSize * 1.15;
+      if (e.x0 < 0 || e.x1 > W || l.y - labelSize < 0 || bottom > H) bad.push(`${k}: ${l.text.replace(/\n/g, " / ")}`);
+    }
+    for (const t of d.shapes) {
+      if (t.kind !== "text") continue;
+      const e = c292TextExtent(t);
+      if (e.x0 < 0 || e.x1 > W || t.y - t.size < 0 || t.y > H) bad.push(`${k}: ${t.text}`);
+    }
+  }
+  ok(bad.length === 0, `#292 details fix: every callout and in-drawing text fits the 240 × 300 viewBox at 0.6 em/char${bad.length ? " — " + bad.join("; ") : ""}`);
+}
+
+// ---- #292 task 3: curtain-mount rules + collector ----
+import { mountRowQty as c292RowQty, sanitizeCurtainMounts as c292SanitizeMounts } from "@/lib/curtain-mounts";
+import { countCutSheetTypes as c292Count, GRID_DESIGN_GONE as c292GridGone } from "@/lib/curtain-cut-sheets/estimator-curtains";
+import { collectCurtainTypes as c292CollectTypes, type CollectInput as C292Input } from "@/lib/curtain-cut-sheets/collect";
+import { curtainCost as c292CurtainCost } from "@/lib/design/curtain-pricing";
+import { computeSetWeight as c292SetWeight, DEFAULT_WEIGHTS as c292Weights, fabricFromPart as c292FabFrom } from "@/lib/design/steel";
+import { CHAIN_JACK as c292ChainJack } from "@/lib/design/goods";
+import type { TrackSeries as C292Series } from "@/lib/track-series";
+
+const C292_FABS = [
+  { sku: "FAB-CH25", desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54, flameRating: "NFPA 701 (IFR)" },
+  { sku: "FAB-EN22", desc: "Encore Velour 22 oz", oz: 22, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
+  { sku: "FAB-NOOZ", desc: "Mystery Scrim" },
+];
+const C292_SERIES = [{ id: "adc-280-black", name: "ADC 280 Black", manufacturer: "ADC", stickLengthFt: 22, carrierSpacingIn: 12, hangerSpacingFt: 7, overlapFt: 2, parts: {}, active: true }] as C292Series[];
+const C292_DESC = "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness";
+const c292Ci = (over: Record<string, unknown> = {}) => ({ name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "9", width: "21.5", height: "18", fullness: "50" as const, ...over });
+const c292Cur = (id: number, over: Partial<C292Item> = {}): Partial<C292Item> & { id: number } => ({ id, desc: C292_DESC, qty: 2, curtain: true, ...over });
+const c292Trk = (id: number, over: Partial<C292Item> = {}): Partial<C292Item> & { id: number } => ({
+  id, sku: "TRK-ADC-280-BLACK", desc: "Main track", unit: "lot", track: { ...C292_TRACK },
+  components: [
+    { sku: "ADC-280-22", label: "Track (22' stick)", role: "other", qty: 4, unit: "ea", cost: 1, price: 2 },
+    { sku: "ADC-2802", label: "Carrier", role: "other", qty: 40, unit: "ea", cost: 1, price: 2 },
+  ],
+  ...over,
+});
+const c292Collect = (sections: C292Section[], extra: Partial<C292Input> = {}) =>
+  c292CollectTypes({ quote: { spec: { sections, mobs: [] } }, fabrics: C292_FABS, trackSeries: C292_SERIES, mounts: {}, partInfo: new Map(), grid: null, ...extra });
+
+// ---- mount rules ----
+{
+  ok(c292RowQty({ kind: "perCurtain", qty: 2 }, { widthFt: 21.5, marks: 23 }) === 2, "#292 mounts: perCurtain is qty per curtain");
+  ok(c292RowQty({ kind: "perFtWidth", qty: 1, everyFt: 5 }, { widthFt: 21.5, marks: 23 }) === 5, "#292 mounts: perFtWidth is qty × ceil(W ÷ everyFt)");
+  ok(c292RowQty({ kind: "perMark", qty: 1 }, { widthFt: 21.5, marks: 23 }) === 23, "#292 mounts: perMark is qty × top-finish marks");
+  const s = c292SanitizeMounts({
+    "tie-batten": { rows: [
+      { sku: " TIE ", rule: { kind: "perMark", qty: "1" } }, { sku: "", rule: { kind: "perCurtain", qty: 1 } },
+      { sku: "A", rule: { kind: "bogus", qty: 1 } }, { sku: "B", rule: { kind: "perCurtain", qty: 0 } },
+      { sku: "C", rule: { kind: "perCurtain", qty: 1001 } }, { sku: "D", rule: { kind: "perFtWidth", qty: 1, everyFt: 0 } },
+    ] },
+    "track-other": { rows: [{ sku: "X", rule: { kind: "perCurtain", qty: 1 } }] },
+    nonsense: { rows: [] },
+    "wall-hookloop": { rows: Array.from({ length: 40 }, (_, i) => ({ sku: `W${i}`, rule: { kind: "perCurtain", qty: 1 } })) },
+  });
+  ok(s["tie-batten"]?.rows.length === 1 && s["tie-batten"].rows[0].sku === "TIE" && s["tie-batten"].rows[0].rule.qty === 1,
+    "#292 mounts: sanitize drops blank SKUs, unknown rule kinds, qty ≤ 0 / > 1,000 and everyFt ≤ 0; trims SKUs, reads numeric strings");
+  ok(!("track-other" in s) && !("nonsense" in s) && s["wall-hookloop"]?.rows.length === 30, "#292 mounts: sanitize drops unknown mount ids (track-other included) and caps a type at 30 rows");
+}
+// ---- collector: Estimator ----
+{
+  const structured = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "edited by hand", curtainInputs: c292Ci() })])]);
+  ok(structured.types.length === 1 && structured.unreadable.length === 0 && structured.types[0].sizes[0].widthFt === 21.5, "#292 collect: curtainInputs are read before the desc");
+  ok(structured.types[0].totalQty === 2, "#292 collect: the line qty wins over curtainInputs.qty (informational only)");
+  const merged = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci() }), c292Cur(2, { qty: 3 })])]);
+  ok(merged.types.length === 1 && merged.types[0].totalQty === 5 && merged.types[0].sizes.length === 1 && merged.types[0].sizes[0].qty === 5,
+    "#292 collect: identical curtains merge into one type (qty summed, sizes merged)");
+  const split = c292Collect([c292Sec("s1", [
+    c292Cur(1),
+    c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 75% fullness" }),
+    c292Cur(3, { curtainInputs: c292Ci({ bottomFinish: "hem" }) }),
+    c292Cur(4, { curtainInputs: c292Ci({ mountType: "wall-hookloop" }) }),
+  ])]);
+  ok(split.types.length === 4, "#292 collect: a different fullness, bottom finish or mount splits into its own type");
+  const opt = c292Collect([c292Sec("s1", [c292Cur(1, { option: true }), c292Cur(2)])]);
+  ok(opt.types.length === 1 && opt.types[0].totalQty === 2 && opt.skippedOptional.length === 1, "#292 collect: an optional curtain line gets no sheet and is listed as left out");
+  const bad = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Main Drape (black)" }), c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 0'W × 18'H, 50% fullness" })])]);
+  ok(bad.types.length === 0 && bad.unreadable.map((u) => u.reason).join("|") === "Can't read size — edit the curtain|Size is 0 — edit the curtain",
+    "#292 collect: an unparseable or zero-size line is unreadable, never guessed");
+  const order = c292Collect([
+    c292Sec("s1", [c292Cur(1, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" }), c292Cur(2)]),
+    c292Sec("s2", [c292Cur(3, { desc: "Border — Charisma Velour 25 oz, 40'W × 5'H, 50% fullness" })]),
+  ]);
+  ok(order.types.map((t) => `${t.sheetNo}:${t.title}`).join() === "CS-1:Legs,CS-2:Main Drape,CS-3:Border", "#292 collect: CS numbers follow section order, then line order");
+  const twins = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" }), c292Cur(2, { desc: "Legs — Encore Velour 22 oz, 6'W × 18'H, 50% fullness" })])]);
+  ok(twins.types.map((t) => t.title).join("|") === "Legs (Charisma Velour 25 oz)|Legs (Encore Velour 22 oz)", "#292 collect: colliding titles get the fabric appended");
+}
+// ---- collector: hardware ----
+{
+  const tracked = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])]);
+  const t = tracked.types[0];
+  ok(t.curtains[0].mount.source === "track" && t.curtains[0].mount.key === "track-batten" && t.markSpacingIn === 12,
+    "#292 collect: a linked track gives the mount (from track.mounting) and the series' carrier spacing");
+  ok(t.hardware.find((h) => h.sku === "ADC-2802")?.qty === 40 && t.hardware.every((h) => h.from === "track"),
+    "#292 collect: track hardware is the line's stored components, counted once for a qty-2 curtain on one track");
+  const over = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2, { track: { ...C292_TRACK, carrierSpacingIn: 18 } })])]);
+  ok(over.types[0].markSpacingIn === 18, "#292 collect: a line's carrier-spacing override beats the series default");
+  const two = c292Collect([c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1" }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3" })])]);
+  ok(two.types.length === 1 && two.types[0].hardware.find((h) => h.sku === "ADC-2802")?.qty === 80, "#292 collect: two tracks in one type sum their components by SKU");
+  const gone = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])], { trackSeries: [] });
+  ok(gone.types[0].hardware.length === 2 && gone.types[0].warnings.includes("Track series no longer exists — hardware as quoted."),
+    "#292 collect: a deleted series keeps the stored components and warns");
+  const mounts = { "tie-batten": { rows: [
+    { sku: "TIE", rule: { kind: "perMark" as const, qty: 1 } },
+    { sku: "CLAMP", rule: { kind: "perFtWidth" as const, qty: 1, everyFt: 5 } },
+    { sku: "KIT", rule: { kind: "perCurtain" as const, qty: 2 } },
+  ] } };
+  const partInfo = new Map([["TIE", { desc: "Tie line", unit: "ea" }]]);
+  const ruled = c292Collect([c292Sec("s1", [c292Cur(1)])], { mounts, partInfo });
+  const q = (sku: string) => ruled.types[0].hardware.find((h) => h.sku === sku)?.qty;
+  ok(q("TIE") === 46 && q("CLAMP") === 10 && q("KIT") === 4 && ruled.types[0].hardware.find((h) => h.sku === "TIE")?.desc === "Tie line",
+    "#292 collect: mount rules × curtain qty — 23 marks × 2 ties, ceil(21.5 ÷ 5) × 2 clamps, 2 × 2 kits");
+  const none = c292Collect([c292Sec("s1", [c292Cur(1)])]);
+  ok(none.types[0].hardware.length === 0 && none.types[0].warnings.includes("No hardware listed for Tie-line to pipe batten — Estimating Rules → Curtain mounts"),
+    "#292 collect: a mount type with no rows warns and lists no hardware");
+  ok(none.types[0].warnings.some((w) => w.startsWith("Mount assumed:")), "#292 collect: a defaulted mount is flagged as assumed");
+}
+// ---- collector: weight + area ----
+{
+  const t = c292Collect([c292Sec("s1", [c292Cur(1)])]).types[0];
+  const fab = c292FabFrom({ desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 })!;
+  const want = c292SetWeight({ name: "Main Drape", fabResolved: fab, w: 21.5, h: 18, full: 50, qty: 1, chain: c292ChainJack, batten: 0, mode: "dead" }, c292Weights).goods;
+  ok(t.weightLbEach[0] === want && t.weightLbTotal === (want as number) * 2, "#292 collect: weight is computeSetWeight(...).goods for the same inputs (× qty for the total)");
+  const hem = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "hem" }) })])]).types[0];
+  ok(Math.abs((t.weightLbEach[0] as number) - (hem.weightLbEach[0] as number) - 0.14 * 21.5) < 1e-9, "#292 collect: chain vs hem differs by the jack-chain weight (0.14 lb/ft × W)");
+  const noOz = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Main Drape — Mystery Scrim, 21.5'W × 18'H, 50% fullness" })])]).types[0];
+  ok(noOz.weightLbEach[0] === null && noOz.weightLbTotal === null && noOz.warnings.includes("Weight not set for Mystery Scrim — Catalog"), "#292 collect: a fabric with no oz weighs null and warns");
+  const area = c292CurtainCost({ finishedWidthFt: 21.5, finishedHeightFt: 18, fullnessPct: 50, qty: 1 }, { fabricRate: 0, sewingPct: 0 }).sewnAreaSqft;
+  ok(t.sewnAreaSqftEach[0] === area && t.sewnAreaSqftTotal === area * 2, "#292 collect: sewn area is curtainCost(...).sewnAreaSqft");
+}
+// ---- collector: Grid ----
+{
+  const main = { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "FAB-CH25" };
+  const project = {
+    options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }, { id: "opt-b", name: "Alt", quoteId: null, createdAt: 2 }],
+    placements: [
+      { id: "p1", optionId: "opt-a", curtain: main },
+      { id: "p2", optionId: "opt-a", curtain: { type: "Border" as const, name: "Border 1", widthFt: 40, heightFt: 5, fullnessPct: 50, fabricSku: "FAB-CH25", topFinish: "pipe-pocket" as const, bottomFinish: "chain" as const, mountType: "wall-hookloop" as const } },
+      { id: "p3", optionId: "opt-b", curtain: { ...main, name: "Other option" } },
+      { id: "p4", optionId: "opt-a" },
+    ],
+    routes: [],
+  };
+  const spec = { kind: "grid", gridProjectId: "GRD-1", gridOptionId: "opt-a", lines: [
+    { sku: "CURTAIN", desc: c292CurtainDesc(main, "Charisma Velour 25 oz"), qty: 1, unit: "ea", price: 1, ext: 1 },
+    { sku: "CURTAIN", desc: "Main (hand edited)", qty: 1, unit: "ea", price: 1, ext: 1 },
+  ] };
+  const grid = (p: typeof project | null, s: object = spec) => c292CollectTypes({ quote: { spec: s }, fabrics: C292_FABS, trackSeries: [], mounts: {}, partInfo: new Map(), grid: { project: p as never } });
+  const live = grid(project);
+  const m = live.types.find((t) => t.title === "Main")!;
+  const b = live.types.find((t) => t.title === "Border 1")!;
+  ok(live.types.length === 2 && m.curtains[0].mount.key === "track-batten" && m.curtains[0].mount.source === "assumed" && m.curtains[0].bottomFinish === "chain",
+    "#292 collect: Grid placements of the quote's option become types, with the Grid type defaults marked assumed");
+  ok(b.curtains[0].topFinish === "pipe-pocket" && b.curtains[0].mount.key === "wall-hookloop" && b.curtains[0].mount.source === "picked", "#292 collect: a placement's stored finishes and mount win over the defaults");
+  const goneProject = grid(null);
+  ok(goneProject.notes.includes(c292GridGone) && goneProject.types.length === 1 && goneProject.unreadable.length === 1, "#292 collect: a deleted Grid project falls back to the quoted lines");
+  const goneOption = grid(project, { ...spec, gridOptionId: "opt-zz" });
+  ok(goneOption.notes.includes(c292GridGone) && goneOption.types.length === 1, "#292 collect: a deleted option falls back to the quoted lines too");
+  const orphan = { options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }], placements: [{ id: "p9", optionId: "opt-gone", curtain: main }], routes: [] };
+  const orphanRead = c292CollectTypes({ quote: { spec }, fabrics: C292_FABS, trackSeries: [], mounts: {}, partInfo: new Map(), grid: { project: orphan as never } });
+  ok(orphanRead.types.length === 1 && orphan.placements[0].optionId === "opt-gone",
+    "#292 collect: an orphan placement reads as the first option (ensureOptions) without mutating the caller's project");
+}
+// ---- task 3 fix round 1: type key carries hardware source + spacing; qty ≤ 0; pipe-pocket note ----
+{
+  const sp = (n: number) => ({ ...C292_TRACK, carrierSpacingIn: n });
+  const spacing = c292Collect([c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) })])]);
+  ok(spacing.types.length === 2 && spacing.types.map((t) => t.markSpacingIn).join() === "12,18", "#292 collect fix: identical curtains on the same series at 12\" vs 18\" carrier spacing are two types");
+  const emptyTrack = c292Collect([c292Sec("s1", [
+    c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: { ...C292_TRACK, seriesId: "" } }),
+    c292Cur(3, { curtainInputs: c292Ci({ mountType: "track-batten" }) }),
+  ])], { trackSeries: [] });
+  ok(emptyTrack.types.length === 2, "#292 collect fix: a track line with an empty seriesId and a picked no-track curtain of the same mount are two types");
+  ok(c292Count({ sections: [c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) })])] }, C292_FABS, C292_SERIES) === 2,
+    "#292 collect fix: countCutSheetTypes stays in step with the new key");
+  const mixed = c292Collect([c292Sec("s1", [
+    c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }),
+    c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) }),
+    c292Cur(5, { curtainTrackKey: "ct-5" }), c292Trk(6, { curtainTrackKey: "ct-5", track: { ...C292_TRACK, seriesId: "" } }),
+    c292Cur(7, { curtainInputs: c292Ci({ mountType: "track-batten" }) }),
+    c292Cur(8, { curtainInputs: c292Ci({ mountType: "wall-hookloop" }) }),
+    c292Cur(9),
+  ])]);
+  ok(mixed.types.every((t) => new Set(t.curtains.map((c) => c.mount.source === "track" ? `track:${c.mount.track?.seriesId}:${c.mount.track?.carrierSpacingIn}` : "rules")).size === 1),
+    "#292 collect fix: within every type all members share one hardware source and one carrier spacing");
+  const zero = c292Collect([c292Sec("s1", [c292Cur(1, { qty: 0 }), c292Cur(2, { qty: -3 }), c292Cur(3, { qty: 0.4 }), c292Cur(4, { qty: 2.6 }), c292Cur(5, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness", qty: 0 })])]);
+  ok(zero.types.length === 1 && zero.types[0].totalQty === 4 && zero.skippedOptional.length === 3, "#292 collect fix: qty ≤ 0 lines are left out (not a sheet, listed as skipped); a fractional qty > 0 never prints below 1 (0.4 → 1, 2.6 → 3)");
+  ok(c292Count({ sections: [c292Sec("s1", [c292Cur(1, { qty: 0 })])] }, C292_FABS, C292_SERIES) === 0, "#292 collect fix: countCutSheetTypes does not count a qty 0 line");
+  const pp = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "pipe-pocket" }) }), c292Cur(2)])]);
+  ok(pp.types.length === 2 && pp.types[0].weightNote === "Bottom pipe not included" && pp.types[1].weightNote === undefined,
+    "#292 collect fix: a pipe-pocket bottom carries weightNote \"Bottom pipe not included\"; chain and hem carry none");
+}
+// ---- the preview count ----
+{
+  const secs = [c292Sec("s1", [c292Cur(1), c292Cur(2, { qty: 1 }), c292Cur(3, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" })])];
+  ok(c292Count({ sections: secs }, C292_FABS, C292_SERIES) === c292Collect(secs).types.length && c292Count({ sections: secs }, C292_FABS, C292_SERIES) === 2,
+    "#292 collect: countCutSheetTypes (client-safe) equals the collector's type count");
+}
+// ---- #292 task 4: the sheet model ----
+import { cutSheetCssVars as c292CssVars, cutSheetModel as c292Model, plainDescription as c292Plain, quoteRevisionRows as c292RevRows } from "@/lib/curtain-cut-sheets/model";
+{
+  const t = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])]).types[0];
+  ok(c292Plain(t) === `Two Main Drape panels, each 21'-6" wide × 18'-0" tall finished, sewn from Charisma Velour 25 oz with 50% fullness. The top has webbing with grommets every 12", hung from carriers on an ADC 280 Black track mounted to a pipe batten; the bottom has a chain pocket so the curtain hangs straight.`,
+    "#292 model: plainDescription is the fixed deterministic sentence (spec §2.6 sample)");
+  const rows = c292RevRows([
+    { rev: 2, at: 20, reason: "sent", note: "" }, { rev: 1, at: 10, reason: "manual", note: "First pass" }, { rev: 3, at: 30, reason: "manual", note: "" },
+  ]);
+  ok(rows.map((r) => `${r.letter}:${r.label}`).join("|") === "A:First pass|B:Issued to customer|C:Pricing snapshot", "#292 model: quoteRevisionRows letters A, B… in rev order; sent reads Issued to customer");
+  const ctx = {
+    quote: { id: "Q-1", number: "EST-1042", name: "Main stage", customer: "Lakefront HS", venue: "Auditorium — Lakefront", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "Jeff Chesebro", index: 1, total: 1, now: 1,
+  };
+  const sub = c292Model(t, { ...ctx, style: "submittal" });
+  ok(sub.titleBlock?.sheet.number === "CS-1" && sub.titleBlock.project.id === "EST-1042" && sub.titleBlock.status === "— Preliminary" && sub.titleBlock.optionName === null &&
+      sub.titleBlock.scale === `Elev ${sub.elevation.scale} · Detail NTS` && sub.titleBlock.drawnBy === "Jeff Chesebro",
+    "#292 model: the Submittal title block is filled from the quote (estimate #, CS-n, Preliminary with no revisions)");
+  ok(sub.materials.map((m) => m.label).join() === "Fabric,Flame rating,Fullness,Finished size,Top finish,Bottom finish,Sewn area,Weight,Qty" &&
+      sub.materials[0].value === `Charisma Velour 25 oz · 25 oz/lin yd, 54" bolt` && sub.materials[2].value === "50% (1.5×)",
+    "#292 model: materials rows in spec order, with the catalog weight basis");
+  ok(sub.hardware.some((h) => h.sku === "ADC-2802") && sub.description === "", "#292 model: Submittal carries the hardware table");
+  const cli = c292Model(t, { ...ctx, style: "client" });
+  const json = JSON.stringify(cli);
+  ok(cli.titleBlock === null && cli.hardware.length === 0 && cli.materials.length === 0 && !/"sku"|"cost"|"price"/.test(json) && !json.includes("ADC-2802") && cli.description.startsWith("Two Main Drape"),
+    "#292 model: the Client model has no SKU or cost fields — elevation, description, sizes and mount only");
+  const v = c292CssVars();
+  ok(v["--dw-w"] === "11in" && v["--dw-h"] === "8.5in" && v["--dw-strip"] === "2.1in", "#292 model: cut-sheet CSS variables are Letter landscape");
+
+  // review rounds: weight note, blank facts, and facts that differ between merged members
+  const weightRow = (m: typeof sub) => m.materials.find((r) => r.label === "Weight");
+  const pp = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "pipe-pocket" }) })])]).types[0];
+  const ppRow = weightRow(c292Model(pp, { ...ctx, style: "submittal" }));
+  ok(!!ppRow && ppRow.value.includes("lb") && ppRow.value.includes("Bottom pipe not included") && !weightRow(sub)?.value.includes("Bottom pipe"),
+    "#292 model: a pipe-pocket bottom prints its weight note beside the weight; a chain bottom prints none");
+  const noOz = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ fabricSku: "FAB-NOOZ", fabricName: "Mystery Scrim", bottomFinish: "pipe-pocket" }) })])]).types[0];
+  const noOzModel = c292Model(noOz, { ...ctx, style: "submittal" });
+  ok(noOz.weightLbTotal === null && noOz.weightNote === "Bottom pipe not included" && !weightRow(noOzModel) && !JSON.stringify(noOzModel.materials).includes("Bottom pipe"),
+    "#292 model: with no weight there is no Weight row — and no note next to a blank weight");
+  const c0 = t.curtains[0];
+  const blankFab = { ...t, curtains: [{ ...c0, fabric: null, fabricText: "" }] };
+  const blankModel = c292Model(blankFab, { ...ctx, style: "submittal" });
+  ok(!blankModel.materials.some((r) => r.label === "Fabric" || r.label === "Flame rating") && !/—|specified|undefined|null/.test(blankModel.materials.map((r) => r.value).join("|")),
+    "#292 model: a blank fabric prints no Fabric row and no stand-in text");
+  const blankDesc = c292Plain(blankFab);
+  ok(blankDesc.startsWith(`Two Main Drape panels, each 21'-6" wide × 18'-0" tall finished, with 50% fullness.`) && !/specified|undefined|null/.test(blankDesc),
+    "#292 model: a blank fabric is left out of the plain description (no stand-in)");
+  const colored = (a?: string, b?: string) => c292Model({ ...t, curtains: [{ ...c0, color: a }, { ...c0, color: b }] }, { ...ctx, style: "submittal" }).materials.find((r) => r.label === "Color")?.value;
+  ok(colored("Black", "Black") === "Black" && colored("Black", "Navy") === undefined && colored("Black", undefined) === undefined && colored(undefined, undefined) === undefined,
+    "#292 model: Color prints only when every member of the type agrees on it");
+  const otherDesc = c292Plain({ ...t, curtains: [{ ...c0, mount: { ...c0.mount, key: "track-other" as const } }] });
+  ok(otherDesc.includes("hung from carriers on an ADC 280 Black track") && !otherDesc.includes("its supports") && !otherDesc.includes("mounted to"),
+    "#292 model: an unknown track mounting names no place (no stand-in)");
+  ok(!JSON.stringify(sub).includes("biparting") && !JSON.stringify(cli).includes("biparting"), "#292 model: a track operation is never printed (it is not part of the type key)");
+  const multi = c292Collect([c292Sec("s1", [c292Cur(1), c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 10'W × 18'H, 50% fullness", qty: 1 })])]).types[0];
+  const multiModel = c292Model(multi, { ...ctx, style: "client" });
+  ok(multiModel.sizes.length === 2 && multiModel.description.startsWith("Three Main Drape panels in 2 sizes") && multiModel.sizes.reduce((a, s) => a + s.qty, 0) === 3,
+    "#292 model: several sizes read as a count in the sentence and each size is a row");
+}
+
+/* ======================================================================
+   #292 Task 5 — Curtain mounts store + Estimating Rules screen + catalog
+   fabric facts (weight, basis, flame rating).
+   ====================================================================== */
+import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProblem, optionalPartFields as c292PartFields } from "@/app/(app)/catalog/part-form";
+import { readdirSync as c292Readdir } from "node:fs";
+{
+  const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
+  const full = c292PartFields(fd({ oz: "25", ozBasis: "sq-yd", flameRating: "  NFPA 701 (IFR)  " }));
+  ok(full.oz === 25 && full.ozBasis === "sq-yd" && full.flameRating === "NFPA 701 (IFR)", "#292 catalog: weight (oz), basis and flame rating are read when submitted");
+  const blank = c292PartFields(fd({ oz: "", ozBasis: "lin-yd", flameRating: "" }));
+  ok("oz" in blank && blank.oz === undefined && blank.ozBasis === undefined && "flameRating" in blank && blank.flameRating === undefined,
+    "#292 catalog: a submitted blank clears (basis clears with a blank oz)");
+  const noBasis = c292PartFields(fd({ oz: "25", ozBasis: "" }));
+  ok(noBasis.oz === 25 && "ozBasis" in noBasis && noBasis.ozBasis === undefined, "#292 catalog: a part with oz and a blank (Not set) basis posts no basis — none is stamped");
+  ok(!("flameRating" in c292PartFields(fd({ desc: "x" }))) && c292PartFields(fd({ flameRating: "x".repeat(200) })).flameRating?.length === c292FlameMax && c292FlameMax === 120,
+    "#292 catalog: absent fields stay out of the patch; a rating is capped at 120 chars");
+  ok(c292FactsProblem("Hardware", "ea", { flameRating: "NFPA 701" }) !== null && c292FactsProblem("Fabric", "yd", { flameRating: "NFPA 701", oz: 25 }) === null && c292FactsProblem("Hardware", "ea", {}) === null,
+    "#292 catalog: only a fabric part carries weight / flame rating");
+}
+{
+  const rd292 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd292("src/app/(app)/estimating-rules/page.tsx").includes('href="/estimating-rules/curtain-mounts"'), "#292 source: Estimating Rules links Curtain mounts");
+  const acts = rd292("src/app/(app)/estimating-rules/curtain-mounts/actions.ts");
+  ok(acts.includes('requirePerm("manage_users")') && !acts.includes("requireUser("), "#292 source: the Curtain mounts action is manage_users-only");
+  ok(rd292("src/app/(app)/estimating-rules/curtain-mounts/page.tsx").includes('can("manage_users"'), "#292 source: the Curtain mounts page gates on manage_users");
+  {
+    const mountsClient = rd292("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx");
+    ok(!/@\/lib\/stores\/|@\/db|curtain-cut-sheets\/(load|collect)/.test(mountsClient), "#292 source: the Curtain mounts client imports no server store, db, or cut-sheet load/collect module");
+    ok(mountsClient.includes("validateMountRows(") && mountsClient.includes("setRows(checked.rows"), "#292 source: the Curtain mounts client validates before submit and resets its draft to the saved rows");
+    const frf = rd292("src/app/(app)/catalog/fabric-rate-field.tsx");
+    ok(frf.includes('<option value="">Not set</option>') && frf.includes('initialOzBasis ?? ""'), "#292 source: the weight-basis select has a Not set option, selected when the part has no basis");
+  }
+  ok(rd292("scripts/smoke-routes.ts").includes('"/estimating-rules/curtain-mounts"'), "#292 source: smoke covers /estimating-rules/curtain-mounts");
+}
+// ---- #292 weight path: never a guessed basis or bolt width (fabricFromPart's lin-yd / 54" defaults stay for the lineset tool) ----
+{
+  const fabs = [
+    ...C292_FABS,
+    { sku: "FAB-NOBASIS", desc: "Basisless Velour 25 oz", oz: 25, boltWidthIn: 54 },
+    { sku: "FAB-NOBOLT", desc: "Boltless Velour 25 oz", oz: 25, ozBasis: "lin-yd" as const },
+    { sku: "FAB-SQ", desc: "Square Muslin 6 oz", oz: 6, ozBasis: "sq-yd" as const },
+  ];
+  const one = (fabric: string) => c292Collect([c292Sec("s1", [c292Cur(1, { desc: `Main Drape — ${fabric}, 21.5'W × 18'H, 50% fullness` })])], { fabrics: fabs }).types[0];
+  const wctx = {
+    style: "submittal" as const,
+    quote: { id: "Q-1", number: "EST-1042", name: "", customer: "", venue: "", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "", index: 1, total: 1, now: 1,
+  };
+  const fabricRow = (t: ReturnType<typeof one>) => c292Model(t, wctx).materials.find((r) => r.label === "Fabric")?.value;
+  const weightRow = (t: ReturnType<typeof one>) => c292Model(t, wctx).materials.find((r) => r.label === "Weight");
+  const noBasis = one("Basisless Velour 25 oz");
+  ok(noBasis.weightLbEach[0] === null && noBasis.weightLbTotal === null && !weightRow(noBasis) && noBasis.warnings.includes("Weight not set for Basisless Velour 25 oz — Catalog"),
+    "#292 weight: oz with no basis weighs nothing (no lin-yd guess) and warns Weight not set");
+  const noBolt = one("Boltless Velour 25 oz");
+  ok(noBolt.weightLbEach[0] === null && noBolt.weightLbTotal === null && !weightRow(noBolt) && noBolt.warnings.includes("Weight not set for Boltless Velour 25 oz — Catalog"),
+    "#292 weight: a lin-yd fabric with no bolt width weighs nothing (no 54\" guess) and warns Weight not set");
+  const sq = one("Square Muslin 6 oz");
+  const sqWant = c292SetWeight({ name: "Main Drape", fabResolved: c292FabFrom({ desc: "Square Muslin 6 oz", oz: 6, ozBasis: "sq-yd" })!, w: 21.5, h: 18, full: 50, qty: 1, chain: c292ChainJack, batten: 0, mode: "dead" }, c292Weights).goods;
+  ok(sq.weightLbEach[0] === sqWant && sq.weightLbTotal === (sqWant as number) * 2 && !!weightRow(sq) && !sq.warnings.some((w) => w.startsWith("Weight not set")),
+    "#292 weight: a sq-yd fabric weighs without a bolt width");
+  ok(fabricRow(noBasis) === `Basisless Velour 25 oz · 54" bolt` && fabricRow(noBolt) === "Boltless Velour 25 oz · 25 oz/lin yd" && fabricRow(sq) === "Square Muslin 6 oz · 6 oz/sq yd",
+    "#292 weight: the Fabric row prints oz only with its basis — an unset basis drops the oz figure, never prints 'lin yd'");
+}
+
+// ---- #292 task 6: loader, renderer, Cut sheets page, Quotes hub entry ----
+{
+  const rd292b = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd292b("src/app/(app)/quotes/page.tsx").includes("/estimator/cut-sheets?id="), "#292 source: the Quotes hub action strip links Cut sheets");
+  const pg = rd292b("src/app/(app)/estimator/cut-sheets/page.tsx");
+  ok(pg.includes("requireUser()") && pg.includes("loadCutSheets("), "#292 source: the Cut sheets page is requireUser-gated and reads through loadCutSheets");
+  const smoke = rd292b("scripts/smoke-routes.ts");
+  ok(smoke.includes('"/estimator/cut-sheets?id=Q-2041"') && smoke.includes('"/estimator/cut-sheets?id=Q-2041&style=client"') && smoke.includes('"/estimator/cut-sheets?id=Q-0000", reject: "Application error"'),
+    "#292 source: smoke covers both styles and the missing-quote page");
+  const libDir = join(process.cwd(), "src/lib/curtain-cut-sheets");
+  const libSrc = c292Readdir(libDir).map((f) => readFileSync(join(libDir, f), "utf8")).join("\n");
+  ok(!/@anthropic-ai|@\/lib\/ai\b|from "@\/lib\/ai\//.test(libSrc), "#292 source: src/lib/curtain-cut-sheets imports no Anthropic SDK and no lib/ai (deterministic)");
+}
+
+// ---- #292 task 7: Edit curtain, structured curtain lines + keys, finishes/mount ----
+import { applyCurtainEdit as c292ApplyEdit, curtainDraftFromLine as c292DraftFrom, curtainDraftValid as c292DraftValid, curtainItem as c292Item } from "@/app/(app)/estimator/curtain-line";
+import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292ReplaceTrack } from "@/app/(app)/estimator/track-bom";
+{
+  const draft = { name: "Main Drape", hang: "Pipe", fabric: "FAB-CH25", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
+  const fab = { sku: "FAB-CH25", name: "Charisma Velour 25 oz", costPerSqft: 0 };
+  const it = c292Item(draft, { fab, costEach: 100, priceEach: 150 }, { id: 7, sku: "CRT-8", trackKey: "ct-7" });
+  ok(it.desc === C292_DESC && it.qty === 2 && it.curtain === true && it.curtainTrackKey === "ct-7" && it.sku === "CRT-8",
+    "#292 edit: curtainItem keeps addCurtain's exact desc format and carries the track key");
+  ok(it.curtainInputs?.width === "21.5" && it.curtainInputs.fabricSku === "FAB-CH25" && it.curtainInputs.topFinish === "grommets" && it.curtainInputs.bottomFinish === "chain" && it.curtainInputs.mountType === "tie-batten" && it.curtainInputs.fullness === "50",
+    "#292 edit: curtainItem stores structured curtainInputs (with finishes and mount)");
+  const fromStructured = c292DraftFrom(it, "FAB-X");
+  ok(fromStructured.width === "21.5" && fromStructured.height === "18" && fromStructured.fabric === "FAB-CH25" && fromStructured.mountType === "tie-batten", "#292 edit: the edit draft seeds from curtainInputs");
+  const legacy = c292DraftFrom({ id: 1, sku: "CRT-1", desc: C292_DESC, qty: 3, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X");
+  ok(legacy.name === "Main Drape" && legacy.width === "21.5" && legacy.fullness === "50" && legacy.qty === "3" && legacy.topFinish === "grommets", "#292 edit: a legacy line seeds from its parsed desc");
+  const unreadable = c292DraftFrom({ id: 1, sku: "CRT-1", desc: "Main Drape — hand edited", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X");
+  ok(unreadable.name === "Main Drape" && unreadable.width === "" && unreadable.height === "", "#292 edit: an unreadable line seeds its name only, W/H blank");
+  const old: C292Item = { ...it, id: 41, lineOrder: 3, comment: "c", internalNote: "n", option: true, curtainTrackKey: "ct-41", specKey: "SK", por: true, portalConfirm: true, sku: "CRT-OLD" };
+  const sec = c292Sec("s", [old as C292Item & { id: number }]);
+  const replaced = c292ReplaceCurtain(sec, 41, { ...it, desc: "new" }).items[0];
+  ok(replaced.id === 41 && replaced.lineOrder === 3 && replaced.comment === "c" && replaced.internalNote === "n" && replaced.option === true && replaced.curtainTrackKey === "ct-41" && replaced.specKey === "SK" && replaced.por === true && replaced.portalConfirm === true && replaced.sku === "CRT-OLD" && replaced.desc === "new",
+    "#292 edit: replaceCurtainLine keeps id, order, notes, option, key, specKey, por/portalConfirm and SKU");
+  const withTrack = c292ApplyEdit(c292Sec("s", [{ ...it, id: 50, curtainTrackKey: undefined }, { id: 51 }]), 50, { ...it, curtainTrackKey: undefined }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(withTrack.items.map((x) => x.id).join() === "50,99,51" && !!withTrack.items[0].curtainTrackKey?.startsWith("ct-50-") && withTrack.items[1].curtainTrackKey === withTrack.items[0].curtainTrackKey,
+    "#292 edit: Add track while editing inserts a keyed track line right after the curtain");
+  const t2 = c292ReplaceTrack(c292Sec("s", [{ id: 5, track: { ...C292_TRACK }, curtainTrackKey: "ct-4" }]), 5, { sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(t2.items[0].curtainTrackKey === "ct-4", "#292 edit: Update track keeps the curtain-track key");
+  const rd292c = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const est = rd292c("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/curtainItem\(/.test(est) && /newCurtainTrackKey\(/.test(est), "#292 source: addCurtain writes curtainInputs + curtainTrackKey through curtainItem");
+  ok(/<CurtainModal[\s\S]{0,400}editing=\{/.test(est), "#292 source: CurtainModal receives editing");
+  ok(rd292c("src/app/(app)/estimator/section-card.tsx").includes("onEditCurtain"), "#292 source: curtain lines get an ✎ (onEditCurtain)");
+  ok(/cleanCurtainFinishes\(/.test(rd292c("src/app/(app)/design/grid/[id]/actions.ts")), "#292 source: placeCurtainAction validates finishes/mount through cleanCurtainFinishes");
+}
+
+// ---- #292 task 7 fix round 1: vendor cost survives Update, one curtain line builder, key/specKey edge cases ----
+import { computeCurtain as c292Compute } from "@/app/(app)/estimator/pricing";
+import { cleanCurtainRequest as c292CleanReq } from "@/lib/portal-cart-rules";
+import { cartLinesFromSpec as c292CartLines } from "@/lib/portal-pricing";
+import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
+{
+  const SK_MAIN = c292SpecKey(undefined, "Main Drape");
+  const SK_BORDER = c292SpecKey(undefined, "Border 1");
+  const fabs = [{ sku: "T292-FAB", name: "Charisma Velour 25 oz", costPerSqft: 0, curtainAreaRate: 2 }];
+  const sew = { sewingPct: 10 };
+  const mk = (d: Parameters<typeof c292Compute>[0]) => c292Compute(d, fabs, sew, 0.3).costEach;
+  const base = { name: "Main Drape", hang: "Pipe", fabric: "T292-FAB", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
+
+  // 1. a Rose Brand vendor cost round-trips draft → line → Edit → Update with the same cost and price
+  const vd = { ...base, vendorCostOverride: "412.5" };
+  const vc = c292Compute(vd, fabs, sew, 0.3);
+  const vItem = c292Item(vd, vc, { id: 7, sku: "CRT-8" });
+  const vBack = c292DraftFrom(vItem, "FAB-X", fabs, mk);
+  const vc2 = c292Compute(vBack, fabs, sew, 0.3);
+  const vItem2 = c292Item(vBack, vc2, { id: 7, sku: "CRT-8" });
+  ok(vc.costEach === 412.5 && vItem.curtainInputs?.vendorCost === "412.5" && vBack.vendorCostOverride === "412.5" && vItem2.cost === vItem.cost && vItem2.price === vItem.price && vItem2.curtainInputs?.vendorCost === "412.5",
+    "#292 fix: a vendor cost override round-trips draft → line → Update with identical cost and price");
+  ok(c292Item(base, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined && c292Item({ ...base, vendorCostOverride: "  " }, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined,
+    "#292 fix: a blank vendor cost stores nothing");
+
+  // legacy lines (no curtainInputs): a stored cost that isn't today's make-it cost is kept as the override
+  const legacyCost = 999.99;
+  const legacyLine: C292Item = { id: 3, sku: "CRT-3", desc: C292_DESC, qty: 2, unit: "ea", cost: legacyCost, price: 1428.56, curtain: true };
+  const lDraft = c292DraftFrom(legacyLine, "FAB-X", fabs, mk);
+  const lItem = c292Item(lDraft, c292Compute(lDraft, fabs, sew, 0.3), { id: 3, sku: "" });
+  ok(lDraft.vendorCostOverride === String(legacyCost) && lItem.cost === legacyCost,
+    "#292 fix: a legacy line whose cost ≠ the computed make-it cost keeps its cost after Update");
+  const sameCost = mk({ ...base, fabric: "T292-FAB" });
+  const lSame = c292DraftFrom({ ...legacyLine, cost: sameCost }, "FAB-X", fabs, mk);
+  ok(lSame.vendorCostOverride === undefined && lSame.fabric === "T292-FAB", "#292 fix: a legacy line already at today's make-it cost gets no override");
+  ok(c292DraftFrom(legacyLine, "FAB-X", fabs).fabric === "T292-FAB" && c292DraftFrom(legacyLine, "FAB-X").fabric === "FAB-X",
+    "#292 fix: a legacy line's printed fabric name resolves back to its SKU when fabrics are passed (default fabric otherwise)");
+
+  // round 2: an unreadable legacy curtain can never be Updated to 0×0; a legacy fabric that matches nothing must be picked
+  const unreadLine: C292Item = { id: 4, sku: "CRT-4", desc: "Main Drape — hand edited", qty: 1, unit: "ea", cost: 1800, price: 2571.43, curtain: true };
+  const uDraft = c292DraftFrom(unreadLine, "FAB-X", fabs, mk);
+  ok(uDraft.vendorCostOverride === undefined && uDraft.width === "" && uDraft.height === "" && !c292DraftValid(uDraft, 1800),
+    "#292 fix2: an unreadable legacy line seeds no override and its draft is refused (Update disabled)");
+  ok(!c292DraftValid({ ...uDraft, width: "20" }, 100) && !c292DraftValid({ ...uDraft, height: "18" }, 100) && !c292DraftValid({ ...uDraft, width: "0", height: "18" }, 100),
+    "#292 fix2: a curtain needs both a width and a height above 0 to be valid");
+  ok(c292DraftValid({ ...base }, 150) && !c292DraftValid({ ...base }, 0) && !c292DraftValid({ ...base, name: " " }, 150) && !c292DraftValid({ ...base, fabric: "" }, 150),
+    "#292 fix2: a complete draft is valid; a missing name, fabric or price is not");
+  ok(lDraft.vendorCostOverride === String(legacyCost) && c292DraftValid(lDraft, 1428.56), "#292 fix2: a parseable legacy line still seeds its cost and stays valid");
+  const otherFabLine: C292Item = { ...legacyLine, desc: C292_DESC.replace("Charisma Velour 25 oz", "Discontinued Cloth") };
+  const oDraft = c292DraftFrom(otherFabLine, "FAB-X", fabs, mk);
+  ok(oDraft.fabric === "" && oDraft.width === "21.5" && !c292DraftValid(oDraft, 100) && c292DraftValid({ ...oDraft, fabric: "T292-FAB" }, 100),
+    "#292 fix2: a legacy line whose fabric matches no current fabric leaves it unpicked until the user picks one");
+  const rdM = readFileSync(join(process.cwd(), "src/app/(app)/estimator/curtain-modal.tsx"), "utf8");
+  ok(/curtainDraftValid\(draft, cc\.priceEach\)/.test(rdM) && rdM.includes("Kept from the quote"), "#292 source: the modal's valid check is curtainDraftValid, and the kept-cost hint shows");
+
+  // the portal never sees a vendor cost
+  const clean = c292CleanReq({ name: "Main", fabricSku: "T292-FAB", qty: 1, width: "20", height: "18", fullness: "50", vendorCost: "5", topFinish: "hem" }, fabs);
+  ok(clean.ok && !("vendorCost" in clean.curtain) && !("topFinish" in clean.curtain), "#292 fix: cleanCurtainRequest drops vendorCost (and the staff finishes)");
+  const cartLines = c292CartLines([c292Sec("s", [{ ...vItem, id: 7 }])]);
+  ok(cartLines.length === 1 && !!cartLines[0].curtainInputs && !("vendorCost" in cartLines[0].curtainInputs) && cartLines[0].curtainInputs.width === "21.5" && vItem.curtainInputs?.vendorCost === "412.5",
+    "#292 fix: cartLinesFromSpec strips vendorCost from a staff curtain line (source line untouched)");
+
+  // 2. the add path builds its line through curtainItem — identical to the pre-#292 inline line
+  const ac = c292Compute(base, fabs, sew, 0.3);
+  const added = { ...c292Item(base, ac, { id: 11, sku: "CRT-12", trackKey: undefined }), curtain: true, specKey: c292SpecKey(undefined, "Main Drape") || undefined };
+  const oldDesc = "Main Drape" + " — " + ac.fab.name + ", " + (parseFloat(base.width) || 0) + "'W × " + (parseFloat(base.height) || 0) + "'H, " + base.fullness + "% fullness";
+  ok(added.desc === oldDesc && added.desc === C292_DESC && added.qty === 2 && added.unit === "ea" && added.cost === ac.costEach && added.price === ac.priceEach && added.id === 11 && added.sku === "CRT-12" && !!SK_MAIN && added.specKey === SK_MAIN && !("curtainTrackKey" in added),
+    "#292 fix: a freshly added curtain line keeps the pre-#292 desc/qty/cost/price (no track → no key)");
+  const qtyBad = c292Item({ ...base, qty: "0" }, ac, { id: 1, sku: "CRT-2" });
+  ok(qtyBad.qty === 1 && c292Item(base, ac, { id: 1, sku: "CRT-2", trackKey: "ct-1" }).curtainTrackKey === "ct-1", "#292 fix: curtainItem clamps qty to 1 and keys a tracked add");
+  const estSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const addSrc = estSrc.slice(estSrc.indexOf("const addCurtain = "), estSrc.indexOf("const setFixture = "));
+  ok(/\.\.\.curtainItem\(d, c, \{ id: idN, sku: "CRT-" \+ skuN, trackKey: key \}\)/.test(addSrc) && !/desc: name \+/.test(addSrc), "#292 source: addCurtain builds its line through curtainItem (no inline desc)");
+
+  // 3. rename: a name-derived specKey follows the new name; a pinned one stays
+  const derivedOld: C292Item = { ...vItem, id: 41, specKey: c292SpecKey(undefined, "Main Drape") || undefined };
+  const renamed = c292Item({ ...base, name: "Border 1" }, ac, { id: 41, sku: "" });
+  renamed.specKey = c292SpecKey(undefined, "Border 1") || undefined;
+  const r1 = c292ReplaceCurtain(c292Sec("s", [derivedOld]), 41, renamed).items[0];
+  const r2 = c292ReplaceCurtain(c292Sec("s", [{ ...derivedOld, specKey: "Pinned" }]), 41, renamed).items[0];
+  const r3 = c292ReplaceCurtain(c292Sec("s", [derivedOld]), 41, { ...renamed, specKey: undefined }).items[0];
+  const r4 = c292ReplaceCurtain(c292Sec("s", [{ ...derivedOld, specKey: undefined }]), 41, renamed).items[0];
+  ok(!!SK_BORDER && SK_BORDER !== SK_MAIN && derivedOld.specKey === SK_MAIN && r1.specKey === SK_BORDER && r2.specKey === "Pinned" && !("specKey" in r3) && r4.specKey === SK_BORDER,
+    "#292 fix: rename re-derives a name-derived specKey, keeps a pinned one");
+  const legacyRename = c292ReplaceCurtain(c292Sec("s", [{ ...legacyLine, id: 41, specKey: SK_MAIN ?? undefined }]), 41, renamed).items[0];
+  ok(legacyRename.specKey === SK_BORDER, "#292 fix: a legacy line's derived specKey (name read from its desc) follows a rename");
+
+  // Add track while editing mints the curtain's own key, never a stale/shared one
+  const stale = c292ApplyEdit(c292Sec("s", [{ ...vItem, id: 50, curtainTrackKey: "ct-7" }, { id: 7, curtain: true, curtainTrackKey: "ct-7" }]), 50, { ...vItem }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(!!stale.items[0].curtainTrackKey?.startsWith("ct-50-") && stale.items[1].id === 99 && stale.items[1].curtainTrackKey === stale.items[0].curtainTrackKey && stale.items[2].curtainTrackKey === "ct-7",
+    "#292 fix: Add track while editing mints ct-<line id>-<nonce> instead of reusing a stale or shared key");
+}
+
+async function curtain292AsyncChecks(): Promise<void> {
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const { CURTAIN_MOUNTS_BLOB } = await import("@/lib/curtain-mounts");
+  const { listCurtainMounts, saveCurtainMount } = await import("@/lib/stores/curtain-mounts");
+  const before = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
+  const TIE = fid(292, "tie-line");
+  await mergeUpsert(TIE, { desc: "Test292 Tie line", category: "Test292 Hardware", unit: "ea", list: 2, cost: 1 });
+  reg("catalog_parts", TIE);
+  try {
+    const saved = await saveCurtainMount("tie-batten", [{ sku: ` ${TIE} `, rule: { kind: "perMark", qty: "1" } }], "Tester");
+    ok(saved.ok && saved.hardware.rows.length === 1 && saved.hardware.rows[0].sku === TIE && saved.hardware.updatedBy === "Tester", "#292 store: saveCurtainMount saves sanitized rows, stamped with who saved them");
+    const back = await listCurtainMounts();
+    ok(back["tie-batten"]?.rows[0]?.sku === TIE && back["tie-batten"]?.rows[0]?.rule.kind === "perMark", "#292 store: listCurtainMounts reads the row back");
+    const gone = await saveCurtainMount("tie-batten", [{ sku: "NO-SUCH-292", rule: { kind: "perCurtain", qty: 1 } }], "Tester");
+    ok(!gone.ok && gone.error.includes("NO-SUCH-292"), "#292 store: a SKU missing from the catalog is refused by name");
+    const other = await saveCurtainMount("track-other", [], "Tester");
+    ok(!other.ok, "#292 store: track-other (or any unknown id) is refused");
+    const bad = async (rows: unknown[], needle: string, label: string) => {
+      const r = await saveCurtainMount("tie-batten", rows, "Tester2");
+      const stored = await listCurtainMounts();
+      ok(!r.ok && r.error.includes(needle) && stored["tie-batten"]?.rows.length === 1 && stored["tie-batten"]?.updatedBy === "Tester", `#292 store: ${label} is refused by row and the stored blob is unchanged`);
+    };
+    const goodRow = { sku: TIE, rule: { kind: "perMark", qty: 1 } };
+    await bad([goodRow, { sku: TIE, rule: { kind: "perCurtain", qty: "abc" } }], "Row 2 (" + TIE + "): quantity", "a non-numeric quantity");
+    await bad([{ sku: TIE, rule: { kind: "perCurtain", qty: 0 } }], "Row 1", "a zero quantity");
+    await bad([{ sku: TIE, rule: { kind: "perCurtain", qty: 5000 } }], "Row 1", "an over-cap quantity");
+    await bad([{ sku: TIE, rule: { kind: "perFtWidth", qty: 1, everyFt: 0 } }], "every N feet", "an invalid every-ft");
+    await bad([goodRow, { sku: "", rule: { kind: "perCurtain", qty: 1 } }], "Row 2: pick a part", "a blank part row");
+    const resaved = await saveCurtainMount("tie-batten", [goodRow, { sku: TIE, rule: { kind: "perFtWidth", qty: 2, everyFt: 4 } }], "Tester3");
+    ok(resaved.ok && resaved.hardware.rows.length === 2 && (await listCurtainMounts())["tie-batten"]?.rows.length === 2, "#292 store: a fully valid submission saves every row");
+    const { createFixture } = await import("./test-fixtures");
+    const { loadCutSheets } = await import("@/lib/curtain-cut-sheets/load");
+    const FAB = fid(292, "fabric");
+    await mergeUpsert(FAB, { desc: "Test292 Velour 25 oz", category: "Fabric", unit: "yd", list: 10, cost: 5, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 });
+    reg("catalog_parts", FAB);
+    const QID = fid(292, "quote");
+    const ci = { name: "Test292 Main", fabricSku: FAB, fabricName: "Test292 Velour 25 oz", qty: "1", width: "20", height: "18", fullness: "50" };
+    const track = (key: string, id: number) => ({
+      id, sku: "TRK-X", desc: "track", qty: 1, unit: "lot", cost: 1, price: 2, curtainTrackKey: key,
+      track: { seriesId: "test292-gone", operation: "oneway", runFt: 20, curved: false, mounting: "batten", qty: 1 },
+      components: [{ sku: "T292-CARRIER", label: "Carrier", role: "other", qty: 20, unit: "ea", cost: 1, price: 2 }],
+    });
+    await createFixture("quotes", {
+      id: QID, name: "T292 cut sheets", customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner: "Tester", preparedBy: "Tester", value: 0, margin: 0, history: [], createdAt: 1, updatedAt: 1,
+      spec: { sections: [{ id: "s1", name: "Drapery", kind: "materials", mfr: "", freightPct: 0, items: [
+        { id: 1, sku: "CRT-1", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: ci, curtainTrackKey: "ct-1" }, track("ct-1", 2),
+        { id: 3, sku: "CRT-3", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: ci, curtainTrackKey: "ct-3" }, track("ct-3", 4),
+      ] }], mobs: [] },
+    } as never);
+    const loaded = await loadCutSheets(QID, { images: "none" });
+    ok(loaded.ok && loaded.result.types.length === 1 && loaded.result.types[0].totalQty === 2 && loaded.result.types[0].hardware.find((h) => h.sku === "T292-CARRIER")?.qty === 40,
+      "#292 load: two identical keyed curtain lines read as one type with both tracks' components");
+    ok(loaded.ok && loaded.models.submittal[0].titleBlock?.sheet.number === "CS-1" && loaded.models.client[0].description.startsWith("Two Test292 Main panels") && loaded.photos.size === 0,
+      "#292 load: both styles are modelled; no photos when images are 'none'");
+    const missing = await loadCutSheets(fid(292, "no-such-quote"), { images: "none" });
+    ok(!missing.ok && missing.error === "Quote not found.", "#292 load: an unknown quote id reads 'Quote not found.'");
+  } finally {
+    const after = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
+    await setBlob(CURTAIN_MOUNTS_BLOB, Object.fromEntries(Object.keys(after).map((k) => [k, Object.prototype.hasOwnProperty.call(before, k) ? before[k] : null])));
+  }
+  await cutSheetPackage292Checks();
+  await cutSheetFinal292AsyncChecks();
+}
+
+// ---- #292 task 8: signed print route, estimate-PDF toggle, client package ----
+import { DEFAULT_PDF_OPTIONS as c292PdfDefaults, PDF_TOGGLE_KEYS as c292PdfKeys, normalizePdfOptions as c292NormPdf } from "@/lib/quote-pdf/pdf-options";
+import { signPrintToken as c292Sign, verifyPrintToken as c292Verify } from "@/lib/quote-pdf/token";
+import { cutSheetFileName as c292FileName } from "@/lib/curtain-cut-sheets/package-sheets";
+import { CutSheetPages as C292Pages } from "@/components/cutsheets/cut-sheet-pages";
+import { createElement as c292El } from "react";
+import { renderToStaticMarkup as c292Render } from "react-dom/server";
+{
+  ok(c292PdfDefaults.pdfCutSheets === false && (c292PdfKeys as readonly string[]).includes("pdfCutSheets") && c292NormPdf(undefined).pdfCutSheets === false && c292NormPdf({ pdfCutSheets: true }).pdfCutSheets === true,
+    "#292 pdf: pdfCutSheets defaults off, is a toggle key, and a stored true is kept");
+  const now = 1_700_000_000_000;
+  const tok = c292Sign("s3cret", "cutsheets", "Q-1", now);
+  ok(c292Verify("s3cret", tok, "cutsheets", "Q-1", now) && !c292Verify("s3cret", tok, "cutsheets", "Q-2", now), "#292 token: a cutsheets token verifies for its own quote id only");
+  ok(!c292Verify("s3cret", c292Sign("s3cret", "quote", "Q-1", now), "cutsheets", "Q-1", now), "#292 token: a quote token does not verify as cutsheets");
+  ok(c292FileName("CS-2", "Legs (Encore Velour 22 oz)") === "cutsheets/CS-2-Legs_Encore_Velour_22_oz.pdf", "#292 package: one Submittal PDF per type under cutsheets/");
+  const rd292d = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pr = rd292d("src/app/print/cutsheets/[quoteId]/page.tsx");
+  const prBody = pr.slice(pr.indexOf("export default"));
+  ok(/verifyPrintToken\([^)]*"cutsheets"/.test(pr) && prBody.indexOf("tokenOk(") >= 0 && prBody.indexOf("tokenOk(") < prBody.indexOf("loadCutSheets("),
+    "#292 source: the print route verifies a cutsheets token before loadCutSheets");
+  const pkg = rd292d("src/lib/client-package-server.ts");
+  ok(pkg.includes("addCutSheets(") && rd292d("src/lib/curtain-cut-sheets/package-sheets.ts").includes("cutsheets/"), "#292 source: client packages write the cutsheets/ folder");
+  ok(/pdfCutSheets/.test(rd292d("src/app/print/quote/[id]/page.tsx")) && /CutSheetPages/.test(rd292d("src/app/print/quote/[id]/page.tsx")), "#292 source: the estimate print route appends Client pages behind pdfCutSheets");
+  ok(!/curtain-cut-sheets\/(collect|load|package-sheets)/.test(rd292d("src/app/(app)/estimator/estimator-client.tsx") + rd292d("src/app/(app)/estimator/preview-doc.tsx")),
+    "#292 source: the Estimator client never imports the collector, loader or package helper (bundle/boundary)");
+
+  // Render level: a fixture quote with curtains, rendered in BOTH styles, prints sheet CS-1.
+  const types = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2), c292Cur(3, { desc: "Legs — Encore Velour 22 oz, 6'W × 20'H, 50% fullness", qty: 4 })])]).types;
+  const ctx8 = {
+    quote: { id: "Q-1", number: "EST-1042", name: "Main stage", customer: "Lakefront HS", venue: "Auditorium — Lakefront", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "Jeff Chesebro", total: types.length, now: 1,
+  };
+  const html = (style: "submittal" | "client") =>
+    c292Render(c292El(C292Pages, { models: types.map((t, i) => c292Model(t, { ...ctx8, style, index: i + 1 })), style, photos: new Map<string, string[]>() }));
+  const subHtml = html("submittal");
+  const cliHtml = html("client");
+  ok(types.length === 2 && subHtml.includes('data-sheet="CS-1"') && subHtml.includes('data-sheet="CS-2"') && subHtml.includes("ADC-2802"),
+    "#292 render: the Submittal set renders one sheet per type (CS-1, CS-2) with the hardware table");
+  ok(cliHtml.includes('data-sheet="CS-1"') && cliHtml.includes('data-sheet="CS-2"') && cliHtml.includes("pk-cs-client") && !cliHtml.includes("ADC-2802"),
+    "#292 render: the Client set renders CS-1 and CS-2 with no SKUs");
+
+  // Client sheets break AFTER every sheet but the last (Submittal pattern) — an appended set never prints a blank page.
+  const css = rd292d("src/app/globals.css");
+  const clientRule = /\.pk-cs-client \{[^}]*\}/.exec(css)?.[0] ?? "";
+  ok(!!clientRule && !/break-before/.test(clientRule) && /\.pk-cs-set \.pk-cs-client \{[^}]*break-after: page/.test(css) && /\.pk-cs-set \.pk-cs-client:last-child \{[^}]*break-after: auto/.test(css),
+    "#292 css: Client sheets break after each sheet except the last, never before");
+  const qpr = rd292d("src/app/print/quote/[id]/page.tsx");
+  ok(/breakBefore: "page"/.test(qpr) && /CLIENT_PRINT_CSS/.test(qpr), "#292 source: the appended Client set starts on its own page and carries the Client print resets");
+}
+
+// ---- #292 task 8 fix round 1: bounded package renders, safe estimate append, customer-safe index ----
+import * as c292Pkg from "@/lib/curtain-cut-sheets/package-sheets";
+import * as c292Dl from "@/lib/curtain-cut-sheets/deadline";
+import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const P = c292Pkg;
+  const maxDur = [rd("src/app/(app)/quotes/page.tsx"), rd("src/app/(app)/design/grid/[id]/page.tsx")].map((t) => /export const maxDuration = (\d+);/.exec(t)?.[1]);
+  ok(maxDur.every((v) => Number(v) * 1000 === P.PACKAGE_MAX_DURATION_MS)
+    && P.CUT_SHEET_MIN_RENDER_MS > 0 && P.CUT_SHEET_MIN_RENDER_MS < P.CUT_SHEET_DEADLINE_MS
+    && P.CUT_SHEET_DEADLINE_MS + P.PACKAGE_FINISH_ALLOWANCE_MS + 10_000 <= P.PACKAGE_MAX_DURATION_MS,
+    "#292 package budget: pre-cut-sheet work + every render (each cut at the deadline) + the finish allowance stays 10 s inside the pages' 120 s maxDuration");
+  const D = 1_000_000;
+  ok(P.renderTimeoutMs(D, D - 100_000) === c292StepMs && P.renderTimeoutMs(D, D - 7_000) === 7_000 && P.renderTimeoutMs(D, D + 5) === 1 && P.cutSheetDeadline(10) === 10 + P.CUT_SHEET_DEADLINE_MS,
+    "#292 package budget: a render's Chrome step cap is the normal cap or the time left, whichever is less (never below 1 ms)");
+  ok(P.cutSheetGapReason(new c292Dl.CutSheetDeadlineError()) === P.CUT_SHEET_LATE
+    && P.cutSheetGapReason(Object.assign(new Error("Navigation timeout of 30000 ms exceeded"), { name: "TimeoutError" })) === P.CUT_SHEET_LATE
+    && P.cutSheetGapReason(new Error("spawn /opt/chrome ENOENT")) === P.CUT_SHEET_RENDER_FAILED && P.CUT_SHEET_RENDER_FAILED === "Couldn't be rendered — print from Cut sheets",
+    "#292 package: a render error becomes a fixed customer-safe reason (timeout → late, anything else → couldn't be rendered)");
+  const srv = rd("src/lib/client-package-server.ts");
+  const builders = ["export async function createClientPackage(", "export async function createQuoteClientPackage("].map((h) => srv.slice(srv.indexOf(h), srv.indexOf("\n}\n", srv.indexOf(h))));
+  ok(builders.every((b) => b.indexOf("cutSheetDeadline(Date.now())") > 0 && b.indexOf("cutSheetDeadline(Date.now())") < b.indexOf("blobEnabled()") && /addCutSheets\([^;]*\{ deadline: cutSheetsBy \}\)/.test(b)),
+    "#292 source: each package builder takes its cut-sheet deadline at the start of the build and threads it into addCutSheets");
+  const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
+  ok(/rejectAfter\(render\(url, \{ timeoutMs: renderTimeoutMs\(opts\.deadline, now\(\)\), signal: abort\.signal \}\), opts\.deadline - now\(\)\)/.test(ps) && ps.indexOf("signPrintToken(") > ps.indexOf("CUT_SHEET_MIN_RENDER_MS || abort.signal.aborted) {"),
+    "#292 source: each render gets a step cap and a hard wait cap from the deadline, and its token is signed right before it");
+  const idx = srv.split("\n").filter((l) => l.includes("00-package-index.json"));
+  ok(idx.length === 2 && idx.every((l) => l.includes("cutSheets: { sheets: cutSheets.sheets }") && !/unreadable/.test(l)) && /cutSheetsUnreadable: built\.cutSheets\.unreadable/.test(rd("src/app/(app)/design/grid/[id]/actions.ts")),
+    "#292 package: the zip's index lists the sheets but never the staff-only unreadable reasons; the Grid action still returns them");
+  const now = 1_700_000_000_000;
+  ok(!c292Verify("s3cret", c292Sign("s3cret", "cutsheets", "Q-1", now), "quote", "Q-1", now), "#292 token: a cutsheets token does not verify as a quote token");
+  const qpr = rd("src/app/print/quote/[id]/page.tsx");
+  ok(/settleWithin\(loadCutSheets\(id, \{ images: "data" \}\), CUT_SHEET_APPEND_LOAD_MS, `\[cutsheets\] estimate PDF \$\{id\}`\)/.test(qpr) && c292Dl.CUT_SHEET_APPEND_LOAD_MS <= 10_000,
+    "#292 source: the estimate print route waits at most a few seconds for appended cut sheets, then prints without them");
+  const pv = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(/cut sheet\$\{p\.cutSheetCount === 1 \? "" : "s"\} \(Client style\)/.test(pv) && !/cut sheet page/.test(pv), "#292 preview: the chip counts cut sheets (types), not pages");
+}
+
+async function cutSheetPackage292Checks(): Promise<void> {
+  const P = c292Pkg;
+  const { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } = await import("@/lib/curtain-cut-sheets/model");
+  const t0 = Date.now();
+  ok(await c292Dl.settleWithin(new Promise<number>(() => undefined), 20) === null && Date.now() - t0 < 2_000
+    && await c292Dl.settleWithin(Promise.reject(new Error("x")), 1_000) === null && await c292Dl.settleWithin(Promise.resolve(7), 1_000) === 7,
+    "#292 estimate append: a hung or failed cut-sheet load settles to null (estimate prints without it); a fast one passes through");
+  const types = [{ sheetNo: "CS-1", title: "Main (Velour)", totalQty: 1 }, { sheetNo: "CS-2", title: "Legs", totalQty: 4 }];
+  const okLoad = (t = types, unreadable: unknown[] = []) => async () => ({ ok: true as const, result: { types: t as never, unreadable: unreadable as never } });
+  const where = { origin: "https://app.example" };
+  const warn = console.warn;
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) process.env.AUTH_SECRET = "test292-secret";
+  console.warn = () => undefined;
+  try {
+    // A render that never answers: the first starts with 10 s left, the clock jumps to 30 ms left, so it is cut at
+    // the deadline; the second has too little time to start. Both become gaps and nothing waits on Chrome.
+    const D = Date.now() + 60_000;
+    let calls = 0;
+    const seen: number[] = [];
+    const files: ZipFile292[] = [];
+    const gaps: ClientPackageGap292[] = [];
+    const started = Date.now();
+    const out = await P.addCutSheets("Q-292", where, files, gaps, {
+      deadline: D, load: okLoad(), now: () => (calls++ === 0 ? D - 10_000 : D - 30),
+      render: (_u, o) => { seen.push(o.timeoutMs); return new Promise<Buffer>(() => undefined); },
+    });
+    ok(seen.length === 1 && seen[0] === 30 && files.length === 0 && gaps.length === 2 && gaps.every((g) => g.kind === "missing-cutsheet" && g.description.endsWith(P.CUT_SHEET_ON_REQUEST))
+      && out.sheets.every((s) => s.file === null) && Date.now() - started < 5_000,
+      "#292 package: a render past the deadline is abandoned as a gap, a render with too little time left is skipped, and Chrome gets only the time left");
+    const gaps2: ClientPackageGap292[] = [];
+    const files2: ZipFile292[] = [];
+    let url = "";
+    await P.addCutSheets("Q-292", where, files2, gaps2, {
+      deadline: Date.now() + 60_000, load: okLoad(),
+      render: async (u, o) => { if (u.includes("CS-2")) throw new Error("spawn /opt/secret-chrome ENOENT"); url = u; ok(o.timeoutMs === c292StepMs, "#292 package: an early render gets the normal Chrome step cap"); return Buffer.from("%PDF"); },
+    });
+    const tok = url ? new URL(url).searchParams.get("t") || "" : "";
+    ok(files2.length === 1 && files2[0].name === "cutsheets/CS-1-Main_Velour.pdf" && c292Verify(process.env.AUTH_SECRET || "", tok, "cutsheets", "Q-292", Date.now())
+      && gaps2.length === 1 && gaps2[0].description === `Legs — ${P.CUT_SHEET_ON_REQUEST}` && !gaps2[0].description.includes("secret"),
+      "#292 package: a rendered sheet lands under cutsheets/ with its own cutsheets token; a raw render error never reaches the customer's index");
+    const g3: ClientPackageGap292[] = [];
+    await P.addCutSheets("Q-292", { error: "Set QUOTE_PDF_ORIGIN — a production server off Vercel won’t print" }, [], g3, { deadline: Date.now() + 60_000, load: okLoad() });
+    ok(g3.length === 2 && g3.every((g) => g.description.endsWith(P.CUT_SHEET_ON_REQUEST) && !g.description.includes("QUOTE_PDF_ORIGIN")),
+      "#292 package: a staff-only print-origin error maps to the fixed customer-safe reason");
+    const run = async (load: Parameters<typeof P.addCutSheets>[4]["load"]) => {
+      const g: ClientPackageGap292[] = [];
+      await P.addCutSheets("Q-292", where, [], g, { deadline: Date.now() + 60_000, load, render: async () => Buffer.from("%PDF") });
+      return g;
+    };
+    const gone = await run(async () => ({ ok: false as const, error: CUT_SHEETS_NO_QUOTE }));
+    const wrong = await run(async () => ({ ok: false as const, error: CUT_SHEETS_WRONG_TYPE }));
+    const allBad = await run(okLoad([], [{ reason: "Can't read size — edit the curtain" }]));
+    const none = await run(okLoad([], []));
+    ok(gone.length === 1 && gone[0].kind === "missing-cutsheet" && gone[0].description === P.CUT_SHEET_QUOTE_GONE
+      && allBad.length === 1 && allBad[0].description === P.CUT_SHEETS_ON_REQUEST && wrong.length === 0 && none.length === 0,
+      "#292 package: a deleted quote or all-unreadable curtains leave one missing-cutsheet gap; no curtains (or not a system quote) leaves none");
+  } finally {
+    console.warn = warn;
+    if (!secret) delete process.env.AUTH_SECRET;
+  }
+}
+type ZipFile292 = import("@/lib/zip").ZipFile;
+type ClientPackageGap292 = import("@/lib/client-package").ClientPackageGap;
+
 /* ======================================================================
    Photo sheet — pure sheet model (photo-sheet.ts).
    ====================================================================== */
@@ -44055,4 +44949,1753 @@ import type { SpecItem as N293gItem, SpecSection as N293gSec } from "@/app/(app)
   const cliSrc = rd("src/app/(app)/estimator/estimator-client.tsx");
   ok(colSrc.includes("!Object.hasOwn(rows, s)") && !colSrc.includes("(s in rows)") && cliSrc.includes("Object.hasOwn(kpLib.rows, sku)") && !cliSrc.includes("sku in kpLib.rows"),
     "#293 fix: row-loaded checks use Object.hasOwn (an sku named like an inherited property is not a loaded row)");
+}
+
+/* ============================================================================
+   #292 final review fix wave — unique curtain↔track keys, narrowed fabric
+   reads, an abortable Chrome queue, Grid edit links/fabric names/legacy
+   options, customer-neutral gap wording, shrunk photos, blank fabric seeds,
+   the Grid editor's unreadable note, and pristine mount rows. Async checks
+   run in cutSheetFinal292AsyncChecks() (called from curtain292AsyncChecks).
+   ============================================================================ */
+import { newCurtainTrackKey as f292Key, remapCurtainTrackKeys as f292Remap, linkCurtainTracks as f292Link } from "@/lib/curtain-cut-sheets/track-link";
+import {
+  curtainEditLink as f292EditLink, curtainFabricLookups as f292Lookups, cutSheetsUnreadableNote as f292Note,
+  curtainTypeKey as f292TypeKey, gridCurtains as f292Grid, readCurtains as f292Read, GRID_DESIGN_GONE as f292Gone,
+} from "@/lib/curtain-cut-sheets/estimator-curtains";
+import { copySectionForTarget as f292Copy } from "@/app/(app)/estimator/copy-system";
+import { curtainCostKept as f292Kept, curtainDraftFromLine as f292DraftFrom } from "@/app/(app)/estimator/curtain-line";
+import { BLANK_MOUNT_DRAFT as f292Blank, isPristineMountDraft as f292Pristine } from "@/lib/curtain-mounts";
+import { curtainDesc as f292CurtainDesc } from "@/lib/design/grid-bom";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const cur = (id: number, extra: Partial<C292Item> = {}) => ({ id, curtain: true, desc: C292_DESC, qty: 1, ...extra });
+  const trk = (id: number, extra: Partial<C292Item> = {}) => ({ id, track: { ...C292_TRACK }, ...extra });
+
+  // #1 (a) new keys are globally unique
+  const keys = new Set(Array.from({ length: 500 }, () => f292Key(100)));
+  ok(keys.size === 500 && [...keys].every((k) => /^ct-100-[0-9a-z]+$/.test(k)), "#292 final #1: 500 keys minted for the same line id are all distinct (ct-<id>-<nonce>)");
+
+  // #1 (b) a copied section's pairs get fresh shared keys; the input is untouched
+  let n = 0;
+  const srcItems = c292Sec("s", [cur(1, { curtainTrackKey: "ct-1" }), trk(2, { curtainTrackKey: "ct-1" }), cur(3, { curtainTrackKey: "ct-3" }), trk(4, { curtainTrackKey: "ct-3" }), { id: 5 }]).items;
+  const remapped = f292Remap(srcItems, (id) => `new-${id}-${n++}`);
+  ok(remapped[0].curtainTrackKey === "new-1-0" && remapped[1].curtainTrackKey === "new-1-0" && remapped[2].curtainTrackKey === "new-3-1" && remapped[3].curtainTrackKey === "new-3-1"
+    && !("curtainTrackKey" in remapped[4]) && srcItems[0].curtainTrackKey === "ct-1",
+    "#292 final #1: remapCurtainTrackKeys gives each pair one fresh shared key and never mutates the source");
+  const source = c292Sec("sysA", [cur(1, { curtainTrackKey: "ct-1" }), trk(2, { curtainTrackKey: "ct-1" })]);
+  const copied = f292Copy(source, { newSectionId: "sysB", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section;
+  const cl = f292Link([source, copied]);
+  ok(copied.items[0].curtainTrackKey !== "ct-1" && copied.items[0].curtainTrackKey === copied.items[1].curtainTrackKey
+    && cl.links.get(source.items[0]) === source.items[1] && cl.links.get(copied.items[0]) === copied.items[1] && cl.duplicates.length === 0,
+    "#292 final #1: Copy here — the copy's curtain/track pair gets a fresh key and both systems keep their own track link");
+  const readBoth = f292Read({ sections: [source, copied] }, C292_FABS, C292_SERIES, null);
+  ok(readBoth.curtains.length === 2 && readBoth.curtains.every((c) => c.mount.source === "track"), "#292 final #1: neither the source nor the copy falls back to the assumed tie-batten mount");
+  ok(rd("src/app/(app)/estimator/copy-system.ts").includes("items: remapCurtainTrackKeys(items)"), "#292 source: copySectionForTarget re-keys the copied pairs (Copy here, to new, to existing)");
+
+  // #1 (c) already-saved collisions: same-section tracks win
+  const a = c292Sec("a", [cur(1, { curtainTrackKey: "ct-5" }), trk(2, { curtainTrackKey: "ct-5" })]);
+  const b = c292Sec("b", [cur(3, { curtainTrackKey: "ct-5" }), trk(4, { curtainTrackKey: "ct-5" })]);
+  const ab = f292Link([a, b]);
+  ok(ab.links.get(a.items[0]) === a.items[1] && ab.links.get(b.items[0]) === b.items[1] && ab.duplicates.length === 0,
+    "#292 final #1: two sections sharing a legacy key each link their own same-section track");
+  const lone = c292Sec("x", [cur(6, { curtainTrackKey: "ct-5" })]);
+  const lb = f292Link([lone, b]);
+  ok(lb.links.get(b.items[0]) === b.items[1] && !lb.links.has(lone.items[0]) && lb.duplicates[0] === lone.items[0],
+    "#292 final #1: a curtain whose key has no track in its own section never steals another section's linked track (flagged instead)");
+  const cross = f292Link([c292Sec("p", [cur(7, { curtainTrackKey: "ct-q" })]), c292Sec("q", [trk(8, { curtainTrackKey: "ct-q" })])]);
+  ok(cross.links.size === 1 && cross.duplicates.length === 0, "#292 final #1: a free keyed track in another section still links (the pre-collision rule)");
+
+  // #2 fabric lookups mirror the adapters
+  const structured = f292Lookups({ sections: [c292Sec("s", [cur(1, { curtainInputs: c292Ci() as never })])] }, null);
+  const legacy = f292Lookups({ sections: [c292Sec("s", [cur(1)])] }, null);
+  const noSku = f292Lookups({ sections: [c292Sec("s", [cur(1, { curtainInputs: c292Ci({ fabricSku: "" }) as never })])] }, null);
+  ok(structured.skus.join() === "FAB-CH25" && !structured.byName && structured.byNameIfMissing.join() === "FAB-CH25" && legacy.byName && legacy.skus.length === 0 && noSku.byName,
+    "#292 final #2: structured curtains name their fabric SKUs; a legacy desc or a name-only curtain needs the fabric list by name");
+  const gridProject = { options: [{ id: "opt-a", name: "A", quoteId: "Q-7", createdAt: 1 }], placements: [{ id: "p1", optionId: "opt-a", curtain: { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "FAB-EN22" } }] };
+  const gl = f292Lookups({ kind: "grid", gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: "x" }] }, gridProject);
+  const gGone = f292Lookups({ kind: "grid", gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: "x" }] }, null);
+  ok(gl.skus.join() === "FAB-EN22" && !gl.byName && gGone.byName && gGone.skus.length === 0, "#292 final #2: a live Grid option names its placements' fabric SKUs; quoted lines need names");
+  const ld = rd("src/lib/curtain-cut-sheets/load.ts");
+  ok(!/fabricParts\(\)/.test(ld) && !/\blist\(\)/.test(ld) && /cutSheetFabricRows\(curtainFabricLookups\(quote\.spec, project, quote\.id\)\)/.test(ld),
+    "#292 final #2: loadCutSheets never reads the whole catalog — only the fabric rows its curtains name");
+  ok(/loadCutSheets\(quoteId, \{ images: style === "client" \? "data" : "none", sheet: sheet \|\| undefined \}\)/.test(rd("src/app/print/cutsheets/[quoteId]/page.tsx")),
+    "#292 final #2: a one-sheet print route (each package render) reads only its own sheet's photos");
+
+  // #4 edit links
+  const gq = { id: "Q-9", quoteType: "system", spec: { kind: "grid", gridProjectId: "GRD-1", gridOptionId: "opt-a" } };
+  ok(f292EditLink({ ref: "s1/line-4", sectionId: "s1" }, gq).href === "/estimator?id=Q-9"
+    && f292EditLink({ ref: "placement-p1" }, gq).href === "/design/grid/GRD-1?option=opt-a"
+    && f292EditLink({ ref: "line-2" }, gq).href === "/estimator?id=Q-9" && f292EditLink({ ref: "line-2" }, gq).label !== "Edit the curtain →",
+    "#292 final #4: Edit the curtain → only for Estimator rows; a Grid placement opens its design; quoted lines open the quote");
+  const csPage = rd("src/app/(app)/estimator/cut-sheets/page.tsx");
+  ok(csPage.includes("curtainEditLink(u, quote)") && !csPage.includes("editHref"), "#292 final #4: the Cut sheets page builds each row's link through curtainEditLink");
+
+  // #5 a Grid fabric that left the catalog never prints its SKU
+  const goneCurtain = { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "GONE-1" };
+  const proj5 = { options: [{ id: "opt-a", name: "A", quoteId: null, createdAt: 1 }], placements: [{ id: "p1", optionId: "opt-a", curtain: goneCurtain }, { id: "p2", optionId: "opt-a", curtain: { ...goneCurtain, fabricSku: "GONE-2" } }] };
+  const named = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain, "Old Velour") }] }, proj5, C292_FABS);
+  const unnamed = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain) }] }, proj5, C292_FABS);
+  const live = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain, "Charisma Velour 25 oz") }] }, proj5, C292_FABS);
+  ok(named.curtains[0].fabricText === "Old Velour" && named.curtains[0].fabricRef === "GONE-1" && named.curtains[1].fabricText === "" && unnamed.curtains.every((c) => c.fabricText === "")
+    && live.curtains.every((c) => c.fabricText === "") && f292TypeKey(unnamed.curtains[0]) !== f292TypeKey(unnamed.curtains[1]),
+    "#292 final #5: a gone Grid fabric prints its quoted name or nothing (never the SKU); two gone fabrics stay separate types");
+
+  // #6 a Grid quote saved before gridOptionId finds its option by quoteId
+  const proj6 = { options: [{ id: "opt-a", name: "A", quoteId: "Q-OTHER", createdAt: 1 }, { id: "opt-b", name: "B", quoteId: "Q-6", createdAt: 2 }],
+    placements: [{ id: "p1", optionId: "opt-a", curtain: { ...goneCurtain, name: "A side" } }, { id: "p2", optionId: "opt-b", curtain: { ...goneCurtain, name: "B side", fabricSku: "FAB-CH25" } }] };
+  const old6 = f292Read({ kind: "grid", lines: [] }, C292_FABS, [], proj6, "Q-6");
+  const legacy6 = f292Read({ kind: "grid", lines: [] }, C292_FABS, [], { quoteId: "Q-L", placements: [{ id: "p1", curtain: { ...goneCurtain, fabricSku: "FAB-CH25" } }] }, "Q-L");
+  ok(old6.notes.length === 0 && old6.curtains.map((c) => c.name).join() === "B side" && legacy6.notes.length === 0 && legacy6.curtains.length === 1
+    && f292Read({ kind: "grid", lines: [] }, C292_FABS, [], proj6).notes.includes(f292Gone) && f292Read({ kind: "grid", gridOptionId: "opt-zz", lines: [] }, C292_FABS, [], proj6, "Q-6").notes.includes(f292Gone),
+    "#292 final #6: no gridOptionId → the option whose quoteId is this quote (or a pre-options project's own quote); a named option that's gone still reads the quoted lines");
+
+  // #7 customer-neutral wording, and the header says what is enforced
+  const P = c292Pkg;
+  const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
+  ok(P.CUT_SHEET_ON_REQUEST === "Cut sheet available on request" && !/print from|edit the/i.test(P.CUT_SHEET_ON_REQUEST + P.CUT_SHEETS_ON_REQUEST)
+    && /work BEFORE the cut\s+\* sheets[\s\S]{0,120}is not bounded/.test(ps) && /loadCutSheets runs once, before any deadline check/.test(ps) && /past the deadline every remaining sheet\s+\* becomes a gap/.test(ps),
+    "#292 final #7: the zip's gap reason is a neutral 'available on request'; the header states exactly what the deadline bounds");
+  ok(P.cutSheetGapReason(Object.assign(new Error("x"), { name: "AbortError" })) === P.CUT_SHEET_LATE, "#292 final #3: an aborted render logs as late");
+
+  // #9 blank fabric seeds + the kept-cost hint only for a seeded cost
+  const fabs9 = [{ sku: "T292-FAB", name: "Charisma Velour 25 oz" }];
+  const unread9 = f292DraftFrom({ id: 1, sku: "C", desc: "Main — hand edited", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X", fabs9);
+  const rec9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ fabricSku: "", fabricName: "" }) as never }, "FAB-X", fabs9);
+  const byName9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ fabricSku: "" }) as never }, "FAB-X", fabs9);
+  ok(unread9.fabric === "" && rec9.fabric === "" && byName9.fabric === "T292-FAB", "#292 final #9: an unreadable line or a 'recommend one' curtain seeds no fabric (staff pick); a name-only one resolves by name");
+  const seeded9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ vendorCost: "412.5" }) as never }, "FAB-X", fabs9);
+  ok(f292Kept(seeded9) && !f292Kept({ ...seeded9, vendorCostOverride: "500" }) && !f292Kept({ ...seeded9, vendorCostOverride: "", seededVendorCost: "" }) && !f292Kept({ ...unread9, vendorCostOverride: "300" }),
+    "#292 final #9: 'Kept from the quote' only while the cost field holds the seeded value, never for a typed one");
+  ok(rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{editing && curtainCostKept(draft) && ("), "#292 final #9: the modal's kept-cost hint reads curtainCostKept");
+
+  // #10 the Grid editor shows the unreadable curtains
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(f292Note(1) === "1 curtain couldn't be read for cut sheets — edit it, then rebuild" && f292Note(3).startsWith("3 curtains couldn't")
+    && ed.includes("setPackageUnreadable(result.cutSheetsUnreadable)") && ed.includes("cutSheetsUnreadableNote(packageUnreadable.length)"),
+    "#292 final #10: the Grid editor's package result names how many curtains the cut sheets couldn't read");
+
+  // #11 pristine "+ Add part" rows are dropped before validation
+  ok(f292Pristine({ ...f292Blank }) && !f292Pristine({ ...f292Blank, qty: "2" }) && !f292Pristine({ ...f292Blank, sku: "X" }) && !f292Pristine({ ...f292Blank, kind: "perMark" }),
+    "#292 final #11: only an untouched Add part row counts as pristine");
+  const mc = rd("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx");
+  ok(/toRows\(rows\.filter\(\(r\) => !isPristineMountDraft\(r\)\)\)/.test(mc) && mc.indexOf("isPristineMountDraft(r)") < mc.indexOf("validateMountRows(submitted)"),
+    "#292 final #11: the Curtain mounts screen drops pristine rows before validating (the server still refuses partial rows)");
+}
+
+async function cutSheetFinal292AsyncChecks(): Promise<void> {
+  const P = c292Pkg;
+  const { enqueueRender, renderPrintRouteToPdf } = await import("@/lib/quote-pdf/render");
+  const { cutSheetFabricRows, cutSheetPhotoDataUrl, CUT_SHEET_PHOTO_EDGE_PX } = await import("@/lib/curtain-cut-sheets/load");
+  const sharp = (await import("sharp")).default;
+
+  // #3 aborted before its turn: never runs, rejected at once, the queue moves on
+  let release!: () => void;
+  const blocker = enqueueRender(() => new Promise<string>((r) => { release = () => r("first"); }));
+  const ctl = new AbortController();
+  let launched = 0;
+  const queued = enqueueRender(async () => { launched++; return "never"; }, ctl.signal);
+  const order: string[] = [];
+  const after = enqueueRender(async () => { order.push("after"); return "after"; });
+  const t0 = Date.now();
+  ctl.abort();
+  const rejected = await queued.then(() => false, (e: unknown) => e instanceof Error && e.name === "AbortError");
+  ok(rejected && Date.now() - t0 < 1_000 && launched === 0, "#292 final #3: a queued render aborted before its turn rejects at once (AbortError) and never runs");
+  release();
+  ok((await blocker) === "first" && (await after) === "after" && launched === 0 && order.join() === "after",
+    "#292 final #3: the aborted slot passes straight on — the next render (no signal) still runs");
+  const pre = new AbortController();
+  pre.abort();
+  let ranPre = false;
+  ok(await enqueueRender(async () => { ranPre = true; return 1; }, pre.signal).then(() => false, () => true) && !ranPre, "#292 final #3: an already-aborted signal never launches the task");
+  const mid = new AbortController();
+  let sawAbort = false;
+  const running = enqueueRender((signal) => new Promise<number>((_, reject) => {
+    signal?.addEventListener("abort", () => { sawAbort = true; reject(new Error("browser closed")); });
+  }), mid.signal);
+  setTimeout(() => mid.abort(), 20);
+  ok(await running.then(() => false, () => true) && sawAbort, "#292 final #3: a running render receives the abort (render.ts closes its browser)");
+  const seq: number[] = [];
+  await Promise.all([1, 2, 3].map((i) => enqueueRender(async () => { seq.push(i); await new Promise((r) => setTimeout(r, 5)); seq.push(-i); })));
+  ok(seq.join() === "1,-1,2,-2,3,-3", "#292 final #3: without a signal the queue still runs one render at a time, in order");
+  const src = readFileSync(join(process.cwd(), "src/lib/quote-pdf/render.ts"), "utf8");
+  ok(/if \(!opts\.signal\) return enqueueRender\(\(\) => renderOnce\(url, timeout\)\);/.test(src) && renderPrintRouteToPdf.length === 1,
+    "#292 final #3: a caller with no signal takes the unchanged queue path");
+
+  // #3 the package passes a deadline signal, and abandons it when done
+  const warn = console.warn;
+  const logged: string[] = [];
+  console.warn = (...a: unknown[]) => { logged.push(a.map(String).join(" ")); };
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) process.env.AUTH_SECRET = "test292-secret";
+  try {
+    let sig: AbortSignal | undefined;
+    let loads = 0;
+    const types = [{ sheetNo: "CS-1", title: "Main", totalQty: 1 }, { sheetNo: "CS-2", title: "Legs", totalQty: 4 }];
+    const gaps: ClientPackageGap292[] = [];
+    await P.addCutSheets("Q-F292", { origin: "https://app.example" }, [], gaps, {
+      deadline: Date.now() + 60_000,
+      load: async () => { loads++; return { ok: true as const, result: { types: types as never, unreadable: [] } }; },
+      render: async (_u, o) => { sig = o.signal; if (_u.includes("CS-2")) throw new Error("spawn ENOENT"); return Buffer.from("%PDF"); },
+    });
+    ok(loads === 1 && !!sig && sig.aborted && gaps.length === 1 && gaps[0].description === `Legs — ${P.CUT_SHEET_ON_REQUEST}`
+      && logged.some((l) => l.includes("CS-2") && l.includes(P.CUT_SHEET_RENDER_FAILED)),
+      "#292 final #2/#3/#7: one load for the package, each render gets the deadline signal (aborted once the package is done), and the staff reason goes to the log only");
+  } finally {
+    console.warn = warn;
+    if (!secret) delete process.env.AUTH_SECRET;
+  }
+
+  // #2 the estimate append never drops cut sheets silently
+  const seen: string[] = [];
+  console.warn = (...a: unknown[]) => { seen.push(a.map(String).join(" ")); };
+  try {
+    const hung = await c292Dl.settleWithin(new Promise<number>(() => undefined), 10, "[cutsheets] estimate PDF Q-1");
+    const failed = await c292Dl.settleWithin(Promise.reject(new Error("boom")), 1_000, "[cutsheets] estimate PDF Q-2");
+    const quiet = await c292Dl.settleWithin(Promise.resolve(5), 1_000, "[cutsheets] estimate PDF Q-3");
+    ok(hung === null && failed === null && quiet === 5 && seen.length === 2 && seen[0].includes("Q-1") && seen[0].includes("not loaded within 10 ms") && seen[1].includes("Q-2") && seen[1].includes("boom"),
+      "#292 final #2: a timed-out or failed appended load logs one console.warn each; a loaded one logs nothing");
+  } finally {
+    console.warn = warn;
+  }
+
+  // #2 fabric rows: by SKU only, the fabric categories only when a name lookup is needed
+  type Part = import("@/lib/stores/catalog").CatalogPart;
+  const part = (sku: string, category = "Fabric", unit = "sqft") => ({ id: sku, sku, desc: sku + " desc", category, unit, cost: 1, list: 2 }) as unknown as Part;
+  let cat = 0;
+  const asked: string[][] = [];
+  const reader = { getMany: async (s: readonly string[]) => { asked.push([...s]); return s.filter((x) => x !== "MISSING").map((x) => (x === "BOLT" ? part(x, "Hardware", "ea") : part(x))); }, byCategory: async () => { cat++; return [part("F-1"), part("F-2")]; } };
+  const r1 = await cutSheetFabricRows({ skus: ["F-1", "BOLT"], byName: false, byNameIfMissing: ["F-1"] }, reader);
+  ok(r1.map((p) => p.sku).join() === "F-1" && cat === 0 && asked[0].join() === "F-1,BOLT", "#292 final #2: structured curtains read their fabric SKUs only (a non-fabric part is dropped), never the fabric list");
+  const r2 = await cutSheetFabricRows({ skus: ["MISSING"], byName: false, byNameIfMissing: ["MISSING"] }, reader);
+  const r3 = await cutSheetFabricRows({ skus: [], byName: true, byNameIfMissing: [] }, reader);
+  ok(cat === 2 && r2.map((p) => p.sku).join() === "F-1,F-2" && r3.length === 2, "#292 final #2: the fabric categories are read only when a curtain must be matched by fabric name");
+
+  // #8 photos inline at tile size
+  const big = await sharp({ create: { width: 1600, height: 800, channels: 3, background: { r: 200, g: 40, b: 40 } } }).png().toBuffer();
+  const uri = await cutSheetPhotoDataUrl(big);
+  const meta = uri ? await sharp(Buffer.from(uri.split(",")[1], "base64")).metadata() : null;
+  ok(!!uri && uri.startsWith("data:image/webp;base64,") && meta?.width === CUT_SHEET_PHOTO_EDGE_PX && meta?.height === CUT_SHEET_PHOTO_EDGE_PX / 2 && CUT_SHEET_PHOTO_EDGE_PX <= 400,
+    "#292 final #8: an inlined cut-sheet photo is shrunk to the tile (~400 px WebP), not the stored 1600 px");
+  ok((await cutSheetPhotoDataUrl(Buffer.from("not an image"))) === null, "#292 final #8: a photo that can't be shrunk is skipped");
+}
+
+/* ======================================================================
+   #293 slice 2 — pure rules: the system library (which quotes and
+   systems are indexed, search + ranking, hits, keys, the Load pick and
+   placement, notices) and Merge narrative.
+   ====================================================================== */
+import {
+  systemLibraryEntries as n293sEntries, searchSystemLibrary as n293sSearch, toLibraryHit as n293sHit,
+  parseLibraryKey as n293sParseKey, librarySourceOf as n293sSource, librarySectionForLoad as n293sForLoad,
+  placeLoadedSection as n293sPlace, loadNotice as n293sLoadNotice, libraryRowMeta as n293sRowMeta,
+  libraryRowCounts as n293sRowCounts, LIBRARY_SNIPPET as n293sSnip, LIBRARY_SEARCH_LIMIT as n293sLimit,
+  LIBRARY_GONE as n293sGone, type SystemLibraryEntry as N293sEntry,
+} from "@/lib/narrative/system-library";
+import { mergeNarrative as n293sMerge, mergeNotice as n293sMergeNotice } from "@/lib/narrative/merge";
+import type { Quote as N293sQuote } from "@/lib/stores/quotes";
+import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)/estimator/types";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const it = (id: number, sku: string, extra: Partial<N293sItem> = {}): N293sItem =>
+    ({ id, sku, desc: "Desc " + sku, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293sItem);
+  const sec = (id: string, name: string, items: N293sItem[], extra: Partial<N293sSec> = {}): N293sSec =>
+    ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const rev = (n: number, reason: "manual" | "sent", at: number, sections: N293sSec[], tierMargin = 0.3) =>
+    ({ rev: n, at, by: "t", reason, note: "", name: "Rev " + n, value: 0, margin: 0, status: "sent", tierMargin, spec: { sections, mobs: [] } });
+  const quote = (id: string, status: string, extra: Record<string, unknown> = {}): N293sQuote =>
+    ({ id, name: "Quote " + id, customer: "Denorm " + id, customerId: null, locationId: null, value: 0, margin: 0, status,
+       source: "estimator", quoteType: "system", owner: "t", createdAt: 1, updatedAt: 1000, spec: null, ...extra } as unknown as N293sQuote);
+
+  // ---- which quotes and systems are indexed ----
+  const lighting = sec("sysA", "Main Lighting", [
+    it(1, "ETC-S4"),
+    it(2, "CUSTOM-X", { custom: true }),
+    it(3, "", { rewardCredit: true, qty: 1, price: -50 }),
+    it(5, "VQ-1", { vendorQuoteId: "vq1", desc: "Vendor rig" }),
+  ], {
+    narrative: "  Our lighting.  ", presentation: "narrative", room: "Stage left",
+    keyProducts: [
+      { lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true },
+      { lineKey: "9", sku: "GONE", text: "x", photo: true },
+      { lineKey: "5", sku: "VQ-1", text: "Vendor para", photo: true },
+    ],
+  });
+  const QS = quote("QS", "sent", {
+    customerId: "C1", estNo: 1005, updatedAt: 9000,
+    spec: { sections: [sec("sysLive", "Live only edit", [it(1, "LIVE")])], mobs: [] },
+    revisions: [
+      rev(1, "manual", 1000, [sec("sysOld", "Old manual", [it(1, "OLD")])]),
+      rev(2, "sent", 5000, [lighting, sec("sysL", "Labor", [it(4, "LAB", { labor: true })], { kind: "labor" }), sec("sysE", "Empty", [])]),
+      rev(3, "manual", 6000, [sec("sysLater", "Later manual", [it(1, "LATER")])]),
+    ],
+  });
+  const QD = quote("QD", "draft", { revisions: [rev(1, "sent", 4000, [sec("d", "Recalled draft", [it(1, "D")])])] });
+  const QL = quote("QL", "lost", { revisions: [rev(1, "sent", 4000, [sec("l", "Lost one", [it(1, "L")])])] });
+  const QDL = quote("QDL", "won", { source: "daylite", spec: { sections: [sec("h", "History", [it(1, "H")])] } });
+  const QF = quote("QF", "sent", { quoteType: "flame_test", revisions: [rev(1, "sent", 4000, [sec("f", "Flame", [it(1, "F")])])] });
+  const QW = quote("QW", "won", { updatedAt: 3000, spec: { sections: [sec("sysW", "Rigging", [it(1, "RIG-1")])], mobs: [] } });
+  const QA = quote("QA", "sent", { quoteType: undefined, revisions: [rev(1, "sent", 7000, [sec("sysA2", "Audio", [it(1, "SPK-1")])])] });
+  const QX = quote("QX", "sent", { spec: { sections: [sec("x", "Never cut", [it(1, "X")])] } });
+  const QJ = quote("QJ", "won", { spec: "junk" });
+  const names = new Map([["C1", "Lakefront HS"]]);
+  const all = n293sEntries([QS, QD, QL, QDL, QF, QW, QA, QX, QJ], names);
+
+  ok(eq(all.map((e) => e.key), ["QW:live:sysW", "QA:1:sysA2", "QS:2:sysA"]),
+    "#293s library: sent + won system quotes only (draft, lost, Daylite, flame, never-sent and junk specs skipped); won first, then newest");
+  const s = all.find((e) => e.quoteId === "QS")!;
+  ok(s.systemName === "Main Lighting" && s.rev === 2 && s.at === 5000 && s.status === "sent",
+    "#293s library: a sent quote indexes its LATEST SENT revision — not the live edit, not a later manual revision");
+  ok(s.customer === "Lakefront HS" && s.estNumber === "EST-1005" && s.quoteName === "Quote QS" && s.intro === "Our lighting." && s.presentation === "narrative",
+    "#293s library: customer from the directory name, estimate number, trimmed intro, presentation");
+  ok(s.lineCount === 3 && eq(s.skus, ["ETC-S4", "CUSTOM-X", "VQ-1"]),
+    "#293s library: the Rewards credit line is excluded from counts and skus");
+  ok(eq(s.keyProducts.map((k) => k.sku), ["ETC-S4", "VQ-1"]) && s.keyProducts[0].heading === "Desc ETC-S4",
+    "#293s library: only resolved key products are indexed, with their printed heading");
+  ok(!all.some((e) => e.sectionId === "sysL" || e.sectionId === "sysE"), "#293s library: labor and empty systems are skipped");
+  const w = all.find((e) => e.quoteId === "QW")!;
+  ok(w.rev === null && w.at === 3000 && w.status === "won" && w.customer === "Denorm QW", "#293s library: won-without-send uses the live spec and updatedAt; the denormalized customer is the fallback");
+  ok(n293sSource(QD) === null && n293sSource(QL) === null && n293sSource(QDL) === null && n293sSource(QF) === null && n293sSource(QX) === null && n293sSource(QS)?.tierMargin === 0.3,
+    "#293s library: librarySourceOf is null for draft / lost / Daylite / service / never-sent; a revision carries its tierMargin");
+
+  // ---- search and ranking ----
+  ok(eq(n293sSearch(all, "lighting lakefront").map((e) => e.key), ["QS:2:sysA"]), "#293s search: every token must match somewhere (name + customer)");
+  ok(eq(n293sSearch(all, "etc-s4").map((e) => e.key), ["QS:2:sysA"]) && eq(n293sSearch(all, "vendor rig").map((e) => e.key), ["QS:2:sysA"]),
+    "#293s search: matches a sku or a line description, case-insensitively");
+  ok(n293sSearch(all, "EST-1005").length === 1 && n293sSearch(all, "quote qa").length === 1, "#293s search: matches the estimate number and the quote name");
+  ok(n293sSearch(all, "lighting rigging").length === 0, "#293s search: tokens AND, they don't OR");
+  ok(eq(n293sSearch(all, "").map((e) => e.key), ["QW:live:sysW", "QA:1:sysA2", "QS:2:sysA"]), "#293s search: an empty query lists everything won → sent → newest");
+  const QT = quote("QT", "sent", { revisions: [rev(1, "sent", 4000, [
+    sec("b", "Audio", [it(1, "CBL", { desc: "Speaker cable" })]),
+    sec("a", "Speakers", [it(1, "SPK")]),
+  ])] });
+  ok(eq(n293sSearch(n293sEntries([QT], new Map()), "speaker").map((e) => e.sectionId), ["a", "b"]),
+    "#293s search: with equal status and date, a system-name match ranks before a lines-only match");
+  ok(eq(n293sSearch(all, "", { hasNarrative: true }).map((e) => e.key), ["QS:2:sysA"]), "#293s search: Has narrative keeps systems with an intro or key products");
+  const many = Array.from({ length: 60 }, (_, i) => quote("QM" + i, "won", { updatedAt: i, spec: { sections: [sec("m", "Many " + i, [it(1, "M")])] } }));
+  const manyEntries = n293sEntries(many, new Map());
+  ok(n293sLimit === 50 && n293sSearch(manyEntries, "").length === 50 && n293sSearch(manyEntries, "", { limit: 3 }).length === 3,
+    "#293s search: 50 by default, a smaller limit honored");
+
+  // ---- hits never carry text bodies ----
+  const longIntro = sec("sysLong", "Long", [it(1, "LNG")], { narrative: "word ".repeat(80) });
+  const hit = n293sHit(n293sEntries([quote("QH", "won", { spec: { sections: [longIntro] } })], new Map())[0]);
+  ok(!("intro" in hit) && !("keyProducts" in hit) && !("skus" in hit) && !("descs" in hit) && hit.introSnippet.length <= n293sSnip && n293sSnip === 140,
+    "#293s hits: the list gets a ≤140-char intro snippet and counts — never the intro, block texts, skus or descriptions");
+  const sHit = n293sHit(s);
+  ok(sHit.keyProductCount === 2 && sHit.keyProductSnippets[0].sku === "ETC-S4" && sHit.keyProductSnippets[0].snippet === "S4 para" && sHit.lineCount === 3,
+    "#293s hits: key-product count and per-block snippets");
+
+  // ---- keys ----
+  ok(eq(n293sParseKey("Q-2041:3:sys12"), { quoteId: "Q-2041", rev: 3, sectionId: "sys12" }) && eq(n293sParseKey("Q-dl-9:live:sysA"), { quoteId: "Q-dl-9", rev: null, sectionId: "sysA" }),
+    "#293s keys: quoteId:rev:sectionId, with live for won-without-send");
+  ok(n293sParseKey("bad") === null && n293sParseKey("Q:x:y") === null && n293sParseKey("") === null, "#293s keys: malformed keys parse to null");
+
+  // ---- the Load pick ----
+  const pick = n293sForLoad(QS, "sysA")!;
+  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2]) && pick.vendorLinesDropped === 1 && pick.source.tierMargin === 0.3,
+    "#293s load: vendor-quote lines and the Rewards credit are left out (counted); the snapshot's tier is the source tier");
+  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
+    "#293s load: blocks on dropped or missing lines go, room (job-specific) goes, the narrative carries");
+  ok(n293sForLoad(QS, "sysL") === null && n293sForLoad(QS, "nope") === null && n293sForLoad(QD, "d") === null && n293sForLoad(QS, "sysLive") === null,
+    "#293s load: labor, unknown, draft and live-only-after-send systems are refused");
+  ok(n293sGone === "That estimate is no longer available", "#293s load: the gone message is the spec's copy");
+
+  // ---- placement on the client ----
+  let n = 500;
+  const placed = n293sPlace({ ...pick.section, freightAuto: true, freightPct: 9 }, { id: "sys777", nextId: () => ++n, autoFreightPct: 4 });
+  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }]),
+    "#293s place: fresh section id, items re-id'd through nextId, blocks follow their lines");
+  ok(placed.freightPct === 4 && n293sPlace({ ...pick.section, freightPct: 9 }, { id: "s", nextId: () => ++n, autoFreightPct: 4 }).freightPct === 9,
+    "#293s place: an auto-freight system takes this estimate's default; a hand-set freight is kept");
+  ok(!("keyProducts" in n293sPlace(sec("z", "Z", [it(1, "Z")]), { id: "s", nextId: () => ++n, autoFreightPct: 0 })), "#293s place: no blocks → no key (back-compat shape)");
+
+  // ---- notices and row text ----
+  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesDropped: 1 }) ===
+    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line left out", "#293s notice: Load reports cost moves and left-out vendor lines");
+  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesDropped: 0 }) ===
+    "Loaded A from Q-1 · 1 part updated to today's cost · 2 lines re-priced to this estimate's tier", "#293s notice: singular/plural and the tier move");
+  const rowHit = { ...sHit, status: "won" as const, at: Date.UTC(2026, 8, 15, 18) };
+  ok(n293sRowMeta(rowHit) === "Lakefront HS · EST-1005 · Won · Sep 15, 2026" && n293sRowCounts(sHit) === "3 lines · 2 key products",
+    "#293s rows: customer · EST · Won|Sent · date, then line and key-product counts");
+
+  // ---- Merge narrative ----
+  const target = sec("t", "Target", [it(10, "ETC-S4"), it(11, "SPK"), it(12, "OPT", { option: true }), it(13, "SPK")], {
+    narrative: "Existing intro.", keyProducts: [{ lineKey: "11", sku: "SPK", text: "mine", photo: true }],
+  });
+  const S1 = { systemName: "A", intro: "Our lighting.", keyProducts: [
+    { sku: "ETC-S4", text: "S4 para", photo: false }, { sku: "SPK", text: "x", photo: true },
+    { sku: "OPT", text: "o", photo: true }, { sku: "NOPE", text: "n", photo: true },
+  ] };
+  const S2 = { systemName: "B", intro: "  Our \n lighting. ", keyProducts: [{ sku: "ETC-S4", text: "again", photo: true }] };
+  const S3 = { systemName: "C", intro: "Second intro.", keyProducts: [] };
+  const m = n293sMerge(target, [S1, S2, S3], { intro: true, products: true });
+  ok(m.section.narrative === "Existing intro.\n\nOur lighting.\n\nSecond intro." && m.introsAppended === 2,
+    "#293s merge: intros append after a blank line; one already present (after whitespace normalization) is skipped");
+  ok(eq(m.section.keyProducts, [{ lineKey: "11", sku: "SPK", text: "mine", photo: true }, { lineKey: "10", sku: "ETC-S4", text: "S4 para", photo: false }]) && m.productsAdded === 1,
+    "#293s merge: a block anchors to the first eligible unmarked line with its sku, carrying text and photo");
+  ok(eq(m.skippedPresent, ["SPK", "ETC-S4"]) && eq(m.skippedNoLine, ["OPT", "NOPE"]) && m.skippedFull.length === 0,
+    "#293s merge: already featured → skippedPresent; no eligible line (an option, or absent) → skippedNoLine — never invented");
+  ok(n293sMergeNotice(m) === "Added intro from 2 systems · 1 key product · skipped 2 already featured · 2 not on this system (add the part first): OPT, NOPE",
+    "#293s merge: the notice reads as the spec writes it");
+  ok(n293sMergeNotice({ ...m, introsAppended: 2, productsAdded: 4, skippedPresent: ["a", "b"], skippedNoLine: ["X", "Y", "Z"], skippedFull: [], introsTooLong: 0 }) ===
+    "Added intro from 2 systems · 4 key products · skipped 2 already featured · 3 not on this system (add the part first): X, Y, Z", "#293s merge: the spec's example notice");
+  ok(n293sMerge(sec("e", "E", [it(1, "A")]), [S3], { intro: true, products: true }).section.narrative === "Second intro.", "#293s merge: into an empty narrative, no leading blank line");
+  const introOff = n293sMerge(target, [S1], { intro: false, products: true });
+  const prodOff = n293sMerge(target, [S1], { intro: true, products: false });
+  ok(introOff.section.narrative === "Existing intro." && introOff.productsAdded === 1 && eq(prodOff.section.keyProducts, target.keyProducts) && prodOff.introsAppended === 1,
+    "#293s merge: Intro and Key products can each be turned off");
+  const fullItems = Array.from({ length: 21 }, (_, i) => it(i + 1, "F" + i));
+  const full = sec("f", "Full", fullItems, { keyProducts: fullItems.slice(0, 20).map((x) => ({ lineKey: String(x.id), sku: x.sku, text: "", photo: true })) });
+  const fm = n293sMerge(full, [{ systemName: "X", intro: "", keyProducts: [{ sku: "F20", text: "t", photo: true }] }], { intro: true, products: true });
+  ok(eq(fm.skippedFull, ["F20"]) && fm.skippedNoLine.length === 0 && !fm.changed && /over the 20-product limit/.test(n293sMergeNotice(fm)),
+    "#293s merge: at MAX_KEY_PRODUCTS the overflow is reported as over the limit, not as a missing part");
+  const same = n293sMerge(target, [{ systemName: "Y", intro: "Existing intro.", keyProducts: [{ sku: "SPK", text: "", photo: true }] }], { intro: true, products: true });
+  ok(!same.changed && same.section === target && n293sMergeNotice({ ...same, skippedPresent: [] }) === "Nothing to merge — this system already has it all",
+    "#293s merge: nothing to add → the same object, changed false");
+  const long = n293sMerge(sec("g", "G", [it(1, "A")], { narrative: "x".repeat(7990) }), [{ systemName: "L", intro: "y".repeat(20), keyProducts: [] }], { intro: true, products: false });
+  ok(long.introsTooLong === 1 && !long.changed, "#293s merge: an intro that would push the narrative past MAX_INTRO is skipped and counted");
+
+  // ---- client-safety of the pure modules ----
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const serverImport = (src: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/session|lib\/blob|lib\/narrative\/(library|photos|system-library-index|load-system))/m.test(src);
+  ok(!serverImport(rd("src/lib/narrative/system-library.ts")) && !serverImport(rd("src/lib/narrative/merge.ts")),
+    "#293s pure: system-library.ts and merge.ts value-import no store, db, session, blob or server-only narrative module (client-safe)");
+}
+
+/* ======================================================================
+   #293 slice 2 — server: the copy-pricing helper shared by Copy and Load,
+   the Load core (re-reads the quote, re-prices, drops vendor lines), the
+   index cache and its invalidation, and the three library actions.
+   ====================================================================== */
+import { systemLibraryIndex as n293sIndex, invalidateSystemLibrary as n293sInvalidate } from "@/lib/narrative/system-library-index";
+import { loadLibrarySystem as n293sLoad } from "@/lib/narrative/load-system";
+import {
+  create as n293sQCreate, update as n293sQUpdate, addQuoteRevision as n293sQAddRev, remove as n293sQRemove,
+} from "@/lib/stores/quotes";
+import { mergeUpsert as n293sMergeUpsert } from "@/lib/stores/catalog";
+import { tierSeedPrice as n293sSeed } from "@/app/(app)/estimator/tier-reprice";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("), acts.indexOf("\n}\n", acts.indexOf("export async function copySystemToEstimateAction(")));
+  ok(copyFn.includes("const { catalog, fixtures } = await copyPricingFor(items);") && !copyFn.includes("listFixtures(") && copyFn.includes("copySectionForTarget(sanitizeSystemSell(section),"),
+    "#293s copy-pricing: Copy system loads today's catalog + fixtures through the shared copyPricingFor helper");
+  const cp = rd("src/app/(app)/estimator/copy-pricing.ts");
+  ok(cp.includes("export async function copyPricingFor(") && cp.includes("allAssembliesFrom(fixtureRecords, parts)") && cp.includes("c.found && (c.cost > 0 || c.costOverride !== undefined)"),
+    "#293s copy-pricing: the helper keeps #266's fixture resolution and the missing-part fallback");
+  const ls = rd("src/lib/narrative/load-system.ts");
+  ok(ls.includes("copyPricingFor(picked.section.items)") && ls.includes("copySectionForTarget(sanitizeSystemSell(picked.section),") && ls.includes("invalidateSystemLibrary()"),
+    "#293s load: Load re-prices through the same helper + copySectionForTarget, and a gone key invalidates the index");
+  const la = rd("src/app/(app)/estimator/library-actions.ts");
+  ok(/^"use server";/.test(la) && ["searchSystemLibraryAction", "getSystemLibraryEntryAction", "loadLibrarySystemAction"].every((f) => la.includes(`export async function ${f}(`)) &&
+     (la.match(/await requireUser\(\);/g) || []).length === 3 && !la.includes("requirePerm("),
+    "#293s actions: the three library actions are server actions, each behind requireUser (spec §4.1)");
+  ok(la.includes(".map(toLibraryHit)") && la.includes("LIBRARY_QUERY_MAX"), "#293s actions: search answers hits only (no text bodies) and caps the query");
+  ok(la.includes("limit: LIBRARY_SEARCH_LIMIT") && !/limit:\s*opts/.test(la),
+    "#293s actions: search passes the pure search a fixed finite integer limit (never a client-supplied or NaN one)");
+  const qs = rd("src/lib/stores/quotes.ts");
+  const setStatusFn = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("async function reconcileRewardsSafely("));
+  const removeFn = qs.slice(qs.indexOf("export async function remove("), qs.indexOf("\n}\n", qs.indexOf("export async function remove(")));
+  ok(setStatusFn.includes("if (out && moved.value) await invalidateSystemLibrarySafely();") && removeFn.includes("await invalidateSystemLibrarySafely();"),
+    "#293s index: every real status transition and a quote delete invalidate the library");
+  ok(qs.includes('await import("@/lib/narrative/system-library-index")'), "#293s index: quotes.ts reaches the index by dynamic import (no import cycle)");
+  const ix = rd("src/lib/narrative/system-library-index.ts");
+  ok(ix.includes("const TTL_MS = 5 * 60 * 1000;") && ix.includes("generation++"), "#293s index: a 5-minute per-process cache with a generation guard (portalIndex idiom)");
+}
+
+async function systemLibrary293sAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "lib-part");
+  const QID = fixtureId(293, "lib-sent");
+  const QDRAFT = fixtureId(293, "lib-draft");
+  const QWON = fixtureId(293, "lib-won-gone");
+  await n293sMergeUpsert(P, { desc: "Test293 Lib part", category: "Test293 Cat", unit: "ea", list: 200, cost: 120 });
+  registerFixture("catalog_parts", P);
+  const seeded = n293sSeed({ cost: 100 }, 0.3);
+  const section = {
+    id: "sysLib", name: "Test293 Library Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
+    presentation: "narrative", narrative: "Library intro 293.", room: "Stage left",
+    items: [
+      { id: 1, sku: P, desc: "Lib part", qty: 2, unit: "ea", cost: 100, price: seeded },
+      { id: 2, sku: "VQ-293", desc: "Vendor gear", qty: 1, unit: "ea", cost: 50, price: 80, vendorQuoteId: "vq-293" },
+    ],
+    keyProducts: [{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }],
+  } as unknown as N293sSec;
+
+  // A sent quote, then a post-send edit that must never reach the library.
+  await n293sQCreate({ id: QID, name: "#293 lib", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QID);
+  await n293sQUpdate(QID, { status: "sent" });
+  await n293sQAddRev(QID, { by: "Test", reason: "sent", note: "Sent to customer" });
+  await n293sQUpdate(QID, { spec: { sections: [{ ...section, name: "Test293 Edited after send", narrative: "Leaked" }], mobs: [] } });
+  // A draft with the same system.
+  await n293sQCreate({ id: QDRAFT, name: "#293 lib draft", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [{ ...section, name: "Test293 Draft only" }], mobs: [] } });
+  registerFixture("quotes", QDRAFT);
+
+  n293sInvalidate();
+  const idx = await n293sIndex();
+  const mine = idx.filter((e) => e.quoteId === QID);
+  ok(mine.length === 1 && mine[0].key === `${QID}:1:sysLib` && mine[0].systemName === "Test293 Library Lighting" && mine[0].intro === "Library intro 293.",
+    "#293s index (DB): a sent quote edited after send is indexed from its sent revision");
+  ok(!idx.some((e) => e.quoteId === QDRAFT) && !idx.some((e) => e.systemName === "Test293 Edited after send"), "#293s index (DB): drafts and post-send edits never appear");
+
+  // The cache holds until invalidated; quotes.remove() invalidates on its own.
+  await n293sQCreate({ id: QWON, name: "#293 lib won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QWON);
+  await n293sQUpdate(QWON, { status: "won" });
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): a cached index doesn't see a quote written without a status transition");
+  n293sInvalidate();
+  ok((await n293sIndex()).some((e) => e.key === `${QWON}:live:sysLib`), "#293s index (DB): after invalidation a won-without-send quote is indexed from its live spec");
+
+  // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
+  const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
+  ok(r.ok && r.section.items.length === 1 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesDropped === 1,
+    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line left out");
+  ok(r.ok && r.section.name === "Test293 Library Lighting" && r.section.narrative === "Library intro 293." && r.section.presentation === "narrative" &&
+     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
+    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry; the vendor line's block and the room don't");
+  ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
+  const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
+  ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
+  ok(!(await n293sLoad("garbage", 0.2)).ok, "#293s load (DB): a malformed key is refused");
+  // Final review: warm the index right before remove(), so the drop below is remove()'s own invalidation.
+  ok((await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): the won quote is listed in a warm index right before remove()");
+  await n293sQRemove(QWON);
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): deleting a quote drops it from the library (remove invalidates)");
+  const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2);
+  ok(!gone.ok && gone.error === "That estimate is no longer available", "#293s load (DB): a deleted quote's entry is refused with the spec's message");
+}
+
+/* ======================================================================
+   #293 slice 2 — library modal + Load wiring (client components; proven
+   by source like the other client checks — React isn't mounted here).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const clientImportsServer = (s: string) =>
+    /^import (?!type)[^\n]*from "(@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/narrative\/(library|photos|system-library-index|load-system))|\.\/copy-pricing)/m.test(s);
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/^"use client";/.test(modal) && !clientImportsServer(modal) && !clientImportsServer(cli),
+    "#293s UI: the library modal is a client module; neither it nor the Estimator value-imports a store or server-only module");
+  ok(modal.includes("searchSystemLibraryAction(") && modal.includes("getSystemLibraryEntryAction(") && modal.includes("loadLibrarySystemAction(") && modal.includes("Has narrative"),
+    "#293s UI: the modal searches, reads one entry for the detail pane, and loads; the Has narrative chip filters");
+  ok(modal.includes("libraryRowMeta(h)") && modal.includes("libraryRowCounts(h)") && modal.includes("No sent or won systems match.") && modal.includes("Pick a system to see its intro and key products."),
+    "#293s UI: rows show customer · EST · status · date and counts; empty states");
+  ok(modal.includes("Re-priced at today's catalog and this estimate's tier. Vendor-quote lines are left out.") && modal.includes("Load system"),
+    "#293s UI: Load says how it prices");
+  ok(modal.includes("mergeNarrative(p.target, sources, opts)") && modal.includes("mergeNotice(preview)") && modal.includes("Tick one or more systems to merge.") && modal.includes(">Merge<"),
+    "#293s UI: merge mode previews with mergeNarrative before applying");
+  ok((modal.match(/\} catch \{/g) || []).length >= 3 && !modal.includes("window.confirm"), "#293s UI: every server await in the modal is caught (a throw can't unmount the Estimator)");
+  ok(cli.includes("+ From library…") && cli.includes("<SystemLibraryModal") && cli.includes('mode="load"') && cli.includes("tierMargin={tierMargin}"),
+    "#293s UI: + From library… opens the modal in load mode with this estimate's tier");
+  const place = cli.slice(cli.indexOf("const placeLibrarySystem = "), cli.indexOf("const pushItems = "));
+  ok(place.includes("placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct })") && place.includes("selectSystem(newId)") && place.includes('verb: "Loaded"') && place.includes("loadNotice(res)"),
+    "#293s UI: a loaded system gets fresh ids (blocks remapped), lands after the active system, is selected, and the notice reports the re-price");
+  ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded";') && cli.includes('moveNotice.ok && moveNotice.verb === "Loaded" ?'), "#293s UI: the result banner shows the Load notice");
+}
+
+/* ======================================================================
+   #293 slice 2 — library modal review fixes (a failed first search, a
+   failed entry fetch, and a Load closed mid-flight).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  const list = modal.slice(modal.indexOf('aria-label="Library systems"'), modal.indexOf('aria-label="Selected system"'));
+  ok(modal.includes("setSearchFailed(true)") && modal.includes("}, [query, hasNarrative, attempt]);") &&
+    list.includes("searchFailed ?") && list.indexOf("searchFailed ?") < list.indexOf("hits === null ?") && list.includes("setAttempt((n) => n + 1)") && list.includes("Retry"),
+    "#293s modal fix: a failed search shows a Retry state in the list instead of a stuck Searching…");
+  const fc = modal.slice(modal.indexOf("const focus = "), modal.indexOf("const toggle = "));
+  const fcCatch = fc.slice(fc.indexOf("} catch {"));
+  ok(fcCatch.includes("setPicked((ks) => ks.filter((k) => k !== key))") && fcCatch.includes("setFocusKey((f) => (f === key ? null : f))") && fcCatch.includes("setErr(FAILED)") &&
+    (fc.match(/setFocusKey\(\(f\) => \(f === key \? null : f\)\)/g) || []).length >= 2,
+    "#293s modal fix: a failed or gone entry fetch unticks the row and clears the detail pane (no Loading… forever, Merge never pinned)");
+  ok(modal.includes('if (e.key === "Escape" && !pending) p.onClose();') && (modal.match(/disabled=\{pending\} onClick=\{p\.onClose\}/g) || []).length >= 3,
+    "#293s modal fix: Close, Cancel and Esc are disabled while a Load is in flight, so a cancelled Load can't land after the modal closed");
+}
+
+/* ======================================================================
+   #293 slice 2 — Merge narrative wiring (narrative column ⋯ menu; the
+   card has no ⋯ menu, so the column that owns the narrative hosts it).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  ok(col.includes("Merge narrative from library…") && col.includes('<SystemLibraryModal mode="merge" target={sec}'),
+    "#293s merge UI: ⋯ → Merge narrative from library… opens the library in merge mode for this system");
+  const apply = col.slice(col.indexOf("const applyMerge = "), col.indexOf("return (", col.indexOf("const applyMerge = ")));
+  ok(apply.includes("p.onChange((s) => mergeNarrative(s, sources, opts).section)") && apply.includes("setNotice(mergeNotice(r))") && apply.includes("if (r.changed)"),
+    "#293s merge UI: applies through onChange on the live section (setSections) and reports what was added and skipped");
+  ok(/^"use client";/.test(col) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos|system-library-index|load-system))/m.test(col),
+    "#293s merge UI: the column still imports no server-only module");
+}
+
+/* ======================================================================
+   #293 slice 2 — final review fixes: customer-built portal quotes stay out
+   of the library; a loaded section never keeps another venue's freight;
+   setStatus and remove() really invalidate (checked against a WARM index);
+   a malformed Load key leaves the index warm; a no-tier target prices at
+   the Estimator's fallback seed, not the source customer's tier.
+   ====================================================================== */
+import { setStatus as n293fSetStatus } from "@/lib/stores/quotes";
+import { TIER_FALLBACK_MARGIN as n293fFallback, usableTierMargin as n293fUsable } from "@/app/(app)/estimator/tier-reprice";
+{
+  const it = (id: number, sku: string, extra: Partial<N293sItem> = {}): N293sItem =>
+    ({ id, sku, desc: "Desc " + sku, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293sItem);
+  const sec = (id: string, name: string, items: N293sItem[], extra: Partial<N293sSec> = {}): N293sSec =>
+    ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const sentRev = (sections: N293sSec[]) =>
+    ({ rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "Rev 1", value: 0, margin: 0, status: "sent", tierMargin: 0.3, spec: { sections, mobs: [] } });
+  const quote = (id: string, source: string, extra: Record<string, unknown> = {}): N293sQuote =>
+    ({ id, name: "Quote " + id, customer: "C", customerId: null, locationId: null, value: 0, margin: 0, status: "sent",
+       source, quoteType: "system", owner: "t", createdAt: 1, updatedAt: 1000, spec: null,
+       revisions: [sentRev([sec("s1", "Portal system", [it(1, "PART-1")])])], ...extra } as unknown as N293sQuote);
+
+  ok(!!n293sSource(quote("Qest", "estimator")), "#293s final: control — a sent estimator system quote IS in the library");
+  ok(n293sSource(quote("Qpc", "portal-catalog")) === null, "#293s final: a sent portal-catalog (customer-built) quote is not indexed");
+  ok(n293sSource(quote("Qps", "portal-service")) === null && n293sSource(quote("Qps2", "portal-service", { quoteType: "flame_test" })) === null,
+    "#293s final: a sent portal-service (customer-built) quote is not indexed");
+  ok(n293sSource(quote("Qpw", "portal-catalog", { status: "won" })) === null && n293sSource(quote("Qss", "portal-self-serve")) === null,
+    "#293s final: a won portal-catalog quote and a legacy portal-self-serve quote are not indexed either");
+  ok(n293sEntries([quote("Qpc", "portal-catalog"), quote("Qps", "portal-service"), quote("Qest", "estimator")], new Map()).every((e) => e.quoteId === "Qest"),
+    "#293s final: the library lists the estimator quote and neither portal quote");
+
+  const withMiles = quote("Qmi", "estimator", {
+    revisions: [sentRev([sec("s1", "Copied from a portal quote", [it(1, "PART-1")], { freightPct: 7, freightAuto: false, freightMiles: 412 })])],
+  });
+  const lm = n293sForLoad(withMiles, "s1");
+  ok(!!lm && lm.section.freightAuto === true && !("freightMiles" in lm.section),
+    "#293s final: a section carrying freightMiles loads with freightAuto true and no freightMiles (no other venue's freight)");
+  const noMiles = quote("Qnm", "estimator", { revisions: [sentRev([sec("s1", "Hand freight", [it(1, "PART-1")], { freightPct: 7, freightAuto: false })])] });
+  const ln = n293sForLoad(noMiles, "s1");
+  ok(!!ln && ln.section.freightAuto === false && ln.section.freightPct === 7, "#293s final: control — a section without freightMiles keeps its own freight settings");
+
+  ok(n293fUsable(0.2) === 0.2 && n293fUsable(null) === null && n293fUsable(0) === null && n293fUsable(1) === null && n293fUsable(NaN) === null && n293fUsable("0.2") === null,
+    "#293s final: the shared usableTierMargin keeps its rule (0 < m < 1, finite number)");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const ls = rd("src/lib/narrative/load-system.ts");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  ok(ls.includes("usableTierMargin(targetTierMargin) ?? TIER_FALLBACK_MARGIN") && !ls.includes("const usableTier") &&
+     !acts.includes("const usableTierMargin") && acts.includes("usableTierMargin } from \"./tier-reprice\""),
+    "#293s final: Load and Copy share one usableTierMargin; Load falls back to TIER_FALLBACK_MARGIN");
+  const malformed = ls.indexOf("if (!k) return { ok: false, error: LIBRARY_GONE };");
+  ok(malformed > 0 && malformed < ls.indexOf("invalidateSystemLibrary();"), "#293s final: a malformed key returns before the gone-key invalidation");
+}
+
+async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "lib-final-part");
+  const QW = fixtureId(293, "lib-final-won");
+  const QPC = fixtureId(293, "lib-final-portal-catalog");
+  const QPS = fixtureId(293, "lib-final-portal-service");
+  await n293sMergeUpsert(P, { desc: "Test293 Final part", category: "Test293 Cat", unit: "ea", list: 200, cost: 120 });
+  registerFixture("catalog_parts", P);
+  const section = {
+    id: "sysFin", name: "Test293 Final Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
+    items: [{ id: 1, sku: P, desc: "Final part", qty: 2, unit: "ea", cost: 100, price: n293sSeed({ cost: 100 }, 0.2) }],
+  } as unknown as N293sSec;
+
+  // ---- setStatus invalidates on its own: warm (absent) → real draft→won → listed, no explicit invalidate ----
+  await n293sQCreate({ id: QW, name: "#293 final won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.2, spec: { sections: [section], mobs: [] } });
+  registerFixture("quotes", QW);
+  n293sInvalidate();
+  const warm = await n293sIndex();
+  ok(!warm.some((e) => e.quoteId === QW) && (await n293sIndex()) === warm, "#293s final (DB): the index is warm and the draft fixture is absent");
+  await n293fSetStatus(QW, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+  const afterWon = await n293sIndex();
+  ok(afterWon !== warm && afterWon.some((e) => e.key === `${QW}:live:sysFin`),
+    "#293s final (DB): a real setStatus(won) invalidates the warm index — the quote appears without an explicit invalidate");
+
+  // ---- a malformed key leaves a warm index warm; a parsed-but-gone key invalidates ----
+  const warm2 = await n293sIndex();
+  const bad1 = await n293sLoad("garbage", 0.2);
+  const bad2 = await n293sLoad("a:b:c:d", 0.2);
+  ok(!bad1.ok && !bad2.ok && (await n293sIndex()) === warm2, "#293s final (DB): a malformed key is refused and the warm index stays cached");
+  const goneKey = await n293sLoad(`${fixtureId(293, "lib-final-never")}:live:sysFin`, 0.2);
+  ok(!goneKey.ok && goneKey.error === n293sGone && (await n293sIndex()) !== warm2, "#293s final (DB): control — a parsed key whose quote is gone does invalidate");
+
+  // ---- a target with no tier prices at the Estimator's fallback seed, not the source's 0.2 ----
+  const nt = await n293sLoad(`${QW}:live:sysFin`, null);
+  ok(nt.ok && nt.section.items[0].cost === 120 && nt.section.items[0].price === n293sSeed({ cost: 120 }, n293fFallback) &&
+     nt.section.items[0].price !== n293sSeed({ cost: 120 }, 0.2) && nt.tierRepriced === 1,
+    `#293s final (DB): Load into a no-tier estimate prices at TIER_FALLBACK_MARGIN (${n293fFallback}), not the source customer's 0.2`);
+
+  // ---- remove() invalidates on its own: warm (listed) → remove → gone ----
+  const warm3 = await n293sIndex();
+  ok(warm3.some((e) => e.quoteId === QW) && (await n293sIndex()) === warm3, "#293s final (DB): the won fixture is listed in a warm index before remove()");
+  await n293sQRemove(QW);
+  ok(!(await n293sIndex()).some((e) => e.quoteId === QW), "#293s final (DB): remove() drops it from the warm index without an explicit invalidate");
+
+  // ---- customer-built portal quotes, sent, are never indexed ----
+  for (const [id, source] of [[QPC, "portal-catalog"], [QPS, "portal-service"]] as const) {
+    await n293sQCreate({ id, name: "#293 final " + source, customer: "Spec fixture", owner: "spec", quoteType: "system", source, tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+    registerFixture("quotes", id);
+    await n293sQUpdate(id, { status: "sent" });
+    await n293sQAddRev(id, { by: "Test", reason: "sent", note: "Sent to customer" });
+  }
+  n293sInvalidate();
+  const pidx = await n293sIndex();
+  ok(!pidx.some((e) => e.quoteId === QPC) && !pidx.some((e) => e.quoteId === QPS), "#293s final (DB): sent portal-catalog and portal-service quotes are not in the library");
+  const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3);
+  ok(!pl.ok && pl.error === n293sGone, "#293s final (DB): a portal quote's system can't be loaded by key");
+}
+
+/* ============================================================================
+   Merge #292 × #293 slice 2 — Load system re-keys curtain/track pairs. A
+   loaded system rides copySectionForTarget (load-system.ts) and then
+   placeLoadedSection's re-id, so its pairs get a fresh shared key and can't
+   collide with a pair already in the target estimate (e.g. the very system
+   it was saved from).
+   ============================================================================ */
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const src = c292Sec("sysA", [
+    { id: 1, curtain: true, desc: C292_DESC, qty: 1, curtainTrackKey: "ct-1" },
+    { id: 2, track: { ...C292_TRACK }, curtainTrackKey: "ct-1" },
+  ]);
+  const loaded = f292Copy(src, { newSectionId: "sysL", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 }).section;
+  let nid = 200;
+  const placed = n293sPlace(loaded, { id: "sys999", nextId: () => ++nid, autoFreightPct: 0 });
+  const links = f292Link([src, placed]);
+  ok(placed.items[0].curtainTrackKey !== "ct-1" && placed.items[0].curtainTrackKey === placed.items[1].curtainTrackKey
+    && placed.items[0].id === 201 && placed.items[1].id === 202
+    && links.links.get(src.items[0]) === src.items[1] && links.links.get(placed.items[0]) === placed.items[1] && links.duplicates.length === 0,
+    "Merge #292x293s Load: a loaded system's curtain/track pair gets a fresh shared key through the re-id, and neither it nor the existing pair loses its track");
+  ok(/copySectionForTarget\(sanitizeSystemSell\(picked\.section\)/.test(rd("src/lib/narrative/load-system.ts")),
+    "Merge #292x293s Load: loadLibrarySystem builds the loaded section through copySectionForTarget (which re-keys pairs)");
+}
+
+/* ======================================================================
+   #293 slice 3 — pure rules: the share token, the online-estimate state,
+   the sent-version view of a quote, the BOM view, the client-IP helper
+   and the revision docFields annex.
+   ====================================================================== */
+import {
+  SHARE_DEFAULT_TTL_MS as n293tTtl, SHARE_MAX_TTL_MS as n293tMaxTtl, SHARE_TOKEN_RE as n293tTokenRe,
+  newShareNonce as n293tNonce, signShareToken as n293tSign, verifyShareToken as n293tVerify,
+} from "@/lib/quote-share/token";
+import {
+  onlineEstimateState as n293tState, shareEligibility as n293tElig, quoteAsOfRevision as n293tAsOf,
+  onlineHeaderLine as n293tHeader, sharePath as n293tPath, onlineView as n293tView, ONLINE_COPY as n293tCopy,
+} from "@/lib/quote-share/view";
+import { bomViewProps as n293tBom, offersBomView as n293tOffersBom } from "@/app/(app)/estimator/quote-document-view";
+import { clientIp as n293tIp, clientIpFromHeaders as n293tIpH } from "@/lib/rate-limit";
+import { signPrintToken as n293tSignPrint, verifyPrintToken as n293tVerifyPrint } from "@/lib/quote-pdf/token";
+import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type QuoteRevision as N293tRev } from "@/lib/stores/quotes";
+{
+  const S = "test-secret-293t";
+  const NOW = 1_800_000_000_000;
+
+  // ---- token ----
+  const nonce = n293tNonce();
+  ok(/^[A-Za-z0-9_-]{43}$/.test(nonce) && n293tNonce() !== nonce, "#293t token: a nonce is 32 random bytes, base64url, fresh each call");
+  ok(n293tTtl === 60 * 86_400_000 && n293tMaxTtl === 366 * 86_400_000, "#293t token: 60-day default, 366-day ceiling");
+  const exp = NOW + n293tTtl;
+  const stored = { nonce, expiresAt: exp };
+  const tok = n293tSign(S, "Q-1", nonce, exp);
+  ok(n293tTokenRe.test(tok) && tok.startsWith(exp + "."), "#293t token: <exp>.<43-char base64url MAC>");
+  ok(n293tVerify(S, tok, "Q-1", stored, NOW) && n293tVerify(S, tok, "Q-1", stored, exp), "#293t token: sign → verify (valid up to and including exp)");
+  ok(!n293tVerify(S, tok, "Q-2", stored, NOW), "#293t token: another quote id ✗");
+  ok(!n293tVerify(S, tok, "Q-1", { nonce: n293tNonce(), expiresAt: exp }, NOW), "#293t token: a rotated nonce ✗");
+  ok(!n293tVerify(S, tok, "Q-1", { nonce, expiresAt: 0 }, NOW), "#293t token: revoked (expiresAt 0) ✗");
+  ok(!n293tVerify(S, tok, "Q-1", { nonce, expiresAt: exp + 1 }, NOW), "#293t token: exp ≠ stored expiry ✗");
+  ok(!n293tVerify(S, tok, "Q-1", stored, exp + 1), "#293t token: expired ✗");
+  const far = NOW + n293tMaxTtl + 1;
+  ok(!n293tVerify(S, n293tSign(S, "Q-1", nonce, far), "Q-1", { nonce, expiresAt: far }, NOW), "#293t token: a TTL over 366 days ✗");
+  const mac = tok.split(".")[1];
+  ok(!n293tVerify(S, exp + "." + (mac[0] === "A" ? "B" : "A") + mac.slice(1), "Q-1", stored, NOW), "#293t token: a tampered MAC ✗");
+  ok(["", "abc", exp + ".short", "x" + tok, "0" + tok, "00" + tok, tok + "A", tok.replace(".", "-")].every((t) => !n293tVerify(S, t, "Q-1", stored, NOW)), "#293t token: malformed tokens ✗");
+  ok(!n293tVerify(S, tok, "Q-1", stored, NaN) && !n293tVerify(S, tok, "Q-1", stored, Infinity), "#293t token: a non-finite clock fails closed");
+  ok(!n293tVerify("", tok, "Q-1", stored, NOW) && !n293tVerify(S, tok, "Q-1", null, NOW) && !n293tVerify("other-secret", tok, "Q-1", stored, NOW) &&
+     !n293tVerify(S, tok, "Q-1", { nonce: "", expiresAt: exp }, NOW),
+    "#293t token: no secret, no stored link, the wrong secret or an empty nonce ✗");
+  const printTok = n293tSignPrint(S, "quote", "Q-1", NOW);
+  ok(!n293tVerify(S, printTok, "Q-1", { nonce, expiresAt: Number(printTok.split(".")[0]) }, NOW),
+    "#293t token: a print token never verifies as a share token, even with the stored expiry forced to match");
+  ok(!n293tVerifyPrint(S, n293tSign(S, "Q-1", nonce, NOW + 60_000), "quote", "Q-1", NOW), "#293t token: a share token never verifies as a print token");
+  ok(n293tPath("Q-1", tok) === "/share/quote/Q-1/" + tok, "#293t token: the share path");
+
+  // ---- online state ----
+  const rev = (n: number, reason: "manual" | "sent", at: number, extra: Record<string, unknown> = {}) =>
+    ({ rev: n, at, by: "t", reason, note: "", name: "Sent name", value: 500, margin: 0.3, status: "sent", spec: { sections: [{ id: "rev" + n }] }, ...extra }) as unknown as N293tRev;
+  const quote = (status: string, revisions: N293tRev[], extra: Record<string, unknown> = {}) =>
+    ({ id: "Q-9", name: "Live name", customer: "Walk-in", customerId: "c1", locationId: "loc-live", value: 900, margin: 0.2, status, source: "estimator",
+       quoteType: "system", owner: "Live Owner", createdAt: 1, updatedAt: 9_000, history: [], review: {}, spec: { sections: [{ id: "live" }] },
+       quoteNote: "Live note", pdfOptions: { detail: "itemized" }, vendorQuotes: [{ id: "vq-live" }], revisions, ...extra }) as unknown as N293tQuote;
+  const sent = rev(2, "sent", 5000);
+  const revs = [rev(1, "manual", 1000), sent, rev(3, "manual", 7000)];
+  ok(n293tState(quote("draft", [])).kind === "unavailable" && n293tState(quote("sent", [rev(1, "manual", 1)])).kind === "unavailable",
+    "#293t state: never sent (no sent revision) → unavailable");
+  const st = n293tState(quote("sent", revs));
+  ok(st.kind === "ok" && st.rev.rev === 2 && !st.closed, "#293t state: sent → ok on the LATEST SENT revision, never a later manual one");
+  const lost = n293tState(quote("lost", revs));
+  const won = n293tState(quote("won", revs));
+  ok(lost.kind === "ok" && lost.closed && won.kind === "ok" && !won.closed, "#293t state: lost → ok + closed; won → ok, no banner");
+  ok(n293tState(quote("draft", revs)).kind === "revising", "#293t state: recalled to draft after a send → revising");
+  ok(["flame_test", "repair", "inspection", "consulting", "rental"].every((t) => n293tState(quote("sent", revs, { quoteType: t })).kind === "unavailable") &&
+     n293tState(quote("sent", revs, { quoteType: undefined })).kind === "ok",
+    "#293t state: service, consulting and rental quotes → unavailable; an absent quoteType is a system quote");
+  ok(n293tElig(quote("sent", revs)) === "ok" && n293tElig(quote("draft", revs)) === "revising" && n293tElig(quote("draft", [])) === "not-sent" &&
+     n293tElig(quote("sent", revs, { quoteType: "flame_test" })) === "not-shareable",
+    "#293t eligibility: ok / revising / not-sent / not-shareable");
+
+  // ---- the sent version of a quote ----
+  const df = { customer: "Sent Cust", locationId: "loc-sent", contactName: "Sent Contact", quoteNote: "Sent note", assumptions: "Sent assumptions",
+    installTimeframe: "Q4", preparedBy: "Sent Preparer", owner: "Sent Owner", termsText: "Sent terms", paymentTerms: "Net 30",
+    pdfOptions: { detail: "sectioned" }, portalFirm: null, source: "estimator" };
+  // Final fix 1: the Rev/date stamp the PDF copy freezes (here the PDF printed Rev 2, dated 5001 — one ms after the revision's own `at`, 5000, so frozen and derived differ).
+  const withDf = rev(2, "sent", 5000, { docFields: { ...df, revNo: 2, issuedAt: 5001 }, spec: { sections: [{ id: "sentSec" }] }, vendorQuotes: [{ id: "vq-sent" }] });
+  const live = quote("sent", [rev(1, "manual", 1000), withDf, rev(3, "manual", 7000)], { shareLink: { nonce: "N", expiresAt: 1, createdAt: 1, createdBy: "x" } });
+  const a = n293tAsOf(live, withDf);
+  ok(a.name === "Sent name" && a.value === 500 && (a.spec as { sections: { id: string }[] }).sections[0].id === "sentSec" &&
+     (a.vendorQuotes as { id: string }[])[0].id === "vq-sent" && a.updatedAt === 5001 && a.revisions?.length === 2,
+    "#293t as-sent: the revision's name, spec, vendor quotes and value win over the live quote; its date and rev number are the frozen PDF stamp (docFields revNo/issuedAt)");
+  ok(a.quoteNote === "Sent note" && a.owner === "Sent Owner" && a.preparedBy === "Sent Preparer" && a.locationId === "loc-sent" &&
+     (a.pdfOptions as { detail: string }).detail === "sectioned",
+    "#293t as-sent: docFields win over the live header fields");
+  ok(a.shareLink === null, "#293t as-sent: the share link never rides into the document data");
+  const b = n293tAsOf(live, sent);
+  ok(b.quoteNote === "Live note" && (b.pdfOptions as { detail: string }).detail === "itemized" && b.name === "Sent name",
+    "#293t as-sent: a revision cut before #293 (no docFields) reads the live header and the revision's body");
+  ok(live.quoteNote === "Live note" && live.revisions?.length === 3 && live.name === "Live name", "#293t as-sent: the live quote is never mutated");
+  const day = new Date(5001).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
+  ok(n293tHeader({ ...live, estNo: 1005 } as N293tQuote, withDf) === "EST-1005 · Rev 2 · sent " + day, "#293t header: EST-#### · Rev N · sent <date>");
+  ok(n293tView("bom") === "bom" && n293tView(["bom", "x"]) === "bom" && n293tView("x") === "narrative" && n293tView(undefined) === "narrative",
+    "#293t view param: ?view=bom, anything else is the narrative");
+
+  // ---- revision docFields ----
+  const frozen = n293tDocFields({ ...live, contactName: undefined, paymentTerms: "Net 30", termsText: "T", portalFirm: { generatedAt: 1, validUntil: 2 } } as unknown as N293tQuote);
+  ok(frozen.quoteNote === "Live note" && frozen.owner === "Live Owner" && frozen.locationId === "loc-live" && frozen.paymentTerms === "Net 30" &&
+     frozen.termsText === "T" && frozen.portalFirm?.validUntil === 2 && frozen.source === "estimator" && (frozen.pdfOptions as { detail: string } | null)?.detail === "itemized",
+    "#293t docFields: the printed header fields are copied");
+  ok(frozen.contactName === null, "#293t docFields: an absent contact freezes as null (the document then uses the primary contact, as live)");
+  const bare = n293tDocFields({ id: "Q-x", customer: "", status: "draft" } as unknown as N293tQuote);
+  ok(bare.pdfOptions === null && bare.portalFirm === null && bare.paymentTerms === null && bare.locationId === null && bare.quoteNote === "",
+    "#293t docFields: absent fields read as null / empty");
+  ok(!("shareLink" in frozen) && !("margin" in frozen) && !("tierMargin" in frozen) && !("review" in frozen), "#293t docFields: nothing internal is frozen");
+
+  // ---- BOM view ----
+  const narr = p293Props({ pdfOptions: { detail: "sectioned", pdfQty: false, pdfNotes: false, pdfPrices: false, pdfItemizedAppendix: true } });
+  const bom = n293tBom(narr);
+  ok(bom.detail === "itemized" && bom.pdfQty && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
+     bom.sections.every((s) => s.presentation === "itemized"),
+    "#293t BOM view: every system itemized, quantities and descriptions on, prices kept as chosen, appendix off");
+  ok(narr.sections.some((s) => s.presentation === "narrative") && narr.detail === "sectioned", "#293t BOM view: the input props are not mutated");
+  const narrHtml = p293Render(p293Props());
+  const bomHtml = p293Render(n293tBom(p293Props()));
+  ok(narrHtml.includes("Intro para.") && !narrHtml.includes(">Line 5<") && bomHtml.includes(">Line 5<") && !bomHtml.includes("Intro para."),
+    "#293t BOM view: the narrative system's intro gives way to its itemized lines");
+  const allItemized = p293Sections().map((s) => ({ ...s, presentation: "itemized" as const }));
+  ok(n293tOffersBom(p293Sections(), "itemized") && !n293tOffersBom(allItemized, "itemized") && n293tOffersBom(allItemized, "sectioned"),
+    "#293t BOM view: the toggle is offered only when the body left some system un-itemized");
+
+  // ---- client IP ----
+  const h = new Headers({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1", "x-real-ip": "198.51.100.1" });
+  ok(n293tIpH(h) === "203.0.113.9" && n293tIp(new Request("http://x/", { headers: h })) === "203.0.113.9", "#293t ip: the first x-forwarded-for hop, from headers or a Request");
+  ok(n293tIpH(new Headers({ "x-real-ip": " 198.51.100.1 " })) === "198.51.100.1" && n293tIpH(new Headers()) === "", "#293t ip: x-real-ip fallback, else empty");
+
+  // ---- copy ----
+  ok(n293tCopy.shareInactive === "This link isn’t active. Ask your Peak rep for a new one." &&
+     n293tCopy.revising === "This estimate is being revised — your Peak rep will send the updated version." &&
+     n293tCopy.closed === "This estimate is closed." && n293tCopy.portalUnavailable === "This estimate isn’t available online.",
+    "#293t copy: the customer-facing cards read as specified");
+  const viewSrc = readFileSync(join(process.cwd(), "src/lib/quote-share/view.ts"), "utf8");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/quote-pdf\/state"|@\/lib\/estimate-number")/m.test(viewSrc), "#293t view.ts stays client-safe: value imports only state + estimate-number");
+  const tokSrc = readFileSync(join(process.cwd(), "src/lib/quote-share/token.ts"), "utf8");
+  ok(tokSrc.includes("timingSafeEqual(want, have)") && tokSrc.includes("`share:quote:${quoteId}:${nonce}:${exp}`"), "#293t token: constant-time compare over the share: domain");
+}
+
+/* ======================================================================
+   #293 slice 3 — share links: the store write (no updatedAt bump, no
+   content change), create / re-copy / revoke, resolve for the public page,
+   the status a browser sees, the actions and the Client link panel.
+   ====================================================================== */
+import {
+  ensureShareLink as n293tEnsure, revokeShareLink as n293tRevoke, resolveSharedQuote as n293tResolve,
+  shareLinkStatus as n293tStatus, shareLinkView as n293tLinkView, SHARE_ID_MAX as n293tIdMax,
+} from "@/lib/quote-share/links";
+import {
+  create as n293tQCreate, update as n293tQUpdate, addQuoteRevision as n293tQAddRev, get as n293tQGet,
+  buildQuote as n293tBuild, QUOTE_CONTENT_FIELDS as n293tContentFields,
+} from "@/lib/stores/quotes";
+{
+  ok(!(n293tContentFields as readonly string[]).includes("shareLink"), "#293t links: shareLink is not a content field (a link never re-renders the PDF)");
+  ok(n293tBuild("Q-x", { shareLink: { nonce: "n", expiresAt: 9, createdAt: 1, createdBy: "x" } } as never, "system", null, 1).shareLink === undefined,
+    "#293t links: buildQuote never copies a share link");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/share-actions.ts");
+  ok(/^"use server";/.test(acts) && ["shareLinkStatusAction", "getShareLinkAction", "revokeShareLinkAction"].every((f) => acts.includes(`export async function ${f}(`)) &&
+     (acts.match(/await requireUser\(\);/g) || []).length === 3 && (acts.match(/can\("send", user\.roles\)/g) || []).length === 3 && !acts.includes("requirePerm("),
+    "#293t actions: three server actions, each behind requireUser; create, revoke and the path need Send (answered inline, never a redirect)");
+  ok(!/^export (?!async function)/m.test(acts), "#293t actions: a \"use server\" file exports only async functions");
+  const panel = rd("src/app/(app)/estimator/client-link-panel.tsx");
+  ok(/^"use client";/.test(panel) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/quote-share\/(token|links|photo-response)|lib\/quote-pdf\/(document-loader|portal-access|quote-document-data|token))/m.test(panel),
+    "#293t panel: a client component with no server-only value import");
+  ok(!panel.includes("window.confirm") && !/(^|[^\w.])confirm\(/m.test(panel) && panel.includes("ONLINE_COPY.revokeConfirm") && panel.includes("navigator.clipboard.writeText("),
+    "#293t panel: Revoke confirms inline; Copy writes the clipboard (with a manual fallback)");
+  ok(panel.includes("Copy client link") && panel.includes("Client link") && panel.includes("created by") && (panel.match(/catch \{/g) || []).length >= 3,
+    "#293t panel: copy, expiry line, and every action await wrapped in try/catch");
+  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(pd.includes('import { ClientLinkPanel } from "./client-link-panel";') && pd.includes("{p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}"),
+    "#293t preview: the Client link block sits in the customer preview sidebar");
+  const qs = rd("src/lib/stores/quotes.ts");
+  const psl = qs.slice(qs.indexOf("export async function patchShareLink("), qs.indexOf("\n}\n", qs.indexOf("export async function patchShareLink(")));
+  ok(psl.includes("patchQuote(id,") && !psl.includes("updatedAt"), "#293t links: patchShareLink writes under the row lock and never touches updatedAt");
+  // Task-1 review (binding): the store mints the nonce and the expiry; no caller can hand one in, and no other writer touches shareLink.
+  const opSrc = qs.slice(qs.indexOf("export type ShareLinkOp"), qs.indexOf(";\n", qs.indexOf("export type ShareLinkOp")));
+  ok(opSrc.length > 0 && !/\b(nonce|expiresAt)\b/.test(opSrc) && psl.includes("newShareNonce()") && psl.includes("SHARE_DEFAULT_TTL_MS"),
+    "#293t links: patchShareLink takes no nonce or expiry — it mints the nonce (newShareNonce) and the 60-day expiry itself");
+  ok((qs.match(/\.shareLink = /g) || []).length === (psl.match(/\.shareLink = /g) || []).length && (psl.match(/\.shareLink = /g) || []).length >= 2,
+    "#293t links: patchShareLink is the only shareLink writer in the quotes store");
+  const lk = rd("src/lib/quote-share/links.ts");
+  ok(!lk.includes("newShareNonce") && !/\bshareLink\s*=/.test(lk), "#293t links: links.ts never mints a nonce or writes shareLink itself");
+  const upd = qs.slice(qs.indexOf("export async function update("), qs.indexOf("\n}\n", qs.indexOf("export async function update(")));
+  ok(upd.includes("delete clean.shareLink;"), "#293t links: update() drops a caller's shareLink (a stale client write can't revive a revoked link)");
+}
+
+async function shareLinks293tAsyncChecks(): Promise<void> {
+  const S = "test-secret-293t";
+  const QS = fixtureId(293, "t-share-sent");
+  const QD = fixtureId(293, "t-share-draft");
+  const QF = fixtureId(293, "t-share-flame");
+  const sec = { id: "sysT", name: "Test293t Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "T293T", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+  await n293tQCreate({ id: QS, name: "#293t share", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", quoteNote: "Sent note 293t", spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QS);
+  await n293tQCreate({ id: QD, name: "#293t draft", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QD);
+  await n293tQCreate({ id: QF, name: "#293t flame", customer: "Spec fixture", owner: "spec", quoteType: "flame_test", source: "estimator" });
+  registerFixture("quotes", QF);
+
+  // A never-sent quote can't get a link, and nothing is written.
+  const never = await n293tEnsure(QD, "Tester", { secret: S });
+  ok(!never.ok && never.error === n293tCopy.notSent && !(await n293tQGet(QD))?.shareLink, "#293t links (DB): a never-sent quote is refused and nothing is written");
+  const flame = await n293tEnsure(QF, "Tester", { secret: S });
+  ok(!flame.ok && flame.error === n293tCopy.notShareable, "#293t links (DB): a service quote is refused");
+  ok(!(await n293tEnsure(QS, "Tester", { secret: "" })).ok, "#293t links (DB): no AUTH_SECRET → refused");
+
+  // Send it: the new revision carries docFields.
+  await n293tQUpdate(QS, { status: "sent" });
+  const rev = await n293tQAddRev(QS, { by: "Test", reason: "sent", note: "Sent to customer" });
+  ok(rev?.docFields?.quoteNote === "Sent note 293t" && rev.docFields.owner === "spec" && rev.docFields.source === "estimator",
+    "#293t docFields (DB): a new revision freezes the printed header fields");
+
+  const before = (await n293tQGet(QS))!;
+  const now = Date.now();
+  const made = await n293tEnsure(QS, "Tester", { secret: S, now });
+  ok(made.ok && made.link.active && made.link.expiresAt === now + 60 * 86_400_000 && made.link.createdBy === "Tester" &&
+     !!made.link.path && made.link.path.startsWith(`/share/quote/${encodeURIComponent(QS)}/`) && /\/\d+\.[A-Za-z0-9_-]{43}$/.test(made.link.path),
+    "#293t links (DB): Copy client link creates a 60-day link");
+  ok(made.ok && !("nonce" in made.link), "#293t links (DB): the browser view never carries the nonce");
+  const after = (await n293tQGet(QS))!;
+  ok(after.updatedAt === before.updatedAt && after.contentChangedAt === before.contentChangedAt, "#293t links (DB): creating a link moves neither updatedAt nor contentChangedAt");
+  const again = await n293tEnsure(QS, "Someone else", { secret: S, now: now + 1000 });
+  ok(made.ok && again.ok && again.link.path === made.link.path && again.link.createdBy === "Tester", "#293t links (DB): copying again gives the same link");
+  const tok = made.ok ? made.link.path!.split("/").pop()! : "";
+
+  // Resolve (the public page's read).
+  const hit = await n293tResolve(QS, tok, { secret: S, now });
+  ok(hit?.state.kind === "ok" && hit.state.rev.rev === rev?.rev, "#293t resolve (DB): a valid token opens the latest sent revision");
+  ok((await n293tResolve(QS, tok, { secret: S, now: now + 61 * 86_400_000 })) === null, "#293t resolve (DB): an expired link → null");
+  ok((await n293tResolve(QD, tok, { secret: S, now })) === null, "#293t resolve (DB): another quote's id → null");
+  ok((await n293tResolve(QS, tok.slice(0, -1) + (tok.endsWith("A") ? "B" : "A"), { secret: S, now })) === null, "#293t resolve (DB): a tampered token → null");
+  ok((await n293tResolve("Q".repeat(n293tIdMax + 1), tok, { secret: S, now })) === null && (await n293tResolve(QS, "not-a-token", { secret: S, now })) === null,
+    "#293t resolve (DB): an oversize id or malformed token → null");
+
+  // What a browser sees.
+  const st = n293tStatus((await n293tQGet(QS))!, false, S, now);
+  const stSend = n293tStatus((await n293tQGet(QS))!, true, S, now);
+  ok(st.state === "ok" && st.link?.active === true && st.link.path === null && stSend.link?.path === (made.ok ? made.link.path : "x"),
+    "#293t status (DB): the path is shown only to a Send holder");
+
+  // Recalled to draft → revising; a link can't be created; the old one shows the card.
+  await n293tQUpdate(QS, { status: "draft" });
+  ok((await n293tResolve(QS, tok, { secret: S, now }))?.state.kind === "revising", "#293t resolve (DB): recalled to draft → revising");
+  const refused = await n293tEnsure(QS, "Tester", { secret: S, now });
+  ok(!refused.ok && refused.error === n293tCopy.revisingStaff, "#293t links (DB): a recalled quote can't get a new link");
+  await n293tQUpdate(QS, { status: "lost" });
+  const closed = await n293tResolve(QS, tok, { secret: S, now });
+  ok(closed?.state.kind === "ok" && closed.state.closed, "#293t resolve (DB): a lost quote still opens, marked closed");
+
+  // Revoke: the nonce rotates, expiry 0, the old token dies; a new copy is a new link.
+  const oldNonce = (await n293tQGet(QS))!.shareLink!.nonce;
+  const rv = await n293tRevoke(QS, "Revoker", { now: now + 2000 });
+  const revoked = (await n293tQGet(QS))!;
+  ok(rv.ok && revoked.shareLink!.expiresAt === 0 && revoked.shareLink!.nonce !== oldNonce && revoked.shareLink!.revokedBy === "Revoker" && revoked.shareLink!.revokedAt === now + 2000,
+    "#293t revoke (DB): rotates the nonce, sets expiry 0, records who and when");
+  ok((await n293tResolve(QS, tok, { secret: S, now })) === null && n293tLinkView(revoked, S, now)?.active === false, "#293t revoke (DB): the old link stops working at once");
+  // A stale client write (an editor holding the pre-revoke doc) can't put the old link back.
+  await n293tQUpdate(QS, { shareLink: { ...revoked.shareLink!, nonce: oldNonce, expiresAt: now + 60 * 86_400_000, revokedAt: null, revokedBy: null } } as never);
+  const afterStale = (await n293tQGet(QS))!;
+  ok(afterStale.shareLink!.nonce === revoked.shareLink!.nonce && afterStale.shareLink!.expiresAt === 0 && (await n293tResolve(QS, tok, { secret: S, now })) === null,
+    "#293t revoke (DB): update() carrying the old link leaves it revoked — the old token stays dead");
+  await n293tQUpdate(QD, { shareLink: { nonce: "forged", expiresAt: now + 1000, createdAt: now, createdBy: "x" } } as never);
+  ok(!(await n293tQGet(QD))?.shareLink, "#293t links (DB): update() never writes a share link");
+  await n293tQUpdate(QS, { status: "sent" });
+  const fresh = await n293tEnsure(QS, "Tester", { secret: S, now: now + 3000 });
+  ok(fresh.ok && made.ok && fresh.link.path !== made.link.path, "#293t revoke (DB): Copy client link after a revoke makes a new link");
+  ok(!(await n293tRevoke(fixtureId(293, "t-share-never"), "x")).ok, "#293t revoke (DB): an unknown quote is refused");
+}
+
+/* ======================================================================
+   #293 slice 3 — the web document: layout="web", what the online pages
+   must never render, the one loader (sent version, photos as scoped URLs),
+   and the photo set a sent revision may serve.
+   ====================================================================== */
+import { readdirSync as n293tReaddir } from "node:fs";
+import { createHash as n293tSha } from "node:crypto";
+import { loadQuoteDocumentProps as n293tLoad } from "@/lib/quote-pdf/document-loader";
+import { photoDocForRevision as n293tPhotoFor, servePhotoForRevision as n293tServe, revisionSections as n293tRevSections, ONLINE_PHOTO_CACHE as n293tPhotoCache } from "@/lib/quote-share/photo-response";
+import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-document-data";
+{
+  const base = JSON.parse(readFileSync(join(process.cwd(), "docs/superpowers/fixtures/293-quote-document-baseline.json"), "utf8")) as Record<string, string>;
+  ok(p293Render({ ...p293Props(), layout: "sheet" }) === base.itemized, "#293t web: layout=\"sheet\" renders byte-for-byte as the baseline");
+  const web = p293Render({ ...p293Props(), layout: "web" });
+  ok(web.includes('class="est-doc est-web"') && web.includes("width:100%;max-width:740px;box-sizing:border-box") && web.includes('class="est-meta"'),
+    "#293t web: fluid up to 740px, with the header grid marked for the phone layout");
+  const css = (p293Mod() as unknown as { QUOTE_WEB_CSS: string }).QUOTE_WEB_CSS;
+  ok(/@media \(max-width: 600px\)[\s\S]*\.est-web \{ padding: 20px 16px !important; \}/.test(css) &&
+     /@media \(max-width: 480px\)[\s\S]*\.est-web \.est-kp img \{ float: none !important;/.test(css) &&
+     /@media \(max-width: 760px\)[\s\S]*box-shadow: none !important/.test(css) && css.includes(".pk-no-print { display: none !important; }"),
+    "#293t web: phone padding < 600px, photo above its paragraph < 480px, sheet chrome only > 760px, page chrome dropped in print");
+
+  // Never rendered (spec §5.6): internal money, notes, vendor terms, review, links.
+  const AT = Date.UTC(2026, 9, 1, 15);
+  const secret = {
+    id: "Q-293T", name: "Never render", customer: "Walk-in", customerId: null, owner: "Pat", preparedBy: "", updatedAt: AT, createdAt: AT, revisions: [],
+    quoteNote: "", assumptions: "", paymentTerms: "Net 30", margin: 0.4242, tierMargin: 0.3737, pricingTier: "TIER-SECRET-293",
+    review: { note: "REVIEW-SECRET-293" }, history: [{ at: 1, to: "draft", note: "HISTORY-SECRET-293" }],
+    shareLink: { nonce: "NONCE-SECRET-293", expiresAt: 1, createdAt: 1, createdBy: "x" }, pdf: { blobPath: "quotes/BLOB-SECRET-293.pdf" },
+    spec: { sections: [
+      { id: "n", name: "Narr", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Intro.",
+        items: [{ id: 1, sku: "S1", desc: "Line one", qty: 1, unit: "ea", cost: 31337.77, price: 50000, internalNote: "INTERNAL-SECRET-293", link: "https://x.example/LINK-SECRET-293", room: "ROOM-SECRET-293" }],
+        keyProducts: [{ lineKey: "1", sku: "S1", text: "Para.", photo: false }] },
+      { id: "i", name: "Items", kind: "materials", mfr: "", freightPct: 0,
+        items: [{ id: 2, sku: "VQ", desc: "Vendor", qty: 1, unit: "ea", cost: 27182.81, price: 40000, vendorQuoteId: "VQ-S", internalNote: "INTERNAL2-SECRET-293" }] },
+    ] },
+    vendorQuotes: [{ id: "VQ-S", vendor: "Acme", quoteNumber: "Q1", description: "Motors", display: "itemized", lines: [{ id: 1, description: "Motor", qty: 1, unit: "ea", amount: 27182.81 }],
+      terms: "TERMS-SECRET-293", notes: "NOTES-SECRET-293", total: 27182.81, includesFreight: false }],
+    pdfOptions: {},
+  };
+  const props = n293tDocData(secret as never, null, { companyName: "Peak Systems Group", logoDark: null });
+  for (const [label, html] of [["narrative", p293Render({ ...props, layout: "web" })], ["BOM", p293Render({ ...n293tBom(props), layout: "web" })]] as const) {
+    ok(!/SECRET-293/.test(html) && !html.includes("31,337.77") && !html.includes("27,182.81") && !html.includes("42.42") && !html.includes("37.37"),
+      `#293t never rendered (${label}): no cost, margin, tier, internal note, vendor terms/notes, link, room, review, history, nonce or PDF path`);
+  }
+
+  // Task 3 review (hardening, Task 4 commit 1): the never-rendered salt, widened — component cost,
+  // sellOverride, labor groups, a vendor attachment, approvedAgainst, emails, shop/bonus/travel labor
+  // names, Rewards-credit internals, and an EARLIER sent revision plus a later manual one and a live
+  // edit, each with its own salted spec. The document is the latest sent revision as the pages build
+  // it (quoteAsOfRevision → quoteDocumentDataFor), rendered layout="web" as Narrative and as BOM.
+  {
+    const vq = (salt: string) => [{ id: "VQ-S", vendor: "Acme", quoteNumber: "Q1", description: "Motors", display: "itemized", link: `https://v.example/VLINK-${salt}`,
+      attachment: { name: `ATTACHNAME-${salt}.pdf`, mime: "application/pdf", blobPath: `vendor-quotes/ATTACHBLOB-${salt}.pdf`, dataUrl: `data:application/pdf;base64,ATTACHDATA-${salt}` },
+      lines: [{ id: 1, description: "Motor", qty: 1, unit: "ea", amount: 27182.81 }], terms: `TERMS-${salt}`, notes: `NOTES-${salt}`, total: 27182.81, includesFreight: false }];
+    const spec = (intro: string, salt: string) => ({ sections: [
+      { id: "n", name: "Narr", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: intro,
+        laborGroups: { "lg-1": { draft: { note: `LABORGROUP-${salt}`, crew: [{ role: `CREWROLE-${salt}` }] }, lines: 1 } },
+        items: [
+          { id: 1, sku: "S1", desc: "Line one", qty: 1, unit: "ea", cost: 31337.77, price: 50000, sellOverride: true,
+            internalNote: `INTERNAL-${salt}`, link: `https://x.example/LINK-${salt}`, room: `ROOM-${salt}`,
+            components: [{ sku: `COMPSKU-${salt}`, label: `COMPLABEL-${salt}`, role: "track", qty: 2, unit: "ea", cost: 13579.24, price: 24680.13 }] },
+          { id: 4, sku: "LAB-INSTALL", desc: "Installation", qty: 1, unit: "ea", cost: 1000, price: 2000, labor: true, laborGroup: "lg-1" },
+          { id: 5, sku: "LAB-SHOP-1", desc: `SHOPLINE-${salt}`, qty: 1, unit: "ea", cost: 100, price: 300, labor: true, laborOverhead: "shop" },
+          { id: 6, sku: "LAB-BONUS-1", desc: `BONUSLINE-${salt}`, qty: 1, unit: "ea", cost: 100, price: 300, labor: true, laborOverhead: "bonus" },
+          { id: 7, sku: "LAB-TRAVEL-1", desc: `TRAVELLINE-${salt}`, qty: 1, unit: "ea", cost: 100, price: 300, labor: true, laborTravel: "hotel", laborMobKey: "m-gone" },
+        ],
+        keyProducts: [{ lineKey: "1", sku: "S1", text: "Para.", photo: false }] },
+      { id: "i", name: "Items", kind: "materials", mfr: "", freightPct: 0, sellOverride: 61000,
+        items: [
+          { id: 2, sku: "VQ", desc: "Vendor", qty: 1, unit: "ea", cost: 27182.81, price: 40000, vendorQuoteId: "VQ-S", internalNote: `INTERNAL2-${salt}` },
+          { id: 3, sku: "P3", desc: "Plain part", qty: 1, unit: "ea", cost: 11000.11, price: 20000 },
+          { id: 8, sku: "", desc: `REWARDDESC-${salt}`, qty: 1, unit: "ea", cost: 0, price: -300, rewardCredit: true },
+        ] },
+    ] });
+    const df = (note: string, owner: string) => ({ customer: "Walk-in", locationId: null, contactName: null, quoteNote: note, assumptions: "", installTimeframe: "",
+      preparedBy: "", owner, termsText: "", paymentTerms: "Net 30", pdfOptions: { pdfItemizedAppendix: true, pdfNotes: true }, portalFirm: null, source: "estimator" });
+    const AT2 = Date.UTC(2026, 9, 1, 15);
+    const early = { rev: 1, at: AT2 - 86_400_000, by: "early.SECRET-293@peak.test", reason: "sent", note: "EARLYREVNOTE-SECRET-293", name: "EARLYNAME-SECRET-293", value: 99999.91,
+      margin: 0.4242, pricingTier: "TIER-SECRET-293", tierMargin: 0.3737, status: "sent", spec: spec("EARLYINTRO-SECRET-293", "EARLY-SECRET-293"), vendorQuotes: vq("EARLYVQ-SECRET-293"),
+      pdfBlobPath: "quotes/EARLYPDF-SECRET-293.pdf", docFields: df("EARLYNOTE-SECRET-293", "EARLYOWNER-SECRET-293") };
+    const sent = { rev: 2, at: AT2, by: "sender.SECRET-293@peak.test", reason: "sent", note: "REVNOTE-SECRET-293", name: "Second sent", value: 120000,
+      margin: 0.4242, pricingTier: "TIER-SECRET-293", tierMargin: 0.3737, status: "sent", spec: spec("Intro two 293t.", "REV2-SECRET-293"), vendorQuotes: vq("REV2VQ-SECRET-293"),
+      pdfBlobPath: "quotes/REV2PDF-SECRET-293.pdf", docFields: df("Note two 293t.", "Pat") };
+    const later = { ...sent, rev: 3, at: AT2 + 1000, reason: "manual", name: "LATERNAME-SECRET-293", spec: spec("LATERINTRO-SECRET-293", "LATER-SECRET-293"),
+      vendorQuotes: vq("LATERVQ-SECRET-293"), docFields: df("LATERNOTE-SECRET-293", "LATEROWNER-SECRET-293") };
+    const secret2 = {
+      id: "Q-293TW", name: "LIVENAME-SECRET-293", customer: "Walk-in", customerId: "c-293tw", owner: "Pat", ownerEmail: "owner.SECRET-293@peak.test", preparedBy: "",
+      contact: { name: "Dana", email: "contact.SECRET-293@x.test" }, createdAt: AT2, updatedAt: AT2 + 2000, quoteNote: "LIVENOTE-SECRET-293", assumptions: "", paymentTerms: "Net 30",
+      margin: 0.4242, tierMargin: 0.3737, pricingTier: "TIER-SECRET-293", status: "sent", source: "estimator", quoteType: "system",
+      review: { state: "approved", reviewer: "reviewer.SECRET-293@peak.test", submittedBy: "submit.SECRET-293@peak.test", submittedAt: 1, decidedBy: "decide.SECRET-293@peak.test", decidedAt: 1,
+        note: "REVIEW-SECRET-293", method: "in_app", approvedAgainst: { sell: 86420.97, linesKey: "APPROVED-SECRET-293" } },
+      history: [{ at: 1, to: "sent", note: "HISTORY-SECRET-293" }],
+      portalAcceptance: { at: 1, by: "Dana", byEmail: "accept.SECRET-293@x.test", notes: "ACCEPTNOTES-SECRET-293", purchaseMethod: "po", poDocumentId: "DOC-SECRET-293" },
+      rewardLedger: [{ kind: "earn", amount: 4242, note: "LEDGER-SECRET-293" }], rewardsCredit: { posted: 300, note: "CREDITNOTE-SECRET-293" },
+      shareLink: { nonce: "NONCE-SECRET-293", expiresAt: 1, createdAt: 1, createdBy: "x" }, pdf: { blobPath: "quotes/BLOB-SECRET-293.pdf" },
+      spec: spec("LIVEINTRO-SECRET-293", "LIVE-SECRET-293"), vendorQuotes: vq("LIVEVQ-SECRET-293"), pdfOptions: {},
+      revisions: [early, sent, later],
+    } as unknown as N293tQuote;
+    const asSent = n293tAsOf(secret2, (secret2.revisions as N293tRev[])[1]);
+    const cust = { name: "Walk-in Co", locations: [], contacts: [{ name: "Dana", role: "Director", email: "dana.SECRET-293@x.test", primary: true }] };
+    const props2 = n293tDocData(asSent, cust as never, { companyName: "Peak Systems Group", logoDark: null });
+    const views = [["Narrative", p293Render({ ...props2, layout: "web" })], ["BOM", p293Render({ ...n293tBom(props2), layout: "web" })]] as const;
+    for (const [label, html] of views) {
+      const leaks = [
+        /SECRET-293/.test(html) && "a salted string",
+        ["31,337.77", "27,182.81", "13,579.24", "24,680.13", "11,000.11", "86,420.97", "99,999.91"].find((n) => html.includes(n)) && "a cost / approval / earlier-revision figure",
+        (/\b42(\.\d+)?%/.test(html) || /\b37(\.\d+)?%/.test(html)) && "a margin as a percent",
+        (html.includes("0.4242") || html.includes("0.3737") || html.includes("42.42") || html.includes("37.37")) && "a raw margin",
+        /override/i.test(html) && "sell-override wording",
+      ].filter(Boolean);
+      ok(leaks.length === 0 && html.includes('class="est-doc est-web"') && (label === "BOM" || html.includes("Intro two 293t.")) && html.includes("Note two 293t.") && html.includes("Rewards points applied"),
+        `#293t never rendered, widened (${label}, web): the sent revision only — no component cost, sellOverride, labor group, vendor attachment, approval snapshot, email, shop/bonus/travel line, Rewards-credit internals, earlier/later revision or live edit (leaks: ${leaks.join(", ") || "none"})`);
+    }
+    ok(views[1][1].includes("Line one") && views[1][1].includes("Plain part"), "#293t never rendered, widened: the BOM view still itemizes the sent lines (the salt check above ran on a real BOM)");
+  }
+
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const loader = rd("src/lib/quote-pdf/document-loader.ts");
+  const print = rd("src/app/print/quote/[id]/page.tsx");
+  ok(["quoteDocumentDataFor(", "purchasePerksForCompany(", "purchasePerksDocLine(", "keyProductPhotoDataUris(", "getCustomer(", "getSettings("].every((c) => loader.includes(c) && print.includes(c)),
+    "#293t loader: the web loader and the print route build the document from the same calls (no drift until the print route moves onto the loader)");
+  ok(loader.includes("quoteAsOfRevision(q, opts.revision)") && loader.includes("keyProductPhotoDocs("), "#293t loader: a revision renders as sent; web photos are the printed docs as scoped URLs");
+  ok(loader.includes('if (opts.photos !== "inline" && !webRevisionOk(q, opts.revision)) return null;') && loader.includes('rev.reason === "sent"') && loader.includes("q.revisions.includes(rev)") &&
+     loader.includes("Promise<QuoteDocumentProps | null>"),
+    "#293t loader: the web path fails closed — only a sent revision that is this quote's own object renders; anything else is null");
+  const pr = rd("src/lib/quote-share/photo-response.ts");
+  ok(pr.includes("keyProductPhotoDocs(revisionSections(rev))") && pr.includes("PHOTO_TYPES.has(doc.contentType)") && pr.includes('"x-content-type-options": "nosniff"') &&
+     pr.includes('"private, max-age=3600"') && pr.includes('createHash("sha1").update(doc.blobKey)'),
+    "#293t photos: only the sent revision's printed photo docs, PNG/JPEG/WebP, nosniff, private 1 h, ETag on id + blobKey hash");
+
+  // Binding (Task 1 review): the as-sent quote feeds only the server QuoteDocument — it is built in the
+  // loader alone, the loader never touches the live PDF or share link, and no client component imports
+  // the loader or the photo responder.
+  const srcFiles = (dir: string): string[] => n293tReaddir(join(process.cwd(), dir), { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? srcFiles(join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [join(dir, e.name)] : []));
+  const all = srcFiles("src").map((f) => [f, rd(f)] as const);
+  const asOfCallers = all.filter(([, t]) => t.includes("quoteAsOfRevision(")).map(([f]) => f).sort();
+  ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
+    `#293t binding: quoteAsOfRevision is called only by the document loader (got ${asOfCallers.join(", ")})`);
+  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: purchasePerksDocLine\(perks\) \};/.test(loader),
+    "#293t binding: the loader is server-only, returns QuoteDocument props only, and never reads the live PDF or the share link");
+  const clientImporters = all.filter(([, t]) => /^["']use client["'];?\s*$/m.test(t) && /from ["']@\/lib\/(quote-pdf\/document-loader|quote-share\/photo-response)["']/.test(t)).map(([f]) => f);
+  ok(clientImporters.length === 0, `#293t binding: no client component imports the loader or the photo responder (got ${clientImporters.join(", ")})`);
+}
+
+async function onlineDoc293tAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "t-doc-part");
+  const P2 = fixtureId(293, "t-doc-item-part");
+  const P3 = fixtureId(293, "t-doc-gif-part");
+  const QID = fixtureId(293, "t-doc-quote");
+  for (const sku of [P, P2, P3]) {
+    await n293MergeUpsert(sku, { desc: "Test293t " + sku, category: "Test293 Cat", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", sku);
+  }
+  const mk = async (sku: string, fileName: string, contentType = "image/webp") => {
+    const d = await n293CreateDoc({ kind: "image", fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-293t/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#293t doc: fixture document failed to create");
+    registerFixture("part_documents", d.id);
+    await n293Attach(d.id, [sku], "Test");
+    registerFixture("part_document_links", n293LinkId(sku, d.id));
+    return d;
+  };
+  const narrDoc = await mk(P, "t-narr.webp");
+  const itemDoc = await mk(P2, "t-item.webp");
+  const gifDoc = await mk(P3, "t-narr.gif", "image/gif");
+  const sections = (intro: string) => [
+    { id: "n", name: "Test293t Narrative", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: intro,
+      items: [{ id: 1, sku: P, desc: "Narr part", qty: 1, unit: "ea", cost: 5, price: 10 }, { id: 3, sku: P3, desc: "Gif part", qty: 1, unit: "ea", cost: 5, price: 10 }],
+      keyProducts: [{ lineKey: "1", sku: P, text: "Para 293t.", photo: true }, { lineKey: "3", sku: P3, text: "Gif para 293t.", photo: true }] },
+    { id: "i", name: "Test293t Itemized", kind: "materials", mfr: "", freightPct: 0,
+      items: [{ id: 2, sku: P2, desc: "Item part", qty: 1, unit: "ea", cost: 5, price: 10 }], keyProducts: [{ lineKey: "2", sku: P2, text: "Never prints", photo: true }] },
+  ];
+  await n293tQCreate({ id: QID, name: "#293t loader", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", quoteNote: "Sent note", spec: { sections: sections("Sent intro 293t."), mobs: [] } });
+  registerFixture("quotes", QID);
+  await n293tQUpdate(QID, { status: "sent", pdfOptions: { pdfCover: true } as never });
+  await n293tQAddRev(QID, { by: "Test", reason: "sent", note: "Sent" });
+  await n293tQUpdate(QID, { name: "Edited after send", quoteNote: "Edited note", spec: { sections: sections("Leaked intro 293t."), mobs: [] } });
+
+  const q = (await n293tQGet(QID))!;
+  const st = n293tState(q);
+  if (st.kind !== "ok") { ok(false, "#293t loader (DB): fixture quote is ok"); return; }
+  const loaded = await n293tLoad(q, { revision: st.rev, photos: { href: (id) => `/t/photo/${id}` } });
+  if (!loaded) { ok(false, "#293t loader (DB): the sent revision loads"); return; }
+  const props = loaded;
+  ok(props.projectName === "#293t loader" && props.quoteNote === "Sent note" && props.revNum === st.rev.rev && props.revDateMs === st.rev.at,
+    "#293t loader (DB): the sent version — its name, cover note, Rev N and date — not the edit made after sending");
+  ok(props.keyProductPhotos?.[P]?.src === `/t/photo/${narrDoc.id}` && !props.keyProductPhotos?.[P2], "#293t loader (DB): a printed photo becomes its scoped URL; an itemized system's block has none");
+  ok(typeof props.rewardsLine === "string", "#293t loader (DB): the purchase-perks line is loaded as on the PDF");
+  const html = p293Render({ ...props, layout: "web" });
+  ok(html.includes("Sent intro 293t.") && html.includes("Para 293t.") && !html.includes("Leaked intro 293t.") && !html.includes("Edited after send") && !html.includes("Never prints") &&
+     html.includes(`src="/t/photo/${narrDoc.id}"`),
+    "#293t loader (DB): a quote edited after sending shows the SENT version online, photo included");
+  // Task 3 review (hardening): the web path fails CLOSED — no revision, a revision that isn't this
+  // quote's own, or one that isn't a sent one is refused (null), never the live quote. Only the
+  // print path ("inline") still renders the live quote without a revision.
+  const webHref = { href: (id: string) => `/t/photo/${id}` };
+  const noRev = await n293tLoad(q, { revision: undefined as unknown as N293tRev, photos: webHref });
+  const nullRev = await n293tLoad(q, { revision: null as unknown as N293tRev, photos: webHref });
+  ok(noRev === null && nullRev === null, "#293t loader (DB): a web page with no revision is refused (null) — never the live quote");
+  const manual = { ...st.rev, reason: "manual" as const };
+  const foreign = await n293tLoad(q, { revision: { ...st.rev }, photos: webHref });
+  const notSent = await n293tLoad({ ...q, revisions: [...(q.revisions || []), manual] }, { revision: manual, photos: webHref });
+  ok(foreign === null && notSent === null, "#293t loader (DB): a web page given a revision that isn't this quote's own, or isn't a sent one, is refused");
+  const liveProps = await n293tLoad(q, { photos: "inline" });
+  ok(liveProps?.projectName === "Edited after send", "#293t loader (DB): the print path (inline) without a revision still renders the live quote");
+
+  ok((await n293tPhotoFor(st.rev, narrDoc.id))?.id === narrDoc.id, "#293t photos (DB): the sent revision's printed photo is servable");
+  ok((await n293tPhotoFor(st.rev, itemDoc.id)) === null && (await n293tPhotoFor(st.rev, "PD-no-such")) === null && (await n293tPhotoFor(st.rev, "")) === null,
+    "#293t photos (DB): a photo on an itemized system, an unknown id or a blank id is never served");
+
+  // Binding (Task 1 review): only image/png|jpeg|webp is ever linked or served — and the
+  // 404s / 304 below answer before any blob read (the harness has no Blob store).
+  ok(!props.keyProductPhotos?.[P3], "#293t loader (DB): a printed photo that isn't PNG/JPEG/WebP gets no link");
+  const req = (h: Record<string, string> = {}) => new Request("http://x.test/p", { headers: h });
+  const gif = await n293tServe(req(), st.rev, gifDoc.id);
+  const item = await n293tServe(req(), st.rev, itemDoc.id);
+  const unknown = await n293tServe(req(), st.rev, "PD-no-such");
+  ok(gif.status === 404 && item.status === 404 && unknown.status === 404 && (await unknown.text()) === "Not found",
+    "#293t photos (DB): a GIF on the sent revision, an itemized system's photo and an unknown id are a plain 404");
+  const etag = `"${narrDoc.id}-${n293tSha("sha1").update(narrDoc.blobKey!).digest("hex").slice(0, 16)}"`;
+  const cached = await n293tServe(req({ "if-none-match": etag }), st.rev, narrDoc.id);
+  ok(cached.status === 304 && cached.headers.get("etag") === etag && cached.headers.get("cache-control") === n293tPhotoCache && n293tPhotoCache === "private, max-age=3600",
+    "#293t photos (DB): a matching If-None-Match is a 304 on the doc id + blobKey ETag, private 1 h");
+  const edited = (await n293tQGet(QID))!;
+  ok(n293tRevSections(st.rev).some((s) => s.narrative === "Sent intro 293t.") && !n293tRevSections(st.rev).some((s) => s.narrative === "Leaked intro 293t.") &&
+     (edited.spec as { sections: { narrative?: string }[] }).sections.some((s) => s.narrative === "Leaked intro 293t."),
+    "#293t photos (DB): the photo set is read from the sent revision's sections, not the edited live quote");
+
+  // Task 3 review (hardening): two SENT revisions through the real store — the loader renders the
+  // latest one only; the earlier revision's salted name, note, intro and line never reach the page.
+  const Q2 = fixtureId(293, "t-doc-two-revs");
+  const sec2 = (intro: string, line: string) => [{ id: "n", name: "Test293t Two", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: intro,
+    items: [{ id: 1, sku: P, desc: line, qty: 1, unit: "ea", cost: 5, price: 10, internalNote: "INTERNAL-SECRET-293" }], keyProducts: [] }];
+  await n293tQCreate({ id: Q2, name: "EARLYNAME-SECRET-293", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", quoteNote: "EARLYNOTE-SECRET-293",
+    spec: { sections: sec2("EARLYINTRO-SECRET-293", "EARLYLINE-SECRET-293"), mobs: [] } });
+  registerFixture("quotes", Q2);
+  await n293tQUpdate(Q2, { status: "sent" });
+  await n293tQAddRev(Q2, { by: "Test", reason: "sent", note: "First" });
+  await n293tQUpdate(Q2, { name: "Two revs 293t", quoteNote: "Second note 293t.", spec: { sections: sec2("Second intro 293t.", "Second line 293t"), mobs: [] } });
+  await n293tQAddRev(Q2, { by: "Test", reason: "sent", note: "Second" });
+  const q2 = (await n293tQGet(Q2))!;
+  const st2 = n293tState(q2);
+  const p2 = st2.kind === "ok" ? await n293tLoad(q2, { revision: st2.rev, photos: webHref }) : null;
+  const h2 = p2 ? [p293Render({ ...p2, layout: "web" }), p293Render({ ...n293tBom(p2), layout: "web" })].join("\n") : "";
+  // Final fix 1: no PDF was copied, so Rev N follows the PDF's counting rule (1 revision before it).
+  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 1 &&
+     h2.includes("Second intro 293t.") && h2.includes("Second note 293t.") && h2.includes("Second line 293t") && !/SECRET-293/.test(h2),
+    "#293t loader (DB): with two sent revisions the page renders the latest only — nothing of the earlier one, no internal note (Narrative + BOM, web)");
+}
+
+/* ======================================================================
+   #293 slice 3 — the portal estimate page: who may see what, the page and
+   photo route wiring, the row link, and the smoke routes.
+   ====================================================================== */
+import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/portal-access";
+{
+  const rev = { rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "N", value: 1, margin: 0, status: "sent", spec: { sections: [] } };
+  const pq = (extra: Record<string, unknown>) =>
+    ({ id: "Q-p", name: "P", customer: "C", customerId: "c1", locationId: null, value: 1, margin: 0, status: "sent", source: "estimator", quoteType: "system",
+       owner: "o", createdAt: 1, updatedAt: 1, history: [], review: {}, revisions: [rev], ...extra }) as unknown as N293tQuote;
+  ok(n293tPortalState(pq({}), "c1").kind === "ok", "#293t portal: the customer's sent quote → ok");
+  ok(n293tPortalState(pq({}), "c2").kind === "unavailable" && n293tPortalState(pq({}), "").kind === "unavailable", "#293t portal: another customer, or no customer → unavailable");
+  ok(n293tPortalState(pq({ source: "daylite" }), "c1").kind === "unavailable", "#293t portal: Daylite history → unavailable");
+  ok(n293tPortalState(pq({ status: "draft" }), "c1").kind === "revising", "#293t portal: a staff quote recalled after sending → the being-revised card (decision 16), own customer only");
+  ok(n293tPortalState(pq({ status: "draft", revisions: [] }), "c1").kind === "unavailable", "#293t portal: a never-sent draft → unavailable");
+
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const resolveLocal = (from: string, spec: string): string | null => {
+    const b = spec.startsWith("@/") ? join("src", spec.slice(2)) : spec.startsWith(".") ? join(dirname(from), spec) : null;
+    if (!b) return null;
+    for (const ext of [".ts", ".tsx", "/index.ts", "/index.tsx", ""]) {
+      const p = b + ext;
+      if ((ext || /\.(ts|tsx)$/.test(p)) && existsSync(join(process.cwd(), p))) return p;
+    }
+    return null;
+  };
+  const valueImports = (s: string) => [...s.matchAll(/^import (?!type )[\s\S]*? from "([^"]+)";/gm)].map((m) => m[1]);
+  const noClientImports = (file: string) =>
+    valueImports(rd(file)).every((spec) => {
+      const p = resolveLocal(file, spec);
+      return !p || !/^\s*["']use client["']/.test(rd(p));
+    });
+  const page = rd("src/app/portal/quotes/[id]/page.tsx");
+  const comp = rd("src/components/online-estimate/online-estimate.tsx");
+  ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(comp) && noClientImports("src/app/portal/quotes/[id]/page.tsx") && noClientImports("src/components/online-estimate/online-estimate.tsx"),
+    "#293t portal page: server-rendered; no client component it imports can receive the quote's data");
+  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid)") &&
+     page.includes("loadQuoteDocumentProps(q, {") && page.includes("revision: state.rev,") && page.includes("ONLINE_COPY.portalUnavailable") && page.includes("ONLINE_COPY.revising") && page.includes("<PortalSignedOut"),
+    "#293t portal page: the viewer first, then the one state rule; the sent revision; the signed-out, unavailable and revising cards");
+  ok(!page.includes("notFound(") && !/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(page),
+    "#293t portal page: every miss is a 200 card; the page never writes");
+  ok(comp.includes("<QuoteDocument {...shown} layout=\"web\" />") && comp.includes("bomViewProps(docProps)") && comp.includes("offersBomView(docProps.sections, docProps.detail)") &&
+     (comp.match(/prefetch=\{false\}/g) || []).length >= 3 && comp.includes("ONLINE_COPY.closed") && comp.includes("<style>{QUOTE_WEB_CSS}</style>"),
+    "#293t online view: the web document, a server-side BOM transform behind two plain links, the closed banner");
+  const photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
+  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId)") &&
+     photo.includes("servePhotoForRevision(req, state.rev, docId)") && photo.includes("`portal-photo:${session.grantId}`"),
+    "#293t portal photos: a portal viewer, 300/min per grant, the quote's own sent revision, only its printed photos");
+  const row = rd("src/app/portal/quote-row.tsx");
+  ok(row.includes("portalOnlineEstimateState(q, cid).kind") && row.includes("`/portal/quotes/${encodeURIComponent(q.id)}`") && row.includes("Open PDF ↗"),
+    "#293t portal row: the title opens the online estimate when it's ok or being revised; the PDF link stays");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(['"/portal/quotes/Q-2041",', '"/portal/quotes/Q-2041?preview=lakefront",', '"/portal/quotes/Q-2041?preview=lakefront&view=bom",', '"/portal/quotes/Q-0?preview=lakefront",'].every((r) => smoke.includes(r)),
+    "#293t smoke: the portal estimate page's signed-out, unavailable and BOM-param routes are smoke routes");
+
+  // Hardening (Task 3 review) at the call site: the page passes the sent revision, and a refused
+  // load (the loader's fail-closed null) is the same generic card — never the live quote.
+  ok(page.includes("if (!docProps) return shell(<OnlineEstimateCard title={ONLINE_COPY.portalUnavailable} backHref={backHref} />);"),
+    "#293t portal page: a refused load (null) renders the generic unavailable card");
+  ok(!/\bq\.pdf\b|pdfBlobPath|quoteAsOfRevision|shareLink/.test(page) && (page.match(/base \+ "\/pdf"/g) || []).length === 2,
+    "#293t portal page: Download PDF is the existing sent-PDF route (/portal/quotes/[id]/pdf), never the live pdf field; no as-sent quote outside the loader");
+  const meta = page.slice(page.indexOf("export async function generateMetadata"), page.indexOf("function one("));
+  ok(meta.length > 0 && !/getQuote|loadQuoteDocumentProps|params/.test(meta), "#293t portal page: generateMetadata never reads the quote");
+  ok(!/\b(update|patchShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(photo) && photo.indexOf("resolvePortalViewer(") < photo.indexOf("rateLimit(") && photo.indexOf("rateLimit(") < photo.indexOf("getQuote("),
+    "#293t portal photos: read-only; the viewer, then the rate limit, then the quote");
+}
+
+
+async function portalPage293tAsyncChecks(): Promise<void> {
+  // Hard tenant scoping through the real store: a sent quote of customer A is A's only.
+  const QA = fixtureId(293, "t-portal-quote");
+  const A = fixtureId(293, "t-portal-cust-a");
+  const B = fixtureId(293, "t-portal-cust-b");
+  await n293tQCreate({ id: QA, name: "#293t portal", customer: "Spec A", customerId: A, owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [], mobs: [] } });
+  registerFixture("quotes", QA);
+  await n293tQUpdate(QA, { status: "sent" });
+  await n293tQAddRev(QA, { by: "Test", reason: "sent", note: "Sent" });
+  const q = (await n293tQGet(QA))!;
+  ok(n293tPortalState(q, A).kind === "ok" && n293tPortalState(q, B).kind === "unavailable" && n293tPortalState(q, "").kind === "unavailable",
+    "#293t portal (DB): a sent quote opens for its own customer only — another customer, or none, gets the unavailable card");
+  await n293tQUpdate(QA, { status: "draft" });
+  const recalled = (await n293tQGet(QA))!;
+  ok(n293tPortalState(recalled, A).kind === "revising" && n293tPortalState(recalled, B).kind === "unavailable",
+    "#293t portal (DB): recalled to draft — the being-revised card for its own customer, still unavailable to anyone else");
+  await n293tQUpdate(QA, { status: "sent", customerId: B });
+  const moved = (await n293tQGet(QA))!;
+  ok(n293tPortalState(moved, A).kind === "unavailable" && n293tPortalState(moved, B).kind === "ok",
+    "#293t portal (DB): re-linked to another customer — the old customer loses it at once (read live, per request)");
+}
+
+/* ======================================================================
+   #293 slice 3 — the share page: outside the team login, one card for
+   every failure, no index / no Referer, rate limits, read-only, photos
+   scoped to the sent revision, never cached by the service worker.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const mw = rd("src/middleware.ts");
+  const m = mw.match(/matcher:\s*\[\s*"([^"]+)"/);
+  const re = new RegExp("^" + (m ? m[1].replace(/\\\\/g, "\\") : "$^") + "$");
+  ok(!re.test("/share/quote/Q-1/" + "1." + "A".repeat(43)) && !re.test("/share/quote/Q-1/x/photo/PD-1"), "#293t middleware: /share/* skips the team login (it checks its own token)");
+  ok(re.test("/shareholders") && re.test("/") && re.test("/catalog/documents") && !re.test("/print/quote/Q-1") && !re.test("/portal/quotes/Q-1"),
+    "#293t middleware: only share/ is newly exempt; app pages still go through the login gate");
+  ok(mw.includes("|portal|") && mw.includes("|print/|share/|") && mw.includes("/share/quote/[id]/[token]"), "#293t middleware: the exemption sits beside print/ and the doc comment names the route");
+
+  const page = rd("src/app/share/quote/[id]/[token]/page.tsx");
+  ok(page.indexOf("rateLimit(") > -1 && page.indexOf("rateLimit(") < page.indexOf("resolveSharedQuote(") && page.includes('"share-view:" + ') && page.includes("SHARE_VIEW_PER_MIN"),
+    "#293t share page: the per-IP rate limit runs before anything is read");
+  ok(page.includes("robots: { index: false, follow: false }") && page.includes('referrer: "no-referrer"') && page.includes('export const dynamic = "force-dynamic";'),
+    "#293t share page: never indexed, never leaks the token in a Referer, never cached");
+  ok((page.match(/ONLINE_COPY\.shareInactive/g) || []).length === 1 && page.includes("ONLINE_COPY.revising") && page.includes("ONLINE_COPY.tooMany") && !page.includes("notFound("),
+    "#293t share page: one 'isn't active' card for every failure, all 200");
+  ok(!page.includes("/pdf") && !page.includes("pdfHref={pdf") && page.includes("pdfHref={null}"), "#293t share page: no PDF link (the PDF route needs a portal session)");
+  ok(!/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert|rateLimitRefund)\(/.test(page) && !page.includes("cookies(") && !page.includes("auth("),
+    "#293t share page: read-only, and it never reads or sets a session");
+  ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(rd("src/app/share/layout.tsx")), "#293t share page: server-rendered, with its own minimal layout");
+  const photo = rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts");
+  ok(photo.indexOf("rateLimit(") < photo.indexOf("resolveSharedQuote(") && photo.includes('"share-photo:" + (clientIp(req) || "unknown")') && photo.includes("SHARE_PHOTO_PER_MIN") &&
+     photo.includes("servePhotoForRevision(req, hit.state.rev, docId)") && photo.includes('hit.state.kind !== "ok"'),
+    "#293t share photos: rate-limited per IP, the same token check as the page, only the sent revision's printed photos");
+  const cfg = rd("next.config.ts");
+  ok(/source: "\/share\/:path\*"[\s\S]{0,300}"Referrer-Policy", value: "no-referrer"[\s\S]{0,200}"X-Robots-Tag", value: "noindex, nofollow"/.test(cfg) &&
+     cfg.indexOf('source: "/share/:path*"') > cfg.indexOf('value: "DENY"'),
+    "#293t headers: /share/* answers no-referrer + noindex, after the global headers");
+  const sw = rd("public/sw.js");
+  ok(sw.includes('requested.pathname.startsWith("/share/")') && sw.includes('target.pathname.startsWith("/share/")'), "#293t service worker: a share page (its token in the URL) is never cached");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes(`"/share/quote/Q-2041/1.${"A".repeat(43)}",`) && smoke.includes('"/share/quote/Q-2041/not-a-token",'), "#293t smoke: a well-formed but invalid token (passes the shape check, fails the HMAC verify) and a malformed one are smoke routes (both 200 cards)");
+  // Beyond the plan's checks: the loader fails closed (null) → the same one card; no-IP
+  // requests share one fixed "unknown" bucket; the as-sent quote and the link record never
+  // reach the page; and the fetch handler never serves or stores a /share/ response.
+  ok(page.includes("!docProps") && page.indexOf("loadQuoteDocumentProps(") < page.indexOf("ONLINE_COPY.shareInactive") && page.includes("revision: ok.rev"),
+    "#293t share page: pinned to the sent revision, and a loader that fails closed shows the same one card");
+  ok(page.includes('clientIpFromHeaders(await headers()) || "unknown"') && photo.includes('"share-photo:" + (clientIp(req) || "unknown")'),
+    "#293t share rate limits: a request with no client IP counts against one fixed \"unknown\" key");
+  ok(!/quoteAsOfRevision|shareLink|generateMetadata/.test(page) && !/quoteAsOfRevision|shareLink/.test(photo),
+    "#293t share page: no as-sent quote outside the loader, no link record, fixed metadata");
+  ok(sw.includes('if (sameOrigin && url.pathname.startsWith("/share/")) return;') &&
+     sw.indexOf('url.pathname.startsWith("/share/")') < sw.indexOf('req.mode === "navigate"'),
+    "#293t service worker: share pages and share photos bypass the worker entirely (no cache-first image copy of a token URL)");
+}
+
+/* ======================================================================
+   #293 slice 3 — final review fix wave: the online pages print the Rev N
+   and date the sent PDF printed (recorded at render, frozen with the copy,
+   derived by the PDF's counting rule otherwise; fix round 2: one re-render
+   when the quote moves mid-render); Revoke with no link returns before any
+   write; a refused create mints no link (doc unchanged); the print token's
+   leading zero; the share photo key; the smoke token; the nonce comments;
+   the Client link panel's re-read on focus.
+   ====================================================================== */
+import {
+  documentRevStamp as n293tFStamp, settlePdf as n293tFSettle, pendingPdf as n293tFPending, latestSentRevision as n293tFLatestSent,
+  type QuotePdfState as N293tFPdf,
+} from "@/lib/quote-pdf/state";
+import { sentDocumentStamp as n293tFSent } from "@/lib/quote-share/view";
+import { patchShareLink as n293tFPatchLink, setStatus as n293tFSetStatus, updateQuotePdf as n293tFUpdatePdf } from "@/lib/stores/quotes";
+import { generateQuotePdf as n293tFGenerate } from "@/lib/quote-pdf/generate";
+import { PDF_FUNCTION_BUDGET_MS as n293tFBudgetMs, stampRerenderFits as n293tFRerenderFits } from "@/lib/quote-pdf/generate";
+import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293tFRerenderDeadline } from "@/lib/quote-pdf/generate";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const SET = { companyName: "Peak Systems Group", logoDark: null };
+  const DAY = 86_400_000;
+  const chicago = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
+  const df = { customer: "C", locationId: null, contactName: null, quoteNote: "", assumptions: "", installTimeframe: "", preparedBy: "", owner: "Pat",
+    termsText: "", paymentTerms: null, pdfOptions: null, portalFirm: null, source: "estimator" };
+  const r = (n: number, reason: "manual" | "sent", at: number, extra: Record<string, unknown> = {}) =>
+    ({ rev: n, at, by: "t", reason, note: "", name: "N", value: 1, margin: 0, status: "sent", spec: { sections: [] }, ...extra }) as unknown as N293tRev;
+  const qf = (revisions: N293tRev[], extra: Record<string, unknown> = {}) =>
+    ({ id: "Q-F", name: "N", customer: "C", customerId: null, value: 1, margin: 0, status: "sent", source: "estimator", quoteType: "system", owner: "Pat",
+       createdAt: 7, updatedAt: 99 * DAY, history: [], review: {}, estNo: 1007, revisions, ...extra }) as unknown as N293tQuote;
+
+  // ---- one counting rule: what quoteDocumentDataFor prints is documentRevStamp ----
+  const cases = [qf([]), qf([r(1, "sent", 1), r(2, "manual", 2), r(3, "sent", 3)]), qf([r(1, "sent", 1)], { updatedAt: 0 })];
+  ok(cases.every((q) => { const d = n293tDocData(q, null, SET); const s = n293tFStamp(q); return s.revNum === d.revNum && s.revDateMs === d.revDateMs; }) &&
+     n293tFStamp(cases[1]).revNum === 3 && n293tFStamp(cases[2]).revDateMs === 7,
+    "#293t final 1: documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (revisions so far, at least 1; updatedAt, else createdAt)");
+  const ready: N293tFPdf = { status: "ready", at: 10, savedAt: 5, blobPath: "p", printed: { revNum: 2, revDateMs: 5 } };
+  const pend = n293tFPending(ready, 20, 21);
+  const settled = n293tFSettle(pend, 20, { ok: true, blobPath: "p2", printed: { revNum: 3, revDateMs: 20 } }, 30);
+  const bare = n293tFSettle(pend, 20, { ok: true, blobPath: "p2" }, 30);
+  ok(!("printed" in pend) && settled?.printed?.revNum === 3 && settled.printed.revDateMs === 20 && !!bare && !("printed" in bare),
+    "#293t final 1: a settled file records what it printed; a new save's pending state never carries the old file's stamp");
+
+  // ---- the online stamp: frozen when recorded, derived by the PDF rule otherwise ----
+  const fz = r(3, "sent", 9 * DAY, { docFields: { ...df, revNo: 2, issuedAt: 4 * DAY } });
+  const three = [r(1, "sent", DAY), r(2, "manual", 2 * DAY)];
+  const s1 = n293tFSent(qf([...three, fz]), fz);
+  ok(s1.revNo === 2 && s1.issuedAt === 4 * DAY, "#293t final 1: a revision with a frozen stamp prints exactly it");
+  const noStamp = r(3, "sent", 9 * DAY, { docFields: df, pdfSavedAt: 6 * DAY });
+  const old = r(3, "sent", 9 * DAY);
+  const s2 = n293tFSent(qf([...three, noStamp]), noStamp);
+  const s3 = n293tFSent(qf([...three, old]), old);
+  ok(s2.revNo === 2 && s2.issuedAt === 6 * DAY && s3.revNo === 2 && s3.issuedAt === 9 * DAY,
+    "#293t final 1: without a stamp — Rev = the revisions before it, date = the copied file's savedAt, else the revision's own date");
+  const first = r(1, "sent", 3 * DAY);
+  const s4 = n293tFSent(qf([first]), first);
+  ok(s4.revNo === 1 && s4.issuedAt === 3 * DAY, "#293t final 1: a first send with no stamp derives Rev 1 (the PDF's floor of 1)");
+
+  // ---- recall + edit + resend on a later day: the web pages print the PDF's Rev and date ----
+  const T1 = Date.UTC(2026, 9, 1, 18), T2 = Date.UTC(2026, 9, 5, 18), T3 = Date.UTC(2026, 9, 8, 18);
+  const rev1 = r(1, "sent", T1, { docFields: { ...df, revNo: 1, issuedAt: T1 - 60_000 } });
+  // Day 5: recalled + edited + saved → the render reads revisions [rev1], updatedAt T2.
+  const pdfProps = n293tDocData(qf([rev1], { updatedAt: T2, status: "draft" }), null, SET);
+  // Day 8: sent from the hub → rev 2 cut; its copy freezes what that file printed.
+  const rev2 = r(2, "sent", T3, { docFields: { ...df, revNo: pdfProps.revNum, issuedAt: pdfProps.revDateMs }, pdfSavedAt: T2 + 5 });
+  const live = qf([rev1, rev2], { updatedAt: T3 + DAY });
+  const webProps = n293tDocData(n293tAsOf(live, rev2), null, SET);
+  const hdr = n293tHeader(live, rev2);
+  ok(pdfProps.revNum === 1 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
+    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev 1 and save date, not rev 2 / the send day");
+  ok(hdr === `EST-1007 · Rev 1 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
+    "#293t final 1: the online header line names the PDF's Rev and date too");
+  const firstWeb = n293tDocData(n293tAsOf(qf([rev1]), rev1), null, SET);
+  ok(firstWeb.revNum === 1 && firstWeb.revDateMs === T1 - 60_000 && n293tHeader(qf([rev1]), rev1) === `EST-1007 · Rev 1 · sent ${chicago(T1 - 60_000)}`,
+    "#293t final 1: first send — the online pages and the PDF say the same Rev and date");
+  const oldRevs = [r(1, "sent", T1), r(2, "manual", T2), r(3, "sent", T3)];
+  const oldWeb = n293tDocData(n293tAsOf(qf(oldRevs), oldRevs[2]), null, SET);
+  ok(oldWeb.revNum === 2 && oldWeb.revDateMs === T3, "#293t final 1: an old revision without the fields derives the PDF counting rule (2 revisions before it) and its own date");
+  const headerOnly = n293tAsOf(live, rev2) as unknown as Record<string, unknown>;
+  ok(!("revNo" in headerOnly) && !("issuedAt" in headerOnly), "#293t final 1: the stamp never leaks into the as-sent quote's header fields");
+
+  // ---- the writers ----
+  const qs = rd("src/lib/stores/quotes.ts");
+  const srp = qs.slice(qs.indexOf("export async function setRevisionPdfPath("), qs.indexOf("\n}\n", qs.indexOf("export async function setRevisionPdfPath(")));
+  ok(srp.includes("if (r && !r.pdfBlobPath) {") && srp.includes("revNo: p.revNum, issuedAt: p.revDateMs") && srp.includes("r.pdfSavedAt = file.savedAt"),
+    "#293t final 1: the stamp is frozen once, in the same write as the revision's PDF copy");
+  const gen = rd("src/lib/quote-pdf/generate.ts");
+  ok(gen.includes("const first = await printedStamp(quoteId, q);") && gen.includes("{ ok: true, blobPath: path, printed }") &&
+     gen.includes("{ savedAt: pdf.savedAt, printed: pdf.printed ?? null }"),
+    "#293t final 1: the generator records what a quote file printed and the sent-revision copy carries it");
+  // Fix round 2: the stamp re-render's budget gate.
+  ok(n293tFBudgetMs === 120_000 && PDF_COALESCE_MS222 + RENDER_WORST_CASE_MS222 + PDF_UPLOAD_ALLOWANCE_MS222 <= n293tFBudgetMs &&
+     PDF_COALESCE_MS222 + 2 * RENDER_WORST_CASE_MS222 + PDF_UPLOAD_ALLOWANCE_MS222 > n293tFBudgetMs,
+    "#293t fix round 2: one worst-case render fits the 120 s budget, two never do — so the re-render is gated on time left");
+  ok(n293tFRerenderMinMs === 30_000 && n293tFRerenderFits(PDF_COALESCE_MS222) && n293tFRerenderFits(60_000) && n293tFRerenderFits(70_000) &&
+     !n293tFRerenderFits(70_001) && !n293tFRerenderFits(71_000) && !n293tFRerenderFits(Number.NaN) && !n293tFRerenderFits(-1),
+    "#293t fix round 2b: a re-render runs while elapsed + RERENDER_MIN_MS (30 s) + the upload allowance ≤ 120 s — up to 70 s in");
+  ok(n293tFRerenderDeadline(60_000) === 40_000 && n293tFRerenderDeadline(70_000) === n293tFRerenderMinMs && n293tFRerenderDeadline(PDF_COALESCE_MS222) === 96_000 &&
+     PDF_COALESCE_MS222 + n293tFRerenderDeadline(PDF_COALESCE_MS222) + PDF_UPLOAD_ALLOWANCE_MS222 === n293tFBudgetMs,
+    "#293t fix round 2b: the re-render's hard stop is 120 − 20 − elapsed (60 s in → 40 s), so render 2 can never eat the upload allowance");
+  ok(gen.includes("isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(elapsed)") && gen.includes("(stampRerenderDeadlineMs(elapsed))") &&
+     gen.includes("AbortSignal.timeout(ms)") && (gen.match(/await render\(/g) || []).length === 2,
+    "#293t fix round 2: the generator re-renders at most once, only for a still-pending save with budget left, under a deadline signal");
+  const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
+  ok(qdd.includes("const stamp = documentRevStamp(q);") && qdd.includes("revNum: stamp.revNum,") && qdd.includes("revDateMs: stamp.revDateMs,") &&
+     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };"),
+    "#293t final 1: the PDF's Rev/date rule is unchanged, now named once (documentRevStamp)");
+
+  // ---- item 7: the print token's leading zero ----
+  const S = "test-secret-293tf";
+  const NOW = 1_800_000_000_000;
+  const pt = n293tSignPrint(S, "quote", "Q-1", NOW);
+  ok(n293tVerifyPrint(S, pt, "quote", "Q-1", NOW) && !n293tVerifyPrint(S, "0" + pt, "quote", "Q-1", NOW) && !n293tVerifyPrint(S, "00" + pt, "quote", "Q-1", NOW),
+    "#293t final 7: a print token with a leading zero on its expiry never verifies (one expiry, one spelling)");
+
+  // ---- items 2, 3, 5, 8, 9: wiring ----
+  ok(rd("scripts/smoke-routes.ts").includes(`"/share/quote/Q-2041/1.${"A".repeat(43)}",`), "#293t final 2: the smoke share token passes the shape check (reaches the DB read + HMAC verify)");
+  ok(rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts").includes('rateLimit("share-photo:" + (clientIp(req) || "unknown"), SHARE_PHOTO_PER_MIN, 60_000)'),
+    "#293t final 3: the share photo key is share-photo:<ip>, or share-photo:unknown, built like the page's");
+  const lk = rd("src/lib/quote-share/links.ts");
+  ok(lk.includes("let refusal = null as string | null;"), "#293t final 5: the create refusal keeps its string type across the callback");
+  ok(lk.includes("if (!cur.shareLink) return { ok: true };") && lk.indexOf("if (!cur.shareLink) return { ok: true };") < lk.indexOf('patchShareLink(quoteId, { kind: "revoke"') &&
+     qs.includes("if (!prev) return; // nothing to revoke — no link minted, doc unchanged"),
+    "#293t final 4: Revoke on a quote with no link returns before any write (and the store path mints no link, doc unchanged)");
+  const tokSrc = rd("src/lib/quote-share/token.ts");
+  ok(!tokSrc.includes("lives only in the database") && tokSrc.includes("/api/sync/pull ships whole quote") && qs.includes("/api/sync/pull ships whole quote docs (nonce"),
+    "#293t final 8: the nonce comments say staff browsers can see it via /api/sync/pull — and that it is no credential without AUTH_SECRET");
+  const panel = rd("src/app/(app)/estimator/client-link-panel.tsx");
+  ok(panel.includes('window.addEventListener("focus", refresh);') && panel.includes('document.addEventListener("visibilitychange", refresh);') &&
+     panel.includes('window.removeEventListener("focus", refresh);') && (panel.match(/await reload\(\);/g) || []).length >= 4 && !panel.includes("window.confirm"),
+    "#293t final 9: the Client link panel re-reads its status on focus and after its own actions (listeners cleaned up; confirms stay inline)");
+}
+
+async function finalFix293tAsyncChecks(): Promise<void> {
+  // ---- item 4 + 6: Revoke with no link, and a refused create, mint no link (doc / link unchanged) ----
+  const QN = fixtureId(293, "t-final-nolink");
+  await n293tQCreate({ id: QN, name: "#293t no link", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator" });
+  registerFixture("quotes", QN);
+  const before = JSON.stringify(await n293tQGet(QN));
+  const rv = await n293tRevoke(QN, "Revoker");
+  ok(rv.ok && JSON.stringify(await n293tQGet(QN)) === before, "#293t final 4 (DB): Revoke on a quote that never had a link succeeds — no link minted, doc unchanged (revokeShareLink returns before the store)");
+  const direct = await n293tFPatchLink(QN, { kind: "revoke", by: "x", now: Date.now() });
+  ok(direct?.wrote === false && !direct.quote.shareLink, "#293t final 4 (DB): the store's revoke path mints nothing when there is no link");
+
+  await withPdfEnv222(async () => {
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    delete process.env.VERCEL;
+    const root = mkdtempSync(join(tmpdir(), "quote-pdfs-293tf-"));
+    process.env.QUOTE_PDF_DIR = root;
+    try {
+      const origin = "http://print.test";
+      const secret = "spec-secret-293tf";
+      const sec = { id: "sysF", name: "Test293tF", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "T293TF", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+      const SET = { companyName: "Peak Systems Group", logoDark: null };
+      const webHref = { href: (id: string) => `/t/photo/${id}` };
+      const tick = () => new Promise<void>((res) => setTimeout(res, 5));
+      // What the print route prints, read at render time — exactly its own call.
+      const render = (id: string, seen: { v: { revNum: number; revDateMs: number } | null }, during?: () => Promise<unknown>) => async () => {
+        if (during) await during();
+        const d = n293tDocData((await n293tQGet(id))!, null, SET);
+        seen.v = { revNum: d.revNum, revDateMs: d.revDateMs };
+        return Buffer.from("%PDF-1.4 293tf");
+      };
+      const saveAndRender = async (id: string, seen: { v: { revNum: number; revDateMs: number } | null }, during?: () => Promise<unknown>) => {
+        const savedAt = Date.now();
+        await n293tFUpdatePdf(id, (cur) => n293tFPending(cur, savedAt, savedAt));
+        await n293tFGenerate({ quoteId: id, savedAt, origin, secret, render: render(id, seen, during) });
+        return savedAt;
+      };
+      const web = async (id: string) => {
+        const q = (await n293tQGet(id))!;
+        const st = n293tState(q);
+        if (st.kind !== "ok") return null;
+        const props = await n293tLoad(q, { revision: st.rev, photos: webHref });
+        return props ? { q, rev: st.rev, props, header: n293tHeader(q, st.rev) } : null;
+      };
+      const send = (id: string) => n293tFSetStatus(id, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+      const fileOf = async (id: string) => {
+        const p = (await n293tQGet(id))?.pdf;
+        const store = pdfStorage();
+        if (!p?.blobPath || "unavailable" in store) return null;
+        return (await store.read(p.blobPath))?.toString() ?? null;
+      };
+
+      // 1. Send from the hub after a save (the render ran BEFORE the cut) — first send.
+      const QA = fixtureId(293, "t-final-hub");
+      await n293tQCreate({ id: QA, name: "#293tF hub", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+      registerFixture("quotes", QA);
+      await n293tQUpdate(QA, { quoteNote: "First note 293tF" });
+      const seen1 = { v: null as { revNum: number; revDateMs: number } | null };
+      let qaRenders = 0;
+      await saveAndRender(QA, seen1, async () => { qaRenders++; });
+      const pdf1 = (await n293tQGet(QA))?.pdf;
+      ok(!!seen1.v && pdf1?.status === "ready" && pdf1.printed?.revNum === seen1.v.revNum && pdf1.printed.revDateMs === seen1.v.revDateMs,
+        "#293t final 1 (DB): the generator records exactly the Rev + date the print route printed");
+      ok(qaRenders === 1, `#293t fix round 2 (DB): no write during the render → exactly one Chrome run (got ${qaRenders})`);
+      await tick();
+      await send(QA);
+      const w1 = await web(QA);
+      ok(!!w1 && !!seen1.v && !!w1.rev.pdfBlobPath && w1.rev.docFields?.revNo === seen1.v.revNum && w1.rev.docFields?.issuedAt === seen1.v.revDateMs &&
+         w1.props.revNum === seen1.v.revNum && w1.props.revDateMs === seen1.v.revDateMs && w1.header.includes(` · Rev ${seen1.v.revNum} · `),
+        "#293t final 1 (DB): first send — the copy freezes the PDF's Rev + date and the online document + header print them");
+
+      // 2. Recall, edit, save, then send again from the hub: the PDF still says Rev 1 (rendered before rev 2 was cut).
+      await n293tFSetStatus(QA, "draft", "spec");
+      await tick();
+      await n293tQUpdate(QA, { quoteNote: "Second note 293tF" });
+      const seen2 = { v: null as { revNum: number; revDateMs: number } | null };
+      const saved2 = await saveAndRender(QA, seen2);
+      await tick();
+      await send(QA);
+      const w2 = await web(QA);
+      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 1 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
+         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 1 · ") && w2.props.quoteNote === "Second note 293tF",
+        "#293t final 1 (DB): recall + edit + resend — the online pages print the PDF's Rev 1 and save date, not the revision's own Rev 2 / send time");
+
+      // 3. Save + send in one action (the render runs AFTER the cut): the PDF says Rev 2 — and so do the pages.
+      const QB = fixtureId(293, "t-final-onesave");
+      await n293tQCreate({ id: QB, name: "#293tF one save", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+      registerFixture("quotes", QB);
+      await send(QB);
+      await n293tFSetStatus(QB, "draft", "spec");
+      await tick();
+      await n293tQUpdate(QB, { quoteNote: "One-save note 293tF" });
+      const savedB = Date.now();
+      await n293tFUpdatePdf(QB, (cur) => n293tFPending(cur, savedB, savedB));
+      await send(QB); // the cut lands while the render is still pending
+      const seen3 = { v: null as { revNum: number; revDateMs: number } | null };
+      await n293tFGenerate({ quoteId: QB, savedAt: savedB, origin, secret, render: render(QB, seen3) });
+      const w3 = await web(QB);
+      ok(!!w3 && !!seen3.v && seen3.v.revNum === 2 && w3.rev.rev === 2 && w3.rev.docFields?.revNo === 2 && w3.props.revNum === 2 &&
+         w3.props.revDateMs === seen3.v.revDateMs && w3.header.includes(" · Rev 2 · "),
+        "#293t final 1 (DB): save + send in one action — the render after the cut prints Rev 2, and the pages follow the PDF, not a fixed rule");
+
+      // 4. A write lands during the render: nothing is recorded; the pages derive (revisions before it, the file's savedAt).
+      const QC = fixtureId(293, "t-final-race");
+      await n293tQCreate({ id: QC, name: "#293tF race", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+      registerFixture("quotes", QC);
+      await n293tQUpdate(QC, { quoteNote: "Race note 293tF" });
+      const seen4 = { v: null as { revNum: number; revDateMs: number } | null };
+      let qcMoves = 0;
+      const savedC = Date.now();
+      await n293tFUpdatePdf(QC, (cur) => n293tFPending(cur, savedC, savedC));
+      await n293tFGenerate({
+        quoteId: QC, savedAt: savedC, origin, secret,
+        render: async () => {
+          qcMoves++;
+          await tick();
+          await n293tQUpdate(QC, { category: qcMoves === 1 ? "Rigging" : "Lighting" } as never);
+          const d = n293tDocData((await n293tQGet(QC))!, null, SET);
+          seen4.v = { revNum: d.revNum, revDateMs: d.revDateMs };
+          return Buffer.from(`%PDF-1.4 293tf-qc render ${qcMoves}`);
+        },
+      });
+      const pdf4 = (await n293tQGet(QC))?.pdf;
+      ok(pdf4?.status === "ready" && !pdf4.printed, "#293t final 1 (DB): a write during the render — and again during its one re-render → no stamp recorded (never a guess)");
+      ok(qcMoves === 2, `#293t fix round 2 (DB): a quote that moves during both renders is rendered exactly twice, then derives (got ${qcMoves})`);
+      ok(pdf4?.status === "ready" && !!pdf4.blobPath && (await fileOf(QC)) === "%PDF-1.4 293tf-qc render 2",
+        "#293t fix round 2 (DB): a quote that moves during both renders stores render 2's file (the last one rendered), unstamped");
+      await tick();
+      await send(QC);
+      const w4 = await web(QC);
+      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
+        "#293t final 1 (DB): an unstamped copy derives the PDF counting rule — Rev 1, the copied file's savedAt");
+
+      // 5. Fix round 2 — the quote moves during render 1 only (the Send click mid-render): one re-render, its stamp recorded.
+      const mkRace = async (tag: string) => {
+        const id = fixtureId(293, `t-r2-${tag}`);
+        await n293tQCreate({ id, name: `#293tF r2 ${tag}`, customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+        registerFixture("quotes", id);
+        await n293tQUpdate(id, { quoteNote: `R2 ${tag} 293tF` });
+        const savedAt = Date.now();
+        await n293tFUpdatePdf(id, (cur) => n293tFPending(cur, savedAt, savedAt));
+        return { id, savedAt };
+      };
+      type R2Seen = { revNum: number; revDateMs: number; signal: boolean; body: string };
+      const r2Render = (id: string, log: R2Seen[], moveOn: (n: number) => boolean, failOn?: (n: number) => boolean) =>
+        async (_url: string, opts?: { signal?: AbortSignal }) => {
+          const n = log.length + 1;
+          if (moveOn(n)) { await tick(); await n293tQUpdate(id, { category: `Move ${n}` } as never); }
+          if (failOn?.(n)) { log.push({ revNum: -1, revDateMs: -1, signal: !!opts?.signal, body: "failed" }); throw new Error("render 2 failed"); }
+          const d = n293tDocData((await n293tQGet(id))!, null, SET);
+          const body = `%PDF-1.4 293tf-r2 render ${n}`;
+          log.push({ revNum: d.revNum, revDateMs: d.revDateMs, signal: !!opts?.signal, body });
+          return Buffer.from(body);
+        };
+      {
+        const { id, savedAt } = await mkRace("once");
+        const log: R2Seen[] = [];
+        const res = await n293tFGenerate({ quoteId: id, savedAt, origin, secret, render: r2Render(id, log, (n) => n === 1) });
+        const pdf = (await n293tQGet(id))?.pdf;
+        ok(log.length === 2 && res?.status === "ready" && pdf?.printed?.revNum === log[1].revNum && pdf.printed.revDateMs === log[1].revDateMs,
+          "#293t fix round 2 (DB): the quote moved during render 1 only → rendered once more, and render 2's Rev + date are recorded");
+        ok(log.length === 2 && !log[0].signal && log[1].signal && (await fileOf(id)) === log[1].body,
+          "#293t fix round 2 (DB): the re-render is the stored file and runs under a deadline signal (render 1 never gets one)");
+      }
+      {
+        const { id, savedAt } = await mkRace("late");
+        const log: R2Seen[] = [];
+        let clockCalls = 0;
+        const asked: number[] = [];
+        const res = await n293tFGenerate({
+          quoteId: id, savedAt, origin, secret, render: r2Render(id, log, (n) => n === 1),
+          now: () => (clockCalls++ === 0 ? 0 : 71_000), deadlineSignal: (ms) => { asked.push(ms); return new AbortController().signal; },
+        });
+        ok(log.length === 1 && asked.length === 0 && res?.status === "ready" && !res.printed,
+          "#293t fix round 2b (DB): 71 s in, under 30 s of render time left → no second Chrome run, no stamp (the pages derive)");
+      }
+      {
+        const { id, savedAt } = await mkRace("sixty");
+        const log: R2Seen[] = [];
+        let clockCalls = 0;
+        const asked: number[] = [];
+        const res = await n293tFGenerate({
+          quoteId: id, savedAt, origin, secret, render: r2Render(id, log, (n) => n === 1),
+          now: () => (clockCalls++ === 0 ? 0 : 60_000), deadlineSignal: (ms) => { asked.push(ms); return new AbortController().signal; },
+        });
+        ok(log.length === 2 && log[1].signal && asked.join(",") === "40000" && res?.status === "ready" && res.printed?.revNum === log[1].revNum && res.printed.revDateMs === log[1].revDateMs,
+          `#293t fix round 2b (DB): 60 s in → the re-render runs with a 40 s hard stop and its stamp is recorded (asked ${asked.join(",")})`);
+      }
+      {
+        const { id, savedAt } = await mkRace("aborted");
+        const log: R2Seen[] = [];
+        const res = await n293tFGenerate({
+          quoteId: id, savedAt, origin, secret,
+          render: async (url, opts) => {
+            if (opts?.signal?.aborted) { log.push({ revNum: -1, revDateMs: -1, signal: true, body: "aborted" }); throw new Error("The render was cancelled."); }
+            return r2Render(id, log, (n) => n === 1)(url, opts);
+          },
+          deadlineSignal: () => AbortSignal.abort(),
+        });
+        ok(log.length === 2 && log[1].body === "aborted" && res?.status === "ready" && !res.printed && (await fileOf(id)) === "%PDF-1.4 293tf-r2 render 1",
+          "#293t fix round 2b (DB): a re-render stopped at its deadline keeps render 1's file, ready and unstamped");
+      }
+      {
+        const { id, savedAt } = await mkRace("fail");
+        const log: R2Seen[] = [];
+        const res = await n293tFGenerate({ quoteId: id, savedAt, origin, secret, render: r2Render(id, log, (n) => n === 1, (n) => n === 2) });
+        ok(log.length === 2 && res?.status === "ready" && !res.printed && (await fileOf(id)) === "%PDF-1.4 293tf-r2 render 1",
+          "#293t fix round 2 (DB): a failed re-render keeps render 1's file, ready and unstamped — never a failed PDF");
+      }
+      {
+        const { id, savedAt } = await mkRace("superseded");
+        const log: R2Seen[] = [];
+        const res = await n293tFGenerate({
+          quoteId: id, savedAt, origin, secret,
+          render: async (url, opts) => {
+            if (log.length === 0) {
+              await n293tFUpdatePdf(id, (cur) => n293tFPending(cur, savedAt + 1, savedAt + 1));
+              await tick();
+              await n293tQUpdate(id, { category: "Superseded move" } as never); // the quote moves too, so only the isPendingFor guard stops a re-render
+            }
+            return r2Render(id, log, () => false)(url, opts);
+          },
+        });
+        ok(log.length === 1 && res === null, "#293t fix round 2 (DB): a newer save taking the pending state mid-render (and the quote moving) → no re-render; the render is superseded as before");
+      }
+
+      // 6. A refused create mints no link — even over an expired link (patchQuote still rewrites the row; the link is unchanged).
+      const made = await n293tEnsure(QA, "Tester", { secret });
+      const linkBefore = JSON.stringify((await n293tQGet(QA))?.shareLink);
+      const refused = await n293tFPatchLink(QA, { kind: "create", by: "x", now: Date.now() + 400 * DAY, allow: () => false });
+      ok(made.ok && refused?.wrote === false && JSON.stringify((await n293tQGet(QA))?.shareLink) === linkBefore,
+        "#293t final 6 (DB): patchShareLink create with allow() false mints no link (wrote false) and leaves the link unchanged");
+      ok(n293tFLatestSent((await n293tQGet(QA))?.revisions)?.rev === 2, "#293t final (DB): fixture sanity — the hub quote's latest sent revision is rev 2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 }

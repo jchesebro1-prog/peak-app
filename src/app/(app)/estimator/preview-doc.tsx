@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { QuotePdfViewer } from "@/components/quote-pdf/quote-pdf-viewer";
+import { ClientLinkPanel } from "./client-link-panel";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { systemFreight, systemItemsRev, systemSellTotal } from "./pricing";
 import type { PaymentTerms, SpecSection } from "./types";
@@ -55,7 +56,7 @@ const actionLink: CSSProperties = {
   border: "none",
 };
 
-export type PdfToggle = "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfItemizedAppendix";
+export type PdfToggle = "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfItemizedAppendix" | "pdfCutSheets";
 
 export type PreviewProps = {
   phone: boolean;
@@ -80,6 +81,9 @@ export type PreviewProps = {
   pdfTerms: boolean;
   pdfOptions: boolean;
   pdfItemizedAppendix: boolean;
+  pdfCutSheets: boolean;
+  /** #292 — sheets the saved PDF would append (countCutSheetTypes over the live sections). */
+  cutSheetCount: number;
   paymentTerms: PaymentTerms;
   paymentTermsOptions: readonly PaymentTerms[];
   setPaymentTerms: (terms: PaymentTerms) => void;
@@ -177,6 +181,27 @@ export default function PreviewDoc(p: PreviewProps) {
             <button type="button" onClick={() => p.togglePdf("pdfTerms")} style={p.pdfTerms ? segOn : segOff}>
               {(p.pdfTerms ? "✓ " : "") + "Terms"}
             </button>
+            <button
+              type="button"
+              disabled={p.cutSheetCount === 0}
+              title={p.cutSheetCount === 0 ? "This quote has no curtains." : undefined}
+              onClick={() => p.togglePdf("pdfCutSheets")}
+              style={{ ...(p.pdfCutSheets && p.cutSheetCount > 0 ? segOn : segOff), ...(p.cutSheetCount === 0 ? { cursor: "not-allowed", opacity: 0.55 } : {}) }}
+            >
+              {(p.pdfCutSheets && p.cutSheetCount > 0 ? "✓ " : "") + "Cut sheets"}
+            </button>
+            {p.pdfCutSheets && p.cutSheetCount > 0 && (
+              <div style={{ fontSize: 11.5, color: "#5b616e", lineHeight: 1.45, padding: "2px 4px" }}>
+                {`+ ${p.cutSheetCount} cut sheet${p.cutSheetCount === 1 ? "" : "s"} (Client style) print after the estimate — `}
+                {p.savedQuoteId ? (
+                  <a href={`/estimator/cut-sheets?id=${encodeURIComponent(p.savedQuoteId)}&style=client`} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                    View cut sheets →
+                  </a>
+                ) : (
+                  "save to view them"
+                )}
+              </div>
+            )}
             <select
               value={p.paymentTerms}
               onChange={(event) => p.setPaymentTerms(event.target.value as PaymentTerms)}
@@ -229,6 +254,7 @@ export default function PreviewDoc(p: PreviewProps) {
           ) : (
             <span style={{ ...actionLink, color: "#9aa0ab", background: "#f1f2f5", cursor: "default" }}>Download PDF</span>
           )}
+          {p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}
         </aside>
         <div
           className="est-scroll est-docwrap"

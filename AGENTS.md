@@ -591,7 +591,7 @@ See `.env.example`.
     stay datasheet-only. Remaining: a "Manual URL" import column. Punch
     item #290.
 
-32. ✅ **Narrative-first client preview — Slice 1** (#293, D539–D545) —
+32. ✅ **Narrative-first client preview — Slices 1–3** (#293, D539–D545, D549–D552, D565–D572) —
     key products on a system (★ per line; `SpecSection.keyProducts`
     anchored to line id + sku, sanitized server-side, remapped on Copy
     here), write-once product paragraphs on the catalog part
@@ -600,10 +600,34 @@ See `.env.example`.
     system intros, Draft narrative (copy only — D89), the customer PDF
     printing each block with the part's primary photo floated right
     (data URIs; byte-identical without blocks), and Show on PDF →
-    Itemized appendix. Slices 2 (system library) and 3 (client link)
-    follow. Spec `docs/superpowers/specs/2026-10-01-narrative-client-preview-design.md`.
+    Itemized appendix. Slice 2 adds the computed system library
+    (sent/won systems from the latest sent revision; 5-minute index
+    invalidated by setStatus/remove), Load system (re-priced through
+    Copy system's shared `copy-pricing.ts`, vendor lines left out) and
+    append-only Merge narrative. Slice 3 puts the latest SENT version online: `/portal/quotes/[id]` and a signed no-login
+    `/share/quote/[id]/[token]` (HMAC over a stored nonce, 60 days, Revoke rotates; Send to copy), one
+    `onlineEstimateState` rule, a server-side Narrative / BOM toggle, `layout="web"`, scoped photo routes, revisions
+    freezing the printed header (`docFields`) and the sent PDF's Rev/date; the print route joins the shared loader
+    after #292 merges. Spec `docs/superpowers/specs/2026-10-01-narrative-client-preview-design.md`.
 
-33. ✅ **Catalog photo sheet** (#294, D546–D548) — Catalog → Datasheets →
+33. ✅ **Curtain cut sheets** (#292, D553–D564) — every curtain type on a
+    system quote gets a deterministic cut sheet (CS-1, CS-2…): front
+    elevation from the finished size (marks ≤ 12" o.c.), a mounting detail,
+    materials (fabric, flame rating, sewn area from `curtainCost`, weight
+    from `computeSetWeight`, never guessed) and mounting hardware (the
+    linked track line's components, else Estimating Rules → Curtain
+    mounts, `curtain_mount_hardware`). `src/lib/curtain-cut-sheets/` reads
+    Estimator (structured `curtainInputs`, legacy desc parser, the
+    `ct-<line id>-<nonce>` curtain↔track key) and Grid quotes; Submittal
+    (Letter landscape, title block) and Client (Letter portrait, plain
+    language) styles at `/estimator/cut-sheets`, rendered through a signed
+    `/print/cutsheets/[quoteId]` route into a `cutsheets/` folder in client
+    packages and an off-by-default **Cut sheets** toggle on the estimate
+    PDF. Fabric parts gain flame rating + weight fields. Remaining is
+    Jeff-gated: confirm the mount types, fill Curtain mounts, set fabric
+    oz + flame ratings (PUNCHLIST #292).
+
+34. ✅ **Catalog photo sheet** (#294, D546–D548) — Catalog → Datasheets →
     Photo sheet (`/catalog/documents/photos`): export an .xlsx with one row
     per quoted or portal part (Manufacturer · MFR Part # · SKU · … · Photo
     1–3 · Status), fill in image links or file names (Photo 1 becomes the

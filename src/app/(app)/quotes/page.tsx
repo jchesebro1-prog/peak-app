@@ -961,6 +961,11 @@ function SelectedPanel({
             Spec from this quote →
           </Link>
         )}
+        {(!q.quoteType || q.quoteType === "system") && (
+          <Link href={`/estimator/cut-sheets?id=${encodeURIComponent(q.id)}`} className="pk-btn-outline">
+            Cut sheets →
+          </Link>
+        )}
         <div
           style={{
             marginLeft: "auto",

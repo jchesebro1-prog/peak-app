@@ -28,7 +28,31 @@ export type QuotePdfState = {
    * exist. A real render's pendingPdf never carries it.
    */
   stale?: true;
+  /**
+   * #293 slice 3 — the Rev N and date this READY file printed (a quote
+   * document only), recorded by the generator when it can be sure of them;
+   * absent when it can't (a write landed during the render) and on files
+   * rendered before #293. Copied onto a sent revision with the file, so the
+   * online pages print exactly what the customer's PDF says.
+   */
+  printed?: DocumentRevStamp;
 };
+
+/**
+ * #293 slice 3 — the Rev N and date the customer QuoteDocument prints for a
+ * quote as it stands at render time: Rev = the revisions cut so far (at
+ * least 1), the date = the last update. quoteDocumentDataFor reads exactly
+ * this, so the generator can record what a file printed. Pure.
+ */
+export type DocumentRevStamp = { revNum: number; revDateMs: number };
+
+export function documentRevStamp(q: {
+  revisions?: readonly unknown[] | null;
+  updatedAt?: number | null;
+  createdAt?: number | null;
+}): DocumentRevStamp {
+  return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };
+}
 
 /** What a browser sees: the state without the storage path. */
 export type QuotePdfView = {
@@ -41,7 +65,7 @@ export type QuotePdfView = {
   outOfDate?: boolean;
 };
 
-export type PdfOutcome = { ok: true; blobPath: string } | { ok: false; error: string };
+export type PdfOutcome = { ok: true; blobPath: string; printed?: DocumentRevStamp | null } | { ok: false; error: string };
 
 /** A render still "pending" this long after it started died with its function. */
 export const PDF_PENDING_STALE_MS = 150_000;
@@ -100,7 +124,7 @@ export function settlePdf(
   now: number
 ): QuotePdfState | undefined {
   if (!cur || cur.savedAt !== savedAt) return undefined;
-  if (outcome.ok) return { status: "ready", at: now, savedAt, blobPath: outcome.blobPath };
+  if (outcome.ok) return { status: "ready", at: now, savedAt, blobPath: outcome.blobPath, ...(outcome.printed ? { printed: outcome.printed } : {}) };
   return failedPdf(cur, savedAt, outcome.error, now);
 }
 

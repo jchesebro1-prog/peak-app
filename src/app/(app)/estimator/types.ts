@@ -93,6 +93,8 @@ export type SpecItem = {
   laborTravel?: LaborTravelKind;
   /** #270: links a mobilization line and its travel lines (same key). */
   laborMobKey?: string;
+  /** #292: shared by a curtain line and the track line that hangs it (laborMobKey idiom) — "ct-<curtain line id at add time>". */
+  curtainTrackKey?: string;
   /** #269: every line one "Add labor" inserted shares this id; the draft
    *  that built them is `SpecSection.laborGroups[id]` (labor-group.ts). */
   laborGroup?: string;
@@ -284,8 +286,19 @@ export type CurtainDraft = {
   width: string;
   fullness: string;
   bottom: string;
+  /** #292 — "grommets" | "pipe-pocket" | "hook-loop" (vocab.ts). `hang` and `bottom` above are legacy and read by nothing.
+   *  The three #292 fields are optional only so drafts built before #292 still type; every
+   *  Estimator draft sets them (freshCurtain, curtainDraftFromLine) and readers default a blank. */
+  topFinish?: string;
+  /** #292 — "chain" | "pipe-pocket" | "hem". */
+  bottomFinish?: string;
+  /** #292 — a CURTAIN_MOUNT_TYPES id; used only when no track is linked. */
+  mountType?: string;
   /** Real vendor (Rose Brand) unit cost; when set, overrides the make-it cost. */
   vendorCostOverride?: string;
+  /** #292 — the override Edit curtain SEEDED from the line (curtainDraftFromLine); the
+   *  "Kept from the quote" hint shows only while the field still holds it. Never stored. */
+  seededVendorCost?: string;
 };
 
 /** #274: the track configurator's form (strings while editing, like every

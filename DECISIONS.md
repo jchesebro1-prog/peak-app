@@ -8686,3 +8686,224 @@ at a time straight to Blob. Every 45 s server batch re-plans from the database, 
 stopped and a re-upload of the same sheet is a no-op; a hard deadline at the budget plus 10 s, as in the Drive sync,
 stops a hung fetch. A placement warning on a stored photo is a success, not a failure. Import never deletes, replaces or
 hides an image.
+
+## D549. The system library is computed, never curated (#293 slice 2, 2026-10-01)
+
+What is indexed: sent and won system quotes (`quoteType` "system" or absent), read from the latest sent revision. A won
+quote that was never sent uses its live spec. Never indexed: Daylite history, lost quotes, drafts, post-send edits,
+service quotes, labor systems, and systems that are empty without the Rewards credit. Customer-built portal quotes
+(sources `portal-catalog`, `portal-service` and the retired `portal-self-serve`) are not in the library either — a
+default taken without asking; Jeff can reverse it. Ranking is won, then sent, then newest, then name match. Hits carry
+140-character snippets, never text bodies. The index is a 5-minute per-process cache, invalidated by every real
+`setStatus` transition and by `remove()`; a malformed library key never invalidates. When `setStatus` runs inside
+`setQuoteStage`'s outer transaction the index can stay stale for up to 5 minutes (a known window); Load re-checks as of
+now, so a stale row never loads wrong content. (Spec decision 11, §2.4, §4.1.)
+
+## D550. Load system reuses Copy system's pricing (#293 slice 2, 2026-10-01)
+
+The catalog and fixture loading moved to `estimator/copy-pricing.ts` (`copyPricingFor`), shared by Copy and Load; the
+`#274B` source check now reads that file, the one harness pin retargeted. The server re-reads the quote and picks the
+snapshot by the library rule as of now, so a re-sent quote loads its newest sent revision. Left out: vendor-quote lines
+(counted), blocks on dropped or missing lines, the Rewards credit and `room`. Placement: ids are re-minted client-side
+with blocks remapped, and the system lands after the active one. A loaded section never keeps a portal section's
+distance-based freight: `freightMiles` is removed and `freightAuto` is on, so freight follows this estimate's auto
+default. A target estimate with no tier prices loads lines at the Estimator's fallback seed (`usableTierMargin`, now
+shared, moved to `estimator/tier-reprice.ts`). A gone key answers "That estimate is no longer available" and
+invalidates the index. (Spec decision 12, §4.2.)
+
+## D551. Merge narrative is append-only (#293 slice 2, 2026-10-01)
+
+Intros are deduped after whitespace normalization; an intro that would pass `MAX_INTRO` is skipped and counted. A block
+anchors to the first eligible unmarked line with its sku, and is never invented. Overflow at `MAX_KEY_PRODUCTS` is
+reported separately (`skippedFull`), a deviation from the spec's `skippedNoLine`, so the notice never tells staff to
+"add the part first" for a full system. Merge never switches presentation. (Spec decision 13, §2.5.)
+
+## D552. Where the library lives in the UI (#293 slice 2, 2026-10-01)
+
+**+ From library…** sits under the cards column's **+ Add system**, because the rail's own button reads "+ Add" and has
+no room. **Merge narrative from library…** is in the narrative column's ⋯ menu, because the system card has no ⋯ menu
+(spec §4.2 assumed one). One modal serves both modes; Has narrative starts on in merge mode. While a Load is in flight,
+Close, Cancel and Esc are disabled; a failed search shows Retry; a failed entry unticks. The Load notice reuses the
+move/copy banner (`verb: "Loaded"`).
+
+## D553. One cut sheet per curtain type; the type key (#292, 2026-10-01)
+
+A curtain type is the same name (trimmed, case-insensitive) + fabric + fullness + top finish + bottom finish + mount,
+and the mount is the linked track's series and mounting when a track is linked, else the picked mount type. A tracked
+curtain's key also carries the track series and the carrier spacing, so one group always has one hardware source and
+one spacing. Size is not part of the type: a sheet lists total qty and a size schedule of every finished W x H with its
+qty. Sheets are numbered CS-1, CS-2... in first-appearance order (section order, then line order; Grid placement order).
+Optional-scope curtain lines (`option: true`) get no sheet and are listed as left out on the staff page, the
+`bomFromQuote` rule. Two adapters feed one collector: a quote with non-empty `spec.sections` reads through the Estimator
+adapter, else `spec.kind === "grid"` through the Grid adapter, so a quote is read by exactly one.
+
+## D554. Elevation drawn from finished dimensions, using the pricing and steel functions (#292, 2026-10-01)
+
+The elevation is drawn from the finished W x H that `curtainCost` prices and `computeSetWeight` weighs; sewn area and
+weight on the sheet come from those two functions, never a parallel formula. One architectural scale (the largest that
+fits), at most three panels drawn and "Typical" beyond that, 3-1/2" webbing and 4" bottom hems and pockets (shop
+standards awaiting Jeff). Top-finish marks default to 12" o.c. maximum, spaced evenly with both ends marked
+(`count = ceil(W*12 / s) + 1`); a tracked curtain's marks are carriers at the line's `carrierSpacingIn` override, else
+the series' spacing, else 12". Grid curtains default their finishes and mount by Grid type (Draw grommets/chain/
+track-batten; Border grommets/hem/tie-batten; Leg and Full grommets/chain/tie-batten), marked assumed when defaulted.
+
+## D555. Weight is never guessed (#292, 2026-10-01)
+
+A fabric with no weight basis (`oz`), or a lin-yd basis with no bolt width, prints no weight and raises a "Weight not
+set" staff warning; a blank fact prints nothing, never stand-in text. A pipe-pocket bottom has no jack chain, and the
+pipe is not part of the goods weight, so the sheet says "Bottom pipe not included". Track weight is excluded.
+
+## D556. Mount from the track, else picked; hardware sources; mount-detail drawings are code (#292, 2026-10-01)
+
+A linked track's `track.mounting` picks the mount detail, through `mountTypeForTrackMounting(string)` (batten, ceiling,
+structure, anything else to a generic `track-other` that is never pickable, so a new `TrackMounting` value cannot break
+compile or render). Tracked hardware is the track lines' stored components summed by SKU. An untracked curtain uses its
+picked mount type (five starters: Track batten, Track ceiling, Track structure, Tie-line to pipe batten, Wall/header
+hook-and-loop; pending Jeff), and its hardware comes from the admin Curtain mounts blob `curtain_mount_hardware`
+(Estimating Rules, `manage_users`, per-curtain / per-ft-of-width / per-mark rules, starts empty, refuses a SKU not in
+the catalog). The mount-detail drawings are one pure SVG geometry function per mount type, in code, not data. Old
+untracked lines assume `tie-batten` and say so.
+
+## D557. Curtain-track link key is `ct-<line id>-<nonce>` (#292, 2026-10-01)
+
+The spec's `ct-<line id>` is replaced by `ct-<line id>-<nonce>`: a line id is reused after copy and reorder flows, so a
+bare id could collide. Old `ct-<line id>` keys still link. When two tracks carry the same key, the same-section track is
+preferred. Copy here and Load system (#293) give the copied curtain/track pairs fresh keys. A curtain with no key falls
+back to the next item in its section when that is an unkeyed track line; one track per curtain, a second curtain is
+flagged.
+
+## D558. Structured curtain inputs, legacy parsing, Edit and Update curtain (#292, 2026-10-01)
+
+Estimator curtain lines store a structured `curtainInputs` (the portal's `CurtainRequest` shape plus top finish, bottom
+finish, mount type); legacy lines, whose size lives only in `desc`, are read by a pure parser. A line the parser cannot
+read, or whose size is 0, is flagged "Edit the curtain", never guessed. Edit curtain / Update curtain re-opens the
+configurator; the vendor cost is kept as a staff-only field and never goes into customer carts, a legacy line keeps its
+cost, and Update stays disabled until width and height are above 0 and a fabric is picked. `curtainInputs.qty` is
+informational; the line qty counts.
+
+## D559. Fabric flame rating and weight fields on catalog parts (#292, 2026-10-01)
+
+Fabric parts gain an optional `flameRating` (120 characters, written only through `mergeUpsert`), edited in the part
+editor's fabric section beside the existing `oz`, `ozBasis` and `boltWidthIn` weight basis, which had no editor. A blank
+clears the field and the basis clears with a blank oz; the server refuses these on a non-fabric part. No import column
+yet.
+
+## D560. Two cut-sheet styles from one model (#292, 2026-10-01)
+
+Both styles render from one `CutSheetModel`. Submittal is Letter landscape with a title block (CS-n, estimate number,
+quote revision lettered A, B..., "Elev <scale> - Detail NTS"), elevation, mount detail, materials and hardware tables,
+and shows SKUs; staff warnings sit above it on the page. Client is Letter portrait with a Peak header, the elevation,
+a plain-language description, "How it hangs", sizes and part photos, and carries no SKU, cost or staff warning.
+
+## D561. The signed `/print/cutsheets/[quoteId]` route (#292, 2026-10-01)
+
+Cut sheets for headless-Chrome rendering come from a signed print route, with a new print-token kind `"cutsheets"`,
+checked before any read; `/print/` is exempt from the login redirect. The staff page `/estimator/cut-sheets` is
+`requireUser()`, like the Estimator page; the Curtain mounts screen and its action are `manage_users`.
+
+## D562. Estimate PDF cut-sheet toggle (#292, 2026-10-01)
+
+Show on PDF gains Cut sheets (`pdfCutSheets`, default off), appending the Client pages to the estimate PDF (the portal
+serves the same PDF). The load is raced against 8 s; a slow or failed load drops the sheets with a log line and never
+fails the estimate. Catalog, track-series and Curtain mounts edits do not reschedule a PDF; they show on the next save.
+
+## D563. Client package `cutsheets/` folder and its time budget (#292, 2026-10-01)
+
+Client packages gain a `cutsheets/` folder with one Submittal PDF per type. Cut-sheet work has a 75 s deadline from
+the build start, leaving a 25 s reserve under `maxDuration` 120, and each render is bounded by an `AbortSignal`
+(`render.ts` gained an optional `signal`; callers without one are unchanged). A type that misses the deadline or fails
+becomes a `missing-cutsheet` gap worded customer-neutrally, "Cut sheet available on request"; the unreadable list stays
+out of the zip index. Residual risk: a legitimate in-deadline cut-sheet render can make a quote PDF save on the same
+instance wait up to about 75 s.
+
+## D564. Targeted fabric reads (#292, 2026-10-01)
+
+The loader reads fabrics with `getMany` by the ids the curtains name. A category query runs only for legacy name
+matching, and categories with stray spaces are not matched by the SQL filter, so a legacy line that names such a fabric
+reads as unmatched rather than guessed.
+
+## D565. The client share link: an HMAC over a stored nonce, 60 days, Revoke rotates (#293, 2026-10-02)
+
+Token `<exp>.<base64url HMAC-SHA256(AUTH_SECRET, "share:quote:<id>:<nonce>:<exp>")>`, domain-separated from the print
+token. The 32-byte nonce lives only on the quote (`shareLink`), so a nonce alone can't make a token. Verify fails
+closed (no secret, revoked, malformed, exp not matching the stored one, expired, over 366 days, MAC mismatch via
+`timingSafeEqual`), and `exp` must not start with 0 (a leading-zero spelling of the same number would otherwise
+verify); the print-PDF token got the same tightening. Default 60 days; Copy again returns the same link; Revoke
+rotates the nonce AND writes expiry 0. `shareLink` is written only by `patchShareLink`, which mints its own nonce and
+never bumps `updatedAt` (that is the printed date, the portal sort key and the approval version check; a share link
+is not the document). `update()` strips `shareLink`, so a stale Estimator tab can't revive a revoked link. Create and
+revoke need `send`, answered inline ("Needs the Send permission.", the D542 idiom) rather than through `requirePerm`'s
+redirect; the status read returns the path only to `send` holders, since copying a public link is a form of sending.
+Rotating `AUTH_SECRET` kills every link.
+
+## D566. One loader, one online rule, every miss is the same 200 card (#293, 2026-10-02)
+
+The portal and share pages use one loader that fails closed unless it is handed a sent revision object of this quote.
+Web pages render the latest SENT revision only, never the live draft. `onlineEstimateState`: a system quote with a
+sent revision, status sent/won/lost; lost renders the document marked "This estimate is closed."; back in draft after
+a send renders "This estimate is being revised" with no content and no PDF. The portal page uses
+`portalOnlineEstimateState` (same customer, not Daylite history, then the rule), because `portalListsQuote` hides
+staff drafts and would have said "isn't available" about a recalled quote. Every share failure (bad token, revoked,
+expired, unknown quote, never sent, service quote, rate limit) is one identical "This link isn't active…" card with
+HTTP 200; an App Router page can't answer 429 (the photo routes can and do, 60/min/IP). No view tracking: a public GET
+never writes.
+
+## D567. Rev number and issue date online match what the sent PDF printed (#293, 2026-10-02)
+
+The PDF generator brackets the print route's read and records a `{revNo, issuedAt}` stamp on the saved PDF when the
+quote did not move during the render; the once-only copy onto the sent revision freezes it into `docFields`. If the
+quote moved mid-render it re-renders once when at least 30 s of render time remain (elapsed at most 70 s, hard-stopped
+by an AbortSignal at 120 - 20 - elapsed). Revisions sent before this deploy have no stamp and fall back to "revisions
+before it, then `pdfSavedAt`, else `rev.at`"; so an Estimator save-with-Sent resend from before the deploy may show
+Rev N-1 online while its PDF says Rev N. PDFs print exactly as before. The PDF's own rule that the first and second
+send both print Rev 1 is a separate follow-up, not changed here.
+
+## D568. Revisions freeze the printed header; the print route stays on its own calls (#293, 2026-10-02)
+
+Every new revision carries `docFields` (customer, venue, contact, cover note, assumptions, timeframe, prepared by,
+owner, terms, payment terms, `pdfOptions`, `portalFirm`, source), so the web page prints the header as it was sent;
+`contactName` freezes as `null` when absent so the document still falls back to the primary contact (a frozen `""`
+would drop the Attn line). Recall ignores it. `quoteAsOfRevision` + `loadQuoteDocumentProps` render the revision's
+body, header, Rev N and date; older revisions without `docFields` read the live header. The print route is NOT moved
+onto the loader: #292 rewrites that route's load block and three harness pins hold its literal calls, so the two are
+built from the same pure pieces (`quoteDocumentDataFor`, `purchasePerksDocLine`, the photos module) and a harness check
+pins them to the same calls. Converging the print route onto the loader is a follow-up after #292 merges.
+
+## D569. Narrative / BOM is a server-side view transform (#293, 2026-10-02)
+
+`bomViewProps` lives in `quote-document-view.ts`, not `quote-document.tsx`, because the latter imports a `.jpg` the
+harness can't load. Every system is itemized, quantities and descriptions on, prices as the quote chose, appendix off.
+The toggle shows whenever the body left a system un-itemized: a narrative system, or any system under By section
+(a departure from the spec's "a narrative system"; By section also differs from the BOM). The toggle is two links; no
+client component receives quote data. Product notes: the BOM view shows quantities and descriptions even when the
+estimate was sent narrative-only, and cut sheets stay PDF-only online (`pdfCutSheets` is ignored by `QuoteDocument`).
+
+## D570. `layout="web"`, scoped photos, no Referer, no SW cache (#293, 2026-10-02)
+
+`layout="web"` is fluid to 740 px with `QUOTE_WEB_CSS` (phone padding under 600 px, stacked header/signature grids,
+photo above its paragraph under 480 px, sheet chrome over 760 px); without it the document is byte-identical.
+Photos reach pages only through two routes (portal, share) that serve ids the latest sent revision prints
+(PNG/JPEG/WebP, nosniff, private 1 h, ETag on id + blobKey hash); the page builds them from a function
+`photos: { href(docId) }` because the portal's team preview needs `?preview=<cid>` on every URL. `/share/*` answers
+`Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex, nofollow`; middleware exempts only the `share/` prefix; the
+service worker bypasses `/share/` entirely (its cache-first image branch would otherwise keep showing photos after a
+revoke, and token URLs would sit in Cache Storage). A browser may still show a share photo from its own HTTP cache for
+up to an hour after a revoke; those are catalog photos, not quote data.
+
+## D571. Client link lives in the customer preview only (#293, 2026-10-02)
+
+The Client link block (Copy client link, Expires ... created by ..., Revoke with an inline two-step confirm) sits in
+the customer preview sidebar. The toolbar ⋯ is `QuoteNextStep`'s server-evaluated approval menu shared with the Quotes
+hub, and adding to it would mean editing `estimator-client.tsx`, which #292 edits, so the spec's toolbar copy is left
+out. `shareLinkView` lives in `links.ts`, not `view.ts`, and takes no origin: it signs the token, which needs
+`node:crypto`, and `view.ts` must stay client-safe; the browser prefixes `window.location.origin`. `ClientLinkPanel`
+re-reads on window focus so a link revoked in another tab shows as gone.
+
+## D572. Slice 3 known residuals and test reach (#293, 2026-10-02)
+
+Accepted: a small timing difference between "unknown quote" and "bad token" (quote ids are sequential anyway; 60/min/IP
+bounds it); the link nonce reaches signed-in staff browsers through `/api/sync/pull` (not exploitable without
+`AUTH_SECRET`); the online header date is Chicago time while the document body uses server time (UTC on Vercel), a
+follow-up. Smoke can't reach the rendered document, since no seeded quote has a sent revision: it covers the 200 cards
+and compiles the six new routes, and the document path is covered by harness renders, loader DB checks and the browser
+check.

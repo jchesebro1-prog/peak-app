@@ -84,6 +84,9 @@ import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { partForGrid } from "@/lib/design/grid-part-lookup";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
+import { headers } from "next/headers";
+import { printOriginFor } from "@/lib/quote-pdf/origin";
+import type { CutSheetsAdded } from "@/lib/curtain-cut-sheets/package-sheets";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
 import { isGridLayer } from "@/lib/design/grid-scopes";
@@ -94,6 +97,7 @@ import {
   type GridCurtain,
 } from "@/lib/design/grid-bom";
 import { isFabricRow } from "@/lib/design/grid-curtains";
+import { cleanCurtainFinishes } from "@/lib/curtain-cut-sheets/vocab";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
 import { getSettings } from "@/lib/settings";
@@ -427,18 +431,21 @@ export async function linkLinesetDesignAction(
 export async function createClientPackageAction(
   projectId: string,
   optionId: string | null,
-): Promise<{ ok: true; packageId: string; url: string; gapCount: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; packageId: string; url: string; gapCount: number; cutSheetsUnreadable: CutSheetsAdded["unreadable"] } | { ok: false; error: string }> {
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
+  const h = await headers();
+  const printWhere = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
   try {
-    const built = await createClientPackage(project, user.name, optionId);
+    const built = await createClientPackage(project, user.name, optionId, { printWhere });
     revalidatePath(editorPath(projectId));
     return {
       ok: true,
       packageId: built.record.id,
       url: `/api/client-packages/${encodeURIComponent(built.record.id)}`,
       gapCount: built.gaps.length,
+      cutSheetsUnreadable: built.cutSheets.unreadable, // #292 — staff-only; kept out of the zip's index
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The client package could not be built." };
@@ -520,6 +527,10 @@ export async function placeCurtainAction(
       color?: string;
       /** Spec records design §6 — optional system match key override. */
       specKey?: string;
+      /** #292 — cut-sheet finishes + mount; bad or absent values drop, never refuse. */
+      topFinish?: string;
+      bottomFinish?: string;
+      mountType?: string;
     };
     category?: string;
     optionId: string;
@@ -555,6 +566,7 @@ export async function placeCurtainAction(
     fabricSku: fabric.id,
     color: (c.color || "").trim().slice(0, 40) || undefined,
     specKey: (typeof c.specKey === "string" ? c.specKey : "").trim().slice(0, 120) || undefined,
+    ...cleanCurtainFinishes(c),
   };
   const p = await addCurtainPlacement(projectId, {
     sheetId: input.sheetId,

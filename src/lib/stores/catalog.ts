@@ -1,7 +1,7 @@
-import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, listDocs, listDocsByField, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
-import { isFabricPart } from "@/lib/fabric-part";
+import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
 import type { PortalVisibility } from "@/lib/portal-visibility";
 import { MAX_PARAGRAPH } from "@/app/(app)/estimator/narrative";
@@ -96,6 +96,8 @@ export type CatalogPart = {
    *  the catalog part editor or imported as "Fabric $/sq ft"; read only
    *  through fabricAreaRateOf. Distinct from raw costPerSqft. */
   curtainAreaRate?: number;
+  /** #292 — Fabric parts only: flame rating as printed on cut sheets (e.g. "NFPA 701 (IFR)"), ≤ 120 chars. Written only through mergeUpsert. */
+  flameRating?: string;
   /** Labor rows — 'RIG' | 'LIG' | 'AUD' | 'VID' picks the rate set. */
   discipline?: string;
   /** Labor rows — 'labor' | 'ot' | 'sup' | 'shop' | 'travel' | 'equip'. */
@@ -241,6 +243,14 @@ export async function byCategory(category: string): Promise<CatalogPart[]> {
 export async function fabricParts(): Promise<CatalogPart[]> {
   const all = await list();
   return all.filter(isFabricPart);
+}
+
+/** fabricParts() with the category filtered in SQL — only the Fabric and
+ *  Soft Goods rows are read, never the whole book (#292 cut sheets). A
+ *  category stored with stray surrounding spaces is missed here (isFabricPart
+ *  trims); the exact rule still re-runs on what comes back. */
+export async function fabricPartsByCategory(): Promise<CatalogPart[]> {
+  return (await listDocsByField<CatalogPart>("catalog_parts", "category", ["Fabric", SOFT_GOODS_CATEGORY])).filter(isFabricPart);
 }
 
 /** Options for a part write. `pricedAt` is the effective date to stamp WHEN

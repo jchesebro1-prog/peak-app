@@ -20,7 +20,8 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import {
   carriesPipeline,
   firstStage,
@@ -303,6 +304,24 @@ export type Quote = {
    *  Absent until the first such change (a new quote renders what it was
    *  created with). */
   contentChangedAt?: number;
+  /** #293 slice 3 (spec §1.6) — the client share link. Server-written only
+   *  (patchShareLink); never in QUOTE_CONTENT_FIELDS, never snapshotted,
+   *  never copied by buildQuote. The Client link panel gets a ShareLinkView,
+   *  never the nonce — but /api/sync/pull ships whole quote docs (nonce
+   *  included) to active team users, like `pdf.blobPath`. That is not a
+   *  credential on its own: a token can't be made without AUTH_SECRET. */
+  shareLink?: QuoteShareLink | null;
+};
+
+/** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
+export type QuoteShareLink = {
+  /** 32 random bytes, base64url — rotated on revoke. */
+  nonce: string;
+  expiresAt: number;
+  createdAt: number;
+  createdBy: string;
+  revokedAt?: number | null;
+  revokedBy?: string | null;
 };
 
 /**
@@ -344,6 +363,34 @@ export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
   const rec = (q || {}) as Record<string, unknown>;
   return JSON.stringify(QUOTE_CONTENT_FIELDS.map((k) => rec[k] ?? null));
 }
+
+/** #293 slice 3 (spec §1.5) — the non-payload fields the customer document
+ *  prints, frozen with every new revision so the online page shows the
+ *  version that was sent. `contactName` is null when the quote had none
+ *  (the document then reads the primary contact, as the live quote does).
+ *  Recall ignores it: restoreQuoteRevision copies named payload fields only. */
+export type QuoteRevisionDocFields = {
+  customer: string;
+  locationId: string | null;
+  contactName: string | null;
+  quoteNote: string;
+  assumptions: string;
+  installTimeframe: string;
+  preparedBy: string;
+  owner: string;
+  termsText: string;
+  paymentTerms: string | null;
+  pdfOptions: QuotePdfOptions | null;
+  portalFirm: Quote["portalFirm"] | null;
+  source: string;
+  /** #293 slice 3 — the Rev N and the date the revision's PDF printed
+   *  (QuotePdfState.printed), stamped once with the PDF copy
+   *  (setRevisionPdfPath). Absent until then, when the render couldn't be
+   *  sure of them, and on older revisions — the online page then derives
+   *  them (sentDocumentStamp). Never part of the header spread. */
+  revNo?: number;
+  issuedAt?: number;
+};
 
 /**
  * An immutable snapshot of a quote's priced state (punch item 24). Modelled on
@@ -396,6 +443,12 @@ export type QuoteRevision = {
    *  An annex stamped once after the snapshot is cut; the priced fields above
    *  are still never rewritten. */
   pdfBlobPath?: string;
+  /** #293 slice 3 — the `savedAt` of the file copied onto this revision,
+   *  stamped with `pdfBlobPath` (absent on copies made before #293). */
+  pdfSavedAt?: number;
+  /** #293 slice 3 — the printed header fields as they stood (absent on
+   *  revisions cut before #293; the online page then reads the live ones). */
+  docFields?: QuoteRevisionDocFields;
 };
 
 export type ReviewOpts = {
@@ -686,12 +739,36 @@ export async function update(
 ): Promise<Quote | null> {
   return patchQuote(id, (q) => {
     // #223: an allocated number never changes — a patch cannot carry one.
-    Object.assign(q, withoutEstimateFields(patch), { updatedAt: Date.now() });
+    const clean: Partial<Quote> = withoutEstimateFields(patch);
+    // #293 slice 3: the share link is patchShareLink's alone — a stale client
+    // patch (an editor holding the pre-revoke doc) can't revive a revoked link.
+    delete clean.shareLink;
+    Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
 }
 
 /* ---- revisions (punch item 24) ---- */
+
+/** #293 slice 3 — the header fields a revision freezes (spec §1.5). Pure. */
+export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
+  const d = doc as Quote & { paymentTerms?: string | null };
+  return {
+    customer: d.customer || "",
+    locationId: d.locationId ?? null,
+    contactName: typeof d.contactName === "string" ? d.contactName : null,
+    quoteNote: d.quoteNote || "",
+    assumptions: d.assumptions || "",
+    installTimeframe: d.installTimeframe || "",
+    preparedBy: d.preparedBy || "",
+    owner: d.owner || "",
+    termsText: d.termsText || "",
+    paymentTerms: typeof d.paymentTerms === "string" ? d.paymentTerms : null,
+    pdfOptions: d.pdfOptions ?? null,
+    portalFirm: d.portalFirm ?? null,
+    source: d.source || "",
+  };
+}
 
 /** Build a snapshot of a quote's current priced state. Pure. */
 function snapshotOf(
@@ -722,6 +799,8 @@ function snapshotOf(
     consulting: doc.consulting ?? null,
     rental: doc.rental ?? null,
     vendorQuotes: doc.vendorQuotes ?? null,
+    // #293 slice 3: what the customer document's header printed.
+    docFields: revisionDocFields(doc),
   };
 }
 
@@ -855,8 +934,16 @@ export async function updateQuotePdf(
   });
 }
 
-/** Stamp a revision's PDF copy once (#222). False when the revision is gone or already has one. */
-export async function setRevisionPdfPath(id: string, rev: number, path: string): Promise<boolean> {
+/** Stamp a revision's PDF copy once (#222). False when the revision is gone or already has one.
+ *  #293 slice 3: in the same once-only write, the copied file's `savedAt` and
+ *  — when the render recorded them — the Rev N and date it printed, frozen
+ *  into the revision's docFields so the online pages print the same. */
+export async function setRevisionPdfPath(
+  id: string,
+  rev: number,
+  path: string,
+  file: { savedAt?: number; printed?: DocumentRevStamp | null } = {}
+): Promise<boolean> {
   return withTransaction(async () => {
     await lockQuoteRow(id);
     let hit = false;
@@ -864,11 +951,60 @@ export async function setRevisionPdfPath(id: string, rev: number, path: string):
       const r = (doc.revisions || []).find((x) => x.rev === rev);
       if (r && !r.pdfBlobPath) {
         r.pdfBlobPath = path;
+        if (typeof file.savedAt === "number" && Number.isFinite(file.savedAt)) r.pdfSavedAt = file.savedAt;
+        const p = file.printed;
+        if (r.docFields && p && Number.isSafeInteger(p.revNum) && p.revNum >= 1 && Number.isFinite(p.revDateMs)) {
+          r.docFields = { ...r.docFields, revNo: p.revNum, issuedAt: p.revDateMs };
+        }
         hit = true;
       }
     });
     return hit;
   });
+}
+
+/**
+ * #293 slice 3 — what patchShareLink may do (spec §1.6, §5.5). Neither op
+ * carries a token secret, a key or a lifetime — the store mints those itself,
+ * so no caller can choose or replay one. `allow` re-checks eligibility under
+ * the row lock; `now` is the clock (a parameter for tests).
+ */
+export type ShareLinkOp = { kind: "create"; by: string; now: number; allow: (doc: Quote) => boolean } | { kind: "revoke"; by: string; now: number };
+
+/**
+ * #293 slice 3 — the ONLY writer of `Quote.shareLink`. Under the row lock
+ * (patchQuote), so "is a link already active?" and the write are one
+ * compare-and-set. Create: an active link is left as is (re-copy = the same
+ * link); otherwise a fresh nonce and a 60-day expiry. Revoke: a fresh nonce
+ * AND expiry 0, so every earlier token fails twice over and nothing can bring
+ * it back. Never bumps the document's printed date (the link isn't the
+ * document) and never changes content (shareLink isn't a
+ * QUOTE_CONTENT_FIELDS member). `wrote` = a new link record was stored.
+ */
+export async function patchShareLink(id: string, op: ShareLinkOp): Promise<{ quote: Quote; wrote: boolean } | null> {
+  const at = Number.isFinite(op.now) ? op.now : Date.now();
+  let wrote = false;
+  const quote = await patchQuote(id, (doc) => {
+    const prev = doc.shareLink ?? null;
+    if (op.kind === "revoke") {
+      if (!prev) return; // nothing to revoke — no link minted, doc unchanged (patchDoc still rewrites the row; revokeShareLink returns before this)
+      doc.shareLink = {
+        nonce: newShareNonce(),
+        expiresAt: 0,
+        createdAt: prev?.createdAt ?? at,
+        createdBy: prev?.createdBy ?? op.by,
+        revokedAt: at,
+        revokedBy: op.by,
+      };
+      wrote = true;
+      return;
+    }
+    if (!op.allow(doc)) return;
+    if (prev && typeof prev.nonce === "string" && prev.nonce && prev.expiresAt > at) return; // already active — the same link
+    doc.shareLink = { nonce: newShareNonce(), expiresAt: at + SHARE_DEFAULT_TTL_MS, createdAt: at, createdBy: op.by, revokedAt: null, revokedBy: null };
+    wrote = true;
+  });
+  return quote ? { quote, wrote } : null;
 }
 
 /** After a send commits: copy the current PDF onto the new sent revision (#222).
@@ -1468,6 +1604,12 @@ export async function setStatus(
   // row (historical-import records history, it is not a sale made here), and
   // never able to block the status change: a failure is logged, not thrown.
   if (out && moved.value && opts.bypassApprovalGate !== "historical-import") await reconcileRewardsSafely(out, by);
+  // #293 slice 2: same outer-transaction caveat as the copy above — inside
+  // setQuoteStage's transaction this invalidation fires BEFORE commit, so a
+  // rebuild that runs concurrently can cache the pre-transition state for up
+  // to the 5-minute TTL. Accepted: the library is a reference list, and Load
+  // re-reads the quote and re-picks its snapshot as of now.
+  if (out && moved.value) await invalidateSystemLibrarySafely();
   return out;
 }
 
@@ -1478,6 +1620,17 @@ async function reconcileRewardsSafely(q: Quote, by?: string | null, opts: { dele
     await reconcileQuoteLedger(q, by || DEFAULT_ACTOR, opts);
   } catch (e) {
     console.error("[rewards] ledger post failed for quote", q.id, e);
+  }
+}
+
+/** #293 slice 2: the system library indexes sent/won quotes — a real status
+ *  transition or a delete can add or remove entries. Dynamic import: the
+ *  index imports this store. Never throws. */
+async function invalidateSystemLibrarySafely(): Promise<void> {
+  try {
+    (await import("@/lib/narrative/system-library-index")).invalidateSystemLibrary();
+  } catch (e) {
+    console.error("[system-library] invalidate failed", e);
   }
 }
 
@@ -1579,6 +1732,7 @@ export async function remove(id: string, by?: string | null): Promise<void> {
   const q = await getDoc<Quote>("quotes", id);
   await softDeleteDoc("quotes", id);
   if (q) await reconcileRewardsSafely(q, by, { deleted: true });
+  await invalidateSystemLibrarySafely();
 }
 
 /**

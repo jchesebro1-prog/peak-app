@@ -83,6 +83,15 @@ const nextConfig: NextConfig = {
         source: "/portal/catalog/doc/:id",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
+      // #293 slice 3: the client share page carries its token in the path —
+      // never pass it on in a Referer, and never index it.
+      {
+        source: "/share/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
     ];
   },
   // The Field Survey module was renamed Venue Assessments (route moved from

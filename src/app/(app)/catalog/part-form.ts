@@ -27,7 +27,13 @@ export type OptionalPartFields = {
   /** #245 Task 5 — an explicit Show/Hide portal-visibility override; Auto is
    *  stored as absent (undefined clears through mergeUpsert). */
   portalVisibility?: "show" | "hide" | undefined;
+  /** #292 — Fabric parts only: weight, its basis and flame rating (cut sheets). */
+  oz?: number;
+  ozBasis?: "lin-yd" | "sq-yd";
+  flameRating?: string;
 };
+
+export const FLAME_RATING_MAX = 120;
 
 /**
  * Fields the part modal may or may not render. A key the form did NOT submit
@@ -44,6 +50,12 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
   if (fd.has("mapPrice")) out.mapPrice = num(fd.get("mapPrice"));
   if (fd.has("curtainAreaRate")) out.curtainAreaRate = positive(fd.get("curtainAreaRate"));
   if (fd.has("boltWidthIn")) out.boltWidthIn = positive(fd.get("boltWidthIn"));
+  if (fd.has("oz")) out.oz = positive(fd.get("oz"));
+  if (fd.has("ozBasis")) {
+    const b = String(fd.get("ozBasis") || "");
+    out.ozBasis = out.oz !== undefined && (b === "lin-yd" || b === "sq-yd") ? b : undefined;
+  }
+  if (fd.has("flameRating")) out.flameRating = String(fd.get("flameRating") || "").trim().slice(0, FLAME_RATING_MAX) || undefined;
   if (fd.has("portalVisibility")) {
     const v = normalizeVisibility(fd.get("portalVisibility"));
     out.portalVisibility = v === "auto" ? undefined : v;
@@ -69,6 +81,12 @@ export function fabricRateProblem(category: string, rate: number | undefined, un
   if (rate > FABRIC_AREA_RATE_MAX)
     return `A fabric rate over $${FABRIC_AREA_RATE_MAX}/sq ft looks like a typo — enter the cost per sq ft of sewn fabric.`;
   return null;
+}
+
+/** #292: only a fabric part carries weight / flame rating (the fields render only there; this is the server gate). */
+export function fabricFactsProblem(category: string, unit: string | null | undefined, f: Pick<OptionalPartFields, "oz" | "ozBasis" | "flameRating">): string | null {
+  if (f.oz === undefined && f.ozBasis === undefined && f.flameRating === undefined) return null;
+  return isFabricPart({ category, unit }) ? null : "Only a fabric part carries a weight or flame rating — clear them or change the category.";
 }
 
 /**

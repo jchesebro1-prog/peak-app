@@ -97,6 +97,7 @@ import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type Dev
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, groupOfCustomSystem, type BomGroupKey, type GroupedBomLine } from "@/lib/design/grid-bom-groups";
+import { cutSheetsUnreadableNote } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import { AccessoryPicker, AccessoryRow } from "./accessories";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
@@ -375,6 +376,8 @@ export default function GridEditor({
   const [packageBusy, setPackageBusy] = useState(false);
   const [packageUrl, setPackageUrl] = useState<string | null>(null);
   const [packageGapCount, setPackageGapCount] = useState<number | null>(null);
+  /* #292: curtains the cut sheets couldn't read (staff-only — never in the zip). */
+  const [packageUnreadable, setPackageUnreadable] = useState<Array<{ where: string; desc: string; reason: string }>>([]);
 
   async function linkLineset(designId: string) {
     setLinesetBusy(true);
@@ -387,12 +390,14 @@ export default function GridEditor({
   async function buildClientPackage() {
     setPackageBusy(true);
     setPackageUrl(null);
+    setPackageUnreadable([]);
     const result = await createClientPackageAction(project.id, activeOptionId);
     setPackageBusy(false);
     if (!result.ok) setErr(result.error);
     else {
       setPackageUrl(result.url);
       setPackageGapCount(result.gapCount);
+      setPackageUnreadable(result.cutSheetsUnreadable);
     }
   }
 
@@ -1487,6 +1492,14 @@ export default function GridEditor({
           <a href={packageUrl} style={{ ...BTN, textDecoration: "none", color: "#1f7a52" }}>
             Download{packageGapCount ? ` · ${packageGapCount} gaps` : ""}
           </a>
+        )}
+        {packageUrl && packageUnreadable.length > 0 && (
+          <span
+            style={{ fontSize: 12, color: "#8a6d1f", alignSelf: "center" }}
+            title={packageUnreadable.map((u) => `${u.where} — ${u.desc}: ${u.reason}`).join("\n")}
+          >
+            {cutSheetsUnreadableNote(packageUnreadable.length)}
+          </span>
         )}
         {canCreate && (
           armDelete ? (

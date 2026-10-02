@@ -436,7 +436,7 @@ export function verifyShareToken(
 
 - no secret or stored link;
 - `stored.expiresAt <= 0`, meaning revoked;
-- a token not matching `/^(\d{1,15})\.([A-Za-z0-9_-]{43})$/`;
+- a token not matching `/^([1-9]\d{0,14})\.([A-Za-z0-9_-]{43})$/`;
 - `exp !== stored.expiresAt`;
 - `now > exp`;
 - `exp − now > SHARE_MAX_TTL_MS`;

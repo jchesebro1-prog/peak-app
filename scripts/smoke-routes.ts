@@ -83,6 +83,7 @@ const ROUTES = [
   "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/estimating-rules",
   "/estimating-rules/track-series", // #274 — the track configurator's parts map (admin)
+  "/estimating-rules/curtain-mounts", // #292 — curtain-mount hardware (admin)
   "/inspections",
   "/flame-tests",
   "/repairs",
@@ -210,6 +211,19 @@ const ROUTES = [
   // page returns the signed-out card before any of them are read.
   "/portal/service?type=flame&venue=x",
   "/portal/service?from=x",
+  // #293 slice 3 — the online estimate page. No seeded quote has a sent
+  // revision, so these cover the 200 cards (signed out; not available, in a
+  // team preview) and compile the page; the document itself is harness-
+  // rendered (#293 slice 3 blocks). Q-0 is an unknown id.
+  "/portal/quotes/Q-2041",
+  "/portal/quotes/Q-2041?preview=lakefront",
+  "/portal/quotes/Q-2041?preview=lakefront&view=bom",
+  "/portal/quotes/Q-0?preview=lakefront",
+  // #293 slice 3 — the signed share page: a well-formed token that passes the
+  // shape check and reaches the DB read + HMAC verify (and fails it), and a
+  // malformed one refused before any read — both the one 200 "isn't active" card.
+  "/share/quote/Q-2041/1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "/share/quote/Q-2041/not-a-token",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",
@@ -313,6 +327,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?size=d", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?option=opt-does-not-exist&size=b", reject: "no longer exists" },
+  // #292 — curtain cut sheets (both styles; an unknown id renders "Quote not found." with a 200).
+  { route: "/estimator/cut-sheets?id=Q-2041" },
+  { route: "/estimator/cut-sheets?id=Q-2041&style=client" },
+  { route: "/estimator/cut-sheets?id=Q-0000", reject: "Application error" },
 ];
 
 let fail = 0;

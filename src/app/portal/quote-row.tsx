@@ -5,7 +5,7 @@ import type { Quote } from "@/lib/stores/quotes";
 import { canAcceptPortal } from "@/lib/portal-quote-mode";
 import { portalQuoteTypeLabel } from "@/lib/portal-my-quotes";
 import { portalQuoteDate } from "@/lib/portal-quote-names";
-import { portalQuotePdfPreparing, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
+import { portalOnlineEstimateState, portalQuotePdfPreparing, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
 import { latestSentRevision, pdfView } from "@/lib/quote-pdf/state";
 import { copyQuoteToCart } from "./actions";
 import { AcceptDialog } from "./accept-dialog";
@@ -134,7 +134,18 @@ export function PortalQuoteRow({
   const pdfHref = portalQuotePdfSource(q, cid)
     ? `/portal/quotes/${encodeURIComponent(q.id)}/pdf` + (preview ? `?preview=${encodeURIComponent(cid)}` : "")
     : null;
-  const title = pdfHref ? (
+  // #293 slice 3: the title opens the online estimate when there's a sent
+  // version to show (or the being-revised card); else the PDF, as before.
+  const online = portalOnlineEstimateState(q, cid).kind;
+  const onlineHref =
+    online === "ok" || online === "revising"
+      ? `/portal/quotes/${encodeURIComponent(q.id)}` + (preview ? `?preview=${encodeURIComponent(cid)}` : "")
+      : null;
+  const title = onlineHref ? (
+    <Link href={onlineHref} prefetch={false} style={{ color: "inherit", textDecoration: "none" }}>
+      {q.name}
+    </Link>
+  ) : pdfHref ? (
     <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
       {q.name}
     </a>

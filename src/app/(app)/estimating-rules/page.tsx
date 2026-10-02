@@ -166,6 +166,19 @@ export default async function EstimatingRulesPage() {
             </div>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>Open →</span>
           </Link>
+          <Link
+            href="/estimating-rules/curtain-mounts"
+            className="pk-card er-noprint"
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 17px", marginBottom: 14, textDecoration: "none", color: "inherit" }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Curtain mounts</div>
+              <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 2 }}>
+                The hardware each curtain mount uses when a curtain has no track.
+              </div>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>Open →</span>
+          </Link>
           <RulesEditor
             groups={groups}
             venueDoctrine={resolveVenueDoctrine(settings?.venueDoctrine)}

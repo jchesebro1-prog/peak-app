@@ -3,6 +3,7 @@ import { isAppOrigin, originFrom } from "./origin";
 import { renderPrintRouteToPdf } from "./render";
 import {
   canHavePdf,
+  documentRevStamp,
   latestSentRevision,
   pdfIsCurrent,
   pdfKindForQuoteType,
@@ -10,6 +11,7 @@ import {
   printPathFor,
   revisionAwaitingPdf,
   settlePdf,
+  type DocumentRevStamp,
   type PdfOutcome,
   type QuotePdfState,
 } from "./state";
@@ -42,7 +44,9 @@ export type GenerateInput = {
   savedAt: number;
   origin: string;
   secret?: string;
-  render?: (url: string) => Promise<Buffer>;
+  /** Spec-harness seam for Chrome. `opts.signal` is passed only to the
+   *  stamp re-render (#293 slice 3), which must stop at the budget's deadline. */
+  render?: (url: string, opts?: { signal?: AbortSignal }) => Promise<Buffer>;
   /** Spec-harness seam for the settle write; defaults to updateQuotePdf. */
   updatePdf?: typeof updateQuotePdf;
   /**
@@ -56,6 +60,10 @@ export type GenerateInput = {
   coalesceMs?: number;
   /** Spec-harness seam for the coalescing wait; defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
+  /** Spec-harness seam for the budget clock (the stamp re-render's gate); defaults to Date.now. */
+  now?: () => number;
+  /** Spec-harness seam for the re-render's hard stop; defaults to AbortSignal.timeout. */
+  deadlineSignal?: (ms: number) => AbortSignal;
 };
 
 /**
@@ -73,6 +81,36 @@ export const PDF_COALESCE_MS = 4_000;
  * reserves it so a slower Chrome step can't silently eat the upload's share.
  */
 export const PDF_UPLOAD_ALLOWANCE_MS = 20_000;
+
+/** The rendering pages' maxDuration (#222): every page whose actions schedule a render sets 120 s. */
+export const PDF_FUNCTION_BUDGET_MS = 120_000;
+
+/**
+ * #293 slice 3 — the least render time worth a stamp re-render (fix round 2b).
+ * Two worst-case renders never fit (4 s coalesce + 2 × 90 s + 20 s upload =
+ * 204 s > 120 s), and gating on a whole worst case would leave a 10 s window a
+ * cold Chrome on Vercel rarely meets. So the re-render runs while at least
+ * this much render time is left before the upload allowance, and is hard-
+ * stopped at that point (stampRerenderDeadlineMs) — the budget holds whatever
+ * Chrome does: coalesce + render 1 + render 2 (≤ the deadline) + upload ≤ 120 s.
+ */
+export const RERENDER_MIN_MS = 30_000;
+
+/**
+ * May a render whose stamp was lost to a mid-render write run Chrome once
+ * more? Only while elapsed + RERENDER_MIN_MS + the upload allowance ≤ 120 s
+ * (elapsed ≤ 120 − 20 − 30 = 70 s, coalescing wait included); otherwise the
+ * stamp stays unrecorded and the online pages derive it. Elapsed is measured
+ * from generateQuotePdf's start, like the #222 T5 budget.
+ */
+export function stampRerenderFits(elapsedMs: number): boolean {
+  return Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs + RERENDER_MIN_MS + PDF_UPLOAD_ALLOWANCE_MS <= PDF_FUNCTION_BUDGET_MS;
+}
+
+/** The re-render's hard stop: what is left of the budget before the upload allowance (≥ RERENDER_MIN_MS when it fits). */
+export function stampRerenderDeadlineMs(elapsedMs: number): number {
+  return Math.max(1, PDF_FUNCTION_BUDGET_MS - PDF_UPLOAD_ALLOWANCE_MS - elapsedMs);
+}
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -92,6 +130,26 @@ function isPendingFor(cur: QuotePdfState | null | undefined, savedAt: number): c
   return !!cur && cur.status === "pending" && cur.savedAt === savedAt;
 }
 
+/**
+ * #293 slice 3 — the Rev N and date the file just rendered printed: the
+ * print route's own rule (documentRevStamp, via quoteDocumentDataFor) over the
+ * quote it read mid-render. Read before and after the render; both values only
+ * ever grow (revisions are append-only, updatedAt moves forward), so equal
+ * readings mean the print route saw exactly them. A write that landed during
+ * the render → `stamp: null` (nothing is recorded rather than a guess), with
+ * the quote as re-read (`after`) so the caller can render once more against it.
+ */
+async function printedStamp(
+  quoteId: string,
+  before: Parameters<typeof documentRevStamp>[0]
+): Promise<{ stamp: DocumentRevStamp | null; after: Awaited<ReturnType<typeof getQuote>> }> {
+  const after = await getQuote(quoteId).catch(() => null);
+  if (!after) return { stamp: null, after: null };
+  const a = documentRevStamp(before);
+  const b = documentRevStamp(after);
+  return { stamp: a.revNum === b.revNum && a.revDateMs === b.revDateMs ? a : null, after };
+}
+
 /** Settle only a state still pending for this save; anything else is superseded. */
 function settleIfPending(cur: QuotePdfState | null, savedAt: number, outcome: PdfOutcome): QuotePdfState | undefined {
   return isPendingFor(cur, savedAt) ? settlePdf(cur, savedAt, outcome, Date.now()) : undefined;
@@ -100,6 +158,8 @@ function settleIfPending(cur: QuotePdfState | null, savedAt: number, outcome: Pd
 export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfState | null> {
   const { quoteId, savedAt } = input;
   const updatePdf = input.updatePdf ?? updateQuotePdf;
+  const clock = input.now ?? Date.now;
+  const startedAt = clock();
   const settleFailed = async (error: string): Promise<QuotePdfState | null> => {
     const res = await updatePdf(quoteId, (cur) => settleIfPending(cur, savedAt, { ok: false, error }));
     return res && res.changed ? res.after : null;
@@ -123,18 +183,45 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
     if (!secret) return await settleFailed("AUTH_SECRET is not set — the print page can’t be signed.");
     const store = pdfStorage();
     if ("unavailable" in store) return await settleFailed(store.unavailable);
-    const token = signPrintToken(secret, kind, quoteId, Date.now());
-    const url = `${input.origin}${printPathFor(kind, quoteId)}?t=${encodeURIComponent(token)}`;
+    const render = input.render ?? renderPrintRouteToPdf;
+    const printUrl = () => `${input.origin}${printPathFor(kind, quoteId)}?t=${encodeURIComponent(signPrintToken(secret, kind, quoteId, Date.now()))}`;
     let bytes: Buffer;
     try {
-      bytes = await (input.render ?? renderPrintRouteToPdf)(url);
+      bytes = await render(printUrl());
     } catch (e) {
       return await settleFailed(reason(e));
+    }
+    let printed: DocumentRevStamp | null = null;
+    if (kind === "quote") {
+      const first = await printedStamp(quoteId, q);
+      printed = first.stamp;
+      // #293 slice 3 fix round 2: the writer most likely to move the quote
+      // mid-render is the Send click itself (a send never waits for the PDF),
+      // and an unstamped copy makes the online pages guess the Rev. So when
+      // the quote moved (and this save still owns the pending state), render
+      // once more against the quote as it is now — only while RERENDER_MIN_MS
+      // of render time is left before the upload allowance (stampRerenderFits,
+      // elapsed ≤ 70 s), hard-stopped at that allowance (stampRerenderDeadlineMs)
+      // so the 120 s budget holds whatever Chrome does. Settle/supersede is unchanged: the settle below
+      // still compares-and-sets on this savedAt. A second move, a failed or
+      // stopped re-render → render 1's file, no stamp (the pages derive).
+      const elapsed = clock() - startedAt;
+      if (!printed && first.after && isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(elapsed)) {
+        const signal = (input.deadlineSignal ?? ((ms: number) => AbortSignal.timeout(ms)))(stampRerenderDeadlineMs(elapsed));
+        try {
+          const again = await render(printUrl(), { signal });
+          const second = await printedStamp(quoteId, first.after);
+          bytes = again;
+          printed = second.stamp;
+        } catch (e) {
+          console.warn("[quote-pdf] stamp re-render failed — keeping the first file, unstamped", quoteId, reason(e));
+        }
+      }
     }
     const path = await store.put(pdfStoragePath(quoteId, String(savedAt)), bytes);
     let res: Awaited<ReturnType<typeof updateQuotePdf>>;
     try {
-      res = await updatePdf(quoteId, (cur) => settleIfPending(cur, savedAt, { ok: true, blobPath: path }));
+      res = await updatePdf(quoteId, (cur) => settleIfPending(cur, savedAt, { ok: true, blobPath: path, printed }));
     } catch (e) {
       // The settle never committed, so nothing records this file — drop it
       // before recording the failure (the last good file stays current).
@@ -191,7 +278,9 @@ export async function copySentRevisionPdf(quoteId: string): Promise<string | nul
   const bytes = await store.read(pdf.blobPath);
   if (!bytes) return null;
   const path = await store.put(pdfStoragePath(quoteId, `rev-${rev.rev}`), bytes);
-  if (!(await setRevisionPdfPath(quoteId, rev.rev, path))) {
+  // #293 slice 3: the copy carries what the file printed (Rev N + date) onto
+  // the revision, so the online pages print exactly the customer's PDF.
+  if (!(await setRevisionPdfPath(quoteId, rev.rev, path, { savedAt: pdf.savedAt, printed: pdf.printed ?? null }))) {
     const now = await getQuote(quoteId);
     const kept = (now?.revisions || []).find((r) => r.rev === rev.rev)?.pdfBlobPath;
     if (kept !== path) await store.remove(path).catch(() => undefined);
