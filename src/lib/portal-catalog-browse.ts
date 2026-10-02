@@ -2,7 +2,8 @@
 // prices through portal-pricing.ts. Never import into a client component;
 // it hands the browser `TileVM`s only (sell-only, see portal-catalog-view.ts).
 import type { PortalSession } from "@/lib/portal";
-import { portalIndex, type PortalIndex } from "@/lib/portal-catalog-index";
+import { portalIndex, portalMfrImage, type PortalIndex } from "@/lib/portal-catalog-index";
+import { isCustomCategory, portalFallback } from "@/lib/part-image-fallback";
 import { cleanDeptId, cleanSearchQuery, quotedBeforeSkus, toTileVM, type TileVM } from "@/lib/portal-catalog-view";
 import { departmentFilterFor, departmentTiles, packagesTile, resolveDept, type DeptTileVM } from "@/lib/portal-departments";
 import { priceFixture, priceSku, pricingContextFor, type PortalPricingContext } from "@/lib/portal-pricing";
@@ -72,15 +73,19 @@ export type SearchPortalCatalogResult = { ok: true; result: CatalogResult } | { 
 
 /** Sell-only tiles for the given search entries, priced for `ctx`'s customer. */
 export async function tilesFor(entries: readonly SearchEntry[], ix: PortalIndex, ctx: PortalPricingContext): Promise<TileVM[]> {
+  const look = portalMfrImage(ix);
   return Promise.all(
     entries.map(async (e) => {
       if (e.kind === "fixture") {
         const fx = ix.fixtures.get(e.key.slice("fixture:".length));
         const engine = fx ? ix.parts.get(fx.lightEngineSku) : undefined;
         const price = fx ? await priceFixture(fx.id, {}, ctx) : null;
-        return toTileVM(e, engine, price, fx);
+        const fb = portalFallback({ mfr: engine?.mfr, custom: isCustomCategory(engine?.category), por: !price || price.por }, look);
+        return toTileVM(e, engine, price, fx, fb);
       }
-      return toTileVM(e, ix.parts.get(e.sku), await priceSku(e.sku, ctx));
+      const part = ix.parts.get(e.sku);
+      const pr = await priceSku(e.sku, ctx);
+      return toTileVM(e, part, pr, undefined, portalFallback({ mfr: part?.mfr ?? e.mfr, custom: isCustomCategory(part?.category ?? e.category), por: !pr || pr.por }, look));
     })
   );
 }

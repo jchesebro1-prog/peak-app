@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { PORTAL_MAX_QTY } from "@/lib/portal-cart-rules";
 import { PREVIEW_ADD_HINT } from "@/lib/portal-part-view";
+import { fallbackSrc, type ImageFallback } from "@/lib/part-image-fallback";
 import { addToCart } from "./actions";
 
 /**
@@ -17,6 +18,14 @@ export const money = (n: number) =>
 
 export function docSrc(id: string, previewCid: string): string {
   return `/portal/catalog/doc/${encodeURIComponent(id)}` + (previewCid ? `?preview=${encodeURIComponent(previewCid)}` : "");
+}
+
+/** The image a part shows when it has no photo of its own — a placeholder or
+ *  its manufacturer's image (Manufacturer section Part 1). Sizing comes from
+ *  the surrounding box's `img` rule (object-fit: contain). */
+export function FallbackImg({ fallback, previewCid, className }: { fallback: ImageFallback; previewCid: string; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img className={className} src={fallbackSrc(fallback, (id) => docSrc(id, previewCid))} alt="" loading="lazy" decoding="async" />;
 }
 
 export function clampQty(n: number): number {

@@ -21,6 +21,8 @@ import {
 } from "@/lib/portal-visibility";
 import { buildHaystack, type SearchEntry } from "@/lib/portal-search";
 import { cleanPortalCategory } from "@/lib/fixture-assemblies";
+import { listManufacturers } from "@/lib/stores/manufacturers";
+import { mfrKey } from "@/lib/catalog-books";
 import { OTHER_PACKAGES_CATEGORY } from "@/lib/portal-departments";
 
 /**
@@ -108,7 +110,17 @@ export type PortalIndex = {
    *  `fabrics` above (which pages hand straight to the client) so the rate
    *  never rides along in a server-component prop. */
   fabricRates: Map<string, number>;
+  /** Manufacturer section Part 1 — mfrKey → that manufacturer's image
+   *  document (unlinked; servable); used only as a fallback for parts with no
+   *  photo of their own. Never feeds `IndexedPart.imageIds`, visibility or the
+   *  browse rule. */
+  mfrImageDocs: Map<string, string>;
 };
+
+/** Manufacturer name → its image document id (servable), or null. */
+export function portalMfrImage(ix: Pick<PortalIndex, "mfrImageDocs">): (mfr: string) => string | null {
+  return (mfr) => ix.mfrImageDocs.get(mfrKey(mfr)) ?? null;
+}
 
 const TTL_MS = 5 * 60 * 1000;
 const MONTH_MS = 30.4375 * 86400000;
@@ -260,7 +272,7 @@ export function servableDocIdsFrom(
 
 async function buildIndex(): Promise<Built> {
   const now = Date.now();
-  const [all, rules, fixtureRows, quotes] = await Promise.all([listCatalog(), loadPortalRules(), listFixtures(), getAllQuotes()]);
+  const [all, rules, fixtureRows, quotes, manufacturerRows] = await Promise.all([listCatalog(), loadPortalRules(), listFixtures(), getAllQuotes(), listManufacturers()]);
   const rule: BrowseRule = { minQuotes: rules.browseMinQuotes };
   const state = await loadPartDocsState(all);
   const images = buildImageIndex(state.documents, state.links);
@@ -390,10 +402,20 @@ async function buildIndex(): Promise<Built> {
   }
 
   const servableDocIds = servableDocIdsFrom(state.index, images, liveSkus);
+  // Manufacturer images are unlinked documents (docsById is built from every
+  // document, linked or not). They are servable but never a part's own photo.
+  const mfrImageDocs = new Map<string, string>();
+  for (const m of manufacturerRows) {
+    const d = m.imageDocumentId ? state.index.docsById.get(m.imageDocumentId) : undefined;
+    if (d && d.kind === "image" && d.blobKey && ["image/png", "image/jpeg", "image/webp"].includes(d.contentType)) {
+      mfrImageDocs.set(m.key, d.id);
+      servableDocIds.add(d.id);
+    }
+  }
 
   fabrics.sort((a, b) => a.name.localeCompare(b.name));
 
-  return { at: now, ix: { parts, componentParts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics, fabricRates }, facts, rule };
+  return { at: now, ix: { parts, componentParts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics, fabricRates, mfrImageDocs }, facts, rule };
 }
 
 function headQty(q: number | undefined): number {

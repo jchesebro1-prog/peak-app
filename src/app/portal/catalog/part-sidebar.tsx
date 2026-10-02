@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import type { ImageFallback } from "@/lib/part-image-fallback";
 import { catalogHref, type CatalogParams, type TileVM } from "@/lib/portal-catalog-view";
 import { PART_UNAVAILABLE_COPY, PORTAL_DOC_KIND_LABEL, type PartDetail, type PartDetailPart, type PartDocVM } from "@/lib/portal-part-view";
 import { AskQuestion } from "./ask-question";
 import { FixtureConfig } from "./fixture-config";
-import { AddedNote, docSrc, money, PreviewHint, QtyStepper, useAddToQuote } from "./panel-ui";
+import { AddedNote, docSrc, FallbackImg, money, PreviewHint, QtyStepper, useAddToQuote } from "./panel-ui";
 
 /**
  * The catalog's right-hand part sidebar (#245 Task 11, spec §3.2) — a
@@ -82,7 +83,7 @@ export function PartSidebar({
             </div>
           ) : (
             <>
-              <Gallery images={detail.images} hasDocs={detail.docs.length > 0} previewCid={previewCid} />
+              <Gallery images={detail.images} fallback={detail.fallback} hasDocs={detail.docs.length > 0} previewCid={previewCid} />
               <div>
                 <div className="ps-mfr">{detail.mfr || (detail.kind === "fixture" ? "Package" : "")}</div>
                 <h2 id="ps-title" className="ps-title">
@@ -152,15 +153,15 @@ function PlaceholderArt({ size = 44, datasheet = false }: { size?: number; datas
   );
 }
 
-function Gallery({ images, hasDocs, previewCid }: { images: string[]; hasDocs: boolean; previewCid: string }) {
+function Gallery({ images, fallback, hasDocs, previewCid }: { images: string[]; fallback: ImageFallback | null; hasDocs: boolean; previewCid: string }) {
   const [idx, setIdx] = useState(0);
   const [broken, setBroken] = useState<Record<string, boolean>>({});
   const shown = images.filter((id) => !broken[id]);
   const cur = shown[Math.min(idx, shown.length - 1)];
   if (!cur) {
     return (
-      <div className="ps-gallery-main ps-gallery-empty">
-        <PlaceholderArt size={56} datasheet={hasDocs} />
+      <div className={"ps-gallery-main" + (fallback ? "" : " ps-gallery-empty")}>
+        {fallback ? <FallbackImg fallback={fallback} previewCid={previewCid} /> : <PlaceholderArt size={56} datasheet={hasDocs} />}
       </div>
     );
   }
@@ -342,10 +343,12 @@ function GoesWithRow({
   });
   return (
     <div className="ps-row">
-      <Link href={href} scroll={false} className={"ps-mini-img" + (t.imageId && !broken ? "" : " ps-mini-empty")} tabIndex={-1} aria-hidden="true">
+      <Link href={href} scroll={false} className={"ps-mini-img" + (t.imageId && !broken ? "" : t.fallback ? "" : " ps-mini-empty")} tabIndex={-1} aria-hidden="true">
         {t.imageId && !broken ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={docSrc(t.imageId, previewCid)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
+        ) : t.fallback ? (
+          <FallbackImg fallback={t.fallback} previewCid={previewCid} />
         ) : (
           <PlaceholderArt size={24} datasheet={t.hasDatasheet} />
         )}

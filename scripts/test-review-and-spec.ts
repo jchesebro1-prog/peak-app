@@ -10771,6 +10771,7 @@ seeded()
   .then(() => portalPage293tAsyncChecks())
   .then(() => finalFix293tAsyncChecks())
   .then(() => mfrStoreAsyncChecks())
+  .then(() => mfrPortalAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -28680,7 +28681,7 @@ import {
 
   const leaky = { imageIds: ["IMG-1", "IMG-2"], datasheetIds: ["DS-1"], unit: "ft", cost: 42, list: 99, note: "x", margin: 0.3 };
   const t = d245Tile({ key: "SKU-1", kind: "part", title: "Widget", sku: "SKU-1", mfr: "ETC", category: "Lighting" }, leaky, { unitPrice: 12.5, por: false });
-  ok(eq(Object.keys(t).sort(), ["category", "hasDatasheet", "imageId", "key", "kind", "mfr", "por", "sku", "title", "unit", "unitPrice"]),
+  ok(eq(Object.keys(t).sort(), ["category", "fallback", "hasDatasheet", "imageId", "key", "kind", "mfr", "por", "sku", "title", "unit", "unitPrice"]),
     "#245 tile: TileVM is exactly the sell-only whitelist");
   ok(t.imageId === "IMG-1" && t.hasDatasheet && t.unit === "ft" && t.unitPrice === 12.5 && !t.por && !JSON.stringify(t).includes("42"),
     "#245 tile: hero image = first image id; no cost rides along from an IndexedPart");
@@ -28879,7 +28880,7 @@ import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
   const docVms = d245PartVM(leakyPart, null, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false, blobKey: "x" } as never, { id: "D2", kind: "datasheet", title: "DS", pdf: true }], []).docs;
   ok(eq(docVms, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false }, { id: "D2", kind: "datasheet", title: "DS", pdf: true }]),
     "#245 sidebar (fix 1): a document carries pdf — only a PDF opens inline; the doc VM is a whitelist");
-  ok(eq(Object.keys(pv).sort(), ["docs", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
+  ok(eq(Object.keys(pv).sort(), ["docs", "fallback", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
     "#245 sidebar: the part detail is exactly the sell-only whitelist");
   const pj = JSON.stringify(pv);
   ok(!pj.includes("\"cost\"") && !pj.includes("\"list\"") && !pj.includes("margin") && !pj.includes("tier") && !pj.includes("silver") && !pj.includes("note") && !pj.includes("pricedAt") && !pj.includes("42"),
@@ -28907,7 +28908,7 @@ import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
   ok(!fvm.unavailable && fvm.unitPrice === 300 && fvm.key === "fixture:fx1" && fvm.mfr === "ETC", "#245 fixture sidebar: priced from the no-add-on fixture price");
   const fu = d245FixtureVM(fxDef, "", null, () => null, { images: [], docs: [] });
   ok(fu.unavailable && fu.unitPrice === null && !fu.por, "#245 fixture sidebar: an unpriceable fixture reads unavailable");
-  ok(eq(Object.keys(fvm).sort(), ["addOns", "description", "docs", "fixed", "id", "images", "key", "kind", "mfr", "por", "title", "unavailable", "unitPrice"]),
+  ok(eq(Object.keys(fvm).sort(), ["addOns", "description", "docs", "fallback", "fixed", "id", "images", "key", "kind", "mfr", "por", "title", "unavailable", "unitPrice"]),
     "#245 fixture sidebar: exactly the sell-only whitelist");
   ok(d245Unavailable === "This item isn't available.", "#245 sidebar: the unavailable copy");
 }
@@ -48642,4 +48643,34 @@ import { manufacturerRows as mfrRows, matchManufacturerFile as mfrMatch } from "
   const g = src.indexOf("getDocument(input.documentId)");
   const v = src.indexOf("verifyUploadedBlob({");
   ok(g > 0 && v > 0 && g < v, "mfr images: the set-image action refuses an existing document before touching any blob");
+}
+
+/* ======================================================================
+   Manufacturer images — portal fallbacks (PGlite).
+   ====================================================================== */
+import { portalIndex as mfpIndex, invalidatePortalIndex as mfpInvalidate, portalMfrImage as mfpLook } from "@/lib/portal-catalog-index";
+import { toTileVM as mfpTile } from "@/lib/portal-catalog-view";
+import { setManufacturerImage as mfpSetImg } from "@/lib/stores/manufacturers";
+import { createDocument as mfpCreateDoc } from "@/lib/stores/part-documents";
+async function mfrPortalAsyncChecks(): Promise<void> {
+  const SKU = fixtureId("MFP", "PART-1");
+  await upsertPart({ id: SKU, sku: SKU, desc: "mfr portal part", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "MfpBrand", portalVisibility: "show" } as never);
+  registerFixture("catalog_parts", SKU);
+  mfpInvalidate();
+  const before = await mfpIndex({ fresh: true });
+  const doc = await mfpCreateDoc({ kind: "image", title: "MfpBrand (manufacturer)", fileName: "m.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/x/m.webp", sourceUrl: null, source: "manufacturer", sourceRef: "mfr:mfpbrand", by: "mfr test" });
+  if (doc) registerFixture("part_documents", doc.id);
+  const m = await mfpSetImg({ name: "MfpBrand", documentId: doc!.id, by: "mfr test" });
+  registerFixture("manufacturers", m.id);
+  mfpInvalidate();
+  const ix = await mfpIndex({ fresh: true });
+  ok(ix.mfrImageDocs.get("mfpbrand") === doc!.id && ix.servableDocIds.has(doc!.id), "mfr images: the portal index knows the manufacturer image and may serve it");
+  ok(mfpLook(ix)("MFP-BRAND") === doc!.id && mfpLook(ix)("Nobody") === null, "mfr images: portalMfrImage matches by key");
+  const bp = before.parts.get(SKU), ap = ix.parts.get(SKU);
+  ok(!!bp && !!ap && bp.imageIds.length === 0 && ap.imageIds.length === 0 && bp.visibility === ap.visibility, "mfr images: a manufacturer image never becomes a part image or changes visibility");
+  ok(!before.servableDocIds.has(doc!.id), "mfr images: before the image was set, the document was not servable");
+  const tile = mfpTile({ key: SKU, kind: "part", title: "t", sku: SKU, mfr: "MfpBrand", category: "Lighting" }, ap, { unitPrice: 12, por: false }, undefined, { kind: "image", documentId: doc!.id, label: "MfpBrand" });
+  ok(tile.imageId === null && tile.fallback?.kind === "image", "mfr images: a tile without a photo carries the fallback");
+  const withPhoto = mfpTile({ key: SKU, kind: "part", title: "t", sku: SKU, mfr: "MfpBrand", category: "Lighting" }, { imageIds: ["PD-own"] }, { unitPrice: 12, por: false }, undefined, { kind: "placeholder", name: "coming-soon" });
+  ok(withPhoto.fallback === null && withPhoto.imageId === "PD-own", "mfr images: a tile with its own photo has no fallback");
 }

@@ -1,5 +1,6 @@
 import type { SearchEntry, SearchQuery } from "@/lib/portal-search";
 import { PACKAGES_DEPT } from "@/lib/portal-departments";
+import type { ImageFallback } from "@/lib/part-image-fallback";
 
 /**
  * Portal catalog browse page — pure, client-safe helpers (#245 Task 10,
@@ -19,6 +20,9 @@ export type TileVM = {
   mfr: string;
   category: string;
   imageId: string | null;
+  /** Manufacturer section Part 1 — what shows when the part has no photo of
+   *  its own (null when it has one). Never a stored photo. */
+  fallback: ImageFallback | null;
   hasDatasheet: boolean;
   unitPrice: number | null;
   por: boolean;
@@ -209,9 +213,10 @@ type TileFixture = { lines: readonly { required: boolean }[] } | null | undefine
 /** One result tile — an explicit whitelist (never a spread), sell only. A
  *  missing price reads as "Price on request". A fixture tile (#289) gets the
  *  "Package" badge, and "Includes N parts" when its index fixture is given. */
-export function toTileVM(e: TileIdentity, media: TileMedia, price: TilePrice, fixture?: TileFixture): TileVM {
+export function toTileVM(e: TileIdentity, media: TileMedia, price: TilePrice, fixture?: TileFixture, fallback: ImageFallback | null = null): TileVM {
   const unitPrice = price && !price.por && typeof price.unitPrice === "number" ? price.unitPrice : null;
   const n = fixture ? includedLines(fixture.lines).length : 0;
+  const imageId = media?.imageIds?.[0] ?? null;
   return {
     key: String(e.key),
     kind: e.kind === "fixture" ? "fixture" : "part",
@@ -219,7 +224,8 @@ export function toTileVM(e: TileIdentity, media: TileMedia, price: TilePrice, fi
     sku: String(e.sku || ""),
     mfr: String(e.mfr || ""),
     category: String(e.category || ""),
-    imageId: media?.imageIds?.[0] ?? null,
+    imageId,
+    fallback: imageId ? null : fallback,
     hasDatasheet: !!media?.datasheetIds?.length,
     unitPrice,
     por: unitPrice == null,
