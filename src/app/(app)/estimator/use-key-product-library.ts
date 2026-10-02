@@ -12,6 +12,9 @@ export type KeyProductLibrary = {
   rows: Record<string, KeyProductLibraryRow>;
   /** Fetch any of `skus` not cached yet; resolves to the whole cache. */
   ensure: (skus: string[]) => Promise<Record<string, KeyProductLibraryRow>>;
+  /** Re-read `skus` even when cached (Draft narrative copies the CURRENT
+   *  library paragraph); resolves to the whole cache. Rejects on failure. */
+  refresh: (skus: string[]) => Promise<Record<string, KeyProductLibraryRow>>;
   /** Replace one row (after Save to library). */
   setRow: (sku: string, row: KeyProductLibraryRow) => void;
 };
@@ -36,6 +39,16 @@ export function useKeyProductLibrary(activeSkus: string[]): KeyProductLibrary {
     }
   }, []);
 
+  const refresh = useCallback(async (skus: string[]) => {
+    const want = [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))].slice(0, MAX_LIBRARY_SKUS);
+    if (!want.length) return rowsRef.current;
+    const got = await keyProductLibraryAction(want);
+    const next = { ...rowsRef.current, ...got };
+    rowsRef.current = next;
+    setRows(next);
+    return next;
+  }, []);
+
   const setRow = useCallback((sku: string, row: KeyProductLibraryRow) => {
     const next = { ...rowsRef.current, [sku]: row };
     rowsRef.current = next;
@@ -47,5 +60,5 @@ export function useKeyProductLibrary(activeSkus: string[]): KeyProductLibrary {
     if (key) void ensure(key.split("\n"));
   }, [key, ensure]);
 
-  return { rows, ensure, setRow };
+  return { rows, ensure, refresh, setRow };
 }

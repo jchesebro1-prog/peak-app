@@ -1,4 +1,5 @@
 import type { KeyProduct, SpecItem, SpecSection } from "./types";
+import { systemPrintsInBody } from "./quote-document-view";
 /**
  * #281 — a system narrative's plain-text formatting, turned into printable
  * blocks. Pure (no React) so the test:specs harness can import it.
@@ -89,8 +90,14 @@ export type KeyProductResolution =
  *  still match, and the line must still be eligible. */
 export function resolveKeyProducts(sec: SpecSection): KeyProductResolution[] {
   const items = Array.isArray(sec?.items) ? sec.items : [];
-  return (sec?.keyProducts || []).map((kp): KeyProductResolution => {
-    const item = items.find((it) => String(it.id) === kp.lineKey);
+  // Defensive (the print path reads saved JSON): a non-array list resolves
+  // to nothing and a malformed row reads "missing" — never a throw. The
+  // result stays index-aligned with sec.keyProducts.
+  const kps: unknown[] = Array.isArray(sec?.keyProducts) ? sec.keyProducts : [];
+  return kps.map((raw): KeyProductResolution => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { kp: { lineKey: "", sku: "", text: "", photo: false }, status: "missing" };
+    const kp = raw as KeyProduct;
+    const item = items.find((it) => it && String(it.id) === kp.lineKey);
     if (!item) return { kp, status: "missing" };
     if (skuOf(item) !== kp.sku) return { kp, status: "changed", item };
     if (!isKeyProductEligible(item)) return { kp, status: "ineligible", item };
@@ -114,7 +121,7 @@ export function sanitizeKeyProducts(raw: unknown): KeyProduct[] {
     if (!r || typeof r !== "object" || Array.isArray(r)) continue;
     const o = r as Record<string, unknown>;
     const lineKey = strOf(o.lineKey).trim().slice(0, 32);
-    const sku = strOf(o.sku).trim();
+    const sku = strOf(o.sku).trim().slice(0, 128);
     if (!lineKey || !sku || keys.has(lineKey) || skus.has(sku)) continue;
     keys.add(lineKey);
     skus.add(sku);
@@ -179,6 +186,16 @@ export function toggleKeyProduct(sec: SpecSection, itemId: number, libraryText: 
   if (!it) return sec;
   if (keyProductStar(sec, it) === "on") return withKeyProducts(sec, (sec.keyProducts || []).filter((k) => k.lineKey !== String(itemId)));
   return markKeyProduct(sec, itemId, libraryText);
+}
+
+/** The ★'s late fill: once the library row arrives, copy its paragraph onto
+ *  the block anchored at `itemId` — only while that block still features
+ *  `sku` and its text is still empty (a user's typing always wins). */
+export function fillEmptyKeyProductText(sec: SpecSection, itemId: number, sku: string, text: string): SpecSection {
+  const kps = Array.isArray(sec.keyProducts) ? sec.keyProducts : [];
+  const i = kps.findIndex((k) => k.lineKey === String(itemId) && k.sku === sku);
+  if (i < 0 || !text || (kps[i].text || "").trim()) return sec;
+  return patchKeyProduct(sec, i, { text });
 }
 
 export function moveKeyProduct(sec: SpecSection, index: number, dir: -1 | 1): SpecSection {
@@ -307,16 +324,19 @@ export type PrintableKeyProduct = { sku: string; heading: string; blocks: Narrat
 /** What prints for a narrative system: resolved "ok" blocks in order. */
 export function printableKeyProducts(sec: SpecSection): PrintableKeyProduct[] {
   return resolveKeyProducts(sec).flatMap((r) =>
-    r.status === "ok" ? [{ sku: r.kp.sku, heading: keyProductHeading(r.item), blocks: narrativeBlocks(r.kp.text), photo: r.kp.photo }] : []
+    r.status === "ok"
+      ? [{ sku: r.kp.sku, heading: keyProductHeading(r.item), blocks: narrativeBlocks(typeof r.kp.text === "string" ? r.kp.text : ""), photo: r.kp.photo !== false }]
+      : []
   );
 }
 
-/** Skus whose photo the document prints: narrative systems' printable
- *  blocks with photo on, deduped, in document order. */
+/** Skus whose photo the document prints: printed (revenue-carrying)
+ *  narrative systems' printable blocks with photo on, deduped, in document
+ *  order — a system the body skips never costs a photo read. */
 export function photoSkusOf(sections: SpecSection[]): string[] {
   const out: string[] = [];
-  for (const sec of sections || []) {
-    if ((sec?.presentation || "itemized") !== "narrative") continue;
+  for (const sec of Array.isArray(sections) ? sections : []) {
+    if (!sec || (sec.presentation || "itemized") !== "narrative" || !systemPrintsInBody(sec)) continue;
     for (const p of printableKeyProducts(sec)) if (p.photo && !out.includes(p.sku)) out.push(p.sku);
   }
   return out;

@@ -1315,6 +1315,7 @@ export default function SectionCard(p: SectionCardProps) {
                         onClick={() => p.onToggleKeyProduct(it.id)}
                         disabled={kpStar === "full" || kpStar === "dupSku"}
                         aria-pressed={kpStar === "on"}
+                        aria-label="Key product — featured in the narrative"
                         title={
                           kpStar === "on"
                             ? "Key product — featured in the narrative"

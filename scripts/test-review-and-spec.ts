@@ -10716,6 +10716,7 @@ seeded()
   .then(() => packages289AsyncChecks())
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
+  .then(() => narrativeFinal293AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -43384,4 +43385,165 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
     "#293 part editor: the Narrative paragraph panel saves through the same action, stale-checked, and leaks no field into the part form");
   const cat = rd("src/app/(app)/catalog/page.tsx");
   ok(/canCreate && editing && part && \([\s\S]{0,400}<NarrativeParagraphPanel\s+key=\{part\.sku\}/.test(cat), "#293 part editor: the panel mounts for Create users editing a part");
+}
+
+/* ======================================================================
+   #293 slice 1 — final review fixes: photo deadline + running budget,
+   defensive print path, Draft/Save robustness, the ★ race, appendix
+   comments, sku cap, actions width, wiring pins.
+   ====================================================================== */
+import { inlinePhotos as n293fInline, PHOTO_INLINE_DEADLINE_MS as n293fDeadline } from "@/lib/narrative/photos";
+import type { PartDocument as N293fDoc } from "@/lib/part-docs/types";
+import {
+  fillEmptyKeyProductText as n293fFill, printableKeyProducts as n293fPrintable, photoSkusOf as n293fPhotoSkus,
+  resolveKeyProducts as n293fResolve, sanitizeKeyProducts as n293fSanitize, toggleKeyProduct as n293fToggle,
+} from "@/app/(app)/estimator/narrative";
+import { systemPrintsInBody as n293fPrints } from "@/app/(app)/estimator/quote-document-view";
+import type { SpecItem as N293fItem, SpecSection as N293fSec } from "@/app/(app)/estimator/types";
+
+async function narrativeFinal293AsyncChecks(): Promise<void> {
+  const d = (id: string, size: number): N293fDoc =>
+    ({ id, kind: "image", title: "T-" + id, fileName: id, contentType: "image/png", size, blobKey: id, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    ok(n293fDeadline > 0 && n293fDeadline <= 10000, "#293 fix photos: one overall inline deadline well under the 30 s render step (≤ 10 s)");
+
+    // A reader that never resolves: the inline step returns by the deadline,
+    // that photo skipped, the others kept, and the hung read is aborted.
+    let seen: AbortSignal | undefined;
+    const hang = async (key: string, _max: number, signal?: AbortSignal) => {
+      if (key === "a") { seen = signal; return new Promise<Uint8Array | null>(() => {}); }
+      return new Uint8Array(5);
+    };
+    const t0 = Date.now();
+    const out = await n293fInline(new Map([["A", d("a", 5)], ["B", d("b", 5)]]), hang, { perImage: 16, total: 100, concurrency: 6, deadlineMs: 60 });
+    const took = Date.now() - t0;
+    ok(took < 2000 && Object.keys(out).join(",") === "B", "#293 fix photos: a hung Blob read can't stall the render — inlinePhotos returns at the deadline with that photo skipped");
+    ok(!!seen && seen.aborted, "#293 fix photos: the hung read's AbortSignal fires at the deadline");
+
+    // Photos not yet read when the deadline passes are skipped unread.
+    const reads1: string[] = [];
+    const hangFirst = async (key: string) => { reads1.push(key); return key === "a" ? new Promise<Uint8Array | null>(() => {}) : new Uint8Array(5); };
+    const out1 = await n293fInline(new Map([["A", d("a", 5)], ["B", d("b", 5)], ["C", d("c", 5)]]), hangFirst, { perImage: 16, total: 100, concurrency: 1, deadlineMs: 40 });
+    ok(Object.keys(out1).length === 0 && reads1.join(",") === "a", "#293 fix photos: after the deadline the remaining batches are never read");
+
+    // The running byte total stops reads once the budget is spent.
+    const reads2: string[] = [];
+    const sized = (sizes: Record<string, number>) => async (key: string) => { reads2.push(key); return new Uint8Array(sizes[key]); };
+    const out2 = await n293fInline(new Map([["A", d("a", 10)], ["B", d("b", 1)], ["C", d("c", 1)]]), sized({ a: 10, b: 1, c: 1 }), { perImage: 16, total: 10, concurrency: 1, deadlineMs: 5000 });
+    ok(reads2.join(",") === "a" && Object.keys(out2).join(",") === "A", "#293 fix photos: budget reached → later photos are never read (reader called once)");
+    reads2.length = 0;
+    const out3 = await n293fInline(new Map([["A", d("a", 10)], ["B", d("b", 10)], ["C", d("c", 1)], ["D", d("d", 1)]]), sized({ a: 10, b: 10, c: 1, d: 1 }), { perImage: 16, total: 12, concurrency: 1, deadlineMs: 5000 });
+    ok(reads2.join(",") === "a,c,d" && Object.keys(out3).join(",") === "A,C,D", "#293 fix photos: a photo whose stored size no longer fits the remaining budget is skipped unread; smaller ones still fit");
+    const reads4: string[] = [];
+    const out4 = await n293fInline(new Map([["A", d("a", 5)], ["B", d("b", 5)]]), async (k) => { reads4.push(k); return new Uint8Array(5); }, { perImage: 16, total: 100, concurrency: 6 });
+    ok(Object.keys(out4).join(",") === "A,B" && reads4.length === 2, "#293 fix photos: the default deadline leaves normal reads untouched");
+  } finally {
+    console.warn = warn;
+  }
+}
+
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const it = (id: number, extra: Partial<N293fItem> = {}): N293fItem => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293fItem);
+  const sec = (items: N293fItem[], extra: Partial<N293fSec> = {}): N293fSec => ({ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+
+  // 7 — the print path never throws on malformed saved data.
+  const bad = (kps: unknown) => sec([it(1)], { presentation: "narrative", keyProducts: kps as N293fSec["keyProducts"] });
+  let threw = false;
+  let objKps: unknown = null;
+  let mixed: ReturnType<typeof n293fPrintable> = [];
+  try {
+    objKps = n293fPrintable(bad({ lineKey: "1", sku: "SKU-1" }));
+    mixed = n293fPrintable(bad([null, 5, "x", ["arr"], { lineKey: "1", sku: "SKU-1", text: 42, photo: "yes" }]));
+    n293fPhotoSkus([bad("nope"), bad([null]), null as unknown as N293fSec]);
+  } catch {
+    threw = true;
+  }
+  ok(!threw && eq(objKps, []), "#293 fix print: a non-array keyProducts prints nothing and never throws");
+  ok(!threw && mixed.length === 1 && eq(mixed[0].blocks, []) && mixed[0].photo === true && mixed[0].heading === "Line 1",
+    "#293 fix print: malformed rows are skipped and a non-string text prints the heading only — no throw");
+  const rz = n293fResolve(bad([null, { lineKey: "1", sku: "SKU-1", text: "t", photo: true }]));
+  ok(rz.length === 2 && rz[0].status === "missing" && rz[0].kp.lineKey === "" && rz[1].status === "ok", "#293 fix print: resolve stays index-aligned — a malformed row reads missing with a safe placeholder");
+  let renderThrew = false;
+  try {
+    const secs = p293Sections();
+    secs[1].keyProducts = { bogus: true } as unknown as N293fSec["keyProducts"];
+    secs[3].keyProducts = [null, { lineKey: "8", sku: "SKU-8", text: 7, photo: true }] as unknown as N293fSec["keyProducts"];
+    p293Render(p293Props({ sections: secs }));
+  } catch {
+    renderThrew = true;
+  }
+  ok(!renderThrew, "#293 fix print: QuoteDocument renders a quote with malformed keyProducts without throwing");
+
+  // 8 — photoSkusOf skips systems the body doesn't print.
+  const zero = sec([it(1, { cost: 0, price: 0 })], { id: "z", presentation: "narrative", keyProducts: [{ lineKey: "1", sku: "SKU-1", text: "", photo: true }] });
+  const live = sec([it(2)], { id: "l", presentation: "narrative", keyProducts: [{ lineKey: "2", sku: "SKU-2", text: "", photo: true }] });
+  ok(!n293fPrints(zero) && n293fPrints(live) && eq(n293fPhotoSkus([zero, live]), ["SKU-2"]), "#293 fix photos: a narrative system with no revenue (not printed) costs no photo read");
+  ok(eq(p293AppendixIds(p293Sections(), "sectioned"), p293Sections().filter(n293fPrints).map((x) => x.id)), "#293 fix: the appendix and photo reads share QuoteDocument's printed-systems predicate");
+
+  // 11 — sku length cap.
+  const long = "S".repeat(300);
+  const capped = n293fSanitize([{ lineKey: "1", sku: long, text: "", photo: true }]);
+  ok(capped.length === 1 && capped[0].sku.length === 128, "#293 fix sanitize: a key product's sku is capped at 128 chars");
+
+  // 4 — the ★ late fill: only while the block is still empty and still that sku.
+  const base = sec([it(1), it(2)]);
+  const marked = n293fToggle(base, 1, "");
+  const filled = n293fFill(marked, 1, "SKU-1", "Library para");
+  ok(filled.keyProducts?.[0].text === "Library para", "#293 fix ★: an empty block marked before the library row loaded is filled once it arrives");
+  const typed = { ...marked, keyProducts: [{ ...marked.keyProducts![0], text: "Typed" }] };
+  ok(n293fFill(typed, 1, "SKU-1", "Library para") === typed, "#293 fix ★: text typed meanwhile is never overwritten");
+  ok(n293fFill(base, 1, "SKU-1", "Library para") === base && n293fFill(marked, 1, "OTHER", "x") === marked && n293fFill(marked, 1, "SKU-1", "") === marked,
+    "#293 fix ★: un-starred, re-anchored or no paragraph → no change");
+
+  // 5 — the appendix prints line comments even with Descriptions off.
+  const cs = p293Sections();
+  cs[1].items = cs[1].items.map((x) => (x.id === 5 ? { ...x, comment: "Narr comment 293" } : x));
+  const offNotes = p293Render(p293Props({ sections: cs, pdfOptions: { pdfNotes: false, pdfItemizedAppendix: true } }));
+  const offApx = p293Render(p293Props({ sections: cs, pdfOptions: { pdfNotes: false } }));
+  ok(offNotes.split("Narr comment 293").length === 2 && !offApx.includes("Narr comment 293"), "#293 fix appendix: line comments print in the appendix even with Descriptions off");
+  const secNoNotes = p293Render(p293Props({ pdfOptions: { detail: "sectioned", pdfNotes: false, pdfItemizedAppendix: true } }));
+  ok(secNoNotes.includes("Customer note"), "#293 fix appendix: by-section appendix prints an itemized system's comment with Descriptions off");
+
+  // Source wiring (client components aren't mounted here).
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const hook = rd("src/app/(app)/estimator/use-key-product-library.ts");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const photos = rd("src/lib/narrative/photos.ts");
+  const doSave = col.slice(col.indexOf("const doSave = "), col.indexOf("const onSave = "));
+  ok(/start\(async \(\) => \{[\s\S]*try \{[\s\S]*await saveProductParagraphAction\([\s\S]*\} catch \{\s*setMsg\(FAILED\);/.test(doSave),
+    "#293 fix Save to library: the server await is caught (FAILED message) — a throw can't unmount the Estimator");
+  ok(doSave.includes("library.setRow(kp.sku, { ...row, paragraph: out.stale.paragraph, paragraphUpdatedAt: out.stale.updatedAt })"),
+    "#293 fix Save to library: a stale answer refreshes the cached row (chip + Use library text)");
+  const draftSrc = col.slice(col.indexOf("const draft = "), col.indexOf("const saveAsIntro = "));
+  ok(draftSrc.includes("await p.library.refresh(okSkus)") && draftSrc.includes("okSkus.some((s) => !(s in rows))") && col.includes('const NO_LIBRARY = "Could not load the library";') &&
+     draftSrc.indexOf("setNotice(NO_LIBRARY)") > -1 && draftSrc.indexOf("setNotice(NO_LIBRARY)") < draftSrc.indexOf("draftNarrative("),
+    "#293 fix Draft: force-refreshes the library and aborts (no write) with “Could not load the library” when any sku has no row");
+  const refreshSrc = hook.slice(hook.indexOf("const refresh = useCallback("), hook.indexOf("const setRow = useCallback("));
+  ok(refreshSrc.includes("keyProductLibraryAction(want)") && !/catch/.test(refreshSrc) && !refreshSrc.includes("in rowsRef.current"),
+    "#293 fix Draft: refresh bypasses the cache and rejects on failure (no swallowed error)");
+  ok(/onChange=\{\(e\) => \{\s*setIntroId\(e\.target\.value\);\s*setDraftAsk\(false\);/.test(col), "#293 fix Draft: changing the intro closes the Replace / Fill blanks strip");
+  const star = cli.slice(cli.indexOf("const toggleKeyProductLine = "), cli.indexOf("const curtainSec = "));
+  ok(star.includes("updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));") && star.includes(".ensure([sku])") && star.includes("fillEmptyKeyProductText(s, itemId, sku, para)") &&
+     star.indexOf("toggleKeyProduct(s, itemId, text)") < star.indexOf(".ensure([sku])"),
+    "#293 fix ★: marks first, awaits the library row, then fills an empty block on the live section");
+  ok(cli.includes('"minmax(150px,1.3fr) 104px 92px 136px 116px 104px"') && cli.includes('"minmax(150px,1.3fr) 104px 136px 116px 104px"'),
+    "#293 fix actions cell: 104px in both views — five 20px buttons (✎ ★ ↑ ↓ ×) fit");
+  ok(card.includes('aria-label="Key product — featured in the narrative"'), "#293 fix ★: the star has an aria-label");
+  ok(/<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli), "#293 fix: the narrative column remounts per system (key={narrSec.id})");
+  ok(photos.includes("Promise.race([read(d.blobKey as string, caps.perImage, abort.signal), expired])") && photos.includes("getBlobStream(blobKey, { signal })"),
+    "#293 fix photos: each read races the deadline and the Blob GET carries the AbortSignal");
+  const clientImportsServer = (src: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/narrative\/(library|photos))/m.test(src);
+  const clients = {
+    "narrative-column.tsx": col,
+    "use-key-product-library.ts": hook,
+    "narrative-intros-modal.tsx": rd("src/app/(app)/estimator/narrative-intros-modal.tsx"),
+    "narrative-paragraph-panel.tsx": rd("src/app/(app)/catalog/narrative-paragraph-panel.tsx"),
+  };
+  ok(Object.values(clients).every((src) => /^"use client";/.test(src) && !clientImportsServer(src)) && !clientImportsServer(card) && !clientImportsServer(cli),
+    "#293 fix: narrative-column.tsx and every #293 client module value-import no store, db, blob, session or server-only narrative module");
 }

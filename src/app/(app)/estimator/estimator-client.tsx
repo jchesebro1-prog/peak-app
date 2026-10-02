@@ -113,7 +113,7 @@ import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import NarrativeColumn from "./narrative-column";
 import { useKeyProductLibrary } from "./use-key-product-library";
-import { isKeyProductEligible, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
+import { fillEmptyKeyProductText, isKeyProductEligible, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
@@ -831,10 +831,11 @@ export default function EstimatorClient({
      64px cell instead of three, which used to overflow the old 22px column
      and wrap onto a second grid row. #269: 84px internally, room for the
      labor lines' ✎ Edit labor button beside them. #293: +20px for the ★
-     key-product toggle. */
+     key-product toggle — five 20px buttons + 1px gaps (✎ ★ ↑ ↓ × on a
+     labor or track line) need 104px in BOTH views. */
   const cols = isInternal
     ? "minmax(150px,1.3fr) 104px 92px 136px 116px 104px"
-    : "minmax(150px,1.3fr) 104px 136px 116px 84px";
+    : "minmax(150px,1.3fr) 104px 136px 116px 104px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
      `travel` used to carry an estimate for every customer AND venue in the
@@ -2478,11 +2479,24 @@ export default function EstimatorClient({
   const kpLib = useKeyProductLibrary(narrSkus);
   const updateSection = (secId: string, fn: (s: SpecSection) => SpecSection) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? fn(s) : s)));
-  /** #293 ★: marking copies the saved paragraph when the library row is loaded. */
+  /** #293 ★: marking copies the saved paragraph when the library row is
+   *  loaded. When it isn't yet (a ★ in a system the prefetch hasn't reached —
+   *  pointer-down activates it, the prefetch effect runs after), mark the
+   *  line now, await the row, then fill the block's text if it's still empty
+   *  (functional updater on the live section, so nothing typed is lost). */
   const toggleKeyProductLine = (secId: string, itemId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((i) => i.id === itemId);
-    const text = (it && kpLib.rows[it.sku.trim()]?.paragraph) || "";
+    const sku = it ? it.sku.trim() : "";
+    const text = (sku && kpLib.rows[sku]?.paragraph) || "";
     updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));
+    if (!sku || sku in kpLib.rows) return;
+    void kpLib
+      .ensure([sku])
+      .then((rows) => {
+        const para = rows[sku]?.paragraph || "";
+        if (para) updateSection(secId, (s) => fillEmptyKeyProductText(s, itemId, sku, para));
+      })
+      .catch(() => {});
   };
 
   const curtainSec = sections.find((s) => s.id === curtainFor);

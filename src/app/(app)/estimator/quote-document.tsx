@@ -189,18 +189,21 @@ function SectionBand({ num, name, subtotalLabel }: { num: number; name: string; 
 
 /** One system's itemized lines + freight row — the body's itemized view and
  *  the #293 appendix share it so they can't drift. `showDesc` is the
- *  Descriptions toggle in the body and always true in the appendix. */
+ *  Descriptions toggle in the body and always true in the appendix;
+ *  `showAllComments` (appendix only) prints every line comment, which the
+ *  body ties to Descriptions through each line's own `showComment`. */
 function ItemizedLines(props: {
   lines: DocLine[];
   hasFreight: boolean;
   freightLabel: string;
   freightRowLabel: string;
   showDesc: boolean;
+  showAllComments?: boolean;
   pdfQty: boolean;
   pdfPrices: boolean;
   lineCols: string;
 }) {
-  const { lines, hasFreight, freightLabel, freightRowLabel, showDesc, pdfQty, pdfPrices, lineCols } = props;
+  const { lines, hasFreight, freightLabel, freightRowLabel, showDesc, showAllComments, pdfQty, pdfPrices, lineCols } = props;
   return (
     <div style={{ marginBottom: 6 }}>
       {lines.map((ln) => (
@@ -219,7 +222,7 @@ function ItemizedLines(props: {
         >
           {showDesc && <span>
             {ln.desc}
-            {ln.showComment && (
+            {(ln.showComment || (!!showAllComments && !!ln.comment)) && (
               <span
                 style={{
                   display: "block",
@@ -901,6 +904,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                       freightLabel={ps.freightLabel}
                       freightRowLabel={freightRowLabel}
                       showDesc
+                      showAllComments
                       pdfQty={p.pdfQty}
                       pdfPrices={p.pdfPrices}
                       lineCols={appendixCols}

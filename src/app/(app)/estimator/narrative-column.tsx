@@ -54,6 +54,7 @@ const CHIP_TONE: Record<KeyProductChip, CSSProperties> = {
 };
 const STRIP: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11.5, fontWeight: 600, color: "#b4543a", background: "#fbecea", borderRadius: 6, padding: "6px 8px" };
 const FAILED = "Could not reach the server. Try again.";
+const NO_LIBRARY = "Could not load the library";
 const ASK: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 11.5, color: "#3a3f4a", background: "#fbf3dd", borderRadius: 6, padding: "6px 8px" };
 
 export default function NarrativeColumn(p: NarrativeColumnProps) {
@@ -80,7 +81,24 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
       setNotice("");
       try {
         const okSkus = resolveKeyProducts(sec).filter((r) => r.status === "ok").map((r) => r.kp.sku);
-        const rows = await p.library.ensure(okSkus);
+        // Force-refresh (bypass the cache) so Draft copies the CURRENT
+        // library paragraph. Any sku still without a row means the library
+        // didn't load: abort with no write — a missing row would otherwise
+        // read as "no paragraph" and replace written text with the
+        // description.
+        let rows = p.library.rows;
+        if (okSkus.length) {
+          try {
+            rows = await p.library.refresh(okSkus);
+          } catch {
+            setNotice(NO_LIBRARY);
+            return;
+          }
+          if (okSkus.some((s) => !(s in rows))) {
+            setNotice(NO_LIBRARY);
+            return;
+          }
+        }
         const lib = new Map(Object.entries(rows));
         const introText = chosen ? chosen.text : null;
         if (mode == null && draftOverwrites(sec, introText, lib)) {
@@ -126,7 +144,10 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
         <select
           aria-label="System intro"
           value={introId}
-          onChange={(e) => setIntroId(e.target.value)}
+          onChange={(e) => {
+            setIntroId(e.target.value);
+            setDraftAsk(false); // the Replace / Fill blanks strip asked about the previous intro
+          }}
           style={{ flex: "1 1 140px", minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11.5, color: "#5b616e", background: "#fff" }}
         >
           <option value="">— none —</option>
@@ -276,20 +297,29 @@ function KeyProductCard(props: KeyProductCardProps) {
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
 
+  /** Every server await is caught: a throw inside startTransition reaches
+   *  the error boundary and would unmount the Estimator (unsaved work lost). */
   const doSave = (expect: number | null) =>
     start(async () => {
       setMsg("");
-      const out = await saveProductParagraphAction(kp.sku, kp.text, expect);
-      if (out.ok) {
-        library.setRow(kp.sku, out.row);
-        setAsk(null);
-        setMsg("Saved to the library.");
-      } else if (out.stale) {
-        setStale(out.stale);
-        setAsk("stale");
-      } else {
-        setAsk(null);
-        setMsg(out.error);
+      try {
+        const out = await saveProductParagraphAction(kp.sku, kp.text, expect);
+        if (out.ok) {
+          library.setRow(kp.sku, out.row);
+          setAsk(null);
+          setMsg("Saved to the library.");
+        } else if (out.stale) {
+          // The library moved on: refresh the cached row so the chip and
+          // "Use library text" show the paragraph that's there now.
+          if (row) library.setRow(kp.sku, { ...row, paragraph: out.stale.paragraph, paragraphUpdatedAt: out.stale.updatedAt });
+          setStale(out.stale);
+          setAsk("stale");
+        } else {
+          setAsk(null);
+          setMsg(out.error);
+        }
+      } catch {
+        setMsg(FAILED);
       }
     });
   const onSave = () => {

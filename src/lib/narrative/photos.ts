@@ -24,7 +24,13 @@ export const PHOTO_MAX_BYTES = 3 * 1024 * 1024;
 export const PHOTO_TOTAL_MAX_BYTES = 15 * 1024 * 1024;
 export const PHOTO_READ_CONCURRENCY = 6;
 
-export type PhotoReader = (blobKey: string, maxBytes: number) => Promise<Uint8Array | null>;
+/** Every photo read shares one deadline (ms): a hung Blob GET can't hold the
+ *  print route past its own render step timeout (RENDER_STEP_TIMEOUT_MS,
+ *  30 s). Photos not read by then are skipped with a warning. */
+export const PHOTO_INLINE_DEADLINE_MS = 8000;
+
+export type PhotoReader = (blobKey: string, maxBytes: number, signal?: AbortSignal) => Promise<Uint8Array | null>;
+export type PhotoCaps = { perImage: number; total: number; concurrency: number; deadlineMs?: number };
 
 /** sku → primary visible image doc, for the photo-on blocks of narrative systems. */
 export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<string, PartDocument>> {
@@ -41,8 +47,8 @@ export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<
 }
 
 /** Read a private blob, giving up (null) past `maxBytes`. */
-export async function readBlobCapped(blobKey: string, maxBytes: number): Promise<Uint8Array | null> {
-  const stream = await getBlobStream(blobKey);
+export async function readBlobCapped(blobKey: string, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array | null> {
+  const stream = await getBlobStream(blobKey, { signal });
   if (!stream) return null;
   const reader = (stream as ReadableStream<Uint8Array>).getReader();
   const chunks: Uint8Array[] = [];
@@ -66,39 +72,72 @@ export async function readBlobCapped(blobKey: string, maxBytes: number): Promise
   return out;
 }
 
-/** Inline photo docs as data URIs within the caps (pure apart from `read`). */
+/** Inline photo docs as data URIs within the caps (pure apart from `read`).
+ *  Reads run in batches of `concurrency` under ONE overall deadline (a read
+ *  still pending then is aborted and skipped), and a running byte total
+ *  stops reading once the document budget is spent — a photo whose stored
+ *  size no longer fits is never read. Never throws. */
 export async function inlinePhotos(
   docs: ReadonlyMap<string, PartDocument>,
   read: PhotoReader,
-  caps: { perImage: number; total: number; concurrency: number } = { perImage: PHOTO_MAX_BYTES, total: PHOTO_TOTAL_MAX_BYTES, concurrency: PHOTO_READ_CONCURRENCY }
+  caps: PhotoCaps = { perImage: PHOTO_MAX_BYTES, total: PHOTO_TOTAL_MAX_BYTES, concurrency: PHOTO_READ_CONCURRENCY }
 ): Promise<Record<string, { src: string; alt: string }>> {
   const entries = [...docs].filter(([, d]) => PHOTO_TYPES.has(d.contentType) && !!d.blobKey && !(d.size > caps.perImage));
-  const bytes: Array<Uint8Array | null> = entries.map(() => null);
-  for (let i = 0; i < entries.length; i += caps.concurrency) {
-    await Promise.all(
-      entries.slice(i, i + caps.concurrency).map(async ([sku, d], j) => {
-        try {
-          const b = await read(d.blobKey as string, caps.perImage);
-          if (b && b.byteLength <= caps.perImage) bytes[i + j] = b;
-          else console.warn("[narrative] key-product photo skipped (missing or over 3 MB)", sku, d.id);
-        } catch (e) {
-          console.warn("[narrative] key-product photo unreadable", sku, d.id, e instanceof Error ? e.message : e);
-        }
-      })
-    );
-  }
   const out: Record<string, { src: string; alt: string }> = {};
-  let total = 0;
-  entries.forEach(([sku, d], i) => {
-    const b = bytes[i];
-    if (!b) return;
-    if (total + b.byteLength > caps.total) {
-      console.warn("[narrative] key-product photo skipped (document photo budget reached)", sku, d.id);
-      return;
-    }
-    total += b.byteLength;
-    out[sku] = { src: `data:${d.contentType};base64,${Buffer.from(b).toString("base64")}`, alt: d.title || sku };
+  if (!entries.length) return out;
+  const abort = new AbortController();
+  const TIMEOUT = Symbol("timeout");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<typeof TIMEOUT>((resolve) => {
+    timer = setTimeout(() => {
+      abort.abort();
+      resolve(TIMEOUT);
+    }, Math.max(0, caps.deadlineMs ?? PHOTO_INLINE_DEADLINE_MS));
   });
+  let total = 0;
+  try {
+    for (let i = 0; i < entries.length; i += caps.concurrency) {
+      const batch = entries.slice(i, i + caps.concurrency);
+      const remaining = caps.total - total;
+      if (abort.signal.aborted || remaining <= 0) {
+        for (const [sku, d] of entries.slice(i))
+          console.warn(abort.signal.aborted ? "[narrative] key-product photo skipped (photo deadline reached)" : "[narrative] key-product photo skipped (document photo budget reached)", sku, d.id);
+        break;
+      }
+      const got = await Promise.all(
+        batch.map(async ([sku, d]): Promise<Uint8Array | null> => {
+          if (d.size > remaining) {
+            console.warn("[narrative] key-product photo skipped (document photo budget reached)", sku, d.id);
+            return null;
+          }
+          try {
+            const b = await Promise.race([read(d.blobKey as string, caps.perImage, abort.signal), expired]);
+            if (b === TIMEOUT) {
+              console.warn("[narrative] key-product photo skipped (photo deadline reached)", sku, d.id);
+              return null;
+            }
+            if (b && b.byteLength <= caps.perImage) return b;
+            console.warn("[narrative] key-product photo skipped (missing or over 3 MB)", sku, d.id);
+          } catch (e) {
+            console.warn("[narrative] key-product photo unreadable", sku, d.id, e instanceof Error ? e.message : e);
+          }
+          return null;
+        })
+      );
+      batch.forEach(([sku, d], j) => {
+        const b = got[j];
+        if (!b) return;
+        if (total + b.byteLength > caps.total) {
+          console.warn("[narrative] key-product photo skipped (document photo budget reached)", sku, d.id);
+          return;
+        }
+        total += b.byteLength;
+        out[sku] = { src: `data:${d.contentType};base64,${Buffer.from(b).toString("base64")}`, alt: d.title || sku };
+      });
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   return out;
 }
 
