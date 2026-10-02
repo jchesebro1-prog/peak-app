@@ -8606,20 +8606,26 @@ The sheet has one row per part with three photo slots, not one row per photo —
 single line to fill in. Photo 1 is the primary: a new Photo 1 moves to the front of the part's real images; Photos 2 and 3
 append at the end of the real-image group; datasheet-render thumbnails always stay last. Rows match a part on
 Manufacturer + MFR Part # (normalized, against MFR P/N or M/N) with SKU narrowing a tie, and SKU alone matches by SKU.
-Exactly one part matches or the row is a listed problem — it never guesses.
+Exactly one part matches or the row is a listed problem — it never guesses. An MFR Part # with neither a Manufacturer
+nor a SKU is never matched on its own ("fill in Manufacturer or SKU").
 
 ## D547. A new image source `sheet`, and how it avoids double imports (#294, 2026-10-01)
 
 Images added from a sheet carry `source: "sheet"` (label "Sheet") with `sourceRef` `drive:<fileId>` for a Drive item or
 `file:<name>` for a dropped file; `sourceUrl` is the URL (URL items) or the Drive `webViewLink`. The Drive photo sync
 treats sheet-claimed Drive files as unchanged, so a file is never imported twice, and an existing image document with the
-same URL or Drive file is linked to the part rather than re-fetched. `sheet` shares rank 0 with upload and drive in
+same URL or Drive file is linked to the part rather than re-fetched. A photo someone detached from a part stays detached:
+a cell naming it (by URL, Drive file, dropped name or what its slot showed) is a problem — "removed from this part
+earlier — re-add it in the part editor" — never a revived link. URLs compare exactly; file names in any case. `sheet`
+shares rank 0 with upload and drive in
 `IMAGE_SOURCE_RANK`.
 
 ## D548. Photo sheet size caps, batching and resumability (#294, 2026-10-01)
 
-A sheet is capped at 800 KB and 5,000 rows, since server actions cap request bodies at 1,200 KB and the results sheet
-re-sends the file. The browser sends import rows in chunks whose JSON stays under 600 KB, and dropped photos upload one
+A sheet is capped at 800 KB and 5,000 rows with a photo value (an untouched export row doesn't count), since server
+actions cap request bodies at 1,200 KB and the results sheet re-sends the file. The browser sends import rows in chunks
+whose JSON stays under 400,000 characters (`IMPORT_CHUNK_CHARS`), each with only the failed keys its own rows plan, and
+the results request caps each Status at 200 characters and the statuses at 350,000; dropped photos upload one
 at a time straight to Blob. Every 45 s server batch re-plans from the database, so an interrupted import resumes where it
 stopped and a re-upload of the same sheet is a no-op; a hard deadline at the budget plus 10 s, as in the Drive sync,
 stops a hung fetch. A placement warning on a stored photo is a success, not a failure. Import never deletes, replaces or
