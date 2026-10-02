@@ -43445,6 +43445,41 @@ import { readdirSync as c292Readdir } from "node:fs";
   ok(!/@anthropic-ai|@\/lib\/ai\b|from "@\/lib\/ai\//.test(libSrc), "#292 source: src/lib/curtain-cut-sheets imports no Anthropic SDK and no lib/ai (deterministic)");
 }
 
+// ---- #292 task 7: Edit curtain, structured curtain lines + keys, finishes/mount ----
+import { applyCurtainEdit as c292ApplyEdit, curtainDraftFromLine as c292DraftFrom, curtainItem as c292Item } from "@/app/(app)/estimator/curtain-line";
+import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292ReplaceTrack } from "@/app/(app)/estimator/track-bom";
+{
+  const draft = { name: "Main Drape", hang: "Pipe", fabric: "FAB-CH25", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
+  const fab = { sku: "FAB-CH25", name: "Charisma Velour 25 oz", costPerSqft: 0 };
+  const it = c292Item(draft, { fab, costEach: 100, priceEach: 150 }, { id: 7, sku: "CRT-8", trackKey: "ct-7" });
+  ok(it.desc === C292_DESC && it.qty === 2 && it.curtain === true && it.curtainTrackKey === "ct-7" && it.sku === "CRT-8",
+    "#292 edit: curtainItem keeps addCurtain's exact desc format and carries the track key");
+  ok(it.curtainInputs?.width === "21.5" && it.curtainInputs.fabricSku === "FAB-CH25" && it.curtainInputs.topFinish === "grommets" && it.curtainInputs.bottomFinish === "chain" && it.curtainInputs.mountType === "tie-batten" && it.curtainInputs.fullness === "50",
+    "#292 edit: curtainItem stores structured curtainInputs (with finishes and mount)");
+  const fromStructured = c292DraftFrom(it, "FAB-X");
+  ok(fromStructured.width === "21.5" && fromStructured.height === "18" && fromStructured.fabric === "FAB-CH25" && fromStructured.mountType === "tie-batten", "#292 edit: the edit draft seeds from curtainInputs");
+  const legacy = c292DraftFrom({ id: 1, sku: "CRT-1", desc: C292_DESC, qty: 3, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X");
+  ok(legacy.name === "Main Drape" && legacy.width === "21.5" && legacy.fullness === "50" && legacy.qty === "3" && legacy.topFinish === "grommets", "#292 edit: a legacy line seeds from its parsed desc");
+  const unreadable = c292DraftFrom({ id: 1, sku: "CRT-1", desc: "Main Drape — hand edited", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X");
+  ok(unreadable.name === "Main Drape" && unreadable.width === "" && unreadable.height === "", "#292 edit: an unreadable line seeds its name only, W/H blank");
+  const old: C292Item = { ...it, id: 41, lineOrder: 3, comment: "c", internalNote: "n", option: true, curtainTrackKey: "ct-41", specKey: "SK", por: true, portalConfirm: true, sku: "CRT-OLD" };
+  const sec = c292Sec("s", [old as C292Item & { id: number }]);
+  const replaced = c292ReplaceCurtain(sec, 41, { ...it, desc: "new" }).items[0];
+  ok(replaced.id === 41 && replaced.lineOrder === 3 && replaced.comment === "c" && replaced.internalNote === "n" && replaced.option === true && replaced.curtainTrackKey === "ct-41" && replaced.specKey === "SK" && replaced.por === true && replaced.portalConfirm === true && replaced.sku === "CRT-OLD" && replaced.desc === "new",
+    "#292 edit: replaceCurtainLine keeps id, order, notes, option, key, specKey, por/portalConfirm and SKU");
+  const withTrack = c292ApplyEdit(c292Sec("s", [{ ...it, id: 50, curtainTrackKey: undefined }, { id: 51 }]), 50, { ...it, curtainTrackKey: undefined }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(withTrack.items.map((x) => x.id).join() === "50,99,51" && withTrack.items[0].curtainTrackKey === "ct-50" && withTrack.items[1].curtainTrackKey === "ct-50",
+    "#292 edit: Add track while editing inserts a keyed track line right after the curtain");
+  const t2 = c292ReplaceTrack(c292Sec("s", [{ id: 5, track: { ...C292_TRACK }, curtainTrackKey: "ct-4" }]), 5, { sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(t2.items[0].curtainTrackKey === "ct-4", "#292 edit: Update track keeps the curtain-track key");
+  const rd292c = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const est = rd292c("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/curtainItem\(/.test(est) && /newCurtainTrackKey\(/.test(est), "#292 source: addCurtain writes curtainInputs + curtainTrackKey through curtainItem");
+  ok(/<CurtainModal[\s\S]{0,400}editing=\{/.test(est), "#292 source: CurtainModal receives editing");
+  ok(rd292c("src/app/(app)/estimator/section-card.tsx").includes("onEditCurtain"), "#292 source: curtain lines get an ✎ (onEditCurtain)");
+  ok(/cleanCurtainFinishes\(/.test(rd292c("src/app/(app)/design/grid/[id]/actions.ts")), "#292 source: placeCurtainAction validates finishes/mount through cleanCurtainFinishes");
+}
+
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert } = await import("@/lib/stores/catalog");

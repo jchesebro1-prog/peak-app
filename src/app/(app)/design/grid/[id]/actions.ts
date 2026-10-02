@@ -94,6 +94,7 @@ import {
   type GridCurtain,
 } from "@/lib/design/grid-bom";
 import { isFabricRow } from "@/lib/design/grid-curtains";
+import { cleanCurtainFinishes } from "@/lib/curtain-cut-sheets/vocab";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
 import { getSettings } from "@/lib/settings";
@@ -520,6 +521,10 @@ export async function placeCurtainAction(
       color?: string;
       /** Spec records design §6 — optional system match key override. */
       specKey?: string;
+      /** #292 — cut-sheet finishes + mount; bad or absent values drop, never refuse. */
+      topFinish?: string;
+      bottomFinish?: string;
+      mountType?: string;
     };
     category?: string;
     optionId: string;
@@ -555,6 +560,7 @@ export async function placeCurtainAction(
     fabricSku: fabric.id,
     color: (c.color || "").trim().slice(0, 40) || undefined,
     specKey: (typeof c.specKey === "string" ? c.specKey : "").trim().slice(0, 120) || undefined,
+    ...cleanCurtainFinishes(c),
   };
   const p = await addCurtainPlacement(projectId, {
     sheetId: input.sheetId,

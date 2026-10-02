@@ -267,6 +267,14 @@ export type CurtainDraft = {
   width: string;
   fullness: string;
   bottom: string;
+  /** #292 — "grommets" | "pipe-pocket" | "hook-loop" (vocab.ts). `hang` and `bottom` above are legacy and read by nothing.
+   *  The three #292 fields are optional only so drafts built before #292 still type; every
+   *  Estimator draft sets them (freshCurtain, curtainDraftFromLine) and readers default a blank. */
+  topFinish?: string;
+  /** #292 — "chain" | "pipe-pocket" | "hem". */
+  bottomFinish?: string;
+  /** #292 — a CURTAIN_MOUNT_TYPES id; used only when no track is linked. */
+  mountType?: string;
   /** Real vendor (Rose Brand) unit cost; when set, overrides the make-it cost. */
   vendorCostOverride?: string;
 };

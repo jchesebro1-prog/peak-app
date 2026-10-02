@@ -5,6 +5,17 @@ import { curtainPriceEach, sewnSellLabel, type FabricSell } from "@/lib/curtain-
 import { GRID_FULLNESS, curtainSpecOf, type GridCurtain, type GridCurtainType } from "@/lib/design/grid-bom";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import SpecKeySelect from "@/components/spec-key-select";
+import {
+  BOTTOM_FINISHES,
+  BOTTOM_FINISH_SHORT,
+  CURTAIN_MOUNT_TYPES,
+  GRID_CURTAIN_DEFAULTS,
+  TOP_FINISHES,
+  TOP_FINISH_SHORT,
+  type CurtainBottomFinish,
+  type CurtainMountTypeId,
+  type CurtainTopFinish,
+} from "@/lib/curtain-cut-sheets/vocab";
 
 /**
  * Curtain drop-in dialog (punch #49) - Jeff: "when you drop it in you specify
@@ -17,6 +28,10 @@ import SpecKeySelect from "@/components/spec-key-select";
  * customer-safe mirror). No margin and no cost basis reach this component; the
  * server prices the line authoritatively on drop and again at quote time, and
  * the two agree to the cent because they run the same flat $/sq ft model (#227).
+ *
+ * #292: Top / Bottom finish and Mount feed the curtain cut sheets only (never
+ * price). Each follows the curtain type's default (GRID_CURTAIN_DEFAULTS)
+ * until the designer picks one.
  */
 
 const BTN: React.CSSProperties = {
@@ -81,6 +96,14 @@ export default function CurtainDrop({
   const [fullnessPct, setFullnessPct] = useState(50);
   const [color, setColor] = useState("");
   const [specKey, setSpecKey] = useState("");
+  /* #292: only the designer's touched choice is state; null follows the type default. */
+  const [topPick, setTopPick] = useState<CurtainTopFinish | null>(null);
+  const [bottomPick, setBottomPick] = useState<CurtainBottomFinish | null>(null);
+  const [mountPick, setMountPick] = useState<CurtainMountTypeId | null>(null);
+  const def = GRID_CURTAIN_DEFAULTS[type];
+  const topFinish = topPick ?? def.top;
+  const bottomFinish = bottomPick ?? def.bottom;
+  const mountType = mountPick ?? def.mount;
 
   const widthFt = parseFloat(width) || 0;
   const heightFt = parseFloat(height) || 0;
@@ -93,6 +116,9 @@ export default function CurtainDrop({
     fabricSku,
     color: color.trim() || undefined,
     specKey: specKey || undefined,
+    topFinish,
+    bottomFinish,
+    mountType,
   };
   const fabric = fabrics.find((f) => f.sku === fabricSku);
   const price = curtainPriceEach(curtainSpecOf(draft), fabric?.pricePerSqft || 0);
@@ -201,6 +227,70 @@ export default function CurtainDrop({
             );
           })}
         </div>
+      </div>
+
+      <div style={{ marginBottom: 9 }}>
+        <label style={LBL}>Top</label>
+        <div style={{ display: "flex", gap: 4 }}>
+          {TOP_FINISHES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setTopPick(v)}
+              style={{
+                ...BTN,
+                flex: 1,
+                padding: "4px 0",
+                fontSize: 11,
+                background: v === topFinish ? "#16181d" : "#fff",
+                color: v === topFinish ? "#fff" : "#3d424e",
+                borderColor: v === topFinish ? "#16181d" : "#dfe2e8",
+              }}
+            >
+              {TOP_FINISH_SHORT[v]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 9 }}>
+        <label style={LBL}>Bottom</label>
+        <div style={{ display: "flex", gap: 4 }}>
+          {BOTTOM_FINISHES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setBottomPick(v)}
+              style={{
+                ...BTN,
+                flex: 1,
+                padding: "4px 0",
+                fontSize: 11,
+                background: v === bottomFinish ? "#16181d" : "#fff",
+                color: v === bottomFinish ? "#fff" : "#3d424e",
+                borderColor: v === bottomFinish ? "#16181d" : "#dfe2e8",
+              }}
+            >
+              {BOTTOM_FINISH_SHORT[v]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 9 }}>
+        <label style={LBL} htmlFor="grid-curtain-mount">Mount</label>
+        <select
+          id="grid-curtain-mount"
+          value={mountType}
+          onChange={(e) => setMountPick(e.target.value as CurtainMountTypeId)}
+          style={INPUT}
+        >
+          {CURTAIN_MOUNT_TYPES.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div style={{ marginBottom: 9 }}>
