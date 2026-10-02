@@ -10273,6 +10273,40 @@ read "Link only" and those rows appear under "Link to fetch"; a bulk Fetch links
 files, more of the 45 s budget per run). Watch item: client packages now include manuals (often 10-25 MB) in the
 in-memory zip.
 
+## 293. Estimates — narrative-first client preview (key products, saved paragraphs, intros, appendix) — Slice 1 DONE 2026-10-01 (D539–D545)
+
+**Slice 1 done.**
+- **Key products.** Any eligible line can be starred into a key product (★ on the row, or + Key product in the
+  narrative column). Each block prints, in Narrative presentation only, its saved paragraph with the part's primary
+  photo floated right.
+- **Library.** Paragraphs are written once on the catalog part (Save to library, or the part editor's Narrative
+  paragraph) and copied onto quotes. System intros are a reusable library (Save as intro, Manage intros).
+- **Draft narrative** fills the intro and block texts (Replace / Fill blanks) and switches the system to Narrative.
+- **Itemized appendix.** A new Show-on-PDF toggle reprints every narrative (or by-section) system's full line list on
+  a new page after the signature.
+- **Back-compat.** A quote without blocks prints byte-for-byte as before. There are no migrations.
+- **Spec:** `docs/superpowers/specs/2026-10-01-narrative-client-preview-design.md`. **Plan:**
+  `docs/superpowers/plans/2026-10-01-narrative-slice1.md`.
+
+Gates: tsc 0; test:specs 10,530 PASS / 0 FAIL (152 for #293); test:smoke 187/187 ALL PASSED; `next build` OK; eslint 0
+errors on the branch's changed files (1 pre-existing warning on an untouched line).
+Browser: Browser-verified on a scratch datadir: ★ on a catalog line, Save to library (chip → From library), Narrative +
+intro, the real headless-Chrome PDF printing the intro and the key product's paragraph, Itemized appendix on page 2
+after the signature, Draft narrative (no-change case), and the part editor showing the saved paragraph. The photo float
+was not exercised in a browser — local dev has no Blob store; harness-covered.
+
+**Rollback.** No hazard: pre-#293 code ignores `keyProducts` and drops the appendix key on its next save, which is
+harmless.
+
+**Slice 2 (next).** System library, Load system, Merge narrative (spec §4, §8.2).
+**Slice 3.** Portal estimate page, signed share link, Narrative / BOM toggle (spec §5, §8.3).
+
+**For Jeff.**
+- Open questions in spec §12: photo side, datasheet thumbnails as photos, default presentation, who manages intros.
+- Toggle title says "every narrative system's" though By-section prints every system — reword?
+- Paragraphs live on catalog parts, so take `npm run db:export` before Clear catalog price list or the go-live wipe.
+- Preview deploys share the production DB, so a paragraph or intro saved on a preview is a production write.
+
 ## 294. Catalog — photo sheet (export, fill in URLs or file names, import by MFR part #) — DONE 2026-10-01 (D546–D548)
 
 **Done.** Catalog → Datasheets gains a **Photo sheet** page (`/catalog/documents/photos`). Download an .xlsx with one row
@@ -10289,9 +10323,14 @@ replace an image, and a re-upload of the same sheet is a no-op. A results sheet 
 linked to manufacturer part number". Spec: `docs/superpowers/specs/2026-10-01-catalog-photo-sheet-design.md`. **Plan:**
 `docs/superpowers/plans/2026-10-01-catalog-photo-sheet.md`. No migrations.
 
-Gates (after the final review fix wave): tsc 0; eslint 0 problems on the touched files; test:specs 10,477 PASS / ALL
-PASSED; test:smoke 189/189 ALL PASSED (including `/catalog/documents/photos` and `/catalog/documents/photos/export`); `next build` OK (both routes in
-the table). Not exercised in a browser or against Blob / Drive locally — harness-covered.
+Gates (merged with main, #293 included): tsc 0; eslint 0 problems on the touched files; test:specs 10,632 PASS / ALL
+PASSED (102 for #294); test:smoke 189/189 ALL PASSED (including `/catalog/documents/photos` and
+`/catalog/documents/photos/export`); `next build` OK (both routes in the table).
+Browser: on a scratch datadir, the export downloads a real .xlsx and Preview on a hand-made sheet lists 3 photos to add
+(a URL as Photo 1, a dropped file as Photo 2, the same URL linked to a second part) and 5 problems with the right
+reasons (ftp link, no Manufacturer/SKU, unknown part, HEIC, a name not dropped with Drive unconnected). That run caught
+the SKU-as-MFR-Part-# gap (fixed). Import itself was not clicked locally — `.env.local` carries the real Blob token —
+so storing photos is harness-covered only (fake Blob + fake fetch/Drive).
 
 **For Jeff.** Export a real sheet in production and try one manufacturer first. File-name cells that should come from
 Drive only work once the #283 Drive photo setup is done (OAuth scope, folder, enabled account); otherwise drop the photos

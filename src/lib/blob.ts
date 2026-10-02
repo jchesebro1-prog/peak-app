@@ -89,9 +89,12 @@ export function isBlobNotFound(e: unknown): boolean {
 
 /** Stream a private blob's bytes (server-side; the proxy route's engine). */
 export async function getBlobStream(
-  pathname: string
+  pathname: string,
+  opts?: { signal?: AbortSignal }
 ): Promise<ReadableStream | null> {
-  const res = await get(pathname, { access: "private" });
+  // #293: an optional abort (the print route's photo deadline) — omitted,
+  // the call is exactly as before.
+  const res = await get(pathname, opts?.signal ? { access: "private", abortSignal: opts.signal } : { access: "private" });
   return (res && (res.stream as unknown as ReadableStream)) || null;
 }
 

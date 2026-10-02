@@ -25,6 +25,7 @@ import { travelForId } from "@/lib/stores/customers";
 import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
 import type { QuoteLite, TravelLite } from "./types";
+import { withSanitizedKeyProducts } from "./narrative";
 import type { DraftedLine } from "./ai-scope-modal";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import {
@@ -380,7 +381,8 @@ export async function saveQuoteAction(
   // #267: a system's typed sell / $25 rounding is only kept when valid
   // (sellOverride finite, > 0, ≤ $10M; priceRound exactly 25) — dropped
   // otherwise, before anything prices or stores the sections.
-  const sellSanitized = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell) : payload.sections;
+  // #293: key-product blocks are shape-cleaned server-side whatever the client posts.
+  const sellSanitized = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts) : payload.sections;
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
   // when any other line carries one.
@@ -732,7 +734,8 @@ export async function moveSystemToEstimateAction(
   // #267: a moved system keeps its own price — sanitized like a save.
   // #282 phase 2: the Rewards credit belongs to the source quote's customer —
   // it never travels with a moved system.
-  const [moved] = withoutRewardCredit([{ ...sanitizeSystemSell(section), id: "sys" + Date.now() }]);
+  // #293: blocks travel as-is (ids are kept) — sanitized like a save.
+  const [moved] = withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })]);
   const placed = await placeSystemInEstimate(moved, target, {
     newName: moved.name + " (moved)",
     sourceContext,
@@ -906,6 +909,8 @@ export async function copySystemToEstimateAction(
   vendorQuotes: VendorQuote[] = []
 ): Promise<CopySystemResult> {
   const user = await requireUser();
+  // #293: blocks ride copySectionForTarget's section spread — sanitized first.
+  section = withSanitizedKeyProducts(section);
   const { resolveTier } = await import("@/lib/pricing-tiers");
   const items = Array.isArray(section?.items) ? section.items : [];
 

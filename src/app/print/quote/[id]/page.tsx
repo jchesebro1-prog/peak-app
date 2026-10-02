@@ -8,6 +8,7 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
+import { keyProductPhotoDataUris } from "@/lib/narrative/photos";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Quote", robots: { index: false, follow: false } };
@@ -43,10 +44,14 @@ export default async function PrintQuotePage({
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(q.customerId),
   ]);
+  const doc = quoteDocumentDataFor(q, cust, settings);
+  // #293: key-product photos inlined as data URIs (this route has no session).
+  // Never throws — a photo that can't be read just isn't printed.
+  const keyProductPhotos = await keyProductPhotoDataUris(doc.sections);
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>
-      <QuoteDocument {...quoteDocumentDataFor(q, cust, settings)} rewardsLine={purchasePerksDocLine(perks)} />
+      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} rewardsLine={purchasePerksDocLine(perks)} />
     </main>
   );
 }

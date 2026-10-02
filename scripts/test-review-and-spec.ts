@@ -10717,6 +10717,9 @@ seeded()
   .then(() => photoSheetIoAsyncChecks())
   .then(() => photoSheetImportAsyncChecks())
   .then(() => photoSheetFinalAsyncChecks())
+  .then(() => narrative293AsyncChecks())
+  .then(() => narrativePhotos293AsyncChecks())
+  .then(() => narrativeFinal293AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -43395,4 +43398,661 @@ async function photoSheetFinalAsyncChecks(): Promise<void> {
   ok(rbm({ manufacturer: "", mfrPart: "RB-BOBNET", sku: "" }).kind === "needs-key", "photo sheet match: a SKU-valued MFR Part # alone still needs a manufacturer or SKU");
   const rbRows = phsExport(rbParts, new Set(["RB-BOBNET"]), new Map(), new Map());
   ok(rbRows.length === 1 && rbRows[0].mfrPart === "RB-BOBNET", "photo sheet export: MFR Part # falls back to the SKU");
+}
+
+/* ======================================================================
+   #293 slice 1 — pure rules: key products (eligibility, resolve,
+   sanitize, remap, star/edit helpers, chip, Draft narrative, printable
+   blocks), the Itemized appendix option, and the system-intro library.
+   ====================================================================== */
+import {
+  MAX_KEY_PRODUCTS as n293MaxKp, MAX_PARAGRAPH as n293MaxPara, MAX_INTRO as n293MaxIntro, MAX_LIBRARY_SKUS as n293MaxLib,
+  isKeyProductEligible as n293Eligible, resolveKeyProducts as n293Resolve, sanitizeKeyProducts as n293Sanitize,
+  withKeyProducts as n293WithKps, withSanitizedKeyProducts as n293WithSanitized, remapKeyProducts as n293Remap,
+  keyProductStar as n293Star, toggleKeyProduct as n293Toggle, markKeyProduct as n293Mark, moveKeyProduct as n293Move,
+  removeKeyProduct as n293Remove, patchKeyProduct as n293Patch, reanchorKeyProduct as n293Reanchor,
+  unmarkedEligibleLines as n293Unmarked, keyProductChip as n293Chip, KEY_PRODUCT_CHIP_LABEL as n293ChipLabel,
+  draftNarrative as n293Draft, draftOverwrites as n293Overwrites, printableKeyProducts as n293Printable,
+  photoSkusOf as n293PhotoSkus, type LibraryInfo as N293Lib,
+} from "@/app/(app)/estimator/narrative";
+import { DEFAULT_PDF_OPTIONS as n293DefPdf, PDF_TOGGLE_KEYS as n293ToggleKeys, normalizePdfOptions as n293NormPdf } from "@/lib/quote-pdf/pdf-options";
+import { copySectionForTarget as n293Copy } from "@/app/(app)/estimator/copy-system";
+import { repriceForTier as n293Reprice } from "@/app/(app)/estimator/tier-reprice";
+import { withRewardCredit as n293WithCredit } from "@/lib/rewards/credit-line";
+import { sanitizeSystemSell as n293SanSell } from "@/app/(app)/estimator/pricing";
+import {
+  applyIntroOp as n293Apply, newIntroId as n293NewId, sanitizeIntro as n293SanIntro, sanitizeIntroList as n293SanList,
+  MAX_INTROS as n293MaxIntros, MAX_INTRO_TITLE as n293MaxTitle, INTRO_ID_RE as n293IntroRe, type SystemIntro as N293Intro,
+} from "@/lib/narrative/intros";
+import type { KeyProduct as N293Kp, SpecItem as N293Item, SpecSection as N293Sec } from "@/app/(app)/estimator/types";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const it = (id: number, extra: Partial<N293Item> = {}): N293Item => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293Item);
+  const sec = (items: N293Item[], extra: Partial<N293Sec> = {}): N293Sec => ({ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const kp = (lineKey: string, sku: string, text = "", photo = true): N293Kp => ({ lineKey, sku, text, photo });
+  const lib = (o: Record<string, N293Lib>) => new Map(Object.entries(o));
+
+  // Limits.
+  ok(n293MaxKp === 20 && n293MaxPara === 4000 && n293MaxIntro === 8000 && n293MaxLib === 200, "#293 limits: 20 key products, 4,000-char paragraph, 8,000-char intro, 200 skus per library read");
+
+  // Eligibility.
+  ok(n293Eligible(it(1)) && n293Eligible(it(2, { custom: true })) && n293Eligible(it(3, { allowance: true })) && n293Eligible(it(4, { vendorQuoteId: "VQ-1" })) && n293Eligible(it(5, { curtain: true })),
+    "#293 eligible: plain catalog, custom, allowance-with-sku, vendor and curtain lines can be key products");
+  ok(!n293Eligible(it(1, { labor: true })) && !n293Eligible(it(1, { laborOverhead: "shop" })) && !n293Eligible(it(1, { laborTravel: "mileage" })) &&
+     !n293Eligible(it(1, { rewardCredit: true })) && !n293Eligible(it(1, { option: true })) && !n293Eligible(it(1, { sku: "   " })),
+    "#293 eligible: labor, overhead, travel, Rewards credit, option and blank-sku lines are not");
+
+  // Resolve.
+  const rs = n293Resolve(sec([it(1), it(2), it(3, { option: true })], { keyProducts: [kp("1", "SKU-1"), kp("9", "X"), kp("2", "OTHER"), kp("3", "SKU-3")] }));
+  ok(rs.map((r) => r.status).join(",") === "ok,missing,changed,ineligible", "#293 resolve: ok / missing (line removed) / changed (same id, other sku) / ineligible (became an option)");
+  ok(n293Resolve(sec([it(1)])).length === 0, "#293 resolve: a section without keyProducts resolves to nothing");
+
+  // Sanitize.
+  const messy: unknown[] = [
+    null, "x", 7, ["arr"], { lineKey: "", sku: "A" }, { lineKey: "4", sku: "  " },
+    { lineKey: " 1 ", sku: " SKU-1 ", text: "  hi\r\nthere  ", photo: "yes", junk: 1 },
+    { lineKey: "1", sku: "SKU-9", text: "dup line" },
+    { lineKey: "2", sku: "SKU-1", text: "dup sku" },
+    { lineKey: 7, sku: "SKU-7", text: "x".repeat(n293MaxPara + 50), photo: false },
+    { lineKey: "99", sku: "GONE", text: "kept although unresolved" },
+  ];
+  const clean = n293Sanitize(messy);
+  ok(eq(clean, [
+    { lineKey: "1", sku: "SKU-1", text: "hi\nthere", photo: true },
+    { lineKey: "7", sku: "SKU-7", text: "x".repeat(n293MaxPara), photo: false },
+    { lineKey: "99", sku: "GONE", text: "kept although unresolved", photo: true },
+  ]), "#293 sanitize: drops non-objects / missing lineKey or sku, trims, defaults photo to true, strips unknown keys, caps text, dedupes by lineKey then sku, keeps unresolved blocks");
+  ok(clean.every((k) => eq(Object.keys(k), ["lineKey", "sku", "text", "photo"])), "#293 sanitize: exactly four keys per block");
+  ok(n293Sanitize(Array.from({ length: 30 }, (_, i) => ({ lineKey: String(i), sku: "S" + i }))).length === n293MaxKp && eq(n293Sanitize("nope"), []),
+    "#293 sanitize: caps the count at MAX_KEY_PRODUCTS; a non-array is []");
+
+  // withKeyProducts / withSanitizedKeyProducts.
+  const bare = sec([it(1)]);
+  ok(n293WithSanitized(bare) === bare, "#293 save: a section without keyProducts passes through untouched (same object — back-compat exact)");
+  ok(!("keyProducts" in n293WithKps(sec([it(1)], { keyProducts: [kp("1", "SKU-1")] }), [])) && !("keyProducts" in n293WithKps(bare, undefined)),
+    "#293 withKeyProducts: an empty list removes the key");
+  ok(eq(n293WithSanitized(sec([it(1)], { keyProducts: messy as N293Kp[] })).keyProducts, clean) && !("keyProducts" in n293WithSanitized(sec([it(1)], { keyProducts: [null] as unknown as N293Kp[] }))),
+    "#293 save: messy blocks are cleaned; all-invalid blocks drop the key");
+
+  // Remap.
+  ok(eq(n293Remap([kp("1", "A"), kp("2", "B"), kp("3", "C")], new Map([[1, 101], [2, 102]]))?.map((k) => k.lineKey), ["101", "102"]) && n293Remap(undefined, new Map()) === undefined,
+    "#293 remap: ids follow the map, unmapped blocks drop, undefined passes through");
+
+  // Star / toggle / mark.
+  const s2 = sec([it(1), it(2), it(3, { sku: "SKU-2" }), it(4, { option: true })]);
+  ok(n293Star(s2, s2.items[0]) === "off" && n293Star(s2, s2.items[3]) === "none", "#293 star: an eligible unmarked line is off; an option line has no star");
+  const on1 = n293Toggle(s2, 1, "Library para");
+  ok(eq(on1.keyProducts, [{ lineKey: "1", sku: "SKU-1", text: "Library para", photo: true }]) && n293Star(on1, on1.items[0]) === "on", "#293 star: toggling on appends a block with the library text, photo on");
+  ok(!("keyProducts" in n293Toggle(on1, 1, "")), "#293 star: toggling off removes the block (and the key when it was the last)");
+  const on2 = n293Toggle(s2, 2, "");
+  ok(n293Star(on2, on2.items[2]) === "dupSku" && n293Mark(on2, 3, "") === on2, "#293 star: a second line with the same sku is disabled and cannot be marked");
+  const full = sec(Array.from({ length: 21 }, (_, i) => it(i + 1)));
+  let f = full;
+  for (let i = 1; i <= 20; i++) f = n293Mark(f, i, "");
+  ok(f.keyProducts!.length === 20 && n293Star(f, f.items[20]) === "full" && n293Mark(f, 21, "") === f, "#293 star: at MAX_KEY_PRODUCTS the star is disabled");
+
+  // Move / remove / patch / reanchor / picker.
+  const three = n293Mark(n293Mark(n293Mark(sec([it(1), it(2), it(3)]), 1, ""), 2, ""), 3, "");
+  ok(eq(n293Move(three, 0, 1).keyProducts!.map((k) => k.lineKey), ["2", "1", "3"]) && n293Move(three, 0, -1) === three, "#293 move: ↓ swaps; out of range is a no-op");
+  ok(eq(n293Remove(three, 1).keyProducts!.map((k) => k.lineKey), ["1", "3"]), "#293 remove: removes by index");
+  const patched = n293Patch(three, 0, { text: "y".repeat(n293MaxPara + 9), photo: false });
+  ok(patched.keyProducts![0].text.length === n293MaxPara && patched.keyProducts![0].photo === false, "#293 patch: text capped, photo toggled");
+  const swapped = { ...three, items: three.items.map((x) => (x.id === 2 ? { ...x, sku: "NEW-2" } : x)) };
+  ok(n293Reanchor(swapped, 1).keyProducts![1].sku === "NEW-2" && n293Reanchor(three, 1) === three, "#293 re-anchor: a changed block adopts the line's new sku; an ok block is untouched");
+  ok(eq(n293Unmarked(n293Mark(s2, 1, "")).map((x) => x.id), [2]), "#293 picker: lists eligible unmarked lines, one per sku");
+
+  // Chip.
+  const row = (paragraph: string | null, inCatalog = true): N293Lib => ({ inCatalog, desc: "Cat", paragraph });
+  ok(n293Chip(kp("1", "A", "x"), undefined) === null && n293Chip(kp("1", "A", "x"), row(null, false)) === "custom" && n293Chip(kp("1", "A", "x"), row(null)) === "needs" &&
+     n293Chip(kp("1", "A", " Same "), row("Same")) === "library" && n293Chip(kp("1", "A", "Other"), row("Same")) === "edited",
+    "#293 chip: not loaded / Not in catalog / Needs a paragraph / From library / Edited");
+  ok(n293ChipLabel.needs === "Needs a paragraph" && n293ChipLabel.library === "From library" && n293ChipLabel.edited === "Edited" && n293ChipLabel.custom === "Not in catalog", "#293 chip: labels are the spec's copy");
+
+  // Draft narrative.
+  const d0 = sec([it(1), it(2), it(3), it(4, { sku: "CUSTOM-4", desc: "Hand-made truss" })], {
+    narrative: "",
+    keyProducts: [kp("1", "SKU-1"), kp("2", "SKU-2", "Written by hand"), kp("3", "SKU-3"), kp("4", "CUSTOM-4"), kp("9", "GONE", "keep me")],
+  });
+  const L = lib({
+    "SKU-1": row("Library one."), "SKU-2": row("Library two."),
+    "SKU-3": { inCatalog: true, desc: "Cat desc 3", paragraph: null },
+    "CUSTOM-4": { inCatalog: false, desc: "", paragraph: null },
+  });
+  const blanks = n293Draft(d0, "Intro text", L, "blanks");
+  const texts = (s: N293Sec) => s.keyProducts!.map((k) => k.text);
+  ok(blanks.section.narrative === "Intro text" && eq(texts(blanks.section), ["Library one.", "Written by hand", "Cat desc 3", "Hand-made truss", "keep me"]),
+    "#293 draft (blanks): intro fills an empty narrative; library paragraph, else catalog description, else the line's description; written text and unresolved blocks are left alone");
+  ok(eq(blanks.needsParagraph, ["SKU-3", "CUSTOM-4"]) && blanks.section.presentation === "narrative" && blanks.changed, "#293 draft: reports skus with no library paragraph and switches to Narrative");
+  const replace = n293Draft({ ...d0, narrative: "Old intro" }, "Intro text", L, "replace");
+  ok(replace.section.narrative === "Intro text" && texts(replace.section)[1] === "Library two.", "#293 draft (replace): overwrites the intro and written block text");
+  ok(n293Draft({ ...d0, narrative: "Old intro" }, null, L, "replace").section.narrative === "Old intro", "#293 draft: no chosen intro leaves the narrative alone");
+  ok(n293Draft({ ...d0, narrative: "Kept" }, "Intro text", L, "blanks").section.narrative === "Kept", "#293 draft (blanks): a written intro is kept");
+  const again = n293Draft(replace.section, "Intro text", L, "replace");
+  ok(!again.changed && again.section === replace.section, "#293 draft: changed is false (same object) when nothing differs");
+  ok(n293Overwrites(d0, "Intro text", L) && !n293Overwrites(sec([it(1)], { keyProducts: [kp("1", "SKU-1")] }), "Intro", L) && n293Overwrites(sec([it(1)], { narrative: "Mine" }), "Intro", L),
+    "#293 draft: asks before overwriting written text, not before filling blanks");
+
+  // Printable blocks.
+  const pr = n293Printable(sec([it(1, { allowance: true, desc: "Rigging hardware" }), it(2), it(3, { option: true })], {
+    keyProducts: [kp("2", "SKU-2", "Two.\n\n- a\n- b", false), kp("1", "SKU-1"), kp("3", "SKU-3", "opt"), kp("9", "GONE", "gone")],
+  }));
+  ok(eq(pr.map((p) => p.sku), ["SKU-2", "SKU-1"]) && pr[1].heading === "Budget allowance — Rigging hardware" && pr[0].heading === "Line 2",
+    "#293 printable: order kept, unresolved excluded, heading = desc with the allowance prefix");
+  ok(eq(pr[0].blocks, [{ kind: "p", lines: ["Two."] }, { kind: "ul", items: ["a", "b"] }]) && pr[0].photo === false && eq(pr[1].blocks, []),
+    "#293 printable: text split by narrativeBlocks; empty text prints the heading only");
+  ok(eq(n293PhotoSkus([
+    sec([it(1), it(2)], { presentation: "narrative", keyProducts: [kp("1", "SKU-1"), kp("2", "SKU-2", "", false)] }),
+    sec([it(1)], { id: "s2", presentation: "narrative", keyProducts: [kp("1", "SKU-1")] }),
+    sec([it(5)], { id: "s3", keyProducts: [kp("5", "SKU-5")] }),
+  ]), ["SKU-1"]), "#293 photos: only narrative systems' printable blocks with photo on, deduped");
+
+  // Blocks travel as-is on every path that keeps ids.
+  const carried = sec([it(1)], { keyProducts: [kp("1", "SKU-1", "t")] });
+  ok(eq(n293SanSell(carried).keyProducts, carried.keyProducts), "#293 carry: sanitizeSystemSell keeps keyProducts");
+  ok(eq(n293Copy(carried, { newSectionId: "s9", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section.keyProducts, carried.keyProducts),
+    "#293 carry: Copy to another estimate (copySectionForTarget) keeps keyProducts and ids");
+  ok(eq(n293WithCredit([carried], 50, 99)[0].keyProducts, carried.keyProducts), "#293 carry: withRewardCredit keeps keyProducts");
+  ok(eq(n293Reprice([carried], 0.25, 0.2).sections[0].keyProducts, carried.keyProducts), "#293 carry: tier re-price keeps keyProducts");
+
+  // Itemized appendix option.
+  ok(n293DefPdf.pdfItemizedAppendix === false && (n293ToggleKeys as readonly string[]).includes("pdfItemizedAppendix"), "#293 pdf options: Itemized appendix defaults off and is a toggle key");
+  ok(n293NormPdf(undefined).pdfItemizedAppendix === false && n293NormPdf({ pdfItemizedAppendix: true }).pdfItemizedAppendix === true && n293NormPdf({ pdfItemizedAppendix: "yes" }).pdfItemizedAppendix === false,
+    "#293 pdf options: absent → false, true kept, a non-boolean → false");
+
+  // Intros (pure).
+  ok(n293NewId(() => 0) === "NI-00000000" && n293NewId(() => 0.9999) === "NI-zzzzzzzz" && n293IntroRe.test(n293NewId(Math.random)), "#293 intros: NI- + 8 base36 chars");
+  const I = (id: string, title: string, text = "Body"): N293Intro => ({ id, title, text, updatedAt: 1, updatedBy: "t" });
+  const list = [I("NI-aaaaaaaa", "Rigging"), I("NI-bbbbbbbb", "Audio")];
+  const bad = (r: ReturnType<typeof n293SanIntro>, re: RegExp) => !r.ok && re.test(r.error);
+  ok(bad(n293SanIntro({ title: "  ", text: "x" }, list), /title/i) && bad(n293SanIntro({ title: "t".repeat(n293MaxTitle + 1), text: "x" }, list), /120/) &&
+     bad(n293SanIntro({ title: "T", text: "   " }, list), /text/i) && bad(n293SanIntro({ title: "T", text: "x".repeat(n293MaxIntro + 1) }, list), /8,000/),
+    "#293 intros: empty title, long title, empty text and long text are refused");
+  ok(bad(n293SanIntro({ title: "rigging", text: "x" }, list), /already exists/) && n293SanIntro({ id: "NI-aaaaaaaa", title: "RIGGING", text: "x" }, list).ok,
+    "#293 intros: a duplicate title (case-insensitive) is refused, except the intro itself");
+  const s = n293SanIntro({ title: " Lighting ", text: " a\r\nb " }, list);
+  ok(s.ok && s.value.title === "Lighting" && s.value.text === "a\nb" && s.value.id === null, "#293 intros: trims and normalizes line breaks");
+  ok(bad(n293SanIntro({ id: "bogus", title: "X", text: "y" }, list), /no longer exists/), "#293 intros: a malformed id is refused");
+  let n = 0;
+  const mint = () => ["NI-aaaaaaaa", "NI-cccccccc"][n++] ?? "NI-dddddddd";
+  const add = n293Apply(list, { kind: "upsert", intro: { title: "Lighting", text: "Wash" } }, 50, "Pat", mint);
+  ok(add.ok && add.id === "NI-cccccccc" && eq(add.list.map((i) => i.title), ["Audio", "Lighting", "Rigging"]) && add.list.find((i) => i.id === "NI-cccccccc")!.updatedBy === "Pat",
+    "#293 intros: upsert-new mints a fresh id (skipping a collision), stamps by/at, sorts by title");
+  const edit = n293Apply(list, { kind: "upsert", intro: { id: "NI-aaaaaaaa", title: "Rigging", text: "New body" } }, 60, "Lee", mint);
+  ok(edit.ok && edit.id === "NI-aaaaaaaa" && edit.list.find((i) => i.id === "NI-aaaaaaaa")!.text === "New body" && edit.list.length === 2, "#293 intros: upsert-existing keeps the id");
+  const gone = n293Apply(list, { kind: "upsert", intro: { id: "NI-zzzzzzzz", title: "Q", text: "q" } }, 60, "Lee", mint);
+  ok(!gone.ok && /no longer exists/.test(gone.error), "#293 intros: upserting a deleted intro is refused");
+  const del = n293Apply(list, { kind: "delete", id: "NI-bbbbbbbb" }, 70, "Lee", mint);
+  const delUnknown = n293Apply(list, { kind: "delete", id: "NI-zzzzzzzz" }, 70, "Lee", mint);
+  ok(del.ok && eq(del.list.map((i) => i.id), ["NI-aaaaaaaa"]) && delUnknown.ok && delUnknown.list.length === 2, "#293 intros: delete removes; deleting an unknown id is a no-op");
+  const many = Array.from({ length: n293MaxIntros }, (_, i) => I("NI-" + String(i).padStart(8, "0"), "T" + i));
+  const capped = n293Apply(many, { kind: "upsert", intro: { title: "One more", text: "x" } }, 1, "t", () => "NI-zzzzzzzz");
+  ok(!capped.ok && /200/.test(capped.error) && n293Apply(many, { kind: "upsert", intro: { id: many[0].id, title: "T0", text: "edit" } }, 1, "t", mint).ok,
+    "#293 intros: the 200 cap refuses a new intro but still allows edits");
+  ok(eq(n293SanList([null, { id: "NI-aaaaaaaa", title: "A", text: "a", updatedAt: 1, updatedBy: "x" }, { id: "bad", title: "B", text: "b" }]).map((i) => i.id), ["NI-aaaaaaaa"]),
+    "#293 intros: the stored list is shape-cleaned on read");
+}
+
+/* ======================================================================
+   #293 slice 1 — server layer: the product paragraph write (mergeUpsert
+   only), the intros blob, the library rows, key-product photos (primary
+   image, live parts only, inlining caps), and save-path sanitization.
+   ====================================================================== */
+import { saveProductParagraph as n293SaveParagraph, mergeUpsert as n293MergeUpsert, get as n293GetPart, remove as n293RemovePart } from "@/lib/stores/catalog";
+import { listIntros as n293ListIntros, upsertIntro as n293UpsertIntro, deleteIntro as n293DeleteIntro } from "@/lib/stores/narrative-intros";
+import { keyProductLibrary as n293Library } from "@/lib/narrative/library";
+import { inlinePhotos as n293Inline, keyProductPhotoDocs as n293PhotoDocs } from "@/lib/narrative/photos";
+import {
+  attachDocument as n293Attach, createDocument as n293CreateDoc, documentLinkId as n293LinkId,
+  setDocumentLinkDisplay as n293SetDisplay, setImageOrder as n293SetOrder,
+} from "@/lib/stores/part-documents";
+import { create as n293QCreate, get as n293QGet, addQuoteRevision as n293QAddRev } from "@/lib/stores/quotes";
+import type { PartDocument as N293Doc } from "@/lib/part-docs/types";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  ok(acts.includes("payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts)"), "#293 save: saveQuoteAction sanitizes every posted section's keyProducts beside sanitizeSystemSell");
+  ok(acts.includes('withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })])'), "#293 move: a moved system's keyProducts are sanitized");
+  const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("));
+  ok(/section = withSanitizedKeyProducts\(section\);/.test(copyFn.slice(0, 1200)), "#293 copy: a copied system's keyProducts are sanitized before copySectionForTarget");
+  const na = rd("src/app/(app)/estimator/narrative-actions.ts");
+  ok(/^"use server";/.test(na) && ["keyProductLibraryAction", "saveProductParagraphAction", "upsertSystemIntroAction", "deleteSystemIntroAction"].every((f) => na.includes(`export async function ${f}(`)),
+    "#293 actions: the four narrative actions live in one \"use server\" file");
+  ok((na.match(/can\("create", user\.roles\)/g) || []).length === 3 && !/requirePerm\(/.test(na), "#293 actions: all three library writes refuse without Create (with a message, not a redirect)");
+  ok(rd("src/lib/stores/catalog.ts").includes("narrativeText: body") && /mergeUpsert\(key, \{ narrativeText: body, narrativeUpdatedAt:/.test(rd("src/lib/stores/catalog.ts")),
+    "#293 paragraph: the write goes through mergeUpsert only");
+}
+
+async function narrative293AsyncChecks(): Promise<void> {
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const savedIntros = await getBlob<Record<string, unknown>>("narrative_intros", {});
+  const P1 = fixtureId(293, "kp-part");
+  const PDEL = fixtureId(293, "kp-part-gone");
+  const QID = fixtureId(293, "kp-quote");
+  try {
+    // ---- product paragraph: mergeUpsert only, price and spec untouched ----
+    await n293MergeUpsert(P1, { desc: "Test293 Fresnel", category: "Test293 Cat", unit: "ea", list: 200, cost: 120, specTitle: "FRESNEL", specBody: "1. Spec body" });
+    registerFixture("catalog_parts", P1);
+    const before = await n293GetPart(P1);
+    const r1 = await n293SaveParagraph(P1, "  A bright, even wash.\r\n\r\n- Quiet  ", "Tester", { now: 5_000 });
+    const after = await n293GetPart(P1);
+    ok(r1.ok && after?.narrativeText === "A bright, even wash.\n\n- Quiet" && after.narrativeUpdatedAt === 5_000 && after.narrativeUpdatedBy === "Tester",
+      "#293 paragraph: saveProductParagraph writes narrativeText / At / By (trimmed, line breaks normalized)");
+    ok(!!before && !!after && after.cost === before.cost && after.list === before.list && after.pricedAt === before.pricedAt && after.specBody === "1. Spec body" && after.specTitle === "FRESNEL",
+      "#293 paragraph: cost, list, pricedAt and the spec fields are unchanged");
+    await n293MergeUpsert(P1, { cost: 130, list: 210 }); // a price-book style patch
+    ok((await n293GetPart(P1))?.narrativeText === "A bright, even wash.\n\n- Quiet", "#293 paragraph: a later price patch through mergeUpsert leaves the paragraph intact");
+    const stale = await n293SaveParagraph(P1, "Newer", "Other", { expectUpdatedAt: 1 });
+    ok(!stale.ok && stale.stale?.updatedAt === 5_000 && stale.stale?.paragraph === "A bright, even wash.\n\n- Quiet", "#293 paragraph: a stale expectUpdatedAt is refused with the current text and stamp");
+    const fresh = await n293SaveParagraph(P1, "Newer", "Other", { expectUpdatedAt: 5_000, now: 6_000 });
+    ok(fresh.ok && (await n293GetPart(P1))?.narrativeText === "Newer", "#293 paragraph: a matching expectUpdatedAt writes");
+    ok(!(await n293SaveParagraph(P1, "   ", "T")).ok && !(await n293SaveParagraph(P1, "x".repeat(4001), "T")).ok, "#293 paragraph: empty and over-length text are refused");
+    ok(!(await n293SaveParagraph(fixtureId(293, "no-such-sku"), "Text", "T")).ok, "#293 paragraph: a sku not in the catalog (custom) is refused");
+    await n293MergeUpsert(PDEL, { desc: "Test293 Gone", category: "Test293 Cat", unit: "ea", list: 1, cost: 1 });
+    registerFixture("catalog_parts", PDEL);
+    await n293RemovePart(PDEL);
+    ok(!(await n293SaveParagraph(PDEL, "Text", "T")).ok, "#293 paragraph: a soft-deleted part is refused");
+
+    // ---- intros blob ----
+    await setBlob("narrative_intros", { intros: [] });
+    const a = await n293UpsertIntro({ title: "Test293 Rigging", text: "Our rigging systems…" }, "Tester");
+    ok(a.ok && /^NI-[0-9a-z]{8}$/.test(a.id || "") && (await n293ListIntros()).some((i) => i.id === a.id && i.updatedBy === "Tester"), "#293 intros: upsertIntro mints an id and round-trips through the blob");
+    const dup = await n293UpsertIntro({ title: "test293 rigging", text: "x" }, "Tester");
+    ok(!dup.ok, "#293 intros: a duplicate title is refused by the store");
+    if (a.ok && a.id) {
+      const e = await n293UpsertIntro({ id: a.id, title: "Test293 Rigging", text: "Edited" }, "Lee");
+      ok(e.ok && (await n293ListIntros()).find((i) => i.id === a.id)?.text === "Edited", "#293 intros: an edit keeps the id");
+      const d = await n293DeleteIntro(a.id, "Lee");
+      ok(d.ok && !(await n293ListIntros()).some((i) => i.id === a.id), "#293 intros: deleteIntro removes it");
+    }
+
+    // ---- the quote save path stores sanitized blocks; a revision snapshots them ----
+    const { withSanitizedKeyProducts } = await import("@/app/(app)/estimator/narrative");
+    const posted = { id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative" as const,
+      items: [{ id: 1, sku: P1, desc: "Fresnel", qty: 2, unit: "ea", cost: 120, price: 200 }],
+      keyProducts: [{ lineKey: 1, sku: ` ${P1} `, text: "  Para  ", photo: "x", junk: true }, { lineKey: "1", sku: "DUP" }] } as unknown as N293Sec;
+    const stored = [posted].map(withSanitizedKeyProducts);
+    await n293QCreate({ id: QID, name: "#293 kp", customer: "Spec fixture", owner: "spec", quoteType: "system", spec: { sections: stored, mobs: [] } });
+    registerFixture("quotes", QID);
+    const back = ((await n293QGet(QID))?.spec as { sections?: N293Sec[] } | null)?.sections?.[0];
+    // jsonb stores object keys in its own order, so compare with sorted keys.
+    const canon = (v: unknown) => JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x));
+    ok(canon(back?.keyProducts) === canon([{ lineKey: "1", sku: P1, text: "Para", photo: true }]), "#293 save: messy posted keyProducts are stored sanitized");
+    const rev = await n293QAddRev(QID, { by: "Test", note: "#293" });
+    const revSec = (rev?.spec as { sections?: N293Sec[] } | null)?.sections?.[0];
+    ok(canon(revSec?.keyProducts) === canon(back?.keyProducts), "#293 save: addQuoteRevision snapshots keyProducts with the spec");
+  } finally {
+    await setBlob("narrative_intros", { intros: Array.isArray(savedIntros.intros) ? savedIntros.intros : [] });
+  }
+}
+
+async function narrativePhotos293AsyncChecks(): Promise<void> {
+  const P1 = fixtureId(293, "ph-part");
+  const P2 = fixtureId(293, "ph-hidden");
+  const P3 = fixtureId(293, "ph-gone");
+  const CUSTOM = fixtureId(293, "ph-custom");
+  for (const [sku, desc] of [[P1, "Test293 Photo part"], [P2, "Test293 Hidden-only"], [P3, "Test293 Deleted"]]) {
+    await n293MergeUpsert(sku, { desc, category: "Test293 Cat", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", sku);
+  }
+  await n293SaveParagraph(P1, "Library text for the photo part.", "Tester");
+  const mk = async (fileName: string, contentType: string) => {
+    const d = await n293CreateDoc({ kind: "image", fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-293/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#293 photos: fixture document failed to create");
+    registerFixture("part_documents", d.id);
+    return d;
+  };
+  const first = await mk("first.jpg", "image/jpeg");
+  const second = await mk("second.webp", "image/webp");
+  const hidden = await mk("hidden.png", "image/png");
+  const gone = await mk("gone.png", "image/png");
+  for (const [doc, sku] of [[first, P1], [second, P1], [hidden, P2], [gone, P3]] as const) {
+    await n293Attach(doc.id, [sku], "Test");
+    registerFixture("part_document_links", n293LinkId(sku, doc.id));
+  }
+  ok(await n293SetOrder(P1, [second.id, first.id]), "#293 photos fixture: Make primary moves the second image first");
+  ok(await n293SetDisplay(hidden.id, P2, { hidden: true }), "#293 photos fixture: P2's only image is hidden");
+  await n293RemovePart(P3);
+
+  const item = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 5, price: 10 });
+  const kp = (id: number, sku: string, photo = true) => ({ lineKey: String(id), sku, text: "t", photo });
+  const sections = [
+    { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", items: [item(1, P1), item(2, P2), item(3, P3)], keyProducts: [kp(1, P1), kp(2, P2), kp(3, P3)] },
+    { id: "b", name: "B", kind: "materials", mfr: "", freightPct: 0, items: [item(1, P2)], keyProducts: [kp(1, P2)] },
+  ] as unknown as N293Sec[];
+  const docs = await n293PhotoDocs(sections);
+  ok([...docs.keys()].join(",") === P1 && docs.get(P1)?.id === second.id,
+    "#293 photos: the primary visible image (visibleImagesForParts [0]); none for a hidden-only part or a soft-deleted part");
+  ok((await n293PhotoDocs([{ ...sections[0], keyProducts: [kp(1, P1, false)] }] as unknown as N293Sec[])).size === 0, "#293 photos: photo off → no photo doc");
+
+  const libRows = await n293Library([P1, P2, CUSTOM, P1, "  "]);
+  ok(Object.keys(libRows).sort().join(",") === [CUSTOM, P1, P2].sort().join(","), "#293 library: one row per distinct, non-blank sku");
+  ok(libRows[P1].inCatalog && libRows[P1].paragraph === "Library text for the photo part." && libRows[P1].photoDocId === second.id && libRows[P1].desc === "Test293 Photo part",
+    "#293 library: a catalog part's row carries its paragraph, description and primary photo");
+  ok(libRows[P2].inCatalog && libRows[P2].paragraph === null && libRows[P2].photoDocId === null, "#293 library: no paragraph → null; hidden-only images → no photo");
+  ok(!libRows[CUSTOM].inCatalog && libRows[CUSTOM].paragraph === null, "#293 library: a custom sku reads Not in catalog");
+
+  // inlinePhotos — fake reader, every cap.
+  const d = (id: string, contentType: string, size: number, blobKey: string | null = id): N293Doc =>
+    ({ id, kind: "image", title: "T-" + id, fileName: id, contentType, size, blobKey, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] });
+  const bytes: Record<string, Uint8Array | "throw" | null> = { a: new Uint8Array(10), f: new Uint8Array(5), g: new Uint8Array(20), d: null, e: "throw" };
+  const reads: string[] = [];
+  const read = async (key: string) => { reads.push(key); const b = bytes[key]; if (b === "throw") throw new Error("blob down"); return b ?? null; };
+  const map = new Map<string, N293Doc>([
+    ["A", d("a", "image/png", 10)], ["B", d("b", "image/svg+xml", 10)], ["C", d("c", "image/jpeg", 99)], ["D", d("d", "image/webp", 1)],
+    ["E", d("e", "image/png", 1)], ["F", d("f", "image/png", 5)], ["G", d("g", "image/png", 1)], ["H", d("h", "image/png", 1, null)],
+  ]);
+  const warn = console.warn;
+  console.warn = () => {};
+  let out: Record<string, { src: string; alt: string }> = {};
+  try {
+    out = await n293Inline(map, read, { perImage: 16, total: 12, concurrency: 2 });
+  } finally {
+    console.warn = warn;
+  }
+  ok(Object.keys(out).join(",") === "A" && out.A.src === "data:image/png;base64," + Buffer.from(new Uint8Array(10)).toString("base64") && out.A.alt === "T-a",
+    "#293 inline: a PNG within caps becomes a data URI; SVG, oversize, missing, unreadable, over-total and blob-less photos are skipped");
+  ok(!reads.includes("b") && !reads.includes("c") && !reads.includes("h"), "#293 inline: disallowed types, a stored size over the cap and a missing blobKey are never read");
+}
+
+/* ======================================================================
+   #293 slice 1 — printing: a quote without key products renders
+   byte-for-byte as before; key products print with a photo floated right
+   (narrative systems only); the Itemized appendix after the signature.
+   ====================================================================== */
+import { qd293Cases as p293Cases, qd293Props as p293Props, qd293Sections as p293Sections, quoteDocumentModule293 as p293Mod, renderQuoteDocument293 as p293Render } from "./qd293-cases";
+import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quote-document-view";
+{
+  const base = JSON.parse(readFileSync(join(process.cwd(), "docs/superpowers/fixtures/293-quote-document-baseline.json"), "utf8")) as Record<string, string>;
+  const cases = p293Cases();
+  ok(Object.keys(cases).length === 3 && Object.keys(cases).every((k) => typeof base[k] === "string"), "#293 print: every baseline case is in the committed fixture");
+  for (const [k, props] of Object.entries(cases)) ok(p293Render(props) === base[k], `#293 print: a quote without key products renders byte-for-byte as before (${k})`);
+
+  // Key products in a narrative system.
+  const secs = p293Sections();
+  secs[1].keyProducts = [
+    { lineKey: "5", sku: "SKU-5", text: "Para five.\n\n- Bright\n- Even", photo: true },
+    { lineKey: "6", sku: "SKU-6", text: "", photo: true },
+    { lineKey: "99", sku: "GONE", text: "Never prints", photo: true },
+  ];
+  secs[0].keyProducts = [{ lineKey: "1", sku: "SKU-1", text: "Itemized never prints me", photo: true }];
+  secs[3].keyProducts = [{ lineKey: "8", sku: "SKU-8", text: "Eight.", photo: false }];
+  const html = p293Render({ ...p293Props({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" }, "SKU-1": { src: "data:image/png;base64,WFhY", alt: "One" }, "SKU-8": { src: "data:image/png;base64,ODg4", alt: "Eight" } } });
+  ok((html.match(/class="est-kp"/g) || []).length === 3, "#293 print: one est-kp block per resolved key product of a narrative system (a removed line's block is skipped)");
+  ok(!html.includes("Itemized never prints me") && !html.includes("Never prints"), "#293 print: an itemized system's blocks and unresolved blocks never print");
+  ok(html.includes('src="data:image/png;base64,QUFB"') && /float:right;width:34%/.test(html) && (html.match(/<img[^>]+src="data:image/g) || []).length === 1,
+    "#293 print: the photo floats right beside its paragraph; a block with no photo src or photo off prints full width");
+  ok(html.includes("Para five.") && html.includes("<li>Bright</li>") && html.includes(">Line 6</div>") && html.includes("Intro para."), "#293 print: intro first, then each heading + paragraph blocks; empty text prints the heading only");
+  ok(!html.includes("System scope and pricing are included in the total above.") && base.itemized.includes("System scope and pricing are included in the total above."),
+    "#293 print: a narrative system with key products drops the fallback sentence");
+
+  // Itemized appendix.
+  // `>Name</span>` also matches the Optional additions box (an option line
+  // prints its system's name), so count what the appendix ADDS over the same
+  // render without it.
+  const band = (h: string, name: string) => (h.match(new RegExp(`>${name}</span>`, "g")) || []).length;
+  const added = (h: string, off: string, name: string) => band(h, name) - band(off, name);
+  const on = p293Render(p293Props({ pdfOptions: { pdfItemizedAppendix: true } }));
+  ok(on.includes('class="est-appendix"') && on.includes("Appendix — Itemized bill of materials"), "#293 appendix: the toggle prints the appendix heading");
+  ok(on.indexOf("Appendix — Itemized") > on.indexOf("Signature — accepted for") && on.indexOf("Appendix — Itemized") < on.indexOf("Questions? Reach out to"),
+    "#293 appendix: after the signature block, before the footer");
+  ok(added(on, base.itemized, "Lighting") === 1 && added(on, base.itemized, "Empty narrative") === 1 && added(on, base.itemized, "Rigging") === 0 && added(on, base.itemized, "Install") === 0 && on.includes("Line 5") && on.includes("Line 8"),
+    "#293 appendix (itemized detail): only the narrative systems repeat, with their lines");
+  ok(JSON.stringify(p293Props({ pdfOptions: { pdfItemizedAppendix: true } }).t) === JSON.stringify(p293Props().t) && on.split("Total investment").length === base.itemized.split("Total investment").length,
+    "#293 appendix: totals are unchanged (the appendix restates, never adds)");
+  const secOn = p293Render(p293Props({ pdfOptions: { detail: "sectioned", pdfItemizedAppendix: true } }));
+  ok(added(secOn, base.sectioned, "Rigging") === 1 && added(secOn, base.sectioned, "Install") === 1 && added(secOn, base.sectioned, "Lighting") === 1 && secOn.includes("Installation, commissioning &amp; project management"),
+    "#293 appendix (by section): every system is listed; a labor system prints the body's single row");
+  const noDesc = p293Render(p293Props({ pdfOptions: { pdfNotes: false, pdfItemizedAppendix: true } }));
+  ok(noDesc.includes(">Line 5</span>"), "#293 appendix: descriptions always print in the appendix, even with Descriptions off");
+  const onlyItemized = p293Sections().filter((s) => s.presentation !== "narrative");
+  ok(!p293Render(p293Props({ sections: onlyItemized, pdfOptions: { pdfItemizedAppendix: true } })).includes("est-appendix"), "#293 appendix: nothing the body left out → no appendix");
+  ok(!base.itemized.includes("est-appendix"), "#293 appendix: off by default");
+
+  // Pure helper + print CSS.
+  const ids = (sections: ReturnType<typeof p293Sections>, d: "itemized" | "sectioned") => p293AppendixIds(sections, d).join(",");
+  const withEmpty = [...p293Sections(), { id: "s5", name: "No revenue", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative" as const, items: [] }];
+  ok(ids(withEmpty, "itemized") === "s2,s4" && ids(withEmpty, "sectioned") === "s1,s2,s3,s4", "#293 appendixSystemIds: narrative systems under itemized; every system under by-section; revenue-less systems skipped");
+  const css = p293Mod().QUOTE_PRINT_CSS;
+  ok(css.includes(".est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }") && css.includes(".est-doc .est-appendix { break-before: page; page-break-before: always; }"),
+    "#293 print CSS: a key-product block keeps together; the appendix starts a new page");
+
+  // Wiring (source).
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(qd.includes("printableKeyProducts(sec)") && qd.includes("<ItemizedLines") && qd.includes("function ItemizedLines(") && !/internalNote/.test(qd),
+    "#293 QuoteDocument: blocks come from printableKeyProducts; body and appendix share ItemizedLines; never names internalNote");
+  const pr = rd("src/app/print/quote/[id]/page.tsx");
+  ok(pr.includes("keyProductPhotoDataUris(") && pr.includes("keyProductPhotos={keyProductPhotos}"), "#293 print route: passes the inlined key-product photos");
+  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(pd.includes('p.togglePdf("pdfItemizedAppendix")') && pd.includes('"Itemized appendix"') && pd.includes("Print every narrative system's full line list after the signature"),
+    "#293 preview: Show on PDF offers the Itemized appendix toggle");
+  ok(/detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix/.test(rd("src/app/(app)/estimator/estimator-client.tsx")),
+    "#293 estimator: the appendix choice is saved with pdfOptions");
+}
+
+/* ======================================================================
+   #293 slice 1 — key-products UI wiring (client components; proven by
+   source like the other client checks — React isn't mounted here).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const clientImportsServer = (s: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos))/m.test(s);
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const hook = rd("src/app/(app)/estimator/use-key-product-library.ts");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/^"use client";/.test(col) && /^"use client";/.test(hook) && !clientImportsServer(col) && !clientImportsServer(hook) && !clientImportsServer(card),
+    "#293 UI: the column and the library hook are client modules that import no store or server-only module");
+  ok(hook.includes("keyProductLibraryAction(") && hook.includes("MAX_LIBRARY_SKUS"), "#293 UI: the hook reads library rows through keyProductLibraryAction, ≤ 200 skus");
+  ok(card.includes("onToggleKeyProduct: (itemId: number) => void;") && card.includes("keyProductStar(sec, it)") && card.includes("Key product — featured in the narrative"),
+    "#293 UI: each eligible line row has the ★ toggle with the spec's title");
+  ok(col.includes("Line removed — this block won't print") && col.includes("— this block won't print") && col.includes("Optional/labor line — won't print") && col.includes("Re-anchor"),
+    "#293 UI: unresolved blocks show their strips (removed / changed + Re-anchor / ineligible)");
+  ok(col.includes("Save to library") && col.includes("Use library text") && col.includes("Replace the library paragraph for") && col.includes("changed since you loaded it") && !col.includes("window.confirm"),
+    "#293 UI: Save to library confirms inline before replacing and on a stale version (never window.confirm)");
+  ok(col.includes("No photo — prints full width") && col.includes("/api/part-documents/") && col.includes("+ Key product"), "#293 UI: photo thumbnail + switch, the no-photo note, and the + Key product picker");
+  ok(cli.includes("remapKeyProducts(res.section.keyProducts, idMap)") && cli.includes("<NarrativeColumn") && cli.includes("onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}"),
+    "#293 UI: Copy here remaps blocks to the new item ids; the column and ★ are wired");
+  ok(rd("src/app/(app)/estimator/page.tsx").includes('canWriteNarrativeLibrary={can("create", user.roles)}'), "#293 UI: Save to library is offered per the Create permission");
+}
+
+/* ======================================================================
+   #293 slice 1 — intros, Draft narrative and the part editor's Narrative
+   paragraph (client wiring, by source).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const clientImportsServer = (s: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos))/m.test(s);
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const modal = rd("src/app/(app)/estimator/narrative-intros-modal.tsx");
+  const panel = rd("src/app/(app)/catalog/narrative-paragraph-panel.tsx");
+  ok([modal, panel].every((s) => /^"use client";/.test(s) && !clientImportsServer(s)), "#293 UI: the intros modal and the part-editor panel are client modules importing no store");
+  ok(col.includes("Draft narrative") && col.includes("draftOverwrites(") && col.includes("draftNarrative(") && col.includes("Replace what") && col.includes("Fill blanks only") && col.includes("Switched to Narrative") && col.includes("still need"),
+    "#293 Draft: asks Replace / Fill blanks / Cancel before overwriting, switches to Narrative, reports skus still needing a paragraph");
+  ok(col.includes("Save as intro") && col.includes("Manage intros") && col.includes("Needs the Create permission") && col.includes("— none —") && col.includes("upsertSystemIntroAction("),
+    "#293 intros: the intro select, Save as intro and Manage intros (disabled without Create)");
+  ok(modal.includes("upsertSystemIntroAction(") && modal.includes("deleteSystemIntroAction(") && !modal.includes("window.confirm"), "#293 intros: the modal edits and deletes (inline confirm)");
+  ok(rd("src/app/(app)/estimator/page.tsx").includes("listIntros()") && rd("src/app/(app)/estimator/page.tsx").includes("narrativeIntros={narrativeIntros}"), "#293 intros: the Estimator page loads the intro library");
+  ok(panel.includes("Narrative paragraph") && panel.includes("saveProductParagraphAction(") && panel.includes("changed since you loaded it") && !/\bname=/.test(panel),
+    "#293 part editor: the Narrative paragraph panel saves through the same action, stale-checked, and leaks no field into the part form");
+  const cat = rd("src/app/(app)/catalog/page.tsx");
+  ok(/canCreate && editing && part && \([\s\S]{0,400}<NarrativeParagraphPanel\s+key=\{part\.sku\}/.test(cat), "#293 part editor: the panel mounts for Create users editing a part");
+}
+
+/* ======================================================================
+   #293 slice 1 — final review fixes: photo deadline + running budget,
+   defensive print path, Draft/Save robustness, the ★ race, appendix
+   comments, sku cap, actions width, wiring pins.
+   ====================================================================== */
+import { inlinePhotos as n293fInline, PHOTO_INLINE_DEADLINE_MS as n293fDeadline } from "@/lib/narrative/photos";
+import type { PartDocument as N293fDoc } from "@/lib/part-docs/types";
+import {
+  fillEmptyKeyProductText as n293fFill, printableKeyProducts as n293fPrintable, photoSkusOf as n293fPhotoSkus,
+  resolveKeyProducts as n293fResolve, sanitizeKeyProducts as n293fSanitize, toggleKeyProduct as n293fToggle,
+} from "@/app/(app)/estimator/narrative";
+import { systemPrintsInBody as n293fPrints } from "@/app/(app)/estimator/quote-document-view";
+import type { SpecItem as N293fItem, SpecSection as N293fSec } from "@/app/(app)/estimator/types";
+
+async function narrativeFinal293AsyncChecks(): Promise<void> {
+  const d = (id: string, size: number): N293fDoc =>
+    ({ id, kind: "image", title: "T-" + id, fileName: id, contentType: "image/png", size, blobKey: id, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    ok(n293fDeadline > 0 && n293fDeadline <= 10000, "#293 fix photos: one overall inline deadline well under the 30 s render step (≤ 10 s)");
+
+    // A reader that never resolves: the inline step returns by the deadline,
+    // that photo skipped, the others kept, and the hung read is aborted.
+    let seen: AbortSignal | undefined;
+    const hang = async (key: string, _max: number, signal?: AbortSignal) => {
+      if (key === "a") { seen = signal; return new Promise<Uint8Array | null>(() => {}); }
+      return new Uint8Array(5);
+    };
+    const t0 = Date.now();
+    const out = await n293fInline(new Map([["A", d("a", 5)], ["B", d("b", 5)]]), hang, { perImage: 16, total: 100, concurrency: 6, deadlineMs: 60 });
+    const took = Date.now() - t0;
+    ok(took < 2000 && Object.keys(out).join(",") === "B", "#293 fix photos: a hung Blob read can't stall the render — inlinePhotos returns at the deadline with that photo skipped");
+    ok(!!seen && seen.aborted, "#293 fix photos: the hung read's AbortSignal fires at the deadline");
+
+    // Photos not yet read when the deadline passes are skipped unread.
+    const reads1: string[] = [];
+    const hangFirst = async (key: string) => { reads1.push(key); return key === "a" ? new Promise<Uint8Array | null>(() => {}) : new Uint8Array(5); };
+    const out1 = await n293fInline(new Map([["A", d("a", 5)], ["B", d("b", 5)], ["C", d("c", 5)]]), hangFirst, { perImage: 16, total: 100, concurrency: 1, deadlineMs: 40 });
+    ok(Object.keys(out1).length === 0 && reads1.join(",") === "a", "#293 fix photos: after the deadline the remaining batches are never read");
+
+    // The running byte total stops reads once the budget is spent.
+    const reads2: string[] = [];
+    const sized = (sizes: Record<string, number>) => async (key: string) => { reads2.push(key); return new Uint8Array(sizes[key]); };
+    const out2 = await n293fInline(new Map([["A", d("a", 10)], ["B", d("b", 1)], ["C", d("c", 1)]]), sized({ a: 10, b: 1, c: 1 }), { perImage: 16, total: 10, concurrency: 1, deadlineMs: 5000 });
+    ok(reads2.join(",") === "a" && Object.keys(out2).join(",") === "A", "#293 fix photos: budget reached → later photos are never read (reader called once)");
+    reads2.length = 0;
+    const out3 = await n293fInline(new Map([["A", d("a", 10)], ["B", d("b", 10)], ["C", d("c", 1)], ["D", d("d", 1)]]), sized({ a: 10, b: 10, c: 1, d: 1 }), { perImage: 16, total: 12, concurrency: 1, deadlineMs: 5000 });
+    ok(reads2.join(",") === "a,c,d" && Object.keys(out3).join(",") === "A,C,D", "#293 fix photos: a photo whose stored size no longer fits the remaining budget is skipped unread; smaller ones still fit");
+    const reads4: string[] = [];
+    const out4 = await n293fInline(new Map([["A", d("a", 5)], ["B", d("b", 5)]]), async (k) => { reads4.push(k); return new Uint8Array(5); }, { perImage: 16, total: 100, concurrency: 6 });
+    ok(Object.keys(out4).join(",") === "A,B" && reads4.length === 2, "#293 fix photos: the default deadline leaves normal reads untouched");
+  } finally {
+    console.warn = warn;
+  }
+}
+
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const it = (id: number, extra: Partial<N293fItem> = {}): N293fItem => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293fItem);
+  const sec = (items: N293fItem[], extra: Partial<N293fSec> = {}): N293fSec => ({ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+
+  // 7 — the print path never throws on malformed saved data.
+  const bad = (kps: unknown) => sec([it(1)], { presentation: "narrative", keyProducts: kps as N293fSec["keyProducts"] });
+  let threw = false;
+  let objKps: unknown = null;
+  let mixed: ReturnType<typeof n293fPrintable> = [];
+  try {
+    objKps = n293fPrintable(bad({ lineKey: "1", sku: "SKU-1" }));
+    mixed = n293fPrintable(bad([null, 5, "x", ["arr"], { lineKey: "1", sku: "SKU-1", text: 42, photo: "yes" }]));
+    n293fPhotoSkus([bad("nope"), bad([null]), null as unknown as N293fSec]);
+  } catch {
+    threw = true;
+  }
+  ok(!threw && eq(objKps, []), "#293 fix print: a non-array keyProducts prints nothing and never throws");
+  ok(!threw && mixed.length === 1 && eq(mixed[0].blocks, []) && mixed[0].photo === true && mixed[0].heading === "Line 1",
+    "#293 fix print: malformed rows are skipped and a non-string text prints the heading only — no throw");
+  const rz = n293fResolve(bad([null, { lineKey: "1", sku: "SKU-1", text: "t", photo: true }]));
+  ok(rz.length === 2 && rz[0].status === "missing" && rz[0].kp.lineKey === "" && rz[1].status === "ok", "#293 fix print: resolve stays index-aligned — a malformed row reads missing with a safe placeholder");
+  let renderThrew = false;
+  try {
+    const secs = p293Sections();
+    secs[1].keyProducts = { bogus: true } as unknown as N293fSec["keyProducts"];
+    secs[3].keyProducts = [null, { lineKey: "8", sku: "SKU-8", text: 7, photo: true }] as unknown as N293fSec["keyProducts"];
+    p293Render(p293Props({ sections: secs }));
+  } catch {
+    renderThrew = true;
+  }
+  ok(!renderThrew, "#293 fix print: QuoteDocument renders a quote with malformed keyProducts without throwing");
+
+  // 8 — photoSkusOf skips systems the body doesn't print.
+  const zero = sec([it(1, { cost: 0, price: 0 })], { id: "z", presentation: "narrative", keyProducts: [{ lineKey: "1", sku: "SKU-1", text: "", photo: true }] });
+  const live = sec([it(2)], { id: "l", presentation: "narrative", keyProducts: [{ lineKey: "2", sku: "SKU-2", text: "", photo: true }] });
+  ok(!n293fPrints(zero) && n293fPrints(live) && eq(n293fPhotoSkus([zero, live]), ["SKU-2"]), "#293 fix photos: a narrative system with no revenue (not printed) costs no photo read");
+  ok(eq(p293AppendixIds(p293Sections(), "sectioned"), p293Sections().filter(n293fPrints).map((x) => x.id)), "#293 fix: the appendix and photo reads share QuoteDocument's printed-systems predicate");
+
+  // 11 — sku length cap.
+  const long = "S".repeat(300);
+  const capped = n293fSanitize([{ lineKey: "1", sku: long, text: "", photo: true }]);
+  ok(capped.length === 1 && capped[0].sku.length === 128, "#293 fix sanitize: a key product's sku is capped at 128 chars");
+
+  // 4 — the ★ late fill: only while the block is still empty and still that sku.
+  const base = sec([it(1), it(2)]);
+  const marked = n293fToggle(base, 1, "");
+  const filled = n293fFill(marked, 1, "SKU-1", "Library para");
+  ok(filled.keyProducts?.[0].text === "Library para", "#293 fix ★: an empty block marked before the library row loaded is filled once it arrives");
+  const typed = { ...marked, keyProducts: [{ ...marked.keyProducts![0], text: "Typed" }] };
+  ok(n293fFill(typed, 1, "SKU-1", "Library para") === typed, "#293 fix ★: text typed meanwhile is never overwritten");
+  ok(n293fFill(base, 1, "SKU-1", "Library para") === base && n293fFill(marked, 1, "OTHER", "x") === marked && n293fFill(marked, 1, "SKU-1", "") === marked,
+    "#293 fix ★: un-starred, re-anchored or no paragraph → no change");
+
+  // 5 — the appendix prints line comments even with Descriptions off.
+  const cs = p293Sections();
+  cs[1].items = cs[1].items.map((x) => (x.id === 5 ? { ...x, comment: "Narr comment 293" } : x));
+  const offNotes = p293Render(p293Props({ sections: cs, pdfOptions: { pdfNotes: false, pdfItemizedAppendix: true } }));
+  const offApx = p293Render(p293Props({ sections: cs, pdfOptions: { pdfNotes: false } }));
+  ok(offNotes.split("Narr comment 293").length === 2 && !offApx.includes("Narr comment 293"), "#293 fix appendix: line comments print in the appendix even with Descriptions off");
+  const secNoNotes = p293Render(p293Props({ pdfOptions: { detail: "sectioned", pdfNotes: false, pdfItemizedAppendix: true } }));
+  ok(secNoNotes.includes("Customer note"), "#293 fix appendix: by-section appendix prints an itemized system's comment with Descriptions off");
+
+  // Source wiring (client components aren't mounted here).
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const hook = rd("src/app/(app)/estimator/use-key-product-library.ts");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const photos = rd("src/lib/narrative/photos.ts");
+  const doSave = col.slice(col.indexOf("const doSave = "), col.indexOf("const onSave = "));
+  ok(/start\(async \(\) => \{[\s\S]*try \{[\s\S]*await saveProductParagraphAction\([\s\S]*\} catch \{\s*setMsg\(FAILED\);/.test(doSave),
+    "#293 fix Save to library: the server await is caught (FAILED message) — a throw can't unmount the Estimator");
+  ok(doSave.includes("library.setRow(kp.sku, { ...row, paragraph: out.stale.paragraph, paragraphUpdatedAt: out.stale.updatedAt })"),
+    "#293 fix Save to library: a stale answer refreshes the cached row (chip + Use library text)");
+  const draftSrc = col.slice(col.indexOf("const draft = "), col.indexOf("const saveAsIntro = "));
+  ok(draftSrc.includes("await p.library.refresh(okSkus)") && draftSrc.includes("okSkus.some((s) => !Object.hasOwn(rows, s))") && col.includes('const NO_LIBRARY = "Could not load the library";') &&
+     draftSrc.indexOf("setNotice(NO_LIBRARY)") > -1 && draftSrc.indexOf("setNotice(NO_LIBRARY)") < draftSrc.indexOf("draftNarrative("),
+    "#293 fix Draft: force-refreshes the library and aborts (no write) with “Could not load the library” when any sku has no row");
+  const refreshSrc = hook.slice(hook.indexOf("const refresh = useCallback("), hook.indexOf("const setRow = useCallback("));
+  ok(refreshSrc.includes("keyProductLibraryAction(want)") && !/catch/.test(refreshSrc) && !refreshSrc.includes("in rowsRef.current"),
+    "#293 fix Draft: refresh bypasses the cache and rejects on failure (no swallowed error)");
+  ok(/onChange=\{\(e\) => \{\s*setIntroId\(e\.target\.value\);\s*setDraftAsk\(false\);/.test(col), "#293 fix Draft: changing the intro closes the Replace / Fill blanks strip");
+  const star = cli.slice(cli.indexOf("const toggleKeyProductLine = "), cli.indexOf("const curtainSec = "));
+  ok(star.includes("updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));") && star.includes(".ensure([sku])") && star.includes("fillEmptyKeyProductText(s, itemId, sku, para)") &&
+     star.indexOf("toggleKeyProduct(s, itemId, text)") < star.indexOf(".ensure([sku])"),
+    "#293 fix ★: marks first, awaits the library row, then fills an empty block on the live section");
+  ok(cli.includes('"minmax(150px,1.3fr) 104px 92px 136px 116px 104px"') && cli.includes('"minmax(150px,1.3fr) 104px 136px 116px 104px"'),
+    "#293 fix actions cell: 104px in both views — five 20px buttons (✎ ★ ↑ ↓ ×) fit");
+  ok(card.includes('aria-label="Key product — featured in the narrative"'), "#293 fix ★: the star has an aria-label");
+  ok(/<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli), "#293 fix: the narrative column remounts per system (key={narrSec.id})");
+  ok(photos.includes("Promise.race([read(d.blobKey as string, caps.perImage, abort.signal), expired])") && photos.includes("getBlobStream(blobKey, { signal })"),
+    "#293 fix photos: each read races the deadline and the Blob GET carries the AbortSignal");
+  const clientImportsServer = (src: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/narrative\/(library|photos))/m.test(src);
+  const clients = {
+    "narrative-column.tsx": col,
+    "use-key-product-library.ts": hook,
+    "narrative-intros-modal.tsx": rd("src/app/(app)/estimator/narrative-intros-modal.tsx"),
+    "narrative-paragraph-panel.tsx": rd("src/app/(app)/catalog/narrative-paragraph-panel.tsx"),
+  };
+  ok(Object.values(clients).every((src) => /^"use client";/.test(src) && !clientImportsServer(src)) && !clientImportsServer(card) && !clientImportsServer(cli),
+    "#293 fix: narrative-column.tsx and every #293 client module value-import no store, db, blob, session or server-only narrative module");
+}
+
+/* #293 slice 1 — final review fixes (round 2): the sku cap agrees with the
+   star, and "is the row loaded" checks ignore inherited property names. */
+import { isKeyProductEligible as n293gEligible, keyProductStar as n293gStar } from "@/app/(app)/estimator/narrative";
+import type { SpecItem as N293gItem, SpecSection as N293gSec } from "@/app/(app)/estimator/types";
+{
+  const line = (sku: string): N293gItem => ({ id: 1, sku, desc: "Line", qty: 1, unit: "ea", cost: 10, price: 20 } as N293gItem);
+  const section: N293gSec = { id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [] } as N293gSec;
+  ok(n293gEligible(line("A".repeat(128))) && n293gStar(section, line("A".repeat(128))) === "off", "#293 fix sku cap: a 128-char sku is still eligible");
+  ok(!n293gEligible(line("A".repeat(129))) && n293gStar(section, line("A".repeat(129))) === "none",
+    "#293 fix sku cap: a 129-char sku is not eligible (star none), so a starred block can't vanish on save");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const colSrc = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const cliSrc = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(colSrc.includes("!Object.hasOwn(rows, s)") && !colSrc.includes("(s in rows)") && cliSrc.includes("Object.hasOwn(kpLib.rows, sku)") && !cliSrc.includes("sku in kpLib.rows"),
+    "#293 fix: row-loaded checks use Object.hasOwn (an sku named like an inherited property is not a loaded row)");
 }

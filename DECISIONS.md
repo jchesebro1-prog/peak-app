@@ -8600,6 +8600,62 @@ manual is PDF only. In the customer view an unknown document kind is dropped, no
 Separately, the portal's "Parts you've quoted before" shelf is no longer loaded or shown on the
 Packages page (`showQuotedBeforeShelf`: no search or filters, page 1, department not `packages`).
 
+## D539. No generation in the quote path (#293, 2026-10-01)
+
+Every customer-facing word on a narrative quote is typed once, by a person, and then copied: a product paragraph on the
+catalog part, a system intro in the intros library, the text on a block. Nothing is written by a model at quote time and
+nothing is rewritten when a quote prints. "Draft narrative" only assembles text that already exists (the part's saved
+paragraph, the library intro, rules-based scope text), so it stays inside D89's deterministic, no-`ANTHROPIC_API_KEY`
+line.
+
+## D540. Key products are structured blocks on the section (#293, 2026-10-01)
+
+A system section carries `keyProducts`, each block anchored to `String(item.id)` plus the line's sku, unique per section.
+A block resolves to a line only when both match; a block whose line is gone is flagged, never auto-deleted. A same-estimate
+Copy remaps the ids; Copy to existing, Move, recall, tier re-price and the Rewards credit carry blocks as-is. The server
+sanitizes `keyProducts` on save, and on Move and Copy too, a plan-level extension of spec §3.4, so the stored shape is
+server-clean on every entry. A sku longer than 128 characters cannot be starred, so the stored cap and the ★ always
+agree. (Spec decisions 2, 3, 6 and part of 13.)
+
+## D541. The product paragraph is a `CatalogPart` field written only through `mergeUpsert` (#293, 2026-10-01)
+
+`narrativeText`, `narrativeAt` and `narrativeBy` are written only through `mergeUpsert`, which also carries the
+stale-version check and the refusal for a custom (non-catalog) sku. Paragraphs live and die with the parts: Clear catalog
+price list and the go-live wipe remove them, so run `npm run db:export` first. (Spec decision 4.)
+
+## D542. System intros are one `narrative_intros` settings blob with single-op writes (#293, 2026-10-01)
+
+The reusable system intros live in one `narrative_intros` settings blob that survives both resets. Each write is a
+single operation (add, edit, delete), not a whole-blob replace. Writes need Create permission and answer with a message
+rather than `requirePerm`'s redirect, so a refused save reads as an inline error. (Spec decisions 5 and 6; open question
+6 is still open.)
+
+## D543. Printing: Narrative only, photo from the live part, byte-identical without blocks (#293, 2026-10-01)
+
+Key products print only in the Narrative presentation. The photo is `visibleImagesForParts()[0]` of a live part, inlined
+into the PDF as a data URI (PNG, JPEG or WebP; 3 MB each, 15 MB total, 6 concurrent) and floated right at 34 %. Inlining
+has one overall deadline of about 8 s plus a running 15 MB byte budget; photos not read in time are skipped with a
+warning and never fail the render. `ItemizedLines` and `SectionBand` are extracted, and output without blocks is
+byte-identical to before (a committed baseline fixture). The pure view helpers live in `quote-document-view.ts`, because
+`quote-document.tsx` imports a `.jpg` the harness cannot load. `layout="web"` is deferred to Slice 3. (Spec decisions 7,
+8 and 9.)
+
+## D544. The Itemized appendix (`pdfItemizedAppendix`, default off) (#293, 2026-10-01)
+
+The appendix reprints the full line list of every narrative system, or of every system when printing by section. Line
+descriptions are always on, and line comments always print as well. It goes on a new page after the signature and before
+the footer, and totals are unchanged. (Spec decision 10.)
+
+## D545. Estimator UI choices for key products (#293, 2026-10-01)
+
+- Confirms are inline two-step strips, never `window.confirm` (the Capacitor shells).
+- The ★ lives in the actions cell, which is widened by 20 px.
+- The library cache prefetches the active system's eligible skus, so a ★ click copies the saved paragraph; the ★ awaits
+  the library row and fills the block text only if it is still empty.
+- Draft narrative force-refreshes the system's library rows and refuses to write ("Could not load the library") if any
+  cannot load.
+- The Draft confirm offers Replace / Fill blanks / Cancel.
+
 ## D546. Photo sheet: one row per part, Photo 1–3, Photo 1 is the primary (#294, 2026-10-01)
 
 The sheet has one row per part with three photo slots, not one row per photo — it reads like the catalog and a part is a
