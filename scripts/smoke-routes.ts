@@ -248,7 +248,7 @@ const ROUTES = [
  * "That design no longer exists" page instead of a 404, so status alone
  * cannot distinguish a rendered editor from a miss.
  */
-const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
+const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true }> = [
   { route: "/projects/P-3001" },
   { route: "/api/projects/P-3001/handoff" },
   { route: "/inspections/RI-2042" },
@@ -333,6 +333,9 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/estimator/cut-sheets?id=Q-2041" },
   { route: "/estimator/cut-sheets?id=Q-2041&style=client" },
   { route: "/estimator/cut-sheets?id=Q-0000", reject: "Application error" },
+  // #296 — no rack is seeded, so the staff submittal preview is checked on its
+  // not-found path: the module compiles and an unknown id is a clean 404, not a 500.
+  { route: "/design/assemblies/rack/SA-NOPE", expectNotFound: true },
 ];
 
 let fail = 0;
@@ -495,7 +498,8 @@ async function checkRoute(
   base: string,
   route: string,
   jar: CookieJar | null,
-  reject?: string
+  reject?: string,
+  expectNotFound?: boolean
 ): Promise<{ route: string; ok: boolean; detail: string }> {
   try {
     const res = await fetch(base + route, {
@@ -504,6 +508,11 @@ async function checkRoute(
     });
     const body = await res.text();
     const finalUrl = new URL(res.url);
+    if (expectNotFound) {
+      // The route's correct answer is its not-found page: exactly 404, never a 5xx or a login bounce.
+      const ok404 = res.status === 404 && !finalUrl.pathname.startsWith("/login");
+      return { route, ok: ok404, detail: ok404 ? "status 404 (expected)" : `status ${res.status}, final ${finalUrl.pathname} — expected a 404` };
+    }
     let problem = looksLikeErrorPage(
       res.status,
       finalUrl.pathname + finalUrl.search,
@@ -620,7 +629,7 @@ async function main() {
 
     console.log("[smoke] --- dynamic [id] routes ---");
     for (const d of DYNAMIC_ROUTES) {
-      const r = await checkRoute(base, d.route, jar, d.reject);
+      const r = await checkRoute(base, d.route, jar, d.reject, d.expectNotFound);
       report(r.ok, `${d.route} (${r.detail})`);
     }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   FIXTURE_BOXES,
@@ -334,7 +335,13 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
                   : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}
           </p>
         </div>
-        <button type="button" onClick={onCancel} style={{ border: 0, background: "transparent", color: "#737985", cursor: "pointer", fontSize: 12, flexShrink: 0 }}>Cancel</button>
+        <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexShrink: 0 }}>
+          {isRack && draft.id && (
+            // A new tab, so the open draft survives; the sheets print the saved rack.
+            <Link href={`/design/assemblies/rack/${encodeURIComponent(draft.id)}`} target="_blank" rel="noopener" title="Opens the saved rack's submittal sheets in a new tab" style={{ color: "var(--accent)", fontSize: 12, textDecoration: "none" }}>Submittal</Link>
+          )}
+          <button type="button" onClick={onCancel} style={{ border: 0, background: "transparent", color: "#737985", cursor: "pointer", fontSize: 12, flexShrink: 0 }}>Cancel</button>
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
         <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : isHardware ? "e.g. Chain wrap" : isRack ? "e.g. AV head-end rack" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>

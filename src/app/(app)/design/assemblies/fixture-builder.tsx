@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
 import { resolveFixture, toSkuMap, type FixtureKind, type FixtureRecord } from "@/lib/fixture-assemblies";
@@ -264,6 +265,9 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
                       />
                     ) : (
                       <button type="button" onClick={() => edit(rec)} style={EDIT_BTN}>Edit</button>
+                    )}
+                    {rec.kind === "rack" && (
+                      <Link href={`/design/assemblies/rack/${encodeURIComponent(rec.id)}`} style={{ ...EDIT_BTN, textDecoration: "none" }}>Submittal</Link>
                     )}
                     <ConfirmButton label="Delete" confirmLabel={`Delete ${rec.label}?`} style={{ fontSize: 11.5, padding: "6px 9px" }} onConfirm={() => remove(rec)} />
                   </div>

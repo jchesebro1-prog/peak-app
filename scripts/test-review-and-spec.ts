@@ -44932,6 +44932,85 @@ import type { RackPartInfo as C296sInfo, RackPlacement as C296sPlacement, RackLa
     "#296 rack submittal: racksInQuote keeps distinct, well-formed ids that resolve to a rack");
 }
 
+/* ===== #296 — rack sheets ===== */
+import { signPrintToken as c296pSign, verifyPrintToken as c296pVerify } from "@/lib/quote-pdf/token";
+import { elevationSvgFor as c296pSvgFor } from "@/lib/rack/svg";
+import {
+  parseRackSheet as c296pParse, rackCell as c296pCell, rackText as c296pText, rackDateLabel as c296pDate, rackSheetFooter as c296pFooter,
+  rackTotalsRows as c296pRows, rackIssuesForSheet as c296pIssues, rackMissingLine as c296pMissing, RACK_SHEET_NOTE as c296pNote,
+} from "@/lib/rack/sheet-format";
+import { rackSubmittal as c296pSub } from "@/lib/rack/submittal";
+import type { RackPartInfo as C296pInfo, RackLayout as C296pLayout, RackIssue as C296pIssue } from "@/lib/rack/types";
+{
+  // Print token for the rack route.
+  const S = "rack-sheet-secret", t0 = 1_780_000_000_000;
+  const tok = c296pSign(S, "rack", "SA-R1", t0);
+  ok(c296pVerify(S, tok, "rack", "SA-R1", t0 + 1000), "#296 rack sheets: a rack print token verifies for its kind + id");
+  ok(!c296pVerify(S, tok, "rack", "SA-R2", t0) && !c296pVerify(S, tok, "cutsheets", "SA-R1", t0), "#296 rack sheets: a rack token is refused for another id or kind");
+  ok(!c296pVerify(S, c296pSign(S, "cutsheets", "SA-R1", t0), "rack", "SA-R1", t0), "#296 rack sheets: a cutsheets token does not verify as rack");
+
+  // Source checks: token before any read; one shared SVG entry point.
+  const rdp = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const printSrc = rdp("src/app/print/rack/[id]/page.tsx");
+  const vi = printSrc.indexOf("verifyPrintToken("), li = printSrc.indexOf("loadRackForSheets(");
+  ok(vi > 0 && li > 0 && vi < li, "#296 rack sheets: the print route checks the token before loadRackForSheets");
+  ok(printSrc.includes("notFound()") && printSrc.includes('"rack"') && printSrc.includes("force-dynamic") && printSrc.includes("index: false"), "#296 rack sheets: the print route 404s, is force-dynamic and noindex");
+  const sheetsSrc = rdp("src/components/rack/RackSheets.tsx");
+  ok(sheetsSrc.includes("elevationSvgFor(") && rdp("src/components/rack/RackElevation.tsx").includes("elevationSvgFor("), "#296 rack sheets: RackSheets and RackElevation both draw through elevationSvgFor");
+  ok(!sheetsSrc.includes('"use client"') && !sheetsSrc.includes("'use client'"), "#296 rack sheets: RackSheets is server-renderable (no use client)");
+  const staffSrc = rdp("src/app/(app)/design/assemblies/rack/[id]/page.tsx");
+  ok(staffSrc.includes("requireUser(") && staffSrc.includes("notFound()") && staffSrc.includes("<PrintButton") && staffSrc.includes("/submittal?part=csv"), "#296 rack sheets: the staff preview requires a user, 404s, prints and links the downloads");
+  ok(rdp("src/app/(app)/design/assemblies/fixture-builder.tsx").includes("/design/assemblies/rack/") && rdp("src/app/(app)/design/assemblies/fixture-form.tsx").includes("/design/assemblies/rack/"), "#296 rack sheets: the builder row and the rack form link the submittal");
+  ok(rdp("scripts/smoke-routes.ts").includes("/design/assemblies/rack/SA-NOPE"), "#296 rack sheets: smoke covers the staff preview's not-found path");
+
+  // Sidebar = print: the same call twice is the same string, and the id prefix keeps the hatch ids apart.
+  const cat: Record<string, Partial<C296pInfo> & { desc: string }> = {
+    "AMP-A": { desc: "Power amplifier", mfr: "Acme", ruHeight: 2, depthIn: 15.5, weightLb: 30, powerWatts: 400, maxPowerWatts: 800 },
+    "PDU-1": { desc: "Rack PDU", mfr: "Powerco", weightLb: 6, powerWatts: 0, powerCapacityWatts: 1800 },
+    "MYS-1": { desc: "Mystery box", ruHeight: 1 },
+  };
+  const look = (sku: string): C296pInfo | undefined => (cat[sku] ? { sku, found: true, ...cat[sku] } : undefined);
+  const L: C296pLayout = {
+    config: { ruCount: 12, widthIn: 19, numbering: "bottom-up" },
+    placements: [
+      { id: "RP-A", kind: "device", sku: "AMP-A", ruStart: 1, ruHeight: 2, face: "front" },
+      { id: "RP-M", kind: "device", sku: "MYS-1", ruStart: 4, ruHeight: 1, face: "rear" },
+      { id: "RP-R", kind: "reserved", ruStart: 8, ruHeight: 2, face: "front" },
+    ],
+  };
+  const a = c296pSvgFor(L, look, "front", { idPrefix: "rk-print-front" });
+  ok(a === c296pSvgFor(L, look, "front", { idPrefix: "rk-print-front" }) && a.startsWith("<svg"), "#296 rack sheets: elevationSvgFor is deterministic for the same layout, face and prefix");
+  ok(a.includes("rk-print-front-hatch") && !a.includes("rk-print-rear-hatch"), "#296 rack sheets: the print prefix scopes the hatch pattern id");
+
+  // Pure cells.
+  ok(c296pParse("schedule") === "schedule" && c296pParse("power") === "power" && c296pParse("all") === "elevation" && c296pParse(undefined) === "elevation", "#296 rack sheets: ?sheet= parses, defaulting to the elevation");
+  ok(c296pCell(null) === "—" && c296pCell(0) === "0" && c296pCell(15.25) === "15.25" && c296pCell(1234.5) === "1,234.5" && c296pCell(NaN) === "—", "#296 rack sheets: number cells print — for unknown, keep a measured 0");
+  ok(c296pText("") === "—" && c296pText("  ") === "—" && c296pText("Acme") === "Acme", "#296 rack sheets: blank text cells print —");
+  ok(c296pDate(Date.UTC(2026, 9, 3, 3, 0)) === "Oct 2, 2026", "#296 rack sheets: the date label is the Chicago day");
+  ok(c296pFooter("Peak Systems Group", "MDF rack", "Oct 2, 2026") === "Peak Systems Group · Rack submittal — MDF rack · Oct 2, 2026" && c296pFooter("", "MDF rack", "Oct 2, 2026") === "Rack submittal — MDF rack · Oct 2, 2026", "#296 rack sheets: footer line, company optional");
+  ok(c296pNote === "For submittal — not for construction.", "#296 rack sheets: the elevation note copy");
+
+  // Totals grid: "At least" whenever a part's watts or weight is unknown; PDU row only when known.
+  const sub = c296pSub({ label: "MDF rack", scope: "Audio", rack: L, parts: [{ sku: "PDU-1", qty: 1 }] } as never, look);
+  const rows = c296pRows(sub);
+  const val = (l: string) => rows.find((r) => r.label === l)?.value;
+  ok(rows.map((r) => r.label).join("|") === "RU used|RU free|RU reserved|Weight|Typical power|Maximum power|Heat|Current at 120 V|PDU capacity", "#296 rack sheets: totals grid rows in order, PDU last when known");
+  ok(val("Typical power")?.startsWith("At least ") === true && val("Heat")?.startsWith("At least ") === true && val("Weight")?.startsWith("At least ") === true && val("Current at 120 V")?.endsWith(" A") === true, "#296 rack sheets: unknown watts / weight read 'At least'");
+  ok(val("RU used") === `${sub.totals.ruUsed} of 12` && val("PDU capacity") === `1,800 W — ${sub.power.loadPct}% loaded`, "#296 rack sheets: RU used reads 'n of N'; PDU capacity with % loaded");
+  const known = c296pSub({ label: "R", rack: { config: L.config, placements: [L.placements[0]] }, parts: [] } as never, look);
+  const kr = c296pRows(known);
+  ok(!kr.some((r) => r.label === "PDU capacity") && kr.find((r) => r.label === "Typical power")?.value === "400 W" && kr.find((r) => r.label === "Weight")?.value === "30 lb", "#296 rack sheets: fully known totals print plain; no PDU row without a capacity");
+
+  // Warnings errors first; missing-data lines name the part and the fields.
+  const iss: C296pIssue[] = [
+    { level: "warning", code: "w1", placementIds: [], message: "W one" },
+    { level: "error", code: "e1", placementIds: [], message: "E one" },
+    { level: "warning", code: "w2", placementIds: [], message: "W two" },
+  ];
+  ok(c296pIssues(iss).map((i) => i.message).join("|") === "E one|W one|W two", "#296 rack sheets: warnings list errors first, order kept");
+  ok(c296pMissing({ sku: "MYS-1", label: "Mystery box", fields: ["depthIn", "weightLb", "powerWatts"] }) === "Mystery box (MYS-1): Depth (in), Weight (lb), Power (W)" && c296pMissing({ sku: "X", label: "X", fields: ["ruHeight"] }) === "X: RU height", "#296 rack sheets: missing-data lines use the catalog field labels");
+}
+
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert } = await import("@/lib/stores/catalog");
