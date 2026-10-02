@@ -607,4 +607,6 @@ export type EstimatorProps = {
   viewerName: string;
   /** #287 task B — may this user make someone else the lead estimator (`approve`)? */
   viewerCanApprove: boolean;
+  /** #293 — may this user save product paragraphs / system intros (`create`)? */
+  canWriteNarrativeLibrary: boolean;
 };

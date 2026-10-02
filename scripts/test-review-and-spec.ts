@@ -43336,3 +43336,29 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
   ok(/detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix/.test(rd("src/app/(app)/estimator/estimator-client.tsx")),
     "#293 estimator: the appendix choice is saved with pdfOptions");
 }
+
+/* ======================================================================
+   #293 slice 1 — key-products UI wiring (client components; proven by
+   source like the other client checks — React isn't mounted here).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const clientImportsServer = (s: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/narrative\/(library|photos))/m.test(s);
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const hook = rd("src/app/(app)/estimator/use-key-product-library.ts");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/^"use client";/.test(col) && /^"use client";/.test(hook) && !clientImportsServer(col) && !clientImportsServer(hook) && !clientImportsServer(card),
+    "#293 UI: the column and the library hook are client modules that import no store or server-only module");
+  ok(hook.includes("keyProductLibraryAction(") && hook.includes("MAX_LIBRARY_SKUS"), "#293 UI: the hook reads library rows through keyProductLibraryAction, ≤ 200 skus");
+  ok(card.includes("onToggleKeyProduct: (itemId: number) => void;") && card.includes("keyProductStar(sec, it)") && card.includes("Key product — featured in the narrative"),
+    "#293 UI: each eligible line row has the ★ toggle with the spec's title");
+  ok(col.includes("Line removed — this block won't print") && col.includes("— this block won't print") && col.includes("Optional/labor line — won't print") && col.includes("Re-anchor"),
+    "#293 UI: unresolved blocks show their strips (removed / changed + Re-anchor / ineligible)");
+  ok(col.includes("Save to library") && col.includes("Use library text") && col.includes("Replace the library paragraph for") && col.includes("changed since you loaded it") && !col.includes("window.confirm"),
+    "#293 UI: Save to library confirms inline before replacing and on a stale version (never window.confirm)");
+  ok(col.includes("No photo — prints full width") && col.includes("/api/part-documents/") && col.includes("+ Key product"), "#293 UI: photo thumbnail + switch, the no-photo note, and the + Key product picker");
+  ok(cli.includes("remapKeyProducts(res.section.keyProducts, idMap)") && cli.includes("<NarrativeColumn") && cli.includes("onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}"),
+    "#293 UI: Copy here remaps blocks to the new item ids; the column and ★ are wired");
+  ok(rd("src/app/(app)/estimator/page.tsx").includes('canWriteNarrativeLibrary={can("create", user.roles)}'), "#293 UI: Save to library is offered per the Create permission");
+}

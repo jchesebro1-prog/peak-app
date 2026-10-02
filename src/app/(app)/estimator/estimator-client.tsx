@@ -111,6 +111,9 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
+import NarrativeColumn from "./narrative-column";
+import { useKeyProductLibrary } from "./use-key-product-library";
+import { isKeyProductEligible, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
@@ -181,6 +184,7 @@ const CSS = `
 .est-row:hover { background: #fafbff; }
 .est-actions { opacity: .4; transition: opacity .12s; }
 .est-row:hover .est-actions, .est-actions:focus-within { opacity: 1; }
+.est-row-kp .est-actions { opacity: 1; }
 .est-action-btn:hover { background: #eef0f3 !important; }
 .est-x:hover { color: #d6584a !important; }
 .est-delsys:hover { color: #d6584a !important; }
@@ -423,6 +427,7 @@ export default function EstimatorClient({
   canApplyCredit,
   viewerName,
   viewerCanApprove,
+  canWriteNarrativeLibrary,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -822,10 +827,11 @@ export default function EstimatorClient({
      Ext sell's own input both have room; the ×/↑/↓ actions now share ONE
      64px cell instead of three, which used to overflow the old 22px column
      and wrap onto a second grid row. #269: 84px internally, room for the
-     labor lines' ✎ Edit labor button beside them. */
+     labor lines' ✎ Edit labor button beside them. #293: +20px for the ★
+     key-product toggle. */
   const cols = isInternal
-    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 84px"
-    : "minmax(150px,1.3fr) 104px 136px 116px 64px";
+    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 104px"
+    : "minmax(150px,1.3fr) 104px 136px 116px 84px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
      `travel` used to carry an estimate for every customer AND venue in the
@@ -1558,8 +1564,6 @@ export default function EstimatorClient({
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
-  const setSystemNarrative = (secId: string, narrative: string) =>
-    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
   // #262: stored raw, like narrative — partsListRows trims on export.
   const setSystemRoom = (secId: string, room: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, room } : s)));
@@ -1659,12 +1663,17 @@ export default function EstimatorClient({
       const detail = parts.length ? parts.join(" · ") : "prices already current";
       if (res.kind === "same") {
         const newId = sections.some((s) => s.id === res.section.id) ? "sys" + nextId() : res.section.id;
-        const copy: SpecSection = {
-          ...res.section,
-          id: newId,
-          name: sec.name + " (copy)",
-          items: res.section.items.map((it) => ({ ...it, id: nextId() })),
-        };
+        // #293: item ids are re-minted, so key-product blocks follow them.
+        const idMap = new Map<number, number>();
+        const copyItems = res.section.items.map((it) => {
+          const nid = nextId();
+          idMap.set(it.id, nid);
+          return { ...it, id: nid };
+        });
+        const copy: SpecSection = withKeyProducts(
+          { ...res.section, id: newId, name: sec.name + " (copy)", items: copyItems },
+          remapKeyProducts(res.section.keyProducts, idMap)
+        );
         setSections((ss) => {
           const at = ss.findIndex((s) => s.id === secId);
           return at < 0 ? [...ss, copy] : [...ss.slice(0, at + 1), copy, ...ss.slice(at + 1)];
@@ -2461,6 +2470,17 @@ export default function EstimatorClient({
       .join(" · ") || "Add quote details";
   /** #281: the narrative column follows the active system (first as fallback). */
   const narrSec = sections.find((s) => s.id === activeId) || sections[0] || null;
+  /** #293: the active system's eligible skus — the library cache prefetches them. */
+  const narrSkus = useMemo(() => (narrSec ? narrSec.items.filter(isKeyProductEligible).map((it) => it.sku.trim()) : []), [narrSec]);
+  const kpLib = useKeyProductLibrary(narrSkus);
+  const updateSection = (secId: string, fn: (s: SpecSection) => SpecSection) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? fn(s) : s)));
+  /** #293 ★: marking copies the saved paragraph when the library row is loaded. */
+  const toggleKeyProductLine = (secId: string, itemId: number) => {
+    const it = sections.find((s) => s.id === secId)?.items.find((i) => i.id === itemId);
+    const text = (it && kpLib.rows[it.sku.trim()]?.paragraph) || "";
+    updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));
+  };
 
   const curtainSec = sections.find((s) => s.id === curtainFor);
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
@@ -3763,6 +3783,7 @@ export default function EstimatorClient({
                   onSetSpecKey={setItemSpecKey}
                   onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                   onRemoveItem={removeItem}
+                  onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
                   onToggleCatalog={() => openInputMethod("catalog", sec.id)}
                   onToggleCurtain={() => openInputMethod("curtain", sec.id)}
                   onToggleFixture={() => openInputMethod("fixture", sec.id)}
@@ -3872,55 +3893,13 @@ export default function EstimatorClient({
                   </button>
                 </div>
                 {narrSec ? (
-                  <>
-                    <select
-                      value={narrSec.presentation || "itemized"}
-                      onChange={(e) => setSystemPresentation(narrSec.id, e.target.value as "itemized" | "narrative")}
-                      aria-label="Customer presentation"
-                      style={{
-                        alignSelf: "flex-start",
-                        border: "1px solid #e4e7ec",
-                        borderRadius: 6,
-                        padding: "4px 6px",
-                        fontSize: 11.5,
-                        color: "#5b616e",
-                        background: "#fff",
-                      }}
-                    >
-                      <option value="itemized">Customer: itemized</option>
-                      <option value="narrative">Customer: narrative</option>
-                    </select>
-                    {(narrSec.presentation || "itemized") === "itemized" && (
-                      <div style={{ fontSize: 11, color: "#8c919c", lineHeight: 1.4 }}>
-                        Prints on the quote only in Narrative mode.
-                      </div>
-                    )}
-                    <textarea
-                      ref={narrRef}
-                      className="est-field"
-                      aria-label={"Narrative for " + (narrSec.name || "this system")}
-                      value={narrSec.narrative || ""}
-                      onChange={(e) => setSystemNarrative(narrSec.id, e.target.value)}
-                      placeholder="Explain this system for the customer — what it is, what it does, what's included…"
-                      style={{
-                        flex: 1,
-                        minHeight: 240,
-                        width: "100%",
-                        resize: "none",
-                        fontFamily: "var(--font-ui)",
-                        fontSize: 13,
-                        lineHeight: 1.55,
-                        color: "#16181d",
-                        background: "#fff",
-                        border: "1px solid #e4e7ec",
-                        borderRadius: 8,
-                        padding: "10px 12px",
-                      }}
-                    />
-                    <div style={{ fontSize: 11, color: "#8c919c", lineHeight: 1.4 }}>
-                      Blank line = new paragraph · start a line with “- ” for a bullet
-                    </div>
-                  </>
+                  <NarrativeColumn
+                    sec={narrSec}
+                    narrRef={narrRef}
+                    onChange={(fn) => updateSection(narrSec.id, fn)}
+                    library={kpLib}
+                    canWriteLibrary={canWriteNarrativeLibrary}
+                  />
                 ) : (
                   <div style={{ fontSize: 12, color: "#8c919c", lineHeight: 1.45 }}>
                     Add a system to write its narrative.

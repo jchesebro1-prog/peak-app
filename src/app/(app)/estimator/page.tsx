@@ -449,6 +449,8 @@ export default async function EstimatorPage({
       // the quote; only an approver may hand it to someone else.
       viewerName={user.name}
       viewerCanApprove={can("approve", user.roles)}
+      // #293: Save to library / intros — the Spec panel's audience (#205).
+      canWriteNarrativeLibrary={can("create", user.roles)}
     />
   );
 }
