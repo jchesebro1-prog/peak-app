@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { slotAriaLabel } from "@/lib/rack/geometry";
 import { move, remove, update } from "@/lib/rack/layout";
-import { duplicatePlacement, setPlacementOverride, type OverrideNumberKey } from "@/lib/rack/rules";
+import { duplicateMessage, duplicatePlacement, setPlacementOverride, type OverrideNumberKey } from "@/lib/rack/rules";
 import type { RackEdit, RackFace, RackLayout, RackPartLookup, RackPlacement } from "@/lib/rack/types";
 
 export type PlacementMenuProps = {
@@ -21,8 +21,8 @@ export type PlacementMenuProps = {
   onReplace: (id: string) => void;
   onClose: () => void;
   newId: () => string;
-  /** Focus goes back here when the menu closes (the slot that opened it). */
-  returnFocusTo?: HTMLElement | null;
+  /** Focus goes back here when the menu closes (the slot that opened it). After a Remove it goes to the enclosing elevation panel. */
+  returnFocusTo?: HTMLElement | SVGElement | null;
 };
 
 const WIDTHS = [
@@ -39,6 +39,7 @@ export function PlacementMenu(props: PlacementMenuProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(props.onClose);
   const returnRef = useRef(props.returnFocusTo);
+  const removedRef = useRef(false);
   useEffect(() => {
     closeRef.current = props.onClose;
     returnRef.current = props.returnFocusTo;
@@ -71,11 +72,18 @@ export function PlacementMenu(props: PlacementMenuProps) {
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("pointerdown", onDown, true);
     const ret = returnRef;
+    const removed = removedRef;
+    // The panel the opener sits in, found while the opener is still in the page.
+    const panel = props.returnFocusTo?.closest<HTMLElement>("[data-rack-elevation]") ?? null;
     return () => {
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("pointerdown", onDown, true);
-      ret.current?.focus();
+      const back = ret.current;
+      if (!removed.current && back?.isConnected) back.focus();
+      else (panel?.isConnected ? panel : null)?.focus();
     };
+    // Mount-only: the opener captured here is the one that opened this menu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** One engine edit; on refusal show its reason. */
@@ -102,21 +110,20 @@ export function PlacementMenu(props: PlacementMenuProps) {
 
   const duplicate = () => {
     const want = Math.max(1, Math.min(DUP_MAX, Math.floor(Number(dupN)) || 1));
-    const res = { placed: 0 };
+    const res: { placed: number; stopped?: "full" | "max" } = { placed: 0 };
     const ok = run((l) => {
       const d = duplicatePlacement(l, p.id, want, newId);
       res.placed = d.placed;
+      res.stopped = d.stopped;
       return d;
     });
-    if (!ok) return;
-    setMsg({
-      tone: "info",
-      text: res.placed === want ? `Placed ${want} ${want === 1 ? "copy" : "copies"}.` : `Placed ${res.placed} of ${want} — the rack is full.`,
-    });
+    if (ok) setMsg({ tone: "info", text: duplicateMessage(want, res.placed, res.stopped) });
   };
 
   const removeIt = () => {
-    if (run((l) => remove(l, p.id))) closeRef.current();
+    if (!run((l) => remove(l, p.id))) return;
+    removedRef.current = true;
+    closeRef.current();
   };
 
   if (typeof document === "undefined") return null;

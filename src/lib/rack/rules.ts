@@ -70,25 +70,34 @@ const widthOfLanes = (n: RackPlacement["laneCount"]): RackWidthClass | undefined
 
 /**
  * Up to `count` copies of a placement, each at `firstFit` for its height, face
- * and width — one edit, so one undo. Copies keep sku, label, optional and
- * overrides; a shelf's devices are not copied, and a device copied off a shelf
- * lands in the rack itself. `placed` says how many fit.
+ * and width — one edit, so one undo. Copies are identical gear at the same
+ * price: sku, label, optional, overrides, cost override and notes. A shelf's
+ * devices are not copied, and a device copied off a shelf lands in the rack
+ * itself. `placed` says how many fit; `stopped` why copies ran out.
  */
 export function duplicatePlacement(
   layout: RackLayout,
   id: string,
   count: number,
   newId: () => string
-): ({ ok: true; layout: RackLayout } | { ok: false; reason: string }) & { placed: number } {
+): ({ ok: true; layout: RackLayout } | { ok: false; reason: string }) & { placed: number; stopped?: "full" | "max" } {
   const cur = layout.placements.find((q) => q.id === id);
   if (!cur) return { ok: false, reason: "That placement isn't in the rack.", placed: 0 };
   const want = Math.max(1, Math.min(RACK_MAX_PLACEMENTS, Math.floor(Number.isFinite(count) ? count : 1)));
   const width = widthOfLanes(cur.laneCount);
   let out = layout;
   let placed = 0;
-  for (let i = 0; i < want && out.placements.length < RACK_MAX_PLACEMENTS; i++) {
+  let stopped: "full" | "max" | undefined;
+  for (let i = 0; i < want; i++) {
+    if (out.placements.length >= RACK_MAX_PLACEMENTS) {
+      stopped = "max";
+      break;
+    }
     const fit = firstFit(out, cur.ruHeight, cur.face, width);
-    if (!fit) break;
+    if (!fit) {
+      stopped = "full";
+      break;
+    }
     const copy: RackPlacement = {
       id: newId(),
       kind: cur.kind,
@@ -100,17 +109,27 @@ export function duplicatePlacement(
       ...(width ? { lane: fit.lane, laneCount: cur.laneCount } : {}),
       ...(cur.optional ? { optional: true } : {}),
       ...(cur.override ? { override: structuredClone(cur.override) } : {}),
+      ...(cur.costOverride !== undefined ? { costOverride: cur.costOverride } : {}),
+      ...(cur.notes ? { notes: cur.notes } : {}),
     };
     const r = place(out, copy);
-    if (!r.ok) break;
+    if (!r.ok) {
+      stopped = "full";
+      break;
+    }
     out = r.layout;
     placed++;
   }
-  if (placed === 0) {
-    const reason = layout.placements.length >= RACK_MAX_PLACEMENTS ? `A rack can hold at most ${RACK_MAX_PLACEMENTS} placements.` : "No room for a copy — the rack is full.";
-    return { ok: false, reason, placed };
-  }
-  return { ok: true, layout: out, placed };
+  if (placed === 0) return { ok: false, reason: `No room for a copy — ${stopReason(stopped ?? "full")}.`, placed, stopped };
+  return { ok: true, layout: out, placed, ...(stopped ? { stopped } : {}) };
+}
+
+const stopReason = (s: "full" | "max") => (s === "max" ? `the rack can hold at most ${RACK_MAX_PLACEMENTS} placements` : "the rack is full");
+
+/** The PlacementMenu's line after a duplicate: "Placed 4 copies." / "Placed 3 of 4 — the rack is full." */
+export function duplicateMessage(want: number, placed: number, stopped?: "full" | "max"): string {
+  if (placed >= want) return `Placed ${placed} ${placed === 1 ? "copy" : "copies"}.`;
+  return `Placed ${placed} of ${want} — ${stopReason(stopped ?? "full")}.`;
 }
 
 export type OverrideNumberKey = "ruHeight" | "depthIn" | "weightLb" | "powerWatts";

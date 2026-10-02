@@ -7,9 +7,10 @@
  * them. No React, no store/db imports.
  */
 import { textExtent, type Shape } from "@/lib/curtain-cut-sheets/shapes";
+import { wholeRu } from "./drag";
 import { childrenOf, laneSpan, occupiedSpan, placementFacts, ruRangeLabel } from "./layout";
 import { ruLabel } from "./rules";
-import { RU_IN, type RackConfig, type RackFace, type RackLayout, type RackPartInfo, type RackPartLookup, type RackPlacement } from "./types";
+import { RU_IN, type PlacementKind, type RackConfig, type RackFace, type RackLayout, type RackPartInfo, type RackPartLookup, type RackPlacement } from "./types";
 
 export const RACK_GEOM = { railIn: 1.6, panelIn: 19, marginIn: 0.6, labelSize: 0.55, ruNumberSize: 0.45 } as const;
 
@@ -215,13 +216,14 @@ export function slotAriaLabel(p: RackPlacement, info: RackPartInfo | undefined, 
  * The snapped `ruStart` for a part of `ruHeight` RU under a pointer at `yIn`
  * (drawing inches, y down). The ghost centers on the pointer's RU row and is
  * clamped to the rack. `title` must match how the drawing was rendered.
+ * Heights round up to whole RU, the way the layout resolves them.
  */
 export function ruFromPointer(yIn: number, config: Pick<RackConfig, "ruCount">, ruHeight: number, opts?: { title?: boolean }): number {
   const { ruCount } = config;
   const top = RACK_GEOM.marginIn + (opts?.title ? TITLE_BAND : 0);
   const row = Math.min(ruCount - 1, Math.max(0, Math.floor((yIn - top) / RU_IN)));
   const pointerRu = ruCount - row;
-  const h = Math.max(1, Math.round(ruHeight));
+  const h = wholeRu(ruHeight);
   return Math.max(1, Math.min(ruCount - h + 1, pointerRu - Math.floor((h - 1) / 2)));
 }
 
@@ -260,4 +262,29 @@ export function ghostRect(
     w: panelIn / laneCount - 2 * INSET,
     h: ruHeight * RU_IN - 2 * INSET,
   });
+}
+
+/** Where a part would land: a top-level RU + lane, or a lane on a shelf (`shelfId`, `ruStart` = the shelf's). */
+export type RackTarget = { ruStart: number; lane: 0 | 1 | 2; shelfId?: string };
+
+/**
+ * The target under a drawing point. A device over a shelf — or over a device
+ * already on one — targets that shelf, its lane taken from the pointer's x
+ * (the engine refuses a lane outside the shelf's span, with its reason); any
+ * other point is a top-level RU from `ruFromPointer`. `slots` are this face's.
+ */
+export function placementTarget(
+  layout: RackLayout,
+  slots: readonly RackSlot[],
+  pt: { x: number; y: number },
+  part: { ruHeight: number; laneCount: 1 | 2 | 3; kind: PlacementKind }
+): RackTarget {
+  const lane = laneFromPointer(pt.x, part.laneCount);
+  if (part.kind === "device") {
+    const hit = slotAt(slots, pt.x, pt.y);
+    const under = hit ? layout.placements.find((q) => q.id === hit.placementId) : undefined;
+    const shelf = under?.shelfId ? layout.placements.find((q) => q.id === under.shelfId) : under;
+    if (shelf && shelf.kind === "shelf" && !shelf.shelfId) return { ruStart: shelf.ruStart, lane, shelfId: shelf.id };
+  }
+  return { ruStart: ruFromPointer(pt.y, layout.config, part.ruHeight), lane };
 }

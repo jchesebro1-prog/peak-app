@@ -7,12 +7,15 @@
  * Pure rules (canPlace, ruFromPointer, laneFromPointer, ghostRect) do the work.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ghostRect, laneFromPointer, RACK_GEOM, ruFromPointer, slotAriaLabel, type RackSlot } from "@/lib/rack/geometry";
-import { canPlace, laneCountOf, occupiedSpan } from "@/lib/rack/layout";
-import { RU_IN, type PlacementKind, type RackFace, type RackIssue, type RackLayout, type RackPartLookup, type RackPlacement, type RackWidthClass } from "@/lib/rack/types";
+import { wholeRu } from "@/lib/rack/drag";
+import { ghostRect, placementTarget, RACK_GEOM, slotAriaLabel, type RackSlot, type RackTarget } from "@/lib/rack/geometry";
+import { canPlace, laneCountOf, occupiedSpan, place, reparent } from "@/lib/rack/layout";
+import { RU_IN, type PlacementKind, type RackEdit, type RackFace, type RackIssue, type RackLayout, type RackPartLookup, type RackPlacement, type RackWidthClass } from "@/lib/rack/types";
 
-export type RackTarget = { ruStart: number; lane: 0 | 1 | 2 };
+export type { RackTarget } from "@/lib/rack/geometry";
 export type RackArmed = { sku: string; kind: PlacementKind; ruHeight: number; width: RackWidthClass; label?: string };
+/** Where a placement or a move lands; `shelfId` = on that shelf (the shelf's RU and face). */
+export type RackDrop = { ruStart: number; face: RackFace; lane: 0 | 1 | 2; shelfId?: string };
 
 const GHOST_ID = "\u0000ghost";
 const DRAG_PX = 4;
@@ -26,9 +29,9 @@ export function clientToDrawing(el: Element | null, clientX: number, clientY: nu
   return { x: ((clientX - r.left) / r.width) * viewBox.w, y: ((clientY - r.top) / r.height) * viewBox.h };
 }
 
-/** Where a part `ruHeight` tall and `width` wide lands under a drawing point. */
-export function targetAt(layout: RackLayout, pt: { x: number; y: number }, ruHeight: number, width: RackWidthClass | undefined): RackTarget {
-  return { ruStart: ruFromPointer(pt.y, layout.config, ruHeight), lane: laneFromPointer(pt.x, laneCountOf(width)) };
+/** Where an armed / dropped part lands under a drawing point (a device over a shelf goes on the shelf). */
+export function armedTarget(layout: RackLayout, slots: readonly RackSlot[], pt: { x: number; y: number }, part: { ruHeight: number; width: RackWidthClass; kind: PlacementKind }): RackTarget {
+  return placementTarget(layout, slots, pt, { ruHeight: wholeRu(part.ruHeight), laneCount: laneCountOf(part.width), kind: part.kind });
 }
 
 /** The probe an armed part would be at `t` on `face`. */
@@ -39,9 +42,10 @@ export function armedProbe(armed: RackArmed, face: RackFace, t: RackTarget): Rac
     kind: armed.kind,
     ...(armed.kind !== "reserved" ? { sku: armed.sku } : {}),
     ruStart: t.ruStart,
-    ruHeight: Math.max(1, Math.ceil(armed.ruHeight)),
+    ruHeight: wholeRu(armed.ruHeight),
     face,
     ...(n > 1 ? { lane: t.lane, laneCount: n } : {}),
+    ...(t.shelfId ? { shelfId: t.shelfId } : {}),
   };
 }
 
@@ -62,11 +66,13 @@ export type ElevationOverlayProps = {
   /** Armed-hover / drop ghost position, owned by the face panel (drag-and-drop sets it too). */
   hover: RackTarget | null;
   onHover: (t: RackTarget | null) => void;
-  onPlace?: (p: { ruStart: number; face: RackFace; lane: 0 | 1 | 2 }) => void;
-  onMove?: (id: string, to: { ruStart: number; face: RackFace; lane: 0 | 1 | 2 }, copy: boolean) => void;
+  onPlace?: (p: RackDrop) => void;
+  onMove?: (id: string, to: RackDrop, copy: boolean) => void;
   onSelect?: (ids: string[]) => void;
   onMenu?: (id: string, at: { x: number; y: number }) => void;
 };
+
+const sameTarget = (a: RackTarget | null, b: RackTarget) => !!a && a.ruStart === b.ruStart && a.lane === b.lane && a.shelfId === b.shelfId;
 
 export function ElevationOverlay(props: ElevationOverlayProps) {
   const { layout, lookup, face, mode, selection, armed, issues, slots, viewBox, scale, hover, onHover, onPlace, onMove, onSelect, onMenu } = props;
@@ -75,8 +81,9 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
   const dragRef = useRef<Drag | null>(null);
   const pressTimer = useRef<number | null>(null);
   const pressMenu = useRef(false); // a long-press opened the menu, so the browser's own contextmenu must not open it again
-  const suppressClick = useRef(false);
+  const suppressClick = useRef(false); // the click that ends a drag or long-press; consumed by the <svg>'s own onClick
   const [dragGhost, setDragGhost] = useState<DragGhost | null>(null);
+  const dragging = dragGhost !== null;
 
   useEffect(() => {
     const t = pressTimer;
@@ -84,6 +91,21 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
       if (t.current !== null) window.clearTimeout(t.current);
     };
   }, []);
+
+  // Escape during a drag cancels it: nothing is committed.
+  useEffect(() => {
+    if (!dragging) return;
+    const d = dragRef;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      d.current = null;
+      setDragGhost(null);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [dragging]);
 
   const byId = useMemo(() => new Map(layout.placements.map((p) => [p.id, p])), [layout]);
   const selected = useMemo(() => new Set(selection), [selection]);
@@ -118,12 +140,21 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
     else onSelect([id]);
   };
 
-  /** A dragged placement's target: a shelf's device keeps its shelf's RU unless it's being copied off. */
+  /** A dragged placement's target: a device over a shelf goes on it; anything else is a top-level RU. */
   const dragTarget = (p: RackPlacement, pt: { x: number; y: number }, copy: boolean): RackTarget => {
     const span = !copy && p.kind === "shelf" ? occupiedSpan(layout, p) : null;
     const h = span ? span.hi - span.lo + 1 : p.ruHeight;
-    const t = { ruStart: ruFromPointer(pt.y, layout.config, h), lane: laneFromPointer(pt.x, p.laneCount ?? 1) };
-    return p.shelfId && !copy ? { ...t, ruStart: p.ruStart } : t;
+    return placementTarget(layout, slots, pt, { ruHeight: h, laneCount: p.laneCount ?? 1, kind: p.kind });
+  };
+
+  /** What committing a drag would do — the same engine call the parent makes (reparent for a move, place for a copy). */
+  const dragCheck = (p: RackPlacement, g: DragGhost): { probe: RackPlacement; check: RackEdit } => {
+    const n = p.laneCount ?? 1;
+    const to = { ruStart: g.ruStart, face, ...(n > 1 ? { lane: g.lane } : {}), ...(g.shelfId ? { shelfId: g.shelfId } : {}) };
+    if (!g.copy) return { probe: { ...p, ...to }, check: reparent(layout, p.id, to) };
+    const probe: RackPlacement = { ...p, ...to, id: GHOST_ID };
+    if (!g.shelfId) delete probe.shelfId;
+    return { probe, check: place(layout, probe) };
   };
 
   /* ---- the ghost being drawn (a drag wins over an armed hover) ---- */
@@ -131,15 +162,10 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
     if (dragGhost) {
       const p = byId.get(dragGhost.id);
       if (!p) return null;
-      const probe: RackPlacement = { ...p, ruStart: dragGhost.ruStart, face, ...((p.laneCount ?? 1) > 1 ? { lane: dragGhost.lane } : {}) };
-      if (dragGhost.copy) {
-        probe.id = GHOST_ID;
-        delete probe.shelfId;
-      }
-      const span = occupiedSpan(layout, probe);
-      const lo = span?.lo ?? probe.ruStart;
+      const { probe, check } = dragCheck(p, dragGhost);
+      const span = !probe.shelfId && probe.kind === "shelf" ? occupiedSpan(layout, p) : null;
       const h = span ? span.hi - span.lo + 1 : probe.ruHeight;
-      return { rect: ghostRect(layout.config, lo, h, probe.lane ?? 0, probe.laneCount ?? 1), check: canPlace(layout, probe) };
+      return { rect: ghostRect(layout.config, probe.ruStart, h, probe.lane ?? 0, probe.laneCount ?? 1), check };
     }
     if (hover && armed && edit) {
       const probe = armedProbe(armed, face, hover);
@@ -160,15 +186,15 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
       const pt = toDrawing(e);
       if (d.active && p && pt) {
         const t = dragTarget(p, pt, e.altKey);
-        setDragGhost((g) => (g && g.id === d.id && g.ruStart === t.ruStart && g.lane === t.lane && g.copy === e.altKey ? g : { ...t, id: d.id, copy: e.altKey }));
+        setDragGhost((g) => (g && g.id === d.id && sameTarget(g, t) && g.copy === e.altKey ? g : { ...t, id: d.id, copy: e.altKey }));
       }
       return;
     }
     if (!edit || !armed || e.pointerType === "touch") return;
     const pt = toDrawing(e);
     if (!pt) return;
-    const t = targetAt(layout, pt, armed.ruHeight, armed.width);
-    if (!hover || hover.ruStart !== t.ruStart || hover.lane !== t.lane) onHover(t);
+    const t = armedTarget(layout, slots, pt, armed);
+    if (!sameTarget(hover, t)) onHover(t);
   };
 
   const endDrag = () => {
@@ -185,14 +211,13 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
     if (d.active) {
       suppressClick.current = true;
       if (p && pt && onMove) onMove(d.id, { ...dragTarget(p, pt, e.altKey), face }, e.altKey);
-    } else if (!e.shiftKey && selection.length > 1) {
-      onSelect?.([d.id]); // a plain click inside a multi-selection narrows it
     }
     endDrag();
   };
 
   const onSlotPointerDown = (e: React.PointerEvent<SVGRectElement>, id: string) => {
     pressMenu.current = false;
+    suppressClick.current = false;
     if (e.button !== 0) return; // right-click opens the menu through contextmenu
     toggle(id, e.shiftKey);
     if (!edit) return;
@@ -245,14 +270,12 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
     }
   };
 
+  // Runs before the <svg>'s onClick, which then clears suppressClick whether or not the click reached here.
   const onBackgroundClick = (e: React.MouseEvent<SVGRectElement>) => {
-    if (suppressClick.current) {
-      suppressClick.current = false;
-      return;
-    }
+    if (suppressClick.current) return;
     if (edit && armed && onPlace) {
       const pt = toDrawing(e);
-      if (pt) onPlace({ ...targetAt(layout, pt, armed.ruHeight, armed.width), face });
+      if (pt) onPlace({ ...armedTarget(layout, slots, pt, armed), face });
       return;
     }
     if (selection.length) onSelect?.([]);
@@ -272,11 +295,14 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={endDrag}
+      onClick={() => {
+        suppressClick.current = false;
+      }}
       onPointerLeave={() => {
         if (!dragRef.current && hover) onHover(null);
       }}
     >
-      <rect x={panelX0} y={top} width={panelIn} height={bodyH} fill="transparent" onClick={onBackgroundClick} style={{ cursor: edit && armed ? "copy" : "default" }} />
+      <rect x={panelX0} y={top} width={panelIn} height={bodyH} fill="transparent" onPointerDown={() => (suppressClick.current = false)} onClick={onBackgroundClick} style={{ cursor: edit && armed ? "copy" : "default" }} />
 
       {slots.map((s) => {
         const p = byId.get(s.placementId);
@@ -336,8 +362,8 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
           role="button"
           tabIndex={0}
           aria-label={`Options for ${slotAriaLabel(singleP, singleP.sku ? lookup(singleP.sku) : undefined, layout.config, layout)}`}
-          className="outline-none"
-          style={{ cursor: "pointer" }}
+          className="group outline-none"
+          style={{ cursor: "pointer", pointerEvents: armed ? "none" : "auto" }}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => menuFromElement(e.currentTarget, single.placementId)}
           onKeyDown={(e) => {
@@ -347,7 +373,7 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
             menuFromElement(e.currentTarget, single.placementId);
           }}
         >
-          <rect x={single.x + single.w - 1.05} y={single.y + 0.08} width={0.95} height={Math.min(1.5, single.h - 0.16)} rx={0.15} vectorEffect={NSS} style={{ fill: "#fff", stroke: "var(--accent)", strokeWidth: 1 }} />
+          <rect x={single.x + single.w - 1.05} y={single.y + 0.08} width={0.95} height={Math.min(1.5, single.h - 0.16)} rx={0.15} vectorEffect={NSS} className="[fill:#fff] [stroke:var(--accent)] [stroke-width:1px] group-focus-visible:[stroke:var(--ink)] group-focus-visible:[stroke-width:2.5px]" />
           {[0, 1, 2].map((i) => (
             <circle key={i} cx={single.x + single.w - 0.575} cy={single.y + 0.08 + Math.min(1.5, single.h - 0.16) / 2 + (i - 1) * 0.28} r={0.08} style={{ fill: "var(--ink)" }} />
           ))}
@@ -374,7 +400,7 @@ export function ElevationOverlay(props: ElevationOverlayProps) {
     </svg>
     {ghost && !ghost.check.ok ? (
       <div
-        role="status"
+        aria-live="off"
         style={{
           position: "absolute",
           left: panelX0 * scale,

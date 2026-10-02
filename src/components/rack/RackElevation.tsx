@@ -9,32 +9,17 @@
  * (`elevation-overlay.tsx`) with the same viewBox.
  */
 import { useId, useMemo, useState } from "react";
+import { parseRackPartDrag } from "@/lib/rack/drag";
 import { rackGeometry } from "@/lib/rack/geometry";
 import { elevationSvgFor } from "@/lib/rack/svg";
-import { RACK_WIDTHS, type PlacementKind, type RackFace, type RackIssue, type RackLayout, type RackPartLookup, type RackWidthClass } from "@/lib/rack/types";
-import { clientToDrawing, ElevationOverlay, targetAt, type RackTarget } from "./elevation-overlay";
+import type { PlacementKind, RackFace, RackIssue, RackLayout, RackPartLookup, RackWidthClass } from "@/lib/rack/types";
+import { armedTarget, clientToDrawing, ElevationOverlay, type RackTarget } from "./elevation-overlay";
 
-export type { RackArmed } from "./elevation-overlay";
+export type { RackArmed, RackDrop } from "./elevation-overlay";
+export { parseRackPartDrag, type RackPartDrag } from "@/lib/rack/drag";
 
-/** The picker's drag payload type: JSON `{ sku, ruHeight, width, kind, label }`. */
+/** The picker's drag payload type: JSON `{ sku, ruHeight, width, kind, label }` (read with `parseRackPartDrag`). */
 export const RACK_PART_MIME = "application/x-rack-part";
-export type RackPartDrag = { sku: string; ruHeight: number; width: RackWidthClass; kind: PlacementKind; label?: string };
-
-const KINDS: readonly PlacementKind[] = ["device", "shelf", "blank", "vent", "reserved"];
-
-/** Read a picker drag payload; null when it isn't one. */
-export function parseRackPartDrag(raw: string): RackPartDrag | null {
-  try {
-    const v = JSON.parse(raw) as Record<string, unknown>;
-    if (!v || typeof v !== "object" || typeof v.sku !== "string") return null;
-    const ruHeight = typeof v.ruHeight === "number" && Number.isFinite(v.ruHeight) && v.ruHeight > 0 ? v.ruHeight : 1;
-    const width = typeof v.width === "string" && (RACK_WIDTHS as readonly string[]).includes(v.width) ? (v.width as RackWidthClass) : "full";
-    const kind = typeof v.kind === "string" && KINDS.includes(v.kind as PlacementKind) ? (v.kind as PlacementKind) : "device";
-    return { sku: v.sku, ruHeight, width, kind, ...(typeof v.label === "string" ? { label: v.label } : {}) };
-  } catch {
-    return null;
-  }
-}
 
 export type RackElevationProps = {
   layout: RackLayout;
@@ -44,8 +29,10 @@ export type RackElevationProps = {
   selection: string[];
   armed?: { sku: string; kind: PlacementKind; ruHeight: number; width: RackWidthClass; label?: string } | null;
   issues?: RackIssue[];
-  onPlace?: (p: { ruStart: number; face: RackFace; lane: 0 | 1 | 2 }) => void; // armed click / drop from picker
-  onMove?: (id: string, to: { ruStart: number; face: RackFace; lane: 0 | 1 | 2 }, copy: boolean) => void;
+  /** Armed click / drop from the picker. `shelfId`: a device dropped on a shelf (`ruStart` is the shelf's) — place it with that shelfId. */
+  onPlace?: (p: { ruStart: number; face: RackFace; lane: 0 | 1 | 2; shelfId?: string }) => void;
+  /** A drag ended. `shelfId` set = onto that shelf; absent = top-level (off a shelf if it was on one). Commit with `reparent`, or `place` for a copy. */
+  onMove?: (id: string, to: { ruStart: number; face: RackFace; lane: 0 | 1 | 2; shelfId?: string }, copy: boolean) => void;
   onSelect?: (ids: string[]) => void;
   onMenu?: (id: string, at: { x: number; y: number }) => void;
   onKey?: (e: React.KeyboardEvent) => void;
@@ -58,6 +45,7 @@ export function RackElevation(props: RackElevationProps) {
   return (
     <div
       tabIndex={0}
+      data-rack-elevation=""
       role="group"
       aria-label={props.mode === "edit" ? "Rack elevation editor" : "Rack elevation"}
       onKeyDown={props.onKey}
@@ -97,8 +85,8 @@ function FacePanel(props: RackElevationProps & { panelFace: RackFace; idPrefix: 
           e.dataTransfer.dropEffect = "copy";
           const pt = clientToDrawing(e.currentTarget, e.clientX, e.clientY, geom.viewBox);
           if (!pt || !armed) return; // the payload itself is only readable on drop; the parent arms on dragstart
-          const t = targetAt(layout, pt, armed.ruHeight, armed.width);
-          if (!hover || hover.ruStart !== t.ruStart || hover.lane !== t.lane) setHover(t);
+          const t = armedTarget(layout, geom.slots, pt, armed);
+          if (!hover || hover.ruStart !== t.ruStart || hover.lane !== t.lane || hover.shelfId !== t.shelfId) setHover(t);
         }}
         onDragLeave={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover(null);
@@ -111,7 +99,7 @@ function FacePanel(props: RackElevationProps & { panelFace: RackFace; idPrefix: 
           const pt = clientToDrawing(e.currentTarget, e.clientX, e.clientY, geom.viewBox);
           const dims = part ?? armed;
           if (!pt || !dims || !onPlace) return;
-          onPlace({ ...targetAt(layout, pt, dims.ruHeight, dims.width), face });
+          onPlace({ ...armedTarget(layout, geom.slots, pt, dims), face });
         }}
       >
         <div aria-hidden="true" className="[&>svg]:block [&>svg]:h-full [&>svg]:w-full" style={{ width: w, height: h }} dangerouslySetInnerHTML={{ __html: svg }} />

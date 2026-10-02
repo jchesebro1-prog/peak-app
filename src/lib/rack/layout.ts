@@ -252,6 +252,31 @@ export function move(layout: RackLayout, id: string, to: { ruStart?: number; fac
   return commit(layout, next);
 }
 
+/**
+ * Move a placement anywhere as ONE edit: onto a shelf (`shelfId`; it takes the
+ * shelf's RU and face), off its shelf into the rack, or within the rack
+ * (plain `move`). Checked against the rack without the placement's old spot,
+ * so a tall device can leave its shelf into the rows its own clearance held.
+ * List order is kept.
+ */
+export function reparent(layout: RackLayout, id: string, to: { ruStart?: number; face?: RackFace; lane?: 0 | 1 | 2; shelfId?: string }): RackEdit {
+  const cur = layout.placements.find((q) => q.id === id);
+  if (!cur) return NOT_FOUND;
+  if (!to.shelfId && !cur.shelfId) return move(layout, id, to);
+  const next = structuredClone(cur);
+  if (to.lane !== undefined) next.lane = to.lane;
+  if (to.shelfId) next.shelfId = to.shelfId;
+  else {
+    delete next.shelfId;
+    if (to.ruStart !== undefined) next.ruStart = to.ruStart;
+    if (to.face !== undefined) next.face = to.face;
+  }
+  const without: RackLayout = { ...layout, placements: layout.placements.filter((q) => q.id !== id) };
+  const seated = normalized(without, next);
+  const check = canPlace(without, seated);
+  return check.ok ? { ok: true, layout: replaced(layout, seated) } : check;
+}
+
 export function remove(layout: RackLayout, id: string): RackEdit {
   const cur = layout.placements.find((q) => q.id === id);
   if (!cur) return NOT_FOUND;

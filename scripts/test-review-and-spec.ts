@@ -44491,6 +44491,8 @@ import { readFileSync as c296cRead } from "node:fs";
 import * as c296eGeo from "@/lib/rack/geometry";
 import * as c296eSvgMod from "@/lib/rack/svg";
 import * as c296eRules from "@/lib/rack/rules";
+import * as c296eLayout from "@/lib/rack/layout";
+import * as c296eDrag from "@/lib/rack/drag";
 import { existsSync as c296eExists, readFileSync as c296eRead } from "node:fs";
 import type { RackPlacement as C296ePlacement, RackLayout as C296eLayout, RackPartInfo as C296eInfo, RackConfig as C296eConfig } from "@/lib/rack/types";
 {
@@ -44586,6 +44588,74 @@ import type { RackPlacement as C296ePlacement, RackLayout as C296eLayout, RackPa
   ok(texts[0].includes('RACK_PART_MIME = "application/x-rack-part"'), "#296 rack component: RackElevation exports the picker drop MIME type");
   ok(!/#b08d4a/i.test(texts.join("\n")) && (texts[0] + texts[3]).includes("var(--accent)"), "#296 rack component: the accent comes from var(--accent), never a hardcoded hex");
   ok(texts[2].includes("createPortal(") && texts[2].includes("duplicatePlacement(") && texts[2].includes("Escape"), "#296 rack component: PlacementMenu portals to the body, duplicates through firstFit and closes on Escape");
+
+  // ---- fix round 1: whole-RU heights ----
+  ok(call<number>(geo.ruFromPointer, rowY(c12, 5), c12, 2.5) === 4 && call<number>(geo.ruFromPointer, rowY(c12, 5), c12, 3) === 4 && call<number>(geo.ruFromPointer, rowY(c12, 5), c12, 0.5) === 5, "#296 rack component: ruFromPointer rounds a fractional height up to whole RU (2.5 → 3, 0.5 → 1)");
+  const pd = (o: unknown) => c296eDrag.parseRackPartDrag(JSON.stringify(o));
+  ok(pd({ sku: "A", ruHeight: 1.5, width: "half", kind: "device" })?.ruHeight === 2 && pd({ sku: "A", ruHeight: 0.5 })?.ruHeight === 1 && pd({ sku: "A" })?.ruHeight === 1 && pd({ sku: "A", ruHeight: -2 })?.ruHeight === 1, "#296 rack component: parseRackPartDrag returns whole-RU heights, at least 1");
+  ok(c296eDrag.parseRackPartDrag("nope") === null && pd({ ruHeight: 2 }) === null && pd({ sku: "A", width: "wide", kind: "robot" })?.width === "full" && pd({ sku: "A", kind: "robot" })?.kind === "device" && pd({ sku: "A", label: "Amp" })?.label === "Amp", "#296 rack component: parseRackPartDrag refuses non-payloads and defaults a bad width/kind");
+
+  // ---- fix round 1: shelf targets ----
+  const tray = P({ id: "T", kind: "shelf", sku: "SHELF", ruStart: 4, ruHeight: 1 });
+  const onTray = P({ id: "U", sku: "S", ruStart: 4, ruHeight: 2, shelfId: "RP-T", laneCount: 2, lane: 0 });
+  const lone = P({ id: "V", sku: "S", ruStart: 9, ruHeight: 1, laneCount: 2, lane: 0 });
+  const sl = L([tray, onTray, lone], { ruCount: 12 });
+  const sg = c296eGeo.rackGeometry(sl, look, { face: "front" });
+  const trayS = sg.slots.find((s) => s.placementId === "RP-T")!;
+  const uS = sg.slots.find((s) => s.placementId === "RP-U")!;
+  const pt = (s: { x: number; y: number; w: number; h: number }, fx: number, fy = 0.9) => ({ x: s.x + s.w * fx, y: s.y + s.h * fy });
+  ok(JSON.stringify(c296eGeo.placementTarget(sl, sg.slots, pt(trayS, 0.75), { ruHeight: 1, laneCount: 2, kind: "device" })) === JSON.stringify({ ruStart: 4, lane: 1, shelfId: "RP-T" }), "#296 rack component: a device over a shelf targets the shelf, lane from the pointer's x");
+  ok(c296eGeo.placementTarget(sl, sg.slots, pt(uS, 0.5, 0.5), { ruHeight: 1, laneCount: 2, kind: "device" }).shelfId === "RP-T", "#296 rack component: a device over a device already on a shelf targets that shelf");
+  const blankT = c296eGeo.placementTarget(sl, sg.slots, pt(trayS, 0.75), { ruHeight: 1, laneCount: 1, kind: "blank" });
+  ok(blankT.shelfId === undefined && blankT.ruStart === 4, "#296 rack component: a blank (not a device) over a shelf targets the rack RU");
+  ok(c296eGeo.placementTarget(sl, sg.slots, { x: trayS.x + 1, y: rowY(sl.config, 10) }, { ruHeight: 1, laneCount: 1, kind: "device" }).shelfId === undefined, "#296 rack component: a device over empty rows targets a top-level RU");
+
+  // ---- fix round 1: reparent ----
+  const onto = c296eLayout.reparent(sl, "RP-V", { shelfId: "RP-T", lane: 1, ruStart: 9, face: "rear" });
+  const vOn = onto.ok ? onto.layout.placements.find((p) => p.id === "RP-V") : undefined;
+  ok(onto.ok && vOn?.shelfId === "RP-T" && vOn.ruStart === 4 && vOn.face === "front" && vOn.lane === 1, "#296 rack component: reparent puts a top-level device on a shelf at the shelf's RU and face");
+  ok(onto.ok && onto.layout.placements.map((p) => p.id).join() === sl.placements.map((p) => p.id).join(), "#296 rack component: reparent keeps list order");
+  const off = c296eLayout.reparent(sl, "RP-U", { ruStart: 9, face: "front", lane: 0 });
+  ok(!off.ok, "#296 rack component: reparent off a shelf onto a taken RU is refused");
+  const off2 = c296eLayout.reparent(sl, "RP-U", { ruStart: 5, face: "rear", lane: 1 });
+  const uOff = off2.ok ? off2.layout.placements.find((p) => p.id === "RP-U") : undefined;
+  ok(off2.ok && !!uOff && uOff.shelfId === undefined && uOff.ruStart === 5 && uOff.face === "rear" && uOff.lane === 1, "#296 rack component: reparent moves a shelf's device off it to a top-level RU");
+  // RP-U is 2U on a 1U shelf, so its shelf reserves RU 4–5; leaving into RU 5 on the front must not collide with its own clearance.
+  const off3 = c296eLayout.reparent(sl, "RP-U", { ruStart: 5, face: "front", lane: 1 });
+  ok(off3.ok, "#296 rack component: reparent lets a tall device leave its shelf into the rows its own clearance held");
+  const sh2 = P({ id: "T2", kind: "shelf", sku: "SHELF", ruStart: 10, ruHeight: 1 });
+  const shOnSh = c296eLayout.reparent(L([tray, sh2], { ruCount: 12 }), "RP-T2", { shelfId: "RP-T", lane: 0 });
+  ok(!shOnSh.ok && shOnSh.reason === "A shelf can't sit on another shelf.", "#296 rack component: reparent refuses a shelf on a shelf with the engine's reason");
+  const sibling = c296eLayout.reparent(sl, "RP-V", { shelfId: "RP-T", lane: 0 });
+  ok(!sibling.ok && /Wider than the shelf|Another device already sits there/.test(sibling.reason), "#296 rack component: reparent onto a taken shelf spot gives the engine's reason");
+  const plain = c296eLayout.reparent(sl, "RP-V", { ruStart: 11 });
+  const viaMove = c296eLayout.move(sl, "RP-V", { ruStart: 11 });
+  ok(plain.ok && viaMove.ok && JSON.stringify(plain.layout) === JSON.stringify(viaMove.layout), "#296 rack component: reparent between top-level RUs is a plain move");
+
+  // ---- fix round 1: duplicate copies price + notes; the placement cap ----
+  const priced = L([P({ id: "A", sku: "CXD", ruStart: 1, ruHeight: 1, costOverride: 412.5, notes: "Bridge mode" })], { ruCount: 6 });
+  const dp = c296eRules.duplicatePlacement(priced, "RP-A", 2, nid);
+  const dpCopies = dp.ok ? dp.layout.placements.slice(1) : [];
+  ok(dpCopies.length === 2 && dpCopies.every((p) => p.costOverride === 412.5 && p.notes === "Bridge mode"), "#296 rack component: copies keep the cost override and notes");
+  const many: C296ePlacement[] = [];
+  for (let i = 0; many.length < 299; i++) many.push(P({ id: "M" + i, kind: "reserved", sku: undefined, ruStart: 1 + Math.floor(i / 6), face: i % 6 < 3 ? "front" : "rear", lane: (i % 3) as 0 | 1 | 2, laneCount: 3 }));
+  const capL = L([...many, P({ id: "Z", sku: "S", ruStart: 60, ruHeight: 1, laneCount: 3, lane: 0 })], { ruCount: 60 });
+  const capD = c296eRules.duplicatePlacement(capL, "RP-Z", 4, nid);
+  ok(capL.placements.length === 300, "#296 rack component: the cap fixture holds exactly 300 placements");
+  ok(!capD.ok && capD.placed === 0 && capD.stopped === "max" && capD.reason === "No room for a copy — the rack can hold at most 300 placements.", "#296 rack component: at 300 placements a duplicate is refused naming the cap");
+  const cap299 = L([...many.slice(0, 298), P({ id: "Z", sku: "S", ruStart: 60, ruHeight: 1, laneCount: 3, lane: 0 })], { ruCount: 60 });
+  const capD2 = c296eRules.duplicatePlacement(cap299, "RP-Z", 4, nid);
+  ok(capD2.ok && capD2.placed === 1 && capD2.stopped === "max" && c296eRules.duplicateMessage(4, capD2.placed, capD2.stopped) === "Placed 1 of 4 — the rack can hold at most 300 placements.", "#296 rack component: copies that stop at the cap say so: \"Placed 1 of 4 — the rack can hold at most 300 placements.\"");
+  ok(c296eRules.duplicateMessage(4, 3, "full") === "Placed 3 of 4 — the rack is full." && c296eRules.duplicateMessage(1, 1) === "Placed 1 copy." && c296eRules.duplicateMessage(4, 4) === "Placed 4 copies.", "#296 rack component: duplicateMessage wording");
+
+  // ---- fix round 1: overlay source checks ----
+  const ov1 = texts[3];
+  ok(/onClick=\{\(\) => \{\s*suppressClick\.current = false;\s*\}\}/.test(ov1) && /onPointerDown=\{\(\) => \(suppressClick\.current = false\)\}/.test(ov1), "#296 rack component: the drag-ending click is consumed on the <svg> and reset on background pointerdown");
+  ok(/if \(!dragging\) return;[\s\S]{0,200}"Escape"/.test(ov1), "#296 rack component: Escape during a drag cancels it");
+  ok(/pointerEvents: armed \? "none" : "auto"/.test(ov1) && ov1.includes("group-focus-visible:"), "#296 rack component: the kebab ignores the pointer while armed and has a visible focus style");
+  ok(!ov1.includes("narrows it") && ov1.includes('aria-live="off"') && !ov1.includes('role="status"'), "#296 rack component: no dead multi-select branch; the red caption is not announced (the <title> carries it)");
+  ok(texts[0].includes("data-rack-elevation") && texts[2].includes('closest<HTMLElement>("[data-rack-elevation]")') && texts[2].includes("removedRef.current = true"), "#296 rack component: after Remove, focus falls back to the elevation panel");
+  ok(texts[0].includes("shelfId?: string") && ov1.includes("reparent(layout, p.id, to)"), "#296 rack component: onPlace/onMove carry shelfId and the drag ghost checks through reparent");
 }
 
 async function curtain292AsyncChecks(): Promise<void> {
