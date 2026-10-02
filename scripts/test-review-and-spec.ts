@@ -43878,3 +43878,23 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
     "#293s UI: a loaded system gets fresh ids (blocks remapped), lands after the active system, is selected, and the notice reports the re-price");
   ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded";') && cli.includes('moveNotice.ok && moveNotice.verb === "Loaded" ?'), "#293s UI: the result banner shows the Load notice");
 }
+
+/* ======================================================================
+   #293 slice 2 — library modal review fixes (a failed first search, a
+   failed entry fetch, and a Load closed mid-flight).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  const list = modal.slice(modal.indexOf('aria-label="Library systems"'), modal.indexOf('aria-label="Selected system"'));
+  ok(modal.includes("setSearchFailed(true)") && modal.includes("}, [query, hasNarrative, attempt]);") &&
+    list.includes("searchFailed ?") && list.indexOf("searchFailed ?") < list.indexOf("hits === null ?") && list.includes("setAttempt((n) => n + 1)") && list.includes("Retry"),
+    "#293s modal fix: a failed search shows a Retry state in the list instead of a stuck Searching…");
+  const fc = modal.slice(modal.indexOf("const focus = "), modal.indexOf("const toggle = "));
+  const fcCatch = fc.slice(fc.indexOf("} catch {"));
+  ok(fcCatch.includes("setPicked((ks) => ks.filter((k) => k !== key))") && fcCatch.includes("setFocusKey((f) => (f === key ? null : f))") && fcCatch.includes("setErr(FAILED)") &&
+    (fc.match(/setFocusKey\(\(f\) => \(f === key \? null : f\)\)/g) || []).length >= 2,
+    "#293s modal fix: a failed or gone entry fetch unticks the row and clears the detail pane (no Loading… forever, Merge never pinned)");
+  ok(modal.includes('if (e.key === "Escape" && !pending) p.onClose();') && (modal.match(/disabled=\{pending\} onClick=\{p\.onClose\}/g) || []).length >= 3,
+    "#293s modal fix: Close, Cancel and Esc are disabled while a Load is in flight, so a cancelled Load can't land after the modal closed");
+}

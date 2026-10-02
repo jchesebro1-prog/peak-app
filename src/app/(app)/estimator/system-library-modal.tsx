@@ -36,6 +36,9 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
   // Merge needs narrative content, so it starts filtered to it.
   const [hasNarrative, setHasNarrative] = useState(merge);
   const [hits, setHits] = useState<SystemLibraryHit[] | null>(null);
+  // A failed search shows Retry in the list (never a stuck "Searching…"); attempt re-runs it.
+  const [searchFailed, setSearchFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [, startSearch] = useTransition();
   const seq = useRef(0);
   const [focusKey, setFocusKey] = useState<string | null>(null);
@@ -54,15 +57,19 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
           const r = await searchSystemLibraryAction(query.trim(), { hasNarrative });
           if (my === seq.current) {
             setHits(r);
+            setSearchFailed(false);
             setErr("");
           }
         } catch {
-          if (my === seq.current) setErr(FAILED);
+          if (my === seq.current) {
+            setSearchFailed(true);
+            setErr(FAILED);
+          }
         }
       });
     }, 260);
     return () => clearTimeout(t);
-  }, [query, hasNarrative]);
+  }, [query, hasNarrative, attempt]);
 
   const focus = (key: string) => {
     setFocusKey(key);
@@ -70,13 +77,20 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
     startFetch(async () => {
       try {
         const e = await getSystemLibraryEntryAction(key);
-        if (e) setEntries((m) => ({ ...m, [key]: e }));
-        else {
+        if (e) {
+          setEntries((m) => ({ ...m, [key]: e }));
+          setErr("");
+        } else {
           // A gone entry can't be merged — untick it so it can't hold Merge on "Loading…".
           setPicked((ks) => ks.filter((k) => k !== key));
+          setFocusKey((f) => (f === key ? null : f));
           setErr("That system is no longer in the library.");
         }
       } catch {
+        // Same as gone: no entry arrived, so the row can't stay ticked or
+        // leave the detail pane (and Merge) on "Loading…". Clicking it retries.
+        setPicked((ks) => ks.filter((k) => k !== key));
+        setFocusKey((f) => (f === key ? null : f));
         setErr(FAILED);
       }
     });
@@ -114,7 +128,8 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
       aria-modal="true"
       aria-label={merge ? "Merge narrative from the library" : "Load a system from the library"}
       onKeyDown={(e) => {
-        if (e.key === "Escape") p.onClose();
+        // While a Load is in flight the modal can't close: a result landing after close would still insert a system.
+        if (e.key === "Escape" && !pending) p.onClose();
       }}
       style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(22,24,29,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
     >
@@ -126,7 +141,7 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
               {merge ? "Append intros and key products from sent and won systems into this one." : "Every system on a sent or won estimate, as it was sent."}
             </div>
           </div>
-          <button type="button" style={BTN} onClick={p.onClose}>Close</button>
+          <button type="button" style={BTN} disabled={pending} onClick={p.onClose}>Close</button>
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -150,7 +165,12 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", minHeight: 0 }}>
           <div aria-label="Library systems" style={{ flex: "1 1 320px", minWidth: 0, maxHeight: "50vh", overflowY: "auto", border: "1px solid #ececf0", borderRadius: 8 }}>
-            {hits === null ? (
+            {searchFailed ? (
+              <div style={HINT}>
+                Search didn&apos;t go through.{" "}
+                <button type="button" style={BTN} onClick={() => { setSearchFailed(false); setAttempt((n) => n + 1); }}>Retry</button>
+              </div>
+            ) : hits === null ? (
               <div style={HINT}>Searching…</div>
             ) : !hits.length ? (
               <div style={HINT}>No sent or won systems match.</div>
@@ -233,14 +253,14 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
             <>
               {/* Copy as a JS string (not JSX text) so the apostrophes need no &apos; — the harness matches it verbatim. */}
               <span style={{ fontSize: 11.5, color: "#8c919c", marginRight: "auto" }}>{"Re-priced at today's catalog and this estimate's tier. Vendor-quote lines are left out."}</span>
-              <button type="button" style={BTN} onClick={p.onClose}>Cancel</button>
+              <button type="button" style={BTN} disabled={pending} onClick={p.onClose}>Cancel</button>
               <button type="button" style={{ ...PRIMARY, opacity: focusKey && !pending ? 1 : 0.5 }} disabled={!focusKey || pending} onClick={load}>
                 {pending ? "Loading…" : "Load system"}
               </button>
             </>
           ) : (
             <>
-              <button type="button" style={BTN} onClick={p.onClose}>Cancel</button>
+              <button type="button" style={BTN} disabled={pending} onClick={p.onClose}>Cancel</button>
               <button
                 type="button"
                 style={{ ...PRIMARY, opacity: preview?.changed && allLoaded ? 1 : 0.5 }}
