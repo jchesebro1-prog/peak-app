@@ -21,7 +21,11 @@ export default async function ManufacturersPage() {
   const parts = await listCatalog();
   const [state, records] = await Promise.all([loadPartDocsState(parts), listManufacturers()]);
   const images = buildImageIndex(state.documents, state.links);
-  const rows = manufacturerRows(parts, (sku) => (images.get(sku) ?? []).some((r) => !r.hidden && r.source !== "datasheet-render"), records);
+  // "Without a photo" uses the portal's own-photo rule (portal-catalog-index):
+  // a non-hidden image whose document has a stored file — a datasheet-render
+  // thumbnail counts, since the portal shows it.
+  const hasOwnPhoto = (sku: string) => (images.get(sku) ?? []).some((r) => !r.hidden && !!state.index.docsById.get(r.id)?.blobKey);
+  const rows = manufacturerRows(parts, hasOwnPhoto, records);
   const canEdit = can("create", user.roles);
   return (
     <div className="pk-content" style={{ maxWidth: 1100 }}>

@@ -7,10 +7,11 @@ import { MAX_INTRO, MAX_KEY_PRODUCTS, MAX_PARAGRAPH, isKeyProductEligible, isLin
  * exist without one, and adding a priced line would change the estimate).
  * Pure and client-safe: the modal previews with it, the column applies it.
  *
- * A `line:<id>` block (an allowance/custom line, Manufacturer section Part 1)
+ * A `line:<id>` block (an allowance line, or a custom line with no real sku —
+ * Manufacturer section Part 1)
  * names a line of its source system only — nothing here can match it, so it
  * is skipped and counted nowhere. A real sku matches only a line whose own
- * anchor is that sku (an allowance/custom line anchors on its token).
+ * anchor is that sku (a tokenized line anchors on its token).
  */
 
 export type MergeOpts = { intro: boolean; products: boolean };

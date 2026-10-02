@@ -324,6 +324,9 @@ function KeyProductCard(props: KeyProductCardProps) {
   /** An allowance/custom line's block: no library entry, prints a placeholder. */
   const isLine = isLineToken(kp.sku);
   const row = isLine ? undefined : library.rows[kp.sku];
+  /** The card's name: the line's description; a removed tokenized line never
+   *  shows its raw `line:<id>` token. */
+  const title = item?.desc || (isLine ? "Removed line" : kp.sku);
   const chip = keyProductChip(kp, row);
   /** What prints when there is no photo of its own (Manufacturer section Part 1);
    *  only for a block that prints at all. */
@@ -387,7 +390,7 @@ function KeyProductCard(props: KeyProductCardProps) {
     <div style={{ border: "1px solid #ececf0", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 7, background: "#fff" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>{item?.desc || kp.sku}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>{title}</div>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#8c919c" }}>{isLine ? lineLabel(item) : kp.sku}</div>
         </div>
         {chip && (
@@ -433,7 +436,7 @@ function KeyProductCard(props: KeyProductCardProps) {
 
       <textarea
         className="est-field"
-        aria-label={"Paragraph for " + (item?.desc || kp.sku)}
+        aria-label={"Paragraph for " + title}
         value={kp.text}
         maxLength={MAX_PARAGRAPH}
         placeholder={row?.desc || item?.desc || ""}

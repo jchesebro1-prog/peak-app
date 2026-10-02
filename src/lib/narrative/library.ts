@@ -12,7 +12,8 @@ import { isLineToken, MAX_LIBRARY_SKUS, type KeyProductLibraryRow } from "@/app/
  *
  * Manufacturer section Part 1: a part with no photo also reports its
  * manufacturer image (what the document prints instead). A `line:<id>` token
- * (an allowance/custom line) has no library entry and gets no row.
+ * (an allowance line, or a custom line with no real sku) has no library
+ * entry and gets no row.
  */
 export async function keyProductLibrary(skus: readonly string[]): Promise<Record<string, KeyProductLibraryRow>> {
   const wanted = [

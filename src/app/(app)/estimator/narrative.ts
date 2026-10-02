@@ -1,5 +1,6 @@
 import type { KeyProduct, SpecItem, SpecSection } from "./types";
 import { systemPrintsInBody } from "./quote-document-view";
+import { isPlaceholderSku } from "@/lib/specs/record-keys";
 /**
  * #281 — a system narrative's plain-text formatting, turned into printable
  * blocks. Pure (no React) so the test:specs harness can import it.
@@ -83,20 +84,26 @@ const realSkuOf = (it: Pick<SpecItem, "sku"> | null | undefined): string => {
   const s = it && typeof it.sku === "string" ? it.sku.trim() : "";
   return s.length > MAX_SKU ? "" : s;
 };
-/** A key product's anchor sku: the line's real sku, or `line:<id>` for an
- *  allowance or custom line (no catalog sku — Manufacturer section Part 1).
- *  A token is unique per line, so two CUSTOM lines can both be featured and
- *  a token never reaches the catalog, the library or a photo read. */
+/** A key product's anchor sku: the line's real sku, or `line:<id>` for a
+ *  line with no usable sku (Manufacturer section Part 1) — an allowance line,
+ *  or a custom line whose sku is blank, too long, or a generic placeholder
+ *  the Estimator writes ("CUSTOM", "AI"…, `isPlaceholderSku`). A custom line
+ *  saved to the catalog keeps its real sku and anchors on it like any part,
+ *  so its own photo and library paragraph still load. A token is unique per
+ *  line, so two generic CUSTOM lines can both be featured, and a token never
+ *  reaches the catalog, the library or a photo read. */
 const skuOf = (it: Pick<SpecItem, "sku" | "id" | "allowance" | "custom"> | null | undefined): string => {
   if (!it) return "";
-  if (it.allowance || it.custom) return `line:${it.id}`;
-  return realSkuOf(it);
+  if (it.allowance) return `line:${it.id}`;
+  const real = realSkuOf(it);
+  if (it.custom && (!real || isPlaceholderSku(real))) return `line:${it.id}`;
+  return real;
 };
 /** The anchor a new block on this line takes (the ★, the + Key product picker). */
 export const keyProductSkuOf = (it: Pick<SpecItem, "sku" | "id" | "allowance" | "custom">): string => skuOf(it);
 export const isLineToken = (sku: string): boolean => typeof sku === "string" && /^line:\d+$/.test(sku);
 /** Does a saved block's sku still anchor on this line? The current anchor, or
- *  — for an allowance/custom line featured before Part 1 — its real sku, so
+ *  — for a tokenized line featured before Part 1 — its real sku, so
  *  existing saved quotes resolve exactly as before. */
 const anchorsOn = (item: SpecItem, sku: string): boolean => {
   const cur = skuOf(item);
@@ -392,8 +399,9 @@ export function photoSkusOf(sections: SpecSection[]): string[] {
 }
 
 /** The photo skus that may take their manufacturer's image when the part has
- *  no photo of its own: not a placeholder block (a legacy allowance/custom
- *  block on a real sku — the kind placeholder comes first in the chain). */
+ *  no photo of its own: not a placeholder block (a custom line on a real
+ *  catalog sku, or a legacy allowance/custom block — the kind placeholder
+ *  comes before the manufacturer image in the chain). */
 export function manufacturerFallbackSkusOf(sections: SpecSection[]): string[] {
   return printedPhotoSkus(sections, (p) => !p.placeholder);
 }

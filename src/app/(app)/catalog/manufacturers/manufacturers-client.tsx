@@ -236,7 +236,7 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
                 <td style={{ ...td, width: 64 }}>
                   {r.imageDocumentId ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={`/api/part-documents/${r.imageDocumentId}`} alt={`${r.name} image`} width={48} height={48} style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 6, border: "1px solid #e4e7ec", background: "#fff" }} />
+                    <img src={`/api/part-documents/${r.imageDocumentId}`} alt={`${r.name} image`} width={48} height={48} loading="lazy" decoding="async" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 6, border: "1px solid #e4e7ec", background: "#fff" }} />
                   ) : (
                     <span style={{ fontSize: 11, color: "#aab0bb" }}>No image</span>
                   )}
