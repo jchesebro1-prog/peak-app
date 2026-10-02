@@ -44823,6 +44823,115 @@ async function rack296DefaultsAsyncChecks(): Promise<void> {
   }
 }
 
+/* ===== #296 — rack submittal ===== */
+import {
+  rackSubmittal as c296sSub, scheduleCsv as c296sCsv, formatWatts as c296sW, formatBtu as c296sBtu, formatLb as c296sLb,
+  racksInGrid as c296sInGrid, racksInQuote as c296sInQuote,
+} from "@/lib/rack/submittal";
+import type { RackPartInfo as C296sInfo, RackPlacement as C296sPlacement, RackLayout as C296sLayout } from "@/lib/rack/types";
+{
+  const cat: Record<string, Partial<C296sInfo> & { desc: string }> = {
+    "AMP-A": { desc: "Power amplifier", mfr: "Acme", ruHeight: 2, depthIn: 15.5, weightLb: 30, powerWatts: 400, maxPowerWatts: 800 },
+    "DSP-B": { desc: "Matrix, 8x8 DSP", mfr: "Acme", ruHeight: 1, depthIn: 10, weightLb: 9, powerWatts: 60 },
+    "SW-C": { desc: "Network switch", mfr: "Netco", ruHeight: 1, depthIn: 12, weightLb: 8, powerWatts: 100 },
+    "PATCH-P": { desc: "Patch panel", mfr: "Netco", ruHeight: 1, depthIn: 3, weightLb: 3, powerWatts: 0 },
+    "REC-H": { desc: "Spare receiver", mfr: "Acme", ruHeight: 1, depthIn: 9, weightLb: 7, powerWatts: 50 },
+    "SHELF-D": { desc: "Rack shelf", mfr: "Rackco", ruHeight: 1, depthIn: 12, weightLb: 5 },
+    "TX-E": { desc: "Half-rack transmitter", mfr: "Acme", ruHeight: 1, depthIn: 8, weightLb: 2, powerWatts: 20, rackWidth: "half" },
+    "BLK-1": { desc: "Blank panel", mfr: "Rackco", weightLb: 0.5 },
+    "UPS-G": { desc: "UPS", mfr: "Powerco", ruHeight: 2, depthIn: 20, weightLb: 40 },
+    "FRM-1": { desc: "Rack frame", mfr: "Rackco", weightLb: 80, powerWatts: 0 },
+    "PDU-1": { desc: "Rack PDU", mfr: "Powerco", weightLb: 6, powerWatts: 0, powerCapacityWatts: 1800 },
+    "RAILS-0": { desc: "Rear rails", weightLb: 4, powerWatts: 0 },
+  };
+  const lookup = (sku: string): C296sInfo | undefined => (cat[sku] ? { sku, found: true, ...cat[sku] } : sku === "GONE" ? { sku, desc: "", found: false } : undefined);
+  const P = (o: Partial<C296sPlacement> & { id: string }): C296sPlacement => ({ kind: "device", sku: "S", ruStart: 1, ruHeight: 1, face: "front", ...o, id: "RP-" + o.id });
+  const L = (ps: C296sPlacement[], ruCount = 42): C296sLayout => ({ config: { ruCount, widthIn: 19, numbering: "bottom-up" }, placements: ps });
+  const rec = (rack: C296sLayout, parts: { sku: string; qty: number; label?: string }[] = [], label = "MDF rack") => ({ label, scope: "Audio" as const, rack, parts });
+
+  // 11 placements, listed in a scrambled order on purpose.
+  const main = L([
+    P({ id: "UPS", sku: "UPS-G", ruStart: 1, ruHeight: 2 }),
+    P({ id: "SW", sku: "SW-C", ruStart: 11 }),
+    P({ id: "TXF", sku: "TX-E", kind: "device", ruStart: 5, lane: 1, laneCount: 2, shelfId: "RP-SHELF" }),
+    P({ id: "SHELF", sku: "SHELF-D", kind: "shelf", ruStart: 5 }),
+    P({ id: "TXE", sku: "TX-E", ruStart: 5, lane: 0, laneCount: 2, shelfId: "RP-SHELF" }),
+    P({ id: "DSP", sku: "DSP-B", ruStart: 14 }),
+    P({ id: "PAT", sku: "PATCH-P", ruStart: 14, face: "rear" }),
+    P({ id: "AMP", sku: "AMP-A", ruStart: 12, ruHeight: 2 }),
+    P({ id: "RES", kind: "reserved", sku: undefined, ruStart: 20, ruHeight: 4 }),
+    P({ id: "REC", sku: "REC-H", ruStart: 9, optional: true, notes: "Spare slot" }),
+    P({ id: "BLK", sku: "BLK-1", kind: "blank", ruStart: 3 }),
+  ]);
+  const sub = c296sSub(rec(main, [{ sku: "FRM-1", qty: 1 }, { sku: "PDU-1", qty: 1 }, { sku: "RAILS-0", qty: 0 }]), lookup);
+
+  ok(sub.title === "MDF rack" && sub.scope === "Audio" && sub.ruCount === 42, "#296 rack submittal: title, scope and RU count carry");
+  ok(sub.schedule.map((r) => r.ru).join("|") === "RU 20–23|RU 14|RU 14|RU 12–13|RU 11|RU 9|RU 5|on shelf RU 5|on shelf RU 5|RU 3|RU 1–2",
+    "#296 rack submittal: schedule runs top to bottom, front before rear at one RU, shelf children right after their shelf");
+  ok(sub.schedule.map((r) => r.face).join() === "Front,Front,Rear,Front,Front,Front,Front,Front,Front,Front,Front", "#296 rack submittal: faces print Front / Rear");
+  ok(sub.schedule.map((r) => r.sku).join() === ",DSP-B,PATCH-P,AMP-A,SW-C,REC-H,SHELF-D,TX-E,TX-E,BLK-1,UPS-G", "#296 rack submittal: one row per placement, identical gear listed twice");
+  const res = sub.schedule[0];
+  ok(res.reserved && res.desc === "Reserved — future" && res.sku === "" && res.mfr === "" && res.qty === 1 && res.weightLb === null && res.watts === null && res.depthIn === null && !res.optional, "#296 rack submittal: a reserved row reads \"Reserved — future\" with no numbers");
+  const amp = sub.schedule[3];
+  ok(amp.mfr === "Acme" && amp.desc === "Power amplifier" && amp.depthIn === 15.5 && amp.weightLb === 30 && amp.watts === 400 && amp.qty === 1 && amp.notes === "" && !amp.reserved, "#296 rack submittal: numbers come from the catalog, mfr and desc too");
+  const rec_ = sub.schedule[5];
+  ok(rec_.optional && rec_.notes === "Optional — Spare slot", "#296 rack submittal: an optional row's notes start \"Optional — \"");
+  ok(sub.schedule[9].sku === "BLK-1" && sub.schedule[9].watts === null && sub.schedule[2].watts === 0, "#296 rack submittal: blank panels are rows; unknown watts is null, a measured 0 W stays 0");
+  ok(sub.schedule[10].watts === null && sub.schedule[10].weightLb === 40, "#296 rack submittal: unknown watts is null, never 0");
+  ok(sub.rackLevel.map((r) => `${r.qty}|${r.sku}|${r.weightLb}|${r.watts}`).join() === "1|FRM-1|80|0,1|PDU-1|6|0" && sub.rackLevel[0].desc === "Rack frame" && sub.rackLevel[1].mfr === "Powerco",
+    "#296 rack submittal: rack-level rows keep list order and skip qty-0 parts");
+  ok(sub.power.lines[0] === "At least 600 W typical (1 part unknown)", "#296 rack submittal: power line 1 says \"At least\" with the unknown count: " + sub.power.lines[0]);
+  ok(sub.power.lines.join(" / ") === "At least 600 W typical (1 part unknown) / 1,000 W maximum / 2,047 BTU/hr / 5.0 A at 120 V / PDU capacity 1,800 W — 33% loaded / 185.5 lb",
+    "#296 rack submittal: power lines are exact: " + sub.power.lines.join(" / "));
+  ok(sub.power.circuitAmps === 5 && sub.power.capacityWatts === 1800 && sub.power.loadPct === 33, "#296 rack submittal: power summary numbers");
+  ok(sub.datasheetSkus.join() === "DSP-B,PATCH-P,AMP-A,SW-C,REC-H,SHELF-D,TX-E,BLK-1,UPS-G,FRM-1,PDU-1", "#296 rack submittal: datasheet SKUs are distinct, in schedule order then rack-level, never reserved: " + sub.datasheetSkus.join());
+  ok(sub.gaps.length === 1 && sub.gaps[0].kind === "missing-data" && sub.gaps[0].sku === "UPS-G" && sub.gaps[0].detail === "Missing Power (W)" && sub.gaps[0].label === "UPS", "#296 rack submittal: gaps name the part missing watts: " + JSON.stringify(sub.gaps));
+  ok(sub.issues.length === 0 && sub.totals.ruUsed === 9 && sub.totals.ruReserved === 4 && sub.totals.unknownWatts === 1 && sub.totals.unknownWeight === 0, "#296 rack submittal: issues come from validate(), totals from totals(): " + JSON.stringify(sub.issues));
+
+  // Without unknowns the wording drops "At least".
+  const clean = c296sSub(rec(L([P({ id: "A", sku: "SW-C", ruStart: 1 })]), [], "Small"), lookup);
+  ok(clean.power.lines.join(" / ") === "100 W typical / 100 W maximum / 341 BTU/hr / 0.8 A at 120 V / 8 lb" && clean.power.capacityWatts === null && clean.power.loadPct === null && clean.gaps.length === 0 && clean.scope === "Audio",
+    "#296 rack submittal: no unknowns reads plainly, no capacity line when none: " + clean.power.lines.join(" / "));
+
+  // Unknown SKU: both a catalog gap and a data gap; weight reads "At least".
+  const odd = c296sSub(rec(L([P({ id: "A", sku: "GONE", ruStart: 1 }), P({ id: "B", sku: "NEVER", ruStart: 2 }), P({ id: "C", sku: "SW-C", ruStart: 3, label: "Core switch" })]), [{ sku: "GONE", qty: 2 }], "Odd"), lookup);
+  ok(odd.gaps.filter((g) => g.kind === "missing-catalog").map((g) => g.sku).join() === "NEVER,GONE" && odd.gaps.find((g) => g.sku === "GONE" && g.kind === "missing-catalog")?.detail === "Not in the catalog.",
+    "#296 rack submittal: a SKU the lookup can't find (found false or undefined) is a missing-catalog gap, once");
+  ok(odd.gaps.some((g) => g.kind === "missing-data" && g.sku === "NEVER" && g.detail === "Missing RU height, Depth (in), Weight (lb), Power (W)") && odd.gaps.filter((g) => g.sku === "SW-C").length === 0,
+    "#296 rack submittal: missing-data lists the field labels in order");
+  ok(odd.power.lines[0].startsWith("At least ") && odd.power.lines[0].endsWith("(2 parts unknown)") && odd.power.lines[odd.power.lines.length - 1] === "At least 8 lb", "#296 rack submittal: plural parts unknown and an \"At least\" weight: " + odd.power.lines.join(" / "));
+  ok(odd.schedule.find((r) => r.sku === "SW-C")?.desc === "Core switch", "#296 rack submittal: a placement label wins over the catalog description");
+
+  // Display order ignores the numbering setting; a taller shelf child keeps the shelf's own RU strings.
+  const td = c296sSub(rec({ config: { ruCount: 10, widthIn: 19, numbering: "top-down" }, placements: [P({ id: "A", sku: "SW-C", ruStart: 1 }), P({ id: "B", sku: "AMP-A", ruStart: 9, ruHeight: 2 })] }), lookup);
+  ok(td.schedule.map((r) => r.ru).join("|") === "RU 1–2|RU 10", "#296 rack submittal: top-down numbering relabels but keeps highest-stored-RU first");
+
+  // CSV.
+  const inj = c296sSub(rec(L([P({ id: "A", sku: "DSP-B", ruStart: 2 }), P({ id: "B", sku: "SW-C", ruStart: 1, label: "=1+1", notes: "@SUM(A1)" }), P({ id: "C", sku: "AMP-A", ruStart: 3, ruHeight: 2, label: 'Say "hi"', notes: "-5 dB pad" })]), [{ sku: "PDU-1", qty: 2 }]), lookup);
+  const csv = c296sCsv(inj);
+  const rows = csv.replace(/^﻿/, "").split("\r\n");
+  ok(csv.startsWith("﻿") && rows[0] === "RU,Face,Qty,Manufacturer,Model/SKU,Description,Depth (in),Weight (lb),Watts,Notes", "#296 rack submittal: CSV starts with a BOM and the exact header");
+  ok(rows[2] === "RU 2,Front,1,Acme,DSP-B,\"Matrix, 8x8 DSP\",10,9,60,", "#296 rack submittal: a comma description is quoted, numbers unformatted, blank notes: " + rows[2]);
+  ok(rows[3] === "RU 1,Front,1,Netco,SW-C,'=1+1,12,8,100,'@SUM(A1)", "#296 rack submittal: formula-looking text gets a leading apostrophe: " + rows[3]);
+  ok(rows[1] === "RU 3–4,Front,1,Acme,AMP-A,\"Say \"\"hi\"\"\",15.5,30,400,'-5 dB pad", "#296 rack submittal: inner quotes double, a leading minus is neutralized, 15.5 stays 15.5: " + rows[1]);
+  ok(rows.slice(4).join("|") === "|Rack-level parts|Qty,Manufacturer,Model/SKU,Description,Weight (lb),Watts|2,Powerco,PDU-1,Rack PDU,6,0|" && csv.endsWith("\r\n") && !csv.replace(/\r\n/g, "").includes("\n"),
+    "#296 rack submittal: a blank line, then the rack-level section, CRLF endings: " + JSON.stringify(rows.slice(4)));
+  const nl = c296sCsv({ ...inj, schedule: [{ ...inj.schedule[0], desc: "two\nlines", notes: "a\rb" }], rackLevel: [] });
+  ok(nl.includes('"two\nlines"') && nl.includes('"a\rb"'), "#296 rack submittal: LF and CR inside a field are quoted");
+  const emptyCsv = c296sCsv({ ...inj, schedule: [], rackLevel: [] });
+  ok(emptyCsv === "﻿RU,Face,Qty,Manufacturer,Model/SKU,Description,Depth (in),Weight (lb),Watts,Notes\r\n\r\nRack-level parts\r\nQty,Manufacturer,Model/SKU,Description,Weight (lb),Watts\r\n", "#296 rack submittal: an empty rack still prints both headers");
+
+  // Formatting.
+  ok(c296sW(1240) === "1,240 W" && c296sW(37.55) === "37.6 W" && c296sW(0) === "0 W" && c296sBtu(3412) === "3,412 BTU/hr" && c296sLb(1234.5) === "1,234.5 lb", "#296 rack submittal: formatWatts / formatBtu / formatLb group thousands");
+
+  // Which racks a Grid or a quote carries.
+  const fx = (id: string) => ({ "SA-R1": { kind: "rack" }, "SA-R2": { kind: "rack" }, "SA-S1": { kind: "system" } } as Record<string, { kind: string }>)[id];
+  ok(c296sInGrid(["asm:SA-R2", "asm:SA-S1", "asm:SA-R1", "asm:SA-R2", "allow:x:good", "P-123", "asm:SA-GONE", "asm:"], fx).join() === "SA-R2,SA-R1", "#296 rack submittal: racksInGrid returns distinct rack ids from asm: parts only");
+  ok(c296sInGrid(new Set(["asm:SA-R1"]), fx).join() === "SA-R1" && c296sInGrid([], fx).length === 0, "#296 rack submittal: racksInGrid takes any iterable");
+  ok(c296sInQuote([{ rackId: "SA-R1" }, { fixtureId: "SA-R2" }, { rackId: "SA-R1" }, { rackId: "sa-r1" }, { rackId: 5 }, { fixtureId: "SA-S1" }, { rackId: "SA-R1; DROP" }, { rackId: "SA-GONE" }, {}], fx).join() === "SA-R1,SA-R2",
+    "#296 rack submittal: racksInQuote keeps distinct, well-formed ids that resolve to a rack");
+}
+
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert } = await import("@/lib/stores/catalog");
