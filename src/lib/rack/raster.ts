@@ -4,7 +4,10 @@
  * must be drawn with `strokeMode: "absolute"`; and the serializer writes no
  * width/height, so librsvg would read viewBox inches as pixels — the root
  * gets explicit pixel dimensions first. Any failure is null (the caller
- * prints a pointer to the package's elevation.pdf instead).
+ * prints a pointer to the package's elevation.pdf instead) — including a
+ * drawing whose text didn't render (no fonts on the server). Rack elevations
+ * always carry RU numbers, so an SVG with no text at all also reads as
+ * "nothing lettered" and returns null.
  */
 import sharp from "sharp";
 import type { RackLayout, RackPartLookup } from "./types";
@@ -12,6 +15,8 @@ import { renderRackElevationSvg } from "./svg";
 
 /** Taller than this is refused rather than rasterized (a 60 RU rack at 1400 px wide is ~6,700 px). */
 const MAX_HEIGHT_PX = 12_000;
+/** Every text element, tspans included (the serializer never nests <text>). */
+const TEXT_EL = /<text\b[^>]*>[\s\S]*?<\/text>/g;
 
 export async function svgToPng(svg: string, widthPx = 1400): Promise<Buffer | null> {
   try {
@@ -23,7 +28,15 @@ export async function svgToPng(svg: string, widthPx = 1400): Promise<Buffer | nu
     const heightPx = Math.max(1, Math.round((widthPx * h) / w));
     if (heightPx > MAX_HEIGHT_PX) throw new Error(`too tall (${heightPx} px)`);
     const sized = svg.replace(/^<svg\b/, `<svg width="${widthPx}" height="${heightPx}"`);
-    return await sharp(Buffer.from(sized, "utf8")).flatten({ background: "#ffffff" }).png().toBuffer();
+    const draw = (markup: string) => sharp(Buffer.from(markup, "utf8")).flatten({ background: "#ffffff" });
+    // A server without fonts (Vercel's Lambda image) draws blank labels instead of failing:
+    // if the drawing is pixel-identical with every <text> removed, nothing was lettered.
+    const [withText, withoutText] = await Promise.all([draw(sized).raw().toBuffer(), draw(sized.replace(TEXT_EL, "")).raw().toBuffer()]);
+    if (withText.equals(withoutText)) {
+      console.warn("rack raster: no fonts — falling back to the PDF pointer");
+      return null;
+    }
+    return await draw(sized).png().toBuffer();
   } catch (e) {
     console.warn(`[rack] elevation raster failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;

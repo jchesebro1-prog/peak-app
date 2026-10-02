@@ -18,8 +18,8 @@ export const RACK_PACKAGE_FILES = ["elevation.pdf", "schedule.pdf", "power-heat.
 export type RackRun =
   /** rackSubmittalFiles ran: `folder` is its safeName'd label, `staffGaps` its gaps. */
   | { id: string; name: string; outcome: "done"; folder: string; files: ZipFile[]; staffGaps: RackSubmittalGap[] }
-  /** Not started — too little time left in the package budget. */
-  | { id: string; name: string; outcome: "late" }
+  /** Sheets not started — too little time left in the package budget; still carries what needs no Chrome (schedule.csv). */
+  | { id: string; name: string; outcome: "late"; folder: string; files: ZipFile[] }
   /** The rack id resolves to nothing (deleted, or no longer a rack). */
   | { id: string; name: string; outcome: "missing" };
 
@@ -50,17 +50,13 @@ export function rackPackageEntries(runs: readonly RackRun[]): RackPackageEntries
       gap(run.name);
       continue;
     }
-    if (run.outcome === "late") {
-      warnings.push(`rack ${run.id} (${run.name}): not started — too little time left in the package budget`);
-      gap(run.name);
-      continue;
-    }
+    if (run.outcome === "late") warnings.push(`rack ${run.id} (${run.name}): sheets not started — too little time left in the package budget`);
     // Two racks with the same label would share a folder: suffix -2, -3… (case-insensitive, for Windows/macOS unzip).
     let folder = run.folder;
     for (let n = 2; used.has(folder.toLowerCase()); n++) folder = `${run.folder}-${n}`;
     used.add(folder.toLowerCase());
     folderOf.set(run.id, folder);
-    for (const g of run.staffGaps) warnings.push(`rack ${run.id} (${run.name}): ${g.label || g.sku}: ${g.detail}`);
+    for (const g of run.outcome === "done" ? run.staffGaps : []) warnings.push(`rack ${run.id} (${run.name}): ${g.label || g.sku}: ${g.detail}`);
     const names = run.files.map((f) => f.name);
     if (names.length) {
       for (const f of run.files) files.push({ name: `racks/${folder}/${f.name}`, data: f.data });

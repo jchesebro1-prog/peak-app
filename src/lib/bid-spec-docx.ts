@@ -80,11 +80,12 @@ function partHeading(text: string): Paragraph {
 export const RACK_SECTION_HEADING = "27 11 16 — Communications Racks, Frames and Enclosures";
 /** Word's px are 1/96 in (docx converts transformation px to EMU at 9525). */
 const PX_PER_IN = 96;
-const IMAGE_MAX_W_IN = 6.5;
+/** The document is A4 (docx's default) with 1 in margins: 9,026 DXA ≈ 6.27 in of text width. */
+const IMAGE_MAX_W_IN = 6.25;
 const IMAGE_MAX_H_IN = 8.5;
 const RACK_COLS = ["RU", "Face", "Qty", "Manufacturer", "Model/SKU", "Description", "Watts"];
-/** DXA; sums to the 6.5 in text width (9,360). */
-const RACK_COL_W = [1000, 760, 560, 1600, 1700, 2900, 840];
+/** DXA; sums to 9,010 — inside A4's 9,026 DXA text width. */
+const RACK_COL_W = [960, 730, 540, 1540, 1640, 2800, 800];
 const RULE = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
 const CELL_BORDERS = { top: RULE, bottom: RULE, left: RULE, right: RULE };
 
@@ -113,7 +114,7 @@ function rackTable(rack: RackSpecSection): Table {
   });
 }
 
-/** The PNG scaled to fit 6.5 × 8.5 in, keeping its aspect; null when the bytes aren't a PNG. */
+/** The PNG scaled to fit 6.25 × 8.5 in, keeping its aspect; null when the bytes aren't a PNG. */
 function elevationImage(png: Buffer): Paragraph | null {
   const size = pngSize(png);
   if (!size) return null;

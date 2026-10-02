@@ -19,12 +19,13 @@ import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/li
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { ensureOptions, optionSlice, resolveOptionId } from "@/lib/design/grid-options";
-import type { FixtureRecord } from "@/lib/fixture-assemblies";
+import type { FixtureRecord, FixtureResolvable } from "@/lib/fixture-assemblies";
+import { gridSpecBomRows } from "@/lib/design/grid-virtual-parts";
 import { emptyRackLayout } from "@/lib/rack/layout";
 import { loadRackForSheets } from "@/lib/rack/load";
 import { rackPackageEntries, type RackIndexEntry, type RackRun } from "@/lib/rack/package";
 import { rackElevationPng } from "@/lib/rack/raster";
-import { racksInGrid, racksInQuote } from "@/lib/rack/submittal";
+import { racksInGrid, racksInQuote, scheduleCsv } from "@/lib/rack/submittal";
 import { RACK_MIN_RENDER_MS, rackSubmittalFiles } from "@/lib/rack/submittal-server";
 
 export type BuiltClientPackage = {
@@ -142,8 +143,17 @@ function roughQuoteDrawing(quote: Quote, packageName: string): Buffer {
   return renderLetterPdf(doc);
 }
 
-function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number }> {
-  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number; labor?: boolean }> }> } | null | undefined;
+/**
+ * The quote's equipment rows, summed by SKU. #296 (D578): a line built from a
+ * rack (`rackId`) expands into the rack's members, read live through `rackOf`,
+ * so the package's datasheets/ and spec cover them like a Grid rack; a rack
+ * that no longer resolves (or has no members) keeps its one quoted row.
+ */
+export function quoteBom(
+  quote: Pick<Quote, "spec">,
+  rackOf?: (id: string) => FixtureResolvable | null | undefined,
+): Array<{ sku: string; desc: string; qty: number }> {
+  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number; labor?: boolean; rackId?: unknown }> }> } | null | undefined;
   const rows = new Map<string, { sku: string; desc: string; qty: number }>();
   for (const section of spec?.sections || []) {
     for (const item of section.items || []) {
@@ -152,6 +162,18 @@ function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number 
       // engineering, allowance, performance bonus) — they're not equipment
       // and don't belong in the BOM/client package either.
       if (section.kind === "labor" || item.labor || isRewardCreditItem(item) || item.qty == null || item.qty <= 0) continue;
+      const rack = rackOf && typeof item.rackId === "string" ? rackOf(item.rackId) : null;
+      if (rack?.kind === "rack") {
+        const members = gridSpecBomRows([{ sku: `asm:${item.rackId}`, desc: String(item.desc || ""), qty: item.qty }], rackOf!);
+        if (members.length && members.every((m) => m.sku)) {
+          for (const m of members) {
+            const current = rows.get(m.sku);
+            if (current) current.qty += m.qty;
+            else rows.set(m.sku, { sku: m.sku, desc: m.desc, qty: m.qty });
+          }
+          continue;
+        }
+      }
       const sku = String(item.sku || item.desc || "Unspecified line");
       const current = rows.get(sku);
       if (current) current.qty += item.qty;
@@ -160,6 +182,9 @@ function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number 
   }
   return [...rows.values()];
 }
+
+/** A raster needs at least this much render budget left to be started. */
+const RACK_MIN_RASTER_MS = 1_000;
 
 type RacksAdded = { index: RackIndexEntry[]; spec: RackSpecSection[] };
 
@@ -190,13 +215,16 @@ async function addRacks(
       continue;
     }
     const name = loaded.rec.label || nameOf(id);
-    if (deadline - Date.now() < RACK_MIN_RENDER_MS) runs.push({ id, name, outcome: "late" });
-    else {
+    if (deadline - Date.now() < RACK_MIN_RENDER_MS) {
+      // No Chrome: the sheets stay out (a missing-rack gap), the CSV needs no render.
+      const csv = { name: "schedule.csv", data: Buffer.from(scheduleCsv(loaded.submittal), "utf8") };
+      runs.push({ id, name, outcome: "late", folder: safeName(loaded.rec.label || loaded.rec.id), files: [csv] });
+    } else {
       const res = await rackSubmittalFiles(id, where, { deadline, datasheets: false });
       runs.push(res.ok ? { id, name, outcome: "done", folder: res.folder, files: res.files, staffGaps: res.gaps } : { id, name, outcome: "missing" });
     }
     // The D94 section needs no Chrome; the raster is skipped once the render budget is spent (D577 pointer instead).
-    const png = Date.now() < deadline ? await rackElevationPng(loaded.rec.rack ?? emptyRackLayout(), loaded.lookup, `rk${i + 1}`) : null;
+    const png = deadline - Date.now() >= RACK_MIN_RASTER_MS ? await rackElevationPng(loaded.rec.rack ?? emptyRackLayout(), loaded.lookup, `rk${i + 1}`) : null;
     sections.set(id, { title: name, ...(loaded.submittal.scope ? { scope: loaded.submittal.scope } : {}), schedule: loaded.submittal.schedule, ...(png ? { elevationPng: png } : {}) });
   }
   for (const id of missing) runs.push({ id, name: nameOf(id), outcome: "missing" });
@@ -321,7 +349,10 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
   const bySku = new Map(catalog.map((part) => [part.sku, part]));
-  const bom = quoteBom(quote);
+  // #296 — fixtures once, before the BOM: rack lines expand into their members (live, D578).
+  const qItems = quoteItems(quote);
+  const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
+  const bom = quoteBom(quote, (id) => rackFixtures.get(id));
   const matched = matchBom(bom, catalog);
   const sections = await allSections();
   const spec = assemble(matched.rows, sections, {
@@ -364,8 +395,6 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   }, files, gaps);
   const cutSheets = await addCutSheets(quote.id, opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, { deadline: cutSheetsBy });
   // #296 — rack lines (`rackId`, D578; or a rack `fixtureId`), read live, after the cut sheets on the same deadline.
-  const qItems = quoteItems(quote);
-  const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
   const quoteRacks = racksInQuote(qItems, (id) => rackFixtures.get(id));
   // A well-formed rackId that no longer resolves to a rack (deleted) is an on-request gap, named by its line.
   const rackLineName = new Map<string, string>();

@@ -45127,6 +45127,7 @@ async function rack296ZipAsyncChecks(): Promise<void> {
 import { rackPackageEntries as c296qEntries, RACK_ON_REQUEST as c296qOnRequest, RACK_PACKAGE_FILES as c296qFileList } from "@/lib/rack/package";
 import { buildSpecDocx as c296qDocx } from "@/lib/bid-spec-docx";
 import { svgToPng as c296qPng, pngSize as c296qPngSize } from "@/lib/rack/raster";
+import { quoteBom as c296qQuoteBom } from "@/lib/client-package-server";
 import { renderRackElevationSvg as c296qSvg } from "@/lib/rack/svg";
 import { emptyRackLayout as c296qEmpty } from "@/lib/rack/layout";
 import type { AssembledSpec as C296qSpec } from "@/lib/bid-spec";
@@ -45136,16 +45137,17 @@ import type { AssembledSpec as C296qSpec } from "@/lib/bid-spec";
   const r = c296qEntries([
     { id: "SA-A", name: "MDF rack", outcome: "done", folder: "MDF_rack", files: c296qFileList.map(f), staffGaps: [] },
     { id: "SA-B", name: "MDF rack", outcome: "done", folder: "mdf_rack", files: [f("schedule.csv")], staffGaps: [{ sku: "", label: "Elevation", kind: "missing-data", detail: staff }] },
-    { id: "SA-C", name: "Booth rack", outcome: "late" },
+    { id: "SA-C", name: "Booth rack", outcome: "late", folder: "Booth_rack", files: [f("schedule.csv")] },
     { id: "SA-D", name: "Old rack", outcome: "missing" },
   ]);
   ok(c296qFileList.join() === "elevation.pdf,schedule.pdf,power-heat.pdf,schedule.csv", "#296 rack package: the expected per-rack files (no datasheets.pdf)");
-  ok(r.files.map((x) => x.name).join() === "racks/MDF_rack/elevation.pdf,racks/MDF_rack/schedule.pdf,racks/MDF_rack/power-heat.pdf,racks/MDF_rack/schedule.csv,racks/mdf_rack-2/schedule.csv",
+  ok(r.files.map((x) => x.name).join() === "racks/MDF_rack/elevation.pdf,racks/MDF_rack/schedule.pdf,racks/MDF_rack/power-heat.pdf,racks/MDF_rack/schedule.csv,racks/mdf_rack-2/schedule.csv,racks/Booth_rack/schedule.csv",
     "#296 rack package: files land under racks/<folder>/, a folder clash (any case) gets -2: " + r.files.map((x) => x.name).join());
   ok(JSON.stringify(r.index) === JSON.stringify([
     { name: "MDF rack", folder: "MDF_rack", files: [...c296qFileList] },
     { name: "MDF rack", folder: "mdf_rack-2", files: ["schedule.csv"] },
-  ]), "#296 rack package: the index lists each rack that produced files: name, folder, file names");
+    { name: "Booth rack", folder: "Booth_rack", files: ["schedule.csv"] },
+  ]), "#296 rack package: the index lists each rack that produced files: name, folder, file names (a late rack still carries its CSV)");
   ok(r.gaps.length === 3 && r.gaps.every((g) => g.kind === "missing-rack" && g.sku === "RACK" && g.catalogId === null)
     && r.gaps.map((g) => g.description).join("|") === `MDF rack — ${c296qOnRequest}|Booth rack — ${c296qOnRequest}|Old rack — ${c296qOnRequest}`,
     "#296 rack package: an incomplete, late or missing rack is one missing-rack gap with the customer-safe sentence");
@@ -45153,11 +45155,36 @@ import type { AssembledSpec as C296qSpec } from "@/lib/bid-spec";
   const pub = JSON.stringify({ index: r.index, gaps: r.gaps });
   ok(!pub.includes("preview page") && !pub.includes("rendered") && !pub.includes("SA-") && !pub.includes("deleted") && !pub.includes("time"), "#296 rack package: no staff detail or rack id reaches the customer index");
   ok(r.warnings.some((w) => w.includes("SA-B") && w.includes(staff)) && r.warnings.some((w) => w.includes("SA-C")) && r.warnings.some((w) => w.includes("SA-D")), "#296 rack package: staff detail goes to the warnings (server log)");
-  ok(r.folderOf.get("SA-A") === "MDF_rack" && r.folderOf.get("SA-B") === "mdf_rack-2" && !r.folderOf.has("SA-C"), "#296 rack package: folderOf maps each rack to its final folder");
+  ok(r.folderOf.get("SA-A") === "MDF_rack" && r.folderOf.get("SA-B") === "mdf_rack-2" && r.folderOf.get("SA-C") === "Booth_rack" && !r.folderOf.has("SA-D"), "#296 rack package: folderOf maps each rack to its final folder");
+  ok(r.warnings.some((w) => w.includes("SA-C") && w.includes("sheets not started")) && r.warnings.some((w) => w.includes("SA-C") && w.includes("elevation.pdf, schedule.pdf, power-heat.pdf")), "#296 rack package (fix 1): a late rack logs why and which drawings are missing");
+
+  // Fix 1 — quote BOM: a rackId line expands into the rack's members (live), a rack-free quote is unchanged.
+  const rackRec = { id: "SA-Q296", kind: "rack" as const, label: "MDF rack", lightEngineSku: "", lensSku: "", lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "PDU-1", qty: 1, label: "PDU" }],
+    rack: { config: c296qEmpty().config, placements: [
+      { id: "RP-1", kind: "device" as const, sku: "AMP-1", ruStart: 10, ruHeight: 2, face: "front" as const },
+      { id: "RP-2", kind: "device" as const, sku: "AMP-1", ruStart: 12, ruHeight: 2, face: "front" as const },
+      { id: "RP-3", kind: "device" as const, sku: "DSP-1", ruStart: 8, ruHeight: 1, face: "front" as const },
+    ] } };
+  const rackOf = (id: string) => (id === rackRec.id ? rackRec : undefined);
+  const qSpec = (items: unknown[]) => ({ spec: { sections: [{ kind: "materials", items }] } }) as never;
+  const amp = { sku: "AMP-1", desc: "Amp", qty: 1 };
+  const withRack = c296qQuoteBom(qSpec([amp, { sku: "SA-Q296", desc: "MDF rack", qty: 2, fixture: true, rackId: "SA-Q296" }]), rackOf);
+  const qty = (sku: string) => withRack.find((r) => r.sku === sku)?.qty;
+  ok(qty("AMP-1") === 1 + 2 * 2 && qty("DSP-1") === 2 && qty("PDU-1") === 2 && !withRack.some((r) => r.sku.startsWith("SA-")),
+    "#296 rack package (fix 1): a quote's rack line expands into member SKUs (line qty × count), no SA- row: " + JSON.stringify(withRack));
+  const gone = c296qQuoteBom(qSpec([{ sku: "SA-GONE296", desc: "Old rack", qty: 1, rackId: "SA-GONE296" }]), rackOf);
+  ok(JSON.stringify(gone) === JSON.stringify([{ sku: "SA-GONE296", desc: "Old rack", qty: 1 }]), "#296 rack package (fix 1): a deleted rack keeps its one quoted row");
+  const plainItems = [amp, { sku: "CBL-1", desc: "Cable", qty: 3 }, { sku: "AMP-1", desc: "Amp", qty: 2 }, { sku: "LAB", desc: "Labor", qty: 1, labor: true }];
+  ok(JSON.stringify(c296qQuoteBom(qSpec(plainItems), rackOf)) === JSON.stringify(c296qQuoteBom(qSpec(plainItems)))
+    && JSON.stringify(c296qQuoteBom(qSpec(plainItems))) === JSON.stringify([{ sku: "AMP-1", desc: "Amp", qty: 3 }, { sku: "CBL-1", desc: "Cable", qty: 3 }]),
+    "#296 rack package (fix 1): a rack-free quote's BOM is unchanged");
+  ok(rd296q("src/lib/client-package-server.ts").indexOf("const rackFixtures") < rd296q("src/lib/client-package-server.ts").indexOf("const bom = quoteBom(quote, (id) => rackFixtures.get(id));"), "#296 rack package (fix 1 source): the rack fixtures load before the quote BOM");
   const none = c296qEntries([]);
   ok(none.files.length === 0 && none.index.length === 0 && none.gaps.length === 0, "#296 rack package: no racks, nothing added");
 
   const src = rd296q("src/lib/client-package-server.ts");
+  ok(src.includes("RACK_MIN_RASTER_MS = 1_000") && src.includes("deadline - Date.now() >= RACK_MIN_RASTER_MS ? await rackElevationPng("), "#296 rack package (fix 4 source): a raster starts only with at least 1 s of render budget left");
+  ok(/outcome: "late", folder: safeName\(loaded\.rec\.label \|\| loaded\.rec\.id\), files: \[csv\]/.test(src) && src.includes("scheduleCsv(loaded.submittal)"), "#296 rack package (fix 4 source): a rack out of render time still gets its schedule.csv");
   ok(src.includes("racksInGrid(") && src.includes("racksInQuote(") && src.includes("rackSubmittalFiles("), "#296 rack package (source): the client-package builder discovers racks in Grid and quotes and calls rackSubmittalFiles");
   ok(/rackSubmittalFiles\([^)]*datasheets: false/.test(src), "#296 rack package (source): the client package asks for no datasheets.pdf (the package's own datasheets/ covers members)");
   ok((src.match(/racks: rackRun\.index/g) ?? []).length === 2 && (src.match(/buildSpecDocx\(\{ \.\.\.spec, racks: rackRun\.spec \}\)/g) ?? []).length === 2,
@@ -45182,6 +45209,11 @@ async function rack296PackageAsyncChecks(): Promise<void> {
     ok(size?.width === 1400 && size.height === Math.round((1400 * Number(vb[2])) / Number(vb[1])), "#296 rack package: the PNG is 1400 px wide at the viewBox aspect: " + JSON.stringify(size));
   }
   ok((await c296qPng("<not svg")) === null, "#296 rack package: svgToPng returns null on bad input");
+  // Fix 2 — no fonts: a drawing identical with and without its text means nothing was lettered → null.
+  const stripped = svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/g, "");
+  ok(svg.includes("<text") && !stripped.includes("<text"), "#296 rack package (fix 2): fixture sanity — the elevation has text, the stripped copy none");
+  ok(png === null || (await c296qPng(stripped)) === null, "#296 rack package (fix 2): an SVG whose text draws nothing (stripped, as with no fonts) returns null");
+  ok(rd296q("src/lib/rack/raster.ts").includes(".raw().toBuffer()") && rd296q("src/lib/rack/raster.ts").includes("rack raster: no fonts — falling back to the PDF pointer"), "#296 rack package (fix 2 source): svgToPng compares raw pixels with and without text");
   ok(c296qPngSize(Buffer.from("nope")) === null, "#296 rack package: pngSize rejects a non-PNG");
 
   // A tiny real PNG (sharp is a dependency), 100 × 300 px.
@@ -45197,7 +45229,12 @@ async function rack296PackageAsyncChecks(): Promise<void> {
   ok(["RU", "Face", "Qty", "Manufacturer", "Model/SKU", "Description", "Watts", "Reserved — future", "AMP-1", "120"].every((t) => withPng.includes(`>${t}<`)) && withPng.includes(">—<"),
     "#296 rack package: the table has the seven columns, reserved rows and — for unknown watts");
   const ext = /<wp:extent cx="(\d+)" cy="(\d+)"/.exec(withPng);
-  ok(!!ext && Number(ext[1]) <= 6.5 * 914400 && Number(ext[2]) <= 8.5 * 914400 && Math.abs(Number(ext[2]) / Number(ext[1]) - 3) < 0.02, "#296 rack package: the image fits 6.5 × 8.5 in keeping its aspect: " + (ext ? ext.slice(1).join("×") : "none"));
+  ok(!!ext && Number(ext[1]) <= 6.25 * 914400 && Number(ext[2]) <= 8.5 * 914400 && Math.abs(Number(ext[2]) / Number(ext[1]) - 3) < 0.02, "#296 rack package: the image fits 6.25 × 8.5 in keeping its aspect: " + (ext ? ext.slice(1).join("×") : "none"));
+  const wide = await sharp({ create: { width: 900, height: 100, channels: 3, background: "#ffffff" } }).png().toBuffer();
+  const wideExt = /<wp:extent cx="(\d+)"/.exec(await xml({ ...base, racks: [{ title: "W", folder: "W", schedule, elevationPng: wide }] }));
+  ok(!!wideExt && Number(wideExt[1]) === Math.round(6.25 * 96) * 9525, "#296 rack package (fix 3): a wide image is capped at 6.25 in (A4 text width): " + wideExt?.[1]);
+  const grid = (/<w:tblGrid>([\s\S]*?)<\/w:tblGrid>/.exec(withPng)?.[1] ?? "").match(/w:w="(\d+)"/g)?.map((m) => Number(m.slice(5, -1))) ?? [];
+  ok(grid.length === 7 && grid.reduce((a, b) => a + b, 0) <= 9026, "#296 rack package (fix 3): the schedule table fits A4's 9,026 DXA text width: " + grid.join("+"));
   const noPng = await xml({ ...base, racks: [{ title: "MDF rack", folder: "MDF_rack", schedule }] });
   ok(noPng.includes("Elevation: see racks/MDF_rack/elevation.pdf in this package.") && !noPng.includes("<w:drawing>") && noPng.includes("<w:tbl>"), "#296 rack package: without a PNG the docx points at the package's elevation.pdf");
   const noPdf = await xml({ ...base, racks: [{ title: "MDF rack", folder: "MDF_rack", schedule, elevationPdfMissing: true }] });
