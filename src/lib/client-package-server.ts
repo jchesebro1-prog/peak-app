@@ -1,5 +1,5 @@
 import { dataUrlToBytes, getBlobStream, putBlob, safeName, blobEnabled } from "@/lib/blob";
-import { assemble, matchBom, type AssembledSpec, type SpecCatalogPart } from "@/lib/bid-spec";
+import { assemble, matchBom, type AssembledSpec, type RackSpecSection, type SpecCatalogPart } from "@/lib/bid-spec";
 import { buildSpecDocx } from "@/lib/bid-spec-docx";
 import { buildClientPackageManifest, coveredNote, packageNeedsFixtures, type ClientPackageGap } from "@/lib/client-package";
 import { placementQty } from "@/lib/design/grid-bom";
@@ -19,6 +19,13 @@ import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/li
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { ensureOptions, optionSlice, resolveOptionId } from "@/lib/design/grid-options";
+import type { FixtureRecord } from "@/lib/fixture-assemblies";
+import { emptyRackLayout } from "@/lib/rack/layout";
+import { loadRackForSheets } from "@/lib/rack/load";
+import { rackPackageEntries, type RackIndexEntry, type RackRun } from "@/lib/rack/package";
+import { rackElevationPng } from "@/lib/rack/raster";
+import { racksInGrid, racksInQuote } from "@/lib/rack/submittal";
+import { RACK_MIN_RENDER_MS, rackSubmittalFiles } from "@/lib/rack/submittal-server";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -154,6 +161,65 @@ function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number 
   return [...rows.values()];
 }
 
+type RacksAdded = { index: RackIndexEntry[]; spec: RackSpecSection[] };
+
+/**
+ * #296 — each rack's sheets + schedule CSV under `racks/<folder>/` (no
+ * datasheets.pdf: the package's own datasheets/ already covers the members)
+ * and its D94 section. Runs AFTER the cut sheets on the same render deadline
+ * (so the package's finish allowance stays whole): a rack with less than
+ * RACK_MIN_RENDER_MS left is not started and becomes a "missing-rack" gap, as
+ * does a rack id that no longer resolves. Racks are read live (D578).
+ */
+async function addRacks(
+  found: string[],
+  missing: string[],
+  nameOf: (id: string) => string,
+  where: PrintWhere,
+  files: ZipFile[],
+  gaps: ClientPackageGap[],
+  deadline: number,
+): Promise<RacksAdded> {
+  if (!found.length && !missing.length) return { index: [], spec: [] };
+  const runs: RackRun[] = [];
+  const sections = new Map<string, Omit<RackSpecSection, "folder" | "elevationPdfMissing">>();
+  for (const [i, id] of found.entries()) {
+    const loaded = await loadRackForSheets(id);
+    if (!loaded) {
+      runs.push({ id, name: nameOf(id), outcome: "missing" });
+      continue;
+    }
+    const name = loaded.rec.label || nameOf(id);
+    if (deadline - Date.now() < RACK_MIN_RENDER_MS) runs.push({ id, name, outcome: "late" });
+    else {
+      const res = await rackSubmittalFiles(id, where, { deadline, datasheets: false });
+      runs.push(res.ok ? { id, name, outcome: "done", folder: res.folder, files: res.files, staffGaps: res.gaps } : { id, name, outcome: "missing" });
+    }
+    // The D94 section needs no Chrome; the raster is skipped once the render budget is spent (D577 pointer instead).
+    const png = Date.now() < deadline ? await rackElevationPng(loaded.rec.rack ?? emptyRackLayout(), loaded.lookup, `rk${i + 1}`) : null;
+    sections.set(id, { title: name, ...(loaded.submittal.scope ? { scope: loaded.submittal.scope } : {}), schedule: loaded.submittal.schedule, ...(png ? { elevationPng: png } : {}) });
+  }
+  for (const id of missing) runs.push({ id, name: nameOf(id), outcome: "missing" });
+  const entries = rackPackageEntries(runs);
+  for (const w of entries.warnings) console.warn(`[rack] client package ${w}`);
+  files.push(...entries.files);
+  gaps.push(...entries.gaps);
+  const spec: RackSpecSection[] = [];
+  for (const id of found) {
+    const section = sections.get(id);
+    if (!section) continue;
+    const folder = entries.folderOf.get(id) ?? "";
+    spec.push({ ...section, folder, elevationPdfMissing: !folder || !entries.files.some((f) => f.name === `racks/${folder}/elevation.pdf`) });
+  }
+  return { index: entries.index, spec };
+}
+
+/** A quote's line items, every section. */
+function quoteItems(quote: Quote): Array<{ rackId?: unknown; fixtureId?: unknown; desc?: unknown }> {
+  const spec = quote.spec as { sections?: Array<{ items?: Array<{ rackId?: unknown; fixtureId?: unknown; desc?: unknown }> }> } | null | undefined;
+  return (spec?.sections || []).flatMap((s) => s.items || []);
+}
+
 /**
  * Put every package document in the zip ONCE (#207): a fixture datasheet
  * that also covers its lens and clamps is one file. A document whose blob is
@@ -200,10 +266,9 @@ export async function createClientPackage(
     date: Date.now(),
   });
   const packageName = `${safeName(project.name || project.id)}-${project.id}`;
-  const files: ZipFile[] = [
-    { name: "specification.docx", data: await buildSpecDocx(spec) },
-    { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) },
-  ];
+  // The docx is written once the racks are known (#296); it keeps its place in the zip.
+  const specFile: ZipFile = { name: "specification.docx", data: Buffer.alloc(0) };
+  const files: ZipFile[] = [specFile, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) }];
   const gaps = [...manifest.gaps];
   const itemBySku = new Map(manifest.items.map((item) => [item.sku, item]));
   await addDocuments(manifest.documents, docIndex, (sku) => {
@@ -227,8 +292,13 @@ export async function createClientPackage(
   if (optQuoteId) cutSheets = await addCutSheets(optQuoteId, opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, { deadline: cutSheetsBy });
   else if (optionSlice(project, optId).placements.some((p) => !!p.curtain))
     gaps.push({ kind: "missing-cutsheet", sku: "CS", description: "Add this design to Quotes to include cut sheets", qty: 0, catalogId: null });
+  // #296 — racks placed on this option (`asm:<id>` of kind rack), after the cut sheets on the same deadline.
+  const gridRacks = racksInGrid(optionSlice(project, optId).placements.map((p) => p.partId), (id) => fixtures?.get(id));
+  const rackRun = await addRacks(gridRacks, [], (id) => fixtures?.get(id)?.label || "Rack", opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, cutSheetsBy);
+  const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
+  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
   const publicManifest = { ...manifest, gaps };
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, cutSheets: { sheets: cutSheets.sheets }, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const zip = createStoredZip(files);
   const fileName = `${packageName}.zip`;
   const stored = await putBlob(`client-packages/${safeName(project.id)}/${fileName}`, zip, "application/zip");
@@ -241,7 +311,7 @@ export async function createClientPackage(
     datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length,
     gapCount: gaps.length,
   });
-  return { record, gaps, spec, cutSheets };
+  return { record, gaps, spec: specWithRacks, cutSheets };
 }
 
 /** Build the same package from a quote when it has not yet become a Grid project. */
@@ -284,19 +354,29 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   }
   const covered = items.filter((item) => item.datasheetCoveredBy.length).map((item) => coveredNote(item.sku, item.datasheetCoveredBy));
   const packageName = `${safeName(quote.name || quote.id)}-${safeName(displayQuoteNumber(quote))}`;
-  const files: ZipFile[] = [
-    { name: "specification.docx", data: await buildSpecDocx(spec) },
-    { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) },
-  ];
+  // The docx is written once the racks are known (#296); it keeps its place in the zip.
+  const specFile: ZipFile = { name: "specification.docx", data: Buffer.alloc(0) };
+  const files: ZipFile[] = [specFile, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) }];
   const itemBySku = new Map(items.map((item) => [item.sku, item]));
   await addDocuments(packageDocs.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
   }, files, gaps);
   const cutSheets = await addCutSheets(quote.id, opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, { deadline: cutSheetsBy });
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, cutSheets: { sheets: cutSheets.sheets }, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  // #296 — rack lines (`rackId`, D578; or a rack `fixtureId`), read live, after the cut sheets on the same deadline.
+  const qItems = quoteItems(quote);
+  const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
+  const quoteRacks = racksInQuote(qItems, (id) => rackFixtures.get(id));
+  // A well-formed rackId that no longer resolves to a rack (deleted) is an on-request gap, named by its line.
+  const rackLineName = new Map<string, string>();
+  for (const it of qItems) if (typeof it.rackId === "string" && !rackLineName.has(it.rackId)) rackLineName.set(it.rackId, String(it.desc || "") || "Rack");
+  const goneRacks = racksInQuote(qItems.map((it) => ({ rackId: it.rackId })), () => ({ kind: "rack" })).filter((id) => rackFixtures.get(id)?.kind !== "rack");
+  const rackRun = await addRacks(quoteRacks, goneRacks, (id) => rackFixtures.get(id)?.label || rackLineName.get(id) || "Rack", opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, cutSheetsBy);
+  const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
+  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const fileName = `${packageName}.zip`;
   const stored = await putBlob(`client-packages/quote-${safeName(quote.id)}/${fileName}`, createStoredZip(files), "application/zip");
   const record = await saveClientPackage({ projectId: `quote:${quote.id}`, fileName, blobPath: stored.pathname, createdBy: by, itemCount: items.length, datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length, gapCount: gaps.length });
-  return { record, gaps, spec, cutSheets };
+  return { record, gaps, spec: specWithRacks, cutSheets };
 }

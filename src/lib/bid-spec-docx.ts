@@ -1,13 +1,22 @@
 import {
   AlignmentType,
+  BorderStyle,
   Document,
   HeadingLevel,
+  ImageRun,
   Packer,
   Paragraph,
+  Table,
+  TableCell,
+  TableLayoutType,
+  TableRow,
   TabStopType,
   TextRun,
+  WidthType,
 } from "docx";
-import type { AssembledSpec } from "@/lib/bid-spec";
+import type { AssembledSpec, RackSpecSection } from "@/lib/bid-spec";
+import { pngSize } from "@/lib/rack/png-size";
+import { xmlSafe } from "@/lib/specs/spec-docx";
 
 /* ------------------------------------------------------------------ *
  * Real .docx generation (D94 upgrade, 2026-07-20).
@@ -66,6 +75,87 @@ function partHeading(text: string): Paragraph {
   });
 }
 
+/* ---------- #296 — Equipment Racks (D573, D577) ---------- */
+
+export const RACK_SECTION_HEADING = "27 11 16 — Communications Racks, Frames and Enclosures";
+/** Word's px are 1/96 in (docx converts transformation px to EMU at 9525). */
+const PX_PER_IN = 96;
+const IMAGE_MAX_W_IN = 6.5;
+const IMAGE_MAX_H_IN = 8.5;
+const RACK_COLS = ["RU", "Face", "Qty", "Manufacturer", "Model/SKU", "Description", "Watts"];
+/** DXA; sums to the 6.5 in text width (9,360). */
+const RACK_COL_W = [1000, 760, 560, 1600, 1700, 2900, 840];
+const RULE = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
+const CELL_BORDERS = { top: RULE, bottom: RULE, left: RULE, right: RULE };
+
+function rackCell(text: string, width: number, bold = false): TableCell {
+  return new TableCell({
+    width: { size: width, type: WidthType.DXA },
+    borders: CELL_BORDERS,
+    children: [new Paragraph({ children: [new TextRun({ text: xmlSafe(text), bold, size: 18 })] })],
+  });
+}
+
+const wattsText = (w: number | null) => (w === null ? "—" : (Math.round(w * 10) / 10).toLocaleString("en-US", { maximumFractionDigits: 1 }));
+
+function rackTable(rack: RackSpecSection): Table {
+  return new Table({
+    width: { size: RACK_COL_W.reduce((a, b) => a + b, 0), type: WidthType.DXA },
+    layout: TableLayoutType.FIXED,
+    columnWidths: RACK_COL_W,
+    borders: { ...CELL_BORDERS, insideHorizontal: RULE, insideVertical: RULE },
+    rows: [
+      new TableRow({ tableHeader: true, children: RACK_COLS.map((h, i) => rackCell(h, RACK_COL_W[i], true)) }),
+      ...rack.schedule.map(
+        (r) => new TableRow({ children: [r.ru, r.face, String(r.qty), r.mfr, r.sku, r.desc, wattsText(r.watts)].map((t, i) => rackCell(t, RACK_COL_W[i])) })
+      ),
+    ],
+  });
+}
+
+/** The PNG scaled to fit 6.5 × 8.5 in, keeping its aspect; null when the bytes aren't a PNG. */
+function elevationImage(png: Buffer): Paragraph | null {
+  const size = pngSize(png);
+  if (!size) return null;
+  const scale = Math.min((IMAGE_MAX_W_IN * PX_PER_IN) / size.width, (IMAGE_MAX_H_IN * PX_PER_IN) / size.height);
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 160 },
+    children: [
+      new ImageRun({
+        type: "png",
+        data: png,
+        transformation: { width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) },
+        altText: { name: "Rack elevation", title: "Rack elevation", description: "Front elevation of the rack" },
+      }),
+    ],
+  });
+}
+
+function rackSection(racks: RackSpecSection[]): Array<Paragraph | Table> {
+  const out: Array<Paragraph | Table> = [
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      spacing: { before: 400, after: 160 },
+      border: { bottom: { style: "single", size: 6, color: "000000", space: 2 } },
+      children: [new TextRun({ text: RACK_SECTION_HEADING, bold: true, size: 24 })],
+    }),
+  ];
+  for (const rack of racks) {
+    out.push(partHeading(xmlSafe(rack.scope ? `${rack.title} — ${rack.scope}` : rack.title)));
+    const image = rack.elevationPng ? elevationImage(rack.elevationPng) : null;
+    if (image) out.push(image);
+    else {
+      const pointer = rack.elevationPdfMissing
+        ? "Elevation drawing available on request."
+        : `Elevation: see racks/${rack.folder}/elevation.pdf in this package.`;
+      out.push(new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: xmlSafe(pointer), italics: true })] }));
+    }
+    out.push(rackTable(rack), new Paragraph({ spacing: { after: 240 }, children: [] }));
+  }
+  return out;
+}
+
 export async function buildSpecDocx(spec: AssembledSpec): Promise<Buffer> {
   const dateStr = new Date(spec.date).toLocaleDateString(undefined, {
     year: "numeric",
@@ -73,7 +163,7 @@ export async function buildSpecDocx(spec: AssembledSpec): Promise<Buffer> {
     day: "numeric",
   });
 
-  const children: Paragraph[] = [
+  const children: Array<Paragraph | Table> = [
     new Paragraph({
       heading: HeadingLevel.TITLE,
       children: [new TextRun({ text: spec.projectName, bold: true, size: 32 })],
@@ -133,6 +223,9 @@ export async function buildSpecDocx(spec: AssembledSpec): Promise<Buffer> {
     }
   }
 
+  // #296 — a section of its own, before the record of what was left unspecified.
+  if (spec.racks?.length) children.push(...rackSection(spec.racks));
+
   if (spec.waived.length) {
     children.push(
       new Paragraph({
@@ -163,7 +256,7 @@ export async function buildSpecDocx(spec: AssembledSpec): Promise<Buffer> {
     }
   }
 
-  if (!spec.sections.length) {
+  if (!spec.sections.length && !spec.racks?.length) {
     children.push(
       new Paragraph({
         alignment: AlignmentType.LEFT,

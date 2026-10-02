@@ -1,6 +1,7 @@
 import type { CatalogPart } from "@/lib/stores/catalog";
 import { partText, type SpecSection } from "@/lib/specs/sections";
 import { hasPrintableSpec } from "@/lib/specs/articles";
+import type { ScheduleRow } from "@/lib/rack/submittal";
 
 /* ------------------------------------------------------------------ *
  * Bid-spec matching + assembly (D94).
@@ -170,6 +171,22 @@ export type AssembledSpec = {
   /** Rows the user waived, carried through so the document's own record
    *  shows what was consciously left unspecified. */
   waived: Array<{ sku: string; desc: string; reason: string }>;
+  /** #296 — racks in a client package: printed after the sections as
+   *  "27 11 16 — Communications Racks, Frames and Enclosures" (D573). */
+  racks?: RackSpecSection[];
+};
+
+/** #296 — one rack in the D94 document: heading, front elevation, schedule. */
+export type RackSpecSection = {
+  title: string;
+  scope?: string;
+  /** The rack's folder in the package (`racks/<folder>/`), for the elevation pointer. */
+  folder: string;
+  schedule: ScheduleRow[];
+  /** The front elevation (D577); absent = the raster failed → a pointer to elevation.pdf. */
+  elevationPng?: Buffer;
+  /** True when the package has no elevation.pdf for this rack either (render failed or late). */
+  elevationPdfMissing?: boolean;
 };
 
 /**
