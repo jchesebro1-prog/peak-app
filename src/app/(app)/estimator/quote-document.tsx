@@ -78,6 +78,10 @@ export type QuoteDocumentProps = {
   /** #293 — sku → the photo a key product prints beside its paragraph. The
    *  print route inlines data URIs (it has no session); absent = no photos. */
   keyProductPhotos?: Record<string, { src: string; alt: string }>;
+  /** #293 slice 3 — "web" for the portal and share pages: fluid up to the
+   *  sheet's 740px, with QUOTE_WEB_CSS's phone rules. Absent / "sheet" renders
+   *  byte-for-byte as before (the PDF and the baseline fixture). */
+  layout?: "sheet" | "web";
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -92,6 +96,29 @@ nextjs-portal { display: none !important; }
 .est-doc .est-line, .est-doc .est-optbox, .est-doc .est-totals, .est-doc .est-terms, .est-doc .est-accept, .est-doc .est-sig { break-inside: avoid; page-break-inside: avoid; }
 .est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }
 .est-doc .est-appendix { break-before: page; page-break-before: always; }
+`;
+
+/** #293 slice 3 — page CSS for layout="web" (the portal and share pages):
+ *  phone padding under 600px with one-column header and signature grids, a
+ *  key-product photo full width above its paragraph under 480px, the sheet
+ *  chrome (shadow, radius) only above 760px, and the page chrome dropped
+ *  when the page is printed. !important because the document's own styles
+ *  are inline. */
+export const QUOTE_WEB_CSS = `
+.est-web { margin: 0 auto; }
+@media (max-width: 760px) { .est-web { box-shadow: none !important; border-radius: 0 !important; } }
+@media (max-width: 600px) {
+  .est-web { padding: 20px 16px !important; }
+  .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
+}
+@media (max-width: 480px) {
+  .est-web .est-kp img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+}
+@media print {
+  html, body { background: #fff !important; }
+  .pk-no-print { display: none !important; }
+  .est-web { box-shadow: none !important; padding: 0 !important; max-width: none !important; }
+}
 `;
 
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 72%, #000)";
@@ -303,6 +330,7 @@ function ItemizedLines(props: {
 
 export default function QuoteDocument(p: QuoteDocumentProps) {
   const isItemized = p.detail === "itemized";
+  const web = p.layout === "web";
   const showLines = p.pdfQty || p.pdfNotes || p.pdfPrices;
   const lineCols = [p.pdfNotes ? "1fr" : "", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
   const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
@@ -428,9 +456,10 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
 
   return (
         <div
-          className="est-doc"
+          className={web ? "est-doc est-web" : "est-doc"}
           style={{
-            width: 740,
+            width: web ? "100%" : 740,
+            ...(web ? { maxWidth: 740, boxSizing: "border-box" as const } : {}),
             background: "#fff",
             borderRadius: 4,
             boxShadow: "0 6px 30px rgba(0,0,0,.12)",
@@ -505,6 +534,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
 
           {/* prepared for / project / prepared by */}
           <div
+            className={web ? "est-meta" : undefined}
             style={{
               display: "grid",
               gridTemplateColumns: "1.1fr 1.3fr 1fr",

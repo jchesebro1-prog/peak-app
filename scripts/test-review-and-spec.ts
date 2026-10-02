@@ -10721,6 +10721,7 @@ seeded()
   .then(() => systemLibrary293sAsyncChecks())
   .then(() => systemLibrary293sFinalFixAsyncChecks())
   .then(() => shareLinks293tAsyncChecks())
+  .then(() => onlineDoc293tAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -45438,4 +45439,147 @@ async function shareLinks293tAsyncChecks(): Promise<void> {
   const fresh = await n293tEnsure(QS, "Tester", { secret: S, now: now + 3000 });
   ok(fresh.ok && made.ok && fresh.link.path !== made.link.path, "#293t revoke (DB): Copy client link after a revoke makes a new link");
   ok(!(await n293tRevoke(fixtureId(293, "t-share-never"), "x")).ok, "#293t revoke (DB): an unknown quote is refused");
+}
+
+/* ======================================================================
+   #293 slice 3 — the web document: layout="web", what the online pages
+   must never render, the one loader (sent version, photos as scoped URLs),
+   and the photo set a sent revision may serve.
+   ====================================================================== */
+import { readdirSync as n293tReaddir } from "node:fs";
+import { createHash as n293tSha } from "node:crypto";
+import { loadQuoteDocumentProps as n293tLoad } from "@/lib/quote-pdf/document-loader";
+import { photoDocForRevision as n293tPhotoFor, servePhotoForRevision as n293tServe, revisionSections as n293tRevSections, ONLINE_PHOTO_CACHE as n293tPhotoCache } from "@/lib/quote-share/photo-response";
+import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-document-data";
+{
+  const base = JSON.parse(readFileSync(join(process.cwd(), "docs/superpowers/fixtures/293-quote-document-baseline.json"), "utf8")) as Record<string, string>;
+  ok(p293Render({ ...p293Props(), layout: "sheet" }) === base.itemized, "#293t web: layout=\"sheet\" renders byte-for-byte as the baseline");
+  const web = p293Render({ ...p293Props(), layout: "web" });
+  ok(web.includes('class="est-doc est-web"') && web.includes("width:100%;max-width:740px;box-sizing:border-box") && web.includes('class="est-meta"'),
+    "#293t web: fluid up to 740px, with the header grid marked for the phone layout");
+  const css = (p293Mod() as unknown as { QUOTE_WEB_CSS: string }).QUOTE_WEB_CSS;
+  ok(/@media \(max-width: 600px\)[\s\S]*\.est-web \{ padding: 20px 16px !important; \}/.test(css) &&
+     /@media \(max-width: 480px\)[\s\S]*\.est-web \.est-kp img \{ float: none !important;/.test(css) &&
+     /@media \(max-width: 760px\)[\s\S]*box-shadow: none !important/.test(css) && css.includes(".pk-no-print { display: none !important; }"),
+    "#293t web: phone padding < 600px, photo above its paragraph < 480px, sheet chrome only > 760px, page chrome dropped in print");
+
+  // Never rendered (spec §5.6): internal money, notes, vendor terms, review, links.
+  const AT = Date.UTC(2026, 9, 1, 15);
+  const secret = {
+    id: "Q-293T", name: "Never render", customer: "Walk-in", customerId: null, owner: "Pat", preparedBy: "", updatedAt: AT, createdAt: AT, revisions: [],
+    quoteNote: "", assumptions: "", paymentTerms: "Net 30", margin: 0.4242, tierMargin: 0.3737, pricingTier: "TIER-SECRET-293",
+    review: { note: "REVIEW-SECRET-293" }, history: [{ at: 1, to: "draft", note: "HISTORY-SECRET-293" }],
+    shareLink: { nonce: "NONCE-SECRET-293", expiresAt: 1, createdAt: 1, createdBy: "x" }, pdf: { blobPath: "quotes/BLOB-SECRET-293.pdf" },
+    spec: { sections: [
+      { id: "n", name: "Narr", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Intro.",
+        items: [{ id: 1, sku: "S1", desc: "Line one", qty: 1, unit: "ea", cost: 31337.77, price: 50000, internalNote: "INTERNAL-SECRET-293", link: "https://x.example/LINK-SECRET-293", room: "ROOM-SECRET-293" }],
+        keyProducts: [{ lineKey: "1", sku: "S1", text: "Para.", photo: false }] },
+      { id: "i", name: "Items", kind: "materials", mfr: "", freightPct: 0,
+        items: [{ id: 2, sku: "VQ", desc: "Vendor", qty: 1, unit: "ea", cost: 27182.81, price: 40000, vendorQuoteId: "VQ-S", internalNote: "INTERNAL2-SECRET-293" }] },
+    ] },
+    vendorQuotes: [{ id: "VQ-S", vendor: "Acme", quoteNumber: "Q1", description: "Motors", display: "itemized", lines: [{ id: 1, description: "Motor", qty: 1, unit: "ea", amount: 27182.81 }],
+      terms: "TERMS-SECRET-293", notes: "NOTES-SECRET-293", total: 27182.81, includesFreight: false }],
+    pdfOptions: {},
+  };
+  const props = n293tDocData(secret as never, null, { companyName: "Peak Systems Group", logoDark: null });
+  for (const [label, html] of [["narrative", p293Render({ ...props, layout: "web" })], ["BOM", p293Render({ ...n293tBom(props), layout: "web" })]] as const) {
+    ok(!/SECRET-293/.test(html) && !html.includes("31,337.77") && !html.includes("27,182.81") && !html.includes("42.42") && !html.includes("37.37"),
+      `#293t never rendered (${label}): no cost, margin, tier, internal note, vendor terms/notes, link, room, review, history, nonce or PDF path`);
+  }
+
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const loader = rd("src/lib/quote-pdf/document-loader.ts");
+  const print = rd("src/app/print/quote/[id]/page.tsx");
+  ok(["quoteDocumentDataFor(", "purchasePerksForCompany(", "purchasePerksDocLine(", "keyProductPhotoDataUris(", "getCustomer(", "getSettings("].every((c) => loader.includes(c) && print.includes(c)),
+    "#293t loader: the web loader and the print route build the document from the same calls (no drift until the print route moves onto the loader)");
+  ok(loader.includes("quoteAsOfRevision(q, opts.revision)") && loader.includes("keyProductPhotoDocs("), "#293t loader: a revision renders as sent; web photos are the printed docs as scoped URLs");
+  const pr = rd("src/lib/quote-share/photo-response.ts");
+  ok(pr.includes("keyProductPhotoDocs(revisionSections(rev))") && pr.includes("PHOTO_TYPES.has(doc.contentType)") && pr.includes('"x-content-type-options": "nosniff"') &&
+     pr.includes('"private, max-age=3600"') && pr.includes('createHash("sha1").update(doc.blobKey)'),
+    "#293t photos: only the sent revision's printed photo docs, PNG/JPEG/WebP, nosniff, private 1 h, ETag on id + blobKey hash");
+
+  // Binding (Task 1 review): the as-sent quote feeds only the server QuoteDocument — it is built in the
+  // loader alone, the loader never touches the live PDF or share link, and no client component imports
+  // the loader or the photo responder.
+  const srcFiles = (dir: string): string[] => n293tReaddir(join(process.cwd(), dir), { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? srcFiles(join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [join(dir, e.name)] : []));
+  const all = srcFiles("src").map((f) => [f, rd(f)] as const);
+  const asOfCallers = all.filter(([, t]) => t.includes("quoteAsOfRevision(")).map(([f]) => f).sort();
+  ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
+    `#293t binding: quoteAsOfRevision is called only by the document loader (got ${asOfCallers.join(", ")})`);
+  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: purchasePerksDocLine\(perks\) \};/.test(loader),
+    "#293t binding: the loader is server-only, returns QuoteDocument props only, and never reads the live PDF or the share link");
+  const clientImporters = all.filter(([, t]) => /^["']use client["'];?\s*$/m.test(t) && /from ["']@\/lib\/(quote-pdf\/document-loader|quote-share\/photo-response)["']/.test(t)).map(([f]) => f);
+  ok(clientImporters.length === 0, `#293t binding: no client component imports the loader or the photo responder (got ${clientImporters.join(", ")})`);
+}
+
+async function onlineDoc293tAsyncChecks(): Promise<void> {
+  const P = fixtureId(293, "t-doc-part");
+  const P2 = fixtureId(293, "t-doc-item-part");
+  const P3 = fixtureId(293, "t-doc-gif-part");
+  const QID = fixtureId(293, "t-doc-quote");
+  for (const sku of [P, P2, P3]) {
+    await n293MergeUpsert(sku, { desc: "Test293t " + sku, category: "Test293 Cat", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", sku);
+  }
+  const mk = async (sku: string, fileName: string, contentType = "image/webp") => {
+    const d = await n293CreateDoc({ kind: "image", fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-293t/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#293t doc: fixture document failed to create");
+    registerFixture("part_documents", d.id);
+    await n293Attach(d.id, [sku], "Test");
+    registerFixture("part_document_links", n293LinkId(sku, d.id));
+    return d;
+  };
+  const narrDoc = await mk(P, "t-narr.webp");
+  const itemDoc = await mk(P2, "t-item.webp");
+  const gifDoc = await mk(P3, "t-narr.gif", "image/gif");
+  const sections = (intro: string) => [
+    { id: "n", name: "Test293t Narrative", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: intro,
+      items: [{ id: 1, sku: P, desc: "Narr part", qty: 1, unit: "ea", cost: 5, price: 10 }, { id: 3, sku: P3, desc: "Gif part", qty: 1, unit: "ea", cost: 5, price: 10 }],
+      keyProducts: [{ lineKey: "1", sku: P, text: "Para 293t.", photo: true }, { lineKey: "3", sku: P3, text: "Gif para 293t.", photo: true }] },
+    { id: "i", name: "Test293t Itemized", kind: "materials", mfr: "", freightPct: 0,
+      items: [{ id: 2, sku: P2, desc: "Item part", qty: 1, unit: "ea", cost: 5, price: 10 }], keyProducts: [{ lineKey: "2", sku: P2, text: "Never prints", photo: true }] },
+  ];
+  await n293tQCreate({ id: QID, name: "#293t loader", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", quoteNote: "Sent note", spec: { sections: sections("Sent intro 293t."), mobs: [] } });
+  registerFixture("quotes", QID);
+  await n293tQUpdate(QID, { status: "sent", pdfOptions: { pdfCover: true } as never });
+  await n293tQAddRev(QID, { by: "Test", reason: "sent", note: "Sent" });
+  await n293tQUpdate(QID, { name: "Edited after send", quoteNote: "Edited note", spec: { sections: sections("Leaked intro 293t."), mobs: [] } });
+
+  const q = (await n293tQGet(QID))!;
+  const st = n293tState(q);
+  if (st.kind !== "ok") { ok(false, "#293t loader (DB): fixture quote is ok"); return; }
+  const props = await n293tLoad(q, { revision: st.rev, photos: { href: (id) => `/t/photo/${id}` } });
+  ok(props.projectName === "#293t loader" && props.quoteNote === "Sent note" && props.revNum === st.rev.rev && props.revDateMs === st.rev.at,
+    "#293t loader (DB): the sent version — its name, cover note, Rev N and date — not the edit made after sending");
+  ok(props.keyProductPhotos?.[P]?.src === `/t/photo/${narrDoc.id}` && !props.keyProductPhotos?.[P2], "#293t loader (DB): a printed photo becomes its scoped URL; an itemized system's block has none");
+  ok(typeof props.rewardsLine === "string", "#293t loader (DB): the purchase-perks line is loaded as on the PDF");
+  const html = p293Render({ ...props, layout: "web" });
+  ok(html.includes("Sent intro 293t.") && html.includes("Para 293t.") && !html.includes("Leaked intro 293t.") && !html.includes("Edited after send") && !html.includes("Never prints") &&
+     html.includes(`src="/t/photo/${narrDoc.id}"`),
+    "#293t loader (DB): a quote edited after sending shows the SENT version online, photo included");
+  const liveProps = await n293tLoad(q, { photos: { href: (id) => `/t/photo/${id}` } });
+  ok(liveProps.projectName === "Edited after send", "#293t loader (DB): without a revision it renders the live quote (the print route's behaviour)");
+
+  ok((await n293tPhotoFor(st.rev, narrDoc.id))?.id === narrDoc.id, "#293t photos (DB): the sent revision's printed photo is servable");
+  ok((await n293tPhotoFor(st.rev, itemDoc.id)) === null && (await n293tPhotoFor(st.rev, "PD-no-such")) === null && (await n293tPhotoFor(st.rev, "")) === null,
+    "#293t photos (DB): a photo on an itemized system, an unknown id or a blank id is never served");
+
+  // Binding (Task 1 review): only image/png|jpeg|webp is ever linked or served — and the
+  // 404s / 304 below answer before any blob read (the harness has no Blob store).
+  ok(!props.keyProductPhotos?.[P3], "#293t loader (DB): a printed photo that isn't PNG/JPEG/WebP gets no link");
+  const req = (h: Record<string, string> = {}) => new Request("http://x.test/p", { headers: h });
+  const gif = await n293tServe(req(), st.rev, gifDoc.id);
+  const item = await n293tServe(req(), st.rev, itemDoc.id);
+  const unknown = await n293tServe(req(), st.rev, "PD-no-such");
+  ok(gif.status === 404 && item.status === 404 && unknown.status === 404 && (await unknown.text()) === "Not found",
+    "#293t photos (DB): a GIF on the sent revision, an itemized system's photo and an unknown id are a plain 404");
+  const etag = `"${narrDoc.id}-${n293tSha("sha1").update(narrDoc.blobKey!).digest("hex").slice(0, 16)}"`;
+  const cached = await n293tServe(req({ "if-none-match": etag }), st.rev, narrDoc.id);
+  ok(cached.status === 304 && cached.headers.get("etag") === etag && cached.headers.get("cache-control") === n293tPhotoCache && n293tPhotoCache === "private, max-age=3600",
+    "#293t photos (DB): a matching If-None-Match is a 304 on the doc id + blobKey ETag, private 1 h");
+  const edited = (await n293tQGet(QID))!;
+  ok(n293tRevSections(st.rev).some((s) => s.narrative === "Sent intro 293t.") && !n293tRevSections(st.rev).some((s) => s.narrative === "Leaked intro 293t.") &&
+     (edited.spec as { sections: { narrative?: string }[] }).sections.some((s) => s.narrative === "Leaked intro 293t."),
+    "#293t photos (DB): the photo set is read from the sent revision's sections, not the edited live quote");
 }
