@@ -43400,6 +43400,35 @@ import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProble
   }
   ok(rd292("scripts/smoke-routes.ts").includes('"/estimating-rules/curtain-mounts"'), "#292 source: smoke covers /estimating-rules/curtain-mounts");
 }
+// ---- #292 weight path: never a guessed basis or bolt width (fabricFromPart's lin-yd / 54" defaults stay for the lineset tool) ----
+{
+  const fabs = [
+    ...C292_FABS,
+    { sku: "FAB-NOBASIS", desc: "Basisless Velour 25 oz", oz: 25, boltWidthIn: 54 },
+    { sku: "FAB-NOBOLT", desc: "Boltless Velour 25 oz", oz: 25, ozBasis: "lin-yd" as const },
+    { sku: "FAB-SQ", desc: "Square Muslin 6 oz", oz: 6, ozBasis: "sq-yd" as const },
+  ];
+  const one = (fabric: string) => c292Collect([c292Sec("s1", [c292Cur(1, { desc: `Main Drape — ${fabric}, 21.5'W × 18'H, 50% fullness` })])], { fabrics: fabs }).types[0];
+  const wctx = {
+    style: "submittal" as const,
+    quote: { id: "Q-1", number: "EST-1042", name: "", customer: "", venue: "", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "", index: 1, total: 1, now: 1,
+  };
+  const fabricRow = (t: ReturnType<typeof one>) => c292Model(t, wctx).materials.find((r) => r.label === "Fabric")?.value;
+  const weightRow = (t: ReturnType<typeof one>) => c292Model(t, wctx).materials.find((r) => r.label === "Weight");
+  const noBasis = one("Basisless Velour 25 oz");
+  ok(noBasis.weightLbEach[0] === null && noBasis.weightLbTotal === null && !weightRow(noBasis) && noBasis.warnings.includes("Weight not set for Basisless Velour 25 oz — Catalog"),
+    "#292 weight: oz with no basis weighs nothing (no lin-yd guess) and warns Weight not set");
+  const noBolt = one("Boltless Velour 25 oz");
+  ok(noBolt.weightLbEach[0] === null && noBolt.weightLbTotal === null && !weightRow(noBolt) && noBolt.warnings.includes("Weight not set for Boltless Velour 25 oz — Catalog"),
+    "#292 weight: a lin-yd fabric with no bolt width weighs nothing (no 54\" guess) and warns Weight not set");
+  const sq = one("Square Muslin 6 oz");
+  const sqWant = c292SetWeight({ name: "Main Drape", fabResolved: c292FabFrom({ desc: "Square Muslin 6 oz", oz: 6, ozBasis: "sq-yd" })!, w: 21.5, h: 18, full: 50, qty: 1, chain: c292ChainJack, batten: 0, mode: "dead" }, c292Weights).goods;
+  ok(sq.weightLbEach[0] === sqWant && sq.weightLbTotal === (sqWant as number) * 2 && !!weightRow(sq) && !sq.warnings.some((w) => w.startsWith("Weight not set")),
+    "#292 weight: a sq-yd fabric weighs without a bolt width");
+  ok(fabricRow(noBasis) === `Basisless Velour 25 oz · 54" bolt` && fabricRow(noBolt) === "Boltless Velour 25 oz · 25 oz/lin yd" && fabricRow(sq) === "Square Muslin 6 oz · 6 oz/sq yd",
+    "#292 weight: the Fabric row prints oz only with its basis — an unset basis drops the oz figure, never prints 'lin yd'");
+}
 
 async function curtain292AsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");

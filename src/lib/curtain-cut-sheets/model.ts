@@ -134,7 +134,8 @@ function fabricValue(type: CurtainType): string {
   const f = type.curtains[0].fabric;
   if (!name) return "";
   const facts: string[] = [];
-  if (f?.oz) facts.push(`${f.oz} oz/${f.ozBasis === "sq-yd" ? "sq yd" : "lin yd"}`);
+  // oz prints only with its basis — an unset basis drops the figure rather than implying lin yd
+  if (f?.oz && f.ozBasis) facts.push(`${f.oz} oz/${f.ozBasis === "sq-yd" ? "sq yd" : "lin yd"}`);
   if (f?.boltWidthIn) facts.push(`${f.boltWidthIn}" bolt`);
   return facts.length ? `${name} · ${facts.join(", ")}` : name;
 }

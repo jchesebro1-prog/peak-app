@@ -58,9 +58,14 @@ export function sewnAreaEach(c: Pick<CutSheetCurtain, "widthFt" | "heightFt" | "
   return curtainCost({ finishedWidthFt: c.widthFt, finishedHeightFt: c.heightFt, fullnessPct: c.fullnessPct, qty: 1 }, { fabricRate: 0, sewingPct: 0 }).sewnAreaSqft;
 }
 
-/** computeSetWeight(...).goods for ONE curtain (fabric + 6" cut + chain + 0.5 lb/ft hardware); null when the fabric has no oz. */
+/**
+ * computeSetWeight(...).goods for ONE curtain (fabric + 6" cut + chain + 0.5 lb/ft hardware); null when the fabric has no oz,
+ * no weight basis, or is lin-yd with no bolt width — fabricFromPart's lin-yd / 54" defaults would be a guess on a cut sheet.
+ */
 export function weightEach(c: CutSheetCurtain): number | null {
-  const fab = c.fabric ? fabricFromPart({ desc: c.fabric.name, oz: c.fabric.oz, ozBasis: c.fabric.ozBasis, boltWidthIn: c.fabric.boltWidthIn }) : null;
+  const f = c.fabric;
+  if (!f || !f.ozBasis || (f.ozBasis === "lin-yd" && !(typeof f.boltWidthIn === "number" && f.boltWidthIn > 0))) return null;
+  const fab = fabricFromPart({ desc: f.name, oz: f.oz, ozBasis: f.ozBasis, boltWidthIn: f.boltWidthIn });
   if (!fab) return null;
   return computeSetWeight(
     { name: c.name, fabResolved: fab, w: c.widthFt, h: c.heightFt, full: c.fullnessPct, qty: 1, chain: c.bottomFinish === "chain" ? CHAIN_JACK : CHAIN_NONE, batten: 0, mode: "dead" },
