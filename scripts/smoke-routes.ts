@@ -217,6 +217,11 @@ const ROUTES = [
   "/portal/quotes/Q-2041?preview=lakefront",
   "/portal/quotes/Q-2041?preview=lakefront&view=bom",
   "/portal/quotes/Q-0?preview=lakefront",
+  // #293 slice 3 — the signed share page: a token with a 0 expiry and a
+  // malformed one, both refused by the shape check before any read (no
+  // leading zero, af6ea385) — both the one 200 "isn't active" card.
+  "/share/quote/Q-2041/0.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "/share/quote/Q-2041/not-a-token",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",

@@ -45781,3 +45781,55 @@ async function portalPage293tAsyncChecks(): Promise<void> {
   ok(n293tPortalState(moved, A).kind === "unavailable" && n293tPortalState(moved, B).kind === "ok",
     "#293t portal (DB): re-linked to another customer — the old customer loses it at once (read live, per request)");
 }
+
+/* ======================================================================
+   #293 slice 3 — the share page: outside the team login, one card for
+   every failure, no index / no Referer, rate limits, read-only, photos
+   scoped to the sent revision, never cached by the service worker.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const mw = rd("src/middleware.ts");
+  const m = mw.match(/matcher:\s*\[\s*"([^"]+)"/);
+  const re = new RegExp("^" + (m ? m[1].replace(/\\\\/g, "\\") : "$^") + "$");
+  ok(!re.test("/share/quote/Q-1/" + "1." + "A".repeat(43)) && !re.test("/share/quote/Q-1/x/photo/PD-1"), "#293t middleware: /share/* skips the team login (it checks its own token)");
+  ok(re.test("/shareholders") && re.test("/") && re.test("/catalog/documents") && !re.test("/print/quote/Q-1") && !re.test("/portal/quotes/Q-1"),
+    "#293t middleware: only share/ is newly exempt; app pages still go through the login gate");
+  ok(mw.includes("|portal|") && mw.includes("|print/|share/|") && mw.includes("/share/quote/[id]/[token]"), "#293t middleware: the exemption sits beside print/ and the doc comment names the route");
+
+  const page = rd("src/app/share/quote/[id]/[token]/page.tsx");
+  ok(page.indexOf("rateLimit(") > -1 && page.indexOf("rateLimit(") < page.indexOf("resolveSharedQuote(") && page.includes('"share-view:" + ') && page.includes("SHARE_VIEW_PER_MIN"),
+    "#293t share page: the per-IP rate limit runs before anything is read");
+  ok(page.includes("robots: { index: false, follow: false }") && page.includes('referrer: "no-referrer"') && page.includes('export const dynamic = "force-dynamic";'),
+    "#293t share page: never indexed, never leaks the token in a Referer, never cached");
+  ok((page.match(/ONLINE_COPY\.shareInactive/g) || []).length === 1 && page.includes("ONLINE_COPY.revising") && page.includes("ONLINE_COPY.tooMany") && !page.includes("notFound("),
+    "#293t share page: one 'isn't active' card for every failure, all 200");
+  ok(!page.includes("/pdf") && !page.includes("pdfHref={pdf") && page.includes("pdfHref={null}"), "#293t share page: no PDF link (the PDF route needs a portal session)");
+  ok(!/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert|rateLimitRefund)\(/.test(page) && !page.includes("cookies(") && !page.includes("auth("),
+    "#293t share page: read-only, and it never reads or sets a session");
+  ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(rd("src/app/share/layout.tsx")), "#293t share page: server-rendered, with its own minimal layout");
+  const photo = rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts");
+  ok(photo.indexOf("rateLimit(") < photo.indexOf("resolveSharedQuote(") && photo.includes('"share-photo:" + clientIp(req)') && photo.includes("SHARE_PHOTO_PER_MIN") &&
+     photo.includes("servePhotoForRevision(req, hit.state.rev, docId)") && photo.includes('hit.state.kind !== "ok"'),
+    "#293t share photos: rate-limited per IP, the same token check as the page, only the sent revision's printed photos");
+  const cfg = rd("next.config.ts");
+  ok(/source: "\/share\/:path\*"[\s\S]{0,300}"Referrer-Policy", value: "no-referrer"[\s\S]{0,200}"X-Robots-Tag", value: "noindex, nofollow"/.test(cfg) &&
+     cfg.indexOf('source: "/share/:path*"') > cfg.indexOf('value: "DENY"'),
+    "#293t headers: /share/* answers no-referrer + noindex, after the global headers");
+  const sw = rd("public/sw.js");
+  ok(sw.includes('requested.pathname.startsWith("/share/")') && sw.includes('target.pathname.startsWith("/share/")'), "#293t service worker: a share page (its token in the URL) is never cached");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes(`"/share/quote/Q-2041/0.${"A".repeat(43)}",`) && smoke.includes('"/share/quote/Q-2041/not-a-token",'), "#293t smoke: a well-formed but invalid token and a malformed one are smoke routes (both 200 cards)");
+  // Beyond the plan's checks: the loader fails closed (null) → the same one card; no-IP
+  // requests share one fixed "unknown" bucket; the as-sent quote and the link record never
+  // reach the page; and the fetch handler never serves or stores a /share/ response.
+  ok(page.includes("!docProps") && page.indexOf("loadQuoteDocumentProps(") < page.indexOf("ONLINE_COPY.shareInactive") && page.includes("revision: ok.rev"),
+    "#293t share page: pinned to the sent revision, and a loader that fails closed shows the same one card");
+  ok(page.includes('clientIpFromHeaders(await headers()) || "unknown"') && photo.includes('.replace(/^share-photo:$/, "share-photo:unknown")'),
+    "#293t share rate limits: a request with no client IP counts against one fixed \"unknown\" key");
+  ok(!/quoteAsOfRevision|shareLink|generateMetadata/.test(page) && !/quoteAsOfRevision|shareLink/.test(photo),
+    "#293t share page: no as-sent quote outside the loader, no link record, fixed metadata");
+  ok(sw.includes('if (sameOrigin && url.pathname.startsWith("/share/")) return;') &&
+     sw.indexOf('url.pathname.startsWith("/share/")') < sw.indexOf('req.mode === "navigate"'),
+    "#293t service worker: share pages and share photos bypass the worker entirely (no cache-first image copy of a token URL)");
+}

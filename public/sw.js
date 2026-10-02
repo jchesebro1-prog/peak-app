@@ -60,13 +60,14 @@ function cacheableDocument(req, res) {
   const answered = new URL(res.url);
   if (requested.pathname !== answered.pathname) return false;
   if (requested.pathname === "/login" || requested.pathname.startsWith("/api/")) return false;
+  if (requested.pathname.startsWith("/share/")) return false; // #293: a token URL is never kept
   return (res.headers.get("content-type") || "").includes("text/html");
 }
 
 self.addEventListener("message", (event) => {
   if (!event.data || event.data.type !== "CACHE_ROUTE") return;
   const target = new URL(String(event.data.url || ""), self.location.origin);
-  if (target.origin !== self.location.origin || target.pathname.startsWith("/api/") || target.pathname === "/login") return;
+  if (target.origin !== self.location.origin || target.pathname.startsWith("/api/") || target.pathname === "/login" || target.pathname.startsWith("/share/")) return;
   target.searchParams.delete("_rsc");
   const request = new Request(target.toString(), {
     method: "GET",
@@ -92,6 +93,11 @@ self.addEventListener("fetch", (event) => {
 
   // Never cache the API surface — always network (may fail offline by design).
   if (sameOrigin && url.pathname.startsWith("/api/")) return;
+
+  // #293: the client share page and its photos carry a token in the URL —
+  // always network, never a cached copy (the image cache below is cache-first,
+  // so a revoked link's photos would otherwise keep loading from here).
+  if (sameOrigin && url.pathname.startsWith("/share/")) return;
 
   // RSC flight responses are not HTML documents. Caching one under a route
   // poisons Back/reload with an unreadable component payload.
