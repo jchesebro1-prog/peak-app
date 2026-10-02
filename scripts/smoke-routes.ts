@@ -79,6 +79,8 @@ const ROUTES = [
   "/catalog/documents/upload", // #207 — bulk drop
   "/catalog/documents/photos", // photo sheet — export, upload, preview, import
   "/catalog/documents/photos/export", // photo sheet — the .xlsx download
+  "/catalog/rack-data", // #296 — rack data sheet: download, upload, preview, import
+  "/catalog/rack-data/export", // #296 — the rack data CSV download
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
   "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/estimating-rules",

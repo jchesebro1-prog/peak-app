@@ -10755,6 +10755,7 @@ seeded()
   .then(() => photoSheetIoAsyncChecks())
   .then(() => photoSheetImportAsyncChecks())
   .then(() => photoSheetFinalAsyncChecks())
+  .then(() => rack296SheetAsyncChecks())
   .then(() => curtain292AsyncChecks())
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
@@ -43665,6 +43666,72 @@ import { optionalPartFields as c296PartFields, rackFactsProblem as c296Problem }
   ok(rd296("src/app/(app)/estimator/actions.ts").includes("rackFactsOrUndefined("), "#296 source: catalog search hits carry rack facts");
   ok(rd296("src/app/(app)/design/assemblies/actions.ts").includes("rack: h.rack"), "#296 source: assembly part hits carry rack facts");
   ok(rd296("src/app/(app)/catalog/actions.ts").includes("rackFactsProblem("), "#296 source: upsertPart gates rack facts");
+}
+
+/* ===== #296 — rack-data sheet ===== */
+import { rackSheetRows as c296Rows, rackSheetPatch as c296SheetPatch, rackSheetExportGrid as c296ExportGrid, rackSheetCsv as c296SheetCsv, rackImportSummary as c296Summary, RACK_SHEET_HEADERS as c296Headers } from "@/lib/rack/part-facts-sheet";
+import { parseCsv as c296ParseCsv } from "@/app/(app)/import/parse";
+{
+  const grid = c296ExportGrid([
+    { sku: "A-1", mfr: "Acme", desc: "Amp, 2-channel", ruHeight: 2, depthIn: 15.5, weightLb: 18, powerWatts: 0, maxPowerWatts: 450, powerCapacityWatts: 1800, rackMount: "rack", rackWidth: "half", mountFace: "front", airflow: "front-to-rear", rackNotes: 'Leave 1U "vent" above' },
+    { sku: "B-2", desc: "Bare part" },
+  ]);
+  ok(grid[0].join("|") === c296Headers.join("|") && grid.length === 3, "#296 sheet: export grid is the header row plus one row per part");
+  const rt = c296Rows(grid);
+  ok(rt.ok && rt.rows.length === 2 && rt.rows[0].sku === "A-1" && rt.rows[0].line === 2 && rt.rows[1].line === 3, "#296 sheet: rows carry sku and their own file line");
+  const p0 = rt.ok ? c296SheetPatch(rt.rows[0].cells) : null;
+  ok(!!p0 && p0.ok && p0.patch.ruHeight === 2 && p0.patch.depthIn === 15.5 && p0.patch.weightLb === 18 && p0.patch.powerWatts === 0 && p0.patch.maxPowerWatts === 450 && p0.patch.powerCapacityWatts === 1800 && p0.patch.rackMount === "rack" && p0.patch.rackWidth === "half" && p0.patch.mountFace === "front" && p0.patch.airflow === "front-to-rear" && p0.patch.rackNotes === 'Leave 1U "vent" above', "#296 sheet: every column round-trips export -> rows -> patch (0 W kept)");
+  const p1 = rt.ok ? c296SheetPatch(rt.rows[1].cells) : null;
+  ok(!!p1 && p1.ok && Object.keys(p1.patch).length === 0, "#296 sheet: blank cells are skipped, never cleared");
+  const viaCsv = c296ParseCsv(c296SheetCsv(grid));
+  ok(viaCsv.ok && viaCsv.rows[0][2] === "Amp, 2-channel" && viaCsv.rows[0][13] === 'Leave 1U "vent" above' && viaCsv.headers[0] === "SKU", "#296 sheet: the CSV text (BOM, quotes, commas) parses back through the import hub's parser");
+  ok(c296SheetCsv(grid).startsWith("\ufeff"), "#296 sheet: export CSV starts with a UTF-8 BOM for Excel");
+  const noSku = c296Rows([["Description", "RU height"], ["x", "1"]]);
+  ok(!noSku.ok && noSku.error === "The sheet needs a SKU column.", "#296 sheet: a sheet without a SKU column is refused");
+  const alias = c296Rows([["  sku ", "ru  height", "DEPTH (IN)", "Weird extra"], ["Z", "1.5", "9", "ignored"]]);
+  const ap = alias.ok ? c296SheetPatch(alias.rows[0].cells) : null;
+  ok(!!ap && ap.ok && ap.patch.ruHeight === 1.5 && ap.patch.depthIn === 9, "#296 sheet: header case/spacing tolerated, unknown columns ignored");
+  const bad = c296SheetPatch({ "Airflow": "up" });
+  ok(!bad.ok && bad.error.includes("airflow"), "#296 sheet: an invalid enum names the field");
+  const badRu = c296SheetPatch({ "RU height": "1.3" });
+  ok(!badRu.ok && badRu.error.includes("RU height"), "#296 sheet: a bad RU height names the field");
+  const info = c296Rows([["SKU", "Manufacturer", "Description", "RU height"], ["Q", "Informational", "Only", ""], ["", "", "", ""]]);
+  const ip = info.ok ? c296SheetPatch(info.rows[0].cells) : null;
+  ok(info.ok && info.rows.length === 1 && !!ip && ip.ok && Object.keys(ip.patch).length === 0, "#296 sheet: Manufacturer/Description never write; wholly blank rows skipped");
+  ok(c296Summary([{ line: 2, sku: "a", status: "updated" }, { line: 3, sku: "b", status: "unknown-sku" }, { line: 4, sku: "c", status: "updated" }, { line: 5, sku: "d", status: "unchanged" }]) === "2 updated · 1 unchanged · 1 unknown SKU", "#296 sheet: summary line");
+  const rd296b = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok((rd296b("src/app/(app)/catalog/rack-data/actions.ts").match(/requirePerm\("create"\)/g) ?? []).length === 2, "#296 source: preview and import both gate on requirePerm(\"create\")");
+  ok(rd296b("src/app/(app)/catalog/rack-data/export/route.ts").includes('requirePerm("create")'), "#296 source: the rack-data export gates on create");
+  ok(rd296b("src/app/(app)/catalog/rack-data/rack-data-client.tsx").includes("Blank cells") || rd296b("src/app/(app)/catalog/rack-data/page.tsx").includes("Blank cells never erase what&apos;s already saved."), "#296 source: the page promises blank cells never erase");
+  ok(!/from "@\/lib\/stores|from "@\/db/.test(rd296b("src/app/(app)/catalog/rack-data/rack-data-client.tsx")), "#296 source: the rack-data client imports no store or db");
+}
+
+async function rack296SheetAsyncChecks(): Promise<void> {
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const { mergeUpsert, get } = await import("@/lib/stores/catalog");
+  const { applyRackRows } = await import("@/lib/rack/part-facts-sheet-server");
+  const A = fid(296, "sheet-a");
+  const B = fid(296, "sheet-b");
+  const GONE = fid(296, "sheet-missing");
+  await mergeUpsert(A, { desc: "Test296 Sheet part", category: "Test296", unit: "ea", list: 1, cost: 1, weightLb: 10 });
+  reg("catalog_parts", A);
+  await mergeUpsert(B, { desc: "Test296 Sheet part B", category: "Test296", unit: "ea", list: 1, cost: 1 });
+  reg("catalog_parts", B);
+  const row = (line: number, sku: string, cells: Record<string, string>) => ({ line, sku, cells: { SKU: sku, ...cells } });
+  const dry = await applyRackRows([row(2, A, { "Power (W)": "120" })], { dryRun: true });
+  ok(dry[0].status === "updated" && (await get(A))?.powerWatts === undefined, "#296 sheet apply: dry run reports updated and writes nothing");
+  const res = await applyRackRows([row(2, A, { "Power (W)": "120" }), row(3, GONE, { "Power (W)": "5" }), row(4, B, { "RU height": "9.3" }), row(5, B, {})]);
+  const a = await get(A);
+  ok(a?.weightLb === 10 && a?.powerWatts === 120, "#296 sheet apply: only the filled cell is written; the stored weight stays");
+  ok(res[0].status === "updated" && res[1].status === "unknown-sku" && res[2].status === "invalid" && res[3].status === "unchanged", "#296 sheet apply: updated / unknown-sku / invalid / unchanged are reported per row");
+  ok(res[2].line === 4 && (res[2].message ?? "").startsWith("Rack data: RU height must be"), "#296 sheet apply: an invalid row carries its line and the field's error");
+  ok((await get(B))?.ruHeight === undefined, "#296 sheet apply: an invalid row writes nothing");
+  const again = await applyRackRows([row(2, A, { "Power (W)": "120", "Weight (lb)": "10" })]);
+  ok(again[0].status === "unchanged", "#296 sheet apply: identical values report unchanged");
+  const zero = await applyRackRows([row(2, B, { "Power (W)": "0" }), row(3, B, { "Power (W)": "0" })]);
+  ok(zero[0].status === "updated" && zero[1].status === "unchanged" && (await get(B))?.powerWatts === 0, "#296 sheet apply: 0 W is a real value and a SKU listed twice compares against the first row");
+  const noSku = await applyRackRows([row(2, "", { "Power (W)": "1" })]);
+  ok(noSku[0].status === "invalid", "#296 sheet apply: a row without a SKU is invalid");
 }
 
 async function curtain292AsyncChecks(): Promise<void> {

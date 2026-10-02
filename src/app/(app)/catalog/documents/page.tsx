@@ -120,6 +120,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           {can("manage_users", user.roles) && <ThumbnailButton />}
           {can("manage_users", user.roles) && <CatalogImagesButton />}
           <Link href="/catalog/documents/photos" className="pk-btn-outline" style={{ textDecoration: "none" }}>Photo sheet</Link>
+          <Link href="/catalog/rack-data" className="pk-btn-outline" style={{ textDecoration: "none" }}>Rack data sheet</Link>
           <Link href="/catalog/documents/upload" className="pk-btn-accent" style={{ textDecoration: "none" }}>Upload many</Link>
         </div>
       </div>
