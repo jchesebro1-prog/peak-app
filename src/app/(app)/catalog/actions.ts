@@ -12,7 +12,7 @@ import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { runCatalogImport } from "./import";
 import { parsePortsField, serializePorts } from "@/lib/catalog-ports";
 import type { Port } from "@/lib/catalog-connect";
-import { validateSameAs, optionalPartFields, specSortValue, fabricRateProblem } from "./part-form";
+import { validateSameAs, optionalPartFields, specSortValue, fabricRateProblem, fabricFactsProblem } from "./part-form";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
@@ -96,6 +96,8 @@ export async function upsertPart(formData: FormData): Promise<void> {
   const optional = optionalPartFields(formData);
   const rateProblem = fabricRateProblem(category, optional.curtainAreaRate, unit);
   if (rateProblem) redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(rateProblem)}`);
+  const factsProblem = fabricFactsProblem(category, unit, optional);
+  if (factsProblem) redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(factsProblem)}`);
 
   // Compared through serializePorts — the same stable key order the editor's
   // hidden field uses — so re-saving the modal without touching the ports is a

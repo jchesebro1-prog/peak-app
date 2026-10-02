@@ -10714,6 +10714,7 @@ seeded()
   .then(() => rename288AsyncChecks())
   .then(() => category289AsyncChecks())
   .then(() => packages289AsyncChecks())
+  .then(() => curtain292AsyncChecks())
   .then(() => narrative293AsyncChecks())
   .then(() => narrativePhotos293AsyncChecks())
   .then(() => narrativeFinal293AsyncChecks())
@@ -42910,6 +42911,893 @@ import { showQuotedBeforeShelf as s290Shelf, parseCatalogParams as s290Params } 
   ok(s290Shelf(s290Params({ dept: "lighting" })) === true, "#290 shelf: a part department still shows it");
   ok(s290Shelf(s290Params({ q: "s4" })) === false && s290Shelf(s290Params({ page: "2" })) === false && s290Shelf(s290Params({ cat: "Lighting" })) === false, "#290 shelf: a search, a filter or page 2 hides it (unchanged)");
 }
+
+/* ============================================================================
+   #292 — curtain cut sheets: one sheet per curtain TYPE (elevation, mounting
+   detail, materials, hardware), read from Estimator or Grid quotes. Pure
+   checks run here; DB checks run in curtain292AsyncChecks() (registered on
+   the promise chain after packages289AsyncChecks).
+   ============================================================================ */
+import {
+  ASSUMED_MOUNT as c292Assumed,
+  CURTAIN_MOUNT_TYPES as c292MountTypes,
+  GRID_CURTAIN_DEFAULTS as c292GridDefaults,
+  cleanCurtainFinishes as c292CleanFinishes,
+  isMountTypeId as c292IsMount,
+  mountTypeForTrackMounting as c292MountFor,
+} from "@/lib/curtain-cut-sheets/vocab";
+import { parseEstimatorCurtainDesc as c292ParseEst, parseGridCurtainDesc as c292ParseGrid } from "@/lib/curtain-cut-sheets/parse";
+import { linkCurtainTracks as c292Link, newCurtainTrackKey as c292Key } from "@/lib/curtain-cut-sheets/track-link";
+import { curtainDesc as c292CurtainDesc, type GridCurtain as C292GridCurtain } from "@/lib/design/grid-bom";
+import type { SpecItem as C292Item, SpecSection as C292Section } from "@/app/(app)/estimator/types";
+
+const C292_TRACK = { seriesId: "adc-280-black", operation: "biparting" as const, runFt: 40, curved: false, mounting: "batten" as const, qty: 1 };
+function c292Sec(id: string, items: Array<Partial<C292Item> & { id: number }>): C292Section {
+  return {
+    id, name: id, kind: "materials", mfr: "", freightPct: 0,
+    items: items.map((it) => ({ sku: "X", desc: "x", qty: 1, unit: "ea", cost: 0, price: 0, ...it }) as C292Item),
+  };
+}
+
+// ---- vocabulary ----
+{
+  ok(c292MountFor("batten") === "track-batten" && c292MountFor("ceiling") === "track-ceiling" && c292MountFor("structure") === "track-structure",
+    "#292 vocab: batten / ceiling / structure mountings map to their mount types");
+  ok(c292MountFor("rafter") === "track-other" && c292MountFor("") === "track-other",
+    "#292 vocab: any other mounting string is track-other (a third TrackMounting never breaks)");
+  ok(c292MountTypes.map((t) => t.id).join() === "track-batten,track-ceiling,track-structure,tie-batten,wall-hookloop" && !c292IsMount("track-other") && c292IsMount("tie-batten"),
+    "#292 vocab: five pickable mount types; track-other is never pickable");
+  ok(c292Assumed === "tie-batten" && c292GridDefaults.Draw.mount === "track-batten" && c292GridDefaults.Border.bottom === "hem" && c292GridDefaults.Leg.mount === "tie-batten" && c292GridDefaults.Full.bottom === "chain",
+    "#292 vocab: assumed mount is tie-batten; Grid type defaults per spec §1.4");
+  const cf = c292CleanFinishes({ topFinish: "pipe-pocket", bottomFinish: "velcro", mountType: "track-other" });
+  ok(cf.topFinish === "pipe-pocket" && !("bottomFinish" in cf) && !("mountType" in cf) && Object.keys(c292CleanFinishes(null)).length === 0,
+    "#292 vocab: cleanCurtainFinishes keeps valid values and drops bad or absent ones (never refuses)");
+}
+// ---- parsers ----
+{
+  const fabs = new Set(["Charisma Velour 25 oz", "Encore Velour 22 oz"]);
+  const a = c292ParseEst("Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness", fabs);
+  ok(!!a && a.name === "Main Drape" && a.fabricName === "Charisma Velour 25 oz" && a.widthFt === 21.5 && a.heightFt === 18 && a.fullnessPct === 50,
+    "#292 parse: the exact addCurtain desc round-trips, decimals included");
+  const flat = c292ParseEst("Cyc — Encore Velour 22 oz, 40'W × 20'H, 0% fullness", fabs);
+  ok(!!flat && flat.fullnessPct === 0, "#292 parse: 0% fullness reads as flat");
+  const dash = c292ParseEst("Legs — Stage Left — Encore Velour 22 oz, 6'W × 20'H, 50% fullness", fabs);
+  ok(!!dash && dash.name === "Legs — Stage Left" && dash.fabricName === "Encore Velour 22 oz", "#292 parse: a name containing ' — ' splits at the known fabric");
+  const unknown = c292ParseEst("Legs — Stage Left — Mystery Cloth, 6'W × 20'H, 50% fullness", fabs);
+  ok(!!unknown && unknown.name === "Legs" && unknown.fabricName === "Stage Left — Mystery Cloth", "#292 parse: with no known fabric it splits at the first ' — '");
+  ok(c292ParseEst("Main Drape (black), 20 x 18 ft", fabs) === null && c292ParseEst("Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H", fabs) === null && c292ParseEst("", fabs) === null,
+    "#292 parse: a hand-edited desc reads as null, never a guess");
+  const g: C292GridCurtain = { type: "Leg", name: "SL Leg", widthFt: 6, heightFt: 20.5, fullnessPct: 50, fabricSku: "FAB-1" };
+  const gp = c292ParseGrid(c292CurtainDesc(g, "Encore Velour 22 oz"));
+  ok(!!gp && gp.name === "SL Leg" && gp.gridType === "Leg" && gp.widthFt === 6 && gp.heightFt === 20.5 && gp.fullnessPct === 50 && gp.fabricName === "Encore Velour 22 oz",
+    "#292 parse: curtainDesc round-trips through parseGridCurtainDesc (% fullness)");
+  const gf = c292ParseGrid(c292CurtainDesc({ ...g, type: "Full", fullnessPct: 0 }));
+  ok(!!gf && gf.fullnessPct === 0 && gf.gridType === "Full" && gf.fabricName === "FAB-1", "#292 parse: a flat Grid curtain round-trips (the fabric SKU when no name)");
+  ok(c292ParseGrid("Truss 12in box · 10 ft") === null && c292ParseGrid("SL Leg (Tab) · 6×20 ft · flat · X") === null, "#292 parse: a non-curtain Grid line reads as null");
+}
+// ---- track link ----
+{
+  const cur = (id: number, extra: Partial<C292Item> = {}) => ({ id, curtain: true, ...extra });
+  const trk = (id: number, extra: Partial<C292Item> = {}) => ({ id, track: { ...C292_TRACK }, ...extra });
+  ok(c292Key(41, () => "n0") === "ct-41-n0" && /^ct-41-[0-9a-z]{6,}$/.test(c292Key(41)), "#292 link: newCurtainTrackKey is ct-<line id>-<nonce> (final review #1)");
+  const s1 = c292Sec("a", [cur(1, { curtainTrackKey: "ct-41" })]);
+  const s2 = c292Sec("b", [{ id: 9 }, trk(2, { curtainTrackKey: "ct-41" })]);
+  ok(c292Link([s1, s2]).links.get(s1.items[0])?.id === 2, "#292 link: a shared key matches across sections");
+  const adj = c292Sec("c", [cur(3), trk(4)]);
+  ok(c292Link([adj]).links.get(adj.items[0])?.id === 4, "#292 link: a key-less curtain links to the track line right after it");
+  ok(c292Link([c292Sec("d", [cur(5)]), c292Sec("e", [trk(6)])]).links.size === 0, "#292 link: no adjacency fallback across sections");
+  ok(c292Link([c292Sec("f", [cur(7), { id: 8 }, trk(9)])]).links.size === 0, "#292 link: no fallback past a non-track line");
+  ok(c292Link([c292Sec("g", [cur(10), trk(11, { curtainTrackKey: "ct-99" })])]).links.size === 0, "#292 link: no fallback onto a track that carries its own key");
+  const dupe = c292Sec("h", [cur(12, { curtainTrackKey: "ct-12" }), cur(13, { curtainTrackKey: "ct-12" }), trk(14, { curtainTrackKey: "ct-12" })]);
+  const dl = c292Link([dupe]);
+  ok(dl.links.get(dupe.items[0])?.id === 14 && !dl.links.has(dupe.items[1]) && dl.duplicates.length === 1 && dl.duplicates[0] === dupe.items[1],
+    "#292 link: two curtains on one key — the first links, the second is flagged");
+}
+
+// ---- #292 task 2: geometry + mount details ----
+import { elevation as c292Elev, ftIn as c292FtIn, inchLabel as c292InchLabel, pickScale as c292Pick, topMarks as c292Marks } from "@/lib/curtain-cut-sheets/geometry";
+import { textExtent as c292TextExtent } from "@/lib/curtain-cut-sheets/shapes";
+import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/lib/curtain-cut-sheets/mount-details";
+// ---- geometry ----
+{
+  const m20 = c292Marks(20, 12);
+  ok(m20.count === 21 && m20.spacingIn === 12, "#292 geometry: topMarks(20, 12) → 21 marks at 12\"");
+  const m205 = c292Marks(20.5, 12);
+  ok(m205.count === 22 && m205.spacingIn <= 12 && Math.abs(m205.spacingIn * 21 - 246) < 1e-9, "#292 geometry: topMarks(20.5, 12) → 22 marks at ≤ 12\", both ends marked");
+  ok(c292Marks(0, 12).count === 0 && c292Marks(20, 0).count === 0, "#292 geometry: topMarks of a zero width (or spacing) is 0 marks");
+  ok([c292FtIn(21.5), c292FtIn(18), c292FtIn(0.75), c292FtIn(10.999), c292FtIn(6.0208)].join("|") === `21'-6"|18'-0"|0'-9"|11'-0"|6'-0 1/4"`,
+    "#292 geometry: ftIn rounds to the nearest 1/4\" (spec §2.4 cases)");
+  ok(c292Pick([{ widthFt: 20, heightFt: 18 }], { wIn: 6, hIn: 4 }).label === `1/8"=1'-0"`, "#292 geometry: pickScale picks the largest architectural scale that fits");
+  ok(c292Pick([{ widthFt: 2, heightFt: 2 }], { wIn: 6, hIn: 4 }).label === `1"=1'-0"`, "#292 geometry: a small drop draws at 1\"=1'-0\"");
+  ok(c292Pick([{ widthFt: 200, heightFt: 100 }], { wIn: 6, hIn: 4 }).label === `1/16"=1'-0"`, "#292 geometry: an oversize drop falls back to the smallest scale");
+  const base = { fullnessPct: 50, top: "grommets" as const, bottom: "chain" as const, markSpacingIn: 12, markLabel: "Grommets" as const, box: { wIn: 4.6, hIn: 3.9 } };
+  const three = [{ widthFt: 20, heightFt: 18, qty: 2 }, { widthFt: 10, heightFt: 18, qty: 1 }, { widthFt: 6, heightFt: 18, qty: 4 }];
+  const e3 = c292Elev({ ...base, sizes: three });
+  const texts = (e: { shapes: Array<{ kind: string; text?: string }> }) => e.shapes.filter((s) => s.kind === "text").map((s) => s.text as string);
+  ok(e3.shapes.filter((s) => s.tag === "panel").length === 3 && !texts(e3).some((t) => t.startsWith("Typical")), "#292 geometry: up to 3 sizes are drawn side by side");
+  ok(e3.shapes.filter((s) => s.tag === "mark").length === 21 + 11 + 7 && texts(e3).includes(`Grommets @ 12" o.c. max (21)`) && texts(e3).includes("Qty 2"),
+    "#292 geometry: a grommet at every mark per panel, the o.c. label, and each size's qty");
+  const e4 = c292Elev({ ...base, sizes: [...three, { widthFt: 4, heightFt: 18, qty: 1 }] });
+  ok(e4.shapes.filter((s) => s.tag === "panel").length === 1 && texts(e4).includes("Typical — 4 sizes, see schedule"), "#292 geometry: 4+ sizes draw only the largest, captioned Typical");
+  const flat = c292Elev({ ...base, fullnessPct: 0, sizes: three });
+  ok(flat.shapes.every((s) => s.tag !== "pleat") && e3.shapes.some((s) => s.tag === "pleat"), "#292 geometry: pleat lines only when there is fullness");
+}
+// ---- mount details ----
+{
+  const keys = [...c292MountTypes.map((t) => t.id), "track-other" as const];
+  ok(keys.every((k) => { const d = c292Detail(k); return !!d.title && d.shapes.length > 0 && d.labels.length >= 1; }), "#292 details: every mount type (and track-other) has a titled detail with ≥ 1 label");
+  ok(c292Detail("track-other").note === c292OtherNote && c292OtherNote === "Track mounting per manufacturer's instructions" && !c292Detail("tie-batten").note,
+    "#292 details: track-other carries the manufacturer's-instructions note");
+}
+// ---- #292 task 2 fix round 1: label fit + no label collisions ----
+{
+  const base = { fullnessPct: 50, top: "grommets" as const, bottom: "chain" as const, markSpacingIn: 12, markLabel: "Grommets" as const, box: { wIn: 4.6, hIn: 3.9 } };
+  const sz = (...w: number[]) => w.map((widthFt, i) => ({ widthFt, heightFt: 18, qty: i + 1 }));
+  type C292Text = { kind: "text"; x: number; y: number; text: string; size: number; anchor?: "start" | "middle" | "end"; rotate?: number };
+  const textsOf = (shapes: readonly { kind: string }[]) => shapes.filter((s): s is C292Text => s.kind === "text");
+  const overlaps = (shapes: readonly { kind: string }[]) => {
+    const flat = textsOf(shapes).filter((t) => !t.rotate);
+    for (let i = 0; i < flat.length; i++) {
+      for (let j = i + 1; j < flat.length; j++) {
+        if (Math.abs(flat[i].y - flat[j].y) > 1e-6) continue;
+        const a = c292TextExtent(flat[i]);
+        const b = c292TextExtent(flat[j]);
+        if (a.x0 < b.x1 - 1e-9 && b.x0 < a.x1 - 1e-9) return `${flat[i].text} / ${flat[j].text}`;
+      }
+    }
+    return "";
+  };
+  const cases: Array<[string, Parameters<typeof c292Elev>[0]]> = [
+    ["20/10/6 grommets+chain", { ...base, sizes: sz(20, 10, 6) }],
+    ["4 sizes (typical)", { ...base, sizes: sz(20, 10, 6, 4) }],
+    ["20/10/6 pipe pockets", { ...base, top: "pipe-pocket", bottom: "pipe-pocket", sizes: sz(20, 10, 6) }],
+    ["30/8/4 hook-loop hem", { ...base, top: "hook-loop", bottom: "hem", sizes: sz(30, 8, 4) }],
+    ["tall narrow first", { ...base, sizes: [{ widthFt: 6, heightFt: 40, qty: 1 }, { widthFt: 30, heightFt: 10, qty: 1 }, { widthFt: 5, heightFt: 5, qty: 1 }] }],
+    ["Carriers 6\" spacing", { ...base, markLabel: "Carriers", markSpacingIn: 6, sizes: sz(20, 10, 6) }],
+  ];
+  for (const [name, input] of cases) {
+    const e = c292Elev(input);
+    ok(overlaps(e.shapes) === "", `#292 geometry fix: no two text shapes on a baseline overlap in x (${name})${overlaps(e.shapes) ? " — " + overlaps(e.shapes) : ""}`);
+  }
+  const e3 = c292Elev({ ...base, sizes: sz(20, 10, 6) });
+  const t3 = textsOf(e3.shapes).map((t) => t.text);
+  ok(t3.filter((t) => t.includes("o.c.")).length === 1 && t3.includes("(11)") && t3.includes("(7)"), "#292 geometry fix: the o.c. spacing label prints once; the other panels carry only their count");
+  const six = c292Elev({ ...base, sizes: sz(6) });
+  const sixBottom = textsOf(six.shapes).filter((t) => /Chain|pocket/.test(t.text));
+  const sixPanel = six.shapes.find((s) => s.tag === "panel" && s.kind === "rect") as { x: number; w: number };
+  ok(sixBottom.length === 1 && sixBottom.every((t) => { const x = c292TextExtent(t); return x.x0 >= sixPanel.x - 1e-9 && x.x1 <= sixPanel.x + sixPanel.w + 1e-9; }),
+    "#292 geometry fix: the bottom-finish label fits inside a 6 ft panel");
+  // fix round 2: every bottom-finish label stays inside ITS OWN panel at the multi-size scale (sz(6) alone picks 1/8", which never needs the two-line branch)
+  const bottomIn = (e: ReturnType<typeof c292Elev>) => {
+    const panels = e.shapes.filter((s): s is Extract<typeof s, { kind: "rect" }> => s.kind === "rect" && s.tag === "panel");
+    const labels = textsOf(e.shapes).filter((t) => t.anchor === "middle" && /^(Chain|Pipe|Hem)/.test(t.text));
+    const bad = panels.filter((p) => {
+      const mine = labels.filter((t) => t.x >= p.x - 1e-9 && t.x <= p.x + p.w + 1e-9);
+      return mine.length !== 1 || c292TextExtent(mine[0]).x0 < p.x - 1e-9 || c292TextExtent(mine[0]).x1 > p.x + p.w + 1e-9;
+    });
+    return { panels: panels.length, labels, bad: bad.length };
+  };
+  for (const [name, input] of cases) {
+    if (input.sizes.length > 3) continue;
+    const r = bottomIn(c292Elev(input));
+    ok(r.bad === 0 && r.labels.length === r.panels, `#292 geometry fix 2: each panel carries exactly one bottom label inside its own x-range (${name})`);
+  }
+  const narrow = bottomIn(c292Elev({ ...base, sizes: sz(20, 10, 6) }));
+  ok(narrow.labels.length === 3 && narrow.labels[2].text === "Chain\npocket" && narrow.labels[0].text === "Chain pocket",
+    "#292 geometry fix 2: at 20/10/6 the 6 ft panel's label is the two-line form (the narrow-panel branch is exercised)");
+  const e4 = c292Elev({ ...base, sizes: [...sz(20, 10, 6, 4), { widthFt: 0, heightFt: 5 }] });
+  ok(textsOf(e4.shapes).some((t) => t.text === "Typical — 4 sizes, see schedule"), "#292 geometry fix: the Typical caption counts drawn sizes, not zero-size entries");
+  const cap = textsOf(e4.shapes).find((t) => t.text.startsWith("Typical"))!;
+  const qty = textsOf(e4.shapes).find((t) => t.text.startsWith("Qty"))!;
+  ok(cap.y - qty.y >= 0.085 * 1.4, "#292 geometry fix: the Typical caption sits clear below the Qty line");
+  ok([c292InchLabel(0.25), c292InchLabel(0.5), c292InchLabel(12), c292InchLabel(11.75), c292InchLabel(0), c292InchLabel(1.25)].join("|") === `1/4"|1/2"|12"|11 3/4"|0"|1 1/4"`,
+    "#292 geometry fix: inchLabel drops a zero whole number before a fraction");
+  const wild = c292Marks(1000, 0.001);
+  const huge = c292Marks(10000, 1);
+  ok(wild.count === 2000 && huge.count === 2000 && c292Marks(20, 0.001).count === 241,
+    "#292 geometry fix: topMarks caps at 2000 marks and treats spacing below 1\" as 1\"");
+  const wildElev = c292Elev({ ...base, markSpacingIn: 0.001, sizes: sz(20) });
+  ok(wildElev.shapes.filter((s) => s.tag === "mark").length <= 2000, "#292 geometry fix: an absurd mark spacing never draws more than 2000 grommets");
+  ok(textsOf(wildElev.shapes).some((t) => t.text === `Grommets @ 1" o.c. max (${c292Marks(20, 0.001).count})`),
+    "#292 geometry fix 2: the o.c. label prints the clamped 1\" spacing, consistent with the drawn marks");
+}
+{
+  const keys = [...c292MountTypes.map((t) => t.id), "track-other" as const];
+  const W = 240;
+  const H = 300;
+  const labelSize = 9; // ShapeSvg's default labelSize
+  const bad: string[] = [];
+  for (const k of keys) {
+    const d = c292Detail(k);
+    for (const l of d.labels) {
+      const e = c292TextExtent({ x: l.x, text: l.text, size: labelSize, anchor: l.anchor });
+      const lines = l.text.split("\n").length;
+      const bottom = l.y + (lines - 1) * labelSize * 1.15;
+      if (e.x0 < 0 || e.x1 > W || l.y - labelSize < 0 || bottom > H) bad.push(`${k}: ${l.text.replace(/\n/g, " / ")}`);
+    }
+    for (const t of d.shapes) {
+      if (t.kind !== "text") continue;
+      const e = c292TextExtent(t);
+      if (e.x0 < 0 || e.x1 > W || t.y - t.size < 0 || t.y > H) bad.push(`${k}: ${t.text}`);
+    }
+  }
+  ok(bad.length === 0, `#292 details fix: every callout and in-drawing text fits the 240 × 300 viewBox at 0.6 em/char${bad.length ? " — " + bad.join("; ") : ""}`);
+}
+
+// ---- #292 task 3: curtain-mount rules + collector ----
+import { mountRowQty as c292RowQty, sanitizeCurtainMounts as c292SanitizeMounts } from "@/lib/curtain-mounts";
+import { countCutSheetTypes as c292Count, GRID_DESIGN_GONE as c292GridGone } from "@/lib/curtain-cut-sheets/estimator-curtains";
+import { collectCurtainTypes as c292CollectTypes, type CollectInput as C292Input } from "@/lib/curtain-cut-sheets/collect";
+import { curtainCost as c292CurtainCost } from "@/lib/design/curtain-pricing";
+import { computeSetWeight as c292SetWeight, DEFAULT_WEIGHTS as c292Weights, fabricFromPart as c292FabFrom } from "@/lib/design/steel";
+import { CHAIN_JACK as c292ChainJack } from "@/lib/design/goods";
+import type { TrackSeries as C292Series } from "@/lib/track-series";
+
+const C292_FABS = [
+  { sku: "FAB-CH25", desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54, flameRating: "NFPA 701 (IFR)" },
+  { sku: "FAB-EN22", desc: "Encore Velour 22 oz", oz: 22, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
+  { sku: "FAB-NOOZ", desc: "Mystery Scrim" },
+];
+const C292_SERIES = [{ id: "adc-280-black", name: "ADC 280 Black", manufacturer: "ADC", stickLengthFt: 22, carrierSpacingIn: 12, hangerSpacingFt: 7, overlapFt: 2, parts: {}, active: true }] as C292Series[];
+const C292_DESC = "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness";
+const c292Ci = (over: Record<string, unknown> = {}) => ({ name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "9", width: "21.5", height: "18", fullness: "50" as const, ...over });
+const c292Cur = (id: number, over: Partial<C292Item> = {}): Partial<C292Item> & { id: number } => ({ id, desc: C292_DESC, qty: 2, curtain: true, ...over });
+const c292Trk = (id: number, over: Partial<C292Item> = {}): Partial<C292Item> & { id: number } => ({
+  id, sku: "TRK-ADC-280-BLACK", desc: "Main track", unit: "lot", track: { ...C292_TRACK },
+  components: [
+    { sku: "ADC-280-22", label: "Track (22' stick)", role: "other", qty: 4, unit: "ea", cost: 1, price: 2 },
+    { sku: "ADC-2802", label: "Carrier", role: "other", qty: 40, unit: "ea", cost: 1, price: 2 },
+  ],
+  ...over,
+});
+const c292Collect = (sections: C292Section[], extra: Partial<C292Input> = {}) =>
+  c292CollectTypes({ quote: { spec: { sections, mobs: [] } }, fabrics: C292_FABS, trackSeries: C292_SERIES, mounts: {}, partInfo: new Map(), grid: null, ...extra });
+
+// ---- mount rules ----
+{
+  ok(c292RowQty({ kind: "perCurtain", qty: 2 }, { widthFt: 21.5, marks: 23 }) === 2, "#292 mounts: perCurtain is qty per curtain");
+  ok(c292RowQty({ kind: "perFtWidth", qty: 1, everyFt: 5 }, { widthFt: 21.5, marks: 23 }) === 5, "#292 mounts: perFtWidth is qty × ceil(W ÷ everyFt)");
+  ok(c292RowQty({ kind: "perMark", qty: 1 }, { widthFt: 21.5, marks: 23 }) === 23, "#292 mounts: perMark is qty × top-finish marks");
+  const s = c292SanitizeMounts({
+    "tie-batten": { rows: [
+      { sku: " TIE ", rule: { kind: "perMark", qty: "1" } }, { sku: "", rule: { kind: "perCurtain", qty: 1 } },
+      { sku: "A", rule: { kind: "bogus", qty: 1 } }, { sku: "B", rule: { kind: "perCurtain", qty: 0 } },
+      { sku: "C", rule: { kind: "perCurtain", qty: 1001 } }, { sku: "D", rule: { kind: "perFtWidth", qty: 1, everyFt: 0 } },
+    ] },
+    "track-other": { rows: [{ sku: "X", rule: { kind: "perCurtain", qty: 1 } }] },
+    nonsense: { rows: [] },
+    "wall-hookloop": { rows: Array.from({ length: 40 }, (_, i) => ({ sku: `W${i}`, rule: { kind: "perCurtain", qty: 1 } })) },
+  });
+  ok(s["tie-batten"]?.rows.length === 1 && s["tie-batten"].rows[0].sku === "TIE" && s["tie-batten"].rows[0].rule.qty === 1,
+    "#292 mounts: sanitize drops blank SKUs, unknown rule kinds, qty ≤ 0 / > 1,000 and everyFt ≤ 0; trims SKUs, reads numeric strings");
+  ok(!("track-other" in s) && !("nonsense" in s) && s["wall-hookloop"]?.rows.length === 30, "#292 mounts: sanitize drops unknown mount ids (track-other included) and caps a type at 30 rows");
+}
+// ---- collector: Estimator ----
+{
+  const structured = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "edited by hand", curtainInputs: c292Ci() })])]);
+  ok(structured.types.length === 1 && structured.unreadable.length === 0 && structured.types[0].sizes[0].widthFt === 21.5, "#292 collect: curtainInputs are read before the desc");
+  ok(structured.types[0].totalQty === 2, "#292 collect: the line qty wins over curtainInputs.qty (informational only)");
+  const merged = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci() }), c292Cur(2, { qty: 3 })])]);
+  ok(merged.types.length === 1 && merged.types[0].totalQty === 5 && merged.types[0].sizes.length === 1 && merged.types[0].sizes[0].qty === 5,
+    "#292 collect: identical curtains merge into one type (qty summed, sizes merged)");
+  const split = c292Collect([c292Sec("s1", [
+    c292Cur(1),
+    c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 75% fullness" }),
+    c292Cur(3, { curtainInputs: c292Ci({ bottomFinish: "hem" }) }),
+    c292Cur(4, { curtainInputs: c292Ci({ mountType: "wall-hookloop" }) }),
+  ])]);
+  ok(split.types.length === 4, "#292 collect: a different fullness, bottom finish or mount splits into its own type");
+  const opt = c292Collect([c292Sec("s1", [c292Cur(1, { option: true }), c292Cur(2)])]);
+  ok(opt.types.length === 1 && opt.types[0].totalQty === 2 && opt.skippedOptional.length === 1, "#292 collect: an optional curtain line gets no sheet and is listed as left out");
+  const bad = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Main Drape (black)" }), c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 0'W × 18'H, 50% fullness" })])]);
+  ok(bad.types.length === 0 && bad.unreadable.map((u) => u.reason).join("|") === "Can't read size — edit the curtain|Size is 0 — edit the curtain",
+    "#292 collect: an unparseable or zero-size line is unreadable, never guessed");
+  const order = c292Collect([
+    c292Sec("s1", [c292Cur(1, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" }), c292Cur(2)]),
+    c292Sec("s2", [c292Cur(3, { desc: "Border — Charisma Velour 25 oz, 40'W × 5'H, 50% fullness" })]),
+  ]);
+  ok(order.types.map((t) => `${t.sheetNo}:${t.title}`).join() === "CS-1:Legs,CS-2:Main Drape,CS-3:Border", "#292 collect: CS numbers follow section order, then line order");
+  const twins = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" }), c292Cur(2, { desc: "Legs — Encore Velour 22 oz, 6'W × 18'H, 50% fullness" })])]);
+  ok(twins.types.map((t) => t.title).join("|") === "Legs (Charisma Velour 25 oz)|Legs (Encore Velour 22 oz)", "#292 collect: colliding titles get the fabric appended");
+}
+// ---- collector: hardware ----
+{
+  const tracked = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])]);
+  const t = tracked.types[0];
+  ok(t.curtains[0].mount.source === "track" && t.curtains[0].mount.key === "track-batten" && t.markSpacingIn === 12,
+    "#292 collect: a linked track gives the mount (from track.mounting) and the series' carrier spacing");
+  ok(t.hardware.find((h) => h.sku === "ADC-2802")?.qty === 40 && t.hardware.every((h) => h.from === "track"),
+    "#292 collect: track hardware is the line's stored components, counted once for a qty-2 curtain on one track");
+  const over = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2, { track: { ...C292_TRACK, carrierSpacingIn: 18 } })])]);
+  ok(over.types[0].markSpacingIn === 18, "#292 collect: a line's carrier-spacing override beats the series default");
+  const two = c292Collect([c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1" }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3" })])]);
+  ok(two.types.length === 1 && two.types[0].hardware.find((h) => h.sku === "ADC-2802")?.qty === 80, "#292 collect: two tracks in one type sum their components by SKU");
+  const gone = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])], { trackSeries: [] });
+  ok(gone.types[0].hardware.length === 2 && gone.types[0].warnings.includes("Track series no longer exists — hardware as quoted."),
+    "#292 collect: a deleted series keeps the stored components and warns");
+  const mounts = { "tie-batten": { rows: [
+    { sku: "TIE", rule: { kind: "perMark" as const, qty: 1 } },
+    { sku: "CLAMP", rule: { kind: "perFtWidth" as const, qty: 1, everyFt: 5 } },
+    { sku: "KIT", rule: { kind: "perCurtain" as const, qty: 2 } },
+  ] } };
+  const partInfo = new Map([["TIE", { desc: "Tie line", unit: "ea" }]]);
+  const ruled = c292Collect([c292Sec("s1", [c292Cur(1)])], { mounts, partInfo });
+  const q = (sku: string) => ruled.types[0].hardware.find((h) => h.sku === sku)?.qty;
+  ok(q("TIE") === 46 && q("CLAMP") === 10 && q("KIT") === 4 && ruled.types[0].hardware.find((h) => h.sku === "TIE")?.desc === "Tie line",
+    "#292 collect: mount rules × curtain qty — 23 marks × 2 ties, ceil(21.5 ÷ 5) × 2 clamps, 2 × 2 kits");
+  const none = c292Collect([c292Sec("s1", [c292Cur(1)])]);
+  ok(none.types[0].hardware.length === 0 && none.types[0].warnings.includes("No hardware listed for Tie-line to pipe batten — Estimating Rules → Curtain mounts"),
+    "#292 collect: a mount type with no rows warns and lists no hardware");
+  ok(none.types[0].warnings.some((w) => w.startsWith("Mount assumed:")), "#292 collect: a defaulted mount is flagged as assumed");
+}
+// ---- collector: weight + area ----
+{
+  const t = c292Collect([c292Sec("s1", [c292Cur(1)])]).types[0];
+  const fab = c292FabFrom({ desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 })!;
+  const want = c292SetWeight({ name: "Main Drape", fabResolved: fab, w: 21.5, h: 18, full: 50, qty: 1, chain: c292ChainJack, batten: 0, mode: "dead" }, c292Weights).goods;
+  ok(t.weightLbEach[0] === want && t.weightLbTotal === (want as number) * 2, "#292 collect: weight is computeSetWeight(...).goods for the same inputs (× qty for the total)");
+  const hem = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "hem" }) })])]).types[0];
+  ok(Math.abs((t.weightLbEach[0] as number) - (hem.weightLbEach[0] as number) - 0.14 * 21.5) < 1e-9, "#292 collect: chain vs hem differs by the jack-chain weight (0.14 lb/ft × W)");
+  const noOz = c292Collect([c292Sec("s1", [c292Cur(1, { desc: "Main Drape — Mystery Scrim, 21.5'W × 18'H, 50% fullness" })])]).types[0];
+  ok(noOz.weightLbEach[0] === null && noOz.weightLbTotal === null && noOz.warnings.includes("Weight not set for Mystery Scrim — Catalog"), "#292 collect: a fabric with no oz weighs null and warns");
+  const area = c292CurtainCost({ finishedWidthFt: 21.5, finishedHeightFt: 18, fullnessPct: 50, qty: 1 }, { fabricRate: 0, sewingPct: 0 }).sewnAreaSqft;
+  ok(t.sewnAreaSqftEach[0] === area && t.sewnAreaSqftTotal === area * 2, "#292 collect: sewn area is curtainCost(...).sewnAreaSqft");
+}
+// ---- collector: Grid ----
+{
+  const main = { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "FAB-CH25" };
+  const project = {
+    options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }, { id: "opt-b", name: "Alt", quoteId: null, createdAt: 2 }],
+    placements: [
+      { id: "p1", optionId: "opt-a", curtain: main },
+      { id: "p2", optionId: "opt-a", curtain: { type: "Border" as const, name: "Border 1", widthFt: 40, heightFt: 5, fullnessPct: 50, fabricSku: "FAB-CH25", topFinish: "pipe-pocket" as const, bottomFinish: "chain" as const, mountType: "wall-hookloop" as const } },
+      { id: "p3", optionId: "opt-b", curtain: { ...main, name: "Other option" } },
+      { id: "p4", optionId: "opt-a" },
+    ],
+    routes: [],
+  };
+  const spec = { kind: "grid", gridProjectId: "GRD-1", gridOptionId: "opt-a", lines: [
+    { sku: "CURTAIN", desc: c292CurtainDesc(main, "Charisma Velour 25 oz"), qty: 1, unit: "ea", price: 1, ext: 1 },
+    { sku: "CURTAIN", desc: "Main (hand edited)", qty: 1, unit: "ea", price: 1, ext: 1 },
+  ] };
+  const grid = (p: typeof project | null, s: object = spec) => c292CollectTypes({ quote: { spec: s }, fabrics: C292_FABS, trackSeries: [], mounts: {}, partInfo: new Map(), grid: { project: p as never } });
+  const live = grid(project);
+  const m = live.types.find((t) => t.title === "Main")!;
+  const b = live.types.find((t) => t.title === "Border 1")!;
+  ok(live.types.length === 2 && m.curtains[0].mount.key === "track-batten" && m.curtains[0].mount.source === "assumed" && m.curtains[0].bottomFinish === "chain",
+    "#292 collect: Grid placements of the quote's option become types, with the Grid type defaults marked assumed");
+  ok(b.curtains[0].topFinish === "pipe-pocket" && b.curtains[0].mount.key === "wall-hookloop" && b.curtains[0].mount.source === "picked", "#292 collect: a placement's stored finishes and mount win over the defaults");
+  const goneProject = grid(null);
+  ok(goneProject.notes.includes(c292GridGone) && goneProject.types.length === 1 && goneProject.unreadable.length === 1, "#292 collect: a deleted Grid project falls back to the quoted lines");
+  const goneOption = grid(project, { ...spec, gridOptionId: "opt-zz" });
+  ok(goneOption.notes.includes(c292GridGone) && goneOption.types.length === 1, "#292 collect: a deleted option falls back to the quoted lines too");
+  const orphan = { options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }], placements: [{ id: "p9", optionId: "opt-gone", curtain: main }], routes: [] };
+  const orphanRead = c292CollectTypes({ quote: { spec }, fabrics: C292_FABS, trackSeries: [], mounts: {}, partInfo: new Map(), grid: { project: orphan as never } });
+  ok(orphanRead.types.length === 1 && orphan.placements[0].optionId === "opt-gone",
+    "#292 collect: an orphan placement reads as the first option (ensureOptions) without mutating the caller's project");
+}
+// ---- task 3 fix round 1: type key carries hardware source + spacing; qty ≤ 0; pipe-pocket note ----
+{
+  const sp = (n: number) => ({ ...C292_TRACK, carrierSpacingIn: n });
+  const spacing = c292Collect([c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) })])]);
+  ok(spacing.types.length === 2 && spacing.types.map((t) => t.markSpacingIn).join() === "12,18", "#292 collect fix: identical curtains on the same series at 12\" vs 18\" carrier spacing are two types");
+  const emptyTrack = c292Collect([c292Sec("s1", [
+    c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: { ...C292_TRACK, seriesId: "" } }),
+    c292Cur(3, { curtainInputs: c292Ci({ mountType: "track-batten" }) }),
+  ])], { trackSeries: [] });
+  ok(emptyTrack.types.length === 2, "#292 collect fix: a track line with an empty seriesId and a picked no-track curtain of the same mount are two types");
+  ok(c292Count({ sections: [c292Sec("s1", [c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }), c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) })])] }, C292_FABS, C292_SERIES) === 2,
+    "#292 collect fix: countCutSheetTypes stays in step with the new key");
+  const mixed = c292Collect([c292Sec("s1", [
+    c292Cur(1, { curtainTrackKey: "ct-1" }), c292Trk(2, { curtainTrackKey: "ct-1", track: sp(12) }),
+    c292Cur(3, { curtainTrackKey: "ct-3" }), c292Trk(4, { curtainTrackKey: "ct-3", track: sp(18) }),
+    c292Cur(5, { curtainTrackKey: "ct-5" }), c292Trk(6, { curtainTrackKey: "ct-5", track: { ...C292_TRACK, seriesId: "" } }),
+    c292Cur(7, { curtainInputs: c292Ci({ mountType: "track-batten" }) }),
+    c292Cur(8, { curtainInputs: c292Ci({ mountType: "wall-hookloop" }) }),
+    c292Cur(9),
+  ])]);
+  ok(mixed.types.every((t) => new Set(t.curtains.map((c) => c.mount.source === "track" ? `track:${c.mount.track?.seriesId}:${c.mount.track?.carrierSpacingIn}` : "rules")).size === 1),
+    "#292 collect fix: within every type all members share one hardware source and one carrier spacing");
+  const zero = c292Collect([c292Sec("s1", [c292Cur(1, { qty: 0 }), c292Cur(2, { qty: -3 }), c292Cur(3, { qty: 0.4 }), c292Cur(4, { qty: 2.6 }), c292Cur(5, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness", qty: 0 })])]);
+  ok(zero.types.length === 1 && zero.types[0].totalQty === 4 && zero.skippedOptional.length === 3, "#292 collect fix: qty ≤ 0 lines are left out (not a sheet, listed as skipped); a fractional qty > 0 never prints below 1 (0.4 → 1, 2.6 → 3)");
+  ok(c292Count({ sections: [c292Sec("s1", [c292Cur(1, { qty: 0 })])] }, C292_FABS, C292_SERIES) === 0, "#292 collect fix: countCutSheetTypes does not count a qty 0 line");
+  const pp = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "pipe-pocket" }) }), c292Cur(2)])]);
+  ok(pp.types.length === 2 && pp.types[0].weightNote === "Bottom pipe not included" && pp.types[1].weightNote === undefined,
+    "#292 collect fix: a pipe-pocket bottom carries weightNote \"Bottom pipe not included\"; chain and hem carry none");
+}
+// ---- the preview count ----
+{
+  const secs = [c292Sec("s1", [c292Cur(1), c292Cur(2, { qty: 1 }), c292Cur(3, { desc: "Legs — Charisma Velour 25 oz, 6'W × 18'H, 50% fullness" })])];
+  ok(c292Count({ sections: secs }, C292_FABS, C292_SERIES) === c292Collect(secs).types.length && c292Count({ sections: secs }, C292_FABS, C292_SERIES) === 2,
+    "#292 collect: countCutSheetTypes (client-safe) equals the collector's type count");
+}
+// ---- #292 task 4: the sheet model ----
+import { cutSheetCssVars as c292CssVars, cutSheetModel as c292Model, plainDescription as c292Plain, quoteRevisionRows as c292RevRows } from "@/lib/curtain-cut-sheets/model";
+{
+  const t = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2)])]).types[0];
+  ok(c292Plain(t) === `Two Main Drape panels, each 21'-6" wide × 18'-0" tall finished, sewn from Charisma Velour 25 oz with 50% fullness. The top has webbing with grommets every 12", hung from carriers on an ADC 280 Black track mounted to a pipe batten; the bottom has a chain pocket so the curtain hangs straight.`,
+    "#292 model: plainDescription is the fixed deterministic sentence (spec §2.6 sample)");
+  const rows = c292RevRows([
+    { rev: 2, at: 20, reason: "sent", note: "" }, { rev: 1, at: 10, reason: "manual", note: "First pass" }, { rev: 3, at: 30, reason: "manual", note: "" },
+  ]);
+  ok(rows.map((r) => `${r.letter}:${r.label}`).join("|") === "A:First pass|B:Issued to customer|C:Pricing snapshot", "#292 model: quoteRevisionRows letters A, B… in rev order; sent reads Issued to customer");
+  const ctx = {
+    quote: { id: "Q-1", number: "EST-1042", name: "Main stage", customer: "Lakefront HS", venue: "Auditorium — Lakefront", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "Jeff Chesebro", index: 1, total: 1, now: 1,
+  };
+  const sub = c292Model(t, { ...ctx, style: "submittal" });
+  ok(sub.titleBlock?.sheet.number === "CS-1" && sub.titleBlock.project.id === "EST-1042" && sub.titleBlock.status === "— Preliminary" && sub.titleBlock.optionName === null &&
+      sub.titleBlock.scale === `Elev ${sub.elevation.scale} · Detail NTS` && sub.titleBlock.drawnBy === "Jeff Chesebro",
+    "#292 model: the Submittal title block is filled from the quote (estimate #, CS-n, Preliminary with no revisions)");
+  ok(sub.materials.map((m) => m.label).join() === "Fabric,Flame rating,Fullness,Finished size,Top finish,Bottom finish,Sewn area,Weight,Qty" &&
+      sub.materials[0].value === `Charisma Velour 25 oz · 25 oz/lin yd, 54" bolt` && sub.materials[2].value === "50% (1.5×)",
+    "#292 model: materials rows in spec order, with the catalog weight basis");
+  ok(sub.hardware.some((h) => h.sku === "ADC-2802") && sub.description === "", "#292 model: Submittal carries the hardware table");
+  const cli = c292Model(t, { ...ctx, style: "client" });
+  const json = JSON.stringify(cli);
+  ok(cli.titleBlock === null && cli.hardware.length === 0 && cli.materials.length === 0 && !/"sku"|"cost"|"price"/.test(json) && !json.includes("ADC-2802") && cli.description.startsWith("Two Main Drape"),
+    "#292 model: the Client model has no SKU or cost fields — elevation, description, sizes and mount only");
+  const v = c292CssVars();
+  ok(v["--dw-w"] === "11in" && v["--dw-h"] === "8.5in" && v["--dw-strip"] === "2.1in", "#292 model: cut-sheet CSS variables are Letter landscape");
+
+  // review rounds: weight note, blank facts, and facts that differ between merged members
+  const weightRow = (m: typeof sub) => m.materials.find((r) => r.label === "Weight");
+  const pp = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ bottomFinish: "pipe-pocket" }) })])]).types[0];
+  const ppRow = weightRow(c292Model(pp, { ...ctx, style: "submittal" }));
+  ok(!!ppRow && ppRow.value.includes("lb") && ppRow.value.includes("Bottom pipe not included") && !weightRow(sub)?.value.includes("Bottom pipe"),
+    "#292 model: a pipe-pocket bottom prints its weight note beside the weight; a chain bottom prints none");
+  const noOz = c292Collect([c292Sec("s1", [c292Cur(1, { curtainInputs: c292Ci({ fabricSku: "FAB-NOOZ", fabricName: "Mystery Scrim", bottomFinish: "pipe-pocket" }) })])]).types[0];
+  const noOzModel = c292Model(noOz, { ...ctx, style: "submittal" });
+  ok(noOz.weightLbTotal === null && noOz.weightNote === "Bottom pipe not included" && !weightRow(noOzModel) && !JSON.stringify(noOzModel.materials).includes("Bottom pipe"),
+    "#292 model: with no weight there is no Weight row — and no note next to a blank weight");
+  const c0 = t.curtains[0];
+  const blankFab = { ...t, curtains: [{ ...c0, fabric: null, fabricText: "" }] };
+  const blankModel = c292Model(blankFab, { ...ctx, style: "submittal" });
+  ok(!blankModel.materials.some((r) => r.label === "Fabric" || r.label === "Flame rating") && !/—|specified|undefined|null/.test(blankModel.materials.map((r) => r.value).join("|")),
+    "#292 model: a blank fabric prints no Fabric row and no stand-in text");
+  const blankDesc = c292Plain(blankFab);
+  ok(blankDesc.startsWith(`Two Main Drape panels, each 21'-6" wide × 18'-0" tall finished, with 50% fullness.`) && !/specified|undefined|null/.test(blankDesc),
+    "#292 model: a blank fabric is left out of the plain description (no stand-in)");
+  const colored = (a?: string, b?: string) => c292Model({ ...t, curtains: [{ ...c0, color: a }, { ...c0, color: b }] }, { ...ctx, style: "submittal" }).materials.find((r) => r.label === "Color")?.value;
+  ok(colored("Black", "Black") === "Black" && colored("Black", "Navy") === undefined && colored("Black", undefined) === undefined && colored(undefined, undefined) === undefined,
+    "#292 model: Color prints only when every member of the type agrees on it");
+  const otherDesc = c292Plain({ ...t, curtains: [{ ...c0, mount: { ...c0.mount, key: "track-other" as const } }] });
+  ok(otherDesc.includes("hung from carriers on an ADC 280 Black track") && !otherDesc.includes("its supports") && !otherDesc.includes("mounted to"),
+    "#292 model: an unknown track mounting names no place (no stand-in)");
+  ok(!JSON.stringify(sub).includes("biparting") && !JSON.stringify(cli).includes("biparting"), "#292 model: a track operation is never printed (it is not part of the type key)");
+  const multi = c292Collect([c292Sec("s1", [c292Cur(1), c292Cur(2, { desc: "Main Drape — Charisma Velour 25 oz, 10'W × 18'H, 50% fullness", qty: 1 })])]).types[0];
+  const multiModel = c292Model(multi, { ...ctx, style: "client" });
+  ok(multiModel.sizes.length === 2 && multiModel.description.startsWith("Three Main Drape panels in 2 sizes") && multiModel.sizes.reduce((a, s) => a + s.qty, 0) === 3,
+    "#292 model: several sizes read as a count in the sentence and each size is a row");
+}
+
+/* ======================================================================
+   #292 Task 5 — Curtain mounts store + Estimating Rules screen + catalog
+   fabric facts (weight, basis, flame rating).
+   ====================================================================== */
+import { FLAME_RATING_MAX as c292FlameMax, fabricFactsProblem as c292FactsProblem, optionalPartFields as c292PartFields } from "@/app/(app)/catalog/part-form";
+import { readdirSync as c292Readdir } from "node:fs";
+{
+  const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
+  const full = c292PartFields(fd({ oz: "25", ozBasis: "sq-yd", flameRating: "  NFPA 701 (IFR)  " }));
+  ok(full.oz === 25 && full.ozBasis === "sq-yd" && full.flameRating === "NFPA 701 (IFR)", "#292 catalog: weight (oz), basis and flame rating are read when submitted");
+  const blank = c292PartFields(fd({ oz: "", ozBasis: "lin-yd", flameRating: "" }));
+  ok("oz" in blank && blank.oz === undefined && blank.ozBasis === undefined && "flameRating" in blank && blank.flameRating === undefined,
+    "#292 catalog: a submitted blank clears (basis clears with a blank oz)");
+  const noBasis = c292PartFields(fd({ oz: "25", ozBasis: "" }));
+  ok(noBasis.oz === 25 && "ozBasis" in noBasis && noBasis.ozBasis === undefined, "#292 catalog: a part with oz and a blank (Not set) basis posts no basis — none is stamped");
+  ok(!("flameRating" in c292PartFields(fd({ desc: "x" }))) && c292PartFields(fd({ flameRating: "x".repeat(200) })).flameRating?.length === c292FlameMax && c292FlameMax === 120,
+    "#292 catalog: absent fields stay out of the patch; a rating is capped at 120 chars");
+  ok(c292FactsProblem("Hardware", "ea", { flameRating: "NFPA 701" }) !== null && c292FactsProblem("Fabric", "yd", { flameRating: "NFPA 701", oz: 25 }) === null && c292FactsProblem("Hardware", "ea", {}) === null,
+    "#292 catalog: only a fabric part carries weight / flame rating");
+}
+{
+  const rd292 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd292("src/app/(app)/estimating-rules/page.tsx").includes('href="/estimating-rules/curtain-mounts"'), "#292 source: Estimating Rules links Curtain mounts");
+  const acts = rd292("src/app/(app)/estimating-rules/curtain-mounts/actions.ts");
+  ok(acts.includes('requirePerm("manage_users")') && !acts.includes("requireUser("), "#292 source: the Curtain mounts action is manage_users-only");
+  ok(rd292("src/app/(app)/estimating-rules/curtain-mounts/page.tsx").includes('can("manage_users"'), "#292 source: the Curtain mounts page gates on manage_users");
+  {
+    const mountsClient = rd292("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx");
+    ok(!/@\/lib\/stores\/|@\/db|curtain-cut-sheets\/(load|collect)/.test(mountsClient), "#292 source: the Curtain mounts client imports no server store, db, or cut-sheet load/collect module");
+    ok(mountsClient.includes("validateMountRows(") && mountsClient.includes("setRows(checked.rows"), "#292 source: the Curtain mounts client validates before submit and resets its draft to the saved rows");
+    const frf = rd292("src/app/(app)/catalog/fabric-rate-field.tsx");
+    ok(frf.includes('<option value="">Not set</option>') && frf.includes('initialOzBasis ?? ""'), "#292 source: the weight-basis select has a Not set option, selected when the part has no basis");
+  }
+  ok(rd292("scripts/smoke-routes.ts").includes('"/estimating-rules/curtain-mounts"'), "#292 source: smoke covers /estimating-rules/curtain-mounts");
+}
+// ---- #292 weight path: never a guessed basis or bolt width (fabricFromPart's lin-yd / 54" defaults stay for the lineset tool) ----
+{
+  const fabs = [
+    ...C292_FABS,
+    { sku: "FAB-NOBASIS", desc: "Basisless Velour 25 oz", oz: 25, boltWidthIn: 54 },
+    { sku: "FAB-NOBOLT", desc: "Boltless Velour 25 oz", oz: 25, ozBasis: "lin-yd" as const },
+    { sku: "FAB-SQ", desc: "Square Muslin 6 oz", oz: 6, ozBasis: "sq-yd" as const },
+  ];
+  const one = (fabric: string) => c292Collect([c292Sec("s1", [c292Cur(1, { desc: `Main Drape — ${fabric}, 21.5'W × 18'H, 50% fullness` })])], { fabrics: fabs }).types[0];
+  const wctx = {
+    style: "submittal" as const,
+    quote: { id: "Q-1", number: "EST-1042", name: "", customer: "", venue: "", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "", index: 1, total: 1, now: 1,
+  };
+  const fabricRow = (t: ReturnType<typeof one>) => c292Model(t, wctx).materials.find((r) => r.label === "Fabric")?.value;
+  const weightRow = (t: ReturnType<typeof one>) => c292Model(t, wctx).materials.find((r) => r.label === "Weight");
+  const noBasis = one("Basisless Velour 25 oz");
+  ok(noBasis.weightLbEach[0] === null && noBasis.weightLbTotal === null && !weightRow(noBasis) && noBasis.warnings.includes("Weight not set for Basisless Velour 25 oz — Catalog"),
+    "#292 weight: oz with no basis weighs nothing (no lin-yd guess) and warns Weight not set");
+  const noBolt = one("Boltless Velour 25 oz");
+  ok(noBolt.weightLbEach[0] === null && noBolt.weightLbTotal === null && !weightRow(noBolt) && noBolt.warnings.includes("Weight not set for Boltless Velour 25 oz — Catalog"),
+    "#292 weight: a lin-yd fabric with no bolt width weighs nothing (no 54\" guess) and warns Weight not set");
+  const sq = one("Square Muslin 6 oz");
+  const sqWant = c292SetWeight({ name: "Main Drape", fabResolved: c292FabFrom({ desc: "Square Muslin 6 oz", oz: 6, ozBasis: "sq-yd" })!, w: 21.5, h: 18, full: 50, qty: 1, chain: c292ChainJack, batten: 0, mode: "dead" }, c292Weights).goods;
+  ok(sq.weightLbEach[0] === sqWant && sq.weightLbTotal === (sqWant as number) * 2 && !!weightRow(sq) && !sq.warnings.some((w) => w.startsWith("Weight not set")),
+    "#292 weight: a sq-yd fabric weighs without a bolt width");
+  ok(fabricRow(noBasis) === `Basisless Velour 25 oz · 54" bolt` && fabricRow(noBolt) === "Boltless Velour 25 oz · 25 oz/lin yd" && fabricRow(sq) === "Square Muslin 6 oz · 6 oz/sq yd",
+    "#292 weight: the Fabric row prints oz only with its basis — an unset basis drops the oz figure, never prints 'lin yd'");
+}
+
+// ---- #292 task 6: loader, renderer, Cut sheets page, Quotes hub entry ----
+{
+  const rd292b = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd292b("src/app/(app)/quotes/page.tsx").includes("/estimator/cut-sheets?id="), "#292 source: the Quotes hub action strip links Cut sheets");
+  const pg = rd292b("src/app/(app)/estimator/cut-sheets/page.tsx");
+  ok(pg.includes("requireUser()") && pg.includes("loadCutSheets("), "#292 source: the Cut sheets page is requireUser-gated and reads through loadCutSheets");
+  const smoke = rd292b("scripts/smoke-routes.ts");
+  ok(smoke.includes('"/estimator/cut-sheets?id=Q-2041"') && smoke.includes('"/estimator/cut-sheets?id=Q-2041&style=client"') && smoke.includes('"/estimator/cut-sheets?id=Q-0000", reject: "Application error"'),
+    "#292 source: smoke covers both styles and the missing-quote page");
+  const libDir = join(process.cwd(), "src/lib/curtain-cut-sheets");
+  const libSrc = c292Readdir(libDir).map((f) => readFileSync(join(libDir, f), "utf8")).join("\n");
+  ok(!/@anthropic-ai|@\/lib\/ai\b|from "@\/lib\/ai\//.test(libSrc), "#292 source: src/lib/curtain-cut-sheets imports no Anthropic SDK and no lib/ai (deterministic)");
+}
+
+// ---- #292 task 7: Edit curtain, structured curtain lines + keys, finishes/mount ----
+import { applyCurtainEdit as c292ApplyEdit, curtainDraftFromLine as c292DraftFrom, curtainDraftValid as c292DraftValid, curtainItem as c292Item } from "@/app/(app)/estimator/curtain-line";
+import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292ReplaceTrack } from "@/app/(app)/estimator/track-bom";
+{
+  const draft = { name: "Main Drape", hang: "Pipe", fabric: "FAB-CH25", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
+  const fab = { sku: "FAB-CH25", name: "Charisma Velour 25 oz", costPerSqft: 0 };
+  const it = c292Item(draft, { fab, costEach: 100, priceEach: 150 }, { id: 7, sku: "CRT-8", trackKey: "ct-7" });
+  ok(it.desc === C292_DESC && it.qty === 2 && it.curtain === true && it.curtainTrackKey === "ct-7" && it.sku === "CRT-8",
+    "#292 edit: curtainItem keeps addCurtain's exact desc format and carries the track key");
+  ok(it.curtainInputs?.width === "21.5" && it.curtainInputs.fabricSku === "FAB-CH25" && it.curtainInputs.topFinish === "grommets" && it.curtainInputs.bottomFinish === "chain" && it.curtainInputs.mountType === "tie-batten" && it.curtainInputs.fullness === "50",
+    "#292 edit: curtainItem stores structured curtainInputs (with finishes and mount)");
+  const fromStructured = c292DraftFrom(it, "FAB-X");
+  ok(fromStructured.width === "21.5" && fromStructured.height === "18" && fromStructured.fabric === "FAB-CH25" && fromStructured.mountType === "tie-batten", "#292 edit: the edit draft seeds from curtainInputs");
+  const legacy = c292DraftFrom({ id: 1, sku: "CRT-1", desc: C292_DESC, qty: 3, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X");
+  ok(legacy.name === "Main Drape" && legacy.width === "21.5" && legacy.fullness === "50" && legacy.qty === "3" && legacy.topFinish === "grommets", "#292 edit: a legacy line seeds from its parsed desc");
+  const unreadable = c292DraftFrom({ id: 1, sku: "CRT-1", desc: "Main Drape — hand edited", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X");
+  ok(unreadable.name === "Main Drape" && unreadable.width === "" && unreadable.height === "", "#292 edit: an unreadable line seeds its name only, W/H blank");
+  const old: C292Item = { ...it, id: 41, lineOrder: 3, comment: "c", internalNote: "n", option: true, curtainTrackKey: "ct-41", specKey: "SK", por: true, portalConfirm: true, sku: "CRT-OLD" };
+  const sec = c292Sec("s", [old as C292Item & { id: number }]);
+  const replaced = c292ReplaceCurtain(sec, 41, { ...it, desc: "new" }).items[0];
+  ok(replaced.id === 41 && replaced.lineOrder === 3 && replaced.comment === "c" && replaced.internalNote === "n" && replaced.option === true && replaced.curtainTrackKey === "ct-41" && replaced.specKey === "SK" && replaced.por === true && replaced.portalConfirm === true && replaced.sku === "CRT-OLD" && replaced.desc === "new",
+    "#292 edit: replaceCurtainLine keeps id, order, notes, option, key, specKey, por/portalConfirm and SKU");
+  const withTrack = c292ApplyEdit(c292Sec("s", [{ ...it, id: 50, curtainTrackKey: undefined }, { id: 51 }]), 50, { ...it, curtainTrackKey: undefined }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(withTrack.items.map((x) => x.id).join() === "50,99,51" && !!withTrack.items[0].curtainTrackKey?.startsWith("ct-50-") && withTrack.items[1].curtainTrackKey === withTrack.items[0].curtainTrackKey,
+    "#292 edit: Add track while editing inserts a keyed track line right after the curtain");
+  const t2 = c292ReplaceTrack(c292Sec("s", [{ id: 5, track: { ...C292_TRACK }, curtainTrackKey: "ct-4" }]), 5, { sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(t2.items[0].curtainTrackKey === "ct-4", "#292 edit: Update track keeps the curtain-track key");
+  const rd292c = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const est = rd292c("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/curtainItem\(/.test(est) && /newCurtainTrackKey\(/.test(est), "#292 source: addCurtain writes curtainInputs + curtainTrackKey through curtainItem");
+  ok(/<CurtainModal[\s\S]{0,400}editing=\{/.test(est), "#292 source: CurtainModal receives editing");
+  ok(rd292c("src/app/(app)/estimator/section-card.tsx").includes("onEditCurtain"), "#292 source: curtain lines get an ✎ (onEditCurtain)");
+  ok(/cleanCurtainFinishes\(/.test(rd292c("src/app/(app)/design/grid/[id]/actions.ts")), "#292 source: placeCurtainAction validates finishes/mount through cleanCurtainFinishes");
+}
+
+// ---- #292 task 7 fix round 1: vendor cost survives Update, one curtain line builder, key/specKey edge cases ----
+import { computeCurtain as c292Compute } from "@/app/(app)/estimator/pricing";
+import { cleanCurtainRequest as c292CleanReq } from "@/lib/portal-cart-rules";
+import { cartLinesFromSpec as c292CartLines } from "@/lib/portal-pricing";
+import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
+{
+  const SK_MAIN = c292SpecKey(undefined, "Main Drape");
+  const SK_BORDER = c292SpecKey(undefined, "Border 1");
+  const fabs = [{ sku: "T292-FAB", name: "Charisma Velour 25 oz", costPerSqft: 0, curtainAreaRate: 2 }];
+  const sew = { sewingPct: 10 };
+  const mk = (d: Parameters<typeof c292Compute>[0]) => c292Compute(d, fabs, sew, 0.3).costEach;
+  const base = { name: "Main Drape", hang: "Pipe", fabric: "T292-FAB", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
+
+  // 1. a Rose Brand vendor cost round-trips draft → line → Edit → Update with the same cost and price
+  const vd = { ...base, vendorCostOverride: "412.5" };
+  const vc = c292Compute(vd, fabs, sew, 0.3);
+  const vItem = c292Item(vd, vc, { id: 7, sku: "CRT-8" });
+  const vBack = c292DraftFrom(vItem, "FAB-X", fabs, mk);
+  const vc2 = c292Compute(vBack, fabs, sew, 0.3);
+  const vItem2 = c292Item(vBack, vc2, { id: 7, sku: "CRT-8" });
+  ok(vc.costEach === 412.5 && vItem.curtainInputs?.vendorCost === "412.5" && vBack.vendorCostOverride === "412.5" && vItem2.cost === vItem.cost && vItem2.price === vItem.price && vItem2.curtainInputs?.vendorCost === "412.5",
+    "#292 fix: a vendor cost override round-trips draft → line → Update with identical cost and price");
+  ok(c292Item(base, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined && c292Item({ ...base, vendorCostOverride: "  " }, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined,
+    "#292 fix: a blank vendor cost stores nothing");
+
+  // legacy lines (no curtainInputs): a stored cost that isn't today's make-it cost is kept as the override
+  const legacyCost = 999.99;
+  const legacyLine: C292Item = { id: 3, sku: "CRT-3", desc: C292_DESC, qty: 2, unit: "ea", cost: legacyCost, price: 1428.56, curtain: true };
+  const lDraft = c292DraftFrom(legacyLine, "FAB-X", fabs, mk);
+  const lItem = c292Item(lDraft, c292Compute(lDraft, fabs, sew, 0.3), { id: 3, sku: "" });
+  ok(lDraft.vendorCostOverride === String(legacyCost) && lItem.cost === legacyCost,
+    "#292 fix: a legacy line whose cost ≠ the computed make-it cost keeps its cost after Update");
+  const sameCost = mk({ ...base, fabric: "T292-FAB" });
+  const lSame = c292DraftFrom({ ...legacyLine, cost: sameCost }, "FAB-X", fabs, mk);
+  ok(lSame.vendorCostOverride === undefined && lSame.fabric === "T292-FAB", "#292 fix: a legacy line already at today's make-it cost gets no override");
+  ok(c292DraftFrom(legacyLine, "FAB-X", fabs).fabric === "T292-FAB" && c292DraftFrom(legacyLine, "FAB-X").fabric === "FAB-X",
+    "#292 fix: a legacy line's printed fabric name resolves back to its SKU when fabrics are passed (default fabric otherwise)");
+
+  // round 2: an unreadable legacy curtain can never be Updated to 0×0; a legacy fabric that matches nothing must be picked
+  const unreadLine: C292Item = { id: 4, sku: "CRT-4", desc: "Main Drape — hand edited", qty: 1, unit: "ea", cost: 1800, price: 2571.43, curtain: true };
+  const uDraft = c292DraftFrom(unreadLine, "FAB-X", fabs, mk);
+  ok(uDraft.vendorCostOverride === undefined && uDraft.width === "" && uDraft.height === "" && !c292DraftValid(uDraft, 1800),
+    "#292 fix2: an unreadable legacy line seeds no override and its draft is refused (Update disabled)");
+  ok(!c292DraftValid({ ...uDraft, width: "20" }, 100) && !c292DraftValid({ ...uDraft, height: "18" }, 100) && !c292DraftValid({ ...uDraft, width: "0", height: "18" }, 100),
+    "#292 fix2: a curtain needs both a width and a height above 0 to be valid");
+  ok(c292DraftValid({ ...base }, 150) && !c292DraftValid({ ...base }, 0) && !c292DraftValid({ ...base, name: " " }, 150) && !c292DraftValid({ ...base, fabric: "" }, 150),
+    "#292 fix2: a complete draft is valid; a missing name, fabric or price is not");
+  ok(lDraft.vendorCostOverride === String(legacyCost) && c292DraftValid(lDraft, 1428.56), "#292 fix2: a parseable legacy line still seeds its cost and stays valid");
+  const otherFabLine: C292Item = { ...legacyLine, desc: C292_DESC.replace("Charisma Velour 25 oz", "Discontinued Cloth") };
+  const oDraft = c292DraftFrom(otherFabLine, "FAB-X", fabs, mk);
+  ok(oDraft.fabric === "" && oDraft.width === "21.5" && !c292DraftValid(oDraft, 100) && c292DraftValid({ ...oDraft, fabric: "T292-FAB" }, 100),
+    "#292 fix2: a legacy line whose fabric matches no current fabric leaves it unpicked until the user picks one");
+  const rdM = readFileSync(join(process.cwd(), "src/app/(app)/estimator/curtain-modal.tsx"), "utf8");
+  ok(/curtainDraftValid\(draft, cc\.priceEach\)/.test(rdM) && rdM.includes("Kept from the quote"), "#292 source: the modal's valid check is curtainDraftValid, and the kept-cost hint shows");
+
+  // the portal never sees a vendor cost
+  const clean = c292CleanReq({ name: "Main", fabricSku: "T292-FAB", qty: 1, width: "20", height: "18", fullness: "50", vendorCost: "5", topFinish: "hem" }, fabs);
+  ok(clean.ok && !("vendorCost" in clean.curtain) && !("topFinish" in clean.curtain), "#292 fix: cleanCurtainRequest drops vendorCost (and the staff finishes)");
+  const cartLines = c292CartLines([c292Sec("s", [{ ...vItem, id: 7 }])]);
+  ok(cartLines.length === 1 && !!cartLines[0].curtainInputs && !("vendorCost" in cartLines[0].curtainInputs) && cartLines[0].curtainInputs.width === "21.5" && vItem.curtainInputs?.vendorCost === "412.5",
+    "#292 fix: cartLinesFromSpec strips vendorCost from a staff curtain line (source line untouched)");
+
+  // 2. the add path builds its line through curtainItem — identical to the pre-#292 inline line
+  const ac = c292Compute(base, fabs, sew, 0.3);
+  const added = { ...c292Item(base, ac, { id: 11, sku: "CRT-12", trackKey: undefined }), curtain: true, specKey: c292SpecKey(undefined, "Main Drape") || undefined };
+  const oldDesc = "Main Drape" + " — " + ac.fab.name + ", " + (parseFloat(base.width) || 0) + "'W × " + (parseFloat(base.height) || 0) + "'H, " + base.fullness + "% fullness";
+  ok(added.desc === oldDesc && added.desc === C292_DESC && added.qty === 2 && added.unit === "ea" && added.cost === ac.costEach && added.price === ac.priceEach && added.id === 11 && added.sku === "CRT-12" && !!SK_MAIN && added.specKey === SK_MAIN && !("curtainTrackKey" in added),
+    "#292 fix: a freshly added curtain line keeps the pre-#292 desc/qty/cost/price (no track → no key)");
+  const qtyBad = c292Item({ ...base, qty: "0" }, ac, { id: 1, sku: "CRT-2" });
+  ok(qtyBad.qty === 1 && c292Item(base, ac, { id: 1, sku: "CRT-2", trackKey: "ct-1" }).curtainTrackKey === "ct-1", "#292 fix: curtainItem clamps qty to 1 and keys a tracked add");
+  const estSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const addSrc = estSrc.slice(estSrc.indexOf("const addCurtain = "), estSrc.indexOf("const setFixture = "));
+  ok(/\.\.\.curtainItem\(d, c, \{ id: idN, sku: "CRT-" \+ skuN, trackKey: key \}\)/.test(addSrc) && !/desc: name \+/.test(addSrc), "#292 source: addCurtain builds its line through curtainItem (no inline desc)");
+
+  // 3. rename: a name-derived specKey follows the new name; a pinned one stays
+  const derivedOld: C292Item = { ...vItem, id: 41, specKey: c292SpecKey(undefined, "Main Drape") || undefined };
+  const renamed = c292Item({ ...base, name: "Border 1" }, ac, { id: 41, sku: "" });
+  renamed.specKey = c292SpecKey(undefined, "Border 1") || undefined;
+  const r1 = c292ReplaceCurtain(c292Sec("s", [derivedOld]), 41, renamed).items[0];
+  const r2 = c292ReplaceCurtain(c292Sec("s", [{ ...derivedOld, specKey: "Pinned" }]), 41, renamed).items[0];
+  const r3 = c292ReplaceCurtain(c292Sec("s", [derivedOld]), 41, { ...renamed, specKey: undefined }).items[0];
+  const r4 = c292ReplaceCurtain(c292Sec("s", [{ ...derivedOld, specKey: undefined }]), 41, renamed).items[0];
+  ok(!!SK_BORDER && SK_BORDER !== SK_MAIN && derivedOld.specKey === SK_MAIN && r1.specKey === SK_BORDER && r2.specKey === "Pinned" && !("specKey" in r3) && r4.specKey === SK_BORDER,
+    "#292 fix: rename re-derives a name-derived specKey, keeps a pinned one");
+  const legacyRename = c292ReplaceCurtain(c292Sec("s", [{ ...legacyLine, id: 41, specKey: SK_MAIN ?? undefined }]), 41, renamed).items[0];
+  ok(legacyRename.specKey === SK_BORDER, "#292 fix: a legacy line's derived specKey (name read from its desc) follows a rename");
+
+  // Add track while editing mints the curtain's own key, never a stale/shared one
+  const stale = c292ApplyEdit(c292Sec("s", [{ ...vItem, id: 50, curtainTrackKey: "ct-7" }, { id: 7, curtain: true, curtainTrackKey: "ct-7" }]), 50, { ...vItem }, { id: 99, sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
+  ok(!!stale.items[0].curtainTrackKey?.startsWith("ct-50-") && stale.items[1].id === 99 && stale.items[1].curtainTrackKey === stale.items[0].curtainTrackKey && stale.items[2].curtainTrackKey === "ct-7",
+    "#292 fix: Add track while editing mints ct-<line id>-<nonce> instead of reusing a stale or shared key");
+}
+
+async function curtain292AsyncChecks(): Promise<void> {
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const { CURTAIN_MOUNTS_BLOB } = await import("@/lib/curtain-mounts");
+  const { listCurtainMounts, saveCurtainMount } = await import("@/lib/stores/curtain-mounts");
+  const before = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
+  const TIE = fid(292, "tie-line");
+  await mergeUpsert(TIE, { desc: "Test292 Tie line", category: "Test292 Hardware", unit: "ea", list: 2, cost: 1 });
+  reg("catalog_parts", TIE);
+  try {
+    const saved = await saveCurtainMount("tie-batten", [{ sku: ` ${TIE} `, rule: { kind: "perMark", qty: "1" } }], "Tester");
+    ok(saved.ok && saved.hardware.rows.length === 1 && saved.hardware.rows[0].sku === TIE && saved.hardware.updatedBy === "Tester", "#292 store: saveCurtainMount saves sanitized rows, stamped with who saved them");
+    const back = await listCurtainMounts();
+    ok(back["tie-batten"]?.rows[0]?.sku === TIE && back["tie-batten"]?.rows[0]?.rule.kind === "perMark", "#292 store: listCurtainMounts reads the row back");
+    const gone = await saveCurtainMount("tie-batten", [{ sku: "NO-SUCH-292", rule: { kind: "perCurtain", qty: 1 } }], "Tester");
+    ok(!gone.ok && gone.error.includes("NO-SUCH-292"), "#292 store: a SKU missing from the catalog is refused by name");
+    const other = await saveCurtainMount("track-other", [], "Tester");
+    ok(!other.ok, "#292 store: track-other (or any unknown id) is refused");
+    const bad = async (rows: unknown[], needle: string, label: string) => {
+      const r = await saveCurtainMount("tie-batten", rows, "Tester2");
+      const stored = await listCurtainMounts();
+      ok(!r.ok && r.error.includes(needle) && stored["tie-batten"]?.rows.length === 1 && stored["tie-batten"]?.updatedBy === "Tester", `#292 store: ${label} is refused by row and the stored blob is unchanged`);
+    };
+    const goodRow = { sku: TIE, rule: { kind: "perMark", qty: 1 } };
+    await bad([goodRow, { sku: TIE, rule: { kind: "perCurtain", qty: "abc" } }], "Row 2 (" + TIE + "): quantity", "a non-numeric quantity");
+    await bad([{ sku: TIE, rule: { kind: "perCurtain", qty: 0 } }], "Row 1", "a zero quantity");
+    await bad([{ sku: TIE, rule: { kind: "perCurtain", qty: 5000 } }], "Row 1", "an over-cap quantity");
+    await bad([{ sku: TIE, rule: { kind: "perFtWidth", qty: 1, everyFt: 0 } }], "every N feet", "an invalid every-ft");
+    await bad([goodRow, { sku: "", rule: { kind: "perCurtain", qty: 1 } }], "Row 2: pick a part", "a blank part row");
+    const resaved = await saveCurtainMount("tie-batten", [goodRow, { sku: TIE, rule: { kind: "perFtWidth", qty: 2, everyFt: 4 } }], "Tester3");
+    ok(resaved.ok && resaved.hardware.rows.length === 2 && (await listCurtainMounts())["tie-batten"]?.rows.length === 2, "#292 store: a fully valid submission saves every row");
+    const { createFixture } = await import("./test-fixtures");
+    const { loadCutSheets } = await import("@/lib/curtain-cut-sheets/load");
+    const FAB = fid(292, "fabric");
+    await mergeUpsert(FAB, { desc: "Test292 Velour 25 oz", category: "Fabric", unit: "yd", list: 10, cost: 5, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 });
+    reg("catalog_parts", FAB);
+    const QID = fid(292, "quote");
+    const ci = { name: "Test292 Main", fabricSku: FAB, fabricName: "Test292 Velour 25 oz", qty: "1", width: "20", height: "18", fullness: "50" };
+    const track = (key: string, id: number) => ({
+      id, sku: "TRK-X", desc: "track", qty: 1, unit: "lot", cost: 1, price: 2, curtainTrackKey: key,
+      track: { seriesId: "test292-gone", operation: "oneway", runFt: 20, curved: false, mounting: "batten", qty: 1 },
+      components: [{ sku: "T292-CARRIER", label: "Carrier", role: "other", qty: 20, unit: "ea", cost: 1, price: 2 }],
+    });
+    await createFixture("quotes", {
+      id: QID, name: "T292 cut sheets", customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner: "Tester", preparedBy: "Tester", value: 0, margin: 0, history: [], createdAt: 1, updatedAt: 1,
+      spec: { sections: [{ id: "s1", name: "Drapery", kind: "materials", mfr: "", freightPct: 0, items: [
+        { id: 1, sku: "CRT-1", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: ci, curtainTrackKey: "ct-1" }, track("ct-1", 2),
+        { id: 3, sku: "CRT-3", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: ci, curtainTrackKey: "ct-3" }, track("ct-3", 4),
+      ] }], mobs: [] },
+    } as never);
+    const loaded = await loadCutSheets(QID, { images: "none" });
+    ok(loaded.ok && loaded.result.types.length === 1 && loaded.result.types[0].totalQty === 2 && loaded.result.types[0].hardware.find((h) => h.sku === "T292-CARRIER")?.qty === 40,
+      "#292 load: two identical keyed curtain lines read as one type with both tracks' components");
+    ok(loaded.ok && loaded.models.submittal[0].titleBlock?.sheet.number === "CS-1" && loaded.models.client[0].description.startsWith("Two Test292 Main panels") && loaded.photos.size === 0,
+      "#292 load: both styles are modelled; no photos when images are 'none'");
+    const missing = await loadCutSheets(fid(292, "no-such-quote"), { images: "none" });
+    ok(!missing.ok && missing.error === "Quote not found.", "#292 load: an unknown quote id reads 'Quote not found.'");
+  } finally {
+    const after = await getBlob<Record<string, unknown>>(CURTAIN_MOUNTS_BLOB, {});
+    await setBlob(CURTAIN_MOUNTS_BLOB, Object.fromEntries(Object.keys(after).map((k) => [k, Object.prototype.hasOwnProperty.call(before, k) ? before[k] : null])));
+  }
+  await cutSheetPackage292Checks();
+  await cutSheetFinal292AsyncChecks();
+}
+
+// ---- #292 task 8: signed print route, estimate-PDF toggle, client package ----
+import { DEFAULT_PDF_OPTIONS as c292PdfDefaults, PDF_TOGGLE_KEYS as c292PdfKeys, normalizePdfOptions as c292NormPdf } from "@/lib/quote-pdf/pdf-options";
+import { signPrintToken as c292Sign, verifyPrintToken as c292Verify } from "@/lib/quote-pdf/token";
+import { cutSheetFileName as c292FileName } from "@/lib/curtain-cut-sheets/package-sheets";
+import { CutSheetPages as C292Pages } from "@/components/cutsheets/cut-sheet-pages";
+import { createElement as c292El } from "react";
+import { renderToStaticMarkup as c292Render } from "react-dom/server";
+{
+  ok(c292PdfDefaults.pdfCutSheets === false && (c292PdfKeys as readonly string[]).includes("pdfCutSheets") && c292NormPdf(undefined).pdfCutSheets === false && c292NormPdf({ pdfCutSheets: true }).pdfCutSheets === true,
+    "#292 pdf: pdfCutSheets defaults off, is a toggle key, and a stored true is kept");
+  const now = 1_700_000_000_000;
+  const tok = c292Sign("s3cret", "cutsheets", "Q-1", now);
+  ok(c292Verify("s3cret", tok, "cutsheets", "Q-1", now) && !c292Verify("s3cret", tok, "cutsheets", "Q-2", now), "#292 token: a cutsheets token verifies for its own quote id only");
+  ok(!c292Verify("s3cret", c292Sign("s3cret", "quote", "Q-1", now), "cutsheets", "Q-1", now), "#292 token: a quote token does not verify as cutsheets");
+  ok(c292FileName("CS-2", "Legs (Encore Velour 22 oz)") === "cutsheets/CS-2-Legs_Encore_Velour_22_oz.pdf", "#292 package: one Submittal PDF per type under cutsheets/");
+  const rd292d = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pr = rd292d("src/app/print/cutsheets/[quoteId]/page.tsx");
+  const prBody = pr.slice(pr.indexOf("export default"));
+  ok(/verifyPrintToken\([^)]*"cutsheets"/.test(pr) && prBody.indexOf("tokenOk(") >= 0 && prBody.indexOf("tokenOk(") < prBody.indexOf("loadCutSheets("),
+    "#292 source: the print route verifies a cutsheets token before loadCutSheets");
+  const pkg = rd292d("src/lib/client-package-server.ts");
+  ok(pkg.includes("addCutSheets(") && rd292d("src/lib/curtain-cut-sheets/package-sheets.ts").includes("cutsheets/"), "#292 source: client packages write the cutsheets/ folder");
+  ok(/pdfCutSheets/.test(rd292d("src/app/print/quote/[id]/page.tsx")) && /CutSheetPages/.test(rd292d("src/app/print/quote/[id]/page.tsx")), "#292 source: the estimate print route appends Client pages behind pdfCutSheets");
+  ok(!/curtain-cut-sheets\/(collect|load|package-sheets)/.test(rd292d("src/app/(app)/estimator/estimator-client.tsx") + rd292d("src/app/(app)/estimator/preview-doc.tsx")),
+    "#292 source: the Estimator client never imports the collector, loader or package helper (bundle/boundary)");
+
+  // Render level: a fixture quote with curtains, rendered in BOTH styles, prints sheet CS-1.
+  const types = c292Collect([c292Sec("s1", [c292Cur(1), c292Trk(2), c292Cur(3, { desc: "Legs — Encore Velour 22 oz, 6'W × 20'H, 50% fullness", qty: 4 })])]).types;
+  const ctx8 = {
+    quote: { id: "Q-1", number: "EST-1042", name: "Main stage", customer: "Lakefront HS", venue: "Auditorium — Lakefront", revisions: [] },
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] }, preparedBy: "Jeff Chesebro", total: types.length, now: 1,
+  };
+  const html = (style: "submittal" | "client") =>
+    c292Render(c292El(C292Pages, { models: types.map((t, i) => c292Model(t, { ...ctx8, style, index: i + 1 })), style, photos: new Map<string, string[]>() }));
+  const subHtml = html("submittal");
+  const cliHtml = html("client");
+  ok(types.length === 2 && subHtml.includes('data-sheet="CS-1"') && subHtml.includes('data-sheet="CS-2"') && subHtml.includes("ADC-2802"),
+    "#292 render: the Submittal set renders one sheet per type (CS-1, CS-2) with the hardware table");
+  ok(cliHtml.includes('data-sheet="CS-1"') && cliHtml.includes('data-sheet="CS-2"') && cliHtml.includes("pk-cs-client") && !cliHtml.includes("ADC-2802"),
+    "#292 render: the Client set renders CS-1 and CS-2 with no SKUs");
+
+  // Client sheets break AFTER every sheet but the last (Submittal pattern) — an appended set never prints a blank page.
+  const css = rd292d("src/app/globals.css");
+  const clientRule = /\.pk-cs-client \{[^}]*\}/.exec(css)?.[0] ?? "";
+  ok(!!clientRule && !/break-before/.test(clientRule) && /\.pk-cs-set \.pk-cs-client \{[^}]*break-after: page/.test(css) && /\.pk-cs-set \.pk-cs-client:last-child \{[^}]*break-after: auto/.test(css),
+    "#292 css: Client sheets break after each sheet except the last, never before");
+  const qpr = rd292d("src/app/print/quote/[id]/page.tsx");
+  ok(/breakBefore: "page"/.test(qpr) && /CLIENT_PRINT_CSS/.test(qpr), "#292 source: the appended Client set starts on its own page and carries the Client print resets");
+}
+
+// ---- #292 task 8 fix round 1: bounded package renders, safe estimate append, customer-safe index ----
+import * as c292Pkg from "@/lib/curtain-cut-sheets/package-sheets";
+import * as c292Dl from "@/lib/curtain-cut-sheets/deadline";
+import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const P = c292Pkg;
+  const maxDur = [rd("src/app/(app)/quotes/page.tsx"), rd("src/app/(app)/design/grid/[id]/page.tsx")].map((t) => /export const maxDuration = (\d+);/.exec(t)?.[1]);
+  ok(maxDur.every((v) => Number(v) * 1000 === P.PACKAGE_MAX_DURATION_MS)
+    && P.CUT_SHEET_MIN_RENDER_MS > 0 && P.CUT_SHEET_MIN_RENDER_MS < P.CUT_SHEET_DEADLINE_MS
+    && P.CUT_SHEET_DEADLINE_MS + P.PACKAGE_FINISH_ALLOWANCE_MS + 10_000 <= P.PACKAGE_MAX_DURATION_MS,
+    "#292 package budget: pre-cut-sheet work + every render (each cut at the deadline) + the finish allowance stays 10 s inside the pages' 120 s maxDuration");
+  const D = 1_000_000;
+  ok(P.renderTimeoutMs(D, D - 100_000) === c292StepMs && P.renderTimeoutMs(D, D - 7_000) === 7_000 && P.renderTimeoutMs(D, D + 5) === 1 && P.cutSheetDeadline(10) === 10 + P.CUT_SHEET_DEADLINE_MS,
+    "#292 package budget: a render's Chrome step cap is the normal cap or the time left, whichever is less (never below 1 ms)");
+  ok(P.cutSheetGapReason(new c292Dl.CutSheetDeadlineError()) === P.CUT_SHEET_LATE
+    && P.cutSheetGapReason(Object.assign(new Error("Navigation timeout of 30000 ms exceeded"), { name: "TimeoutError" })) === P.CUT_SHEET_LATE
+    && P.cutSheetGapReason(new Error("spawn /opt/chrome ENOENT")) === P.CUT_SHEET_RENDER_FAILED && P.CUT_SHEET_RENDER_FAILED === "Couldn't be rendered — print from Cut sheets",
+    "#292 package: a render error becomes a fixed customer-safe reason (timeout → late, anything else → couldn't be rendered)");
+  const srv = rd("src/lib/client-package-server.ts");
+  const builders = ["export async function createClientPackage(", "export async function createQuoteClientPackage("].map((h) => srv.slice(srv.indexOf(h), srv.indexOf("\n}\n", srv.indexOf(h))));
+  ok(builders.every((b) => b.indexOf("cutSheetDeadline(Date.now())") > 0 && b.indexOf("cutSheetDeadline(Date.now())") < b.indexOf("blobEnabled()") && /addCutSheets\([^;]*\{ deadline: cutSheetsBy \}\)/.test(b)),
+    "#292 source: each package builder takes its cut-sheet deadline at the start of the build and threads it into addCutSheets");
+  const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
+  ok(/rejectAfter\(render\(url, \{ timeoutMs: renderTimeoutMs\(opts\.deadline, now\(\)\), signal: abort\.signal \}\), opts\.deadline - now\(\)\)/.test(ps) && ps.indexOf("signPrintToken(") > ps.indexOf("CUT_SHEET_MIN_RENDER_MS || abort.signal.aborted) {"),
+    "#292 source: each render gets a step cap and a hard wait cap from the deadline, and its token is signed right before it");
+  const idx = srv.split("\n").filter((l) => l.includes("00-package-index.json"));
+  ok(idx.length === 2 && idx.every((l) => l.includes("cutSheets: { sheets: cutSheets.sheets }") && !/unreadable/.test(l)) && /cutSheetsUnreadable: built\.cutSheets\.unreadable/.test(rd("src/app/(app)/design/grid/[id]/actions.ts")),
+    "#292 package: the zip's index lists the sheets but never the staff-only unreadable reasons; the Grid action still returns them");
+  const now = 1_700_000_000_000;
+  ok(!c292Verify("s3cret", c292Sign("s3cret", "cutsheets", "Q-1", now), "quote", "Q-1", now), "#292 token: a cutsheets token does not verify as a quote token");
+  const qpr = rd("src/app/print/quote/[id]/page.tsx");
+  ok(/settleWithin\(loadCutSheets\(id, \{ images: "data" \}\), CUT_SHEET_APPEND_LOAD_MS, `\[cutsheets\] estimate PDF \$\{id\}`\)/.test(qpr) && c292Dl.CUT_SHEET_APPEND_LOAD_MS <= 10_000,
+    "#292 source: the estimate print route waits at most a few seconds for appended cut sheets, then prints without them");
+  const pv = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(/cut sheet\$\{p\.cutSheetCount === 1 \? "" : "s"\} \(Client style\)/.test(pv) && !/cut sheet page/.test(pv), "#292 preview: the chip counts cut sheets (types), not pages");
+}
+
+async function cutSheetPackage292Checks(): Promise<void> {
+  const P = c292Pkg;
+  const { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } = await import("@/lib/curtain-cut-sheets/model");
+  const t0 = Date.now();
+  ok(await c292Dl.settleWithin(new Promise<number>(() => undefined), 20) === null && Date.now() - t0 < 2_000
+    && await c292Dl.settleWithin(Promise.reject(new Error("x")), 1_000) === null && await c292Dl.settleWithin(Promise.resolve(7), 1_000) === 7,
+    "#292 estimate append: a hung or failed cut-sheet load settles to null (estimate prints without it); a fast one passes through");
+  const types = [{ sheetNo: "CS-1", title: "Main (Velour)", totalQty: 1 }, { sheetNo: "CS-2", title: "Legs", totalQty: 4 }];
+  const okLoad = (t = types, unreadable: unknown[] = []) => async () => ({ ok: true as const, result: { types: t as never, unreadable: unreadable as never } });
+  const where = { origin: "https://app.example" };
+  const warn = console.warn;
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) process.env.AUTH_SECRET = "test292-secret";
+  console.warn = () => undefined;
+  try {
+    // A render that never answers: the first starts with 10 s left, the clock jumps to 30 ms left, so it is cut at
+    // the deadline; the second has too little time to start. Both become gaps and nothing waits on Chrome.
+    const D = Date.now() + 60_000;
+    let calls = 0;
+    const seen: number[] = [];
+    const files: ZipFile292[] = [];
+    const gaps: ClientPackageGap292[] = [];
+    const started = Date.now();
+    const out = await P.addCutSheets("Q-292", where, files, gaps, {
+      deadline: D, load: okLoad(), now: () => (calls++ === 0 ? D - 10_000 : D - 30),
+      render: (_u, o) => { seen.push(o.timeoutMs); return new Promise<Buffer>(() => undefined); },
+    });
+    ok(seen.length === 1 && seen[0] === 30 && files.length === 0 && gaps.length === 2 && gaps.every((g) => g.kind === "missing-cutsheet" && g.description.endsWith(P.CUT_SHEET_ON_REQUEST))
+      && out.sheets.every((s) => s.file === null) && Date.now() - started < 5_000,
+      "#292 package: a render past the deadline is abandoned as a gap, a render with too little time left is skipped, and Chrome gets only the time left");
+    const gaps2: ClientPackageGap292[] = [];
+    const files2: ZipFile292[] = [];
+    let url = "";
+    await P.addCutSheets("Q-292", where, files2, gaps2, {
+      deadline: Date.now() + 60_000, load: okLoad(),
+      render: async (u, o) => { if (u.includes("CS-2")) throw new Error("spawn /opt/secret-chrome ENOENT"); url = u; ok(o.timeoutMs === c292StepMs, "#292 package: an early render gets the normal Chrome step cap"); return Buffer.from("%PDF"); },
+    });
+    const tok = url ? new URL(url).searchParams.get("t") || "" : "";
+    ok(files2.length === 1 && files2[0].name === "cutsheets/CS-1-Main_Velour.pdf" && c292Verify(process.env.AUTH_SECRET || "", tok, "cutsheets", "Q-292", Date.now())
+      && gaps2.length === 1 && gaps2[0].description === `Legs — ${P.CUT_SHEET_ON_REQUEST}` && !gaps2[0].description.includes("secret"),
+      "#292 package: a rendered sheet lands under cutsheets/ with its own cutsheets token; a raw render error never reaches the customer's index");
+    const g3: ClientPackageGap292[] = [];
+    await P.addCutSheets("Q-292", { error: "Set QUOTE_PDF_ORIGIN — a production server off Vercel won’t print" }, [], g3, { deadline: Date.now() + 60_000, load: okLoad() });
+    ok(g3.length === 2 && g3.every((g) => g.description.endsWith(P.CUT_SHEET_ON_REQUEST) && !g.description.includes("QUOTE_PDF_ORIGIN")),
+      "#292 package: a staff-only print-origin error maps to the fixed customer-safe reason");
+    const run = async (load: Parameters<typeof P.addCutSheets>[4]["load"]) => {
+      const g: ClientPackageGap292[] = [];
+      await P.addCutSheets("Q-292", where, [], g, { deadline: Date.now() + 60_000, load, render: async () => Buffer.from("%PDF") });
+      return g;
+    };
+    const gone = await run(async () => ({ ok: false as const, error: CUT_SHEETS_NO_QUOTE }));
+    const wrong = await run(async () => ({ ok: false as const, error: CUT_SHEETS_WRONG_TYPE }));
+    const allBad = await run(okLoad([], [{ reason: "Can't read size — edit the curtain" }]));
+    const none = await run(okLoad([], []));
+    ok(gone.length === 1 && gone[0].kind === "missing-cutsheet" && gone[0].description === P.CUT_SHEET_QUOTE_GONE
+      && allBad.length === 1 && allBad[0].description === P.CUT_SHEETS_ON_REQUEST && wrong.length === 0 && none.length === 0,
+      "#292 package: a deleted quote or all-unreadable curtains leave one missing-cutsheet gap; no curtains (or not a system quote) leaves none");
+  } finally {
+    console.warn = warn;
+    if (!secret) delete process.env.AUTH_SECRET;
+  }
+}
+type ZipFile292 = import("@/lib/zip").ZipFile;
+type ClientPackageGap292 = import("@/lib/client-package").ClientPackageGap;
+
 /* ======================================================================
    #293 slice 1 — pure rules: key products (eligibility, resolve,
    sanitize, remap, star/edit helpers, chip, Draft narrative, printable
@@ -43567,6 +44455,235 @@ import type { SpecItem as N293gItem, SpecSection as N293gSec } from "@/app/(app)
     "#293 fix: row-loaded checks use Object.hasOwn (an sku named like an inherited property is not a loaded row)");
 }
 
+/* ============================================================================
+   #292 final review fix wave — unique curtain↔track keys, narrowed fabric
+   reads, an abortable Chrome queue, Grid edit links/fabric names/legacy
+   options, customer-neutral gap wording, shrunk photos, blank fabric seeds,
+   the Grid editor's unreadable note, and pristine mount rows. Async checks
+   run in cutSheetFinal292AsyncChecks() (called from curtain292AsyncChecks).
+   ============================================================================ */
+import { newCurtainTrackKey as f292Key, remapCurtainTrackKeys as f292Remap, linkCurtainTracks as f292Link } from "@/lib/curtain-cut-sheets/track-link";
+import {
+  curtainEditLink as f292EditLink, curtainFabricLookups as f292Lookups, cutSheetsUnreadableNote as f292Note,
+  curtainTypeKey as f292TypeKey, gridCurtains as f292Grid, readCurtains as f292Read, GRID_DESIGN_GONE as f292Gone,
+} from "@/lib/curtain-cut-sheets/estimator-curtains";
+import { copySectionForTarget as f292Copy } from "@/app/(app)/estimator/copy-system";
+import { curtainCostKept as f292Kept, curtainDraftFromLine as f292DraftFrom } from "@/app/(app)/estimator/curtain-line";
+import { BLANK_MOUNT_DRAFT as f292Blank, isPristineMountDraft as f292Pristine } from "@/lib/curtain-mounts";
+import { curtainDesc as f292CurtainDesc } from "@/lib/design/grid-bom";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const cur = (id: number, extra: Partial<C292Item> = {}) => ({ id, curtain: true, desc: C292_DESC, qty: 1, ...extra });
+  const trk = (id: number, extra: Partial<C292Item> = {}) => ({ id, track: { ...C292_TRACK }, ...extra });
+
+  // #1 (a) new keys are globally unique
+  const keys = new Set(Array.from({ length: 500 }, () => f292Key(100)));
+  ok(keys.size === 500 && [...keys].every((k) => /^ct-100-[0-9a-z]+$/.test(k)), "#292 final #1: 500 keys minted for the same line id are all distinct (ct-<id>-<nonce>)");
+
+  // #1 (b) a copied section's pairs get fresh shared keys; the input is untouched
+  let n = 0;
+  const srcItems = c292Sec("s", [cur(1, { curtainTrackKey: "ct-1" }), trk(2, { curtainTrackKey: "ct-1" }), cur(3, { curtainTrackKey: "ct-3" }), trk(4, { curtainTrackKey: "ct-3" }), { id: 5 }]).items;
+  const remapped = f292Remap(srcItems, (id) => `new-${id}-${n++}`);
+  ok(remapped[0].curtainTrackKey === "new-1-0" && remapped[1].curtainTrackKey === "new-1-0" && remapped[2].curtainTrackKey === "new-3-1" && remapped[3].curtainTrackKey === "new-3-1"
+    && !("curtainTrackKey" in remapped[4]) && srcItems[0].curtainTrackKey === "ct-1",
+    "#292 final #1: remapCurtainTrackKeys gives each pair one fresh shared key and never mutates the source");
+  const source = c292Sec("sysA", [cur(1, { curtainTrackKey: "ct-1" }), trk(2, { curtainTrackKey: "ct-1" })]);
+  const copied = f292Copy(source, { newSectionId: "sysB", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section;
+  const cl = f292Link([source, copied]);
+  ok(copied.items[0].curtainTrackKey !== "ct-1" && copied.items[0].curtainTrackKey === copied.items[1].curtainTrackKey
+    && cl.links.get(source.items[0]) === source.items[1] && cl.links.get(copied.items[0]) === copied.items[1] && cl.duplicates.length === 0,
+    "#292 final #1: Copy here — the copy's curtain/track pair gets a fresh key and both systems keep their own track link");
+  const readBoth = f292Read({ sections: [source, copied] }, C292_FABS, C292_SERIES, null);
+  ok(readBoth.curtains.length === 2 && readBoth.curtains.every((c) => c.mount.source === "track"), "#292 final #1: neither the source nor the copy falls back to the assumed tie-batten mount");
+  ok(rd("src/app/(app)/estimator/copy-system.ts").includes("items: remapCurtainTrackKeys(items)"), "#292 source: copySectionForTarget re-keys the copied pairs (Copy here, to new, to existing)");
+
+  // #1 (c) already-saved collisions: same-section tracks win
+  const a = c292Sec("a", [cur(1, { curtainTrackKey: "ct-5" }), trk(2, { curtainTrackKey: "ct-5" })]);
+  const b = c292Sec("b", [cur(3, { curtainTrackKey: "ct-5" }), trk(4, { curtainTrackKey: "ct-5" })]);
+  const ab = f292Link([a, b]);
+  ok(ab.links.get(a.items[0]) === a.items[1] && ab.links.get(b.items[0]) === b.items[1] && ab.duplicates.length === 0,
+    "#292 final #1: two sections sharing a legacy key each link their own same-section track");
+  const lone = c292Sec("x", [cur(6, { curtainTrackKey: "ct-5" })]);
+  const lb = f292Link([lone, b]);
+  ok(lb.links.get(b.items[0]) === b.items[1] && !lb.links.has(lone.items[0]) && lb.duplicates[0] === lone.items[0],
+    "#292 final #1: a curtain whose key has no track in its own section never steals another section's linked track (flagged instead)");
+  const cross = f292Link([c292Sec("p", [cur(7, { curtainTrackKey: "ct-q" })]), c292Sec("q", [trk(8, { curtainTrackKey: "ct-q" })])]);
+  ok(cross.links.size === 1 && cross.duplicates.length === 0, "#292 final #1: a free keyed track in another section still links (the pre-collision rule)");
+
+  // #2 fabric lookups mirror the adapters
+  const structured = f292Lookups({ sections: [c292Sec("s", [cur(1, { curtainInputs: c292Ci() as never })])] }, null);
+  const legacy = f292Lookups({ sections: [c292Sec("s", [cur(1)])] }, null);
+  const noSku = f292Lookups({ sections: [c292Sec("s", [cur(1, { curtainInputs: c292Ci({ fabricSku: "" }) as never })])] }, null);
+  ok(structured.skus.join() === "FAB-CH25" && !structured.byName && structured.byNameIfMissing.join() === "FAB-CH25" && legacy.byName && legacy.skus.length === 0 && noSku.byName,
+    "#292 final #2: structured curtains name their fabric SKUs; a legacy desc or a name-only curtain needs the fabric list by name");
+  const gridProject = { options: [{ id: "opt-a", name: "A", quoteId: "Q-7", createdAt: 1 }], placements: [{ id: "p1", optionId: "opt-a", curtain: { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "FAB-EN22" } }] };
+  const gl = f292Lookups({ kind: "grid", gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: "x" }] }, gridProject);
+  const gGone = f292Lookups({ kind: "grid", gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: "x" }] }, null);
+  ok(gl.skus.join() === "FAB-EN22" && !gl.byName && gGone.byName && gGone.skus.length === 0, "#292 final #2: a live Grid option names its placements' fabric SKUs; quoted lines need names");
+  const ld = rd("src/lib/curtain-cut-sheets/load.ts");
+  ok(!/fabricParts\(\)/.test(ld) && !/\blist\(\)/.test(ld) && /cutSheetFabricRows\(curtainFabricLookups\(quote\.spec, project, quote\.id\)\)/.test(ld),
+    "#292 final #2: loadCutSheets never reads the whole catalog — only the fabric rows its curtains name");
+  ok(/loadCutSheets\(quoteId, \{ images: style === "client" \? "data" : "none", sheet: sheet \|\| undefined \}\)/.test(rd("src/app/print/cutsheets/[quoteId]/page.tsx")),
+    "#292 final #2: a one-sheet print route (each package render) reads only its own sheet's photos");
+
+  // #4 edit links
+  const gq = { id: "Q-9", quoteType: "system", spec: { kind: "grid", gridProjectId: "GRD-1", gridOptionId: "opt-a" } };
+  ok(f292EditLink({ ref: "s1/line-4", sectionId: "s1" }, gq).href === "/estimator?id=Q-9"
+    && f292EditLink({ ref: "placement-p1" }, gq).href === "/design/grid/GRD-1?option=opt-a"
+    && f292EditLink({ ref: "line-2" }, gq).href === "/estimator?id=Q-9" && f292EditLink({ ref: "line-2" }, gq).label !== "Edit the curtain →",
+    "#292 final #4: Edit the curtain → only for Estimator rows; a Grid placement opens its design; quoted lines open the quote");
+  const csPage = rd("src/app/(app)/estimator/cut-sheets/page.tsx");
+  ok(csPage.includes("curtainEditLink(u, quote)") && !csPage.includes("editHref"), "#292 final #4: the Cut sheets page builds each row's link through curtainEditLink");
+
+  // #5 a Grid fabric that left the catalog never prints its SKU
+  const goneCurtain = { type: "Draw" as const, name: "Main", widthFt: 20, heightFt: 18, fullnessPct: 50, fabricSku: "GONE-1" };
+  const proj5 = { options: [{ id: "opt-a", name: "A", quoteId: null, createdAt: 1 }], placements: [{ id: "p1", optionId: "opt-a", curtain: goneCurtain }, { id: "p2", optionId: "opt-a", curtain: { ...goneCurtain, fabricSku: "GONE-2" } }] };
+  const named = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain, "Old Velour") }] }, proj5, C292_FABS);
+  const unnamed = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain) }] }, proj5, C292_FABS);
+  const live = f292Grid({ gridOptionId: "opt-a", lines: [{ sku: "CURTAIN", desc: f292CurtainDesc(goneCurtain, "Charisma Velour 25 oz") }] }, proj5, C292_FABS);
+  ok(named.curtains[0].fabricText === "Old Velour" && named.curtains[0].fabricRef === "GONE-1" && named.curtains[1].fabricText === "" && unnamed.curtains.every((c) => c.fabricText === "")
+    && live.curtains.every((c) => c.fabricText === "") && f292TypeKey(unnamed.curtains[0]) !== f292TypeKey(unnamed.curtains[1]),
+    "#292 final #5: a gone Grid fabric prints its quoted name or nothing (never the SKU); two gone fabrics stay separate types");
+
+  // #6 a Grid quote saved before gridOptionId finds its option by quoteId
+  const proj6 = { options: [{ id: "opt-a", name: "A", quoteId: "Q-OTHER", createdAt: 1 }, { id: "opt-b", name: "B", quoteId: "Q-6", createdAt: 2 }],
+    placements: [{ id: "p1", optionId: "opt-a", curtain: { ...goneCurtain, name: "A side" } }, { id: "p2", optionId: "opt-b", curtain: { ...goneCurtain, name: "B side", fabricSku: "FAB-CH25" } }] };
+  const old6 = f292Read({ kind: "grid", lines: [] }, C292_FABS, [], proj6, "Q-6");
+  const legacy6 = f292Read({ kind: "grid", lines: [] }, C292_FABS, [], { quoteId: "Q-L", placements: [{ id: "p1", curtain: { ...goneCurtain, fabricSku: "FAB-CH25" } }] }, "Q-L");
+  ok(old6.notes.length === 0 && old6.curtains.map((c) => c.name).join() === "B side" && legacy6.notes.length === 0 && legacy6.curtains.length === 1
+    && f292Read({ kind: "grid", lines: [] }, C292_FABS, [], proj6).notes.includes(f292Gone) && f292Read({ kind: "grid", gridOptionId: "opt-zz", lines: [] }, C292_FABS, [], proj6, "Q-6").notes.includes(f292Gone),
+    "#292 final #6: no gridOptionId → the option whose quoteId is this quote (or a pre-options project's own quote); a named option that's gone still reads the quoted lines");
+
+  // #7 customer-neutral wording, and the header says what is enforced
+  const P = c292Pkg;
+  const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
+  ok(P.CUT_SHEET_ON_REQUEST === "Cut sheet available on request" && !/print from|edit the/i.test(P.CUT_SHEET_ON_REQUEST + P.CUT_SHEETS_ON_REQUEST)
+    && /work BEFORE the cut\s+\* sheets[\s\S]{0,120}is not bounded/.test(ps) && /loadCutSheets runs once, before any deadline check/.test(ps) && /past the deadline every remaining sheet\s+\* becomes a gap/.test(ps),
+    "#292 final #7: the zip's gap reason is a neutral 'available on request'; the header states exactly what the deadline bounds");
+  ok(P.cutSheetGapReason(Object.assign(new Error("x"), { name: "AbortError" })) === P.CUT_SHEET_LATE, "#292 final #3: an aborted render logs as late");
+
+  // #9 blank fabric seeds + the kept-cost hint only for a seeded cost
+  const fabs9 = [{ sku: "T292-FAB", name: "Charisma Velour 25 oz" }];
+  const unread9 = f292DraftFrom({ id: 1, sku: "C", desc: "Main — hand edited", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true }, "FAB-X", fabs9);
+  const rec9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ fabricSku: "", fabricName: "" }) as never }, "FAB-X", fabs9);
+  const byName9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ fabricSku: "" }) as never }, "FAB-X", fabs9);
+  ok(unread9.fabric === "" && rec9.fabric === "" && byName9.fabric === "T292-FAB", "#292 final #9: an unreadable line or a 'recommend one' curtain seeds no fabric (staff pick); a name-only one resolves by name");
+  const seeded9 = f292DraftFrom({ id: 1, sku: "C", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: c292Ci({ vendorCost: "412.5" }) as never }, "FAB-X", fabs9);
+  ok(f292Kept(seeded9) && !f292Kept({ ...seeded9, vendorCostOverride: "500" }) && !f292Kept({ ...seeded9, vendorCostOverride: "", seededVendorCost: "" }) && !f292Kept({ ...unread9, vendorCostOverride: "300" }),
+    "#292 final #9: 'Kept from the quote' only while the cost field holds the seeded value, never for a typed one");
+  ok(rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{editing && curtainCostKept(draft) && ("), "#292 final #9: the modal's kept-cost hint reads curtainCostKept");
+
+  // #10 the Grid editor shows the unreadable curtains
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(f292Note(1) === "1 curtain couldn't be read for cut sheets — edit it, then rebuild" && f292Note(3).startsWith("3 curtains couldn't")
+    && ed.includes("setPackageUnreadable(result.cutSheetsUnreadable)") && ed.includes("cutSheetsUnreadableNote(packageUnreadable.length)"),
+    "#292 final #10: the Grid editor's package result names how many curtains the cut sheets couldn't read");
+
+  // #11 pristine "+ Add part" rows are dropped before validation
+  ok(f292Pristine({ ...f292Blank }) && !f292Pristine({ ...f292Blank, qty: "2" }) && !f292Pristine({ ...f292Blank, sku: "X" }) && !f292Pristine({ ...f292Blank, kind: "perMark" }),
+    "#292 final #11: only an untouched Add part row counts as pristine");
+  const mc = rd("src/app/(app)/estimating-rules/curtain-mounts/curtain-mounts-client.tsx");
+  ok(/toRows\(rows\.filter\(\(r\) => !isPristineMountDraft\(r\)\)\)/.test(mc) && mc.indexOf("isPristineMountDraft(r)") < mc.indexOf("validateMountRows(submitted)"),
+    "#292 final #11: the Curtain mounts screen drops pristine rows before validating (the server still refuses partial rows)");
+}
+
+async function cutSheetFinal292AsyncChecks(): Promise<void> {
+  const P = c292Pkg;
+  const { enqueueRender, renderPrintRouteToPdf } = await import("@/lib/quote-pdf/render");
+  const { cutSheetFabricRows, cutSheetPhotoDataUrl, CUT_SHEET_PHOTO_EDGE_PX } = await import("@/lib/curtain-cut-sheets/load");
+  const sharp = (await import("sharp")).default;
+
+  // #3 aborted before its turn: never runs, rejected at once, the queue moves on
+  let release!: () => void;
+  const blocker = enqueueRender(() => new Promise<string>((r) => { release = () => r("first"); }));
+  const ctl = new AbortController();
+  let launched = 0;
+  const queued = enqueueRender(async () => { launched++; return "never"; }, ctl.signal);
+  const order: string[] = [];
+  const after = enqueueRender(async () => { order.push("after"); return "after"; });
+  const t0 = Date.now();
+  ctl.abort();
+  const rejected = await queued.then(() => false, (e: unknown) => e instanceof Error && e.name === "AbortError");
+  ok(rejected && Date.now() - t0 < 1_000 && launched === 0, "#292 final #3: a queued render aborted before its turn rejects at once (AbortError) and never runs");
+  release();
+  ok((await blocker) === "first" && (await after) === "after" && launched === 0 && order.join() === "after",
+    "#292 final #3: the aborted slot passes straight on — the next render (no signal) still runs");
+  const pre = new AbortController();
+  pre.abort();
+  let ranPre = false;
+  ok(await enqueueRender(async () => { ranPre = true; return 1; }, pre.signal).then(() => false, () => true) && !ranPre, "#292 final #3: an already-aborted signal never launches the task");
+  const mid = new AbortController();
+  let sawAbort = false;
+  const running = enqueueRender((signal) => new Promise<number>((_, reject) => {
+    signal?.addEventListener("abort", () => { sawAbort = true; reject(new Error("browser closed")); });
+  }), mid.signal);
+  setTimeout(() => mid.abort(), 20);
+  ok(await running.then(() => false, () => true) && sawAbort, "#292 final #3: a running render receives the abort (render.ts closes its browser)");
+  const seq: number[] = [];
+  await Promise.all([1, 2, 3].map((i) => enqueueRender(async () => { seq.push(i); await new Promise((r) => setTimeout(r, 5)); seq.push(-i); })));
+  ok(seq.join() === "1,-1,2,-2,3,-3", "#292 final #3: without a signal the queue still runs one render at a time, in order");
+  const src = readFileSync(join(process.cwd(), "src/lib/quote-pdf/render.ts"), "utf8");
+  ok(/if \(!opts\.signal\) return enqueueRender\(\(\) => renderOnce\(url, timeout\)\);/.test(src) && renderPrintRouteToPdf.length === 1,
+    "#292 final #3: a caller with no signal takes the unchanged queue path");
+
+  // #3 the package passes a deadline signal, and abandons it when done
+  const warn = console.warn;
+  const logged: string[] = [];
+  console.warn = (...a: unknown[]) => { logged.push(a.map(String).join(" ")); };
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) process.env.AUTH_SECRET = "test292-secret";
+  try {
+    let sig: AbortSignal | undefined;
+    let loads = 0;
+    const types = [{ sheetNo: "CS-1", title: "Main", totalQty: 1 }, { sheetNo: "CS-2", title: "Legs", totalQty: 4 }];
+    const gaps: ClientPackageGap292[] = [];
+    await P.addCutSheets("Q-F292", { origin: "https://app.example" }, [], gaps, {
+      deadline: Date.now() + 60_000,
+      load: async () => { loads++; return { ok: true as const, result: { types: types as never, unreadable: [] } }; },
+      render: async (_u, o) => { sig = o.signal; if (_u.includes("CS-2")) throw new Error("spawn ENOENT"); return Buffer.from("%PDF"); },
+    });
+    ok(loads === 1 && !!sig && sig.aborted && gaps.length === 1 && gaps[0].description === `Legs — ${P.CUT_SHEET_ON_REQUEST}`
+      && logged.some((l) => l.includes("CS-2") && l.includes(P.CUT_SHEET_RENDER_FAILED)),
+      "#292 final #2/#3/#7: one load for the package, each render gets the deadline signal (aborted once the package is done), and the staff reason goes to the log only");
+  } finally {
+    console.warn = warn;
+    if (!secret) delete process.env.AUTH_SECRET;
+  }
+
+  // #2 the estimate append never drops cut sheets silently
+  const seen: string[] = [];
+  console.warn = (...a: unknown[]) => { seen.push(a.map(String).join(" ")); };
+  try {
+    const hung = await c292Dl.settleWithin(new Promise<number>(() => undefined), 10, "[cutsheets] estimate PDF Q-1");
+    const failed = await c292Dl.settleWithin(Promise.reject(new Error("boom")), 1_000, "[cutsheets] estimate PDF Q-2");
+    const quiet = await c292Dl.settleWithin(Promise.resolve(5), 1_000, "[cutsheets] estimate PDF Q-3");
+    ok(hung === null && failed === null && quiet === 5 && seen.length === 2 && seen[0].includes("Q-1") && seen[0].includes("not loaded within 10 ms") && seen[1].includes("Q-2") && seen[1].includes("boom"),
+      "#292 final #2: a timed-out or failed appended load logs one console.warn each; a loaded one logs nothing");
+  } finally {
+    console.warn = warn;
+  }
+
+  // #2 fabric rows: by SKU only, the fabric categories only when a name lookup is needed
+  type Part = import("@/lib/stores/catalog").CatalogPart;
+  const part = (sku: string, category = "Fabric", unit = "sqft") => ({ id: sku, sku, desc: sku + " desc", category, unit, cost: 1, list: 2 }) as unknown as Part;
+  let cat = 0;
+  const asked: string[][] = [];
+  const reader = { getMany: async (s: readonly string[]) => { asked.push([...s]); return s.filter((x) => x !== "MISSING").map((x) => (x === "BOLT" ? part(x, "Hardware", "ea") : part(x))); }, byCategory: async () => { cat++; return [part("F-1"), part("F-2")]; } };
+  const r1 = await cutSheetFabricRows({ skus: ["F-1", "BOLT"], byName: false, byNameIfMissing: ["F-1"] }, reader);
+  ok(r1.map((p) => p.sku).join() === "F-1" && cat === 0 && asked[0].join() === "F-1,BOLT", "#292 final #2: structured curtains read their fabric SKUs only (a non-fabric part is dropped), never the fabric list");
+  const r2 = await cutSheetFabricRows({ skus: ["MISSING"], byName: false, byNameIfMissing: ["MISSING"] }, reader);
+  const r3 = await cutSheetFabricRows({ skus: [], byName: true, byNameIfMissing: [] }, reader);
+  ok(cat === 2 && r2.map((p) => p.sku).join() === "F-1,F-2" && r3.length === 2, "#292 final #2: the fabric categories are read only when a curtain must be matched by fabric name");
+
+  // #8 photos inline at tile size
+  const big = await sharp({ create: { width: 1600, height: 800, channels: 3, background: { r: 200, g: 40, b: 40 } } }).png().toBuffer();
+  const uri = await cutSheetPhotoDataUrl(big);
+  const meta = uri ? await sharp(Buffer.from(uri.split(",")[1], "base64")).metadata() : null;
+  ok(!!uri && uri.startsWith("data:image/webp;base64,") && meta?.width === CUT_SHEET_PHOTO_EDGE_PX && meta?.height === CUT_SHEET_PHOTO_EDGE_PX / 2 && CUT_SHEET_PHOTO_EDGE_PX <= 400,
+    "#292 final #8: an inlined cut-sheet photo is shrunk to the tile (~400 px WebP), not the stored 1600 px");
+  ok((await cutSheetPhotoDataUrl(Buffer.from("not an image"))) === null, "#292 final #8: a photo that can't be shrunk is skipped");
+}
+
 /* ======================================================================
    #293 slice 2 — pure rules: the system library (which quotes and
    systems are indexed, search + ranking, hits, keys, the Load pick and
@@ -44025,4 +45142,29 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
   ok(!pidx.some((e) => e.quoteId === QPC) && !pidx.some((e) => e.quoteId === QPS), "#293s final (DB): sent portal-catalog and portal-service quotes are not in the library");
   const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3);
   ok(!pl.ok && pl.error === n293sGone, "#293s final (DB): a portal quote's system can't be loaded by key");
+}
+
+/* ============================================================================
+   Merge #292 × #293 slice 2 — Load system re-keys curtain/track pairs. A
+   loaded system rides copySectionForTarget (load-system.ts) and then
+   placeLoadedSection's re-id, so its pairs get a fresh shared key and can't
+   collide with a pair already in the target estimate (e.g. the very system
+   it was saved from).
+   ============================================================================ */
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const src = c292Sec("sysA", [
+    { id: 1, curtain: true, desc: C292_DESC, qty: 1, curtainTrackKey: "ct-1" },
+    { id: 2, track: { ...C292_TRACK }, curtainTrackKey: "ct-1" },
+  ]);
+  const loaded = f292Copy(src, { newSectionId: "sysL", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 }).section;
+  let nid = 200;
+  const placed = n293sPlace(loaded, { id: "sys999", nextId: () => ++nid, autoFreightPct: 0 });
+  const links = f292Link([src, placed]);
+  ok(placed.items[0].curtainTrackKey !== "ct-1" && placed.items[0].curtainTrackKey === placed.items[1].curtainTrackKey
+    && placed.items[0].id === 201 && placed.items[1].id === 202
+    && links.links.get(src.items[0]) === src.items[1] && links.links.get(placed.items[0]) === placed.items[1] && links.duplicates.length === 0,
+    "Merge #292x293s Load: a loaded system's curtain/track pair gets a fresh shared key through the re-id, and neither it nor the existing pair loses its track");
+  ok(/copySectionForTarget\(sanitizeSystemSell\(picked\.section\)/.test(rd("src/lib/narrative/load-system.ts")),
+    "Merge #292x293s Load: loadLibrarySystem builds the loaded section through copySectionForTarget (which re-keys pairs)");
 }

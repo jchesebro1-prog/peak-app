@@ -10325,3 +10325,59 @@ system and reported the key product it couldn't anchor; no console errors.
 - Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.
 - Portal-built quotes are excluded from the library — keep that?
 - Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
+
+## 292. Curtains — a cut sheet for every curtain type, for submittals and estimates — DONE 2026-10-01 (D553-D564)
+
+**Reported (Jeff, 2026-10-01).** Every curtain on a quote gets a cut sheet: front elevation, how it mounts, all its
+mounting hardware, and its materials. Deterministic, no AI.
+
+**Done.**
+- **One sheet per curtain type** (name + fabric + fullness + top + bottom + mount), numbered CS-1, CS-2..., with a
+  total qty and a size schedule. Read from Estimator quotes (structured `curtainInputs`, a legacy desc parser, the
+  `ct-<line id>-<nonce>` curtain-track key) and Grid quotes, through `src/lib/curtain-cut-sheets/`.
+- **Elevation and materials** drawn from finished dimensions; sewn area from `curtainCost`, weight from
+  `computeSetWeight`, never guessed (no basis or no bolt width prints no weight and warns). Grommet or carrier marks at
+  most 12" o.c.
+- **Mounting.** The linked track's mounting and stored components, else a picked mount type with hardware from the new
+  Estimating Rules -> Curtain mounts list. The mount-detail drawings are code.
+- **Estimator curtains.** The Configure curtain dialog gains Top finish, Bottom finish and Mount, and Edit / Update
+  curtain; the Grid curtain drop dialog the same fields. Fabric parts gain Flame rating and the weight basis
+  (oz, basis) in the part editor.
+- **Outputs.** `/estimator/cut-sheets` (Submittal Letter-landscape with a CS-n title block, Client Letter-portrait in
+  plain language, printed through `PrintButton`); a `cutsheets/` folder in client packages; and an off-by-default
+  Show on PDF -> Cut sheets toggle that appends the Client pages to the estimate PDF. Headless-Chrome renders go
+  through a signed `/print/cutsheets/[quoteId]` route. No migrations.
+- **Spec:** `docs/superpowers/specs/2026-10-01-curtain-cut-sheets-design.md`. **Plan:**
+  `docs/superpowers/plans/2026-10-01-curtain-cut-sheets.md`.
+
+Gates (merged head, which includes #293 slices 1-2): tsc 0; test:specs 10,862 PASS / 0 FAIL (#292: 234 checks + 2 merge
+checks); test:smoke 191/191 ALL PASSED; `next build` OK; eslint 0 on the changed src files.
+Browser: Browser-verified on a scratch datadir: Configure curtain shows Top finish / Bottom finish / Mount; a 2x
+21'-6" x 18'-0" velour curtain -> Cut sheets page renders the Submittal sheet (elevation with grommet count, tie-line
+mount detail, materials table, CS-1 title block, staff warnings above the sheet: no hardware listed, flame rating not
+set) and the Client sheet (plain-language description, How it hangs, sizes); turning on Show on PDF -> Cut sheets put the
+Client sheet on page 2 of the real headless-Chrome estimate PDF. The client-package zip wasn't exercised (no Blob store
+in local dev) -- harness-covered.
+
+**Rollback.** No hazard: older code ignores the new line fields, fabric fields and the `curtain_mount_hardware` blob.
+
+**Remaining (Jeff-gated).**
+1. Estimating Rules -> Curtain mounts starts empty: until hardware is set per mount type, an untracked sheet lists
+   none and warns.
+2. Set Weight (oz, basis, bolt width) and Flame rating on the real fabric parts so sheets print them.
+3. `QUOTE_PDF_ORIGIN` must be set in production (the #222 requirement) for package and PDF renders.
+
+**Out of scope.** A "Flame rating" / "Weight (oz)" import column; a Grid curtain edit dialog (re-drop to change);
+bi-parting pairs drawn as two lapped panels (a pair prints as one panel, Qty 2); track weight; rentals and portal-side
+cut sheets; a zip of the Client style; per-curtain color on Estimator lines.
+
+**For Jeff.**
+- Confirm the five mount types and their hardware (Track batten, Track ceiling, Track structure (drop kit), Tie-line to
+  pipe batten, Wall/header hook-and-loop): add, rename or drop any? Estimating Rules -> Curtain mounts starts empty,
+  so nothing lists hardware until it is set up.
+- Is tie-batten the right assumed mount for old curtain lines that have no track?
+- Are the Grid curtain-type defaults right (Draw grommets/chain/track-batten; Border grommets/hem/tie-batten; Leg and
+  Full grommets/chain/tie-batten)? In particular, should Border be hem and Draw track-batten?
+- Is 12" o.c. maximum right for grommets on every fabric, or should spacing vary by fabric or type?
+- Are 3-1/2" webbing and 4" bottom hems and pockets Peak's shop standards?
+- Set flame rating and weight (oz + basis + bolt width) on fabric parts so sheets print them.

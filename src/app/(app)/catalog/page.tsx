@@ -945,6 +945,9 @@ function PartFormModal({
                   key={part.sku}
                   initialRate={part.curtainAreaRate ?? null}
                   initialBoltWidthIn={part.boltWidthIn ?? null}
+                  initialOz={part.oz ?? null}
+                  initialOzBasis={part.ozBasis ?? null}
+                  initialFlameRating={part.flameRating ?? null}
                   fallbackRate={fabricAreaRateOf({ sku: part.sku, costPerSqft: part.costPerSqft, unit: part.unit, cost: part.cost })}
                   inputStyle={inputStyle}
                 />

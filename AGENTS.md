@@ -606,5 +606,22 @@ See `.env.example`.
     Copy system's shared `copy-pricing.ts`, vendor lines left out) and
     append-only Merge narrative. Slice 3 (client link) follows. Spec `docs/superpowers/specs/2026-10-01-narrative-client-preview-design.md`.
 
+33. ✅ **Curtain cut sheets** (#292, D553–D564) — every curtain type on a
+    system quote gets a deterministic cut sheet (CS-1, CS-2…): front
+    elevation from the finished size (marks ≤ 12" o.c.), a mounting detail,
+    materials (fabric, flame rating, sewn area from `curtainCost`, weight
+    from `computeSetWeight`, never guessed) and mounting hardware (the
+    linked track line's components, else Estimating Rules → Curtain
+    mounts, `curtain_mount_hardware`). `src/lib/curtain-cut-sheets/` reads
+    Estimator (structured `curtainInputs`, legacy desc parser, the
+    `ct-<line id>-<nonce>` curtain↔track key) and Grid quotes; Submittal
+    (Letter landscape, title block) and Client (Letter portrait, plain
+    language) styles at `/estimator/cut-sheets`, rendered through a signed
+    `/print/cutsheets/[quoteId]` route into a `cutsheets/` folder in client
+    packages and an off-by-default **Cut sheets** toggle on the estimate
+    PDF. Fabric parts gain flame rating + weight fields. Remaining is
+    Jeff-gated: confirm the mount types, fill Curtain mounts, set fabric
+    oz + flame ratings (PUNCHLIST #292).
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

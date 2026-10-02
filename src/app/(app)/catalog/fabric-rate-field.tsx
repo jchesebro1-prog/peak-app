@@ -7,8 +7,8 @@ import { FABRIC_RATE_UNIT, NO_FABRIC_RATE, sqftRateFromLinearYard, sqftRateFromS
  * #227 — a Fabric part's one curtain rate: FABRIC cost per sq ft of sewn
  * fabric area. It carries no sewing: every curtain estimate adds the sewing
  * labor rule on top (#227 late, Estimating Rules curtains.sewingPct). Lives inside
- * `<form action={upsertPart}>`: only the two named inputs (curtainAreaRate,
- * boltWidthIn) post with the form. The converter inputs carry no `name` and
+ * `<form action={upsertPart}>`: only the named inputs (curtainAreaRate,
+ * boltWidthIn, and #292's oz, ozBasis, flameRating) post with the form. The converter inputs carry no `name` and
  * its buttons are type="button", so nothing else reaches upsertPart.
  */
 
@@ -39,18 +39,28 @@ function asText(n: number | null): string {
 export default function FabricRateField({
   initialRate,
   initialBoltWidthIn,
+  initialOz,
+  initialOzBasis,
+  initialFlameRating,
   fallbackRate,
   inputStyle,
 }: {
   /** The part's own curtainAreaRate, or null. */
   initialRate: number | null;
   initialBoltWidthIn: number | null;
+  /** #292 — the part's weight (oz), its basis and flame rating, or null. */
+  initialOz: number | null;
+  initialOzBasis: "lin-yd" | "sq-yd" | null;
+  initialFlameRating: string | null;
   /** What the part prices at with the field blank (seed, else cost per sq ft); 0 = none. */
   fallbackRate: number;
   inputStyle: CSSProperties;
 }) {
   const [rate, setRate] = useState(asText(initialRate));
   const [bolt, setBolt] = useState(asText(initialBoltWidthIn));
+  const [oz, setOz] = useState(asText(initialOz));
+  const [ozBasis, setOzBasis] = useState<"" | "lin-yd" | "sq-yd">(initialOzBasis ?? "");
+  const [flame, setFlame] = useState(initialFlameRating ?? "");
   const [perLinYd, setPerLinYd] = useState("");
   const [perSqYd, setPerSqYd] = useState("");
   const linYdRate = sqftRateFromLinearYard(parseFloat(perLinYd), parseFloat(bolt));
@@ -89,7 +99,26 @@ export default function FabricRateField({
           />
         </div>
       </div>
-      <div style={HELP}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.4fr", gap: 12, marginTop: 12 }}>
+        <div>
+          <div style={LBL}>Weight (oz)</div>
+          <input name="oz" value={oz} onChange={(e) => setOz(e.target.value)} inputMode="decimal" placeholder="25" style={inputStyle} />
+        </div>
+        <div>
+          <div style={LBL}>Weight basis</div>
+          <select name="ozBasis" value={ozBasis} onChange={(e) => setOzBasis(e.target.value as "" | "lin-yd" | "sq-yd")} style={inputStyle}>
+            <option value="">Not set</option>
+            <option value="lin-yd">per linear yard</option>
+            <option value="sq-yd">per square yard</option>
+          </select>
+        </div>
+        <div>
+          <div style={LBL}>Flame rating</div>
+          <input name="flameRating" value={flame} onChange={(e) => setFlame(e.target.value)} maxLength={120} placeholder="NFPA 701 (IFR)" style={inputStyle} />
+        </div>
+      </div>
+      <div style={HELP}>Weight and flame rating print on curtain cut sheets; blank prints nothing.</div>
+      <div style={{ ...HELP, marginTop: 10 }}>
         Fabric cost only — estimates add sewing labor (Estimating Rules, default 10 %). Priced per sq ft of sewn
         fabric area (finished width × (1 + fullness) × height); sell = cost ÷ (1 − margin).
       </div>

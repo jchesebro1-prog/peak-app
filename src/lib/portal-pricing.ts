@@ -473,7 +473,12 @@ export function cartLinesFromSpec(sections: readonly SpecSection[]): Array<Omit<
       if (it.fixture) {
         if (it.fixtureId) out.push({ kind: "fixture", fixtureId: it.fixtureId, fixtureOptions: it.fixtureOptions, qty: it.qty });
       } else if (it.curtain) {
-        if (it.curtainInputs) out.push({ kind: "curtain", curtainInputs: it.curtainInputs, qty: it.qty });
+        if (it.curtainInputs) {
+          // #292: a staff vendor cost never reaches a customer cart.
+          const curtainInputs = { ...it.curtainInputs };
+          delete curtainInputs.vendorCost;
+          out.push({ kind: "curtain", curtainInputs, qty: it.qty });
+        }
       } else if (it.sku) {
         out.push({ kind: "part", sku: it.sku, qty: it.qty });
       }

@@ -97,20 +97,60 @@ function printPathOf(url: string): string {
 
 let queue: Promise<unknown> = Promise.resolve();
 
-export function renderPrintRouteToPdf(url: string, opts: { timeoutMs?: number } = {}): Promise<Buffer> {
+/** A render given up by its caller (#292: a client package past its cut-sheet deadline). */
+export class RenderAborted extends Error {
+  constructor() {
+    super("The render was cancelled.");
+    this.name = "AbortError";
+  }
+}
+const abortErrorOf = (signal: AbortSignal): Error => (signal.reason instanceof Error ? signal.reason : new RenderAborted());
+
+/**
+ * The one Chrome queue: tasks run one at a time, in order. Without a signal
+ * this is exactly the pre-#292 queue. With one (#292 final review #3): a task
+ * aborted before its turn never runs (its slot passes straight on, so nothing
+ * launches Chrome for it) and its caller is rejected at once, not at its
+ * turn; a running task gets the signal to stop early. Exported for the spec
+ * harness, which drives it with fake tasks.
+ */
+export function enqueueRender<T>(task: (signal?: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    const run = () => task();
+    const next = queue.then(run, run);
+    queue = next.catch(() => undefined);
+    return next;
+  }
+  const run = () => (signal.aborted ? Promise.reject(abortErrorOf(signal)) : task(signal));
+  const next = queue.then(run, run);
+  queue = next.catch(() => undefined);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortErrorOf(signal));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    next.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/**
+ * `signal` (optional — every pre-#292 caller passes none and behaves exactly
+ * as before): aborted before its turn, the render never launches Chrome;
+ * aborted while running, the browser is closed at once, so the queue moves on.
+ */
+export function renderPrintRouteToPdf(url: string, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Buffer> {
   // `next dev` compiles /print on first hit, which can take far longer than a
   // warm production render.
   const timeout = opts.timeoutMs ?? (process.env.NODE_ENV === "development" ? 90_000 : RENDER_STEP_TIMEOUT_MS);
-  const run = () => renderOnce(url, timeout);
-  const next = queue.then(run, run);
-  queue = next.catch(() => undefined);
-  return next;
+  if (!opts.signal) return enqueueRender(() => renderOnce(url, timeout));
+  return enqueueRender((signal) => renderOnce(url, timeout, signal), opts.signal);
 }
 
-async function renderOnce(url: string, timeout: number): Promise<Buffer> {
+async function renderOnce(url: string, timeout: number, signal?: AbortSignal): Promise<Buffer> {
   const launch = await chromeLaunch();
   if ("unavailable" in launch) throw new PdfRenderUnavailable(launch.unavailable);
+  if (signal?.aborted) throw abortErrorOf(signal);
   const puppeteer = (await import("puppeteer-core")).default;
+  if (signal?.aborted) throw abortErrorOf(signal);
   const browser = await puppeteer.launch({
     executablePath: launch.executablePath,
     args: launch.args,
@@ -118,6 +158,14 @@ async function renderOnce(url: string, timeout: number): Promise<Buffer> {
     defaultViewport: { width: 1100, height: 1400 },
     timeout: RENDER_LAUNCH_TIMEOUT_MS,
   });
+  // Aborted mid-render: close Chrome now — the in-flight step fails and the queue moves on.
+  const closeOnAbort = () => {
+    browser.close().catch(() => undefined);
+  };
+  if (signal) {
+    if (signal.aborted) closeOnAbort();
+    else signal.addEventListener("abort", closeOnAbort, { once: true });
+  }
   try {
     const page = await browser.newPage();
     const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
@@ -158,6 +206,7 @@ async function renderOnce(url: string, timeout: number): Promise<Buffer> {
     const pdf = await page.pdf({ format: "letter", printBackground: true, preferCSSPageSize: true, timeout });
     return Buffer.from(pdf);
   } finally {
+    signal?.removeEventListener("abort", closeOnAbort);
     await browser.close().catch(() => undefined);
   }
 }

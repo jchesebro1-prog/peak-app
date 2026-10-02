@@ -8694,3 +8694,99 @@ no room. **Merge narrative from library…** is in the narrative column's ⋯ me
 (spec §4.2 assumed one). One modal serves both modes; Has narrative starts on in merge mode. While a Load is in flight,
 Close, Cancel and Esc are disabled; a failed search shows Retry; a failed entry unticks. The Load notice reuses the
 move/copy banner (`verb: "Loaded"`).
+
+## D553. One cut sheet per curtain type; the type key (#292, 2026-10-01)
+
+A curtain type is the same name (trimmed, case-insensitive) + fabric + fullness + top finish + bottom finish + mount,
+and the mount is the linked track's series and mounting when a track is linked, else the picked mount type. A tracked
+curtain's key also carries the track series and the carrier spacing, so one group always has one hardware source and
+one spacing. Size is not part of the type: a sheet lists total qty and a size schedule of every finished W x H with its
+qty. Sheets are numbered CS-1, CS-2... in first-appearance order (section order, then line order; Grid placement order).
+Optional-scope curtain lines (`option: true`) get no sheet and are listed as left out on the staff page, the
+`bomFromQuote` rule. Two adapters feed one collector: a quote with non-empty `spec.sections` reads through the Estimator
+adapter, else `spec.kind === "grid"` through the Grid adapter, so a quote is read by exactly one.
+
+## D554. Elevation drawn from finished dimensions, using the pricing and steel functions (#292, 2026-10-01)
+
+The elevation is drawn from the finished W x H that `curtainCost` prices and `computeSetWeight` weighs; sewn area and
+weight on the sheet come from those two functions, never a parallel formula. One architectural scale (the largest that
+fits), at most three panels drawn and "Typical" beyond that, 3-1/2" webbing and 4" bottom hems and pockets (shop
+standards awaiting Jeff). Top-finish marks default to 12" o.c. maximum, spaced evenly with both ends marked
+(`count = ceil(W*12 / s) + 1`); a tracked curtain's marks are carriers at the line's `carrierSpacingIn` override, else
+the series' spacing, else 12". Grid curtains default their finishes and mount by Grid type (Draw grommets/chain/
+track-batten; Border grommets/hem/tie-batten; Leg and Full grommets/chain/tie-batten), marked assumed when defaulted.
+
+## D555. Weight is never guessed (#292, 2026-10-01)
+
+A fabric with no weight basis (`oz`), or a lin-yd basis with no bolt width, prints no weight and raises a "Weight not
+set" staff warning; a blank fact prints nothing, never stand-in text. A pipe-pocket bottom has no jack chain, and the
+pipe is not part of the goods weight, so the sheet says "Bottom pipe not included". Track weight is excluded.
+
+## D556. Mount from the track, else picked; hardware sources; mount-detail drawings are code (#292, 2026-10-01)
+
+A linked track's `track.mounting` picks the mount detail, through `mountTypeForTrackMounting(string)` (batten, ceiling,
+structure, anything else to a generic `track-other` that is never pickable, so a new `TrackMounting` value cannot break
+compile or render). Tracked hardware is the track lines' stored components summed by SKU. An untracked curtain uses its
+picked mount type (five starters: Track batten, Track ceiling, Track structure, Tie-line to pipe batten, Wall/header
+hook-and-loop; pending Jeff), and its hardware comes from the admin Curtain mounts blob `curtain_mount_hardware`
+(Estimating Rules, `manage_users`, per-curtain / per-ft-of-width / per-mark rules, starts empty, refuses a SKU not in
+the catalog). The mount-detail drawings are one pure SVG geometry function per mount type, in code, not data. Old
+untracked lines assume `tie-batten` and say so.
+
+## D557. Curtain-track link key is `ct-<line id>-<nonce>` (#292, 2026-10-01)
+
+The spec's `ct-<line id>` is replaced by `ct-<line id>-<nonce>`: a line id is reused after copy and reorder flows, so a
+bare id could collide. Old `ct-<line id>` keys still link. When two tracks carry the same key, the same-section track is
+preferred. Copy here and Load system (#293) give the copied curtain/track pairs fresh keys. A curtain with no key falls
+back to the next item in its section when that is an unkeyed track line; one track per curtain, a second curtain is
+flagged.
+
+## D558. Structured curtain inputs, legacy parsing, Edit and Update curtain (#292, 2026-10-01)
+
+Estimator curtain lines store a structured `curtainInputs` (the portal's `CurtainRequest` shape plus top finish, bottom
+finish, mount type); legacy lines, whose size lives only in `desc`, are read by a pure parser. A line the parser cannot
+read, or whose size is 0, is flagged "Edit the curtain", never guessed. Edit curtain / Update curtain re-opens the
+configurator; the vendor cost is kept as a staff-only field and never goes into customer carts, a legacy line keeps its
+cost, and Update stays disabled until width and height are above 0 and a fabric is picked. `curtainInputs.qty` is
+informational; the line qty counts.
+
+## D559. Fabric flame rating and weight fields on catalog parts (#292, 2026-10-01)
+
+Fabric parts gain an optional `flameRating` (120 characters, written only through `mergeUpsert`), edited in the part
+editor's fabric section beside the existing `oz`, `ozBasis` and `boltWidthIn` weight basis, which had no editor. A blank
+clears the field and the basis clears with a blank oz; the server refuses these on a non-fabric part. No import column
+yet.
+
+## D560. Two cut-sheet styles from one model (#292, 2026-10-01)
+
+Both styles render from one `CutSheetModel`. Submittal is Letter landscape with a title block (CS-n, estimate number,
+quote revision lettered A, B..., "Elev <scale> - Detail NTS"), elevation, mount detail, materials and hardware tables,
+and shows SKUs; staff warnings sit above it on the page. Client is Letter portrait with a Peak header, the elevation,
+a plain-language description, "How it hangs", sizes and part photos, and carries no SKU, cost or staff warning.
+
+## D561. The signed `/print/cutsheets/[quoteId]` route (#292, 2026-10-01)
+
+Cut sheets for headless-Chrome rendering come from a signed print route, with a new print-token kind `"cutsheets"`,
+checked before any read; `/print/` is exempt from the login redirect. The staff page `/estimator/cut-sheets` is
+`requireUser()`, like the Estimator page; the Curtain mounts screen and its action are `manage_users`.
+
+## D562. Estimate PDF cut-sheet toggle (#292, 2026-10-01)
+
+Show on PDF gains Cut sheets (`pdfCutSheets`, default off), appending the Client pages to the estimate PDF (the portal
+serves the same PDF). The load is raced against 8 s; a slow or failed load drops the sheets with a log line and never
+fails the estimate. Catalog, track-series and Curtain mounts edits do not reschedule a PDF; they show on the next save.
+
+## D563. Client package `cutsheets/` folder and its time budget (#292, 2026-10-01)
+
+Client packages gain a `cutsheets/` folder with one Submittal PDF per type. Cut-sheet work has a 75 s deadline from
+the build start, leaving a 25 s reserve under `maxDuration` 120, and each render is bounded by an `AbortSignal`
+(`render.ts` gained an optional `signal`; callers without one are unchanged). A type that misses the deadline or fails
+becomes a `missing-cutsheet` gap worded customer-neutrally, "Cut sheet available on request"; the unreadable list stays
+out of the zip index. Residual risk: a legitimate in-deadline cut-sheet render can make a quote PDF save on the same
+instance wait up to about 75 s.
+
+## D564. Targeted fabric reads (#292, 2026-10-01)
+
+The loader reads fabrics with `getMany` by the ids the curtains name. A category query runs only for legacy name
+matching, and categories with stray spaces are not matched by the SQL filter, so a legacy line that names such a fabric
+reads as unmatched rather than guessed.

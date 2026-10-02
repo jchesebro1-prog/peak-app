@@ -8,7 +8,7 @@ import { placementQty } from "@/lib/design/grid-bom";
 import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import type { FixtureResolvable } from "@/lib/fixture-assemblies";
 
-export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec";
+export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec" | "missing-cutsheet";
 
 export type ClientPackageGap = {
   kind: PackageGapKind;

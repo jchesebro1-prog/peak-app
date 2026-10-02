@@ -15,6 +15,8 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { createQuoteClientPackage } from "@/lib/client-package-server";
+import { headers } from "next/headers";
+import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 
 /**
@@ -73,8 +75,10 @@ export async function createQuoteClientPackageAction(formData: FormData): Promis
   if (!id) return;
   const quote = await get(id);
   if (!quote) return;
+  const h = await headers();
+  const printWhere = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
   try {
-    const result = await createQuoteClientPackage(quote, user.name);
+    const result = await createQuoteClientPackage(quote, user.name, { printWhere });
     redirect(`/api/client-packages/${encodeURIComponent(result.record.id)}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not build the client package.";

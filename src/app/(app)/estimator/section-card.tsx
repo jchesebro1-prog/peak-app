@@ -171,6 +171,8 @@ export type SectionCardProps = {
   onEditLabor?: (laborGroup: string) => void;
   /** #274: reopen the track configurator on a track line (by line id). */
   onEditTrack?: (lineId: number) => void;
+  /** #292: reopen the curtain configurator on a curtain line (by line id). */
+  onEditCurtain?: (lineId: number) => void;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
   onMoveToNew: () => void;
   /** Moves this system into an already-existing estimate, by id. */
@@ -922,11 +924,16 @@ export default function SectionCard(p: SectionCardProps) {
               /* #274: a track line reopens the track configurator the same
                  way — its description or ✎, first click only. */
               const trackEditable = isInternal && !!p.onEditTrack && !!it.track;
+              /* #292: a curtain line reopens the curtain configurator through
+                 the same description click (openLine) and its own ✎ — a line
+                 is never both a track and a curtain. */
+              const curtainEditable = isInternal && !!p.onEditCurtain && !!it.curtain;
               const openTrack = (e: { detail: number }) => {
                 if (e.detail > 1) return;
                 if (trackEditable) p.onEditTrack?.(it.id);
+                else if (curtainEditable) p.onEditCurtain?.(it.id);
               };
-              const lineEditable = laborEditable || trackEditable;
+              const lineEditable = laborEditable || trackEditable || curtainEditable;
               const openLine = laborEditable ? openLabor : openTrack;
               return (
                 <div
@@ -944,7 +951,7 @@ export default function SectionCard(p: SectionCardProps) {
                 >
                   <div style={{ minWidth: 0 }}>
                     <div
-                      title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : lineDesc}
+                      title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : curtainEditable ? lineDesc + " — click to edit this curtain" : lineDesc}
                       onClick={lineEditable ? openLine : undefined}
                       style={{
                         lineHeight: 1.3,
@@ -1307,6 +1314,9 @@ export default function SectionCard(p: SectionCardProps) {
                     )}
                     {trackEditable && (
                       <button type="button" className="est-action-btn" onClick={openTrack} title="Edit track — reopens the track configurator" aria-label={`Edit track for ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
+                    {curtainEditable && (
+                      <button type="button" className="est-action-btn" onClick={openLine} title="Edit curtain — reopens the curtain configurator" aria-label={`Edit curtain ${it.desc}`} style={ACTION_BTN}>✎</button>
                     )}
                     {kpStar !== "none" && (
                       <button
