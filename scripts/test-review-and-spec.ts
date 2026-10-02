@@ -45251,12 +45251,12 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   const df = { customer: "Sent Cust", locationId: "loc-sent", contactName: "Sent Contact", quoteNote: "Sent note", assumptions: "Sent assumptions",
     installTimeframe: "Q4", preparedBy: "Sent Preparer", owner: "Sent Owner", termsText: "Sent terms", paymentTerms: "Net 30",
     pdfOptions: { detail: "sectioned" }, portalFirm: null, source: "estimator" };
-  // Final fix 1: the Rev/date stamp the PDF copy freezes (here the PDF printed Rev 2, dated 5000).
-  const withDf = rev(2, "sent", 5000, { docFields: { ...df, revNo: 2, issuedAt: 5000 }, spec: { sections: [{ id: "sentSec" }] }, vendorQuotes: [{ id: "vq-sent" }] });
+  // Final fix 1: the Rev/date stamp the PDF copy freezes (here the PDF printed Rev 2, dated 5001 — one ms after the revision's own `at`, 5000, so frozen and derived differ).
+  const withDf = rev(2, "sent", 5000, { docFields: { ...df, revNo: 2, issuedAt: 5001 }, spec: { sections: [{ id: "sentSec" }] }, vendorQuotes: [{ id: "vq-sent" }] });
   const live = quote("sent", [rev(1, "manual", 1000), withDf, rev(3, "manual", 7000)], { shareLink: { nonce: "N", expiresAt: 1, createdAt: 1, createdBy: "x" } });
   const a = n293tAsOf(live, withDf);
   ok(a.name === "Sent name" && a.value === 500 && (a.spec as { sections: { id: string }[] }).sections[0].id === "sentSec" &&
-     (a.vendorQuotes as { id: string }[])[0].id === "vq-sent" && a.updatedAt === 5000 && a.revisions?.length === 2,
+     (a.vendorQuotes as { id: string }[])[0].id === "vq-sent" && a.updatedAt === 5001 && a.revisions?.length === 2,
     "#293t as-sent: the revision's name, spec, vendor quotes and value win over the live quote; its date and rev number are the frozen PDF stamp (docFields revNo/issuedAt)");
   ok(a.quoteNote === "Sent note" && a.owner === "Sent Owner" && a.preparedBy === "Sent Preparer" && a.locationId === "loc-sent" &&
      (a.pdfOptions as { detail: string }).detail === "sectioned",
@@ -45266,7 +45266,7 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   ok(b.quoteNote === "Live note" && (b.pdfOptions as { detail: string }).detail === "itemized" && b.name === "Sent name",
     "#293t as-sent: a revision cut before #293 (no docFields) reads the live header and the revision's body");
   ok(live.quoteNote === "Live note" && live.revisions?.length === 3 && live.name === "Live name", "#293t as-sent: the live quote is never mutated");
-  const day = new Date(5000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
+  const day = new Date(5001).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
   ok(n293tHeader({ ...live, estNo: 1005 } as N293tQuote, withDf) === "EST-1005 · Rev 2 · sent " + day, "#293t header: EST-#### · Rev N · sent <date>");
   ok(n293tView("bom") === "bom" && n293tView(["bom", "x"]) === "bom" && n293tView("x") === "narrative" && n293tView(undefined) === "narrative",
     "#293t view param: ?view=bom, anything else is the narrative");
@@ -46014,6 +46014,12 @@ async function finalFix293tAsyncChecks(): Promise<void> {
         return props ? { q, rev: st.rev, props, header: n293tHeader(q, st.rev) } : null;
       };
       const send = (id: string) => n293tFSetStatus(id, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+      const fileOf = async (id: string) => {
+        const p = (await n293tQGet(id))?.pdf;
+        const store = pdfStorage();
+        if (!p?.blobPath || "unavailable" in store) return null;
+        return (await store.read(p.blobPath))?.toString() ?? null;
+      };
 
       // 1. Send from the hub after a save (the render ran BEFORE the cut) — first send.
       const QA = fixtureId(293, "t-final-hub");
@@ -46072,10 +46078,24 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       await n293tQUpdate(QC, { quoteNote: "Race note 293tF" });
       const seen4 = { v: null as { revNum: number; revDateMs: number } | null };
       let qcMoves = 0;
-      const savedC = await saveAndRender(QC, seen4, async () => { qcMoves++; await tick(); await n293tQUpdate(QC, { category: qcMoves === 1 ? "Rigging" : "Lighting" } as never); });
+      const savedC = Date.now();
+      await n293tFUpdatePdf(QC, (cur) => n293tFPending(cur, savedC, savedC));
+      await n293tFGenerate({
+        quoteId: QC, savedAt: savedC, origin, secret,
+        render: async () => {
+          qcMoves++;
+          await tick();
+          await n293tQUpdate(QC, { category: qcMoves === 1 ? "Rigging" : "Lighting" } as never);
+          const d = n293tDocData((await n293tQGet(QC))!, null, SET);
+          seen4.v = { revNum: d.revNum, revDateMs: d.revDateMs };
+          return Buffer.from(`%PDF-1.4 293tf-qc render ${qcMoves}`);
+        },
+      });
       const pdf4 = (await n293tQGet(QC))?.pdf;
       ok(pdf4?.status === "ready" && !pdf4.printed, "#293t final 1 (DB): a write during the render — and again during its one re-render → no stamp recorded (never a guess)");
       ok(qcMoves === 2, `#293t fix round 2 (DB): a quote that moves during both renders is rendered exactly twice, then derives (got ${qcMoves})`);
+      ok(pdf4?.status === "ready" && !!pdf4.blobPath && (await fileOf(QC)) === "%PDF-1.4 293tf-qc render 2",
+        "#293t fix round 2 (DB): a quote that moves during both renders stores render 2's file (the last one rendered), unstamped");
       await tick();
       await send(QC);
       const w4 = await web(QC);
@@ -46103,12 +46123,6 @@ async function finalFix293tAsyncChecks(): Promise<void> {
           log.push({ revNum: d.revNum, revDateMs: d.revDateMs, signal: !!opts?.signal, body });
           return Buffer.from(body);
         };
-      const fileOf = async (id: string) => {
-        const p = (await n293tQGet(id))?.pdf;
-        const store = pdfStorage();
-        if (!p?.blobPath || "unavailable" in store) return null;
-        return (await store.read(p.blobPath))?.toString() ?? null;
-      };
       {
         const { id, savedAt } = await mkRace("once");
         const log: R2Seen[] = [];
@@ -46170,11 +46184,15 @@ async function finalFix293tAsyncChecks(): Promise<void> {
         const res = await n293tFGenerate({
           quoteId: id, savedAt, origin, secret,
           render: async (url, opts) => {
-            if (log.length === 0) await n293tFUpdatePdf(id, (cur) => n293tFPending(cur, savedAt + 1, savedAt + 1));
-            return r2Render(id, log, (n) => n === 1)(url, opts);
+            if (log.length === 0) {
+              await n293tFUpdatePdf(id, (cur) => n293tFPending(cur, savedAt + 1, savedAt + 1));
+              await tick();
+              await n293tQUpdate(id, { category: "Superseded move" } as never); // the quote moves too, so only the isPendingFor guard stops a re-render
+            }
+            return r2Render(id, log, () => false)(url, opts);
           },
         });
-        ok(log.length === 1 && res === null, "#293t fix round 2 (DB): a newer save taking the pending state mid-render → no re-render; the render is superseded as before");
+        ok(log.length === 1 && res === null, "#293t fix round 2 (DB): a newer save taking the pending state mid-render (and the quote moving) → no re-render; the render is superseded as before");
       }
 
       // 6. A refused create mints no link — even over an expired link (patchQuote still rewrites the row; the link is unchanged).
