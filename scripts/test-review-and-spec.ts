@@ -43260,3 +43260,79 @@ async function narrativePhotos293AsyncChecks(): Promise<void> {
     "#293 inline: a PNG within caps becomes a data URI; SVG, oversize, missing, unreadable, over-total and blob-less photos are skipped");
   ok(!reads.includes("b") && !reads.includes("c") && !reads.includes("h"), "#293 inline: disallowed types, a stored size over the cap and a missing blobKey are never read");
 }
+
+/* ======================================================================
+   #293 slice 1 — printing: a quote without key products renders
+   byte-for-byte as before; key products print with a photo floated right
+   (narrative systems only); the Itemized appendix after the signature.
+   ====================================================================== */
+import { qd293Cases as p293Cases, qd293Props as p293Props, qd293Sections as p293Sections, quoteDocumentModule293 as p293Mod, renderQuoteDocument293 as p293Render } from "./qd293-cases";
+import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quote-document-view";
+{
+  const base = JSON.parse(readFileSync(join(process.cwd(), "docs/superpowers/fixtures/293-quote-document-baseline.json"), "utf8")) as Record<string, string>;
+  const cases = p293Cases();
+  ok(Object.keys(cases).length === 3 && Object.keys(cases).every((k) => typeof base[k] === "string"), "#293 print: every baseline case is in the committed fixture");
+  for (const [k, props] of Object.entries(cases)) ok(p293Render(props) === base[k], `#293 print: a quote without key products renders byte-for-byte as before (${k})`);
+
+  // Key products in a narrative system.
+  const secs = p293Sections();
+  secs[1].keyProducts = [
+    { lineKey: "5", sku: "SKU-5", text: "Para five.\n\n- Bright\n- Even", photo: true },
+    { lineKey: "6", sku: "SKU-6", text: "", photo: true },
+    { lineKey: "99", sku: "GONE", text: "Never prints", photo: true },
+  ];
+  secs[0].keyProducts = [{ lineKey: "1", sku: "SKU-1", text: "Itemized never prints me", photo: true }];
+  secs[3].keyProducts = [{ lineKey: "8", sku: "SKU-8", text: "Eight.", photo: false }];
+  const html = p293Render({ ...p293Props({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" }, "SKU-1": { src: "data:image/png;base64,WFhY", alt: "One" }, "SKU-8": { src: "data:image/png;base64,ODg4", alt: "Eight" } } });
+  ok((html.match(/class="est-kp"/g) || []).length === 3, "#293 print: one est-kp block per resolved key product of a narrative system (a removed line's block is skipped)");
+  ok(!html.includes("Itemized never prints me") && !html.includes("Never prints"), "#293 print: an itemized system's blocks and unresolved blocks never print");
+  ok(html.includes('src="data:image/png;base64,QUFB"') && /float:right;width:34%/.test(html) && (html.match(/<img[^>]+src="data:image/g) || []).length === 1,
+    "#293 print: the photo floats right beside its paragraph; a block with no photo src or photo off prints full width");
+  ok(html.includes("Para five.") && html.includes("<li>Bright</li>") && html.includes(">Line 6</div>") && html.includes("Intro para."), "#293 print: intro first, then each heading + paragraph blocks; empty text prints the heading only");
+  ok(!html.includes("System scope and pricing are included in the total above.") && base.itemized.includes("System scope and pricing are included in the total above."),
+    "#293 print: a narrative system with key products drops the fallback sentence");
+
+  // Itemized appendix.
+  // `>Name</span>` also matches the Optional additions box (an option line
+  // prints its system's name), so count what the appendix ADDS over the same
+  // render without it.
+  const band = (h: string, name: string) => (h.match(new RegExp(`>${name}</span>`, "g")) || []).length;
+  const added = (h: string, off: string, name: string) => band(h, name) - band(off, name);
+  const on = p293Render(p293Props({ pdfOptions: { pdfItemizedAppendix: true } }));
+  ok(on.includes('class="est-appendix"') && on.includes("Appendix — Itemized bill of materials"), "#293 appendix: the toggle prints the appendix heading");
+  ok(on.indexOf("Appendix — Itemized") > on.indexOf("Signature — accepted for") && on.indexOf("Appendix — Itemized") < on.indexOf("Questions? Reach out to"),
+    "#293 appendix: after the signature block, before the footer");
+  ok(added(on, base.itemized, "Lighting") === 1 && added(on, base.itemized, "Empty narrative") === 1 && added(on, base.itemized, "Rigging") === 0 && added(on, base.itemized, "Install") === 0 && on.includes("Line 5") && on.includes("Line 8"),
+    "#293 appendix (itemized detail): only the narrative systems repeat, with their lines");
+  ok(JSON.stringify(p293Props({ pdfOptions: { pdfItemizedAppendix: true } }).t) === JSON.stringify(p293Props().t) && on.split("Total investment").length === base.itemized.split("Total investment").length,
+    "#293 appendix: totals are unchanged (the appendix restates, never adds)");
+  const secOn = p293Render(p293Props({ pdfOptions: { detail: "sectioned", pdfItemizedAppendix: true } }));
+  ok(added(secOn, base.sectioned, "Rigging") === 1 && added(secOn, base.sectioned, "Install") === 1 && added(secOn, base.sectioned, "Lighting") === 1 && secOn.includes("Installation, commissioning &amp; project management"),
+    "#293 appendix (by section): every system is listed; a labor system prints the body's single row");
+  const noDesc = p293Render(p293Props({ pdfOptions: { pdfNotes: false, pdfItemizedAppendix: true } }));
+  ok(noDesc.includes(">Line 5</span>"), "#293 appendix: descriptions always print in the appendix, even with Descriptions off");
+  const onlyItemized = p293Sections().filter((s) => s.presentation !== "narrative");
+  ok(!p293Render(p293Props({ sections: onlyItemized, pdfOptions: { pdfItemizedAppendix: true } })).includes("est-appendix"), "#293 appendix: nothing the body left out → no appendix");
+  ok(!base.itemized.includes("est-appendix"), "#293 appendix: off by default");
+
+  // Pure helper + print CSS.
+  const ids = (sections: ReturnType<typeof p293Sections>, d: "itemized" | "sectioned") => p293AppendixIds(sections, d).join(",");
+  const withEmpty = [...p293Sections(), { id: "s5", name: "No revenue", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative" as const, items: [] }];
+  ok(ids(withEmpty, "itemized") === "s2,s4" && ids(withEmpty, "sectioned") === "s1,s2,s3,s4", "#293 appendixSystemIds: narrative systems under itemized; every system under by-section; revenue-less systems skipped");
+  const css = p293Mod().QUOTE_PRINT_CSS;
+  ok(css.includes(".est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }") && css.includes(".est-doc .est-appendix { break-before: page; page-break-before: always; }"),
+    "#293 print CSS: a key-product block keeps together; the appendix starts a new page");
+
+  // Wiring (source).
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(qd.includes("printableKeyProducts(sec)") && qd.includes("<ItemizedLines") && qd.includes("function ItemizedLines(") && !/internalNote/.test(qd),
+    "#293 QuoteDocument: blocks come from printableKeyProducts; body and appendix share ItemizedLines; never names internalNote");
+  const pr = rd("src/app/print/quote/[id]/page.tsx");
+  ok(pr.includes("keyProductPhotoDataUris(") && pr.includes("keyProductPhotos={keyProductPhotos}"), "#293 print route: passes the inlined key-product photos");
+  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(pd.includes('p.togglePdf("pdfItemizedAppendix")') && pd.includes('"Itemized appendix"') && pd.includes("Print every narrative system's full line list after the signature"),
+    "#293 preview: Show on PDF offers the Itemized appendix toggle");
+  ok(/detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix/.test(rd("src/app/(app)/estimator/estimator-client.tsx")),
+    "#293 estimator: the appendix choice is saved with pdfOptions");
+}

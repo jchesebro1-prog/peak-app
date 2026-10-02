@@ -4,7 +4,8 @@ import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, syste
 import { systemSellTotal } from "./pricing";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
-import { narrativeBlocks } from "./narrative";
+import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
+import { appendixSystemIds } from "./quote-document-view";
 
 /**
  * The customer quote document (#222) — ONE component for both places it
@@ -71,6 +72,12 @@ export type QuoteDocumentProps = {
    *  under the totals; absent/"" when the program is off or the customer has
    *  no purchase perks (the print route loads it). */
   rewardsLine?: string;
+  /** #293 — Show on PDF → Itemized appendix: every system the body didn't
+   *  itemize prints again, in full, after the signature (totals unchanged). */
+  pdfItemizedAppendix: boolean;
+  /** #293 — sku → the photo a key product prints beside its paragraph. The
+   *  print route inlines data URIs (it has no session); absent = no photos. */
+  keyProductPhotos?: Record<string, { src: string; alt: string }>;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -83,6 +90,8 @@ nextjs-portal { display: none !important; }
 .est-doc { width: auto !important; height: auto !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; border-radius: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .est-doc .est-secband { break-inside: avoid; break-after: avoid; page-break-after: avoid; }
 .est-doc .est-line, .est-doc .est-optbox, .est-doc .est-totals, .est-doc .est-terms, .est-doc .est-accept, .est-doc .est-sig { break-inside: avoid; page-break-inside: avoid; }
+.est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }
+.est-doc .est-appendix { break-before: page; page-break-before: always; }
 `;
 
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 72%, #000)";
@@ -104,6 +113,189 @@ function longDate(ms: number): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+type DocLine = {
+  key: string;
+  desc: string;
+  comment: string;
+  showComment: boolean;
+  sub: { key: string; qty: number; unit: string; text: string }[];
+  qty: string | number;
+  unit: string;
+  ext: string;
+};
+
+/** #281 blocks — blank line = paragraph, "- " = bullet, single breaks kept. */
+function renderNarrativeBlocks(blocks: NarrativeBlock[]) {
+  return blocks.map((b, bi) =>
+    b.kind === "ul" ? (
+      <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18, listStyleType: "disc" }}>
+        {b.items.map((it, ii) => (
+          <li key={ii}>{it}</li>
+        ))}
+      </ul>
+    ) : (
+      <p key={bi} style={{ margin: bi ? "6px 0 0" : 0 }}>
+        {b.lines.map((ln, li) => (
+          <Fragment key={li}>
+            {li > 0 && <br />}
+            {ln}
+          </Fragment>
+        ))}
+      </p>
+    )
+  );
+}
+
+/** The dark system band (number · name · subtotal) — body and appendix. */
+function SectionBand({ num, name, subtotalLabel }: { num: number; name: string; subtotalLabel: string }) {
+  return (
+    <div
+      className="est-secband"
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 10,
+        background: "#16181d",
+        color: "#fff",
+        padding: "8px 13px 8px 10px",
+        borderRadius: 4,
+        borderLeft: "4px solid var(--accent)",
+        marginBottom: 2,
+        marginTop: 14,
+      }}
+    >
+      <span style={{ display: "flex", alignItems: "baseline", gap: 9, minWidth: 0 }}>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10.5,
+            opacity: 0.65,
+            flexShrink: 0,
+          }}
+        >
+          {String(num).padStart(2, "0")}
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{name}</span>
+      </span>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>
+        {subtotalLabel}
+      </span>
+    </div>
+  );
+}
+
+/** One system's itemized lines + freight row — the body's itemized view and
+ *  the #293 appendix share it so they can't drift. `showDesc` is the
+ *  Descriptions toggle in the body and always true in the appendix. */
+function ItemizedLines(props: {
+  lines: DocLine[];
+  hasFreight: boolean;
+  freightLabel: string;
+  freightRowLabel: string;
+  showDesc: boolean;
+  pdfQty: boolean;
+  pdfPrices: boolean;
+  lineCols: string;
+}) {
+  const { lines, hasFreight, freightLabel, freightRowLabel, showDesc, pdfQty, pdfPrices, lineCols } = props;
+  return (
+    <div style={{ marginBottom: 6 }}>
+      {lines.map((ln) => (
+        <div
+          key={ln.key}
+          className="est-line"
+          style={{
+            display: "grid",
+            gridTemplateColumns: lineCols,
+            gap: 8,
+            padding: "8px 13px 6px",
+            fontSize: 12.5,
+            borderBottom: "1px solid #f0f1f4",
+            alignItems: "center",
+          }}
+        >
+          {showDesc && <span>
+            {ln.desc}
+            {ln.showComment && (
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  color: "#8c919c",
+                  marginTop: 2,
+                  lineHeight: 1.35,
+                }}
+              >
+                {ln.comment}
+              </span>
+            )}
+            {ln.sub.map((sl) => (
+              <span
+                key={sl.key}
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  color: "#8c919c",
+                  marginTop: 2,
+                  paddingLeft: 12,
+                  lineHeight: 1.35,
+                }}
+              >
+                {pdfQty && (
+                  <span style={{ fontFamily: "var(--font-mono)", marginRight: 6 }}>
+                    {sl.qty} {sl.unit}
+                  </span>
+                )}
+                {sl.text}
+              </span>
+            ))}
+          </span>}
+          {pdfQty && (
+            <span
+              style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#8c919c" }}
+            >
+              {ln.qty} {ln.unit}
+            </span>
+          )}
+          {pdfPrices && (
+            <span
+              style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
+            >
+              {ln.ext}
+            </span>
+          )}
+        </div>
+      ))}
+      {hasFreight && (showDesc || pdfPrices) && (
+        <div
+          className="est-line"
+          style={{
+            display: "grid",
+            gridTemplateColumns: lineCols,
+            gap: 8,
+            padding: "8px 13px 6px",
+            fontSize: 12.5,
+            borderBottom: "1px solid #f0f1f4",
+            alignItems: "center",
+            color: "#5b616e",
+          }}
+        >
+          {showDesc && <span>{freightRowLabel}</span>}
+          {pdfQty && <span></span>}
+          {pdfPrices && (
+            <span
+              style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
+            >
+              {freightLabel}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function QuoteDocument(p: QuoteDocumentProps) {
@@ -130,6 +322,8 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
         name: sec.name,
         narrative: (sec.narrative || "").trim(),
         presentation: sec.presentation || "itemized",
+        // #293: resolved key-product blocks (printed in Narrative only).
+        keyProducts: printableKeyProducts(sec),
         subtotalLabel: fmt(sub),
         hasFreight: secFr > 0,
         freightLabel: fmt(secFr),
@@ -224,6 +418,10 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   // #251 (Jeff, Sep 28): name only what the quote actually carries — no
   // labor means no "includes installation", same for freight at $0.
   const inclusions = inclusionsLine(p.t);
+  // #293: the Itemized appendix — the systems the body left un-itemized.
+  const appendixIds = p.pdfItemizedAppendix ? new Set(appendixSystemIds(p.sections, p.detail)) : null;
+  const appendixSections = appendixIds ? previewSections.filter((ps) => appendixIds.has(ps.id)) : [];
+  const appendixCols = ["1fr", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
 
   return (
         <div
@@ -390,159 +588,51 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
           {/* sections */}
           {previewSections.map((ps) => (
             <div key={ps.num + ps.name}>
-              <div
-                className="est-secband"
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 10,
-                  background: "#16181d",
-                  color: "#fff",
-                  padding: "8px 13px 8px 10px",
-                  borderRadius: 4,
-                  borderLeft: "4px solid var(--accent)",
-                  marginBottom: 2,
-                  marginTop: 14,
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "baseline", gap: 9, minWidth: 0 }}>
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10.5,
-                      opacity: 0.65,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {String(ps.num).padStart(2, "0")}
-                  </span>
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{ps.name}</span>
-                </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>
-                  {ps.subtotalLabel}
-                </span>
-              </div>
+              <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
               {ps.presentation === "narrative" ? (
                 <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
-                  {/* #281: blank line = paragraph, "- " = bullet, single breaks kept. */}
+                  {/* #281: blank line = paragraph, "- " = bullet, single breaks kept.
+                      #293: then each key product — heading, paragraph, photo floated right. */}
                   {(() => {
                     const blocks = narrativeBlocks(ps.narrative);
-                    if (!blocks.length) return "System scope and pricing are included in the total above.";
-                    return blocks.map((b, bi) =>
-                      b.kind === "ul" ? (
-                        <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18, listStyleType: "disc" }}>
-                          {b.items.map((it, ii) => (
-                            <li key={ii}>{it}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p key={bi} style={{ margin: bi ? "6px 0 0" : 0 }}>
-                          {b.lines.map((ln, li) => (
-                            <Fragment key={li}>
-                              {li > 0 && <br />}
-                              {ln}
-                            </Fragment>
-                          ))}
-                        </p>
-                      )
+                    if (!blocks.length && !ps.keyProducts.length) return "System scope and pricing are included in the total above.";
+                    return (
+                      <>
+                        {renderNarrativeBlocks(blocks)}
+                        {ps.keyProducts.map((kp, ki) => {
+                          const photo = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
+                          return (
+                            <div key={"kp-" + kp.sku} className="est-kp" style={{ display: "flow-root", marginTop: blocks.length || ki ? 12 : 0 }}>
+                              {photo ? (
+                                <>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={photo.src}
+                                    alt={photo.alt}
+                                    style={{ float: "right", width: "34%", maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" }}
+                                  />
+                                </>
+                              ) : null}
+                              <div style={{ fontWeight: 600, color: "#16181d", marginBottom: kp.blocks.length ? 3 : 0 }}>{kp.heading}</div>
+                              {renderNarrativeBlocks(kp.blocks)}
+                            </div>
+                          );
+                        })}
+                      </>
                     );
                   })()}
                 </div>
               ) : isItemized && showLines ? (
-                <div style={{ marginBottom: 6 }}>
-                  {ps.lines.map((ln) => (
-                    <div
-                      key={ln.key}
-                      className="est-line"
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: lineCols,
-                        gap: 8,
-                        padding: "8px 13px 6px",
-                        fontSize: 12.5,
-                        borderBottom: "1px solid #f0f1f4",
-                        alignItems: "center",
-                      }}
-                    >
-                      {p.pdfNotes && <span>
-                        {ln.desc}
-                        {ln.showComment && (
-                          <span
-                            style={{
-                              display: "block",
-                              fontSize: 11,
-                              color: "#8c919c",
-                              marginTop: 2,
-                              lineHeight: 1.35,
-                            }}
-                          >
-                            {ln.comment}
-                          </span>
-                        )}
-                        {ln.sub.map((sl) => (
-                          <span
-                            key={sl.key}
-                            style={{
-                              display: "block",
-                              fontSize: 11,
-                              color: "#8c919c",
-                              marginTop: 2,
-                              paddingLeft: 12,
-                              lineHeight: 1.35,
-                            }}
-                          >
-                            {p.pdfQty && (
-                              <span style={{ fontFamily: "var(--font-mono)", marginRight: 6 }}>
-                                {sl.qty} {sl.unit}
-                              </span>
-                            )}
-                            {sl.text}
-                          </span>
-                        ))}
-                      </span>}
-                      {p.pdfQty && (
-                        <span
-                          style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#8c919c" }}
-                        >
-                          {ln.qty} {ln.unit}
-                        </span>
-                      )}
-                      {p.pdfPrices && (
-                        <span
-                          style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                        >
-                          {ln.ext}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  {ps.hasFreight && (p.pdfNotes || p.pdfPrices) && (
-                    <div
-                      className="est-line"
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: lineCols,
-                        gap: 8,
-                        padding: "8px 13px 6px",
-                        fontSize: 12.5,
-                        borderBottom: "1px solid #f0f1f4",
-                        alignItems: "center",
-                        color: "#5b616e",
-                      }}
-                    >
-                      {p.pdfNotes && <span>{freightRowLabel}</span>}
-                      {p.pdfQty && <span></span>}
-                      {p.pdfPrices && (
-                        <span
-                          style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                        >
-                          {ps.freightLabel}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <ItemizedLines
+                  lines={ps.lines}
+                  hasFreight={ps.hasFreight}
+                  freightLabel={ps.freightLabel}
+                  freightRowLabel={freightRowLabel}
+                  showDesc={p.pdfNotes}
+                  pdfQty={p.pdfQty}
+                  pdfPrices={p.pdfPrices}
+                  lineCols={lineCols}
+                />
               ) : !isItemized ? (
                 <div
                   className="est-line"
@@ -794,6 +884,30 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   </div>
                 </div>
               </>
+            )}
+
+            {/* #293: Itemized appendix — restates, never adds to the totals. */}
+            {appendixSections.length > 0 && (
+              <div className="est-appendix" style={{ marginTop: 22 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#16181d", marginBottom: 2 }}>
+                  Appendix — Itemized bill of materials
+                </div>
+                {appendixSections.map((ps) => (
+                  <div key={"apx-" + ps.num + ps.name}>
+                    <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
+                    <ItemizedLines
+                      lines={ps.lines}
+                      hasFreight={ps.hasFreight}
+                      freightLabel={ps.freightLabel}
+                      freightRowLabel={freightRowLabel}
+                      showDesc
+                      pdfQty={p.pdfQty}
+                      pdfPrices={p.pdfPrices}
+                      lineCols={appendixCols}
+                    />
+                  </div>
+                ))}
+              </div>
             )}
 
             {/* footer */}

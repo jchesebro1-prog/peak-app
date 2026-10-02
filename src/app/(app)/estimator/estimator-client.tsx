@@ -613,9 +613,8 @@ export default function EstimatorClient({
   const [pdfTerms, setPdfTerms] = useState(initial.pdfOptions.pdfTerms);
   const [pdfOptions, setPdfOptions] = useState(initial.pdfOptions.pdfOptions);
   const [pdfPrices, setPdfPrices] = useState(initial.pdfOptions.pdfPrices);
+  const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
-  /** #293: carried so a save does not drop the stored choice; the toggle UI lands with the preview task. */
-  const [pdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
     () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix }),
@@ -4137,6 +4136,7 @@ export default function EstimatorClient({
             pdfCover={pdfCover}
             pdfTerms={pdfTerms}
             pdfOptions={pdfOptions}
+            pdfItemizedAppendix={pdfItemizedAppendix}
             paymentTerms={paymentTerms}
             paymentTermsOptions={PAYMENT_TERMS}
             setPaymentTerms={setPaymentTerms}
@@ -4146,6 +4146,7 @@ export default function EstimatorClient({
               else if (flag === "pdfPrices") setPdfPrices((v) => !v);
               else if (flag === "pdfCover") setPdfCover((v) => !v);
               else if (flag === "pdfOptions") setPdfOptions((v) => !v);
+              else if (flag === "pdfItemizedAppendix") setPdfItemizedAppendix((v) => !v);
               else setPdfTerms((v) => !v);
             }}
           />
