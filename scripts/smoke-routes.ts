@@ -209,6 +209,14 @@ const ROUTES = [
   // page returns the signed-out card before any of them are read.
   "/portal/service?type=flame&venue=x",
   "/portal/service?from=x",
+  // #293 slice 3 — the online estimate page. No seeded quote has a sent
+  // revision, so these cover the 200 cards (signed out; not available, in a
+  // team preview) and compile the page; the document itself is harness-
+  // rendered (#293 slice 3 blocks). Q-0 is an unknown id.
+  "/portal/quotes/Q-2041",
+  "/portal/quotes/Q-2041?preview=lakefront",
+  "/portal/quotes/Q-2041?preview=lakefront&view=bom",
+  "/portal/quotes/Q-0?preview=lakefront",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",

@@ -1,4 +1,5 @@
-import { portalListsQuote, type Quote } from "@/lib/stores/quotes";
+import { isImportedHistoryQuote, portalListsQuote, type Quote } from "@/lib/stores/quotes";
+import { onlineEstimateState, type OnlineEstimateState } from "@/lib/quote-share/view";
 import { portalPdfPreparing, portalPdfSource, portalPdfUnavailable } from "./state";
 
 /**
@@ -22,4 +23,19 @@ export function portalQuotePdfPreparing(q: Quote, customerId: string): boolean {
  *  sent before saved PDFs existed, or edited after the send. */
 export function portalQuotePdfUnavailable(q: Quote, customerId: string): boolean {
   return portalListsQuote(q, customerId) && portalPdfUnavailable(q);
+}
+
+/**
+ * #293 slice 3 — the portal estimate page's rule (spec §5.2, decision 16):
+ * the quote must be this customer's and not Daylite history; then the one
+ * online rule decides. A staff quote recalled to draft after sending shows
+ * the "being revised" card (no content) — portalListsQuote hides staff
+ * drafts, so the list rule alone would call it unavailable. Content (ok)
+ * still requires the portal's list rule.
+ */
+export function portalOnlineEstimateState(q: Quote, customerId: string): OnlineEstimateState {
+  if (!customerId || q.customerId !== customerId || isImportedHistoryQuote(q)) return { kind: "unavailable" };
+  const s = onlineEstimateState(q);
+  if (s.kind === "ok" && !portalListsQuote(q, customerId)) return { kind: "unavailable" };
+  return s;
 }

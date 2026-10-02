@@ -10722,6 +10722,7 @@ seeded()
   .then(() => systemLibrary293sFinalFixAsyncChecks())
   .then(() => shareLinks293tAsyncChecks())
   .then(() => onlineDoc293tAsyncChecks())
+  .then(() => portalPage293tAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -45689,4 +45690,94 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 2 &&
      h2.includes("Second intro 293t.") && h2.includes("Second note 293t.") && h2.includes("Second line 293t") && !/SECRET-293/.test(h2),
     "#293t loader (DB): with two sent revisions the page renders the latest only — nothing of the earlier one, no internal note (Narrative + BOM, web)");
+}
+
+/* ======================================================================
+   #293 slice 3 — the portal estimate page: who may see what, the page and
+   photo route wiring, the row link, and the smoke routes.
+   ====================================================================== */
+import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/portal-access";
+{
+  const rev = { rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "N", value: 1, margin: 0, status: "sent", spec: { sections: [] } };
+  const pq = (extra: Record<string, unknown>) =>
+    ({ id: "Q-p", name: "P", customer: "C", customerId: "c1", locationId: null, value: 1, margin: 0, status: "sent", source: "estimator", quoteType: "system",
+       owner: "o", createdAt: 1, updatedAt: 1, history: [], review: {}, revisions: [rev], ...extra }) as unknown as N293tQuote;
+  ok(n293tPortalState(pq({}), "c1").kind === "ok", "#293t portal: the customer's sent quote → ok");
+  ok(n293tPortalState(pq({}), "c2").kind === "unavailable" && n293tPortalState(pq({}), "").kind === "unavailable", "#293t portal: another customer, or no customer → unavailable");
+  ok(n293tPortalState(pq({ source: "daylite" }), "c1").kind === "unavailable", "#293t portal: Daylite history → unavailable");
+  ok(n293tPortalState(pq({ status: "draft" }), "c1").kind === "revising", "#293t portal: a staff quote recalled after sending → the being-revised card (decision 16), own customer only");
+  ok(n293tPortalState(pq({ status: "draft", revisions: [] }), "c1").kind === "unavailable", "#293t portal: a never-sent draft → unavailable");
+
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const resolveLocal = (from: string, spec: string): string | null => {
+    const b = spec.startsWith("@/") ? join("src", spec.slice(2)) : spec.startsWith(".") ? join(dirname(from), spec) : null;
+    if (!b) return null;
+    for (const ext of [".ts", ".tsx", "/index.ts", "/index.tsx", ""]) {
+      const p = b + ext;
+      if ((ext || /\.(ts|tsx)$/.test(p)) && existsSync(join(process.cwd(), p))) return p;
+    }
+    return null;
+  };
+  const valueImports = (s: string) => [...s.matchAll(/^import (?!type )[\s\S]*? from "([^"]+)";/gm)].map((m) => m[1]);
+  const noClientImports = (file: string) =>
+    valueImports(rd(file)).every((spec) => {
+      const p = resolveLocal(file, spec);
+      return !p || !/^\s*["']use client["']/.test(rd(p));
+    });
+  const page = rd("src/app/portal/quotes/[id]/page.tsx");
+  const comp = rd("src/components/online-estimate/online-estimate.tsx");
+  ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(comp) && noClientImports("src/app/portal/quotes/[id]/page.tsx") && noClientImports("src/components/online-estimate/online-estimate.tsx"),
+    "#293t portal page: server-rendered; no client component it imports can receive the quote's data");
+  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid)") &&
+     page.includes("loadQuoteDocumentProps(q, {") && page.includes("revision: state.rev,") && page.includes("ONLINE_COPY.portalUnavailable") && page.includes("ONLINE_COPY.revising") && page.includes("<PortalSignedOut"),
+    "#293t portal page: the viewer first, then the one state rule; the sent revision; the signed-out, unavailable and revising cards");
+  ok(!page.includes("notFound(") && !/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(page),
+    "#293t portal page: every miss is a 200 card; the page never writes");
+  ok(comp.includes("<QuoteDocument {...shown} layout=\"web\" />") && comp.includes("bomViewProps(docProps)") && comp.includes("offersBomView(docProps.sections, docProps.detail)") &&
+     (comp.match(/prefetch=\{false\}/g) || []).length >= 3 && comp.includes("ONLINE_COPY.closed") && comp.includes("<style>{QUOTE_WEB_CSS}</style>"),
+    "#293t online view: the web document, a server-side BOM transform behind two plain links, the closed banner");
+  const photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
+  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId)") &&
+     photo.includes("servePhotoForRevision(req, state.rev, docId)") && photo.includes("`portal-photo:${session.grantId}`"),
+    "#293t portal photos: a portal viewer, 300/min per grant, the quote's own sent revision, only its printed photos");
+  const row = rd("src/app/portal/quote-row.tsx");
+  ok(row.includes("portalOnlineEstimateState(q, cid).kind") && row.includes("`/portal/quotes/${encodeURIComponent(q.id)}`") && row.includes("Open PDF ↗"),
+    "#293t portal row: the title opens the online estimate when it's ok or being revised; the PDF link stays");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(['"/portal/quotes/Q-2041",', '"/portal/quotes/Q-2041?preview=lakefront",', '"/portal/quotes/Q-2041?preview=lakefront&view=bom",', '"/portal/quotes/Q-0?preview=lakefront",'].every((r) => smoke.includes(r)),
+    "#293t smoke: the portal estimate page's signed-out, unavailable and BOM-param routes are smoke routes");
+
+  // Hardening (Task 3 review) at the call site: the page passes the sent revision, and a refused
+  // load (the loader's fail-closed null) is the same generic card — never the live quote.
+  ok(page.includes("if (!docProps) return shell(<OnlineEstimateCard title={ONLINE_COPY.portalUnavailable} backHref={backHref} />);"),
+    "#293t portal page: a refused load (null) renders the generic unavailable card");
+  ok(!/\bq\.pdf\b|pdfBlobPath|quoteAsOfRevision|shareLink/.test(page) && (page.match(/base \+ "\/pdf"/g) || []).length === 2,
+    "#293t portal page: Download PDF is the existing sent-PDF route (/portal/quotes/[id]/pdf), never the live pdf field; no as-sent quote outside the loader");
+  const meta = page.slice(page.indexOf("export async function generateMetadata"), page.indexOf("function one("));
+  ok(meta.length > 0 && !/getQuote|loadQuoteDocumentProps|params/.test(meta), "#293t portal page: generateMetadata never reads the quote");
+  ok(!/\b(update|patchShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(photo) && photo.indexOf("resolvePortalViewer(") < photo.indexOf("rateLimit(") && photo.indexOf("rateLimit(") < photo.indexOf("getQuote("),
+    "#293t portal photos: read-only; the viewer, then the rate limit, then the quote");
+}
+
+
+async function portalPage293tAsyncChecks(): Promise<void> {
+  // Hard tenant scoping through the real store: a sent quote of customer A is A's only.
+  const QA = fixtureId(293, "t-portal-quote");
+  const A = fixtureId(293, "t-portal-cust-a");
+  const B = fixtureId(293, "t-portal-cust-b");
+  await n293tQCreate({ id: QA, name: "#293t portal", customer: "Spec A", customerId: A, owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [], mobs: [] } });
+  registerFixture("quotes", QA);
+  await n293tQUpdate(QA, { status: "sent" });
+  await n293tQAddRev(QA, { by: "Test", reason: "sent", note: "Sent" });
+  const q = (await n293tQGet(QA))!;
+  ok(n293tPortalState(q, A).kind === "ok" && n293tPortalState(q, B).kind === "unavailable" && n293tPortalState(q, "").kind === "unavailable",
+    "#293t portal (DB): a sent quote opens for its own customer only — another customer, or none, gets the unavailable card");
+  await n293tQUpdate(QA, { status: "draft" });
+  const recalled = (await n293tQGet(QA))!;
+  ok(n293tPortalState(recalled, A).kind === "revising" && n293tPortalState(recalled, B).kind === "unavailable",
+    "#293t portal (DB): recalled to draft — the being-revised card for its own customer, still unavailable to anyone else");
+  await n293tQUpdate(QA, { status: "sent", customerId: B });
+  const moved = (await n293tQGet(QA))!;
+  ok(n293tPortalState(moved, A).kind === "unavailable" && n293tPortalState(moved, B).kind === "ok",
+    "#293t portal (DB): re-linked to another customer — the old customer loses it at once (read live, per request)");
 }
