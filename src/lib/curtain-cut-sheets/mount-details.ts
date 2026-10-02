@@ -11,6 +11,8 @@ export const MOUNT_DETAIL_VIEWBOX = { w: 240, h: 300 } as const;
 export const TRACK_OTHER_NOTE = "Track mounting per manufacturer's instructions";
 export type MountDetail = { title: string; shapes: Shape[]; labels: ShapeLabel[]; note?: string };
 
+/** Left edge of the right-hand callout column: the longest line (≤ 14 chars at 9 px, ~0.6 em) ends inside the 240 box. */
+const LABEL_X = 160;
 const lab = (x: number, y: number, text: string, to: [number, number], anchor: "start" | "end" = "start"): ShapeLabel => ({ x, y, text, leaderTo: to, anchor });
 const pipe = (cx: number, cy: number, r = 14): Shape => ({ kind: "circle", cx, cy, r, stroke: "heavy", fill: "none" });
 
@@ -41,9 +43,9 @@ function trackLabels(y: number): ShapeLabel[] {
   return [
     lab(72, y + 10, "Track", [100, y + 10], "end"),
     lab(72, y + 34, "Carrier", [112, y + 16], "end"),
-    lab(168, y + 44, "Snap hook", [126, y + 44]),
-    lab(168, y + 66, "Webbing +\ngrommet", [140, y + 65]),
-    lab(168, 250, "Curtain fabric", [142, 250]),
+    lab(LABEL_X, y + 44, "Snap hook", [126, y + 44]),
+    lab(LABEL_X, y + 66, "Webbing +\ngrommet", [140, y + 65]),
+    lab(LABEL_X, 250, "Curtain fabric", [142, 250]),
   ];
 }
 
@@ -61,21 +63,21 @@ export function mountDetail(key: CurtainMountKey): MountDetail {
           ...trackBelow(90),
           ...curtainBelow(146),
         ],
-        labels: [lab(168, 26, "Pipe batten\n(by others)", [134, 36]), lab(168, 62, "Batten clamp", [134, 53]), ...trackLabels(90)],
+        labels: [lab(LABEL_X, 26, "Pipe batten\n(by others)", [134, 36]), lab(LABEL_X, 62, "Batten clamp", [134, 53]), ...trackLabels(90)],
       };
     case "track-ceiling":
       return {
         title,
         shapes: [
-          { kind: "rect", x: 20, y: 14, w: 200, h: 18, stroke: "thin", fill: "hatch" },
-          { kind: "line", x1: 20, y1: 32, x2: 220, y2: 32, stroke: "heavy" },
+          { kind: "rect", x: 20, y: 14, w: 130, h: 18, stroke: "thin", fill: "hatch" },
+          { kind: "line", x1: 20, y1: 32, x2: 150, y2: 32, stroke: "heavy" },
           { kind: "line", x1: 120, y1: 14, x2: 120, y2: 32, stroke: "thin", dash: true },
           { kind: "rect", x: 106, y: 32, w: 28, h: 10, stroke: "med", fill: "tone" },
           { kind: "line", x1: 120, y1: 42, x2: 120, y2: 90, stroke: "med" },
           ...trackBelow(90),
           ...curtainBelow(146),
         ],
-        labels: [lab(168, 10, "Ceiling\n(anchor by others)", [150, 24]), lab(168, 50, "Ceiling hanger / clip", [134, 38]), ...trackLabels(90)],
+        labels: [lab(LABEL_X, 10, "Ceiling\n(anchor\nby others)", [150, 24]), lab(LABEL_X, 50, "Ceiling hanger\n/ clip", [134, 38]), ...trackLabels(90)],
       };
     case "track-structure":
       return {
@@ -90,7 +92,7 @@ export function mountDetail(key: CurtainMountKey): MountDetail {
           ...trackBelow(110),
           ...curtainBelow(166),
         ],
-        labels: [lab(178, 10, "Steel beam\n(by others)", [170, 30]), lab(178, 62, "Beam clamp", [140, 59]), lab(72, 88, "Drop rod / cable", [120, 88], "end"), ...trackLabels(110)],
+        labels: [lab(LABEL_X, 32, "Steel beam\n(by others)", [124, 34]), lab(LABEL_X, 62, "Beam clamp", [140, 59]), lab(72, 88, "Drop rod /\ncable", [120, 88], "end"), ...trackLabels(110)],
       };
     case "tie-batten":
       return {
@@ -102,10 +104,10 @@ export function mountDetail(key: CurtainMountKey): MountDetail {
           ...curtainBelow(150),
         ],
         labels: [
-          lab(168, 44, "Pipe batten\n(by others)", [134, 60]),
-          lab(168, 100, "Tie line\n(bow knot)", [148, 100]),
-          lab(168, 166, "Webbing +\ngrommet", [140, 159]),
-          lab(168, 250, "Curtain fabric", [142, 250]),
+          lab(LABEL_X, 44, "Pipe batten\n(by others)", [134, 60]),
+          lab(LABEL_X, 100, "Tie line\n(bow knot)", [148, 100]),
+          lab(LABEL_X, 166, "Webbing +\ngrommet", [140, 159]),
+          lab(LABEL_X, 250, "Curtain fabric", [142, 250]),
         ],
       };
     case "wall-hookloop":
@@ -120,11 +122,11 @@ export function mountDetail(key: CurtainMountKey): MountDetail {
           { kind: "path", d: "M86 116 C 120 160, 100 220, 122 290", stroke: "med" },
         ],
         labels: [
-          lab(168, 20, "Wall (by others)", [48, 20]),
-          lab(168, 52, "Header board\n(by others)", [74, 60]),
-          lab(168, 92, "Hook strip on header", [80, 90]),
-          lab(168, 130, "Loop strip sewn\nto the curtain", [86, 110]),
-          lab(168, 230, "Curtain fabric", [110, 230]),
+          lab(LABEL_X, 20, "Wall\n(by others)", [48, 20]),
+          lab(LABEL_X, 52, "Header board\n(by others)", [74, 60]),
+          lab(LABEL_X, 92, "Hook strip\non header", [80, 90]),
+          lab(LABEL_X, 130, "Loop strip\nsewn to the\ncurtain", [86, 110]),
+          lab(LABEL_X, 230, "Curtain fabric", [110, 230]),
         ],
       };
     default:

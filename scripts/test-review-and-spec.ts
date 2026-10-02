@@ -42989,7 +42989,8 @@ function c292Sec(id: string, items: Array<Partial<C292Item> & { id: number }>): 
 }
 
 // ---- #292 task 2: geometry + mount details ----
-import { elevation as c292Elev, ftIn as c292FtIn, pickScale as c292Pick, topMarks as c292Marks } from "@/lib/curtain-cut-sheets/geometry";
+import { elevation as c292Elev, ftIn as c292FtIn, inchLabel as c292InchLabel, pickScale as c292Pick, topMarks as c292Marks } from "@/lib/curtain-cut-sheets/geometry";
+import { textExtent as c292TextExtent } from "@/lib/curtain-cut-sheets/shapes";
 import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/lib/curtain-cut-sheets/mount-details";
 // ---- geometry ----
 {
@@ -43021,4 +43022,78 @@ import { mountDetail as c292Detail, TRACK_OTHER_NOTE as c292OtherNote } from "@/
   ok(keys.every((k) => { const d = c292Detail(k); return !!d.title && d.shapes.length > 0 && d.labels.length >= 1; }), "#292 details: every mount type (and track-other) has a titled detail with ≥ 1 label");
   ok(c292Detail("track-other").note === c292OtherNote && c292OtherNote === "Track mounting per manufacturer's instructions" && !c292Detail("tie-batten").note,
     "#292 details: track-other carries the manufacturer's-instructions note");
+}
+// ---- #292 task 2 fix round 1: label fit + no label collisions ----
+{
+  const base = { fullnessPct: 50, top: "grommets" as const, bottom: "chain" as const, markSpacingIn: 12, markLabel: "Grommets" as const, box: { wIn: 4.6, hIn: 3.9 } };
+  const sz = (...w: number[]) => w.map((widthFt, i) => ({ widthFt, heightFt: 18, qty: i + 1 }));
+  type C292Text = { kind: "text"; x: number; y: number; text: string; size: number; anchor?: "start" | "middle" | "end"; rotate?: number };
+  const textsOf = (shapes: readonly { kind: string }[]) => shapes.filter((s): s is C292Text => s.kind === "text");
+  const overlaps = (shapes: readonly { kind: string }[]) => {
+    const flat = textsOf(shapes).filter((t) => !t.rotate);
+    for (let i = 0; i < flat.length; i++) {
+      for (let j = i + 1; j < flat.length; j++) {
+        if (Math.abs(flat[i].y - flat[j].y) > 1e-6) continue;
+        const a = c292TextExtent(flat[i]);
+        const b = c292TextExtent(flat[j]);
+        if (a.x0 < b.x1 - 1e-9 && b.x0 < a.x1 - 1e-9) return `${flat[i].text} / ${flat[j].text}`;
+      }
+    }
+    return "";
+  };
+  const cases: Array<[string, Parameters<typeof c292Elev>[0]]> = [
+    ["20/10/6 grommets+chain", { ...base, sizes: sz(20, 10, 6) }],
+    ["4 sizes (typical)", { ...base, sizes: sz(20, 10, 6, 4) }],
+    ["20/10/6 pipe pockets", { ...base, top: "pipe-pocket", bottom: "pipe-pocket", sizes: sz(20, 10, 6) }],
+    ["30/8/4 hook-loop hem", { ...base, top: "hook-loop", bottom: "hem", sizes: sz(30, 8, 4) }],
+    ["tall narrow first", { ...base, sizes: [{ widthFt: 6, heightFt: 40, qty: 1 }, { widthFt: 30, heightFt: 10, qty: 1 }, { widthFt: 5, heightFt: 5, qty: 1 }] }],
+    ["Carriers 6\" spacing", { ...base, markLabel: "Carriers", markSpacingIn: 6, sizes: sz(20, 10, 6) }],
+  ];
+  for (const [name, input] of cases) {
+    const e = c292Elev(input);
+    ok(overlaps(e.shapes) === "", `#292 geometry fix: no two text shapes on a baseline overlap in x (${name})${overlaps(e.shapes) ? " — " + overlaps(e.shapes) : ""}`);
+  }
+  const e3 = c292Elev({ ...base, sizes: sz(20, 10, 6) });
+  const t3 = textsOf(e3.shapes).map((t) => t.text);
+  ok(t3.filter((t) => t.includes("o.c.")).length === 1 && t3.includes("(11)") && t3.includes("(7)"), "#292 geometry fix: the o.c. spacing label prints once; the other panels carry only their count");
+  const six = c292Elev({ ...base, sizes: sz(6) });
+  const sixBottom = textsOf(six.shapes).filter((t) => /Chain|pocket/.test(t.text));
+  const sixPanel = six.shapes.find((s) => s.tag === "panel" && s.kind === "rect") as { x: number; w: number };
+  ok(sixBottom.length === 1 && sixBottom.every((t) => { const x = c292TextExtent(t); return x.x0 >= sixPanel.x - 1e-9 && x.x1 <= sixPanel.x + sixPanel.w + 1e-9; }),
+    "#292 geometry fix: the bottom-finish label fits inside a 6 ft panel");
+  const e4 = c292Elev({ ...base, sizes: [...sz(20, 10, 6, 4), { widthFt: 0, heightFt: 5 }] });
+  ok(textsOf(e4.shapes).some((t) => t.text === "Typical — 4 sizes, see schedule"), "#292 geometry fix: the Typical caption counts drawn sizes, not zero-size entries");
+  const cap = textsOf(e4.shapes).find((t) => t.text.startsWith("Typical"))!;
+  const qty = textsOf(e4.shapes).find((t) => t.text.startsWith("Qty"))!;
+  ok(cap.y - qty.y >= 0.085 * 1.4, "#292 geometry fix: the Typical caption sits clear below the Qty line");
+  ok([c292InchLabel(0.25), c292InchLabel(0.5), c292InchLabel(12), c292InchLabel(11.75), c292InchLabel(0), c292InchLabel(1.25)].join("|") === `1/4"|1/2"|12"|11 3/4"|0"|1 1/4"`,
+    "#292 geometry fix: inchLabel drops a zero whole number before a fraction");
+  const wild = c292Marks(1000, 0.001);
+  const huge = c292Marks(10000, 1);
+  ok(wild.count === 2000 && huge.count === 2000 && c292Marks(20, 0.001).count === 241,
+    "#292 geometry fix: topMarks caps at 2000 marks and treats spacing below 1\" as 1\"");
+  const wildElev = c292Elev({ ...base, markSpacingIn: 0.001, sizes: sz(20) });
+  ok(wildElev.shapes.filter((s) => s.tag === "mark").length <= 2000, "#292 geometry fix: an absurd mark spacing never draws more than 2000 grommets");
+}
+{
+  const keys = [...c292MountTypes.map((t) => t.id), "track-other" as const];
+  const W = 240;
+  const H = 300;
+  const labelSize = 9; // ShapeSvg's default labelSize
+  const bad: string[] = [];
+  for (const k of keys) {
+    const d = c292Detail(k);
+    for (const l of d.labels) {
+      const e = c292TextExtent({ x: l.x, text: l.text, size: labelSize, anchor: l.anchor });
+      const lines = l.text.split("\n").length;
+      const bottom = l.y + (lines - 1) * labelSize * 1.15;
+      if (e.x0 < 0 || e.x1 > W || l.y - labelSize < 0 || bottom > H) bad.push(`${k}: ${l.text.replace(/\n/g, " / ")}`);
+    }
+    for (const t of d.shapes) {
+      if (t.kind !== "text") continue;
+      const e = c292TextExtent(t);
+      if (e.x0 < 0 || e.x1 > W || t.y - t.size < 0 || t.y > H) bad.push(`${k}: ${t.text}`);
+    }
+  }
+  ok(bad.length === 0, `#292 details fix: every callout and in-drawing text fits the 240 × 300 viewBox at 0.6 em/char${bad.length ? " — " + bad.join("; ") : ""}`);
 }

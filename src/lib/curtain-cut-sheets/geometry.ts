@@ -3,7 +3,7 @@
  * INCHES (spec §2.4), drawn from finished dimensions (decision 2). Returns
  * shapes, never JSX.
  */
-import type { Shape } from "./shapes";
+import { textExtent, type Shape } from "./shapes";
 import type { CurtainSize } from "./parse";
 import type { CurtainBottomFinish, CurtainTopFinish } from "./vocab";
 
@@ -26,7 +26,8 @@ export function ftIn(ft: number): string {
 export function inchLabel(inches: number): string {
   const q = Math.max(0, Math.round((Number.isFinite(inches) ? inches : 0) * 4));
   const frac = FRACTIONS[q % 4];
-  return `${Math.floor(q / 4)}${frac ? " " + frac : ""}"`;
+  const whole = Math.floor(q / 4);
+  return `${frac && whole === 0 ? "" : whole + (frac ? " " : "")}${frac}"`;
 }
 
 /** Largest first. */
@@ -51,12 +52,12 @@ const BOTTOM_BAND_FT = 4 / 12; // hem / pocket (Open question 5)
 const MIN_BAND_IN = 0.06;
 
 /** Up to 3 distinct sizes, largest area first; more than 3 → only the largest, flagged `typical`. */
-export function drawnPanels(sizes: readonly SizedPanel[]): { panels: SizedPanel[]; typical: boolean } {
+export function drawnPanels(sizes: readonly SizedPanel[]): { panels: SizedPanel[]; typical: boolean; count: number } {
   const sorted = sizes
     .filter((s) => s.widthFt > 0 && s.heightFt > 0)
     .slice()
     .sort((a, b) => b.widthFt * b.heightFt - a.widthFt * a.heightFt || b.widthFt - a.widthFt);
-  return sorted.length > 3 ? { panels: sorted.slice(0, 1), typical: true } : { panels: sorted, typical: false };
+  return sorted.length > 3 ? { panels: sorted.slice(0, 1), typical: true, count: sorted.length } : { panels: sorted, typical: false, count: sorted.length };
 }
 
 /** The largest architectural scale at which every drawn panel fits the box; the smallest scale when none does. */
@@ -73,11 +74,15 @@ export function pickScale(sizes: readonly SizedPanel[], box: { wIn: number; hIn:
   return ARCH_SCALES[ARCH_SCALES.length - 1];
 }
 
-/** Evenly spaced marks, both ends always marked: count = ceil(W·12 ÷ s) + 1, at W·12 ÷ (count − 1) ≤ s. */
+/** Smallest mark spacing honored, in, and the most marks one panel ever draws (a runaway input never hangs a render). */
+export const MIN_MARK_SPACING_IN = 1;
+export const MAX_MARKS = 2000;
+
+/** Evenly spaced marks, both ends always marked: count = ceil(W·12 ÷ s) + 1, at W·12 ÷ (count − 1) ≤ s (until the caps). */
 export function topMarks(widthFt: number, maxSpacingIn: number): { count: number; spacingIn: number } {
   const wIn = widthFt * 12;
   if (!(wIn > 0) || !(maxSpacingIn > 0)) return { count: 0, spacingIn: 0 };
-  const count = Math.ceil(wIn / maxSpacingIn - 1e-9) + 1;
+  const count = Math.min(MAX_MARKS, Math.ceil(wIn / Math.max(MIN_MARK_SPACING_IN, maxSpacingIn) - 1e-9) + 1);
   return { count, spacingIn: wIn / (count - 1) };
 }
 
@@ -90,14 +95,14 @@ export function elevation(input: {
   markLabel: "Grommets" | "Carriers";
   box: { wIn: number; hIn: number };
 }): { scale: string; shapes: Shape[] } {
-  const { panels, typical } = drawnPanels(input.sizes);
+  const { panels, typical, count: drawnCount } = drawnPanels(input.sizes);
   const scale = pickScale(input.sizes, input.box);
   const s = scale.inPerFt;
   const shapes: Shape[] = [];
   const y = ELEV_DIM_IN;
   let x = ELEV_DIM_IN;
   let maxH = 0;
-  for (const p of panels) {
+  for (const [pi, p] of panels.entries()) {
     const w = p.widthFt * s;
     const h = p.heightFt * s;
     maxH = Math.max(maxH, h);
@@ -122,11 +127,15 @@ export function elevation(input: {
       if (m.count >= 2) {
         const x2 = x + (m.spacingIn / 12) * s;
         const dy = y - 0.1;
+        // the full o.c. label prints once (first panel); the rest carry only their count
+        const full = `${input.markLabel} @ ${inchLabel(input.markSpacingIn)} o.c. max (${m.count})`;
+        const label = pi === 0 ? full : `(${m.count})`;
+        const raise = pi === 0 && panels.length > 1 && textExtent({ x, text: full, size: ELEV_TEXT_IN }).x1 > x + w + ELEV_GAP_IN - 0.05;
         shapes.push(
           { kind: "line", tag: "dim", x1: x, y1: dy, x2, y2: dy, stroke: "thin" },
           { kind: "line", tag: "dim", x1: x, y1: dy - 0.04, x2: x, y2: y, stroke: "thin" },
           { kind: "line", tag: "dim", x1: x2, y1: dy - 0.04, x2, y2: y, stroke: "thin" },
-          { kind: "text", x, y: dy - 0.06, text: `${input.markLabel} @ ${inchLabel(input.markSpacingIn)} o.c. max (${m.count})`, size: ELEV_TEXT_IN }
+          { kind: "text", x, y: dy - 0.06 - (raise ? 0.12 : 0), text: label, size: ELEV_TEXT_IN }
         );
       }
     } else {
@@ -141,7 +150,20 @@ export function elevation(input: {
       if (input.bottom === "chain") shapes.push({ kind: "line", tag: "band", x1: x, y1: by + botH / 2, x2: x + w, y2: by + botH / 2, stroke: "thin", dash: true });
     }
     const bottomLabel = input.bottom === "chain" ? "Chain pocket" : input.bottom === "pipe-pocket" ? "Pipe pocket" : "Hem";
-    shapes.push({ kind: "text", x: x + w / 2, y: by - 0.04, text: bottomLabel, size: ELEV_TEXT_IN * 0.85, anchor: "middle" });
+    {
+      // fit the label to the panel: one line, else two lines, shrinking to a floor; omitted when even that cannot fit
+      const room = w - 0.04;
+      const base = ELEV_TEXT_IN * 0.85;
+      const lines = [bottomLabel, bottomLabel.replace(" ", "\n")];
+      for (const text of lines) {
+        const longest = Math.max(...text.split("\n").map((l) => l.length));
+        const size = Math.min(base, room / (longest * 0.6));
+        if (size < 0.055) continue;
+        const nl = text.split("\n").length;
+        shapes.push({ kind: "text", x: x + w / 2, y: by - 0.04 - (nl - 1) * size * 1.15, text, size, anchor: "middle" });
+        break;
+      }
+    }
     // overall width, then the qty of this size, under the panel
     const wy = y + h + 0.16;
     shapes.push(
@@ -162,7 +184,7 @@ export function elevation(input: {
     x += w + ELEV_GAP_IN;
   }
   if (typical) {
-    shapes.push({ kind: "text", x: ELEV_DIM_IN, y: y + maxH + 0.5, text: `Typical — ${input.sizes.length} sizes, see schedule`, size: ELEV_TEXT_IN, bold: true });
+    shapes.push({ kind: "text", x: ELEV_DIM_IN, y: y + maxH + 0.56, text: `Typical — ${drawnCount} sizes, see schedule`, size: ELEV_TEXT_IN, bold: true });
   }
   return { scale: scale.label, shapes };
 }

@@ -12,3 +12,13 @@ export type Shape = Tagged &
   );
 /** A plain-language callout; "\n" breaks lines. */
 export type ShapeLabel = { x: number; y: number; text: string; anchor?: "start" | "end"; leaderTo?: [number, number] };
+
+/** Budget for a glyph's advance, in em (Public Sans runs wider than a serif fallback). */
+export const TEXT_ADVANCE_EM = 0.6;
+/** Estimated horizontal extent of a text shape (widest line), honoring its anchor. */
+export function textExtent(t: { x: number; text: string; size: number; anchor?: "start" | "middle" | "end" }): { x0: number; x1: number } {
+  const w = Math.max(...t.text.split("\n").map((l) => l.length)) * t.size * TEXT_ADVANCE_EM;
+  const a = t.anchor ?? "start";
+  const x0 = a === "end" ? t.x - w : a === "middle" ? t.x - w / 2 : t.x;
+  return { x0, x1: x0 + w };
+}
