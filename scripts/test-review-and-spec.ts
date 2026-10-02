@@ -42905,3 +42905,71 @@ import { showQuotedBeforeShelf as s290Shelf, parseCatalogParams as s290Params } 
   ok(s290Shelf(s290Params({ dept: "lighting" })) === true, "#290 shelf: a part department still shows it");
   ok(s290Shelf(s290Params({ q: "s4" })) === false && s290Shelf(s290Params({ page: "2" })) === false && s290Shelf(s290Params({ cat: "Lighting" })) === false, "#290 shelf: a search, a filter or page 2 hides it (unchanged)");
 }
+/* ======================================================================
+   Photo sheet — pure sheet model (photo-sheet.ts).
+   ====================================================================== */
+import {
+  rowsFromGrid as phsRows, rowsToGrid as phsGrid, toImportRows as phsImportRows, buildPartMatcher as phsMatcher,
+  slotSource as phsSlot, exportRows as phsExport, placeNewImage as phsPlace, sheetDriveClaims as phsClaims,
+  PHOTO_SHEET_HEADERS as phsHeaders, type SheetPart as PhsPart, type SheetImage as PhsImage,
+} from "@/lib/part-docs/photo-sheet";
+const PHS_H: string[] = [...phsHeaders];
+const PHS_PARTS: PhsPart[] = [
+  { sku: "SKU-A", desc: "A", category: "Lighting", mfr: "ETC", manufacturerPartNumber: "S4-ALPHA" },
+  { sku: "SKU-B", desc: "B", category: "Lighting", mfr: "ETC", manufacturerModelNumber: "S4 BRAVO" },
+  { sku: "SKU-C1", desc: "C1", category: "Rigging", mfr: "ADC", manufacturerPartNumber: "280" },
+  { sku: "SKU-C2", desc: "C2", category: "Rigging", mfr: "ADC", manufacturerPartNumber: "280" },
+  { sku: "SKU-D", desc: "D", category: "Lighting", mfr: "Chauvet", manufacturerPartNumber: "S4-ALPHA" },
+  { sku: "SKU-L", desc: "L", category: "Labor", manufacturerPartNumber: "LAB1" },
+];
+{
+  const g = phsRows([PHS_H.map((h) => `  ${h.toUpperCase()} `), ["ETC", "S4-ALPHA", "", "", "", "", " https://x/a.jpg ", "", "", ""], [], ["", "", "", "", "", "", "", "", "", ""]]);
+  ok(g.ok && g.rows.length === 1 && g.rows[0].rowNumber === 2 && g.rows[0].photos[0] === "https://x/a.jpg" && g.rows[0].photos.length === 3,
+    "photo sheet parse: headers match case/space-insensitively, cells trim, blank rows drop, rowNumber is the sheet row");
+  const bad = phsRows([["Foo", "Bar"], ["1", "2"]]);
+  ok(!bad.ok && /Photo 1/.test(bad.error), "photo sheet parse: a sheet without Photo 1 + MFR Part #/SKU is refused");
+  const skuOnly = phsRows([["SKU", "Photo 1", "Notes"], ["SKU-D", "x.jpg", "ignored"]]);
+  ok(skuOnly.ok && skuOnly.rows[0].sku === "SKU-D" && skuOnly.rows[0].photos[0] === "x.jpg" && skuOnly.rows[0].mfrPart === "", "photo sheet parse: SKU + Photo 1 is enough; unknown columns are ignored");
+  const many = phsRows([PHS_H, ...Array.from({ length: 5001 }, (_, i) => ["M", `P${i}`, "", "", "", "", "", "", "", ""])]);
+  ok(!many.ok && /5000/.test(many.error), "photo sheet parse: more than 5000 rows is refused");
+
+  const grid = phsGrid(g.ok ? g.rows : [], new Map([[2, "Added 1"]]));
+  ok(grid[0].join("|") === PHS_H.join("|") && grid[1][9] === "Added 1" && grid[1][6] === "https://x/a.jpg", "photo sheet grid: header row + a status override lands in Status");
+  ok(phsImportRows(skuOnly.ok ? [...skuOnly.rows, { ...skuOnly.rows[0], rowNumber: 3, photos: ["", "", ""] }] : []).length === 1, "photo sheet import rows: rows with no photo value are dropped");
+
+  const m = phsMatcher(PHS_PARTS);
+  const pick = (manufacturer: string, mfrPart: string, sku: string) => m({ manufacturer, mfrPart, sku });
+  const a = pick("etc", "s4alpha", "");
+  ok(a.kind === "matched" && a.sku === "SKU-A", "photo sheet match: manufacturer (any case) + normalized MFR P/N");
+  const amb = pick("", "S4-ALPHA", "");
+  ok(amb.kind === "ambiguous" && amb.skus.sort().join() === "SKU-A,SKU-D", "photo sheet match: the same MFR P/N at two manufacturers is ambiguous without a manufacturer");
+  const b = pick("ETC", "S4-BRAVO", "");
+  ok(b.kind === "matched" && b.sku === "SKU-B", "photo sheet match: the MFR model number counts");
+  const c2 = pick("ADC", "280", "sku-c2");
+  ok(c2.kind === "matched" && c2.sku === "SKU-C2", "photo sheet match: SKU breaks a tie");
+  ok(pick("ADC", "280", "").kind === "ambiguous", "photo sheet match: a tie without SKU stays ambiguous");
+  const d = pick("", "", "SKU-D");
+  ok(d.kind === "matched" && d.sku === "SKU-D", "photo sheet match: a SKU-only row matches by SKU");
+  ok(pick("ETC", "NOPE", "").kind === "none" && pick("", "LAB1", "").kind === "none" && pick("", "", "").kind === "none", "photo sheet match: unknown, Labor and empty rows match nothing");
+
+  const drv: PhsImage = { id: "PD-1", source: "drive", sourceRef: "f1", sourceUrl: "https://drive/f1", fileName: "front.webp" };
+  const sh: PhsImage = { id: "PD-2", source: "sheet", sourceRef: "file:Back.JPG", sourceUrl: null, fileName: "Back.webp" };
+  const shd: PhsImage = { id: "PD-3", source: "sheet", sourceRef: "drive:f2", sourceUrl: "https://drive/f2", fileName: "side.webp" };
+  const up: PhsImage = { id: "PD-4", source: "upload", sourceUrl: null, fileName: "u.webp" };
+  const fe: PhsImage = { id: "PD-5", source: "fetch", sourceUrl: "https://m/x.jpg", fileName: "x.webp" };
+  const names = new Map([["f1", "front.jpg"], ["f2", "side.png"]]);
+  ok(phsSlot(drv, names) === "front.jpg" && phsSlot(drv, new Map()) === "https://drive/f1", "photo sheet slot source: a Drive photo shows its Drive name, else its link");
+  ok(phsSlot(shd, names) === "side.png" && phsSlot(sh, names) === "Back.JPG", "photo sheet slot source: sheet photos show their Drive or dropped name");
+  ok(phsSlot(up, names) === "u.webp" && phsSlot(fe, names) === "https://m/x.jpg", "photo sheet slot source: an upload shows its file name, a fetch its URL");
+
+  const rows = phsExport(PHS_PARTS, new Set(["SKU-A", "SKU-B", "SKU-L"]), new Map([["SKU-A", [fe, up, drv, sh]]]), names);
+  ok(rows.length === 2 && rows[0].sku === "SKU-B" && rows[0].status === "Missing" && rows[0].photosNow === "0", "photo sheet export: Labor dropped; parts missing a photo come first");
+  ok(rows[1].sku === "SKU-A" && rows[1].photos.join("|") === "https://m/x.jpg|u.webp|front.jpg" && rows[1].photosNow === "4" && rows[1].status === "Has 4" && rows[1].mfrPart === "S4-ALPHA" && rows[1].manufacturer === "ETC",
+    "photo sheet export: the first three real photos fill the slots; Photos now counts all");
+  ok(rows[0].rowNumber === 2 && rows[1].rowNumber === 3, "photo sheet export: rows are numbered as sheet rows");
+
+  const ord = [{ id: "a", source: "upload" as const }, { id: "r", source: "datasheet-render" as const }, { id: "n", source: "sheet" as const }];
+  ok(phsPlace(ord, "n", true).join() === "n,a,r", "photo sheet place: a primary goes to the front, thumbnails stay last");
+  ok(phsPlace(ord, "n", false).join() === "a,n,r", "photo sheet place: a non-primary appends at the end of the real photos");
+  ok([...phsClaims([shd, drv, sh])].join() === "f2", "photo sheet claims: only sheet-imported Drive files are claimed");
+}

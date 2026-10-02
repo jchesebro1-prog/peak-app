@@ -46,7 +46,7 @@ export function isDocSlotKind(v: unknown): v is DocSlotKind {
 }
 
 /** `drive` (#283) — an image imported from the Peak Product Photos Drive folder. */
-export type PartDocumentSource = "upload" | "drive" | "fetch" | "davinci" | "legacy" | "datasheet-render";
+export type PartDocumentSource = "upload" | "drive" | "fetch" | "davinci" | "legacy" | "datasheet-render" | "sheet";
 
 /** A file this document used to hold. Replacing never deletes the blob (§2.4). */
 export type PartDocumentHistoryEntry = {
@@ -136,6 +136,7 @@ export function maxBytesFor(kind: PartDocKind): number {
 export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
   upload: 0,
   drive: 0,
+  sheet: 0,
   fetch: 1,
   davinci: 2,
   "datasheet-render": 3,

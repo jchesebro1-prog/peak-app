@@ -17,6 +17,7 @@ import { uploadNewDocument } from "./documents/upload-client";
 const IMAGE_SOURCE_LABEL: Record<PartDocumentSource, string> = {
   upload: "Upload",
   drive: "Drive",
+  sheet: "Sheet",
   fetch: "From URL",
   "datasheet-render": "Datasheet thumbnail",
   davinci: "DaVinci",
