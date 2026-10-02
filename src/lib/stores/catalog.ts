@@ -4,7 +4,7 @@ import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
 import type { PortalVisibility } from "@/lib/portal-visibility";
-import type { Airflow, MountFace, RackMount, RackWidthClass } from "@/lib/rack/types";
+import type { RackPartFacts } from "@/lib/rack/types";
 import { MAX_PARAGRAPH } from "@/app/(app)/estimator/narrative";
 
 export type CatalogProductMetadata = {
@@ -205,22 +205,7 @@ export type CatalogPart = {
   narrativeText?: string;
   narrativeUpdatedAt?: number;
   narrativeUpdatedBy?: string;
-  /** #296 — rack data, optional; absent = unknown, 0 = measured none. Written
-   *  only through mergeUpsert (the part editor's Rack data section, the
-   *  rack-data import); no price-book, enricher or importer patch carries
-   *  these keys, so they are never cleared by a sync. See `RackPartFacts`. */
-  rackMount?: RackMount;
-  ruHeight?: number;
-  rackWidth?: RackWidthClass;
-  depthIn?: number;
-  weightLb?: number;
-  powerWatts?: number;
-  maxPowerWatts?: number;
-  powerCapacityWatts?: number;
-  mountFace?: MountFace;
-  airflow?: Airflow;
-  rackNotes?: string;
-};
+} & RackPartFacts; // #296 — rack data, optional; absent = unknown, 0 = measured none. Written only through mergeUpsert; no price-book, enricher or importer patch carries these keys.
 
 /** All parts (port of window.MASTER_CATALOG reads). */
 export async function list(): Promise<CatalogPart[]> {

@@ -69,8 +69,8 @@ function numberOf(k: RackFactKey, v: unknown): number | null {
  */
 export function cleanRackFacts(
   input: Record<string, unknown>
-): { ok: true; patch: Partial<Record<RackFactKey, unknown>> } | { ok: false; error: string } {
-  const patch: Partial<Record<RackFactKey, unknown>> = {};
+): { ok: true; patch: Partial<RackPartFacts> } | { ok: false; error: string } {
+  const patch: Record<string, unknown> = {};
   for (const k of RACK_FACT_KEYS) {
     if (!(k in input)) continue;
     const v = input[k];
@@ -98,7 +98,7 @@ export function cleanRackFacts(
       patch[k] = n;
     }
   }
-  return { ok: true, patch };
+  return { ok: true, patch: patch as Partial<RackPartFacts> };
 }
 
 /** The rack_<key> fields a form carries — only names present. */
@@ -130,6 +130,12 @@ export function rackFactsOf(part: Partial<RackPartFacts> | null | undefined): Ra
     }
   }
   return out as RackPartFacts;
+}
+
+/** rackFactsOf, or undefined when the part carries no rack data (search hits omit it). */
+export function rackFactsOrUndefined(part: Partial<RackPartFacts> | null | undefined): RackPartFacts | undefined {
+  const f = rackFactsOf(part);
+  return Object.keys(f).length ? f : undefined;
 }
 
 /** A part as the rack engine sees it; an unknown SKU resolves `found: false`. */

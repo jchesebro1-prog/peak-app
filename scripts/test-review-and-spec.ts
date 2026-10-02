@@ -43624,7 +43624,7 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
 }
 
 /* ===== #296 — catalog rack fields ===== */
-import { cleanRackFacts as c296Clean, rackFactsOf as c296FactsOf, rackDataCoverage as c296Coverage, rackPartInfo as c296Info, rackFactsFromForm as c296FromForm } from "@/lib/rack/part-facts";
+import { cleanRackFacts as c296Clean, rackFactsOf as c296FactsOf, rackFactsOrUndefined as c296FactsOrU, rackDataCoverage as c296Coverage, rackPartInfo as c296Info, rackFactsFromForm as c296FromForm } from "@/lib/rack/part-facts";
 import { optionalPartFields as c296PartFields, rackFactsProblem as c296Problem } from "@/app/(app)/catalog/part-form";
 {
   const a = c296Clean({ ruHeight: "2", depthIn: "15.5", powerWatts: "0", airflow: "front-to-rear", rackWidth: "half" });
@@ -43651,10 +43651,19 @@ import { optionalPartFields as c296PartFields, rackFactsProblem as c296Problem }
   ok(!e.ok && e.error === "Rack data: airflow must be one of front-to-rear, rear-to-front, side, passive.", "#296 catalog: enum error text");
   const e2 = c296Clean({ ruHeight: "1.3" });
   ok(!e2.ok && e2.error === "Rack data: RU height must be a positive number in half-RU steps.", "#296 catalog: RU error text");
+  ok(c296FactsOf({ powerWatts: 0, weightLb: 0 }).powerWatts === 0 && c296FactsOf({ weightLb: 0 }).weightLb === 0, "#296 catalog: rackFactsOf keeps a stored 0 (measured none)");
+  ok(c296FactsOrU({ sku: "x", desc: "y" } as never) === undefined && c296FactsOrU({ ruHeight: 1 })?.ruHeight === 1, "#296 catalog: rackFactsOrUndefined omits an empty set");
+  const blankFd = new FormData(); blankFd.set("rack_weightLb", "");
+  const blankPf = c296PartFields(blankFd);
+  ok("weightLb" in blankPf && blankPf.weightLb === undefined, "#296 catalog: optionalPartFields clears on a submitted blank rack field");
+  const more = c296Clean({ maxPowerWatts: "450", powerCapacityWatts: "1800", mountFace: "rear" });
+  ok(more.ok && more.patch.maxPowerWatts === 450 && more.patch.powerCapacityWatts === 1800 && more.patch.mountFace === "rear", "#296 catalog: max power, outlet capacity and mount face parse");
+  const frac = c296Clean({ depthIn: "15.25", powerWatts: "37.55" });
+  ok(frac.ok && frac.patch.depthIn === 15.25 && frac.patch.powerWatts === 37.55, "#296 catalog: fractional depth and watts are kept");
   const rd296 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   ok(rd296("src/app/(app)/catalog/page.tsx").includes("<RackDataField"), "#296 source: the part editor renders the Rack data section");
-  ok(rd296("src/app/(app)/estimator/actions.ts").includes("rackFactsOf("), "#296 source: catalog search hits carry rack facts");
-  ok(rd296("src/app/(app)/design/assemblies/actions.ts").includes("rackFactsOf("), "#296 source: assembly part hits carry rack facts");
+  ok(rd296("src/app/(app)/estimator/actions.ts").includes("rackFactsOrUndefined("), "#296 source: catalog search hits carry rack facts");
+  ok(rd296("src/app/(app)/design/assemblies/actions.ts").includes("rack: h.rack"), "#296 source: assembly part hits carry rack facts");
   ok(rd296("src/app/(app)/catalog/actions.ts").includes("rackFactsProblem("), "#296 source: upsertPart gates rack facts");
 }
 

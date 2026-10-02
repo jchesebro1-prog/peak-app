@@ -40,11 +40,11 @@ const SELECTS = [
 
 const NUMBERS = [
   { key: "ruHeight", step: 0.5 },
-  { key: "depthIn", step: 0.1 },
-  { key: "weightLb", step: 0.1 },
-  { key: "powerWatts", step: 0.1 },
-  { key: "maxPowerWatts", step: 0.1 },
-  { key: "powerCapacityWatts", step: 0.1 },
+  { key: "depthIn", step: "any" },
+  { key: "weightLb", step: "any" },
+  { key: "powerWatts", step: "any" },
+  { key: "maxPowerWatts", step: "any" },
+  { key: "powerCapacityWatts", step: "any" },
 ] as const;
 
 export default function RackDataField({ initial }: { initial: RackPartFacts }) {
