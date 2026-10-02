@@ -43706,6 +43706,142 @@ import { parseCsv as c296ParseCsv } from "@/app/(app)/import/parse";
   ok(!/from "@\/lib\/stores|from "@\/db/.test(rd296b("src/app/(app)/catalog/rack-data/rack-data-client.tsx")), "#296 source: the rack-data client imports no store or db");
 }
 
+/* ===== #296 — rack layout core ===== */
+import {
+  laneCountOf as c296LaneCountOf, laneSpan as c296LaneSpan, placementFacts as c296Facts, heightForPart as c296Height,
+  childrenOf as c296Children, occupiedSpan as c296Span, canPlace as c296Can, place as c296Place, move as c296Move,
+  remove as c296Remove, resize as c296Resize, update as c296Update, newPlacementId as c296NewId,
+  emptyRackLayout as c296Empty, sanitizeRackLayout as c296Sanitize, ruRangeLabel as c296RuLabel,
+} from "@/lib/rack/layout";
+import type { RackPlacement as C296Placement, RackLayout as C296Layout, RackEdit as C296Edit } from "@/lib/rack/types";
+{
+  const P = (o: Partial<C296Placement>): C296Placement => ({ kind: "device", sku: "S", ruStart: 1, ruHeight: 1, face: "front", ...o, id: "RP-" + (o.id ?? "X") });
+  const withP = (...ps: C296Placement[]): C296Layout => ({ config: { ruCount: 42, widthIn: 19, numbering: "bottom-up" }, placements: ps });
+  const why = (r: { ok: boolean; reason?: string } | C296Edit) => ("reason" in r ? r.reason : "") ?? "";
+  const lay = (e: C296Edit): C296Layout => { if (!e.ok) throw new Error("#296 rack layout: expected ok edit, got " + e.reason); return e.layout; };
+
+  // helpers
+  const E = c296Empty();
+  ok(JSON.stringify(E) === JSON.stringify({ config: { ruCount: 42, widthIn: 19, numbering: "bottom-up" }, placements: [] }) && c296Empty(12).config.ruCount === 12, "#296 rack layout: emptyRackLayout defaults to 42 RU, 19 in, bottom-up");
+  ok(c296NewId(1700000000000, 35) === "RP-" + (1700000000000).toString(36).toUpperCase() + "Z", "#296 rack layout: newPlacementId is RP- + base36 time + base36 seq, upper case");
+  ok(c296LaneCountOf(undefined) === 1 && c296LaneCountOf("full") === 1 && c296LaneCountOf("23in") === 1 && c296LaneCountOf("half") === 2 && c296LaneCountOf("third") === 3, "#296 rack layout: laneCountOf maps width classes to lanes");
+  const ls = c296LaneSpan({ lane: 1, laneCount: 3 });
+  ok(Math.abs(ls[0] - 1 / 3) < 1e-12 && Math.abs(ls[1] - 2 / 3) < 1e-12 && c296LaneSpan({}).join() === "0,1", "#296 rack layout: laneSpan is [lane/n, (lane+1)/n), absent = full width");
+  ok(c296Height(undefined) === 1 && c296Height({ sku: "a", desc: "", found: true, ruHeight: 1.5 }) === 2 && c296Height({ sku: "a", desc: "", found: true, ruHeight: 2 }, 3) === 3 && c296Height(undefined, 0) === 1, "#296 rack layout: heightForPart is override > ceil(catalog) > 1, min 1");
+  const look = (sku: string) => sku === "AMP" ? { sku, desc: "Amp", found: true, ruHeight: 2, depthIn: 15, weightLb: 30, powerWatts: 200, airflow: "front-to-rear" as const, rackWidth: "half" as const } : undefined;
+  const f1 = c296Facts(P({ sku: "AMP", override: { weightLb: 25 } }), look);
+  ok(f1.weightLb === 25 && f1.depthIn === 15 && f1.powerWatts === 200 && f1.maxPowerWatts === 200 && f1.airflow === "front-to-rear" && f1.rackWidth === "half" && f1.catalogRuHeight === 2, "#296 rack layout: placementFacts — override > catalog, maxPowerWatts falls back to powerWatts");
+  const f2 = c296Facts(P({ sku: "NOPE" }), look);
+  ok(f2.rackWidth === "full" && !("weightLb" in f2 && f2.weightLb !== undefined) && f2.powerWatts === undefined && f2.maxPowerWatts === undefined, "#296 rack layout: placementFacts — unknown stays unknown, width defaults to full");
+  ok(c296RuLabel(E.config, 12, 12) === "RU 12" && c296RuLabel(E.config, 12, 13) === "RU 12–13" && c296RuLabel({ ...E.config, numbering: "top-down" }, 1, 2) === "RU 41–42", "#296 rack layout: ruRangeLabel honours numbering, en dash, low→high");
+
+  // bounds
+  ok(!c296Can(E, P({ ruStart: 0 })).ok && why(c296Can(E, P({ ruStart: 0 }))) === "Doesn't fit — the rack has 42 RU.", "#296 rack layout: ruStart 0 refused with the rack size");
+  ok(c296Can(E, P({ ruStart: 42 })).ok, "#296 rack layout: a 1U at the top RU fits");
+  ok(!c296Can(E, P({ ruStart: 42, ruHeight: 2 })).ok, "#296 rack layout: a 2U at the top RU refused");
+  ok(why(c296Can(E, P({ ruHeight: 1.5 }))) === "Height must be a whole number of RU." && !c296Can(E, P({ ruHeight: 0 })).ok, "#296 rack layout: height must be whole RU ≥ 1");
+
+  // overlap
+  const amp = P({ id: "A", label: "Amp", ruStart: 10, ruHeight: 2 });
+  const L1 = withP(amp);
+  ok(why(c296Can(L1, P({ id: "B", ruStart: 11 }))) === "Overlaps Amp at RU 11.", "#296 rack layout: same face + lane overlap refused, naming the placement and RU");
+  ok(why(c296Can(withP(P({ id: "A", sku: "SKU-9", ruStart: 10 })), P({ id: "B", ruStart: 10 }))) === "Overlaps SKU-9 at RU 10." && why(c296Can(withP(P({ id: "A", kind: "reserved", sku: undefined, ruStart: 10 })), P({ id: "B", ruStart: 10 }))) === "Overlaps a reserved slot at RU 10.", "#296 rack layout: overlap label falls back to SKU, then 'a reserved slot'");
+  ok(c296Can(L1, P({ id: "B", ruStart: 11, face: "rear" })).ok, "#296 rack layout: front vs rear at the same RU allowed");
+  ok(c296Can(L1, P({ id: "B", ruStart: 12 })).ok && c296Can(L1, P({ id: "B", ruStart: 9 })).ok, "#296 rack layout: adjacent RU above and below allowed");
+  const half0 = P({ id: "H0", ruStart: 5, lane: 0, laneCount: 2 });
+  ok(c296Can(withP(half0), P({ id: "H1", ruStart: 5, lane: 1, laneCount: 2 })).ok, "#296 rack layout: half-width pair side by side allowed");
+  ok(!c296Can(withP(half0), P({ id: "F", ruStart: 5 })).ok && !c296Can(withP(P({ id: "F", ruStart: 5 })), P({ id: "H", ruStart: 5, lane: 1, laneCount: 2 })).ok, "#296 rack layout: full + half at the same RU refused");
+  ok(!c296Can(withP(half0), P({ id: "T", ruStart: 5, lane: 1, laneCount: 3 })).ok && c296Can(withP(half0), P({ id: "T", ruStart: 5, lane: 2, laneCount: 3 })).ok, "#296 rack layout: half lane 0 vs third lane 1 intersect; vs third lane 2 do not");
+  ok(why(c296Can(E, P({ lane: 2, laneCount: 2 }))) === "That lane doesn't exist for this width." && why(c296Can(E, P({ lane: 1 }))) === "That lane doesn't exist for this width.", "#296 rack layout: lane must be below laneCount");
+
+  // SKU rule
+  ok(c296Can(E, P({ kind: "reserved", sku: undefined })).ok, "#296 rack layout: a reserved slot needs no SKU");
+  ok(why(c296Can(E, P({ sku: undefined }))) === "Pick a part for this slot." && why(c296Can(E, P({ kind: "blank", sku: "  " }))) === "Pick a part for this slot.", "#296 rack layout: a device or blank needs a SKU");
+  ok(!c296Can(E, P({ kind: "reserved", sku: "X" })).ok, "#296 rack layout: a reserved slot carries no SKU");
+
+  // shelves (D575)
+  const shelf = P({ id: "S", kind: "shelf", sku: "SHELF", label: "Shelf", ruStart: 5, ruHeight: 1 });
+  const LS = lay(c296Place(withP(shelf), P({ id: "C1", shelfId: "RP-S", ruStart: 99, face: "rear", lane: 0, laneCount: 2 })));
+  const c1 = LS.placements.find((p) => p.id === "RP-C1")!;
+  ok(c1.ruStart === 5 && c1.face === "front", "#296 rack layout: a shelf child's ruStart and face are normalized to its shelf");
+  ok(c296Span(LS, c1) === null && JSON.stringify(c296Span(LS, LS.placements[0])) === JSON.stringify({ lo: 5, hi: 5 }), "#296 rack layout: a child takes no RU; a shelf with a child within its height is not extended");
+  ok(c296Can(LS, P({ id: "D", ruStart: 6 })).ok, "#296 rack layout: a device directly above a shelf with a short child is allowed");
+  ok(c296Children(LS, "RP-S").length === 1 && c296Children(LS, "RP-NONE").length === 0, "#296 rack layout: childrenOf lists a shelf's devices");
+  ok(why(c296Can(LS, P({ id: "C2", shelfId: "RP-S", ruStart: 5, lane: 0, laneCount: 2 }))) === "Another device already sits there on the shelf.", "#296 rack layout: children on one shelf may not share a lane");
+  const LS2 = lay(c296Place(LS, P({ id: "C2", shelfId: "RP-S", ruStart: 5, lane: 1, laneCount: 2, ruHeight: 3 })));
+  ok(JSON.stringify(c296Span(LS2, LS2.placements[0])) === JSON.stringify({ lo: 5, hi: 7 }), "#296 rack layout: a taller child extends the shelf's span upward");
+  ok(why(c296Can(LS2, P({ id: "D", ruStart: 6 }))) === "Overlaps Shelf at RU 6." && c296Can(LS2, P({ id: "D", ruStart: 8 })).ok && c296Can(LS2, P({ id: "D", ruStart: 6, face: "rear" })).ok, "#296 rack layout: the extended span blocks a device directly above on that face only");
+  const LD = withP(shelf, P({ id: "D", label: "Switch", ruStart: 6 }));
+  ok(why(c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 2 }))) === "Too tall for the shelf — 1 RU above it are taken." && c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 1 })).ok, "#296 rack layout: a too-tall child under a device is refused; one that fits is allowed");
+  ok(why(c296Can(withP(shelf, P({ id: "D", ruStart: 7, ruHeight: 2 })), P({ id: "C", shelfId: "RP-S", ruHeight: 4 }))) === "Too tall for the shelf — 2 RU above it are taken.", "#296 rack layout: the clearance count names how many RU are taken");
+  ok(why(c296Can(withP(shelf), P({ id: "C", shelfId: "RP-GONE" }))) === "That shelf isn't in the rack." && why(c296Can(withP(P({ id: "D", ruStart: 5 })), P({ id: "C", shelfId: "RP-D" }))) === "That shelf isn't in the rack.", "#296 rack layout: a child needs an existing shelf");
+  ok(!c296Can(withP(shelf), P({ id: "C", kind: "shelf", shelfId: "RP-S" })).ok, "#296 rack layout: a shelf cannot sit on a shelf");
+  const top = P({ id: "S", kind: "shelf", sku: "SHELF", ruStart: 41, ruHeight: 1 });
+  ok(!c296Can(withP(top), P({ id: "C", shelfId: "RP-S", ruHeight: 3 })).ok, "#296 rack layout: a child that would rise past the top of the rack is refused");
+
+  // edits
+  ok(why(c296Remove(LS2, "RP-S")) === "Remove the 2 devices on this shelf first.", "#296 rack layout: a shelf with devices cannot be removed");
+  const afterChildGone = lay(c296Remove(lay(c296Remove(LS2, "RP-C1")), "RP-C2"));
+  ok(lay(c296Remove(afterChildGone, "RP-S")).placements.length === 0, "#296 rack layout: remove children, then the shelf");
+  const moved = lay(c296Move(LS2, "RP-S", { ruStart: 20 }));
+  ok(moved.placements.find((p) => p.id === "RP-S")!.ruStart === 20 && c296Children(moved, "RP-S").every((c) => c.ruStart === 20), "#296 rack layout: moving a shelf moves its children");
+  const movedRear = lay(c296Move(LS2, "RP-S", { face: "rear" }));
+  ok(movedRear.placements.every((p) => p.face === "rear"), "#296 rack layout: a shelf's children follow it to the other face");
+  ok(why(c296Move(L1, "RP-A", { ruStart: 42 })) === "Doesn't fit — the rack has 42 RU.", "#296 rack layout: move off the top refused");
+  ok(lay(c296Move(L1, "RP-A", { ruStart: 1 })).placements[0].ruStart === 1, "#296 rack layout: a move to free space succeeds");
+  ok(!c296Move(withP(amp, P({ id: "B", ruStart: 20 })), "RP-B", { ruStart: 11 }).ok, "#296 rack layout: a move onto another placement refused");
+  ok(!c296Move(LS2, "RP-C1", { lane: 1 }).ok && lay(c296Move(LS, "RP-C1", { lane: 1, ruStart: 30 })).placements.find((p) => p.id === "RP-C1")!.ruStart === 5, "#296 rack layout: moving a child changes its lane only");
+  ok(!c296Move(L1, "RP-NONE", { ruStart: 1 }).ok && !c296Remove(L1, "RP-NONE").ok, "#296 rack layout: edits on a missing id refuse");
+  ok(why(c296Resize(L1, "RP-A", 3)) === "" && lay(c296Resize(L1, "RP-A", 3)).placements[0].ruHeight === 3 && !c296Resize(withP(amp, P({ id: "B", ruStart: 12 })), "RP-A", 3).ok, "#296 rack layout: resize re-checks overlap");
+  ok(!c296Resize(LD, "RP-S", 2).ok, "#296 rack layout: resizing a shelf into the device above refused");
+  const halfL = withP(P({ id: "H", ruStart: 5, lane: 1, laneCount: 2 }));
+  ok(why(c296Update(halfL, "RP-H", { laneCount: 1 })) === "That lane doesn't exist for this width.", "#296 rack layout: update re-checks a laneCount change");
+  ok(why(c296Update(L1, "RP-A", { sku: "" })) === "Pick a part for this slot." && lay(c296Update(L1, "RP-A", { sku: "NEW" })).placements[0].sku === "NEW", "#296 rack layout: update re-checks a SKU change");
+  const opt = lay(c296Update(L1, "RP-A", { optional: true, notes: "spare" }));
+  ok(opt.placements[0].optional === true && opt.placements[0].notes === "spare" && !("optional" in lay(c296Update(opt, "RP-A", { optional: undefined })).placements[0]), "#296 rack layout: update sets and clears fields");
+  ok(why(c296Place(L1, P({ id: "A", ruStart: 30 }))) !== "" && !c296Place(L1, P({ id: "A", ruStart: 30 })).ok, "#296 rack layout: place refuses a duplicate id");
+
+  // immutability
+  const before = JSON.stringify(LS2);
+  c296Place(LS2, P({ id: "Z", ruStart: 30 })); c296Move(LS2, "RP-S", { ruStart: 25, face: "rear" }); c296Remove(LS2, "RP-C1");
+  c296Resize(LS2, "RP-S", 2); c296Update(LS2, "RP-C2", { notes: "x", lane: 0 }); c296Sanitize(LS2);
+  const pz = P({ id: "Q", shelfId: "RP-S", ruStart: 77 }); const pzBefore = JSON.stringify(pz); c296Place(LS2, pz);
+  ok(JSON.stringify(LS2) === before && JSON.stringify(pz) === pzBefore, "#296 rack layout: no edit mutates its input layout or placement");
+  const placed = lay(c296Place(L1, P({ id: "Z", ruStart: 30 })));
+  ok(placed.placements[0] !== L1.placements[0] && placed.config !== L1.config, "#296 rack layout: an edit returns fresh objects");
+
+  // sanitize
+  const dup = c296Sanitize(withP(P({ id: "A" }), P({ id: "A", ruStart: 3 })));
+  ok(!dup.ok && dup.error === "Two placements share the id RP-A.", "#296 rack layout: sanitize refuses duplicate ids");
+  const big = c296Sanitize({ config: { ruCount: 61, widthIn: 19, numbering: "bottom-up" }, placements: [] });
+  ok(!big.ok && big.error === "A rack has 1–60 RU." && !c296Sanitize({ config: { ruCount: 4.5, widthIn: 19 }, placements: [] }).ok, "#296 rack layout: sanitize refuses 61 RU and fractional RU counts");
+  const ov = c296Sanitize(withP(amp, P({ id: "B", ruStart: 11 })));
+  ok(!ov.ok && ov.error === "Amp (RU 10–11, front): Overlaps S at RU 11.", "#296 rack layout: sanitize names the first overlapping placement");
+  const many = c296Sanitize({ config: { ruCount: 42, widthIn: 19, numbering: "bottom-up" }, placements: Array.from({ length: 301 }, (_, i) => P({ id: "N" + i, kind: "reserved", sku: undefined, ruStart: 1 })) });
+  ok(!many.ok && many.error === "A rack can hold at most 300 placements.", "#296 rack layout: sanitize caps placements at 300");
+  ok(!c296Sanitize(null).ok && !c296Sanitize({ config: {}, placements: "x" }).ok && !c296Sanitize(withP(P({ id: "lower!" }))).ok, "#296 rack layout: sanitize refuses a bad shape or id");
+  const messy = { extra: 1, config: { ruCount: 24, widthIn: 23, depthIn: 30, numbering: "top-down", junk: true }, placements: [
+    { ...shelf, label: "  Shelf  ", extra: "x", costOverride: -5, override: { ruHeight: 1.5, weightLb: 4, rackWidth: "huge", junk: 1 } },
+    { ...P({ id: "C1", shelfId: "RP-S", ruStart: 3, face: "rear", notes: "n".repeat(300), sku: "  K  " }), optional: true },
+    P({ id: "R", kind: "reserved", sku: undefined, ruStart: 10, ruHeight: 2, costOverride: 12.5 }),
+  ] };
+  const messyBefore = JSON.stringify(messy);
+  const s1 = c296Sanitize(messy);
+  ok(s1.ok && JSON.stringify(messy) === messyBefore, "#296 rack layout: sanitize accepts a valid layout without mutating it");
+  if (s1.ok) {
+    const v = s1.value; const [sh, ch, rs] = v.placements;
+    ok(JSON.stringify(v.config) === JSON.stringify({ ruCount: 24, widthIn: 23, depthIn: 30, numbering: "top-down" }) && !("extra" in v), "#296 rack layout: sanitize keeps config fields and drops unknown keys");
+    ok(sh.label === "Shelf" && !("extra" in sh) && !("costOverride" in sh) && JSON.stringify(sh.override) === JSON.stringify({ weightLb: 4 }), "#296 rack layout: sanitize trims labels, drops negative cost and bad override fields");
+    ok(ch.ruStart === 5 && ch.face === "front" && ch.sku === "K" && ch.notes?.length === 200 && ch.optional === true && rs.costOverride === 12.5 && !("sku" in rs), "#296 rack layout: sanitize normalizes children to their shelf and caps notes at 200");
+    const s2 = c296Sanitize(v);
+    ok(s2.ok && JSON.stringify(s2.value) === JSON.stringify(v), "#296 rack layout: sanitize is idempotent (byte-identical second pass)");
+  }
+  const orphan = c296Sanitize(withP(P({ id: "C", label: "Mic rx", shelfId: "RP-GONE", ruStart: 3 })));
+  ok(!orphan.ok && orphan.error.endsWith(": That shelf isn't in the rack.") && orphan.error.startsWith("Mic rx ("), "#296 rack layout: sanitize refuses a child whose shelf is missing");
+  const childFirst = c296Sanitize(withP(P({ id: "C", shelfId: "RP-S" }), shelf));
+  ok(childFirst.ok, "#296 rack layout: sanitize validates a child after its shelf regardless of array order");
+}
+
 async function rack296SheetAsyncChecks(): Promise<void> {
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
   const { mergeUpsert, get } = await import("@/lib/stores/catalog");
