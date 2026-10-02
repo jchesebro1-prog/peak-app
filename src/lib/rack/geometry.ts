@@ -36,6 +36,11 @@ export type RackTextShape = Extract<Shape, { kind: "text" }> & { halo?: true };
 
 type Rect = { x: number; y: number; w: number; h: number };
 
+/** Three-place rounding as a string — the one number format the SVG serializer and slot coordinates share. */
+export const fmt = (n: number) => String(+n.toFixed(3));
+const rnd = (n: number) => +fmt(n);
+const rounded = (r: Rect): Rect => ({ x: rnd(r.x), y: rnd(r.y), w: rnd(r.w), h: rnd(r.h) });
+
 /** Collapse whitespace so a pasted label can't add line breaks to a one-line text shape. */
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -103,13 +108,18 @@ export function rackGeometry(
     const [a, b] = laneSpan(p);
     return { x: panelX0 + a * panelIn + INSET, w: (b - a) * panelIn - 2 * INSET };
   };
-  const spanRect = (p: RackPlacement, lo: number, hi: number): Rect => {
+  /** The drawn box for RU `lo..hi`, clamped to the frame; null when none of it is inside (a draft may be out of range). */
+  const spanRect = (p: RackPlacement, lo: number, hi: number): Rect | null => {
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+    const a = Math.max(1, lo);
+    const b = Math.min(ruCount, hi);
+    if (a > b) return null;
     const { x, w } = laneX(p);
-    return { x, y: ruTop(hi) + INSET, w, h: (hi - lo + 1) * RU_IN - 2 * INSET };
+    return rounded({ x, y: ruTop(b) + INSET, w, h: (b - a + 1) * RU_IN - 2 * INSET });
   };
 
   const drawLabel = (p: RackPlacement, r: Rect) => {
-    if (p.kind === "vent") return; // identified by its slats
+    if (p.kind === "vent" && !p.label) return; // identified by its slats
     const info = p.sku ? lookup(p.sku) : undefined;
     const clean = (s: string | undefined) => (s ? oneLine(s) : "");
     const line1 = clean(p.label) || (p.kind === "reserved" ? RESERVED_TEXT : clean(info?.desc) || clean(p.sku));
@@ -117,11 +127,11 @@ export function rackGeometry(
     const maxW = r.w - LABEL_PAD;
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
-    const l2 = p.kind !== "reserved" && p.ruHeight >= 2 ? `${clean(info?.mfr)} ${clean(p.sku)}`.trim() : "";
+    const l2 = p.kind !== "reserved" && p.kind !== "vent" && p.ruHeight >= 2 ? `${clean(info?.mfr)} ${clean(p.sku)}`.trim() : "";
     const size2 = labelSize * 0.8;
     const t1 = fitText(line1, labelSize, maxW);
     const t2 = l2 && l2 !== line1 ? fitText(l2, size2, maxW) : null;
-    const halo = p.kind === "reserved" ? ({ halo: true } as const) : {};
+    const halo = p.kind === "reserved" || p.kind === "vent" ? ({ halo: true } as const) : {};
     if (t1 && t2) {
       const y1 = cy - 0.08;
       shapes.push({ kind: "text", x: cx, y: y1, text: t1, size: labelSize, anchor: "middle", ...halo } as RackTextShape);
@@ -151,7 +161,7 @@ export function rackGeometry(
       const depth = placementFacts(p, lookup).depthIn;
       if (depth !== undefined && !(config.depthIn !== undefined && depth > config.depthIn / 2)) continue;
       const r = spanRect(p, p.ruStart, p.ruStart + p.ruHeight - 1);
-      shapes.push({ kind: "rect", x: r.x, y: r.y, w: r.w, h: r.h, stroke: "thin", dash: true });
+      if (r) shapes.push({ kind: "rect", x: r.x, y: r.y, w: r.w, h: r.h, stroke: "thin", dash: true });
     }
   }
 
@@ -159,14 +169,16 @@ export function rackGeometry(
   for (const p of layout.placements) {
     if (p.shelfId || p.face !== opts.face) continue;
     if (p.kind !== "shelf") {
-      drawBox(p, spanRect(p, p.ruStart, p.ruStart + p.ruHeight - 1), opts.face);
+      const r = spanRect(p, p.ruStart, p.ruStart + p.ruHeight - 1);
+      if (r) drawBox(p, r, opts.face);
       continue;
     }
     // A shelf is the outline of everything the engine reserves for it (D575: its own
     // rows, plus the extension for a tall device); the tray is a thin band at the bottom.
     const span = occupiedSpan(layout, p)!;
     const box = spanRect(p, span.lo, span.hi);
-    const bandTop = box.y + box.h - TRAY_IN;
+    if (!box) continue;
+    const bandTop = rnd(box.y + box.h - TRAY_IN);
     shapes.push({ kind: "rect", x: box.x, y: box.y, w: box.w, h: box.h, stroke: "med", fill: "none", ...(p.optional ? { dash: true } : {}) });
     shapes.push({ kind: "rect", x: box.x, y: bandTop, w: box.w, h: TRAY_IN, stroke: "thin", fill: "tone" });
     const kids = childrenOf(layout, p.id);
@@ -177,7 +189,8 @@ export function rackGeometry(
       const cell = c.ruHeight * RU_IN;
       // Bottom on the tray band; a device as tall as the whole span is trimmed to clear it.
       const y = Math.max(box.y, bandTop - cell + INSET);
-      drawBox(c, { x, y, w, h: bandTop - INSET - y }, opts.face);
+      const h = bandTop - INSET - y;
+      if (h > 0) drawBox(c, rounded({ x, y, w, h }), opts.face);
     }
   }
 

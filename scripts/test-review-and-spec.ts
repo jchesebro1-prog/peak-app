@@ -43778,6 +43778,9 @@ import type { RackPlacement as C296Placement, RackLayout as C296Layout, RackEdit
   ok(why(c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 2 }))) === "Too tall for the shelf — 1 RU above it is taken." && c296Can(LD, P({ id: "C", shelfId: "RP-S", ruHeight: 1 })).ok, "#296 rack layout: a too-tall child under a device is refused; one that fits is allowed");
   ok(why(c296Can(withP(shelf, P({ id: "D", ruStart: 7, ruHeight: 2 })), P({ id: "C", shelfId: "RP-S", ruHeight: 4 }))) === "Too tall for the shelf — 2 RU above it are taken.", "#296 rack layout: the clearance count names how many RU are taken");
   ok(why(c296Can(withP(shelf), P({ id: "C", shelfId: "RP-GONE" }))) === "That shelf isn't in the rack." && why(c296Can(withP(P({ id: "D", ruStart: 5 })), P({ id: "C", shelfId: "RP-D" }))) === "That shelf isn't in the rack.", "#296 rack layout: a child needs an existing shelf");
+  const half = P({ id: "H", kind: "shelf", sku: "SHELF", ruStart: 8, ruHeight: 1, lane: 1, laneCount: 2 });
+  ok(why(c296Can(withP(half), P({ id: "W", shelfId: "RP-H" }))) === "Wider than the shelf." && c296Can(withP(half), P({ id: "W", shelfId: "RP-H", lane: 0, laneCount: 2 })).ok === false && c296Can(withP(half), P({ id: "W", shelfId: "RP-H", lane: 1, laneCount: 2 })).ok && c296Can(withP(half), P({ id: "W", shelfId: "RP-H", lane: 2, laneCount: 3 })).ok, "#296 rack layout: a shelf child must sit inside its shelf's lanes (full width on a half shelf is refused; the shelf's own lane is accepted)");
+  ok(c296Can(withP(shelf), P({ id: "W", shelfId: "RP-S", lane: 1, laneCount: 3 })).ok && !c296Sanitize({ config: { ruCount: 42, widthIn: 19, numbering: "bottom-up" }, placements: [half, P({ id: "W", shelfId: "RP-H", ruStart: 8 })] }).ok, "#296 rack layout: a child inside a full-width shelf is fine; sanitize refuses a too-wide child");
   ok(!c296Can(withP(shelf), P({ id: "C", kind: "shelf", shelfId: "RP-S" })).ok, "#296 rack layout: a shelf cannot sit on a shelf");
   const top = P({ id: "S", kind: "shelf", sku: "SHELF", ruStart: 41, ruHeight: 1 });
   ok(!c296Can(withP(top), P({ id: "C", shelfId: "RP-S", ruHeight: 3 })).ok, "#296 rack layout: a child that would rise past the top of the rack is refused");
@@ -43922,6 +43925,8 @@ import type { RackPlacement as C296rPlacement, RackLayout as C296rLayout, RackPa
   ok(c296rValidate(L([P({ id: "T", ruStart: 41, ruHeight: 2 })])).length === 0, "#296 rack rules: a 2U at RU 41 is in bounds");
   ok(c296rValidate(L([P({ id: "C", shelfId: "RP-GONE", ruStart: 3 })])).map((i) => i.code).join() === "shelf", "#296 rack rules: a child without its shelf is a shelf error");
   ok(c296rValidate(L([P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 3 }), P({ id: "C", shelfId: "RP-SH", ruStart: 3 })])).length === 0, "#296 rack rules: a child on a real shelf is fine");
+  const wide = c296rValidate(L([P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 3, lane: 1, laneCount: 2 }), P({ id: "C", shelfId: "RP-SH", ruStart: 3 })]));
+  ok(wide.length === 1 && wide[0].level === "error" && wide[0].code === "shelf" && wide[0].placementIds.join() === "RP-C" && wide[0].message.endsWith("Wider than the shelf."), "#296 rack rules: a child wider than its shelf is one shelf error on the child");
   const errs = (l: C296rLayout) => c296rValidate(l).filter((i) => i.level === "error");
   const sib = errs(L([P({ id: "SH", kind: "shelf", sku: "SHELF", ruStart: 3 }), P({ id: "C1", shelfId: "RP-SH", ruStart: 3 }), P({ id: "C2", shelfId: "RP-SH", ruStart: 3 })]));
   ok(sib.length === 1 && sib[0].code === "shelf" && sib[0].placementIds.join() === "RP-C1,RP-C2" && sib[0].message === "S (RU 3, front): S already sits there on the shelf.", "#296 rack rules: two children in one shelf spot are one error listing both");
@@ -44083,7 +44088,7 @@ import type { RackPlacement as C296gPlacement, RackLayout as C296gLayout, RackPa
   const hr = slotRect(g2, "R").r;
   ok(near(hl.w, 9.5, 0.1) && near(hr.w, 9.5, 0.1) && hl.x < hr.x && near(hl.x + hl.w + 0.08, hr.x, 1e-9) && hl.y === hr.y, "#296 rack geometry: a half-width pair draws two ~9.5 in rects side by side");
   const g2t = c296gGeom(L([P({ id: "T", laneCount: 3, lane: 2 })]), look, { face: "front" });
-  ok(near(slotRect(g2t, "T").r.w, 19 / 3 - 0.08, 1e-9), "#296 rack geometry: a third-width lane is a third of the panel");
+  ok(near(slotRect(g2t, "T").r.w, 19 / 3 - 0.08, 0.001), "#296 rack geometry: a third-width lane is a third of the panel");
 
   // optional / blank / vent / reserved
   const g3 = c296gGeom(L([
@@ -44172,6 +44177,22 @@ import type { RackPlacement as C296gPlacement, RackLayout as C296gLayout, RackPa
   const raw = c296gShapesToSvg([{ kind: "text", x: 1, y: 2, text: "a\nb<", size: 0.5 }, { kind: "line", x1: 0, y1: 0, x2: 1, y2: 1, stroke: "heavy" }], { w: 4, h: 3 }, { className: 'a"b' });
   ok(raw.includes('class="a&quot;b"') && raw.includes("<tspan") && raw.includes("b&lt;") && raw.includes('stroke-width="1.6"') && raw.includes('viewBox="0 0 4 3"'), "#296 rack geometry: shapesToSvg escapes the class, breaks lines into tspans, heavy is 1.6 px");
   ok(c296gSvg(L([P({ id: "A", label: "x\u0001y" })]), look, { face: "front" }).includes(">xy<"), "#296 rack geometry: control characters never reach the markup");
+  // review fixes (round 2)
+  const resv = L([P({ id: "Q", kind: "reserved", sku: undefined })]);
+  const evil = c296gSvg(resv, look, { face: "front", idPrefix: 'a"onload="x' });
+  ok(evil.includes('<pattern id="a-onload--x-hatch"') && evil.includes('fill="url(#a-onload--x-hatch)"') && !evil.includes("onload=") && !evil.includes('a"'), "#296 rack geometry: idPrefix is sanitized, and id and fill carry the same safe value");
+  ok(c296gSvg(resv, look, { face: "front", idPrefix: "" }).includes('id="rk-hatch"') && c296gSvg(resv, look, { face: "front", idPrefix: "Rack_2-a" }).includes('id="Rack_2-a-hatch"'), "#296 rack geometry: an empty idPrefix falls back to rk; letters, digits, _ and - are kept");
+  const vl = c296gGeom(L([P({ id: "V", kind: "vent", sku: "VNT", label: "Rear vent" }), P({ id: "W", kind: "vent", sku: "VNT", ruStart: 2 })]), look, { face: "front" });
+  const vt = texts(vl.shapes).filter((x) => x.text === "Rear vent");
+  ok(vt.length === 1 && "halo" in vt[0] && vt[0].halo === true && texts(vl.shapes).filter((x) => x.size === c296gG.labelSize).length === 1 && vl.shapes.filter((x) => x.kind === "line" && x.tag === "band").length === 6, "#296 rack geometry: a labelled vent draws its label with a halo over the slats; an unlabelled vent has none");
+  const oor = c296gGeom(L([P({ id: "T", ruStart: 11, ruHeight: 4 }), P({ id: "B", ruStart: -1, ruHeight: 3 }), P({ id: "G", ruStart: 20 }), P({ id: "N", ruStart: Number.NaN })]), look, { face: "front" });
+  const frameTop = M, frameBot = M + 12 * 1.75;
+  ok(oor.slots.map((x) => x.placementId).join() === "RP-T,RP-B" && oor.slots.every((x) => x.y >= frameTop && x.y + x.h <= frameBot) && rects(oor.shapes).every((r) => r.y >= frameTop - 1e-9 && r.y + r.h <= frameBot + 1e-9), "#296 rack geometry: spans are clamped to 1..ruCount; one wholly outside the rack, or with a bad RU, is not drawn");
+  const clampT = oor.slots.find((x) => x.placementId === "RP-T")!;
+  ok(near(clampT.y, M + 0.04, 1e-9) && near(clampT.h, 2 * 1.75 - 0.08, 1e-9), "#296 rack geometry: a placement running past the top is trimmed to RU 11–12");
+  ok(oor.slots.every((x) => [x.x, x.y, x.w, x.h].every((n) => n === +n.toFixed(3))) && rects(oor.shapes).every((r) => [r.x, r.y, r.w, r.h].every((n) => n === +n.toFixed(3))), "#296 rack geometry: slot and rect coordinates are rounded to 3 places");
+  const third = c296gGeom(L([P({ id: "T", laneCount: 3, lane: 1 })]), look, { face: "front" });
+  ok(third.slots[0].x === +third.slots[0].x.toFixed(3) && third.slots[0].w === 6.253 && rects(third.shapes).some((r) => r.x === third.slots[0].x && r.w === third.slots[0].w), "#296 rack geometry: a third-width slot is a rounded number and equals its drawn rect");
   const dashed = L([P({ id: "O", optional: true }), P({ id: "Q", kind: "reserved", sku: undefined, ruStart: 2 })]);
   const sc = c296gSvg(dashed, look, { face: "front" });
   const ab = c296gSvg(dashed, look, { face: "front", strokeMode: "absolute" });

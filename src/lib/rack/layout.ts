@@ -35,7 +35,7 @@ const NOTES_MAX = 200;
 const SKU_MAX = 80;
 
 /** Which rule a placement broke — validate() reports it as the issue code. */
-export type PlaceFailCode = "height" | "bounds" | "sku" | "lane" | "shelf" | "overlap" | "shelf-sibling" | "shelf-bounds" | "shelf-clearance";
+export type PlaceFailCode = "height" | "bounds" | "sku" | "lane" | "shelf" | "overlap" | "shelf-sibling" | "shelf-width" | "shelf-bounds" | "shelf-clearance";
 type Check = { ok: true } | { ok: false; reason: string; code: PlaceFailCode };
 type Span = { lo: number; hi: number };
 
@@ -165,6 +165,8 @@ export function canPlace(layout: RackLayout, p: RackPlacement, opts?: { ignoreId
     if (!shelf || shelf.kind !== "shelf" || shelf.shelfId) return { ok: false, reason: "That shelf isn't in the rack.", code: "shelf" };
     if (p.kind === "shelf") return { ok: false, reason: "A shelf can't sit on another shelf.", code: "shelf" };
     if (layout.placements.some((q) => q.shelfId === p.id)) return { ok: false, reason: "A device on a shelf can't hold other devices.", code: "shelf" };
+    const sl = laneSpan(shelf);
+    if (myLanes[0] < sl[0] - EPS || myLanes[1] > sl[1] + EPS) return { ok: false, reason: "Wider than the shelf.", code: "shelf-width" };
     const siblings = others.filter((q) => q.shelfId === shelf.id);
     if (siblings.some((s) => lanesIntersect(laneSpan(s), myLanes)))
       return { ok: false, reason: "Another device already sits there on the shelf.", code: "shelf-sibling" };

@@ -137,7 +137,7 @@ export function validate(layout: RackLayout, lookup?: RackPartLookup): RackIssue
     const shelf = p.shelfId ? byId.get(p.shelfId) : undefined;
     if (r.code === "shelf-clearance" && shelfOverlaps(shelf)) continue;
     if (r.code === "shelf-bounds" && shelfOutOfBounds(shelf)) continue;
-    const code = r.code === "shelf-bounds" ? "bounds" : r.code === "shelf-clearance" ? "shelf" : r.code;
+    const code = r.code === "shelf-bounds" ? "bounds" : r.code === "shelf-clearance" || r.code === "shelf-width" ? "shelf" : r.code;
     add("error", code, [p], `${where(p)}: ${r.reason}`, spanOf(layout, p).lo);
   }
   for (let i = 0; i < placements.length; i++)

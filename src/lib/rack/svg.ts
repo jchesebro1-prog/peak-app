@@ -5,7 +5,7 @@
  * every number goes through `fmt`; text and attribute values are escaped.
  */
 import type { Fill, Shape, Stroke } from "@/lib/curtain-cut-sheets/shapes";
-import { rackGeometry, type RackGeometryOpts } from "./geometry";
+import { fmt, rackGeometry, type RackGeometryOpts } from "./geometry";
 import type { RackLayout, RackPartLookup } from "./types";
 
 const SW: Record<Stroke, number> = { thin: 0.6, med: 1, heavy: 1.6 }; // screen px
@@ -16,7 +16,8 @@ const DASH = "4 3";
 const DASH_ABS = "0.25 0.18"; // inches
 const HATCH_PITCH = 0.12;
 
-const fmt = (n: number) => String(+n.toFixed(3));
+/** Keep an id prefix to [A-Za-z0-9_-]; anything else becomes "-", and an empty result falls back to "rk". */
+const safePrefix = (p: string | undefined) => (p ?? "").replace(/[^A-Za-z0-9_-]/g, "-") || "rk";
 // XML 1.0 forbids most control characters; drop them rather than emit a broken file.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g;
 const esc = (s: string) =>
@@ -33,7 +34,7 @@ export function shapesToSvg(
   viewBox: { w: number; h: number },
   opts: { title?: string; className?: string; idPrefix?: string; strokeMode?: "screen" | "absolute" } = {}
 ): string {
-  const hatchId = `${opts.idPrefix ?? "rk"}-hatch`;
+  const hatchId = `${safePrefix(opts.idPrefix)}-hatch`; // [A-Za-z0-9_-] only, so safe in id= and url(#…)
   const fillOf = (f: Fill | undefined) => (f === "tone" ? TONE : f === "hatch" ? `url(#${hatchId})` : f === "solid" ? "currentColor" : "none");
   // "absolute" is for rasterizers (librsvg) that ignore vector-effect: strokes and dashes in user units.
   const abs = opts.strokeMode === "absolute";
@@ -73,7 +74,7 @@ export function shapesToSvg(
     .join("");
 
   const defs = usesHatch
-    ? `<defs><pattern id="${esc(hatchId)}" patternUnits="userSpaceOnUse" width="${HATCH_PITCH}" height="${HATCH_PITCH}" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="${HATCH_PITCH}" stroke="currentColor" stroke-width="${abs ? 0.01 : 0.5}"${VE} /></pattern></defs>`
+    ? `<defs><pattern id="${hatchId}" patternUnits="userSpaceOnUse" width="${HATCH_PITCH}" height="${HATCH_PITCH}" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="${HATCH_PITCH}" stroke="currentColor" stroke-width="${abs ? 0.01 : 0.5}"${VE} /></pattern></defs>`
     : "";
   const cls = opts.className ? ` class="${esc(opts.className)}"` : "";
   const title = opts.title ? `<title>${esc(opts.title)}</title>` : "";
