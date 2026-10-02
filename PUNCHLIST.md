@@ -10455,3 +10455,20 @@ so the rank difference is NaN, which is falsy in `compareImages`, and ties fall 
 source rank; the gallery shows the raw label `sheet` instead of "Sheet". One side effect: the old Drive photo sync does
 not know sheet-claimed Drive files, so a rolled-back deploy could import such a file a second time as a duplicate `drive`
 image (additive, deletable). No migrations to undo.
+
+## 295. Estimates — vendor quote "Load from CSV" rejected the example once Excel had saved it — DONE 2026-10-02
+
+Jeff: downloaded the vendor-quote example CSV, added rows in Excel, loaded it back — nothing imported, and the same
+sentence repeated once per row. Root cause: both CSV pickers (vendor quote form, and the catalog CSV under "+ Add part
+from catalog") read the file with `File.text()`, which always decodes UTF-8. Excel's "UTF-16 Unicode Text" save puts a
+NUL between every character: the header still matched (header names are normalized to letters and digits), but every
+quantity and amount read as NaN, so every row was rejected and the UI joined all the per-row errors into one wall of
+text. Excel's "Macintosh CSV" (bare `\r` line endings) failed too, as one line. Fix (`material-csv.ts`):
+`decodeCsvBytes`/`readCsvFile` decode by BOM (UTF-16LE/BE, UTF-8), sniff BOM-less UTF-16, and fall back from strict
+UTF-8 to Windows-1252 (Excel's plain CSV save); lines split on `\r\n|\r|\n`; `summarizeCsvErrors` says a repeated row
+error once with a count; both pickers accept `.txt`/`.tsv` (Excel's tab-delimited saves). Per-row error strings are
+unchanged. Browser-verified on a scratch datadir: a UTF-16LE tab file named `.txt` loads 3 lines including "café"; a
+file with every amount blank shows one message, "(2 more rows with the same kind of problem.)".
+Gates: tsc 0; test:specs 11,159 PASS / 0 FAIL (+7, on the #294 head); test:smoke 197/197 ALL PASSED; eslint 0 on the changed src files.
+
+---
