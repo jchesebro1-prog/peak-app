@@ -45143,3 +45143,28 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
   const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3);
   ok(!pl.ok && pl.error === n293sGone, "#293s final (DB): a portal quote's system can't be loaded by key");
 }
+
+/* ============================================================================
+   Merge #292 × #293 slice 2 — Load system re-keys curtain/track pairs. A
+   loaded system rides copySectionForTarget (load-system.ts) and then
+   placeLoadedSection's re-id, so its pairs get a fresh shared key and can't
+   collide with a pair already in the target estimate (e.g. the very system
+   it was saved from).
+   ============================================================================ */
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const src = c292Sec("sysA", [
+    { id: 1, curtain: true, desc: C292_DESC, qty: 1, curtainTrackKey: "ct-1" },
+    { id: 2, track: { ...C292_TRACK }, curtainTrackKey: "ct-1" },
+  ]);
+  const loaded = f292Copy(src, { newSectionId: "sysL", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 }).section;
+  let nid = 200;
+  const placed = n293sPlace(loaded, { id: "sys999", nextId: () => ++nid, autoFreightPct: 0 });
+  const links = f292Link([src, placed]);
+  ok(placed.items[0].curtainTrackKey !== "ct-1" && placed.items[0].curtainTrackKey === placed.items[1].curtainTrackKey
+    && placed.items[0].id === 201 && placed.items[1].id === 202
+    && links.links.get(src.items[0]) === src.items[1] && links.links.get(placed.items[0]) === placed.items[1] && links.duplicates.length === 0,
+    "Merge #292x293s Load: a loaded system's curtain/track pair gets a fresh shared key through the re-id, and neither it nor the existing pair loses its track");
+  ok(/copySectionForTarget\(sanitizeSystemSell\(picked\.section\)/.test(rd("src/lib/narrative/load-system.ts")),
+    "Merge #292x293s Load: loadLibrarySystem builds the loaded section through copySectionForTarget (which re-keys pairs)");
+}
