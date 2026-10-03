@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { matchManufacturerFile, type ManufacturerRow } from "@/lib/manufacturer-rows";
 import { newDocumentId } from "@/lib/part-docs/types";
@@ -242,7 +243,7 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
                   )}
                 </td>
                 <td style={td}>
-                  <b>{r.name}</b>
+                  <Link href={`/catalog/manufacturers/${encodeURIComponent(r.key)}`} style={{ fontWeight: 700, color: "inherit", textDecoration: "none" }}>{r.name}</Link>
                   {r.spellings.length > 0 && (
                     <span title={r.spellings.join(", ")} style={{ marginLeft: 8, fontSize: 11, color: "#8c919c" }}>+{r.spellings.length} spelling{r.spellings.length === 1 ? "" : "s"}</span>
                   )}

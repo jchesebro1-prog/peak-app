@@ -49035,3 +49035,62 @@ async function mfrPageCanonicalAsyncChecks(): Promise<void> {
   await mpMerge("testmpasrc", "testmpatgt", "mp test");
   ok((await find("testmpatgt")).imageDocumentId === dD.id && mpLookup(await mpList())("Test MPA Src") === dD.id, "mfr page: the source's image is adopted when the target has none");
 }
+
+/* ======================================================================
+   Manufacturer page — view model (pure) + source checks.
+   ====================================================================== */
+import { manufacturerPageVM as mpVM, catalogHref as mpHref } from "@/lib/manufacturer-page-vm";
+{
+  const recs = [
+    { key: "allenandheath", name: "Allen and Heath", imageDocumentId: "PD-9", aliasKeys: ["allenheath"], mergedInto: null, notes: "Net 30" },
+    { key: "allenheath", name: "Allen & Heath", imageDocumentId: null, aliasKeys: [], mergedInto: "allenandheath" },
+    { key: "etc", name: "ETC", imageDocumentId: null, aliasKeys: [], mergedInto: null },
+  ];
+  const parts = [
+    { sku: "A1", mfr: "Allen & Heath", category: "Audio" },
+    { sku: "A2", mfr: "Allen and Heath", category: "Audio" },
+    { sku: "A3", mfr: "Allen and Heath", category: "Audio" },
+    { sku: "A4", mfr: "Allen and Heath", category: "Cable" },
+    { sku: "A5", mfr: "Allen and Heath", category: "Labor" },
+    { sku: "E1", mfr: "ETC", category: "Lighting" },
+  ];
+  const vendors = new Map([
+    ["V1", { name: "Pro Dist", lastList: { receivedAt: 1, effectiveAt: 2 }, terms: "Net 30", manufacturers: ["Allen & Heath", "Allen and Heath", "ETC"] }],
+    ["V2", { name: "Other", terms: "", manufacturers: [] as string[] }],
+  ]);
+  const base = {
+    records: recs, parts, ownPhoto: (s: string) => s === "A1", vendorOwnerByKey: new Map([["allenheath", "V1"], ["allenandheath", "V1"], ["etc", "V1"]]),
+    vendors, company: null, sites: [], companyPeople: [], reps: [], priceBookAt: 123,
+  };
+  // Asked for an alias key, the page is the canonical manufacturer's.
+  const vm = mpVM({ ...base, key: "allenheath" });
+  ok(vm.key === "allenandheath" && vm.name === "Allen and Heath", "mfr page: the view model resolves an alias key to the canonical manufacturer, named by its most common spelling");
+  ok(vm.spellings.map((s) => s.name).join("|") === "Allen and Heath|Allen & Heath" && vm.aliasKeys.join() === "allenheath" && vm.aliases[0].name === "Allen & Heath", "mfr page: spellings and merged keys cover every key in the group");
+  ok(vm.imageDocumentId === "PD-9" && vm.notes === "Net 30", "mfr page: image and notes come from the canonical record");
+  ok(vm.catalog.parts === 4 && vm.catalog.withoutPhoto === 3, "mfr page: catalog counts span the group, leave Labor out, and use the own-photo rule");
+  ok(vm.catalog.topCategories.map((c) => `${c.name}:${c.count}`).join() === "Audio:3,Cable:1" && vm.catalog.priceBookAt === 123, "mfr page: top categories count by part, Labor excluded");
+  ok(vm.vendors.length === 1 && vm.vendors[0].id === "V1" && vm.vendors[0].href === "/vendors/V1" && vm.vendors[0].claimed.join() === "Allen & Heath,Allen and Heath", "mfr page: a vendor claiming several spellings is listed once, with only this group's claimed spellings");
+  const cats = mpVM({ ...base, key: "etc", parts: [...parts, ...["a", "b", "c", "d", "e", "f"].map((c, i) => ({ sku: `X${i}`, mfr: "ETC", category: `Cat ${c}` }))] });
+  ok(cats.catalog.topCategories.length === 5 && cats.vendors[0].claimed.join() === "ETC", "mfr page: only the top five categories show");
+  ok(mpHref("Allen & Heath") === "/catalog?mfr=Allen%20%26%20Heath" && vm.spellings[1].href === "/catalog?mfr=Allen%20%26%20Heath", "mfr page: catalog links encode the spelling");
+  const solo = mpVM({ ...base, records: [], key: "nobody", parts: [], vendorOwnerByKey: new Map() });
+  ok(solo.name === "nobody" && solo.vendors.length === 0 && solo.catalog.parts === 0, "mfr page: a key with nothing falls back to the key as its name");
+  const dead = mpVM({ ...base, key: "etc", vendors: new Map() });
+  ok(dead.vendors.length === 0, "mfr page: a claim by a vendor that is no longer live is left out");
+}
+{
+  const pageDir = join(process.cwd(), "src/app/(app)/catalog/manufacturers/[key]");
+  const acts = readFileSync(join(pageDir, "actions.ts"), "utf8");
+  const page = readFileSync(join(pageDir, "page.tsx"), "utf8");
+  const client = readFileSync(join(pageDir, "manufacturer-client.tsx"), "utf8");
+  const fns = ["mergeManufacturerAction", "unmergeManufacturerAction", "setManufacturerCompanyAction", "createManufacturerCompanyAction", "addManufacturerPersonAction", "removeManufacturerPersonAction", "setManufacturerNotesAction"];
+  ok(fns.every((f) => new RegExp(`export async function ${f}\\([^)]*\\)[^{]*\\{\\s*const user = await requirePerm\\("create"\\)`).test(acts)), "mfr page: every manufacturer-page write requires the create permission");
+  ok(/export async function searchContactsAction[\s\S]*?await requireUser\(\)/.test(acts), "mfr page: contact search needs a signed-in user");
+  ok(page.includes("redirect(") && page.includes("notFound()") && page.includes("await params") && page.includes("requireUser()"), "mfr page: the page redirects aliases, 404s unknowns, awaits params and requires a user");
+  ok(page.includes("QUOTED-SECTION-SLOT"), "mfr page: the Quoted section slot is marked for Part 3");
+  ok(!/from "@\/lib\/stores|from "@\/db|from "@\/lib\/identity/.test(client) && /canEdit/.test(client), "mfr page: the client component imports no server store and gates edits on canEdit");
+  const list = readFileSync(join(process.cwd(), "src/app/(app)/catalog/manufacturers/manufacturers-client.tsx"), "utf8");
+  ok(list.includes("/catalog/manufacturers/"), "mfr page: list rows link to the manufacturer page");
+  const act1 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/manufacturers/actions.ts"), "utf8");
+  ok(/canonicalKeyMap/.test(act1) && /sourceRef: `mfr:\$\{canonKey\}`/.test(act1), "mfr page: image documents are titled and referenced by the canonical manufacturer");
+}

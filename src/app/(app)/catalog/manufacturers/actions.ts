@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { createDocument, getDocument } from "@/lib/stores/part-documents";
-import { removeManufacturerImage, setManufacturerImage } from "@/lib/stores/manufacturers";
+import { listManufacturers, removeManufacturerImage, setManufacturerImage } from "@/lib/stores/manufacturers";
+import { canonicalKeyMap } from "@/lib/manufacturer-aliases";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 import { shrinkStoredImage } from "@/lib/part-docs/shrink-upload";
 import { isDocumentId } from "@/lib/part-docs/types";
@@ -31,7 +32,12 @@ export async function setManufacturerImageAction(input: { name: string; document
   if (!checked.ok) return checked;
   const shrunk = await shrinkStoredImage(input.documentId, checked.file);
   if (!shrunk.ok) return shrunk;
-  const doc = await createDocument({ id: input.documentId, kind: "image", title: `${name} (manufacturer)`, ...shrunk.file, sourceUrl: null, source: "manufacturer", sourceRef: `mfr:${mfrKey(name)}`, by: user.name });
+  // Name the document for the CANONICAL manufacturer — setManufacturerImage lands on
+  // the canonical record, so metadata must not name a merged-away alias.
+  const records = await listManufacturers();
+  const canonKey = canonicalKeyMap(records)(mfrKey(name));
+  const canonName = records.find((m) => m.key === canonKey)?.name.trim() || (canonKey === mfrKey(name) ? name : canonKey);
+  const doc = await createDocument({ id: input.documentId, kind: "image", title: `${canonName} (manufacturer)`, ...shrunk.file, sourceUrl: null, source: "manufacturer", sourceRef: `mfr:${canonKey}`, by: user.name });
   if (!doc) return { ok: false, error: "That document already exists — try again." };
   await setManufacturerImage({ name, documentId: doc.id, by: user.name });
   refresh();
