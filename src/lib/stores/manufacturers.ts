@@ -78,20 +78,29 @@ async function save(m: Manufacturer): Promise<Manufacturer> {
   return m;
 }
 
+/** The canonical record for a spelling's key (a merged-away spelling resolves to its target), or null. */
+async function canonicalRecord(rawKey: string): Promise<{ canon: string; cur: Manufacturer | null }> {
+  const all = await listManufacturers();
+  const canon = canonicalKeyMap(all)(rawKey);
+  return { canon, cur: all.find((m) => m.key === canon) ?? null };
+}
+
 export async function setManufacturerImage(input: { name: string; documentId: string; by: string; at?: number }): Promise<Manufacturer> {
   const key = mfrKey(input.name);
   if (!key) throw new Error("A manufacturer needs a name.");
   const at = input.at ?? Date.now();
-  const cur = await manufacturerByKey(key);
+  const { canon, cur } = await canonicalRecord(key);
   if (!cur) {
-    return save({ id: idForKey(key), key, name: input.name.trim(), imageDocumentId: input.documentId, imageHistory: [], ...blank(), createdAt: at, updatedAt: at, updatedBy: input.by });
+    return save({ id: idForKey(canon), key: canon, name: canon === key ? input.name.trim() : canon, imageDocumentId: input.documentId, imageHistory: [], ...blank(), createdAt: at, updatedAt: at, updatedBy: input.by });
   }
   const history = cur.imageDocumentId && cur.imageDocumentId !== input.documentId ? [cur.imageDocumentId, ...cur.imageHistory] : cur.imageHistory;
   return save({ ...cur, imageDocumentId: input.documentId, imageHistory: history, updatedAt: at, updatedBy: input.by });
 }
 
 export async function removeManufacturerImage(key: string, by: string, at: number = Date.now()): Promise<Manufacturer | null> {
-  const cur = await manufacturerByKey(key);
+  const k = mfrKey(key);
+  if (!k) return null;
+  const { cur } = await canonicalRecord(k);
   if (!cur) return null;
   if (!cur.imageDocumentId) return cur;
   return save({ ...cur, imageHistory: [cur.imageDocumentId, ...cur.imageHistory], imageDocumentId: null, updatedAt: at, updatedBy: by });
