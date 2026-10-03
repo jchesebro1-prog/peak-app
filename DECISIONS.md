@@ -9042,3 +9042,69 @@ middleware matcher redirected every request without a team session to /login, wh
 for portal customers (who sign in with a magic link, not a team login), the headless-Chrome print routes and the
 no-login share page. `placeholders/` is therefore added to the matcher exemptions next to the other static assets —
 public by design, like `manifest.webmanifest`.
+
+## D588. The manufacturer page route, lazy records and permissions (#298, 2026-10-03)
+
+`/catalog/manufacturers/<key>` with `<key>` = `mfrKey(name)` (a–z, 0–9). Viewing needs `requireUser()`; every write needs
+`requirePerm("create")`, the Part 1 rule. A raw key that is not already canonical (mixed case, punctuation, or a merged
+alias) redirects to the canonical URL rather than rendering twice. Records stay lazy: a manufacturer with no record still
+has a page, built from the catalog, and the record is created on the first edit, named by the most common catalog spelling
+(never a bare key). A key with no catalog part and no record is a 404, and every write action refuses such a key ("That
+manufacturer isn't in the catalog.") instead of minting an empty record from a typed URL.
+
+## D589. Merging spellings is non-destructive and alias-aware (#298, 2026-10-03)
+
+Catalog `mfr` text is never rewritten — it is the supplier's own spelling and the Displays API and imports read it. A merge
+instead records `aliasKeys` on the target and `mergedInto` on the source, and one pure resolver (`canonicalKeyMap`) maps any
+key to its canonical key, flattening chains; merging into yourself or one of your own aliases is refused. The target keeps
+its own image, company and notes, adopts the source's image or company only when it has none, and the people lists union
+(deduped by contact). Every lookup keyed by manufacturer reads the resolver: list rows, `manufacturerImageLookup`, the
+portal's `mfrImageDocs`, and the Part 1 image set / remove, which resolve to the canonical record so an image set through an
+alias is not stranded on a merged-away record. Unmerge removes the alias and clears `mergedInto`.
+
+## D590. A manufacturer's company, and reps from any company (#298, 2026-10-03)
+
+A manufacturer links to at most one company (`companyId`) — the maker's own. The page shows that company's locations and
+people read-only; editing stays on the company page, linked from the page, so there is one place to maintain a contact.
+**Create company** reuses the existing vendor-company creator (type vendor/manufacturer). Reps are a separate list of
+`{contactId, role}` from any company, because the people Jeff actually deals with are often at a rep firm or distributor,
+not the manufacturer; the contact search is debounced and capped, and re-adding a rep updates the role.
+
+## D591. Supplied-by reuses the vendor claim (#298, 2026-10-03)
+
+The vendor a manufacturer is "supplied by" is not a new field: it is the existing vendor-profile claim
+(`claimManufacturerAction` / `releaseManufacturerAction`, one vendor per manufacturer spelling — claiming moves it). The page
+lists the vendors claiming any spelling in the merged group, so one page can show two when two spellings were claimed
+separately, each with its own Release. **Set vendor** claims only the page's canonical spelling; other spellings keep whoever
+claimed them until released. Reusing the claim keeps the vendor page, price lists and this page agreeing without a sync.
+
+## D592. What the analytics count (#298, 2026-10-03)
+
+Live system quotes with `spec.sections` (Estimator, Quick Design, Grid); service quotes, Daylite history and deleted quotes
+carry no catalog lines and drop out by construction. Lines skipped: labor (`labor`, a labor section, `laborOverhead`,
+`laborTravel`), options, the rewards credit, allowances and price-on-request. A fixture line with `components` counts each
+component (`qty = component.qty × line.qty`, the component's cost and price); any other line counts itself, and a line with
+quantity 0 counts nothing. Manufacturer is the catalog part's `mfr` by sku, else the line's own `manufacturer` text (a
+component falls back to its parent line's), resolved to the canonical key; no manufacturer is skipped. **Cost is the cost as
+quoted** on the line — what Peak expected to pay then, not today's price book — with sell shown beneath.
+
+## D593. The window, the metrics and the forecast (#298, 2026-10-03)
+
+The window is the **12 calendar months ending now**, in America/Chicago — the oldest month begins at midnight Chicago on the
+1st — so the headline Won equals the sum of the monthly chart. Quoted = lines on quotes created in the window whose status
+is sent, won or lost; Won = quotes whose `wonAt` is in the window; Lost = status lost with `decidedAt` in the window; win
+rate = Won ÷ (Won + Lost) by cost, none when both are 0; Open = status sent (any age); In draft = status draft (any age).
+**Forecast = Open × the manufacturer's own win rate, else the shop-wide rate over the same window, else 0.** There are no
+stage probabilities because the app has none; drafts are shown, never forecast, and the page says it is an estimate from
+history. Top parts are the ten largest by quoted cost, keyed by sku (description when blank).
+
+## D594. Where analytics show, and the vendor rollup (#298, 2026-10-03)
+
+Three places, one pure module (`src/lib/manufacturer-analytics.ts`) and one loader that reads quotes, catalog and records
+once per page: the manufacturer page's **Quoted** section (tiles, 12-bar won chart, top parts, the forecast footnote with
+"(shop rate)" when it fell back), the Manufacturers list (**Quoted 12 mo** and **Open** columns and a Parts · Quoted · Open
+sort), and the vendor Overview tab's "Quoted through this vendor" card (loaded only on that tab and only when the vendor
+claims manufacturers). The vendor rollup covers the vendor's claimed spellings after canonicalising, counts **distinct
+quotes** (a quote touching two of its manufacturers counts once), shows the **pooled win rate** (Won ÷ (Won + Lost) across
+all of them) and sets its **forecast to the sum of its manufacturers' forecasts**, each with its own rate or the shop rate —
+so the card's forecast always equals its rows added up. Analytics are read-only and write nothing.

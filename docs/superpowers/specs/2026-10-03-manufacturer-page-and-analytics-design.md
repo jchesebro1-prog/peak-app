@@ -90,7 +90,7 @@ different keys. **Merge into…** on a manufacturer's page folds it into another
 - **Cost is the cost as quoted** on the line (what Peak expected to pay then);
   sell is shown alongside.
 
-### Metrics (per manufacturer; trailing 12 months unless noted)
+### Metrics (per manufacturer; the window is the 12 calendar months ending now (America/Chicago) unless noted — the oldest month starts at midnight Chicago on the 1st, so Won equals the monthly chart's sum)
 | Metric | Definition |
 |---|---|
 | Quoted | cost of lines on quotes **created** in the window whose status is sent, won or lost |
@@ -103,6 +103,12 @@ different keys. **Merge into…** on a manufacturer's page folds it into another
 | Monthly won | won cost per calendar month, last 12 months (America/Chicago) |
 | Top parts | top 10 skus by Quoted cost (sku, description, qty, cost) |
 | Quotes | count of distinct quotes contributing to Quoted |
+
+A component with no catalog manufacturer falls back to its parent line's
+`manufacturer` text. A vendor rollup counts distinct quotes (one quote touching
+two of its manufacturers counts once), its **forecast is the sum of its
+manufacturers' forecasts** (each with its own win rate or the shop rate), and
+the win rate it shows is the pooled one (Won ÷ (Won + Lost) over all of them).
 
 Every cost metric has a sell twin. No stage probabilities exist in the app, so the
 forecast weights only sent quotes by history; drafts are shown, never forecast.

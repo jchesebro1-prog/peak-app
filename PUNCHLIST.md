@@ -10578,3 +10578,54 @@ tokenized line) to `line:<id>`, and reads the block "changed", so the block is *
 stored text is kept (sanitize keeps it) and prints again when the code is rolled forward. A custom line saved to the catalog
 anchors on its real sku, so old code resolves and prints its block exactly as #293 did (own photo, no placeholder).
 Nothing throws. The placeholder files are just static assets.
+
+## 298. Catalog — the manufacturer page + quoted cost and forecast (Manufacturer section, Parts 2–3) — DONE 2026-10-03 (D588–D594)
+
+**Reported by Jeff 2026-10-02:** "a better manufacturer page that also links to vendors in companies tab and allows for
+people to also be linked but also has locations and current cost quoted and allows for better forecast … with the
+vendor/manufacturer. Overall there needs to be a manufacturer section of catalog." Then, 2026-10-03: "keep going til it is
+all done" — every choice below was taken without asking and is logged in DECISIONS. Spec:
+`docs/superpowers/specs/2026-10-03-manufacturer-page-and-analytics-design.md`; plan alongside it under
+`docs/superpowers/plans/`. No migration (new fields on the existing `manufacturers` doc records); no new dependencies.
+
+What shipped:
+- **The page** (`/catalog/manufacturers/<key>`, every row on Catalog → Manufacturers links to it): header with the image
+  (Part 1 actions), spellings, merged spellings with Unmerge and **Merge into…**; **Supplied by** (the vendor that claims
+  any spelling, last price list and terms, **Set vendor** / **Release**); **Company** (link, create or unlink — its
+  locations and people show here, editing stays on the company page); **Reps & contacts** from any company with a role;
+  **Notes**; **Catalog** (parts, parts without a photo, top categories, price-book date); **Quoted**. Viewing needs a
+  sign-in, every write needs `create`. A record is created on the first edit; a key that is in no catalog part and has
+  no record is a 404, and write actions refuse such a key (D588).
+- **Merge spellings:** "Allen & Heath" + "Allen and Heath" become one manufacturer. Non-destructive: catalog `mfr` text
+  never changes, the target keeps its own image/company/notes and adopts the source's only when it has none, people are
+  unioned. The list, the image lookup (portal, documents, cut sheets) and the portal index are alias-aware; an image set
+  or removed through an alias lands on the canonical record (D589).
+- **Quoted cost and forecast** (12 calendar months ending now, America/Chicago; cost as quoted with sell beneath): Quoted,
+  Won, Lost, win rate, Open (sent), In draft, **Forecast** (open × the manufacturer's win rate, else the shop rate),
+  a 12-bar monthly Won chart, top 10 parts, quote count. Shown on the manufacturer page, as **Quoted 12 mo** and **Open**
+  columns with a sort on the list, and as a "Quoted through this vendor" card on the vendor Overview tab (D593–D594).
+
+Gates (final head): tsc 0 errors; eslint 0 errors on every source file the branch touched (18 files; 2 pre-existing
+`Date.now` warnings in `vendors/[id]/page.tsx`); test:specs 11,943 PASS / 0 FAIL, ALL PASSED (baseline 11,857; the new
+checks are prefixed `mfr page:` and `mfr analytics:`); test:smoke 206/206 ALL PASSED including
+`/catalog/manufacturers/rosebrand`; `npm run build` exit 0 with `/catalog/manufacturers/[key]` listed (`.next` deleted
+after). Not exercised end to end: the page's write actions in a browser against a real database (typechecked, built,
+covered by store-level checks, and the page GET is in smoke) and the image actions (they need a real Blob token).
+
+**For Jeff.**
+1. Open Catalog → Manufacturers and **merge the duplicate spellings** — on each manufacturer's page, **Merge into…** the
+   spelling you want to keep (an "Allen & Heath" / "Allen and Heath"-style pair becomes one row, one image, one set of
+   numbers). Catalog parts keep their own text, and **Unmerge** undoes it.
+2. **Link each manufacturer's company** (or **Create company**) and add its **reps** from whichever company they work for;
+   then **set the supplying vendor** on the page. A manufacturer belongs to at most one vendor spelling-by-spelling —
+   setting a vendor moves it from the previous one.
+3. Read the **forecast as an estimate from history**: open sent quotes × that manufacturer's win rate (the shop-wide rate
+   when it has no decided quotes yet, marked "shop rate"). The app has no stage probabilities, drafts are shown but never
+   forecast, and a vendor's forecast is the sum of its manufacturers'. Cost is what the line carried when it was quoted.
+
+**Rollback.** Safe; nothing is migrated and analytics write nothing. Old code reads a manufacturer record by its known
+fields and ignores `aliasKeys`, `mergedInto`, `companyId`, `people` and `notes` (they stay stored, and come back when the
+code is rolled forward). Merged spellings simply stop grouping — each key lists as its own row again, and a merged-away
+spelling's image is its own record's (a target that adopted it keeps the copy). The manufacturer page route and the
+Quoted columns / vendor card disappear; the list rows lose their link. Vendor claims made from the page are ordinary
+vendor-profile claims and stay. Nothing throws.

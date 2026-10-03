@@ -681,5 +681,16 @@ See `.env.example`.
     same fallback. Remaining is Jeff-gated: upload the
     manufacturer images. Punch item #297.
 
+37. ✅ **Manufacturer page + analytics** (#298, D588–D594) — every manufacturer
+    has a page at `/catalog/manufacturers/<key>` (alias keys redirect; records
+    still lazy, unbacked keys 404): vendor claim (reuses the vendor-profile
+    claim), a linked company (people/locations read-only) plus reps from any
+    company, notes, and non-destructive spelling merges (`aliasKeys`/`mergedInto`,
+    `canonicalKeyMap` — image lookup, list rows and portal index alias-aware).
+    Quoted cost and forecast (`manufacturer-analytics.ts`: 12 calendar months,
+    Chicago; cost as quoted; forecast = open × own or shop win rate) show on the
+    page, the list and the vendor Overview (forecast = sum of its manufacturers').
+    Remaining is Jeff-gated: merge spellings, link companies/reps. Punch item #298.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
