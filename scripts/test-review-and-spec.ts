@@ -49118,3 +49118,55 @@ import { canonicalNameFor as mpName } from "@/lib/manufacturer-page-vm";
   const removeFn = acts.slice(acts.indexOf("export async function removeManufacturerPersonAction"), acts.indexOf("export async function setManufacturerNotesAction"));
   ok(removeFn.includes("isKnown(key)") && acts.includes("await isKnown(sourceKey)") && acts.includes("await isKnown(aliasKey)") && /slice\(0, 100\)/.test(acts), "mfr page: remove, merge and unmerge check the key is known, and contact search caps its query");
 }
+
+/* ======================================================================
+   Manufacturer analytics — quoted cost, win rate and forecast (pure).
+   ====================================================================== */
+import { manufacturerAnalytics, rollupMetrics as maRollup, attributedLines as maLines, type AnalyticsQuote as MaQuote } from "@/lib/manufacturer-analytics";
+{
+  const DAY = 86400000;
+  const now = Date.UTC(2026, 9, 1);
+  const parts = new Map([
+    ["S1", { sku: "S1", mfr: "ETC", desc: "Source Four" }],
+    ["S2", { sku: "S2", mfr: "Allen & Heath", desc: "SQ-5" }],
+    ["C1", { sku: "C1", mfr: "ETC", desc: "Lamp" }],
+  ]);
+  const canon = (k: string) => (k === "allenheath" ? "allenandheath" : k);
+  const mk = (id: string, status: string, createdAt: number, history: Array<{ at: number; to: string }>, items: unknown[]) =>
+    ({ id, status, createdAt, updatedAt: createdAt, history, spec: { sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items }] } }) as unknown as MaQuote;
+  const q1 = mk("Q1", "won", now - 100 * DAY, [{ at: now - 50 * DAY, to: "won" }], [
+    { sku: "S1", qty: 2, cost: 100, price: 150 },
+    { sku: "L", qty: 5, cost: 50, price: 80, labor: true },
+    { sku: "S1", qty: 1, cost: 100, price: 150, option: true },
+    { sku: "", qty: 1, cost: 500, price: 600, allowance: true },
+    { sku: "fa-1", qty: 2, cost: 0, price: 0, components: [{ sku: "C1", label: "", role: "other", qty: 3, unit: "ea", cost: 10, price: 20 }] },
+    { sku: "X9", qty: 1, cost: 40, price: 60, manufacturer: "Allen and Heath" },
+  ]);
+  const q2 = mk("Q2", "lost", now - 80 * DAY, [{ at: now - 40 * DAY, to: "lost" }], [{ sku: "S1", qty: 1, cost: 100, price: 150 }]);
+  const q3 = mk("Q3", "sent", now - 10 * DAY, [], [{ sku: "S1", qty: 4, cost: 100, price: 150 }, { sku: "S2", qty: 1, cost: 200, price: 300 }]);
+  const q4 = mk("Q4", "draft", now - 5 * DAY, [], [{ sku: "S1", qty: 1, cost: 100, price: 150 }]);
+  const q5 = mk("Q5", "won", now - 500 * DAY, [{ at: now - 400 * DAY, to: "won" }], [{ sku: "S1", qty: 10, cost: 100, price: 150 }]);
+  const res = manufacturerAnalytics([q1, q2, q3, q4, q5], parts, canon, now);
+  const etc = res.byKey.get("etc")!;
+  const ah = res.byKey.get("allenandheath")!;
+  ok(!!etc && !!ah && !res.byKey.has("allenheath"), "mfr analytics: manufacturers resolve to canonical keys");
+  ok(etc.quoted.cost === 760 && etc.quoted.sell === 2 * 150 + 2 * 3 * 20 + 150 + 600, "mfr analytics: quoted counts sent/won/lost lines in the window, fixture components expanded (cost 760)");
+  ok(etc.won.cost === 260 && etc.lost.cost === 100 && etc.open.cost === 400 && etc.draft.cost === 100, "mfr analytics: won, lost, open and draft split by status");
+  ok(etc.quotes === 3, "mfr analytics: quote count is distinct quotes in Quoted (draft and out-of-window excluded)");
+  ok(Math.abs((etc.winRate ?? -1) - 260 / 360) < 1e-9 && !etc.usedShopRate, "mfr analytics: win rate is won ÷ (won + lost) by cost");
+  ok(Math.abs(etc.forecast.cost - (400 * 260) / 360) < 1e-9, "mfr analytics: forecast is open × the manufacturer's win rate");
+  ok(ah.won.cost === 40 && ah.open.cost === 200 && ah.winRate === 1 && ah.forecast.cost === 200, "mfr analytics: a line's own manufacturer text and a catalog mfr land under one canonical key");
+  ok(ah.quoted.cost === 240, "mfr analytics: labor, option and allowance lines are excluded");
+  ok(maLines(q1, parts, canon).length === 3 && maLines(q1, parts, canon).every((l) => l.cost > 0), "mfr analytics: attributedLines skips labor, option and allowance (S1, the fixture component and X9 are counted)");
+  ok(etc.monthlyWon.length === 12 && etc.monthlyWon[11].month === "2026-09" && etc.monthlyWon[0].month === "2025-10", "mfr analytics: monthly won has 12 buckets ending with now's month");
+  const wonMonth = etc.monthlyWon.find((m) => m.cost > 0);
+  ok(!!wonMonth && wonMonth.month === "2026-08" && wonMonth.cost === 260 && etc.monthlyWon.reduce((a, m) => a + m.cost, 0) === 260, "mfr analytics: the won month holds the won cost and nothing else does");
+  ok(etc.topParts[0].sku === "S1" && etc.topParts.length <= 10, "mfr analytics: top parts lead with the highest quoted cost");
+  ok(res.shopWinRate !== null && Math.abs(res.shopWinRate - 300 / 400) < 1e-9, "mfr analytics: shop win rate is won ÷ (won + lost) across every manufacturer");
+  const roll = maRollup([etc, ah], res.shopWinRate);
+  ok(roll.quoted.cost === 1000 && roll.won.cost === 300 && roll.lost.cost === 100 && Math.abs((roll.winRate ?? -1) - 0.75) < 1e-9 && roll.keys.join() === "etc,allenandheath", "mfr analytics: rollup sums costs and recomputes the win rate from summed won/lost");
+  const q6 = mk("Q6", "sent", now - 3 * DAY, [], [{ sku: "Z1", qty: 1, cost: 100, price: 150, manufacturer: "Neutrik" }]);
+  const res2 = manufacturerAnalytics([q1, q2, q6], parts, canon, now);
+  const neu = res2.byKey.get("neutrik")!;
+  ok(neu.winRate === null && neu.usedShopRate && neu.open.cost === 100 && Math.abs(neu.forecast.cost - 100 * (res2.shopWinRate ?? 0)) < 1e-9, "mfr analytics: a manufacturer with no decided quotes forecasts at the shop win rate");
+}
