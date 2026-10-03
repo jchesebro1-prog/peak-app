@@ -6,6 +6,10 @@ import type { CSSProperties } from "react";
 import type { ManufacturerEntry, VendorDiscounts, VendorRegistration } from "@/lib/vendor-status";
 import { claimManufacturerAction, releaseManufacturerAction, removeVendorProfileAction, saveVendorProfileAction } from "../actions";
 import { ConfirmButton } from "@/components/confirm-button";
+import Link from "next/link";
+import { money } from "@/lib/format";
+import { MoneyTile, RateTile, TileRow } from "@/components/manufacturer-metrics";
+import type { VendorQuotedVM } from "@/lib/vendor-quoted";
 
 /**
  * #122 — Overview: discounts + project registration (inline-editable, one
@@ -26,12 +30,14 @@ export default function OverviewTab({
   registration,
   manufacturers,
   directory,
+  quoted,
 }: {
   vendorId: string;
   discounts: VendorDiscounts;
   registration: VendorRegistration;
   manufacturers: string[];
   directory: Array<ManufacturerEntry & { vendorName: string }>;
+  quoted: VendorQuotedVM | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -116,6 +122,48 @@ export default function OverviewTab({
           <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>Claiming a manufacturer another vendor holds moves it here.</span>
         </div>
       </div>
+
+      {quoted && (
+        <div style={CARD}>
+          <div style={H}>
+            Quoted through this vendor <span style={{ fontSize: 12, fontWeight: 500, color: "#8c919c", marginLeft: 6 }}>Last 12 months · cost, with sell beneath</span>
+          </div>
+          <TileRow>
+            <MoneyTile label="Quoted" value={quoted.quoted} caption={`${quoted.quotes} quote${quoted.quotes === 1 ? "" : "s"}`} />
+            <MoneyTile label="Won" value={quoted.won} />
+            <RateTile label="Win rate" rate={quoted.winRate} shopRate={quoted.usedShopRate} caption="Pooled across its manufacturers" />
+            <MoneyTile label="Open" value={quoted.open} />
+            <MoneyTile label="Forecast" value={quoted.forecast} emphasis caption={quoted.winRate === null ? "No decided quotes yet." : undefined} />
+          </TileRow>
+          <div style={{ fontSize: 11.5, color: "#8c919c", margin: "8px 0 12px" }}>Sum of each manufacturer&apos;s forecast.</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+              <thead>
+                <tr>
+                  {["Manufacturer", "Quoted", "Won", "Open"].map((h, i) => (
+                    <th key={h} style={{ fontSize: 10, fontWeight: 600, color: "#aab0bb", textTransform: "uppercase", letterSpacing: ".04em", textAlign: i ? "right" : "left", padding: "6px 8px" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {quoted.rows.map((r) => (
+                  <tr key={r.key}>
+                    <td style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12.5 }}>
+                      <Link href={`/catalog/manufacturers/${encodeURIComponent(r.key)}`} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>{r.name}</Link>
+                    </td>
+                    {[r.quoted, r.won, r.open].map((p, i) => (
+                      <td key={i} style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12.5, textAlign: "right", whiteSpace: "nowrap" }}>
+                        <div style={{ fontWeight: 600 }}>{money(p.cost)}</div>
+                        <div style={{ fontSize: 11, color: "#8c919c" }}>sell {money(p.sell)}</div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div style={CARD}>
         <div style={H}>Discounts</div>

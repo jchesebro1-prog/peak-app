@@ -9,6 +9,8 @@ import { VENDOR_STATUS_META } from "@/lib/vendor-status";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { groupRows } from "@/lib/feed-buckets";
 import { dateYear, timeAgo } from "@/lib/format";
+import { loadManufacturerAnalytics } from "@/lib/manufacturer-analytics-load";
+import { vendorQuotedVM, type VendorQuotedVM } from "@/lib/vendor-quoted";
 import ActivityComposer from "@/app/(app)/companies/[id]/activity-composer";
 import { ACCENT_INK, ACCENT_SOFT, mono, typeColor } from "@/app/(app)/companies/lib";
 import { VENDOR_TABS, VENDOR_TAB_LABEL, resolveVendorTab, type VendorTab } from "../tabs";
@@ -84,6 +86,12 @@ export default async function VendorDetailPage({
   };
   const feedGroups = groupRows(feedRows, Date.now());
   const todayInput = toDateInput(Date.now());
+  // Quotes are read only for the tab that shows them.
+  let quoted: VendorQuotedVM | null = null;
+  if (tab === "overview" && row.profile.manufacturers.length) {
+    const analytics = await loadManufacturerAnalytics();
+    quoted = vendorQuotedVM(row.profile.manufacturers, analytics.byKey, analytics.shopWinRate, analytics.canonical);
+  }
 
   return (
     <>
@@ -159,6 +167,7 @@ export default async function VendorDetailPage({
             registration={row.profile.registration}
             manufacturers={row.profile.manufacturers}
             directory={data.directory}
+            quoted={quoted}
           />
         )}
         {tab === "contacts" && <ContactsTab vendorId={row.id} contacts={contacts} />}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { matchManufacturerFile, type ManufacturerRow } from "@/lib/manufacturer-rows";
 import { newDocumentId } from "@/lib/part-docs/types";
+import { money } from "@/lib/format";
 import { preflight, putFile } from "../documents/upload-client";
 import { removeManufacturerImageAction, setManufacturerImageAction } from "./actions";
 
@@ -20,6 +21,10 @@ const SERVER_DOWN = "The server didn't answer — try again.";
 const IMAGE_FILE = /\.(png|jpe?g|webp)$/i;
 
 type Filter = "all" | "missing" | "has";
+type Sort = "parts" | "quoted" | "open";
+const SORTS: Array<[Sort, string]> = [["parts", "Parts"], ["quoted", "Quoted"], ["open", "Open"]];
+/** Cost quoted in the last 12 months, and cost of quotes still open, per manufacturer key. */
+export type QuotedTotals = Record<string, { quoted12: number; open: number }>;
 type ManyRow = { id: string; file: File; key: string | null; status: "pending" | "uploading" | "done" | "failed"; message?: string };
 
 /** Upload one image file for a manufacturer; null on success, else a plain error. */
@@ -63,10 +68,11 @@ const th: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: "#aab0bb
 const td: React.CSSProperties = { padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12.5, verticalAlign: "middle" };
 const select: React.CSSProperties = { fontSize: 12.5, padding: "6px 9px", borderRadius: 8, border: "1px solid #dfe2e8", background: "#fff" };
 
-export default function ManufacturersClient({ rows, canEdit }: { rows: ManufacturerRow[]; canEdit: boolean }) {
+export default function ManufacturersClient({ rows, quoted, canEdit }: { rows: ManufacturerRow[]; quoted: QuotedTotals; canEdit: boolean }) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<Sort>("parts");
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [many, setMany] = useState<ManyRow[]>([]);
@@ -78,13 +84,17 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
   const byKey = useMemo(() => new Map(rows.map((r) => [r.key, r] as const)), [rows]);
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return rows.filter((r) => {
+    const kept = rows.filter((r) => {
       if (filter === "missing" && r.imageDocumentId) return false;
       if (filter === "has" && !r.imageDocumentId) return false;
       if (!needle) return true;
       return r.name.toLowerCase().includes(needle) || r.spellings.some((s) => s.toLowerCase().includes(needle));
     });
-  }, [rows, filter, q]);
+    // Parts is the server's order (most parts first); the money sorts are highest first, ties by name.
+    if (sort === "parts") return kept;
+    const amount = (r: ManufacturerRow) => (sort === "quoted" ? quoted[r.key]?.quoted12 : quoted[r.key]?.open) ?? 0;
+    return [...kept].sort((x, y) => amount(y) - amount(x) || x.name.localeCompare(y.name));
+  }, [rows, filter, q, sort, quoted]);
 
   const setRowBusy = (key: string, on: boolean) => setBusy((b) => ({ ...b, [key]: on }));
   const setRowError = (key: string, msg: string | null) =>
@@ -225,12 +235,18 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
             {label} ({counts[f]})
           </button>
         ))}
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search manufacturers…" aria-label="Search manufacturers" style={{ ...select, width: 240, marginLeft: "auto" }} />
+        <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#8c919c" }}>
+          Sort by
+          <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort manufacturers" style={select}>
+            {SORTS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+          </select>
+        </label>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search manufacturers…" aria-label="Search manufacturers" style={{ ...select, width: 240 }} />
       </div>
 
       <div className="pk-card" style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680 }}>
-          <thead><tr>{["Image", "Manufacturer", "Parts", ""].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr></thead>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+          <thead><tr>{["Image", "Manufacturer", "Parts", "Quoted, 12 mo", "Open", ""].map((h, i) => <th key={i} style={i === 3 || i === 4 ? { ...th, textAlign: "right" } : th}>{h}</th>)}</tr></thead>
           <tbody>
             {shown.map((r) => (
               <tr key={r.key}>
@@ -252,6 +268,8 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
                 <td style={{ ...td, color: "#5b616e" }}>
                   {r.parts} part{r.parts === 1 ? "" : "s"} · {r.withoutPhoto} without a photo
                 </td>
+                <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{money(quoted[r.key]?.quoted12 ?? 0)}</td>
+                <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{money(quoted[r.key]?.open ?? 0)}</td>
                 <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
                   {canEdit && (
                     <>
@@ -274,7 +292,7 @@ export default function ManufacturersClient({ rows, canEdit }: { rows: Manufactu
               </tr>
             ))}
             {!shown.length && (
-              <tr><td colSpan={4} style={{ ...td, color: "#8c919c", textAlign: "center", padding: 24 }}>No manufacturers match.</td></tr>
+              <tr><td colSpan={6} style={{ ...td, color: "#8c919c", textAlign: "center", padding: 24 }}>No manufacturers match.</td></tr>
             )}
           </tbody>
         </table>

@@ -10776,6 +10776,7 @@ seeded()
   .then(() => mfrCutSheetAsyncChecks())
   .then(() => mfrPageStoreAsyncChecks())
   .then(() => mfrPageCanonicalAsyncChecks())
+  .then(() => mfrAnalyticsLoadAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -49087,7 +49088,7 @@ import { manufacturerPageVM as mpVM, catalogHref as mpHref } from "@/lib/manufac
   ok(fns.every((f) => new RegExp(`export async function ${f}\\([^)]*\\)[^{]*\\{\\s*const user = await requirePerm\\("create"\\)`).test(acts)), "mfr page: every manufacturer-page write requires the create permission");
   ok(/export async function searchContactsAction[\s\S]*?await requireUser\(\)/.test(acts), "mfr page: contact search needs a signed-in user");
   ok(page.includes("redirect(") && page.includes("notFound()") && page.includes("await params") && page.includes("requireUser()"), "mfr page: the page redirects aliases, 404s unknowns, awaits params and requires a user");
-  ok(page.includes("QUOTED-SECTION-SLOT"), "mfr page: the Quoted section slot is marked for Part 3");
+  ok(page.includes("<QuotedSection") && page.includes("loadManufacturerAnalytics(") && !page.includes("QUOTED-SECTION-SLOT"), "mfr page: the Quoted section renders from one analytics load (Part 3)");
   ok(!/from "@\/lib\/stores|from "@\/db|from "@\/lib\/identity/.test(client) && /canEdit/.test(client), "mfr page: the client component imports no server store and gates edits on canEdit");
   const list = readFileSync(join(process.cwd(), "src/app/(app)/catalog/manufacturers/manufacturers-client.tsx"), "utf8");
   ok(list.includes("/catalog/manufacturers/"), "mfr page: list rows link to the manufacturer page");
@@ -49191,4 +49192,35 @@ import { manufacturerAnalytics, rollupMetrics as maRollup, attributedLines as ma
   const res2 = manufacturerAnalytics([q1, q2, q6], parts, canon, now);
   const neu = res2.byKey.get("neutrik")!;
   ok(neu.winRate === null && neu.usedShopRate === true && !manufacturerAnalytics([q6], parts, canon, now).byKey.get("neutrik")!.usedShopRate && neu.open.cost === 100 && Math.abs(neu.forecast.cost - 100 * (res2.shopWinRate ?? 0)) < 1e-9, "mfr analytics: a manufacturer with no decided quotes forecasts at the shop win rate");
+}
+
+/* ======================================================================
+   Manufacturer analytics — the loader, the vendor card model (PGlite).
+   ====================================================================== */
+import { loadManufacturerAnalytics as maLoad } from "@/lib/manufacturer-analytics-load";
+import { vendorQuotedVM as maVendorVm } from "@/lib/vendor-quoted";
+import { create as maCreateQuote, update as maUpdateQuote } from "@/lib/stores/quotes";
+async function mfrAnalyticsLoadAsyncChecks(): Promise<void> {
+  const sku = fixtureId("MAL", "PART");
+  await upsertPart({ id: sku, sku, desc: "mfr analytics part", category: "Lighting", unit: "ea", list: 200, cost: 100, mfr: "MfaBrand" });
+  registerFixture("catalog_parts", sku);
+  const spec = (items: unknown[]) => ({ sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items }] }) as never;
+  const qa = fixtureId("MAL", "Q-SENT");
+  const qb = fixtureId("MAL", "Q-WON");
+  const qc = fixtureId("MAL", "Q-DRAFT");
+  for (const id of [qa, qb, qc]) registerFixture("quotes", id);
+  await maCreateQuote({ id: qa, name: "mal sent", customer: "MAL Test" });
+  await maUpdateQuote(qa, { status: "sent", spec: spec([{ sku, qty: 2, cost: 100, price: 150 }]) });
+  await maCreateQuote({ id: qb, name: "mal won", customer: "MAL Test" });
+  await maUpdateQuote(qb, { status: "won", history: [{ at: Date.now(), to: "won" }], spec: spec([{ sku, qty: 1, cost: 50, price: 80 }]) });
+  await maCreateQuote({ id: qc, name: "mal draft", customer: "MAL Test" });
+  await maUpdateQuote(qc, { spec: spec([{ sku, qty: 3, cost: 100, price: 150 }]) });
+  const res = await maLoad();
+  const m = res.byKey.get("mfabrand");
+  ok(!!m && m.quoted.cost === 250 && m.quoted.sell === 2 * 150 + 80, "mfr analytics: the loader reads real quotes and the catalog (sent + won = quoted cost 250)");
+  ok(!!m && m.open.cost === 200 && m.won.cost === 50 && m.draft.cost === 300 && m.quotes === 2, "mfr analytics: the loader splits open, won and draft and counts distinct quotes");
+  ok(res.canonical("mfabrand") === "mfabrand" && res.windowStart < res.now, "mfr analytics: the loader returns a canonical resolver and the window");
+  const vm = maVendorVm(["MfaBrand", "MFA Brand", "Nobody At All"], res.byKey, res.shopWinRate, res.canonical);
+  ok(!!vm && vm.rows.length === 1 && vm.rows[0].key === "mfabrand" && vm.rows[0].name === "MfaBrand" && vm.quoted.cost === 250, "mfr analytics: the vendor card lists a manufacturer once however it is spelled, and skips one with no metrics");
+  ok(maVendorVm(["Nobody At All"], res.byKey, res.shopWinRate, res.canonical) === null && maVendorVm([], res.byKey, res.shopWinRate, res.canonical) === null, "mfr analytics: the vendor card is hidden when no claimed manufacturer has metrics");
 }

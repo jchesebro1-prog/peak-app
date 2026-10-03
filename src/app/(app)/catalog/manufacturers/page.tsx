@@ -7,6 +7,7 @@ import { listManufacturers } from "@/lib/stores/manufacturers";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { buildImageIndex } from "@/lib/part-docs/views";
 import { manufacturerRows } from "@/lib/manufacturer-rows";
+import { loadManufacturerAnalytics } from "@/lib/manufacturer-analytics-load";
 import ManufacturersClient from "./manufacturers-client";
 
 export const metadata = { title: "Manufacturers — Quartzite-6" };
@@ -26,6 +27,9 @@ export default async function ManufacturersPage() {
   // thumbnail counts, since the portal shows it.
   const hasOwnPhoto = (sku: string) => (images.get(sku) ?? []).some((r) => !r.hidden && !!state.index.docsById.get(r.id)?.blobKey);
   const rows = manufacturerRows(parts, hasOwnPhoto, records);
+  // One analytics pass for the whole list (cost only; a row with no quotes shows $0).
+  const analytics = await loadManufacturerAnalytics(undefined, { parts, records });
+  const quoted = Object.fromEntries(rows.map((r) => [r.key, { quoted12: analytics.byKey.get(r.key)?.quoted.cost ?? 0, open: analytics.byKey.get(r.key)?.open.cost ?? 0 }]));
   const canEdit = can("create", user.roles);
   return (
     <div className="pk-content" style={{ maxWidth: 1100 }}>
@@ -39,7 +43,7 @@ export default async function ManufacturersPage() {
           File storage isn&apos;t configured on this deployment (no BLOB_READ_WRITE_TOKEN) — uploads will be refused.
         </div>
       )}
-      <ManufacturersClient rows={rows} canEdit={canEdit} />
+      <ManufacturersClient rows={rows} quoted={quoted} canEdit={canEdit} />
     </div>
   );
 }

@@ -17,7 +17,9 @@ import { buildImageIndex } from "@/lib/part-docs/views";
 import { allCompanies, getCompanies, getCompany } from "@/lib/identity/companies";
 import { contactsForCompany, displayName, emailsForContacts, getContact, phonesForContacts } from "@/lib/identity/contacts";
 import { sitesForCompany } from "@/lib/identity/sites";
+import { loadManufacturerAnalytics } from "@/lib/manufacturer-analytics-load";
 import ManufacturerClient from "./manufacturer-client";
+import QuotedSection from "./quoted-section";
 
 export const metadata = { title: "Manufacturer — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -104,6 +106,9 @@ export default async function ManufacturerPage({ params }: { params: Promise<{ k
   });
   if (!vm.catalog.parts && !record) notFound();
 
+  // Quotes are read once here; the catalog and records already loaded are reused.
+  const analytics = await loadManufacturerAnalytics(undefined, { parts, records });
+
   const mergeTargets = manufacturerRows(parts, ownPhoto, records)
     .filter((r) => r.key !== vm.key)
     .map((r) => ({ key: r.key, name: r.name }));
@@ -123,7 +128,7 @@ export default async function ManufacturerPage({ params }: { params: Promise<{ k
         companyOptions={companies.map((c) => ({ id: c.id, name: c.name, detail: [c.city, c.state].filter(Boolean).join(", ") }))}
         vendorOptions={vendorCos.map((c) => ({ id: c.id, name: c.name, detail: [c.city, c.state].filter(Boolean).join(", ") }))}
       />
-      {/* QUOTED-SECTION-SLOT — Part 3 (Task 4) renders the Quoted analytics section here. */}
+      <QuotedSection metrics={analytics.byKey.get(vm.key) ?? null} shopWinRate={analytics.shopWinRate} />
     </div>
   );
 }
