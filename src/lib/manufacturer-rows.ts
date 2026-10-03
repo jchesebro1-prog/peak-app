@@ -34,9 +34,15 @@ export function manufacturerRows(
   return rows.sort((x, y) => y.parts - x.parts || x.name.localeCompare(y.name));
 }
 
-/** Upload many: a file name (extension dropped) matches the row whose key it equals — never a substring. */
-export function matchManufacturerFile(fileName: string, rows: readonly Pick<ManufacturerRow, "key">[]): string | null {
+/** Upload many: a file name (extension dropped) matches the row whose key it equals — never a substring. A
+ *  merged-away spelling resolves through `canonical` to its canonical row (rows are one per canonical key). */
+export function matchManufacturerFile(
+  fileName: string,
+  rows: readonly Pick<ManufacturerRow, "key">[],
+  canonical: (key: string) => string = (k) => k
+): string | null {
   const base = String(fileName ?? "").split(/[\\/]/).pop() || "";
-  const key = mfrKey(base.replace(/\.[A-Za-z0-9]{1,5}$/, ""));
+  const raw = mfrKey(base.replace(/\.[A-Za-z0-9]{1,5}$/, ""));
+  const key = raw ? canonical(raw) : "";
   return key && rows.some((r) => r.key === key) ? key : null;
 }

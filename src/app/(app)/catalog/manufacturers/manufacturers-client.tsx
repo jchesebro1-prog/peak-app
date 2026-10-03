@@ -68,7 +68,8 @@ const th: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: "#aab0bb
 const td: React.CSSProperties = { padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12.5, verticalAlign: "middle" };
 const select: React.CSSProperties = { fontSize: 12.5, padding: "6px 9px", borderRadius: 8, border: "1px solid #dfe2e8", background: "#fff" };
 
-export default function ManufacturersClient({ rows, quoted, canEdit }: { rows: ManufacturerRow[]; quoted: QuotedTotals; canEdit: boolean }) {
+/** `aliases`: merged-away key → canonical key, so Upload many matches a file named for a merged spelling. */
+export default function ManufacturersClient({ rows, quoted, canEdit, aliases = {} }: { rows: ManufacturerRow[]; quoted: QuotedTotals; canEdit: boolean; aliases?: Record<string, string> }) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
@@ -132,7 +133,7 @@ export default function ManufacturersClient({ rows, quoted, canEdit }: { rows: M
     setDropError(null);
     const imgs = files.filter((f) => IMAGE_FILE.test(f.name));
     setIgnored(files.length - imgs.length);
-    setMany(imgs.map((file, i) => ({ id: `${Date.now()}-${i}`, file, key: matchManufacturerFile(file.name, rows), status: "pending" as const })));
+    setMany(imgs.map((file, i) => ({ id: `${Date.now()}-${i}`, file, key: matchManufacturerFile(file.name, rows, (k) => aliases[k] ?? k), status: "pending" as const })));
   };
   const patchMany = (id: string, change: Partial<ManyRow>) => setMany((all) => all.map((m) => (m.id === id ? { ...m, ...change } : m)));
 

@@ -35,6 +35,8 @@ export type MfrPageInput = {
 export type MfrPageVM = {
   key: string;
   name: string;
+  /** The canonical record's own name (else the canonical key's most common spelling) — the spelling **Set vendor** claims (D591). `name` can be an alias's spelling. */
+  claimName: string;
   spellings: { name: string; href: string }[];
   aliasKeys: string[];
   aliases: { key: string; name: string }[];
@@ -117,6 +119,7 @@ export function manufacturerPageVM(input: MfrPageInput): MfrPageVM {
   return {
     key,
     name: name || key,
+    claimName: (record?.name || "").trim() || aliasName(key),
     spellings,
     aliasKeys,
     aliases: aliasKeys.map((k) => ({ key: k, name: aliasName(k) })),

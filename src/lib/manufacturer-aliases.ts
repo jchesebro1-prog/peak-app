@@ -19,6 +19,19 @@ export function canonicalKeyMap(records: readonly AliasRecord[]): (key: string) 
   };
 }
 
+/** Every merged-away key → its canonical key, as a plain object a client component can take. */
+export function aliasTargets(records: readonly AliasRecord[]): Record<string, string> {
+  const canon = canonicalKeyMap(records);
+  const out: Record<string, string> = {};
+  for (const r of records) {
+    for (const k of [r.key, ...(r.aliasKeys ?? [])]) {
+      const c = canon(k);
+      if (k && c !== k) out[k] = c;
+    }
+  }
+  return out;
+}
+
 export function groupKeys(records: readonly AliasRecord[], canonical: string): string[] {
   const canon = canonicalKeyMap(records);
   const keys = new Set<string>([canonical]);

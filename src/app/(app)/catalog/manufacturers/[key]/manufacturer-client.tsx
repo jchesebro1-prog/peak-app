@@ -282,7 +282,7 @@ export default function ManufacturerClient({
             <div style={{ width: 280 }}>
               <CustomerCombobox options={vendorOptions} value={vendorPick} onChange={setVendorPick} placeholder="Pick a vendor…" inputStyle={{ ...input, width: "100%" }} disabled={anyBusy} />
             </div>
-            <button type="button" className="pk-btn-accent" disabled={anyBusy || !vendorPick} onClick={() => run("vendors", () => claimManufacturerAction(vendorPick, vm.name), () => setVendorPick(""))}>
+            <button type="button" className="pk-btn-accent" disabled={anyBusy || !vendorPick} onClick={() => run("vendors", () => claimManufacturerAction(vendorPick, vm.claimName), () => setVendorPick(""))}>
               {b("vendors") ? "Working…" : "Set vendor"}
             </button>
             <span style={muted}>A manufacturer belongs to one vendor — setting it moves it.</span>

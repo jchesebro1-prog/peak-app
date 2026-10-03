@@ -48,6 +48,7 @@ export default function QuotedSection({ metrics, shopWinRate }: { metrics: Manuf
             </TileRow>
             <div style={{ fontSize: 11.5, color: "#8c919c", margin: "8px 0 0" }}>
               Open quotes × win rate — this manufacturer&apos;s, or the shop&apos;s when it has no decided quotes in the last 12 months.
+              {m.includesCatalogCost && " Grid quotes use today's catalog cost."}
             </div>
 
             <div style={{ marginTop: 18, fontSize: 12.5, fontWeight: 600 }}>Won by month <span style={{ fontWeight: 500, color: "#8c919c" }}>(cost)</span></div>

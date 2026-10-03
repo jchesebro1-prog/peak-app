@@ -4,6 +4,11 @@
  * what Peak has quoted through each manufacturer — cost as quoted, sell
  * alongside — plus a history-weighted forecast of what is still open.
  *
+ * Counted: Estimator-built system quotes (`spec.sections`, portal catalog
+ * quotes included) at the cost as quoted, and Grid quotes (flat `spec.lines`)
+ * at today's catalog cost — Grid lines carry no cost of their own. Quick
+ * Design quotes (`spec.fromDesign`, no lines) count nothing.
+ *
  * Pure — no I/O. The loader hands in the quotes, a sku → catalog part map and
  * a canonical-key resolver (merged manufacturers), so the same code runs on
  * the server and in the harness.
@@ -14,9 +19,13 @@ import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { decidedAt, wonAt } from "@/lib/dashboard/metrics";
 import { mfrKey } from "@/lib/catalog-books";
+import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/design/grid-virtual-parts";
+import { CUSTOM_ITEM_PREFIX } from "@/lib/design/grid-custom-items";
+import { isLaborSku } from "@/lib/design/wire-labor";
 
 export type AnalyticsQuote = Pick<Quote, "id" | "status" | "createdAt" | "updatedAt" | "history" | "spec">;
-export type AnalyticsPart = { sku: string; mfr?: string; desc?: string };
+/** `cost` is today's catalog cost — read only for Grid lines, which carry none. */
+export type AnalyticsPart = { sku: string; mfr?: string; desc?: string; cost?: number };
 export type MoneyPair = { cost: number; sell: number };
 export type ManufacturerMetrics = {
   key: string;
@@ -36,6 +45,8 @@ export type ManufacturerMetrics = {
   /** Distinct quotes contributing to Quoted (so a rollup can count a quote once). */
   quoteIds: string[];
   quotes: number;
+  /** A counted Grid line contributed: its cost is today's catalog cost, not the cost as quoted. */
+  includesCatalogCost: boolean;
 };
 export type AnalyticsResult = {
   byKey: Map<string, ManufacturerMetrics>;
@@ -48,7 +59,8 @@ export type AnalyticsResult = {
  *  monthly bucket (so the Won tile always equals the chart's sum). */
 export const ANALYTICS_WINDOW_MS = 365 * 24 * 3600 * 1000;
 
-type AttributedLine = { key: string; sku: string; desc: string; qty: number; cost: number; sell: number };
+type AttributedLine = { key: string; sku: string; desc: string; qty: number; cost: number; sell: number; catalogCost?: true };
+type GridLine = { sku?: unknown; desc?: unknown; qty?: unknown; price?: unknown; ext?: unknown; allowance?: unknown; custom?: unknown };
 
 const num = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) ? n : 0);
 
@@ -60,7 +72,7 @@ export function attributedLines(
   partsBySku: ReadonlyMap<string, AnalyticsPart>,
   canonical: (key: string) => string,
 ): AttributedLine[] {
-  const spec = q.spec as { sections?: unknown } | null | undefined;
+  const spec = q.spec as { sections?: unknown; lines?: unknown } | null | undefined;
   const sections = spec && Array.isArray(spec.sections) ? (spec.sections as SpecSection[]) : [];
   const out: AttributedLine[] = [];
   const keyFor = (sku: string, own?: string): string => {
@@ -86,6 +98,24 @@ export function attributedLines(
       if (!key || lineQty <= 0) continue;
       out.push({ key, sku: it.sku, desc: partsBySku.get(it.sku)?.desc || it.desc || "", qty: lineQty, cost: lineQty * num(it.cost), sell: lineExtSellOf(it) });
     }
+  }
+  // Grid quotes (flat `spec.lines`, D111/D316): a line's `sku` is the Grid part
+  // id, which equals the catalog sku for a catalog-backed part. Allowances,
+  // Auto assemblies, custom items and labor are skipped, as is any line with
+  // no catalog part (a library-only symbol, a curtain). Grid lines carry no
+  // cost, so cost is the catalog's current cost (flagged `catalogCost`).
+  const flat = spec && Array.isArray(spec.lines) ? (spec.lines as GridLine[]) : [];
+  for (const l of flat) {
+    if (!l || typeof l !== "object" || l.allowance || l.custom) continue;
+    const sku = typeof l.sku === "string" ? l.sku.trim() : "";
+    if (!sku || sku.startsWith(ALLOWANCE_PART_PREFIX) || sku.startsWith(ASSEMBLY_PART_PREFIX) || sku.startsWith(CUSTOM_ITEM_PREFIX) || isLaborSku(sku)) continue;
+    const part = partsBySku.get(sku);
+    if (!part) continue;
+    const key = keyFor(sku);
+    const qty = num(l.qty);
+    if (!key || qty <= 0) continue;
+    const sell = typeof l.ext === "number" && Number.isFinite(l.ext) ? l.ext : qty * num(l.price);
+    out.push({ key, sku, desc: part.desc || (typeof l.desc === "string" ? l.desc : ""), qty, cost: num(part.cost) * qty, sell, catalogCost: true });
   }
   return out;
 }
@@ -152,7 +182,7 @@ export function manufacturerAnalytics(
         m: {
           key, quoted: pair(), won: pair(), lost: pair(), open: pair(), draft: pair(),
           winRate: null, forecast: pair(), usedShopRate: false,
-          monthlyWon: [], topParts: [], quoteIds: [], quotes: 0,
+          monthlyWon: [], topParts: [], quoteIds: [], quotes: 0, includesCatalogCost: false,
         },
         quoteIds: new Set(), months: new Map(months.map((mo) => [mo, pair()])), parts: new Map(),
       };
@@ -171,6 +201,8 @@ export function manufacturerAnalytics(
     const wonMonth = wonHere ? monthOf(wonAt(q as Quote)) : "";
     for (const l of lines) {
       const a = accFor(l.key);
+      const counted = quotedHere || wonHere || lostHere || status === "sent" || status === "draft";
+      if (l.catalogCost && counted) a.m.includesCatalogCost = true;
       if (quotedHere) {
         add(a.m.quoted, l.cost, l.sell);
         a.quoteIds.add(q.id);
@@ -245,5 +277,6 @@ export function rollupMetrics(
     usedShopRate: winRate === null && shopWinRate !== null,
     monthlyWon: monthOrder.map((mo) => ({ month: mo, ...monthly.get(mo)! })),
     quotes: new Set(list.flatMap((m) => m.quoteIds)).size,
+    includesCatalogCost: list.some((m) => m.includesCatalogCost),
   };
 }

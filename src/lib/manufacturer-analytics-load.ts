@@ -8,9 +8,14 @@ import { list as listCatalog } from "@/lib/stores/catalog";
 import type { CatalogPart } from "@/lib/stores/catalog";
 import { listManufacturers, type Manufacturer } from "@/lib/stores/manufacturers";
 import { canonicalKeyMap } from "@/lib/manufacturer-aliases";
+import { mfrKey } from "@/lib/catalog-books";
 import { manufacturerAnalytics, type AnalyticsPart, type AnalyticsResult } from "@/lib/manufacturer-analytics";
 
-export type LoadedAnalytics = AnalyticsResult & { canonical: (key: string) => string };
+export type LoadedAnalytics = AnalyticsResult & {
+  canonical: (key: string) => string;
+  /** A canonical key whose manufacturer page exists (a non-Labor catalog part spells it, or it has its own record) — the page's 404 rule. */
+  hasPage: (key: string) => boolean;
+};
 
 /** A page that already read the catalog / manufacturer records passes them in so they aren't read twice. */
 export async function loadManufacturerAnalytics(
@@ -23,7 +28,14 @@ export async function loadManufacturerAnalytics(
     preloaded.records ?? listManufacturers(),
   ]);
   const partsBySku = new Map<string, AnalyticsPart>();
-  for (const p of parts) partsBySku.set(p.sku, { sku: p.sku, mfr: p.mfr, desc: p.desc });
+  for (const p of parts) partsBySku.set(p.sku, { sku: p.sku, mfr: p.mfr, desc: p.desc, cost: p.cost });
   const canonical = canonicalKeyMap(records);
-  return { ...manufacturerAnalytics(quotes, partsBySku, canonical, now), canonical };
+  const paged = new Set<string>();
+  for (const r of records) if (canonical(r.key) === r.key) paged.add(r.key);
+  for (const p of parts) {
+    if (p.category === "Labor") continue;
+    const k = mfrKey(String(p.mfr ?? "").trim());
+    if (k) paged.add(canonical(k));
+  }
+  return { ...manufacturerAnalytics(quotes, partsBySku, canonical, now), canonical, hasPage: (key) => paged.has(key) };
 }

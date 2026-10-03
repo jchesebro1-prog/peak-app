@@ -90,7 +90,7 @@ export default async function VendorDetailPage({
   let quoted: VendorQuotedVM | null = null;
   if (tab === "overview" && row.profile.manufacturers.length) {
     const analytics = await loadManufacturerAnalytics();
-    quoted = vendorQuotedVM(row.profile.manufacturers, analytics.byKey, analytics.shopWinRate, analytics.canonical);
+    quoted = vendorQuotedVM(row.profile.manufacturers, analytics.byKey, analytics.shopWinRate, analytics.canonical, analytics.hasPage);
   }
 
   return (

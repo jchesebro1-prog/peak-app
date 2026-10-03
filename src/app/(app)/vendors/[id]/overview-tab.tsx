@@ -135,7 +135,7 @@ export default function OverviewTab({
             <MoneyTile label="Open" value={quoted.open} />
             <MoneyTile label="Forecast" value={quoted.forecast} emphasis caption={quoted.winRate === null ? "No decided quotes yet." : undefined} />
           </TileRow>
-          <div style={{ fontSize: 11.5, color: "#8c919c", margin: "8px 0 12px" }}>Sum of each manufacturer&apos;s forecast.</div>
+          <div style={{ fontSize: 11.5, color: "#8c919c", margin: "8px 0 12px" }}>Sum of each manufacturer&apos;s forecast.{quoted.includesCatalogCost ? " Grid quotes use today's catalog cost." : ""}</div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
               <thead>
@@ -149,7 +149,11 @@ export default function OverviewTab({
                 {quoted.rows.map((r) => (
                   <tr key={r.key}>
                     <td style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12.5 }}>
-                      <Link href={`/catalog/manufacturers/${encodeURIComponent(r.key)}`} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>{r.name}</Link>
+                      {r.linked ? (
+                        <Link href={`/catalog/manufacturers/${encodeURIComponent(r.key)}`} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>{r.name}</Link>
+                      ) : (
+                        <span style={{ fontWeight: 600 }}>{r.name}</span>
+                      )}
                     </td>
                     {[r.quoted, r.won, r.open].map((p, i) => (
                       <td key={i} style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12.5, textAlign: "right", whiteSpace: "nowrap" }}>

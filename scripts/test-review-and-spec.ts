@@ -49223,4 +49223,90 @@ async function mfrAnalyticsLoadAsyncChecks(): Promise<void> {
   const vm = maVendorVm(["MfaBrand", "MFA Brand", "Nobody At All"], res.byKey, res.shopWinRate, res.canonical);
   ok(!!vm && vm.rows.length === 1 && vm.rows[0].key === "mfabrand" && vm.rows[0].name === "MfaBrand" && vm.quoted.cost === 250, "mfr analytics: the vendor card lists a manufacturer once however it is spelled, and skips one with no metrics");
   ok(maVendorVm(["Nobody At All"], res.byKey, res.shopWinRate, res.canonical) === null && maVendorVm([], res.byKey, res.shopWinRate, res.canonical) === null, "mfr analytics: the vendor card is hidden when no claimed manufacturer has metrics");
+  ok(res.hasPage("mfabrand") && !res.hasPage("nobodyatall"), "mfr analytics: the loader knows which manufacturer keys have a page");
+  ok(!!m && !m.includesCatalogCost, "mfr analytics: estimator-only metrics are not flagged as catalog cost");
+  // A Grid quote (flat spec.lines, no sections) counts at today's catalog cost.
+  const qg = fixtureId("MAL", "Q-GRID");
+  registerFixture("quotes", qg);
+  await maCreateQuote({ id: qg, name: "mal grid", customer: "MAL Test" });
+  await maUpdateQuote(qg, { status: "sent", spec: { kind: "grid", gridProjectId: "GP-x", gridOptionId: "o1", lines: [{ sku, desc: "x", qty: 2, unit: "ea", price: 300, ext: 600 }, { sku: "allow:x:good", desc: "a", qty: 1, unit: "lot", price: 50, ext: 50, allowance: true }] } as never });
+  const resG = await maLoad();
+  const mg = resG.byKey.get("mfabrand");
+  ok(!!mg && mg.open.cost === 400 && mg.open.sell === 2 * 150 + 600 && mg.quoted.cost === 450 && mg.includesCatalogCost, "mfr analytics: the loader counts a Grid quote's lines at the catalog's current cost (open 200 + 2 × 100)");
+}
+
+/* ======================================================================
+   Manufacturer section — final review fixes (#298): Grid quotes, claim name,
+   alias-aware Upload many, unlinked vendor rows.
+   ====================================================================== */
+import { manufacturerAnalytics as mafAnalytics, attributedLines as mafLines, rollupMetrics as mafRollup, type AnalyticsQuote as MafQuote } from "@/lib/manufacturer-analytics";
+import { vendorQuotedVM as mafVendorVm } from "@/lib/vendor-quoted";
+import { matchManufacturerFile as mafMatch } from "@/lib/manufacturer-rows";
+import { aliasTargets as mafAliasTargets } from "@/lib/manufacturer-aliases";
+import { manufacturerPageVM as mafPageVM } from "@/lib/manufacturer-page-vm";
+{
+  const DAY = 86400000;
+  const now = Date.UTC(2026, 9, 1);
+  const parts = new Map([
+    ["S1", { sku: "S1", mfr: "ETC", desc: "Source Four", cost: 100 }],
+    ["W1", { sku: "W1", mfr: "Belden", desc: "Cable per ft", cost: 0.5 }],
+  ]);
+  const canon = (k: string) => k;
+  const grid = (id: string, status: string, lines: unknown[], history: Array<{ at: number; to: string }> = []) =>
+    ({ id, status, createdAt: now - 10 * DAY, updatedAt: now - 10 * DAY, history, spec: { kind: "grid", gridProjectId: "GP-1", gridOptionId: "o1", lines } }) as unknown as MafQuote;
+  const qg = grid("G1", "won", [
+    { sku: "S1", desc: "Source Four", qty: 3, unit: "ea", price: 180, ext: 540 },
+    { sku: "W1", desc: "Cable", qty: 100, unit: "ft", price: 1 },
+    { sku: "allow:lighting.fixtures:good", desc: "Allowance", qty: 1, unit: "lot", price: 900, ext: 900, allowance: true },
+    { sku: "asm:fa-1", desc: "Assembly", qty: 1, unit: "ea", price: 500, ext: 500 },
+    { sku: "custom:c1", desc: "Custom item", qty: 1, unit: "ea", price: 70, ext: 70 },
+    { sku: "S1", desc: "flagged custom", qty: 1, unit: "ea", price: 70, ext: 70, custom: true },
+    { sku: "labor:lighting", desc: "Labor — Lighting", qty: 1, unit: "lot", price: 400, ext: 400 },
+    { sku: "CURTAIN", desc: "Main drape", qty: 1, unit: "ea", price: 3000, ext: 3000 },
+    { sku: "SYM-9", desc: "Library-only symbol", qty: 2, unit: "ea", price: 10, ext: 20 },
+    { sku: "S1", desc: "zero", qty: 0, unit: "ea", price: 180, ext: 0 },
+  ], [{ at: now - 5 * DAY, to: "won" }]);
+  const gl = mafLines(qg, parts, canon);
+  ok(gl.length === 2 && gl[0].key === "etc" && gl[0].cost === 300 && gl[0].sell === 540 && gl[0].catalogCost === true, "mfr analytics: a Grid quote's catalog line counts at today's catalog cost × qty, sell = its ext");
+  ok(gl[1].key === "belden" && gl[1].cost === 50 && gl[1].sell === 100, "mfr analytics: a Grid line with no ext sells at qty × price");
+  ok(gl.every((l) => l.sku === "S1" || l.sku === "W1"), "mfr analytics: Grid allowance, assembly, custom, labor, curtain, library-only and zero-qty lines are skipped");
+  const resG = mafAnalytics([qg], parts, canon, now);
+  const etc = resG.byKey.get("etc")!;
+  ok(!!etc && etc.won.cost === 300 && etc.quoted.cost === 300 && etc.quotes === 1 && etc.includesCatalogCost, "mfr analytics: a won Grid quote lands in Quoted and Won and flags the metrics as catalog cost");
+  const est = { id: "E1", status: "sent", createdAt: now - 3 * DAY, updatedAt: now - 3 * DAY, history: [], spec: { sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ sku: "S1", qty: 1, cost: 90, price: 150 }] }] } } as unknown as MafQuote;
+  const resE = mafAnalytics([est], parts, canon, now).byKey.get("etc")!;
+  ok(resE.open.cost === 90 && !resE.includesCatalogCost, "mfr analytics: an Estimator line keeps its cost as quoted and is not flagged");
+  const quick = { id: "QD1", status: "sent", createdAt: now - 3 * DAY, updatedAt: now - 3 * DAY, history: [], spec: { fromDesign: "D-1" } } as unknown as MafQuote;
+  const bare = { id: "B1", status: "sent", createdAt: now - 3 * DAY, updatedAt: now - 3 * DAY, history: [], spec: null } as unknown as MafQuote;
+  ok(mafLines(quick, parts, canon).length === 0 && mafLines(bare, parts, canon).length === 0 && mafAnalytics([quick, bare], parts, canon, now).byKey.size === 0, "mfr analytics: a quote with neither sections nor lines (Quick Design, empty) contributes nothing");
+  const roll = mafRollup([resE, etc], resG.shopWinRate);
+  ok(roll.includesCatalogCost && !mafRollup([resE], null).includesCatalogCost, "mfr analytics: a rollup is flagged when any of its manufacturers is");
+  const vm = mafVendorVm(["ETC", "Belden"], resG.byKey, resG.shopWinRate, canon, (k) => k === "etc");
+  ok(!!vm && vm.includesCatalogCost && vm.rows.find((r) => r.key === "etc")!.linked && !vm.rows.find((r) => r.key === "belden")!.linked, "mfr analytics: a vendor card row has no link when its manufacturer has no page");
+  ok(mafVendorVm(["ETC"], resG.byKey, resG.shopWinRate, canon)!.rows[0].linked, "mfr analytics: vendor card rows link by default");
+}
+{
+  const recs = [
+    { key: "allenandheath", name: "Allen and Heath", imageDocumentId: null, aliasKeys: ["allenheath"], mergedInto: null },
+    { key: "allenheath", name: "Allen & Heath", imageDocumentId: null, aliasKeys: [], mergedInto: "allenandheath" },
+    { key: "ah", name: "AH", imageDocumentId: null, aliasKeys: [], mergedInto: "allenheath" },
+    { key: "etc", name: "ETC", imageDocumentId: null, aliasKeys: [], mergedInto: null },
+  ];
+  const targets = mafAliasTargets(recs);
+  ok(targets.allenheath === "allenandheath" && targets.ah === "allenandheath" && !("etc" in targets) && !("allenandheath" in targets), "mfr page: alias targets map every merged-away key (chains flattened) to its canonical key");
+  const rows = [{ key: "allenandheath" }, { key: "etc" }];
+  const res = (k: string) => targets[k] ?? k;
+  ok(mafMatch("Allen & Heath.jpg", rows, res) === "allenandheath" && mafMatch("AH.png", rows, res) === "allenandheath" && mafMatch("ETC.jpg", rows, res) === "etc", "mfr page: Upload many matches a file named for a merged-away spelling to its canonical row");
+  ok(mafMatch("Allen & Heath.jpg", rows) === null && mafMatch("Allen and Heath.jpg", rows) === "allenandheath", "mfr page: without a resolver Upload many matches by exact key only");
+  // The catalog spells it "Allen & Heath" most often, but the claim goes to the canonical record's name.
+  const parts = [
+    { sku: "A1", mfr: "Allen & Heath", category: "Audio" }, { sku: "A2", mfr: "Allen & Heath", category: "Audio" }, { sku: "A3", mfr: "Allen and Heath", category: "Audio" },
+    { sku: "N1", mfr: "Neutrik", category: "Cable" }, { sku: "N2", mfr: "NEUTRIK", category: "Cable" }, { sku: "N3", mfr: "Neutrik", category: "Cable" },
+  ];
+  const base = { records: recs, parts, ownPhoto: () => false, vendorOwnerByKey: new Map<string, string>(), vendors: new Map(), company: null, sites: [], companyPeople: [], reps: [], priceBookAt: null };
+  const vm = mafPageVM({ ...base, key: "allenheath" });
+  ok(vm.name === "Allen & Heath" && vm.claimName === "Allen and Heath", "mfr page: Set vendor claims the canonical record's name, not the group's most common spelling");
+  ok(mafPageVM({ ...base, key: "neutrik" }).claimName === "Neutrik", "mfr page: with no record, Set vendor claims the key's most common catalog spelling");
+  const client = readFileSync(join(process.cwd(), "src/app/(app)/catalog/manufacturers/[key]/manufacturer-client.tsx"), "utf8");
+  ok(client.includes("claimManufacturerAction(vendorPick, vm.claimName)"), "mfr page: the Set vendor button claims vm.claimName");
 }

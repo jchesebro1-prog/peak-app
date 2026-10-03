@@ -7,7 +7,8 @@
 import { mfrKey } from "@/lib/catalog-books";
 import { rollupMetrics, type ManufacturerMetrics, type MoneyPair } from "@/lib/manufacturer-analytics";
 
-export type VendorQuotedRow = { key: string; name: string; quoted: MoneyPair; won: MoneyPair; open: MoneyPair };
+/** `linked`: the manufacturer has a page (a line's own manufacturer text with no catalog part and no record has none). */
+export type VendorQuotedRow = { key: string; name: string; linked: boolean; quoted: MoneyPair; won: MoneyPair; open: MoneyPair };
 export type VendorQuotedVM = {
   quoted: MoneyPair;
   won: MoneyPair;
@@ -17,6 +18,8 @@ export type VendorQuotedVM = {
   winRate: number | null;
   usedShopRate: boolean;
   quotes: number;
+  /** Some counted Grid line priced at today's catalog cost. */
+  includesCatalogCost: boolean;
   rows: VendorQuotedRow[];
 };
 
@@ -25,6 +28,7 @@ export function vendorQuotedVM(
   byKey: ReadonlyMap<string, ManufacturerMetrics>,
   shopWinRate: number | null,
   canonical: (key: string) => string,
+  hasPage: (key: string) => boolean = () => true,
 ): VendorQuotedVM | null {
   const seen = new Map<string, string>(); // canonical key → first claimed spelling
   for (const name of claimed) {
@@ -41,7 +45,7 @@ export function vendorQuotedVM(
   if (!found.length) return null;
   const roll = rollupMetrics(found.map((f) => f.m), shopWinRate);
   const rows = found
-    .map(({ m, name }) => ({ key: m.key, name, quoted: m.quoted, won: m.won, open: m.open }))
+    .map(({ m, name }) => ({ key: m.key, name, linked: hasPage(m.key), quoted: m.quoted, won: m.won, open: m.open }))
     .sort((a, b) => b.quoted.cost - a.quoted.cost || a.name.localeCompare(b.name));
   return {
     quoted: roll.quoted,
@@ -51,6 +55,7 @@ export function vendorQuotedVM(
     winRate: roll.winRate ?? shopWinRate,
     usedShopRate: roll.winRate === null && shopWinRate !== null,
     quotes: roll.quotes,
+    includesCatalogCost: roll.includesCatalogCost,
     rows,
   };
 }
