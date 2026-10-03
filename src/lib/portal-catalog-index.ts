@@ -406,9 +406,10 @@ async function buildIndex(): Promise<Built> {
   // document, linked or not). They are servable but never a part's own photo.
   const mfrImageDocs = new Map<string, string>();
   for (const m of manufacturerRows) {
+    if (m.mergedInto) continue; // a merged-away spelling is reached through its target's aliasKeys
     const d = m.imageDocumentId ? state.index.docsById.get(m.imageDocumentId) : undefined;
     if (d && d.kind === "image" && d.blobKey && ["image/png", "image/jpeg", "image/webp"].includes(d.contentType)) {
-      mfrImageDocs.set(m.key, d.id);
+      for (const k of [m.key, ...m.aliasKeys]) mfrImageDocs.set(k, d.id);
       servableDocIds.add(d.id);
     }
   }

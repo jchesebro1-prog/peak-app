@@ -10774,6 +10774,7 @@ seeded()
   .then(() => mfrPortalAsyncChecks())
   .then(() => mfrDocsAsyncChecks())
   .then(() => mfrCutSheetAsyncChecks())
+  .then(() => mfrPageStoreAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -48887,4 +48888,95 @@ async function mfrCutSheetAsyncChecks(): Promise<void> {
   ok(docs.get(B)?.id === own.id, "mfr images: a cut-sheet sku keeps its own photo over the manufacturer image");
   ok(!docs.has(C), "mfr images: a cut-sheet sku whose manufacturer has no image has no photo (no placeholder)");
   ok((await mfcPhotoDocs([])).size === 0, "mfr images: no skus, no photos");
+}
+
+/* ======================================================================
+   Manufacturer page — alias resolver (pure).
+   ====================================================================== */
+import { canonicalKeyMap as mpCanon, groupKeys as mpGroup, planMerge as mpPlan } from "@/lib/manufacturer-aliases";
+import { manufacturerRows as mpRows } from "@/lib/manufacturer-rows";
+{
+  const recs = [
+    { key: "allenandheath", aliasKeys: ["allenheath"], mergedInto: null },
+    { key: "allenheath", aliasKeys: [], mergedInto: "allenandheath" },
+    { key: "etc", aliasKeys: [], mergedInto: null },
+  ];
+  const c = mpCanon(recs);
+  ok(c("allenheath") === "allenandheath" && c("allenandheath") === "allenandheath" && c("etc") === "etc" && c("nobody") === "nobody", "mfr page: aliases resolve to their canonical key; unknown keys map to themselves");
+  ok(mpGroup(recs, "allenandheath").join() === "allenandheath,allenheath", "mfr page: a group lists the canonical key then its aliases");
+  const p1 = mpPlan(recs, "etc", "allenheath");
+  ok(p1.ok && p1.target === "allenandheath" && p1.moved.join() === "etc", "mfr page: merging into an alias merges into its canonical key");
+  ok(!mpPlan(recs, "allenheath", "allenandheath").ok && !mpPlan(recs, "etc", "etc").ok, "mfr page: merging into yourself (or your own canonical) is refused");
+  const p2 = mpPlan(recs, "allenandheath", "etc");
+  ok(p2.ok && p2.target === "etc" && p2.moved.join() === "allenandheath,allenheath", "mfr page: merging a key that has aliases moves them too");
+  const rows = mpRows(
+    [{ sku: "1", mfr: "Allen & Heath", category: "Audio" }, { sku: "2", mfr: "Allen and Heath", category: "Audio" }, { sku: "3", mfr: "Allen and Heath", category: "Audio" }],
+    () => false,
+    [{ key: "allenandheath", imageDocumentId: "PD-1", aliasKeys: ["allenheath"], mergedInto: null }, { key: "allenheath", imageDocumentId: null, aliasKeys: [], mergedInto: "allenandheath" }]
+  );
+  ok(rows.length === 1 && rows[0].key === "allenandheath" && rows[0].parts === 3 && rows[0].spellings.join() === "Allen & Heath" && rows[0].imageDocumentId === "PD-1", "mfr page: merged spellings list as one manufacturer row");
+}
+
+/* ======================================================================
+   Manufacturer page — merges, record fields, alias-aware lookups (PGlite).
+   ====================================================================== */
+import { ensureManufacturer as mpEnsure, mergeManufacturer as mpMerge, unmergeManufacturer as mpUnmerge, addManufacturerPerson as mpAddPerson, removeManufacturerPerson as mpRmPerson, setManufacturerNotes as mpNotes, setManufacturerCompany as mpCompany, listManufacturers as mpList, setManufacturerImage as mpSetImg, manufacturerImageLookup as mpLookup } from "@/lib/stores/manufacturers";
+import { createDocument as mpCreateDoc } from "@/lib/stores/part-documents";
+import { portalIndex as mpPortalIndex, invalidatePortalIndex as mpPortalInvalidate } from "@/lib/portal-catalog-index";
+async function mfrPageStoreAsyncChecks(): Promise<void> {
+  const src = await mpEnsure("Test MP & Co", "mp test");
+  const tgt = await mpEnsure("Test MP and Co", "mp test");
+  registerFixture("manufacturers", src.id);
+  registerFixture("manufacturers", tgt.id);
+  ok(src.key === "testmpco" && tgt.key === "testmpandco" && src.aliasKeys.length === 0 && src.mergedInto === null && src.companyId === null && src.people.length === 0 && src.notes === "", "mfr page: ensureManufacturer creates a record with default alias/company/people/notes fields");
+  ok((await mpEnsure("TEST MP & CO", "mp test")).id === src.id, "mfr page: ensureManufacturer returns the existing record for a key");
+  const doc = await mpCreateDoc({ kind: "image", title: "TestMP logo", fileName: "mp.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/mp/mp.webp", sourceUrl: null, source: "manufacturer", sourceRef: "mfr:testmpandco", by: "mp test" });
+  if (doc) registerFixture("part_documents", doc.id);
+  await mpSetImg({ name: "Test MP and Co", documentId: doc!.id, by: "mp test" });
+
+  ok(!(await mpMerge("testmpco", "testmpco", "mp test")).ok, "mfr page: merging a manufacturer into itself returns ok: false");
+  ok((await mpMerge("testmpco", "testmpandco", "mp test")).ok, "mfr page: merge returns ok");
+  const all = await mpList();
+  const t2 = all.find((m) => m.key === "testmpandco")!;
+  const s2 = all.find((m) => m.key === "testmpco")!;
+  ok(t2.aliasKeys.includes("testmpco") && s2.mergedInto === "testmpandco", "mfr page: the target lists the alias and the source points at the target");
+  ok(!(await mpMerge("testmpandco", "testmpco", "mp test")).ok, "mfr page: merging into one of your own aliases is refused");
+  ok(mpLookup(all)("Test MP & Co") === doc!.id && mpLookup(all)("Test MP and Co") === doc!.id, "mfr page: the image lookup resolves an alias spelling to its target's image");
+
+  await mpAddPerson("testmpco", "ct-x", "Regional rep", "mp test");
+  let t3 = (await mpList()).find((m) => m.key === "testmpandco")!;
+  ok(t3.people.length === 1 && t3.people[0].contactId === "ct-x" && t3.people[0].role === "Regional rep" && (await mpList()).find((m) => m.key === "testmpco")!.people.length === 0, "mfr page: a person added through an alias lands on the target");
+  await mpAddPerson("testmpandco", "ct-x", "Sales engineer", "mp test");
+  t3 = (await mpList()).find((m) => m.key === "testmpandco")!;
+  ok(t3.people.length === 1 && t3.people[0].role === "Sales engineer", "mfr page: adding the same contact again updates the role (one entry)");
+  await mpRmPerson("testmpco", "ct-x", "mp test");
+  ok(((await mpList()).find((m) => m.key === "testmpandco")!).people.length === 0, "mfr page: removing a person works through an alias");
+  await mpNotes("testmpandco", "x".repeat(5000), "mp test");
+  ok(((await mpList()).find((m) => m.key === "testmpandco")!).notes.length === 4000, "mfr page: notes are capped at 4000 characters");
+  await mpCompany("testmpco", "C-1", "mp test");
+  ok(((await mpList()).find((m) => m.key === "testmpandco")!).companyId === "C-1", "mfr page: the company link lands on the target");
+  await mpCompany("testmpandco", null, "mp test");
+
+  mpPortalInvalidate();
+  const ix = await mpPortalIndex({ fresh: true });
+  ok(ix.mfrImageDocs.get("testmpco") === doc!.id && ix.mfrImageDocs.get("testmpandco") === doc!.id, "mfr page: the portal index serves the target's image under the alias key too");
+
+  // A merge carries people / company / image from the source when the target has none.
+  const a = await mpEnsure("Test MP Carry A", "mp test");
+  const b = await mpEnsure("Test MP Carry B", "mp test");
+  registerFixture("manufacturers", a.id);
+  registerFixture("manufacturers", b.id);
+  await mpAddPerson("testmpcarrya", "ct-1", "Rep", "mp test");
+  await mpAddPerson("testmpcarryb", "ct-1", "Dup", "mp test");
+  await mpAddPerson("testmpcarryb", "ct-2", "Other", "mp test");
+  await mpCompany("testmpcarrya", "C-A", "mp test");
+  await mpMerge("testmpcarrya", "testmpcarryb", "mp test");
+  const cb = (await mpList()).find((m) => m.key === "testmpcarryb")!;
+  ok(cb.companyId === "C-A" && cb.people.map((p) => p.contactId).sort().join() === "ct-1,ct-2" && cb.people.find((p) => p.contactId === "ct-1")!.role === "Dup", "mfr page: merge adopts the source's company when the target has none and unions people (target's role wins)");
+
+  ok((await mpUnmerge("testmpco", "mp test")).ok, "mfr page: unmerge returns ok");
+  const after = await mpList();
+  ok(!after.find((m) => m.key === "testmpandco")!.aliasKeys.includes("testmpco") && after.find((m) => m.key === "testmpco")!.mergedInto === null, "mfr page: unmerge clears both sides");
+  ok(!(await mpUnmerge("testmpco", "mp test")).ok, "mfr page: unmerging an unmerged spelling is refused");
+  ok(mpLookup(after)("Test MP & Co") === null, "mfr page: after unmerge the alias no longer resolves to the target's image");
 }

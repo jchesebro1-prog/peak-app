@@ -1,20 +1,24 @@
 import { mfrKey } from "@/lib/catalog-books";
+import { canonicalKeyMap } from "@/lib/manufacturer-aliases";
 
-/** Catalog → Manufacturers rows (pure). One row per mfrKey; Labor and blank
- *  manufacturers left out; the shown name is the most common spelling. */
+/** Catalog → Manufacturers rows (pure). One row per canonical key (merged
+ *  spellings group under their target); Labor and blank manufacturers left
+ *  out; the shown name is the most common spelling across the group. */
 export type ManufacturerRow = { key: string; name: string; spellings: string[]; parts: number; withoutPhoto: number; imageDocumentId: string | null };
 
 export function manufacturerRows(
   parts: readonly { mfr?: string; category?: string; sku: string }[],
   hasOwnPhoto: (sku: string) => boolean,
-  records: readonly { key: string; imageDocumentId: string | null }[]
+  records: readonly { key: string; imageDocumentId: string | null; aliasKeys?: string[]; mergedInto?: string | null }[]
 ): ManufacturerRow[] {
+  const canon = canonicalKeyMap(records);
   const acc = new Map<string, { counts: Map<string, number>; parts: number; withoutPhoto: number }>();
   for (const p of parts) {
     if (p.category === "Labor") continue;
     const name = String(p.mfr ?? "").trim();
-    const key = mfrKey(name);
-    if (!key) continue;
+    const raw = mfrKey(name);
+    if (!raw) continue;
+    const key = canon(raw);
     let a = acc.get(key);
     if (!a) acc.set(key, (a = { counts: new Map(), parts: 0, withoutPhoto: 0 }));
     a.counts.set(name, (a.counts.get(name) ?? 0) + 1);
