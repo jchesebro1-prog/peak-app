@@ -7,7 +7,9 @@ import {
   MAX_PARAGRAPH,
   draftNarrative,
   draftOverwrites,
+  isLineToken,
   keyProductChip,
+  keyProductSkuOf,
   markKeyProduct,
   moveKeyProduct,
   patchKeyProduct,
@@ -25,6 +27,7 @@ import NarrativeIntrosModal from "./narrative-intros-modal";
 import SystemLibraryModal from "./system-library-modal";
 import { mergeNarrative, mergeNotice, type MergeOpts } from "@/lib/narrative/merge";
 import type { SystemLibraryEntry } from "@/lib/narrative/system-library";
+import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 
 /**
  * #293 — the narrative column's body (the #281 aside keeps its header and
@@ -55,6 +58,8 @@ const CHIP_TONE: Record<KeyProductChip, CSSProperties> = {
   edited: { background: "#eef0f3", color: "#3a3f4a" },
   custom: { background: "#f1f2f5", color: "#8c919c" },
 };
+/** What the card shows in place of a `line:<id>` token (an allowance/custom line). */
+const lineLabel = (it: SpecItem | undefined): string => (it?.sku || "").trim() || (it?.allowance ? "Allowance" : it?.custom ? "Custom line" : "Line");
 const STRIP: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11.5, fontWeight: 600, color: "#b4543a", background: "#fbecea", borderRadius: 6, padding: "6px 8px" };
 const FAILED = "Could not reach the server. Try again.";
 const NO_LIBRARY = "Could not load the library";
@@ -84,7 +89,8 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
     startBusy(async () => {
       setNotice("");
       try {
-        const okSkus = resolveKeyProducts(sec).filter((r) => r.status === "ok").map((r) => r.kp.sku);
+        // Line tokens (allowance/custom lines) have no library row — Draft never touches them.
+        const okSkus = resolveKeyProducts(sec).filter((r) => r.status === "ok" && !isLineToken(r.kp.sku)).map((r) => r.kp.sku);
         // Force-refresh (bypass the cache) so Draft copies the CURRENT
         // library paragraph. Any sku still without a row means the library
         // didn't load: abort with no write — a missing row would otherwise
@@ -290,7 +296,8 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
             const id = Number(e.target.value);
             const it = sec.items.find((x) => x.id === id);
             if (!it) return;
-            const text = p.library.rows[it.sku.trim()]?.paragraph || "";
+            const k = keyProductSkuOf(it);
+            const text = isLineToken(k) ? "" : p.library.rows[k]?.paragraph || "";
             p.onChange((s) => markKeyProduct(s, id, text));
           }}
           style={{ alignSelf: "flex-start", border: "1px dashed #d6d9e0", borderRadius: 6, padding: "4px 6px", fontSize: 11.5, color: "#5b616e", background: "#fff" }}
@@ -298,7 +305,7 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
           <option value="">+ Key product…</option>
           {pickable.map((it) => (
             <option key={it.id} value={it.id}>
-              {it.desc} · {it.sku}
+              {it.desc} · {lineLabel(it)}
             </option>
           ))}
         </select>
@@ -314,8 +321,28 @@ function KeyProductCard(props: KeyProductCardProps) {
   const { r, index, count, onChange, library, canWriteLibrary } = props;
   const kp = r.kp;
   const item: SpecItem | undefined = r.status === "missing" ? undefined : r.item;
-  const row = library.rows[kp.sku];
+  /** An allowance/custom line's block: no library entry, prints a placeholder. */
+  const isLine = isLineToken(kp.sku);
+  const row = isLine ? undefined : library.rows[kp.sku];
+  /** The card's name: the line's description; a removed tokenized line never
+   *  shows its raw `line:<id>` token. */
+  const title = item?.desc || (isLine ? "Removed line" : kp.sku);
   const chip = keyProductChip(kp, row);
+  /** What prints when there is no photo of its own (Manufacturer section Part 1);
+   *  only for a block that prints at all. */
+  const placeholder = r.status !== "ok" ? null : r.item.allowance ? "allowance" : r.item.custom ? "custom-device" : null;
+  const photoToggle = (src: string) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "#5b616e" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        style={{ width: 52, height: 52, objectFit: "contain", borderRadius: 6, border: "1px solid #eef0f3", background: "#fff", opacity: kp.photo ? 1 : 0.4 }}
+      />
+      <input type="checkbox" checked={kp.photo} onChange={(e) => { const v = e.target.checked; onChange((s) => patchKeyProduct(s, index, { photo: v })); }} />
+      Photo
+    </label>
+  );
   const [ask, setAsk] = useState<null | "replace" | "stale">(null);
   const [stale, setStale] = useState<{ paragraph: string | null; updatedAt: number | null } | null>(null);
   const [msg, setMsg] = useState("");
@@ -363,8 +390,8 @@ function KeyProductCard(props: KeyProductCardProps) {
     <div style={{ border: "1px solid #ececf0", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 7, background: "#fff" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>{item?.desc || kp.sku}</div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#8c919c" }}>{kp.sku}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>{title}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#8c919c" }}>{isLine ? lineLabel(item) : kp.sku}</div>
         </div>
         {chip && (
           <span style={{ ...CHIP_TONE[chip], fontSize: 10.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>{KEY_PRODUCT_CHIP_LABEL[chip]}</span>
@@ -387,23 +414,29 @@ function KeyProductCard(props: KeyProductCardProps) {
       {r.status === "ineligible" && <div style={STRIP}><span>{"Optional/labor line — won't print"}</span></div>}
 
       {row?.photoDocId ? (
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "#5b616e" }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={"/api/part-documents/" + encodeURIComponent(row.photoDocId)}
-            alt=""
-            style={{ width: 52, height: 52, objectFit: "contain", borderRadius: 6, border: "1px solid #eef0f3", background: "#fff", opacity: kp.photo ? 1 : 0.4 }}
-          />
-          <input type="checkbox" checked={kp.photo} onChange={(e) => { const v = e.target.checked; onChange((s) => patchKeyProduct(s, index, { photo: v })); }} />
-          Photo
-        </label>
+        photoToggle("/api/part-documents/" + encodeURIComponent(row.photoDocId))
+      ) : placeholder === "allowance" ? (
+        <>
+          {photoToggle(PLACEHOLDER_SRC.allowance)}
+          <div style={HINT}>Prints the Allowance placeholder</div>
+        </>
+      ) : placeholder === "custom-device" ? (
+        <>
+          {photoToggle(PLACEHOLDER_SRC["custom-device"])}
+          <div style={HINT}>Prints the Custom Device placeholder</div>
+        </>
+      ) : row?.fallbackDocId ? (
+        <>
+          {photoToggle("/api/part-documents/" + encodeURIComponent(row.fallbackDocId))}
+          <div style={HINT}>{`Prints the manufacturer image (${row.fallbackLabel})`}</div>
+        </>
       ) : row ? (
         <div style={HINT}>No photo — prints full width</div>
       ) : null}
 
       <textarea
         className="est-field"
-        aria-label={"Paragraph for " + (item?.desc || kp.sku)}
+        aria-label={"Paragraph for " + title}
         value={kp.text}
         maxLength={MAX_PARAGRAPH}
         placeholder={row?.desc || item?.desc || ""}
@@ -432,9 +465,12 @@ function KeyProductCard(props: KeyProductCardProps) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
         <button type="button" style={BTN} disabled={index === 0} onClick={() => onChange((s) => moveKeyProduct(s, index, -1))} aria-label="Move up">↑</button>
         <button type="button" style={BTN} disabled={index === count - 1} onClick={() => onChange((s) => moveKeyProduct(s, index, 1))} aria-label="Move down">↓</button>
-        <button type="button" style={{ ...BTN, opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }} disabled={!canSave || pending} title={saveTitle} onClick={onSave}>
-          {pending ? "Saving…" : "Save to library"}
-        </button>
+        {/* A line token has no catalog part, so no library paragraph to save. */}
+        {!isLine && (
+          <button type="button" style={{ ...BTN, opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }} disabled={!canSave || pending} title={saveTitle} onClick={onSave}>
+            {pending ? "Saving…" : "Save to library"}
+          </button>
+        )}
         {chip === "edited" && row?.paragraph != null && (
           <button type="button" style={BTN} onClick={() => { const t = row.paragraph as string; onChange((s) => patchKeyProduct(s, index, { text: t })); }}>Use library text</button>
         )}

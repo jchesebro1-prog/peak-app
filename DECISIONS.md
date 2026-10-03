@@ -8986,3 +8986,59 @@ shared `RackElevation` (spec wave 4); racks in the portal; a cable/patch schedul
 Documents. Known: reserved slots print as a gray tone (the shared screen SVG's thin hatch); the sheet footer prints once
 per sheet, not per page of a long schedule; the rack-data export's default scope includes labor SKUs; a stored layout
 that fails current rules opens flagged "needs review" and its config fields refuse until it is fixed.
+
+## D583. Two fallback chains, and why documents stop after the manufacturer image (#297, 2026-10-02)
+
+A part with no photo of its own now shows a fallback in a fixed order, from one pure rule
+(`src/lib/part-image-fallback.ts`). **Portal:** own photo → Allowance placeholder → Custom Device placeholder →
+manufacturer image → Contact Us (price on request) → Image Coming Soon; it never returns nothing. **Documents** (the
+estimate PDF, the online estimate, cut sheets): own photo → Allowance → Custom Device → manufacturer
+image → nothing, and the block prints full width as before. Documents never print Contact Us or Image Coming Soon: a
+customer-facing proposal that says "image coming soon" next to a priced product reads as unfinished, and "Contact us"
+is a portal sales prompt that means nothing on a page the customer already holds. A fallback is never stored on a part
+and never counts as a photo — photo counts, the Photo sheet, the Datasheets to-do and portal visibility read only linked
+images. The Allowance/Custom rule keys on the quote line's `allowance` / `custom` flags and the catalog category
+`Custom Parts`; POR is the portal's `por`. Client packages are not in either chain: a package carries no estimate PDF,
+and its cut sheets print submittal style with no photos (`images: "none"`).
+
+## D584. Manufacturer images are unlinked `part_documents` (#297, 2026-10-02)
+
+A manufacturer image is an ordinary `part_documents` record (`kind: "image"`, new `PartDocumentSource` value
+`"manufacturer"`, `sourceRef: "mfr:<key>"`) with no `part_document_links` row, so it reuses the shrink-to-WebP path, the
+checked Blob upload and the existing serving routes without a second file store. Nothing counts it as a part photo:
+every photo reader goes through linked images, and an unlinked document is invisible to them. The source ranks 0
+(`IMAGE_SOURCE_RANK`) and carries the label "Manufacturer"; the Attach-existing search skips it so one cannot be
+attached to a part by accident. The portal reads a manufacturer's image from the unlinked set, and the servable-id set
+includes it so the existing photo route serves it.
+
+## D585. The `manufacturers` table (#297, 2026-10-02)
+
+One record per `mfrKey(name)` (lowercase, a–z0–9 only) in a new `manufacturers` doc table (migration
+`0035_manufacturers`). Records are created lazily on the first image upload — there is no seed and no backfill.
+The id is deterministic, `"MF-" + sha1(key)[0:10]`, so two first uploads racing for one key upsert the same row
+instead of making two. Setting an image keeps the previous document id in `imageHistory`; Remove clears
+`imageDocumentId` and keeps the document; nothing is ever deleted. The Manufacturers page lists every spelling a catalog
+carries; "Allen & Heath" and "Allen and Heath" are separate keys and stay separate until Part 2 merges aliases. Upload
+many matches `mfrKey(file name without extension) === key` exactly, never by substring.
+
+## D586. Allowance and custom key products anchor on `line:<id>` (#297, 2026-10-02)
+
+A line with no usable sku could never carry a #293 key-product block. A block now takes `KeyProduct.sku = "line:" +
+line id` (`keyProductSkuOf` in `narrative.ts`) on such a line: an allowance line, or a custom line whose trimmed sku is
+blank, too long, or a generic placeholder the Estimator writes ("CUSTOM", "AI" — `isPlaceholderSku`, any case). A
+custom line saved to the catalog ("add to catalog", category Custom Parts) keeps its real sku and anchors on it like any
+catalog part — its own photo and library paragraph load, and with no photo it prints the Custom Device placeholder
+(never the manufacturer image). Every other real-sku line is unchanged. A line token gets no library row, no Save to library, no Draft and no catalog photo read — the text is always
+hand-written — and Copy remaps it to `line:<newId>`. It prints the kind's placeholder (Allowance or Custom Device)
+beside the paragraph, with the existing Photo toggle. A block saved before this on such a line's real sku still resolves
+(`anchorsOn`), but because the chain puts the placeholder ahead of the manufacturer image, an older allowance/custom
+block that used to print full width now prints its placeholder. Merge narrative skips a `line:` source block and no
+longer lets a real-sku block land on a tokenized line.
+
+## D587. `/placeholders/` is exempt from team auth (#297, 2026-10-02)
+
+The four placeholder files in `public/placeholders/` are static brand artwork with no customer data. The auth
+middleware matcher redirected every request without a team session to /login, which would have broken the placeholder
+for portal customers (who sign in with a magic link, not a team login), the headless-Chrome print routes and the
+no-login share page. `placeholders/` is therefore added to the matcher exemptions next to the other static assets —
+public by design, like `manifest.webmanifest`.

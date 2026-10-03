@@ -664,5 +664,22 @@ See `.env.example`.
     (Rack data sheet), set the default blank/vent panels, and check a zip and
     a package .docx on a preview deploy. Punch item #296.
 
+36. ✅ **Manufacturer images + placeholders** (#297, D583–D587) — a part with
+    no photo shows a fallback instead of a blank: portal own photo →
+    Allowance → Custom Device → manufacturer image → Contact Us (price on
+    request) → Image Coming Soon; documents stop after the manufacturer image
+    and print full width (`src/lib/part-image-fallback.ts`, four WebP files in
+    `public/placeholders/`, exempt from team auth). Catalog → Manufacturers
+    (`/catalog/manufacturers`) lists each `mfrKey` with part/photo counts and
+    sets, replaces or removes its image (Upload many matches file names to
+    names exactly); the image is an unlinked `part_documents` record, source
+    `manufacturer`, kept in `manufacturers.imageHistory` (migration 0035,
+    deterministic `MF-` ids, lazy). Allowance lines and custom lines with no
+    real sku (blank, CUSTOM, AI) carry a key product via a `line:<id>` token
+    that prints the kind's placeholder; a custom line saved to the catalog
+    anchors on its sku (own photo, else Custom Device); cut sheets use the
+    same fallback. Remaining is Jeff-gated: upload the
+    manufacturer images. Punch item #297.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -10,6 +10,7 @@ import {
   type SystemLibraryHit,
 } from "@/lib/narrative/system-library";
 import { mergeNarrative, mergeNotice, type MergeOpts } from "@/lib/narrative/merge";
+import { isLineToken } from "./narrative";
 import { getSystemLibraryEntryAction, loadLibrarySystemAction, searchSystemLibraryAction } from "./library-actions";
 
 /**
@@ -219,7 +220,9 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
                 {detail.keyProducts.length ? (
                   detail.keyProducts.map((k) => (
                     <div key={k.sku} style={{ fontSize: 12.5 }}>
-                      {k.heading} <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#8c919c" }}>{k.sku}</span>
+                      {k.heading}{" "}
+                      {/* A line:<id> token (allowance/custom line) is internal — no sku to show. */}
+                      {!isLineToken(k.sku) && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#8c919c" }}>{k.sku}</span>}
                     </div>
                   ))
                 ) : (

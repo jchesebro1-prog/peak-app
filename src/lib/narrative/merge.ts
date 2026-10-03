@@ -1,11 +1,17 @@
 import type { KeyProduct, SpecSection } from "@/app/(app)/estimator/types";
-import { MAX_INTRO, MAX_KEY_PRODUCTS, MAX_PARAGRAPH, isKeyProductEligible, withKeyProducts } from "@/app/(app)/estimator/narrative";
+import { MAX_INTRO, MAX_KEY_PRODUCTS, MAX_PARAGRAPH, isKeyProductEligible, isLineToken, keyProductSkuOf, withKeyProducts } from "@/app/(app)/estimator/narrative";
 
 /**
  * #293 slice 2 — Merge narrative: append library systems' intros and key
  * products into a system. Append-only, never invents a line (a block can't
  * exist without one, and adding a priced line would change the estimate).
  * Pure and client-safe: the modal previews with it, the column applies it.
+ *
+ * A `line:<id>` block (an allowance line, or a custom line with no real sku —
+ * Manufacturer section Part 1)
+ * names a line of its source system only — nothing here can match it, so it
+ * is skipped and counted nowhere. A real sku matches only a line whose own
+ * anchor is that sku (a tokenized line anchors on its token).
  */
 
 export type MergeOpts = { intro: boolean; products: boolean };
@@ -58,13 +64,13 @@ export function mergeNarrative(target: SpecSection, sources: MergeSource[], opts
     for (const s of srcs) {
       for (const b of Array.isArray(s?.keyProducts) ? s.keyProducts : []) {
         const sku = typeof b?.sku === "string" ? b.sku.trim() : "";
-        if (!sku) continue;
+        if (!sku || isLineToken(sku)) continue;
         if (kps.some((k) => k.sku === sku)) {
           pushOnce(skippedPresent, sku);
           continue;
         }
         const used = new Set(kps.map((k) => k.lineKey));
-        const line = target.items.find((it) => isKeyProductEligible(it) && (it.sku || "").trim() === sku && !used.has(String(it.id)));
+        const line = target.items.find((it) => isKeyProductEligible(it) && keyProductSkuOf(it) === sku && !used.has(String(it.id)));
         if (!line) {
           pushOnce(skippedNoLine, sku);
           continue;

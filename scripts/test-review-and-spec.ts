@@ -10770,6 +10770,10 @@ seeded()
   .then(() => onlineDoc293tAsyncChecks())
   .then(() => portalPage293tAsyncChecks())
   .then(() => finalFix293tAsyncChecks())
+  .then(() => mfrStoreAsyncChecks())
+  .then(() => mfrPortalAsyncChecks())
+  .then(() => mfrDocsAsyncChecks())
+  .then(() => mfrCutSheetAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -28679,7 +28683,7 @@ import {
 
   const leaky = { imageIds: ["IMG-1", "IMG-2"], datasheetIds: ["DS-1"], unit: "ft", cost: 42, list: 99, note: "x", margin: 0.3 };
   const t = d245Tile({ key: "SKU-1", kind: "part", title: "Widget", sku: "SKU-1", mfr: "ETC", category: "Lighting" }, leaky, { unitPrice: 12.5, por: false });
-  ok(eq(Object.keys(t).sort(), ["category", "hasDatasheet", "imageId", "key", "kind", "mfr", "por", "sku", "title", "unit", "unitPrice"]),
+  ok(eq(Object.keys(t).sort(), ["category", "fallback", "hasDatasheet", "imageId", "key", "kind", "mfr", "por", "sku", "title", "unit", "unitPrice"]),
     "#245 tile: TileVM is exactly the sell-only whitelist");
   ok(t.imageId === "IMG-1" && t.hasDatasheet && t.unit === "ft" && t.unitPrice === 12.5 && !t.por && !JSON.stringify(t).includes("42"),
     "#245 tile: hero image = first image id; no cost rides along from an IndexedPart");
@@ -28878,7 +28882,7 @@ import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
   const docVms = d245PartVM(leakyPart, null, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false, blobKey: "x" } as never, { id: "D2", kind: "datasheet", title: "DS", pdf: true }], []).docs;
   ok(eq(docVms, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false }, { id: "D2", kind: "datasheet", title: "DS", pdf: true }]),
     "#245 sidebar (fix 1): a document carries pdf — only a PDF opens inline; the doc VM is a whitelist");
-  ok(eq(Object.keys(pv).sort(), ["docs", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
+  ok(eq(Object.keys(pv).sort(), ["docs", "fallback", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
     "#245 sidebar: the part detail is exactly the sell-only whitelist");
   const pj = JSON.stringify(pv);
   ok(!pj.includes("\"cost\"") && !pj.includes("\"list\"") && !pj.includes("margin") && !pj.includes("tier") && !pj.includes("silver") && !pj.includes("note") && !pj.includes("pricedAt") && !pj.includes("42"),
@@ -28906,7 +28910,7 @@ import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
   ok(!fvm.unavailable && fvm.unitPrice === 300 && fvm.key === "fixture:fx1" && fvm.mfr === "ETC", "#245 fixture sidebar: priced from the no-add-on fixture price");
   const fu = d245FixtureVM(fxDef, "", null, () => null, { images: [], docs: [] });
   ok(fu.unavailable && fu.unitPrice === null && !fu.por, "#245 fixture sidebar: an unpriceable fixture reads unavailable");
-  ok(eq(Object.keys(fvm).sort(), ["addOns", "description", "docs", "fixed", "id", "images", "key", "kind", "mfr", "por", "title", "unavailable", "unitPrice"]),
+  ok(eq(Object.keys(fvm).sort(), ["addOns", "description", "docs", "fallback", "fixed", "id", "images", "key", "kind", "mfr", "por", "title", "unavailable", "unitPrice"]),
     "#245 fixture sidebar: exactly the sell-only whitelist");
   ok(d245Unavailable === "This item isn't available.", "#245 sidebar: the unavailable copy");
 }
@@ -48550,4 +48554,337 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       rmSync(root, { recursive: true, force: true });
     }
   });
+}
+
+/* ======================================================================
+   Manufacturer images — the pure fallback rule (part-image-fallback.ts).
+   ====================================================================== */
+import { portalFallback as mfiPortal, documentFallback as mfiDoc, PLACEHOLDER_SRC as mfiSrc, isCustomCategory as mfiIsCustom, fallbackSrc as mfiFallbackSrc } from "@/lib/part-image-fallback";
+import { existsSync as mfiExists } from "node:fs";
+{
+  const img = (m: string) => (m.trim().toLowerCase() === "etc" ? "PD-etc-logo" : null);
+  const p = (i: Parameters<typeof mfiPortal>[0]) => JSON.stringify(mfiPortal(i, img));
+  const d = (i: Parameters<typeof mfiDoc>[0]) => JSON.stringify(mfiDoc(i, img));
+  ok(p({ allowance: true, mfr: "ETC" }) === JSON.stringify({ kind: "placeholder", name: "allowance" }), "mfr images: an allowance shows the Allowance placeholder even with a manufacturer image");
+  ok(p({ custom: true, mfr: "ETC" }) === JSON.stringify({ kind: "placeholder", name: "custom-device" }), "mfr images: a custom item shows Custom Device even with a manufacturer image");
+  ok(p({ mfr: "ETC", por: true }) === JSON.stringify({ kind: "image", documentId: "PD-etc-logo", label: "ETC" }), "mfr images: a manufacturer image beats Contact Us");
+  ok(p({ mfr: "Chauvet", por: true }) === JSON.stringify({ kind: "placeholder", name: "contact-us" }), "mfr images: price on request without a manufacturer image shows Contact Us");
+  ok(p({ mfr: "", por: false }) === JSON.stringify({ kind: "placeholder", name: "coming-soon" }) && p({}) === JSON.stringify({ kind: "placeholder", name: "coming-soon" }), "mfr images: nothing else applies → Image Coming Soon");
+  ok(d({ allowance: true }) === JSON.stringify({ kind: "placeholder", name: "allowance" }) && d({ custom: true }) === JSON.stringify({ kind: "placeholder", name: "custom-device" }), "mfr images: documents print the kind placeholders");
+  ok(d({ mfr: "ETC" }) === JSON.stringify({ kind: "image", documentId: "PD-etc-logo", label: "ETC" }), "mfr images: documents print the manufacturer image");
+  ok(mfiDoc({ mfr: "Chauvet", por: true }, img) === null && mfiDoc({}, img) === null, "mfr images: documents never print Contact Us or Coming Soon");
+  ok(mfiIsCustom("Custom Parts") && mfiIsCustom(" custom parts ") && !mfiIsCustom("Lighting") && !mfiIsCustom(null), "mfr images: the Custom Parts category marks a custom catalog part");
+  ok(mfiFallbackSrc({ kind: "placeholder", name: "coming-soon" }, (id) => "/d/" + id) === "/placeholders/coming-soon.webp" && mfiFallbackSrc({ kind: "image", documentId: "X", label: "" }, (id) => "/d/" + id) === "/d/X", "mfr images: fallbackSrc maps placeholders to static files and images through the caller's doc URL");
+  ok(Object.values(mfiSrc).every((s) => mfiExists("public" + s)), "mfr images: all four placeholder files ship in public/placeholders");
+}
+
+/* ======================================================================
+   Manufacturer images — the manufacturers store (PGlite).
+   ====================================================================== */
+import { listManufacturers as mfsList, manufacturerByKey as mfsByKey, setManufacturerImage as mfsSet, removeManufacturerImage as mfsRemove, manufacturerImageLookup as mfsLookup } from "@/lib/stores/manufacturers";
+import { createDocument as mfsCreateDoc, visibleImagesForParts as mfsVisible } from "@/lib/stores/part-documents";
+import { searchDocumentsAction as mfsSearch } from "@/app/(app)/catalog/documents/actions";
+import { readFileSync as mfsReadFile } from "node:fs";
+async function mfrStoreAsyncChecks(): Promise<void> {
+  const mkDoc = async (title: string) => {
+    const d = await mfsCreateDoc({ kind: "image", title, fileName: title + ".webp", contentType: "image/webp", size: 10, blobKey: null, sourceUrl: null, source: "manufacturer", sourceRef: "mfr:testmfrimg", by: "mfr test" });
+    if (d) registerFixture("part_documents", d.id);
+    return d!;
+  };
+  const a = await mkDoc("TestMfrImg logo A");
+  const m1 = await mfsSet({ name: "TestMfrImg", documentId: a.id, by: "mfr test" });
+  registerFixture("manufacturers", m1.id);
+  ok(/^MF-[0-9a-f]{10}$/.test(m1.id) && m1.key === "testmfrimg" && m1.imageDocumentId === a.id && m1.imageHistory.length === 0, "mfr images: the first image creates the record lazily, keyed by mfrKey");
+  const b = await mkDoc("TestMfrImg logo B");
+  const m2 = await mfsSet({ name: "Test-Mfr Img", documentId: b.id, by: "mfr test" });
+  ok(m2.id === m1.id && m2.imageDocumentId === b.id && m2.imageHistory[0] === a.id, "mfr images: a second spelling with the same key updates the same record; the old image moves to history");
+  ok((await mfsList()).filter((m) => m.key === "testmfrimg").length === 1, "mfr images: one record per key");
+  const m3 = await mfsRemove("testmfrimg", "mfr test");
+  ok(!!m3 && m3.imageDocumentId === null && m3.imageHistory.slice(0, 2).join() === [b.id, a.id].join(), "mfr images: remove clears the image and keeps it in history");
+  await mfsSet({ name: "TestMfrImg", documentId: b.id, by: "mfr test" });
+  const look = mfsLookup(await mfsList());
+  ok(look("TEST MFR IMG") === b.id && look("Nobody") === null, "mfr images: the lookup matches any spelling with the same key");
+  ok((await mfsByKey("testmfrimg"))?.imageDocumentId === b.id, "mfr images: manufacturerByKey reads the record");
+  const SKU = fixtureId("MFI", "PART-1");
+  await upsertPart({ id: SKU, sku: SKU, desc: "mfr img part", category: "Lighting", unit: "ea", list: 1, cost: 1, mfr: "TestMfrImg" });
+  registerFixture("catalog_parts", SKU);
+  ok(!((await mfsVisible([SKU])).get(SKU)?.length), "mfr images: an unlinked manufacturer image never appears in a part's images");
+  const hits = await mfsSearch("TestMfrImg logo").catch(() => null);
+  ok(hits === null || (hits.ok && !hits.hits.some((h) => h.id === a.id || h.id === b.id)), "mfr images: attach-existing search never offers a manufacturer image");
+  const rx = await mkDoc("RaceMfr logo X");
+  const ry = await mkDoc("RaceMfr logo Y");
+  const [r1] = await Promise.all([
+    mfsSet({ name: "RaceMfr", documentId: rx.id, by: "mfr test" }),
+    mfsSet({ name: "Race-Mfr", documentId: ry.id, by: "mfr test" }),
+  ]);
+  registerFixture("manufacturers", r1.id);
+  ok((await mfsList()).filter((m) => m.key === "racemfr").length === 1, "mfr images: two concurrent first-creates for one key leave exactly one record");
+  ok(mfsReadFile("src/app/(app)/catalog/documents/actions.ts", "utf8").includes('source !== "manufacturer"'), "mfr images: searchDocumentsAction filters manufacturer-source documents (source check)");
+}
+
+/* ======================================================================
+   Manufacturer images — page rows + upload-many matcher (pure).
+   ====================================================================== */
+import { manufacturerRows as mfrRows, matchManufacturerFile as mfrMatch } from "@/lib/manufacturer-rows";
+{
+  const parts = [
+    { sku: "A1", mfr: "ETC", category: "Lighting" }, { sku: "A2", mfr: "E.T.C.", category: "Lighting" }, { sku: "A3", mfr: "ETC", category: "Lighting" },
+    { sku: "B1", mfr: "Allen and Heath", category: "Audio" }, { sku: "B2", mfr: "Allen & Heath", category: "Audio" },
+    { sku: "L1", mfr: "ETC", category: "Labor" }, { sku: "N1", mfr: "", category: "Lighting" },
+  ];
+  const rows = mfrRows(parts, (s) => s === "A1", [{ key: "etc", imageDocumentId: "PD-1" }]);
+  const etc = rows.find((r) => r.key === "etc");
+  ok(rows[0].key === "etc" && !!etc && etc.name === "ETC" && etc.spellings.join() === "E.T.C." && etc.parts === 3 && etc.withoutPhoto === 2 && etc.imageDocumentId === "PD-1", "mfr images: rows group spellings by key, count parts (no Labor) and parts without a photo, carry the image");
+  ok(rows.some((r) => r.key === "allenandheath") && rows.some((r) => r.key === "allenheath") && !rows.some((r) => r.key === ""), "mfr images: '&' vs 'and' stay separate rows (Part 2 merges); blank manufacturers are left out");
+  ok(mfrMatch("ETC.jpg", rows) === "etc" && mfrMatch("e.t.c.PNG", rows) === "etc" && mfrMatch("Allen and Heath.webp", rows) === "allenandheath", "mfr images: a file name matches a manufacturer by key, any case or punctuation");
+  ok(mfrMatch("ETC Lighting.jpg", rows) === null && mfrMatch("photo.jpg", rows) === null, "mfr images: a file name never matches by substring");
+}
+
+{
+  const src = readFileSync("src/app/(app)/catalog/manufacturers/actions.ts", "utf8");
+  const g = src.indexOf("getDocument(input.documentId)");
+  const v = src.indexOf("verifyUploadedBlob({");
+  ok(g > 0 && v > 0 && g < v, "mfr images: the set-image action refuses an existing document before touching any blob");
+}
+
+/* ======================================================================
+   Manufacturer images — portal fallbacks (PGlite).
+   ====================================================================== */
+import { portalIndex as mfpIndex, invalidatePortalIndex as mfpInvalidate, portalMfrImage as mfpLook } from "@/lib/portal-catalog-index";
+import { toTileVM as mfpTile } from "@/lib/portal-catalog-view";
+import { setManufacturerImage as mfpSetImg } from "@/lib/stores/manufacturers";
+import { createDocument as mfpCreateDoc } from "@/lib/stores/part-documents";
+async function mfrPortalAsyncChecks(): Promise<void> {
+  const SKU = fixtureId("MFP", "PART-1");
+  await upsertPart({ id: SKU, sku: SKU, desc: "mfr portal part", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "MfpBrand", portalVisibility: "show" } as never);
+  registerFixture("catalog_parts", SKU);
+  mfpInvalidate();
+  const before = await mfpIndex({ fresh: true });
+  const doc = await mfpCreateDoc({ kind: "image", title: "MfpBrand (manufacturer)", fileName: "m.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/x/m.webp", sourceUrl: null, source: "manufacturer", sourceRef: "mfr:mfpbrand", by: "mfr test" });
+  if (doc) registerFixture("part_documents", doc.id);
+  const m = await mfpSetImg({ name: "MfpBrand", documentId: doc!.id, by: "mfr test" });
+  registerFixture("manufacturers", m.id);
+  mfpInvalidate();
+  const ix = await mfpIndex({ fresh: true });
+  ok(ix.mfrImageDocs.get("mfpbrand") === doc!.id && ix.servableDocIds.has(doc!.id), "mfr images: the portal index knows the manufacturer image and may serve it");
+  ok(mfpLook(ix)("MFP-BRAND") === doc!.id && mfpLook(ix)("Nobody") === null, "mfr images: portalMfrImage matches by key");
+  const bp = before.parts.get(SKU), ap = ix.parts.get(SKU);
+  ok(!!bp && !!ap && bp.imageIds.length === 0 && ap.imageIds.length === 0 && bp.visibility === ap.visibility, "mfr images: a manufacturer image never becomes a part image or changes visibility");
+  ok(!before.servableDocIds.has(doc!.id), "mfr images: before the image was set, the document was not servable");
+  const tile = mfpTile({ key: SKU, kind: "part", title: "t", sku: SKU, mfr: "MfpBrand", category: "Lighting" }, ap, { unitPrice: 12, por: false }, undefined, { kind: "image", documentId: doc!.id, label: "MfpBrand" });
+  ok(tile.imageId === null && tile.fallback?.kind === "image", "mfr images: a tile without a photo carries the fallback");
+  const withPhoto = mfpTile({ key: SKU, kind: "part", title: "t", sku: SKU, mfr: "MfpBrand", category: "Lighting" }, { imageIds: ["PD-own"] }, { unitPrice: 12, por: false }, undefined, { kind: "placeholder", name: "coming-soon" });
+  ok(withPhoto.fallback === null && withPhoto.imageId === "PD-own", "mfr images: a tile with its own photo has no fallback");
+}
+
+/* ======================================================================
+   Manufacturer images — key products for allowance/custom lines (pure).
+   ====================================================================== */
+import { isKeyProductEligible as mfdElig, keyProductStar as mfdStar, toggleKeyProduct as mfdToggle, printableKeyProducts as mfdPrintable, remapKeyProducts as mfdRemap, photoSkusOf as mfdPhotoSkus, isLineToken as mfdIsLine, sanitizeKeyProducts as mfdSanitize, resolveKeyProducts as mfdResolve, reanchorKeyProduct as mfdReanchor, fillEmptyKeyProductText as mfdFill, draftNarrative as mfdDraft, draftOverwrites as mfdOverwrites, manufacturerFallbackSkusOf as mfdMfrSkus, keyProductSkuOf as mfdSkuOf, unmarkedEligibleLines as mfdUnmarked } from "@/app/(app)/estimator/narrative";
+import { mergeNarrative as mfdMerge } from "@/lib/narrative/merge";
+{
+  const sec = { id: 1, name: "Sys", presentation: "narrative", items: [
+    { id: 11, sku: "", desc: "Lighting allowance", qty: 1, allowance: true },
+    { id: 12, sku: "CUSTOM", desc: "Custom truss", qty: 1, custom: true },
+    { id: 13, sku: "CUSTOM", desc: "Custom bracket", qty: 1, custom: true },
+  ], keyProducts: [] } as never;
+  ok(mfdElig((sec as { items: never[] }).items[0]) && mfdElig((sec as { items: never[] }).items[1]), "mfr images: allowance and custom lines can be key products");
+  ok(mfdUnmarked(sec).length === 3, "mfr images: the + Key product picker lists each allowance/custom line, even two CUSTOM lines");
+  let s = mfdToggle(sec, 11, ""); s = mfdToggle(s, 12, ""); s = mfdToggle(s, 13, "");
+  const kps = (s as { keyProducts: { sku: string; lineKey: string }[] }).keyProducts;
+  ok(kps.map((k) => k.sku).join() === "line:11,line:12,line:13", "mfr images: their blocks anchor on line tokens, so two CUSTOM lines can both be featured");
+  ok(mfdSanitize(kps).length === 3 && mfdIsLine("line:11") && !mfdIsLine("S4-19") && !mfdIsLine("line:") && !mfdIsLine("line:1a") && !mfdIsLine(undefined as never), "mfr images: line tokens survive sanitize");
+  const pr = mfdPrintable(s);
+  ok(pr.map((p) => p.placeholder).join() === "allowance,custom-device,custom-device", "mfr images: printable blocks carry their placeholder");
+  ok(mfdStar(s, (s as unknown as { items: never[] }).items[0]) === "on", "mfr images: the star reads on for a featured allowance line");
+  ok(mfdPhotoSkus([s]).every((k) => !mfdIsLine(k)), "mfr images: line tokens never trigger a catalog photo read");
+  const re = mfdRemap(kps as never, new Map([[11, 21], [12, 22], [13, 23]]));
+  ok(re?.map((k) => `${k.lineKey}:${k.sku}`).join() === "21:line:21,22:line:22,23:line:23", "mfr images: a remap rewrites the line token with the new id");
+}
+{
+  // Priced lines so the system prints in the body (photoSkusOf reads only those).
+  const L = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10, price: 25, ...extra });
+  const legacy = { id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "", items: [L(1, { allowance: true }), L(2), L(3, { allowance: true, sku: "" }), L(4, { custom: true, sku: "CUSTOM" })],
+    keyProducts: [
+      { lineKey: "1", sku: "SKU-1", text: "Legacy allowance block", photo: true },
+      { lineKey: "2", sku: "SKU-2", text: "Catalog block", photo: true },
+      { lineKey: "3", sku: "line:3", text: "", photo: true },
+      { lineKey: "4", sku: "line:4", text: "Hand-written custom text", photo: true },
+    ] } as never;
+  const res = mfdResolve(legacy);
+  ok(res.map((r) => r.status).join() === "ok,ok,ok,ok", "mfr images: a saved block on an allowance line's real sku still resolves (exactly as before)");
+  ok(mfdPhotoSkus([legacy]).join() === "SKU-1,SKU-2", "mfr images: photo reads cover real skus only, legacy ones included");
+  ok(mfdMfrSkus([legacy]).join() === "SKU-2", "mfr images: a placeholder block never takes the manufacturer image (allowance/custom come first in the chain)");
+  ok(mfdSkuOf(L(1, { allowance: true }) as never) === "line:1" && mfdSkuOf(L(2) as never) === "SKU-2", "mfr images: keyProductSkuOf is the anchor a new block takes");
+  ok(mfdFill(legacy, 3, "line:3", "Library text") === legacy, "mfr images: a line token never takes library text");
+  const d = mfdDraft(legacy, null, new Map([["SKU-1", { inCatalog: true, desc: "d1", paragraph: "P1" }], ["SKU-2", { inCatalog: true, desc: "d2", paragraph: null }]]), "replace");
+  const dk = (d.section.keyProducts || []) as { sku: string; text: string }[];
+  ok(dk[2].text === "" && dk[3].text === "Hand-written custom text" && !d.needsParagraph.some((k) => mfdIsLine(k)) && d.needsParagraph.join() === "SKU-2",
+    "mfr images: Draft narrative leaves line-token blocks untouched and never counts them as needing a paragraph");
+  const onlyLine = { ...(legacy as object), presentation: "narrative", narrative: "x", keyProducts: [(legacy as { keyProducts: unknown[] }).keyProducts[3]] } as never;
+  ok(!mfdOverwrites(onlyLine, null, new Map()), "mfr images: Draft never asks before overwriting a line-token block (it never writes one)");
+  // A line token whose line stopped being allowance/custom: changed → Re-anchor adopts the real sku.
+  const flipped = { ...(legacy as object), items: [L(1, { allowance: true }), L(2), L(3), L(4, { custom: true, sku: "CUSTOM" })] } as never;
+  ok(mfdResolve(flipped)[2].status === "changed", "mfr images: a line token on a line that is no longer allowance/custom reads changed");
+  ok(((mfdReanchor(flipped, 2).keyProducts || []) as { sku: string }[])[2].sku === "SKU-3", "mfr images: Re-anchor adopts the line's real sku");
+  // Merge: a library line token never matches a line elsewhere and counts nowhere.
+  const tgt = { id: "t", name: "T", kind: "materials", mfr: "", freightPct: 0, items: [L(4, { custom: true, sku: "CUSTOM" }), L(5)] } as never;
+  const m = mfdMerge(tgt, [{ systemName: "Src", intro: "", keyProducts: [{ sku: "line:4", text: "x", photo: true }, { sku: "SKU-5", text: "five", photo: true }] }], { intro: false, products: true });
+  ok(m.productsAdded === 1 && !m.skippedNoLine.length && !m.skippedPresent.length && !m.skippedFull.length && ((m.section.keyProducts || []) as { sku: string }[]).map((k) => k.sku).join() === "SKU-5",
+    "mfr images: Merge narrative skips line-token blocks without counting them");
+}
+{
+  // #297 final review I1: a custom line saved to the catalog keeps its real sku
+  // and anchors on it like any part; only a blank / generic placeholder sku
+  // ("CUSTOM", "AI", any case) or an allowance line takes a line token.
+  const L = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10, price: 25, ...extra });
+  const sec = { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "", keyProducts: [], items: [
+    L(1, { custom: true, sku: "PART-77" }),
+    L(2, { custom: true, sku: "CUSTOM" }),
+    L(3, { custom: true, sku: " custom " }),
+    L(4, { custom: true, sku: "AI" }),
+    L(5, { custom: true, sku: "ai" }),
+    L(6, { custom: true, sku: "  " }),
+  ] } as never;
+  const its = (sec as { items: never[] }).items;
+  ok(mfdSkuOf(its[0]) === "PART-77", "mfr images: a custom line with a real catalog sku anchors on that sku");
+  ok(mfdSkuOf(its[1]) === "line:2" && mfdSkuOf(its[2]) === "line:3" && mfdSkuOf(its[3]) === "line:4" && mfdSkuOf(its[4]) === "line:5" && mfdSkuOf(its[5]) === "line:6",
+    "mfr images: a custom line with a blank or generic sku (CUSTOM / AI, any case) anchors on its line token");
+  let s = sec as Parameters<typeof mfdToggle>[0];
+  for (const id of [1, 2, 3, 4, 5, 6]) s = mfdToggle(s, id, id === 1 ? "Library paragraph" : "");
+  const kps = ((s as { keyProducts: { sku: string; text: string }[] }).keyProducts || []);
+  ok(kps.map((k) => k.sku).join() === "PART-77,line:2,line:3,line:4,line:5,line:6" && kps[0].text === "Library paragraph",
+    "mfr images: a real-sku custom line takes its library paragraph; generic CUSTOM lines can all be featured");
+  ok(mfdResolve(s).every((r) => r.status === "ok"), "mfr images: every custom block resolves");
+  const pr = mfdPrintable(s);
+  ok(pr[0].sku === "PART-77" && pr[0].placeholder === "custom-device", "mfr images: a real-sku custom block still carries the Custom Device placeholder");
+  ok(mfdPhotoSkus([s]).join() === "PART-77", "mfr images: a real-sku custom block reads its own photo; tokens read nothing");
+  ok(mfdMfrSkus([s]).length === 0, "mfr images: a real-sku custom block never takes the manufacturer image (Custom Device comes first)");
+  // A saved pre-Part-1 block on a generic custom line's "CUSTOM" sku still resolves.
+  const legacy = { ...(sec as object), keyProducts: [{ lineKey: "2", sku: "CUSTOM", text: "Old", photo: true }] } as never;
+  ok(mfdResolve(legacy)[0].status === "ok", "mfr images: a pre-Part-1 block on a generic CUSTOM sku still resolves");
+  ok(readFileSync("src/lib/specs/record-keys.ts", "utf8").includes('"CUSTOM", "AI"') && readFileSync("src/app/(app)/estimator/estimator-client.tsx", "utf8").includes('|| "CUSTOM")') && readFileSync("src/app/(app)/estimator/estimator-client.tsx", "utf8").includes('sku: "AI",'),
+    "mfr images: the generic skus the Estimator writes (CUSTOM, AI) are the placeholder set");
+  const col = readFileSync("src/app/(app)/estimator/narrative-column.tsx", "utf8");
+  const iOwn = col.indexOf("{row?.photoDocId ? ("), iCustom = col.indexOf('placeholder === "custom-device" ? ('), iMfr = col.indexOf("row?.fallbackDocId ? (");
+  ok(iOwn > 0 && iOwn < iCustom && iCustom < iMfr, "mfr images: the narrative column hint follows the chain — own photo, then Custom Device, then the manufacturer image");
+  ok(col.includes('"Removed line"') && !col.includes("item?.desc || kp.sku"), "mfr images: a removed line-token block never shows its raw token as a title");
+  const mpage = readFileSync("src/app/(app)/catalog/manufacturers/page.tsx", "utf8");
+  ok(mpage.includes("state.index.docsById.get(r.id)?.blobKey") && !mpage.includes('"datasheet-render"'), "mfr images: Manufacturers counts photos by the portal's own-photo rule");
+  ok(readFileSync("src/app/(app)/catalog/manufacturers/manufacturers-client.tsx", "utf8").includes('loading="lazy" decoding="async"'), "mfr images: Manufacturers table thumbnails load lazily");
+}
+
+/* ======================================================================
+   Manufacturer images — the document prints the placeholder (render).
+   ====================================================================== */
+import { qd293Props as mfdQdProps, qd293Sections as mfdQdSections, renderQuoteDocument293 as mfdQdRender } from "./qd293-cases";
+{
+  const secs = mfdQdSections();
+  secs[1].items = [...secs[1].items, { id: 9, sku: "", desc: "Fixture allowance", qty: 1, unit: "ea", cost: 10, price: 25, allowance: true } as never, { id: 10, sku: "CUSTOM", desc: "Custom bracket", qty: 1, unit: "ea", cost: 10, price: 25, custom: true } as never];
+  secs[1].keyProducts = [
+    { lineKey: "5", sku: "SKU-5", text: "Five.", photo: true },
+    { lineKey: "9", sku: "line:9", text: "Allowance para.", photo: true },
+    { lineKey: "10", sku: "line:10", text: "Custom para.", photo: true },
+    { lineKey: "6", sku: "SKU-6", text: "Six, no photo.", photo: true },
+  ];
+  const html = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" } } });
+  ok(html.includes('src="/placeholders/allowance.webp"') && html.includes('src="/placeholders/custom-device.webp"') && html.includes('src="data:image/png;base64,QUFB"'),
+    "mfr images: an allowance/custom key product prints its placeholder; a catalog photo still prints");
+  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 3 && html.includes("Budget allowance — Fixture allowance"), "mfr images: placeholders float like a photo; a catalog block with no photo prints full width");
+  secs[1].keyProducts = secs[1].keyProducts.map((k) => ({ ...k, photo: false }));
+  const off = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: {} });
+  ok(!off.includes("/placeholders/") && (off.match(/class="est-kp"/g) || []).length === 4, "mfr images: Photo off drops the placeholder too");
+}
+{
+  const mw = readFileSync("src/middleware.ts", "utf8");
+  ok(/\|placeholders\//.test(mw), "mfr images: /placeholders/ is public, so the print route, share page and portal (no team session) can load them");
+  const col = readFileSync("src/app/(app)/estimator/narrative-column.tsx", "utf8");
+  ok(col.includes("Prints the Allowance placeholder") && col.includes("Prints the Custom Device placeholder") && col.includes("Prints the manufacturer image (") && col.includes("No photo — prints full width"),
+    "mfr images: the narrative column says what will print");
+}
+
+/* ======================================================================
+   Manufacturer images — documents fall back to the manufacturer image (PGlite).
+   ====================================================================== */
+import { keyProductPhotoDocs as mfdPhotoDocs } from "@/lib/narrative/photos";
+import { keyProductLibrary as mfdLibrary } from "@/lib/narrative/library";
+import { setManufacturerImage as mfdSetImg } from "@/lib/stores/manufacturers";
+import { createDocument as mfdCreateDoc, attachDocument as mfdAttach } from "@/lib/stores/part-documents";
+async function mfrDocsAsyncChecks(): Promise<void> {
+  const SKU = fixtureId("MFD", "PART-1");
+  const SKU2 = fixtureId("MFD", "PART-2");
+  await upsertPart({ id: SKU, sku: SKU, desc: "mfr doc part", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "MfdBrand" });
+  registerFixture("catalog_parts", SKU);
+  await upsertPart({ id: SKU2, sku: SKU2, desc: "mfr doc part 2", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "MfdBrand" });
+  registerFixture("catalog_parts", SKU2);
+  const doc = await mfdCreateDoc({ kind: "image", title: "MfdBrand (manufacturer)", fileName: "m.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/y/m.webp", sourceUrl: null, source: "manufacturer", sourceRef: "mfr:mfdbrand", by: "mfr test" });
+  if (doc) registerFixture("part_documents", doc.id);
+  const own = await mfdCreateDoc({ kind: "image", title: "Own photo", fileName: "o.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/z/o.webp", sourceUrl: null, source: "upload", by: "mfr test" } as never);
+  if (own) registerFixture("part_documents", own.id);
+  await mfdAttach(own!.id, [SKU2], "mfr test");
+  const m = await mfdSetImg({ name: "MfdBrand", documentId: doc!.id, by: "mfr test" });
+  registerFixture("manufacturers", m.id);
+  const L = (id: number, sku: string, extra: Record<string, unknown> = {}) => ({ id, sku, desc: "d" + id, qty: 1, unit: "ea", cost: 50, price: 100, ...extra });
+  const sec = { id: "s1", name: "S", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "", items: [L(5, SKU), L(6, SKU2), L(7, "", { allowance: true })],
+    keyProducts: [{ lineKey: "5", sku: SKU, text: "Para", photo: true }, { lineKey: "6", sku: SKU2, text: "Own", photo: true }, { lineKey: "7", sku: "line:7", text: "Allow", photo: true }] } as never;
+  const docs = await mfdPhotoDocs([sec]);
+  ok(docs.get(SKU)?.id === doc!.id, "mfr images: a key product with no photo resolves its manufacturer image document");
+  ok(docs.get(SKU2)?.id === own!.id && docs.size === 2 && ![...docs.keys()].some((k) => k.startsWith("line:")), "mfr images: a part's own photo wins; a line token reads nothing");
+  const legacySec = { ...(sec as object), items: [L(5, SKU, { allowance: true })], keyProducts: [{ lineKey: "5", sku: SKU, text: "Legacy", photo: true }] } as never;
+  ok(!(await mfdPhotoDocs([legacySec])).has(SKU), "mfr images: a legacy allowance block on a catalog sku with no photo prints the allowance placeholder, not the manufacturer image");
+  const lib = await mfdLibrary([SKU, SKU2, "line:7"]);
+  ok(lib[SKU]?.photoDocId === null && lib[SKU]?.fallbackDocId === doc!.id && lib[SKU]?.fallbackLabel === "MfdBrand", "mfr images: the narrative column learns what will print instead");
+  ok(lib[SKU2]?.photoDocId === own!.id && lib[SKU2]?.fallbackDocId === null && lib[SKU2]?.fallbackLabel === null && !("line:7" in lib), "mfr images: a part with a photo has no fallback; a line token gets no library row");
+  // #297 final review I1: a custom line saved to the catalog ("Custom Parts")
+  // keeps its real sku — its own photo prints; with none, the Custom Device
+  // placeholder does, never the manufacturer image.
+  const CSKU = fixtureId("MFD", "CUSTOM-1");
+  const CSKU2 = fixtureId("MFD", "CUSTOM-2");
+  await upsertPart({ id: CSKU, sku: CSKU, desc: "custom part with photo", category: "Custom Parts", unit: "ea", list: 10, cost: 5, mfr: "MfdBrand" });
+  registerFixture("catalog_parts", CSKU);
+  await upsertPart({ id: CSKU2, sku: CSKU2, desc: "custom part no photo", category: "Custom Parts", unit: "ea", list: 10, cost: 5, mfr: "MfdBrand" });
+  registerFixture("catalog_parts", CSKU2);
+  await mfdAttach(own!.id, [CSKU], "mfr test");
+  const cItems = [L(8, CSKU, { custom: true }), L(9, CSKU2, { custom: true }), L(10, "CUSTOM", { custom: true })];
+  const cKps = cItems.map((it) => ({ lineKey: String(it.id), sku: mfdSkuOf(it as never), text: "C", photo: true }));
+  ok(cKps.map((k) => k.sku).join() === [CSKU, CSKU2, "line:10"].join(), "mfr images: a catalog custom line anchors on its real sku; a generic one on its token");
+  const cSec = { ...(sec as object), items: cItems, keyProducts: cKps } as never;
+  const cDocs = await mfdPhotoDocs([cSec]);
+  ok(cDocs.get(CSKU)?.id === own!.id, "mfr images: a custom line with a real catalog sku prints its own photo");
+  ok(!cDocs.has(CSKU2) && cDocs.size === 1, "mfr images: a real-sku custom line with no photo takes no manufacturer image (Custom Device prints)");
+  ok(mfdPrintable(cSec).map((p) => p.placeholder).join() === "custom-device,custom-device,custom-device", "mfr images: every custom block falls back to Custom Device");
+  const cLib = await mfdLibrary([CSKU, CSKU2]);
+  ok(cLib[CSKU]?.inCatalog === true && cLib[CSKU]?.photoDocId === own!.id && cLib[CSKU2]?.inCatalog === true && cLib[CSKU2]?.photoDocId === null,
+    "mfr images: a real-sku custom line loads its library row (paragraph + own photo)");
+}
+
+/* ======================================================================
+   Manufacturer images — curtain cut sheets (PGlite).
+   ====================================================================== */
+import { cutSheetPhotoDocs as mfcPhotoDocs } from "@/lib/curtain-cut-sheets/load";
+import { setManufacturerImage as mfcSetImg } from "@/lib/stores/manufacturers";
+import { createDocument as mfcCreateDoc, attachDocument as mfcAttach } from "@/lib/stores/part-documents";
+async function mfrCutSheetAsyncChecks(): Promise<void> {
+  const A = fixtureId("MFC", "PART-A");
+  const B = fixtureId("MFC", "PART-B");
+  const C = fixtureId("MFC", "PART-C");
+  for (const [sku, mfr] of [[A, "MfcBrand"], [B, "MfcBrand"], [C, "MfcNoImage"]] as const) {
+    await upsertPart({ id: sku, sku, desc: "mfr cut part " + sku, category: "Fabric", unit: "yd", list: 10, cost: 5, mfr });
+    registerFixture("catalog_parts", sku);
+  }
+  const mk = async (title: string, source: string, blobKey: string | null) => {
+    const d = await mfcCreateDoc({ kind: "image", title, fileName: title + ".webp", contentType: "image/webp", size: 10, blobKey, sourceUrl: null, source, sourceRef: source === "manufacturer" ? "mfr:mfcbrand" : undefined, by: "mfr test" } as never);
+    if (d) registerFixture("part_documents", d.id);
+    return d!;
+  };
+  const mdoc = await mk("MfcBrand (manufacturer)", "manufacturer", "part-docs/c/m.webp");
+  const own = await mk("MfcOwn", "upload", "part-docs/c/o.webp");
+  await mfcAttach(own.id, [B], "mfr test");
+  const m = await mfcSetImg({ name: "MfcBrand", documentId: mdoc.id, by: "mfr test" });
+  registerFixture("manufacturers", m.id);
+  const docs = await mfcPhotoDocs([A, B, C]);
+  ok(docs.get(A)?.id === mdoc.id, "mfr images: a cut-sheet sku with no photo resolves its manufacturer image document");
+  ok(docs.get(B)?.id === own.id, "mfr images: a cut-sheet sku keeps its own photo over the manufacturer image");
+  ok(!docs.has(C), "mfr images: a cut-sheet sku whose manufacturer has no image has no photo (no placeholder)");
+  ok((await mfcPhotoDocs([])).size === 0, "mfr images: no skus, no photos");
 }

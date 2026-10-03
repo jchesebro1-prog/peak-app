@@ -317,6 +317,7 @@ export async function searchDocumentsAction(q: string): Promise<DocActionResult<
   const tokens = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!tokens.length) return { ok: true, hits: [] };
   const hits = (await allDocuments())
+    .filter((d) => d.source !== "manufacturer") // a manufacturer image is never offered as "attach existing" to a part
     .filter((d) => {
       const hay = `${d.title} ${d.fileName}`.toLowerCase();
       return tokens.every((t) => hay.includes(t));

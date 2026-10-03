@@ -1,5 +1,6 @@
 import type { KeyProduct, SpecItem, SpecSection } from "./types";
 import { systemPrintsInBody } from "./quote-document-view";
+import { isPlaceholderSku } from "@/lib/specs/record-keys";
 /**
  * #281 — a system narrative's plain-text formatting, turned into printable
  * blocks. Pure (no React) so the test:specs harness can import it.
@@ -63,6 +64,11 @@ export type KeyProductLibraryRow = LibraryInfo & {
   paragraphUpdatedBy: string | null;
   /** The part's primary visible image (visibleImagesForParts()[sku][0]). */
   photoDocId: string | null;
+  /** What the document prints instead when there is no photo: the part's
+   *  manufacturer image (Manufacturer section Part 1), else null. */
+  fallbackDocId: string | null;
+  /** The manufacturer name that image belongs to (the column's hint). */
+  fallbackLabel: string | null;
 };
 /** saveProductParagraphAction's answer — declared here because a "use server"
  *  file may export only async functions. */
@@ -73,9 +79,36 @@ export type ParagraphSaveResponse =
 /** sanitizeKeyProducts caps a stored sku at this length, so a longer one can
  *  never round-trip a save — such a line is not eligible (no star). */
 const MAX_SKU = 128;
-const skuOf = (it: Pick<SpecItem, "sku"> | null | undefined): string => {
+/** The line's own sku, trimmed ("" past MAX_SKU) — the pre-Part-1 anchor. */
+const realSkuOf = (it: Pick<SpecItem, "sku"> | null | undefined): string => {
   const s = it && typeof it.sku === "string" ? it.sku.trim() : "";
   return s.length > MAX_SKU ? "" : s;
+};
+/** A key product's anchor sku: the line's real sku, or `line:<id>` for a
+ *  line with no usable sku (Manufacturer section Part 1) — an allowance line,
+ *  or a custom line whose sku is blank, too long, or a generic placeholder
+ *  the Estimator writes ("CUSTOM", "AI"…, `isPlaceholderSku`). A custom line
+ *  saved to the catalog keeps its real sku and anchors on it like any part,
+ *  so its own photo and library paragraph still load. A token is unique per
+ *  line, so two generic CUSTOM lines can both be featured, and a token never
+ *  reaches the catalog, the library or a photo read. */
+const skuOf = (it: Pick<SpecItem, "sku" | "id" | "allowance" | "custom"> | null | undefined): string => {
+  if (!it) return "";
+  if (it.allowance) return `line:${it.id}`;
+  const real = realSkuOf(it);
+  if (it.custom && (!real || isPlaceholderSku(real))) return `line:${it.id}`;
+  return real;
+};
+/** The anchor a new block on this line takes (the ★, the + Key product picker). */
+export const keyProductSkuOf = (it: Pick<SpecItem, "sku" | "id" | "allowance" | "custom">): string => skuOf(it);
+export const isLineToken = (sku: string): boolean => typeof sku === "string" && /^line:\d+$/.test(sku);
+/** Does a saved block's sku still anchor on this line? The current anchor, or
+ *  — for a tokenized line featured before Part 1 — its real sku, so
+ *  existing saved quotes resolve exactly as before. */
+const anchorsOn = (item: SpecItem, sku: string): boolean => {
+  const cur = skuOf(item);
+  if (cur === sku) return true;
+  return isLineToken(cur) && !!sku && !isLineToken(sku) && realSkuOf(item) === sku;
 };
 
 /** A line that can be featured: a real sku, and not labor / overhead /
@@ -105,7 +138,7 @@ export function resolveKeyProducts(sec: SpecSection): KeyProductResolution[] {
     const kp = raw as KeyProduct;
     const item = items.find((it) => it && String(it.id) === kp.lineKey);
     if (!item) return { kp, status: "missing" };
-    if (skuOf(item) !== kp.sku) return { kp, status: "changed", item };
+    if (!anchorsOn(item, kp.sku)) return { kp, status: "changed", item };
     if (!isKeyProductEligible(item)) return { kp, status: "ineligible", item };
     return { kp, status: "ok", item };
   });
@@ -160,7 +193,9 @@ export function remapKeyProducts(kps: KeyProduct[] | undefined, idMap: ReadonlyM
   for (const kp of kps) {
     const n = Number(kp.lineKey);
     const next = Number.isFinite(n) ? idMap.get(n) : undefined;
-    if (next != null) out.push({ ...kp, lineKey: String(next) });
+    if (next == null) continue;
+    // A line token names the line id, so it follows the re-id.
+    out.push(isLineToken(kp.sku) ? { ...kp, lineKey: String(next), sku: `line:${next}` } : { ...kp, lineKey: String(next) });
   }
   return out;
 }
@@ -198,6 +233,8 @@ export function toggleKeyProduct(sec: SpecSection, itemId: number, libraryText: 
  *  the block anchored at `itemId` — only while that block still features
  *  `sku` and its text is still empty (a user's typing always wins). */
 export function fillEmptyKeyProductText(sec: SpecSection, itemId: number, sku: string, text: string): SpecSection {
+  // A line token has no library paragraph to copy.
+  if (isLineToken(sku)) return sec;
   const kps = Array.isArray(sec.keyProducts) ? sec.keyProducts : [];
   const i = kps.findIndex((k) => k.lineKey === String(itemId) && k.sku === sku);
   if (i < 0 || !text || (kps[i].text || "").trim()) return sec;
@@ -294,7 +331,9 @@ export function draftNarrative(
   const before = sec.keyProducts || [];
   const kps = before.map((kp, i) => {
     const r = res[i];
-    if (r.status !== "ok") return kp;
+    // A line-token block (allowance/custom line) has no library or catalog
+    // text: its paragraph is always hand-written, so Draft never touches it.
+    if (r.status !== "ok" || isLineToken(kp.sku)) return kp;
     const lib = library.get(kp.sku);
     if (lib?.paragraph == null && !needs.includes(kp.sku)) needs.push(kp.sku);
     if (mode === "blanks" && kp.text.trim()) return kp;
@@ -316,7 +355,7 @@ export function draftOverwrites(sec: SpecSection, intro: string | null, library:
   const cur = (sec.narrative || "").trim();
   if (introText != null && cur && cur !== introText) return true;
   return resolveKeyProducts(sec).some(
-    (r) => r.status === "ok" && r.kp.text.trim() !== "" && r.kp.text.trim() !== draftTextFor(r.item, library.get(r.kp.sku)).trim()
+    (r) => r.status === "ok" && !isLineToken(r.kp.sku) && r.kp.text.trim() !== "" && r.kp.text.trim() !== draftTextFor(r.item, library.get(r.kp.sku)).trim()
   );
 }
 
@@ -326,12 +365,28 @@ export function keyProductHeading(it: SpecItem): string {
   return it.allowance ? "Budget allowance — " + it.desc : it.desc;
 }
 
-export type PrintableKeyProduct = { sku: string; heading: string; blocks: NarrativeBlock[]; photo: boolean };
+export type PrintableKeyProduct = {
+  sku: string;
+  heading: string;
+  blocks: NarrativeBlock[];
+  photo: boolean;
+  /** An allowance / custom line: what prints when the block has no photo of
+   *  its own (Manufacturer section Part 1). Absent on every other block. */
+  placeholder?: "allowance" | "custom-device";
+};
 /** What prints for a narrative system: resolved "ok" blocks in order. */
 export function printableKeyProducts(sec: SpecSection): PrintableKeyProduct[] {
   return resolveKeyProducts(sec).flatMap((r) =>
     r.status === "ok"
-      ? [{ sku: r.kp.sku, heading: keyProductHeading(r.item), blocks: narrativeBlocks(typeof r.kp.text === "string" ? r.kp.text : ""), photo: r.kp.photo !== false }]
+      ? [
+          {
+            sku: r.kp.sku,
+            heading: keyProductHeading(r.item),
+            blocks: narrativeBlocks(typeof r.kp.text === "string" ? r.kp.text : ""),
+            photo: r.kp.photo !== false,
+            ...(r.item.allowance ? { placeholder: "allowance" as const } : r.item.custom ? { placeholder: "custom-device" as const } : {}),
+          },
+        ]
       : []
   );
 }
@@ -340,10 +395,23 @@ export function printableKeyProducts(sec: SpecSection): PrintableKeyProduct[] {
  *  narrative systems' printable blocks with photo on, deduped, in document
  *  order — a system the body skips never costs a photo read. */
 export function photoSkusOf(sections: SpecSection[]): string[] {
+  return printedPhotoSkus(sections, () => true);
+}
+
+/** The photo skus that may take their manufacturer's image when the part has
+ *  no photo of its own: not a placeholder block (a custom line on a real
+ *  catalog sku, or a legacy allowance/custom block — the kind placeholder
+ *  comes before the manufacturer image in the chain). */
+export function manufacturerFallbackSkusOf(sections: SpecSection[]): string[] {
+  return printedPhotoSkus(sections, (p) => !p.placeholder);
+}
+
+/** Line tokens never reach a catalog/photo read (they print a placeholder). */
+function printedPhotoSkus(sections: SpecSection[], keep: (p: PrintableKeyProduct) => boolean): string[] {
   const out: string[] = [];
   for (const sec of Array.isArray(sections) ? sections : []) {
     if (!sec || (sec.presentation || "itemized") !== "narrative" || !systemPrintsInBody(sec)) continue;
-    for (const p of printableKeyProducts(sec)) if (p.photo && !out.includes(p.sku)) out.push(p.sku);
+    for (const p of printableKeyProducts(sec)) if (p.photo && !isLineToken(p.sku) && keep(p) && !out.includes(p.sku)) out.push(p.sku);
   }
   return out;
 }

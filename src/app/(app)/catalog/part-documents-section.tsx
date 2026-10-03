@@ -18,6 +18,7 @@ const IMAGE_SOURCE_LABEL: Record<PartDocumentSource, string> = {
   upload: "Upload",
   drive: "Drive",
   sheet: "Sheet",
+  manufacturer: "Manufacturer",
   fetch: "From URL",
   "datasheet-render": "Datasheet thumbnail",
   davinci: "DaVinci",

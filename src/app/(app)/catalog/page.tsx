@@ -269,6 +269,22 @@ export default async function CatalogPage({
           >
             Datasheets
           </Link>
+          {/* Manufacturer section Part 1 — one image per manufacturer. */}
+          <Link
+            href="/catalog/manufacturers"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#16181d",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
+              borderRadius: 9,
+              padding: "10px 15px",
+              textDecoration: "none",
+            }}
+          >
+            Manufacturers
+          </Link>
           {/* #226 — the Grid's device types (admin). */}
           {isAdmin && (
             <Link

@@ -30,7 +30,7 @@ export function preflight(file: File, kind: PartDocKind): string | null {
   return null;
 }
 
-async function putFile(file: File, documentId: string): Promise<Result<{ pathname: string }>> {
+export async function putFile(file: File, documentId: string): Promise<Result<{ pathname: string }>> {
   try {
     const res = await upload(partDocBlobPath(documentId, file.name), file, {
       access: "private",

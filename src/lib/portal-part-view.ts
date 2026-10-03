@@ -1,5 +1,6 @@
 import type { IndexedFixture } from "@/lib/portal-catalog-index";
 import { includedLines, type TileVM } from "@/lib/portal-catalog-view";
+import type { ImageFallback } from "@/lib/part-image-fallback";
 
 /**
  * Portal part sidebar — pure, client-safe shapes + helpers (#245 Task 11,
@@ -31,6 +32,8 @@ export type PartDetailPart = {
   unitPrice: number | null;
   por: boolean;
   images: string[];
+  /** Shown in the gallery when `images` is empty (Manufacturer section Part 1). */
+  fallback: ImageFallback | null;
   docs: PartDocVM[];
   specText: string | null;
   goesWith: TileVM[];
@@ -51,6 +54,7 @@ export type PartDetailFixture = {
   fixed: Array<{ sku: string; label: string; qty: number }>;
   addOns: FixtureAddOnVM[];
   images: string[];
+  fallback: ImageFallback | null;
   docs: PartDocVM[];
 };
 
@@ -124,8 +128,9 @@ type PartSource = {
 };
 
 /** The part sidebar's view of one part — an explicit whitelist, sell only. */
-export function toPartDetailVM(p: PartSource, price: Price, docs: readonly PartDocVM[], goesWith: readonly TileVM[]): PartDetailPart {
+export function toPartDetailVM(p: PartSource, price: Price, docs: readonly PartDocVM[], goesWith: readonly TileVM[], fallback: ImageFallback | null = null): PartDetailPart {
   const s = sell(price);
+  const images = [...(p.imageIds ?? [])].map(String);
   return {
     kind: "part",
     key: String(p.sku),
@@ -136,7 +141,8 @@ export function toPartDetailVM(p: PartSource, price: Price, docs: readonly PartD
     unit: String(p.unit || "ea"),
     unitPrice: s.unitPrice,
     por: s.por,
-    images: [...(p.imageIds ?? [])].map(String),
+    images,
+    fallback: images.length ? null : fallback,
     docs: customerPartDocs(docs),
     specText: typeof p.specText === "string" && p.specText.trim() ? p.specText : null,
     goesWith: goesWith.slice(0, GOES_WITH_MAX),
@@ -154,7 +160,8 @@ export function toFixtureDetailVM(
   mfr: string,
   price: Price,
   addOnPrice: (sku: string) => Price,
-  media: { images: readonly string[]; docs: readonly PartDocVM[] }
+  media: { images: readonly string[]; docs: readonly PartDocVM[] },
+  fallback: ImageFallback | null = null
 ): PartDetailFixture {
   const s = sell(price);
   return {
@@ -175,6 +182,7 @@ export function toFixtureDetailVM(
         return { key: fixtureOptionKey(l), sku: String(l.sku), label: String(l.label || l.sku), unitPrice: a.unitPrice, por: a.por };
       }),
     images: [...media.images].map(String),
+    fallback: media.images.length ? null : fallback,
     docs: customerPartDocs(media.docs),
   };
 }

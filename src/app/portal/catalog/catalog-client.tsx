@@ -8,7 +8,7 @@ import type { DeptTileVM } from "@/lib/portal-departments";
 import type { PartDetail } from "@/lib/portal-part-view";
 import { CurtainRequestButton } from "./curtain-request";
 import { PANEL_CSS } from "./panel-css";
-import { docSrc, money, useAddToQuote } from "./panel-ui";
+import { docSrc, FallbackImg, money, useAddToQuote } from "./panel-ui";
 import { PartSidebar } from "./part-sidebar";
 import {
   catalogHref,
@@ -133,19 +133,6 @@ function SearchIcon() {
   );
 }
 
-function DatasheetArt() {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, color: "#9aa0ab" }}>
-      <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
-        <path d="M6 2.8h8.2L19 7.6v13.6H6z" />
-        <path d="M14 2.8v5h5" />
-        <path d="M8.8 12h7.4M8.8 15h7.4M8.8 18h4.6" strokeLinecap="round" />
-      </svg>
-      <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".04em", textTransform: "uppercase" }}>Datasheet</span>
-    </div>
-  );
-}
-
 function PlaceholderArt() {
   return (
     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#c3c7ce" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
@@ -181,12 +168,12 @@ function Tile({
   const showImage = !!t.imageId && !broken;
   return (
     <article className="pc-tile">
-      <Link href={href} scroll={false} className={"pc-media" + (showImage ? "" : " pc-media-empty")} aria-label={t.title} tabIndex={-1}>
+      <Link href={href} scroll={false} className={"pc-media" + (showImage || t.fallback ? "" : " pc-media-empty")} aria-label={t.title} tabIndex={-1}>
         {showImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={docSrc(t.imageId!, previewCid)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
-        ) : t.hasDatasheet ? (
-          <DatasheetArt />
+        ) : t.fallback ? (
+          <FallbackImg fallback={t.fallback} previewCid={previewCid} />
         ) : (
           <PlaceholderArt />
         )}
@@ -488,12 +475,12 @@ export function CatalogClient({
               <div className="pc-dept-grid">
                 {tiles.map((t) => (
                   <Link key={t.id} href={catalogHref(params, { dept: t.id, page: 1 }, previewCid)} scroll={false} className="pc-dept-tile">
-                    <div className={"pc-dept-media" + (t.imageId ? "" : " pc-media-empty")}>
+                    <div className="pc-dept-media">
                       {t.imageId ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={docSrc(t.imageId, previewCid)} alt="" loading="lazy" decoding="async" />
                       ) : (
-                        <PlaceholderArt />
+                        <FallbackImg fallback={{ kind: "placeholder", name: "coming-soon" }} previewCid={previewCid} />
                       )}
                     </div>
                     <div className="pc-dept-body">

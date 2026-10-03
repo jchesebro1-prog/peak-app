@@ -2,7 +2,8 @@
 // prices through portal-pricing.ts. Never import into a client component; it
 // hands the browser sell-only `PartDetail`s (see portal-part-view.ts).
 import type { PortalSession } from "@/lib/portal";
-import { fixtureComponentPart, portalIndex, type PortalIndex } from "@/lib/portal-catalog-index";
+import { fixtureComponentPart, portalIndex, portalMfrImage, type PortalIndex } from "@/lib/portal-catalog-index";
+import { isCustomCategory, portalFallback } from "@/lib/part-image-fallback";
 import { PORTAL_EXPIRED_COPY, portalBrowseAllowed, PORTAL_BROWSE_RATE_COPY, tilesFor } from "@/lib/portal-catalog-browse";
 import {
   cleanFixtureOptions,
@@ -48,15 +49,17 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
     const engine = ix.parts.get(fx.lightEngineSku);
     const o = { margin: ctx.margin, staleCostMonths: ctx.staleCostMonths, now: ctx.now };
     const docIds = [...new Set(fx.lines.filter((l) => l.required).flatMap((l) => ix.parts.get(l.sku)?.datasheetIds ?? []))];
+    const fixturePrice = await priceFixture(fx.id, {}, ctx);
     return toFixtureDetailVM(
       fx,
       engine?.mfr ?? "",
-      await priceFixture(fx.id, {}, ctx),
+      fixturePrice,
       (sku) => {
         const p = fixtureComponentPart(ix, sku);
         return p ? unitPriceFor(p, o) : null;
       },
-      { images: engine?.imageIds ?? [], docs: docsFor(ix, docIds) }
+      { images: engine?.imageIds ?? [], docs: docsFor(ix, docIds) },
+      portalFallback({ mfr: engine?.mfr, custom: isCustomCategory(engine?.category), por: !fixturePrice || fixturePrice.por }, portalMfrImage(ix))
     );
   }
 
@@ -70,7 +73,8 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
     if (accessories.length >= GOES_WITH_MAX) break;
   }
   const [price, goesWith] = await Promise.all([priceSku(part.sku, ctx), tilesFor(accessories, ix, ctx)]);
-  return toPartDetailVM(part, price, docsFor(ix, part.datasheetIds), goesWith);
+  const fallback = portalFallback({ mfr: part.mfr, custom: isCustomCategory(part.category), por: !price || price.por }, portalMfrImage(ix));
+  return toPartDetailVM(part, price, docsFor(ix, part.datasheetIds), goesWith, fallback);
 }
 
 export type PartDetailResult = { ok: true; detail: PartDetail } | { ok: false; error: string };
