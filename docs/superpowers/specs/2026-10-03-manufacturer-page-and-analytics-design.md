@@ -76,9 +76,17 @@ different keys. **Merge into…** on a manufacturer's page folds it into another
 ## Part 3 — quoted cost and forecast
 
 ### What counts
-- **Quotes:** live system quotes with `spec.sections` (Estimator / Quick / Grid);
-  service quotes, Daylite history and deleted quotes carry no catalog lines and
-  are skipped by construction.
+- **Quotes:** Estimator-built system quotes (`spec.sections`, portal catalog
+  quotes included) and Grid quotes (flat `spec.lines`, at today's catalog cost —
+  below). Quick Design quotes are **not** counted (only `spec.fromDesign`, no
+  lines); service quotes and Daylite history carry no catalog lines. Deleted
+  quotes drop out because the quote store lists only live quotes.
+- **Grid lines:** a line's `sku` is the Grid part id (= catalog sku for a
+  catalog-backed part). Skip allowances (`allowance`, `allow:`), assemblies
+  (`asm:`), custom items (`custom:`), labor (`labor:`) and lines with no
+  catalog part. Sell = `ext` (else qty × price); cost = the catalog part's
+  current cost × qty (Grid lines carry no cost), flagged `includesCatalogCost`
+  and footnoted "Grid quotes use today's catalog cost."
 - **Lines:** every section item except labor (`labor`, a labor section,
   `laborOverhead`, `laborTravel`), options, the rewards credit, allowances and
   price-on-request lines. A line with `components` (fixtures) counts each

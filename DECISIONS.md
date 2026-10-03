@@ -9060,7 +9060,15 @@ key to its canonical key, flattening chains; merging into yourself or one of you
 its own image, company and notes, adopts the source's image or company only when it has none, and the people lists union
 (deduped by contact). Every lookup keyed by manufacturer reads the resolver: list rows, `manufacturerImageLookup`, the
 portal's `mfrImageDocs`, and the Part 1 image set / remove, which resolve to the canonical record so an image set through an
-alias is not stranded on a merged-away record. Unmerge removes the alias and clears `mergedInto`.
+alias is not stranded on a merged-away record, and Upload many resolves a file named for a merged-away spelling to its
+canonical row. Unmerge removes the alias and clears `mergedInto`. A merged-away record's own notes stay on that record —
+hidden while it is merged, shown again on unmerge; they are not copied to the target.
+
+The new fields (`aliasKeys`, `mergedInto`, `companyId`, `people`, `notes`) are **lost on a record if older code writes it**:
+the pre-#298 store rewrites the whole document with only the fields it knows, so a rollback — or a preview deploy built
+from a branch cut before this merge, since previews share the production database — that sets or removes a manufacturer's
+image drops them from that record. A merge then survives from the other side (the target's `aliasKeys` if an alias was
+rewritten, the aliases' `mergedInto` if the target was), but that record's people, notes and company link are gone.
 
 ## D590. A manufacturer's company, and reps from any company (#298, 2026-10-03)
 
@@ -9075,18 +9083,27 @@ not the manufacturer; the contact search is debounced and capped, and re-adding 
 The vendor a manufacturer is "supplied by" is not a new field: it is the existing vendor-profile claim
 (`claimManufacturerAction` / `releaseManufacturerAction`, one vendor per manufacturer spelling — claiming moves it). The page
 lists the vendors claiming any spelling in the merged group, so one page can show two when two spellings were claimed
-separately, each with its own Release. **Set vendor** claims only the page's canonical spelling; other spellings keep whoever
-claimed them until released. Reusing the claim keeps the vendor page, price lists and this page agreeing without a sync.
+separately, each with its own Release. **Set vendor** claims only the canonical record's own name (else, with no record, the
+canonical key's most common catalog spelling) — not the page heading, which can be an alias's more common spelling; other
+spellings keep whoever claimed them until released. Reusing the claim keeps the vendor page, price lists and this page agreeing without a sync.
 
 ## D592. What the analytics count (#298, 2026-10-03)
 
-Live system quotes with `spec.sections` (Estimator, Quick Design, Grid); service quotes, Daylite history and deleted quotes
-carry no catalog lines and drop out by construction. Lines skipped: labor (`labor`, a labor section, `laborOverhead`,
+Counted: **Estimator-built system quotes** (`spec.sections`, portal catalog quotes included) and **Grid quotes** (flat
+`spec.lines`). **Quick Design quotes are not counted** — they carry only `spec.fromDesign`, no lines — and neither are
+service quotes or Daylite history (no catalog lines). Deleted quotes drop out because the quote store lists only live
+quotes. Estimator lines skipped: labor (`labor`, a labor section, `laborOverhead`,
 `laborTravel`), options, the rewards credit, allowances and price-on-request. A fixture line with `components` counts each
 component (`qty = component.qty × line.qty`, the component's cost and price); any other line counts itself, and a line with
 quantity 0 counts nothing. Manufacturer is the catalog part's `mfr` by sku, else the line's own `manufacturer` text (a
 component falls back to its parent line's), resolved to the canonical key; no manufacturer is skipped. **Cost is the cost as
 quoted** on the line — what Peak expected to pay then, not today's price book — with sell shown beneath.
+
+A Grid line's `sku` is the Grid part id, which equals the catalog sku for a catalog-backed part. Allowances (`allowance`,
+`allow:`), Auto assemblies (`asm:`), custom items (`custom:`), labor (`labor:`) and any line with no catalog part (a
+library-only symbol, a curtain) are skipped. Sell is the line's `ext` (else qty × price); **cost is the catalog part's
+current cost × qty**, because Grid lines carry no cost of their own. Metrics that include such a line are flagged
+(`includesCatalogCost`) and the Quoted section and vendor card say "Grid quotes use today's catalog cost."
 
 ## D593. The window, the metrics and the forecast (#298, 2026-10-03)
 
@@ -9107,4 +9124,6 @@ sort), and the vendor Overview tab's "Quoted through this vendor" card (loaded o
 claims manufacturers). The vendor rollup covers the vendor's claimed spellings after canonicalising, counts **distinct
 quotes** (a quote touching two of its manufacturers counts once), shows the **pooled win rate** (Won ÷ (Won + Lost) across
 all of them) and sets its **forecast to the sum of its manufacturers' forecasts**, each with its own rate or the shop rate —
-so the card's forecast always equals its rows added up. Analytics are read-only and write nothing.
+so the card's forecast always equals its rows added up. A card row links to the manufacturer's page only when that page
+exists (a line's own manufacturer text with no catalog part and no record would 404). Analytics are read-only and write
+nothing.

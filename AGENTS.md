@@ -688,8 +688,10 @@ See `.env.example`.
     company, notes, and non-destructive spelling merges (`aliasKeys`/`mergedInto`,
     `canonicalKeyMap` — image lookup, list rows and portal index alias-aware).
     Quoted cost and forecast (`manufacturer-analytics.ts`: 12 calendar months,
-    Chicago; cost as quoted; forecast = open × own or shop win rate) show on the
-    page, the list and the vendor Overview (forecast = sum of its manufacturers').
+    Chicago; Estimator quotes incl. portal catalog quotes at cost as quoted, Grid
+    quotes at today's catalog cost, Quick Design quotes not counted, deleted
+    quotes drop out; forecast = open × own or shop win rate) show on the page,
+    the list and the vendor Overview (forecast = sum of its manufacturers').
     Remaining is Jeff-gated: merge spellings, link companies/reps. Punch item #298.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults

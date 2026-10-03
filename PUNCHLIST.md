@@ -10598,17 +10598,21 @@ What shipped:
   no record is a 404, and write actions refuse such a key (D588).
 - **Merge spellings:** "Allen & Heath" + "Allen and Heath" become one manufacturer. Non-destructive: catalog `mfr` text
   never changes, the target keeps its own image/company/notes and adopts the source's only when it has none, people are
-  unioned. The list, the image lookup (portal, documents, cut sheets) and the portal index are alias-aware; an image set
-  or removed through an alias lands on the canonical record (D589).
+  unioned. The list, the image lookup (portal, documents, cut sheets), the portal index and Upload many are alias-aware;
+  an image set or removed through an alias lands on the canonical record; a merged-away record's own notes stay on it,
+  hidden until unmerge (D589).
 - **Quoted cost and forecast** (12 calendar months ending now, America/Chicago; cost as quoted with sell beneath): Quoted,
   Won, Lost, win rate, Open (sent), In draft, **Forecast** (open × the manufacturer's win rate, else the shop rate),
-  a 12-bar monthly Won chart, top 10 parts, quote count. Shown on the manufacturer page, as **Quoted 12 mo** and **Open**
+  a 12-bar monthly Won chart, top 10 parts, quote count. Counted: Estimator-built system quotes (portal catalog quotes
+  included) at the cost as quoted, and Grid quotes at today's catalog cost (Grid lines carry none — footnoted "Grid quotes
+  use today's catalog cost."); Quick Design quotes are not counted (they have no lines), and deleted quotes drop out
+  because the quote store lists only live quotes (D592). Shown on the manufacturer page, as **Quoted 12 mo** and **Open**
   columns with a sort on the list, and as a "Quoted through this vendor" card on the vendor Overview tab (D593–D594).
 
 Gates (final head): tsc 0 errors; eslint 0 errors on every source file the branch touched (18 files; 2 pre-existing
-`Date.now` warnings in `vendors/[id]/page.tsx`); test:specs 11,943 PASS / 0 FAIL, ALL PASSED (baseline 11,857; the new
-checks are prefixed `mfr page:` and `mfr analytics:`); test:smoke 206/206 ALL PASSED including
-`/catalog/manufacturers/rosebrand`; `npm run build` exit 0 with `/catalog/manufacturers/[key]` listed (`.next` deleted
+`Date.now` warnings in `vendors/[id]/page.tsx`); test:specs 11,961 PASS / 0 FAIL, ALL PASSED (baseline 11,857; 11,943
+before the final-review fixes; the new checks are prefixed `mfr page:` and `mfr analytics:`); test:smoke 206/206 ALL
+PASSED including `/catalog/manufacturers/rosebrand` and the vendor Overview; `npm run build` exit 0 with `/catalog/manufacturers/[key]` listed (`.next` deleted
 after). Not exercised end to end: the page's write actions in a browser against a real database (typechecked, built,
 covered by store-level checks, and the page GET is in smoke) and the image actions (they need a real Blob token).
 
@@ -10624,8 +10628,11 @@ covered by store-level checks, and the page GET is in smoke) and the image actio
    forecast, and a vendor's forecast is the sum of its manufacturers'. Cost is what the line carried when it was quoted.
 
 **Rollback.** Safe; nothing is migrated and analytics write nothing. Old code reads a manufacturer record by its known
-fields and ignores `aliasKeys`, `mergedInto`, `companyId`, `people` and `notes` (they stay stored, and come back when the
-code is rolled forward). Merged spellings simply stop grouping — each key lists as its own row again, and a merged-away
+fields and ignores `aliasKeys`, `mergedInto`, `companyId`, `people` and `notes` — they stay stored and come back when the
+code is rolled forward, **unless older code writes that record**: the old store rewrites the whole document, so setting
+or removing a manufacturer's image from a rollback, or from a preview deploy built from a branch cut before this merge
+(previews share the production database), drops those fields from that record. A merge survives from the other side (the
+aliases' `mergedInto`, or the target's `aliasKeys`), but that record's people, notes and company link are lost. Merged spellings simply stop grouping — each key lists as its own row again, and a merged-away
 spelling's image is its own record's (a target that adopted it keeps the copy). The manufacturer page route and the
 Quoted columns / vendor card disappear; the list rows lose their link. Vendor claims made from the page are ordinary
 vendor-profile claims and stay. Nothing throws.
