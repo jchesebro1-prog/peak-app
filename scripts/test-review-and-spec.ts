@@ -49165,8 +49165,30 @@ import { manufacturerAnalytics, rollupMetrics as maRollup, attributedLines as ma
   ok(res.shopWinRate !== null && Math.abs(res.shopWinRate - 300 / 400) < 1e-9, "mfr analytics: shop win rate is won ÷ (won + lost) across every manufacturer");
   const roll = maRollup([etc, ah], res.shopWinRate);
   ok(roll.quoted.cost === 1000 && roll.won.cost === 300 && roll.lost.cost === 100 && Math.abs((roll.winRate ?? -1) - 0.75) < 1e-9 && roll.keys.join() === "etc,allenandheath", "mfr analytics: rollup sums costs and recomputes the win rate from summed won/lost");
+  ok(Math.abs(roll.forecast.cost - (etc.forecast.cost + ah.forecast.cost)) < 1e-9 && roll.quotes === 3, "mfr analytics: rollup forecast is the sum of the rows' forecasts and quotes are counted once (Q1, Q2, Q3)");
+  ok(etc.monthlyWon.reduce((a, m) => a + m.cost, 0) === etc.won.cost && etc.monthlyWon.reduce((a, m) => a + m.sell, 0) === etc.won.sell, "mfr analytics: the Won total equals the sum of the monthly chart");
+  ok(res.windowStart === Date.UTC(2025, 9, 1, 5), "mfr analytics: the window starts at midnight Chicago on the first day of the oldest chart month");
+  const qx = mk("QX", "won", now - 400 * DAY, [{ at: now - 30 * DAY, to: "won" }], [{ sku: "S1", qty: 1, cost: 70, price: 90 }]);
+  const resX = manufacturerAnalytics([qx], parts, canon, now).byKey.get("etc")!;
+  ok(resX.won.cost === 70 && resX.quoted.cost === 0 && resX.quotes === 0, "mfr analytics: a quote created before the window but won inside it counts in Won, not Quoted");
+  const qe = mk("QE", "sent", now - 2 * DAY, [], [
+    { sku: "S1", qty: 1, cost: 1000, price: 1500, por: true },
+    { sku: "", qty: 1, cost: 0, price: -50, rewardCredit: true },
+    { sku: "S1", qty: 1, cost: 1000, price: 1500, laborOverhead: "shop" },
+    { sku: "S1", qty: 1, cost: 1000, price: 1500, laborTravel: "hotel" },
+    { sku: "S1", qty: 0, cost: 1000, price: 1500 },
+    { sku: "S1", qty: 1, cost: 5, price: 8 },
+    { sku: "", qty: 2, cost: 30, price: 40, desc: "Custom cable", manufacturer: "Neutrik" },
+  ]);
+  (qe as unknown as { spec: { sections: unknown[] } }).spec.sections.push({ id: "l", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [{ sku: "S1", qty: 1, cost: 999, price: 1 }] });
+  const lines = maLines(qe, parts, canon);
+  ok(lines.length === 2 && lines.reduce((a, l) => a + l.cost, 0) === 65, "mfr analytics: por, rewards credit, labor overhead/travel, a labor section and zero-qty lines are excluded");
+  const resE = manufacturerAnalytics([qe], parts, canon, now).byKey.get("neutrik")!;
+  ok(resE.topParts[0].sku === "" && resE.topParts[0].desc === "Custom cable" && resE.topParts[0].cost === 60, "mfr analytics: a line with no sku is keyed by its description in top parts");
+  const qc = mk("QC", "sent", now - 2 * DAY, [], [{ sku: "fa-2", qty: 1, cost: 0, price: 0, manufacturer: "Neutrik", components: [{ sku: "NOPE", label: "Plug", role: "other", qty: 2, unit: "ea", cost: 5, price: 9 }] }]);
+  ok(maLines(qc, parts, canon).length === 1 && maLines(qc, parts, canon)[0].key === "neutrik", "mfr analytics: a component with no catalog manufacturer falls back to the line's manufacturer");
   const q6 = mk("Q6", "sent", now - 3 * DAY, [], [{ sku: "Z1", qty: 1, cost: 100, price: 150, manufacturer: "Neutrik" }]);
   const res2 = manufacturerAnalytics([q1, q2, q6], parts, canon, now);
   const neu = res2.byKey.get("neutrik")!;
-  ok(neu.winRate === null && neu.usedShopRate && neu.open.cost === 100 && Math.abs(neu.forecast.cost - 100 * (res2.shopWinRate ?? 0)) < 1e-9, "mfr analytics: a manufacturer with no decided quotes forecasts at the shop win rate");
+  ok(neu.winRate === null && neu.usedShopRate === true && !manufacturerAnalytics([q6], parts, canon, now).byKey.get("neutrik")!.usedShopRate && neu.open.cost === 100 && Math.abs(neu.forecast.cost - 100 * (res2.shopWinRate ?? 0)) < 1e-9, "mfr analytics: a manufacturer with no decided quotes forecasts at the shop win rate");
 }

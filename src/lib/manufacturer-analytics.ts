@@ -33,6 +33,8 @@ export type ManufacturerMetrics = {
   /** "YYYY-MM" (America/Chicago), 12 entries, oldest first. */
   monthlyWon: Array<{ month: string; cost: number; sell: number }>;
   topParts: Array<{ sku: string; desc: string; qty: number; cost: number }>;
+  /** Distinct quotes contributing to Quoted (so a rollup can count a quote once). */
+  quoteIds: string[];
   quotes: number;
 };
 export type AnalyticsResult = {
@@ -42,6 +44,8 @@ export type AnalyticsResult = {
   now: number;
 };
 
+/** Nominal window length. The real window starts on the first day of the oldest
+ *  monthly bucket (so the Won tile always equals the chart's sum). */
 export const ANALYTICS_WINDOW_MS = 365 * 24 * 3600 * 1000;
 
 type AttributedLine = { key: string; sku: string; desc: string; qty: number; cost: number; sell: number };
@@ -72,14 +76,14 @@ export function attributedLines(
       if (Array.isArray(it.components) && it.components.length) {
         for (const c of it.components) {
           const qty = num(c.qty) * lineQty;
-          const key = keyFor(c.sku, undefined);
+          const key = keyFor(c.sku, it.manufacturer);
           if (!key || qty <= 0) continue;
           out.push({ key, sku: c.sku, desc: partsBySku.get(c.sku)?.desc || c.label || "", qty, cost: num(c.cost) * qty, sell: num(c.price) * qty });
         }
         continue;
       }
       const key = keyFor(it.sku, it.manufacturer);
-      if (!key) continue;
+      if (!key || lineQty <= 0) continue;
       out.push({ key, sku: it.sku, desc: partsBySku.get(it.sku)?.desc || it.desc || "", qty: lineQty, cost: lineQty * num(it.cost), sell: lineExtSellOf(it) });
     }
   }
@@ -91,6 +95,20 @@ const monthOf = (t: number): string => {
   const p = monthFmt.formatToParts(new Date(t));
   return `${p.find((x) => x.type === "year")!.value}-${p.find((x) => x.type === "month")!.value}`;
 };
+
+/** Epoch ms of 00:00 America/Chicago on the 1st of `monthKey` ("YYYY-MM"). */
+function chicagoMonthStart(monthKey: string): number {
+  const [y, m] = monthKey.split("-").map(Number);
+  // Chicago is UTC-5 or UTC-6; the right guess formats as the 1st at hour 00.
+  for (const h of [5, 6]) {
+    const t = Date.UTC(y, m - 1, 1, h);
+    const p = hourFmt.formatToParts(new Date(t));
+    const get = (k: string) => Number(p.find((x) => x.type === k)!.value);
+    if (get("day") === 1 && get("hour") % 24 === 0) return t;
+  }
+  return Date.UTC(y, m - 1, 1, 6);
+}
+const hourFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", day: "numeric", hour: "numeric", hourCycle: "h23" });
 
 /** The 12 "YYYY-MM" keys ending with `now`'s Chicago month, oldest first. */
 function lastTwelveMonths(now: number): string[] {
@@ -123,9 +141,9 @@ export function manufacturerAnalytics(
   canonical: (key: string) => string,
   now: number,
 ): AnalyticsResult {
-  const windowStart = now - ANALYTICS_WINDOW_MS;
-  const inWindow = (t: number) => t >= windowStart && t <= now;
   const months = lastTwelveMonths(now);
+  const windowStart = chicagoMonthStart(months[0]);
+  const inWindow = (t: number) => t >= windowStart && t <= now;
   const accs = new Map<string, Acc>();
   const accFor = (key: string): Acc => {
     let a = accs.get(key);
@@ -134,7 +152,7 @@ export function manufacturerAnalytics(
         m: {
           key, quoted: pair(), won: pair(), lost: pair(), open: pair(), draft: pair(),
           winRate: null, forecast: pair(), usedShopRate: false,
-          monthlyWon: [], topParts: [], quotes: 0,
+          monthlyWon: [], topParts: [], quoteIds: [], quotes: 0,
         },
         quoteIds: new Set(), months: new Map(months.map((mo) => [mo, pair()])), parts: new Map(),
       };
@@ -156,11 +174,12 @@ export function manufacturerAnalytics(
       if (quotedHere) {
         add(a.m.quoted, l.cost, l.sell);
         a.quoteIds.add(q.id);
-        const p = a.parts.get(l.sku) || { sku: l.sku, desc: l.desc, qty: 0, cost: 0 };
+        const pk = l.sku || l.desc;
+        const p = a.parts.get(pk) || { sku: l.sku, desc: l.desc, qty: 0, cost: 0 };
         p.qty += l.qty;
         p.cost += l.cost;
         if (!p.desc) p.desc = l.desc;
-        a.parts.set(l.sku, p);
+        a.parts.set(pk, p);
       }
       if (wonHere) {
         add(a.m.won, l.cost, l.sell);
@@ -185,12 +204,13 @@ export function manufacturerAnalytics(
   for (const [key, a] of accs) {
     const m = a.m;
     m.winRate = rate(m.won.cost, m.lost.cost);
-    m.usedShopRate = m.winRate === null;
+    m.usedShopRate = m.winRate === null && shopWinRate !== null;
     const r = m.winRate ?? shopWinRate ?? 0;
     m.forecast = { cost: m.open.cost * r, sell: m.open.sell * r };
     m.monthlyWon = months.map((mo) => ({ month: mo, ...a.months.get(mo)! }));
     m.topParts = [...a.parts.values()].sort((x, y) => y.cost - x.cost || x.sku.localeCompare(y.sku)).slice(0, 10);
-    m.quotes = a.quoteIds.size;
+    m.quoteIds = [...a.quoteIds];
+    m.quotes = m.quoteIds.length;
     byKey.set(key, m);
   }
   return { byKey, shopWinRate, windowStart, now };
@@ -201,7 +221,7 @@ export function manufacturerAnalytics(
 export function rollupMetrics(
   list: readonly ManufacturerMetrics[],
   shopWinRate: number | null,
-): Omit<ManufacturerMetrics, "key" | "topParts"> & { keys: string[] } {
+): Omit<ManufacturerMetrics, "key" | "topParts" | "quoteIds"> & { keys: string[] } {
   const sum = (pick: (m: ManufacturerMetrics) => MoneyPair): MoneyPair => {
     const p = pair();
     for (const m of list) add(p, pick(m).cost, pick(m).sell);
@@ -211,7 +231,6 @@ export function rollupMetrics(
   const lost = sum((m) => m.lost);
   const open = sum((m) => m.open);
   const winRate = rate(won.cost, lost.cost);
-  const r = winRate ?? shopWinRate ?? 0;
   const monthly = new Map<string, MoneyPair>();
   for (const m of list) for (const e of m.monthlyWon) add(monthly.get(e.month) ?? monthly.set(e.month, pair()).get(e.month)!, e.cost, e.sell);
   const monthOrder = list.length ? list[0].monthlyWon.map((e) => e.month) : [];
@@ -221,9 +240,10 @@ export function rollupMetrics(
     won, lost, open,
     draft: sum((m) => m.draft),
     winRate,
-    forecast: { cost: open.cost * r, sell: open.sell * r },
-    usedShopRate: winRate === null,
+    // The sum of the rows' own forecasts, so a card total equals its rows.
+    forecast: sum((m) => m.forecast),
+    usedShopRate: winRate === null && shopWinRate !== null,
     monthlyWon: monthOrder.map((mo) => ({ month: mo, ...monthly.get(mo)! })),
-    quotes: list.reduce((a, m) => a + m.quotes, 0),
+    quotes: new Set(list.flatMap((m) => m.quoteIds)).size,
   };
 }
