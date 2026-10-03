@@ -110,8 +110,10 @@ export async function removeManufacturerImage(key: string, by: string, at: numbe
  *  A merged-away spelling resolves to its target's image. */
 export function manufacturerImageLookup(rows: readonly Manufacturer[]): (mfr: string) => string | null {
   const byKey = new Map<string, string>();
+  const canon = canonicalKeyMap(rows);
   for (const m of rows) {
-    if (!m.imageDocumentId || m.mergedInto) continue;
+    // A record that isn't its own canonical key (merged away, or an alias rewritten by a rollback) never supplies an image.
+    if (!m.imageDocumentId || m.mergedInto || canon(m.key) !== m.key) continue;
     for (const k of [m.key, ...m.aliasKeys]) byKey.set(k, m.imageDocumentId);
   }
   return (mfr) => byKey.get(mfrKey(mfr)) ?? null;

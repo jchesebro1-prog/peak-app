@@ -28,7 +28,12 @@ export async function loadManufacturerAnalytics(
     preloaded.records ?? listManufacturers(),
   ]);
   const partsBySku = new Map<string, AnalyticsPart>();
-  for (const p of parts) partsBySku.set(p.sku, { sku: p.sku, mfr: p.mfr, desc: p.desc, cost: p.cost });
+  for (const p of parts) {
+    const ap: AnalyticsPart = { sku: p.sku, mfr: p.mfr, desc: p.desc, cost: p.cost };
+    partsBySku.set(p.sku, ap);
+    // A Grid line's `sku` is the part's document id, which can differ from its sku.
+    if (p.id && p.id !== p.sku && !partsBySku.has(p.id)) partsBySku.set(p.id, ap);
+  }
   const canonical = canonicalKeyMap(records);
   const paged = new Set<string>();
   for (const r of records) if (canonical(r.key) === r.key) paged.add(r.key);

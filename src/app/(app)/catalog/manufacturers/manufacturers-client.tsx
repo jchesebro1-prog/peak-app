@@ -69,7 +69,7 @@ const td: React.CSSProperties = { padding: 8, borderTop: "1px solid #f0f1f4", fo
 const select: React.CSSProperties = { fontSize: 12.5, padding: "6px 9px", borderRadius: 8, border: "1px solid #dfe2e8", background: "#fff" };
 
 /** `aliases`: merged-away key → canonical key, so Upload many matches a file named for a merged spelling. */
-export default function ManufacturersClient({ rows, quoted, canEdit, aliases = {} }: { rows: ManufacturerRow[]; quoted: QuotedTotals; canEdit: boolean; aliases?: Record<string, string> }) {
+export default function ManufacturersClient({ rows, quoted, canEdit, aliases = {}, includesCatalogCost = false }: { rows: ManufacturerRow[]; quoted: QuotedTotals; canEdit: boolean; aliases?: Record<string, string>; includesCatalogCost?: boolean }) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
@@ -298,6 +298,7 @@ export default function ManufacturersClient({ rows, quoted, canEdit, aliases = {
           </tbody>
         </table>
       </div>
+      {includesCatalogCost && <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 8 }}>Grid quotes count at today&apos;s catalog cost.</div>}
     </div>
   );
 }

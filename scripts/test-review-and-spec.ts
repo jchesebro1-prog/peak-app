@@ -49284,6 +49284,9 @@ import { manufacturerPageVM as mafPageVM } from "@/lib/manufacturer-page-vm";
   const vm = mafVendorVm(["ETC", "Belden"], resG.byKey, resG.shopWinRate, canon, (k) => k === "etc");
   ok(!!vm && vm.includesCatalogCost && vm.rows.find((r) => r.key === "etc")!.linked && !vm.rows.find((r) => r.key === "belden")!.linked, "mfr analytics: a vendor card row has no link when its manufacturer has no page");
   ok(mafVendorVm(["ETC"], resG.byKey, resG.shopWinRate, canon)!.rows[0].linked, "mfr analytics: vendor card rows link by default");
+  const both = { id: "BOTH1", status: "won", createdAt: now - 10 * DAY, updatedAt: now - 10 * DAY, history: [{ at: now - 5 * DAY, to: "won" }], spec: { sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ sku: "S1", qty: 1, cost: 90, price: 150 }] }], lines: [{ sku: "S1", desc: "Source Four", qty: 3, unit: "ea", price: 180, ext: 540 }] } } as unknown as MafQuote;
+  const bl = mafLines(both, parts, canon);
+  ok(bl.length === 1 && bl[0].cost === 90 && !bl[0].catalogCost, "mfr analytics: a quote with both sections and Grid lines counts only the sections");
 }
 {
   const recs = [
@@ -49292,6 +49295,11 @@ import { manufacturerPageVM as mafPageVM } from "@/lib/manufacturer-page-vm";
     { key: "ah", name: "AH", imageDocumentId: null, aliasKeys: [], mergedInto: "allenheath" },
     { key: "etc", name: "ETC", imageDocumentId: null, aliasKeys: [], mergedInto: null },
   ];
+  const rolled = [
+    { key: "rbtarget", name: "RB Target", imageDocumentId: null, aliasKeys: ["rbalias"], mergedInto: null },
+    { key: "rbalias", name: "RB Alias", imageDocumentId: "img-rb", aliasKeys: [], mergedInto: null },
+  ] as unknown as Parameters<typeof mfsLookup>[0];
+  ok(mfsLookup(rolled)("RB Alias") === null, "mfr page: a rollback-rewritten alias record (not its own canonical key) never supplies an image");
   const targets = mafAliasTargets(recs);
   ok(targets.allenheath === "allenandheath" && targets.ah === "allenandheath" && !("etc" in targets) && !("allenandheath" in targets), "mfr page: alias targets map every merged-away key (chains flattened) to its canonical key");
   const rows = [{ key: "allenandheath" }, { key: "etc" }];

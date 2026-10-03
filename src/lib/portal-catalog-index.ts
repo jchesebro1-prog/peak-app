@@ -22,6 +22,7 @@ import {
 import { buildHaystack, type SearchEntry } from "@/lib/portal-search";
 import { cleanPortalCategory } from "@/lib/fixture-assemblies";
 import { listManufacturers } from "@/lib/stores/manufacturers";
+import { canonicalKeyMap } from "@/lib/manufacturer-aliases";
 import { mfrKey } from "@/lib/catalog-books";
 import { OTHER_PACKAGES_CATEGORY } from "@/lib/portal-departments";
 
@@ -405,8 +406,9 @@ async function buildIndex(): Promise<Built> {
   // Manufacturer images are unlinked documents (docsById is built from every
   // document, linked or not). They are servable but never a part's own photo.
   const mfrImageDocs = new Map<string, string>();
+  const mfrCanon = canonicalKeyMap(manufacturerRows);
   for (const m of manufacturerRows) {
-    if (m.mergedInto) continue; // a merged-away spelling is reached through its target's aliasKeys
+    if (m.mergedInto || mfrCanon(m.key) !== m.key) continue; // a merged-away spelling is reached through its target's aliasKeys
     const d = m.imageDocumentId ? state.index.docsById.get(m.imageDocumentId) : undefined;
     if (d && d.kind === "image" && d.blobKey && ["image/png", "image/jpeg", "image/webp"].includes(d.contentType)) {
       for (const k of [m.key, ...m.aliasKeys]) mfrImageDocs.set(k, d.id);

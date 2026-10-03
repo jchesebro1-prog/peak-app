@@ -104,7 +104,8 @@ export function attributedLines(
   // Auto assemblies, custom items and labor are skipped, as is any line with
   // no catalog part (a library-only symbol, a curtain). Grid lines carry no
   // cost, so cost is the catalog's current cost (flagged `catalogCost`).
-  const flat = spec && Array.isArray(spec.lines) ? (spec.lines as GridLine[]) : [];
+  // Walked only when the quote has no `sections` array, so no quote is counted twice.
+  const flat = spec && !Array.isArray(spec.sections) && Array.isArray(spec.lines) ? (spec.lines as GridLine[]) : [];
   for (const l of flat) {
     if (!l || typeof l !== "object" || l.allowance || l.custom) continue;
     const sku = typeof l.sku === "string" ? l.sku.trim() : "";

@@ -31,6 +31,7 @@ export default async function ManufacturersPage() {
   // One analytics pass for the whole list (cost only; a row with no quotes shows $0).
   const analytics = await loadManufacturerAnalytics(undefined, { parts, records });
   const quoted = Object.fromEntries(rows.map((r) => [r.key, { quoted12: analytics.byKey.get(r.key)?.quoted.cost ?? 0, open: analytics.byKey.get(r.key)?.open.cost ?? 0 }]));
+  const includesCatalogCost = rows.some((r) => !!analytics.byKey.get(r.key)?.includesCatalogCost);
   const canEdit = can("create", user.roles);
   return (
     <div className="pk-content" style={{ maxWidth: 1100 }}>
@@ -44,7 +45,7 @@ export default async function ManufacturersPage() {
           File storage isn&apos;t configured on this deployment (no BLOB_READ_WRITE_TOKEN) — uploads will be refused.
         </div>
       )}
-      <ManufacturersClient rows={rows} quoted={quoted} canEdit={canEdit} aliases={aliasTargets(records)} />
+      <ManufacturersClient rows={rows} quoted={quoted} canEdit={canEdit} aliases={aliasTargets(records)} includesCatalogCost={includesCatalogCost} />
     </div>
   );
 }
