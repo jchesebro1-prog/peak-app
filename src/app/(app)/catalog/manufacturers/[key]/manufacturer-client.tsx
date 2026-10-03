@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
@@ -125,21 +125,29 @@ export default function ManufacturerClient({
   const [picked, setPicked] = useState<{ id: string; name: string; company: string } | null>(null);
   const [role, setRole] = useState("");
   const searchSeq = useRef(0);
-  const onSearch = async (value: string) => {
-    setQ(value);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Debounced ~200 ms; a stale answer (an older keystroke's) is dropped by the sequence number.
+  const onSearch = (value: string) => {
+    const text = value.slice(0, 100);
+    setQ(text);
     setPicked(null);
     const seq = ++searchSeq.current;
-    if (value.trim().length < 2) return setHits([]);
-    try {
-      const found = await searchContactsAction(value);
-      if (seq === searchSeq.current) {
-        setHits(found);
-        setError("reps", null);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (text.trim().length < 2) return setHits([]);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const found = await searchContactsAction(text);
+        if (seq === searchSeq.current) {
+          setHits(found);
+          setError("reps", null);
+        }
+      } catch {
+        if (seq === searchSeq.current) setError("reps", SERVER_DOWN);
       }
-    } catch {
-      if (seq === searchSeq.current) setError("reps", SERVER_DOWN);
-    }
+    }, 200);
   };
+
+  useEffect(() => () => { if (searchTimer.current) clearTimeout(searchTimer.current); }, []);
 
   /* ---- notes ---- */
   const [notes, setNotes] = useState(vm.notes);

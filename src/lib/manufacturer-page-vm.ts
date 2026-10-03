@@ -86,7 +86,7 @@ export function manufacturerPageVM(input: MfrPageInput): MfrPageVM {
     const n = (r?.name || "").trim() || k;
     if (!bySpelling.includes(n)) bySpelling.push(n);
   }
-  const name = bySpelling[0] ?? (record?.name || "").trim() ?? key;
+  const name = bySpelling[0] ?? (record?.name || "").trim();
   const spellings = bySpelling.map((n) => ({ name: n, href: catalogHref(n) }));
 
   const aliasName = (k: string) => {
@@ -134,4 +134,30 @@ export function manufacturerPageVM(input: MfrPageInput): MfrPageVM {
       priceBookAt: input.priceBookAt,
     },
   };
+}
+
+/**
+ * The display name a write to `key` would give its canonical record — or null
+ * when nothing backs the key (no record, and no catalog part spells it), so a
+ * write must refuse instead of inventing a manufacturer. An existing record
+ * keeps its own name; otherwise the most common catalog spelling names it.
+ */
+export function canonicalNameFor(
+  key: string,
+  records: readonly (MfrPageRecord & { name?: string })[],
+  parts: readonly MfrPagePart[]
+): { canon: string; name: string; exists: boolean } | null {
+  const k = mfrKey(key);
+  if (!k) return null;
+  const canon = canonicalKeyMap(records)(k);
+  const rec = records.find((m) => m.key === canon);
+  if (rec) return { canon, name: (rec.name || "").trim() || canon, exists: true };
+  const tally = new Map<string, number>();
+  for (const p of parts) {
+    if (p.category === "Labor") continue;
+    const n = String(p.mfr ?? "").trim();
+    if (n && mfrKey(n) === canon) tally.set(n, (tally.get(n) ?? 0) + 1);
+  }
+  const best = [...tally].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  return best ? { canon, name: best[0], exists: false } : null;
 }

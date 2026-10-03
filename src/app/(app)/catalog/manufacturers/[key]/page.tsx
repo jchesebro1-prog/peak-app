@@ -49,7 +49,8 @@ export default async function ManufacturerPage({ params }: { params: Promise<{ k
 
   // A merged-away spelling is the same manufacturer as its target.
   const canonical = canonicalKeyMap(records)(key);
-  if (canonical !== key) redirect(`/catalog/manufacturers/${encodeURIComponent(canonical)}`);
+  // Also normalises a hand-typed URL (/ETC, /Rose%20Brand) to the lowercase canonical key.
+  if (rawKey !== canonical) redirect(`/catalog/manufacturers/${encodeURIComponent(canonical)}`);
 
   const images = buildImageIndex(state.documents, state.links);
   // The portal's own-photo rule: a non-hidden image whose document has a stored file.

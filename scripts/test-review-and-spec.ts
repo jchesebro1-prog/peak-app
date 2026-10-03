@@ -49094,3 +49094,27 @@ import { manufacturerPageVM as mpVM, catalogHref as mpHref } from "@/lib/manufac
   const act1 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/manufacturers/actions.ts"), "utf8");
   ok(/canonicalKeyMap/.test(act1) && /sourceRef: `mfr:\$\{canonKey\}`/.test(act1), "mfr page: image documents are titled and referenced by the canonical manufacturer");
 }
+
+/* ======================================================================
+   Manufacturer page — writes refuse keys nothing backs (pure decision).
+   ====================================================================== */
+import { canonicalNameFor as mpName } from "@/lib/manufacturer-page-vm";
+{
+  const recs = [
+    { key: "allenandheath", name: "Allen and Heath", imageDocumentId: null, aliasKeys: ["allenheath"], mergedInto: null },
+    { key: "allenheath", name: "Allen & Heath", imageDocumentId: null, aliasKeys: [], mergedInto: "allenandheath" },
+  ];
+  const parts = [
+    { sku: "1", mfr: "Rose Brand", category: "Fabric" }, { sku: "2", mfr: "Rose Brand", category: "Fabric" }, { sku: "3", mfr: "RoseBrand", category: "Fabric" },
+    { sku: "4", mfr: "Peak Labor", category: "Labor" },
+  ];
+  const a = mpName("allenheath", recs, parts);
+  ok(!!a && a.canon === "allenandheath" && a.name === "Allen and Heath" && a.exists, "mfr page: a key with a record resolves to the canonical record's own name");
+  const r = mpName("rosebrand", recs, parts);
+  ok(!!r && r.canon === "rosebrand" && r.name === "Rose Brand" && !r.exists, "mfr page: a key with no record is named by its most common catalog spelling");
+  ok(mpName("madeup", recs, parts) === null && mpName("", recs, parts) === null, "mfr page: a key with no record and no catalog spelling is refused (null)");
+  ok(mpName("peaklabor", recs, parts) === null, "mfr page: a Labor-only spelling does not make a manufacturer");
+  const acts = readFileSync(join(process.cwd(), "src/app/(app)/catalog/manufacturers/[key]/actions.ts"), "utf8");
+  const removeFn = acts.slice(acts.indexOf("export async function removeManufacturerPersonAction"), acts.indexOf("export async function setManufacturerNotesAction"));
+  ok(removeFn.includes("isKnown(key)") && acts.includes("await isKnown(sourceKey)") && acts.includes("await isKnown(aliasKey)") && /slice\(0, 100\)/.test(acts), "mfr page: remove, merge and unmerge check the key is known, and contact search caps its query");
+}

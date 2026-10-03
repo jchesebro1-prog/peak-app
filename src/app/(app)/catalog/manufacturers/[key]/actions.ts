@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { mfrKey } from "@/lib/catalog-books";
-import { canonicalKeyMap } from "@/lib/manufacturer-aliases";
+import { canonicalNameFor } from "@/lib/manufacturer-page-vm";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import {
   addManufacturerPerson,
@@ -31,37 +31,37 @@ function refresh(portal = false) {
   if (portal) revalidatePath("/portal/catalog");
 }
 
+const UNKNOWN = "That manufacturer isn't in the catalog.";
+
 /**
- * Make sure the canonical record for `key` exists, named for a real spelling
- * (the page's name when it belongs to this key, else the most common catalog
- * spelling, else the key). Edits resolve to the canonical record, and a record
- * created from a bare key would otherwise be named "allenandheath".
+ * Make sure the canonical record for `key` exists, named for a real catalog
+ * spelling — and refuse (null) a key that no record and no catalog part backs,
+ * so a write can never invent a manufacturer. Edits resolve to the canonical
+ * record; a record made from a bare key would be named "allenandheath".
  */
-async function ensureCanonical(key: string, nameHint: string, by: string): Promise<string | null> {
-  const k = mfrKey(key);
-  if (!k) return null;
+async function ensureCanonical(key: string, by: string): Promise<string | null> {
   const records = await listManufacturers();
-  const canon = canonicalKeyMap(records)(k);
-  if (records.some((m) => m.key === canon)) return canon;
-  let name = String(nameHint ?? "").trim().slice(0, 200);
-  if (mfrKey(name) !== canon) {
-    const tally = new Map<string, number>();
-    for (const p of await listCatalog()) {
-      const n = String(p.mfr ?? "").trim();
-      if (n && mfrKey(n) === canon) tally.set(n, (tally.get(n) ?? 0) + 1);
-    }
-    name = [...tally].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? canon;
-  }
-  await ensureManufacturer(name, by);
-  return canon;
+  const direct = canonicalNameFor(key, records, []);
+  const known = direct ?? canonicalNameFor(key, records, await listCatalog());
+  if (!known) return null;
+  if (!known.exists) await ensureManufacturer(known.name, by);
+  return known.canon;
+}
+
+/** Is `key` backed by a record or a catalog part? Never writes. */
+async function isKnown(key: string): Promise<boolean> {
+  const records = await listManufacturers();
+  return !!(canonicalNameFor(key, records, []) ?? canonicalNameFor(key, records, await listCatalog()));
 }
 
 export async function mergeManufacturerAction(sourceKey: string, targetKey: string): Promise<Res> {
   const user = await requirePerm("create");
   try {
-    const s = await ensureCanonical(sourceKey, "", user.name);
-    const t = await ensureCanonical(targetKey, "", user.name);
-    if (!s || !t) return { ok: false, error: "Pick a manufacturer." };
+    if (!mfrKey(sourceKey) || !mfrKey(targetKey)) return { ok: false, error: "Pick a manufacturer." };
+    if (!(await isKnown(sourceKey)) || !(await isKnown(targetKey))) return { ok: false, error: UNKNOWN };
+    const s = await ensureCanonical(sourceKey, user.name);
+    const t = await ensureCanonical(targetKey, user.name);
+    if (!s || !t) return { ok: false, error: UNKNOWN };
     const r = await mergeManufacturer(s, t, user.name);
     if (!r.ok) return r;
     refresh(true);
@@ -75,6 +75,8 @@ export async function mergeManufacturerAction(sourceKey: string, targetKey: stri
 export async function unmergeManufacturerAction(aliasKey: string): Promise<Res> {
   const user = await requirePerm("create");
   try {
+    if (!mfrKey(aliasKey)) return { ok: false, error: "Pick a manufacturer." };
+    if (!(await isKnown(aliasKey))) return { ok: false, error: UNKNOWN };
     const r = await unmergeManufacturer(mfrKey(aliasKey), user.name);
     if (!r.ok) return r;
     refresh(true);
@@ -89,7 +91,7 @@ export async function setManufacturerCompanyAction(key: string, name: string, co
   const user = await requirePerm("create");
   try {
     if (companyId && !(await getCompany(companyId))) return { ok: false, error: "That company no longer exists." };
-    if (!(await ensureCanonical(key, name, user.name))) return { ok: false, error: "Pick a manufacturer." };
+    if (!(await ensureCanonical(key, user.name))) return { ok: false, error: UNKNOWN };
     await setManufacturerCompany(key, companyId || null, user.name);
     refresh();
     return { ok: true };
@@ -105,8 +107,8 @@ export async function createManufacturerCompanyAction(key: string, name: string)
   const clean = String(name ?? "").trim().slice(0, 200);
   if (!clean) return { ok: false, error: "Enter the company's name." };
   try {
-    const canon = await ensureCanonical(key, clean, user.name);
-    if (!canon) return { ok: false, error: "Pick a manufacturer." };
+    const canon = await ensureCanonical(key, user.name);
+    if (!canon) return { ok: false, error: UNKNOWN };
     const rec = (await listManufacturers()).find((m) => m.key === canon);
     if (rec?.companyId && (await getCompany(rec.companyId))) return { ok: false, error: "This manufacturer already has a company — unlink it first." };
     const co = await createVendorCompany(clean);
@@ -123,7 +125,7 @@ export async function addManufacturerPersonAction(key: string, name: string, con
   const user = await requirePerm("create");
   try {
     if (!(await getContact(contactId))) return { ok: false, error: "That contact no longer exists." };
-    if (!(await ensureCanonical(key, name, user.name))) return { ok: false, error: "Pick a manufacturer." };
+    if (!(await ensureCanonical(key, user.name))) return { ok: false, error: UNKNOWN };
     await addManufacturerPerson(key, contactId, String(role ?? ""), user.name);
     refresh();
     return { ok: true };
@@ -136,7 +138,12 @@ export async function addManufacturerPersonAction(key: string, name: string, con
 export async function removeManufacturerPersonAction(key: string, contactId: string): Promise<Res> {
   const user = await requirePerm("create");
   try {
-    await removeManufacturerPerson(key, String(contactId ?? ""), user.name);
+    if (!(await isKnown(key))) return { ok: false, error: UNKNOWN };
+    // No record means no people to remove — never create one just to remove nothing.
+    const records = await listManufacturers();
+    if (records.some((m) => m.key === canonicalNameFor(key, records, [])?.canon)) {
+      await removeManufacturerPerson(key, String(contactId ?? ""), user.name);
+    }
     refresh();
     return { ok: true };
   } catch (err) {
@@ -148,7 +155,7 @@ export async function removeManufacturerPersonAction(key: string, contactId: str
 export async function setManufacturerNotesAction(key: string, name: string, notes: string): Promise<Res> {
   const user = await requirePerm("create");
   try {
-    if (!(await ensureCanonical(key, name, user.name))) return { ok: false, error: "Pick a manufacturer." };
+    if (!(await ensureCanonical(key, user.name))) return { ok: false, error: UNKNOWN };
     await setManufacturerNotes(key, String(notes ?? "").slice(0, 4000), user.name);
     refresh();
     return { ok: true };
@@ -161,7 +168,7 @@ export async function setManufacturerNotesAction(key: string, name: string, note
 /** Typeahead for the Reps & contacts picker: case-insensitive contains on "first last", 20 at most. */
 export async function searchContactsAction(q: string): Promise<Array<{ id: string; name: string; company: string }>> {
   await requireUser();
-  const needle = String(q ?? "").trim().toLowerCase();
+  const needle = String(q ?? "").trim().slice(0, 100).toLowerCase();
   if (needle.length < 2) return [];
   const hits = (await allContacts()).filter((c) => displayName(c).toLowerCase().includes(needle)).slice(0, 20);
   const companies = await getCompanies([...new Set(hits.map((c) => c.homeCompanyId).filter((id): id is string => !!id))]);
