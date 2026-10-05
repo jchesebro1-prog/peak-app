@@ -9218,3 +9218,88 @@ The bottom pane is a library with Favorites, Recent and All, a scope → device-
 (`grid-library.ts`), and numbered symbol tiles. Clicking a tile arms painter mode — click again or press Esc to stop; the
 old "Done" button is gone — and dragging a tile onto the plan places once. **+ Build assembly** appears on every category,
 because the Assemblies node hides when a design has none and the button could not live only there.
+
+## D605. Symbol size and Generic / Object are saved per design (#300, 2026-10-05)
+
+A Grid design carries `symbolDisplay: { scale, mode }` — `scale` 25–400 % (default 100 %), `mode` `generic` or `object`
+(default generic) — cleaned by the pure `cleanSymbolDisplay` in `src/lib/design/grid-symbol-display.ts` and saved by
+`setSymbolDisplay` / `setSymbolDisplayAction`. Jeff picked "saved per design" over a per-viewer setting so the plan view
+and the printed drawing set match and everyone sees the same size. The scale applies to canvas markers, assembly child
+markers, the label chip offset, the selection ring, the **click and snap targets** (the hit radius is `DEVICE_HIT_RADIUS ×
+scale`, so small symbols stay clickable and big ones don't swallow their neighbours) and every plan sheet in the drawing set
+(marker size and collision boxes). One shared helper, `markerBox(part, scale)`, replaces the duplicated `|| 44 / || 30`
+fallbacks. **Riser rows do not scale** — the riser is schematic. The toolbar slider paints live and saves once, debounced,
+on release; double-click resets to 100 %. A display setting is not an edit, so it is **not undoable** and **does not clear
+the undo stack**.
+
+## D606. Drawings are part documents of two new kinds, `symbol` and `riser` (#300, 2026-10-05)
+
+Object drawings live in the existing `part_documents` / `part_document_links` collections and private Blob as two new kinds,
+`symbol` (the plan drawing) and `riser`. They are **not coverage slots**: no Datasheets to-do row, no "missing" filter, no
+accessory coverage, and they are excluded everywhere `image` is (portal catalog, galleries, client packages, Displays API).
+A part has **one current link per kind** — `attachDocument` enforces it, and the DaVinci import must go through it. **Replace
+uploads a new document** rather than rewriting the file, so a drawing shared by several parts never changes under the
+others. A device type points at its drawing with `symbolDocId` in the device-types blob — an unlinked `symbol` document,
+the same shape the manufacturer image (D583) uses. Built-out UI: Symbol drawing and Riser drawing slots in the catalog part
+editor's Documents section (upload, replace, remove, checkerboard preview) and a drawing slot per type in Grid Settings →
+Device types (`drawing-upload.ts`, `drawing-actions.ts`).
+
+## D607. SVG is accepted only for drawings, and always sanitized (#300, 2026-10-05)
+
+SVG stays refused for every other part-document kind. For a drawing, `sanitizeSvg` (`src/lib/part-docs/svg-sanitize.ts`)
+runs on every SVG on the way in — a hand-written tokenizer and a linear-time CSS scanner, rewritten after two adversarial
+reviews. It drops scripts, `on*` handlers, `<foreignObject>`, `iframe`/`embed`/`object`, external references (`href` that is
+not `#…` or a `data:image/(png|jpeg|webp)`), `<?xml-stylesheet?>`, style `@import`, `url()` and `image-set()`; CDATA is
+escaped as text; mismatched tags are refused; a file that is not a single `<svg>` root, is over **1 MB**, or still holds
+`javascript:` after cleaning is refused. Magic-byte sniffing recognises SVG text. Rasters (PNG / JPEG / WebP) shrink to
+≤ 1024 px WebP with transparency kept, the same pipeline as catalog photos. Illustrator `<style>` classes (`.st0`…) survive
+sanitizing — they stay harmless because of D608.
+
+## D608. Drawings are only ever drawn as images (#300, 2026-10-05)
+
+A drawing is never inlined: the canvas and drawing sets use `<image href>`, HTML uses `<img>` (`src/components/design/
+object-symbol.tsx`), so no script runs and no style class can collide with the page. The signed-in
+`/api/part-documents/[id]` route serves a drawing with `Content-Security-Policy: sandbox; default-src 'none'; img-src data:;
+style-src 'unsafe-inline'` and `nosniff`. **The customer portal refuses drawings** (its document route 404s them) — they stay
+internal in v1. A drawing that fails to load draws the generic symbol in its place (an `onError` plus a detached-image probe
+for a failure before hydration), so a broken file never leaves a hole. `SymbolShape` is untouched and still never emits
+`<image`. Printed pages wait on their `<image>` loads (`use-images-settled.ts`) before the PDF renders.
+
+## D609. How a marker picks its drawing (#300, 2026-10-05)
+
+Plan: the part's own `symbol` drawing → its device type's drawing → the generic symbol. Riser: the part's `riser` drawing →
+its plan drawing → generic. The pure `resolveObjectSymbol` / `symbolUrlsFromRows` (`src/lib/design/object-symbols.ts`) hold
+the order; the **server builds the `symbolUrls` URL map** (`object-symbols-server.ts`) so clients only draw — the editor
+page reuses the part documents it already loaded for the Documents panel, and the set and riser pages run one batched
+query. Assemblies (`asm:`) and virtual parts get a drawing **only through their device type**; an assembly never has its own.
+Object mode with no drawing falls back to generic, so nothing disappears while the library is built out (Jeff). Product
+Library tiles always show a drawing when there is one, in either mode.
+
+## D610. `npm run symbols:davinci` (#300, 2026-10-05)
+
+`scripts/symbols-davinci.ts` (pure plan in `src/lib/davinci/symbols-plan.ts`) attaches ETC's DaVinci drawings to catalog
+parts. It is a **dry run by default**; every planned file is still prepared (sanitized, shrunk) so the report is exact. Parts
+match as in #162/#207 (`matchSku` plus the manufacturer gate, so Draper's "450" never gets ETC's 450). It **never replaces a
+hand upload** (a live drawing of that kind whose source is not `davinci`, re-checked just before each write), is
+**idempotent** (a drawing is one shared document with a deterministic `PD-V…` id linked to every matched part; an existing id
+is linked, never re-uploaded) and **does not re-attach a drawing a person detached**. DaVinci's "Unknown" placeholder
+(`VISUAL_UNKNOWN`, image type Other) is skipped. Any image that more than 25 parts would share is reported in the dry run (none
+today). An SVG over 1 MB is rasterized (≤ 1024 px WebP) rather than refused. `--apply` needs `--yes` whenever a Blob token or a
+hosted `DATABASE_URL` is set, and a **local-DB apply with a Blob token is refused unless `--local-blob`** (the blobs would be
+orphaned in the shared store); the script prints the DB target and the `[blob] store_…` it will write to. Each group's write
+is its own try/catch (a failed one deletes its blob, the run continues, exit code 1). The extract
+(`data/davinci-extract.json`) gains `planImageId` / `riserImageId` per record and a top-level `images` name/type map.
+
+## D611. DaVinci coverage today, and how to grow it (#300, 2026-10-05)
+
+The 2026-09-02 export holds **452 of the extract's 1,215 distinct image ids** on disk — roughly 354 records with a plan
+drawing and 351 with a riser drawing. A dry run against a catalog with one ETC part per record planned **668 part drawings
+(332 plan, 336 riser) from 444 files**; production's real catalog will land differently. Browsing more of DaVinci's library
+and re-exporting adds coverage — the same command picks up what is new. The extract keeps #162's keep rule: a type with no
+ports, docs or model numbers is dropped (646 such types carry a plan image), so those never import.
+
+## D612. Rights and privacy of the drawings (#300, 2026-10-05)
+
+Peak has ETC's dealer permission to use DaVinci's product drawings (Jeff, 2026-10-05). The drawings stay private — signed-in
+routes only, the portal unchanged (D608). Out of scope: true-to-scale drawings from real product dimensions, rotating
+symbols, symbols in the customer portal, a per-sheet scale.

@@ -1,5 +1,7 @@
 # The Grid — object symbols + scale slider (#300) Implementation Plan
 
+**Status:** Shipped 2026-10-05 (D605–D612).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A per-design symbol size slider and Generic/Object switch for The Grid; object drawings (SVG/PNG) per catalog

@@ -10680,3 +10680,62 @@ old code. `placeDeviceAction` and `placeCurtainAction` results gained a `placeme
 pane-size, collapsed, snap and tab `localStorage` keys are ignored by old code. A Grid design edited under the workspace
 reads and quotes identically on old code; the only thing lost on a rollback is the workspace itself, and undo history, which
 was never stored.
+
+## 300. Design — object symbols for The Grid (product drawings, DaVinci import) + a symbol size slider — DONE 2026-10-05 (D605–D612)
+
+**Reported by Jeff 2026-10-05**, after #299 shipped: "Can we also try to make the symbols that DaVinci has import as well and
+have the option for generic symbols or object symbols? … as we build out the symbols then we have the ability to see what the
+objects look like. Also can we have a scale objects slider because sometimes the symbols are too big other times they are too
+small." Jeff's choices: the slider is **saved per design** (the plan and the printed drawing set match); Object mode with no
+drawing yet **falls back to the generic icon**; drawings show on the **plan canvas, printed drawing sets, Product Library
+tiles and the riser view**; a per-part drawing wins, else the device type's, else generic; Peak has **ETC's dealer permission**
+to use DaVinci's product drawings. Spec: `docs/superpowers/specs/2026-10-05-grid-object-symbols-design.md`; plan alongside it
+under `docs/superpowers/plans/`. No migration, no new dependency.
+
+What shipped, in three slices:
+- **Slice 1 — size slider + Generic / Object.** `GridProject.symbolDisplay` (`grid-symbol-display.ts`, D605): a toolbar
+  Size slider (25–400 %, live paint, saved on release, double-click = 100 %) and a Generic / Object toggle, scaling markers,
+  assembly children, label offset, selection ring, click/snap targets and every drawing-set plan sheet through the one
+  `markerBox` helper. The riser does not scale.
+- **Slice 2 — object drawings.** Part documents of two new kinds, `symbol` and `riser` (D606), SVG accepted only for
+  drawings and always sanitized (`svg-sanitize.ts`, D607), drawn only as images with a sandbox CSP and a generic fallback on
+  a failed load (`object-symbol.tsx`, D608). Resolution part → device type → generic, riser → plan → generic, with a
+  server-built `symbolUrls` map (`object-symbols.ts`, `object-symbols-server.ts`, D609). Drawn on the plan canvas, the
+  drawing set (plan sheets, riser sheet, symbol legend) and the riser; Product Library tiles show them too. Slots in the
+  catalog part editor's Documents section and in Grid Settings → Device types (`drawing-upload.ts`).
+- **Slice 3 — DaVinci import.** The extract carries `planImageId` / `riserImageId`; `npm run symbols:davinci`
+  (`symbols-plan.ts` + `scripts/symbols-davinci.ts`, D610) is a dry run by default, never replaces a hand upload, is
+  idempotent and skips DaVinci's "Unknown" placeholder. Dry run against a one-ETC-part-per-record catalog: 668 part
+  drawings from 444 files; the 2026-09-02 export has 452 of 1,215 image ids on disk (D611).
+
+Gates (final head): …
+
+**Production runbook — the DaVinci import (Jeff).** Nothing is written until step 4.
+1. **Back up.** `DATABASE_URL=<prod> npm run db:export`.
+2. **Get the production env as a matched pair.** `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` must come from the **same Vercel
+   project** (Jeff runs the env pull to a temp file — never into the repo root, see the `.env.production.local` hazard — and
+   I read the two values from it). A production database paired with another project's Blob store would attach drawings that
+   production cannot read.
+3. **Dry run**, from the **main checkout** (where the DaVinci export lives under `data/davinci/source`):
+   `DATABASE_URL=… BLOB_READ_WRITE_TOKEN=… npm run symbols:davinci`. Check the printed `[blob] store_…` line is
+   **production's** store, and that the summary looks right: matched parts, drawings to attach, no image shared by more than 25
+   parts. (`--source <dir>` if the export is elsewhere. Without `--apply` nothing is uploaded.)
+4. **Apply.** `DATABASE_URL=… BLOB_READ_WRITE_TOKEN=… npm run symbols:davinci -- --apply --yes`. Safe to re-run; a run that
+   prints "failed" for any group exits 1 and the re-run picks up only what is missing.
+5. **Verify.** Open the Grid design of a matched ETC part, switch to **Object**, and confirm one drawing loads — that proves
+   the database and the Blob store are the same pair.
+6. **Clean up.** Delete the temp env file.
+
+**For Jeff.**
+1. Try it: open a Grid design, drag the **Size** slider, flip **Generic / Object**, print the drawing set at both sizes.
+2. **Upload a drawing** on one catalog part (part editor → Documents → Symbol drawing) and on one **device type** (Grid
+   Settings → Device types) and check the order: the part's drawing wins, then the type's, then generic.
+3. Run the **DaVinci import** above.
+4. Browse more of DaVinci's library and give me a **fuller export** later — the same command adds what is new.
+
+**Rollback.** Safe: no migration. Old code treats the two new kinds as unknown — `isPartDocKind` rejects a `symbol` or
+`riser` document, every coverage slot and the image gallery filter by kind so the documents are never counted or shown
+there, and the old part editor's all-documents list may show one with an unrecognised kind label. `GridProject.symbolDisplay`
+and the device types' `symbolDocId` are fields old code ignores, so a design reads and quotes identically with the generic
+symbols at their old size. Rolling back loses only the drawings' display; the documents stay in the database and Blob and
+return on the roll-forward.

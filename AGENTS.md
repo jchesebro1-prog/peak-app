@@ -713,5 +713,22 @@ See `.env.example`.
     No migration; Blank designs don't Auto fill (D603, Jeff). Remaining:
     try it on a real Auto-filled, large design in production. Punch item #299.
 
+39. ✅ **Object symbols + size slider** (#300, D605–D612) — a Grid design saves
+    its own symbol size (25–400 %) and Generic / Object mode (`symbolDisplay`,
+    `grid-symbol-display.ts`; scales markers, click/snap targets, the ring and
+    the drawing set's plan sheets through one `markerBox`, never the riser).
+    Product drawings are part documents of two new kinds, `symbol` and
+    `riser` (not coverage slots, never in the portal), per part and per device
+    type (`symbolDocId`); SVG is accepted only for drawings and always
+    sanitized (`svg-sanitize.ts`), drawn only as images with a sandbox CSP and
+    a generic fallback (`object-symbol.tsx`, `drawing-upload.ts`). A marker
+    resolves part → device type → generic, riser → plan → generic
+    (`object-symbols.ts`, `object-symbols-server.ts` build the URL map). Shown
+    on the plan, the drawing set, Library tiles and the riser. `npm run
+    symbols:davinci` (`symbols-plan.ts` + `scripts/symbols-davinci.ts`) attaches
+    ETC's DaVinci drawings: dry run by default, never replaces a hand upload,
+    idempotent. No migration. Remaining is Jeff-gated: the production import
+    (runbook in PUNCHLIST #300) and a fuller DaVinci export. Punch item #300.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

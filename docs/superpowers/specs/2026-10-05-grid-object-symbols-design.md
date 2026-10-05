@@ -1,5 +1,7 @@
 # The Grid — object symbols, DaVinci drawings and a symbol-scale slider (#300) — design
 
+**Status:** Shipped 2026-10-05 (D605–D612).
+
 **Date:** 2026-10-05 · **Punch:** #300 · **Decisions:** D605–D612 · **Approved by:** Jeff (2026-10-05, in session)
 
 ## Ask
