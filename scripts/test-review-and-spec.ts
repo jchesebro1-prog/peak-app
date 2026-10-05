@@ -49780,4 +49780,29 @@ import { sniffDocumentType as sniff300 } from "@/lib/part-docs/files";
   const e = sanitizeSvg(S('<a href="&#106;avascript:alert(1)"><rect/></a><set attributeName="href" to="java&#x09;script:alert(1)"/><rect fill="url(&#x27;https://x/p&#x27;)" style="fill:u\\72l(https://x/q)"/>'));
   const e2 = sanitizeSvg(S('<rect><title>&#106;avascript:alert(1)</title></rect>'));
   ok(e.ok && !/&#|javascript|https:\/\/x|<set/i.test(e.svg) && !e2.ok, "#300 svg: entity-encoded javascript:, href animation and CSS-escaped url() never survive");
+  const X = (inner: string, attrs = "") => `<svg xmlns="http://www.w3.org/2000/svg"${attrs}>${inner}</svg>`;
+  const t0 = Date.now();
+  sanitizeSvg(X("<style>url(" + " ".repeat(900_000) + "</style>"));
+  ok(Date.now() - t0 < 1000, "#300 svg: a crafted 1 MB style can't stall the server");
+  const t1 = Date.now();
+  sanitizeSvg(X("<style>" + "url(".repeat(240_000) + "</style>"));
+  ok(Date.now() - t1 < 1000, "#300 svg: 1 MB of repeated url( can't stall the server");
+  const t2 = Date.now();
+  sanitizeSvg(X("", " " + Array.from({ length: 80_000 }, (_, i) => `a${i}="1"`).join(" ")));
+  ok(Date.now() - t2 < 1000, "#300 svg: 1 MB of distinct attributes can't stall the server");
+  const t3 = Date.now();
+  sanitizeSvg(X("<a" + "b".repeat(900_000)));
+  ok(Date.now() - t3 < 1000, "#300 svg: a 1 MB unclosed tag can't stall the server");
+  const split = [
+    sanitizeSvg(X('<style>@imp<![CDATA[ort "https://x/a.css";]]></style>')),
+    sanitizeSvg(X('<style>@imp<g/>ort "https://x/b.css";</style>')),
+    sanitizeSvg(X("<style>.a{fill:u<![CDATA[rl(https://x/c)]]>}</style>")),
+  ];
+  ok(split.every((r) => r.ok && !/@import|https:\/\/x|CDATA|<g/i.test(r.svg)) && split[1].ok && split[1].removed.includes("style elements"), "#300 svg: a style split by CDATA or a child element is cleaned as one");
+  const cd = sanitizeSvg(X("<desc><![CDATA[><img src=x onerror=alert(1)>]]></desc>"));
+  ok(cd.ok && !cd.svg.includes("<![CDATA[") && !cd.svg.includes("<img") && cd.svg.includes("&lt;img"), "#300 svg: CDATA is written as escaped text, never markup");
+  const q = sanitizeSvg(X('<style>.a{font-family:"A\\"B"}</style><rect style=\'font-family:"C\\"D"\'/>'));
+  ok(q.ok && q.svg.includes('"A\\"B"') && q.svg.includes("&quot;C\\&quot;D&quot;") && q.removed.length === 0, "#300 svg: legitimate CSS escapes are kept as written");
+  const fa = sanitizeSvg(X('<image srcset="https://x/1.png 1x" href="#i"/><g xml:base="https://x/"><rect background="https://x/2.png"/></g>'));
+  ok(fa.ok && !/srcset|xml:base|background|https:\/\/x/.test(fa.svg) && fa.svg.includes('href="#i"') && fa.removed.includes("external links"), "#300 svg: srcset, xml:base and other fetch attributes dropped");
 }

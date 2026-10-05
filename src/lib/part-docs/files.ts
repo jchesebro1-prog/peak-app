@@ -82,6 +82,12 @@ export function sniffDocumentType(bytes: Uint8Array): SniffedType | null {
   return null;
 }
 
+/** How many leading bytes sniffing needs. */
+export const SNIFF_BYTES = 64 * 1024;
+
+/** One prolog item an SVG file may start with: whitespace, a processing instruction, a comment, a `<!DOCTYPE svg…>`. */
+const SVG_PROLOG = /\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE\s+svg\b(?:[^[>]|\[[^\]]*\])*>/iy;
+
 /**
  * SVG text (#300): after an optional UTF-8 BOM, whitespace, `<?xml …?>` /
  * other processing instructions, comments and a `<!DOCTYPE svg…>`, the first
@@ -89,17 +95,17 @@ export function sniffDocumentType(bytes: Uint8Array): SniffedType | null {
  * unless it says so in `ALLOWED_TYPES`, and every stored SVG is sanitized.
  */
 function looksLikeSvg(bytes: Uint8Array): boolean {
-  let s = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, SNIFF_BYTES)).replace(/^\uFEFF/, "");
+  // TextDecoder drops a leading UTF-8 BOM itself.
+  const s = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, SNIFF_BYTES));
+  let i = 0;
   for (;;) {
-    const before = s;
-    s = s.replace(/^\s+/, "").replace(/^<\?[\s\S]*?\?>/, "").replace(/^<!--[\s\S]*?-->/, "").replace(/^<!DOCTYPE\s+svg\b(?:[^[>]|\[[^\]]*\])*>/i, "");
-    if (s === before) break;
+    SVG_PROLOG.lastIndex = i;
+    const m = SVG_PROLOG.exec(s);
+    if (!m) break;
+    i += m[0].length;
   }
-  return /^<svg[\s>/]/.test(s);
+  return /^<svg[\s>/]/.test(s.slice(i, i + 5));
 }
-
-/** How many leading bytes sniffing needs. */
-export const SNIFF_BYTES = 64 * 1024;
 
 /**
  * What the bytes really are, for the three image kinds part documents
