@@ -136,6 +136,7 @@ export default function CurtainDrop({
         width: 264,
         lineHeight: 1.4,
       }}
+      data-plan-popover
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === "Escape") onCancel();

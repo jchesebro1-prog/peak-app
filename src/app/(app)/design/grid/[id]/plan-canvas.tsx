@@ -58,10 +58,10 @@ const PANEL_LABEL: React.CSSProperties = {
 export const GRID_PART_MIME = "application/x-grid-part";
 
 /** Space held as the hand tool: never while typing. */
-function isEditable(t: EventTarget | null): boolean {
-  const el = t as HTMLElement | null;
-  const tag = el?.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || Boolean(el?.isContentEditable);
+function isEditable(target: EventTarget | null): boolean {
+  const t = target instanceof Element ? target : null;
+  const tag = t?.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t instanceof HTMLElement && t.isContentEditable);
 }
 
 export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId: string, at: Point) => void }) {
@@ -165,13 +165,23 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
       onPointerLeave={() => {
         overRef.current = false;
       }}
+      // Clicking the plan takes focus out of a field (the device search…) so
+      // V/H/Escape/Delete work again. Capture phase = before any other handling;
+      // the inline popovers (curtain, calibrate, space) keep their own focus.
+      onPointerDownCapture={(e) => {
+        const hit = e.target instanceof Element ? e.target : null;
+        if (hit?.closest("[data-plan-popover], input, select, textarea, label")) return;
+        const ae = document.activeElement;
+        if (ae instanceof HTMLElement && ae !== document.body && isEditable(ae)) ae.blur();
+      }}
       // Pan (#299). Runs on the box, so the plan's own onDown sees the same
       // pointerdown and bails (it checks the hand tool first); capture keeps
       // the plan's onMove/onUp out of the gesture entirely.
       onPointerDown={(e) => {
+        const hit = e.target instanceof Element ? e.target : null;
         if (!panOn || e.button !== 0 || !sheet) return;
         // Let the no-sheet upload button (and any control) take its own click.
-        if ((e.target as HTMLElement).closest("button, a, input, select, textarea, label")) return;
+        if (hit?.closest("button, a, input, select, textarea, label")) return;
         const box = e.currentTarget;
         panStart.current = { x: e.clientX, y: e.clientY, left: box.scrollLeft, top: box.scrollTop };
         setGrabbing(true);
@@ -559,6 +569,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
             };
             return (
               <div
+                data-plan-popover
                 style={{
                   position: "absolute",
                   left: `${anchor.x * 100}%`,

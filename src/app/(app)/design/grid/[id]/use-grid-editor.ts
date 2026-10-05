@@ -756,9 +756,9 @@ function useGridEditorImpl(props: GridEditorProps) {
       // any element opted out with data-no-nudge — owns the arrow keys;
       // don't also move the selected plan device underneath it.
       if (e.defaultPrevented) return;
-      const t = e.target as HTMLElement | null;
+      const t = e.target instanceof Element ? e.target : null;
       const tag = t?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t instanceof HTMLElement && t.isContentEditable)) return;
       if (t?.closest('[role="dialog"], [data-no-nudge]')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const step = e.shiftKey ? NUDGE_FAST : NUDGE;
@@ -1401,9 +1401,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      const t = e.target as HTMLElement | null;
+      const t = e.target instanceof Element ? e.target : null;
       const tag = t?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t instanceof HTMLElement && t.isContentEditable)) return;
       if (t?.closest('[role="dialog"], [data-no-nudge]')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {

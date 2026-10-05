@@ -10,8 +10,9 @@ import { IconChevronDown } from "./icons";
  * ArrowUp/Down move focus between items, Enter activates the focused one
  * (native button/link behaviour). `href` items are next/link. A menu may
  * also carry free content (`children`) under its items — the Design menu's
- * option switcher, the Outputs menu's package result. The root is
- * `data-no-nudge`, so arrow keys here never nudge a selected device.
+ * option switcher, the Outputs menu's package result. Only the open list is
+ * `data-no-nudge` (arrow keys there never nudge a selected device), never the
+ * trigger — shortcuts work again as soon as the menu closes.
  */
 
 export type MenuItem = {
@@ -72,6 +73,7 @@ export default function Menu({
   disabled,
   triggerStyle,
   chevron = true,
+  onOpenChange,
 }: {
   label: React.ReactNode;
   title?: string;
@@ -84,27 +86,33 @@ export default function Menu({
   triggerStyle?: React.CSSProperties;
   /** false for a bare "⋯" trigger. */
   chevron?: boolean;
+  /** Called whenever the menu opens or closes. */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const close = () => setOpen(false);
+  const change = (v: boolean) => {
+    setOpen(v);
+    onOpenChange?.(v);
+  };
+  const close = () => change(false);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) change(false);
     };
     // On document, so it runs before the editor's window-level shortcuts —
     // preventDefault tells them this Escape was the menu's.
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const t = e.target as HTMLElement | null;
+      const t = e.target instanceof Element ? e.target : null;
       // A field inside the menu (option name, rename) keeps its own Escape.
       if (t && rootRef.current?.contains(t) && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
       e.preventDefault();
-      setOpen(false);
+      change(false);
       triggerRef.current?.focus();
     };
     document.addEventListener("pointerdown", onDown);
@@ -113,6 +121,7 @@ export default function Menu({
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- change() only forwards to the latest onOpenChange
   }, [open]);
 
   const focusables = () =>
@@ -126,7 +135,7 @@ export default function Menu({
   };
 
   return (
-    <div ref={rootRef} data-no-nudge style={{ position: "relative", display: "inline-flex" }}>
+    <div ref={rootRef} style={{ position: "relative", display: "inline-flex" }}>
       <button
         ref={triggerRef}
         type="button"
@@ -135,11 +144,11 @@ export default function Menu({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => change(!open)}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown" && !open) {
             e.preventDefault();
-            setOpen(true);
+            change(true);
             requestAnimationFrame(() => move(1));
           }
         }}
@@ -152,8 +161,9 @@ export default function Menu({
         <div
           ref={listRef}
           role="menu"
+          data-no-nudge
           onKeyDown={(e) => {
-            const tag = (e.target as HTMLElement).tagName;
+            const tag = e.target instanceof Element ? e.target.tagName : "";
             if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
             if (e.key === "ArrowDown") {
               e.preventDefault();

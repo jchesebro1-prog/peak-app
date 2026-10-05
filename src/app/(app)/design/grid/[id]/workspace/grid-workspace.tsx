@@ -79,6 +79,9 @@ export default function GridWorkspace({
 
   const resize = useCallback((k: PaneKey, px: number) => {
     setSizes((prev) => (prev[k] === px ? prev : { ...prev, [k]: px }));
+  }, []);
+  // Persist only when a drag ends (or the size resets) — not on every move.
+  const persistSize = useCallback((k: PaneKey, px: number) => {
     save(PANE_SIZE_KEY(k), String(px));
   }, []);
   const toggle = (k: PaneKey) => {
@@ -101,6 +104,7 @@ export default function GridWorkspace({
       size={sizes[k]}
       collapsed={collapsed[k]}
       onResize={(px) => resize(k, px)}
+      onResizeEnd={(px) => persistSize(k, px)}
       onToggle={() => toggle(k)}
     >
       {body}

@@ -45,7 +45,7 @@ import {
  * the old header row held lives here, in a menu, or in the sheet tabs.
  */
 
-const SOON = "Coming in this release";
+const SOON = "coming in this release";
 
 const BTN: React.CSSProperties = {
   display: "inline-flex",
@@ -77,12 +77,15 @@ const FIELD_LABEL: React.CSSProperties = {
 
 function IconButton({
   title,
+  label,
   active,
   disabled,
   onClick,
   children,
 }: {
   title: string;
+  /** The accessible name when it differs from the tooltip. */
+  label?: string;
   active?: boolean;
   disabled?: boolean;
   onClick?: () => void;
@@ -92,7 +95,7 @@ function IconButton({
     <button
       type="button"
       title={title}
-      aria-label={title}
+      aria-label={label ?? title}
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
@@ -112,6 +115,15 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+/** A not-yet-wired Edit / Arrange control: its real name + shortcut, disabled. */
+function SoonButton({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <IconButton title={`${name} — ${SOON}`} label={name} disabled>
+      {children}
+    </IconButton>
   );
 }
 
@@ -177,7 +189,6 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
 
   const id = encodeURIComponent(project.id);
   const opt = encodeURIComponent(activeOptionId);
-  const armed = Boolean(armedPartId || armedCurtainType);
   const scopes = refillableScopes(project.scopeInputs, auto);
   const pct = Math.round(zoom * 100);
 
@@ -225,8 +236,8 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
       <Divider />
       <Group label="Tools">
         {toolButton("select", "Select (V)", <IconSelect />)}
-        {toolButton("place", armed ? "Place (P)" : "Place (P) — pick a part in the Library", <IconPlace />, {
-          disabled: !armedPartId && !armedCurtainType,
+        {toolButton("place", armedPartId || armedCurtainType ? "Place (P)" : "Place (P) — pick a part in the Library", <IconPlace />, {
+          disabled: !armedPartId,
           active: tool === "place" || tool === "curtain",
         })}
         {toolButton("wire", "Wire (W)", <IconWire />, { disabled: !sheet })}
@@ -237,24 +248,24 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
 
       <Divider />
       <Group label="Edit">
-        <IconButton title={SOON} disabled>
+        <SoonButton name="Undo (⌘Z)">
           <IconUndo />
-        </IconButton>
-        <IconButton title={SOON} disabled>
+        </SoonButton>
+        <SoonButton name="Redo (⇧⌘Z)">
           <IconRedo />
-        </IconButton>
-        <IconButton title={SOON} disabled>
+        </SoonButton>
+        <SoonButton name="Cut (⌘X)">
           <IconCut />
-        </IconButton>
-        <IconButton title={SOON} disabled>
+        </SoonButton>
+        <SoonButton name="Copy (⌘C)">
           <IconCopy />
-        </IconButton>
-        <IconButton title={SOON} disabled>
+        </SoonButton>
+        <SoonButton name="Paste (⌘V)">
           <IconPaste />
-        </IconButton>
-        <IconButton title={SOON} disabled>
+        </SoonButton>
+        <SoonButton name="Duplicate (⌘D)">
           <IconDuplicate />
-        </IconButton>
+        </SoonButton>
         <IconButton
           title={selectedPlacement ? "Delete (Del)" : "Delete (Del) — select a device first"}
           disabled={!selectedPlacement || busy}
@@ -266,10 +277,21 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
 
       <Divider />
       <Group label="Arrange">
-        {[IconAlignLeft, IconAlignCenter, IconAlignRight, IconAlignTop, IconAlignMiddle, IconAlignBottom, IconDistributeH, IconDistributeV].map((I, i) => (
-          <IconButton key={i} title={SOON} disabled>
+        {(
+          [
+            ["Align left", IconAlignLeft],
+            ["Align center", IconAlignCenter],
+            ["Align right", IconAlignRight],
+            ["Align top", IconAlignTop],
+            ["Align middle", IconAlignMiddle],
+            ["Align bottom", IconAlignBottom],
+            ["Distribute horizontally", IconDistributeH],
+            ["Distribute vertically", IconDistributeV],
+          ] as const
+        ).map(([name, I]) => (
+          <SoonButton key={name} name={name}>
             <I />
-          </IconButton>
+          </SoonButton>
         ))}
       </Group>
 
@@ -317,8 +339,9 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         </IconButton>
       </Group>
 
-      <span style={{ flex: 1 }} />
-
+      {/* One non-wrapping unit, pushed to the right: the toolbar only wraps
+          between whole groups, and only when the window is genuinely narrow. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", flexWrap: "nowrap", marginLeft: "auto" }}>
       {/* Change equipment (#211) — the Scope panel's dialog, Auto scopes only. */}
       {scopes.length === 1 && (
         <button type="button" style={BTN} onClick={() => setRefillScope(scopes[0])} title={`Re-fill ${SHORT[scopes[0]]} with different equipment`}>
@@ -370,6 +393,9 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
       <Menu
         label="Outputs"
         title="Riser, schedule, drawing set, lineset, client package"
+        onOpenChange={(open) => {
+          if (!open) setArmDelete(false);
+        }}
         align="right"
         width={300}
         items={[
@@ -449,7 +475,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         </a>
       )}
 
-      <div data-no-nudge style={{ position: "relative", display: "inline-flex" }}>
+      <div style={{ position: "relative", display: "inline-flex" }}>
         <button
           type="button"
           style={{ ...BTN, background: "#16181d", color: "#fff", borderColor: "#16181d", opacity: busy || bomEmpty ? 0.55 : 1 }}
@@ -463,6 +489,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         {incompleteQuote && (
           <div
             role="alertdialog"
+            data-no-nudge
             aria-label="Quote an incomplete design?"
             style={{
               position: "absolute",
@@ -494,6 +521,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
             </div>
           </div>
         )}
+      </div>
       </div>
 
       {refillScope && auto && project.scopeInputs && (

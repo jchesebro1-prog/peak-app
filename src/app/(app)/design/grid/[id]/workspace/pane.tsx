@@ -48,6 +48,7 @@ export function Pane({
   size,
   collapsed,
   onResize,
+  onResizeEnd,
   onToggle,
   children,
   tabs,
@@ -57,13 +58,25 @@ export function Pane({
   side: "left" | "right" | "bottom";
   size: number;
   collapsed: boolean;
+  /** Live size while dragging — state only, never persisted. */
   onResize: (px: number) => void;
+  /** Final size (drag released, or double-click reset) — persist here. */
+  onResizeEnd: (px: number) => void;
   onToggle: () => void;
   children: React.ReactNode;
   tabs?: React.ReactNode;
 }) {
   const start = useRef<{ size: number; x: number; y: number } | null>(null);
+  const last = useRef<number | null>(null);
   const border = side === "left" ? { borderRight: "1px solid #dfe2e8" } : side === "right" ? { borderLeft: "1px solid #dfe2e8" } : { borderTop: "1px solid #dfe2e8" };
+
+  // Release / cancel / lost capture all land here; persist once, if it moved.
+  const endDrag = () => {
+    const px = last.current;
+    start.current = null;
+    last.current = null;
+    if (px != null) onResizeEnd(px);
+  };
 
   if (collapsed) {
     const vertical = side !== "bottom";
@@ -130,6 +143,7 @@ export function Pane({
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           start.current = { size, x: e.clientX, y: e.clientY };
+          last.current = null;
           e.currentTarget.setPointerCapture?.(e.pointerId);
           e.preventDefault();
         }}
@@ -137,18 +151,17 @@ export function Pane({
           const s = start.current;
           if (!s) return;
           const delta = side === "bottom" ? s.y - e.clientY : side === "left" ? e.clientX - s.x : s.x - e.clientX;
-          onResize(clampPane(k, s.size + delta));
+          const px = clampPane(k, s.size + delta);
+          last.current = px;
+          onResize(px);
         }}
-        onPointerUp={() => {
-          start.current = null;
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
+        onDoubleClick={() => {
+          onResize(PANE_DEFAULTS[k]);
+          onResizeEnd(PANE_DEFAULTS[k]);
         }}
-        onPointerCancel={() => {
-          start.current = null;
-        }}
-        onLostPointerCapture={() => {
-          start.current = null;
-        }}
-        onDoubleClick={() => onResize(PANE_DEFAULTS[k])}
         style={{ position: "absolute", zIndex: 4, touchAction: "none", ...handleStyle }}
       />
     </section>

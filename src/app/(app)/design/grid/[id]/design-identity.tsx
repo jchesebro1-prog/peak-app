@@ -23,6 +23,8 @@ const quiet: CSSProperties = {
   fontWeight: 500,
   cursor: "pointer",
 };
+/** One line, truncated: keeps the toolbar a single row for long names. */
+const clip: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const field: CSSProperties = {
   borderWidth: 1,
   borderStyle: "solid",
@@ -97,7 +99,7 @@ export default function DesignIdentity({
   };
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 700, color: "#16181d", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 700, color: "#16181d", flexWrap: "nowrap", whiteSpace: "nowrap" }}>
       Manual Layout <span style={{ color: "#8c919c", fontWeight: 500 }}>·</span>
       {editingName ? (
         <input
@@ -119,7 +121,7 @@ export default function DesignIdentity({
           style={{ ...field, width: 240 }}
         />
       ) : (
-        <button type="button" onClick={beginRename} disabled={pending || !canEdit} title={canEdit ? "Rename this design" : undefined} style={canEdit ? quiet : { ...quiet, cursor: "default" }}>
+        <button type="button" onClick={beginRename} disabled={pending || !canEdit} title={canEdit ? `Rename this design — ${name}` : name} style={{ ...(canEdit ? quiet : { ...quiet, cursor: "default" }), ...clip, maxWidth: 200 }}>
           {name}
         </button>
       )}
@@ -140,14 +142,14 @@ export default function DesignIdentity({
           </button>
         </span>
       ) : !canEdit ? (
-        customer ? <span style={{ color: "#8c919c", fontWeight: 500 }}>{customer}</span> : null
+        customer ? <span title={customer} style={{ color: "#8c919c", fontWeight: 500, ...clip, maxWidth: 150 }}>{customer}</span> : null
       ) : (
         <button
           type="button"
           onClick={() => setEditingCustomer(true)}
           disabled={pending}
-          title={customer ? "Change the customer — clears the venue and contact" : "Link this design to a customer"}
-          style={customer ? quiet : { ...quiet, color: "var(--accent)", fontWeight: 600 }}
+          title={customer ? `${customer} — change the customer (clears the venue and contact)` : "Link this design to a customer"}
+          style={{ ...(customer ? quiet : { ...quiet, color: "var(--accent)", fontWeight: 600 }), ...clip, maxWidth: 150 }}
         >
           {customer || "+ Customer"}
         </button>
