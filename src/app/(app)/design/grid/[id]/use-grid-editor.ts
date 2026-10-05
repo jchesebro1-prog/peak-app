@@ -60,6 +60,7 @@ import {
   replacePlacementsPartAction,
   restoreItemsAction,
   setPlacementsCategoryAction,
+  setSymbolDisplayAction,
   setSymbolLookAction,
   setVenueAction,
   linkLinesetDesignAction,
@@ -79,7 +80,7 @@ import { alignPositions, changedMoves, distributePositions, type AlignMode } fro
 import { copySelection, PASTE_OFFSET, pasteLayout, type Clipboard } from "@/lib/design/grid-clipboard";
 // Type-only: the module itself imports the server-side catalog lookup.
 import type { CurtainInput } from "@/lib/design/grid-curtain-input";
-import type { SymbolDisplay } from "@/lib/design/grid-symbol-display";
+import { cleanSymbolDisplay, hitRadius, type SymbolDisplay, type SymbolMode } from "@/lib/design/grid-symbol-display";
 import {
   SNAP_FT_KEY,
   SNAP_ON_KEY,
@@ -112,7 +113,8 @@ import {
  *  target circular on tall pages) — same value the click-to-select test
  *  under `onDown` uses. Route-endpoint snapping (Task 4) uses a wider,
  *  ~1.5x radius: a waypoint should count as "on the device" even when it
- *  isn't pixel-perfect on the marker center. */
+ *  isn't pixel-perfect on the marker center. Both are at 100 % symbol size;
+ *  the editor scales them with the design's Size (#300, `hitRadius`). */
 const DEVICE_HIT_RADIUS = 0.028;
 const DEVICE_SNAP_RADIUS = DEVICE_HIT_RADIUS * 1.5;
 
@@ -131,6 +133,9 @@ const NUDGE_FAST = 0.01;
 /** Coalesce key-repeat into one write, holding an arrow must not fire a
  *  server action per keystroke. */
 const NUDGE_COMMIT_MS = 400;
+/** The Size slider's save debounce (#300): it paints every step, writes once
+ *  the hand settles — the last value wins. */
+const SYMBOL_SAVE_MS = 400;
 
 /** Snap on (#299): one arrow press moves a device one grid step; Shift = this many. */
 const SNAP_NUDGE_FAST_STEPS = 5;
@@ -246,15 +251,16 @@ function stepLabel(verb: string, n: number): string {
 function snappedPlacement(
   p: Point,
   placements: GridPlacement[],
-  aspect: number
+  aspect: number,
+  radius: number = DEVICE_SNAP_RADIUS
 ): GridPlacement | null {
   return (
     [...placements]
       .reverse()
       .find(
         (pl) =>
-          Math.abs(pl.x - p.x) < DEVICE_SNAP_RADIUS &&
-          Math.abs(pl.y - p.y) < DEVICE_SNAP_RADIUS / (aspect || 1)
+          Math.abs(pl.x - p.x) < radius &&
+          Math.abs(pl.y - p.y) < radius / (aspect || 1)
       ) || null
   );
 }
@@ -425,6 +431,91 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  did, in words. View state only; never persisted. */
   const [lastAction, setLastAction] = useState<string | null>(null);
   const noteAction = useCallback((text: string) => setLastAction(text), []);
+
+  /** Symbol size + Generic/Object (#300) — a display setting saved on the
+   *  design, so the plan and the printed set match. Painted here first,
+   *  then written; never an undo step, and it never clears the stack. */
+  const [symbolDisplay, setSymbolDisplayLocal] = useState<SymbolDisplay>(project.symbolDisplay);
+  const [symbolSeen, setSymbolSeen] = useState<SymbolDisplay>(project.symbolDisplay);
+  /** A write is scheduled or in flight — its value outranks the props. */
+  const [symbolSaving, setSymbolSaving] = useState(false);
+  // Adopt a new server value (another tab, a refresh) during render — unless
+  // this tab still has its own write on the way.
+  if (symbolSeen.scale !== project.symbolDisplay.scale || symbolSeen.mode !== project.symbolDisplay.mode) {
+    setSymbolSeen(project.symbolDisplay);
+    if (!symbolSaving) setSymbolDisplayLocal(project.symbolDisplay);
+  }
+  /** The last value the server holds — what a failed write reverts to. */
+  const symbolSaved = useRef<SymbolDisplay>(project.symbolDisplay);
+  useEffect(() => {
+    symbolSaved.current = project.symbolDisplay;
+  }, [project.symbolDisplay]);
+  const symbolTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The value still inside the debounce (null once sent). */
+  const symbolUnsent = useRef<SymbolDisplay | null>(null);
+  /** Write sequence: only the newest write's answer counts (last value wins). */
+  const symbolSeq = useRef(0);
+  const sendSymbolDisplay = useCallback(
+    async (next: SymbolDisplay, seq: number) => {
+      symbolUnsent.current = null;
+      let r: Awaited<ReturnType<typeof setSymbolDisplayAction>> | null = null;
+      try {
+        r = await setSymbolDisplayAction(project.id, next);
+      } catch {
+        r = null;
+      } finally {
+        if (seq === symbolSeq.current) {
+          setSymbolSaving(false);
+          if (!r || !r.ok) {
+            setSymbolDisplayLocal(symbolSaved.current);
+            setErr(r && !r.ok ? r.error : SAVE_FAILED);
+          }
+        }
+      }
+    },
+    [project.id]
+  );
+  function saveSymbolDisplay(next: SymbolDisplay, delay: number) {
+    setSymbolDisplayLocal(next);
+    setSymbolSaving(true);
+    const seq = ++symbolSeq.current;
+    if (symbolTimer.current) clearTimeout(symbolTimer.current);
+    symbolTimer.current = null;
+    if (delay <= 0) {
+      void sendSymbolDisplay(next, seq);
+      return;
+    }
+    symbolUnsent.current = next;
+    symbolTimer.current = setTimeout(() => {
+      symbolTimer.current = null;
+      void sendSymbolDisplay(next, seq);
+    }, delay);
+  }
+  /** The Size slider: paints live, writes debounced. */
+  function setSymbolScale(v: number) {
+    const scale = cleanSymbolDisplay({ scale: v }).scale;
+    if (scale === symbolDisplay.scale) return;
+    saveSymbolDisplay({ ...symbolDisplay, scale }, SYMBOL_SAVE_MS);
+  }
+  /** Generic / Object: writes at once (with the current size). */
+  function setSymbolMode(mode: SymbolMode) {
+    if (mode === symbolDisplay.mode) return;
+    saveSymbolDisplay({ ...symbolDisplay, mode }, 0);
+  }
+  // Leaving inside the debounce still writes the last size (best effort).
+  useEffect(
+    () => () => {
+      if (symbolTimer.current) clearTimeout(symbolTimer.current);
+      symbolTimer.current = null;
+      const unsent = symbolUnsent.current;
+      symbolUnsent.current = null;
+      if (unsent) void setSymbolDisplayAction(project.id, unsent).catch(() => {});
+    },
+    [project.id]
+  );
+  /** Device hit + wire-snap radii follow the drawn size (#300). */
+  const deviceHitRadius = hitRadius(DEVICE_HIT_RADIUS, symbolDisplay.scale);
+  const deviceSnapRadius = hitRadius(DEVICE_SNAP_RADIUS, symbolDisplay.scale);
 
   // Repositioning (punch #47). Two pieces of local truth, both required:
   //  - `drag` is the live gesture (nothing has been written yet);
@@ -1414,11 +1505,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         // end off a device) behave exactly as before.
         // Visible devices only: a wire must not snap onto a marker the
         // designer can't see (#48).
-        const fromPlacement = snappedPlacement(points[0], visiblePlacements, aspect);
+        const fromPlacement = snappedPlacement(points[0], visiblePlacements, aspect, deviceSnapRadius);
         const toPlacement = snappedPlacement(
           points[points.length - 1],
           visiblePlacements,
-          aspect
+          aspect,
+          deviceSnapRadius
         );
         let fromPlacementId: string | undefined;
         let toPlacementId: string | undefined;
@@ -1478,8 +1570,8 @@ function useGridEditorImpl(props: GridEditorProps) {
       .reverse()
       .find(
         (pl) =>
-          Math.abs(pl.x - p.x) < DEVICE_HIT_RADIUS &&
-          Math.abs(pl.y - p.y) < DEVICE_HIT_RADIUS / (aspect || 1)
+          Math.abs(pl.x - p.x) < deviceHitRadius &&
+          Math.abs(pl.y - p.y) < deviceHitRadius / (aspect || 1)
       );
     if (hit) {
       setCategoryDraft(null);
@@ -2460,6 +2552,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   return {
     router,
     project,
+    symbolDisplay,
+    setSymbolScale,
+    setSymbolMode,
     sheets,
     parts,
     fabrics,

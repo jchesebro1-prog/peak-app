@@ -11,6 +11,7 @@ import type { GridEditor } from "../use-grid-editor";
 import Menu from "./menu";
 import OutputsMenu from "./outputs-menu";
 import QuoteButton from "./quote-button";
+import SymbolControls from "./symbol-controls";
 import { BTN, FIELD_LABEL } from "./toolbar-style";
 import {
   IconAlignBottom,
@@ -43,7 +44,8 @@ import {
  * The Grid workspace toolbar (#299): one 34px row — the design's name and
  * customer, the tools (one active at a time), Edit (undo/redo, cut/copy/
  * paste/duplicate, Delete), Arrange (align ×6 at 2+ selected, distribute ×2
- * at 3+), View (zoom, Fit), then Change equipment, Design ▾, Outputs ▾
+ * at 3+), View (zoom, Fit), Snap, Symbols (Size + Generic/Object, #300 —
+ * symbol-controls.tsx), then Change equipment, Design ▾, Outputs ▾
  * (outputs-menu.tsx) and the primary Add to quotes (quote-button.tsx). Every
  * control the old header row held lives here, in a menu, or in the sheet tabs.
  */
@@ -436,6 +438,10 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           ))}
         </select>
       </Group>
+
+      <Divider />
+      {/* Symbol Size + Generic / Object (#300) — saved on the design. */}
+      <SymbolControls ed={ed} />
 
       {/* One non-wrapping unit, pushed to the right: the toolbar only wraps
           between whole groups, and only when the window is genuinely narrow. */}

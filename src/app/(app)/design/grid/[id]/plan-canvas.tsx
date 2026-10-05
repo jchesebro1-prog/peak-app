@@ -9,6 +9,7 @@ import { symbolLook } from "@/lib/design/grid-icons";
 import { SymbolShape } from "@/components/design/symbol-shape";
 import { polygonCentroid } from "@/lib/design/grid-geometry";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
+import { markerBox } from "@/lib/design/grid-symbol-display";
 import CurtainDrop from "./curtain-drop";
 import PlanLegend from "./plan-legend";
 import type { GridEditor } from "./use-grid-editor";
@@ -71,6 +72,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     fabrics,
     specKeys,
     symbolCtx,
+    symbolDisplay,
     selectedIds,
     marquee,
     cancelGesture,
@@ -498,6 +500,9 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
               const x = pl.x * size.w;
               const y = pl.y * size.h;
               const on = selectedSet.has(pl.id);
+              // The design's symbol Size (#300) scales the marker, its
+              // children, the label offset and the selection ring.
+              const s = symbolDisplay.scale;
               // A seeded-but-unassigned placement (#38 Task 2) has no
               // catalog part to name it, so its own category — the
               // human system-function label grid-seed.ts stamped it
@@ -513,10 +518,10 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                 <g key={pl.id}>
                   {pl.curtain ? (
                     <>
-                      <rect x={x - 11} y={y - 8} width={22} height={16} rx={2} fill={c} opacity={0.92} />
-                      <rect x={x - 11} y={y - 8} width={22} height={16} rx={2} fill="none" stroke="#fff" strokeWidth={1.5} />
+                      <rect x={x - 11 * s} y={y - 8 * s} width={22 * s} height={16 * s} rx={2 * s} fill={c} opacity={0.92} />
+                      <rect x={x - 11 * s} y={y - 8 * s} width={22 * s} height={16 * s} rx={2 * s} fill="none" stroke="#fff" strokeWidth={1.5} />
                       <path
-                        d={`M ${x - 7} ${y - 6} L ${x - 7} ${y + 6} M ${x} ${y - 6} L ${x} ${y + 6} M ${x + 7} ${y - 6} L ${x + 7} ${y + 6}`}
+                        d={`M ${x - 7 * s} ${y - 6 * s} L ${x - 7 * s} ${y + 6 * s} M ${x} ${y - 6 * s} L ${x} ${y + 6 * s} M ${x + 7 * s} ${y - 6 * s} L ${x + 7 * s} ${y + 6 * s}`}
                         stroke="#fff"
                         strokeWidth={1}
                         opacity={0.75}
@@ -525,8 +530,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                   ) : (
                     <>
                       {(() => {
-                        const w = part?.symbolWidth || 44;
-                        const h = part?.symbolHeight || 30;
+                        const { w, h } = markerBox(part, s);
                         return (
                           <>
                             {/* Stock-symbol badge (spec 2026-09-25); ring + label below are unchanged. */}
@@ -542,8 +546,8 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                                   iconId={childLook.iconId}
                                   x={cx}
                                   y={cy}
-                                  w={10}
-                                  h={8}
+                                  w={10 * s}
+                                  h={8 * s}
                                   color={childLook.color}
                                   opacity={1}
                                 />
@@ -554,12 +558,12 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                       })()}
                     </>
                   )}
-                  <rect x={x + 12} y={y - 8} width={Math.max(30, label.length * 6.4) + 8} height={16} rx={4} fill="#fff" stroke={c} strokeWidth={1} opacity={0.95} />
-                  <text x={x + 16} y={y + 4} fill={c} fontSize={10.5} fontWeight={700} style={{ fontFamily: "inherit" }}>
+                  <rect x={x + 12 * s} y={y - 8} width={Math.max(30, label.length * 6.4) + 8} height={16} rx={4} fill="#fff" stroke={c} strokeWidth={1} opacity={0.95} />
+                  <text x={x + 12 * s + 4} y={y + 4} fill={c} fontSize={10.5} fontWeight={700} style={{ fontFamily: "inherit" }}>
                     {label}
                   </text>
                   {on && (
-                    <circle cx={x} cy={y} r={15} fill="none" stroke="#16181d" strokeDasharray="4 3" strokeWidth={1.5} />
+                    <circle cx={x} cy={y} r={Math.max(6, 15 * s)} fill="none" stroke="#16181d" strokeDasharray="4 3" strokeWidth={1.5} />
                   )}
                 </g>
               );

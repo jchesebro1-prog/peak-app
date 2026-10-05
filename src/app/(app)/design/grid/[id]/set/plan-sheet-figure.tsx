@@ -22,6 +22,7 @@ export type FigurePlacement = {
   key: string;
   /** Per-sheet type mark printed beside the symbol (L1, A2 …). */
   tag: string;
+  /** Marker box at the design's symbol size (#300) — curtains included. */
   w: number;
   h: number;
   curtain: boolean;
@@ -114,8 +115,9 @@ export default function PlanSheetFigure({
     const symbols = placements.map((pl) => ({
       x: pl.x * U,
       y: pl.y * H,
-      w: (pl.curtain ? 22 : pl.w) * K,
-      h: (pl.curtain ? 16 : pl.h) * K,
+      // Curtains carry their glyph's scaled size too (#300).
+      w: pl.w * K,
+      h: pl.h * K,
       tw: textW(pl.tag, TAG_FS),
       th: TAG_FS * 1.15,
     }));
@@ -238,7 +240,7 @@ export default function PlanSheetFigure({
                   const x = pl.x * U;
                   const y = pl.y * H;
                   return pl.curtain ? (
-                    <rect key={pl.id} x={x - 11 * K} y={y - 8 * K} width={22 * K} height={16 * K} rx={2 * K} fill={pl.color} />
+                    <rect key={pl.id} x={x - (pl.w / 2) * K} y={y - (pl.h / 2) * K} width={pl.w * K} height={pl.h * K} rx={2 * K} fill={pl.color} />
                   ) : (
                     <SymbolShape key={pl.id} iconId={pl.iconId} x={x} y={y} w={pl.w * K} h={pl.h * K} color={pl.color} />
                   );

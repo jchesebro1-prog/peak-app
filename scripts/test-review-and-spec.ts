@@ -1016,7 +1016,7 @@ const gridUploadRoute = readFileSync(
 // #299: the editor's shell (toolbar, sheet tabs, menus, status bar) lives in
 // grid/[id]/workspace/*.tsx — scanned alongside the editor wherever a moved
 // string is asserted.
-const gridWorkspaceSource = ["grid-workspace", "pane", "toolbar", "outputs-menu", "quote-button", "menu", "sheet-tabs", "status-bar", "icons", "property-editor", "system-status", "bom-panel", "right-pane"]
+const gridWorkspaceSource = ["grid-workspace", "pane", "toolbar", "outputs-menu", "quote-button", "menu", "sheet-tabs", "status-bar", "icons", "property-editor", "system-status", "bom-panel", "right-pane", "symbol-controls"]
   .map((w) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/workspace/${w}.tsx`), "utf8"))
   .join("\n");
 const gridEditorSource = readFileSync(

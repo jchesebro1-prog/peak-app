@@ -40,7 +40,7 @@ import { SymbolIcon } from "@/components/design/symbol-shape";
 import { PrintButton } from "@/components/letter/print-button";
 import PlanSheetFigure, { type FigurePlacement } from "./plan-sheet-figure";
 import SetSettingsPanel from "./set-settings-panel";
-import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
+import { cleanSymbolDisplay, markerBox } from "@/lib/design/grid-symbol-display";
 
 export const metadata = { title: "Drawing set — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -197,8 +197,11 @@ export default async function DrawingSetPage({
       // One type mark per part; each named curtain is its own type.
       key: pl.curtain ? `curtain:${pl.curtain.name}` : pl.partId,
       tag: "",
-      w: part?.symbolWidth || 44,
-      h: part?.symbolHeight || 30,
+      // The design's symbol size (#300) — the same box the editor draws;
+      // a curtain's glyph is 22×16 at 100 %.
+      ...(pl.curtain
+        ? { w: 22 * symbolDisplay.scale, h: 16 * symbolDisplay.scale }
+        : markerBox(part, symbolDisplay.scale)),
       curtain: Boolean(pl.curtain),
     };
     return { fig, desc, qty };
