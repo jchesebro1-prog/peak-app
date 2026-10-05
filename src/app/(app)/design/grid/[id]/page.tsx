@@ -241,7 +241,14 @@ export default async function GridEditorPage({
   // #299: the Spreadsheet view — the active option's equipment schedule,
   // built by the /schedule page's own helper over this request's reads
   // (catalog fallback + virtual parts + riser view), so the two never differ.
-  const schedule = await scheduleForOption(project, activeOptionId, { catalog, gridSymbols, settings, deviceTypes, equip: equipLoaded });
+  // A schedule fault must not take the editor down with it either — the view
+  // says it couldn't be built and points at the printable page's own error.
+  const schedule = await scheduleForOption(project, activeOptionId, { catalog, gridSymbols, settings, deviceTypes, equip: equipLoaded }).catch(
+    (e: unknown) => {
+      console.error("[grid] schedule build failed:", e);
+      return null;
+    }
+  );
 
   // #223 — each option's draft quote by its estimate number.
   const quoteNumbers = Object.fromEntries(await quoteNumbersFor((project.options || []).map((o) => o.quoteId)));

@@ -36,7 +36,13 @@ export default function SpreadsheetView({ ed }: { ed: GridEditor }) {
             Open printable schedule →
           </Link>
         </div>
-        <ScheduleTable schedule={schedule} accent="var(--accent)" />
+        {schedule ? (
+          <ScheduleTable schedule={schedule} accent="var(--accent)" />
+        ) : (
+          <div style={{ fontSize: 13, color: "#8c919c", padding: "18px 0" }}>
+            The schedule couldn&apos;t be built — open the printable schedule to see the error.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -49435,3 +49435,9 @@ import { browserTree, nodeForPlacement } from "@/lib/design/grid-browser-tree";
   ok(house.children![0].kind === "device" && house.children![0].children!.map((m) => m.label).join(",") === "ERn2,P-ACP", "#299 tree: assembly members as leaves");
   ok(nodeForPlacement(t, "b").join(">") === "design>sheet:s1>space:sp1>group:space:sp1:S4 LED>pl:b", "#299 tree: path to a device");
 }
+
+/* #299 Grid workspace — one schedule builder (Task 12) */
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd("src/app/(app)/design/grid/[id]/schedule/page.tsx").includes("scheduleForOption(") && rd("src/app/(app)/design/grid/[id]/page.tsx").includes("scheduleForOption("), "#299 spreadsheet: the schedule page and the editor share one builder");
+}

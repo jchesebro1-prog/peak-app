@@ -217,8 +217,9 @@ export type GridEditorProps = {
   favorites: string[];
   recent: string[];
   /** #299: the active option's equipment schedule for the Spreadsheet view,
-   *  built server-side by scheduleForOption — the /schedule page's own helper. */
-  schedule: ScheduleData;
+   *  built server-side by scheduleForOption — the /schedule page's own helper.
+   *  null when the build threw: the view says so instead of showing nothing. */
+  schedule: ScheduleData | null;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {

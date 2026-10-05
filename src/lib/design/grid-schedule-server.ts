@@ -26,7 +26,7 @@ import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import type { EquipmentMap, EquipPriceCtx } from "@/lib/design/equipment-map";
 import { symbolContext } from "@/lib/design/grid-icons";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
-import { buildSchedule, scheduleWiresFromView, type ScheduleData } from "@/lib/design/grid-schedule";
+import { buildSchedule, catalogForSchedule, scheduleWiresFromView, type ScheduleData } from "@/lib/design/grid-schedule";
 
 export async function scheduleForOption(
   project: GridProject,
@@ -42,8 +42,16 @@ export async function scheduleForOption(
   const { catalog, gridSymbols, settings, deviceTypes, equip } = deps;
   const placedIds = (project.placements || []).map((pl) => pl.partId);
   const slice = optionSlice(project, optionId);
+  // Only the parts this option places or routes can be looked up by id (a
+  // curtain's fabric and the riser document's typed links too), so the
+  // catalog fallback is built over that slice, not every catalog row.
+  const needed = [
+    ...slice.placements.flatMap((pl) => (pl.curtain ? [pl.partId, pl.curtain.fabricSku] : [pl.partId])),
+    ...slice.routes.map((r) => r.partId),
+    ...(project.riser?.[optionId]?.links || []).map((l) => l.partId),
+  ];
   const parts = [
-    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
+    ...gridPartsFrom(gridSymbols, catalogForSchedule(catalog, gridSymbols, needed), resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
     ...(equip ? virtualPartsFor(placedIds, equip.map, equip.ctx) : await loadVirtualParts(placedIds, catalog)),
   ];
   const partById = new Map(parts.map((p) => [p.id, p]));

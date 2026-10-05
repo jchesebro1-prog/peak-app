@@ -175,6 +175,8 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
     armedCurtainType,
     selectedPlacement,
     removePlacement,
+    view,
+    setView,
     zoom,
     zoomIn,
     zoomOut,
@@ -197,7 +199,13 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
       title={title}
       active={opts?.active ?? tool === t}
       disabled={opts?.disabled}
-      onClick={() => (t === "place" ? armedPartId && enterTool("place", { partId: armedPartId }) : enterTool(t))}
+      onClick={() => {
+        // #299: the tools act on the plan — leave Spreadsheet view first.
+        setView("plan");
+        if (t === "place") {
+          if (armedPartId) enterTool("place", { partId: armedPartId });
+        } else enterTool(t);
+      }}
     >
       {icon}
     </IconButton>
@@ -267,8 +275,14 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           <IconDuplicate />
         </SoonButton>
         <IconButton
-          title={selectedPlacement ? "Delete (Del)" : "Delete (Del) — select a device first"}
-          disabled={!selectedPlacement || busy}
+          title={
+            view === "sheet"
+              ? "Switch to Plan view to delete"
+              : selectedPlacement
+                ? "Delete (Del)"
+                : "Delete (Del) — select a device first"
+          }
+          disabled={!selectedPlacement || busy || view === "sheet"}
           onClick={() => selectedPlacement && removePlacement(selectedPlacement.id)}
         >
           <IconTrash />

@@ -9,6 +9,24 @@ import { spaceOf, type SpaceLite } from "./grid-geometry";
 import { curtainDesc, placementQty, type GridCurtain } from "./grid-bom";
 import type { RiserView } from "./grid-riser-doc";
 
+/**
+ * The catalog rows a schedule can look up by id: parts placed or routed in the
+ * option (plus a curtain's fabric and the riser document's typed links), and
+ * the pricing part behind any Grid-library symbol among them. The schedule
+ * reads only a part's description (and the symbol's name), never the rest of
+ * the catalog, so building the catalog-fallback parts from this slice yields
+ * the same schedule without walking every catalog row on each request.
+ */
+export function catalogForSchedule<C extends { id: string }>(
+  catalog: C[],
+  symbols: Array<{ id: string; pricingPartId?: string | null }>,
+  ids: Iterable<string>
+): C[] {
+  const need = new Set(ids);
+  for (const s of symbols) if (need.has(s.id) && s.pricingPartId) need.add(s.pricingPartId);
+  return catalog.filter((p) => need.has(p.id));
+}
+
 /** `code` overrides the printed Part cell for rows with no SKU (curtains). */
 export type ScheduleRow = { partId: string; code?: string; desc: string; qty: number };
 export type ScheduleSection = { key: string; name: string; rows: ScheduleRow[] };
