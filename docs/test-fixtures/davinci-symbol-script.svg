@@ -1,0 +1,1147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 26.0.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 100 100" style="enable-background:new 0 0 100 100;" xml:space="preserve">
+<style type="text/css">
+	.st0{opacity:0.8;}
+	.st1{fill:#96BC75;stroke:#245984;stroke-miterlimit:10;}
+	.st2{fill:none;stroke:#245984;stroke-miterlimit:10;}
+</style>
+<g id="Layer_2_00000008148866333104118370000016627403381766895032_" class="st0">
+	<g id="ELLIPSE_1_">
+		<path class="st1" d="M19.4,98.3c0,1,0.8,1.7,1.7,1.7h57.8c1,0,1.7-0.8,1.7-1.7V1.7c0-1-0.8-1.7-1.7-1.7H21.1c-1,0-1.7,0.8-1.7,1.7
+			"/>
+	</g>
+</g>
+<g id="Layer_1_00000013897894185687840480000010153335681728252059_">
+	<desc>Composer Export</desc>
+	<script  type="text/ecmascript">
+		<![CDATA[
+if(typeof(top) != "undefined")
+{
+	top.ShowPaper = ShowPaper;
+}
+function ShowHotSpot(evt,hotspotid)
+{
+	var svgDocument = evt.target.ownerDocument;
+	var strId = "hotspot."+hotspotid;
+	var hotspot = svgDocument.getElementById(strId);
+	if(hotspot)
+		hotspot.setAttribute("opacity",".5");
+}
+function HideHotSpot(evt,hotspotid)
+{
+	var svgDocument = evt.target.ownerDocument;
+	var strId = "hotspot."+hotspotid;
+	var hotspot = svgDocument.getElementById(strId);
+	if(hotspot)
+		hotspot.setAttribute("opacity","0");
+
+	var toolTip = svgDocument.getElementById('ToolTip');
+	if(toolTip)
+		toolTip.setAttribute("visibility","hidden");
+}
+function ShowToolTip(evt,hotspotid,strTooltip)
+{
+	if(strTooltip=="")
+	return;
+
+	// change text
+	var svgDocument = evt.target.ownerDocument;
+	var tiptext = svgDocument.getElementById('ToolTipText');
+	if( !tiptext )
+	return;
+	tiptext.firstChild.nodeValue = " " + strTooltip + "  " ;
+
+	// show tooltip before, else some refresh issue
+
+	var toolTip = svgDocument.getElementById('ToolTip');
+	if(!toolTip)
+	return;
+
+	toolTip.setAttribute("visibility","visible");
+	toolTip.setAttribute("opacity",".95");
+
+	// move tooltip
+	// get viewbox
+
+	var root = svgDocument.documentElement;
+	var vbox = (root.getAttribute("viewBox")).split(' ');
+	var x0 = parseFloat(vbox[0]);
+	var y0 = parseFloat(vbox[1]);
+	var vboxW = parseFloat(vbox[2]);
+	var vboxH = parseFloat(vbox[3]);
+
+	// get default width of svg
+
+	var strW = root.getAttribute("width");
+	var svgW = parseFloat(strW);
+	if(strW.indexOf('mm') != -1)
+	svgW *= 3.779;
+
+	var strH = root.getAttribute("height");
+	var svgH = parseFloat(strH);
+	if(strH.indexOf('mm') != -1)
+	svgH *= 3.779;  	// 96 dpi  -> 96/25.4 = 3.779
+
+	// update the viewbox / width / height if svg is embedded in html with zoom fit all
+	var realx0 = x0;
+	var realy0 = y0;
+	var realvboxW = vboxW;
+	var realvboxH = vboxH;
+	var realsvgW = svgW;
+	var realsvgH = svgH;
+
+	if ((typeof(top) == "undefined") || (typeof(top.svgctl1) != "undefined")) // embedded in html
+	{
+		// get window size in pxl
+
+		svgW = window.innerWidth;
+		svgH = window.innerHeight;
+
+		// calculate real viewbox
+
+		realsvgW = svgW;
+		realsvgH = svgH;
+		if((svgW / svgH) > (vboxW / vboxH))
+		{
+			realvboxW = (vboxH * svgW) / svgH;
+			realvboxH = vboxH;
+			realx0 = x0 - (realvboxW - vboxW)/2 ;
+		}
+		else
+		{
+			realvboxH = (vboxW * svgH) / svgW;
+			realvboxW = vboxW;
+			realy0 = y0 - (realvboxH - vboxH)/2 ;
+		}
+	}
+
+	// get user zoom/pan
+
+	var newScale = root.currentScale;
+	var translation = root.currentTranslate;
+
+	// transform pxl to user unit
+
+	var xPos = (((evt.clientX+10- translation.x)/newScale) * realvboxW)/realsvgW  + realx0 ;
+	var yPos = (((evt.clientY+5- translation.y)/newScale) * realvboxH)/ realsvgH  + realy0 ;
+	var scaleForWidth = ( (1 / newScale) * realvboxH) / realsvgH;
+
+	// move tooltip
+
+	toolTip.setAttribute("transform", "translate(" + xPos + "," + yPos + ")" );
+
+	// resize tooltip
+
+	var fontsize = 12;
+	tiptext.setAttribute("font-size",fontsize*scaleForWidth);
+	tiptext.setAttribute("y", fontsize*scaleForWidth);
+	var tipBG = svgDocument.getElementById('ToolTipBG');
+	var outline = tiptext.getBBox();
+	if(tipBG)
+	{
+		tipBG.setAttribute("stroke-width", 1*scaleForWidth);
+		tipBG.setAttribute("width", Number(outline.width) );
+		tipBG.setAttribute("height", Number(outline.height) + fontsize*.5*scaleForWidth );
+	}
+	var ToolTipShadow = svgDocument.getElementById('ToolTipShadow');
+	if(ToolTipShadow)
+	{
+		ToolTipShadow.setAttribute("width", Number(outline.width) );
+		ToolTipShadow.setAttribute("height", Number(outline.height) + fontsize*.5*scaleForWidth );
+		ToolTipShadow.setAttribute("x", 3*scaleForWidth);
+		ToolTipShadow.setAttribute("y", 3*scaleForWidth);
+	}
+}
+function ShowPaper()
+{
+  var svgDocument = getDocument();
+  var paper = svgDocument.getElementById("paperID");
+  if(paper)
+  {
+    paper.setAttribute("transform","scale(1)");
+    paper.setAttribute("opacity","1");
+    paper.setAttribute("visibility","visible");
+  }
+  var svg = svgDocument.getRootElement();
+  if(svg)
+  {
+    svg.setAttribute("width","307.000mm");
+    svg.setAttribute("height","220.000mm");
+    svg.setAttribute("viewBox","-5.000000 -5.000000 307.000000 220.000000");
+  }
+}
+
+			
+			
+			]]>
+	</script>
+	<g id="LWPOLYLINE_128_">
+		<polyline class="st2" points="22.1,2.7 21.6,2.6 21.1,2.4 20.7,2.2 20.3,2.1 19.9,2 19.7,1.9 19.5,1.9 19.5,1.8 		"/>
+	</g>
+	<g id="ARC_541_">
+		<path class="st2" d="M21.2,0.1c-1,0-1.7,0.8-1.7,1.7"/>
+	</g>
+	<g id="LWPOLYLINE_129_">
+		<polyline class="st2" points="21.2,0.1 21.2,0.2 21.3,0.3 21.4,0.6 21.5,0.9 21.6,1.3 21.8,1.7 21.9,2.2 22.1,2.7 		"/>
+	</g>
+	<g id="LINE_3099_">
+		<line class="st2" x1="22.1" y1="97.3" x2="77.9" y2="97.3"/>
+	</g>
+	<g id="LWPOLYLINE_130_">
+		<polyline class="st2" points="77.9,97.3 78.1,97.8 78.2,98.3 78.4,98.7 78.5,99.1 78.6,99.4 78.7,99.7 78.8,99.8 78.8,99.9 		"/>
+	</g>
+	<g id="LINE_3100_">
+		<line class="st2" x1="78.8" y1="99.9" x2="21.2" y2="99.9"/>
+	</g>
+	<g id="LWPOLYLINE_131_">
+		<polyline class="st2" points="22.1,97.3 21.9,97.8 21.8,98.3 21.6,98.7 21.5,99.1 21.4,99.4 21.3,99.7 21.2,99.8 21.2,99.9 		"/>
+	</g>
+	<g id="LWPOLYLINE_132_">
+		<polyline class="st2" points="80.5,98.2 80.5,98.1 80.3,98.1 80.1,98 79.7,97.9 79.3,97.8 78.9,97.6 78.4,97.4 77.9,97.3 		"/>
+	</g>
+	<g id="ARC_542_">
+		<path class="st2" d="M78.8,99.9c1,0,1.7-0.8,1.7-1.7"/>
+	</g>
+	<g id="LWPOLYLINE_133_">
+		<polyline class="st2" points="80.5,1.8 80.5,1.9 80.3,1.9 80.1,2 79.7,2.1 79.3,2.2 78.9,2.4 78.4,2.6 77.9,2.7 		"/>
+	</g>
+	<g id="LWPOLYLINE_134_">
+		<polyline class="st2" points="78.8,0.1 78.8,0.2 78.7,0.3 78.6,0.6 78.5,0.9 78.4,1.3 78.2,1.7 78.1,2.2 77.9,2.7 		"/>
+	</g>
+	<g id="ARC_543_">
+		<path class="st2" d="M80.5,1.8c0-1-0.8-1.7-1.7-1.7"/>
+	</g>
+	<g id="ARC_544_">
+		<path class="st2" d="M19.5,98.2c0,1,0.8,1.7,1.7,1.7"/>
+	</g>
+	<g id="LWPOLYLINE_135_">
+		<polyline class="st2" points="22.1,97.3 21.6,97.4 21.1,97.6 20.7,97.8 20.3,97.9 19.9,98 19.7,98.1 19.5,98.1 19.5,98.2 		"/>
+	</g>
+	<g id="LINE_3101_">
+		<line class="st2" x1="21.2" y1="0.1" x2="78.8" y2="0.1"/>
+	</g>
+	<g id="LINE_3102_">
+		<line class="st2" x1="77.9" y1="2.7" x2="22.1" y2="2.7"/>
+	</g>
+	<g id="LINE_3103_">
+		<line class="st2" x1="77.9" y1="97.3" x2="77.9" y2="2.7"/>
+	</g>
+	<g id="LINE_3104_">
+		<line class="st2" x1="22.1" y1="2.7" x2="22.1" y2="97.3"/>
+	</g>
+	<g id="LINE_3105_">
+		<line class="st2" x1="64.5" y1="22.9" x2="64.5" y2="77.1"/>
+	</g>
+	<g id="ARC_545_">
+		<path class="st2" d="M64.5,22.9c0-1.1-0.9-2-2-2"/>
+	</g>
+	<g id="LINE_3106_">
+		<line class="st2" x1="37.5" y1="20.9" x2="62.5" y2="20.9"/>
+	</g>
+	<g id="ARC_546_">
+		<path class="st2" d="M37.5,20.9c-1.1,0-2,0.9-2,2"/>
+	</g>
+	<g id="LINE_3107_">
+		<line class="st2" x1="35.5" y1="77.1" x2="35.5" y2="22.9"/>
+	</g>
+	<g id="ARC_547_">
+		<path class="st2" d="M35.5,77.1c0,1.1,0.9,2,2,2"/>
+	</g>
+	<g id="LINE_3108_">
+		<line class="st2" x1="62.5" y1="79.1" x2="37.5" y2="79.1"/>
+	</g>
+	<g id="ARC_548_">
+		<path class="st2" d="M62.5,79.1c1.1,0,2-0.9,2-2"/>
+	</g>
+	<g id="LINE_3109_">
+		<line class="st2" x1="62.5" y1="20.9" x2="62.5" y2="20.9"/>
+	</g>
+	<g id="LINE_3110_">
+		<line class="st2" x1="64.5" y1="22.9" x2="64.5" y2="22.9"/>
+	</g>
+	<g id="LWPOLYLINE_136_">
+		<polyline class="st2" points="62.5,20.9 62.8,20.9 63.1,21 		"/>
+	</g>
+	<g id="LWPOLYLINE_137_">
+		<polyline class="st2" points="64.4,22.3 64.4,22.5 64.5,22.9 		"/>
+	</g>
+	<g id="LINE_3111_">
+		<line class="st2" x1="35.5" y1="22.9" x2="35.5" y2="22.9"/>
+	</g>
+	<g id="LINE_3112_">
+		<line class="st2" x1="37.5" y1="20.9" x2="37.5" y2="20.9"/>
+	</g>
+	<g id="LWPOLYLINE_138_">
+		<polyline class="st2" points="35.5,22.9 35.6,22.5 35.6,22.3 		"/>
+	</g>
+	<g id="LWPOLYLINE_139_">
+		<polyline class="st2" points="36.9,21 37.2,20.9 37.5,20.9 		"/>
+	</g>
+	<g id="LINE_3113_">
+		<line class="st2" x1="19.5" y1="98.2" x2="19.5" y2="1.8"/>
+	</g>
+	<g id="LINE_3114_">
+		<line class="st2" x1="64.5" y1="77.1" x2="64.5" y2="77.1"/>
+	</g>
+	<g id="LWPOLYLINE_140_">
+		<polyline class="st2" points="64.5,77.1 64.4,77.5 64.4,77.5 		"/>
+	</g>
+	<g id="LINE_3115_">
+		<line class="st2" x1="80.5" y1="1.8" x2="80.5" y2="98.2"/>
+	</g>
+	<g id="LINE_3116_">
+		<line class="st2" x1="37.5" y1="20.9" x2="41.9" y2="20.9"/>
+	</g>
+	<g id="LINE_3117_">
+		<line class="st2" x1="43.2" y1="20.9" x2="56.8" y2="20.9"/>
+	</g>
+	<g id="LINE_3118_">
+		<line class="st2" x1="58.1" y1="20.9" x2="62.5" y2="20.9"/>
+	</g>
+	<g id="LINE_3119_">
+		<line class="st2" x1="61.6" y1="79.1" x2="61.4" y2="79.1"/>
+	</g>
+	<g id="LINE_3120_">
+		<line class="st2" x1="59.2" y1="79.1" x2="59" y2="79.1"/>
+	</g>
+	<g id="LINE_3121_">
+		<line class="st2" x1="41" y1="79.1" x2="40.8" y2="79.1"/>
+	</g>
+	<g id="LINE_3122_">
+		<line class="st2" x1="38.6" y1="79.1" x2="38.4" y2="79.1"/>
+	</g>
+	<g id="LINE_3123_">
+		<line class="st2" x1="64.5" y1="22.9" x2="64.5" y2="33.7"/>
+	</g>
+	<g id="LINE_3124_">
+		<line class="st2" x1="64.5" y1="35" x2="64.5" y2="65.1"/>
+	</g>
+	<g id="LINE_3125_">
+		<line class="st2" x1="64.5" y1="66.4" x2="64.5" y2="77.1"/>
+	</g>
+	<g id="LINE_3126_">
+		<line class="st2" x1="35.5" y1="77.1" x2="35.5" y2="77.1"/>
+	</g>
+	<g id="LINE_3127_">
+		<line class="st2" x1="35.5" y1="77.1" x2="35.5" y2="74.5"/>
+	</g>
+	<g id="LINE_3128_">
+		<line class="st2" x1="35.5" y1="65.8" x2="35.5" y2="59.6"/>
+	</g>
+	<g id="LINE_3129_">
+		<line class="st2" x1="35.5" y1="50.9" x2="35.5" y2="48"/>
+	</g>
+	<g id="LINE_3130_">
+		<line class="st2" x1="35.5" y1="46" x2="35.5" y2="38.5"/>
+	</g>
+	<g id="LINE_3131_">
+		<line class="st2" x1="35.5" y1="37.1" x2="35.5" y2="22.9"/>
+	</g>
+	<g id="LWPOLYLINE_141_">
+		<polyline class="st2" points="35.6,77.5 35.6,77.5 35.5,77.1 		"/>
+	</g>
+	<g id="ELLIPSE_272_">
+		<path class="st2" d="M80.6,1.7c0-1-0.8-1.7-1.7-1.7"/>
+	</g>
+	<g id="LINE_3132_">
+		<line class="st2" x1="80.6" y1="1.7" x2="80.5" y2="1.8"/>
+	</g>
+	<g id="LINE_3133_">
+		<line class="st2" x1="78.8" y1="0.1" x2="78.9" y2="0"/>
+	</g>
+	<g id="ELLIPSE_273_">
+		<path class="st2" d="M19.4,98.3c0,1,0.8,1.7,1.7,1.7"/>
+	</g>
+	<g id="LINE_3134_">
+		<line class="st2" x1="19.4" y1="98.3" x2="19.5" y2="98.2"/>
+	</g>
+	<g id="LINE_3135_">
+		<line class="st2" x1="21.2" y1="99.9" x2="21.1" y2="100"/>
+	</g>
+	<g id="ELLIPSE_274_">
+		<path class="st2" d="M21.1,0c-1,0-1.7,0.8-1.7,1.7"/>
+	</g>
+	<g id="LINE_3136_">
+		<line class="st2" x1="21.1" y1="0" x2="21.2" y2="0.1"/>
+	</g>
+	<g id="LINE_3137_">
+		<line class="st2" x1="19.5" y1="1.8" x2="19.4" y2="1.7"/>
+	</g>
+	<g id="ELLIPSE_275_">
+		<path class="st2" d="M78.9,100c1,0,1.7-0.8,1.7-1.7"/>
+	</g>
+	<g id="LINE_3138_">
+		<line class="st2" x1="78.9" y1="100" x2="78.8" y2="99.9"/>
+	</g>
+	<g id="LINE_3139_">
+		<line class="st2" x1="80.5" y1="98.2" x2="80.6" y2="98.3"/>
+	</g>
+	<g id="LINE_3140_">
+		<line class="st2" x1="21.1" y1="100" x2="78.9" y2="100"/>
+	</g>
+	<g id="LINE_3141_">
+		<line class="st2" x1="19.4" y1="1.7" x2="19.4" y2="98.3"/>
+	</g>
+	<g id="LINE_3142_">
+		<line class="st2" x1="46.9" y1="0" x2="21.1" y2="0"/>
+	</g>
+	<g id="LINE_3143_">
+		<line class="st2" x1="47" y1="0" x2="46.9" y2="0"/>
+	</g>
+	<g id="ELLIPSE_276_">
+		<path class="st2" d="M47,0c0,0,0.2,0,0.4,0"/>
+	</g>
+	<g id="LINE_3144_">
+		<line class="st2" x1="47.4" y1="0" x2="52.6" y2="0"/>
+	</g>
+	<g id="ELLIPSE_277_">
+		<path class="st2" d="M52.6,0C52.9,0,53,0,53,0"/>
+	</g>
+	<g id="LINE_3145_">
+		<line class="st2" x1="53.1" y1="0" x2="53" y2="0"/>
+	</g>
+	<g id="LINE_3146_">
+		<line class="st2" x1="78.9" y1="0" x2="53.1" y2="0"/>
+	</g>
+	<g id="LINE_3147_">
+		<line class="st2" x1="80.6" y1="98.3" x2="80.6" y2="1.7"/>
+	</g>
+	<g id="LINE_3148_">
+		<line class="st2" x1="39.9" y1="75.7" x2="39.9" y2="75.7"/>
+	</g>
+	<g id="LINE_3149_">
+		<line class="st2" x1="39.9" y1="50.1" x2="39.9" y2="75.7"/>
+	</g>
+	<g id="LINE_3150_">
+		<line class="st2" x1="39.9" y1="50.1" x2="40" y2="50.2"/>
+	</g>
+	<g id="LINE_3151_">
+		<line class="st2" x1="40" y1="50.2" x2="40" y2="76.7"/>
+	</g>
+	<g id="LINE_3152_">
+		<line class="st2" x1="39.9" y1="76.7" x2="40" y2="76.7"/>
+	</g>
+	<g id="LINE_3153_">
+		<line class="st2" x1="39.9" y1="76.7" x2="39.9" y2="75.7"/>
+	</g>
+	<g id="LINE_3154_">
+		<line class="st2" x1="60.1" y1="50.1" x2="52.6" y2="50.1"/>
+	</g>
+	<g id="LINE_3155_">
+		<line class="st2" x1="60.1" y1="50.1" x2="60" y2="50.2"/>
+	</g>
+	<g id="LINE_3156_">
+		<line class="st2" x1="60" y1="50.2" x2="40" y2="50.2"/>
+	</g>
+	<g id="LINE_3157_">
+		<line class="st2" x1="47.4" y1="50.1" x2="39.9" y2="50.1"/>
+	</g>
+	<g id="LINE_3158_">
+		<line class="st2" x1="47.4" y1="50.1" x2="47.4" y2="50.1"/>
+	</g>
+	<g id="LINE_3159_">
+		<line class="st2" x1="47.4" y1="50.1" x2="52.6" y2="50.1"/>
+	</g>
+	<g id="LINE_3160_">
+		<line class="st2" x1="52.6" y1="50.1" x2="52.6" y2="50.1"/>
+	</g>
+	<g id="LINE_3161_">
+		<line class="st2" x1="60.1" y1="76.7" x2="60" y2="76.7"/>
+	</g>
+	<g id="LINE_3162_">
+		<line class="st2" x1="60" y1="76.7" x2="60" y2="50.2"/>
+	</g>
+	<g id="LINE_3163_">
+		<line class="st2" x1="60.1" y1="75.7" x2="60.1" y2="50.1"/>
+	</g>
+	<g id="LINE_3164_">
+		<line class="st2" x1="60.1" y1="75.7" x2="60.1" y2="75.7"/>
+	</g>
+	<g id="LINE_3165_">
+		<line class="st2" x1="60.1" y1="75.7" x2="60.1" y2="76.7"/>
+	</g>
+	<g id="LINE_3166_">
+		<line class="st2" x1="40" y1="76.7" x2="60" y2="76.7"/>
+	</g>
+	<g id="LINE_3167_">
+		<line class="st2" x1="60.1" y1="76.7" x2="39.9" y2="76.7"/>
+	</g>
+	<g id="LINE_3168_">
+		<line class="st2" x1="39.7" y1="49.3" x2="39.9" y2="49.3"/>
+	</g>
+	<g id="LINE_3169_">
+		<line class="st2" x1="39.9" y1="75.7" x2="39.7" y2="75.7"/>
+	</g>
+	<g id="LINE_3170_">
+		<line class="st2" x1="47.4" y1="50.1" x2="47.4" y2="50"/>
+	</g>
+	<g id="LINE_3171_">
+		<line class="st2" x1="60.1" y1="49.3" x2="60.3" y2="49.3"/>
+	</g>
+	<g id="LINE_3172_">
+		<line class="st2" x1="52.6" y1="50" x2="52.6" y2="50.1"/>
+	</g>
+	<g id="LINE_3173_">
+		<line class="st2" x1="60.3" y1="75.7" x2="60.1" y2="75.7"/>
+	</g>
+	<g id="LINE_3174_">
+		<line class="st2" x1="39.9" y1="50" x2="40" y2="49.9"/>
+	</g>
+	<g id="LINE_3175_">
+		<line class="st2" x1="40" y1="49.9" x2="60" y2="49.9"/>
+	</g>
+	<g id="LINE_3176_">
+		<line class="st2" x1="60.1" y1="50" x2="60" y2="49.9"/>
+	</g>
+	<g id="LINE_3177_">
+		<line class="st2" x1="60.1" y1="50" x2="39.9" y2="50"/>
+	</g>
+	<g id="LINE_3178_">
+		<line class="st2" x1="40" y1="23.4" x2="40" y2="49.9"/>
+	</g>
+	<g id="LINE_3179_">
+		<line class="st2" x1="60" y1="23.4" x2="40" y2="23.4"/>
+	</g>
+	<g id="LINE_3180_">
+		<line class="st2" x1="60" y1="49.9" x2="60" y2="23.4"/>
+	</g>
+	<g id="LINE_3181_">
+		<line class="st2" x1="60.1" y1="23.4" x2="52.6" y2="23.4"/>
+	</g>
+	<g id="LINE_3182_">
+		<line class="st2" x1="60.1" y1="23.4" x2="60" y2="23.4"/>
+	</g>
+	<g id="LINE_3183_">
+		<line class="st2" x1="39.9" y1="23.4" x2="40" y2="23.4"/>
+	</g>
+	<g id="LINE_3184_">
+		<line class="st2" x1="47.4" y1="23.4" x2="39.9" y2="23.4"/>
+	</g>
+	<g id="LINE_3185_">
+		<line class="st2" x1="47.4" y1="23.4" x2="47.4" y2="23.4"/>
+	</g>
+	<g id="LINE_3186_">
+		<line class="st2" x1="47.4" y1="23.4" x2="52.6" y2="23.4"/>
+	</g>
+	<g id="LINE_3187_">
+		<line class="st2" x1="52.6" y1="23.4" x2="52.6" y2="23.4"/>
+	</g>
+	<g id="LINE_3188_">
+		<line class="st2" x1="60.1" y1="49" x2="60.1" y2="23.4"/>
+	</g>
+	<g id="LINE_3189_">
+		<line class="st2" x1="60.1" y1="49" x2="60.1" y2="49"/>
+	</g>
+	<g id="LINE_3190_">
+		<line class="st2" x1="60.1" y1="49" x2="60.1" y2="50"/>
+	</g>
+	<g id="LINE_3191_">
+		<line class="st2" x1="39.9" y1="49" x2="39.9" y2="49"/>
+	</g>
+	<g id="LINE_3192_">
+		<line class="st2" x1="39.9" y1="23.4" x2="39.9" y2="49"/>
+	</g>
+	<g id="LINE_3193_">
+		<line class="st2" x1="39.9" y1="50" x2="39.9" y2="49"/>
+	</g>
+	<g id="LINE_3194_">
+		<line class="st2" x1="39.9" y1="49" x2="39.7" y2="49"/>
+	</g>
+	<g id="LINE_3195_">
+		<line class="st2" x1="47.4" y1="23.4" x2="47.4" y2="23.2"/>
+	</g>
+	<g id="LINE_3196_">
+		<line class="st2" x1="52.6" y1="23.2" x2="52.6" y2="23.4"/>
+	</g>
+	<g id="LINE_3197_">
+		<line class="st2" x1="60.3" y1="49" x2="60.1" y2="49"/>
+	</g>
+	<g id="LINE_3198_">
+		<line class="st2" x1="47.8" y1="50" x2="47.8" y2="50.1"/>
+	</g>
+	<g id="LINE_3199_">
+		<line class="st2" x1="52.2" y1="50.1" x2="52.2" y2="50"/>
+	</g>
+	<g id="LINE_3200_">
+		<line class="st2" x1="47.8" y1="50" x2="47.8" y2="50.1"/>
+	</g>
+	<g id="LINE_3201_">
+		<line class="st2" x1="52.2" y1="50.1" x2="52.2" y2="50"/>
+	</g>
+	<g id="LINE_3202_">
+		<line class="st2" x1="35.5" y1="65.7" x2="35.7" y2="65.7"/>
+	</g>
+	<g id="LINE_3203_">
+		<line class="st2" x1="35.7" y1="65.8" x2="35.5" y2="65.8"/>
+	</g>
+	<g id="LINE_3204_">
+		<line class="st2" x1="35.7" y1="59.6" x2="35.5" y2="59.6"/>
+	</g>
+	<g id="LINE_3205_">
+		<line class="st2" x1="35.5" y1="59.6" x2="35.7" y2="59.6"/>
+	</g>
+	<g id="LINE_3206_">
+		<line class="st2" x1="35.5" y1="50.9" x2="35.7" y2="50.9"/>
+	</g>
+	<g id="LINE_3207_">
+		<line class="st2" x1="35.7" y1="74.5" x2="35.5" y2="74.5"/>
+	</g>
+	<g id="LINE_3208_">
+		<line class="st2" x1="35.5" y1="50.6" x2="35.6" y2="50.6"/>
+	</g>
+	<g id="LINE_3209_">
+		<line class="st2" x1="35.5" y1="50.7" x2="35.6" y2="50.7"/>
+	</g>
+	<g id="LINE_3210_">
+		<line class="st2" x1="35.6" y1="74.7" x2="35.5" y2="74.7"/>
+	</g>
+	<g id="LINE_3211_">
+		<line class="st2" x1="35.6" y1="74.7" x2="35.5" y2="74.7"/>
+	</g>
+	<g id="LINE_3212_">
+		<line class="st2" x1="64.5" y1="66.4" x2="64.4" y2="66.4"/>
+	</g>
+	<g id="LINE_3213_">
+		<line class="st2" x1="64.4" y1="66.4" x2="64.5" y2="66.4"/>
+	</g>
+	<g id="LINE_3214_">
+		<line class="st2" x1="64.5" y1="33.7" x2="64.4" y2="33.7"/>
+	</g>
+	<g id="LINE_3215_">
+		<line class="st2" x1="64.4" y1="33.7" x2="64.5" y2="33.7"/>
+	</g>
+	<g id="LINE_3216_">
+		<line class="st2" x1="64.4" y1="35" x2="64.5" y2="35"/>
+	</g>
+	<g id="LINE_3217_">
+		<line class="st2" x1="64.5" y1="65.1" x2="64.4" y2="65.1"/>
+	</g>
+	<g id="LINE_3218_">
+		<line class="st2" x1="64.4" y1="65.1" x2="64.5" y2="65.1"/>
+	</g>
+	<g id="LINE_3219_">
+		<line class="st2" x1="64.5" y1="35" x2="64.4" y2="35"/>
+	</g>
+	<g id="LINE_3220_">
+		<line class="st2" x1="61.4" y1="79.1" x2="61.4" y2="79.1"/>
+	</g>
+	<g id="LINE_3221_">
+		<line class="st2" x1="61.4" y1="79.1" x2="61.4" y2="79.1"/>
+	</g>
+	<g id="LINE_3222_">
+		<line class="st2" x1="59.2" y1="79.1" x2="59.2" y2="79.1"/>
+	</g>
+	<g id="LINE_3223_">
+		<line class="st2" x1="59.2" y1="79.1" x2="59.2" y2="79.1"/>
+	</g>
+	<g id="LINE_3224_">
+		<line class="st2" x1="58.1" y1="21" x2="58.1" y2="20.9"/>
+	</g>
+	<g id="LINE_3225_">
+		<line class="st2" x1="56.8" y1="21" x2="56.8" y2="20.9"/>
+	</g>
+	<g id="LINE_3226_">
+		<line class="st2" x1="58.1" y1="20.9" x2="58.1" y2="21"/>
+	</g>
+	<g id="LINE_3227_">
+		<line class="st2" x1="56.8" y1="20.9" x2="56.8" y2="21"/>
+	</g>
+	<g id="LINE_3228_">
+		<line class="st2" x1="35.5" y1="37.1" x2="35.6" y2="37.1"/>
+	</g>
+	<g id="LINE_3229_">
+		<line class="st2" x1="35.5" y1="38.5" x2="35.6" y2="38.5"/>
+	</g>
+	<g id="LINE_3230_">
+		<line class="st2" x1="41.9" y1="21" x2="41.9" y2="20.9"/>
+	</g>
+	<g id="LINE_3231_">
+		<line class="st2" x1="43.2" y1="21" x2="43.2" y2="20.9"/>
+	</g>
+	<g id="LINE_3232_">
+		<line class="st2" x1="41.9" y1="20.9" x2="41.9" y2="21"/>
+	</g>
+	<g id="LINE_3233_">
+		<line class="st2" x1="43.2" y1="20.9" x2="43.2" y2="21"/>
+	</g>
+	<g id="LINE_3234_">
+		<line class="st2" x1="35.6" y1="38.5" x2="35.5" y2="38.5"/>
+	</g>
+	<g id="LINE_3235_">
+		<line class="st2" x1="40.8" y1="79.1" x2="40.8" y2="79.1"/>
+	</g>
+	<g id="LINE_3236_">
+		<line class="st2" x1="40.8" y1="79.1" x2="40.8" y2="79.1"/>
+	</g>
+	<g id="LINE_3237_">
+		<line class="st2" x1="38.6" y1="79.1" x2="38.6" y2="79.1"/>
+	</g>
+	<g id="LINE_3238_">
+		<line class="st2" x1="38.6" y1="79.1" x2="38.6" y2="79.1"/>
+	</g>
+	<g id="LINE_3239_">
+		<line class="st2" x1="35.6" y1="48" x2="35.5" y2="48"/>
+	</g>
+	<g id="LINE_3240_">
+		<line class="st2" x1="35.5" y1="48" x2="35.6" y2="48"/>
+	</g>
+	<g id="LINE_3241_">
+		<line class="st2" x1="35.5" y1="46" x2="35.6" y2="46"/>
+	</g>
+	<g id="LINE_3242_">
+		<line class="st2" x1="35.6" y1="46" x2="35.5" y2="46"/>
+	</g>
+	<g id="LINE_3243_">
+		<line class="st2" x1="35.5" y1="76" x2="35.6" y2="76"/>
+	</g>
+	<g id="LINE_3244_">
+		<line class="st2" x1="35.6" y1="49.4" x2="35.5" y2="49.4"/>
+	</g>
+	<g id="LINE_3245_">
+		<line class="st2" x1="35.6" y1="49.4" x2="35.5" y2="49.4"/>
+	</g>
+	<g id="LINE_3246_">
+		<line class="st2" x1="35.5" y1="76" x2="35.6" y2="76"/>
+	</g>
+	<g id="LINE_3247_">
+		<line class="st2" x1="35.6" y1="48.4" x2="35.5" y2="48.4"/>
+	</g>
+	<g id="LINE_3248_">
+		<line class="st2" x1="35.5" y1="45.6" x2="35.6" y2="45.6"/>
+	</g>
+	<g id="LINE_3249_">
+		<line class="st2" x1="35.6" y1="38.9" x2="35.5" y2="38.9"/>
+	</g>
+	<g id="LINE_3250_">
+		<line class="st2" x1="35.5" y1="36.7" x2="35.6" y2="36.7"/>
+	</g>
+	<g id="LINE_3251_">
+		<line class="st2" x1="41.5" y1="21" x2="41.5" y2="20.9"/>
+	</g>
+	<g id="LINE_3252_">
+		<line class="st2" x1="43.6" y1="20.9" x2="43.6" y2="21"/>
+	</g>
+	<g id="LINE_3253_">
+		<line class="st2" x1="56.4" y1="21" x2="56.4" y2="20.9"/>
+	</g>
+	<g id="LINE_3254_">
+		<line class="st2" x1="58.5" y1="20.9" x2="58.5" y2="21"/>
+	</g>
+	<g id="LINE_3255_">
+		<line class="st2" x1="64.5" y1="66.9" x2="64.4" y2="66.9"/>
+	</g>
+	<g id="LINE_3256_">
+		<line class="st2" x1="64.4" y1="33.3" x2="64.5" y2="33.3"/>
+	</g>
+	<g id="LINE_3257_">
+		<line class="st2" x1="64.4" y1="64.7" x2="64.5" y2="64.7"/>
+	</g>
+	<g id="LINE_3258_">
+		<line class="st2" x1="64.5" y1="35.4" x2="64.4" y2="35.4"/>
+	</g>
+	<g id="LINE_3259_">
+		<line class="st2" x1="35.5" y1="44.4" x2="35.6" y2="44.4"/>
+	</g>
+	<g id="LINE_3260_">
+		<line class="st2" x1="35.5" y1="40" x2="35.6" y2="40"/>
+	</g>
+	<g id="ARC_549_">
+		<path class="st2" d="M62.9,23c0-0.3-0.2-0.5-0.5-0.5"/>
+	</g>
+	<g id="LINE_3261_">
+		<line class="st2" x1="62.5" y1="21.2" x2="62.5" y2="22.5"/>
+	</g>
+	<g id="ARC_550_">
+		<path class="st2" d="M64.2,23c0-1-0.8-1.8-1.8-1.8"/>
+	</g>
+	<g id="LINE_3262_">
+		<line class="st2" x1="62.9" y1="23" x2="64.2" y2="23"/>
+	</g>
+	<g id="LINE_3263_">
+		<line class="st2" x1="37.5" y1="21.2" x2="62.5" y2="21.2"/>
+	</g>
+	<g id="LINE_3264_">
+		<line class="st2" x1="62.5" y1="22.5" x2="37.5" y2="22.5"/>
+	</g>
+	<g id="LINE_3265_">
+		<line class="st2" x1="37.5" y1="21.2" x2="37.5" y2="22.5"/>
+	</g>
+	<g id="LINE_3266_">
+		<line class="st2" x1="62.9" y1="77.2" x2="62.9" y2="23"/>
+	</g>
+	<g id="LINE_3267_">
+		<line class="st2" x1="64.2" y1="23" x2="64.2" y2="77.2"/>
+	</g>
+	<g id="LINE_3268_">
+		<line class="st2" x1="62.9" y1="77.2" x2="64.2" y2="77.2"/>
+	</g>
+	<g id="ARC_551_">
+		<path class="st2" d="M62.5,77.6c0.3,0,0.5-0.2,0.5-0.5"/>
+	</g>
+	<g id="LINE_3269_">
+		<line class="st2" x1="37.5" y1="77.6" x2="62.5" y2="77.6"/>
+	</g>
+	<g id="ARC_552_">
+		<path class="st2" d="M37.1,77.2c0,0.3,0.2,0.5,0.5,0.5"/>
+	</g>
+	<g id="LINE_3270_">
+		<line class="st2" x1="37.1" y1="23" x2="37.1" y2="77.2"/>
+	</g>
+	<g id="ARC_553_">
+		<path class="st2" d="M37.5,22.5c-0.3,0-0.5,0.2-0.5,0.5"/>
+	</g>
+	<g id="CIRCLE_38_">
+		<circle class="st2" cx="38.5" cy="35.4" r="0.4"/>
+	</g>
+	<g id="CIRCLE_39_">
+		<circle class="st2" cx="38.5" cy="30.6" r="0.4"/>
+	</g>
+	<g id="CIRCLE_40_">
+		<circle class="st2" cx="38.5" cy="25.8" r="0.4"/>
+	</g>
+	<g id="ARC_554_">
+		<path class="st2" d="M40.2,23c-0.4,0-0.7,0.3-0.7,0.7"/>
+	</g>
+	<g id="LINE_3271_">
+		<line class="st2" x1="39.5" y1="23.6" x2="39.5" y2="76.5"/>
+	</g>
+	<g id="ARC_555_">
+		<path class="st2" d="M39.5,76.5c0,0.4,0.3,0.7,0.7,0.7"/>
+	</g>
+	<g id="LINE_3272_">
+		<line class="st2" x1="40.2" y1="77.2" x2="59.8" y2="77.2"/>
+	</g>
+	<g id="ARC_556_">
+		<path class="st2" d="M59.8,77.2c0.4,0,0.7-0.3,0.7-0.7"/>
+	</g>
+	<g id="LINE_3273_">
+		<line class="st2" x1="60.5" y1="76.5" x2="60.5" y2="23.6"/>
+	</g>
+	<g id="ARC_557_">
+		<path class="st2" d="M60.5,23.6c0-0.4-0.3-0.7-0.7-0.7"/>
+	</g>
+	<g id="LINE_3274_">
+		<line class="st2" x1="59.8" y1="23" x2="40.2" y2="23"/>
+	</g>
+	<g id="LINE_3275_">
+		<line class="st2" x1="62.5" y1="77.6" x2="62.5" y2="78.9"/>
+	</g>
+	<g id="LINE_3276_">
+		<line class="st2" x1="62.5" y1="78.9" x2="37.5" y2="78.9"/>
+	</g>
+	<g id="LINE_3277_">
+		<line class="st2" x1="37.5" y1="77.6" x2="37.5" y2="78.9"/>
+	</g>
+	<g id="ARC_558_">
+		<path class="st2" d="M62.5,78.9c1,0,1.8-0.8,1.8-1.8"/>
+	</g>
+	<g id="ARC_559_">
+		<path class="st2" d="M37.5,21.2c-1,0-1.8,0.8-1.8,1.8"/>
+	</g>
+	<g id="LINE_3278_">
+		<line class="st2" x1="35.8" y1="23" x2="37.1" y2="23"/>
+	</g>
+	<g id="LINE_3279_">
+		<line class="st2" x1="35.8" y1="77.2" x2="35.8" y2="23"/>
+	</g>
+	<g id="LINE_3280_">
+		<line class="st2" x1="35.8" y1="77.2" x2="37.1" y2="77.2"/>
+	</g>
+	<g id="ARC_560_">
+		<path class="st2" d="M35.8,77.2c0,1,0.8,1.8,1.8,1.8"/>
+	</g>
+	<g id="LINE_3281_">
+		<line class="st2" x1="60.3" y1="23.2" x2="60.3" y2="76.9"/>
+	</g>
+	<g id="LINE_3282_">
+		<line class="st2" x1="39.7" y1="23.2" x2="60.3" y2="23.2"/>
+	</g>
+	<g id="LINE_3283_">
+		<line class="st2" x1="39.7" y1="76.9" x2="39.7" y2="23.2"/>
+	</g>
+	<g id="LINE_3284_">
+		<line class="st2" x1="60.3" y1="76.9" x2="39.7" y2="76.9"/>
+	</g>
+	<g id="LINE_3285_">
+		<line class="st2" x1="64.4" y1="35.6" x2="64.4" y2="33"/>
+	</g>
+	<g id="LINE_3286_">
+		<line class="st2" x1="64.4" y1="35.6" x2="64.4" y2="64.5"/>
+	</g>
+	<g id="LINE_3287_">
+		<line class="st2" x1="64.4" y1="67.1" x2="64.4" y2="64.5"/>
+	</g>
+	<g id="LINE_3288_">
+		<line class="st2" x1="64.4" y1="67.1" x2="64.4" y2="77.2"/>
+	</g>
+	<g id="LINE_3289_">
+		<line class="st2" x1="64.2" y1="77.2" x2="64.4" y2="77.2"/>
+	</g>
+	<g id="LINE_3290_">
+		<line class="st2" x1="64.4" y1="23" x2="64.2" y2="23"/>
+	</g>
+	<g id="LINE_3291_">
+		<line class="st2" x1="64.4" y1="23" x2="64.4" y2="33"/>
+	</g>
+	<g id="LINE_3292_">
+		<line class="st2" x1="61.6" y1="79.1" x2="59" y2="79.1"/>
+	</g>
+	<g id="LINE_3293_">
+		<line class="st2" x1="59" y1="79.1" x2="41" y2="79.1"/>
+	</g>
+	<g id="LINE_3294_">
+		<line class="st2" x1="41" y1="79.1" x2="38.4" y2="79.1"/>
+	</g>
+	<g id="LINE_3295_">
+		<line class="st2" x1="38.4" y1="79.1" x2="37.5" y2="79.1"/>
+	</g>
+	<g id="LINE_3296_">
+		<line class="st2" x1="37.5" y1="78.9" x2="37.5" y2="79.1"/>
+	</g>
+	<g id="LINE_3297_">
+		<line class="st2" x1="62.5" y1="79.1" x2="62.5" y2="78.9"/>
+	</g>
+	<g id="LINE_3298_">
+		<line class="st2" x1="62.5" y1="79.1" x2="61.6" y2="79.1"/>
+	</g>
+	<g id="ARC_561_">
+		<path class="st2" d="M62.5,79.1c1.1,0,1.9-0.9,1.9-1.9"/>
+	</g>
+	<g id="LINE_3299_">
+		<line class="st2" x1="43.9" y1="21" x2="41.3" y2="21"/>
+	</g>
+	<g id="LINE_3300_">
+		<line class="st2" x1="43.9" y1="21" x2="56.1" y2="21"/>
+	</g>
+	<g id="LINE_3301_">
+		<line class="st2" x1="58.7" y1="21" x2="56.1" y2="21"/>
+	</g>
+	<g id="LINE_3302_">
+		<line class="st2" x1="58.7" y1="21" x2="62.5" y2="21"/>
+	</g>
+	<g id="LINE_3303_">
+		<line class="st2" x1="62.5" y1="21.2" x2="62.5" y2="21"/>
+	</g>
+	<g id="LINE_3304_">
+		<line class="st2" x1="37.5" y1="21" x2="37.5" y2="21.2"/>
+	</g>
+	<g id="LINE_3305_">
+		<line class="st2" x1="37.5" y1="21" x2="41.3" y2="21"/>
+	</g>
+	<g id="ARC_562_">
+		<path class="st2" d="M64.4,23c0-1.1-0.9-1.9-1.9-1.9"/>
+	</g>
+	<g id="LINE_3306_">
+		<line class="st2" x1="35.8" y1="23" x2="35.6" y2="23"/>
+	</g>
+	<g id="ARC_563_">
+		<path class="st2" d="M37.5,21c-1.1,0-1.9,0.9-1.9,1.9"/>
+	</g>
+	<g id="LINE_3307_">
+		<line class="st2" x1="35.6" y1="45.7" x2="35.6" y2="48.3"/>
+	</g>
+	<g id="LINE_3308_">
+		<line class="st2" x1="35.6" y1="45.7" x2="35.6" y2="43.7"/>
+	</g>
+	<g id="LINE_3309_">
+		<line class="st2" x1="35.7" y1="43.7" x2="35.6" y2="43.7"/>
+	</g>
+	<g id="LINE_3310_">
+		<line class="st2" x1="35.7" y1="40.7" x2="35.7" y2="43.7"/>
+	</g>
+	<g id="LINE_3311_">
+		<line class="st2" x1="35.6" y1="40.6" x2="35.7" y2="40.7"/>
+	</g>
+	<g id="LINE_3312_">
+		<line class="st2" x1="35.6" y1="40.6" x2="35.6" y2="39.1"/>
+	</g>
+	<g id="LINE_3313_">
+		<line class="st2" x1="35.6" y1="36.5" x2="35.6" y2="39.1"/>
+	</g>
+	<g id="LINE_3314_">
+		<line class="st2" x1="35.6" y1="36.5" x2="35.6" y2="23"/>
+	</g>
+	<g id="LINE_3315_">
+		<line class="st2" x1="35.6" y1="77.2" x2="35.8" y2="77.2"/>
+	</g>
+	<g id="LINE_3316_">
+		<line class="st2" x1="35.6" y1="77.2" x2="35.6" y2="74.7"/>
+	</g>
+	<g id="LINE_3317_">
+		<line class="st2" x1="35.7" y1="74.7" x2="35.6" y2="74.7"/>
+	</g>
+	<g id="LINE_3318_">
+		<line class="st2" x1="35.7" y1="74.7" x2="35.7" y2="50.7"/>
+	</g>
+	<g id="LINE_3319_">
+		<line class="st2" x1="35.6" y1="50.7" x2="35.7" y2="50.7"/>
+	</g>
+	<g id="LINE_3320_">
+		<line class="st2" x1="35.6" y1="50.7" x2="35.6" y2="48.3"/>
+	</g>
+	<g id="ARC_564_">
+		<path class="st2" d="M35.6,77.2c0,1.1,0.9,1.9,1.9,1.9"/>
+	</g>
+	<g id="LINE_3321_">
+		<line class="st2" x1="60.3" y1="76.2" x2="60.1" y2="76.2"/>
+	</g>
+	<g id="LINE_3322_">
+		<line class="st2" x1="39.9" y1="76.2" x2="39.7" y2="76.2"/>
+	</g>
+	<g id="LINE_3323_">
+		<line class="st2" x1="58.7" y1="21" x2="58.7" y2="20.9"/>
+	</g>
+	<g id="LINE_3324_">
+		<line class="st2" x1="64.4" y1="33" x2="64.4" y2="33"/>
+	</g>
+	<g id="LWPOLYLINE_142_">
+		<polyline class="st2" points="64.4,22.7 64.4,22.4 64.4,22.2 		"/>
+	</g>
+	<g id="LWPOLYLINE_143_">
+		<polyline class="st2" points="63.2,21 63,21 62.7,20.9 		"/>
+	</g>
+	<g id="LINE_3325_">
+		<line class="st2" x1="64.4" y1="33" x2="64.4" y2="22.7"/>
+	</g>
+	<g id="LINE_3326_">
+		<line class="st2" x1="62.7" y1="20.9" x2="58.7" y2="20.9"/>
+	</g>
+	<g id="LINE_3327_">
+		<line class="st2" x1="64.4" y1="67.1" x2="64.4" y2="67.1"/>
+	</g>
+	<g id="LINE_3328_">
+		<line class="st2" x1="64.4" y1="77.6" x2="64.4" y2="77.4"/>
+	</g>
+	<g id="LINE_3329_">
+		<line class="st2" x1="64.4" y1="77.4" x2="64.4" y2="67.1"/>
+	</g>
+	<g id="LINE_3330_">
+		<line class="st2" x1="61.6" y1="79.1" x2="61.6" y2="79.1"/>
+	</g>
+	<g id="LINE_3331_">
+		<line class="st2" x1="64.4" y1="64.5" x2="64.4" y2="64.5"/>
+	</g>
+	<g id="LINE_3332_">
+		<line class="st2" x1="64.4" y1="35.6" x2="64.4" y2="35.6"/>
+	</g>
+	<g id="LINE_3333_">
+		<line class="st2" x1="64.4" y1="64.5" x2="64.4" y2="35.6"/>
+	</g>
+	<g id="LINE_3334_">
+		<line class="st2" x1="41" y1="79.1" x2="41" y2="79.1"/>
+	</g>
+	<g id="LINE_3335_">
+		<line class="st2" x1="59" y1="79.1" x2="59" y2="79.1"/>
+	</g>
+	<g id="LINE_3336_">
+		<line class="st2" x1="43.9" y1="21" x2="43.9" y2="20.9"/>
+	</g>
+	<g id="LINE_3337_">
+		<line class="st2" x1="56.1" y1="21" x2="56.1" y2="20.9"/>
+	</g>
+	<g id="LINE_3338_">
+		<line class="st2" x1="56.1" y1="20.9" x2="43.9" y2="20.9"/>
+	</g>
+	<g id="LWPOLYLINE_144_">
+		<polyline class="st2" points="37.3,20.9 37,21 36.8,21 		"/>
+	</g>
+	<g id="LWPOLYLINE_145_">
+		<polyline class="st2" points="35.6,22.2 35.6,22.4 35.6,22.7 		"/>
+	</g>
+	<g id="LINE_3339_">
+		<line class="st2" x1="41.3" y1="21" x2="41.3" y2="20.9"/>
+	</g>
+	<g id="LINE_3340_">
+		<line class="st2" x1="35.6" y1="36.5" x2="35.6" y2="36.5"/>
+	</g>
+	<g id="LINE_3341_">
+		<line class="st2" x1="35.6" y1="22.7" x2="35.6" y2="36.5"/>
+	</g>
+	<g id="LINE_3342_">
+		<line class="st2" x1="41.3" y1="20.9" x2="37.3" y2="20.9"/>
+	</g>
+	<g id="LINE_3343_">
+		<line class="st2" x1="35.6" y1="45.7" x2="35.6" y2="45.7"/>
+	</g>
+	<g id="LINE_3344_">
+		<line class="st2" x1="35.6" y1="43.7" x2="35.6" y2="45.7"/>
+	</g>
+	<g id="LINE_3345_">
+		<line class="st2" x1="35.6" y1="43.7" x2="35.6" y2="43.7"/>
+	</g>
+	<g id="LINE_3346_">
+		<line class="st2" x1="35.6" y1="48.3" x2="35.6" y2="50.7"/>
+	</g>
+	<g id="LINE_3347_">
+		<line class="st2" x1="35.6" y1="48.3" x2="35.6" y2="48.3"/>
+	</g>
+	<g id="LINE_3348_">
+		<line class="st2" x1="35.6" y1="50.7" x2="35.6" y2="50.7"/>
+	</g>
+	<g id="LINE_3349_">
+		<line class="st2" x1="38.4" y1="79.1" x2="38.4" y2="79.1"/>
+	</g>
+	<g id="LINE_3350_">
+		<line class="st2" x1="35.6" y1="74.7" x2="35.6" y2="77.4"/>
+	</g>
+	<g id="LINE_3351_">
+		<line class="st2" x1="35.6" y1="77.4" x2="35.6" y2="77.6"/>
+	</g>
+	<g id="LINE_3352_">
+		<line class="st2" x1="35.6" y1="74.7" x2="35.6" y2="74.7"/>
+	</g>
+	<g id="LINE_3353_">
+		<line class="st2" x1="35.6" y1="39.1" x2="35.6" y2="39.1"/>
+	</g>
+	<g id="LINE_3354_">
+		<line class="st2" x1="35.6" y1="39.1" x2="35.6" y2="40.6"/>
+	</g>
+	<g id="LINE_3355_">
+		<line class="st2" x1="35.6" y1="40.6" x2="35.6" y2="40.6"/>
+	</g>
+	<g id="LINE_3356_">
+		<line class="st2" x1="64.4" y1="35.6" x2="64.4" y2="35"/>
+	</g>
+	<g id="LINE_3357_">
+		<line class="st2" x1="64.4" y1="33.7" x2="64.4" y2="33"/>
+	</g>
+	<g id="LINE_3358_">
+		<line class="st2" x1="58.7" y1="21" x2="58.1" y2="21"/>
+	</g>
+	<g id="LINE_3359_">
+		<line class="st2" x1="56.8" y1="21" x2="56.1" y2="21"/>
+	</g>
+	<g id="LINE_3360_">
+		<line class="st2" x1="43.9" y1="21" x2="43.2" y2="21"/>
+	</g>
+	<g id="LINE_3361_">
+		<line class="st2" x1="41.9" y1="21" x2="41.3" y2="21"/>
+	</g>
+	<g id="LINE_3362_">
+		<line class="st2" x1="64.4" y1="67.1" x2="64.4" y2="66.4"/>
+	</g>
+	<g id="LINE_3363_">
+		<line class="st2" x1="64.4" y1="65.1" x2="64.4" y2="64.5"/>
+	</g>
+	<g id="LINE_3364_">
+		<line class="st2" x1="35.6" y1="45.7" x2="35.6" y2="46"/>
+	</g>
+	<g id="LINE_3365_">
+		<line class="st2" x1="35.6" y1="48" x2="35.6" y2="48.3"/>
+	</g>
+	<g id="LINE_3366_">
+		<line class="st2" x1="35.6" y1="36.5" x2="35.6" y2="37.1"/>
+	</g>
+	<g id="LINE_3367_">
+		<line class="st2" x1="35.6" y1="38.5" x2="35.6" y2="39.1"/>
+	</g>
+	<g id="LINE_3368_">
+		<line class="st2" x1="62.5" y1="79.1" x2="62.5" y2="79.1"/>
+	</g>
+	<g id="LINE_3369_">
+		<line class="st2" x1="37.5" y1="79.1" x2="37.5" y2="79.1"/>
+	</g>
+</g>
+</svg>

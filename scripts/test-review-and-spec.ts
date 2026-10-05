@@ -49754,3 +49754,30 @@ async function gridSymbolDisplayAsyncChecks300(): Promise<void> {
   const body = at < 0 ? "" : actSrc.slice(at, actSrc.indexOf("\n}\n", at));
   ok(body.includes("await requireUser()") && body.includes("revalidatePath(") && body.includes("setSymbolDisplay("), "#300 action: setSymbolDisplayAction requires a user, stores, revalidates");
 }
+
+/* #300 object symbols — SVG sanitizer (Task 4) */
+import { sanitizeSvg, SVG_MAX_BYTES } from "@/lib/part-docs/svg-sanitize";
+import { sniffDocumentType as sniff300 } from "@/lib/part-docs/files";
+{
+  const enc = (s: string) => new TextEncoder().encode(s);
+  const S = (inner: string, attrs = "") => `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"${attrs}>${inner}</svg>`;
+  const a = sanitizeSvg(S('<script>alert(1)</script><rect width="5" height="5" onclick="x()"/>'));
+  ok(a.ok && !/script|onclick/i.test(a.svg) && a.svg.includes("<rect"), "#300 svg: script element and on* attributes removed");
+  const b = sanitizeSvg(S('<foreignObject><div>x</div></foreignObject><image href="https://evil/x.png"/><use xlink:href="#a"/>'));
+  ok(b.ok && !/foreignObject|evil/i.test(b.svg) && b.svg.includes('xlink:href="#a"'), "#300 svg: foreignObject + external href removed, #fragment kept");
+  const c = sanitizeSvg(S('<style>@import url(https://x/y.css); .st0{fill:url(https://x/p)}</style><a href="javascript:alert(1)"><rect/></a>'));
+  ok(c.ok && !/@import|https:\/\/x|javascript:/i.test(c.svg), "#300 svg: style imports, external url() and javascript: hrefs removed");
+  ok(!sanitizeSvg("<html><body>hi</body></html>").ok && !sanitizeSvg("x".repeat(SVG_MAX_BYTES + 1)).ok, "#300 svg: non-svg root and oversize refused");
+  ok(!sanitizeSvg(S("") + S("")).ok, "#300 svg: two roots refused");
+  const real = readFileSync(join(process.cwd(), "docs/test-fixtures/davinci-symbol-sample.svg"), "utf8");
+  const r = sanitizeSvg(real);
+  ok(r.ok && r.svg.includes("<style") && r.svg.includes("viewBox"), "#300 svg: a real DaVinci drawing survives with its styles and viewBox");
+  const scr = sanitizeSvg(readFileSync(join(process.cwd(), "docs/test-fixtures/davinci-symbol-script.svg"), "utf8"));
+  ok(scr.ok && !/<script/i.test(scr.svg) && scr.removed.includes("script"), "#300 svg: DaVinci's one scripted drawing is cleaned");
+  ok(sniff300(enc("﻿  <?xml version='1.0'?>\n<!-- c --><svg xmlns='http://www.w3.org/2000/svg'/>")) === "svg" && sniff300(enc("<html></html>")) !== "svg", "#300 svg: sniffing recognises SVG text");
+  const d = sanitizeSvg(S('<svg:script>alert(1)</svg:script><SCRIPT type="x"><scrIpt>a</scrIpt>b</SCRIPT><rect/onload=alert(1) title="a>b"/><rect\nONMOUSEOVER\n=\n\'x()\' width="1"/><script><![CDATA[ </script> alert(2) ]]></script>'));
+  ok(d.ok && !/script|onload|onmouseover|alert/i.test(d.svg) && d.svg.includes('title="a&gt;b"') && d.svg.includes('width="1"'), "#300 svg: namespaced/mixed-case/nested/CDATA scripts and unquoted or newline on* attributes removed");
+  const e = sanitizeSvg(S('<a href="&#106;avascript:alert(1)"><rect/></a><set attributeName="href" to="java&#x09;script:alert(1)"/><rect fill="url(&#x27;https://x/p&#x27;)" style="fill:u\\72l(https://x/q)"/>'));
+  const e2 = sanitizeSvg(S('<rect><title>&#106;avascript:alert(1)</title></rect>'));
+  ok(e.ok && !/&#|javascript|https:\/\/x|<set/i.test(e.svg) && !e2.ok, "#300 svg: entity-encoded javascript:, href animation and CSS-escaped url() never survive");
+}

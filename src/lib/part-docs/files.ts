@@ -6,7 +6,7 @@ import type { PartDocKind } from "./types";
  * the real bytes; the extension and the browser's MIME are never trusted.
  */
 
-export type SniffedType = "pdf" | "doc" | "docx" | "png" | "jpeg" | "webp";
+export type SniffedType = "pdf" | "doc" | "docx" | "png" | "jpeg" | "webp" | "svg";
 
 export const CONTENT_TYPES: Record<SniffedType, string> = {
   pdf: "application/pdf",
@@ -15,6 +15,7 @@ export const CONTENT_TYPES: Record<SniffedType, string> = {
   png: "image/png",
   jpeg: "image/jpeg",
   webp: "image/webp",
+  svg: "image/svg+xml",
 };
 
 /** What each slot accepts: a datasheet is a PDF; a spec sheet is PDF or Word
@@ -34,8 +35,10 @@ export function acceptFor(kind: PartDocKind): string {
   return ".pdf,.doc,.docx,application/pdf,application/msword," + CONTENT_TYPES.docx;
 }
 
-/** Every content type the upload token may be issued for (the bytes are checked after). */
-export const UPLOAD_CONTENT_TYPES: readonly string[] = [...Object.values(CONTENT_TYPES), "application/octet-stream"];
+/** Every content type the upload token may be issued for (the bytes are checked after).
+ *  SVG is left out here: no slot accepts it yet (#300 adds it with its own
+ *  sanitize-on-upload path). */
+export const UPLOAD_CONTENT_TYPES: readonly string[] = [...Object.entries(CONTENT_TYPES).filter(([t]) => t !== "svg").map(([, c]) => c), "application/octet-stream"];
 
 const OLE2 = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
@@ -75,7 +78,24 @@ export function sniffDocumentType(bytes: Uint8Array): SniffedType | null {
   ) {
     return "docx";
   }
+  if (looksLikeSvg(bytes)) return "svg";
   return null;
+}
+
+/**
+ * SVG text (#300): after an optional UTF-8 BOM, whitespace, `<?xml …?>` /
+ * other processing instructions, comments and a `<!DOCTYPE svg…>`, the first
+ * element is `<svg`. Sniffing only names the type — no slot accepts "svg"
+ * unless it says so in `ALLOWED_TYPES`, and every stored SVG is sanitized.
+ */
+function looksLikeSvg(bytes: Uint8Array): boolean {
+  let s = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, SNIFF_BYTES)).replace(/^\uFEFF/, "");
+  for (;;) {
+    const before = s;
+    s = s.replace(/^\s+/, "").replace(/^<\?[\s\S]*?\?>/, "").replace(/^<!--[\s\S]*?-->/, "").replace(/^<!DOCTYPE\s+svg\b(?:[^[>]|\[[^\]]*\])*>/i, "");
+    if (s === before) break;
+  }
+  return /^<svg[\s>/]/.test(s);
 }
 
 /** How many leading bytes sniffing needs. */
