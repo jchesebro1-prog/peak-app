@@ -49386,3 +49386,18 @@ import * as GLIB from "@/lib/design/grid-library";
   ok(GLIB.assemblyParts(parts as never, "").map((p) => p.id).join(",") === "b,a" && GLIB.assemblyParts(parts as never, "zeta").length === 1, "#299 library: assemblies filter + sort");
   ok(GLIB.assemblyParts([{ id: "x", sku: "B2", desc: "Same", category: "", unit: "ea", list: 1, cost: 1, kind: "assembly" }, { id: "y", sku: "A1", desc: "Same", category: "", unit: "ea", list: 1, cost: 1, kind: "assembly" }] as never, "").map((p) => p.id).join(",") === "y,x", "#299 library: equal names sort by sku");
 }
+
+/* ======================================================================
+   #299 Grid workspace — System Status rules (Task 8)
+   ====================================================================== */
+import { systemStatus } from "@/lib/design/grid-system-status";
+{
+  const base = { err: null, hasSheet: true, calibrated: true, page: 1, needsPart: 0, hiddenUnmapped: 0, tierFallback: [], unmeasuredWires: 0, hasWires: false };
+  ok(systemStatus(base).length === 0, "#299 status: a clean design has no rows");
+  ok(systemStatus({ ...base, hasSheet: false, calibrated: false }).map((s) => s.key).join(",") === "sheet", "#299 status: no sheet → only the upload row");
+  const all = systemStatus({ ...base, err: "Boom.", calibrated: false, needsPart: 1, hiddenUnmapped: 3, tierFallback: ["a", "b"], unmeasuredWires: 2, hasWires: true });
+  ok(all.map((s) => s.key).join(",") === "err,cal,needs,wires,tier,unmapped", "#299 status: fixed order");
+  ok(all.find((s) => s.key === "needs")!.text === "Incomplete — 1 item needs a part." && all.find((s) => s.key === "cal")!.level === "warn", "#299 status: copy + calibration is a warning once wires exist");
+  ok(systemStatus({ ...base, calibrated: false }).find((s) => s.key === "cal")!.level === "info", "#299 status: calibration is info with no wires");
+  ok(systemStatus({ ...base, needsPart: 4 })[0].text === "Incomplete — 4 items need a part.", "#299 status: plural");
+}
