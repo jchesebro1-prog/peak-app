@@ -15,6 +15,7 @@ import { legendRows, symbolContext, type SymbolEntry } from "@/lib/design/grid-i
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import { PrintButton } from "@/components/letter/print-button";
 import RiserEditor from "./riser-editor";
+import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 
 export const metadata = { title: "Riser — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -67,6 +68,7 @@ export default async function RiserPage({
     ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
   ];
   const view = riserViewForOption({ project, optionId, parts, symCtx });
+  const symbolDisplay = cleanSymbolDisplay(project.symbolDisplay);
 
   // Legend (#206 rule): one row per icon+colour actually drawn.
   const partById = new Map(parts.map((p) => [p.id, p]));
@@ -126,6 +128,7 @@ export default async function RiserPage({
         cables={cables}
         placements={slice.placements.map((pl) => ({ id: pl.id, sheetId: pl.sheetId, page: pl.page, x: pl.x, y: pl.y }))}
         calibrations={(project.calibrations || []).map((c) => ({ docId: c.docId, page: c.page }))}
+        symbolDisplay={symbolDisplay}
       />
       {legend.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12, fontSize: 11.5, color: "#5b616e" }}>

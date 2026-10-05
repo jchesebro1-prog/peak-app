@@ -42,6 +42,7 @@ import {
   setOptionQuote,
   setPlacementCategory,
   setScopeInputs,
+  setSymbolDisplay,
   setLinesetDesign,
   setLaborOverride,
   setSheetCalibration,
@@ -1126,6 +1127,18 @@ export async function setScopeInputsAction(
   const p = await setScopeInputs(projectId, cleaned && cleanMovables(cleaned, tpl));
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/** Symbol scale + generic/object mode for the design (#300). The store cleans
+ *  the payload; the drawing set and riser pages read it too. */
+export async function setSymbolDisplayAction(projectId: string, raw: unknown): Promise<Result> {
+  await requireUser();
+  const p = await setSymbolDisplay(projectId, raw);
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/set`);
+  revalidatePath(`${editorPath(projectId)}/riser`);
   return { ok: true };
 }
 

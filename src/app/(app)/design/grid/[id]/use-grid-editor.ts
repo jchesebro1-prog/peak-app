@@ -79,6 +79,7 @@ import { alignPositions, changedMoves, distributePositions, type AlignMode } fro
 import { copySelection, PASTE_OFFSET, pasteLayout, type Clipboard } from "@/lib/design/grid-clipboard";
 // Type-only: the module itself imports the server-side catalog lookup.
 import type { CurtainInput } from "@/lib/design/grid-curtain-input";
+import type { SymbolDisplay } from "@/lib/design/grid-symbol-display";
 import {
   SNAP_FT_KEY,
   SNAP_ON_KEY,
@@ -278,6 +279,8 @@ export type ProjectLite = {
   linesetDesignId: string | null;
   /** Riser documents per option (#209) — the sidebar BOM counts RiserLinks. */
   riser: Record<string, RiserDoc>;
+  /** Symbol scale + mode (#300) — always cleaned by the page. */
+  symbolDisplay: SymbolDisplay;
 };
 
 type Pending =

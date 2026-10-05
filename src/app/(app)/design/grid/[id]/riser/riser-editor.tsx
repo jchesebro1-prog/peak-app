@@ -17,6 +17,7 @@ import {
   type RiserView,
 } from "@/lib/design/grid-riser-doc";
 import { addRouteAction, addSpaceAction, removeRouteAction } from "../actions";
+import type { SymbolDisplay } from "@/lib/design/grid-symbol-display";
 import {
   addRiserLinkAction,
   patchRiserAction,
@@ -81,6 +82,7 @@ export default function RiserEditor({
   spaces,
   placements,
   calibrations,
+  symbolDisplay,
 }: {
   projectId: string;
   optionId: string;
@@ -91,6 +93,8 @@ export default function RiserEditor({
   spaces: Array<{ sheetId: string; page: number }>;
   placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number }>;
   calibrations: Array<{ docId: string; page: number }>;
+  /** Design symbol display (#300) — passed to the canvas. */
+  symbolDisplay?: SymbolDisplay;
 }) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -479,7 +483,7 @@ export default function RiserEditor({
             No spaces yet — use Space to add one, or draw rooms on the plan.
           </div>
         )}
-        <RiserCanvas view={view} boxes={liveBoxes} levelYs={liveLevels} svgRef={svgRef} handlers={handlers} selected={selected} />
+        <RiserCanvas view={view} boxes={liveBoxes} levelYs={liveLevels} svgRef={svgRef} handlers={handlers} selected={selected} symbolDisplay={symbolDisplay} />
       </div>
       <NotesPanel
         notes={view.notes}

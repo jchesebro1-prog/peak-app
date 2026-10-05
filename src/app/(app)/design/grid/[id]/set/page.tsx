@@ -40,6 +40,7 @@ import { SymbolIcon } from "@/components/design/symbol-shape";
 import { PrintButton } from "@/components/letter/print-button";
 import PlanSheetFigure, { type FigurePlacement } from "./plan-sheet-figure";
 import SetSettingsPanel from "./set-settings-panel";
+import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 
 export const metadata = { title: "Drawing set — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -138,6 +139,7 @@ export default async function DrawingSetPage({
 
   // E-501 + E-60x
   const view = riserViewForOption({ project, optionId, parts, symCtx });
+  const symbolDisplay = cleanSymbolDisplay(project.symbolDisplay);
   const schedule = buildSchedule({
     placements: slice.placements,
     spaces,
@@ -309,7 +311,7 @@ export default async function DrawingSetPage({
       return (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: `calc(8pt * var(--dw-k))` }}>
           <div style={{ flex: 1, minHeight: 0 }}>
-            {view.nodes.length ? <RiserCanvas view={view} fill /> : <p style={{ margin: 0, color: "#5b616e" }}>Nothing on the riser yet — add spaces and devices first.</p>}
+            {view.nodes.length ? <RiserCanvas view={view} fill symbolDisplay={symbolDisplay} /> : <p style={{ margin: 0, color: "#5b616e" }}>Nothing on the riser yet — add spaces and devices first.</p>}
           </div>
           {view.notes.length > 0 && (
             <div>

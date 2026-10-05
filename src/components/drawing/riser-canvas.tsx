@@ -13,6 +13,7 @@ import {
   type RiserViewNode,
 } from "@/lib/design/grid-riser-doc";
 import { bezierAt, placeChip, type Bezier, type Pt, type Rect } from "@/lib/design/drawing-labels";
+import type { SymbolDisplay } from "@/lib/design/grid-symbol-display";
 
 /**
  * The riser, drawn (#209). One pure SVG renderer for the riser editor
@@ -124,6 +125,8 @@ export function RiserCanvas({
   selected?: RiserSelection;
   /** Fill the parent's height too (the E-501 drawing area). */
   fill?: boolean;
+  /** Design symbol display (#300) — threaded now, drawn by a later task. */
+  symbolDisplay?: SymbolDisplay;
 }) {
   const h: RiserCanvasHandlers = handlers || {};
   const interactive = Boolean(handlers);

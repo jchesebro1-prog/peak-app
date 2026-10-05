@@ -10788,6 +10788,7 @@ seeded()
   .then(() => mfrAnalyticsLoadAsyncChecks())
   .then(() => gridBatchAsyncChecks299())
   .then(() => gridPasteAsyncChecks299())
+  .then(() => gridSymbolDisplayAsyncChecks300())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -49737,4 +49738,19 @@ import * as GSD from "@/lib/design/grid-symbol-display";
   ok(b.w === 24 && b.h === 17 && GSD.markerBox(null, 2).w === 88 && GSD.markerBox({}, 1).h === 30, "#300 display: marker box scales, 44×30 fallback");
   ok(GSD.markerBox({ symbolWidth: 44 }, NaN).w === 44, "#300 display: bad scale → 1");
   ok(GSD.hitRadius(0.028, 2) === 0.056 && GSD.hitRadius(0.028, 0.25) === 0.014, "#300 display: hit radius scales, floor at half");
+}
+
+/* #300 Grid symbol display — store setter + action (Task 2) */
+async function gridSymbolDisplayAsyncChecks300(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const { registerFixture } = await import("./test-fixtures");
+  const gp = await GP.createProject({ name: "TEST300 symbol display project", customer: "Test Customer 300", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  const r = await GP.setSymbolDisplay(gp.id, { scale: 9, mode: "object" });
+  const stored = (await GP.getProject(gp.id))!.symbolDisplay;
+  ok(!!r && stored?.scale === 4 && stored?.mode === "object", "#300 store: setSymbolDisplay cleans and stores { scale: 4, mode: object }");
+  const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+  const at = actSrc.indexOf("export async function setSymbolDisplayAction");
+  const body = at < 0 ? "" : actSrc.slice(at, actSrc.indexOf("\n}\n", at));
+  ok(body.includes("await requireUser()") && body.includes("revalidatePath(") && body.includes("setSymbolDisplay("), "#300 action: setSymbolDisplayAction requires a user, stores, revalidates");
 }

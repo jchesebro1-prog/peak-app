@@ -43,6 +43,7 @@ import { systemMatchKeys } from "@/lib/specs/records";
 import { scheduleForOption } from "@/lib/design/grid-schedule-server";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
+import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -276,6 +277,7 @@ export default async function GridEditorPage({
         revisions: project.revisions || [],
         linesetDesignId: project.linesetDesignId || null,
         riser: project.riser || {},
+        symbolDisplay: cleanSymbolDisplay(project.symbolDisplay),
       }}
       sheets={sheets.map((s) => ({
         id: s.id,

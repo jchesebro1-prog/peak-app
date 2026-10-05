@@ -30,6 +30,7 @@ import {
   type RiserRemoved,
 } from "@/lib/design/grid-riser-doc";
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
+import { cleanSymbolDisplay, type SymbolDisplay } from "@/lib/design/grid-symbol-display";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import {
@@ -297,6 +298,8 @@ export type GridProject = {
   /** Drawing-set settings (#209) — size, drawn/checked by, excluded sheets,
    *  general notes, revision labels. Absent = defaults. */
   drawingSet?: DrawingSetSettings;
+  /** Symbol scale + generic/object mode for this design (#300); absent = default. */
+  symbolDisplay?: SymbolDisplay;
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -1383,6 +1386,14 @@ export async function setDrawingSet(
     const next = cleanDrawingSet({ ...(p.drawingSet || {}), ...cleanDrawingSet(patch) });
     if (opts.resetGeneralNotes) delete next.generalNotes;
     p.drawingSet = next;
+    p.updatedAt = Date.now();
+  });
+}
+
+/** Store the design's symbol display (#300) — cleaned, never trusted. */
+export async function setSymbolDisplay(projectId: string, raw: unknown): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.symbolDisplay = cleanSymbolDisplay(raw);
     p.updatedAt = Date.now();
   });
 }

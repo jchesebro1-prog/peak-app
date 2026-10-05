@@ -27,7 +27,7 @@ export const DEFAULT_SYMBOL_DISPLAY: SymbolDisplay = {
  */
 export function cleanSymbolDisplay(raw: unknown): SymbolDisplay {
   if (typeof raw !== "object" || raw === null) {
-    return DEFAULT_SYMBOL_DISPLAY;
+    return { ...DEFAULT_SYMBOL_DISPLAY };
   }
 
   const obj = raw as Record<string, unknown>;
