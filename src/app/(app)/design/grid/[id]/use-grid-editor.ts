@@ -903,23 +903,11 @@ function useGridEditorImpl(props: GridEditorProps) {
       label?: string
     ): Promise<{ ok: boolean; previous: { id: string; x: number; y: number }[] | null }> => {
       const servers = new Map(placements.map((q) => [q.id, q]));
-      // A move onto the position the design already has writes nothing: no
-      // action, no "Moved …" note, no undo step, and the hand edit must not
-      // clear the Auto tag (#299). Compared with the SERVER position (the
-      // nudge paints optimistically first, so the shown one is already the
-      // target); an optimistic entry for a dropped move is cleared.
-      const valid = moves.filter((m) => {
-        const q = servers.get(m.id);
-        return q && (Math.abs(q.x - m.x) > 1e-9 || Math.abs(q.y - m.y) > 1e-9);
-      });
-      const dropped = moves.filter((m) => servers.has(m.id) && !valid.includes(m));
-      if (dropped.length)
-        setMovedLocal((prev) => {
-          if (!dropped.some((m) => prev[m.id])) return prev;
-          const next = { ...prev };
-          for (const m of dropped) delete next[m.id];
-          return next;
-        });
+      // Always write what was asked: the saved position is stale between a
+      // write and its router.refresh(), so a quick correction back to the old
+      // spot must not be dropped. Callers filter no-op moves themselves
+      // (changedMoves against the shown positions). Unknown ids are skipped.
+      const valid = moves.filter((m) => servers.has(m.id));
       if (!valid.length) return { ok: true, previous: null };
       setMovedLocal((prev) => {
         const next = { ...prev };
@@ -1096,6 +1084,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   useEffect(
     () => () => {
       const pending = takeNudge();
+      // Best effort by design: the write may call router.refresh() after unmount.
       if (pending?.length) void sendMovesRef.current(pending);
     },
     [takeNudge]
