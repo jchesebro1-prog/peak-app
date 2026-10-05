@@ -252,12 +252,14 @@ export function isDocumentId(v: unknown): v is string {
  *  starts with a character the strict `SAFE_FILE_SEGMENT` rule allows —
  *  see `blobPathBelongsTo`. */
 export function safeDocFileName(name: string): string {
-  return (
-    String(name ?? "")
-      .replace(/[^a-zA-Z0-9._-]+/g, "_")
-      .replace(/^[._]+|_+$/g, "")
-      .slice(0, 80) || "file"
-  );
+  const s = String(name ?? "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^[._]+|_+$/g, "");
+  if (s.length <= 80) return s || "file";
+  // Truncate the stem, never the extension (#300): "…long drawing name.svg"
+  // must still end in ".svg".
+  const ext = /\.[A-Za-z0-9]{1,8}$/.exec(s)?.[0] ?? "";
+  return s.slice(0, 80 - ext.length).replace(/[._]+$/, "") + ext;
 }
 
 /** `part-docs/<documentId>/<fileName>` (§5). The Blob SDK appends a random

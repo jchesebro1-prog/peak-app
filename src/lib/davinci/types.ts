@@ -61,10 +61,20 @@ export type DavinciAccessoryLink = {
   userDefinable: boolean;
 };
 
+/**
+ * `library.json` `images[].imageMetadata` for one image id (#300). Kept only for
+ * ids a record references, so the symbols import can recognise DaVinci's own
+ * placeholder ("Unknown", type "Other" — VISUAL_UNKNOWN, the plan image of 705
+ * records) and title a drawing by its own name ("UNISON UH1RS").
+ */
+export type DavinciImageMeta = { name: string; type: string };
+
 export type DavinciExtract = {
   libraryTimestamp: string;
   generatedAt: number;
   records: readonly DavinciRecord[];
+  /** Plan/riser image metadata by image id (#300). Optional so an older extract still loads. */
+  images?: Readonly<Record<string, DavinciImageMeta>>;
   /** Part documents (#207). Optional so an extract written before it still loads. */
   accessoryTypes?: Readonly<Record<string, DavinciAccessoryType>>;
   accessoryLinks?: readonly DavinciAccessoryLink[];

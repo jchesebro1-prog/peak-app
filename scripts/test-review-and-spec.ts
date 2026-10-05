@@ -50083,9 +50083,112 @@ import { candidatesFor as cand300, planSymbolImport as plan300, type SymbolImpor
   );
   const rd300c = readFileSync(join(process.cwd(), "scripts/symbols-davinci.ts"), "utf8");
   ok(
-    rd300c.includes("Blob storage is not configured — dry run only.") && rd300c.includes("requireHostedConfirmation(hosted, args)") &&
-      rd300c.includes("attachDocument(g.id, g.skus, BY)") && !rd300c.includes("ensureLinks") && rd300c.includes("sanitizeSvg(") &&
+    rd300c.includes("Blob storage is not configured — dry run only.") && rd300c.includes("const refusal = applyRefusal(") &&
+      rd300c.indexOf("const refusal = applyRefusal(") < rd300c.indexOf("loadExtract()") &&
+      rd300c.includes("attachDocument(g.id, skus, BY)") && !rd300c.includes("ensureLinks") && rd300c.includes("sanitizeSvg(") &&
       rd300c.includes('source: "davinci"') && rd300c.includes("sourceRef: g.imageId") && rd300c.indexOf("if (!apply)") < rd300c.indexOf("putBlob("),
-    "#300 symbols:davinci: dry run by default, hosted writes need --yes, no Blob token writes nothing, SVGs are sanitized, links go through the one-current attachDocument"
+    "#300 symbols:davinci: dry run by default, the --apply guard runs before anything is read, no Blob token writes nothing, SVGs are sanitized, links go through the one-current attachDocument"
+  );
+}
+
+/* ======================================================================
+   #300 Task 11 fix round 1 — DaVinci's "Unknown" placeholder is never
+   imported; images shared by > 25 parts are listed; --apply guard; titles
+   by image name; file names keep their extension; per-group failures.
+   ====================================================================== */
+import {
+  VISUAL_UNKNOWN_IMAGE_ID as UNK300f,
+  applyRefusal as refuse300f,
+  blobStoreLabel as store300f,
+  sharedImages as shared300f,
+  SKIP_REASON_LABEL as label300f,
+} from "@/lib/davinci/symbols-plan";
+import { safeDocFileName as safe300f } from "@/lib/part-docs/types";
+{
+  const rec = (typeId: string, model: string, extra: Record<string, unknown>) => ({
+    typeId, displayName: `Type ${typeId}`, category: "Fixture", manufacturer: "ETC", active: true,
+    modelNumbers: [model], ports: [], docs: [], ...extra,
+  });
+  const ex = {
+    libraryTimestamp: "t", generatedAt: 0,
+    records: [
+      rec("u1", "UNK1", { planImageId: UNK300f, riserImageId: "r-real" }),
+      rec("u2", "OTHER1", { planImageId: "p-other" }),
+      rec("u3", "NAMED1", { planImageId: "p-named" }),
+      rec("u4", "PREV1", { planImageId: "p-preview", riserImageId: "r-title" }),
+      rec("u5", "NOMETA1", { planImageId: "p-nometa" }),
+    ],
+    images: {
+      [UNK300f]: { name: "Unknown", type: "Other" },
+      "p-other": { name: "Some Thing", type: "Other" },
+      "p-named": { name: " unknown ", type: "Icon" },
+      "p-preview": { name: "UNISON UH1RS", type: "Template Preview" },
+      "r-title": { name: "Riser Panel", type: "Title Block" },
+      "r-real": { name: "", type: "Riser" },
+    },
+  } as unknown as Parameters<typeof cand300>[0];
+  const stats = { placeholder: 0 };
+  const c = cand300(ex, ["UNK1", "OTHER1", "NAMED1", "PREV1", "NOMETA1"].map((sku) => ({ id: sku, sku, manufacturer: "ETC" })), stats);
+  const got = c.map((x) => `${x.partSku}:${x.kind}:${x.imageId}`).sort().join();
+  ok(
+    got === "NOMETA1:symbol:p-nometa,PREV1:riser:r-title,PREV1:symbol:p-preview,UNK1:riser:r-real" && stats.placeholder === 3,
+    "#300 fix: candidatesFor skips DaVinci's VISUAL_UNKNOWN id, any image typed Other and any named Unknown — and counts them — but keeps real drawings tagged Template Preview / Title Block or with no metadata"
+  );
+  ok(
+    c.find((x) => x.imageId === "p-preview")?.imageName === "UNISON UH1RS" && !("imageName" in c.find((x) => x.imageId === "r-real")!) &&
+      !("imageName" in c.find((x) => x.imageId === "p-nometa")!),
+    "#300 fix: a candidate carries the image's own library name (the document title) only when it has one"
+  );
+  const mk = (partSku: string, imageId: string, kind: "symbol" | "riser" = "symbol"): Cand300 => ({ partSku, kind, imageId, typeId: "t", displayName: "Disp" });
+  const many = [
+    ...Array.from({ length: 26 }, (_, i) => mk(`P${i}`, "hot")),
+    ...Array.from({ length: 25 }, (_, i) => mk(`Q${i}`, "edge")),
+    mk("P0", "hot", "riser"),
+  ];
+  const sh = shared300f(many, 25);
+  ok(
+    sh.length === 1 && sh[0].imageId === "hot" && sh[0].parts === 26 && sh[0].name === "Disp" && shared300f(many, 30).length === 0,
+    "#300 fix: sharedImages lists an image more than 25 distinct parts would share (a part counted once across kinds), exactly 25 is not listed"
+  );
+  const base = { store: "store_X", db: "LOCAL PGlite (.data/pglite)" };
+  ok(
+    refuse300f({ ...base, hosted: false, blob: true, yes: false, localBlob: false })?.includes("--yes") === true &&
+      refuse300f({ ...base, hosted: false, blob: true, yes: true, localBlob: false })?.includes("orphaned") === true &&
+      refuse300f({ ...base, hosted: false, blob: true, yes: true, localBlob: true }) === null &&
+      refuse300f({ ...base, hosted: true, blob: true, yes: false, localBlob: false })?.includes("HOSTED") === true &&
+      refuse300f({ ...base, hosted: true, blob: true, yes: true, localBlob: false }) === null &&
+      refuse300f({ ...base, hosted: true, blob: false, yes: false, localBlob: false }) !== null &&
+      refuse300f({ ...base, hosted: false, blob: false, yes: false, localBlob: false }) === null,
+    "#300 fix: --apply with a Blob token always needs --yes, a local-DB apply with a Blob token also needs --local-blob, a hosted DB needs --yes, no token and no hosted DB writes nothing so needs neither"
+  );
+  const tok = "vercel_blob_rw_AbC123_s3cretPart";
+  ok(
+    store300f({ BLOB_READ_WRITE_TOKEN: tok }) === "store_AbC123" && store300f({ BLOB_STORE_ID: "store_Z", BLOB_READ_WRITE_TOKEN: tok }) === "store_Z" &&
+      store300f({ BLOB_READ_WRITE_TOKEN: "garbage" }) === "unknown" && !store300f({ BLOB_READ_WRITE_TOKEN: tok }).includes("s3cret"),
+    "#300 fix: the Blob store is named from BLOB_STORE_ID or the token's store segment — never the token's secret"
+  );
+  const long = safe300f(`DaVinci ${"Very Long Drawing Name ".repeat(6)}symbol.svg`);
+  ok(
+    long.length <= 80 && long.endsWith(".svg") && !long.includes("_.svg") && safe300f("ETC S4 / Datasheet (EN).pdf") === "ETC_S4_Datasheet_EN_.pdf",
+    "#300 fix: safeDocFileName truncates the stem and keeps the extension; short names are unchanged"
+  );
+  const rdf = readFileSync(join(process.cwd(), "scripts/symbols-davinci.ts"), "utf8");
+  ok(
+    label300f.removed === "detached earlier" && rdf.includes("documentLinksForParts(g.skus)") && rdf.includes("title: `DaVinci ${g.title}`") &&
+      rdf.includes("withoutEnlargement: true") && rdf.includes("density: 144") && rdf.includes("if (blobKey) await deleteBlob(blobKey)") &&
+      rdf.includes("exportStamp !== extract.libraryTimestamp"),
+    "#300 fix: removed reads \"detached earlier\"; targets are re-checked for a hand drawing before linking; titles use the image name; oversized SVGs rasterize at 144 dpi without enlargement; a failed create deletes its upload; a library timestamp mismatch warns"
+  );
+  const exImg = extractLibrary({
+    ...LIB162,
+    types: [{ ...LIB162.types[0], visuals: { data: { imageId: "{AAAA0000-0000-4000-8000-000000000001}" } } }],
+    images: [
+      { imageId: "aaaa0000-0000-4000-8000-000000000001", imageMetadata: { imageName: "Unknown", imageType: "Other" } },
+      { imageId: "bbbb0000-0000-4000-8000-000000000002", imageMetadata: { imageName: "Title", imageType: "Title Block" } },
+    ],
+  });
+  ok(
+    JSON.stringify(exImg.images) === JSON.stringify({ "aaaa0000-0000-4000-8000-000000000001": { name: "Unknown", type: "Other" } }),
+    "#300 fix: the extract carries imageName/imageType for referenced plan and riser image ids only"
   );
 }

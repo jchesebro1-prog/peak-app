@@ -31,7 +31,7 @@
 import type { Port } from "@/lib/catalog-connect";
 import { normalizeSku } from "./sku";
 import { DIRECTION_MAP, mapProtocol } from "./protocol-map";
-import type { DavinciAccessoryLink, DavinciAccessoryType, DavinciDoc, DavinciExtract, DavinciRecord } from "./types";
+import type { DavinciAccessoryLink, DavinciAccessoryType, DavinciDoc, DavinciExtract, DavinciImageMeta, DavinciRecord } from "./types";
 
 /** ETC's internal scratch category — never a product (D5). */
 const EXCLUDED_CATEGORIES = new Set(["Internal-DO NOT USE"]);
@@ -169,7 +169,29 @@ export function extractLibrary(lib: unknown): DavinciExtract {
   }
 
   const { accessoryTypes, accessoryLinks } = extractAccessoryGraph(arr(L.types), cats, mfrs, classes);
-  return { libraryTimestamp: str(L.timestamp), generatedAt: Date.now(), records, accessoryTypes, accessoryLinks };
+  return { libraryTimestamp: str(L.timestamp), generatedAt: Date.now(), records, images: referencedImages(L.images, records), accessoryTypes, accessoryLinks };
+}
+
+/**
+ * `images[]` `{ imageId, imageMetadata: { imageName, imageType } }` for the ids
+ * a record references (#300) — the rest of the 2,122 entries (title blocks,
+ * template previews, icons of dropped types) never reach a catalog part.
+ */
+function referencedImages(list: unknown, records: readonly DavinciRecord[]): Record<string, DavinciImageMeta> {
+  const wanted = new Set<string>();
+  for (const r of records) {
+    if (r.planImageId) wanted.add(r.planImageId);
+    if (r.riserImageId) wanted.add(r.riserImageId);
+  }
+  const out: Record<string, DavinciImageMeta> = {};
+  for (const raw of arr(list)) {
+    const x = bag(raw);
+    const id = imageId(x.imageId);
+    if (!id || !wanted.has(id) || out[id]) continue;
+    const m = bag(x.imageMetadata);
+    out[id] = { name: str(m.imageName).trim(), type: str(m.imageType).trim() };
+  }
+  return out;
 }
 
 /** `"{ABC-…}"` / `"abc-…"` / `""` → lower-case id without braces, or "" (#300). */
