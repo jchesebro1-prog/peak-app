@@ -403,6 +403,16 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           { label: "Schedule →", href: `/design/grid/${id}/schedule?option=${opt}` },
           { label: "Drawing set →", href: `/design/grid/${id}/set?option=${opt}` },
           ...(project.linesetDesignId ? [{ label: "Linesets →", href: `/design/grid/${id}/lineset` }] : []),
+          // Same links the BOM panel shows under the quote button (#299).
+          ...(activeOption.quoteId
+            ? [
+                { label: "View in Quotes →", href: "/quotes" },
+                {
+                  label: "Spec from this design →",
+                  href: `/design/specs/new?grid=${encodeURIComponent(project.id)}&quote=${encodeURIComponent(activeOption.quoteId)}`,
+                },
+              ]
+            : []),
         ]}
       >
         <div style={FIELD_LABEL}>Lineset</div>

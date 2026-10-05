@@ -49402,3 +49402,32 @@ import { systemStatus } from "@/lib/design/grid-system-status";
   ok(systemStatus({ ...base, needsPart: 4 })[0].text === "Incomplete — 4 items need a part.", "#299 status: plural");
   ok(systemStatus({ ...base, hasSheet: false, calibrated: false, hiddenUnmapped: 2 }).map((s) => s.key).join(",") === "sheet,unmapped", "#299 status: no sheet hides only the calibration row");
 }
+
+/* ======================================================================
+   #299 Grid workspace — Browser tree (Task 11)
+   ====================================================================== */
+import { browserTree, nodeForPlacement } from "@/lib/design/grid-browser-tree";
+{
+  const pl = (id: string, partId: string, x: number, extra: Record<string, unknown> = {}) =>
+    ({ id, sheetId: "s1", page: 1, x, y: 0.5, partId, by: "t", at: 1, ...extra });
+  const sq = (id: string, name: string, x0: number, x1: number) =>
+    ({ id, sheetId: "s1", page: 1, name, color: "#000", points: [{ x: x0, y: 0 }, { x: x1, y: 0 }, { x: x1, y: 1 }, { x: x0, y: 1 }], by: "t", at: 1 });
+  const t = browserTree({
+    designName: "Lincoln", sheets: [{ id: "s1", name: "Base" }, { id: "s2", name: "Empty" }],
+    placements: [pl("a", "S4", 0.1), pl("b", "S4", 0.2, { qty: 3 }), pl("c", "Rack", 0.7), pl("d", "S4", 0.95)] as never,
+    spaces: [sq("sp1", "Stage", 0, 0.5), sq("sp2", "House", 0.5, 0.9)] as never,
+    routes: [{ id: "w1", sheetId: "s1", page: 1, partId: "cat6", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], aspect: 1, by: "t", at: 1 }] as never,
+    nameOf: (p) => ({ S4: "S4 LED", Rack: "12U rack" } as Record<string, string>)[p.partId],
+    membersOf: (p) => (p.partId === "Rack" ? ["ERn2", "P-ACP"] : []),
+    wireName: () => "Cat6",
+  });
+  const sheet = t.children!;
+  ok(sheet.length === 1 && sheet[0].key === "sheet:s1" && sheet[0].count === 6, "#299 tree: only non-empty sheets; count sums lot qty");
+  const kids = sheet[0].children!.map((n) => n.key);
+  ok(kids.join(",") === "space:sp2,space:sp1,none:s1:1,wires:s1:1", "#299 tree: spaces by name, then No space, then wires (single page → no page level)");
+  const stage = sheet[0].children!.find((n) => n.key === "space:sp1")!;
+  ok(stage.children!.length === 1 && stage.children![0].kind === "group" && stage.children![0].label === "S4 LED ×4", "#299 tree: identical parts group with summed qty");
+  const house = sheet[0].children!.find((n) => n.key === "space:sp2")!;
+  ok(house.children![0].kind === "device" && house.children![0].children!.map((m) => m.label).join(",") === "ERn2,P-ACP", "#299 tree: assembly members as leaves");
+  ok(nodeForPlacement(t, "b").join(">") === "design>sheet:s1>space:sp1>group:space:sp1:S4 LED>pl:b", "#299 tree: path to a device");
+}
