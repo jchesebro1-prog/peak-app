@@ -10662,7 +10662,8 @@ What shipped, in six slices:
   Set category / Replace part / Delete through the batched actions (D597, D598), and snap to grid (D600).
 - **Slice 6 — Clipboard and undo.** Copy, cut, paste and duplicate (D601); undo and redo, 100 deep per tab (D599).
 
-Gates (final head): tsc clean; test:specs ALL PASSED (baseline 11,963 PASS); eslint 0 errors on the grid directories;
+Gates (final head): tsc clean; test:specs ALL PASSED, 12,085 PASS (baseline 11,963; +122); eslint 0 errors on the grid
+directories; `next build` OK; test:smoke ALL PASSED (206 routes, incl. every /design/grid route);
 every slice checked in the browser on a scratch datadir at 1600x1000 and a narrow width. Not exercised: an Auto-filled design
 (the scratch database had none) and a multi-thousand-device design.
 
