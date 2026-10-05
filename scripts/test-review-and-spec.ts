@@ -49318,3 +49318,18 @@ import { manufacturerPageVM as mafPageVM } from "@/lib/manufacturer-page-vm";
   const client = readFileSync(join(process.cwd(), "src/app/(app)/catalog/manufacturers/[key]/manufacturer-client.tsx"), "utf8");
   ok(client.includes("claimManufacturerAction(vendorPick, vm.claimName)"), "mfr page: the Set vendor button claims vm.claimName");
 }
+/* ======================================================================
+   #299 Grid workspace — pane layout rules (Task 1)
+   ====================================================================== */
+import * as GWL from "@/lib/design/grid-workspace-layout";
+{
+  ok(GWL.clampPane("left", 50) === 200 && GWL.clampPane("left", 9999) === 520, "#299 layout: side panes clamp to 200–520");
+  ok(GWL.clampPane("bottom", 50) === 120 && GWL.clampPane("bottom", 9999) === 480, "#299 layout: bottom pane clamps to 120–480");
+  ok(GWL.clampPane("right", NaN) === 280 && GWL.clampPane("right", null) === 280, "#299 layout: unusable width → default");
+  ok(GWL.clampPane("left", 301.6) === 302, "#299 layout: whole pixels");
+  ok(GWL.parsePaneSize("left", "abc") === 280 && GWL.parsePaneSize("left", "330") === 330, "#299 layout: parse stored size");
+  ok(GWL.parseCollapsed("1", false) === true && GWL.parseCollapsed("0", true) === false && GWL.parseCollapsed(null, true) === true, "#299 layout: collapsed flag parse with fallback");
+  ok(GWL.defaultCollapsed("left", 1000) && GWL.defaultCollapsed("right", 1000) && !GWL.defaultCollapsed("bottom", 1000), "#299 layout: narrow window collapses side panes only");
+  ok(!GWL.defaultCollapsed("left", 1600), "#299 layout: wide window keeps panes open");
+  ok(GWL.PANE_SIZE_KEY("left") === "pk.grid.pane.left.v1" && GWL.PANE_COLLAPSED_KEY("bottom") === "pk.grid.pane.bottom.collapsed.v1", "#299 layout: storage keys");
+}
