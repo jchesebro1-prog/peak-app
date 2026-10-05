@@ -332,7 +332,7 @@ function cleanCss(css: string, removed: Set<string>): string {
         } else j += isEscape(css, j) ? readEscape(css, j).end - j : 1;
       }
       const to = Math.min(j + 1, css.length);
-      replace(i, to, "", "style imports");
+      replace(i, to, " ", "style imports");
       i = to;
     } else if (isNameChar(c) || isEscape(css, i)) {
       const { name, end } = readName(css, i);
@@ -343,11 +343,12 @@ function cleanCss(css: string, removed: Set<string>): string {
         if (!u.fragment) replace(i, u.end, "none", "external url()");
         i = u.end;
       } else if (FETCH_FUNCTIONS.has(fn)) {
-        // `image-set(`, `image(`, `cross-fade(`, `src(`, `element(` are defused unless they name a `#fragment`;
-        // their arguments are still scanned (a nested `url(` is handled on its own).
+        // `image-set(`, `image(`, `cross-fade(`, `src(` always fetch (any string argument, not just the first),
+        // so they are defused; only `element(#id)` — a same-document reference — is left alone.
+        // Their arguments are still scanned (a nested `url(` is handled on its own).
         const a = skipSpace(css, end + 1);
         const first = css[a] === '"' || css[a] === "'" ? readString(css, a).value : css.slice(a, a + 1);
-        if (!isFragment(first)) replace(i, end, "invalid", "external url()");
+        if (!(fn === "element" && isFragment(first))) replace(i, end, "invalid", "external url()");
         i = end + 1;
       } else {
         i = end;
@@ -369,33 +370,34 @@ function pass(text: string): SanitizeResult {
   const removed = new Set<string>();
   const out: string[] = [];
   const stack: string[] = [];
-  let skipDepth = 0; // > 0 while inside a removed element
+  const skipStack: string[] = []; // open element names while inside a removed element
   // Inside a `<style>`: its direct text and CDATA, joined (a browser joins them before
   // reading the CSS, so `@imp<![CDATA[ort` is one `@import`), and the depth of a child element being dropped.
   let styleText: string[] | null = null;
-  let styleChildDepth = 0;
+  const styleChildStack: string[] = [];
   let roots = 0;
   let rootIsSvg = false;
 
   for (const tok of tokens) {
-    if (skipDepth > 0) {
-      // Inside a removed element: only count depth, so nested or repeated tags (`<script><script>…`) stay inside.
-      if (tok.t === "open" && !tok.selfClose) skipDepth++;
-      else if (tok.t === "close") skipDepth--;
+    if (skipStack.length > 0) {
+      // Inside a removed element: track open names so nested or repeated tags (`<script><script>…`) stay
+      // inside and a close tag that matches nothing open is refused, as it is everywhere else.
+      if (tok.t === "open" && !tok.selfClose) skipStack.push(tok.name);
+      else if (tok.t === "close" && skipStack.pop() !== tok.name) return { ok: false, error: UNREADABLE };
       continue;
     }
     if (styleText) {
-      if (styleChildDepth > 0) {
+      if (styleChildStack.length > 0) {
         // Inside an element nested in a style: dropped with its content (it is not part of the CSS).
-        if (tok.t === "open" && !tok.selfClose) styleChildDepth++;
-        else if (tok.t === "close") styleChildDepth--;
+        if (tok.t === "open" && !tok.selfClose) styleChildStack.push(tok.name);
+        else if (tok.t === "close" && styleChildStack.pop() !== tok.name) return { ok: false, error: UNREADABLE };
         continue;
       }
       if (tok.t === "text") styleText.push(decodeXmlEntities(tok.raw));
       else if (tok.t === "cdata") styleText.push(tok.raw);
       else if (tok.t === "open") {
         removed.add("style elements");
-        if (!tok.selfClose) styleChildDepth = 1;
+        if (!tok.selfClose) styleChildStack.push(tok.name);
       } else {
         if (stack[stack.length - 1] !== tok.name) return { ok: false, error: UNREADABLE };
         // The whole style is cleaned once, then written once as escaped text (never CDATA).
@@ -440,7 +442,7 @@ function pass(text: string): SanitizeResult {
     if (blocked || animatesLink) {
       // Blocked elements go with everything inside them.
       removed.add(blocked ?? "link animation");
-      if (!tok.selfClose) skipDepth = 1;
+      if (!tok.selfClose) skipStack.push(tok.name);
       continue;
     }
 
@@ -483,7 +485,7 @@ function pass(text: string): SanitizeResult {
   }
 
   // Every element is closed and there was a root.
-  if (skipDepth > 0 || stack.length > 0) return { ok: false, error: UNREADABLE };
+  if (skipStack.length > 0 || stack.length > 0) return { ok: false, error: UNREADABLE };
   if (roots !== 1 || !rootIsSvg) return { ok: false, error: NOT_SVG };
 
   const svg = out.join("");

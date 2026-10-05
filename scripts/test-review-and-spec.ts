@@ -49805,4 +49805,10 @@ import { sniffDocumentType as sniff300 } from "@/lib/part-docs/files";
   ok(q.ok && q.svg.includes('"A\\"B"') && q.svg.includes("&quot;C\\&quot;D&quot;") && q.removed.length === 0, "#300 svg: legitimate CSS escapes are kept as written");
   const fa = sanitizeSvg(X('<image srcset="https://x/1.png 1x" href="#i"/><g xml:base="https://x/"><rect background="https://x/2.png"/></g>'));
   ok(fa.ok && !/srcset|xml:base|background|https:\/\/x/.test(fa.svg) && fa.svg.includes('href="#i"') && fa.removed.includes("external links"), "#300 svg: srcset, xml:base and other fetch attributes dropped");
+  const is = sanitizeSvg(X('<rect style="background-image:image-set(&quot;#a&quot; 1x,&quot;https://x/h&quot; 2x)"/>'));
+  ok(is.ok && !/image-set/i.test(is.svg) && is.svg.includes("invalid("), "#300 svg: image-set with a leading #fragment still can't fetch a later URL");
+  const mm = [sanitizeSvg(X("<style><g></style>@import url(https://x/m.css);</style>")), sanitizeSvg(X("<script><g></script></script>"))];
+  ok(mm.every((r) => !r.ok), "#300 svg: a close tag matching nothing inside a dropped element is refused");
+  const sp = sanitizeSvg(X("<style>u@import x;rl(https://e)</style>"));
+  ok(!sp.ok || !sp.svg.includes("url(https://e"), "#300 svg: a removed @import never splices its neighbours into url(");
 }
