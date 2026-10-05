@@ -719,7 +719,7 @@ export async function pastePlacementsAction(
 ): Promise<{ ok: true; placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number } | { ok: false; error: string }> {
   const user = await requireUser();
   if (
-    !isStr(projectId) || !isObj(input) || !isStr(input.sheetId) || input.sheetId === "" || !isPage(input.page) ||
+    !isStr(projectId) || !isObj(input) || !isStr(input.sheetId) || input.sheetId === "" || input.sheetId.length > PART_ID_MAX || !isPage(input.page) ||
     !isStr(input.optionId) || !Array.isArray(input.items) || !Array.isArray(input.routeIds) || !input.routeIds.every(isStr) ||
     !input.items.every(
       (it) =>
@@ -825,7 +825,18 @@ export async function restoreItemsAction(projectId: string, bundle: RemovedBundl
     if (!pl) return { ok: false, error: UNDO_INVALID };
     placements.push(pl);
   }
-  const r = await restoreItems(projectId, { placements, riser: isObj(bundle.riser) ? bundle.riser : {} });
+  // Restored riser links skip addRiserLinkAction, so apply its part rule here:
+  // a cable that left the Grid library (or isn't per-length) refuses the undo.
+  const riser = isObj(bundle.riser) ? bundle.riser : {};
+  const cableIds = new Set<string>();
+  for (const entry of Object.values(riser)) {
+    const links = isObj(entry) && Array.isArray(entry.links) ? entry.links : [];
+    for (const l of links) if (isObj(l)) cableIds.add(isStr(l.partId) ? l.partId : "");
+  }
+  const cables = await Promise.all([...cableIds].map((id) => (isPartId(id) ? partForGrid(id) : Promise.resolve(null))));
+  if (cables.some((part) => !part || !isPerLengthUnit(part.unit)))
+    return { ok: false, error: "Couldn't undo — a cable in it is no longer in the Grid library." };
+  const r = await restoreItems(projectId, { placements, riser });
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);

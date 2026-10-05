@@ -49563,7 +49563,9 @@ async function gridPasteAsyncChecks299(): Promise<void> {
   const { DEFAULT_OPTION_ID } = await import("../src/lib/design/grid-options");
   const gp = await GP.createProject({ name: "TEST299 paste grid project", customer: "Test Customer 299", customerId: null, by: "Test Harness" });
   registerFixture("grid_projects", gp.id);
-  const sheetId = "gs-fixture299p";
+  const sheetRec = await GP.addSheet(gp.id, { name: "TEST299 paste sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness" });
+  if (sheetRec) registerFixture("grid_sheets", sheetRec.id);
+  const sheetId = sheetRec ? sheetRec.id : "gs-fixture299p";
   await GP.addPlacement(gp.id, { sheetId, page: 1, x: 0.1, y: 0.1, partId: fixtureId(299, "part"), optionId: DEFAULT_OPTION_ID, by: "t" });
   const src = (await GP.getProject(gp.id))!.placements.at(-1)!;
 
@@ -49578,6 +49580,9 @@ async function gridPasteAsyncChecks299(): Promise<void> {
   const after = (await GP.getProject(gp.id))!;
   ok(back.ok && after.placements.some((p) => p.id === src.id && p.x === 0.1), "#299 restore: record back with its original id");
   ok(!(await GP.restoreItems(gp.id, rm.ok ? rm.value : { placements: [], riser: {} })).ok, "#299 restore: refuses when the id already exists");
+  const orphan = { ...src, id: "gp-0123456789ab", sheetId: "gs-removed299" };
+  const orph = await GP.restoreItems(gp.id, { placements: [orphan], riser: {} });
+  ok(!orph.ok && !(await GP.getProject(gp.id))!.placements.some((p) => p.id === orphan.id), "#299 restore: refused when a record's sheet is no longer on the design");
 
   // Wire paste: both ends pasted onto a calibrated page → copied, remapped,
   // translated by its FROM device's delta; the same paste onto an

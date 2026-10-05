@@ -1087,6 +1087,7 @@ export async function setPlacementsPart(
 
 /** OPTION_GONE's copy in the editor actions — the option a paste targets was removed. */
 const PASTE_OPTION_GONE = "That option was removed — refresh the page.";
+const PASTE_SHEET_GONE = "That sheet is no longer on this design — reload and try again.";
 const PASTE_NOTHING = "Nothing to paste.";
 const PASTE_TOO_MANY = "Paste fewer than 2,000 items.";
 const RESTORE_STALE = "Couldn't undo — the design changed.";
@@ -1119,12 +1120,18 @@ export async function pastePlacements(
   const before = await getProject(projectId);
   if (!before) return { ok: false, error: "Design not found." };
   if (!hasOption(before, input.optionId)) return { ok: false, error: PASTE_OPTION_GONE };
+  if (!(before.sheetIds || []).includes(input.sheetId)) return { ok: false, error: PASTE_SHEET_GONE };
 
   let refused = false;
+  let sheetGone = false;
   let value: { placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number } | undefined;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId)) {
       refused = true;
+      return;
+    }
+    if (!(p.sheetIds || []).includes(input.sheetId)) {
+      sheetGone = true;
       return;
     }
     const at = Date.now();
@@ -1160,7 +1167,10 @@ export async function pastePlacements(
       const toId = r?.toPlacementId ? newId.get(r.toPlacementId) : undefined;
       const src = r?.fromPlacementId ? source.get(r.fromPlacementId) : undefined;
       const dst = fromId ? target.get(fromId) : undefined;
-      if (!r || !fromId || !toId || !src || !dst || !calibrated) {
+      // Same-page rule (translateRouteEnds'): a wire on another sheet/page
+      // than its FROM device isn't drawn between these devices.
+      const samePage = !!r && !!src && r.sheetId === src.sheetId && r.page === src.page;
+      if (!r || !fromId || !toId || !src || !dst || !calibrated || !samePage) {
         skippedWires++;
         continue;
       }
@@ -1187,6 +1197,7 @@ export async function pastePlacements(
     value = { placements: pasted, routes, skippedWires };
   });
   if (!updated) return { ok: false, error: "Design not found." };
+  if (sheetGone) return { ok: false, error: PASTE_SHEET_GONE };
   if (refused || !value) return { ok: false, error: PASTE_OPTION_GONE };
   return { ok: true, project: updated, value };
 }
@@ -1196,7 +1207,7 @@ export async function pastePlacements(
  * their ORIGINAL ids, then the riser links and conduits that went with
  * them. All-or-nothing, batchEdit's two-check pattern: refused when any id
  * is already on the design (undo already ran, or the design changed) or a
- * record's option is gone — a refusal never bumps `updatedAt`.
+ * record's option or sheet is gone — a refusal never bumps `updatedAt`.
  *
  * The bundle comes back from the CLIENT, so the riser half is rebuilt
  * through cleanRiserRemoved (live option keys only, `lk-`/`cd-` ids, valid
@@ -1214,6 +1225,9 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
     const have = new Set((p.placements || []).map((pl) => pl.id));
     if (ids.some((id) => have.has(id))) return RESTORE_STALE;
     if (placements.some((pl) => pl.optionId !== undefined && !hasOption(p, pl.optionId))) return RESTORE_STALE;
+    // A record whose sheet was deleted since would come back invisible but priced.
+    const sheets = new Set(p.sheetIds || []);
+    if (placements.some((pl) => !sheets.has(pl.sheetId))) return RESTORE_STALE;
     return null;
   };
   const before = await getProject(projectId);
