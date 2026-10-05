@@ -7,7 +7,7 @@ import {
   type SlotCoverage,
 } from "./coverage";
 import type { QuotedPartStat } from "./quoted-parts";
-import { compareImages, DOC_SLOT_KINDS, type DocSlotKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
+import { compareImages, DOC_SLOT_KINDS, isDrawingKind, type DocSlotKind, type DrawingKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
 
 /**
  * Serializable view models for the Datasheets page and the part editor
@@ -113,6 +113,30 @@ export function buildImageIndex(documents: readonly PartDocument[], links: reado
 
 export function imagesFor(index: ReadonlyMap<string, ImageRef[]>, sku: string): ImageRef[] {
   return index.get(sku) ?? [];
+}
+
+/** A part's current symbol / riser drawing (#300) for the part editor's
+ *  Drawings slots — `removed` is what the SVG sanitizer stripped (empty = nothing). */
+export type PartDrawingRef = { id: string; title: string; fileName: string; source: PartDocumentSource; uploadedAt: number; uploadedBy: string; removed: string[] };
+export type PartDrawingSlots = Record<DrawingKind, PartDrawingRef | null>;
+
+/** The part's live symbol and riser drawings, from the same `documents` /
+ *  `links` arrays `loadPartDocsState` loads (no extra query). attachDocument
+ *  keeps one current link per kind; should two ever be live, the newest link
+ *  wins (the same rule as symbolUrlsFor). A document's own kind is
+ *  authoritative and one with no stored file is skipped. Pure. */
+export function drawingSlotsFor(documents: readonly PartDocument[], links: readonly PartDocumentLink[], sku: string): PartDrawingSlots {
+  const docsById = new Map(documents.map((d) => [d.id, d] as const));
+  const out: PartDrawingSlots = { symbol: null, riser: null };
+  const newest: Record<DrawingKind, number> = { symbol: -Infinity, riser: -Infinity };
+  for (const l of links) {
+    if (l.partSku !== sku) continue;
+    const d = docsById.get(l.documentId);
+    if (!d || !d.blobKey || !isDrawingKind(d.kind) || l.createdAt < newest[d.kind]) continue;
+    newest[d.kind] = l.createdAt;
+    out[d.kind] = { id: d.id, title: d.title, fileName: d.fileName, source: d.source, uploadedAt: d.uploadedAt, uploadedBy: d.uploadedBy, removed: [...(d.svgRemoved ?? [])] };
+  }
+  return out;
 }
 
 /** `count` includes hidden images — staff see all (#245); `first` is the
@@ -234,6 +258,8 @@ export type PartDocsView = {
   accessories: PartRef[];
   /** The image gallery, in display order (#245). */
   images: PartDocsImage[];
+  /** The part's current symbol / riser drawings (#300) — set by the catalog page via drawingSlotsFor. */
+  drawings?: PartDrawingSlots;
 };
 
 export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: string) => string, images: readonly ImageRef[] = []): PartDocsView {

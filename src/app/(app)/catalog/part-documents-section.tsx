@@ -4,10 +4,13 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
 import { collapseList } from "@/lib/part-docs/coverage";
-import { PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocumentSource } from "@/lib/part-docs/types";
-import { moveImageToFront, primaryImageIndex, type PartDocsImage, type PartDocsView } from "@/lib/part-docs/views";
+import { acceptFor } from "@/lib/part-docs/files";
+import { PART_DOC_KINDS, PART_DOC_KIND_LABEL, type DrawingKind, type PartDocumentSource } from "@/lib/part-docs/types";
+import { moveImageToFront, primaryImageIndex, type PartDocsImage, type PartDocsView, type PartDrawingRef } from "@/lib/part-docs/views";
+import { ConfirmButton } from "@/components/confirm-button";
+import { ObjectSymbolTile } from "@/components/design/object-symbol";
 import AlsoCovers from "./documents/also-covers";
-import { addImageFromUrlAction, setImageDisplayAction, setImageOrderAction } from "./documents/actions";
+import { addImageFromUrlAction, detachDocumentAction, setImageDisplayAction, setImageOrderAction } from "./documents/actions";
 import SlotCell, { docHref } from "./documents/slot-cell";
 import { uploadNewDocument } from "./documents/upload-client";
 
@@ -190,6 +193,113 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
 }
 
 /**
+ * One object-drawing slot (#300, D606): the part's Symbol drawing (plan) or
+ * Riser drawing (front view). Single slot — upload, replace, remove. Replace
+ * uploads a NEW document for this part only (attachDocument unlinks the
+ * previous drawing of the same kind, which stays on record), so a drawing a
+ * DaVinci import shares across several parts is never changed under them.
+ * Remove detaches it from this part. The drawing previews as an <img> on a
+ * checkerboard — never inlined (the SVG was sanitized on the way in; what
+ * the sanitizer stripped shows as a "Cleaned:" note).
+ */
+function DrawingSlot({ sku, kind, drawing }: { sku: string; kind: DrawingKind; drawing: PartDrawingRef | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  const [, startTransition] = useTransition();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const onFile = (file: File) => {
+    setError(null);
+    setBusy(drawing ? "Replacing…" : "Uploading…");
+    startTransition(async () => {
+      const r = await uploadNewDocument(file, kind, [sku]);
+      setBusy(null);
+      if (!r.ok) setError(r.error || "That didn't work.");
+      else router.refresh();
+    });
+  };
+
+  const dropProps = {
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOver(true);
+    },
+    onDragLeave: () => setOver(false),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOver(false);
+      const f = e.dataTransfer.files?.[0];
+      if (f) onFile(f);
+    },
+  };
+
+  return (
+    <div {...dropProps} data-drawing-slot={kind}>
+      <input
+        ref={fileRef}
+        type="file"
+        accept={acceptFor(kind)}
+        aria-label={`Upload ${PART_DOC_KIND_LABEL[kind].toLowerCase()}`}
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) onFile(f);
+        }}
+      />
+      {drawing ? (
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <a href={docHref(drawing.id)} target="_blank" rel="noopener noreferrer" title={drawing.fileName}>
+            <ObjectSymbolTile src={docHref(drawing.id)} size={72} />
+          </a>
+          <div style={{ minWidth: 0, display: "grid", gap: 3 }}>
+            <a href={docHref(drawing.id)} target="_blank" rel="noopener noreferrer" title={drawing.fileName} style={{ fontSize: 12, color: "#1f7a52", fontWeight: 600, textDecoration: "none", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              ✓ {drawing.title}
+            </a>
+            <span style={{ fontSize: 10.5, color: "#8c919c" }}>
+              {IMAGE_SOURCE_LABEL[drawing.source] ?? drawing.source} · {drawing.uploadedBy} {dateYear(drawing.uploadedAt)}
+            </span>
+            {drawing.removed.length > 0 && (
+              <span style={{ fontSize: 10.5, color: "#9a6b12" }}>Cleaned: {drawing.removed.join(", ")} removed</span>
+            )}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" style={smallLink} disabled={!!busy} onClick={() => fileRef.current?.click()}>
+                Replace
+              </button>
+              <ConfirmButton
+                label="Remove"
+                confirmLabel="Remove from this part?"
+                pendingLabel="Removing…"
+                className="pk-btn-outline"
+                style={{ fontSize: 11, padding: "2px 8px" }}
+                onConfirm={async () => {
+                  const r = await detachDocumentAction(drawing.id, sku);
+                  if (!r.ok) throw new Error(r.error);
+                  router.refresh();
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={!!busy}
+          style={{ border: "1px dashed #c9cdd5", borderRadius: 7, background: over ? "#f4f6fb" : "#fff", color: "#6b7079", fontSize: 11.5, padding: "5px 10px", cursor: "pointer" }}
+        >
+          Drop SVG / PNG or click
+        </button>
+      )}
+      {busy && <div style={{ fontSize: 11, color: "#8c919c", marginTop: 3 }}>{busy}</div>}
+      {error && <div role="alert" style={{ marginTop: 3, fontSize: 11, color: "#b4543a" }}>{error}</div>}
+    </div>
+  );
+}
+
+/**
  * The part editor's Documents section (#207, spec §3): the three slots (same
  * cell as the Datasheets page), every document linked to the part with its
  * replaced versions, and the computed "Covered by" / "Covers" context from
@@ -215,6 +325,16 @@ export default function PartDocumentsSection({ view }: { view: PartDocsView }) {
           <div key={k}>
             <div style={{ fontSize: 11.5, fontWeight: 600, color: "#5b616e", marginBottom: 4 }}>{PART_DOC_KIND_LABEL[k]}</div>
             <SlotCell sku={view.sku} kind={k} view={view.slots[k]} onUploaded={(sku, documentId, fileName) => setJustUploaded({ sku, documentId, fileName })} />
+          </div>
+        ))}
+      </div>
+
+      {/* #300 — the part's object drawings: what The Grid draws in Object mode. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 12 }}>
+        {(["symbol", "riser"] as const).map((k) => (
+          <div key={k}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "#5b616e", marginBottom: 4 }}>{PART_DOC_KIND_LABEL[k]}</div>
+            <DrawingSlot sku={view.sku} kind={k} drawing={view.drawings?.[k] ?? null} />
           </div>
         ))}
       </div>

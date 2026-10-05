@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { setSettings } from "@/lib/settings";
 import { cleanCategoryIcons, cleanSymbolColors, isGridIconId } from "@/lib/design/grid-icons";
-import { setDeviceTypeIcons } from "@/lib/stores/device-types";
+import { setDeviceTypeIcons, setDeviceTypeSymbol } from "@/lib/stores/device-types";
+import { getDocument } from "@/lib/stores/part-documents";
 import { cleanStandardNotes } from "@/lib/design/grid-drawing-set";
 import { cleanWireTypes, type WireType } from "@/lib/catalog-connect";
 import { PORT_RULES } from "@/lib/catalog-port-rules";
@@ -49,6 +50,25 @@ export async function saveDeviceTypeIconsAction(icons: Record<string, string | n
   }
   await setDeviceTypeIcons(clean);
   revalidatePath("/", "layout");
+}
+
+/** #300: Device types drawing slot — point a type at an uploaded, UNLINKED
+ *  `symbol` part document (createDeviceTypeDrawingAction), or `null` to
+ *  clear it (the document itself stays on record). The document must exist,
+ *  be a `symbol` and hold a stored file. Revalidates the whole layout so the
+ *  Grid editor, drawing sets and riser redraw with it. */
+export async function setDeviceTypeSymbolAction(typeKey: string, docId: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const key = String(typeKey ?? "");
+  if (docId !== null) {
+    const doc = await getDocument(String(docId));
+    if (!doc || doc.kind !== "symbol" || !doc.blobKey) return { ok: false, error: "That drawing no longer exists." };
+  }
+  const r = await setDeviceTypeSymbol(key, docId === null ? null : String(docId));
+  if (!r.ok) return r;
+  revalidatePath("/design/grid/settings");
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 /** Symbol colours (stock symbols) — sparse per swatch over

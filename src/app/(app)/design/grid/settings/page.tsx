@@ -13,7 +13,8 @@ import { CategoryIconsCard } from "./category-icons-card";
 import { listProjects } from "@/lib/stores/grid-projects";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { typeOfCategory } from "@/lib/design/device-types";
-import { DeviceTypeIconsCard } from "./device-type-icons-card";
+import { DeviceTypeIconsCard, type DeviceTypeDrawing } from "./device-type-icons-card";
+import { getDocuments } from "@/lib/stores/part-documents";
 import { WireTypesCard } from "./wire-types-card";
 import { StandardNotesCard } from "./standard-notes-card";
 import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
@@ -84,6 +85,17 @@ export default async function GridSettingsPage() {
   // Advanced override list (overridden or used-in-a-design categories).
   const [deviceTypes, projects] = await Promise.all([loadDeviceTypeContext(catalog), listProjects()]);
   const symCtx = symbolContext(settings, deviceTypes.types);
+  // #300: each type's drawing — a removed, non-symbol or file-less document never shows (nor draws).
+  const typeDrawingDocs = new Map(
+    (await getDocuments(deviceTypes.types.map((t) => t.symbolDocId).filter((id): id is string => !!id)))
+      .filter((d) => d.kind === "symbol" && !!d.blobKey)
+      .map((d) => [d.id, d])
+  );
+  const typeDrawings: Record<string, DeviceTypeDrawing> = {};
+  for (const t of deviceTypes.types) {
+    const d = t.symbolDocId ? typeDrawingDocs.get(t.symbolDocId) : undefined;
+    if (d) typeDrawings[t.key] = { id: d.id, removed: [...(d.svgRemoved ?? [])] };
+  }
   const categoryRows = symbolCategoryRows({
     catalogCategories: Array.from(new Set(catalog.map((p) => p.category || ""))),
     grid: gridSymbols.map((s) => ({ category: s.category || "Other", scope: s.scope })),
@@ -174,6 +186,7 @@ export default async function GridSettingsPage() {
         key={JSON.stringify(deviceTypes.types.map((t) => [t.key, t.icon ?? null]))}
         types={deviceTypes.types.filter((t) => !t.archived)}
         ctx={symCtx}
+        drawings={typeDrawings}
       />
 
       <CategoryIconsCard

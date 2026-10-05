@@ -25,7 +25,7 @@ import { allSections } from "@/lib/stores/spec-sections";
 import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { buildImageIndex, imagesFor, partDocsView, type PartDocsView } from "@/lib/part-docs/views";
+import { buildImageIndex, drawingSlotsFor, imagesFor, partDocsView, type PartDocsView } from "@/lib/part-docs/views";
 import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
 import FabricRateField from "./fabric-rate-field";
@@ -215,7 +215,9 @@ export default async function CatalogPage({
     ? await (async () => {
         const state = await loadPartDocsState(parts);
         const imageIndex = buildImageIndex(state.documents, state.links);
-        return partDocsView(state.index, editingPart.sku, (s) => descBySku!.get(s) ?? "", imagesFor(imageIndex, editingPart.sku));
+        const view = partDocsView(state.index, editingPart.sku, (s) => descBySku!.get(s) ?? "", imagesFor(imageIndex, editingPart.sku));
+        // #300: the Symbol / Riser drawing slots, from the same two arrays.
+        return { ...view, drawings: drawingSlotsFor(state.documents, state.links, editingPart.sku) };
       })()
     : null;
 

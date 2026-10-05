@@ -18049,8 +18049,8 @@ const gemValueImports = (src: string): string[] =>
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
   ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  // #226 adds saveDeviceTypeIconsAction (the 10th).
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 10 && (actionsSrc.match(/^export async function/gm) || []).length === 10, "#211 T3: every settings action, the four new ones included, is admin-gated");
+  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th).
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 11 && (actionsSrc.match(/^export async function/gm) || []).length === 11, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
 /* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
@@ -49970,4 +49970,33 @@ import { NODE_ROW as RS300_ROW, NODE_ROW_OBJECT as RS300_ROW_OBJ, nodeRowHeight 
 {
   ok(rs300RowH("object") === RS300_ROW_OBJ && RS300_ROW_OBJ === 28 && rs300RowH("generic") === RS300_ROW && RS300_ROW === 16 && rs300RowH(undefined) === 16 && rs300RowH(null) === 16,
     "#300 riser: nodeRowHeight — 28-unit rows in Object mode, the original 16 otherwise");
+}
+
+/* ======================================================================
+   #300 Task 9 — build-out UI: Symbol / Riser drawing slots in the part
+   editor, a drawing per device type in Grid Settings (admin only).
+   ====================================================================== */
+{
+  const rd300b = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const pds300 = rd300b("src/app/(app)/catalog/part-documents-section.tsx");
+  const dtc300 = rd300b("src/app/(app)/design/grid/settings/device-type-icons-card.tsx");
+  ok(
+    pds300.includes('(["symbol", "riser"] as const)') && pds300.includes("uploadNewDocument(file, kind, [sku])") && pds300.includes("accept={acceptFor(kind)}") &&
+      pds300.includes("<ObjectSymbolTile") && pds300.includes("Cleaned:") && pds300.includes("detachDocumentAction(drawing.id, sku)") &&
+      dtc300.includes('preflight(file, "symbol")') && dtc300.includes('accept={acceptFor("symbol")}') && dtc300.includes("createDeviceTypeDrawingAction(") &&
+      dtc300.includes("setDeviceTypeSymbolAction(key, made.documentId)") && dtc300.includes("setDeviceTypeSymbolAction(key, null)") && dtc300.includes("<ObjectSymbolTile") &&
+      !/<svg[^>]*dangerouslySetInnerHTML|dangerouslySetInnerHTML/.test(pds300 + dtc300),
+    "#300 build-out: the part editor uploads symbol + riser drawings and the device-type card a symbol drawing, previewed as <img> tiles, never inlined"
+  );
+  const sa300 = rd300b("src/app/(app)/design/grid/settings/actions.ts");
+  const fn300 = sa300.slice(sa300.indexOf("export async function setDeviceTypeSymbolAction"));
+  const body300 = fn300.slice(0, fn300.indexOf("\n}\n") + 2);
+  const da300 = rd300b("src/app/(app)/design/grid/settings/drawing-actions.ts");
+  ok(
+    body300.length > 0 && body300.includes('> {\n  await requirePerm("manage_users");\n  const key') &&
+      body300.includes('doc.kind !== "symbol"') && body300.includes("!doc.blobKey") && body300.includes("setDeviceTypeSymbol(") &&
+      da300.startsWith('"use server"') && da300.includes('const user = await requirePerm("manage_users")') && da300.includes('kind: "symbol"') &&
+      da300.indexOf("await getDocument(input.documentId)") < da300.indexOf("verifyUploadedBlob(") && da300.includes("storeDrawingUpload(") && !da300.includes("attachDocument("),
+    "#300 build-out: setDeviceTypeSymbolAction is admin-only and accepts only a stored symbol document; the device-type upload is admin-only, sanitized and linked to no part"
+  );
 }

@@ -43,3 +43,26 @@ export function ObjectSymbolImg({ src, size }: { src: string; size: number }) {
     <img src={src} alt="" draggable={false} width={size} height={size} style={{ width: size, height: size, objectFit: "contain", display: "block" }} />
   );
 }
+
+/** A drawing preview tile for the build-out screens (part editor, Grid
+ *  Settings → Device types): the drawing as an `<img>` on a light
+ *  checkerboard, so a transparent SVG/WebP reads against both its own
+ *  white and its transparent areas. */
+export function ObjectSymbolTile({ src, size }: { src: string; size: number }) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        padding: 4,
+        boxSizing: "border-box",
+        borderRadius: 7,
+        border: "1px solid #dfe2e8",
+        background: "repeating-conic-gradient(#eef0f3 0% 25%, #ffffff 0% 50%) 50% / 12px 12px",
+        flex: "none",
+      }}
+    >
+      <ObjectSymbolImg src={src} size={size - 10} />
+    </div>
+  );
+}
