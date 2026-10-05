@@ -20,6 +20,12 @@ import {
   removeCustomItem,
   removeOption,
   removePlacement,
+  removePlacements,
+  movePlacements,
+  setPlacementsCategory,
+  setPlacementsPart,
+  type RemovedBundle,
+  MAX_BATCH,
   removeProject,
   removeRoute,
   removeSheet,
@@ -642,6 +648,78 @@ export async function removePlacementAction(
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };
+}
+
+/* ------------------------- batch edits (#299 Task 14) ------------------------- */
+
+const BATCH_INVALID = "That edit isn't valid — reload and try again.";
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const isStr = (v: unknown): v is string => typeof v === "string";
+const isFiniteNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Move many devices in one write; wires follow each device. `previous`
+ *  holds the old positions for undo. All-or-nothing (store). */
+export async function movePlacementsAction(
+  projectId: string,
+  moves: { id: string; x: number; y: number }[]
+): Promise<{ ok: true; previous: { id: string; x: number; y: number }[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (!isStr(projectId) || !Array.isArray(moves) || !moves.every((m) => isObj(m) && isStr(m.id) && isFiniteNum(m.x) && isFiniteNum(m.y)))
+    return { ok: false, error: BATCH_INVALID };
+  const r = await movePlacements(projectId, moves.map((m) => ({ id: m.id, x: m.x, y: m.y })));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  return { ok: true, previous: r.value };
+}
+
+/** Remove many devices in one write; their riser links/conduits go too.
+ *  `removed` carries everything undo needs to put back. */
+export async function removePlacementsAction(
+  projectId: string,
+  ids: string[]
+): Promise<{ ok: true; removed: RemovedBundle } | { ok: false; error: string }> {
+  await requireUser();
+  if (!isStr(projectId) || !Array.isArray(ids) || !ids.every(isStr)) return { ok: false, error: BATCH_INVALID };
+  const r = await removePlacements(projectId, ids);
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
+  return { ok: true, removed: r.value };
+}
+
+/** Label (or clear, with "") many devices' categories in one write. */
+export async function setPlacementsCategoryAction(
+  projectId: string,
+  items: { id: string; category: string }[]
+): Promise<{ ok: true; previous: { id: string; category: string }[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (!isStr(projectId) || !Array.isArray(items) || !items.every((it) => isObj(it) && isStr(it.id) && isStr(it.category)))
+    return { ok: false, error: BATCH_INVALID };
+  const r = await setPlacementsCategory(projectId, items.map((it) => ({ id: it.id, category: it.category })));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  return { ok: true, previous: r.value };
+}
+
+/** Swap the part on many devices in one write. Every new part must be in
+ *  the Grid library (the route action's partForGrid lookup); curtains are
+ *  refused by the store. */
+export async function replacePlacementsPartAction(
+  projectId: string,
+  items: { id: string; partId: string }[]
+): Promise<{ ok: true; previous: { id: string; partId: string }[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (!isStr(projectId) || !Array.isArray(items) || !items.every((it) => isObj(it) && isStr(it.id) && isStr(it.partId) && it.partId !== ""))
+    return { ok: false, error: BATCH_INVALID };
+  if (items.length > MAX_BATCH) return { ok: false, error: "Select fewer than 2,000 items." };
+  const parts = await Promise.all([...new Set(items.map((it) => it.partId))].map((id) => partForGrid(id)));
+  if (parts.some((part) => !part)) return { ok: false, error: "That part is not in the Grid library." };
+  const r = await setPlacementsPart(projectId, items.map((it) => ({ id: it.id, partId: it.partId })));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
+  return { ok: true, previous: r.value };
 }
 
 export async function calibrateAction(

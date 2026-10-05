@@ -10786,6 +10786,7 @@ seeded()
   .then(() => mfrPageStoreAsyncChecks())
   .then(() => mfrPageCanonicalAsyncChecks())
   .then(() => mfrAnalyticsLoadAsyncChecks())
+  .then(() => gridBatchAsyncChecks299())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -49476,4 +49477,66 @@ import * as GSNAP from "@/lib/design/grid-snap";
   const dl = GSNAP.snapDelta({ x: 0.1, y: 0.1 }, { x: 0.1149, y: 0.1 }, g);
   ok(Math.abs(dl.dx - 0.01) < 1e-12 && Math.abs(dl.dy - 0) < 1e-12, "#299 snap: group delta snaps the anchor");
   ok(GSNAP.feetLabel(0.5) === `6"` && GSNAP.feetLabel(5) === `5'`, "#299 snap: labels");
+}
+
+/* #299 Grid workspace — riser removed/restore (Task 14) */
+import { riserRemovedBetween, restoreRiserItems, normalizeRiserDoc as normalizeRiserDoc299 } from "@/lib/design/grid-riser-doc";
+{
+  const end = (placementId: string) => ({ kind: "placement" as const, placementId });
+  const lk = (id: string, a: string, b: string) => ({ id, from: end(a), to: end(b), partId: "cat6", lengthFt: 10, by: "t", at: 1 });
+  const before = { "opt-base": { ...normalizeRiserDoc299(undefined), links: [lk("lk-1", "gp-a", "gp-b"), lk("lk-2", "gp-c", "gp-d")] } };
+  const after = { "opt-base": { ...normalizeRiserDoc299(undefined), links: [lk("lk-2", "gp-c", "gp-d")] } };
+  const removed = riserRemovedBetween(before, after);
+  ok(removed["opt-base"].links.map((l) => l.id).join(",") === "lk-1" && removed["opt-base"].conduits.length === 0, "#299 riser: removed links found");
+  ok(Object.keys(riserRemovedBetween(after, after)).length === 0, "#299 riser: nothing removed → empty");
+  const live = { placementIds: new Set(["gp-a", "gp-b", "gp-c", "gp-d"]), spaceIds: new Set<string>() };
+  const back = restoreRiserItems(after, removed, live)!;
+  ok(back["opt-base"].links.map((l) => l.id).sort().join(",") === "lk-1,lk-2", "#299 riser: restore re-adds the link");
+  ok(restoreRiserItems(back, removed, live)!["opt-base"].links.length === 2, "#299 riser: restore is idempotent by id");
+  const half = { placementIds: new Set(["gp-a"]), spaceIds: new Set<string>() };
+  ok(restoreRiserItems(after, removed, half)!["opt-base"].links.length === 1, "#299 riser: a link whose end is gone stays out");
+}
+
+/* #299 Grid workspace — batch actions are authed and revalidate (Task 14) */
+{
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+  const body = (name: string) => { const i = src.indexOf(`export async function ${name}(`); if (i < 0) return ""; const j = src.indexOf("export async function", i + 10); return src.slice(i, j < 0 ? undefined : j); };
+  for (const n of ["movePlacementsAction", "removePlacementsAction", "setPlacementsCategoryAction", "replacePlacementsPartAction"])
+    ok(body(n).includes("requireUser()") && body(n).includes("revalidatePath("), `#299 actions: ${n} is authed and revalidates`);
+}
+
+/* #299 Grid workspace — batched store edits on a scratch project (Task 14) */
+async function gridBatchAsyncChecks299(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const gp = await GP.createProject({ name: "TEST299 batch grid project", customer: "Test Customer 299", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  const optionId = (await GP.getProject(gp.id))!.options![0].id;
+  const sheetId = "gs-fixture299";
+  const add = async (x: number, y: number) => (await GP.addPlacement(gp.id, { sheetId, page: 1, x, y, partId: fixtureId(299, "part"), optionId, by: "t" }))!;
+  await add(0.1, 0.1); await add(0.2, 0.2); await add(0.3, 0.3);
+  let p = (await GP.getProject(gp.id))!;
+  const [a, b, c] = p.placements.slice(-3);
+
+  const mv = await GP.movePlacements(gp.id, [{ id: a.id, x: 0.5, y: 0.5 }, { id: b.id, x: 1.4, y: -1 }]);
+  p = (await GP.getProject(gp.id))!;
+  const pa = p.placements.find((x) => x.id === a.id)!, pb = p.placements.find((x) => x.id === b.id)!;
+  ok(mv.ok && pa.x === 0.5 && pb.x === 1 && pb.y === 0, "#299 batch: move applies + clamps");
+  ok(mv.ok && mv.value.find((m) => m.id === a.id)!.x === 0.1, "#299 batch: move returns previous positions");
+
+  const bad = await GP.movePlacements(gp.id, [{ id: a.id, x: 0.9, y: 0.9 }, { id: "gp-nope", x: 0, y: 0 }]);
+  ok(!bad.ok && (await GP.getProject(gp.id))!.placements.find((x) => x.id === a.id)!.x === 0.5, "#299 batch: a missing id refuses the whole move");
+
+  const cat = await GP.setPlacementsCategory(gp.id, [{ id: a.id, category: "  FOH  " }, { id: b.id, category: "" }]);
+  p = (await GP.getProject(gp.id))!;
+  ok(cat.ok && p.placements.find((x) => x.id === a.id)!.category === "FOH" && !("category" in p.placements.find((x) => x.id === b.id)!), "#299 batch: category trim + clear");
+
+  const sw = await GP.setPlacementsPart(gp.id, [{ id: b.id, partId: fixtureId(299, "part2") }]);
+  p = (await GP.getProject(gp.id))!;
+  ok(sw.ok && sw.value[0].partId === fixtureId(299, "part") && p.placements.find((x) => x.id === b.id)!.partId === fixtureId(299, "part2"), "#299 batch: part swap applies + returns previous parts");
+
+  const rm = await GP.removePlacements(gp.id, [a.id, c.id]);
+  p = (await GP.getProject(gp.id))!;
+  ok(rm.ok && rm.value.placements.map((x) => x.id).join(",") === [a.id, c.id].join(",") && !p.placements.some((x) => x.id === a.id || x.id === c.id), "#299 batch: remove returns the records it removed");
+  ok(!(await GP.removePlacements(gp.id, [])).ok, "#299 batch: empty selection refused");
 }

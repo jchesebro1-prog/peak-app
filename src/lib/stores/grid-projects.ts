@@ -19,7 +19,7 @@ import {
   type GridOption,
 } from "@/lib/design/grid-options";
 export type { GridOption } from "@/lib/design/grid-options";
-import { copyRiserDoc, pruneRisers, type RiserDoc } from "@/lib/design/grid-riser-doc";
+import { copyRiserDoc, pruneRisers, riserRemovedBetween, type RiserDoc, type RiserRemoved } from "@/lib/design/grid-riser-doc";
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
@@ -810,17 +810,21 @@ export async function setPlacementCategory(
   placementId: string,
   category: string
 ): Promise<GridProject | null> {
-  const label = category.trim().slice(0, 40);
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.placements = (p.placements || []).map((pl) => {
-      if (pl.id !== placementId) return pl;
-      const next = withoutAuto({ ...pl });
-      if (label) next.category = label;
-      else delete next.category;
-      return next;
-    });
+    p.placements = (p.placements || []).map((pl) => (pl.id === placementId ? withCategory(pl, category) : pl));
     p.updatedAt = Date.now();
   });
+}
+
+/** The one category rule (punch #48): trim, cap at 40 characters, and an
+ *  empty label DELETES the key. A category edit is a hand edit, so it
+ *  clears the #211 auto tag. Shared by the single and batch setters. */
+function withCategory(pl: GridPlacement, category: string): GridPlacement {
+  const label = category.trim().slice(0, 40);
+  const next = withoutAuto({ ...pl });
+  if (label) next.category = label;
+  else delete next.category;
+  return next;
 }
 
 /**
@@ -860,24 +864,37 @@ export async function movePlacement(
       pl.id === placementId ? withoutAuto({ ...pl, x, y }) : pl
     );
     // Guarded so a pre-D110 doc with no `routes` key doesn't grow an empty one.
-    if (p.routes?.length) p.routes = p.routes.map((r) => {
-      const head = r.fromPlacementId === placementId;
-      const tail = r.toPlacementId === placementId;
-      // Same sheet/page only, an endpoint id can't refer across pages, but a
-      // restored revision could carry a stale pairing, and shifting a polyline
-      // on another page would be worse than leaving it be.
-      if ((!head && !tail) || r.sheetId !== current.sheetId || r.page !== current.page) return r;
-      const last = r.points.length - 1;
-      return {
-        ...r,
-        points: r.points.map((q, i) =>
-          (head && i === 0) || (tail && i === last)
-            ? { x: clamp01(q.x + dx), y: clamp01(q.y + dy) }
-            : q
-        ),
-      };
-    });
+    if (p.routes?.length)
+      p.routes = translateRouteEnds(p.routes, new Map([[placementId, { sheetId: current.sheetId, page: current.page, dx, dy }]]));
     p.updatedAt = Date.now();
+  });
+}
+
+type MoveDelta = { sheetId: string; page: number; dx: number; dy: number };
+
+/** Attached wires follow a moved device (movePlacement's rule): each
+ *  endpoint drawn onto a moved placement translates by THAT placement's
+ *  delta — a run between two moved devices shifts each end by its own.
+ *  Same sheet/page only: an endpoint id can't refer across pages, but a
+ *  restored revision could carry a stale pairing, and shifting a polyline
+ *  on another page would be worse than leaving it be. */
+function translateRouteEnds(routes: GridRoute[], deltas: ReadonlyMap<string, MoveDelta>): GridRoute[] {
+  const onPage = (r: GridRoute, id: string | undefined): MoveDelta | null => {
+    const d = id ? deltas.get(id) : undefined;
+    return d && r.sheetId === d.sheetId && r.page === d.page ? d : null;
+  };
+  return routes.map((r) => {
+    const head = onPage(r, r.fromPlacementId);
+    const tail = onPage(r, r.toPlacementId);
+    if (!head && !tail) return r;
+    const last = r.points.length - 1;
+    return {
+      ...r,
+      points: r.points.map((q, i) => {
+        const d = head && i === 0 ? head : tail && i === last ? tail : null;
+        return d ? { x: clamp01(q.x + d.dx), y: clamp01(q.y + d.dy) } : q;
+      }),
+    };
   });
 }
 
@@ -891,6 +908,167 @@ export async function removePlacement(
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: new Set([placementId]) });
     p.updatedAt = Date.now();
   });
+}
+
+/* ------------------------- batch edits (#299 Task 14) ------------------------- */
+
+/** What a batch removal took out — enough for undo to put it all back. */
+export type RemovedBundle = { placements: GridPlacement[]; riser: RiserRemoved };
+export type BatchResult<T> = { ok: true; project: GridProject; value: T } | { ok: false; error: string };
+
+export const MAX_BATCH = 2000;
+const BATCH_NOTHING = "Nothing selected.";
+const BATCH_TOO_MANY = "Select fewer than 2,000 items.";
+const batchStale = (n: number) => `${n} item(s) are no longer on this design — reload and try again.`;
+
+/**
+ * One all-or-nothing batch edit: ONE patchDoc, and either every listed
+ * placement changes or none does. The id check runs twice — on a read
+ * before patchDoc, so an ordinary refusal never writes at all, and again
+ * inside the mutate against the doc actually being written, since it may
+ * have changed in between. A refusal inside leaves the doc untouched
+ * (patchDoc still rewrites it as read, but `updatedAt` doesn't move — the
+ * addPlacement `refused` pattern). `apply` runs only once every check
+ * passed, and computes its return value from the pre-mutation doc.
+ */
+async function batchEdit<T>(
+  projectId: string,
+  rawIds: readonly string[],
+  apply: (p: GridProject, ids: ReadonlySet<string>) => T,
+  check?: (placements: GridPlacement[], ids: ReadonlySet<string>) => string | null
+): Promise<BatchResult<T>> {
+  if (rawIds.length > MAX_BATCH) return { ok: false, error: BATCH_TOO_MANY };
+  const ids = new Set(rawIds);
+  if (!ids.size) return { ok: false, error: BATCH_NOTHING };
+  const refusalFor = (placements: GridPlacement[]): string | null => {
+    const have = new Set(placements.map((pl) => pl.id));
+    let missing = 0;
+    for (const id of ids) if (!have.has(id)) missing++;
+    return missing ? batchStale(missing) : check ? check(placements, ids) : null;
+  };
+  const before = await getProject(projectId);
+  if (!before) return { ok: false, error: "Design not found." };
+  const early = refusalFor(before.placements || []);
+  if (early) return { ok: false, error: early };
+
+  // `as`: assigned inside the patchDoc callback, which TS's narrowing can't see.
+  let refusal = null as string | null;
+  let value: T | undefined;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    refusal = refusalFor(p.placements || []);
+    if (refusal) return;
+    value = apply(p, ids);
+    p.updatedAt = Date.now();
+  });
+  if (!updated) return { ok: false, error: "Design not found." };
+  if (refusal) return { ok: false, error: refusal };
+  return { ok: true, project: updated, value: value as T };
+}
+
+/** Last entry wins when an id repeats. */
+function byId<T extends { id: string }>(items: readonly T[]): Map<string, T> {
+  return new Map(items.map((it) => [it.id, it]));
+}
+
+/**
+ * Move many placed devices at once (#299). Each lands clamped to the page;
+ * attached wire ends follow each device by its own delta (movePlacement's
+ * rule); every moved device loses its #211 auto tag. Returns the PREVIOUS
+ * positions, in stored order, for undo.
+ */
+export async function movePlacements(
+  projectId: string,
+  moves: { id: string; x: number; y: number }[]
+): Promise<BatchResult<{ id: string; x: number; y: number }[]>> {
+  const target = byId(moves);
+  return batchEdit(projectId, moves.map((m) => m.id), (p) => {
+    const previous: { id: string; x: number; y: number }[] = [];
+    const deltas = new Map<string, MoveDelta>();
+    p.placements = (p.placements || []).map((pl) => {
+      const t = target.get(pl.id);
+      if (!t) return pl;
+      const x = clamp01(t.x);
+      const y = clamp01(t.y);
+      previous.push({ id: pl.id, x: pl.x, y: pl.y });
+      deltas.set(pl.id, { sheetId: pl.sheetId, page: pl.page, dx: x - pl.x, dy: y - pl.y });
+      return withoutAuto({ ...pl, x, y });
+    });
+    if (p.routes?.length) p.routes = translateRouteEnds(p.routes, deltas);
+    return previous;
+  });
+}
+
+/**
+ * Remove many placed devices at once (#299). Riser links and conduits
+ * ending on any of them go too (removePlacement's rule). Returns the removed
+ * records as stored, in stored order, plus the riser items the prune took.
+ */
+export async function removePlacements(projectId: string, ids: string[]): Promise<BatchResult<RemovedBundle>> {
+  return batchEdit(projectId, ids, (p, gone) => {
+    const placements = (p.placements || []).filter((pl) => gone.has(pl.id));
+    p.placements = (p.placements || []).filter((pl) => !gone.has(pl.id));
+    let riser: RiserRemoved = {};
+    if (p.riser) {
+      const before = p.riser;
+      p.riser = pruneRisers(p.riser, { placementIds: gone });
+      riser = riserRemovedBetween(before, p.riser);
+    }
+    return { placements, riser };
+  });
+}
+
+/** Label many placements at once (#299) — setPlacementCategory's rule per
+ *  item. Returns the previous categories ("" when none). */
+export async function setPlacementsCategory(
+  projectId: string,
+  items: { id: string; category: string }[]
+): Promise<BatchResult<{ id: string; category: string }[]>> {
+  const next = byId(items);
+  return batchEdit(projectId, items.map((it) => it.id), (p) => {
+    const previous: { id: string; category: string }[] = [];
+    p.placements = (p.placements || []).map((pl) => {
+      const it = next.get(pl.id);
+      if (!it) return pl;
+      previous.push({ id: pl.id, category: pl.category || "" });
+      return withCategory(pl, it.category);
+    });
+    return previous;
+  });
+}
+
+const CURTAIN_PART_REFUSAL = "Curtains can't change part — edit the curtain instead.";
+
+/**
+ * Swap the part on many placements at once (#299). A curtain placement's
+ * part is its fabric, so curtains are refused (the whole batch). A real
+ * swap clears the #211 auto tag and drops a lot `qty` — a quantity counted
+ * for one part means nothing for another; re-picking the same part changes
+ * nothing. Returns the previous partIds. The caller checks the new parts
+ * exist (the store never reads the catalog).
+ */
+export async function setPlacementsPart(
+  projectId: string,
+  items: { id: string; partId: string }[]
+): Promise<BatchResult<{ id: string; partId: string }[]>> {
+  const next = byId(items);
+  return batchEdit(
+    projectId,
+    items.map((it) => it.id),
+    (p) => {
+      const previous: { id: string; partId: string }[] = [];
+      p.placements = (p.placements || []).map((pl) => {
+        const it = next.get(pl.id);
+        if (!it) return pl;
+        previous.push({ id: pl.id, partId: pl.partId });
+        if (it.partId === pl.partId) return pl;
+        const swapped: GridPlacement = withoutAuto({ ...pl, partId: it.partId });
+        delete swapped.qty;
+        return swapped;
+      });
+      return previous;
+    },
+    (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_PART_REFUSAL : null)
+  );
 }
 
 /** Set (or replace) the scale for one page of one sheet. */

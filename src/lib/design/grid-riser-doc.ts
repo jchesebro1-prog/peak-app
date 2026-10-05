@@ -486,6 +486,69 @@ export function pruneRisers(riser: Record<string, RiserDoc> | undefined, gone: G
   return out;
 }
 
+/** Links and conduits a batch removal dropped, keyed by option id (the
+ *  riser map key) — what undo hands back to restoreRiserItems (#299). */
+export type RiserRemoved = Record<string, { links: RiserLink[]; conduits: RiserConduit[] }>;
+
+/** Per key: the links/conduits whose id is in `before` but not `after`.
+ *  Keys with nothing removed are omitted. */
+export function riserRemovedBetween(
+  before: Record<string, RiserDoc> | undefined,
+  after: Record<string, RiserDoc> | undefined
+): RiserRemoved {
+  const out: RiserRemoved = {};
+  for (const [k, raw] of Object.entries(before || {})) {
+    const b = normalizeRiserDoc(raw);
+    const a = normalizeRiserDoc(after?.[k]);
+    const linkIds = new Set(a.links.map((l) => l.id));
+    const conduitIds = new Set(a.conduits.map((c) => c.id));
+    const links = b.links.filter((l) => !linkIds.has(l.id));
+    const conduits = b.conduits.filter((c) => !conduitIds.has(c.id));
+    if (links.length || conduits.length) out[k] = { links, conduits };
+  }
+  return out;
+}
+
+/** Undo of a batch removal: re-add each removed link/conduit to its key's
+ *  document when its id is absent there AND both ends still resolve — a
+ *  placement end to a live placement, a space end to no space or a live
+ *  space. Idempotent by id; never exceeds the per-document caps. */
+export function restoreRiserItems(
+  current: Record<string, RiserDoc> | undefined,
+  removed: RiserRemoved,
+  liveIds: { placementIds: ReadonlySet<string>; spaceIds: ReadonlySet<string> }
+): Record<string, RiserDoc> | undefined {
+  const keys = Object.keys(removed);
+  if (!keys.length) return current;
+  const live = (e: EndRef) =>
+    e.kind === "placement" ? liveIds.placementIds.has(e.placementId) : e.spaceId === null || liveIds.spaceIds.has(e.spaceId);
+  const out: Record<string, RiserDoc> = { ...(current || {}) };
+  for (const k of keys) {
+    const doc = normalizeRiserDoc(out[k]);
+    const r = removed[k];
+    const linkIds = new Set(doc.links.map((l) => l.id));
+    const conduitIds = new Set(doc.conduits.map((c) => c.id));
+    const links = [...doc.links];
+    const conduits = [...doc.conduits];
+    for (const l of r?.links || []) {
+      if (links.length >= MAX_LINKS) break;
+      if (!linkIds.has(l.id) && live(l.from) && live(l.to)) {
+        links.push(l);
+        linkIds.add(l.id);
+      }
+    }
+    for (const c of r?.conduits || []) {
+      if (conduits.length >= MAX_CONDUITS) break;
+      if (!conduitIds.has(c.id) && live(c.from) && live(c.to)) {
+        conduits.push(c);
+        conduitIds.add(c.id);
+      }
+    }
+    out[k] = { ...doc, links, conduits };
+  }
+  return out;
+}
+
 /** An option copy's riser: same layout, new ids, device ends re-pointed at
  *  the copied placements (an end whose device wasn't copied drops out). */
 export function copyRiserDoc(
