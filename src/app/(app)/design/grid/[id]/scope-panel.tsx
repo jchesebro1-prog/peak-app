@@ -139,6 +139,62 @@ function ProgressRow({
   );
 }
 
+/**
+ * The "Change equipment…" dialog for one Auto scope (#211). Exported so the
+ * workspace toolbar (#299) opens the very same dialog the panel does — the
+ * editor holds which scope is open and renders this once.
+ */
+export function ScopeRefillDialog({
+  projectId,
+  optionId,
+  scope,
+  scopeInputs,
+  auto,
+  placements,
+  onClose,
+  onChanged,
+  onError,
+}: {
+  projectId: string;
+  optionId: string;
+  scope: SysKey;
+  scopeInputs: QuickScopeInputs;
+  auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets };
+  placements?: ReadonlyArray<{ optionId?: string; auto?: unknown; autoOrigin?: unknown; qty?: number }>;
+  onClose: () => void;
+  onChanged: () => void;
+  onError: (msg: string) => void;
+}) {
+  return (
+    <RefillDialog
+      projectId={projectId}
+      optionId={optionId}
+      scope={scope}
+      inputs={scopeInputs}
+      estimate={auto.estimate}
+      initialCards={auto.cards}
+      keptUnits={Object.values(keptUnitsByRow(placements || [], [scope])).reduce((n, u) => n + u, 0)}
+      onClose={onClose}
+      onDone={() => {
+        onClose();
+        onChanged();
+      }}
+      onError={onError}
+    />
+  );
+}
+
+/** The Auto scopes a "Change equipment…" button is offered for: tracked
+ *  (toggled on, catalog-trackable) and chosen in the Auto intake. Same rule
+ *  as the panel's per-row button — the toolbar reads it too (#299). */
+export function refillableScopes(
+  scopeInputs: QuickScopeInputs | null,
+  auto: { estimate: AutoEstimate } | null
+): SysKey[] {
+  if (!scopeInputs || !auto) return [];
+  return SYS_ORDER.filter((k) => TRACKABLE_SYS_KEYS.includes(k) && scopeInputs.sys[k] && auto.estimate.tierByScope[k]);
+}
+
 export default function ScopePanel({
   projectId,
   scopeInputs,
@@ -150,6 +206,7 @@ export default function ScopePanel({
   defaultTier,
   onChanged,
   onError,
+  onRefill,
 }: {
   projectId: string;
   scopeInputs: QuickScopeInputs | null;
@@ -169,6 +226,9 @@ export default function ScopePanel({
   defaultTier?: TierKey;
   onChanged: () => void;
   onError: (msg: string) => void;
+  /** #299: the editor owns the open dialog (shared with the toolbar); when
+   *  given, the button calls this and the panel renders no dialog itself. */
+  onRefill?: (scope: SysKey) => void;
 }) {
   const [tierKey, setTierKey] = useState<TierKey>(defaultTier ?? "better");
   const [refill, setRefill] = useState<SysKey | null>(null);
@@ -311,7 +371,7 @@ export default function ScopePanel({
                     allowances={t?.allowances || 0}
                   />
                   {autoTier && scopeInputs && (
-                    <button type="button" onClick={() => setRefill(k)} style={{ ...BTN, justifySelf: "start", padding: "3px 9px", fontSize: 11 }}>
+                    <button type="button" onClick={() => (onRefill ? onRefill(k) : setRefill(k))} style={{ ...BTN, justifySelf: "start", padding: "3px 9px", fontSize: 11 }}>
                       Change equipment…
                     </button>
                   )}
@@ -331,20 +391,16 @@ export default function ScopePanel({
 
       {pending && <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 6 }}>Saving…</div>}
 
-      {refill && auto && scopeInputs && (
-        <RefillDialog
+      {refill && auto && scopeInputs && !onRefill && (
+        <ScopeRefillDialog
           projectId={projectId}
           optionId={optionId}
           scope={refill}
-          inputs={scopeInputs}
-          estimate={auto.estimate}
-          initialCards={auto.cards}
-          keptUnits={Object.values(keptUnitsByRow(placements || [], [refill])).reduce((n, u) => n + u, 0)}
+          scopeInputs={scopeInputs}
+          auto={auto}
+          placements={placements}
           onClose={() => setRefill(null)}
-          onDone={() => {
-            setRefill(null);
-            onChanged();
-          }}
+          onChanged={onChanged}
           onError={onError}
         />
       )}

@@ -197,7 +197,10 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
         panStart.current = null;
         setGrabbing(false);
       }}
-      style={{ overflow: "auto", background: "#6d7076", padding: 18, borderRadius: 10, display: "flex", justifyContent: "center", minHeight: 420, cursor: panCursor ?? undefined }}
+      // #299: fills the workspace's center pane (flex: 1 in its column). The
+      // sheet centres by its own auto margins, not justify-content — centred
+      // flex content that overflows is cut off on the left, past scrolling.
+      style={{ flex: 1, minHeight: 0, overflow: "auto", background: "#6d7076", padding: 18, display: "flex", justifyContent: sheet ? undefined : "center", cursor: panCursor ?? undefined }}
     >
       {!sheet ? (
         <div style={{ alignSelf: "center", color: "#e6e8ec", fontSize: 13.5, textAlign: "center", lineHeight: 1.6 }}>
@@ -231,6 +234,11 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
           }}
           style={{
             position: "relative",
+            // Auto margins centre the sheet when it is smaller than the box
+            // and stop it stretching to the box's height (the overlay and
+            // toNorm read this box's size — it must be exactly the sheet).
+            margin: "auto",
+            flex: "0 0 auto",
             lineHeight: 0,
             cursor:
               panCursor ??
@@ -247,7 +255,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
           }}
         >
           {isPdf ? (
-            <PdfCanvas dataUrl={sheet.dataUrl} page={page} zoom={zoom} onLoaded={onLoaded} onSize={onSize} />
+            <PdfCanvas key={sheet.id} dataUrl={sheet.dataUrl} page={page} zoom={zoom} onLoaded={onLoaded} onSize={onSize} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img

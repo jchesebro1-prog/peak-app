@@ -38,6 +38,7 @@ import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
 import type { GridLaborLine } from "@/lib/design/wire-labor";
 import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import { optionSlice } from "@/lib/design/grid-options";
+import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
 import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import type { ScopeTargets, ScopeTargetsByTier } from "@/lib/design/scope-targets";
@@ -49,11 +50,14 @@ import {
   addSpaceAction,
   calibrateAction,
   createDraftQuoteAction,
+  deleteProjectAction,
   movePlacementAction,
   placeCurtainAction,
   placeDeviceAction,
+  removePlacementAction,
   setPlacementCategoryAction,
   setSymbolLookAction,
+  setVenueAction,
   linkLinesetDesignAction,
   createClientPackageAction,
 } from "./actions";
@@ -62,7 +66,8 @@ import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type Dev
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
-import { activeTool, fitZoom, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
+import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
+import type { SysKey } from "@/app/(app)/design/quick/engine";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -279,6 +284,15 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [size, setSize] = useState({ w: 900, h: 1200 });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** The status bar's "Last action" (#299) — what the last successful edit
+   *  did, in words. View state only; never persisted. */
+  const [lastAction, setLastAction] = useState<string | null>(null);
+  const noteAction = useCallback((text: string) => setLastAction(text), []);
+  /** Plan view / Spreadsheet view under the canvas (#299). */
+  const [view, setView] = useState<"plan" | "sheet">("plan");
+  /** The Auto scope whose "Change equipment…" dialog is open — one state
+   *  for the Scope panel's button and the toolbar's (#299). */
+  const [refillScope, setRefillScope] = useState<SysKey | null>(null);
   const [linesetBusy, setLinesetBusy] = useState(false);
   const [packageBusy, setPackageBusy] = useState(false);
   const [packageUrl, setPackageUrl] = useState<string | null>(null);
@@ -291,7 +305,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     const result = await linkLinesetDesignAction(project.id, designId || null);
     setLinesetBusy(false);
     if (!result.ok) setErr(result.error);
-    else router.refresh();
+    else {
+      noteAction(designId ? "Linked a lineset design" : "Unlinked the lineset design");
+      router.refresh();
+    }
   }
 
   async function buildClientPackage() {
@@ -305,6 +322,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       setPackageUrl(result.url);
       setPackageGapCount(result.gapCount);
       setPackageUnreadable(result.cutSheetsUnreadable);
+      noteAction("Built the client package");
     }
   }
 
@@ -385,6 +403,20 @@ function useGridEditorImpl(props: GridEditorProps) {
   const lookOf = useCallback(
     (part: PartLite | null | undefined): SymbolLook => (part && lookById.get(part.id)) || symbolLook(part, symbolCtx),
     [lookById, symbolCtx]
+  );
+  /** How the status bar names a part / a placement: the part number (a
+   *  virtual Auto part by its description, as the BOM does). */
+  const partLabel = useCallback(
+    (partId: string) => {
+      const p = partById.get(partId);
+      return p?.virtual ? p.desc : partId;
+    },
+    [partById]
+  );
+  const placementLabel = useCallback(
+    (pl: GridPlacement) =>
+      pl.curtain ? pl.curtain.name : isSeedPlaceholder(pl.partId) ? pl.category || "device" : partLabel(pl.partId),
+    [partLabel]
   );
   /* ------------------------- scopes + layers (#48) ------------------------- */
 
@@ -604,6 +636,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     } else {
       setIncompleteQuote(null);
       setTierFallbackLines(r.fallbackLines);
+      noteAction(activeOption.quoteId ? "Updated the draft quote" : "Created a draft quote");
       router.refresh();
     }
   };
@@ -703,10 +736,11 @@ function useGridEditorImpl(props: GridEditorProps) {
           });
           return;
         }
+        noteAction(`Moved ${placementLabel(server)}`);
         router.refresh();
       });
     },
-    [project.id, placements, router]
+    [project.id, placements, router, noteAction, placementLabel]
   );
 
   // Arrow-key nudge for the selected device (punch #47). Bound to the window
@@ -793,7 +827,12 @@ function useGridEditorImpl(props: GridEditorProps) {
     const box = scrollRef.current;
     if (!box) return;
     const rendered = isPdf ? size : { w: Math.round(900 * zoom), h: Math.round(900 * zoom) * aspect };
-    setZoom(fitZoom({ w: box.clientWidth - 24, h: box.clientHeight - 24 }, rendered, zoom));
+    // clientWidth/Height include the box's own padding (18px a side today) —
+    // subtract what is actually there, so Fit never leaves a scrollbar.
+    const cs = window.getComputedStyle(box);
+    const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    setZoom(fitZoom({ w: box.clientWidth - padX, h: box.clientHeight - padY }, rendered, zoom));
   }, [isPdf, size, zoom, aspect]);
 
   // Auto-fit once per sheet (#299): the first time a sheet's size is known
@@ -859,6 +898,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     }
     setActiveSheetId(r.sheetId);
     setPage(1);
+    noteAction(`Uploaded ${file.name}`);
     router.refresh();
   }
 
@@ -878,7 +918,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     }).then((r) => {
       setBusy(false);
       if (!r.ok) setErr(r.error);
-      else router.refresh();
+      else {
+        noteAction(`Placed ${partLabel(partId)}`);
+        router.refresh();
+      }
     });
   }
 
@@ -974,7 +1017,10 @@ function useGridEditorImpl(props: GridEditorProps) {
         }).then((r) => {
           setBusy(false);
           if (!r.ok) setErr(r.error);
-          else router.refresh();
+          else {
+            noteAction(`Drew a ${partLabel(wirePartId)} run`);
+            router.refresh();
+          }
         });
         return;
       }
@@ -1088,7 +1134,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     setBusy(false);
     setCategoryDraft(null);
     if (!r.ok) setErr(r.error);
-    else router.refresh();
+    else {
+      noteAction(label.trim() ? `Set category ${label.trim()}` : "Cleared a category");
+      router.refresh();
+    }
   }
 
   /** Persist a catalog ENTRY's icon/colour override (#131 → stock symbols).
@@ -1098,7 +1147,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     const r = await setSymbolLookAction(project.id, symbolId, patch);
     setBusy(false);
     if (!r.ok) setErr(r.error);
-    else router.refresh();
+    else {
+      noteAction(`Changed the ${partLabel(symbolId)} symbol`);
+      router.refresh();
+    }
   }
 
   /** Persist a dropped curtain (punch #49). The server re-validates every
@@ -1118,7 +1170,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     setBusy(false);
     setCurtainAt(null);
     if (!r.ok) setErr(r.error);
-    else router.refresh();
+    else {
+      noteAction(`Placed curtain ${curtain.name}`);
+      router.refresh();
+    }
   }
 
   async function confirmSpace() {
@@ -1140,7 +1195,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     setSpaceDraft([]);
     setEntry("");
     if (!r.ok) setErr(r.error);
-    else router.refresh();
+    else {
+      noteAction(`Added space ${name}`);
+      router.refresh();
+    }
   }
 
   async function confirmCalibration() {
@@ -1163,7 +1221,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     setPending(null);
     setEntry("");
     if (!r.ok) setErr(r.error);
-    else router.refresh();
+    else {
+      noteAction(`Calibrated page ${page}`);
+      router.refresh();
+    }
   }
 
   /* ------------------------------ tool model (#299) ------------------------------ */
@@ -1192,6 +1253,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         setErr("Pick a wire type in the Wires tab first.");
         return;
       }
+      // An unmeasured wire is a lie in a BOM — the Wires panel already
+      // disables its button on an uncalibrated page; W and the toolbar agree.
+      if (t === "wire" && !cal) {
+        setErr("Calibrate this page before drawing wire.");
+        return;
+      }
       if (t !== "select" && t !== "pan") {
         setSelected(null);
         setSelectedSpaceId(null);
@@ -1204,7 +1271,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (t === "calibrate") setCalibrating(true);
       if (t === "pan") setPanning(true);
     },
-    [clearModes, wirePartId]
+    [clearModes, wirePartId, cal]
   );
 
   /** Back to select with nothing selected — what un-arming a palette part or
@@ -1239,6 +1306,131 @@ function useGridEditorImpl(props: GridEditorProps) {
     },
     [hiddenSet]
   );
+
+  /* --------------------------- workspace shell (#299) --------------------------- */
+
+  /** Drop every per-sheet/per-page gesture — what the old sheet <select> and
+   *  page ‹ › buttons each did inline before switching. */
+  const resetSheetState = useCallback(() => {
+    setSelected(null);
+    setPending(null);
+    setSpaceDrawing(false);
+    setSpaceDraft([]);
+    setSelectedSpaceId(null);
+    setWireDrawing(false);
+    setWireDraft([]);
+    setSelectedRouteId(null);
+    setCurtainAt(null);
+    setCategoryDraft(null);
+  }, []);
+
+  /** Sheet tabs: switch the visible sheet (was the header's sheet <select>). */
+  const switchSheet = useCallback(
+    (id: string) => {
+      setActiveSheetId(id);
+      setPage(1);
+      resetSheetState();
+    },
+    [resetSheetState]
+  );
+
+  /** PDF page ‹ › (was the header's page buttons). */
+  const goToPage = useCallback(
+    (n: number) => {
+      const next = Math.min(Math.max(1, n), pages);
+      if (next === page) return;
+      setPage(next);
+      resetSheetState();
+    },
+    [page, pages, resetSheetState]
+  );
+
+  /** Zoom from the toolbar's % field — clamped, rounded to whole percent. */
+  const applyZoom = useCallback((z: number) => {
+    if (!Number.isFinite(z) || z <= 0) return;
+    setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100)));
+  }, []);
+
+  /** Venue picker (was the header's venue <select>) — stamped onto the quote. */
+  async function setVenue(siteId: string) {
+    setBusy(true);
+    const r = await setVenueAction(project.id, siteId);
+    setBusy(false);
+    if (!r.ok) setErr(r.error);
+    else {
+      noteAction(siteId ? `Set venue ${venues.find((v) => v.id === siteId)?.name ?? ""}`.trim() : "Cleared the venue");
+      router.refresh();
+    }
+  }
+
+  /** Delete design, second step of the two-step arm/confirm. */
+  async function deleteDesign() {
+    setBusy(true);
+    const r = await deleteProjectAction(project.id);
+    setBusy(false);
+    if (!r.ok) {
+      setErr(r.error);
+      setArmDelete(false);
+      return;
+    }
+    router.push("/design/designs");
+  }
+
+  /** Remove one placement — the selected-device Remove button, the toolbar
+   *  Delete and the Delete/Backspace key all land here. */
+  const removePlacement = useCallback(
+    async (placementId: string) => {
+      const target = placements.find((pl) => pl.id === placementId);
+      setBusy(true);
+      const r = await removePlacementAction(project.id, placementId);
+      setBusy(false);
+      setSelected(null);
+      if (!r.ok) setErr(r.error);
+      else {
+        noteAction(`Removed ${target ? placementLabel(target) : "a device"}`);
+        router.refresh();
+      }
+    },
+    [placements, project.id, router, noteAction, placementLabel]
+  );
+
+  // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
+  // select with nothing selected, Delete/Backspace removes the selected
+  // device. Same guards as the arrow-key nudge: never while typing, never
+  // under a dialog or a data-no-nudge element, never with a modifier.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      if (t?.closest('[role="dialog"], [data-no-nudge]')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Escape") {
+        disarm();
+        return;
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (!selectedPlacement || busy || drag) return;
+        e.preventDefault();
+        removePlacement(selectedPlacement.id);
+        return;
+      }
+      if (e.repeat) return;
+      const next = TOOL_KEYS[e.key.toLowerCase()];
+      if (!next) return;
+      if (next === "place") {
+        // P re-enters Place only while a part is armed (pick one in the Library).
+        if (armedPartId) enterTool("place", { partId: armedPartId });
+        return;
+      }
+      if (!sheet && next !== "select") return;
+      enterTool(next);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [disarm, enterTool, removePlacement, selectedPlacement, busy, drag, armedPartId, sheet]);
+
   return {
     router,
     project,
@@ -1422,6 +1614,18 @@ function useGridEditorImpl(props: GridEditorProps) {
     disarm,
     zoomIn,
     zoomOut,
+    lastAction,
+    noteAction,
+    view,
+    setView,
+    refillScope,
+    setRefillScope,
+    switchSheet,
+    goToPage,
+    applyZoom,
+    setVenue,
+    deleteDesign,
+    removePlacement,
   };
 }
 

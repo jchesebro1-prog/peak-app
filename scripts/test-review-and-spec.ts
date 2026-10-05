@@ -1013,10 +1013,16 @@ const gridUploadRoute = readFileSync(
   join(process.cwd(), "src/app/api/grid-sheets/upload/route.ts"),
   "utf8"
 );
+// #299: the editor's shell (toolbar, sheet tabs, menus, status bar) lives in
+// grid/[id]/workspace/*.tsx — scanned alongside the editor wherever a moved
+// string is asserted.
+const gridWorkspaceSource = ["grid-workspace", "pane", "toolbar", "menu", "sheet-tabs", "status-bar", "icons"]
+  .map((w) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/workspace/${w}.tsx`), "utf8"))
+  .join("\n");
 const gridEditorSource = readFileSync(
   join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"),
   "utf8"
-) + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8");
+) + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") + gridWorkspaceSource;
 ok(
   !/NextResponse\.json\(\s*\{[^}]*blobPath/.test(gridUploadRoute),
   "#146 the plan-sheet upload route never hands a blobPath back to the browser"
@@ -5070,7 +5076,7 @@ async function xlsxFixture(): Promise<Buffer> {
     const gate = body.indexOf('if (!can("create", user.roles)) return { ok: false, error: "You can');
     ok(gate > 0 && gate < body.indexOf(store) && gate < body.indexOf("updateDesign("), `#244 review: ${name} refuses without the create permission before any write`);
   }
-  ok(g244Read("src/app/(app)/design/grid/[id]/editor.tsx").includes("canEdit={canCreate}"), "#244 review: the editor header only offers rename / re-link to people who can create designs");
+  ok(g244Read("src/app/(app)/design/grid/[id]/workspace/toolbar.tsx").includes("canEdit={canCreate}"), "#244 review: the editor header only offers rename / re-link to people who can create designs");
   ok(g244Read("src/app/(app)/design/grid/[id]/design-identity.tsx").includes("onFocus={(e) => e.currentTarget.select()}"), "#244 review: opening the title rename selects the old title, so typing replaces it");
   const g244Sites = [{ id: "site-1", legacyLocId: "loc1" }, { id: "site-2", legacyLocId: null }];
   ok(pickedVenueMissing({ locationMode: "pick", locationId: "loc-gone" }, g244Sites) && pickedVenueMissing({ locationMode: "pick", locationId: "loc1" }, []),
@@ -5552,7 +5558,7 @@ import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib
   for (const rel of symClientFiles) {
     // #299: the editor's state moved to use-grid-editor.ts — scan both under the editor's entry.
     const src = readFileSync(join(process.cwd(), rel), "utf8") +
-      (rel.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") : "");
+      (rel.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") + gridWorkspaceSource : "");
     const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
     ok(valueImports.length === 0, `#206: ${rel} imports no VALUE from @/lib/stores or @/db${valueImports.length ? ` (found: ${String(valueImports[0]).slice(0, 80)})` : ""}`);
   }
@@ -22685,7 +22691,7 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
   for (const f of mirrors227) {
     // #299: the Grid editor's logic moved to use-grid-editor.ts — scanned under the editor's entry.
     const s = readFileSync(join(process.cwd(), f), "utf8") +
-      (f.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") : "");
+      (f.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") + gridWorkspaceSource : "");
     ok(!/makingRate|MAKING_RATE|sellCoeffs|SellCoeffs|makingPerFt|curtainCoeffs/.test(s), `#227: ${f} carries no making term or sell coefficients`);
     if (f !== "src/lib/design/curtain-pricing.ts") ok(!/curtainAreaRate\s*\?\?|SEED_FABRIC_RATES\[/.test(s), `#227: ${f} resolves a fabric rate only through fabricAreaRateOf`);
   }
@@ -33733,7 +33739,7 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
     "src/app/(app)/design/grid/[id]/editor.tsx",
   ]) {
     // #299: the editor's state moved to use-grid-editor.ts (also "use client") — scanned under the editor's entry.
-    const s = src(f) + (f.endsWith("/grid/[id]/editor.tsx") ? src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + src("src/app/(app)/design/grid/[id]/plan-canvas.tsx") : "");
+    const s = src(f) + (f.endsWith("/grid/[id]/editor.tsx") ? src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + src("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource : "");
     const bad = [...s.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
     ok(s.startsWith('"use client"') && bad.length === 0, `spec pickers: ${f} is a client file with no store/db value imports (${bad.join(", ") || "none"})`);
   }
@@ -46936,7 +46942,7 @@ import { curtainDesc as f292CurtainDesc } from "@/lib/design/grid-bom";
   ok(rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{editing && curtainCostKept(draft) && ("), "#292 final #9: the modal's kept-cost hint reads curtainCostKept");
 
   // #10 the Grid editor shows the unreadable curtains
-  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource;
   ok(f292Note(1) === "1 curtain couldn't be read for cut sheets — edit it, then rebuild" && f292Note(3).startsWith("3 curtains couldn't")
     && ed.includes("setPackageUnreadable(result.cutSheetsUnreadable)") && ed.includes("cutSheetsUnreadableNote(packageUnreadable.length)"),
     "#292 final #10: the Grid editor's package result names how many curtains the cut sheets couldn't read");
