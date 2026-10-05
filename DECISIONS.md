@@ -9127,3 +9127,94 @@ all of them) and sets its **forecast to the sum of its manufacturers' forecasts*
 so the card's forecast always equals its rows added up. A card row links to the manufacturer's page only when that page
 exists (a line's own manufacturer text with no catalog part and no record would 404). Analytics are read-only and write
 nothing.
+
+## D595. A fixed docked shell, not a docking library (#299, 2026-10-04)
+
+The Grid editor (`/design/grid/[id]`) is one full-window CSS grid under the app nav: a toolbar, a left pane (Property
+Editor, System Status, Targets), the plan canvas with sheet tabs, a right pane (Browser tree and tabs), a bottom Product
+Library and a status bar. The left, right and bottom panes are resizable and collapsible, and each viewer's sizes and
+collapsed state live in that browser's `localStorage` (try/catch; defaults when it is unavailable). Below 1100 px the side
+panes start collapsed. Jeff picked "a fixed docked shell around the existing components" over a floating docking library or
+a restyle only (Approach A): panes cannot be dragged to new places, which keeps the layout predictable and adds no
+dependency. The ~2,500-line `editor.tsx` is split — `use-grid-editor.ts` owns all editor state and handlers,
+`plan-canvas.tsx` holds the SVG and pointer logic, and `workspace/*` holds the panes. The pure layout rules are in
+`src/lib/design/grid-workspace-layout.ts`.
+
+## D596. One tool at a time (#299, 2026-10-04)
+
+The editor has one active tool — select, place a part, curtain, calibrate, space, wire, delete — and `enterTool` clears
+every other mode when a tool starts. That fixes the old bug where arming a part left calibrate switched on. Entering a tool
+also switches back to Plan view (every entry point — library, right pane, status bar, Property Editor — goes through it),
+and Wire refuses on a page that is not calibrated, with a message, because a route's length means nothing without a scale
+(the same rule the wire panel already had). The pure rules are `src/lib/design/grid-tools.ts`.
+
+## D597. Selection and bulk edits (#299, 2026-10-04)
+
+Selection is a set of placement ids (click, shift-click, marquee). The bulk edits are exactly **Set category**, **Replace
+part** and **Delete**: a device's layer, scope and space are computed from its part and its position, never stored, so
+there is nothing else to set in bulk. Actions apply to the visible selected devices only — a device on a hidden layer or
+scope is never edited behind the user's back. Clicking and releasing on one device of a multi-selection narrows the
+selection to it (the Figma convention; a drag moves the whole group). Deleting several devices has no confirm on the key or
+the toolbar because undo is the safety net (D599); the "Delete n" button in the Property Editor does confirm. Align and
+distribute are pure rules in `src/lib/design/grid-align.ts`; selection rules are in `grid-selection.ts`.
+
+## D598. Batched actions (#299, 2026-10-04)
+
+Multi-device edits are six server actions — `movePlacementsAction`, `removePlacementsAction`,
+`setPlacementsCategoryAction`, `replacePlacementsPartAction`, `pastePlacementsAction`, `restoreItemsAction` — each one
+`patchDoc`, all-or-nothing: the batch is checked on a read first and re-checked inside the mutate, which narrows but does not
+eliminate last-write-wins races (`patchDoc` still has no version check, as before). A payload carries at most 2,000 items
+and at most 200 distinct part ids. A placeable part id is a Grid-library part, an Auto `asm:`/`allow:` virtual or a
+`grid-seed:` placeholder; a dead virtual still refuses at quote time (#211), not at placement. The single-item actions stay
+for their other callers; `placeDeviceAction` and `placeCurtainAction` now also return the new `placement` so undo can record
+it.
+
+## D599. Undo and redo (#299, 2026-10-04)
+
+Undo is client-side, per browser tab, capped at 100 entries (`src/lib/design/grid-undo.ts`). Every placement edit is
+recorded once: moves (drag, nudge, align, distribute), place, curtain drop, paste, duplicate, delete, cut, set category and
+replace part. Undo replays through the same batched actions, so a refusal shows "Couldn't undo — the design changed." and
+clears the stack, while a thrown network error keeps it. Actions that are not undoable — Auto fill and Change equipment,
+sheet upload and delete, calibration, option add / rename / delete, space and wire edits, revision restore — clear the stack
+and say "not undoable; use Revisions". Switching option keeps the stack. Undoing a move or a part swap does not restore the
+`auto` tag (a hand edit is a hand edit), but undoing a part swap does restore a lot's qty. Undoing a paste removes the
+pasted devices and leaves the pasted wires, since they are no longer attached to anything copied. Every nudge is written
+and undoable; the no-op filter was removed because a stale saved position must not swallow a requested move.
+
+## D600. Snap to grid is a viewer option (#299, 2026-10-04)
+
+A toolbar toggle, off by default, remembered per viewer in `localStorage`. Spacings are 6", 1', 2' and 5' on a calibrated
+page and 1 % of the sheet on one that is not (`src/lib/design/grid-snap.ts`). A spacing too fine or too coarse for the
+current zoom switches snap off with a status message. Snapping is applied on the client to place, drop, drag, nudge and paste;
+what is stored is unchanged — a plain position — so nothing about snap is in the data or the quote. The dot grid is hidden
+when its dots would be under 6 px apart.
+
+## D601. The clipboard (#299, 2026-10-04)
+
+Copy and cut fill an in-memory clipboard, per tab, that survives sheet and option switches (`grid-clipboard.ts`). Paste
+re-validates curtains through the shared `checkCurtainInput` (`grid-curtain-input.ts`) and refuses sheets or options that
+are gone. Wires are copied only when both of their ends are copied, and are pasted only onto the same sheet and page, which
+must be calibrated; a cut then paste drops the wires, because the source devices no longer exist, and the result says how
+many were skipped. Duplicate does not touch the clipboard. Toolbar Paste lands in place after a cut and one step offset
+after a copy. Restore (the undo of a delete) keeps the record's own `by`, `at` and `auto` after sanitizing, and refuses
+deleted sheets or options and stale ids, with the riser keys limited to live options.
+
+## D602. The Spreadsheet view reuses the schedule builder (#299, 2026-10-04)
+
+The center pane's Spreadsheet view is built on the server with the schedule page's own builder (`scheduleForOption`,
+wrapped in `src/lib/design/grid-schedule-server.ts`) over only the catalog parts the option uses (`catalogForSchedule`),
+which keeps it byte-identical to `/design/grid/<id>/schedule` while reading far less. A failed build shows a message in the
+pane and never an empty schedule that looks like "no devices".
+
+## D603. No "Auto fill…" for Blank designs (#299, 2026-10-04)
+
+The spec's toolbar has an "Auto fill…" button that would also work on a Blank design. It is **not built**: the refill flow
+(`refillScopeAction`) refuses a scope that is not Auto, so Blank would need a new server action. Blank designs still open on
+the auto-generated base sheet, as they have since #249. Question for Jeff: should a Blank design be able to Auto fill?
+
+## D604. The Product Library (#299, 2026-10-04)
+
+The bottom pane is a library with Favorites, Recent and All, a scope → device-type tree, Assemblies and Curtains
+(`grid-library.ts`), and numbered symbol tiles. Clicking a tile arms painter mode — click again or press Esc to stop; the
+old "Done" button is gone — and dragging a tile onto the plan places once. **+ Build assembly** appears on every category,
+because the Assemblies node hides when a design has none and the button could not live only there.

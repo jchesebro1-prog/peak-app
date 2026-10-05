@@ -1,6 +1,8 @@
 # The Grid — DaVinci-style workspace (#299) — design
 
-**Date:** 2026-10-04 · **Punch:** #299 · **Decisions:** D595– · **Approved by:** Jeff (2026-10-04, in session)
+**Status:** Shipped 2026-10-04 (D595–D604).
+
+**Date:** 2026-10-04 · **Punch:** #299 · **Decisions:** D595–D604 · **Approved by:** Jeff (2026-10-04, in session)
 
 ## Ask
 

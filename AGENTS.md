@@ -694,5 +694,25 @@ See `.env.example`.
     the list and the vendor Overview (forecast = sum of its manufacturers').
     Remaining is Jeff-gated: merge spellings, link companies/reps. Punch item #298.
 
+38. ✅ **The Grid workspace** (#299, D595–D604) — `/design/grid/[id]` is a full-window
+    DaVinci-style docked workspace: icon toolbar, a left pane (Property Editor,
+    System Status, Placed vs. target), the plan canvas with sheet tabs and a
+    Plan / Spreadsheet toggle (the schedule's own builder), a right pane (Browser
+    tree, Layers, Spaces, Wires, BOM, Revisions), a bottom Product Library of
+    numbered symbol tiles (Favorites / Recent / scope → device type /
+    Assemblies / Curtains) and a status bar; side and bottom panes resize and
+    collapse per viewer (`localStorage`). `editor.tsx` became `use-grid-editor.ts`
+    (state, one active tool), `plan-canvas.tsx` and `workspace/*`; the rules are
+    pure modules in `src/lib/design/` (`grid-workspace-layout`, `grid-tools`,
+    `grid-selection`, `grid-align`, `grid-snap`, `grid-clipboard`, `grid-undo`,
+    `grid-library`, `grid-browser-tree`, `grid-system-status`). Multi-select
+    (click / shift / marquee), align / distribute, bulk Set category / Replace
+    part / Delete, copy / cut / paste / duplicate, snap to grid (off by default)
+    and 100-deep client-side undo / redo go through six batched all-or-nothing
+    actions (`movePlacementsAction` … `restoreItemsAction`, one `patchDoc` each).
+    No migration. Remaining is Jeff-gated: whether a Blank design gets "Auto
+    fill…" (D603), and trying it on a real Auto-filled, large design on a
+    preview deploy. Punch item #299.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

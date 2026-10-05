@@ -10636,3 +10636,47 @@ aliases' `mergedInto`, or the target's `aliasKeys`), but that record's people, n
 spelling's image is its own record's (a target that adopted it keeps the copy). The manufacturer page route and the
 Quoted columns / vendor card disappear; the list rows lose their link. Vendor claims made from the page are ordinary
 vendor-profile claims and stay. Nothing throws.
+
+## 299. Design — The Grid as a DaVinci-style workspace (docked panes, Product Library, Property Editor, Browser tree, multi-select, snap, copy/paste, undo) — DONE 2026-10-04 (D595–D604)
+
+**Reported by Jeff 2026-10-04:** a screenshot of ETC's DaVinci System Designer and "How do we make The Grid look closer to
+this?" Jeff's choices in the design session: borrow all four ideas (full-window docked layout, Product Library tiles,
+Property Editor + Browser tree, icon toolbar + status bar); keep our canvas and its logic (the Auto / Blank intake,
+venue-template base sheets, Auto fill, Change equipment); a fixed docked shell around the existing components; Placed vs.
+target on the left under System Status; multi-select, copy/paste/duplicate, align/distribute and undo/redo in this project;
+snap to grid as an option, off by default. Spec: `docs/superpowers/specs/2026-10-04-grid-davinci-workspace-design.md`;
+plan alongside it under `docs/superpowers/plans/`. No migration, no schema change; no new dependencies.
+
+What shipped, in six slices:
+- **Slice 1 — the shell.** `/design/grid/[id]` is a full-window docked workspace (D595): icon toolbar with tooltips and
+  keyboard shortcuts, left / right / bottom panes that resize and collapse (per-viewer `localStorage`), sheet tabs, a status
+  bar. `editor.tsx` is split into `use-grid-editor.ts` (all state and handlers), `plan-canvas.tsx` (the SVG and pointer
+  logic, moved unchanged) and `workspace/*`. One tool is active at a time (D596).
+- **Slice 2 — Product Library.** The bottom pane: Favorites / Recent / All, a scope → device-type tree, Assemblies and
+  Curtains, numbered symbol tiles; click arms the painter, drag places once; "+ Build assembly" on every category (D604).
+- **Slice 3 — Property Editor, System Status, Targets, Browser tree.** The left pane shows the selected device (or
+  space / wire), System Status rules and the Placed-vs-target card; the right pane's tabs hold the Browser tree, Layers,
+  Spaces, Wires, BOM and Revisions with their drafts kept mounted.
+- **Slice 4 — Spreadsheet view.** A Plan / Spreadsheet toggle; the sheet is the schedule page's own builder (D602).
+- **Slice 5 — Multi-select, bulk edits, snap.** Click / shift / marquee selection, group move, align and distribute, bulk
+  Set category / Replace part / Delete through the batched actions (D597, D598), and snap to grid (D600).
+- **Slice 6 — Clipboard and undo.** Copy, cut, paste and duplicate (D601); undo and redo, 100 deep per tab (D599).
+
+Gates (final head): tsc clean; test:specs ALL PASSED (baseline 11,963 PASS); eslint 0 errors on the grid directories;
+every slice checked in the browser on a scratch datadir at 1600x1000 and a narrow width. Not exercised: an Auto-filled design
+(the scratch database had none) and a multi-thousand-device design.
+
+**For Jeff.**
+1. **Question (D603):** should a Blank design get "Auto fill…"? It is not in the toolbar because the refill flow only works
+   on Auto designs and a Blank one would need a new server action. Blank designs still open on the auto-generated base
+   sheet.
+2. Try it on a **real Auto-filled design on a preview deploy** (a preview writes the production database, so work on a copy
+   you do not mind editing): select a few, drag, align, snap, copy/paste, delete and undo.
+3. Open one **multi-thousand-device design** and tell me if drag, marquee or the right-pane tabs feel slow; every tab body
+   re-renders during a drag today and that is the first thing to tune.
+
+**Rollback.** Safe: no migration, no schema change, nothing stored in a new shape. The six batched actions are unused by
+old code. `placeDeviceAction` and `placeCurtainAction` results gained a `placement` field that old clients ignore. The
+pane-size, collapsed, snap and tab `localStorage` keys are ignored by old code. A Grid design edited under the workspace
+reads and quotes identically on old code; the only thing lost on a rollback is the workspace itself, and undo history, which
+was never stored.
