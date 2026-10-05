@@ -40,6 +40,7 @@ import { CanMapProvider } from "@/components/design/equipment-map-link";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { systemMatchKeys } from "@/lib/specs/records";
+import { scheduleForOption } from "@/lib/design/grid-schedule-server";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 
@@ -237,6 +238,11 @@ export default async function GridEditorPage({
   });
   const laborLines = built?.ok ? built.build.labor : [];
 
+  // #299: the Spreadsheet view — the active option's equipment schedule,
+  // built by the /schedule page's own helper over this request's reads
+  // (catalog fallback + virtual parts + riser view), so the two never differ.
+  const schedule = await scheduleForOption(project, activeOptionId, { catalog, gridSymbols, settings, deviceTypes, equip: equipLoaded });
+
   // #223 — each option's draft quote by its estimate number.
   const quoteNumbers = Object.fromEntries(await quoteNumbersFor((project.options || []).map((o) => o.quoteId)));
 
@@ -285,6 +291,7 @@ export default async function GridEditorPage({
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
       customLines={customLines}
       laborLines={laborLines}
+      schedule={schedule}
       deviceTypes={deviceTypes.types}
       favorites={favorites}
       recent={recent}

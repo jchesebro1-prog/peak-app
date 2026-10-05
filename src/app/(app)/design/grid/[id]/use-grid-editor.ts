@@ -70,6 +70,7 @@ import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
 import type { SysKey } from "@/app/(app)/design/quick/engine";
 import { paletteView } from "@/lib/design/grid-palette";
+import type { ScheduleData } from "@/lib/design/grid-schedule";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -215,6 +216,9 @@ export type GridEditorProps = {
   /** #226: this user's starred parts and last-placed parts (newest first). */
   favorites: string[];
   recent: string[];
+  /** #299: the active option's equipment schedule for the Spreadsheet view,
+   *  built server-side by scheduleForOption — the /schedule page's own helper. */
+  schedule: ScheduleData;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -238,6 +242,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     laborLines,
     deviceTypes,
     recent,
+    schedule,
   } = props;
   const router = useRouter();
   const pathname = usePathname();
@@ -769,6 +774,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   // while any drawing mode owns the canvas.
   useEffect(() => {
     if (!selectedPlacement) return;
+    // #299: the plan is hidden in Spreadsheet view — nothing to nudge there.
+    if (view !== "plan") return;
     if (pending || curtainAt || calDraft || drag || spaceDrawing || wireDrawing) return;
     const onKey = (e: KeyboardEvent) => {
       // A dialog (e.g. the IconPicker) that already handled this key — or
@@ -811,6 +818,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     drag,
     spaceDrawing,
     wireDrawing,
+    view,
   ]);
 
   // A pending nudge must not outlive the editor.
@@ -1433,6 +1441,9 @@ function useGridEditorImpl(props: GridEditorProps) {
         disarm();
         return;
       }
+      // #299: Spreadsheet view hides the plan — the tool keys and Delete
+      // would act on a plan nobody can see. Escape (above) still clears.
+      if (view !== "plan") return;
       if (e.key === "Delete" || e.key === "Backspace") {
         if (!selectedPlacement || busy || drag) return;
         e.preventDefault();
@@ -1452,7 +1463,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removePlacement, selectedPlacement, busy, drag, armedPartId, sheet]);
+  }, [disarm, enterTool, removePlacement, selectedPlacement, busy, drag, armedPartId, sheet, view]);
 
   return {
     router,
@@ -1644,6 +1655,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     noteAction,
     view,
     setView,
+    schedule,
     refillScope,
     setRefillScope,
     switchSheet,

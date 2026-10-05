@@ -4,7 +4,8 @@ import { useGridEditor, type GridEditorProps } from "./use-grid-editor";
 import PlanCanvas from "./plan-canvas";
 import GridWorkspace from "./workspace/grid-workspace";
 import Toolbar from "./workspace/toolbar";
-import SheetTabs, { SpreadsheetPlaceholder, ViewTabs } from "./workspace/sheet-tabs";
+import SheetTabs, { ViewTabs } from "./workspace/sheet-tabs";
+import SpreadsheetView from "./workspace/spreadsheet-view";
 import StatusBar from "./workspace/status-bar";
 import ProductLibrary from "./workspace/product-library";
 import PropertyEditor from "./workspace/property-editor";
@@ -43,7 +44,12 @@ export default function GridEditor(props: GridEditorProps) {
       center={
         <>
           <SheetTabs ed={ed} />
-          {ed.view === "plan" ? <PlanCanvas ed={ed} onDropPart={ed.placeAt} /> : <SpreadsheetPlaceholder />}
+          {/* The plan stays mounted while the Spreadsheet view shows, so the
+              PDF render, zoom and scroll survive the round trip. */}
+          <div style={{ display: ed.view === "plan" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0 }}>
+            <PlanCanvas ed={ed} onDropPart={ed.placeAt} />
+          </div>
+          {ed.view === "sheet" && <SpreadsheetView ed={ed} />}
           <ViewTabs ed={ed} />
         </>
       }

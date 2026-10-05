@@ -178,12 +178,3 @@ export function ViewTabs({ ed }: { ed: GridEditor }) {
     </div>
   );
 }
-
-/** Until the Spreadsheet view lands (Task 12). */
-export function SpreadsheetPlaceholder() {
-  return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#6d7076", color: "#e6e8ec", fontSize: 13 }}>
-      Spreadsheet view arrives with the Browser tree.
-    </div>
-  );
-}

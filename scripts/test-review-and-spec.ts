@@ -17692,7 +17692,8 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     "#209 set page: one sheet list, @page from the size table, the saved riser, the same ?option= resolution as riser/schedule");
   ok(gdsSetSrc.includes("<PrintButton") && !gdsSetSrc.includes("#b08d4a\"}") && gdsSetSrc.includes("resolveGeneralNotes(set, settings.gridStandardNotes)"),
     "#209 set page: printed with the existing PrintButton; general notes default to Grid Settings' standard notes");
-  const gdsSchedSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/schedule/page.tsx"), "utf8");
+  // #299: the schedule build moved into scheduleForOption (grid-schedule-server.ts), shared with the editor's Spreadsheet view.
+  const gdsSchedSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-schedule-server.ts"), "utf8");
   ok(gdsSchedSrc.includes("buildSchedule(") && gdsSchedSrc.includes("riserViewForOption("), "#209 schedule page: shares the set's schedule builder and lists RiserLinks");
   const gdsSmokeSrc = readFileSync(join(process.cwd(), "scripts/smoke-routes.ts"), "utf8");
   ok(gdsSmokeSrc.includes('"/design/grid/GRD-5001/set"') && gdsSmokeSrc.includes('"/design/grid/GRD-5001/set?size=d"'), "#209 smoke: the set route is covered at both sizes");
@@ -17729,7 +17730,7 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     "#209 scheduleWiresFromView: names each edge's ends from the view's nodes ('Unassigned' when the edge lands there)"
   );
   const gdsSetPageSrc2 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
-  const gdsSchedPageSrc2 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/schedule/page.tsx"), "utf8");
+  const gdsSchedPageSrc2 = readFileSync(join(process.cwd(), "src/lib/design/grid-schedule-server.ts"), "utf8"); // #299: moved with the schedule build
   ok(
     gdsSetPageSrc2.includes("scheduleWiresFromView(view)") && gdsSchedPageSrc2.includes("scheduleWiresFromView(view)"),
     "#209 scheduleWiresFromView: the set and schedule pages both call the one shared helper instead of duplicating the edge→name mapping"
@@ -18333,7 +18334,10 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   const refs = gemRefs6(est);
   ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#211 T6: overrideRefs names the SKUs and assemblies to load");
   const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
-  const pages6 = ["riser", "set", "schedule"].map((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8"));
+  // #299: the schedule page's build (incl. loadVirtualParts) moved into grid-schedule-server.ts.
+  const pages6 = ["riser", "set", "schedule"].map((d) =>
+    readFileSync(join(process.cwd(), d === "schedule" ? "src/lib/design/grid-schedule-server.ts" : `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8")
+  );
   ok(readFileSync(join(process.cwd(), "src/lib/design/grid-palette.ts"), "utf8").includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6 (moved by #226): the palette (grid-palette.ts) hides virtual parts; the quote, riser, set and schedule resolve them");
 }
 

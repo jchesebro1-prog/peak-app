@@ -4,16 +4,11 @@ import { getProject } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getSettings } from "@/lib/settings";
-import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
-import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
-import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
-import { gridPartsFrom } from "@/lib/design/grid-parts";
-import { loadVirtualParts } from "@/lib/stores/equipment-map";
+import { resolveOptionId } from "@/lib/design/grid-options";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
-import { symbolContext } from "@/lib/design/grid-icons";
-import { riserViewForOption } from "@/lib/design/grid-riser-view";
-import { buildSchedule, scheduleWiresFromView } from "@/lib/design/grid-schedule";
+import { scheduleForOption } from "@/lib/design/grid-schedule-server";
 import { PrintButton } from "@/components/letter/print-button";
+import ScheduleTable from "./schedule-table";
 
 export const metadata = { title: "Equipment schedule — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -48,55 +43,14 @@ export default async function SchedulePage({
 
   const optionId = resolveOptionId(project, requestedOption);
   const option = project.options!.find((o) => o.id === optionId)!;
-  const slice = optionSlice(project, optionId);
   const optionQuery = `?option=${encodeURIComponent(optionId)}`;
 
   const [catalog, gridSymbols, settings] = await Promise.all([listCatalog(), listGridSymbols(), getSettings()]);
   // #226: device types — the scope fix (Unscoped, not the old Lighting fallback).
   const deviceTypes = await loadDeviceTypeContext(catalog);
   const accent = settings.accent || "#b08d4a";
-  const parts = [
-    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
-    ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
-  ];
-  const partById = new Map(parts.map((p) => [p.id, p]));
-  const spaces = project.spaces || [];
-  const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings, deviceTypes.types) });
-  const { sections, wires, unitCount, wireFeet } = buildSchedule({
-    placements: slice.placements,
-    spaces,
-    descOf: (pid) => partById.get(pid)?.desc,
-    wires: scheduleWiresFromView(view),
-  });
-
-  const th: React.CSSProperties = {
-    textAlign: "left",
-    fontSize: "9pt",
-    letterSpacing: ".08em",
-    textTransform: "uppercase",
-    color: "#666",
-    borderBottom: "1.5px solid #1a1a1a",
-    padding: "3px 8px 5px 0",
-    fontFamily: "var(--font-ui), sans-serif",
-  };
-  const td: React.CSSProperties = {
-    padding: "5px 8px 5px 0",
-    borderBottom: "1px solid #e2e2e6",
-    fontSize: "11.5pt",
-    verticalAlign: "top",
-  };
-  const sectionHead: React.CSSProperties = {
-    fontFamily: "var(--font-ui), sans-serif",
-    fontSize: "10.5pt",
-    fontWeight: 700,
-    letterSpacing: ".04em",
-    textTransform: "uppercase",
-    color: "#1a1a1a",
-    borderBottom: `2px solid ${accent}`,
-    display: "inline-block",
-    paddingBottom: 1,
-    marginBottom: 6,
-  };
+  // #299: the editor's Spreadsheet view builds the same schedule through the same helper.
+  const schedule = await scheduleForOption(project, optionId, { catalog, gridSymbols, settings, deviceTypes });
 
   return (
     <div className="pk-content" style={{ padding: "26px 30px 64px" }}>
@@ -125,71 +79,7 @@ export default async function SchedulePage({
           </div>
         </div>
 
-        {sections.length === 0 && wires.length === 0 ? (
-          <p style={{ color: "#666" }}>Nothing on the plans yet.</p>
-        ) : (
-          <>
-            {sections.map((sec) => (
-              <div key={sec.key} style={{ marginBottom: 16 }}>
-                <div style={sectionHead}>{sec.name}</div>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...th, width: 54 }}>Qty</th>
-                      <th style={{ ...th, width: 150 }}>Part</th>
-                      <th style={th}>Description</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sec.rows.map((r) => (
-                      <tr key={r.partId}>
-                        <td style={td}>{r.qty}</td>
-                        <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.code || r.partId}</td>
-                        <td style={td}>{r.desc}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-
-            {wires.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={sectionHead}>Wire runs</div>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...th, width: 150 }}>Wire</th>
-                      <th style={th}>Run</th>
-                      <th style={{ ...th, width: 110 }}>Length</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {wires.map((e) => (
-                      <tr key={e.id}>
-                        <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{e.partId}</td>
-                        <td style={td}>{e.fromName} → {e.toName}</td>
-                        <td style={td}>{e.lengthFt !== null ? formatMeasure(e.lengthFt, e.unit as MeasureUnit) : "unmeasured"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div style={{ borderTop: "1.5px solid #1a1a1a", marginTop: 20, paddingTop: 8, fontSize: "10.5pt", color: "#444" }}>
-              <strong>{unitCount}</strong> unit{unitCount === 1 ? "" : "s"} across{" "}
-              <strong>{sections.length}</strong> area{sections.length === 1 ? "" : "s"}
-              {wireFeet.map((w) => (
-                <span key={w.partId}>
-                  {" · "}
-                  <strong>{Math.ceil(w.ft)} {w.unit}</strong> {w.partId}
-                  {w.unmeasured > 0 ? ` (+${w.unmeasured} unmeasured)` : ""}
-                </span>
-              ))}
-            </div>
-          </>
-        )}
+        <ScheduleTable schedule={schedule} accent={accent} />
       </div>
     </div>
   );
