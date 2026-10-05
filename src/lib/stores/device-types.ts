@@ -18,10 +18,12 @@ import {
   typeReviewRows,
   withRecent,
   withTypeIcons,
+  withTypeSymbol,
   type DeviceType,
   type DeviceTypeContext,
   type TypeMap,
 } from "@/lib/design/device-types";
+import { isDocumentId } from "@/lib/part-docs/types";
 
 /**
  * Grid device types store (#226). Four doc-store blobs, no table and no
@@ -50,6 +52,21 @@ export async function setDeviceTypeIcons(icons: Record<string, string | null>): 
   const next = withTypeIcons(await getDeviceTypes(), icons);
   await setBlob(DEVICE_TYPES_BLOB, { types: next });
   return next;
+}
+
+/** Grid Settings → Device types drawing slot (#300). `docId` null clears.
+ *  Refuses an unknown type key or a malformed document id; that the document
+ *  exists and is a `symbol` is the action's job. */
+export async function setDeviceTypeSymbol(
+  typeKey: string,
+  docId: string | null
+): Promise<{ ok: true; types: DeviceType[] } | { ok: false; error: string }> {
+  const types = await getDeviceTypes();
+  if (!types.some((t) => t.key === typeKey)) return { ok: false, error: "That device type no longer exists." };
+  if (docId !== null && !isDocumentId(docId)) return { ok: false, error: "Not a document id." };
+  const next = withTypeSymbol(types, typeKey, docId);
+  await setBlob(DEVICE_TYPES_BLOB, { types: next });
+  return { ok: true, types: next };
 }
 
 export async function getTypeMap(): Promise<TypeMap> {

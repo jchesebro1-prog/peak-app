@@ -10790,6 +10790,7 @@ seeded()
   .then(() => gridPasteAsyncChecks299())
   .then(() => gridSymbolDisplayAsyncChecks300())
   .then(() => partDocSymbolAsyncChecks300())
+  .then(() => objectSymbolAsyncChecks300())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -49836,7 +49837,7 @@ async function partDocSymbolAsyncChecks300(): Promise<void> {
   ok(sym.ok && sym.contentType === "image/svg+xml" && !pd300Check("datasheet", svgBytes).ok, "#300 drawings: a symbol takes SVG bytes; a datasheet still refuses them");
   ok(pd300UploadTypes.includes("image/svg+xml"), "#300 drawings: the upload token allows image/svg+xml (checkDocumentBytes is the authority)");
   const route = readFileSync(join(process.cwd(), "src/app/api/part-documents/[id]/route.ts"), "utf8");
-  ok(route.includes("sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'") && route.includes('contentType === "image/svg+xml"'),
+  ok(route.includes("sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'") && route.includes('contentType.startsWith("image/svg")'),
     "#300 drawings: the serve route sandboxes an image/svg+xml response (CSP sandbox, default-src 'none')");
 
   // The SVG write path: sanitized text to a NEW blob, original deleted, what was stripped recorded.
@@ -49865,4 +49866,78 @@ async function partDocSymbolAsyncChecks300(): Promise<void> {
   await pd300Attach(second.id, [sku], "Test");
   const live = (await pd300LinksFor([sku])).filter((l) => l.kind === "symbol").map((l) => l.documentId);
   ok(live.length === 1 && live[0] === second.id, "#300 drawings: attaching a second symbol to a part leaves only the second linked");
+}
+
+/* ======================================================================
+   #300 Task 6 — object symbol resolution (D609): part drawing → device-type
+   drawing → generic; device types carry a `symbolDocId`; symbolUrlsFor
+   builds the per-part URL map server-side for the parts in view.
+   ====================================================================== */
+import { resolveObjectSymbol as os300Resolve } from "@/lib/design/object-symbols";
+{
+  const A = "PD-aaaaaa111", B = "PD-bbbbbb222", C = "PD-cccccc333";
+  const U = (id: string) => `/api/part-documents/${encodeURIComponent(id)}`;
+  const both = os300Resolve({ partSymbol: A, typeSymbol: B });
+  ok(both.plan === U(A) && both.riser === U(A), "#300 symbols: the part's own drawing wins over its device type's");
+  const typed = os300Resolve({ typeSymbol: B });
+  ok(typed.plan === U(B) && typed.riser === U(B), "#300 symbols: a part with no drawing falls back to its device type's");
+  const ris = os300Resolve({ partSymbol: A, partRiser: C });
+  const risType = os300Resolve({ partRiser: C, typeSymbol: B });
+  ok(ris.plan === U(A) && ris.riser === U(C) && risType.plan === U(B) && risType.riser === U(C) && os300Resolve({ partSymbol: A }).riser === U(A),
+    "#300 symbols: the riser uses the part's riser drawing, else whatever the plan resolved to");
+  ok(JSON.stringify(os300Resolve({})) === "{}" && JSON.stringify(os300Resolve({ partSymbol: "javascript:x", typeSymbol: "../etc" })) === "{}",
+    "#300 symbols: nothing (or a malformed id) resolves to {} — the generic symbol draws");
+}
+
+async function objectSymbolAsyncChecks300(): Promise<void> {
+  const DT = await import("../src/lib/stores/device-types");
+  const { deviceTypesFrom } = await import("../src/lib/design/device-types");
+  const { symbolUrlsFor } = await import("../src/lib/design/object-symbols-server");
+  const PD = await import("../src/lib/stores/part-documents");
+  const { getDb } = await import("../src/db");
+  const { blobs } = await import("../src/db/doc-tables");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb();
+  const snap = await db.select().from(blobs).where(eq(blobs.id, "gridDeviceTypes"));
+  try {
+    await db.delete(blobs).where(eq(blobs.id, "gridDeviceTypes"));
+    const set = await DT.setDeviceTypeSymbol("speakers", "PD-spk300abc");
+    const read1 = (await DT.getDeviceTypes()).find((t) => t.key === "speakers")?.symbolDocId;
+    const bad = await DT.setDeviceTypeSymbol("speakers", "PD-../x");
+    const none = await DT.setDeviceTypeSymbol("no-such-type", "PD-spk300abc");
+    await DT.setDeviceTypeSymbol("speakers", null);
+    const read2 = (await DT.getDeviceTypes()).find((t) => t.key === "speakers");
+    ok(set.ok && read1 === "PD-spk300abc" && !bad.ok && !none.ok && !!read2 && read2.symbolDocId === undefined,
+      "#300 device types: setDeviceTypeSymbol sets, refuses a bad id or unknown type, and clears");
+    const cleaned = deviceTypesFrom([
+      { key: "speakers", label: "Speakers", scope: "Audio", order: 10, symbolDocId: "PD-spk300abc" },
+      { key: "amplifiers", label: "Amplifiers", scope: "Audio", order: 20, symbolDocId: "javascript:alert(1)" },
+    ]);
+    ok(cleaned.find((t) => t.key === "speakers")?.symbolDocId === "PD-spk300abc" && !("symbolDocId" in (cleaned.find((t) => t.key === "amplifiers") ?? {})),
+      "#300 device types: cleanType keeps a well-formed symbolDocId and drops a malformed one");
+
+    // symbolUrlsFor: own drawing, device-type drawing, neither.
+    const mk = (n: string) => PD.createDocument({ kind: "symbol", fileName: `${n}.svg`, contentType: "image/svg+xml", size: 100, blobKey: `part-docs/PD-fixture-${n}/${n}.svg`, sourceUrl: null, source: "upload", by: "Test" });
+    const ownDoc = await mk("os300own");
+    const typeDoc = await mk("os300type");
+    if (!ownDoc || !typeDoc) throw new Error("#300 symbols: fixture documents failed to create");
+    const skuOwn = fixtureId(300, "sku-os-own");
+    registerFixture("part_documents", ownDoc.id);
+    registerFixture("part_documents", typeDoc.id);
+    registerFixture("part_document_links", PD.documentLinkId(skuOwn, ownDoc.id));
+    await PD.attachDocument(ownDoc.id, [skuOwn], "Test");
+    const typeRes = await DT.setDeviceTypeSymbol("speakers", typeDoc.id);
+    const types = typeRes.ok ? typeRes.types : [];
+    const P = (id: string, extra: Record<string, unknown> = {}) => ({ id, sku: id, desc: id, category: "", unit: "ea", list: 0, cost: 0, ...extra });
+    const map = await symbolUrlsFor(
+      [P("gl-own", { pricingPartId: skuOwn }), P(fixtureId(300, "sku-os-typed"), { deviceType: "speakers" }), P(fixtureId(300, "sku-os-none"), { deviceType: "amplifiers" })],
+      types
+    );
+    const U = (id: string) => `/api/part-documents/${encodeURIComponent(id)}`;
+    ok(map["gl-own"]?.plan === U(ownDoc.id) && map[fixtureId(300, "sku-os-typed")]?.plan === U(typeDoc.id) && !(fixtureId(300, "sku-os-none") in map) && Object.keys(map).length === 2,
+      "#300 symbols: symbolUrlsFor maps a part's own drawing, a device type's drawing, and leaves a part with neither out");
+  } finally {
+    await db.delete(blobs).where(eq(blobs.id, "gridDeviceTypes"));
+    for (const row of snap) await db.insert(blobs).values(row);
+  }
 }

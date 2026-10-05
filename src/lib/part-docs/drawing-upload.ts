@@ -17,7 +17,7 @@
 import type { StoredFile } from "@/lib/stores/part-documents";
 import { CONTENT_TYPES } from "./files";
 import { liveShrinkUploadDeps, shrinkStoredImage, type ShrinkUploadDeps } from "./shrink-upload";
-import { sanitizeSvg } from "./svg-sanitize";
+import { SVG_MAX_BYTES, sanitizeSvg } from "./svg-sanitize";
 import { partDocBlobPath } from "./types";
 
 /** Longest edge of a stored raster drawing (D607). */
@@ -37,6 +37,12 @@ export async function storeDrawingUpload(
       /* best effort — the outcome stands either way */
     }
   };
+  // The blob's known size is checked before its bytes are read — an over-
+  // limit file never gets pulled into memory (same refusal as the sanitizer).
+  if (Number.isFinite(file.size) && file.size > SVG_MAX_BYTES) {
+    await removeQuietly(file.blobKey);
+    return { ok: false, error: "That drawing is over 1 MB." };
+  }
   let bytes: Uint8Array | null = null;
   try {
     bytes = await deps.read(file.blobKey);

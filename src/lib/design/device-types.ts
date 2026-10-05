@@ -12,6 +12,7 @@
  * store is src/lib/stores/device-types.ts; the palette, Layers, legends,
  * Grid Settings and the harness all import this file.
  * ------------------------------------------------------------------ */
+import { isDocumentId } from "@/lib/part-docs/types";
 import { isGridLayer, UNSCOPED, type GridLayer } from "./grid-scopes";
 
 export type DeviceType = {
@@ -23,6 +24,10 @@ export type DeviceType = {
   /** grid-icons id; checked with isGridIconId where it is resolved
    *  (grid-icons symbolContext) — this file cannot import the registry. */
   icon?: string | null;
+  /** #300 (D606/D609): the type's object drawing — a `symbol` part document
+   *  (`PD-…`) every part of this type falls back to when it has no drawing
+   *  of its own (resolveObjectSymbol). Kept only when the id is well formed. */
+  symbolDocId?: string;
 };
 
 export type TypeMapEntry = { typeKey: string | null; by: "auto" | "admin"; at: number };
@@ -118,6 +123,7 @@ function cleanType(raw: unknown): DeviceType | null {
   const t: DeviceType = { key, label, scope, order: typeof r.order === "number" && Number.isFinite(r.order) ? r.order : 0 };
   if (r.archived === true) t.archived = true;
   if (typeof r.icon === "string" && ICON_RE.test(r.icon)) t.icon = r.icon;
+  if (isDocumentId(r.symbolDocId)) t.symbolDocId = r.symbolDocId;
   return t;
 }
 
@@ -532,6 +538,7 @@ export function cleanDeviceTypesInput(
     const t: DeviceType = { key, label, scope, order: (i + 1) * 10 };
     if (archived) t.archived = true;
     if (existing?.icon) t.icon = existing.icon;
+    if (existing?.symbolDocId) t.symbolDocId = existing.symbolDocId;
     out.push(t);
   }
   for (const t of current) if (!keys.has(t.key)) out.push({ ...t, archived: true, order: (out.length + 1) * 10 });
@@ -546,6 +553,18 @@ export function withTypeIcons(types: readonly DeviceType[], icons: Record<string
     const v = icons[t.key];
     if (typeof v === "string" && ICON_RE.test(v)) next.icon = v;
     else delete next.icon;
+    return next;
+  });
+}
+
+/** Set (a `PD-…` id) or clear (null / anything malformed) the object
+ *  drawing of the named type; others untouched (#300). */
+export function withTypeSymbol(types: readonly DeviceType[], typeKey: string, docId: string | null): DeviceType[] {
+  return types.map((t) => {
+    const next: DeviceType = { ...t };
+    if (t.key !== typeKey) return next;
+    if (isDocumentId(docId)) next.symbolDocId = docId;
+    else delete next.symbolDocId;
     return next;
   });
 }

@@ -59,7 +59,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       // sniffing a misdeclared content-type (e.g. treating an uploaded file
       // as HTML/script) instead of trusting the header above.
       "x-content-type-options": "nosniff",
-      ...(contentType === "image/svg+xml" ? { "content-security-policy": SVG_CSP } : {}),
+      ...(contentType.startsWith("image/svg") ? { "content-security-policy": SVG_CSP } : {}),
     },
   });
 }

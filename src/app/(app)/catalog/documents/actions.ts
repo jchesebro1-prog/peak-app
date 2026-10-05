@@ -135,7 +135,7 @@ export async function attachUploadedDocumentAction(input: {
 }): Promise<DocActionResult<{ documentId: string; linked: number }>> {
   const user = await requireUser();
   if (!isDocumentId(input.documentId)) return { ok: false, error: "Not a document id." };
-  if (!isPartDocKind(input.kind)) return { ok: false, error: "Pick Datasheet, Spec sheet, Manual or Image." };
+  if (!isPartDocKind(input.kind)) return { ok: false, error: "Pick Datasheet, Spec sheet, Manual, Image, Symbol drawing or Riser drawing." };
   const skus = await liveSkus(input.skus || []);
   if (!skus.length) return { ok: false, error: "Those parts are no longer in the catalog." };
   // A document already existing under this id is not this upload's blob to
@@ -329,6 +329,7 @@ export async function searchDocumentsAction(q: string): Promise<DocActionResult<
   if (!tokens.length) return { ok: true, hits: [] };
   const hits = (await allDocuments())
     .filter((d) => d.source !== "manufacturer") // a manufacturer image is never offered as "attach existing" to a part
+    .filter((d) => !isDrawingKind(d.kind)) // #300: a symbol/riser drawing is one part's own — never a Datasheets-page "attach existing" hit
     .filter((d) => {
       const hay = `${d.title} ${d.fileName}`.toLowerCase();
       return tokens.every((t) => hay.includes(t));
