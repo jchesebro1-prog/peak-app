@@ -96,8 +96,9 @@ One icon row (icons with tooltips + keyboard shortcuts):
   - one device → part, MFR #, layer/scope, space (computed), qty, sell, auto tag, by; Replace part…, Delete;
   - one curtain → its curtain fields (existing curtain editing);
   - one space / one wire → what `SpacesPanel` / `WiresPanel` edit today;
-  - several → shared fields ("3 devices · Lighting · Space: mixed") and bulk actions **Delete**, **Move to
-    layer/space**, **Replace part…**.
+  - several → shared fields ("3 devices · Lighting · Space: mixed") and bulk actions **Delete**, **Set category**,
+    **Replace part…**. (Layer/scope comes from the part and space from position — both computed, never stored — so
+    neither is a bulk "move to"; Set category is the user-category layer.)
 - **System Status** — one list aggregating the warnings already computed (needs-a-part count, uncalibrated sheet,
   unmapped parts hidden, tier-fallback lines, last server error). Rows with a fix link to it.
 - **Targets** — the existing Scope / Placed vs. target content, collapsible.
@@ -140,8 +141,11 @@ One icon row (icons with tooltips + keyboard shortcuts):
    design changed" and clear the stack. **Not undoable** (tooltip says "use Revisions"): Auto fill, Change equipment,
    sheet upload/delete, calibration, option add/delete.
 6. **Batched server actions** — `movePlacementsAction`, `removePlacementsAction`, `pastePlacementsAction`,
-   `restoreItemsAction`: each validates and applies a list in **one `patchDoc`** with one revalidate, all-or-nothing
-   (a missing id refuses the whole batch and names it). Sanitized server-side like the single-item actions, which
+   `restoreItemsAction`, `setPlacementsCategoryAction`, `replacePlacementsPartAction`. Paste re-validates every
+   pasted curtain with the same rules `placeCurtainAction` uses (shared helper). Each
+   validates and applies a list in **one `patchDoc`** with one revalidate, all-or-nothing
+   (a missing id refuses the whole batch and names it). `placeDeviceAction` / `placeCurtainAction` also return the
+   new placement id so a single place can be undone. Sanitized server-side like the single-item actions, which
    stay for their other callers.
 
 ### 6. Errors
