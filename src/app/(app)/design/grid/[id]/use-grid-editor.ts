@@ -62,7 +62,7 @@ import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type Dev
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
-import { activeTool, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
+import { activeTool, fitZoom, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -359,7 +359,16 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [wirePartId, setWirePartId] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
 
+  /** Hand tool (#299): the H tool, or Space held over the plan
+   *  (PlanCanvas tracks the key). Either way a pointerdown pans the plan's
+   *  scroll box and never reaches the plan dispatcher (onDown). */
+  const [panning, setPanning] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const tool: GridTool = activeTool({ armedPartId, armedCurtainType, wireDrawing, spaceDrawing, calibrating, panning });
+
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  /** The plan's scrolling box — Fit measures it, the hand tool scrolls it. */
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const onLoaded = useCallback((n: number) => setPages(n), []);
   const onSize = useCallback((w: number, h: number) => setSize({ w, h }), []);
@@ -759,7 +768,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** Null when the wrapper has no measurable size (sheet still loading, or
    *  the window is hidden): fabricating (0,0) instead would drop devices and
    *  space corners at the top-left, so callers must bail on null. */
-  function toNorm(e: React.PointerEvent): Point | null {
+  function toNorm(e: { clientX: number; clientY: number }): Point | null {
     const r = wrapRef.current?.getBoundingClientRect();
     if (!r || r.width < 1 || r.height < 1) return null;
     return {
@@ -767,6 +776,56 @@ function useGridEditorImpl(props: GridEditorProps) {
       y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
     };
   }
+
+  /** Where the pointer is over the plan, in plan coords (null off-plan) —
+   *  for the status bar and paste. One state update per animation frame at
+   *  most: pointermove fires far faster than anything needs to repaint. */
+  const [cursorAt, setCursorAt] = useState<Point | null>(null);
+  const cursorNext = useRef<Point | null>(null);
+  const cursorFrame = useRef<number | null>(null);
+  const queueCursorAt = useCallback((p: Point | null) => {
+    cursorNext.current = p;
+    if (cursorFrame.current !== null) return;
+    cursorFrame.current = requestAnimationFrame(() => {
+      cursorFrame.current = null;
+      const next = cursorNext.current;
+      setCursorAt((prev) =>
+        prev === next || (prev && next && prev.x === next.x && prev.y === next.y) ? prev : next
+      );
+    });
+  }, []);
+  const clearCursorAt = useCallback(() => queueCursorAt(null), [queueCursorAt]);
+  useEffect(() => () => {
+    if (cursorFrame.current !== null) cancelAnimationFrame(cursorFrame.current);
+  }, []);
+
+  /** Zoom so the whole sheet fits the plan box. `size` is the PDF canvas's
+   *  rendered pixels but an image's natural pixels (the <img> draws at
+   *  900 px × zoom), so the rendered size is derived per kind. */
+  const fit = useCallback(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    const rendered = isPdf ? size : { w: Math.round(900 * zoom), h: Math.round(900 * zoom) * aspect };
+    setZoom(fitZoom({ w: box.clientWidth - 24, h: box.clientHeight - 24 }, rendered, zoom));
+  }, [isPdf, size, zoom, aspect]);
+
+  // Auto-fit once per sheet (#299): the first time a sheet's size is known
+  // after it becomes active — so a design opens fitted, not at 125 %. `size`
+  // still holds the previous sheet's (or the default) value when the sheet
+  // changes, so "known" means "changed since this sheet became active".
+  const fittedSheets = useRef(new Set<string>());
+  const sizeAtSheet = useRef<{ id: string; size: { w: number; h: number } } | null>(null);
+  const sheetKey = sheet?.id;
+  useEffect(() => {
+    if (!sheetKey || fittedSheets.current.has(sheetKey)) return;
+    if (sizeAtSheet.current?.id !== sheetKey) {
+      sizeAtSheet.current = { id: sheetKey, size };
+      return;
+    }
+    if (sizeAtSheet.current.size === size) return;
+    fittedSheets.current.add(sheetKey);
+    fit();
+  }, [sheetKey, size, fit]);
 
   /**
    * Post the sheet to /api/grid-sheets/upload (#146, D173) rather than through
@@ -816,7 +875,29 @@ function useGridEditorImpl(props: GridEditorProps) {
     router.refresh();
   }
 
+  /** Drop one unit of a part at a plan point — the armed-part click and a
+   *  palette drag-and-drop (#299) both land here. Places once; arms nothing. */
+  function placeAt(partId: string, at: Point) {
+    if (busy || pending || curtainAt || !sheet) return;
+    setErr(null);
+    setBusy(true);
+    placeDeviceAction(project.id, {
+      sheetId: sheet.id,
+      page,
+      x: at.x,
+      y: at.y,
+      partId,
+      optionId: activeOptionId,
+    }).then((r) => {
+      setBusy(false);
+      if (!r.ok) setErr(r.error);
+      else router.refresh();
+    });
+  }
+
   function onDown(e: React.PointerEvent) {
+    // The hand tool owns the gesture: PlanCanvas pans the scroll box (#299).
+    if (tool === "pan" || spaceHeld) return;
     // The curtain dialog owns the canvas exactly like `pending` does (#49).
     if (busy || pending || curtainAt || !sheet) return;
     const p = toNorm(e);
@@ -955,20 +1036,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     }
 
     if (armedPart) {
-      setErr(null);
-      setBusy(true);
-      placeDeviceAction(project.id, {
-        sheetId: sheet.id,
-        page,
-        x: p.x,
-        y: p.y,
-        partId: armedPart.id,
-        optionId: activeOptionId,
-      }).then((r) => {
-        setBusy(false);
-        if (!r.ok) setErr(r.error);
-        else router.refresh();
-      });
+      placeAt(armedPart.id, p);
       return;
     }
 
@@ -988,6 +1056,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
 
   function onMove(e: React.PointerEvent) {
+    queueCursorAt(toNorm(e));
     if (drag) {
       // Until the hand has travelled DRAG_PX this is still a click: leave the
       // marker exactly where it is so a shaky click can never nudge a device.
@@ -1111,11 +1180,6 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
 
   /* ------------------------------ tool model (#299) ------------------------------ */
-
-  /** Hand tool. Nothing reads it yet beyond the toolbar's active tool; the
-   *  workspace shell drives the plan's scroll with it. */
-  const [panning, setPanning] = useState(false);
-  const tool: GridTool = activeTool({ armedPartId, armedCurtainType, wireDrawing, spaceDrawing, calibrating, panning });
 
   /** One tool at a time (#299): every entry point clears every other mode. */
   const clearModes = useCallback(() => {
@@ -1346,6 +1410,11 @@ function useGridEditorImpl(props: GridEditorProps) {
     shownAt,
     commitMove,
     toNorm,
+    placeAt,
+    cursorAt,
+    clearCursorAt,
+    scrollRef,
+    fit,
     upload,
     onDown,
     onMove,
@@ -1361,6 +1430,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     enterTool,
     panning,
     setPanning,
+    spaceHeld,
+    setSpaceHeld,
     disarm,
     zoomIn,
     zoomOut,

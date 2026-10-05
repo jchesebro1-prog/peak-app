@@ -1016,7 +1016,7 @@ const gridUploadRoute = readFileSync(
 const gridEditorSource = readFileSync(
   join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"),
   "utf8"
-) + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
+) + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8");
 ok(
   !/NextResponse\.json\(\s*\{[^}]*blobPath/.test(gridUploadRoute),
   "#146 the plan-sheet upload route never hands a blobPath back to the browser"
@@ -5457,7 +5457,7 @@ import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
   const gridEditorFixWaveSrc = readFileSync(
     join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"),
     "utf8"
-  ) + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
+  ) + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8");
   ok(gridEditorFixWaveSrc.includes("if (e.defaultPrevented) return;") &&
      gridEditorFixWaveSrc.includes('t?.closest(\'[role="dialog"], [data-no-nudge]\')'),
     "#206 final fix wave: the editor's arrow-key nudge bails when a dialog already handled the key");
@@ -5552,12 +5552,12 @@ import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib
   for (const rel of symClientFiles) {
     // #299: the editor's state moved to use-grid-editor.ts — scan both under the editor's entry.
     const src = readFileSync(join(process.cwd(), rel), "utf8") +
-      (rel.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") : "");
+      (rel.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") : "");
     const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
     ok(valueImports.length === 0, `#206: ${rel} imports no VALUE from @/lib/stores or @/db${valueImports.length ? ` (found: ${String(valueImports[0]).slice(0, 80)})` : ""}`);
   }
   const editorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8") +
-    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
+    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8");
   const riserSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
   ok(!/shapeFor|GRID_SHAPES|categoryShapes/.test(editorSrc) && !/shapeFor|markerColor/.test(riserSrc),
     "#206: the editor and riser resolve badges through symbolLook, not the D154 shapeFor/markerColor path");
@@ -18070,7 +18070,7 @@ import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } fro
   const spSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
   ok(!spSrc.includes("scopeTargets(") && !spSrc.includes("FabricOption") && !spSrc.includes("subscribeTierDefs"), "#211 T4: the Scope panel computes no targets in the browser");
   const edSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8") +
-    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
+    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8");
   const pgSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
   ok(!edSrc.includes("engineFabrics") && !pgSrc.includes("engineFabrics={") && pgSrc.includes("scopeTargets={scopeTargets}"), "#211 T4: no cost-bearing fabric rows cross to the Grid client (D139's crossing is gone)");
   const seedSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-seed.ts"), "utf8");
@@ -19297,7 +19297,7 @@ import { sellFromCost as ci212Sell } from "@/lib/design/equipment-map";
   const body = (name: string) => acts.slice(acts.indexOf(`export async function ${name}`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}`)));
   ok(body("saveCustomItemAction").includes("await requireUser()") && body("saveCustomItemAction").includes("saveCustomItem(") && body("removeCustomItemAction").includes("await requireUser()"),
     "#212 custom: both actions use the placement-edit gate and the server-side store");
-  const ed = src("src/app/(app)/design/grid/[id]/editor.tsx") + src("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const ed = src("src/app/(app)/design/grid/[id]/editor.tsx") + src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + src("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(ed.includes("<CustomItemsSection") && ed.includes("customValue") && ed.includes("disabled={busy || bomEmpty}"),
     "#212 custom: the editor BOM shows custom items, totals them and can quote a custom-only option");
 }
@@ -22685,7 +22685,7 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
   for (const f of mirrors227) {
     // #299: the Grid editor's logic moved to use-grid-editor.ts — scanned under the editor's entry.
     const s = readFileSync(join(process.cwd(), f), "utf8") +
-      (f.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") : "");
+      (f.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") : "");
     ok(!/makingRate|MAKING_RATE|sellCoeffs|SellCoeffs|makingPerFt|curtainCoeffs/.test(s), `#227: ${f} carries no making term or sell coefficients`);
     if (f !== "src/lib/design/curtain-pricing.ts") ok(!/curtainAreaRate\s*\?\?|SEED_FABRIC_RATES\[/.test(s), `#227: ${f} resolves a fabric rate only through fabricAreaRateOf`);
   }
@@ -23321,7 +23321,7 @@ import type { PartLite as PL226 } from "@/lib/design/grid-bom";
   const palImports = [...pal.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
   ok(pal.startsWith('"use client"') && palImports.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")) && pal.includes("paletteView(") && pal.includes("toggleGridFavoriteAction(") && pal.includes('href="/catalog/device-types"'),
     "#226 palette: a client component on pure modules; stars through the action; admins get a link to Device types");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(ed.includes("<DevicePalette") && !ed.includes("filteredParts") && !ed.includes("scopeFilter"), "#226 palette: the editor delegates the palette");
   const pg = read("src/app/(app)/design/grid/[id]/page.tsx");
   ok(pg.includes("loadDeviceTypeContext(catalog)") && pg.includes("getGridFavorites(user.id)") && pg.includes("getGridRecent(user.id)") && pg.includes("favorites={favorites}") && pg.includes("recent={recent}"),
@@ -23366,7 +23366,7 @@ import { typeLayerKey as dt4LayerKey, isLayerVisible as dt4Visible } from "@/lib
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const lp = read("src/app/(app)/design/grid/[id]/layers-panel.tsx");
   ok(lp.includes("typeLayerKey(s, t.key)") && lp.includes("typeRows"), "#226 layers: the Layers panel lists device types under each scope");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(ed.includes("typeLayerRows(") && ed.includes("typeKeyOfPlacement") && ed.includes("typeRows={typeRows}") && ed.includes("deviceType: null"),
     "#226 layers: the editor groups placements by type and hides by type; partless legend entries are typed Unmapped");
   for (const d of ["riser", "set", "schedule"]) {
@@ -23462,7 +23462,7 @@ import { DRAPERY_TYPE_KEY as T4F_DRAPERY, DEFAULT_TYPE_ICONS as T4F_TYPE_ICONS }
     "#226 T4 fix: untyped callers still dedupe by badge alone");
 
   ok(T4F_DRAPERY === "drapery" && Object.hasOwn(T4F_TYPE_ICONS, T4F_DRAPERY), "#226 T4 fix: DRAPERY_TYPE_KEY names a seeded type");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(ed.includes("pl.curtain ? DRAPERY_TYPE_KEY :") && !ed.includes('"drapery"'), "#226 T4 fix: the editor's curtain layer uses DRAPERY_TYPE_KEY");
 }
 
@@ -23719,7 +23719,7 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
     acc.includes("saveAccessoryAction(projectId, optionId, { partId: p.id, qty: n, scope: group })") &&
     acc.includes("saveAccessoryAction(projectId, optionId, { id: accessoryId, qty: n })") && acc.includes("removeAccessoryAction(projectId, optionId, accessoryId)"),
     "#230 UI: the picker searches the heading's types (Search all fallback); rows edit qty and remove through the actions");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(ed.includes("bomGroups(") && ed.includes("groupedBomLines(") && ed.includes("+ Add accessory") && ed.includes("<AccessoryPicker") && ed.includes("<AccessoryRow"),
     "#230 UI: the editor BOM renders one heading per category, each with + Add accessory");
   ok(ed.includes("accessoryBomLines(accessories, parts)") && ed.includes("accessoryValue") && ed.includes("accessoryLines.length === 0"),
@@ -23972,7 +23972,7 @@ import { bomGroups as lb232Groups, groupedBomLines as lb232Grouped } from "@/lib
   };
   ok(!has("src/lib/design/grid-labor.ts") && !has("src/app/(app)/design/grid/settings/labor-hours-card.tsx"), "#232: the hours-per-device suggestion and its settings card are gone");
   ok(!wl231Groups.some((g) => g.items.some((it) => it.id === "grid.laborHoursPerDevice")), "#232: grid.laborHoursPerDevice is retired from Estimating Rules");
-  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(!ed.includes("suggestLabor") && !ed.includes("Labor (suggested)") && ed.includes("<LaborLineRow") && ed.includes("laborLines: GridLaborLine[]") &&
     ed.includes('case "labor":') && /const\s+\w+:\s*never\s*=\s*l\.source/.test(ed) && ed.includes("labor: laborLines"),
     "#232: the editor BOM prints each server-computed labor line inside its heading (exhaustive source switch)");
@@ -33718,7 +33718,7 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
     "spec pickers: the Grid curtain dialog offers an optional Spec select with the derived key as Auto");
   const gridPage = src("src/app/(app)/design/grid/[id]/page.tsx");
   ok(/allSpecRecords\(\)/.test(gridPage) && /specKeys=\{systemMatchKeys\(specRecords\)\}/.test(gridPage), "spec pickers: the Grid page passes specKeys from the server");
-  ok(/specKeys=\{specKeys\}/.test(src("src/app/(app)/design/grid/[id]/editor.tsx")), "spec pickers: the Grid editor forwards specKeys to the curtain dialog");
+  ok(/specKeys=\{specKeys\}/.test(src("src/app/(app)/design/grid/[id]/plan-canvas.tsx")), "spec pickers: the Grid editor forwards specKeys to the curtain dialog");
   const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
   const placeBody = acts.slice(acts.indexOf("export async function placeCurtainAction("), acts.indexOf("user-defined categories (#48/#41)"));
   ok(/specKey: \(typeof c\.specKey === "string" \? c\.specKey : ""\)\.trim\(\)\.slice\(0, 120\) \|\| undefined/.test(placeBody),
@@ -33733,7 +33733,7 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
     "src/app/(app)/design/grid/[id]/editor.tsx",
   ]) {
     // #299: the editor's state moved to use-grid-editor.ts (also "use client") — scanned under the editor's entry.
-    const s = src(f) + (f.endsWith("/grid/[id]/editor.tsx") ? src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") : "");
+    const s = src(f) + (f.endsWith("/grid/[id]/editor.tsx") ? src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + src("src/app/(app)/design/grid/[id]/plan-canvas.tsx") : "");
     const bad = [...s.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
     ok(s.startsWith('"use client"') && bad.length === 0, `spec pickers: ${f} is a client file with no store/db value imports (${bad.join(", ") || "none"})`);
   }
@@ -46936,7 +46936,7 @@ import { curtainDesc as f292CurtainDesc } from "@/lib/design/grid-bom";
   ok(rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{editing && curtainCostKept(draft) && ("), "#292 final #9: the modal's kept-cost hint reads curtainCostKept");
 
   // #10 the Grid editor shows the unreadable curtains
-  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(f292Note(1) === "1 curtain couldn't be read for cut sheets — edit it, then rebuild" && f292Note(3).startsWith("3 curtains couldn't")
     && ed.includes("setPackageUnreadable(result.cutSheetsUnreadable)") && ed.includes("cutSheetsUnreadableNote(packageUnreadable.length)"),
     "#292 final #10: the Grid editor's package result names how many curtains the cut sheets couldn't read");
@@ -49356,4 +49356,5 @@ import * as GT from "@/lib/design/grid-tools";
   ok(GT.fitZoom({ w: 1000, h: 800 }, { w: 1125, h: 562.5 }, 1.25) === 1.05, "#299 tools: fit zoom by width");
   ok(GT.fitZoom({ w: 1000, h: 200 }, { w: 900, h: 900 }, 1) === 0.25, "#299 tools: fit zoom clamps to min");
   ok(GT.fitZoom({ w: 0, h: 0 }, { w: 900, h: 900 }, 1.5) === 1.5, "#299 tools: unknown box keeps zoom");
+  ok(GT.fitZoom({ w: 1250, h: 10000 }, { w: 1000, h: 1000 }, 1) === 1.2, "#299 tools: fit zoom exact multiple doesn't lose a step");
 }

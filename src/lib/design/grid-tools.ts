@@ -31,6 +31,6 @@ export function fitZoom(container: { w: number; h: number }, sheetPx: { w: numbe
   const nw = sheetPx.w / zoom;
   const nh = sheetPx.h / zoom;
   const fit = Math.min(container.w / nw, container.h / nh) * 0.96;
-  const snapped = Math.floor(fit / 0.05) * 0.05;
+  const snapped = Math.floor(fit / 0.05 + 1e-9) * 0.05;
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(snapped * 100) / 100));
 }
