@@ -194,6 +194,7 @@ function DesignProps({ ed }: { ed: GridEditor }) {
               <button
                 style={{ ...BTN, padding: "4px 8px", fontSize: 11, color: "#a0442b" }}
                 disabled={busy}
+                title="Clear this page's scale — not undoable; use Revisions"
                 onClick={clearCalibration}
               >
                 Clear
@@ -739,7 +740,7 @@ function ReplacePartPicker({
 /* ---------------------------------- space ---------------------------------- */
 
 function SpaceProps({ ed, space }: { ed: GridEditor; space: GridSpace }) {
-  const { project, spaceRollups, busy, router, setErr, setSelectedSpaceId } = ed;
+  const { project, spaceRollups, busy, setErr, setSelectedSpaceId } = ed;
   const r = spaceRollups.find((x) => x.spaceId === space.id);
   return (
     <>
@@ -767,7 +768,7 @@ function SpaceProps({ ed, space }: { ed: GridEditor; space: GridSpace }) {
           selected={space}
           busy={busy}
           onSelect={setSelectedSpaceId}
-          onChanged={() => router.refresh()}
+          onChanged={ed.onStructuralChange}
           onError={(m) => setErr(m)}
         />
       </div>
@@ -778,7 +779,7 @@ function SpaceProps({ ed, space }: { ed: GridEditor; space: GridSpace }) {
 /* ---------------------------------- wire ---------------------------------- */
 
 function RouteProps({ ed, route }: { ed: GridEditor; route: GridRoute }) {
-  const { project, partById, busy, router, setErr, setSelectedRouteId } = ed;
+  const { project, partById, busy, setErr, setSelectedRouteId } = ed;
   const ft = routeLengthFt(route, project.calibrations);
   const cal = project.calibrations.find((c) => c.docId === route.sheetId && c.page === route.page);
   const part = partById.get(route.partId);
@@ -803,7 +804,7 @@ function RouteProps({ ed, route }: { ed: GridEditor; route: GridRoute }) {
           selected={route}
           busy={busy}
           onSelect={setSelectedRouteId}
-          onChanged={() => router.refresh()}
+          onChanged={ed.onStructuralChange}
           onError={(m) => setErr(m)}
         />
       </div>

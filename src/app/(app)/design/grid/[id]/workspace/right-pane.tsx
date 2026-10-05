@@ -228,6 +228,7 @@ export default function RightPane({ ed }: { ed: GridEditor }) {
           revisions={project.revisions}
           busy={busy}
           onChanged={() => router.refresh()}
+          onRestored={ed.onStructuralChange}
           onError={(m) => setErr(m)}
         />
       </Panel>

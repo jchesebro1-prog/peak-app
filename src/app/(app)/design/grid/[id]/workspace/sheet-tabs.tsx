@@ -40,7 +40,7 @@ const NAV_BTN: React.CSSProperties = {
 };
 
 export default function SheetTabs({ ed }: { ed: GridEditor }) {
-  const { router, project, sheets, sheet, switchSheet, busy, fileRef, upload, isPdf, page, pages, goToPage, noteAction } = ed;
+  const { project, sheets, sheet, switchSheet, busy, fileRef, upload, isPdf, page, pages, goToPage, noteAction, onStructuralChange } = ed;
   return (
     <div
       style={{
@@ -96,12 +96,12 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
                   label="Delete sheet"
                   confirmLabel="Confirm"
                   style={{ fontSize: 11.5, padding: "6px 10px" }}
-                  title="Deletes this sheet from the design — refused while it still has devices, spaces, or wires on it"
+                  title="Deletes this sheet from the design — refused while it still has devices, spaces, or wires on it — not undoable; use Revisions"
                   onConfirm={async () => {
                     const r = await removeSheetAction(project.id, s.id);
                     if (!r.ok) throw new Error(r.error);
                     noteAction(`Deleted sheet ${s.name}`);
-                    router.refresh();
+                    onStructuralChange();
                   }}
                 />
               </Menu>
@@ -115,8 +115,8 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
           aria-label={sheets.length > 0 ? "+ Additional sheet" : "+ Plan sheet"}
           title={
             sheets.length > 0
-              ? "Uploads a real plan as a NEW, separate sheet — the sheet(s) already here, and everything placed on them, are untouched"
-              : "Upload a plan sheet (PDF or image)"
+              ? "Uploads a real plan as a NEW, separate sheet — the sheet(s) already here, and everything placed on them, are untouched — not undoable; use Revisions"
+              : "Upload a plan sheet (PDF or image) — not undoable; use Revisions"
           }
           style={{ ...TAB, padding: "0 11px", border: "none", background: "transparent", color: "#d3d6dc", cursor: "pointer", fontSize: 15 }}
         >

@@ -46,12 +46,16 @@ export default function RevisionsPanel({
   revisions,
   busy,
   onChanged,
+  onRestored,
   onError,
 }: {
   projectId: string;
   revisions: GridRevision[];
   busy: boolean;
   onChanged: () => void;
+  /** A restore replaces the layout — the editor clears its undo stack (#299).
+   *  Falls back to onChanged. */
+  onRestored?: () => void;
   onError: (msg: string) => void;
 }) {
   const [note, setNote] = useState("");
@@ -119,7 +123,7 @@ export default function RevisionsPanel({
                       setArmRestore(null);
                       const res = await restoreRevisionAction(projectId, r.rev);
                       if (!res.ok) onError(res.error);
-                      else onChanged();
+                      else (onRestored ?? onChanged)();
                     }}
                   >
                     Restore v{r.rev}?

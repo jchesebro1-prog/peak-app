@@ -41,14 +41,15 @@ import {
 
 /**
  * The Grid workspace toolbar (#299): one 34px row — the design's name and
- * customer, the tools (one active at a time), Edit (cut/copy/paste/
- * duplicate and Delete work; undo/redo arrive in a later slice), Arrange (align ×6 at 2+ selected, distribute ×2
+ * customer, the tools (one active at a time), Edit (undo/redo, cut/copy/
+ * paste/duplicate, Delete), Arrange (align ×6 at 2+ selected, distribute ×2
  * at 3+), View (zoom, Fit), then Change equipment, Design ▾, Outputs ▾
  * (outputs-menu.tsx) and the primary Add to quotes (quote-button.tsx). Every
  * control the old header row held lives here, in a menu, or in the sheet tabs.
  */
 
-const SOON = "coming in this release";
+/** Tooltip suffix on edits the undo stack can't take back (#299 slice 6). */
+const NOT_UNDOABLE = " — not undoable; use Revisions";
 
 function IconButton({
   title,
@@ -93,15 +94,6 @@ function IconButton({
   );
 }
 
-/** A not-yet-wired Edit control: its real name + shortcut, disabled. */
-function SoonButton({ name, children }: { name: string; children: React.ReactNode }) {
-  return (
-    <IconButton title={`${name} — ${SOON}`} label={name} disabled>
-      {children}
-    </IconButton>
-  );
-}
-
 function Divider() {
   return <span aria-hidden style={{ width: 1, height: 20, background: "#dfe2e8", margin: "0 4px", flex: "0 0 auto" }} />;
 }
@@ -116,7 +108,6 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 
 export default function Toolbar({ ed }: { ed: GridEditor }) {
   const {
-    router,
     project,
     sheet,
     venues,
@@ -161,6 +152,13 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
     cutSelected,
     paste,
     duplicate,
+    canUndo,
+    canRedo,
+    undoLabel,
+    redoLabel,
+    undo,
+    redo,
+    onStructuralChange,
   } = ed;
 
   const scopes = refillableScopes(project.scopeInputs, auto);
@@ -184,12 +182,18 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         : writes && busy
           ? "saving…"
           : null;
+  /** Why Undo / Redo is off (tooltip suffix), or null when it works. */
+  const stepBlocked = (has: boolean, what: string): string | null =>
+    view === "sheet" ? "switch to Plan view" : !has ? `nothing to ${what}` : busy ? "saving…" : null;
+  const undoBlocked = stepBlocked(canUndo, "undo");
+  const redoBlocked = stepBlocked(canRedo, "redo");
   const pasteBlocked: string | null =
     view === "sheet" ? "switch to Plan view" : !clipboard ? "copy a device first" : !sheet ? "upload a sheet first" : busy ? "saving…" : null;
 
-  const toolButton = (t: GridTool, title: string, icon: React.ReactNode, opts?: { disabled?: boolean; active?: boolean }) => (
+  const toolButton = (t: GridTool, title: string, icon: React.ReactNode, opts?: { disabled?: boolean; active?: boolean; label?: string }) => (
     <IconButton
       title={title}
+      label={opts?.label}
       active={opts?.active ?? tool === t}
       disabled={opts?.disabled}
       onClick={() => {
@@ -243,18 +247,28 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         })}
         {toolButton("wire", "Wire (W)", <IconWire />, { disabled: !sheet })}
         {toolButton("space", "Space (S)", <IconSpace />, { disabled: !sheet })}
-        {toolButton("calibrate", "Calibrate this page", <IconCalibrate />, { disabled: !sheet })}
+        {toolButton("calibrate", `Calibrate this page${NOT_UNDOABLE}`, <IconCalibrate />, { disabled: !sheet, label: "Calibrate this page" })}
         {toolButton("pan", "Pan (H, or hold Space)", <IconPan />, { disabled: !sheet })}
       </Group>
 
       <Divider />
       <Group label="Edit">
-        <SoonButton name="Undo (⌘Z)">
+        <IconButton
+          title={undoBlocked ? `Undo (⌘Z) — ${undoBlocked}` : `Undo ${undoLabel} (⌘Z)`}
+          label="Undo (⌘Z)"
+          disabled={!!undoBlocked}
+          onClick={() => void undo()}
+        >
           <IconUndo />
-        </SoonButton>
-        <SoonButton name="Redo (⇧⌘Z)">
+        </IconButton>
+        <IconButton
+          title={redoBlocked ? `Redo (⇧⌘Z) — ${redoBlocked}` : `Redo ${redoLabel} (⇧⌘Z)`}
+          label="Redo (⇧⌘Z)"
+          disabled={!!redoBlocked}
+          onClick={() => void redo()}
+        >
           <IconRedo />
-        </SoonButton>
+        </IconButton>
         {(
           [
             ["Cut (⌘X)", IconCut, () => void cutSelected(), true],
@@ -428,14 +442,14 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", flexWrap: "nowrap", marginLeft: "auto" }}>
       {/* Change equipment (#211) — the Scope panel's dialog, Auto scopes only. */}
       {scopes.length === 1 && (
-        <button type="button" style={BTN} onClick={() => setRefillScope(scopes[0])} title={`Re-fill ${SHORT[scopes[0]]} with different equipment`}>
+        <button type="button" style={BTN} onClick={() => setRefillScope(scopes[0])} title={`Re-fill ${SHORT[scopes[0]]} with different equipment${NOT_UNDOABLE}`}>
           Change equipment…
         </button>
       )}
       {scopes.length > 1 && (
         <Menu
           label="Change equipment"
-          title="Re-fill one Auto scope with different equipment"
+          title={`Re-fill one Auto scope with different equipment${NOT_UNDOABLE}`}
           align="right"
           items={scopes.map((k) => ({ label: `${SHORT[k]}…`, onSelect: () => setRefillScope(k) }))}
         />
@@ -450,7 +464,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           counts={optionCounts}
           busy={busy}
           onSwitch={switchOption}
-          onChanged={() => router.refresh()}
+          onChanged={onStructuralChange}
           onError={(m) => setErr(m)}
         />
         {venues.length > 0 && (
@@ -496,7 +510,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           onClose={() => setRefillScope(null)}
           onChanged={() => {
             ed.noteAction(`Changed ${SHORT[refillScope]} equipment`);
-            router.refresh();
+            onStructuralChange();
           }}
           onError={(m) => setErr(m)}
         />

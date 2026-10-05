@@ -833,6 +833,9 @@ export async function restoreItemsAction(projectId: string, bundle: RemovedBundl
     const links = isObj(entry) && Array.isArray(entry.links) ? entry.links : [];
     for (const l of links) if (isObj(l)) cableIds.add(isStr(l.partId) ? l.partId : "");
   }
+  // Bounded like every batch: the riser half round-trips through the client,
+  // so it can't make the lookup below fan out without limit.
+  if (cableIds.size > MAX_BATCH) return { ok: false, error: "Couldn't undo — too many items." };
   const cables = await Promise.all([...cableIds].map((id) => (isPartId(id) ? partForGrid(id) : Promise.resolve(null))));
   if (cables.some((part) => !part || !isPerLengthUnit(part.unit)))
     return { ok: false, error: "Couldn't undo — a cable in it is no longer in the Grid library." };

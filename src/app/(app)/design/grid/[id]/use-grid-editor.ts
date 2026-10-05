@@ -58,7 +58,7 @@ import {
   placeDeviceAction,
   removePlacementsAction,
   replacePlacementsPartAction,
-  setPlacementCategoryAction,
+  restoreItemsAction,
   setPlacementsCategoryAction,
   setSymbolLookAction,
   setVenueAction,
@@ -89,6 +89,16 @@ import {
   snapPoint,
   type SnapGrid,
 } from "@/lib/design/grid-snap";
+import {
+  emptyUndo,
+  pushUndo,
+  takeRedo,
+  takeUndo,
+  withRefreshedRestore,
+  type GridCommand,
+  type UndoEntry,
+  type UndoState,
+} from "@/lib/design/grid-undo";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -147,6 +157,11 @@ function mergeMoves(
 /** What a thrown action (dropped connection, server error — not a refusal)
  *  says next to the plan once its optimistic state is rolled back. */
 const SAVE_FAILED = "That didn't save — check your connection and try again.";
+
+/** What a refused undo/redo step says (#299) — another person (or tab) changed
+ *  the design since the step was recorded; the stack is cleared with it. */
+const UNDO_STALE = "Couldn't undo — the design changed.";
+const REDO_STALE = "Couldn't redo — the design changed.";
 
 /** Status-bar words for an align mode ("Aligned 3 devices left"). */
 const ALIGN_WORDS: Record<AlignMode, string> = {
@@ -390,6 +405,27 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  did, in words. View state only; never persisted. */
   const [lastAction, setLastAction] = useState<string | null>(null);
   const noteAction = useCallback((text: string) => setLastAction(text), []);
+
+  /** Undo / redo (#299 slice 6) — a per-tab client stack. The ref is the
+   *  truth handlers read (two quick presses can't both pop the same entry);
+   *  the state mirrors it so the toolbar re-renders. Never persisted. */
+  const undoRef = useRef<UndoState>(emptyUndo());
+  const [undoState, setUndoState] = useState<UndoState>(emptyUndo);
+  const commitUndo = useCallback((s: UndoState) => {
+    undoRef.current = s;
+    setUndoState(s);
+  }, []);
+  /** Record one undoable edit (a new edit clears redo). */
+  const record = useCallback((e: UndoEntry) => commitUndo(pushUndo(undoRef.current, e)), [commitUndo]);
+  /** Drop the whole stack — after an edit that isn't undoable (Change
+   *  equipment, sheets, calibration, options, spaces, wires, revision
+   *  restore): its effects can collide with the ids the stack recorded. */
+  const clearUndo = useCallback(() => commitUndo(emptyUndo()), [commitUndo]);
+  /** What a panel's not-undoable edit calls on success: clear the stack, refresh. */
+  const onStructuralChange = useCallback(() => {
+    clearUndo();
+    router.refresh();
+  }, [clearUndo, router]);
   /** Plan view / Spreadsheet view under the canvas (#299). */
   const [view, setView] = useState<"plan" | "sheet">("plan");
   /** The Auto scope whose "Change equipment…" dialog is open — one state
@@ -904,7 +940,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   const writeMoves = useCallback(
     async (
       moves: { id: string; x: number; y: number }[],
-      label?: string
+      label?: string,
+      /** The undo step's verb (#299): "Move", "Nudge", "Align", "Distribute". */
+      verb = "Move"
     ): Promise<{ ok: boolean; previous: { id: string; x: number; y: number }[] | null }> => {
       const servers = new Map(placements.map((q) => [q.id, q]));
       // Always write what was asked: the saved position is stale between a
@@ -941,6 +979,14 @@ function useGridEditorImpl(props: GridEditorProps) {
         noteAction(
           label ?? (valid.length === 1 ? `Moved ${placementLabel(servers.get(valid[0].id)!)}` : `Moved ${countNoun(valid.map((m) => servers.get(m.id)!))}`)
         );
+        // Every successful write is one undo step — drag, align, distribute,
+        // a timer-written or flushed nudge alike (#299 slice 6).
+        if (r.previous.length)
+          record({
+            label: `${verb} ${valid.length}`,
+            forward: { kind: "move", moves: valid.map(({ id, x, y }) => ({ id, x, y })) },
+            inverse: { kind: "move", moves: r.previous },
+          });
         router.refresh();
         return { ok: true, previous: r.previous };
       } catch {
@@ -951,10 +997,11 @@ function useGridEditorImpl(props: GridEditorProps) {
         setBusy(false);
       }
     },
-    [project.id, placements, router, noteAction, placementLabel]
+    [project.id, placements, router, noteAction, placementLabel, record]
   );
   const sendMoves = useCallback(
-    async (moves: { id: string; x: number; y: number }[], label?: string) => (await writeMoves(moves, label)).previous,
+    async (moves: { id: string; x: number; y: number }[], label?: string, verb?: string) =>
+      (await writeMoves(moves, label, verb)).previous,
     [writeMoves]
   );
   /** The latest sendMoves, for the nudge timer: the timer outlives the render
@@ -986,7 +1033,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const m = takeNudge();
       const rest = m && dropIds ? m.filter((mv) => !dropIds.has(mv.id)) : m;
       if (!rest?.length) return true;
-      return (await writeMoves(rest)).ok;
+      return (await writeMoves(rest, undefined, "Nudge")).ok;
     },
     [takeNudge, writeMoves]
   );
@@ -995,7 +1042,8 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  write (this batch wins per device), so a stale debounce can never land
    *  after it and undo the drag/align. One write, one refresh, no flicker. */
   const commitMoves = useCallback(
-    (moves: { id: string; x: number; y: number }[], label?: string) => sendMoves(mergeMoves(takeNudge(), moves), label),
+    (moves: { id: string; x: number; y: number }[], label?: string, verb?: string) =>
+      sendMoves(mergeMoves(takeNudge(), moves), label, verb),
     [takeNudge, sendMoves]
   );
 
@@ -1063,7 +1111,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
       nudgeTimer.current = setTimeout(() => {
         const m = takeNudge();
-        if (m?.length) void sendMovesRef.current(m);
+        if (m?.length) void sendMovesRef.current(m, undefined, "Nudge");
       }, NUDGE_COMMIT_MS);
     };
     window.addEventListener("keydown", onKey);
@@ -1194,8 +1242,23 @@ function useGridEditorImpl(props: GridEditorProps) {
     setActiveSheetId(r.sheetId);
     setPage(1);
     noteAction(`Uploaded ${file.name}`);
+    clearUndo();
     router.refresh();
   }
+
+  /** One undo step for devices that were just created (place, curtain drop,
+   *  paste, duplicate): undo removes them by id; redo restores the records. */
+  const recordPlace = useCallback(
+    (label: string, created: GridPlacement[]) => {
+      if (!created.length) return;
+      record({
+        label,
+        forward: { kind: "restore", bundle: { placements: created, riser: {} } },
+        inverse: { kind: "remove", ids: created.map((pl) => pl.id) },
+      });
+    },
+    [record]
+  );
 
   /** Drop one unit of a part at a plan point — the armed-part click and a
    *  palette drag-and-drop (#299) both land here. Places once; arms nothing. */
@@ -1212,14 +1275,21 @@ function useGridEditorImpl(props: GridEditorProps) {
       y: p.y,
       partId,
       optionId: activeOptionId,
-    }).then((r) => {
-      setBusy(false);
-      if (!r.ok) setErr(r.error);
-      else {
-        noteAction(`Placed ${partLabel(partId)}`);
-        router.refresh();
+    }).then(
+      (r) => {
+        setBusy(false);
+        if (!r.ok) setErr(r.error);
+        else {
+          noteAction(`Placed ${partLabel(partId)}`);
+          recordPlace(`Place ${partLabel(partId)}`, [r.placement]);
+          router.refresh();
+        }
+      },
+      () => {
+        setBusy(false);
+        setErr(SAVE_FAILED);
       }
-    });
+    );
   }
 
   function onDown(e: React.PointerEvent) {
@@ -1316,6 +1386,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           if (!r.ok) setErr(r.error);
           else {
             noteAction(`Drew a ${partLabel(wirePartId)} run`);
+            clearUndo();
             router.refresh();
           }
         });
@@ -1501,13 +1572,26 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   /** Persist a placement's user-defined category (punch #48). "" clears it. */
   async function saveCategory(placementId: string, label: string) {
+    // The batch setter with one item (same category rule as the single one)
+    // hands back the previous label, so the edit is one undo step (#299).
+    if (!(await flushNudge())) return;
     setBusy(true);
-    const r = await setPlacementCategoryAction(project.id, placementId, label);
+    const items = [{ id: placementId, category: label }];
+    let r: Awaited<ReturnType<typeof setPlacementsCategoryAction>>;
+    try {
+      r = await setPlacementsCategoryAction(project.id, items);
+    } catch {
+      setBusy(false);
+      setErr(SAVE_FAILED);
+      return;
+    }
     setBusy(false);
     setCategoryDraft(null);
     if (!r.ok) setErr(r.error);
     else {
       noteAction(label.trim() ? `Set category ${label.trim()}` : "Cleared a category");
+      if (r.previous.some((pv) => pv.category !== label.trim().slice(0, 40)))
+        record({ label: "Set category 1", forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
       router.refresh();
     }
   }
@@ -1531,19 +1615,28 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (!sheet || !curtainAt) return;
     setErr(null);
     setBusy(true);
-    const r = await placeCurtainAction(project.id, {
-      sheetId: sheet.id,
-      page,
-      x: curtainAt.x,
-      y: curtainAt.y,
-      curtain,
-      optionId: activeOptionId,
-    });
+    let r: Awaited<ReturnType<typeof placeCurtainAction>>;
+    try {
+      r = await placeCurtainAction(project.id, {
+        sheetId: sheet.id,
+        page,
+        x: curtainAt.x,
+        y: curtainAt.y,
+        curtain,
+        optionId: activeOptionId,
+      });
+    } catch {
+      // Keep the dialog open so the typed spec isn't lost.
+      setBusy(false);
+      setErr(SAVE_FAILED);
+      return;
+    }
     setBusy(false);
     setCurtainAt(null);
     if (!r.ok) setErr(r.error);
     else {
       noteAction(`Placed curtain ${curtain.name}`);
+      recordPlace(`Place ${curtain.name}`, [r.placement]);
       router.refresh();
     }
   }
@@ -1569,6 +1662,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (!r.ok) setErr(r.error);
     else {
       noteAction(`Added space ${name}`);
+      clearUndo();
       router.refresh();
     }
   }
@@ -1595,6 +1689,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (!r.ok) setErr(r.error);
     else {
       noteAction(`Calibrated page ${page}`);
+      clearUndo();
       router.refresh();
     }
   }
@@ -1608,6 +1703,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (!r.ok) setErr(r.error);
     else {
       noteAction(`Cleared page ${page}'s scale`);
+      clearUndo();
       router.refresh();
     }
   }
@@ -1762,7 +1858,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** Remove every visible selected device in one write — the Property
    *  Editor's Remove / Delete n, the toolbar Delete and the Delete/Backspace
    *  key all land here. Resolves to what undo needs to put back, or null. */
-  const removeSelected = useCallback(async (): Promise<RemovedBundle | null> => {
+  const removeSelectedAs = useCallback(async (verb: "Delete" | "Cut"): Promise<RemovedBundle | null> => {
     const targets = selectedPlacements;
     if (!targets.length) return null;
     // A pending nudge writes first (minus the devices going away), so its
@@ -1779,6 +1875,8 @@ function useGridEditorImpl(props: GridEditorProps) {
       setSelectedIds([]);
       setCategoryDraft(null);
       noteAction(targets.length === 1 ? `Removed ${placementLabel(targets[0])}` : `Removed ${countNoun(targets)}`);
+      const ids = targets.map((pl) => pl.id);
+      record({ label: `${verb} ${ids.length}`, forward: { kind: "remove", ids }, inverse: { kind: "restore", bundle: r.removed } });
       router.refresh();
       return r.removed;
     } catch {
@@ -1787,7 +1885,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     } finally {
       setBusy(false);
     }
-  }, [selectedPlacements, project.id, router, noteAction, placementLabel, flushNudge]);
+  }, [selectedPlacements, project.id, router, noteAction, placementLabel, flushNudge, record]);
+  const removeSelected = useCallback(() => removeSelectedAs("Delete"), [removeSelectedAs]);
 
   /** Where each visible selected device is shown right now. */
   const selectionPositions = useCallback(
@@ -1803,7 +1902,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const before = selectionPositions();
       const moves = changedMoves(before, alignPositions(before, mode));
       if (!moves.length) return null;
-      return commitMoves(moves, `Aligned ${countNoun(selectedPlacements)} ${ALIGN_WORDS[mode]}`);
+      return commitMoves(moves, `Aligned ${countNoun(selectedPlacements)} ${ALIGN_WORDS[mode]}`, "Align");
     },
     [selectedPlacements, selectionPositions, commitMoves]
   );
@@ -1815,7 +1914,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const before = selectionPositions();
       const moves = changedMoves(before, distributePositions(before, axis));
       if (!moves.length) return null;
-      return commitMoves(moves, `Distributed ${countNoun(selectedPlacements)} ${axis === "x" ? "horizontally" : "vertically"}`);
+      return commitMoves(moves, `Distributed ${countNoun(selectedPlacements)} ${axis === "x" ? "horizontally" : "vertically"}`, "Distribute");
     },
     [selectedPlacements, selectionPositions, commitMoves]
   );
@@ -1840,6 +1939,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           return null;
         }
         noteAction(want ? `Set category ${want} on ${countNoun(selectedPlacements)}` : `Cleared the category on ${countNoun(selectedPlacements)}`);
+        record({ label: `Set category ${items.length}`, forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
         router.refresh();
         return r.previous;
       } catch {
@@ -1849,7 +1949,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         setBusy(false);
       }
     },
-    [selectedPlacements, project.id, router, noteAction, flushNudge]
+    [selectedPlacements, project.id, router, noteAction, flushNudge, record]
   );
 
   /** Swap the part on every visible selected device. Curtains can't change
@@ -1870,6 +1970,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           return null;
         }
         noteAction(`Replaced ${countNoun(selectedPlacements)} with ${partLabel(partId)}`);
+        record({ label: `Replace part ${items.length}`, forward: { kind: "part", items }, inverse: { kind: "part", items: r.previous } });
         router.refresh();
         return r.previous;
       } catch {
@@ -1879,7 +1980,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         setBusy(false);
       }
     },
-    [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge]
+    [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge, record]
   );
 
   /* ------------------------- clipboard (#299) ------------------------- */
@@ -1940,13 +2041,13 @@ function useGridEditorImpl(props: GridEditorProps) {
     const cut = selectedPlacements;
     const snap = snapshotSelection();
     if (!snap) return null;
-    const removed = await removeSelected();
+    const removed = await removeSelectedAs("Cut");
     if (removed) {
       commitCopy(snap, true);
       noteAction(`Cut ${countNoun(cut)}`);
     }
     return removed;
-  }, [busy, selectedPlacements, snapshotSelection, commitCopy, removeSelected, noteAction]);
+  }, [busy, selectedPlacements, snapshotSelection, commitCopy, removeSelectedAs, noteAction]);
 
   /** Lay `clip` onto the active sheet/page/option and select the copies.
    *  Wires come along only onto the page they were copied from. */
@@ -2009,6 +2110,8 @@ function useGridEditorImpl(props: GridEditorProps) {
         setSelectedRouteId(null);
         const skipped = r.skippedWires + dropped;
         noteAction(`${verb} ${countNoun(r.placements)}${skipped > 0 ? ` · ${skipped} wire${skipped === 1 ? "" : "s"} skipped` : ""}`);
+        // Undo removes the pasted devices; wires the paste drew stay (v1).
+        recordPlace(`${verb === "Duplicated" ? "Duplicate" : "Paste"} ${r.placements.length}`, r.placements);
         router.refresh();
         return { placements: r.placements, routes: r.routes };
       } catch {
@@ -2018,7 +2121,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         setBusy(false);
       }
     },
-    [sheet, busy, flushNudge, snap, project.id, page, activeOptionId, noteAction, router]
+    [sheet, busy, flushNudge, snap, project.id, page, activeOptionId, noteAction, router, recordPlace]
   );
 
   /** ⌘V / toolbar Paste: at the pointer when it is over the plan (and has
@@ -2054,6 +2157,144 @@ function useGridEditorImpl(props: GridEditorProps) {
     return pasteClip(snap.clip, null, snap.origin, "Duplicated", { remember: false });
   }, [busy, selectedPlacements, snapshotSelection, pasteClip]);
 
+  /* ------------------------- undo / redo (#299 slice 6) ------------------------- */
+
+  /** Run one recorded command through the batch actions (all-or-nothing).
+   *  A refusal comes back as `{ ok: false }`; a throw propagates. A remove
+   *  hands back the fresh bundle so the other side of the entry can be
+   *  refreshed (withRefreshedRestore). */
+  const runCommand = useCallback(
+    async (c: GridCommand): Promise<{ ok: true; bundle?: RemovedBundle } | { ok: false; error: string }> => {
+      switch (c.kind) {
+        case "move": {
+          // Optimistic, like any move — and it also overwrites a stale
+          // override from the original move, which would otherwise wake up
+          // the moment the server copy returns to that override's `base`.
+          const servers = new Map(placements.map((q) => [q.id, q]));
+          const known = c.moves.filter((m) => servers.has(m.id));
+          setMovedLocal((prev) => {
+            const next = { ...prev };
+            for (const m of known) {
+              const server = servers.get(m.id)!;
+              next[m.id] = { at: { x: m.x, y: m.y }, base: { x: server.x, y: server.y } };
+            }
+            return next;
+          });
+          const rollBack = () =>
+            setMovedLocal((prev) => {
+              const next = { ...prev };
+              for (const m of known) delete next[m.id];
+              return next;
+            });
+          try {
+            const r = await movePlacementsAction(project.id, c.moves);
+            if (!r.ok) {
+              rollBack();
+              return r;
+            }
+          } catch (e) {
+            rollBack();
+            throw e;
+          }
+          router.refresh();
+          return { ok: true };
+        }
+        case "remove": {
+          const r = await removePlacementsAction(project.id, c.ids);
+          if (!r.ok) return r;
+          const gone = new Set(c.ids);
+          setSelectedIds((prev) => prev.filter((id) => !gone.has(id)));
+          router.refresh();
+          return { ok: true, bundle: r.removed };
+        }
+        case "restore": {
+          const r = await restoreItemsAction(project.id, c.bundle);
+          if (!r.ok) return r;
+          // What came back is selected, the way a paste selects its copies.
+          setSelectedIds(c.bundle.placements.map((pl) => pl.id));
+          setSelectedSpaceId(null);
+          setSelectedRouteId(null);
+          router.refresh();
+          return { ok: true };
+        }
+        case "category": {
+          const r = await setPlacementsCategoryAction(project.id, c.items);
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
+        case "part": {
+          const r = await replacePlacementsPartAction(project.id, c.items);
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
+      }
+    },
+    [placements, project.id, router]
+  );
+
+  /** One step at a time: a second press while a step is in flight is dropped. */
+  const stepping = useRef(false);
+
+  /** Undo (dir "undo") or redo (dir "redo") one step. A pending nudge is
+   *  written first, so ⌘Z right after an arrow press undoes that nudge. A
+   *  refusal means the design changed under the stack: say so and clear it.
+   *  A throw (connection) keeps the stack — it may work on a retry. */
+  const step = useCallback(
+    async (dir: "undo" | "redo") => {
+      if (busy || drag || stepping.current) return;
+      stepping.current = true;
+      try {
+        if (!(await flushNudge())) return;
+        const taken = dir === "undo" ? takeUndo(undoRef.current) : takeRedo(undoRef.current);
+        if (!taken) return;
+        const { entry, next } = taken;
+        setErr(null);
+        setCategoryDraft(null);
+        setBusy(true);
+        try {
+          const r = await runCommand(dir === "undo" ? entry.inverse : entry.forward);
+          if (!r.ok) {
+            setErr(dir === "undo" ? UNDO_STALE : REDO_STALE);
+            commitUndo(emptyUndo());
+            // Show the design as it is now (the other edit that broke the step).
+            router.refresh();
+            return;
+          }
+          let after = next;
+          if (r.bundle) {
+            // A remove just ran: the entry's other side restores the records
+            // as the server had them a moment ago.
+            if (dir === "undo") {
+              const [moved, ...rest] = next.future;
+              after = { ...next, future: [withRefreshedRestore(moved, r.bundle, "forward"), ...rest] };
+            } else {
+              const last = next.past[next.past.length - 1];
+              after = { ...next, past: [...next.past.slice(0, -1), withRefreshedRestore(last, r.bundle, "inverse")] };
+            }
+          }
+          commitUndo(after);
+          noteAction(`${dir === "undo" ? "Undid" : "Redid"} ${entry.label}`);
+        } catch {
+          setErr(SAVE_FAILED);
+        } finally {
+          setBusy(false);
+        }
+      } finally {
+        stepping.current = false;
+      }
+    },
+    [busy, drag, flushNudge, runCommand, commitUndo, noteAction, router]
+  );
+  const undo = useCallback(() => step("undo"), [step]);
+  const redo = useCallback(() => step("redo"), [step]);
+  const canUndo = undoState.past.length > 0;
+  const canRedo = undoState.future.length > 0;
+  /** The step each button would take, for its tooltip ("Undo Move 3"). */
+  const undoLabel = undoState.past.length ? undoState.past[undoState.past.length - 1].label : null;
+  const redoLabel = undoState.future.length ? undoState.future[0].label : null;
+
   // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
   // select with nothing selected, Delete/Backspace removes every selected
   // device. Same guards as the arrow-key nudge: never while typing, never
@@ -2075,6 +2316,21 @@ function useGridEditorImpl(props: GridEditorProps) {
         setSelectedSpaceId(null);
         setSelectedRouteId(null);
         return;
+      }
+      // ⌘Z undo; ⇧⌘Z / Ctrl+Shift+Z / Ctrl+Y redo (#299 slice 6). Inside a
+      // text field the browser's own text undo wins (the guards above).
+      if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+        const k = e.key.toLowerCase();
+        const isUndo = k === "z" && !e.shiftKey;
+        const isRedo = (k === "z" && e.shiftKey) || (k === "y" && e.ctrlKey && !e.metaKey && !e.shiftKey);
+        if (isUndo || isRedo) {
+          if (view !== "plan") return;
+          if (isUndo ? !undoRef.current.past.length : !undoRef.current.future.length) return;
+          e.preventDefault();
+          if (busy || drag) return;
+          void (isUndo ? undo() : redo());
+          return;
+        }
       }
       // ⌘C/⌘X/⌘V/⌘D (Ctrl on Windows) — copy, cut, paste, duplicate (#299).
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
@@ -2125,7 +2381,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate]);
+  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo]);
 
   return {
     router,
@@ -2347,6 +2603,17 @@ function useGridEditorImpl(props: GridEditorProps) {
     cutSelected,
     paste,
     duplicate,
+    undoState,
+    canUndo,
+    canRedo,
+    undoLabel,
+    redoLabel,
+    undo,
+    redo,
+    record,
+    runCommand,
+    clearUndo,
+    onStructuralChange,
   };
 }
 

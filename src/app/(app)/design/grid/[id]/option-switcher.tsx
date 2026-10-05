@@ -85,12 +85,12 @@ export default function OptionSwitcher({
 
       {mode === "idle" && (
         <>
-          <button style={BTN} disabled={busy || pending} onClick={() => { setMode("add"); setName(""); setCopy(activeCount > 0); }}>+ Option</button>
+          <button style={BTN} disabled={busy || pending} title="Add a design option — not undoable; use Revisions" onClick={() => { setMode("add"); setName(""); setCopy(activeCount > 0); }}>+ Option</button>
           <button style={BTN} disabled={busy || pending} onClick={() => { setMode("rename"); setName(active.name); }}>Rename</button>
           <button
             style={{ ...BTN, color: options.length <= 1 ? "#b6bac2" : "#a0442b" }}
             disabled={busy || pending || options.length <= 1}
-            title={options.length <= 1 ? "A design keeps at least one option" : `Remove ${active.name} and everything placed in it`}
+            title={options.length <= 1 ? "A design keeps at least one option" : `Remove ${active.name} and everything placed in it — not undoable; use Revisions`}
             onClick={() => setMode("delete")}
           >
             Delete
