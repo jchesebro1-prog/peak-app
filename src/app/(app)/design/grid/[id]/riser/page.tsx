@@ -16,6 +16,8 @@ import { SymbolIcon } from "@/components/design/symbol-shape";
 import { PrintButton } from "@/components/letter/print-button";
 import RiserEditor from "./riser-editor";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
+import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
+import type { ObjectSymbolUrls } from "@/lib/design/object-symbols";
 
 export const metadata = { title: "Riser — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -67,11 +69,24 @@ export default async function RiserPage({
     ...gridPartsFrom(gridSymbols, catalog, categoryMap, { catalogFallback: true, deviceTypes }),
     ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
   ];
-  const view = riserViewForOption({ project, optionId, parts, symCtx });
   const symbolDisplay = cleanSymbolDisplay(project.symbolDisplay);
+  const partById = new Map(parts.map((p) => [p.id, p]));
+  // #300 (D609): in Object mode, the drawing URLs of the parts this option
+  // places — rows draw the riser drawing (else the plan drawing). A lookup
+  // failure draws the generic badges instead of failing the page.
+  const symbolUrls =
+    symbolDisplay.mode === "object"
+      ? await symbolUrlsFor(
+          [...new Set(slice.placements.filter((pl) => !pl.curtain).map((pl) => pl.partId))].flatMap((pid) => partById.get(pid) ?? []),
+          deviceTypes.types
+        ).catch((e: unknown) => {
+          console.error("[grid riser] object symbol lookup failed:", e);
+          return {} as Record<string, ObjectSymbolUrls>;
+        })
+      : {};
+  const view = riserViewForOption({ project, optionId, parts, symCtx, symbolMode: symbolDisplay.mode, symbolUrls });
 
   // Legend (#206 rule): one row per icon+colour actually drawn.
-  const partById = new Map(parts.map((p) => [p.id, p]));
   const legend = legendRows(
     slice.placements
       .filter((pl) => !pl.curtain)

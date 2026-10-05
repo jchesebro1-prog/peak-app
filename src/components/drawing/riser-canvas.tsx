@@ -1,9 +1,9 @@
 import type { PointerEvent as ReactPointerEvent, Ref } from "react";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { SymbolShape } from "@/components/design/symbol-shape";
+import { ObjectSymbol } from "@/components/design/object-symbol";
 import {
   NODE_HEAD,
-  NODE_ROW,
   RISER_H,
   RISER_W,
   type EndAnchor,
@@ -11,6 +11,7 @@ import {
   type RiserNote,
   type RiserView,
   type RiserViewNode,
+  nodeRowHeight,
 } from "@/lib/design/grid-riser-doc";
 import { bezierAt, placeChip, type Bezier, type Pt, type Rect } from "@/lib/design/drawing-labels";
 import type { SymbolDisplay } from "@/lib/design/grid-symbol-display";
@@ -22,6 +23,9 @@ import type { SymbolDisplay } from "@/lib/design/grid-symbol-display";
  * "typed"), conduits (grey dashed annotation, never priced) and level lines.
  * Edge chips carry the cable's short code + length and are placed clear of
  * every node and each other (drawing-labels placeChip).
+ * #300: in Object mode every device row is the taller nodeRowHeight row, and
+ * a row whose part has a riser drawing (`href`) draws it as an image
+ * (ObjectSymbol) instead of the generic badge.
  * No "use client" — without handlers nothing on it is interactive.
  */
 
@@ -50,7 +54,7 @@ type Curve = { d: string; pts: Bezier; side?: 1 | -1 };
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, Math.max(1, max - 1))}…` : s);
 const pxBox = (b: RiserNodeBox) => ({ x: b.x * RISER_W, y: b.y * RISER_H, w: b.w * RISER_W, h: b.h * RISER_H });
-const rowCenterY = (top: number, i: number) => top + NODE_HEAD + 6 + i * NODE_ROW + NODE_ROW / 2;
+const rowCenterY = (top: number, i: number, rowH: number) => top + NODE_HEAD + 6 + i * rowH + rowH / 2;
 const CHIP_H = 16;
 const chipW = (label: string) => label.length * 5.6 + 12;
 /** Keeps chips on the canvas: left, right and top walls. */
@@ -62,13 +66,13 @@ const WALLS: Rect[] = [
 
 /** A device end sits on its row's left/right edge (whichever faces the other
  *  end); a space end sits on the node's bottom centre. */
-function anchorAt(a: EndAnchor, node: RiserViewNode, box: RiserNodeBox, towardX: number): Anchor {
+function anchorAt(a: EndAnchor, node: RiserViewNode, box: RiserNodeBox, towardX: number, rowH: number): Anchor {
   const b = pxBox(box);
   if (a.partId) {
     const i = node.groups.findIndex((g) => g.partId === a.partId);
     if (i >= 0) {
       const right = towardX >= b.x + b.w / 2;
-      return { p: { x: right ? b.x + b.w : b.x, y: rowCenterY(b.y, i) }, row: true, dir: right ? 1 : -1 };
+      return { p: { x: right ? b.x + b.w : b.x, y: rowCenterY(b.y, i, rowH) }, row: true, dir: right ? 1 : -1 };
     }
   }
   return { p: { x: b.x + b.w / 2, y: b.y + b.h }, row: false, dir: 1 };
@@ -125,10 +129,14 @@ export function RiserCanvas({
   selected?: RiserSelection;
   /** Fill the parent's height too (the E-501 drawing area). */
   fill?: boolean;
-  /** Design symbol display (#300) — threaded now, drawn by a later task. */
+  /** Design symbol display (#300). The row height and drawings follow the
+   *  view's own `symbolMode` (it laid the node boxes out); kept for callers. */
   symbolDisplay?: SymbolDisplay;
 }) {
   const h: RiserCanvasHandlers = handlers || {};
+  // #300: one row height for this riser — the same rule buildRiserView sized the boxes with.
+  const rowH = nodeRowHeight(view.symbolMode);
+  const objectRows = view.symbolMode === "object";
   const interactive = Boolean(handlers);
   const pointer = interactive ? { cursor: "pointer" } : undefined;
   const nodeMap = new Map(view.nodes.map((n) => [n.key, n]));
@@ -145,7 +153,7 @@ export function RiserCanvas({
     if (!nf || !nt) return null;
     const bf = pxBox(boxOf(nf));
     const bt = pxBox(boxOf(nt));
-    return curve(anchorAt(from, nf, boxOf(nf), bt.x + bt.w / 2), anchorAt(to, nt, boxOf(nt), bf.x + bf.w / 2));
+    return curve(anchorAt(from, nf, boxOf(nf), bt.x + bt.w / 2, rowH), anchorAt(to, nt, boxOf(nt), bf.x + bf.w / 2, rowH));
   };
 
   // Paths first, then nodes (their white fill masks any path under them),
@@ -258,7 +266,10 @@ export function RiserCanvas({
       {view.nodes.map((n) => {
         const b = pxBox(boxOf(n));
         const on = selected?.nodeKey === n.key;
-        const maxChars = Math.max(6, Math.floor((b.w - 34) / 6));
+        // Object rows hold a (rowH − 4)-unit drawing slot, so their text starts further in.
+        const slot = rowH - 4;
+        const textX = objectRows ? 8 + slot + 4 : 28;
+        const maxChars = Math.max(6, Math.floor((b.w - textX - 6) / 6));
         return (
           <g key={n.key} data-node={n.key}>
             <rect x={r1(b.x)} y={r1(b.y)} width={r1(b.w)} height={r1(b.h)} rx={8} fill="#fff" stroke={n.color} strokeWidth={on ? 2.6 : 1.5} />
@@ -269,18 +280,23 @@ export function RiserCanvas({
               </text>
             </g>
             {n.groups.length === 0 ? (
-              <text x={r1(b.x + 12)} y={r1(rowCenterY(b.y, 0) + 4)} fontSize={10.5} fill="#9aa0ab">
+              <text x={r1(b.x + 12)} y={r1(rowCenterY(b.y, 0, rowH) + 4)} fontSize={10.5} fill="#9aa0ab">
                 no devices
               </text>
             ) : (
               n.groups.map((g, i) => {
-                const cy = rowCenterY(b.y, i);
+                const cy = rowCenterY(b.y, i, rowH);
+                const iconX = objectRows ? b.x + 8 + slot / 2 : b.x + 16;
                 const rowOn = selected?.row?.key === n.key && selected.row.partId === g.partId;
                 return (
                   <g key={g.partId} data-row={g.partId} onClick={h.onRowClick ? () => h.onRowClick?.(n.key, g.partId) : undefined} style={pointer}>
-                    <rect x={r1(b.x + 4)} y={r1(cy - NODE_ROW / 2)} width={r1(b.w - 8)} height={NODE_ROW} rx={3} fill={rowOn ? "#eef3ff" : "transparent"} />
-                    <SymbolShape iconId={g.iconId} x={r1(b.x + 16)} y={r1(cy)} w={12} h={12} color={g.color} />
-                    <text x={r1(b.x + 28)} y={r1(cy + 4)} fontSize={11} fill="#3d424e">
+                    <rect x={r1(b.x + 4)} y={r1(cy - rowH / 2)} width={r1(b.w - 8)} height={rowH} rx={3} fill={rowOn ? "#eef3ff" : "transparent"} />
+                    {objectRows && g.href ? (
+                      <ObjectSymbol href={g.href} x={r1(iconX)} y={r1(cy)} w={slot} h={slot} />
+                    ) : (
+                      <SymbolShape iconId={g.iconId} x={r1(iconX)} y={r1(cy)} w={12} h={12} color={g.color} />
+                    )}
+                    <text x={r1(b.x + textX)} y={r1(cy + 4)} fontSize={11} fill="#3d424e">
                       {fit(`${g.qty}× ${g.desc}`, maxChars)}
                     </text>
                   </g>

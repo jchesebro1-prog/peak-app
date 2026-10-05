@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { MeasureUnit, Point } from "@/lib/annotations";
 import { SymbolShape } from "@/components/design/symbol-shape";
 import { ObjectSymbol } from "@/components/design/object-symbol";
+import { useImagesSettled } from "@/components/design/use-images-settled";
 import { pointInPolygon } from "@/lib/design/grid-geometry";
 import { fitBox, scaleNote } from "@/lib/design/grid-drawing-set";
 import { KEY_MAX_ROWS, placeLabels, planKeyLayout, spaceNameRect, symbolRect, type Pt, type Rect } from "@/lib/design/drawing-labels";
@@ -58,7 +59,9 @@ const textW = (s: string, fs: number) => s.length * fs * 0.7 + 2 * K;
  * would land on a symbol, an earlier mark, a space name or a wire.
  *
  * `data-ready` flips to "1" once the plan's aspect is known (and a PDF page
- * has painted); the print check and the Print button wait on it.
+ * has painted) and every object drawing has loaded or failed (#300, capped
+ * at ~5 s so a broken drawing never blocks printing); the print check and
+ * the Print button wait on it.
  */
 export default function PlanSheetFigure({
   sheet,
@@ -96,7 +99,8 @@ export default function PlanSheetFigure({
   // painted — an image's data-ready is fine gated on load alone, but a PDF
   // sheet also has to wait for PdfCanvas's onRendered so the print harness
   // never captures a blank page (#209 review I2).
-  const ready = isPdf ? aspect !== null && rendered : aspect !== null;
+  const drawingsSettled = useImagesSettled(placements.flatMap((pl) => (pl.href ? [pl.href] : [])));
+  const ready = (isPdf ? aspect !== null && rendered : aspect !== null) && drawingsSettled;
   const layout = planKeyLayout({ areaW, areaH, captionH, aspect, rows: keyRows.length, k });
   const fit = aspect ? fitBox(layout.planW, layout.planH, aspect) : null;
   const H = aspect ? U * aspect : 0;

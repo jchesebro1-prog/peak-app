@@ -5,12 +5,18 @@ import { symbolLook, type SymbolContext, type SymbolEntry } from "./grid-icons";
 import { optionSlice, type GridOption } from "./grid-options";
 import { riserGraph, type RiserGroup } from "./grid-riser";
 import { buildRiserView, type RiserDoc, type RiserView } from "./grid-riser-doc";
+import type { SymbolMode } from "./grid-symbol-display";
+import type { ObjectSymbolUrls } from "./object-symbols";
 
 /**
  * One option's riser, ready to draw (#209): the derived graph (riserGraph,
  * D112) + the saved riser document + each device row's stock-symbol look
  * (the same symbolLook the plan uses). Shared by the riser editor page, the
  * drawing set's E-501 and the schedule's wire runs. Pure.
+ *
+ * #300: in Object mode a row carries its part's riser drawing (the server-
+ * built `symbolUrls` map — riser drawing, else plan drawing) and every row
+ * is the taller Object-mode row (nodeRowHeight).
  */
 export type RiserProjectLite = {
   placements?: GridPlacement[];
@@ -28,8 +34,12 @@ export function riserViewForOption(input: {
   optionId: string;
   parts: PartLite[];
   symCtx: SymbolContext;
+  /** #300: the design's symbol mode (Generic when absent). */
+  symbolMode?: SymbolMode;
+  /** #300: partId → drawing URLs (symbolUrlsFor), used only in Object mode. */
+  symbolUrls?: Record<string, ObjectSymbolUrls>;
 }): RiserView {
-  const { project, optionId, parts, symCtx } = input;
+  const { project, optionId, parts, symCtx, symbolMode, symbolUrls } = input;
   const slice = optionSlice(project, optionId);
   const spaces = project.spaces || [];
   const graph = riserGraph(slice.placements, slice.routes, spaces, parts, project.calibrations || []);
@@ -47,5 +57,7 @@ export function riserViewForOption(input: {
     },
     partDesc: (id) => partById.get(id)?.desc || id,
     partCode: (id) => partById.get(id)?.sku || id,
+    symbolMode,
+    riserHref: (id) => (symbolUrls && Object.hasOwn(symbolUrls, id) ? symbolUrls[id].riser : undefined),
   });
 }

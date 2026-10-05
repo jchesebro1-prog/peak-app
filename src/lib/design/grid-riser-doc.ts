@@ -17,12 +17,22 @@
 import type { Point } from "@/lib/annotations";
 import { pointInPolygon, polygonCentroid, spaceOf, type SpaceLite } from "./grid-geometry";
 import type { RiserGraph, RiserGroup } from "./grid-riser";
+import type { SymbolMode } from "./grid-symbol-display";
 
 export const RISER_W = 1000;
 export const RISER_H = 620;
 /** Node header and device-row heights, in canvas units. */
 export const NODE_HEAD = 24;
 export const NODE_ROW = 16;
+/** #300: a device row's height in Object mode — room for the riser drawing. */
+export const NODE_ROW_OBJECT = 28;
+
+/** The device-row height for a design's symbol mode (#300) — the one rule
+ *  every riser layout uses: node heights, row hit boxes, wire and conduit
+ *  anchors. Generic (or unknown) keeps the original 16. */
+export function nodeRowHeight(mode?: SymbolMode | null): number {
+  return mode === "object" ? NODE_ROW_OBJECT : NODE_ROW;
+}
 /** The node key for devices and ends that sit in no space. */
 export const UNASSIGNED_KEY = "unassigned";
 
@@ -205,9 +215,10 @@ export function nodeKeyOf(spaceId: string | null): string {
   return spaceId ?? UNASSIGNED_KEY;
 }
 
-/** Normalized height a node needs for its header + rows. */
-export function nodeMinH(groupCount: number): number {
-  return (NODE_HEAD + 6 + Math.max(1, groupCount) * NODE_ROW + 8) / RISER_H;
+/** Normalized height a node needs for its header + rows (taller rows in
+ *  Object mode, #300). */
+export function nodeMinH(groupCount: number, mode?: SymbolMode | null): number {
+  return (NODE_HEAD + 6 + Math.max(1, groupCount) * nodeRowHeight(mode) + 8) / RISER_H;
 }
 
 /* -------------------------------- layout -------------------------------- */
@@ -623,14 +634,26 @@ export function copyRiserDoc(
 
 /* --------------------------------- view --------------------------------- */
 
-export type RiserViewGroup = RiserGroup & { ids: string[]; iconId: string; color: string };
+export type RiserViewGroup = RiserGroup & {
+  ids: string[];
+  iconId: string;
+  color: string;
+  /** #300: the part's riser drawing (riser → plan drawing), set only in
+   *  Object mode — drawn as an image instead of the generic badge. */
+  href?: string;
+};
 export type RiserViewNode = {
   key: string;
   spaceId: string | null;
   name: string;
   color: string;
   groups: RiserViewGroup[];
+  /** Display box: never shorter than the node's rows need in this mode. */
   box: RiserNodeBox;
+  /** #300: the height the node would have in Generic mode (saved box or
+   *  generic rows). A drag in Object mode saves this, so Object mode's
+   *  taller rows never get written into the stored riser document. */
+  baseH: number;
 };
 export type EndAnchor = { key: string; partId: string | null };
 export type RiserViewEdge = {
@@ -654,6 +677,8 @@ export type RiserView = {
   notes: RiserNote[];
   /** Canvas height in units (≥ RISER_H). */
   height: number;
+  /** #300: the design's symbol mode — sets the row height (nodeRowHeight). */
+  symbolMode: SymbolMode;
 };
 
 /**
@@ -672,8 +697,17 @@ export function buildRiserView(input: {
   look?: (g: RiserGroup) => { iconId: string; color: string };
   partDesc?: (partId: string) => string;
   partCode?: (partId: string) => string;
+  /** #300: the design's symbol mode (Generic when absent). */
+  symbolMode?: SymbolMode;
+  /** #300: a part's riser drawing URL — used only in Object mode. */
+  riserHref?: (partId: string) => string | undefined;
 }): RiserView {
   const doc = normalizeRiserDoc(input.doc);
+  const symbolMode: SymbolMode = input.symbolMode === "object" ? "object" : "generic";
+  const hrefOf = (partId: string): { href?: string } => {
+    const href = symbolMode === "object" ? input.riserHref?.(partId) : undefined;
+    return href ? { href } : {};
+  };
   const look = input.look || (() => ({ iconId: "device", color: "#8c919c" }));
   const desc = input.partDesc || ((id: string) => id);
   const code = input.partCode || ((id: string) => id);
@@ -727,7 +761,12 @@ export function buildRiserView(input: {
   const nodes: RiserViewNode[] = keys.map((key) => {
     const space = input.spaces.find((s) => s.id === key);
     const g = graphNode.get(key);
-    const groups: RiserViewGroup[] = (g?.groups || []).map((grp) => ({ ...grp, ids: ids.get(`${key}|${grp.partId}`) || [], ...look(grp) }));
+    const groups: RiserViewGroup[] = (g?.groups || []).map((grp) => ({
+      ...grp,
+      ids: ids.get(`${key}|${grp.partId}`) || [],
+      ...look(grp),
+      ...hrefOf(grp.partId),
+    }));
     const b = boxes[key];
     return {
       key,
@@ -735,10 +774,11 @@ export function buildRiserView(input: {
       name: space ? space.name : "Unassigned",
       color: space?.color || g?.color || "#9aa0ab",
       groups,
-      box: { ...b, h: Math.max(b.h, r3(nodeMinH(groups.length))) },
+      box: { ...b, h: Math.max(b.h, r3(nodeMinH(groups.length, symbolMode))) },
+      baseH: Math.max(b.h, r3(nodeMinH(groups.length))),
     };
   });
 
   const bottom = Math.max(1, ...nodes.map((n) => n.box.y + n.box.h), ...doc.levels.map((l) => l.y));
-  return { nodes, edges, conduits, levels: doc.levels, notes: doc.notes, height: Math.ceil(bottom * RISER_H + 24) };
+  return { nodes, edges, conduits, levels: doc.levels, notes: doc.notes, height: Math.ceil(bottom * RISER_H + 24), symbolMode };
 }

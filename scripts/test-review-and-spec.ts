@@ -49962,3 +49962,12 @@ async function objectSymbolAsyncChecks300(): Promise<void> {
   ok(at300 > 0 && pc300.indexOf("<ObjectSymbol", at300 + 1) === -1 && gate300 > 0 && at300 - gate300 < 400,
     "#300 draw: the plan canvas renders <ObjectSymbol only under its Object-mode condition");
 }
+
+/* ======================================================================
+   #300 Task 8 — riser rows in Object mode: one row-height rule.
+   ====================================================================== */
+import { NODE_ROW as RS300_ROW, NODE_ROW_OBJECT as RS300_ROW_OBJ, nodeRowHeight as rs300RowH } from "@/lib/design/grid-riser-doc";
+{
+  ok(rs300RowH("object") === RS300_ROW_OBJ && RS300_ROW_OBJ === 28 && rs300RowH("generic") === RS300_ROW && RS300_ROW === 16 && rs300RowH(undefined) === 16 && rs300RowH(null) === 16,
+    "#300 riser: nodeRowHeight — 28-unit rows in Object mode, the original 16 otherwise");
+}

@@ -318,8 +318,12 @@ export default function RiserEditor({
       drag.current = null;
       if (!d) return;
       if (d.kind === "node") {
-        const box = liveBoxes[d.key];
-        if (!box) return;
+        const live = liveBoxes[d.key];
+        if (!live) return;
+        // #300: Object mode's taller rows are display-only — the saved box
+        // keeps the node's Generic-mode height (baseH), never the grown one.
+        const n = nodeByKey.get(d.key);
+        const box = view.symbolMode === "object" && n ? { ...live, h: Math.min(live.h, n.baseH) } : live;
         void patch({ op: "moveNode", key: d.key, box }).then((ok) => {
           if (!ok) dropLive(d.key);
         });

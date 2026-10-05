@@ -39,6 +39,7 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import { PrintButton } from "@/components/letter/print-button";
 import PlanSheetFigure, { type FigurePlacement } from "./plan-sheet-figure";
+import RiserSheetFigure from "./riser-sheet-figure";
 import SetSettingsPanel from "./set-settings-panel";
 import { cleanSymbolDisplay, markerBox } from "@/lib/design/grid-symbol-display";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
@@ -140,7 +141,6 @@ export default async function DrawingSetPage({
   const now = Date.now();
 
   // E-501 + E-60x
-  const view = riserViewForOption({ project, optionId, parts, symCtx });
   const symbolDisplay = cleanSymbolDisplay(project.symbolDisplay);
   // #300 (D609): in Object mode, the drawing URLs of the parts this option
   // places (never the whole catalog fallback). A lookup failure prints the
@@ -155,6 +155,8 @@ export default async function DrawingSetPage({
           return {} as Record<string, ObjectSymbolUrls>;
         })
       : {};
+  // E-501 follows the design's mode too (#300): the same map — riser drawing, else plan drawing.
+  const view = riserViewForOption({ project, optionId, parts, symCtx, symbolMode: symbolDisplay.mode, symbolUrls });
 
   const schedule = buildSchedule({
     placements: slice.placements,
@@ -332,7 +334,14 @@ export default async function DrawingSetPage({
       return (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: `calc(8pt * var(--dw-k))` }}>
           <div style={{ flex: 1, minHeight: 0 }}>
-            {view.nodes.length ? <RiserCanvas view={view} fill symbolDisplay={symbolDisplay} /> : <p style={{ margin: 0, color: "#5b616e" }}>Nothing on the riser yet — add spaces and devices first.</p>}
+            {view.nodes.length ? (
+              // Joins the Print button's wait until its riser drawings have loaded (#300).
+              <RiserSheetFigure hrefs={view.nodes.flatMap((n) => n.groups.flatMap((g) => (g.href ? [g.href] : [])))}>
+                <RiserCanvas view={view} fill symbolDisplay={symbolDisplay} />
+              </RiserSheetFigure>
+            ) : (
+              <p style={{ margin: 0, color: "#5b616e" }}>Nothing on the riser yet — add spaces and devices first.</p>
+            )}
           </div>
           {view.notes.length > 0 && (
             <div>

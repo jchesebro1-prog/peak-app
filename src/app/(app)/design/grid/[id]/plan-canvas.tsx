@@ -533,10 +533,12 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                     <>
                       {(() => {
                         const { w, h } = markerBox(part, s);
-                        // #300 (D608/D609): in Object mode a part (or an
-                        // assembly) with its own drawing draws it, fitted in
-                        // the same marker box; everything else keeps the
-                        // generic badge (an assembly its generic children).
+                        // #300 (D608/D609): in Object mode a part with a
+                        // drawing (its own, else its device type's) draws it,
+                        // fitted in the same marker box; everything else keeps
+                        // the generic badge. An assembly never has a drawing
+                        // (symbolUrlsFor never maps one): it always draws its
+                        // badge and its generic member children.
                         const drawing = symbolDisplay.mode === "object" ? symbolUrls[pl.partId]?.plan : undefined;
                         if (drawing) return <ObjectSymbol href={drawing} x={x} y={y} w={w} h={h} selected={on} />;
                         return (
