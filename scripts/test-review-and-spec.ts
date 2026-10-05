@@ -1016,7 +1016,7 @@ const gridUploadRoute = readFileSync(
 // #299: the editor's shell (toolbar, sheet tabs, menus, status bar) lives in
 // grid/[id]/workspace/*.tsx — scanned alongside the editor wherever a moved
 // string is asserted.
-const gridWorkspaceSource = ["grid-workspace", "pane", "toolbar", "menu", "sheet-tabs", "status-bar", "icons", "property-editor", "system-status"]
+const gridWorkspaceSource = ["grid-workspace", "pane", "toolbar", "menu", "sheet-tabs", "status-bar", "icons", "property-editor", "system-status", "bom-panel", "right-pane"]
   .map((w) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/workspace/${w}.tsx`), "utf8"))
   .join("\n");
 const gridEditorSource = readFileSync(
@@ -18397,7 +18397,7 @@ import {
   ok(vOf("asm:SA-LIVE7").virtualDead === undefined && vOf("asm:SA-LIVE7").cost === 1000 && vOf("asm:SA-LIVE7").list === 1600, "#211 fix1 I4: a priced assembly is live");
   ok(vOf("allow:audio:subwoofer:good").desc === "Subwoofer" && vOf("allow:audio:subwoofer:good").allowance === true && vOf("allow:audio:subwoofer:good").virtualDead === undefined, "#211 fix1 I5: a live allowance's desc is the row's plain label");
   const quote7 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
-  const ed7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  const ed7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx"), "utf8");
   ok(quote7.includes("virtualDead") && quote7.includes("need") && ed7.includes("Needs a part") && ed7.includes("VIRTUAL_DEAD_HINT"), "#211 fix1 I4: the quote refuses dead lines; the editor flags them 'Needs a part'");
   // M4 — bid-spec rows
   const spec7 = gemSpecRows7(
@@ -18821,7 +18821,7 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   const quoteBody = gridAct.slice(gridAct.indexOf("export async function createDraftQuoteAction"));
   const refillBodyFr = gridAct.slice(gridAct.indexOf("export async function refillScopeAction"));
   ok(quoteBody.includes("acceptIncomplete") && quoteBody.includes("autoNeedsPart(project, resolvedOptionId)"), "#211 final review D322: the Grid quote refuses Auto needs-a-part lines unless the person confirmed");
-  const edFr = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  const edFr = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx");
   ok(edFr.includes("Quote anyway") && edFr.includes("runQuote(true)"), "#211 final review D322: the editor asks before quoting an incomplete Auto design");
   ok(refillBodyFr.indexOf("AUTO_SCOPES.includes(") > -1 && refillBodyFr.indexOf("AUTO_SCOPES.includes(") < refillBodyFr.indexOf("getProject("), "#211 final review minor: refillScopeAction refuses a non-Auto scope before reading the project");
   // Minors
@@ -19749,7 +19749,7 @@ async function specBuilderActionsAsyncChecks(): Promise<void> {
 {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   ok(read("src/app/(app)/quotes/page.tsx").includes("/design/specs/new?quote="), "#205 spec builder: quotes hub offers Spec from this quote");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx");
   ok(ed.includes("/design/specs/new?grid=") && ed.includes("Spec from this design"), "#205 spec builder: the Grid editor links to the spec builder without an engagement");
   ok(read("src/app/(app)/design/engagements/view.tsx").includes("/design/specs/new?engagement="), "#205 spec builder: the engagement's Bid spec link opens the new builder");
 }
@@ -26435,7 +26435,7 @@ const fwbRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(bump.ok && bump.clamped === true && bump.item.qty === fwbAccMax && plain.ok && !("clamped" in plain), "#230 final-B: an over-cap bump is clamped and says so; an exact fit doesn't");
   ok(fwbClampNote(fwbAccMax) === "That accessory line is capped at 100,000 — it now holds 100,000.", "#230 final-B: the clamp note names the cap");
   const acc = fwbRd("src/app/(app)/design/grid/[id]/accessories.tsx");
-  const ed = fwbRd("src/app/(app)/design/grid/[id]/editor.tsx");
+  const ed = fwbRd("src/app/(app)/design/grid/[id]/editor.tsx") + fwbRd("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx");
   const gridActs = fwbRd("src/app/(app)/design/grid/[id]/actions.ts");
   ok(/line\.removed \?/.test(acc) && acc.includes("Removed part") && /onDone\(true, r\.note\)/.test(acc), "#230 final-B: the row shows a Removed part chip; the picker hands the clamp note back");
   ok(/onDone=\{\(added, note\) => \{\s*setAddingTo\(null\);[\s\S]{0,120}if \(note\) setErr\(note\);/.test(ed), "#230 final-B: the picker closes after adding and the clamp note is shown");
@@ -27337,7 +27337,7 @@ function e223Src(rel: string): string {
    #223 — display sweep C: Grid, Designs/Home promote, Specs, engagements.
    ====================================================================== */
 {
-  const ed = e223Src("src/app/(app)/design/grid/[id]/editor.tsx");
+  const ed = e223Src("src/app/(app)/design/grid/[id]/editor.tsx") + e223Src("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx");
   ok(ed.includes("quoteNumbers[activeOption.quoteId] ?? activeOption.quoteId"), "#223 Grid editor: 'Update draft quote' names the number");
   ok(!e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("quoted as ${q.id}"), "#223 Grid revisions note the quote by number");
   ok(
