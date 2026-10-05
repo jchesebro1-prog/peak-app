@@ -710,9 +710,8 @@ See `.env.example`.
     part / Delete, copy / cut / paste / duplicate, snap to grid (off by default)
     and 100-deep client-side undo / redo go through six batched all-or-nothing
     actions (`movePlacementsAction` … `restoreItemsAction`, one `patchDoc` each).
-    No migration. Remaining is Jeff-gated: whether a Blank design gets "Auto
-    fill…" (D603), and trying it on a real Auto-filled, large design on a
-    preview deploy. Punch item #299.
+    No migration; Blank designs don't Auto fill (D603, Jeff). Remaining:
+    try it on a real Auto-filled, large design in production. Punch item #299.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

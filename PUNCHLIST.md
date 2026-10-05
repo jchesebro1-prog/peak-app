@@ -10668,9 +10668,8 @@ every slice checked in the browser on a scratch datadir at 1600x1000 and a narro
 (the scratch database had none) and a multi-thousand-device design.
 
 **For Jeff.**
-1. **Question (D603):** should a Blank design get "Auto fill…"? It is not in the toolbar because the refill flow only works
-   on Auto designs and a Blank one would need a new server action. Blank designs still open on the auto-generated base
-   sheet.
+1. **Decided (D603):** no "Auto fill…" for Blank designs — Jeff, 2026-10-04: skip it. Blank designs still open on the
+   auto-generated base sheet.
 2. Try it on a **real Auto-filled design on a preview deploy** (a preview writes the production database, so work on a copy
    you do not mind editing): select a few, drag, align, snap, copy/paste, delete and undo.
 3. Open one **multi-thousand-device design** and tell me if drag, marquee or the right-pane tabs feel slow; every tab body

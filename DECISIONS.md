@@ -9210,7 +9210,7 @@ pane and never an empty schedule that looks like "no devices".
 
 The spec's toolbar has an "Auto fill…" button that would also work on a Blank design. It is **not built**: the refill flow
 (`refillScopeAction`) refuses a scope that is not Auto, so Blank would need a new server action. Blank designs still open on
-the auto-generated base sheet, as they have since #249. Question for Jeff: should a Blank design be able to Auto fill?
+the auto-generated base sheet, as they have since #249. Jeff, 2026-10-04: skip it — Blank designs don't Auto fill.
 
 ## D604. The Product Library (#299, 2026-10-04)
 
