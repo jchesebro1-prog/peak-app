@@ -539,9 +539,8 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                         // the generic badge. An assembly never has a drawing
                         // (symbolUrlsFor never maps one): it always draws its
                         // badge and its generic member children.
-                        const drawing = symbolDisplay.mode === "object" ? symbolUrls[pl.partId]?.plan : undefined;
-                        if (drawing) return <ObjectSymbol href={drawing} x={x} y={y} w={w} h={h} selected={on} />;
-                        return (
+                        // The generic badge — also what a drawing that fails to load falls back to.
+                        const generic = (
                           <>
                             {/* Stock-symbol badge (spec 2026-09-25); ring + label below are unchanged. */}
                             <SymbolShape iconId={look.iconId} x={x} y={y} w={w} h={h} color={c} />
@@ -565,6 +564,9 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                             })}
                           </>
                         );
+                        const drawing = symbolDisplay.mode === "object" ? symbolUrls[pl.partId]?.plan : undefined;
+                        if (drawing) return <ObjectSymbol href={drawing} x={x} y={y} w={w} h={h} selected={on} fallback={generic} />;
+                        return generic;
                       })()}
                     </>
                   )}

@@ -14,7 +14,6 @@ import {
   nodeRowHeight,
 } from "@/lib/design/grid-riser-doc";
 import { bezierAt, placeChip, type Bezier, type Pt, type Rect } from "@/lib/design/drawing-labels";
-import type { SymbolDisplay } from "@/lib/design/grid-symbol-display";
 
 /**
  * The riser, drawn (#209). One pure SVG renderer for the riser editor
@@ -129,9 +128,6 @@ export function RiserCanvas({
   selected?: RiserSelection;
   /** Fill the parent's height too (the E-501 drawing area). */
   fill?: boolean;
-  /** Design symbol display (#300). The row height and drawings follow the
-   *  view's own `symbolMode` (it laid the node boxes out); kept for callers. */
-  symbolDisplay?: SymbolDisplay;
 }) {
   const h: RiserCanvasHandlers = handlers || {};
   // #300: one row height for this riser — the same rule buildRiserView sized the boxes with.
@@ -292,7 +288,14 @@ export function RiserCanvas({
                   <g key={g.partId} data-row={g.partId} onClick={h.onRowClick ? () => h.onRowClick?.(n.key, g.partId) : undefined} style={pointer}>
                     <rect x={r1(b.x + 4)} y={r1(cy - rowH / 2)} width={r1(b.w - 8)} height={rowH} rx={3} fill={rowOn ? "#eef3ff" : "transparent"} />
                     {objectRows && g.href ? (
-                      <ObjectSymbol href={g.href} x={r1(iconX)} y={r1(cy)} w={slot} h={slot} />
+                      <ObjectSymbol
+                        href={g.href}
+                        x={r1(iconX)}
+                        y={r1(cy)}
+                        w={slot}
+                        h={slot}
+                        fallback={<SymbolShape iconId={g.iconId} x={r1(iconX)} y={r1(cy)} w={12} h={12} color={g.color} />}
+                      />
                     ) : (
                       <SymbolShape iconId={g.iconId} x={r1(iconX)} y={r1(cy)} w={12} h={12} color={g.color} />
                     )}

@@ -14,6 +14,7 @@ import { riserViewForOption } from "@/lib/design/grid-riser-view";
 import { legendRows, symbolContext, type SymbolEntry } from "@/lib/design/grid-icons";
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import { PrintButton } from "@/components/letter/print-button";
+import RiserSheetFigure from "../set/riser-sheet-figure";
 import RiserEditor from "./riser-editor";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
@@ -113,7 +114,7 @@ export default async function RiserPage({
         <Link href={`${base}/set${optionQuery}`} style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, color: "var(--accent)", textDecoration: "none" }}>
           Drawing set →
         </Link>
-        <PrintButton accent={accent} />
+        <PrintButton accent={accent} waitFor="[data-riser-figure]" />
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
         <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Riser</h1>
@@ -127,24 +128,26 @@ export default async function RiserPage({
         Devices, rooms and wire runs come live from the plan; the layout, level lines, conduit notes and typed
         cable links are saved here. Anything you add on the riser lands on the plan too.
       </p>
-      <RiserEditor
-        projectId={project.id}
-        optionId={optionId}
-        view={view}
-        devices={devices}
-        sheets={sheets.map((s) => ({
-          id: s.id,
-          name: s.name,
-          mime: s.mime,
-          // Blob-stored sheets stream through the authenticated proxy (D116).
-          src: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
-        }))}
-        spaces={(project.spaces || []).map((s) => ({ sheetId: s.sheetId, page: s.page }))}
-        cables={cables}
-        placements={slice.placements.map((pl) => ({ id: pl.id, sheetId: pl.sheetId, page: pl.page, x: pl.x, y: pl.y }))}
-        calibrations={(project.calibrations || []).map((c) => ({ docId: c.docId, page: c.page }))}
-        symbolDisplay={symbolDisplay}
-      />
+      {/* Joins the Print button's wait until the riser's drawings have loaded (#300) — the set's E-501 gate. */}
+      <RiserSheetFigure hrefs={view.nodes.flatMap((n) => n.groups.flatMap((g) => (g.href ? [g.href] : [])))}>
+        <RiserEditor
+          projectId={project.id}
+          optionId={optionId}
+          view={view}
+          devices={devices}
+          sheets={sheets.map((s) => ({
+            id: s.id,
+            name: s.name,
+            mime: s.mime,
+            // Blob-stored sheets stream through the authenticated proxy (D116).
+            src: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
+          }))}
+          spaces={(project.spaces || []).map((s) => ({ sheetId: s.sheetId, page: s.page }))}
+          cables={cables}
+          placements={slice.placements.map((pl) => ({ id: pl.id, sheetId: pl.sheetId, page: pl.page, x: pl.x, y: pl.y }))}
+          calibrations={(project.calibrations || []).map((c) => ({ docId: c.docId, page: c.page }))}
+        />
+      </RiserSheetFigure>
       {legend.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12, fontSize: 11.5, color: "#5b616e" }}>
           <span style={{ fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", fontSize: 10, color: "#9aa0ab", alignSelf: "center" }}>Legend</span>
@@ -154,6 +157,7 @@ export default async function RiserPage({
               {l.label}
             </span>
           ))}
+          {symbolDisplay.mode === "object" && <span style={{ color: "#8c919c", fontStyle: "italic", alignSelf: "center" }}>Product drawings shown where available</span>}
         </div>
       )}
     </div>

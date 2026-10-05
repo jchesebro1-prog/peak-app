@@ -287,6 +287,9 @@ export default async function DrawingSetPage({
                   {l.label}
                 </span>
               ))}
+              {symbolDisplay.mode === "object" && (
+                <span style={{ gridColumn: "1 / -1", color: "#8c919c", fontStyle: "italic" }}>Product drawings shown where available</span>
+              )}
             </div>
           </div>
         )}
@@ -337,7 +340,7 @@ export default async function DrawingSetPage({
             {view.nodes.length ? (
               // Joins the Print button's wait until its riser drawings have loaded (#300).
               <RiserSheetFigure hrefs={view.nodes.flatMap((n) => n.groups.flatMap((g) => (g.href ? [g.href] : [])))}>
-                <RiserCanvas view={view} fill symbolDisplay={symbolDisplay} />
+                <RiserCanvas view={view} fill />
               </RiserSheetFigure>
             ) : (
               <p style={{ margin: 0, color: "#5b616e" }}>Nothing on the riser yet — add spaces and devices first.</p>

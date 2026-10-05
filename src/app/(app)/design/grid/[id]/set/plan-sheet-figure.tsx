@@ -250,7 +250,15 @@ export default function PlanSheetFigure({
                   return pl.curtain ? (
                     <rect key={pl.id} x={x - (pl.w / 2) * K} y={y - (pl.h / 2) * K} width={pl.w * K} height={pl.h * K} rx={2 * K} fill={pl.color} />
                   ) : pl.href ? (
-                    <ObjectSymbol key={pl.id} href={pl.href} x={x} y={y} w={pl.w * K} h={pl.h * K} />
+                    <ObjectSymbol
+                      key={pl.id}
+                      href={pl.href}
+                      x={x}
+                      y={y}
+                      w={pl.w * K}
+                      h={pl.h * K}
+                      fallback={<SymbolShape iconId={pl.iconId} x={x} y={y} w={pl.w * K} h={pl.h * K} color={pl.color} />}
+                    />
                   ) : (
                     <SymbolShape key={pl.id} iconId={pl.iconId} x={x} y={y} w={pl.w * K} h={pl.h * K} color={pl.color} />
                   );

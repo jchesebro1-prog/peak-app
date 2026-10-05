@@ -228,7 +228,7 @@ function DevicePalette({
               >
                 <span style={BADGE}>{i + 1}</span>
                 {drawing ? (
-                  <ObjectSymbolImg src={drawing} size={34} />
+                  <ObjectSymbolImg src={drawing} size={34} fallback={<SymbolIcon iconId={look.iconId} color={look.color} size={34} />} />
                 ) : (
                   <SymbolIcon iconId={look.iconId} color={look.color} size={34} />
                 )}

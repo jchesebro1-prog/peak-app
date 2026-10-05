@@ -183,7 +183,7 @@ export default async function GridEditorPage({
   // to the part-document viewer. loadPartDocsState runs the legacy backfill
   // first, so a legacy blob is a document by now — and a replaced or
   // detached legacy file no longer counts (final fix wave, I1).
-  const { index: docIndex } = await loadPartDocsState(catalog);
+  const { index: docIndex, documents: docRows, links: docLinks } = await loadPartDocsState(catalog);
   const hasDatasheetFile = (p: (typeof catalog)[number]) => ownFiles(docIndex, p.sku, "datasheet").length > 0;
   // #211: assemblies and allowances placed by Auto resolve live into PartLite rows.
   const parts: PartLite[] = [
@@ -192,8 +192,9 @@ export default async function GridEditorPage({
   ];
   // #300 (D609): each part's object drawing URLs, resolved here so the client
   // never reads documents. A lookup failure must never break the editor — it
-  // just draws the generic symbols.
-  const symbolUrls = await symbolUrlsFor(parts, deviceTypes.types).catch((e: unknown) => {
+  // just draws the generic symbols. The documents and links loaded above are
+  // reused, so the lookup queries nothing.
+  const symbolUrls = await symbolUrlsFor(parts, deviceTypes.types, { docs: docRows, links: docLinks }).catch((e: unknown) => {
     console.error("[grid] object symbol lookup failed:", e);
     return {};
   });

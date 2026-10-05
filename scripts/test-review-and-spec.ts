@@ -49899,6 +49899,49 @@ import { resolveObjectSymbol as os300Resolve } from "@/lib/design/object-symbols
     "#300 symbols: nothing (or a malformed id) resolves to {} — the generic symbol draws");
 }
 
+/* #300 final fix — the pure core both symbolUrlsFor paths share (the
+   editor's pre-loaded documents/links, and the batched query). */
+import { symbolUrlsFromRows as os300Rows } from "@/lib/design/object-symbols";
+{
+  const U = (id: string) => `/api/part-documents/${encodeURIComponent(id)}`;
+  const P = (id: string, extra: Record<string, unknown> = {}) => ({ id, sku: id, desc: id, category: "", unit: "ea", list: 0, cost: 0, ...extra });
+  const docs = [
+    { id: "PD-old111aaa", kind: "symbol" as const, blobKey: "k1" },
+    { id: "PD-new222bbb", kind: "symbol" as const, blobKey: "k2" },
+    { id: "PD-ris333ccc", kind: "riser" as const, blobKey: "k3" },
+    { id: "PD-nofile444", kind: "symbol" as const, blobKey: null },
+    { id: "PD-sheet5555", kind: "datasheet" as const, blobKey: "k5" },
+    { id: "PD-type6666a", kind: "symbol" as const, blobKey: "k6" },
+    { id: "PD-arch7777a", kind: "symbol" as const, blobKey: "k7" },
+  ] as unknown as Parameters<typeof os300Rows>[2];
+  const L = (partSku: string, documentId: string, kind: string, createdAt: number) => ({ partSku, documentId, kind, createdAt });
+  const links = [
+    L("SKU-A", "PD-new222bbb", "symbol", 20),
+    L("SKU-A", "PD-old111aaa", "symbol", 10),
+    L("SKU-A", "PD-ris333ccc", "riser", 5),
+    L("SKU-B", "PD-nofile444", "symbol", 1),
+    L("SKU-C", "PD-sheet5555", "symbol", 1),
+    L("SKU-OUT", "PD-new222bbb", "symbol", 1),
+  ] as unknown as Parameters<typeof os300Rows>[3];
+  const types = [
+    { key: "speakers", label: "Speakers", scope: "Audio", order: 10, symbolDocId: "PD-type6666a" },
+    { key: "amps", label: "Amps", scope: "Audio", order: 20, symbolDocId: "PD-arch7777a", archived: true },
+  ] as unknown as Parameters<typeof os300Rows>[1];
+  const parts = [
+    P("gl-a", { pricingPartId: "SKU-A" }),
+    P("SKU-B", { deviceType: "speakers" }),
+    P("SKU-C"),
+    P("SKU-D", { deviceType: "amps" }),
+    P("asm:x", { kind: "assembly", deviceType: "speakers" }),
+  ] as unknown as Parameters<typeof os300Rows>[0];
+  const m = os300Rows(parts, types, docs, links);
+  ok(
+    m["gl-a"]?.plan === U("PD-new222bbb") && m["gl-a"]?.riser === U("PD-ris333ccc") &&
+      m["SKU-B"]?.plan === U("PD-type6666a") && !("SKU-C" in m) && !("SKU-D" in m) && !("asm:x" in m) && Object.keys(m).length === 2,
+    "#300 symbols: symbolUrlsFromRows — newest link wins, riser kept, a file-less or non-drawing document falls to the type, an archived type or assembly never draws"
+  );
+}
+
 async function objectSymbolAsyncChecks300(): Promise<void> {
   const DT = await import("../src/lib/stores/device-types");
   const { deviceTypesFrom } = await import("../src/lib/design/device-types");
@@ -49946,6 +49989,14 @@ async function objectSymbolAsyncChecks300(): Promise<void> {
     const U = (id: string) => `/api/part-documents/${encodeURIComponent(id)}`;
     ok(map["gl-own"]?.plan === U(ownDoc.id) && map[fixtureId(300, "sku-os-typed")]?.plan === U(typeDoc.id) && !(fixtureId(300, "sku-os-none") in map) && Object.keys(map).length === 2,
       "#300 symbols: symbolUrlsFor maps a part's own drawing, a device type's drawing, and leaves a part with neither out");
+    // The editor's path (documents + links it already loaded) must agree with the query path.
+    const [allDocs300, allLinks300] = await Promise.all([PD.allDocuments(), PD.allDocumentLinks()]);
+    const loadedMap = await symbolUrlsFor(
+      [P("gl-own", { pricingPartId: skuOwn }), P(fixtureId(300, "sku-os-typed"), { deviceType: "speakers" }), P(fixtureId(300, "sku-os-none"), { deviceType: "amplifiers" })],
+      types,
+      { docs: allDocs300, links: allLinks300 }
+    );
+    ok(JSON.stringify(loadedMap) === JSON.stringify(map), "#300 symbols: symbolUrlsFor with pre-loaded documents and links builds the same map as its query path");
   } finally {
     await db.delete(blobs).where(eq(blobs.id, "gridDeviceTypes"));
     for (const row of snap) await db.insert(blobs).values(row);

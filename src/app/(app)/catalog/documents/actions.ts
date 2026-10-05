@@ -70,9 +70,11 @@ const MAX_SKUS_PER_CALL = 500;
 
 /** Every document write here changes what the portal index derives (images,
  *  datasheet coverage) — drop this process's cached copy; other serverless
- *  instances converge within the index's 5-minute TTL. */
-function revalidate(): void {
-  invalidatePortalIndex();
+ *  instances converge within the index's 5-minute TTL. A Grid drawing
+ *  (`symbol` / `riser`, #300) is not in that index, so a write touching only
+ *  a drawing (`kind`) skips the ~37k-part rebuild. */
+function revalidate(kind?: PartDocKind): void {
+  if (!isDrawingKind(kind)) invalidatePortalIndex();
   revalidatePath("/catalog/documents");
   revalidatePath("/catalog");
 }
@@ -176,7 +178,7 @@ export async function attachUploadedDocumentAction(input: {
     const primary = new Set(Array.isArray(sheet.primarySkus) ? sheet.primarySkus.map(String) : []);
     for (const sku of skus) await placeSheetImage(doc.id, sku, primary.has(sku));
   }
-  revalidate();
+  revalidate(doc.kind);
   return { ok: true, documentId: doc.id, linked };
 }
 
@@ -205,7 +207,7 @@ export async function replaceDocumentFileAction(input: {
     file = drawn.file;
   }
   await replaceDocumentFile(doc.id, file, user.name);
-  revalidate();
+  revalidate(doc.kind);
   return { ok: true };
 }
 
@@ -213,8 +215,11 @@ export async function replaceDocumentFileAction(input: {
 export async function detachDocumentAction(documentId: string, sku: string): Promise<DocActionResult> {
   await requireUser();
   if (!isDocumentId(documentId)) return { ok: false, error: "Not a document id." };
+  // Read first only for its kind (a drawing skips the portal-index rebuild);
+  // a missing document still falls through to detach's own refusal.
+  const doc = await getDocument(documentId);
   if (!(await detachDocument(documentId, String(sku || "").trim()))) return { ok: false, error: "That part was not linked to this document." };
-  revalidate();
+  revalidate(doc?.kind);
   return { ok: true };
 }
 
@@ -227,7 +232,7 @@ export async function attachExistingDocumentAction(documentId: string, skus: str
   const live = await liveSkus(skus || []);
   if (!live.length) return { ok: false, error: "Pick at least one catalog part." };
   const linked = await attachDocument(doc.id, live, user.name);
-  revalidate();
+  revalidate(doc.kind);
   return { ok: true, linked };
 }
 
