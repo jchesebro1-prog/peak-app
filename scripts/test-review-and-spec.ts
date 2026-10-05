@@ -49364,3 +49364,23 @@ import * as GT from "@/lib/design/grid-tools";
   ok(GT.fitZoom({ w: 0, h: 0 }, { w: 900, h: 900 }, 1.5) === 1.5, "#299 tools: unknown box keeps zoom");
   ok(GT.fitZoom({ w: 1250, h: 10000 }, { w: 1000, h: 1000 }, 1) === 1.2, "#299 tools: fit zoom exact multiple doesn't lose a step");
 }
+
+/* #299 Grid workspace — Product Library tree (Task 6) */
+import * as GLIB from "@/lib/design/grid-library";
+{
+  const q = GLIB.libraryQuery({ kind: "type", scope: "Lighting", typeKey: "par" }, "s4", "ETC");
+  ok(q !== null && q.tab === "all" && q.scope === "Lighting" && q.typeKey === "par" && q.search === "s4" && q.mfr === "ETC", "#299 library: type node → palette query");
+  ok(GLIB.libraryQuery({ kind: "favorites" }, "", "")?.tab === "favorites", "#299 library: favorites → favorites tab");
+  ok(GLIB.libraryQuery({ kind: "curtains" }, "", "") === null && GLIB.libraryQuery({ kind: "assemblies" }, "", "") === null, "#299 library: curtains/assemblies are not palette queries");
+  const tree = GLIB.libraryTree({ scopeCounts: { Lighting: 62, Rigging: 0, Audio: 3 }, favorites: 2, recent: 0, assemblies: 1,
+    open: { kind: "scope", scope: "Lighting" }, typeChips: [{ key: "par", label: "PAR", count: 10 }] });
+  ok(tree.map((n) => n.key).join(",") === "favorites,recent,all,scope:Lighting,scope:Audio,assemblies,curtains", "#299 library: node order, empty scopes hidden");
+  const light = tree.find((n) => n.key === "scope:Lighting")!;
+  ok(light.count === 62 && light.children?.[0].key === "type:Lighting:par", "#299 library: open scope lists its types");
+  ok(!tree.find((n) => n.key === "scope:Audio")!.children, "#299 library: closed scopes have no children");
+  ok(!GLIB.libraryTree({ scopeCounts: {}, favorites: 0, recent: 0, assemblies: 0, open: { kind: "all" }, typeChips: [] }).some((n) => n.key === "assemblies"), "#299 library: no assemblies node when there are none");
+  const parts = [{ id: "a", sku: "A", desc: "Zeta rack", category: "", unit: "ea", list: 1, cost: 1, kind: "assembly" as const },
+    { id: "b", sku: "B", desc: "Alpha pkg", category: "", unit: "ea", list: 1, cost: 1, kind: "assembly" as const },
+    { id: "c", sku: "C", desc: "Plain", category: "", unit: "ea", list: 1, cost: 1 }];
+  ok(GLIB.assemblyParts(parts as never, "").map((p) => p.id).join(",") === "b,a" && GLIB.assemblyParts(parts as never, "zeta").length === 1, "#299 library: assemblies filter + sort");
+}
