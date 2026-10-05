@@ -14,7 +14,7 @@ const DEVICES_HELP =
   "Arm a device and click the plan to place each unit · click a marker to select it, drag it to move it (arrow keys nudge) · click inside a space to select the room · the BOM prices every sheet in this design, not just the visible page.";
 
 export default function StatusBar({ ed }: { ed: GridEditor }) {
-  const { lastAction, sheetPlacements, placements, selectedPlacements, sheet, cal, page, err, setErr } = ed;
+  const { lastAction, sheetPlacements, placements, selectedPlacements, sheet, cal, page, err, setErr, snapStatus } = ed;
   const onSheet = sheetPlacements.reduce((n, pl) => n + placementQty(pl), 0);
   const inDesign = placements.reduce((n, pl) => n + placementQty(pl), 0);
   const scale = !sheet ? "no sheet" : cal ? `calibrated · ref ${formatMeasure(cal.refLength, cal.unit)}` : `not calibrated (page ${page})`;
@@ -42,6 +42,8 @@ export default function StatusBar({ ed }: { ed: GridEditor }) {
       </span>
       {sep}
       <span>Scale: {scale}</span>
+      {sep}
+      <span>{snapStatus}</span>
       {selectedPlacements.length > 1 && (
         <>
           {sep}

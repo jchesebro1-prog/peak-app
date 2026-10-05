@@ -534,7 +534,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
             placeholder={sharedCategory === null ? "Mixed" : "Followspots, House left…"}
             aria-label={`Category for ${n} ${noun}`}
             onKeyDown={(e) => {
-              if (e.key === "Enter") applyCategory();
+              if (e.key === "Enter" && !busy) applyCategory();
             }}
             style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px", minWidth: 0 }}
           />

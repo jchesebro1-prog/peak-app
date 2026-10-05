@@ -75,6 +75,15 @@ import { paletteView } from "@/lib/design/grid-palette";
 import type { ScheduleData } from "@/lib/design/grid-schedule";
 import { idsInRect, marqueeSelection, normRect, toggleId, type Rect } from "@/lib/design/grid-selection";
 import { alignPositions, changedMoves, distributePositions, type AlignMode } from "@/lib/design/grid-align";
+import {
+  SNAP_FT_KEY,
+  SNAP_ON_KEY,
+  SNAP_SPACINGS_FT,
+  snapDelta,
+  snapGrid,
+  snapPoint,
+  type SnapGrid,
+} from "@/lib/design/grid-snap";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -106,6 +115,29 @@ const NUDGE_FAST = 0.01;
 /** Coalesce key-repeat into one write, holding an arrow must not fire a
  *  server action per keystroke. */
 const NUDGE_COMMIT_MS = 400;
+
+/** Snap on (#299): one arrow press moves a device one grid step; Shift = this many. */
+const SNAP_NUDGE_FAST_STEPS = 5;
+
+/** One axis of a snapped nudge: the grid line `k` steps from `v` in direction
+ *  `dir` — from a point already on the grid that is exactly k steps; from an
+ *  off-grid point the first step lands on the next line over. The tolerance
+ *  keeps float noise (0.30000000000000004) from skipping a line. */
+function nextGridLine(v: number, step: number, dir: -1 | 1, k: number): number {
+  const n = v / step;
+  return (dir > 0 ? Math.floor(n + 1e-6) + k : Math.ceil(n - 1e-6) - k) * step;
+}
+
+/** Fold one batch of moves into another, the later one winning per device. */
+function mergeMoves(
+  first: readonly { id: string; x: number; y: number }[] | null,
+  then: readonly { id: string; x: number; y: number }[],
+): { id: string; x: number; y: number }[] {
+  if (!first?.length) return [...then];
+  const m = new Map(first.map((mv) => [mv.id, mv]));
+  for (const mv of then) m.set(mv.id, mv);
+  return [...m.values()];
+}
 
 /** What a thrown action (dropped connection, server error — not a refusal)
  *  says next to the plan once its optimistic state is rolled back. */
@@ -153,11 +185,13 @@ type MarkerDrag = {
 };
 
 /** Where a dragged group's members are right now: each one's grab-time
- *  position plus the dragged marker's delta, clamped to the page. */
-function dragTargets(d: MarkerDrag): { id: string; x: number; y: number }[] {
+ *  position plus the dragged marker's delta, clamped to the page. With snap
+ *  on (#299) the DRAGGED marker lands on the grid and every other member
+ *  moves by that same snapped delta — the live preview and the commit both
+ *  read this, so what you see on release is what is written. */
+function dragTargets(d: MarkerDrag, snap: SnapGrid | null): { id: string; x: number; y: number }[] {
   const o = d.from[d.id];
-  const dx = o ? d.at.x - o.x : 0;
-  const dy = o ? d.at.y - o.y : 0;
+  const { dx, dy } = o ? snapDelta(o, d.at, snap) : { dx: 0, dy: 0 };
   return d.ids
     .filter((id) => d.from[id])
     .map((id) => ({ id, x: clamp01(d.from[id].x + dx), y: clamp01(d.from[id].y + dy) }));
@@ -459,6 +493,52 @@ function useGridEditorImpl(props: GridEditorProps) {
   const aspect = size.w > 0 && size.h > 0 ? size.h / size.w : 1;
   const cal = sheet ? findCalibration(project.calibrations, sheet.id, page) : null;
 
+  /** Snap to grid (#299 slice 5) — per viewer, off by default, applied
+   *  client-side to place, curtain drop, group drag and nudge. The stored
+   *  values are applied after mount (hydration-safe, the inbox-layout
+   *  pattern); every change is written back. */
+  const [snapOn, setSnapOnState] = useState(false);
+  const [snapFt, setSnapFtState] = useState(1);
+  useEffect(() => {
+    queueMicrotask(() => {
+      try {
+        const on = window.localStorage.getItem(SNAP_ON_KEY);
+        const ft = Number(window.localStorage.getItem(SNAP_FT_KEY));
+        setSnapOnState(on === "1");
+        setSnapFtState((SNAP_SPACINGS_FT as readonly number[]).includes(ft) ? ft : 1);
+      } catch {
+        /* storage unavailable — keep the defaults */
+      }
+    });
+  }, []);
+  const setSnapOn = useCallback((on: boolean) => {
+    setSnapOnState(on);
+    try {
+      window.localStorage.setItem(SNAP_ON_KEY, on ? "1" : "0");
+    } catch {
+      /* per-viewer convenience only */
+    }
+  }, []);
+  const setSnapFt = useCallback((ft: number) => {
+    if (!(SNAP_SPACINGS_FT as readonly number[]).includes(ft)) return;
+    setSnapFtState(ft);
+    try {
+      window.localStorage.setItem(SNAP_FT_KEY, String(ft));
+    } catch {
+      /* per-viewer convenience only */
+    }
+  }, []);
+  /** The active snap step, or null when snap is off — or on but the spacing
+   *  is unusable at this page's scale (then it behaves as off and the status
+   *  bar says so). Uncalibrated pages snap to 1% of the sheet. */
+  const calScale = cal?.scale;
+  const calUnitOfPage = cal?.unit;
+  const snap = useMemo(
+    () => (snapOn ? snapGrid(calScale != null && calUnitOfPage ? { scale: calScale, unit: calUnitOfPage } : null, snapFt, aspect) : null),
+    [snapOn, calScale, calUnitOfPage, snapFt, aspect]
+  );
+  const snapStatus = !snapOn ? "Snap: off" : snap ? `Snap: ${snap.label}` : "Snap: too fine at this scale";
+
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   /** Every part's resolved badge (icon + colour), computed once per prop
    *  change — the plan re-renders on every drag step. */
@@ -569,9 +649,9 @@ function useGridEditorImpl(props: GridEditorProps) {
     }
     // The live gesture wins — every device in a group drag moves by the
     // dragged marker's delta (#299).
-    if (drag && drag.moved) for (const t of dragTargets(drag)) put(t.id, t);
+    if (drag && drag.moved) for (const t of dragTargets(drag, snap)) put(t.id, t);
     return m;
-  }, [placements, movedLocal, drag]);
+  }, [placements, movedLocal, drag, snap]);
 
   const sheetPlacements = useMemo(() => {
     const base = placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page);
@@ -805,7 +885,7 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  here. Optimistic entries go in first and are ALL rolled back if the
    *  server refuses. Resolves to the positions the server replaced (what
    *  undo needs), or null when nothing was written. */
-  const commitMoves = useCallback(
+  const sendMoves = useCallback(
     async (moves: { id: string; x: number; y: number }[], label?: string) => {
       const servers = new Map(placements.map((q) => [q.id, q]));
       const valid = moves.filter((m) => servers.has(m.id));
@@ -850,6 +930,44 @@ function useGridEditorImpl(props: GridEditorProps) {
     },
     [project.id, placements, router, noteAction, placementLabel]
   );
+  /** The latest sendMoves, for the nudge timer: the timer outlives the render
+   *  that armed it, and a stale closure would check its moves against a
+   *  placement list from before a delete. */
+  const sendMovesRef = useRef(sendMoves);
+  useEffect(() => {
+    sendMovesRef.current = sendMoves;
+  }, [sendMoves]);
+
+  /** The nudge positions painted but not yet written (the 400 ms debounce). */
+  const pendingNudge = useRef<{ id: string; x: number; y: number }[] | null>(null);
+  /** Cancel the debounce and hand back the unwritten nudge (null if none). */
+  const takeNudge = useCallback(() => {
+    if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+    nudgeTimer.current = null;
+    const m = pendingNudge.current;
+    pendingNudge.current = null;
+    return m;
+  }, []);
+  /** Write a pending nudge NOW, before an edit that isn't a move (delete,
+   *  category, part), so the debounce can never fire after it. Devices in
+   *  `dropIds` (about to be deleted) are left out of the write — moving them
+   *  first would be pointless, and moving them after would fail. */
+  const flushNudge = useCallback(
+    async (dropIds?: ReadonlySet<string>) => {
+      const m = takeNudge();
+      const rest = m && dropIds ? m.filter((mv) => !dropIds.has(mv.id)) : m;
+      if (rest?.length) await sendMoves(rest);
+    },
+    [takeNudge, sendMoves]
+  );
+  /** Every move that isn't the nudge timer itself (drag release, align,
+   *  distribute) goes through here: a pending nudge is FOLDED into the same
+   *  write (this batch wins per device), so a stale debounce can never land
+   *  after it and undo the drag/align. One write, one refresh, no flicker. */
+  const commitMoves = useCallback(
+    (moves: { id: string; x: number; y: number }[], label?: string) => sendMoves(mergeMoves(takeNudge(), moves), label),
+    [takeNudge, sendMoves]
+  );
 
   // Arrow-key nudge for the selected device (punch #47). Bound to the window
   // because the plan is a div with no focus of its own; every text field in
@@ -871,15 +989,32 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t instanceof HTMLElement && t.isContentEditable)) return;
       if (t?.closest('[role="dialog"], [data-no-nudge]')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const step = e.shiftKey ? NUDGE_FAST : NUDGE;
-      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
-      const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-      if (!dx && !dy) return;
+      const dirX = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+      const dirY = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+      if (!dirX && !dirY) return;
       e.preventDefault(); // don't scroll the plan out from under the device
+      let dx: number;
+      let dy: number;
+      if (snap) {
+        // Snap on (#299): the first selected device steps to the next grid
+        // line in the arrow's direction (its other axis rounds onto the grid
+        // too, so it lands on a dot); the rest move by the same delta.
+        const k = e.shiftKey ? SNAP_NUDGE_FAST_STEPS : 1;
+        const a = shownAt(selectedPlacements[0]);
+        const to = snapPoint(a, snap);
+        if (dirX) to.x = clamp01(nextGridLine(a.x, snap.stepX, dirX as -1 | 1, k));
+        if (dirY) to.y = clamp01(nextGridLine(a.y, snap.stepY, dirY as -1 | 1, k));
+        dx = to.x - a.x;
+        dy = to.y - a.y;
+      } else {
+        const step = e.shiftKey ? NUDGE_FAST : NUDGE;
+        dx = dirX * step;
+        dy = (dirY * step) / (aspect || 1);
+      }
       // #299: every selected device moves together.
       const moves = selectedPlacements.map((pl) => {
         const from = shownAt(pl);
-        return { id: pl.id, x: clamp01(from.x + dx), y: clamp01(from.y + dy / (aspect || 1)) };
+        return { id: pl.id, x: clamp01(from.x + dx), y: clamp01(from.y + dy) };
       });
       // Paint every keystroke; write once the key-repeat settles.
       setMovedLocal((prev) => {
@@ -889,10 +1024,13 @@ function useGridEditorImpl(props: GridEditorProps) {
         }
         return next;
       });
+      // The pending write accumulates: a selection change between two
+      // presses must not drop the first device's unwritten nudge.
+      pendingNudge.current = mergeMoves(pendingNudge.current, moves);
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
       nudgeTimer.current = setTimeout(() => {
-        nudgeTimer.current = null;
-        void commitMoves(moves);
+        const m = takeNudge();
+        if (m?.length) void sendMovesRef.current(m);
       }, NUDGE_COMMIT_MS);
     };
     window.addEventListener("keydown", onKey);
@@ -900,7 +1038,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   }, [
     selectedPlacements,
     shownAt,
-    commitMoves,
+    takeNudge,
+    snap,
     aspect,
     pending,
     curtainAt,
@@ -1025,11 +1164,13 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (busy || pending || curtainAt || !sheet) return;
     setErr(null);
     setBusy(true);
+    // Snap on (#299): the armed click and a palette drop both land on the grid.
+    const p = snapPoint(at, snap);
     placeDeviceAction(project.id, {
       sheetId: sheet.id,
       page,
-      x: at.x,
-      y: at.y,
+      x: p.x,
+      y: p.y,
       partId,
       optionId: activeOptionId,
     }).then((r) => {
@@ -1195,7 +1336,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (armedCurtainType) {
       setSelectedIds([]);
       setCategoryDraft(null);
-      setCurtainAt(p);
+      setCurtainAt(snapPoint(p, snap));
       return;
     }
 
@@ -1288,7 +1429,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         else if (d.toggleOff) setSelectedIds([]);
         return;
       }
-      void commitMoves(dragTargets(d));
+      void commitMoves(dragTargets(d, snap));
       return;
     }
     if (!calDraft) return;
@@ -1574,6 +1715,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   const removeSelected = useCallback(async (): Promise<RemovedBundle | null> => {
     const targets = selectedPlacements;
     if (!targets.length) return null;
+    // A pending nudge writes first (minus the devices going away), so its
+    // debounce can't fire after the delete and report them missing.
+    await flushNudge(new Set(targets.map((pl) => pl.id)));
     setErr(null);
     setBusy(true);
     try {
@@ -1593,7 +1737,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     } finally {
       setBusy(false);
     }
-  }, [selectedPlacements, project.id, router, noteAction, placementLabel]);
+  }, [selectedPlacements, project.id, router, noteAction, placementLabel, flushNudge]);
 
   /** Where each visible selected device is shown right now. */
   const selectionPositions = useCallback(
@@ -1636,6 +1780,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         .filter((pl) => (normalizeCategory(pl.category) ?? "") !== want)
         .map((pl) => ({ id: pl.id, category: want }));
       if (!items.length) return null;
+      await flushNudge();
       setErr(null);
       setBusy(true);
       try {
@@ -1654,7 +1799,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         setBusy(false);
       }
     },
-    [selectedPlacements, project.id, router, noteAction]
+    [selectedPlacements, project.id, router, noteAction, flushNudge]
   );
 
   /** Swap the part on every visible selected device. Curtains can't change
@@ -1665,6 +1810,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (!partId || selectedPlacements.some((pl) => pl.curtain)) return null;
       const items = selectedPlacements.filter((pl) => pl.partId !== partId).map((pl) => ({ id: pl.id, partId }));
       if (!items.length) return null;
+      await flushNudge();
       setErr(null);
       setBusy(true);
       try {
@@ -1683,7 +1829,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         setBusy(false);
       }
     },
-    [selectedPlacements, project.id, router, noteAction, partLabel]
+    [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge]
   );
 
   // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
@@ -1895,6 +2041,12 @@ function useGridEditorImpl(props: GridEditorProps) {
     selectedPart,
     shownAt,
     commitMoves,
+    snapOn,
+    setSnapOn,
+    snapFt,
+    setSnapFt,
+    snap,
+    snapStatus,
     selectedIds,
     setSelectedIds,
     selectedPlacements,

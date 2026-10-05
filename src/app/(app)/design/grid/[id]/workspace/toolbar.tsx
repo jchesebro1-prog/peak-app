@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { SHORT } from "@/app/(app)/design/quick/engine";
+import { feetLabel, SNAP_SPACINGS_FT } from "@/lib/design/grid-snap";
 import type { GridTool } from "@/lib/design/grid-tools";
 import DesignIdentity from "../design-identity";
 import OptionSwitcher from "../option-switcher";
@@ -148,6 +149,12 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
     refillScope,
     setRefillScope,
     setErr,
+    cal,
+    snapOn,
+    setSnapOn,
+    snapFt,
+    setSnapFt,
+    snap,
   } = ed;
 
   const scopes = refillableScopes(project.scopeInputs, auto);
@@ -336,6 +343,47 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         <IconButton title="Fit sheet" disabled={!sheet} onClick={fit}>
           <IconFit />
         </IconButton>
+      </Group>
+
+      <Divider />
+      {/* Snap to grid (#299 slice 5) — per viewer, off by default. */}
+      <Group label="Snap">
+        <button
+          type="button"
+          aria-pressed={snapOn}
+          title={
+            !snapOn
+              ? "Snap to grid — place, drag and nudge land on the grid"
+              : snap
+                ? `Snap to grid is on (${snap.label}) — click to turn it off`
+                : "Snap to grid is on, but too fine at this scale — pick a larger spacing"
+          }
+          onClick={() => setSnapOn(!snapOn)}
+          style={{
+            ...BTN,
+            height: 24,
+            padding: "0 8px",
+            borderColor: snapOn ? "#16181d" : "#dfe2e8",
+            background: snapOn ? "#16181d" : "#fff",
+            color: snapOn ? "#fff" : "#3d424e",
+          }}
+        >
+          Snap
+        </button>
+        <select
+          value={String(snapFt)}
+          onChange={(e) => setSnapFt(Number(e.target.value))}
+          disabled={!cal}
+          aria-label="Snap spacing"
+          title={cal ? "Snap spacing" : "Calibrate the page to snap in feet"}
+          style={{ ...BTN, height: 24, padding: "0 4px", marginLeft: 3, fontWeight: 500, cursor: cal ? "pointer" : "default" }}
+        >
+          {SNAP_SPACINGS_FT.map((ft) => (
+            <option key={ft} value={String(ft)}>
+              {feetLabel(ft)}
+            </option>
+          ))}
+        </select>
       </Group>
 
       {/* One non-wrapping unit, pushed to the right: the toolbar only wraps

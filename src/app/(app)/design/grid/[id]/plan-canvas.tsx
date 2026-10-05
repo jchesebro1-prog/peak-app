@@ -123,7 +123,28 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     spaceHeld,
     setSpaceHeld,
     clearCursorAt,
+    snap,
   } = ed;
+
+  // The sheet's rendered pixel size (#299 snap dots) — observed rather than
+  // derived, so it tracks zoom, a PDF page re-render and a sheet switch alike.
+  const [boxPx, setBoxPx] = useState<{ w: number; h: number } | null>(null);
+  const sheetId = sheet?.id;
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      const h = entry.contentRect.height;
+      setBoxPx((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [wrapRef, sheetId]);
+  /** The snap grid's dot pattern, or null: snap off, no size yet, or a step
+   *  under 6 px on screen (too dense to read — snapping still applies). */
+  const dotStep = snap && boxPx ? { x: snap.stepX * boxPx.w, y: snap.stepY * boxPx.h } : null;
+  const dots = dotStep && dotStep.x >= 6 && dotStep.y >= 6 ? dotStep : null;
 
   // Space held = the hand tool while it's down. Bound to the window (the plan
   // has no focus of its own); a text field keeps its space bar, and the page
@@ -303,6 +324,23 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
             />
           )}
 
+          {dots && (
+            // Snap grid dots: over the sheet, under the overlay. The pattern
+            // is shifted half a tile so each dot sits ON a grid point (a
+            // radial gradient centres in its tile).
+            <div
+              aria-hidden
+              data-snap-dots
+              style={{
+                position: "absolute",
+                inset: 0,
+                pointerEvents: "none",
+                backgroundImage: "radial-gradient(rgba(0,0,0,.28) 1px, transparent 1.2px)",
+                backgroundSize: `${dots.x}px ${dots.y}px`,
+                backgroundPosition: `${-dots.x / 2}px ${-dots.y / 2}px`,
+              }}
+            />
+          )}
           <svg
             width={size.w}
             height={size.h}
