@@ -23329,7 +23329,7 @@ import type { PartLite as PL226 } from "@/lib/design/grid-bom";
     "#226 palette: a client component on pure modules; stars through the action; admins get a link to Device types");
   // #299: the palette's tiles now render inside the Library pane (workspace/product-library.tsx).
   const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + pal;
-  ok(ed.includes("<DevicePalette") && !ed.includes("filteredParts") && !ed.includes("scopeFilter"), "#226 palette: the editor delegates the palette");
+  ok(ed.includes("<DevicePalette") && read("src/app/(app)/design/grid/[id]/editor.tsx").includes("<ProductLibrary") && !ed.includes("filteredParts") && !ed.includes("scopeFilter"), "#226 palette: the editor delegates the palette");
   const pg = read("src/app/(app)/design/grid/[id]/page.tsx");
   ok(pg.includes("loadDeviceTypeContext(catalog)") && pg.includes("getGridFavorites(user.id)") && pg.includes("getGridRecent(user.id)") && pg.includes("favorites={favorites}") && pg.includes("recent={recent}"),
     "#226 palette: the page loads types, favorites and recent for the signed-in user");
@@ -49384,4 +49384,5 @@ import * as GLIB from "@/lib/design/grid-library";
     { id: "b", sku: "B", desc: "Alpha pkg", category: "", unit: "ea", list: 1, cost: 1, kind: "assembly" as const },
     { id: "c", sku: "C", desc: "Plain", category: "", unit: "ea", list: 1, cost: 1 }];
   ok(GLIB.assemblyParts(parts as never, "").map((p) => p.id).join(",") === "b,a" && GLIB.assemblyParts(parts as never, "zeta").length === 1, "#299 library: assemblies filter + sort");
+  ok(GLIB.assemblyParts([{ id: "x", sku: "B2", desc: "Same", category: "", unit: "ea", list: 1, cost: 1, kind: "assembly" }, { id: "y", sku: "A1", desc: "Same", category: "", unit: "ea", list: 1, cost: 1, kind: "assembly" }] as never, "").map((p) => p.id).join(",") === "y,x", "#299 library: equal names sort by sku");
 }

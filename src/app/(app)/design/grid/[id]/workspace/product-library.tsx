@@ -340,13 +340,12 @@ function BuildAssembly({ ed }: { ed: GridEditor }) {
 /* ------------------------------- library ------------------------------- */
 
 export default function ProductLibrary({ ed }: { ed: GridEditor }) {
-  const { parts, fabrics, deviceTypes, recent, armedPartId, armedCurtainType, partLayerHidden, enterTool, disarm, busy, symbolCtx } = ed;
+  const { parts, fabrics, deviceTypes, favorites, setFavorites, recent, armedPartId, armedCurtainType, partLayerHidden, enterTool, disarm, busy, symbolCtx } = ed;
   const canMap = useCanMap();
   const [sel, setSel] = useState<LibrarySel>({ kind: "all" });
   const [expanded, setExpanded] = useState<GridLayer | null>(null);
   const [search, setSearch] = useState("");
   const [mfr, setMfr] = useState("");
-  const [favorites, setFavorites] = useState<string[]>(ed.favorites);
   const [starErr, setStarErr] = useState<string | null>(null);
   const [, startStar] = useTransition();
 
@@ -382,7 +381,13 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
     setMfr("");
     if (s.kind === "scope" || s.kind === "type") setExpanded(s.scope);
   };
-  const toggleScope = (s: GridLayer) => setExpanded((cur) => (cur === s ? null : s));
+  const toggleScope = (s: GridLayer) => {
+    const next = expanded === s ? null : s;
+    setExpanded(next);
+    // A selected type node under a scope that just collapsed would vanish while still
+    // filtering the tiles — fall back to that type's scope.
+    if (sel.kind === "type" && sel.scope !== next) setSel({ kind: "scope", scope: sel.scope });
+  };
   // Moved from the old device palette — optimistic, rolled back on error.
   const star = (id: string) => {
     const before = favorites;
@@ -442,6 +447,19 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
               ))}
             </select>
           )}
+          {view && view.hiddenUnmapped > 0 && (
+            <span style={{ fontSize: 10.5, color: "#8c919c", lineHeight: 1.4 }}>
+              {view.hiddenUnmapped} unmapped {view.hiddenUnmapped === 1 ? "part" : "parts"} hidden —{" "}
+              {canMap ? (
+                <Link href="/catalog/device-types" style={{ color: "var(--accent)" }}>
+                  map them in Catalog → Device types
+                </Link>
+              ) : (
+                "search to find them"
+              )}
+              .
+            </span>
+          )}
           <span
             style={{
               flex: 1,
@@ -497,19 +515,6 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
             <DevicePalette ed={ed} rows={view?.rows ?? []} favSet={favSet} onStar={star} emptyText={emptyText} />
           )}
 
-          {view && view.hiddenUnmapped > 0 && (
-            <div style={{ marginTop: 8, fontSize: 10.5, color: "#8c919c", lineHeight: 1.4 }}>
-              {view.hiddenUnmapped} unmapped {view.hiddenUnmapped === 1 ? "part" : "parts"} hidden —{" "}
-              {canMap ? (
-                <Link href="/catalog/device-types" style={{ color: "var(--accent)" }}>
-                  map them in Catalog → Device types
-                </Link>
-              ) : (
-                "search to find them"
-              )}
-              .
-            </div>
-          )}
         </div>
       </div>
     </div>

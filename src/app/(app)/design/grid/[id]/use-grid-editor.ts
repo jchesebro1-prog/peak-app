@@ -235,12 +235,14 @@ function useGridEditorImpl(props: GridEditorProps) {
     customLines,
     laborLines,
     deviceTypes,
-    favorites,
     recent,
   } = props;
   const router = useRouter();
   const pathname = usePathname();
   const [selected, setSelected] = useState<string | null>(null);
+  /** #226/#299: the starred-parts list lives here, not in the Product Library, so it
+   *  survives the bottom pane unmounting its body when collapsed. */
+  const [favorites, setFavorites] = useState<string[]>(props.favorites);
   /** Punch #76 — lines the last successful draft/update quoted at plain list
    *  price because the part had no usable cost (or the resolved tier margin
    *  itself was out of range), even though this quote's pricingTier/tierMargin
@@ -1289,15 +1291,6 @@ function useGridEditorImpl(props: GridEditorProps) {
   const zoomOut = useCallback(() => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - 0.25) * 100) / 100)), []);
   const zoomIn = useCallback(() => setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + 0.25) * 100) / 100)), []);
 
-  /** #226: arming from the palette clears every other armed tool (#299: and
-   *  every other mode — calibration, a pending entry, an open curtain drop). */
-  const armPart = useCallback(
-    (partId: string | null) => {
-      if (partId) enterTool("place", { partId });
-      else disarm();
-    },
-    [enterTool, disarm]
-  );
   /** The palette's "that layer is hidden" warning — scope or type layer. */
   const partLayerHidden = useCallback(
     (p: PartLite) => {
@@ -1452,6 +1445,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     laborLines,
     deviceTypes,
     favorites,
+    setFavorites,
     recent,
     pathname,
     selected,
@@ -1603,7 +1597,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     dropCurtain,
     confirmSpace,
     confirmCalibration,
-    armPart,
     partLayerHidden,
     tool,
     enterTool,
