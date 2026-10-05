@@ -1,0 +1,499 @@
+"use client";
+
+import { formatMeasure } from "@/lib/annotations";
+import { curtainDesc, placementQty, routeLengthFt } from "@/lib/design/grid-bom";
+import { spaceOf } from "@/lib/design/grid-geometry";
+import { normalizeCategory, scopeColor } from "@/lib/design/grid-scopes";
+import { symbolLook } from "@/lib/design/grid-icons";
+import { isSeedPlaceholder } from "@/lib/design/grid-seed";
+import { curtainSpecKey } from "@/lib/specs/record-keys";
+import { TIERS } from "@/app/(app)/design/quick/engine";
+import { UNMAPPED_TYPE } from "@/lib/design/device-types";
+import type { GridPlacement, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
+import SymbolLookPanel from "../symbol-look-panel";
+import { Breakdown, SpaceEditor } from "../spaces-panel";
+import { RouteEditor } from "../wires-panel";
+import type { GridEditor } from "../use-grid-editor";
+
+/**
+ * The Property Editor (#299) — DaVinci-style key/value rows for whatever is
+ * selected: the design itself when nothing is (name, customer, venue,
+ * option, sheet, scale), one device or curtain, one space, one wire run.
+ * The selected-device card and the Scale card moved here unchanged in
+ * behaviour; the space / wire edit blocks are the panels' own components.
+ */
+
+export const PANEL_LABEL: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: ".06em",
+  textTransform: "uppercase",
+  color: "#9aa0ab",
+};
+
+const BTN: React.CSSProperties = {
+  borderWidth: 1, borderStyle: "solid", borderColor: "#dfe2e8",
+  background: "#fff",
+  borderRadius: 7,
+  padding: "5px 10px",
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#3d424e",
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
+
+const INPUT: React.CSSProperties = {
+  borderWidth: 1, borderStyle: "solid", borderColor: "#dfe2e8",
+  borderRadius: 7,
+  padding: "5px 8px",
+  fontSize: 12,
+  fontFamily: "inherit",
+  background: "#fff",
+  color: "#16181d",
+  width: "100%",
+};
+
+function moneyFmt(n: number): string {
+  return "$" + Math.round(n).toLocaleString("en-US");
+}
+
+/** One key/value row: label left (muted), value right. */
+export function PropRow({ label, children, title }: { label: string; children: React.ReactNode; title?: string }) {
+  return (
+    <div
+      title={title}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "42% 58%",
+        alignItems: "center",
+        minHeight: 26,
+        padding: "3px 10px",
+        fontSize: 11.5,
+        borderBottom: "1px solid #f0f1f4",
+      }}
+    >
+      <span style={{ color: "#8c919c", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      <span style={{ color: "#16181d", minWidth: 0, overflowWrap: "anywhere" }}>{children}</span>
+    </div>
+  );
+}
+
+/** A grouped section header — DaVinci's band. */
+export function PropSection({ title, right }: { title: string; right?: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "#f7f8fa", borderBottom: "1px solid #f0f1f4" }}>
+      <span style={{ ...PANEL_LABEL, flex: 1 }}>{title}</span>
+      {right}
+    </div>
+  );
+}
+
+/** Free content under a section (buttons, editors) — padded like a row. */
+function PropBlock({ children }: { children: React.ReactNode }) {
+  return <div style={{ padding: "7px 10px", borderBottom: "1px solid #f0f1f4" }}>{children}</div>;
+}
+
+export default function PropertyEditor({ ed }: { ed: GridEditor }) {
+  const { selectedPlacement, selectedRouteId, selectedSpaceId, visibleRoutes, pageSpaces } = ed;
+  const route = selectedRouteId ? visibleRoutes.find((r) => r.id === selectedRouteId) ?? null : null;
+  const space = selectedSpaceId ? pageSpaces.find((s) => s.id === selectedSpaceId) ?? null : null;
+  return (
+    <div style={{ background: "#fff", borderBottom: "1px solid #dfe2e8" }}>
+      {selectedPlacement ? (
+        <DeviceProps ed={ed} pl={selectedPlacement} />
+      ) : route ? (
+        <RouteProps ed={ed} route={route} />
+      ) : space ? (
+        <SpaceProps ed={ed} space={space} />
+      ) : (
+        <DesignProps ed={ed} />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------- the design ------------------------------- */
+
+function DesignProps({ ed }: { ed: GridEditor }) {
+  const { project, venues, setVenue, busy, activeOption, sheet, page, pages, cal, calibrating, enterTool, clearCalibration } = ed;
+  const tier = activeOption.tier ? TIERS.find((t) => t.key === activeOption.tier)?.label : null;
+  return (
+    <>
+      <PropSection title="Design" />
+      {/* Name and customer edit in place in the toolbar (#244) — shown here. */}
+      <PropRow label="Name" title="Rename it from the title in the toolbar">
+        {project.name}
+      </PropRow>
+      <PropRow label="Customer" title="Change it from the toolbar, next to the name">
+        {project.customer || <span style={{ color: "#8c919c" }}>—</span>}
+      </PropRow>
+      <PropRow label="Venue">
+        {venues.length > 0 ? (
+          <select
+            value={project.siteId || ""}
+            onChange={(e) => setVenue(e.target.value)}
+            disabled={busy}
+            title="Venue — stamped onto the quote"
+            style={{ ...INPUT, padding: "3px 6px", fontSize: 11.5 }}
+          >
+            <option value="">No venue</option>
+            {venues.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span style={{ color: "#8c919c" }}>—</span>
+        )}
+      </PropRow>
+      <PropRow label="Option" title="Switch or rename options in the Design menu">
+        {activeOption.name}
+        {tier ? <span style={{ color: "#8c919c" }}> · {tier}</span> : null}
+      </PropRow>
+      <PropRow label="Sheet">
+        {sheet ? (
+          <>
+            {sheet.name}
+            {pages > 1 ? <span style={{ color: "#8c919c" }}> · page {page} of {pages}</span> : null}
+          </>
+        ) : (
+          <span style={{ color: "#8c919c" }}>None yet</span>
+        )}
+      </PropRow>
+
+      {/* scale — the old Scale card */}
+      <PropSection title="Scale" />
+      {!sheet ? (
+        <PropBlock>
+          <div style={{ fontSize: 11.5, color: "#8c919c" }}>Upload a plan sheet first.</div>
+        </PropBlock>
+      ) : cal ? (
+        <>
+          <PropRow label="Status">
+            <span style={{ color: "#2e7d55", fontWeight: 600 }}>Calibrated</span>
+          </PropRow>
+          <PropRow label="Reference">
+            {formatMeasure(cal.refLength, cal.unit)} · {cal.by}
+          </PropRow>
+          <PropBlock>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                style={{ ...BTN, padding: "4px 8px", fontSize: 11 }}
+                onClick={() => enterTool("calibrate")}
+              >
+                Recalibrate
+              </button>
+              <button
+                style={{ ...BTN, padding: "4px 8px", fontSize: 11, color: "#a0442b" }}
+                disabled={busy}
+                onClick={clearCalibration}
+              >
+                Clear
+              </button>
+            </div>
+          </PropBlock>
+        </>
+      ) : (
+        <>
+          <PropRow label="Status">
+            <span style={{ color: "#8a6d1f", fontWeight: 600 }}>Not calibrated</span>
+          </PropRow>
+          <PropBlock>
+            <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 8 }}>
+              Not set for page {page}. Draw over a known dimension, then type its real length —
+              wire lengths and layouts stay correct at any zoom.
+            </div>
+            <button
+              style={{ ...BTN, width: "100%", background: calibrating ? "#16181d" : "#fff", color: calibrating ? "#fff" : "#3d424e", borderColor: calibrating ? "#16181d" : "#dfe2e8" }}
+              onClick={() => enterTool("calibrate")}
+            >
+              {calibrating ? "Draw the reference…" : "Calibrate this page"}
+            </button>
+          </PropBlock>
+        </>
+      )}
+    </>
+  );
+}
+
+/* ------------------------------ device / curtain ------------------------------ */
+
+function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
+  const {
+    project,
+    partById,
+    selectedPart,
+    lookOf,
+    symbolCtx,
+    busy,
+    fabricNames,
+    curtainPrices,
+    scopeOfPlacement,
+    typeKeyOfPlacement,
+    deviceTypes,
+    categoryDraft,
+    setCategoryDraft,
+    categoryCounts,
+    saveCategory,
+    saveSymbolLook,
+    shownAt,
+    removePlacement,
+  } = ed;
+  const selectedPlacement = pl;
+  const part = selectedPlacement.curtain ? null : partById.get(selectedPlacement.partId) ?? null;
+  const qty = placementQty(selectedPlacement);
+  const typeKey = typeKeyOfPlacement(selectedPlacement);
+  const typeLabel =
+    typeKey === UNMAPPED_TYPE ? "Unmapped" : deviceTypes.find((t) => t.key === typeKey)?.label ?? part?.deviceTypeLabel ?? typeKey;
+  const room = spaceOf(selectedPlacement, project.spaces || []);
+  const auto = selectedPlacement.auto;
+  const autoTier = auto ? TIERS.find((t) => t.key === auto.tier)?.label ?? auto.tier : null;
+  const ports = !selectedPlacement.curtain ? part?.ports || [] : [];
+
+  return (
+    <>
+      <PropSection title={selectedPlacement.curtain ? "Selected curtain" : "Selected device"} />
+      <PropRow label={selectedPlacement.curtain ? "Curtain" : "Part"}>
+        <strong style={{ fontWeight: 600 }}>
+          {selectedPlacement.curtain
+            ? selectedPlacement.curtain.name
+            : isSeedPlaceholder(selectedPlacement.partId)
+              ? selectedPlacement.category || "Unassigned device"
+              : partById.get(selectedPlacement.partId)?.virtual
+                ? partById.get(selectedPlacement.partId)!.desc
+                : selectedPlacement.partId}
+        </strong>
+      </PropRow>
+      <PropRow label="Description">
+        <span style={{ color: "#5b616e" }}>
+          {selectedPlacement.curtain
+            ? curtainDesc(
+                selectedPlacement.curtain,
+                fabricNames.get(selectedPlacement.curtain.fabricSku)
+              )
+            : isSeedPlaceholder(selectedPlacement.partId)
+              ? "Generated from your measurements — delete and drop a real catalog part here"
+              : partById.get(selectedPlacement.partId)?.desc || "No longer in the catalog"}
+        </span>
+      </PropRow>
+      {part && !part.virtual && (
+        <>
+          <PropRow label="MFR #">{part.modelNumber || part.sku}</PropRow>
+          <PropRow label="Manufacturer">{part.manufacturer || <span style={{ color: "#8c919c" }}>—</span>}</PropRow>
+        </>
+      )}
+      <PropRow label="Scope">{scopeOfPlacement(selectedPlacement)}</PropRow>
+      <PropRow label="Type">{typeLabel}</PropRow>
+      <PropRow label="Space">{room?.name ?? "—"}</PropRow>
+      <PropRow label="Qty">{qty}</PropRow>
+      <PropRow label="Sell">
+        <span style={{ fontWeight: 600 }}>
+          {selectedPlacement.curtain ? moneyFmt(curtainPrices.get(selectedPlacement.id) || 0) : moneyFmt((part?.list || 0) * qty)}
+        </span>
+      </PropRow>
+      {selectedPlacement.curtain && (() => {
+        const c = selectedPlacement.curtain;
+        const key = c.specKey || curtainSpecKey(c.type, c.name);
+        return (
+          <PropRow label="Spec key">
+            <span style={{ color: "#5b616e" }}>Spec: {key ? (c.specKey ? key : `Auto: ${key}`) : "— none —"}</span>
+          </PropRow>
+        );
+      })()}
+      <PropRow label="Auto">{auto ? `Auto · ${autoTier}` : "Hand-placed"}</PropRow>
+      <PropRow label="Placed by">{selectedPlacement.by}</PropRow>
+      {/* Position readout + nudge hint (punch #47). Percent of the
+          page box is the honest unit here, it's what's stored, and
+          it stays meaningful on an uncalibrated sheet. */}
+      {(() => {
+        const at = shownAt(selectedPlacement);
+        return (
+          <PropRow label="Position">
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
+              x {(at.x * 100).toFixed(1)}% · y {(at.y * 100).toFixed(1)}%
+            </span>
+          </PropRow>
+        );
+      })()}
+
+      {/* User-defined category (punch #48/#41) - open-ended by
+          design: assign now, consume later. Orthogonal to the scope
+          above and to whatever space the marker happens to sit in. */}
+      <PropRow label="Category">
+        {categoryDraft === null ? (
+          <button
+            style={{ ...BTN, width: "100%", padding: "3px 7px", fontSize: 11, fontWeight: 500, textAlign: "left" }}
+            onClick={() => setCategoryDraft(normalizeCategory(selectedPlacement.category) || "")}
+          >
+            {normalizeCategory(selectedPlacement.category)
+              ? `Category: ${normalizeCategory(selectedPlacement.category)}`
+              : "+ Add a category"}
+          </button>
+        ) : (
+          <span style={{ display: "flex", gap: 5 }}>
+            <input
+              value={categoryDraft}
+              onChange={(e) => setCategoryDraft(e.target.value)}
+              list="grid-category-suggestions"
+              placeholder="Followspots, House left…"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setCategoryDraft(null);
+                if (e.key === "Enter") saveCategory(selectedPlacement.id, categoryDraft);
+              }}
+              style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px", minWidth: 0 }}
+              autoFocus
+            />
+            <datalist id="grid-category-suggestions">
+              {categoryCounts.map((c) => (
+                <option key={c.key} value={c.key} />
+              ))}
+            </datalist>
+            <button
+              style={{ ...BTN, padding: "3px 8px", fontSize: 11 }}
+              disabled={busy}
+              onClick={() => saveCategory(selectedPlacement.id, categoryDraft)}
+            >
+              Save
+            </button>
+          </span>
+        )}
+      </PropRow>
+
+      {ports.length > 0 && (
+        <>
+          <PropSection title="Ports" />
+          {ports.map((port) => (
+            /* Leads with connectionType, like the catalog ports editor
+               (#162): this is the screen where a designer judges a
+               wire, and a DaVinci-sourced port can read
+               `name: "DMX Male"` while being correctly typed
+               "line power (unspecified)" — the enricher maps by
+               protocol and falls back to the connector label only for
+               the name. The type governs wireability; the name is the
+               part that misleads. */
+            <PropRow key={`${port.name}-${port.connectionType}`} label={port.connectionType}>
+              <span style={{ color: "#5b616e" }}>{port.direction}{port.name ? ` · ${port.name}` : ""}</span>
+            </PropRow>
+          ))}
+        </>
+      )}
+
+      {/* Symbol (#131 → stock symbols) — the per-ENTRY icon/colour
+          override: every placed instance of this catalog entry
+          redraws, on the plan and the riser. The category defaults
+          live in Grid Settings. Keyed so a saved colour resets the
+          panel's local draft. */}
+      {selectedPart && (
+        <>
+          <PropSection title="Symbol look" />
+          <PropBlock>
+            <SymbolLookPanel
+              key={`${selectedPart.id}|${lookOf(selectedPart).color}`}
+              desc={selectedPart.desc}
+              look={lookOf(selectedPart)}
+              base={symbolLook(
+                { category: selectedPart.category, group: selectedPart.group, trade: selectedPart.trade, gridScope: selectedPart.gridScope },
+                symbolCtx
+              )}
+              hasIcon={!!(selectedPart.icon || selectedPart.shape)}
+              hasColor={!!selectedPart.color}
+              busy={busy}
+              onSave={(patch) => saveSymbolLook(selectedPart.id, patch)}
+            />
+          </PropBlock>
+        </>
+      )}
+
+      <PropBlock>
+        <div style={{ fontSize: 10.5, color: "#8c919c", lineHeight: 1.45 }}>
+          Drag the marker to move it · arrow keys nudge (hold Shift for
+          bigger steps) · attached wires follow.
+        </div>
+        <button
+          style={{ ...BTN, marginTop: 8, width: "100%", color: "#a0442b" }}
+          disabled={busy}
+          onClick={() => removePlacement(selectedPlacement.id)}
+        >
+          {selectedPlacement.curtain ? "Remove curtain" : "Remove device"}
+        </button>
+      </PropBlock>
+    </>
+  );
+}
+
+/* ---------------------------------- space ---------------------------------- */
+
+function SpaceProps({ ed, space }: { ed: GridEditor; space: GridSpace }) {
+  const { project, spaceRollups, busy, router, setErr, setSelectedSpaceId } = ed;
+  const r = spaceRollups.find((x) => x.spaceId === space.id);
+  return (
+    <>
+      <PropSection title="Selected space" />
+      <PropRow label="Name">
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span aria-hidden style={{ width: 10, height: 10, borderRadius: 3, background: space.color, flex: "0 0 auto" }} />
+          {space.name}
+        </span>
+      </PropRow>
+      <PropRow label="Devices">{r ? r.count : 0}</PropRow>
+      <PropRow label="Value">
+        <span style={{ fontWeight: 600 }}>{moneyFmt(r ? r.value : 0)}</span>
+      </PropRow>
+      {r && (r.byScope.length > 0 || r.byCategory.length > 0) && (
+        <PropBlock>
+          <Breakdown title="By scope" slices={r.byScope} color={scopeColor} />
+          <Breakdown title="Your categories" slices={r.byCategory} />
+        </PropBlock>
+      )}
+      <div style={{ padding: "0 10px 9px" }}>
+        <SpaceEditor
+          key={space.id}
+          projectId={project.id}
+          selected={space}
+          busy={busy}
+          onSelect={setSelectedSpaceId}
+          onChanged={() => router.refresh()}
+          onError={(m) => setErr(m)}
+        />
+      </div>
+    </>
+  );
+}
+
+/* ---------------------------------- wire ---------------------------------- */
+
+function RouteProps({ ed, route }: { ed: GridEditor; route: GridRoute }) {
+  const { project, partById, busy, router, setErr, setSelectedRouteId } = ed;
+  const ft = routeLengthFt(route, project.calibrations);
+  const cal = project.calibrations.find((c) => c.docId === route.sheetId && c.page === route.page);
+  const part = partById.get(route.partId);
+  return (
+    <>
+      <PropSection title="Selected wire run" />
+      <PropRow label="Part">
+        <strong style={{ fontWeight: 600 }}>{route.partId}</strong>
+      </PropRow>
+      {part && (
+        <PropRow label="Description">
+          <span style={{ color: "#5b616e" }}>{part.desc}</span>
+        </PropRow>
+      )}
+      <PropRow label="Length">
+        {ft !== null && cal ? formatMeasure(ft, cal.unit) : <span style={{ color: "#a0442b" }}>unmeasured — calibrate this page</span>}
+      </PropRow>
+      <div style={{ padding: "0 10px 9px" }}>
+        <RouteEditor
+          key={route.id}
+          projectId={project.id}
+          selected={route}
+          busy={busy}
+          onSelect={setSelectedRouteId}
+          onChanged={() => router.refresh()}
+          onError={(m) => setErr(m)}
+        />
+      </div>
+    </>
+  );
+}

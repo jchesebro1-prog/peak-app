@@ -48,7 +48,7 @@ function moneyFmt(n: number): string {
  * Categories deliberately do NOT sum to the space total: they are opt-in
  * labels, and most placements carry none.
  */
-function Breakdown({
+export function Breakdown({
   title,
   slices,
   color,
@@ -83,7 +83,6 @@ function Breakdown({
 }
 
 export default function SpacesPanel({
-  projectId,
   pageSpaces,
   rollups,
   drawing,
@@ -92,10 +91,7 @@ export default function SpacesPanel({
   onStartDraw,
   onCancelDraw,
   onSelect,
-  onChanged,
-  onError,
 }: {
-  projectId: string;
   /** Spaces on the active sheet+page, project order. */
   pageSpaces: GridSpace[];
   /** Whole-project rollups (all sheets), from bomBySpace. */
@@ -106,13 +102,8 @@ export default function SpacesPanel({
   onStartDraw: () => void;
   onCancelDraw: () => void;
   onSelect: (id: string | null) => void;
-  onChanged: () => void;
-  onError: (msg: string) => void;
 }) {
-  const [renameDraft, setRenameDraft] = useState<string | null>(null);
-  const [armDelete, setArmDelete] = useState(false);
   const rollupById = new Map(rollups.map((r) => [r.spaceId, r]));
-  const selected = pageSpaces.find((s) => s.id === selectedSpaceId) || null;
   const offPageRollups = rollups.filter(
     (r) => r.spaceId !== null && !pageSpaces.some((s) => s.id === r.spaceId)
   );
@@ -150,7 +141,7 @@ export default function SpacesPanel({
             return (
               <div key={s.id}>
                 <button
-                  onClick={() => { onSelect(on ? null : s.id); setRenameDraft(null); setArmDelete(false); }}
+                  onClick={() => onSelect(on ? null : s.id)}
                   style={{
                     ...BTN,
                     width: "100%",
@@ -186,71 +177,6 @@ export default function SpacesPanel({
         </div>
       )}
 
-      {selected && (
-        <div style={{ marginTop: 9, borderTop: "1px solid #edeff3", paddingTop: 9 }}>
-          {renameDraft === null ? (
-            <div style={{ display: "flex", gap: 5 }}>
-              <button style={{ ...BTN, flex: 1, padding: "4px 8px", fontSize: 11 }} onClick={() => setRenameDraft(selected.name)}>
-                Rename
-              </button>
-              {!armDelete ? (
-                <button style={{ ...BTN, flex: 1, padding: "4px 8px", fontSize: 11, color: "#a0442b" }} onClick={() => setArmDelete(true)}>
-                  Delete
-                </button>
-              ) : (
-                <button
-                  style={{ ...BTN, flex: 1, padding: "4px 8px", fontSize: 11, background: "#a0442b", color: "#fff", borderColor: "#a0442b" }}
-                  disabled={busy}
-                  onClick={async () => {
-                    const r = await removeSpaceAction(projectId, selected.id);
-                    setArmDelete(false);
-                    onSelect(null);
-                    if (!r.ok) onError(r.error);
-                    else onChanged();
-                  }}
-                >
-                  Really delete
-                </button>
-              )}
-            </div>
-          ) : (
-            <div style={{ display: "flex", gap: 5 }}>
-              <input
-                value={renameDraft}
-                onChange={(e) => setRenameDraft(e.target.value)}
-                onKeyDown={async (e) => {
-                  if (e.key === "Escape") setRenameDraft(null);
-                  if (e.key === "Enter" && renameDraft.trim()) {
-                    const r = await renameSpaceAction(projectId, selected.id, renameDraft);
-                    setRenameDraft(null);
-                    if (!r.ok) onError(r.error);
-                    else onChanged();
-                  }
-                }}
-                style={INPUT}
-                autoFocus
-              />
-              <button
-                style={{ ...BTN, padding: "4px 9px", fontSize: 11 }}
-                disabled={busy || !renameDraft.trim()}
-                onClick={async () => {
-                  const r = await renameSpaceAction(projectId, selected.id, renameDraft);
-                  setRenameDraft(null);
-                  if (!r.ok) onError(r.error);
-                  else onChanged();
-                }}
-              >
-                Save
-              </button>
-            </div>
-          )}
-          <div style={{ fontSize: 10.5, color: "#9aa0ab", marginTop: 5 }}>
-            Devices inside the outline belong to it automatically — nested
-            spaces win by smallest.
-          </div>
-        </div>
-      )}
-
       {(offPageRollups.length > 0 || unassigned) && (
         <div style={{ marginTop: 9, borderTop: "1px solid #edeff3", paddingTop: 8, display: "grid", gap: 3 }}>
           {offPageRollups.map((r) => (
@@ -267,6 +193,94 @@ export default function SpacesPanel({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The selected space's rename / delete (D109) — the Property Editor's
+ * "one space" mode (#299). Keyed by the space id at the call site, so
+ * picking another space starts a fresh draft and disarms Delete.
+ */
+export function SpaceEditor({
+  projectId,
+  selected,
+  busy,
+  onSelect,
+  onChanged,
+  onError,
+}: {
+  projectId: string;
+  selected: GridSpace;
+  busy: boolean;
+  onSelect: (id: string | null) => void;
+  onChanged: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [renameDraft, setRenameDraft] = useState<string | null>(null);
+  const [armDelete, setArmDelete] = useState(false);
+  return (
+    <div style={{ marginTop: 9, borderTop: "1px solid #edeff3", paddingTop: 9 }}>
+      {renameDraft === null ? (
+        <div style={{ display: "flex", gap: 5 }}>
+          <button style={{ ...BTN, flex: 1, padding: "4px 8px", fontSize: 11 }} onClick={() => setRenameDraft(selected.name)}>
+            Rename
+          </button>
+          {!armDelete ? (
+            <button style={{ ...BTN, flex: 1, padding: "4px 8px", fontSize: 11, color: "#a0442b" }} onClick={() => setArmDelete(true)}>
+              Delete
+            </button>
+          ) : (
+            <button
+              style={{ ...BTN, flex: 1, padding: "4px 8px", fontSize: 11, background: "#a0442b", color: "#fff", borderColor: "#a0442b" }}
+              disabled={busy}
+              onClick={async () => {
+                const r = await removeSpaceAction(projectId, selected.id);
+                setArmDelete(false);
+                onSelect(null);
+                if (!r.ok) onError(r.error);
+                else onChanged();
+              }}
+            >
+              Really delete
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 5 }}>
+          <input
+            value={renameDraft}
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onKeyDown={async (e) => {
+              if (e.key === "Escape") setRenameDraft(null);
+              if (e.key === "Enter" && renameDraft.trim()) {
+                const r = await renameSpaceAction(projectId, selected.id, renameDraft);
+                setRenameDraft(null);
+                if (!r.ok) onError(r.error);
+                else onChanged();
+              }
+            }}
+            style={INPUT}
+            autoFocus
+          />
+          <button
+            style={{ ...BTN, padding: "4px 9px", fontSize: 11 }}
+            disabled={busy || !renameDraft.trim()}
+            onClick={async () => {
+              const r = await renameSpaceAction(projectId, selected.id, renameDraft);
+              setRenameDraft(null);
+              if (!r.ok) onError(r.error);
+              else onChanged();
+            }}
+          >
+            Save
+          </button>
+        </div>
+      )}
+      <div style={{ fontSize: 10.5, color: "#9aa0ab", marginTop: 5 }}>
+        Devices inside the outline belong to it automatically — nested
+        spaces win by smallest.
+      </div>
     </div>
   );
 }

@@ -1016,7 +1016,7 @@ const gridUploadRoute = readFileSync(
 // #299: the editor's shell (toolbar, sheet tabs, menus, status bar) lives in
 // grid/[id]/workspace/*.tsx — scanned alongside the editor wherever a moved
 // string is asserted.
-const gridWorkspaceSource = ["grid-workspace", "pane", "toolbar", "menu", "sheet-tabs", "status-bar", "icons"]
+const gridWorkspaceSource = ["grid-workspace", "pane", "toolbar", "menu", "sheet-tabs", "status-bar", "icons", "property-editor", "system-status"]
   .map((w) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/workspace/${w}.tsx`), "utf8"))
   .join("\n");
 const gridEditorSource = readFileSync(
@@ -5563,7 +5563,7 @@ import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib
     ok(valueImports.length === 0, `#206: ${rel} imports no VALUE from @/lib/stores or @/db${valueImports.length ? ` (found: ${String(valueImports[0]).slice(0, 80)})` : ""}`);
   }
   const editorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8") +
-    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8");
+    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") + gridWorkspaceSource;
   const riserSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
   ok(!/shapeFor|GRID_SHAPES|categoryShapes/.test(editorSrc) && !/shapeFor|markerColor/.test(riserSrc),
     "#206: the editor and riser resolve badges through symbolLook, not the D154 shapeFor/markerColor path");
@@ -18076,7 +18076,7 @@ import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } fro
   const spSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
   ok(!spSrc.includes("scopeTargets(") && !spSrc.includes("FabricOption") && !spSrc.includes("subscribeTierDefs"), "#211 T4: the Scope panel computes no targets in the browser");
   const edSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8") +
-    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8");
+    readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") + gridWorkspaceSource;
   const pgSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
   ok(!edSrc.includes("engineFabrics") && !pgSrc.includes("engineFabrics={") && pgSrc.includes("scopeTargets={scopeTargets}"), "#211 T4: no cost-bearing fabric rows cross to the Grid client (D139's crossing is gone)");
   const seedSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-seed.ts"), "utf8");
@@ -19303,7 +19303,7 @@ import { sellFromCost as ci212Sell } from "@/lib/design/equipment-map";
   const body = (name: string) => acts.slice(acts.indexOf(`export async function ${name}`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}`)));
   ok(body("saveCustomItemAction").includes("await requireUser()") && body("saveCustomItemAction").includes("saveCustomItem(") && body("removeCustomItemAction").includes("await requireUser()"),
     "#212 custom: both actions use the placement-edit gate and the server-side store");
-  const ed = src("src/app/(app)/design/grid/[id]/editor.tsx") + src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + src("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  const ed = src("src/app/(app)/design/grid/[id]/editor.tsx") + src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + src("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource;
   ok(ed.includes("<CustomItemsSection") && ed.includes("customValue") && ed.includes("disabled={busy || bomEmpty}"),
     "#212 custom: the editor BOM shows custom items, totals them and can quote a custom-only option");
 }
@@ -23373,7 +23373,7 @@ import { typeLayerKey as dt4LayerKey, isLayerVisible as dt4Visible } from "@/lib
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const lp = read("src/app/(app)/design/grid/[id]/layers-panel.tsx");
   ok(lp.includes("typeLayerKey(s, t.key)") && lp.includes("typeRows"), "#226 layers: the Layers panel lists device types under each scope");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource;
   ok(ed.includes("typeLayerRows(") && ed.includes("typeKeyOfPlacement") && ed.includes("typeRows={typeRows}") && ed.includes("deviceType: null"),
     "#226 layers: the editor groups placements by type and hides by type; partless legend entries are typed Unmapped");
   for (const d of ["riser", "set", "schedule"]) {
@@ -23469,7 +23469,7 @@ import { DRAPERY_TYPE_KEY as T4F_DRAPERY, DEFAULT_TYPE_ICONS as T4F_TYPE_ICONS }
     "#226 T4 fix: untyped callers still dedupe by badge alone");
 
   ok(T4F_DRAPERY === "drapery" && Object.hasOwn(T4F_TYPE_ICONS, T4F_DRAPERY), "#226 T4 fix: DRAPERY_TYPE_KEY names a seeded type");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource;
   ok(ed.includes("pl.curtain ? DRAPERY_TYPE_KEY :") && !ed.includes('"drapery"'), "#226 T4 fix: the editor's curtain layer uses DRAPERY_TYPE_KEY");
 }
 
@@ -23726,7 +23726,7 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
     acc.includes("saveAccessoryAction(projectId, optionId, { partId: p.id, qty: n, scope: group })") &&
     acc.includes("saveAccessoryAction(projectId, optionId, { id: accessoryId, qty: n })") && acc.includes("removeAccessoryAction(projectId, optionId, accessoryId)"),
     "#230 UI: the picker searches the heading's types (Search all fallback); rows edit qty and remove through the actions");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource;
   ok(ed.includes("bomGroups(") && ed.includes("groupedBomLines(") && ed.includes("+ Add accessory") && ed.includes("<AccessoryPicker") && ed.includes("<AccessoryRow"),
     "#230 UI: the editor BOM renders one heading per category, each with + Add accessory");
   ok(ed.includes("accessoryBomLines(accessories, parts)") && ed.includes("accessoryValue") && ed.includes("accessoryLines.length === 0"),
@@ -23979,7 +23979,7 @@ import { bomGroups as lb232Groups, groupedBomLines as lb232Grouped } from "@/lib
   };
   ok(!has("src/lib/design/grid-labor.ts") && !has("src/app/(app)/design/grid/settings/labor-hours-card.tsx"), "#232: the hours-per-device suggestion and its settings card are gone");
   ok(!wl231Groups.some((g) => g.items.some((it) => it.id === "grid.laborHoursPerDevice")), "#232: grid.laborHoursPerDevice is retired from Estimating Rules");
-  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx") + rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource;
   ok(!ed.includes("suggestLabor") && !ed.includes("Labor (suggested)") && ed.includes("<LaborLineRow") && ed.includes("laborLines: GridLaborLine[]") &&
     ed.includes('case "labor":') && /const\s+\w+:\s*never\s*=\s*l\.source/.test(ed) && ed.includes("labor: laborLines"),
     "#232: the editor BOM prints each server-computed labor line inside its heading (exhaustive source switch)");

@@ -49,6 +49,7 @@ import {
   addRouteAction,
   addSpaceAction,
   calibrateAction,
+  clearCalAction,
   createDraftQuoteAction,
   deleteProjectAction,
   movePlacementAction,
@@ -68,6 +69,7 @@ import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories"
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
 import type { SysKey } from "@/app/(app)/design/quick/engine";
+import { paletteView } from "@/lib/design/grid-palette";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -584,6 +586,21 @@ function useGridEditorImpl(props: GridEditorProps) {
   const wireParts = useMemo(() => parts.filter((p) => isPerLengthUnit(p.unit)), [parts]);
 
   const lines = useMemo(() => bomLines(placements, parts), [placements, parts]);
+  /** System Status (#299): BOM lines whose part is `virtualDead` — the same
+   *  condition that prints the "Needs a part" pill on a BOM row. */
+  const needsPart = useMemo(() => lines.filter((l) => partById.get(l.partId)?.virtualDead).length, [lines, partById]);
+  /** System Status (#299): unmapped parts the Library's All view hides. */
+  const hiddenUnmapped = useMemo(
+    () =>
+      paletteView(
+        parts,
+        { tab: "all", search: "", scope: "", typeKey: "", mfr: "" },
+        deviceTypes.filter((t) => !t.archived),
+        favorites,
+        recent
+      ).hiddenUnmapped,
+    [parts, deviceTypes, favorites, recent]
+  );
   const totals = useMemo(() => bomTotals(placements, parts), [placements, parts]);
   const riserLinks = useMemo(() => riserLinksOf(project.riser, activeOptionId), [project.riser, activeOptionId]);
   const wires = useMemo(
@@ -1229,6 +1246,19 @@ function useGridEditorImpl(props: GridEditorProps) {
     }
   }
 
+  /** Drop this page's scale (the Property Editor's Scale → Clear). */
+  async function clearCalibration() {
+    if (!sheet) return;
+    setBusy(true);
+    const r = await clearCalAction(project.id, sheet.id, page);
+    setBusy(false);
+    if (!r.ok) setErr(r.error);
+    else {
+      noteAction(`Cleared page ${page}'s scale`);
+      router.refresh();
+    }
+  }
+
   /* ------------------------------ tool model (#299) ------------------------------ */
 
   /** One tool at a time (#299): every entry point clears every other mode. */
@@ -1597,6 +1627,9 @@ function useGridEditorImpl(props: GridEditorProps) {
     dropCurtain,
     confirmSpace,
     confirmCalibration,
+    clearCalibration,
+    needsPart,
+    hiddenUnmapped,
     partLayerHidden,
     tool,
     enterTool,

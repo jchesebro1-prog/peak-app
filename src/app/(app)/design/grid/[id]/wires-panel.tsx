@@ -37,7 +37,6 @@ const INPUT: React.CSSProperties = {
 };
 
 export default function WiresPanel({
-  projectId,
   wireParts,
   pageRoutes,
   calibrations,
@@ -51,10 +50,7 @@ export default function WiresPanel({
   onStartDraw,
   onCancelDraw,
   onSelect,
-  onChanged,
-  onError,
 }: {
-  projectId: string;
   /** Catalog parts priced per length — the only legal wire types. */
   wireParts: PartLite[];
   /** Routes on the active sheet+page. */
@@ -71,11 +67,7 @@ export default function WiresPanel({
   onStartDraw: () => void;
   onCancelDraw: () => void;
   onSelect: (id: string | null) => void;
-  onChanged: () => void;
-  onError: (msg: string) => void;
 }) {
-  const [armDelete, setArmDelete] = useState(false);
-  const selected = pageRoutes.find((r) => r.id === selectedRouteId) || null;
 
   return (
     <div style={{ background: "#fff", border: "1px solid #edeff3", borderRadius: 10, padding: 12 }}>
@@ -133,7 +125,7 @@ export default function WiresPanel({
             return (
               <button
                 key={r.id}
-                onClick={() => { onSelect(on ? null : r.id); setArmDelete(false); }}
+                onClick={() => onSelect(on ? null : r.id)}
                 style={{
                   ...BTN,
                   display: "flex",
@@ -157,35 +149,57 @@ export default function WiresPanel({
         </div>
       )}
 
-      {selected && (
-        <div style={{ marginTop: 8, borderTop: "1px solid #edeff3", paddingTop: 8 }}>
-          {!armDelete ? (
-            <button style={{ ...BTN, width: "100%", padding: "4px 8px", fontSize: 11, color: "#a0442b" }} onClick={() => setArmDelete(true)}>
-              Remove wire run
-            </button>
-          ) : (
-            <button
-              style={{ ...BTN, width: "100%", padding: "4px 8px", fontSize: 11, background: "#a0442b", color: "#fff", borderColor: "#a0442b" }}
-              disabled={busy}
-              onClick={async () => {
-                const res = await removeRouteAction(projectId, selected.id);
-                setArmDelete(false);
-                onSelect(null);
-                if (!res.ok) onError(res.error);
-                else onChanged();
-              }}
-            >
-              Really remove
-            </button>
-          )}
-        </div>
-      )}
-
       {unmeasured > 0 && (
         <div style={{ fontSize: 10.5, color: "#a0442b", marginTop: 8 }}>
           {unmeasured} wire run{unmeasured === 1 ? "" : "s"} lost their page scale —
           recalibrate to price them.
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The selected run's Remove (D110) — the Property Editor's "one wire" mode
+ * (#299). Keyed by the route id at the call site, so picking another run
+ * disarms the confirm.
+ */
+export function RouteEditor({
+  projectId,
+  selected,
+  busy,
+  onSelect,
+  onChanged,
+  onError,
+}: {
+  projectId: string;
+  selected: GridRoute;
+  busy: boolean;
+  onSelect: (id: string | null) => void;
+  onChanged: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [armDelete, setArmDelete] = useState(false);
+  return (
+    <div style={{ marginTop: 8, borderTop: "1px solid #edeff3", paddingTop: 8 }}>
+      {!armDelete ? (
+        <button style={{ ...BTN, width: "100%", padding: "4px 8px", fontSize: 11, color: "#a0442b" }} onClick={() => setArmDelete(true)}>
+          Remove wire run
+        </button>
+      ) : (
+        <button
+          style={{ ...BTN, width: "100%", padding: "4px 8px", fontSize: 11, background: "#a0442b", color: "#fff", borderColor: "#a0442b" }}
+          disabled={busy}
+          onClick={async () => {
+            const res = await removeRouteAction(projectId, selected.id);
+            setArmDelete(false);
+            onSelect(null);
+            if (!res.ok) onError(res.error);
+            else onChanged();
+          }}
+        >
+          Really remove
+        </button>
       )}
     </div>
   );
