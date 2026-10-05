@@ -49725,3 +49725,16 @@ import * as GCLIP from "@/lib/design/grid-clipboard";
   const again = GCLIP.pasteLayout(clip, null, { x: 0.2, y: 0.2 });
   ok(Math.abs(again.anchor.x - 0.215) < 1e-12, "#299 clip: off-plan paste offsets from the last paste");
 }
+
+/* #300 object symbols — display rules (Task 1) */
+import * as GSD from "@/lib/design/grid-symbol-display";
+{
+  ok(JSON.stringify(GSD.cleanSymbolDisplay(null)) === JSON.stringify({ scale: 1, mode: "generic" }), "#300 display: default");
+  ok(GSD.cleanSymbolDisplay({ scale: 9, mode: "object" }).scale === 4 && GSD.cleanSymbolDisplay({ scale: 0.01 }).scale === 0.25, "#300 display: scale clamps 0.25–4");
+  ok(GSD.cleanSymbolDisplay({ scale: 1.234 }).scale === 1.25 && GSD.cleanSymbolDisplay({ scale: NaN }).scale === 1, "#300 display: scale rounds to 0.05; NaN → 1");
+  ok(GSD.cleanSymbolDisplay({ mode: "object" }).mode === "object" && GSD.cleanSymbolDisplay({ mode: "weird" }).mode === "generic", "#300 display: mode");
+  const b = GSD.markerBox({ symbolWidth: 48, symbolHeight: 34 }, 0.5);
+  ok(b.w === 24 && b.h === 17 && GSD.markerBox(null, 2).w === 88 && GSD.markerBox({}, 1).h === 30, "#300 display: marker box scales, 44×30 fallback");
+  ok(GSD.markerBox({ symbolWidth: 44 }, NaN).w === 44, "#300 display: bad scale → 1");
+  ok(GSD.hitRadius(0.028, 2) === 0.056 && GSD.hitRadius(0.028, 0.25) === 0.014, "#300 display: hit radius scales, floor at half");
+}
