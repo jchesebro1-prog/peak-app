@@ -1,19 +1,21 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getDeviceTypes } from "@/lib/stores/device-types";
+import { getDeviceTypes, setDeviceTypeSymbol } from "@/lib/stores/device-types";
 import { createDocument, getDocument } from "@/lib/stores/part-documents";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 import { storeDrawingUpload } from "@/lib/part-docs/drawing-upload";
 import { isDocumentId } from "@/lib/part-docs/types";
 
 /**
- * #300 — Grid Settings → Device types drawing upload, step 1 of 2. The
- * browser put the file straight to Blob (putFile); this checks the bytes as
- * a `symbol` drawing, sanitizes the SVG (or shrinks a raster) and records an
- * UNLINKED `symbol` part document — linked to no part, like a manufacturer
- * image (#297). Step 2 is `setDeviceTypeSymbolAction(typeKey, documentId)`.
- * Admin only, the same gate as every Grid Settings write.
+ * #300 — Grid Settings → Device types drawing upload. The browser put the
+ * file straight to Blob (putFile); this checks the bytes as a `symbol`
+ * drawing, sanitizes the SVG (or shrinks a raster), records an UNLINKED
+ * `symbol` part document — linked to no part, like a manufacturer image
+ * (#297) — and points the type at it in the same call, so a failure between
+ * the two can't leave an orphan document. Admin only, the same gate as every
+ * Grid Settings write.
  */
 export async function createDeviceTypeDrawingAction(input: {
   typeKey: string;
@@ -44,5 +46,9 @@ export async function createDeviceTypeDrawingAction(input: {
     by: user.name,
   });
   if (!doc) return { ok: false, error: "That document already exists — try again." };
+  const set = await setDeviceTypeSymbol(type.key, doc.id);
+  if (!set.ok) return set;
+  revalidatePath("/design/grid/settings");
+  revalidatePath("/", "layout");
   return { ok: true, documentId: doc.id };
 }

@@ -49984,7 +49984,7 @@ import { NODE_ROW as RS300_ROW, NODE_ROW_OBJECT as RS300_ROW_OBJ, nodeRowHeight 
     pds300.includes('(["symbol", "riser"] as const)') && pds300.includes("uploadNewDocument(file, kind, [sku])") && pds300.includes("accept={acceptFor(kind)}") &&
       pds300.includes("<ObjectSymbolTile") && pds300.includes("Cleaned:") && pds300.includes("detachDocumentAction(drawing.id, sku)") &&
       dtc300.includes('preflight(file, "symbol")') && dtc300.includes('accept={acceptFor("symbol")}') && dtc300.includes("createDeviceTypeDrawingAction(") &&
-      dtc300.includes("setDeviceTypeSymbolAction(key, made.documentId)") && dtc300.includes("setDeviceTypeSymbolAction(key, null)") && dtc300.includes("<ObjectSymbolTile") &&
+      !dtc300.includes("made.documentId") && dtc300.includes("setDeviceTypeSymbolAction(key, null)") && dtc300.includes("<ObjectSymbolTile") &&
       !/<svg[^>]*dangerouslySetInnerHTML|dangerouslySetInnerHTML/.test(pds300 + dtc300),
     "#300 build-out: the part editor uploads symbol + riser drawings and the device-type card a symbol drawing, previewed as <img> tiles, never inlined"
   );
@@ -49992,10 +49992,21 @@ import { NODE_ROW as RS300_ROW, NODE_ROW_OBJECT as RS300_ROW_OBJ, nodeRowHeight 
   const fn300 = sa300.slice(sa300.indexOf("export async function setDeviceTypeSymbolAction"));
   const body300 = fn300.slice(0, fn300.indexOf("\n}\n") + 2);
   const da300 = rd300b("src/app/(app)/design/grid/settings/drawing-actions.ts");
+  // Every exported server action in this file (outside the exact-count gate on settings/actions.ts) must open on
+  // requirePerm("manage_users") — before any other await — and the gate count must equal the export count.
+  const da300Parts = da300.split("export async function ").slice(1);
+  const da300Gated =
+    da300Parts.length >= 1 &&
+    (da300.match(/requirePerm\("manage_users"\)/g) ?? []).length === da300Parts.length &&
+    da300Parts.every((b) => {
+      const gate = b.indexOf('requirePerm("manage_users")');
+      return gate >= 0 && b.indexOf("await ") === b.lastIndexOf("await ", gate);
+    });
   ok(
     body300.length > 0 && body300.includes('> {\n  await requirePerm("manage_users");\n  const key') &&
       body300.includes('doc.kind !== "symbol"') && body300.includes("!doc.blobKey") && body300.includes("setDeviceTypeSymbol(") &&
-      da300.startsWith('"use server"') && da300.includes('const user = await requirePerm("manage_users")') && da300.includes('kind: "symbol"') &&
+      da300.startsWith('"use server"') && da300Gated && da300.includes('const user = await requirePerm("manage_users")') && da300.includes('kind: "symbol"') &&
+      da300.includes("setDeviceTypeSymbol(type.key, doc.id)") &&
       da300.indexOf("await getDocument(input.documentId)") < da300.indexOf("verifyUploadedBlob(") && da300.includes("storeDrawingUpload(") && !da300.includes("attachDocument("),
     "#300 build-out: setDeviceTypeSymbolAction is admin-only and accepts only a stored symbol document; the device-type upload is admin-only, sanitized and linked to no part"
   );

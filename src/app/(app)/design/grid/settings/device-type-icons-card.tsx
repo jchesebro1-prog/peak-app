@@ -104,7 +104,7 @@ export function DeviceTypeIconsCard({ types, ctx, drawings = {} }: { types: Devi
       else router.refresh();
     });
   };
-  /** Upload → unlinked `symbol` document → point the type at it. */
+  /** Upload → one call stores an unlinked `symbol` document and points the type at it. */
   const uploadDrawing = (key: string, file: File) =>
     runDrawing(key, "Uploading…", async () => {
       const refused = preflight(file, "symbol");
@@ -112,9 +112,7 @@ export function DeviceTypeIconsCard({ types, ctx, drawings = {} }: { types: Devi
       const documentId = newDocumentId();
       const put = await putFile(file, documentId);
       if (!put.ok) return put;
-      const made = await createDeviceTypeDrawingAction({ typeKey: key, documentId, blobPathname: put.pathname, fileName: file.name });
-      if (!made.ok) return made;
-      return setDeviceTypeSymbolAction(key, made.documentId);
+      return createDeviceTypeDrawingAction({ typeKey: key, documentId, blobPathname: put.pathname, fileName: file.name });
     });
   const removeDrawing = (key: string) => runDrawing(key, "Removing…", () => setDeviceTypeSymbolAction(key, null));
 

@@ -62,7 +62,8 @@ export async function setDeviceTypeSymbolAction(typeKey: string, docId: string |
   const key = String(typeKey ?? "");
   if (docId !== null) {
     const doc = await getDocument(String(docId));
-    if (!doc || doc.kind !== "symbol" || !doc.blobKey) return { ok: false, error: "That drawing no longer exists." };
+    if (!doc) return { ok: false, error: "That drawing no longer exists." };
+    if (doc.kind !== "symbol" || !doc.blobKey) return { ok: false, error: "That isn't a stored symbol drawing." };
   }
   const r = await setDeviceTypeSymbol(key, docId === null ? null : String(docId));
   if (!r.ok) return r;

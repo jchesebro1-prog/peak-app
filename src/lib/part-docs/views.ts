@@ -123,17 +123,16 @@ export type PartDrawingSlots = Record<DrawingKind, PartDrawingRef | null>;
 /** The part's live symbol and riser drawings, from the same `documents` /
  *  `links` arrays `loadPartDocsState` loads (no extra query). attachDocument
  *  keeps one current link per kind; should two ever be live, the newest link
- *  wins (the same rule as symbolUrlsFor). A document's own kind is
+ *  wins, ties to the later one (the same rule as symbolUrlsFor). A document's own kind is
  *  authoritative and one with no stored file is skipped. Pure. */
 export function drawingSlotsFor(documents: readonly PartDocument[], links: readonly PartDocumentLink[], sku: string): PartDrawingSlots {
   const docsById = new Map(documents.map((d) => [d.id, d] as const));
   const out: PartDrawingSlots = { symbol: null, riser: null };
-  const newest: Record<DrawingKind, number> = { symbol: -Infinity, riser: -Infinity };
-  for (const l of links) {
+  // Stable ascending sort by createdAt, last wins — symbolUrlsFor's rule, so the editor and the canvas agree on ties.
+  for (const l of [...links].sort((a, b) => a.createdAt - b.createdAt)) {
     if (l.partSku !== sku) continue;
     const d = docsById.get(l.documentId);
-    if (!d || !d.blobKey || !isDrawingKind(d.kind) || l.createdAt < newest[d.kind]) continue;
-    newest[d.kind] = l.createdAt;
+    if (!d || !d.blobKey || !isDrawingKind(d.kind)) continue;
     out[d.kind] = { id: d.id, title: d.title, fileName: d.fileName, source: d.source, uploadedAt: d.uploadedAt, uploadedBy: d.uploadedBy, removed: [...(d.svgRemoved ?? [])] };
   }
   return out;
