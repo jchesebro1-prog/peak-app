@@ -778,25 +778,12 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
 
   /** Where the pointer is over the plan, in plan coords (null off-plan) —
-   *  for the status bar and paste. One state update per animation frame at
-   *  most: pointermove fires far faster than anything needs to repaint. */
-  const [cursorAt, setCursorAt] = useState<Point | null>(null);
-  const cursorNext = useRef<Point | null>(null);
-  const cursorFrame = useRef<number | null>(null);
-  const queueCursorAt = useCallback((p: Point | null) => {
-    cursorNext.current = p;
-    if (cursorFrame.current !== null) return;
-    cursorFrame.current = requestAnimationFrame(() => {
-      cursorFrame.current = null;
-      const next = cursorNext.current;
-      setCursorAt((prev) =>
-        prev === next || (prev && next && prev.x === next.x && prev.y === next.y) ? prev : next
-      );
-    });
-  }, []);
-  const clearCursorAt = useCallback(() => queueCursorAt(null), [queueCursorAt]);
-  useEffect(() => () => {
-    if (cursorFrame.current !== null) cancelAnimationFrame(cursorFrame.current);
+   *  for paste, which reads it on demand. A ref, not state: pointermove
+   *  fires constantly and nothing renders the point, so updating it must
+   *  never re-render the editor. */
+  const cursorAtRef = useRef<Point | null>(null);
+  const clearCursorAt = useCallback(() => {
+    cursorAtRef.current = null;
   }, []);
 
   /** Zoom so the whole sheet fits the plan box. `size` is the PDF canvas's
@@ -1056,7 +1043,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
 
   function onMove(e: React.PointerEvent) {
-    queueCursorAt(toNorm(e));
+    cursorAtRef.current = toNorm(e);
     if (drag) {
       // Until the hand has travelled DRAG_PX this is still a click: leave the
       // marker exactly where it is so a shaky click can never nudge a device.
@@ -1411,7 +1398,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     commitMove,
     toNorm,
     placeAt,
-    cursorAt,
+    cursorAtRef,
     clearCursorAt,
     scrollRef,
     fit,

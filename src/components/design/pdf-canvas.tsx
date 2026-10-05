@@ -112,6 +112,9 @@ export default function PdfCanvas({
   // Load the document once per file.
   useEffect(() => {
     let dead = false;
+    // Drop the previous document first: the render effect would otherwise
+    // repaint the OLD page (and report its size) while the new one loads.
+    docRef.current = null;
     (async () => {
       try {
         setLoading(true);

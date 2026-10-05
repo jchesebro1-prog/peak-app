@@ -169,7 +169,9 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
       // pointerdown and bails (it checks the hand tool first); capture keeps
       // the plan's onMove/onUp out of the gesture entirely.
       onPointerDown={(e) => {
-        if (!panOn || e.button !== 0) return;
+        if (!panOn || e.button !== 0 || !sheet) return;
+        // Let the no-sheet upload button (and any control) take its own click.
+        if ((e.target as HTMLElement).closest("button, a, input, select, textarea, label")) return;
         const box = e.currentTarget;
         panStart.current = { x: e.clientX, y: e.clientY, left: box.scrollLeft, top: box.scrollTop };
         setGrabbing(true);
@@ -188,6 +190,10 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
         setGrabbing(false);
       }}
       onPointerCancel={() => {
+        panStart.current = null;
+        setGrabbing(false);
+      }}
+      onLostPointerCapture={() => {
         panStart.current = null;
         setGrabbing(false);
       }}
