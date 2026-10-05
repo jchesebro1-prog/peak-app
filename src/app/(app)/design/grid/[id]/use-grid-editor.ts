@@ -81,6 +81,7 @@ import { copySelection, PASTE_OFFSET, pasteLayout, type Clipboard } from "@/lib/
 // Type-only: the module itself imports the server-side catalog lookup.
 import type { CurtainInput } from "@/lib/design/grid-curtain-input";
 import { cleanSymbolDisplay, hitRadius, type SymbolDisplay, type SymbolMode } from "@/lib/design/grid-symbol-display";
+import type { ObjectSymbolUrls } from "@/lib/design/object-symbols";
 import {
   SNAP_FT_KEY,
   SNAP_ON_KEY,
@@ -333,6 +334,9 @@ export type GridEditorProps = {
   laborLines: GridLaborLine[];
   /** #226: the curated device types (palette chips, Layers). */
   deviceTypes: DeviceType[];
+  /** #300 (D609): partId → object drawing URLs, built server-side by
+   *  symbolUrlsFor; a part absent here draws the generic symbol. */
+  symbolUrls: Record<string, ObjectSymbolUrls>;
   /** #226: this user's starred parts and last-placed parts (newest first). */
   favorites: string[];
   recent: string[];
@@ -364,6 +368,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     deviceTypes,
     recent,
     schedule,
+    symbolUrls,
   } = props;
   const router = useRouter();
   const pathname = usePathname();
@@ -2555,6 +2560,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     symbolDisplay,
     setSymbolScale,
     setSymbolMode,
+    symbolUrls,
     sheets,
     parts,
     fabrics,

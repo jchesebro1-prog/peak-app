@@ -49941,3 +49941,24 @@ async function objectSymbolAsyncChecks300(): Promise<void> {
     for (const row of snap) await db.insert(blobs).values(row);
   }
 }
+
+/* ======================================================================
+   #300 Task 7 — object drawings drawn (D608): only as <image>/<img>, through
+   the new ObjectSymbol component; SymbolShape stays pure SVG; the plan draws
+   a drawing only in Object mode.
+   ====================================================================== */
+{
+  const rd300 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  // (its doc comment says "no <image>" — only an element, `<image ` + attributes, counts)
+  const ss300 = rd300("src/components/design/symbol-shape.tsx");
+  ok(!/<image\s/.test(ss300) && !ss300.includes("object-symbol"), "#300 draw: SymbolShape stays pure SVG — no <image element, no ObjectSymbol");
+  const os300 = rd300("src/components/design/object-symbol.tsx");
+  const os300Bad = os300.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
+  ok(os300.includes("<image") && os300.includes("preserveAspectRatio") && os300.includes("<img") && os300Bad.length === 0,
+    "#300 draw: ObjectSymbol draws an <image> fitted with preserveAspectRatio (and an <img> tile), importing no store or DB value");
+  const pc300 = rd300("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  const at300 = pc300.indexOf("<ObjectSymbol");
+  const gate300 = pc300.lastIndexOf('mode === "object"', at300);
+  ok(at300 > 0 && pc300.indexOf("<ObjectSymbol", at300 + 1) === -1 && gate300 > 0 && at300 - gate300 < 400,
+    "#300 draw: the plan canvas renders <ObjectSymbol only under its Object-mode condition");
+}

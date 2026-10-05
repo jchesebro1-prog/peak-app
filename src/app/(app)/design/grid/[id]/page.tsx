@@ -44,6 +44,7 @@ import { scheduleForOption } from "@/lib/design/grid-schedule-server";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
+import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -189,6 +190,14 @@ export default async function GridEditorPage({
     ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile, deviceTypes }),
     ...virtualPartsFor((project.placements || []).map((pl) => pl.partId), equipMap, equipCtx),
   ];
+  // #300 (D609): each part's object drawing URLs, resolved here so the client
+  // never reads documents. A lookup failure must never break the editor — it
+  // just draws the generic symbols.
+  const symbolUrls = await symbolUrlsFor(parts, deviceTypes.types).catch((e: unknown) => {
+    console.error("[grid] object symbol lookup failed:", e);
+    return {};
+  });
+
 
   /**
    * Curtain drop-in (punch #49): the fabric list with its sell price/sq ft for
@@ -302,6 +311,7 @@ export default async function GridEditorPage({
       laborLines={laborLines}
       schedule={schedule}
       deviceTypes={deviceTypes.types}
+      symbolUrls={symbolUrls}
       favorites={favorites}
       recent={recent}
     />

@@ -24,6 +24,7 @@ import { resolveObjectSymbol, type ObjectSymbolUrls, type SymbolDocs } from "./o
 export async function symbolUrlsFor(parts: readonly PartLite[], types: readonly DeviceType[]): Promise<Record<string, ObjectSymbolUrls>> {
   const keyOf = (p: PartLite): string | null => {
     if (p.allowance || p.kind === "assembly") return null;
+    // Catalog row id == sku (CatalogPart.id = sku), so this key is the partSku the links are stored under.
     const k = String(p.pricingPartId || p.id || "").trim();
     return !k || k.startsWith("asm:") || k.startsWith("allow:") ? null : k;
   };
@@ -39,7 +40,11 @@ export async function symbolUrlsFor(parts: readonly PartLite[], types: readonly 
   // One batched read of every candidate document (part links + type drawings):
   // a document's own kind is authoritative and a removed one never draws.
   const wanted = [...links.map((l) => l.documentId), ...typeDoc.values()];
-  const kindOf = wanted.length ? new Map((await getDocuments(wanted)).map((d) => [d.id, d.kind])) : new Map<string, string>();
+  // A document with no stored file (link-only, never fetched) is skipped, so
+  // the serve route never redirects an <image> to an external sourceUrl.
+  const kindOf = wanted.length
+    ? new Map((await getDocuments(wanted)).filter((d) => !!d.blobKey).map((d) => [d.id, d.kind]))
+    : new Map<string, string>();
 
   // partSku → { symbol, riser } (attachDocument keeps one current link per
   // kind; should two ever be live, the newest wins).

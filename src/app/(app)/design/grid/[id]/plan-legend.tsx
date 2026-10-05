@@ -41,7 +41,9 @@ function writeOpen(open: boolean) {
   window.dispatchEvent(new Event(EVT));
 }
 
-export default function PlanLegend({ rows }: { rows: LegendRow[] }) {
+/** `note` (#300): one extra line under the key — Object mode says product
+ *  drawings replace the generic badges where a part has one. */
+export default function PlanLegend({ rows, note }: { rows: LegendRow[]; note?: string }) {
   const open = useSyncExternalStore(subscribe, readOpen, () => true);
   if (!rows.length) return null;
   return (
@@ -71,6 +73,7 @@ export default function PlanLegend({ rows }: { rows: LegendRow[] }) {
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
           </span>
         ))}
+        {note && <span style={{ color: "#8c919c", fontStyle: "italic" }}>{note}</span>}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { placementQty, routeLengthFt } from "@/lib/design/grid-bom";
 import { markerColor } from "@/lib/design/grid-symbols";
 import { symbolLook } from "@/lib/design/grid-icons";
 import { SymbolShape } from "@/components/design/symbol-shape";
+import { ObjectSymbol } from "@/components/design/object-symbol";
 import { polygonCentroid } from "@/lib/design/grid-geometry";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { markerBox } from "@/lib/design/grid-symbol-display";
@@ -73,6 +74,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     specKeys,
     symbolCtx,
     symbolDisplay,
+    symbolUrls,
     selectedIds,
     marquee,
     cancelGesture,
@@ -531,6 +533,12 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                     <>
                       {(() => {
                         const { w, h } = markerBox(part, s);
+                        // #300 (D608/D609): in Object mode a part (or an
+                        // assembly) with its own drawing draws it, fitted in
+                        // the same marker box; everything else keeps the
+                        // generic badge (an assembly its generic children).
+                        const drawing = symbolDisplay.mode === "object" ? symbolUrls[pl.partId]?.plan : undefined;
+                        if (drawing) return <ObjectSymbol href={drawing} x={x} y={y} w={w} h={h} selected={on} />;
                         return (
                           <>
                             {/* Stock-symbol badge (spec 2026-09-25); ring + label below are unchanged. */}
@@ -594,7 +602,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
           </svg>
 
           {/* plan legend (stock symbols) — every badge on this sheet */}
-          <PlanLegend rows={planLegendRows} />
+          <PlanLegend rows={planLegendRows} note={symbolDisplay.mode === "object" ? "Product drawings shown where available" : undefined} />
 
           {/* curtain drop-in (punch #49) - anchored where it was dropped,
               same on-canvas idiom as the calibration/space entry */}

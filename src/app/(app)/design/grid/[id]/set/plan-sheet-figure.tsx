@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useState } from "react";
 import type { MeasureUnit, Point } from "@/lib/annotations";
 import { SymbolShape } from "@/components/design/symbol-shape";
+import { ObjectSymbol } from "@/components/design/object-symbol";
 import { pointInPolygon } from "@/lib/design/grid-geometry";
 import { fitBox, scaleNote } from "@/lib/design/grid-drawing-set";
 import { KEY_MAX_ROWS, placeLabels, planKeyLayout, spaceNameRect, symbolRect, type Pt, type Rect } from "@/lib/design/drawing-labels";
@@ -26,6 +27,9 @@ export type FigurePlacement = {
   w: number;
   h: number;
   curtain: boolean;
+  /** #300: the part's object drawing (set only when the design is in Object
+   *  mode and the part has one) — drawn as an image in the marker box. */
+  href?: string;
 };
 export type FigureRoute = { id: string; points: Point[]; color: string };
 export type FigureSpace = { id: string; points: Point[]; name: string; color: string };
@@ -241,6 +245,8 @@ export default function PlanSheetFigure({
                   const y = pl.y * H;
                   return pl.curtain ? (
                     <rect key={pl.id} x={x - (pl.w / 2) * K} y={y - (pl.h / 2) * K} width={pl.w * K} height={pl.h * K} rx={2 * K} fill={pl.color} />
+                  ) : pl.href ? (
+                    <ObjectSymbol key={pl.id} href={pl.href} x={x} y={y} w={pl.w * K} h={pl.h * K} />
                   ) : (
                     <SymbolShape key={pl.id} iconId={pl.iconId} x={x} y={y} w={pl.w * K} h={pl.h * K} color={pl.color} />
                   );

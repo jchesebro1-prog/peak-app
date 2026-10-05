@@ -8,6 +8,7 @@ import type { GridLayer } from "@/lib/design/grid-scopes";
 import { PALETTE_ROW_CAP, isMapped, paletteView } from "@/lib/design/grid-palette";
 import { assemblyParts, libraryQuery, libraryTree, selKey, type LibraryNode, type LibrarySel } from "@/lib/design/grid-library";
 import { SymbolIcon } from "@/components/design/symbol-shape";
+import { ObjectSymbolImg } from "@/components/design/object-symbol";
 import { useCanMap } from "@/components/design/equipment-map-link";
 import { toggleGridFavoriteAction } from "../actions";
 import AssembliesPanel from "../assemblies-panel";
@@ -201,13 +202,15 @@ function DevicePalette({
   onStar: (id: string) => void;
   emptyText: string;
 }) {
-  const { armedPartId, lookOf, enterTool, disarm } = ed;
+  const { armedPartId, lookOf, enterTool, disarm, symbolUrls } = ed;
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
         {rows.slice(0, PALETTE_ROW_CAP).map((p, i) => {
           const on = p.id === armedPartId;
           const look = lookOf(p);
+          // #300: a part's drawing shows whenever it has one, in either mode.
+          const drawing = symbolUrls[p.id]?.plan;
           const starred = favSet.has(p.id);
           return (
             <div key={p.id} style={{ position: "relative", minWidth: 0 }}>
@@ -224,7 +227,11 @@ function DevicePalette({
                 style={tileStyle(on)}
               >
                 <span style={BADGE}>{i + 1}</span>
-                <SymbolIcon iconId={look.iconId} color={look.color} size={34} />
+                {drawing ? (
+                  <ObjectSymbolImg src={drawing} size={34} />
+                ) : (
+                  <SymbolIcon iconId={look.iconId} color={look.color} size={34} />
+                )}
                 <span style={NAME}>{p.desc}</span>
                 <span style={{ marginTop: "auto", fontSize: 11, color: "#8c919c" }}>
                   {!isMapped(p) && <span style={{ fontWeight: 700, color: "#a0442b" }}>Unmapped · </span>}

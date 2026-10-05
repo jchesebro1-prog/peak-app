@@ -41,6 +41,8 @@ import { PrintButton } from "@/components/letter/print-button";
 import PlanSheetFigure, { type FigurePlacement } from "./plan-sheet-figure";
 import SetSettingsPanel from "./set-settings-panel";
 import { cleanSymbolDisplay, markerBox } from "@/lib/design/grid-symbol-display";
+import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
+import type { ObjectSymbolUrls } from "@/lib/design/object-symbols";
 
 export const metadata = { title: "Drawing set — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -140,6 +142,20 @@ export default async function DrawingSetPage({
   // E-501 + E-60x
   const view = riserViewForOption({ project, optionId, parts, symCtx });
   const symbolDisplay = cleanSymbolDisplay(project.symbolDisplay);
+  // #300 (D609): in Object mode, the drawing URLs of the parts this option
+  // places (never the whole catalog fallback). A lookup failure prints the
+  // generic symbols instead of failing the set.
+  const symbolUrls =
+    symbolDisplay.mode === "object"
+      ? await symbolUrlsFor(
+          [...new Set(slice.placements.filter((pl) => !pl.curtain).map((pl) => pl.partId))].flatMap((pid) => partById.get(pid) ?? []),
+          deviceTypes.types
+        ).catch((e: unknown) => {
+          console.error("[grid set] object symbol lookup failed:", e);
+          return {} as Record<string, ObjectSymbolUrls>;
+        })
+      : {};
+
   const schedule = buildSchedule({
     placements: slice.placements,
     spaces,
@@ -203,6 +219,8 @@ export default async function DrawingSetPage({
         ? { w: 22 * symbolDisplay.scale, h: 16 * symbolDisplay.scale }
         : markerBox(part, symbolDisplay.scale)),
       curtain: Boolean(pl.curtain),
+      // The design's mode (#300): Object mode prints the part's drawing where one exists.
+      ...(!pl.curtain && symbolUrls[pl.partId]?.plan ? { href: symbolUrls[pl.partId].plan } : {}),
     };
     return { fig, desc, qty };
   };
