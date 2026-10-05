@@ -15,6 +15,7 @@ import {
 import {
   compareImages,
   isDocumentId,
+  isDrawingKind,
   newDocumentId,
   type PartDocKind,
   type PartDocument,
@@ -75,6 +76,8 @@ export type NewPartDocument = {
   source: PartDocumentSource;
   sourceRef?: string;
   language?: string;
+  /** What the SVG sanitizer stripped (#300, drawing kinds only). */
+  svgRemoved?: string[];
   by: string;
   at?: number;
 };
@@ -94,6 +97,7 @@ function buildDocument(input: NewPartDocument): PartDocument {
     source: input.source,
     ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
     ...(input.language ? { language: input.language } : {}),
+    ...(input.svgRemoved?.length ? { svgRemoved: [...input.svgRemoved] } : {}),
     uploadedAt: input.at ?? Date.now(),
     uploadedBy: input.by,
     history: [],
@@ -127,7 +131,8 @@ export async function createDocuments(
   return { created, complete: r.complete };
 }
 
-export type StoredFile = { blobKey: string; fileName: string; contentType: string; size: number };
+/** `svgRemoved` (#300): what sanitizeSvg stripped from this file, when it is a sanitized drawing SVG. */
+export type StoredFile = { blobKey: string; fileName: string; contentType: string; size: number; svgRemoved?: string[] };
 
 /**
  * Point a document at a new stored file. The file it held (if any) moves to
@@ -137,9 +142,13 @@ export type StoredFile = { blobKey: string; fileName: string; contentType: strin
 export async function replaceDocumentFile(id: string, file: StoredFile, by: string, at = Date.now()): Promise<PartDocument | null> {
   return patchDoc<PartDocument>("part_documents", id, (d) => {
     const history = [...(d.history || [])];
-    if (d.blobKey) history.push({ blobKey: d.blobKey, fileName: d.fileName, size: d.size, replacedAt: at, replacedBy: by });
+    if (d.blobKey) history.push({ blobKey: d.blobKey, fileName: d.fileName, size: d.size, replacedAt: at, replacedBy: by, ...(d.svgRemoved?.length ? { svgRemoved: d.svgRemoved } : {}) });
+    // #300 — the stripped list describes the CURRENT file only; it moves to history with it.
+    const { svgRemoved: _previous, ...rest } = d;
+    void _previous;
     return {
-      ...d,
+      ...rest,
+      ...(file.svgRemoved?.length ? { svgRemoved: [...file.svgRemoved] } : {}),
       blobKey: file.blobKey,
       fileName: file.fileName,
       contentType: file.contentType,
@@ -169,6 +178,11 @@ export async function recordFetchResult(id: string, result: { ok: boolean; error
  * read of the deterministic link ids, new links inserted in one batch
  * (ON CONFLICT DO NOTHING, so a concurrent attach of the same pair is not
  * counted twice), detached ones revived in one batch.
+ *
+ * #300 (D606): a part has ONE current symbol and ONE current riser drawing.
+ * Attaching a drawing document detaches (soft-deletes) every other live
+ * link of the same kind on those parts; the old documents stay, with their
+ * history, and can be re-attached.
  */
 export async function attachDocument(documentId: string, skus: readonly string[], by: string, at = Date.now()): Promise<number> {
   const doc = await getDocument(documentId);
@@ -192,6 +206,12 @@ export async function attachDocument(documentId: string, skus: readonly string[]
   }
   const inserted = fresh.length ? (await insertDocsIfAbsent<PartDocumentLink>("part_document_links", fresh)).ids.length : 0;
   const revived = revive.length ? (await upsertDocs<PartDocumentLink>("part_document_links", revive)).ids.length : 0;
+  if (isDrawingKind(doc.kind)) {
+    const parts = [...new Set([...wanted.values()].map((l) => l.partSku))];
+    for (const l of await documentLinksForParts(parts)) {
+      if (l.kind === doc.kind && l.documentId !== documentId) await softDeleteDoc("part_document_links", l.id);
+    }
+  }
   return inserted + revived;
 }
 

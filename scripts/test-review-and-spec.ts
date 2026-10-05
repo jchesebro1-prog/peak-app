@@ -10789,6 +10789,7 @@ seeded()
   .then(() => gridBatchAsyncChecks299())
   .then(() => gridPasteAsyncChecks299())
   .then(() => gridSymbolDisplayAsyncChecks300())
+  .then(() => partDocSymbolAsyncChecks300())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -49811,4 +49812,57 @@ import { sniffDocumentType as sniff300 } from "@/lib/part-docs/files";
   ok(mm.every((r) => !r.ok), "#300 svg: a close tag matching nothing inside a dropped element is refused");
   const sp = sanitizeSvg(X("<style>u@import x;rl(https://e)</style>"));
   ok(!sp.ok || !sp.svg.includes("url(https://e"), "#300 svg: a removed @import never splices its neighbours into url(");
+}
+
+/* ======================================================================
+   #300 Task 5 — symbol / riser drawing kinds (D606–D608): kinds + byte
+   rules, SVG allowed for the upload token, the sandboxed serve route, the
+   sanitize-to-a-new-blob write path (fake Blob deps), and one current
+   drawing link per part per kind (store level).
+   ====================================================================== */
+import { isPartDocKind as pd300IsKind } from "@/lib/part-docs/types";
+import { checkDocumentBytes as pd300Check, UPLOAD_CONTENT_TYPES as pd300UploadTypes } from "@/lib/part-docs/files";
+import { storeDrawingUpload as pd300StoreDrawing } from "@/lib/part-docs/drawing-upload";
+import {
+  attachDocument as pd300Attach,
+  createDocument as pd300CreateDoc,
+  documentLinkId as pd300LinkId,
+  documentLinksForParts as pd300LinksFor,
+} from "@/lib/stores/part-documents";
+async function partDocSymbolAsyncChecks300(): Promise<void> {
+  const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>');
+  ok(pd300IsKind("symbol") && pd300IsKind("riser"), "#300 drawings: symbol and riser are part-document kinds");
+  const sym = pd300Check("symbol", svgBytes);
+  ok(sym.ok && sym.contentType === "image/svg+xml" && !pd300Check("datasheet", svgBytes).ok, "#300 drawings: a symbol takes SVG bytes; a datasheet still refuses them");
+  ok(pd300UploadTypes.includes("image/svg+xml"), "#300 drawings: the upload token allows image/svg+xml (checkDocumentBytes is the authority)");
+  const route = readFileSync(join(process.cwd(), "src/app/api/part-documents/[id]/route.ts"), "utf8");
+  ok(route.includes("sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'") && route.includes('contentType === "image/svg+xml"'),
+    "#300 drawings: the serve route sandboxes an image/svg+xml response (CSP sandbox, default-src 'none')");
+
+  // The SVG write path: sanitized text to a NEW blob, original deleted, what was stripped recorded.
+  const blobs = new Map<string, Uint8Array>([["part-docs/PD-sym300a/x.svg", new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect onclick="x()" width="1"/></svg>')]]);
+  const removed: string[] = [];
+  const stored = await pd300StoreDrawing("PD-sym300a", { blobKey: "part-docs/PD-sym300a/x.svg", fileName: "x.svg", contentType: "image/svg+xml", size: 99 }, {
+    read: async (p) => blobs.get(p) ?? null,
+    put: async (p, bytes) => { const q = `${p.replace(/\.svg$/, "")}-r4nd.svg`; blobs.set(q, new Uint8Array(bytes)); return { pathname: q }; },
+    remove: async (p) => { removed.push(p); },
+  });
+  const cleanText = stored.ok ? new TextDecoder().decode(blobs.get(stored.file.blobKey)) : "";
+  ok(stored.ok && stored.file.blobKey !== "part-docs/PD-sym300a/x.svg" && removed.includes("part-docs/PD-sym300a/x.svg") && !/script|onclick/i.test(cleanText) && cleanText.includes("<rect") && (stored.file.svgRemoved?.length ?? 0) > 0,
+    "#300 drawings: an SVG is sanitized into a new blob, the upload deleted, and what was stripped recorded");
+
+  // One current symbol per part: attaching a second symbol unlinks the first.
+  const sku = fixtureId(300, "sku-sym");
+  const mk = (n: string) => pd300CreateDoc({ kind: "symbol", fileName: `${n}.svg`, contentType: "image/svg+xml", size: 100, blobKey: `part-docs/PD-fixture-${n}/${n}.svg`, sourceUrl: null, source: "upload", by: "Test" });
+  const first = await mk("sym1");
+  const second = await mk("sym2");
+  if (!first || !second) throw new Error("#300 drawings: fixture documents failed to create");
+  registerFixture("part_documents", first.id);
+  registerFixture("part_documents", second.id);
+  registerFixture("part_document_links", pd300LinkId(sku, first.id));
+  registerFixture("part_document_links", pd300LinkId(sku, second.id));
+  await pd300Attach(first.id, [sku], "Test");
+  await pd300Attach(second.id, [sku], "Test");
+  const live = (await pd300LinksFor([sku])).filter((l) => l.kind === "symbol").map((l) => l.documentId);
+  ok(live.length === 1 && live[0] === second.id, "#300 drawings: attaching a second symbol to a part leaves only the second linked");
 }

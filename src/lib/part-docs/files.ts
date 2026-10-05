@@ -1,4 +1,4 @@
-import type { PartDocKind } from "./types";
+import { isDrawingKind, type PartDocKind } from "./types";
 
 /**
  * File-type rules for part documents (#207, spec §6). Pure — the upload
@@ -20,25 +20,31 @@ export const CONTENT_TYPES: Record<SniffedType, string> = {
 
 /** What each slot accepts: a datasheet is a PDF; a spec sheet is PDF or Word
  *  (§2.2); a manual is a PDF (#290); an image is PNG, JPEG, or WebP (#245) —
- *  never SVG. */
+ *  never SVG. A symbol/riser drawing (#300) is the one place SVG is taken,
+ *  and every one is sanitized before it is stored. */
 export const ALLOWED_TYPES: Record<PartDocKind, readonly SniffedType[]> = {
   datasheet: ["pdf"],
   specsheet: ["pdf", "doc", "docx"],
   manual: ["pdf"],
   image: ["png", "jpeg", "webp"],
+  symbol: ["svg", "png", "jpeg", "webp"],
+  riser: ["svg", "png", "jpeg", "webp"],
 };
 
 /** The `accept` attribute for a slot's file input. */
 export function acceptFor(kind: PartDocKind): string {
   if (kind === "datasheet" || kind === "manual") return ".pdf,application/pdf";
   if (kind === "image") return ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp";
+  if (isDrawingKind(kind)) return ".svg,.png,.jpg,.jpeg,.webp,image/svg+xml,image/png,image/jpeg,image/webp";
   return ".pdf,.doc,.docx,application/pdf,application/msword," + CONTENT_TYPES.docx;
 }
 
 /** Every content type the upload token may be issued for (the bytes are checked after).
- *  SVG is left out here: no slot accepts it yet (#300 adds it with its own
- *  sanitize-on-upload path). */
-export const UPLOAD_CONTENT_TYPES: readonly string[] = [...Object.entries(CONTENT_TYPES).filter(([t]) => t !== "svg").map(([, c]) => c), "application/octet-stream"];
+ *  The token route doesn't know the slot, so SVG is allowed here for every
+ *  upload (#300); `checkDocumentBytes(kind, …)` after the upload is the
+ *  authority — SVG passes only for a symbol/riser drawing, which is then
+ *  sanitized before anything is recorded. */
+export const UPLOAD_CONTENT_TYPES: readonly string[] = [...Object.values(CONTENT_TYPES), "application/octet-stream"];
 
 const OLE2 = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
@@ -134,6 +140,10 @@ export function mustBeFilesCopy(kind: PartDocKind): string {
       return "Spec sheets must be PDF or Word files.";
     case "image":
       return "Images must be PNG, JPEG, or WebP files.";
+    case "symbol":
+      return "Symbol drawings must be SVG, PNG, JPEG, or WebP files.";
+    case "riser":
+      return "Riser drawings must be SVG, PNG, JPEG, or WebP files.";
   }
 }
 
@@ -144,6 +154,18 @@ export function checkDocumentBytes(kind: PartDocKind, bytes: Uint8Array): { ok: 
     if (!imageType) return { ok: false, error: "That file is not a PNG, JPEG, or WebP image." };
     const type: SniffedType = imageType === "image/png" ? "png" : imageType === "image/jpeg" ? "jpeg" : "webp";
     return { ok: true, type, contentType: imageType };
+  }
+  if (isDrawingKind(kind)) {
+    // #300 — a drawing is a raster (sniffed exactly like an image) or SVG text.
+    const imageType = sniffImageType(bytes);
+    if (imageType) {
+      const type: SniffedType = imageType === "image/png" ? "png" : imageType === "image/jpeg" ? "jpeg" : "webp";
+      return { ok: true, type, contentType: imageType };
+    }
+    const sniffed = sniffDocumentType(bytes);
+    if (sniffed === "svg") return { ok: true, type: "svg", contentType: CONTENT_TYPES.svg };
+    if (sniffed) return { ok: false, error: mustBeFilesCopy(kind) };
+    return { ok: false, error: "That file is not an SVG, PNG, JPEG, or WebP drawing." };
   }
   const type = sniffDocumentType(bytes);
   if (!type) return { ok: false, error: ALLOWED_TYPES[kind].includes("doc") ? "That file is not a PDF or Word document." : "That file is not a PDF." };
@@ -161,6 +183,7 @@ export function contentTypeForFileName(fileName: string): string {
   if (n.endsWith(".png")) return CONTENT_TYPES.png;
   if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return CONTENT_TYPES.jpeg;
   if (n.endsWith(".webp")) return CONTENT_TYPES.webp;
+  if (n.endsWith(".svg")) return CONTENT_TYPES.svg;
   return CONTENT_TYPES.pdf;
 }
 
@@ -175,7 +198,7 @@ export const EQUIVALENT_EXTENSION: Partial<Record<SniffedType, RegExp>> = { jpeg
 /** Make a file name end in the extension its bytes actually have. */
 export function withExtension(fileName: string, type: SniffedType): string {
   if ((EQUIVALENT_EXTENSION[type] ?? new RegExp(`\\.${type}$`, "i")).test(fileName)) return fileName;
-  const base = fileName.replace(/\.(pdf|docx?|aspx|php|html?|png|jpe?g|webp)$/i, "");
+  const base = fileName.replace(/\.(pdf|docx?|aspx|php|html?|png|jpe?g|webp|svg)$/i, "");
   return `${base || "document"}.${type}`;
 }
 

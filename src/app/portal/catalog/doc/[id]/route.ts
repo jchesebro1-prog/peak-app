@@ -54,6 +54,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 
   const contentType = doc.contentType || "application/octet-stream";
   if (doc.kind === "image" && !ALLOWED_IMAGE_CONTENT_TYPES.has(contentType)) return notFound();
+  // #300 — object drawings (and any SVG) are staff-only; servableDocIds never
+  // lists one, this is the belt to that brace.
+  if (doc.kind === "symbol" || doc.kind === "riser" || contentType.startsWith("image/svg")) return notFound();
 
   // The blobKey changes on every replace (putBlob's addRandomSuffix), so a
   // hash of it — not just doc.id — moves the ETag when the file does

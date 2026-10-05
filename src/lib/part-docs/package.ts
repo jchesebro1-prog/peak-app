@@ -1,5 +1,5 @@
 import { slotCoverage, type CoverageIndex } from "./coverage";
-import type { DocSlotKind, PartDocKind } from "./types";
+import { isDocSlotKind, type DocSlotKind, type PartDocKind } from "./types";
 
 /**
  * Which documents a client package carries (#207, spec §3 "Client
@@ -63,7 +63,8 @@ const PACKAGE_FOLDER: Record<DocSlotKind, string> = { datasheet: "datasheets", s
 
 /** A zip entry name per document, unique within one package. */
 export function packageEntryName(doc: Pick<PackageDocument, "documentId" | "kind" | "name">, used: Set<string>, safe: (s: string) => string): string {
-  const folder = doc.kind === "image" ? "images" : PACKAGE_FOLDER[doc.kind];
+  // #300: resolvePackageDocs only ever takes slot kinds, so a symbol/riser drawing never reaches a package; "drawings" only keeps this total.
+  const folder = doc.kind === "image" ? "images" : isDocSlotKind(doc.kind) ? PACKAGE_FOLDER[doc.kind] : "drawings";
   let name = `${folder}/${safe(doc.name)}`;
   if (used.has(name)) name = `${folder}/${doc.documentId}-${safe(doc.name)}`;
   used.add(name);

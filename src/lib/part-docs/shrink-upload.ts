@@ -24,12 +24,15 @@ async function readWhole(pathname: string): Promise<Uint8Array | null> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-const liveDeps: ShrinkUploadDeps = { read: readWhole, put: putBlob, remove: deleteBlob };
+/** Exported for the drawing path (#300, drawing-upload.ts), which reads/stores the same way. */
+export const liveShrinkUploadDeps: ShrinkUploadDeps = { read: readWhole, put: putBlob, remove: deleteBlob };
 
 export async function shrinkStoredImage(
   documentId: string,
   file: StoredFile,
-  deps: ShrinkUploadDeps = liveDeps
+  deps: ShrinkUploadDeps = liveShrinkUploadDeps,
+  /** `maxEdge` — #300 object drawings shrink to ≤ 1024 px (default 1600, shrink.ts). */
+  opts: { maxEdge?: number } = {}
 ): Promise<{ ok: true; file: StoredFile } | { ok: false; error: string }> {
   const removeQuietly = async (pathname: string) => {
     try {
@@ -45,7 +48,7 @@ export async function shrinkStoredImage(
     bytes = null;
   }
   if (!bytes) return { ok: false, error: "Couldn't read the uploaded file — try again" };
-  const shrunk = await shrinkImage(bytes);
+  const shrunk = await shrinkImage(bytes, opts);
   if (!shrunk.ok) {
     await removeQuietly(file.blobKey);
     return shrunk;

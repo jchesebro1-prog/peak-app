@@ -1,6 +1,6 @@
 import { upload } from "@vercel/blob/client";
 import { contentTypeForFileName } from "@/lib/part-docs/files";
-import { maxBytesFor, newDocumentId, partDocBlobPath, type PartDocKind } from "@/lib/part-docs/types";
+import { isDrawingKind, maxBytesFor, newDocumentId, partDocBlobPath, type PartDocKind } from "@/lib/part-docs/types";
 import { attachUploadedDocumentAction, replaceDocumentFileAction } from "./actions";
 
 /**
@@ -16,6 +16,8 @@ type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 export function preflight(file: File, kind: PartDocKind): string | null {
   const cap = maxBytesFor(kind);
   if (file.size > cap) return `${file.name} is over ${Math.round(cap / (1024 * 1024))} MB.`;
+  // #300 — a symbol/riser drawing is SVG or a raster.
+  if (isDrawingKind(kind)) return /\.(svg|png|jpe?g|webp)$/i.test(file.name) ? null : `${file.name} is not an SVG, PNG, JPEG, or WebP drawing.`;
   // A datasheet and (#290) a manual are PDF only.
   const pdfOnly = kind === "datasheet" || kind === "manual";
   const ok =

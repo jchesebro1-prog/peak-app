@@ -9,7 +9,19 @@
  * accessory. Spec: docs/superpowers/specs/2026-09-25-part-documents-design.md §5.
  */
 
-export type PartDocKind = "datasheet" | "specsheet" | "manual" | "image";
+export type PartDocKind = "datasheet" | "specsheet" | "manual" | "image" | "symbol" | "riser";
+
+/** The object-drawing kinds (#300, D606): a part's plan `symbol` and its
+ *  front-view `riser` drawing. Like `image`, neither is a coverage slot —
+ *  they never appear on the Datasheets to-do list, in coverage, the portal,
+ *  client packages or the Displays API. One current link per part per kind
+ *  (attachDocument unlinks the previous one). SVG (sanitized on the way in)
+ *  or a raster shrunk to ≤ 1024 px WebP. */
+export const DRAWING_KINDS = ["symbol", "riser"] as const;
+export type DrawingKind = (typeof DRAWING_KINDS)[number];
+export function isDrawingKind(v: unknown): v is DrawingKind {
+  return (DRAWING_KINDS as readonly unknown[]).includes(v);
+}
 
 /** The coverage slots — a datasheet/spec-sheet/manual document can satisfy
  *  a part's requirement; an image never can (#245). Existing screens iterate
@@ -23,17 +35,24 @@ export const DOC_SLOT_KINDS = ["datasheet", "specsheet", "manual"] as const;
 export type DocSlotKind = (typeof DOC_SLOT_KINDS)[number];
 
 /** Every part-document kind, coverage slots plus the gallery-only `image`
- *  kind (#245). */
-export const ALL_PART_DOC_KINDS = ["datasheet", "specsheet", "manual", "image"] as const;
+ *  kind (#245) and the object-drawing kinds (#300). */
+export const ALL_PART_DOC_KINDS = ["datasheet", "specsheet", "manual", "image", "symbol", "riser"] as const;
 
 /** Alias of DOC_SLOT_KINDS — typed to the narrow DocSlotKind (not the wider
  *  PartDocKind) so iterating it never introduces "image" into a slot-keyed
  *  Record or a DocumentRow index. */
 export const PART_DOC_KINDS: readonly DocSlotKind[] = DOC_SLOT_KINDS;
-export const PART_DOC_KIND_LABEL: Record<PartDocKind, string> = { datasheet: "Datasheet", specsheet: "Spec sheet", manual: "Manual", image: "Image" };
+export const PART_DOC_KIND_LABEL: Record<PartDocKind, string> = {
+  datasheet: "Datasheet",
+  specsheet: "Spec sheet",
+  manual: "Manual",
+  image: "Image",
+  symbol: "Symbol drawing",
+  riser: "Riser drawing",
+};
 
 export function isPartDocKind(v: unknown): v is PartDocKind {
-  return isDocSlotKind(v) || v === "image";
+  return isDocSlotKind(v) || v === "image" || isDrawingKind(v);
 }
 
 /** Narrower than isPartDocKind (#245 review fix): true only for the
@@ -55,6 +74,8 @@ export type PartDocumentHistoryEntry = {
   size: number;
   replacedAt: number;
   replacedBy: string;
+  /** What the SVG sanitizer stripped from this file (#300) — carried over from the document when it was replaced. */
+  svgRemoved?: string[];
 };
 
 export type PartDocument = {
@@ -78,6 +99,10 @@ export type PartDocument = {
   /** The last fetch attempt of `sourceUrl` (D272): failures stay listed
    *  with their reason until a later fetch succeeds. */
   lastFetch?: { at: number; ok: boolean; error?: string };
+  /** What `sanitizeSvg` stripped from the current file (#300, symbol/riser
+   *  SVG only) — e.g. "script elements", "event handlers" — so an admin can
+   *  see what a drawing lost on the way in. Absent = nothing stripped. */
+  svgRemoved?: string[];
 };
 
 export type PartDocumentLink = {
@@ -126,8 +151,13 @@ export const MAX_PART_DOC_BYTES = 25 * 1024 * 1024;
 /** Image cap (#245; #283 raised 10 → 25 MB — images are shrunk on the way in, so this only bounds what's read into memory). */
 export const MAX_PART_IMAGE_BYTES = 25 * 1024 * 1024;
 
+/** Object-drawing cap (#300): a symbol/riser raster is shrunk to ≤ 1024 px
+ *  and an SVG must sanitize under 1 MB (SVG_MAX_BYTES), so 5 MB is plenty. */
+export const MAX_PART_DRAWING_BYTES = 5 * 1024 * 1024;
+
 /** The byte ceiling for a slot's kind (#245). */
 export function maxBytesFor(kind: PartDocKind): number {
+  if (isDrawingKind(kind)) return MAX_PART_DRAWING_BYTES;
   return kind === "image" ? MAX_PART_IMAGE_BYTES : MAX_PART_DOC_BYTES;
 }
 

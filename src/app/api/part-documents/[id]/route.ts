@@ -3,6 +3,13 @@ import { getBlobStream } from "@/lib/blob";
 import { getDocument } from "@/lib/stores/part-documents";
 import { contentDisposition, contentTypeForFileName } from "@/lib/part-docs/files";
 
+/** #300 (D608) — a stored SVG (a symbol/riser drawing, always sanitized on
+ *  the way in) is still served sandboxed: opened directly in a tab it can
+ *  run nothing, load nothing but inline data: images, and style only
+ *  itself. Served INLINE (like every part document here) so `<img>` and
+ *  SVG `<image>` can draw it. */
+const SVG_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+
 /**
  * Part-document viewer (#207, spec §7): signed-in only. Streams the private
  * blob; a link-only document (no stored file yet) redirects to its source
@@ -38,9 +45,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     return new Response("Couldn't read the file — try again", { status: 502 });
   }
   if (!stream) return new Response("File missing from storage", { status: 404 });
+  const contentType = h === null ? doc.contentType || contentTypeForFileName(fileName) : contentTypeForFileName(fileName);
   return new Response(stream, {
     headers: {
-      "content-type": h === null ? doc.contentType || contentTypeForFileName(fileName) : contentTypeForFileName(fileName),
+      "content-type": contentType,
       "content-disposition": contentDisposition(fileName),
       // A replace writes a NEW blob and moves the old one to history, so the
       // bytes behind one (id, history) pair never change — but the current
@@ -51,6 +59,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       // sniffing a misdeclared content-type (e.g. treating an uploaded file
       // as HTML/script) instead of trusting the header above.
       "x-content-type-options": "nosniff",
+      ...(contentType === "image/svg+xml" ? { "content-security-policy": SVG_CSP } : {}),
     },
   });
 }

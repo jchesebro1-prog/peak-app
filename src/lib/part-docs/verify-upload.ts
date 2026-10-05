@@ -23,7 +23,7 @@ const liveDeps: VerifyDeps = { head: getBlobHead, remove: deleteBlob };
 export function displayFileName(raw: string, type: SniffedType): string {
   const name = String(raw ?? "").split(/[\\/]/).pop()!.trim().slice(0, 180) || "document";
   const matchesType = (EQUIVALENT_EXTENSION[type] ?? new RegExp(`\\.${type}$`, "i")).test(name);
-  return matchesType ? name : `${name.replace(/\.(pdf|docx?|png|jpe?g|webp)$/i, "")}.${type}`;
+  return matchesType ? name : `${name.replace(/\.(pdf|docx?|png|jpe?g|webp|svg)$/i, "")}.${type}`;
 }
 
 export async function verifyUploadedBlob(

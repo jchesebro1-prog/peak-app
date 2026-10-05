@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ALL_PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocKind } from "@/lib/part-docs/types";
+import { ALL_PART_DOC_KINDS, isDrawingKind, PART_DOC_KIND_LABEL, type PartDocKind } from "@/lib/part-docs/types";
 import { matchFilesAction, searchPartsAction, type FileMatchRow, type PartHit } from "../actions";
 import { preflight, uploadNewDocument } from "../upload-client";
 
@@ -191,7 +191,7 @@ export default function BulkDrop() {
                     <td style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.fileName}>{r.fileName}</td>
                     <td style={{ padding: 8, borderTop: "1px solid #f0f1f4" }}>
                       <select aria-label={`Kind for ${r.fileName}`} value={r.kind} disabled={r.status === "done"} onChange={(e) => patch(r.key, { kind: e.target.value as PartDocKind })} style={{ fontSize: 12, padding: "4px 6px", borderRadius: 6, border: "1px solid #dfe2e8" }}>
-                        {ALL_PART_DOC_KINDS.map((k) => <option key={k} value={k}>{PART_DOC_KIND_LABEL[k]}</option>)}
+                        {ALL_PART_DOC_KINDS.filter((k) => !isDrawingKind(k)).map((k) => <option key={k} value={k}>{PART_DOC_KIND_LABEL[k]}</option>)}
                       </select>
                     </td>
                     <td style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12, color: CONF[r.confidence].color, fontWeight: 600 }}>{CONF[r.confidence].label}</td>

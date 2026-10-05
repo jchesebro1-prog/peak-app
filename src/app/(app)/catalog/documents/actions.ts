@@ -24,6 +24,7 @@ import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/li
 import { buildFetchContext, catalogFetchTargets, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { fetchImageBytes } from "@/lib/part-docs/fetch";
 import { shrinkStoredImage } from "@/lib/part-docs/shrink-upload";
+import { storeDrawingUpload } from "@/lib/part-docs/drawing-upload";
 import { shrinkImage, webpFileName } from "@/lib/part-docs/shrink";
 import { fileNameForFetched, sniffImageType } from "@/lib/part-docs/files";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
@@ -46,6 +47,7 @@ import {
   PREFILL_CHUNK_WORST_CASE_MS,
   isDocSlotKind,
   isDocumentId,
+  isDrawingKind,
   isPartDocKind,
   newDocumentId,
   partDocBlobPath,
@@ -152,6 +154,11 @@ export async function attachUploadedDocumentAction(input: {
     const shrunk = await shrinkStoredImage(input.documentId, file);
     if (!shrunk.ok) return shrunk;
     file = shrunk.file;
+  } else if (isDrawingKind(input.kind)) {
+    // #300 — SVG sanitized to a new blob, raster shrunk to ≤ 1024 px WebP; the upload is deleted.
+    const drawn = await storeDrawingUpload(input.documentId, file);
+    if (!drawn.ok) return drawn;
+    file = drawn.file;
   }
   const sheet = input.kind === "image" && input.sheet && String(input.sheet.fileName || "").trim() ? input.sheet : null;
   const doc = await createDocument({
@@ -192,6 +199,10 @@ export async function replaceDocumentFileAction(input: {
     const shrunk = await shrinkStoredImage(doc.id, file);
     if (!shrunk.ok) return shrunk;
     file = shrunk.file;
+  } else if (isDrawingKind(doc.kind)) {
+    const drawn = await storeDrawingUpload(doc.id, file);
+    if (!drawn.ok) return drawn;
+    file = drawn.file;
   }
   await replaceDocumentFile(doc.id, file, user.name);
   revalidate();
