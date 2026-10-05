@@ -436,12 +436,6 @@ function useGridEditorImpl(props: GridEditorProps) {
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The nudge positions painted but not yet written (the 400 ms debounce). */
   const pendingNudge = useRef<{ id: string; x: number; y: number }[] | null>(null);
-  /** Positions writeMoves has saved whose refresh hasn't landed yet (id →
-   *  server position at write time + the written one), and the ids a write
-   *  is in flight for — so the nudge timer can tell a nudge that came back to
-   *  its SAVED spot (write nothing) from one undoing an unrefreshed write. */
-  const writtenRef = useRef(new Map<string, MoveOverride>());
-  const inFlightRef = useRef(new Set<string>());
   /** Forget every optimistic position except a still-unwritten nudge's —
    *  after an edit the stack can't follow (revision restore, another
    *  panel's change) or a refused undo step, a spent override must not
@@ -453,7 +447,6 @@ function useGridEditorImpl(props: GridEditorProps) {
       for (const [id, o] of Object.entries(prev)) if (keep.has(id)) next[id] = o;
       return next;
     });
-    writtenRef.current.clear();
   }, []);
 
   /** Undo / redo (#299 slice 6) — a per-tab client stack. The ref is the
@@ -763,11 +756,6 @@ function useGridEditorImpl(props: GridEditorProps) {
       return changed ? next : prev;
     });
   }
-  // …and the written-position memo the nudge timer reads, likewise.
-  useEffect(() => {
-    const byId = new Map(placements.map((q) => [q.id, q] as const));
-    for (const [id, o] of writtenRef.current) if (isSpentOverride(byId.get(id), o)) writtenRef.current.delete(id);
-  }, [placements]);
 
   const sheetPlacements = useMemo(() => {
     const base = placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page);
@@ -1033,17 +1021,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         });
       setErr(null);
       setBusy(true);
-      for (const m of valid) inFlightRef.current.add(m.id);
       try {
         const r = await movePlacementsAction(project.id, valid);
         if (!r.ok) {
           setErr(r.error);
           rollBack();
           return { ok: false, previous: null };
-        }
-        for (const m of valid) {
-          const server = servers.get(m.id)!;
-          writtenRef.current.set(m.id, { at: { x: m.x, y: m.y }, base: { x: server.x, y: server.y } });
         }
         noteAction(
           label ?? (valid.length === 1 ? `Moved ${placementLabel(servers.get(valid[0].id)!)}` : `Moved ${countNoun(valid.map((m) => servers.get(m.id)!))}`)
@@ -1063,7 +1046,6 @@ function useGridEditorImpl(props: GridEditorProps) {
         setErr(SAVE_FAILED);
         return { ok: false, previous: null };
       } finally {
-        for (const m of valid) inFlightRef.current.delete(m.id);
         setBusy(false);
       }
     },
@@ -1081,29 +1063,6 @@ function useGridEditorImpl(props: GridEditorProps) {
   useEffect(() => {
     sendMovesRef.current = sendMoves;
   }, [sendMoves]);
-  /** The latest server placements, for the same timer. */
-  const placementsRef = useRef(placements);
-  useEffect(() => {
-    placementsRef.current = placements;
-  }, [placements]);
-  /** Drop the moves of a pending nudge that came back to where the device is
-   *  SAVED (the server copy, or a written-but-unrefreshed position), so a
-   *  nudge out and back inside the debounce writes nothing and records no
-   *  undo step. Safe only for a nudge: nothing else is in flight for those
-   *  ids — and any id a write IS in flight for keeps its move, unfiltered. */
-  const unsavedNudge = useCallback((m: { id: string; x: number; y: number }[]) => {
-    const byId = new Map(placementsRef.current.map((q) => [q.id, q] as const));
-    const saved = m.flatMap((mv) => {
-      const server = byId.get(mv.id);
-      if (!server) return [];
-      const w = writtenRef.current.get(mv.id);
-      const at = w && server.x === w.base.x && server.y === w.base.y ? w.at : { x: server.x, y: server.y };
-      return [{ id: mv.id, ...at }];
-    });
-    const changed = new Set(changedMoves(saved, m).map((mv) => mv.id));
-    return m.filter((mv) => inFlightRef.current.has(mv.id) || changed.has(mv.id));
-  }, []);
-
   /** How many devices the unwritten nudge moves (0 = none) — state, so the
    *  toolbar's Undo can offer a nudge still inside the debounce. */
   const [nudgePending, setNudgePending] = useState(0);
@@ -1129,11 +1088,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     async (dropIds?: ReadonlySet<string>): Promise<boolean> => {
       const m = takeNudge();
       const kept = m && dropIds ? m.filter((mv) => !dropIds.has(mv.id)) : m;
-      const rest = kept ? unsavedNudge(kept) : null;
-      if (!rest?.length) return true;
-      return (await writeMoves(rest, undefined, "nudge")).ok;
+      if (!kept?.length) return true;
+      return (await writeMoves(kept, undefined, "nudge")).ok;
     },
-    [takeNudge, writeMoves, unsavedNudge]
+    [takeNudge, writeMoves]
   );
   /** Every move that isn't the nudge timer itself (drag release, align,
    *  distribute) goes through here: a pending nudge is FOLDED into the same
@@ -1221,8 +1179,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           return;
         }
         const m = takeNudge();
-        const rest = m ? unsavedNudge(m) : null;
-        if (rest?.length) void sendMovesRef.current(rest, undefined, "nudge");
+        if (m?.length) void sendMovesRef.current(m, undefined, "nudge");
       };
       nudgeTimer.current = setTimeout(commit, NUDGE_COMMIT_MS);
     };
@@ -1232,7 +1189,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     selectedPlacements,
     shownAt,
     takeNudge,
-    unsavedNudge,
     snap,
     aspect,
     pending,

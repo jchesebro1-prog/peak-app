@@ -49575,7 +49575,7 @@ async function gridBatchAsyncChecks299(): Promise<void> {
   const structural = hook.slice(hook.indexOf("const onStructuralChange = useCallback("), hook.indexOf("const onStructuralChange = useCallback(") + 200);
   ok(structural.includes("dropMoveOverrides();"), "#299 final: a not-undoable edit drops spent move overrides");
   ok(/commitUndo\(emptyUndo\(\)\);\s*dropMoveOverrides\(\);/.test(hook), "#299 final: a refused undo/redo step drops move overrides");
-  ok(hook.includes("const rest = m ? unsavedNudge(m) : null;"), "#299 final: the nudge timer writes nothing for a nudge back to its saved spot");
+  ok(!hook.includes("unsavedNudge") && !hook.includes("writtenRef") && !hook.includes("inFlightRef"), "#299 final: every nudge is written and undoable (no no-op nudge filter)");
   const ret = hook.slice(hook.lastIndexOf("\n  return {"));
   ok(["runCommand", "setMovedLocal", "setBusy", "setDrag", "commitMoves", "clearUndo", "undoState"].every((k) => !new RegExp(`^    ${k},$`, "m").test(ret)),
     "#299 final: the hook no longer hands out invariant-bypassing internals");
