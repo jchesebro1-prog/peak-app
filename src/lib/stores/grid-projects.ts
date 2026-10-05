@@ -1055,26 +1055,32 @@ const CURTAIN_PART_REFUSAL = "Curtains can't change part — edit the curtain in
  * part is its fabric, so curtains are refused (the whole batch). A real
  * swap clears the #211 auto tag and drops a lot `qty` — a quantity counted
  * for one part means nothing for another; re-picking the same part changes
- * nothing. Returns the previous partIds. The caller checks the new parts
+ * nothing. An item may carry `qty` (undo of a swap): it is cleaned like any
+ * written lot qty and set instead of dropped. Returns the previous partIds,
+ * with `qty` when the placement had one. The caller checks the new parts
  * exist (the store never reads the catalog).
  */
 export async function setPlacementsPart(
   projectId: string,
-  items: { id: string; partId: string }[]
-): Promise<BatchResult<{ id: string; partId: string }[]>> {
+  items: { id: string; partId: string; qty?: number }[]
+): Promise<BatchResult<{ id: string; partId: string; qty?: number }[]>> {
   const next = byId(items);
   return batchEdit(
     projectId,
     items.map((it) => it.id),
     (p) => {
-      const previous: { id: string; partId: string }[] = [];
+      const previous: { id: string; partId: string; qty?: number }[] = [];
       p.placements = (p.placements || []).map((pl) => {
         const it = next.get(pl.id);
         if (!it) return pl;
-        previous.push({ id: pl.id, partId: pl.partId });
+        previous.push({ id: pl.id, partId: pl.partId, ...(pl.qty !== undefined ? { qty: pl.qty } : {}) });
         if (it.partId === pl.partId) return pl;
         const swapped: GridPlacement = withoutAuto({ ...pl, partId: it.partId });
-        delete swapped.qty;
+        // An item carrying qty (undo of a swap) restores its lot through the
+        // same clean as every other written qty; otherwise the lot is dropped.
+        const { qty } = lotAndTag(it.qty, undefined);
+        if (qty !== undefined) swapped.qty = qty;
+        else delete swapped.qty;
         return swapped;
       });
       return previous;

@@ -49540,6 +49540,16 @@ async function gridBatchAsyncChecks299(): Promise<void> {
   p = (await GP.getProject(gp.id))!;
   ok(sw.ok && sw.value[0].partId === fixtureId(299, "part") && p.placements.find((x) => x.id === b.id)!.partId === fixtureId(299, "part2"), "#299 batch: part swap applies + returns previous parts");
 
+  // Undo of a part swap restores a lot qty: the swap drops it but reports it
+  // in previous, and a swap back carrying { qty } sets it again (cleaned).
+  const lot = (await GP.addPlacements(gp.id, { sheetId, page: 1, optionId, by: "t", items: [{ x: 0.6, y: 0.6, partId: fixtureId(299, "part"), qty: 6 }] }))!.placements.at(-1)!;
+  const lotSw = await GP.setPlacementsPart(gp.id, [{ id: lot.id, partId: fixtureId(299, "part2") }]);
+  const lotDropped = !("qty" in (await GP.getProject(gp.id))!.placements.find((x) => x.id === lot.id)!);
+  const lotBack = await GP.setPlacementsPart(gp.id, lotSw.ok ? lotSw.value : []);
+  const lotAfter = (await GP.getProject(gp.id))!.placements.find((x) => x.id === lot.id)!;
+  ok(lot.qty === 6 && lotSw.ok && lotDropped && lotSw.value[0].qty === 6 && lotBack.ok && lotAfter.partId === fixtureId(299, "part") && lotAfter.qty === 6,
+    "#299 batch: part swap drops a lot qty and returns it in previous; swapping back with { qty } restores it");
+
   const rm = await GP.removePlacements(gp.id, [a.id, c.id]);
   p = (await GP.getProject(gp.id))!;
   ok(rm.ok && rm.value.placements.map((x) => x.id).join(",") === [a.id, c.id].join(",") && !p.placements.some((x) => x.id === a.id || x.id === c.id), "#299 batch: remove returns the records it removed");

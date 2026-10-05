@@ -371,7 +371,12 @@ export default function ScopePanel({
                     allowances={t?.allowances || 0}
                   />
                   {autoTier && scopeInputs && (
-                    <button type="button" onClick={() => (onRefill ? onRefill(k) : setRefill(k))} style={{ ...BTN, justifySelf: "start", padding: "3px 9px", fontSize: 11 }}>
+                    <button
+                      type="button"
+                      onClick={() => (onRefill ? onRefill(k) : setRefill(k))}
+                      title={`Re-fill ${SHORT[k]} with different equipment — not undoable; use Revisions`}
+                      style={{ ...BTN, justifySelf: "start", padding: "3px 9px", fontSize: 11 }}
+                    >
                       Change equipment…
                     </button>
                   )}

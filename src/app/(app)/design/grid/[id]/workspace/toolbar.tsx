@@ -245,8 +245,8 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           disabled: !armedPartId,
           active: tool === "place" || tool === "curtain",
         })}
-        {toolButton("wire", "Wire (W)", <IconWire />, { disabled: !sheet })}
-        {toolButton("space", "Space (S)", <IconSpace />, { disabled: !sheet })}
+        {toolButton("wire", `Wire (W)${NOT_UNDOABLE}`, <IconWire />, { disabled: !sheet, label: "Wire (W)" })}
+        {toolButton("space", `Space (S)${NOT_UNDOABLE}`, <IconSpace />, { disabled: !sheet, label: "Space (S)" })}
         {toolButton("calibrate", `Calibrate this page${NOT_UNDOABLE}`, <IconCalibrate />, { disabled: !sheet, label: "Calibrate this page" })}
         {toolButton("pan", "Pan (H, or hold Space)", <IconPan />, { disabled: !sheet })}
       </Group>

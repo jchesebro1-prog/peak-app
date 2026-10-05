@@ -680,15 +680,21 @@ export async function setPlacementsCategoryAction(
  *  refused by the store. */
 export async function replacePlacementsPartAction(
   projectId: string,
-  items: { id: string; partId: string }[]
-): Promise<{ ok: true; previous: { id: string; partId: string }[] } | { ok: false; error: string }> {
+  items: { id: string; partId: string; qty?: number }[]
+): Promise<{ ok: true; previous: { id: string; partId: string; qty?: number }[] } | { ok: false; error: string }> {
   await requireUser();
-  if (!isStr(projectId) || !Array.isArray(items) || !items.every((it) => isObj(it) && isStr(it.id) && isStr(it.partId) && it.partId !== ""))
+  if (
+    !isStr(projectId) || !Array.isArray(items) ||
+    !items.every((it) => isObj(it) && isStr(it.id) && isStr(it.partId) && it.partId !== "" && (it.qty === undefined || isFiniteNum(it.qty)))
+  )
     return { ok: false, error: BATCH_INVALID };
   if (items.length > MAX_BATCH) return { ok: false, error: "Select fewer than 2,000 items." };
   const parts = await Promise.all([...new Set(items.map((it) => it.partId))].map((id) => partForGrid(id)));
   if (parts.some((part) => !part)) return { ok: false, error: "That part is not in the Grid library." };
-  const r = await setPlacementsPart(projectId, items.map((it) => ({ id: it.id, partId: it.partId })));
+  const r = await setPlacementsPart(
+    projectId,
+    items.map((it) => ({ id: it.id, partId: it.partId, ...(it.qty !== undefined ? { qty: it.qty } : {}) }))
+  );
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);

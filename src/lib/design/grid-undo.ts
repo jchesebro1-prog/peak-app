@@ -13,7 +13,7 @@ export type GridCommand =
   | { kind: "remove"; ids: string[] }
   | { kind: "restore"; bundle: RemovedBundle }
   | { kind: "category"; items: { id: string; category: string }[] }
-  | { kind: "part"; items: { id: string; partId: string }[] };
+  | { kind: "part"; items: { id: string; partId: string; qty?: number }[] };
 
 export type UndoEntry = { label: string; forward: GridCommand; inverse: GridCommand };
 export type UndoState = { past: UndoEntry[]; future: UndoEntry[] };

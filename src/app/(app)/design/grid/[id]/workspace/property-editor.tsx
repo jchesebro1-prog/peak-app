@@ -187,6 +187,7 @@ function DesignProps({ ed }: { ed: GridEditor }) {
             <div style={{ display: "flex", gap: 6 }}>
               <button
                 style={{ ...BTN, padding: "4px 8px", fontSize: 11 }}
+                title="Set this page's scale again — not undoable; use Revisions"
                 onClick={() => enterTool("calibrate")}
               >
                 Recalibrate

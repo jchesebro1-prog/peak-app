@@ -1014,14 +1014,21 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   /** The nudge positions painted but not yet written (the 400 ms debounce). */
   const pendingNudge = useRef<{ id: string; x: number; y: number }[] | null>(null);
+  /** How many devices the unwritten nudge moves (0 = none) — state, so the
+   *  toolbar's Undo can offer a nudge still inside the debounce. */
+  const [nudgePending, setNudgePending] = useState(0);
   /** Cancel the debounce and hand back the unwritten nudge (null if none). */
   const takeNudge = useCallback(() => {
     if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     nudgeTimer.current = null;
     const m = pendingNudge.current;
     pendingNudge.current = null;
+    setNudgePending(0);
     return m;
   }, []);
+  /** An undo/redo step is in flight (#299 slice 6): a second press is
+   *  dropped, and so is an arrow-key nudge (its write would land mid-step). */
+  const stepping = useRef(false);
   /** Write a pending nudge NOW, before an edit that isn't a move (delete,
    *  category, part), so the debounce can never fire after it. Devices in
    *  `dropIds` (about to be deleted) are left out of the write — moving them
@@ -1071,6 +1078,9 @@ function useGridEditorImpl(props: GridEditorProps) {
       const dirY = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
       if (!dirX && !dirY) return;
       e.preventDefault(); // don't scroll the plan out from under the device
+      // A write (or an undo/redo step) is in flight: a nudge queued now could
+      // land in the middle of the step and corrupt the stack.
+      if (busy || stepping.current) return;
       let dx: number;
       let dy: number;
       if (snap) {
@@ -1108,6 +1118,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       // The pending write accumulates: a selection change between two
       // presses must not drop the first device's unwritten nudge.
       pendingNudge.current = mergeMoves(pendingNudge.current, moves);
+      setNudgePending(pendingNudge.current.length);
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
       nudgeTimer.current = setTimeout(() => {
         const m = takeNudge();
@@ -1122,6 +1133,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     takeNudge,
     snap,
     aspect,
+    busy,
     pending,
     curtainAt,
     calDraft,
@@ -2234,9 +2246,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     [placements, project.id, router]
   );
 
-  /** One step at a time: a second press while a step is in flight is dropped. */
-  const stepping = useRef(false);
-
   /** Undo (dir "undo") or redo (dir "redo") one step. A pending nudge is
    *  written first, so ⌘Z right after an arrow press undoes that nudge. A
    *  refusal means the design changed under the stack: say so and clear it.
@@ -2289,10 +2298,13 @@ function useGridEditorImpl(props: GridEditorProps) {
   );
   const undo = useCallback(() => step("undo"), [step]);
   const redo = useCallback(() => step("redo"), [step]);
-  const canUndo = undoState.past.length > 0;
+  // A nudge still inside its debounce counts: undo writes it (recording it)
+  // and then undoes that step.
+  const canUndo = undoState.past.length > 0 || nudgePending > 0;
   const canRedo = undoState.future.length > 0;
   /** The step each button would take, for its tooltip ("Undo Move 3"). */
-  const undoLabel = undoState.past.length ? undoState.past[undoState.past.length - 1].label : null;
+  const undoLabel =
+    nudgePending > 0 ? `Nudge ${nudgePending}` : undoState.past.length ? undoState.past[undoState.past.length - 1].label : null;
   const redoLabel = undoState.future.length ? undoState.future[0].label : null;
 
   // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
@@ -2325,7 +2337,8 @@ function useGridEditorImpl(props: GridEditorProps) {
         const isRedo = (k === "z" && e.shiftKey) || (k === "y" && e.ctrlKey && !e.metaKey && !e.shiftKey);
         if (isUndo || isRedo) {
           if (view !== "plan") return;
-          if (isUndo ? !undoRef.current.past.length : !undoRef.current.future.length) return;
+          // A pending (unwritten) nudge is something to undo too.
+          if (isUndo ? !undoRef.current.past.length && !pendingNudge.current?.length : !undoRef.current.future.length) return;
           e.preventDefault();
           if (busy || drag) return;
           void (isUndo ? undo() : redo());

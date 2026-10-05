@@ -96,7 +96,7 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
                   label="Delete sheet"
                   confirmLabel="Confirm"
                   style={{ fontSize: 11.5, padding: "6px 10px" }}
-                  title="Deletes this sheet from the design — refused while it still has devices, spaces, or wires on it — not undoable; use Revisions"
+                  title="Deletes this sheet from the design; refused while it still has devices, spaces, or wires on it. Not undoable; use Revisions."
                   onConfirm={async () => {
                     const r = await removeSheetAction(project.id, s.id);
                     if (!r.ok) throw new Error(r.error);
