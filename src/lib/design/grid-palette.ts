@@ -5,7 +5,7 @@ import { ALLOWANCE_TYPE, ASSEMBLY_TYPE, UNMAPPED_TYPE, typeKeyOfPart, typeLabel,
 
 /**
  * The Grid device palette's filter (#226, spec §Screens 2). Pure and
- * client-safe; device-palette.tsx renders what this returns.
+ * client-safe; workspace/product-library.tsx renders what this returns.
  *
  * Favorites / Recent: the user's stored order, parts no longer in the
  * library skipped, the search applied. All: scope chip → type chips for

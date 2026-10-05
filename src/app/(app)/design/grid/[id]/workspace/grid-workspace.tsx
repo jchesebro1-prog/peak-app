@@ -23,7 +23,7 @@ import { Pane } from "./pane";
  */
 
 const STRIP = 28;
-const PANE_TITLES: Record<PaneKey, string> = { left: "Properties", right: "Browser", bottom: "Library" };
+const PANE_TITLES: Record<PaneKey, string> = { left: "Properties", right: "Browser", bottom: "Product library" };
 
 function save(key: string, v: string) {
   try {

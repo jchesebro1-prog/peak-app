@@ -3,7 +3,7 @@
 import { EquipmentMapLink } from "@/components/design/equipment-map-link";
 import Link from "next/link";
 import { formatMeasure } from "@/lib/annotations";
-import { curtainDesc, GRID_CURTAIN_TYPES, VIRTUAL_DEAD_HINT } from "@/lib/design/grid-bom";
+import { curtainDesc, VIRTUAL_DEAD_HINT } from "@/lib/design/grid-bom";
 import { normalizeCategory, SCOPE_COLORS } from "@/lib/design/grid-scopes";
 import { symbolLook } from "@/lib/design/grid-icons";
 import { LaborLineRow } from "./labor-lines";
@@ -15,10 +15,8 @@ import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
 import ScopePanel from "./scope-panel";
-import AssembliesPanel from "./assemblies-panel";
 import SymbolLookPanel from "./symbol-look-panel";
 import CustomItemsSection from "./custom-items";
-import DevicePalette from "./device-palette";
 import { groupOfCustomSystem, type GroupedBomLine } from "@/lib/design/grid-bom-groups";
 import { AccessoryPicker, AccessoryRow } from "./accessories";
 import { useGridEditor, type GridEditor as GridEditorState, type GridEditorProps } from "./use-grid-editor";
@@ -27,6 +25,7 @@ import GridWorkspace from "./workspace/grid-workspace";
 import Toolbar from "./workspace/toolbar";
 import SheetTabs, { SpreadsheetPlaceholder, ViewTabs } from "./workspace/sheet-tabs";
 import StatusBar from "./workspace/status-bar";
+import ProductLibrary from "./workspace/product-library";
 
 /**
  * The Grid editor (D108) — device painting on plan sheets, in the markup
@@ -104,15 +103,11 @@ function LegacyLeftColumn({ ed }: { ed: GridEditorState }) {
     router,
     project,
     parts,
-    fabrics,
     scopeTargets,
     auto,
     symbolCtx,
     activeOptionId,
     customLines,
-    deviceTypes,
-    favorites,
-    recent,
     setSelected,
     tierFallbackLines,
     incompleteQuote,
@@ -123,12 +118,9 @@ function LegacyLeftColumn({ ed }: { ed: GridEditorState }) {
     page,
     busy,
     setErr,
-    armedPartId,
-    setArmedPartId,
     setHiddenLayers,
     hiddenSet,
     toggleLayer,
-    armedCurtainType,
     categoryDraft,
     setCategoryDraft,
     calibrating,
@@ -169,10 +161,7 @@ function LegacyLeftColumn({ ed }: { ed: GridEditorState }) {
     shownAt,
     saveCategory,
     saveSymbolLook,
-    armPart,
-    partLayerHidden,
     enterTool,
-    disarm,
     setRefillScope,
     removePlacement,
     setSpaceDraft,
@@ -311,21 +300,6 @@ function LegacyLeftColumn({ ed }: { ed: GridEditorState }) {
 
   return (
     <div style={{ display: "grid", gap: 12, padding: 12 }}>
-      {/* device palette (#226: tabs, device-type chips, manufacturer filter, stars) */}
-      <DevicePalette
-        parts={parts}
-        types={deviceTypes}
-        favorites={favorites}
-        recent={recent}
-        armedPartId={armedPartId}
-        onArm={armPart}
-        onDisarm={() => setArmedPartId(null)}
-        isHidden={partLayerHidden}
-        lookOf={lookOf}
-      />
-
-      <AssembliesPanel parts={parts} onChanged={() => router.refresh()} />
-
       {/* scale */}
       <div style={PANEL}>
         <div style={PANEL_LABEL}>Scale</div>
@@ -368,42 +342,6 @@ function LegacyLeftColumn({ ed }: { ed: GridEditorState }) {
               {calibrating ? "Draw the reference…" : "Calibrate this page"}
             </button>
           </>
-        )}
-      </div>
-
-      {/* curtains (punch #49) - a drop-in, not a catalog pick */}
-      <div style={PANEL}>
-        <div style={PANEL_LABEL}>Curtains</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-          {GRID_CURTAIN_TYPES.map((t) => {
-            const on = t === armedCurtainType;
-            return (
-              <button
-                key={t}
-                style={{
-                  ...BTN,
-                  padding: "5px 6px",
-                  background: on ? "#16181d" : "#fff",
-                  color: on ? "#fff" : "#3d424e",
-                  borderColor: on ? "#16181d" : "#dfe2e8",
-                }}
-                disabled={busy}
-                onClick={() => (on ? disarm() : enterTool("curtain", { curtainType: t }))}
-              >
-                {t}s
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ marginTop: 7, fontSize: 11, color: armedCurtainType ? "#2e7d55" : "#8c919c", fontWeight: armedCurtainType ? 600 : 400, lineHeight: 1.45 }}>
-          {armedCurtainType
-            ? `Dropping a ${armedCurtainType.toLowerCase()}: click the plan, then give it a name and size.`
-            : "Pick a type, click the plan, then specify name, size, fullness and fabric. Priced like the estimator."}
-        </div>
-        {fabrics.length === 0 && (
-          <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b" }}>
-            No fabric rows in the catalog yet, and a curtain needs one to price.
-          </div>
         )}
       </div>
 
@@ -798,7 +736,7 @@ export default function GridEditor(props: GridEditorProps) {
       toolbar={<Toolbar ed={ed} />}
       left={<LegacyLeftColumn ed={ed} />}
       right={null}
-      bottom={null}
+      bottom={<ProductLibrary ed={ed} />}
       center={
         <>
           <SheetTabs ed={ed} />

@@ -89,7 +89,7 @@ export function libraryTree(input: {
   return out;
 }
 
-/** Assembly parts for the Assemblies node: search on description / model / manufacturer, sorted by description. */
+/** Assembly parts for the Assemblies node: search on description / model / manufacturer, sorted by description, then sku. */
 export function assemblyParts(parts: PartLite[], search: string): PartLite[] {
   const q = search.trim().toLowerCase();
   return parts
@@ -99,5 +99,5 @@ export function assemblyParts(parts: PartLite[], search: string): PartLite[] {
         !q ||
         [p.desc, p.modelNumber, p.manufacturer].some((s) => (s || "").toLowerCase().includes(q)),
     )
-    .sort((a, b) => a.desc.localeCompare(b.desc));
+    .sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));
 }

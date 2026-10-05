@@ -23323,11 +23323,12 @@ import type { PartLite as PL226 } from "@/lib/design/grid-bom";
   ok(PAL226_CAP === 60, "#226 palette: the row cap stays 60");
 
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  const pal = read("src/app/(app)/design/grid/[id]/device-palette.tsx");
+  const pal = read("src/app/(app)/design/grid/[id]/workspace/product-library.tsx");
   const palImports = [...pal.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
   ok(pal.startsWith('"use client"') && palImports.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")) && pal.includes("paletteView(") && pal.includes("toggleGridFavoriteAction(") && pal.includes('href="/catalog/device-types"'),
     "#226 palette: a client component on pure modules; stars through the action; admins get a link to Device types");
-  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  // #299: the palette's tiles now render inside the Library pane (workspace/product-library.tsx).
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx") + read("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + read("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + pal;
   ok(ed.includes("<DevicePalette") && !ed.includes("filteredParts") && !ed.includes("scopeFilter"), "#226 palette: the editor delegates the palette");
   const pg = read("src/app/(app)/design/grid/[id]/page.tsx");
   ok(pg.includes("loadDeviceTypeContext(catalog)") && pg.includes("getGridFavorites(user.id)") && pg.includes("getGridRecent(user.id)") && pg.includes("favorites={favorites}") && pg.includes("recent={recent}"),

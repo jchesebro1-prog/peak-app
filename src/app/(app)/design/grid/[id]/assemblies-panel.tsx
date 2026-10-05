@@ -11,11 +11,13 @@ import { createGridAssemblyAction, removeGridAssemblyAction } from "./actions";
 const FIELD: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 8px", font: "inherit", fontSize: 12, color: "#16181d", background: "#fff" };
 const BTN: React.CSSProperties = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "5px 9px", font: "inherit", fontSize: 11.5, fontWeight: 600, color: "#3d424e", background: "#fff", cursor: "pointer" };
 
-export default function AssembliesPanel({ parts, onChanged }: { parts: PartLite[]; onChanged: () => void }) {
+/** `initialOpen` (#299): the Product Library's "+ Build assembly" popover
+ *  opens straight onto the create form. */
+export default function AssembliesPanel({ parts, onChanged, initialOpen = false }: { parts: PartLite[]; onChanged: () => void; initialOpen?: boolean }) {
   const devices = useMemo(() => parts.filter((p) => p.kind !== "assembly"), [parts]);
   const assemblies = useMemo(() => parts.filter((p) => p.kind === "assembly"), [parts]);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const [name, setName] = useState("");
   const [manufacturer, setManufacturer] = useState("");
   const [modelNumber, setModelNumber] = useState("");
