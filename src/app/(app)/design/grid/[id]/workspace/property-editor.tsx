@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { formatMeasure } from "@/lib/annotations";
 import { curtainDesc, placementQty, routeLengthFt } from "@/lib/design/grid-bom";
 import { spaceOf } from "@/lib/design/grid-geometry";
@@ -632,12 +632,16 @@ function ReplacePartPicker({
   const [search, setSearch] = useState("");
   const [scope, setScope] = useState<GridLayer | "">(selectionScope ?? "");
   const [picked, setPicked] = useState<string | null>(null);
-  const view = paletteView(
-    parts,
-    { tab: "all", search, scope, typeKey: "", mfr: "" },
-    deviceTypes.filter((t) => !t.archived),
-    favorites,
-    recent
+  const view = useMemo(
+    () =>
+      paletteView(
+        parts,
+        { tab: "all", search, scope, typeKey: "", mfr: "" },
+        deviceTypes.filter((t) => !t.archived),
+        favorites,
+        recent
+      ),
+    [parts, search, scope, deviceTypes, favorites, recent]
   );
   const rows = view.rows.slice(0, PALETTE_ROW_CAP);
   const current = same(pls.map((pl) => pl.partId));

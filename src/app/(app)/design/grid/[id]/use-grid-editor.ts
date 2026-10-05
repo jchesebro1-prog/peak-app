@@ -226,6 +226,18 @@ function dragTargets(d: MarkerDrag, snap: SnapGrid | null): { id: string; x: num
  *  the compiler's no-setState-in-effect rule. */
 type MoveOverride = { at: Point; base: Point };
 
+/** An override is spent once the server copy no longer sits at its `base`
+ *  (the refresh landed, the device moved some other way) or is gone. */
+function isSpentOverride(server: Point | undefined, o: MoveOverride): boolean {
+  return !server || server.x !== o.base.x || server.y !== o.base.y;
+}
+
+/** An undo step's label (#299), read after "Undo " / "Undid ":
+ *  "move (3 devices)", "delete (1 device)". */
+function stepLabel(verb: string, n: number): string {
+  return `${verb} (${n} device${n === 1 ? "" : "s"})`;
+}
+
 /** Placement (if any) on `placements` whose marker the point `p` snaps to,
  *  using the same box-tolerance shape as the existing hit-test. Scans
  *  in the same reversed order as the marker-select hit-test below (`onDown`)
@@ -411,6 +423,39 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [lastAction, setLastAction] = useState<string | null>(null);
   const noteAction = useCallback((text: string) => setLastAction(text), []);
 
+  // Repositioning (punch #47). Two pieces of local truth, both required:
+  //  - `drag` is the live gesture (nothing has been written yet);
+  //  - `movedLocal` is the OPTIMISTIC position of placements whose move has
+  //    been sent but whose refresh hasn't landed. Without it the marker snaps
+  //    back to its old spot the instant the pointer lifts: `project` is a
+  //    server prop and `router.refresh()` is fire-and-forget, so there is a
+  //    window where the action has committed and the props still say old.
+  //    Each entry expires by itself (see MoveOverride).
+  const [drag, setDrag] = useState<MarkerDrag | null>(null);
+  const [movedLocal, setMovedLocal] = useState<Record<string, MoveOverride>>({});
+  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The nudge positions painted but not yet written (the 400 ms debounce). */
+  const pendingNudge = useRef<{ id: string; x: number; y: number }[] | null>(null);
+  /** Positions writeMoves has saved whose refresh hasn't landed yet (id →
+   *  server position at write time + the written one), and the ids a write
+   *  is in flight for — so the nudge timer can tell a nudge that came back to
+   *  its SAVED spot (write nothing) from one undoing an unrefreshed write. */
+  const writtenRef = useRef(new Map<string, MoveOverride>());
+  const inFlightRef = useRef(new Set<string>());
+  /** Forget every optimistic position except a still-unwritten nudge's —
+   *  after an edit the stack can't follow (revision restore, another
+   *  panel's change) or a refused undo step, a spent override must not
+   *  wake up when the server copy returns to its `base`. */
+  const dropMoveOverrides = useCallback(() => {
+    const keep = new Set((pendingNudge.current ?? []).map((m) => m.id));
+    setMovedLocal((prev) => {
+      const next: Record<string, MoveOverride> = {};
+      for (const [id, o] of Object.entries(prev)) if (keep.has(id)) next[id] = o;
+      return next;
+    });
+    writtenRef.current.clear();
+  }, []);
+
   /** Undo / redo (#299 slice 6) — a per-tab client stack. The ref is the
    *  truth handlers read (two quick presses can't both pop the same entry);
    *  the state mirrors it so the toolbar re-renders. Never persisted. */
@@ -429,8 +474,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** What a panel's not-undoable edit calls on success: clear the stack, refresh. */
   const onStructuralChange = useCallback(() => {
     clearUndo();
+    dropMoveOverrides();
     router.refresh();
-  }, [clearUndo, router]);
+  }, [clearUndo, dropMoveOverrides, router]);
   /** Plan view / Spreadsheet view under the canvas (#299). */
   const [view, setView] = useState<"plan" | "sheet">("plan");
   /** The Auto scope whose "Change equipment…" dialog is open — one state
@@ -488,18 +534,6 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [curtainAt, setCurtainAt] = useState<Point | null>(null);
   /** Inline category editor for the selected placement (null = closed). */
   const [categoryDraft, setCategoryDraft] = useState<string | null>(null);
-
-  // Repositioning (punch #47). Two pieces of local truth, both required:
-  //  - `drag` is the live gesture (nothing has been written yet);
-  //  - `movedLocal` is the OPTIMISTIC position of placements whose move has
-  //    been sent but whose refresh hasn't landed. Without it the marker snaps
-  //    back to its old spot the instant the pointer lifts: `project` is a
-  //    server prop and `router.refresh()` is fire-and-forget, so there is a
-  //    window where the action has committed and the props still say old.
-  //    Each entry expires by itself (see MoveOverride).
-  const [drag, setDrag] = useState<MarkerDrag | null>(null);
-  const [movedLocal, setMovedLocal] = useState<Record<string, MoveOverride>>({});
-  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [calibrating, setCalibrating] = useState(false);
   const [calDraft, setCalDraft] = useState<Point[] | null>(null);
@@ -690,8 +724,9 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  on screen mid-gesture is exactly what the store will write. */
   const placementOffsets = useMemo(() => {
     const m = new Map<string, { dx: number; dy: number }>();
+    const byId = new Map(placements.map((q) => [q.id, q] as const));
     const put = (id: string, at: Point) => {
-      const base = placements.find((q) => q.id === id);
+      const base = byId.get(id);
       if (!base) return;
       const dx = at.x - base.x;
       const dy = at.y - base.y;
@@ -699,9 +734,8 @@ function useGridEditorImpl(props: GridEditorProps) {
       else m.delete(id);
     };
     for (const [id, o] of Object.entries(movedLocal)) {
-      const server = placements.find((q) => q.id === id);
       // Spent: the refresh landed, or that device moved some other way.
-      if (!server || server.x !== o.base.x || server.y !== o.base.y) continue;
+      if (isSpentOverride(byId.get(id), o)) continue;
       put(id, o.at);
     }
     // The live gesture wins — every device in a group drag moves by the
@@ -709,6 +743,31 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (drag && drag.moved) for (const t of dragTargets(drag, snap)) put(t.id, t);
     return m;
   }, [placements, movedLocal, drag, snap]);
+
+  // Prune spent overrides (the refresh landed, the device moved some other
+  // way, or it is gone) whenever the server copy changes — adjusted during
+  // render when the prop changes (React's "storing information from previous
+  // renders" pattern), so no effect cascades. The updater hands back `prev`
+  // untouched when nothing is spent.
+  const [prunedFor, setPrunedFor] = useState(placements);
+  if (prunedFor !== placements) {
+    setPrunedFor(placements);
+    const byId = new Map(placements.map((q) => [q.id, q] as const));
+    setMovedLocal((prev) => {
+      let changed = false;
+      const next: Record<string, MoveOverride> = {};
+      for (const [id, o] of Object.entries(prev)) {
+        if (isSpentOverride(byId.get(id), o)) changed = true;
+        else next[id] = o;
+      }
+      return changed ? next : prev;
+    });
+  }
+  // …and the written-position memo the nudge timer reads, likewise.
+  useEffect(() => {
+    const byId = new Map(placements.map((q) => [q.id, q] as const));
+    for (const [id, o] of writtenRef.current) if (isSpentOverride(byId.get(id), o)) writtenRef.current.delete(id);
+  }, [placements]);
 
   const sheetPlacements = useMemo(() => {
     const base = placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page);
@@ -946,8 +1005,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     async (
       moves: { id: string; x: number; y: number }[],
       label?: string,
-      /** The undo step's verb (#299): "Move", "Nudge", "Align", "Distribute". */
-      verb = "Move"
+      /** The undo step's verb (#299): "move", "nudge", "align", "distribute". */
+      verb = "move"
     ): Promise<{ ok: boolean; previous: { id: string; x: number; y: number }[] | null }> => {
       const servers = new Map(placements.map((q) => [q.id, q]));
       // Always write what was asked: the saved position is stale between a
@@ -974,12 +1033,17 @@ function useGridEditorImpl(props: GridEditorProps) {
         });
       setErr(null);
       setBusy(true);
+      for (const m of valid) inFlightRef.current.add(m.id);
       try {
         const r = await movePlacementsAction(project.id, valid);
         if (!r.ok) {
           setErr(r.error);
           rollBack();
           return { ok: false, previous: null };
+        }
+        for (const m of valid) {
+          const server = servers.get(m.id)!;
+          writtenRef.current.set(m.id, { at: { x: m.x, y: m.y }, base: { x: server.x, y: server.y } });
         }
         noteAction(
           label ?? (valid.length === 1 ? `Moved ${placementLabel(servers.get(valid[0].id)!)}` : `Moved ${countNoun(valid.map((m) => servers.get(m.id)!))}`)
@@ -988,7 +1052,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         // a timer-written or flushed nudge alike (#299 slice 6).
         if (r.previous.length)
           record({
-            label: `${verb} ${valid.length}`,
+            label: stepLabel(verb, valid.length),
             forward: { kind: "move", moves: valid.map(({ id, x, y }) => ({ id, x, y })) },
             inverse: { kind: "move", moves: r.previous },
           });
@@ -999,6 +1063,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         setErr(SAVE_FAILED);
         return { ok: false, previous: null };
       } finally {
+        for (const m of valid) inFlightRef.current.delete(m.id);
         setBusy(false);
       }
     },
@@ -1016,9 +1081,29 @@ function useGridEditorImpl(props: GridEditorProps) {
   useEffect(() => {
     sendMovesRef.current = sendMoves;
   }, [sendMoves]);
+  /** The latest server placements, for the same timer. */
+  const placementsRef = useRef(placements);
+  useEffect(() => {
+    placementsRef.current = placements;
+  }, [placements]);
+  /** Drop the moves of a pending nudge that came back to where the device is
+   *  SAVED (the server copy, or a written-but-unrefreshed position), so a
+   *  nudge out and back inside the debounce writes nothing and records no
+   *  undo step. Safe only for a nudge: nothing else is in flight for those
+   *  ids — and any id a write IS in flight for keeps its move, unfiltered. */
+  const unsavedNudge = useCallback((m: { id: string; x: number; y: number }[]) => {
+    const byId = new Map(placementsRef.current.map((q) => [q.id, q] as const));
+    const saved = m.flatMap((mv) => {
+      const server = byId.get(mv.id);
+      if (!server) return [];
+      const w = writtenRef.current.get(mv.id);
+      const at = w && server.x === w.base.x && server.y === w.base.y ? w.at : { x: server.x, y: server.y };
+      return [{ id: mv.id, ...at }];
+    });
+    const changed = new Set(changedMoves(saved, m).map((mv) => mv.id));
+    return m.filter((mv) => inFlightRef.current.has(mv.id) || changed.has(mv.id));
+  }, []);
 
-  /** The nudge positions painted but not yet written (the 400 ms debounce). */
-  const pendingNudge = useRef<{ id: string; x: number; y: number }[] | null>(null);
   /** How many devices the unwritten nudge moves (0 = none) — state, so the
    *  toolbar's Undo can offer a nudge still inside the debounce. */
   const [nudgePending, setNudgePending] = useState(0);
@@ -1043,11 +1128,12 @@ function useGridEditorImpl(props: GridEditorProps) {
   const flushNudge = useCallback(
     async (dropIds?: ReadonlySet<string>): Promise<boolean> => {
       const m = takeNudge();
-      const rest = m && dropIds ? m.filter((mv) => !dropIds.has(mv.id)) : m;
+      const kept = m && dropIds ? m.filter((mv) => !dropIds.has(mv.id)) : m;
+      const rest = kept ? unsavedNudge(kept) : null;
       if (!rest?.length) return true;
-      return (await writeMoves(rest, undefined, "Nudge")).ok;
+      return (await writeMoves(rest, undefined, "nudge")).ok;
     },
-    [takeNudge, writeMoves]
+    [takeNudge, writeMoves, unsavedNudge]
   );
   /** Every move that isn't the nudge timer itself (drag release, align,
    *  distribute) goes through here: a pending nudge is FOLDED into the same
@@ -1135,7 +1221,8 @@ function useGridEditorImpl(props: GridEditorProps) {
           return;
         }
         const m = takeNudge();
-        if (m?.length) void sendMovesRef.current(m, undefined, "Nudge");
+        const rest = m ? unsavedNudge(m) : null;
+        if (rest?.length) void sendMovesRef.current(rest, undefined, "nudge");
       };
       nudgeTimer.current = setTimeout(commit, NUDGE_COMMIT_MS);
     };
@@ -1145,6 +1232,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     selectedPlacements,
     shownAt,
     takeNudge,
+    unsavedNudge,
     snap,
     aspect,
     pending,
@@ -1306,7 +1394,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         if (!r.ok) setErr(r.error);
         else {
           noteAction(`Placed ${partLabel(partId)}`);
-          recordPlace(`Place ${partLabel(partId)}`, [r.placement]);
+          recordPlace(`place ${partLabel(partId)}`, [r.placement]);
           router.refresh();
         }
       },
@@ -1616,7 +1704,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     else {
       noteAction(label.trim() ? `Set category ${label.trim()}` : "Cleared a category");
       if (r.previous.some((pv) => pv.category !== label.trim().slice(0, 40)))
-        record({ label: "Set category 1", forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
+        record({ label: stepLabel("set category", 1), forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
       router.refresh();
     }
   }
@@ -1661,7 +1749,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (!r.ok) setErr(r.error);
     else {
       noteAction(`Placed curtain ${curtain.name}`);
-      recordPlace(`Place ${curtain.name}`, [r.placement]);
+      recordPlace(`place ${curtain.name}`, [r.placement]);
       router.refresh();
     }
   }
@@ -1901,7 +1989,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       setCategoryDraft(null);
       noteAction(targets.length === 1 ? `Removed ${placementLabel(targets[0])}` : `Removed ${countNoun(targets)}`);
       const ids = targets.map((pl) => pl.id);
-      record({ label: `${verb} ${ids.length}`, forward: { kind: "remove", ids }, inverse: { kind: "restore", bundle: r.removed } });
+      record({ label: stepLabel(verb.toLowerCase(), ids.length), forward: { kind: "remove", ids }, inverse: { kind: "restore", bundle: r.removed } });
       router.refresh();
       return r.removed;
     } catch {
@@ -1927,7 +2015,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const before = selectionPositions();
       const moves = changedMoves(before, alignPositions(before, mode));
       if (!moves.length) return null;
-      return commitMoves(moves, `Aligned ${countNoun(selectedPlacements)} ${ALIGN_WORDS[mode]}`, "Align");
+      return commitMoves(moves, `Aligned ${countNoun(selectedPlacements)} ${ALIGN_WORDS[mode]}`, "align");
     },
     [selectedPlacements, selectionPositions, commitMoves]
   );
@@ -1939,7 +2027,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const before = selectionPositions();
       const moves = changedMoves(before, distributePositions(before, axis));
       if (!moves.length) return null;
-      return commitMoves(moves, `Distributed ${countNoun(selectedPlacements)} ${axis === "x" ? "horizontally" : "vertically"}`, "Distribute");
+      return commitMoves(moves, `Distributed ${countNoun(selectedPlacements)} ${axis === "x" ? "horizontally" : "vertically"}`, "distribute");
     },
     [selectedPlacements, selectionPositions, commitMoves]
   );
@@ -1964,7 +2052,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           return null;
         }
         noteAction(want ? `Set category ${want} on ${countNoun(selectedPlacements)}` : `Cleared the category on ${countNoun(selectedPlacements)}`);
-        record({ label: `Set category ${items.length}`, forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
+        record({ label: stepLabel("set category", items.length), forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
         router.refresh();
         return r.previous;
       } catch {
@@ -1995,7 +2083,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           return null;
         }
         noteAction(`Replaced ${countNoun(selectedPlacements)} with ${partLabel(partId)}`);
-        record({ label: `Replace part ${items.length}`, forward: { kind: "part", items }, inverse: { kind: "part", items: r.previous } });
+        record({ label: stepLabel("replace part", items.length), forward: { kind: "part", items }, inverse: { kind: "part", items: r.previous } });
         router.refresh();
         return r.previous;
       } catch {
@@ -2136,7 +2224,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         const skipped = r.skippedWires + dropped;
         noteAction(`${verb} ${countNoun(r.placements)}${skipped > 0 ? ` · ${skipped} wire${skipped === 1 ? "" : "s"} skipped` : ""}`);
         // Undo removes the pasted devices; wires the paste drew stay (v1).
-        recordPlace(`${verb === "Duplicated" ? "Duplicate" : "Paste"} ${r.placements.length}`, r.placements);
+        recordPlace(stepLabel(verb === "Duplicated" ? "duplicate" : "paste", r.placements.length), r.placements);
         router.refresh();
         return { placements: r.placements, routes: r.routes };
       } catch {
@@ -2280,6 +2368,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           if (!r.ok) {
             setErr(dir === "undo" ? UNDO_STALE : REDO_STALE);
             commitUndo(emptyUndo());
+            dropMoveOverrides();
             // Show the design as it is now (the other edit that broke the step).
             router.refresh();
             return;
@@ -2307,7 +2396,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         stepping.current = false;
       }
     },
-    [busy, drag, flushNudge, runCommand, commitUndo, noteAction, router]
+    [busy, drag, flushNudge, runCommand, commitUndo, dropMoveOverrides, noteAction, router]
   );
   const undo = useCallback(() => step("undo"), [step]);
   const redo = useCallback(() => step("redo"), [step]);
@@ -2315,9 +2404,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   // and then undoes that step.
   const canUndo = undoState.past.length > 0 || nudgePending > 0;
   const canRedo = undoState.future.length > 0;
-  /** The step each button would take, for its tooltip ("Undo Move 3"). */
+  /** The step each button would take, for its tooltip ("Undo move (3 devices)"). */
   const undoLabel =
-    nudgePending > 0 ? `Nudge ${nudgePending}` : undoState.past.length ? undoState.past[undoState.past.length - 1].label : null;
+    nudgePending > 0 ? stepLabel("nudge", nudgePending) : undoState.past.length ? undoState.past[undoState.past.length - 1].label : null;
   const redoLabel = undoState.future.length ? undoState.future[0].label : null;
 
   // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
@@ -2460,7 +2549,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     size,
     setSize,
     busy,
-    setBusy,
     err,
     setErr,
     linesetBusy,
@@ -2488,9 +2576,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     categoryDraft,
     setCategoryDraft,
     drag,
-    setDrag,
     movedLocal,
-    setMovedLocal,
     calibrating,
     setCalibrating,
     calDraft,
@@ -2566,7 +2652,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     selectedPlacement,
     selectedPart,
     shownAt,
-    commitMoves,
     snapOn,
     setSnapOn,
     snapFt,
@@ -2629,7 +2714,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     cutSelected,
     paste,
     duplicate,
-    undoState,
     canUndo,
     canRedo,
     undoLabel,
@@ -2637,8 +2721,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     undo,
     redo,
     record,
-    runCommand,
-    clearUndo,
     onStructuralChange,
   };
 }

@@ -49565,6 +49565,22 @@ async function gridBatchAsyncChecks299(): Promise<void> {
   ok(body("placeCurtainAction").includes("checkCurtainInput("), "#299 actions: placeCurtainAction validates through the shared checkCurtainInput");
 }
 
+/* #299 Grid workspace — final review: undo copy, move overrides, hook surface */
+{
+  const hook = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
+  const bar = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/workspace/toolbar.tsx"), "utf8");
+  ok(hook.includes('return `${verb} (${n} device${n === 1 ? "" : "s"})`;') && hook.includes('stepLabel("nudge", nudgePending)') && hook.includes('stepLabel("replace part", items.length)'),
+    "#299 final: undo steps read \"move (3 devices)\" (stepLabel)");
+  ok(bar.includes("`Undo ${undoLabel} — ⌘Z`") && bar.includes("`Redo ${redoLabel} — ⇧⌘Z`"), "#299 final: the Undo/Redo tooltips read \"Undo move (3 devices) — ⌘Z\"");
+  const structural = hook.slice(hook.indexOf("const onStructuralChange = useCallback("), hook.indexOf("const onStructuralChange = useCallback(") + 200);
+  ok(structural.includes("dropMoveOverrides();"), "#299 final: a not-undoable edit drops spent move overrides");
+  ok(/commitUndo\(emptyUndo\(\)\);\s*dropMoveOverrides\(\);/.test(hook), "#299 final: a refused undo/redo step drops move overrides");
+  ok(hook.includes("const rest = m ? unsavedNudge(m) : null;"), "#299 final: the nudge timer writes nothing for a nudge back to its saved spot");
+  const ret = hook.slice(hook.lastIndexOf("\n  return {"));
+  ok(["runCommand", "setMovedLocal", "setBusy", "setDrag", "commitMoves", "clearUndo", "undoState"].every((k) => !new RegExp(`^    ${k},$`, "m").test(ret)),
+    "#299 final: the hook no longer hands out invariant-bypassing internals");
+}
+
 /* #299 Grid workspace — paste + restore on a scratch project (Task 19) */
 async function gridPasteAsyncChecks299(): Promise<void> {
   const GP = await import("../src/lib/stores/grid-projects");
@@ -49635,6 +49651,44 @@ async function gridPasteAsyncChecks299(): Promise<void> {
   ok(mv.ok && near(r1.points[0].x, 0.3) && near(r1.points[0].y, 0.2) && near(r1.points[1].x, 0.3) && near(r1.points[1].y, 0.35) &&
     near(r1.points[2].x, 0.4) && near(r1.points[2].y, 0.5) && JSON.stringify(r2.points) === JSON.stringify(offPage.points),
     "#299 batch: each wire end follows its own device; a run on another page stays put");
+
+  // Final review: paste / Replace part (and its undo) accept Auto-filled and
+  // seed devices — one server helper, beside partForGrid.
+  const PL = await import("../src/lib/design/grid-part-lookup");
+  const VP = await import("../src/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("../src/lib/design/equipment-vocab");
+  const { seedPlaceholderPartId } = await import("../src/lib/design/grid-seed");
+  const asmId = VP.assemblyPartId("fa-test299-gone");
+  const allowId = VP.allowancePartId(EQUIPMENT_ROWS[0].key, "better");
+  const seedId = seedPlaceholderPartId("speaker-l");
+  const junk = "zz-not-a-part-299-" + Date.now();
+  ok(await PL.isPlaceablePartId(asmId), "#299 final: an asm: virtual id is placeable (a dead assembly refuses at quote time, not here)");
+  ok(await PL.isPlaceablePartId(allowId), "#299 final: a well-formed allow:<row>:<tier> id is placeable");
+  ok(await PL.isPlaceablePartId(seedId), "#299 final: a grid-seed: placeholder is placeable");
+  ok(!(await PL.isPlaceablePartId(junk)) && !(await PL.isPlaceablePartId("allow:not-a-row:better")) && !(await PL.isPlaceablePartId("")),
+    "#299 final: an unknown id, a malformed allow: id and an empty id are not placeable");
+  const placeable = await PL.placeablePartIds([asmId, allowId, seedId, junk, asmId]);
+  ok(placeable.size === 3 && placeable.has(asmId) && placeable.has(allowId) && placeable.has(seedId) && !placeable.has(junk),
+    "#299 final: placeablePartIds dedupes and keeps only the placeable ids");
+  const toAsm = await GP.setPlacementsPart(gp.id, [{ id: mvA.id, partId: asmId }]);
+  const onAsm = (await GP.getProject(gp.id))!.placements.find((x) => x.id === mvA.id)!;
+  const fromAsm = await GP.setPlacementsPart(gp.id, toAsm.ok ? toAsm.value : []);
+  const backFromAsm = (await GP.getProject(gp.id))!.placements.find((x) => x.id === mvA.id)!;
+  const reAsm = await GP.setPlacementsPart(gp.id, fromAsm.ok ? fromAsm.value : []);
+  ok(toAsm.ok && onAsm.partId === asmId && fromAsm.ok && fromAsm.value[0].partId === asmId && backFromAsm.partId === fixtureId(299, "part") &&
+    reAsm.ok && (await GP.getProject(gp.id))!.placements.find((x) => x.id === mvA.id)!.partId === asmId,
+    "#299 final: a part swap to an asm: id and its undo/redo round-trip at the store level");
+  {
+    const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+    const fnBody = (name: string) => { const i = actSrc.indexOf(`export async function ${name}(`); if (i < 0) return ""; const j = actSrc.indexOf("export async function", i + 10); return actSrc.slice(i, j < 0 ? undefined : j); };
+    for (const n of ["pastePlacementsAction", "replacePlacementsPartAction"]) {
+      ok(fnBody(n).includes("placeablePartIds(") && !fnBody(n).includes("partForGrid("), `#299 final: ${n} checks parts through placeablePartIds, not partForGrid alone`);
+      ok(fnBody(n).includes("> MAX_DISTINCT_PARTS") && fnBody(n).includes("TOO_MANY_PARTS"), `#299 final: ${n} refuses more than MAX_DISTINCT_PARTS distinct parts`);
+    }
+    ok(fnBody("restoreItemsAction").includes("cableIds.size > MAX_DISTINCT_PARTS"), "#299 final: restoreItemsAction bounds its distinct cable lookups");
+    ok(/const MAX_DISTINCT_PARTS = 200;/.test(actSrc) && actSrc.includes("That's too many different parts in one edit — try a smaller selection."),
+      "#299 final: the distinct-part cap is 200 with its copy");
+  }
 }
 
 /* #299 Grid workspace — undo + clipboard (Task 18) */

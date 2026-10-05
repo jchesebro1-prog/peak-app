@@ -927,7 +927,7 @@ export type BatchResult<T> = { ok: true; project: GridProject; value: T } | { ok
 
 export const MAX_BATCH = 2000;
 const BATCH_NOTHING = "Nothing selected.";
-const BATCH_TOO_MANY = "Select fewer than 2,000 items.";
+const BATCH_TOO_MANY = "Select 2,000 items or fewer.";
 const batchStale = (n: number) => `${n} item(s) are no longer on this design — reload and try again.`;
 
 /**
@@ -1095,7 +1095,7 @@ export async function setPlacementsPart(
 const PASTE_OPTION_GONE = "That option was removed — refresh the page.";
 const PASTE_SHEET_GONE = "That sheet is no longer on this design — reload and try again.";
 const PASTE_NOTHING = "Nothing to paste.";
-const PASTE_TOO_MANY = "Paste fewer than 2,000 items.";
+const PASTE_TOO_MANY = "Paste 2,000 items or fewer.";
 const RESTORE_STALE = "Couldn't undo — the design changed.";
 const RESTORE_NOTHING = "Nothing to undo.";
 const RESTORE_TOO_MANY = "Couldn't undo — too many items.";

@@ -102,7 +102,7 @@ import { getCatalogRates, loadWireLaborRules } from "@/lib/stores/pricing";
 import { fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
-import { partForGrid } from "@/lib/design/grid-part-lookup";
+import { partForGrid, placeablePartIds } from "@/lib/design/grid-part-lookup";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { headers } from "next/headers";
@@ -675,9 +675,15 @@ export async function setPlacementsCategoryAction(
   return { ok: true, previous: r.value };
 }
 
-/** Swap the part on many devices in one write. Every new part must be in
- *  the Grid library (the route action's partForGrid lookup); curtains are
- *  refused by the store. */
+/** #299: one batch edit resolves at most this many DISTINCT part ids — the
+ *  per-id lookups run in parallel, so the payload can't fan them out. */
+const MAX_DISTINCT_PARTS = 200;
+const TOO_MANY_PARTS = "That's too many different parts in one edit — try a smaller selection.";
+
+/** Swap the part on many devices in one write. Every new part must be
+ *  placeable (placeablePartIds: the Grid library, or an Auto virtual / seed
+ *  placeholder id — undo of a swap on an Auto device sends one back);
+ *  curtains are refused by the store. */
 export async function replacePlacementsPartAction(
   projectId: string,
   items: { id: string; partId: string; qty?: number }[]
@@ -688,9 +694,11 @@ export async function replacePlacementsPartAction(
     !items.every((it) => isObj(it) && isStr(it.id) && isStr(it.partId) && it.partId !== "" && (it.qty === undefined || isFiniteNum(it.qty)))
   )
     return { ok: false, error: BATCH_INVALID };
-  if (items.length > MAX_BATCH) return { ok: false, error: "Select fewer than 2,000 items." };
-  const parts = await Promise.all([...new Set(items.map((it) => it.partId))].map((id) => partForGrid(id)));
-  if (parts.some((part) => !part)) return { ok: false, error: "That part is not in the Grid library." };
+  if (items.length > MAX_BATCH) return { ok: false, error: "Select 2,000 items or fewer." };
+  const partIds = new Set(items.map((it) => it.partId));
+  if (partIds.size > MAX_DISTINCT_PARTS) return { ok: false, error: TOO_MANY_PARTS };
+  const placeable = await placeablePartIds(partIds);
+  if (placeable.size !== partIds.size) return { ok: false, error: "That part is not in the Grid library." };
   const r = await setPlacementsPart(
     projectId,
     items.map((it) => ({ id: it.id, partId: it.partId, ...(it.qty !== undefined ? { qty: it.qty } : {}) }))
@@ -737,11 +745,13 @@ export async function pastePlacementsAction(
   )
     return { ok: false, error: BATCH_INVALID };
   if (!input.items.length) return { ok: false, error: "Nothing to paste." };
-  if (input.items.length > MAX_BATCH || input.routeIds.length > MAX_BATCH) return { ok: false, error: "Paste fewer than 2,000 items." };
+  if (input.items.length > MAX_BATCH || input.routeIds.length > MAX_BATCH) return { ok: false, error: "Paste 2,000 items or fewer." };
 
-  const deviceParts = [...new Set(input.items.filter((it) => !it.curtain).map((it) => it.partId))];
-  const parts = await Promise.all(deviceParts.map((id) => partForGrid(id)));
-  if (parts.some((part) => !part)) return { ok: false, error: "That part is not in the Grid library." };
+  // Auto-filled (asm:/allow:) and seed devices paste like any other (#299).
+  const deviceParts = new Set(input.items.filter((it) => !it.curtain).map((it) => it.partId));
+  if (deviceParts.size > MAX_DISTINCT_PARTS) return { ok: false, error: TOO_MANY_PARTS };
+  const placeable = await placeablePartIds(deviceParts);
+  if (placeable.size !== deviceParts.size) return { ok: false, error: "That part is not in the Grid library." };
   const items: PasteItem[] = [];
   for (const it of input.items) {
     let curtain: GridCurtain | undefined;
@@ -841,7 +851,7 @@ export async function restoreItemsAction(projectId: string, bundle: RemovedBundl
   }
   // Bounded like every batch: the riser half round-trips through the client,
   // so it can't make the lookup below fan out without limit.
-  if (cableIds.size > MAX_BATCH) return { ok: false, error: "Couldn't undo — too many items." };
+  if (cableIds.size > MAX_DISTINCT_PARTS) return { ok: false, error: "Couldn't undo — too many different parts in one step." };
   const cables = await Promise.all([...cableIds].map((id) => (isPartId(id) ? partForGrid(id) : Promise.resolve(null))));
   if (cables.some((part) => !part || !isPerLengthUnit(part.unit)))
     return { ok: false, error: "Couldn't undo — a cable in it is no longer in the Grid library." };

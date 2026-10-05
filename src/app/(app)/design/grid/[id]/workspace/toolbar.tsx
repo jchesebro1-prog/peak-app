@@ -254,7 +254,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
       <Divider />
       <Group label="Edit">
         <IconButton
-          title={undoBlocked ? `Undo (⌘Z) — ${undoBlocked}` : `Undo ${undoLabel} (⌘Z)`}
+          title={undoBlocked ? `Undo (⌘Z) — ${undoBlocked}` : `Undo ${undoLabel} — ⌘Z`}
           label="Undo (⌘Z)"
           disabled={!!undoBlocked}
           onClick={() => void undo()}
@@ -262,7 +262,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           <IconUndo />
         </IconButton>
         <IconButton
-          title={redoBlocked ? `Redo (⇧⌘Z) — ${redoBlocked}` : `Redo ${redoLabel} (⇧⌘Z)`}
+          title={redoBlocked ? `Redo (⇧⌘Z) — ${redoBlocked}` : `Redo ${redoLabel} — ⇧⌘Z`}
           label="Redo (⇧⌘Z)"
           disabled={!!redoBlocked}
           onClick={() => void redo()}
