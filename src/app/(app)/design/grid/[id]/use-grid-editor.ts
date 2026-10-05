@@ -1897,42 +1897,71 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  pointer still there steps by the offset instead of stacking. */
   const lastPasteCursorRef = useRef<Point | null>(null);
 
+  /** Where the clipboard's devices came from (their bounding-box top-left)
+   *  and whether the copy was a cut, so a first paste with no pointer can
+   *  land back at the source: exactly in place after a cut, one step down-
+   *  right after a copy. Set with the clip; ⌘D never touches it. */
+  const clipOriginRef = useRef<{ origin: Point; fromCut: boolean } | null>(null);
+
   /** Snapshot the visible selection, at the positions it is shown at (a
-   *  pending nudge included). Returns the clip, or null with nothing copied. */
-  const takeCopy = useCallback((): Clipboard | null => {
+   *  pending nudge included). Pure: writes no clipboard state. */
+  const snapshotSelection = useCallback((): { clip: Clipboard; origin: Point } | null => {
     if (!selectedPlacements.length) return null;
     const ids = new Set(selectedPlacements.map((pl) => pl.id));
     const shown = placements.map((pl) => (ids.has(pl.id) ? { ...pl, ...shownAt(pl) } : pl));
     const clip = copySelection(project.id, shown, routes, [...ids]);
-    clipRef.current = clip;
-    setClipboardState(clip);
+    if (!clip) return null;
+    const pts = selectedPlacements.map(shownAt);
+    return { clip, origin: { x: Math.min(...pts.map((p) => p.x)), y: Math.min(...pts.map((p) => p.y)) } };
+  }, [selectedPlacements, placements, routes, shownAt, project.id]);
+
+  /** Make `snap` the clipboard (a new copy resets the paste stepping). */
+  const commitCopy = useCallback((snap: { clip: Clipboard; origin: Point }, fromCut: boolean) => {
+    clipRef.current = snap.clip;
+    clipOriginRef.current = { origin: snap.origin, fromCut };
+    setClipboardState(snap.clip);
     lastPasteRef.current = null;
     lastPasteCursorRef.current = null;
-    return clip;
-  }, [selectedPlacements, placements, routes, shownAt, project.id]);
+  }, []);
 
   /** ⌘C / toolbar Copy. */
   const copySelected = useCallback(() => {
-    const clip = takeCopy();
-    if (!clip) return;
+    const snap = snapshotSelection();
+    if (!snap) return;
+    commitCopy(snap, false);
     noteAction(`Copied ${countNoun(selectedPlacements)}`);
-  }, [takeCopy, noteAction, selectedPlacements]);
+  }, [snapshotSelection, commitCopy, noteAction, selectedPlacements]);
 
-  /** ⌘X / toolbar Cut: copy, then remove (one write). Resolves to what undo
-   *  needs to put the devices back, or null. */
+  /** ⌘X / toolbar Cut: copy, then remove (one write). The clipboard is only
+   *  replaced once the removal went through. Resolves to what undo needs to
+   *  put the devices back, or null. */
   const cutSelected = useCallback(async (): Promise<RemovedBundle | null> => {
     if (busy || !selectedPlacements.length) return null;
     const cut = selectedPlacements;
-    if (!takeCopy()) return null;
+    const snap = snapshotSelection();
+    if (!snap) return null;
     const removed = await removeSelected();
-    if (removed) noteAction(`Cut ${countNoun(cut)}`);
+    if (removed) {
+      commitCopy(snap, true);
+      noteAction(`Cut ${countNoun(cut)}`);
+    }
     return removed;
-  }, [busy, selectedPlacements, takeCopy, removeSelected, noteAction]);
+  }, [busy, selectedPlacements, snapshotSelection, commitCopy, removeSelected, noteAction]);
 
   /** Lay `clip` onto the active sheet/page/option and select the copies.
    *  Wires come along only onto the page they were copied from. */
   const pasteClip = useCallback(
-    async (clip: Clipboard, at: Point | null, last: Point | null, verb: string): Promise<{ placements: GridPlacement[]; routes: GridRoute[] } | null> => {
+    async (
+      clip: Clipboard,
+      at: Point | null,
+      last: Point | null,
+      verb: string,
+      /** remember: set the last-paste anchor ⌘V steps from (false for ⌘D,
+       *  which leaves the clipboard alone). exact: skip the snap (a cut put
+       *  back where it was). */
+      opts: { remember?: boolean; exact?: boolean } = {}
+    ): Promise<{ placements: GridPlacement[]; routes: GridRoute[] } | null> => {
+      const { remember = true, exact = false } = opts;
       if (!sheet || busy) return null;
       if (!(await flushNudge())) return null;
       // With snap on, a step smaller than one grid cell would round straight
@@ -1943,7 +1972,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           : last;
       const laid = pasteLayout(clip, at, step);
       let anchor = laid.anchor;
-      if (snap) {
+      if (snap && !exact) {
         const { dx, dy } = snapDelta(anchor, anchor, snap);
         const w = Math.max(0, ...clip.items.map((i) => i.dx));
         const h = Math.max(0, ...clip.items.map((i) => i.dy));
@@ -1973,7 +2002,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           setErr(r.error);
           return null;
         }
-        lastPasteRef.current = anchor;
+        if (remember) lastPasteRef.current = anchor;
         setSelectedIds(r.placements.map((pl) => pl.id));
         setCategoryDraft(null);
         setSelectedSpaceId(null);
@@ -1994,28 +2023,36 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   /** ⌘V / toolbar Paste: at the pointer when it is over the plan (and has
    *  moved since the last paste), else stepped from the last paste, else
-   *  centred. Resolves to what was created (undo), or null. */
+   *  (first paste, same sheet and page as the source) back at the source —
+   *  in place after a cut, one step down-right after a copy — else centred.
+   *  Resolves to what was created (undo), or null. */
   const paste = useCallback(async () => {
     const clip = clipRef.current;
     if (!clip) return null;
     const cur = cursorAtRef.current;
     const prev = lastPasteCursorRef.current;
     const at = cur && !(prev && prev.x === cur.x && prev.y === cur.y) ? cur : null;
-    const r = await pasteClip(clip, at, lastPasteRef.current, "Pasted");
+    const src = clipOriginRef.current;
+    const atSource =
+      !at && !lastPasteRef.current && src && sheet && clip.sourceProjectId === project.id && clip.sourceSheetId === sheet.id && clip.sourcePage === page;
+    let r;
+    if (atSource && src.fromCut) r = await pasteClip(clip, src.origin, null, "Pasted", { exact: true });
+    else if (atSource) r = await pasteClip(clip, null, src.origin, "Pasted");
+    else r = await pasteClip(clip, at, lastPasteRef.current, "Pasted");
     if (r && cur) lastPasteCursorRef.current = { ...cur };
     return r;
-  }, [pasteClip]);
+  }, [pasteClip, sheet, project.id, page]);
 
-  /** ⌘D / toolbar Duplicate: copy the selection, then paste it one step
-   *  down-right of where it sits. Resolves to what was created, or null. */
+  /** ⌘D / toolbar Duplicate: paste the selection one step down-right of its
+   *  own bounding-box origin. The clipboard, ⌘V's last-paste anchor and its
+   *  pointer memory are left alone; the new copies become the selection, so
+   *  repeating steps on from them. Resolves to what was created, or null. */
   const duplicate = useCallback(async () => {
     if (busy || !selectedPlacements.length) return null;
-    const clip = takeCopy();
-    if (!clip) return null;
-    const pts = selectedPlacements.map(shownAt);
-    const origin = { x: Math.min(...pts.map((p) => p.x)), y: Math.min(...pts.map((p) => p.y)) };
-    return pasteClip(clip, null, origin, "Duplicated");
-  }, [busy, selectedPlacements, takeCopy, shownAt, pasteClip]);
+    const snap = snapshotSelection();
+    if (!snap) return null;
+    return pasteClip(snap.clip, null, snap.origin, "Duplicated", { remember: false });
+  }, [busy, selectedPlacements, snapshotSelection, pasteClip]);
 
   // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
   // select with nothing selected, Delete/Backspace removes every selected
