@@ -16,21 +16,33 @@ export function feetLabel(ft: number): string {
   return `${Math.round(ft * 12)}"`;
 }
 
+type SnapCal = { scale: number; unit: MeasureUnit } | null | undefined;
+const usable = (cal: SnapCal): cal is { scale: number; unit: MeasureUnit } => Boolean(cal && Number.isFinite(cal.scale) && cal.scale > 0);
+
+/** Why a calibrated page can't snap at `spacingFt`: "fine" (step < 0.1% of the sheet), "coarse" (> 50%),
+ *  else null (usable, or uncalibrated — which always has the plan step). */
+export function snapProblem(cal: SnapCal, spacingFt: number): "fine" | "coarse" | null {
+  if (!usable(cal)) return null;
+  const stepX = spacingFt / (cal.scale * FEET[cal.unit]);
+  if (!Number.isFinite(stepX) || stepX < 0.001) return "fine";
+  if (stepX > 0.5) return "coarse";
+  return null;
+}
+
 /**
  * Snap steps as fractions of the sheet. Calibrated: `spacingFt` over the page width in feet; null when the
  * grid would be too dense (< 0.001) or too coarse (> 0.5) to help. Uncalibrated: 1% of the sheet.
  * `aspect` is size.h / size.w; stepY = stepX / aspect keeps the cells square on the sheet.
  */
 export function snapGrid(
-  cal: { scale: number; unit: MeasureUnit } | null | undefined,
+  cal: SnapCal,
   spacingFt: number,
   aspect: number,
 ): SnapGrid | null {
   const asp = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
-  if (cal && Number.isFinite(cal.scale) && cal.scale > 0) {
-    const pageFt = cal.scale * FEET[cal.unit];
-    const stepX = spacingFt / pageFt;
-    if (!Number.isFinite(stepX) || stepX < 0.001 || stepX > 0.5) return null;
+  if (usable(cal)) {
+    if (snapProblem(cal, spacingFt)) return null;
+    const stepX = spacingFt / (cal.scale * FEET[cal.unit]);
     return { stepX, stepY: stepX / asp, label: feetLabel(spacingFt) };
   }
   return { stepX: SNAP_PLAN_STEP, stepY: SNAP_PLAN_STEP / asp, label: "1% of sheet" };

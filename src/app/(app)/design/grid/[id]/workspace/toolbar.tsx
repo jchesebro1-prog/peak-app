@@ -155,6 +155,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
     snapFt,
     setSnapFt,
     snap,
+    snapIssue,
   } = ed;
 
   const scopes = refillableScopes(project.scopeInputs, auto);
@@ -356,7 +357,9 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
               ? "Snap to grid — place, drag and nudge land on the grid"
               : snap
                 ? `Snap to grid is on (${snap.label}) — click to turn it off`
-                : "Snap to grid is on, but too fine at this scale — pick a larger spacing"
+                : snapIssue === "coarse"
+                  ? "Snap to grid is on, but too coarse at this scale — pick a smaller spacing"
+                  : "Snap to grid is on, but too fine at this scale — pick a larger spacing"
           }
           onClick={() => setSnapOn(!snapOn)}
           style={{

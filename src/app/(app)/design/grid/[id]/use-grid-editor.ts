@@ -81,6 +81,7 @@ import {
   SNAP_SPACINGS_FT,
   snapDelta,
   snapGrid,
+  snapProblem,
   snapPoint,
   type SnapGrid,
 } from "@/lib/design/grid-snap";
@@ -537,7 +538,18 @@ function useGridEditorImpl(props: GridEditorProps) {
     () => (snapOn ? snapGrid(calScale != null && calUnitOfPage ? { scale: calScale, unit: calUnitOfPage } : null, snapFt, aspect) : null),
     [snapOn, calScale, calUnitOfPage, snapFt, aspect]
   );
-  const snapStatus = !snapOn ? "Snap: off" : snap ? `Snap: ${snap.label}` : "Snap: too fine at this scale";
+  /** Why a calibrated page can't snap at the chosen spacing (null = it can). */
+  const snapIssue = useMemo(
+    () => (snapOn ? snapProblem(calScale != null && calUnitOfPage ? { scale: calScale, unit: calUnitOfPage } : null, snapFt) : null),
+    [snapOn, calScale, calUnitOfPage, snapFt]
+  );
+  const snapStatus = !snapOn
+    ? "Snap: off"
+    : snap
+      ? `Snap: ${snap.label}`
+      : snapIssue === "coarse"
+        ? "Snap: too coarse at this scale"
+        : "Snap: too fine at this scale";
 
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   /** Every part's resolved badge (icon + colour), computed once per prop
@@ -885,11 +897,30 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  here. Optimistic entries go in first and are ALL rolled back if the
    *  server refuses. Resolves to the positions the server replaced (what
    *  undo needs), or null when nothing was written. */
-  const sendMoves = useCallback(
-    async (moves: { id: string; x: number; y: number }[], label?: string) => {
+  const writeMoves = useCallback(
+    async (
+      moves: { id: string; x: number; y: number }[],
+      label?: string
+    ): Promise<{ ok: boolean; previous: { id: string; x: number; y: number }[] | null }> => {
       const servers = new Map(placements.map((q) => [q.id, q]));
-      const valid = moves.filter((m) => servers.has(m.id));
-      if (!valid.length) return null;
+      // A move onto the position the design already has writes nothing: no
+      // action, no "Moved …" note, no undo step, and the hand edit must not
+      // clear the Auto tag (#299). Compared with the SERVER position (the
+      // nudge paints optimistically first, so the shown one is already the
+      // target); an optimistic entry for a dropped move is cleared.
+      const valid = moves.filter((m) => {
+        const q = servers.get(m.id);
+        return q && (Math.abs(q.x - m.x) > 1e-9 || Math.abs(q.y - m.y) > 1e-9);
+      });
+      const dropped = moves.filter((m) => servers.has(m.id) && !valid.includes(m));
+      if (dropped.length)
+        setMovedLocal((prev) => {
+          if (!dropped.some((m) => prev[m.id])) return prev;
+          const next = { ...prev };
+          for (const m of dropped) delete next[m.id];
+          return next;
+        });
+      if (!valid.length) return { ok: true, previous: null };
       setMovedLocal((prev) => {
         const next = { ...prev };
         for (const m of valid) {
@@ -913,22 +944,26 @@ function useGridEditorImpl(props: GridEditorProps) {
         if (!r.ok) {
           setErr(r.error);
           rollBack();
-          return null;
+          return { ok: false, previous: null };
         }
         noteAction(
           label ?? (valid.length === 1 ? `Moved ${placementLabel(servers.get(valid[0].id)!)}` : `Moved ${countNoun(valid.map((m) => servers.get(m.id)!))}`)
         );
         router.refresh();
-        return r.previous;
+        return { ok: true, previous: r.previous };
       } catch {
         rollBack();
         setErr(SAVE_FAILED);
-        return null;
+        return { ok: false, previous: null };
       } finally {
         setBusy(false);
       }
     },
     [project.id, placements, router, noteAction, placementLabel]
+  );
+  const sendMoves = useCallback(
+    async (moves: { id: string; x: number; y: number }[], label?: string) => (await writeMoves(moves, label)).previous,
+    [writeMoves]
   );
   /** The latest sendMoves, for the nudge timer: the timer outlives the render
    *  that armed it, and a stale closure would check its moves against a
@@ -951,14 +986,17 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** Write a pending nudge NOW, before an edit that isn't a move (delete,
    *  category, part), so the debounce can never fire after it. Devices in
    *  `dropIds` (about to be deleted) are left out of the write — moving them
-   *  first would be pointless, and moving them after would fail. */
+   *  first would be pointless, and moving them after would fail.
+   *  Resolves to false when the write failed (the error is already showing
+   *  and the markers rolled back): the caller must stop, not carry on. */
   const flushNudge = useCallback(
-    async (dropIds?: ReadonlySet<string>) => {
+    async (dropIds?: ReadonlySet<string>): Promise<boolean> => {
       const m = takeNudge();
       const rest = m && dropIds ? m.filter((mv) => !dropIds.has(mv.id)) : m;
-      if (rest?.length) await sendMoves(rest);
+      if (!rest?.length) return true;
+      return (await writeMoves(rest)).ok;
     },
-    [takeNudge, sendMoves]
+    [takeNudge, writeMoves]
   );
   /** Every move that isn't the nudge timer itself (drag release, align,
    *  distribute) goes through here: a pending nudge is FOLDED into the same
@@ -1016,6 +1054,9 @@ function useGridEditorImpl(props: GridEditorProps) {
         const from = shownAt(pl);
         return { id: pl.id, x: clamp01(from.x + dx), y: clamp01(from.y + dy) };
       });
+      // Pinned at the page edge (or already on the grid line): nothing moves,
+      // so nothing is painted, queued or written.
+      if (!changedMoves(selectedPlacements.map((pl) => ({ id: pl.id, ...shownAt(pl) })), moves).length) return;
       // Paint every keystroke; write once the key-repeat settles.
       setMovedLocal((prev) => {
         const next = { ...prev };
@@ -1051,9 +1092,14 @@ function useGridEditorImpl(props: GridEditorProps) {
   ]);
 
   // A pending nudge must not outlive the editor.
-  useEffect(() => () => {
-    if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
-  }, []);
+  // …but leaving the page inside the 400 ms window still writes it (best effort).
+  useEffect(
+    () => () => {
+      const pending = takeNudge();
+      if (pending?.length) void sendMovesRef.current(pending);
+    },
+    [takeNudge]
+  );
 
   /** Null when the wrapper has no measurable size (sheet still loading, or
    *  the window is hidden): fabricating (0,0) instead would drop devices and
@@ -1429,7 +1475,18 @@ function useGridEditorImpl(props: GridEditorProps) {
         else if (d.toggleOff) setSelectedIds([]);
         return;
       }
-      void commitMoves(dragTargets(d, snap));
+      // Released where it started (snapped back, or dragged out and back):
+      // that was a click — writing nothing, not even an Auto-tag clear.
+      const targets = changedMoves(
+        d.ids.filter((id) => d.from[id]).map((id) => ({ id, ...d.from[id] })),
+        dragTargets(d, snap)
+      );
+      if (!targets.length) {
+        if (d.collapse) setSelectedIds([d.id]);
+        else if (d.toggleOff) setSelectedIds([]);
+        return;
+      }
+      void commitMoves(targets);
       return;
     }
     if (!calDraft) return;
@@ -1717,7 +1774,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (!targets.length) return null;
     // A pending nudge writes first (minus the devices going away), so its
     // debounce can't fire after the delete and report them missing.
-    await flushNudge(new Set(targets.map((pl) => pl.id)));
+    if (!(await flushNudge(new Set(targets.map((pl) => pl.id))))) return null;
     setErr(null);
     setBusy(true);
     try {
@@ -1780,7 +1837,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         .filter((pl) => (normalizeCategory(pl.category) ?? "") !== want)
         .map((pl) => ({ id: pl.id, category: want }));
       if (!items.length) return null;
-      await flushNudge();
+      if (!(await flushNudge())) return null;
       setErr(null);
       setBusy(true);
       try {
@@ -1810,7 +1867,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (!partId || selectedPlacements.some((pl) => pl.curtain)) return null;
       const items = selectedPlacements.filter((pl) => pl.partId !== partId).map((pl) => ({ id: pl.id, partId }));
       if (!items.length) return null;
-      await flushNudge();
+      if (!(await flushNudge())) return null;
       setErr(null);
       setBusy(true);
       try {
@@ -2047,6 +2104,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     setSnapFt,
     snap,
     snapStatus,
+    snapIssue,
     selectedIds,
     setSelectedIds,
     selectedPlacements,

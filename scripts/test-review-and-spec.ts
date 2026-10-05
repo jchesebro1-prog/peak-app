@@ -49477,6 +49477,8 @@ import * as GSNAP from "@/lib/design/grid-snap";
   const dl = GSNAP.snapDelta({ x: 0.1, y: 0.1 }, { x: 0.1149, y: 0.1 }, g);
   ok(Math.abs(dl.dx - 0.01) < 1e-12 && Math.abs(dl.dy - 0) < 1e-12, "#299 snap: group delta snaps the anchor");
   ok(GSNAP.feetLabel(0.5) === `6"` && GSNAP.feetLabel(5) === `5'`, "#299 snap: labels");
+  ok(GSNAP.snapProblem({ scale: 100000, unit: "ft" }, 0.5) === "fine" && GSNAP.snapProblem({ scale: 5, unit: "ft" }, 5) === "coarse", "#299 snap: names a too-fine vs too-coarse grid");
+  ok(GSNAP.snapProblem({ scale: 100, unit: "ft" }, 1) === null && GSNAP.snapProblem(null, 1) === null, "#299 snap: a usable or uncalibrated grid has no problem");
 }
 
 /* #299 Grid workspace — riser removed/restore (Task 14) */
