@@ -10787,6 +10787,7 @@ seeded()
   .then(() => mfrPageCanonicalAsyncChecks())
   .then(() => mfrAnalyticsLoadAsyncChecks())
   .then(() => gridBatchAsyncChecks299())
+  .then(() => gridPasteAsyncChecks299())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -33731,8 +33732,9 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
   const gridPage = src("src/app/(app)/design/grid/[id]/page.tsx");
   ok(/allSpecRecords\(\)/.test(gridPage) && /specKeys=\{systemMatchKeys\(specRecords\)\}/.test(gridPage), "spec pickers: the Grid page passes specKeys from the server");
   ok(/specKeys=\{specKeys\}/.test(src("src/app/(app)/design/grid/[id]/plan-canvas.tsx")), "spec pickers: the Grid editor forwards specKeys to the curtain dialog");
-  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
-  const placeBody = acts.slice(acts.indexOf("export async function placeCurtainAction("), acts.indexOf("user-defined categories (#48/#41)"));
+  // #299 Task 19: placeCurtainAction's checks moved into the shared checkCurtainInput.
+  const acts = src("src/lib/design/grid-curtain-input.ts");
+  const placeBody = acts.slice(acts.indexOf("export async function checkCurtainInput("));
   ok(/specKey: \(typeof c\.specKey === "string" \? c\.specKey : ""\)\.trim\(\)\.slice\(0, 120\) \|\| undefined/.test(placeBody),
     "spec pickers: placeCurtainAction stores the trimmed, capped specKey on the curtain");
 
@@ -43558,7 +43560,8 @@ import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292Repla
   ok(/curtainItem\(/.test(est) && /newCurtainTrackKey\(/.test(est), "#292 source: addCurtain writes curtainInputs + curtainTrackKey through curtainItem");
   ok(/<CurtainModal[\s\S]{0,400}editing=\{/.test(est), "#292 source: CurtainModal receives editing");
   ok(rd292c("src/app/(app)/estimator/section-card.tsx").includes("onEditCurtain"), "#292 source: curtain lines get an ✎ (onEditCurtain)");
-  ok(/cleanCurtainFinishes\(/.test(rd292c("src/app/(app)/design/grid/[id]/actions.ts")), "#292 source: placeCurtainAction validates finishes/mount through cleanCurtainFinishes");
+  // #299 Task 19: the curtain checks moved into checkCurtainInput, which placeCurtainAction calls.
+  ok(/cleanCurtainFinishes\(/.test(rd292c("src/lib/design/grid-curtain-input.ts")), "#292 source: placeCurtainAction validates finishes/mount through cleanCurtainFinishes");
 }
 
 // ---- #292 task 7 fix round 1: vendor cost survives Update, one curtain line builder, key/specKey edge cases ----
@@ -49541,6 +49544,82 @@ async function gridBatchAsyncChecks299(): Promise<void> {
   p = (await GP.getProject(gp.id))!;
   ok(rm.ok && rm.value.placements.map((x) => x.id).join(",") === [a.id, c.id].join(",") && !p.placements.some((x) => x.id === a.id || x.id === c.id), "#299 batch: remove returns the records it removed");
   ok(!(await GP.removePlacements(gp.id, [])).ok, "#299 batch: empty selection refused");
+}
+
+/* #299 Grid workspace — paste/restore actions are authed; curtains share one validator (Task 19) */
+{
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+  const body = (name: string) => { const i = src.indexOf(`export async function ${name}(`); if (i < 0) return ""; const j = src.indexOf("export async function", i + 10); return src.slice(i, j < 0 ? undefined : j); };
+  for (const n of ["restoreItemsAction", "pastePlacementsAction"])
+    ok(body(n).includes("requireUser()"), `#299 actions: ${n} is authed`);
+  ok(body("placeCurtainAction").includes("checkCurtainInput("), "#299 actions: placeCurtainAction validates through the shared checkCurtainInput");
+}
+
+/* #299 Grid workspace — paste + restore on a scratch project (Task 19) */
+async function gridPasteAsyncChecks299(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const GR = await import("../src/lib/stores/grid-riser");
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const { DEFAULT_OPTION_ID } = await import("../src/lib/design/grid-options");
+  const gp = await GP.createProject({ name: "TEST299 paste grid project", customer: "Test Customer 299", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  const sheetId = "gs-fixture299p";
+  await GP.addPlacement(gp.id, { sheetId, page: 1, x: 0.1, y: 0.1, partId: fixtureId(299, "part"), optionId: DEFAULT_OPTION_ID, by: "t" });
+  const src = (await GP.getProject(gp.id))!.placements.at(-1)!;
+
+  const pasted = await GP.pastePlacements(gp.id, { sheetId, page: 1, optionId: DEFAULT_OPTION_ID, by: "t",
+    items: [{ srcId: src.id, x: 0.4, y: 0.4, partId: src.partId, category: " Pasted ", qty: 3 }], routeIds: [] });
+  ok(pasted.ok && pasted.value.placements.length === 1 && pasted.value.placements[0].id !== src.id && pasted.value.placements[0].category === "Pasted" && pasted.value.placements[0].qty === 3, "#299 paste: new id, trimmed category, lot qty");
+  ok(pasted.ok && !("auto" in pasted.value.placements[0]), "#299 paste: never auto-tagged");
+
+  const rm = await GP.removePlacements(gp.id, [src.id]);
+  ok(rm.ok, "#299 restore: setup removed");
+  const back = await GP.restoreItems(gp.id, rm.ok ? rm.value : { placements: [], riser: {} });
+  const after = (await GP.getProject(gp.id))!;
+  ok(back.ok && after.placements.some((p) => p.id === src.id && p.x === 0.1), "#299 restore: record back with its original id");
+  ok(!(await GP.restoreItems(gp.id, rm.ok ? rm.value : { placements: [], riser: {} })).ok, "#299 restore: refuses when the id already exists");
+
+  // Wire paste: both ends pasted onto a calibrated page → copied, remapped,
+  // translated by its FROM device's delta; the same paste onto an
+  // uncalibrated page skips the wire and counts it.
+  const add = async (x: number, y: number) => (await GP.addPlacement(gp.id, { sheetId, page: 2, x, y, partId: fixtureId(299, "part"), optionId: DEFAULT_OPTION_ID, by: "t" }))!.placements.at(-1)!;
+  const wa = await add(0.1, 0.1), wb = await add(0.3, 0.3);
+  await GP.addRoute(gp.id, { sheetId, page: 2, partId: fixtureId(299, "wire"), points: [{ x: 0.1, y: 0.1 }, { x: 0.3, y: 0.3 }], aspect: 0.75, optionId: DEFAULT_OPTION_ID, by: "t", fromPlacementId: wa.id, toPlacementId: wb.id });
+  const wire = (await GP.getProject(gp.id))!.routes!.at(-1)!;
+  await GP.setSheetCalibration(gp.id, { docId: sheetId, page: 3, scale: 100, unit: "ft", refLength: 10, by: "t", at: 1 });
+  const items = [{ srcId: wa.id, x: 0.5, y: 0.2, partId: wa.partId }, { srcId: wb.id, x: 0.7, y: 0.4, partId: wb.partId }];
+  const wp = await GP.pastePlacements(gp.id, { sheetId, page: 3, optionId: DEFAULT_OPTION_ID, by: "t", items, routeIds: [wire.id] });
+  const nr = wp.ok ? wp.value.routes[0] : undefined;
+  const idA = wp.ok ? wp.value.placements[0].id : "", idB = wp.ok ? wp.value.placements[1].id : "";
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  const uncal = await GP.pastePlacements(gp.id, { sheetId, page: 4, optionId: DEFAULT_OPTION_ID, by: "t", items, routeIds: [wire.id] });
+  ok(wp.ok && wp.value.skippedWires === 0 && !!nr && nr.id !== wire.id && nr.page === 3 && nr.fromPlacementId === idA && nr.toPlacementId === idB &&
+    near(nr.points[0].x, 0.5) && near(nr.points[0].y, 0.2) && near(nr.points[1].x, 0.7) && near(nr.points[1].y, 0.4) &&
+    uncal.ok && uncal.value.routes.length === 0 && uncal.value.skippedWires === 1,
+    "#299 paste: a wire between two pasted devices is copied, remapped and moved; an uncalibrated page skips and counts it");
+
+  // Riser round-trip: a typed link ending on a removed device comes back with it.
+  const rl = await GR.addRiserLink(gp.id, { optionId: DEFAULT_OPTION_ID, from: { kind: "placement", placementId: wa.id }, to: { kind: "placement", placementId: wb.id }, partId: fixtureId(299, "wire"), lengthFt: 25, by: "t" });
+  const rmw = await GP.removePlacements(gp.id, [wa.id]);
+  const gone = (await GP.getProject(gp.id))!.riser?.[DEFAULT_OPTION_ID]?.links.some((l) => rl.ok && l.id === rl.id);
+  const rst = await GP.restoreItems(gp.id, rmw.ok ? rmw.value : { placements: [], riser: {} });
+  const link = (await GP.getProject(gp.id))!.riser?.[DEFAULT_OPTION_ID]?.links.find((l) => rl.ok && l.id === rl.id);
+  ok(rl.ok && rmw.ok && gone === false && rst.ok && !!link && link.from.kind === "placement" && link.from.placementId === wa.id && link.lengthFt === 25,
+    "#299 restore: a riser link removed with its device comes back on undo");
+
+  // Batch move: each wire end follows its own device; a run on another page
+  // (a stale pairing) stays put.
+  const mvA = await add(0.2, 0.2), mvB = await add(0.4, 0.4);
+  await GP.addRoute(gp.id, { sheetId, page: 2, partId: fixtureId(299, "wire"), points: [{ x: 0.2, y: 0.2 }, { x: 0.3, y: 0.35 }, { x: 0.4, y: 0.4 }], aspect: 0.75, optionId: DEFAULT_OPTION_ID, by: "t", fromPlacementId: mvA.id, toPlacementId: mvB.id });
+  const onPage = (await GP.getProject(gp.id))!.routes!.at(-1)!;
+  await GP.addRoute(gp.id, { sheetId, page: 5, partId: fixtureId(299, "wire"), points: [{ x: 0.2, y: 0.2 }, { x: 0.4, y: 0.4 }], aspect: 0.75, optionId: DEFAULT_OPTION_ID, by: "t", fromPlacementId: mvA.id, toPlacementId: mvB.id });
+  const offPage = (await GP.getProject(gp.id))!.routes!.at(-1)!;
+  const mv = await GP.movePlacements(gp.id, [{ id: mvA.id, x: 0.3, y: 0.2 }, { id: mvB.id, x: 0.4, y: 0.5 }]);
+  const routes = (await GP.getProject(gp.id))!.routes!;
+  const r1 = routes.find((r) => r.id === onPage.id)!, r2 = routes.find((r) => r.id === offPage.id)!;
+  ok(mv.ok && near(r1.points[0].x, 0.3) && near(r1.points[0].y, 0.2) && near(r1.points[1].x, 0.3) && near(r1.points[1].y, 0.35) &&
+    near(r1.points[2].x, 0.4) && near(r1.points[2].y, 0.5) && JSON.stringify(r2.points) === JSON.stringify(offPage.points),
+    "#299 batch: each wire end follows its own device; a run on another page stays put");
 }
 
 /* #299 Grid workspace — undo + clipboard (Task 18) */

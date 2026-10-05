@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
+import { clamp01, findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
 import { clampConfigDims, venueOf, type QuickScopeInputs, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
 import { clampHouseFieldsFor } from "@/lib/design/venue-templates/house-dims";
 import {
@@ -24,6 +24,11 @@ import {
   movePlacements,
   setPlacementsCategory,
   setPlacementsPart,
+  pastePlacements,
+  restoreItems,
+  type GridPlacement,
+  type GridRoute,
+  type PasteItem,
   type RemovedBundle,
   MAX_BATCH,
   removeProject,
@@ -62,7 +67,7 @@ import { getSite, sitesForCompany } from "@/lib/identity/sites";
 // into lib/design/grid-quote.ts (D186) so a quote can be built per option on a
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
-import { get as getPart, getMany as getCatalogParts } from "@/lib/stores/catalog";
+import { getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
 import { pushGridRecent, toggleGridFavorite } from "@/lib/stores/device-types";
 import { autoNeedsPart, fillAutoScopes } from "@/lib/design/grid-auto-fill";
@@ -79,7 +84,17 @@ import {
   type AutoEquipHit,
   type SellCard,
 } from "@/lib/design/auto-estimate";
-import { autoEstimateFor, mergeScopeEstimate, overrideRefs, sanitizeAutoEstimate, type AutoEstimate, type AutoOverride } from "@/lib/design/grid-auto-model";
+import {
+  autoEstimateFor,
+  cleanLotQty,
+  mergeScopeEstimate,
+  overrideRefs,
+  sanitizeAutoEstimate,
+  sanitizeAutoOrigin,
+  sanitizeAutoTag,
+  type AutoEstimate,
+  type AutoOverride,
+} from "@/lib/design/grid-auto-model";
 import { buildEquipmentPriceTable, isTierKey, sellFromCost } from "@/lib/design/equipment-map";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { listFixtures } from "@/lib/stores/fixtures";
@@ -96,14 +111,8 @@ import type { CutSheetsAdded } from "@/lib/curtain-cut-sheets/package-sheets";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
 import { isGridLayer } from "@/lib/design/grid-scopes";
-import {
-  GRID_CURTAIN_TYPES,
-  GRID_FULLNESS,
-  isPerLengthUnit,
-  type GridCurtain,
-} from "@/lib/design/grid-bom";
-import { isFabricRow } from "@/lib/design/grid-curtains";
-import { cleanCurtainFinishes } from "@/lib/curtain-cut-sheets/vocab";
+import { isPerLengthUnit, type GridCurtain } from "@/lib/design/grid-bom";
+import { checkCurtainInput, type CurtainInput } from "@/lib/design/grid-curtain-input";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
 import { getSettings } from "@/lib/settings";
@@ -118,6 +127,8 @@ import type { AState } from "@/app/(app)/design/quick/engine";
 /** The Grid editor server actions (D108). */
 
 type Result = { ok: true } | { ok: false; error: string };
+/** placeDeviceAction / placeCurtainAction (#299): the new record, for undo. */
+type PlacedResult = { ok: true; placement: GridPlacement } | { ok: false; error: string };
 
 function editorPath(projectId: string): string {
   return `/design/grid/${encodeURIComponent(projectId)}`;
@@ -461,13 +472,15 @@ export async function createClientPackageAction(
 export async function placeDeviceAction(
   projectId: string,
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string }
-): Promise<Result> {
+): Promise<PlacedResult> {
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   const p = await addPlacement(projectId, { ...input, by: user.name });
-  if (!p) return { ok: false, error: "Design not found." };
+  // The new record is the last placement of the doc this patch wrote (#299).
+  const placement = p?.placements.at(-1);
+  if (!placement) return { ok: false, error: "Design not found." };
   // #226: Recent is the placer's own last-40 list — a convenience, so a
   // failed write never fails the placement that already landed.
   try {
@@ -476,7 +489,7 @@ export async function placeDeviceAction(
     /* best-effort */
   }
   revalidatePath(editorPath(projectId));
-  return { ok: true };
+  return { ok: true, placement };
 }
 
 /** #226: star / unstar a part in the palette — the signed-in user's own
@@ -506,15 +519,12 @@ export async function movePlacementAction(
 
 /* ------------------------------ curtains (#49) ------------------------------ */
 
-/** Sanity ceiling on a drape dimension, in feet - a typo like 400 for 40 would
- *  otherwise quote five figures of fabric without a murmur. */
-const MAX_CURTAIN_FT = 300;
-
 /**
  * Drop a specced curtain onto the plan (punch #49). The dialog gathers Name,
- * Width, Height, Fullness and Fabric - Jeff's list - and this is where every
- * one of them is checked; the client's live price is a preview, the fabric
- * rate and the money come from the catalog here and at quote time.
+ * Width, Height, Fullness and Fabric - Jeff's list - and checkCurtainInput
+ * (shared with paste and undo, #299) is where every one of them is checked;
+ * the client's live price is a preview, the fabric rate and the money come
+ * from the catalog there and at quote time.
  */
 export async function placeCurtainAction(
   projectId: string,
@@ -523,57 +533,19 @@ export async function placeCurtainAction(
     page: number;
     x: number;
     y: number;
-    curtain: {
-      type: string;
-      name: string;
-      widthFt: number;
-      heightFt: number;
-      fullnessPct: number;
-      fabricSku: string;
-      color?: string;
-      /** Spec records design §6 — optional system match key override. */
-      specKey?: string;
-      /** #292 — cut-sheet finishes + mount; bad or absent values drop, never refuse. */
-      topFinish?: string;
-      bottomFinish?: string;
-      mountType?: string;
-    };
+    curtain: CurtainInput;
     category?: string;
     optionId: string;
   }
-): Promise<Result> {
+): Promise<PlacedResult> {
   const user = await requireUser();
-  const c = input.curtain;
-  if (!(GRID_CURTAIN_TYPES as readonly string[]).includes(c.type))
-    return { ok: false, error: "Pick a curtain type: Border, Draw, Full or Leg." };
-  const name = (c.name || "").trim();
-  if (!name) return { ok: false, error: "Name the curtain: 'Main Grand Drape', 'US Border'…" };
-  const width = Number(c.widthFt);
-  const height = Number(c.heightFt);
-  if (!(width > 0) || !(height > 0))
-    return { ok: false, error: "Width and height must both be positive numbers of feet." };
-  if (width > MAX_CURTAIN_FT || height > MAX_CURTAIN_FT)
-    return { ok: false, error: `That drape is over ${MAX_CURTAIN_FT} ft, check the dimensions.` };
-  if (!GRID_FULLNESS.some((f) => f.pct === Number(c.fullnessPct)))
-    return { ok: false, error: "Fullness must be Flat, 50%, 75% or 100%." };
-  const fabric = await getPart(c.fabricSku);
-  if (!fabric || !isFabricRow(fabric))
-    return { ok: false, error: "Pick a fabric from the catalog's fabric rows." };
+  const checked = await checkCurtainInput(input.curtain);
+  if (!checked.ok) return checked;
+  const curtain = checked.curtain;
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
 
-  const curtain: GridCurtain = {
-    type: c.type as GridCurtain["type"],
-    name: name.slice(0, 80),
-    widthFt: width,
-    heightFt: height,
-    fullnessPct: Number(c.fullnessPct),
-    fabricSku: fabric.id,
-    color: (c.color || "").trim().slice(0, 40) || undefined,
-    specKey: (typeof c.specKey === "string" ? c.specKey : "").trim().slice(0, 120) || undefined,
-    ...cleanCurtainFinishes(c),
-  };
   const p = await addCurtainPlacement(projectId, {
     sheetId: input.sheetId,
     page: input.page,
@@ -584,9 +556,10 @@ export async function placeCurtainAction(
     optionId: input.optionId,
     by: user.name,
   });
-  if (!p) return { ok: false, error: "Design not found." };
+  const placement = p?.placements.at(-1);
+  if (!placement) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
-  return { ok: true };
+  return { ok: true, placement };
 }
 
 /* --------------------- user-defined categories (#48/#41) --------------------- */
@@ -720,6 +693,143 @@ export async function replacePlacementsPartAction(
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);
   return { ok: true, previous: r.value };
+}
+
+/* --------------------------- paste + undo (#299 Task 19) --------------------------- */
+
+const PART_ID_MAX = 120;
+const PLACEMENT_ID = /^gp-[0-9a-f]{12}$/;
+const UNDO_INVALID = "Couldn't undo — reload and try again.";
+const isPage = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1;
+const isPartId = (v: unknown): v is string => isStr(v) && v !== "" && v.length <= PART_ID_MAX;
+
+/** Paste copied devices (and the wires between them) onto one page of one
+ *  option. Every device part must be in the Grid library; every curtain goes
+ *  through checkCurtainInput and takes its fabric as its part. Wires that
+ *  can't come along are counted in `skippedWires` (store). */
+export async function pastePlacementsAction(
+  projectId: string,
+  input: {
+    sheetId: string;
+    page: number;
+    optionId: string;
+    items: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number }[];
+    routeIds: string[];
+  }
+): Promise<{ ok: true; placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (
+    !isStr(projectId) || !isObj(input) || !isStr(input.sheetId) || input.sheetId === "" || !isPage(input.page) ||
+    !isStr(input.optionId) || !Array.isArray(input.items) || !Array.isArray(input.routeIds) || !input.routeIds.every(isStr) ||
+    !input.items.every(
+      (it) =>
+        isObj(it) && isStr(it.srcId) && isFiniteNum(it.x) && isFiniteNum(it.y) && isPartId(it.partId) &&
+        (it.category === undefined || isStr(it.category)) &&
+        (it.qty === undefined || isFiniteNum(it.qty)) &&
+        (it.curtain === undefined || isObj(it.curtain))
+    )
+  )
+    return { ok: false, error: BATCH_INVALID };
+  if (!input.items.length) return { ok: false, error: "Nothing to paste." };
+  if (input.items.length > MAX_BATCH || input.routeIds.length > MAX_BATCH) return { ok: false, error: "Paste fewer than 2,000 items." };
+
+  const deviceParts = [...new Set(input.items.filter((it) => !it.curtain).map((it) => it.partId))];
+  const parts = await Promise.all(deviceParts.map((id) => partForGrid(id)));
+  if (parts.some((part) => !part)) return { ok: false, error: "That part is not in the Grid library." };
+  const items: PasteItem[] = [];
+  for (const it of input.items) {
+    let curtain: GridCurtain | undefined;
+    if (it.curtain) {
+      const checked = await checkCurtainInput(it.curtain);
+      if (!checked.ok) return checked;
+      curtain = checked.curtain;
+    }
+    items.push({
+      srcId: it.srcId,
+      x: it.x,
+      y: it.y,
+      // A curtain's part is its fabric (addCurtainPlacement's rule).
+      partId: curtain ? curtain.fabricSku : it.partId,
+      ...(it.category !== undefined ? { category: it.category } : {}),
+      ...(it.qty !== undefined ? { qty: it.qty } : {}),
+      ...(curtain ? { curtain } : {}),
+    });
+  }
+  const r = await pastePlacements(projectId, {
+    sheetId: input.sheetId,
+    page: input.page,
+    optionId: input.optionId,
+    by: user.name,
+    items,
+    routeIds: input.routeIds,
+  });
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
+  return { ok: true, placements: r.value.placements, routes: r.value.routes, skippedWires: r.value.skippedWires };
+}
+
+/** Rebuild ONE placement record a client echoed back for undo — a fresh
+ *  object of only GridPlacement's own fields, each re-checked, so a
+ *  tampered bundle can't plant arbitrary data. null = refuse the restore. */
+async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | null> {
+  if (!isObj(raw)) return null;
+  if (!isStr(raw.id) || !PLACEMENT_ID.test(raw.id)) return null;
+  if (!isFiniteNum(raw.x) || !isFiniteNum(raw.y) || !isPage(raw.page)) return null;
+  if (!isStr(raw.sheetId) || raw.sheetId === "" || raw.sheetId.length > PART_ID_MAX || !isPartId(raw.partId)) return null;
+  if (raw.optionId !== undefined && !isStr(raw.optionId)) return null;
+  let curtain: GridCurtain | undefined;
+  if (raw.curtain !== undefined) {
+    if (!isObj(raw.curtain)) return null;
+    const checked = await checkCurtainInput(raw.curtain as CurtainInput);
+    if (!checked.ok) return null;
+    curtain = checked.curtain;
+  }
+  const category = isStr(raw.category) ? raw.category.trim().slice(0, 40) : "";
+  const seededFrom = isStr(raw.seededFrom) ? raw.seededFrom.slice(0, PART_ID_MAX) : "";
+  const qty = cleanLotQty(raw.qty);
+  const auto = raw.auto === undefined ? null : sanitizeAutoTag(raw.auto);
+  const autoOrigin = raw.autoOrigin === undefined ? null : sanitizeAutoOrigin(raw.autoOrigin);
+  return {
+    id: raw.id,
+    sheetId: raw.sheetId,
+    page: raw.page,
+    x: clamp01(raw.x),
+    y: clamp01(raw.y),
+    partId: curtain ? curtain.fabricSku : raw.partId,
+    ...(category ? { category } : {}),
+    ...(curtain ? { curtain } : {}),
+    ...(isStr(raw.optionId) ? { optionId: raw.optionId } : {}),
+    ...(seededFrom ? { seededFrom } : {}),
+    ...(qty !== undefined ? { qty } : {}),
+    ...(auto ? { auto } : {}),
+    ...(autoOrigin ? { autoOrigin } : {}),
+    by: isStr(raw.by) ? raw.by.slice(0, 80) : "",
+    at: isFiniteNum(raw.at) ? raw.at : Date.now(),
+  };
+}
+
+/** Undo of a batch removal ONLY: puts the removed devices back with their
+ *  original ids, plus the riser links/conduits that went with them. The
+ *  bundle round-trips through the client, so every record is rebuilt and
+ *  re-validated here, and the riser half is cleaned by the store. Refused,
+ *  whole, when any record fails or the design changed since. */
+export async function restoreItemsAction(projectId: string, bundle: RemovedBundle): Promise<Result> {
+  await requireUser();
+  if (!isStr(projectId) || !isObj(bundle) || !Array.isArray(bundle.placements)) return { ok: false, error: UNDO_INVALID };
+  if (!bundle.placements.length) return { ok: false, error: "Nothing to undo." };
+  if (bundle.placements.length > MAX_BATCH) return { ok: false, error: "Couldn't undo — too many items." };
+  const placements: GridPlacement[] = [];
+  for (const raw of bundle.placements) {
+    const pl = await cleanRestoredPlacement(raw);
+    if (!pl) return { ok: false, error: UNDO_INVALID };
+    placements.push(pl);
+  }
+  const r = await restoreItems(projectId, { placements, riser: isObj(bundle.riser) ? bundle.riser : {} });
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
+  return { ok: true };
 }
 
 export async function calibrateAction(

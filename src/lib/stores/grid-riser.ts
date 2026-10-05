@@ -8,6 +8,7 @@ import {
   MAX_CONDUITS,
   MAX_LEVELS,
   MAX_LINKS,
+  MAX_LINK_FT,
   MAX_NOTES,
   marginPoints,
   nodeKeyOf,
@@ -39,7 +40,7 @@ function rid(prefix: string): string {
 }
 
 export const MAX_NODE_QTY = 200;
-export const MAX_LINK_FT = 5000;
+export { MAX_LINK_FT };
 
 type Missing = "not-found" | "no-such-option";
 type DropRefusal = "no-such-space" | "no-sheet";

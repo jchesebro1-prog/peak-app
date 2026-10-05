@@ -7,7 +7,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
-import { calibrationScale, clamp01, type Calibration, type Point } from "@/lib/annotations";
+import { calibrationScale, clamp01, findCalibration, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
 import {
   copyOptionMembers,
@@ -19,7 +19,16 @@ import {
   type GridOption,
 } from "@/lib/design/grid-options";
 export type { GridOption } from "@/lib/design/grid-options";
-import { copyRiserDoc, pruneRisers, riserRemovedBetween, type RiserDoc, type RiserRemoved } from "@/lib/design/grid-riser-doc";
+import {
+  cleanRiserRemoved,
+  copyRiserDoc,
+  normalizeRiserDoc,
+  pruneRisers,
+  restoreRiserItems,
+  riserRemovedBetween,
+  type RiserDoc,
+  type RiserRemoved,
+} from "@/lib/design/grid-riser-doc";
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
@@ -925,8 +934,11 @@ const batchStale = (n: number) => `${n} item(s) are no longer on this design —
  * One all-or-nothing batch edit: ONE patchDoc, and either every listed
  * placement changes or none does. The id check runs twice — on a read
  * before patchDoc, so an ordinary refusal never writes at all, and again
- * inside the mutate against the doc actually being written, since it may
- * have changed in between. A refusal inside leaves the doc untouched
+ * inside the mutate against the doc patchDoc itself just read. The second
+ * check narrows the race with a concurrent edit; it does not close it:
+ * patchDoc reads then writes with no revision check, so a write landing
+ * between its read and its write is still overwritten (last writer wins,
+ * as for every Grid patch). A refusal inside leaves the doc untouched
  * (patchDoc still rewrites it as read, but `updatedAt` doesn't move — the
  * addPlacement `refused` pattern). `apply` runs only once every check
  * passed, and computes its return value from the pre-mutation doc.
@@ -1069,6 +1081,180 @@ export async function setPlacementsPart(
     },
     (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_PART_REFUSAL : null)
   );
+}
+
+/* --------------------------- paste + undo (#299 Task 19) --------------------------- */
+
+/** OPTION_GONE's copy in the editor actions — the option a paste targets was removed. */
+const PASTE_OPTION_GONE = "That option was removed — refresh the page.";
+const PASTE_NOTHING = "Nothing to paste.";
+const PASTE_TOO_MANY = "Paste fewer than 2,000 items.";
+const RESTORE_STALE = "Couldn't undo — the design changed.";
+const RESTORE_NOTHING = "Nothing to undo.";
+const RESTORE_TOO_MANY = "Couldn't undo — too many items.";
+
+export type PasteItem = { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: GridCurtain; qty?: number };
+
+/**
+ * Paste copied devices onto one page of one option (#299), in ONE patch.
+ * Each item becomes a NEW placement (fresh id, clamped to the page, category
+ * trimmed and capped, lot qty cleaned) and never carries an auto tag,
+ * autoOrigin or seededFrom — a paste is a hand edit.
+ *
+ * `routeIds` name stored wires to copy with them. A wire is copied only
+ * when both its ends were pasted, its FROM device is still on the design
+ * (a cut device is gone, so the wire's offset can't be worked out) and the
+ * target page is calibrated (wire footage needs a scale); every other
+ * requested wire counts in `skippedWires`. A copy keeps the part,
+ * connection type and aspect, joins the target option/sheet/page, re-points
+ * its ends at the new devices, and moves every point by the FROM device's
+ * delta. The caller checks the parts (the store never reads the catalog).
+ */
+export async function pastePlacements(
+  projectId: string,
+  input: { sheetId: string; page: number; optionId: string; by: string; items: PasteItem[]; routeIds: string[] }
+): Promise<BatchResult<{ placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number }>> {
+  if (!input.items.length) return { ok: false, error: PASTE_NOTHING };
+  if (input.items.length > MAX_BATCH || input.routeIds.length > MAX_BATCH) return { ok: false, error: PASTE_TOO_MANY };
+  const before = await getProject(projectId);
+  if (!before) return { ok: false, error: "Design not found." };
+  if (!hasOption(before, input.optionId)) return { ok: false, error: PASTE_OPTION_GONE };
+
+  let refused = false;
+  let value: { placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number } | undefined;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) {
+      refused = true;
+      return;
+    }
+    const at = Date.now();
+    const newId = new Map<string, string>();
+    const pasted: GridPlacement[] = input.items.map((it) => {
+      const id = rid("gp-");
+      if (it.srcId) newId.set(it.srcId, id);
+      const label = (it.category || "").trim().slice(0, 40);
+      return {
+        id,
+        sheetId: input.sheetId,
+        page: input.page,
+        x: clamp01(it.x),
+        y: clamp01(it.y),
+        partId: it.partId,
+        optionId: input.optionId,
+        ...(label ? { category: label } : {}),
+        ...lotAndTag(it.qty, undefined),
+        ...(it.curtain ? { curtain: it.curtain } : {}),
+        by: input.by,
+        at,
+      };
+    });
+    const target = byId(pasted);
+    const source = byId(p.placements || []);
+    const stored = byId(p.routes || []);
+    const calibrated = !!findCalibration(p.calibrations || [], input.sheetId, input.page);
+    const routes: GridRoute[] = [];
+    let skippedWires = 0;
+    for (const routeId of new Set(input.routeIds)) {
+      const r = stored.get(routeId);
+      const fromId = r?.fromPlacementId ? newId.get(r.fromPlacementId) : undefined;
+      const toId = r?.toPlacementId ? newId.get(r.toPlacementId) : undefined;
+      const src = r?.fromPlacementId ? source.get(r.fromPlacementId) : undefined;
+      const dst = fromId ? target.get(fromId) : undefined;
+      if (!r || !fromId || !toId || !src || !dst || !calibrated) {
+        skippedWires++;
+        continue;
+      }
+      const dx = dst.x - src.x;
+      const dy = dst.y - src.y;
+      routes.push({
+        id: rid("wr-"),
+        sheetId: input.sheetId,
+        page: input.page,
+        partId: r.partId,
+        points: r.points.map((q) => ({ x: clamp01(q.x + dx), y: clamp01(q.y + dy) })),
+        aspect: r.aspect,
+        optionId: input.optionId,
+        by: input.by,
+        at,
+        fromPlacementId: fromId,
+        toPlacementId: toId,
+        ...(r.connectionType ? { connectionType: r.connectionType } : {}),
+      });
+    }
+    p.placements = [...(p.placements || []), ...pasted];
+    if (routes.length) p.routes = [...(p.routes || []), ...routes];
+    p.updatedAt = at;
+    value = { placements: pasted, routes, skippedWires };
+  });
+  if (!updated) return { ok: false, error: "Design not found." };
+  if (refused || !value) return { ok: false, error: PASTE_OPTION_GONE };
+  return { ok: true, project: updated, value };
+}
+
+/**
+ * Undo of a batch removal (#299): put the removed placements back with
+ * their ORIGINAL ids, then the riser links and conduits that went with
+ * them. All-or-nothing, batchEdit's two-check pattern: refused when any id
+ * is already on the design (undo already ran, or the design changed) or a
+ * record's option is gone — a refusal never bumps `updatedAt`.
+ *
+ * The bundle comes back from the CLIENT, so the riser half is rebuilt
+ * through cleanRiserRemoved (live option keys only, `lk-`/`cd-` ids, valid
+ * ends), each item must end on a placement of ITS option, and every touched
+ * document is re-normalized. The placement records are appended as given:
+ * restoreItemsAction rebuilds and re-validates each one before calling here.
+ */
+export async function restoreItems(projectId: string, bundle: RemovedBundle): Promise<BatchResult<{ ids: string[] }>> {
+  const placements = Array.isArray(bundle?.placements) ? bundle.placements : [];
+  if (!placements.length) return { ok: false, error: RESTORE_NOTHING };
+  if (placements.length > MAX_BATCH) return { ok: false, error: RESTORE_TOO_MANY };
+  const ids = placements.map((pl) => pl.id);
+  if (new Set(ids).size !== ids.length) return { ok: false, error: RESTORE_STALE };
+  const refusalFor = (p: GridProject): string | null => {
+    const have = new Set((p.placements || []).map((pl) => pl.id));
+    if (ids.some((id) => have.has(id))) return RESTORE_STALE;
+    if (placements.some((pl) => pl.optionId !== undefined && !hasOption(p, pl.optionId))) return RESTORE_STALE;
+    return null;
+  };
+  const before = await getProject(projectId);
+  if (!before) return { ok: false, error: "Design not found." };
+  const early = refusalFor(before);
+  if (early) return { ok: false, error: early };
+
+  let refusal = null as string | null;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    refusal = refusalFor(p);
+    if (refusal) return;
+    p.placements = [...(p.placements || []), ...placements];
+    const first = defaultOptionId(p);
+    const optionOf = new Map(p.placements.map((pl) => [pl.id, pl.optionId || first]));
+    const removed = cleanRiserRemoved(bundle?.riser, new Set(ensureOptions(p).options.map((o) => o.id)));
+    // An item may only end on a device of its own option's riser.
+    const ownEnd = (k: string) => (e: { kind: string; placementId?: string }) =>
+      e.kind !== "placement" || optionOf.get(e.placementId as string) === k;
+    for (const k of Object.keys(removed)) {
+      const ok = ownEnd(k);
+      const links = removed[k].links.filter((l) => ok(l.from) && ok(l.to));
+      const conduits = removed[k].conduits.filter((c) => ok(c.from) && ok(c.to));
+      if (links.length || conduits.length) removed[k] = { links, conduits };
+      else delete removed[k];
+    }
+    const keys = Object.keys(removed);
+    if (keys.length) {
+      const restored = restoreRiserItems(p.riser, removed, {
+        placementIds: new Set(optionOf.keys()),
+        spaceIds: new Set((p.spaces || []).map((sp) => sp.id)),
+      });
+      if (restored) {
+        for (const k of keys) restored[k] = normalizeRiserDoc(restored[k]);
+        p.riser = restored;
+      }
+    }
+    p.updatedAt = Date.now();
+  });
+  if (!updated) return { ok: false, error: "Design not found." };
+  if (refusal) return { ok: false, error: refusal };
+  return { ok: true, project: updated, value: { ids } };
 }
 
 /** Set (or replace) the scale for one page of one sheet. */

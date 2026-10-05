@@ -79,6 +79,9 @@ export const MAX_LEVELS = 50;
 export const MAX_CONDUITS = 500;
 export const MAX_NOTES = 100;
 export const MAX_LINKS = 1000;
+/** Longest typed RiserLink, in feet (moved here from stores/grid-riser.ts so
+ *  restore can bound a client-echoed link by the same rule addRiserLink does). */
+export const MAX_LINK_FT = 5000;
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
@@ -504,6 +507,39 @@ export function riserRemovedBetween(
     const conduitIds = new Set(a.conduits.map((c) => c.id));
     const links = b.links.filter((l) => !linkIds.has(l.id));
     const conduits = b.conduits.filter((c) => !conduitIds.has(c.id));
+    if (links.length || conduits.length) out[k] = { links, conduits };
+  }
+  return out;
+}
+
+/** Riser ids as rid() writes them — what a restored link/conduit must carry. */
+const LINK_ID = /^lk-[0-9a-f]{12}$/;
+const CONDUIT_ID = /^cd-[0-9a-f]{12}$/;
+
+/** A RiserRemoved the CLIENT echoed back for undo (#299) — untrusted.
+ *  Rebuilt fresh: only keys in `liveKeys` (the project's live option ids;
+ *  anything else, "__proto__" included, is ignored), only links whose id is
+ *  an `lk-` id and conduits whose id is a `cd-` id, every item through the
+ *  same clean as a stored read (ends via toEndRef, extra properties
+ *  dropped), a link's length bounded as addRiserLink bounds it, each list
+ *  capped. Never throws. */
+export function cleanRiserRemoved(raw: unknown, liveKeys: ReadonlySet<string>): RiserRemoved {
+  const out: RiserRemoved = Object.create(null);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  const arr = (v: unknown): Array<Record<string, unknown>> =>
+    Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object") : [];
+  for (const k of Object.keys(raw)) {
+    if (!liveKeys.has(k)) continue;
+    const entry = (raw as Record<string, unknown>)[k];
+    const r = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+    const links = arr(r.links)
+      .map(cleanLink)
+      .filter((l): l is RiserLink => l !== null && LINK_ID.test(l.id) && l.lengthFt > 0 && l.lengthFt <= MAX_LINK_FT)
+      .slice(0, MAX_LINKS);
+    const conduits = arr(r.conduits)
+      .map(cleanConduit)
+      .filter((c): c is RiserConduit => c !== null && CONDUIT_ID.test(c.id))
+      .slice(0, MAX_CONDUITS);
     if (links.length || conduits.length) out[k] = { links, conduits };
   }
   return out;
