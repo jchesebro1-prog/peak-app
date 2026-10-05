@@ -10727,11 +10727,23 @@ pre-existing on main); `next build` OK; test:smoke ALL PASSED (206 routes).
    the database and the Blob store are the same pair.
 6. **Clean up.** Delete the temp env file.
 
+**Production auth (learned on the first run, 2026-10-05).** The store authenticates by **OIDC**: production's
+`BLOB_READ_WRITE_TOKEN` is a placeholder, and `@vercel/blob` prefers `VERCEL_OIDC_TOKEN` + `BLOB_STORE_ID` anyway. `vercel env
+pull` always mints a **development**-scoped OIDC token, so the store's project connection must include **Development**
+(Storage → quartzite-files → Projects → quartzite-six → environments) for a run from this Mac — otherwise every upload fails
+with "OIDC is enabled for this project, but not for the development environment" (nothing is written). After the change,
+`vercel env ls` shows `BLOB_STORE_ID` on Development; a one-blob put/del probe confirms it before `--apply`.
+
+**Run 2026-10-05 (production).** Backup `backups/peak-backup-20261005-1037.json` (83,827 records). Store
+`store_Urz9RhECnnklU2KP`. **217 drawings stored, 1,896 part links** (637 plan symbols, 1,259 riser drawings planned); 300
+DaVinci placeholders and 3,339 not-downloaded skipped; 0 failed. A re-run dry run finds all 1,896 already present.
+
 **For Jeff.**
 1. Try it: open a Grid design, drag the **Size** slider, flip **Generic / Object**, print the drawing set at both sizes.
 2. **Upload a drawing** on one catalog part (part editor → Documents → Symbol drawing) and on one **device type** (Grid
    Settings → Device types) and check the order: the part's drawing wins, then the type's, then generic.
-3. Run the **DaVinci import** above.
+3. ~~Run the **DaVinci import** above.~~ Done 2026-10-05 (217 drawings, 1,896 parts). Untick **Development** on the store's
+   project connection again unless you want local runs to keep working.
 4. Browse more of DaVinci's library and give me a **fuller export** later — the same command adds what is new.
 
 **Rollback.** Safe: no migration. Old code treats the two new kinds as unknown — `isPartDocKind` rejects a `symbol` or
