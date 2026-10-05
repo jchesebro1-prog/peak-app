@@ -400,6 +400,11 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [zoom, setZoom] = useState(1.25);
   const [size, setSize] = useState({ w: 900, h: 1200 });
   const [busy, setBusy] = useState(false);
+  /** `busy`, readable from the nudge timer (it closes over a stale render). */
+  const busyRef = useRef(false);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
   const [err, setErr] = useState<string | null>(null);
   /** The status bar's "Last action" (#299) — what the last successful edit
    *  did, in words. View state only; never persisted. */
@@ -1078,9 +1083,11 @@ function useGridEditorImpl(props: GridEditorProps) {
       const dirY = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
       if (!dirX && !dirY) return;
       e.preventDefault(); // don't scroll the plan out from under the device
-      // A write (or an undo/redo step) is in flight: a nudge queued now could
-      // land in the middle of the step and corrupt the stack.
-      if (busy || stepping.current) return;
+      // An undo/redo step is in flight: a nudge queued now could land in the
+      // middle of the step and corrupt the stack. An ordinary write in flight
+      // (even this nudge's own debounced one) is fine — the tap is painted and
+      // queued, and the timer below waits for that write to finish.
+      if (stepping.current) return;
       let dx: number;
       let dy: number;
       if (snap) {
@@ -1120,10 +1127,17 @@ function useGridEditorImpl(props: GridEditorProps) {
       pendingNudge.current = mergeMoves(pendingNudge.current, moves);
       setNudgePending(pendingNudge.current.length);
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
-      nudgeTimer.current = setTimeout(() => {
+      const commit = () => {
+        // A write is still in flight: re-arm instead of firing, so the queued
+        // nudge is written after it finishes, never dropped or interleaved.
+        if (busyRef.current) {
+          nudgeTimer.current = setTimeout(commit, NUDGE_COMMIT_MS);
+          return;
+        }
         const m = takeNudge();
         if (m?.length) void sendMovesRef.current(m, undefined, "Nudge");
-      }, NUDGE_COMMIT_MS);
+      };
+      nudgeTimer.current = setTimeout(commit, NUDGE_COMMIT_MS);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1133,7 +1147,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     takeNudge,
     snap,
     aspect,
-    busy,
     pending,
     curtainAt,
     calDraft,
