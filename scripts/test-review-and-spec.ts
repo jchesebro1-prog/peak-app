@@ -50021,3 +50021,71 @@ import { NODE_ROW as RS300_ROW, NODE_ROW_OBJECT as RS300_ROW_OBJ, nodeRowHeight 
     "#300 build-out: setDeviceTypeSymbolAction is admin-only and accepts only a stored symbol document; the device-type upload is admin-only, sanitized and linked to no part"
   );
 }
+
+/* ======================================================================
+   #300 Task 11 — DaVinci drawings import plan (symbols:davinci): pure
+   candidatesFor (the #162/#207 match + manufacturer gate) and
+   planSymbolImport (every skip reason + replacing an older DaVinci drawing).
+   ====================================================================== */
+import { candidatesFor as cand300, planSymbolImport as plan300, type SymbolImportCandidate as Cand300 } from "@/lib/davinci/symbols-plan";
+{
+  const rec300 = (typeId: string, model: string, extra: Record<string, unknown>) => ({
+    typeId, displayName: `Type ${typeId}`, category: "Fixture", manufacturer: "ETC", active: true,
+    modelNumbers: [model], ports: [], docs: [], ...extra,
+  });
+  const ex300 = {
+    libraryTimestamp: "t", generatedAt: 0,
+    records: [
+      rec300("t1", "S4LED", { planImageId: "aaa", riserImageId: "bbb" }),
+      rec300("t2", "450", { planImageId: "ccc" }),
+      rec300("t3", "NOIMG", {}),
+    ],
+  } as unknown as Parameters<typeof cand300>[0];
+  const c300 = cand300(ex300, [
+    { id: "ETC:S4LED", sku: "ETC:S4LED", manufacturer: "ETC" },
+    { id: "S4LED", sku: "S4LED", manufacturer: "E.T.C." },
+    { id: "Draper:450", sku: "Draper:450", manufacturer: "Draper" },
+    { id: "NOIMG", sku: "NOIMG", manufacturer: "ETC" },
+    { id: "nomatch", sku: "nomatch", manufacturer: "ETC" },
+  ]);
+  ok(
+    c300.length === 4 &&
+      c300.filter((c) => c.partSku === "ETC:S4LED").map((c) => `${c.kind}:${c.imageId}`).join() === "symbol:aaa,riser:bbb" &&
+      c300.filter((c) => c.partSku === "S4LED").map((c) => `${c.kind}:${c.imageId}:${c.typeId}`).join() === "symbol:aaa:t1,riser:bbb:t1" &&
+      c300.every((c) => c.displayName === "Type t1"),
+    "#300 symbols:davinci: candidatesFor matches by normalized SKU behind the ETC manufacturer gate — one candidate per part and drawing kind"
+  );
+  ok(
+    !c300.some((c) => c.partSku === "Draper:450") && !c300.some((c) => c.partSku === "NOIMG" || c.partSku === "nomatch"),
+    "#300 symbols:davinci: a Draper SKU that normalizes to an ETC model gets no ETC drawing, and a type without an image id yields nothing"
+  );
+  const mk300 = (partSku: string, kind: "symbol" | "riser", imageId: string): Cand300 => ({ partSku, kind, imageId, typeId: "t", displayName: "T" });
+  const p300 = plan300(
+    [mk300("A", "symbol", "x1"), mk300("B", "symbol", "x2"), mk300("C", "symbol", "x3"), mk300("D", "riser", "x4"), mk300("E", "symbol", "x5"), mk300("F", "symbol", "x6"), mk300("G", "symbol", "x7"), mk300("H", "riser", "x8")],
+    new Set(["x2", "x3", "x4", "x5", "x6", "x7", "x8"]),
+    [
+      { partSku: "B", kind: "symbol", source: "upload" },
+      { partSku: "C", kind: "symbol", source: "davinci", sourceRef: "x3" },
+      { partSku: "D", kind: "riser", source: "davinci", sourceRef: "old" },
+      { partSku: "E", kind: "riser", source: "upload" },
+      { partSku: "F", kind: "symbol", source: "davinci", sourceRef: "x6", detached: true },
+      { partSku: "G", kind: "symbol", source: "upload", detached: true },
+    ]
+  );
+  const why300 = Object.fromEntries(p300.skipped.map((s) => [s.c.partSku, s.reason]));
+  ok(
+    why300.A === "not-downloaded" && why300.B === "hand-uploaded" && why300.C === "already-present" && why300.F === "removed" && p300.skipped.length === 4,
+    "#300 symbols:davinci: planSymbolImport skips not-downloaded, hand-uploaded (never replaces a person's drawing), already-present and a DaVinci drawing a person detached"
+  );
+  ok(
+    p300.attach.map((c) => c.partSku).join() === "D,E,G,H",
+    "#300 symbols:davinci: an older DaVinci drawing (different image id) is replaced; another kind's drawing or a detached hand upload does not block; no drawing → attach"
+  );
+  const rd300c = readFileSync(join(process.cwd(), "scripts/symbols-davinci.ts"), "utf8");
+  ok(
+    rd300c.includes("Blob storage is not configured — dry run only.") && rd300c.includes("requireHostedConfirmation(hosted, args)") &&
+      rd300c.includes("attachDocument(g.id, g.skus, BY)") && !rd300c.includes("ensureLinks") && rd300c.includes("sanitizeSvg(") &&
+      rd300c.includes('source: "davinci"') && rd300c.includes("sourceRef: g.imageId") && rd300c.indexOf("if (!apply)") < rd300c.indexOf("putBlob("),
+    "#300 symbols:davinci: dry run by default, hosted writes need --yes, no Blob token writes nothing, SVGs are sanitized, links go through the one-current attachDocument"
+  );
+}
