@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GridPlacement, GridRoute } from "@/lib/stores/grid-projects";
 import { browserTree, nodeForPlacement, type TreeNode } from "@/lib/design/grid-browser-tree";
+import { toggleId } from "@/lib/design/grid-selection";
 import type { GridEditor } from "../use-grid-editor";
 
 /**
@@ -33,6 +34,8 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
     page,
     selected,
     setSelected,
+    selectedIds,
+    setSelectedIds,
     selectedSpaceId,
     setSelectedSpaceId,
     selectedRouteId,
@@ -71,6 +74,7 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
   );
 
   const byId = useMemo(() => new Map(placements.map((pl) => [pl.id, pl])), [placements]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   /** Explicit open/closed choices; anything absent falls back to openByDefault. */
   const [toggled, setToggled] = useState<Map<string, boolean>>(() => new Map());
@@ -120,20 +124,33 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
     }
   }
 
-  function pickPlacement(n: TreeNode, id: string) {
+  /** Select devices on the plan (#299: a group selects all of its devices). */
+  function pickPlacements(n: TreeNode, ids: string[]) {
     goTo(n);
-    setSelected(id);
+    setSelectedIds(ids);
     setCategoryDraft(null);
     setSelectedSpaceId(null);
     setSelectedRouteId(null);
   }
 
-  function onRow(n: TreeNode, parent: TreeNode | null) {
-    // A device or group selects (a group its first device, until the plan
-    // has multi-select); an assembly member selects its parent device.
+  /** On the visible sheet/page now — a Shift-click there adds to the
+   *  selection; elsewhere it can't (switching page clears it). */
+  const onThisPage = (n: TreeNode) => n.sheetId === activeSheetId && (n.page ?? 1) === page;
+
+  function onRow(n: TreeNode, parent: TreeNode | null, shift: boolean) {
+    // A device or group selects (a group every device in it); an assembly
+    // member selects its parent device.
     const ids = n.placementIds ?? (n.key.startsWith("member:") ? parent?.placementIds : undefined);
     if (ids && ids.length > 0) {
-      pickPlacement(n, ids[0]);
+      // Shift-click a device row toggles it in the plan's selection.
+      if (shift && ids.length === 1 && onThisPage(n)) {
+        setSelectedIds(toggleId(selectedIds, ids[0]));
+        setCategoryDraft(null);
+        setSelectedSpaceId(null);
+        setSelectedRouteId(null);
+        return;
+      }
+      pickPlacements(n, ids);
       return;
     }
     if (n.routeId) {
@@ -154,7 +171,9 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
   }
 
   function isSelected(n: TreeNode): boolean {
-    if (n.kind === "device" && n.placementIds?.length === 1) return n.placementIds[0] === selected;
+    if (n.kind === "device" && n.placementIds?.length === 1) return selectedSet.has(n.placementIds[0]);
+    // A group reads as selected when every device in it is.
+    if (n.kind === "group" && n.placementIds?.length) return n.placementIds.every((id) => selectedSet.has(id));
     if (n.kind === "wire") return n.routeId === selectedRouteId;
     if (n.kind === "space" && n.spaceId) return n.spaceId === selectedSpaceId;
     return false;
@@ -198,7 +217,7 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
             )}
             <button
               type="button"
-              onClick={() => onRow(n, parent)}
+              onClick={(e) => onRow(n, parent, e.shiftKey)}
               aria-current={on ? "true" : undefined}
               title={hidden ? `${n.label} — in a hidden layer` : n.label}
               style={{

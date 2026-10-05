@@ -52,7 +52,7 @@ import {
   clearCalAction,
   createDraftQuoteAction,
   deleteProjectAction,
-  movePlacementAction,
+  movePlacementsAction,
   placeCurtainAction,
   placeDeviceAction,
   removePlacementAction,
@@ -71,6 +71,7 @@ import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } fro
 import type { SysKey } from "@/app/(app)/design/quick/engine";
 import { paletteView } from "@/lib/design/grid-palette";
 import type { ScheduleData } from "@/lib/design/grid-schedule";
+import { idsInRect, marqueeSelection, normRect, toggleId, type Rect } from "@/lib/design/grid-selection";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -107,16 +108,36 @@ const NUDGE_COMMIT_MS = 400;
  *  marker center) so the marker doesn't jump under the cursor; `cx/cy` are the
  *  screen-pixel origin for the DRAG_PX test; `toggleOff` remembers that the
  *  marker was already selected, so a click that never became a drag still
- *  deselects exactly as it did before. */
+ *  deselects exactly as it did before.
+ *  #299 group drag: `ids` are every device that moves with it (the selection
+ *  when the grab landed on a selected marker, else just `[id]`), `from` is
+ *  where each was SHOWN at the grab — every one moves by the dragged
+ *  marker's delta (`at - from[id]`). `collapse`: the grab landed on one
+ *  member of a larger selection, so a click that never became a drag
+ *  narrows the selection to that device. */
 type MarkerDrag = {
   id: string;
+  ids: string[];
+  from: Record<string, Point>;
   off: Point;
   cx: number;
   cy: number;
   at: Point;
   moved: boolean;
   toggleOff: boolean;
+  collapse: boolean;
 };
+
+/** Where a dragged group's members are right now: each one's grab-time
+ *  position plus the dragged marker's delta, clamped to the page. */
+function dragTargets(d: MarkerDrag): { id: string; x: number; y: number }[] {
+  const o = d.from[d.id];
+  const dx = o ? d.at.x - o.x : 0;
+  const dy = o ? d.at.y - o.y : 0;
+  return d.ids
+    .filter((id) => d.from[id])
+    .map((id) => ({ id, x: clamp01(d.from[id].x + dx), y: clamp01(d.from[id].y + dy) }));
+}
 
 /** An optimistic position (punch #47): where the client put a device, plus
  *  the server position it replaces. Holding `base` is what makes the override
@@ -247,7 +268,16 @@ function useGridEditorImpl(props: GridEditorProps) {
   } = props;
   const router = useRouter();
   const pathname = usePathname();
-  const [selected, setSelected] = useState<string | null>(null);
+  /** #299 multi-select: every selected device, in the order picked. The
+   *  single-device `selected` is derived — set only when exactly one is. */
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selected = selectedIds.length === 1 ? selectedIds[0] : null;
+  /** The pre-multi-select setter, kept so single-device call sites read the same. */
+  const setSelected = useCallback((id: string | null) => setSelectedIds(id ? [id] : []), []);
+  /** The marquee being dragged on empty plan (plan coords), null otherwise.
+   *  `marqueeStart` is the pointerdown that may grow into one. */
+  const [marquee, setMarquee] = useState<Rect | null>(null);
+  const marqueeStart = useRef<{ p: Point; cx: number; cy: number; shift: boolean; rect: Rect | null } | null>(null);
   /** #226/#299: the starred-parts list lives here, not in the Product Library, so it
    *  survives the bottom pane unmounting its body when collapsed. */
   const [favorites, setFavorites] = useState<string[]>(props.favorites);
@@ -276,7 +306,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   const activeOption = project.options.find((o) => o.id === activeOptionId) || project.options[0];
   const switchOption = useCallback(
     (id: string) => {
-      setSelected(null);
+      setSelectedIds([]);
       setTierFallbackLines([]);
       router.replace(`${pathname}?option=${encodeURIComponent(id)}`, { scroll: false });
     },
@@ -514,7 +544,9 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (!server || server.x !== o.base.x || server.y !== o.base.y) continue;
       put(id, o.at);
     }
-    if (drag && drag.moved) put(drag.id, drag.at); // the live gesture wins
+    // The live gesture wins — every device in a group drag moves by the
+    // dragged marker's delta (#299).
+    if (drag && drag.moved) for (const t of dragTargets(drag)) put(t.id, t);
     return m;
   }, [placements, movedLocal, drag]);
 
@@ -721,6 +753,15 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  race a refresh. */
   const selectedPlacement =
     placements.find((pl) => pl.id === selected && placementVisible(pl)) || null;
+  /** Every selected device that is visible (#299), in selection order —
+   *  server copies, like `selectedPlacement` (read positions via `shownAt`). */
+  const selectedPlacements = useMemo(() => {
+    const byId = new Map(placements.map((pl) => [pl.id, pl]));
+    return selectedIds.flatMap((id) => {
+      const pl = byId.get(id);
+      return pl && placementVisible(pl) ? [pl] : [];
+    });
+  }, [placements, selectedIds, placementVisible]);
   /** The catalog entry behind the selected device (curtains and seed
    *  placeholders have none) — what the Symbol select edits (#131). */
   const selectedPart =
@@ -734,36 +775,44 @@ function useGridEditorImpl(props: GridEditorProps) {
     [placementOffsets]
   );
 
-  /** Write a reposition (punch #47), shared by the drag and the arrow-key
-   *  nudge. The optimistic entry goes in FIRST and is rolled back only if the
-   *  server refuses, so the marker never flickers back to where it was. */
-  const commitMove = useCallback(
-    (placementId: string, at: Point) => {
-      const server = placements.find((q) => q.id === placementId);
-      if (!server) return;
-      setMovedLocal((prev) => ({
-        ...prev,
-        [placementId]: { at, base: { x: server.x, y: server.y } },
-      }));
+  /** Write many repositions in one batched, all-or-nothing action (#299) —
+   *  the drag (one device or a group) and the arrow-key nudge both land
+   *  here. Optimistic entries go in first and are ALL rolled back if the
+   *  server refuses. Resolves to the positions the server replaced (what
+   *  undo needs), or null when nothing was written. */
+  const commitMoves = useCallback(
+    async (moves: { id: string; x: number; y: number }[], label?: string) => {
+      const servers = new Map(placements.map((q) => [q.id, q]));
+      const valid = moves.filter((m) => servers.has(m.id));
+      if (!valid.length) return null;
+      setMovedLocal((prev) => {
+        const next = { ...prev };
+        for (const m of valid) {
+          const server = servers.get(m.id)!;
+          next[m.id] = { at: { x: m.x, y: m.y }, base: { x: server.x, y: server.y } };
+        }
+        return next;
+      });
       setErr(null);
       setBusy(true);
-      movePlacementAction(project.id, { placementId, x: at.x, y: at.y }).then((r) => {
-        setBusy(false);
-        if (!r.ok) {
-          // Refused: drop the optimistic position so the marker returns to
-          // where the design actually has it, next to the error.
-          setErr(r.error);
-          setMovedLocal((prev) => {
-            if (!(placementId in prev)) return prev;
-            const next = { ...prev };
-            delete next[placementId];
-            return next;
-          });
-          return;
-        }
-        noteAction(`Moved ${placementLabel(server)}`);
-        router.refresh();
-      });
+      const r = await movePlacementsAction(project.id, valid);
+      setBusy(false);
+      if (!r.ok) {
+        // Refused: drop every optimistic position so the markers return to
+        // where the design actually has them, next to the error.
+        setErr(r.error);
+        setMovedLocal((prev) => {
+          const next = { ...prev };
+          for (const m of valid) delete next[m.id];
+          return next;
+        });
+        return null;
+      }
+      noteAction(
+        label ?? (valid.length === 1 ? `Moved ${placementLabel(servers.get(valid[0].id)!)}` : `Moved ${valid.length} devices`)
+      );
+      router.refresh();
+      return r.previous;
     },
     [project.id, placements, router, noteAction, placementLabel]
   );
@@ -774,7 +823,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   // otherwise lose its arrow keys, hence the editable-target bail-out. Inert
   // while any drawing mode owns the canvas.
   useEffect(() => {
-    if (!selectedPlacement) return;
+    if (!selectedPlacements.length) return;
     // #299: the plan is hidden in Spreadsheet view — nothing to nudge there.
     if (view !== "plan") return;
     if (pending || curtainAt || calDraft || drag || spaceDrawing || wireDrawing) return;
@@ -793,25 +842,31 @@ function useGridEditorImpl(props: GridEditorProps) {
       const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
       if (!dx && !dy) return;
       e.preventDefault(); // don't scroll the plan out from under the device
-      const from = shownAt(selectedPlacement);
-      const at = { x: clamp01(from.x + dx), y: clamp01(from.y + dy / (aspect || 1)) };
+      // #299: every selected device moves together.
+      const moves = selectedPlacements.map((pl) => {
+        const from = shownAt(pl);
+        return { id: pl.id, x: clamp01(from.x + dx), y: clamp01(from.y + dy / (aspect || 1)) };
+      });
       // Paint every keystroke; write once the key-repeat settles.
-      setMovedLocal((prev) => ({
-        ...prev,
-        [selectedPlacement.id]: { at, base: { x: selectedPlacement.x, y: selectedPlacement.y } },
-      }));
+      setMovedLocal((prev) => {
+        const next = { ...prev };
+        for (const [i, pl] of selectedPlacements.entries()) {
+          next[pl.id] = { at: { x: moves[i].x, y: moves[i].y }, base: { x: pl.x, y: pl.y } };
+        }
+        return next;
+      });
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
       nudgeTimer.current = setTimeout(() => {
         nudgeTimer.current = null;
-        commitMove(selectedPlacement.id, at);
+        void commitMoves(moves);
       }, NUDGE_COMMIT_MS);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
-    selectedPlacement,
+    selectedPlacements,
     shownAt,
-    commitMove,
+    commitMoves,
     aspect,
     pending,
     curtainAt,
@@ -1070,38 +1125,67 @@ function useGridEditorImpl(props: GridEditorProps) {
           Math.abs(pl.y - p.y) < DEVICE_HIT_RADIUS / (aspect || 1)
       );
     if (hit) {
-      setSelected(hit.id);
       setCategoryDraft(null);
       setSelectedSpaceId(null);
       setSelectedRouteId(null);
+      // #299: Shift-click adds/removes one device and never starts a drag.
+      if (e.shiftKey) {
+        setSelectedIds(toggleId(selectedIds, hit.id));
+        return;
+      }
+      // A grab on a selected device keeps the whole selection, so the
+      // group moves together; on an unselected one it selects just that.
+      const inSelection = selectedIds.includes(hit.id);
+      const ids = inSelection ? selectedIds : [hit.id];
+      if (!inSelection) setSelectedIds([hit.id]);
+      const from: Record<string, Point> = {};
+      for (const pl of visiblePlacements) if (ids.includes(pl.id)) from[pl.id] = { x: pl.x, y: pl.y };
       setDrag({
         id: hit.id,
+        ids: ids.filter((id) => from[id]),
+        from,
         off: { x: hit.x - p.x, y: hit.y - p.y },
         cx: e.clientX,
         cy: e.clientY,
         at: { x: hit.x, y: hit.y },
         moved: false,
         toggleOff: hit.id === selected,
+        collapse: inSelection && selectedIds.length > 1,
       });
       e.currentTarget.setPointerCapture?.(e.pointerId);
       return;
     }
-    setSelected(null);
-    setCategoryDraft(null);
 
     // Curtain drop-in (#49): the type was armed in the sidebar, so the click
     // just decides WHERE - the dialog gathers the five fields at that spot.
     if (armedCurtainType) {
+      setSelectedIds([]);
+      setCategoryDraft(null);
       setCurtainAt(p);
       return;
     }
 
     if (armedPart) {
+      setSelectedIds([]);
+      setCategoryDraft(null);
       placeAt(armedPart.id, p);
       return;
     }
 
-    // Nothing armed: a wire is a finer target than a room, so routes first…
+    // Nothing armed (#299): this press may grow into a marquee. Until the
+    // pointer travels DRAG_PX it is still a click, and the release runs the
+    // click below (`clickEmpty`) — the route or room under the point.
+    marqueeStart.current = { p, cx: e.clientX, cy: e.clientY, shift: e.shiftKey, rect: null };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }
+
+  /** A click (no drag) on empty plan with nothing armed: drop the device
+   *  selection, then pick the route or room under the point. */
+  function clickEmpty(p: Point) {
+    if (!sheet) return;
+    setSelectedIds([]);
+    setCategoryDraft(null);
+    // A wire is a finer target than a room, so routes first…
     const nearRoute = [...visibleRoutes]
       .reverse()
       .find((r) => distToPolyline(p, r.points, aspect) < 0.012);
@@ -1118,6 +1202,15 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   function onMove(e: React.PointerEvent) {
     cursorAtRef.current = toNorm(e);
+    const ms = marqueeStart.current;
+    if (ms) {
+      if (!ms.rect && Math.hypot(e.clientX - ms.cx, e.clientY - ms.cy) < DRAG_PX) return;
+      const p = toNorm(e);
+      if (!p) return;
+      ms.rect = normRect(ms.p, p);
+      setMarquee(ms.rect);
+      return;
+    }
     if (drag) {
       // Until the hand has travelled DRAG_PX this is still a click: leave the
       // marker exactly where it is so a shaky click can never nudge a device.
@@ -1134,16 +1227,34 @@ function useGridEditorImpl(props: GridEditorProps) {
     setCalDraft((prev) => (prev ? [prev[0], p] : prev));
   }
 
-  function onUp() {
+  function onUp(e?: React.PointerEvent) {
+    const ms = marqueeStart.current;
+    if (ms) {
+      marqueeStart.current = null;
+      setMarquee(null);
+      if (!ms.rect) {
+        clickEmpty(ms.p);
+        return;
+      }
+      // Shown positions (visiblePlacements carries every live offset).
+      const hits = idsInRect(visiblePlacements, ms.rect);
+      setSelectedIds(marqueeSelection(selectedIds, hits, ms.shift || Boolean(e?.shiftKey)));
+      setCategoryDraft(null);
+      setSelectedSpaceId(null);
+      setSelectedRouteId(null);
+      return;
+    }
     if (drag) {
       const d = drag;
       setDrag(null);
-      // Never travelled: this was a click, so keep the old toggle-select.
+      // Never travelled: this was a click, so keep the old toggle-select —
+      // or, on one member of a larger selection, narrow it to that device.
       if (!d.moved) {
-        if (d.toggleOff) setSelected(null);
+        if (d.collapse) setSelectedIds([d.id]);
+        else if (d.toggleOff) setSelectedIds([]);
         return;
       }
-      commitMove(d.id, d.at);
+      void commitMoves(dragTargets(d));
       return;
     }
     if (!calDraft) return;
@@ -1153,6 +1264,14 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (Math.abs(a.x - b.x) < 0.005 && Math.abs(a.y - b.y) < 0.005) return;
     setEntry("");
     setPending({ kind: "calibrate", a, b });
+  }
+
+  /** A cancelled pointer (browser gesture, lost capture) abandons the drag
+   *  or marquee rather than committing wherever it stopped. */
+  function cancelGesture() {
+    setDrag(null);
+    marqueeStart.current = null;
+    setMarquee(null);
   }
 
   /** Persist a placement's user-defined category (punch #48). "" clears it. */
@@ -1287,6 +1406,9 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   const enterTool = useCallback(
     (t: GridTool, opts?: { partId?: string; curtainType?: string }) => {
+      // Every tool acts on the plan — arming one from anywhere (Product
+      // Library, the right pane, a Calibrate button) leaves Spreadsheet view.
+      setView("plan");
       clearModes();
       // A wire run needs its wire type picked up front (the finish click has
       // no popover), so without one the person stays in select.
@@ -1301,7 +1423,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         return;
       }
       if (t !== "select" && t !== "pan") {
-        setSelected(null);
+        setSelectedIds([]);
         setSelectedSpaceId(null);
         setSelectedRouteId(null);
       }
@@ -1319,11 +1441,13 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  a curtain type did before the tool model (both also dropped the
    *  selection). */
   const disarm = useCallback(() => {
-    enterTool("select");
-    setSelected(null);
+    // enterTool("select") minus its switch to the plan: Escape in
+    // Spreadsheet view clears without leaving the sheet.
+    clearModes();
+    setSelectedIds([]);
     setSelectedSpaceId(null);
     setSelectedRouteId(null);
-  }, [enterTool]);
+  }, [clearModes]);
 
   /** Zoom −/+ step 0.25 within [ZOOM_MIN, ZOOM_MAX], rounded to 2 decimals so
    *  a Fit value like 1.05 steps cleanly. */
@@ -1344,7 +1468,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** Drop every per-sheet/per-page gesture — what the old sheet <select> and
    *  page ‹ › buttons each did inline before switching. */
   const resetSheetState = useCallback(() => {
-    setSelected(null);
+    setSelectedIds([]);
     setPending(null);
     setSpaceDrawing(false);
     setSpaceDraft([]);
@@ -1416,7 +1540,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       setBusy(true);
       const r = await removePlacementAction(project.id, placementId);
       setBusy(false);
-      setSelected(null);
+      setSelectedIds([]);
       if (!r.ok) setErr(r.error);
       else {
         noteAction(`Removed ${target ? placementLabel(target) : "a device"}`);
@@ -1437,6 +1561,17 @@ function useGridEditorImpl(props: GridEditorProps) {
       const tag = t?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t instanceof HTMLElement && t.isContentEditable)) return;
       if (t?.closest('[role="dialog"], [data-no-nudge]')) return;
+      // ⌘A / Ctrl+A (#299): select every visible device on this sheet/page.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "a") {
+        if (view !== "plan") return;
+        e.preventDefault();
+        if (tool !== "select") return;
+        setSelectedIds(visiblePlacements.map((pl) => pl.id));
+        setCategoryDraft(null);
+        setSelectedSpaceId(null);
+        setSelectedRouteId(null);
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
         disarm();
@@ -1464,7 +1599,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removePlacement, selectedPlacement, busy, drag, armedPartId, sheet, view]);
+  }, [disarm, enterTool, removePlacement, selectedPlacement, busy, drag, armedPartId, sheet, view, tool, visiblePlacements]);
 
   return {
     router,
@@ -1623,7 +1758,12 @@ function useGridEditorImpl(props: GridEditorProps) {
     selectedPlacement,
     selectedPart,
     shownAt,
-    commitMove,
+    commitMoves,
+    selectedIds,
+    setSelectedIds,
+    selectedPlacements,
+    marquee,
+    cancelGesture,
     toNorm,
     placeAt,
     cursorAtRef,

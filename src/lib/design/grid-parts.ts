@@ -53,7 +53,7 @@ export function gridPartsFrom(
     // `ports` from the pricing catalog once, at first seed, and never
     // refreshes it. Fall back to the symbol's snapshot only when there's no
     // linked pricing part with its own ports.
-    const ports = p?.ports?.length ? p.ports : s.ports;
+    const ports = p?.ports?.length ? p.ports : s.ports || [];
     return {
       id: s.id,
       sku: s.modelNumber || s.id,

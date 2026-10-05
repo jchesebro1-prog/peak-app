@@ -95,12 +95,14 @@ function PropBlock({ children }: { children: React.ReactNode }) {
 }
 
 export default function PropertyEditor({ ed }: { ed: GridEditor }) {
-  const { selectedPlacement, selectedRouteId, selectedSpaceId, visibleRoutes, pageSpaces } = ed;
+  const { selectedPlacement, selectedPlacements, selectedRouteId, selectedSpaceId, visibleRoutes, pageSpaces } = ed;
   const route = selectedRouteId ? visibleRoutes.find((r) => r.id === selectedRouteId) ?? null : null;
   const space = selectedSpaceId ? pageSpaces.find((s) => s.id === selectedSpaceId) ?? null : null;
   return (
     <div style={{ background: "#fff", borderBottom: "1px solid #dfe2e8" }}>
-      {selectedPlacement ? (
+      {selectedPlacements.length > 1 ? (
+        <PropSection title={`${selectedPlacements.length} items selected`} />
+      ) : selectedPlacement ? (
         <DeviceProps ed={ed} pl={selectedPlacement} />
       ) : route ? (
         <RouteProps ed={ed} route={route} />

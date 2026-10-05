@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatMeasure, MEASURE_UNITS, type MeasureUnit, type Point } from "@/lib/annotations";
 import { placementQty, routeLengthFt } from "@/lib/design/grid-bom";
 import { markerColor } from "@/lib/design/grid-symbols";
@@ -71,7 +71,9 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     fabrics,
     specKeys,
     symbolCtx,
-    selected,
+    selectedIds,
+    marquee,
+    cancelGesture,
     sheet,
     isPdf,
     page,
@@ -83,7 +85,6 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     curtainAt,
     setCurtainAt,
     drag,
-    setDrag,
     calibrating,
     calDraft,
     pending,
@@ -128,6 +129,8 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
   // has no focus of its own); a text field keeps its space bar, and the page
   // only loses its space-to-scroll while the pointer is over the plan.
   const overRef = useRef(false);
+  /** Every selected device gets the dashed ring (#299 multi-select). */
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.code !== "Space" || isEditable(e.target)) return;
@@ -228,7 +231,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
           onPointerUp={onUp}
           // A cancelled pointer (browser gesture, lost capture) abandons
           // the drag rather than committing wherever it stopped.
-          onPointerCancel={() => setDrag(null)}
+          onPointerCancel={cancelGesture}
           onPointerLeave={clearCursorAt}
           // Palette drag-and-drop (#299): a drop places one unit where it
           // lands and arms nothing.
@@ -271,6 +274,10 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
             <img
               src={sheet.dataUrl}
               alt={sheet.name}
+              // The browser's own image drag would start on any press-and-move
+              // and cancel the pointer (pointercancel), killing marker drags
+              // and the marquee (#299) on image sheets.
+              draggable={false}
               // Intrinsic dimensions, not clientWidth: onLoad can fire
               // before layout (and never fires for cached images), which
               // left size at 0×0 and broke the calibration math. The
@@ -452,7 +459,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
               const c = pl.curtain ? symbolCtx.colors.Curtains : look.color;
               const x = pl.x * size.w;
               const y = pl.y * size.h;
-              const on = pl.id === selected;
+              const on = selectedSet.has(pl.id);
               // A seeded-but-unassigned placement (#38 Task 2) has no
               // catalog part to name it, so its own category — the
               // human system-function label grid-seed.ts stamped it
@@ -519,6 +526,18 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                 </g>
               );
             })}
+            {/* marquee select (#299) — dragged on empty plan */}
+            {marquee && (
+              <rect
+                x={marquee.x0 * size.w}
+                y={marquee.y0 * size.h}
+                width={(marquee.x1 - marquee.x0) * size.w}
+                height={(marquee.y1 - marquee.y0) * size.h}
+                strokeDasharray="4 3"
+                strokeWidth={1}
+                style={{ fill: "color-mix(in srgb, var(--accent) 10%, transparent)", stroke: "var(--accent)" }}
+              />
+            )}
             {calDraft && (
               <line
                 x1={calDraft[0].x * size.w}
