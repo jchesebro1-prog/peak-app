@@ -10708,7 +10708,8 @@ What shipped, in three slices:
   idempotent and skips DaVinci's "Unknown" placeholder. Dry run against a one-ETC-part-per-record catalog: 668 part
   drawings from 444 files; the 2026-09-02 export has 452 of 1,215 image ids on disk (D611).
 
-Gates (final head): …
+Gates (final head): tsc clean; test:specs ALL PASSED, 12,152 PASS (baseline 12,085; +67); eslint 0 errors (6 warnings, all
+pre-existing on main); `next build` OK; test:smoke ALL PASSED (206 routes).
 
 **Production runbook — the DaVinci import (Jeff).** Nothing is written until step 4.
 1. **Back up.** `DATABASE_URL=<prod> npm run db:export`.
