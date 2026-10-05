@@ -49400,4 +49400,5 @@ import { systemStatus } from "@/lib/design/grid-system-status";
   ok(all.find((s) => s.key === "needs")!.text === "Incomplete — 1 item needs a part." && all.find((s) => s.key === "cal")!.level === "warn", "#299 status: copy + calibration is a warning once wires exist");
   ok(systemStatus({ ...base, calibrated: false }).find((s) => s.key === "cal")!.level === "info", "#299 status: calibration is info with no wires");
   ok(systemStatus({ ...base, needsPart: 4 })[0].text === "Incomplete — 4 items need a part.", "#299 status: plural");
+  ok(systemStatus({ ...base, hasSheet: false, calibrated: false, hiddenUnmapped: 2 }).map((s) => s.key).join(",") === "sheet,unmapped", "#299 status: no sheet hides only the calibration row");
 }

@@ -36,14 +36,13 @@ export function systemStatus(i: SystemStatusInput): StatusItem[] {
     items.push({ key: "err", level: "error", text: i.err, fix: null });
   }
 
-  // 2. Upload: no plan sheet (short-circuit: calibration warning comes ONLY if there IS a sheet)
+  // 2. Upload: no plan sheet
   if (!i.hasSheet) {
     items.push({ key: "sheet", level: "warn", text: "Upload a plan sheet to start.", fix: "upload" });
-    return items; // No other rules apply if there's no sheet
   }
 
-  // 3. Calibration: page not calibrated
-  if (!i.calibrated) {
+  // 3. Calibration: page not calibrated (only if there IS a sheet)
+  if (i.hasSheet && !i.calibrated) {
     const level = i.hasWires ? "warn" : "info";
     items.push({
       key: "cal",
