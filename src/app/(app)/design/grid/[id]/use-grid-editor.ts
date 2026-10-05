@@ -44,7 +44,7 @@ import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import type { ScopeTargets, ScopeTargetsByTier } from "@/lib/design/scope-targets";
 import type { SellCard } from "@/lib/design/auto-estimate";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
-import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
+import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, RemovedBundle } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
   addSpaceAction,
@@ -55,8 +55,10 @@ import {
   movePlacementsAction,
   placeCurtainAction,
   placeDeviceAction,
-  removePlacementAction,
+  removePlacementsAction,
+  replacePlacementsPartAction,
   setPlacementCategoryAction,
+  setPlacementsCategoryAction,
   setSymbolLookAction,
   setVenueAction,
   linkLinesetDesignAction,
@@ -72,6 +74,7 @@ import type { SysKey } from "@/app/(app)/design/quick/engine";
 import { paletteView } from "@/lib/design/grid-palette";
 import type { ScheduleData } from "@/lib/design/grid-schedule";
 import { idsInRect, marqueeSelection, normRect, toggleId, type Rect } from "@/lib/design/grid-selection";
+import { alignPositions, changedMoves, distributePositions, type AlignMode } from "@/lib/design/grid-align";
 
 /**
  * The Grid editor's state, memos and handlers (#299 Task 2) — moved out of
@@ -103,6 +106,27 @@ const NUDGE_FAST = 0.01;
 /** Coalesce key-repeat into one write, holding an arrow must not fire a
  *  server action per keystroke. */
 const NUDGE_COMMIT_MS = 400;
+
+/** What a thrown action (dropped connection, server error — not a refusal)
+ *  says next to the plan once its optimistic state is rolled back. */
+const SAVE_FAILED = "That didn't save — check your connection and try again.";
+
+/** Status-bar words for an align mode ("Aligned 3 devices left"). */
+const ALIGN_WORDS: Record<AlignMode, string> = {
+  left: "left",
+  center: "to center",
+  right: "right",
+  top: "top",
+  middle: "to middle",
+  bottom: "bottom",
+};
+
+/** "4 devices", "2 curtains", or "5 items" when both are selected. */
+function countNoun(pls: readonly GridPlacement[]): string {
+  const curtains = pls.filter((pl) => pl.curtain).length;
+  const noun = curtains === 0 ? "device" : curtains === pls.length ? "curtain" : "item";
+  return `${pls.length} ${noun}${pls.length === 1 ? "" : "s"}`;
+}
 
 /** An in-flight marker drag (punch #47). `off` is the grab offset (pointer to
  *  marker center) so the marker doesn't jump under the cursor; `cx/cy` are the
@@ -271,7 +295,6 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** #299 multi-select: every selected device, in the order picked. The
    *  single-device `selected` is derived — set only when exactly one is. */
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const selected = selectedIds.length === 1 ? selectedIds[0] : null;
   /** The pre-multi-select setter, kept so single-device call sites read the same. */
   const setSelected = useCallback((id: string | null) => setSelectedIds(id ? [id] : []), []);
   /** The marquee being dragged on empty plan (plan coords), null otherwise.
@@ -747,14 +770,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   );
 
   const armedPart = armedPartId ? partById.get(armedPartId) : null;
-  /** Selection follows visibility (#48): hiding a layer must not leave a
-   *  selected-but-invisible device wired to the arrow-key nudge and the
-   *  Remove button. Derived rather than cleared from an effect, so it can't
-   *  race a refresh. */
-  const selectedPlacement =
-    placements.find((pl) => pl.id === selected && placementVisible(pl)) || null;
   /** Every selected device that is visible (#299), in selection order —
-   *  server copies, like `selectedPlacement` (read positions via `shownAt`). */
+   *  server copies (read positions via `shownAt`). */
   const selectedPlacements = useMemo(() => {
     const byId = new Map(placements.map((pl) => [pl.id, pl]));
     return selectedIds.flatMap((id) => {
@@ -762,6 +779,14 @@ function useGridEditorImpl(props: GridEditorProps) {
       return pl && placementVisible(pl) ? [pl] : [];
     });
   }, [placements, selectedIds, placementVisible]);
+  /** Selection follows visibility (#48): hiding a layer must not leave a
+   *  selected-but-invisible device wired to the arrow-key nudge and the
+   *  Remove button. Derived rather than cleared from an effect, so it can't
+   *  race a refresh. #299: the single selection is the VISIBLE one — two
+   *  selected with one hidden reads as one device everywhere (Property
+   *  Editor, status bar, Delete, nudge). */
+  const selectedPlacement = selectedPlacements.length === 1 ? selectedPlacements[0] : null;
+  const selected = selectedPlacement ? selectedPlacement.id : null;
   /** The catalog entry behind the selected device (curtains and seed
    *  placeholders have none) — what the Symbol select edits (#131). */
   const selectedPart =
@@ -793,26 +818,35 @@ function useGridEditorImpl(props: GridEditorProps) {
         }
         return next;
       });
-      setErr(null);
-      setBusy(true);
-      const r = await movePlacementsAction(project.id, valid);
-      setBusy(false);
-      if (!r.ok) {
-        // Refused: drop every optimistic position so the markers return to
-        // where the design actually has them, next to the error.
-        setErr(r.error);
+      // Refused or thrown: drop every optimistic position so the markers
+      // return to where the design actually has them, next to the error.
+      const rollBack = () =>
         setMovedLocal((prev) => {
           const next = { ...prev };
           for (const m of valid) delete next[m.id];
           return next;
         });
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await movePlacementsAction(project.id, valid);
+        if (!r.ok) {
+          setErr(r.error);
+          rollBack();
+          return null;
+        }
+        noteAction(
+          label ?? (valid.length === 1 ? `Moved ${placementLabel(servers.get(valid[0].id)!)}` : `Moved ${countNoun(valid.map((m) => servers.get(m.id)!))}`)
+        );
+        router.refresh();
+        return r.previous;
+      } catch {
+        rollBack();
+        setErr(SAVE_FAILED);
         return null;
+      } finally {
+        setBusy(false);
       }
-      noteAction(
-        label ?? (valid.length === 1 ? `Moved ${placementLabel(servers.get(valid[0].id)!)}` : `Moved ${valid.length} devices`)
-      );
-      router.refresh();
-      return r.previous;
     },
     [project.id, placements, router, noteAction, placementLabel]
   );
@@ -1532,26 +1566,128 @@ function useGridEditorImpl(props: GridEditorProps) {
     router.push("/design/designs");
   }
 
-  /** Remove one placement — the selected-device Remove button, the toolbar
-   *  Delete and the Delete/Backspace key all land here. */
-  const removePlacement = useCallback(
-    async (placementId: string) => {
-      const target = placements.find((pl) => pl.id === placementId);
-      setBusy(true);
-      const r = await removePlacementAction(project.id, placementId);
-      setBusy(false);
+  /* ------------------------- bulk edits on the selection (#299) ------------------------- */
+
+  /** Remove every visible selected device in one write — the Property
+   *  Editor's Remove / Delete n, the toolbar Delete and the Delete/Backspace
+   *  key all land here. Resolves to what undo needs to put back, or null. */
+  const removeSelected = useCallback(async (): Promise<RemovedBundle | null> => {
+    const targets = selectedPlacements;
+    if (!targets.length) return null;
+    setErr(null);
+    setBusy(true);
+    try {
+      const r = await removePlacementsAction(project.id, targets.map((pl) => pl.id));
+      if (!r.ok) {
+        setErr(r.error);
+        return null;
+      }
       setSelectedIds([]);
-      if (!r.ok) setErr(r.error);
-      else {
-        noteAction(`Removed ${target ? placementLabel(target) : "a device"}`);
+      setCategoryDraft(null);
+      noteAction(targets.length === 1 ? `Removed ${placementLabel(targets[0])}` : `Removed ${countNoun(targets)}`);
+      router.refresh();
+      return r.removed;
+    } catch {
+      setErr(SAVE_FAILED);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [selectedPlacements, project.id, router, noteAction, placementLabel]);
+
+  /** Where each visible selected device is shown right now. */
+  const selectionPositions = useCallback(
+    () => selectedPlacements.map((pl) => ({ id: pl.id, ...shownAt(pl) })),
+    [selectedPlacements, shownAt]
+  );
+
+  /** Line the selection up (2+). Only devices that actually move are sent;
+   *  resolves to the positions they replaced (undo), or null. */
+  const alignSelected = useCallback(
+    async (mode: AlignMode) => {
+      if (selectedPlacements.length < 2) return null;
+      const before = selectionPositions();
+      const moves = changedMoves(before, alignPositions(before, mode));
+      if (!moves.length) return null;
+      return commitMoves(moves, `Aligned ${countNoun(selectedPlacements)} ${ALIGN_WORDS[mode]}`);
+    },
+    [selectedPlacements, selectionPositions, commitMoves]
+  );
+
+  /** Space the selection evenly along one axis (3+); the end devices stay. */
+  const distributeSelected = useCallback(
+    async (axis: "x" | "y") => {
+      if (selectedPlacements.length < 3) return null;
+      const before = selectionPositions();
+      const moves = changedMoves(before, distributePositions(before, axis));
+      if (!moves.length) return null;
+      return commitMoves(moves, `Distributed ${countNoun(selectedPlacements)} ${axis === "x" ? "horizontally" : "vertically"}`);
+    },
+    [selectedPlacements, selectionPositions, commitMoves]
+  );
+
+  /** Label (or clear, with "") every visible selected device. Devices that
+   *  already carry the label are left alone. Resolves to the previous
+   *  categories (undo), or null when nothing was written. */
+  const setCategoryForSelected = useCallback(
+    async (category: string) => {
+      const want = normalizeCategory(category) ?? "";
+      const items = selectedPlacements
+        .filter((pl) => (normalizeCategory(pl.category) ?? "") !== want)
+        .map((pl) => ({ id: pl.id, category: want }));
+      if (!items.length) return null;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setPlacementsCategoryAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return null;
+        }
+        noteAction(want ? `Set category ${want} on ${countNoun(selectedPlacements)}` : `Cleared the category on ${countNoun(selectedPlacements)}`);
         router.refresh();
+        return r.previous;
+      } catch {
+        setErr(SAVE_FAILED);
+        return null;
+      } finally {
+        setBusy(false);
       }
     },
-    [placements, project.id, router, noteAction, placementLabel]
+    [selectedPlacements, project.id, router, noteAction]
+  );
+
+  /** Swap the part on every visible selected device. Curtains can't change
+   *  part (the server refuses the whole batch), so a selection holding one
+   *  sends nothing. Resolves to the previous partIds (undo), or null. */
+  const replacePartForSelected = useCallback(
+    async (partId: string) => {
+      if (!partId || selectedPlacements.some((pl) => pl.curtain)) return null;
+      const items = selectedPlacements.filter((pl) => pl.partId !== partId).map((pl) => ({ id: pl.id, partId }));
+      if (!items.length) return null;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await replacePlacementsPartAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return null;
+        }
+        noteAction(`Replaced ${countNoun(selectedPlacements)} with ${partLabel(partId)}`);
+        router.refresh();
+        return r.previous;
+      } catch {
+        setErr(SAVE_FAILED);
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [selectedPlacements, project.id, router, noteAction, partLabel]
   );
 
   // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
-  // select with nothing selected, Delete/Backspace removes the selected
+  // select with nothing selected, Delete/Backspace removes every selected
   // device. Same guards as the arrow-key nudge: never while typing, never
   // under a dialog or a data-no-nudge element, never with a modifier.
   useEffect(() => {
@@ -1581,9 +1717,9 @@ function useGridEditorImpl(props: GridEditorProps) {
       // would act on a plan nobody can see. Escape (above) still clears.
       if (view !== "plan") return;
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (!selectedPlacement || busy || drag) return;
+        if (!selectedPlacements.length || busy || drag) return;
         e.preventDefault();
-        removePlacement(selectedPlacement.id);
+        void removeSelected();
         return;
       }
       if (e.repeat) return;
@@ -1599,7 +1735,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removePlacement, selectedPlacement, busy, drag, armedPartId, sheet, view, tool, visiblePlacements]);
+  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements]);
 
   return {
     router,
@@ -1804,7 +1940,11 @@ function useGridEditorImpl(props: GridEditorProps) {
     applyZoom,
     setVenue,
     deleteDesign,
-    removePlacement,
+    removeSelected,
+    alignSelected,
+    distributeSelected,
+    setCategoryForSelected,
+    replacePartForSelected,
   };
 }
 

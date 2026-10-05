@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { formatMeasure } from "@/lib/annotations";
 import { curtainDesc, placementQty, routeLengthFt } from "@/lib/design/grid-bom";
 import { spaceOf } from "@/lib/design/grid-geometry";
-import { normalizeCategory, scopeColor } from "@/lib/design/grid-scopes";
+import { normalizeCategory, scopeColor, type GridLayer } from "@/lib/design/grid-scopes";
+import { PALETTE_ROW_CAP, paletteView } from "@/lib/design/grid-palette";
 import { symbolLook } from "@/lib/design/grid-icons";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
@@ -18,7 +20,8 @@ import type { GridEditor } from "../use-grid-editor";
 /**
  * The Property Editor (#299) — DaVinci-style key/value rows for whatever is
  * selected: the design itself when nothing is (name, customer, venue,
- * option, sheet, scale), one device or curtain, one space, one wire run.
+ * option, sheet, scale), one device or curtain, several at once (bulk
+ * category / replace part / delete), one space, one wire run.
  * The selected-device card and the Scale card moved here unchanged in
  * behaviour; the space / wire edit blocks are the panels' own components.
  */
@@ -101,7 +104,8 @@ export default function PropertyEditor({ ed }: { ed: GridEditor }) {
   return (
     <div style={{ background: "#fff", borderBottom: "1px solid #dfe2e8" }}>
       {selectedPlacements.length > 1 ? (
-        <PropSection title={`${selectedPlacements.length} items selected`} />
+        /* Keyed by the selection so its drafts reset when it changes. */
+        <SeveralProps key={selectedPlacements.map((pl) => pl.id).join("|")} ed={ed} pls={selectedPlacements} />
       ) : selectedPlacement ? (
         <DeviceProps ed={ed} pl={selectedPlacement} />
       ) : route ? (
@@ -241,7 +245,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
     saveCategory,
     saveSymbolLook,
     shownAt,
-    removePlacement,
+    removeSelected,
   } = ed;
   const selectedPlacement = pl;
   const part = selectedPlacement.curtain ? null : partById.get(selectedPlacement.partId) ?? null;
@@ -416,12 +420,319 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         <button
           style={{ ...BTN, marginTop: 8, width: "100%", color: "#a0442b" }}
           disabled={busy}
-          onClick={() => removePlacement(selectedPlacement.id)}
+          onClick={() => void removeSelected()}
         >
           {selectedPlacement.curtain ? "Remove curtain" : "Remove device"}
         </button>
       </PropBlock>
     </>
+  );
+}
+
+/* ------------------------------ several at once ------------------------------ */
+
+/** One value when every item agrees, else null (the row reads "Mixed"). */
+function same<T>(values: T[]): T | null {
+  return values.length && values.every((v) => v === values[0]) ? values[0] : null;
+}
+
+/** A small two-step confirm row — what "Delete n" and "Replace…" share. */
+function ConfirmRow({
+  text,
+  confirmLabel,
+  busy,
+  danger,
+  onConfirm,
+  onCancel,
+}: {
+  text: string;
+  confirmLabel: string;
+  busy: boolean;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div role="alertdialog" aria-label={text} data-no-nudge style={{ fontSize: 11.5, color: "#3d424e", lineHeight: 1.45 }}>
+      <div style={{ marginBottom: 6 }}>{text}</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          type="button"
+          style={{ ...BTN, padding: "4px 9px", fontSize: 11, ...(danger ? { background: "#a0442b", color: "#fff", borderColor: "#a0442b" } : { background: "#16181d", color: "#fff", borderColor: "#16181d" }) }}
+          disabled={busy}
+          onClick={onConfirm}
+        >
+          {confirmLabel}
+        </button>
+        <button type="button" style={{ ...BTN, padding: "4px 9px", fontSize: 11 }} disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
+  const {
+    project,
+    partById,
+    busy,
+    fabricNames,
+    curtainPrices,
+    scopeOfPlacement,
+    categoryCounts,
+    setCategoryForSelected,
+    replacePartForSelected,
+    removeSelected,
+  } = ed;
+  const n = pls.length;
+  const curtainCount = pls.filter((pl) => pl.curtain).length;
+  const anyCurtain = curtainCount > 0;
+  const noun = curtainCount === 0 ? "devices" : curtainCount === n ? "curtains" : "items";
+
+  /** What each item IS: a curtain by its name, a device by its part. */
+  const identity = (pl: GridPlacement) => (pl.curtain ? `curtain:${pl.curtain.name}` : `part:${pl.partId}`);
+  const describe = (pl: GridPlacement) =>
+    pl.curtain
+      ? curtainDesc(pl.curtain, fabricNames.get(pl.curtain.fabricSku))
+      : isSeedPlaceholder(pl.partId)
+        ? pl.category || "Unassigned device"
+        : partById.get(pl.partId)?.desc || pl.partId;
+  const kinds = new Set(pls.map(identity)).size;
+  const scope = same(pls.map(scopeOfPlacement));
+  const rooms = pls.map((pl) => spaceOf(pl, project.spaces || [])?.name ?? "—");
+  const room = same(rooms);
+  const sell = pls.reduce(
+    (a, pl) => a + (pl.curtain ? curtainPrices.get(pl.id) || 0 : (partById.get(pl.partId)?.list || 0) * placementQty(pl)),
+    0
+  );
+  const sharedCategory = same(pls.map((pl) => normalizeCategory(pl.category) ?? ""));
+
+  const [category, setCategory] = useState(sharedCategory ?? "");
+  const [replacing, setReplacing] = useState(false);
+  const [armDelete, setArmDelete] = useState(false);
+
+  const applyCategory = () => void setCategoryForSelected(category);
+
+  return (
+    <>
+      <PropSection title={`${n} ${noun}`} />
+      <PropRow label={anyCurtain ? "Items" : "Parts"}>
+        {kinds === 1 ? <strong style={{ fontWeight: 600 }}>{describe(pls[0])}</strong> : `${kinds} different`}
+      </PropRow>
+      <PropRow label="Scope">{scope ?? <span style={{ color: "#8c919c" }}>Mixed</span>}</PropRow>
+      <PropRow label="Space">{room ?? <span style={{ color: "#8c919c" }}>Mixed</span>}</PropRow>
+      <PropRow label="Sell total">
+        <span style={{ fontWeight: 600 }}>{moneyFmt(sell)}</span>
+      </PropRow>
+      <PropRow label="Category" title="Label every selected item at once — leave it empty and Apply to clear">
+        <span style={{ display: "flex", gap: 5 }}>
+          <input
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            list="grid-bulk-category-suggestions"
+            placeholder={sharedCategory === null ? "Mixed" : "Followspots, House left…"}
+            aria-label={`Category for ${n} ${noun}`}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applyCategory();
+            }}
+            style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px", minWidth: 0 }}
+          />
+          <datalist id="grid-bulk-category-suggestions">
+            {categoryCounts.map((c) => (
+              <option key={c.key} value={c.key} />
+            ))}
+          </datalist>
+          <button type="button" style={{ ...BTN, padding: "3px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" }} disabled={busy} onClick={applyCategory}>
+            Apply
+          </button>
+        </span>
+      </PropRow>
+
+      {/* A curtain's part is its fabric — the server refuses the swap, so
+          Replace is offered only on a devices-only selection. */}
+      {!anyCurtain && (
+        <PropBlock>
+          {replacing ? (
+            <ReplacePartPicker
+              ed={ed}
+              pls={pls}
+              scope={scope}
+              onDone={() => setReplacing(false)}
+              onPick={(partId) => replacePartForSelected(partId)}
+            />
+          ) : (
+            <button
+              type="button"
+              style={{ ...BTN, width: "100%" }}
+              disabled={busy}
+              onClick={() => {
+                setArmDelete(false);
+                setReplacing(true);
+              }}
+              title={`Swap the part on all ${n} selected devices`}
+            >
+              Replace part…
+            </button>
+          )}
+        </PropBlock>
+      )}
+
+      <PropBlock>
+        <div style={{ fontSize: 10.5, color: "#8c919c", lineHeight: 1.45, marginBottom: 8 }}>
+          Drag any selected marker to move them together · arrow keys nudge · Arrange in the toolbar lines them up.
+        </div>
+        {armDelete ? (
+          <ConfirmRow
+            text={`Delete ${n} ${noun}?`}
+            confirmLabel={busy ? "Deleting…" : `Delete ${n}`}
+            busy={busy}
+            danger
+            onConfirm={() => void removeSelected()}
+            onCancel={() => setArmDelete(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            style={{ ...BTN, width: "100%", color: "#a0442b" }}
+            disabled={busy}
+            onClick={() => {
+              setReplacing(false);
+              setArmDelete(true);
+            }}
+          >
+            Delete {n}
+          </button>
+        )}
+      </PropBlock>
+    </>
+  );
+}
+
+/** Replace part… (#299): a compact Product Library search — the palette's
+ *  own filter on its All tab, pre-scoped to the selection's scope — then an
+ *  inline confirm. Only real Grid-library parts are offered (paletteView
+ *  never returns virtual Auto parts, which the server can't resolve). */
+function ReplacePartPicker({
+  ed,
+  pls,
+  scope: selectionScope,
+  onPick,
+  onDone,
+}: {
+  ed: GridEditor;
+  pls: GridPlacement[];
+  scope: GridLayer | null;
+  onPick: (partId: string) => Promise<unknown>;
+  onDone: () => void;
+}) {
+  const { parts, deviceTypes, favorites, recent, busy, partById } = ed;
+  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<GridLayer | "">(selectionScope ?? "");
+  const [picked, setPicked] = useState<string | null>(null);
+  const view = paletteView(
+    parts,
+    { tab: "all", search, scope, typeKey: "", mfr: "" },
+    deviceTypes.filter((t) => !t.archived),
+    favorites,
+    recent
+  );
+  const rows = view.rows.slice(0, PALETTE_ROW_CAP);
+  const current = same(pls.map((pl) => pl.partId));
+  const scopes = Object.keys(view.scopeCounts).filter((k) => k !== "");
+  if (scope && !scopes.includes(scope)) scopes.push(scope);
+  const pickedPart = picked ? partById.get(picked) : null;
+
+  if (pickedPart) {
+    return (
+      <ConfirmRow
+        text={`Replace ${pls.length} devices with ${pickedPart.desc}?`}
+        confirmLabel={busy ? "Replacing…" : "Replace"}
+        busy={busy}
+        onConfirm={async () => {
+          const r = await onPick(pickedPart.id);
+          if (r) onDone();
+        }}
+        onCancel={() => setPicked(null)}
+      />
+    );
+  }
+
+  return (
+    <div data-no-nudge>
+      <div style={{ display: "flex", gap: 5, marginBottom: 6 }}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search parts…"
+          aria-label="Search the Grid library for a replacement part"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onDone();
+          }}
+          style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px", minWidth: 0 }}
+          autoFocus
+        />
+        <button type="button" style={{ ...BTN, padding: "3px 8px", fontSize: 11 }} onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+      <select
+        value={scope}
+        onChange={(e) => setScope(e.target.value as GridLayer | "")}
+        aria-label="Scope"
+        style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px", marginBottom: 6 }}
+      >
+        <option value="">All scopes ({view.scopeCounts[""] ?? 0})</option>
+        {scopes.map((k) => (
+          <option key={k} value={k}>
+            {k} ({view.scopeCounts[k] ?? 0})
+          </option>
+        ))}
+      </select>
+      <div role="listbox" aria-label="Replacement parts" style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #dfe2e8", borderRadius: 7 }}>
+        {rows.length === 0 ? (
+          <div style={{ padding: "8px 9px", fontSize: 11.5, color: "#8c919c" }}>
+            {search.trim() ? "No parts match — try another word or All scopes." : "No mapped parts in this scope — search to see every part."}
+          </div>
+        ) : (
+          rows.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              role="option"
+              aria-selected={false}
+              disabled={p.id === current}
+              title={p.id === current ? "Every selected device already uses this part" : `Replace with ${p.desc}`}
+              onClick={() => setPicked(p.id)}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "5px 9px",
+                border: "none",
+                borderBottom: "1px solid #f0f1f4",
+                background: "#fff",
+                cursor: p.id === current ? "default" : "pointer",
+                fontFamily: "inherit",
+                color: p.id === current ? "#8c919c" : "#16181d",
+              }}
+            >
+              <div style={{ fontSize: 11.5, fontWeight: 600 }}>{p.desc}</div>
+              <div style={{ fontSize: 10.5, color: "#8c919c" }}>
+                {[p.manufacturer, p.modelNumber || p.sku].filter(Boolean).join(" · ")}
+                {p.id === current ? " · current" : ""}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+      {(view.rows.length > rows.length || view.hiddenUnmapped > 0) && (
+        <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 5, lineHeight: 1.4 }}>
+          {view.rows.length > rows.length ? `Showing the first ${rows.length} of ${view.rows.length} — search to narrow. ` : ""}
+          {view.hiddenUnmapped > 0 ? `${view.hiddenUnmapped} unmapped parts hidden — search to find them.` : ""}
+        </div>
+      )}
+    </div>
   );
 }
 

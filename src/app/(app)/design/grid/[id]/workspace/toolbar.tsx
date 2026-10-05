@@ -1,15 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { EquipmentMapLink } from "@/components/design/equipment-map-link";
 import { SHORT } from "@/app/(app)/design/quick/engine";
-import { cutSheetsUnreadableNote } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import type { GridTool } from "@/lib/design/grid-tools";
 import DesignIdentity from "../design-identity";
 import OptionSwitcher from "../option-switcher";
 import { refillableScopes, ScopeRefillDialog } from "../scope-panel";
 import type { GridEditor } from "../use-grid-editor";
 import Menu from "./menu";
+import OutputsMenu from "./outputs-menu";
+import QuoteButton from "./quote-button";
+import { BTN, FIELD_LABEL } from "./toolbar-style";
 import {
   IconAlignBottom,
   IconAlignCenter,
@@ -39,41 +40,14 @@ import {
 
 /**
  * The Grid workspace toolbar (#299): one 34px row — the design's name and
- * customer, the tools (one active at a time), Edit and Arrange (later
- * slices wire these; Delete works now), View (zoom, Fit), then Change
- * equipment, Design ▾, Outputs ▾ and the primary Add to quotes. Every control
- * the old header row held lives here, in a menu, or in the sheet tabs.
+ * customer, the tools (one active at a time), Edit (Delete works; the rest
+ * arrive in later slices), Arrange (align ×6 at 2+ selected, distribute ×2
+ * at 3+), View (zoom, Fit), then Change equipment, Design ▾, Outputs ▾
+ * (outputs-menu.tsx) and the primary Add to quotes (quote-button.tsx). Every
+ * control the old header row held lives here, in a menu, or in the sheet tabs.
  */
 
 const SOON = "coming in this release";
-
-const BTN: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  height: 28,
-  borderWidth: 1,
-  borderStyle: "solid",
-  borderColor: "#dfe2e8",
-  background: "#fff",
-  borderRadius: 7,
-  padding: "0 10px",
-  fontSize: 12,
-  fontWeight: 600,
-  color: "#3d424e",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  whiteSpace: "nowrap",
-  textDecoration: "none",
-};
-
-const FIELD_LABEL: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: ".06em",
-  textTransform: "uppercase",
-  color: "#9aa0ab",
-  margin: "2px 0 6px",
-};
 
 function IconButton({
   title,
@@ -118,7 +92,7 @@ function IconButton({
   );
 }
 
-/** A not-yet-wired Edit / Arrange control: its real name + shortcut, disabled. */
+/** A not-yet-wired Edit control: its real name + shortcut, disabled. */
 function SoonButton({ name, children }: { name: string; children: React.ReactNode }) {
   return (
     <IconButton title={`${name} — ${SOON}`} label={name} disabled>
@@ -147,34 +121,21 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
     venues,
     customerOptions,
     canCreate,
-    quoteNumbers,
     activeOptionId,
     activeOption,
     optionCounts,
     switchOption,
-    linesetDesigns,
-    linkLineset,
-    linesetBusy,
-    buildClientPackage,
-    packageBusy,
     packageUrl,
-    packageGapCount,
-    packageUnreadable,
-    armDelete,
-    setArmDelete,
-    deleteDesign,
     setVenue,
     busy,
-    bomEmpty,
-    runQuote,
-    incompleteQuote,
-    setIncompleteQuote,
     tool,
     enterTool,
     armedPartId,
     armedCurtainType,
-    selectedPlacement,
-    removePlacement,
+    selectedPlacements,
+    removeSelected,
+    alignSelected,
+    distributeSelected,
     view,
     setView,
     zoom,
@@ -189,10 +150,17 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
     setErr,
   } = ed;
 
-  const id = encodeURIComponent(project.id);
-  const opt = encodeURIComponent(activeOptionId);
   const scopes = refillableScopes(project.scopeInputs, auto);
   const pct = Math.round(zoom * 100);
+  /** Why an Arrange control is off (its tooltip), or null when it works. */
+  const arrangeBlocked = (min: 2 | 3): string | null =>
+    view === "sheet"
+      ? "Switch to Plan view to arrange"
+      : selectedPlacements.length < min
+        ? `Select ${min} or more devices`
+        : busy
+          ? "Saving…"
+          : null;
 
   const toolButton = (t: GridTool, title: string, icon: React.ReactNode, opts?: { disabled?: boolean; active?: boolean }) => (
     <IconButton
@@ -278,12 +246,15 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           title={
             view === "sheet"
               ? "Switch to Plan view to delete"
-              : selectedPlacement
-                ? "Delete (Del)"
-                : "Delete (Del) — select a device first"
+              : selectedPlacements.length > 1
+                ? `Delete ${selectedPlacements.length} (Del)`
+                : selectedPlacements.length
+                  ? "Delete (Del)"
+                  : "Delete (Del) — select a device first"
           }
-          disabled={!selectedPlacement || busy || view === "sheet"}
-          onClick={() => selectedPlacement && removePlacement(selectedPlacement.id)}
+          label="Delete (Del)"
+          disabled={!selectedPlacements.length || busy || view === "sheet"}
+          onClick={() => void removeSelected()}
         >
           <IconTrash />
         </IconButton>
@@ -293,20 +264,34 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
       <Group label="Arrange">
         {(
           [
-            ["Align left", IconAlignLeft],
-            ["Align center", IconAlignCenter],
-            ["Align right", IconAlignRight],
-            ["Align top", IconAlignTop],
-            ["Align middle", IconAlignMiddle],
-            ["Align bottom", IconAlignBottom],
-            ["Distribute horizontally", IconDistributeH],
-            ["Distribute vertically", IconDistributeV],
+            ["Align left", IconAlignLeft, "left"],
+            ["Align center", IconAlignCenter, "center"],
+            ["Align right", IconAlignRight, "right"],
+            ["Align top", IconAlignTop, "top"],
+            ["Align middle", IconAlignMiddle, "middle"],
+            ["Align bottom", IconAlignBottom, "bottom"],
           ] as const
-        ).map(([name, I]) => (
-          <SoonButton key={name} name={name}>
-            <I />
-          </SoonButton>
-        ))}
+        ).map(([name, I, mode]) => {
+          const blocked = arrangeBlocked(2);
+          return (
+            <IconButton key={name} title={blocked ?? name} label={name} disabled={!!blocked} onClick={() => void alignSelected(mode)}>
+              <I />
+            </IconButton>
+          );
+        })}
+        {(
+          [
+            ["Distribute horizontally", IconDistributeH, "x"],
+            ["Distribute vertically", IconDistributeV, "y"],
+          ] as const
+        ).map(([name, I, axis]) => {
+          const blocked = arrangeBlocked(3);
+          return (
+            <IconButton key={name} title={blocked ?? name} label={name} disabled={!!blocked} onClick={() => void distributeSelected(axis)}>
+              <I />
+            </IconButton>
+          );
+        })}
       </Group>
 
       <Divider />
@@ -404,94 +389,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         )}
       </Menu>
 
-      <Menu
-        label="Outputs"
-        title="Riser, schedule, drawing set, lineset, client package"
-        onOpenChange={(open) => {
-          if (!open) setArmDelete(false);
-        }}
-        align="right"
-        width={300}
-        items={[
-          { label: "Riser →", href: `/design/grid/${id}/riser?option=${opt}` },
-          { label: "Schedule →", href: `/design/grid/${id}/schedule?option=${opt}` },
-          { label: "Drawing set →", href: `/design/grid/${id}/set?option=${opt}` },
-          ...(project.linesetDesignId ? [{ label: "Linesets →", href: `/design/grid/${id}/lineset` }] : []),
-          // Same links the BOM panel shows under the quote button (#299).
-          ...(activeOption.quoteId
-            ? [
-                { label: "View in Quotes →", href: "/quotes" },
-                {
-                  label: "Spec from this design →",
-                  href: `/design/specs/new?grid=${encodeURIComponent(project.id)}&quote=${encodeURIComponent(activeOption.quoteId)}`,
-                },
-              ]
-            : []),
-        ]}
-      >
-        <div style={FIELD_LABEL}>Lineset</div>
-        <select
-          value={project.linesetDesignId || ""}
-          disabled={linesetBusy}
-          onChange={(e) => linkLineset(e.target.value)}
-          aria-label="Lineset Builder design for this Grid"
-          title="Link a saved Lineset Builder design; the schedule derives from its current inputs"
-          style={{ ...BTN, fontWeight: 500, width: "100%" }}
-        >
-          <option value="">No lineset linked</option>
-          {linesetDesigns.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
-
-        <div style={{ ...FIELD_LABEL, marginTop: 12 }}>Client package</div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          <button type="button" style={BTN} disabled={packageBusy || busy} onClick={buildClientPackage} title="Build a ZIP with the specification, datasheets, plan sheets, and rough riser drawings">
-            {packageBusy ? "Building…" : packageUrl ? "Rebuild" : "Build client package"}
-          </button>
-          {packageUrl && (
-            <a href={packageUrl} style={{ ...BTN, color: "#1f7a52" }}>
-              Download{packageGapCount ? ` · ${packageGapCount} gaps` : ""}
-            </a>
-          )}
-        </div>
-        {packageUrl && packageUnreadable.length > 0 && (
-          <div
-            style={{ fontSize: 11.5, color: "#8a6d1f", marginTop: 6, lineHeight: 1.4 }}
-            title={packageUnreadable.map((u) => `${u.where} — ${u.desc}: ${u.reason}`).join("\n")}
-          >
-            {cutSheetsUnreadableNote(packageUnreadable.length)}
-          </div>
-        )}
-
-        {canCreate && (
-          <div style={{ borderTop: "1px solid #edeff3", marginTop: 12, paddingTop: 10, display: "flex", gap: 6, alignItems: "center" }}>
-            {armDelete ? (
-              <>
-                <button
-                  type="button"
-                  style={{ ...BTN, background: "#a0442b", color: "#fff", borderColor: "#a0442b" }}
-                  disabled={busy}
-                  onClick={deleteDesign}
-                >
-                  {busy ? "Deleting…" : "Really delete"}
-                </button>
-                <button type="button" style={BTN} disabled={busy} onClick={() => setArmDelete(false)}>
-                  Keep
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                style={{ ...BTN, color: "#a0442b" }}
-                disabled={busy}
-                onClick={() => setArmDelete(true)}
-                title="Deletes this design and its plan sheets"
-              >
-                Delete design
-              </button>
-            )}
-          </div>
-        )}
-      </Menu>
+      <OutputsMenu ed={ed} />
 
       {packageUrl && (
         <a href={packageUrl} style={{ ...BTN, color: "#1f7a52" }} title="The client package you just built">
@@ -499,53 +397,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         </a>
       )}
 
-      <div style={{ position: "relative", display: "inline-flex" }}>
-        <button
-          type="button"
-          style={{ ...BTN, background: "#16181d", color: "#fff", borderColor: "#16181d", opacity: busy || bomEmpty ? 0.55 : 1 }}
-          disabled={busy || bomEmpty}
-          onClick={() => runQuote(false)}
-          title={bomEmpty ? "Place something first — the BOM is empty" : "Create or update this option's draft quote"}
-        >
-          {activeOption.quoteId ? `Update quote ${quoteNumbers[activeOption.quoteId] ?? activeOption.quoteId}` : "Add to quotes"}
-        </button>
-        {/* D322 — the same confirm the BOM card shows, where this click can see it. */}
-        {incompleteQuote && (
-          <div
-            role="alertdialog"
-            data-no-nudge
-            aria-label="Quote an incomplete design?"
-            style={{
-              position: "absolute",
-              top: "calc(100% + 6px)",
-              right: 0,
-              zIndex: 60,
-              width: 300,
-              background: "#fbf0ea",
-              border: "1px solid #f0d6cd",
-              borderRadius: 9,
-              padding: "9px 11px",
-              fontSize: 11.5,
-              color: "#a0442b",
-              lineHeight: 1.45,
-              boxShadow: "0 10px 28px rgba(0,0,0,.14)",
-            }}
-          >
-            <div>{incompleteQuote}</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 7, alignItems: "center", flexWrap: "wrap" }}>
-              <button type="button" style={{ ...BTN, height: 26, fontSize: 11.5 }} disabled={busy} onClick={() => runQuote(true)}>
-                Quote anyway
-              </button>
-              <button type="button" style={{ ...BTN, height: 26, fontSize: 11.5 }} onClick={() => setIncompleteQuote(null)}>
-                Cancel
-              </button>
-              <EquipmentMapLink style={{ fontWeight: 600, color: "#a0442b" }} fallback="Ask an admin to map them in the Equipment map.">
-                Equipment map →
-              </EquipmentMapLink>
-            </div>
-          </div>
-        )}
-      </div>
+      <QuoteButton ed={ed} />
       </div>
 
       {refillScope && auto && project.scopeInputs && (
