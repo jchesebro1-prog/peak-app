@@ -150,6 +150,10 @@ export function extractLibrary(lib: unknown): DavinciExtract {
     const ids = typeModelNumbers(t);
     if (!ids.length) continue;
 
+    const visual = bag(bag(t.visuals).data);
+    const planImageId = imageId(visual.imageId);
+    const riserImageId = imageId(visual.riserImageId);
+
     records.push({
       typeId: str(t.typeId),
       displayName: str(ti.displayName),
@@ -159,11 +163,18 @@ export function extractLibrary(lib: unknown): DavinciExtract {
       modelNumbers: ids,
       ports,
       docs: out,
+      ...(planImageId ? { planImageId } : {}),
+      ...(riserImageId ? { riserImageId } : {}),
     });
   }
 
   const { accessoryTypes, accessoryLinks } = extractAccessoryGraph(arr(L.types), cats, mfrs, classes);
   return { libraryTimestamp: str(L.timestamp), generatedAt: Date.now(), records, accessoryTypes, accessoryLinks };
+}
+
+/** `"{ABC-…}"` / `"abc-…"` / `""` → lower-case id without braces, or "" (#300). */
+function imageId(v: unknown): string {
+  return str(v).replace(/[{}]/g, "").trim().toLowerCase();
 }
 
 /** Every model and part number of a type, through normalizeSku. */

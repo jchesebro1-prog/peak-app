@@ -12640,6 +12640,16 @@ ok(
   extractLibrary({ ...LIB162, types: [{ ...LIB162.types[0], typeInformation: { ...LIB162.types[0].typeInformation, typeActive: { legacy: true, endActiveDate: "2999-12-31 23:59:59" } } }] }).records[0].active === false,
   "#162 an explicitly legacy type is inactive whatever its end date says"
 );
+// #300 — plan and riser image ids ride along, normalised (braces off, lower-case, empty → absent).
+{
+  const withVisuals = (data: Record<string, string>) =>
+    extractLibrary({ ...LIB162, types: [{ ...LIB162.types[0], visuals: { data } }] }).records[0];
+  const both = withVisuals({ imageId: "{ABC12345-AAAA-BBBB-CCCC-0123456789AB}", riserImageId: "FCC23EF1-0000-4000-8000-000000000001" });
+  ok(both.planImageId === "abc12345-aaaa-bbbb-cccc-0123456789ab", "#300 a braced upper-case plan image id is stored unbraced and lower-case");
+  ok(both.riserImageId === "fcc23ef1-0000-4000-8000-000000000001", "#300 the riser image id is carried, lower-cased");
+  const none = withVisuals({ imageId: "", riserImageId: "" });
+  ok(!("planImageId" in none) && !("riserImageId" in none) && !("planImageId" in r162), "#300 an empty or missing image id is absent from the record, not an empty string");
+}
 ok(
   extractLibrary({ ...LIB162, types: [{ ...LIB162.types[0], typeInformation: { displayName: "x", categoryId: "C-1", manufacturerId: "M-ETC" } }] }).records[0].active === true,
   "#162 a type with no typeActive block at all is treated as active — missing data never demotes a live type"

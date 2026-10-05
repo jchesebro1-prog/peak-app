@@ -30,6 +30,14 @@ export type DavinciRecord = {
   modelNumbers: readonly string[];
   ports: readonly Port[];
   docs: readonly DavinciDoc[];
+  /**
+   * DaVinci's plan-symbol image id (`visuals.data.imageId`) — braces stripped,
+   * lower-case; absent when the type has none (#300). The file lives in the
+   * gitignored export's `images/{<id>}.svg|png`.
+   */
+  planImageId?: string;
+  /** Riser image id (`visuals.data.riserImageId`), same normalisation (#300). */
+  riserImageId?: string;
 };
 
 /**
