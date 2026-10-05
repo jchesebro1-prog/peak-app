@@ -41,8 +41,8 @@ import {
 
 /**
  * The Grid workspace toolbar (#299): one 34px row — the design's name and
- * customer, the tools (one active at a time), Edit (Delete works; the rest
- * arrive in later slices), Arrange (align ×6 at 2+ selected, distribute ×2
+ * customer, the tools (one active at a time), Edit (cut/copy/paste/
+ * duplicate and Delete work; undo/redo arrive in a later slice), Arrange (align ×6 at 2+ selected, distribute ×2
  * at 3+), View (zoom, Fit), then Change equipment, Design ▾, Outputs ▾
  * (outputs-menu.tsx) and the primary Add to quotes (quote-button.tsx). Every
  * control the old header row held lives here, in a menu, or in the sheet tabs.
@@ -156,6 +156,11 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
     setSnapFt,
     snap,
     snapIssue,
+    clipboard,
+    copySelected,
+    cutSelected,
+    paste,
+    duplicate,
   } = ed;
 
   const scopes = refillableScopes(project.scopeInputs, auto);
@@ -169,6 +174,18 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         : busy
           ? "Saving…"
           : null;
+
+  /** Why Cut/Copy/Duplicate is off (tooltip suffix), or null when it works. */
+  const selectionBlocked = (writes: boolean): string | null =>
+    view === "sheet"
+      ? "switch to Plan view"
+      : !selectedPlacements.length
+        ? "select a device first"
+        : writes && busy
+          ? "saving…"
+          : null;
+  const pasteBlocked: string | null =
+    view === "sheet" ? "switch to Plan view" : !clipboard ? "copy a device first" : !sheet ? "upload a sheet first" : busy ? "saving…" : null;
 
   const toolButton = (t: GridTool, title: string, icon: React.ReactNode, opts?: { disabled?: boolean; active?: boolean }) => (
     <IconButton
@@ -238,18 +255,35 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
         <SoonButton name="Redo (⇧⌘Z)">
           <IconRedo />
         </SoonButton>
-        <SoonButton name="Cut (⌘X)">
-          <IconCut />
-        </SoonButton>
-        <SoonButton name="Copy (⌘C)">
-          <IconCopy />
-        </SoonButton>
-        <SoonButton name="Paste (⌘V)">
+        {(
+          [
+            ["Cut (⌘X)", IconCut, () => void cutSelected(), true],
+            ["Copy (⌘C)", IconCopy, copySelected, false],
+          ] as const
+        ).map(([name, I, run, writes]) => {
+          const blocked = selectionBlocked(writes);
+          return (
+            <IconButton key={name} title={blocked ? `${name} — ${blocked}` : name} label={name} disabled={!!blocked} onClick={run}>
+              <I />
+            </IconButton>
+          );
+        })}
+        <IconButton
+          title={pasteBlocked ? `Paste (⌘V) — ${pasteBlocked}` : "Paste (⌘V)"}
+          label="Paste (⌘V)"
+          disabled={!!pasteBlocked}
+          onClick={() => void paste()}
+        >
           <IconPaste />
-        </SoonButton>
-        <SoonButton name="Duplicate (⌘D)">
+        </IconButton>
+        <IconButton
+          title={selectionBlocked(true) ? `Duplicate (⌘D) — ${selectionBlocked(true)}` : "Duplicate (⌘D)"}
+          label="Duplicate (⌘D)"
+          disabled={!!selectionBlocked(true)}
+          onClick={() => void duplicate()}
+        >
           <IconDuplicate />
-        </SoonButton>
+        </IconButton>
         <IconButton
           title={
             view === "sheet"

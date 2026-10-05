@@ -53,6 +53,7 @@ import {
   createDraftQuoteAction,
   deleteProjectAction,
   movePlacementsAction,
+  pastePlacementsAction,
   placeCurtainAction,
   placeDeviceAction,
   removePlacementsAction,
@@ -75,6 +76,9 @@ import { paletteView } from "@/lib/design/grid-palette";
 import type { ScheduleData } from "@/lib/design/grid-schedule";
 import { idsInRect, marqueeSelection, normRect, toggleId, type Rect } from "@/lib/design/grid-selection";
 import { alignPositions, changedMoves, distributePositions, type AlignMode } from "@/lib/design/grid-align";
+import { copySelection, PASTE_OFFSET, pasteLayout, type Clipboard } from "@/lib/design/grid-clipboard";
+// Type-only: the module itself imports the server-side catalog lookup.
+import type { CurtainInput } from "@/lib/design/grid-curtain-input";
 import {
   SNAP_FT_KEY,
   SNAP_ON_KEY,
@@ -1878,6 +1882,141 @@ function useGridEditorImpl(props: GridEditorProps) {
     [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge]
   );
 
+  /* ------------------------- clipboard (#299) ------------------------- */
+
+  /** The copied devices. The ref is what handlers read (duplicate copies
+   *  and pastes in one go, before a re-render); the state mirrors it so the
+   *  toolbar's Paste enables. Both live in the hook, which survives option
+   *  and sheet switches, so a copy carries across them within the tab. */
+  const clipRef = useRef<Clipboard | null>(null);
+  const [clipboard, setClipboardState] = useState<Clipboard | null>(null);
+  /** Where the last paste landed (its top-left), so pasting again steps
+   *  down-right instead of stacking. Reset by every new copy. */
+  const lastPasteRef = useRef<Point | null>(null);
+  /** The pointer position that placed the last paste: a second ⌘V with the
+   *  pointer still there steps by the offset instead of stacking. */
+  const lastPasteCursorRef = useRef<Point | null>(null);
+
+  /** Snapshot the visible selection, at the positions it is shown at (a
+   *  pending nudge included). Returns the clip, or null with nothing copied. */
+  const takeCopy = useCallback((): Clipboard | null => {
+    if (!selectedPlacements.length) return null;
+    const ids = new Set(selectedPlacements.map((pl) => pl.id));
+    const shown = placements.map((pl) => (ids.has(pl.id) ? { ...pl, ...shownAt(pl) } : pl));
+    const clip = copySelection(project.id, shown, routes, [...ids]);
+    clipRef.current = clip;
+    setClipboardState(clip);
+    lastPasteRef.current = null;
+    lastPasteCursorRef.current = null;
+    return clip;
+  }, [selectedPlacements, placements, routes, shownAt, project.id]);
+
+  /** ⌘C / toolbar Copy. */
+  const copySelected = useCallback(() => {
+    const clip = takeCopy();
+    if (!clip) return;
+    noteAction(`Copied ${countNoun(selectedPlacements)}`);
+  }, [takeCopy, noteAction, selectedPlacements]);
+
+  /** ⌘X / toolbar Cut: copy, then remove (one write). Resolves to what undo
+   *  needs to put the devices back, or null. */
+  const cutSelected = useCallback(async (): Promise<RemovedBundle | null> => {
+    if (busy || !selectedPlacements.length) return null;
+    const cut = selectedPlacements;
+    if (!takeCopy()) return null;
+    const removed = await removeSelected();
+    if (removed) noteAction(`Cut ${countNoun(cut)}`);
+    return removed;
+  }, [busy, selectedPlacements, takeCopy, removeSelected, noteAction]);
+
+  /** Lay `clip` onto the active sheet/page/option and select the copies.
+   *  Wires come along only onto the page they were copied from. */
+  const pasteClip = useCallback(
+    async (clip: Clipboard, at: Point | null, last: Point | null, verb: string): Promise<{ placements: GridPlacement[]; routes: GridRoute[] } | null> => {
+      if (!sheet || busy) return null;
+      if (!(await flushNudge())) return null;
+      // With snap on, a step smaller than one grid cell would round straight
+      // back onto the last paste — step at least one cell instead.
+      const step =
+        snap && !at && last
+          ? { x: last.x + Math.max(0, snap.stepX - PASTE_OFFSET), y: last.y + Math.max(0, snap.stepY - PASTE_OFFSET) }
+          : last;
+      const laid = pasteLayout(clip, at, step);
+      let anchor = laid.anchor;
+      if (snap) {
+        const { dx, dy } = snapDelta(anchor, anchor, snap);
+        const w = Math.max(0, ...clip.items.map((i) => i.dx));
+        const h = Math.max(0, ...clip.items.map((i) => i.dy));
+        anchor = { x: Math.min(Math.max(anchor.x + dx, 0), 1 - w), y: Math.min(Math.max(anchor.y + dy, 0), 1 - h) };
+      }
+      const samePage = clip.sourceProjectId === project.id && clip.sourceSheetId === sheet.id && clip.sourcePage === page;
+      const routeIds = samePage ? clip.routeIds : [];
+      const dropped = clip.routeIds.length - routeIds.length;
+      const items = clip.items.map((it) => {
+        const out: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number } = {
+          srcId: it.srcId,
+          x: anchor.x + it.dx,
+          y: anchor.y + it.dy,
+          partId: it.partId,
+        };
+        if (it.category !== undefined) out.category = it.category;
+        if (it.qty !== undefined) out.qty = it.qty;
+        // The full curtain record; the server re-checks every field.
+        if (it.curtain) out.curtain = { ...it.curtain };
+        return out;
+      });
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await pastePlacementsAction(project.id, { sheetId: sheet.id, page, optionId: activeOptionId, items, routeIds });
+        if (!r.ok) {
+          setErr(r.error);
+          return null;
+        }
+        lastPasteRef.current = anchor;
+        setSelectedIds(r.placements.map((pl) => pl.id));
+        setCategoryDraft(null);
+        setSelectedSpaceId(null);
+        setSelectedRouteId(null);
+        const skipped = r.skippedWires + dropped;
+        noteAction(`${verb} ${countNoun(r.placements)}${skipped > 0 ? ` · ${skipped} wire${skipped === 1 ? "" : "s"} skipped` : ""}`);
+        router.refresh();
+        return { placements: r.placements, routes: r.routes };
+      } catch {
+        setErr(SAVE_FAILED);
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [sheet, busy, flushNudge, snap, project.id, page, activeOptionId, noteAction, router]
+  );
+
+  /** ⌘V / toolbar Paste: at the pointer when it is over the plan (and has
+   *  moved since the last paste), else stepped from the last paste, else
+   *  centred. Resolves to what was created (undo), or null. */
+  const paste = useCallback(async () => {
+    const clip = clipRef.current;
+    if (!clip) return null;
+    const cur = cursorAtRef.current;
+    const prev = lastPasteCursorRef.current;
+    const at = cur && !(prev && prev.x === cur.x && prev.y === cur.y) ? cur : null;
+    const r = await pasteClip(clip, at, lastPasteRef.current, "Pasted");
+    if (r && cur) lastPasteCursorRef.current = { ...cur };
+    return r;
+  }, [pasteClip]);
+
+  /** ⌘D / toolbar Duplicate: copy the selection, then paste it one step
+   *  down-right of where it sits. Resolves to what was created, or null. */
+  const duplicate = useCallback(async () => {
+    if (busy || !selectedPlacements.length) return null;
+    const clip = takeCopy();
+    if (!clip) return null;
+    const pts = selectedPlacements.map(shownAt);
+    const origin = { x: Math.min(...pts.map((p) => p.x)), y: Math.min(...pts.map((p) => p.y)) };
+    return pasteClip(clip, null, origin, "Duplicated");
+  }, [busy, selectedPlacements, takeCopy, shownAt, pasteClip]);
+
   // Tool shortcuts (#299): V/P/W/S/H pick a tool, Escape drops back to
   // select with nothing selected, Delete/Backspace removes every selected
   // device. Same guards as the arrow-key nudge: never while typing, never
@@ -1899,6 +2038,28 @@ function useGridEditorImpl(props: GridEditorProps) {
         setSelectedSpaceId(null);
         setSelectedRouteId(null);
         return;
+      }
+      // ⌘C/⌘X/⌘V/⌘D (Ctrl on Windows) — copy, cut, paste, duplicate (#299).
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+        const k = e.key.toLowerCase();
+        if (k === "c" || k === "x" || k === "v" || k === "d") {
+          if (view !== "plan") return;
+          if (k === "c" || k === "x") {
+            // Highlighted page text, or nothing selected: the browser's own copy.
+            if (!selectedPlacements.length || window.getSelection()?.toString()) return;
+            e.preventDefault();
+            if (k === "c") copySelected();
+            else if (!busy && !drag) void cutSelected();
+            return;
+          }
+          if (k === "v" && !clipRef.current) return;
+          // ⌘D would bookmark the page — always ours on the plan.
+          e.preventDefault();
+          if (e.repeat || busy || drag) return;
+          if (k === "v") void paste();
+          else if (selectedPlacements.length) void duplicate();
+          return;
+        }
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
@@ -1927,7 +2088,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements]);
+  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate]);
 
   return {
     router,
@@ -2144,6 +2305,11 @@ function useGridEditorImpl(props: GridEditorProps) {
     distributeSelected,
     setCategoryForSelected,
     replacePartForSelected,
+    clipboard,
+    copySelected,
+    cutSelected,
+    paste,
+    duplicate,
   };
 }
 
