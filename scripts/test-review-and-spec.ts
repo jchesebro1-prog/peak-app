@@ -49542,3 +49542,38 @@ async function gridBatchAsyncChecks299(): Promise<void> {
   ok(rm.ok && rm.value.placements.map((x) => x.id).join(",") === [a.id, c.id].join(",") && !p.placements.some((x) => x.id === a.id || x.id === c.id), "#299 batch: remove returns the records it removed");
   ok(!(await GP.removePlacements(gp.id, [])).ok, "#299 batch: empty selection refused");
 }
+
+/* #299 Grid workspace — undo + clipboard (Task 18) */
+import * as GU from "@/lib/design/grid-undo";
+import * as GCLIP from "@/lib/design/grid-clipboard";
+{
+  const e = (n: number): GU.UndoEntry => ({ label: `e${n}`, forward: { kind: "remove", ids: [`x${n}`] }, inverse: { kind: "remove", ids: [`y${n}`] } });
+  let s = GU.emptyUndo();
+  s = GU.pushUndo(s, e(1)); s = GU.pushUndo(s, e(2));
+  const u = GU.takeUndo(s)!;
+  ok(u.entry.label === "e2" && u.next.past.length === 1 && u.next.future[0].label === "e2", "#299 undo: undo moves the last entry to redo");
+  const r = GU.takeRedo(u.next)!;
+  ok(r.entry.label === "e2" && r.next.past.length === 2 && r.next.future.length === 0, "#299 undo: redo moves it back");
+  ok(GU.pushUndo(u.next, e(3)).future.length === 0, "#299 undo: a new edit clears redo");
+  let big = GU.emptyUndo(); for (let i = 0; i < 105; i++) big = GU.pushUndo(big, e(i));
+  ok(big.past.length === GU.UNDO_CAP && big.past[0].label === "e5", "#299 undo: capped at 100, oldest dropped");
+  ok(GU.takeUndo(GU.emptyUndo()) === null && GU.takeRedo(GU.emptyUndo()) === null, "#299 undo: empty stacks");
+  const bundle = { placements: [], riser: {} };
+  ok(GU.withRefreshedRestore({ label: "d", forward: { kind: "remove", ids: ["a"] }, inverse: { kind: "restore", bundle: { placements: [{ id: "old" }] as never, riser: {} } } }, bundle, "inverse").inverse.kind === "restore", "#299 undo: refreshed restore bundle");
+
+  const P = (id: string, x: number, y: number, extra: Record<string, unknown> = {}) => ({ id, sheetId: "s", page: 1, x, y, partId: "p", by: "t", at: 1, ...extra });
+  const pls = [P("a", 0.2, 0.2, { auto: { scope: "Lighting", rowKey: "k", tier: "good" }, category: "FOH" }), P("b", 0.3, 0.25, { qty: 4 }), P("c", 0.9, 0.9)] as never;
+  const routes = [{ id: "w1", fromPlacementId: "a", toPlacementId: "b" }, { id: "w2", fromPlacementId: "a", toPlacementId: "c" }] as never;
+  const clip = GCLIP.copySelection("GRD-1", pls, routes, ["a", "b", "zz"])!;
+  ok(clip.items.length === 2 && clip.routeIds.join(",") === "w1", "#299 clip: copies the set and only wires with both ends inside");
+  const ia = clip.items.find((i) => i.srcId === "a")!;
+  ok(ia.dx === 0 && ia.dy === 0 && Math.abs(clip.items.find((i) => i.srcId === "b")!.dx - 0.1) < 1e-12 && ia.category === "FOH" && !("auto" in ia), "#299 clip: relative offsets, no auto tag");
+  ok(clip.items.find((i) => i.srcId === "b")!.qty === 4, "#299 clip: lot qty kept");
+  ok(GCLIP.copySelection("GRD-1", pls, routes, ["zz"]) === null, "#299 clip: nothing resolvable → null");
+  const at = GCLIP.pasteLayout(clip, { x: 0.5, y: 0.5 }, null);
+  ok(Math.abs(at.items.find((i) => i.srcId === "b")!.x - 0.6) < 1e-12, "#299 clip: paste at cursor keeps layout");
+  const edge = GCLIP.pasteLayout(clip, { x: 0.97, y: 0.99 }, null);
+  ok(edge.items.every((i) => i.x <= 1 && i.y <= 1) && Math.abs(edge.anchor.x - 0.9) < 1e-12, "#299 clip: shifted to stay on the sheet");
+  const again = GCLIP.pasteLayout(clip, null, { x: 0.2, y: 0.2 });
+  ok(Math.abs(again.anchor.x - 0.215) < 1e-12, "#299 clip: off-plan paste offsets from the last paste");
+}
