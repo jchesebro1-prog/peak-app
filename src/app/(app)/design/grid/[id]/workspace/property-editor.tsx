@@ -298,7 +298,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         const key = c.specKey || curtainSpecKey(c.type, c.name);
         return (
           <PropRow label="Spec key">
-            <span style={{ color: "#5b616e" }}>Spec: {key ? (c.specKey ? key : `Auto: ${key}`) : "— none —"}</span>
+            <span style={{ color: "#5b616e" }}>{key ? (c.specKey ? key : `Auto: ${key}`) : "— none —"}</span>
           </PropRow>
         );
       })()}

@@ -291,6 +291,7 @@ function LegacyLeftColumn({ ed }: { ed: GridEditorState }) {
         onSelect={(id) => {
           setSelectedSpaceId(id);
           setSelected(null);
+          setSelectedRouteId(null);
         }}
       />
 
