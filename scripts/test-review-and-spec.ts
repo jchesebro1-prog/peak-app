@@ -49441,3 +49441,39 @@ import { browserTree, nodeForPlacement } from "@/lib/design/grid-browser-tree";
   const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   ok(rd("src/app/(app)/design/grid/[id]/schedule/page.tsx").includes("scheduleForOption(") && rd("src/app/(app)/design/grid/[id]/page.tsx").includes("scheduleForOption("), "#299 spreadsheet: the schedule page and the editor share one builder");
 }
+
+/* #299 Grid workspace — selection, align, snap (Task 13) */
+import * as GSEL from "@/lib/design/grid-selection";
+import * as GAL from "@/lib/design/grid-align";
+import * as GSNAP from "@/lib/design/grid-snap";
+{
+  const r = GSEL.normRect({ x: 0.6, y: 0.4 }, { x: 0.2, y: 0.1 });
+  ok(r.x0 === 0.2 && r.x1 === 0.6 && r.y0 === 0.1 && r.y1 === 0.4, "#299 select: normalized rect");
+  ok(GSEL.idsInRect([{ id: "a", x: 0.2, y: 0.1 }, { id: "b", x: 0.7, y: 0.2 }, { id: "c", x: 0.5, y: 0.3 }], r).join(",") === "a,c", "#299 select: inclusive hits");
+  ok(GSEL.toggleId(["a", "b"], "a").join(",") === "b" && GSEL.toggleId(["b"], "c").join(",") === "b,c", "#299 select: toggle");
+  ok(GSEL.marqueeSelection(["a"], ["b", "a"], true).join(",") === "a,b" && GSEL.marqueeSelection(["a"], ["b"], false).join(",") === "b", "#299 select: additive marquee");
+
+  const pts = [{ id: "a", x: 0.1, y: 0.5 }, { id: "b", x: 0.5, y: 0.2 }, { id: "c", x: 0.3, y: 0.9 }];
+  ok(GAL.alignPositions(pts, "left").every((p) => p.x === 0.1), "#299 align: left");
+  ok(GAL.alignPositions(pts, "center").every((p) => Math.abs(p.x - 0.3) < 1e-12), "#299 align: center = midpoint of extremes");
+  ok(GAL.alignPositions(pts, "bottom").every((p) => p.y === 0.9) && GAL.alignPositions(pts, "bottom")[0].x === 0.1, "#299 align: bottom keeps x");
+  const d = GAL.distributePositions(pts, "x");
+  ok(d.find((p) => p.id === "c")!.x === 0.3 && d.find((p) => p.id === "a")!.x === 0.1 && d.find((p) => p.id === "b")!.x === 0.5, "#299 align: distribute keeps ends, spaces the middle");
+  const d2 = GAL.distributePositions([{ id: "a", x: 0, y: 0 }, { id: "b", x: 0.9, y: 0 }, { id: "c", x: 0.1, y: 0 }], "x");
+  ok(Math.abs(d2.find((p) => p.id === "c")!.x - 0.45) < 1e-12, "#299 align: distribute moves the middle item");
+  ok(GAL.alignPositions(pts.slice(0, 1), "left")[0].x === 0.1 && GAL.distributePositions(pts.slice(0, 2), "x").length === 2, "#299 align: too few items → unchanged");
+  ok(GAL.changedMoves(pts, GAL.alignPositions(pts, "left")).map((p) => p.id).join(",") === "b,c", "#299 align: only changed moves are sent");
+
+  // 1 page width = 100 ft; 1' spacing → 0.01; aspect 0.5 → stepY 0.02
+  const g = GSNAP.snapGrid({ scale: 100, unit: "ft" }, 1, 0.5)!;
+  ok(Math.abs(g.stepX - 0.01) < 1e-12 && Math.abs(g.stepY - 0.02) < 1e-12 && g.label === "1'", "#299 snap: calibrated step");
+  ok(Math.abs(GSNAP.snapGrid({ scale: 1200, unit: "in" }, 1, 1)!.stepX - 0.01) < 1e-12, "#299 snap: inches calibration");
+  ok(GSNAP.snapGrid({ scale: 100000, unit: "ft" }, 0.5, 1) === null && GSNAP.snapGrid({ scale: 5, unit: "ft" }, 5, 1) === null, "#299 snap: too dense / too coarse → off");
+  ok(GSNAP.snapGrid(null, 1, 2)!.stepY === 0.005 && GSNAP.snapGrid(null, 1, 2)!.label === "1% of sheet", "#299 snap: uncalibrated plan step");
+  const sp = GSNAP.snapPoint({ x: 0.0149, y: 0.031 }, g);
+  ok(Math.abs(sp.x - 0.01) < 1e-12 && Math.abs(sp.y - 0.04) < 1e-12, "#299 snap: rounds to nearest step");
+  ok(GSNAP.snapPoint({ x: 0.999, y: 1 }, g).x <= 1, "#299 snap: clamps");
+  const dl = GSNAP.snapDelta({ x: 0.1, y: 0.1 }, { x: 0.1149, y: 0.1 }, g);
+  ok(Math.abs(dl.dx - 0.01) < 1e-12 && Math.abs(dl.dy - 0) < 1e-12, "#299 snap: group delta snaps the anchor");
+  ok(GSNAP.feetLabel(0.5) === `6"` && GSNAP.feetLabel(5) === `5'`, "#299 snap: labels");
+}
