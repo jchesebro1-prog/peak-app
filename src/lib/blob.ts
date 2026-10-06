@@ -36,12 +36,20 @@ export async function putBlob(
   return { url: res.url, pathname: res.pathname };
 }
 
+/** putBlobAt overwrites by name, so it may only ever touch the estimate-package cache. */
+export function assertEstimatePackagePath(pathname: string): void {
+  if (!pathname.startsWith("estimate-package/") || pathname.length <= "estimate-package/".length || pathname.split("/").includes("..") || pathname.includes("..")) {
+    throw new Error(`putBlobAt: refusing path outside estimate-package/: ${pathname}`);
+  }
+}
+
 /**
  * #301 slice C — write a private blob at an EXACT pathname, replacing any
  * earlier one (the estimate package's per-revision zip cache). Unlike
  * putBlob there is no random suffix, so a later read finds it by name.
  */
 export async function putBlobAt(pathname: string, bytes: Buffer, contentType: string): Promise<{ url: string; pathname: string }> {
+  assertEstimatePackagePath(pathname);
   const res = await put(pathname, bytes, {
     access: "private",
     contentType,

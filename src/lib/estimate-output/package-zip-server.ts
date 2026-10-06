@@ -1,5 +1,6 @@
 import { buildSpecDocx } from "@/lib/bid-spec-docx";
 import type { SpecCatalogPart } from "@/lib/bid-spec";
+import { after } from "next/server";
 import { blobEnabled, deleteBlobsUnder, getBlobStream, putBlobAt, safeName } from "@/lib/blob";
 import { quoteSpecParts } from "@/lib/client-package-server";
 import { CutSheetDeadlineError } from "@/lib/curtain-cut-sheets/deadline";
@@ -117,8 +118,19 @@ type ServeDeps = {
   cacheOn: boolean;
   get: (path: string) => Promise<ReadableStream | null>;
   put: (path: string, bytes: Buffer) => Promise<void>;
+  /** Run a task after the response goes out (Next's `after()`; fire-and-forget outside a request). */
+  defer: (task: () => Promise<void>) => void;
   build: (q: Quote, rev: QuoteRevision) => Promise<BuiltPackageZip>;
 };
+
+/** Next's `after()` where there is a request scope, else a plain un-awaited call; a rejection is the task's own to catch. */
+function deferTask(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch {
+    void task().catch(() => {});
+  }
+}
 
 const textResponse = (body: string, status: number) =>
   new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" } });
@@ -131,6 +143,7 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
     put: async (path, bytes) => {
       await putBlobAt(path, bytes, "application/zip");
     },
+    defer: deferTask,
     build: (q, rev) => buildRevisionPackageZip(q, rev),
     ...deps,
   };
@@ -153,11 +166,14 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
   const built = await d.build(pkg.q, pkg.rev);
   if (!built) return textResponse(NOTHING_TO_DOWNLOAD, 404);
   if (d.cacheOn && zipCacheable(built.leftOut)) {
-    try {
-      await d.put(path, built.zip);
-    } catch (e) {
-      console.warn("[package] zip cache write failed", e instanceof Error ? e.message : e);
-    }
+    const zip = built.zip;
+    d.defer(async () => {
+      try {
+        await d.put(path, zip);
+      } catch (e) {
+        console.warn("[package] zip cache write failed", e instanceof Error ? e.message : e);
+      }
+    });
   }
   return new Response(zipStream(built.zip), { headers });
 }

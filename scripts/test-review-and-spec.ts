@@ -51708,8 +51708,10 @@ import {
   packageZipCacheOn as e301czCacheOn, LEFT_OUT_REASON as e301czReason, PACKAGE_ZIP_DOC_MAX_BYTES as e301czDocMax, PACKAGE_ZIP_TOTAL_MAX_BYTES as e301czTotalMax,
   PACKAGE_ZIP_DEADLINE_MS as e301czDeadline,
 } from "@/lib/estimate-output/package-zip";
+import { assertEstimatePackagePath as e301czAssertPath } from "@/lib/blob";
 import { quoteSpecParts as e301czSpecParts } from "@/lib/client-package-server";
 import { buildCoverageIndex as e301czIndex } from "@/lib/part-docs/coverage";
+import { specReadyFor as e301czSpecReady } from "@/lib/estimate-output/package-spec-ready";
 import { downloadsView as e301czView, downloadsSummary as e301czSummary } from "@/lib/estimate-output/package-extras-model";
 import { PackageDownloads as E301czDownloads } from "@/components/estimate-output/package-extras";
 import { createElement as createElement301cz } from "react";
@@ -51725,9 +51727,11 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(e301czCacheable([]) && e301czCacheable([{ name: "a", reason: e301czReason.tooBig }]) && !e301czCacheable([{ name: "a", reason: e301czReason.late }]) &&
      !e301czCacheable([{ name: "a", reason: e301czReason.unreadable }]) && !e301czCacheable([{ name: "a", reason: e301czReason.missing }]),
     "#301 zip: only a complete build (or one cut only by the size cap) is cached — a timeout is never frozen");
-  ok(e301czCacheOn({ NODE_ENV: "production" }, true) && !e301czCacheOn({ NODE_ENV: "production" }, false) && !e301czCacheOn({ NODE_ENV: "development" }, true) &&
-     e301czCacheOn({ NODE_ENV: "development", ESTIMATE_PACKAGE_CACHE: "1" }, true),
-    "#301 zip: no cache without Blob, and none under next dev unless ESTIMATE_PACKAGE_CACHE=1 (a scratch DB reuses real quote ids)");
+  ok(e301czCacheOn({ NODE_ENV: "production", VERCEL: "1" }, true) && !e301czCacheOn({ NODE_ENV: "production", VERCEL: "1" }, false) && !e301czCacheOn({ NODE_ENV: "development" }, true) &&
+     e301czCacheOn({ NODE_ENV: "development", ESTIMATE_PACKAGE_CACHE: "1" }, true) && e301czCacheOn({ NODE_ENV: "production", ESTIMATE_PACKAGE_CACHE: "1" }, true),
+    "#301 zip: cache only on Vercel (or ESTIMATE_PACKAGE_CACHE=1) with Blob on");
+  ok(!e301czCacheOn({ NODE_ENV: "production" }, true) && !e301czCacheOn({ NODE_ENV: "production", VERCEL: "0", ESTIMATE_PACKAGE_CACHE: "0" }, true),
+    "#301 zip: a local next start (no VERCEL) against a scratch DB with the prod Blob token never caches");
   // quoteSpecParts (pure): a ready part assembles; a part with no spec and an unknown sku are gaps.
   const cat = [
     { id: "R", sku: "R", desc: "Ready part", category: "Other", unit: "ea", list: 1, cost: 1, specSectionId: "ss-1", specBody: "Provide the fixture." },
@@ -51737,6 +51741,15 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
     catalog: cat, docIndex: e301czIndex({ documents: [], links: [], accessoryLinks: [], parts: [] }), sections: [{ id: "ss-1", number: "11 61 23", title: "Lighting", sort: 1, part1: [], part3: [] }] as never[], by: "T", date: 1 });
   ok(sp.spec.sections.length === 1 && sp.spec.engagementId === "quote:Q-1" && sp.gaps.map((g) => `${g.kind}:${g.sku}`).sort().join() === "missing-catalog:Z,missing-datasheet:N,missing-datasheet:R,missing-spec:N" && sp.items.length === 3,
     "#301 zip: quoteSpecParts assembles the ready rows and reports the same gaps the client package did");
+  {
+    const rp = [{ sku: "R", specSectionId: "ss-1", specBody: "Provide the fixture." }, { sku: "N" }] as never[];
+    ok(e301czSpecReady(rp, [{ id: "ss-1" }] as never[]) && !e301czSpecReady(rp, [{ id: "ss-other" }] as never[]) && !e301czSpecReady(rp, []) &&
+       !e301czSpecReady([{ sku: "N" }] as never[], [{ id: "ss-1" }] as never[]),
+      "#301 zip: the Downloads card promises Specifications.docx only when a BOM row's section still exists (a deleted section never advertises a docx the zip lacks)");
+    const ex = rd("src/lib/estimate-output/package-extras.ts");
+    ok(ex.includes("specReadyFor(docs.parts, await allSections())") && !ex.includes("const specReady = docs.parts.some"),
+      "#301 zip: loadPackageExtras reads the same allSections() the docx assembles from");
+  }
   const cps = rd("src/lib/client-package-server.ts");
   const qcp = cps.slice(cps.indexOf("export async function createQuoteClientPackage("));
   ok(qcp.includes("quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now() })") &&
@@ -51744,11 +51757,24 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
     "#301 zip: the staff quote package builds its spec through quoteSpecParts (the #296 BOM line unchanged)");
   ok(/addRandomSuffix: false,\s*allowOverwrite: true/.test(rd("src/lib/blob.ts")) && rd("src/lib/rack/submittal-server.ts").includes("export async function readCapped("),
     "#301 zip: putBlobAt writes a fixed path; readCapped is shared with the rack submittal");
+  {
+    const blobSrc = rd("src/lib/blob.ts");
+    const fn = blobSrc.slice(blobSrc.indexOf("export async function putBlobAt("));
+    let rejected = 0;
+    const bad = ["part-docs/x.pdf", "/estimate-package/x.zip", "estimate-package/../part-docs/x.zip", "estimate-package/a/../../b", "../estimate-package/x", "", "estimate-package"];
+    for (const b of bad) { try { e301czAssertPath(b); } catch (e) { if (/estimate-package/.test(e instanceof Error ? e.message : "")) rejected++; } }
+    let okPath = true;
+    try { e301czAssertPath("estimate-package/Q-1/rev-2.zip"); } catch { okPath = false; }
+    ok(rejected === bad.length && okPath && fn.indexOf("assertEstimatePackagePath(pathname)") > 0 && fn.indexOf("assertEstimatePackagePath(pathname)") < fn.indexOf("await put("),
+      "#301 zip: putBlobAt refuses any path outside estimate-package/ or containing .. , before it calls Blob");
+  }
   const route = rd("src/app/share/quote/[id]/[token]/package.zip/route.ts");
   ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
      route.indexOf("resolveSharedPackage(") < route.indexOf("servePackageZip(pkg)") && route.includes("SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS") &&
-     route.includes("export const maxDuration = 60;"),
-    "#301 zip: the route rate-limits (6 / 10 min / IP), takes only a v2 token, then serves the pinned revision's zip");
+     route.includes("export const maxDuration = 120;") && !route.includes("maxDuration = 60"),
+    "#301 zip: the route rate-limits (6 / 10 min / IP), takes only a v2 token, then serves the pinned revision's zip (maxDuration 120, as the rack submittal)");
+  ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
+    "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
   ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("buildSpecDocx(sp.spec)") && srv.includes("zipCacheable(built.leftOut)") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
@@ -51833,11 +51859,27 @@ async function e301cZipAsyncChecks(): Promise<void> {
     put: async (path: string, bytes: Buffer) => { puts.push(path); cached = bytes; },
     build: async () => { builds++; return { zip: Buffer.from("ZIP"), leftOut: [], datasheets: 1, specsheets: 0, specifications: false }; },
   };
-  const r1 = await Z.servePackageZip(pkg, deps);
-  const r2 = await Z.servePackageZip(pkg, deps);
+  const deferred: Array<() => Promise<void>> = [];
+  const defer = (task: () => Promise<void>) => { deferred.push(task); };
+  const r1 = await Z.servePackageZip(pkg, { ...deps, defer });
+  ok(puts.length === 0 && cached === null && deferred.length === 1, "#301 zip (serve): the cache write is deferred, not awaited before the response");
+  await deferred.shift()!();
+  const r2 = await Z.servePackageZip(pkg, { ...deps, defer });
   ok(r1.status === 200 && r2.status === 200 && builds === 1 && puts.join() === `estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}.zip` && (await r2.text()) === "ZIP" &&
      /attachment; filename="EST-\d+ Rev 1 package\.zip"/.test(r1.headers.get("content-disposition") || "") && r1.headers.get("content-type") === "application/zip",
     "#301 zip (serve): the first download builds and caches; the second streams the cache");
+  const failDefer: Array<() => Promise<void>> = [];
+  const failed = await Z.servePackageZip(pkg, { ...deps, get: async () => null, defer: (t) => { failDefer.push(t); }, put: async () => { throw new Error("blob down"); } });
+  let failThrew = false;
+  try { await failDefer[0]?.(); } catch { failThrew = true; }
+  ok(failed.status === 200 && failDefer.length === 1 && !failThrew, "#301 zip (serve): a failed deferred cache write is logged, never thrown");
+  // The default defer (no request scope here) falls back to a fire-and-forget write and never delays the response.
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let started = false;
+  const slow = await Z.servePackageZip(pkg, { ...deps, get: async () => null, put: async () => { started = true; await gate; } });
+  ok(slow.status === 200 && started, "#301 zip (serve): with no request scope the write is fired without awaiting (a slow put does not hold the response)");
+  release();
   const noCache = await Z.servePackageZip(pkg, { ...deps, get: async () => null, build: async () => ({ zip: Buffer.from("Z2"), leftOut: [{ name: "a", reason: LEFT_OUT_REASON.late }], datasheets: 0, specsheets: 0, specifications: false }) });
   const empty = await Z.servePackageZip(pkg, { ...deps, get: async () => null, build: async () => null });
   ok(noCache.status === 200 && puts.length === 1 && empty.status === 404 && (await empty.text()) === "Nothing to download for this estimate.",

@@ -4,8 +4,8 @@ import { resolveSharedPackage, SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS } from 
 import { isShareTokenV2 } from "@/lib/quote-share/token";
 
 export const dynamic = "force-dynamic";
-/** A 45 s build deadline plus the docx and the response. */
-export const maxDuration = 60;
+/** A 45 s build deadline plus the docx and the response (same ceiling as the rack submittal route). */
+export const maxDuration = 120;
 
 const notFound = () => new Response("Not found", { status: 404 });
 
@@ -18,7 +18,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string; tok
   const { id, token } = await ctx.params;
   if (!rateLimit("share-zip:" + (clientIp(req) || "unknown"), SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS).ok) return new Response("Too many requests", { status: 429 });
   if (!isShareTokenV2(token)) return notFound();
-  const pkg = await resolveSharedPackage(id, token);
+  let pkg: Awaited<ReturnType<typeof resolveSharedPackage>>;
+  try {
+    pkg = await resolveSharedPackage(id, token);
+  } catch (e) {
+    console.error("[package] zip link resolve failed", e);
+    return notFound();
+  }
   if (!pkg) return notFound();
   try {
     return await servePackageZip(pkg);

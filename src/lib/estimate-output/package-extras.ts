@@ -1,6 +1,7 @@
 import type { SharedPackage } from "@/lib/quote-share/links";
-import { hasPrintableSpec } from "@/lib/specs/articles";
 import { revisionPackageDocs } from "./package-docs-server";
+import { specReadyFor } from "./package-spec-ready";
+import { allSections } from "@/lib/stores/spec-sections";
 import { datasheetLinks, downloadsView, EMPTY_EXTRAS, type PackageExtras } from "./package-extras-model";
 
 /**
@@ -14,7 +15,7 @@ export async function loadPackageExtras(hit: SharedPackage, base: string): Promi
   try {
     const docs = await revisionPackageDocs(hit.rev);
     extras.datasheets = datasheetLinks(docs.bySku, base);
-    const specReady = docs.parts.some((p) => !!(p as { specSectionId?: string }).specSectionId && hasPrintableSpec(p as { specBody?: string; specState?: "authored" | "draft" }));
+    const specReady = specReadyFor(docs.parts, await allSections());
     extras.downloads = downloadsView(docs.documents, specReady, base);
   } catch (e) {
     console.warn("[package] documents unavailable", e instanceof Error ? e.message : e);
