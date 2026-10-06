@@ -1,9 +1,11 @@
-import { get as getQuote, patchShareLink, type Quote } from "@/lib/stores/quotes";
-import { SHARE_TOKEN_RE, signShareToken, verifyShareToken } from "./token";
+import { get as getQuote, patchShareLink, type Quote, type QuoteRevision } from "@/lib/stores/quotes";
+import { latestSentRevision } from "@/lib/quote-pdf/state";
+import { parseShareToken, SHARE_TOKEN_RE, signShareToken, signShareTokenV2, verifyShareToken, verifyShareTokenV2 } from "./token";
 import {
   ONLINE_COPY, onlineEstimateState, shareEligibility, sharePath,
   type OnlineEstimateState, type ShareLinkStatus, type ShareLinkView,
 } from "./view";
+import { packageState, sentRevisionRows, type VisiblePackageState } from "./package-view";
 
 /**
  * #293 slice 3 — client share links, server side (spec §5.3, §5.5, §7).
@@ -22,13 +24,16 @@ export function shareSecret(): string {
   return process.env.AUTH_SECRET || "";
 }
 
-export function shareLinkView(q: Pick<Quote, "id" | "shareLink">, secret: string, now: number, withPath = true): ShareLinkView | null {
+export function shareLinkView(q: Pick<Quote, "id" | "shareLink" | "revisions">, secret: string, now: number, withPath = true): ShareLinkView | null {
   const l = q.shareLink;
   if (!l) return null;
   const active = !!secret && typeof l.nonce === "string" && !!l.nonce && l.expiresAt > now;
+  // #301 slice B: the copyable link pins the latest SENT revision (D-g).
+  const latest = active && withPath ? latestSentRevision(q.revisions) : null;
   return {
     active,
     path: active && withPath ? sharePath(q.id, signShareToken(secret, q.id, l.nonce, l.expiresAt)) : null,
+    pathV2: latest ? sharePath(q.id, signShareTokenV2(secret, q.id, latest.rev, l.nonce, l.expiresAt)) : null,
     expiresAt: l.expiresAt,
     createdAt: l.createdAt,
     createdBy: l.createdBy,
@@ -37,9 +42,10 @@ export function shareLinkView(q: Pick<Quote, "id" | "shareLink">, secret: string
   };
 }
 
-/** The Client link panel's read: the path only for a Send holder. */
+/** The Client link panel's read: the paths only for a Send holder; the
+ *  per-revision rows (no paths) for anyone signed in. */
 export function shareLinkStatus(q: Quote, canSend: boolean, secret: string, now: number): ShareLinkStatus {
-  return { state: shareEligibility(q), canSend, link: shareLinkView(q, secret, now, canSend) };
+  return { state: shareEligibility(q), canSend, link: shareLinkView(q, secret, now, canSend), sentRevs: sentRevisionRows(q) };
 }
 
 export type ShareWrite = { ok: true; link: ShareLinkView } | { ok: false; error: string };
@@ -108,4 +114,32 @@ export async function resolveSharedQuote(
   if (!q || q.id !== id) return null;
   if (!verifyShareToken(secret, token, id, q.shareLink, opts.now ?? Date.now())) return null;
   return { q, state: onlineEstimateState(q) };
+}
+
+/** #301 slice B — a rev-pinned (v2) package link, resolved. `currentPath`:
+ *  the v2 link to the latest sent revision when this one is superseded. */
+export type SharedPackage = { q: Quote; rev: QuoteRevision; state: VisiblePackageState; currentPath: string | null };
+
+/** The package page's (and its photo route's) one check, in order: shape
+ *  (no DB read for a malformed id or a non-v2 token) → get → v2 verify →
+ *  packageState. Read-only. null = the one "isn't active" card. */
+export async function resolveSharedPackage(
+  id: string,
+  token: string,
+  opts: { secret?: string; now?: number } = {}
+): Promise<SharedPackage | null> {
+  if (typeof id !== "string" || !id || id.length > SHARE_ID_MAX) return null;
+  const parsed = parseShareToken(token);
+  if (!parsed || parsed.v !== 2) return null;
+  const secret = opts.secret ?? shareSecret();
+  if (!secret) return null;
+  const q = await getQuote(id);
+  if (!q || q.id !== id || !q.shareLink) return null;
+  const rev = verifyShareTokenV2(secret, token, id, q.shareLink, opts.now ?? Date.now());
+  if (rev == null) return null;
+  const state = packageState(q, rev);
+  if (state.kind === "inactive") return null;
+  const l = q.shareLink;
+  const currentPath = state.kind === "superseded" ? sharePath(id, signShareTokenV2(secret, id, state.latestRev, l.nonce, l.expiresAt)) : null;
+  return { q, rev: state.rev, state, currentPath };
 }

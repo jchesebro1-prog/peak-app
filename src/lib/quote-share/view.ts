@@ -1,6 +1,7 @@
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { latestSentRevision, pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import type { SentRevRow } from "./package-view";
 
 /**
  * #293 slice 3 — the online estimate's pure rules (spec §2.7, decision 16):
@@ -137,11 +138,14 @@ export function onlineView(raw: string | string[] | undefined): "narrative" | "b
   return (Array.isArray(raw) ? raw[0] : raw) === "bom" ? "bom" : "narrative";
 }
 
-/** What a browser learns about a link — never the nonce. `path` only while
- *  active, and only for a `send` holder. */
+/** What a browser learns about a link — never the nonce. `path` (v1, #293)
+ *  and `pathV2` (#301 slice B — pinned to the latest SENT revision) only
+ *  while active, and only for a `send` holder. `pathV2` is optional so
+ *  older literal views (harness fixtures) stay valid. */
 export type ShareLinkView = {
   active: boolean;
   path: string | null;
+  pathV2?: string | null;
   expiresAt: number;
   createdAt: number;
   createdBy: string;
@@ -149,4 +153,6 @@ export type ShareLinkView = {
   revokedBy: string | null;
 };
 
-export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null };
+/** `sentRevs` (#301 slice B) — every sent revision with its opens, for any
+ *  signed-in user; it carries no path. */
+export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null; sentRevs: SentRevRow[] };

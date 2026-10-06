@@ -67,10 +67,13 @@ export function coverFooterLine(input: { companyName: string; offices?: CoverOff
   return [input.companyName, address, o?.phone || "", input.website || ""].map((s) => (s || "").trim()).filter(Boolean).join(" · ");
 }
 
-/** Slice A link line: the active v1 link, only while the online page would show the estimate. */
+/** The cover's link line: the active link's v2 (rev-pinned) path — #301
+ *  slice B — else its v1 path (a view built without pathV2), only while the
+ *  online page would show the estimate. */
 export function coverShareUrl(origin: string | null, link: ShareLinkView | null, state: OnlineEstimateState["kind"]): string | null {
-  if (!origin || !link || !link.active || !link.path || state !== "ok") return null;
-  return origin.replace(/\/+$/, "") + link.path;
+  const path = link ? (link.pathV2 ?? link.path) : null;
+  if (!origin || !link || !link.active || !path || state !== "ok") return null;
+  return origin.replace(/\/+$/, "") + path;
 }
 
 export function coverPdfFileName(number: string): string {

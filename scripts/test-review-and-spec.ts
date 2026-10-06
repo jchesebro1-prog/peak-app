@@ -10792,6 +10792,7 @@ seeded()
   .then(() => partDocSymbolAsyncChecks300())
   .then(() => objectSymbolAsyncChecks300())
   .then(() => estimateOutput301AAsyncChecks())
+  .then(() => estimateOutput301BAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -50912,4 +50913,89 @@ import type { Quote as E301bsQuote, QuoteRevision as E301bsRev } from "@/lib/sto
   ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/quote-pdf\/state"|\.\/view"|@\/lib\/estimate-output\/opens")/m.test(rd("src/lib/quote-share/package-view.ts")) &&
      !/^import (?!type)/m.test(rd("src/lib/estimate-output/opens.ts")),
     "#301 purity: package-view.ts value-imports only quote-pdf/state, ./view and opens; opens.ts imports nothing");
+}
+
+/* ======================================================================
+   #301 slice B — links: the v2 path on a link view (latest sent rev),
+   resolveSharedPackage (shape → get → v2 verify → state; a superseded
+   page gets the current version's path), the per-rev status rows, and
+   the cover's link line moving to v2.
+   ====================================================================== */
+import { shareLinkView as e301blView, resolveSharedPackage as e301blResolve } from "@/lib/quote-share/links";
+import { signShareToken as e301blSign1, signShareTokenV2 as e301blSign2 } from "@/lib/quote-share/token";
+import { coverShareUrl as e301blCoverUrl } from "@/lib/estimate-output/cover";
+{
+  const S = "test-secret-301bl";
+  const NOW = 1_800_000_000_000;
+  const exp = NOW + 86_400_000;
+  const link = { nonce: "N".repeat(43), expiresAt: exp, createdAt: 1, createdBy: "x" };
+  const revs = [{ rev: 1, reason: "sent", at: 1 }, { rev: 2, reason: "manual", at: 2 }, { rev: 3, reason: "sent", at: 3 }];
+  const v = e301blView({ id: "Q-1", shareLink: link, revisions: revs } as never, S, NOW);
+  ok(v?.path === "/share/quote/Q-1/" + e301blSign1(S, "Q-1", link.nonce, exp) && v?.pathV2 === "/share/quote/Q-1/" + e301blSign2(S, "Q-1", 3, link.nonce, exp),
+    "#301 links: the view keeps the v1 path and adds the v2 path pinned to the latest SENT rev");
+  ok(e301blView({ id: "Q-1", shareLink: link, revisions: [revs[1]] } as never, S, NOW)?.pathV2 === null &&
+     e301blView({ id: "Q-1", shareLink: link, revisions: revs } as never, S, NOW, false)?.pathV2 === null &&
+     e301blView({ id: "Q-1", shareLink: { ...link, expiresAt: 0 }, revisions: revs } as never, S, NOW)?.pathV2 === null,
+    "#301 links: no v2 path before a send, without Send, or once revoked");
+  const lv = { active: true, path: "/share/quote/Q-1/1.v1", pathV2: "/share/quote/Q-1/1.3.v2", expiresAt: 9, createdAt: 1, createdBy: "x", revokedAt: null, revokedBy: null };
+  ok(e301blCoverUrl("https://app.test/", lv, "ok") === "https://app.test/share/quote/Q-1/1.3.v2" && e301blCoverUrl("https://app.test", { ...lv, pathV2: undefined }, "ok") === "https://app.test/share/quote/Q-1/1.v1" &&
+     e301blCoverUrl("https://app.test", lv, "revising") === null,
+    "#301 cover: the link line prints the v2 (rev-pinned) link; a view without one still prints its path");
+  const lk = readFileSync(join(process.cwd(), "src/lib/quote-share/links.ts"), "utf8");
+  const rsp = lk.slice(lk.indexOf("export async function resolveSharedPackage("));
+  ok(rsp.indexOf("parseShareToken(") < rsp.indexOf("getQuote(") && rsp.indexOf("getQuote(") < rsp.indexOf("verifyShareTokenV2(") && rsp.indexOf("verifyShareTokenV2(") < rsp.indexOf("packageState("),
+    "#301 links: resolveSharedPackage checks shape before any read, then get → verify → state (read-only)");
+  ok(!/\b(update|patchShareLink|addQuoteRevision|setStatus)\(/.test(rsp.slice(0, rsp.indexOf("\n}\n"))), "#301 links: resolving a package never writes");
+}
+
+async function e301bLinksAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const L = await import("@/lib/quote-share/links");
+  const S = "test-secret-301bl";
+  const QID = fixtureId(301, "b-links");
+  const sec = { id: "s1", name: "Stage lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+  await Q.create({ id: QID, name: "#301b links", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }); // rev 1
+  const now = Date.now();
+  const made = await L.ensureShareLink(QID, "Tester", { secret: S, now });
+  const tok1 = made.ok ? made.link.path!.split("/").pop()! : "";
+  const tokA = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
+  ok(made.ok && /^\d+\.1\.[A-Za-z0-9_-]{43}$/.test(tokA), "#301 links (DB): Copy client link returns a v2 path pinned to rev 1");
+  const a = await L.resolveSharedPackage(QID, tokA, { secret: S, now });
+  ok(a?.state.kind === "ok" && a.rev.rev === 1 && a.currentPath === null, "#301 links (DB): a v2 token opens its pinned revision");
+  ok((await L.resolveSharedQuote(QID, tok1, { secret: S, now }))?.state.kind === "ok" && (await L.resolveSharedQuote(QID, tokA, { secret: S, now })) === null &&
+     (await L.resolveSharedPackage(QID, tok1, { secret: S, now })) === null,
+    "#301 links (DB): v1 keeps #293's resolve; v1 and v2 never cross");
+
+  // A manual snapshot, then a second send: rev 3, printed "Rev 2" (R11).
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "manual" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
+  const view2 = L.shareLinkView((await Q.get(QID))!, S, now);
+  const tokB = view2?.pathV2?.split("/").pop() || "";
+  ok(/^\d+\.3\.[A-Za-z0-9_-]{43}$/.test(tokB) && view2?.path === (made.ok ? made.link.path : "x"), "#301 links (DB): after a re-send the v2 path pins the new rev; the v1 path is unchanged");
+  const sup = await L.resolveSharedPackage(QID, tokA, { secret: S, now });
+  ok(sup?.state.kind === "superseded" && sup.rev.rev === 1 && sup.currentPath === view2?.pathV2, "#301 links (DB): the old v2 link → superseded, pointing at the current version");
+  const st = L.shareLinkStatus((await Q.get(QID))!, true, S, now);
+  ok(st.sentRevs.map((r) => r.line).join(" | ") === "Rev 2 · not opened yet | Rev 1 — superseded · not opened yet", "#301 links (DB): the status lists each sent rev, newest first, as Rev N");
+
+  await Q.update(QID, { status: "draft" });
+  ok((await L.resolveSharedPackage(QID, tokB, { secret: S, now }))?.state.kind === "revising" && (await L.resolveSharedPackage(QID, tokA, { secret: S, now }))?.state.kind === "superseded",
+    "#301 links (DB): recalled → the current link shows revising, the old one stays superseded");
+  await Q.update(QID, { status: "lost" });
+  const closed = await L.resolveSharedPackage(QID, tokB, { secret: S, now });
+  ok(closed?.state.kind === "ok" && closed.state.closed, "#301 links (DB): lost → ok, closed");
+  await L.revokeShareLink(QID, "Revoker");
+  ok((await L.resolveSharedPackage(QID, tokA, { secret: S, now })) === null && (await L.resolveSharedPackage(QID, tokB, { secret: S, now })) === null,
+    "#301 links (DB): Revoke kills every v2 token");
+  ok((await L.resolveSharedPackage("Q".repeat(65), tokB, { secret: S, now })) === null && (await L.resolveSharedPackage(QID, "nope", { secret: S, now })) === null,
+    "#301 links (DB): an oversize id or a malformed token → null");
+}
+
+/* #301 slice B — DB checks. Later slice B tasks append one
+   `await e301b<Part>AsyncChecks();` line at the end of this body. */
+async function estimateOutput301BAsyncChecks(): Promise<void> {
+  await e301bLinksAsyncChecks();
 }
