@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition, type CSSProperties } from "react";
 import { getShareLinkAction, revokeShareLinkAction, shareLinkStatusAction } from "./share-actions";
+import { PackageStaffPanel } from "./package-staff-panel";
 import { ONLINE_COPY, type ShareLinkStatus } from "@/lib/quote-share/view";
 
 /**
@@ -15,6 +16,8 @@ import { ONLINE_COPY, type ShareLinkStatus } from "@/lib/quote-share/view";
  * #301 slice B: Copy copies the v2 link (pinned to the latest sent revision);
  * every sent revision is listed with its opens (a superseded one keeps working
  * with a banner).
+ * #301 slice C: the package's staff side (gaps, drawings, responses, Rebuild)
+ * is PackageStaffPanel, mounted last.
  */
 
 const FAILED = "Could not reach the server. Try again.";
@@ -206,6 +209,7 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
           {err}
         </span>
       )}
+      <PackageStaffPanel quoteId={quoteId} />
     </div>
   );
 }

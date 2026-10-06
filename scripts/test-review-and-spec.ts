@@ -51534,6 +51534,7 @@ async function estimateOutput301CAsyncChecks(): Promise<void> {
   await e301cZipAsyncChecks();
   await e301cFilesAsyncChecks();
   await e301cActionsAsyncChecks();
+  await e301cPanelAsyncChecks();
 }
 
 async function e301cStoreAsyncChecks(): Promise<void> {
@@ -52007,8 +52008,8 @@ async function e301cFilesAsyncChecks(): Promise<void> {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const srv = rd("src/lib/estimate-output/responses-server.ts");
   const sub = srv.slice(srv.indexOf("export async function submitClientResponse("), srv.indexOf("export async function notifyClientResponse("));
-  const order = ["o.website", "RESPONSE_IP_LIMIT", "resolveSharedPackage(", "canAct(hit.state)", "RESPONSE_QUOTE_LIMIT", "sanitizeClientResponse(", "appendClientResponse(", "notify("].map((s) => sub.indexOf(s));
-  ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 actions: honeypot → IP limit → token → canAct → quote limit → sanitize → append → notify (${order.join(",")})`);
+  const order = ["o.website", "RESPONSE_IP_LIMIT", "resolveSharedPackage(", "canAct(hit.state)", "sanitizeClientResponse(", "RESPONSE_QUOTE_LIMIT", "appendClientResponse(", "notify("].map((s) => sub.indexOf(s));
+  ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 actions: honeypot → IP limit → token → canAct → sanitize → quote limit → append → notify (${order.join(",")})`);
   ok(!/\b(setStatus|update|setQuoteStage|patchShareLink)\(/.test(srv) && srv.includes('type: "system"') && srv.includes('parentKind: "quote"') && srv.includes("system: true") &&
      srv.includes("responseAssignees(q.owner, q.preparedBy, users)"),
     "#301 actions: never a status or stage write; a system note (R15), a system lead activity, a task per R16 assignee");
@@ -52090,4 +52091,86 @@ async function e301cActionsAsyncChecks(): Promise<void> {
     createTask: async (t: { assigneeUserId?: string | null }) => { seen.push(`task:${t.assigneeUserId}`); return {} as never; },
   });
   ok(seen.join() === "note,act:L-301C:system,task:u-a", "#301 actions (DB): a failing step never stops the rest; the lead gets a system activity; no lead estimator → every active approver");
+}
+
+/* ======================================================================
+   #301 slice C — staff panel: the Client link panel gains the package's
+   staff side — gap chips (decision 13: staff-only), Drawings (list,
+   Upload…, remove behind an inline confirm), client responses newest
+   first, and Rebuild package. A separate client component, mounted by one
+   line, so the #293 panel pins stay put.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const panel = rd("src/app/(app)/estimator/package-staff-panel.tsx");
+  ok(/^"use client";/.test(panel) && panel.includes('data-testid="package-staff"') && panel.includes('data-testid="package-gaps"') && panel.includes('data-testid="package-responses"') &&
+     panel.includes("putPackageFile(file, quoteId)") && panel.indexOf("putPackageFile(file, quoteId)") < panel.indexOf("addPackageFileAction(") &&
+     panel.includes("rebuildPackageZipAction(") && panel.includes("removePackageFileAction(") && !panel.includes("confirm(") && (panel.match(/catch \{/g) || []).length >= 4 &&
+     !/^import (?!type)[^\n]*from "@\/(lib\/(stores|blob|session|users|settings)|db)\//m.test(panel) && !panel.includes("estimate-files/"),
+    "#301 panel: a client component — upload to Blob then finalize, remove with an inline confirm, rebuild; no server import; never builds a storage path itself");
+  const clp = rd("src/app/(app)/estimator/client-link-panel.tsx");
+  ok(clp.includes('import { PackageStaffPanel } from "./package-staff-panel";') && clp.includes("<PackageStaffPanel quoteId={quoteId} />") &&
+     (clp.match(/await reload\(\);/g) || []).length >= 4 && (clp.match(/catch \{/g) || []).length >= 3,
+    "#301 panel: the Client link panel mounts it in one line; its own #293 shape is unchanged");
+  const acts = rd("src/app/(app)/estimator/package-actions.ts");
+  const read = acts.slice(acts.indexOf("export async function packagePanelAction("));
+  ok(read.indexOf("await requireUser();") < read.indexOf("getQuote(") && read.includes('loadPackagePanel(q, can("send", user.roles))') &&
+     acts.slice(acts.indexOf("export async function rebuildPackageZipAction(")).includes("clearPackageZipCache(q.id)"),
+    "#301 panel: any signed-in user reads the panel (Send decides the buttons); Rebuild clears this quote's cached zips");
+  const rs = rd("src/lib/estimate-output/responses-server.ts");
+  ok(rs.includes("responseAssignees(hit.q.owner, hit.q.preparedBy, users)") && rs.indexOf("sanitizeClientResponse(") < rs.indexOf("RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS)"),
+    "#301 panel (Task 7 review): the confirmation names the lead only when they were notified; the per-quote slot is spent after the submission sanitizes");
+}
+
+async function e301cPanelAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const P = await import("@/lib/estimate-output/package-panel-server");
+  const QID = fixtureId(301, "c-panel");
+  const items = [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }, { id: 2, sku: "B", desc: "B", qty: 1, unit: "ea", cost: 1, price: 2 }];
+  await Q.create({ id: QID, name: "#301c panel", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+    spec: { sections: [
+      { id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, clientGoals: "", keyProducts: [{ lineKey: "1", sku: "A", text: "", photo: true }], items },
+      { id: "s2", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, clientGoals: "Safe flying.", items },
+    ], mobs: [] } });
+  registerFixture("quotes", QID);
+  const deps = { datasheetGaps: async () => 2, uploads: () => false };
+  const p1 = await P.loadPackagePanel((await Q.get(QID))!, false, deps);
+  ok(p1.gaps.join("|") === "2 parts without a datasheet|No drawings|1 key product needs a paragraph|No client goals on 1 scope" && !p1.canSend && !p1.uploads && p1.files.length === 0 && p1.responses.length === 0,
+    "#301 panel (DB): the four gap chips from the live quote; Send and storage flags pass through");
+  await Q.addPackageFile(QID, { id: "PF-0000000301c1", kind: "plan", name: "Plan.pdf", blobPath: `estimate-files/${(await import("@/lib/estimate-output/package-files")).quotePathSegment(QID)}/UP-0123456789abcdef/p.pdf`, contentType: "application/pdf", size: 10, source: "upload", addedAt: 1, addedBy: "T" });
+  await Q.update(QID, { status: "sent" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
+  const base = { kind: "question" as const, name: "Pat", email: "", message: "Q", sectionIds: [], sectionNames: [], total: 0 };
+  await Q.appendClientResponse(QID, 1, base, Date.UTC(2026, 9, 5, 15), "CR-0000000301c1");
+  await Q.appendClientResponse(QID, 1, { ...base, message: "Later" }, Date.UTC(2026, 9, 6, 15), "CR-0000000301c2");
+  const p2 = await P.loadPackagePanel((await Q.get(QID))!, true, { ...deps, datasheetGaps: async () => { throw new Error("down"); } });
+  ok(!p2.gaps.includes("No drawings") && !p2.gaps.some((g) => g.includes("datasheet")) && p2.files[0]?.name === "Plan.pdf" && p2.canSend &&
+     p2.responses.map((r) => r.message).join() === "Later,Q" && p2.responses[0].revLabel === "Rev 1",
+    "#301 panel (DB): a drawing clears \"No drawings\"; a failed datasheet count shows no chip; responses newest first as Rev N");
+
+  // Task 7 review fixes (a) the confirmation names only a lead who was actually notified; (b) invalid submits spend no per-quote slot.
+  const L = await import("@/lib/quote-share/links");
+  const R = await import("@/lib/estimate-output/responses-server");
+  const S = "test-secret-301cp";
+  const RID = fixtureId(301, "c-panel-resp");
+  await Q.create({ id: RID, name: "#301c panel resp", customer: "Spec fixture", customerId: null, owner: "Lead 301P", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items }], mobs: [] } });
+  registerFixture("quotes", RID);
+  await Q.update(RID, { status: "sent" });
+  await Q.addQuoteRevision(RID, { by: "Test", reason: "sent" });
+  const made = await L.ensureShareLink(RID, "Tester", { secret: S });
+  const tok = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
+  const salt = String(Date.now() % 100_000);
+  const notify = async () => {};
+  const mkUsers = (status: string) => [{ id: "u-301p", name: "Lead 301P", status, roles: ["Estimator"] }];
+  const active = await R.submitClientResponse("question", RID, tok, { name: "Pat", message: "Hi" }, "198.51.100.1-" + salt, { secret: S, users: async () => mkUsers("active"), notify });
+  const inactive = await R.submitClientResponse("question", RID, tok, { name: "Pat", message: "Hi" }, "198.51.100.2-" + salt, { secret: S, users: async () => mkUsers("inactive"), notify });
+  ok(active.ok && (active as { confirmation: string }).confirmation === "Thanks — Lead 301P has been notified." &&
+     inactive.ok && (inactive as { confirmation: string }).confirmation === "Thanks — Peak Systems Group has been notified.",
+    "#301 panel (DB): an inactive lead estimator isn't named — the generic confirmation, since they weren't notified");
+  const invalid = [];
+  for (let i = 0; i < 31; i++) invalid.push(await R.submitClientResponse("question", RID, tok, { name: "", message: "x" }, `198.51.100.${10 + i}-` + salt, { secret: S, users: async () => mkUsers("active"), notify }));
+  const valid = await R.submitClientResponse("question", RID, tok, { name: "Pat", message: "Still fine" }, "198.51.100.99-" + salt, { secret: S, users: async () => mkUsers("active"), notify });
+  ok(invalid.every((r) => !r.ok) && valid.ok, "#301 panel (DB): 31 invalid (empty-name) submits don't spend the per-quote 30/day slots — a valid one still lands");
 }

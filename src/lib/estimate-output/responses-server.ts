@@ -40,9 +40,10 @@ export async function submitClientResponse(kind: ClientResponseKind, id: string,
   const hit = await resolveSharedPackage(id, token, { secret: deps.secret, now });
   if (!hit) return { ok: false, error: CLIENT_ACTION_COPY.inactive };
   if (!canAct(hit.state)) return { ok: false, error: hit.state.kind === "superseded" ? CLIENT_ACTION_COPY.superseded : CLIENT_ACTION_COPY.closed };
-  if (!rateLimit(`share-respond-quote:${hit.q.id}`, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS).ok) return { ok: false, error: CLIENT_ACTION_COPY.tooMany };
   const clean = sanitizeClientResponse(kind, o, responseScopes(revisionSections(hit.rev)));
   if (!clean.ok) return clean;
+  // The per-quote daily slot is spent only on a submission that will be written (an invalid one costs the quote nothing).
+  if (!rateLimit(`share-respond-quote:${hit.q.id}`, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS).ok) return { ok: false, error: CLIENT_ACTION_COPY.tooMany };
   const res = await appendClientResponse(hit.q.id, hit.rev.rev, clean.value, now, newResponseId());
   if (!res.ok) return { ok: false, error: res.reason === "full" ? CLIENT_ACTION_COPY.full : res.reason === "state" ? CLIENT_ACTION_COPY.closed : CLIENT_ACTION_COPY.inactive };
   let users: RosterUser[] = [];
@@ -57,7 +58,10 @@ export async function submitClientResponse(kind: ClientResponseKind, id: string,
   } catch (e) {
     console.error("[client-response] notify failed", e instanceof Error ? e.message : e);
   }
-  return { ok: true, confirmation: confirmationText(leadEstimator(hit.q.owner, hit.q.preparedBy, users)?.name ?? null) };
+  // Name the lead estimator only when they were the one notified (an inactive lead falls back to the approvers).
+  const notified = responseAssignees(hit.q.owner, hit.q.preparedBy, users);
+  const lead = leadEstimator(hit.q.owner, hit.q.preparedBy, users);
+  return { ok: true, confirmation: confirmationText(notified.length === 1 && lead && notified[0] === lead ? lead.name : null) };
 }
 
 type NotifyDeps = {
