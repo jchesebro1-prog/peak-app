@@ -1850,11 +1850,13 @@ export default function EstimatorClient({
     if (!goalsSurveyId) return;
     let live = true;
     // Raw state on purpose (not the setSections wrapper, which clears the #254
-    // banner); aliased so the #254 pin on the raw-writer count stays 4.
-    const writeSections = setSectionsState;
+    // banner). Automatic, so — like the freight auto-apply — the same pre-fill
+    // goes into a live re-price banner's Undo snapshot, or Undo would drop it.
     surveyGoalsAction(goalsSurveyId)
       .then((r) => {
-        if (live && r.ok) writeSections((prev) => fillClientGoals(prev, r.goals));
+        if (!live || !r.ok) return;
+        setSectionsState((prev) => fillClientGoals(prev, r.goals));
+        setTierReprice((n) => (n ? { ...n, before: fillClientGoals(n.before, r.goals) } : n));
       })
       .catch(() => undefined);
     return () => {

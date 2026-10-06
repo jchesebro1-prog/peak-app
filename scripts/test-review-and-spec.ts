@@ -33997,8 +33997,8 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
   ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);\s*setSectionsState\(v\);/.test(t254Client)
-    && (t254Client.match(/setSectionsState\(/g) || []).length === 4,
-    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price and Undo write the raw state");
+    && (t254Client.match(/setSectionsState\(/g) || []).length === 5,
+    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo and the site-visit goals pre-fill write the raw state");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
     "#254 the automatic freight re-apply keeps a live banner and carries into its Undo snapshot");
   ok(!/from "@\/(lib\/stores|db)/.test(t254Pure) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(t254Client),
@@ -50254,7 +50254,7 @@ import {
   DISCIPLINES as e301fDisc, DISCIPLINE_LABEL as e301fLabel, CLIENT_GOALS_MAX as e301fGoalsMax, COVER_TEXT_MAX as e301fCoverMax,
   cleanPlainText as e301fClean, sanitizeDiscipline as e301fSanDisc, inferDiscipline as e301fInfer, effectiveDiscipline as e301fEff,
   autoDisciplineLabel as e301fAuto, withDiscipline as e301fWithDisc, withSanitizedOutputFields as e301fSan,
-  coverTextFromSelection as e301fSel, appendGoals as e301fAppend, effectiveNotIncluded as e301fEffNot,
+  coverTextFromSelection as e301fSel, appendGoals as e301fAppend, appendGoalsResult as e301fAppendRes, effectiveNotIncluded as e301fEffNot,
   sanitizeEstimateOutputDefaults as e301fSanDefaults, ESTIMATE_OUTPUT_BLOB as e301fBlob,
 } from "@/lib/estimate-output/fields";
 import { DISCIPLINE_GROUPS as e301fGroups } from "@/lib/stores/survey-intake";
@@ -50301,6 +50301,15 @@ import type { SpecSection as E301fSec } from "@/app/(app)/estimator/types";
   ok(e301fSel("  First line\n  second line  ") === "First line second line", "#301 fields: a selection becomes one cover paragraph");
   ok(e301fAppend("", " New ") === "New" && e301fAppend("Old", "New") === "Old\n\nNew" && e301fAppend("Old\n\nNew", "New") === "Old\n\nNew" && e301fAppend("Old", "  ") === "Old",
     "#301 fields: From site visit fills blank goals, appends after a blank line, never duplicates");
+  ok(/setSectionsState\(\(prev\) => fillClientGoals\(prev, r\.goals\)\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: fillClientGoals\(n\.before, r\.goals\) \} : n\)\);/.test(readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8")),
+    "#301 goals pre-fill carries into a live re-price banner's Undo snapshot, like the freight auto-apply");
+  const e301Full = "x".repeat(e301fGoalsMax);
+  ok(!e301fAppendRes("", "New").truncated && !e301fAppendRes("Old", "Old").truncated && !e301fAppendRes("Old", "New").truncated && !e301fAppendRes("Old", "  ").truncated,
+    "#301 fields: appendGoalsResult — fits, duplicate and blank picks are not truncation");
+  ok(e301fAppendRes("a".repeat(e301fGoalsMax - 10), "b".repeat(50)).truncated && e301fAppendRes("a".repeat(e301fGoalsMax - 10), "b".repeat(50)).text.length === e301fGoalsMax,
+    "#301 fields: appendGoalsResult — a pick cut short by the cap reports truncated");
+  ok(e301fAppendRes(e301Full, "New").truncated && e301fAppendRes(e301Full, "New").text === e301Full && e301fAppendRes("", "y".repeat(e301fGoalsMax + 5)).truncated,
+    "#301 fields: appendGoalsResult — goals already at the cap (pick cut to nothing) and an oversize pick into blank goals report truncated");
   ok(e301fEffNot(undefined, "Permits") === "Permits" && e301fEffNot(null, "Permits") === "Permits" && e301fEffNot("", "Permits") === "" && e301fEffNot("Paint", "Permits") === "Paint",
     "#301 fields: Not included absent → the default list; an emptied list stays empty");
   const d = e301fSanDefaults({ notIncluded: " Permits \r\n\r\n Painting ", website: " peaksystemsgroup.com\n ", extra: 1 });
@@ -50573,7 +50582,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
     "#301 UI: the system header's Discipline select (blank = auto, hidden on labor systems)");
   ok(cli.includes("onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}") && /<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli) &&
      cli.includes("quoteId={loadedId}") && cli.includes("customerId={customerId}"), "#301 UI: the select and the column are wired");
-  const effect = cli.slice(cli.indexOf("const goalsSurveyId ="), cli.indexOf("const goalsSurveyId =") + 700);
-  ok(effect.includes('aiSource?.kind === "survey"') && effect.includes("surveyGoalsAction(goalsSurveyId)") && effect.includes("writeSections((prev) => fillClientGoals(prev, r.goals))") && effect.includes("= setSectionsState;") && effect.includes(".catch("),
+  const effect = cli.slice(cli.indexOf("const goalsSurveyId ="), cli.indexOf("const goalsSurveyId =") + 1100);
+  ok(effect.includes('aiSource?.kind === "survey"') && effect.includes("surveyGoalsAction(goalsSurveyId)") && effect.includes("setSectionsState((prev) => fillClientGoals(prev, r.goals))") && !effect.includes("writeSections") && effect.includes(".catch("),
     "#301 UI: a page opened from a site visit pre-fills matching blank goals once, automatically (R3)");
 }

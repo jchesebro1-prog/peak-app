@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SpecSection } from "./types";
-import { CLIENT_GOALS_MAX, COVER_TEXT_MAX, appendGoals, cleanPlainText } from "@/lib/estimate-output/fields";
+import { CLIENT_GOALS_MAX, COVER_TEXT_MAX, appendGoals, appendGoalsResult } from "@/lib/estimate-output/fields";
 import { COVER_SOURCE_LABEL, MISSING_COVER, coverParagraphFor, type CoverSource } from "@/lib/estimate-output/scopes";
 import type { SiteVisitOption } from "@/lib/estimate-output/goals";
 import { siteVisitGoalsAction } from "./output-actions";
@@ -42,32 +42,54 @@ export default function ScopeOutputFields(p: ScopeOutputFieldsProps) {
   const [menu, setMenu] = useState<Menu>(null);
   const [note, setNote] = useState("");
   const [, start] = useTransition();
+  // Bumped on every open and close: a From-site-visit load that resolves after
+  // the user closed the menu (or reopened it) is stale and must not reopen it.
+  const menuReq = useRef(0);
   const cover = coverParagraphFor(sec);
   const derived = coverParagraphFor({ ...sec, coverText: "" });
   const goals = sec.clientGoals || "";
   const isLabor = sec.kind === "labor";
 
+  const closeMenu = () => {
+    menuReq.current += 1;
+    setMenu(null);
+  };
   const openMenu = () => {
     if (menu) {
-      setMenu(null);
+      closeMenu();
       return;
     }
+    const req = ++menuReq.current;
     setMenu({ state: "loading" });
     start(async () => {
       try {
         const r = await siteVisitGoalsAction({ quoteId: p.quoteId, customerId: p.customerId });
+        if (req !== menuReq.current) return;
         setMenu(r.ok ? { state: "ready", options: r.options } : { state: "error", error: r.error });
       } catch {
+        if (req !== menuReq.current) return;
         setMenu({ state: "error", error: FAILED });
       }
     });
   };
+  const menuOpen = !!menu;
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        menuReq.current += 1;
+        setMenu(null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
   const pickGoals = (text: string) => {
-    // appendGoals caps at CLIENT_GOALS_MAX; say so when the append was cut short.
-    const next = appendGoals(sec.clientGoals, text);
-    setNote(next !== (sec.clientGoals || "") && !next.includes(cleanPlainText(text, CLIENT_GOALS_MAX)) ? "Client goals are capped at " + CLIENT_GOALS_MAX.toLocaleString("en-US") + " characters — the added goals were cut short." : "");
+    // appendGoals caps at CLIENT_GOALS_MAX; say so when the pick was cut short or nothing fit.
+    const r = appendGoalsResult(sec.clientGoals, text);
+    setNote(r.truncated ? "Client goals are capped at " + CLIENT_GOALS_MAX.toLocaleString("en-US") + " characters — " + (r.text.trim() === (sec.clientGoals || "").trim() ? "the added goals did not fit." : "the added goals were cut short.") : "");
     p.onChange((s) => ({ ...s, clientGoals: appendGoals(s.clientGoals, text) }));
-    setMenu(null);
+    closeMenu();
   };
 
   return (
@@ -114,6 +136,7 @@ export default function ScopeOutputFields(p: ScopeOutputFieldsProps) {
             placeholder="What is the client trying to solve?"
             onChange={(e) => {
               const v = e.target.value;
+              setNote("");
               p.onChange((s) => ({ ...s, clientGoals: v }));
             }}
             style={{ ...TA, minHeight: 64 }}
