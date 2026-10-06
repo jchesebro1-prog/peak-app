@@ -2,8 +2,10 @@ import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import PackageView from "@/components/estimate-output/package-view";
 import { OnlineEstimateCard } from "@/components/online-estimate/online-estimate";
 import { loadPackageExtras } from "@/lib/estimate-output/package-extras";
+import { creditNoteText } from "@/lib/estimate-output/responses";
 import { loadPackageViewProps } from "@/lib/estimate-output/package-loader";
 import { resolveSharedPackage } from "@/lib/quote-share/links";
+import { canAct } from "@/lib/quote-share/package-view";
 import { ONLINE_COPY, sharePath } from "@/lib/quote-share/view";
 import { OpenBeacon } from "./open-beacon";
 import { buildPackageSlots } from "./package-slots";
@@ -24,7 +26,12 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
   const base = hit ? sharePath(hit.q.id, token) : "";
   const model = hit ? await loadPackageViewProps(hit, { base, view, letterheadSrc: letterhead.src }) : null;
   if (!hit || !model) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
-  const slots = buildPackageSlots(await loadPackageExtras(hit, base));
+  const slots = buildPackageSlots(await loadPackageExtras(hit, base), {
+    id: hit.q.id,
+    token,
+    canAct: canAct(hit.state),
+    creditNote: creditNoteText(model.totals.creditAmount),
+  });
   return (
     <>
       <PackageView model={model} slots={slots} />

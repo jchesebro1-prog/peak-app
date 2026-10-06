@@ -51533,6 +51533,7 @@ async function estimateOutput301CAsyncChecks(): Promise<void> {
   await e301cDocsAsyncChecks();
   await e301cZipAsyncChecks();
   await e301cFilesAsyncChecks();
+  await e301cActionsAsyncChecks();
 }
 
 async function e301cStoreAsyncChecks(): Promise<void> {
@@ -51993,4 +51994,100 @@ async function e301cFilesAsyncChecks(): Promise<void> {
   ok(/default-src 'none'/.test(res.headers.get("content-security-policy") || "") && res.headers.get("x-content-type-options") === "nosniff" && /^inline; filename="[^"\r\n]*"; filename\*=UTF-8''[A-Za-z0-9%._~!-]*$/.test(cd) &&
      svgRes.status === 404 && noStream.status === 404 && throwing.status === 502 && !(await throwing.text()).includes("secret"),
     "#301 uploads (serve): CSP locked, a hostile name cannot split headers, a non-allowed stored type or a missing blob is a 404, a vendor error never leaks");
+}
+
+/* ======================================================================
+   #301 slice C — client actions (D-m, D-n, R1, R15, R16): two server
+   actions that re-verify the v2 token, the pinned rev = latest sent and
+   canAct on every submit; per-IP 5/10 min + per-quote 30/day; a honeypot;
+   a system note on the quote + customer, a system activity on the lead,
+   one task per assignee; no status change. Two JS-only islands.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const srv = rd("src/lib/estimate-output/responses-server.ts");
+  const sub = srv.slice(srv.indexOf("export async function submitClientResponse("), srv.indexOf("export async function notifyClientResponse("));
+  const order = ["o.website", "RESPONSE_IP_LIMIT", "resolveSharedPackage(", "canAct(hit.state)", "RESPONSE_QUOTE_LIMIT", "sanitizeClientResponse(", "appendClientResponse(", "notify("].map((s) => sub.indexOf(s));
+  ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 actions: honeypot → IP limit → token → canAct → quote limit → sanitize → append → notify (${order.join(",")})`);
+  ok(!/\b(setStatus|update|setQuoteStage|patchShareLink)\(/.test(srv) && srv.includes('type: "system"') && srv.includes('parentKind: "quote"') && srv.includes("system: true") &&
+     srv.includes("responseAssignees(q.owner, q.preparedBy, users)"),
+    "#301 actions: never a status or stage write; a system note (R15), a system lead activity, a task per R16 assignee");
+  const acts = rd("src/app/share/quote/[id]/[token]/actions.ts");
+  ok(/^"use server";/.test(acts) && !/^export (?!async function)/m.test(acts) && acts.includes('submitClientResponse("accept", String(id || ""), String(token || ""), input, ip)') &&
+     acts.includes('submitClientResponse("question", String(id || ""), String(token || ""), input, ip)') && (acts.match(/clientIpFromHeaders\(await headers\(\)\)/g) || []).length >= 3 &&
+     (acts.match(/catch \(e\)/g) || []).length >= 3,
+    "#301 actions: two public actions keyed on the client IP, never throwing; only async exports");
+  for (const f of ["scope-selection.tsx", "question-form.tsx"]) {
+    const src = rd("src/app/share/quote/[id]/[token]/" + f);
+    ok(/^"use client";/.test(src) && src.includes("useSyncExternalStore(") && src.includes('method="post"') && src.includes("e.preventDefault()") &&
+       src.includes('name="website"') && src.includes("CLIENT_ACTION_COPY.noJs") && src.includes('from "./actions"') && (src.match(/catch \{/g) || []).length >= 1 &&
+       !/^import (?!type)[^\n]*from "@\/(lib\/(stores|blob|session|users|settings|quote-share|quote-pdf)|db)\//m.test(src) && !src.includes("confirm("),
+      `#301 actions: ${f} renders only after hydration, posts through the server action, has a honeypot, imports nothing server-side`);
+  }
+  const sel = rd("src/app/share/quote/[id]/[token]/scope-selection.tsx");
+  ok(sel.includes("CLIENT_ACTION_COPY.selectedTotal") && sel.includes("creditNote") && sel.includes("selectedTotal(scopes.filter("),
+    "#301 actions: the live \"Selected scopes\" total (pre-credit) and the Rewards credit note (R1)");
+  const slots = rd("src/app/share/quote/[id]/[token]/package-slots.tsx");
+  ok(slots.includes("x.actions && ctx.canAct") && rd("src/app/share/quote/[id]/[token]/package-page.tsx").includes("canAct: canAct(hit.state)"),
+    "#301 actions: the forms show only when the page can act (latest sent revision of a sent quote)");
+}
+
+async function e301cActionsAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const L = await import("@/lib/quote-share/links");
+  const R = await import("@/lib/estimate-output/responses-server");
+  const T = await import("@/lib/stores/tasks");
+  const N = await import("@/lib/stores/notes");
+  const S = "test-secret-301ca";
+  const QID = fixtureId(301, "c-actions");
+  const sec = (id: string, name: string, price: number) => ({ id, name, kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A-" + id, desc: name, qty: 1, unit: "ea", cost: 1, price }] });
+  await Q.create({ id: QID, name: "#301c actions", customer: "Spec fixture", customerId: null, owner: "Lead 301C", quoteType: "system", source: "estimator",
+    spec: { sections: [sec("s1", "Lighting", 28500), sec("s2", "Rigging", 19750)], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
+  const made = await L.ensureShareLink(QID, "Tester", { secret: S });
+  const tok = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
+  const users = [{ id: "u-301c", name: "Lead 301C", status: "active", roles: ["Estimator"] }];
+  const calls: string[] = [];
+  const notify = async (_q: unknown, r: { kind: string; total: number }) => { calls.push(`${r.kind}:${r.total}`); };
+  const salt = String(Date.now() % 100_000);
+  const deps = { secret: S, users: async () => users, notify };
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat Doe", email: "pat@school.org", sectionIds: ["s2", "s1", "bogus"] }, "203.0.113.1-" + salt, deps);
+  const q1 = (await Q.get(QID))!;
+  ok(acc.ok && acc.confirmation === "Thanks — Lead 301C has been notified." && q1.status === "sent" && q1.clientResponses?.length === 1 &&
+     q1.clientResponses[0].total === 48250 && q1.clientResponses[0].sectionNames.join() === "Lighting,Rigging" && calls.join() === "accept:48250",
+    "#301 actions (DB): a selection is stored with the server's own total, the lead estimator is named, the status stays sent");
+  const hp = await R.submitClientResponse("question", QID, tok, { name: "Bot", message: "spam", website: "http://spam" }, "203.0.113.2-" + salt, deps);
+  ok(hp.ok && (await Q.get(QID))!.clientResponses?.length === 1 && calls.length === 1, "#301 actions (DB): a honeypot hit looks fine and writes nothing");
+  const ip = "203.0.113.3-" + salt;
+  const burst = [];
+  for (let i = 0; i < 6; i++) burst.push(await R.submitClientResponse("question", QID, tok, { name: "Q", message: "Hi " + i }, ip, deps));
+  ok(burst.slice(0, 5).every((r) => r.ok) && !burst[5].ok && (burst[5] as { error: string }).error === "Too many submissions — try again later.",
+    "#301 actions (DB): 5 per IP per 10 minutes");
+  const v1 = made.ok && made.link.path ? made.link.path.split("/").pop()! : "";
+  const bad = await R.submitClientResponse("question", QID, v1, { name: "Q", message: "v1" }, "203.0.113.4-" + salt, deps);
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }); // supersedes rev 1
+  const sup = await R.submitClientResponse("question", QID, tok, { name: "Q", message: "old" }, "203.0.113.5-" + salt, deps);
+  ok(!bad.ok && !sup.ok && (sup as { error: string }).error.startsWith("A newer version of this estimate was sent"),
+    "#301 actions (DB): a v1 link and a superseded revision take no response");
+  // The real side effects (R15, R16): a system note on the quote, a task to the assignee; no lead → no activity.
+  const q2 = (await Q.get(QID))!;
+  const r0 = q2.clientResponses![0];
+  await R.notifyClientResponse(q2, r0, users, Date.UTC(2026, 9, 5, 15));
+  const tasks = (await T.tasksForQuote(QID)).filter((t) => t.assigneeUserId === "u-301c");
+  const notes = (await N.allNotes()).filter((n) => n.parentKind === "quote" && n.parentId === QID);
+  for (const t of tasks) registerFixture("tasks", t.id);
+  for (const n of notes) registerFixture("notes", n.id);
+  ok(tasks.length === 1 && /^Client accepted EST-\d+ Rev 1 — Lighting, Rigging \(\$48,250\.00\)$/.test(tasks[0].title) && tasks[0].dueAt === Date.UTC(2026, 9, 6, 4, 59) &&
+     notes.length === 1 && notes[0].system && notes[0].by === "Client link" && notes[0].text.includes("$48,250.00 before any Rewards credit"),
+    "#301 actions (DB): one task to the lead estimator due tonight, one system note naming the scopes and pre-credit total");
+  const seen: string[] = [];
+  await R.notifyClientResponse({ ...q2, leadId: "L-301C", owner: "Nobody", preparedBy: "" /* create() defaults preparedBy to owner */ }, r0, [...users, { id: "u-a", name: "Approver", status: "active", roles: ["Manager"] }], Date.now(), {
+    addNote: async () => { seen.push("note"); throw new Error("note down"); },
+    logActivity: async (leadId: string, a: { type?: string }) => { seen.push(`act:${leadId}:${a.type}`); return null; },
+    createTask: async (t: { assigneeUserId?: string | null }) => { seen.push(`task:${t.assigneeUserId}`); return {} as never; },
+  });
+  ok(seen.join() === "note,act:L-301C:system,task:u-a", "#301 actions (DB): a failing step never stops the rest; the lead gets a system activity; no lead estimator → every active approver");
 }
