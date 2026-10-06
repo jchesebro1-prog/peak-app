@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
-import { deleteBlob, getBlobHead, getBlobStream } from "@/lib/blob";
+import { blobEnabled, deleteBlob, getBlobHead, getBlobStream, putBlob } from "@/lib/blob";
+import { GRID_SET_COPY, GRID_SET_STEP_MS, GRID_SET_WAIT_FOR, gridSetFileName, gridSetId, gridSetPrintUrl } from "@/lib/design/grid-set-print";
 import { cleanText, displayFileName, isUploadKey } from "@/lib/document-files";
+import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
+import { signPrintToken } from "@/lib/quote-pdf/token";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
+import { gridProjectForQuote, type GridProject } from "@/lib/stores/grid-projects";
 import { addPackageFile, get as getQuote, removePackageFile, type QuoteRevision } from "@/lib/stores/quotes";
 import {
-  cleanPackageFiles, isPackageFileId, isPackageFileKind, MAX_PACKAGE_FILE_BYTES, newPackageFileId, PACKAGE_FILE_SNIFF_BYTES, PACKAGE_FILE_TYPES, PACKAGE_FILES_COPY,
+  cleanPackageFiles, gridSetBlobPath, isPackageFileId, isPackageFileKind, MAX_PACKAGE_FILE_BYTES, MAX_PACKAGE_FILES, newPackageFileId, PACKAGE_FILE_SNIFF_BYTES, PACKAGE_FILE_TYPES, PACKAGE_FILES_COPY,
   packageBlobReferenced, packageFileName, packageFilePathInScope, sniffPackageFile, visiblePackageFiles, type PackageFile,
 } from "./package-files";
 
@@ -140,4 +144,79 @@ export async function servePackageFile(req: Request, file: PackageFile, deps: Pa
       "content-security-policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; frame-ancestors 'self'",
     },
   });
+}
+
+type GridDeps = {
+  secret: string;
+  blobOn: boolean;
+  now: () => number;
+  newId: () => string;
+  find: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
+  render: (url: string, opts: { timeoutMs?: number; waitFor?: string }) => Promise<Buffer>;
+  put: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ url: string; pathname: string }>;
+  remove: (pathname: string) => Promise<void>;
+};
+
+/**
+ * #301 slice C (D-j, R8) — "Generate from Grid": render the linked design's
+ * drawing set (cover, plans, riser, schedules at 11×17) through the signed
+ * print route to ONE PDF (adaptation 5) and store it as a `drawing`, source
+ * `grid`. An earlier Grid set is replaced. The token is signed right before
+ * the render (120 s life). `origin` is the request's own (printOriginFor).
+ */
+export async function generateGridDrawingSet(quoteId: string, by: string, origin: string, deps: Partial<GridDeps> = {}): Promise<Result<{ file: PackageFile }>> {
+  const d: GridDeps = {
+    secret: process.env.AUTH_SECRET || "",
+    blobOn: blobEnabled(),
+    now: Date.now,
+    newId: newPackageFileId,
+    find: gridProjectForQuote,
+    render: renderPrintRouteToPdf,
+    put: putBlob,
+    remove: deleteBlob,
+    ...deps,
+  };
+  if (!d.secret) return { ok: false, error: GRID_SET_COPY.noSecret };
+  if (!d.blobOn) return { ok: false, error: PACKAGE_FILES_COPY.noStorage };
+  const q = await getQuote(String(quoteId || ""));
+  if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: ONLINE_COPY.gone };
+  const hit = await d.find(q.id);
+  if (!hit) return { ok: false, error: GRID_SET_COPY.noGrid };
+  const current = cleanPackageFiles(q.packageFiles);
+  const old = current.filter((f) => f.source === "grid");
+  if (current.length - old.length >= MAX_PACKAGE_FILES) return { ok: false, error: PACKAGE_FILES_COPY.full };
+  const setId = gridSetId(hit.project.id, hit.optionId);
+  let pdf: Buffer;
+  try {
+    const t = signPrintToken(d.secret, "grid-set", setId, d.now());
+    pdf = await d.render(gridSetPrintUrl(origin, setId, t), { timeoutMs: GRID_SET_STEP_MS, waitFor: GRID_SET_WAIT_FOR });
+  } catch (e) {
+    if (e instanceof PdfRenderUnavailable) return { ok: false, error: e.message };
+    console.error("[package] grid drawing set render failed", e);
+    return { ok: false, error: GRID_SET_COPY.renderFailed };
+  }
+  if (pdf.length > MAX_PACKAGE_FILE_BYTES) return { ok: false, error: GRID_SET_COPY.tooBig };
+  const stored = await d.put(gridSetBlobPath(q.id), pdf, "application/pdf");
+  for (const f of old) await removePackageFileAndBlob(q.id, f.id, { remove: d.remove });
+  const file: PackageFile = {
+    id: d.newId(),
+    kind: "drawing",
+    name: gridSetFileName(hit.project.name),
+    blobPath: stored.pathname,
+    contentType: "application/pdf",
+    size: pdf.length,
+    source: "grid",
+    addedAt: d.now(),
+    addedBy: cleanText(by, 120),
+  };
+  const res = await addPackageFile(q.id, file);
+  if (!res.ok) {
+    try {
+      await d.remove(stored.pathname);
+    } catch {
+      /* best effort */
+    }
+    return { ok: false, error: res.reason === "full" ? PACKAGE_FILES_COPY.full : ONLINE_COPY.gone };
+  }
+  return { ok: true, file };
 }

@@ -1,6 +1,7 @@
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { blobEnabled } from "@/lib/blob";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
+import { gridProjectForQuote, type GridProject } from "@/lib/stores/grid-projects";
 import type { Quote } from "@/lib/stores/quotes";
 import { datasheetGapCount } from "./package-docs-server";
 import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "./package-gaps";
@@ -14,10 +15,15 @@ import { responseRows, type ResponseRow } from "./responses";
  * as "Rev N". Server-only. `deps` exists for the spec harness.
  */
 
-export type PackagePanel = { canSend: boolean; uploads: boolean; files: PackageFileRow[]; responses: ResponseRow[]; gaps: string[] };
+/** `grid` — the linked Grid design's label (Task 9: "Generate from Grid"), or null when none is linked. */
+export type PackagePanel = { canSend: boolean; uploads: boolean; files: PackageFileRow[]; responses: ResponseRow[]; gaps: string[]; grid: { label: string } | null };
 
-type PanelDeps = { datasheetGaps: (spec: unknown) => Promise<number>; uploads: () => boolean };
-const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled };
+type PanelDeps = {
+  datasheetGaps: (spec: unknown) => Promise<number>;
+  uploads: () => boolean;
+  findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
+};
+const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled, findGrid: gridProjectForQuote };
 
 function liveSections(q: Quote): SpecSection[] {
   const s = q.spec as { sections?: unknown } | null | undefined;
@@ -34,6 +40,16 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
   } catch (e) {
     console.warn("[package] datasheet gap count failed", e instanceof Error ? e.message : e);
   }
+  let grid: PackagePanel["grid"] = null;
+  try {
+    const hit = await d.findGrid(q.id);
+    if (hit) {
+      const opt = (hit.project.options || []).find((o) => o.id === hit.optionId);
+      grid = { label: `${hit.project.name}${(hit.project.options || []).length > 1 && opt ? ` — ${opt.name}` : ""}` };
+    }
+  } catch (e) {
+    console.warn("[package] grid lookup failed", e instanceof Error ? e.message : e);
+  }
   const revNoOf = (rev: number) => {
     const r = (q.revisions || []).find((x) => x.rev === rev);
     return r ? sentDocumentStamp(q, r).revNo : rev;
@@ -49,5 +65,6 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
       keyProductsNeedText: keyProductsNeedingText(sections),
       scopesNoGoals: scopesWithoutGoals(sections),
     }),
+    grid,
   };
 }

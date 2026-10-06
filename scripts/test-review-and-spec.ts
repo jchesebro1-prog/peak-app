@@ -17705,7 +17705,7 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
     ok(valueImports.length === 0, `#209 client boundary: ${rel} imports no VALUE from @/lib/stores or @/db`);
   }
-  const gdsSetSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  const gdsSetSrc = gridSetSources301();
   ok(gdsSetSrc.includes("printPageCss(size)") && gdsSetSrc.includes("buildSheetList(") && gdsSetSrc.includes("riserViewForOption(") && gdsSetSrc.includes("resolveOptionId(project, requestedOption)"),
     "#209 set page: one sheet list, @page from the size table, the saved riser, the same ?option= resolution as riser/schedule");
   ok(gdsSetSrc.includes("<PrintButton") && !gdsSetSrc.includes("#b08d4a\"}") && gdsSetSrc.includes("resolveGeneralNotes(set, settings.gridStandardNotes)"),
@@ -17747,7 +17747,7 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     swWires.length === 1 && swWires[0].fromName === "Stage" && swWires[0].toName === "Unassigned" && swWires[0].partId === "WIRE-SW" && swWires[0].lengthFt === 30,
     "#209 scheduleWiresFromView: names each edge's ends from the view's nodes ('Unassigned' when the edge lands there)"
   );
-  const gdsSetPageSrc2 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  const gdsSetPageSrc2 = gridSetSources301();
   const gdsSchedPageSrc2 = readFileSync(join(process.cwd(), "src/lib/design/grid-schedule-server.ts"), "utf8"); // #299: moved with the schedule build
   ok(
     gdsSetPageSrc2.includes("scheduleWiresFromView(view)") && gdsSchedPageSrc2.includes("scheduleWiresFromView(view)"),
@@ -17767,7 +17767,7 @@ import { DROP_STEP, MAX_CONDUITS as GDS_MAX_CONDUITS } from "@/lib/design/grid-r
   // I1 — explicit note numbers (preflight strips <ol> markers)
   const fnNotes = symRender(symH(RiserNotes, { notes: [{ id: "a", n: 1, text: "First" }, { id: "b", n: 2, text: "Second" }] }));
   ok(fnNotes.includes('<span class="pk-dw-num">1.</span>') && fnNotes.includes('<span class="pk-dw-num">2.</span>'), "#209 I1: riser notes print explicit numbers");
-  const fnSetSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  const fnSetSrc = gridSetSources301();
   ok(fnSetSrc.includes('<span className="pk-dw-num">{`${i + 1}.`}</span>'), "#209 I1: cover general notes print explicit numbers");
   const fnCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
   ok(/\.pk-dw-notes,\s*\.pk-riser-notes\s*\{[^}]*list-style: none/.test(fnCss) && /\.pk-dw-num\s*\{[^}]*min-width: 1\.6em/.test(fnCss), "#209 I1: note lists drop markers; .pk-dw-num holds the number");
@@ -17858,8 +17858,8 @@ import { DROP_STEP, MAX_CONDUITS as GDS_MAX_CONDUITS } from "@/lib/design/grid-r
   const fnPng = decodeDataUrl("data:image/png;base64,iVBORw0KGgo=");
   ok(!!fnSvg && fnSvg.mime === "image/svg+xml" && new TextDecoder().decode(fnSvg.bytes) === "<svg/>", "#209 I6: a url-encoded data-URL decodes");
   ok(!!fnPng && fnPng.mime === "image/png" && fnPng.bytes[1] === 0x50 && fnPng.bytes.length === 8 && decodeDataUrl("https://x") === null, "#209 I6: a base64 data-URL decodes; a plain URL doesn't");
-  ok(fnSetSrc.includes("src: `/api/grid-sheets/${encodeURIComponent(src.id)}`") && !fnSetSrc.includes("src.dataUrl"), "#209 I6: the set loads every sheet through the proxy, never inlining a data-URL");
-  const fnRouteSrc = readFileSync(join(process.cwd(), "src/app/api/grid-sheets/[id]/route.ts"), "utf8");
+  ok(fnSetSrc.includes("sheet: (src) => `/api/grid-sheets/${encodeURIComponent(src.id)}`") && fnSetSrc.includes("src: assets.sheet(src)") && !fnSetSrc.includes("src.dataUrl"), "#209 I6: the set loads every sheet through the proxy, never inlining a data-URL");
+  const fnRouteSrc = ["src/app/api/grid-sheets/[id]/route.ts", "src/lib/grid-sheet-serve.ts"].map((p) => readFileSync(join(process.cwd(), p), "utf8")).join("\n");
   ok(fnRouteSrc.includes("decodeDataUrl(sheet.dataUrl)") && fnRouteSrc.includes("sandbox"), "#209 I6: the proxy serves in-database sheets, SVG under a sandbox CSP");
   const fnPdfSrc = readFileSync(join(process.cwd(), "src/components/design/pdf-canvas.tsx"), "utf8");
   ok(fnPdfSrc.includes("const docCache = new Map<string, Promise<PdfDoc>>()") && fnPdfSrc.includes("printZoom("), "#209 I6: one parsed PDF per source; print-sized raster");
@@ -18354,7 +18354,7 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
   // #299: the schedule page's build (incl. loadVirtualParts) moved into grid-schedule-server.ts.
   const pages6 = ["riser", "set", "schedule"].map((d) =>
-    readFileSync(join(process.cwd(), d === "schedule" ? "src/lib/design/grid-schedule-server.ts" : `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8")
+    d === "set" ? gridSetSources301() : readFileSync(join(process.cwd(), d === "schedule" ? "src/lib/design/grid-schedule-server.ts" : `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8")
   );
   ok(readFileSync(join(process.cwd(), "src/lib/design/grid-palette.ts"), "utf8").includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6 (moved by #226): the palette (grid-palette.ts) hides virtual parts; the quote, riser, set and schedule resolve them");
 }
@@ -18393,7 +18393,7 @@ import {
   // I3 — drawing-set device key sums units
   const m7 = gemMarks7([{ key: "PIPE", desc: "Pipe", qty: 240 }, { key: "PAR", desc: "Par" }, { key: "PIPE", desc: "Pipe", qty: 10 }, { key: "PAR", desc: "Par", qty: 0 }], "R");
   ok(m7.rows.map((r) => `${r.tag}:${r.qty}`).join(",") === "R1:250,R2:2", "#211 fix1 I3: the device key adds each symbol's unit count");
-  const set7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  const set7 = gridSetSources301();
   ok(set7.includes("qty: f.qty") && set7.includes("`${desc} ×${qty}`") && set7.includes("`${tag} ×${qty}`"), "#211 fix1 I3: the plan sheet carries lot qty into the key and labels the symbol ×N");
   // M2 — schedule counts units
   const sch7 = gemSchedule7({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0.1, y: 0.1, partId: "PIPE", qty: 240 }, { id: "b", sheetId: "s", page: 1, x: 0.2, y: 0.1, partId: "PAR" }], spaces: [], descOf: () => "x", wires: [] });
@@ -23399,11 +23399,11 @@ import { typeLayerKey as dt4LayerKey, isLayerVisible as dt4Visible } from "@/lib
   ok(ed.includes("typeLayerRows(") && ed.includes("typeKeyOfPlacement") && ed.includes("typeRows={typeRows}") && ed.includes("deviceType: null"),
     "#226 layers: the editor groups placements by type and hides by type; partless legend entries are typed Unmapped");
   for (const d of ["riser", "set", "schedule"]) {
-    const s = read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
+    const s = d === "set" ? gridSetSources301() : read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
     ok(s.includes("loadDeviceTypeContext(catalog)") && s.includes("deviceTypes })"), `#226: the ${d} page resolves device types (scope fix + labels)`);
   }
   for (const d of ["riser", "set"]) {
-    const s = read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
+    const s = d === "set" ? gridSetSources301() : read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
     ok(s.includes("symbolContext(settings, deviceTypes.types)") && s.includes("deviceType: null"), `#226: the ${d} legend is grouped by device type`);
   }
   ok(read("src/app/(app)/design/grid/[id]/page.tsx").includes("symbolContext(settings, deviceTypes.types)"), "#226: the plan editor resolves type icons");
@@ -27367,7 +27367,7 @@ function e223Src(rel: string): string {
       e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("${displayQuoteNumber(existing)} is already"),
     "#223 Grid 'already sent — cut a revision' names the quote by number"
   );
-  ok(e223Src("src/app/(app)/design/grid/[id]/set/page.tsx").includes("optionQuoteNo"), "#223 drawing set title block prints the number");
+  ok(gridSetSources301().includes("optionQuoteNo"), "#223 drawing set title block prints the number");
   ok(e223Src("src/app/(app)/design/designs/design-client.tsx").includes("{promotedNo ?? promotedId}"), "#223 Designs: 'linked to quote' shows the number");
   ok(e223Src("src/app/(app)/home-my-designs.tsx").includes("{promotedNo ?? promoted}"), "#223 Home: 'Added to Quotes as' shows the number");
   ok(e223Src("src/app/(app)/design/specs/[id]/header-fields.tsx").includes("quoteNumber || s.quoteId"), "#223 Spec builder: source line names the quote's number");
@@ -51535,6 +51535,7 @@ async function estimateOutput301CAsyncChecks(): Promise<void> {
   await e301cFilesAsyncChecks();
   await e301cActionsAsyncChecks();
   await e301cPanelAsyncChecks();
+  await e301cGridAsyncChecks();
 }
 
 async function e301cStoreAsyncChecks(): Promise<void> {
@@ -52173,4 +52174,127 @@ async function e301cPanelAsyncChecks(): Promise<void> {
   for (let i = 0; i < 31; i++) invalid.push(await R.submitClientResponse("question", RID, tok, { name: "", message: "x" }, `198.51.100.${10 + i}-` + salt, { secret: S, users: async () => mkUsers("active"), notify }));
   const valid = await R.submitClientResponse("question", RID, tok, { name: "Pat", message: "Still fine" }, "198.51.100.99-" + salt, { secret: S, users: async () => mkUsers("active"), notify });
   ok(invalid.every((r) => !r.ok) && valid.ok, "#301 panel (DB): 31 invalid (empty-name) submits don't spend the per-quote 30/day slots — a valid one still lands");
+}
+
+/* ======================================================================
+   #301 slice C — Grid set (R8, R9, D-k): gridProjectForQuote; the drawing
+   set body shared by the team page and a signed /print/grid-set/[id]
+   (id = <project>~<option>); per-asset print tokens for sheet sources and
+   symbol drawings; renderPrintRouteToPdf's waitFor; Generate from Grid
+   stores ONE "drawing" PDF (source grid) and replaces an earlier one.
+   ====================================================================== */
+import {
+  gridSetId as e301cgId, parseGridSetId as e301cgParse, gridSetAssetTokenId as e301cgAssetId, gridSetPrintUrl as e301cgUrl, gridSetFileName as e301cgFile,
+  GRID_SET_WAIT_FOR as e301cgWait, GRID_SET_STEP_MS as e301cgStep,
+} from "@/lib/design/grid-set-print";
+import { signPrintToken as e301cgSign, verifyPrintToken as e301cgVerify } from "@/lib/quote-pdf/token";
+import { RENDER_LAUNCH_TIMEOUT_MS as e301cgLaunch, RENDER_FONTS_TIMEOUT_MS as e301cgFonts, RENDER_WAIT_FOR_TIMEOUT_MS as e301cgWaitCap } from "@/lib/quote-pdf/render";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(e301cgId("GRD-5001", "opt-base") === "GRD-5001~opt-base" && JSON.stringify(e301cgParse("GRD-5001~opt-base")) === JSON.stringify({ projectId: "GRD-5001", optionId: "opt-base" }) &&
+     ["", "GRD-1", "GRD-1~", "~opt", "a~b~c", "../x~y", "GRD 1~opt", "G".repeat(81) + "~o"].every((s) => e301cgParse(s) === null),
+    "#301 grid: a set id is <project>~<option>, strictly shaped");
+  ok(e301cgAssetId("GRD-1~opt-1", "sheet", "gs-1") === "GRD-1~opt-1|sheet|gs-1" && e301cgUrl("https://app.test/", "GRD-1~opt-1", "1.x") === "https://app.test/print/grid-set/GRD-1~opt-1?t=1.x" &&
+     e301cgFile("Lakefront HS / Main") === "Lakefront HS - Main — drawing set.pdf",
+    "#301 grid: asset token ids, the print URL, the stored file name");
+  const NOW = 1_800_000_000_000;
+  const page = e301cgSign("s3", "grid-set", "GRD-1~opt-1", NOW);
+  const asset = e301cgSign("s3", "grid-set", "GRD-1~opt-1|sheet|gs-1", NOW);
+  ok(e301cgVerify("s3", page, "grid-set", "GRD-1~opt-1", NOW) && !e301cgVerify("s3", page, "grid-set", "GRD-1~opt-1|sheet|gs-1", NOW) &&
+     !e301cgVerify("s3", asset, "grid-set", "GRD-1~opt-1", NOW) && !e301cgVerify("s3", asset, "grid-set", "GRD-1~opt-1|sheet|gs-2", NOW) && !e301cgVerify("s3", page, "rack", "GRD-1~opt-1", NOW),
+    "#301 grid: the page token and each asset token are separate (R8b — an asset token proves the page drew that asset)");
+  ok(e301cgWait === '[data-plan-figure]:not([data-ready="1"]):not([data-error="1"])' && e301cgLaunch + 2 * e301cgStep + e301cgFonts + Math.min(e301cgStep, e301cgWaitCap) <= 110_000,
+    "#301 grid: R8c — wait for every plan figure to settle; one render's worst case fits the 120 s action with room to store it");
+  const rs = rd("src/lib/quote-pdf/render.ts");
+  const body = rs.slice(rs.indexOf("async function renderOnce("));
+  ok(body.indexOf("page.evaluate(") < body.indexOf("page.waitForFunction(") && body.indexOf("page.waitForFunction(") < body.indexOf("landedOnRequested(url, page.url())") &&
+     body.includes("timeout: Math.min(timeout, RENDER_WAIT_FOR_TIMEOUT_MS)") && body.includes("if (waitFor)"),
+    "#301 grid: waitFor runs after the fonts wait and before the landed re-check and page.pdf(); a selector still matching fails the render");
+  ok(/export type PrintTokenKind = [^;]*"grid-set"/.test(rd("src/lib/quote-pdf/token.ts")), "#301 grid: \"grid-set\" is a print token kind");
+  const pp = rd("src/app/print/grid-set/[id]/page.tsx");
+  ok(pp.indexOf("tokenOk(") < pp.indexOf("parseGridSetId(") && pp.indexOf("parseGridSetId(") < pp.indexOf("getProject(") && pp.includes("hasOption(project, parsed.optionId)") &&
+     pp.includes("<DrawingSetSheets data={data} assets={assets} />") && pp.includes("printPageCss(data.size)") && !pp.includes("requireUser") && pp.includes('requestedSize: "b"'),
+    "#301 grid: the print page checks its token before any read, needs an exact option, prints the shared sheets at 11×17");
+  for (const [f, kind] of [["src/app/print/grid-set/[id]/asset/sheet/[sheetId]/route.ts", "sheet"], ["src/app/print/grid-set/[id]/asset/doc/[docId]/route.ts", "doc"]] as const) {
+    const src = rd(f);
+    ok(src.indexOf("verifyPrintToken(") < src.indexOf(kind === "sheet" ? "getProject(" : "getDocument(") && src.includes(`gridSetAssetTokenId(id, "${kind}", `),
+      `#301 grid: the ${kind} asset route verifies its own asset token before any read`);
+  }
+  ok(rd("src/app/print/grid-set/[id]/asset/sheet/[sheetId]/route.ts").includes("sheet.projectId !== project.id || !(project.sheetIds || []).includes(sheet.id)") &&
+     rd("src/app/print/grid-set/[id]/asset/doc/[docId]/route.ts").includes('doc.kind !== "symbol" && doc.kind !== "riser"'),
+    "#301 grid: a sheet must belong to the project; a doc must be a symbol / riser drawing");
+  const team = rd("src/app/(app)/design/grid/[id]/set/page.tsx");
+  ok(team.includes("loadDrawingSetData(project, { requestedOption, requestedSize, assets: TEAM_DRAWING_SET_ASSETS })") && team.includes("<DrawingSetSheets data={data} assets={TEAM_DRAWING_SET_ASSETS} />") &&
+     team.includes("await requireUser();") && team.includes("<SetSettingsPanel"),
+    "#301 grid: the team page keeps its session gate, toolbar and settings panel, and renders the shared sheets");
+  const sheets = rd("src/components/drawing/drawing-set-sheets.tsx");
+  ok(!sheets.includes('"use client"') && !sheets.includes("/api/grid-sheets/") && !sheets.includes("/api/part-documents/") && sheets.includes("assets.sheet(src)"),
+    "#301 grid: the shared sheets component takes every asset URL from its resolver");
+  const gen = rd("src/lib/estimate-output/package-files-server.ts");
+  const g = gen.slice(gen.indexOf("export async function generateGridDrawingSet("));
+  ok(g.indexOf("d.find(q.id)") < g.indexOf('signPrintToken(d.secret, "grid-set", setId, d.now())') && g.indexOf('signPrintToken(d.secret, "grid-set", setId, d.now())') < g.indexOf("d.render(") &&
+     g.includes("waitFor: GRID_SET_WAIT_FOR") && g.includes('kind: "drawing"') && g.includes('source: "grid"'),
+    "#301 grid: Generate signs the token right before the one render and stores a Grid drawing set");
+  const acts = rd("src/app/(app)/estimator/package-actions.ts");
+  ok(acts.slice(acts.indexOf("export async function generateGridDrawingsAction(")).includes("printOriginFor(process.env,"), "#301 grid: the action prints from the request's own origin (printOriginFor)");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base", expectNotFound: true }') && smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base/asset/sheet/gs-1", expectNotFound: true }') &&
+     smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base/asset/doc/PD-1", expectNotFound: true }'),
+    "#301 smoke: the print page and both asset routes without a token are clean 404s");
+}
+
+async function e301cGridAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const G = await import("@/lib/stores/grid-projects");
+  const Q = await import("@/lib/stores/quotes");
+  const F = await import("@/lib/estimate-output/package-files");
+  const S = await import("@/lib/estimate-output/package-files-server");
+  const { rehrefSymbolUrls } = await import("@/lib/design/drawing-set-data");
+  ok(JSON.stringify(rehrefSymbolUrls({ p1: { plan: "/api/part-documents/PD-1", riser: "/api/part-documents/PD-2" }, p2: { plan: "https://evil/x" } }, (id) => `/print/x/asset/doc/${id}?t=T`)) ===
+     JSON.stringify({ p1: { plan: "/print/x/asset/doc/PD-1?t=T", riser: "/print/x/asset/doc/PD-2?t=T" } }),
+    "#301 grid: symbol URLs are re-pointed at the print-scoped asset route; anything unexpected falls back to the generic symbol");
+  const QID = fixtureId(301, "c-grid");
+  await Q.create({ id: QID, name: "#301c grid", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "grid",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] }], mobs: [] } });
+  registerFixture("quotes", QID);
+  const project = await G.createProject({ name: "#301c grid design", customer: "Spec fixture", customerId: null, by: "Test" });
+  registerFixture("grid_projects", project.id);
+  const { ensureOptions } = await import("@/lib/design/grid-options");
+  const optionId = ensureOptions(project).options[0].id;
+  ok((await G.gridProjectForQuote(QID)) === null, "#301 grid (DB): no design is linked yet");
+  await G.setOptionQuote(project.id, optionId, QID);
+  const hit = await G.gridProjectForQuote(QID);
+  ok(hit?.project.id === project.id && hit.optionId === optionId, "#301 grid (DB): R9 — the design whose option minted this quote");
+  const puts: string[] = [];
+  const removed: string[] = [];
+  let n = 0;
+  const deps = {
+    secret: "s3cret-301cg",
+    blobOn: true,
+    now: () => 1_800_000_000_000,
+    newId: () => "PF-" + (++n).toString(16).padStart(12, "e"),
+    render: async (url: string, opts: { waitFor?: string; timeoutMs?: number }) => {
+      if (!url.startsWith(`https://app.test/print/grid-set/${encodeURIComponent(project.id + "~" + optionId)}?t=`) || opts.waitFor !== '[data-plan-figure]:not([data-ready="1"]):not([data-error="1"])' || opts.timeoutMs !== 25_000) throw new Error("bad render call " + url);
+      return Buffer.from("%PDF-1.7 grid set");
+    },
+    put: async (path: string) => { puts.push(path); return { url: "u", pathname: path + "-Sfx" + puts.length }; },
+    remove: async (p: string) => { removed.push(p); },
+  };
+  const g1 = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", deps);
+  const g2 = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", deps);
+  const files = F.cleanPackageFiles((await Q.get(QID))!.packageFiles);
+  ok(g1.ok && g2.ok && files.length === 1 && files[0].source === "grid" && files[0].kind === "drawing" && files[0].name === "#301c grid design — drawing set.pdf" &&
+     puts.every((p) => p === `estimate-files/${F.quotePathSegment(QID)}/grid/drawing-set.pdf`) && removed.join() === `estimate-files/${F.quotePathSegment(QID)}/grid/drawing-set.pdf-Sfx1`,
+    "#301 grid (DB): Generate stores one Grid drawing set; generating again replaces it (the old blob goes)");
+  const noBlob = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", { ...deps, blobOn: false });
+  const noGrid = await S.generateGridDrawingSet(fixtureId(301, "c-grid-none"), "Tester", "https://app.test", deps);
+  ok(!noBlob.ok && noBlob.error === F.PACKAGE_FILES_COPY.noStorage && !noGrid.ok, "#301 grid (DB): no storage or no quote / design → a message, nothing stored");
+}
+
+/** #301 slice C (adaptation 7): the drawing set's body moved out of set/page.tsx
+ *  into a data loader and a sheets component; the #209 / #211 / #223 source pins read all three. */
+function gridSetSources301(): string {
+  return ["src/app/(app)/design/grid/[id]/set/page.tsx", "src/lib/design/drawing-set-data.ts", "src/components/drawing/drawing-set-sheets.tsx"]
+    .map((p) => readFileSync(join(process.cwd(), p), "utf8"))
+    .join("\n");
 }

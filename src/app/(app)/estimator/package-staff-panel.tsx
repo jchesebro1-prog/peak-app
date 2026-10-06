@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
-import { addPackageFileAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction } from "./package-actions";
+import { addPackageFileAction, generateGridDrawingsAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction } from "./package-actions";
 import { putPackageFile } from "./package-file-upload";
 import { PACKAGE_FILE_ACCEPT, PACKAGE_FILE_KIND_LABEL, PACKAGE_FILE_KINDS, PACKAGE_FILES_COPY, type PackageFileKind } from "@/lib/estimate-output/package-files";
 import type { PackagePanel } from "@/lib/estimate-output/package-panel-server";
+import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
 
 /**
  * #301 slice C — the package's staff side under the Client link block:
@@ -94,6 +95,23 @@ export function PackageStaffPanel({ quoteId }: { quoteId: string }) {
       await reload();
     });
 
+  const generate = () =>
+    start(async () => {
+      setErr(null);
+      setNote(GRID_SET_COPY.generating);
+      let r: Awaited<ReturnType<typeof generateGridDrawingsAction>>;
+      try {
+        r = await generateGridDrawingsAction(quoteId);
+      } catch {
+        setNote(null);
+        setErr(FAILED);
+        return;
+      }
+      setNote(r.ok ? GRID_SET_COPY.generated : null);
+      if (!r.ok) setErr(r.error);
+      await reload();
+    });
+
   const rebuild = () =>
     start(async () => {
       setErr(null);
@@ -172,6 +190,15 @@ export function PackageStaffPanel({ quoteId }: { quoteId: string }) {
             if (file) upload(file);
           }}
         />
+        <button
+          type="button"
+          onClick={generate}
+          disabled={!canUpload || !panel.grid}
+          title={panel.grid ? `From ${panel.grid.label}` : "Link a Grid design to this quote first."}
+          style={{ ...btn, ...(canUpload && panel.grid ? {} : off) }}
+        >
+          Generate from Grid
+        </button>
       </div>
       {!panel.uploads && <span style={small}>{PACKAGE_FILES_COPY.noStorage}</span>}
 

@@ -359,6 +359,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/print/cover/Q-2041?t=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },
   // #301 — the cover PDF download: an unknown quote is a clean 404, never a render.
   { route: "/api/quotes/Q-0/cover-pdf", expectNotFound: true },
+  // #301 slice C — the signed Grid set print and its two asset routes without a token: clean 404s before any read.
+  { route: "/print/grid-set/GRD-5001~opt-base", expectNotFound: true },
+  { route: "/print/grid-set/GRD-5001~opt-base/asset/sheet/gs-1", expectNotFound: true },
+  { route: "/print/grid-set/GRD-5001~opt-base/asset/doc/PD-1", expectNotFound: true },
 ];
 
 let fail = 0;
