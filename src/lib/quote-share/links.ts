@@ -1,6 +1,6 @@
 import { get as getQuote, patchShareLink, recordShareOpen, type Quote, type QuoteRevision } from "@/lib/stores/quotes";
-import { createHash } from "node:crypto";
-import { rateLimit } from "@/lib/rate-limit";
+import { createHmac } from "node:crypto";
+import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { SHARE_OPEN_DEDUPE_MS } from "@/lib/estimate-output/opens";
 import { latestSentRevision } from "@/lib/quote-pdf/state";
 import { parseShareToken, SHARE_TOKEN_RE, signShareToken, signShareTokenV2, verifyShareToken, verifyShareTokenV2 } from "./token";
@@ -150,9 +150,10 @@ export async function resolveSharedPackage(
 /** Cheap per-IP guard before any read, for the open beacon. */
 export const SHARE_OPEN_PER_MIN = 30;
 
-/** The dedupe key never holds the raw IP. */
-function ipKey(ip: string): string {
-  return createHash("sha256").update(ip || "unknown").digest("base64url").slice(0, 16);
+/** No limiter key ever holds the raw IP: it is an HMAC keyed by the share
+ *  secret, so the short hash can't be reversed by brute-forcing IPv4. */
+export function openIpKey(ip: string): string {
+  return createHmac("sha256", shareSecret()).update(ip || "unknown").digest("base64url").slice(0, 16);
 }
 
 /**
@@ -165,6 +166,16 @@ function ipKey(ip: string): string {
 export async function recordSharedOpen(id: string, token: string, ip: string, opts: { secret?: string; now?: number } = {}): Promise<boolean> {
   const hit = await resolveSharedPackage(id, token, opts);
   if (!hit) return false;
-  if (!rateLimit(`share-open:${hit.q.id}:${hit.rev.rev}:${ipKey(ip)}`, 1, SHARE_OPEN_DEDUPE_MS).ok) return false;
-  return recordShareOpen(hit.q.id, hit.rev.rev, opts.now ?? Date.now());
+  const slot = `share-open:${hit.q.id}:${hit.rev.rev}:${openIpKey(ip)}`;
+  if (!rateLimit(slot, 1, SHARE_OPEN_DEDUPE_MS).ok) return false;
+  // A failed write must not suppress this IP for the whole window: refund the slot.
+  let recorded = false;
+  try {
+    recorded = await recordShareOpen(hit.q.id, hit.rev.rev, opts.now ?? Date.now());
+  } catch (e) {
+    rateLimitRefund(slot);
+    throw e;
+  }
+  if (!recorded) rateLimitRefund(slot);
+  return recorded;
 }

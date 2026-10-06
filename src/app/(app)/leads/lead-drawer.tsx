@@ -1150,6 +1150,12 @@ export default function LeadDrawer({
                     </div>
                   </div>
 
+                  {vm.quoteOpensLine && (
+                    <div data-testid="lead-quote-opens" style={{ padding: "0 22px 10px", fontSize: 11.5, color: "#5b616e" }}>
+                      {vm.quoteOpensLine}
+                    </div>
+                  )}
+
                   {/* footer actions */}
                   <div
                     style={{

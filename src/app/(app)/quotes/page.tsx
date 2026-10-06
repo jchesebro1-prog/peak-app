@@ -29,6 +29,7 @@ import { shownReviewState } from "@/lib/review-line";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
 import { displayQuoteNumber, quoteMatchesSearch, quoteSearchRank } from "@/lib/estimate-number";
+import { opensChip } from "@/lib/quote-share/package-view";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
 /** #222 fix wave 1: recalling a revision renders the quote's saved PDF in `after()`, inside this budget. */
@@ -544,6 +545,8 @@ export default async function QuotesPage({
         {filtered.map((q) => {
           const nextStep = q.id === selectedId ? selectedNext : null;
           const reviewLimit = reviewLimitChip(q, limitCtx, me);
+          // #301 slice B: the client opened the package link (any sent revision).
+          const opened = opensChip(q);
           // #242 / #284: an approval that no longer holds (stale auto limit or a
           // changed price/line set) is not an approval — never the green badge.
           const rState = shownReviewState(q.review?.state, approvalHolds(q, limitCtx));
@@ -693,6 +696,26 @@ export default async function QuotesPage({
                         }}
                       >
                         ✓ Customer accepted
+                      </span>
+                    )}
+                    {opened && (
+                      <span
+                        data-testid="quote-opened-chip"
+                        title={opened.title}
+                        style={{
+                          flexShrink: 0,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
+                          color: "#3155a8",
+                          background: "#e9eefb",
+                          border: "1px solid #d4ddf3",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        {opened.label}
                       </span>
                     )}
                     {reviewLimit && <ReviewLimitChip chip={reviewLimit} variant="pill" />}

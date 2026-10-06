@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { getOptionalUser } from "@/lib/session";
 import { clientIpFromHeaders, rateLimit } from "@/lib/rate-limit";
-import { recordSharedOpen, SHARE_OPEN_PER_MIN } from "@/lib/quote-share/links";
+import { openIpKey, recordSharedOpen, SHARE_OPEN_PER_MIN } from "@/lib/quote-share/links";
 
 /**
  * #301 slice B — the package page's server actions. Public (the share route
@@ -19,7 +19,7 @@ export async function recordShareOpenAction(id: string, token: string): Promise<
     if (typeof id !== "string" || typeof token !== "string") return;
     if (await getOptionalUser()) return;
     const ip = clientIpFromHeaders(await headers()) || "unknown";
-    if (!rateLimit("share-open-ip:" + ip, SHARE_OPEN_PER_MIN, 60_000).ok) return;
+    if (!rateLimit(`share-open-ip:${openIpKey(ip)}`, SHARE_OPEN_PER_MIN, 60_000).ok) return;
     await recordSharedOpen(id, token, ip);
   } catch (e) {
     console.warn("[share] open not recorded", e instanceof Error ? e.message : e);

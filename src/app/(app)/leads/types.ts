@@ -83,6 +83,9 @@ export type DrawerDetailVM = {
   quoteId: string;
   /** #223 — the converted quote's estimate number ("" when none). */
   quoteNumber: string;
+  /** #301 slice B — "Client link — Rev 2 · opened 3× · …" for the converted
+   *  quote once its package link was opened ("" otherwise). */
+  quoteOpensLine: string;
 };
 
 export type SourceOptionVM = { value: string; label: string };

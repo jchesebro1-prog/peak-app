@@ -51251,7 +51251,7 @@ async function e301bPageAsyncChecks(): Promise<void> {
      acts.indexOf("getOptionalUser()") < acts.indexOf("recordSharedOpen(") && acts.includes("clientIpFromHeaders(await headers())") && acts.includes("catch (e)"),
     "#301 opens: the action skips team users first, keys on the client IP, never throws and returns nothing");
   const lk = rd("src/lib/quote-share/links.ts");
-  ok(lk.includes("rateLimit(`share-open:${hit.q.id}:${hit.rev.rev}:${ipKey(ip)}`, 1, SHARE_OPEN_DEDUPE_MS)") && lk.includes('createHash("sha256")'),
+  ok(lk.includes("rateLimit(slot, 1, SHARE_OPEN_DEDUPE_MS)") && lk.includes('createHmac("sha256", shareSecret())'),
     "#301 opens: one open per IP-hash per revision per 30 minutes (the in-memory limiter)");
   const beacon = rd("src/app/share/quote/[id]/[token]/open-beacon.tsx");
   ok(/^"use client";/.test(beacon) && beacon.includes("useEffect(") && beacon.includes("sent.current") && beacon.includes('from "./actions"') &&
@@ -51292,4 +51292,33 @@ async function e301bOpensAsyncChecks(): Promise<void> {
   ok(L.shareLinkStatus((await Q.get(QID))!, true, S, Date.now()).sentRevs[0].line.startsWith("Rev 1 · opened 2× · first "), "#301 opens (DB): the Client link panel's row shows the count");
   await L.revokeShareLink(QID, "Revoker");
   ok((await L.recordSharedOpen(QID, tok2, "198.51.100.4-" + salt, { secret: S })) === false, "#301 opens (DB): a revoked link records nothing");
+}
+
+/* ======================================================================
+   #301 slice B — opens display (§8): the Quotes hub "Opened" chip and the
+   lead drawer's Client link line, both from the pure package-view rules.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const hub = rd("src/app/(app)/quotes/page.tsx");
+  ok(hub.includes('import { opensChip } from "@/lib/quote-share/package-view";') && hub.includes("const opened = opensChip(q);") && hub.includes('data-testid="quote-opened-chip"') &&
+     hub.includes("title={opened.title}") && hub.indexOf('data-testid="quote-opened-chip"') < hub.indexOf("{reviewLimit && <ReviewLimitChip"),
+    "#301 hub: an \"Opened\" chip on a quote whose client link was opened (rows in its title)");
+  const lib = rd("src/app/(app)/leads/lib.ts");
+  ok(lib.includes("quoteOpensLine: latestOpensLine(convertedQuote),") && lib.includes('import { latestOpensLine } from "@/lib/quote-share/package-view";'),
+    "#301 lead: the drawer view-model carries the converted quote's Client link line");
+  ok(rd("src/app/(app)/leads/types.ts").includes("quoteOpensLine: string;"), "#301 lead: DrawerDetailVM.quoteOpensLine");
+  const drawer = rd("src/app/(app)/leads/lead-drawer.tsx");
+  ok(drawer.includes('data-testid="lead-quote-opens"') && drawer.includes("{vm.quoteOpensLine}") && drawer.indexOf('data-testid="lead-quote-opens"') < drawer.indexOf("{/* footer actions */}"),
+    "#301 lead: the drawer shows the line above its footer");
+  // Task 8 review hardening: keyed IP hash, no raw-IP limiter key, refunded dedupe slot on failure.
+  const lk = rd("src/lib/quote-share/links.ts");
+  const acts = rd("src/app/share/quote/[id]/[token]/actions.ts");
+  const rsoFn = lk.slice(lk.indexOf("export async function recordSharedOpen("));
+  ok(lk.includes('createHmac("sha256", shareSecret())') && !lk.includes('createHash("sha256").update(ip') && lk.includes("export function openIpKey(ip: string): string"),
+    "#301 opens hardening: the IP hash is an HMAC keyed by the share secret (openIpKey), not a bare SHA-256");
+  ok(acts.includes("openIpKey(ip)") && !acts.includes('"share-open-ip:" + ip') && !acts.includes("share-open-ip:${ip}"),
+    "#301 opens hardening: the per-IP guard keys on the keyed hash, never the raw IP");
+  ok(lk.includes("rateLimitRefund") && rsoFn.includes("rateLimitRefund(slot)") && rsoFn.includes("catch") && /if \(!recorded\) rateLimitRefund\(slot\)/.test(rsoFn),
+    "#301 opens hardening: a failed or false recordShareOpen refunds the dedupe slot");
 }
