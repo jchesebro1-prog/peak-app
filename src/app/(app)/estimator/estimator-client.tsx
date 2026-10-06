@@ -441,6 +441,7 @@ export default function EstimatorClient({
   viewerCanApprove,
   canWriteNarrativeLibrary,
   narrativeIntros,
+  notIncludedDefault,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -621,6 +622,9 @@ export default function EstimatorClient({
   const titleOpenRef = useRef(false);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
   const [assumptions, setAssumptions] = useState(initial.assumptions || "");
+  /** #301 — the cover PDF's Overall summary and Not included (never on the estimate PDF). */
+  const [coverSummary, setCoverSummary] = useState(initial.coverSummary);
+  const [notIncluded, setNotIncluded] = useState(initial.notIncluded ?? notIncludedDefault);
   const checkedAssumptions = useMemo(() => new Set(assumptions.split("\n").map((line) => line.trim()).filter(Boolean)), [assumptions]);
   const [installTimeframe, setInstallTimeframe] = useState(initial.installTimeframe);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
@@ -800,6 +804,8 @@ export default function EstimatorClient({
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assumptionsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coverSummaryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notIncludedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -1237,6 +1243,9 @@ export default function EstimatorClient({
           mobs,
           vendorQuotes,
           pdfOptions: pdfOpts,
+          // #301 (R14): the cover fields ride every Save.
+          coverSummary,
+          notIncluded,
         });
         // #181: adopt the id whenever the server hands one back, even when
         // `ok` is false — the create branch mints the quote FIRST and only
@@ -1476,6 +1485,19 @@ export default function EstimatorClient({
     if (!loadedId) return;
     if (assumptionsTimer.current) clearTimeout(assumptionsTimer.current);
     assumptionsTimer.current = setTimeout(() => persistMeta({ assumptions: v }), 500);
+  };
+  // #301: autosaved like the cover note so the Cover PDF reflects them without a full Save.
+  const onCoverSummary = (v: string) => {
+    setCoverSummary(v);
+    if (!loadedId) return;
+    if (coverSummaryTimer.current) clearTimeout(coverSummaryTimer.current);
+    coverSummaryTimer.current = setTimeout(() => persistMeta({ coverSummary: v }), 500);
+  };
+  const onNotIncluded = (v: string) => {
+    setNotIncluded(v);
+    if (!loadedId) return;
+    if (notIncludedTimer.current) clearTimeout(notIncludedTimer.current);
+    notIncludedTimer.current = setTimeout(() => persistMeta({ notIncluded: v }), 500);
   };
   const toggleAssumption = (line: string) => {
     const current = assumptions.split("\n").map((item) => item.trim()).filter(Boolean);
@@ -4289,6 +4311,11 @@ export default function EstimatorClient({
               else if (flag === "pdfCutSheets") setPdfCutSheets((v) => !v);
               else setPdfTerms((v) => !v);
             }}
+            coverSummary={coverSummary}
+            setCoverSummary={onCoverSummary}
+            notIncluded={notIncluded}
+            setNotIncluded={onNotIncluded}
+            notIncludedDefault={notIncludedDefault}
           />
         </>
       )}

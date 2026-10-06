@@ -551,6 +551,11 @@ export type InitialQuote = {
    *  Sent with the FIRST save only, which retires that draft server-side. */
   replaces: string;
   /** Saved Show-on-PDF choices (#222) — DEFAULT_PDF_OPTIONS for a new estimate. */
+  /** #301 — the cover PDF's overall summary ("" = the scope-list sentence). */
+  coverSummary: string;
+  /** #301 — Not included as stored; null = never stored (the editor starts
+   *  from the Settings → Estimate output default list). */
+  notIncluded: string | null;
   pdfOptions: QuotePdfOptions;
   /** The saved PDF's state (#222) — null for a new or never-rendered estimate. */
   pdf: QuotePdfView | null;
@@ -640,4 +645,6 @@ export type EstimatorProps = {
   canWriteNarrativeLibrary: boolean;
   /** #293 — the system-intro library (Settings blob `narrative_intros`). */
   narrativeIntros: SystemIntro[];
+  /** #301 — Settings → Estimate output: the default Not included list (Reset to default). */
+  notIncludedDefault: string;
 };

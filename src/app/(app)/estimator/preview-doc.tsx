@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { QuotePdfViewer } from "@/components/quote-pdf/quote-pdf-viewer";
 import { ClientLinkPanel } from "./client-link-panel";
+import { CoverPackagePanel } from "./cover-package-panel";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { systemFreight, systemItemsRev, systemSellTotal } from "./pricing";
 import type { PaymentTerms, SpecSection } from "./types";
@@ -88,6 +89,12 @@ export type PreviewProps = {
   paymentTermsOptions: readonly PaymentTerms[];
   setPaymentTerms: (terms: PaymentTerms) => void;
   togglePdf: (flag: PdfToggle) => void;
+  /** #301 — the cover PDF's quote-level text (Cover & package block). */
+  coverSummary: string;
+  setCoverSummary: (v: string) => void;
+  notIncluded: string;
+  setNotIncluded: (v: string) => void;
+  notIncludedDefault: string;
 };
 
 export default function PreviewDoc(p: PreviewProps) {
@@ -254,6 +261,16 @@ export default function PreviewDoc(p: PreviewProps) {
           ) : (
             <span style={{ ...actionLink, color: "#9aa0ab", background: "#f1f2f5", cursor: "default" }}>Download PDF</span>
           )}
+          <CoverPackagePanel
+            savedQuoteId={p.savedQuoteId}
+            canEdit={p.canBuild}
+            dirty={p.dirty}
+            coverSummary={p.coverSummary}
+            onCoverSummary={p.setCoverSummary}
+            notIncluded={p.notIncluded}
+            onNotIncluded={p.setNotIncluded}
+            notIncludedDefault={p.notIncludedDefault}
+          />
           {p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}
         </aside>
         <div

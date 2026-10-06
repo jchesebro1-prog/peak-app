@@ -36,6 +36,7 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type {
   AiSource,
@@ -141,6 +142,8 @@ async function initialFrom(
       replaces: "",
       pdfOptions: { ...DEFAULT_PDF_OPTIONS },
       pdf: null,
+      coverSummary: "",
+      notIncluded: null,
       portal: null,
     };
   }
@@ -207,6 +210,9 @@ async function initialFrom(
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),
     pdf: pdfView(q.pdf, Date.now()),
+    // #301: the cover fields as stored; null = never stored (the editor starts from the default list).
+    coverSummary: q.coverSummary || "",
+    notIncluded: typeof q.notIncluded === "string" ? q.notIncluded : null,
     // #245 Task 13: the staff Portal panel — present only for a portal-
     // catalog quote. porItems is a point-in-time read of the loaded spec's
     // `por` lines; the next Save recomputes what remains (clearPricedPor).
@@ -275,7 +281,7 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros] =
+  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults] =
     await Promise.all([
       fabricParts(),
       byCategory("Labor"),
@@ -291,6 +297,7 @@ export default async function EstimatorPage({
       allSpecRecords(),
       listTrackSeries(),
       listIntros(),
+      getEstimateOutputDefaults(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -455,6 +462,8 @@ export default async function EstimatorPage({
       canWriteNarrativeLibrary={can("create", user.roles)}
       // #293: the system-intro library for the narrative column's intro select.
       narrativeIntros={narrativeIntros}
+      // #301: Reset to default in the preview's Cover & package block.
+      notIncludedDefault={estimateOutputDefaults.notIncluded}
     />
   );
 }

@@ -50607,6 +50607,38 @@ async function e301GoalsAsyncChecks(): Promise<void> {
     "#301 settings: Sales & Rewards renders the card from the stored blob");
 }
 
+/* ======================================================================
+   #301 slice A — quote cover fields: Overall summary + Not included in the
+   customer preview sidebar, saved with the quote and autosaved (R14).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  const saveBody = acts.slice(acts.indexOf("export async function saveQuoteAction("), acts.indexOf("export async function searchQuotesAction("));
+  ok(saveBody.includes('...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),') &&
+     saveBody.includes('...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),'),
+    "#301 save: the cover fields ride the Save patch, cleaned and capped (R14)");
+  const meta = acts.slice(acts.indexOf("export async function updateQuoteMetaAction("), acts.indexOf("export type QuotePeopleSync"));
+  ok(meta.includes('if (typeof meta.coverSummary === "string") patch.coverSummary = cleanPlainText(meta.coverSummary, COVER_SUMMARY_MAX);') &&
+     meta.includes('if (typeof meta.notIncluded === "string") patch.notIncluded = cleanPlainText(meta.notIncluded, NOT_INCLUDED_MAX);'),
+    "#301 autosave: the header autosave allowlists the two fields, cleaned");
+  const pg = rd("src/app/(app)/estimator/page.tsx");
+  ok(pg.includes("getEstimateOutputDefaults()") && pg.includes("notIncludedDefault={estimateOutputDefaults.notIncluded}") &&
+     pg.includes('notIncluded: typeof q.notIncluded === "string" ? q.notIncluded : null,') && pg.includes('coverSummary: q.coverSummary || "",'),
+    "#301 page: the stored fields seed the editor; a quote that never stored Not included gets the default");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(cli.includes("useState(initial.notIncluded ?? notIncludedDefault)") && cli.includes("persistMeta({ coverSummary: v })") && cli.includes("persistMeta({ notIncluded: v })") &&
+     /saveQuoteAction\(loadedId, \{[\s\S]{0,1500}coverSummary,\s+notIncluded,/.test(cli),
+    "#301 estimator: the fields autosave (500 ms) and ride every Save");
+  const panel = rd("src/app/(app)/estimator/cover-package-panel.tsx");
+  ok(panel.startsWith('"use client";') && panel.includes("Cover &amp; package") && panel.includes("Overall summary") && panel.includes("Not included") &&
+     panel.includes("Reset to default") && panel.includes("p.onNotIncluded(p.notIncludedDefault)") && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/quote-pdf)/m.test(panel),
+    "#301 preview: the Cover & package block (summary, Not included, Reset to default)");
+  const prev = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(prev.includes("<CoverPackagePanel") && prev.indexOf("<CoverPackagePanel") < prev.indexOf("<ClientLinkPanel") && !prev.includes('className="est-doc"') && !prev.includes("customerLines("),
+    "#301 preview: mounted above the Client link block; the #222 preview pins still hold");
+}
+
 async function e301DefaultsAsyncChecks(): Promise<void> {
   const { getBlob, setBlob } = await import("@/db/doc-store");
   const D = await import("@/lib/stores/estimate-output-defaults");

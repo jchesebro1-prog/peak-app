@@ -26,7 +26,7 @@ import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
 import type { QuoteLite, TravelLite } from "./types";
 import { withSanitizedKeyProducts } from "./narrative";
-import { withSanitizedOutputFields } from "@/lib/estimate-output/fields";
+import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
 import type { DraftedLine } from "./ai-scope-modal";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import {
@@ -157,6 +157,9 @@ export type SavePayload = {
   vendorQuotes: VendorQuote[];
   /** #222 — the preview's Show-on-PDF choices; the saved PDF prints with them. */
   pdfOptions: QuotePdfOptions;
+  /** #301 — the cover fields (R14). Optional so an older caller saves as before. */
+  coverSummary?: string;
+  notIncluded?: string;
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
 };
@@ -444,6 +447,9 @@ export async function saveQuoteAction(
     source: savedSource,
     spec: { sections: savedSections, mobs: payload.mobs },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
+    // #301 (R14): not content fields — they never re-render the estimate PDF.
+    ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
+    ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
   let q: Quote | null = null;
@@ -999,6 +1005,8 @@ export async function updateQuoteMetaAction(
     installTimeframe?: string;
     category?: string;
     name?: string;
+    coverSummary?: string;
+    notIncluded?: string;
   }
 ): Promise<{ ok: boolean; pdf?: QuotePdfView | null }> {
   await requireUser();
@@ -1017,6 +1025,9 @@ export async function updateQuoteMetaAction(
   if (typeof meta.assumptions === "string") patch.assumptions = meta.assumptions;
   if (typeof meta.installTimeframe === "string") patch.installTimeframe = meta.installTimeframe.trim();
   if (typeof meta.category === "string") patch.category = meta.category.trim();
+  // #301: the cover fields autosave like the cover note; neither is content, so no re-render.
+  if (typeof meta.coverSummary === "string") patch.coverSummary = cleanPlainText(meta.coverSummary, COVER_SUMMARY_MAX);
+  if (typeof meta.notIncluded === "string") patch.notIncluded = cleanPlainText(meta.notIncluded, NOT_INCLUDED_MAX);
   // #160: the click-to-edit Estimator title. Blank never clears a name.
   if (typeof meta.name === "string" && meta.name.trim()) patch.name = meta.name.trim();
 
