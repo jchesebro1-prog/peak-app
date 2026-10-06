@@ -24,7 +24,7 @@ export type PackageSlots = {
 };
 
 export const PACKAGE_WEB_CSS = `
-.pkg { display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.55; color: #16181d; }
+.pkg { display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.55; color: #16181d; overflow-wrap: anywhere; }
 .pkg-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 22px 26px; }
 .pkg-logo-full { display: block; width: 100%; height: auto; margin-bottom: 16px; }
 .pkg-logo { display: block; max-height: 64px; max-width: 100%; object-fit: contain; margin-bottom: 16px; }
@@ -45,7 +45,7 @@ export const PACKAGE_WEB_CSS = `
 .pkg-pre { white-space: pre-line; }
 .pkg-ul { margin: 0 0 10px; padding-left: 20px; }
 .pkg-toggle { display: inline-flex; align-self: flex-start; background: #e4e7ec; border-radius: 8px; padding: 2px; }
-.pkg-toggle a { font-size: 12.5px; font-weight: 600; padding: 6px 14px; border-radius: 6px; text-decoration: none; color: #5b616e; }
+.pkg-toggle a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; font-size: 12.5px; font-weight: 600; padding: 6px 14px; border-radius: 6px; text-decoration: none; color: #5b616e; }
 .pkg-toggle a[aria-current="page"] { background: #fff; color: #16181d; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 .pkg-scope-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #eef0f3; padding-bottom: 8px; margin-bottom: 12px; }
 .pkg-scope-head h2 { margin: 0; }
@@ -58,7 +58,7 @@ export const PACKAGE_WEB_CSS = `
 .pkg-bom-wrap { overflow-x: auto; }
 .pkg-bom { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pkg-bom th { text-align: left; font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e4e7ec; padding: 6px 8px; }
-.pkg-bom td { border-bottom: 1px solid #f0f1f4; padding: 6px 8px; vertical-align: top; }
+.pkg-bom td { border-bottom: 1px solid #f0f1f4; padding: 6px 8px; vertical-align: top; overflow-wrap: anywhere; }
 .pkg-bom .pkg-qty { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pkg-row { display: flex; justify-content: space-between; gap: 12px; }
 .pkg-total { font-size: 18px; font-weight: 700; }
@@ -147,7 +147,7 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
               <thead>
                 <tr>
                   {PACKAGE_COPY.bomHead.map((h) => (
-                    <th key={h}>{h}</th>
+                    <th key={h} scope="col">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -239,8 +239,8 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
         <section className="pkg-card">
           <h2>{PACKAGE_COPY.options}</h2>
           <ul className="pkg-opts">
-            {m.options.map((o) => (
-              <li key={o.label}>
+            {m.options.map((o, i) => (
+              <li key={`${i}-${o.label}`}>
                 <div className="pkg-row">
                   <strong>
                     {o.label} — {o.desc}
@@ -257,8 +257,8 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
         <section className="pkg-card">
           <h2>{PACKAGE_COPY.notIncluded}</h2>
           <ul className="pkg-ul" style={{ margin: 0 }}>
-            {m.notIncluded.map((n) => (
-              <li key={n}>{n}</li>
+            {m.notIncluded.map((n, i) => (
+              <li key={`${i}-${n}`}>{n}</li>
             ))}
           </ul>
         </section>

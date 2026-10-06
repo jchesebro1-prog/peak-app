@@ -51133,3 +51133,20 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
      !/^import (?!type)[^\n]*from "(?!react"|@\/lib\/quote-share\/package-view")/m.test(comp),
     "#301 view: a server component with pure props — no hooks, handlers, image import or server module");
 }
+
+/* ===== #301 slice B — package view hardening ===== */
+{
+  const secs = p293Sections().map((s) =>
+    s.id === "s2" ? { ...s, items: (s as { items: { sku?: string }[] }).items.map((it) => (it.sku === "SKU-5" ? { ...it, sku: "SKU-SECRET-5" } : it)), clientGoals: "Even front light.", keyProducts: [{ lineKey: "5", sku: "SKU-SECRET-5", text: "A bright fresnel.", photo: true }] } : s) as E301bbSec[];
+  const doc = p293Props({ sections: secs, pdfOptions: { pdfOptions: true } });
+  const hb = { doc, photos: {}, catalog: new Map(), state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
+    headerLine: "EST-1 · Rev 1 · sent Oct 5, 2026", currentHref: null, base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" };
+  const dup = e301bvRender(e301bvEl(PackageView301, { model: { ...e301bmModel({ ...hb, frozen: { coverSummary: "S.", notIncluded: "Permits" }, view: "narrative" }), notIncluded: ["Permits", "Permits"] } }));
+  ok(e301bvCss.includes("overflow-wrap: anywhere") && e301bvCss.includes(".pkg-bom td {") && /\.pkg-bom td \{[^}]*overflow-wrap: anywhere/.test(e301bvCss) &&
+     /\.pkg \{[^}]*overflow-wrap: anywhere/.test(e301bvCss) && /\.pkg-toggle a \{[^}]*min-height: 44px/.test(e301bvCss),
+    "#301 hardening: long words wrap (.pkg, BOM cells) and the toggle links are 44px tap targets");
+  ok(!dup.includes("SKU-SECRET-5") && dup.includes("A bright fresnel."), "#301 hardening: a key product's sku is never rendered (it is only a React key)");
+  ok((dup.match(/<li>Permits<\/li>/g) || []).length === 2, "#301 hardening: two identical Not-included lines render without throwing");
+  const bomH = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...hb, frozen: { coverSummary: "S.", notIncluded: "" }, view: "bom" }) }));
+  ok(bomH.includes('scope="col"'), "#301 hardening: BOM headers carry scope=col");
+}
