@@ -12,6 +12,9 @@ import { ONLINE_COPY, type ShareLinkStatus } from "@/lib/quote-share/view";
  * status on mount, again whenever the window regains focus (a send made
  * elsewhere while the preview is open enables Copy without reopening it) and
  * after its own actions — no quote data comes from the Estimator.
+ * #301 slice B: Copy copies the v2 link (pinned to the latest sent revision);
+ * every sent revision is listed with its opens (a superseded one keeps working
+ * with a banner).
  */
 
 const FAILED = "Could not reach the server. Try again.";
@@ -96,12 +99,14 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
         return;
       }
       const link = r.link;
-      if (!link.path) {
+      // #301 slice B: the copyable link pins the latest sent revision (v2).
+      const path = link.pathV2 ?? link.path;
+      if (!path) {
         setErr(FAILED);
         return;
       }
       setStatus((s) => (s ? { ...s, link } : s));
-      const url = window.location.origin + link.path;
+      const url = window.location.origin + path;
       try {
         await navigator.clipboard.writeText(url);
         setNote(ONLINE_COPY.copied);
@@ -164,6 +169,15 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
         <span style={small}>
           Expires {shortDate(link.expiresAt)} · created by {link.createdBy}
         </span>
+      )}
+      {status.sentRevs.length > 0 && (
+        <div data-testid="client-link-revs" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {status.sentRevs.map((r) => (
+            <span key={r.rev} style={{ ...small, color: r.latest ? "#3a3f4a" : "#9aa0ab" }}>
+              {r.line}
+            </span>
+          ))}
+        </div>
       )}
       {link && status.canSend && !confirmRevoke && (
         <button type="button" onClick={() => setConfirmRevoke(true)} disabled={pending} style={{ ...linkBtn, color: "#a33a2b", alignSelf: "flex-start" }}>

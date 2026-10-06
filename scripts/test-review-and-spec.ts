@@ -51217,3 +51217,17 @@ async function e301bPageAsyncChecks(): Promise<void> {
     "#301 loader (DB): BOM manufacturer / part # from the catalog (getMany); the scope price");
   ok(hit ? (await packagePhotoDocForRevision(hit.rev, "PD-NOPE-301B")) === null : false, "#301 photos (DB): a doc outside the revision's photo set is never served");
 }
+
+/* ======================================================================
+   #301 slice B — client link panel: Copy client link copies the v2
+   (rev-pinned) link; every sent revision is listed with its opens.
+   ====================================================================== */
+{
+  const panel = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-link-panel.tsx"), "utf8");
+  ok(panel.includes("const path = link.pathV2 ?? link.path;") && panel.includes("const url = window.location.origin + path;") && !panel.includes("window.location.origin + link.path"),
+    "#301 panel: Copy client link copies the v2 link to the latest sent revision");
+  ok(panel.includes('data-testid="client-link-revs"') && panel.includes("status.sentRevs.map((r) =>") && panel.includes("{r.line}") && panel.includes("key={r.rev}"),
+    "#301 panel: one line per sent revision (Rev N, superseded, opens)");
+  ok(/^"use client";/.test(panel) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/quote-share\/(token|links|photo-response|package-view))/m.test(panel),
+    "#301 panel: still a client component with no server value import (the rows come from the status action)");
+}
