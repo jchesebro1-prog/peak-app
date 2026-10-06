@@ -17,9 +17,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string; tok
   const { id, token, docId } = await ctx.params;
   if (!rateLimit("share-photo:" + (clientIp(req) || "unknown"), SHARE_PHOTO_PER_MIN, 60_000).ok) return new Response("Too many requests", { status: 429 });
   if (isShareTokenV2(token)) {
-    const pkg = await resolveSharedPackage(id, token);
-    if (!pkg) return new Response("Not found", { status: 404 });
-    return servePackagePhotoForRevision(req, pkg.rev, docId);
+    try {
+      const pkg = await resolveSharedPackage(id, token);
+      if (!pkg) return new Response("Not found", { status: 404 });
+      return await servePackagePhotoForRevision(req, pkg.rev, docId);
+    } catch (e) {
+      // A DB error is the same uniform 404 as a bad link — never a 500 that tells a prober the link is real.
+      console.warn("[package] photo lookup failed", e instanceof Error ? e.message : e);
+      return new Response("Not found", { status: 404 });
+    }
   }
   const hit = await resolveSharedQuote(id, token);
   if (!hit || hit.state.kind !== "ok") return new Response("Not found", { status: 404 });

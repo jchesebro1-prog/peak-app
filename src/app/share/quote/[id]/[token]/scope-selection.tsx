@@ -25,7 +25,7 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
   const [title, setTitle] = useState("");
   const [email, setEmail] = useState("");
   const [note, setNote] = useState("");
-  const [website, setWebsite] = useState("");
+  const [trap, setTrap] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -46,7 +46,7 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
     start(async () => {
       let r: ClientActionResult;
       try {
-        r = await submitScopeSelection(id, token, { name, title, email, message: note, sectionIds: picked, website });
+        r = await submitScopeSelection(id, token, { name, title, email, message: note, sectionIds: picked, hp_confirm_x: trap });
       } catch {
         setErr(CLIENT_ACTION_COPY.failed);
         return;
@@ -64,7 +64,7 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
       {scopes.map((s) => (
         <label key={s.id} className="pkg-row" style={{ alignItems: "center", cursor: "pointer" }}>
           <span>
-            <input type="checkbox" checked={picked.includes(s.id)} onChange={() => toggle(s.id)} style={{ marginRight: 8 }} />
+            <input type="checkbox" aria-label={s.name} checked={picked.includes(s.id)} onChange={() => toggle(s.id)} style={{ marginRight: 8 }} />
             {s.name}
           </span>
           <span className="pkg-price">{s.priceLabel}</span>
@@ -81,8 +81,8 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
       <textarea aria-label={CLIENT_ACTION_COPY.note} placeholder={CLIENT_ACTION_COPY.note} maxLength={4000} rows={3} value={note} onChange={(e) => setNote(e.target.value)} style={input} />
       <div aria-hidden="true" style={hidden}>
         <label>
-          Website
-          <input type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
+          Leave this field empty
+          <input type="text" name="hp_confirm_x" tabIndex={-1} autoComplete="off" value={trap} onChange={(e) => setTrap(e.target.value)} />
         </label>
       </div>
       {err && (

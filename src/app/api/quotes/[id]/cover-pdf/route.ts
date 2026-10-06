@@ -10,6 +10,9 @@ import { get as getQuote } from "@/lib/stores/quotes";
 
 /** R7: one headless-Chrome render of a 1–2 page cover. */
 export const maxDuration = 60;
+/** The render's own budget: it fails cleanly inside maxDuration (a worst-case render is ~90 s plus the queue). */
+const COVER_RENDER_TIMEOUT_MS = 45_000;
+const COVER_RENDER_DEADLINE_MS = 55_000;
 export const dynamic = "force-dynamic";
 
 const text = (body: string, status: number) =>
@@ -35,7 +38,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
     if ("error" in where) return text(where.error, 503);
     const t = signPrintToken(secret, "cover", q.id, Date.now());
-    const pdf = await renderPrintRouteToPdf(`${where.origin}/print/cover/${encodeURIComponent(q.id)}?t=${encodeURIComponent(t)}`);
+    const pdf = await renderPrintRouteToPdf(`${where.origin}/print/cover/${encodeURIComponent(q.id)}?t=${encodeURIComponent(t)}`, {
+      timeoutMs: COVER_RENDER_TIMEOUT_MS,
+      // Bounds the queue wait too.
+      signal: AbortSignal.timeout(COVER_RENDER_DEADLINE_MS),
+    });
     const disposition = attachmentDisposition(coverPdfFileName(displayQuoteNumber(q)));
     const download = new URL(request.url).searchParams.get("download") === "1";
     return new Response(new Uint8Array(pdf), {

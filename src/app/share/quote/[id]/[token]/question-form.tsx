@@ -16,7 +16,7 @@ export function QuestionForm({ id, token }: { id: string; token: string }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
-  const [website, setWebsite] = useState("");
+  const [trap, setTrap] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -35,7 +35,7 @@ export function QuestionForm({ id, token }: { id: string; token: string }) {
     start(async () => {
       let r: ClientActionResult;
       try {
-        r = await askQuestion(id, token, { name, email, message, website });
+        r = await askQuestion(id, token, { name, email, message, hp_confirm_x: trap });
       } catch {
         setErr(CLIENT_ACTION_COPY.failed);
         return;
@@ -52,8 +52,8 @@ export function QuestionForm({ id, token }: { id: string; token: string }) {
       <textarea aria-label={CLIENT_ACTION_COPY.message} placeholder={CLIENT_ACTION_COPY.message} required maxLength={4000} rows={4} value={message} onChange={(e) => setMessage(e.target.value)} style={input} />
       <div aria-hidden="true" style={hidden}>
         <label>
-          Website
-          <input type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
+          Leave this field empty
+          <input type="text" name="hp_confirm_x" tabIndex={-1} autoComplete="off" value={trap} onChange={(e) => setTrap(e.target.value)} />
         </label>
       </div>
       {err && (

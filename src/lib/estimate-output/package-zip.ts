@@ -44,10 +44,11 @@ export function zipCacheable(rows: readonly LeftOut[]): boolean {
   return rows.every((r) => r.reason === LEFT_OUT_REASON.tooBig);
 }
 
-/** Slice C adaptation 3: Blob must be on, and only a Vercel deployment (VERCEL=1)
- *  — or an explicit ESTIMATE_PACKAGE_CACHE=1 — may write the cache. A local
- *  `next dev` or `next start` on a scratch datadir reuses real quote ids next
- *  to the production Blob token, so it never caches by default. */
-export function packageZipCacheOn(env: { NODE_ENV?: string; VERCEL?: string; ESTIMATE_PACKAGE_CACHE?: string }, blobOn: boolean): boolean {
-  return blobOn && (env.VERCEL === "1" || env.ESTIMATE_PACKAGE_CACHE === "1");
+/** Slice C adaptation 3: Blob must be on, and only the PRODUCTION Vercel
+ *  deployment (VERCEL_ENV=production) — or an explicit ESTIMATE_PACKAGE_CACHE=1 —
+ *  may read or write the cache. A preview deploy and a local `next dev` /
+ *  `next start` share the production DB and Blob token and reuse real quote
+ *  ids, so they never cache (and never delete production's cache) by default. */
+export function packageZipCacheOn(env: { NODE_ENV?: string; VERCEL?: string; VERCEL_ENV?: string; ESTIMATE_PACKAGE_CACHE?: string }, blobOn: boolean): boolean {
+  return blobOn && (env.VERCEL_ENV === "production" || env.ESTIMATE_PACKAGE_CACHE === "1");
 }

@@ -34,7 +34,7 @@ type SubmitDeps = {
 export async function submitClientResponse(kind: ClientResponseKind, id: string, token: string, input: unknown, ip: string, deps: SubmitDeps = {}): Promise<ClientActionResult> {
   const o = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   // Honeypot: a filled hidden field looks like a success and writes nothing (adaptation 14).
-  if (typeof o.website === "string" && o.website.trim()) return { ok: true, confirmation: confirmationText(PEAK_NAME) };
+  if (typeof o.hp_confirm_x === "string" && o.hp_confirm_x.trim()) return { ok: true, confirmation: confirmationText(PEAK_NAME) };
   if (!rateLimit(`share-respond-ip:${ip || "unknown"}`, RESPONSE_IP_LIMIT, RESPONSE_IP_WINDOW_MS).ok) return { ok: false, error: CLIENT_ACTION_COPY.tooMany };
   const now = (deps.now ?? Date.now)();
   const hit = await resolveSharedPackage(id, token, { secret: deps.secret, now });

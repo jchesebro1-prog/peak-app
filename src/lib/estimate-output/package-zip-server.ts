@@ -180,6 +180,7 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
 
 /** Staff "Rebuild package": drop every cached revision zip of this quote. */
 export async function clearPackageZipCache(quoteId: string): Promise<number> {
-  if (!blobEnabled()) return 0;
+  // The same gate as the cache itself: a preview deploy shares production's Blob and must not delete its cache.
+  if (!packageZipCacheOn(process.env, blobEnabled())) return 0;
   return deleteBlobsUnder(packageZipCacheDir(quoteId));
 }

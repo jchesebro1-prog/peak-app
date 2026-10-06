@@ -44,6 +44,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string; tok
       "content-type": doc.contentType || "application/octet-stream",
       "content-disposition": attachmentDisposition(doc.fileName),
       "x-content-type-options": "nosniff",
+      // An attachment, but nothing it holds may run or load anything if a browser opens it anyway.
+      "content-security-policy": "sandbox; default-src 'none'",
       "cache-control": "private, max-age=300",
     },
   });

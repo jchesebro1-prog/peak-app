@@ -185,7 +185,6 @@ export async function generateGridDrawingSet(quoteId: string, by: string, origin
   const hit = await d.find(q.id);
   if (!hit) return { ok: false, error: GRID_SET_COPY.noGrid };
   const current = cleanPackageFiles(q.packageFiles);
-  const old = current.filter((f) => f.source === "grid");
   // The new record is added BEFORE the old Grid set goes, so a full list refuses up front (nothing rendered, the old set kept).
   if (current.length >= MAX_PACKAGE_FILES) return { ok: false, error: PACKAGE_FILES_COPY.full };
   const setId = gridSetId(hit.project.id, hit.optionId);
@@ -241,7 +240,9 @@ export async function generateGridDrawingSet(quoteId: string, by: string, origin
     }
     return { ok: false, error: res.reason === "full" ? PACKAGE_FILES_COPY.full : ONLINE_COPY.gone };
   }
-  // Only now do the older Grid records go (a blob a revision still lists is kept).
+  // Only now do the older Grid records go (a blob a revision still lists is kept). The list comes from the quote the
+  // add returned (row-locked), not a pre-add snapshot, so two concurrent generates can't each keep the other's set.
+  const old = cleanPackageFiles(res.quote.packageFiles).filter((f) => f.source === "grid" && f.id !== file.id);
   for (const f of old) await removePackageFileAndBlob(q.id, f.id, { remove: d.remove });
   return { ok: true, file };
 }

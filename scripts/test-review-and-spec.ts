@@ -50740,7 +50740,8 @@ import { signPrintToken as e301rSign, verifyPrintToken as e301rVerify } from "@/
   const route = rd("src/app/api/quotes/[id]/cover-pdf/route.ts");
   ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
      route.includes('signPrintToken(secret, "cover", q.id, Date.now())') && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
-     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("coverPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"'),
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("COVER_RENDER_TIMEOUT_MS = 45_000") && route.includes("COVER_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes("timeoutMs: COVER_RENDER_TIMEOUT_MS") && route.includes("signal: AbortSignal.timeout(COVER_RENDER_DEADLINE_MS)") && route.includes("coverPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"'),
     "#301 route: signed-in only, 60 s, the shared print origin, system quotes only, \"EST-#### Cover.pdf\" (R7)");
   const panel = rd("src/app/(app)/estimator/cover-package-panel.tsx");
   ok(panel.includes("/cover-pdf") && panel.includes(">Cover PDF<") && panel.includes("Open cover ↗") && panel.includes("Save first — the cover prints the saved estimate.") && panel.includes("Save to create the cover."),
@@ -51184,6 +51185,9 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
   ok(photo.indexOf("rateLimit(") < photo.indexOf("isShareTokenV2(token)") && photo.indexOf("isShareTokenV2(token)") < photo.indexOf("resolveSharedQuote(") &&
      photo.includes("servePackagePhotoForRevision(req, pkg.rev, docId)"),
     "#301 photos: the share photo route takes a v2 token (the pinned revision's package photo set) or a v1 one (#293's)");
+  ok(photo.slice(photo.indexOf("isShareTokenV2(token)) {")).indexOf("try {") > 0 && photo.indexOf("try {") < photo.indexOf("resolveSharedPackage(") && photo.indexOf("resolveSharedPackage(") < photo.indexOf("} catch (e) {") &&
+     photo.slice(photo.indexOf("} catch (e) {")).includes("console.warn(") && photo.slice(photo.indexOf("} catch (e) {")).includes('return new Response("Not found", { status: 404 })') && photo.includes("return await servePackagePhotoForRevision("),
+    "#301 photos fix: a DB error resolving a v2 photo link is the same uniform 404, logged (never a 500)");
   const pr = rd("src/lib/quote-share/photo-response.ts");
   ok(pr.includes("keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)))") && pr.includes("async function serveDoc("), "#301 photos: one serving path, two photo sets");
   const smoke = rd("scripts/smoke-routes.ts");
@@ -51630,7 +51634,7 @@ import { renderToStaticMarkup as e301cdRender } from "react-dom/server";
   ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
      route.indexOf("resolveSharedPackage(") < route.indexOf("packageDocForRevision(pkg.rev, docId)") &&
      route.includes('rateLimit("share-doc:" + (clientIp(req) || "unknown"), SHARE_DOC_PER_MIN, 60_000)') && route.includes("attachmentDisposition(doc.fileName)") &&
-     route.includes('"x-content-type-options": "nosniff"') && !route.includes("quoteAsOfRevision") && !/\b(update|patchQuote|setStatus)\(/.test(route),
+     route.includes('"x-content-type-options": "nosniff"') && route.includes(`"content-security-policy": "sandbox; default-src 'none'"`) && !route.includes("quoteAsOfRevision") && !/\b(update|patchQuote|setStatus)\(/.test(route),
     "#301 docs: the route rate-limits first, takes only a v2 token, serves only the pinned revision's documents, as an attachment; read-only");
   const srv = rd("src/lib/estimate-output/package-docs-server.ts");
   ok(srv.includes("loadScopedCoverage(parts)") && !srv.includes("listCatalog") && !srv.includes("loadPartDocsState") && srv.includes("quoteBom(src, rackOf, internalSkuCheck(parts0))"),
@@ -51731,9 +51735,13 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(e301czCacheable([]) && e301czCacheable([{ name: "a", reason: e301czReason.tooBig }]) && !e301czCacheable([{ name: "a", reason: e301czReason.late }]) &&
      !e301czCacheable([{ name: "a", reason: e301czReason.unreadable }]) && !e301czCacheable([{ name: "a", reason: e301czReason.missing }]),
     "#301 zip: only a complete build (or one cut only by the size cap) is cached — a timeout is never frozen");
-  ok(e301czCacheOn({ NODE_ENV: "production", VERCEL: "1" }, true) && !e301czCacheOn({ NODE_ENV: "production", VERCEL: "1" }, false) && !e301czCacheOn({ NODE_ENV: "development" }, true) &&
+  ok(e301czCacheOn({ NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production" }, true) && !e301czCacheOn({ NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production" }, false) && !e301czCacheOn({ NODE_ENV: "development" }, true) &&
      e301czCacheOn({ NODE_ENV: "development", ESTIMATE_PACKAGE_CACHE: "1" }, true) && e301czCacheOn({ NODE_ENV: "production", ESTIMATE_PACKAGE_CACHE: "1" }, true),
-    "#301 zip: cache only on Vercel (or ESTIMATE_PACKAGE_CACHE=1) with Blob on");
+    "#301 zip: cache only on the production Vercel deploy (or ESTIMATE_PACKAGE_CACHE=1) with Blob on");
+  ok(!e301czCacheOn({ NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "preview" }, true) && !e301czCacheOn({ NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "development" }, true) && !e301czCacheOn({ NODE_ENV: "production", VERCEL: "1" }, true),
+    "#301 zip fix: a Vercel PREVIEW deploy (shared production DB + Blob) never reads or writes the cache");
+  ok(rd("src/lib/estimate-output/package-zip-server.ts").slice(rd("src/lib/estimate-output/package-zip-server.ts").indexOf("export async function clearPackageZipCache(")).includes("packageZipCacheOn(process.env, blobEnabled())"),
+    "#301 zip fix: Rebuild deletes nothing on a non-production deploy (the same gate as the cache)");
   ok(!e301czCacheOn({ NODE_ENV: "production" }, true) && !e301czCacheOn({ NODE_ENV: "production", VERCEL: "0", ESTIMATE_PACKAGE_CACHE: "0" }, true),
     "#301 zip: a local next start (no VERCEL) against a scratch DB with the prod Blob token never caches");
   // quoteSpecParts (pure): a ready part assembles; a part with no spec and an unknown sku are gaps.
@@ -52009,7 +52017,7 @@ async function e301cFilesAsyncChecks(): Promise<void> {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const srv = rd("src/lib/estimate-output/responses-server.ts");
   const sub = srv.slice(srv.indexOf("export async function submitClientResponse("), srv.indexOf("export async function notifyClientResponse("));
-  const order = ["o.website", "RESPONSE_IP_LIMIT", "resolveSharedPackage(", "canAct(hit.state)", "sanitizeClientResponse(", "RESPONSE_QUOTE_LIMIT", "appendClientResponse(", "notify("].map((s) => sub.indexOf(s));
+  const order = ["o.hp_confirm_x", "RESPONSE_IP_LIMIT", "resolveSharedPackage(", "canAct(hit.state)", "sanitizeClientResponse(", "RESPONSE_QUOTE_LIMIT", "appendClientResponse(", "notify("].map((s) => sub.indexOf(s));
   ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 actions: honeypot → IP limit → token → canAct → sanitize → quote limit → append → notify (${order.join(",")})`);
   ok(!/\b(setStatus|update|setQuoteStage|patchShareLink)\(/.test(srv) && srv.includes('type: "system"') && srv.includes('parentKind: "quote"') && srv.includes("system: true") &&
      srv.includes("responseAssignees(q.owner, q.preparedBy, users)"),
@@ -52022,11 +52030,15 @@ async function e301cFilesAsyncChecks(): Promise<void> {
   for (const f of ["scope-selection.tsx", "question-form.tsx"]) {
     const src = rd("src/app/share/quote/[id]/[token]/" + f);
     ok(/^"use client";/.test(src) && src.includes("useSyncExternalStore(") && src.includes('method="post"') && src.includes("e.preventDefault()") &&
-       src.includes('name="website"') && src.includes("CLIENT_ACTION_COPY.noJs") && src.includes('from "./actions"') && (src.match(/catch \{/g) || []).length >= 1 &&
+       src.includes('name="hp_confirm_x"') && !src.includes('name="website"') && src.includes('aria-hidden="true"') && src.includes('autoComplete="off"') && src.includes("tabIndex={-1}") && src.includes("CLIENT_ACTION_COPY.noJs") && src.includes('from "./actions"') && (src.match(/catch \{/g) || []).length >= 1 &&
        !/^import (?!type)[^\n]*from "@\/(lib\/(stores|blob|session|users|settings|quote-share|quote-pdf)|db)\//m.test(src) && !src.includes("confirm("),
       `#301 actions: ${f} renders only after hydration, posts through the server action, has a honeypot, imports nothing server-side`);
   }
   const sel = rd("src/app/share/quote/[id]/[token]/scope-selection.tsx");
+  const qf = rd("src/app/share/quote/[id]/[token]/question-form.tsx");
+  ok(sel.includes('<input type="checkbox" aria-label={s.name}') && ["name", "title", "email", "note"].every((k) => sel.includes(`aria-label={CLIENT_ACTION_COPY.${k}} placeholder={CLIENT_ACTION_COPY.${k}}`)) &&
+     ["name", "email", "message"].every((k) => qf.includes(`aria-label={CLIENT_ACTION_COPY.${k}} placeholder={CLIENT_ACTION_COPY.${k}}`)),
+    "#301 a11y: each scope checkbox is named by its scope; every text field's aria-label equals its placeholder");
   ok(sel.includes("CLIENT_ACTION_COPY.selectedTotal") && sel.includes("creditNote") && sel.includes("selectedTotal(scopes.filter("),
     "#301 actions: the live \"Selected scopes\" total (pre-credit) and the Rewards credit note (R1)");
   const slots = rd("src/app/share/quote/[id]/[token]/package-slots.tsx");
@@ -52061,7 +52073,7 @@ async function e301cActionsAsyncChecks(): Promise<void> {
   ok(acc.ok && acc.confirmation === "Thanks — Lead 301C has been notified." && q1.status === "sent" && q1.clientResponses?.length === 1 &&
      q1.clientResponses[0].total === 48250 && q1.clientResponses[0].sectionNames.join() === "Lighting,Rigging" && calls.join() === "accept:48250",
     "#301 actions (DB): a selection is stored with the server's own total, the lead estimator is named, the status stays sent");
-  const hp = await R.submitClientResponse("question", QID, tok, { name: "Bot", message: "spam", website: "http://spam" }, "203.0.113.2-" + salt, deps);
+  const hp = await R.submitClientResponse("question", QID, tok, { name: "Bot", message: "spam", hp_confirm_x: "http://spam" }, "203.0.113.2-" + salt, deps);
   ok(hp.ok && (await Q.get(QID))!.clientResponses?.length === 1 && calls.length === 1, "#301 actions (DB): a honeypot hit looks fine and writes nothing");
   const ip = "203.0.113.3-" + salt;
   const burst = [];
@@ -52247,6 +52259,7 @@ import { RENDER_LAUNCH_TIMEOUT_MS as e301cgLaunch, RENDER_FONTS_TIMEOUT_MS as e3
     "#301 grid fix: the two pre-existing dispatch lines stay byte-identical (#292 pin)");
   ok(g.includes("failIf: GRID_SET_FAIL_IF") && g.includes("signal: d.signal(") && g.includes("GRID_SET_DEADLINE_MS") && g.includes('process.env.NODE_ENV === "development"') &&
      g.indexOf("d.put(") < g.indexOf("addPackageFile(q.id, file)") && g.indexOf("addPackageFile(q.id, file)") < g.indexOf("removePackageFileAndBlob(q.id, f.id") &&
+     g.includes("cleanPackageFiles(res.quote.packageFiles).filter((f) => f.source === \"grid\" && f.id !== file.id)") && !g.includes("const old = current.filter(") &&
      g.includes("GRID_SET_COPY.figureFailed") && g.includes("GRID_SET_COPY.storeFailed"),
     "#301 grid fix: Generate bounds the queue wait, passes failIf, adds the new record BEFORE removing the old, and names the failing step");
   const smoke = rd("scripts/smoke-routes.ts");
@@ -52342,6 +52355,18 @@ async function e301cGridAsyncChecks(): Promise<void> {
   const noBlob = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", { ...deps, blobOn: false });
   const noGrid = await S.generateGridDrawingSet(fixtureId(301, "c-grid-none"), "Tester", "https://app.test", deps);
   ok(!noBlob.ok && noBlob.error === F.PACKAGE_FILES_COPY.noStorage && !noGrid.ok, "#301 grid (DB): no storage or no quote / design → a message, nothing stored");
+  // Final review fix 6: two concurrent generates leave ONE Grid set (the old set is read from the add's own row-locked result).
+  const QC = fixtureId(301, "c-grid-conc");
+  await Q.create({ id: QC, name: "#301c grid conc", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "grid",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] }], mobs: [] } });
+  registerFixture("quotes", QC);
+  await G.setOptionQuote(project.id, optionId, QC);
+  let cn = 0;
+  const concDeps = { ...deps, newId: () => "PF-" + (++cn).toString(16).padStart(12, "c") };
+  const conc = await Promise.all([S.generateGridDrawingSet(QC, "Tester", "https://app.test", concDeps), S.generateGridDrawingSet(QC, "Tester", "https://app.test", concDeps)]);
+  const concFiles = F.cleanPackageFiles((await Q.get(QC))!.packageFiles);
+  ok(conc.every((r) => r.ok) && concFiles.filter((f) => f.source === "grid").length === 1, "#301 grid fix (DB): two concurrent Generates leave exactly one Grid drawing set");
+  await G.setOptionQuote(project.id, optionId, QID);
 }
 
 /** #301 slice C (adaptation 7): the drawing set's body moved out of set/page.tsx
