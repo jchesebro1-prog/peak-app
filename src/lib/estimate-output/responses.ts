@@ -89,6 +89,8 @@ export function sanitizeClientResponse(
   input: unknown,
   scopes: readonly ResponseScope[]
 ): { ok: true; value: CleanResponse } | { ok: false; error: string } {
+  // The type says accept | question; a server action's argument isn't checked at runtime.
+  if ((kind as string) !== "accept" && (kind as string) !== "question") return { ok: false, error: CLIENT_ACTION_COPY.failed };
   const o = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   const name = cleanText(o.name, RESPONSE_NAME_MAX);
   if (!name) return { ok: false, error: CLIENT_ACTION_COPY.needName };
@@ -134,9 +136,9 @@ function responseOf(v: unknown): ClientResponse | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
   if (!isClientResponseId(o.id) || (o.kind !== "accept" && o.kind !== "question")) return null;
-  const rev = Number(o.rev);
-  const at = Number(o.at);
-  const total = Number(o.total);
+  // Real numbers only: Number(null) / Number("") would coerce a damaged record to 0.
+  const { rev, at, total } = o;
+  if (typeof rev !== "number" || typeof at !== "number" || typeof total !== "number") return null;
   if (!Number.isSafeInteger(rev) || rev < 1 || !Number.isFinite(at) || !Number.isFinite(total) || total < 0) return null;
   const title = cleanText(o.title, RESPONSE_TITLE_MAX);
   return {
@@ -238,8 +240,11 @@ export function chicagoDayEnd(now: number): number {
 
 export type ResponseRow = { id: string; kindLabel: string; revLabel: string; who: string; scopes: string; total: string; message: string; when: string };
 
+/** U+202F / U+00A0 (newer ICU puts one before AM/PM) → a plain space, so the stamp is ICU-independent. */
 const chicagoStamp = (ms: number) =>
-  new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" });
+  new Date(ms)
+    .toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })
+    .replace(/[\u202f\u00a0]/g, " ");
 
 /** The staff list, newest first. `revNoOf` maps QuoteRevision.rev → the printed Rev N. */
 export function responseRows(raw: unknown, revNoOf: (rev: number) => number): ResponseRow[] {

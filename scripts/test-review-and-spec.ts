@@ -10793,6 +10793,7 @@ seeded()
   .then(() => objectSymbolAsyncChecks300())
   .then(() => estimateOutput301AAsyncChecks())
   .then(() => estimateOutput301BAsyncChecks())
+  .then(() => estimateOutput301CAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -51499,4 +51500,103 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
      !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/narrative"|@\/app\/\(app\)\/estimator\/quote-document-view"|\.\/scopes")/m.test(rd("src/lib/estimate-output/package-gaps.ts")),
     "#301 responses/gaps purity: client-safe value imports only");
+}
+
+/* ======================================================================
+   #301 slice C — store: packageFiles + clientResponses are store-owned
+   (row lock, no updatedAt / contentChangedAt move, update() can't write
+   them); packageFiles freeze into docFields and are annexed onto the
+   latest SENT revision while the online state is ok (R13); a response is
+   appended only for the latest sent revision of a sent quote (D-m).
+   ====================================================================== */
+{
+  const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
+  const fnBody = (h: string) => qs.slice(qs.indexOf(h), qs.indexOf("\n}\n", qs.indexOf(h)));
+  const upd = fnBody("export async function update(");
+  ok(upd.includes("delete clean.packageFiles;") && upd.includes("delete clean.clientResponses;") && upd.includes("delete clean.shareLink;"),
+    "#301 store: update() drops a caller's packageFiles and clientResponses (and still shareLink)");
+  const writers = ["export async function addPackageFile(", "export async function removePackageFile(", "export async function appendClientResponse("].map(fnBody);
+  ok(writers.every((w) => w.includes("patchQuote(id,") && !w.includes("updatedAt")) &&
+     (qs.match(/\.packageFiles = /g) || []).length === (writers[0] + writers[1] + fnBody("function annexPackageFiles(")).match(/\.packageFiles = /g)?.length &&
+     (qs.match(/\.clientResponses = /g) || []).length === 1,
+    "#301 store: the three writers are the only writers, under the row lock, and never move updatedAt");
+  ok(fnBody("export function revisionDocFields(").includes("packageFiles: cleanPackageFiles(d.packageFiles)") &&
+     !qs.slice(qs.indexOf("export const QUOTE_CONTENT_FIELDS"), qs.indexOf("] as const;", qs.indexOf("export const QUOTE_CONTENT_FIELDS"))).includes("packageFiles"),
+    "#301 store: every new revision freezes the drawings list; attaching one is not content (the PDF never goes stale)");
+  const annex = fnBody("function annexPackageFiles(");
+  ok(annex.includes("onlineEstimateState(doc)") && annex.includes("!r.docFields") && annex.includes("packageFiles: cleanPackageFiles(doc.packageFiles)"),
+    "#301 store: R13 — the annex mirrors the list onto the latest sent revision only while the online state is ok, and never creates docFields");
+}
+
+async function estimateOutput301CAsyncChecks(): Promise<void> {
+  await e301cStoreAsyncChecks();
+}
+
+async function e301cStoreAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const F = await import("@/lib/estimate-output/package-files");
+  const QID = fixtureId(301, "c-store");
+  const sec = { id: "s1", name: "Stage lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+  await Q.create({ id: QID, name: "#301c store", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QID);
+  const file = (n: number, extra: Record<string, unknown> = {}) => ({
+    id: "PF-" + n.toString(16).padStart(12, "0"), kind: "plan" as const, name: `Plan ${n}.pdf`, blobPath: `estimate-files/${F.quotePathSegment(QID)}/UP-0123456789abcdef/p${n}.pdf`,
+    contentType: "application/pdf" as const, size: 100, source: "upload" as const, addedAt: n, addedBy: "T", ...extra });
+  const before = (await Q.get(QID))!;
+  const a1 = await Q.addPackageFile(QID, file(1));
+  const q1 = (await Q.get(QID))!;
+  ok(a1.ok && a1.annexedRev === null && F.cleanPackageFiles(q1.packageFiles).length === 1 && q1.updatedAt === before.updatedAt && q1.contentChangedAt === before.contentChangedAt,
+    "#301 store (DB): a drawing on an unsent quote is listed, annexes nothing, moves neither updatedAt nor contentChangedAt");
+  await Q.update(QID, { status: "sent" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }); // rev 1
+  const sent1 = (await Q.get(QID))!.revisions!.at(-1)!;
+  ok(F.cleanPackageFiles(sent1.docFields?.packageFiles).map((f) => f.id).join() === file(1).id, "#301 store (DB): a send freezes the drawings in the revision's docFields");
+  const a2 = await Q.addPackageFile(QID, file(2));
+  const r1 = (await Q.get(QID))!.revisions!.find((r) => r.rev === 1)!;
+  ok(a2.ok && a2.annexedRev === 1 && F.cleanPackageFiles(r1.docFields?.packageFiles).length === 2, "#301 store (DB): R13 — a drawing added after the send is annexed onto the sent revision");
+  await Q.update(QID, { status: "draft" });
+  const a3 = await Q.addPackageFile(QID, file(3));
+  const r1b = (await Q.get(QID))!.revisions!.find((r) => r.rev === 1)!;
+  ok(a3.ok && a3.annexedRev === null && F.cleanPackageFiles(r1b.docFields?.packageFiles).length === 2, "#301 store (DB): while revising, a new drawing waits for the next send");
+  await Q.update(QID, { packageFiles: [], clientResponses: [{ id: "CR-000000000001" }] } as never);
+  const q2 = (await Q.get(QID))!;
+  ok(F.cleanPackageFiles(q2.packageFiles).length === 3 && !q2.clientResponses, "#301 store (DB): update() can't overwrite or plant either list");
+  const rm = await Q.removePackageFile(QID, file(1).id);
+  const gone = await Q.removePackageFile(QID, file(1).id);
+  ok(rm.ok && rm.file.id === file(1).id && !gone.ok && gone.reason === "missing" && F.cleanPackageFiles((await Q.get(QID))!.revisions!.find((r) => r.rev === 1)!.docFields?.packageFiles).length === 2,
+    "#301 store (DB): remove returns the removed record; while revising the sent revision keeps its frozen list");
+  const have = F.cleanPackageFiles((await Q.get(QID))!.packageFiles).length;
+  const full = await Promise.all(Array.from({ length: 12 }, (_, i) => Q.addPackageFile(QID, file(100 + i))));
+  ok(full.filter((w) => !w.ok && w.reason === "full").length === have && F.cleanPackageFiles((await Q.get(QID))!.packageFiles).length === 12,
+    "#301 store (DB): the 12 cap holds under concurrent adds (row lock)");
+  // ---- responses ----
+  const clean = { kind: "accept" as const, name: "Pat", email: "", message: "", sectionIds: ["s1"], sectionNames: ["Stage lighting"], total: 20 };
+  const draftTry = await Q.appendClientResponse(QID, 1, clean, Date.now(), "CR-00000000000a");
+  await Q.update(QID, { status: "sent" });
+  const okTry = await Q.appendClientResponse(QID, 1, clean, Date.now(), "CR-00000000000b");
+  const after = (await Q.get(QID))!;
+  ok(!draftTry.ok && draftTry.reason === "state" && okTry.ok && okTry.response.rev === 1 && after.status === "sent" && after.clientResponses?.length === 1,
+    "#301 store (DB): a response is refused while revising, appended on the latest sent revision of a sent quote, and the status never changes");
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }); // rev 2 supersedes rev 1
+  const old = await Q.appendClientResponse(QID, 1, clean, Date.now(), "CR-00000000000c");
+  const unknown = await Q.appendClientResponse("Q-NOPE-301C", 1, clean, Date.now(), "CR-00000000000d");
+  await Q.update(QID, { status: "won" });
+  const won = await Q.appendClientResponse(QID, 2, clean, Date.now(), "CR-00000000000e");
+  ok(!old.ok && old.reason === "state" && !unknown.ok && unknown.reason === "gone" && !won.ok && won.reason === "state",
+    "#301 store (DB): a superseded revision, an unknown quote and a won quote take no response");
+}
+
+/* ===== #301 slice C — responses tightening (Task 2 review) ===== */
+{
+  const sc = [{ id: "s1", name: "Lighting", price: 100, priceLabel: "$100.00" }];
+  const rr = (n: number, extra: Record<string, unknown> = {}) =>
+    ({ id: "CR-" + n.toString(16).padStart(12, "0"), kind: "accept", rev: 3, at: n, name: "Pat", email: "", message: "", sectionIds: ["s1"], sectionNames: ["Lighting"], total: 100, ...extra });
+  ok(e301crClean([rr(1, { at: null }), rr(2, { rev: null }), rr(3, { rev: "" }), rr(4, { at: "" }), rr(5, { total: "5" }), rr(6, { total: null }), rr(7)]).map((x) => x.at).join() === "7",
+    "#301 responses: a record whose at / rev / total isn't a real number is dropped, never coerced to 0");
+  ok(!e301crSan("hack" as never, { name: "P", sectionIds: ["s1"] }, sc).ok && !e301crSan(undefined as never, { name: "P", message: "x", sectionIds: ["s1"] }, sc).ok &&
+     e301crSan("accept", { name: "P", sectionIds: ["s1"] }, sc).ok && e301crSan("question", { name: "P", message: "x" }, sc).ok,
+    "#301 responses: any kind other than exactly accept | question is refused at runtime");
+  const stamp = e301crRows([rr(9, { at: Date.UTC(2026, 9, 5, 19, 14) })], (v) => v)[0].when;
+  ok(stamp === "Oct 5, 2:14 PM" && !/[\u202f\u00a0]/.test(stamp), "#301 responses: the staff time stamp uses a plain space whatever the ICU build");
 }

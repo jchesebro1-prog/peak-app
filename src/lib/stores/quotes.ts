@@ -23,6 +23,9 @@ import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { canHavePdf, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
+import { appendPackageFile, cleanPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
+import { appendResponseTo, type CleanResponse, type ClientResponse } from "@/lib/estimate-output/responses";
+import { onlineEstimateState } from "@/lib/quote-share/view";
 import {
   carriesPipeline,
   firstStage,
@@ -325,6 +328,17 @@ export type Quote = {
    *  recordShareOpen under the row lock; update() drops it; never content,
    *  never snapshotted, never copied by buildQuote. Staff-only. */
   shareOpens?: ShareOpens | null;
+  /** #301 slice C (D-j, R13) — drawings shown under "Plans & risers" on the
+   *  package page. Written only by addPackageFile / removePackageFile under
+   *  the row lock (update() drops it); frozen into every new revision's
+   *  docFields and annexed onto the latest sent revision while the online
+   *  state is ok. Not content: attaching one never stales the estimate PDF.
+   *  `blobPath` never leaves the server (the page links /share/.../file/<id>). */
+  packageFiles?: PackageFile[] | null;
+  /** #301 slice C (D-m) — client scope selections and questions from the
+   *  package page, append-only, ≤ 200. Written only by appendClientResponse;
+   *  update() drops it; never content, never snapshotted. Staff-only. */
+  clientResponses?: ClientResponse[] | null;
 };
 
 /** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
@@ -402,6 +416,9 @@ export type QuoteRevisionDocFields = {
   /** #301 — Not included as sent; null = the quote never stored one (the
    *  default list applied). Absent on older revisions. */
   notIncluded?: string | null;
+  /** #301 slice C — the drawings as sent (and as annexed while this was the
+   *  latest sent revision, R13). Absent on older revisions = none. */
+  packageFiles?: PackageFile[];
   /** #293 slice 3 — the Rev N and the date the revision's PDF printed
    *  (QuotePdfState.printed), stamped once with the PDF copy
    *  (setRevisionPdfPath). Absent until then, when the render couldn't be
@@ -768,6 +785,9 @@ export async function update(
     delete clean.shareLink;
     // #301 slice B: the open counter is recordShareOpen's alone.
     delete clean.shareOpens;
+    // #301 slice C: the drawings list and the client responses have their own writers.
+    delete clean.packageFiles;
+    delete clean.clientResponses;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -794,6 +814,7 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     source: d.source || "",
     coverSummary: d.coverSummary || "",
     notIncluded: typeof d.notIncluded === "string" ? d.notIncluded : null,
+    packageFiles: cleanPackageFiles(d.packageFiles),
   };
 }
 
@@ -1053,6 +1074,88 @@ export async function recordShareOpen(id: string, rev: number, now: number): Pro
     wrote = true;
   });
   return wrote;
+}
+
+/** #301 slice C (R13) — mirror the drawings list onto the latest SENT
+ *  revision while the online state is ok (a recalled quote's new drawings
+ *  wait for the next send). Never creates docFields on a revision cut
+ *  before #293 (Slice C adaptation 12). Returns the annexed rev, or null. */
+function annexPackageFiles(doc: Quote): number | null {
+  const s = onlineEstimateState(doc);
+  if (s.kind !== "ok") return null;
+  const r = (doc.revisions || []).find((x) => x.rev === s.rev.rev);
+  if (!r || !r.docFields) return null;
+  r.docFields = { ...r.docFields, packageFiles: cleanPackageFiles(doc.packageFiles) };
+  return r.rev;
+}
+
+export type PackageFileWrite =
+  | { ok: true; quote: Quote; file: PackageFile; annexedRev: number | null }
+  | { ok: false; reason: "gone" | "full" | "missing" };
+
+/** #301 slice C — the ONLY adder to `Quote.packageFiles` (≤ 12). Row-locked;
+ *  never bumps updatedAt (the drawing isn't the document). */
+export async function addPackageFile(id: string, file: PackageFile): Promise<PackageFileWrite> {
+  let reason: "full" | null = null;
+  let annexedRev: number | null = null;
+  const quote = await patchQuote(id, (doc) => {
+    const next = appendPackageFile(doc.packageFiles, file);
+    if (!next) {
+      reason = "full";
+      return;
+    }
+    doc.packageFiles = next;
+    annexedRev = annexPackageFiles(doc);
+  });
+  if (!quote) return { ok: false, reason: "gone" };
+  if (reason) return { ok: false, reason };
+  return { ok: true, quote, file, annexedRev };
+}
+
+/** #301 slice C — the ONLY remover. The blob is the caller's to delete, and
+ *  only when no revision still lists it (packageBlobReferenced). */
+export async function removePackageFile(id: string, fileId: string): Promise<PackageFileWrite> {
+  let removed: PackageFile | null = null;
+  let annexedRev: number | null = null;
+  const quote = await patchQuote(id, (doc) => {
+    const cur = cleanPackageFiles(doc.packageFiles);
+    removed = cur.find((f) => f.id === fileId) ?? null;
+    if (!removed) return;
+    doc.packageFiles = cur.filter((f) => f.id !== fileId);
+    annexedRev = annexPackageFiles(doc);
+  });
+  if (!quote) return { ok: false, reason: "gone" };
+  if (!removed) return { ok: false, reason: "missing" };
+  return { ok: true, quote, file: removed, annexedRev };
+}
+
+export type ClientResponseWrite = { ok: true; response: ClientResponse } | { ok: false; reason: "gone" | "state" | "full" };
+
+/**
+ * #301 slice C (D-m) — the ONLY writer of `Quote.clientResponses`. Under the
+ * row lock the pinned revision must still be the latest sent one and the
+ * quote must be `sent` (canAct — a recall, a re-send, a win or a loss since
+ * the page loaded refuses). Append-only, ≤ 200. Never changes status, never
+ * bumps updatedAt.
+ */
+export async function appendClientResponse(id: string, pinnedRev: number, r: CleanResponse, now: number, newId: string): Promise<ClientResponseWrite> {
+  let out: ClientResponseWrite = { ok: false, reason: "gone" };
+  await patchQuote(id, (doc) => {
+    const s = onlineEstimateState(doc);
+    if (s.kind !== "ok" || s.rev.rev !== pinnedRev || doc.status !== "sent") {
+      out = { ok: false, reason: "state" };
+      return;
+    }
+    const response: ClientResponse = { ...r, id: newId, rev: pinnedRev, at: now };
+    const next = appendResponseTo(doc.clientResponses, response);
+    if (!next) {
+      out = { ok: false, reason: "full" };
+      return;
+    }
+    doc.clientResponses = next;
+    out = { ok: true, response };
+  });
+  return out;
 }
 
 /** After a send commits: copy the current PDF onto the new sent revision (#222).
