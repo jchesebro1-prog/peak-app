@@ -50545,3 +50545,35 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   ok(without.every((s) => s.rows[0]?.label === "Client goals" && s.rows[0].value === ""),
     "#301 worksheet: no goal → a blank write-in row, like the other blank fields");
 }
+
+/* ======================================================================
+   #301 slice A — authoring UI: the Discipline select, the narrative
+   column's Client goals / From site visit / Cover paragraph, Use selection
+   as cover, and the load-time goals pre-fill (client wiring, by source).
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const serverImport = (s: string) => /^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/session|lib\/blob|lib\/users|lib\/settings|lib\/estimate-output\/(cover-loader|survey-goals-server))/m.test(s);
+  const fields = rd("src/app/(app)/estimator/scope-output-fields.tsx");
+  const col = rd("src/app/(app)/estimator/narrative-column.tsx");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(/^"use client";/.test(fields) && !serverImport(fields) && !serverImport(col) && !serverImport(card) && !serverImport(cli),
+    "#301 UI: the new block and every edited estimator client module value-import no store, db, session, users, settings or estimate-output server module");
+  ok(fields.includes(">Client goals<") && fields.includes("From site visit ▾") && fields.includes("Add the client's goals") && fields.includes("siteVisitGoalsAction(") &&
+     fields.includes("No site-visit goals for this customer yet.") && fields.includes("appendGoals(s.clientGoals, text)"),
+    "#301 UI: Client goals with From site visit (lazy, appends) and the amber blank hint");
+  ok(fields.includes(">Cover paragraph<") && fields.includes("coverParagraphFor(") && fields.includes("COVER_SOURCE_LABEL[") && fields.includes("Clear override") && fields.includes("maxLength={COVER_TEXT_MAX}"),
+    "#301 UI: the Cover paragraph override with its derived placeholder and source chip");
+  ok(/try \{[\s\S]{0,200}await siteVisitGoalsAction\(/.test(fields) && fields.includes('"Could not reach the server. Try again."'), "#301 UI: the action await is caught");
+  ok(col.includes("<ScopeOutputFields") && col.indexOf("<ScopeOutputFields") < col.indexOf("<div style={LABEL}>Intro</div>") && col.includes("Use selection as cover") &&
+     col.includes("coverTextFromSelection(") && col.includes("Select a sentence in the intro first.") && col.includes("onMouseDown={(e) => e.preventDefault()}"),
+    "#301 UI: the column mounts the fields above the intro; Use selection as cover keeps the selection");
+  ok(card.includes("onSetDiscipline: (value: ScopeDiscipline | \"\") => void;") && card.includes('aria-label="Discipline"') && card.includes("autoDisciplineLabel(sec.name)") && card.includes('sec.kind !== "labor"'),
+    "#301 UI: the system header's Discipline select (blank = auto, hidden on labor systems)");
+  ok(cli.includes("onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}") && /<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli) &&
+     cli.includes("quoteId={loadedId}") && cli.includes("customerId={customerId}"), "#301 UI: the select and the column are wired");
+  const effect = cli.slice(cli.indexOf("const goalsSurveyId ="), cli.indexOf("const goalsSurveyId =") + 700);
+  ok(effect.includes('aiSource?.kind === "survey"') && effect.includes("surveyGoalsAction(goalsSurveyId)") && effect.includes("writeSections((prev) => fillClientGoals(prev, r.goals))") && effect.includes("= setSectionsState;") && effect.includes(".catch("),
+    "#301 UI: a page opened from a site visit pre-fills matching blank goals once, automatically (R3)");
+}

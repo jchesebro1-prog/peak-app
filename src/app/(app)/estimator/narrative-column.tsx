@@ -28,6 +28,8 @@ import SystemLibraryModal from "./system-library-modal";
 import { mergeNarrative, mergeNotice, type MergeOpts } from "@/lib/narrative/merge";
 import type { SystemLibraryEntry } from "@/lib/narrative/system-library";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
+import ScopeOutputFields from "./scope-output-fields";
+import { coverTextFromSelection } from "@/lib/estimate-output/fields";
 
 /**
  * #293 — the narrative column's body (the #281 aside keeps its header and
@@ -47,6 +49,9 @@ export type NarrativeColumnProps = {
   /** #293: the system-intro library (loaded server-side, updated by the actions). */
   intros: SystemIntro[];
   onIntros: (list: SystemIntro[]) => void;
+  /** #301: the saved quote id and its customer — From site visit finds the visits. */
+  quoteId: string | null;
+  customerId: string | null;
 };
 
 const LABEL: CSSProperties = { fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".06em", textTransform: "uppercase" };
@@ -157,6 +162,21 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
     setNotice(mergeNotice(r));
   };
 
+  /** #301: "Use selection as cover" — the intro's selected text becomes this
+   *  system's cover paragraph (D-d's "flag a sentence"). The button keeps the
+   *  textarea's selection (onMouseDown preventDefault). */
+  const applySelectionAsCover = () => {
+    const el = narrRef.current;
+    const text = el ? el.value.slice(el.selectionStart ?? 0, el.selectionEnd ?? 0) : "";
+    const clean = coverTextFromSelection(text);
+    if (!clean) {
+      setNotice("Select a sentence in the intro first.");
+      return;
+    }
+    p.onChange((s) => ({ ...s, coverText: clean }));
+    setNotice("Cover paragraph set from the selection.");
+  };
+
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -249,6 +269,7 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
         <option value="narrative">Customer: narrative</option>
       </select>
       {(sec.presentation || "itemized") === "itemized" && <div style={HINT}>Prints on the quote only in Narrative mode.</div>}
+      <ScopeOutputFields sec={sec} onChange={p.onChange} quoteId={p.quoteId} customerId={p.customerId} />
       <div style={LABEL}>Intro</div>
       <textarea
         ref={narrRef}
@@ -275,7 +296,18 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
           padding: "10px 12px",
         }}
       />
-      <div style={HINT}>Blank line = new paragraph · start a line with “- ” for a bullet</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+        <div style={HINT}>Blank line = new paragraph · start a line with “- ” for a bullet</div>
+        <button
+          type="button"
+          style={BTN}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={applySelectionAsCover}
+          title="Copy the selected intro text into this system's cover paragraph"
+        >
+          Use selection as cover
+        </button>
+      </div>
       {hasKps && <div style={{ ...LABEL, marginTop: 4 }}>Key products</div>}
       {res.map((r, i) => (
         <KeyProductCard

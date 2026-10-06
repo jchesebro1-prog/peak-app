@@ -24,6 +24,7 @@ import CatalogPicker from "./catalog-picker";
 import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, readCsvFile, summarizeCsvErrors, type ImportedMaterial } from "./material-csv";
 import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
+import { DISCIPLINES, DISCIPLINE_LABEL, autoDisciplineLabel, type ScopeDiscipline } from "@/lib/estimate-output/fields";
 
 /**
  * One system card — header (badge / rename / cost / price), per-system margin
@@ -123,6 +124,8 @@ export type SectionCardProps = {
   /** #262: the quote's venue name, shown as the Room input's placeholder when blank. */
   defaultRoom?: string;
   onSetPresentation: (value: "itemized" | "narrative") => void;
+  /** #301: the survey discipline this system answers ("" = auto, inferred from the name). */
+  onSetDiscipline: (value: ScopeDiscipline | "") => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   /** #267: a typed system sell (raw text; empty/0/junk clears it). */
@@ -448,6 +451,24 @@ export default function SectionCard(p: SectionCardProps) {
                 <option value="itemized">Customer: itemized</option>
                 <option value="narrative">Customer: narrative</option>
               </select>
+              {/* #301: which site-visit discipline this system answers — matches the
+                  survey's Client goals. Blank = inferred from the name (never stored). */}
+              {sec.kind !== "labor" && (
+                <select
+                  value={sec.discipline || ""}
+                  onChange={(e) => p.onSetDiscipline(e.target.value as ScopeDiscipline | "")}
+                  aria-label="Discipline"
+                  title="The site-visit discipline this system answers"
+                  style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11, color: "#5b616e", background: "#fff" }}
+                >
+                  <option value="">{autoDisciplineLabel(sec.name)}</option>
+                  {DISCIPLINES.map((d) => (
+                    <option key={d} value={d}>
+                      {DISCIPLINE_LABEL[d]}
+                    </option>
+                  ))}
+                </select>
+              )}
               {/* #281: a read-only snippet — the narrative itself is written in the right column. */}
               <button
                 type="button"

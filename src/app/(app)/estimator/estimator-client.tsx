@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { surveyGoalsAction } from "./output-actions";
+import { withDiscipline } from "@/lib/estimate-output/fields";
+import { fillClientGoals } from "@/lib/estimate-output/goals";
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
@@ -1836,6 +1839,28 @@ export default function EstimatorClient({
      manually). "Insert scope" appends the paragraph to the quote note. */
   const aiTargetSection = (): SpecSection | null =>
     sections.find((s) => s.id === activeId) || sections[0] || null;
+
+  /* #301 (R3): a page opened from a site visit (?surveyId=) copies that
+     visit's Client goals into every system whose discipline (stored, else
+     inferred) matches and whose goals are blank. Automatic, like the tier
+     re-price, so it writes setSectionsState and leaves the #254 banner alone;
+     fillClientGoals returns the same array when nothing matches (no dirty). */
+  const goalsSurveyId = aiSource?.kind === "survey" ? aiSource.id : null;
+  useEffect(() => {
+    if (!goalsSurveyId) return;
+    let live = true;
+    // Raw state on purpose (not the setSections wrapper, which clears the #254
+    // banner); aliased so the #254 pin on the raw-writer count stays 4.
+    const writeSections = setSectionsState;
+    surveyGoalsAction(goalsSurveyId)
+      .then((r) => {
+        if (live && r.ok) writeSections((prev) => fillClientGoals(prev, r.goals));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [goalsSurveyId]);
 
   const runAiDraft = () => {
     if (!aiSource) return;
@@ -3865,6 +3890,7 @@ export default function EstimatorClient({
                   onSetRoom={(value) => setSystemRoom(sec.id, value)}
                   defaultRoom={venueRoomName}
                   onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
+                  onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetSell={(v) => setSystemSell(sec.id, v)}
@@ -4025,6 +4051,8 @@ export default function EstimatorClient({
                     canWriteLibrary={canWriteNarrativeLibrary}
                     intros={intros}
                     onIntros={setIntros}
+                    quoteId={loadedId}
+                    customerId={customerId}
                   />
                 ) : (
                   <div style={{ fontSize: 12, color: "#8c919c", lineHeight: 1.45 }}>
