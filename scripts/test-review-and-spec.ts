@@ -10791,6 +10791,7 @@ seeded()
   .then(() => gridSymbolDisplayAsyncChecks300())
   .then(() => partDocSymbolAsyncChecks300())
   .then(() => objectSymbolAsyncChecks300())
+  .then(() => estimateOutput301AAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -50242,4 +50243,117 @@ import { safeDocFileName as safe300f } from "@/lib/part-docs/types";
     JSON.stringify(exImg.images) === JSON.stringify({ "aaaa0000-0000-4000-8000-000000000001": { name: "Unknown", type: "Other" } }),
     "#300 fix: the extract carries imageName/imageType for referenced plan and riser image ids only"
   );
+}
+
+/* ======================================================================
+   #301 slice A — fields: discipline, client goals, cover text on a system;
+   cover summary + Not included on the quote; cleaning, the Load-system
+   strip, buildQuote, revision docFields, the save/move/copy sanitize.
+   ====================================================================== */
+import {
+  DISCIPLINES as e301fDisc, DISCIPLINE_LABEL as e301fLabel, CLIENT_GOALS_MAX as e301fGoalsMax, COVER_TEXT_MAX as e301fCoverMax,
+  cleanPlainText as e301fClean, sanitizeDiscipline as e301fSanDisc, inferDiscipline as e301fInfer, effectiveDiscipline as e301fEff,
+  autoDisciplineLabel as e301fAuto, withDiscipline as e301fWithDisc, withSanitizedOutputFields as e301fSan,
+  coverTextFromSelection as e301fSel, appendGoals as e301fAppend, effectiveNotIncluded as e301fEffNot,
+  sanitizeEstimateOutputDefaults as e301fSanDefaults, ESTIMATE_OUTPUT_BLOB as e301fBlob,
+} from "@/lib/estimate-output/fields";
+import { DISCIPLINE_GROUPS as e301fGroups } from "@/lib/stores/survey-intake";
+import { buildQuote as e301fBuild, revisionDocFields as e301fDocFields, QUOTE_CONTENT_FIELDS as e301fContent, type Quote as E301fQuote } from "@/lib/stores/quotes";
+import { librarySectionForLoad as e301fForLoad } from "@/lib/narrative/system-library";
+import type { SpecSection as E301fSec } from "@/app/(app)/estimator/types";
+{
+  const sec = (extra: Record<string, unknown> = {}): E301fSec =>
+    ({ id: "s1", name: "Stage Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }], ...extra }) as E301fSec;
+
+  // ---- vocab ----
+  ok([...e301fDisc].sort().join(",") === e301fGroups.map((g) => g.key).sort().join(","), "#301 fields: the discipline vocab is exactly the survey's DisciplineKey set");
+  ok(e301fLabel.lighting === "Lighting" && e301fLabel.rigging === "Rigging" && e301fLabel.curtain === "Curtains" && e301fLabel.av === "AV", "#301 fields: discipline labels");
+
+  // ---- cleaning ----
+  ok(e301fClean("  a\r\nb\u0007  ", 100) === "a\nb" && e301fClean(42, 10) === "" && e301fClean("abcdef", 3) === "abc" && e301fClean("ab  \n cd", 4) === "ab",
+    "#301 fields: plain text — CRLF → LF, control chars dropped (tab/newline kept), trimmed, capped, trailing space after the cap trimmed");
+  ok(e301fSanDisc("lighting") === "lighting" && e301fSanDisc("LIGHTING") === null && e301fSanDisc("sound") === null && e301fSanDisc(null) === null, "#301 fields: discipline whitelist");
+
+  // ---- inference (R19) ----
+  const cases: Array<[string, string | null]> = [
+    ["Stage Lighting", "lighting"], ["Dimming upgrade", "lighting"], ["Track lighting", "lighting"], ["Fixtures", "lighting"],
+    ["Rigging", "rigging"], ["Chain hoists", "rigging"], ["Battens", "rigging"],
+    ["Curtain track", "curtain"], ["Main drape & valance", "curtain"], ["Soft goods", "curtain"], ["Cyc", "curtain"],
+    ["Audio / Video", "av"], ["AV system", "av"], ["Sound reinforcement", "av"], ["Projection screen", "av"],
+    ["Track", null], ["Pavilion", null], ["Savings", null], ["Install", null], ["", null],
+  ];
+  const bad = cases.filter(([n, want]) => e301fInfer(n) !== want);
+  ok(bad.length === 0, `#301 fields: inferDiscipline with word boundaries; track never on its own (wrong: ${bad.map(([n]) => n).join(", ") || "none"})`);
+  ok(e301fEff(sec()) === "lighting" && e301fEff(sec({ discipline: "rigging" })) === "rigging" && e301fEff(sec({ discipline: "bogus" })) === "lighting" &&
+     e301fEff(sec({ kind: "labor", name: "Lighting install", discipline: "lighting" })) === null,
+    "#301 fields: effective discipline = stored, else inferred; a labor system never has one (R2)");
+  ok(e301fAuto("Stage Lighting") === "Discipline: auto (Lighting)" && e301fAuto("Install") === "Discipline: —", "#301 fields: the select's blank option names the inferred discipline");
+  ok(e301fWithDisc(sec(), "av").discipline === "av" && !("discipline" in e301fWithDisc(sec({ discipline: "av" }), "")), "#301 fields: withDiscipline sets or removes the key");
+
+  // ---- section sanitize ----
+  const plain = sec();
+  ok(e301fSan(plain) === plain, "#301 fields: a section without the keys passes through untouched (same object)");
+  const dirty = e301fSan(sec({ discipline: "x", clientGoals: "  " + "g".repeat(e301fGoalsMax + 50) + "  ", coverText: "\r\nCover\u0000 text  " }));
+  ok(!("discipline" in dirty) && dirty.clientGoals?.length === e301fGoalsMax && dirty.coverText === "Cover text", "#301 fields: junk discipline dropped, goals capped at 1,000, cover cleaned");
+  const blank = e301fSan(sec({ discipline: "", clientGoals: " ", coverText: "" }));
+  ok(!("discipline" in blank) && !("clientGoals" in blank) && !("coverText" in blank), "#301 fields: blank values remove their keys");
+  ok((e301fSan(sec({ coverText: "c".repeat(e301fCoverMax + 1) })).coverText || "").length === e301fCoverMax, "#301 fields: cover text capped at 1,500");
+  ok(e301fSel("  First line\n  second line  ") === "First line second line", "#301 fields: a selection becomes one cover paragraph");
+  ok(e301fAppend("", " New ") === "New" && e301fAppend("Old", "New") === "Old\n\nNew" && e301fAppend("Old\n\nNew", "New") === "Old\n\nNew" && e301fAppend("Old", "  ") === "Old",
+    "#301 fields: From site visit fills blank goals, appends after a blank line, never duplicates");
+  ok(e301fEffNot(undefined, "Permits") === "Permits" && e301fEffNot(null, "Permits") === "Permits" && e301fEffNot("", "Permits") === "" && e301fEffNot("Paint", "Permits") === "Paint",
+    "#301 fields: Not included absent → the default list; an emptied list stays empty");
+  const d = e301fSanDefaults({ notIncluded: " Permits \r\n\r\n Painting ", website: " peaksystemsgroup.com\n ", extra: 1 });
+  ok(d.notIncluded === "Permits\nPainting" && d.website === "peaksystemsgroup.com" && Object.keys(d).sort().join(",") === "notIncluded,website" && e301fBlob === "estimate_output_defaults",
+    "#301 fields: the Settings defaults blob is cleaned (lines trimmed, blanks dropped, one-line website, unknown keys dropped)");
+  ok(e301fSanDefaults(null).notIncluded === "" && e301fSanDefaults([]).website === "", "#301 fields: junk defaults → empty");
+
+  // ---- quote fields ----
+  ok(!(e301fContent as readonly string[]).includes("coverSummary") && !(e301fContent as readonly string[]).includes("notIncluded"),
+    "#301 fields: coverSummary / notIncluded are not content fields — they never print on the estimate PDF (R14)");
+  const built = e301fBuild("Q-x", { coverSummary: "Sum", notIncluded: "" }, "system", null, 1);
+  const bare = e301fBuild("Q-y", {}, "system", null, 1);
+  ok(built.coverSummary === "Sum" && built.notIncluded === "" && !("coverSummary" in bare) && !("notIncluded" in bare),
+    "#301 fields: buildQuote copies the cover fields only when they are strings (Daylite imports unchanged)");
+  const df = e301fDocFields({ id: "Q", customer: "C", status: "sent", coverSummary: "Sum", notIncluded: "A\nB" } as unknown as E301fQuote);
+  const dfNone = e301fDocFields({ id: "Q", customer: "C", status: "sent" } as unknown as E301fQuote);
+  ok(df.coverSummary === "Sum" && df.notIncluded === "A\nB" && dfNone.coverSummary === "" && dfNone.notIncluded === null,
+    "#301 fields: a revision freezes the cover summary and Not included (null = never set, so the default list applies)");
+
+  // ---- Load system strips per-customer text (R5) ----
+  const won = { id: "Q-w", status: "won", quoteType: "system", source: "estimator", revisions: [], updatedAt: 1, tierMargin: null,
+    spec: { sections: [sec({ discipline: "lighting", clientGoals: "Goals", coverText: "Cover", room: "Hall" })] } } as unknown as E301fQuote;
+  const loaded = e301fForLoad(won, "s1");
+  ok(!!loaded && !("clientGoals" in loaded.section) && !("coverText" in loaded.section) && !("room" in loaded.section) && loaded.section.discipline === "lighting",
+    "#301 fields: Load system drops client goals and the cover paragraph (and room), keeps the discipline");
+
+  // ---- the save paths sanitize ----
+  const acts = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  ok(acts.includes("payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields)"), "#301 save: saveQuoteAction cleans the output fields beside the key products");
+  ok(acts.includes("const moved = withSanitizedOutputFields(movedRaw);"), "#301 move: a moved system's output fields are cleaned");
+  const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("));
+  ok(/section = withSanitizedKeyProducts\(section\);\s+section = withSanitizedOutputFields\(section\);/.test(copyFn.slice(0, 1400)), "#301 copy: a copied system's output fields are cleaned");
+}
+
+/* #301 slice A — the store round trip (create → get → revision → update). Later
+   #301 slice A tasks append one `await e301<Part>AsyncChecks();` line at the end. */
+async function estimateOutput301AAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const QID = fixtureId(301, "a-fields");
+  const sec = { id: "s1", name: "Stage lighting", kind: "materials", mfr: "", freightPct: 0, discipline: "lighting", clientGoals: "Brighter wash", coverText: "Cover para.",
+    items: [{ id: 1, sku: "A", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+  await Q.create({ id: QID, name: "#301 fields", customer: "Spec fixture", owner: "spec", quoteType: "system", coverSummary: "Summary.", notIncluded: "Permits\nPainting",
+    spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QID);
+  const got = await Q.get(QID);
+  ok(got?.coverSummary === "Summary." && got?.notIncluded === "Permits\nPainting", "#301 store: create keeps the cover summary and Not included (buildQuote)");
+  const back = ((got?.spec as { sections?: E301fSec[] } | null)?.sections || [])[0];
+  ok(back?.discipline === "lighting" && back?.clientGoals === "Brighter wash" && back?.coverText === "Cover para.", "#301 store: the section fields round-trip inside spec");
+  const rev = await Q.addQuoteRevision(QID, { by: "Test", note: "#301" });
+  ok(rev?.docFields?.coverSummary === "Summary." && rev?.docFields?.notIncluded === "Permits\nPainting", "#301 store: a new revision freezes both cover fields");
+  const before = got?.contentChangedAt ?? null;
+  const upd = await Q.update(QID, { coverSummary: "New summary." });
+  ok(upd?.coverSummary === "New summary." && (upd?.contentChangedAt ?? null) === before,
+    "#301 store: editing the cover summary is not a content change (the estimate PDF is not re-rendered)");
 }

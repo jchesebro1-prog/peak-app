@@ -256,6 +256,16 @@ export type SpecSection = {
   /** #293: ordered; at most one block per lineKey and per sku. Absent on
    *  every pre-#293 section (which therefore prints exactly as before). */
   keyProducts?: KeyProduct[];
+  /** #301: the survey discipline this system answers (the Discipline select in
+   *  the system header). Absent = inferred from the name for goal matching only
+   *  (inferDiscipline) — never stored by inference. Cleaned on save. */
+  discipline?: "lighting" | "rigging" | "curtain" | "av";
+  /** #301: the client's goals for this scope (≤ 1,000, plain text). Copied
+   *  from the site visit; dropped by Load system (R5). */
+  clientGoals?: string;
+  /** #301: the cover PDF's paragraph override (≤ 1,500). Absent = the intro's
+   *  first paragraph (coverParagraphFor). Dropped by Load system (R5). */
+  coverText?: string;
 };
 
 /* ---------------- configurator drafts (prototype state shapes) ---------------- */

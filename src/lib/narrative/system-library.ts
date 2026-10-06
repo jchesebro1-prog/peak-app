@@ -219,7 +219,7 @@ export function parseLibraryKey(key: string): { quoteId: string; rev: number | n
  * re-sent since indexing loads its newest sent revision). Vendor-quote lines
  * are left out (their records hold job-specific files and terms, and count
  * against the per-estimate attachment budget) and counted; the Rewards
- * credit, blocks on dropped or missing lines, and `room` (job-specific) go.
+ * credit, blocks on dropped or missing lines, `room`, `clientGoals` and `coverText` (job-specific) go.
  */
 export function librarySectionForLoad(
   q: Quote,
@@ -235,6 +235,10 @@ export function librarySectionForLoad(
   const keptIds = new Set(kept.map((it) => String(it.id)));
   const base: SpecSection = { ...sec, items: kept };
   delete base.room;
+  // #301 (R5): the client's goals and the cover paragraph were written for
+  // another customer — the discipline (what the system is) travels.
+  delete base.clientGoals;
+  delete base.coverText;
   // Freight priced from another venue's drive miles (only portal-built
   // sections carry freightMiles) never travels: auto freight re-applies here.
   if ("freightMiles" in base) {

@@ -311,6 +311,14 @@ export type Quote = {
    *  included) to active team users, like `pdf.blobPath`. That is not a
    *  credential on its own: a token can't be made without AUTH_SECRET. */
   shareLink?: QuoteShareLink | null;
+  /** #301 — the cover PDF's overall summary (≤ 3,000, plain text). Not a
+   *  QUOTE_CONTENT_FIELDS member: it never prints on the estimate PDF, so an
+   *  edit never re-renders it. Frozen in a revision's docFields. */
+  coverSummary?: string;
+  /** #301 — "Not included", one item per line (≤ 3,000). Absent = the
+   *  Settings → Estimate output default list (effectiveNotIncluded); "" = none.
+   *  Not a content field. Frozen in a revision's docFields. */
+  notIncluded?: string;
 };
 
 /** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
@@ -383,6 +391,11 @@ export type QuoteRevisionDocFields = {
   pdfOptions: QuotePdfOptions | null;
   portalFirm: Quote["portalFirm"] | null;
   source: string;
+  /** #301 — the cover summary as sent ("" when none). Absent on older revisions. */
+  coverSummary?: string;
+  /** #301 — Not included as sent; null = the quote never stored one (the
+   *  default list applied). Absent on older revisions. */
+  notIncluded?: string | null;
   /** #293 slice 3 — the Rev N and the date the revision's PDF printed
    *  (QuotePdfState.printed), stamped once with the PDF copy
    *  (setRevisionPdfPath). Absent until then, when the render couldn't be
@@ -703,6 +716,10 @@ export function buildQuote(
     ...(pl ? { pipelineId: pl.id, stage: firstStage(pl).id } : {}),
     // #223: the opportunity this quote was made from — its number carries here.
     ...(partial.leadId ? { leadId: partial.leadId } : {}),
+    // #301: the cover fields only when the caller set them — every other
+    // creator (Daylite import, service builders) writes the doc it wrote before.
+    ...(typeof partial.coverSummary === "string" ? { coverSummary: partial.coverSummary } : {}),
+    ...(typeof partial.notIncluded === "string" ? { notIncluded: partial.notIncluded } : {}),
   };
 }
 
@@ -767,6 +784,8 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     pdfOptions: d.pdfOptions ?? null,
     portalFirm: d.portalFirm ?? null,
     source: d.source || "",
+    coverSummary: d.coverSummary || "",
+    notIncluded: typeof d.notIncluded === "string" ? d.notIncluded : null,
   };
 }
 

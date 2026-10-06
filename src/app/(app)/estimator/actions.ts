@@ -26,6 +26,7 @@ import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
 import type { QuoteLite, TravelLite } from "./types";
 import { withSanitizedKeyProducts } from "./narrative";
+import { withSanitizedOutputFields } from "@/lib/estimate-output/fields";
 import type { DraftedLine } from "./ai-scope-modal";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import {
@@ -382,7 +383,8 @@ export async function saveQuoteAction(
   // (sellOverride finite, > 0, ≤ $10M; priceRound exactly 25) — dropped
   // otherwise, before anything prices or stores the sections.
   // #293: key-product blocks are shape-cleaned server-side whatever the client posts.
-  const sellSanitized = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts) : payload.sections;
+  // #301: the output fields (discipline, client goals, cover text) are cleaned the same way.
+  const sellSanitized = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields) : payload.sections;
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
   // when any other line carries one.
@@ -735,7 +737,9 @@ export async function moveSystemToEstimateAction(
   // #282 phase 2: the Rewards credit belongs to the source quote's customer —
   // it never travels with a moved system.
   // #293: blocks travel as-is (ids are kept) — sanitized like a save.
-  const [moved] = withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })]);
+  const [movedRaw] = withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })]);
+  // #301: a moved system keeps its discipline, goals and cover paragraph — cleaned like a save.
+  const moved = withSanitizedOutputFields(movedRaw);
   const placed = await placeSystemInEstimate(moved, target, {
     newName: moved.name + " (moved)",
     sourceContext,
@@ -908,6 +912,7 @@ export async function copySystemToEstimateAction(
   const user = await requireUser();
   // #293: blocks ride copySectionForTarget's section spread — sanitized first.
   section = withSanitizedKeyProducts(section);
+  section = withSanitizedOutputFields(section);
   const { resolveTier } = await import("@/lib/pricing-tiers");
   const items = Array.isArray(section?.items) ? section.items : [];
 
