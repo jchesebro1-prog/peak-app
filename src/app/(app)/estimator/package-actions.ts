@@ -82,6 +82,6 @@ export async function generateGridDrawingsAction(quoteId: string): Promise<{ ok:
     return r.ok ? { ok: true } : { ok: false, error: r.error };
   } catch (e) {
     console.error("[package] generate from grid failed", e);
-    return { ok: false, error: GRID_SET_COPY.renderFailed };
+    return { ok: false, error: GRID_SET_COPY.failed };
   }
 }

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { blobEnabled, deleteBlob, getBlobHead, getBlobStream, putBlob } from "@/lib/blob";
-import { GRID_SET_COPY, GRID_SET_STEP_MS, GRID_SET_WAIT_FOR, gridSetFileName, gridSetId, gridSetPrintUrl } from "@/lib/design/grid-set-print";
+import { GRID_SET_COPY, GRID_SET_DEADLINE_MS, GRID_SET_FAIL_IF, GRID_SET_STEP_MS, GRID_SET_WAIT_FOR, gridSetFileName, gridSetId, gridSetPrintUrl } from "@/lib/design/grid-set-print";
 import { cleanText, displayFileName, isUploadKey } from "@/lib/document-files";
-import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
+import { PdfRenderUnavailable, PrintFigureFailed, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { signPrintToken } from "@/lib/quote-pdf/token";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
@@ -152,7 +152,8 @@ type GridDeps = {
   now: () => number;
   newId: () => string;
   find: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
-  render: (url: string, opts: { timeoutMs?: number; waitFor?: string }) => Promise<Buffer>;
+  render: (url: string, opts: { timeoutMs?: number; waitFor?: string; failIf?: string; signal?: AbortSignal }) => Promise<Buffer>;
+  signal: (ms: number) => AbortSignal;
   put: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ url: string; pathname: string }>;
   remove: (pathname: string) => Promise<void>;
 };
@@ -172,6 +173,7 @@ export async function generateGridDrawingSet(quoteId: string, by: string, origin
     newId: newPackageFileId,
     find: gridProjectForQuote,
     render: renderPrintRouteToPdf,
+    signal: (ms) => AbortSignal.timeout(ms),
     put: putBlob,
     remove: deleteBlob,
     ...deps,
@@ -184,20 +186,34 @@ export async function generateGridDrawingSet(quoteId: string, by: string, origin
   if (!hit) return { ok: false, error: GRID_SET_COPY.noGrid };
   const current = cleanPackageFiles(q.packageFiles);
   const old = current.filter((f) => f.source === "grid");
-  if (current.length - old.length >= MAX_PACKAGE_FILES) return { ok: false, error: PACKAGE_FILES_COPY.full };
+  // The new record is added BEFORE the old Grid set goes, so a full list refuses up front (nothing rendered, the old set kept).
+  if (current.length >= MAX_PACKAGE_FILES) return { ok: false, error: PACKAGE_FILES_COPY.full };
   const setId = gridSetId(hit.project.id, hit.optionId);
   let pdf: Buffer;
   try {
     const t = signPrintToken(d.secret, "grid-set", setId, d.now());
-    pdf = await d.render(gridSetPrintUrl(origin, setId, t), { timeoutMs: GRID_SET_STEP_MS, waitFor: GRID_SET_WAIT_FOR });
+    // Dev compiles /print on first hit (renderPrintRouteToPdf's own 90 s default); production keeps the 25 s steps.
+    const dev = process.env.NODE_ENV === "development";
+    pdf = await d.render(gridSetPrintUrl(origin, setId, t), {
+      timeoutMs: dev ? undefined : GRID_SET_STEP_MS,
+      waitFor: GRID_SET_WAIT_FOR,
+      failIf: GRID_SET_FAIL_IF,
+      // Bounds the queue wait too (a render queued behind others can't outrun the step budget).
+      signal: d.signal(dev ? 360_000 : GRID_SET_DEADLINE_MS),
+    });
   } catch (e) {
     if (e instanceof PdfRenderUnavailable) return { ok: false, error: e.message };
     console.error("[package] grid drawing set render failed", e);
-    return { ok: false, error: GRID_SET_COPY.renderFailed };
+    return { ok: false, error: e instanceof PrintFigureFailed ? GRID_SET_COPY.figureFailed : GRID_SET_COPY.renderFailed };
   }
   if (pdf.length > MAX_PACKAGE_FILE_BYTES) return { ok: false, error: GRID_SET_COPY.tooBig };
-  const stored = await d.put(gridSetBlobPath(q.id), pdf, "application/pdf");
-  for (const f of old) await removePackageFileAndBlob(q.id, f.id, { remove: d.remove });
+  let stored: { url: string; pathname: string };
+  try {
+    stored = await d.put(gridSetBlobPath(q.id), pdf, "application/pdf");
+  } catch (e) {
+    console.error("[package] grid drawing set store failed", e);
+    return { ok: false, error: GRID_SET_COPY.storeFailed };
+  }
   const file: PackageFile = {
     id: d.newId(),
     kind: "drawing",
@@ -209,8 +225,15 @@ export async function generateGridDrawingSet(quoteId: string, by: string, origin
     addedAt: d.now(),
     addedBy: cleanText(by, 120),
   };
-  const res = await addPackageFile(q.id, file);
+  let res: Awaited<ReturnType<typeof addPackageFile>>;
+  try {
+    res = await addPackageFile(q.id, file);
+  } catch (e) {
+    console.error("[package] grid drawing set record failed", e);
+    res = { ok: false, reason: "gone" };
+  }
   if (!res.ok) {
+    // Only the NEW blob goes; the earlier Grid set (record and blob) is untouched.
     try {
       await d.remove(stored.pathname);
     } catch {
@@ -218,5 +241,7 @@ export async function generateGridDrawingSet(quoteId: string, by: string, origin
     }
     return { ok: false, error: res.reason === "full" ? PACKAGE_FILES_COPY.full : ONLINE_COPY.gone };
   }
+  // Only now do the older Grid records go (a blob a revision still lists is kept).
+  for (const f of old) await removePackageFileAndBlob(q.id, f.id, { remove: d.remove });
   return { ok: true, file };
 }

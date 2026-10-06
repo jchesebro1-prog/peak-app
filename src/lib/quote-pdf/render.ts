@@ -99,6 +99,14 @@ function printPathOf(url: string): string {
   }
 }
 
+/** #301 slice C: a figure on the print page settled in its error state (opt-in `failIf` matched). */
+export class PrintFigureFailed extends Error {
+  constructor() {
+    super("A figure on the print page failed to draw — the PDF wasn’t made.");
+    this.name = "PrintFigureFailed";
+  }
+}
+
 let queue: Promise<unknown> = Promise.resolve();
 
 /** A render given up by its caller (#292: a client package past its cut-sheet deadline). */
@@ -141,19 +149,20 @@ export function enqueueRender<T>(task: (signal?: AbortSignal) => Promise<T>, sig
  * as before): aborted before its turn, the render never launches Chrome;
  * aborted while running, the browser is closed at once, so the queue moves on.
  */
-export function renderPrintRouteToPdf(url: string, opts: { timeoutMs?: number; signal?: AbortSignal; waitFor?: string } = {}): Promise<Buffer> {
+export function renderPrintRouteToPdf(url: string, opts: { timeoutMs?: number; signal?: AbortSignal; waitFor?: string; failIf?: string } = {}): Promise<Buffer> {
   // `next dev` compiles /print on first hit, which can take far longer than a
   // warm production render.
   const timeout = opts.timeoutMs ?? (process.env.NODE_ENV === "development" ? 90_000 : RENDER_STEP_TIMEOUT_MS);
   // #301 slice C: only the Grid drawing set passes `waitFor`; every other
   // caller keeps the two pre-existing dispatch lines below, untouched (#292).
+  // `failIf` (also Grid-only) fails the render when it still matches after the wait.
   const waitFor = opts.waitFor;
-  if (waitFor) return enqueueRender((signal) => renderOnce(url, timeout, signal, waitFor), opts.signal);
+  if (waitFor) return enqueueRender((signal) => renderOnce(url, timeout, signal, waitFor, opts.failIf), opts.signal);
   if (!opts.signal) return enqueueRender(() => renderOnce(url, timeout));
   return enqueueRender((signal) => renderOnce(url, timeout, signal), opts.signal);
 }
 
-async function renderOnce(url: string, timeout: number, signal?: AbortSignal, waitFor?: string): Promise<Buffer> {
+async function renderOnce(url: string, timeout: number, signal?: AbortSignal, waitFor?: string, failIf?: string): Promise<Buffer> {
   const launch = await chromeLaunch();
   if ("unavailable" in launch) throw new PdfRenderUnavailable(launch.unavailable);
   if (signal?.aborted) throw abortErrorOf(signal);
@@ -207,9 +216,13 @@ async function renderOnce(url: string, timeout: number, signal?: AbortSignal, wa
     if (fontsCapped) console.warn(`[quote-pdf] fonts still loading after ${fontsCapMs} ms — printing with fallback fonts`, printPathOf(url));
     // #301 slice C (R8c): a page that paints asynchronously (the Grid drawing
     // set's plan sheets flip data-ready) prints only once nothing matches
-    // `waitFor`. Still matching at the cap fails the render — never a blank plan.
+    // `waitFor`. Still matching at the cap fails the render. A figure that
+    // settled by FAILING (data-error="1") also stops the wait, so `failIf`
+    // (opt-in, Grid only) then refuses the print — a failed plan is never
+    // stored as a finished sheet.
     if (waitFor) {
       await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: Math.min(timeout, RENDER_WAIT_FOR_TIMEOUT_MS), polling: 250 }, waitFor);
+      if (failIf && (await page.$(failIf))) throw new PrintFigureFailed();
     }
     // Re-check where the page IS right before printing (#222 final wave B): a
     // client-side redirect after "load" (a login bounce, a script navigating

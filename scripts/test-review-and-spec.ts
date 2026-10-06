@@ -52185,7 +52185,7 @@ async function e301cPanelAsyncChecks(): Promise<void> {
    ====================================================================== */
 import {
   gridSetId as e301cgId, parseGridSetId as e301cgParse, gridSetAssetTokenId as e301cgAssetId, gridSetPrintUrl as e301cgUrl, gridSetFileName as e301cgFile,
-  GRID_SET_WAIT_FOR as e301cgWait, GRID_SET_STEP_MS as e301cgStep,
+  GRID_SET_WAIT_FOR as e301cgWait, GRID_SET_STEP_MS as e301cgStep, GRID_SET_FAIL_IF as e301cgFailIf, GRID_SET_DEADLINE_MS as e301cgDeadline,
 } from "@/lib/design/grid-set-print";
 import { signPrintToken as e301cgSign, verifyPrintToken as e301cgVerify } from "@/lib/quote-pdf/token";
 import { RENDER_LAUNCH_TIMEOUT_MS as e301cgLaunch, RENDER_FONTS_TIMEOUT_MS as e301cgFonts, RENDER_WAIT_FOR_TIMEOUT_MS as e301cgWaitCap } from "@/lib/quote-pdf/render";
@@ -52237,6 +52237,18 @@ import { RENDER_LAUNCH_TIMEOUT_MS as e301cgLaunch, RENDER_FONTS_TIMEOUT_MS as e3
     "#301 grid: Generate signs the token right before the one render and stores a Grid drawing set");
   const acts = rd("src/app/(app)/estimator/package-actions.ts");
   ok(acts.slice(acts.indexOf("export async function generateGridDrawingsAction(")).includes("printOriginFor(process.env,"), "#301 grid: the action prints from the request's own origin (printOriginFor)");
+  // #301 slice C review fixes: a failed plan figure fails the render; add-then-remove ordering; a bounded queue wait.
+  ok(e301cgFailIf === '[data-plan-figure][data-error="1"]' && e301cgDeadline === e301cgLaunch + 2 * e301cgStep + e301cgFonts + Math.min(e301cgStep, e301cgWaitCap) && e301cgDeadline <= 110_000,
+    "#301 grid fix: the failed-figure selector, and a queue deadline equal to one render's worst case (105 s, inside the 120 s action)");
+  ok(body.includes("if (failIf && (await page.$(failIf)))") && body.indexOf("page.waitForFunction(") < body.indexOf("page.$(failIf)") && body.indexOf("page.$(failIf)") < body.indexOf("landedOnRequested(url, page.url())") &&
+     rs.includes("export class PrintFigureFailed") && rs.includes("failIf?: string") && !rs.includes("never a blank plan"),
+    "#301 grid fix: after waitFor, a still-present failIf figure fails the render (opt-in; the comment no longer overclaims)");
+  ok(rs.includes("  if (!opts.signal) return enqueueRender(() => renderOnce(url, timeout));\n  return enqueueRender((signal) => renderOnce(url, timeout, signal), opts.signal);"),
+    "#301 grid fix: the two pre-existing dispatch lines stay byte-identical (#292 pin)");
+  ok(g.includes("failIf: GRID_SET_FAIL_IF") && g.includes("signal: d.signal(") && g.includes("GRID_SET_DEADLINE_MS") && g.includes('process.env.NODE_ENV === "development"') &&
+     g.indexOf("d.put(") < g.indexOf("addPackageFile(q.id, file)") && g.indexOf("addPackageFile(q.id, file)") < g.indexOf("removePackageFileAndBlob(q.id, f.id") &&
+     g.includes("GRID_SET_COPY.figureFailed") && g.includes("GRID_SET_COPY.storeFailed"),
+    "#301 grid fix: Generate bounds the queue wait, passes failIf, adds the new record BEFORE removing the old, and names the failing step");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base", expectNotFound: true }') && smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base/asset/sheet/gs-1", expectNotFound: true }') &&
      smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base/asset/doc/PD-1", expectNotFound: true }'),
@@ -52286,6 +52298,47 @@ async function e301cGridAsyncChecks(): Promise<void> {
   ok(g1.ok && g2.ok && files.length === 1 && files[0].source === "grid" && files[0].kind === "drawing" && files[0].name === "#301c grid design — drawing set.pdf" &&
      puts.every((p) => p === `estimate-files/${F.quotePathSegment(QID)}/grid/drawing-set.pdf`) && removed.join() === `estimate-files/${F.quotePathSegment(QID)}/grid/drawing-set.pdf-Sfx1`,
     "#301 grid (DB): Generate stores one Grid drawing set; generating again replaces it (the old blob goes)");
+  // Review fixes: (1) a failed plan figure stores nothing; (2) add-then-remove; (3) the bounded signal.
+  const { PrintFigureFailed } = await import("@/lib/quote-pdf/render");
+  const putsBefore = puts.length;
+  const figFail = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", { ...deps, render: async () => { throw new PrintFigureFailed(); } });
+  ok(!figFail.ok && figFail.error === "One of the plan sheets couldn’t be drawn — try again." && puts.length === putsBefore &&
+     F.cleanPackageFiles((await Q.get(QID))!.packageFiles).length === 1 && F.cleanPackageFiles((await Q.get(QID))!.packageFiles)[0].id === files[0].id,
+    "#301 grid fix (DB): a plan sheet that failed to draw → a clear message, nothing stored, the earlier set kept");
+  let sawSignal: AbortSignal | undefined;
+  const sigMs: number[] = [];
+  const timedOut = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", {
+    ...deps,
+    signal: (ms: number) => { sigMs.push(ms); return AbortSignal.abort(); },
+    render: async (_u: string, o: { signal?: AbortSignal }) => { sawSignal = o.signal; throw o.signal?.reason ?? new Error("no signal"); },
+  } as never);
+  ok(sigMs.join() === "105000" && sawSignal?.aborted === true && !timedOut.ok && timedOut.error === "The drawing set couldn’t be rendered — try again.",
+    "#301 grid fix (DB): the render gets a 105 s abort signal; an aborted render is a render failure");
+  const removedBefore = removed.length;
+  const failAdd = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", { ...deps, newId: () => files[0].id });
+  const afterFailAdd = F.cleanPackageFiles((await Q.get(QID))!.packageFiles);
+  ok(!failAdd.ok && afterFailAdd.length === 1 && afterFailAdd[0].blobPath === files[0].blobPath && removed.length === removedBefore + 1 && removed[removed.length - 1] === puts[puts.length - 1] + "-Sfx" + puts.length,
+    "#301 grid fix (DB): a failed add deletes only the new blob and keeps the old set (and its blob)");
+  const putFail = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", { ...deps, put: async () => { throw new Error("blob down"); } });
+  ok(!putFail.ok && putFail.error === "The drawing set was drawn but couldn’t be saved — try again." && F.cleanPackageFiles((await Q.get(QID))!.packageFiles)[0].id === files[0].id,
+    "#301 grid fix (DB): a storage failure names the store step and keeps the old set");
+  const QF = fixtureId(301, "c-grid-full");
+  await Q.create({ id: QF, name: "#301c grid full", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "grid",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] }], mobs: [] } });
+  registerFixture("quotes", QF);
+  await G.setOptionQuote(project.id, optionId, QF);
+  const pf = (n: number, extra: Record<string, unknown> = {}) => ({
+    id: "PF-" + n.toString(16).padStart(12, "d"), kind: "plan" as const, name: `Plan ${n}.pdf`, blobPath: `estimate-files/${F.quotePathSegment(QF)}/UP-0123456789abcdef/p${n}.pdf`,
+    contentType: "application/pdf" as const, size: 100, source: "upload" as const, addedAt: n, addedBy: "T", ...extra });
+  for (let i = 0; i < 11; i++) await Q.addPackageFile(QF, pf(i + 1));
+  await Q.addPackageFile(QF, pf(99, { kind: "drawing", source: "grid", blobPath: `estimate-files/${F.quotePathSegment(QF)}/grid/drawing-set.pdf-OLD` }));
+  const rmBeforeFull = removed.length;
+  const putsBeforeFull = puts.length;
+  const fullRes = await S.generateGridDrawingSet(QF, "Tester", "https://app.test", deps);
+  const fullList = F.cleanPackageFiles((await Q.get(QF))!.packageFiles);
+  ok(!fullRes.ok && fullList.length === 12 && fullList.some((f) => f.source === "grid" && f.blobPath.endsWith("-OLD")) && !removed.some((r) => r.endsWith("-OLD")) &&
+     puts.length - putsBeforeFull <= 1 && removed.length - rmBeforeFull === puts.length - putsBeforeFull,
+    "#301 grid fix (DB): a full (12-file) list makes the add fail and the old Grid set survives (any new blob is deleted)");
   const noBlob = await S.generateGridDrawingSet(QID, "Tester", "https://app.test", { ...deps, blobOn: false });
   const noGrid = await S.generateGridDrawingSet(fixtureId(301, "c-grid-none"), "Tester", "https://app.test", deps);
   ok(!noBlob.ok && noBlob.error === F.PACKAGE_FILES_COPY.noStorage && !noGrid.ok, "#301 grid (DB): no storage or no quote / design → a message, nothing stored");
