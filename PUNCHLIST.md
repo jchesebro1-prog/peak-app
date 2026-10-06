@@ -10839,6 +10839,30 @@ delete it at the end):
 7. Check the **Opened** chip on the Quotes hub moved, then **delete the test quote**. Check Blob for leftovers (`estimate-package/<quote>/`
    and the test drawings) and remove them by hand; quote deletion is not known to clean them.
 
+**Production check — RUN 2026-10-06 (Claude, on a throwaway quote).** Test records: company **ZZ TEST #301**
+(`c1791311148406`), Grid design **GRD-5014 "ZZ TEST #301 — delete me"**, quote **EST-1086 (`Q-2054`)**, two bell to-dos
+("Client accepted EST-1086 Rev 2…", "Client question — EST-1086") and two "Client link" notes on the ZZ TEST company.
+Results:
+1. **Generate from Grid** — PASS: one 237 KB, 4-page drawing set stored (`From the Grid`), annexed onto the already-sent Rev 1.
+2. **Uploads** — PASS: a PDF (Plan) and a PNG (Drawing set) went direct-to-Blob and finalized; the PNG hid the Grid set
+   ("Hidden from the client — an upload of this kind replaces it"); an HTML file disguised as `.pdf` was refused
+   ("Drawings must be PDF, PNG, JPEG or WebP files.").
+3. **Drawing PDF under the CSP** — PASS in **Chrome** (renders all pages; `application/pdf`, nosniff, inline, private
+   cache). **Safari not checked** (Claude can only drive Chromium) — Jeff to open one drawing link in Safari.
+4. **Package zip** — PASS: `Specifications.docx` + `datasheets/Element2_Datasheet_RevB.pdf`, no LEFT OUT; a repeat download
+   served the cached copy (same build stamp). Rate limit 6 / 10 min per IP answered 429 as designed.
+5. **Rebuild package** — PASS: the next download was a fresh build; caching resumed a few minutes later (Blob's CDN keeps the
+   deleted path for a short while, so downloads right after a Rebuild rebuild each time — harmless).
+6. **Client actions** — PASS: scope selection + question stored on Rev 2, quote stayed **Sent**, one bell to-do each for the
+   Lead estimator, both notes on the company feed. Re-send gave **Rev 2**; the Rev 1 link shows the superseded banner and no
+   actions. Cookieless opens counted once (dedupe), **Opened** chip on the hub.
+**Found while checking (not #301 bugs):** (a) a Grid-only quote's device lines (`spec.lines`) print on no customer document,
+so the package page/cover show $0 for them — the existing AGENTS #18 limitation, now more visible; (b) React #418 hydration
+errors appear on some staff pages in production (not the package page) — worth a look; (c) the Drive photos account gets 403
+"Google Drive API has not been used in project 494937463280" — enable the Drive API (#283 setup).
+**Clean-up for Jeff:** delete quote EST-1086, design GRD-5014, company ZZ TEST #301 and the two to-dos; then remove Blob
+leftovers under `estimate-package/Q-2054/` and `estimate-files/Q-2054/` (quote deletion isn't known to clean them).
+
 **Rollout.** Copy client links and make covers from **production** only. Preview deploys share the production database and
 print the preview's own origin, and a response submitted from a preview is a production write. The zip cache only runs when
 `VERCEL_ENV=production`, so a preview never reads or writes it. Make sure `QUOTE_PDF_ORIGIN` is set in production (the Batch 2 item)
