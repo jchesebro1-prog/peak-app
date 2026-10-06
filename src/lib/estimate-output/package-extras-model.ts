@@ -1,4 +1,4 @@
-import type { PackageSkuDocs } from "@/lib/part-docs/package";
+import type { PackageDocument, PackageSkuDocs } from "@/lib/part-docs/package";
 import type { ResponseScope } from "./responses";
 
 /**
@@ -30,4 +30,20 @@ export function datasheetLinks(bySku: ReadonlyMap<string, Pick<PackageSkuDocs, "
   const out: Record<string, DatasheetLinkView> = {};
   for (const [sku, d] of bySku) if (d.datasheet) out[sku] = { href: packageDocHref(base, d.datasheet.documentId), name: d.datasheet.name };
   return out;
+}
+
+/** Datasheets and spec sheets only (never manuals — D-l). Nothing to offer → no card. */
+export function downloadsView(documents: readonly Pick<PackageDocument, "documentId" | "name" | "kind">[], specifications: boolean, base: string): PackageDownloadsView | null {
+  const files = documents
+    .filter((d) => d.kind === "datasheet" || d.kind === "specsheet")
+    .map((d) => ({ href: packageDocHref(base, d.documentId), name: d.name, kindLabel: d.kind === "datasheet" ? "Datasheet" : "Spec sheet" }));
+  if (!files.length && !specifications) return null;
+  return { zipHref: `${base}/package.zip`, files, specifications };
+}
+
+export function downloadsSummary(v: PackageDownloadsView): string {
+  const ds = v.files.filter((f) => f.kindLabel === "Datasheet").length;
+  const ss = v.files.length - ds;
+  const parts = [ds ? `${ds} datasheet${ds === 1 ? "" : "s"}` : "", ss ? `${ss} spec sheet${ss === 1 ? "" : "s"}` : "", v.specifications ? "Specifications (Word)" : ""];
+  return parts.filter(Boolean).join(" · ");
 }

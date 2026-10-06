@@ -142,7 +142,8 @@ async function addSheetPdfs(
 export type DatasheetEntry = { sku: string; label: string; bytes: Buffer | null; reason?: string };
 export type CoverEntry = { sku: string; label: string; pageCount: number | null; reason?: string };
 
-async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<Buffer | "too-big"> {
+/** Shared with the estimate package zip (#301 slice C). */
+export async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<Buffer | "too-big"> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let n = 0;

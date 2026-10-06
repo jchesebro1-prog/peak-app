@@ -51531,6 +51531,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
 async function estimateOutput301CAsyncChecks(): Promise<void> {
   await e301cStoreAsyncChecks();
   await e301cDocsAsyncChecks();
+  await e301cZipAsyncChecks();
 }
 
 async function e301cStoreAsyncChecks(): Promise<void> {
@@ -51693,4 +51694,152 @@ async function e301cDocsAsyncChecks(): Promise<void> {
      (await S.packageDocForRevision(rev, img.id)) === null && (await S.packageDocForRevision(rev, "PD-NOPE-301C")) === null && (await S.packageDocForRevision(rev, "../x")) === null,
     "#301 docs (DB): the route serves only the revision's datasheets / spec sheets");
   ok((await S.datasheetGapCount(rev.spec)) === 2, "#301 docs (DB): the gap count — X (spec sheet only) and Y (nothing) have no datasheet; the accessory is covered");
+}
+
+/* ======================================================================
+   #301 slice C — zip (R10): datasheets + spec sheets + Specifications.docx
+   built in memory with the rack caps (25 MB / doc, 60 MB total, 45 s) and
+   a LEFT OUT.txt; cached in private Blob per (quote, rev) on the first
+   download, streamed after; 6 / 10 min / IP. quoteSpecParts is the staff
+   client package's own spec step, extracted with no behavior change.
+   ====================================================================== */
+import {
+  packageZipCachePath as e301czPath, packageZipFileName as e301czName, leftOutText as e301czLeftOut, zipCacheable as e301czCacheable,
+  packageZipCacheOn as e301czCacheOn, LEFT_OUT_REASON as e301czReason, PACKAGE_ZIP_DOC_MAX_BYTES as e301czDocMax, PACKAGE_ZIP_TOTAL_MAX_BYTES as e301czTotalMax,
+  PACKAGE_ZIP_DEADLINE_MS as e301czDeadline,
+} from "@/lib/estimate-output/package-zip";
+import { quoteSpecParts as e301czSpecParts } from "@/lib/client-package-server";
+import { buildCoverageIndex as e301czIndex } from "@/lib/part-docs/coverage";
+import { downloadsView as e301czView, downloadsSummary as e301czSummary } from "@/lib/estimate-output/package-extras-model";
+import { PackageDownloads as E301czDownloads } from "@/components/estimate-output/package-extras";
+import { createElement as createElement301cz } from "react";
+import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/server";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(e301czPath("Q-2041", 3) === "estimate-package/Q-2041/rev-3.zip" && e301czPath("Q 1/x", 1) === "estimate-package/Q_1_x/rev-1.zip" &&
+     e301czName("EST-1042", 2) === "EST-1042 Rev 2 package.zip" && e301czDocMax === 25 * 1024 * 1024 && e301czTotalMax === 60 * 1024 * 1024 && e301czDeadline === 45_000,
+    "#301 zip: the cache path per (quote, rev), the download name, the rack caps");
+  const lo = e301czLeftOut([{ name: "datasheets/Big.pdf", reason: e301czReason.tooBig }]);
+  ok(lo.includes("datasheets/Big.pdf — Left out — package size limit") && lo.endsWith("\r\n") && e301czReason.late === "Left out — ran out of time",
+    "#301 zip: LEFT OUT.txt names each file and why");
+  ok(e301czCacheable([]) && e301czCacheable([{ name: "a", reason: e301czReason.tooBig }]) && !e301czCacheable([{ name: "a", reason: e301czReason.late }]) &&
+     !e301czCacheable([{ name: "a", reason: e301czReason.unreadable }]) && !e301czCacheable([{ name: "a", reason: e301czReason.missing }]),
+    "#301 zip: only a complete build (or one cut only by the size cap) is cached — a timeout is never frozen");
+  ok(e301czCacheOn({ NODE_ENV: "production" }, true) && !e301czCacheOn({ NODE_ENV: "production" }, false) && !e301czCacheOn({ NODE_ENV: "development" }, true) &&
+     e301czCacheOn({ NODE_ENV: "development", ESTIMATE_PACKAGE_CACHE: "1" }, true),
+    "#301 zip: no cache without Blob, and none under next dev unless ESTIMATE_PACKAGE_CACHE=1 (a scratch DB reuses real quote ids)");
+  // quoteSpecParts (pure): a ready part assembles; a part with no spec and an unknown sku are gaps.
+  const cat = [
+    { id: "R", sku: "R", desc: "Ready part", category: "Other", unit: "ea", list: 1, cost: 1, specSectionId: "ss-1", specBody: "Provide the fixture." },
+    { id: "N", sku: "N", desc: "No spec", category: "Other", unit: "ea", list: 1, cost: 1 },
+  ] as never[];
+  const sp = e301czSpecParts({ quote: { id: "Q-1", name: "Hall", customer: "C" }, bom: [{ sku: "R", desc: "Ready", qty: 2 }, { sku: "N", desc: "No spec", qty: 1 }, { sku: "Z", desc: "Unknown", qty: 1 }],
+    catalog: cat, docIndex: e301czIndex({ documents: [], links: [], accessoryLinks: [], parts: [] }), sections: [{ id: "ss-1", number: "11 61 23", title: "Lighting", sort: 1, part1: [], part3: [] }] as never[], by: "T", date: 1 });
+  ok(sp.spec.sections.length === 1 && sp.spec.engagementId === "quote:Q-1" && sp.gaps.map((g) => `${g.kind}:${g.sku}`).sort().join() === "missing-catalog:Z,missing-datasheet:N,missing-datasheet:R,missing-spec:N" && sp.items.length === 3,
+    "#301 zip: quoteSpecParts assembles the ready rows and reports the same gaps the client package did");
+  const cps = rd("src/lib/client-package-server.ts");
+  const qcp = cps.slice(cps.indexOf("export async function createQuoteClientPackage("));
+  ok(qcp.includes("quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now() })") &&
+     qcp.indexOf("const bom = quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog));") < qcp.indexOf("quoteSpecParts("),
+    "#301 zip: the staff quote package builds its spec through quoteSpecParts (the #296 BOM line unchanged)");
+  ok(/addRandomSuffix: false,\s*allowOverwrite: true/.test(rd("src/lib/blob.ts")) && rd("src/lib/rack/submittal-server.ts").includes("export async function readCapped("),
+    "#301 zip: putBlobAt writes a fixed path; readCapped is shared with the rack submittal");
+  const route = rd("src/app/share/quote/[id]/[token]/package.zip/route.ts");
+  ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
+     route.indexOf("resolveSharedPackage(") < route.indexOf("servePackageZip(pkg)") && route.includes("SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS") &&
+     route.includes("export const maxDuration = 60;"),
+    "#301 zip: the route rate-limits (6 / 10 min / IP), takes only a v2 token, then serves the pinned revision's zip");
+  const srv = rd("src/lib/estimate-output/package-zip-server.ts");
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("buildSpecDocx(sp.spec)") && srv.includes("zipCacheable(built.leftOut)") &&
+     !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
+    "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
+  const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
+  const v = e301czView(dl301cz, true, "/b");
+  ok(!!v && v.zipHref === "/b/package.zip" && v.files.map((f) => `${f.kindLabel}:${f.href}`).join() === "Datasheet:/b/doc/PD-1,Spec sheet:/b/doc/PD-2" &&
+     e301czSummary(v) === "1 datasheet · 1 spec sheet · Specifications (Word)" && e301czView([], false, "/b") === null && e301czView([], true, "/b")?.files.length === 0,
+    "#301 zip: Downloads lists datasheets and spec sheets (never manuals); nothing to offer → no card");
+  const html = renderToStaticMarkup301cz(createElement301cz(E301czDownloads, { view: v! }));
+  ok(html.includes(">Downloads<") && html.includes('href="/b/package.zip"') && html.includes("Download all (.zip)") && html.includes("Individual files (2)") && !html.includes("part-docs/"),
+    "#301 zip: the Downloads card — one zip button, the individual files, no storage path");
+  const docRoute = rd("src/app/share/quote/[id]/[token]/doc/[docId]/route.ts");
+  const dRes = docRoute.indexOf("resolveSharedPackage(");
+  const dCatch = docRoute.indexOf("} catch (e) {", dRes);
+  ok(docRoute.lastIndexOf("try {", dRes) > docRoute.indexOf("isShareTokenV2(token)") && dRes < docRoute.indexOf("packageDocForRevision(", dRes) && docRoute.indexOf("packageDocForRevision(", dRes) < dCatch &&
+     dCatch < docRoute.indexOf("getBlobStream(") && docRoute.slice(dCatch, docRoute.indexOf("getBlobStream(")).includes("console.warn(") &&
+     docRoute.slice(dCatch, docRoute.indexOf("getBlobStream(")).includes("return notFound();"),
+    "#301 docs route: a DB error while resolving the package or its document is the same uniform 404, logged server-side (never a 500)");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes(`{ route: "/share/quote/Q-2041/1.1.${"A".repeat(43)}/package.zip", expectNotFound: true }`), "#301 smoke: the zip with a bad v2 token is a clean 404");
+}
+
+async function e301cZipAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const C = await import("@/lib/stores/catalog");
+  const D = await import("@/lib/stores/part-documents");
+  const Q = await import("@/lib/stores/quotes");
+  const SS = await import("@/lib/stores/spec-sections");
+  const Z = await import("@/lib/estimate-output/package-zip-server");
+  const { LEFT_OUT_REASON } = await import("@/lib/estimate-output/package-zip");
+  const { zipStream } = await import("@/lib/zip");
+  const back = Buffer.from(await new Response(zipStream(Buffer.from("x".repeat(700_000)))).arrayBuffer());
+  ok(back.length === 700_000, "#301 zip (stream): zipStream yields the whole buffer in chunks");
+  const section = await SS.createSection({ number: "11 61 99", title: "#301c zip section", sort: 1, by: "Test" });
+  registerFixture("spec_sections", section.id);
+  const [P, BIG, BAD] = ["p", "big", "bad"].map((s) => fixtureId(301, "c-zip-" + s));
+  for (const sku of [P, BIG, BAD]) {
+    await C.upsert({ sku, desc: "Zip part " + sku, category: "Other", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", sku);
+  }
+  await C.mergeUpsert(P, { specSectionId: section.id, specBody: "Provide the #301c fixture." } as never);
+  const mk = async (sku: string, fileName: string, size: number) => {
+    const d = await D.createDocument({ kind: "datasheet", fileName, contentType: "application/pdf", size, blobKey: `part-docs/PD-fixture-301cz/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#301c zip: fixture document failed");
+    registerFixture("part_documents", d.id);
+    await D.attachDocument(d.id, [sku], "Test");
+    registerFixture("part_document_links", D.documentLinkId(sku, d.id));
+    return d;
+  };
+  await mk(P, "ok-301c.pdf", 2_000);
+  await mk(BIG, "big-301c.pdf", 26 * 1024 * 1024);
+  await mk(BAD, "bad-301c.pdf", 1_000);
+  const QID = fixtureId(301, "c-zip");
+  const line = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 });
+  await Q.create({ id: QID, name: "#301c zip", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [line(1, P), line(2, BIG), line(3, BAD)] }], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+  const q = (await Q.get(QID))!;
+  const body = Buffer.from("%PDF-1.7 fixture-301c");
+  const read = async (key: string) => {
+    if (key.endsWith("bad-301c.pdf")) throw new Error("boom");
+    return new Response(new Uint8Array(body)).body;
+  };
+  const built = await Z.buildRevisionPackageZip(q, rev, { read, sections: async () => [section] });
+  // Stored (uncompressed) entries: names and bytes appear as-is; LEFT OUT.txt is UTF-8 (its "—").
+  const has = (text: string) => !!built && built.zip.includes(Buffer.from(text, "utf8"));
+  ok(!!built && has("Specifications.docx") && has("datasheets/ok-301c.pdf") && has("%PDF-1.7 fixture-301c") && has("LEFT OUT.txt") &&
+     has("datasheets/big-301c.pdf — " + LEFT_OUT_REASON.tooBig) && has("datasheets/bad-301c.pdf — " + LEFT_OUT_REASON.unreadable) && built.datasheets === 1 && built.specifications,
+    "#301 zip (DB): Specifications.docx, the readable datasheet, and LEFT OUT.txt naming the oversize and unreadable ones");
+  const late = await Z.buildRevisionPackageZip(q, rev, { read, sections: async () => [section], now: (() => { let t = 0; return () => (t += 50_000); })() });
+  ok(!!late && late.leftOut.some((l) => l.reason === LEFT_OUT_REASON.late), "#301 zip (DB): past the 45 s deadline, the rest is left out as late");
+  const pkg = { q, rev, state: { kind: "ok", rev, closed: false, won: false }, currentPath: null } as never;
+  const puts: string[] = [];
+  let builds = 0;
+  let cached: Buffer | null = null;
+  const deps = {
+    cacheOn: true,
+    get: async () => (cached ? new Response(new Uint8Array(cached)).body : null),
+    put: async (path: string, bytes: Buffer) => { puts.push(path); cached = bytes; },
+    build: async () => { builds++; return { zip: Buffer.from("ZIP"), leftOut: [], datasheets: 1, specsheets: 0, specifications: false }; },
+  };
+  const r1 = await Z.servePackageZip(pkg, deps);
+  const r2 = await Z.servePackageZip(pkg, deps);
+  ok(r1.status === 200 && r2.status === 200 && builds === 1 && puts.join() === `estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}.zip` && (await r2.text()) === "ZIP" &&
+     /attachment; filename="EST-\d+ Rev 1 package\.zip"/.test(r1.headers.get("content-disposition") || "") && r1.headers.get("content-type") === "application/zip",
+    "#301 zip (serve): the first download builds and caches; the second streams the cache");
+  const noCache = await Z.servePackageZip(pkg, { ...deps, get: async () => null, build: async () => ({ zip: Buffer.from("Z2"), leftOut: [{ name: "a", reason: LEFT_OUT_REASON.late }], datasheets: 0, specsheets: 0, specifications: false }) });
+  const empty = await Z.servePackageZip(pkg, { ...deps, get: async () => null, build: async () => null });
+  ok(noCache.status === 200 && puts.length === 1 && empty.status === 404 && (await empty.text()) === "Nothing to download for this estimate.",
+    "#301 zip (serve): a timed-out build is served but not cached; nothing to include → 404");
 }

@@ -83,3 +83,20 @@ export function createStoredZip(files: ZipFile[]): Buffer {
   end.writeUInt16LE(0, 20);
   return Buffer.concat([...locals, centralBytes, end]);
 }
+
+const STREAM_CHUNK = 256 * 1024;
+
+/** #301 slice C — a buffered zip as a stream of 256 KB slices (a buffered
+ *  function response is capped around 4.5 MB on Vercel; real datasheets pass
+ *  that). The rack submittal route's `chunked`, shared. */
+export function zipStream(buf: Buffer): ReadableStream<Uint8Array> {
+  const view = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  let at = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (at >= view.byteLength) return controller.close();
+      controller.enqueue(view.subarray(at, Math.min(at + STREAM_CHUNK, view.byteLength)));
+      at += STREAM_CHUNK;
+    },
+  });
+}

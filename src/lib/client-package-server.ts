@@ -275,6 +275,56 @@ async function addDocuments(
   }
 }
 
+/**
+ * #301 slice C — one quote BOM's spec, package documents, items and gaps,
+ * from a given catalog slice and coverage index. No record, no zip, no
+ * Blob. The staff quote package (below) and the estimate package's
+ * Specifications.docx (estimate-output/package-zip-server.ts) both use it.
+ * #207: the quote's own SKUs are the coverage context — an accessory rides
+ * on a fixture only when that fixture is on this quote.
+ */
+export function quoteSpecParts(input: {
+  quote: Pick<Quote, "id" | "name" | "customer">;
+  bom: Array<{ sku: string; desc: string; qty: number }>;
+  catalog: SpecCatalogPart[];
+  docIndex: CoverageIndex;
+  sections: Awaited<ReturnType<typeof allSections>>;
+  by: string;
+  date: number;
+}) {
+  const { quote, bom, catalog, docIndex } = input;
+  const bySku = new Map(catalog.map((part) => [part.sku, part]));
+  const matched = matchBom(bom, catalog);
+  const spec = assemble(matched.rows, input.sections, {
+    projectName: quote.name,
+    customer: quote.customer,
+    engagementId: `quote:${quote.id}`,
+    preparedBy: input.by,
+    date: input.date,
+  });
+  const packageDocs = resolvePackageDocs(docIndex, bom.filter((row) => bySku.has(row.sku)).map((row) => row.sku));
+  const items = bom.map((row) => {
+    const part = bySku.get(row.sku);
+    const docs = packageDocs.bySku.get(row.sku);
+    return {
+      sku: row.sku,
+      description: row.desc,
+      qty: row.qty,
+      catalogId: part?.id || null,
+      datasheet: docs?.datasheet ?? null,
+      datasheetCoveredBy: docs?.datasheetCoveredBy ?? [],
+      specsheet: docs?.specsheet ?? null,
+      manual: docs?.manual ?? null,
+    };
+  });
+  const gaps: ClientPackageGap[] = matched.rows.filter((row) => row.bucket !== "ready").map((row) => ({ kind: row.bucket === "no-match" ? "missing-catalog" : "missing-spec", sku: row.row.sku, description: row.row.desc, qty: row.row.qty, catalogId: row.part?.id || null }));
+  for (const item of items) {
+    if (item.catalogId && !packageDocs.bySku.get(item.sku)?.datasheetOk) gaps.push({ kind: "missing-datasheet", sku: item.sku, description: item.description, qty: item.qty, catalogId: item.catalogId });
+  }
+  const covered = items.filter((item) => item.datasheetCoveredBy.length).map((item) => coveredNote(item.sku, item.datasheetCoveredBy));
+  return { matched, spec, packageDocs, items, gaps, covered };
+}
+
 export async function createClientPackage(
   project: GridProject,
   by: string,
@@ -351,42 +401,11 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
-  const bySku = new Map(catalog.map((part) => [part.sku, part]));
   // #296 — fixtures once, before the BOM: rack lines expand into their members (live, D578).
   const qItems = quoteItems(quote);
   const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
   const bom = quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog));
-  const matched = matchBom(bom, catalog);
-  const sections = await allSections();
-  const spec = assemble(matched.rows, sections, {
-    projectName: quote.name,
-    customer: quote.customer,
-    engagementId: `quote:${quote.id}`,
-    preparedBy: by,
-    date: Date.now(),
-  });
-  // #207: the quote's own SKUs are the coverage context — an accessory rides
-  // on a fixture only when that fixture is on this quote.
-  const packageDocs = resolvePackageDocs(docIndex, bom.filter((row) => bySku.has(row.sku)).map((row) => row.sku));
-  const items = bom.map((row) => {
-    const part = bySku.get(row.sku);
-    const docs = packageDocs.bySku.get(row.sku);
-    return {
-      sku: row.sku,
-      description: row.desc,
-      qty: row.qty,
-      catalogId: part?.id || null,
-      datasheet: docs?.datasheet ?? null,
-      datasheetCoveredBy: docs?.datasheetCoveredBy ?? [],
-      specsheet: docs?.specsheet ?? null,
-      manual: docs?.manual ?? null,
-    };
-  });
-  const gaps: ClientPackageGap[] = matched.rows.filter((row) => row.bucket !== "ready").map((row) => ({ kind: row.bucket === "no-match" ? "missing-catalog" : "missing-spec", sku: row.row.sku, description: row.row.desc, qty: row.row.qty, catalogId: row.part?.id || null }));
-  for (const item of items) {
-    if (item.catalogId && !packageDocs.bySku.get(item.sku)?.datasheetOk) gaps.push({ kind: "missing-datasheet", sku: item.sku, description: item.description, qty: item.qty, catalogId: item.catalogId });
-  }
-  const covered = items.filter((item) => item.datasheetCoveredBy.length).map((item) => coveredNote(item.sku, item.datasheetCoveredBy));
+  const { spec, packageDocs, items, gaps, covered } = quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now() });
   const packageName = `${safeName(quote.name || quote.id)}-${safeName(displayQuoteNumber(quote))}`;
   // The docx is written once the racks are known (#296); it keeps its place in the zip.
   const specFile: ZipFile = { name: "specification.docx", data: Buffer.alloc(0) };

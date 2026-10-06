@@ -20,9 +20,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string; tok
   const { id, token, docId } = await ctx.params;
   if (!rateLimit("share-doc:" + (clientIp(req) || "unknown"), SHARE_DOC_PER_MIN, 60_000).ok) return new Response("Too many requests", { status: 429 });
   if (!isShareTokenV2(token)) return notFound();
-  const pkg = await resolveSharedPackage(id, token);
-  if (!pkg) return notFound();
-  const doc = await packageDocForRevision(pkg.rev, docId);
+  let doc: Awaited<ReturnType<typeof packageDocForRevision>> = null;
+  try {
+    const pkg = await resolveSharedPackage(id, token);
+    if (!pkg) return notFound();
+    doc = await packageDocForRevision(pkg.rev, docId);
+  } catch (e) {
+    // A DB error is the same uniform 404 as a bad link — never a 500 that tells a prober the link is real.
+    console.warn("[package] doc lookup failed", e instanceof Error ? e.message : e);
+    return notFound();
+  }
   if (!doc || !doc.blobKey) return notFound();
   let stream: ReadableStream | null;
   try {

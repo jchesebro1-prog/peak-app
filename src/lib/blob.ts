@@ -37,6 +37,21 @@ export async function putBlob(
 }
 
 /**
+ * #301 slice C — write a private blob at an EXACT pathname, replacing any
+ * earlier one (the estimate package's per-revision zip cache). Unlike
+ * putBlob there is no random suffix, so a later read finds it by name.
+ */
+export async function putBlobAt(pathname: string, bytes: Buffer, contentType: string): Promise<{ url: string; pathname: string }> {
+  const res = await put(pathname, bytes, {
+    access: "private",
+    contentType,
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+  return { url: res.url, pathname: res.pathname };
+}
+
+/**
  * The first `max` bytes of a private blob, plus its stored size — enough to
  * sniff what a client-uploaded file really is (part documents, #207) without
  * pulling a 25 MB file through the function. Null when the blob is missing.
