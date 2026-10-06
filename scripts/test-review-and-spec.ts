@@ -50835,3 +50835,81 @@ import { signPrintToken as e301btSignPrint } from "@/lib/quote-pdf/token";
      (src.match(/timingSafeEqual\(want, have\)/g) || []).length === 2,
     "#301 token v2: MAC over share:quote:<id>:<rev>:<nonce>:<exp>; v1 unchanged; both compare in constant time");
 }
+
+/* ======================================================================
+   #301 slice B — package state + opens: the D-h state matrix
+   (ok / superseded / revising / inactive), canAct, the banners, the
+   per-revision rows (R11 "Rev N"), and the pure open counter (D-o).
+   ====================================================================== */
+import {
+  packageState as e301bsState, canAct as e301bsCanAct, packageBanner as e301bsBanner, sentRevisionRows as e301bsRows,
+  opensChip as e301bsChip, latestOpensLine as e301bsLatest, PACKAGE_COPY as e301bsCopy,
+} from "@/lib/quote-share/package-view";
+import { nextOpens as e301boNext, cleanOpens as e301boClean, opensFor as e301boFor, opensSummary as e301boSummary, MAX_OPEN_REVS as e301boMax, SHARE_OPEN_DEDUPE_MS as e301boDedupe } from "@/lib/estimate-output/opens";
+import { ONLINE_COPY as e301bsOnline } from "@/lib/quote-share/view";
+import type { Quote as E301bsQuote, QuoteRevision as E301bsRev } from "@/lib/stores/quotes";
+{
+  const AT1 = Date.UTC(2026, 9, 5, 15);
+  const AT3 = Date.UTC(2026, 9, 6, 15);
+  const rev = (n: number, reason: "manual" | "sent", at: number) =>
+    ({ rev: n, at, by: "t", reason, note: "", name: "N", value: 1, margin: 0, status: "sent" }) as unknown as E301bsRev;
+  const revs = [rev(1, "sent", AT1), rev(2, "manual", AT1 + 1), rev(3, "sent", AT3), rev(4, "manual", AT3 + 1)];
+  const q = (status: string, extra: Record<string, unknown> = {}) => ({ quoteType: "system", status, revisions: revs, ...extra }) as unknown as E301bsQuote;
+
+  // ---- state matrix (D-h) ----
+  const ok3 = e301bsState(q("sent"), 3);
+  ok(ok3.kind === "ok" && ok3.rev.rev === 3 && !ok3.closed && !ok3.won && e301bsCanAct(ok3), "#301 state: the latest sent rev of a sent quote → ok, actions on");
+  const won = e301bsState(q("won"), 3);
+  const lost = e301bsState(q("lost"), 3);
+  ok(won.kind === "ok" && won.won && !e301bsCanAct(won) && lost.kind === "ok" && lost.closed && !e301bsCanAct(lost), "#301 state: won → ok (won), lost → ok (closed); neither can act");
+  const sup = e301bsState(q("sent"), 1);
+  ok(sup.kind === "superseded" && sup.rev.rev === 1 && sup.latestRev === 3 && sup.sentAt === AT3 && !e301bsCanAct(sup), "#301 state: an older sent rev → superseded, pointing at the latest (its send date); no actions");
+  const rv = e301bsState(q("draft"), 3);
+  ok(rv.kind === "revising" && rv.rev.rev === 3 && !e301bsCanAct(rv) && e301bsState(q("draft"), 1).kind === "superseded", "#301 state: recalled to draft → revising on the latest; an older rev stays superseded");
+  ok([e301bsState(q("sent"), 2), e301bsState(q("sent"), 9), e301bsState(q("sent", { quoteType: "flame_test" }), 3), e301bsState(q("archived"), 3), e301bsState(q("sent", { revisions: [] }), 1)]
+     .every((s) => s.kind === "inactive" && !e301bsCanAct(s)),
+    "#301 state: a manual rev, an unknown rev, a service quote, an unknown status, no revisions → inactive");
+  ok(e301bsState(q("sent", { quoteType: undefined }), 3).kind === "ok", "#301 state: an absent quoteType is a system quote");
+
+  // ---- banners ----
+  const b = e301bsBanner(sup as never, "/share/quote/Q-1/x");
+  ok(!!b && b.tone === "info" && b.text === "A newer version of this estimate was sent Oct 6, 2026." && b.href === "/share/quote/Q-1/x" && b.linkText === "View the current version",
+    "#301 banner: superseded names the newer send's date and links the current version");
+  ok(e301bsBanner(sup as never, null)?.href === null && e301bsBanner(rv as never, null)?.text === "Peak is revising this estimate." && e301bsBanner(lost as never, null)?.text === e301bsOnline.closed &&
+     e301bsBanner(ok3 as never, null) === null && e301bsBanner(won as never, null) === null,
+    "#301 banner: revising, closed, none for an open or won estimate");
+
+  // ---- opens (pure) ----
+  const o1 = e301boNext(undefined, 3, AT1);
+  const o2 = e301boNext(o1, 3, AT3);
+  ok(JSON.stringify(o1) === JSON.stringify({ "3": { first: AT1, last: AT1, count: 1 } }) && o2?.["3"].count === 2 && o2["3"].first === AT1 && o2["3"].last === AT3,
+    "#301 opens: first open, then count + last move, first stays");
+  ok(e301boNext(o2, 0, AT1) === null && e301boNext(o2, 1.5, AT1) === null && e301boNext(o2, 3, NaN) === null && e301boNext(o2, 1_000_000, AT1) === null, "#301 opens: a bad rev or clock writes nothing");
+  const many: Record<string, unknown> = {};
+  for (let i = 1; i <= e301boMax; i++) many[String(i)] = { first: 1, last: 1, count: 1 };
+  ok(e301boNext(many, e301boMax + 1, AT1) === null && e301boNext(many, 5, AT1)?.["5"].count === 2, "#301 opens: capped at 100 revisions (an existing one still counts)");
+  ok(JSON.stringify(e301boClean({ "1": { first: 5, last: 4, count: 1 }, "x": { first: 1, last: 1, count: 1 }, "__proto__": 1, "2": { first: 1, last: 2, count: 0 }, "3": { first: 1, last: 2, count: 2 } })) ===
+     JSON.stringify({ "3": { first: 1, last: 2, count: 2 } }) && JSON.stringify(e301boClean([])) === "{}" && e301boFor(null, 3) === null,
+    "#301 opens: junk rows, keys and shapes are dropped on read");
+  ok(e301boSummary(null) === "not opened yet" && e301boSummary({ first: AT1, last: AT3, count: 3 }) === "opened 3× · first Oct 5 · last Oct 6" && e301boDedupe === 30 * 60_000,
+    "#301 opens: the summary line (Chicago dates) and the 30-minute dedupe window");
+
+  // ---- per-revision rows (R11) ----
+  const withOpens = { revisions: revs, shareOpens: { "1": { first: AT1, last: AT3, count: 2 } } };
+  const rows = e301bsRows(withOpens);
+  ok(rows.length === 2 && rows[0].rev === 3 && rows[0].revNo === 2 && rows[0].latest && rows[0].line === "Rev 2 · not opened yet" &&
+     rows[1].rev === 1 && rows[1].revNo === 1 && !rows[1].latest && rows[1].line === "Rev 1 — superseded · opened 2× · first Oct 5 · last Oct 6",
+    "#301 rows: sent revisions newest first, printed as Rev N (sentDocumentStamp — rev 3 prints Rev 2), with their opens");
+  ok(e301bsRows({ revisions: [rev(1, "manual", 1)] }).length === 0 && e301bsRows(null).length === 0, "#301 rows: none before the first send");
+  const chip = e301bsChip(withOpens);
+  ok(chip?.label === "Opened" && chip.title === "Client link — Rev 1 — superseded · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
+    "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title");
+  ok(e301bsLatest(withOpens) === "Client link — Rev 2 · not opened yet" && e301bsLatest({ revisions: revs }) === "" && e301bsCopy.clientLink === "Client link",
+    "#301 lead line: the latest revision's row once anything was opened, else nothing");
+
+  // ---- purity ----
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/quote-pdf\/state"|\.\/view"|@\/lib\/estimate-output\/opens")/m.test(rd("src/lib/quote-share/package-view.ts")) &&
+     !/^import (?!type)/m.test(rd("src/lib/estimate-output/opens.ts")),
+    "#301 purity: package-view.ts value-imports only quote-pdf/state, ./view and opens; opens.ts imports nothing");
+}
