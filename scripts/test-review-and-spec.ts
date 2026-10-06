@@ -51409,3 +51409,94 @@ import {
   ok(same === null && same2 === null && e301cfAppend(base, { ...good, id: "PF-00000000000b" } as E301cfFile)?.length === 2,
     "#301 files hardening: appendPackageFile with a junk record is refused (null, the list unchanged); a good one appends");
 }
+
+/* ======================================================================
+   #301 slice C — responses + gaps (pure): D-m records, D-n caps and the
+   section filter, R16 assignees (+ active), the task/note text, the
+   Chicago due time, staff rows, the R1 credit note, and the gap chips.
+   ====================================================================== */
+import {
+  sanitizeClientResponse as e301crSan, responseScopes as e301crScopes, cleanClientResponses as e301crClean, appendResponseTo as e301crAppend,
+  responseTaskTitle as e301crTitle, responseNoteText as e301crNote, responseAssignees as e301crAssignees, leadEstimator as e301crLead,
+  confirmationText as e301crThanks, chicagoDayEnd as e301crDayEnd, responseRows as e301crRows, creditNoteText as e301crCredit,
+  newResponseId as e301crNewId, isClientResponseId as e301crIsId, CLIENT_ACTION_COPY as e301crCopy, MAX_CLIENT_RESPONSES as e301crMax,
+  type ClientResponse as E301crResp,
+} from "@/lib/estimate-output/responses";
+import { packageGapChips as e301crChips, keyProductsNeedingText as e301crKpText, scopesWithoutGoals as e301crNoGoals } from "@/lib/estimate-output/package-gaps";
+import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
+{
+  const scopes = [{ id: "s1", name: "Lighting", price: 28500, priceLabel: "$28,500.00" }, { id: "s2", name: "Rigging", price: 19750.5, priceLabel: "$19,750.50" }];
+  const acc = e301crSan("accept", { name: "  Pat Doe ", email: "pat@school.org", title: "Facilities", message: "Go.", sectionIds: ["s2", "s1", "s1", "nope", 7] }, scopes);
+  ok(acc.ok && acc.value.name === "Pat Doe" && acc.value.sectionIds.join() === "s1,s2" && acc.value.sectionNames.join() === "Lighting,Rigging" && acc.value.total === 48250.5 &&
+     acc.value.title === "Facilities" && acc.value.kind === "accept",
+    "#301 responses: accept keeps only the pinned revision's scopes (document order, deduped) and totals them server-side");
+  const refusals = [
+    e301crSan("accept", { name: " ", sectionIds: ["s1"] }, scopes), e301crSan("accept", { name: "P", sectionIds: [] }, scopes),
+    e301crSan("accept", { name: "P", sectionIds: ["s1"], email: "not-an-email" }, scopes), e301crSan("question", { name: "P", message: "  " }, scopes),
+    e301crSan("accept", null, scopes),
+  ];
+  ok(refusals.every((r) => !r.ok) && refusals.map((r) => (!r.ok ? r.error : "")).join("|") ===
+     [e301crCopy.needName, e301crCopy.needScope, e301crCopy.badEmail, e301crCopy.needMessage, e301crCopy.needName].join("|"),
+    "#301 responses: a name is required, accept needs a scope, a question needs a message, a bad email is refused");
+  const long = e301crSan("question", { name: "N".repeat(500), email: "", title: "T".repeat(500), message: "M".repeat(9000), sectionIds: ["s1"] }, scopes);
+  ok(long.ok && long.value.name.length === 120 && long.value.message.length === 4000 && long.value.sectionIds.length === 0 && long.value.total === 0 && !("title" in long.value),
+    "#301 responses: caps (name 120, message 4,000); a question carries no scopes, total or title");
+  const e2 = e301crSan("accept", { name: "P", email: "e".repeat(300) + "@x.io", sectionIds: ["s1"] }, scopes);
+  const nl = e301crSan("accept", { name: "A\nB", sectionIds: ["s1"] }, scopes);
+  ok(!e2.ok && e2.error === e301crCopy.badEmail && nl.ok && !/[\n\r]/.test(nl.value.name),
+    "#301 responses: an email over 200 characters is refused (never truncated into another address); a name never carries a line break");
+  const secs = [
+    { id: "s1", name: "Lighting", kind: "materials", items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 100 }] },
+    { id: "s3", name: "Install", kind: "labor", items: [{ id: 2, sku: "", desc: "Labor", qty: 1, unit: "ea", cost: 1, price: 50, labor: true }] },
+  ] as unknown as E301crSec[];
+  ok(e301crScopes(secs).map((s) => `${s.id}:${s.price}:${s.priceLabel}`).join() === "s1:100:$100.00,s3:50:$50.00",
+    "#301 responses: the choosable scopes are the printed systems, labor included (R2), priced as the page prices them");
+  // ---- records ----
+  const r = (n: number, extra: Partial<E301crResp> = {}): E301crResp =>
+    ({ id: "CR-" + n.toString(16).padStart(12, "0"), kind: "accept", rev: 3, at: n, name: "Pat", email: "", message: "", sectionIds: ["s1"], sectionNames: ["Lighting"], total: 100, ...extra });
+  ok(e301crClean([r(1), r(1), { ...r(2), kind: "hack" }, { ...r(3), id: "x" }, { ...r(4), rev: 0 }, { ...r(5), total: -1 }, null, r(6)]).map((x) => x.at).join() === "1,6",
+    "#301 responses: junk, duplicate ids, bad kinds / revs / totals are dropped on read");
+  const full = Array.from({ length: e301crMax }, (_, i) => r(i + 1));
+  ok(e301crAppend(full, r(999)) === null && e301crAppend([r(1)], r(2))?.length === 2 && e301crIsId(e301crNewId()) && e301crNewId() !== e301crNewId(),
+    "#301 responses: at most 200 per quote; ids are CR- + 12 hex");
+  // ---- text ----
+  const a = { kind: "accept" as const, name: "Pat Doe", email: "pat@school.org", title: "Facilities", message: "Please start in June.", sectionIds: ["s1", "s2"], sectionNames: ["Lighting", "Rigging"], total: 48250 };
+  ok(e301crTitle(a, "EST-1042", 2) === "Client accepted EST-1042 Rev 2 — Lighting, Rigging ($48,250.00)" &&
+     e301crTitle({ ...a, kind: "question" }, "EST-1042", 2) === "Client question — EST-1042",
+    "#301 responses: the task titles (D-m)");
+  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." &&
+     e301crNote({ ...a, kind: "question", title: undefined, email: "", message: "Is rigging inspected?" }, "EST-1042", 2) === "Client question on EST-1042 Rev 2 (client link).\nFrom: Pat Doe\nMessage: Is rigging inspected?",
+    "#301 responses: the note / activity text names the scopes, the pre-credit total, who, and the message");
+  // ---- R16 assignees ----
+  const U = (id: string, name: string, roles: string[], status = "active") => ({ id, name, roles, status });
+  const users = [U("u1", "Jeff Chesebro", ["Admin"]), U("u2", "Sam Lee", ["Estimator"]), U("u3", "Ana Ruiz", ["Manager"]), U("u4", "Old Hand", ["Admin"], "archived"), U("u5", "Twin", ["Estimator"]), U("u6", "twin", ["Estimator"])];
+  ok(e301crAssignees("  sam lee ", "", users).map((u) => u.id).join() === "u2" && e301crAssignees("", "Sam Lee", users).map((u) => u.id).join() === "u2" &&
+     e301crAssignees("Nobody", "Twin", users).map((u) => u.id).join() === "u1,u3" && e301crAssignees("Old Hand", "", users).map((u) => u.id).join() === "u1,u3",
+    "#301 responses: R16 — the lead estimator (owner, else Prepared by; exact, unique) if active, else every active approve holder");
+  ok(e301crLead("Twin", "", users) === null && e301crThanks("Jeff Chesebro") === "Thanks — Jeff Chesebro has been notified." && e301crThanks(null) === "Thanks — Peak Systems Group has been notified.",
+    "#301 responses: an ambiguous name resolves to nobody; the confirmation names the lead estimator");
+  ok(e301crDayEnd(Date.UTC(2026, 9, 5, 15)) === Date.UTC(2026, 9, 6, 4, 59) && e301crDayEnd(Date.UTC(2026, 0, 15, 15)) === Date.UTC(2026, 0, 16, 5, 59),
+    "#301 responses: tasks are due 11:59 PM Chicago today (CDT and CST)");
+  const rows = e301crRows([r(10, { at: Date.UTC(2026, 9, 5, 19, 14) }), r(11, { at: Date.UTC(2026, 9, 6, 15), kind: "question", sectionIds: [], sectionNames: [], total: 0, message: "Q?" })], (rev) => rev - 1);
+  ok(rows.length === 2 && rows[0].kindLabel === "Question" && rows[0].total === "" && rows[1].kindLabel === "Selected scopes" && rows[1].total === "$100.00" &&
+     rows[1].revLabel === "Rev 2" && rows[1].when === "Oct 5, 2:14 PM",
+    "#301 responses: staff rows newest first, printed Rev N, Chicago time");
+  ok(e301crCredit("−$1,250.00") === "A Rewards credit of $1,250.00 applies to your order." && e301crCredit(null) === null,
+    "#301 responses: R1 — the credit note under the live total");
+  // ---- gaps ----
+  const kpSecs = [
+    { id: "a", name: "Lighting", kind: "materials", clientGoals: "", keyProducts: [{ lineKey: "1", sku: "A", text: "", photo: true }, { lineKey: "2", sku: "B", text: "Para.", photo: true }],
+      items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 10 }, { id: 2, sku: "B", desc: "B", qty: 1, unit: "ea", cost: 1, price: 10 }] },
+    { id: "b", name: "Labor", kind: "labor", items: [{ id: 3, sku: "", desc: "L", qty: 1, unit: "ea", cost: 1, price: 5, labor: true }] },
+    { id: "c", name: "Rigging", kind: "materials", clientGoals: "Safe.", items: [{ id: 4, sku: "C", desc: "C", qty: 1, unit: "ea", cost: 1, price: 10 }] },
+  ] as unknown as E301crSec[];
+  ok(e301crKpText(kpSecs) === 1 && e301crNoGoals(kpSecs) === 1, "#301 gaps: key products with no paragraph; scopes with no client goals (labor never counts)");
+  ok(e301crChips({ noDatasheet: 3, drawings: 0, keyProductsNeedText: 1, scopesNoGoals: 2 }).join("|") === "3 parts without a datasheet|No drawings|1 key product needs a paragraph|No client goals on 2 scopes" &&
+     e301crChips({ noDatasheet: 1, drawings: 2, keyProductsNeedText: 2, scopesNoGoals: 1 }).join("|") === "1 part without a datasheet|2 key products need a paragraph|No client goals on 1 scope" &&
+     e301crChips({ noDatasheet: 0, drawings: 1, keyProductsNeedText: 0, scopesNoGoals: 0 }).length === 0,
+    "#301 gaps: the staff chips (only the gaps that exist)");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
+     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/narrative"|@\/app\/\(app\)\/estimator\/quote-document-view"|\.\/scopes")/m.test(rd("src/lib/estimate-output/package-gaps.ts")),
+    "#301 responses/gaps purity: client-safe value imports only");
+}
