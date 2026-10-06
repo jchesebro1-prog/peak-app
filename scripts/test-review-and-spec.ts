@@ -50651,3 +50651,69 @@ async function e301DefaultsAsyncChecks(): Promise<void> {
     await setBlob("estimate_output_defaults", { notIncluded: saved.notIncluded ?? "", website: saved.website ?? "" });
   }
 }
+
+/* ======================================================================
+   #301 slice A — cover document: signer (R16), footer (R17), link line,
+   the props builder, and a Node render of CoverDocument (no .jpg import).
+   ====================================================================== */
+import {
+  resolveCoverSigner as e301cSigner, coverFooterLine as e301cFooter, coverShareUrl as e301cShare, coverPdfFileName as e301cFile,
+  coverDocumentPropsFor as e301cProps, COVER_DEFAULT_TITLE as e301cTitle,
+} from "@/lib/estimate-output/cover";
+import CoverDocument301, { COVER_PRINT_CSS as e301cCss } from "@/components/estimate-output/cover-document";
+import { createElement as e301cEl } from "react";
+import { renderToStaticMarkup as e301cRender } from "react-dom/server";
+import type { SpecSection as E301cSec } from "@/app/(app)/estimator/types";
+{
+  // ---- signer (R16) ----
+  const users = [
+    { name: "Pat Estimator", title: "Estimator", phone: "", mobile: "555-0101", email: "pat@peak.test" },
+    { name: "Dup Name", title: "A", phone: "1", email: "a@x" },
+    { name: "dup name ", title: "B", phone: "2", email: "b@x" },
+    { name: "Robin Prep", title: "PM", phone: "555-0202", email: "robin@peak.test" },
+  ];
+  const s1 = e301cSigner(" pat ESTIMATOR ", "", users);
+  ok(s1?.name === "Pat Estimator" && s1.title === "Estimator" && s1.phone === "555-0101" && s1.email === "pat@peak.test", "#301 signer: owner matched case-insensitively; phone falls back to mobile");
+  ok(e301cSigner("Dup Name", "Robin Prep", users)?.name === "Robin Prep", "#301 signer: an ambiguous owner falls to Prepared by");
+  ok(e301cSigner("Nobody", "", users) === null && e301cSigner("", null, users) === null, "#301 signer: no unique match → no signer (prints the company)");
+
+  // ---- footer + link + file name ----
+  const offices = [{ street: "1 Side St", city: "Elgin", state: "IL", zip: "60120", phone: "847-000-0000" }, { street: "500 Main St", city: "Chicago", state: "IL", zip: "60601", phone: "312-555-0100", quoteDefault: true }];
+  ok(e301cFooter({ companyName: "Peak Systems Group", offices, website: "peaksystemsgroup.com" }) === "Peak Systems Group · 500 Main St, Chicago, IL 60601 · 312-555-0100 · peaksystemsgroup.com",
+    "#301 footer: company · primary office address · phone · website (R17)");
+  ok(e301cFooter({ companyName: "Peak", offices: [], website: "" }) === "Peak", "#301 footer: missing parts drop out");
+  const link = { active: true, path: "/share/quote/Q-1/123.abc", expiresAt: 9, createdAt: 1, createdBy: "x", revokedAt: null, revokedBy: null };
+  ok(e301cShare("https://app.test/", link, "ok") === "https://app.test/share/quote/Q-1/123.abc" && e301cShare(null, link, "ok") === null &&
+     e301cShare("https://app.test", { ...link, active: false }, "ok") === null && e301cShare("https://app.test", link, "revising") === null && e301cShare("https://app.test", null, "ok") === null,
+    "#301 link: printed only for an active link on an online-ok quote, with an absolute origin");
+  ok(e301cFile("EST-1042") === "EST-1042 Cover.pdf" && e301cFile("EST/1042") === "EST_1042 Cover.pdf", "#301 file: \"EST-1042 Cover.pdf\"");
+
+  // ---- builder ----
+  const secs = p293Sections().map((s, i) => (i === 0 ? { ...s, coverText: "Rigging cover." } : s)) as E301cSec[];
+  const doc = { ...p293Props({ sections: secs, pdfOptions: { pdfOptions: true } }), rewardsLine: "Your Gold rewards: Free freight" };
+  const props = e301cProps({ doc, coverSummary: "", notIncluded: "Permits\nPainting", signer: s1, footerLine: "Peak · x", shareUrl: "https://app.test/share/quote/Q-293/1.x",
+    letterhead: { src: "/_test/peak-letterhead.jpg", full: true } });
+  ok(props.title === "Narrative test" && e301cProps({ doc: { ...doc, projectName: "  " }, coverSummary: "", notIncluded: "", signer: null, footerLine: "", shareUrl: null, letterhead: { src: "x", full: true } }).title === e301cTitle,
+    "#301 cover: the quote name as the title, else \"Estimate Summary\"");
+  ok(props.project.number === `${doc.quoteId} Rev ${doc.revNum}` && props.project.customer === "Walk-in" && props.scopes.length === 4 &&
+     props.scopes[0].text === "Rigging cover." && props.scopes[0].priceLabel.startsWith("Rigging scope: $") && props.scopes[3].missing,
+    "#301 cover: project block, one paragraph + price line per scope, missing ones flagged");
+  ok(props.summary === "This estimate includes 4 scopes: Rigging, Lighting, Install and Empty narrative." && props.notIncluded === "Not included: Permits; Painting." &&
+     props.options.length === 1 && props.options[0].label === "ADD OPTION 1" && props.totals.total.startsWith("$") && props.totals.rewardsLine === "Your Gold rewards: Free freight",
+    "#301 cover: summary sentence, Not included, add options, totals with the purchase-perks line");
+
+  // ---- render ----
+  const html = e301cRender(e301cEl(CoverDocument301, props));
+  ok(html.includes("Narrative test") && html.includes("Rigging cover.") && html.includes("[needs a paragraph]") && html.includes("ADD OPTION 1") && html.includes("Not included: Permits; Painting.") &&
+     html.includes("View the full estimate online:") && html.includes("https://app.test/share/quote/Q-293/1.x") && html.includes("Pat Estimator") && html.includes("Accepted by") && html.includes("Peak · x"),
+    "#301 cover: the document prints every section in the spec's order");
+  const order = ["Narrative test", "Rigging cover.", "This estimate includes", ">Total<", "ADD OPTION 1", "Not included:", "View the full estimate online:", "Pat Estimator"].map((s) => html.indexOf(s));
+  ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 cover: §4 order — title, scopes, summary, total, options, not included, link, signature (${order.join(",")})`);
+  const noSigner = e301cRender(e301cEl(CoverDocument301, { ...props, signer: null, shareUrl: null }));
+  ok(!noSigner.includes("View the full estimate online:") && noSigner.includes("Peak Systems Group"), "#301 cover: no link line without a link; no signer → the company name");
+  ok(e301cCss.includes("@page { size: letter; margin: 0.75in") && e301cCss.includes("font-family: Arial, Helvetica, sans-serif") && e301cCss.includes(".cov-foot { position: fixed"),
+    "#301 cover: Letter, 0.75in margins, Arial, a fixed footer on every page");
+  const comp = readFileSync(join(process.cwd(), "src/components/estimate-output/cover-document.tsx"), "utf8");
+  ok(!comp.includes('"use client"') && !/\buse(State|Effect|Ref|Transition)\(/.test(comp) && !comp.includes("onClick=") && !comp.includes(".jpg"),
+    "#301 cover: a server component with pure props — no hooks, no handlers, no image import");
+}
