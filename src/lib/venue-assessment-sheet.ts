@@ -15,6 +15,7 @@ import {
   FINDING_BUCKETS,
   STAFF_TIERS,
 } from "@/lib/stores/assessment";
+import { goalsFromSurvey } from "@/lib/estimate-output/goals";
 import { linesetCondLabel, linesetTypeLabel } from "@/lib/stores/linesets";
 
 type SheetRecord = Pick<
@@ -49,7 +50,9 @@ function compactRows(rows: ReturnType<typeof row>[]) {
 function disciplineSection(record: SheetRecord, index: number): FieldSheetSection {
   const group = DISCIPLINE_GROUPS[index];
   const data: DisciplineData = record.disciplines?.[group.key] || {};
+  const goals = goalsFromSurvey(record)[group.key as keyof ReturnType<typeof goalsFromSurvey>];
   const rows = [
+    row("Client goals", goals),
     row("Present", data.present),
     ...visibleFields(group, record.venueClass).map((field) => row(field.label, data[field.key])),
     row(group.scopeLabel, data.scope),

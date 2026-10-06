@@ -50524,3 +50524,24 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   ok(byQuote.length === 1 && byQuote[0].surveyId === A, "#301 site visit: a saved quote's own customer wins over the posted one");
   ok((await siteVisitGoalsFor({})).length === 0, "#301 site visit: nothing to match → empty");
 }
+
+/* ===== #301 slice A — worksheet goals ===== */
+{
+  const mk = (disciplines: unknown) => buildAssessmentSheet({
+    id: "FS-301", venueClass: "proscenium", venue: "Goals room", customer: "Sheet test",
+    measurements: {}, disciplines, linesets: [], linesetsEnabled: false,
+    lifeSafety: { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" },
+    signoff: { repName: "", repSignedAt: "", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" },
+    assessmentEnabled: false, assessment: blankAssessment(), templateRev: "5.1",
+  } as any);
+  const secs = (s: ReturnType<typeof mk>) =>
+    (s.fieldSheet?.pages || []).filter((p) => p.title.endsWith("Systems")).flatMap((p) => p.sections);
+  const withGoals = secs(mk({ lighting: { goals: "  Even wash on stage  " }, av: { goals: "" } }));
+  const without = secs(mk({}));
+  ok(withGoals.length === 4 && withGoals.every((s) => s.rows[0]?.label === "Client goals"),
+    "#301 worksheet: every discipline section starts with a Client goals row");
+  const lit = withGoals.find((s) => s.heading.toLowerCase().includes("light"));
+  ok(lit?.rows[0].value === "Even wash on stage", "#301 worksheet: a saved goal prints, cleaned (trimmed)");
+  ok(without.every((s) => s.rows[0]?.label === "Client goals" && s.rows[0].value === ""),
+    "#301 worksheet: no goal → a blank write-in row, like the other blank fields");
+}
