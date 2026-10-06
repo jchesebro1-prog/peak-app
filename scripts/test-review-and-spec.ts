@@ -50357,3 +50357,86 @@ async function estimateOutput301AAsyncChecks(): Promise<void> {
   ok(upd?.coverSummary === "New summary." && (upd?.contentChangedAt ?? null) === before,
     "#301 store: editing the cover summary is not a content change (the estimate PDF is not re-rendered)");
 }
+
+/* ======================================================================
+   #301 slice A — scopes: the printed scopes, the cover paragraph rule
+   (D-d + labor), add options (D-f), the totals lines (R1), Not included,
+   the summary sentence.
+   ====================================================================== */
+import {
+  MISSING_COVER as e301sMissing, LABOR_COVER as e301sLabor, COVER_SOURCE_LABEL as e301sSourceLabel, coverParagraphFor as e301sCover,
+  outputScopes as e301sScopes, addOptions as e301sOptions, coverTotals as e301sTotals, notIncludedItems as e301sNotItems,
+  notIncludedLine as e301sNotLine, coverSummaryText as e301sSummary, scopePriceLabel as e301sPriceLabel,
+} from "@/lib/estimate-output/scopes";
+import { withRewardCredit as e301sCredit } from "@/lib/rewards/credit-line";
+import { round2 as e301sRound } from "@/app/(app)/estimator/pricing";
+import { rewardPointsAppliedLabel as e301sPtsLabel } from "@/lib/rewards/points";
+import type { SpecSection as E301sSec } from "@/app/(app)/estimator/types";
+{
+  // ---- cover paragraph (D-d) ----
+  const base = (extra: Record<string, unknown> = {}): E301sSec =>
+    ({ id: "x", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 5, sku: "SKU-5", desc: "Fresnel", qty: 1, unit: "ea", cost: 10, price: 20 }], ...extra }) as E301sSec;
+  ok(e301sCover(base({ coverText: "  Override text  ", narrative: "Intro." })).text === "Override text" && e301sCover(base({ coverText: "x" })).source === "override",
+    "#301 cover: the override wins");
+  const intro = e301sCover(base({ narrative: "- bullet first\n\nFirst para\nline two.\n\nSecond para." }));
+  ok(intro.source === "intro" && intro.text === "First para line two.", "#301 cover: else the intro's first PARAGRAPH block (bullets skipped, lines joined)");
+  const kp = e301sCover(base({ keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "A bright fresnel.\n\nMore.", photo: true }] }));
+  ok(kp.source === "key-product" && kp.text === "A bright fresnel.", "#301 cover: else the first key product's first paragraph");
+  ok(e301sCover(base()).text === e301sMissing && e301sCover(base()).source === "missing" && e301sMissing === "[needs a paragraph]", "#301 cover: else the visible placeholder");
+  const lab = e301sCover(base({ kind: "labor", name: "Install" }));
+  ok(lab.source === "labor" && lab.text === e301sLabor && e301sCover(base({ kind: "labor", narrative: "Crew of four." })).text === "Crew of four.",
+    "#301 cover: a labor scope falls back to the fixed labor wording, never the placeholder");
+  ok(e301sSourceLabel.override === "Override" && e301sSourceLabel.intro === "From intro" && e301sSourceLabel["key-product"] === "From key product" &&
+     e301sSourceLabel.labor === "Labor wording" && e301sSourceLabel.missing === "Needs a paragraph", "#301 cover: chip labels");
+
+  // ---- scopes = printed systems (D-a, R2) ----
+  const p = p293Props();
+  const sc = e301sScopes(p);
+  ok(sc.map((s) => `${s.num}:${s.name}`).join("|") === "1:Rigging|2:Lighting|3:Install|4:Empty narrative", "#301 scopes: every printed system, in order, numbered like the document");
+  ok(sc[0].discipline === "rigging" && sc[1].discipline === "lighting" && sc[2].isLabor && sc[2].discipline === null && sc[3].discipline === null,
+    "#301 scopes: disciplines inferred; the labor system is a scope with no discipline (R2)");
+  ok(sc[1].cover.source === "intro" && sc[1].cover.text === "Intro para." && sc[0].cover.source === "missing" && sc[2].cover.source === "labor", "#301 scopes: each carries its cover paragraph");
+  const zero = [...p293Sections(), { id: "z", name: "Nothing", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as E301sSec];
+  ok(e301sScopes(p293Props({ sections: zero })).length === 4, "#301 scopes: a system with no revenue doesn't print and isn't a scope");
+
+  // ---- totals invariant (R1) ----
+  const sum = (secs: E301sSec[]) => {
+    const props = p293Props({ sections: secs });
+    return { props, total: e301sRound(e301sScopes(props).reduce((a, s) => a + s.price, 0) - (props.t.credit || 0)) };
+  };
+  const plain = sum(p293Sections());
+  ok(plain.total === e301sRound(plain.props.t.grand), `#301 totals: Σ scope prices = the grand total (freight inside each scope) (${plain.total} vs ${plain.props.t.grand})`);
+  const rounded = p293Sections().map((s, i) => (i === 0 ? { ...s, priceRound: 25 } : i === 1 ? { ...s, sellOverride: 777.77 } : s)) as E301sSec[];
+  const r2 = sum(rounded);
+  ok(r2.total === e301sRound(r2.props.t.grand), "#301 totals: the invariant holds with a typed sell and $25 rounding");
+  const credited = e301sCredit(p293Sections(), 40, 999) as E301sSec[];
+  const r3 = sum(credited);
+  ok((r3.props.t.credit || 0) === 40 && r3.total === e301sRound(r3.props.t.grand), "#301 totals: Σ scope prices − the Rewards credit = the grand total (R1)");
+  const tl = e301sTotals(r3.props);
+  ok(tl.credit === 40 && tl.creditLabel === e301sPtsLabel(40) && tl.totalLabel === "Total" && tl.total === r3.props.t.grand,
+    "#301 totals: the credit row label is rewardPointsAppliedLabel; Total otherwise");
+  ok(e301sTotals(p).creditLabel === null && e301sTotals({ ...p, rewardsLine: "Your Gold rewards: Free freight", standingLines: ["  ", "Valid until x"] }).rewardsLine === "Your Gold rewards: Free freight" &&
+     e301sTotals({ ...p, standingLines: ["  ", "Valid until x"] }).standingLines.join("|") === "Valid until x",
+    "#301 totals: no credit row without a credit; the purchase-perks line and standing lines pass through");
+  const por = p293Sections().map((s, i) => (i === 0 ? { ...s, items: s.items.map((it, j) => (j === 0 ? { ...it, por: true } : it)) } : s)) as E301sSec[];
+  ok(e301sTotals({ ...p293Props({ sections: por }), isPortalCatalog: true }).totalLabel === "Total (excludes items pending price)" &&
+     e301sTotals(p293Props({ sections: por })).totalLabel === "Total", "#301 totals: the POR wording only on a portal-catalog quote, as QuoteDocument prints it");
+
+  // ---- add options (D-f) ----
+  const withComment = p293Sections().map((s, i) => (i === 0 ? { ...s, items: s.items.map((it) => (it.option ? { ...it, comment: " If budget allows " } : it)) } : s)) as E301sSec[];
+  const opts = e301sOptions(p293Props({ sections: withComment, pdfOptions: { pdfOptions: true } }));
+  ok(opts.length === 1 && opts[0].label === "ADD OPTION 1" && opts[0].desc === "Line 3" && opts[0].reason === "If budget allows" && opts[0].sectionName === "Rigging" && opts[0].price === 50,
+    "#301 options: option lines numbered across the quote with description, reason and extended sell");
+  ok(e301sOptions(p293Props({ sections: withComment, pdfOptions: { pdfOptions: false } })).length === 0, "#301 options: printed only when the quote's Options toggle is on");
+
+  // ---- Not included, summary, price label ----
+  ok(e301sNotItems("- Permits\n\n• Painting;\n2. Electrical by others.\npermits\n  ").join("|") === "Permits|Painting|Electrical by others", "#301 not included: markers and trailing ;/. stripped, blanks and repeats dropped");
+  ok(e301sNotLine("Permits\nPainting") === "Not included: Permits; Painting." && e301sNotLine("  ") === "", "#301 not included: one paragraph, or nothing");
+  ok(e301sSummary("  Our summary.  ", ["A"]) === "Our summary." && e301sSummary("", ["A", "B", "C"]) === "This estimate includes 3 scopes: A, B and C." &&
+     e301sSummary("", ["A", "B"]) === "This estimate includes 2 scopes: A and B." && e301sSummary("", ["A"]) === "This estimate includes 1 scope: A." && e301sSummary("", []) === "",
+    "#301 summary: the typed summary, else the deterministic scope-list sentence");
+  ok(e301sPriceLabel("Lighting") === "Lighting scope" && e301sPriceLabel("Rigging scope") === "Rigging scope" && e301sPriceLabel("  ") === "System scope", "#301 price label: \"<name> scope\"");
+  const src = readFileSync(join(process.cwd(), "src/lib/estimate-output/scopes.ts"), "utf8");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|narrative|quote-document-view)"|@\/lib\/rewards\/points"|\.\/fields")/m.test(src),
+    "#301 scopes: pure and client-safe — value imports only pricing, narrative, quote-document-view, rewards/points and fields");
+}
