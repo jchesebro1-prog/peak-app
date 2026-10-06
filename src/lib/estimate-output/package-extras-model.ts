@@ -1,5 +1,7 @@
 import type { PackageDocument, PackageSkuDocs } from "@/lib/part-docs/package";
 import type { ResponseScope } from "./responses";
+import { PACKAGE_FILE_KIND_LABEL, visiblePackageFiles, type PackageFile } from "./package-files";
+import { formatBytes } from "@/lib/document-files";
 
 /**
  * #301 slice C — what fills the package page's Slice B mount points, as
@@ -46,4 +48,19 @@ export function downloadsSummary(v: PackageDownloadsView): string {
   const ss = v.files.length - ds;
   const parts = [ds ? `${ds} datasheet${ds === 1 ? "" : "s"}` : "", ss ? `${ss} spec sheet${ss === 1 ? "" : "s"}` : "", v.specifications ? "Specifications (Word)" : ""];
   return parts.filter(Boolean).join(" · ");
+}
+
+export function packageFileHref(base: string, fileId: string): string {
+  return `${base}/file/${encodeURIComponent(fileId)}`;
+}
+
+/** The pinned revision's visible files (decision 9) as links — never a blob path. */
+export function plansView(files: readonly PackageFile[], base: string): PackagePlanView[] {
+  return visiblePackageFiles(files).map((f) => ({
+    href: packageFileHref(base, f.id),
+    name: f.name,
+    kindLabel: PACKAGE_FILE_KIND_LABEL[f.kind],
+    sizeLabel: formatBytes(f.size),
+    isImage: f.contentType !== "application/pdf",
+  }));
 }

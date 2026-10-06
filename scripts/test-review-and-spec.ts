@@ -51532,6 +51532,7 @@ async function estimateOutput301CAsyncChecks(): Promise<void> {
   await e301cStoreAsyncChecks();
   await e301cDocsAsyncChecks();
   await e301cZipAsyncChecks();
+  await e301cFilesAsyncChecks();
 }
 
 async function e301cStoreAsyncChecks(): Promise<void> {
@@ -51884,4 +51885,112 @@ async function e301cZipAsyncChecks(): Promise<void> {
   const empty = await Z.servePackageZip(pkg, { ...deps, get: async () => null, build: async () => null });
   ok(noCache.status === 200 && puts.length === 1 && empty.status === 404 && (await empty.text()) === "Nothing to download for this estimate.",
     "#301 zip (serve): a timed-out build is served but not cached; nothing to include → 404");
+}
+
+/* ======================================================================
+   #301 slice C — package files: the Blob client-upload broker (Send only,
+   this quote's path, 25 MB), finalize (path scope → head sniff → store;
+   a refusal deletes only the caller's own unrecorded blob), remove (the
+   blob goes only when no revision lists it), the share file route (the
+   pinned revision's VISIBLE files only — R12), and Plans & risers.
+   ====================================================================== */
+import { plansView as e301cuPlans } from "@/lib/estimate-output/package-extras-model";
+import { PackagePlans as E301cuPlans } from "@/components/estimate-output/package-extras";
+import { createElement as e301cuEl } from "react";
+import { renderToStaticMarkup as e301cuRender } from "react-dom/server";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const broker = rd("src/app/api/quotes/[id]/package-files/upload/route.ts");
+  const gate = broker.slice(broker.indexOf("onBeforeGenerateToken"));
+  ok(gate.indexOf("getOptionalUser()") < gate.indexOf('can("send", u.roles)') && gate.indexOf('can("send", u.roles)') < gate.indexOf("packageFilePathInScope(pathname, q.id, uploadKey)") &&
+     broker.includes("maximumSizeInBytes: MAX_PACKAGE_FILE_BYTES") && broker.includes("addRandomSuffix: true") && broker.includes("blobEnabled()") && !broker.includes("onUploadCompleted"),
+    "#301 uploads: the token broker grants one path under this quote's upload key, to a Send holder, ≤ 25 MB, no callback");
+  const srv = rd("src/lib/estimate-output/package-files-server.ts");
+  const fin = srv.slice(srv.indexOf("export async function finalizePackageFileUpload("), srv.indexOf("export async function removePackageFileAndBlob("));
+  ok(fin.indexOf("packageFilePathInScope(") < fin.indexOf("packageBlobReferenced(") && fin.indexOf("packageBlobReferenced(") < fin.indexOf("d.head(") &&
+     fin.indexOf("d.head(") < fin.indexOf("sniffPackageFile(") && fin.indexOf("sniffPackageFile(") < fin.indexOf("addPackageFile("),
+    "#301 uploads: finalize checks the path, never touches a recorded blob, sniffs the real bytes, then records");
+  const fileRoute = rd("src/app/share/quote/[id]/[token]/file/[fileId]/route.ts");
+  ok(fileRoute.indexOf("rateLimit(") < fileRoute.indexOf("isShareTokenV2(token)") && fileRoute.indexOf("isShareTokenV2(token)") < fileRoute.indexOf("resolveSharedPackage(") &&
+     fileRoute.includes("packageFileForRevision(pkg.rev, fileId)") && fileRoute.includes("SHARE_FILE_PER_MIN") && !fileRoute.includes("q.packageFiles"),
+    "#301 uploads: the file route serves only the pinned revision's frozen list (R12), v2 only, 120/min/IP");
+  const acts = rd("src/app/(app)/estimator/package-actions.ts");
+  ok(/^"use server";/.test(acts) && !/^export (?!async function)/m.test(acts) && (acts.match(/await requireUser\(\);/g) || []).length >= 2 &&
+     (acts.match(/if \(!can\("send", user\.roles\)\) return \{ ok: false, error: ONLINE_COPY\.needsSend \};/g) || []).length >= 2,
+    "#301 uploads: the staff actions need a session and Send, answer with a message, export only async functions");
+  const client = rd("src/app/(app)/estimator/package-file-upload.ts");
+  ok(client.includes('from "@vercel/blob/client"') && client.includes("packageFileBlobPath(quoteId, uploadKey, file.name)") && !/from "@\/lib\/(stores|blob|session)/.test(client),
+    "#301 uploads: the browser half uploads straight to Blob under the quote's key, with no server import");
+  const f = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "plan", name: "Plan.pdf", blobPath: "estimate-files/Q/UP-0123456789abcdef/x", contentType: "application/pdf", size: 2048, source: "upload", addedAt: 1, addedBy: "T", ...extra }) as never;
+  const plans = e301cuPlans([f("PF-000000000001"), f("PF-000000000002", { source: "grid" }), f("PF-000000000003", { kind: "riser", contentType: "image/png", name: "Riser.png" })], "/b");
+  ok(plans.map((p) => `${p.kindLabel}|${p.href}|${p.isImage}`).join() === "Plan|/b/file/PF-000000000001|false,Riser|/b/file/PF-000000000003|true" && plans[0].sizeLabel === "2 KB",
+    "#301 uploads: Plans & risers lists the visible files only (an upload hides the Grid file of its kind)");
+  const html = e301cuRender(e301cuEl(E301cuPlans, { plans }));
+  ok(html.includes("Plans &amp; risers") && html.includes('href="/b/file/PF-000000000001"') && html.includes('src="/b/file/PF-000000000003"') && !html.includes("estimate-files/"),
+    "#301 uploads: the card links each file (images previewed) and never prints a blob path");
+  ok(rd("scripts/smoke-routes.ts").includes(`{ route: "/share/quote/Q-2041/1.1.${"A".repeat(43)}/file/PF-000000000001", expectNotFound: true }`), "#301 smoke: the file route with a bad v2 token is a clean 404");
+}
+
+async function e301cFilesAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const F = await import("@/lib/estimate-output/package-files");
+  const S = await import("@/lib/estimate-output/package-files-server");
+  const QID = fixtureId(301, "c-files");
+  await Q.create({ id: QID, name: "#301c files", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] }], mobs: [] } });
+  registerFixture("quotes", QID);
+  const key = "UP-00000000000301c0";
+  const path = (n: string) => F.packageFileBlobPath(QID, key, n) + "-Sfx01";
+  const removed: string[] = [];
+  let idN = 0;
+  const deps = (bytes: Uint8Array, size: number) => ({
+    head: async () => ({ bytes, size }),
+    remove: async (p: string) => { removed.push(p); },
+    now: () => 1_000,
+    newId: () => "PF-" + (++idN).toString(16).padStart(12, "c"),
+  });
+  const pdf = new TextEncoder().encode("%PDF-1.7 fixture");
+  const okRes = await S.finalizePackageFileUpload(QID, { uploadKey: key, blobPath: path("plan.pdf"), fileName: "Main plan.pdf", kind: "plan" }, "Tester", deps(pdf, 4096));
+  ok(okRes.ok && okRes.file.kind === "plan" && okRes.file.contentType === "application/pdf" && okRes.file.size === 4096 && okRes.file.source === "upload" &&
+     F.cleanPackageFiles((await Q.get(QID))!.packageFiles).length === 1 && removed.length === 0,
+    "#301 uploads (DB): a real PDF under this quote's key is recorded as a plan");
+  const again = await S.finalizePackageFileUpload(QID, { uploadKey: key, blobPath: path("plan.pdf"), fileName: "x.pdf", kind: "plan" }, "Tester", deps(pdf, 4096));
+  ok(!again.ok && again.error === F.PACKAGE_FILES_COPY.alreadySaved && removed.length === 0, "#301 uploads (DB): replaying a recorded path is refused and never deletes that blob");
+  const svg = await S.finalizePackageFileUpload(QID, { uploadKey: key, blobPath: path("x.svg"), fileName: "x.svg", kind: "plan" }, "Tester", deps(new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"), 100));
+  const big = await S.finalizePackageFileUpload(QID, { uploadKey: key, blobPath: path("big.pdf"), fileName: "big.pdf", kind: "plan" }, "Tester", deps(pdf, F.MAX_PACKAGE_FILE_BYTES + 1));
+  ok(!svg.ok && svg.error === F.PACKAGE_FILES_COPY.wrongType && !big.ok && big.error === F.PACKAGE_FILES_COPY.tooBig && removed.join() === [path("x.svg"), path("big.pdf")].join(),
+    "#301 uploads (DB): SVG and oversize files are refused and their own unrecorded blobs deleted");
+  const foreign = await S.finalizePackageFileUpload(QID, { uploadKey: key, blobPath: "estimate-files/Q-OTHER/UP-00000000000301c0/a.pdf", fileName: "a.pdf", kind: "plan" }, "Tester", deps(pdf, 10));
+  ok(!foreign.ok && foreign.error === F.PACKAGE_FILES_COPY.notThisQuote && removed.length === 2, "#301 uploads (DB): another quote's path is refused and never deleted");
+  // remove: a never-sent file's blob goes; a file a sent revision froze keeps its blob.
+  const r1 = await S.removePackageFileAndBlob(QID, okRes.ok ? okRes.file.id : "", { remove: async (p: string) => { removed.push(p); } });
+  ok(r1.ok && removed.at(-1) === path("plan.pdf"), "#301 uploads (DB): removing a file nothing else lists deletes its blob");
+  const kept = await S.finalizePackageFileUpload(QID, { uploadKey: key, blobPath: path("riser.pdf"), fileName: "Riser.pdf", kind: "riser" }, "Tester", deps(pdf, 4096));
+  await Q.update(QID, { status: "sent" });
+  const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+  await Q.update(QID, { status: "draft" });
+  const before = removed.length;
+  const r2 = await S.removePackageFileAndBlob(QID, kept.ok ? kept.file.id : "", { remove: async (p: string) => { removed.push(p); } });
+  ok(r2.ok && removed.length === before, "#301 uploads (DB): a file a sent revision still lists keeps its blob (the old link still shows it)");
+  ok(kept.ok && S.packageFileForRevision(rev, kept.file.id)?.id === kept.file.id && S.packageFileForRevision(rev, "PF-ffffffffffff") === null && S.packageFileForRevision(rev, "../x") === null,
+    "#301 uploads (DB): the share route resolves only the pinned revision's frozen files");
+  const stream = async () => new Response("%PDF-1.7 served").body;
+  const res = kept.ok ? await S.servePackageFile(new Request("http://x/"), kept.file, { stream }) : new Response(null, { status: 500 });
+  const etag = res.headers.get("etag") || "";
+  const res304 = kept.ok ? await S.servePackageFile(new Request("http://x/", { headers: { "if-none-match": etag } }), kept.file, { stream }) : new Response(null, { status: 500 });
+  ok(res.status === 200 && res.headers.get("content-type") === "application/pdf" && /^inline; filename="Riser\.pdf"/.test(res.headers.get("content-disposition") || "") &&
+     res.headers.get("x-content-type-options") === "nosniff" && res.headers.get("cache-control") === "private, max-age=3600" && res304.status === 304 && (await res.text()) === "%PDF-1.7 served",
+    "#301 uploads (serve): inline with its real type, nosniff, private cache, an ETag");
+  // Serve-time hardening (Task 1 review): stored type only, nosniff + CSP, a sanitized name, and a bad stored type is a 404.
+  const hostile = { ...(kept.ok ? kept.file : ({} as never)), name: 'a"b\r\nSet-Cookie: x=1\u202e.pdf' } as never;
+  const hRes = await S.servePackageFile(new Request("http://x/"), hostile, { stream });
+  const cd = hRes.headers.get("content-disposition") || "";
+  const svgFile = { ...(kept.ok ? kept.file : ({} as never)), contentType: "image/svg+xml" } as never;
+  const svgRes = await S.servePackageFile(new Request("http://x/"), svgFile, { stream });
+  const noStream = await S.servePackageFile(new Request("http://x/"), kept.ok ? kept.file : (null as never), { stream: async () => null });
+  const throwing = await S.servePackageFile(new Request("http://x/"), kept.ok ? kept.file : (null as never), { stream: async () => { throw new Error("vendor says secret"); } });
+  ok(/default-src 'none'/.test(res.headers.get("content-security-policy") || "") && res.headers.get("x-content-type-options") === "nosniff" && /^inline; filename="[^"\r\n]*"; filename\*=UTF-8''[A-Za-z0-9%._~!-]*$/.test(cd) &&
+     svgRes.status === 404 && noStream.status === 404 && throwing.status === 502 && !(await throwing.text()).includes("secret"),
+    "#301 uploads (serve): CSP locked, a hostile name cannot split headers, a non-allowed stored type or a missing blob is a 404, a vendor error never leaks");
 }

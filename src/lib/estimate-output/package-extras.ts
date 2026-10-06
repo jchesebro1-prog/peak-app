@@ -2,7 +2,8 @@ import type { SharedPackage } from "@/lib/quote-share/links";
 import { revisionPackageDocs } from "./package-docs-server";
 import { specReadyFor } from "./package-spec-ready";
 import { allSections } from "@/lib/stores/spec-sections";
-import { datasheetLinks, downloadsView, EMPTY_EXTRAS, type PackageExtras } from "./package-extras-model";
+import { cleanPackageFiles } from "./package-files";
+import { datasheetLinks, downloadsView, EMPTY_EXTRAS, plansView, type PackageExtras } from "./package-extras-model";
 
 /**
  * #301 slice C — the package page's extras for a resolved v2 link: the
@@ -20,5 +21,7 @@ export async function loadPackageExtras(hit: SharedPackage, base: string): Promi
   } catch (e) {
     console.warn("[package] documents unavailable", e instanceof Error ? e.message : e);
   }
+  // R12 — the pinned revision's frozen list only, never the live quote's.
+  extras.plans = plansView(cleanPackageFiles(hit.rev.docFields?.packageFiles), base);
   return extras;
 }

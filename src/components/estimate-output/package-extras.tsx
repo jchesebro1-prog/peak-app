@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { downloadsSummary, type DatasheetLinkView, type PackageDownloadsView } from "@/lib/estimate-output/package-extras-model";
+import { downloadsSummary, type DatasheetLinkView, type PackageDownloadsView, type PackagePlanView } from "@/lib/estimate-output/package-extras-model";
 
 /**
  * #301 slice C — the package page's extra cards (server components, pure
@@ -46,6 +46,28 @@ export function PackageDownloads({ view }: { view: PackageDownloadsView }) {
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+export function PackagePlans({ plans }: { plans: PackagePlanView[] }) {
+  return (
+    <div className="pkg-card">
+      <h2>Plans &amp; risers</h2>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {plans.map((p) => (
+          <li key={p.href} style={{ marginBottom: 12 }}>
+            {p.isImage && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={p.href} alt={p.name} loading="lazy" style={{ display: "block", maxWidth: "100%", maxHeight: 360, objectFit: "contain", marginBottom: 6 }} />
+            )}
+            <a href={p.href} target="_blank" rel="noopener noreferrer" style={PKG_LINK}>
+              {p.name}
+            </a>{" "}
+            <span className="pkg-muted">{`${p.kindLabel} · ${p.sizeLabel}`}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

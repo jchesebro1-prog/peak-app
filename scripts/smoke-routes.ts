@@ -352,6 +352,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/doc/PD-1", expectNotFound: true },
   // #301 slice C — the package zip with a v2 token that fails the verify: a clean 404, nothing built.
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/package.zip", expectNotFound: true },
+  // #301 slice C — the package file route with a v2 token that fails the verify: a clean 404.
+  { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/file/PF-000000000001", expectNotFound: true },
   // #301 — the cover print route: no token / a well-formed bad token is a clean 404 before any read.
   { route: "/print/cover/Q-2041", expectNotFound: true },
   { route: "/print/cover/Q-2041?t=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },
