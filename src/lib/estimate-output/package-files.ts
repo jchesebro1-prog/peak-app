@@ -1,5 +1,5 @@
 import { cleanText, displayFileName, formatBytes, isUploadKey, safeFileName } from "@/lib/document-files";
-import { sniffDocumentType, sniffImageType } from "@/lib/part-docs/files";
+import { sniffImageType } from "@/lib/part-docs/files";
 
 /**
  * #301 slice C (D-j, R13) — the drawings an estimate package shows under
@@ -53,6 +53,8 @@ export const PACKAGE_FILES_COPY = {
 } as const;
 
 const EXT: Record<PackageFileType, string> = { "application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+/** estimate-files/<quote segment>/(UP-<16 hex> | grid)/<name> — no backslash, no nesting. */
+const BLOB_PATH_RE = /^estimate-files\/[A-Za-z0-9_-]{1,64}\/(?:UP-[0-9a-f]{16}|grid)\/[A-Za-z0-9._-]{1,200}$/;
 const ID_RE = /^PF-[0-9a-f]{12}$/;
 
 export function isPackageFileId(v: unknown): v is string {
@@ -99,9 +101,21 @@ export function gridSetBlobPath(quoteId: string): string {
 /** What the bytes really are — the four accepted types, else null (SVG,
  *  HTML, programs and anything unknown are refused). */
 export function sniffPackageFile(bytes: Uint8Array): PackageFileType | null {
+  // Markup anywhere in the first KB disqualifies every type (polyglots).
+  const head = Array.from(bytes.subarray(0, PACKAGE_FILE_SNIFF_BYTES), (b) => String.fromCharCode(b)).join("").toLowerCase();
+  if (/<svg|<html|<script|<!doctype|<\?xml/.test(head)) return null;
   const img = sniffImageType(bytes);
   if (img) return img;
-  return sniffDocumentType(bytes) === "pdf" ? "application/pdf" : null;
+  return pdfHeaderAtStart(bytes) ? "application/pdf" : null;
+}
+
+/** `%PDF-` at offset 0, allowing only a UTF-8 BOM or up to 4 whitespace bytes before it. */
+function pdfHeaderAtStart(bytes: Uint8Array): boolean {
+  let i = 0;
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) i = 3;
+  const start = i;
+  while (i < bytes.length && i - start < 4 && (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0a || bytes[i] === 0x0d)) i++;
+  return bytes.length >= i + 5 && bytes[i] === 0x25 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x44 && bytes[i + 3] === 0x46 && bytes[i + 4] === 0x2d;
 }
 
 /** The user's file name with an extension that matches the bytes. */
@@ -116,10 +130,11 @@ function fileOf(v: unknown): PackageFile | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
   if (!isPackageFileId(o.id) || !isPackageFileKind(o.kind)) return null;
-  if (typeof o.blobPath !== "string" || !o.blobPath.startsWith(PACKAGE_FILE_PREFIX) || o.blobPath.includes("..")) return null;
+  if (typeof o.blobPath !== "string" || o.blobPath.length > 512 || !BLOB_PATH_RE.test(o.blobPath) || o.blobPath.includes("..")) return null;
   if (!(PACKAGE_FILE_TYPES as readonly string[]).includes(o.contentType as string)) return null;
   if (o.source !== "upload" && o.source !== "grid") return null;
-  const size = Number(o.size);
+  if (typeof o.size !== "number") return null;
+  const size = o.size;
   if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_PACKAGE_FILE_BYTES) return null;
   const addedAt = Number(o.addedAt);
   return {
@@ -152,9 +167,11 @@ export function cleanPackageFiles(raw: unknown): PackageFile[] {
 
 /** The list with `file` appended, or null (full, or the id is already there). */
 export function appendPackageFile(list: unknown, file: PackageFile): PackageFile[] | null {
+  const clean = fileOf(file);
+  if (!clean) return null;
   const cur = cleanPackageFiles(list);
-  if (cur.length >= MAX_PACKAGE_FILES || cur.some((f) => f.id === file.id)) return null;
-  return [...cur, file];
+  if (cur.length >= MAX_PACKAGE_FILES || cur.some((f) => f.id === clean.id)) return null;
+  return [...cur, clean];
 }
 
 /** Decision 9 / D-j: an uploaded file of a kind hides Grid files of that kind. */

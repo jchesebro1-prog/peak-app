@@ -51385,3 +51385,27 @@ import {
   const src = readFileSync(join(process.cwd(), "src/lib/estimate-output/package-files.ts"), "utf8");
   ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/lib\/part-docs\/files")/m.test(src), "#301 files purity: value imports only document-files and part-docs/files");
 }
+
+/* ===== #301 slice C — package files hardening ===== */
+{
+  const ascii = (t: string) => new TextEncoder().encode(t);
+  ok(e301cfSniff(ascii("<html><!-- %PDF-1.7 --><script>alert(1)</script></html>")) === null,
+    "#301 files hardening: an HTML file with %PDF- in a comment is rejected");
+  ok(e301cfSniff(ascii("<svg xmlns='http://www.w3.org/2000/svg'><!-- %PDF-1.4 --></svg>")) === null && e301cfSniff(ascii("%PDF-1.7\n<svg onload=x>")) === null,
+    "#301 files hardening: an SVG with %PDF- is rejected, and so is a PDF-headed buffer that carries <svg in its first 1 KB");
+  ok(e301cfSniff(ascii("%PDF-1.7\n%binary")) === "application/pdf" && e301cfSniff(ascii("\n %PDF-1.4\n")) === "application/pdf",
+    "#301 files hardening: a real PDF header at offset 0 (or after <= 4 whitespace bytes) passes");
+  ok(e301cfSniff(ascii(" ".repeat(300) + "%PDF-1.7\n")) === null && e301cfSniff(ascii("garbage %PDF-1.7")) === null,
+    "#301 files hardening: a PDF header at offset 300 is rejected");
+  const good = { id: "PF-000000000001", kind: "plan", name: "P.pdf", blobPath: "estimate-files/Q-1/UP-0123456789abcdef/P.pdf", contentType: "application/pdf", size: 10, source: "upload", addedAt: 1, addedBy: "T" } as E301cfFile;
+  const longPath = "estimate-files/Q-1/UP-0123456789abcdef/" + "a".repeat(600) + ".pdf";
+  const gridOk = { ...good, id: "PF-000000000002", source: "grid", blobPath: "estimate-files/Q-1/grid/drawing-set-AbC123.pdf" } as E301cfFile;
+  ok(e301cfClean([good, { ...good, id: "PF-000000000003", blobPath: longPath }, { ...good, id: "PF-000000000004", size: "10" }, { ...good, id: "PF-000000000005", blobPath: "estimate-files/Q-1/UP-0123456789abcdef/a\\b.pdf" },
+    { ...good, id: "PF-000000000006", blobPath: "estimate-files/Q-1/other/P.pdf" }, { ...good, id: "PF-000000000007", blobPath: "estimate-files/Q-1/UP-0123456789abcdef/a/b.pdf" }, gridOk]).map((x) => x.id).join() === "PF-000000000001,PF-000000000002",
+    "#301 files hardening: a 600-char blobPath, a string size, a backslash, a wrong folder or a nested name is dropped; the Grid shape is kept");
+  const base = [good];
+  const same = e301cfAppend(base, { ...good, id: "PF-000000000009", blobPath: "documents/x.pdf" } as E301cfFile);
+  const same2 = e301cfAppend(base, { ...good, id: "PF-00000000000a", size: "9" as never } as E301cfFile);
+  ok(same === null && same2 === null && e301cfAppend(base, { ...good, id: "PF-00000000000b" } as E301cfFile)?.length === 2,
+    "#301 files hardening: appendPackageFile with a junk record is refused (null, the list unchanged); a good one appends");
+}
