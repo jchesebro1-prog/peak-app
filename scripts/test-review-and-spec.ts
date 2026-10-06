@@ -50999,3 +50999,93 @@ async function e301bLinksAsyncChecks(): Promise<void> {
 async function estimateOutput301BAsyncChecks(): Promise<void> {
   await e301bLinksAsyncChecks();
 }
+
+/* ======================================================================
+   #301 slice B — BOM + model: R6 BOM rows (line fields first, catalog
+   second, labor dropped except a labor system's one row, no money field),
+   the scope extension, R12 frozen fields, the v2 photo set, and the pure
+   package page model (never the staff placeholder, never a line price).
+   ====================================================================== */
+import { packageBomRows as e301bbRows, packageBomSkus as e301bbSkus, LABOR_BOM_DESC as e301bbLabor, bomCatalogSku as e301bbSku } from "@/lib/estimate-output/bom";
+import { packageFrozenFields as e301bmFrozen, packagePhotoSections as e301bmPhotoSecs, packageViewModel as e301bmModel } from "@/lib/estimate-output/package-model";
+import { outputScopes as e301bbScopes } from "@/lib/estimate-output/scopes";
+import { narrativeBlocks as e301bbBlocks } from "@/app/(app)/estimator/narrative";
+import { withRewardCredit as e301bbCredit } from "@/lib/rewards/credit-line";
+import { fmt as e301bbFmt } from "@/app/(app)/estimator/pricing";
+import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
+{
+  // ---- scope extension ----
+  const kpSecs = p293Sections().map((s) => (s.id === "s2" ? { ...s, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "A bright fresnel.\n\nMore.", photo: true }] } : s)) as E301bbSec[];
+  const sc = e301bbScopes(p293Props({ sections: kpSecs }));
+  ok(JSON.stringify(sc[1].introBlocks) === JSON.stringify(e301bbBlocks("Intro para.\n\n- One\n- Two")) && sc[1].keyProducts.length === 1 && sc[1].keyProducts[0].heading === "Line 5" &&
+     sc[0].introBlocks.length === 0 && sc[0].keyProducts.length === 0, "#301 scopes: each scope carries its intro blocks and printable key products");
+
+  // ---- BOM rows (R6) ----
+  const L = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 2, unit: "ea", cost: 7.77, price: 13.37, internalNote: "INTERNAL-301B", ...extra });
+  const mat = { id: "m", name: "Gear", kind: "materials", mfr: "", freightPct: 0, room: "ROOM-301B", items: [
+    L(1), L(2, { manufacturer: "LineCo", manufacturerPartNumber: "LC-2" }), L(3, { allowance: true }), L(4, { custom: true, sku: "CUSTOM" }),
+    L(5, { labor: true, sku: "LAB-1", unit: "hr" }), L(6, { option: true }), L(7, { vendorQuoteId: "VQ-1" }),
+  ] } as unknown as E301bbSec;
+  const cat = new Map([["SKU-1", { mfr: "CatCo", manufacturerPartNumber: "CC-1" }], ["SKU-2", { mfr: "Other", manufacturerPartNumber: "X" }], ["SKU-3", { mfr: "Nope" }]]);
+  const vqs = [{ id: "VQ-1", vendor: "Acme", quoteNumber: "Q9", description: "Motors", lines: [], terms: "TERMS-301B", notes: "", total: 1, includesFreight: false, display: "single" }] as never;
+  const rows = e301bbRows(mat, cat, vqs);
+  ok(rows.map((r) => r.key).join(",") === "1,2,3,4,7", "#301 BOM: labor and option lines never appear (customerLines + the labor drop)");
+  ok(rows[0].manufacturer === "CatCo" && rows[0].part === "CC-1" && rows[1].manufacturer === "LineCo" && rows[1].part === "LC-2",
+    "#301 BOM: the line's own manufacturer / part # first, the catalog part second");
+  ok(rows[2].description === "Budget allowance — Line 3" && rows[2].manufacturer === "" && rows[3].manufacturer === "" && rows[3].part === "",
+    "#301 BOM: an allowance or a placeholder-sku custom line never borrows a catalog part");
+  ok(rows[4].description === "Acme · Q9 — Motors" && !JSON.stringify(rows).includes("TERMS-301B"), "#301 BOM: a vendor line reads like the document's, never its terms");
+  ok(rows.every((r) => Object.keys(r).sort().join(",") === "description,key,manufacturer,part,qty,unit") && rows[0].qty === 2 && rows[0].unit === "ea",
+    "#301 BOM: a row has exactly Qty · Unit · Manufacturer · Part · Description (+ key) — no money field");
+  const lab = e301bbRows({ id: "l", name: "Install", kind: "labor", mfr: "", freightPct: 0, items: [L(9, { labor: true })] } as unknown as E301bbSec, cat);
+  ok(lab.length === 1 && lab[0].description === e301bbLabor && lab[0].qty === null && e301bbLabor === "Installation, commissioning & project management",
+    "#301 BOM: a labor system is one row, the document's own wording (R2/R6)");
+  const credited = e301bbCredit([mat], 10, 999) as E301bbSec[];
+  ok(e301bbRows(credited[0], cat, vqs).length === rows.length, "#301 BOM: the Rewards credit line never appears");
+  ok(e301bbSkus([mat, { ...mat, id: "m2" } as E301bbSec, { id: "z", name: "Zero", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as E301bbSec]).join(",") === "SKU-1,SKU-2" &&
+     e301bbSku({ sku: " SKU-9 " } as never) === "SKU-9" && e301bbSku({ sku: "AI" } as never) === "",
+    "#301 BOM: the catalog lookup list — printed systems only, deduped, never allowance / vendor / placeholder skus");
+
+  // ---- frozen fields (R12) ----
+  ok(JSON.stringify(e301bmFrozen(undefined, "D")) === JSON.stringify({ coverSummary: "", notIncluded: "" }) &&
+     JSON.stringify(e301bmFrozen({ customer: "C" } as never, "D")) === JSON.stringify({ coverSummary: "", notIncluded: "" }) &&
+     JSON.stringify(e301bmFrozen({ coverSummary: "S", notIncluded: null } as never, "D")) === JSON.stringify({ coverSummary: "S", notIncluded: "D" }) &&
+     e301bmFrozen({ notIncluded: "" } as never, "D").notIncluded === "" && e301bmFrozen({ notIncluded: "X" } as never, "D").notIncluded === "X",
+    "#301 frozen: only the revision's own keys — absent (pre-#301) → empty, never the live quote; null → the default list; a string as sent");
+
+  // ---- v2 photo set ----
+  const psIn = p293Sections();
+  const ps = e301bmPhotoSecs(psIn);
+  ok(ps.length === psIn.length && ps.every((s) => s.presentation === "narrative") && psIn[0].presentation === undefined && ps[1] === psIn[1],
+    "#301 photos: the package's photo set treats every system as narrative (key products show on every scope); the input is never mutated");
+
+  // ---- the model ----
+  const doc = { ...p293Props({ sections: kpSecs, pdfOptions: { pdfOptions: true } }), rewardsLine: "Your Gold rewards: Free freight" };
+  const okState = { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never;
+  const m = e301bmModel({ doc, photos: { "SKU-5": { src: "/p/5", alt: "Five" } }, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "Permits\nPainting" },
+    state: okState, headerLine: "EST-1 · Rev 1 · sent Oct 5, 2026", currentHref: null, view: "narrative", base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" });
+  ok(m.title === "Narrative test" && m.customer === "Walk-in" && m.headerLine.startsWith("EST-1") && m.total === e301bbFmt(doc.t.grand) &&
+     m.logo.src === "/_test/lh.jpg" && m.logo.full && m.banner === null && m.narrativeHref === "/share/quote/Q-293/t" && m.bomHref === "/share/quote/Q-293/t?view=bom",
+    "#301 model: header (title, customer, Rev stamp, grand total), letterhead, no banner on an open estimate, the two view links");
+  ok(m.scopes.map((s) => `${s.num}:${s.name}`).join("|") === "1:Rigging|2:Lighting|3:Install|4:Empty narrative" && m.scopes[1].keyProducts[0].photo?.src === "/p/5" &&
+     m.scopes[1].fallback === null && m.scopes[0].fallback === "The full parts list for this scope is under BOM." && m.scopes[2].fallback === "Installation, commissioning & project management." &&
+     m.scopes[3].fallback === "The full parts list for this scope is under BOM.",
+    "#301 model: every printed scope; key-product photos; a scope with no text says where its parts are; labor reads the labor wording");
+  ok(!JSON.stringify(m).includes("[needs a paragraph]"), "#301 model: the staff placeholder never reaches a client");
+  ok(m.summary === "This estimate includes 4 scopes: Rigging, Lighting, Install and Empty narrative." && m.notIncluded.join("|") === "Permits|Painting" &&
+     m.options.length === 1 && m.options[0].label === "ADD OPTION 1" && m.totals.rewardsLine === "Your Gold rewards: Free freight" && m.scopes[0].bom.length === 3,
+    "#301 model: summary sentence, Not included items, add options, the totals lines (R1), BOM rows per scope");
+  const sup = e301bmModel({ doc, photos: {}, catalog: new Map(), frozen: { coverSummary: "Ours.", notIncluded: "" }, state: { kind: "superseded", rev: { rev: 1 }, latestRev: 3, sentAt: Date.UTC(2026, 9, 6, 15) } as never,
+    headerLine: "x", currentHref: "/share/quote/Q-293/cur", view: "bom", base: "/b", letterheadSrc: "/lh" });
+  ok(sup.banner?.href === "/share/quote/Q-293/cur" && sup.summary === "Ours." && sup.view === "bom" && sup.notIncluded.length === 0, "#301 model: superseded banner with the current link; the typed summary; the BOM view");
+  const pricey = [{ id: "p", name: "Pricey", kind: "materials", mfr: "", freightPct: 0, room: "ROOM-301B", items: [L(1), L(2, { price: 11.11, qty: 1 })] }] as unknown as E301bbSec[];
+  const pm = e301bmModel({ doc: p293Props({ sections: pricey }), photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: okState, headerLine: "x",
+    currentHref: null, view: "bom", base: "/b", letterheadSrc: "/lh" });
+  const pj = JSON.stringify(pm);
+  ok(pm.scopes[0].price === "$37.85" && !pj.includes("26.74") && !pj.includes("13.37") && !pj.includes("11.11") && !pj.includes("7.77") && !pj.includes("INTERNAL-301B") && !pj.includes("ROOM-301B"),
+    "#301 model: the scope price only — never a line or unit price, cost, internal note or room (§10)");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|quote-document-view)"|@\/lib\/specs\/record-keys")/m.test(rd("src/lib/estimate-output/bom.ts")) &&
+     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback")/m.test(rd("src/lib/estimate-output/package-model.ts")),
+    "#301 purity: bom.ts and package-model.ts are pure and client-safe");
+}

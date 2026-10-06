@@ -2,7 +2,7 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { lineExtSellOf, systemSellTotal } from "@/app/(app)/estimator/pricing";
 import { systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
-import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "@/app/(app)/estimator/narrative";
+import { narrativeBlocks, printableKeyProducts, type NarrativeBlock, type PrintableKeyProduct } from "@/app/(app)/estimator/narrative";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import { COVER_TEXT_MAX, cleanPlainText, effectiveDiscipline, type ScopeDiscipline } from "./fields";
 
@@ -59,6 +59,10 @@ export type OutputScope = {
   price: number;
   clientGoals: string;
   cover: CoverParagraph;
+  /** #301 slice B — the intro as printable blocks, and the resolved key
+   *  products (the package page shows them on every scope). */
+  introBlocks: NarrativeBlock[];
+  keyProducts: PrintableKeyProduct[];
 };
 
 export function outputScopes(p: Pick<QuoteDocumentProps, "sections">): OutputScope[] {
@@ -71,6 +75,8 @@ export function outputScopes(p: Pick<QuoteDocumentProps, "sections">): OutputSco
     price: systemSellTotal(sec),
     clientGoals: (sec.clientGoals || "").trim(),
     cover: coverParagraphFor(sec),
+    introBlocks: narrativeBlocks(sec.narrative),
+    keyProducts: printableKeyProducts(sec),
   }));
 }
 
