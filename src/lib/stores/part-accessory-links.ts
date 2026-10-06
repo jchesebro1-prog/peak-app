@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { insertDocsIfAbsent, listDocs, patchDoc, softDeleteDocs, upsertDocs, type DocBatchOpts } from "@/db/doc-store";
+import { insertDocsIfAbsent, listDocs, listDocsByField, patchDoc, softDeleteDocs, upsertDocs, type DocBatchOpts } from "@/db/doc-store";
 import type { AccessoryLinkSource, AccessoryPair, PartAccessoryLink } from "@/lib/part-docs/types";
 
 /**
@@ -209,4 +209,10 @@ export async function retireAccessoryScopes(
   if (!stale.length) return { removed: 0, complete: true };
   const r = await softDeleteDocs("part_accessory_links", stale, opts);
   return { removed: r.ids.length, complete: r.complete };
+}
+
+/** #301 slice C — the live links whose ACCESSORY is one of `skus`, filtered
+ *  in SQL: a per-request coverage read for one quote never lists the graph. */
+export async function accessoryLinksForAccessories(skus: readonly string[]): Promise<PartAccessoryLink[]> {
+  return listDocsByField<PartAccessoryLink>("part_accessory_links", "accessorySku", skus);
 }

@@ -22,6 +22,11 @@ import { packageState, sentRevisionRows, type VisiblePackageState } from "./pack
 export const SHARE_ID_MAX = 64;
 export const SHARE_VIEW_PER_MIN = 60;
 export const SHARE_PHOTO_PER_MIN = 300;
+/** #301 slice C — the package page's downloads (spec §6, R10). */
+export const SHARE_DOC_PER_MIN = 120;
+export const SHARE_FILE_PER_MIN = 120;
+export const SHARE_ZIP_PER_WINDOW = 6;
+export const SHARE_ZIP_WINDOW_MS = 10 * 60_000;
 
 export function shareSecret(): string {
   return process.env.AUTH_SECRET || "";

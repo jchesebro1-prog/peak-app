@@ -51173,7 +51173,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
     "#301 page: a v2 token branches to the package after the rate limit and before the v1 resolve");
   const pp = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
   ok(pp.includes("resolveSharedPackage(id, token)") && pp.includes("loadPackageViewProps(") && (pp.match(/ONLINE_COPY\.shareInactive/g) || []).length === 1 &&
-     pp.includes("<PackageView model={model} slots={{}} />") && pp.includes("Slice C") && !pp.includes('"use client"') && !/\b(update|patchShareLink|recordShareOpen)\(/.test(pp) &&
+     pp.includes("<PackageView model={model} slots={slots} />") && pp.includes("Slice C") && !pp.includes('"use client"') && !/\b(update|patchShareLink|recordShareOpen)\(/.test(pp) &&
      !pp.includes("quoteAsOfRevision") && !pp.includes("auth(") && !pp.includes("cookies("),
     "#301 page: the package page resolves, loads, renders PackageView with the Slice C mounts empty, one inactive card; read-only, no session");
   const loader = rd("src/lib/estimate-output/package-loader.ts");
@@ -51530,6 +51530,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
 
 async function estimateOutput301CAsyncChecks(): Promise<void> {
   await e301cStoreAsyncChecks();
+  await e301cDocsAsyncChecks();
 }
 
 async function e301cStoreAsyncChecks(): Promise<void> {
@@ -51599,4 +51600,97 @@ async function e301cStoreAsyncChecks(): Promise<void> {
     "#301 responses: any kind other than exactly accept | question is refused at runtime");
   const stamp = e301crRows([rr(9, { at: Date.UTC(2026, 9, 5, 19, 14) })], (v) => v)[0].when;
   ok(stamp === "Oct 5, 2:14 PM" && !/[\u202f\u00a0]/.test(stamp), "#301 responses: the staff time stamp uses a plain space whatever the ICU build");
+}
+
+/* ======================================================================
+   #301 slice C — documents: the scoped coverage loader (same answer as
+   the full index, no table scan), the revision's package documents, the
+   datasheet route (v2 only, blob-backed datasheet / spec sheet of the
+   pinned revision, attachment, nosniff, 120/min/IP), and the
+   per-key-product Datasheet link in the page's mount point.
+   ====================================================================== */
+import { datasheetLinks as e301cdLinks, EMPTY_EXTRAS as e301cdEmpty } from "@/lib/estimate-output/package-extras-model";
+import { DatasheetLink as E301cdLink } from "@/components/estimate-output/package-extras";
+import { createElement as e301cdEl } from "react";
+import { renderToStaticMarkup as e301cdRender } from "react-dom/server";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const links = e301cdLinks(new Map([["SKU-1", { datasheet: { documentId: "PD-1", name: "ColorSource.pdf" } }], ["SKU-2", { datasheet: null }]]), "/share/quote/Q-1/t");
+  ok(JSON.stringify(links) === JSON.stringify({ "SKU-1": { href: "/share/quote/Q-1/t/doc/PD-1", name: "ColorSource.pdf" } }) &&
+     e301cdEmpty.downloads === null && e301cdEmpty.plans.length === 0 && e301cdEmpty.actions === null,
+    "#301 docs: a key product's datasheet link is the scoped doc route; parts without one get none");
+  const html = e301cdRender(e301cdEl(E301cdLink, { link: { href: "/share/quote/Q-1/t/doc/PD-1", name: "ColorSource.pdf" } }));
+  ok(html.includes('href="/share/quote/Q-1/t/doc/PD-1"') && html.includes("Datasheet — ColorSource.pdf") && html.includes("download"), "#301 docs: the link reads \"Datasheet — <file>\" and downloads");
+  const route = rd("src/app/share/quote/[id]/[token]/doc/[docId]/route.ts");
+  ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
+     route.indexOf("resolveSharedPackage(") < route.indexOf("packageDocForRevision(pkg.rev, docId)") &&
+     route.includes('rateLimit("share-doc:" + (clientIp(req) || "unknown"), SHARE_DOC_PER_MIN, 60_000)') && route.includes("attachmentDisposition(doc.fileName)") &&
+     route.includes('"x-content-type-options": "nosniff"') && !route.includes("quoteAsOfRevision") && !/\b(update|patchQuote|setStatus)\(/.test(route),
+    "#301 docs: the route rate-limits first, takes only a v2 token, serves only the pinned revision's documents, as an attachment; read-only");
+  const srv = rd("src/lib/estimate-output/package-docs-server.ts");
+  ok(srv.includes("loadScopedCoverage(parts)") && !srv.includes("listCatalog") && !srv.includes("loadPartDocsState") && srv.includes("quoteBom(src, rackOf, internalSkuCheck(parts0))"),
+    "#301 docs: the revision's documents use the scoped loader and the client package's BOM rule — never the whole catalog");
+  const load = rd("src/lib/part-docs/load.ts");
+  const scoped = load.slice(load.indexOf("export async function loadScopedCoverage("));
+  ok(scoped.includes("documentLinksForParts(skus)") && scoped.includes("accessoryLinksForAccessories(skus)") && !scoped.includes("backfillLegacyDatasheets") && !scoped.includes("allDocuments("),
+    "#301 docs: scoped coverage reads three filtered queries and never backfills (a public read never writes)");
+  const pp = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
+  ok(pp.includes("loadPackageExtras(hit, base)") && pp.includes("<PackageView model={model} slots={slots} />") && !pp.includes("slots={{}}"),
+    "#301 docs: the package page fills the Slice B mount points");
+  ok(rd("src/lib/estimate-output/package-extras.ts").includes("catch (e)") && !/^import (?!type)[^\n]*from "(?!\.\/package-files"|@\/lib\/document-files")/m.test(rd("src/lib/estimate-output/package-extras-model.ts")),
+    "#301 docs: extras never fail the page; the view model is pure");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes(`{ route: "/share/quote/Q-2041/1.1.${"A".repeat(43)}/doc/PD-1", expectNotFound: true }`), "#301 smoke: the datasheet route with a bad v2 token is a clean 404");
+}
+
+async function e301cDocsAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const C = await import("@/lib/stores/catalog");
+  const D = await import("@/lib/stores/part-documents");
+  const A = await import("@/lib/stores/part-accessory-links");
+  const Q = await import("@/lib/stores/quotes");
+  const { loadScopedCoverage, loadPartDocsState } = await import("@/lib/part-docs/load");
+  const { resolvePackageDocs } = await import("@/lib/part-docs/package");
+  const S = await import("@/lib/estimate-output/package-docs-server");
+  const [P, ACC, X, Y] = ["fix", "acc", "x", "y"].map((s) => fixtureId(301, "c-doc-" + s));
+  for (const sku of [P, ACC, X, Y]) {
+    await C.upsert({ sku, desc: "Part " + sku, category: "Other", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", sku);
+  }
+  const mk = async (kind: "datasheet" | "specsheet" | "image", fileName: string, contentType: string) => {
+    const d = await D.createDocument({ kind, fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-301c/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#301c docs: fixture document failed");
+    registerFixture("part_documents", d.id);
+    return d;
+  };
+  const ds = await mk("datasheet", "fixture-301c.pdf", "application/pdf");
+  const ss = await mk("specsheet", "x-301c.pdf", "application/pdf");
+  const img = await mk("image", "x-301c.png", "image/png");
+  for (const [doc, sku] of [[ds, P], [ss, X], [img, X]] as const) {
+    await D.attachDocument(doc.id, [sku], "Test");
+    registerFixture("part_document_links", D.documentLinkId(sku, doc.id));
+  }
+  const ref = fixtureId(301, "c-doc-scope");
+  await A.syncAccessoryLinks({ source: "manual", sourceRef: ref }, [{ parentSku: P, accessorySku: ACC }]);
+  registerFixture("part_accessory_links", A.accessoryLinkId("manual", ref, P, ACC));
+  const parts = await C.getMany([P, ACC, X, Y]);
+  const ctx = [P, ACC, X, Y];
+  const scoped = resolvePackageDocs(await loadScopedCoverage(parts), ctx);
+  const full = resolvePackageDocs((await loadPartDocsState(parts)).index, ctx);
+  const shape = (r: typeof scoped) => JSON.stringify({ by: [...r.bySku.entries()].sort(), docs: r.documents.map((d) => ({ ...d, skus: [...d.skus].sort() })).sort((a, b) => a.documentId.localeCompare(b.documentId)) });
+  ok(shape(scoped) === shape(full) && scoped.bySku.get(ACC)?.datasheet?.documentId === ds.id, "#301 docs (DB): the scoped coverage gives the full index's answer (the accessory is covered by its fixture's datasheet)");
+  const QID = fixtureId(301, "c-docs");
+  const line = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 });
+  await Q.create({ id: QID, name: "#301c docs", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [line(1, P), line(2, ACC), line(3, X), line(4, Y)] }], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+  const docs = await S.revisionPackageDocs(rev);
+  ok(docs.documents.map((d) => d.documentId).sort().join() === [ds.id, ss.id].sort().join() && docs.bySku.get(ACC)?.datasheet?.documentId === ds.id,
+    "#301 docs (DB): a revision's package documents are its datasheets and spec sheets (images never)");
+  ok((await S.packageDocForRevision(rev, ds.id))?.id === ds.id && (await S.packageDocForRevision(rev, ss.id))?.id === ss.id &&
+     (await S.packageDocForRevision(rev, img.id)) === null && (await S.packageDocForRevision(rev, "PD-NOPE-301C")) === null && (await S.packageDocForRevision(rev, "../x")) === null,
+    "#301 docs (DB): the route serves only the revision's datasheets / spec sheets");
+  ok((await S.datasheetGapCount(rev.spec)) === 2, "#301 docs (DB): the gap count — X (spec sheet only) and Y (nothing) have no datasheet; the accessory is covered");
 }
