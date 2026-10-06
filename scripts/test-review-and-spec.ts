@@ -50777,3 +50777,61 @@ async function e301CoverAsyncChecks(): Promise<void> {
     await setBlob("estimate_output_defaults", { notIncluded: saved.notIncluded ?? "", website: saved.website ?? "" });
   }
 }
+
+/* ======================================================================
+   #301 slice B — token: the v2 rev-pinned share token (D-g, R11) —
+   sign / parse / verify, domain separation from v1 and print tokens,
+   tamper and shape refusals.
+   ====================================================================== */
+import {
+  SHARE_TOKEN_RE as e301btV1Re, SHARE_TOKEN_V2_RE as e301btV2Re, signShareToken as e301btSign1, verifyShareToken as e301btVerify1,
+  signShareTokenV2 as e301btSign2, verifyShareTokenV2 as e301btVerify2, parseShareToken as e301btParse, isShareTokenV2 as e301btIsV2,
+  newShareNonce as e301btNonce,
+} from "@/lib/quote-share/token";
+import { signPrintToken as e301btSignPrint } from "@/lib/quote-pdf/token";
+{
+  const S = "test-secret-301b";
+  const NOW = 1_800_000_000_000;
+  const nonce = e301btNonce();
+  const exp = NOW + 60 * 86_400_000;
+  const stored = { nonce, expiresAt: exp };
+  const t2 = e301btSign2(S, "Q-1", 3, nonce, exp);
+  ok(e301btV2Re.test(t2) && t2.startsWith(`${exp}.3.`) && !e301btV1Re.test(t2), "#301 token v2: <exp>.<rev>.<mac>, never mistaken for a v1 token");
+  ok(e301btVerify2(S, t2, "Q-1", stored, NOW) === 3 && e301btVerify2(S, t2, "Q-1", stored, exp) === 3, "#301 token v2: sign → verify returns the pinned rev (valid through exp)");
+  const t1 = e301btSign1(S, "Q-1", nonce, exp);
+  ok(e301btVerify2(S, t1, "Q-1", stored, NOW) === null && !e301btVerify1(S, t2, "Q-1", stored, NOW), "#301 token v2: v1 and v2 never verify as each other");
+  const mac = t2.split(".")[2];
+  ok(e301btVerify2(S, `${exp}.4.${mac}`, "Q-1", stored, NOW) === null, "#301 token v2: the rev is inside the MAC — a token edited to another rev ✗");
+  ok(e301btVerify2(S, t2, "Q-2", stored, NOW) === null && e301btVerify2(S, t2, "Q-1", { nonce: e301btNonce(), expiresAt: exp }, NOW) === null &&
+     e301btVerify2(S, t2, "Q-1", { nonce, expiresAt: 0 }, NOW) === null && e301btVerify2(S, t2, "Q-1", stored, exp + 1) === null &&
+     e301btVerify2(S, t2, "Q-1", { nonce, expiresAt: exp + 1 }, NOW) === null,
+    "#301 token v2: another quote, a rotated nonce, revoked, expired, a changed expiry ✗");
+  ok(e301btVerify2(S, `${exp}.3.${mac[0] === "A" ? "B" : "A"}${mac.slice(1)}`, "Q-1", stored, NOW) === null, "#301 token v2: a tampered MAC ✗");
+  ok(["", `${exp}.0.${mac}`, `${exp}.03.${mac}`, `0${t2}`, `${t2}A`, `${exp}.1234567.${mac}`, `${exp}.-1.${mac}`, `${exp}.3`].every((t) => e301btVerify2(S, t, "Q-1", stored, NOW) === null),
+    "#301 token v2: malformed tokens (rev 0, a leading zero, an oversize rev, extra chars, no MAC) ✗");
+  ok(e301btVerify2(S, t2, "Q-1", stored, NaN) === null && e301btVerify2("", t2, "Q-1", stored, NOW) === null && e301btVerify2("other", t2, "Q-1", stored, NOW) === null &&
+     e301btVerify2(S, t2, "Q-1", null, NOW) === null && e301btVerify2(S, t2, "Q-1", { nonce: "", expiresAt: exp }, NOW) === null,
+    "#301 token v2: no clock, no secret, the wrong secret, no stored link, an empty nonce ✗");
+  const far = NOW + 367 * 86_400_000;
+  ok(e301btVerify2(S, e301btSign2(S, "Q-1", 3, nonce, far), "Q-1", { nonce, expiresAt: far }, NOW) === null, "#301 token v2: a TTL over 366 days ✗");
+  const pt = e301btSignPrint(S, "quote", "Q-1", NOW);
+  ok(e301btVerify2(S, pt, "Q-1", { nonce, expiresAt: Number(pt.split(".")[0]) }, NOW) === null, "#301 token v2: a print token never verifies as a share token");
+  const p1 = e301btParse(t1);
+  const p2 = e301btParse(t2);
+  ok(p1?.v === 1 && p1.exp === exp && p2?.v === 2 && p2.exp === exp && p2.rev === 3 && e301btParse("not-a-token") === null && e301btParse(42) === null && e301btParse(null) === null,
+    "#301 token parse: v1 | v2 | null");
+  ok(e301btIsV2(t2) && !e301btIsV2(t1) && !e301btIsV2("1.1.short") && !e301btIsV2(undefined), "#301 token: isShareTokenV2");
+  let threw = 0;
+  for (const bad of [0, -1, 1.5, NaN, 1_000_000]) {
+    try {
+      e301btSign2(S, "Q-1", bad, nonce, exp);
+    } catch {
+      threw++;
+    }
+  }
+  ok(threw === 5, "#301 token v2: signing refuses a rev that isn't an integer 1–999,999");
+  const src = readFileSync(join(process.cwd(), "src/lib/quote-share/token.ts"), "utf8");
+  ok(src.includes("`share:quote:${quoteId}:${rev}:${nonce}:${exp}`") && src.includes("`share:quote:${quoteId}:${nonce}:${exp}`") &&
+     (src.match(/timingSafeEqual\(want, have\)/g) || []).length === 2,
+    "#301 token v2: MAC over share:quote:<id>:<rev>:<nonce>:<exp>; v1 unchanged; both compare in constant time");
+}
