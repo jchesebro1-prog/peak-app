@@ -341,6 +341,11 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
   { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },
+  // #301 — the cover print route: no token / a well-formed bad token is a clean 404 before any read.
+  { route: "/print/cover/Q-2041", expectNotFound: true },
+  { route: "/print/cover/Q-2041?t=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },
+  // #301 — the cover PDF download: an unknown quote is a clean 404, never a render.
+  { route: "/api/quotes/Q-0/cover-pdf", expectNotFound: true },
 ];
 
 let fail = 0;

@@ -50369,6 +50369,7 @@ async function estimateOutput301AAsyncChecks(): Promise<void> {
     "#301 store: editing the cover summary is not a content change (the estimate PDF is not re-rendered)");
   await e301GoalsAsyncChecks();
   await e301DefaultsAsyncChecks();
+  await e301CoverAsyncChecks();
 }
 
 /* ======================================================================
@@ -50716,4 +50717,63 @@ import type { SpecSection as E301cSec } from "@/app/(app)/estimator/types";
   const comp = readFileSync(join(process.cwd(), "src/components/estimate-output/cover-document.tsx"), "utf8");
   ok(!comp.includes('"use client"') && !/\buse(State|Effect|Ref|Transition)\(/.test(comp) && !comp.includes("onClick=") && !comp.includes(".jpg"),
     "#301 cover: a server component with pure props — no hooks, no handlers, no image import");
+}
+
+/* ======================================================================
+   #301 slice A — cover PDF route: the "cover" print token, the signed
+   print page, the staff download (R7), the panel buttons.
+   ====================================================================== */
+import { signPrintToken as e301rSign, verifyPrintToken as e301rVerify } from "@/lib/quote-pdf/token";
+{
+  const S = "test301-secret";
+  const t0 = 1_800_000_000_000;
+  const tok = e301rSign(S, "cover", "Q-1", t0);
+  ok(e301rVerify(S, tok, "cover", "Q-1", t0 + 1000) && !e301rVerify(S, tok, "quote", "Q-1", t0) && !e301rVerify(S, tok, "cover", "Q-2", t0) &&
+     !e301rVerify(S, e301rSign(S, "quote", "Q-1", t0), "cover", "Q-1", t0), "#301 route: a cover token verifies only for its kind + id (domain-separated from the quote PDF)");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const page = rd("src/app/print/cover/[id]/page.tsx");
+  ok(page.includes('verifyPrintToken(process.env.AUTH_SECRET || "", t, "cover", id, Date.now())') && page.includes("notFound()") && page.includes("force-dynamic") &&
+     page.includes("index: false") && page.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && page.includes("await headers()") && page.includes("loadCoverDocumentProps(") &&
+     page.indexOf("tokenOk(") < page.indexOf("getQuote("), "#301 route: the print page checks its token before any read, 404s otherwise, is dynamic and noindex");
+  const route = rd("src/app/api/quotes/[id]/cover-pdf/route.ts");
+  ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
+     route.includes('signPrintToken(secret, "cover", q.id, Date.now())') && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("coverPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"'),
+    "#301 route: signed-in only, 60 s, the shared print origin, system quotes only, \"EST-#### Cover.pdf\" (R7)");
+  const panel = rd("src/app/(app)/estimator/cover-package-panel.tsx");
+  ok(panel.includes("/cover-pdf") && panel.includes(">Cover PDF<") && panel.includes("Open cover ↗") && panel.includes("Save first — the cover prints the saved estimate.") && panel.includes("Save to create the cover."),
+    "#301 route: the preview sidebar's Cover PDF + Open cover buttons");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes('{ route: "/print/cover/Q-2041", expectNotFound: true }') && smoke.includes('{ route: "/api/quotes/Q-0/cover-pdf", expectNotFound: true }'), "#301 route: smoke covers the 404 paths");
+}
+
+async function e301CoverAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const { allUsers } = await import("@/lib/users");
+  const { setBlob, getBlob } = await import("@/db/doc-store");
+  const { loadCoverDocumentProps } = await import("@/lib/estimate-output/cover-loader");
+  const users = await allUsers();
+  const uniq = users.find((u) => users.filter((x) => x.name.trim().toLowerCase() === u.name.trim().toLowerCase()).length === 1);
+  const QID = fixtureId(301, "cover");
+  const saved = await getBlob<Record<string, unknown>>("estimate_output_defaults", {});
+  try {
+    await setBlob("estimate_output_defaults", { notIncluded: "Permits\nPainting", website: "peak.test" });
+    await Q.create({ id: QID, name: "#301 cover", customer: "Spec fixture", owner: uniq?.name || "Nobody Here", quoteType: "system",
+      spec: { sections: [{ id: "s1", name: "Stage lighting", kind: "materials", mfr: "", freightPct: 0, narrative: "A clean wash.", items: [{ id: 1, sku: "A", desc: "Fixture", qty: 2, unit: "ea", cost: 10, price: 25 }] }], mobs: [] } });
+    registerFixture("quotes", QID);
+    const q = await Q.get(QID);
+    const props = q ? await loadCoverDocumentProps(q, { origin: "https://app.test", letterheadSrc: "/_test/lh.jpg" }) : null;
+    ok(!!props && props.title === "#301 cover" && props.scopes.length === 1 && props.scopes[0].text === "A clean wash." && props.scopes[0].priceLabel === "Stage lighting scope: $50.00",
+      "#301 loader: the live quote's scopes and prices");
+    ok(props?.notIncluded === "Not included: Permits; Painting." && !!props?.footerLine.endsWith("peak.test"), "#301 loader: a quote that never stored Not included prints the Settings default; the footer carries the website");
+    ok(props?.shareUrl === null, "#301 loader: no share link → no link line");
+    ok(uniq ? props?.signer?.name === uniq.name : props?.signer === null, "#301 loader: the Lead estimator from the roster (R16)");
+    ok(props?.letterhead.src === "/_test/lh.jpg" || props?.letterhead.full === false, "#301 loader: the baked letterhead unless Branding has a logo");
+    await Q.update(QID, { notIncluded: "" });
+    const q2 = await Q.get(QID);
+    ok(q2 ? (await loadCoverDocumentProps(q2, { origin: null, letterheadSrc: "x" })).notIncluded === "" : false, "#301 loader: an emptied Not included prints nothing");
+  } finally {
+    await setBlob("estimate_output_defaults", { notIncluded: saved.notIncluded ?? "", website: saved.website ?? "" });
+  }
 }

@@ -26,6 +26,7 @@ const sideLabel: CSSProperties = { fontSize: 11, fontWeight: 600, color: "#9aa0a
 const fieldLabel: CSSProperties = { fontSize: 11.5, fontWeight: 600, color: "#3a3f4a" };
 const hint: CSSProperties = { fontSize: 11, color: "#8c919c", lineHeight: 1.45 };
 const ta: CSSProperties = { width: "100%", minHeight: 76, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12, lineHeight: 1.45, color: "#16181d", border: "1px solid #dfe2e8", borderRadius: 7, padding: "7px 9px", background: "#fff" };
+const actionLink: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 13, fontWeight: 600, textAlign: "center", borderRadius: 8, padding: "9px 16px", textDecoration: "none", border: "none" };
 const smallBtn: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer" };
 
 export function CoverPackagePanel(p: CoverPackagePanelProps) {
@@ -65,6 +66,22 @@ export function CoverPackagePanel(p: CoverPackagePanelProps) {
         style={ta}
       />
       <span style={hint}>One item per line — prints as one “Not included:” paragraph on the cover.</span>
+      {p.savedQuoteId ? (
+        <>
+          <a href={`/api/quotes/${encodeURIComponent(p.savedQuoteId)}/cover-pdf?download=1`} style={{ ...actionLink, color: "#fff", background: "var(--accent)" }}>
+            Cover PDF
+          </a>
+          <a href={`/api/quotes/${encodeURIComponent(p.savedQuoteId)}/cover-pdf`} target="_blank" rel="noopener noreferrer" style={{ ...actionLink, color: "#16181d", background: "#f1f2f5" }}>
+            Open cover ↗
+          </a>
+          {p.dirty && <span style={hint}>Save first — the cover prints the saved estimate.</span>}
+        </>
+      ) : (
+        <>
+          <span style={{ ...actionLink, color: "#9aa0ab", background: "#f1f2f5", cursor: "default" }}>Cover PDF</span>
+          <span style={hint}>Save to create the cover.</span>
+        </>
+      )}
     </div>
   );
 }
