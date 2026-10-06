@@ -51328,3 +51328,60 @@ async function e301bOpensAsyncChecks(): Promise<void> {
   ok(lk.includes("rateLimitRefund") && rsoFn.includes("rateLimitRefund(slot)") && rsoFn.includes("catch") && /if \(!recorded\) rateLimitRefund\(slot\)/.test(rsoFn),
     "#301 opens hardening: a failed or false recordShareOpen refunds the dedupe slot");
 }
+
+/* ======================================================================
+   #301 slice C — package files (pure): the PackageFile record (D-j), the
+   upload path scope (a client blobPath is untrusted), the magic-byte
+   sniff (PDF / PNG / JPEG / WebP only), cleaning on read, the 12 cap,
+   and decision 9 — an upload of a kind hides Grid files of that kind.
+   ====================================================================== */
+import {
+  sniffPackageFile as e301cfSniff, packageFilePathInScope as e301cfInScope, packageFileBlobPath as e301cfPath, packageFileName as e301cfName,
+  cleanPackageFiles as e301cfClean, appendPackageFile as e301cfAppend, visiblePackageFiles as e301cfVisible, packageBlobReferenced as e301cfRef,
+  packageFileRows as e301cfRows, newPackageFileId as e301cfNewId, isPackageFileId as e301cfIsId, gridSetBlobPath as e301cfGridPath,
+  MAX_PACKAGE_FILES as e301cfMax, MAX_PACKAGE_FILE_BYTES as e301cfMaxBytes, type PackageFile as E301cfFile,
+} from "@/lib/estimate-output/package-files";
+{
+  const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(16).fill(0)]);
+  const ascii = (s: string) => new TextEncoder().encode(s);
+  ok(e301cfSniff(ascii("%PDF-1.7\n%âãÏÓ")) === "application/pdf" && e301cfSniff(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) === "image/png" &&
+     e301cfSniff(bytes(0xff, 0xd8, 0xff, 0xe0)) === "image/jpeg" && e301cfSniff(bytes(0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50)) === "image/webp",
+    "#301 files: PDF, PNG, JPEG and WebP sniff by their bytes");
+  ok(e301cfSniff(ascii("<svg xmlns='http://www.w3.org/2000/svg'/>")) === null && e301cfSniff(ascii("MZ\x90\x00")) === null && e301cfSniff(ascii("<html>")) === null &&
+     e301cfSniff(new Uint8Array(0)) === null,
+    "#301 files: SVG, programs, HTML and empty files are refused");
+  const key = "UP-0123456789abcdef";
+  const good = e301cfPath("Q-2041", key, "Main plan (rev 2).pdf");
+  ok(good === "estimate-files/Q-2041/UP-0123456789abcdef/Main_plan_rev_2_.pdf" && e301cfInScope(good + "-AbCd12", "Q-2041", key),
+    "#301 files: the upload path is estimate-files/<quote>/<key>/<safe name> (Blob's random suffix allowed)");
+  ok(!e301cfInScope(good, "Q-2042", key) && !e301cfInScope(good, "Q-2041", "UP-ffffffffffffffff") && !e301cfInScope("estimate-files/Q-2041/UP-0123456789abcdef/../x.pdf", "Q-2041", key) &&
+     !e301cfInScope("estimate-files/Q-2041/UP-0123456789abcdef/a/b.pdf", "Q-2041", key) && !e301cfInScope(42, "Q-2041", key) && !e301cfInScope(good, "Q-2041", "UP-bad"),
+    "#301 files: another quote's path, another key, .., a nested path, a non-string and a bad key are out of scope");
+  ok(e301cfName("Plan.PDF", "application/pdf") === "Plan.PDF" && e301cfName("riser.png", "image/jpeg") === "riser.jpg" && e301cfName("set", "application/pdf") === "set.pdf" &&
+     e301cfName("a/b\\c.jpeg", "image/jpeg") === "c.jpeg",
+    "#301 files: the stored name keeps the user's name with an extension that matches the bytes");
+  const f = (id: string, extra: Partial<E301cfFile> = {}): E301cfFile =>
+    ({ id, kind: "plan", name: "Plan.pdf", blobPath: "estimate-files/Q-1/UP-0123456789abcdef/Plan.pdf", contentType: "application/pdf", size: 10, source: "upload", addedAt: 1, addedBy: "T", ...extra });
+  const id = (n: number) => "PF-" + n.toString(16).padStart(12, "0");
+  const junk = [f(id(1)), f("PF-bad"), f(id(2), { kind: "photo" as never }), f(id(3), { blobPath: "documents/x.pdf" }), f(id(4), { blobPath: "estimate-files/../x" }),
+    f(id(5), { contentType: "image/svg+xml" as never }), f(id(6), { size: 0 }), f(id(7), { size: e301cfMaxBytes + 1 }), f(id(8), { source: "ai" as never }), f(id(1)), null, "x"];
+  ok(e301cfClean(junk).map((x) => x.id).join() === id(1) && e301cfClean({}).length === 0, "#301 files: junk rows, duplicate ids and bad shapes are dropped on read");
+  const twelve = Array.from({ length: e301cfMax }, (_, i) => f(id(100 + i)));
+  ok(e301cfClean([...twelve, f(id(999))]).length === 12 && e301cfAppend(twelve, f(id(999))) === null && e301cfAppend([f(id(1))], f(id(2)))?.length === 2 && e301cfAppend([f(id(1))], f(id(1))) === null,
+    "#301 files: at most 12 per quote; a duplicate id is refused");
+  const gridPlan = f(id(20), { source: "grid", kind: "plan" });
+  const gridSet = f(id(21), { source: "grid", kind: "drawing" });
+  const upPlan = f(id(22), { kind: "plan" });
+  ok(e301cfVisible([gridPlan, gridSet, upPlan]).map((x) => x.id).join() === [id(21), id(22)].join() && e301cfVisible([gridPlan, gridSet]).length === 2,
+    "#301 files: an uploaded plan hides the Grid plan, never the Grid drawing set (decision 9, same kind only)");
+  const rows = e301cfRows([gridPlan, upPlan]);
+  ok(rows[0].hidden && rows[0].sourceLabel === "From the Grid" && rows[0].kindLabel === "Plan" && !rows[1].hidden && rows[1].sizeLabel === "10 B",
+    "#301 files: staff rows say what the client can't see (an overridden Grid file)");
+  const q = { packageFiles: [f(id(30))], revisions: [{ docFields: { packageFiles: [f(id(31), { blobPath: "estimate-files/Q-1/UP-0123456789abcdef/Old.pdf" })] } }, { docFields: null }] };
+  ok(e301cfRef(q, f(id(30)).blobPath) && e301cfRef(q, "estimate-files/Q-1/UP-0123456789abcdef/Old.pdf") && !e301cfRef(q, "estimate-files/Q-1/UP-0123456789abcdef/Gone.pdf"),
+    "#301 files: a blob is still referenced by the quote's list or by any revision's frozen list");
+  ok(e301cfIsId(e301cfNewId()) && e301cfNewId() !== e301cfNewId() && e301cfGridPath("Q 2041/x") === "estimate-files/Q_2041_x/grid/drawing-set.pdf",
+    "#301 files: ids are PF- + 12 hex; the Grid set has its own folder");
+  const src = readFileSync(join(process.cwd(), "src/lib/estimate-output/package-files.ts"), "utf8");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/lib\/part-docs\/files")/m.test(src), "#301 files purity: value imports only document-files and part-docs/files");
+}
