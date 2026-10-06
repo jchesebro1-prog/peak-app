@@ -51089,3 +51089,47 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
      !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback")/m.test(rd("src/lib/estimate-output/package-model.ts")),
     "#301 purity: bom.ts and package-model.ts are pure and client-safe");
 }
+
+/* ======================================================================
+   #301 slice B — package view: the server-rendered page (spec §5 order),
+   the BOM view (no prices), banners, Slice C mount points, web + print
+   CSS, and a Node render (no image import, no hooks).
+   ====================================================================== */
+import PackageView301 from "@/components/estimate-output/package-view";
+import { PACKAGE_WEB_CSS as e301bvCss } from "@/components/estimate-output/package-view";
+import { createElement as e301bvEl } from "react";
+import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
+{
+  const secs = p293Sections().map((s) =>
+    s.id === "s2" ? { ...s, clientGoals: "Even front light.", keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "A bright fresnel.", photo: true }] } : s) as E301bbSec[];
+  const doc = { ...p293Props({ sections: secs, pdfOptions: { pdfOptions: true } }), rewardsLine: "Your Gold rewards: Free freight" };
+  const base = { doc, photos: { "SKU-5": { src: "/share/quote/Q-293/t/photo/PD-5", alt: "Five" } }, catalog: new Map([["SKU-1", { mfr: "CatCo", manufacturerPartNumber: "CC-1" }]]),
+    frozen: { coverSummary: "Our summary.", notIncluded: "Permits\nPainting" }, state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
+    headerLine: "EST-1 · Rev 1 · sent Oct 5, 2026", currentHref: null, base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" };
+  const narr = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...base, view: "narrative" }) }));
+  const order = ["Narrative test", "EST-1 · Rev 1", "Our summary.", ">Narrative<", ">Rigging<", "Your goals", "Even front light.", "A bright fresnel.", ">Install<", "ADD OPTION 1", "Not included", "Permits"]
+    .map((s) => narr.indexOf(s));
+  ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 view: §5 order — header, summary, toggle, scopes (goals, intro, key products), options, Not included (${order.join(",")})`);
+  ok(narr.includes('src="/share/quote/Q-293/t/photo/PD-5"') && narr.includes('aria-current="page"') && narr.includes('href="/share/quote/Q-293/t?view=bom"') &&
+     !narr.includes("<table") && !narr.includes("[needs a paragraph]") && narr.includes("Your Gold rewards: Free freight"),
+    "#301 view: Narrative — key-product photos via the scoped route, the BOM link, no table, no staff placeholder, the totals lines");
+  const bom = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...base, view: "bom" }) }));
+  const tables = bom.match(/<table[\s\S]*?<\/table>/g) || [];
+  ok(tables.length === 4 && tables.every((t) => !t.includes("$")) && bom.includes(">Manufacturer<") && bom.includes(">CatCo<") && bom.includes(">CC-1<") && !bom.includes("A bright fresnel."),
+    "#301 view: BOM — one table per scope, Qty · Manufacturer · Part · Description, no price anywhere in a table");
+  ok(!narr.includes("data-mount") && !bom.includes("data-mount"), "#301 view: no Slice C section renders without its slot");
+  const slotted = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...base, view: "narrative" }), slots: { plans: "PLANS-SLOT", downloads: "DL-SLOT", actions: "ACT-SLOT", keyProductExtra: { "SKU-5": "DS-SLOT" } } }));
+  const so = ["A bright fresnel.", "DS-SLOT", "PLANS-SLOT", "ADD OPTION 1", "Not included", "DL-SLOT", "ACT-SLOT"].map((s) => slotted.indexOf(s));
+  ok(so.every((v, i) => v >= 0 && (i === 0 || v > so[i - 1])) && slotted.includes('data-mount="plans"') && slotted.includes('data-mount="downloads"') && slotted.includes('data-mount="actions"'),
+    `#301 view: Slice C mount points — datasheet under its key product, plans before options, downloads then actions last (${so.join(",")})`);
+  const sup = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...base, view: "narrative", currentHref: "/share/quote/Q-293/cur",
+    state: { kind: "superseded", rev: { rev: 1 }, latestRev: 3, sentAt: Date.UTC(2026, 9, 6, 15) } as never }) }));
+  ok(sup.includes('role="status"') && sup.includes("A newer version of this estimate was sent Oct 6, 2026.") && sup.includes('href="/share/quote/Q-293/cur"') && sup.includes("View the current version"),
+    "#301 view: the superseded banner links the current version");
+  ok(e301bvCss.includes("@media (max-width: 600px)") && e301bvCss.includes("@media print") && e301bvCss.includes(".pkg-bom-wrap { overflow-x: auto"),
+    "#301 view: phone rules, a print stylesheet, and a BOM that scrolls inside its card (no page-wide horizontal scroll)");
+  const comp = readFileSync(join(process.cwd(), "src/components/estimate-output/package-view.tsx"), "utf8");
+  ok(!comp.includes('"use client"') && !/\buse(State|Effect|Ref|Transition)\(/.test(comp) && !comp.includes("onClick=") && !comp.includes(".jpg") && !comp.includes("next/link") &&
+     !/^import (?!type)[^\n]*from "(?!react"|@\/lib\/quote-share\/package-view")/m.test(comp),
+    "#301 view: a server component with pure props — no hooks, handlers, image import or server module");
+}
