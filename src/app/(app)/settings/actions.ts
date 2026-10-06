@@ -19,6 +19,8 @@ import {
   type UserStatus,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
+import { saveEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
+import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import {
   resolveFieldDefs,
   slugifyFieldId,
@@ -874,4 +876,17 @@ export async function saveReviewLimitsAction(
   await setSettings({ reviewLimits: limits });
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+/** #301 — Settings → Sales & Rewards → Estimate output. Admin-only; the
+ *  stored blob is the cleaned input (lines trimmed, blanks dropped). */
+export async function saveEstimateOutputDefaultsAction(input: {
+  notIncluded: string;
+  website: string;
+}): Promise<{ ok: true; defaults: EstimateOutputDefaults } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const o = input && typeof input === "object" ? input : { notIncluded: "", website: "" };
+  const defaults = await saveEstimateOutputDefaults({ notIncluded: o.notIncluded, website: o.website });
+  revalidatePath("/", "layout");
+  return { ok: true, defaults };
 }

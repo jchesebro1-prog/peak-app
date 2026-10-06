@@ -9,6 +9,7 @@ import type { VenueType } from "@/lib/venue-types";
 import type { Pipelines } from "@/lib/pipelines";
 import type { DocumentCategory } from "@/lib/document-categories";
 import type { ReviewLimits } from "@/lib/review-limits";
+import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 
 export type UserVM = {
   id: string;
@@ -114,6 +115,8 @@ export type SettingsData = {
   documentCategories: DocumentCategory[];
   /** #242 — Settings → Sales & Rewards → Review limits (resolved; archived people's rows kept). */
   reviewLimits: ReviewLimits;
+  /** #301 — Settings → Sales & Rewards → Estimate output. */
+  estimateOutput: EstimateOutputDefaults;
   /** Settings → Pipelines (Task 7). */
   pipelines: Pipelines;
   /** Stage usage counts, keyed by pipeline id then stage id — the editor's

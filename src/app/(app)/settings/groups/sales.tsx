@@ -1,11 +1,13 @@
 "use client";
 
 import { CustomerFieldsCard } from "../customer-fields-card";
+import { EstimateOutputCard } from "../estimate-output-card";
 import { PipelinesCard } from "../pipelines-card";
 import { ReviewLimitsCard } from "../review-limits-card";
 import type { CustomFieldDef } from "@/lib/customer-fields";
 import type { Pipelines } from "@/lib/pipelines";
 import type { ReviewLimits } from "@/lib/review-limits";
+import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import { GROUP_LINKS } from "../settings-sections";
 import { LinkTiles } from "./shared";
 import type { UserVM } from "./types";
@@ -18,6 +20,7 @@ import type { UserVM } from "./types";
 export function SalesGroup({
   users,
   reviewLimits,
+  estimateOutput,
   pipelines,
   pipelineUsage,
   customerFieldDefs,
@@ -25,6 +28,8 @@ export function SalesGroup({
   users: UserVM[];
   /** #242 — resolved; archived people's rows kept. */
   reviewLimits: ReviewLimits;
+  /** #301 — the Not included default and the cover footer website. */
+  estimateOutput: EstimateOutputDefaults;
   /** Settings → Pipelines (Task 7). */
   pipelines: Pipelines;
   /** Stage usage counts, keyed by pipeline id then stage id. */
@@ -44,6 +49,7 @@ export function SalesGroup({
         key={customerFieldDefs.map((d) => d.id).join("|")}
         defs={customerFieldDefs}
       />
+      <EstimateOutputCard key={JSON.stringify(estimateOutput)} defaults={estimateOutput} />
     </>
   );
 }

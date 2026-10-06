@@ -41766,14 +41766,15 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
     "venueTypes", "intakeCatalog", "visitReasons", "consultingPhases", "consultingDisciplines", "consultingAssumptions",
     "mailboxes", "recordings", "team", "documentCategories", "beta",
   ];
+  const ADDED_CARDS = ["estimateOutput"]; // #301 — Settings → Sales & Rewards → Estimate output
   const cardKeys = scCards.map((c) => c.key as string);
   ok(cardKeys.length === new Set(cardKeys).size, "settings cleanup: no card is registered twice");
-  ok(OLD_CARDS.every((k) => cardKeys.filter((x) => x === k).length === 1) && cardKeys.length === OLD_CARDS.length,
-    `settings cleanup: all ${OLD_CARDS.length} pre-cleanup cards are registered, each in exactly one group`);
+  ok([...OLD_CARDS, ...ADDED_CARDS].every((k) => cardKeys.filter((x) => x === k).length === 1) && cardKeys.length === OLD_CARDS.length + ADDED_CARDS.length,
+    `settings cleanup: all ${OLD_CARDS.length} pre-cleanup cards (+ ${ADDED_CARDS.length} added since) are registered, each in exactly one group`);
   ok(scCards.every((c) => (groupKeys as string[]).includes(c.group)), "settings cleanup: every card's group is a real menu group");
   ok(groupKeys.every((g) => scCardsIn(g).length + scLinks[g].length > 0), "settings cleanup: no group is empty");
   ok(scCardsIn("company").join(",") === "branding,locations,federalHolidays,dashboardDefaults" &&
-    scCardsIn("sales").join(",") === "reviewLimits,pipelines,customerFields" &&
+    scCardsIn("sales").join(",") === "reviewLimits,pipelines,customerFields,estimateOutput" &&
     scCardsIn("field").join(",") === "venueTypes,intakeCatalog,visitReasons" &&
     scCardsIn("consulting").join(",") === "consultingPhases,consultingDisciplines,consultingAssumptions" &&
     scCardsIn("integrations").join(",") === "mailboxes,recordings" &&
@@ -41793,6 +41794,7 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
     reviewLimits: "<ReviewLimitsCard",
     pipelines: "<PipelinesCard",
     customerFields: "<CustomerFieldsCard",
+    estimateOutput: "<EstimateOutputCard",
     venueTypes: "<VenueTypesCard",
     intakeCatalog: ">Site intake — type catalog</div>",
     visitReasons: ">Site visits — reason picklist</div>",
@@ -50366,6 +50368,7 @@ async function estimateOutput301AAsyncChecks(): Promise<void> {
   ok(upd?.coverSummary === "New summary." && (upd?.contentChangedAt ?? null) === before,
     "#301 store: editing the cover summary is not a content change (the estimate PDF is not re-rendered)");
   await e301GoalsAsyncChecks();
+  await e301DefaultsAsyncChecks();
 }
 
 /* ======================================================================
@@ -50585,4 +50588,34 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   const effect = cli.slice(cli.indexOf("const goalsSurveyId ="), cli.indexOf("const goalsSurveyId =") + 1100);
   ok(effect.includes('aiSource?.kind === "survey"') && effect.includes("surveyGoalsAction(goalsSurveyId)") && effect.includes("setSectionsState((prev) => fillClientGoals(prev, r.goals))") && !effect.includes("writeSections") && effect.includes(".catch("),
     "#301 UI: a page opened from a site visit pre-fills matching blank goals once, automatically (R3)");
+}
+
+/* ======================================================================
+   #301 slice A — Settings → Sales & Rewards → Estimate output (R17): the
+   default Not included list and the cover footer's website, one blob.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const card = rd("src/app/(app)/settings/estimate-output-card.tsx");
+  ok(card.startsWith('"use client";') && card.includes("saveEstimateOutputDefaultsAction(") && !/from "@\/(db|lib\/stores|lib\/settings|lib\/users)"/.test(card) &&
+     card.includes(">Estimate output<") && card.includes("Not included — default list") && card.includes("Website (cover footer)"),
+    "#301 settings: the card is a client component over the action — no store/db/settings import");
+  const acts = rd("src/app/(app)/settings/actions.ts");
+  const fn = acts.slice(acts.indexOf("export async function saveEstimateOutputDefaultsAction("));
+  ok(fn.includes('await requirePerm("manage_users");') && fn.includes("saveEstimateOutputDefaults(") && fn.includes('revalidatePath("/", "layout")'), "#301 settings: the save is admin-only");
+  ok(rd("src/app/(app)/settings/groups/sales.tsx").includes("<EstimateOutputCard") && rd("src/app/(app)/settings/page.tsx").includes("estimateOutput={estimateOutput}"),
+    "#301 settings: Sales & Rewards renders the card from the stored blob");
+}
+
+async function e301DefaultsAsyncChecks(): Promise<void> {
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const D = await import("@/lib/stores/estimate-output-defaults");
+  const saved = await getBlob<Record<string, unknown>>("estimate_output_defaults", {});
+  try {
+    const out = await D.saveEstimateOutputDefaults({ notIncluded: " Permits \n\n Painting ", website: " peaksystemsgroup.com " });
+    const back = await D.getEstimateOutputDefaults();
+    ok(out.notIncluded === "Permits\nPainting" && back.notIncluded === "Permits\nPainting" && back.website === "peaksystemsgroup.com", "#301 settings: the defaults round-trip cleaned");
+  } finally {
+    await setBlob("estimate_output_defaults", { notIncluded: saved.notIncluded ?? "", website: saved.website ?? "" });
+  }
 }

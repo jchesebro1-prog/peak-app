@@ -77,6 +77,7 @@ export const SETTINGS_CARDS = [
   { key: "reviewLimits", label: "Review limits", group: "sales" },
   { key: "pipelines", label: "Pipelines", group: "sales" },
   { key: "customerFields", label: "Customer fields", group: "sales" },
+  { key: "estimateOutput", label: "Estimate output", group: "sales" },
   { key: "venueTypes", label: "Venue types", group: "field" },
   { key: "intakeCatalog", label: "Site intake — type catalog", group: "field" },
   { key: "visitReasons", label: "Site visits — reason picklist", group: "field" },

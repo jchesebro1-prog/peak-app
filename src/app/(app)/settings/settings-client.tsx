@@ -103,6 +103,7 @@ export default function SettingsClient({
           <SalesGroup
             users={data.users}
             reviewLimits={data.reviewLimits}
+            estimateOutput={data.estimateOutput}
             pipelines={data.pipelines}
             pipelineUsage={data.pipelineUsage}
             customerFieldDefs={data.customerFieldDefs}

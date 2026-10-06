@@ -9,6 +9,8 @@ import { resolveFieldDefs } from "@/lib/customer-fields";
 import { resolveDocumentCategories } from "@/lib/document-categories";
 import { venueTypesFrom } from "@/lib/venue-types";
 import { reviewLimitsFrom } from "@/lib/review-limits";
+import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
+import { sanitizeEstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import { allUsers } from "@/lib/users";
 import {
   callbackUrl,
@@ -63,6 +65,7 @@ export default async function SettingsPage() {
   const users = isAdmin ? await allUsers() : [];
   const pipelines = isAdmin ? await loadPipelines() : null;
   const pipelineUsage = isAdmin ? await stageUsage() : {};
+  const estimateOutput = isAdmin ? await getEstimateOutputDefaults() : sanitizeEstimateOutputDefaults({});
 
   // ---- Mailboxes (Gmail) — admin surface, env-gated ----
   const gmailOn = gmailEnabled();
@@ -212,6 +215,7 @@ export default async function SettingsPage() {
           documentCategories={resolveDocumentCategories(settings.documentCategories)}
           venueTypes={venueTypesFrom(settings.venueTypes)}
           reviewLimits={reviewLimitsFrom(settings.reviewLimits)}
+          estimateOutput={estimateOutput}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",
