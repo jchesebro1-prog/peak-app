@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { getBlobStream } from "@/lib/blob";
 import { keyProductPhotoDocs, PHOTO_TYPES } from "@/lib/narrative/photos";
+import { packagePhotoSections } from "@/lib/estimate-output/package-model";
 import type { QuoteRevision } from "@/lib/stores/quotes";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { PartDocument } from "@/lib/part-docs/types";
@@ -12,6 +13,8 @@ import type { PartDocument } from "@/lib/part-docs/types";
  * resolved, photo-on blocks of live parts) and serve only a member — PNG,
  * JPEG or WebP, nosniff, private 1 h, an ETag on doc id + blobKey hash (the
  * portal doc route's scheme). Anything else is a plain 404. Read-only.
+ * #301 slice B: the v2 package page serves a wider set
+ * (packagePhotoDocForRevision); both go through serveDoc.
  */
 
 export const ONLINE_PHOTO_CACHE = "private, max-age=3600";
@@ -28,11 +31,19 @@ export async function photoDocForRevision(rev: QuoteRevision, docId: string): Pr
   return null;
 }
 
+/** #301 slice B — the package page's photo set: every printed system's key
+ *  products, whatever its presentation (package-model.ts packagePhotoSections). */
+export async function packagePhotoDocForRevision(rev: QuoteRevision, docId: string): Promise<PartDocument | null> {
+  if (typeof docId !== "string" || !docId) return null;
+  const docs = await keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)));
+  for (const d of docs.values()) if (d.id === docId) return d;
+  return null;
+}
+
 /** A fresh Response per call — a body can be read only once. */
 const notFound = () => new Response("Not found", { status: 404 });
 
-export async function servePhotoForRevision(req: Request, rev: QuoteRevision, docId: string): Promise<Response> {
-  const doc = await photoDocForRevision(rev, docId);
+async function serveDoc(req: Request, doc: PartDocument | null): Promise<Response> {
   if (!doc || !doc.blobKey || !PHOTO_TYPES.has(doc.contentType)) return notFound();
   const etag = `"${doc.id}-${createHash("sha1").update(doc.blobKey).digest("hex").slice(0, 16)}"`;
   if (req.headers.get("if-none-match") === etag) {
@@ -54,4 +65,12 @@ export async function servePhotoForRevision(req: Request, rev: QuoteRevision, do
       "x-content-type-options": "nosniff",
     },
   });
+}
+
+export async function servePhotoForRevision(req: Request, rev: QuoteRevision, docId: string): Promise<Response> {
+  return serveDoc(req, await photoDocForRevision(rev, docId));
+}
+
+export async function servePackagePhotoForRevision(req: Request, rev: QuoteRevision, docId: string): Promise<Response> {
+  return serveDoc(req, await packagePhotoDocForRevision(rev, docId));
 }

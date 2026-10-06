@@ -228,6 +228,11 @@ const ROUTES = [
   // malformed one refused before any read — both the one 200 "isn't active" card.
   "/share/quote/Q-2041/1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   "/share/quote/Q-2041/not-a-token",
+  // #301 slice B — a well-formed v2 (rev-pinned) token that fails the HMAC
+  // verify: the package page compiles and answers the same 200 card, in
+  // both views.
+  "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?view=bom",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",
@@ -341,6 +346,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
   { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },
+  // #301 slice B — the share photo route with a v2 token that fails the verify: a clean 404.
+  { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/photo/PD-1", expectNotFound: true },
   // #301 — the cover print route: no token / a well-formed bad token is a clean 404 before any read.
   { route: "/print/cover/Q-2041", expectNotFound: true },
   { route: "/print/cover/Q-2041?t=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },

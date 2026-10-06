@@ -50998,6 +50998,7 @@ async function e301bLinksAsyncChecks(): Promise<void> {
    `await e301b<Part>AsyncChecks();` line at the end of this body. */
 async function estimateOutput301BAsyncChecks(): Promise<void> {
   await e301bLinksAsyncChecks();
+  await e301bPageAsyncChecks();
 }
 
 /* ======================================================================
@@ -51149,4 +51150,70 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
   ok((dup.match(/<li>Permits<\/li>/g) || []).length === 2, "#301 hardening: two identical Not-included lines render without throwing");
   const bomH = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...hb, frozen: { coverSummary: "S.", notIncluded: "" }, view: "bom" }) }));
   ok(bomH.includes('scope="col"'), "#301 hardening: BOM headers carry scope=col");
+}
+
+/* ======================================================================
+   #301 slice B — page + loader: the share page's v2 branch, the package
+   loader (frozen fields from the pinned revision only — R12), the v2
+   photo set, the photo route accepting either token, smoke routes.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const page = rd("src/app/share/quote/[id]/[token]/page.tsx");
+  ok(page.indexOf("rateLimit(") < page.indexOf("isShareTokenV2(token)") && page.indexOf("isShareTokenV2(token)") < page.indexOf("resolveSharedQuote(") &&
+     page.includes("<SharedPackagePage id={id} token={token} view={onlineView(sp.view)} />"),
+    "#301 page: a v2 token branches to the package after the rate limit and before the v1 resolve");
+  const pp = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
+  ok(pp.includes("resolveSharedPackage(id, token)") && pp.includes("loadPackageViewProps(") && (pp.match(/ONLINE_COPY\.shareInactive/g) || []).length === 1 &&
+     pp.includes("<PackageView model={model} slots={{}} />") && pp.includes("Slice C") && !pp.includes('"use client"') && !/\b(update|patchShareLink|recordShareOpen)\(/.test(pp) &&
+     !pp.includes("quoteAsOfRevision") && !pp.includes("auth(") && !pp.includes("cookies("),
+    "#301 page: the package page resolves, loads, renders PackageView with the Slice C mounts empty, one inactive card; read-only, no session");
+  const loader = rd("src/lib/estimate-output/package-loader.ts");
+  ok(loader.includes("loadQuoteDocumentProps(hit.q, { revision: hit.rev, photos: { href } })") && loader.includes("packageFrozenFields(hit.rev.docFields,") &&
+     loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), href)") && !loader.includes("quoteAsOfRevision") && !/\bq\.(coverSummary|notIncluded|packageFiles)\b/.test(loader),
+    "#301 loader: the sent revision through the web loader; cover fields from the pinned revision only (R12); every scope's photos");
+  const photo = rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts");
+  ok(photo.indexOf("rateLimit(") < photo.indexOf("isShareTokenV2(token)") && photo.indexOf("isShareTokenV2(token)") < photo.indexOf("resolveSharedQuote(") &&
+     photo.includes("servePackagePhotoForRevision(req, pkg.rev, docId)"),
+    "#301 photos: the share photo route takes a v2 token (the pinned revision's package photo set) or a v1 one (#293's)");
+  const pr = rd("src/lib/quote-share/photo-response.ts");
+  ok(pr.includes("keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)))") && pr.includes("async function serveDoc("), "#301 photos: one serving path, two photo sets");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes(`"/share/quote/Q-2041/1.1.${"A".repeat(43)}",`) && smoke.includes(`"/share/quote/Q-2041/1.1.${"A".repeat(43)}?view=bom",`) &&
+     smoke.includes(`{ route: "/share/quote/Q-2041/1.1.${"A".repeat(43)}/photo/PD-1", expectNotFound: true }`),
+    "#301 smoke: a well-formed but invalid v2 token (page + BOM view → the 200 card; photo → 404)");
+}
+
+async function e301bPageAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const L = await import("@/lib/quote-share/links");
+  const C = await import("@/lib/stores/catalog");
+  const { loadPackageViewProps } = await import("@/lib/estimate-output/package-loader");
+  const { packagePhotoDocForRevision } = await import("@/lib/quote-share/photo-response");
+  const S = "test-secret-301bp";
+  const QID = fixtureId(301, "b-page");
+  const SKU = fixtureId(301, "b-bom-part");
+  await C.upsert({ sku: SKU, desc: "Fixture 301b", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Acme Lights", manufacturerPartNumber: "AL-100" });
+  registerFixture("catalog_parts", SKU);
+  const sec = { id: "s1", name: "Stage lighting", kind: "materials", mfr: "", freightPct: 0, clientGoals: "Even light.", narrative: "Frozen intro.",
+    items: [{ id: 1, sku: SKU, desc: "Fixture", qty: 2, unit: "ea", cost: 10, price: 25 }] };
+  await Q.create({ id: QID, name: "#301b page", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", coverSummary: "Frozen summary.", notIncluded: "Permits",
+    spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
+  const made = await L.ensureShareLink(QID, "Tester", { secret: S });
+  const tok = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
+  // Edits after the send must never reach the page (R12).
+  await Q.update(QID, { coverSummary: "LIVE-UNSENT-301B", notIncluded: "LIVE-UNSENT-301B", spec: { sections: [{ ...sec, narrative: "LIVE-UNSENT-301B" }], mobs: [] } });
+  const hit = await L.resolveSharedPackage(QID, tok, { secret: S });
+  const base = "/share/quote/" + encodeURIComponent(QID) + "/" + tok;
+  const props = hit ? await loadPackageViewProps(hit, { base, view: "bom", letterheadSrc: "/_test/lh.jpg" }) : null;
+  ok(!!props && props.summary === "Frozen summary." && props.notIncluded.join("|") === "Permits" && props.scopes[0].intro.length === 1 && props.scopes[0].goals === "Even light." &&
+     !JSON.stringify(props).includes("LIVE-UNSENT-301B"),
+    "#301 loader (DB): the page shows the version that was sent — unsent edits to the summary, Not included or systems never leak (R12)");
+  ok(props?.scopes[0].bom[0]?.manufacturer === "Acme Lights" && props?.scopes[0].bom[0]?.part === "AL-100" && props?.scopes[0].price === "$50.00" && props?.view === "bom",
+    "#301 loader (DB): BOM manufacturer / part # from the catalog (getMany); the scope price");
+  ok(hit ? (await packagePhotoDocForRevision(hit.rev, "PD-NOPE-301B")) === null : false, "#301 photos (DB): a doc outside the revision's photo set is never served");
 }
