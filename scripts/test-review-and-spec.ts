@@ -50999,6 +50999,7 @@ async function e301bLinksAsyncChecks(): Promise<void> {
 async function estimateOutput301BAsyncChecks(): Promise<void> {
   await e301bLinksAsyncChecks();
   await e301bPageAsyncChecks();
+  await e301bOpensAsyncChecks();
 }
 
 /* ======================================================================
@@ -51230,4 +51231,65 @@ async function e301bPageAsyncChecks(): Promise<void> {
     "#301 panel: one line per sent revision (Rev N, superseded, opens)");
   ok(/^"use client";/.test(panel) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/quote-share\/(token|links|photo-response|package-view))/m.test(panel),
     "#301 panel: still a client component with no server value import (the rows come from the status action)");
+}
+
+/* ======================================================================
+   #301 slice B — opens (R18): the store-owned counter (row lock, no
+   updatedAt / contentChangedAt move, update() can't write it), the
+   per-IP-hash 30-minute dedupe, v2 only, team users skipped, the beacon.
+   ====================================================================== */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const qs = rd("src/lib/stores/quotes.ts");
+  const upd = qs.slice(qs.indexOf("export async function update("), qs.indexOf("\n}\n", qs.indexOf("export async function update(")));
+  const rso = qs.slice(qs.indexOf("export async function recordShareOpen("), qs.indexOf("\n}\n", qs.indexOf("export async function recordShareOpen(")));
+  ok(upd.includes("delete clean.shareOpens;") && rso.includes("patchQuote(id,") && !rso.includes("updatedAt") && rso.includes('r.reason === "sent"') &&
+     (qs.match(/\.shareOpens = /g) || []).length === (rso.match(/\.shareOpens = /g) || []).length,
+    "#301 opens: recordShareOpen is the only writer (row lock, sent revisions only, never updatedAt); update() drops a caller's shareOpens");
+  const acts = rd("src/app/share/quote/[id]/[token]/actions.ts");
+  ok(/^"use server";/.test(acts) && !/^export (?!async function)/m.test(acts) && acts.includes("export async function recordShareOpenAction(id: string, token: string): Promise<void>") &&
+     acts.indexOf("getOptionalUser()") < acts.indexOf("recordSharedOpen(") && acts.includes("clientIpFromHeaders(await headers())") && acts.includes("catch (e)"),
+    "#301 opens: the action skips team users first, keys on the client IP, never throws and returns nothing");
+  const lk = rd("src/lib/quote-share/links.ts");
+  ok(lk.includes("rateLimit(`share-open:${hit.q.id}:${hit.rev.rev}:${ipKey(ip)}`, 1, SHARE_OPEN_DEDUPE_MS)") && lk.includes('createHash("sha256")'),
+    "#301 opens: one open per IP-hash per revision per 30 minutes (the in-memory limiter)");
+  const beacon = rd("src/app/share/quote/[id]/[token]/open-beacon.tsx");
+  ok(/^"use client";/.test(beacon) && beacon.includes("useEffect(") && beacon.includes("sent.current") && beacon.includes('from "./actions"') &&
+     !/^import (?!type)[^\n]*from "@\/(lib|db)\//m.test(beacon) && beacon.includes("return null;"),
+    "#301 opens: a JS beacon (link scanners don't run it), once per page load, no server import, renders nothing");
+  const pp = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
+  ok(pp.includes("<OpenBeacon id={hit.q.id} token={token} />") && pp.indexOf("<PackageView") < pp.indexOf("<OpenBeacon"), "#301 opens: the package page mounts the beacon");
+}
+
+async function e301bOpensAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const L = await import("@/lib/quote-share/links");
+  const S = "test-secret-301bw";
+  const QID = fixtureId(301, "b-opens");
+  const sec = { id: "s1", name: "Stage lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+  await Q.create({ id: QID, name: "#301b opens", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
+  const made = await L.ensureShareLink(QID, "Tester", { secret: S });
+  const tok2 = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
+  const tok1 = made.ok && made.link.path ? made.link.path.split("/").pop()! : "";
+  const before = (await Q.get(QID))!;
+  const salt = String(Date.now() % 100_000);
+  const ipA = "198.51.100.1-" + salt;
+  const ipB = "198.51.100.2-" + salt;
+  ok((await L.recordSharedOpen(QID, tok2, ipA, { secret: S })) === true && (await L.recordSharedOpen(QID, tok2, ipA, { secret: S })) === false &&
+     (await L.recordSharedOpen(QID, tok2, ipB, { secret: S })) === true,
+    "#301 opens (DB): the first open from an IP counts, a repeat inside 30 minutes doesn't, another IP does");
+  const after = (await Q.get(QID))!;
+  ok(after.shareOpens?.["1"]?.count === 2 && after.updatedAt === before.updatedAt && after.contentChangedAt === before.contentChangedAt,
+    "#301 opens (DB): two opens on rev 1; neither updatedAt nor contentChangedAt moved");
+  ok((await L.recordSharedOpen(QID, tok1, "198.51.100.3-" + salt, { secret: S })) === false, "#301 opens (DB): a v1 link records nothing (#293 unchanged)");
+  await Q.update(QID, { shareOpens: { "1": { first: 1, last: 1, count: 999 } } } as never);
+  ok((await Q.get(QID))!.shareOpens?.["1"]?.count === 2, "#301 opens (DB): update() can't overwrite the counter");
+  ok((await Q.recordShareOpen(QID, 99, Date.now())) === false && (await Q.recordShareOpen(QID, 1, NaN)) === false, "#301 opens (DB): only a sent revision, only a real clock");
+  ok(L.shareLinkStatus((await Q.get(QID))!, true, S, Date.now()).sentRevs[0].line.startsWith("Rev 1 · opened 2× · first "), "#301 opens (DB): the Client link panel's row shows the count");
+  await L.revokeShareLink(QID, "Revoker");
+  ok((await L.recordSharedOpen(QID, tok2, "198.51.100.4-" + salt, { secret: S })) === false, "#301 opens (DB): a revoked link records nothing");
 }

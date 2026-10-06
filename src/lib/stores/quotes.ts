@@ -22,6 +22,7 @@ import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { canHavePdf, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
+import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
 import {
   carriesPipeline,
   firstStage,
@@ -319,6 +320,11 @@ export type Quote = {
    *  Settings → Estimate output default list (effectiveNotIncluded); "" = none.
    *  Not a content field. Frozen in a revision's docFields. */
   notIncluded?: string;
+  /** #301 slice B (D-o, R18) — client opens of the rev-pinned package link,
+   *  per sent revision (rev → first / last / count). Written only by
+   *  recordShareOpen under the row lock; update() drops it; never content,
+   *  never snapshotted, never copied by buildQuote. Staff-only. */
+  shareOpens?: ShareOpens | null;
 };
 
 /** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
@@ -760,6 +766,8 @@ export async function update(
     // #293 slice 3: the share link is patchShareLink's alone — a stale client
     // patch (an editor holding the pre-revoke doc) can't revive a revoked link.
     delete clean.shareLink;
+    // #301 slice B: the open counter is recordShareOpen's alone.
+    delete clean.shareOpens;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -1024,6 +1032,27 @@ export async function patchShareLink(id: string, op: ShareLinkOp): Promise<{ quo
     wrote = true;
   });
   return quote ? { quote, wrote } : null;
+}
+
+/**
+ * #301 slice B — the ONLY writer of `Quote.shareOpens`: one more open of a
+ * SENT revision, under the row lock. Never bumps `updatedAt` (the printed
+ * date / sort key / approval version) and never changes content
+ * (shareOpens isn't a QUOTE_CONTENT_FIELDS member). false = nothing written
+ * (unknown quote, not a sent revision, a bad clock, or the 100-revision cap).
+ */
+export async function recordShareOpen(id: string, rev: number, now: number): Promise<boolean> {
+  if (!Number.isSafeInteger(rev) || rev < 1 || !Number.isFinite(now)) return false;
+  let wrote = false;
+  await patchQuote(id, (doc) => {
+    const revs = Array.isArray(doc.revisions) ? doc.revisions : [];
+    if (!revs.some((r) => !!r && r.rev === rev && r.reason === "sent")) return;
+    const next = nextOpens(doc.shareOpens, rev, now);
+    if (!next) return;
+    doc.shareOpens = next;
+    wrote = true;
+  });
+  return wrote;
 }
 
 /** After a send commits: copy the current PDF onto the new sent revision (#222).

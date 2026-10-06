@@ -1,4 +1,7 @@
-import { get as getQuote, patchShareLink, type Quote, type QuoteRevision } from "@/lib/stores/quotes";
+import { get as getQuote, patchShareLink, recordShareOpen, type Quote, type QuoteRevision } from "@/lib/stores/quotes";
+import { createHash } from "node:crypto";
+import { rateLimit } from "@/lib/rate-limit";
+import { SHARE_OPEN_DEDUPE_MS } from "@/lib/estimate-output/opens";
 import { latestSentRevision } from "@/lib/quote-pdf/state";
 import { parseShareToken, SHARE_TOKEN_RE, signShareToken, signShareTokenV2, verifyShareToken, verifyShareTokenV2 } from "./token";
 import {
@@ -142,4 +145,26 @@ export async function resolveSharedPackage(
   const l = q.shareLink;
   const currentPath = state.kind === "superseded" ? sharePath(id, signShareTokenV2(secret, id, state.latestRev, l.nonce, l.expiresAt)) : null;
   return { q, rev: state.rev, state, currentPath };
+}
+
+/** Cheap per-IP guard before any read, for the open beacon. */
+export const SHARE_OPEN_PER_MIN = 30;
+
+/** The dedupe key never holds the raw IP. */
+function ipKey(ip: string): string {
+  return createHash("sha256").update(ip || "unknown").digest("base64url").slice(0, 16);
+}
+
+/**
+ * #301 slice B (D-o, R18) — record one client open of a v2 package link.
+ * v1 links and anything resolveSharedPackage refuses record nothing. At
+ * most one open per IP-hash per pinned revision per 30 minutes — in memory
+ * (the rate limiter), so a restart or a second instance can count one more;
+ * best-effort by design. The caller has already skipped team users.
+ */
+export async function recordSharedOpen(id: string, token: string, ip: string, opts: { secret?: string; now?: number } = {}): Promise<boolean> {
+  const hit = await resolveSharedPackage(id, token, opts);
+  if (!hit) return false;
+  if (!rateLimit(`share-open:${hit.q.id}:${hit.rev.rev}:${ipKey(ip)}`, 1, SHARE_OPEN_DEDUPE_MS).ok) return false;
+  return recordShareOpen(hit.q.id, hit.rev.rev, opts.now ?? Date.now());
 }

@@ -4,6 +4,7 @@ import { OnlineEstimateCard } from "@/components/online-estimate/online-estimate
 import { loadPackageViewProps } from "@/lib/estimate-output/package-loader";
 import { resolveSharedPackage } from "@/lib/quote-share/links";
 import { ONLINE_COPY, sharePath } from "@/lib/quote-share/view";
+import { OpenBeacon } from "./open-beacon";
 
 /**
  * #301 slice B — the v2 (rev-pinned) share link's page: the estimate package
@@ -20,5 +21,10 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
   const hit = await resolveSharedPackage(id, token);
   const model = hit ? await loadPackageViewProps(hit, { base: sharePath(hit.q.id, token), view, letterheadSrc: letterhead.src }) : null;
   if (!hit || !model) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
-  return <PackageView model={model} slots={{}} />;
+  return (
+    <>
+      <PackageView model={model} slots={{}} />
+      <OpenBeacon id={hit.q.id} token={token} />
+    </>
+  );
 }
