@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { withSanitizedSurveyGoals } from "@/lib/estimate-output/goals";
 import {
   get,
   update,
@@ -108,7 +109,8 @@ export async function saveSurvey(id: string, patch: SurveyPatch): Promise<void> 
   if (!id) return;
   const existing = await get(id);
   if (!existing) return;
-  await update(id, patch as Partial<SurveyRecord>);
+  // #301 (R4): Client goals are trimmed and capped (≤ 1,000) on the way in.
+  await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
   revalidatePath("/", "layout");
 }
 
@@ -147,7 +149,8 @@ export async function advanceSurveyStage(
   if (!id) return;
   const existing = await get(id);
   if (!existing) return;
-  await update(id, patch as Partial<SurveyRecord>);
+  // #301 (R4): Client goals are trimmed and capped (≤ 1,000) on the way in.
+  await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
   if (target === "scheduled") {
     await assign(id, patch.assignedTo ?? existing.assignedTo, patch.scheduledDate ?? existing.scheduledDate);
   } else {

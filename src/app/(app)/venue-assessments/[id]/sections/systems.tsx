@@ -191,6 +191,19 @@ export function SystemsSection(props: Props) {
 
   return (
     <div>
+      {/* #301: the client's goals for this discipline — copied into the matching
+          scope of the quote (Estimator → narrative column → Client goals). Inside
+          the discipline section, so it inherits the kill-question lock. */}
+      <div style={{ marginBottom: 14 }}>
+        <label style={labelStyle}>Client goals</label>
+        <textarea
+          value={String(props.value(group.key, "goals") || "")}
+          onChange={(event) => props.setValue(group.key, "goals", event.target.value)}
+          maxLength={1000}
+          placeholder="What is the client trying to solve?"
+          style={taStyle}
+        />
+      </div>
       {(group.key === "curtain" || group.key === "lighting") && (
         <div
           style={{

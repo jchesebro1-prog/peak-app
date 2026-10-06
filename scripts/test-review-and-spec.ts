@@ -50356,6 +50356,7 @@ async function estimateOutput301AAsyncChecks(): Promise<void> {
   const upd = await Q.update(QID, { coverSummary: "New summary." });
   ok(upd?.coverSummary === "New summary." && (upd?.contentChangedAt ?? null) === before,
     "#301 store: editing the cover summary is not a content change (the estimate PDF is not re-rendered)");
+  await e301GoalsAsyncChecks();
 }
 
 /* ======================================================================
@@ -50439,4 +50440,87 @@ import type { SpecSection as E301sSec } from "@/app/(app)/estimator/types";
   const src = readFileSync(join(process.cwd(), "src/lib/estimate-output/scopes.ts"), "utf8");
   ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|narrative|quote-document-view)"|@\/lib\/rewards\/points"|\.\/fields")/m.test(src),
     "#301 scopes: pure and client-safe — value imports only pricing, narrative, quote-document-view, rewards/points and fields");
+}
+
+/* ======================================================================
+   #301 slice A — goals: the survey's per-discipline Client goals, cleaned
+   on save, copied into matching blank systems, and the From site visit list.
+   ====================================================================== */
+import {
+  sanitizeSurveyDisciplineGoals as e301gSan, withSanitizedSurveyGoals as e301gWith, goalsFromSurvey as e301gFrom,
+  fillClientGoals as e301gFill, siteVisitOptions as e301gOptions,
+} from "@/lib/estimate-output/goals";
+import type { SpecSection as E301gSec } from "@/app/(app)/estimator/types";
+{
+  const disc = { lighting: { goals: "  Even wash \r\n  ", present: ["Dimmers"] }, av: { goals: 7 }, rigging: { notes: "n" }, curtain: "junk" };
+  const clean = e301gSan(disc) as Record<string, Record<string, unknown>>;
+  ok(clean.lighting.goals === "Even wash" && (clean.lighting.present as string[])[0] === "Dimmers" && !("goals" in clean.av) && clean.rigging.notes === "n" && (clean as Record<string, unknown>).curtain === "junk",
+    "#301 goals: survey goals trimmed; a non-string goals key dropped; every other field untouched");
+  ok(((e301gSan({ lighting: { goals: "x".repeat(1200) } }) as Record<string, { goals: string }>).lighting.goals.length) === 1000, "#301 goals: capped at 1,000");
+  const patch = { notes: "n" };
+  ok(e301gWith(patch) === patch && (e301gWith({ disciplines: { av: { goals: " a " } } }).disciplines as Record<string, { goals: string }>).av.goals === "a",
+    "#301 goals: a patch without disciplines passes through; one with them is cleaned");
+  const g = e301gFrom({ disciplines: { lighting: { goals: " Even wash " }, rigging: { goals: "" }, av: { goals: "Clear speech" }, other: { goals: "x" } } });
+  ok(g.lighting === "Even wash" && g.av === "Clear speech" && !("rigging" in g) && !("other" in g) && Object.keys(e301gFrom(null)).length === 0,
+    "#301 goals: goalsFromSurvey reads the four disciplines only, cleaned again (R4)");
+
+  const s = (id: string, name: string, extra: Record<string, unknown> = {}): E301gSec => ({ id, name, kind: "materials", mfr: "", freightPct: 0, items: [], ...extra }) as E301gSec;
+  const secs = [s("a", "Stage lighting"), s("b", "Rigging", { clientGoals: "Kept" }), s("c", "Misc", { discipline: "av" }), s("d", "Lighting install", { kind: "labor" }), s("e", "Track")];
+  const filled = e301gFill(secs, { lighting: "Even wash", rigging: "New", av: "Clear speech" });
+  ok(filled[0].clientGoals === "Even wash" && filled[1].clientGoals === "Kept" && filled[2].clientGoals === "Clear speech" && !filled[3].clientGoals && !filled[4].clientGoals,
+    "#301 goals: fills only blank goals on systems whose discipline (stored, else inferred) matches; labor and unknown never (R3)");
+  ok(e301gFill(secs, {}) === secs && e301gFill([s("b", "Rigging", { clientGoals: "Kept" })], { rigging: "New" }).length === 1, "#301 goals: nothing to fill → the same array (no dirty state)");
+
+  const sv = (id: string, at: number, extra: Record<string, unknown>) => ({ id, venue: "Hall " + id, customer: "C", updatedAt: at, ...extra });
+  const list = [
+    sv("FS-1", 1_000, { customerId: "c1", disciplines: { lighting: { goals: "L1" } } }),
+    sv("FS-2", 5_000, { leadId: "L-9", customerId: "other", disciplines: { av: { goals: "A2" }, lighting: { goals: "L2" } } }),
+    sv("FS-3", 3_000, { customerId: "c1", disciplines: { rigging: { goals: "" } } }),
+    sv("FS-4", 4_000, { customerId: "c2", disciplines: { lighting: { goals: "X" } } }),
+    ...[5, 6, 7, 8, 9, 10].map((n) => sv("FS-" + n, n * 10_000, { customerId: "c1", disciplines: { curtain: { goals: "C" + n } } })),
+  ];
+  const o = e301gOptions(list, { leadId: "L-9", customerId: "c1" });
+  ok(o.length === 5 && o.every((x) => x.surveyId !== "FS-3" && x.surveyId !== "FS-4") && o[0].surveyId === "FS-10",
+    "#301 site visit: the lead's + the customer's visits with goals, newest five; other customers and goal-less visits never");
+  const fs2 = e301gOptions(list, { leadId: "L-9" })[0];
+  ok(fs2.surveyId === "FS-2" && fs2.entries.map((e) => `${e.discipline}:${e.label}:${e.text}`).join("|") === "lighting:Lighting:L2|av:AV:A2" && fs2.label.startsWith("Hall FS-2 · "),
+    "#301 site visit: entries in discipline order with labels; the option label names the venue and date");
+  ok(e301gOptions(list, {}).length === 0, "#301 site visit: no lead and no customer → nothing");
+
+  const acts = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
+  const saveBody = acts.slice(acts.indexOf("export async function saveSurvey("), acts.indexOf("export async function printSurveySheet("));
+  const advBody = acts.slice(acts.indexOf("export async function advanceSurveyStage("), acts.indexOf("export async function deleteSurvey("));
+  ok(saveBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);") && advBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);"),
+    "#301 goals: saveSurvey and advanceSurveyStage clean the goals before writing (R4)");
+  const box = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/sections/systems.tsx"), "utf8");
+  ok(box.includes(">Client goals</label>") && box.includes('placeholder="What is the client trying to solve?"') && box.includes('props.setValue(group.key, "goals", event.target.value)') &&
+     box.indexOf(">Client goals</label>") < box.indexOf(">Present</label>"), "#301 goals: the box sits at the top of each discipline section (inside its lock)");
+  const oa = readFileSync(join(process.cwd(), "src/app/(app)/estimator/output-actions.ts"), "utf8");
+  ok(/^"use server";/.test(oa) && (oa.match(/await requireUser\(\);/g) || []).length === 2 && oa.includes("export async function surveyGoalsAction(") && oa.includes("export async function siteVisitGoalsAction("),
+    "#301 goals: the two actions are signed-in only");
+}
+
+async function e301GoalsAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const S = await import("@/lib/stores/surveys");
+  const Q = await import("@/lib/stores/quotes");
+  const { surveyGoalsFor, siteVisitGoalsFor } = await import("@/lib/estimate-output/survey-goals-server");
+  const CID = fixtureId(301, "goals-cust");
+  const A = fixtureId(301, "goals-a");
+  const B = fixtureId(301, "goals-b");
+  const QID = fixtureId(301, "goals-quote");
+  await S.create({ id: A, customer: "Spec fixture", customerId: CID, venue: "Main hall", disciplines: { lighting: { goals: "  Even wash  " }, av: { goals: "x".repeat(1200) } } });
+  registerFixture("surveys", A);
+  await S.create({ id: B, customer: "Spec fixture", customerId: CID, venue: "Annex", disciplines: { rigging: { goals: "" } } });
+  registerFixture("surveys", B);
+  const one = await surveyGoalsFor(A);
+  ok(one?.label === "Main hall" && one.goals.lighting === "Even wash" && one.goals.av?.length === 1000, "#301 goals: surveyGoalsFor cleans what it copies (the push path never sanitized it)");
+  ok((await surveyGoalsFor(fixtureId(301, "goals-none"))) === null, "#301 goals: an unknown survey → null");
+  const byCust = await siteVisitGoalsFor({ customerId: CID });
+  ok(byCust.length === 1 && byCust[0].surveyId === A, "#301 site visit: the customer's visits with goals (a goal-less visit is left out)");
+  await Q.create({ id: QID, name: "#301 goals", customer: "Spec fixture", customerId: CID, owner: "spec", quoteType: "system" });
+  registerFixture("quotes", QID);
+  const byQuote = await siteVisitGoalsFor({ quoteId: QID, customerId: "someone-else" });
+  ok(byQuote.length === 1 && byQuote[0].surveyId === A, "#301 site visit: a saved quote's own customer wins over the posted one");
+  ok((await siteVisitGoalsFor({})).length === 0, "#301 site visit: nothing to match → empty");
 }
