@@ -50898,14 +50898,20 @@ import type { Quote as E301bsQuote, QuoteRevision as E301bsRev } from "@/lib/sto
   // ---- per-revision rows (R11) ----
   const withOpens = { revisions: revs, shareOpens: { "1": { first: AT1, last: AT3, count: 2 } } };
   const rows = e301bsRows(withOpens);
-  ok(rows.length === 2 && rows[0].rev === 3 && rows[0].revNo === 2 && rows[0].latest && rows[0].line === "Rev 2 · not opened yet" &&
-     rows[1].rev === 1 && rows[1].revNo === 1 && !rows[1].latest && rows[1].line === "Rev 1 — superseded · opened 2× · first Oct 5 · last Oct 6",
+  ok(rows.length === 2 && rows[0].rev === 3 && rows[0].revNo === 2 && rows[0].latest && rows[0].line === "Rev 2 · sent Oct 6, 10:00 AM · not opened yet" &&
+     rows[1].rev === 1 && rows[1].revNo === 1 && !rows[1].latest && rows[1].line === "Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6",
     "#301 rows: sent revisions newest first, printed as Rev N (sentDocumentStamp — rev 3 prints Rev 2), with their opens");
+  // Two sends that both print "Rev 1" (D567: the PDF stamp is frozen at save) must still read differently.
+  const dfRev = (n: number, at: number) => ({ ...rev(n, "sent", at), docFields: { revNo: 1, issuedAt: AT1 } }) as unknown as E301bsRev;
+  const sameNo = e301bsRows({ revisions: [dfRev(1, AT1), dfRev(2, AT1 + 12 * 60_000)] });
+  ok(sameNo.length === 2 && sameNo[0].revNo === 1 && sameNo[1].revNo === 1 && sameNo[0].line !== sameNo[1].line &&
+     sameNo[0].line === "Rev 1 · sent Oct 5, 10:12 AM · not opened yet" && sameNo[1].line === "Rev 1 — superseded · sent Oct 5, 10:00 AM · not opened yet",
+    "#301 rows: two sent revisions with the same printed Rev N read differently (each row carries its send date and time)");
   ok(e301bsRows({ revisions: [rev(1, "manual", 1)] }).length === 0 && e301bsRows(null).length === 0, "#301 rows: none before the first send");
   const chip = e301bsChip(withOpens);
-  ok(chip?.label === "Opened" && chip.title === "Client link — Rev 1 — superseded · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
+  ok(chip?.label === "Opened" && chip.title === "Client link — Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
     "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title");
-  ok(e301bsLatest(withOpens) === "Client link — Rev 2 · not opened yet" && e301bsLatest({ revisions: revs }) === "" && e301bsCopy.clientLink === "Client link",
+  ok(e301bsLatest(withOpens) === "Client link — Rev 2 · sent Oct 6, 10:00 AM · not opened yet" && e301bsLatest({ revisions: revs }) === "" && e301bsCopy.clientLink === "Client link",
     "#301 lead line: the latest revision's row once anything was opened, else nothing");
 
   // ---- purity ----
@@ -50979,7 +50985,7 @@ async function e301bLinksAsyncChecks(): Promise<void> {
   const sup = await L.resolveSharedPackage(QID, tokA, { secret: S, now });
   ok(sup?.state.kind === "superseded" && sup.rev.rev === 1 && sup.currentPath === view2?.pathV2, "#301 links (DB): the old v2 link → superseded, pointing at the current version");
   const st = L.shareLinkStatus((await Q.get(QID))!, true, S, now);
-  ok(st.sentRevs.map((r) => r.line).join(" | ") === "Rev 2 · not opened yet | Rev 1 — superseded · not opened yet", "#301 links (DB): the status lists each sent rev, newest first, as Rev N");
+  ok(st.sentRevs.map((r) => r.line.replace(/sent [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M/, "sent <t>")).join(" | ") === "Rev 2 · sent <t> · not opened yet | Rev 1 — superseded · sent <t> · not opened yet", "#301 links (DB): the status lists each sent rev, newest first, as Rev N");
 
   await Q.update(QID, { status: "draft" });
   ok((await L.resolveSharedPackage(QID, tokB, { secret: S, now }))?.state.kind === "revising" && (await L.resolveSharedPackage(QID, tokA, { secret: S, now }))?.state.kind === "superseded",
@@ -51144,8 +51150,8 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
   const hb = { doc, photos: {}, catalog: new Map(), state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
     headerLine: "EST-1 · Rev 1 · sent Oct 5, 2026", currentHref: null, base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" };
   const dup = e301bvRender(e301bvEl(PackageView301, { model: { ...e301bmModel({ ...hb, frozen: { coverSummary: "S.", notIncluded: "Permits" }, view: "narrative" }), notIncluded: ["Permits", "Permits"] } }));
-  ok(e301bvCss.includes("overflow-wrap: anywhere") && e301bvCss.includes(".pkg-bom td {") && /\.pkg-bom td \{[^}]*overflow-wrap: anywhere/.test(e301bvCss) &&
-     /\.pkg \{[^}]*overflow-wrap: anywhere/.test(e301bvCss) && /\.pkg-toggle a \{[^}]*min-height: 44px/.test(e301bvCss),
+  ok(!e301bvCss.includes("overflow-wrap: anywhere") && /\.pkg-bom td \{[^}]*overflow-wrap: break-word/.test(e301bvCss) &&
+     /\.pkg \{[^}]*overflow-wrap: break-word/.test(e301bvCss) && /\.pkg-bom th \{[^}]*white-space: nowrap/.test(e301bvCss) && /\.pkg-bom-wrap \{[^}]*overflow-x: auto/.test(e301bvCss) && /\.pkg-toggle a \{[^}]*min-height: 44px/.test(e301bvCss),
     "#301 hardening: long words wrap (.pkg, BOM cells) and the toggle links are 44px tap targets");
   ok(!dup.includes("SKU-SECRET-5") && dup.includes("A bright fresnel."), "#301 hardening: a key product's sku is never rendered (it is only a React key)");
   ok((dup.match(/<li>Permits<\/li>/g) || []).length === 2, "#301 hardening: two identical Not-included lines render without throwing");
@@ -51289,7 +51295,7 @@ async function e301bOpensAsyncChecks(): Promise<void> {
   await Q.update(QID, { shareOpens: { "1": { first: 1, last: 1, count: 999 } } } as never);
   ok((await Q.get(QID))!.shareOpens?.["1"]?.count === 2, "#301 opens (DB): update() can't overwrite the counter");
   ok((await Q.recordShareOpen(QID, 99, Date.now())) === false && (await Q.recordShareOpen(QID, 1, NaN)) === false, "#301 opens (DB): only a sent revision, only a real clock");
-  ok(L.shareLinkStatus((await Q.get(QID))!, true, S, Date.now()).sentRevs[0].line.startsWith("Rev 1 · opened 2× · first "), "#301 opens (DB): the Client link panel's row shows the count");
+  ok(L.shareLinkStatus((await Q.get(QID))!, true, S, Date.now()).sentRevs[0].line.startsWith("Rev 1 · sent ") && /· opened 2× · first /.test(L.shareLinkStatus((await Q.get(QID))!, true, S, Date.now()).sentRevs[0].line), "#301 opens (DB): the Client link panel's row shows the count");
   await L.revokeShareLink(QID, "Revoker");
   ok((await L.recordSharedOpen(QID, tok2, "198.51.100.4-" + salt, { secret: S })) === false, "#301 opens (DB): a revoked link records nothing");
 }

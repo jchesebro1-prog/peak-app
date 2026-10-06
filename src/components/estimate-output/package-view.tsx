@@ -24,7 +24,7 @@ export type PackageSlots = {
 };
 
 export const PACKAGE_WEB_CSS = `
-.pkg { display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.55; color: #16181d; overflow-wrap: anywhere; }
+.pkg { display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.55; color: #16181d; overflow-wrap: break-word; }
 .pkg-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 22px 26px; }
 .pkg-logo-full { display: block; width: 100%; height: auto; margin-bottom: 16px; }
 .pkg-logo { display: block; max-height: 64px; max-width: 100%; object-fit: contain; margin-bottom: 16px; }
@@ -57,8 +57,8 @@ export const PACKAGE_WEB_CSS = `
 .pkg-kp img { float: right; width: 34%; max-height: 2.4in; object-fit: contain; margin: 0 0 8px 14px; }
 .pkg-bom-wrap { overflow-x: auto; }
 .pkg-bom { width: 100%; border-collapse: collapse; font-size: 13px; }
-.pkg-bom th { text-align: left; font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e4e7ec; padding: 6px 8px; }
-.pkg-bom td { border-bottom: 1px solid #f0f1f4; padding: 6px 8px; vertical-align: top; overflow-wrap: anywhere; }
+.pkg-bom th { white-space: nowrap; text-align: left; font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e4e7ec; padding: 6px 8px; }
+.pkg-bom td { border-bottom: 1px solid #f0f1f4; padding: 6px 8px; vertical-align: top; overflow-wrap: break-word; }
 .pkg-bom .pkg-qty { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pkg-row { display: flex; justify-content: space-between; gap: 12px; }
 .pkg-total { font-size: 18px; font-weight: 700; }

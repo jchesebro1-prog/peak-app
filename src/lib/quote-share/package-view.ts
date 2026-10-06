@@ -69,11 +69,17 @@ export function packageBanner(s: VisiblePackageState, currentHref: string | null
   return null;
 }
 
+/** "Oct 5, 10:42 PM" in Chicago time (ICU's narrow no-break space normalised). */
+const sentStamp = (ms: number) =>
+  new Date(ms)
+    .toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })
+    .replace(/[\u202f\u00a0]/g, " ");
+
 export type OpensSource = { revisions?: QuoteRevision[] | null; shareOpens?: unknown };
 export type SentRevRow = { rev: number; revNo: number; sentAt: number; latest: boolean; opens: ShareOpenStat | null; line: string };
 
-/** Staff-side: every sent revision, newest first — "Rev 2 · opened 3× · …",
- *  "Rev 1 — superseded · not opened yet". Never carries a path. */
+/** Staff-side: every sent revision, newest first — "Rev 2 · sent Oct 6, 10:00 AM · opened 3× · …",
+ *  "Rev 1 — superseded · sent Oct 5, 9:58 PM · not opened yet". Never carries a path. */
 export function sentRevisionRows(q: OpensSource | null | undefined): SentRevRow[] {
   const revs = Array.isArray(q?.revisions) ? (q!.revisions as QuoteRevision[]) : [];
   const latest = latestSentRevision(revs);
@@ -83,7 +89,9 @@ export function sentRevisionRows(q: OpensSource | null | undefined): SentRevRow[
     const { revNo, issuedAt } = sentDocumentStamp({ revisions: revs }, r);
     const opens = opensFor(q?.shareOpens, r.rev);
     const isLatest = r === latest;
-    rows.push({ rev: r.rev, revNo, sentAt: issuedAt, latest: isLatest, opens, line: `Rev ${revNo}${isLatest ? "" : " — superseded"} · ${opensSummary(opens)}` });
+    // The row's own send time (r.at, never the frozen PDF stamp): two sends can print the same Rev N (D567).
+    rows.push({ rev: r.rev, revNo, sentAt: issuedAt, latest: isLatest, opens,
+      line: `Rev ${revNo}${isLatest ? "" : " — superseded"} · sent ${sentStamp(r.at)} · ${opensSummary(opens)}` });
   }
   return rows.reverse();
 }
