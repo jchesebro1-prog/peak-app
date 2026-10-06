@@ -730,5 +730,45 @@ See `.env.example`.
     idempotent. No migration. Remaining is Jeff-gated: the production import
     (runbook in PUNCHLIST #300) and a fuller DaVinci export. Punch item #300.
 
+40. ✅ **Two-prong estimate output** (#301, D613–D634) — one estimate, two client
+    outputs from the same printed systems. Systems carry a discipline (blank =
+    inferred, never stored), client goals (pre-filled from the site visit's new
+    per-discipline **Client goals** box; From site visit) and a cover paragraph
+    override (`src/lib/estimate-output/`: `fields`, `goals`, `scopes`, `cover`,
+    `cover-loader`); the quote carries an overall summary and a Not included list
+    (default in Settings → Sales & Rewards → Estimate output, blob
+    `estimate_output_defaults`). The customer preview's **Cover & package** block
+    downloads a 1–2 page Arial **Cover PDF** rendered from the LIVE quote
+    (`/print/cover/[id]`, print token `cover`; `/api/quotes/[id]/cover-pdf`):
+    per-scope paragraph + price, the estimate's own totals lines, add options,
+    Not included, the link line and the Lead estimator's signature. Copy client
+    link now mints a **v2 token pinned to a sent revision**
+    (`quote-share/token.ts`, `pathV2`, `resolveSharedPackage` in `links.ts`;
+    v1 links keep #293's page) that opens a frozen package page
+    (`components/estimate-output/package-view.tsx` via
+    `share/quote/[id]/[token]/package-page.tsx`, `estimate-output/package-loader.ts`,
+    pure `package-model.ts`, `bom.ts`, `quote-share/package-view.ts`): grand
+    total, summary, per-scope goals / intro / key-product photos, a Narrative /
+    BOM toggle with no money, add options, Not included, superseded / revising /
+    closed banners, plus per-key-product datasheet links
+    (`/share/.../doc/[docId]`, scoped coverage `loadScopedCoverage`), a zip
+    (`package.zip`, `package-zip-server.ts`, Blob cache `estimate-package/<q>/rev-<n>.zip`,
+    production only), Plans & risers from store-owned `Quote.packageFiles`
+    (`package-files.ts`, upload broker `/api/quotes/[id]/package-files/upload`,
+    `/share/.../file/[fileId]`; **Generate from Grid** prints the drawing set
+    through `/print/grid-set/<project>~<option>` with per-asset tokens and
+    `renderPrintRouteToPdf` `waitFor`), and client actions (`responses.ts`,
+    `responses-server.ts`, store-owned `Quote.clientResponses`: choose scopes /
+    ask a question, JS-only forms, honeypot, rate limits, a task + note + lead
+    activity, **never a status change**). Opens are a JS beacon into store-owned
+    `Quote.shareOpens` (Client link panel, Quotes hub **Opened** chip, lead
+    drawer). Staff side is `estimator/package-staff-panel.tsx` +
+    `package-actions.ts` under Client link (gap chips, drawings, responses,
+    Rebuild package). No migration, no AI. Remaining is Jeff-gated: fill
+    Settings → Estimate output, the post-merge production check (PDF drawing
+    under its CSP in Chrome and Safari, Generate from Grid, zip twice, a
+    signed-out submit), and the open questions (Rev numbering, BOM quantities,
+    cover heading). Punch item #301.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

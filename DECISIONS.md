@@ -9303,3 +9303,225 @@ ports, docs or model numbers is dropped (646 such types carry a plan image), so 
 Peak has ETC's dealer permission to use DaVinci's product drawings (Jeff, 2026-10-05). The drawings stay private — signed-in
 routes only, the portal unchanged (D608). Out of scope: true-to-scale drawings from real product dimensions, rotating
 symbols, symbols in the customer portal, a per-sheet scale.
+
+## D613. A scope is a printed system; it carries a discipline, client goals and a cover paragraph (#301 slice A, 2026-10-05)
+
+A "scope" on both outputs is a `SpecSection` that prints, in the order `quoteDocumentDataFor` prints it. Its price is the
+system's own sell subtotal (rounding and `sellOverride` included), and the grand total is the document's own total, so
+nothing re-prices (`Σ scope prices − Rewards credit = Total`, R1). A labor system is a scope too: its own name, its one
+"Installation, commissioning & project management" row and price, and it never has a discipline (R2). `SpecSection` gains
+`discipline` (lighting / rigging / curtain / av — the survey's `DisciplineKey`), `clientGoals` (≤ 1,000) and `coverText`
+(≤ 1,500), cleaned server-side beside the key-product sanitize on Save, Move and both Copies (`withSanitizedOutputFields`).
+A blank discipline is inferred from the system name by word-boundary keywords, for goal matching and display only, and is
+never stored (R19: `track` counts only beside curtain / drape, so "track lighting" is lighting). The fields ride `spec`, so
+like `room` an edit asks for a Save and re-renders the estimate PDF. **Load system** drops `clientGoals` and `coverText`
+(written for another customer) and keeps the discipline (R5). Same-estimate Copy and Move keep all three.
+
+## D614. Client goals per site-visit discipline pre-fill matching systems; they never create one (#301 slice A, 2026-10-05)
+
+The venue assessment's discipline sections start with a **Client goals** box (`disciplines[key].goals`, ≤ 1,000, inside the
+kill-question lock), cleaned in `saveSurvey` and `advanceSurveyStage` and again wherever copied (the sync push path has no
+sanitizer, R4). An Estimator opened from a survey fills blank `clientGoals` once, on systems whose discipline (stored, else
+inferred) matches. It never adds a system or a section. **From site visit ▾** in the narrative column lists the quote's
+lead's and customer's visits with goals (newest five) and appends one (capped at 1,000).
+`draftQuoteScopeAction` is unchanged (R3 replaced the spec's Draft-scope copy). A blank box shows "Add the client's goals"
+in amber and never blocks. Goals do not print on the venue-assessment PDF in this slice.
+
+## D615. The cover paragraph rule; a missing paragraph never blocks (#301 slice A, 2026-10-05)
+
+Override (`coverText`, typed or **Use selection as cover** on the intro) → the intro's first paragraph → for a labor system
+"Installation, commissioning & project management." → the first key product's first paragraph → the visible
+"[needs a paragraph]" (grey italic on the PDF). A chip in the narrative column names which one prints. The placeholder is
+staff-only: it never reaches the package page (D624), and neither output ever refuses to render because of it. There is no AI
+anywhere in this path (D89).
+
+## D616. Overall summary and Not included live on the quote; the default lives in Settings (#301 slice A, 2026-10-05)
+
+`Quote.coverSummary` (≤ 3,000) and `notIncluded` (≤ 3,000, one item per line) save with Save and autosave like the cover
+note. They are not `QUOTE_CONTENT_FIELDS` (R14), so neither re-renders the estimate PDF. Absent `notIncluded` means the
+Settings default (the Estimator seeds its textarea with it, so the first Save stores it, and **Reset to default** restores
+it); `""` prints nothing. A blank summary prints "This estimate includes N scopes: A, B and C." Each new revision freezes
+both in `docFields`, with `notIncluded: null` when the quote never stored one. **Narrow R12 exception:** a revision frozen
+with `notIncluded: null` shows today's Settings default on the package page (D622), the same rule the cover applied, rather
+than empty. A revision frozen with a string shows that string.
+
+## D617. Settings → Sales & Rewards → Estimate output (#301 slice A, 2026-10-05)
+
+One admin-only settings blob, `estimate_output_defaults` `{ notIncluded, website }`, kept by the go-live wipe. It is a card
+in the existing Sales & Rewards group, not a new menu group, because the settings-cleanup harness pins the card lists and
+count; exactly those three pins were updated for the added card (R17 asked for a section, this is the smallest change that
+fits). `website` is an unvalidated string rendered as text in the cover footer.
+
+## D618. The Cover PDF is rendered from the live quote, on demand (#301 slice A, 2026-10-05)
+
+Letter, 0.75in margins, Arial (Helvetica or Liberation Sans where Chrome has no Arial), one to two pages. It is rendered
+through the signed `/print/cover/[id]` (print token kind `cover`, 120 s) and the existing headless-Chrome renderer, and
+downloaded from `/api/quotes/[id]/cover-pdf` (signed-in; 404 for a service quote, same text as an unknown id; 45 s render,
+55 s abort, `printOriginFor`). Entry point is the customer preview's **Cover & package** block only; no toolbar ⋯ entry,
+because that menu is `QuoteNextStep`'s shared approval menu (D-p adapted). Content: underlined centered title, project
+block, one paragraph and bold price per scope, the summary, the totals exactly as the estimate prints them (Rewards credit,
+POR wording, purchase perks, standing lines), numbered ADD OPTION lines when the quote's Options toggle is on (D-f), Not
+included, the link line, and the signature block with Accepted by / Date lines. **It reads the live quote (D-p), so a cover
+printed after an edit that has not been re-sent can differ from the page behind the link line.** The link line prints the
+active v2 link (`pathV2`, D620) when the estimate is online, else nothing; its origin is the print origin, so make covers
+from production. The letterhead prints on page 1 only; the footer repeats on every page through a fixed footer over a
+repeating `<tfoot>` spacer.
+
+## D619. The signer is the Lead estimator; the footer comes from Settings (#301 slice A, 2026-10-05)
+
+R16: `owner` is a name string, resolved against `allUsers()` by exact, case-insensitive, unique match. Else `preparedBy` the
+same way. Else the block prints "Peak Systems Group" with no person, and tasks go to every active `approve` holder (D632).
+The block shows that user's name, title, phone and email from Team. The footer is one line: company name · primary office
+street, city, state zip · office phone · website (Settings → Estimate output, D617).
+
+## D620. The client link pins a sent revision: v2 tokens (#301 slice B, 2026-10-05)
+
+Copy client link mints `<exp>.<rev>.<mac>`, the MAC (HMAC-SHA256 with `AUTH_SECRET`) over
+`share:quote:<id>:<rev>:<nonce>:<exp>`: six `:`-fields against v1's five, so neither MAC can stand in for the other (the
+harness checks both directions). It reuses the quote's one nonce and expiry, so Revoke still kills every link. `rev` is
+`QuoteRevision.rev` (manual snapshots count); every page prints the PDF's "Rev N" (`sentDocumentStamp`). **v1 links
+(`<exp>.<mac>`) keep #293's page exactly:** latest sent, no tracking, no actions. `ShareLinkView.path` stays the v1 path
+(a #293 pin); the v2 path is the new optional `pathV2`, and the cover's link line prints it. The v2 page is its own server
+component (`package-page.tsx`); `page.tsx` only adds one early branch.
+
+## D621. Superseded and revising pages keep what was sent (#301 slice B, 2026-10-05)
+
+`packageState` (`quote-share/package-view.ts`): ok, superseded, revising, closed or inactive. A pinned revision that is no
+longer the latest sent one shows the frozen page under "A newer version of this estimate was sent <date>." and **View the
+current version** (the v2 link for the latest, same nonce and expiry). A quote recalled to draft shows the pinned page under
+"Peak is revising this estimate." A lost quote shows "This estimate is closed." **This supersedes #293 decision 16 for v2
+links**: "frozen" means the client keeps what was sent, and Revoke is the kill switch. `canAct` is true only for the latest
+revision of a `sent` quote; won, lost, superseded, revising and inactive pages get no actions. Datasheet links, Downloads
+and Plans & risers still show in every visible state (D627).
+
+## D622. The package page reads only what was sent; the portal page is unchanged (#301 slice B, 2026-10-05)
+
+The page goes through #293's web loader (`loadQuoteDocumentProps` with the pinned revision, which fails closed) and never
+calls `quoteAsOfRevision`. The summary, Not included and drawings come from that revision's `docFields` only (R12);
+`quoteAsOfRevision` spreads `docFields` over the live quote, so a revision cut before #301 would otherwise show unsent,
+live text. A missing key reads empty, except the `notIncluded: null` case in D616. Header fields keep #293's fallback.
+`/portal/quotes/[id]` stays #293's page (D-i); the package is the share link only. Never on the page: cost, margin, tier,
+unit or line sell, `sellOverride`, internal notes, room, labor groups, vendor terms, owner email, datasheet gaps, responses,
+opens, blob paths, and any other revision's content.
+
+## D623. The package BOM: line fields first, catalog second, no money (#301 slice B, 2026-10-05)
+
+`packageBomRows` (`estimate-output/bom.ts`, R6) reads the customer's own rows (`customerLines`: no options, credit or
+overhead lines). Manufacturer and Part come from the line (`manufacturer`, `manufacturerPartNumber`, frozen with the
+revision), else the catalog part by sku (`getMany`), else blank. Allowance, vendor and placeholder-sku lines never borrow a
+catalog part. Labor lines are dropped, except that a labor system is its one document row. `PackageBomRow` has no money
+field, and the harness checks both the keys and the rendered tables. **The BOM shows quantities even when the estimate PDF
+hides them** (`pdfQty`); open question for Jeff.
+
+## D624. Key products show on every scope; the page never shows the staff placeholder (#301 slice B, 2026-10-05)
+
+The package's Narrative view is page-wide, so key products and their photos show on every scope, not only on
+Narrative-presentation systems. The v2 photo route serves the pinned revision's `packagePhotoSections` set; the v1 set is
+unchanged. A scope with no intro and no key products shows its cover override or the labor wording; failing that, "The full
+parts list for this scope is under BOM." `[needs a paragraph]` never reaches a client. The cover has no per-scope heading
+(its price line names the scope), and the page's scope card has one; open question for Jeff.
+
+## D625. Opens are counted by a JS beacon, per sent revision, best effort (#301 slice B, 2026-10-05)
+
+This reverses #293's "no view tracking". The page's `OpenBeacon` calls `recordShareOpenAction` once per load from
+`useEffect`, so link-preview bots and mail scanners that don't run JS aren't counted (R18). A signed-in team member is
+skipped. The action dedupes one open per HMAC'd IP per revision per 30 minutes in an **in-memory** limiter: per server
+instance and best effort, and under `next dev` every reload counts. `Quote.shareOpens` (`{ first, last, count }` per rev) is
+store-owned: `recordShareOpen` writes it under the row lock, never moves `updatedAt`, and `update()` drops it. It shows in
+the Client link panel, as the Quotes hub's **Opened** chip and in the lead drawer. v1 links record nothing. The action is
+fetch-based, so it passes Next's Origin check under `Referrer-Policy: no-referrer`; a no-JS form post would send
+`Origin: null` and be refused (D631).
+
+## D626. The panel lists each sent revision with its send time, because two sends both print "Rev 1" (#301 slice B, 2026-10-05)
+
+The #293 D567 rule prints Rev 1 for both the first and the second send of a quote, online and on the PDF. The Client link
+panel's per-revision rows (visible to anyone signed in; paths stay Send-only) therefore show the send time beside "Rev N",
+so the rows can be told apart. The numbering rule itself is untouched; open question for Jeff.
+
+## D627. The package's documents: scoped coverage, any visible state (#301 slice C, 2026-10-05)
+
+Each key product links its datasheet (`/share/quote/<id>/<v2>/doc/<docId>`: attachment, nosniff, `sandbox; default-src 'none'`
+CSP, 120 / min / IP). The set is what the staff client package would carry for the pinned SENT revision: `quoteBom` (rack
+lines expand to members; labor, credit and zero-qty lines drop out) and `resolvePackageDocs` in the quote's own context,
+datasheets and spec sheets with a stored file only; link-only placeholders are skipped. Public routes read coverage through
+`loadScopedCoverage`: three filtered queries (the revision's skus' document links, those documents, the accessory links
+whose accessory is one of those skus), never the whole catalog or document tables, and no legacy backfill (a public request
+never writes). It gives the full index's answer for that context, and a harness DB check compares the two. A bad token on the photo, doc,
+file and zip routes answers a uniform 404. Datasheet gaps stay **staff-only** chips (D633).
+
+## D628. The package zip: in memory, capped, cached per sent revision in production only (#301 slice C, 2026-10-05)
+
+`/share/…/package.zip` (6 / 10 min / IP) holds `Specifications.docx` (the D94 `assemble` + `buildSpecDocx` over the
+revision's BOM, through `quoteSpecParts`, the staff client package's own spec step extracted unchanged; added only when a BOM
+row assembles into a section), every datasheet and spec sheet (rack submittal caps: 25 MB a file, 60 MB in all, 45 s), and a
+`LEFT OUT.txt` naming anything skipped and why. No manuals, cut sheets or rack sheets. Nothing to include → 404 and no
+Downloads card. The first download caches the zip in private Blob at `estimate-package/<quote>/rev-<rev>.zip` (`putBlobAt`,
+no random suffix); only a build with nothing left out, or left out only by the size cap, is cached. **The cache is
+production-only:** `packageZipCacheOn` needs `VERCEL_ENV=production` (or `ESTIMATE_PACKAGE_CACHE=1`) plus Blob. Preview and
+local runs build every time and never read, write or delete the cache, because a scratch datadir reuses real quote ids next
+to the production Blob token and a preview shares the production database. Staff **Rebuild package** deletes the quote's
+cached zips under the same gate. A cached zip is stale until Rebuild (a follow-up).
+
+## D629. Package drawings: store-owned, frozen per send, an upload overrides Grid (#301 slice C, 2026-10-05)
+
+`Quote.packageFiles` (≤ 12; plan / riser / drawing set; PDF, PNG, JPEG or WebP ≤ 25 MB, magic-byte checked, private Blob,
+uploaded straight from the browser like the `documents` collection) has two writers, `addPackageFile` / `removePackageFile`,
+under the row lock. `update()` drops it, and it is not content, so attaching a drawing never stales the estimate PDF. Every
+new revision freezes the list in `docFields`. They are an annex, not priced content (R13): while the online state is ok,
+each write is also stamped on the latest sent revision; while revising, a change waits for the next send; a revision cut
+before #293 is never given `docFields`. The page and `/share/…/file/<id>` read only the pinned revision's list (R12), serving
+the stored content type with nosniff and a sandbox CSP, inline for PDF and images. An upload of a kind hides Grid files of
+that kind (decision 9; the Upload select defaults to Drawing set). **Removing a drawing deletes its blob only when no
+revision still lists it**, so a superseded link keeps showing what it was sent. A failed upload can leave an orphan `UP-`
+blob (follow-up sweep).
+
+## D630. The Grid drawing set prints through a signed route (#301 slice C, 2026-10-05)
+
+`gridProjectForQuote` scans designs for the option whose `quoteId` is the quote (else a legacy `doc.quoteId`); there is no
+stored back-link (R9). The set's data loader (`design/drawing-set-data.ts`) and sheets (`components/drawing/
+drawing-set-sheets.tsx`) are shared by the team page and `/print/grid-set/<project>~<option>` (print token kind `grid-set`,
+11×17). The print page signs a separate token per sheet source and symbol drawing it draws (`<set>|sheet|<id>`,
+`<set>|doc|<id>`), so an asset route serves only what that page drew; the sheet route also checks the sheet is on the
+project. `renderPrintRouteToPdf` gained `waitFor` and a `failIf` selector: it prints once no plan figure is unsettled, and a
+broken sheet fails Generate instead of printing a blank plan. **Generate from Grid** is a server action storing ONE PDF of
+kind `drawing`, rendered in 25 s steps (20 + 25 + 10 + 25 + 25 = 105 s, inside the Estimator page's 120 s), and replaces an
+earlier Grid set add-then-remove under the row lock, so two concurrent Generates leave one. Six old source reads in the
+harness were re-pointed at the moved code (the #299 re-pointing precedent); their assertions are unchanged.
+
+## D631. Client actions: choose scopes, ask a question; the status never changes (#301 slice C, 2026-10-05)
+
+**Choose your scopes** (every scope checked, a live "Selected scopes" total before any Rewards credit, with the credit named
+under it, R1) and **Ask a question or request changes** call two public server actions. Each re-verifies the v2 token, that
+the pinned revision is the latest sent one, and that the quote is `sent` (`canAct`; the store re-checks under the row lock).
+The forms are **JS-only**: they render after hydration, and without JS the page says "Turn on JavaScript to respond here, or
+reply to Peak's email." (a no-JS form would submit by GET with a name and email in the URL, or fail the Origin check, D625).
+Limits: 5 per IP per 10 minutes; 30 per quote per day, **counted after sanitize**; a hidden honeypot field (`hp_confirm_x`,
+off-screen, `tabIndex` -1, `autoComplete` off, aria-hidden wrapper) whose hit **returns the normal confirmation and writes
+nothing**; name and title ≤ 120, email ≤ 200 and shape-checked, message ≤ 4,000, scopes filtered to the revision's. The
+server computes the total itself. Responses are store-owned (`appendClientResponse`, ≤ 200, append-only; `update()` drops
+them). No cookies. **No status or stage change**; Jeff moves the quote to Won after the PO.
+
+## D632. A response notifies the Lead estimator; nothing else moves (#301 slice C, 2026-10-05)
+
+Best effort after the write, each step on its own: a system note on the quote with its customer (`addNoteRecord`, by "Client
+link", R15), a `system` activity on the lead when the quote has one (never `note`, which would stamp first contact), and one
+task per assignee, due 11:59 PM Chicago that day: `Client accepted EST-1042 Rev 2 — Lighting, Rigging ($48,250.00)` or
+`Client question — EST-1042`. The assignee is the Lead estimator (D619) when that user is active, else every active
+`approve` holder. The confirmation names the Lead estimator, or "Peak Systems Group". Preview deploys write the production
+database, so a response submitted from one is a production write.
+
+## D633. The package's staff side lives under Client link (#301 slice C, 2026-10-05)
+
+`PackageStaffPanel` mounts last in `ClientLinkPanel` (actions in `estimator/package-actions.ts`, so #293's
+`share-actions.ts` stays unchanged). It shows staff-only gap chips from the LIVE quote, i.e. what the next send will carry
+(parts without a datasheet, no drawings, key products that need a paragraph, scopes with no client goals); the drawings
+(Upload…, Generate from Grid, remove behind an inline confirm); the client responses newest first as "Rev N"; and
+**Rebuild package**. Anyone signed in can read it; writes need Send. The client page never lists gaps.
+
+## D634. Printed site-visit sheets were revised outside the repo (#301, 2026-10-05)
+
+The Client goals box is also on paper. The Dropbox site-visit sheets were revised as a parallel side task
+(`knowledge/peak/*-rev-2026-10-05.docx`, a bordered "Client goals" box at the top of each discipline section, revision
+bumped), with a sheet-versus-app field reconciliation in `knowledge/peak/site-visit-sheet-field-reconciliation-2026-10.md`.
+No PDFs: there is no Word or LibreOffice on this Mac. The Rigging sheet has no paper discipline section yet. Nothing in the
+repo changed for this.

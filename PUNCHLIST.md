@@ -10752,3 +10752,137 @@ there, and the old part editor's all-documents list may show one with an unrecog
 and the device types' `symbolDocId` are fields old code ignores, so a design reads and quotes identically with the generic
 symbols at their old size. Rolling back loses only the drawings' display; the documents stay in the database and Blob and
 return on the roll-forward.
+
+## 301. Estimates — two-prong output: cover PDF + client package link (goals, frozen per-revision page, datasheets/zip, drawings, scope selection, questions, opens) — DONE 2026-10-05 (D613–D634)
+
+**Asked by Jeff 2026-10-05** (Cowork brief "Two-Prong Estimate Output (Cover PDF + HTML Package)"): one estimate, two client
+outputs from the same stored systems — a one-to-two page cover PDF on letterhead, and a share link that opens a frozen
+package page — plus a **Client goals** box per site-visit discipline that pre-fills each system's client need. Jeff's
+choices: the link shows scope totals and the grand total only, with the BOM behind a toggle and no unit prices; the price
+source is the app estimate (**no QuickBooks**, Jeff keys it by hand, answered 2026-10-05); the cover's signer is the quote's
+Lead estimator; datasheet gaps are staff-only; accepting notifies and logs but **never changes the status**; the printed
+site-visit sheets are revised in the same build. Spec: `docs/superpowers/specs/2026-10-05-two-prong-estimate-output-design.md`;
+plans alongside it under `docs/superpowers/plans/2026-10-05-estimate-output-slice-{a,b,c}.md`. No migration, no new
+dependency, no AI (D89).
+
+What shipped, in three slices:
+- **Slice A — goals, cover fields, Cover PDF (D613–D619).**
+  - Site visit: a Client goals box at the top of each discipline section.
+  - Estimator: a Discipline select per system (blank = inferred from the name, never stored); the narrative column gains
+    Client goals (pre-filled from a linked site visit, plus **From site visit ▾**), a Cover paragraph override with a source
+    chip, and **Use selection as cover** under the intro.
+  - Customer preview → **Cover & package**: Overall summary, Not included (+ **Reset to default**), **Cover PDF**.
+  - Settings → Sales & Rewards → **Estimate output**: the default Not included list and the website for the footer.
+  - The Cover PDF: letterhead, Arial, underlined title, a paragraph + bold price per scope, summary, the estimate's own
+    totals lines, ADD OPTION lines, Not included, the link line, the Lead estimator's signature and Accepted by / Date lines.
+- **Slice B — the frozen package link (D620–D626).**
+  - Copy client link mints a link pinned to the latest sent revision (v2 token). It opens header + grand total, summary, one
+    card per scope (price, Your goals, intro, key products with photos), a Narrative / BOM toggle (Qty · Manufacturer · Part ·
+    Description, no money), totals, Add options, Not included.
+  - A re-send makes the old link say a newer version exists and link it; a recall says "Peak is revising this estimate."; a
+    lost quote says "closed"; Revoke kills every link. Old #293 links keep working unchanged.
+  - Opens: a JS beacon per sent revision; shown per revision in the Client link panel, as an **Opened** chip on the Quotes
+    hub, and in the lead drawer. Team members are not counted.
+- **Slice C — downloads, drawings, client actions (D627–D634).**
+  - Each key product links its datasheet; **Download all (.zip)** holds every datasheet and spec sheet plus
+    `Specifications.docx` and a `LEFT OUT.txt` for anything skipped. The zip is cached in Blob in production only;
+    **Rebuild package** clears it.
+  - Plans & risers: upload a plan, riser or drawing set (PDF / PNG / JPEG / WebP, 25 MB) in the Client link panel, or
+    **Generate from Grid** from the quote's linked Grid design (one 11×17 PDF through a signed print route). An upload of a
+    kind overrides the Grid file; drawings are frozen per send and annexed onto the latest sent revision.
+  - Client actions: check the scopes wanted (live total) and submit, or ask a question. The Lead estimator (else every
+    active approver) gets a task, the customer feed a system note, the lead a system activity. **Status never changes.**
+  - Staff gap chips (no datasheet, no drawings, key products needing a paragraph, scopes with no client goals), the
+    drawings list, and every client response.
+  - The Grid drawing set body is now shared between the team page and the print route
+    (`design/drawing-set-data.ts`, `components/drawing/drawing-set-sheets.tsx`).
+
+Gates (final head): tsc 0; test:specs 12,541 PASS / 0 FAIL (baseline 12,152 at #300; +389 for #301); test:smoke 218/218 ALL
+PASSED; `next build` OK (every new route listed); eslint clean on the changed files.
+
+Browser (scratch datadir, real Chrome; Blob blanked, so nothing touched production storage):
+- **Slice A.** Settings card; the survey Client goals box saved; the Estimator pre-filled goals from the linked survey; cover
+  paragraph chips From intro / Override / Needs a paragraph; Use selection as cover; the Discipline select; Cover & package
+  with Reset to default and autosave; a real Chrome Cover PDF of 1 page in Arial with the footer and totals re-adding; 375 px
+  no horizontal scroll; no console errors. Not exercised then: the link line after a send and an ADD OPTION render (the link
+  line was seen in Slice B; ADD OPTION is harness-covered only).
+- **Slice B.** Sent a quote and copied a v2 link; the page showed header total, summary, goals, scope cards and the BOM with
+  no dollar sign; no nonce or cost in the HTML; the beacon counted one open per load (team session skipped; dedupe is
+  not visible under `next dev`); the hub **Opened** chip; recall → "Peak is revising" over the frozen $250 (no $350 leak);
+  re-send → a new link, the old one showed the superseded banner + **View the current version**; the cover's link line
+  printed the v2 link; 375 px no scroll; Revoke → both links inactive.
+- **Slice C.** Panel gap chips, "File storage isn't configured" on Drawings, the responses list empty then filled after a
+  submit; on the v2 link both action cards, a live total moving 350 → 225 on unchecking a scope, a selection and a question
+  submitted ("Thanks — Jeff Chesebro has been notified."), status still Sent, bell to-dos "Client accepted EST-1020 Rev 1 —
+  Stage lighting ($225.00)" and "Client question — EST-1020"; `package.zip` 404 (nothing to download); the team drawing set
+  rendered 3 sheets and the signed `/print/grid-set` rendered 3 pages at 11×17; bad or missing tokens 404; 375 px no scroll.
+  **Not exercised (needs Blob):** an upload, Generate from Grid, Rebuild, a served PDF drawing under its CSP in Chrome and
+  Safari, a real zip with a datasheet in it, the zip cache. The final review's fixes (zip cache production-only, honeypot
+  rename, uniform photo 404, doc CSP, cover render budget, race-safe Grid replace, checkbox names) were gated, not
+  re-browsed.
+
+**Post-merge production check (Jeff / next session).** On ONE production test quote (a Grid-backed one, sent at least once;
+delete it at the end):
+1. Open the quote's Client link panel → Drawings → **Upload…** a PDF drawing and a PNG.
+2. Copy the client link and open each drawing link in **Chrome and Safari**. Confirm the PDF renders under the sandbox CSP
+   (`sandbox; default-src 'none'`). If Safari or Chrome shows a blank or a download, drop the CSP for `application/pdf` on
+   `/share/…/file/[fileId]` and re-check.
+3. Press **Generate from Grid** on the quote with a Grid design. Check one PDF appears, and that uploading a Drawing set
+   afterwards replaces it.
+4. Download the **package zip** twice: the first builds it (and caches it), the second must come back fast (cache hit).
+   Open it: `Specifications.docx`, the datasheets, and `LEFT OUT.txt` only if something was skipped.
+5. Attach a datasheet to one part on the quote, press **Rebuild package**, download again, and confirm the new datasheet is
+   inside.
+6. From a **signed-out** browser (or a private window), open the link, submit a **scope selection** and a **question**.
+   Confirm: the bell to-do for the Lead estimator (one each), the system note on the customer's feed, the lead's activity (if
+   it has a lead), the quote still **Sent**, and the panel's Responses list.
+7. Check the **Opened** chip on the Quotes hub moved, then **delete the test quote**. Check Blob for leftovers (`estimate-package/<quote>/`
+   and the test drawings) and remove them by hand; quote deletion is not known to clean them.
+
+**Rollout.** Copy client links and make covers from **production** only. Preview deploys share the production database and
+print the preview's own origin, and a response submitted from a preview is a production write. The zip cache only runs when
+`VERCEL_ENV=production`, so a preview never reads or writes it. Make sure `QUOTE_PDF_ORIGIN` is set in production (the Batch 2 item)
+or the cover's link line carries the wrong origin.
+
+**Rollback.** Safe: no migration. Older code ignores the new JSONB (`SpecSection.discipline/clientGoals/coverText`,
+`Quote.coverSummary/notIncluded/packageFiles/clientResponses/shareOpens`, survey `goals`, the `estimate_output_defaults`
+blob, revision `docFields` keys); they return on the roll-forward. Under old code a v2 link shows the "This link isn't
+active" card (a v2 token fails the v1 pattern), v1 links keep working, and the cover, zip, file, doc and grid-set routes
+disappear. Rotating `AUTH_SECRET` kills every link, as before.
+
+**For Jeff.**
+1. **Fill Settings → Sales & Rewards → Estimate output** (the Not included list and the website). Until then a new quote's
+   Not included starts empty and the cover footer has no web address.
+2. **Rev numbering.** Two sends both print "Rev 1" on the PDF and online (the #293 D567 rule); the panel now shows send
+   times to tell them apart. Fix the numbering?
+3. **BOM quantities** show on the package page even when the estimate PDF hides them. Keep?
+4. **Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
+   heading. Want one?
+5. **Letterhead on page 1 only**; the footer repeats on every page. OK?
+6. **Open counts are best effort.** One per device per half hour, per server instance; a mail scanner that runs JS can still
+   count once. A signal, not proof. Fine?
+7. **A honeypot hit shows the normal "Thanks" and writes nothing** (a bot gets no signal). A real person who autofills the
+   hidden field would be dropped silently; the field is named `hp_confirm_x`, off-screen and not autofilled. Fine?
+8. **Printed site-visit sheets** are revised as `knowledge/peak/*-rev-2026-10-05.docx` in Dropbox. No PDFs (no Word or
+   LibreOffice on the Mac), so open them in Word to check; the Rigging sheet has no paper discipline section yet; the
+   reconciliation is `knowledge/peak/site-visit-sheet-field-reconciliation-2026-10.md`.
+9. **Starter paragraphs** (Riverview / GET / AAC / Fall Creek) are not imported. A separate item?
+10. **QuickBooks stays manual** (your answer, 2026-10-05); nothing syncs.
+11. Spec §13, still open: should Accept require a typed title or PO number? Should the Lead estimator also get an email on
+    accept, beyond the bell task?
+12. Not #301, seen while testing (pre-existing): the Estimator's top toolbar overflows at 1024 px, and after **Send** the
+    Estimator navigates to Home.
+13. Tasks go to the quote's **Lead estimator** only when that name matches one active team member exactly; otherwise every
+    approver gets them. Check the names in Settings → Team.
+
+**Follow-ups.**
+- **Orphan `UP-` uploads.** A direct-to-Blob upload that never finalizes leaves a blob nothing lists; add a sweep.
+- **Zip cache auto-invalidation.** A cached zip stays until **Rebuild package**; attaching a datasheet or changing a part
+  doesn't clear it. Invalidate on those writes.
+- **`gridProjectForQuote` performance.** It scans every Grid project per call (once per panel open and per Generate); index
+  by quote id if it shows up.
+- **Spec builder vs the zip.** The zip's `Specifications.docx` is the D94 generator's output; the Specs builder's saved
+  `SP-####` documents (D329–D332) are a different docx. Decide which the client should get, or include both.
+- Minor review notes not fixed: a cover selection longer than 1,500 chars is silently capped; the cover has Attn and Venue
+  rows beyond the brief; whitespace-only goals count as present; a `Q 1` / `Q_1` quote id could collide in the zip cache key
+  (irrelevant for `Q-####`).
