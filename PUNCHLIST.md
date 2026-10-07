@@ -11000,6 +11000,14 @@ No migration (JSONB fields + one blob).
 6. Expect sent/won quotes containing a renamed part to show their PDF as re-rendering once ("Out of date"), by design.
 7. Tell whoever reads the Displays API that SKUs change; `/api/v1/displays/catalog/<old sku>` keeps resolving.
 
+**Production run — Symetrix DONE 2026-10-07 (Claude, at Jeff's request).** Backup first:
+`backups/peak-backup-20261007-1413-pre304.json` (86,313 records). Fixtures conversion (#210) already done on prod; rename log was
+empty. Preview: 88 rename, 1 no model (`12-0002`). Apply: 88 parts renamed, 6 document/accessory links moved, 1 live quote
+updated (draft **EST-1085 "HoneyRock - Audio"**, `Q-2053`); every other area unchanged. Checked: `80-0043` → `Symetrix:Jupiter 4`
+(Model # Jupiter 4, P/N 80-0043, former SKUs [80-0043]); re-plan → 88 "already"; no live quote still names an old Symetrix
+order #. Run through the same engine as the page (`runRenameBatch`) from the CLI with the production env. Biamp, EAW and
+Meyer remain — their sheets haven't come back.
+
 **Dry run (2026-10-07, a scratch copy of the local DB):** the local book stores these parts as `Symetrix:20-0026` (production
 uses bare `20-0026`, as the sheet does) — the planner matches both. 88 renamed, every reference pass ran, re-plan → 88
 "already", ~1 s. Model names are ChatGPT's text as written (e.g. "Mixer App- 5 Licenses") — fix a row in the sheet and it
