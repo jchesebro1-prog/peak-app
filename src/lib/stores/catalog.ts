@@ -445,7 +445,8 @@ export async function remove(sku: string): Promise<void> {
  * as-is: a rename is not a price change.
  */
 export async function renamePartDocs(from: string, to: string, model: string): Promise<CatalogPart | null> {
-  if (!from || !to || from === to) return null;
+  if (!from || !to) return null;
+  if (from === to) return getDoc<CatalogPart>("catalog_parts", to); // #302: nothing to move — the live part, else null
   const [oldRow, toRow] = await getDocRows<CatalogPart>("catalog_parts", [from, to]).then((rows) => [
     rows.find((r) => r.id === from),
     rows.find((r) => r.id === to),
@@ -458,6 +459,9 @@ export async function renamePartDocs(from: string, to: string, model: string): P
     await softDeleteDoc("catalog_parts", from);
   };
   if (toRow && !(toRow.doc.formerSkus ?? []).includes(from)) return null;
+  // #302: a tombstoned `to` that was itself renamed onward is history, not a
+  // free slot — reviving it would put a second live copy beside its successor.
+  if (toRow?.deleted && toRow.doc.renamedTo) return null;
   if (toRow && !toRow.deleted) {
     await retire();
     return toRow.doc;

@@ -957,6 +957,29 @@ function stampContentChange(doc: Quote, mutate: (doc: Quote) => Quote | void): Q
 }
 
 /**
+ * #302 — the catalog rename sweep's one quote writer: `rewrite` maps the
+ * LIVE `spec` (re-run here on the doc read under the row lock) to its renamed
+ * copy, or null when nothing moved. Never touches `revisions` (sent copies
+ * keep the old SKU and resolve through the redirect) and never bumps
+ * `updatedAt` (the printed date / sort key / approval version) — patchQuote
+ * still stamps `contentChangedAt`, since the document now prints the model.
+ * A #284 approval that matched before the rename is re-fingerprinted: a SKU
+ * swap is not a priced-line change. Returns true when it wrote.
+ */
+export async function rewriteQuoteSpecRefs(id: string, rewrite: (spec: unknown) => unknown | null): Promise<boolean> {
+  let wrote = false;
+  await patchQuote(id, (doc) => {
+    const next = rewrite(doc.spec);
+    if (next === null) return;
+    const held = !!doc.review?.approvedAgainst && approvalSnapshotMatches(doc);
+    doc.spec = next;
+    if (held) doc.review = { ...doc.review, approvedAgainst: approvalFingerprint(doc) };
+    wrote = true;
+  });
+  return wrote;
+}
+
+/**
  * Read-modify-write the quote's `pdf` state (#222) as a compare-and-set:
  * `mutate` sees the state re-read under the row lock and returns the next
  * state, or `undefined` to leave it (a superseded render). Deliberately does

@@ -11072,6 +11072,7 @@ seeded()
   .then(() => estimateOutput301BAsyncChecks())
   .then(() => estimateOutput301CAsyncChecks())
   .then(() => modelSku302StoreAsyncChecks())
+  .then(() => modelSku302ApplyAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -52734,5 +52735,192 @@ async function modelSku302StoreAsyncChecks(): Promise<void> {
   } finally {
     await db.delete(blobs302).where(inArray(blobs302.id, ids302));
     if (snapshot.length) await db.insert(blobs302).values(snapshot);
+  }
+}
+
+/** #302 Task 4 — the rename engine: the parts step, every reference pass,
+ *  resumable on a budget, idempotent, frozen history untouched. Plus the
+ *  renamePartDocs edges folded in from review (from === to, the recovery
+ *  branch, an onward-renamed tombstone). */
+async function modelSku302ApplyAsyncChecks(): Promise<void> {
+  const { fixtureId, registerFixture, createFixture } = await import("./test-fixtures");
+  const Cat = await import("@/lib/stores/catalog");
+  const Ren = await import("@/lib/stores/catalog-renames");
+  const Apply = await import("@/lib/catalog-rename/apply");
+  const DS = await import("@/db/doc-store");
+  const PD = await import("@/lib/stores/part-documents");
+  const PAL = await import("@/lib/stores/part-accessory-links");
+  const Q = await import("@/lib/stores/quotes");
+  const Settings = await import("@/lib/settings");
+  const { approvalFingerprint, approvalSnapshotMatches } = await import("@/lib/approval-snapshot");
+  const { getDb } = await import("@/db");
+  const { blobs: blobsT } = await import("@/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  type D302 = import("@/db/doc-store").Doc;
+  const base = { desc: "Fixture 302 apply", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Symetrix" };
+
+  // ---- renamePartDocs edges (review items) ----
+  const E1 = fixtureId(302, "ed-same");
+  registerFixture("catalog_parts", E1);
+  await DS.upsertDoc("catalog_parts", { ...base, id: E1, sku: E1 } as never);
+  ok((await Cat.renamePartDocs(E1, E1, "m"))?.sku === E1, "#302 store: renamePartDocs(x, x) returns the live part");
+  ok((await Cat.renamePartDocs(fixtureId(302, "ed-none"), fixtureId(302, "ed-none"), "m")) === null, "#302 store: renamePartDocs(x, x) on a missing part is null");
+  const RX = fixtureId(302, "rc-x");
+  const RY = "Symetrix:" + fixtureId(302, "rc-y");
+  registerFixture("catalog_parts", RX);
+  registerFixture("catalog_parts", RY);
+  await DS.upsertDoc("catalog_parts", { ...base, id: RX, sku: RX } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: RY, sku: RY, formerSkus: [RX] } as never);
+  const rec = await Cat.renamePartDocs(RX, RY, "rc");
+  const rxRow = (await DS.getDocRows<D302>("catalog_parts", [RX]))[0];
+  ok(rec?.sku === RY && rxRow?.deleted === true && rxRow.doc.renamedTo === RY, "#302 store: recovery — a live `to` already listing a still-live `from` retires `from` and returns `to`");
+  const OZ = fixtureId(302, "ow-z");
+  const OT = "Symetrix:" + fixtureId(302, "ow-t");
+  registerFixture("catalog_parts", OZ);
+  registerFixture("catalog_parts", OT);
+  await DS.upsertDoc("catalog_parts", { ...base, id: OZ, sku: OZ } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: OT, sku: OT, formerSkus: [OZ], renamedTo: "Symetrix:" + fixtureId(302, "ow-next") } as never);
+  await DS.softDeleteDoc("catalog_parts", OT);
+  ok((await Cat.renamePartDocs(OZ, OT, "ow")) === null && (await Cat.get(OZ))?.sku === OZ, "#302 store: a tombstoned `to` renamed onward is never revived");
+
+  // ---- the engine ----
+  const A = fixtureId(302, "ap-a");
+  const B = fixtureId(302, "ap-b");
+  const C = fixtureId(302, "ap-c");
+  const model = fixtureId(302, "ap-model");
+  const NEW = "Symetrix:" + model;
+  for (const id of [A, B, C, NEW]) registerFixture("catalog_parts", id);
+  await DS.upsertDoc("catalog_parts", { ...base, id: A, sku: A } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: B, sku: B, mfr: "Biamp" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: C, sku: C, specSameAs: A } as never);
+
+  const img = await PD.createDocument({ kind: "image", fileName: "ap-302.png", contentType: "image/png", size: 1000, blobKey: "part-docs/PD-fixture-302/ap-302.png", sourceUrl: null, source: "upload", by: "Test" });
+  if (!img) throw new Error("#302 apply: fixture image failed");
+  registerFixture("part_documents", img.id);
+  await PD.attachDocument(img.id, [A], "Test");
+  registerFixture("part_document_links", PD.documentLinkId(A, img.id));
+  registerFixture("part_document_links", PD.documentLinkId(NEW, img.id));
+  await PD.setDocumentLinkDisplay(img.id, A, { sort: 3 });
+
+  const scope = fixtureId(302, "ap-scope");
+  await PAL.syncAccessoryLinks({ source: "manual", sourceRef: scope }, [{ parentSku: A, accessorySku: B }]);
+  registerFixture("part_accessory_links", PAL.accessoryLinkId("manual", scope, A, B));
+  registerFixture("part_accessory_links", PAL.accessoryLinkId("manual", scope, NEW, B));
+
+  const FX = fixtureId(302, "ap-fx");
+  await createFixture("subassemblies", {
+    id: FX, kind: "fixture", label: "Test302 Kit", description: "", lightEngineSku: A, lensSku: null,
+    lines: { data: [], power: [{ sku: A, qty: 1 }], mounting: [], accessories: [] },
+    createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+  });
+
+  const QID = fixtureId(302, "ap-quote");
+  const spec = { sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: A, desc: "Jupiter mixer", qty: 2, unit: "ea", cost: 5, price: 10 }] }], mobs: [] };
+  const qBase = { id: QID, name: "T302 apply", customer: "", status: "draft", history: [], createdAt: 1, updatedAt: 1, margin: 0.5, value: 20, source: "estimator", quoteType: "system", spec };
+  await createFixture("quotes", { ...qBase, review: { state: "approved", method: "in_app", approvedAgainst: approvalFingerprint(qBase) } });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent", note: "sent" });
+  const qBefore = (await Q.get(QID))!;
+
+  const GP = fixtureId(302, "ap-grid");
+  await createFixture("grid_projects", {
+    id: GP, name: "T302 grid", placements: [{ id: "pl-1", partId: A, x: 1, y: 1 }], routes: [],
+    revisions: [{ rev: 1, at: 1, by: "Test", placements: [{ id: "pl-1", partId: A, x: 1, y: 1 }] }],
+    createdAt: 1, updatedAt: 1,
+  });
+
+  registerFixture("grid_catalog", A);
+  registerFixture("grid_catalog", NEW);
+  await DS.upsertDoc("grid_catalog", { id: A, name: "Jupiter", manufacturer: "Symetrix", modelNumber: A, scope: "Audio", category: "Other", width: 44, height: 30, ports: [], pricingPartId: A, kind: "device", icon: "speaker", createdBy: "Test", createdAt: 1, updatedAt: 1 } as never);
+  const GA = fixtureId(302, "ap-gasm");
+  await createFixture("grid_catalog", { id: GA, name: "T302 asm", manufacturer: "", modelNumber: GA, scope: "Audio", category: "Assembly", width: 74, height: 52, ports: [], kind: "assembly", members: [{ symbolId: A, qty: 1, x: 0, y: 0 }], createdBy: "Test", createdAt: 1, updatedAt: 1 });
+
+  const FAV = "gridFavorites:" + fixtureId(302, "ap-u");
+  const EQ = fixtureId(302, "ap-eq");
+  const WIRE = fixtureId(302, "ap-wire");
+  const blobIds = [Ren.SKU_RENAMES_BLOB, "grid_equipment_map", "track_series", "curtain_mount_hardware", "rack_defaults", "drive_photo_sync", FAV];
+  const db = await getDb();
+  const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
+  const settingsBefore = await Settings.getSettingsPatchStrict();
+  const wireBefore = settingsBefore.wireTypes;
+  const rows = [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: A, model, notes: "" }];
+  type R302 = Extract<Awaited<ReturnType<typeof Apply.runRenameBatch>>, { ok: true }>;
+  const runAll = async (refsOnly = false, from: import("@/lib/catalog-rename/apply").RenameStep = "parts"): Promise<R302[]> => {
+    const out: R302[] = [];
+    let step = from;
+    for (let i = 0; i < 40; i++) {
+      const r = await Apply.runRenameBatch({ rows, step, refsOnly }, "Test", 45_000);
+      if (!r.ok) throw new Error("#302 apply: " + r.error);
+      out.push(r);
+      if (r.complete) break;
+      step = r.step;
+    }
+    return out;
+  };
+  try {
+    await db.delete(blobsT).where(inArray(blobsT.id, [Ren.SKU_RENAMES_BLOB, FAV]));
+    await DS.setBlob(FAV, { ids: [A, "GRID-AUD-SPEAKER"] });
+    await DS.setBlob("grid_equipment_map", { [EQ]: { tiers: { good: { kind: "part", sku: A }, better: { kind: "allowance", amount: 5 } } } });
+    await Settings.setSettings({ wireTypes: [...(Array.isArray(wireBefore) ? wireBefore : []), { id: WIRE, name: "T302 wire", cableSku: A }] });
+
+    ok(!(await Apply.runRenameBatch({ rows, step: "bogus" as never }, "Test", 45_000)).ok, "#302 apply: an unknown step is refused");
+    const p0 = await Apply.runRenameBatch({ rows, step: "parts" }, "Test", 45_000);
+    if (!p0.ok) throw new Error("#302 apply: " + p0.error);
+    // A spent budget stops before any write and hands back the same step; the resumed run then finishes it.
+    const stopped = await Apply.runRenameBatch({ rows, step: "quotes" }, "Test", -1);
+    const qStopped = (await Q.get(QID))!;
+    ok(stopped.ok && stopped.step === "quotes" && !stopped.complete && stopped.changed === 0 && JSON.stringify(qStopped.spec).includes(`"${A}"`), "#302 apply: a spent budget stops mid-step, writes nothing and hands back the same step");
+
+    const first = [p0, ...(await runAll(false, p0.step))];
+    ok(first.map((r) => r.step).join(",") === [...Apply.REF_STEPS, "done"].join(",") && first.at(-1)?.complete === true, "#302 apply: one call per step — parts, every reference step in order, then done");
+    ok(first[0].renamed === 1 && first[0].plan?.counts.rename === 1 && first.slice(1).every((r) => r.plan === null && r.renamed === 0), "#302 apply: the parts step renames the planned row and returns its plan");
+
+    ok((await Cat.get(A))?.sku === NEW && (await Cat.get(NEW))?.manufacturerModelNumber === model, "#302 apply: get(old) resolves to the renamed part, which carries the model");
+    ok((await Ren.allSkuRenames()).some((e) => e.from === A && e.to === NEW && e.model === model && e.by === "Test"), "#302 apply: the rename is logged with who and the model");
+    ok((await Cat.get(C))?.specSameAs === NEW, "#302 apply: parts-refs — another part's specSameAs follows the rename");
+    ok((await Cat.get(B))?.sku === B && (await Cat.get(B))?.specSameAs === undefined, "#302 apply: an unrelated part is untouched");
+
+    const newLinks = await PD.documentLinksForParts([NEW]);
+    const imgLink = newLinks.find((l) => l.documentId === img.id);
+    ok(!!imgLink && imgLink.id === PD.documentLinkId(NEW, img.id) && imgLink.sort === 3 && imgLink.kind === "image", "#302 apply: doc-links — the image link moves to the new SKU, keeping its sort");
+    ok(!(await PD.documentLinksForParts([A])).length, "#302 apply: doc-links — no live link is left under the old SKU");
+
+    const acc = (await PAL.allAccessoryLinks()).filter((l) => l.sourceRef === scope);
+    ok(acc.length === 1 && acc[0].parentSku === NEW && acc[0].accessorySku === B && acc[0].id === PAL.accessoryLinkId("manual", scope, NEW, B), "#302 apply: accessory-links — re-keyed under the new parent SKU, old row retired");
+
+    const fx = (await DS.getDoc<D302>("subassemblies", FX)) as Record<string, unknown> | null;
+    ok(fx?.lightEngineSku === NEW && JSON.stringify(fx?.lines).includes(NEW) && !JSON.stringify(fx).includes(`"${A}"`), "#302 apply: subassemblies — the fixture's light engine and lines follow the rename");
+
+    const q = (await Q.get(QID))!;
+    const qItem = (q.spec as { sections: Array<{ items: Array<{ sku: string; manufacturerModelNumber?: string; desc: string }> }> }).sections[0].items[0];
+    ok(qItem.sku === NEW && qItem.manufacturerModelNumber === model && qItem.desc === "Jupiter mixer", "#302 apply: quotes — the live spec line takes the new SKU and the model, desc untouched");
+    ok(JSON.stringify(q.revisions).includes(`"${A}"`) && !JSON.stringify(q.revisions).includes(NEW), "#302 apply: quotes — the sent revision still holds the old SKU");
+    ok(q.updatedAt === qBefore.updatedAt && approvalSnapshotMatches(q), "#302 apply: quotes — updatedAt is untouched and the approval still holds");
+
+    const gp = (await DS.getDoc<D302>("grid_projects", GP)) as Record<string, unknown> | null;
+    ok((gp?.placements as Array<{ partId: string }>)[0].partId === NEW, "#302 apply: grid-projects — the live placement follows the rename");
+    ok(JSON.stringify(gp?.revisions).includes(`"${A}"`) && !JSON.stringify(gp?.revisions).includes(NEW), "#302 apply: grid-projects — revisions still hold the old SKU");
+
+    const sym = (await DS.getDoc<D302>("grid_catalog", NEW)) as Record<string, unknown> | null;
+    ok(sym?.pricingPartId === NEW && sym?.modelNumber === model && sym?.icon === "speaker", "#302 apply: grid-symbols — the seeded symbol moves to the new id with the model, keeping its look");
+    ok((await DS.getDoc("grid_catalog", A)) === null, "#302 apply: grid-symbols — the old symbol id is retired");
+    const ga = (await DS.getDoc<D302>("grid_catalog", GA)) as Record<string, unknown> | null;
+    ok((ga?.members as Array<{ symbolId: string }>)[0].symbolId === NEW, "#302 apply: grid-symbols — assembly members follow the moved symbol");
+
+    const fav = await DS.getBlob<Record<string, unknown>>(FAV, {});
+    ok(JSON.stringify(fav.ids) === JSON.stringify([NEW, "GRID-AUD-SPEAKER"]), "#302 apply: blobs — a user's Grid favorites follow the rename");
+    const eq = (await DS.getBlob<Record<string, Record<string, Record<string, Record<string, unknown>>>>>("grid_equipment_map", {}))[EQ];
+    ok(eq?.tiers.good.sku === NEW && eq?.tiers.better.kind === "allowance", "#302 apply: blobs — the Equipment map part cell follows the rename");
+    const wires = (await Settings.getSettingsPatchStrict()).wireTypes as Array<{ id: string; cableSku?: string }>;
+    ok(wires.find((w) => w.id === WIRE)?.cableSku === NEW, "#302 apply: blobs — settings.wireTypes cableSku follows the rename");
+
+    const second = await runAll();
+    ok(second.length === first.length && second.every((r) => r.changed === 0 && r.renamed === 0) && second[0].plan?.counts.already === 1, "#302 apply: a second full run changes nothing (changed 0 on every step)");
+
+    const refs = await runAll(true);
+    ok(refs.length === Apply.REF_STEPS.length && refs.every((r) => r.renamed === 0 && r.plan === null) && refs[0].step === Apply.REF_STEPS[1], "#302 apply: refsOnly skips the parts step");
+  } finally {
+    await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
+    if (snapshot.length) await db.insert(blobsT).values(snapshot);
+    await Settings.setSettings({ wireTypes: wireBefore });
   }
 }

@@ -9,7 +9,7 @@ import { cleanModel, modelSku } from "./sku";
 
 export type CrosswalkRow = { rowNumber: number; manufacturer: string; mfrPart: string; sku: string; model: string; notes: string };
 export const CROSSWALK_MAX_ROWS = 5000;
-const CELL_MAX = 2048;
+export const CROSSWALK_CELL_MAX = 2048;
 
 const HEADERS: Record<keyof Omit<CrosswalkRow, "rowNumber">, string[]> = {
   manufacturer: ["manufacturer", "mfr"],
@@ -28,7 +28,7 @@ export function crosswalkRowsFromGrid(grid: string[][]): { ok: true; rows: Cross
   if (body.length > CROSSWALK_MAX_ROWS) return { ok: false, error: `The sheet has more than ${CROSSWALK_MAX_ROWS.toLocaleString()} rows.` };
   const rows: CrosswalkRow[] = [];
   body.forEach((cells, i) => {
-    const v = (c: number) => (c < 0 ? "" : String(cells?.[c] ?? "").trim().slice(0, CELL_MAX));
+    const v = (c: number) => (c < 0 ? "" : String(cells?.[c] ?? "").trim().slice(0, CROSSWALK_CELL_MAX));
     if (!v(at.sku) && !v(at.model)) return;
     rows.push({ rowNumber: i + 2, manufacturer: v(at.manufacturer), mfrPart: v(at.mfrPart), sku: v(at.sku), model: v(at.model), notes: v(at.notes) });
   });

@@ -23,8 +23,9 @@ export async function allSkuRenames(): Promise<SkuRename[]> {
   return clean((await getBlob<{ renames: unknown }>(SKU_RENAMES_BLOB, { renames: [] })).renames);
 }
 
-/** Append `entries`; one entry per `from` — a later entry replaces an
- *  earlier one for the same `from` (a re-run after a corrected model). */
+/** Append `entries`; one entry per `from` — a repeated `from` replaces the
+ *  earlier entry instead of duplicating it (the apply engine re-logs a rename
+ *  whose log append was lost; a retired SKU is never renamed a second time). */
 export async function appendSkuRenames(entries: SkuRename[]): Promise<void> {
   if (!entries.length) return;
   const byFrom = new Map<string, SkuRename>();
