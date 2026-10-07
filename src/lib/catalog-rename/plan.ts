@@ -68,14 +68,14 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
     return i < 0 ? null : s.slice(i + 1).trim().toUpperCase();
   };
   const tailParts = new Map<string, PlanPart[]>();
-  const tailFormer = new Map<string, PlanPart>();
+  const tailFormer = new Map<string, { part: PlanPart; former: string }>();
   for (const p of live) {
     const mk = mfrKey(p.mfr);
     const t = tail(p.sku);
     if (t) tailParts.set(`${mk}|${t}`, [...(tailParts.get(`${mk}|${t}`) ?? []), p]);
     for (const f of p.formerSkus ?? []) {
       const ft = tail(f);
-      if (ft && !tailFormer.has(`${mk}|${ft}`)) tailFormer.set(`${mk}|${ft}`, p);
+      if (ft && !tailFormer.has(`${mk}|${ft}`)) tailFormer.set(`${mk}|${ft}`, { part: p, former: f });
     }
   }
   const first: PlannedRow[] = rows.map((row) => {
@@ -92,8 +92,16 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
     const brand = part?.mfr || row.manufacturer;
     const to = modelSku(brand, model);
     if (!part) {
-      const holder = formerOwner.get(row.sku) ?? tailFormer.get(`${mfrKey(row.manufacturer)}|${row.sku.trim().toUpperCase()}`);
-      if (holder) return mk("already", holder.sku);
+      // `from` is the REAL former SKU (a prefixed "Brand:80-0043" when the
+      // sheet says "80-0043"), so a re-log names what the old data holds.
+      const direct = formerOwner.get(row.sku);
+      const viaTail = direct ? undefined : tailFormer.get(`${mfrKey(row.manufacturer)}|${row.sku.trim().toUpperCase()}`);
+      const holder = direct ?? viaTail?.part;
+      if (holder) {
+        const r = mk("already", holder.sku, viaTail?.former ?? row.sku);
+        // The sheet asks for another model than the part already has: say where it went.
+        return to && to.toUpperCase() === holder.sku.toUpperCase() ? r : { ...r, reason: `Already renamed to ${holder.sku}.` };
+      }
       const target = retiredBy.get(row.sku);
       if (target && to && target.toUpperCase() === to.toUpperCase()) return mk("already", to);
       return mk("skip:not-found");
@@ -102,6 +110,10 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
     if (!to) return mk("skip:bad-model");
     if (to.toUpperCase() === part.sku.toUpperCase()) return mk("skip:same", to, part.sku);
     const owner = liveUpper.get(to.toUpperCase());
+    // A half-finished rename (the copy at `to` was written, then the call died
+    // before `from` was retired): the copy lists `from` among its former SKUs.
+    // Plan it as a rename — renamePartDocs's recovery branch retires `from`.
+    if (owner && owner.sku !== part.sku && (owner.formerSkus ?? []).includes(part.sku)) return mk("rename", owner.sku, part.sku);
     if ((owner && owner.sku !== part.sku) || formerUpper.has(to.toUpperCase()) || retiredUpper.has(to.toUpperCase())) return mk("skip:taken", to);
     return mk("rename", to, part.sku);
   });

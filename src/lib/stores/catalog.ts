@@ -5,6 +5,7 @@ import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
 import type { PortalVisibility } from "@/lib/portal-visibility";
 import type { RackPartFacts } from "@/lib/rack/types";
+import { orderNumberOf } from "@/lib/catalog-rename/sku";
 import { MAX_PARAGRAPH } from "@/app/(app)/estimator/narrative";
 
 export type CatalogProductMetadata = {
@@ -274,7 +275,9 @@ function dedupeBySku(parts: CatalogPart[]): CatalogPart[] {
 
 /** getMany, ignoring SKU case: exact primary-key reads first (renamed SKUs
  *  followed), then one case-insensitive query for only the SKUs that missed
- *  (#205 spec builder). */
+ *  (#205 spec builder). #304: only an exact-case old SKU follows the
+ *  `renamedTo` redirect — a wrong-case old SKU reaches the case-insensitive
+ *  query, which reads live parts only, so it finds nothing. */
 export async function getManyAnyCase(skus: readonly string[]): Promise<CatalogPart[]> {
   const bySku = await resolveLiveBySku(skus);
   const found = dedupeBySku([...bySku.values()]);
@@ -502,7 +505,7 @@ export async function renamePartDocs(from: string, to: string, model: string): P
     id: to,
     sku: to,
     manufacturerModelNumber: model,
-    manufacturerPartNumber: old.manufacturerPartNumber || from,
+    manufacturerPartNumber: old.manufacturerPartNumber || orderNumberOf(from),
     formerSkus: [...new Set([...(old.formerSkus ?? []), from])],
     updatedAt: Date.now(),
   };

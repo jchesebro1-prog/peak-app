@@ -36,6 +36,14 @@ export function partModel(p: ModelPartLike): string {
   return (i >= 0 ? sku.slice(i + 1).trim() : "") || sku;
 }
 
+/** The MFR P/N a renamed part keeps when it had none: the old SKU's text
+ *  after its FIRST colon ("Symetrix:20-0026" → "20-0026"), else the old SKU
+ *  itself (renamePartDocs). */
+export function orderNumberOf(oldSku: string): string {
+  const i = oldSku.indexOf(":");
+  return (i >= 0 ? oldSku.slice(i + 1).trim() : "") || oldSku;
+}
+
 export type SearchPartLike = ModelPartLike & { desc?: string; mfr?: string; formerSkus?: string[] };
 
 export function partSearchHaystack(p: SearchPartLike): string {

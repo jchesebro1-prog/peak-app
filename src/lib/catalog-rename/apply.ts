@@ -19,9 +19,10 @@
  * generated_specs, spec_record_revisions and the settings.fixtureAssemblies
  * backup keep the old SKU and resolve through the catalog's renamedTo
  * redirect. Rewrites are the pure per-area functions in ./rewrite; each write
- * re-runs its rewriter on the doc read inside the write (patchDoc / the
- * quote store's row-locked writer), so a concurrent edit is not overwritten
- * with a stale copy.
+ * re-runs its rewriter on a fresh read just before writing (patchDoc reads
+ * then writes; the quote store's writer holds the row lock), which narrows —
+ * but for patchDoc areas does not close — the window in which a concurrent
+ * edit could be overwritten.
  */
 import {
   getBlob,
@@ -53,9 +54,9 @@ import { allDocumentLinks, documentLinkId } from "@/lib/stores/part-documents";
 import { markQuotePdfStale } from "@/lib/quote-pdf/schedule";
 import { rewriteQuoteSpecRefs } from "@/lib/stores/quotes";
 import { TRACK_SERIES_BLOB } from "@/lib/track-series";
-import { CROSSWALK_CELL_MAX, CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart } from "./plan";
+import { CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart } from "./plan";
 import * as RW from "./rewrite";
-import { REF_STEPS, type RefStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
+import { cleanCrosswalkRows, REF_STEPS, type RefStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
 
 export { REF_STEPS, type RefStep, type RenameStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
 
@@ -67,28 +68,23 @@ const PARTS_CHUNK = 50;
 /** Link rows re-keyed per insert/retire pair. */
 const LINK_CHUNK = 200;
 
-/** What the planner needs: the live book (sku, mfr, former SKUs) and the
- *  retired SKUs that point somewhere (`renamedTo`). Reads the whole book once. */
+/** What the planner needs: the live book (sku, mfr, former SKUs) and every
+ *  soft-deleted SKU — `renamedTo` when it was retired by a rename. A deleted
+ *  part's SKU is never a free target (renamePartDocs refuses it), so the
+ *  planner reads it as `skip:taken`. Reads the whole book once. */
 export async function loadPlanContext(): Promise<{ live: PlanPart[]; retired: Array<{ sku: string; renamedTo?: string }> }> {
   const [live, deleted] = await Promise.all([listCatalog(), listDeletedDocs<CatalogPart>("catalog_parts")]);
   return {
     live: live.map((p) => ({ sku: p.sku, mfr: p.mfr, formerSkus: p.formerSkus })),
-    retired: deleted.filter((p) => !!p.renamedTo).map((p) => ({ sku: p.sku || p.id, renamedTo: p.renamedTo })),
+    retired: deleted.map((p) => ({ sku: p.sku || p.id, ...(p.renamedTo ? { renamedTo: p.renamedTo } : {}) })),
   };
 }
 
-/** Client rows are untrusted: capped, every cell a trimmed string ≤ the sheet's cell cap. */
+/** Client rows are untrusted: a list over the cap is refused outright here;
+ *  each row is cleaned by the one shared cleaner (./steps). */
 function cleanRows(raw: unknown): CrosswalkRow[] | null {
   if (!Array.isArray(raw) || raw.length > CROSSWALK_MAX_ROWS) return null;
-  const s = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "").trim().slice(0, CROSSWALK_CELL_MAX);
-  return raw.filter(isRec).map((r, i) => ({
-    rowNumber: Number.isSafeInteger(r.rowNumber) ? (r.rowNumber as number) : i + 2,
-    manufacturer: s(r.manufacturer),
-    mfrPart: s(r.mfrPart),
-    sku: s(r.sku),
-    model: s(r.model),
-    notes: s(r.notes),
-  }));
+  return cleanCrosswalkRows(raw);
 }
 
 type Ctx = {
@@ -323,7 +319,9 @@ function refStep(step: RefStep, ctx: Ctx): Promise<StepOut> {
   }
 }
 
-/** The parts step: re-plan, then rename in chunks with a log append per chunk. */
+/** The parts step: re-plan, then rename one part at a time — the budget is
+ *  checked before EVERY rename — with a log append per chunk and before any
+ *  early return, so a renamed part is never left out of the log. */
 async function partsStep(rows: CrosswalkRow[], by: string, over: () => boolean): Promise<RenameBatchResult> {
   const ctx = await loadPlanContext();
   const plan = planRenames(rows, ctx.live, ctx.retired);
@@ -336,17 +334,22 @@ async function partsStep(rows: CrosswalkRow[], by: string, over: () => boolean):
     .map((r) => ({ from: r.from, to: r.to!, model: r.model, at: Date.now(), by }));
   await appendSkuRenames(relog);
   let renamed = 0;
-  for (let i = 0; i < plan.renames.length; i += PARTS_CHUNK) {
-    if (over()) return { ok: true, step: "parts", complete: false, renamed, changed: renamed, plan };
-    const entries: SkuRename[] = [];
-    for (const r of plan.renames.slice(i, i + PARTS_CHUNK)) {
-      const part = await renamePartDocs(r.from, r.to, r.model);
-      if (!part) continue; // taken since planning, or retired elsewhere — skipped
-      entries.push({ from: r.from, to: part.sku, model: r.model, at: Date.now(), by });
-      renamed++;
+  let entries: SkuRename[] = [];
+  for (const r of plan.renames) {
+    if (over()) {
+      await appendSkuRenames(entries);
+      return { ok: true, step: "parts", complete: false, renamed, changed: renamed, plan };
     }
-    await appendSkuRenames(entries);
+    const part = await renamePartDocs(r.from, r.to, r.model);
+    if (!part) continue; // taken since planning, or retired elsewhere — skipped
+    entries.push({ from: r.from, to: part.sku, model: r.model, at: Date.now(), by });
+    renamed++;
+    if (entries.length >= PARTS_CHUNK) {
+      await appendSkuRenames(entries);
+      entries = [];
+    }
   }
+  await appendSkuRenames(entries);
   return { ok: true, step: REF_STEPS[0], complete: false, renamed, changed: renamed, plan };
 }
 
@@ -356,7 +359,8 @@ const STEPS: ReadonlySet<string> = new Set<string>(["parts", ...REF_STEPS, "done
  * One batch of the rename: the step named by `input.step` (the parts step is
  * skipped when `refsOnly`), stopping between writes once `budgetMs` is spent.
  * The result's `step` is the one to call with next; `complete` is true only
- * on `done`. `revalidatePath` is the calling action's job.
+ * on `done`. `revalidatePath` and the in-process cache invalidations (portal
+ * index, system library) are the calling action's job.
  */
 export async function runRenameBatch(input: RenameBatchInput, by: string, budgetMs: number): Promise<RenameBatchResult> {
   const start = Date.now();

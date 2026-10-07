@@ -22,6 +22,9 @@ const th: React.CSSProperties = { padding: "6px 8px", fontWeight: 600 };
 const td: React.CSSProperties = { padding: "5px 8px", verticalAlign: "top", wordBreak: "break-word" };
 const mono: React.CSSProperties = { fontFamily: "var(--font-mono)" };
 const UNREACHABLE = "Could not reach the server. Try again.";
+/** #304: a step that returns unchanged and incomplete this many times in a row has stalled. */
+const STALL_LIMIT = 3;
+const NO_PROGRESS = "No progress — try again.";
 /** Rows drawn in each preview table; the counts above always cover the whole sheet. */
 const SHOW_ROWS = 1000;
 const OUTCOMES = Object.keys(RENAME_OUTCOME_LABEL) as RenameOutcome[];
@@ -77,6 +80,10 @@ export default function ModelNumbersClient() {
     setDoneMode(null);
     setTotals(sum);
     setPhase("running");
+    // Stall guard: a step that keeps coming back unchanged and incomplete
+    // (nothing written, same step) is not progressing — stop after
+    // STALL_LIMIT in a row, keeping the resume point.
+    let stalled = 0;
     for (;;) {
       setStepLabel(RENAME_STEP_LABEL[step]);
       let r;
@@ -97,9 +104,16 @@ export default function ModelNumbersClient() {
       sum.renamed += r.renamed;
       if (step !== "parts") sum.changed += r.changed;
       setTotals({ ...sum });
+      stalled = !r.complete && r.step === step && r.changed === 0 ? stalled + 1 : 0;
       step = r.step;
       setResume({ step, refsOnly });
       if (r.complete) break;
+      if (stalled >= STALL_LIMIT) {
+        setError(NO_PROGRESS);
+        setStepLabel("");
+        setPhase(back);
+        return;
+      }
     }
     setResume(null);
     setStepLabel("");
