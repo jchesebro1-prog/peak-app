@@ -338,6 +338,36 @@ import { specRowKey } from "@/lib/specs/record-keys";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
+/* #304 — the Estimator is split across a shell, a state hook, a header and
+   one file per step; pins that used to read estimator-client.tsx /
+   preview-doc.tsx read all of them, in a fixed order, so a verbatim move
+   between them never breaks a pin. Missing files are skipped. */
+const EST_DIR = "src/app/(app)/estimator";
+const ESTIMATOR_FILES = [
+  "estimator-client.tsx",
+  "use-estimator-state.ts",
+  "estimator-styles.ts",
+  "estimator-header.tsx",
+  "header-more-menu.tsx",
+  "estimator-banners.tsx",
+  "step-tabs.tsx",
+  "steps/build-step.tsx",
+  "steps/package-step.tsx",
+  "steps/review-step.tsx",
+  "steps/send-step.tsx",
+];
+const PREVIEW_FILES = ["preview-doc.tsx", "steps/package-step.tsx", "steps/review-step.tsx", "steps/send-step.tsx"];
+const readJoined = (files: string[]) =>
+  files
+    .map((f) => join(process.cwd(), EST_DIR, f))
+    .filter((p) => existsSync(p))
+    .map((p) => readFileSync(p, "utf8"))
+    .join("\n");
+const estimatorSource = () => readJoined(ESTIMATOR_FILES);
+const previewDocSource = () => readJoined(PREVIEW_FILES);
+/* The Estimator's files other than estimator-client.tsx that exist right now, as repo-relative paths — appended to the
+   "every client file" lists so a moved piece of the Estimator stays in those scans. */
+const estimatorExtraPaths = () => ESTIMATOR_FILES.slice(1).map((f) => `${EST_DIR}/${f}`).filter((p) => existsSync(join(process.cwd(), p)));
 
 /* --- Estimator labor defaults and cost rules --- */
 ok(disciplineForSystemTitle("Lighting control") === "LIG", "labor scope defaults from the system title");
@@ -14615,10 +14645,7 @@ async function statusRefusalAsyncChecks(): Promise<void> {
    refusedAdvanceAsyncChecks() just below.
    ==================================================================== */
 {
-  const estimatorClientSrc = readFileSync(
-    join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"),
-    "utf8"
-  );
+  const estimatorClientSrc = estimatorSource();
   // #284 task 5: doSave's body moved into the awaitable saveNow (doSave now
   // just runs it in a transition) — the slice starts there and still covers both.
   // #287 fix round 1: saveNow resolves to the saved updatedAt (or false), not a boolean.
@@ -23072,7 +23099,7 @@ import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(a
   ok(/\{showHang && <>/.test(modal) && modal.includes("hasHangPosition(assembly)"), "#246: Hang position / Circuit # show only for a fixture");
   const page = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
   ok(page.includes("fixtureAssemblies={allAssembliesFrom(fixtures, catalogRows)}"), "#246: the Estimator page passes every assembly kind");
-  const client = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const client = estimatorSource();
   ok(client.includes('fixtureAssemblies.find((item) => (item.kind ?? "fixture") === "fixture")'), "#246: opening the modal preselects the first fixture (never a system)");
 }
 
@@ -25087,7 +25114,7 @@ import { fixtureId as fixtureId222, registerFixture as registerFixture222 } from
   const src222 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const qd = src222("src/app/(app)/estimator/quote-document.tsx");
   ok(!/^\s*["']use client["']/.test(qd) && !/\buse(State|Effect|Memo|Ref|Transition)\(/.test(qd) && !/onClick=/.test(qd), "#222 QuoteDocument: no client directive, no hooks, no handlers — the print route renders it on the server");
-  const pd = src222("src/app/(app)/estimator/preview-doc.tsx");
+  const pd = previewDocSource();
   ok(!pd.includes('className="est-doc"') && !pd.includes("customerLines("), "#222 PreviewDoc carries no copy of the customer document (it lives in QuoteDocument)");
   ok(/\|print\/\|/.test(src222("src/middleware.ts")), "#222 middleware: /print/ is exempt from the team login (it checks its own token)");
   for (const p of ["src/app/print/quote/[id]/page.tsx", "src/app/print/letter/[kind]/[id]/page.tsx"]) {
@@ -25786,9 +25813,9 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
     "#222 pdfDocKey: internal vendor fields (attachment, terms, notes, cost) never mark the PDF stale"
   );
   const s5 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  const pd = s5("src/app/(app)/estimator/preview-doc.tsx");
+  const pd = previewDocSource();
   ok(!pd.includes("window.print") && pd.includes("<QuotePdfViewer") && pd.includes("?download=1"), "#222 PreviewDoc: shows the saved PDF and downloads the saved file — no window.print()");
-  const clientFiles = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/preview-doc.tsx", "src/components/quote-pdf/quote-pdf-viewer.tsx", "src/components/quote-pdf/saved-pdf-button.tsx", "src/components/quote-pdf/use-quote-pdf.ts", "src/components/quote-pdf/pdf-banner.ts"];
+  const clientFiles = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/preview-doc.tsx", "src/components/quote-pdf/quote-pdf-viewer.tsx", "src/components/quote-pdf/saved-pdf-button.tsx", "src/components/quote-pdf/use-quote-pdf.ts", "src/components/quote-pdf/pdf-banner.ts", ...estimatorExtraPaths()];
   ok(
     clientFiles.every((f) => !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/quote-pdf\/(token|storage|render|generate|schedule|portal-access|quote-document-data))/m.test(s5(f))),
     "#222 client files import no store, DB or server-only PDF module"
@@ -25804,7 +25831,7 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
     "#222 T5 withSavedMeta: an autosaved header field moves the saved-PDF baseline — category/timeframe don't print"
   );
   ok(pdfDocKey(withSavedMeta222(base, { name: "   " })) === pdfDocKey(base) && pdfDocKey(withSavedMeta222(base, {})) === pdfDocKey(base), "#222 T5 withSavedMeta: a blank name never clears one; an empty autosave changes nothing");
-  const est5 = s5("src/app/(app)/estimator/estimator-client.tsx");
+  const est5 = estimatorSource();
   const act5 = s5("src/app/(app)/estimator/actions.ts");
   ok(/setSavedDoc\(\(d\) => withSavedMeta\(d, meta\)\)/.test(est5) && /if \(r\.pdf\) setPdf\(r\.pdf\)/.test(est5) && /\.\.\.\(pdf \? \{ pdf \} : \{\}\)/.test(act5), "#222 T5: an autosave hands its PDF state back and moves the preview's baseline");
 
@@ -25822,7 +25849,7 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
   ok(/PDF_POLL_MS = 2000/.test(hook5) && /PDF_POLL_LIMIT_MS = 60_000/.test(hook5), "#222 T5 hook: polls every 2 s for up to 60 s");
   const viewer5 = s5("src/components/quote-pdf/quote-pdf-viewer.tsx");
   ok(/-webkit-touch-callout/.test(viewer5) && viewer5.includes("Open PDF ↗"), "#222 T5 viewer: iOS gets an Open PDF ↗ link (the iframe may show only page 1)");
-  const pd5 = s5("src/app/(app)/estimator/preview-doc.tsx");
+  const pd5 = previewDocSource();
   ok(/p\.togglePdf\("pdfPrices"\)/.test(pd5) && /p\.setDetail\("sectioned"\)/.test(pd5) && /Save & update PDF/.test(pd5), "#222 T5 preview: the Show-on-PDF controls stay editable and a Save re-renders");
 
   // Coalescing: the scheduled job waits for a burst of saves before launching Chrome.
@@ -26797,7 +26824,7 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
 
   // The rule reaches every pricing path as data from the server.
   ok(rd("src/app/(app)/estimator/page.tsx").includes("loadCurtainSewingPct()") && rd("src/app/(app)/estimator/page.tsx").includes("curtainSewingPct={curtainSewingPct}") &&
-      rd("src/app/(app)/estimator/estimator-client.tsx").includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
+      estimatorSource().includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
     "#227 late: the Estimator reads the rule on the server and hands it to its client curtain math");
   // #245 Tasks 10/12: the portal estimate page and its submit are retired —
   // no portal path there prices fabric any more.
@@ -26811,7 +26838,7 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadCurtainSewingPct()") && rd("src/lib/design/grid-quote.ts").includes("loadCurtainSewingPct()") && rd("src/lib/stores/equipment-map.ts").includes("loadCurtainSewingPct()"),
     "#227 late: the Grid editor, the Grid quote and the Equipment-map price context read the rule");
   // #245 Task 12: the portal estimate builder is deleted; the portal cart (which shows curtain requests) takes its place here.
-  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/catalog/quote/cart-client.tsx", "src/app/portal/catalog/curtain-request.tsx"];
+  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/catalog/quote/cart-client.tsx", "src/app/portal/catalog/curtain-request.tsx", ...estimatorExtraPaths()];
   ok(clients.every((f) => !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db)/m.test(rd(f))), "#227 late: no client curtain file imports a VALUE from a store");
 }
 
@@ -27302,7 +27329,7 @@ function e223Src(rel: string): string {
   ok(search.includes("quoteSearchRank("), "#223 ⌘K: exact-number quote hits rank first");
   const intake = e223Src("src/app/(app)/quotes/new/intake-form.tsx");
   ok(!intake.includes("replacing.id") && intake.includes("replacing.number"), "#223 Change type intake names the quote by its number");
-  const est = e223Src("src/app/(app)/estimator/estimator-client.tsx");
+  const est = estimatorSource();
   ok(est.includes("setQuoteId(res.number ?? res.id)") && est.includes("({moveNotice.targetNumber})"), "#223 Estimator: header + move notice show numbers");
   ok(e223Src("src/app/(app)/estimator/page.tsx").includes("quoteId: displayQuoteNumber(q)"), "#223 Estimator: the header label starts as the quote's number");
   ok(e223Src("src/app/(app)/estimator/section-card.tsx").includes("{hit.number}"), "#223 Estimator: the move-to picker lists numbers");
@@ -30417,7 +30444,7 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
   const qns242 = readFileSync(join(process.cwd(), "src/lib/quote-next-step.ts"), "utf8");
   // #284 task 5: EstimatorProps.reviewLimit became EstimatorProps.next (the chip is its strip).
   ok(ty.includes("next: QuoteNextStepView | null;") && !ty.includes("reviewLimit: ReviewLimitChipData | null;"), "#242 estimator: EstimatorProps.reviewLimit");
-  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const ec = estimatorSource();
   ok(
     // #284 task 5: the chip shows as the always-visible strip under the toolbar (next.strip), not an inline ReviewLimitChip.
     !/from "@\/(lib\/stores|db|lib\/review-limits-server|lib\/quote-next-step-server|lib\/quote-review-ops)/.test(ec.replace(/import type[^;]+;/g, "")) && ec.includes("{next.strip}"),
@@ -30447,7 +30474,7 @@ import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip"
     const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/page.tsx`), "utf8");
     ok(src.includes("<ReviewLimitChip chip={reviewLimit} savedOnly />"), `#242 fix: the ${p} builder chip says it reflects the last save`);
   }
-  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const ec = estimatorSource();
   // #284 task 5: the Estimator's state now reads on the next-step pill — the toolbar control gets savedOnly={pdfDirty}.
   const qnsComp242 = readFileSync(join(process.cwd(), "src/components/quote-review/quote-next-step.tsx"), "utf8");
   ok(/<QuoteNextStep\s+quoteId=\{loadedId\}\s+view=\{next\}\s+variant="toolbar"\s+savedOnly=\{pdfDirty\}/.test(ec) && qnsComp242.includes('(savedOnly ? " · as last saved" : "")'),
@@ -30564,7 +30591,7 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   }
 
   // 1 — a stale auto approval on a SENT quote reopens Submit / Attest.
-  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const ec = estimatorSource();
   // #284 task 5: the rule moved to src/lib/quote-next-step.ts, which the Estimator renders through <QuoteNextStep>
   // (runtime-proven by "#284 next: a sent quote whose approval lapsed can be resubmitted (to reach Won)").
   const qnsFinal242 = readFileSync(join(process.cwd(), "src/lib/quote-next-step.ts"), "utf8");
@@ -30737,7 +30764,7 @@ import { shouldAdoptUrlQ } from "@/lib/url-search-text";
   ok(/\(sec\.freightMiles === null && typeof sec\.freightMiles !== "undefined"\)/.test(scSrc245), "#245 final review fix: the 'Freight at max' chip also reads a portal-catalog section's own freightMiles === null, not only freightAuto");
   ok(/\(sec\.freightAuto && p\.freightUnknown\) \|\|/.test(scSrc245), "#245 final review fix: the ordinary Estimator-editable case (freightAuto + freightUnknown) still shows the chip too");
 
-  const ecSrc245 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const ecSrc245 = estimatorSource();
   ok(/if \(v > 30\) v = 30;/.test(ecSrc245) && !/if \(v > 15\) v = 15;/.test(ecSrc245), "#245 final review fix: setFreightPct clamps to 30, not 15");
 
   const routeSrc245 = readFileSync(join(process.cwd(), "src/app/api/part-documents/[id]/route.ts"), "utf8");
@@ -33726,7 +33753,7 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
   const page = src("src/app/(app)/estimator/page.tsx");
   ok(/allSpecRecords\(\)/.test(page) && /specKeys=\{systemMatchKeys\(specRecords\)\}/.test(page),
     "spec pickers: the estimator page reads the records on the server and passes specKeys as strings");
-  const client = src("src/app/(app)/estimator/estimator-client.tsx");
+  const client = estimatorSource();
   const addCustom = client.slice(client.indexOf("const addCustomPart = async"), client.indexOf("/* ---------------- vendor quote (#143"));
   ok(/specKey: d\.specKey \|\| undefined/.test(addCustom), "spec pickers: the custom-part path writes SpecItem.specKey from the form");
   const addCurtain = client.slice(client.indexOf("const addCurtain = (secId: string)"), client.indexOf("const setFixture ="));
@@ -33766,6 +33793,11 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
     const s = src(f) + (f.endsWith("/grid/[id]/editor.tsx") ? src("src/app/(app)/design/grid/[id]/use-grid-editor.ts") + src("src/app/(app)/design/grid/[id]/plan-canvas.tsx") + gridWorkspaceSource : "");
     const bad = [...s.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
     ok(s.startsWith('"use client"') && bad.length === 0, `spec pickers: ${f} is a client file with no store/db value imports (${bad.join(", ") || "none"})`);
+  }
+  // #304: the Estimator's other files (state hook, header, steps) carry the same no-store/db-value-import rule once they exist.
+  for (const f of estimatorExtraPaths()) {
+    const bad = [...src(f).matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
+    ok(bad.length === 0, `spec pickers: ${f} imports no store/db value (${bad.join(", ") || "none"})`);
   }
   // The BOM seam (custom specKey kept, keyless curtain derived) is covered by specRecordsBomSeamAsyncChecks.
 }
@@ -33988,7 +34020,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
     "#254 banner: singulars, no kept segment at 0, fractional percent");
 
   // Structural: wiring, Undo, next-edit clear, client safety, customer document.
-  const t254Client = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const t254Client = estimatorSource();
   const t254Pure = readFileSync(join(process.cwd(), "src/app/(app)/estimator/tier-reprice.ts"), "utf8");
   const t254Persist = t254Client.slice(t254Client.indexOf("const persistMeta = "), t254Client.indexOf("const openTitle = "));
   ok(/await updateQuoteMetaAction\(id, meta\)/.test(t254Persist) && !/applyTierStamp|tierMargin/.test(t254Persist),
@@ -34140,7 +34172,7 @@ import {
     "#254 review: the banner reads \"· Save to keep\" while the re-price is unsaved, and drops it once saved");
 
   // Structural — client.
-  const c = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const c = estimatorSource();
   const between = (a: string, b: string) => c.slice(c.indexOf(a), c.indexOf(b, c.indexOf(a)));
   const apply = between("const applyTierStamp = ", "const tierResolveSeqRef = ");
   ok(/if \(res\.repriced === 0\) return;/.test(apply) && !/setTierReprice\(null\)/.test(apply),
@@ -36810,7 +36842,7 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   // #282 phase 2: postedSections = the sell-sanitized sections after the Rewards-credit clamp.
   ok(acts267.includes("payload.sections.map(sanitizeSystemSell)") && acts267.includes("settleRewardCredit(sellSanitized,") && acts267.includes("reconcileEstimatorValue(postedSections,") && acts267.includes("clearPricedPor(postedSections)"), "#267: saveQuoteAction sanitizes every posted section before pricing and storing it");
   ok(acts267.includes("{ ...sanitizeSystemSell(section), id: \"sys\" + Date.now() }") && acts267.includes("copySectionForTarget(sanitizeSystemSell(section),"), "#267: Move and Copy sanitize the posted section too");
-  const cli267 = read267("src/app/(app)/estimator/estimator-client.tsx");
+  const cli267 = estimatorSource();
   ok(cli267.includes("!initial.portal && (!initial.loadedId || initial.status === \"draft\")") && cli267.includes("withPriceRound(initial.sections)"), "#267: the Estimator stamps priceRound on load for drafts and unsaved estimates only");
   ok((cli267.match(/priceRound: SYSTEM_PRICE_STEP/g) || []).length >= 3, "#267: new systems (freshSections, addSystem) carry priceRound; Round to $25 sets it");
   ok(/const setMarginAll[\s\S]{0,200}clearSellOverride\(s\)/.test(cli267) && /const setSystemMargin[\s\S]{0,300}clearSellOverride\(s\)/.test(cli267), "#267: both margin sliders clear the typed system sell");
@@ -37042,7 +37074,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
     "#269 tier re-price: a stamp change inside the same labor whole percent (27.4% → 27%) leaves the draft and the section alone");
   ok(JSON.stringify(l269Copy(allHand, { newSectionId: "z", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.27 }).section.laborGroups) === JSON.stringify(allHand.laborGroups),
     "#269 copy system: equal tiers leave the stored draft exactly as it was");
-  const cliFix = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const cliFix = estimatorSource();
   ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
     "#269 applyTierStamp: a draft-only change is applied silently (no banner) when nothing re-priced");
 
@@ -37076,7 +37108,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
 
   /* ---- wiring (source) ---- */
   const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const cli = estimatorSource();
   ok(cli.includes("buildLaborItems(r, discLabel, nextId, group)") && cli.includes("withLaborGroup(s, group, items, draft)") && cli.includes("laborEdit?.group || newLaborGroupId()"),
     "#269 addLabor: builds with a group id (the edited group's on Update) and places the lines through withLaborGroup");
   ok(/const openLaborEdit = \(secId: string, group: string\)[\s\S]{0,400}closeInput\(\);[\s\S]{0,200}laborEditRef\.current = [\s\S]{0,120}openInputMethod\("labor", secId\)/.test(cli),
@@ -37495,7 +37527,7 @@ import { readFileSync as l272Read } from "node:fs";
   ok(!/disabled=\{[^}]*missingMiles/.test(modal272) && modal272.includes("disabled={!valid}"), "#272 warning: never blocks Add (the button still gates on valid only)");
 
   /* ---- wiring in the estimator client ---- */
-  const client272 = l272Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  const client272 = estimatorSource();
   ok(client272.includes("applyLocalTrip(m, est)") && client272.includes("applyAutoTripsToMobs(d.mobs, est)") && client272.includes("laborMob(travelEstNow())"), "#272 wiring: setTripLocal, applyAutoTrips and + Add mobilization all run the fill rule");
   const seed272 = client272.slice(client272.indexOf("#269: reopened from a labor line"));
   const edit272 = seed272.slice(0, seed272.indexOf("withTravelFor(customerId, locationId"));
@@ -37556,7 +37588,7 @@ import { readFileSync as l272Read } from "node:fs";
   ok(l272Local({ ...autoFar }, noMiles).milesRT === "" && l272Local({ ...autoFar }, noMiles).milesAuto === undefined, "#272 trip switch: no route clears auto miles");
   const usedBtn = l272Use(l272Type(nearMob, "5"), far);
   ok(usedBtn.milesRT === "342" && usedBtn.milesAuto === true && l272Use(nearMob, noMiles) === nearMob, "#272 'Use N mi RT' button: takes the route's miles as auto; a no-route click is a no-op");
-  const clientSrc = l272Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  const clientSrc = estimatorSource();
   ok(clientSrc.includes('field === "milesRT" ? typeMobMiles(m, val)') && clientSrc.includes("setRouteMiles(m, est)"), "#272 wiring: typing in the miles box clears the flag (setMob), the Use button sets it");
 
   /* ---- #269 round trip: flag survives the stored draft; reopen never refills ---- */
@@ -38167,14 +38199,14 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
     ok(cust.length === 2 && cust[1].item === track && t274bNear(cust[1].ext, track.price), "#274B customer: the curtain and its track are two rows — the track is ONE line, never its parts");
   } else ok(false, "#274B parts list: fixture line priced");
   const doc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/quote-document.tsx"), "utf8");
-  const prev = readFileSync(join(process.cwd(), "src/app/(app)/estimator/preview-doc.tsx"), "utf8");
+  const prev = previewDocSource();
   ok(!/\.components\b/.test(doc) && !/\.components\b/.test(prev), "#274B customer: the quote document / preview never read a line's components");
 }
 
 // ---- wiring (source) ----
 {
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  const client = src("src/app/(app)/estimator/estimator-client.tsx");
+  const client = estimatorSource();
   const card = src("src/app/(app)/estimator/section-card.tsx");
   const modal = src("src/app/(app)/estimator/track-modal.tsx");
   const curtainModal = src("src/app/(app)/estimator/curtain-modal.tsx");
@@ -38760,7 +38792,7 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
   const qSrc = r282Read("src/lib/stores/quotes.ts", "utf8");
   ok(/opts\.bypassApprovalGate !== "historical-import"\) await reconcileRewardsSafely/.test(qSrc) && /console\.error\("\[rewards\] ledger post failed/.test(qSrc),
     "#282 P2 wiring: setStatus posts the ledger after a real transition, never for historical-import, and logs instead of throwing");
-  const clientSrc = r282Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  const clientSrc = estimatorSource();
   ok(/if \(id !== customerId\) setSections\(\(ss\) => \(rewardCreditOf\(ss\) > 0 \? withoutRewardCredit\(ss\) : ss\)\)/.test(clientSrc),
     "#282 P2 wiring: changing the quote's customer drops the credit line");
 }
@@ -40038,7 +40070,7 @@ import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
 
 // #284 task 5 — the next-step control's wiring (source-text checks).
 {
-  const ec = readFileSync("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  const ec = estimatorSource();
   const comp = existsSync("src/components/quote-review/quote-next-step.tsx") ? readFileSync("src/components/quote-review/quote-next-step.tsx", "utf8") : "";
   const ra = existsSync("src/app/(app)/quotes/review-actions.ts") ? readFileSync("src/app/(app)/quotes/review-actions.ts", "utf8") : "";
   ok(!ec.includes("reviewBarOpen") && !ec.includes("Show review status"), "#284 wiring: the collapsible review bar is gone from the Estimator");
@@ -40495,7 +40527,7 @@ import type { PurchasePerk as R282ePP } from "@/lib/rewards/program";
   for (const f of ["src/app/(app)/flame-tests/quote/controls.tsx", "src/app/(app)/inspections/quote/controls.tsx", "src/app/(app)/repairs/quote/controls.tsx"]) {
     ok(/<ServicePurchasePerksBanner customerId=\{customerId\} \/>/.test(r282Read(f, "utf8")), `#282 perks+points wiring: ${f.split("/")[2]} shows the purchase-perks banner`);
   }
-  const est = r282Read("src/app/(app)/estimator/estimator-client.tsx", "utf8");
+  const est = estimatorSource();
   ok(/creditInfo\?\.customerId === customerId && <PurchasePerksBanner text=\{creditInfo\.purchasePerks\}/.test(est), "#282 perks+points wiring: the Estimator banner shows only the current customer's answer");
   for (const f of ["src/components/rewards/purchase-perks-banner.tsx", "src/app/(app)/settings/rewards/purchase-perks-editor.tsx", "src/app/portal/redeem-perk-button.tsx", "src/components/rewards/perk-actions.tsx"]) {
     ok(!/from "@\/lib\/stores\//.test(r282Read(f, "utf8")), `#282 perks+points wiring: client component ${f.split("/").pop()} imports no server store`);
@@ -41455,7 +41487,7 @@ import { quoteBackFromReview as a287Back } from "@/lib/quote-approval-rules";
   ok(comp.includes("nsSendAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendAction(quoteId, shown), { versioned: true }")
     && comp.includes("nsApproveAction(quoteId, shown), { versioned: true }") && comp.includes("beforeAction?: () => Promise<number | false>;"),
     "#287 control: Approve & send decides the shown version without a pre-save; a non-owner Send / Approve only carry asOf — after a pre-save, the version it saved");
-  ok(src285("src/app/(app)/estimator/estimator-client.tsx").includes("return res.id ? res.updatedAt : false;"),
+  ok(estimatorSource().includes("return res.id ? res.updatedAt : false;"),
     "#287 control: the Estimator's saveNow resolves to the saved quote's updatedAt (the version the control then decides)");
   ok(comp.includes("(!approverOnly || view.approverMode)") && comp.includes('approverOnly ? view.secondary.filter((s) => s.action === "approve")'),
     "#287 control: the phone approver mode shows Approve & send, Send back and Approve only");
@@ -41660,7 +41692,7 @@ import { quoteDocumentDataFor as p285DocData } from "@/lib/quote-pdf/quote-docum
   const people = acts.slice(acts.indexOf("export async function setQuotePeopleAction"));
   ok(people.includes("await requireUser()") && people.includes("setQuotePeopleAs(id, user,") && people.includes("quoteNextStepFor(q, user)") && people.includes("scheduleQuotePdf(q.id)"),
     "#287 B action: setQuotePeopleAction runs the guarded op as the session user, returns the fresh next step and re-renders the PDF");
-  const est = src("src/app/(app)/estimator/estimator-client.tsx");
+  const est = estimatorSource();
   ok(est.includes('<span style={CTX_LABEL}>Lead estimator</span>') && est.includes('<span style={{ ...CTX_LABEL, marginTop: 4 }}>Prepared by</span>')
     && est.includes("const r = await setQuotePeopleAction(id, patch);") && est.includes("if (r.next !== undefined) setNext(r.next ?? null);")
     && est.includes("setActionError(r.error ||"),
@@ -43574,7 +43606,7 @@ import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292Repla
   const t2 = c292ReplaceTrack(c292Sec("s", [{ id: 5, track: { ...C292_TRACK }, curtainTrackKey: "ct-4" }]), 5, { sku: "TRK", desc: "t", qty: 1, unit: "lot", cost: 1, price: 2, track: { ...C292_TRACK } });
   ok(t2.items[0].curtainTrackKey === "ct-4", "#292 edit: Update track keeps the curtain-track key");
   const rd292c = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  const est = rd292c("src/app/(app)/estimator/estimator-client.tsx");
+  const est = estimatorSource();
   ok(/curtainItem\(/.test(est) && /newCurtainTrackKey\(/.test(est), "#292 source: addCurtain writes curtainInputs + curtainTrackKey through curtainItem");
   ok(/<CurtainModal[\s\S]{0,400}editing=\{/.test(est), "#292 source: CurtainModal receives editing");
   ok(rd292c("src/app/(app)/estimator/section-card.tsx").includes("onEditCurtain"), "#292 source: curtain lines get an ✎ (onEditCurtain)");
@@ -43652,7 +43684,7 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
     "#292 fix: a freshly added curtain line keeps the pre-#292 desc/qty/cost/price (no track → no key)");
   const qtyBad = c292Item({ ...base, qty: "0" }, ac, { id: 1, sku: "CRT-2" });
   ok(qtyBad.qty === 1 && c292Item(base, ac, { id: 1, sku: "CRT-2", trackKey: "ct-1" }).curtainTrackKey === "ct-1", "#292 fix: curtainItem clamps qty to 1 and keys a tracked add");
-  const estSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const estSrc = estimatorSource();
   const addSrc = estSrc.slice(estSrc.indexOf("const addCurtain = "), estSrc.indexOf("const setFixture = "));
   ok(/\.\.\.curtainItem\(d, c, \{ id: idN, sku: "CRT-" \+ skuN, trackKey: key \}\)/.test(addSrc) && !/desc: name \+/.test(addSrc), "#292 source: addCurtain builds its line through curtainItem (no inline desc)");
 
@@ -44523,7 +44555,7 @@ import { readFileSync as c296cRead } from "node:fs";
   ok(rackLine?.rackId === "SA-RACK-A" && rackLine.price === 1208 && rackLine.cost === 805, "#296 rack consumers: fixtureBomLine on a rack carries rackId and the resolved totals");
   const fxLine = c296cBom(fxAsm, draft);
   ok(!!fxLine && !("rackId" in fxLine), "#296 rack consumers: fixtureBomLine on a fixture has no rackId");
-  const ec = c296cRead(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const ec = estimatorSource();
   ok(ec.includes("...(line.rackId ? { rackId: line.rackId } : {})"), "#296 rack consumers: the Estimator line gets rackId from the BOM line");
   const ty = c296cRead(join(process.cwd(), "src/app/(app)/estimator/types.ts"), "utf8");
   ok(/rackId\?: string;/.test(ty), "#296 rack consumers: SpecItem declares rackId");
@@ -45574,7 +45606,7 @@ import { renderToStaticMarkup as c292Render } from "react-dom/server";
   const pkg = rd292d("src/lib/client-package-server.ts");
   ok(pkg.includes("addCutSheets(") && rd292d("src/lib/curtain-cut-sheets/package-sheets.ts").includes("cutsheets/"), "#292 source: client packages write the cutsheets/ folder");
   ok(/pdfCutSheets/.test(rd292d("src/app/print/quote/[id]/page.tsx")) && /CutSheetPages/.test(rd292d("src/app/print/quote/[id]/page.tsx")), "#292 source: the estimate print route appends Client pages behind pdfCutSheets");
-  ok(!/curtain-cut-sheets\/(collect|load|package-sheets)/.test(rd292d("src/app/(app)/estimator/estimator-client.tsx") + rd292d("src/app/(app)/estimator/preview-doc.tsx")),
+  ok(!/curtain-cut-sheets\/(collect|load|package-sheets)/.test(estimatorSource() + previewDocSource()),
     "#292 source: the Estimator client never imports the collector, loader or package helper (bundle/boundary)");
 
   // Render level: a fixture quote with curtains, rendered in BOTH styles, prints sheet CS-1.
@@ -45635,7 +45667,7 @@ import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
   const qpr = rd("src/app/print/quote/[id]/page.tsx");
   ok(/settleWithin\(loadCutSheets\(id, \{ images: "data" \}\), CUT_SHEET_APPEND_LOAD_MS, `\[cutsheets\] estimate PDF \$\{id\}`\)/.test(qpr) && c292Dl.CUT_SHEET_APPEND_LOAD_MS <= 10_000,
     "#292 source: the estimate print route waits at most a few seconds for appended cut sheets, then prints without them");
-  const pv = rd("src/app/(app)/estimator/preview-doc.tsx");
+  const pv = previewDocSource();
   ok(/cut sheet\$\{p\.cutSheetCount === 1 \? "" : "s"\} \(Client style\)/.test(pv) && !/cut sheet page/.test(pv), "#292 preview: the chip counts cut sheets (types), not pages");
 }
 
@@ -46616,10 +46648,10 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
     "#293 QuoteDocument: blocks come from printableKeyProducts; body and appendix share ItemizedLines; never names internalNote");
   const pr = rd("src/app/print/quote/[id]/page.tsx");
   ok(pr.includes("keyProductPhotoDataUris(") && pr.includes("keyProductPhotos={keyProductPhotos}"), "#293 print route: passes the inlined key-product photos");
-  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
+  const pd = previewDocSource();
   ok(pd.includes('p.togglePdf("pdfItemizedAppendix")') && pd.includes('"Itemized appendix"') && pd.includes("Print every narrative system's full line list after the signature"),
     "#293 preview: Show on PDF offers the Itemized appendix toggle");
-  ok(/detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix/.test(rd("src/app/(app)/estimator/estimator-client.tsx")),
+  ok(/detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix/.test(estimatorSource()),
     "#293 estimator: the appendix choice is saved with pdfOptions");
 }
 
@@ -46633,7 +46665,7 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
   const col = rd("src/app/(app)/estimator/narrative-column.tsx");
   const hook = rd("src/app/(app)/estimator/use-key-product-library.ts");
   const card = rd("src/app/(app)/estimator/section-card.tsx");
-  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const cli = estimatorSource();
   ok(/^"use client";/.test(col) && /^"use client";/.test(hook) && !clientImportsServer(col) && !clientImportsServer(hook) && !clientImportsServer(card),
     "#293 UI: the column and the library hook are client modules that import no store or server-only module");
   ok(hook.includes("keyProductLibraryAction(") && hook.includes("MAX_LIBRARY_SKUS"), "#293 UI: the hook reads library rows through keyProductLibraryAction, ≤ 200 skus");
@@ -46796,7 +46828,7 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const col = rd("src/app/(app)/estimator/narrative-column.tsx");
   const hook = rd("src/app/(app)/estimator/use-key-product-library.ts");
-  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const cli = estimatorSource();
   const card = rd("src/app/(app)/estimator/section-card.tsx");
   const photos = rd("src/lib/narrative/photos.ts");
   const doSave = col.slice(col.indexOf("const doSave = "), col.indexOf("const onSave = "));
@@ -46845,7 +46877,7 @@ import type { SpecItem as N293gItem, SpecSection as N293gSec } from "@/app/(app)
     "#293 fix sku cap: a 129-char sku is not eligible (star none), so a starred block can't vanish on save");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const colSrc = rd("src/app/(app)/estimator/narrative-column.tsx");
-  const cliSrc = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const cliSrc = estimatorSource();
   ok(colSrc.includes("!Object.hasOwn(rows, s)") && !colSrc.includes("(s in rows)") && cliSrc.includes("Object.hasOwn(kpLib.rows, sku)") && !cliSrc.includes("sku in kpLib.rows"),
     "#293 fix: row-loaded checks use Object.hasOwn (an sku named like an inherited property is not a loaded row)");
 }
@@ -47374,7 +47406,7 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   const clientImportsServer = (s: string) =>
     /^import (?!type)[^\n]*from "(@\/(lib\/stores|db|lib\/blob|lib\/session|lib\/narrative\/(library|photos|system-library-index|load-system))|\.\/copy-pricing)/m.test(s);
   const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
-  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const cli = estimatorSource();
   ok(/^"use client";/.test(modal) && !clientImportsServer(modal) && !clientImportsServer(cli),
     "#293s UI: the library modal is a client module; neither it nor the Estimator value-imports a store or server-only module");
   ok(modal.includes("searchSystemLibraryAction(") && modal.includes("getSystemLibraryEntryAction(") && modal.includes("loadLibrarySystemAction(") && modal.includes("Has narrative"),
@@ -47734,7 +47766,7 @@ import {
     "#293t panel: Revoke confirms inline; Copy writes the clipboard (with a manual fallback)");
   ok(panel.includes("Copy client link") && panel.includes("Client link") && panel.includes("created by") && (panel.match(/catch \{/g) || []).length >= 3,
     "#293t panel: copy, expiry line, and every action await wrapped in try/catch");
-  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
+  const pd = previewDocSource();
   ok(pd.includes('import { ClientLinkPanel } from "./client-link-panel";') && pd.includes("{p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}"),
     "#293t preview: the Client link block sits in the customer preview sidebar");
   const qs = rd("src/lib/stores/quotes.ts");
@@ -48806,7 +48838,7 @@ import { mergeNarrative as mfdMerge } from "@/lib/narrative/merge";
   // A saved pre-Part-1 block on a generic custom line's "CUSTOM" sku still resolves.
   const legacy = { ...(sec as object), keyProducts: [{ lineKey: "2", sku: "CUSTOM", text: "Old", photo: true }] } as never;
   ok(mfdResolve(legacy)[0].status === "ok", "mfr images: a pre-Part-1 block on a generic CUSTOM sku still resolves");
-  ok(readFileSync("src/lib/specs/record-keys.ts", "utf8").includes('"CUSTOM", "AI"') && readFileSync("src/app/(app)/estimator/estimator-client.tsx", "utf8").includes('|| "CUSTOM")') && readFileSync("src/app/(app)/estimator/estimator-client.tsx", "utf8").includes('sku: "AI",'),
+  ok(readFileSync("src/lib/specs/record-keys.ts", "utf8").includes('"CUSTOM", "AI"') && estimatorSource().includes('|| "CUSTOM")') && estimatorSource().includes('sku: "AI",'),
     "mfr images: the generic skus the Estimator writes (CUSTOM, AI) are the placeholder set");
   const col = readFileSync("src/app/(app)/estimator/narrative-column.tsx", "utf8");
   const iOwn = col.indexOf("{row?.photoDocId ? ("), iCustom = col.indexOf('placeholder === "custom-device" ? ('), iMfr = col.indexOf("row?.fallbackDocId ? (");
@@ -50305,7 +50337,7 @@ import type { SpecSection as E301fSec } from "@/app/(app)/estimator/types";
   ok(e301fSel("  First line\n  second line  ") === "First line second line", "#301 fields: a selection becomes one cover paragraph");
   ok(e301fAppend("", " New ") === "New" && e301fAppend("Old", "New") === "Old\n\nNew" && e301fAppend("Old\n\nNew", "New") === "Old\n\nNew" && e301fAppend("Old", "  ") === "Old",
     "#301 fields: From site visit fills blank goals, appends after a blank line, never duplicates");
-  ok(/setSectionsState\(\(prev\) => fillClientGoals\(prev, r\.goals\)\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: fillClientGoals\(n\.before, r\.goals\) \} : n\)\);/.test(readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8")),
+  ok(/setSectionsState\(\(prev\) => fillClientGoals\(prev, r\.goals\)\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: fillClientGoals\(n\.before, r\.goals\) \} : n\)\);/.test(estimatorSource()),
     "#301 goals pre-fill carries into a live re-price banner's Undo snapshot, like the freight auto-apply");
   const e301Full = "x".repeat(e301fGoalsMax);
   ok(!e301fAppendRes("", "New").truncated && !e301fAppendRes("Old", "Old").truncated && !e301fAppendRes("Old", "New").truncated && !e301fAppendRes("Old", "  ").truncated,
@@ -50572,7 +50604,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   const fields = rd("src/app/(app)/estimator/scope-output-fields.tsx");
   const col = rd("src/app/(app)/estimator/narrative-column.tsx");
   const card = rd("src/app/(app)/estimator/section-card.tsx");
-  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const cli = estimatorSource();
   ok(/^"use client";/.test(fields) && !serverImport(fields) && !serverImport(col) && !serverImport(card) && !serverImport(cli),
     "#301 UI: the new block and every edited estimator client module value-import no store, db, session, users, settings or estimate-output server module");
   ok(fields.includes(">Client goals<") && fields.includes("From site visit ▾") && fields.includes("Add the client's goals") && fields.includes("siteVisitGoalsAction(") &&
@@ -50629,7 +50661,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   ok(pg.includes("getEstimateOutputDefaults()") && pg.includes("notIncludedDefault={estimateOutputDefaults.notIncluded}") &&
      pg.includes('notIncluded: typeof q.notIncluded === "string" ? q.notIncluded : null,') && pg.includes('coverSummary: q.coverSummary || "",'),
     "#301 page: the stored fields seed the editor; a quote that never stored Not included gets the default");
-  const cli = rd("src/app/(app)/estimator/estimator-client.tsx");
+  const cli = estimatorSource();
   ok(cli.includes("useState(initial.notIncluded ?? notIncludedDefault)") && cli.includes("persistMeta({ coverSummary: v })") && cli.includes("persistMeta({ notIncluded: v })") &&
      /saveQuoteAction\(loadedId, \{[\s\S]{0,1500}coverSummary,\s+notIncluded,/.test(cli),
     "#301 estimator: the fields autosave (500 ms) and ride every Save");
@@ -50637,7 +50669,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   ok(panel.startsWith('"use client";') && panel.includes("Cover &amp; package") && panel.includes("Overall summary") && panel.includes("Not included") &&
      panel.includes("Reset to default") && panel.includes("p.onNotIncluded(p.notIncludedDefault)") && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/quote-pdf)/m.test(panel),
     "#301 preview: the Cover & package block (summary, Not included, Reset to default)");
-  const prev = rd("src/app/(app)/estimator/preview-doc.tsx");
+  const prev = previewDocSource();
   ok(prev.includes("<CoverPackagePanel") && prev.indexOf("<CoverPackagePanel") < prev.indexOf("<ClientLinkPanel") && !prev.includes('className="est-doc"') && !prev.includes("customerLines("),
     "#301 preview: mounted above the Client link block; the #222 preview pins still hold");
 }
@@ -52392,7 +52424,7 @@ import { CUSTOM_PART_MARGIN as t302Margin, customPartSell as t302Sell } from "@/
   const guardAt = save302.indexOf("catalogGet(sku)");
   ok(guardAt > 0 && guardAt < save302.indexOf("await mergeUpsert(sku") && /already in the catalog/.test(save302.slice(guardAt, guardAt + 400)),
     "#302: saveEstimatorCustomPartAction refuses a SKU already in the catalog before mergeUpsert can overwrite it");
-  const client302 = est302("estimator-client.tsx");
+  const client302 = estimatorSource();
   const add302 = client302.slice(client302.indexOf("const addCustomPart = async"), client302.indexOf("/* ---------------- vendor quote"));
   ok(!/if \(!saved\.ok\) return;/.test(add302) && /if \(!saved\.ok\) \{\s*setCustomError\(saved\.error\);\s*return;/.test(add302),
     "#302: addCustomPart shows the server's refusal instead of a bare return on !saved.ok");
