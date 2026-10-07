@@ -7,6 +7,18 @@ import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, sna
 import { normalizeSku } from "@/lib/davinci/sku";
 import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
 import { planRenames as cr302Plan, crosswalkRowsFromGrid as cr302Rows } from "@/lib/catalog-rename/plan";
+import * as cr302Rw from "@/lib/catalog-rename/rewrite";
+import type { SpecItem as Cr302SpecItem, SpecSection as Cr302Section } from "@/app/(app)/estimator/types";
+import type { CartLine as Cr302CartLine } from "@/lib/portal-cart-types";
+import type { ProcurementLine as Cr302ProcLine } from "@/lib/stores/projects";
+import type { SpecDocProduct as Cr302SpecProduct } from "@/lib/specs/spec-document";
+import type { GridPlacement as Cr302Placement, GridRoute as Cr302Route } from "@/lib/stores/grid-projects";
+import type { WireType as Cr302WireType } from "@/lib/catalog-connect";
+import type { TrackSeries as Cr302TrackSeries } from "@/lib/track-series";
+import type { CurtainMountHardware as Cr302Mounts } from "@/lib/curtain-mounts";
+import type { RackDefaults as Cr302RackDefaults } from "@/lib/rack/defaults";
+import type { EquipmentMap as Cr302EquipMap } from "@/lib/design/equipment-map";
+import type { FixtureRecord as Cr302Fixture } from "@/lib/fixture-assemblies";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { extractLibrary } from "@/lib/davinci/extract";
 import { buildIndex, buildIndexWithStats, matchSku } from "@/lib/davinci/match";
@@ -10664,6 +10676,208 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     const dp = cr302Plan(dupSheet.rows, [{ sku: "80-0500", mfr: "Symetrix" }], []);
     ok(dp.rows.length === 2 && dp.rows.every((x) => x.outcome === "skip:duplicate") && dp.renames.length === 0, "#302 plan: same SKU, two different models → both skip:duplicate");
   } else ok(false, "#302 plan: duplicate-SKU sheet parses");
+}
+
+/* --- #302 pure reference rewriters (src/lib/catalog-rename/rewrite.ts) --- */
+{
+  const OLD = "80-0043", NEW = "Symetrix:Jupiter 4", OTHER = "80-0099";
+  const m302: ReadonlyMap<string, string> = new Map([[OLD, NEW]]);
+  const models302: ReadonlyMap<string, string> = new Map([[NEW, "Jupiter 4"]]);
+  const none302: ReadonlyMap<string, string> = new Map();
+  const same = (v: unknown, w: unknown) => JSON.stringify(v) === JSON.stringify(w);
+  // One shape every rewriter is held to: moves OLD, keeps OTHER, null when nothing to do, input untouched.
+  const holds = (name: string, fn: (v: any, m: ReadonlyMap<string, string>) => unknown, input: unknown, expected: unknown) => {
+    const before = JSON.stringify(input);
+    const out = fn(input, m302);
+    ok(same(out, expected), `#302 rewrite ${name}: renamed SKU moves, unrelated SKU stays`);
+    ok(JSON.stringify(input) === before, `#302 rewrite ${name}: input is not mutated`);
+    ok(fn(expected, m302) === null && fn(input, none302) === null, `#302 rewrite ${name}: nothing to change → null`);
+  };
+
+  // rewriteSkuKeyed
+  ok(same(cr302Rw.rewriteSkuKeyed({ [`opt:${OLD}`]: 2 }, m302), { [`opt:${NEW}`]: 2 }), "#302 rewrite skuKeyed: slot:sku → slot:newSku (new SKU holds a colon)");
+  ok(same(cr302Rw.rewriteSkuKeyed({ [`opt:${NEW}`]: 1, [`lens:${OLD}`]: 3, [`opt:${OTHER}`]: 1 }, m302), { [`opt:${NEW}`]: 1, [`lens:${NEW}`]: 3, [`opt:${OTHER}`]: 1 }), "#302 rewrite skuKeyed: an already-new key is split on the FIRST colon and kept");
+  ok(cr302Rw.rewriteSkuKeyed({ [`opt:${NEW}`]: 1 }, m302) === null && cr302Rw.rewriteSkuKeyed({ [`opt:${OTHER}`]: 1, nocolon: 2 }, m302) === null, "#302 rewrite skuKeyed: nothing to rewrite → null, a colon-less key is left alone");
+  ok(same(cr302Rw.rewriteSkuKeyed({ [`opt:${OLD}`]: 2, [`opt:${NEW}`]: 1 }, m302), { [`opt:${NEW}`]: 3 }), "#302 rewrite skuKeyed: old + new key both present sum into one");
+  { const rec = { [`opt:${OLD}`]: 2 }; const b = JSON.stringify(rec); cr302Rw.rewriteSkuKeyed(rec, m302); ok(JSON.stringify(rec) === b, "#302 rewrite skuKeyed: input is not mutated"); }
+
+  // rewriteSpecItems
+  const item = (over: Partial<Cr302SpecItem> = {}): Cr302SpecItem => ({ id: 1, sku: OTHER, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, ...over });
+  const items302: Cr302SpecItem[] = [
+    item({ id: 1, sku: OLD, manufacturerModelNumber: "old model", manufacturerPartNumber: OLD }),
+    item({ id: 2, sku: OTHER, manufacturerModelNumber: "keep" }),
+    item({ id: 3, sku: "FIX", fixture: true, components: [{ sku: OLD, label: "dsp", role: "other", qty: 1, unit: "ea", cost: 1, price: 2 }, { sku: OTHER, label: "o", role: "other", qty: 1, unit: "ea", cost: 1, price: 2 }], fixtureOptions: { [`opt:${OLD}`]: 1 } }),
+    item({ id: 4, sku: "CRT", curtain: true, curtainInputs: { name: "n", fabricSku: OLD, fabricName: "f", qty: "1", width: "10", height: "10", fullness: "50" } }),
+  ];
+  {
+    const before = JSON.stringify(items302);
+    const out = cr302Rw.rewriteSpecItems(items302, m302, models302);
+    ok(out !== null && out[0].sku === NEW && out[0].manufacturerModelNumber === "Jupiter 4" && out[0].manufacturerPartNumber === OLD, "#302 rewrite specItems: sku moves and manufacturerModelNumber is set from the model map (order # untouched)");
+    ok(out !== null && out[1] === items302[1] && out[1].manufacturerModelNumber === "keep", "#302 rewrite specItems: an unrelated line is returned as-is");
+    ok(out !== null && out[2].sku === "FIX" && out[2].components?.[0].sku === NEW && out[2].components?.[1].sku === OTHER && out[2].manufacturerModelNumber === undefined && same(out[2].fixtureOptions, { [`opt:${NEW}`]: 1 }), "#302 rewrite specItems: components[].sku and fixtureOptions keys move; the model is NOT set on a line whose own sku did not move");
+    ok(out !== null && out[3].curtainInputs?.fabricSku === NEW && out[3].sku === "CRT" && out[3].manufacturerModelNumber === undefined, "#302 rewrite specItems: curtainInputs.fabricSku moves");
+    ok(JSON.stringify(items302) === before, "#302 rewrite specItems: input is not mutated");
+    ok(cr302Rw.rewriteSpecItems(out!, m302, models302) === null && cr302Rw.rewriteSpecItems(items302, none302, models302) === null, "#302 rewrite specItems: nothing to change → null");
+    const noModel = cr302Rw.rewriteSpecItems([item({ sku: OLD, manufacturerModelNumber: "keep me" })], m302, none302);
+    ok(noModel !== null && noModel[0].sku === NEW && noModel[0].manufacturerModelNumber === "keep me", "#302 rewrite specItems: an unknown model leaves manufacturerModelNumber alone");
+  }
+
+  // rewriteQuoteSpec
+  {
+    const sec = (id: string, its: Cr302SpecItem[], kp?: Cr302Section["keyProducts"]): Cr302Section => ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items: its, ...(kp ? { keyProducts: kp } : {}) });
+    const spec = { sections: [sec("a", [item({ id: 1, sku: OLD })], [{ lineKey: "1", sku: OLD, text: `${OLD} keeps its text`, photo: true }]), sec("b", [item({ id: 2, sku: OTHER })])], note: OLD };
+    const b = JSON.stringify(spec);
+    const out = cr302Rw.rewriteQuoteSpec(spec, m302, models302) as typeof spec | null;
+    ok(out !== null && out.sections[0].items[0].sku === NEW && out.sections[0].items[0].manufacturerModelNumber === "Jupiter 4" && out.sections[0].keyProducts?.[0].sku === NEW && out.sections[0].keyProducts?.[0].text === `${OLD} keeps its text`, "#302 rewrite quoteSpec: items and keyProducts[].sku move, prose is untouched");
+    ok(out !== null && out.sections[1] === spec.sections[1] && out.note === OLD, "#302 rewrite quoteSpec: unrelated sections and top-level fields are carried unchanged");
+    ok(JSON.stringify(spec) === b, "#302 rewrite quoteSpec: input is not mutated");
+    ok(cr302Rw.rewriteQuoteSpec(out, m302, models302) === null && cr302Rw.rewriteQuoteSpec(null, m302, models302) === null && cr302Rw.rewriteQuoteSpec({ sections: "x" }, m302, models302) === null, "#302 rewrite quoteSpec: renamed / null / malformed → null");
+    const kpOnly = { sections: [sec("a", [item({ sku: OTHER })], [{ lineKey: "1", sku: OLD, text: "t", photo: false }])] };
+    const kpOut = cr302Rw.rewriteQuoteSpec(kpOnly, m302, models302) as typeof kpOnly | null;
+    ok(kpOut !== null && kpOut.sections[0].keyProducts?.[0].sku === NEW && kpOut.sections[0].items[0].sku === OTHER, "#302 rewrite quoteSpec: a keyProducts-only change still rewrites");
+  }
+
+  // rewriteCartLines
+  {
+    const lines: Cr302CartLine[] = [
+      { lineId: "l1", kind: "part", sku: OLD, qty: 1 },
+      { lineId: "l2", kind: "part", sku: OTHER, qty: 1 },
+      { lineId: "l3", kind: "fixture", fixtureId: "fa-1", fixtureOptions: { [`opt:${OLD}`]: 1 }, qty: 1 },
+      { lineId: "l4", kind: "curtain", curtainInputs: { name: "n", fabricSku: OLD, fabricName: "f", qty: "1", width: "1", height: "1", fullness: "50" }, qty: 1 },
+    ];
+    const expected: Cr302CartLine[] = [
+      { lineId: "l1", kind: "part", sku: NEW, qty: 1 },
+      { lineId: "l2", kind: "part", sku: OTHER, qty: 1 },
+      { lineId: "l3", kind: "fixture", fixtureId: "fa-1", fixtureOptions: { [`opt:${NEW}`]: 1 }, qty: 1 },
+      { lineId: "l4", kind: "curtain", curtainInputs: { name: "n", fabricSku: NEW, fabricName: "f", qty: "1", width: "1", height: "1", fullness: "50" }, qty: 1 },
+    ];
+    holds("cartLines", (v, m) => cr302Rw.rewriteCartLines(v, m), lines, expected);
+    ok(cr302Rw.rewriteCartLines("junk", m302) === null && cr302Rw.rewriteCartLines([null, 3], m302) === null, "#302 rewrite cartLines: malformed → null");
+  }
+
+  // rewriteProcurement
+  {
+    const row = (sku: string): Cr302ProcLine => ({ id: "pl-1", sku, desc: "d", vendor: "v", qty: 1, unit: "ea", cost: 1, leadDays: 1, status: "pending", orderedAt: null, po: "" });
+    holds("procurement", (v, m) => cr302Rw.rewriteProcurement(v, m), [row(OLD), row(OTHER)], [row(NEW), row(OTHER)]);
+  }
+
+  // rewriteSpecDocProducts
+  {
+    const p = (sku: string): Cr302SpecProduct => ({ sku, qty: 2, mfrNumber: OLD, desc: `desc ${OLD}` });
+    holds("specDocProducts", (v, m) => cr302Rw.rewriteSpecDocProducts(v, m), [p(OLD), p(OTHER)], [p(NEW), p(OTHER)]);
+  }
+
+  // rewriteSubassembly
+  {
+    const fx = {
+      id: "fa-1", kind: "fixture", label: OLD, lightEngineSku: OLD, lensSku: OTHER,
+      lines: { data: [{ sku: OLD, qty: 1 }, { sku: OTHER, qty: 1 }], power: [], mounting: [{ sku: OLD, qty: 0 }], accessories: [] } satisfies Cr302Fixture["lines"],
+      parts: [{ sku: OLD, qty: 2 }],
+    };
+    const exp = { ...fx, lightEngineSku: NEW, lines: { data: [{ sku: NEW, qty: 1 }, { sku: OTHER, qty: 1 }], power: [], mounting: [{ sku: NEW, qty: 0 }], accessories: [] }, parts: [{ sku: NEW, qty: 2 }] };
+    holds("subassembly fixture", (v, m) => cr302Rw.rewriteSubassembly(v, m), fx, exp);
+    const rack = { id: "rk-1", kind: "rack", parts: [{ sku: OLD, qty: 1 }], rack: { config: { ruCount: 12 }, placements: [{ id: "RP-1", kind: "device", sku: OLD, ruStart: 1 }, { id: "RP-2", kind: "reserved", ruStart: 3 }, { id: "RP-3", kind: "blank", sku: OTHER, ruStart: 4 }] } };
+    const rexp = { id: "rk-1", kind: "rack", parts: [{ sku: NEW, qty: 1 }], rack: { config: { ruCount: 12 }, placements: [{ id: "RP-1", kind: "device", sku: NEW, ruStart: 1 }, { id: "RP-2", kind: "reserved", ruStart: 3 }, { id: "RP-3", kind: "blank", sku: OTHER, ruStart: 4 }] } };
+    holds("subassembly rack", (v, m) => cr302Rw.rewriteSubassembly(v, m), rack, rexp);
+    ok(cr302Rw.rewriteSubassembly({ id: "fa-2", label: OLD, lightEngineSku: OTHER }, m302) === null, "#302 rewrite subassembly: labels and ids are never touched");
+  }
+
+  // rewriteGridProjectLive
+  {
+    const pl = (id: string, partId: string, extra: Partial<Cr302Placement> = {}): Cr302Placement => ({ id, sheetId: "gs-1", page: 1, x: 0.1, y: 0.1, partId, by: "t", at: 1, ...extra });
+    const rt = (id: string, partId: string): Cr302Route => ({ id, sheetId: "gs-1", page: 1, partId, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], aspect: 1, by: "t", at: 1 });
+    const frozen = [{ rev: 1, at: 1, by: "t", reason: "manual", note: "", name: "r", sheetIds: [], placements: [pl("gp-old", OLD)], calibrations: [], spaces: [], routes: [rt("wr-old", OLD)] }];
+    const proj = {
+      id: "GRD-5001", name: OLD,
+      placements: [pl("gp-1", OLD), pl("gp-2", OTHER), pl("gp-3", OLD, { curtain: { type: "drape", name: "c", widthFt: 10, heightFt: 10, fullnessPct: 50, fabricSku: OLD } as unknown as Cr302Placement["curtain"] })],
+      routes: [rt("wr-1", OLD), rt("wr-2", OTHER)],
+      riser: { "opt-base": { nodes: {}, levels: [], conduits: [], notes: [], links: [{ id: "lk-1", from: { kind: "space", spaceId: null }, to: { kind: "space", spaceId: null }, partId: OLD, lengthFt: 5, by: "t", at: 1 }] } },
+      options: [{ id: "opt-base", name: "Design", quoteId: null, createdAt: 1, accessories: [{ id: "ba-000000000001", partId: OLD, qty: 1, scope: "Audio" }, { id: "ba-000000000002", partId: OTHER, qty: 1, scope: "Audio" }], customItems: [{ id: "ci-000000000001", desc: OLD, qty: 1, unitCost: 1 }] }],
+      autoEstimate: { "opt-base": { tierByScope: {}, overrides: { "audio:dsp": { sku: OLD, qty: 1 }, "audio:amp": { assemblyId: "fa-1" } } } },
+      revisions: frozen,
+    };
+    const exp = JSON.parse(JSON.stringify(proj));
+    exp.placements[0].partId = NEW; exp.placements[2].partId = NEW; exp.placements[2].curtain.fabricSku = NEW;
+    exp.routes[0].partId = NEW; exp.riser["opt-base"].links[0].partId = NEW; exp.options[0].accessories[0].partId = NEW;
+    exp.autoEstimate["opt-base"].overrides["audio:dsp"].sku = NEW;
+    holds("gridProjectLive", (v, m) => cr302Rw.rewriteGridProjectLive(v, m), proj, exp);
+    const out = cr302Rw.rewriteGridProjectLive(proj, m302) as typeof proj;
+    ok(JSON.stringify(out.revisions) === JSON.stringify(frozen) && out.name === OLD && out.options[0].customItems[0].desc === OLD, "#302 rewrite gridProjectLive: revisions are byte-identical, names and custom-item text untouched");
+    const legacy = { placements: [], routes: [], autoEstimate: { tierByScope: {}, overrides: { "audio:dsp": { sku: OLD } } } };
+    const lout = cr302Rw.rewriteGridProjectLive(legacy, m302) as typeof legacy | null;
+    ok(lout !== null && (lout.autoEstimate.overrides["audio:dsp"] as { sku: string }).sku === NEW, "#302 rewrite gridProjectLive: a pre-D312 bare autoEstimate is rewritten too");
+  }
+
+  // rewriteGridSymbolMembers
+  {
+    const asm = { id: "gsym-1", kind: "assembly", name: OLD, pricingPartId: null, members: [{ symbolId: OLD, qty: 1, x: 0, y: 0 }, { symbolId: OTHER, qty: 1, x: 1, y: 1 }] };
+    holds("gridSymbolMembers", (v, m) => cr302Rw.rewriteGridSymbolMembers(v, m), asm, { ...asm, members: [{ symbolId: NEW, qty: 1, x: 0, y: 0 }, { symbolId: OTHER, qty: 1, x: 1, y: 1 }] });
+    const dev = cr302Rw.rewriteGridSymbolMembers({ id: OLD, kind: "device", pricingPartId: OLD }, m302) as Record<string, unknown> | null;
+    ok(dev !== null && dev.pricingPartId === NEW && dev.id === OLD, "#302 rewrite gridSymbolMembers: a symbol's pricingPartId bridge moves, its own id does not");
+  }
+
+  // rewriteEquipmentMap
+  {
+    const row = (cells: Cr302EquipMap[string]["tiers"]): Cr302EquipMap[string] => ({ tiers: cells, updatedBy: "t", updatedAt: 1 });
+    const map: Cr302EquipMap = {
+      "audio:dsp": row({ good: { kind: "part", sku: OLD }, better: { kind: "part", sku: OTHER }, best: { kind: "assembly", id: OLD } }),
+      "audio:amp": row({ good: { kind: "allowance", amount: 5, confirmedBy: "t", confirmedAt: 1, note: OLD } }),
+    };
+    const exp = JSON.parse(JSON.stringify(map));
+    exp["audio:dsp"].tiers.good.sku = NEW;
+    holds("equipmentMap", (v, m) => cr302Rw.rewriteEquipmentMap(v, m), map, exp);
+  }
+
+  // rewriteTrackSeries
+  {
+    const ser = (sku: string): Cr302TrackSeries => ({ id: "adc-280", name: OLD, manufacturer: "ADC", stickLengthFt: 10, carrierSpacingIn: 6, hangerSpacingFt: 4, overlapFt: 0, parts: { track: { sku }, splice: { sku: OTHER } }, sticks: [{ lengthFt: 5, sku: OTHER }, { lengthFt: 10, sku }], active: true });
+    const blob = { "adc-280": ser(OLD), "adc-300": ser(OTHER) };
+    holds("trackSeries", (v, m) => cr302Rw.rewriteTrackSeries(v, m), blob, { "adc-280": ser(NEW), "adc-300": ser(OTHER) });
+  }
+
+  // rewriteCurtainMounts
+  {
+    const mk = (sku: string): Cr302Mounts => ({ rows: [{ sku, rule: { kind: "perCurtain", qty: 1 } }, { sku: OTHER, rule: { kind: "perMark", qty: 1 } }], updatedBy: "t", updatedAt: 1 });
+    holds("curtainMounts", (v, m) => cr302Rw.rewriteCurtainMounts(v, m), mk(OLD), mk(NEW));
+  }
+
+  // rewriteRackDefaults
+  {
+    const d = (blankSku: string, ventSku: string): Cr302RackDefaults => ({ blankSku, ventSku });
+    holds("rackDefaults", (v, m) => cr302Rw.rewriteRackDefaults(v, m), d(OLD, OTHER), d(NEW, OTHER));
+    ok(same(cr302Rw.rewriteRackDefaults({ ventSku: OLD }, m302), { ventSku: NEW }), "#302 rewrite rackDefaults: a missing blankSku stays missing");
+  }
+
+  // rewriteIdList
+  {
+    holds("idList", (v, m) => cr302Rw.rewriteIdList(v, m), { ids: [OTHER, OLD, "x"] }, { ids: [OTHER, NEW, "x"] });
+    ok(same(cr302Rw.rewriteIdList({ ids: [OLD, "x", NEW] }, m302), { ids: [NEW, "x"] }), "#302 rewrite idList: dedupes when the old and new ids were both present (first position wins)");
+    ok(same(cr302Rw.rewriteIdList({ ids: [NEW, "x", OLD] }, m302), { ids: [NEW, "x"] }), "#302 rewrite idList: dedupe keeps the earlier of the two positions");
+    ok(same(cr302Rw.rewriteIdList({ ids: [OLD], extra: 1 }, m302), { ids: [NEW], extra: 1 }), "#302 rewrite idList: other blob fields are carried");
+  }
+
+  // rewriteDrivePhotoSync
+  {
+    const file = (skus: string[]) => ({ md5: "m", documentId: "pd-1", skus, at: 1 });
+    const blob = { folder: null, files: { f1: file([OLD, OTHER]), f2: file([OTHER]) }, lastRun: { at: 1, unmatched: [{ name: OLD }] }, runningUntil: null };
+    const exp = JSON.parse(JSON.stringify(blob)); exp.files.f1.skus = [NEW, OTHER];
+    holds("drivePhotoSync", (v, m) => cr302Rw.rewriteDrivePhotoSync(v, m), blob, exp);
+    ok(same(cr302Rw.rewriteDrivePhotoSync({ files: { f: file([OLD, NEW]) } }, m302), { files: { f: file([NEW]) } }), "#302 rewrite drivePhotoSync: a file naming both the old and new SKU keeps one");
+  }
+
+  // rewriteWireTypes
+  {
+    const w = (cableSku?: string): Cr302WireType => ({ id: "cat6", label: "Cat6", connectionTypes: ["cat6"], ...(cableSku ? { cableSku } : {}) });
+    holds("wireTypes", (v, m) => cr302Rw.rewriteWireTypes(v, m), [w(OLD), w(OTHER), w()], [w(NEW), w(OTHER), w()]);
+  }
+
+  // rewritePartRefs
+  {
+    const part = { sku: "Symetrix:Jupiter 12", specSameAs: OLD, productMetadata: { accessories: [{ sku: OLD, description: "mount" }, { description: "no sku" }, { sku: OTHER, description: "o" }], datasheets: [{ kind: "datasheet", fileName: OLD }] } };
+    const exp = JSON.parse(JSON.stringify(part)); exp.specSameAs = NEW; exp.productMetadata.accessories[0].sku = NEW;
+    holds("partRefs", (v, m) => cr302Rw.rewritePartRefs(v, m), part, exp);
+    ok(cr302Rw.rewritePartRefs({ sku: OLD, specSameAs: OTHER }, m302) === null, "#302 rewrite partRefs: a part's own sku is the rename's job, not this rewriter's");
+  }
 }
 
 seeded()
