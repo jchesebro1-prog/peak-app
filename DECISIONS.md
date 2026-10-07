@@ -9602,3 +9602,47 @@ A sheet SKU also matches a same-manufacturer `Brand:OrderNo` SKU. Quotes are rew
 `updatedAt` alone, re-stamps an approval that still matched (a SKU swap isn't a price change) and marks the live PDF stale
 so it re-renders with the model. A Grid symbol moves only when its own id is a renamed SKU (user-made symbols stay).
 Two variants that share one model in the sheet are both skipped — give each its own model (the color/finish).
+
+## D643. The Estimator is four steps on one URL (#305, 2026-10-07)
+
+Build · Build package · Customer review · Send & track are one page at `/estimator`, switched by `?step=` (`package` /
+`review` / `send`). The shell reads it with `useSearchParams` and moves with `history.pushState`, so a step change never
+remounts the state hook and unsaved edits survive (Back/forward walks the steps). Build writes no param, so every old
+`/estimator?id=…` link stays canonical; an unknown or wrong-case value is Build. The first save of a new estimate writes
+`?id=` with `replaceState` (keeping the step), so a reload lands on the same quote and step. A phone always shows Customer
+review. Pure rules in `src/lib/estimate-steps/steps.ts`.
+
+## D644. The component body moved verbatim into one state hook; per-step UI state stays shared for now (#305, 2026-10-07)
+
+The old 8,000-line `EstimatorClient` body became `useEstimatorState` (`use-estimator-state.ts`) unchanged, and the four step
+components read what they need from it. State stays in one hook so a step switch cannot drop an edit. Splitting each step's
+own UI state out of the hook is deferred to Phase 2 (Build). The spec harness reads the Estimator as one joined source
+(`estimatorSource()` / `previewDocSource()` over the shell, hook, header and steps), so the pre-existing pins keep reading
+the same code after a verbatim move and only the pins that name a new home changed.
+
+## D645. Each step tab shows a readiness line; it never blocks (#305, 2026-10-07)
+
+`src/lib/estimate-steps/readiness.ts` computes the line under each tab from the live (unsaved) state: Build — empty systems
+and unpriced lines counted and named, "✓ N systems priced" when clean; Build package — client-side gaps only (a printed
+narrative system with no intro), "✓ Ready"; Customer review — the approval pill's own label; Send & track — Sent · Rev N /
+Won / Lost / Ready to send / —. Datasheet and drawing gaps stay as chips inside the Package step rather than in the badge.
+A badge is information; no tab is ever disabled by it, and a Rewards credit line neither prices nor fills a system.
+
+## D646. Header contents, the More ▾ menu, and Review's internal cost summary (#305, 2026-10-07)
+
+One header on every step: customer · estimate number · name, the read-only status pill, Save, the next-step control and a
+**More ▾** menu (Change type, Parts list, Draft from survey, Cut sheets, Delete). The status select moved to Send & track
+(the header shows a read-only pill); the Daylite stage bar and pipeline switch sit there in a Pipeline card. Customer review
+carries an internal cost summary beside the PDF (never on a customer document): per system cost, sell and margin with Total
+= Σ systems = items revenue + freight; when a Rewards credit applies, a Rewards credit row and a Customer total row follow.
+Margin excludes freight. The PDF's own Save / Download / Open actions sit in a row above the viewer on desktop so the PDF has
+one right sidebar, not two.
+
+## D647. Next-step navigation, and the "Send goes to Home" report (#305, 2026-10-07)
+
+After a **successful** QuoteNextStep action the Estimator moves to the step where the next thing happens (`stepAfterAction`):
+submit / approve / attest / assign → Customer review; send → Send & track; send back / withdraw → Build. A refused or failed
+action stays put. `QuoteNextStep.onSync` now receives the action that produced the result (existing callers ignore it).
+#301 open item 12 ("after Send the Estimator navigates to Home") was **not reproducible** — on origin/main 5b5c2a8b and on
+this branch, in dev, Send to customer on a new estimate and on the saved Q-2041 both stay on the Estimator. The new flow pins
+Send → Send & track (never Home). Awaiting Jeff's exact repro (which quote, which button, which browser).

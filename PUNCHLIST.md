@@ -10895,7 +10895,7 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
 11. Spec §13, still open: should Accept require a typed title or PO number? Should the Lead estimator also get an email on
     accept, beyond the bell task?
 12. Not #301, seen while testing (pre-existing): the Estimator's top toolbar overflows at 1024 px, and after **Send** the
-    Estimator navigates to Home.
+    Estimator navigates to Home. → see #305 (not reproducible; awaiting repro).
 13. Tasks go to the quote's **Lead estimator** only when that name matches one active team member exactly; otherwise every
     approver gets them. Check the names in Settings → Team.
 
@@ -11019,3 +11019,50 @@ quote saved from an open tab mid-run may need re-approval.
 
 Gates: `tsc --noEmit` 0 errors; `test:specs` 12,898 PASS / 0 FAIL (333 "#304" checks); `next build` OK; eslint clean on the
 touched `src` files.
+
+## 305. Estimator in four steps — Phase 1 (the frame) — DONE 2026-10-07 (D643–D647)
+
+**Reported by Jeff 2026-10-07:** "I think we are getting to the point that one window is trying to handle too much." The
+Estimator was one 8,000-line screen that was both the pricing workbench and the customer document.
+
+What shipped (Phase 1 only — existing pieces moved into their step, behavior unchanged; no migration, no AI):
+- **Four steps on one URL** — Build · Build package · Customer review · Send & track at `/estimator?id=…&step=…`; Back/forward
+  moves between steps, unsaved edits survive, Build is the canonical (param-less) URL, the first save writes `?id=`. (D643)
+- **One shared header** that wraps at 1024 px (the old overflow is fixed) with a read-only status pill and a **More ▾** menu:
+  Change type, Parts list, Draft from survey, Cut sheets, Delete. (D646)
+- **Readiness line under each tab** — empty systems / unpriced lines, package gaps, approval state, sent state; never blocks. (D645)
+- **Where each control lives** — Build: systems, cards, modals, Rewards credit. Build package: narrative, Show-on-PDF options,
+  cover, drawings and gap chips. Customer review: the saved customer PDF, the internal cost summary and the review actions.
+  Send & track: status, next step, Pipeline (Daylite stages), client link + revisions, client responses, tasks.
+- **Customer review cost summary** — per system cost, sell, margin; Total = Σ systems = items + freight; Rewards credit and
+  Customer total rows when credited. (D646)
+- **A phone shows Customer review only** ("View only on phone"; the approver control and cover stay).
+- **Next-step navigation** — submit/approve → Customer review, Send → Send & track, send back/withdraw → Build. (D647)
+
+Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md`; plan
+`docs/superpowers/plans/2026-10-07-estimator-four-steps-phase1.md`.
+
+**Verification.** Gates (final, after merging origin/main 7ee9ca8f): `tsc --noEmit` 0 errors; scoped eslint
+(`src/app/(app)/estimator`, `quote-review`, `lib/estimate-output`, `lib/estimate-steps`, `lib/quote-pdf`) clean; `test:specs`
+12,953 PASS / 0 FAIL (12,621 before the merge, +332 from main's #303/#304 checks); `next build` OK; `test:smoke` ALL PASSED (223 routes, including the four new `&step=` routes). Browser pass
+(scratch DB, desktop / 1024 / 375): four steps render; unsaved edits survive step switches (a second system is still there on
+Package, Review shows "Unsaved changes"); Back/forward between steps; a new estimate gains `?id=` on first save; Submit lands
+on Review and Send stays on Send & track; More ▾ closes on Esc and outside click; header wraps without overflow at 1024; phone
+375 shows Review only, view-only, cover present, no editable inputs; no console or server errors. The pass found three layout
+issues, fixed in the same change: Review had two sidebars at 1024 (PDF only 440 px — now one right aside), two identical ⋯
+buttons in the header (More ▾), and the Send stage bar uncarded with a doubled Tasks inset.
+
+**Roadmap — Phases 2–6 are open** (each gets its own plan):
+- Phase 2 — Build step: systems rail (add, drag to reorder), groups (In total / Alternate), Mark built & collapse; groups and
+  alternates print on the PDF, cover and package.
+- Phase 3 — Send & track: Gmail send from the tab, escape hatches, follow-up task, open counts, replies arriving in the tab,
+  client responses, Revise with these scopes.
+- Phase 4 — Customer review: client's-eye tabs, internal cost / margin / labor sidebar, pinned comments, Approve / Send back.
+- Phase 5 — Package document editor: Word-like (TipTap) with live chips, product-linked paragraphs, image placement, drag from BOM.
+- Phase 6 — System categories: "+ Add system…" opens a category picker pre-filling that category's typical BOM items.
+
+**Jeff-gated.**
+1. **Phase 6 content** — the typical BOM items for each category (seeded, editable list): Controls, Fixtures, Rigging, Video,
+   Infrastructure, Wireless, Communications; and how a category relates to a system's Discipline.
+2. **"Send → Home"** (#301 item 12): not reproducible (D647). Tell us the exact repro — which quote (new or saved), which
+   button (header, Review panel or Send & track), which browser — and it gets a pin.

@@ -786,5 +786,18 @@ See `.env.example`.
     Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
     sheets come back (PUNCHLIST #304).
 
+42. 🚧 **Estimator in four steps** (#305, D643–D647) — Phase 1 ✅ (the frame): the
+    Estimator is Build · Build package · Customer review · Send & track on one URL
+    (`?step=`, pushState, Build canonical), one shared header with a More ▾ menu, a
+    readiness line under each tab (never blocking), the status select and Daylite
+    pipeline on Send & track, an internal cost summary beside the Review PDF, and
+    next-step navigation (Send → Send & track). State stays in one hook
+    (`use-estimator-state.ts`); steps in `steps/`; pure rules in `src/lib/estimate-steps/`.
+    Next: Phase 2 Build step (systems rail, groups In total/Alternate, Mark built &
+    collapse), 3 Send & track (Gmail send, replies, opens), 4 Customer review
+    (cost/margin/labor sidebar, pinned comments), 5 package document editor (TipTap),
+    6 system categories (Jeff-gated content). Remaining is Jeff-gated: Phase 6
+    typical items per category, and the exact repro for "Send → Home" (PUNCHLIST #305).
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

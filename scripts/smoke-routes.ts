@@ -276,6 +276,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/inbox?customer=rose-brand" },
   { route: "/inbox?customer=rose-brand&log=1" },
   { route: "/estimator?id=Q-2041" },
+  { route: "/estimator?id=Q-2041&step=package" },
+  { route: "/estimator?id=Q-2041&step=review" },
+  { route: "/estimator?id=Q-2041&step=send" },
+  { route: "/estimator?id=Q-2041&step=bogus" },
   // #160 intake hand-off: company preselected, and "Change type" on the seeded draft Q-2041.
   { route: "/quotes/new?customer=lakefront" },
   { route: "/quotes/new?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+quote&type=repair" },
