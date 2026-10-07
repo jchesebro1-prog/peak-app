@@ -53963,3 +53963,154 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(ESTIMATOR_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))) && PREVIEW_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))),
     "#305 harness: every joined Estimator file exists (a rename can't turn the joined-source pins vacuous)");
 }
+
+/* #P2a — Estimator Phase 2a: system groups (pure). */
+import * as p2a from "@/lib/estimate-groups/groups";
+{
+  const g = (id: string, name = id, alternate = false) => ({ id, name, alternate });
+  const s = (id: string, groupId?: string, extra: Record<string, unknown> = {}) => ({ id, ...(groupId ? { groupId } : {}), ...extra });
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id).join(",");
+  const gids = (xs: { id: string; groupId?: string }[]) => xs.map((x) => x.id + ":" + (x.groupId ?? "-")).join(",");
+  const G = [g("g-a", "Stage"), g("g-b", "House")];
+
+  // constants + id
+  ok(p2a.GROUP_NAME_MAX === 80 && p2a.GROUPS_MAX === 20 && p2a.UNTITLED_GROUP === "Untitled group", "#P2a groups: constants (80 / 20 / Untitled group)");
+  const nid1 = p2a.newGroupId();
+  const nid2 = p2a.newGroupId();
+  ok(/^g-[a-z0-9]{1,24}$/.test(nid1) && /^g-[a-z0-9]{1,24}$/.test(nid2), "#P2a groups: newGroupId matches g-<base36>");
+  ok(nid1 !== nid2, "#P2a groups: two newGroupId calls differ");
+
+  // sanitizeGroups
+  ok(p2a.sanitizeGroups(null).length === 0 && p2a.sanitizeGroups({ id: "g-a" }).length === 0 && p2a.sanitizeGroups("x").length === 0, "#P2a groups: sanitize of a non-array is []");
+  ok(p2a.sanitizeGroups([{ id: "x", name: "bad id" }, 7, null]).length === 0, "#P2a groups: sanitize drops non-objects and bad ids");
+  ok(p2a.sanitizeGroups([{ name: "no id" }, { id: 5, name: "num id" }, { id: "G-A" }, { id: "g-" }, { id: "g-" + "a".repeat(25) }]).length === 0, "#P2a groups: sanitize needs a string id matching g-[a-z0-9]{1,24}");
+  const san = p2a.sanitizeGroups([{ id: "g-a", name: "  Stage  " }, { id: "g-a", name: "dup" }, { id: "g-b", name: "", alternate: "yes" }]);
+  ok(san.length === 2 && san[0].name === "Stage" && san[1].name === "Untitled group" && san[1].alternate === false, "#P2a groups: trims, dedupes by id, blank → Untitled group, alternate only when exactly true");
+  ok(san[0].id === "g-a" && san[0].name !== "dup", "#P2a groups: dedupe keeps the first");
+  ok(p2a.sanitizeGroups([{ id: "g-a", name: "x", alternate: true }])[0].alternate === true, "#P2a groups: alternate true is kept as stored");
+  ok(p2a.sanitizeGroups([{ id: "g-a", name: "x".repeat(200) }])[0].name.length === 80, "#P2a groups: name capped at 80");
+  ok(p2a.sanitizeGroups([{ id: "g-a", name: "A\u0000B\u0007\nC" }])[0].name === "ABC", "#P2a groups: control characters removed from names");
+  ok(p2a.sanitizeGroups([{ id: "g-a", name: " \u0001 \t " }])[0].name === "Untitled group", "#P2a groups: a name of only whitespace/control chars is blank → Untitled group");
+  ok(p2a.sanitizeGroups([{ id: "g-a" }])[0].name === "Untitled group", "#P2a groups: a missing name → Untitled group");
+  ok(p2a.sanitizeGroups(Array.from({ length: 30 }, (_, i) => ({ id: "g-" + i, name: "n" }))).length === 20, "#P2a groups: at most 20");
+
+  // normalizeSystemOrder
+  const order = p2a.normalizeSystemOrder([s("1", "g-b"), s("2"), s("3", "g-a"), s("4", "g-zz"), s("5", "g-a")], G);
+  ok(ids(order) === "2,4,3,5,1" && !("groupId" in order[1]), "#P2a groups: ungrouped first, then groups in order, relative order kept; unknown group dropped");
+  const keep = s("3", "g-a");
+  const order2 = p2a.normalizeSystemOrder([keep, s("4", "g-zz")], G);
+  ok(order2[1] === keep && order2[0].id === "4", "#P2a groups: untouched sections keep object identity");
+  const fixedIn = s("4", "g-zz");
+  ok(p2a.normalizeSystemOrder([fixedIn], G)[0] !== fixedIn && fixedIn.groupId === "g-zz", "#P2a groups: a fixed section is a new object; the input is not mutated");
+  const stable = [s("2"), s("3", "g-a"), s("1", "g-b")];
+  ok(p2a.normalizeSystemOrder(stable, G) === stable, "#P2a groups: already-normal input returns the same array");
+  const once = p2a.normalizeSystemOrder([s("1", "g-b"), s("2"), s("4", "g-zz"), s("3", "g-a")], G);
+  ok(p2a.normalizeSystemOrder(once, G) === once, "#P2a groups: normalising is idempotent (second pass returns the same array)");
+  const emptyIn: ReturnType<typeof s>[] = [];
+  ok(p2a.normalizeSystemOrder(emptyIn, G) === emptyIn && p2a.normalizeSystemOrder([s("1", "g-a")], []).length === 1 && !("groupId" in p2a.normalizeSystemOrder([s("1", "g-a")], [])[0]), "#P2a groups: empty input returns itself; with no groups every groupId is dropped");
+
+  // groupBlocks
+  const gb = p2a.groupBlocks([s("1", "g-b"), s("2"), s("3", "g-a")], G);
+  ok(gb.length === 3 && gb[0].group === null && ids(gb[0].sections) === "2" && gb[1].group?.id === "g-a" && ids(gb[1].sections) === "3" && gb[2].group?.id === "g-b" && ids(gb[2].sections) === "1", "#P2a groups: blocks = ungrouped first, then each group in order");
+  const gb2 = p2a.groupBlocks([s("1", "g-b")], G);
+  ok(gb2.length === 1 && gb2[0].group?.id === "g-b", "#P2a groups: empty ungrouped block and empty groups are omitted by default");
+  const gb3 = p2a.groupBlocks([s("1", "g-b")], G, { includeEmpty: true });
+  ok(gb3.length === 2 && gb3[0].group?.id === "g-a" && gb3[0].sections.length === 0 && gb3[1].group?.id === "g-b", "#P2a groups: includeEmpty adds empty groups but still not an empty ungrouped block");
+  ok(p2a.groupBlocks([], G).length === 0 && p2a.groupBlocks([], G, { includeEmpty: true }).length === 2, "#P2a groups: no sections → no blocks (or just the empty groups with includeEmpty)");
+  const gb4 = p2a.groupBlocks([s("1", "g-zz"), s("2", "g-a")], G);
+  ok(gb4.length === 2 && gb4[0].group === null && ids(gb4[0].sections) === "1" && !("groupId" in gb4[0].sections[0]), "#P2a groups: blocks use the normalised order (unknown group → ungrouped)");
+
+  // moveSystemTo
+  const base = [s("1"), s("2"), s("3", "g-a"), s("4", "g-a"), s("5", "g-b")];
+  const toGroupEnd = p2a.moveSystemTo(base, G, "1", { groupId: "g-a", beforeId: null });
+  ok(gids(toGroupEnd) === "2:-,3:g-a,4:g-a,1:g-a,5:g-b", "#P2a groups: moving into a group with no beforeId lands at the end of that group's block");
+  const toGroupBefore = p2a.moveSystemTo(base, G, "1", { groupId: "g-a", beforeId: "4" });
+  ok(gids(toGroupBefore) === "2:-,3:g-a,1:g-a,4:g-a,5:g-b", "#P2a groups: beforeId in the target group inserts before it");
+  const toStrayBefore = p2a.moveSystemTo(base, G, "1", { groupId: "g-a", beforeId: "5" });
+  ok(gids(toStrayBefore) === "2:-,3:g-a,4:g-a,1:g-a,5:g-b", "#P2a groups: beforeId outside the target group falls back to the end of the block");
+  const toNone = p2a.moveSystemTo(base, G, "3", { groupId: null, beforeId: null });
+  ok(gids(toNone) === "1:-,2:-,3:-,4:g-a,5:g-b" && !("groupId" in toNone[2]), "#P2a groups: groupId null removes the key and appends to the ungrouped block");
+  const toNoneBefore = p2a.moveSystemTo(base, G, "4", { groupId: null, beforeId: "1" });
+  ok(gids(toNoneBefore) === "4:-,1:-,2:-,3:g-a,5:g-b", "#P2a groups: ungrouped target honours beforeId");
+  const reorder = p2a.moveSystemTo(base, G, "4", { groupId: "g-a", beforeId: "3" });
+  ok(gids(reorder) === "1:-,2:-,4:g-a,3:g-a,5:g-b", "#P2a groups: reordering inside the same group works");
+  const toEmptyGroup = p2a.moveSystemTo([s("1"), s("2")], G, "2", { groupId: "g-b", beforeId: null });
+  ok(gids(toEmptyGroup) === "1:-,2:g-b", "#P2a groups: moving into an empty group works");
+  ok(p2a.moveSystemTo(base, G, "nope", { groupId: "g-a", beforeId: null }) === base, "#P2a groups: unknown id → input unchanged (same reference)");
+  ok(p2a.moveSystemTo(base, G, "1", { groupId: "g-zz", beforeId: null }) === base, "#P2a groups: unknown target group → input unchanged");
+  ok(p2a.moveSystemTo(base, G, "2", { groupId: null, beforeId: null }) === base, "#P2a groups: dropping a system exactly where it already is returns the input");
+  const unnorm = [s("1", "g-b"), s("2"), s("3", "g-a")];
+  ok(ids(p2a.moveSystemTo(unnorm, G, "2", { groupId: "g-b", beforeId: null })) === "3,1,2", "#P2a groups: the result is normalised even if the input was not");
+  ok(base[0].groupId === undefined && ids(base) === "1,2,3,4,5", "#P2a groups: moveSystemTo does not mutate its input");
+
+  // moveSystemBy
+  const mv = [s("1"), s("2"), s("3", "g-a"), s("4", "g-a"), s("5", "g-b")];
+  ok(gids(p2a.moveSystemBy(mv, G, "2", -1)) === "2:-,1:-,3:g-a,4:g-a,5:g-b", "#P2a groups: up inside a block swaps with the previous system");
+  ok(gids(p2a.moveSystemBy(mv, G, "1", 1)) === "2:-,1:-,3:g-a,4:g-a,5:g-b", "#P2a groups: down inside a block swaps with the next system");
+  ok(gids(p2a.moveSystemBy(mv, G, "3", -1)) === "1:-,2:-,3:-,4:g-a,5:g-b", "#P2a groups: up from the first of a group goes LAST in the ungrouped block above");
+  ok(gids(p2a.moveSystemBy(mv, G, "5", -1)) === "1:-,2:-,3:g-a,4:g-a,5:g-a", "#P2a groups: up from the first of a group goes LAST in the previous group");
+  ok(gids(p2a.moveSystemBy(mv, G, "2", 1)) === "1:-,2:g-a,3:g-a,4:g-a,5:g-b", "#P2a groups: down from the last ungrouped goes FIRST in the next group");
+  ok(gids(p2a.moveSystemBy(mv, G, "4", 1)) === "1:-,2:-,3:g-a,4:g-b,5:g-b", "#P2a groups: down from the last of a group goes FIRST in the next group");
+  ok(p2a.moveSystemBy(mv, G, "1", -1) === mv, "#P2a groups: up at the very top → same reference");
+  ok(p2a.moveSystemBy(mv, G, "5", 1) === mv, "#P2a groups: down at the very bottom → same reference");
+  ok(p2a.moveSystemBy(mv, G, "nope", 1) === mv, "#P2a groups: unknown id → same reference");
+  const gap = [s("1", "g-b")];
+  ok(gids(p2a.moveSystemBy(gap, G, "1", -1)) === "1:g-a", "#P2a groups: up from the first of a group steps into the previous (empty) group");
+  ok(gids(p2a.moveSystemBy([s("1", "g-a")], G, "1", -1)) === "1:-", "#P2a groups: up from the first system of the first group reaches the ungrouped block even when it is empty");
+  ok(gids(p2a.moveSystemBy([s("1", "g-a")], G, "1", 1)) === "1:g-b", "#P2a groups: down from the only system of a group steps into the next group");
+
+  // addGroup / renameGroup / moveGroupBy / removeGroup
+  const added = p2a.addGroup(G, "  Pit  ", "g-pit");
+  ok(added.length === 3 && added[2].id === "g-pit" && added[2].name === "Pit" && added[2].alternate === false && G.length === 2, "#P2a groups: addGroup appends a trimmed, non-alternate group without mutating");
+  ok(p2a.addGroup(G)[2].name === "Untitled group" && /^g-[a-z0-9]{1,24}$/.test(p2a.addGroup(G)[2].id), "#P2a groups: addGroup defaults to Untitled group and a generated id");
+  ok(p2a.addGroup(G, "   ")[2].name === "Untitled group", "#P2a groups: addGroup with a blank name → Untitled group");
+  ok(p2a.addGroup(G, "x".repeat(200))[2].name.length === 80, "#P2a groups: addGroup caps the name at 80");
+  const full = Array.from({ length: 20 }, (_, i) => g("g-" + i));
+  ok(p2a.addGroup(full, "one more") === full, "#P2a groups: addGroup refuses past 20 (same reference)");
+  const ren = p2a.renameGroup(G, "g-a", "  Main stage \u0007 ");
+  ok(ren[0].name === "Main stage" && ren[1] === G[1] && G[0].name === "Stage", "#P2a groups: renameGroup sanitises and does not mutate");
+  ok(p2a.renameGroup(G, "g-a", "")[0].name === "Untitled group" && p2a.renameGroup(G, "g-a", "y".repeat(120))[0].name.length === 80, "#P2a groups: renameGroup blank → Untitled group, capped at 80");
+  ok(p2a.renameGroup(G, "g-zz", "x") === G && p2a.renameGroup(G, "g-a", "Stage") === G, "#P2a groups: renameGroup of an unknown id or an unchanged name returns the input");
+  ok(p2a.moveGroupBy(G, "g-a", 1).map((x) => x.id).join() === "g-b,g-a" && p2a.moveGroupBy(G, "g-b", -1).map((x) => x.id).join() === "g-b,g-a", "#P2a groups: moveGroupBy swaps with its neighbour");
+  ok(p2a.moveGroupBy(G, "g-a", -1) === G && p2a.moveGroupBy(G, "g-b", 1) === G && p2a.moveGroupBy(G, "g-zz", 1) === G, "#P2a groups: moveGroupBy at an edge or for an unknown id returns the input");
+  const rm = p2a.removeGroup([s("1", "g-b"), s("2", "g-a"), s("3")], G, "g-a");
+  ok(rm.groups.length === 1 && rm.groups[0].id === "g-b" && gids(rm.sections) === "2:-,3:-,1:g-b", "#P2a groups: removeGroup drops the group and ungroups its systems (normalised: ungrouped first)");
+  ok(!("groupId" in rm.sections[0]), "#P2a groups: removeGroup removes the groupId key from ungrouped systems");
+  const rmIn = [s("1")];
+  const rm2 = p2a.removeGroup(rmIn, G, "g-zz");
+  ok(rm2.sections === rmIn && rm2.groups === G, "#P2a groups: removeGroup of an unknown id returns both inputs");
+
+  // withoutGroupMeta / withoutBuilt
+  const meta: { id: string; groupId?: string; built?: boolean; name: string } = { id: "1", groupId: "g-a", built: true, name: "x" };
+  const wgm = p2a.withoutGroupMeta(meta);
+  ok(!("groupId" in wgm) && !("built" in wgm) && wgm.name === "x" && wgm.id === "1" && meta.groupId === "g-a", "#P2a groups: withoutGroupMeta drops groupId and built without mutating");
+  const plain: { id: string; groupId?: string; built?: boolean; name: string } = { id: "1", name: "x" };
+  ok(p2a.withoutGroupMeta(plain) === plain, "#P2a groups: withoutGroupMeta of a system with neither returns the same object");
+  const wb = p2a.withoutBuilt(meta);
+  ok(!("built" in wb) && wb.groupId === "g-a" && meta.built === true, "#P2a groups: withoutBuilt drops only built");
+  ok(p2a.withoutBuilt(plain) === plain, "#P2a groups: withoutBuilt of an unbuilt system returns the same object");
+
+  // unmarkEdited
+  type P2aSys = { id: string; built?: boolean; groupId?: string; name: string; n?: number };
+  const pb: P2aSys = { id: "1", built: true, name: "Main", n: 1 };
+  const pu: P2aSys = { id: "2", name: "Other" };
+  const prev: P2aSys[] = [pb, pu];
+  const edited = p2a.unmarkEdited(prev, [{ ...pb, n: 2 }, pu]);
+  ok(edited[0].built === undefined && !("built" in edited[0]) && edited[0].n === 2 && edited[1] === pu, "#P2a groups: a content change to a built section clears built");
+  const toggled: P2aSys[] = [{ ...pb, built: true }, pu];
+  ok(p2a.unmarkEdited(prev, toggled) === toggled, "#P2a groups: a new object with identical content keeps built (same array)");
+  const justBuilt: P2aSys[] = [{ id: "1", name: "Main", n: 1, built: true }, pu];
+  ok(p2a.unmarkEdited([{ id: "1", name: "Main", n: 1 } as P2aSys, pu], justBuilt) === justBuilt, "#P2a groups: marking built (the only change) keeps built");
+  const reordered: P2aSys[] = [{ ...pb, name: "Main", n: 1 }, pu];
+  ok(p2a.unmarkEdited(prev, reordered) === reordered && reordered[0].built === true, "#P2a groups: a rebuilt built section with identical JSON content keeps built");
+  const same: P2aSys[] = [pb, pu];
+  ok(p2a.unmarkEdited(prev, same) === same, "#P2a groups: untouched sections (same objects) keep built and the array is returned as is");
+  const brandNew: P2aSys[] = [pb, { id: "9", built: true, name: "new" }];
+  ok(p2a.unmarkEdited(prev, brandNew) === brandNew, "#P2a groups: a built section with no prev counterpart keeps built");
+  const gOnly: P2aSys[] = [{ ...pb, groupId: "g-a" }, pu];
+  ok(p2a.unmarkEdited(prev, gOnly)[0].built === undefined, "#P2a groups: changing a built section's groupId counts as an edit and clears built");
+  const emptyPrev: P2aSys[] = [pb];
+  ok(p2a.unmarkEdited([], emptyPrev) === emptyPrev, "#P2a groups: unmarkEdited with an empty prev clears nothing");
+  const unbuiltEdit: P2aSys[] = [pb, { ...pu, name: "Changed" }];
+  ok(p2a.unmarkEdited(prev, unbuiltEdit) === unbuiltEdit, "#P2a groups: editing an unbuilt section clears nothing (same array)");
+}
