@@ -52444,3 +52444,33 @@ import {
   ok(client303.includes('e.key === "Escape"') && client303.includes('document.addEventListener("mousedown"') && client303.includes("Show all"), "#303: the Columns popover closes on Escape / outside click and has Show all");
   ok(client303.includes("position: \"sticky\", top: 8, zIndex: 5"), "#303: the bulk-actions bar stays sticky");
 }
+
+/* ======================================================================
+   #304 — Estimator in four steps (Phase 1): step vocabulary + URL rules.
+   ====================================================================== */
+import {
+  ESTIMATE_STEPS as e304Steps,
+  STEP_LABEL as e304Label,
+  parseStep as e304Parse,
+  stepAfterAction as e304After,
+  stepSearch as e304Search,
+} from "@/lib/estimate-steps/steps";
+{
+  ok(e304Steps.join(",") === "build,package,review,send", "#304 steps: four steps in order");
+  ok(e304Label.build === "Build" && e304Label.package === "Build package" && e304Label.review === "Customer review" && e304Label.send === "Send & track",
+    "#304 steps: the tab labels are exactly the spec's");
+  ok(e304Parse(null) === "build" && e304Parse(undefined) === "build" && e304Parse("") === "build" && e304Parse("bogus") === "build" && e304Parse("PACKAGE") === "build",
+    "#304 steps: a missing, unknown or wrong-case step is Build");
+  ok(e304Parse("package") === "package" && e304Parse("review") === "review" && e304Parse("send") === "send" && e304Parse("build") === "build",
+    "#304 steps: each known step parses to itself");
+  ok(e304After("submit") === "review" && e304After("approve") === "review" && e304After("attest") === "review" && e304After("assign") === "review",
+    "#304 steps: submit / approve / attest / assign land on Customer review");
+  ok(e304After("send") === "send", "#304 steps: send lands on Send & track (never Home)");
+  ok(e304After("sendBack") === "build" && e304After("withdraw") === "build", "#304 steps: send back / withdraw return to Build");
+  ok(e304Search("?id=Q-1", "package") === "?id=Q-1&step=package", "#304 steps: a step is added beside the id");
+  ok(e304Search("?id=Q-1&step=send", "build") === "?id=Q-1", "#304 steps: Build drops the step param (old URLs stay canonical)");
+  ok(e304Search("", "build") === "", "#304 steps: an empty search stays empty on Build");
+  ok(e304Search("?customer=lf&venue=v2", "review", "Q-9") === "?customer=lf&venue=v2&id=Q-9&step=review",
+    "#304 steps: other params are kept; a newly saved id is written");
+  ok(e304Search("?id=Q-1&step=review", "review", "Q-1") === "?id=Q-1&step=review", "#304 steps: idempotent");
+}
