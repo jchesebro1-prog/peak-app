@@ -97,8 +97,10 @@ export function rewardCreditLine(amount: number, id: number): SpecItem {
 
 /**
  * The sections carrying exactly one credit line of `amount` on the LAST
- * system (every other credit line removed). `amount` ≤ 0, or no systems at
- * all, leaves no credit line. The existing line keeps its id when there was one.
+ * In-total system — the last one without the Phase 2b `alternate` stamp
+ * (fallback: the last system, when every system is an alternate). Every other
+ * credit line is removed. `amount` ≤ 0, or no systems at all, leaves no credit
+ * line. The existing line keeps its id when there was one.
  */
 export function withRewardCredit<T extends SpecSection>(sections: T[], amount: number, newId: number): T[] {
   let keepId: number | null = null;
@@ -106,7 +108,13 @@ export function withRewardCredit<T extends SpecSection>(sections: T[], amount: n
   const stripped = withoutRewardCredit(sections);
   const a = round2(amount);
   if (!(a > 0) || !stripped.length) return stripped;
-  const last = stripped.length - 1;
+  let last = stripped.length - 1;
+  for (let i = stripped.length - 1; i >= 0; i--) {
+    if (stripped[i]?.alternate !== true) {
+      last = i;
+      break;
+    }
+  }
   return stripped.map((s, i) =>
     i === last ? { ...s, items: [...(s.items || []), rewardCreditLine(a, keepId ?? newId)] } : s
   );

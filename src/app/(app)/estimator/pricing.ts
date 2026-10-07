@@ -297,6 +297,9 @@ export type QuoteTotals = {
   /** #282 phase 2: the Rewards credit taken off `grand` (after tax; never
    *  more than rev + fr + tax, so `grand` never goes below $0). 0 = none. */
   credit?: number;
+  /** Phase 2b: Σ systemSellTotal of the alternate systems (`sec.alternate`) — shown, never part of
+   *  rev/cost/mat/lab/fr/opt/adj/tax/grand. Present only when the quote has an alternate system. */
+  alt?: number;
 };
 
 export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals {
@@ -307,8 +310,20 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     rev = 0,
     cost = 0,
     adjSum = 0,
-    creditSum = 0;
+    creditSum = 0,
+    altSum = 0,
+    anyAlt = false;
   for (const sec of sections) {
+    // Phase 2b: an alternate system (priced separately) adds its own price to
+    // `alt` and NOTHING else — no lines, options, freight or sell adjustment.
+    // A Rewards credit line parked on it (defensive; it pins to the last
+    // In-total system) still comes off the grand total.
+    if (sec.alternate === true) {
+      anyAlt = true;
+      altSum += systemSellTotal(sec);
+      for (const it of sec.items) if (isRewardCreditItem(it)) creditSum += creditLineAmount(it);
+      continue;
+    }
     let secMat = 0,
       secLab = 0;
     for (const it of sec.items) {
@@ -363,6 +378,7 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     margin: rev > 0 ? (rev - cost) / rev : 0,
     adj: round2(adjSum),
     credit,
+    ...(anyAlt ? { alt: round2(altSum) } : {}),
   };
 }
 

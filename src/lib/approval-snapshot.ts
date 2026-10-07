@@ -48,7 +48,12 @@ function linesKeyOf(spec: unknown): string {
   if (Array.isArray(sp.sections)) {
     for (const sec of sp.sections as Array<Record<string, unknown>>) {
       if (!sec || typeof sec !== "object") continue;
-      rows.push(["sec", s(sec.kind), n(sec.freightPct), n(sec.sellOverride)].join("|"));
+      // Phase 2b: an alternate system appends its flag, so flipping a group
+      // In total ⇄ Alternate re-asks approval — while a section without the
+      // stamp keeps its pre-2b row exactly (existing approvals stay valid).
+      const secRow = ["sec", s(sec.kind), n(sec.freightPct), n(sec.sellOverride)];
+      if (sec.alternate === true) secRow.push("alt", b(sec.alternate));
+      rows.push(secRow.join("|"));
       const items = Array.isArray(sec.items) ? (sec.items as Array<Record<string, unknown>>) : [];
       for (const it of items) {
         if (!it || typeof it !== "object" || isRewardCreditItem(it)) continue;

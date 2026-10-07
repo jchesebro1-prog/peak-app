@@ -54395,3 +54395,121 @@ import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-
   ok(norm > 0 && settle > norm, "#P2a hardening: saveQuoteAction normalises the sections (and sanitises built/groupId) before the Rewards credit is settled");
   ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups }"), "#P2a hardening: the final write stays normalised");
 }
+
+/* #P2b core — Estimator Phase 2b: the derived alternate stamp, totals.alt, the Rewards credit pin and the approval fingerprint. */
+import * as p2bGroups from "@/lib/estimate-groups/groups";
+import { totals as p2bTotals, systemSellTotal as p2bSell } from "@/app/(app)/estimator/pricing";
+import { withRewardCredit as p2bWithCredit, sanitizeRewardCredit as p2bSanitizeCredit, isRewardCreditItem as p2bIsCredit } from "@/lib/rewards/credit-line";
+import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
+{
+  type P2bSys = { id: string; groupId?: string; alternate?: true; built?: true; name?: string };
+  const G = [
+    { id: "g-a", name: "Stage", alternate: false },
+    { id: "g-b", name: "Pit option", alternate: true },
+  ];
+  const ids = (xs: P2bSys[]) => xs.map((x) => x.id + (x.alternate === true ? "*" : "") + ("alternate" in x && x.alternate !== true ? "!" : "")).join(",");
+  // --- normalizeSystemOrder stamps ---
+  const raw: P2bSys[] = [
+    { id: "1", alternate: true },
+    { id: "2", groupId: "g-a", alternate: true },
+    { id: "3", groupId: "g-b" },
+    { id: "4", groupId: "g-zz", alternate: true },
+  ];
+  const st = p2bGroups.normalizeSystemOrder(raw, G);
+  ok(ids(st) === "1,4,2,3*", "#P2b core: normalize stamps alternate:true on an Alternate group's systems and removes a stale stamp from ungrouped / In-total / unknown-group systems");
+  ok(!("alternate" in st[0]) && !("alternate" in st[1]) && !("groupId" in st[1]) && !("alternate" in st[2]) && st[3].alternate === true, "#P2b core: the stamp is absent (never false) outside an Alternate group");
+  ok(raw[0].alternate === true && raw[2].alternate === undefined && !("alternate" in raw[2]), "#P2b core: normalize does not mutate its input");
+  ok(p2bGroups.normalizeSystemOrder(st, G) === st, "#P2b core: an already stamped, already ordered array returns the same reference (idempotent)");
+  const okStamp: P2bSys[] = [{ id: "1" }, { id: "2", groupId: "g-a" }, { id: "3", groupId: "g-b", alternate: true }];
+  ok(p2bGroups.normalizeSystemOrder(okStamp, G) === okStamp, "#P2b core: correct order AND correct stamps → same reference");
+  const missing: P2bSys[] = [{ id: "1" }, { id: "2", groupId: "g-a" }, { id: "3", groupId: "g-b" }];
+  const missingOut = p2bGroups.normalizeSystemOrder(missing, G);
+  ok(missingOut !== missing && missingOut[0] === missing[0] && missingOut[1] === missing[1] && missingOut[2].alternate === true, "#P2b core: order already right but a stamp missing → a new array (the same-reference return never hides a stamp change); untouched sections keep identity");
+  const stale: P2bSys[] = [{ id: "1", alternate: true }, { id: "2", groupId: "g-a" }];
+  const staleOut = p2bGroups.normalizeSystemOrder(stale, G);
+  ok(staleOut !== stale && !("alternate" in staleOut[0]), "#P2b core: order already right but a stale stamp → a new array with the stamp removed");
+  // flipping a group's switch re-stamps
+  const flipped = G.map((g) => ({ ...g, alternate: !g.alternate }));
+  const re = p2bGroups.normalizeSystemOrder(okStamp, flipped);
+  ok(ids(re) === "1,2*,3", "#P2b core: flipping the groups' switches re-stamps (In total → Alternate gains it, Alternate → In total loses it)");
+  ok(ids(p2bGroups.normalizeSystemOrder(re, G)) === "1,2,3*", "#P2b core: flipping back restores the original stamps");
+  ok(ids(p2bGroups.normalizeSystemOrder(okStamp, [])) === "1,2,3", "#P2b core: with no groups nothing is stamped (groupId and stamp both dropped)");
+  const rmAlt = p2bGroups.removeGroup(okStamp, G, "g-b");
+  ok(ids(rmAlt.sections) === "1,3,2" && !("groupId" in rmAlt.sections[1]), "#P2b core: removing an Alternate group ungroups its systems and drops their stamp");
+  const moved = p2bGroups.moveSystemTo(okStamp, G, "1", { groupId: "g-b", beforeId: null });
+  ok(ids(moved) === "2,3*,1*", "#P2b core: moving a system into an Alternate group stamps it");
+  const movedOut = p2bGroups.moveSystemTo(okStamp, G, "3", { groupId: null, beforeId: null });
+  ok(ids(movedOut) === "1,3,2" && !("alternate" in movedOut[1]), "#P2b core: moving a system out of an Alternate group drops its stamp");
+  // --- leaving the estimate / server hardening ---
+  const wgm = p2bGroups.withoutGroupMeta({ id: "1", groupId: "g-b", alternate: true as const, name: "x" }) as Record<string, unknown>;
+  ok(!("alternate" in wgm) && !("groupId" in wgm) && wgm.name === "x", "#P2b core: withoutGroupMeta drops alternate");
+  const onlyAlt = { id: "1", alternate: true as const };
+  const wgm2 = p2bGroups.withoutGroupMeta(onlyAlt);
+  ok(wgm2 !== onlyAlt && !("alternate" in wgm2) && onlyAlt.alternate === true, "#P2b core: withoutGroupMeta of a system carrying only the stamp returns a new object without it (no mutation)");
+  const san = p2bGroups.sanitizeSectionGroupMeta({ id: "1", groupId: "g-a", built: true, alternate: true }) as Record<string, unknown>;
+  ok(!("alternate" in san) && san.groupId === "g-a" && san.built === true, "#P2b core: sanitizeSectionGroupMeta always strips a posted alternate (re-derived by normalize), keeping valid built/groupId");
+  const sanJunk = p2bGroups.sanitizeSectionGroupMeta({ id: "1", alternate: "yes" } as never) as Record<string, unknown>;
+  ok(!("alternate" in sanJunk) && sanJunk.id === "1", "#P2b core: sanitizeSectionGroupMeta strips a junk alternate too");
+  const sanClean = { id: "1", groupId: "g-a" };
+  ok(p2bGroups.sanitizeSectionGroupMeta(sanClean) === sanClean, "#P2b core: sanitizeSectionGroupMeta with no alternate keeps the same reference");
+  ok(ids(p2bGroups.normalizeSystemOrder([p2bGroups.sanitizeSectionGroupMeta({ id: "9", groupId: "g-b", alternate: true })] as P2bSys[], G)) === "9*", "#P2b core: sanitize then normalize re-stamps a genuine alternate");
+
+  // --- totals() ---
+  const it = (id: number, qty: number, cost: number, price: number, extra: Record<string, unknown> = {}) => ({ id, sku: "S" + id, desc: "d", qty, unit: "ea", cost, price, ...extra });
+  const inTotal = { id: "i", name: "Main", kind: "materials", mfr: "", freightPct: 0, items: [it(1, 1, 600, 1000)] };
+  const alt = {
+    id: "x", name: "Alt", kind: "materials", mfr: "", freightPct: 10, sellOverride: 500, groupId: "g-b", alternate: true as const,
+    items: [it(2, 2, 150, 200), it(3, 1, 20, 50, { labor: true }), it(4, 1, 10, 75, { option: true })],
+  };
+  ok(p2bSell(alt as never) === 500, "#P2b core: fixture — the alternate system's own sell is its typed $500 (items + freight + override)");
+  const t1 = p2bTotals([inTotal, alt] as never, 0);
+  ok(t1.grand === 1000 && t1.alt === 500, "#P2b core: totals() — grand is the In-total system only; alt = the alternate's systemSellTotal");
+  ok(t1.rev === 1000 && t1.cost === 600 && t1.mat === 1000 && t1.lab === 0 && t1.fr === 0 && t1.adj === 0 && t1.opt === 0 && t1.tax === 0,
+    "#P2b core: totals() — rev/cost/mat/lab/fr/adj/opt exclude the alternate (its lines, labor, freight, sell adjustment and options)");
+  ok(Math.abs(t1.margin - 0.4) < 1e-12, "#P2b core: totals() — margin is the In-total systems' margin");
+  const t1tax = p2bTotals([inTotal, alt] as never, 8);
+  ok(t1tax.tax === 80 && t1tax.grand === 1080 && t1tax.alt === 500, "#P2b core: totals() — tax is on In-total systems only; alt stays the untaxed system sell");
+  const altCredit = { ...alt, items: [...alt.items, it(9, 1, 0, -100, { rewardCredit: true })] };
+  const t2 = p2bTotals([inTotal, altCredit] as never, 0);
+  ok(t2.credit === 100 && t2.grand === 900 && t2.alt === 500, "#P2b core: totals() — a Rewards credit line on an alternate section still reduces grand (and is not in alt)");
+  const allAlt = p2bTotals([{ ...inTotal, alternate: true as const }, alt] as never, 0);
+  ok(allAlt.grand === 0 && allAlt.rev === 0 && allAlt.alt === 1500, "#P2b core: totals() — an all-alternate quote totals $0 with every system in alt");
+  // No alternates ⇒ identical to the pre-change result (fixture computed before this change).
+  const fA = { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 10, priceRound: 25, items: [it(1, 2, 100, 150), it(2, 1, 50, 80, { option: true }), it(3, 4, 40, 60, { labor: true })] };
+  const fB = { id: "b", name: "B", kind: "labor", mfr: "", freightPct: 0, sellOverride: 900, items: [it(4, 10, 50, 70)] };
+  const fC = { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 5, items: [it(5, 3, 33.33, 51.17), it(6, 1, 0, -100, { rewardCredit: true })] };
+  const pre = { mat: 466.84, lab: 1150.67, fr: 41, opt: 80, rev: 1617.51, cost: 959.99, tax: 132.6808, grand: 1691.1908, margin: 0.40650135084172584, adj: 224, credit: 100 };
+  const t3 = p2bTotals([fA, fB, fC] as never, 8);
+  ok(JSON.stringify(t3) === JSON.stringify(pre), "#P2b core: no alternates ⇒ totals() is identical to the pre-change result, field for field (and no alt key)");
+  ok(!("alt" in t3), "#P2b core: no alternates ⇒ no alt key at all");
+  // Adding an alternate system changes nothing but alt.
+  const t4 = p2bTotals([fA, fB, fC, { ...alt }] as never, 8);
+  const { alt: t4alt, ...t4rest } = t4;
+  ok(JSON.stringify(t4rest) === JSON.stringify(pre) && t4alt === 500, "#P2b core: adding an alternate system to that quote changes only alt");
+
+  // --- withRewardCredit pins to the last In-total system ---
+  const sec = (id: string, a?: boolean) => ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items: [it(Number(id.replace(/\D/g, "")) || 1, 1, 1, 2)], ...(a ? { alternate: true as const } : {}) });
+  const credited = (ss: Array<{ id: string; items: unknown[] }>) => ss.filter((s) => s.items.some(p2bIsCredit)).map((s) => s.id).join();
+  const mixed = [sec("s1"), sec("s2"), sec("s3", true), sec("s4", true)];
+  const wc = p2bWithCredit(mixed as never, 50, 99);
+  ok(credited(wc) === "s2", "#P2b core: withRewardCredit places the credit on the last non-alternate system");
+  ok(credited(p2bWithCredit([sec("s1", true), sec("s2", true)] as never, 50, 99)) === "s2", "#P2b core: withRewardCredit on an all-alternate quote falls back to the last system");
+  ok(credited(p2bWithCredit([sec("s1"), sec("s2")] as never, 50, 99)) === "s2", "#P2b core: withRewardCredit with no alternates still uses the last system");
+  const onAlt = [sec("s1"), { ...sec("s2", true), items: [it(2, 1, 1, 2), it(7, 1, 0, -40, { rewardCredit: true })] }];
+  const moved2 = p2bWithCredit(onAlt as never, 40, 99);
+  ok(credited(moved2) === "s1" && moved2[0].items.find(p2bIsCredit)?.id === 7, "#P2b core: a credit sitting on an alternate is re-homed to the last In-total system, keeping its line id");
+  const sanC = p2bSanitizeCredit(onAlt as never, Number.POSITIVE_INFINITY);
+  ok(sanC.ok && credited(sanC.sections as never) === "s1" && sanC.credit === 40, "#P2b core: sanitizeRewardCredit (the save path) re-pins the credit to the last In-total system");
+  const stamped = p2bGroups.normalizeSystemOrder([{ ...sec("s1"), groupId: "g-b" }, sec("s2")] as never, G) as Array<{ id: string; items: unknown[] }>;
+  ok(credited(p2bWithCredit(stamped as never, 25, 99)) === "s2", "#P2b core: after normalize, the credit lands on the last In-total system (an Alternate group sorts last but is skipped)");
+
+  // --- approval fingerprint ---
+  const fpSpec = { sections: [
+    { id: "a", kind: "materials", freightPct: 10, items: [{ id: 1, sku: "S1", qty: 2, price: 150 }, { id: 2, sku: "S2", qty: 1, price: 80, option: true }] },
+    { id: "b", kind: "labor", freightPct: 0, sellOverride: 900, groupId: "g-a", items: [{ id: 3, sku: "", custom: true, qty: 10, price: 70, labor: true }] },
+  ] };
+  const fp0 = p2bFingerprint({ value: 1500, spec: fpSpec });
+  ok(fp0.linesKey === "550a2b5d", "#P2b core: linesKeyOf of a quote with no alternates is unchanged from before Phase 2b (existing approvals stay valid)");
+  const fpAlt = p2bFingerprint({ value: 1500, spec: { sections: [fpSpec.sections[0], { ...fpSpec.sections[1], alternate: true }] } });
+  ok(fpAlt.linesKey !== fp0.linesKey, "#P2b core: linesKeyOf differs when only a section's alternate stamp differs (flipping a group re-asks approval)");
+}

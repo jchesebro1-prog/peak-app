@@ -267,6 +267,11 @@ export type SpecSection = {
   /** Phase 2a: staff-only "built" mark (collapsed in the Build step). Never printed, never in the
    *  PDF doc key; absent when not built (never false). Any other edit to the system clears it. */
   built?: true;
+  /** Phase 2b: derived — only normalizeSystemOrder writes it. `true` exactly when this system's group
+   *  (spec.groups) is an Alternate group ("priced separately — not in the total"); absent otherwise
+   *  (never false). totals() keeps an alternate out of the grand total (it goes to `alt`). A posted
+   *  value is never trusted (sanitizeSectionGroupMeta strips it); a system leaving the estimate drops it. */
+  alternate?: true;
   /** #301: the client's goals for this scope (≤ 1,000, plain text). Copied
    *  from the site visit; dropped by Load system (R5). */
   clientGoals?: string;

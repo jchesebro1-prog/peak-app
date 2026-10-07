@@ -20,7 +20,7 @@ export const UNTITLED_GROUP = "Untitled group";
 const GROUP_ID_RE = /^g-[a-z0-9]{1,24}$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/g;
 
-type Grouped = { id: string; groupId?: string };
+type Grouped = { id: string; groupId?: string; alternate?: true };
 
 /** "g-" + base36 time/random, ≤ 26 chars. The only impure function here. */
 export function newGroupId(): string {
@@ -57,10 +57,33 @@ function dropGroupId<S extends { groupId?: string }>(s: S): S {
   return rest as unknown as S;
 }
 
-/** Ungrouped first, then groups in order. Unknown groupId is dropped. */
+function dropAlternate<S extends { alternate?: true }>(s: S): S {
+  const { alternate: _drop, ...rest } = s;
+  void _drop;
+  return rest as unknown as S;
+}
+
+/**
+ * Phase 2b: the derived `alternate` stamp — `alternate: true` exactly when the
+ * section's group is an Alternate group, the key absent otherwise (never
+ * false). Same reference when the stamp is already right.
+ */
+function withAlternateStamp<S extends Grouped>(s: S, alternateIds: Set<string>): S {
+  const want = s.groupId !== undefined && alternateIds.has(s.groupId);
+  if (want) return s.alternate === true ? s : { ...s, alternate: true };
+  return "alternate" in s ? dropAlternate(s) : s;
+}
+
+/**
+ * Ungrouped first, then groups in order. Unknown groupId is dropped.
+ * Phase 2b: also stamps `alternate` (see withAlternateStamp) — the ONLY writer
+ * of that key. The input array comes back unchanged (same reference) only
+ * when both the order and every section's stamp were already right.
+ */
 export function normalizeSystemOrder<S extends Grouped>(sections: S[], groups: SystemGroup[]): S[] {
   const known = new Set(groups.map((g) => g.id));
-  const fixed = sections.map((s) => (s.groupId !== undefined && !known.has(s.groupId) ? dropGroupId(s) : s));
+  const alternateIds = new Set(groups.filter((g) => g.alternate === true).map((g) => g.id));
+  const fixed = sections.map((s) => withAlternateStamp(s.groupId !== undefined && !known.has(s.groupId) ? dropGroupId(s) : s, alternateIds));
   const out: S[] = fixed.filter((s) => s.groupId === undefined);
   for (const g of groups) for (const s of fixed) if (s.groupId === g.id) out.push(s);
   return sameItems(out, sections) ? sections : out;
@@ -168,28 +191,32 @@ export function removeGroup<S extends Grouped>(
   return { sections: normalizeSystemOrder(sections, left), groups: left };
 }
 
-/** A system leaving this estimate carries neither its group nor its built flag. */
-export function withoutGroupMeta<S extends { groupId?: string; built?: boolean }>(sec: S): S {
-  if (!("groupId" in sec) && !("built" in sec)) return sec;
-  const { groupId: _g, built: _b, ...rest } = sec;
+/** A system leaving this estimate carries neither its group, its built flag nor its alternate stamp. */
+export function withoutGroupMeta<S extends { groupId?: string; built?: boolean; alternate?: true }>(sec: S): S {
+  if (!("groupId" in sec) && !("built" in sec) && !("alternate" in sec)) return sec;
+  const { groupId: _g, built: _b, alternate: _a, ...rest } = sec;
   void _g;
   void _b;
+  void _a;
   return rest as unknown as S;
 }
 
 /**
  * Server-side hardening on save: `built` survives only when exactly `true`,
  * `groupId` only when a string (unknown ids are dropped by normalizeSystemOrder).
+ * Phase 2b: a posted `alternate` is never trusted — it is always stripped and
+ * normalizeSystemOrder re-derives it from the groups.
  * Returns the same reference when nothing needs stripping.
  */
-export function sanitizeSectionGroupMeta<S extends { groupId?: unknown; built?: unknown }>(sec: S): S {
+export function sanitizeSectionGroupMeta<S extends { groupId?: unknown; built?: unknown; alternate?: unknown }>(sec: S): S {
   if (!sec || typeof sec !== "object") return sec;
   const badBuilt = "built" in sec && sec.built !== true;
   const badGroup = "groupId" in sec && typeof sec.groupId !== "string";
-  if (!badBuilt && !badGroup) return sec;
-  const { built: _b, groupId: _g, ...rest } = sec;
+  if (!badBuilt && !badGroup && !("alternate" in sec)) return sec;
+  const { built: _b, groupId: _g, alternate: _a, ...rest } = sec;
   void _b;
   void _g;
+  void _a;
   return {
     ...rest,
     ...(!badBuilt && "built" in sec ? { built: sec.built } : {}),
