@@ -4,7 +4,8 @@ import type { NarrativeBlock } from "@/app/(app)/estimator/narrative";
 import type { QuoteRevisionDocFields } from "@/lib/stores/quotes";
 import { fmt } from "@/app/(app)/estimator/pricing";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
-import { addOptions, coverSummaryText, coverTotals, notIncludedItems, outputScopes } from "./scopes";
+import { addOptions, alternatesListView, coverSummaryText, coverTotals, notIncludedItems, outputScopes } from "./scopes";
+import type { AlternatesListView } from "./scopes";
 import { packageBomRows, type BomCatalogPart, type PackageBomRow } from "./bom";
 import { PACKAGE_COPY, packageBanner, type PackageBanner, type VisiblePackageState } from "@/lib/quote-share/package-view";
 
@@ -68,6 +69,9 @@ export type PackageViewProps = {
   scopes: PackageScopeView[];
   totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
   options: Array<{ label: string; desc: string; reason: string; price: string }>;
+  /** Estimator Phase 2b — the Alternates card (mirrors the cover's list);
+   *  present only when the revision has printed alternates. */
+  alternates?: AlternatesListView;
   notIncluded: string[];
 };
 
@@ -89,6 +93,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
   const scopes = outputScopes(d);
   const byId = new Map((d.sections || []).map((s) => [s.id, s] as const));
   const t = coverTotals(d);
+  const alternates = alternatesListView(d);
   return {
     logo: d.logoDark ? { src: d.logoDark, full: false } : { src: i.letterheadSrc, full: true },
     companyName: d.companyName,
@@ -133,6 +138,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
       standingLines: t.standingLines,
     },
     options: addOptions(d).map((o) => ({ label: o.label, desc: o.desc, reason: o.reason, price: fmt(o.price) })),
+    ...(alternates.length ? { alternates } : {}),
     notIncluded: notIncludedItems(i.frozen.notIncluded),
   };
 }

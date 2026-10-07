@@ -11380,6 +11380,7 @@ seeded()
   .then(() => specRecordMatchAsyncChecks())
   .then(() => specRecordsBomSeamAsyncChecks())
   .then(() => p2bConsumersAsyncChecks())
+  .then(() => p2bOutputsAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
@@ -54814,4 +54815,186 @@ import { qd293Props as p2bdProps, qd293Sections as p2bdSections, qdP2bNoAltCases
   const enBlock = en.slice(en.indexOf('class="est-alts"'));
   ok(enBlock.includes("Scope and pricing for this alternate are shown above.") && !enBlock.includes("Priced separately — not included in the total.</div>"),
     "#P2b document fix: an empty-narrative alternate reads 'Scope and pricing for this alternate are shown above.'");
+}
+
+/* #P2b outputs — alternates on the cover PDF, the client package page and the client's scope picker. */
+import { alternateScopes as p2boAltScopes, outputScopes as p2boScopes, addOptions as p2boOptions, coverTotals as p2boTotals } from "@/lib/estimate-output/scopes";
+import { coverDocumentPropsFor as p2boCover, ALTERNATES_TITLE as p2boAltTitle, ALTERNATES_NOTE as p2boAltNote } from "@/lib/estimate-output/cover";
+import CoverDocumentP2bo from "@/components/estimate-output/cover-document";
+import { packageViewModel as p2boModel } from "@/lib/estimate-output/package-model";
+import PackageViewP2bo from "@/components/estimate-output/package-view";
+import { PACKAGE_COPY as p2boPkgCopy } from "@/lib/quote-share/package-view";
+import {
+  responseScopes as p2boResp, defaultSelectedScopeIds as p2boDefault, sanitizeClientResponse as p2boSan, selectedTotal as p2boSelTotal,
+  responseNoteText as p2boNote, responseTaskTitle as p2boTask, alternateScopeLabel as p2boLabel, CLIENT_ACTION_COPY as p2boCopy,
+} from "@/lib/estimate-output/responses";
+import { revisionGroupedSections as p2boRevSecs } from "@/lib/quote-share/photo-response";
+import { withRewardCredit as p2boCredit } from "@/lib/rewards/credit-line";
+import { normalizeSystemOrder as p2boNorm } from "@/lib/estimate-groups/groups";
+import { systemSellTotal as p2boSell, fmt as p2boFmt } from "@/app/(app)/estimator/pricing";
+import { outputsP2bCase as p2boCase } from "./outputs-p2b-baseline";
+import { createElement as p2boEl } from "react";
+import { renderToStaticMarkup as p2boRender } from "react-dom/server";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  type Sec = ReturnType<typeof p2bdSections>[number];
+  const ln = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 100, price: 400, ...extra });
+  const G = [
+    { id: "g-a", name: "Stage", alternate: false },
+    { id: "g-x", name: "Upgrades", alternate: true },
+    { id: "g-y", name: "Rigging alternates", alternate: true },
+    { id: "g-z", name: "Ghost alternates", alternate: true },
+  ];
+  const alts = (): Sec[] => [
+    { id: "a1", name: "LED Upgrade", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", items: [ln(11), ln(12, { option: true, desc: "Alt option line" })] },
+    { id: "a2", name: "Haze package", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", presentation: "narrative", narrative: "Haze intro.", items: [ln(13), ln(15, { por: true, price: 0 })] },
+    { id: "a3", name: "Motorized battens", kind: "materials", mfr: "", freightPct: 0, groupId: "g-y", items: [ln(14)] },
+    { id: "a4", name: "Prints nothing", kind: "materials", mfr: "", freightPct: 0, groupId: "g-z", items: [ln(16, { option: true, desc: "Orphan alt option" })] },
+  ] as unknown as Sec[];
+  const inTotal = () => p2bdSections().map((s) => (s.id === "s2" || s.id === "s3" ? { ...s, groupId: "g-a" } : s));
+  const opts = { pdfOptions: true };
+  const props = p2bdProps({ sections: [...inTotal(), ...alts()], groups: G, pdfOptions: opts });
+  const plain = p2bdProps({ sections: inTotal(), groups: [G[0]], pdfOptions: opts });
+
+  // ---- alternateScopes ----
+  const as = p2boAltScopes(props);
+  ok(JSON.stringify(as) === JSON.stringify([
+    { groupId: "g-x", name: "Upgrades", price: 800, systems: [{ id: "a1", name: "LED Upgrade", price: 400 }, { id: "a2", name: "Haze package", price: 400 }] },
+    { groupId: "g-y", name: "Rigging alternates", price: 400, systems: [{ id: "a3", name: "Motorized battens", price: 400 }] },
+  ]), "#P2b outputs: alternateScopes — one entry per Alternate group with a printed system (document order, Σ systemSellTotal, its systems); a group whose systems print nothing is left out");
+  ok(as.every((g) => g.price === g.systems.reduce((n, x) => n + x.price, 0)) && as.flatMap((g) => g.systems).every((x) => x.price === p2boSell(props.sections.find((s) => s.id === x.id)!)),
+    "#P2b outputs: alternateScopes prices are systemSellTotal, a group's price their sum");
+  ok(p2boAltScopes(plain).length === 0 && p2boAltScopes({ sections: props.sections, groups: undefined }).length === 0, "#P2b outputs: alternateScopes is [] with no Alternate group (or no groups)");
+
+  // ---- outputScopes + R1 ----
+  ok(p2boScopes(props).map((s) => `${s.num}:${s.id}`).join() === p2boScopes(plain).map((s) => `${s.num}:${s.id}`).join() && !p2boScopes(props).some((s) => s.id.startsWith("a")),
+    "#P2b outputs: outputScopes lists In-total systems only, numbered as before");
+  const r1 = (d: typeof props) => Math.round((p2boScopes(d).reduce((n, s) => n + s.price, 0) - (d.t.credit || 0)) * 100) / 100 === Math.round(d.t.grand * 100) / 100;
+  ok(r1(props) && props.t.grand === plain.t.grand && (props.t.alt ?? 0) > 0, "#P2b outputs: R1 — Σ In-total scope prices − credit = grand with alternates present");
+  const stamped = p2boNorm([...inTotal(), ...alts()], G);
+  const credited = p2bdProps({ sections: p2boCredit(stamped, 150, 999), groups: G, pdfOptions: opts });
+  const creditOnAlt = p2bdProps({ sections: [...inTotal(), ...alts()].map((s) => (s.id === "a3" ? { ...s, items: [...s.items, ...p2boCredit([{ ...s, items: [] }], 90, 998)[0].items] } : s)), groups: G, pdfOptions: opts });
+  ok(credited.t.credit === 150 && r1(credited) && creditOnAlt.t.credit === 90 && r1(creditOnAlt),
+    "#P2b outputs: R1 holds with a Rewards credit — pinned to the last In-total system, or sitting on an alternate");
+
+  // ---- addOptions + POR ----
+  ok(p2boOptions(props).map((o) => o.desc).join("|") === "Line 3|Orphan alt option" && p2boOptions(props).map((o) => o.label).join() === "ADD OPTION 1,ADD OPTION 2",
+    "#P2b outputs: addOptions leaves a PRINTED alternate's option lines out (they belong to it) but keeps an alternate that prints nothing — the estimate PDF's rule");
+  ok(p2boTotals({ ...props, isPortalCatalog: true }).totalLabel === "Total" && p2boTotals({ ...plain, isPortalCatalog: true }).totalLabel === "Total",
+    "#P2b outputs: an alternate's POR line never relabels the Total");
+
+  // ---- cover ----
+  const coverIn = (doc: typeof props) => ({ doc, coverSummary: "", notIncluded: "Permits", signer: null, footerLine: "Peak · x", shareUrl: null, letterhead: { src: "/lh.jpg", full: true } });
+  const cp = p2boCover(coverIn(props));
+  ok(JSON.stringify(cp.alternates) === JSON.stringify([
+    { groupId: "g-x", name: "Upgrades", price: "$800.00", systems: [{ id: "a1", name: "LED Upgrade", price: "$400.00" }, { id: "a2", name: "Haze package", price: "$400.00" }] },
+    { groupId: "g-y", name: "Rigging alternates", price: "$400.00", systems: [{ id: "a3", name: "Motorized battens", price: "$400.00" }] },
+  ]), "#P2b outputs: cover props carry the Alternates list (group name + price, its systems)");
+  const cpl = p2boCover(coverIn(plain));
+  ok(!("alternates" in cpl) && JSON.stringify({ ...cp, alternates: undefined, options: [] }) === JSON.stringify({ ...cpl, options: [] }),
+    "#P2b outputs: with no alternates the cover has no alternates key; otherwise the cover (scopes, summary, totals) matches the In-total-only quote");
+  const cOff = p2boCover(coverIn(p2bdProps({ sections: [...inTotal(), ...alts()], groups: G, pdfOptions: { pdfOptions: false } })));
+  ok(cOff.options.length === 0 && cOff.alternates?.length === 2, "#P2b outputs: the cover's Alternates list prints whatever the Options toggle says");
+  const ch = p2boRender(p2boEl(CoverDocumentP2bo, cp));
+  const iAlt = ch.indexOf(`>${p2boAltTitle}<`);
+  ok(iAlt > ch.indexOf(">Total<") && iAlt < ch.indexOf("ADD OPTION 1") && ch.includes(p2boAltNote) && p2boAltNote === "Not included in the total above." && p2boAltTitle === "Alternates" &&
+     ["Upgrades", "$800.00", "LED Upgrade", "Haze package", "Rigging alternates", "Motorized battens"].every((x) => ch.slice(iAlt).includes(x)) &&
+     ch.slice(iAlt).indexOf("Upgrades") < ch.slice(iAlt).indexOf("LED Upgrade") && ch.slice(iAlt).indexOf("Haze package") < ch.slice(iAlt).indexOf("Rigging alternates") && !ch.includes("Ghost alternates"),
+    "#P2b outputs: the cover prints Alternates after the total (before add options) with 'Not included in the total above.', each group then its systems");
+  ok(!p2boRender(p2boEl(CoverDocumentP2bo, cpl)).includes(">Alternates<"), "#P2b outputs: no Alternates list on a cover without alternates");
+
+  // ---- package page ----
+  const pkgIn = (doc: typeof props) => ({ doc, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
+    headerLine: "x", currentHref: null, view: "narrative" as const, base: "/b", letterheadSrc: "/lh" });
+  const pm = p2boModel(pkgIn(props));
+  const pml = p2boModel(pkgIn(plain));
+  ok(JSON.stringify(pm.alternates) === JSON.stringify(cp.alternates) && !("alternates" in pml) && pm.scopes.map((s) => s.id).join() === pml.scopes.map((s) => s.id).join() &&
+     pm.total === pml.total && JSON.stringify(pm.totals) === JSON.stringify(pml.totals),
+    "#P2b outputs: the package model's Alternates mirror the cover's; scopes and totals stay the In-total ones; no key without alternates");
+  const ph = p2boRender(p2boEl(PackageViewP2bo, { model: pm }));
+  const iCard = ph.indexOf(`<h2>${p2boPkgCopy.alternates}</h2>`);
+  ok(iCard > ph.indexOf("pkg-row pkg-total") && ph.slice(iCard).includes(p2boPkgCopy.alternatesNote) && p2boPkgCopy.alternatesNote === p2boAltNote && p2boPkgCopy.alternates === p2boAltTitle &&
+     ["Upgrades", "$800.00", "LED Upgrade", "Motorized battens"].every((x) => ph.slice(iCard).includes(x)) && !ph.slice(0, iCard).includes("LED Upgrade") &&
+     !p2boRender(p2boEl(PackageViewP2bo, { model: pml })).includes(`<h2>${p2boPkgCopy.alternates}</h2>`),
+    "#P2b outputs: the package page shows an Alternates card after the totals (same copy as the cover), and none without alternates; alternates never appear as scopes");
+
+  // ---- scope picker ----
+  const rs = p2boResp(props.sections, props.groups);
+  ok(rs.map((s) => `${s.id}:${s.alternate ? "A" : "T"}`).join() === "s1:T,s4:T,s2:T,s3:T,a1:A,a2:A,a3:A" &&
+     rs.filter((s) => s.alternate).map((s) => s.name).join("|") === "Alternate — Upgrades: LED Upgrade|Alternate — Upgrades: Haze package|Alternate — Rigging alternates: Motorized battens" &&
+     rs.filter((s) => !s.alternate).every((s) => !("alternate" in s)) && rs.find((s) => s.id === "a1")!.priceLabel === p2boFmt(400) && p2boLabel("G", "S") === "Alternate — G: S",
+    "#P2b outputs: responseScopes — In-total scopes first, then each alternate system flagged alternate: true and labelled 'Alternate — <group>: <system>'");
+  ok(p2boDefault(rs).join() === "s1,s4,s2,s3" && p2boDefault(rs).join() === p2boScopes(props).map((x) => x.id).join() && p2boDefault(p2boResp(plain.sections, plain.groups)).join() === p2boResp(plain.sections, plain.groups).map((s) => s.id).join(),
+    "#P2b outputs: defaultSelectedScopeIds — every In-total scope, no alternate (no alternates → all, as before)");
+  const inSum = p2boSelTotal(rs.filter((s) => !s.alternate));
+  ok(p2boSelTotal(rs.filter((s) => p2boDefault(rs).includes(s.id))) === inSum && p2boSelTotal(rs.filter((s) => [...p2boDefault(rs), "a3"].includes(s.id))) === inSum + 400,
+    "#P2b outputs: the running total starts at the In-total scopes and adds a ticked alternate");
+  const acc = p2boSan("accept", { name: "Pat", sectionIds: ["a3", "s1", "zz-unknown"] }, rs);
+  ok(acc.ok && acc.value.sectionIds.join() === "s1,a3" && acc.value.sectionNames.join("|") === "Rigging|Alternate — Rigging alternates: Motorized battens" &&
+     acc.value.total === p2boSell(props.sections[0]) + 400,
+    "#P2b outputs: the server accepts a submitted alternate id (named by its label, priced into the total) and drops an unknown id");
+  const unk = p2boSan("accept", { name: "Pat", sectionIds: ["zz-unknown", "a4"] }, rs);
+  ok(!unk.ok && unk.error === p2boCopy.needScope, "#P2b outputs: only unknown ids (or an alternate that prints nothing) → refused");
+  if (acc.ok) {
+    ok(p2boNote(acc.value, "EST-1", 2).includes("Rigging, Alternate — Rigging alternates: Motorized battens — ") && p2boTask(acc.value, "EST-1", 2).includes("— Rigging, Alternate — Rigging alternates: Motorized battens ("),
+      "#P2b outputs: the note and task name a chosen alternate by its label");
+  }
+  // the revision path: unstamped revision sections are normalised + stamped against the revision's own groups
+  const rev = { rev: 1, spec: { sections: [...alts(), ...inTotal()].map((s) => { const { alternate: _a, ...r } = s as Sec & { alternate?: true }; void _a; return r; }), groups: G } } as never;
+  const rg = p2boRevSecs(rev);
+  ok(p2boResp(rg.sections, rg.groups).map((s) => s.id).join() === rs.map((s) => s.id).join() && rg.groups.length === 4,
+    "#P2b outputs: revisionGroupedSections normalises and stamps a revision's systems, so the picker offers the page's own scopes in its order");
+  const legacy = p2boRevSecs({ rev: 1, spec: { sections: p2bdSections() } } as never);
+  ok(legacy.groups.length === 0 && legacy.sections.map((s) => s.id).join() === "s1,s2,s3,s4", "#P2b outputs: a revision with no groups reads as before");
+
+  // ---- no alternates: every output byte-for-byte as before (fixture written by scripts/outputs-p2b-baseline.ts from the pre-change code) ----
+  const baseline = JSON.parse(rd("docs/superpowers/fixtures/p2b-outputs-no-alternates.json")) as Record<string, ReturnType<typeof p2boCase>>;
+  const cases = p2bdNoAlt();
+  ok(Object.keys(baseline).join() === Object.keys(cases).join() && Object.keys(cases).length === 7, "#P2b outputs: the no-alternates fixture covers the seven Phase 2b no-alternate cases");
+  for (const [k, doc] of Object.entries(cases)) {
+    const now = p2boCase(doc);
+    const b = baseline[k];
+    ok(now.cover === b.cover && now.coverHtml === b.coverHtml, `#P2b outputs (${k}): cover props + render unchanged without alternates`);
+    ok(now.pkg === b.pkg && now.pkgHtml === b.pkgHtml, `#P2b outputs (${k}): package model + render unchanged without alternates`);
+    ok(now.scopes === b.scopes && JSON.stringify(p2boResp(doc.sections, doc.groups)) === b.scopes, `#P2b outputs (${k}): scope picker scopes unchanged without alternates (with or without groups passed)`);
+  }
+
+  // ---- source pins ----
+  const sel = rd("src/app/share/quote/[id]/[token]/scope-selection.tsx");
+  ok(sel.includes("useState<string[]>(() => defaultSelectedScopeIds(scopes))") && sel.includes("CLIENT_ACTION_COPY.alternates") && sel.includes('scopes.filter((s) => s.alternate === true)') &&
+     sel.includes("selectedTotal(scopes.filter(") && p2boCopy.alternates === "Alternates",
+    "#P2b outputs: the picker starts from defaultSelectedScopeIds and lists alternates under their own 'Alternates' heading; the total counts every ticked scope");
+  const ex = rd("src/lib/estimate-output/package-extras.ts");
+  const srv = rd("src/lib/estimate-output/responses-server.ts");
+  ok(ex.includes("revisionGroupedSections(hit.rev)") && ex.includes("responseScopes(sections, groups)") && srv.includes("revisionGroupedSections(hit.rev)") &&
+     srv.includes("sanitizeClientResponse(kind, o, responseScopes(sections, groups))") && !ex.includes("revisionSections(") && !srv.includes("revisionSections("),
+    "#P2b outputs: the page and the server offer / validate the same list (revisionGroupedSections → responseScopes with groups)");
+}
+
+async function p2bOutputsAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const L = await import("@/lib/quote-share/links");
+  const R = await import("@/lib/estimate-output/responses-server");
+  const S = "test-secret-p2bo";
+  const QID = fixtureId(302, "p2b-outputs");
+  const sec = (id: string, name: string, price: number, groupId?: string) => ({ id, name, kind: "materials", mfr: "", freightPct: 0, ...(groupId ? { groupId } : {}), items: [{ id: 1, sku: "A-" + id, desc: name, qty: 1, unit: "ea", cost: 1, price }] });
+  await Q.create({ id: QID, name: "#P2b outputs", customer: "Spec fixture", customerId: null, owner: "Lead P2B", quoteType: "system", source: "estimator",
+    spec: { sections: [sec("s1", "Lighting", 1000), sec("s2", "LED Upgrade", 500, "g-x")], groups: [{ id: "g-x", name: "Upgrades", alternate: true }], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
+  const made = await L.ensureShareLink(QID, "Tester", { secret: S });
+  const tok = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
+  const users = [{ id: "u-p2b", name: "Lead P2B", status: "active", roles: ["Estimator"] }];
+  const calls: string[] = [];
+  const deps = { secret: S, users: async () => users, notify: async (_q: unknown, r: { total: number; sectionNames: string[] }) => { calls.push(`${r.total}:${r.sectionNames.join("|")}`); } };
+  const salt = String(Date.now() % 100_000);
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat", sectionIds: ["s2", "s1"] }, "198.51.100.1-" + salt, deps);
+  const got = (await Q.get(QID))!;
+  ok(acc.ok && got.clientResponses?.length === 1 && got.clientResponses[0].sectionIds.join() === "s1,s2" && got.clientResponses[0].total === 1500 &&
+     calls.join() === "1500:Lighting|Alternate — Upgrades: LED Upgrade" && got.status === "sent",
+    "#P2b outputs (DB): a submitted alternate id is accepted, recorded by its label and priced into the selection total; the status stays sent");
+  const bad = await R.submitClientResponse("accept", QID, tok, { name: "Pat", sectionIds: ["nope"] }, "198.51.100.2-" + salt, deps);
+  ok(!bad.ok && bad.error === "Check at least one scope." && (await Q.get(QID))!.clientResponses?.length === 1, "#P2b outputs (DB): an unknown id alone is refused and nothing is written");
 }

@@ -1,7 +1,7 @@
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { canAct } from "@/lib/quote-share/package-view";
 import { resolveSharedPackage } from "@/lib/quote-share/links";
-import { revisionSections } from "@/lib/quote-share/photo-response";
+import { revisionGroupedSections } from "@/lib/quote-share/photo-response";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
 import { rateLimit } from "@/lib/rate-limit";
 import { logActivity } from "@/lib/stores/leads";
@@ -40,7 +40,9 @@ export async function submitClientResponse(kind: ClientResponseKind, id: string,
   const hit = await resolveSharedPackage(id, token, { secret: deps.secret, now });
   if (!hit) return { ok: false, error: CLIENT_ACTION_COPY.inactive };
   if (!canAct(hit.state)) return { ok: false, error: hit.state.kind === "superseded" ? CLIENT_ACTION_COPY.superseded : CLIENT_ACTION_COPY.closed };
-  const clean = sanitizeClientResponse(kind, o, responseScopes(revisionSections(hit.rev)));
+  // Phase 2b: the offered scopes include the alternate systems — the same list the picker shows.
+  const { sections, groups } = revisionGroupedSections(hit.rev);
+  const clean = sanitizeClientResponse(kind, o, responseScopes(sections, groups));
   if (!clean.ok) return clean;
   // The per-quote daily slot is spent only on a submission that will be written (an invalid one costs the quote nothing).
   if (!rateLimit(`share-respond-quote:${hit.q.id}`, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS).ok) return { ok: false, error: CLIENT_ACTION_COPY.tooMany };

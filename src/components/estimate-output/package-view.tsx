@@ -234,6 +234,30 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           </div>
         ))}
       </section>
+      {m.alternates && m.alternates.length > 0 && (
+        <section className="pkg-card">
+          <h2>{PACKAGE_COPY.alternates}</h2>
+          <div className="pkg-muted" style={{ marginBottom: 8 }}>
+            {PACKAGE_COPY.alternatesNote}
+          </div>
+          <ul className="pkg-opts">
+            {m.alternates.map((g) => (
+              <li key={g.groupId}>
+                <div className="pkg-row">
+                  <strong>{g.name}</strong>
+                  <span className="pkg-price">{g.price}</span>
+                </div>
+                {g.systems.map((s) => (
+                  <div key={s.id} className="pkg-row" style={{ paddingLeft: 14 }}>
+                    <span>{s.name}</span>
+                    <span>{s.price}</span>
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {slots.plans && <section data-mount="plans">{slots.plans}</section>}
       {m.options.length > 0 && (
         <section className="pkg-card">

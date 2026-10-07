@@ -1,7 +1,7 @@
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { fmt } from "@/app/(app)/estimator/pricing";
 import type { OnlineEstimateState, ShareLinkView } from "@/lib/quote-share/view";
-import { addOptions, coverSummaryText, coverTotals, notIncludedLine, outputScopes, scopePriceLabel } from "./scopes";
+import { addOptions, alternatesListView, coverSummaryText, coverTotals, notIncludedLine, outputScopes, scopePriceLabel, type AlternatesListView } from "./scopes";
 
 /**
  * #301 slice A — the cover PDF's props (spec §4), built from the customer
@@ -16,6 +16,10 @@ export type CoverOffice = { street?: string; city?: string; state?: string; zip?
 
 export const COVER_DEFAULT_TITLE = "Estimate Summary";
 export const COVER_LINK_LEAD = "View the full estimate online:";
+/** Estimator Phase 2b — the cover / package page Alternates list. */
+export const ALTERNATES_TITLE = "Alternates";
+export const ALTERNATES_NOTE = "Not included in the total above.";
+
 
 export type CoverDocumentProps = {
   title: string;
@@ -27,6 +31,9 @@ export type CoverDocumentProps = {
   summary: string;
   totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
   options: Array<{ label: string; desc: string; reason: string; price: string }>;
+  /** Estimator Phase 2b — present only when the quote has printed alternates
+   *  (always shown then, whatever the Options toggle). */
+  alternates?: AlternatesListView;
   notIncluded: string;
   shareUrl: string | null;
   signer: CoverSigner | null;
@@ -87,6 +94,7 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
   const d = input.doc;
   const scopes = outputScopes(d);
   const t = coverTotals(d);
+  const alternates = alternatesListView(d);
   return {
     title: (d.projectName || "").trim() || COVER_DEFAULT_TITLE,
     letterhead: input.letterhead,
@@ -111,6 +119,7 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
       standingLines: t.standingLines,
     },
     options: addOptions(d).map((o) => ({ label: o.label, desc: o.desc, reason: o.reason, price: fmt(o.price) })),
+    ...(alternates.length ? { alternates } : {}),
     notIncluded: notIncludedLine(input.notIncluded),
     shareUrl: input.shareUrl,
     signer: input.signer,

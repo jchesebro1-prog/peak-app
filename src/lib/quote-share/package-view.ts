@@ -24,6 +24,9 @@ export const PACKAGE_COPY = {
   seeBom: "The full parts list for this scope is under BOM.",
   noParts: "No parts listed for this scope.",
   options: "Add options",
+  /** Estimator Phase 2b — the Alternates card (the cover's list, cover.ts). */
+  alternates: "Alternates",
+  alternatesNote: "Not included in the total above.",
   notIncluded: "Not included",
   clientLink: "Client link",
   openedChip: "Opened",

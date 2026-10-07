@@ -4,7 +4,7 @@ import { specReadyFor } from "./package-spec-ready";
 import { allSections } from "@/lib/stores/spec-sections";
 import { cleanPackageFiles } from "./package-files";
 import { responseScopes } from "./responses";
-import { revisionSections } from "@/lib/quote-share/photo-response";
+import { revisionGroupedSections } from "@/lib/quote-share/photo-response";
 import { datasheetLinks, downloadsView, EMPTY_EXTRAS, plansView, type PackageExtras } from "./package-extras-model";
 
 /**
@@ -28,6 +28,8 @@ export async function loadPackageExtras(hit: SharedPackage, base: string): Promi
   // R12 — the pinned revision's frozen list only, never the live quote's.
   extras.plans = plansView(cleanPackageFiles(hit.rev.docFields?.packageFiles), base);
   // The choosable scopes (ids, names, prices) — the forms show only when the page can act (package-slots).
-  extras.actions = { scopes: responseScopes(revisionSections(hit.rev)) };
+  // Phase 2b: alternate systems follow the In-total scopes, unticked by default (scope-selection).
+  const { sections, groups } = revisionGroupedSections(hit.rev);
+  extras.actions = { scopes: responseScopes(sections, groups) };
   return extras;
 }

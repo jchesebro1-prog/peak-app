@@ -1,8 +1,9 @@
 import type { SpecSection } from "@/app/(app)/estimator/types";
+import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { fmt } from "@/app/(app)/estimator/pricing";
 import { cleanText } from "@/lib/document-files";
 import { permsFor } from "@/lib/team";
-import { outputScopes } from "./scopes";
+import { alternateScopes, outputScopes } from "./scopes";
 
 /**
  * #301 slice C (D-m, D-n, R1, R15, R16) — what a client sends from the
@@ -29,7 +30,10 @@ export type ClientResponse = {
 };
 export type CleanResponse = Omit<ClientResponse, "id" | "rev" | "at">;
 export type ClientActionResult = { ok: true; confirmation: string } | { ok: false; error: string };
-export type ResponseScope = { id: string; name: string; price: number; priceLabel: string };
+/** `name` is what the picker shows and the note / task record; an Alternate
+ *  group's system reads "Alternate — <group>: <system>" and carries
+ *  `alternate: true` (absent on In-total scopes). */
+export type ResponseScope = { id: string; name: string; price: number; priceLabel: string; alternate?: true };
 
 export const MAX_CLIENT_RESPONSES = 200;
 export const RESPONSE_NAME_MAX = 120;
@@ -68,15 +72,34 @@ export const CLIENT_ACTION_COPY = {
   closed: "This estimate can’t take responses right now.",
   full: "This estimate can’t take more responses online — contact Peak directly.",
   failed: "Couldn’t send — try again.",
+  alternates: "Alternates",
   noJs: "Turn on JavaScript to respond here, or reply to Peak’s email.",
 } as const;
 
 const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]+$/;
 const ID_RE = /^CR-[0-9a-f]{12}$/;
 
-/** The page's scopes as a client can choose them — the printed systems, labor included (R2). */
-export function responseScopes(sections: SpecSection[]): ResponseScope[] {
-  return outputScopes({ sections }).map((s) => ({ id: s.id, name: s.name, price: s.price, priceLabel: fmt(s.price) }));
+/** "Alternate — <group name>: <system name>" — the picker label, also what
+ *  the note and task record for a chosen alternate. */
+export function alternateScopeLabel(groupName: string, systemName: string): string {
+  return `Alternate — ${groupName}: ${systemName}`;
+}
+
+/** The page's scopes as a client can choose them — the printed In-total
+ *  systems, labor included (R2), then (Estimator Phase 2b) each printed
+ *  Alternate group's systems, flagged `alternate: true`. `sections` must be
+ *  normalised (stamped) against `groups` — no groups, no alternates. */
+export function responseScopes(sections: SpecSection[], groups?: SystemGroup[]): ResponseScope[] {
+  const inTotal: ResponseScope[] = outputScopes({ sections }).map((s) => ({ id: s.id, name: s.name, price: s.price, priceLabel: fmt(s.price) }));
+  const alts: ResponseScope[] = alternateScopes({ sections, groups }).flatMap((g) =>
+    g.systems.map((s) => ({ id: s.id, name: alternateScopeLabel(g.name, s.name), price: s.price, priceLabel: fmt(s.price), alternate: true as const }))
+  );
+  return [...inTotal, ...alts];
+}
+
+/** The picker's starting selection: every In-total scope, no alternate. */
+export function defaultSelectedScopeIds(scopes: ReadonlyArray<Pick<ResponseScope, "id" | "alternate">>): string[] {
+  return scopes.filter((s) => s.alternate !== true).map((s) => s.id);
 }
 
 export function selectedTotal(scopes: ReadonlyArray<Pick<ResponseScope, "price">>): number {

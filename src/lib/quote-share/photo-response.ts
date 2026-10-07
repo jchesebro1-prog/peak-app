@@ -5,6 +5,7 @@ import { packagePhotoSections } from "@/lib/estimate-output/package-model";
 import type { QuoteRevision } from "@/lib/stores/quotes";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { PartDocument } from "@/lib/part-docs/types";
+import { normalizeSystemOrder, sanitizeGroups, type SystemGroup } from "@/lib/estimate-groups/groups";
 
 /**
  * #293 slice 3 (spec §5.4) — the online pages' photos. Both photo routes
@@ -22,6 +23,15 @@ export const ONLINE_PHOTO_CACHE = "private, max-age=3600";
 export function revisionSections(rev: QuoteRevision): SpecSection[] {
   const spec = rev.spec as { sections?: unknown } | null | undefined;
   return spec && Array.isArray(spec.sections) ? (spec.sections as SpecSection[]) : [];
+}
+
+/** Estimator Phase 2b — the revision's systems as the customer document
+ *  prints them (normalised + alternate-stamped against its own groups, as
+ *  quoteDocumentDataFor does), with those groups: the scope picker's input. */
+export function revisionGroupedSections(rev: QuoteRevision): { sections: SpecSection[]; groups: SystemGroup[] } {
+  const spec = rev.spec as { groups?: unknown } | null | undefined;
+  const groups = sanitizeGroups(spec ? spec.groups : undefined);
+  return { sections: normalizeSystemOrder(revisionSections(rev), groups), groups };
 }
 
 export async function photoDocForRevision(rev: QuoteRevision, docId: string): Promise<PartDocument | null> {

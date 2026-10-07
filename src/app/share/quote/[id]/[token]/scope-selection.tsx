@@ -2,12 +2,14 @@
 
 import { useState, useSyncExternalStore, useTransition, type CSSProperties, type FormEvent } from "react";
 import { fmt } from "@/app/(app)/estimator/pricing";
-import { CLIENT_ACTION_COPY, selectedTotal, type ClientActionResult, type ResponseScope } from "@/lib/estimate-output/responses";
+import { CLIENT_ACTION_COPY, defaultSelectedScopeIds, selectedTotal, type ClientActionResult, type ResponseScope } from "@/lib/estimate-output/responses";
 import { submitScopeSelection } from "./actions";
 
 /**
  * #301 slice C (spec §7, R1) — "Choose your scopes": a checkbox per scope
- * (all checked), the live "Selected scopes" total (pre-credit) with the
+ * (every In-total scope checked; Estimator Phase 2b: alternate systems in
+ * their own "Alternates" list, unchecked — a ticked one adds to the total),
+ * the live "Selected scopes" total (pre-credit) with the
  * Rewards credit note, name / title / email / note, Submit selection. It
  * renders only after hydration (adaptation 13): without JS there is no form
  * to post a name into a URL. Receives only scope ids, names and prices.
@@ -20,7 +22,7 @@ const btn: CSSProperties = { font: "inherit", fontWeight: 700, fontSize: 14, col
 
 export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; token: string; scopes: ResponseScope[]; creditNote: string | null }) {
   const hydrated = useSyncExternalStore(subscribeNothing, () => true, () => false);
-  const [picked, setPicked] = useState<string[]>(() => scopes.map((s) => s.id));
+  const [picked, setPicked] = useState<string[]>(() => defaultSelectedScopeIds(scopes));
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [email, setEmail] = useState("");
@@ -40,6 +42,16 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
     );
 
   const toggle = (sid: string) => setPicked((cur) => (cur.includes(sid) ? cur.filter((x) => x !== sid) : [...cur, sid]));
+  const alternates = scopes.filter((s) => s.alternate === true);
+  const scopeRow = (s: ResponseScope) => (
+    <label key={s.id} className="pkg-row" style={{ alignItems: "center", cursor: "pointer" }}>
+      <span>
+        <input type="checkbox" aria-label={s.name} checked={picked.includes(s.id)} onChange={() => toggle(s.id)} style={{ marginRight: 8 }} />
+        {s.name}
+      </span>
+      <span className="pkg-price">{s.priceLabel}</span>
+    </label>
+  );
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setErr(null);
@@ -61,15 +73,13 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
       <p className="pkg-muted" style={{ margin: 0 }}>
         {CLIENT_ACTION_COPY.chooseHelp}
       </p>
-      {scopes.map((s) => (
-        <label key={s.id} className="pkg-row" style={{ alignItems: "center", cursor: "pointer" }}>
-          <span>
-            <input type="checkbox" aria-label={s.name} checked={picked.includes(s.id)} onChange={() => toggle(s.id)} style={{ marginRight: 8 }} />
-            {s.name}
-          </span>
-          <span className="pkg-price">{s.priceLabel}</span>
-        </label>
-      ))}
+      {scopes.filter((s) => s.alternate !== true).map(scopeRow)}
+      {alternates.length > 0 && (
+        <div role="group" aria-label={CLIENT_ACTION_COPY.alternates} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <strong style={{ fontSize: 14 }}>{CLIENT_ACTION_COPY.alternates}</strong>
+          {alternates.map(scopeRow)}
+        </div>
+      )}
       <div className="pkg-row pkg-total" aria-live="polite">
         <span>{CLIENT_ACTION_COPY.selectedTotal}</span>
         <span>{fmt(total)}</span>

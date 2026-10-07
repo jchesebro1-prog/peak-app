@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { COVER_LINK_LEAD, type CoverDocumentProps } from "@/lib/estimate-output/cover";
+import { ALTERNATES_NOTE, ALTERNATES_TITLE, COVER_LINK_LEAD, type CoverDocumentProps } from "@/lib/estimate-output/cover";
 
 /**
  * #301 slice A — the cover PDF (spec §4): standalone, letterhead + footer,
@@ -22,7 +22,7 @@ nextjs-portal { display: none !important; }
 .cov-page td { padding: 0; vertical-align: top; }
 .cov-foot-space { height: 0.45in; }
 .cov-foot { position: fixed; left: 0; right: 0; bottom: 0; height: 0.35in; box-sizing: border-box; padding-top: 5pt; border-top: 1px solid #bbb; text-align: center; font-size: 8pt; color: #555; background: #fff; }
-.cov-scope, .cov-totals, .cov-opt, .cov-sig { break-inside: avoid; page-break-inside: avoid; }
+.cov-scope, .cov-totals, .cov-opt, .cov-alt, .cov-sig { break-inside: avoid; page-break-inside: avoid; }
 @media screen { .cov { max-width: 7in; margin: 24px auto; } .cov-foot { position: static; margin-top: 24px; } .cov-foot-space { display: none; } }
 `;
 
@@ -88,6 +88,27 @@ export default function CoverDocument(p: CoverDocumentProps) {
                   </div>
                 ))}
               </div>
+
+              {p.alternates && p.alternates.length > 0 && (
+                <div className="cov-alts" style={{ marginTop: "12pt" }}>
+                  <div style={{ fontWeight: 700 }}>{ALTERNATES_TITLE}</div>
+                  <div style={{ color: "#333", fontSize: "9.5pt", marginBottom: "4pt" }}>{ALTERNATES_NOTE}</div>
+                  {p.alternates.map((g) => (
+                    <div key={g.groupId} className="cov-alt" style={{ marginBottom: "6pt" }}>
+                      <div style={{ ...row, fontWeight: 700 }}>
+                        <span>{g.name}</span>
+                        <span>{g.price}</span>
+                      </div>
+                      {g.systems.map((s) => (
+                        <div key={s.id} style={{ ...row, paddingLeft: "12pt" }}>
+                          <span>{s.name}</span>
+                          <span>{s.price}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {p.options.length > 0 && (
                 <div style={{ marginTop: "12pt" }}>
