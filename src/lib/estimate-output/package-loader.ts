@@ -1,4 +1,4 @@
-import { getMany } from "@/lib/stores/catalog";
+import { getManyBySku } from "@/lib/stores/catalog";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { keyProductPhotoLinks, loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
 import { onlineHeaderLine } from "@/lib/quote-share/view";
@@ -12,7 +12,8 @@ import { packageFrozenFields, packagePhotoSections, packageViewModel, type Packa
  * fails closed for anything else and is the only place an as-sent quote is
  * built). The cover fields come from that revision's docFields only (R12 —
  * never the live quote). Photos: every scope's key products (the v2 set).
- * BOM: line fields first, then the catalog by sku (R6). Server-only.
+ * BOM: line fields first, then the catalog by sku (R6; a renamed
+ * part's old SKU resolves, #302). Server-only.
  */
 export async function loadPackageViewProps(
   hit: SharedPackage,
@@ -45,7 +46,8 @@ async function catalogFor(skus: string[]): Promise<Map<string, BomCatalogPart>> 
   const out = new Map<string, BomCatalogPart>();
   if (!skus.length) return out;
   try {
-    for (const p of await getMany(skus)) out.set(p.sku, { mfr: p.mfr ?? null, manufacturerPartNumber: p.manufacturerPartNumber ?? null, manufacturerModelNumber: p.manufacturerModelNumber ?? null });
+    // #302: keyed by the line's own sku — a sent revision keeps a renamed part's old SKU.
+    for (const [sku, p] of await getManyBySku(skus)) out.set(sku, { mfr: p.mfr ?? null, manufacturerPartNumber: p.manufacturerPartNumber ?? null, manufacturerModelNumber: p.manufacturerModelNumber ?? null });
   } catch (e) {
     console.warn("[package] catalog lookup failed", e instanceof Error ? e.message : e);
   }

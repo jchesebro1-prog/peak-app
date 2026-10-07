@@ -11320,6 +11320,7 @@ seeded()
   .then(() => modelSku302StoreAsyncChecks())
   .then(() => modelSku302ApplyAsyncChecks())
   .then(() => modelSku302ImportAsyncChecks())
+  .then(() => modelSku302FrozenAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -53312,5 +53313,132 @@ async function modelSku302ImportAsyncChecks(): Promise<void> {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
     await setPle(mk(MFR), null);
+  }
+}
+
+/** #302 Task 8 — frozen history (a SENT quote revision, an outside link)
+ *  keeps a renamed part's OLD sku; the readers resolve it to the live part
+ *  and read its photos / documents under the NEW sku. */
+async function modelSku302FrozenAsyncChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const Cat = await import("@/lib/stores/catalog");
+  const Ren = await import("@/lib/stores/catalog-renames");
+  const DS = await import("@/db/doc-store");
+  const D = await import("@/lib/stores/part-documents");
+  const Q = await import("@/lib/stores/quotes");
+  const L = await import("@/lib/quote-share/links");
+  const { getDb } = await import("@/db");
+  const { blobs: blobsT } = await import("@/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  const { keyProductPhotoDocs } = await import("@/lib/narrative/photos");
+  const { keyProductLibrary } = await import("@/lib/narrative/library");
+  const { loadPackageViewProps } = await import("@/lib/estimate-output/package-loader");
+  const { loadPackageExtras } = await import("@/lib/estimate-output/package-extras");
+  const PD = await import("@/lib/estimate-output/package-docs-server");
+  const { revisionSections, photoDocForRevision, packagePhotoDocForRevision } = await import("@/lib/quote-share/photo-response");
+  const { cutSheetPhotoDocs, cutSheetFabricRows } = await import("@/lib/curtain-cut-sheets/load");
+  const { copyPricingFor } = await import("@/app/(app)/estimator/copy-pricing");
+  const { resolvePartDatasheet } = await import("@/lib/part-docs/datasheet-bridge");
+
+  const OLD = fixtureId(302, "frozen-old");
+  const NEW = "Symetrix:" + fixtureId(302, "frozen-new");
+  const KEEP = fixtureId(302, "frozen-keep");
+  registerFixture("catalog_parts", OLD);
+  registerFixture("catalog_parts", NEW);
+  registerFixture("catalog_parts", KEEP);
+  const base = { desc: "Frozen 302", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "Symetrix" };
+  await DS.upsertDoc("catalog_parts", { ...base, id: OLD, sku: OLD } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: KEEP, sku: KEEP, desc: "Never renamed 302", manufacturerModelNumber: "Keep 302" } as never);
+
+  // The quote is sent BEFORE the rename: its revision names the old SKU, frozen.
+  const QID = fixtureId(302, "frozen-quote");
+  const line = (id: number, sku: string) => ({ id, sku, desc: "Line " + sku, qty: 2, unit: "ea", cost: 10, price: 25 });
+  const sec = { id: "s1", name: "DSP", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Frozen intro.",
+    items: [line(1, OLD), line(2, KEEP)],
+    keyProducts: [{ lineKey: "1", sku: OLD, text: "The DSP.", photo: true }, { lineKey: "2", sku: KEEP, text: "Kept.", photo: true }] };
+  await Q.create({ id: QID, name: "#302 frozen", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } } as never);
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+
+  const db = await getDb();
+  const blobIds = [Ren.SKU_RENAMES_BLOB];
+  const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
+  const prevToken = process.env.DISPLAYS_API_TOKEN;
+  try {
+    ok((await Cat.renamePartDocs(OLD, NEW, "Jupiter 302"))?.sku === NEW, "#302 frozen: fixture part renamed");
+    await Ren.appendSkuRenames([{ from: OLD, to: NEW, model: "Jupiter 302", at: Date.now(), by: "Test" }]);
+    const mk = async (kind: "image" | "datasheet", fileName: string, contentType: string) => {
+      const d = await D.createDocument({ kind, fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-302f/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+      if (!d) throw new Error("#302 frozen: fixture document failed");
+      registerFixture("part_documents", d.id);
+      return d;
+    };
+    const img = await mk("image", "frozen-302.webp", "image/webp");
+    const ds = await mk("datasheet", "frozen-302.pdf", "application/pdf");
+    const keepImg = await mk("image", "keep-302.webp", "image/webp");
+    for (const [doc, sku] of [[img, NEW], [ds, NEW], [keepImg, KEEP]] as const) {
+      await D.attachDocument(doc.id, [sku], "Test");
+      registerFixture("part_document_links", D.documentLinkId(sku, doc.id));
+    }
+    ok(revisionSections(rev)[0]?.items[0]?.sku === OLD && (rev.spec as { sections: Array<{ keyProducts: Array<{ sku: string }> }> }).sections[0].keyProducts[0].sku === OLD,
+      "#302 frozen: the sent revision still names the OLD sku");
+
+    // Narrative photos (the PDF, the portal + v1 share photo routes).
+    const photos = await keyProductPhotoDocs(revisionSections(rev));
+    ok(photos.get(OLD)?.id === img.id && photos.get(KEEP)?.id === keepImg.id, "#302 frozen: keyProductPhotoDocs finds the renamed part's photo for the old sku (and a never-renamed part's as before)");
+    ok((await photoDocForRevision(rev, img.id))?.id === img.id && (await packagePhotoDocForRevision(rev, img.id))?.id === img.id,
+      "#302 frozen: the share / portal photo routes serve the renamed part's photo for a revision naming the old sku");
+    const lib = await keyProductLibrary([OLD, KEEP]);
+    ok(lib[OLD]?.inCatalog === true && lib[OLD]?.photoDocId === img.id && lib[KEEP]?.photoDocId === keepImg.id, "#302 frozen: the Estimator narrative library resolves an old sku to the live part and its photo");
+
+    // The v2 package page: model, photo, datasheet.
+    const S = "test-secret-302f";
+    const made = await L.ensureShareLink(QID, "Tester", { secret: S });
+    const tok = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
+    const hit = await L.resolveSharedPackage(QID, tok, { secret: S });
+    const pbase = "/share/quote/" + encodeURIComponent(QID) + "/" + tok;
+    const props = hit ? await loadPackageViewProps(hit, { base: pbase, view: "bom", letterheadSrc: "/_test/lh.jpg" }) : null;
+    const bomRow = props?.scopes[0]?.bom.find((r) => r.description.startsWith("Line " + OLD));
+    ok(bomRow?.manufacturer === "Symetrix" && bomRow.part === "Jupiter 302", "#302 frozen: the package BOM prints the renamed part's Model # for a line naming the old sku");
+    const kp = props?.scopes[0]?.keyProducts.find((k) => k.sku === OLD);
+    ok(!!kp?.photo && kp.photo.src.endsWith("/photo/" + encodeURIComponent(img.id)), "#302 frozen: the package page shows the renamed part's photo for the old sku");
+    const docs = await PD.revisionPackageDocs(rev);
+    ok(docs.moved?.get(OLD) === NEW && docs.bom.some((r) => r.sku === NEW) && !docs.bom.some((r) => r.sku === OLD) && docs.bySku.get(NEW)?.datasheet?.documentId === ds.id,
+      "#302 frozen: the package documents read and cover the old sku's row under the live sku");
+    ok((await PD.packageDocForRevision(rev, ds.id))?.id === ds.id, "#302 frozen: the share doc route serves the renamed part's datasheet for a revision naming the old sku");
+    const extras = hit ? await loadPackageExtras(hit, pbase) : null;
+    ok(!!extras?.datasheets[OLD] && extras.datasheets[OLD].href === extras.datasheets[NEW]?.href, "#302 frozen: the package page's per-key-product datasheet link resolves for the old sku");
+    ok((await PD.datasheetGapCount(rev.spec)) === 1 && docs.bySku.size === 2, "#302 frozen: the gap chip counts the renamed part once (covered) — only the never-renamed part lacks a datasheet");
+
+    // Cut sheets: photos + fabric rows by the old sku.
+    ok((await cutSheetPhotoDocs([OLD, KEEP])).get(OLD)?.id === img.id, "#302 frozen: cut-sheet photos find the renamed part's photo for the old sku");
+    const fab = { ...base, category: "Fabric", unit: "sqft", formerSkus: [OLD] };
+    let catReads = 0;
+    const rows = await cutSheetFabricRows({ skus: [OLD], byName: false, byNameIfMissing: [OLD] }, {
+      getMany: async () => [{ ...fab, id: NEW, sku: NEW } as never],
+      byCategory: async () => (catReads++, []),
+    });
+    ok(rows.some((p) => p.sku === OLD && p.desc === "Frozen 302") && catReads === 0, "#302 frozen: a curtain naming a renamed fabric's old sku still matches its fabric row (no category read)");
+
+    // Load system / Copy system re-cost a line naming the old sku.
+    const cp = await copyPricingFor([{ id: 1, sku: OLD, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 } as never]);
+    ok(cp.catalog.get(OLD)?.cost === 20 && cp.catalog.get(OLD)?.sku === NEW, "#302 frozen: copyPricingFor re-costs a line naming the old sku from the live part");
+
+    // Outside links: the Displays API and the part-datasheet proxy.
+    process.env.DISPLAYS_API_TOKEN = "test-token-302f";
+    const route = await import("@/app/api/v1/displays/catalog/[sku]/route");
+    const res = await route.GET(new Request("http://localhost/api/v1/displays/catalog/" + encodeURIComponent(OLD), { headers: { authorization: "Bearer test-token-302f" } }), { params: Promise.resolve({ sku: encodeURIComponent(OLD) }) });
+    const body = res.status === 200 ? ((await res.json()) as { data?: { sku?: string } }) : null;
+    ok(body?.data?.sku === NEW, "#302 frozen: the Displays API answers an old sku with the renamed part");
+    // The /api/part-datasheet/[id] route is requireUser-gated (no session here): its lookup is get(sku) → resolvePartDatasheet(part).
+    const part = await Cat.get(OLD);
+    const target = part ? await resolvePartDatasheet(part) : null;
+    ok(target?.kind === "document" && target.documentId === ds.id, "#302 frozen: the part-datasheet lookup for an old sku resolves to the renamed part's datasheet");
+  } finally {
+    if (prevToken === undefined) delete process.env.DISPLAYS_API_TOKEN;
+    else process.env.DISPLAYS_API_TOKEN = prevToken;
+    await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
+    if (snapshot.length) await db.insert(blobsT).values(snapshot);
   }
 }

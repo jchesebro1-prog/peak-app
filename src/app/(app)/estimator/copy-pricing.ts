@@ -1,4 +1,4 @@
-import { getMany as catalogGetMany } from "@/lib/stores/catalog";
+import { getManyBySku as catalogGetManyBySku, type CatalogPart } from "@/lib/stores/catalog";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import type { CopyCatalogPart, CopyFixture } from "./copy-system";
@@ -33,13 +33,17 @@ export async function copyPricingFor(
     fixtureRecords = (await listFixtures()).filter((r) => fixtureIds.has(r.id));
     fixtureRecords.forEach((r) => fixtureSkus(r).forEach((s) => skus.add(s)));
   }
-  const parts = skus.size ? await catalogGetMany([...skus]) : [];
+  // #302: keyed by the SKU each line names — Load system copies a SENT
+  // revision, which keeps a renamed part's old SKU; it re-costs from the
+  // part that SKU now means.
+  const found = skus.size ? await catalogGetManyBySku([...skus]) : new Map<string, CatalogPart>();
+  const parts = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];
   const catalog = new Map<string, CopyCatalogPart>();
-  for (const p of parts) {
+  for (const [sku, p] of found) {
     const cost = Number(p.cost);
     // A part with no real cost today is no basis for re-costing a line.
-    if (!p.sku || !(Number.isFinite(cost) && cost > 0) || catalog.has(p.sku)) continue;
-    catalog.set(p.sku, { sku: p.sku, cost, list: Number(p.list) || 0 });
+    if (!p.sku || !(Number.isFinite(cost) && cost > 0) || catalog.has(sku)) continue;
+    catalog.set(sku, { sku: p.sku, cost, list: Number(p.list) || 0 });
   }
   const fixtures = new Map<string, CopyFixture>();
   if (fixtureRecords.length) {
