@@ -73,6 +73,7 @@ function addressOf(entry: string): string | null {
   return ADDRESS.test(addr) ? addr : null;
 }
 
+// Quoted display names containing commas are not supported — the composer prefills plain addresses.
 /** Comma / semicolon / newline separated, trimmed, de-duplicated
  *  case-insensitively by address. Blank input is `ok` with an empty list —
  *  whether at least one is required is the caller's call. */
@@ -135,12 +136,54 @@ const SNIPPET_MAX = 280;
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
+/** Inbound mail is attacker-controlled: only the first SNIPPET_INPUT_MAX
+ *  characters are ever scanned. */
+const SNIPPET_INPUT_MAX = 20_000;
+const BLOCK_CLOSERS = new Set(["p", "div", "li", "tr"]);
+
+/** Single-pass, linear HTML → text. Every `<` is visited once and every
+ *  indexOf resumes from the cursor, so unterminated tags cannot backtrack.
+ *  Tags vanish (br and block closers leave a space); an unclosed <style> or
+ *  <script> drops everything after it; a `<x` with no `>` is plain text. */
+function stripHtmlLinear(src: string): string {
+  // ASCII-only lowering keeps indices aligned with `src` (toLowerCase can change length).
+  const low = src.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+  const out: string[] = [];
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const lt = src.indexOf("<", i);
+    if (lt === -1) { out.push(src.slice(i)); break; }
+    if (lt > i) out.push(src.slice(i, lt));
+    const c1 = src.charCodeAt(lt + 1);
+    const isLetter = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+    const closing = c1 === 47; // "/"
+    if (!(isLetter(c1) || (closing && isLetter(src.charCodeAt(lt + 2))))) { out.push("<"); i = lt + 1; continue; }
+    const gt = src.indexOf(">", lt + 1);
+    if (gt === -1) { out.push(src.slice(lt)); break; } // no `>` anywhere after: the rest is text
+    const inner = src.slice(lt + 1 + (closing ? 1 : 0), gt);
+    const m = /^[A-Za-z][A-Za-z0-9]*/.exec(inner);
+    const name = m ? m[0].toLowerCase() : "";
+    const rest = m ? inner.slice(m[0].length) : "";
+    if (!closing && (name === "style" || name === "script") ) {
+      const end = low.indexOf("</" + name, gt + 1);
+      if (end === -1) break; // unclosed: its contents are not text
+      const endGt = src.indexOf(">", end);
+      out.push(" ");
+      if (endGt === -1) break;
+      i = endGt + 1;
+      continue;
+    }
+    if (!closing && name === "br" && /^\s*\/?$/.test(rest)) out.push(" ");
+    else if (closing && BLOCK_CLOSERS.has(name) && rest === "") out.push(" ");
+    i = gt + 1;
+  }
+  return out.join("");
+}
+
 /** Plain-text snippet: html stripped, whitespace collapsed, ≤ 280 chars. */
 export function snippetOf(body: string): string {
-  let t = String(body ?? "");
-  t = t.replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ");
-  t = t.replace(/<br\s*\/?>|<\/(p|div|li|tr)>/gi, " ");
-  t = t.replace(/<\/?[A-Za-z][^>]*>/g, "");
+  let t = stripHtmlLinear(String(body ?? "").slice(0, SNIPPET_INPUT_MAX));
   t = t.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (m, e: string) => {
     if (e[0] === "#") {
       const n = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);

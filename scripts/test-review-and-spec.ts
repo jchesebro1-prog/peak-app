@@ -55063,3 +55063,17 @@ async function p3EstimateEmailsAsyncChecks(): Promise<void> {
   const list = (await Q.get(QID))!.estimateEmails!;
   ok(list.length === 50 && list[0].threadId === "C-P3-3" && list[49].threadId === "C-P3-52", "#P3 compose (DB): capped at 50 — the oldest entries are dropped");
 }
+
+// ---- #P3 compose fix: linear snippet strip (no regex backtracking on inbound mail) ----
+{
+  const t = (body: string) => ({ id: "C-FIX", messages: [{ direction: "in" as const, at: 1, body }] });
+  const time = (body: string) => { const t0 = Date.now(); const r = p3ComposeSummarize(t(body))!; return { ms: Date.now() - t0, snippet: r.messages[0].snippet }; };
+  const a = time("<a ".repeat(70_000));
+  const b = time("<style".repeat(35_000));
+  console.log(`#P3 compose fix timings: <a x200KB ${a.ms} ms, <style x200KB ${b.ms} ms`);
+  ok(a.ms < 200 && a.snippet.length <= 280, "#P3 compose fix: 200 KB of repeated `<a ` summarizes in < 200 ms with a sane snippet");
+  ok(b.ms < 200 && b.snippet.length <= 280 && b.snippet.length > 0, "#P3 compose fix: 200 KB of repeated `<style` summarizes in < 200 ms with a sane snippet");
+  ok(time("Hello <style>body{color:red}").snippet === "Hello", "#P3 compose fix: an unclosed <style> drops its contents");
+  ok(time("Hi <SCRIPT>alert(1)").snippet === "Hi" && time("A<style>x{}</STYLE>B<script>y</script>C").snippet === "A B C", "#P3 compose fix: unclosed script dropped; closed style/script (any case) removed");
+  ok(time("<p>Hi <b>Pat</b>,</p><p>Thanks</p>").snippet === "Hi Pat, Thanks" && time("1 < 2 and a<b").snippet === "1 < 2 and a<b", "#P3 compose fix: normal HTML gives the same snippet as before; a stray `<` stays text");
+}
