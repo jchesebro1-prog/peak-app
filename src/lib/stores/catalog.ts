@@ -439,7 +439,9 @@ export async function remove(sku: string): Promise<void> {
  * the redirect. Idempotent: a `from` already retired to `to` returns the
  * live part. Returns null (writes nothing) when `from` is missing or retired
  * elsewhere, or when `to` is a live part — or another part's tombstone —
- * that is not a previous rename of `from`.
+ * that is not a previous rename of `from`. Crash recovery: a `to` that already
+ * lists `from` in its formerSkus while `from` is still live (live `to`, or a
+ * tombstone renamed onward) just retires `from` and returns the live part.
  *
  * Written through upsertDoc, not writePart/upsert, so `pricedAt` is carried
  * as-is: a rename is not a price change.
@@ -461,7 +463,16 @@ export async function renamePartDocs(from: string, to: string, model: string): P
   if (toRow && !(toRow.doc.formerSkus ?? []).includes(from)) return null;
   // #302: a tombstoned `to` that was itself renamed onward is history, not a
   // free slot — reviving it would put a second live copy beside its successor.
-  if (toRow?.deleted && toRow.doc.renamedTo) return null;
+  // It lists `from` (checked above), so `from` was renamed to it and then the
+  // call died before retiring `from`: finish that retire (renamedTo = `to`,
+  // whose own redirect reaches the successor) and hand back the live end of
+  // the chain. A chain that ends nowhere, or back at `from`, is refused.
+  if (toRow?.deleted && toRow.doc.renamedTo) {
+    const live = await get(to);
+    if (!live || live.sku === from) return null;
+    await retire();
+    return live;
+  }
   if (toRow && !toRow.deleted) {
     await retire();
     return toRow.doc;

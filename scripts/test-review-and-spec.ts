@@ -10735,6 +10735,14 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     const kpOnly = { sections: [sec("a", [item({ sku: OTHER })], [{ lineKey: "1", sku: OLD, text: "t", photo: false }])] };
     const kpOut = cr302Rw.rewriteQuoteSpec(kpOnly, m302, models302) as typeof kpOnly | null;
     ok(kpOut !== null && kpOut.sections[0].keyProducts?.[0].sku === NEW && kpOut.sections[0].items[0].sku === OTHER, "#302 rewrite quoteSpec: a keyProducts-only change still rewrites");
+    // Grid quotes (source "grid"): a flat spec.lines list, sku = the placement's partId.
+    const gl = (sku: string) => ({ sku, desc: `${OLD} prose`, qty: 1, unit: "ea", price: 2, ext: 2 });
+    const grid = { kind: "grid", gridProjectId: "GP-1", gridOptionId: "o1", lines: [gl(OLD), gl("CURTAIN"), gl("asm:fa-1"), gl("allow:x"), gl(OTHER)] };
+    const gb = JSON.stringify(grid);
+    const gOut = cr302Rw.rewriteQuoteSpec(grid, m302, models302) as typeof grid | null;
+    ok(gOut !== null && gOut.lines[0].sku === NEW && gOut.lines[0].desc === `${OLD} prose` && !("manufacturerModelNumber" in gOut.lines[0]) && gOut.kind === "grid" && gOut.gridProjectId === "GP-1", "#302 rewrite quoteSpec: a Grid quote's lines[].sku moves, desc and the envelope carry over");
+    ok(gOut !== null && gOut.lines.slice(1).every((l, i) => l === grid.lines[i + 1]), "#302 rewrite quoteSpec: Grid CURTAIN / asm: / allow: / unrelated lines pass through as-is");
+    ok(JSON.stringify(grid) === gb && cr302Rw.rewriteQuoteSpec(gOut, m302, models302) === null && cr302Rw.rewriteQuoteSpec(grid, none302, models302) === null, "#302 rewrite quoteSpec: Grid lines — input not mutated, nothing to change → null");
   }
 
   // rewriteCartLines
@@ -52782,6 +52790,24 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
   await DS.upsertDoc("catalog_parts", { ...base, id: OT, sku: OT, formerSkus: [OZ], renamedTo: "Symetrix:" + fixtureId(302, "ow-next") } as never);
   await DS.softDeleteDoc("catalog_parts", OT);
   ok((await Cat.renamePartDocs(OZ, OT, "ow")) === null && (await Cat.get(OZ))?.sku === OZ, "#302 store: a tombstoned `to` renamed onward is never revived");
+  ok((await DS.getDocRows<D302>("catalog_parts", [OT]))[0]?.deleted === true, "#302 store: …and a chain that resolves nowhere leaves `from` live and `to` a tombstone");
+  // Crash recovery across an onward rename: from → to → successor, where the
+  // call that renamed `from` died before retiring it.
+  const CZ = fixtureId(302, "cr-z");
+  const CT = "Symetrix:" + fixtureId(302, "cr-t");
+  const CN = "Symetrix:" + fixtureId(302, "cr-n");
+  for (const id of [CZ, CT, CN]) registerFixture("catalog_parts", id);
+  await DS.upsertDoc("catalog_parts", { ...base, id: CZ, sku: CZ } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: CT, sku: CT, formerSkus: [CZ], renamedTo: CN } as never);
+  await DS.softDeleteDoc("catalog_parts", CT);
+  await DS.upsertDoc("catalog_parts", { ...base, id: CN, sku: CN, formerSkus: [CZ, CT] } as never);
+  const crOut = await Cat.renamePartDocs(CZ, CT, "cr");
+  const czRow = (await DS.getDocRows<D302>("catalog_parts", [CZ]))[0];
+  ok(crOut?.sku === CN && czRow?.deleted === true && czRow.doc.renamedTo === CT && (await Cat.get(CZ))?.sku === CN, "#302 store: recovery — an onward-renamed tombstone `to` listing a still-live `from` retires `from` (renamedTo = `to`) and returns the successor");
+  const NZ = fixtureId(302, "cr-nz");
+  registerFixture("catalog_parts", NZ);
+  await DS.upsertDoc("catalog_parts", { ...base, id: NZ, sku: NZ } as never);
+  ok((await Cat.renamePartDocs(NZ, CT, "cr")) === null && (await Cat.get(NZ))?.sku === NZ, "#302 store: an onward-renamed tombstone that never listed `from` is still refused");
 
   // ---- the engine ----
   const A = fixtureId(302, "ap-a");
@@ -52801,6 +52827,16 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
   registerFixture("part_document_links", PD.documentLinkId(A, img.id));
   registerFixture("part_document_links", PD.documentLinkId(NEW, img.id));
   await PD.setDocumentLinkDisplay(img.id, A, { sort: 3 });
+  // A second image on A whose link at the NEW id already exists, detached by a person.
+  const img2 = await PD.createDocument({ kind: "image", fileName: "ap-302b.png", contentType: "image/png", size: 1000, blobKey: "part-docs/PD-fixture-302/ap-302b.png", sourceUrl: null, source: "upload", by: "Test" });
+  if (!img2) throw new Error("#302 apply: fixture image 2 failed");
+  registerFixture("part_documents", img2.id);
+  await PD.attachDocument(img2.id, [A], "Test");
+  const det = PD.documentLinkId(NEW, img2.id);
+  registerFixture("part_document_links", PD.documentLinkId(A, img2.id));
+  registerFixture("part_document_links", det);
+  await DS.upsertDoc("part_document_links", { id: det, partSku: NEW, documentId: img2.id, kind: "image", createdAt: 1, createdBy: "Test" } as never);
+  await DS.softDeleteDoc("part_document_links", det);
 
   const scope = fixtureId(302, "ap-scope");
   await PAL.syncAccessoryLinks({ source: "manual", sourceRef: scope }, [{ parentSku: A, accessorySku: B }]);
@@ -52819,7 +52855,16 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
   const qBase = { id: QID, name: "T302 apply", customer: "", status: "draft", history: [], createdAt: 1, updatedAt: 1, margin: 0.5, value: 20, source: "estimator", quoteType: "system", spec };
   await createFixture("quotes", { ...qBase, review: { state: "approved", method: "in_app", approvedAgainst: approvalFingerprint(qBase) } });
   await Q.addQuoteRevision(QID, { by: "Test", reason: "sent", note: "sent" });
+  // A rendered PDF of the pre-rename document (#222): the rename must mark it stale.
+  await Q.updateQuotePdf(QID, () => ({ status: "ready", at: 6, savedAt: 5, blobPath: "quote-pdfs/fixture-302/5.pdf" }));
   const qBefore = (await Q.get(QID))!;
+
+  // A Grid quote: flat spec.lines (grid-quote.ts), approved against them.
+  const QG = fixtureId(302, "ap-gquote");
+  const gLine = (sku: string) => ({ sku, desc: "g", qty: 1, unit: "ea", price: 10, ext: 10 });
+  const gSpec = { kind: "grid", gridProjectId: fixtureId(302, "ap-grid"), gridOptionId: "o1", lines: [gLine(A), gLine("CURTAIN"), gLine("asm:fa-302")] };
+  const qgBase = { id: QG, name: "T302 grid quote", customer: "", status: "draft", history: [], createdAt: 1, updatedAt: 1, margin: 0.5, value: 30, source: "grid", quoteType: "system", spec: gSpec };
+  await createFixture("quotes", { ...qgBase, review: { state: "approved", method: "in_app", approvedAgainst: approvalFingerprint(qgBase) } });
 
   const GP = fixtureId(302, "ap-grid");
   await createFixture("grid_projects", {
@@ -52863,8 +52908,12 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
     await Settings.setSettings({ wireTypes: [...(Array.isArray(wireBefore) ? wireBefore : []), { id: WIRE, name: "T302 wire", cableSku: A }] });
 
     ok(!(await Apply.runRenameBatch({ rows, step: "bogus" as never }, "Test", 45_000)).ok, "#302 apply: an unknown step is refused");
+    // A spent budget in the parts step stops before renaming; the resumed call renames the same row.
+    const pStopped = await Apply.runRenameBatch({ rows, step: "parts" }, "Test", -1);
+    ok(pStopped.ok && pStopped.step === "parts" && !pStopped.complete && pStopped.renamed === 0 && pStopped.plan?.counts.rename === 1 && (await Cat.get(A))?.sku === A, "#302 apply: a spent budget stops the parts step before renaming and hands back `parts`");
     const p0 = await Apply.runRenameBatch({ rows, step: "parts" }, "Test", 45_000);
     if (!p0.ok) throw new Error("#302 apply: " + p0.error);
+    ok(p0.step === Apply.REF_STEPS[0] && p0.renamed === 1 && p0.plan?.counts.rename === 1, "#302 apply: the resumed parts step completes the same rename");
     // A spent budget stops before any write and hands back the same step; the resumed run then finishes it.
     const stopped = await Apply.runRenameBatch({ rows, step: "quotes" }, "Test", -1);
     const qStopped = (await Q.get(QID))!;
@@ -52883,6 +52932,8 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
     const imgLink = newLinks.find((l) => l.documentId === img.id);
     ok(!!imgLink && imgLink.id === PD.documentLinkId(NEW, img.id) && imgLink.sort === 3 && imgLink.kind === "image", "#302 apply: doc-links — the image link moves to the new SKU, keeping its sort");
     ok(!(await PD.documentLinksForParts([A])).length, "#302 apply: doc-links — no live link is left under the old SKU");
+    const detRow = (await DS.getDocRows<D302>("part_document_links", [det]))[0];
+    ok(detRow?.deleted === true && !newLinks.some((l) => l.documentId === img2.id), "#302 apply: doc-links — a link detached at the new id stays detached");
 
     const acc = (await PAL.allAccessoryLinks()).filter((l) => l.sourceRef === scope);
     ok(acc.length === 1 && acc[0].parentSku === NEW && acc[0].accessorySku === B && acc[0].id === PAL.accessoryLinkId("manual", scope, NEW, B), "#302 apply: accessory-links — re-keyed under the new parent SKU, old row retired");
@@ -52895,6 +52946,11 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
     ok(qItem.sku === NEW && qItem.manufacturerModelNumber === model && qItem.desc === "Jupiter mixer", "#302 apply: quotes — the live spec line takes the new SKU and the model, desc untouched");
     ok(JSON.stringify(q.revisions).includes(`"${A}"`) && !JSON.stringify(q.revisions).includes(NEW), "#302 apply: quotes — the sent revision still holds the old SKU");
     ok(q.updatedAt === qBefore.updatedAt && approvalSnapshotMatches(q), "#302 apply: quotes — updatedAt is untouched and the approval still holds");
+    ok(q.pdf?.status === "pending" && q.pdf.stale === true && typeof q.contentChangedAt === "number" && q.pdf.savedAt === q.contentChangedAt && q.pdf.blobPath === "quote-pdfs/fixture-302/5.pdf", "#302 apply: quotes — a ready PDF reads stale as of the rewrite (last good file kept)");
+    const qg = (await Q.get(QG))!;
+    const gLines = (qg.spec as { lines: Array<{ sku: string }> }).lines;
+    ok(gLines[0].sku === NEW && gLines[1].sku === "CURTAIN" && gLines[2].sku === "asm:fa-302" && qg.updatedAt === 1, "#302 apply: quotes — a Grid quote's spec.lines sku follows the rename; CURTAIN / asm: pass through");
+    ok(approvalSnapshotMatches(qg), "#302 apply: quotes — the Grid quote's approval is re-stamped and still holds");
 
     const gp = (await DS.getDoc<D302>("grid_projects", GP)) as Record<string, unknown> | null;
     ok((gp?.placements as Array<{ partId: string }>)[0].partId === NEW, "#302 apply: grid-projects — the live placement follows the rename");

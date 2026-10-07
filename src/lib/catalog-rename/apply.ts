@@ -25,6 +25,7 @@
  */
 import {
   getBlob,
+  getDoc,
   getDocRows,
   insertDocsIfAbsent,
   listBlobIds,
@@ -49,6 +50,7 @@ import { list as listCatalog, renamePartDocs, type CatalogPart } from "@/lib/sto
 import { allSkuRenames, appendSkuRenames, renameMapOf, type SkuRename } from "@/lib/stores/catalog-renames";
 import { accessoryLinkId, allAccessoryLinks } from "@/lib/stores/part-accessory-links";
 import { allDocumentLinks, documentLinkId } from "@/lib/stores/part-documents";
+import { markQuotePdfStale } from "@/lib/quote-pdf/schedule";
 import { rewriteQuoteSpecRefs } from "@/lib/stores/quotes";
 import { TRACK_SERIES_BLOB } from "@/lib/track-series";
 import { CROSSWALK_CELL_MAX, CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart, type RenamePlan } from "./plan";
@@ -126,13 +128,17 @@ async function refContext(over: () => boolean): Promise<Ctx> {
 /**
  * Rewrite one collection's live docs: `rewrite` returns the whole next doc or
  * null. Only docs it would change are written, each with patchDoc re-running
- * `rewrite` on the doc it re-reads.
+ * `rewrite` on the doc it re-reads. patchDoc always writes (and bumps `rev` /
+ * `updatedAt`), so a doc the listing flagged is re-read first and skipped when
+ * an edit since then already left nothing to rewrite (or deleted it).
  */
 async function sweepCollection(coll: CollectionName, rewrite: (doc: Rec) => Rec | null, ctx: Ctx): Promise<StepOut> {
   let changed = 0;
   for (const doc of await listDocs<Doc>(coll)) {
     if (!rewrite(doc)) continue;
     if (ctx.over()) return { done: false, changed };
+    const fresh = await getDoc<Doc>(coll, doc.id);
+    if (!fresh || !rewrite(fresh)) continue;
     let wrote = false;
     await patchDoc<Doc>(coll, doc.id, (fresh) => {
       const next = rewrite(fresh);
@@ -199,13 +205,20 @@ async function accessoryLinksStep(ctx: Ctx): Promise<StepOut> {
   return rekeyLinks<PartAccessoryLink>("part_accessory_links", moves, ctx);
 }
 
+/** Quotes' live `spec` (Estimator sections and Grid `lines`). A rewrite
+ *  changes what the customer document prints, and this is a bulk writer with
+ *  no request to render in: per the quote-pdf/schedule.ts contract (as the
+ *  CSV import does) an existing PDF is marked stale as of that change. */
 async function quotesStep(ctx: Ctx): Promise<StepOut> {
   const rw = (spec: unknown) => RW.rewriteQuoteSpec(spec, ctx.m, ctx.models);
   let changed = 0;
   for (const q of await listDocs<Doc>("quotes")) {
     if (!rw(q.spec)) continue;
     if (ctx.over()) return { done: false, changed };
-    if (await rewriteQuoteSpecRefs(q.id, rw)) changed++;
+    const written = await rewriteQuoteSpecRefs(q.id, rw);
+    if (!written) continue;
+    changed++;
+    if (written.contentChangedAt) await markQuotePdfStale(written.id, written.contentChangedAt);
   }
   return { done: true, changed };
 }

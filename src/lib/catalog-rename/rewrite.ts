@@ -144,20 +144,28 @@ export function rewriteSpecItems<T extends SpecItemShape>(items: T[], m: RenameM
 
 /** A quote's `spec`: each section's `items` and `keyProducts[].sku` (a key
  *  product resolves only while it still matches its line's sku, so both move
- *  together). The section/spec envelope and every other field carry over. */
+ *  together), and a Grid quote's flat `lines[].sku` (`source: "grid"`,
+ *  GridQuoteSpecLine in grid-quote.ts — the placement's partId; "CURTAIN" and
+ *  the virtual `asm:` / `allow:` ids are never renamed SKUs, so they pass
+ *  through; the line has no model field to set). The section/spec envelope
+ *  and every other field carry over. */
 export function rewriteQuoteSpec(spec: unknown, m: RenameMap, models: RenameMap): unknown | null {
-  if (!isRec(spec) || !Array.isArray(spec.sections)) return null;
+  if (!isRec(spec)) return null;
+  const patch: Rec = {};
   const sections = mapObjs(spec.sections, (section) => {
-    const patch: Rec = {};
+    const sp: Rec = {};
     if (Array.isArray(section.items)) {
       const items = rewriteSpecItems(section.items as SpecItemShape[], m, models);
-      if (items) patch.items = items;
+      if (items) sp.items = items;
     }
     const keyProducts = mapObjs(section.keyProducts, (kp) => swapFields(kp, ["sku"], m));
-    if (keyProducts) patch.keyProducts = keyProducts;
-    return overlay(section, patch);
+    if (keyProducts) sp.keyProducts = keyProducts;
+    return overlay(section, sp);
   });
-  return sections ? { ...spec, sections } : null;
+  if (sections) patch.sections = sections;
+  const lines = mapObjs(spec.lines, (ln) => swapFields(ln, ["sku"], m));
+  if (lines) patch.lines = lines;
+  return overlay(spec, patch);
 }
 
 /** A portal cart's `lines` (CartLine): `sku`, `fixtureOptions` keys, `curtainInputs.fabricSku`. `fixtureId` is an assembly id, not a SKU. */

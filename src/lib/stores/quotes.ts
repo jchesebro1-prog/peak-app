@@ -964,11 +964,13 @@ function stampContentChange(doc: Quote, mutate: (doc: Quote) => Quote | void): Q
  * `updatedAt` (the printed date / sort key / approval version) — patchQuote
  * still stamps `contentChangedAt`, since the document now prints the model.
  * A #284 approval that matched before the rename is re-fingerprinted: a SKU
- * swap is not a priced-line change. Returns true when it wrote.
+ * swap is not a priced-line change. Returns the written quote (its
+ * `contentChangedAt` is what the caller marks the PDF stale as of — the
+ * bulk-writer contract in quote-pdf/schedule.ts), or null when nothing moved.
  */
-export async function rewriteQuoteSpecRefs(id: string, rewrite: (spec: unknown) => unknown | null): Promise<boolean> {
+export async function rewriteQuoteSpecRefs(id: string, rewrite: (spec: unknown) => unknown | null): Promise<Quote | null> {
   let wrote = false;
-  await patchQuote(id, (doc) => {
+  const out = await patchQuote(id, (doc) => {
     const next = rewrite(doc.spec);
     if (next === null) return;
     const held = !!doc.review?.approvedAgainst && approvalSnapshotMatches(doc);
@@ -976,7 +978,7 @@ export async function rewriteQuoteSpecRefs(id: string, rewrite: (spec: unknown) 
     if (held) doc.review = { ...doc.review, approvedAgainst: approvalFingerprint(doc) };
     wrote = true;
   });
-  return wrote;
+  return wrote ? out : null;
 }
 
 /**
