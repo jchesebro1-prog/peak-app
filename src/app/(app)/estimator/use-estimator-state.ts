@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { NARR_OPEN_KEY, SIDE_OPEN_KEY } from "./estimator-styles";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { fillClientGoals } from "@/lib/estimate-output/goals";
 import type { Dispatch, SetStateAction } from "react";
@@ -16,6 +16,7 @@ import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
 import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMargin, buildLaborItems, computeCurtain, computeLabor, lineMarginOf, makeLaborRate, repricedAtLineMargin, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
+import type { PdfToggle } from "./preview-doc";
 import type { CurtainDraft, CustomDraft, EstimatorProps, FixtureDraft, LaborDraft, MobDraft, SpecItem, SpecMob, SpecSection, TrackDraft, TravelLite, VendorDraft, VendorLineDraft, VendorQuote } from "./types";
 import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
 import { fixtureBomLine } from "./fixture-bom";
@@ -263,41 +264,34 @@ export function useEstimatorState(props: EstimatorProps) {
   const quoteType = initial.quoteType;
   const [pipelineId, setPipelineId] = useState(initial.pipelineId);
   const [stage, setStage] = useState(initial.stage);
-  /** Narrative column (#281). Defaults open on both server and first client
-   *  render; the remembered choice is applied after mount so hydration matches. */
-  const [narrOpen, setNarrOpen] = useState(true);
   /** #293 — the system-intro library; the intro actions answer with the new list. */
   const [intros, setIntros] = useState(narrativeIntros);
   /** #293 slice 2: the system library modal (Load system). */
   const [libraryOpen, setLibraryOpen] = useState(false);
-  useEffect(() => {
-    try {
-      if (window.localStorage.getItem(NARR_OPEN_KEY) === "0") setNarrOpen(false);
-    } catch {
-      /* storage unavailable (private mode, blocked) — stay open */
-    }
-  }, []);
-  const showNarr = (next: boolean) => {
-    setNarrOpen(next);
-    try {
-      window.localStorage.setItem(NARR_OPEN_KEY, next ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-  };
   const narrRef = useRef<HTMLTextAreaElement | null>(null);
   /** Bumped by a card's snippet — the effect focuses the textarea once the
-   *  column (and the newly active system) has rendered, caret at the end. */
+   *  column (and the newly active system) has rendered, caret at the end.
+   *  #304: the column lives on the Build package step, which may mount after
+   *  this effect runs (the step switch is a separate URL update) — so the
+   *  request stays pending until the textarea exists, and PackageStep calls
+   *  focusNarrIfPending on mount. */
   const [narrFocusReq, setNarrFocusReq] = useState(0);
-  useEffect(() => {
-    if (!narrFocusReq) return;
+  const narrFocusPending = useRef(false);
+  const focusNarrIfPending = useCallback(() => {
     const el = narrRef.current;
-    if (!el) return;
+    if (!narrFocusPending.current || !el) return;
+    narrFocusPending.current = false;
     el.focus();
     const n = el.value.length;
     el.setSelectionRange(n, n);
-  }, [narrFocusReq]);
-  /** Systems rail (#168). Same hydration-safe pattern as narrOpen above. */
+  }, []);
+  useEffect(() => {
+    if (!narrFocusReq) return;
+    narrFocusPending.current = true;
+    focusNarrIfPending();
+  }, [narrFocusReq, focusNarrIfPending]);
+  /** Systems rail (#168). Defaults open on both server and first client
+   *  render; the remembered choice is applied after mount so hydration matches. */
   const [sideOpen, setSideOpen] = useState(true);
   useEffect(() => {
     try {
@@ -374,6 +368,17 @@ export function useEstimatorState(props: EstimatorProps) {
   const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
+  /** #304 — one Show-on-PDF toggle (Build package's PdfOptionsPanel). */
+  const togglePdf = (flag: PdfToggle) => {
+    if (flag === "pdfQty") setPdfQty((v) => !v);
+    else if (flag === "pdfNotes") setPdfNotes((v) => !v);
+    else if (flag === "pdfPrices") setPdfPrices((v) => !v);
+    else if (flag === "pdfCover") setPdfCover((v) => !v);
+    else if (flag === "pdfOptions") setPdfOptions((v) => !v);
+    else if (flag === "pdfItemizedAppendix") setPdfItemizedAppendix((v) => !v);
+    else if (flag === "pdfCutSheets") setPdfCutSheets((v) => !v);
+    else setPdfTerms((v) => !v);
+  };
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
     () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets }),
@@ -2516,6 +2521,7 @@ export function useEstimatorState(props: EstimatorProps) {
     fixtureDraft,
     fixtureFor,
     fixtureSec,
+    focusNarrIfPending,
     freightDefault,
     gateRefused,
     importMaterials,
@@ -2540,7 +2546,6 @@ export function useEstimatorState(props: EstimatorProps) {
     moveItem,
     moveNotice,
     moveSystem,
-    narrOpen,
     narrRef,
     narrSec,
     notIncluded,
@@ -2659,7 +2664,6 @@ export function useEstimatorState(props: EstimatorProps) {
     setVendorLine,
     setWonMetaGuard,
     showContactPick,
-    showNarr,
     showStageBar,
     showVenuePick,
     sideOpen,
@@ -2681,6 +2685,7 @@ export function useEstimatorState(props: EstimatorProps) {
     toggleExpand,
     toggleKeyProductLine,
     toggleMobFlag,
+    togglePdf,
     toggleSide,
     trackDraft,
     trackEdit,

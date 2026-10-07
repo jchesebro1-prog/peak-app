@@ -8,8 +8,6 @@ export const CSS = `
 .est-qd-done:hover { color: #fff !important; border-color: #4a4e56 !important; }
 .est-qd-chip:hover { color: #fff !important; border-color: #4a4e56 !important; }
 .est-qd-col + .est-qd-col { border-left: 1px solid #2b2e35; }
-.est-narr-toggle:hover { color: #16181d !important; border-color: #c4c9d2 !important; }
-.est-narr-tab:hover { color: #16181d !important; background: #f7f8fa !important; }
 .est-side-toggle:hover { color: #16181d !important; border-color: #c4c9d2 !important; }
 .est-side-tab:hover { color: #16181d !important; background: #f7f8fa !important; }
 .est-field:focus { border-color: #c4c9d2 !important; outline: none; }
@@ -35,9 +33,6 @@ export const CSS = `
   .est-topright { width: 100% !important; flex-wrap: wrap !important; gap: 10px !important; justify-content: flex-start !important; }
   .est-body { flex-direction: column !important; }
   .est-side { width: 100% !important; border-right: none !important; border-bottom: 1px solid #ececf0 !important; }
-  .est-narr { width: 100% !important; order: -1; overflow: visible !important; border-left: none !important; border-bottom: 1px solid #ececf0 !important; }
-  .est-narr-collapsed .est-narr-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
-  .est-narr-vlabel { writing-mode: horizontal-tb !important; }
   .est-qd-grid { grid-template-columns: minmax(0, 1fr) !important; }
   .est-qd-col + .est-qd-col { border-left: none !important; border-top: 1px solid #2b2e35 !important; }
   .est-side-collapsed .est-side-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
@@ -60,6 +55,8 @@ export const STATUS_DOT: Record<string, string> = {
   won: "#1f8a5b",
   lost: "#8c919c",
 };
+/** #304 — the header's read-only status label (the select lives on Send & track). */
+export const STATUS_LABEL: Record<string, string> = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
 
 /** Overlapping-chevron breadcrumb shape (Daylite stage bar, Task 6). Every
  *  segment gets the same clip-path and a negative left margin so the next
@@ -117,8 +114,6 @@ export const META_TOGGLE: CSSProperties = {
   whiteSpace: "nowrap",
 };
 export const SIDE_OPEN_KEY = "quartzite.estimator.sideOpen";
-/** #281: the narrative column's open/collapsed choice, per browser. */
-export const NARR_OPEN_KEY = "quartzite.estimator.narrOpen";
 export const SIDE_TOGGLE: CSSProperties = {
   fontFamily: "var(--font-ui)",
   fontSize: 11,

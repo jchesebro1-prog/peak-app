@@ -2,6 +2,7 @@
 
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { PurchasePerksBanner } from "@/components/rewards/purchase-perks-banner";
+import type { NextStepAction } from "@/lib/quote-next-step";
 import type { EstimatorState } from "./use-estimator-state";
 import { tierRepriceMessage } from "./tier-reprice";
 
@@ -10,7 +11,7 @@ import { tierRepriceMessage } from "./tier-reprice";
  * the gate-refusal way through, save notice, purchase perks, Move system
  * result, tier re-price). Shown on every step.
  */
-export function EstimatorBanners({ s }: { s: EstimatorState }) {
+export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (action: NextStepAction) => void }) {
   const {
     actionError,
     actionNotice,
@@ -69,11 +70,12 @@ export function EstimatorBanners({ s }: { s: EstimatorState }) {
               variant="panel"
               disabled={statusChanging || tierResolving}
               beforeAction={pdfDirty ? saveNow : undefined}
-              onSync={(r) => {
+              onSync={(r, action) => {
                 applySync(r);
                 if (r.ok) {
                   setActionError(null);
                   setGateRefused(false);
+                  onActed(action);
                 }
               }}
               onError={(m) => {

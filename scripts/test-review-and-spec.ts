@@ -40085,8 +40085,9 @@ import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
   ok(comp.includes('from "react-dom"') && comp.includes("createPortal(") && comp.includes("document.body") && comp.includes('aria-modal="true"'),
     "#284 wiring: the modals portal to document.body (a sticky toolbar's stacking context can't trap them under the nav)");
   ok(comp.includes('console.error("[QuoteNextStep]", e)') && comp.includes("That didn't go through — check your connection and try again.")
-    && (ec.match(/disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length === 2,
-    "#284 wiring: a thrown action reports instead of crashing, and the control is disabled while a status change or tier lookup is in flight");
+    && (ec.match(/disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length === (ec.match(/beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length
+    && (ec.match(/beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length >= 2,
+    "#284 wiring: a thrown action reports instead of crashing, and the control is disabled while a status change or tier lookup is in flight (#304: also on Review and Send)");
 }
 
 // #284 task 6 — the Quotes hub panel + Reviews page wiring (source-text checks).
@@ -47767,8 +47768,8 @@ import {
   ok(panel.includes("Copy client link") && panel.includes("Client link") && panel.includes("created by") && (panel.match(/catch \{/g) || []).length >= 3,
     "#293t panel: copy, expiry line, and every action await wrapped in try/catch");
   const pd = previewDocSource();
-  ok(pd.includes('import { ClientLinkPanel } from "./client-link-panel";') && pd.includes("{p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}"),
-    "#293t preview: the Client link block sits in the customer preview sidebar");
+  ok(pd.includes('import { ClientLinkPanel } from "../client-link-panel";') && pd.includes("<ClientLinkPanel quoteId={loadedId} withPackage={false} />"),
+    "#293t preview: the Client link block sits in the customer preview sidebar (#304: moved to its step)");
   const qs = rd("src/lib/stores/quotes.ts");
   const psl = qs.slice(qs.indexOf("export async function patchShareLink("), qs.indexOf("\n}\n", qs.indexOf("export async function patchShareLink(")));
   ok(psl.includes("patchQuote(id,") && !psl.includes("updatedAt"), "#293t links: patchShareLink writes under the row lock and never touches updatedAt");
@@ -50671,7 +50672,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
     "#301 preview: the Cover & package block (summary, Not included, Reset to default)");
   const prev = previewDocSource();
   ok(prev.includes("<CoverPackagePanel") && prev.indexOf("<CoverPackagePanel") < prev.indexOf("<ClientLinkPanel") && !prev.includes('className="est-doc"') && !prev.includes("customerLines("),
-    "#301 preview: mounted above the Client link block; the #222 preview pins still hold");
+    "#301 preview: mounted above the Client link block; the #222 preview pins still hold (#304: moved to its step)");
 }
 
 async function e301DefaultsAsyncChecks(): Promise<void> {
@@ -52568,4 +52569,22 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(["ChangeTypeControl", "Parts list (CSV)", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Parts list \(CSV\)|DeleteQuoteButton/.test(header304),
     "#304 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
   ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#304 tabs: labelled from STEP_LABEL, current tab marked");
+}
+
+/* #304 — every existing control has a home step. */
+{
+  const st = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps", f), "utf8");
+  const build = st("build-step.tsx"), pkg = st("package-step.tsx"), review = st("review-step.tsx"), send = st("send-step.tsx");
+  ok(build.includes("<SectionCard") && build.includes("<CurtainModal") && build.includes("<RewardCreditPanel") && build.includes("+ From library…") && !build.includes("<TasksCard"),
+    "#304 steps: Build holds the systems sidebar, cards, modals and Rewards credit — not Tasks");
+  ok(pkg.includes("<NarrativeColumn") && pkg.includes("<PdfOptionsPanel") && pkg.includes("<CoverPackagePanel") && pkg.includes('section="package"'),
+    "#304 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
+  ok(review.includes("<PdfPreviewPane") && review.includes("<ReviewCostSummary") && review.includes('variant="panel"'),
+    "#304 steps: Customer review holds the PDF, the cost summary and the review actions");
+  ok(send.includes("<ClientLinkPanel") && send.includes("withPackage={false}") && send.includes('section="responses"') && send.includes("<TasksCard") && send.includes("changeStatus(") && send.includes("stageBarPipeline"),
+    "#304 steps: Send & track holds status, the client link + revisions, responses, tasks and the pipeline");
+  const staff = readFileSync(join(process.cwd(), "src/app/(app)/estimator/package-staff-panel.tsx"), "utf8");
+  ok(/section = "all"/.test(staff) && /section !== "responses"/.test(staff) && /section !== "package"/.test(staff), "#304 steps: PackageStaffPanel can show only its package half or only responses");
+  const link = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-link-panel.tsx"), "utf8");
+  ok(/withPackage = true/.test(link) && /\{withPackage && <PackageStaffPanel quoteId=\{quoteId\} \/>\}/.test(link), "#304 steps: ClientLinkPanel can leave the package panel out");
 }

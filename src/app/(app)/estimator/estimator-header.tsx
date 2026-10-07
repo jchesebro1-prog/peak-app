@@ -1,8 +1,7 @@
 "use client";
 
-import { CTX_LABEL, DARK_SELECT, META_HEAD, META_HINT, META_SECTION, META_SUB, META_TOGGLE, STATUS_DOT } from "./estimator-styles";
+import { CTX_LABEL, DARK_SELECT, META_HEAD, META_HINT, META_SECTION, META_SUB, META_TOGGLE, STATUS_DOT, STATUS_LABEL } from "./estimator-styles";
 import { INSTALL_TIMEFRAMES, type EstimatorState } from "./use-estimator-state";
-import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { wonEditMessage } from "@/app/(app)/quotes/new/handoff";
@@ -12,7 +11,7 @@ import { HeaderMoreMenu } from "./header-more-menu";
 /**
  * #304 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
  * step: inline rename, number · Rev, the Quote details panel, blended margin,
- * quoted total, status, Save, the next-step control and the ⋯ menu. Wraps
+ * quoted total, status (read-only — set on Send & track), Save, the next-step control and the ⋯ menu. Wraps
  * onto a second row instead of overflowing on a narrow window.
  */
 export function EstimatorHeader({ s, onActed }: { s: EstimatorState; onActed: (action: NextStepAction) => void }) {
@@ -22,7 +21,6 @@ export function EstimatorHeader({ s, onActed }: { s: EstimatorState; onActed: (a
     assumptions,
     category,
     changePeople,
-    changeStatus,
     checkedAssumptions,
     closeQd,
     closeTitle,
@@ -252,16 +250,10 @@ export function EstimatorHeader({ s, onActed }: { s: EstimatorState; onActed: (a
                 flexShrink: 0,
               }}
             />
-            <select
-              value={status}
-              onChange={(e) => changeStatus(e.target.value as QuoteStatus)}
-              style={{ ...DARK_SELECT, borderRadius: 8, padding: "9px 10px" }}
-            >
-              <option value="draft">Draft</option>
-              <option value="sent">Sent</option>
-              <option value="won">Won</option>
-              <option value="lost">Lost</option>
-            </select>
+            {/* #304: read-only here — the status select lives on Send & track. */}
+            <span data-testid="est-status" style={{ fontSize: 12.5, fontWeight: 600, color: "#cfd3da" }}>
+              {STATUS_LABEL[status] || status}
+            </span>
           </div>
           <button
             type="button"

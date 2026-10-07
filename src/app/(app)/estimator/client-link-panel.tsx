@@ -32,7 +32,7 @@ function shortDate(ms: number): string {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
 }
 
-export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
+export function ClientLinkPanel({ quoteId, withPackage = true }: { quoteId: string; withPackage?: boolean }) {
   const [status, setStatus] = useState<ShareLinkStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -209,7 +209,7 @@ export function ClientLinkPanel({ quoteId }: { quoteId: string }) {
           {err}
         </span>
       )}
-      <PackageStaffPanel quoteId={quoteId} />
+      {withPackage && <PackageStaffPanel quoteId={quoteId} />}
     </div>
   );
 }

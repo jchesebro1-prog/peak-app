@@ -13,6 +13,7 @@ import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
  * remove behind an inline confirm), client responses newest first, and
  * Rebuild package. Reads its own state (packagePanelAction) on mount and
  * after each action — no quote data comes from the Estimator.
+ * #304: `section` lets the Package step show the package half and Send & track the responses.
  */
 
 const FAILED = "Could not reach the server. Try again.";
@@ -23,7 +24,7 @@ const btn: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12.5, fontW
 const off: CSSProperties = { cursor: "not-allowed", opacity: 0.55 };
 const linkBtn: CSSProperties = { background: "none", border: "none", padding: 0, fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 
-export function PackageStaffPanel({ quoteId }: { quoteId: string }) {
+export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: string; section?: "all" | "package" | "responses" }) {
   const [panel, setPanel] = useState<PackagePanel | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -132,108 +133,120 @@ export function PackageStaffPanel({ quoteId }: { quoteId: string }) {
 
   return (
     <div data-testid="package-staff" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-      {panel.gaps.length > 0 && (
-        <div data-testid="package-gaps" style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {panel.gaps.map((g) => (
-            <span key={g} style={chip}>
-              {g}
-            </span>
-          ))}
-        </div>
-      )}
+      {section !== "responses" && (
+        <>
+          {panel.gaps.length > 0 && (
+            <div data-testid="package-gaps" style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {panel.gaps.map((g) => (
+                <span key={g} style={chip}>
+                  {g}
+                </span>
+              ))}
+            </div>
+          )}
 
-      <span style={label}>Drawings</span>
-      {panel.files.length === 0 && <span style={small}>No drawings yet.</span>}
-      {panel.files.map((f) => (
-        <div key={f.id} style={{ ...small, display: "flex", flexDirection: "column", gap: 2 }}>
-          <span>
-            <strong style={{ color: "#16181d" }}>{f.name}</strong> · {f.kindLabel} · {f.sourceLabel} · {f.sizeLabel}
-          </span>
-          {f.hidden && <span style={{ color: "#8a6d1f" }}>Hidden from the client — an upload of this kind replaces it.</span>}
-          {panel.canSend && confirmId !== f.id && (
-            <button type="button" onClick={() => setConfirmId(f.id)} disabled={pending} style={{ ...linkBtn, color: "#a33a2b", alignSelf: "flex-start" }}>
-              Remove
+          <span style={label}>Drawings</span>
+          {panel.files.length === 0 && <span style={small}>No drawings yet.</span>}
+          {panel.files.map((f) => (
+            <div key={f.id} style={{ ...small, display: "flex", flexDirection: "column", gap: 2 }}>
+              <span>
+                <strong style={{ color: "#16181d" }}>{f.name}</strong> · {f.kindLabel} · {f.sourceLabel} · {f.sizeLabel}
+              </span>
+              {f.hidden && <span style={{ color: "#8a6d1f" }}>Hidden from the client — an upload of this kind replaces it.</span>}
+              {panel.canSend && confirmId !== f.id && (
+                <button type="button" onClick={() => setConfirmId(f.id)} disabled={pending} style={{ ...linkBtn, color: "#a33a2b", alignSelf: "flex-start" }}>
+                  Remove
+                </button>
+              )}
+              {confirmId === f.id && (
+                <span role="group" aria-label={`Remove ${f.name}`} style={{ display: "flex", gap: 12 }}>
+                  <span>It disappears from the current client link.</span>
+                  <button type="button" onClick={() => remove(f.id)} disabled={pending} style={{ ...linkBtn, color: "#a33a2b" }}>
+                    Remove drawing
+                  </button>
+                  <button type="button" onClick={() => setConfirmId(null)} disabled={pending} style={{ ...linkBtn, color: "#5b616e" }}>
+                    Cancel
+                  </button>
+                </span>
+              )}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <select aria-label="Drawing kind" value={kind} onChange={(e) => setKind(e.target.value as PackageFileKind)} disabled={!canUpload} style={{ fontSize: 12.5, padding: "6px 8px", borderRadius: 7, border: "1px solid #dfe2e8" }}>
+              {PACKAGE_FILE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {PACKAGE_FILE_KIND_LABEL[k]}
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={() => fileInput.current?.click()} disabled={!canUpload} style={{ ...btn, ...(canUpload ? {} : off) }}>
+              Upload…
             </button>
-          )}
-          {confirmId === f.id && (
-            <span role="group" aria-label={`Remove ${f.name}`} style={{ display: "flex", gap: 12 }}>
-              <span>It disappears from the current client link.</span>
-              <button type="button" onClick={() => remove(f.id)} disabled={pending} style={{ ...linkBtn, color: "#a33a2b" }}>
-                Remove drawing
-              </button>
-              <button type="button" onClick={() => setConfirmId(null)} disabled={pending} style={{ ...linkBtn, color: "#5b616e" }}>
-                Cancel
-              </button>
-            </span>
-          )}
-        </div>
-      ))}
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-        <select aria-label="Drawing kind" value={kind} onChange={(e) => setKind(e.target.value as PackageFileKind)} disabled={!canUpload} style={{ fontSize: 12.5, padding: "6px 8px", borderRadius: 7, border: "1px solid #dfe2e8" }}>
-          {PACKAGE_FILE_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {PACKAGE_FILE_KIND_LABEL[k]}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={() => fileInput.current?.click()} disabled={!canUpload} style={{ ...btn, ...(canUpload ? {} : off) }}>
-          Upload…
-        </button>
-        <input
-          ref={fileInput}
-          type="file"
-          accept={PACKAGE_FILE_ACCEPT}
-          hidden
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            if (file) upload(file);
-          }}
-        />
-        <button
-          type="button"
-          onClick={generate}
-          disabled={!canUpload || !panel.grid}
-          title={panel.grid ? `From ${panel.grid.label}` : "Link a Grid design to this quote first."}
-          style={{ ...btn, ...(canUpload && panel.grid ? {} : off) }}
-        >
-          Generate from Grid
-        </button>
-      </div>
-      {!panel.uploads && <span style={small}>{PACKAGE_FILES_COPY.noStorage}</span>}
-
-      <span style={label}>Client responses</span>
-      {panel.responses.length === 0 ? (
-        <span style={small}>No responses yet.</span>
-      ) : (
-        <ul data-testid="package-responses" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-          {panel.responses.map((r) => (
-            <li key={r.id} style={small}>
-              <strong style={{ color: "#16181d" }}>{r.kindLabel}</strong> · {r.revLabel} · {r.when}
-              <br />
-              {r.who}
-              {r.scopes && (
-                <>
-                  <br />
-                  {r.scopes}
-                  {r.total && ` — ${r.total}`}
-                </>
-              )}
-              {r.message && (
-                <>
-                  <br />
-                  <span style={{ whiteSpace: "pre-line" }}>{r.message}</span>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+            <input
+              ref={fileInput}
+              type="file"
+              accept={PACKAGE_FILE_ACCEPT}
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) upload(file);
+              }}
+            />
+            <button
+              type="button"
+              onClick={generate}
+              disabled={!canUpload || !panel.grid}
+              title={panel.grid ? `From ${panel.grid.label}` : "Link a Grid design to this quote first."}
+              style={{ ...btn, ...(canUpload && panel.grid ? {} : off) }}
+            >
+              Generate from Grid
+            </button>
+          </div>
+          {!panel.uploads && <span style={small}>{PACKAGE_FILES_COPY.noStorage}</span>}
+        </>
       )}
 
-      <button type="button" onClick={rebuild} disabled={!panel.canSend || pending} style={{ ...linkBtn, color: "var(--accent)", alignSelf: "flex-start", marginTop: 4, ...(panel.canSend ? {} : off) }}>
-        Rebuild package
-      </button>
-      <span style={small}>The download zip is saved after its first download. Rebuild after adding datasheets.</span>
+      {section !== "package" && (
+        <>
+          <span style={label}>Client responses</span>
+          {panel.responses.length === 0 ? (
+            <span style={small}>No responses yet.</span>
+          ) : (
+            <ul data-testid="package-responses" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+              {panel.responses.map((r) => (
+                <li key={r.id} style={small}>
+                  <strong style={{ color: "#16181d" }}>{r.kindLabel}</strong> · {r.revLabel} · {r.when}
+                  <br />
+                  {r.who}
+                  {r.scopes && (
+                    <>
+                      <br />
+                      {r.scopes}
+                      {r.total && ` — ${r.total}`}
+                    </>
+                  )}
+                  {r.message && (
+                    <>
+                      <br />
+                      <span style={{ whiteSpace: "pre-line" }}>{r.message}</span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {section !== "responses" && (
+        <>
+          <button type="button" onClick={rebuild} disabled={!panel.canSend || pending} style={{ ...linkBtn, color: "var(--accent)", alignSelf: "flex-start", marginTop: 4, ...(panel.canSend ? {} : off) }}>
+            Rebuild package
+          </button>
+          <span style={small}>The download zip is saved after its first download. Rebuild after adding datasheets.</span>
+        </>
+      )}
       {note && <span style={small}>{note}</span>}
       {err && (
         <span role="alert" style={{ ...small, color: "#a33a2b" }}>
