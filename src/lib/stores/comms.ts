@@ -1235,6 +1235,10 @@ export type AddMessageInput = {
   status?: ThreadStatus;
   /** Server stand-in for Team.CURRENT (defaults to DEFAULT_USER). */
   me?: string;
+  /** Estimator Phase 3 — stamp the To / Cc lines on an outbound message
+   *  (CommMessage.to / .cc). Only sendDraft's `stampAddresses` passes them. */
+  to?: string;
+  cc?: string;
 };
 
 /** Append a message; status follows the message direction unless overridden. */
@@ -1260,6 +1264,8 @@ export async function addMessage(
       body: m.body || "",
     };
     if (m.attachments && m.attachments.length) msg.attachments = m.attachments;
+    if (dir === "out" && m.to) msg.to = m.to;
+    if (dir === "out" && m.cc) msg.cc = m.cc;
     if (dir === "out") {
       if (online()) deliverMessage(msg); // GMAIL BRIDGE SEAM (local stamp)
       else {
@@ -1417,7 +1423,10 @@ export async function updateDraft(
 /** #128 review (I3) — `me` threads through to addMessage's author, same as
  *  reply()/logNoteAction/compose(); without it every sent draft stamped
  *  DEFAULT_USER regardless of who actually sent it. */
-export async function sendDraft(id: string, me?: string): Promise<CommThread | null> {
+/** Estimator Phase 3 — `stampAddresses` also records the draft's To / Cc on
+ *  the outbound message itself (the Activity card reads it); every other
+ *  caller leaves app-sent messages as before. */
+export async function sendDraft(id: string, me?: string, opts: { stampAddresses?: boolean } = {}): Promise<CommThread | null> {
   const t = await get(id);
   if (!t) return null;
   const d = t.draft || {};
@@ -1434,6 +1443,7 @@ export async function sendDraft(id: string, me?: string): Promise<CommThread | n
     body: d.body || "",
     attachments: d.attachments,
     me,
+    ...(opts.stampAddresses ? { to: d.to || "", cc: d.cc || "" } : {}),
   });
 }
 
