@@ -68,6 +68,7 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
           dirty={pdfDirty}
           onSave={doSave}
           saveDisabled={statusChanging || tierResolving}
+          actionsInline={!phone}
         />
         {!phone && (
           <aside

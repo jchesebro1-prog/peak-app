@@ -99,6 +99,8 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
             the pipeline switch (Estimate/Design ⇄ BID SPEC) only while
             draft, since a sent/won stage carries contractual meaning. */}
         {showStageBar && (
+          <section aria-label="Pipeline" style={CARD}>
+          <div style={CARD_LABEL}>Pipeline</div>
           <div
             style={{
               display: "flex",
@@ -177,6 +179,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
               </select>
             )}
           </div>
+          </section>
         )}
 
         <section aria-label="Client link" style={CARD}>
@@ -195,7 +198,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
           {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
               attach to; a brand-new unsaved draft has nowhere for
               quoteId to point yet. */}
-          <div style={{ margin: "6px 14px 14px" }}>
+          <div>
             <div
               style={{
                 fontSize: 11,

@@ -28,8 +28,8 @@ export function HeaderMoreMenu({ s }: { s: EstimatorState }) {
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button type="button" aria-haspopup="menu" aria-expanded={open} title="More actions" onClick={() => setOpen((v) => !v)}
-        style={{ fontFamily: "var(--font-ui)", fontSize: 15, fontWeight: 700, lineHeight: 1, color: "#cfd3da", background: "#2b2e35", border: "none", borderRadius: 8, padding: "8px 11px", cursor: "pointer" }}>
-        ⋯
+        style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 700, lineHeight: 1, color: "#cfd3da", background: "#2b2e35", border: "none", borderRadius: 8, padding: "8px 11px", cursor: "pointer" }}>
+        More ▾
       </button>
       {open && (
         <div role="menu" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 40, minWidth: 230, background: "#23262d", border: "1px solid #3a3e46", borderRadius: 8, boxShadow: "0 12px 28px rgba(0,0,0,.28)", padding: "4px 0" }}>

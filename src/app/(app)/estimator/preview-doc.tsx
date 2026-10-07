@@ -105,6 +105,9 @@ export type PdfPreviewProps = {
   dirty: boolean;
   onSave: () => void;
   saveDisabled: boolean;
+  /** #305 — render the action buttons in a compact row above the viewer
+   * instead of a left aside (Review keeps one right aside on desktop). */
+  actionsInline?: boolean;
 };
 
 export function PdfOptionsPanel(p: PdfOptionsProps) {
@@ -207,6 +210,33 @@ export function PdfPreviewPane(p: PdfPreviewProps) {
   const pdfHref = p.savedQuoteId ? `/api/quotes/${encodeURIComponent(p.savedQuoteId)}/pdf` : null;
   const hasFile = !!p.pdf?.hasFile;
 
+  const actions = (
+    <>
+          {(p.dirty || !p.savedQuoteId) && p.canBuild && (
+            <button
+              type="button"
+              onClick={p.onSave}
+              disabled={p.saveDisabled}
+              style={{ ...actionLink, color: "#fff", background: "#2b2e35", cursor: p.saveDisabled ? "not-allowed" : "pointer", opacity: p.saveDisabled ? 0.6 : 1 }}
+            >
+              {p.savedQuoteId ? "Save & update PDF" : "Save to create PDF"}
+            </button>
+          )}
+          {pdfHref && hasFile ? (
+            <>
+              <a href={pdfHref + "?download=1"} style={{ ...actionLink, color: "#fff", background: "var(--accent)" }}>
+                Download PDF
+              </a>
+              <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ ...actionLink, color: "#16181d", background: "#f1f2f5" }}>
+                Open PDF ↗
+              </a>
+            </>
+          ) : (
+            <span style={{ ...actionLink, color: "#9aa0ab", background: "#f1f2f5", cursor: "default" }}>Download PDF</span>
+          )}
+    </>
+  );
+
   return (
     <div
       data-screen-label="Customer quote document"
@@ -232,49 +262,35 @@ export function PdfPreviewPane(p: PdfPreviewProps) {
         </div>
       )}
       <div className="est-previewbody" style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <aside
-          className="est-prevhead"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "stretch",
-            justifyContent: "flex-start",
-            gap: 18,
-            width: 264,
-            padding: "20px 18px",
-            background: "#fff",
-            borderRight: "1px solid #ececf0",
-            flexShrink: 0,
-            overflowY: "auto",
-          }}
-        >
-          {(p.dirty || !p.savedQuoteId) && p.canBuild && (
-            <button
-              type="button"
-              onClick={p.onSave}
-              disabled={p.saveDisabled}
-              style={{ ...actionLink, color: "#fff", background: "#2b2e35", cursor: p.saveDisabled ? "not-allowed" : "pointer", opacity: p.saveDisabled ? 0.6 : 1 }}
-            >
-              {p.savedQuoteId ? "Save & update PDF" : "Save to create PDF"}
-            </button>
-          )}
-          {pdfHref && hasFile ? (
-            <>
-              <a href={pdfHref + "?download=1"} style={{ ...actionLink, color: "#fff", background: "var(--accent)" }}>
-                Download PDF
-              </a>
-              <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ ...actionLink, color: "#16181d", background: "#f1f2f5" }}>
-                Open PDF ↗
-              </a>
-            </>
-          ) : (
-            <span style={{ ...actionLink, color: "#9aa0ab", background: "#f1f2f5", cursor: "default" }}>Download PDF</span>
-          )}
-        </aside>
+        {!p.actionsInline && (
+          <aside
+            className="est-prevhead"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "stretch",
+              justifyContent: "flex-start",
+              gap: 18,
+              width: 264,
+              padding: "20px 18px",
+              background: "#fff",
+              borderRight: "1px solid #ececf0",
+              flexShrink: 0,
+              overflowY: "auto",
+            }}
+          >
+            {actions}
+          </aside>
+        )}
         <div
           className="est-scroll est-docwrap"
           style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#e9ebef", padding: 18, display: "flex", flexDirection: "column" }}
         >
+          {p.actionsInline && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 12, flexShrink: 0 }}>
+              {actions}
+            </div>
+          )}
           <QuotePdfViewer quoteId={p.savedQuoteId} pdf={p.pdf} onPdf={p.onPdf} dirty={p.dirty} />
         </div>
       </div>
