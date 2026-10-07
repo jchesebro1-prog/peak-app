@@ -54108,7 +54108,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   const brandNew: P2aSys[] = [pb, { id: "9", built: true, name: "new" }];
   ok(p2a.unmarkEdited(prev, brandNew) === brandNew, "#P2a groups: a built section with no prev counterpart keeps built");
   const gOnly: P2aSys[] = [{ ...pb, groupId: "g-a" }, pu];
-  ok(p2a.unmarkEdited(prev, gOnly)[0].built === undefined, "#P2a groups: changing a built section's groupId counts as an edit and clears built");
+  ok(p2a.unmarkEdited(prev, gOnly) === gOnly && gOnly[0].built === true, "#P2a groups: changing a built section's groupId keeps built (Phase 2a decision: a move is not an edit)");
   const emptyPrev: P2aSys[] = [pb];
   ok(p2a.unmarkEdited([], emptyPrev) === emptyPrev, "#P2a groups: unmarkEdited with an empty prev clears nothing");
   const unbuiltEdit: P2aSys[] = [pb, { ...pu, name: "Changed" }];

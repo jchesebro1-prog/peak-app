@@ -184,15 +184,19 @@ export function withoutBuilt<S extends { built?: boolean }>(sec: S): S {
   return rest as unknown as S;
 }
 
-/** Any edit to a built section other than `built` itself clears `built`. */
-export function unmarkEdited<S extends { id: string; built?: boolean }>(prev: S[], next: S[]): S[] {
+/**
+ * Any edit to a built section other than `built` itself clears `built`.
+ * Moving it between groups (a `groupId`-only change) is not an edit, so a
+ * move keeps `built` (Phase 2a decision).
+ */
+export function unmarkEdited<S extends { id: string; built?: boolean; groupId?: string }>(prev: S[], next: S[]): S[] {
   const before = new Map(prev.map((s) => [s.id, s]));
   let changed = false;
   const out = next.map((s) => {
     if (!s.built) return s;
     const p = before.get(s.id);
     if (!p || p === s) return s;
-    if (JSON.stringify(withoutBuilt(p)) === JSON.stringify(withoutBuilt(s))) return s;
+    if (JSON.stringify(withoutGroupMeta(p)) === JSON.stringify(withoutGroupMeta(s))) return s;
     changed = true;
     return withoutBuilt(s);
   });
