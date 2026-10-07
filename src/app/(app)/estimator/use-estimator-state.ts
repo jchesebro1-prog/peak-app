@@ -271,7 +271,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const narrRef = useRef<HTMLTextAreaElement | null>(null);
   /** Bumped by a card's snippet — the effect focuses the textarea once the
    *  column (and the newly active system) has rendered, caret at the end.
-   *  #304: the column lives on the Build package step, which may mount after
+   *  #305: the column lives on the Build package step, which may mount after
    *  this effect runs (the step switch is a separate URL update) — so the
    *  request stays pending until the textarea exists, and PackageStep calls
    *  focusNarrIfPending on mount. */
@@ -368,7 +368,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
-  /** #304 — one Show-on-PDF toggle (Build package's PdfOptionsPanel). */
+  /** #305 — one Show-on-PDF toggle (Build package's PdfOptionsPanel). */
   const togglePdf = (flag: PdfToggle) => {
     if (flag === "pdfQty") setPdfQty((v) => !v);
     else if (flag === "pdfNotes") setPdfNotes((v) => !v);
@@ -1594,7 +1594,7 @@ export function useEstimatorState(props: EstimatorProps) {
     }
   };
 
-  /* #304 — the Quote details panel's Category field commits on blur (trimmed;
+  /* #305 — the Quote details panel's Category field commits on blur (trimmed;
      persisted only when it changed). Lives here so the ref write stays in the hook. */
   const commitCategory = () => {
     const v = category.trim();
@@ -1604,7 +1604,7 @@ export function useEstimatorState(props: EstimatorProps) {
     persistMeta({ category: v });
   };
 
-  /* #304 — the ⋯ menu's Cut sheets: save first when the PDF is out of date, then open in a new tab. */
+  /* #305 — the ⋯ menu's Cut sheets: save first when the PDF is out of date, then open in a new tab. */
   const openCutSheets = async () => {
     if (!loadedId) return;
     const href = `/estimator/cut-sheets?id=${encodeURIComponent(loadedId)}`;

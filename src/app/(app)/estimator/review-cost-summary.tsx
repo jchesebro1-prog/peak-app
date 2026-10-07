@@ -3,7 +3,7 @@
 import type { SpecSection } from "./types";
 import { fmt, systemFreight, systemItemsCost, systemMargin, systemSellTotal, type QuoteTotals } from "./pricing";
 
-/** #304 — Customer review's internal numbers (never on a customer document): cost, sell and margin per system. */
+/** #305 — Customer review's internal numbers (never on a customer document): cost, sell and margin per system. */
 export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[]; totals: QuoteTotals }) {
   const cell = { padding: "4px 6px", fontSize: 12, borderBottom: "1px solid #ececf0" } as const;
   const num = { ...cell, textAlign: "right" as const, fontFamily: "var(--font-mono)" };

@@ -338,7 +338,7 @@ import { specRowKey } from "@/lib/specs/record-keys";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
-/* #304 — the Estimator is split across a shell, a state hook, a header and
+/* #305 — the Estimator is split across a shell, a state hook, a header and
    one file per step; pins that used to read estimator-client.tsx /
    preview-doc.tsx read all of them, in a fixed order, so a verbatim move
    between them never breaks a pin. Missing files are skipped. */
@@ -33795,7 +33795,7 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
     const bad = [...s.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
     ok(s.startsWith('"use client"') && bad.length === 0, `spec pickers: ${f} is a client file with no store/db value imports (${bad.join(", ") || "none"})`);
   }
-  // #304: the Estimator's other files (state hook, header, steps) carry the same no-store/db-value-import rule once they exist.
+  // #305: the Estimator's other files (state hook, header, steps) carry the same no-store/db-value-import rule once they exist.
   for (const f of estimatorExtraPaths()) {
     const bad = [...src(f).matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]).filter((m) => /^@\/lib\/stores\/|^@\/db\/|^exceljs$|-io$/.test(m));
     ok(bad.length === 0, `spec pickers: ${f} imports no store/db value (${bad.join(", ") || "none"})`);
@@ -40088,7 +40088,7 @@ import { quoteNextStep as a284Next } from "@/lib/quote-next-step";
   ok(comp.includes('console.error("[QuoteNextStep]", e)') && comp.includes("That didn't go through — check your connection and try again.")
     && (ec.match(/disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length === (ec.match(/beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length
     && (ec.match(/beforeAction=\{pdfDirty \? saveNow : undefined\}/g) || []).length >= 2,
-    "#284 wiring: a thrown action reports instead of crashing, and the control is disabled while a status change or tier lookup is in flight (#304: also on Review and Send)");
+    "#284 wiring: a thrown action reports instead of crashing, and the control is disabled while a status change or tier lookup is in flight (#305: also on Review and Send)");
 }
 
 // #284 task 6 — the Quotes hub panel + Reviews page wiring (source-text checks).
@@ -47770,7 +47770,7 @@ import {
     "#293t panel: copy, expiry line, and every action await wrapped in try/catch");
   const pd = previewDocSource();
   ok(pd.includes('import { ClientLinkPanel } from "../client-link-panel";') && pd.includes("<ClientLinkPanel quoteId={loadedId} withPackage={false} />"),
-    "#293t preview: the Client link block sits in the customer preview sidebar (#304: moved to its step)");
+    "#293t preview: the Client link block sits in the customer preview sidebar (#305: moved to its step)");
   const qs = rd("src/lib/stores/quotes.ts");
   const psl = qs.slice(qs.indexOf("export async function patchShareLink("), qs.indexOf("\n}\n", qs.indexOf("export async function patchShareLink(")));
   ok(psl.includes("patchQuote(id,") && !psl.includes("updatedAt"), "#293t links: patchShareLink writes under the row lock and never touches updatedAt");
@@ -50675,7 +50675,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   const pkgStep304 = rd("src/app/(app)/estimator/steps/package-step.tsx");
   const sendStep304 = rd("src/app/(app)/estimator/steps/send-step.tsx");
   ok(pkgStep304.includes("<CoverPackagePanel") && sendStep304.includes("<ClientLinkPanel") && !prev.includes('className="est-doc"') && !prev.includes("customerLines("),
-    "#301 preview: CoverPackagePanel and ClientLinkPanel stay mounted; the #222 preview pins still hold (#304: Cover & package on Build package, Client link on Send & track)");
+    "#301 preview: CoverPackagePanel and ClientLinkPanel stay mounted; the #222 preview pins still hold (#305: Cover & package on Build package, Client link on Send & track)");
 }
 
 async function e301DefaultsAsyncChecks(): Promise<void> {
@@ -52482,7 +52482,7 @@ import {
 }
 
 /* ======================================================================
-   #304 — Estimator in four steps (Phase 1): step vocabulary + URL rules.
+   #305 — Estimator in four steps (Phase 1): step vocabulary + URL rules.
    ====================================================================== */
 import {
   ESTIMATE_STEPS as e304Steps,
@@ -52492,26 +52492,26 @@ import {
   stepSearch as e304Search,
 } from "@/lib/estimate-steps/steps";
 {
-  ok(e304Steps.join(",") === "build,package,review,send", "#304 steps: four steps in order");
+  ok(e304Steps.join(",") === "build,package,review,send", "#305 steps: four steps in order");
   ok(e304Label.build === "Build" && e304Label.package === "Build package" && e304Label.review === "Customer review" && e304Label.send === "Send & track",
-    "#304 steps: the tab labels are exactly the spec's");
+    "#305 steps: the tab labels are exactly the spec's");
   ok(e304Parse(null) === "build" && e304Parse(undefined) === "build" && e304Parse("") === "build" && e304Parse("bogus") === "build" && e304Parse("PACKAGE") === "build",
-    "#304 steps: a missing, unknown or wrong-case step is Build");
+    "#305 steps: a missing, unknown or wrong-case step is Build");
   ok(e304Parse("package") === "package" && e304Parse("review") === "review" && e304Parse("send") === "send" && e304Parse("build") === "build",
-    "#304 steps: each known step parses to itself");
+    "#305 steps: each known step parses to itself");
   ok(e304After("submit") === "review" && e304After("approve") === "review" && e304After("attest") === "review" && e304After("assign") === "review",
-    "#304 steps: submit / approve / attest / assign land on Customer review");
-  ok(e304After("send") === "send", "#304 steps: send lands on Send & track (never Home)");
-  ok(e304After("sendBack") === "build" && e304After("withdraw") === "build", "#304 steps: send back / withdraw return to Build");
-  ok(e304Search("?id=Q-1", "package") === "?id=Q-1&step=package", "#304 steps: a step is added beside the id");
-  ok(e304Search("?id=Q-1&step=send", "build") === "?id=Q-1", "#304 steps: Build drops the step param (old URLs stay canonical)");
-  ok(e304Search("", "build") === "", "#304 steps: an empty search stays empty on Build");
+    "#305 steps: submit / approve / attest / assign land on Customer review");
+  ok(e304After("send") === "send", "#305 steps: send lands on Send & track (never Home)");
+  ok(e304After("sendBack") === "build" && e304After("withdraw") === "build", "#305 steps: send back / withdraw return to Build");
+  ok(e304Search("?id=Q-1", "package") === "?id=Q-1&step=package", "#305 steps: a step is added beside the id");
+  ok(e304Search("?id=Q-1&step=send", "build") === "?id=Q-1", "#305 steps: Build drops the step param (old URLs stay canonical)");
+  ok(e304Search("", "build") === "", "#305 steps: an empty search stays empty on Build");
   ok(e304Search("?customer=lf&venue=v2", "review", "Q-9") === "?customer=lf&venue=v2&id=Q-9&step=review",
-    "#304 steps: other params are kept; a newly saved id is written");
-  ok(e304Search("?id=Q-1&step=review", "review", "Q-1") === "?id=Q-1&step=review", "#304 steps: idempotent");
+    "#305 steps: other params are kept; a newly saved id is written");
+  ok(e304Search("?id=Q-1&step=review", "review", "Q-1") === "?id=Q-1&step=review", "#305 steps: idempotent");
 }
 
-/* #304 — readiness badges on the four tabs. */
+/* #305 — readiness badges on the four tabs. */
 import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
 {
   type Sec = import("@/app/(app)/estimator/types").SpecSection;
@@ -52520,74 +52520,74 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
 
   const empty = e304Ready({ ...base, sections: [] });
-  ok(empty.build.state === "idle" && empty.build.label === "No systems yet", "#304 readiness: no systems → Build idle");
+  ok(empty.build.state === "idle" && empty.build.label === "No systems yet", "#305 readiness: no systems → Build idle");
 
   const good = e304Ready({ ...base, sections: [sec(), sec({ id: "s2", name: "Rigging" })] });
-  ok(good.build.state === "ok" && good.build.label === "✓ 2 systems priced", "#304 readiness: every system has priced lines → ✓ N systems priced");
+  ok(good.build.state === "ok" && good.build.label === "✓ 2 systems priced", "#305 readiness: every system has priced lines → ✓ N systems priced");
 
   const gaps = e304Ready({ ...base, sections: [sec({ items: [] }), sec({ id: "s2", items: [line({ price: 0 }), line({ id: 2, price: 0 }), line({ id: 3 })] })] });
-  ok(gaps.build.state === "gaps" && gaps.build.count === 3 && gaps.build.label === "1 empty system · 2 unpriced lines", "#304 readiness: empty systems + unpriced lines are counted and named");
+  ok(gaps.build.state === "gaps" && gaps.build.count === 3 && gaps.build.label === "1 empty system · 2 unpriced lines", "#305 readiness: empty systems + unpriced lines are counted and named");
 
   const credit = e304Ready({ ...base, sections: [sec({ items: [line({ rewardCredit: true, price: -50 })] })] });
-  ok(credit.build.state === "gaps" && credit.build.label === "1 empty system", "#304 readiness: a Rewards credit line neither prices nor fills a system");
+  ok(credit.build.state === "gaps" && credit.build.label === "1 empty system", "#305 readiness: a Rewards credit line neither prices nor fills a system");
 
   ok(e304Ready({ ...base, saved: false, sections: [sec()] }).package.state === "idle" && e304Ready({ ...base, saved: false, sections: [sec()] }).package.label === "Save first",
-    "#304 readiness: an unsaved quote's Package is idle");
+    "#305 readiness: an unsaved quote's Package is idle");
   const narr = e304Ready({ ...base, sections: [sec({ presentation: "narrative", narrative: "" })] });
-  ok(narr.package.state === "gaps" && (narr.package.count ?? 0) >= 1 && /gap/.test(narr.package.label), "#304 readiness: a printed narrative system with no intro is a Package gap");
+  ok(narr.package.state === "gaps" && (narr.package.count ?? 0) >= 1 && /gap/.test(narr.package.label), "#305 readiness: a printed narrative system with no intro is a Package gap");
   const narrOk = e304Ready({ ...base, sections: [sec({ presentation: "narrative", narrative: "A new LED system.", clientGoals: "Brighter stage." })] });
-  ok(narrOk.package.state === "ok" && narrOk.package.label === "✓ Ready", "#304 readiness: no gaps → ✓ Ready");
+  ok(narrOk.package.state === "ok" && narrOk.package.label === "✓ Ready", "#305 readiness: no gaps → ✓ Ready");
 
-  ok(e304Ready({ ...base, sections: [sec()] }).review.label === "Not submitted" && e304Ready({ ...base, sections: [sec()] }).review.state === "idle", "#304 readiness: no review view → Not submitted");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).review.state === "ok", "#304 readiness: approved → ok");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Changes requested", tone: "changes" } }).review.state === "gaps", "#304 readiness: changes requested → gaps");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "In review · Jeff", tone: "review" } }).review.label === "In review · Jeff", "#304 readiness: the review label is the pill's own");
+  ok(e304Ready({ ...base, sections: [sec()] }).review.label === "Not submitted" && e304Ready({ ...base, sections: [sec()] }).review.state === "idle", "#305 readiness: no review view → Not submitted");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).review.state === "ok", "#305 readiness: approved → ok");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Changes requested", tone: "changes" } }).review.state === "gaps", "#305 readiness: changes requested → gaps");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "In review · Jeff", tone: "review" } }).review.label === "In review · Jeff", "#305 readiness: the review label is the pill's own");
 
-  ok(e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.label === "Sent · Rev 2" && e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.state === "ok", "#304 readiness: sent → Sent · Rev N");
-  ok(e304Ready({ ...base, sections: [sec()], status: "won" }).send.label === "Won" && e304Ready({ ...base, sections: [sec()], status: "lost" }).send.label === "Lost", "#304 readiness: won / lost");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).send.label === "Ready to send", "#304 readiness: an approved draft is Ready to send");
-  ok(e304Ready({ ...base, sections: [sec()] }).send.label === "—", "#304 readiness: an unapproved draft shows —");
+  ok(e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.label === "Sent · Rev 2" && e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.state === "ok", "#305 readiness: sent → Sent · Rev N");
+  ok(e304Ready({ ...base, sections: [sec()], status: "won" }).send.label === "Won" && e304Ready({ ...base, sections: [sec()], status: "lost" }).send.label === "Lost", "#305 readiness: won / lost");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).send.label === "Ready to send", "#305 readiness: an approved draft is Ready to send");
+  ok(e304Ready({ ...base, sections: [sec()] }).send.label === "—", "#305 readiness: an unapproved draft shows —");
 }
 
-/* #304 — QuoteNextStep hands the action to onSync so the Estimator can move steps. */
+/* #305 — QuoteNextStep hands the action to onSync so the Estimator can move steps. */
 {
   const ns304 = readFileSync(join(process.cwd(), "src/components/quote-review/quote-next-step.tsx"), "utf8");
-  ok(/onSync\?: \(r: NextStepSync, action: NextStepAction\) => void;/.test(ns304), "#304 next step: onSync receives the action");
-  ok(/const run = \(action: NextStepAction, fn:/.test(ns304) && /\(onSync \?\? \(\(\) => router\.refresh\(\)\)\)\(r, action\);/.test(ns304), "#304 next step: run threads its action into onSync");
-  ok(!/\brun\(\(\)/.test(ns304) && !/\brun\(\(shown\)/.test(ns304), "#304 next step: every run(...) call names its action first");
+  ok(/onSync\?: \(r: NextStepSync, action: NextStepAction\) => void;/.test(ns304), "#305 next step: onSync receives the action");
+  ok(/const run = \(action: NextStepAction, fn:/.test(ns304) && /\(onSync \?\? \(\(\) => router\.refresh\(\)\)\)\(r, action\);/.test(ns304), "#305 next step: run threads its action into onSync");
+  ok(!/\brun\(\(\)/.test(ns304) && !/\brun\(\(shown\)/.test(ns304), "#305 next step: every run(...) call names its action first");
 }
 
-/* #304 — the shell: four tabs, URL-synced, one header, the ⋯ menu. */
+/* #305 — the shell: four tabs, URL-synced, one header, the ⋯ menu. */
 {
   const shell304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
   const header304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-header.tsx"), "utf8");
   const more304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/header-more-menu.tsx"), "utf8");
   const tabs304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/step-tabs.tsx"), "utf8");
-  ok(/useSearchParams\(\)/.test(shell304) && /parseStep\(/.test(shell304) && /window\.history\.pushState\(null, "", /.test(shell304), "#304 shell: the step comes from ?step= and moves with pushState (unsaved edits survive)");
-  ok(/s\.phone \? "review"/.test(shell304), "#304 shell: a phone always shows Customer review");
-  ok(/window\.history\.replaceState\(null, "", /.test(shell304) && /s\.loadedId/.test(shell304), "#304 shell: the first save writes ?id= into the URL");
-  ok(/stepAfterAction\(action\)/.test(shell304), "#304 shell: a successful next-step action moves to its step");
-  ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#304 shell: the old build/preview mode and its button are gone");
-  ok(/flexWrap: "wrap"/.test(header304), "#304 header: wraps instead of overflowing at 1024 px");
+  ok(/useSearchParams\(\)/.test(shell304) && /parseStep\(/.test(shell304) && /window\.history\.pushState\(null, "", /.test(shell304), "#305 shell: the step comes from ?step= and moves with pushState (unsaved edits survive)");
+  ok(/s\.phone \? "review"/.test(shell304), "#305 shell: a phone always shows Customer review");
+  ok(/window\.history\.replaceState\(null, "", /.test(shell304) && /s\.loadedId/.test(shell304), "#305 shell: the first save writes ?id= into the URL");
+  ok(/stepAfterAction\(action\)/.test(shell304), "#305 shell: a successful next-step action moves to its step");
+  ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#305 shell: the old build/preview mode and its button are gone");
+  ok(/flexWrap: "wrap"/.test(header304), "#305 header: wraps instead of overflowing at 1024 px");
   ok(["ChangeTypeControl", "Parts list (CSV)", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Parts list \(CSV\)|DeleteQuoteButton/.test(header304),
-    "#304 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
-  ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#304 tabs: labelled from STEP_LABEL, current tab marked");
+    "#305 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
+  ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#305 tabs: labelled from STEP_LABEL, current tab marked");
 }
 
-/* #304 — every existing control has a home step. */
+/* #305 — every existing control has a home step. */
 {
   const st = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps", f), "utf8");
   const build = st("build-step.tsx"), pkg = st("package-step.tsx"), review = st("review-step.tsx"), send = st("send-step.tsx");
   ok(build.includes("<SectionCard") && build.includes("<CurtainModal") && build.includes("<RewardCreditPanel") && build.includes("+ From library…") && !build.includes("<TasksCard"),
-    "#304 steps: Build holds the systems sidebar, cards, modals and Rewards credit — not Tasks");
+    "#305 steps: Build holds the systems sidebar, cards, modals and Rewards credit — not Tasks");
   ok(pkg.includes("<NarrativeColumn") && pkg.includes("<PdfOptionsPanel") && pkg.includes("<CoverPackagePanel") && pkg.includes('section="package"'),
-    "#304 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
+    "#305 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
   ok(review.includes("<PdfPreviewPane") && review.includes("<ReviewCostSummary") && review.includes('variant="panel"'),
-    "#304 steps: Customer review holds the PDF, the cost summary and the review actions");
+    "#305 steps: Customer review holds the PDF, the cost summary and the review actions");
   ok(send.includes("<ClientLinkPanel") && send.includes("withPackage={false}") && send.includes('section="responses"') && send.includes("<TasksCard") && send.includes("changeStatus(") && send.includes("stageBarPipeline"),
-    "#304 steps: Send & track holds status, the client link + revisions, responses, tasks and the pipeline");
+    "#305 steps: Send & track holds status, the client link + revisions, responses, tasks and the pipeline");
   const staff = readFileSync(join(process.cwd(), "src/app/(app)/estimator/package-staff-panel.tsx"), "utf8");
-  ok(/section = "all"/.test(staff) && /section !== "responses"/.test(staff) && /section !== "package"/.test(staff), "#304 steps: PackageStaffPanel can show only its package half or only responses");
+  ok(/section = "all"/.test(staff) && /section !== "responses"/.test(staff) && /section !== "package"/.test(staff), "#305 steps: PackageStaffPanel can show only its package half or only responses");
   const link = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-link-panel.tsx"), "utf8");
-  ok(/withPackage = true/.test(link) && /\{withPackage && <PackageStaffPanel quoteId=\{quoteId\} \/>\}/.test(link), "#304 steps: ClientLinkPanel can leave the package panel out");
+  ok(/withPackage = true/.test(link) && /\{withPackage && <PackageStaffPanel quoteId=\{quoteId\} \/>\}/.test(link), "#305 steps: ClientLinkPanel can leave the package panel out");
 }

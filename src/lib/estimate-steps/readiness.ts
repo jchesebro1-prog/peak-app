@@ -7,7 +7,7 @@ import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { EstimateStep } from "./steps";
 
 /**
- * #304 (spec §4.6) — the line under each step tab. Pure and client-safe;
+ * #305 (spec §4.6) — the line under each step tab. Pure and client-safe;
  * computed from the LIVE editor state, so it moves as you type. Never blocks.
  * The Package count is the client-side half of package-gaps.ts; the
  * server-only gaps (datasheets, drawings) stay as chips inside the step.

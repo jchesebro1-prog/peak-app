@@ -5,7 +5,7 @@ import { ChangeTypeControl } from "@/components/quote-flow-controls";
 import type { EstimatorState } from "./use-estimator-state";
 import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 
-/** #304 — the header's ⋯ menu: actions used a few times per quote, not per minute. */
+/** #305 — the header's ⋯ menu: actions used a few times per quote, not per minute. */
 export function HeaderMoreMenu({ s }: { s: EstimatorState }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

@@ -13,7 +13,7 @@ import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
  * remove behind an inline confirm), client responses newest first, and
  * Rebuild package. Reads its own state (packagePanelAction) on mount and
  * after each action — no quote data comes from the Estimator.
- * #304: `section` lets the Package step show the package half and Send & track the responses.
+ * #305: `section` lets the Package step show the package half and Send & track the responses.
  */
 
 const FAILED = "Could not reach the server. Try again.";

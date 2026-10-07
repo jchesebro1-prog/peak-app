@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 import { ESTIMATE_STEPS, STEP_LABEL, type EstimateStep } from "@/lib/estimate-steps/steps";
 import type { StepBadge } from "@/lib/estimate-steps/readiness";
 
-/** #304 — the four step tabs under the header; the line under each is its readiness. */
+/** #305 — the four step tabs under the header; the line under each is its readiness. */
 const BADGE_INK: Record<StepBadge["state"], string> = { ok: "#1f8a5b", gaps: "#b7791f", idle: "#8c919c" };
 
 export function StepTabs({ step, badges, onStep }: { step: EstimateStep; badges: Record<EstimateStep, StepBadge>; onStep: (s: EstimateStep) => void }) {

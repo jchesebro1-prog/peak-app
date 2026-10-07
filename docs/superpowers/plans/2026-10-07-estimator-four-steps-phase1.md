@@ -35,7 +35,7 @@
 | `src/lib/estimate-steps/steps.ts` | create | Step vocabulary, `parseStep`, `stepAfterAction`, `stepSearch` — pure |
 | `src/lib/estimate-steps/readiness.ts` | create | `estimateReadiness()` → the four tab badges — pure |
 | `src/components/quote-review/quote-next-step.tsx` | modify | `onSync(r, action)` — report which action produced the result |
-| `scripts/test-review-and-spec.ts` | modify | `estimatorSource()` / `previewDocSource()` readers; new #304 block |
+| `scripts/test-review-and-spec.ts` | modify | `estimatorSource()` / `previewDocSource()` readers; new #305 block |
 | `src/app/(app)/estimator/use-estimator-state.ts` | create | The old component body, verbatim, as a hook; `EstimatorState` type |
 | `src/app/(app)/estimator/estimator-styles.ts` | create | Style constants + `CSS` moved out of the client file |
 | `src/app/(app)/estimator/estimator-client.tsx` | rewrite | Shell: header, tabs, banners, active step, URL sync |
@@ -52,9 +52,9 @@
 | `src/app/(app)/estimator/client-link-panel.tsx` | modify | `withPackage?: boolean` (default `true`) |
 | `src/app/(app)/estimator/package-staff-panel.tsx` | modify | `section?: "all" \| "package" \| "responses"` (default `"all"`) |
 | `scripts/smoke-routes.ts` | modify | Four `&step=` routes |
-| `DECISIONS.md`, `PUNCHLIST.md`, `AGENTS.md` | modify | D-entries, punch #304, phase status |
+| `DECISIONS.md`, `PUNCHLIST.md`, `AGENTS.md` | modify | D-entries, punch #305, phase status |
 
-> **Numbering:** this plan uses punch **#304** and decisions **D636–D640**. Two sessions write these files — re-check `origin/main` (`grep -o "^## D[0-9]*" DECISIONS.md | tail -1`, `grep -o "^## [0-9]*\." PUNCHLIST.md | tail -1`) right before Task 9 and renumber if taken.
+> **Numbering:** this plan uses punch **#305** and decisions **D643–D647**. Two sessions write these files — re-check `origin/main` (`grep -o "^## D[0-9]*" DECISIONS.md | tail -1`, `grep -o "^## [0-9]*\." PUNCHLIST.md | tail -1`) right before Task 9 and renumber if taken.
 
 ---
 
@@ -87,7 +87,7 @@ Write the three numbers (PASS, FAIL, lint problems) at the top of your task repo
 
 **Files:**
 - Create: `src/lib/estimate-steps/steps.ts`
-- Test: `scripts/test-review-and-spec.ts` (append a `#304 steps` block at the end)
+- Test: `scripts/test-review-and-spec.ts` (append a `#305 steps` block at the end)
 
 **Interfaces:**
 - Produces:
@@ -102,7 +102,7 @@ Write the three numbers (PASS, FAIL, lint problems) at the top of your task repo
 
 ```ts
 /* ======================================================================
-   #304 — Estimator in four steps (Phase 1): step vocabulary + URL rules.
+   #305 — Estimator in four steps (Phase 1): step vocabulary + URL rules.
    ====================================================================== */
 import {
   ESTIMATE_STEPS as e304Steps,
@@ -112,29 +112,29 @@ import {
   stepSearch as e304Search,
 } from "@/lib/estimate-steps/steps";
 {
-  ok(e304Steps.join(",") === "build,package,review,send", "#304 steps: four steps in order");
+  ok(e304Steps.join(",") === "build,package,review,send", "#305 steps: four steps in order");
   ok(e304Label.build === "Build" && e304Label.package === "Build package" && e304Label.review === "Customer review" && e304Label.send === "Send & track",
-    "#304 steps: the tab labels are exactly the spec's");
+    "#305 steps: the tab labels are exactly the spec's");
   ok(e304Parse(null) === "build" && e304Parse(undefined) === "build" && e304Parse("") === "build" && e304Parse("bogus") === "build" && e304Parse("PACKAGE") === "build",
-    "#304 steps: a missing, unknown or wrong-case step is Build");
+    "#305 steps: a missing, unknown or wrong-case step is Build");
   ok(e304Parse("package") === "package" && e304Parse("review") === "review" && e304Parse("send") === "send" && e304Parse("build") === "build",
-    "#304 steps: each known step parses to itself");
+    "#305 steps: each known step parses to itself");
   ok(e304After("submit") === "review" && e304After("approve") === "review" && e304After("attest") === "review" && e304After("assign") === "review",
-    "#304 steps: submit / approve / attest / assign land on Customer review");
-  ok(e304After("send") === "send", "#304 steps: send lands on Send & track (never Home)");
-  ok(e304After("sendBack") === "build" && e304After("withdraw") === "build", "#304 steps: send back / withdraw return to Build");
-  ok(e304Search("?id=Q-1", "package") === "?id=Q-1&step=package", "#304 steps: a step is added beside the id");
-  ok(e304Search("?id=Q-1&step=send", "build") === "?id=Q-1", "#304 steps: Build drops the step param (old URLs stay canonical)");
-  ok(e304Search("", "build") === "", "#304 steps: an empty search stays empty on Build");
+    "#305 steps: submit / approve / attest / assign land on Customer review");
+  ok(e304After("send") === "send", "#305 steps: send lands on Send & track (never Home)");
+  ok(e304After("sendBack") === "build" && e304After("withdraw") === "build", "#305 steps: send back / withdraw return to Build");
+  ok(e304Search("?id=Q-1", "package") === "?id=Q-1&step=package", "#305 steps: a step is added beside the id");
+  ok(e304Search("?id=Q-1&step=send", "build") === "?id=Q-1", "#305 steps: Build drops the step param (old URLs stay canonical)");
+  ok(e304Search("", "build") === "", "#305 steps: an empty search stays empty on Build");
   ok(e304Search("?customer=lf&venue=v2", "review", "Q-9") === "?customer=lf&venue=v2&id=Q-9&step=review",
-    "#304 steps: other params are kept; a newly saved id is written");
-  ok(e304Search("?id=Q-1&step=review", "review", "Q-1") === "?id=Q-1&step=review", "#304 steps: idempotent");
+    "#305 steps: other params are kept; a newly saved id is written");
+  ok(e304Search("?id=Q-1&step=review", "review", "Q-1") === "?id=Q-1&step=review", "#305 steps: idempotent");
 }
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npm run test:specs 2>&1 | grep -E "#304|Cannot find|error" | head`
+Run: `npm run test:specs 2>&1 | grep -E "#305|Cannot find|error" | head`
 Expected: the harness fails to load — `Cannot find module '@/lib/estimate-steps/steps'`.
 
 - [ ] **Step 3: Implement** `src/lib/estimate-steps/steps.ts`:
@@ -143,7 +143,7 @@ Expected: the harness fails to load — `Cannot find module '@/lib/estimate-step
 import type { NextStepAction } from "@/lib/quote-next-step";
 
 /**
- * #304 (spec 2026-10-07 §4) — the Estimator's four steps. Pure and
+ * #305 (spec 2026-10-07 §4) — the Estimator's four steps. Pure and
  * client-safe: the shell reads `?step=` through parseStep, writes it through
  * stepSearch, and moves after a next-step action through stepAfterAction.
  */
@@ -197,13 +197,13 @@ Note: `URLSearchParams.set` on an existing key keeps its position, and appends n
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npm run test:specs 2>&1 | grep "#304"` → every line `PASS`. Then the full counts: PASS = base + 12, FAIL = 0.
+Run: `npm run test:specs 2>&1 | grep "#305"` → every line `PASS`. Then the full counts: PASS = base + 12, FAIL = 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/lib/estimate-steps/steps.ts scripts/test-review-and-spec.ts
-git commit -m "feat(estimator): #304 step vocabulary + URL rules (pure)
+git commit -m "feat(estimator): #305 step vocabulary + URL rules (pure)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -214,7 +214,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `src/lib/estimate-steps/readiness.ts`
-- Test: `scripts/test-review-and-spec.ts` (append `#304 readiness` block)
+- Test: `scripts/test-review-and-spec.ts` (append `#305 readiness` block)
 
 **Interfaces:**
 - Consumes: `EstimateStep` (Task 1); `SpecSection`, `SpecItem` (`src/app/(app)/estimator/types.ts`); `keyProductsNeedingText`, `scopesWithoutGoals` (`src/lib/estimate-output/package-gaps.ts`); `systemPrintsInBody` (`src/app/(app)/estimator/quote-document-view.ts`); `isRewardCreditItem` (`src/lib/rewards/credit-line.ts`); `NextStepTone` (`src/lib/quote-next-step.ts`).
@@ -226,7 +226,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test** — append:
 
 ```ts
-/* #304 — readiness badges on the four tabs. */
+/* #305 — readiness badges on the four tabs. */
 import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
 {
   type Sec = import("@/app/(app)/estimator/types").SpecSection;
@@ -235,37 +235,37 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
 
   const empty = e304Ready({ ...base, sections: [] });
-  ok(empty.build.state === "idle" && empty.build.label === "No systems yet", "#304 readiness: no systems → Build idle");
+  ok(empty.build.state === "idle" && empty.build.label === "No systems yet", "#305 readiness: no systems → Build idle");
 
   const good = e304Ready({ ...base, sections: [sec(), sec({ id: "s2", name: "Rigging" })] });
-  ok(good.build.state === "ok" && good.build.label === "✓ 2 systems priced", "#304 readiness: every system has priced lines → ✓ N systems priced");
+  ok(good.build.state === "ok" && good.build.label === "✓ 2 systems priced", "#305 readiness: every system has priced lines → ✓ N systems priced");
 
   const gaps = e304Ready({ ...base, sections: [sec({ items: [] }), sec({ id: "s2", items: [line({ price: 0 }), line({ id: 2, price: 0 }), line({ id: 3 })] })] });
-  ok(gaps.build.state === "gaps" && gaps.build.count === 3 && gaps.build.label === "1 empty system · 2 unpriced lines", "#304 readiness: empty systems + unpriced lines are counted and named");
+  ok(gaps.build.state === "gaps" && gaps.build.count === 3 && gaps.build.label === "1 empty system · 2 unpriced lines", "#305 readiness: empty systems + unpriced lines are counted and named");
 
   const credit = e304Ready({ ...base, sections: [sec({ items: [line({ rewardCredit: true, price: -50 })] })] });
-  ok(credit.build.state === "gaps" && credit.build.label === "1 empty system", "#304 readiness: a Rewards credit line neither prices nor fills a system");
+  ok(credit.build.state === "gaps" && credit.build.label === "1 empty system", "#305 readiness: a Rewards credit line neither prices nor fills a system");
 
   ok(e304Ready({ ...base, saved: false, sections: [sec()] }).package.state === "idle" && e304Ready({ ...base, saved: false, sections: [sec()] }).package.label === "Save first",
-    "#304 readiness: an unsaved quote's Package is idle");
+    "#305 readiness: an unsaved quote's Package is idle");
   const narr = e304Ready({ ...base, sections: [sec({ presentation: "narrative", narrative: "" })] });
-  ok(narr.package.state === "gaps" && (narr.package.count ?? 0) >= 1 && /gap/.test(narr.package.label), "#304 readiness: a printed narrative system with no intro is a Package gap");
+  ok(narr.package.state === "gaps" && (narr.package.count ?? 0) >= 1 && /gap/.test(narr.package.label), "#305 readiness: a printed narrative system with no intro is a Package gap");
   const narrOk = e304Ready({ ...base, sections: [sec({ presentation: "narrative", narrative: "A new LED system.", clientGoals: "Brighter stage." })] });
-  ok(narrOk.package.state === "ok" && narrOk.package.label === "✓ Ready", "#304 readiness: no gaps → ✓ Ready");
+  ok(narrOk.package.state === "ok" && narrOk.package.label === "✓ Ready", "#305 readiness: no gaps → ✓ Ready");
 
-  ok(e304Ready({ ...base, sections: [sec()] }).review.label === "Not submitted" && e304Ready({ ...base, sections: [sec()] }).review.state === "idle", "#304 readiness: no review view → Not submitted");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).review.state === "ok", "#304 readiness: approved → ok");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Changes requested", tone: "changes" } }).review.state === "gaps", "#304 readiness: changes requested → gaps");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "In review · Jeff", tone: "review" } }).review.label === "In review · Jeff", "#304 readiness: the review label is the pill's own");
+  ok(e304Ready({ ...base, sections: [sec()] }).review.label === "Not submitted" && e304Ready({ ...base, sections: [sec()] }).review.state === "idle", "#305 readiness: no review view → Not submitted");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).review.state === "ok", "#305 readiness: approved → ok");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Changes requested", tone: "changes" } }).review.state === "gaps", "#305 readiness: changes requested → gaps");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "In review · Jeff", tone: "review" } }).review.label === "In review · Jeff", "#305 readiness: the review label is the pill's own");
 
-  ok(e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.label === "Sent · Rev 2" && e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.state === "ok", "#304 readiness: sent → Sent · Rev N");
-  ok(e304Ready({ ...base, sections: [sec()], status: "won" }).send.label === "Won" && e304Ready({ ...base, sections: [sec()], status: "lost" }).send.label === "Lost", "#304 readiness: won / lost");
-  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).send.label === "Ready to send", "#304 readiness: an approved draft is Ready to send");
-  ok(e304Ready({ ...base, sections: [sec()] }).send.label === "—", "#304 readiness: an unapproved draft shows —");
+  ok(e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.label === "Sent · Rev 2" && e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.state === "ok", "#305 readiness: sent → Sent · Rev N");
+  ok(e304Ready({ ...base, sections: [sec()], status: "won" }).send.label === "Won" && e304Ready({ ...base, sections: [sec()], status: "lost" }).send.label === "Lost", "#305 readiness: won / lost");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).send.label === "Ready to send", "#305 readiness: an approved draft is Ready to send");
+  ok(e304Ready({ ...base, sections: [sec()] }).send.label === "—", "#305 readiness: an unapproved draft shows —");
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `npm run test:specs 2>&1 | grep -E "Cannot find|#304 readiness" | head` → module not found.
+- [ ] **Step 2: Run to verify it fails** — `npm run test:specs 2>&1 | grep -E "Cannot find|#305 readiness" | head` → module not found.
 
 - [ ] **Step 3: Implement** `src/lib/estimate-steps/readiness.ts`:
 
@@ -279,7 +279,7 @@ import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { EstimateStep } from "./steps";
 
 /**
- * #304 (spec §4.6) — the line under each step tab. Pure and client-safe;
+ * #305 (spec §4.6) — the line under each step tab. Pure and client-safe;
  * computed from the LIVE editor state, so it moves as you type. Never blocks.
  * The Package count is the client-side half of package-gaps.ts; the
  * server-only gaps (datasheets, drawings) stay as chips inside the step.
@@ -346,13 +346,13 @@ export function estimateReadiness(i: ReadinessInput): Record<EstimateStep, StepB
 
 > If the `narrOk` test fails because `scopesWithoutGoals` reads goals from a field other than `clientGoals`, open `src/lib/estimate-output/scopes.ts` (`outputScopes`) and set the test fixture's field to the one it reads — do not change `package-gaps.ts`.
 
-- [ ] **Step 4: Run** — `npm run test:specs 2>&1 | grep "#304"` → all PASS; counts PASS = base + 12 + 15, FAIL = 0.
+- [ ] **Step 4: Run** — `npm run test:specs 2>&1 | grep "#305"` → all PASS; counts PASS = base + 12 + 15, FAIL = 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/lib/estimate-steps/readiness.ts scripts/test-review-and-spec.ts
-git commit -m "feat(estimator): #304 readiness badges for the four steps (pure)
+git commit -m "feat(estimator): #305 readiness badges for the four steps (pure)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -371,19 +371,19 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing pin** — append:
 
 ```ts
-/* #304 — QuoteNextStep hands the action to onSync so the Estimator can move steps. */
+/* #305 — QuoteNextStep hands the action to onSync so the Estimator can move steps. */
 {
   const ns304 = readFileSync(join(process.cwd(), "src/components/quote-review/quote-next-step.tsx"), "utf8");
-  ok(/onSync\?: \(r: NextStepSync, action: NextStepAction\) => void;/.test(ns304), "#304 next step: onSync receives the action");
-  ok(/const run = \(action: NextStepAction, fn:/.test(ns304) && /\(onSync \?\? \(\(\) => router\.refresh\(\)\)\)\(r, action\);/.test(ns304), "#304 next step: run threads its action into onSync");
-  ok(!/\brun\(\(\)/.test(ns304) && !/\brun\(\(shown\)/.test(ns304), "#304 next step: every run(...) call names its action first");
+  ok(/onSync\?: \(r: NextStepSync, action: NextStepAction\) => void;/.test(ns304), "#305 next step: onSync receives the action");
+  ok(/const run = \(action: NextStepAction, fn:/.test(ns304) && /\(onSync \?\? \(\(\) => router\.refresh\(\)\)\)\(r, action\);/.test(ns304), "#305 next step: run threads its action into onSync");
+  ok(!/\brun\(\(\)/.test(ns304) && !/\brun\(\(shown\)/.test(ns304), "#305 next step: every run(...) call names its action first");
 }
 ```
 
 - [ ] **Step 2: Run** — those three lines FAIL.
 
 - [ ] **Step 3: Implement.** In `quote-next-step.tsx`:
-  - Props: replace `onSync?: (r: NextStepSync) => void;` with `onSync?: (r: NextStepSync, action: NextStepAction) => void;` (keep its doc comment; append "`action` is the button that produced the result (#304).").
+  - Props: replace `onSync?: (r: NextStepSync) => void;` with `onSync?: (r: NextStepSync, action: NextStepAction) => void;` (keep its doc comment; append "`action` is the button that produced the result (#305).").
   - `run`: change the signature to `const run = (action: NextStepAction, fn: (shown: number) => Promise<NextStepSync>, opts: { skipBefore?: boolean; versioned?: boolean } = {}) => {` and the sync line to `(onSync ?? (() => router.refresh()))(r, action);`.
   - Call sites — prepend the action:
     - `run("sendBack", () => nsSendBackAction(quoteId, text, view.asOf), { skipBefore: true })`
@@ -401,7 +401,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```bash
 git add src/components/quote-review/quote-next-step.tsx scripts/test-review-and-spec.ts
-git commit -m "feat(quote-review): #304 QuoteNextStep passes the action to onSync
+git commit -m "feat(quote-review): #305 QuoteNextStep passes the action to onSync
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -421,7 +421,7 @@ The harness pins strings in `estimator-client.tsx` (44 sites) and `preview-doc.t
 - [ ] **Step 1: Add the readers** right after the `const ok = …` line (~line 340):
 
 ```ts
-/* #304 — the Estimator is split across a shell, a state hook, a header and
+/* #305 — the Estimator is split across a shell, a state hook, a header and
    one file per step; pins that used to read estimator-client.tsx /
    preview-doc.tsx read all of them, in a fixed order, so a verbatim move
    between them never breaks a pin. Missing files are skipped. */
@@ -475,7 +475,7 @@ The remaining `grep` hits are **file lists** (≈ lines 25791, 26814, 33761 — 
 
 ```bash
 git add scripts/test-review-and-spec.ts
-git commit -m "test(estimator): #304 harness pins read the Estimator as one source
+git commit -m "test(estimator): #305 harness pins read the Estimator as one source
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -540,7 +540,7 @@ Fill both lists from the compiler: run `npx tsc --noEmit` and, for each "Cannot 
 
 ```bash
 git add src/app/\(app\)/estimator/
-git commit -m "refactor(estimator): #304 move the component body into useEstimatorState (no behaviour change)
+git commit -m "refactor(estimator): #305 move the component body into useEstimatorState (no behaviour change)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -566,21 +566,21 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing pins** — append:
 
 ```ts
-/* #304 — the shell: four tabs, URL-synced, one header, the ⋯ menu. */
+/* #305 — the shell: four tabs, URL-synced, one header, the ⋯ menu. */
 {
   const shell304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
   const header304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-header.tsx"), "utf8");
   const more304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/header-more-menu.tsx"), "utf8");
   const tabs304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/step-tabs.tsx"), "utf8");
-  ok(/useSearchParams\(\)/.test(shell304) && /parseStep\(/.test(shell304) && /window\.history\.pushState\(null, "", /.test(shell304), "#304 shell: the step comes from ?step= and moves with pushState (unsaved edits survive)");
-  ok(/s\.phone \? "review"/.test(shell304), "#304 shell: a phone always shows Customer review");
-  ok(/window\.history\.replaceState\(null, "", /.test(shell304) && /s\.loadedId/.test(shell304), "#304 shell: the first save writes ?id= into the URL");
-  ok(/stepAfterAction\(action\)/.test(shell304), "#304 shell: a successful next-step action moves to its step");
-  ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#304 shell: the old build/preview mode and its button are gone");
-  ok(/flexWrap: "wrap"/.test(header304), "#304 header: wraps instead of overflowing at 1024 px");
+  ok(/useSearchParams\(\)/.test(shell304) && /parseStep\(/.test(shell304) && /window\.history\.pushState\(null, "", /.test(shell304), "#305 shell: the step comes from ?step= and moves with pushState (unsaved edits survive)");
+  ok(/s\.phone \? "review"/.test(shell304), "#305 shell: a phone always shows Customer review");
+  ok(/window\.history\.replaceState\(null, "", /.test(shell304) && /s\.loadedId/.test(shell304), "#305 shell: the first save writes ?id= into the URL");
+  ok(/stepAfterAction\(action\)/.test(shell304), "#305 shell: a successful next-step action moves to its step");
+  ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#305 shell: the old build/preview mode and its button are gone");
+  ok(/flexWrap: "wrap"/.test(header304), "#305 header: wraps instead of overflowing at 1024 px");
   ok(["ChangeTypeControl", "Parts list (CSV)", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Parts list \(CSV\)|DeleteQuoteButton/.test(header304),
-    "#304 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
-  ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#304 tabs: labelled from STEP_LABEL, current tab marked");
+    "#305 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
+  ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#305 tabs: labelled from STEP_LABEL, current tab marked");
 }
 ```
 
@@ -595,7 +595,7 @@ import type { CSSProperties } from "react";
 import { ESTIMATE_STEPS, STEP_LABEL, type EstimateStep } from "@/lib/estimate-steps/steps";
 import type { StepBadge } from "@/lib/estimate-steps/readiness";
 
-/** #304 — the four step tabs under the header; the line under each is its readiness. */
+/** #305 — the four step tabs under the header; the line under each is its readiness. */
 const BADGE_INK: Record<StepBadge["state"], string> = { ok: "#1f8a5b", gaps: "#b7791f", idle: "#8c919c" };
 
 export function StepTabs({ step, badges, onStep }: { step: EstimateStep; badges: Record<EstimateStep, StepBadge>; onStep: (s: EstimateStep) => void }) {
@@ -640,7 +640,7 @@ import { ChangeTypeControl } from "@/components/quote-flow-controls";
 import type { EstimatorState } from "./use-estimator-state";
 // DeleteQuoteButton: import it from wherever estimator-client.tsx imports it today.
 
-/** #304 — the header's ⋯ menu: actions used a few times per quote, not per minute. */
+/** #305 — the header's ⋯ menu: actions used a few times per quote, not per minute. */
 export function HeaderMoreMenu({ s }: { s: EstimatorState }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -729,7 +729,7 @@ import { EstimatorBanners } from "./estimator-banners";
 import { StepTabs } from "./step-tabs";
 
 /**
- * #304 (spec 2026-10-07 §4) — the Estimator shell: one header, four step
+ * #305 (spec 2026-10-07 §4) — the Estimator shell: one header, four step
  * tabs (`?step=`), the banners, and the active step. All quote state lives in
  * useEstimatorState, so switching steps never drops unsaved edits.
  */
@@ -781,13 +781,13 @@ export default function EstimatorClient(props: EstimatorProps) {
 
 In the hook, delete the `mode` state and `isBuild`/`isPreview`; anything that called `setMode("preview")` goes away with the button. Until Task 7 lands, render today's body when `step !== "review"` and today's preview (phone approver control + `PreviewDoc` without `onBack`/`canBuild` edits) when `step === "review"`, so this task ships a working screen.
 
-- [ ] **Step 8: Verify** — `npx tsc --noEmit`; `npm run lint` ≤ baseline; `npm run test:specs` → new #304 shell pins PASS, FAIL = 0 (if an older pin asserted the toolbar's `Customer preview →` or `setMode`, update that pin's expectation to the tab and note it in the commit message); `npx next build`.
+- [ ] **Step 8: Verify** — `npx tsc --noEmit`; `npm run lint` ≤ baseline; `npm run test:specs` → new #305 shell pins PASS, FAIL = 0 (if an older pin asserted the toolbar's `Customer preview →` or `setMode`, update that pin's expectation to the tab and note it in the commit message); `npx next build`.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add src/app/\(app\)/estimator/ scripts/test-review-and-spec.ts
-git commit -m "feat(estimator): #304 shell — header with ⋯ menu, four step tabs, URL-synced steps
+git commit -m "feat(estimator): #305 shell — header with ⋯ menu, four step tabs, URL-synced steps
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -808,28 +808,28 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Failing pins** — append:
 
 ```ts
-/* #304 — every existing control has a home step. */
+/* #305 — every existing control has a home step. */
 {
   const st = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps", f), "utf8");
   const build = st("build-step.tsx"), pkg = st("package-step.tsx"), review = st("review-step.tsx"), send = st("send-step.tsx");
   ok(build.includes("<SectionCard") && build.includes("<CurtainModal") && build.includes("<RewardCreditPanel") && build.includes("+ From library…") && !build.includes("<TasksCard"),
-    "#304 steps: Build holds the systems sidebar, cards, modals and Rewards credit — not Tasks");
+    "#305 steps: Build holds the systems sidebar, cards, modals and Rewards credit — not Tasks");
   ok(pkg.includes("<NarrativeColumn") && pkg.includes("<PdfOptionsPanel") && pkg.includes("<CoverPackagePanel") && pkg.includes('section="package"'),
-    "#304 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
+    "#305 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
   ok(review.includes("<PdfPreviewPane") && review.includes("<ReviewCostSummary") && review.includes('variant="panel"'),
-    "#304 steps: Customer review holds the PDF, the cost summary and the review actions");
+    "#305 steps: Customer review holds the PDF, the cost summary and the review actions");
   ok(send.includes("<ClientLinkPanel") && send.includes("withPackage={false}") && send.includes('section="responses"') && send.includes("<TasksCard") && send.includes("changeStatus(") && send.includes("stageBarPipeline"),
-    "#304 steps: Send & track holds status, the client link + revisions, responses, tasks and the pipeline");
+    "#305 steps: Send & track holds status, the client link + revisions, responses, tasks and the pipeline");
   const staff = readFileSync(join(process.cwd(), "src/app/(app)/estimator/package-staff-panel.tsx"), "utf8");
-  ok(/section = "all"/.test(staff) && /section !== "responses"/.test(staff) && /section !== "package"/.test(staff), "#304 steps: PackageStaffPanel can show only its package half or only responses");
+  ok(/section = "all"/.test(staff) && /section !== "responses"/.test(staff) && /section !== "package"/.test(staff), "#305 steps: PackageStaffPanel can show only its package half or only responses");
   const link = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-link-panel.tsx"), "utf8");
-  ok(/withPackage = true/.test(link) && /\{withPackage && <PackageStaffPanel quoteId=\{quoteId\} \/>\}/.test(link), "#304 steps: ClientLinkPanel can leave the package panel out");
+  ok(/withPackage = true/.test(link) && /\{withPackage && <PackageStaffPanel quoteId=\{quoteId\} \/>\}/.test(link), "#305 steps: ClientLinkPanel can leave the package panel out");
 }
 ```
 
 - [ ] **Step 2: Run** — FAIL (files missing).
 
-- [ ] **Step 3: `package-staff-panel.tsx`** — signature `export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: string; section?: "all" | "package" | "responses" })`. Wrap the gap chips, Drawings block, `noStorage` note, Rebuild button and its hint in `{section !== "responses" && (<>…</>)}`; wrap the `Client responses` label + list in `{section !== "package" && (<>…</>)}`. `note`/`err` stay unwrapped. Update the header comment: "#304: `section` lets the Package step show the package half and Send & track the responses."
+- [ ] **Step 3: `package-staff-panel.tsx`** — signature `export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: string; section?: "all" | "package" | "responses" })`. Wrap the gap chips, Drawings block, `noStorage` note, Rebuild button and its hint in `{section !== "responses" && (<>…</>)}`; wrap the `Client responses` label + list in `{section !== "package" && (<>…</>)}`. `note`/`err` stay unwrapped. Update the header comment: "#305: `section` lets the Package step show the package half and Send & track the responses."
 
 - [ ] **Step 4: `client-link-panel.tsx`** — `export function ClientLinkPanel({ quoteId, withPackage = true }: { quoteId: string; withPackage?: boolean })`; the last line becomes `{withPackage && <PackageStaffPanel quoteId={quoteId} />}`.
 
@@ -837,7 +837,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `PdfOptionsPanel(p: PdfOptionsProps)` — the `Show on PDF` block (Itemized/By section, Line detail, Cover note, Options, Itemized appendix, Terms, Cut sheets + its note, Payment terms select) and the `Systems` presentation toggles. `PdfOptionsProps` = `PreviewProps` minus `phone`, `canBuild`, `onBack`, `pdf`, `onPdf`, `onSave`, `saveDisabled`, `dirty`, `coverSummary`, `setCoverSummary`, `notIncluded`, `setNotIncluded`, `notIncludedDefault`.
   - `PdfPreviewPane(p: PdfPreviewProps)` — the phone "View only on phone" strip, the Save & update PDF / Save to create PDF button, Download PDF / Open PDF ↗ (or the disabled Download), and `<QuotePdfViewer …>`. `PdfPreviewProps = { phone: boolean; canBuild: boolean; savedQuoteId: string | null; pdf: QuotePdfView | null; onPdf: (v: QuotePdfView) => void; dirty: boolean; onSave: () => void; saveDisabled: boolean }`.
   - Remove `← Back to estimate`, the `CoverPackagePanel` and `ClientLinkPanel` mounts (they move to the Package / Send steps) and the default export.
-  - Update the two pins that asserted the old mounts in this file (the `#301`/`#293` checks for `import { ClientLinkPanel } from "./client-link-panel";` and `{p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}`, and `prev.includes("<CoverPackagePanel")`): they now read `previewDocSource()`, so change their expected strings to the Send step's `<ClientLinkPanel quoteId={s.loadedId} withPackage={false} />` and the Package step's `<CoverPackagePanel`. Keep each pin's message, appending "(#304: moved to its step)".
+  - Update the two pins that asserted the old mounts in this file (the `#301`/`#293` checks for `import { ClientLinkPanel } from "./client-link-panel";` and `{p.savedQuoteId && <ClientLinkPanel quoteId={p.savedQuoteId} />}`, and `prev.includes("<CoverPackagePanel")`): they now read `previewDocSource()`, so change their expected strings to the Send step's `<ClientLinkPanel quoteId={s.loadedId} withPackage={false} />` and the Package step's `<CoverPackagePanel`. Keep each pin's message, appending "(#305: moved to its step)".
 
 - [ ] **Step 6: `review-cost-summary.tsx`**
 
@@ -847,7 +847,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 import type { SpecSection } from "./types";
 import { fmt, systemFreight, systemItemsCost, systemMargin, systemSellTotal, type QuoteTotals } from "./pricing";
 
-/** #304 — Customer review's internal numbers (never on a customer document): cost, sell and margin per system. */
+/** #305 — Customer review's internal numbers (never on a customer document): cost, sell and margin per system. */
 export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[]; totals: QuoteTotals }) {
   const cell = { padding: "4px 6px", fontSize: 12, borderBottom: "1px solid #ececf0" } as const;
   const num = { ...cell, textAlign: "right" as const, fontFamily: "var(--font-mono)" };
@@ -904,7 +904,7 @@ import { PackageStaffPanel } from "../package-staff-panel";
 import { PAYMENT_TERMS } from "../types";
 import type { EstimatorState } from "../use-estimator-state";
 
-/** #304 — Build package: what the client receives. Narrative for the picked system (left), output options (right). */
+/** #305 — Build package: what the client receives. Narrative for the picked system (left), output options (right). */
 export function PackageStep({ s }: { s: EstimatorState }) {
   const sec = s.narrSec;
   return (
@@ -968,7 +968,7 @@ and delete the old build body / preview JSX and the stage bar from the shell. `P
 
 ```bash
 git add src/app/\(app\)/estimator/ scripts/test-review-and-spec.ts
-git commit -m "feat(estimator): #304 Build · Build package · Customer review · Send & track steps
+git commit -m "feat(estimator): #305 Build · Build package · Customer review · Send & track steps
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -986,7 +986,7 @@ Use **superpowers:systematic-debugging**. The cause is not known yet; do not gue
 - [ ] **Step 3: Find the cause.** Candidates to check, in order: a `redirect()` / `router.push` reached from `nsSendAction` → `sendQuoteToCustomer` → `setStatus`; `revalidatePath("/", "layout")` re-rendering a URL that has no `?id=` (an estimate created in the same tab before this phase never got `?id=` — Task 6's `replaceState` may already fix it); the `DeleteQuoteButton`'s `redirectTo`; a layout-level redirect on status change.
 - [ ] **Step 4: Fix at the cause + pin it** (a harness `ok(…)` naming the mechanism). If Task 6 already fixed it, add the pin proving why (e.g. the `replaceState` pin) and say so in the report.
 - [ ] **Step 5: Verify** — the repro now stays on `?step=send`; gates as before.
-- [ ] **Step 6: Commit** — `fix(estimator): #304 Send stays on Send & track (cause: …)`.
+- [ ] **Step 6: Commit** — `fix(estimator): #305 Send stays on Send & track (cause: …)`.
 
 ---
 
@@ -1018,15 +1018,15 @@ Run `npm run test:smoke` (stop any dev server first — memory `peak-worktree-de
   Screenshot each step at 1280 px for the report.
 
 - [ ] **Step 3: Docs** (recompute numbers from `origin/main` first):
-  - `DECISIONS.md` — D636 four steps on one URL (`?step=`, pushState, Build canonical); D637 state hook moved verbatim, UI-state split deferred; D638 readiness rules + never blocking; D639 the ⋯ menu contents and the status select moving to Send & track; D640 next-step navigation map (and the Send→Home cause from Task 8).
-  - `PUNCHLIST.md` — `## 304. Estimator in four steps — Phase 1 (the frame) — DONE <date> (D636–D640)`: reported by Jeff 2026-10-07 ("one window is trying to handle too much"), what shipped, the spec + plan paths, the six-phase roadmap with Phases 2–6 open, Jeff-gated: Phase 6 typical items per category. Mark #301's open item 12 resolved.
-  - `AGENTS.md` — a new phase-status entry `41. 🚧 **Estimator in four steps** (#304, D636–D640)` summarising Phase 1 and listing Phases 2–6 as next.
+  - `DECISIONS.md` — D643 four steps on one URL (`?step=`, pushState, Build canonical); D644 state hook moved verbatim, UI-state split deferred; D645 readiness rules + never blocking; D646 the ⋯ menu contents and the status select moving to Send & track; D647 next-step navigation map (and the Send→Home cause from Task 8).
+  - `PUNCHLIST.md` — `## 304. Estimator in four steps — Phase 1 (the frame) — DONE <date> (D643–D647)`: reported by Jeff 2026-10-07 ("one window is trying to handle too much"), what shipped, the spec + plan paths, the six-phase roadmap with Phases 2–6 open, Jeff-gated: Phase 6 typical items per category. Mark #301's open item 12 resolved.
+  - `AGENTS.md` — a new phase-status entry `42. 🚧 **Estimator in four steps** (#305, D643–D647)` summarising Phase 1 and listing Phases 2–6 as next.
 - [ ] **Step 4: Final gates** — tsc, test:specs (report PASS/FAIL vs Task 0 baseline), lint vs baseline, `next build`, test:smoke.
 - [ ] **Step 5: Commit**
 
 ```bash
 git add scripts/smoke-routes.ts DECISIONS.md PUNCHLIST.md AGENTS.md
-git commit -m "docs: #304 Estimator in four steps — Phase 1 (D636–D640)
+git commit -m "docs: #305 Estimator in four steps — Phase 1 (D643–D647)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```

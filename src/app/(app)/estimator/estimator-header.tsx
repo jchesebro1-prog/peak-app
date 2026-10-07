@@ -9,7 +9,7 @@ import { fmt } from "./pricing";
 import { HeaderMoreMenu } from "./header-more-menu";
 
 /**
- * #304 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
+ * #305 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
  * step: inline rename, number · Rev, the Quote details panel, blended margin,
  * quoted total, status (read-only — set on Send & track), Save, the next-step control and the ⋯ menu. Wraps
  * onto a second row instead of overflowing on a narrow window.
@@ -250,7 +250,7 @@ export function EstimatorHeader({ s, onActed }: { s: EstimatorState; onActed: (a
                 flexShrink: 0,
               }}
             />
-            {/* #304: read-only here — the status select lives on Send & track. */}
+            {/* #305: read-only here — the status select lives on Send & track. */}
             <span data-testid="est-status" style={{ fontSize: 12.5, fontWeight: 600, color: "#cfd3da" }}>
               {STATUS_LABEL[status] || status}
             </span>

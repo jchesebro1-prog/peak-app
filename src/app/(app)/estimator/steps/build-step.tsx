@@ -19,7 +19,7 @@ import VendorQuoteModal from "../vendor-quote-modal";
 import { PortalPanel } from "../portal-panel";
 
 /**
- * #304 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
+ * #305 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
  * the system cards and every configurator modal. A card's narrative snippet
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
@@ -483,7 +483,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
               onToggleExpand={() => toggleExpand(sec.id)}
               onRename={(name) => renameSystem(sec.id, name)}
               onEditNarrative={() => {
-                // #281/#304: make this system active, open Build package, focus its narrative there.
+                // #281/#305: make this system active, open Build package, focus its narrative there.
                 setActiveId(sec.id);
                 onOpenNarrative();
                 setNarrFocusReq((n) => n + 1);

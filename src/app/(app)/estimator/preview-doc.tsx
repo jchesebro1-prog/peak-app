@@ -13,7 +13,7 @@ import type { PaymentTerms, SpecSection } from "./types";
  * sees here is byte-for-byte what the customer gets. Changing a control marks
  * the quote dirty; the next Save re-renders.
  *
- * #304: two pieces for two steps — PdfOptionsPanel (Build package) and
+ * #305: two pieces for two steps — PdfOptionsPanel (Build package) and
  * PdfPreviewPane (Customer review). The cover block and the Client link moved
  * to their own steps.
  */
@@ -92,10 +92,10 @@ export type PreviewProps = {
   togglePdf: (flag: PdfToggle) => void;
 };
 
-/** #304 — the Build package step's output options (Show on PDF + per-system presentation). */
+/** #305 — the Build package step's output options (Show on PDF + per-system presentation). */
 export type PdfOptionsProps = Omit<PreviewProps, "phone" | "canBuild" | "pdf" | "onPdf" | "onSave" | "saveDisabled" | "dirty">;
 
-/** #304 — the Customer review step's saved PDF and its Save / Download actions. */
+/** #305 — the Customer review step's saved PDF and its Save / Download actions. */
 export type PdfPreviewProps = {
   phone: boolean;
   canBuild: boolean;

@@ -33,7 +33,7 @@ type Props = {
   /** Show only the approver's Approve & send / Send back / Approve only (the Estimator's phone preview). */
   approverOnly?: boolean;
   /** Called with every server result; default = router.refresh().
-   *  action is the button that produced the result (#304). */
+   *  action is the button that produced the result (#305). */
   onSync?: (r: NextStepSync, action: NextStepAction) => void;
   /** Report a refusal; default = an inline red line under the control. */
   onError?: (msg: string) => void;

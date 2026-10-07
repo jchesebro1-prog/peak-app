@@ -15,7 +15,7 @@ const CARD = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 } as const;
 
 /**
- * #304 — Send & track: status and the next step, the Daylite pipeline, the
+ * #305 — Send & track: status and the next step, the Daylite pipeline, the
  * client link (+ revisions) and the client's responses, and the quote's tasks.
  */
 export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextStepAction) => void }) {

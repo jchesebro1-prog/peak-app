@@ -55,7 +55,7 @@ export const STATUS_DOT: Record<string, string> = {
   won: "#1f8a5b",
   lost: "#8c919c",
 };
-/** #304 — the header's read-only status label (the select lives on Send & track). */
+/** #305 — the header's read-only status label (the select lives on Send & track). */
 export const STATUS_LABEL: Record<string, string> = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
 
 /** Overlapping-chevron breadcrumb shape (Daylite stage bar, Task 6). Every

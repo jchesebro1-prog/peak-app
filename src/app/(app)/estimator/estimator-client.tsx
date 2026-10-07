@@ -17,7 +17,7 @@ import { ReviewStep } from "./steps/review-step";
 import { SendStep } from "./steps/send-step";
 
 /**
- * #304 (spec 2026-10-07 §4) — the Estimator shell: one header, four step
+ * #305 (spec 2026-10-07 §4) — the Estimator shell: one header, four step
  * tabs (`?step=`), the banners, and the active step. All quote state lives in
  * useEstimatorState, so switching steps never drops unsaved edits.
  */

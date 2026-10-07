@@ -1,7 +1,7 @@
 import type { NextStepAction } from "@/lib/quote-next-step";
 
 /**
- * #304 (spec 2026-10-07 §4) — the Estimator's four steps. Pure and
+ * #305 (spec 2026-10-07 §4) — the Estimator's four steps. Pure and
  * client-safe: the shell reads `?step=` through parseStep, writes it through
  * stepSearch, and moves after a next-step action through stepAfterAction.
  */

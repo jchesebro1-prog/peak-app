@@ -8,7 +8,7 @@ import { ReviewCostSummary } from "../review-cost-summary";
 import type { EstimatorState } from "../use-estimator-state";
 
 /**
- * #304 — Customer review: the saved customer PDF (main), the review actions
+ * #305 — Customer review: the saved customer PDF (main), the review actions
  * and the internal cost summary (right, desktop). A phone shows only the PDF,
  * plus the approver's decision when one is waiting.
  */

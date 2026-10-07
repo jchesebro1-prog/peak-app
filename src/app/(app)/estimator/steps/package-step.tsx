@@ -9,7 +9,7 @@ import { PAYMENT_TERMS } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import type { EstimatorState } from "../use-estimator-state";
 
-/** #304 — Build package: what the client receives. Narrative for the picked system (left), output options (right). */
+/** #305 — Build package: what the client receives. Narrative for the picked system (left), output options (right). */
 export function PackageStep({ s }: { s: EstimatorState }) {
   const {
     canWriteNarrativeLibrary,

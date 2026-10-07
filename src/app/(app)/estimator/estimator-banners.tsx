@@ -7,7 +7,7 @@ import type { EstimatorState } from "./use-estimator-state";
 import { tierRepriceMessage } from "./tier-reprice";
 
 /**
- * #304 — the banners under the step tabs (next-step note, action error with
+ * #305 — the banners under the step tabs (next-step note, action error with
  * the gate-refusal way through, save notice, purchase perks, Move system
  * result, tier re-price). Shown on every step.
  */
