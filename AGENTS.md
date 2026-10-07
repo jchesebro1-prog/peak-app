@@ -770,5 +770,21 @@ See `.env.example`.
     signed-out submit), and the open questions (Rev numbering, BOM quantities,
     cover heading). Punch item #301.
 
+41. ✅ **Model-number SKUs** (#304, D636–D642) — Biamp/EAW/Meyer/Symetrix order-number
+    SKUs (`80-0043`) become `Brand:Model` (`Symetrix:Jupiter 4`) from ChatGPT's crosswalk
+    sheets via Catalog → **Model numbers** (`/catalog/model-numbers`, admin: upload →
+    Preview → Apply, resumable 45 s batches, Fix references). A real rename: new doc +
+    retired doc with `renamedTo` (catalog get/getMany follow it; `getManyBySku`),
+    `formerSkus` on the live part, MFR P/N keeps the order #, log blob
+    `catalog_sku_renames`. Pure rules in `src/lib/catalog-rename/` (`sku.ts` modelSku /
+    partModel / lineModel / partSearchHaystack, `plan.ts`, `rewrite.ts`,
+    `import-resolve.ts`, `steps.ts`); engine `apply.ts` rewrites every live reference
+    (quotes, carts, procurement, spec docs, fixtures/racks, Grid symbols/projects,
+    settings blobs, doc/accessory links) and never frozen history. Every part search
+    matches Model # and former SKUs; customer documents print the Model # only;
+    importers and history-copying writers follow renames. No migration. Remaining is
+    Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
+    sheets come back (PUNCHLIST #304).
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

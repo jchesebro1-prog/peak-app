@@ -10962,3 +10962,52 @@ Gates: `tsc --noEmit` 0 errors; `test:specs` 12,566 PASS / 0 FAIL (12,549 + 17 n
 touched `src` files (the 50k-line spec harness overflows eslint's react-hooks rule stack, so it is not linted); `test:smoke`
 ALL PASSED. Browser-checked at 1000×700 on the dev server: header and Part column stay pinned while the box scrolls both
 ways, the horizontal scrollbar sits on screen, hiding Spec sheet + Manual narrows the table and survives a reload.
+
+## 304. Catalog — model-number SKUs: replace order-number SKUs with `Brand:Model` (Biamp, EAW, Meyer Sound, Symetrix) — DONE 2026-10-07 (D636–D642)
+
+**Asked by Jeff 2026-10-07:** "Can we add to the catalog to have model number and part number? Then we can fix the biamp and
+EAW issue where they list part number but their model number is what we all know." In chat: **replace the SKU** with the
+model, keep the old number searchable, and estimates show only Model #s. The catalog already had a Model # field
+(`manufacturerModelNumber`, "MFR M/N") that almost nothing read.
+
+What changed:
+- **Catalog → Model numbers** (`/catalog/model-numbers`, admin): upload ChatGPT's filled crosswalk
+  (`output/Peak model number crosswalk - <Mfr> filled <date>.xlsx`, sheet "Crosswalk") → Preview → **Apply**. Each part gets
+  SKU `Brand:Model` (`Symetrix:Jupiter 4`), Model # = the model, MFR P/N = the order # (D636, D638). Old doc retired with
+  `renamedTo`; new part carries `formerSkus`; log in blob `catalog_sku_renames`. **Fix references** re-runs the sweeps.
+- **Every live reference moves** (D637): quote specs (Estimator sections, key products, fixture components/options, curtain
+  fabric, Grid `spec.lines`), project procurement, portal carts, spec documents, fixtures + racks, Grid symbols / placements /
+  wire runs / riser links / accessories / Auto overrides, the Equipment map, track series, curtain mounts, rack defaults,
+  Grid favorites/recent, Drive photo sync, wire types, part-to-part refs, document/photo/drawing links and accessory links.
+  Frozen history (sent revisions, Grid revisions, generated specs) keeps the old SKU and resolves through the redirect.
+- **Search** everywhere matches Model #, MFR P/N and former SKUs — catalog page, Estimator picker (+ Assembly Builder,
+  Equipment map), ⌘K, Grid library/palette/accessories, portal, Datasheets, spec builder picker, typeahead, Displays API.
+- **Customer documents print the Model # only** (D640); staff rows show `Jupiter 4 · 80-0043`.
+- **Importers** update a renamed part from a price list keyed by the old order # (D639); writers that copy history forward
+  (Load/Copy system, restores, Estimator save, portal) follow renames (D641).
+
+No migration (JSONB fields + one blob).
+
+**Run it on production (Jeff-gated) — in this order:**
+1. Merge/deploy is done; **don't press Apply or Fix references on a preview deploy** — previews write the production DB.
+2. `npm run db:export` (backup). **No instant rollback past the first Apply**: older code can't follow `renamedTo`.
+3. If `npm run fixtures:convert` (#210) is still pending on production, run it first (or press Fix references after it).
+4. Catalog → Model numbers → upload `Peak model number crosswalk - Symetrix filled 2026-10-07.xlsx` → **Preview**. Expect 88
+   renames + 1 "no model" (`12-0002`, rack ears). Check the skipped list, then **Apply** while nobody is quoting (an open
+   Estimator tab is rewritten on its next save anyway). Not during the daily Drive photo sync.
+5. Biamp, EAW and Meyer: ChatGPT's filled sheets haven't come back yet (only Symetrix exists in `output/`). Same steps when
+   they do; the 220 Biamp rows I pre-filled from descriptions stay out until ChatGPT confirms them.
+6. Expect sent/won quotes containing a renamed part to show their PDF as re-rendering once ("Out of date"), by design.
+7. Tell whoever reads the Displays API that SKUs change; `/api/v1/displays/catalog/<old sku>` keeps resolving.
+
+**Dry run (2026-10-07, a scratch copy of the local DB):** the local book stores these parts as `Symetrix:20-0026` (production
+uses bare `20-0026`, as the sheet does) — the planner matches both. 88 renamed, every reference pass ran, re-plan → 88
+"already", ~1 s. Model names are ChatGPT's text as written (e.g. "Mixer App- 5 Licenses") — fix a row in the sheet and it
+re-plans as "Already renamed to …"; rename that part by hand if needed.
+
+Deferred (minor): a wrong-case old SKU doesn't follow the redirect; concurrent rename-log appends aren't merged (one admin);
+two old-and-new duplicate rows in a spec document or cart aren't merged; unlinked Grid symbols carry no Model #; an approved
+quote saved from an open tab mid-run may need re-approval.
+
+Gates: `tsc --noEmit` 0 errors; `test:specs` 12,898 PASS / 0 FAIL (333 "#304" checks); `next build` OK; eslint clean on the
+touched `src` files.

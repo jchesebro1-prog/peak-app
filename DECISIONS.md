@@ -9535,3 +9535,70 @@ it. Margin, not markup: sell = `round2(cost ÷ 0.65)`, so $100 → $153.85 (`cus
 margin readout beside the field is unchanged. Add to catalog now **refuses a SKU already in the catalog** instead of
 merging over it (the part's own description, cost, list, category and manufacturer are never rewritten from an estimate);
 the message points at "+ Add part from catalog". A soft-deleted part reads as absent, so its SKU can be re-created.
+
+## D636. Model-number SKUs are `Brand:Model` (#304, 2026-10-07)
+
+Jeff's rule: the easy-to-remember value is always the model number. Biamp, EAW, Meyer Sound and Symetrix parts listed under
+order numbers (`80-0043`) get a new SKU **`Brand:Model`** (`Symetrix:Jupiter 4`), the Import hub's own `ETC:S4LED-S2`
+shape, which can't collide across brands. `modelSku` (`src/lib/catalog-rename/sku.ts`): whitespace collapsed; `/ \ # ? %`
+and control characters become `-` in both halves, and the brand also loses `:` (the separator is the first colon); null
+when either half is blank or the SKU passes **60** characters (the tightest stored SKU cap, wire types). The Model # field
+keeps the manufacturer's exact spelling — only the SKU is sanitized.
+
+## D637. A real rename, not an alias layer; frozen history resolves through a redirect (#304, 2026-10-07)
+
+Renaming writes a new catalog doc under the new SKU (a direct copy — `pricedAt`, documents, ports, rack data, narrative
+and spec fields carried, never re-stamped) and retires the old one: soft-deleted with **`renamedTo`**. The live part carries
+**`formerSkus`**. `catalog.get` / `getMany` / `getManyAnyCase` follow `renamedTo` (≤ 8 hops, cycle-safe; a never-renamed
+SKU costs nothing extra) and `getManyBySku` keys results by the SKU asked for. Every live reference is rewritten by the
+engine (`src/lib/catalog-rename/apply.ts`); sent quote revisions, Grid revisions, generated specs, spec record revisions and
+the `settings.fixtureAssemblies` backup keep the old SKU on purpose and resolve through the redirect (package page, photos,
+datasheets, cut sheets, Displays API, `/catalog?edit=`). An alias layer that translates at ~60 read sites was rejected:
+every future feature would have to know about it. Store writes through an old SKU (`mergeUpsert`, `upsert`,
+`saveProductParagraph`) land on the live part and never revive the tombstone; `remove(old)` does nothing and the delete
+action says so. The rename log is the blob `catalog_sku_renames` (from, to, model, at, by) — both the audit trail and the
+map every reference pass reads. `patchDoc` reads then writes, so a sweep narrows, not closes, the window with a concurrent
+edit; an open Estimator tab that saves old SKUs is rewritten on save (D641).
+
+## D638. On rename, MFR P/N keeps the order number (#304, 2026-10-07)
+
+The renamed part's `manufacturerPartNumber` stays what it was, else the old SKU's text after the first `:` (else the old SKU)
+— so `Symetrix:20-0026` gives P/N `20-0026`. Price lists, photo/spec matching and the staff label ("Jupiter 4 · 80-0043")
+keep working off it. `manufacturerModelNumber` = the model.
+
+## D639. Importers find a renamed part by its old number; nothing else changes (#304, 2026-10-07)
+
+Both catalog importers and the manufacturer import guard resolve an incoming row: exact live SKU → a live part with the same
+normalized SKU → a part whose `formerSkus` holds it → the rename log → the **unique** same-manufacturer **renamed** part whose
+MFR P/N equals the row's P/N (or the row SKU when the row has no P/N) (`src/lib/catalog-rename/import-resolve.ts`). The P/N
+step is limited to renamed parts so a never-renamed catalog imports exactly as before. A resolved row updates only
+importer-owned fields; it never writes another part's SKU, Model # or former SKUs. Next year's Biamp list, keyed by order
+number, updates the renamed parts — no duplicates, no revived tombstones, no "no overlap" refusal.
+
+## D640. Customer documents print the Model # only (#304, 2026-10-07)
+
+`partModel` = Model # → MFR P/N → SKU after `Brand:` → SKU; on a quote line, `lineModel` = the line's own Model # → the
+part's Model # → the line's P/N → `partModel(part)` (the line copy wins, as #301 already did). Applied to the package BOM
+("Model" column), portal tiles / part sidebar (the order # is no longer sent to the browser) / fixture rows / cart, cut-sheet
+hardware, rack schedules + CSV + elevation labels, the Grid drawing-set schedule, `/schedule`, spec Word model column and the
+parts CSV. The estimate PDF and cover already print descriptions only. Staff rows (catalog list, Estimator picker, ⌘K,
+Datasheets) show `Jupiter 4 · 80-0043`; the catalog list keeps the SKU too. Every part search matches Model #, MFR P/N and
+former SKUs (`partSearchHaystack`).
+
+## D641. Writers that copy history forward follow renames (#304, 2026-10-07)
+
+Load system / Copy system, quote revision restore, Grid revision restore and every Estimator save pass the copied/saved spec
+through the rename map (`liveRenameRefs`, `quoteSpecFollowingRenames`), so a pre-rename revision never puts an old SKU back
+into live data; the portal index maps former SKUs to the live part (old `?part=` links, carts). Revision snapshots stay
+byte-identical.
+
+## D642. The rename tool is admin-only and rewrites quotes under the row lock (#304, 2026-10-07)
+
+Catalog → **Model numbers** (`/catalog/model-numbers`, `manage_users`): upload the crosswalk workbook (sheet "Crosswalk";
+Manufacturer, SKU, Model # required) → Preview (every row gets one outcome: rename / already / no model / not found /
+manufacturer mismatch / bad model / taken / duplicate / same) → Apply in resumable 45 s batches → reference passes; **Fix
+references** re-runs the passes alone. The server re-plans every call; client rows are re-cleaned (5,000 rows, 2,048 chars).
+A sheet SKU also matches a same-manufacturer `Brand:OrderNo` SKU. Quotes are rewritten through a row-locked writer that leaves
+`updatedAt` alone, re-stamps an approval that still matched (a SKU swap isn't a price change) and marks the live PDF stale
+so it re-renders with the model. A Grid symbol moves only when its own id is a renamed SKU (user-made symbols stay).
+Two variants that share one model in the sheet are both skipped — give each its own model (the color/finish).
