@@ -32,8 +32,9 @@ type Props = {
   variant: "toolbar" | "panel";
   /** Show only the approver's Approve & send / Send back / Approve only (the Estimator's phone preview). */
   approverOnly?: boolean;
-  /** Called with every server result; default = router.refresh(). */
-  onSync?: (r: NextStepSync) => void;
+  /** Called with every server result; default = router.refresh().
+   *  action is the button that produced the result (#304). */
+  onSync?: (r: NextStepSync, action: NextStepAction) => void;
   /** Report a refusal; default = an inline red line under the control. */
   onError?: (msg: string) => void;
   /** Runs before any action (the Estimator saves unsaved edits first): resolves to the
@@ -184,7 +185,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
   /** `fn(shown)` gets the version the viewer is deciding: view.asOf, or — #287 —
    *  the pre-save's own `updatedAt`, since the viewer's just-saved edits are then
    *  the version shown. `versioned`: the action carries it. */
-  const run = (fn: (shown: number) => Promise<NextStepSync>, opts: { skipBefore?: boolean; versioned?: boolean } = {}) => {
+  const run = (action: NextStepAction, fn: (shown: number) => Promise<NextStepSync>, opts: { skipBefore?: boolean; versioned?: boolean } = {}) => {
     setMenu("closed");
     setErr(null);
     startTransition(async () => {
@@ -204,7 +205,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
         const keepShown = !!opts.skipBefore || !!opts.versioned;
         const r = !res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: shown } } : res;
         if (!r.ok) report(r.error || "That didn't go through.");
-        (onSync ?? (() => router.refresh()))(r);
+        (onSync ?? (() => router.refresh()))(r, action);
       } catch (e) {
         // A dropped connection or a thrown action must not reach the error boundary.
         console.error("[QuoteNextStep]", e);
@@ -227,26 +228,26 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
     if (!text || !modal) return;
     const m = modal;
     closeModal();
-    if (m === "sendBack") run(() => nsSendBackAction(quoteId, text, view.asOf), { skipBefore: true });
-    else run(() => nsAttestAction(quoteId, text));
+    if (m === "sendBack") run("sendBack", () => nsSendBackAction(quoteId, text, view.asOf), { skipBefore: true });
+    else run("attest", () => nsAttestAction(quoteId, text));
   };
 
   const dispatch = (action: NextStepAction) => {
     switch (action) {
       case "submit":
-        return run(() => nsSubmitAction(quoteId, null));
+        return run("submit", () => nsSubmitAction(quoteId, null));
       case "send":
         // #287: Approve & send → decides the shown version with no pre-save (like Approve);
         // a non-owner's Send carries it too (after a pre-save, the version it just stored).
-        if (view.approverMode) return run(() => nsSendAction(quoteId, view.asOf), { skipBefore: true });
-        if (!view.viewerIsOwner) return run((shown) => nsSendAction(quoteId, shown), { versioned: true });
-        return run(() => nsSendAction(quoteId));
+        if (view.approverMode) return run("send", () => nsSendAction(quoteId, view.asOf), { skipBefore: true });
+        if (!view.viewerIsOwner) return run("send", (shown) => nsSendAction(quoteId, shown), { versioned: true });
+        return run("send", () => nsSendAction(quoteId));
       case "approve":
         // In review: the shown version, no pre-save. #287 Approve only on a draft saves the approver's edits first.
-        if (view.approverMode) return run(() => nsApproveAction(quoteId, view.asOf), { skipBefore: true });
-        return run((shown) => nsApproveAction(quoteId, shown), { versioned: true });
+        if (view.approverMode) return run("approve", () => nsApproveAction(quoteId, view.asOf), { skipBefore: true });
+        return run("approve", (shown) => nsApproveAction(quoteId, shown), { versioned: true });
       case "withdraw":
-        return run(() => nsWithdrawAction(quoteId));
+        return run("withdraw", () => nsWithdrawAction(quoteId));
       case "assign":
         return setMenu("assign");
       case "sendBack":
@@ -377,7 +378,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
                           type="button"
                           role="menuitem"
                           disabled={busy}
-                          onClick={() => run(() => nsSubmitAction(quoteId, name))}
+                          onClick={() => run("assign", () => nsSubmitAction(quoteId, name))}
                           style={MENU_ITEM}
                         >
                           {name}

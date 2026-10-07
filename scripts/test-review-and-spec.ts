@@ -52512,3 +52512,11 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).send.label === "Ready to send", "#304 readiness: an approved draft is Ready to send");
   ok(e304Ready({ ...base, sections: [sec()] }).send.label === "—", "#304 readiness: an unapproved draft shows —");
 }
+
+/* #304 — QuoteNextStep hands the action to onSync so the Estimator can move steps. */
+{
+  const ns304 = readFileSync(join(process.cwd(), "src/components/quote-review/quote-next-step.tsx"), "utf8");
+  ok(/onSync\?: \(r: NextStepSync, action: NextStepAction\) => void;/.test(ns304), "#304 next step: onSync receives the action");
+  ok(/const run = \(action: NextStepAction, fn:/.test(ns304) && /\(onSync \?\? \(\(\) => router\.refresh\(\)\)\)\(r, action\);/.test(ns304), "#304 next step: run threads its action into onSync");
+  ok(!/\brun\(\(\)/.test(ns304) && !/\brun\(\(shown\)/.test(ns304), "#304 next step: every run(...) call names its action first");
+}
