@@ -24,6 +24,7 @@ type QuoteSpecDoc = {
   name?: string;
   spec?: {
     sections?: Array<{
+      alternate?: true;
       items?: Array<{
         sku?: string;
         desc?: string;
@@ -69,6 +70,8 @@ export async function bomFromQuote(
   };
   const vendorQuotes = new Map((q.vendorQuotes || []).map((vq) => [vq.id, vq]));
   for (const sec of q.spec?.sections || []) {
+    // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
+    if (sec.alternate) continue;
     for (const it of sec.items || []) {
       // Optional-scope lines are not part of the base bid; labor lines
       // (mobilizations, shop & engineering, allowance, performance bonus)

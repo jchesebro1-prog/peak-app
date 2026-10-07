@@ -82,6 +82,8 @@ export function attributedLines(
   };
   for (const sec of sections) {
     if (!sec || sec.kind === "labor" || !Array.isArray(sec.items)) continue;
+    // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
+    if (sec.alternate) continue;
     for (const it of sec.items as SpecItem[]) {
       if (!it || it.labor || it.laborOverhead || it.laborTravel || it.option || it.allowance || it.por || isRewardCreditItem(it)) continue;
       const lineQty = num(it.qty);

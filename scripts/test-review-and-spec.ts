@@ -11379,6 +11379,7 @@ seeded()
   .then(() => specRecordsImportFixRound1AsyncChecks())
   .then(() => specRecordMatchAsyncChecks())
   .then(() => specRecordsBomSeamAsyncChecks())
+  .then(() => p2bConsumersAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
@@ -54528,4 +54529,71 @@ import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
   const rawT = p2bTotals(r282bWithout([stamped]) as never, 0);
   const fixedT = p2bTotals(r282bWithout([p2bGroups.withoutGroupMeta(stamped)]) as never, 0);
   ok(rawT.grand === 0 && fixedT.grand > 0, "#P2b core fix: a stamped section's sell lands in alt (grand 0) until withoutGroupMeta strips it, then grand > 0");
+}
+
+/* ---- #P2b consumers — an Alternate group's systems are out of the base bid, exactly like `option` lines ----
+ * Two fixtures per consumer, identical except one section's `alternate: true`. */
+import { hasLaborLine as p2bcHasLabor } from "@/lib/review-limits";
+import { equipmentSold as p2bcSold } from "@/lib/dashboard/metrics";
+import { attributedLines as p2bcMfrLines } from "@/lib/manufacturer-analytics";
+import { partsListRows as p2bcParts } from "@/app/(app)/estimator/parts-csv";
+import { estimatorCurtains as p2bcCurtains } from "@/lib/curtain-cut-sheets/estimator-curtains";
+{
+  const alt = (on: boolean) => (on ? { alternate: true as const } : {});
+  const mkSec = (id: string, items: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+
+  // review-limits hasLaborLine: a labor line in an alternate section does not count (same as an option labor line).
+  const laborItem = { id: 1, sku: "LAB", desc: "Install", qty: 1, unit: "ea", cost: 50, price: 100, labor: true };
+  const laborSpec = (a: boolean, opt = false) => ({ sections: [mkSec("s1", [{ id: 2, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 }]), mkSec("s2", [{ ...laborItem, ...(opt ? { option: true } : {}) }], alt(a))] });
+  ok(p2bcHasLabor(laborSpec(false)) && !p2bcHasLabor(laborSpec(true)), "#P2b consumers: hasLaborLine ignores a labor line in an Alternate system");
+  ok(p2bcHasLabor(laborSpec(false)) && !p2bcHasLabor(laborSpec(false, true)) && p2bcHasLabor(laborSpec(false)) !== p2bcHasLabor(laborSpec(true)), "#P2b consumers: ...exactly as it ignores an option labor line");
+  ok(p2bcHasLabor({ sections: [mkSec("s1", [laborItem]), mkSec("s2", [laborItem], alt(true))] }), "#P2b consumers: hasLaborLine still counts an In-total labor line beside an Alternate one");
+
+  // dashboard equipmentSold
+  const NOW = Date.UTC(2026, 9, 1);
+  const soldQ = (a: boolean) => ({ id: "Q-P2BC", status: "won", createdAt: NOW - DAY, updatedAt: NOW, history: [{ at: NOW, to: "won" }], spec: { sections: [
+    mkSec("s1", [{ sku: "A", desc: "A", qty: 2, price: 100 }]),
+    mkSec("s2", [{ sku: "B", desc: "B", qty: 3, price: 50 }], alt(a)),
+  ] } }) as never;
+  const soldTotal = (a: boolean) => p2bcSold([soldQ(a)], () => "Cat", NOW - DAY, NOW + DAY).reduce((s, c) => s + c.value, 0);
+  ok(soldTotal(false) === 350 && soldTotal(true) === 200, "#P2b consumers: equipmentSold leaves an Alternate system out (350 → 200)");
+  const soldOpt = p2bcSold([({ id: "Q", status: "won", updatedAt: NOW, history: [{ at: NOW, to: "won" }], spec: { sections: [mkSec("s1", [{ sku: "A", desc: "A", qty: 2, price: 100 }, { sku: "B", desc: "B", qty: 3, price: 50, option: true }])] } }) as never], () => "Cat", NOW - DAY, NOW + DAY).reduce((s, c) => s + c.value, 0);
+  ok(soldOpt === soldTotal(true), "#P2b consumers: ...the same figure as the equivalent option line");
+
+  // manufacturer analytics attributedLines
+  const mParts = new Map([["A", { sku: "A", mfr: "ETC", desc: "A" }], ["B", { sku: "B", mfr: "ETC", desc: "B" }]]);
+  const mQ = (a: boolean) => ({ id: "Q-M", status: "won", createdAt: NOW, updatedAt: NOW, history: [], spec: { sections: [
+    mkSec("s1", [{ sku: "A", qty: 2, cost: 10, price: 20 }]),
+    mkSec("s2", [{ sku: "B", qty: 3, cost: 10, price: 20 }], alt(a)),
+  ] } }) as never;
+  const mLines = (a: boolean) => p2bcMfrLines(mQ(a), mParts as never, (k) => k).map((l) => l.sku).join();
+  ok(mLines(false) === "A,B" && mLines(true) === "A", "#P2b consumers: manufacturer analytics attributedLines skips an Alternate system");
+
+  // estimator parts list (purchasing CSV)
+  const pSecs = (a: boolean) => [
+    mkSec("s1", [{ id: 1, sku: "A", desc: "A", qty: 2, unit: "ea", cost: 10, price: 20 }], { name: "Base" }),
+    mkSec("s2", [{ id: 2, sku: "B", desc: "B", qty: 3, unit: "ea", cost: 10, price: 20 }], { name: "Alt", ...alt(a) }),
+  ] as never;
+  const pSkus = (a: boolean) => p2bcParts(pSecs(a), [], {}).map((r) => r.sku).sort().join();
+  ok(pSkus(false) === "A,B" && pSkus(true) === "A", "#P2b consumers: the purchasing parts list skips an Alternate system");
+
+  // curtain cut sheets: an alternate-section curtain lands in skippedOptional, like an option curtain
+  const cSecs = (a: boolean, opt = false) => [mkSec("s1", [], {}), mkSec("s2", [{ id: 5, sku: "CRT", desc: "Main — ?", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, ...(opt ? { option: true } : {}) }], alt(a))] as never;
+  const skipped = (a: boolean, opt = false) => p2bcCurtains(cSecs(a, opt), [], []).skippedOptional.length;
+  ok(skipped(false) === 0 && skipped(true) === 1 && skipped(false, true) === 1, "#P2b consumers: an Alternate system's curtain is skipped as optional, like an option curtain");
+  ok(p2bcCurtains(cSecs(true), [], []).curtains.length === 0 && p2bcCurtains(cSecs(true), [], []).unreadable.length === 0, "#P2b consumers: ...and is neither read nor reported unreadable");
+}
+
+async function p2bConsumersAsyncChecks(): Promise<void> {
+  // specs/quote-bom bomFromQuote reads a stored quote doc, so it needs the doc store.
+  const { upsertDoc } = await import("@/db/doc-store");
+  const { bomFromQuote } = await import("@/lib/specs/quote-bom");
+  const base = [{ items: [{ sku: "BASE-1", desc: "Base", qty: 1 }] }];
+  await upsertDoc("quotes", { id: "Q-P2BC-0", name: "no alt", spec: { sections: [...base, { items: [{ sku: "ALT-1", desc: "Alt", qty: 2 }] }] } } as never);
+  await upsertDoc("quotes", { id: "Q-P2BC-1", name: "alt", spec: { sections: [...base, { alternate: true, items: [{ sku: "ALT-1", desc: "Alt", qty: 2 }] }] } } as never);
+  await upsertDoc("quotes", { id: "Q-P2BC-2", name: "opt", spec: { sections: [...base, { items: [{ sku: "ALT-1", desc: "Alt", qty: 2, option: true }] }] } } as never);
+  const skus = async (id: string) => { const r = await bomFromQuote(id); return r.ok ? r.rows.map((x) => x.sku).join() : "ERR"; };
+  ok((await skus("Q-P2BC-0")) === "BASE-1,ALT-1" && (await skus("Q-P2BC-1")) === "BASE-1", "#P2b consumers: bomFromQuote (bid-spec BOM) leaves an Alternate system out");
+  ok((await skus("Q-P2BC-2")) === (await skus("Q-P2BC-1")), "#P2b consumers: ...exactly as it leaves an option line out");
 }

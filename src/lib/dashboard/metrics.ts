@@ -116,6 +116,7 @@ export function projectedProfit(projects: ProjectRecord[]): { value: number; pro
 type SpecLike = {
   sections?: Array<{
     kind?: string;
+    alternate?: true;
     items?: Array<{
       sku?: string;
       desc?: string;
@@ -144,6 +145,8 @@ export function equipmentSold(
     if (at < a || at >= b) continue;
     for (const s of ((q.spec as SpecLike | undefined)?.sections) || []) {
       if (s.kind === "labor") continue;
+      // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
+      if (s.alternate) continue;
       for (const it of s.items || []) {
         if (it.labor || it.option || isRewardCreditItem(it)) continue;
         const sku = it.sku || "";

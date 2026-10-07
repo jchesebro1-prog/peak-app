@@ -142,7 +142,9 @@ export function hasLaborLine(spec: unknown): boolean {
   const s = spec as { sections?: unknown; lines?: unknown; fromDesign?: unknown };
   if (Array.isArray(s.sections)) {
     return s.sections.some((sec) => {
-      const so = (sec && typeof sec === "object" ? sec : {}) as { kind?: unknown; items?: unknown };
+      const so = (sec && typeof sec === "object" ? sec : {}) as { kind?: unknown; items?: unknown; alternate?: unknown };
+      // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
+      if (so.alternate) return false;
       const items = Array.isArray(so.items) ? (so.items as LineLike[]) : [];
       return items.some((it) => !!it && !it.option && (so.kind === "labor" || !!it.labor) && estimatorExtSell(it) > 0);
     });

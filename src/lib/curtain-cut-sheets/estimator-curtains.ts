@@ -107,7 +107,8 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
       if (!it.curtain || isRewardCreditItem(it)) continue;
       const lineRef: CurtainLineRef = { ref: `${sec.id}/line-${it.id}`, where: sec.name || "System", desc: it.desc || "", sectionId: sec.id, lineId: it.id };
       const qty = lineQty(it.qty);
-      if (it.option || qty == null) {
+      // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
+      if (it.option || sec.alternate || qty == null) {
         read.skippedOptional.push(lineRef);
         continue;
       }

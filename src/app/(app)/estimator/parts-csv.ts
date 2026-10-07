@@ -77,6 +77,8 @@ function expand(
   const out: PartsListRow[] = [];
   for (const section of sections) {
     if (section.kind === "labor") continue;
+    // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
+    if (section.alternate) continue;
     const room = section.room?.trim() || defaultRoom.trim();
     const system = section.name;
     // #279: every part's sell scales by the system's price (freight included) ÷ its lines' sell.
