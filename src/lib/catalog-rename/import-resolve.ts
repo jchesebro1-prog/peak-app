@@ -34,17 +34,24 @@ function claim(m: Map<string, string | null>, k: string, sku: string): void {
  * 1. an exact live SKU;
  * 2. a live part whose `formerSkus` lists the row SKU (normalized);
  * 3. the rename log, chain followed, to a live SKU (exact, then normalized);
+ *    — a step 2/3 hit yields to the UNIQUE live part whose own SKU normalizes
+ *    to the row SKU's key: a live part's SKU outranks another part's former
+ *    SKU. (Without a 2/3 hit, a normalized-only live match stays the
+ *    importer's own rule — the hub's `ci`; the page is exact.)
  * 4. the UNIQUE live part of the same manufacturer (mfrKey) whose normalized
- *    MFR P/N equals the normalized row SKU or row MFR P/N.
+ *    MFR P/N equals the row's MFR P/N when the row carries one — else the
+ *    row SKU. A row P/N is never second-guessed by its SKU.
  * Anything else — including an ambiguous step 2/4 — is null.
  */
 export function buildImportResolver(live: ResolvablePart[], renames: ReadonlyMap<string, string>): ImportResolver {
   const liveSkus = new Set<string>();
+  const byLiveKey = new Map<string, string | null>(); // normalized live SKU → sku
   const byFormer = new Map<string, string | null>();
   const byMfrPn = new Map<string, string | null>(); // `${mfrKey}\u0000${pnKey}` → sku
   for (const p of live) {
     if (!p?.sku) continue;
     liveSkus.add(p.sku);
+    claim(byLiveKey, key(p.sku), p.sku);
     for (const f of p.formerSkus ?? []) claim(byFormer, key(f), p.sku);
     const mk = key(p.mfr);
     const pk = key(p.manufacturerPartNumber);
@@ -67,20 +74,13 @@ export function buildImportResolver(live: ResolvablePart[], renames: ReadonlyMap
     const k = key(sku);
     if (sku && liveSkus.has(sku)) return sku; // 1
     if (k) {
-      const former = byFormer.get(k); // 2
-      if (former) return former;
-      const renamed = followRename(renames.get(sku)) ?? followRename(renamesByKey.get(k)); // 3
-      if (renamed) return renamed;
+      const hit = byFormer.get(k) || followRename(renames.get(sku)) || followRename(renamesByKey.get(k)); // 2, 3
+      if (hit) return byLiveKey.get(k) || hit; // a live SKU in another spelling outranks a former SKU
     }
     const mk = key(row?.mfr); // 4
     if (!mk) return null;
-    const hits = new Set<string | null>();
-    for (const pk of new Set([k, key(row?.manufacturerPartNumber)])) {
-      if (!pk) continue;
-      const hit = byMfrPn.get(`${mk}\u0000${pk}`);
-      if (hit !== undefined) hits.add(hit);
-    }
-    if (hits.size !== 1) return null;
-    return [...hits][0];
+    const pk = key(row?.manufacturerPartNumber) || k;
+    if (!pk) return null;
+    return byMfrPn.get(`${mk}\u0000${pk}`) ?? null;
   };
 }

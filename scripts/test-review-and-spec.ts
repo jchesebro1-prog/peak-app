@@ -10911,7 +10911,9 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   ok(r({ sku: "NEW-9", mfr: "etc", manufacturerPartNumber: "7060-a" }) === "ETC-S4", "#302 import resolve: same manufacturer (mfrKey) + MFR P/N equal to the row's MFR P/N, normalized");
   ok(r({ sku: "7060A", mfr: "Chauvet" }) === null && r({ sku: "7060A" }) === null, "#302 import resolve: a different (or no) manufacturer never matches on P/N");
   ok(r({ sku: "7061A", mfr: "ETC" }) === null, "#302 import resolve: two parts of one manufacturer sharing a normalized P/N is ambiguous → null");
-  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "7061A" }) === null, "#302 import resolve: row SKU and row P/N naming two different parts is ambiguous → null");
+  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "7061A" }) === null, "#302 import resolve: a row P/N is matched on its own (here an ambiguous P/N → null), never by the row SKU");
+  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "9999" }) === null, "#302 import resolve: row SKU 7060A + row P/N 9999 does NOT resolve to the part whose P/N is 7060A — a carried P/N is the only P/N key");
+  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "  " }) === "ETC-S4", "#302 import resolve: a blank row P/N falls back to matching the row SKU");
   ok(r({ sku: "BRAND-NEW", mfr: "ETC" }) === null && r({ sku: "" }) === null, "#302 import resolve: no match is a new part (null)");
   ok(r({ sku: "plain-1" }) === null, "#302 import resolve: step 1 is exact — case-insensitive matching stays the importer's own rule");
   // The import guard counts resolved rows as overlap (a renamed manufacturer's
@@ -10928,6 +10930,21 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   const liveX = [{ sku: "ETC-S4", mfr: "ETC" }, { sku: "Symetrix:Odd", mfr: "Symetrix", formerSkus: ["ETC S4"] }];
   const ciFirst = checkManufacturer({ mfr: "ETC", fileSkus: ["etc-s4"], catalog: liveX, resolve: cr302Resolver(liveX, new Map()) });
   ok(ciFirst.ok && ciFirst.overlap === 1, "#302 import guard: a SKU already on file in any spelling is judged as before — the resolver only sees rows that match nothing");
+  // The guard passes each row's P/N to the resolver: a file that matches this
+  // manufacturer only through its MFR P/N column is overlap, not "wrong file".
+  const pnOnly = checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1", "NEW-ORDER-2"], filePns: ["80 0050", ""], catalog: cat302, resolve: r });
+  ok(pnOnly.ok && pnOnly.overlap === 1, "#302 import guard: a row matching only by its MFR P/N column counts as overlap");
+  ok(!checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1"], catalog: cat302, resolve: r }).ok, "#302 import guard: the same file without its P/N column still reads as no-overlap");
+  const grpPn = checkManufacturerGroups(groupRowsByManufacturer([{ mfr: "Symetrix", sku: "NEW-ORDER-1", pn: "80-0050" }, { mfr: "Symetrix", sku: "NEW-ORDER-3" }]), cat302, r);
+  ok(grpPn[0].result.ok && grpPn[0].result.overlap === 1, "#302 import guard: groupRowsByManufacturer carries each row's P/N through checkManufacturerGroups");
+  // A live part whose SKU normalizes to the row SKU outranks another part's
+  // former SKU / rename-log entry (steps 2/3) — in both importers.
+  const liveY = [{ sku: "AB-12", mfr: "X" }, { sku: "X:Model", mfr: "X", formerSkus: ["ab 12"] }];
+  const rY = cr302Resolver(liveY, new Map([["ab.12", "X:Model"]]));
+  ok(rY({ sku: "ab12" }) === "AB-12", "#302 import resolve: a live SKU in another spelling outranks another part's former SKU");
+  ok(rY({ sku: "ab.12" }) === "AB-12", "#302 import resolve: a live SKU in another spelling outranks a rename-log entry");
+  ok(cr302Resolver([{ sku: "X:Model", mfr: "X", formerSkus: ["ab 12"] }], new Map())({ sku: "ab12" }) === "X:Model", "#302 import resolve: with no live SKU of that spelling, the former SKU still resolves");
+  ok(cr302Resolver([{ sku: "AB-12", mfr: "X" }], new Map())({ sku: "ab12" }) === null, "#302 import resolve: without a step 2/3 hit a normalized-only live match is still not the resolver's call");
 }
 
 seeded()
@@ -46741,7 +46758,7 @@ import type { PartDocument as N293Doc } from "@/lib/part-docs/types";
   ok(/^"use server";/.test(na) && ["keyProductLibraryAction", "saveProductParagraphAction", "upsertSystemIntroAction", "deleteSystemIntroAction"].every((f) => na.includes(`export async function ${f}(`)),
     "#293 actions: the four narrative actions live in one \"use server\" file");
   ok((na.match(/can\("create", user\.roles\)/g) || []).length === 3 && !/requirePerm\(/.test(na), "#293 actions: all three library writes refuse without Create (with a message, not a redirect)");
-  ok(rd("src/lib/stores/catalog.ts").includes("narrativeText: body") && /mergeUpsert\(key, \{ narrativeText: body, narrativeUpdatedAt:/.test(rd("src/lib/stores/catalog.ts")),
+  ok(rd("src/lib/stores/catalog.ts").includes("narrativeText: body") && /mergeUpsert\(part\.sku, \{ narrativeText: body, narrativeUpdatedAt:/.test(rd("src/lib/stores/catalog.ts")),
     "#293 paragraph: the write goes through mergeUpsert only");
 }
 
@@ -53082,16 +53099,36 @@ async function modelSku302ImportAsyncChecks(): Promise<void> {
 
     // ---- Import hub (commitCatalogImport → commitImport("catalog")) ----
     const fields = meta("catalog")!.fields;
-    const hubRows = (list: number) => prep([[O2, MFR, "Radius 12 (2026)", String(list)]], amap(["SKU", "Manufacturer", "Description", "List Price"], fields), fields).rows;
+    const hubRows = (list: number) => prep([[O2, MFR, "Radius 12 (2026)", String(list), "WRONG MODEL"]], amap(["SKU", "Manufacturer", "Description", "List Price", "MFR M/N"], fields), fields).rows;
     const hu = await commitCatalogImport({ rows: hubRows(250), mode: "update", effectiveAt: Date.now(), priced: true });
     ok(hu.ok && hu.res.updated === 1 && hu.res.created === 0, "#302 import hub: Update existing matches the renamed part by its old SKU" + (hu.ok ? "" : ` (${hu.error})`));
     const p2 = await Cat.get(N2);
-    ok(p2?.list === 250 && p2.desc === "Radius 12 (2026)" && p2.sku === N2 && p2.manufacturerModelNumber === "Radius 12" && JSON.stringify(p2.formerSkus) === JSON.stringify([O2]), "#302 import hub: the renamed part's price changed, its identity did not");
+    ok(p2?.list === 250 && p2.desc === "Radius 12 (2026)" && p2.sku === N2 && p2.manufacturerModelNumber === "Radius 12" && JSON.stringify(p2.formerSkus) === JSON.stringify([O2]), "#302 import hub: the renamed part's price changed, its identity (incl. model # over the file's wrong MFR M/N) did not");
     ok(!(await liveHasOld(O2)) && (await tomb(O2, N2)), "#302 import hub: no live part at the old SKU after Update existing");
     const hc = await commitCatalogImport({ rows: hubRows(275), mode: "create", effectiveAt: Date.now(), priced: true });
     ok(hc.ok && (await Cat.get(N2))?.list === 275 && !(await liveHasOld(O2)) && (await tomb(O2, N2)), "#302 import hub: Create new on an old SKU merges into the renamed part, never a duplicate or a revived tombstone");
+    ok((await Cat.get(N2))?.manufacturerModelNumber === "Radius 12", "#302 import hub: Create new on an old SKU keeps the renamed part's model # over the file's MFR M/N");
     const hs = await commitCatalogImport({ rows: hubRows(999), mode: "skip", effectiveAt: Date.now(), priced: true });
     ok(hs.ok && hs.res.skipped === 1 && (await Cat.get(N2))?.list === 275, "#302 import hub: Skip duplicates treats the old SKU as a duplicate of the renamed part");
+
+    // ---- Store guard: every writer handed an OLD sku lands on the renamed part ----
+    const liveCount = async (sku: string) => (await DS.listDocs<D302>("catalog_parts")).filter((d) => d.id === sku || (d as { sku?: string }).sku === sku).length;
+    const mu = await Cat.mergeUpsert(O1, { list: 99 });
+    const n1a = await Cat.get(N1);
+    ok(mu.sku === N1 && mu.id === N1 && n1a?.list === 99 && n1a.sku === N1 && n1a.id === N1, "#302 store guard: mergeUpsert(old, patch) updates the renamed part under its own sku/id");
+    ok(JSON.stringify(n1a?.formerSkus) === JSON.stringify([O1]) && n1a?.manufacturerModelNumber === "Jupiter 4" && n1a?.renamedTo === undefined, "#302 store guard: mergeUpsert(old) keeps the renamed part's formerSkus and model #");
+    ok(!(await liveHasOld(O1)) && (await liveCount(O1)) === 0 && (await tomb(O1, N1)), "#302 store guard: mergeUpsert(old) leaves no live doc at the old id and the tombstone keeps renamedTo");
+    const up = await Cat.upsert({ ...(n1a as import("@/lib/stores/catalog").CatalogPart), id: O1, sku: O1, list: 77 });
+    const n1b = await Cat.get(N1);
+    ok(up.sku === N1 && n1b?.list === 77 && n1b.sku === N1 && JSON.stringify(n1b.formerSkus) === JSON.stringify([O1]), "#302 store guard: upsert({ sku: old }) lands on the renamed part, keeping its formerSkus");
+    ok(!(await liveHasOld(O1)) && (await tomb(O1, N1)), "#302 store guard: upsert({ sku: old }) never revives the tombstone as a live duplicate");
+    const pp = await Cat.saveProductParagraph(O1, "Fixture 302 paragraph", "Test");
+    const n1c = await Cat.get(N1);
+    ok(pp.ok && pp.part.sku === N1 && n1c?.narrativeText === "Fixture 302 paragraph" && n1c.list === 77 && !(await liveHasOld(O1)) && (await tomb(O1, N1)), "#302 store guard: saveProductParagraph(old) lands on the renamed part");
+    const { catalogParts: cpT } = await import("@/db/doc-tables");
+    const revOf = async (id: string) => (await db.select({ rev: cpT.rev }).from(cpT).where(inArray(cpT.id, [id])))[0]?.rev;
+    const oldRev = await revOf(O1);
+    ok(oldRev != null && (await Cat.remove(O1)) === false && (await Cat.get(N1))?.sku === N1 && (await revOf(O1)) === oldRev && (await tomb(O1, N1)), "#302 store guard: remove(old) acts on nothing — the renamed part stays live, the tombstone untouched");
   } finally {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);

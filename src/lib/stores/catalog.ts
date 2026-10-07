@@ -333,7 +333,17 @@ export async function upsert(
   part: Omit<CatalogPart, "id"> & { id?: string },
   opts: UpsertOpts = {}
 ): Promise<CatalogPart> {
-  const existing = await get(part.id || part.sku);
+  const requested = part.id || part.sku;
+  const existing = await get(requested);
+  // #302: a SKU retired by a rename reads as the part it became. Write THAT
+  // part (full replace of its doc, keeping its formerSkus) — never the
+  // tombstone at the old id, which upsertDoc would revive as a live duplicate.
+  if (existing && existing.sku !== requested) {
+    const doc = { ...part, id: existing.id, sku: existing.sku, formerSkus: existing.formerSkus };
+    if (!doc.formerSkus) delete doc.formerSkus;
+    delete doc.renamedTo;
+    return writePart(existing, doc, opts);
+  }
   return writePart(existing, part, opts);
 }
 
@@ -359,6 +369,10 @@ export async function mergeUpsert(
   opts: UpsertOpts = {}
 ): Promise<CatalogPart> {
   const existing = await get(sku);
+  // #302: an old SKU (retired by a rename) resolves to the renamed part; the
+  // patch lands on THAT part under its own sku/id. Writing `sku: <old>` would
+  // either stamp the old SKU onto the renamed doc or revive the tombstone.
+  const target = existing?.sku ?? sku;
   // Cast: TS can't see that callers only omit fields `existing` already
   // supplies (or, for a brand-new part, that `patch` carries every required
   // field itself) — the runtime contract is enforced by callers, same as
@@ -370,7 +384,8 @@ export async function mergeUpsert(
     ...(patch.productMetadata || existing?.productMetadata
       ? { productMetadata: mergeProductMetadata(existing?.productMetadata, patch.productMetadata) }
       : {}),
-    sku,
+    id: target,
+    sku: target,
   };
   return writePart(existing, merged as Omit<CatalogPart, "id"> & { id?: string }, opts);
 }
@@ -407,7 +422,7 @@ export async function saveProductParagraph(
       stale: { paragraph: part.narrativeText ?? null, updatedAt: part.narrativeUpdatedAt ?? null },
     };
   }
-  const saved = await mergeUpsert(key, { narrativeText: body, narrativeUpdatedAt: opts.now ?? Date.now(), narrativeUpdatedBy: by });
+  const saved = await mergeUpsert(part.sku, { narrativeText: body, narrativeUpdatedAt: opts.now ?? Date.now(), narrativeUpdatedBy: by });
   return { ok: true, part: saved };
 }
 
@@ -427,8 +442,13 @@ export async function clearCatalogPriceList(): Promise<number> {
  * part's desc/price at the moment they're added (they don't re-resolve the
  * catalog on read), so a past quote's line text is unaffected either way.
  */
-export async function remove(sku: string): Promise<void> {
+export async function remove(sku: string): Promise<boolean> {
+  // #302: only a LIVE doc at this exact id is deleted. An old SKU retired by a
+  // rename is a tombstone — removing it acts on nothing (never on the part it
+  // was renamed to, and the tombstone keeps its rev and renamedTo).
+  if (!sku || !(await getDoc<CatalogPart>("catalog_parts", sku))) return false;
   await softDeleteDoc("catalog_parts", sku);
+  return true;
 }
 
 /**

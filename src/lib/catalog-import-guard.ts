@@ -68,6 +68,11 @@ function plural(n: number, word: string): string {
 export function checkManufacturer(input: {
   mfr: string;
   fileSkus: string[];
+  /** #302 — each file row's MFR P/N, index-aligned with `fileSkus` ("" =
+   *  none), so a row whose SKU matches nothing but whose P/N column names one
+   *  of this manufacturer's parts counts as overlap, exactly as the importer
+   *  will resolve it. Optional; only read through `resolve`. */
+  filePns?: string[];
   catalog: CatalogRef[];
   resolve?: ImportResolver;
 }): ManufacturerCheck {
@@ -95,6 +100,12 @@ export function checkManufacturer(input: {
     ? [...spellings.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0]
     : typed;
 
+  const pnBySku = new Map<string, string>(); // first non-blank P/N per file SKU
+  input.fileSkus.forEach((raw, i) => {
+    const s = (raw || "").trim();
+    const pn = String(input.filePns?.[i] ?? "").trim();
+    if (s && pn && !pnBySku.has(s)) pnBySku.set(s, pn);
+  });
   const fileSkus = Array.from(new Set(input.fileSkus.map((s) => (s || "").trim()).filter(Boolean)));
   const n = fileSkus.length;
   // A SKU already on file (any spelling — the hub's own `ci` match) is judged
@@ -102,7 +113,7 @@ export function checkManufacturer(input: {
   const rowKey = (s: string) => {
     const k = skuKey(s);
     if (!input.resolve || mine.has(k) || foreignBySku.has(k)) return k;
-    return skuKey(input.resolve({ sku: s, mfr: typed }) ?? s);
+    return skuKey(input.resolve({ sku: s, mfr: typed, manufacturerPartNumber: pnBySku.get(s) }) ?? s);
   };
 
   const foreign = fileSkus
@@ -135,18 +146,23 @@ export function checkManufacturer(input: {
   return { ok: true, normalizedMfr, isNew: mine.size === 0, overlap };
 }
 
-export type ManufacturerGroup = { mfr: string; skus: string[] };
+/** `pns` (#302), when present, is index-aligned with `skus`: each row's MFR
+ *  P/N ("" = none). */
+export type ManufacturerGroup = { mfr: string; skus: string[]; pns?: string[] };
 
 /** Rows → one group per mfrKey, keeping the first spelling seen. Blank
  *  manufacturers form their own group (which then fails as `missing`). */
-export function groupRowsByManufacturer(rows: Array<{ mfr: string; sku: string }>): ManufacturerGroup[] {
+export function groupRowsByManufacturer(rows: Array<{ mfr: string; sku: string; pn?: string }>): ManufacturerGroup[] {
   const by = new Map<string, ManufacturerGroup>();
   for (const r of rows) {
     const mfr = (r.mfr || "").trim();
     const key = mfrKey(mfr);
-    const g = by.get(key) || { mfr, skus: [] };
+    const g = by.get(key) || { mfr, skus: [], pns: [] };
     const sku = (r.sku || "").trim();
-    if (sku) g.skus.push(sku);
+    if (sku) {
+      g.skus.push(sku);
+      g.pns!.push((r.pn || "").trim());
+    }
     by.set(key, g);
   }
   return [...by.values()];
@@ -158,6 +174,6 @@ export function checkManufacturerGroups(groups: ManufacturerGroup[], catalog: Ca
   return groups.map((g) => ({
     mfr: g.mfr,
     count: g.skus.length,
-    result: checkManufacturer({ mfr: g.mfr, fileSkus: g.skus, catalog, resolve }),
+    result: checkManufacturer({ mfr: g.mfr, fileSkus: g.skus, filePns: g.pns, catalog, resolve }),
   }));
 }

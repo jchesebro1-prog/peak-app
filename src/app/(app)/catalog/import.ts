@@ -45,7 +45,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   // #302 — a row keyed by a renamed part's old order number (or by its MFR
   // P/N) updates that part; the guard judges rows by the same resolution.
   const resolve = await importResolverFor(catalog);
-  const guard = checkManufacturer({ mfr: input.mfr, fileSkus: valid.map((r) => r.sku), catalog, resolve });
+  const guard = checkManufacturer({ mfr: input.mfr, fileSkus: valid.map((r) => r.sku), filePns: valid.map((r) => r.manufacturerPartNumber ?? ""), catalog, resolve });
   if (!guard.ok) return { ok: false, error: guard.detail };
   const mfr = guard.normalizedMfr;
 
@@ -74,8 +74,8 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   const priced = parsed.hasList || parsed.hasCost;
   for (const r of valid) {
     // #302 — write to the RESOLVED live SKU, never the row's old one:
-    // mergeUpsert(old) would follow the tombstone's renamedTo on read but
-    // write under the key it was given. A row resolving to a different part
+    // the bySku/existing bookkeeping below is keyed by live SKU (and the
+    // store's mergeUpsert also lands an old SKU on the renamed part). A row resolving to a different part
     // owns only what an exact match owns — the part's SKU, formerSkus and
     // model # stay (its P/N only moves when the row carries one).
     const resolved = resolve({ sku: r.sku, mfr: r.mfr || mfr, manufacturerPartNumber: r.manufacturerPartNumber });

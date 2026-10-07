@@ -109,6 +109,8 @@ export async function checkCatalogImportAction(groups: ManufacturerGroup[]): Pro
   const clean: ManufacturerGroup[] = (Array.isArray(groups) ? groups : []).slice(0, 100).map((g) => ({
     mfr: String(g?.mfr ?? "").slice(0, 200),
     skus: (Array.isArray(g?.skus) ? g.skus : []).slice(0, 20000).map((s) => String(s ?? "").slice(0, 200)),
+    // #302 — index-aligned with skus (the commit path passes the same).
+    ...(Array.isArray(g?.pns) ? { pns: g.pns.slice(0, 20000).map((s) => String(s ?? "").slice(0, 200)) } : {}),
   }));
   if (!clean.length) return [];
   // #302 — the same resolution the commit runs (renamed parts' old SKUs).
