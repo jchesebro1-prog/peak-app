@@ -9725,5 +9725,5 @@ pricing for this alternate are shown above." Output is byte-identical for quotes
 In-total scopes keep R1 (per-scope prices sum to the total). The cover and the package page list Alternates whenever present,
 under one shared note (`ALTERNATES_NOTE`, `src/lib/estimate-output/alternates-copy.ts`). The client picker offers each
 alternate as "Alternate — <group>: <system>", unchecked by default; ticking adds it to the selected total. The server
-validates picked ids against the revision's own data (`revisionGroupedSections`), not the client's list, and the question note
-names the alternate.
+validates picked ids against the revision's own data (`revisionGroupedSections`), not the client's list, and the scope-selection
+note and task name the alternate by its picker label (a question carries no scopes).

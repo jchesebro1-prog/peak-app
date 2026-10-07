@@ -11129,6 +11129,13 @@ in the total above."; "Optional — not included in this alternate's price"; "Sc
 above."; "Alternate — <group>: <system>"; "Alternate · not in total"; "Alternates (not in total)". The cover/package note and
 the PDF sub-line are worded differently on purpose.
 
+**Question for Jeff.** The review limit (#242 auto-approve) counts only the In-total value, so a small base bid with a large
+Alternate can auto-approve and reach the customer as a firm alternate price with no approver; flipping it to In total later
+does re-ask approval. Keep it, or make the limit count alternates too?
+
 **Open (minor, not blocking).**
+- Portal Refresh pricing / Copy to cart fold an Alternate's lines into the total (same as option lines today) — skip `sec.alternate` there.
+- After a flip shrinks the In-total price below an applied Rewards credit, Save clamps it with an "available" notice that blames the customer balance; reword.
+- A labor system in an Alternate group still flags the won project as needing install labor (`quoteHasLabor`).
 - The approval fingerprint can't tell which of two otherwise-identical systems is the alternate (the gross value catches most).
 - The Build rail's active toggle is a no-op without `aria-disabled`; one toggle line per group; a long group name truncates the suffix.
