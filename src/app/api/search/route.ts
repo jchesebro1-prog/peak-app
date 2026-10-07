@@ -48,7 +48,7 @@ function matches(q: string, ...fields: Array<unknown>): boolean {
 type NumberedDoc = QuoteNumberFields & { id: string; name?: string | null; customer?: string | null };
 const asNumbered = (d: Doc): NumberedDoc => d as unknown as NumberedDoc;
 
-/** #302: "Jupiter 4 · 80-0043" — the model first, the order # beside it. */
+/** #304: "Jupiter 4 · 80-0043" — the model first, the order # beside it. */
 function staffLabelText(p: SearchPartLike): string {
   const l = staffPartLabel(p);
   return [l.primary, l.secondary].filter(Boolean).join(" · ");
@@ -257,7 +257,7 @@ export async function GET(req: Request) {
   add(
     "Catalog",
     parts
-      // #302: sku/desc/mfr/MFR P/N/Model #/former SKUs (one haystack), plus the category.
+      // #304: sku/desc/mfr/MFR P/N/Model #/former SKUs (one haystack), plus the category.
       .filter((d) => partSearchHaystack(d as unknown as SearchPartLike).includes(q) || matches(q, d.category))
       .map((d) => ({
         id: d.id,

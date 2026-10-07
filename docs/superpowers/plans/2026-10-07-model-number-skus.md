@@ -1,4 +1,4 @@
-# Model-number SKUs (#302) Implementation Plan
+# Model-number SKUs (#304) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -29,14 +29,14 @@ A server engine (`apply.ts`) applies a plan in 45 s resumable batches. It writes
 - Admin page permission: `requirePerm("manage_users")`. Sheet caps: 800 KB, 5,000 rows, cell strings ≤ 2,048.
 - Batch budget: `FETCH_ACTION_BUDGET_MS` (`src/lib/part-docs/types.ts`). Page `maxDuration = 60`.
 - Checks go in `scripts/test-review-and-spec.ts`:
-  - **sync checks:** `ok(cond, "#302 …")` placed before the async chain (search for `.then(() => estimateOutput301CAsyncChecks())`)
-  - **DB checks:** an `async function modelSku302<Name>AsyncChecks()` added at EOF and chained with `.then(() => modelSku302<Name>AsyncChecks())` right after `estimateOutput301CAsyncChecks`
-  - fixtures via `fixtureId(302, "slug")` + `registerFixture(coll, id)` (`scripts/test-fixtures.ts`)
-  - every check message starts with `#302`
-- Run tests: `cd /Users/sm/Downloads/peak-app-299 && npm run test:specs 2>&1 | grep -E "#302|FAILED|ALL PASSED|Error" | tail -40`. Baseline before this branch: ALL PASSED.
+  - **sync checks:** `ok(cond, "#304 …")` placed before the async chain (search for `.then(() => estimateOutput301CAsyncChecks())`)
+  - **DB checks:** an `async function modelSku304<Name>AsyncChecks()` added at EOF and chained with `.then(() => modelSku304<Name>AsyncChecks())` right after `estimateOutput301CAsyncChecks`
+  - fixtures via `fixtureId(304, "slug")` + `registerFixture(coll, id)` (`scripts/test-fixtures.ts`)
+  - every check message starts with `#304`
+- Run tests: `cd /Users/sm/Downloads/peak-app-299 && npm run test:specs 2>&1 | grep -E "#304|FAILED|ALL PASSED|Error" | tail -40`. Baseline before this branch: ALL PASSED.
 - Typecheck: `npx tsc --noEmit -p . 2>&1 | tail -20` → no output.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- Match the surrounding code's comment density and idiom. Reference the punch number (`#302`) in comments the way neighbouring code does.
+- Match the surrounding code's comment density and idiom. Reference the punch number (`#304`) in comments the way neighbouring code does.
 
 ---
 
@@ -72,29 +72,29 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
 
 - [ ] **Step 1: Add the fields to `CatalogPart`** (`src/lib/stores/catalog.ts`, just after `manufacturerModelNumber`):
 ```ts
-  /** #302 — every SKU this part has had (order numbers replaced by a
+  /** #304 — every SKU this part has had (order numbers replaced by a
    *  `Brand:Model` SKU). Searched everywhere a part is searched; the
    *  importers match an incoming row on it. Written only by the rename tool. */
   formerSkus?: string[];
-  /** #302 — set ONLY on a retired (soft-deleted) part: the SKU it was renamed
+  /** #304 — set ONLY on a retired (soft-deleted) part: the SKU it was renamed
    *  to. get/getMany follow it so frozen history (sent revisions) resolves. */
   renamedTo?: string;
 ```
 
-- [ ] **Step 2: Write failing sync checks** (append near the other sync checks before the async chain; import with aliases `as cr302…` to avoid name clashes):
+- [ ] **Step 2: Write failing sync checks** (append near the other sync checks before the async chain; import with aliases `as cr304…` to avoid name clashes):
 ```ts
-import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
-import { planRenames as cr302Plan, crosswalkRowsFromGrid as cr302Rows, type CrosswalkRow as Cr302Row } from "@/lib/catalog-rename/plan";
+import { modelSku as cr304ModelSku, partModel as cr304PartModel, partMatchesQuery as cr304Match, staffPartLabel as cr304Label, cleanModel as cr304Clean } from "@/lib/catalog-rename/sku";
+import { planRenames as cr304Plan, crosswalkRowsFromGrid as cr304Rows, type CrosswalkRow as Cr304Row } from "@/lib/catalog-rename/plan";
 // ...
-ok(cr302ModelSku("Symetrix", " Jupiter  4 ") === "Symetrix:Jupiter 4", "#302 sku: Brand:Model, whitespace collapsed");
-ok(cr302ModelSku("Biamp", "A/B #1?") === "Biamp:A-B -1-", "#302 sku: / # ? become -");
-ok(cr302ModelSku("", "X") === null && cr302ModelSku("Biamp", "  ") === null, "#302 sku: blank brand or model → null");
-ok(cr302ModelSku("Symetrix", "x".repeat(60)) === null, "#302 sku: over 60 chars → null");
-ok(cr302Clean("W3,  Black, US") === "W3, Black, US", "#302 cleanModel keeps commas");
-ok(cr302PartModel({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }) === "Jupiter 4", "#302 partModel: model first");
-ok(cr302PartModel({ sku: "ETC:S4LED", manufacturerPartNumber: "7060A" }) === "7060A" && cr302PartModel({ sku: "ETC:S4LED" }) === "S4LED" && cr302PartModel({ sku: "PLAIN" }) === "PLAIN", "#302 partModel: P/N, then sku tail, then sku");
-ok(cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP", formerSkus: ["80-0043"] }, "80-0043") && cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "jupiter dsp") && !cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "edge"), "#302 search: former SKUs, model and multi-token");
-ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" })) === JSON.stringify({ primary: "Jupiter 4", secondary: "80-0043" }) && cr302Label({ sku: "X", manufacturerPartNumber: "X" }).secondary === "", "#302 staff label: model · order #, no repeat");
+ok(cr304ModelSku("Symetrix", " Jupiter  4 ") === "Symetrix:Jupiter 4", "#304 sku: Brand:Model, whitespace collapsed");
+ok(cr304ModelSku("Biamp", "A/B #1?") === "Biamp:A-B -1-", "#304 sku: / # ? become -");
+ok(cr304ModelSku("", "X") === null && cr304ModelSku("Biamp", "  ") === null, "#304 sku: blank brand or model → null");
+ok(cr304ModelSku("Symetrix", "x".repeat(60)) === null, "#304 sku: over 60 chars → null");
+ok(cr304Clean("W3,  Black, US") === "W3, Black, US", "#304 cleanModel keeps commas");
+ok(cr304PartModel({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }) === "Jupiter 4", "#304 partModel: model first");
+ok(cr304PartModel({ sku: "ETC:S4LED", manufacturerPartNumber: "7060A" }) === "7060A" && cr304PartModel({ sku: "ETC:S4LED" }) === "S4LED" && cr304PartModel({ sku: "PLAIN" }) === "PLAIN", "#304 partModel: P/N, then sku tail, then sku");
+ok(cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP", formerSkus: ["80-0043"] }, "80-0043") && cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "jupiter dsp") && !cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "edge"), "#304 search: former SKUs, model and multi-token");
+ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" })) === JSON.stringify({ primary: "Jupiter 4", secondary: "80-0043" }) && cr304Label({ sku: "X", manufacturerPartNumber: "X" }).secondary === "", "#304 staff label: model · order #, no repeat");
 {
   const g = [["Manufacturer", "MFR Part # (order number)", "SKU", "Description", "Category", "Model #", "Source URL", "Notes"],
     ["Symetrix", "80-0043", "80-0043", "Jupiter 4", "DSP", "Jupiter 4", "u", "confirmed"],
@@ -107,19 +107,19 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     ["Symetrix", "80-0060", "80-0060", "Taken", "", "Prism 4x4", "", ""],
     ["Symetrix", "80-0070", "80-0070", "Long", "", "y".repeat(70), "", ""],
     ["Symetrix", "80-0080", "80-0080", "Old", "", "Done", "", ""]];
-  const r = cr302Rows(g);
-  ok(r.ok && r.rows.length === 10 && r.rows[0].sku === "80-0043" && r.rows[0].model === "Jupiter 4" && r.rows[0].rowNumber === 2, "#302 crosswalk: header-matched rows, 1-based sheet row numbers");
-  ok(!cr302Rows([["Manufacturer", "SKU"]]).ok, "#302 crosswalk: a sheet with no Model # column is refused");
+  const r = cr304Rows(g);
+  ok(r.ok && r.rows.length === 10 && r.rows[0].sku === "80-0043" && r.rows[0].model === "Jupiter 4" && r.rows[0].rowNumber === 2, "#304 crosswalk: header-matched rows, 1-based sheet row numbers");
+  ok(!cr304Rows([["Manufacturer", "SKU"]]).ok, "#304 crosswalk: a sheet with no Model # column is refused");
   if (r.ok) {
     const live = [{ sku: "80-0043", mfr: "Symetrix" }, { sku: "80-0042", mfr: "Symetrix" }, { sku: "12-0002", mfr: "Symetrix" }, { sku: "80-0001", mfr: "Symetrix" },
       { sku: "80-0056", mfr: "Symetrix" }, { sku: "80-0057", mfr: "Symetrix" }, { sku: "80-0060", mfr: "Symetrix" }, { sku: "Symetrix:Prism 4x4", mfr: "Symetrix" },
       { sku: "80-0070", mfr: "Symetrix" }, { sku: "Symetrix:Done", mfr: "Symetrix", formerSkus: ["80-0080"] }];
-    const p = cr302Plan(r.rows, live, [{ sku: "80-0080", renamedTo: "Symetrix:Done" }]);
+    const p = cr304Plan(r.rows, live, [{ sku: "80-0080", renamedTo: "Symetrix:Done" }]);
     const o = (sku: string) => p.rows.find((x) => x.row.sku === sku)?.outcome;
-    ok(o("80-0043") === "rename" && o("80-0042") === "rename" && o("12-0002") === "skip:no-model" && o("80-0099") === "skip:not-found" && o("80-0001") === "skip:mfr-mismatch", "#302 plan: rename / no-model / not-found / mfr-mismatch");
-    ok(o("80-0056") === "skip:duplicate" && o("80-0057") === "skip:duplicate", "#302 plan: two rows → one SKU (case-insensitive) skips both");
-    ok(o("80-0060") === "skip:taken" && o("80-0070") === "skip:bad-model" && o("80-0080") === "already", "#302 plan: taken / bad-model / already renamed");
-    ok(p.renames.length === 2 && p.renames[0].to === "Symetrix:Jupiter 4" && p.counts.rename === 2 && p.counts["skip:duplicate"] === 2, "#302 plan: rename map + counts");
+    ok(o("80-0043") === "rename" && o("80-0042") === "rename" && o("12-0002") === "skip:no-model" && o("80-0099") === "skip:not-found" && o("80-0001") === "skip:mfr-mismatch", "#304 plan: rename / no-model / not-found / mfr-mismatch");
+    ok(o("80-0056") === "skip:duplicate" && o("80-0057") === "skip:duplicate", "#304 plan: two rows → one SKU (case-insensitive) skips both");
+    ok(o("80-0060") === "skip:taken" && o("80-0070") === "skip:bad-model" && o("80-0080") === "already", "#304 plan: taken / bad-model / already renamed");
+    ok(p.renames.length === 2 && p.renames[0].to === "Symetrix:Jupiter 4" && p.counts.rename === 2 && p.counts["skip:duplicate"] === 2, "#304 plan: rename map + counts");
   }
 }
 ```
@@ -131,7 +131,7 @@ Run: `npm run test:specs 2>&1 | tail -5`. Expected: an error that `@/lib/catalog
 - [ ] **Step 4: Implement `sku.ts`**
 ```ts
 /**
- * #302 — model-number SKUs. Pure, client-safe rules: the `Brand:Model` SKU a
+ * #304 — model-number SKUs. Pure, client-safe rules: the `Brand:Model` SKU a
  * rename writes, the model a customer document prints (`partModel`), and the
  * one search haystack every part search uses (old order numbers included).
  */
@@ -195,7 +195,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { cleanModel, modelSku } from "./sku";
 
 /**
- * #302 — plan a model-number rename from a crosswalk sheet (ChatGPT's
+ * #304 — plan a model-number rename from a crosswalk sheet (ChatGPT's
  * "Peak model number crosswalk … filled" workbooks). Pure: every row gets
  * exactly one outcome; only `rename` rows are ever applied.
  */
@@ -287,9 +287,9 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
 ```
 Also add a check: two sheet rows with the same `SKU` but different models → both `skip:duplicate`.
 
-- [ ] **Step 6: Run the checks.** Expected: all `#302` checks pass, ALL PASSED. Then run `npx tsc --noEmit -p .` and expect a clean result.
+- [ ] **Step 6: Run the checks.** Expected: all `#304` checks pass, ALL PASSED. Then run `npx tsc --noEmit -p .` and expect a clean result.
 
-- [ ] **Step 7: Commit** `feat(catalog): #302 model-number SKU rule, partModel, search haystack, crosswalk planner`
+- [ ] **Step 7: Commit** `feat(catalog): #304 model-number SKU rule, partModel, search haystack, crosswalk planner`
 
 ---
 
@@ -299,7 +299,7 @@ Also add a check: two sheet rows with the same `SKU` but different models → bo
 - Modify: `src/lib/stores/catalog.ts` (get / getMany / getManyAnyCase redirect, `getManyBySku`, `renamePartDocs`)
 - Create: `src/lib/stores/catalog-renames.ts`
 - Modify: `src/db/doc-store.ts` (add `listBlobIds(prefix)`)
-- Test: DB checks `modelSku302StoreAsyncChecks`
+- Test: DB checks `modelSku304StoreAsyncChecks`
 
 **Interfaces — Produces:**
 ```ts
@@ -320,7 +320,7 @@ export function renameMapOf(entries: SkuRename[]): Map<string, string>; // pure;
 export async function listBlobIds(prefix: string): Promise<string[]>;
 ```
 
-- [ ] **Step 1: Failing DB checks.** Create a part `fixtureId(302,"p1")` with mfr `Symetrix`, `manufacturerPartNumber` unset, `pricedAt: 111`, and `narrativeText: "x"`. Then `renamePartDocs(p1, "Symetrix:Fixture 302 A", "Fixture 302 A")` and assert:
+- [ ] **Step 1: Failing DB checks.** Create a part `fixtureId(304,"p1")` with mfr `Symetrix`, `manufacturerPartNumber` unset, `pricedAt: 111`, and `narrativeText: "x"`. Then `renamePartDocs(p1, "Symetrix:Fixture 304 A", "Fixture 304 A")` and assert:
   - The new part has sku/id = to, `manufacturerModelNumber` = model, `manufacturerPartNumber` = old sku, `formerSkus` = [old], `pricedAt` 111 and the narrative carried.
   - `get(old)` returns the new part.
   - `getMany([old])` returns [new].
@@ -331,7 +331,7 @@ export async function listBlobIds(prefix: string): Promise<string[]>;
   - Renaming another part to the same `to` returns null.
   - `renameMapOf([{a→b},{b→c}])` maps a→c.
   - `appendSkuRenames` twice with the same `from` keeps one entry.
-  - `listBlobIds("gridFavorites:")` finds a blob set with `setBlob("gridFavorites:" + fixtureId(302,"u"), { ids: [] })`.
+  - `listBlobIds("gridFavorites:")` finds a blob set with `setBlob("gridFavorites:" + fixtureId(304,"u"), { ids: [] })`.
 
   Register every created doc with `registerFixture("catalog_parts", id)`, the new SKU included. Clean up blobs at the end of the check (`setBlob` to empty, or delete if a helper exists).
 - [ ] **Step 2: Run → fails.**
@@ -348,7 +348,7 @@ export async function listBlobIds(prefix: string): Promise<string[]>;
     - Then `patchDoc` old `{ renamedTo: to }` followed by `softDeleteDoc`.
   - `listBlobIds`: `select id from blobs where id like prefix%`. Escape `%` and `_` in the prefix.
 - [ ] **Step 4: Run → PASS; tsc clean.**
-- [ ] **Step 5: Commit** `feat(catalog): #302 rename store — renamedTo redirect, getManyBySku, rename log`
+- [ ] **Step 5: Commit** `feat(catalog): #304 rename store — renamedTo redirect, getManyBySku, rename log`
 
 ---
 
@@ -420,7 +420,7 @@ Walk only these fields. Never deep-replace arbitrary strings.
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement** with a small internal `const sw = (s: string | undefined) => (s && m.has(s) ? m.get(s)! : s)` and a `changed` flag per function. Use `structuredClone` only on the branch that changes.
 - [ ] **Step 4: PASS, tsc clean.**
-- [ ] **Step 5: Commit** `feat(catalog): #302 pure reference rewriters`
+- [ ] **Step 5: Commit** `feat(catalog): #304 pure reference rewriters`
 
 ---
 
@@ -428,7 +428,7 @@ Walk only these fields. Never deep-replace arbitrary strings.
 
 **Files:**
 - Create: `src/lib/catalog-rename/apply.ts` (SERVER ONLY, header comment says so)
-- Test: DB checks `modelSku302ApplyAsyncChecks`
+- Test: DB checks `modelSku304ApplyAsyncChecks`
 
 **Interfaces:**
 - Consumes: Tasks 1–3, `listDocs/patchDoc/upsertDocs/softDeleteDocs/getBlob/setBlob/listBlobIds` from `@/db/doc-store`, `allDocumentLinks`/`documentLinkId` (`@/lib/stores/part-documents`), `allAccessoryLinks`/`accessoryLinkId` (`@/lib/stores/part-accessory-links`).
@@ -458,7 +458,7 @@ export async function runRenameBatch(input: RenameBatchInput, by: string, budget
   - Advance to the next step and return. Each call does at most one step, or stops mid-step on budget and resumes. Steps are idempotent, so resuming re-scans the collection.
 - **Final:** `{ step: "done", complete: true }`. `revalidatePath` is the action's job, not the engine's.
 
-- [ ] **Step 1: Failing DB checks** (`modelSku302ApplyAsyncChecks`). Fixtures:
+- [ ] **Step 1: Failing DB checks** (`modelSku304ApplyAsyncChecks`). Fixtures:
   - catalog parts A (`80-0043`-style fixture SKU, mfr Symetrix) and B (unrelated)
   - an image document link on A (create a `part_documents` row and a link via `attachDocument`)
   - an accessory link A→B (`syncAccessoryLinks` or a direct upsert)
@@ -479,7 +479,7 @@ export async function runRenameBatch(input: RenameBatchInput, by: string, budget
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: PASS, tsc clean.**
-- [ ] **Step 5: Commit** `feat(catalog): #302 rename engine — parts + reference passes, resumable`
+- [ ] **Step 5: Commit** `feat(catalog): #304 rename engine — parts + reference passes, resumable`
 
 ---
 
@@ -516,7 +516,7 @@ Otherwise `null` (new part).
   - `registry.ts`: `find` uses the resolver, and `create` merges into the resolved SKU.
   - Import guard: when computing overlap, count a row as matching if the resolver finds a part.
 - [ ] **Step 4: PASS, tsc clean.**
-- [ ] **Step 5: Commit** `feat(import): #302 importers match renamed parts by former SKU / order #`
+- [ ] **Step 5: Commit** `feat(import): #304 importers match renamed parts by former SKU / order #`
 
 ---
 
@@ -543,7 +543,7 @@ Otherwise `null` (new part).
   - For SQL prefilters (`searchDocs` on `doc::text ILIKE`), no change is needed: `formerSkus` and the model are in the JSON. Only the JS post-filter changes.
   - For the portal index, add the model and former SKUs to its index entry if the entry type lacks them (`src/lib/portal-catalog-index.ts:~314,361` already carries `model`).
 - [ ] **Step 4: PASS, tsc clean.**
-- [ ] **Step 5: Commit** `feat(search): #302 every part search matches Model # and former SKUs`
+- [ ] **Step 5: Commit** `feat(search): #304 every part search matches Model # and former SKUs`
 
 ---
 
@@ -557,7 +557,7 @@ Otherwise `null` (new part).
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement**, per the survey table.
 - [ ] **Step 4: PASS, tsc clean.**
-- [ ] **Step 5: Commit** `feat(docs): #302 customer documents print the Model # only`
+- [ ] **Step 5: Commit** `feat(docs): #304 customer documents print the Model # only`
 
 ---
 
@@ -581,7 +581,7 @@ Find each with `grep -rn "getMany(\|getManyAnyCase(" src | grep -v stores/catalo
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement.** Use `getManyBySku` and look photos/documents up by the **resolved** SKU (`map.get(oldSku)?.sku`). Single-SKU routes already resolve through `get` after Task 2. Where they compare `p.sku === requested`, compare against the resolved SKU instead.
 - [ ] **Step 4: PASS, tsc clean.**
-- [ ] **Step 5: Commit** `fix(catalog): #302 frozen revisions resolve renamed SKUs`
+- [ ] **Step 5: Commit** `fix(catalog): #304 frozen revisions resolve renamed SKUs`
 
 ---
 
@@ -616,7 +616,7 @@ Find each with `grep -rn "getMany(\|getManyAnyCase(" src | grep -v stores/catalo
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: PASS, tsc clean, `npx eslint src/app/(app)/catalog/model-numbers src/lib/catalog-rename`** clean.
-- [ ] **Step 5: Commit** `feat(catalog): #302 Catalog → Model numbers (upload crosswalk, preview, apply)`
+- [ ] **Step 5: Commit** `feat(catalog): #304 Catalog → Model numbers (upload crosswalk, preview, apply)`
 
 ---
 
@@ -630,7 +630,7 @@ Find each with `grep -rn "getMany(\|getManyAnyCase(" src | grep -v stores/catalo
     - importer resolution order
     - customer docs print the model only
     - admin-only tool
-  - `PUNCHLIST.md` gets #302 with Jeff-gated steps: run `db:export`, upload the Symetrix sheet, then Biamp/EAW/Meyer when ChatGPT's sheets arrive.
+  - `PUNCHLIST.md` gets #304 with Jeff-gated steps: run `db:export`, upload the Symetrix sheet, then Biamp/EAW/Meyer when ChatGPT's sheets arrive.
   - `AGENTS.md` gets phase entry 41.
 - [ ] **Step 2: Gates** (memory: peak-verification-gate-protocol). Run `npx tsc --noEmit -p .`, `npm run test:specs`, eslint vs a baseline (`git diff --name-only origin/main | xargs npx eslint`), and `npx next build` (in the worktree; it gives each worker a throwaway datadir). Then `npm run test:smoke` against a scratch-datadir dev server (memory: peak-exercising-post-routes-safely / worktree traps). Report real numbers.
 - [ ] **Step 3: Local dry run on a COPY of the real book.** Stop nothing in the main checkout. `cp -R /Users/sm/Downloads/peak-app/.data/pglite <scratch>/pglite-302` only if no process holds it (`lsof +D`). Run a tsx script with `PGLITE_PATH=<scratch>/pglite-302` that plans and applies the Symetrix filled sheet, then prints counts and a sample of rewritten refs. Delete the scratch copy afterwards.

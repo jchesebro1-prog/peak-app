@@ -70,7 +70,7 @@ export function gridPartsFrom(
       ...typed(s, p),
       manufacturer: s.manufacturer,
       modelNumber: s.modelNumber,
-      // #302: search-only — the live catalog part's Model # and old order numbers.
+      // #304: search-only — the live catalog part's Model # and old order numbers.
       ...(p?.manufacturerModelNumber ? { manufacturerModelNumber: p.manufacturerModelNumber } : {}),
       ...(p?.formerSkus?.length ? { formerSkus: p.formerSkus } : {}),
       symbolWidth: s.width,

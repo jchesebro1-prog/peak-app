@@ -24,7 +24,7 @@ import { buildImageIndex } from "./views";
 export type ListDrive = () => Promise<{ files: DriveListedPhoto[] } | { files: null; reason: string }>;
 
 /** An .xlsx reads the sheet named `sheetName` (the photo sheet's "Photos" by
- *  default; #302's crosswalk passes "Crosswalk"), else the first sheet. */
+ *  default; #304's crosswalk passes "Crosswalk"), else the first sheet. */
 export async function readSheetFile(buf: Buffer, fileName: string, sheetName: string = PHOTO_SHEET_NAME): Promise<{ ok: true; grid: string[][] } | { ok: false; error: string }> {
   if (/\.(csv|tsv|txt)$/i.test(fileName)) {
     const t = parseCsv(buf.toString("utf8"));

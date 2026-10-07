@@ -24,7 +24,7 @@ export async function keyProductLibrary(skus: readonly string[]): Promise<Record
     ),
   ].slice(0, MAX_LIBRARY_SKUS);
   if (!wanted.length) return {};
-  // #302: keyed by the requested sku — a line loaded from a sent revision may
+  // #304: keyed by the requested sku — a line loaded from a sent revision may
   // still name a renamed part's old SKU.
   const { parts: bySku, images } = await partsAndImagesBySku(wanted);
   const needsFallback = [...bySku].some(([sku, p]) => !images.get(sku)?.[0] && (p.mfr || "").trim());

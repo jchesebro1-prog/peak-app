@@ -78,11 +78,11 @@ export type CatalogPart = {
   manufacturerPartNumber?: string;
   /** Manufacturer's model number, when the vendor distinguishes it from P/N. */
   manufacturerModelNumber?: string;
-  /** #302 — every SKU this part has had (order numbers replaced by a
+  /** #304 — every SKU this part has had (order numbers replaced by a
    *  `Brand:Model` SKU). Searched everywhere a part is searched; the
    *  importers match an incoming row on it. Written only by the rename tool. */
   formerSkus?: string[];
-  /** #302 — set ONLY on a retired (soft-deleted) part: the SKU it was renamed
+  /** #304 — set ONLY on a retired (soft-deleted) part: the SKU it was renamed
    *  to. get/getMany follow it so frozen history (sent revisions) resolves. */
   renamedTo?: string;
   /** Minimum advertised price; never treated as Peak cost or sell. */
@@ -219,10 +219,10 @@ export async function list(): Promise<CatalogPart[]> {
   return listDocs<CatalogPart>("catalog_parts");
 }
 
-/** #302 — how many renamedTo links a read follows (a→b→c is two). */
+/** #304 — how many renamedTo links a read follows (a→b→c is two). */
 const MAX_RENAME_HOPS = 8;
 
-/** requested SKU → the live part it now means (#302). Exact primary-key reads
+/** requested SKU → the live part it now means (#304). Exact primary-key reads
  *  first; only a SKU that reads as a retired part with `renamedTo` costs
  *  another batched read, so a book that was never renamed reads exactly as it
  *  did. Missing, deleted-without-redirect and cyclic/over-long chains are
@@ -245,7 +245,7 @@ async function resolveLiveBySku(skus: readonly string[]): Promise<Map<string, Ca
   return out;
 }
 
-/** The live part for `sku`; a SKU retired by a rename (#302) resolves to the
+/** The live part for `sku`; a SKU retired by a rename (#304) resolves to the
  *  part it became, so frozen history that names the old SKU still finds it. */
 export async function get(sku: string): Promise<CatalogPart | null> {
   const live = await getDoc<CatalogPart>("catalog_parts", sku);
@@ -256,12 +256,12 @@ export async function get(sku: string): Promise<CatalogPart | null> {
 /** The live parts among `skus`, read by primary key (the SKU is the document
  *  id) — batched, never the whole book and never one query per part. Missing
  *  and deleted SKUs are simply absent; a retired SKU follows `renamedTo`
- *  (#302), and the result is deduped by sku. */
+ *  (#304), and the result is deduped by sku. */
 export async function getMany(skus: readonly string[]): Promise<CatalogPart[]> {
   return dedupeBySku([...(await resolveLiveBySku(skus)).values()]);
 }
 
-/** getMany keyed by the REQUESTED sku (#302): `map.get(oldSku)` is the part
+/** getMany keyed by the REQUESTED sku (#304): `map.get(oldSku)` is the part
  *  that SKU now means. Two requested SKUs may map to the same part. */
 export async function getManyBySku(skus: readonly string[]): Promise<Map<string, CatalogPart>> {
   return resolveLiveBySku(skus);
@@ -335,7 +335,7 @@ export async function upsert(
 ): Promise<CatalogPart> {
   const requested = part.id || part.sku;
   const existing = await get(requested);
-  // #302: a SKU retired by a rename reads as the part it became. Write THAT
+  // #304: a SKU retired by a rename reads as the part it became. Write THAT
   // part (full replace of its doc, keeping its formerSkus) — never the
   // tombstone at the old id, which upsertDoc would revive as a live duplicate.
   if (existing && existing.sku !== requested) {
@@ -369,7 +369,7 @@ export async function mergeUpsert(
   opts: UpsertOpts = {}
 ): Promise<CatalogPart> {
   const existing = await get(sku);
-  // #302: an old SKU (retired by a rename) resolves to the renamed part; the
+  // #304: an old SKU (retired by a rename) resolves to the renamed part; the
   // patch lands on THAT part under its own sku/id. Writing `sku: <old>` would
   // either stamp the old SKU onto the renamed doc or revive the tombstone.
   const target = existing?.sku ?? sku;
@@ -443,7 +443,7 @@ export async function clearCatalogPriceList(): Promise<number> {
  * catalog on read), so a past quote's line text is unaffected either way.
  */
 export async function remove(sku: string): Promise<boolean> {
-  // #302: only a LIVE doc at this exact id is deleted. An old SKU retired by a
+  // #304: only a LIVE doc at this exact id is deleted. An old SKU retired by a
   // rename is a tombstone — removing it acts on nothing (never on the part it
   // was renamed to, and the tombstone keeps its rev and renamedTo).
   if (!sku || !(await getDoc<CatalogPart>("catalog_parts", sku))) return false;
@@ -452,7 +452,7 @@ export async function remove(sku: string): Promise<boolean> {
 }
 
 /**
- * #302 — rename a part's SKU: write the copy under `to` and retire `from`
+ * #304 — rename a part's SKU: write the copy under `to` and retire `from`
  * with `renamedTo`, so get/getMany keep resolving the old SKU. One write path
  * for the whole feature; it never touches frozen data (quote revisions, Grid
  * revisions, generated specs) — those keep the old SKU and resolve through
@@ -468,7 +468,7 @@ export async function remove(sku: string): Promise<boolean> {
  */
 export async function renamePartDocs(from: string, to: string, model: string): Promise<CatalogPart | null> {
   if (!from || !to) return null;
-  if (from === to) return getDoc<CatalogPart>("catalog_parts", to); // #302: nothing to move — the live part, else null
+  if (from === to) return getDoc<CatalogPart>("catalog_parts", to); // #304: nothing to move — the live part, else null
   const [oldRow, toRow] = await getDocRows<CatalogPart>("catalog_parts", [from, to]).then((rows) => [
     rows.find((r) => r.id === from),
     rows.find((r) => r.id === to),
@@ -481,7 +481,7 @@ export async function renamePartDocs(from: string, to: string, model: string): P
     await softDeleteDoc("catalog_parts", from);
   };
   if (toRow && !(toRow.doc.formerSkus ?? []).includes(from)) return null;
-  // #302: a tombstoned `to` that was itself renamed onward is history, not a
+  // #304: a tombstoned `to` that was itself renamed onward is history, not a
   // free slot — reviving it would put a second live copy beside its successor.
   // It lists `from` (checked above), so `from` was renamed to it and then the
   // call died before retiring `from`: finish that retire (renamedTo = `to`,

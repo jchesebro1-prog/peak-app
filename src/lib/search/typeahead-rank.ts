@@ -1,6 +1,6 @@
 /**
  * #121 — pure filter/rank helpers behind the shared Typeahead. The only
- * import is the pure, client-safe #302 search haystack: the spec harness runs
+ * import is the pure, client-safe #304 search haystack: the spec harness runs
  * this DB-free, and the Typeahead is a client component that must not drag
  * anything heavier into the browser bundle.
  */
@@ -30,7 +30,7 @@ export type CatalogLike = {
   desc: string;
   mfr?: string | null;
   category?: string | null;
-  /** #302 — searched too when the row carries them. */
+  /** #304 — searched too when the row carries them. */
   manufacturerPartNumber?: string | null;
   manufacturerModelNumber?: string | null;
   formerSkus?: string[] | null;

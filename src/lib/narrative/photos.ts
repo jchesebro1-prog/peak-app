@@ -47,7 +47,7 @@ export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<
   const skus = photoSkusOf(sections);
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
-  // #302: keyed by the sku the section names — a sent revision keeps a
+  // #304: keyed by the sku the section names — a sent revision keeps a
   // renamed part's old SKU, and its photo is found under the new one.
   const { parts, images } = await partsAndImagesBySku(skus);
   for (const sku of skus) {

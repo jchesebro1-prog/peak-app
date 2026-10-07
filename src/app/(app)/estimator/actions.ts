@@ -961,7 +961,7 @@ export async function copySystemToEstimateAction(
     fixtures,
     sourceTierMargin: sourceTier,
     targetTierMargin: targetTier,
-    // #302: lines naming a renamed part's old SKU land on the live SKU.
+    // #304: lines naming a renamed part's old SKU land on the live SKU.
     renames,
   });
 
@@ -1385,7 +1385,7 @@ export async function draftQuoteScopeAction(input: {
 
 /**
  * Catalog search for the estimator's "Add part from catalog" picker (team-only).
- * In-memory substring match over sku/desc/mfr/MFR P/N/Model #/former SKUs (#302; optionally scoped to a category),
+ * In-memory substring match over sku/desc/mfr/MFR P/N/Model #/former SKUs (#304; optionally scoped to a category),
  * ranked so prefix hits on the SKU or description come first. Returns up to
  * `limit` hits plus the pre-cap total so the UI can say "refine to narrow".
  */
@@ -1408,7 +1408,7 @@ export async function searchCatalog(
       const sku = (p.sku || "").toLowerCase();
       const desc = (p.desc || "").toLowerCase();
       const cat = (p.category || "").toLowerCase();
-      // #302: the Model # and old order numbers rank like the SKU does.
+      // #304: the Model # and old order numbers rank like the SKU does.
       const names = [sku, (p.manufacturerModelNumber || "").toLowerCase(), ...(p.formerSkus ?? []).map((s) => s.toLowerCase())].filter(Boolean);
       if (!q) return { p, score: 0 };
       let score = -1;

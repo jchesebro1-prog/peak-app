@@ -693,7 +693,7 @@ export async function setBlob(
 }
 
 /**
- * Ids of every blob whose id starts with `prefix` (#302 — the per-user
+ * Ids of every blob whose id starts with `prefix` (#304 — the per-user
  * `gridFavorites:<userId>` blobs, which the rename sweep has to visit). The
  * prefix is matched literally: `%`, `_` and `\` are escaped for LIKE.
  */

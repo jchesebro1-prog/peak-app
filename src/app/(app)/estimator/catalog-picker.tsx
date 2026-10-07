@@ -186,7 +186,7 @@ export default function CatalogPicker({
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>
                 {h.sku}
                 {(() => {
-                  // #302: the model leads, the order # beside it (the SKU stays — it's the key).
+                  // #304: the model leads, the order # beside it (the SKU stays — it's the key).
                   const l = staffPartLabel({ sku: h.sku, manufacturerModelNumber: h.model, manufacturerPartNumber: h.mpn });
                   const text = l.secondary ? `${l.primary} · ${l.secondary}` : l.primary;
                   return text && text !== h.sku ? <span style={{ color: "#8c919c" }}>{" · " + text}</span> : null;

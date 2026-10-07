@@ -6,7 +6,7 @@ export const metadata = { title: "Model numbers — Quartzite-6" };
 // Rename batches run under a 45 s budget (FETCH_ACTION_BUDGET_MS).
 export const maxDuration = 60;
 
-/** #302 Catalog → Model numbers (admin): order-number SKUs become `Brand:Model` from a filled crosswalk sheet. */
+/** #304 Catalog → Model numbers (admin): order-number SKUs become `Brand:Model` from a filled crosswalk sheet. */
 export default async function ModelNumbersPage() {
   await requirePerm("manage_users");
   return (

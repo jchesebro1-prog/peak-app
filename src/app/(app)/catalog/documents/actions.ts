@@ -376,7 +376,7 @@ export async function searchPartsAction(q: string): Promise<DocActionResult<{ hi
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   const candidates = await searchDocs<CatalogPart>("catalog_parts", mostSelectiveToken(tokens), 200);
   const hits = candidates
-    .filter((p) => partMatchesQuery(p, query)) // #302: + former SKUs
+    .filter((p) => partMatchesQuery(p, query)) // #304: + former SKUs
     .slice(0, 20)
     .map(hitOf);
   return { ok: true, hits };

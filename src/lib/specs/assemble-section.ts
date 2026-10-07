@@ -439,7 +439,7 @@ export function assembleSection(input: {
         return {
           sku: c.part.sku,
           mfr: c.part.mfr || prefix(c.part.sku) || "",
-          model: partModel(c.part), // #302: the one model rule
+          model: partModel(c.part), // #304: the one model rule
           description: c.tp.specTitle || c.part.desc || "",
           ...(showQty && (c.p.qty || 0) > 0 ? { qty: c.p.qty } : {}),
         };

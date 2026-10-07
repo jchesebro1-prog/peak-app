@@ -17,7 +17,7 @@ import type { CurtainSpec } from "@/lib/curtain-geom";
 import type { GridShape } from "./grid-symbols";
 // Pure (no store/db imports) — safe in this client-safe module.
 import { curtainSpecKey } from "@/lib/specs/record-keys";
-// Pure and import-free (#302) — client-safe.
+// Pure and import-free (#304) — client-safe.
 import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 
 /** The slice of a catalog part the BOM needs — structurally satisfied by
@@ -68,7 +68,7 @@ export type PartLite = {
   /** Grid-owned symbol metadata; pricing remains optional and separate. */
   manufacturer?: string;
   modelNumber?: string;
-  /** #302: the catalog part's Model # and old order numbers — search only
+  /** #304: the catalog part's Model # and old order numbers — search only
    *  (same names as CatalogPart so raw rows pass straight through). Sent only
    *  when present. */
   manufacturerModelNumber?: string;
@@ -539,7 +539,7 @@ export function bomTotals(
   return { value, cost, margin: value > 0 ? (value - cost) / value : 0 };
 }
 
-/** #302: the one text a Grid part search matches — description, the Grid
+/** #304: the one text a Grid part search matches — description, the Grid
  *  model (or sku), the maker, and the catalog part's Model # + former SKUs. */
 export function partLiteHaystack(p: PartLite): string {
   return partSearchHaystack({

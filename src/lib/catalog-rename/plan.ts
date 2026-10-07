@@ -2,7 +2,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { cleanModel, modelSku } from "./sku";
 
 /**
- * #302 — plan a model-number rename from a crosswalk sheet (ChatGPT's
+ * #304 — plan a model-number rename from a crosswalk sheet (ChatGPT's
  * "Peak model number crosswalk … filled" workbooks). Pure: every row gets
  * exactly one outcome; only `rename` rows are ever applied.
  */

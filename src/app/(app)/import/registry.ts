@@ -716,13 +716,13 @@ function needsSpecLib(v: Values): boolean {
   return !!(str(v.specSectionId) || str(v.specArticleId));
 }
 
-/** #302 — the catalog commit's row resolver, built once in the writer's
+/** #304 — the catalog commit's row resolver, built once in the writer's
  *  `load` from the same snapshot it returns (the cache array is the key).
  *  Rows created later in the file are found by the exact `ci` match first. */
 const CATALOG_RESOLVERS = new WeakMap<object, ImportResolver>();
 
 /** The cached part a catalog row means: the hub's own case/punctuation-
- *  insensitive SKU match first, then (#302) the resolver — a renamed part's
+ *  insensitive SKU match first, then (#304) the resolver — a renamed part's
  *  old order number (formerSkus / rename log) or its manufacturer + MFR P/N. */
 function findCatalogPart(v: Values, cache: Record<string, unknown>[]): Record<string, unknown> | null {
   const exact = cache.find((p) => ci(p.sku, v.sku));
@@ -731,7 +731,7 @@ function findCatalogPart(v: Values, cache: Record<string, unknown>[]): Record<st
   return to ? (cache.find((p) => p.sku === to) ?? null) : null;
 }
 
-/** #302 — a row that matched a DIFFERENT part (not its own SKU) owns only
+/** #304 — a row that matched a DIFFERENT part (not its own SKU) owns only
  *  what an exact match owns: the part's model # stays (its sku and
  *  formerSkus are never in a catalogPatch; its P/N moves only when the row
  *  carries one, as for any match). */
@@ -1196,7 +1196,7 @@ const WRITERS: Record<string, Writer> = {
       // overlapping part (final review item 3). The existing record comes
       // from the same cache `find` reads, so an in-file duplicate sees the
       // row written just before it.
-      // #302 — the same lookup `find` uses, so an old order number merges
+      // #304 — the same lookup `find` uses, so an old order number merges
       // into the renamed part under ITS sku (never a write at the old SKU).
       const ex = findCatalogPart(v, cache);
       const sku = ex ? str(ex.sku) : str(v.sku);

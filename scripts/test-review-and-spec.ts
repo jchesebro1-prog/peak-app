@@ -5,25 +5,25 @@ import {
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
-import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, partSearchHaystack as cr302Hay, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
-import { planRenames as cr302Plan, crosswalkRowsFromGrid as cr302Rows } from "@/lib/catalog-rename/plan";
-import * as cr302Rw from "@/lib/catalog-rename/rewrite";
-import { cleanCrosswalkRows as cr302CleanRows, cleanRenameBatchInput as cr302CleanInput, isRenameStep as cr302IsStep, REF_STEPS as cr302RefSteps, RENAME_OUTCOME_LABEL as cr302OutcomeLabel, RENAME_STEP_LABEL as cr302StepLabel } from "@/lib/catalog-rename/steps";
-import { buildImportResolver as cr302Resolver } from "@/lib/catalog-rename/import-resolve";
-import { assemblyParts as cr302GridLib } from "@/lib/design/grid-library";
-import { paletteView as cr302Palette } from "@/lib/design/grid-palette";
-import { accessoryCandidates as cr302AccCand } from "@/lib/design/grid-accessories";
-import type { SpecItem as Cr302SpecItem, SpecSection as Cr302Section } from "@/app/(app)/estimator/types";
-import type { CartLine as Cr302CartLine } from "@/lib/portal-cart-types";
-import type { ProcurementLine as Cr302ProcLine } from "@/lib/stores/projects";
-import type { SpecDocProduct as Cr302SpecProduct } from "@/lib/specs/spec-document";
-import type { GridPlacement as Cr302Placement, GridRoute as Cr302Route } from "@/lib/stores/grid-projects";
-import type { WireType as Cr302WireType } from "@/lib/catalog-connect";
-import type { TrackSeries as Cr302TrackSeries } from "@/lib/track-series";
-import type { CurtainMountHardware as Cr302Mounts } from "@/lib/curtain-mounts";
-import type { RackDefaults as Cr302RackDefaults } from "@/lib/rack/defaults";
-import type { EquipmentMap as Cr302EquipMap } from "@/lib/design/equipment-map";
-import type { FixtureRecord as Cr302Fixture } from "@/lib/fixture-assemblies";
+import { modelSku as cr304ModelSku, partModel as cr304PartModel, partMatchesQuery as cr304Match, partSearchHaystack as cr304Hay, staffPartLabel as cr304Label, cleanModel as cr304Clean } from "@/lib/catalog-rename/sku";
+import { planRenames as cr304Plan, crosswalkRowsFromGrid as cr304Rows } from "@/lib/catalog-rename/plan";
+import * as cr304Rw from "@/lib/catalog-rename/rewrite";
+import { cleanCrosswalkRows as cr304CleanRows, cleanRenameBatchInput as cr304CleanInput, isRenameStep as cr304IsStep, REF_STEPS as cr304RefSteps, RENAME_OUTCOME_LABEL as cr304OutcomeLabel, RENAME_STEP_LABEL as cr304StepLabel } from "@/lib/catalog-rename/steps";
+import { buildImportResolver as cr304Resolver } from "@/lib/catalog-rename/import-resolve";
+import { assemblyParts as cr304GridLib } from "@/lib/design/grid-library";
+import { paletteView as cr304Palette } from "@/lib/design/grid-palette";
+import { accessoryCandidates as cr304AccCand } from "@/lib/design/grid-accessories";
+import type { SpecItem as Cr304SpecItem, SpecSection as Cr304Section } from "@/app/(app)/estimator/types";
+import type { CartLine as Cr304CartLine } from "@/lib/portal-cart-types";
+import type { ProcurementLine as Cr304ProcLine } from "@/lib/stores/projects";
+import type { SpecDocProduct as Cr304SpecProduct } from "@/lib/specs/spec-document";
+import type { GridPlacement as Cr304Placement, GridRoute as Cr304Route } from "@/lib/stores/grid-projects";
+import type { WireType as Cr304WireType } from "@/lib/catalog-connect";
+import type { TrackSeries as Cr304TrackSeries } from "@/lib/track-series";
+import type { CurtainMountHardware as Cr304Mounts } from "@/lib/curtain-mounts";
+import type { RackDefaults as Cr304RackDefaults } from "@/lib/rack/defaults";
+import type { EquipmentMap as Cr304EquipMap } from "@/lib/design/equipment-map";
+import type { FixtureRecord as Cr304Fixture } from "@/lib/fixture-assemblies";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { extractLibrary } from "@/lib/davinci/extract";
 import { buildIndex, buildIndexWithStats, matchSku } from "@/lib/davinci/match";
@@ -10622,21 +10622,21 @@ import {
   ok(trvFormula("inspection", "inspection.total").includes(trvFlyNote), "#208 M4: inspection.total's formula string notes flights-over-drive");
 }
 
-/* --- #302 model-number SKUs: SKU rule, partModel, search, crosswalk planner --- */
-ok(cr302ModelSku("Symetrix", " Jupiter  4 ") === "Symetrix:Jupiter 4", "#302 sku: Brand:Model, whitespace collapsed");
-ok(cr302ModelSku("Biamp", "A/B #1?") === "Biamp:A-B -1-", "#302 sku: / # ? become -");
-ok(cr302ModelSku("", "X") === null && cr302ModelSku("Biamp", "  ") === null, "#302 sku: blank brand or model → null");
-ok(cr302ModelSku("Symetrix", "x".repeat(60)) === null, "#302 sku: over 60 chars → null");
-ok(cr302ModelSku("A/V: Co", "X") === "A-V- Co:X", "#302 sku: brand sanitized like the model, colon → -");
+/* --- #304 model-number SKUs: SKU rule, partModel, search, crosswalk planner --- */
+ok(cr304ModelSku("Symetrix", " Jupiter  4 ") === "Symetrix:Jupiter 4", "#304 sku: Brand:Model, whitespace collapsed");
+ok(cr304ModelSku("Biamp", "A/B #1?") === "Biamp:A-B -1-", "#304 sku: / # ? become -");
+ok(cr304ModelSku("", "X") === null && cr304ModelSku("Biamp", "  ") === null, "#304 sku: blank brand or model → null");
+ok(cr304ModelSku("Symetrix", "x".repeat(60)) === null, "#304 sku: over 60 chars → null");
+ok(cr304ModelSku("A/V: Co", "X") === "A-V- Co:X", "#304 sku: brand sanitized like the model, colon → -");
 {
   const len60 = "x".repeat(60 - "Symetrix:".length);
-  ok(cr302ModelSku("Symetrix", len60)?.length === 60 && cr302ModelSku("Symetrix", len60 + "x") === null, "#302 sku: exactly 60 chars passes, 61 → null");
+  ok(cr304ModelSku("Symetrix", len60)?.length === 60 && cr304ModelSku("Symetrix", len60 + "x") === null, "#304 sku: exactly 60 chars passes, 61 → null");
 }
-ok(cr302Clean("W3,  Black, US") === "W3, Black, US", "#302 cleanModel keeps commas");
-ok(cr302PartModel({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }) === "Jupiter 4", "#302 partModel: model first");
-ok(cr302PartModel({ sku: "ETC:S4LED", manufacturerPartNumber: "7060A" }) === "7060A" && cr302PartModel({ sku: "ETC:S4LED" }) === "S4LED" && cr302PartModel({ sku: "PLAIN" }) === "PLAIN", "#302 partModel: P/N, then sku tail, then sku");
-ok(cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP", formerSkus: ["80-0043"] }, "80-0043") && cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "jupiter dsp") && !cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "edge"), "#302 search: former SKUs, model and multi-token");
-ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" })) === JSON.stringify({ primary: "Jupiter 4", secondary: "80-0043" }) && cr302Label({ sku: "X", manufacturerPartNumber: "X" }).secondary === "", "#302 staff label: model · order #, no repeat");
+ok(cr304Clean("W3,  Black, US") === "W3, Black, US", "#304 cleanModel keeps commas");
+ok(cr304PartModel({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }) === "Jupiter 4", "#304 partModel: model first");
+ok(cr304PartModel({ sku: "ETC:S4LED", manufacturerPartNumber: "7060A" }) === "7060A" && cr304PartModel({ sku: "ETC:S4LED" }) === "S4LED" && cr304PartModel({ sku: "PLAIN" }) === "PLAIN", "#304 partModel: P/N, then sku tail, then sku");
+ok(cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP", formerSkus: ["80-0043"] }, "80-0043") && cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "jupiter dsp") && !cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "edge"), "#304 search: former SKUs, model and multi-token");
+ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" })) === JSON.stringify({ primary: "Jupiter 4", secondary: "80-0043" }) && cr304Label({ sku: "X", manufacturerPartNumber: "X" }).secondary === "", "#304 staff label: model · order #, no repeat");
 {
   const g = [["Manufacturer", "MFR Part # (order number)", "SKU", "Description", "Category", "Model #", "Source URL", "Notes"],
     ["Symetrix", "80-0043", "80-0043", "Jupiter 4", "DSP", "Jupiter 4", "u", "confirmed"],
@@ -10649,198 +10649,198 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     ["Symetrix", "80-0060", "80-0060", "Taken", "", "Prism 4x4", "", ""],
     ["Symetrix", "80-0070", "80-0070", "Long", "", "y".repeat(70), "", ""],
     ["Symetrix", "80-0080", "80-0080", "Old", "", "Done", "", ""]];
-  const r = cr302Rows(g);
-  ok(r.ok && r.rows.length === 10 && r.rows[0].sku === "80-0043" && r.rows[0].model === "Jupiter 4" && r.rows[0].rowNumber === 2, "#302 crosswalk: header-matched rows, 1-based sheet row numbers");
-  ok(!cr302Rows([["Manufacturer", "SKU"]]).ok, "#302 crosswalk: a sheet with no Model # column is refused");
+  const r = cr304Rows(g);
+  ok(r.ok && r.rows.length === 10 && r.rows[0].sku === "80-0043" && r.rows[0].model === "Jupiter 4" && r.rows[0].rowNumber === 2, "#304 crosswalk: header-matched rows, 1-based sheet row numbers");
+  ok(!cr304Rows([["Manufacturer", "SKU"]]).ok, "#304 crosswalk: a sheet with no Model # column is refused");
   if (r.ok) {
     const live = [{ sku: "80-0043", mfr: "Symetrix" }, { sku: "80-0042", mfr: "Symetrix" }, { sku: "12-0002", mfr: "Symetrix" }, { sku: "80-0001", mfr: "Symetrix" },
       { sku: "80-0056", mfr: "Symetrix" }, { sku: "80-0057", mfr: "Symetrix" }, { sku: "80-0060", mfr: "Symetrix" }, { sku: "Symetrix:Prism 4x4", mfr: "Symetrix" },
       { sku: "80-0070", mfr: "Symetrix" }, { sku: "Symetrix:Done", mfr: "Symetrix", formerSkus: ["80-0080"] }];
-    const p = cr302Plan(r.rows, live, [{ sku: "80-0080", renamedTo: "Symetrix:Done" }]);
+    const p = cr304Plan(r.rows, live, [{ sku: "80-0080", renamedTo: "Symetrix:Done" }]);
     const o = (sku: string) => p.rows.find((x) => x.row.sku === sku)?.outcome;
-    ok(o("80-0043") === "rename" && o("80-0042") === "rename" && o("12-0002") === "skip:no-model" && o("80-0099") === "skip:not-found" && o("80-0001") === "skip:mfr-mismatch", "#302 plan: rename / no-model / not-found / mfr-mismatch");
-    ok(o("80-0056") === "skip:duplicate" && o("80-0057") === "skip:duplicate", "#302 plan: two rows → one SKU (case-insensitive) skips both");
-    ok(o("80-0060") === "skip:taken" && o("80-0070") === "skip:bad-model" && o("80-0080") === "already", "#302 plan: taken / bad-model / already renamed");
-    ok(p.renames.length === 2 && p.renames[0].to === "Symetrix:Jupiter 4" && p.counts.rename === 2 && p.counts["skip:duplicate"] === 2, "#302 plan: rename map + counts");
+    ok(o("80-0043") === "rename" && o("80-0042") === "rename" && o("12-0002") === "skip:no-model" && o("80-0099") === "skip:not-found" && o("80-0001") === "skip:mfr-mismatch", "#304 plan: rename / no-model / not-found / mfr-mismatch");
+    ok(o("80-0056") === "skip:duplicate" && o("80-0057") === "skip:duplicate", "#304 plan: two rows → one SKU (case-insensitive) skips both");
+    ok(o("80-0060") === "skip:taken" && o("80-0070") === "skip:bad-model" && o("80-0080") === "already", "#304 plan: taken / bad-model / already renamed");
+    ok(p.renames.length === 2 && p.renames[0].to === "Symetrix:Jupiter 4" && p.counts.rename === 2 && p.counts["skip:duplicate"] === 2, "#304 plan: rename map + counts");
   }
   {
-    const sr = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Meyer-Sound", "09.084.001.07", "UPM-1P"], ["Symetrix", "S-2", "Ghost"]]);
+    const sr = cr304Rows([["Manufacturer", "SKU", "Model #"], ["Meyer-Sound", "09.084.001.07", "UPM-1P"], ["Symetrix", "S-2", "Ghost"]]);
     if (sr.ok) {
-      const sp = cr302Plan(sr.rows, [{ sku: "Meyer Sound:UPM-1P", mfr: "Meyer Sound", formerSkus: ["09.084.001.07"] }, { sku: "S-2", mfr: "Symetrix" }], [{ sku: "Symetrix:Ghost" }]);
+      const sp = cr304Plan(sr.rows, [{ sku: "Meyer Sound:UPM-1P", mfr: "Meyer Sound", formerSkus: ["09.084.001.07"] }, { sku: "S-2", mfr: "Symetrix" }], [{ sku: "Symetrix:Ghost" }]);
       const so = (sku: string) => sp.rows.find((x) => x.row.sku === sku);
-      ok(so("09.084.001.07")?.outcome === "already" && so("09.084.001.07")?.to === "Meyer Sound:UPM-1P", "#302 plan: already via a live part's formerSkus despite brand spelling");
-      ok(so("S-2")?.outcome === "skip:taken", "#302 plan: a retired part's SKU is taken");
-    } else ok(false, "#302 plan: extra sheet parses");
-    const cs = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "Symetrix:Jupiter 4", "JUPITER 4"]]);
-    if (cs.ok) ok(cr302Plan(cs.rows, [{ sku: "Symetrix:Jupiter 4", mfr: "Symetrix" }], [])?.rows[0].outcome === "skip:same", "#302 plan: skip:same is case-insensitive");
-    else ok(false, "#302 plan: skip:same sheet parses");
+      ok(so("09.084.001.07")?.outcome === "already" && so("09.084.001.07")?.to === "Meyer Sound:UPM-1P", "#304 plan: already via a live part's formerSkus despite brand spelling");
+      ok(so("S-2")?.outcome === "skip:taken", "#304 plan: a retired part's SKU is taken");
+    } else ok(false, "#304 plan: extra sheet parses");
+    const cs = cr304Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "Symetrix:Jupiter 4", "JUPITER 4"]]);
+    if (cs.ok) ok(cr304Plan(cs.rows, [{ sku: "Symetrix:Jupiter 4", mfr: "Symetrix" }], [])?.rows[0].outcome === "skip:same", "#304 plan: skip:same is case-insensitive");
+    else ok(false, "#304 plan: skip:same sheet parses");
   }
   // Brand:OrderNo catalogs — the sheet's bare order number still finds the part.
   {
-    const pr = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "20-0026", "Jupiter 4"]]);
+    const pr = cr304Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "20-0026", "Jupiter 4"]]);
     if (pr.ok) {
-      const pp = cr302Plan(pr.rows, [{ sku: "Symetrix:20-0026", mfr: "Symetrix" }], []);
-      ok(pp.rows[0].outcome === "rename" && pp.rows[0].from === "Symetrix:20-0026" && pp.rows[0].to === "Symetrix:Jupiter 4" && pp.renames[0]?.from === "Symetrix:20-0026", "#302 plan: Brand:-prefixed live part matched from a bare sheet SKU (from = real sku)");
-      const two = cr302Plan(pr.rows, [{ sku: "Symetrix:20-0026", mfr: "Symetrix" }, { sku: "Symetrix Inc:20-0026", mfr: "Symetrix" }], []);
-      ok(two.rows[0].outcome === "skip:not-found" && two.rows[0].reason === "No catalog part has this SKU." && two.renames.length === 0, "#302 plan: two same-mfr prefixed candidates → not-found");
-      const other = cr302Plan(pr.rows, [{ sku: "Biamp:20-0026", mfr: "Biamp" }], []);
-      ok(other.rows[0].outcome === "skip:not-found", "#302 plan: a different manufacturer's prefixed part never matches");
-      const al = cr302Plan(pr.rows, [{ sku: "Symetrix:Jupiter 4", mfr: "Symetrix", formerSkus: ["Symetrix:20-0026"] }], []);
-      ok(al.rows[0].outcome === "already" && al.rows[0].to === "Symetrix:Jupiter 4", "#302 plan: already via a prefixed former SKU");
-      const alOther = cr302Plan(pr.rows, [{ sku: "Biamp:Jupiter 4", mfr: "Biamp", formerSkus: ["Biamp:20-0026"] }], []);
-      ok(alOther.rows[0].outcome === "skip:not-found", "#302 plan: another manufacturer's prefixed former SKU is not 'already'");
-    } else ok(false, "#302 plan: prefixed sheet parses");
+      const pp = cr304Plan(pr.rows, [{ sku: "Symetrix:20-0026", mfr: "Symetrix" }], []);
+      ok(pp.rows[0].outcome === "rename" && pp.rows[0].from === "Symetrix:20-0026" && pp.rows[0].to === "Symetrix:Jupiter 4" && pp.renames[0]?.from === "Symetrix:20-0026", "#304 plan: Brand:-prefixed live part matched from a bare sheet SKU (from = real sku)");
+      const two = cr304Plan(pr.rows, [{ sku: "Symetrix:20-0026", mfr: "Symetrix" }, { sku: "Symetrix Inc:20-0026", mfr: "Symetrix" }], []);
+      ok(two.rows[0].outcome === "skip:not-found" && two.rows[0].reason === "No catalog part has this SKU." && two.renames.length === 0, "#304 plan: two same-mfr prefixed candidates → not-found");
+      const other = cr304Plan(pr.rows, [{ sku: "Biamp:20-0026", mfr: "Biamp" }], []);
+      ok(other.rows[0].outcome === "skip:not-found", "#304 plan: a different manufacturer's prefixed part never matches");
+      const al = cr304Plan(pr.rows, [{ sku: "Symetrix:Jupiter 4", mfr: "Symetrix", formerSkus: ["Symetrix:20-0026"] }], []);
+      ok(al.rows[0].outcome === "already" && al.rows[0].to === "Symetrix:Jupiter 4", "#304 plan: already via a prefixed former SKU");
+      const alOther = cr304Plan(pr.rows, [{ sku: "Biamp:Jupiter 4", mfr: "Biamp", formerSkus: ["Biamp:20-0026"] }], []);
+      ok(alOther.rows[0].outcome === "skip:not-found", "#304 plan: another manufacturer's prefixed former SKU is not 'already'");
+    } else ok(false, "#304 plan: prefixed sheet parses");
   }
   // Same sheet SKU twice with different models: one part can't take two SKUs.
-  const dupSheet = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "80-0500", "Alpha"], ["Symetrix", "80-0500", "Beta"]]);
+  const dupSheet = cr304Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "80-0500", "Alpha"], ["Symetrix", "80-0500", "Beta"]]);
   if (dupSheet.ok) {
-    const dp = cr302Plan(dupSheet.rows, [{ sku: "80-0500", mfr: "Symetrix" }], []);
-    ok(dp.rows.length === 2 && dp.rows.every((x) => x.outcome === "skip:duplicate") && dp.renames.length === 0, "#302 plan: same SKU, two different models → both skip:duplicate");
-  } else ok(false, "#302 plan: duplicate-SKU sheet parses");
+    const dp = cr304Plan(dupSheet.rows, [{ sku: "80-0500", mfr: "Symetrix" }], []);
+    ok(dp.rows.length === 2 && dp.rows.every((x) => x.outcome === "skip:duplicate") && dp.renames.length === 0, "#304 plan: same SKU, two different models → both skip:duplicate");
+  } else ok(false, "#304 plan: duplicate-SKU sheet parses");
 }
 
-/* --- #302 search: the spec picker, typeahead, datasheets and Displays API --- */
+/* --- #304 search: the spec picker, typeahead, datasheets and Displays API --- */
 {
   // typeahead-rank: Model #, MFR P/N and former SKUs join the haystack; category stays.
   const tp = { sku: "Symetrix:Jupiter 4", desc: "DSP", mfr: "Symetrix", category: "Audio", manufacturerPartNumber: "80-0043", manufacturerModelNumber: "Jupiter 4", formerSkus: ["80-0042-OLD"] };
-  ok(catalogFilter("80-0042-old", tp) && catalogFilter("jupiter", tp) && catalogFilter("80-0043 audio", tp) && !catalogFilter("edge", tp), "#302 search: typeahead catalogFilter matches former SKU, Model #, MFR P/N and category");
-  ok(catalogFilter("dsp", { sku: "X", desc: "DSP", formerSkus: null, manufacturerModelNumber: null }), "#302 search: typeahead rows without the new fields still match");
+  ok(catalogFilter("80-0042-old", tp) && catalogFilter("jupiter", tp) && catalogFilter("80-0043 audio", tp) && !catalogFilter("edge", tp), "#304 search: typeahead catalogFilter matches former SKU, Model #, MFR P/N and category");
+  ok(catalogFilter("dsp", { sku: "X", desc: "DSP", formerSkus: null, manufacturerModelNumber: null }), "#304 search: typeahead rows without the new fields still match");
   // datasheets: documentRowMatches reads formerSkus (present only when non-empty).
   const dsIdx = buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] });
   const dsRow = documentRow({ sku: "Symetrix:Jupiter 4", quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: "Symetrix:Jupiter 4", desc: "DSP", category: "Audio", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", formerSkus: ["80-0043"] }, dsIdx, () => "");
-  ok(JSON.stringify(dsRow.formerSkus) === JSON.stringify(["80-0043"]) && documentRowMatches(dsRow, parseDocumentsFilter({ q: "80-0043" })) && documentRowMatches(dsRow, parseDocumentsFilter({ q: "jupiter dsp" })) && !documentRowMatches(dsRow, parseDocumentsFilter({ q: "edge" })), "#302 search: datasheets row matches a former SKU and Model #");
+  ok(JSON.stringify(dsRow.formerSkus) === JSON.stringify(["80-0043"]) && documentRowMatches(dsRow, parseDocumentsFilter({ q: "80-0043" })) && documentRowMatches(dsRow, parseDocumentsFilter({ q: "jupiter dsp" })) && !documentRowMatches(dsRow, parseDocumentsFilter({ q: "edge" })), "#304 search: datasheets row matches a former SKU and Model #");
   const dsPlain = documentRow({ sku: "P", quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: "P", desc: "Plain", category: "Audio", formerSkus: [] }, dsIdx, () => "");
-  ok(!("formerSkus" in dsPlain), "#302 search: datasheets row carries formerSkus only when non-empty");
+  ok(!("formerSkus" in dsPlain), "#304 search: datasheets row carries formerSkus only when non-empty");
   // source pins: the SQL-prefiltered / server-only sites use the shared haystack.
-  const pin302 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  const pk = pin302("src/lib/specs/picker.ts");
-  ok(/TEXT_FIELDS = \[[^\]]*"manufacturerPartNumber"[^\]]*"manufacturerModelNumber"[^\]]*"formerSkus"/.test(pk) && pk.includes("partSearchHaystack(part).includes(query)"), "#302 search: spec picker prefilter lists P/N, Model # and formerSkus and the JS filter uses the haystack");
+  const pin304 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pk = pin304("src/lib/specs/picker.ts");
+  ok(/TEXT_FIELDS = \[[^\]]*"manufacturerPartNumber"[^\]]*"manufacturerModelNumber"[^\]]*"formerSkus"/.test(pk) && pk.includes("partSearchHaystack(part).includes(query)"), "#304 search: spec picker prefilter lists P/N, Model # and formerSkus and the JS filter uses the haystack");
   for (const f of ["src/app/api/v1/displays/catalog/route.ts", "src/app/api/displays/catalog/route.ts"]) {
-    const src = pin302(f);
-    ok(src.includes("partSearchHaystack(part).includes(q)") && !src.includes("part.manufacturerModelNumber].some"), `#302 search: ${f} filters q through the shared haystack (former SKUs included)`);
+    const src = pin304(f);
+    ok(src.includes("partSearchHaystack(part).includes(q)") && !src.includes("part.manufacturerModelNumber].some"), `#304 search: ${f} filters q through the shared haystack (former SKUs included)`);
   }
 }
 
-/* --- #302 pure reference rewriters (src/lib/catalog-rename/rewrite.ts) --- */
+/* --- #304 pure reference rewriters (src/lib/catalog-rename/rewrite.ts) --- */
 {
   const OLD = "80-0043", NEW = "Symetrix:Jupiter 4", OTHER = "80-0099";
-  const m302: ReadonlyMap<string, string> = new Map([[OLD, NEW]]);
-  const models302: ReadonlyMap<string, string> = new Map([[NEW, "Jupiter 4"]]);
-  const none302: ReadonlyMap<string, string> = new Map();
+  const m304: ReadonlyMap<string, string> = new Map([[OLD, NEW]]);
+  const models304: ReadonlyMap<string, string> = new Map([[NEW, "Jupiter 4"]]);
+  const none304: ReadonlyMap<string, string> = new Map();
   const same = (v: unknown, w: unknown) => JSON.stringify(v) === JSON.stringify(w);
   // One shape every rewriter is held to: moves OLD, keeps OTHER, null when nothing to do, input untouched.
   const holds = (name: string, fn: (v: any, m: ReadonlyMap<string, string>) => unknown, input: unknown, expected: unknown) => {
     const before = JSON.stringify(input);
-    const out = fn(input, m302);
-    ok(same(out, expected), `#302 rewrite ${name}: renamed SKU moves, unrelated SKU stays`);
-    ok(JSON.stringify(input) === before, `#302 rewrite ${name}: input is not mutated`);
-    ok(fn(expected, m302) === null && fn(input, none302) === null, `#302 rewrite ${name}: nothing to change → null`);
+    const out = fn(input, m304);
+    ok(same(out, expected), `#304 rewrite ${name}: renamed SKU moves, unrelated SKU stays`);
+    ok(JSON.stringify(input) === before, `#304 rewrite ${name}: input is not mutated`);
+    ok(fn(expected, m304) === null && fn(input, none304) === null, `#304 rewrite ${name}: nothing to change → null`);
   };
 
   // rewriteSkuKeyed
-  ok(same(cr302Rw.rewriteSkuKeyed({ [`opt:${OLD}`]: 2 }, m302), { [`opt:${NEW}`]: 2 }), "#302 rewrite skuKeyed: slot:sku → slot:newSku (new SKU holds a colon)");
-  ok(same(cr302Rw.rewriteSkuKeyed({ [`opt:${NEW}`]: 1, [`lens:${OLD}`]: 3, [`opt:${OTHER}`]: 1 }, m302), { [`opt:${NEW}`]: 1, [`lens:${NEW}`]: 3, [`opt:${OTHER}`]: 1 }), "#302 rewrite skuKeyed: an already-new key is split on the FIRST colon and kept");
-  ok(cr302Rw.rewriteSkuKeyed({ [`opt:${NEW}`]: 1 }, m302) === null && cr302Rw.rewriteSkuKeyed({ [`opt:${OTHER}`]: 1, nocolon: 2 }, m302) === null, "#302 rewrite skuKeyed: nothing to rewrite → null, a colon-less key is left alone");
-  ok(same(cr302Rw.rewriteSkuKeyed({ [`opt:${OLD}`]: 2, [`opt:${NEW}`]: 1 }, m302), { [`opt:${NEW}`]: 3 }), "#302 rewrite skuKeyed: old + new key both present sum into one");
-  { const rec = { [`opt:${OLD}`]: 2 }; const b = JSON.stringify(rec); cr302Rw.rewriteSkuKeyed(rec, m302); ok(JSON.stringify(rec) === b, "#302 rewrite skuKeyed: input is not mutated"); }
+  ok(same(cr304Rw.rewriteSkuKeyed({ [`opt:${OLD}`]: 2 }, m304), { [`opt:${NEW}`]: 2 }), "#304 rewrite skuKeyed: slot:sku → slot:newSku (new SKU holds a colon)");
+  ok(same(cr304Rw.rewriteSkuKeyed({ [`opt:${NEW}`]: 1, [`lens:${OLD}`]: 3, [`opt:${OTHER}`]: 1 }, m304), { [`opt:${NEW}`]: 1, [`lens:${NEW}`]: 3, [`opt:${OTHER}`]: 1 }), "#304 rewrite skuKeyed: an already-new key is split on the FIRST colon and kept");
+  ok(cr304Rw.rewriteSkuKeyed({ [`opt:${NEW}`]: 1 }, m304) === null && cr304Rw.rewriteSkuKeyed({ [`opt:${OTHER}`]: 1, nocolon: 2 }, m304) === null, "#304 rewrite skuKeyed: nothing to rewrite → null, a colon-less key is left alone");
+  ok(same(cr304Rw.rewriteSkuKeyed({ [`opt:${OLD}`]: 2, [`opt:${NEW}`]: 1 }, m304), { [`opt:${NEW}`]: 3 }), "#304 rewrite skuKeyed: old + new key both present sum into one");
+  { const rec = { [`opt:${OLD}`]: 2 }; const b = JSON.stringify(rec); cr304Rw.rewriteSkuKeyed(rec, m304); ok(JSON.stringify(rec) === b, "#304 rewrite skuKeyed: input is not mutated"); }
 
   // rewriteSpecItems
-  const item = (over: Partial<Cr302SpecItem> = {}): Cr302SpecItem => ({ id: 1, sku: OTHER, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, ...over });
-  const items302: Cr302SpecItem[] = [
+  const item = (over: Partial<Cr304SpecItem> = {}): Cr304SpecItem => ({ id: 1, sku: OTHER, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2, ...over });
+  const items304: Cr304SpecItem[] = [
     item({ id: 1, sku: OLD, manufacturerModelNumber: "old model", manufacturerPartNumber: OLD }),
     item({ id: 2, sku: OTHER, manufacturerModelNumber: "keep" }),
     item({ id: 3, sku: "FIX", fixture: true, components: [{ sku: OLD, label: "dsp", role: "other", qty: 1, unit: "ea", cost: 1, price: 2 }, { sku: OTHER, label: "o", role: "other", qty: 1, unit: "ea", cost: 1, price: 2 }], fixtureOptions: { [`opt:${OLD}`]: 1 } }),
     item({ id: 4, sku: "CRT", curtain: true, curtainInputs: { name: "n", fabricSku: OLD, fabricName: "f", qty: "1", width: "10", height: "10", fullness: "50" } }),
   ];
   {
-    const before = JSON.stringify(items302);
-    const out = cr302Rw.rewriteSpecItems(items302, m302, models302);
-    ok(out !== null && out[0].sku === NEW && out[0].manufacturerModelNumber === "Jupiter 4" && out[0].manufacturerPartNumber === OLD, "#302 rewrite specItems: sku moves and manufacturerModelNumber is set from the model map (order # untouched)");
-    ok(out !== null && out[1] === items302[1] && out[1].manufacturerModelNumber === "keep", "#302 rewrite specItems: an unrelated line is returned as-is");
-    ok(out !== null && out[2].sku === "FIX" && out[2].components?.[0].sku === NEW && out[2].components?.[1].sku === OTHER && out[2].manufacturerModelNumber === undefined && same(out[2].fixtureOptions, { [`opt:${NEW}`]: 1 }), "#302 rewrite specItems: components[].sku and fixtureOptions keys move; the model is NOT set on a line whose own sku did not move");
-    ok(out !== null && out[3].curtainInputs?.fabricSku === NEW && out[3].sku === "CRT" && out[3].manufacturerModelNumber === undefined, "#302 rewrite specItems: curtainInputs.fabricSku moves");
-    ok(JSON.stringify(items302) === before, "#302 rewrite specItems: input is not mutated");
-    ok(cr302Rw.rewriteSpecItems(out!, m302, models302) === null && cr302Rw.rewriteSpecItems(items302, none302, models302) === null, "#302 rewrite specItems: nothing to change → null");
-    const noModel = cr302Rw.rewriteSpecItems([item({ sku: OLD, manufacturerModelNumber: "keep me" })], m302, none302);
-    ok(noModel !== null && noModel[0].sku === NEW && noModel[0].manufacturerModelNumber === "keep me", "#302 rewrite specItems: an unknown model leaves manufacturerModelNumber alone");
+    const before = JSON.stringify(items304);
+    const out = cr304Rw.rewriteSpecItems(items304, m304, models304);
+    ok(out !== null && out[0].sku === NEW && out[0].manufacturerModelNumber === "Jupiter 4" && out[0].manufacturerPartNumber === OLD, "#304 rewrite specItems: sku moves and manufacturerModelNumber is set from the model map (order # untouched)");
+    ok(out !== null && out[1] === items304[1] && out[1].manufacturerModelNumber === "keep", "#304 rewrite specItems: an unrelated line is returned as-is");
+    ok(out !== null && out[2].sku === "FIX" && out[2].components?.[0].sku === NEW && out[2].components?.[1].sku === OTHER && out[2].manufacturerModelNumber === undefined && same(out[2].fixtureOptions, { [`opt:${NEW}`]: 1 }), "#304 rewrite specItems: components[].sku and fixtureOptions keys move; the model is NOT set on a line whose own sku did not move");
+    ok(out !== null && out[3].curtainInputs?.fabricSku === NEW && out[3].sku === "CRT" && out[3].manufacturerModelNumber === undefined, "#304 rewrite specItems: curtainInputs.fabricSku moves");
+    ok(JSON.stringify(items304) === before, "#304 rewrite specItems: input is not mutated");
+    ok(cr304Rw.rewriteSpecItems(out!, m304, models304) === null && cr304Rw.rewriteSpecItems(items304, none304, models304) === null, "#304 rewrite specItems: nothing to change → null");
+    const noModel = cr304Rw.rewriteSpecItems([item({ sku: OLD, manufacturerModelNumber: "keep me" })], m304, none304);
+    ok(noModel !== null && noModel[0].sku === NEW && noModel[0].manufacturerModelNumber === "keep me", "#304 rewrite specItems: an unknown model leaves manufacturerModelNumber alone");
   }
 
   // rewriteQuoteSpec
   {
-    const sec = (id: string, its: Cr302SpecItem[], kp?: Cr302Section["keyProducts"]): Cr302Section => ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items: its, ...(kp ? { keyProducts: kp } : {}) });
+    const sec = (id: string, its: Cr304SpecItem[], kp?: Cr304Section["keyProducts"]): Cr304Section => ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items: its, ...(kp ? { keyProducts: kp } : {}) });
     const spec = { sections: [sec("a", [item({ id: 1, sku: OLD })], [{ lineKey: "1", sku: OLD, text: `${OLD} keeps its text`, photo: true }]), sec("b", [item({ id: 2, sku: OTHER })])], note: OLD };
     const b = JSON.stringify(spec);
-    const out = cr302Rw.rewriteQuoteSpec(spec, m302, models302) as typeof spec | null;
-    ok(out !== null && out.sections[0].items[0].sku === NEW && out.sections[0].items[0].manufacturerModelNumber === "Jupiter 4" && out.sections[0].keyProducts?.[0].sku === NEW && out.sections[0].keyProducts?.[0].text === `${OLD} keeps its text`, "#302 rewrite quoteSpec: items and keyProducts[].sku move, prose is untouched");
-    ok(out !== null && out.sections[1] === spec.sections[1] && out.note === OLD, "#302 rewrite quoteSpec: unrelated sections and top-level fields are carried unchanged");
-    ok(JSON.stringify(spec) === b, "#302 rewrite quoteSpec: input is not mutated");
-    ok(cr302Rw.rewriteQuoteSpec(out, m302, models302) === null && cr302Rw.rewriteQuoteSpec(null, m302, models302) === null && cr302Rw.rewriteQuoteSpec({ sections: "x" }, m302, models302) === null, "#302 rewrite quoteSpec: renamed / null / malformed → null");
+    const out = cr304Rw.rewriteQuoteSpec(spec, m304, models304) as typeof spec | null;
+    ok(out !== null && out.sections[0].items[0].sku === NEW && out.sections[0].items[0].manufacturerModelNumber === "Jupiter 4" && out.sections[0].keyProducts?.[0].sku === NEW && out.sections[0].keyProducts?.[0].text === `${OLD} keeps its text`, "#304 rewrite quoteSpec: items and keyProducts[].sku move, prose is untouched");
+    ok(out !== null && out.sections[1] === spec.sections[1] && out.note === OLD, "#304 rewrite quoteSpec: unrelated sections and top-level fields are carried unchanged");
+    ok(JSON.stringify(spec) === b, "#304 rewrite quoteSpec: input is not mutated");
+    ok(cr304Rw.rewriteQuoteSpec(out, m304, models304) === null && cr304Rw.rewriteQuoteSpec(null, m304, models304) === null && cr304Rw.rewriteQuoteSpec({ sections: "x" }, m304, models304) === null, "#304 rewrite quoteSpec: renamed / null / malformed → null");
     const kpOnly = { sections: [sec("a", [item({ sku: OTHER })], [{ lineKey: "1", sku: OLD, text: "t", photo: false }])] };
-    const kpOut = cr302Rw.rewriteQuoteSpec(kpOnly, m302, models302) as typeof kpOnly | null;
-    ok(kpOut !== null && kpOut.sections[0].keyProducts?.[0].sku === NEW && kpOut.sections[0].items[0].sku === OTHER, "#302 rewrite quoteSpec: a keyProducts-only change still rewrites");
+    const kpOut = cr304Rw.rewriteQuoteSpec(kpOnly, m304, models304) as typeof kpOnly | null;
+    ok(kpOut !== null && kpOut.sections[0].keyProducts?.[0].sku === NEW && kpOut.sections[0].items[0].sku === OTHER, "#304 rewrite quoteSpec: a keyProducts-only change still rewrites");
     // Grid quotes (source "grid"): a flat spec.lines list, sku = the placement's partId.
     const gl = (sku: string) => ({ sku, desc: `${OLD} prose`, qty: 1, unit: "ea", price: 2, ext: 2 });
     const grid = { kind: "grid", gridProjectId: "GP-1", gridOptionId: "o1", lines: [gl(OLD), gl("CURTAIN"), gl("asm:fa-1"), gl("allow:x"), gl(OTHER)] };
     const gb = JSON.stringify(grid);
-    const gOut = cr302Rw.rewriteQuoteSpec(grid, m302, models302) as typeof grid | null;
-    ok(gOut !== null && gOut.lines[0].sku === NEW && gOut.lines[0].desc === `${OLD} prose` && !("manufacturerModelNumber" in gOut.lines[0]) && gOut.kind === "grid" && gOut.gridProjectId === "GP-1", "#302 rewrite quoteSpec: a Grid quote's lines[].sku moves, desc and the envelope carry over");
-    ok(gOut !== null && gOut.lines.slice(1).every((l, i) => l === grid.lines[i + 1]), "#302 rewrite quoteSpec: Grid CURTAIN / asm: / allow: / unrelated lines pass through as-is");
-    ok(JSON.stringify(grid) === gb && cr302Rw.rewriteQuoteSpec(gOut, m302, models302) === null && cr302Rw.rewriteQuoteSpec(grid, none302, models302) === null, "#302 rewrite quoteSpec: Grid lines — input not mutated, nothing to change → null");
+    const gOut = cr304Rw.rewriteQuoteSpec(grid, m304, models304) as typeof grid | null;
+    ok(gOut !== null && gOut.lines[0].sku === NEW && gOut.lines[0].desc === `${OLD} prose` && !("manufacturerModelNumber" in gOut.lines[0]) && gOut.kind === "grid" && gOut.gridProjectId === "GP-1", "#304 rewrite quoteSpec: a Grid quote's lines[].sku moves, desc and the envelope carry over");
+    ok(gOut !== null && gOut.lines.slice(1).every((l, i) => l === grid.lines[i + 1]), "#304 rewrite quoteSpec: Grid CURTAIN / asm: / allow: / unrelated lines pass through as-is");
+    ok(JSON.stringify(grid) === gb && cr304Rw.rewriteQuoteSpec(gOut, m304, models304) === null && cr304Rw.rewriteQuoteSpec(grid, none304, models304) === null, "#304 rewrite quoteSpec: Grid lines — input not mutated, nothing to change → null");
   }
 
   // rewriteCartLines
   {
-    const lines: Cr302CartLine[] = [
+    const lines: Cr304CartLine[] = [
       { lineId: "l1", kind: "part", sku: OLD, qty: 1 },
       { lineId: "l2", kind: "part", sku: OTHER, qty: 1 },
       { lineId: "l3", kind: "fixture", fixtureId: "fa-1", fixtureOptions: { [`opt:${OLD}`]: 1 }, qty: 1 },
       { lineId: "l4", kind: "curtain", curtainInputs: { name: "n", fabricSku: OLD, fabricName: "f", qty: "1", width: "1", height: "1", fullness: "50" }, qty: 1 },
     ];
-    const expected: Cr302CartLine[] = [
+    const expected: Cr304CartLine[] = [
       { lineId: "l1", kind: "part", sku: NEW, qty: 1 },
       { lineId: "l2", kind: "part", sku: OTHER, qty: 1 },
       { lineId: "l3", kind: "fixture", fixtureId: "fa-1", fixtureOptions: { [`opt:${NEW}`]: 1 }, qty: 1 },
       { lineId: "l4", kind: "curtain", curtainInputs: { name: "n", fabricSku: NEW, fabricName: "f", qty: "1", width: "1", height: "1", fullness: "50" }, qty: 1 },
     ];
-    holds("cartLines", (v, m) => cr302Rw.rewriteCartLines(v, m), lines, expected);
-    ok(cr302Rw.rewriteCartLines("junk", m302) === null && cr302Rw.rewriteCartLines([null, 3], m302) === null, "#302 rewrite cartLines: malformed → null");
+    holds("cartLines", (v, m) => cr304Rw.rewriteCartLines(v, m), lines, expected);
+    ok(cr304Rw.rewriteCartLines("junk", m304) === null && cr304Rw.rewriteCartLines([null, 3], m304) === null, "#304 rewrite cartLines: malformed → null");
   }
 
   // rewriteProcurement
   {
-    const row = (sku: string): Cr302ProcLine => ({ id: "pl-1", sku, desc: "d", vendor: "v", qty: 1, unit: "ea", cost: 1, leadDays: 1, status: "pending", orderedAt: null, po: "" });
-    holds("procurement", (v, m) => cr302Rw.rewriteProcurement(v, m), [row(OLD), row(OTHER)], [row(NEW), row(OTHER)]);
+    const row = (sku: string): Cr304ProcLine => ({ id: "pl-1", sku, desc: "d", vendor: "v", qty: 1, unit: "ea", cost: 1, leadDays: 1, status: "pending", orderedAt: null, po: "" });
+    holds("procurement", (v, m) => cr304Rw.rewriteProcurement(v, m), [row(OLD), row(OTHER)], [row(NEW), row(OTHER)]);
   }
 
   // rewriteSpecDocProducts
   {
-    const p = (sku: string): Cr302SpecProduct => ({ sku, qty: 2, mfrNumber: OLD, desc: `desc ${OLD}` });
-    holds("specDocProducts", (v, m) => cr302Rw.rewriteSpecDocProducts(v, m), [p(OLD), p(OTHER)], [p(NEW), p(OTHER)]);
+    const p = (sku: string): Cr304SpecProduct => ({ sku, qty: 2, mfrNumber: OLD, desc: `desc ${OLD}` });
+    holds("specDocProducts", (v, m) => cr304Rw.rewriteSpecDocProducts(v, m), [p(OLD), p(OTHER)], [p(NEW), p(OTHER)]);
   }
 
   // rewriteSubassembly
   {
     const fx = {
       id: "fa-1", kind: "fixture", label: OLD, lightEngineSku: OLD, lensSku: OTHER,
-      lines: { data: [{ sku: OLD, qty: 1 }, { sku: OTHER, qty: 1 }], power: [], mounting: [{ sku: OLD, qty: 0 }], accessories: [] } satisfies Cr302Fixture["lines"],
+      lines: { data: [{ sku: OLD, qty: 1 }, { sku: OTHER, qty: 1 }], power: [], mounting: [{ sku: OLD, qty: 0 }], accessories: [] } satisfies Cr304Fixture["lines"],
       parts: [{ sku: OLD, qty: 2 }],
     };
     const exp = { ...fx, lightEngineSku: NEW, lines: { data: [{ sku: NEW, qty: 1 }, { sku: OTHER, qty: 1 }], power: [], mounting: [{ sku: NEW, qty: 0 }], accessories: [] }, parts: [{ sku: NEW, qty: 2 }] };
-    holds("subassembly fixture", (v, m) => cr302Rw.rewriteSubassembly(v, m), fx, exp);
+    holds("subassembly fixture", (v, m) => cr304Rw.rewriteSubassembly(v, m), fx, exp);
     const rack = { id: "rk-1", kind: "rack", parts: [{ sku: OLD, qty: 1 }], rack: { config: { ruCount: 12 }, placements: [{ id: "RP-1", kind: "device", sku: OLD, ruStart: 1 }, { id: "RP-2", kind: "reserved", ruStart: 3 }, { id: "RP-3", kind: "blank", sku: OTHER, ruStart: 4 }] } };
     const rexp = { id: "rk-1", kind: "rack", parts: [{ sku: NEW, qty: 1 }], rack: { config: { ruCount: 12 }, placements: [{ id: "RP-1", kind: "device", sku: NEW, ruStart: 1 }, { id: "RP-2", kind: "reserved", ruStart: 3 }, { id: "RP-3", kind: "blank", sku: OTHER, ruStart: 4 }] } };
-    holds("subassembly rack", (v, m) => cr302Rw.rewriteSubassembly(v, m), rack, rexp);
-    ok(cr302Rw.rewriteSubassembly({ id: "fa-2", label: OLD, lightEngineSku: OTHER }, m302) === null, "#302 rewrite subassembly: labels and ids are never touched");
+    holds("subassembly rack", (v, m) => cr304Rw.rewriteSubassembly(v, m), rack, rexp);
+    ok(cr304Rw.rewriteSubassembly({ id: "fa-2", label: OLD, lightEngineSku: OTHER }, m304) === null, "#304 rewrite subassembly: labels and ids are never touched");
   }
 
   // rewriteGridProjectLive
   {
-    const pl = (id: string, partId: string, extra: Partial<Cr302Placement> = {}): Cr302Placement => ({ id, sheetId: "gs-1", page: 1, x: 0.1, y: 0.1, partId, by: "t", at: 1, ...extra });
-    const rt = (id: string, partId: string): Cr302Route => ({ id, sheetId: "gs-1", page: 1, partId, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], aspect: 1, by: "t", at: 1 });
+    const pl = (id: string, partId: string, extra: Partial<Cr304Placement> = {}): Cr304Placement => ({ id, sheetId: "gs-1", page: 1, x: 0.1, y: 0.1, partId, by: "t", at: 1, ...extra });
+    const rt = (id: string, partId: string): Cr304Route => ({ id, sheetId: "gs-1", page: 1, partId, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], aspect: 1, by: "t", at: 1 });
     const frozen = [{ rev: 1, at: 1, by: "t", reason: "manual", note: "", name: "r", sheetIds: [], placements: [pl("gp-old", OLD)], calibrations: [], spaces: [], routes: [rt("wr-old", OLD)] }];
     const proj = {
       id: "GRD-5001", name: OLD,
-      placements: [pl("gp-1", OLD), pl("gp-2", OTHER), pl("gp-3", OLD, { curtain: { type: "drape", name: "c", widthFt: 10, heightFt: 10, fullnessPct: 50, fabricSku: OLD } as unknown as Cr302Placement["curtain"] })],
+      placements: [pl("gp-1", OLD), pl("gp-2", OTHER), pl("gp-3", OLD, { curtain: { type: "drape", name: "c", widthFt: 10, heightFt: 10, fullnessPct: 50, fabricSku: OLD } as unknown as Cr304Placement["curtain"] })],
       routes: [rt("wr-1", OLD), rt("wr-2", OTHER)],
       riser: { "opt-base": { nodes: {}, levels: [], conduits: [], notes: [], links: [{ id: "lk-1", from: { kind: "space", spaceId: null }, to: { kind: "space", spaceId: null }, partId: OLD, lengthFt: 5, by: "t", at: 1 }] } },
       options: [{ id: "opt-base", name: "Design", quoteId: null, createdAt: 1, accessories: [{ id: "ba-000000000001", partId: OLD, qty: 1, scope: "Audio" }, { id: "ba-000000000002", partId: OTHER, qty: 1, scope: "Audio" }], customItems: [{ id: "ci-000000000001", desc: OLD, qty: 1, unitCost: 1 }] }],
@@ -10851,60 +10851,60 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     exp.placements[0].partId = NEW; exp.placements[2].partId = NEW; exp.placements[2].curtain.fabricSku = NEW;
     exp.routes[0].partId = NEW; exp.riser["opt-base"].links[0].partId = NEW; exp.options[0].accessories[0].partId = NEW;
     exp.autoEstimate["opt-base"].overrides["audio:dsp"].sku = NEW;
-    holds("gridProjectLive", (v, m) => cr302Rw.rewriteGridProjectLive(v, m), proj, exp);
-    const out = cr302Rw.rewriteGridProjectLive(proj, m302) as typeof proj;
-    ok(JSON.stringify(out.revisions) === JSON.stringify(frozen) && out.name === OLD && out.options[0].customItems[0].desc === OLD, "#302 rewrite gridProjectLive: revisions are byte-identical, names and custom-item text untouched");
+    holds("gridProjectLive", (v, m) => cr304Rw.rewriteGridProjectLive(v, m), proj, exp);
+    const out = cr304Rw.rewriteGridProjectLive(proj, m304) as typeof proj;
+    ok(JSON.stringify(out.revisions) === JSON.stringify(frozen) && out.name === OLD && out.options[0].customItems[0].desc === OLD, "#304 rewrite gridProjectLive: revisions are byte-identical, names and custom-item text untouched");
     const legacy = { placements: [], routes: [], autoEstimate: { tierByScope: {}, overrides: { "audio:dsp": { sku: OLD } } } };
-    const lout = cr302Rw.rewriteGridProjectLive(legacy, m302) as typeof legacy | null;
-    ok(lout !== null && (lout.autoEstimate.overrides["audio:dsp"] as { sku: string }).sku === NEW, "#302 rewrite gridProjectLive: a pre-D312 bare autoEstimate is rewritten too");
+    const lout = cr304Rw.rewriteGridProjectLive(legacy, m304) as typeof legacy | null;
+    ok(lout !== null && (lout.autoEstimate.overrides["audio:dsp"] as { sku: string }).sku === NEW, "#304 rewrite gridProjectLive: a pre-D312 bare autoEstimate is rewritten too");
   }
 
   // rewriteGridSymbolMembers
   {
     const asm = { id: "gsym-1", kind: "assembly", name: OLD, pricingPartId: null, members: [{ symbolId: OLD, qty: 1, x: 0, y: 0 }, { symbolId: OTHER, qty: 1, x: 1, y: 1 }] };
-    holds("gridSymbolMembers", (v, m) => cr302Rw.rewriteGridSymbolMembers(v, m), asm, { ...asm, members: [{ symbolId: NEW, qty: 1, x: 0, y: 0 }, { symbolId: OTHER, qty: 1, x: 1, y: 1 }] });
-    const dev = cr302Rw.rewriteGridSymbolMembers({ id: OLD, kind: "device", pricingPartId: OLD }, m302) as Record<string, unknown> | null;
-    ok(dev !== null && dev.pricingPartId === NEW && dev.id === OLD, "#302 rewrite gridSymbolMembers: a symbol's pricingPartId bridge moves, its own id does not");
+    holds("gridSymbolMembers", (v, m) => cr304Rw.rewriteGridSymbolMembers(v, m), asm, { ...asm, members: [{ symbolId: NEW, qty: 1, x: 0, y: 0 }, { symbolId: OTHER, qty: 1, x: 1, y: 1 }] });
+    const dev = cr304Rw.rewriteGridSymbolMembers({ id: OLD, kind: "device", pricingPartId: OLD }, m304) as Record<string, unknown> | null;
+    ok(dev !== null && dev.pricingPartId === NEW && dev.id === OLD, "#304 rewrite gridSymbolMembers: a symbol's pricingPartId bridge moves, its own id does not");
   }
 
   // rewriteEquipmentMap
   {
-    const row = (cells: Cr302EquipMap[string]["tiers"]): Cr302EquipMap[string] => ({ tiers: cells, updatedBy: "t", updatedAt: 1 });
-    const map: Cr302EquipMap = {
+    const row = (cells: Cr304EquipMap[string]["tiers"]): Cr304EquipMap[string] => ({ tiers: cells, updatedBy: "t", updatedAt: 1 });
+    const map: Cr304EquipMap = {
       "audio:dsp": row({ good: { kind: "part", sku: OLD }, better: { kind: "part", sku: OTHER }, best: { kind: "assembly", id: OLD } }),
       "audio:amp": row({ good: { kind: "allowance", amount: 5, confirmedBy: "t", confirmedAt: 1, note: OLD } }),
     };
     const exp = JSON.parse(JSON.stringify(map));
     exp["audio:dsp"].tiers.good.sku = NEW;
-    holds("equipmentMap", (v, m) => cr302Rw.rewriteEquipmentMap(v, m), map, exp);
+    holds("equipmentMap", (v, m) => cr304Rw.rewriteEquipmentMap(v, m), map, exp);
   }
 
   // rewriteTrackSeries
   {
-    const ser = (sku: string): Cr302TrackSeries => ({ id: "adc-280", name: OLD, manufacturer: "ADC", stickLengthFt: 10, carrierSpacingIn: 6, hangerSpacingFt: 4, overlapFt: 0, parts: { track: { sku }, splice: { sku: OTHER } }, sticks: [{ lengthFt: 5, sku: OTHER }, { lengthFt: 10, sku }], active: true });
+    const ser = (sku: string): Cr304TrackSeries => ({ id: "adc-280", name: OLD, manufacturer: "ADC", stickLengthFt: 10, carrierSpacingIn: 6, hangerSpacingFt: 4, overlapFt: 0, parts: { track: { sku }, splice: { sku: OTHER } }, sticks: [{ lengthFt: 5, sku: OTHER }, { lengthFt: 10, sku }], active: true });
     const blob = { "adc-280": ser(OLD), "adc-300": ser(OTHER) };
-    holds("trackSeries", (v, m) => cr302Rw.rewriteTrackSeries(v, m), blob, { "adc-280": ser(NEW), "adc-300": ser(OTHER) });
+    holds("trackSeries", (v, m) => cr304Rw.rewriteTrackSeries(v, m), blob, { "adc-280": ser(NEW), "adc-300": ser(OTHER) });
   }
 
   // rewriteCurtainMounts
   {
-    const mk = (sku: string): Cr302Mounts => ({ rows: [{ sku, rule: { kind: "perCurtain", qty: 1 } }, { sku: OTHER, rule: { kind: "perMark", qty: 1 } }], updatedBy: "t", updatedAt: 1 });
-    holds("curtainMounts", (v, m) => cr302Rw.rewriteCurtainMounts(v, m), mk(OLD), mk(NEW));
+    const mk = (sku: string): Cr304Mounts => ({ rows: [{ sku, rule: { kind: "perCurtain", qty: 1 } }, { sku: OTHER, rule: { kind: "perMark", qty: 1 } }], updatedBy: "t", updatedAt: 1 });
+    holds("curtainMounts", (v, m) => cr304Rw.rewriteCurtainMounts(v, m), mk(OLD), mk(NEW));
   }
 
   // rewriteRackDefaults
   {
-    const d = (blankSku: string, ventSku: string): Cr302RackDefaults => ({ blankSku, ventSku });
-    holds("rackDefaults", (v, m) => cr302Rw.rewriteRackDefaults(v, m), d(OLD, OTHER), d(NEW, OTHER));
-    ok(same(cr302Rw.rewriteRackDefaults({ ventSku: OLD }, m302), { ventSku: NEW }), "#302 rewrite rackDefaults: a missing blankSku stays missing");
+    const d = (blankSku: string, ventSku: string): Cr304RackDefaults => ({ blankSku, ventSku });
+    holds("rackDefaults", (v, m) => cr304Rw.rewriteRackDefaults(v, m), d(OLD, OTHER), d(NEW, OTHER));
+    ok(same(cr304Rw.rewriteRackDefaults({ ventSku: OLD }, m304), { ventSku: NEW }), "#304 rewrite rackDefaults: a missing blankSku stays missing");
   }
 
   // rewriteIdList
   {
-    holds("idList", (v, m) => cr302Rw.rewriteIdList(v, m), { ids: [OTHER, OLD, "x"] }, { ids: [OTHER, NEW, "x"] });
-    ok(same(cr302Rw.rewriteIdList({ ids: [OLD, "x", NEW] }, m302), { ids: [NEW, "x"] }), "#302 rewrite idList: dedupes when the old and new ids were both present (first position wins)");
-    ok(same(cr302Rw.rewriteIdList({ ids: [NEW, "x", OLD] }, m302), { ids: [NEW, "x"] }), "#302 rewrite idList: dedupe keeps the earlier of the two positions");
-    ok(same(cr302Rw.rewriteIdList({ ids: [OLD], extra: 1 }, m302), { ids: [NEW], extra: 1 }), "#302 rewrite idList: other blob fields are carried");
+    holds("idList", (v, m) => cr304Rw.rewriteIdList(v, m), { ids: [OTHER, OLD, "x"] }, { ids: [OTHER, NEW, "x"] });
+    ok(same(cr304Rw.rewriteIdList({ ids: [OLD, "x", NEW] }, m304), { ids: [NEW, "x"] }), "#304 rewrite idList: dedupes when the old and new ids were both present (first position wins)");
+    ok(same(cr304Rw.rewriteIdList({ ids: [NEW, "x", OLD] }, m304), { ids: [NEW, "x"] }), "#304 rewrite idList: dedupe keeps the earlier of the two positions");
+    ok(same(cr304Rw.rewriteIdList({ ids: [OLD], extra: 1 }, m304), { ids: [NEW], extra: 1 }), "#304 rewrite idList: other blob fields are carried");
   }
 
   // rewriteDrivePhotoSync
@@ -10912,26 +10912,26 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     const file = (skus: string[]) => ({ md5: "m", documentId: "pd-1", skus, at: 1 });
     const blob = { folder: null, files: { f1: file([OLD, OTHER]), f2: file([OTHER]) }, lastRun: { at: 1, unmatched: [{ name: OLD }] }, runningUntil: null };
     const exp = JSON.parse(JSON.stringify(blob)); exp.files.f1.skus = [NEW, OTHER];
-    holds("drivePhotoSync", (v, m) => cr302Rw.rewriteDrivePhotoSync(v, m), blob, exp);
-    ok(same(cr302Rw.rewriteDrivePhotoSync({ files: { f: file([OLD, NEW]) } }, m302), { files: { f: file([NEW]) } }), "#302 rewrite drivePhotoSync: a file naming both the old and new SKU keeps one");
+    holds("drivePhotoSync", (v, m) => cr304Rw.rewriteDrivePhotoSync(v, m), blob, exp);
+    ok(same(cr304Rw.rewriteDrivePhotoSync({ files: { f: file([OLD, NEW]) } }, m304), { files: { f: file([NEW]) } }), "#304 rewrite drivePhotoSync: a file naming both the old and new SKU keeps one");
   }
 
   // rewriteWireTypes
   {
-    const w = (cableSku?: string): Cr302WireType => ({ id: "cat6", label: "Cat6", connectionTypes: ["cat6"], ...(cableSku ? { cableSku } : {}) });
-    holds("wireTypes", (v, m) => cr302Rw.rewriteWireTypes(v, m), [w(OLD), w(OTHER), w()], [w(NEW), w(OTHER), w()]);
+    const w = (cableSku?: string): Cr304WireType => ({ id: "cat6", label: "Cat6", connectionTypes: ["cat6"], ...(cableSku ? { cableSku } : {}) });
+    holds("wireTypes", (v, m) => cr304Rw.rewriteWireTypes(v, m), [w(OLD), w(OTHER), w()], [w(NEW), w(OTHER), w()]);
   }
 
   // rewritePartRefs
   {
     const part = { sku: "Symetrix:Jupiter 12", specSameAs: OLD, productMetadata: { accessories: [{ sku: OLD, description: "mount" }, { description: "no sku" }, { sku: OTHER, description: "o" }], datasheets: [{ kind: "datasheet", fileName: OLD }] } };
     const exp = JSON.parse(JSON.stringify(part)); exp.specSameAs = NEW; exp.productMetadata.accessories[0].sku = NEW;
-    holds("partRefs", (v, m) => cr302Rw.rewritePartRefs(v, m), part, exp);
-    ok(cr302Rw.rewritePartRefs({ sku: OLD, specSameAs: OTHER }, m302) === null, "#302 rewrite partRefs: a part's own sku is the rename's job, not this rewriter's");
+    holds("partRefs", (v, m) => cr304Rw.rewritePartRefs(v, m), part, exp);
+    ok(cr304Rw.rewritePartRefs({ sku: OLD, specSameAs: OTHER }, m304) === null, "#304 rewrite partRefs: a part's own sku is the rename's job, not this rewriter's");
   }
 }
 
-/* --- #302 Task 5: importers resolve renamed parts (src/lib/catalog-rename/import-resolve.ts) --- pure */
+/* --- #304 Task 5: importers resolve renamed parts (src/lib/catalog-rename/import-resolve.ts) --- pure */
 {
   const live = [
     { sku: "Symetrix:Jupiter 4", mfr: "Symetrix", manufacturerPartNumber: "80-0043", formerSkus: ["80-0043"] },
@@ -10942,179 +10942,179 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     { sku: "PLAIN-1" },
   ];
   const renames = new Map([["80-0050", "Symetrix:Radius 12"], ["OLD-A", "OLD-B"], ["OLD-B", "Symetrix:Radius 12"], ["GONE-1", "GONE-2"]]);
-  const r = cr302Resolver(live, renames);
-  ok(r({ sku: "ETC-S4", mfr: "Symetrix" }) === "ETC-S4", "#302 import resolve: an exact live SKU wins first (whatever the row's manufacturer)");
-  ok(r({ sku: "80-0043" }) === "Symetrix:Jupiter 4", "#302 import resolve: a former SKU finds the renamed part");
-  ok(r({ sku: "80 0043" }) === "Symetrix:Jupiter 4" && r({ sku: "800043" }) === "Symetrix:Jupiter 4", "#302 import resolve: former SKUs compare punctuation/space-insensitively");
-  ok(r({ sku: "80-0050" }) === "Symetrix:Radius 12", "#302 import resolve: the rename log maps an old SKU with no formerSkus entry");
-  ok(r({ sku: "OLD-A" }) === "Symetrix:Radius 12", "#302 import resolve: a rename chain is followed to the live SKU");
-  ok(r({ sku: "GONE-1" }) === null, "#302 import resolve: a rename that ends at no live part is a new part (null)");
-  ok(r({ sku: "7060A", mfr: "ETC" }) === "ETC-S4", "#302 import resolve: same manufacturer + MFR P/N equal to the row SKU");
-  ok(r({ sku: "NEW-9", mfr: "etc", manufacturerPartNumber: "7060-a" }) === "ETC-S4", "#302 import resolve: same manufacturer (mfrKey) + MFR P/N equal to the row's MFR P/N, normalized");
-  ok(r({ sku: "7060A", mfr: "Chauvet" }) === null && r({ sku: "7060A" }) === null, "#302 import resolve: a different (or no) manufacturer never matches on P/N");
-  ok(r({ sku: "7061A", mfr: "ETC" }) === null, "#302 import resolve: two parts of one manufacturer sharing a normalized P/N is ambiguous → null");
-  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "7061A" }) === null, "#302 import resolve: a row P/N is matched on its own (here an ambiguous P/N → null), never by the row SKU");
-  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "9999" }) === null, "#302 import resolve: row SKU 7060A + row P/N 9999 does NOT resolve to the part whose P/N is 7060A — a carried P/N is the only P/N key");
-  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "  " }) === "ETC-S4", "#302 import resolve: a blank row P/N falls back to matching the row SKU");
-  ok(r({ sku: "BRAND-NEW", mfr: "ETC" }) === null && r({ sku: "" }) === null, "#302 import resolve: no match is a new part (null)");
-  ok(r({ sku: "plain-1" }) === null, "#302 import resolve: step 1 is exact — case-insensitive matching stays the importer's own rule");
+  const r = cr304Resolver(live, renames);
+  ok(r({ sku: "ETC-S4", mfr: "Symetrix" }) === "ETC-S4", "#304 import resolve: an exact live SKU wins first (whatever the row's manufacturer)");
+  ok(r({ sku: "80-0043" }) === "Symetrix:Jupiter 4", "#304 import resolve: a former SKU finds the renamed part");
+  ok(r({ sku: "80 0043" }) === "Symetrix:Jupiter 4" && r({ sku: "800043" }) === "Symetrix:Jupiter 4", "#304 import resolve: former SKUs compare punctuation/space-insensitively");
+  ok(r({ sku: "80-0050" }) === "Symetrix:Radius 12", "#304 import resolve: the rename log maps an old SKU with no formerSkus entry");
+  ok(r({ sku: "OLD-A" }) === "Symetrix:Radius 12", "#304 import resolve: a rename chain is followed to the live SKU");
+  ok(r({ sku: "GONE-1" }) === null, "#304 import resolve: a rename that ends at no live part is a new part (null)");
+  ok(r({ sku: "7060A", mfr: "ETC" }) === "ETC-S4", "#304 import resolve: same manufacturer + MFR P/N equal to the row SKU");
+  ok(r({ sku: "NEW-9", mfr: "etc", manufacturerPartNumber: "7060-a" }) === "ETC-S4", "#304 import resolve: same manufacturer (mfrKey) + MFR P/N equal to the row's MFR P/N, normalized");
+  ok(r({ sku: "7060A", mfr: "Chauvet" }) === null && r({ sku: "7060A" }) === null, "#304 import resolve: a different (or no) manufacturer never matches on P/N");
+  ok(r({ sku: "7061A", mfr: "ETC" }) === null, "#304 import resolve: two parts of one manufacturer sharing a normalized P/N is ambiguous → null");
+  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "7061A" }) === null, "#304 import resolve: a row P/N is matched on its own (here an ambiguous P/N → null), never by the row SKU");
+  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "9999" }) === null, "#304 import resolve: row SKU 7060A + row P/N 9999 does NOT resolve to the part whose P/N is 7060A — a carried P/N is the only P/N key");
+  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "  " }) === "ETC-S4", "#304 import resolve: a blank row P/N falls back to matching the row SKU");
+  ok(r({ sku: "BRAND-NEW", mfr: "ETC" }) === null && r({ sku: "" }) === null, "#304 import resolve: no match is a new part (null)");
+  ok(r({ sku: "plain-1" }) === null, "#304 import resolve: step 1 is exact — case-insensitive matching stays the importer's own rule");
   // The import guard counts resolved rows as overlap (a renamed manufacturer's
   // whole price list is still keyed by order number).
-  const cat302 = live.map(({ sku, mfr }) => ({ sku, mfr }));
-  const noRes = checkManufacturer({ mfr: "Symetrix", fileSkus: ["80-0043", "80-0050"], catalog: cat302 });
-  ok(!noRes.ok && noRes.reason === "no-overlap", "#302 import guard: without the resolver an order-number file reads as the wrong manufacturer");
-  const withRes = checkManufacturer({ mfr: "Symetrix", fileSkus: ["80-0043", "80-0050"], catalog: cat302, resolve: r });
-  ok(withRes.ok && withRes.overlap === 2, "#302 import guard: with the resolver, rows that resolve to a renamed part count as overlap");
-  const foreign302 = checkManufacturer({ mfr: "ETC", fileSkus: ["80-0043", "ETC-S4"], catalog: cat302, resolve: r });
-  ok(!foreign302.ok && foreign302.reason === "foreign-skus" && foreign302.examples[0].sku === "80-0043" && foreign302.examples[0].mfr === "Symetrix", "#302 import guard: an old SKU that resolves to another manufacturer's part is foreign, named by the row's own SKU");
-  const grp302 = checkManufacturerGroups([{ mfr: "Symetrix", skus: ["80-0043"] }], cat302, r);
-  ok(grp302[0].result.ok, "#302 import guard: checkManufacturerGroups threads the resolver");
+  const cat304 = live.map(({ sku, mfr }) => ({ sku, mfr }));
+  const noRes = checkManufacturer({ mfr: "Symetrix", fileSkus: ["80-0043", "80-0050"], catalog: cat304 });
+  ok(!noRes.ok && noRes.reason === "no-overlap", "#304 import guard: without the resolver an order-number file reads as the wrong manufacturer");
+  const withRes = checkManufacturer({ mfr: "Symetrix", fileSkus: ["80-0043", "80-0050"], catalog: cat304, resolve: r });
+  ok(withRes.ok && withRes.overlap === 2, "#304 import guard: with the resolver, rows that resolve to a renamed part count as overlap");
+  const foreign304 = checkManufacturer({ mfr: "ETC", fileSkus: ["80-0043", "ETC-S4"], catalog: cat304, resolve: r });
+  ok(!foreign304.ok && foreign304.reason === "foreign-skus" && foreign304.examples[0].sku === "80-0043" && foreign304.examples[0].mfr === "Symetrix", "#304 import guard: an old SKU that resolves to another manufacturer's part is foreign, named by the row's own SKU");
+  const grp304 = checkManufacturerGroups([{ mfr: "Symetrix", skus: ["80-0043"] }], cat304, r);
+  ok(grp304[0].result.ok, "#304 import guard: checkManufacturerGroups threads the resolver");
   const liveX = [{ sku: "ETC-S4", mfr: "ETC" }, { sku: "Symetrix:Odd", mfr: "Symetrix", formerSkus: ["ETC S4"] }];
-  const ciFirst = checkManufacturer({ mfr: "ETC", fileSkus: ["etc-s4"], catalog: liveX, resolve: cr302Resolver(liveX, new Map()) });
-  ok(ciFirst.ok && ciFirst.overlap === 1, "#302 import guard: a SKU already on file in any spelling is judged as before — the resolver only sees rows that match nothing");
+  const ciFirst = checkManufacturer({ mfr: "ETC", fileSkus: ["etc-s4"], catalog: liveX, resolve: cr304Resolver(liveX, new Map()) });
+  ok(ciFirst.ok && ciFirst.overlap === 1, "#304 import guard: a SKU already on file in any spelling is judged as before — the resolver only sees rows that match nothing");
   // The guard passes each row's P/N to the resolver: a file that matches this
   // manufacturer only through its MFR P/N column is overlap, not "wrong file".
-  const pnOnly = checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1", "NEW-ORDER-2"], filePns: ["80 0050", ""], catalog: cat302, resolve: r });
-  ok(pnOnly.ok && pnOnly.overlap === 1, "#302 import guard: a row matching only by its MFR P/N column counts as overlap");
-  ok(!checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1"], catalog: cat302, resolve: r }).ok, "#302 import guard: the same file without its P/N column still reads as no-overlap");
-  const grpPn = checkManufacturerGroups(groupRowsByManufacturer([{ mfr: "Symetrix", sku: "NEW-ORDER-1", pn: "80-0050" }, { mfr: "Symetrix", sku: "NEW-ORDER-3" }]), cat302, r);
-  ok(grpPn[0].result.ok && grpPn[0].result.overlap === 1, "#302 import guard: groupRowsByManufacturer carries each row's P/N through checkManufacturerGroups");
+  const pnOnly = checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1", "NEW-ORDER-2"], filePns: ["80 0050", ""], catalog: cat304, resolve: r });
+  ok(pnOnly.ok && pnOnly.overlap === 1, "#304 import guard: a row matching only by its MFR P/N column counts as overlap");
+  ok(!checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1"], catalog: cat304, resolve: r }).ok, "#304 import guard: the same file without its P/N column still reads as no-overlap");
+  const grpPn = checkManufacturerGroups(groupRowsByManufacturer([{ mfr: "Symetrix", sku: "NEW-ORDER-1", pn: "80-0050" }, { mfr: "Symetrix", sku: "NEW-ORDER-3" }]), cat304, r);
+  ok(grpPn[0].result.ok && grpPn[0].result.overlap === 1, "#304 import guard: groupRowsByManufacturer carries each row's P/N through checkManufacturerGroups");
   // A live part whose SKU normalizes to the row SKU outranks another part's
   // former SKU / rename-log entry (steps 2/3) — in both importers.
   const liveY = [{ sku: "AB-12", mfr: "X" }, { sku: "X:Model", mfr: "X", formerSkus: ["ab 12"] }];
-  const rY = cr302Resolver(liveY, new Map([["ab.12", "X:Model"]]));
-  ok(rY({ sku: "ab12" }) === "AB-12", "#302 import resolve: a live SKU in another spelling outranks another part's former SKU");
-  ok(rY({ sku: "ab.12" }) === "AB-12", "#302 import resolve: a live SKU in another spelling outranks a rename-log entry");
-  ok(cr302Resolver([{ sku: "X:Model", mfr: "X", formerSkus: ["ab 12"] }], new Map())({ sku: "ab12" }) === "X:Model", "#302 import resolve: with no live SKU of that spelling, the former SKU still resolves");
-  ok(cr302Resolver([{ sku: "AB-12", mfr: "X" }], new Map())({ sku: "ab12" }) === null, "#302 import resolve: without a step 2/3 hit a normalized-only live match is still not the resolver's call");
+  const rY = cr304Resolver(liveY, new Map([["ab.12", "X:Model"]]));
+  ok(rY({ sku: "ab12" }) === "AB-12", "#304 import resolve: a live SKU in another spelling outranks another part's former SKU");
+  ok(rY({ sku: "ab.12" }) === "AB-12", "#304 import resolve: a live SKU in another spelling outranks a rename-log entry");
+  ok(cr304Resolver([{ sku: "X:Model", mfr: "X", formerSkus: ["ab 12"] }], new Map())({ sku: "ab12" }) === "X:Model", "#304 import resolve: with no live SKU of that spelling, the former SKU still resolves");
+  ok(cr304Resolver([{ sku: "AB-12", mfr: "X" }], new Map())({ sku: "ab12" }) === null, "#304 import resolve: without a step 2/3 hit a normalized-only live match is still not the resolver's call");
 }
 
-/* --- #302 Task 6: every part search matches Model # and former SKUs --- */
+/* --- #304 Task 6: every part search matches Model # and former SKUs --- */
 {
-  const src302 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
-  const pinRel = (rel: string, name: string) => ok(/from "@\/lib\/catalog-rename\/sku"/.test(src302(rel)) && src302(rel).includes(name), `#302 search ${rel}: reads the shared haystack (${name})`);
+  const src304 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const pinRel = (rel: string, name: string) => ok(/from "@\/lib\/catalog-rename\/sku"/.test(src304(rel)) && src304(rel).includes(name), `#304 search ${rel}: reads the shared haystack (${name})`);
   pinRel("src/app/api/search/route.ts", "partSearchHaystack(");
   pinRel("src/app/(app)/catalog/page.tsx", "partSearchHaystack(");
   pinRel("src/app/(app)/estimator/actions.ts", "partSearchHaystack(");
   pinRel("src/app/(app)/catalog/documents/actions.ts", "partMatchesQuery(");
   pinRel("src/lib/design/grid-bom.ts", "partSearchHaystack(");
-  ok(["grid-library", "grid-palette", "grid-accessories"].every((f) => src302(`src/lib/design/${f}.ts`).includes("partLiteHaystack(")), "#302 search: the Grid library, palette and accessory pickers share partLiteHaystack");
-  ok(src302("src/lib/portal-catalog-index.ts").includes("...(p.formerSkus ?? [])"), "#302 search: the portal index haystack carries former SKUs");
-  ok(src302("src/lib/design/grid-parts.ts").split("formerSkus").length > 2, "#302 search: gridPartsFrom carries formerSkus onto PartLite (catalog-linked and fallback rows)");
+  ok(["grid-library", "grid-palette", "grid-accessories"].every((f) => src304(`src/lib/design/${f}.ts`).includes("partLiteHaystack(")), "#304 search: the Grid library, palette and accessory pickers share partLiteHaystack");
+  ok(src304("src/lib/portal-catalog-index.ts").includes("...(p.formerSkus ?? [])"), "#304 search: the portal index haystack carries former SKUs");
+  ok(src304("src/lib/design/grid-parts.ts").split("formerSkus").length > 2, "#304 search: gridPartsFrom carries formerSkus onto PartLite (catalog-linked and fallback rows)");
   // The two server pickers that wrap the Estimator search (Assembly Builder, Grid Equipment map) inherit it.
-  ok(src302("src/app/(app)/design/assemblies/actions.ts").includes("searchCatalog(") && src302("src/app/(app)/design/grid/settings/actions.ts").includes("searchCatalog("), "#302 search: the Assembly Builder and Equipment-map pickers wrap the Estimator's searchCatalog");
+  ok(src304("src/app/(app)/design/assemblies/actions.ts").includes("searchCatalog(") && src304("src/app/(app)/design/grid/settings/actions.ts").includes("searchCatalog("), "#304 search: the Assembly Builder and Equipment-map pickers wrap the Estimator's searchCatalog");
 
   // Behaviour: Grid parts (library tree, palette, accessory picker).
   const lite = (over: Record<string, unknown>) => ({ id: "x", sku: "G-1", desc: "Rack DSP", category: "Audio", unit: "ea", list: 0, cost: 0, ...over }) as unknown as import("@/lib/design/grid-bom").PartLite;
   const renamed = lite({ id: "p1", sku: "Symetrix:Jupiter 4", modelNumber: "80-0043", manufacturer: "Symetrix", manufacturerModelNumber: "Jupiter 4", formerSkus: ["80-0043-OLD"], kind: "assembly" });
   const other = lite({ id: "p2", sku: "G-2", desc: "Speaker", modelNumber: "S-2", manufacturer: "JBL", kind: "assembly" });
-  const asm = (q: string) => cr302GridLib([renamed, other], q).map((p) => p.id);
-  ok(asm("jupiter 4").join() === "p1" && asm("80-0043-old").join() === "p1" && asm("symetrix").join() === "p1" && asm("s-2").join() === "p2", "#302 search: Grid assembly list finds by Model # / former SKU, still by maker / model");
-  const pal = (q: string) => cr302Palette([renamed, other], { tab: "all", search: q, scope: "", typeKey: "", mfr: "" }, [], [], []).rows.map((p) => p.id);
-  ok(pal("jupiter 4").join() === "p1" && pal("80-0043-old").join() === "p1" && pal("rack dsp").join() === "p1" && pal("speaker").join() === "p2", "#302 search: Grid palette search finds by Model # / former SKU, still by desc");
-  const accRows = (q: string) => cr302AccCand([renamed, other], "audio" as never, q, true).map((p) => p.id);
-  ok(accRows("jupiter 4").join() === "p1" && accRows("80-0043-old").join() === "p1" && accRows("jbl").join() === "p2", "#302 search: '+ Add accessory' (all categories) finds by Model # / former SKU, still by maker");
+  const asm = (q: string) => cr304GridLib([renamed, other], q).map((p) => p.id);
+  ok(asm("jupiter 4").join() === "p1" && asm("80-0043-old").join() === "p1" && asm("symetrix").join() === "p1" && asm("s-2").join() === "p2", "#304 search: Grid assembly list finds by Model # / former SKU, still by maker / model");
+  const pal = (q: string) => cr304Palette([renamed, other], { tab: "all", search: q, scope: "", typeKey: "", mfr: "" }, [], [], []).rows.map((p) => p.id);
+  ok(pal("jupiter 4").join() === "p1" && pal("80-0043-old").join() === "p1" && pal("rack dsp").join() === "p1" && pal("speaker").join() === "p2", "#304 search: Grid palette search finds by Model # / former SKU, still by desc");
+  const accRows = (q: string) => cr304AccCand([renamed, other], "audio" as never, q, true).map((p) => p.id);
+  ok(accRows("jupiter 4").join() === "p1" && accRows("80-0043-old").join() === "p1" && accRows("jbl").join() === "p2", "#304 search: '+ Add accessory' (all categories) finds by Model # / former SKU, still by maker");
 
   // Behaviour: portal catalog index entries use buildHaystack; a former SKU in it is found (and punctuation-insensitive).
   const entry = (key: string, hay: Array<string | undefined>): D242Entry => ({ key, kind: "part", title: key, sku: key, mfr: "", category: "", haystack: d245Hay(hay), browsable: true, rank: 0 });
   const pe = [entry("Symetrix:Jupiter 4", ["Symetrix:Jupiter 4", "DSP", "Symetrix", "80-0043-OLD"]), entry("G-2", ["G-2", "Speaker"])];
   const pq = (q: string) => d245Search(pe, { q, mfr: [], cat: [], page: 1, pageSize: 20 }).entries.map((e) => e.key).join();
-  ok(pq("80-0043-old") === "Symetrix:Jupiter 4" && pq("800043old") === "Symetrix:Jupiter 4" && pq("speaker") === "G-2", "#302 search: a former SKU in a portal index haystack finds the part");
+  ok(pq("80-0043-old") === "Symetrix:Jupiter 4" && pq("800043old") === "Symetrix:Jupiter 4" && pq("speaker") === "G-2", "#304 search: a former SKU in a portal index haystack finds the part");
 
   // Behaviour: the shared haystack/matcher the ⌘K, catalog page and picker filters read.
   const rp = { sku: "Symetrix:Jupiter 4", desc: "DSP", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043", formerSkus: ["80-0043-OLD"] };
-  ok(cr302Hay(rp).includes("80-0043-old") && cr302Hay(rp).includes("jupiter 4") && cr302Hay(rp).includes("80-0043"), "#302 search: haystack holds Model #, MFR P/N and former SKUs");
-  ok(cr302Match(rp, "jupiter dsp") && cr302Match(rp, "80-0043-old") && !cr302Match(rp, "jupiter 12"), "#302 search: document picker token match (every token)");
+  ok(cr304Hay(rp).includes("80-0043-old") && cr304Hay(rp).includes("jupiter 4") && cr304Hay(rp).includes("80-0043"), "#304 search: haystack holds Model #, MFR P/N and former SKUs");
+  ok(cr304Match(rp, "jupiter dsp") && cr304Match(rp, "80-0043-old") && !cr304Match(rp, "jupiter 12"), "#304 search: document picker token match (every token)");
 }
 
 
-/* --- #302 Task 7: customer documents print the Model # only; staff rows lead with it --- */
-import { lineModel as cr302LineModel } from "@/lib/catalog-rename/sku";
-import { packageBomRows as cr302BomRows } from "@/lib/estimate-output/bom";
-import { toTileVM as cr302Tile } from "@/lib/portal-catalog-view";
-import { toPartDetailVM as cr302PartVM, toFixtureDetailVM as cr302FixVM } from "@/lib/portal-part-view";
-import { buildSchedule as cr302BuildSchedule, scheduleGroups as cr302Groups, scheduleModelOf as cr302SchedModel } from "@/lib/design/grid-schedule";
-import { rackSubmittal as cr302RackSub, scheduleCsv as cr302RackCsv } from "@/lib/rack/submittal";
-import { rackPartInfo as cr302RackInfo } from "@/lib/rack/part-facts";
-import { collectCurtainTypes as cr302Collect } from "@/lib/curtain-cut-sheets/collect";
-import { partsListRows as cr302PartsRows } from "@/app/(app)/estimator/parts-csv";
-import { documentRow as cr302DocRow } from "@/lib/part-docs/views";
+/* --- #304 Task 7: customer documents print the Model # only; staff rows lead with it --- */
+import { lineModel as cr304LineModel } from "@/lib/catalog-rename/sku";
+import { packageBomRows as cr304BomRows } from "@/lib/estimate-output/bom";
+import { toTileVM as cr304Tile } from "@/lib/portal-catalog-view";
+import { toPartDetailVM as cr304PartVM, toFixtureDetailVM as cr304FixVM } from "@/lib/portal-part-view";
+import { buildSchedule as cr304BuildSchedule, scheduleGroups as cr304Groups, scheduleModelOf as cr304SchedModel } from "@/lib/design/grid-schedule";
+import { rackSubmittal as cr304RackSub, scheduleCsv as cr304RackCsv } from "@/lib/rack/submittal";
+import { rackPartInfo as cr304RackInfo } from "@/lib/rack/part-facts";
+import { collectCurtainTypes as cr304Collect } from "@/lib/curtain-cut-sheets/collect";
+import { partsListRows as cr304PartsRows } from "@/app/(app)/estimator/parts-csv";
+import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 {
-  const src302 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const src304 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
   const ORDER = "80-0043";
   const JUP = { sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER };
 
   // lineModel: the line's model → the catalog part's model → the line's P/N → partModel(part); never the order # when a model exists.
-  ok(cr302LineModel({ sku: JUP.sku, manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }) === "Jupiter 4", "#302 lineModel: the line's own Model # first");
-  ok(cr302LineModel({ sku: JUP.sku, manufacturerPartNumber: ORDER }, JUP) === "Jupiter 4", "#302 lineModel: a line copy with only the order # reads the catalog part's Model #");
-  ok(cr302LineModel({ sku: "X", manufacturerPartNumber: "LC-2" }, { sku: "X", manufacturerPartNumber: "CC" }) === "LC-2" && cr302LineModel({ sku: "A:B" }, { sku: "A:B" }) === "B" && cr302LineModel({ sku: "X" }) === "",
-    "#302 lineModel: line P/N before the part's P/N, SKU tail last, blank with no identity");
+  ok(cr304LineModel({ sku: JUP.sku, manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }) === "Jupiter 4", "#304 lineModel: the line's own Model # first");
+  ok(cr304LineModel({ sku: JUP.sku, manufacturerPartNumber: ORDER }, JUP) === "Jupiter 4", "#304 lineModel: a line copy with only the order # reads the catalog part's Model #");
+  ok(cr304LineModel({ sku: "X", manufacturerPartNumber: "LC-2" }, { sku: "X", manufacturerPartNumber: "CC" }) === "LC-2" && cr304LineModel({ sku: "A:B" }, { sku: "A:B" }) === "B" && cr304LineModel({ sku: "X" }) === "",
+    "#304 lineModel: line P/N before the part's P/N, SKU tail last, blank with no identity");
 
   // BOM (the package page): the part column is the model, the order # never prints.
   const bomSec = { id: "m", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [
     { id: 1, ...JUP, desc: "Jupiter DSP", qty: 1, unit: "ea", cost: 1, price: 2 },
     { id: 2, sku: JUP.sku, manufacturerPartNumber: ORDER, desc: "Older line (no model copy)", qty: 1, unit: "ea", cost: 1, price: 2 },
   ] } as never;
-  const bomRows = cr302BomRows(bomSec, new Map([[JUP.sku, { mfr: "Symetrix", manufacturerPartNumber: ORDER, manufacturerModelNumber: "Jupiter 4" }]]));
-  ok(bomRows.map((r) => r.part).join("|") === "Jupiter 4|Jupiter 4" && !JSON.stringify(bomRows).includes(ORDER), "#302 BOM: part column is the Model # (line copy, else the catalog part's), the order # never appears");
-  ok(src302("src/lib/quote-share/package-view.ts").includes('bomHead: ["Qty", "Manufacturer", "Model", "Description"]'), "#302 BOM: the package table header says Model");
-  ok(/manufacturerModelNumber: p\.manufacturerModelNumber/.test(src302("src/lib/estimate-output/package-loader.ts")), "#302 BOM: the package loader reads the catalog Model #");
+  const bomRows = cr304BomRows(bomSec, new Map([[JUP.sku, { mfr: "Symetrix", manufacturerPartNumber: ORDER, manufacturerModelNumber: "Jupiter 4" }]]));
+  ok(bomRows.map((r) => r.part).join("|") === "Jupiter 4|Jupiter 4" && !JSON.stringify(bomRows).includes(ORDER), "#304 BOM: part column is the Model # (line copy, else the catalog part's), the order # never appears");
+  ok(src304("src/lib/quote-share/package-view.ts").includes('bomHead: ["Qty", "Manufacturer", "Model", "Description"]'), "#304 BOM: the package table header says Model");
+  ok(/manufacturerModelNumber: p\.manufacturerModelNumber/.test(src304("src/lib/estimate-output/package-loader.ts")), "#304 BOM: the package loader reads the catalog Model #");
 
   // Parts list (CSV): line model → part model; the order # stays out of the model column.
-  const pl = cr302PartsRows([{ id: "s", name: "Sys", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: JUP.sku, manufacturerPartNumber: ORDER, desc: "DSP", qty: 1, unit: "ea", cost: 1, price: 2 }] }] as never, [], { [JUP.sku]: { mfr: "Symetrix", manufacturerPartNumber: ORDER, manufacturerModelNumber: "Jupiter 4" } });
-  ok(pl[0]?.modelNumber === "Jupiter 4", "#302 parts list: the catalog Model # beats a line's older order # copy");
-  ok(/partModel\(/.test(src302("src/lib/specs/assemble-section.ts")) && !src302("src/lib/specs/assemble-section.ts").includes("const tail ="), "#302 spec table: assemble-section uses the one partModel rule");
+  const pl = cr304PartsRows([{ id: "s", name: "Sys", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: JUP.sku, manufacturerPartNumber: ORDER, desc: "DSP", qty: 1, unit: "ea", cost: 1, price: 2 }] }] as never, [], { [JUP.sku]: { mfr: "Symetrix", manufacturerPartNumber: ORDER, manufacturerModelNumber: "Jupiter 4" } });
+  ok(pl[0]?.modelNumber === "Jupiter 4", "#304 parts list: the catalog Model # beats a line's older order # copy");
+  ok(/partModel\(/.test(src304("src/lib/specs/assemble-section.ts")) && !src304("src/lib/specs/assemble-section.ts").includes("const tail ="), "#304 spec table: assemble-section uses the one partModel rule");
 
   // Portal: tiles, sidebar, fixture rows, cart lines carry a server-computed model; mpn is gone from the sidebar payload.
-  const tile = cr302Tile({ key: JUP.sku, kind: "part", title: "DSP", sku: JUP.sku, mfr: "Symetrix", category: "Audio" }, { mpn: ORDER, model: "Jupiter 4" }, null);
-  ok(tile.model === "Jupiter 4" && !JSON.stringify(tile).includes(ORDER), "#302 portal tile: identity is the Model # (no order #)");
-  ok(cr302Tile({ key: "ETC:S4", kind: "part", title: "S4", sku: "ETC:S4", mfr: "ETC", category: "" }, { mpn: "7060A" }, null).model === "7060A" && cr302Tile({ key: "fixture:A", kind: "fixture", title: "F", sku: "ETC:S4", mfr: "", category: "" }, undefined, null).model === "",
-    "#302 portal tile: no model → MFR P/N; a fixture tile has none");
-  const det = cr302PartVM({ sku: JUP.sku, desc: "DSP", mfr: "Symetrix", mpn: ORDER, model: "Jupiter 4" }, null, [], []);
-  ok(det.model === "Jupiter 4" && !JSON.stringify(det).includes(ORDER) && !("mpn" in det), "#302 portal sidebar: Model # only, the order # never ships to the browser");
-  const fxVm = cr302FixVM({ id: "F", label: "Fx", description: "", lightEngineSku: "ETC:S4", lensSku: null, lines: [{ slot: "lightEngine", sku: "ETC:S4", label: "Engine", qty: 1, required: true }, { slot: "accessories", sku: "Symetrix:Hook 9", label: "Hook", qty: 0, required: false }] }, "ETC", null, () => null, { images: [], docs: [] });
-  ok(fxVm.fixed[0].model === "S4" && fxVm.addOns[0].model === "Hook 9", "#302 portal fixture rows: model defaults to the SKU tail; the server passes the real Model #");
-  const pp = src302("src/lib/portal-pricing.ts");
-  ok(/model: partModel\(\{ sku: part\.sku, manufacturerModelNumber: part\.model, manufacturerPartNumber: part\.mpn \}\)/.test(pp) && pp.includes("manufacturerModelNumber: part.model"), "#302 portal cart: a priced part line carries its model, and the quote item copies the Model #");
-  const readsModel = (rel: string, expr: string) => ok(src302(rel).includes(expr), `#302 portal ${rel}: prints ${expr}`);
+  const tile = cr304Tile({ key: JUP.sku, kind: "part", title: "DSP", sku: JUP.sku, mfr: "Symetrix", category: "Audio" }, { mpn: ORDER, model: "Jupiter 4" }, null);
+  ok(tile.model === "Jupiter 4" && !JSON.stringify(tile).includes(ORDER), "#304 portal tile: identity is the Model # (no order #)");
+  ok(cr304Tile({ key: "ETC:S4", kind: "part", title: "S4", sku: "ETC:S4", mfr: "ETC", category: "" }, { mpn: "7060A" }, null).model === "7060A" && cr304Tile({ key: "fixture:A", kind: "fixture", title: "F", sku: "ETC:S4", mfr: "", category: "" }, undefined, null).model === "",
+    "#304 portal tile: no model → MFR P/N; a fixture tile has none");
+  const det = cr304PartVM({ sku: JUP.sku, desc: "DSP", mfr: "Symetrix", mpn: ORDER, model: "Jupiter 4" }, null, [], []);
+  ok(det.model === "Jupiter 4" && !JSON.stringify(det).includes(ORDER) && !("mpn" in det), "#304 portal sidebar: Model # only, the order # never ships to the browser");
+  const fxVm = cr304FixVM({ id: "F", label: "Fx", description: "", lightEngineSku: "ETC:S4", lensSku: null, lines: [{ slot: "lightEngine", sku: "ETC:S4", label: "Engine", qty: 1, required: true }, { slot: "accessories", sku: "Symetrix:Hook 9", label: "Hook", qty: 0, required: false }] }, "ETC", null, () => null, { images: [], docs: [] });
+  ok(fxVm.fixed[0].model === "S4" && fxVm.addOns[0].model === "Hook 9", "#304 portal fixture rows: model defaults to the SKU tail; the server passes the real Model #");
+  const pp = src304("src/lib/portal-pricing.ts");
+  ok(/model: partModel\(\{ sku: part\.sku, manufacturerModelNumber: part\.model, manufacturerPartNumber: part\.mpn \}\)/.test(pp) && pp.includes("manufacturerModelNumber: part.model"), "#304 portal cart: a priced part line carries its model, and the quote item copies the Model #");
+  const readsModel = (rel: string, expr: string) => ok(src304(rel).includes(expr), `#304 portal ${rel}: prints ${expr}`);
   readsModel("src/app/portal/catalog/part-sidebar.tsx", "<b>{detail.model}</b>");
   readsModel("src/app/portal/catalog/part-sidebar.tsx", "[t.mfr, t.model]");
   readsModel("src/app/portal/catalog/catalog-client.tsx", "{t.model}");
   readsModel("src/app/portal/catalog/fixture-config.tsx", "{l.model}");
   readsModel("src/app/portal/catalog/fixture-config.tsx", "{a.model}");
   readsModel("src/app/portal/catalog/quote/cart-client.tsx", "{line.model}");
-  ok(!src302("src/app/portal/catalog/part-sidebar.tsx").includes("detail.mpn"), "#302 portal sidebar: never reads the order # (mpn)");
+  ok(!src304("src/app/portal/catalog/part-sidebar.tsx").includes("detail.mpn"), "#304 portal sidebar: never reads the order # (mpn)");
 
   // Grid schedule (drawing set + /schedule): the Model # replaces the part id when the part resolves.
-  const sched = cr302BuildSchedule({
+  const sched = cr304BuildSchedule({
     placements: [{ id: "pl1", sheetId: "s", page: 1, x: 0, y: 0, partId: "P1" }, { id: "pl2", sheetId: "s", page: 1, x: 1, y: 1, partId: "P9" }],
     spaces: [],
     descOf: (pid) => (pid === "P1" ? "DSP" : undefined),
-    modelOf: (pid) => cr302SchedModel(pid === "P1" ? { sku: JUP.sku, manufacturerModelNumber: "Jupiter 4" } : undefined),
+    modelOf: (pid) => cr304SchedModel(pid === "P1" ? { sku: JUP.sku, manufacturerModelNumber: "Jupiter 4" } : undefined),
     wires: [{ id: "w1", partId: "P1", fromName: "A", toName: "B", lengthFt: 10, unit: "ft" }],
   });
-  const grp = cr302Groups(sched);
+  const grp = cr304Groups(sched);
   const codes = grp[0].rows.map((r) => (r.kind === "row" ? r.code : "")).join("|");
   ok(codes === "Jupiter 4|P9" && grp[1].rows[0].kind === "wire" && (grp[1].rows[0] as { model?: string }).model === "Jupiter 4" && sched.wireFeet[0].model === "Jupiter 4" && !JSON.stringify(sched).includes(ORDER),
-    "#302 grid schedule: a resolved part prints its Model #; an unresolved one keeps its part id; wire rows + footage line follow");
-  ok(JSON.stringify(cr302BuildSchedule({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0, y: 0, partId: "P1" }], spaces: [], descOf: () => "d", wires: [] }).sections[0].rows[0]) === JSON.stringify({ partId: "P1", desc: "d", qty: 1 }),
-    "#302 grid schedule: with no modelOf the rows are unchanged");
-  ok(src302("src/components/drawing/drawing-set-sheets.tsx").includes("it.model || it.partId") && src302("src/lib/design/drawing-set-data.ts").includes("modelOf:") && src302("src/lib/design/grid-schedule-server.ts").includes("modelOf:"), "#302 grid schedule: drawing set, /schedule and the printer all read the model");
+    "#304 grid schedule: a resolved part prints its Model #; an unresolved one keeps its part id; wire rows + footage line follow");
+  ok(JSON.stringify(cr304BuildSchedule({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0, y: 0, partId: "P1" }], spaces: [], descOf: () => "d", wires: [] }).sections[0].rows[0]) === JSON.stringify({ partId: "P1", desc: "d", qty: 1 }),
+    "#304 grid schedule: with no modelOf the rows are unchanged");
+  ok(src304("src/components/drawing/drawing-set-sheets.tsx").includes("it.model || it.partId") && src304("src/lib/design/drawing-set-data.ts").includes("modelOf:") && src304("src/lib/design/grid-schedule-server.ts").includes("modelOf:"), "#304 grid schedule: drawing set, /schedule and the printer all read the model");
 
   // Rack sheets: the schedule row / CSV carry the model; sku stays the lookup key.
-  const rackInfo = cr302RackInfo({ sku: JUP.sku, desc: "Jupiter DSP", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER, ruHeight: 1 }, JUP.sku);
+  const rackInfo = cr304RackInfo({ sku: JUP.sku, desc: "Jupiter DSP", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER, ruHeight: 1 }, JUP.sku);
   const rLookup = (sku: string) => (sku === JUP.sku ? rackInfo : undefined);
-  const rack = cr302RackSub(
+  const rack = cr304RackSub(
     { label: "R", scope: "Audio", rack: { config: { ruCount: 12, widthIn: 19, numbering: "bottom-up" }, placements: [{ id: "RP-1", kind: "device", sku: JUP.sku, ruStart: 1, ruHeight: 1, face: "front" }] }, parts: [{ sku: JUP.sku, qty: 1 }] } as never,
     rLookup
   );
-  ok(rack.schedule[0].model === "Jupiter 4" && rack.schedule[0].sku === JUP.sku && rack.rackLevel[0].model === "Jupiter 4", "#302 rack submittal: schedule + rack-level rows carry the Model # (sku kept for datasheets)");
-  const rcsv = cr302RackCsv(rack);
-  ok(rcsv.includes("Jupiter 4") && !rcsv.includes(ORDER) && !rcsv.includes("Symetrix:Jupiter 4"), "#302 rack CSV: the model column prints the Model #, never the order # or the Brand: SKU");
-  ok(src302("src/components/rack/RackSheets.tsx").includes("rackText(r.model || r.sku)") && src302("src/lib/rack/geometry.ts").includes("rackModelOf("), "#302 rack sheets + elevation labels read the model");
+  ok(rack.schedule[0].model === "Jupiter 4" && rack.schedule[0].sku === JUP.sku && rack.rackLevel[0].model === "Jupiter 4", "#304 rack submittal: schedule + rack-level rows carry the Model # (sku kept for datasheets)");
+  const rcsv = cr304RackCsv(rack);
+  ok(rcsv.includes("Jupiter 4") && !rcsv.includes(ORDER) && !rcsv.includes("Symetrix:Jupiter 4"), "#304 rack CSV: the model column prints the Model #, never the order # or the Brand: SKU");
+  ok(src304("src/components/rack/RackSheets.tsx").includes("rackText(r.model || r.sku)") && src304("src/lib/rack/geometry.ts").includes("rackModelOf("), "#304 rack sheets + elevation labels read the model");
 
   // Cut sheets: hardware prints the model.
-  const cs = cr302Collect({
+  const cs = cr304Collect({
     quote: { spec: { sections: [{ id: "s1", name: "s1", kind: "materials", mfr: "", freightPct: 0, items: [
       { id: 1, sku: "X", desc: "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness", qty: 2, unit: "ea", cost: 0, price: 0, curtain: true,
         curtainInputs: { name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "9", width: "21.5", height: "18", fullness: "50", mountType: "wall-hookloop" } },
@@ -11125,55 +11125,55 @@ import { documentRow as cr302DocRow } from "@/lib/part-docs/views";
     partInfo: new Map([[JUP.sku, { desc: "Hook", unit: "ea", model: "Jupiter 4" }]]),
     grid: null,
   });
-  ok(cs.types[0]?.hardware[0]?.sku === JUP.sku && cs.types[0].hardware[0].model === "Jupiter 4", "#302 cut sheets: hardware rows carry the live part's Model # (sku kept as the key)");
-  const csNo = cr302Collect({ quote: { spec: { sections: [{ id: "s1", name: "s1", kind: "materials", mfr: "", freightPct: 0, items: [
+  ok(cs.types[0]?.hardware[0]?.sku === JUP.sku && cs.types[0].hardware[0].model === "Jupiter 4", "#304 cut sheets: hardware rows carry the live part's Model # (sku kept as the key)");
+  const csNo = cr304Collect({ quote: { spec: { sections: [{ id: "s1", name: "s1", kind: "materials", mfr: "", freightPct: 0, items: [
       { id: 1, sku: "X", desc: "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness", qty: 2, unit: "ea", cost: 0, price: 0, curtain: true,
         curtainInputs: { name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "9", width: "21.5", height: "18", fullness: "50", mountType: "wall-hookloop" } },
     ] }], mobs: [] } } as never,
     fabrics: [{ sku: "FAB-CH25", desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 }], trackSeries: [],
     mounts: { "wall-hookloop": { rows: [{ sku: JUP.sku, rule: { kind: "perCurtain", qty: 2 } }] } } as never, partInfo: new Map(), grid: null });
-  ok(csNo.types[0]?.hardware[0]?.model === "Jupiter 4", "#302 cut sheets: with no live part the SKU tail stands in (never the Brand: prefix)");
-  ok(src302("src/components/cutsheets/cut-sheet-pages.tsx").includes("{h.model}") && src302("src/lib/curtain-cut-sheets/load.ts").includes("model: partModel(p)"), "#302 cut sheets: the printer + loader read the model");
+  ok(csNo.types[0]?.hardware[0]?.model === "Jupiter 4", "#304 cut sheets: with no live part the SKU tail stands in (never the Brand: prefix)");
+  ok(src304("src/components/cutsheets/cut-sheet-pages.tsx").includes("{h.model}") && src304("src/lib/curtain-cut-sheets/load.ts").includes("model: partModel(p)"), "#304 cut sheets: the printer + loader read the model");
 
   // Staff rows.
-  ok(src302("src/app/(app)/catalog/page.tsx").includes("staffPartLabel(p)") && src302("src/app/api/search/route.ts").includes("staffPartLabel(p)") && src302("src/app/(app)/estimator/catalog-picker.tsx").includes("staffPartLabel("), "#302 staff rows: the catalog list, ⌘K and the Estimator picker use staffPartLabel");
-  ok(src302("src/app/(app)/estimator/actions.ts").includes("model: p.manufacturerModelNumber.trim()") && src302("src/app/(app)/estimator/actions.ts").includes("mpn: p.manufacturerPartNumber.trim()"), "#302 staff rows: searchCatalog hits carry the model / order # when present");
-  const dr = cr302DocRow({ sku: JUP.sku, quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: JUP.sku, desc: "DSP", category: "Audio", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }, buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] }), () => "");
-  ok(dr.model === "Jupiter 4", "#302 datasheets row: the Model # (partModel)");
+  ok(src304("src/app/(app)/catalog/page.tsx").includes("staffPartLabel(p)") && src304("src/app/api/search/route.ts").includes("staffPartLabel(p)") && src304("src/app/(app)/estimator/catalog-picker.tsx").includes("staffPartLabel("), "#304 staff rows: the catalog list, ⌘K and the Estimator picker use staffPartLabel");
+  ok(src304("src/app/(app)/estimator/actions.ts").includes("model: p.manufacturerModelNumber.trim()") && src304("src/app/(app)/estimator/actions.ts").includes("mpn: p.manufacturerPartNumber.trim()"), "#304 staff rows: searchCatalog hits carry the model / order # when present");
+  const dr = cr304DocRow({ sku: JUP.sku, quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: JUP.sku, desc: "DSP", category: "Audio", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }, buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] }), () => "");
+  ok(dr.model === "Jupiter 4", "#304 datasheets row: the Model # (partModel)");
 }
 
-/* --- #302 Task 9: Catalog → Model numbers (admin page, batch input cleaning) --- */
+/* --- #304 Task 9: Catalog → Model numbers (admin page, batch input cleaning) --- */
 {
-  const src302 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const src304 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
   const dir = "src/app/(app)/catalog/model-numbers";
-  const page = src302(`${dir}/page.tsx`);
-  const actions = src302(`${dir}/actions.ts`);
-  const client = src302(`${dir}/model-numbers-client.tsx`);
-  ok(page.includes('requirePerm("manage_users")') && page.includes("export const maxDuration = 60"), "#302 page: the page is admin-only (manage_users) with a 60 s maxDuration");
-  ok(actions.split('requirePerm("manage_users")').length === 3, "#302 page: both actions require manage_users");
-  ok(actions.includes("cleanRenameBatchInput(input)") && actions.includes("FETCH_ACTION_BUDGET_MS") && /if \(r\.ok && r\.complete\) \{\s*revalidatePath\("\/catalog"\)/.test(actions), "#302 page: the batch action cleans its input, runs under the fetch budget and revalidates /catalog when complete");
-  ok(actions.includes('readSheetFile(Buffer.from(await file.arrayBuffer()), file.name, CROSSWALK_SHEET_NAME)') && actions.includes('CROSSWALK_SHEET_NAME = "Crosswalk"') && actions.includes("MAX_SHEET_BYTES"), "#302 page: the preview reads the Crosswalk sheet under the 800 KB cap");
-  ok(/try \{\s*r = await runModelNumbersBatchAction\(/.test(client) && /try \{\s*r = await planModelNumbersAction\(/.test(client) && client.includes('"Could not reach the server. Try again."'), "#302 page: the client catches each action await (Could not reach the server)");
-  ok(client.includes("setResume({ step, refsOnly })") && client.includes("resuming?.step ??"), "#302 page: a stopped run keeps its step and the same button resumes there");
-  ok(!/from "@\/lib\/catalog-rename\/apply"/.test(client) && !/from "@\/lib\/stores\//.test(client) && /import type \{[^}]*\} from "@\/lib\/catalog-rename\/plan"/.test(client), "#302 page: the client never imports the server engine or a store (plan types only)");
-  ok(src302("scripts/smoke-routes.ts").includes('"/catalog/model-numbers"'), "#302 page: smoke-routes lists /catalog/model-numbers");
-  ok(/isAdmin && \(\s*<Link\s+href="\/catalog\/model-numbers"/.test(src302("src/app/(app)/catalog/page.tsx")), "#302 page: the catalog page links Model numbers for admins only");
+  const page = src304(`${dir}/page.tsx`);
+  const actions = src304(`${dir}/actions.ts`);
+  const client = src304(`${dir}/model-numbers-client.tsx`);
+  ok(page.includes('requirePerm("manage_users")') && page.includes("export const maxDuration = 60"), "#304 page: the page is admin-only (manage_users) with a 60 s maxDuration");
+  ok(actions.split('requirePerm("manage_users")').length === 3, "#304 page: both actions require manage_users");
+  ok(actions.includes("cleanRenameBatchInput(input)") && actions.includes("FETCH_ACTION_BUDGET_MS") && /if \(r\.ok && r\.complete\) \{\s*revalidatePath\("\/catalog"\)/.test(actions), "#304 page: the batch action cleans its input, runs under the fetch budget and revalidates /catalog when complete");
+  ok(actions.includes('readSheetFile(Buffer.from(await file.arrayBuffer()), file.name, CROSSWALK_SHEET_NAME)') && actions.includes('CROSSWALK_SHEET_NAME = "Crosswalk"') && actions.includes("MAX_SHEET_BYTES"), "#304 page: the preview reads the Crosswalk sheet under the 800 KB cap");
+  ok(/try \{\s*r = await runModelNumbersBatchAction\(/.test(client) && /try \{\s*r = await planModelNumbersAction\(/.test(client) && client.includes('"Could not reach the server. Try again."'), "#304 page: the client catches each action await (Could not reach the server)");
+  ok(client.includes("setResume({ step, refsOnly })") && client.includes("resuming?.step ??"), "#304 page: a stopped run keeps its step and the same button resumes there");
+  ok(!/from "@\/lib\/catalog-rename\/apply"/.test(client) && !/from "@\/lib\/stores\//.test(client) && /import type \{[^}]*\} from "@\/lib\/catalog-rename\/plan"/.test(client), "#304 page: the client never imports the server engine or a store (plan types only)");
+  ok(src304("scripts/smoke-routes.ts").includes('"/catalog/model-numbers"'), "#304 page: smoke-routes lists /catalog/model-numbers");
+  ok(/isAdmin && \(\s*<Link\s+href="\/catalog\/model-numbers"/.test(src304("src/app/(app)/catalog/page.tsx")), "#304 page: the catalog page links Model numbers for admins only");
 
   // Step labels cover every step; outcome labels every outcome.
-  ok(["parts", ...cr302RefSteps, "done"].every((st) => cr302IsStep(st) && !!cr302StepLabel[st as keyof typeof cr302StepLabel]) && Object.keys(cr302StepLabel).length === cr302RefSteps.length + 2, "#302 page: every rename step has a plain-words label");
-  ok(cr302StepLabel.parts === "Renaming parts" && cr302StepLabel.quotes === "Updating quotes" && !cr302IsStep("bogus") && !cr302IsStep("toString") && !cr302IsStep(3), "#302 page: step labels read plainly; unknown steps (incl. prototype keys) are refused");
-  const planned302 = cr302Plan([{ rowNumber: 2, manufacturer: "X", mfrPart: "", sku: "a", model: "b", notes: "" }], [], []);
-  ok(Object.keys(planned302.counts).every((o) => !!cr302OutcomeLabel[o as keyof typeof cr302OutcomeLabel]) && Object.keys(cr302OutcomeLabel).length === Object.keys(planned302.counts).length, "#302 page: every plan outcome has a chip label");
+  ok(["parts", ...cr304RefSteps, "done"].every((st) => cr304IsStep(st) && !!cr304StepLabel[st as keyof typeof cr304StepLabel]) && Object.keys(cr304StepLabel).length === cr304RefSteps.length + 2, "#304 page: every rename step has a plain-words label");
+  ok(cr304StepLabel.parts === "Renaming parts" && cr304StepLabel.quotes === "Updating quotes" && !cr304IsStep("bogus") && !cr304IsStep("toString") && !cr304IsStep(3), "#304 page: step labels read plainly; unknown steps (incl. prototype keys) are refused");
+  const planned304 = cr304Plan([{ rowNumber: 2, manufacturer: "X", mfrPart: "", sku: "a", model: "b", notes: "" }], [], []);
+  ok(Object.keys(planned304.counts).every((o) => !!cr304OutcomeLabel[o as keyof typeof cr304OutcomeLabel]) && Object.keys(cr304OutcomeLabel).length === Object.keys(planned304.counts).length, "#304 page: every plan outcome has a chip label");
 
   // Untrusted batch rows.
   const long = "x".repeat(3000);
-  const cleaned = cr302CleanRows([{ rowNumber: 7, manufacturer: " Biamp ", sku: 1234, model: long, notes: { evil: 1 } }, null, "junk", [1], { rowNumber: "abc", sku: "s" }, { rowNumber: -3, sku: "t" }]);
-  ok(cleaned.length === 3 && cleaned[0].rowNumber === 7 && cleaned[0].manufacturer === "Biamp" && cleaned[0].sku === "1234" && cleaned[0].model.length === 2048 && cleaned[0].notes === "" && cleaned[0].mfrPart === "", "#302 page: rows are cleaned — strings trimmed + capped at 2,048, numbers stringified, objects dropped to blank");
-  ok(cleaned[1].rowNumber === 6 && cleaned[2].rowNumber === 7, "#302 page: a non-numeric or non-positive rowNumber falls back to its sheet position");
-  ok(cr302CleanRows(Array.from({ length: 5100 }, () => ({ sku: "s" }))).length === 5000 && cr302CleanRows("nope").length === 0, "#302 page: rows are capped at 5,000; a non-list is no rows");
-  ok(cr302CleanInput({ rows: [], step: "nope" }) === null && cr302CleanInput(null) === null, "#302 page: an unknown step is refused before the engine runs");
-  const ci = cr302CleanInput({ rows: [{ sku: "a" }], step: "quotes", refsOnly: "yes" });
-  ok(!!ci && ci.step === "quotes" && ci.refsOnly === false && ci.rows.length === 1 && cr302CleanInput({ rows: [], step: cr302RefSteps[0], refsOnly: true })?.refsOnly === true, "#302 page: step kept, refsOnly only when literally true");
+  const cleaned = cr304CleanRows([{ rowNumber: 7, manufacturer: " Biamp ", sku: 1234, model: long, notes: { evil: 1 } }, null, "junk", [1], { rowNumber: "abc", sku: "s" }, { rowNumber: -3, sku: "t" }]);
+  ok(cleaned.length === 3 && cleaned[0].rowNumber === 7 && cleaned[0].manufacturer === "Biamp" && cleaned[0].sku === "1234" && cleaned[0].model.length === 2048 && cleaned[0].notes === "" && cleaned[0].mfrPart === "", "#304 page: rows are cleaned — strings trimmed + capped at 2,048, numbers stringified, objects dropped to blank");
+  ok(cleaned[1].rowNumber === 6 && cleaned[2].rowNumber === 7, "#304 page: a non-numeric or non-positive rowNumber falls back to its sheet position");
+  ok(cr304CleanRows(Array.from({ length: 5100 }, () => ({ sku: "s" }))).length === 5000 && cr304CleanRows("nope").length === 0, "#304 page: rows are capped at 5,000; a non-list is no rows");
+  ok(cr304CleanInput({ rows: [], step: "nope" }) === null && cr304CleanInput(null) === null, "#304 page: an unknown step is refused before the engine runs");
+  const ci = cr304CleanInput({ rows: [{ sku: "a" }], step: "quotes", refsOnly: "yes" });
+  ok(!!ci && ci.step === "quotes" && ci.refsOnly === false && ci.rows.length === 1 && cr304CleanInput({ rows: [], step: cr304RefSteps[0], refsOnly: true })?.refsOnly === true, "#304 page: step kept, refsOnly only when literally true");
 }
 
 
@@ -11368,12 +11368,12 @@ seeded()
   .then(() => estimateOutput301AAsyncChecks())
   .then(() => estimateOutput301BAsyncChecks())
   .then(() => estimateOutput301CAsyncChecks())
-  .then(() => modelSku302StoreAsyncChecks())
-  .then(() => modelSku302ApplyAsyncChecks())
-  .then(() => modelSku302ImportAsyncChecks())
-  .then(() => modelSku302FrozenAsyncChecks())
-  .then(() => modelSku302LiveWritersAsyncChecks())
-  .then(() => modelSku302PageAsyncChecks())
+  .then(() => modelSku304StoreAsyncChecks())
+  .then(() => modelSku304ApplyAsyncChecks())
+  .then(() => modelSku304ImportAsyncChecks())
+  .then(() => modelSku304FrozenAsyncChecks())
+  .then(() => modelSku304LiveWritersAsyncChecks())
+  .then(() => modelSku304PageAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -45734,7 +45734,7 @@ async function rack296ZipAsyncChecks(): Promise<void> {
     const ds = ok1.ok ? ok1.files.find((f) => f.name === "datasheets.pdf") : undefined;
     ok(!!ds && (await C296zPdf.load(ds.data)).getPageCount() === 1, "#296 rack zip: with no datasheets on file the PDF is just the cover listing the gaps");
     const csv = ok1.ok ? ok1.files.find((f) => f.name === "schedule.csv")?.data.toString("utf8") ?? "" : "";
-    ok(csv.includes(cr302PartModel({ sku: AMP })) && csv.includes("Model/SKU"), "#296 rack zip: schedule.csv carries the schedule (#302: its model column prints the model — the SKU tail)");
+    ok(csv.includes(cr304PartModel({ sku: AMP })) && csv.includes("Model/SKU"), "#296 rack zip: schedule.csv carries the schedule (#304: its model column prints the model — the SKU tail)");
 
     const ok2 = await c296zFiles(rec.id, { origin: "http://x" }, { deadline: Date.now() + 60_000, render: async () => { throw new Error("no chrome"); } });
     ok(ok2.ok && ok2.files.map((f) => f.name).join() === "schedule.csv,datasheets.pdf", "#296 rack zip: failed renders leave the sheets out, CSV and datasheets stay");
@@ -52957,93 +52957,93 @@ function gridSetSources301(): string {
     .join("\n");
 }
 
-/** #302 Task 2 — the rename store: renamedTo redirect, getManyBySku, the idempotent
+/** #304 Task 2 — the rename store: renamedTo redirect, getManyBySku, the idempotent
  *  renamePartDocs, the rename-log blob and listBlobIds. */
-async function modelSku302StoreAsyncChecks(): Promise<void> {
+async function modelSku304StoreAsyncChecks(): Promise<void> {
   const { fixtureId, registerFixture } = await import("./test-fixtures");
   const Cat = await import("@/lib/stores/catalog");
   const Ren = await import("@/lib/stores/catalog-renames");
   const DS = await import("@/db/doc-store");
   const { getDb } = await import("@/db");
-  const { blobs: blobs302 } = await import("@/db/doc-tables");
+  const { blobs: blobs304 } = await import("@/db/doc-tables");
   const { inArray } = await import("drizzle-orm");
 
-  const p1 = fixtureId(302, "p1");
-  const p2 = fixtureId(302, "p2");
-  const to = "Symetrix:" + fixtureId(302, "model-a");
+  const p1 = fixtureId(304, "p1");
+  const p2 = fixtureId(304, "p2");
+  const to = "Symetrix:" + fixtureId(304, "model-a");
   registerFixture("catalog_parts", p1);
   registerFixture("catalog_parts", p2);
   registerFixture("catalog_parts", to);
-  const base = { desc: "Fixture 302", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Symetrix" };
+  const base = { desc: "Fixture 304", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Symetrix" };
   await DS.upsertDoc("catalog_parts", { ...base, id: p1, sku: p1, pricedAt: 111, narrativeText: "x" } as never);
   await DS.upsertDoc("catalog_parts", { ...base, id: p2, sku: p2 } as never);
 
   // Never-renamed SKUs read exactly as before.
-  ok((await Cat.get(p1))?.sku === p1 && (await Cat.get(fixtureId(302, "nope"))) === null, "#302 store: an un-renamed SKU reads as before and a missing SKU is null");
+  ok((await Cat.get(p1))?.sku === p1 && (await Cat.get(fixtureId(304, "nope"))) === null, "#304 store: an un-renamed SKU reads as before and a missing SKU is null");
 
-  const renamed = await Cat.renamePartDocs(p1, to, "Fixture 302 A");
-  ok(renamed?.sku === to && renamed.id === to, "#302 store: renamePartDocs returns the new part keyed by the new SKU");
-  ok(renamed?.manufacturerModelNumber === "Fixture 302 A" && renamed.manufacturerPartNumber === p1, "#302 store: the model is stored and the old SKU becomes the MFR P/N when none was set");
-  ok(JSON.stringify(renamed?.formerSkus) === JSON.stringify([p1]) && renamed?.renamedTo === undefined, "#302 store: formerSkus = [old], renamedTo is not carried onto the live doc");
-  ok(renamed?.pricedAt === 111 && renamed?.narrativeText === "x", "#302 store: pricedAt and the narrative carry over untouched");
-  ok((await Cat.get(p1))?.sku === to, "#302 store: get(old) follows renamedTo to the new part");
+  const renamed = await Cat.renamePartDocs(p1, to, "Fixture 304 A");
+  ok(renamed?.sku === to && renamed.id === to, "#304 store: renamePartDocs returns the new part keyed by the new SKU");
+  ok(renamed?.manufacturerModelNumber === "Fixture 304 A" && renamed.manufacturerPartNumber === p1, "#304 store: the model is stored and the old SKU becomes the MFR P/N when none was set");
+  ok(JSON.stringify(renamed?.formerSkus) === JSON.stringify([p1]) && renamed?.renamedTo === undefined, "#304 store: formerSkus = [old], renamedTo is not carried onto the live doc");
+  ok(renamed?.pricedAt === 111 && renamed?.narrativeText === "x", "#304 store: pricedAt and the narrative carry over untouched");
+  ok((await Cat.get(p1))?.sku === to, "#304 store: get(old) follows renamedTo to the new part");
   const many = await Cat.getMany([p1, to, p2]);
-  ok(many.length === 2 && many.filter((p) => p.sku === to).length === 1 && many.some((p) => p.sku === p2), "#302 store: getMany follows the redirect and dedupes by sku");
-  ok((await Cat.getManyAnyCase([p1]))[0]?.sku === to, "#302 store: getManyAnyCase follows the redirect");
-  const bySku = await Cat.getManyBySku([p1, to, p2, fixtureId(302, "gone")]);
-  ok(bySku.get(p1)?.sku === to && bySku.get(to)?.sku === to && bySku.get(p2)?.sku === p2 && bySku.size === 3, "#302 store: getManyBySku keys by the REQUESTED sku and omits misses");
+  ok(many.length === 2 && many.filter((p) => p.sku === to).length === 1 && many.some((p) => p.sku === p2), "#304 store: getMany follows the redirect and dedupes by sku");
+  ok((await Cat.getManyAnyCase([p1]))[0]?.sku === to, "#304 store: getManyAnyCase follows the redirect");
+  const bySku = await Cat.getManyBySku([p1, to, p2, fixtureId(304, "gone")]);
+  ok(bySku.get(p1)?.sku === to && bySku.get(to)?.sku === to && bySku.get(p2)?.sku === p2 && bySku.size === 3, "#304 store: getManyBySku keys by the REQUESTED sku and omits misses");
   const live = (await Cat.list()).map((p) => p.sku);
-  ok(!live.includes(p1) && live.includes(to), "#302 store: the old SKU is gone from the live list");
+  ok(!live.includes(p1) && live.includes(to), "#304 store: the old SKU is gone from the live list");
   const oldRow = (await DS.getDocRows<import("@/db/doc-store").Doc>("catalog_parts", [p1]))[0];
-  ok(oldRow?.deleted === true && oldRow.doc.renamedTo === to, "#302 store: the retired old doc is soft-deleted with renamedTo");
+  ok(oldRow?.deleted === true && oldRow.doc.renamedTo === to, "#304 store: the retired old doc is soft-deleted with renamedTo");
 
-  const again = await Cat.renamePartDocs(p1, to, "Fixture 302 A");
-  ok(again?.sku === to && (await Cat.list()).filter((p) => p.sku === to).length === 1, "#302 store: a second identical rename is idempotent, no duplicate");
-  ok((await Cat.renamePartDocs(p2, to, "Fixture 302 A")) === null, "#302 store: renaming another part onto a live SKU returns null");
-  ok((await Cat.get(p2))?.sku === p2, "#302 store: the refused rename left the other part alone");
-  ok((await Cat.renamePartDocs(fixtureId(302, "gone"), "Symetrix:" + fixtureId(302, "model-z"), "z")) === null, "#302 store: renaming a missing part returns null");
+  const again = await Cat.renamePartDocs(p1, to, "Fixture 304 A");
+  ok(again?.sku === to && (await Cat.list()).filter((p) => p.sku === to).length === 1, "#304 store: a second identical rename is idempotent, no duplicate");
+  ok((await Cat.renamePartDocs(p2, to, "Fixture 304 A")) === null, "#304 store: renaming another part onto a live SKU returns null");
+  ok((await Cat.get(p2))?.sku === p2, "#304 store: the refused rename left the other part alone");
+  ok((await Cat.renamePartDocs(fixtureId(304, "gone"), "Symetrix:" + fixtureId(304, "model-z"), "z")) === null, "#304 store: renaming a missing part returns null");
 
   // Defence in depth: never overwrite another part's tombstone.
-  const tomb = "Symetrix:" + fixtureId(302, "tomb");
+  const tomb = "Symetrix:" + fixtureId(304, "tomb");
   registerFixture("catalog_parts", tomb);
   await DS.upsertDoc("catalog_parts", { ...base, id: tomb, sku: tomb } as never);
   await DS.softDeleteDoc("catalog_parts", tomb);
-  ok((await Cat.renamePartDocs(p2, tomb, "tomb")) === null && (await Cat.get(p2))?.sku === p2, "#302 store: renaming onto another part's soft-deleted SKU is refused");
+  ok((await Cat.renamePartDocs(p2, tomb, "tomb")) === null && (await Cat.get(p2))?.sku === p2, "#304 store: renaming onto another part's soft-deleted SKU is refused");
 
   // formerSkus dedupes exact strings across a second rename.
-  const to2 = "Symetrix:" + fixtureId(302, "model-b");
+  const to2 = "Symetrix:" + fixtureId(304, "model-b");
   registerFixture("catalog_parts", to2);
-  const second = await Cat.renamePartDocs(to, to2, "Fixture 302 B");
-  ok(JSON.stringify(second?.formerSkus) === JSON.stringify([p1, to]) && second?.manufacturerPartNumber === p1, "#302 store: a second rename accumulates formerSkus and keeps the first MFR P/N");
-  ok((await Cat.get(p1))?.sku === to2, "#302 store: a two-hop redirect resolves to the live part");
+  const second = await Cat.renamePartDocs(to, to2, "Fixture 304 B");
+  ok(JSON.stringify(second?.formerSkus) === JSON.stringify([p1, to]) && second?.manufacturerPartNumber === p1, "#304 store: a second rename accumulates formerSkus and keeps the first MFR P/N");
+  ok((await Cat.get(p1))?.sku === to2, "#304 store: a two-hop redirect resolves to the live part");
 
   // The rename log.
-  ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("a") === "c", "#302 store: renameMapOf collapses a→b→c to a→c");
-  ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("b") === "c", "#302 store: renameMapOf keeps b→c");
+  ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("a") === "c", "#304 store: renameMapOf collapses a→b→c to a→c");
+  ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("b") === "c", "#304 store: renameMapOf keeps b→c");
   const db = await getDb();
-  const ids302 = [Ren.SKU_RENAMES_BLOB, "gridFavorites:" + fixtureId(302, "u")];
-  const snapshot = await db.select().from(blobs302).where(inArray(blobs302.id, ids302));
+  const ids304 = [Ren.SKU_RENAMES_BLOB, "gridFavorites:" + fixtureId(304, "u")];
+  const snapshot = await db.select().from(blobs304).where(inArray(blobs304.id, ids304));
   try {
-    await db.delete(blobs302).where(inArray(blobs302.id, ids302));
-    ok((await Ren.allSkuRenames()).length === 0, "#302 store: an empty rename log reads as []");
+    await db.delete(blobs304).where(inArray(blobs304.id, ids304));
+    ok((await Ren.allSkuRenames()).length === 0, "#304 store: an empty rename log reads as []");
     await Ren.appendSkuRenames([{ from: p1, to, model: "one", at: 1, by: "u" }]);
     await Ren.appendSkuRenames([{ from: p1, to: to2, model: "two", at: 2, by: "u" }, { from: p2, to: "q", model: "m", at: 3, by: "u" }]);
     const log = await Ren.allSkuRenames();
-    ok(log.filter((e) => e.from === p1).length === 1 && log.find((e) => e.from === p1)?.to === to2 && log.length === 2, "#302 store: appendSkuRenames dedupes by from, last wins");
-    await DS.setBlob("gridFavorites:" + fixtureId(302, "u"), { ids: [] });
-    ok((await DS.listBlobIds("gridFavorites:")).includes("gridFavorites:" + fixtureId(302, "u")), "#302 store: listBlobIds finds blobs by prefix");
-    ok(!(await DS.listBlobIds("gridFavorites_")).length && !(await DS.listBlobIds("grid%")).length, "#302 store: listBlobIds escapes % and _ in the prefix");
+    ok(log.filter((e) => e.from === p1).length === 1 && log.find((e) => e.from === p1)?.to === to2 && log.length === 2, "#304 store: appendSkuRenames dedupes by from, last wins");
+    await DS.setBlob("gridFavorites:" + fixtureId(304, "u"), { ids: [] });
+    ok((await DS.listBlobIds("gridFavorites:")).includes("gridFavorites:" + fixtureId(304, "u")), "#304 store: listBlobIds finds blobs by prefix");
+    ok(!(await DS.listBlobIds("gridFavorites_")).length && !(await DS.listBlobIds("grid%")).length, "#304 store: listBlobIds escapes % and _ in the prefix");
   } finally {
-    await db.delete(blobs302).where(inArray(blobs302.id, ids302));
-    if (snapshot.length) await db.insert(blobs302).values(snapshot);
+    await db.delete(blobs304).where(inArray(blobs304.id, ids304));
+    if (snapshot.length) await db.insert(blobs304).values(snapshot);
   }
 }
 
-/** #302 Task 4 — the rename engine: the parts step, every reference pass,
+/** #304 Task 4 — the rename engine: the parts step, every reference pass,
  *  resumable on a budget, idempotent, frozen history untouched. Plus the
  *  renamePartDocs edges folded in from review (from === to, the recovery
  *  branch, an onward-renamed tombstone). */
-async function modelSku302ApplyAsyncChecks(): Promise<void> {
+async function modelSku304ApplyAsyncChecks(): Promise<void> {
   const { fixtureId, registerFixture, createFixture } = await import("./test-fixtures");
   const Cat = await import("@/lib/stores/catalog");
   const Ren = await import("@/lib/stores/catalog-renames");
@@ -53057,72 +53057,72 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
   const { getDb } = await import("@/db");
   const { blobs: blobsT } = await import("@/db/doc-tables");
   const { inArray } = await import("drizzle-orm");
-  type D302 = import("@/db/doc-store").Doc;
-  const base = { desc: "Fixture 302 apply", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Symetrix" };
+  type D304 = import("@/db/doc-store").Doc;
+  const base = { desc: "Fixture 304 apply", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Symetrix" };
 
   // ---- renamePartDocs edges (review items) ----
-  const E1 = fixtureId(302, "ed-same");
+  const E1 = fixtureId(304, "ed-same");
   registerFixture("catalog_parts", E1);
   await DS.upsertDoc("catalog_parts", { ...base, id: E1, sku: E1 } as never);
-  ok((await Cat.renamePartDocs(E1, E1, "m"))?.sku === E1, "#302 store: renamePartDocs(x, x) returns the live part");
-  ok((await Cat.renamePartDocs(fixtureId(302, "ed-none"), fixtureId(302, "ed-none"), "m")) === null, "#302 store: renamePartDocs(x, x) on a missing part is null");
-  const RX = fixtureId(302, "rc-x");
-  const RY = "Symetrix:" + fixtureId(302, "rc-y");
+  ok((await Cat.renamePartDocs(E1, E1, "m"))?.sku === E1, "#304 store: renamePartDocs(x, x) returns the live part");
+  ok((await Cat.renamePartDocs(fixtureId(304, "ed-none"), fixtureId(304, "ed-none"), "m")) === null, "#304 store: renamePartDocs(x, x) on a missing part is null");
+  const RX = fixtureId(304, "rc-x");
+  const RY = "Symetrix:" + fixtureId(304, "rc-y");
   registerFixture("catalog_parts", RX);
   registerFixture("catalog_parts", RY);
   await DS.upsertDoc("catalog_parts", { ...base, id: RX, sku: RX } as never);
   await DS.upsertDoc("catalog_parts", { ...base, id: RY, sku: RY, formerSkus: [RX] } as never);
   const rec = await Cat.renamePartDocs(RX, RY, "rc");
-  const rxRow = (await DS.getDocRows<D302>("catalog_parts", [RX]))[0];
-  ok(rec?.sku === RY && rxRow?.deleted === true && rxRow.doc.renamedTo === RY, "#302 store: recovery — a live `to` already listing a still-live `from` retires `from` and returns `to`");
-  const OZ = fixtureId(302, "ow-z");
-  const OT = "Symetrix:" + fixtureId(302, "ow-t");
+  const rxRow = (await DS.getDocRows<D304>("catalog_parts", [RX]))[0];
+  ok(rec?.sku === RY && rxRow?.deleted === true && rxRow.doc.renamedTo === RY, "#304 store: recovery — a live `to` already listing a still-live `from` retires `from` and returns `to`");
+  const OZ = fixtureId(304, "ow-z");
+  const OT = "Symetrix:" + fixtureId(304, "ow-t");
   registerFixture("catalog_parts", OZ);
   registerFixture("catalog_parts", OT);
   await DS.upsertDoc("catalog_parts", { ...base, id: OZ, sku: OZ } as never);
-  await DS.upsertDoc("catalog_parts", { ...base, id: OT, sku: OT, formerSkus: [OZ], renamedTo: "Symetrix:" + fixtureId(302, "ow-next") } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: OT, sku: OT, formerSkus: [OZ], renamedTo: "Symetrix:" + fixtureId(304, "ow-next") } as never);
   await DS.softDeleteDoc("catalog_parts", OT);
-  ok((await Cat.renamePartDocs(OZ, OT, "ow")) === null && (await Cat.get(OZ))?.sku === OZ, "#302 store: a tombstoned `to` renamed onward is never revived");
-  ok((await DS.getDocRows<D302>("catalog_parts", [OT]))[0]?.deleted === true, "#302 store: …and a chain that resolves nowhere leaves `from` live and `to` a tombstone");
+  ok((await Cat.renamePartDocs(OZ, OT, "ow")) === null && (await Cat.get(OZ))?.sku === OZ, "#304 store: a tombstoned `to` renamed onward is never revived");
+  ok((await DS.getDocRows<D304>("catalog_parts", [OT]))[0]?.deleted === true, "#304 store: …and a chain that resolves nowhere leaves `from` live and `to` a tombstone");
   // Crash recovery across an onward rename: from → to → successor, where the
   // call that renamed `from` died before retiring it.
-  const CZ = fixtureId(302, "cr-z");
-  const CT = "Symetrix:" + fixtureId(302, "cr-t");
-  const CN = "Symetrix:" + fixtureId(302, "cr-n");
+  const CZ = fixtureId(304, "cr-z");
+  const CT = "Symetrix:" + fixtureId(304, "cr-t");
+  const CN = "Symetrix:" + fixtureId(304, "cr-n");
   for (const id of [CZ, CT, CN]) registerFixture("catalog_parts", id);
   await DS.upsertDoc("catalog_parts", { ...base, id: CZ, sku: CZ } as never);
   await DS.upsertDoc("catalog_parts", { ...base, id: CT, sku: CT, formerSkus: [CZ], renamedTo: CN } as never);
   await DS.softDeleteDoc("catalog_parts", CT);
   await DS.upsertDoc("catalog_parts", { ...base, id: CN, sku: CN, formerSkus: [CZ, CT] } as never);
   const crOut = await Cat.renamePartDocs(CZ, CT, "cr");
-  const czRow = (await DS.getDocRows<D302>("catalog_parts", [CZ]))[0];
-  ok(crOut?.sku === CN && czRow?.deleted === true && czRow.doc.renamedTo === CT && (await Cat.get(CZ))?.sku === CN, "#302 store: recovery — an onward-renamed tombstone `to` listing a still-live `from` retires `from` (renamedTo = `to`) and returns the successor");
-  const NZ = fixtureId(302, "cr-nz");
+  const czRow = (await DS.getDocRows<D304>("catalog_parts", [CZ]))[0];
+  ok(crOut?.sku === CN && czRow?.deleted === true && czRow.doc.renamedTo === CT && (await Cat.get(CZ))?.sku === CN, "#304 store: recovery — an onward-renamed tombstone `to` listing a still-live `from` retires `from` (renamedTo = `to`) and returns the successor");
+  const NZ = fixtureId(304, "cr-nz");
   registerFixture("catalog_parts", NZ);
   await DS.upsertDoc("catalog_parts", { ...base, id: NZ, sku: NZ } as never);
-  ok((await Cat.renamePartDocs(NZ, CT, "cr")) === null && (await Cat.get(NZ))?.sku === NZ, "#302 store: an onward-renamed tombstone that never listed `from` is still refused");
+  ok((await Cat.renamePartDocs(NZ, CT, "cr")) === null && (await Cat.get(NZ))?.sku === NZ, "#304 store: an onward-renamed tombstone that never listed `from` is still refused");
 
   // ---- the engine ----
-  const A = fixtureId(302, "ap-a");
-  const B = fixtureId(302, "ap-b");
-  const C = fixtureId(302, "ap-c");
-  const model = fixtureId(302, "ap-model");
+  const A = fixtureId(304, "ap-a");
+  const B = fixtureId(304, "ap-b");
+  const C = fixtureId(304, "ap-c");
+  const model = fixtureId(304, "ap-model");
   const NEW = "Symetrix:" + model;
   for (const id of [A, B, C, NEW]) registerFixture("catalog_parts", id);
   await DS.upsertDoc("catalog_parts", { ...base, id: A, sku: A } as never);
   await DS.upsertDoc("catalog_parts", { ...base, id: B, sku: B, mfr: "Biamp" } as never);
   await DS.upsertDoc("catalog_parts", { ...base, id: C, sku: C, specSameAs: A } as never);
 
-  const img = await PD.createDocument({ kind: "image", fileName: "ap-302.png", contentType: "image/png", size: 1000, blobKey: "part-docs/PD-fixture-302/ap-302.png", sourceUrl: null, source: "upload", by: "Test" });
-  if (!img) throw new Error("#302 apply: fixture image failed");
+  const img = await PD.createDocument({ kind: "image", fileName: "ap-304.png", contentType: "image/png", size: 1000, blobKey: "part-docs/PD-fixture-304/ap-304.png", sourceUrl: null, source: "upload", by: "Test" });
+  if (!img) throw new Error("#304 apply: fixture image failed");
   registerFixture("part_documents", img.id);
   await PD.attachDocument(img.id, [A], "Test");
   registerFixture("part_document_links", PD.documentLinkId(A, img.id));
   registerFixture("part_document_links", PD.documentLinkId(NEW, img.id));
   await PD.setDocumentLinkDisplay(img.id, A, { sort: 3 });
   // A second image on A whose link at the NEW id already exists, detached by a person.
-  const img2 = await PD.createDocument({ kind: "image", fileName: "ap-302b.png", contentType: "image/png", size: 1000, blobKey: "part-docs/PD-fixture-302/ap-302b.png", sourceUrl: null, source: "upload", by: "Test" });
-  if (!img2) throw new Error("#302 apply: fixture image 2 failed");
+  const img2 = await PD.createDocument({ kind: "image", fileName: "ap-304b.png", contentType: "image/png", size: 1000, blobKey: "part-docs/PD-fixture-304/ap-304b.png", sourceUrl: null, source: "upload", by: "Test" });
+  if (!img2) throw new Error("#304 apply: fixture image 2 failed");
   registerFixture("part_documents", img2.id);
   await PD.attachDocument(img2.id, [A], "Test");
   const det = PD.documentLinkId(NEW, img2.id);
@@ -53131,37 +53131,37 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
   await DS.upsertDoc("part_document_links", { id: det, partSku: NEW, documentId: img2.id, kind: "image", createdAt: 1, createdBy: "Test" } as never);
   await DS.softDeleteDoc("part_document_links", det);
 
-  const scope = fixtureId(302, "ap-scope");
+  const scope = fixtureId(304, "ap-scope");
   await PAL.syncAccessoryLinks({ source: "manual", sourceRef: scope }, [{ parentSku: A, accessorySku: B }]);
   registerFixture("part_accessory_links", PAL.accessoryLinkId("manual", scope, A, B));
   registerFixture("part_accessory_links", PAL.accessoryLinkId("manual", scope, NEW, B));
 
-  const FX = fixtureId(302, "ap-fx");
+  const FX = fixtureId(304, "ap-fx");
   await createFixture("subassemblies", {
-    id: FX, kind: "fixture", label: "Test302 Kit", description: "", lightEngineSku: A, lensSku: null,
+    id: FX, kind: "fixture", label: "Test304 Kit", description: "", lightEngineSku: A, lensSku: null,
     lines: { data: [], power: [{ sku: A, qty: 1 }], mounting: [], accessories: [] },
     createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
   });
 
-  const QID = fixtureId(302, "ap-quote");
+  const QID = fixtureId(304, "ap-quote");
   const spec = { sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: A, desc: "Jupiter mixer", qty: 2, unit: "ea", cost: 5, price: 10 }] }], mobs: [] };
-  const qBase = { id: QID, name: "T302 apply", customer: "", status: "draft", history: [], createdAt: 1, updatedAt: 1, margin: 0.5, value: 20, source: "estimator", quoteType: "system", spec };
+  const qBase = { id: QID, name: "T304 apply", customer: "", status: "draft", history: [], createdAt: 1, updatedAt: 1, margin: 0.5, value: 20, source: "estimator", quoteType: "system", spec };
   await createFixture("quotes", { ...qBase, review: { state: "approved", method: "in_app", approvedAgainst: approvalFingerprint(qBase) } });
   await Q.addQuoteRevision(QID, { by: "Test", reason: "sent", note: "sent" });
   // A rendered PDF of the pre-rename document (#222): the rename must mark it stale.
-  await Q.updateQuotePdf(QID, () => ({ status: "ready", at: 6, savedAt: 5, blobPath: "quote-pdfs/fixture-302/5.pdf" }));
+  await Q.updateQuotePdf(QID, () => ({ status: "ready", at: 6, savedAt: 5, blobPath: "quote-pdfs/fixture-304/5.pdf" }));
   const qBefore = (await Q.get(QID))!;
 
   // A Grid quote: flat spec.lines (grid-quote.ts), approved against them.
-  const QG = fixtureId(302, "ap-gquote");
+  const QG = fixtureId(304, "ap-gquote");
   const gLine = (sku: string) => ({ sku, desc: "g", qty: 1, unit: "ea", price: 10, ext: 10 });
-  const gSpec = { kind: "grid", gridProjectId: fixtureId(302, "ap-grid"), gridOptionId: "o1", lines: [gLine(A), gLine("CURTAIN"), gLine("asm:fa-302")] };
-  const qgBase = { id: QG, name: "T302 grid quote", customer: "", status: "draft", history: [], createdAt: 1, updatedAt: 1, margin: 0.5, value: 30, source: "grid", quoteType: "system", spec: gSpec };
+  const gSpec = { kind: "grid", gridProjectId: fixtureId(304, "ap-grid"), gridOptionId: "o1", lines: [gLine(A), gLine("CURTAIN"), gLine("asm:fa-304")] };
+  const qgBase = { id: QG, name: "T304 grid quote", customer: "", status: "draft", history: [], createdAt: 1, updatedAt: 1, margin: 0.5, value: 30, source: "grid", quoteType: "system", spec: gSpec };
   await createFixture("quotes", { ...qgBase, review: { state: "approved", method: "in_app", approvedAgainst: approvalFingerprint(qgBase) } });
 
-  const GP = fixtureId(302, "ap-grid");
+  const GP = fixtureId(304, "ap-grid");
   await createFixture("grid_projects", {
-    id: GP, name: "T302 grid", placements: [{ id: "pl-1", partId: A, x: 1, y: 1 }], routes: [],
+    id: GP, name: "T304 grid", placements: [{ id: "pl-1", partId: A, x: 1, y: 1 }], routes: [],
     revisions: [{ rev: 1, at: 1, by: "Test", placements: [{ id: "pl-1", partId: A, x: 1, y: 1 }] }],
     createdAt: 1, updatedAt: 1,
   });
@@ -53169,25 +53169,25 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
   registerFixture("grid_catalog", A);
   registerFixture("grid_catalog", NEW);
   await DS.upsertDoc("grid_catalog", { id: A, name: "Jupiter", manufacturer: "Symetrix", modelNumber: A, scope: "Audio", category: "Other", width: 44, height: 30, ports: [], pricingPartId: A, kind: "device", icon: "speaker", createdBy: "Test", createdAt: 1, updatedAt: 1 } as never);
-  const GA = fixtureId(302, "ap-gasm");
-  await createFixture("grid_catalog", { id: GA, name: "T302 asm", manufacturer: "", modelNumber: GA, scope: "Audio", category: "Assembly", width: 74, height: 52, ports: [], kind: "assembly", members: [{ symbolId: A, qty: 1, x: 0, y: 0 }], createdBy: "Test", createdAt: 1, updatedAt: 1 });
+  const GA = fixtureId(304, "ap-gasm");
+  await createFixture("grid_catalog", { id: GA, name: "T304 asm", manufacturer: "", modelNumber: GA, scope: "Audio", category: "Assembly", width: 74, height: 52, ports: [], kind: "assembly", members: [{ symbolId: A, qty: 1, x: 0, y: 0 }], createdBy: "Test", createdAt: 1, updatedAt: 1 });
 
-  const FAV = "gridFavorites:" + fixtureId(302, "ap-u");
-  const EQ = fixtureId(302, "ap-eq");
-  const WIRE = fixtureId(302, "ap-wire");
+  const FAV = "gridFavorites:" + fixtureId(304, "ap-u");
+  const EQ = fixtureId(304, "ap-eq");
+  const WIRE = fixtureId(304, "ap-wire");
   const blobIds = [Ren.SKU_RENAMES_BLOB, "grid_equipment_map", "track_series", "curtain_mount_hardware", "rack_defaults", "drive_photo_sync", FAV];
   const db = await getDb();
   const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
   const settingsBefore = await Settings.getSettingsPatchStrict();
   const wireBefore = settingsBefore.wireTypes;
   const rows = [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: A, model, notes: "" }];
-  type R302 = Extract<Awaited<ReturnType<typeof Apply.runRenameBatch>>, { ok: true }>;
-  const runAll = async (refsOnly = false, from: import("@/lib/catalog-rename/apply").RenameStep = "parts"): Promise<R302[]> => {
-    const out: R302[] = [];
+  type R304 = Extract<Awaited<ReturnType<typeof Apply.runRenameBatch>>, { ok: true }>;
+  const runAll = async (refsOnly = false, from: import("@/lib/catalog-rename/apply").RenameStep = "parts"): Promise<R304[]> => {
+    const out: R304[] = [];
     let step = from;
     for (let i = 0; i < 40; i++) {
       const r = await Apply.runRenameBatch({ rows, step, refsOnly }, "Test", 45_000);
-      if (!r.ok) throw new Error("#302 apply: " + r.error);
+      if (!r.ok) throw new Error("#304 apply: " + r.error);
       out.push(r);
       if (r.complete) break;
       step = r.step;
@@ -53198,75 +53198,75 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
     await db.delete(blobsT).where(inArray(blobsT.id, [Ren.SKU_RENAMES_BLOB, FAV]));
     await DS.setBlob(FAV, { ids: [A, "GRID-AUD-SPEAKER"] });
     await DS.setBlob("grid_equipment_map", { [EQ]: { tiers: { good: { kind: "part", sku: A }, better: { kind: "allowance", amount: 5 } } } });
-    await Settings.setSettings({ wireTypes: [...(Array.isArray(wireBefore) ? wireBefore : []), { id: WIRE, name: "T302 wire", cableSku: A }] });
+    await Settings.setSettings({ wireTypes: [...(Array.isArray(wireBefore) ? wireBefore : []), { id: WIRE, name: "T304 wire", cableSku: A }] });
 
-    ok(!(await Apply.runRenameBatch({ rows, step: "bogus" as never }, "Test", 45_000)).ok, "#302 apply: an unknown step is refused");
+    ok(!(await Apply.runRenameBatch({ rows, step: "bogus" as never }, "Test", 45_000)).ok, "#304 apply: an unknown step is refused");
     // A spent budget in the parts step stops before renaming; the resumed call renames the same row.
     const pStopped = await Apply.runRenameBatch({ rows, step: "parts" }, "Test", -1);
-    ok(pStopped.ok && pStopped.step === "parts" && !pStopped.complete && pStopped.renamed === 0 && pStopped.plan?.counts.rename === 1 && (await Cat.get(A))?.sku === A, "#302 apply: a spent budget stops the parts step before renaming and hands back `parts`");
+    ok(pStopped.ok && pStopped.step === "parts" && !pStopped.complete && pStopped.renamed === 0 && pStopped.plan?.counts.rename === 1 && (await Cat.get(A))?.sku === A, "#304 apply: a spent budget stops the parts step before renaming and hands back `parts`");
     const p0 = await Apply.runRenameBatch({ rows, step: "parts" }, "Test", 45_000);
-    if (!p0.ok) throw new Error("#302 apply: " + p0.error);
-    ok(p0.step === Apply.REF_STEPS[0] && p0.renamed === 1 && p0.plan?.counts.rename === 1, "#302 apply: the resumed parts step completes the same rename");
+    if (!p0.ok) throw new Error("#304 apply: " + p0.error);
+    ok(p0.step === Apply.REF_STEPS[0] && p0.renamed === 1 && p0.plan?.counts.rename === 1, "#304 apply: the resumed parts step completes the same rename");
     // A spent budget stops before any write and hands back the same step; the resumed run then finishes it.
     const stopped = await Apply.runRenameBatch({ rows, step: "quotes" }, "Test", -1);
     const qStopped = (await Q.get(QID))!;
-    ok(stopped.ok && stopped.step === "quotes" && !stopped.complete && stopped.changed === 0 && JSON.stringify(qStopped.spec).includes(`"${A}"`), "#302 apply: a spent budget stops mid-step, writes nothing and hands back the same step");
+    ok(stopped.ok && stopped.step === "quotes" && !stopped.complete && stopped.changed === 0 && JSON.stringify(qStopped.spec).includes(`"${A}"`), "#304 apply: a spent budget stops mid-step, writes nothing and hands back the same step");
 
     const first = [p0, ...(await runAll(false, p0.step))];
-    ok(first.map((r) => r.step).join(",") === [...Apply.REF_STEPS, "done"].join(",") && first.at(-1)?.complete === true, "#302 apply: one call per step — parts, every reference step in order, then done");
-    ok(first[0].renamed === 1 && first[0].plan?.counts.rename === 1 && first.slice(1).every((r) => r.plan === null && r.renamed === 0), "#302 apply: the parts step renames the planned row and returns its plan");
+    ok(first.map((r) => r.step).join(",") === [...Apply.REF_STEPS, "done"].join(",") && first.at(-1)?.complete === true, "#304 apply: one call per step — parts, every reference step in order, then done");
+    ok(first[0].renamed === 1 && first[0].plan?.counts.rename === 1 && first.slice(1).every((r) => r.plan === null && r.renamed === 0), "#304 apply: the parts step renames the planned row and returns its plan");
 
-    ok((await Cat.get(A))?.sku === NEW && (await Cat.get(NEW))?.manufacturerModelNumber === model, "#302 apply: get(old) resolves to the renamed part, which carries the model");
-    ok((await Ren.allSkuRenames()).some((e) => e.from === A && e.to === NEW && e.model === model && e.by === "Test"), "#302 apply: the rename is logged with who and the model");
-    ok((await Cat.get(C))?.specSameAs === NEW, "#302 apply: parts-refs — another part's specSameAs follows the rename");
-    ok((await Cat.get(B))?.sku === B && (await Cat.get(B))?.specSameAs === undefined, "#302 apply: an unrelated part is untouched");
+    ok((await Cat.get(A))?.sku === NEW && (await Cat.get(NEW))?.manufacturerModelNumber === model, "#304 apply: get(old) resolves to the renamed part, which carries the model");
+    ok((await Ren.allSkuRenames()).some((e) => e.from === A && e.to === NEW && e.model === model && e.by === "Test"), "#304 apply: the rename is logged with who and the model");
+    ok((await Cat.get(C))?.specSameAs === NEW, "#304 apply: parts-refs — another part's specSameAs follows the rename");
+    ok((await Cat.get(B))?.sku === B && (await Cat.get(B))?.specSameAs === undefined, "#304 apply: an unrelated part is untouched");
 
     const newLinks = await PD.documentLinksForParts([NEW]);
     const imgLink = newLinks.find((l) => l.documentId === img.id);
-    ok(!!imgLink && imgLink.id === PD.documentLinkId(NEW, img.id) && imgLink.sort === 3 && imgLink.kind === "image", "#302 apply: doc-links — the image link moves to the new SKU, keeping its sort");
-    ok(!(await PD.documentLinksForParts([A])).length, "#302 apply: doc-links — no live link is left under the old SKU");
-    const detRow = (await DS.getDocRows<D302>("part_document_links", [det]))[0];
-    ok(detRow?.deleted === true && !newLinks.some((l) => l.documentId === img2.id), "#302 apply: doc-links — a link detached at the new id stays detached");
+    ok(!!imgLink && imgLink.id === PD.documentLinkId(NEW, img.id) && imgLink.sort === 3 && imgLink.kind === "image", "#304 apply: doc-links — the image link moves to the new SKU, keeping its sort");
+    ok(!(await PD.documentLinksForParts([A])).length, "#304 apply: doc-links — no live link is left under the old SKU");
+    const detRow = (await DS.getDocRows<D304>("part_document_links", [det]))[0];
+    ok(detRow?.deleted === true && !newLinks.some((l) => l.documentId === img2.id), "#304 apply: doc-links — a link detached at the new id stays detached");
 
     const acc = (await PAL.allAccessoryLinks()).filter((l) => l.sourceRef === scope);
-    ok(acc.length === 1 && acc[0].parentSku === NEW && acc[0].accessorySku === B && acc[0].id === PAL.accessoryLinkId("manual", scope, NEW, B), "#302 apply: accessory-links — re-keyed under the new parent SKU, old row retired");
+    ok(acc.length === 1 && acc[0].parentSku === NEW && acc[0].accessorySku === B && acc[0].id === PAL.accessoryLinkId("manual", scope, NEW, B), "#304 apply: accessory-links — re-keyed under the new parent SKU, old row retired");
 
-    const fx = (await DS.getDoc<D302>("subassemblies", FX)) as Record<string, unknown> | null;
-    ok(fx?.lightEngineSku === NEW && JSON.stringify(fx?.lines).includes(NEW) && !JSON.stringify(fx).includes(`"${A}"`), "#302 apply: subassemblies — the fixture's light engine and lines follow the rename");
+    const fx = (await DS.getDoc<D304>("subassemblies", FX)) as Record<string, unknown> | null;
+    ok(fx?.lightEngineSku === NEW && JSON.stringify(fx?.lines).includes(NEW) && !JSON.stringify(fx).includes(`"${A}"`), "#304 apply: subassemblies — the fixture's light engine and lines follow the rename");
 
     const q = (await Q.get(QID))!;
     const qItem = (q.spec as { sections: Array<{ items: Array<{ sku: string; manufacturerModelNumber?: string; desc: string }> }> }).sections[0].items[0];
-    ok(qItem.sku === NEW && qItem.manufacturerModelNumber === model && qItem.desc === "Jupiter mixer", "#302 apply: quotes — the live spec line takes the new SKU and the model, desc untouched");
-    ok(JSON.stringify(q.revisions).includes(`"${A}"`) && !JSON.stringify(q.revisions).includes(NEW), "#302 apply: quotes — the sent revision still holds the old SKU");
-    ok(q.updatedAt === qBefore.updatedAt && approvalSnapshotMatches(q), "#302 apply: quotes — updatedAt is untouched and the approval still holds");
-    ok(q.pdf?.status === "pending" && q.pdf.stale === true && typeof q.contentChangedAt === "number" && q.pdf.savedAt === q.contentChangedAt && q.pdf.blobPath === "quote-pdfs/fixture-302/5.pdf", "#302 apply: quotes — a ready PDF reads stale as of the rewrite (last good file kept)");
+    ok(qItem.sku === NEW && qItem.manufacturerModelNumber === model && qItem.desc === "Jupiter mixer", "#304 apply: quotes — the live spec line takes the new SKU and the model, desc untouched");
+    ok(JSON.stringify(q.revisions).includes(`"${A}"`) && !JSON.stringify(q.revisions).includes(NEW), "#304 apply: quotes — the sent revision still holds the old SKU");
+    ok(q.updatedAt === qBefore.updatedAt && approvalSnapshotMatches(q), "#304 apply: quotes — updatedAt is untouched and the approval still holds");
+    ok(q.pdf?.status === "pending" && q.pdf.stale === true && typeof q.contentChangedAt === "number" && q.pdf.savedAt === q.contentChangedAt && q.pdf.blobPath === "quote-pdfs/fixture-304/5.pdf", "#304 apply: quotes — a ready PDF reads stale as of the rewrite (last good file kept)");
     const qg = (await Q.get(QG))!;
     const gLines = (qg.spec as { lines: Array<{ sku: string }> }).lines;
-    ok(gLines[0].sku === NEW && gLines[1].sku === "CURTAIN" && gLines[2].sku === "asm:fa-302" && qg.updatedAt === 1, "#302 apply: quotes — a Grid quote's spec.lines sku follows the rename; CURTAIN / asm: pass through");
-    ok(approvalSnapshotMatches(qg), "#302 apply: quotes — the Grid quote's approval is re-stamped and still holds");
+    ok(gLines[0].sku === NEW && gLines[1].sku === "CURTAIN" && gLines[2].sku === "asm:fa-304" && qg.updatedAt === 1, "#304 apply: quotes — a Grid quote's spec.lines sku follows the rename; CURTAIN / asm: pass through");
+    ok(approvalSnapshotMatches(qg), "#304 apply: quotes — the Grid quote's approval is re-stamped and still holds");
 
-    const gp = (await DS.getDoc<D302>("grid_projects", GP)) as Record<string, unknown> | null;
-    ok((gp?.placements as Array<{ partId: string }>)[0].partId === NEW, "#302 apply: grid-projects — the live placement follows the rename");
-    ok(JSON.stringify(gp?.revisions).includes(`"${A}"`) && !JSON.stringify(gp?.revisions).includes(NEW), "#302 apply: grid-projects — revisions still hold the old SKU");
+    const gp = (await DS.getDoc<D304>("grid_projects", GP)) as Record<string, unknown> | null;
+    ok((gp?.placements as Array<{ partId: string }>)[0].partId === NEW, "#304 apply: grid-projects — the live placement follows the rename");
+    ok(JSON.stringify(gp?.revisions).includes(`"${A}"`) && !JSON.stringify(gp?.revisions).includes(NEW), "#304 apply: grid-projects — revisions still hold the old SKU");
 
-    const sym = (await DS.getDoc<D302>("grid_catalog", NEW)) as Record<string, unknown> | null;
-    ok(sym?.pricingPartId === NEW && sym?.modelNumber === model && sym?.icon === "speaker", "#302 apply: grid-symbols — the seeded symbol moves to the new id with the model, keeping its look");
-    ok((await DS.getDoc("grid_catalog", A)) === null, "#302 apply: grid-symbols — the old symbol id is retired");
-    const ga = (await DS.getDoc<D302>("grid_catalog", GA)) as Record<string, unknown> | null;
-    ok((ga?.members as Array<{ symbolId: string }>)[0].symbolId === NEW, "#302 apply: grid-symbols — assembly members follow the moved symbol");
+    const sym = (await DS.getDoc<D304>("grid_catalog", NEW)) as Record<string, unknown> | null;
+    ok(sym?.pricingPartId === NEW && sym?.modelNumber === model && sym?.icon === "speaker", "#304 apply: grid-symbols — the seeded symbol moves to the new id with the model, keeping its look");
+    ok((await DS.getDoc("grid_catalog", A)) === null, "#304 apply: grid-symbols — the old symbol id is retired");
+    const ga = (await DS.getDoc<D304>("grid_catalog", GA)) as Record<string, unknown> | null;
+    ok((ga?.members as Array<{ symbolId: string }>)[0].symbolId === NEW, "#304 apply: grid-symbols — assembly members follow the moved symbol");
 
     const fav = await DS.getBlob<Record<string, unknown>>(FAV, {});
-    ok(JSON.stringify(fav.ids) === JSON.stringify([NEW, "GRID-AUD-SPEAKER"]), "#302 apply: blobs — a user's Grid favorites follow the rename");
+    ok(JSON.stringify(fav.ids) === JSON.stringify([NEW, "GRID-AUD-SPEAKER"]), "#304 apply: blobs — a user's Grid favorites follow the rename");
     const eq = (await DS.getBlob<Record<string, Record<string, Record<string, Record<string, unknown>>>>>("grid_equipment_map", {}))[EQ];
-    ok(eq?.tiers.good.sku === NEW && eq?.tiers.better.kind === "allowance", "#302 apply: blobs — the Equipment map part cell follows the rename");
+    ok(eq?.tiers.good.sku === NEW && eq?.tiers.better.kind === "allowance", "#304 apply: blobs — the Equipment map part cell follows the rename");
     const wires = (await Settings.getSettingsPatchStrict()).wireTypes as Array<{ id: string; cableSku?: string }>;
-    ok(wires.find((w) => w.id === WIRE)?.cableSku === NEW, "#302 apply: blobs — settings.wireTypes cableSku follows the rename");
+    ok(wires.find((w) => w.id === WIRE)?.cableSku === NEW, "#304 apply: blobs — settings.wireTypes cableSku follows the rename");
 
     const second = await runAll();
-    ok(second.length === first.length && second.every((r) => r.changed === 0 && r.renamed === 0) && second[0].plan?.counts.already === 1, "#302 apply: a second full run changes nothing (changed 0 on every step)");
+    ok(second.length === first.length && second.every((r) => r.changed === 0 && r.renamed === 0) && second[0].plan?.counts.already === 1, "#304 apply: a second full run changes nothing (changed 0 on every step)");
 
     const refs = await runAll(true);
-    ok(refs.length === Apply.REF_STEPS.length && refs.every((r) => r.renamed === 0 && r.plan === null) && refs[0].step === Apply.REF_STEPS[1], "#302 apply: refsOnly skips the parts step");
+    ok(refs.length === Apply.REF_STEPS.length && refs.every((r) => r.renamed === 0 && r.plan === null) && refs[0].step === Apply.REF_STEPS[1], "#304 apply: refsOnly skips the parts step");
   } finally {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
@@ -53274,12 +53274,12 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
   }
 }
 
-/** #302 Task 5 — both catalog importers update a renamed part when a price
+/** #304 Task 5 — both catalog importers update a renamed part when a price
  *  list still keys it by its old order number: no duplicate at the old SKU,
  *  no revived tombstone, and the import guard doesn't refuse the file. Driven
  *  through the importers' own server entry points (runCatalogImport — the
  *  Catalog page; commitCatalogImport → commitImport("catalog") — the hub). */
-async function modelSku302ImportAsyncChecks(): Promise<void> {
+async function modelSku304ImportAsyncChecks(): Promise<void> {
   const { fixtureId, registerFixture } = await import("./test-fixtures");
   const Cat = await import("@/lib/stores/catalog");
   const Ren = await import("@/lib/stores/catalog-renames");
@@ -53293,75 +53293,75 @@ async function modelSku302ImportAsyncChecks(): Promise<void> {
   const { getDb } = await import("@/db");
   const { blobs: blobsT } = await import("@/db/doc-tables");
   const { inArray } = await import("drizzle-orm");
-  type D302 = import("@/db/doc-store").Doc;
+  type D304 = import("@/db/doc-store").Doc;
 
   // A manufacturer only this check's parts carry, so the guard's overlap
   // test sees exactly these parts.
-  const MFR = fixtureId(302, "imp-mfr");
-  const O1 = fixtureId(302, "imp-o1"); // Catalog page path
-  const O2 = fixtureId(302, "imp-o2"); // Import hub path
+  const MFR = fixtureId(304, "imp-mfr");
+  const O1 = fixtureId(304, "imp-o1"); // Catalog page path
+  const O2 = fixtureId(304, "imp-o2"); // Import hub path
   const N1 = `${MFR}:Jupiter 4`;
   const N2 = `${MFR}:Radius 12`;
   for (const id of [O1, O2, N1, N2]) registerFixture("catalog_parts", id);
-  const base = { desc: "Fixture 302 import", category: "Other", unit: "ea", cost: 50, mfr: MFR };
+  const base = { desc: "Fixture 304 import", category: "Other", unit: "ea", cost: 50, mfr: MFR };
   const db = await getDb();
   const blobIds = [Ren.SKU_RENAMES_BLOB];
   const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
   try {
     await DS.upsertDoc("catalog_parts", { ...base, id: O1, sku: O1, list: 100 } as never);
     await DS.upsertDoc("catalog_parts", { ...base, id: O2, sku: O2, list: 200 } as never);
-    ok(!!(await Cat.renamePartDocs(O1, N1, "Jupiter 4")) && !!(await Cat.renamePartDocs(O2, N2, "Radius 12")), "#302 import: fixture parts renamed");
+    ok(!!(await Cat.renamePartDocs(O1, N1, "Jupiter 4")) && !!(await Cat.renamePartDocs(O2, N2, "Radius 12")), "#304 import: fixture parts renamed");
     await Ren.appendSkuRenames([
       { from: O1, to: N1, model: "Jupiter 4", at: 1, by: "Test" },
       { from: O2, to: N2, model: "Radius 12", at: 1, by: "Test" },
     ]);
-    const liveHasOld = async (old: string) => (await DS.listDocs<D302>("catalog_parts")).some((d) => d.id === old);
+    const liveHasOld = async (old: string) => (await DS.listDocs<D304>("catalog_parts")).some((d) => d.id === old);
     const tomb = async (old: string, to: string) => {
-      const row = (await DS.getDocRows<D302>("catalog_parts", [old]))[0];
+      const row = (await DS.getDocRows<D304>("catalog_parts", [old]))[0];
       return row?.deleted === true && (row.doc as { renamedTo?: string }).renamedTo === to;
     };
 
     // ---- Catalog page (runCatalogImport) ----
     const csv = `SKU,Description,List,MFR M/N\n${O1},Jupiter 4 DSP (2026),150,WRONG MODEL\n`;
     const pg = await runPage({ mfr: MFR, text: csv, bytes: Buffer.byteLength(csv, "utf8"), effectiveAt: Date.now(), defaultCategory: "Other" });
-    ok(pg.ok && pg.imported === 1, "#302 import page: an order-number price list for a renamed manufacturer is not refused by the guard" + (pg.ok ? "" : ` (${pg.error})`));
+    ok(pg.ok && pg.imported === 1, "#304 import page: an order-number price list for a renamed manufacturer is not refused by the guard" + (pg.ok ? "" : ` (${pg.error})`));
     const p1 = await Cat.get(N1);
-    ok(p1?.list === 150 && p1.desc === "Jupiter 4 DSP (2026)", "#302 import page: the renamed part's price and description changed");
-    ok(p1?.sku === N1 && p1.manufacturerModelNumber === "Jupiter 4" && p1.manufacturerPartNumber === O1 && JSON.stringify(p1.formerSkus) === JSON.stringify([O1]), "#302 import page: the renamed part keeps its sku, model #, P/N and formerSkus");
-    ok(!(await liveHasOld(O1)) && (await tomb(O1, N1)) && (await Cat.get(O1))?.sku === N1, "#302 import page: no live part at the old SKU — the tombstone stays a redirect");
+    ok(p1?.list === 150 && p1.desc === "Jupiter 4 DSP (2026)", "#304 import page: the renamed part's price and description changed");
+    ok(p1?.sku === N1 && p1.manufacturerModelNumber === "Jupiter 4" && p1.manufacturerPartNumber === O1 && JSON.stringify(p1.formerSkus) === JSON.stringify([O1]), "#304 import page: the renamed part keeps its sku, model #, P/N and formerSkus");
+    ok(!(await liveHasOld(O1)) && (await tomb(O1, N1)) && (await Cat.get(O1))?.sku === N1, "#304 import page: no live part at the old SKU — the tombstone stays a redirect");
 
     // ---- Import hub (commitCatalogImport → commitImport("catalog")) ----
     const fields = meta("catalog")!.fields;
     const hubRows = (list: number) => prep([[O2, MFR, "Radius 12 (2026)", String(list), "WRONG MODEL"]], amap(["SKU", "Manufacturer", "Description", "List Price", "MFR M/N"], fields), fields).rows;
     const hu = await commitCatalogImport({ rows: hubRows(250), mode: "update", effectiveAt: Date.now(), priced: true });
-    ok(hu.ok && hu.res.updated === 1 && hu.res.created === 0, "#302 import hub: Update existing matches the renamed part by its old SKU" + (hu.ok ? "" : ` (${hu.error})`));
+    ok(hu.ok && hu.res.updated === 1 && hu.res.created === 0, "#304 import hub: Update existing matches the renamed part by its old SKU" + (hu.ok ? "" : ` (${hu.error})`));
     const p2 = await Cat.get(N2);
-    ok(p2?.list === 250 && p2.desc === "Radius 12 (2026)" && p2.sku === N2 && p2.manufacturerModelNumber === "Radius 12" && JSON.stringify(p2.formerSkus) === JSON.stringify([O2]), "#302 import hub: the renamed part's price changed, its identity (incl. model # over the file's wrong MFR M/N) did not");
-    ok(!(await liveHasOld(O2)) && (await tomb(O2, N2)), "#302 import hub: no live part at the old SKU after Update existing");
+    ok(p2?.list === 250 && p2.desc === "Radius 12 (2026)" && p2.sku === N2 && p2.manufacturerModelNumber === "Radius 12" && JSON.stringify(p2.formerSkus) === JSON.stringify([O2]), "#304 import hub: the renamed part's price changed, its identity (incl. model # over the file's wrong MFR M/N) did not");
+    ok(!(await liveHasOld(O2)) && (await tomb(O2, N2)), "#304 import hub: no live part at the old SKU after Update existing");
     const hc = await commitCatalogImport({ rows: hubRows(275), mode: "create", effectiveAt: Date.now(), priced: true });
-    ok(hc.ok && (await Cat.get(N2))?.list === 275 && !(await liveHasOld(O2)) && (await tomb(O2, N2)), "#302 import hub: Create new on an old SKU merges into the renamed part, never a duplicate or a revived tombstone");
-    ok((await Cat.get(N2))?.manufacturerModelNumber === "Radius 12", "#302 import hub: Create new on an old SKU keeps the renamed part's model # over the file's MFR M/N");
+    ok(hc.ok && (await Cat.get(N2))?.list === 275 && !(await liveHasOld(O2)) && (await tomb(O2, N2)), "#304 import hub: Create new on an old SKU merges into the renamed part, never a duplicate or a revived tombstone");
+    ok((await Cat.get(N2))?.manufacturerModelNumber === "Radius 12", "#304 import hub: Create new on an old SKU keeps the renamed part's model # over the file's MFR M/N");
     const hs = await commitCatalogImport({ rows: hubRows(999), mode: "skip", effectiveAt: Date.now(), priced: true });
-    ok(hs.ok && hs.res.skipped === 1 && (await Cat.get(N2))?.list === 275, "#302 import hub: Skip duplicates treats the old SKU as a duplicate of the renamed part");
+    ok(hs.ok && hs.res.skipped === 1 && (await Cat.get(N2))?.list === 275, "#304 import hub: Skip duplicates treats the old SKU as a duplicate of the renamed part");
 
     // ---- Store guard: every writer handed an OLD sku lands on the renamed part ----
-    const liveCount = async (sku: string) => (await DS.listDocs<D302>("catalog_parts")).filter((d) => d.id === sku || (d as { sku?: string }).sku === sku).length;
+    const liveCount = async (sku: string) => (await DS.listDocs<D304>("catalog_parts")).filter((d) => d.id === sku || (d as { sku?: string }).sku === sku).length;
     const mu = await Cat.mergeUpsert(O1, { list: 99 });
     const n1a = await Cat.get(N1);
-    ok(mu.sku === N1 && mu.id === N1 && n1a?.list === 99 && n1a.sku === N1 && n1a.id === N1, "#302 store guard: mergeUpsert(old, patch) updates the renamed part under its own sku/id");
-    ok(JSON.stringify(n1a?.formerSkus) === JSON.stringify([O1]) && n1a?.manufacturerModelNumber === "Jupiter 4" && n1a?.renamedTo === undefined, "#302 store guard: mergeUpsert(old) keeps the renamed part's formerSkus and model #");
-    ok(!(await liveHasOld(O1)) && (await liveCount(O1)) === 0 && (await tomb(O1, N1)), "#302 store guard: mergeUpsert(old) leaves no live doc at the old id and the tombstone keeps renamedTo");
+    ok(mu.sku === N1 && mu.id === N1 && n1a?.list === 99 && n1a.sku === N1 && n1a.id === N1, "#304 store guard: mergeUpsert(old, patch) updates the renamed part under its own sku/id");
+    ok(JSON.stringify(n1a?.formerSkus) === JSON.stringify([O1]) && n1a?.manufacturerModelNumber === "Jupiter 4" && n1a?.renamedTo === undefined, "#304 store guard: mergeUpsert(old) keeps the renamed part's formerSkus and model #");
+    ok(!(await liveHasOld(O1)) && (await liveCount(O1)) === 0 && (await tomb(O1, N1)), "#304 store guard: mergeUpsert(old) leaves no live doc at the old id and the tombstone keeps renamedTo");
     const up = await Cat.upsert({ ...(n1a as import("@/lib/stores/catalog").CatalogPart), id: O1, sku: O1, list: 77 });
     const n1b = await Cat.get(N1);
-    ok(up.sku === N1 && n1b?.list === 77 && n1b.sku === N1 && JSON.stringify(n1b.formerSkus) === JSON.stringify([O1]), "#302 store guard: upsert({ sku: old }) lands on the renamed part, keeping its formerSkus");
-    ok(!(await liveHasOld(O1)) && (await tomb(O1, N1)), "#302 store guard: upsert({ sku: old }) never revives the tombstone as a live duplicate");
-    const pp = await Cat.saveProductParagraph(O1, "Fixture 302 paragraph", "Test");
+    ok(up.sku === N1 && n1b?.list === 77 && n1b.sku === N1 && JSON.stringify(n1b.formerSkus) === JSON.stringify([O1]), "#304 store guard: upsert({ sku: old }) lands on the renamed part, keeping its formerSkus");
+    ok(!(await liveHasOld(O1)) && (await tomb(O1, N1)), "#304 store guard: upsert({ sku: old }) never revives the tombstone as a live duplicate");
+    const pp = await Cat.saveProductParagraph(O1, "Fixture 304 paragraph", "Test");
     const n1c = await Cat.get(N1);
-    ok(pp.ok && pp.part.sku === N1 && n1c?.narrativeText === "Fixture 302 paragraph" && n1c.list === 77 && !(await liveHasOld(O1)) && (await tomb(O1, N1)), "#302 store guard: saveProductParagraph(old) lands on the renamed part");
+    ok(pp.ok && pp.part.sku === N1 && n1c?.narrativeText === "Fixture 304 paragraph" && n1c.list === 77 && !(await liveHasOld(O1)) && (await tomb(O1, N1)), "#304 store guard: saveProductParagraph(old) lands on the renamed part");
     const { catalogParts: cpT } = await import("@/db/doc-tables");
     const revOf = async (id: string) => (await db.select({ rev: cpT.rev }).from(cpT).where(inArray(cpT.id, [id])))[0]?.rev;
     const oldRev = await revOf(O1);
-    ok(oldRev != null && (await Cat.remove(O1)) === false && (await Cat.get(N1))?.sku === N1 && (await revOf(O1)) === oldRev && (await tomb(O1, N1)), "#302 store guard: remove(old) acts on nothing — the renamed part stays live, the tombstone untouched");
+    ok(oldRev != null && (await Cat.remove(O1)) === false && (await Cat.get(N1))?.sku === N1 && (await revOf(O1)) === oldRev && (await tomb(O1, N1)), "#304 store guard: remove(old) acts on nothing — the renamed part stays live, the tombstone untouched");
   } finally {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
@@ -53369,10 +53369,10 @@ async function modelSku302ImportAsyncChecks(): Promise<void> {
   }
 }
 
-/** #302 Task 8 — frozen history (a SENT quote revision, an outside link)
+/** #304 Task 8 — frozen history (a SENT quote revision, an outside link)
  *  keeps a renamed part's OLD sku; the readers resolve it to the live part
  *  and read its photos / documents under the NEW sku. */
-async function modelSku302FrozenAsyncChecks(): Promise<void> {
+async function modelSku304FrozenAsyncChecks(): Promise<void> {
   const { fixtureId, registerFixture } = await import("./test-fixtures");
   const Cat = await import("@/lib/stores/catalog");
   const Ren = await import("@/lib/stores/catalog-renames");
@@ -53393,23 +53393,23 @@ async function modelSku302FrozenAsyncChecks(): Promise<void> {
   const { copyPricingFor } = await import("@/app/(app)/estimator/copy-pricing");
   const { resolvePartDatasheet } = await import("@/lib/part-docs/datasheet-bridge");
 
-  const OLD = fixtureId(302, "frozen-old");
-  const NEW = "Symetrix:" + fixtureId(302, "frozen-new");
-  const KEEP = fixtureId(302, "frozen-keep");
+  const OLD = fixtureId(304, "frozen-old");
+  const NEW = "Symetrix:" + fixtureId(304, "frozen-new");
+  const KEEP = fixtureId(304, "frozen-keep");
   registerFixture("catalog_parts", OLD);
   registerFixture("catalog_parts", NEW);
   registerFixture("catalog_parts", KEEP);
-  const base = { desc: "Frozen 302", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "Symetrix" };
+  const base = { desc: "Frozen 304", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "Symetrix" };
   await DS.upsertDoc("catalog_parts", { ...base, id: OLD, sku: OLD } as never);
-  await DS.upsertDoc("catalog_parts", { ...base, id: KEEP, sku: KEEP, desc: "Never renamed 302", manufacturerModelNumber: "Keep 302" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: KEEP, sku: KEEP, desc: "Never renamed 304", manufacturerModelNumber: "Keep 304" } as never);
 
   // The quote is sent BEFORE the rename: its revision names the old SKU, frozen.
-  const QID = fixtureId(302, "frozen-quote");
+  const QID = fixtureId(304, "frozen-quote");
   const line = (id: number, sku: string) => ({ id, sku, desc: "Line " + sku, qty: 2, unit: "ea", cost: 10, price: 25 });
   const sec = { id: "s1", name: "DSP", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Frozen intro.",
     items: [line(1, OLD), line(2, KEEP)],
     keyProducts: [{ lineKey: "1", sku: OLD, text: "The DSP.", photo: true }, { lineKey: "2", sku: KEEP, text: "Kept.", photo: true }] };
-  await Q.create({ id: QID, name: "#302 frozen", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } } as never);
+  await Q.create({ id: QID, name: "#304 frozen", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } } as never);
   registerFixture("quotes", QID);
   await Q.update(QID, { status: "sent" });
   const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
@@ -53419,75 +53419,75 @@ async function modelSku302FrozenAsyncChecks(): Promise<void> {
   const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
   const prevToken = process.env.DISPLAYS_API_TOKEN;
   try {
-    ok((await Cat.renamePartDocs(OLD, NEW, "Jupiter 302"))?.sku === NEW, "#302 frozen: fixture part renamed");
-    await Ren.appendSkuRenames([{ from: OLD, to: NEW, model: "Jupiter 302", at: Date.now(), by: "Test" }]);
+    ok((await Cat.renamePartDocs(OLD, NEW, "Jupiter 304"))?.sku === NEW, "#304 frozen: fixture part renamed");
+    await Ren.appendSkuRenames([{ from: OLD, to: NEW, model: "Jupiter 304", at: Date.now(), by: "Test" }]);
     const mk = async (kind: "image" | "datasheet", fileName: string, contentType: string) => {
-      const d = await D.createDocument({ kind, fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-302f/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
-      if (!d) throw new Error("#302 frozen: fixture document failed");
+      const d = await D.createDocument({ kind, fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-304f/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+      if (!d) throw new Error("#304 frozen: fixture document failed");
       registerFixture("part_documents", d.id);
       return d;
     };
-    const img = await mk("image", "frozen-302.webp", "image/webp");
-    const ds = await mk("datasheet", "frozen-302.pdf", "application/pdf");
-    const keepImg = await mk("image", "keep-302.webp", "image/webp");
+    const img = await mk("image", "frozen-304.webp", "image/webp");
+    const ds = await mk("datasheet", "frozen-304.pdf", "application/pdf");
+    const keepImg = await mk("image", "keep-304.webp", "image/webp");
     for (const [doc, sku] of [[img, NEW], [ds, NEW], [keepImg, KEEP]] as const) {
       await D.attachDocument(doc.id, [sku], "Test");
       registerFixture("part_document_links", D.documentLinkId(sku, doc.id));
     }
     ok(revisionSections(rev)[0]?.items[0]?.sku === OLD && (rev.spec as { sections: Array<{ keyProducts: Array<{ sku: string }> }> }).sections[0].keyProducts[0].sku === OLD,
-      "#302 frozen: the sent revision still names the OLD sku");
+      "#304 frozen: the sent revision still names the OLD sku");
 
     // Narrative photos (the PDF, the portal + v1 share photo routes).
     const photos = await keyProductPhotoDocs(revisionSections(rev));
-    ok(photos.get(OLD)?.id === img.id && photos.get(KEEP)?.id === keepImg.id, "#302 frozen: keyProductPhotoDocs finds the renamed part's photo for the old sku (and a never-renamed part's as before)");
+    ok(photos.get(OLD)?.id === img.id && photos.get(KEEP)?.id === keepImg.id, "#304 frozen: keyProductPhotoDocs finds the renamed part's photo for the old sku (and a never-renamed part's as before)");
     ok((await photoDocForRevision(rev, img.id))?.id === img.id && (await packagePhotoDocForRevision(rev, img.id))?.id === img.id,
-      "#302 frozen: the share / portal photo routes serve the renamed part's photo for a revision naming the old sku");
+      "#304 frozen: the share / portal photo routes serve the renamed part's photo for a revision naming the old sku");
     const lib = await keyProductLibrary([OLD, KEEP]);
-    ok(lib[OLD]?.inCatalog === true && lib[OLD]?.photoDocId === img.id && lib[KEEP]?.photoDocId === keepImg.id, "#302 frozen: the Estimator narrative library resolves an old sku to the live part and its photo");
+    ok(lib[OLD]?.inCatalog === true && lib[OLD]?.photoDocId === img.id && lib[KEEP]?.photoDocId === keepImg.id, "#304 frozen: the Estimator narrative library resolves an old sku to the live part and its photo");
 
     // The v2 package page: model, photo, datasheet.
-    const S = "test-secret-302f";
+    const S = "test-secret-304f";
     const made = await L.ensureShareLink(QID, "Tester", { secret: S });
     const tok = made.ok && made.link.pathV2 ? made.link.pathV2.split("/").pop()! : "";
     const hit = await L.resolveSharedPackage(QID, tok, { secret: S });
     const pbase = "/share/quote/" + encodeURIComponent(QID) + "/" + tok;
     const props = hit ? await loadPackageViewProps(hit, { base: pbase, view: "bom", letterheadSrc: "/_test/lh.jpg" }) : null;
     const bomRow = props?.scopes[0]?.bom.find((r) => r.description.startsWith("Line " + OLD));
-    ok(bomRow?.manufacturer === "Symetrix" && bomRow.part === "Jupiter 302", "#302 frozen: the package BOM prints the renamed part's Model # for a line naming the old sku");
+    ok(bomRow?.manufacturer === "Symetrix" && bomRow.part === "Jupiter 304", "#304 frozen: the package BOM prints the renamed part's Model # for a line naming the old sku");
     const kp = props?.scopes[0]?.keyProducts.find((k) => k.sku === OLD);
-    ok(!!kp?.photo && kp.photo.src.endsWith("/photo/" + encodeURIComponent(img.id)), "#302 frozen: the package page shows the renamed part's photo for the old sku");
+    ok(!!kp?.photo && kp.photo.src.endsWith("/photo/" + encodeURIComponent(img.id)), "#304 frozen: the package page shows the renamed part's photo for the old sku");
     const docs = await PD.revisionPackageDocs(rev);
     ok(docs.moved?.get(OLD) === NEW && docs.bom.some((r) => r.sku === NEW) && !docs.bom.some((r) => r.sku === OLD) && docs.bySku.get(NEW)?.datasheet?.documentId === ds.id,
-      "#302 frozen: the package documents read and cover the old sku's row under the live sku");
-    ok((await PD.packageDocForRevision(rev, ds.id))?.id === ds.id, "#302 frozen: the share doc route serves the renamed part's datasheet for a revision naming the old sku");
+      "#304 frozen: the package documents read and cover the old sku's row under the live sku");
+    ok((await PD.packageDocForRevision(rev, ds.id))?.id === ds.id, "#304 frozen: the share doc route serves the renamed part's datasheet for a revision naming the old sku");
     const extras = hit ? await loadPackageExtras(hit, pbase) : null;
-    ok(!!extras?.datasheets[OLD] && extras.datasheets[OLD].href === extras.datasheets[NEW]?.href, "#302 frozen: the package page's per-key-product datasheet link resolves for the old sku");
-    ok((await PD.datasheetGapCount(rev.spec)) === 1 && docs.bySku.size === 2, "#302 frozen: the gap chip counts the renamed part once (covered) — only the never-renamed part lacks a datasheet");
+    ok(!!extras?.datasheets[OLD] && extras.datasheets[OLD].href === extras.datasheets[NEW]?.href, "#304 frozen: the package page's per-key-product datasheet link resolves for the old sku");
+    ok((await PD.datasheetGapCount(rev.spec)) === 1 && docs.bySku.size === 2, "#304 frozen: the gap chip counts the renamed part once (covered) — only the never-renamed part lacks a datasheet");
 
     // Cut sheets: photos + fabric rows by the old sku.
-    ok((await cutSheetPhotoDocs([OLD, KEEP])).get(OLD)?.id === img.id, "#302 frozen: cut-sheet photos find the renamed part's photo for the old sku");
+    ok((await cutSheetPhotoDocs([OLD, KEEP])).get(OLD)?.id === img.id, "#304 frozen: cut-sheet photos find the renamed part's photo for the old sku");
     const fab = { ...base, category: "Fabric", unit: "sqft", formerSkus: [OLD] };
     let catReads = 0;
     const rows = await cutSheetFabricRows({ skus: [OLD], byName: false, byNameIfMissing: [OLD] }, {
       getMany: async () => [{ ...fab, id: NEW, sku: NEW } as never],
       byCategory: async () => (catReads++, []),
     });
-    ok(rows.some((p) => p.sku === OLD && p.desc === "Frozen 302") && catReads === 0, "#302 frozen: a curtain naming a renamed fabric's old sku still matches its fabric row (no category read)");
+    ok(rows.some((p) => p.sku === OLD && p.desc === "Frozen 304") && catReads === 0, "#304 frozen: a curtain naming a renamed fabric's old sku still matches its fabric row (no category read)");
 
     // Load system / Copy system re-cost a line naming the old sku.
     const cp = await copyPricingFor([{ id: 1, sku: OLD, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 } as never]);
-    ok(cp.catalog.get(OLD)?.cost === 20 && cp.catalog.get(OLD)?.sku === NEW, "#302 frozen: copyPricingFor re-costs a line naming the old sku from the live part");
+    ok(cp.catalog.get(OLD)?.cost === 20 && cp.catalog.get(OLD)?.sku === NEW, "#304 frozen: copyPricingFor re-costs a line naming the old sku from the live part");
 
     // Outside links: the Displays API and the part-datasheet proxy.
-    process.env.DISPLAYS_API_TOKEN = "test-token-302f";
+    process.env.DISPLAYS_API_TOKEN = "test-token-304f";
     const route = await import("@/app/api/v1/displays/catalog/[sku]/route");
-    const res = await route.GET(new Request("http://localhost/api/v1/displays/catalog/" + encodeURIComponent(OLD), { headers: { authorization: "Bearer test-token-302f" } }), { params: Promise.resolve({ sku: encodeURIComponent(OLD) }) });
+    const res = await route.GET(new Request("http://localhost/api/v1/displays/catalog/" + encodeURIComponent(OLD), { headers: { authorization: "Bearer test-token-304f" } }), { params: Promise.resolve({ sku: encodeURIComponent(OLD) }) });
     const body = res.status === 200 ? ((await res.json()) as { data?: { sku?: string } }) : null;
-    ok(body?.data?.sku === NEW, "#302 frozen: the Displays API answers an old sku with the renamed part");
+    ok(body?.data?.sku === NEW, "#304 frozen: the Displays API answers an old sku with the renamed part");
     // The /api/part-datasheet/[id] route is requireUser-gated (no session here): its lookup is get(sku) → resolvePartDatasheet(part).
     const part = await Cat.get(OLD);
     const target = part ? await resolvePartDatasheet(part) : null;
-    ok(target?.kind === "document" && target.documentId === ds.id, "#302 frozen: the part-datasheet lookup for an old sku resolves to the renamed part's datasheet");
+    ok(target?.kind === "document" && target.documentId === ds.id, "#304 frozen: the part-datasheet lookup for an old sku resolves to the renamed part's datasheet");
   } finally {
     if (prevToken === undefined) delete process.env.DISPLAYS_API_TOKEN;
     else process.env.DISPLAYS_API_TOKEN = prevToken;
@@ -53496,11 +53496,11 @@ async function modelSku302FrozenAsyncChecks(): Promise<void> {
   }
 }
 
-/* #302 Task 8 fix 1 — the writers that copy frozen history back into LIVE
+/* #304 Task 8 fix 1 — the writers that copy frozen history back into LIVE
    fields (Load system, quote + Grid revision restore) land renamed parts on
    their live SKU; the revision snapshots stay as written. Plus the portal's
    former-SKU alias and Copy system's pure rename step. */
-async function modelSku302LiveWritersAsyncChecks(): Promise<void> {
+async function modelSku304LiveWritersAsyncChecks(): Promise<void> {
   const { fixtureId, registerFixture } = await import("./test-fixtures");
   const Cat = await import("@/lib/stores/catalog");
   const Ren = await import("@/lib/stores/catalog-renames");
@@ -53524,37 +53524,37 @@ async function modelSku302LiveWritersAsyncChecks(): Promise<void> {
   });
   const cpLine = cp.section.items[0] as { sku: string; cost: number; manufacturerModelNumber?: string };
   ok(cpLine.sku === "Sym:LW" && cpLine.manufacturerModelNumber === "LW" && cpLine.cost === 12 && cp.section.keyProducts?.[0]?.sku === "Sym:LW" && srcSec.items[0].sku === "OLD-LW",
-    "#302 live writers: copySectionForTarget re-costs under the old sku, then moves the copied line + key product to the live sku and model (source untouched)");
+    "#304 live writers: copySectionForTarget re-costs under the old sku, then moves the copied line + key product to the live sku and model (source untouched)");
   const noRen = copySectionForTarget(srcSec as never, { newSectionId: "sysY", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 });
-  ok(noRen.section.items[0].sku === "OLD-LW", "#302 live writers: without a rename log the copy keeps its skus");
+  ok(noRen.section.items[0].sku === "OLD-LW", "#304 live writers: without a rename log the copy keeps its skus");
 
   // Pure: the portal's former-SKU alias.
   const ip = { sku: "Sym:LW" } as never;
   const fakeIx = { parts: new Map([["Sym:LW", ip]]), formerSkus: new Map([["OLD-LW", "Sym:LW"]]) };
   ok(PI.portalPart(fakeIx, "OLD-LW") === ip && PI.portalPart(fakeIx, "Sym:LW") === ip && PI.portalPart(fakeIx, "NOPE") === undefined,
-    "#302 live writers: portalPart resolves a former sku to the live part");
+    "#304 live writers: portalPart resolves a former sku to the live part");
 
-  const OLD = fixtureId(302, "lw-old");
-  const NEW = "Symetrix:" + fixtureId(302, "lw-new");
+  const OLD = fixtureId(304, "lw-old");
+  const NEW = "Symetrix:" + fixtureId(304, "lw-new");
   registerFixture("catalog_parts", OLD);
   registerFixture("catalog_parts", NEW);
-  await DS.upsertDoc("catalog_parts", { id: OLD, sku: OLD, desc: "Live writers 302", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "Symetrix" } as never);
+  await DS.upsertDoc("catalog_parts", { id: OLD, sku: OLD, desc: "Live writers 304", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "Symetrix" } as never);
 
   // A quote sent (revision cut) and a Grid design snapshotted BEFORE the rename.
-  const QID = fixtureId(302, "lw-quote");
+  const QID = fixtureId(304, "lw-quote");
   const sec = { id: "s1", name: "DSP", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Intro.",
     items: [{ id: 1, sku: OLD, desc: "Line " + OLD, qty: 2, unit: "ea", cost: 20, price: 40 }],
     keyProducts: [{ lineKey: "1", sku: OLD, text: "The DSP.", photo: true }] };
-  await Q.create({ id: QID, name: "#302 live writers", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } } as never);
+  await Q.create({ id: QID, name: "#304 live writers", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } } as never);
   registerFixture("quotes", QID);
   await Q.update(QID, { status: "sent" });
   const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
   const qSnap = JSON.stringify((await Q.get(QID))!.revisions!.find((r) => r.rev === rev.rev));
 
-  const gp = await GP.createProject({ name: "#302 live writers grid", customer: "Spec fixture", customerId: null, by: "Test" });
+  const gp = await GP.createProject({ name: "#304 live writers grid", customer: "Spec fixture", customerId: null, by: "Test" });
   registerFixture("grid_projects", gp.id);
   const opt = (await GP.getProject(gp.id))!.options![0].id;
-  await GP.addPlacement(gp.id, { sheetId: "sheet-302", page: 1, x: 0.5, y: 0.5, partId: OLD, optionId: opt, by: "Test" });
+  await GP.addPlacement(gp.id, { sheetId: "sheet-304", page: 1, x: 0.5, y: 0.5, partId: OLD, optionId: opt, by: "Test" });
   const gRev = (await GP.addRevision(gp.id, { by: "Test", note: "before the rename" }))!;
   const gSnap = JSON.stringify((await GP.getProject(gp.id))!.revisions!.find((r) => r.rev === gRev.rev));
 
@@ -53562,37 +53562,37 @@ async function modelSku302LiveWritersAsyncChecks(): Promise<void> {
   const blobIds = [Ren.SKU_RENAMES_BLOB];
   const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
   try {
-    ok((await Cat.renamePartDocs(OLD, NEW, "Jupiter LW"))?.sku === NEW, "#302 live writers: fixture part renamed");
+    ok((await Cat.renamePartDocs(OLD, NEW, "Jupiter LW"))?.sku === NEW, "#304 live writers: fixture part renamed");
     await Ren.appendSkuRenames([{ from: OLD, to: NEW, model: "Jupiter LW", at: Date.now(), by: "Test" }]);
 
     // Load system from the sent revision.
     const loaded = await loadLibrarySystem(`${QID}:${rev.rev}:s1`, 0.3);
     const ld = loaded.ok ? (loaded.section.items[0] as { sku: string; cost: number; manufacturerModelNumber?: string }) : null;
     ok(!!ld && ld.sku === NEW && ld.manufacturerModelNumber === "Jupiter LW" && ld.cost === 20 && loaded.ok && loaded.section.keyProducts?.[0]?.sku === NEW,
-      "#302 live writers: Load system from a sent revision naming the old sku writes the NEW sku (and model) on the live line and key product, priced from the live part");
+      "#304 live writers: Load system from a sent revision naming the old sku writes the NEW sku (and model) on the live line and key product, priced from the live part");
 
     // Quote restore.
     const qr = await Q.restoreQuoteRevision(QID, rev.rev, "Test");
     const live = qr.ok ? (qr.quote.spec as { sections: Array<{ items: Array<{ sku: string; manufacturerModelNumber?: string }>; keyProducts: Array<{ sku: string }> }> }).sections[0] : null;
     ok(!!live && live.items[0].sku === NEW && live.items[0].manufacturerModelNumber === "Jupiter LW" && live.keyProducts[0].sku === NEW,
-      "#302 live writers: restoring a pre-rename quote revision puts the live sku (and model) on the live spec");
+      "#304 live writers: restoring a pre-rename quote revision puts the live sku (and model) on the live spec");
     const qAfter = (await Q.get(QID))!;
     ok(JSON.stringify(qAfter.revisions!.find((r) => r.rev === rev.rev)) === qSnap,
-      "#302 live writers: the restored quote revision's snapshot is byte-identical (still names the old sku)");
+      "#304 live writers: the restored quote revision's snapshot is byte-identical (still names the old sku)");
 
     // Grid restore.
     await GP.removePlacements(gp.id, (await GP.getProject(gp.id))!.placements.map((p) => p.id));
     const gr = await GP.restoreRevision(gp.id, gRev.rev, "Test");
     const gAfter = (await GP.getProject(gp.id))!;
     ok(gr.ok && gAfter.placements.length === 1 && gAfter.placements[0].partId === NEW,
-      "#302 live writers: restoring a pre-rename Grid revision puts the live sku on the live placements");
+      "#304 live writers: restoring a pre-rename Grid revision puts the live sku on the live placements");
     ok(JSON.stringify(gAfter.revisions!.find((r) => r.rev === gRev.rev)) === gSnap,
-      "#302 live writers: the restored Grid revision's snapshot is byte-identical (still names the old sku)");
+      "#304 live writers: the restored Grid revision's snapshot is byte-identical (still names the old sku)");
 
     // Portal index: the renamed part answers its former sku.
     const ix = await PI.portalIndex({ fresh: true });
     ok(ix.formerSkus.get(OLD) === NEW && PI.portalPart(ix, OLD)?.sku === NEW,
-      "#302 live writers: the portal index maps a former sku to the live part (old ?part= bookmarks, cart lines)");
+      "#304 live writers: the portal index maps a former sku to the live part (old ?part= bookmarks, cart lines)");
   } finally {
     PI.invalidatePortalIndex();
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
@@ -53600,8 +53600,8 @@ async function modelSku302LiveWritersAsyncChecks(): Promise<void> {
   }
 }
 
-/** #302 Task 9 — readSheetFile reads the named sheet (the crosswalk passes "Crosswalk"), default unchanged. */
-async function modelSku302PageAsyncChecks(): Promise<void> {
+/** #304 Task 9 — readSheetFile reads the named sheet (the crosswalk passes "Crosswalk"), default unchanged. */
+async function modelSku304PageAsyncChecks(): Promise<void> {
   const wb = new ExcelJS.Workbook();
   wb.addWorksheet("Instructions").addRow(["Read me first"]);
   const cw = wb.addWorksheet("Crosswalk");
@@ -53609,11 +53609,11 @@ async function modelSku302PageAsyncChecks(): Promise<void> {
   cw.addRow(["Symetrix", "80-0043", "80-0043", "DSP", "Audio", "Jupiter 4", "https://x", ""]);
   const buf = Buffer.from(await wb.xlsx.writeBuffer());
   const named = await phsRead(buf, "crosswalk.xlsx", "Crosswalk");
-  ok(named.ok && named.grid[0][2] === "SKU" && named.grid[1][5] === "Jupiter 4", "#302 page: readSheetFile reads the sheet named by sheetName (Crosswalk second)");
-  const parsed = named.ok ? cr302Rows(named.grid) : null;
-  ok(!!parsed && parsed.ok && parsed.rows.length === 1 && parsed.rows[0].sku === "80-0043" && parsed.rows[0].model === "Jupiter 4", "#302 page: the Crosswalk sheet parses into crosswalk rows");
+  ok(named.ok && named.grid[0][2] === "SKU" && named.grid[1][5] === "Jupiter 4", "#304 page: readSheetFile reads the sheet named by sheetName (Crosswalk second)");
+  const parsed = named.ok ? cr304Rows(named.grid) : null;
+  ok(!!parsed && parsed.ok && parsed.rows.length === 1 && parsed.rows[0].sku === "80-0043" && parsed.rows[0].model === "Jupiter 4", "#304 page: the Crosswalk sheet parses into crosswalk rows");
   const dflt = await phsRead(buf, "crosswalk.xlsx");
-  ok(dflt.ok && dflt.grid[0][0] === "Read me first", "#302 page: without sheetName (and no Photos sheet) readSheetFile still reads the first sheet");
+  ok(dflt.ok && dflt.grid[0][0] === "Read me first", "#304 page: without sheetName (and no Photos sheet) readSheetFile still reads the first sheet");
   const missing = await phsRead(buf, "crosswalk.xlsx", "Nope");
-  ok(missing.ok && missing.grid[0][0] === "Read me first", "#302 page: an absent sheetName falls back to the first sheet");
+  ok(missing.ok && missing.grid[0][0] === "Read me first", "#304 page: an absent sheetName falls back to the first sheet");
 }

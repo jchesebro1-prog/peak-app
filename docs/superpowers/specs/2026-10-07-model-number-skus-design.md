@@ -1,6 +1,6 @@
-# Model-number SKUs (#302) — design
+# Model-number SKUs (#304) — design
 
-**Date:** 2026-10-07 · **Punch item:** #302 · **Status:** approved by Jeff in chat
+**Date:** 2026-10-07 · **Punch item:** #304 · **Status:** approved by Jeff in chat
 
 ## Problem
 

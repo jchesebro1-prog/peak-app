@@ -192,7 +192,7 @@ const byName = (a: PartLite, b: PartLite) => a.desc.localeCompare(b.desc) || a.s
 export function accessoryCandidates(parts: readonly PartLite[], group: BomGroupKey, search: string, all: boolean): PartLite[] {
   const q = search.trim().toLowerCase();
   if (all && !q) return [];
-  const hit = (p: PartLite) => !q || partLiteHaystack(p).includes(q); // #302: + Model # and former SKUs
+  const hit = (p: PartLite) => !q || partLiteHaystack(p).includes(q); // #304: + Model # and former SKUs
   const inGroup = (p: PartLite) => !!p.deviceType && groupOfPart(p) === group;
   return parts
     .filter((p) => placeable(p) && (all || inGroup(p)) && hit(p))

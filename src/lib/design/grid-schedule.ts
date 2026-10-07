@@ -28,7 +28,7 @@ export function catalogForSchedule<C extends { id: string }>(
   return catalog.filter((p) => need.has(p.id));
 }
 
-/** `code` overrides the printed Part cell for rows with no SKU (curtains). `model` (#302) is the part's Model # — what a printed schedule shows instead of the part id. */
+/** `code` overrides the printed Part cell for rows with no SKU (curtains). `model` (#304) is the part's Model # — what a printed schedule shows instead of the part id. */
 export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number };
 export type ScheduleSection = { key: string; name: string; rows: ScheduleRow[] };
 export type ScheduleWire = { id: string; partId: string; model?: string; fromName: string; toName: string; lengthFt: number | null; unit: string };
@@ -68,7 +68,7 @@ export function buildSchedule(input: {
   placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number }>;
   spaces: Array<SpaceLite & { name: string }>;
   descOf: (partId: string) => string | undefined;
-  /** #302: the printed Model # per part id; blank/absent = print the part id as before. */
+  /** #304: the printed Model # per part id; blank/absent = print the part id as before. */
   modelOf?: (partId: string) => string | undefined;
   wires: ScheduleWire[];
 }): ScheduleData {
@@ -111,7 +111,7 @@ export function buildSchedule(input: {
   };
 }
 
-/** #302: a part's printed Model # for a schedule — undefined when the part isn't known (the row then prints its part id). */
+/** #304: a part's printed Model # for a schedule — undefined when the part isn't known (the row then prints its part id). */
 export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: string } | undefined): string | undefined {
   return p ? partModel({ sku: p.sku, manufacturerModelNumber: p.manufacturerModelNumber }) || undefined : undefined;
 }

@@ -52,7 +52,7 @@ function infoOf(info: Record<string, PartInfo>, sku: string): PartInfo | undefin
   return sku && Object.prototype.hasOwnProperty.call(info, sku) ? info[sku] : undefined;
 }
 
-/** Model rule (#262, #302): partModel for a known catalog part (model > P/N >
+/** Model rule (#262, #304): partModel for a known catalog part (model > P/N >
  *  the SKU's tail after `Brand:` > the SKU); "" for an unknown SKU. */
 function modelFromInfo(info: Record<string, PartInfo>, sku: string): string {
   const p = infoOf(info, sku);

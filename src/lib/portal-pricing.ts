@@ -60,7 +60,7 @@ export type SellLine = {
   kind: "part" | "fixture" | "curtain";
   title: string;
   sku: string | null;
-  /** #302: what the customer sees as the line's identity — the Model # (partModel); "" for a curtain. */
+  /** #304: what the customer sees as the line's identity — the Model # (partModel); "" for a curtain. */
   model?: string;
   qty: number;
   unit: string;
@@ -143,7 +143,7 @@ function fxEngineModel(p: IndexedPart | undefined, sku: string): string {
 type Priced = { sell: SellLine; item: Omit<SpecItem, "id"> | null; section: "equip" | "fixt" | "drape" };
 
 function pricePart(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts): Priced {
-  // #302: a cart line written before the cart sweep may name a former SKU.
+  // #304: a cart line written before the cart sweep may name a former SKU.
   const part: IndexedPart | undefined = l.sku ? portalPart(ix, l.sku) : undefined;
   if (!part) return { sell: unavailableLine(l, qty, l.sku ?? null), item: null, section: "equip" };
   const u = unitPriceFor(part, o);
@@ -170,7 +170,7 @@ function pricePart(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts):
     price: u.unitPrice ?? 0,
     ...(part.mfr ? { manufacturer: part.mfr } : {}),
     ...(part.mpn ? { manufacturerPartNumber: part.mpn } : {}),
-    ...(part.model ? { manufacturerModelNumber: part.model } : {}), // #302: the quote line carries its Model # for customer documents
+    ...(part.model ? { manufacturerModelNumber: part.model } : {}), // #304: the quote line carries its Model # for customer documents
     ...(u.por ? { por: true } : {}),
   };
   return { sell, item, section: "equip" };

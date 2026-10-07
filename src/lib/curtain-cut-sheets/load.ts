@@ -33,7 +33,7 @@ type FabricReaders = { getMany: (skus: readonly string[]) => Promise<CatalogPart
  * Only the fabric rows the curtains name (final review #2): their SKUs by
  * primary key; the fabric categories (never the whole catalog) only when a
  * line must be matched by its printed fabric NAME. `read` is a harness seam.
- * #302: a line naming a renamed fabric's old SKU gets that fabric's row
+ * #304: a line naming a renamed fabric's old SKU gets that fabric's row
  * under the SKU it names (getMany follows the rename; the live part lists
  * the old SKU in formerSkus), so the collector still matches it.
  */
@@ -51,7 +51,7 @@ export async function cutSheetFabricRows(
 
 /** `parts` plus, for each requested SKU a part lists in `formerSkus` (a
  *  rename moved it) and no part answers directly, that part again under the
- *  requested SKU (#302). Read-only rows for matching — never written back. */
+ *  requested SKU (#304). Read-only rows for matching — never written back. */
 function underRequestedSkus(parts: CatalogPart[], requested: readonly string[]): CatalogPart[] {
   const have = new Set(parts.map((p) => p.sku));
   const out = [...parts];
@@ -94,7 +94,7 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
     grid: isGrid ? { project } : null,
   };
   // Pass 1 names the hardware SKUs; one catalog read gets their live desc/unit; pass 2 prints them.
-  // #302: keyed by the SKU the line names — a renamed part's old SKU resolves.
+  // #304: keyed by the SKU the line names — a renamed part's old SKU resolves.
   const first = collectCurtainTypes(base);
   const skus = [...new Set(first.types.flatMap((t) => t.hardware.map((h) => h.sku)))];
   const result = skus.length
@@ -130,7 +130,7 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
 export async function cutSheetPhotoDocs(skus: readonly string[]): Promise<Map<string, PartDocument>> {
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
-  // #302: keyed by the SKU asked for — a renamed part's old SKU (a line not
+  // #304: keyed by the SKU asked for — a renamed part's old SKU (a line not
   // yet swept) reads its photos where they now live, under the live SKU.
   const { parts, images } = await partsAndImagesBySku(skus);
   const noPhoto: Array<[string, CatalogPart]> = [];

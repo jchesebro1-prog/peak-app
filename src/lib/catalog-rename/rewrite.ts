@@ -1,5 +1,5 @@
 /**
- * #302 — pure per-area reference rewriters. A catalog rename moves a part's
+ * #304 — pure per-area reference rewriters. A catalog rename moves a part's
  * SKU ("80-0043" → "Symetrix:Jupiter 4"); every place that stores a SKU as a
  * plain string must follow it. Each function here knows ONE area's real
  * shape, walks only that area's SKU fields (never a deep string replace — a

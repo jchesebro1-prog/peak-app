@@ -44,7 +44,7 @@ function guardMessage(c: GroupCheck): string {
 export async function commitCatalogImport(input: CatalogCommitInput): Promise<CatalogCommitResult> {
   // #132 — the wrong-manufacturer guard, per manufacturer in the file,
   // before anything is written; a failure rejects the whole file.
-  // #302 — a row keyed by a renamed part's old order number counts as that
+  // #304 — a row keyed by a renamed part's old order number counts as that
   // part, exactly as commitImport's catalog writer will resolve it.
   const catalog = await listCatalog();
   const checks = checkManufacturerGroups(catalogGroups(input.rows), catalog, await importResolverFor(catalog));

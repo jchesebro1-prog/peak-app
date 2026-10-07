@@ -18,7 +18,7 @@ export type TileVM = {
   kind: "part" | "fixture";
   title: string;
   sku: string;
-  /** #302: what the customer sees as the part's identity (partModel); "" on a fixture tile. */
+  /** #304: what the customer sees as the part's identity (partModel); "" on a fixture tile. */
   model: string;
   mfr: string;
   category: string;

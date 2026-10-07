@@ -28,7 +28,7 @@ export type PartDetailPart = {
   sku: string;
   title: string;
   mfr: string;
-  /** #302: the part's Model # (partModel) — the only identity a customer sees; the order # never ships. */
+  /** #304: the part's Model # (partModel) — the only identity a customer sees; the order # never ships. */
   model: string;
   unit: string;
   unitPrice: number | null;
@@ -41,7 +41,7 @@ export type PartDetailPart = {
   goesWith: TileVM[];
 };
 
-export type FixtureAddOnVM = { key: string; sku: string; /** #302: the add-on part's Model # */ model: string; label: string; unitPrice: number | null; por: boolean };
+export type FixtureAddOnVM = { key: string; sku: string; /** #304: the add-on part's Model # */ model: string; label: string; unitPrice: number | null; por: boolean };
 
 export type PartDetailFixture = {
   kind: "fixture";
@@ -165,7 +165,7 @@ export function toFixtureDetailVM(
   addOnPrice: (sku: string) => Price,
   media: { images: readonly string[]; docs: readonly PartDocVM[] },
   fallback: ImageFallback | null = null,
-  /** #302: a component part's Model # (the server reads the index; default = the sku's tail). */
+  /** #304: a component part's Model # (the server reads the index; default = the sku's tail). */
   modelOf: (sku: string) => string = (sku) => partModel({ sku })
 ): PartDetailFixture {
   const s = sell(price);

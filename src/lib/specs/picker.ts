@@ -51,7 +51,7 @@ export type SpecPickerPart = {
 
 export const PICKER_LIMIT = 60;
 const CANDIDATE_CAP = 2000;
-// #302 — `formerSkus` is a JSON array; `doc->>'formerSkus'` is its text form, so the
+// #304 — `formerSkus` is a JSON array; `doc->>'formerSkus'` is its text form, so the
 // LIKE prefilter still finds a retired order # (the JS filter below is exact).
 const TEXT_FIELDS = ["sku", "desc", "mfr", "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus"] as const;
 const SPEC_TEXT_FIELDS = ["specBody", "specSameAs"] as const;

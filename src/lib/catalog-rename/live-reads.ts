@@ -4,7 +4,7 @@ import { visibleImagesForParts } from "@/lib/stores/part-documents";
 import type { PartDocument } from "@/lib/part-docs/types";
 
 /**
- * #302 — frozen history (a sent quote revision, a Grid revision, an outside
+ * #304 — frozen history (a sent quote revision, a Grid revision, an outside
  * link) keeps the SKU it was written with; a rename moved the part AND its
  * document links to the new SKU. These reads take the SKUs as written and
  * answer keyed by them, so a caller that looks a line up by its own `sku`
@@ -33,7 +33,7 @@ export async function partsAndImagesBySku(
   return { parts, images };
 }
 
-/** requested SKU → its live SKU, only for SKUs a rename moved (#302). */
+/** requested SKU → its live SKU, only for SKUs a rename moved (#304). */
 export function movedSkus(parts: ReadonlyMap<string, Pick<CatalogPart, "sku">>): Map<string, string> {
   const out = new Map<string, string>();
   for (const [requested, p] of parts) if (p.sku !== requested) out.set(requested, p.sku);

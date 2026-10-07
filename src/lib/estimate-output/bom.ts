@@ -15,7 +15,7 @@ import { lineModel } from "@/lib/catalog-rename/sku";
  */
 
 export type PackageBomRow = { key: string; qty: number | null; unit: string; manufacturer: string; part: string; description: string };
-/** #302: `part` prints the Model # (lineModel), never the order # when a model exists. */
+/** #304: `part` prints the Model # (lineModel), never the order # when a model exists. */
 export type BomCatalogPart = { mfr?: string | null; manufacturerPartNumber?: string | null; manufacturerModelNumber?: string | null };
 
 export const LABOR_BOM_DESC = "Installation, commissioning & project management";

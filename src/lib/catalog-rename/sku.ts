@@ -1,5 +1,5 @@
 /**
- * #302 — model-number SKUs. Pure, client-safe rules: the `Brand:Model` SKU a
+ * #304 — model-number SKUs. Pure, client-safe rules: the `Brand:Model` SKU a
  * rename writes, the model a customer document prints (`partModel`), and the
  * one search haystack every part search uses (old order numbers included).
  */

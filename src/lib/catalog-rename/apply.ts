@@ -1,6 +1,6 @@
-// SERVER ONLY — the #302 catalog rename engine (reads and writes the database; never import from a client component).
+// SERVER ONLY — the #304 catalog rename engine (reads and writes the database; never import from a client component).
 /**
- * #302 — apply a model-number crosswalk: rename the parts, then rewrite every
+ * #304 — apply a model-number crosswalk: rename the parts, then rewrite every
  * live reference to the old SKUs. One call does at most ONE step and stops
  * between writes once `budgetMs` (FETCH_ACTION_BUDGET_MS, passed in by the
  * action) is spent; the client calls again with the step it was handed back.

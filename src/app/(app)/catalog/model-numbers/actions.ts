@@ -9,7 +9,7 @@ import { MAX_SHEET_BYTES, SHEET_TOO_BIG } from "@/lib/part-docs/photo-sheet";
 import { readSheetFile } from "@/lib/part-docs/photo-sheet-io";
 import { FETCH_ACTION_BUDGET_MS } from "@/lib/part-docs/types";
 
-/** #302 Catalog → Model numbers: preview a crosswalk sheet, then apply it in budgeted batches. */
+/** #304 Catalog → Model numbers: preview a crosswalk sheet, then apply it in budgeted batches. */
 
 const CROSSWALK_SHEET_NAME = "Crosswalk";
 

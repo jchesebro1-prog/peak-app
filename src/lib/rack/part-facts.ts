@@ -178,7 +178,7 @@ export function rackDataCoverage(
   return { total: distinct.length, missing };
 }
 
-/** #302: what a rack sheet prints for a part — its Model # (else MFR P/N, else the SKU's tail), never the order # when a model exists. */
+/** #304: what a rack sheet prints for a part — its Model # (else MFR P/N, else the SKU's tail), never the order # when a model exists. */
 export function rackModelOf(info: Pick<RackPartInfo, "model"> | undefined, sku: string): string {
   return info?.model || partModel({ sku });
 }

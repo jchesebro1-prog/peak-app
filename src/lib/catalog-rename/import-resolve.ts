@@ -1,5 +1,5 @@
 /**
- * #302 — which live part an imported price-list row means. Manufacturer price
+ * #304 — which live part an imported price-list row means. Manufacturer price
  * lists keep arriving keyed by order number ("80-0043") after the part was
  * renamed to a `Brand:Model` SKU ("Symetrix:Jupiter 4"), so both catalog
  * importers (the Catalog page's runCatalogImport and the Import hub's catalog

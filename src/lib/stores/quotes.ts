@@ -959,7 +959,7 @@ function stampContentChange(doc: Quote, mutate: (doc: Quote) => Quote | void): Q
 }
 
 /**
- * #302 — the catalog rename sweep's one quote writer: `rewrite` maps the
+ * #304 — the catalog rename sweep's one quote writer: `rewrite` maps the
  * LIVE `spec` (re-run here on the doc read under the row lock) to its renamed
  * copy, or null when nothing moved. Never touches `revisions` (sent copies
  * keep the old SKU and resolve through the redirect) and never bumps
@@ -1233,7 +1233,7 @@ export async function restoreQuoteRevision(
   // quote / no customer / another customer's revision) before it goes back.
   const { restoredCreditFor } = await import("./reward-ledger");
   const credit = await restoredCreditFor(q, target, opts.mayApplyCredit ?? true);
-  // #302: the snapshot keeps the SKUs it was cut with; the spec it puts back
+  // #304: the snapshot keeps the SKUs it was cut with; the spec it puts back
   // is LIVE, so a part renamed since moves to its live SKU (and model). The
   // revision itself is never written — the rewrite copies what it changes.
   const renames = await liveRenameRefs();

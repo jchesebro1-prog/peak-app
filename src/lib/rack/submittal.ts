@@ -22,7 +22,7 @@ export type ScheduleRow = {
   qty: number;
   mfr: string;
   sku: string;
-  /** #302: the Model # a customer sheet prints (`sku` stays the lookup key); absent → print the sku. */
+  /** #304: the Model # a customer sheet prints (`sku` stays the lookup key); absent → print the sku. */
   model?: string;
   desc: string;
   depthIn: number | null;

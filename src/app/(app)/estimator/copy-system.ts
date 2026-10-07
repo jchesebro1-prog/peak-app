@@ -99,7 +99,7 @@ export function copySectionForTarget(
     fixtures: ReadonlyMap<string, CopyFixture>;
     sourceTierMargin: number | null;
     targetTierMargin: number | null;
-    /** #302: the rename log (old SKU → live SKU, live SKU → model). A
+    /** #304: the rename log (old SKU → live SKU, live SKU → model). A
      *  section copied from a sent revision keeps a renamed part's old SKU;
      *  the copy lands on the live estimate under the live SKU. */
     renames?: { m: RenameMap; models: RenameMap };
@@ -215,7 +215,7 @@ export function copySectionForTarget(
     laborSeedMarginOf(tgt)
   );
   delete copied.sellOverride;
-  // #302: priced above under the SKU the source names (the catalog map is
+  // #304: priced above under the SKU the source names (the catalog map is
   // keyed by it); the copy is LIVE data, so its lines and key products then
   // move to the live SKU, and a moved line prints its new model.
   const live = opts.renames?.m.size

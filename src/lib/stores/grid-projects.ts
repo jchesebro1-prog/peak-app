@@ -1885,7 +1885,7 @@ export async function restoreRevision(
   if (!p) return { ok: false, reason: "not-found" };
   const target = (p.revisions || []).find((r) => r.rev === rev);
   if (!target) return { ok: false, reason: "no-such-rev" };
-  // #302: the snapshot keeps the part ids it was cut with; see below.
+  // #304: the snapshot keeps the part ids it was cut with; see below.
   const { m: renamed } = await liveRenameRefs();
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (doc) => {
     pushRevision(doc, by, "restore", `Auto-saved before recalling v${rev}`);
@@ -1931,7 +1931,7 @@ export async function restoreRevision(
     for (const k of Object.keys(restoredEsts)) if (!liveOptionIds.has(k)) delete restoredEsts[k];
     if (Object.keys(restoredEsts).length) doc.autoEstimate = restoredEsts;
     else delete doc.autoEstimate;
-    // #302: the restored design is LIVE — a part renamed since the snapshot
+    // #304: the restored design is LIVE — a part renamed since the snapshot
     // moves to its live SKU (placements, routes, riser links, option
     // accessories, Auto overrides). Copy-on-write: the snapshot in
     // `revisions` is never touched.

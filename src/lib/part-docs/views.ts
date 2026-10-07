@@ -150,7 +150,7 @@ export type DocumentRow = {
   sku: string;
   mfr: string;
   model: string;
-  /** #302 — retired order #s, searchable; present only when non-empty. */
+  /** #304 — retired order #s, searchable; present only when non-empty. */
   formerSkus?: string[];
   desc: string;
   category: string;
@@ -173,7 +173,7 @@ export function documentRow(stat: QuotedPartStat, part: RowPart, index: Coverage
   return {
     sku: part.sku,
     mfr: part.mfr || "",
-    model: partModel(part), // #302: the one model rule (model → P/N → SKU tail → SKU)
+    model: partModel(part), // #304: the one model rule (model → P/N → SKU tail → SKU)
     ...(part.formerSkus?.length ? { formerSkus: part.formerSkus } : {}),
     desc: part.desc,
     category: part.category || "",

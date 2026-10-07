@@ -150,7 +150,7 @@ export default async function CatalogPage({
     if (catParam !== "all" && (p.category || "Uncategorized") !== catParam) return false;
     if (unitParam !== "all" && (p.unit || "ea") !== unitParam) return false;
     if (tokens.length) {
-      // #302: + MFR P/N, Model # and former SKUs (one haystack); category stays searchable.
+      // #304: + MFR P/N, Model # and former SKUs (one haystack); category stays searchable.
       const hay = partSearchHaystack(p) + " " + (p.category || "").toLowerCase();
       if (!tokens.every((token) => hay.includes(token))) return false;
     }
@@ -325,7 +325,7 @@ export default async function CatalogPage({
               Departments
             </Link>
           )}
-          {/* #302 — order-number SKUs → Brand:Model from a crosswalk sheet (admin). */}
+          {/* #304 — order-number SKUs → Brand:Model from a crosswalk sheet (admin). */}
           {isAdmin && (
             <Link
               href="/catalog/model-numbers"
@@ -546,7 +546,7 @@ export default async function CatalogPage({
                     >
                       {p.sku}
                     </span>
-                    {/* #302: the model leads, the order # beside it — shown only when it adds to the SKU itself. */}
+                    {/* #304: the model leads, the order # beside it — shown only when it adds to the SKU itself. */}
                     {(() => {
                       const lbl = staffPartLabel(p);
                       const text = lbl.secondary ? `${lbl.primary} · ${lbl.secondary}` : lbl.primary;

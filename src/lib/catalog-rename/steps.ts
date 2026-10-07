@@ -1,7 +1,7 @@
 import { CROSSWALK_CELL_MAX, CROSSWALK_MAX_ROWS, type CrosswalkRow, type RenameOutcome, type RenamePlan } from "./plan";
 
 /**
- * #302 — the rename's step list and batch shapes, pure so the Catalog →
+ * #304 — the rename's step list and batch shapes, pure so the Catalog →
  * Model numbers client can name each step without importing the server-only
  * engine (./apply re-exports these). One call runs one step:
  *

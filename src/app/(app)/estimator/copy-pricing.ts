@@ -17,7 +17,7 @@ export async function copyPricingFor(
 ): Promise<{
   catalog: Map<string, CopyCatalogPart>;
   fixtures: Map<string, CopyFixture>;
-  /** #302: the rename log, for copySectionForTarget to land the copy on live SKUs. */
+  /** #304: the rename log, for copySectionForTarget to land the copy on live SKUs. */
   renames: { m: Map<string, string>; models: Map<string, string> };
 }> {
   /* Today's catalog, for only the SKUs this section names — plus, when a line
@@ -39,7 +39,7 @@ export async function copyPricingFor(
     fixtureRecords = (await listFixtures()).filter((r) => fixtureIds.has(r.id));
     fixtureRecords.forEach((r) => fixtureSkus(r).forEach((s) => skus.add(s)));
   }
-  // #302: keyed by the SKU each line names — Load system copies a SENT
+  // #304: keyed by the SKU each line names — Load system copies a SENT
   // revision, which keeps a renamed part's old SKU; it re-costs from the
   // part that SKU now means.
   const [found, renames] = await Promise.all([

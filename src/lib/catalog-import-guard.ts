@@ -59,7 +59,7 @@ function plural(n: number, word: string): string {
  * Unbranded parts (no mfr) are never foreign: importing them under a
  * manufacturer is how they get one.
  *
- * #302 — `resolve` (the importers' own buildImportResolver) judges each file
+ * #304 — `resolve` (the importers' own buildImportResolver) judges each file
  * SKU by the live part it resolves to: an old order number that now means a
  * renamed `Brand:Model` part counts as overlap (or as foreign, when that part
  * is another manufacturer's), exactly as the importer will write it. Messages
@@ -68,7 +68,7 @@ function plural(n: number, word: string): string {
 export function checkManufacturer(input: {
   mfr: string;
   fileSkus: string[];
-  /** #302 — each file row's MFR P/N, index-aligned with `fileSkus` ("" =
+  /** #304 — each file row's MFR P/N, index-aligned with `fileSkus` ("" =
    *  none), so a row whose SKU matches nothing but whose P/N column names one
    *  of this manufacturer's parts counts as overlap, exactly as the importer
    *  will resolve it. Optional; only read through `resolve`. */
@@ -146,7 +146,7 @@ export function checkManufacturer(input: {
   return { ok: true, normalizedMfr, isNew: mine.size === 0, overlap };
 }
 
-/** `pns` (#302), when present, is index-aligned with `skus`: each row's MFR
+/** `pns` (#304), when present, is index-aligned with `skus`: each row's MFR
  *  P/N ("" = none). */
 export type ManufacturerGroup = { mfr: string; skus: string[]; pns?: string[] };
 

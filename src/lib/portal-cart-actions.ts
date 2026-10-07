@@ -44,7 +44,7 @@ export async function addToCartFor(session: PortalSession | null, input: unknown
 
   let line: Parameters<typeof addLine>[2];
   if (r.kind === "part") {
-    // #302: a former SKU (an old bookmark) adds the live part under its live SKU.
+    // #304: a former SKU (an old bookmark) adds the live part under its live SKU.
     const part = typeof r.sku === "string" && r.sku ? portalPart(ix, r.sku) : undefined;
     const problem = cartAddProblem(!!part, r.qty as number);
     if (problem) return { ok: false, error: problem };

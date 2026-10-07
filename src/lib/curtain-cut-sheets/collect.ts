@@ -16,7 +16,7 @@ import { topMarks } from "./geometry";
 import { curtainTypeKey, readCurtains, type CurtainFabricRow, type CurtainLineRef, type CutSheetCurtain, type GridProjectLite } from "./estimator-curtains";
 import { DEFAULT_MARK_SPACING_IN, MOUNT_KEY_LABELS, isMountTypeId, type CurtainMountTypeId } from "./vocab";
 
-/** `model` (#302) is what the sheet prints (partModel); `sku` stays the lookup key. */
+/** `model` (#304) is what the sheet prints (partModel); `sku` stays the lookup key. */
 export type CutSheetHardware = { sku: string; model: string; desc: string; qty: number; unit: string; from: "track" | "mount-rules" };
 export type CurtainType = {
   key: string;

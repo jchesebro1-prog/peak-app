@@ -2,7 +2,7 @@ import { getBlob, setBlob } from "@/db/doc-store";
 import { buildImportResolver, type ImportResolver, type ResolvablePart } from "@/lib/catalog-rename/import-resolve";
 
 /**
- * #302 — the append-only log of SKU renames (order number → `Brand:Model`).
+ * #304 — the append-only log of SKU renames (order number → `Brand:Model`).
  * One blob, `{ renames: [...] }`. The importers and the sweeps read it as
  * the old → new crosswalk; the parts themselves carry the same fact in
  * `formerSkus` / `renamedTo`, so the log is the audit trail and the lookup
@@ -51,7 +51,7 @@ export function renameMapOf(entries: SkuRename[]): Map<string, string> {
   return out;
 }
 
-/** #302 — what a LIVE write needs to follow the renames: `m` (old SKU → the
+/** #304 — what a LIVE write needs to follow the renames: `m` (old SKU → the
  *  SKU it ended up as) and `models` (final SKU → its model, what a moved
  *  quote line prints). One log read. The rename sweep and the writers that
  *  copy frozen history back into live fields (Load system, Copy system,
@@ -63,7 +63,7 @@ export async function liveRenameRefs(): Promise<{ m: Map<string, string>; models
   return { m: renameMapOf(log), models };
 }
 
-/** #302 — the importers' row resolver over `live` (the book the import has
+/** #304 — the importers' row resolver over `live` (the book the import has
  *  already loaded) and the rename log; one log read per import. */
 export async function importResolverFor(live: ResolvablePart[]): Promise<ImportResolver> {
   return buildImportResolver(live, renameMapOf(await allSkuRenames()));

@@ -42,7 +42,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
 
   // #132 — the guard runs before any upsert, so a rejected file writes nothing.
   const catalog = await listCatalog();
-  // #302 — a row keyed by a renamed part's old order number (or by its MFR
+  // #304 — a row keyed by a renamed part's old order number (or by its MFR
   // P/N) updates that part; the guard judges rows by the same resolution.
   const resolve = await importResolverFor(catalog);
   const guard = checkManufacturer({ mfr: input.mfr, fileSkus: valid.map((r) => r.sku), filePns: valid.map((r) => r.manufacturerPartNumber ?? ""), catalog, resolve });
@@ -73,7 +73,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   }
   const priced = parsed.hasList || parsed.hasCost;
   for (const r of valid) {
-    // #302 — write to the RESOLVED live SKU, never the row's old one:
+    // #304 — write to the RESOLVED live SKU, never the row's old one:
     // the bySku/existing bookkeeping below is keyed by live SKU (and the
     // store's mergeUpsert also lands an old SKU on the renamed part). A row resolving to a different part
     // owns only what an exact match owns — the part's SKU, formerSkus and

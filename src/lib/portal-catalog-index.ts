@@ -116,14 +116,14 @@ export type PortalIndex = {
    *  photo of their own. Never feeds `IndexedPart.imageIds`, visibility or the
    *  browse rule. */
   mfrImageDocs: Map<string, string>;
-  /** #302 — a renamed part's former SKU → its live SKU (from the parts'
+  /** #304 — a renamed part's former SKU → its live SKU (from the parts'
    *  `formerSkus`), so an old `?part=` bookmark or a cart line written before
    *  the cart sweep still finds the part. Read through `portalPart`. */
   formerSkus: Map<string, string>;
 };
 
 /** The quotable part `sku` names — its live SKU, or a former one a rename
- *  moved (#302). The returned part carries the live `sku`. */
+ *  moved (#304). The returned part carries the live `sku`. */
 export function portalPart(ix: Pick<PortalIndex, "parts" | "formerSkus">, sku: string): IndexedPart | undefined {
   const own = ix.parts.get(sku);
   if (own) return own;
@@ -359,7 +359,7 @@ async function buildIndex(): Promise<Built> {
       sku: ip.sku,
       mfr: ip.mfr,
       category: ip.category,
-      haystack: buildHaystack([ip.sku, ip.desc, ip.mfr, ip.category, ip.mpn, ip.model, ...(p.formerSkus ?? [])]), // #302: old order numbers find the part
+      haystack: buildHaystack([ip.sku, ip.desc, ip.mfr, ip.category, ip.mpn, ip.model, ...(p.formerSkus ?? [])]), // #304: old order numbers find the part
       browsable: browsable(f, rule),
       rank: ip.quoteCount,
     });

@@ -7,7 +7,7 @@ import { MAX_SHEET_BYTES, SHEET_TOO_BIG } from "@/lib/part-docs/photo-sheet";
 import { planModelNumbersAction, runModelNumbersBatchAction } from "./actions";
 
 /**
- * #302 Model numbers flow: pick the crosswalk → Preview (nothing written) →
+ * #304 Model numbers flow: pick the crosswalk → Preview (nothing written) →
  * Apply (one server step per call, under the action's budget, until done).
  * A failed or unreachable call keeps the step it stopped on, so pressing the
  * same button again resumes there. The server re-plans from the sheet's rows

@@ -25,7 +25,7 @@ export type RevisionPackageDocs = {
   index: CoverageIndex;
   bySku: Map<string, PackageSkuDocs>;
   documents: PackageDocument[];
-  /** #302: the spec's SKU → its live SKU, for SKUs a rename moved. `bom`,
+  /** #304: the spec's SKU → its live SKU, for SKUs a rename moved. `bom`,
    *  `parts` and `bySku` speak live SKUs; a caller keyed by the spec's own
    *  line SKU (the package page's per-key-product datasheet) maps through this. */
   moved: Map<string, string>;
@@ -42,7 +42,7 @@ export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDoc
   const rackOf = (id: string) => fixtures.get(id);
   // Pass 1 lists every sku a rack expands to, so one catalog read covers the
   // internal-row check pass 2 needs (labor members drop out, #296).
-  // #302: a sent revision keeps a renamed part's old SKU — its row is read,
+  // #304: a sent revision keeps a renamed part's old SKU — its row is read,
   // covered and listed under the live SKU.
   const found = await getManyBySku(quoteBom(src, rackOf).map((r) => r.sku));
   const parts0 = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];

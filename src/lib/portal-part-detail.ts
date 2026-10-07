@@ -68,7 +68,7 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
     );
   }
 
-  const part = portalPart(ix, key); // #302: an old `?part=` bookmark opens the renamed part
+  const part = portalPart(ix, key); // #304: an old `?part=` bookmark opens the renamed part
   if (!part) return null;
   const accessories: SearchEntry[] = [];
   for (const sku of part.accessories) {
