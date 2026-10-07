@@ -9646,3 +9646,41 @@ action stays put. `QuoteNextStep.onSync` now receives the action that produced t
 #301 open item 12 ("after Send the Estimator navigates to Home") was **not reproducible** — on origin/main 5b5c2a8b and on
 this branch, in dev, Send to customer on a new estimate and on the saved Q-2041 both stay on the Estimator. The new flow pins
 Send → Send & track (never Home). Awaiting Jeff's exact repro (which quote, which button, which browser).
+
+## D648. System groups: `spec.groups` beside `spec.sections`, one normalising function (#306, 2026-10-07)
+
+A quote's systems can be grouped. `spec.groups` is a list of `SystemGroup {id, name, alternate}` stored beside `spec.sections`,
+so revisions and packages carry it like the sections. Ids are `g-…`; at most 20 groups; a name is trimmed to 80 characters
+and falls back to "Untitled group". `alternate` is stored but always false until Phase 2b (In total / Alternate end to end).
+The order invariant is: ungrouped systems first, then each group's systems in group order. One pure function
+(`src/lib/estimate-groups/`) restores it and is run on every mutation, on load and on save, so a stale or hand-edited
+document can never print out of order.
+
+## D649. `built` and collapse are staff-only; what clears `built` (#306, 2026-10-07)
+
+`built` lives on the section but is stripped from the PDF doc key, so marking a system built never re-renders or re-keys a
+customer document. Collapse is per person per quote in localStorage, never stored on the quote. A content edit to a system
+clears `built`; a move between groups does not (a move is not an edit). Automatic writes — tier re-price and its undo,
+freight auto-apply, goals pre-fill — and the Rewards credit re-pin do not clear it either. Mark built also clears the #254
+tier-reprice banner for that system, because it goes through the normal wrapper.
+
+## D650. Rail interactions: drag, arrows, delete, New group (#306, 2026-10-07)
+
+Reordering is HTML5 drag (the house pattern) in the Build rail only; dragging from a card header is deferred. The keyboard
+path is the row's ↑/↓ buttons: ↑ on the first system of the first group ungroups it (an empty ungrouped block is a valid
+destination). Drop targets are a row, a group heading, or the Ungrouped block. Deleting a group asks inline, and its systems
+become ungrouped. "+ New group" in a card's Group select makes an Untitled group and moves that system into it in one hook
+call (`addGroupForSystem`), then focuses the group's rename in the rail; the option is disabled at the 20-group cap.
+
+## D651. Groups travel only inside one estimate (#306, 2026-10-07)
+
+A system that leaves an estimate drops its group metadata: move to an existing or new estimate, copy to another estimate, and
+loading a system from the library. Copy within the same estimate keeps the source's group. Add system and Load system join
+the active system's group. The target of a move keeps its own groups; the moved system arrives ungrouped.
+
+## D652. Groups on the customer document (#306, 2026-10-07)
+
+The customer PDF and the online / share / portal views (all through `quoteDocumentDataFor`) print a group heading row — the
+group name and the subtotal of its printed systems — before the group's first printed band. Band numbering and totals do not
+change. The Itemized appendix, the cover PDF, the package page and the client scope picker are unchanged. In total / Alternate
+is Phase 2b.

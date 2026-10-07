@@ -11066,3 +11066,35 @@ buttons in the header (More ▾), and the Send stage bar uncarded with a doubled
    Infrastructure, Wireless, Communications; and how a category relates to a system's Discipline.
 2. **"Send → Home"** (#301 item 12): not reproducible (D647). Tell us the exact repro — which quote (new or saved), which
    button (header, Review panel or Send & track), which browser — and it gets a pin.
+
+## 306. Estimator Phase 2a — Build step: groups, reorder, Mark built — DONE 2026-10-07 (D648–D652)
+
+Part of #305's roadmap (see #305): Phase 2 split in two. 2a is groups, reorder and Mark built; 2b is In total / Alternate.
+
+What shipped (no migration, no AI):
+- **System groups** — `spec.groups` (`SystemGroup {id, name, alternate}`), at most 20, one pure function keeps ungrouped first
+  then groups in order on every mutation, load and save; revisions and packages carry it. (D648)
+- **Build rail** — group headings with a subtotal, rename in place (Enter / Esc), move group up/down, inline delete confirm;
+  drag a system onto a row, a heading or Ungrouped; ↑/↓ on each row (↑ on the first system of the first group ungroups it). (D650)
+- **Card controls** — a Group select (No group, each group, + New group — disabled with "(limit reached)" at 20), and
+  ✓ Mark built & collapse with a built tag and a ✓ in the rail; collapse is per person per quote. (D649, D650)
+- **Built rules** — content edits clear built; moving between groups and automatic writes do not. (D649)
+- **Moves between estimates** drop group metadata; Add / Load system join the active system's group. (D651)
+- **Customer output** — a group heading row (name + subtotal of printed systems) before each group's first printed band on the
+  PDF and the online / share / portal views; band numbering and totals unchanged. (D652)
+
+Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md` §8; plan
+`docs/superpowers/plans/2026-10-07-estimator-phase2a-build-step.md`.
+
+**Verification.** Gates: `tsc --noEmit` 0 errors; scoped eslint clean; `test:specs` 13,123 PASS / 0 FAIL (13,122 before the
+polish pin); `next build` OK; `test:smoke` ALL PASSED. Browser pass (scratch DB, controller): add groups, rename (Enter), Group
+select, ↓ across a group edge, drag row to row, row to heading, row to Ungrouped, Mark built (✓ in the rail, built tag,
+collapse), renaming a built system unmarks it, Save + reload keeps groups, order, built and collapse; the saved PDF shows the
+ungrouped Drapery system with no heading, then a "HOUSE" heading above the Rigging band. The pass found two rail polish items,
+fixed: the group subtotal printed "$0.00" while rows print "$0", and + New group did nothing at the cap.
+
+**Next:** Phase 2b — In total / Alternate end to end (totals and every `option`-line consumer, cover scopes, the client scope
+picker), then Phases 3–6 per #305.
+
+**Open (minor, not blocking).** No end-of-list drop target when there are no groups; Firefox / Safari drag from the name
+button unverified; card-header drag deferred (D650).
