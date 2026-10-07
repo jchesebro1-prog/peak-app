@@ -54227,3 +54227,64 @@ import * as p2a from "@/lib/estimate-groups/groups";
   const gapsBuilt = e304Ready({ ...base, sections: [sec({ built: true }), sec({ id: "s2", items: [line({ price: 0 })] })] }).build;
   ok(gapsBuilt.state === "gaps" && gapsBuilt.label === "1 unpriced line" && gapsBuilt.count === 1, "#P2a readiness: gaps win over built progress (label unchanged)");
 }
+
+/* #P2a build UI — the grouped Build rail (drag + arrows), group dividers in the card column, the card's Group select and Mark built. */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const build = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const rail = build.slice(build.indexOf("function SystemsRail("));
+  const step = build.slice(build.indexOf("export function BuildStep("), build.indexOf("function blockSell("));
+  ok(rail.length > 0 && step.includes("<SystemsRail s={s} editingGroupId={editingGroupId} setEditingGroupId={setEditingGroupId} />") && !step.includes("{sections.map((sec) => {"),
+    "#P2a build UI: the sidebar list is the SystemsRail, not a flat sections.map");
+  ok(/\{blocks\.map\(\(b\) =>/.test(rail) && rail.includes('<Fragment key="ungrouped">{b.sections.map(systemRow)}</Fragment>') && rail.includes("{b.sections.map(systemRow)}"),
+    "#P2a build UI: the rail renders from blocks (ungrouped rows, then each group's heading + rows)");
+  ok(/draggable\s*\n\s*onDragStart=\{\(e\) => \{\s*e\.dataTransfer\.setData\("text\/plain", sec\.id\);/.test(rail) && rail.includes("onDragEnd={endDrag}"),
+    "#P2a build UI: system rows are draggable and set dataTransfer text/plain = sec.id");
+  ok(/e\.preventDefault\(\);[\s\S]{0,80}e\.dataTransfer\.dropEffect = "move";/.test(rail) && rail.includes('const id = dragId || e.dataTransfer.getData("text/plain");') && rail.includes("moveSystemToAction(id, target)"),
+    "#P2a build UI: drop targets preventDefault on dragover and drop through moveSystemToAction (board house pattern)");
+  ok(rail.includes("onDrop={dropOn({ groupId: sec.groupId ?? null, beforeId: sec.id })}") && rail.includes("onDrop={dropOn({ groupId: g.id, beforeId: null })}") && rail.includes("onDrop={dropOn({ groupId: null, beforeId: null })}"),
+    "#P2a build UI: row → before it in its group; heading → end of that group; Ungrouped → ungroup");
+  ok(rail.includes('boxShadow: hot ? "0 -2px 0 0 var(--accent)" : undefined') && (rail.match(/outline: (hot|ungroupedHot) \? "2px solid var\(--accent\)" : "none"/g) || []).length === 2
+    && /const endDrag = \(\) => \{\s*setDragId\(null\);\s*setDrop\(null\);/.test(rail) && rail.includes("if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;"),
+    "#P2a build UI: drag feedback — a 2px accent line above a row, an accent outline on a heading / Ungrouped, cleared on leave, drop and dragend");
+  ok(rail.includes("aria-label={`Move ${name} up`}") && rail.includes("aria-label={`Move ${name} down`}") && rail.includes("moveSystemByAction(sec.id, -1)") && rail.includes("moveSystemByAction(sec.id, 1)"),
+    "#P2a build UI: each row has ↑/↓ buttons (Move <name> up/down) calling moveSystemByAction");
+  ok(rail.includes("onClick={() => selectSystem(sec.id)}"), "#P2a build UI: clicking a row still selects the system");
+  ok(rail.includes("{built && (") && /title="Built"[^>]*>\s*✓/.test(rail) && rail.includes("const built = isBuilt(sec.id);"), "#P2a build UI: a built rail row shows ✓");
+  ok(rail.includes("{fmt(blockSell(secs))}") && /function blockSell\([^)]*\): number \{\s*return secs\.reduce\(\(n, sec\) => n \+ systemSellTotal\(sec\), 0\);/.test(build),
+    "#P2a build UI: a group heading's subtotal is fmt(Σ systemSellTotal) of its systems");
+  ok(rail.includes("autoFocus") && rail.includes('if (e.key === "Enter")') && rail.includes('} else if (e.key === "Escape")') && rail.includes("renameGroupAction(id, value)") && rail.includes('title="Rename group"'),
+    "#P2a build UI: a group name renames inline (click → input; Enter / blur commits, Escape cancels)");
+  ok(rail.includes("moveGroupByAction(g.id, -1)") && rail.includes("moveGroupByAction(g.id, 1)") && rail.includes("aria-label={`Move group ${g.name} up`}"), "#P2a build UI: group headings reorder with ↑/↓");
+  ok(rail.includes("Delete group? Systems stay, ungrouped.") && rail.includes("removeGroupAction(g.id)") && !/window\.confirm|confirm\(/.test(build),
+    "#P2a build UI: deleting a group asks inline (no window.confirm) and keeps its systems");
+  ok(rail.includes("+ Add group") && rail.includes("const id = addGroupAction();") && rail.includes("+ Add") && rail.includes("‹ Hide"), "#P2a build UI: + Add group sits beside + Add / ‹ Hide");
+  ok(/\{groups\.length > 0 && \(\s*<div\s+className="est-rail-ungrouped"/.test(rail) && rail.includes("Ungrouped"), "#P2a build UI: the Ungrouped drop zone shows only when groups exist (even with no ungrouped systems)");
+  ok(/\{blocks\.map\(\(b, bi\) => \{/.test(step) && step.includes('className="est-group-divider"') && step.includes("{b.group.name}") && step.includes("{fmt(blockSell(b.sections))}") && step.includes("{b.group && (") && step.includes("index={first + j}"),
+    "#P2a build UI: the card column renders blocks with a divider (name + subtotal) per group, none for ungrouped, numbering continuous");
+  ok(step.includes("groups={groups}") && step.includes("groupId={sec.groupId ?? null}") && step.includes("onSetGroup={(groupId) => setSystemGroup(sec.id, groupId)}")
+    && step.includes("const id = addGroupForSystem(sec.id);") && step.includes("setEditingGroupId(id);") && step.includes("if (!sideOpen) toggleSide();")
+    && step.includes("built={isBuilt(sec.id)}") && step.includes("onMarkBuilt={() => markBuilt(sec.id)}"),
+    "#P2a build UI: BuildStep wires the card's Group select, + New group (focuses its rename in the rail) and Mark built");
+  ok(/<option value="">No group<\/option>\s*\{p\.groups\.map\(\(g\) => \(/.test(card) && card.includes("<option value={NEW_GROUP}>+ New group</option>") && card.includes('aria-label="Group"')
+    && card.includes("if (v === NEW_GROUP) p.onNewGroup();") && card.includes("else p.onSetGroup(v || null);"),
+    "#P2a build UI: SectionCard has a Group select — No group, each group, + New group");
+  ok(card.includes('{"✓ Mark built & collapse"}') && card.includes("onClick={p.onMarkBuilt}"), "#P2a build UI: SectionCard has a ✓ Mark built & collapse button");
+  ok(/\{p\.built && \(\s*<span[\s\S]{0,260}>\s*built\s*<\/span>/.test(card), "#P2a build UI: a built card's header shows a built tag");
+  ok(["groups: SystemGroup[];", "groupId: string | null;", "onSetGroup: (groupId: string | null) => void;", "onNewGroup: () => void;", "built: boolean;", "onMarkBuilt: () => void;"].every((x) => card.includes(x)),
+    "#P2a build UI: SectionCard's new props are typed");
+  const afs = hook.slice(hook.indexOf("const addGroupForSystem = "), hook.indexOf("const renameGroupAction = "));
+  ok(afs.includes("addGroup(groups, undefined, id)") && afs.includes("reorderSections(moveSystemTo(sections, next, secId, { groupId: id, beforeId: null }))") && /\n    addGroupForSystem,\n/.test(hook),
+    "#P2a build UI: + New group creates the group and moves the system against the NEW groups in one call");
+  // Why addGroupForSystem exists: a move against the old groups refuses the not-yet-known group.
+  const G0 = p2a.sanitizeGroups([{ id: "g-a", name: "A" }]);
+  const secs0 = [{ id: "1" }, { id: "2", groupId: "g-a" }];
+  const G1 = p2a.addGroup(G0, undefined, "g-new");
+  ok(p2a.moveSystemTo(secs0, G0, "1", { groupId: "g-new", beforeId: null }) === secs0 && p2a.moveSystemTo(secs0, G1, "1", { groupId: "g-new", beforeId: null }).map((x) => `${x.id}:${x.groupId ?? "-"}`).join(",") === "2:g-a,1:g-new"
+    && G1[1].name === "Untitled group",
+    "#P2a build UI: + New group lands the system in an Untitled group only when moved against the updated groups");
+  ok(!/\.components|customerLines\(|window\.print|est-doc|reviewBarOpen/.test(build) && !/from "@\/lib\/(stores|db)\//.test(build.replace(/import type [^\n]+\n/g, "")),
+    "#P2a build UI: build-step.tsx stays clear of the pinned hazards (no components/customerLines/print/est-doc/reviewBarOpen, no store/db value imports)");
+}

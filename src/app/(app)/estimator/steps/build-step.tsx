@@ -1,6 +1,8 @@
 "use client";
 
+import { Fragment, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { withDiscipline } from "@/lib/estimate-output/fields";
+import { GROUPS_MAX } from "@/lib/estimate-groups/groups";
 import { pointsLabel } from "@/lib/rewards/points";
 import { SIDE_TOGGLE } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
@@ -24,8 +26,16 @@ import { PortalPanel } from "../portal-panel";
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
 export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNarrative: () => void }) {
+  /** Phase 2a: the rail group whose name is being edited (a new group opens in rename). */
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const {
     activeId,
+    addGroupForSystem,
+    blocks,
+    groups,
+    isBuilt,
+    markBuilt,
+    setSystemGroup,
     addAiLine,
     addCurtain,
     addCustomPart,
@@ -111,7 +121,6 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     scrollRef,
     searchQuotes,
     sections,
-    selectSystem,
     setActiveId,
     setAiOpen,
     setAutoHrs,
@@ -191,109 +200,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
               flexShrink: 0,
             }}
           >
-            <div style={{ padding: "16px 14px 8px" }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 10,
-                  padding: "0 6px",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "#9aa0ab",
-                    letterSpacing: ".06em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Systems
-                </span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button
-                    type="button"
-                    onClick={addSystem}
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "var(--accent)",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                  >
-                    + Add
-                  </button>
-                  <button
-                    type="button"
-                    className="est-side-toggle"
-                    onClick={toggleSide}
-                    aria-expanded={true}
-                    title="Hide systems"
-                    style={SIDE_TOGGLE}
-                  >
-                    ‹ Hide
-                  </button>
-                </div>
-              </div>
-              {sections.map((sec) => {
-                const sub = systemSellTotal(sec);
-                const active = activeId === sec.id;
-                const label = sec.name
-                  .split(" — ")[0]
-                  .split(" & ")[0]
-                  .replace("Motorized Hoists", "Hoists");
-                return (
-                  <button
-                    type="button"
-                    key={sec.id}
-                    onClick={() => selectSystem(sec.id)}
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      padding: active ? "10px 12px 10px 9px" : "10px 12px",
-                      borderRadius: 9,
-                      marginBottom: 3,
-                      border: "none",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      background: active ? ACCENT_SOFT : "transparent",
-                      borderLeft: active ? "3px solid var(--accent)" : undefined,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: active ? 600 : 500,
-                        color: active ? ACCENT_INK : "#3a3f4a",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {label || "Untitled"}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11.5,
-                        color: active ? ACCENT_INK : "#9aa0ab",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {short(sub)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <SystemsRail s={s} editingGroupId={editingGroupId} setEditingGroupId={setEditingGroupId} />
 
             <div
               style={{ margin: "6px 14px", padding: 13, background: "#f7f8fa", borderRadius: 10 }}
@@ -461,85 +368,137 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
           }}
         >
           {initial.portal && <PortalPanel data={initial.portal} statusError={portalStatusError} />}
-          {sections.map((sec, i) => (
-            <SectionCard
-              key={sec.id}
-              sec={sec}
-              index={i}
-              active={activeId === sec.id}
-              expanded={isExpanded(sec.id)}
-              isInternal={isInternal}
-              cols={cols}
-              catalogOpen={isOpenFor("catalog", sec.id)}
-              customOpen={isOpenFor("custom", sec.id)}
-              openMethod={openInput && openInput.secId === sec.id ? openInput.kind : null}
-              customDraft={customDraft}
-              vendorQuotes={vendorQuotes}
-              vendorPreviews={vendorPreviews}
-              savedQuoteId={loadedId}
-              registerRef={(id, el) => {
-                cardRefs.current[id] = el;
-              }}
-              onToggleExpand={() => toggleExpand(sec.id)}
-              onRename={(name) => renameSystem(sec.id, name)}
-              onEditNarrative={() => {
-                // #281/#305: make this system active, open Build package, focus its narrative there.
-                setActiveId(sec.id);
-                onOpenNarrative();
-                setNarrFocusReq((n) => n + 1);
-              }}
-              onActivate={() => setActiveId(sec.id)}
-              onSetRoom={(value) => setSystemRoom(sec.id, value)}
-              defaultRoom={venueRoomName}
-              onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
-              onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}
-              onDelete={() => deleteSystem(sec.id)}
-              onSetMargin={(v) => setSystemMargin(sec.id, v)}
-              onSetSell={(v) => setSystemSell(sec.id, v)}
-              onResetSell={() => resetSystemSell(sec.id)}
-              onRoundPrice={() => roundSystemPrice(sec.id)}
-              onSetFreight={(v) => setFreightPct(sec.id, v)}
-              freightUnknown={freightDefault.unknown}
-              onInc={inc}
-              onDec={dec}
-              onSetQty={setQty}
-              onSetPrice={setItemPrice}
-              onSetExtSell={setItemExtSell}
-              specKeys={specKeys}
-              onSetSpecKey={setItemSpecKey}
-              onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
-              onRemoveItem={removeItem}
-              onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
-              onToggleCatalog={() => openInputMethod("catalog", sec.id)}
-              onToggleCurtain={() => openInputMethod("curtain", sec.id)}
-              onToggleFixture={() => openInputMethod("fixture", sec.id)}
-              onToggleLabor={() => openInputMethod("labor", sec.id)}
-              onToggleTrack={() => openInputMethod("track", sec.id)}
-              onToggleCustom={() => openInputMethod("custom", sec.id)}
-              onToggleVendor={() => openInputMethod("vendor", sec.id)}
-              onAddPart={(cat, qty) => addPart(sec.id, cat, qty)}
-              onImportMaterials={(items) => importMaterials(sec.id, items)}
-              onSetVendorDisplay={setVendorDisplay}
-              onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
-              onEditLabor={(group) => openLaborEdit(sec.id, group)}
-              onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
-              onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
-              onSetCustomDraft={setCustomField}
-              onAddCustomPart={() => addCustomPart(sec.id)}
-              customError={customError}
-              savingCustom={savingCustom}
-              onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
-              onMoveToExisting={(targetQuoteId) =>
-                moveSystem(sec.id, { kind: "existing", quoteId: targetQuoteId })
-              }
-              onCopyToNew={() => copySystem(sec.id, { kind: "new" })}
-              onCopyToExisting={(targetQuoteId) =>
-                copySystem(sec.id, { kind: "existing", quoteId: targetQuoteId })
-              }
-              onCopyHere={() => copySystem(sec.id, { kind: "same" })}
-              onSearchQuotes={searchQuotes}
-            />
-          ))}
+          {/* Phase 2a: cards stack in `blocks` order (= the stored order) with a divider per group. */}
+          {blocks.map((b, bi) => {
+            const first = blocks.slice(0, bi).reduce((n, x) => n + x.sections.length, 0);
+            return (
+              <div key={b.group ? b.group.id : "ungrouped"}>
+                {b.group && (
+                  <div
+                    className="est-group-divider"
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      margin: bi === 0 ? "2px 4px 12px" : "22px 4px 12px",
+                      paddingBottom: 7,
+                      borderBottom: "1px solid #e4e7ec",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        color: "#5b616e",
+                        letterSpacing: ".06em",
+                        textTransform: "uppercase",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {b.group.name}
+                    </span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", flexShrink: 0 }}>
+                      {fmt(blockSell(b.sections))}
+                    </span>
+                  </div>
+                )}
+                {b.sections.map((sec, j) => (
+                  <SectionCard
+                    key={sec.id}
+                    sec={sec}
+                    index={first + j}
+                    active={activeId === sec.id}
+                    expanded={isExpanded(sec.id)}
+                    isInternal={isInternal}
+                    cols={cols}
+                    catalogOpen={isOpenFor("catalog", sec.id)}
+                    customOpen={isOpenFor("custom", sec.id)}
+                    openMethod={openInput && openInput.secId === sec.id ? openInput.kind : null}
+                    customDraft={customDraft}
+                    vendorQuotes={vendorQuotes}
+                    vendorPreviews={vendorPreviews}
+                    savedQuoteId={loadedId}
+                    registerRef={(id, el) => {
+                      cardRefs.current[id] = el;
+                    }}
+                    onToggleExpand={() => toggleExpand(sec.id)}
+                    onRename={(name) => renameSystem(sec.id, name)}
+                    onEditNarrative={() => {
+                      // #281/#305: make this system active, open Build package, focus its narrative there.
+                      setActiveId(sec.id);
+                      onOpenNarrative();
+                      setNarrFocusReq((n) => n + 1);
+                    }}
+                    onActivate={() => setActiveId(sec.id)}
+                    onSetRoom={(value) => setSystemRoom(sec.id, value)}
+                    defaultRoom={venueRoomName}
+                    onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
+                    onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}
+                    onDelete={() => deleteSystem(sec.id)}
+                    onSetMargin={(v) => setSystemMargin(sec.id, v)}
+                    onSetSell={(v) => setSystemSell(sec.id, v)}
+                    onResetSell={() => resetSystemSell(sec.id)}
+                    onRoundPrice={() => roundSystemPrice(sec.id)}
+                    onSetFreight={(v) => setFreightPct(sec.id, v)}
+                    freightUnknown={freightDefault.unknown}
+                    onInc={inc}
+                    onDec={dec}
+                    onSetQty={setQty}
+                    onSetPrice={setItemPrice}
+                    onSetExtSell={setItemExtSell}
+                    specKeys={specKeys}
+                    onSetSpecKey={setItemSpecKey}
+                    onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
+                    onRemoveItem={removeItem}
+                    onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
+                    onToggleCatalog={() => openInputMethod("catalog", sec.id)}
+                    onToggleCurtain={() => openInputMethod("curtain", sec.id)}
+                    onToggleFixture={() => openInputMethod("fixture", sec.id)}
+                    onToggleLabor={() => openInputMethod("labor", sec.id)}
+                    onToggleTrack={() => openInputMethod("track", sec.id)}
+                    onToggleCustom={() => openInputMethod("custom", sec.id)}
+                    onToggleVendor={() => openInputMethod("vendor", sec.id)}
+                    onAddPart={(cat, qty) => addPart(sec.id, cat, qty)}
+                    onImportMaterials={(items) => importMaterials(sec.id, items)}
+                    onSetVendorDisplay={setVendorDisplay}
+                    onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
+                    onEditLabor={(group) => openLaborEdit(sec.id, group)}
+                    onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
+                    onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
+                    onSetCustomDraft={setCustomField}
+                    onAddCustomPart={() => addCustomPart(sec.id)}
+                    customError={customError}
+                    savingCustom={savingCustom}
+                    onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
+                    onMoveToExisting={(targetQuoteId) =>
+                      moveSystem(sec.id, { kind: "existing", quoteId: targetQuoteId })
+                    }
+                    onCopyToNew={() => copySystem(sec.id, { kind: "new" })}
+                    onCopyToExisting={(targetQuoteId) =>
+                      copySystem(sec.id, { kind: "existing", quoteId: targetQuoteId })
+                    }
+                    onCopyHere={() => copySystem(sec.id, { kind: "same" })}
+                    onSearchQuotes={searchQuotes}
+                    groups={groups}
+                    groupId={sec.groupId ?? null}
+                    onSetGroup={(groupId) => setSystemGroup(sec.id, groupId)}
+                    onNewGroup={() => {
+                      const id = addGroupForSystem(sec.id);
+                      if (!id) return;
+                      // Focus the new group's name in the rail (open the rail if it's hidden).
+                      setEditingGroupId(id);
+                      if (!sideOpen) toggleSide();
+                    }}
+                    built={isBuilt(sec.id)}
+                    onMarkBuilt={() => markBuilt(sec.id)}
+                  />
+                ))}
+              </div>
+            );
+          })}
 
           <button
             type="button"
@@ -714,6 +673,495 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
           onClose={() => setAiOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+/** Phase 2a: a group's subtotal — the sum of its systems' sell. */
+function blockSell(secs: EstimatorState["sections"]): number {
+  return secs.reduce((n, sec) => n + systemSellTotal(sec), 0);
+}
+
+/** Where a rail drag is hovering: a system row (insert before it), a group heading (append), or the Ungrouped zone. */
+type RailDrop = { kind: "row"; id: string } | { kind: "group"; id: string } | { kind: "ungrouped" } | null;
+
+const RAIL_BTN: CSSProperties = {
+  width: 18,
+  height: 18,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "none",
+  background: "transparent",
+  borderRadius: 4,
+  color: "#aab0bb",
+  fontSize: 11,
+  lineHeight: 1,
+  cursor: "pointer",
+  padding: 0,
+  flexShrink: 0,
+};
+
+const RAIL_HEAD: CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  color: "#5b616e",
+  letterSpacing: ".05em",
+  textTransform: "uppercase",
+};
+
+/**
+ * Phase 2a — the Build rail: systems under group headings, HTML5 drag (the
+ * board's house pattern: draggable rows, dataTransfer "text/plain", onDragOver
+ * preventDefault, onDrop reads the id) plus ↑/↓ buttons as the keyboard path.
+ * Drop on a row → insert before it and join its group; on a heading → append to
+ * that group; on Ungrouped → ungroup. Every move goes through the hook's pure rules.
+ */
+function SystemsRail({
+  s,
+  editingGroupId,
+  setEditingGroupId,
+}: {
+  s: EstimatorState;
+  editingGroupId: string | null;
+  setEditingGroupId: (id: string | null) => void;
+}) {
+  const {
+    activeId,
+    addGroupAction,
+    addSystem,
+    blocks,
+    groups,
+    isBuilt,
+    moveGroupByAction,
+    moveSystemByAction,
+    moveSystemToAction,
+    removeGroupAction,
+    renameGroupAction,
+    sections,
+    selectSystem,
+    toggleSide,
+  } = s;
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [drop, setDrop] = useState<RailDrop>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  /** Escape cancels a rename; the blur that follows must not commit it. */
+  const renameCancelled = useRef(false);
+
+  const sameDrop = (a: RailDrop, b: RailDrop) =>
+    a === b || (!!a && !!b && a.kind === b.kind && (a.kind === "ungrouped" || (b.kind !== "ungrouped" && a.id === b.id)));
+  const over = (target: Exclude<RailDrop, null>) => (e: DragEvent<HTMLElement>) => {
+    if (!dragId) return; // only rail drags (files, text) are not ours
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    if (!sameDrop(drop, target)) setDrop(target);
+  };
+  const leave = (target: Exclude<RailDrop, null>) => (e: DragEvent<HTMLElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    if (sameDrop(drop, target)) setDrop(null);
+  };
+  const dropOn = (target: { groupId: string | null; beforeId: string | null }) => (e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = dragId || e.dataTransfer.getData("text/plain");
+    setDragId(null);
+    setDrop(null);
+    if (id && sections.some((x) => x.id === id)) moveSystemToAction(id, target);
+  };
+  const endDrag = () => {
+    setDragId(null);
+    setDrop(null);
+  };
+
+  const startRename = (id: string) => {
+    renameCancelled.current = false;
+    setConfirmDeleteId(null);
+    setEditingGroupId(id);
+  };
+  const commitRename = (id: string, value: string) => {
+    if (renameCancelled.current) {
+      renameCancelled.current = false;
+      return;
+    }
+    renameGroupAction(id, value);
+    setEditingGroupId(null);
+  };
+
+  const lastGroupId = groups.length ? groups[groups.length - 1].id : null;
+  const firstId = sections[0]?.id;
+  const lastId = sections[sections.length - 1]?.id;
+
+  const groupHeading = (g: (typeof groups)[number], gi: number, secs: EstimatorState["sections"]) => {
+    const hot = drop?.kind === "group" && drop.id === g.id;
+    const editing = editingGroupId === g.id;
+    return (
+      <div key={"h-" + g.id} style={{ marginTop: 10, marginBottom: 3 }}>
+        <div
+          className="est-rail-group"
+          onDragOver={over({ kind: "group", id: g.id })}
+          onDragLeave={leave({ kind: "group", id: g.id })}
+          onDrop={dropOn({ groupId: g.id, beforeId: null })}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "5px 6px 5px 8px",
+            borderRadius: 7,
+            background: "#f7f8fa",
+            outline: hot ? "2px solid var(--accent)" : "none",
+            outlineOffset: -2,
+          }}
+        >
+          {editing ? (
+            <input
+              autoFocus
+              defaultValue={g.name}
+              maxLength={80}
+              aria-label="Group name"
+              onFocus={(e) => {
+                renameCancelled.current = false;
+                e.currentTarget.select();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitRename(g.id, e.currentTarget.value);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  renameCancelled.current = true;
+                  setEditingGroupId(null);
+                }
+              }}
+              onBlur={(e) => commitRename(g.id, e.currentTarget.value)}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontFamily: "var(--font-ui)",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#16181d",
+                border: "1px solid #c4c9d2",
+                borderRadius: 5,
+                padding: "2px 5px",
+                background: "#fff",
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => startRename(g.id)}
+              title="Rename group"
+              style={{
+                ...RAIL_HEAD,
+                flex: 1,
+                minWidth: 0,
+                textAlign: "left",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                border: "none",
+                background: "transparent",
+                cursor: "text",
+                padding: 0,
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              {g.name}
+            </button>
+          )}
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#6b7079", flexShrink: 0 }}>{fmt(blockSell(secs))}</span>
+          <button
+            type="button"
+            className="est-action-btn"
+            aria-label={`Move group ${g.name} up`}
+            title="Move group up"
+            disabled={gi === 0}
+            onClick={() => moveGroupByAction(g.id, -1)}
+            style={{ ...RAIL_BTN, opacity: gi === 0 ? 0.35 : 1, cursor: gi === 0 ? "default" : "pointer" }}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="est-action-btn"
+            aria-label={`Move group ${g.name} down`}
+            title="Move group down"
+            disabled={gi === groups.length - 1}
+            onClick={() => moveGroupByAction(g.id, 1)}
+            style={{ ...RAIL_BTN, opacity: gi === groups.length - 1 ? 0.35 : 1, cursor: gi === groups.length - 1 ? "default" : "pointer" }}
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            className="est-action-btn est-x"
+            aria-label={`Delete group ${g.name}`}
+            title="Delete group"
+            onClick={() => setConfirmDeleteId(confirmDeleteId === g.id ? null : g.id)}
+            style={RAIL_BTN}
+          >
+            ×
+          </button>
+        </div>
+        {/* Inline confirm — no browser dialog. */}
+        {confirmDeleteId === g.id && (
+          <div style={{ margin: "4px 2px 2px", padding: "7px 9px", background: "#fdf3f1", border: "1px solid #f1d6d0", borderRadius: 7, fontSize: 11.5, color: "#5b616e" }}>
+            Delete group? Systems stay, ungrouped.
+            <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmDeleteId(null);
+                  if (editingGroupId === g.id) setEditingGroupId(null);
+                  removeGroupAction(g.id);
+                }}
+                style={{ fontSize: 11.5, fontWeight: 600, color: "#c0392b", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteId(null)}
+                style={{ fontSize: 11.5, fontWeight: 600, color: "#5b616e", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const systemRow = (sec: EstimatorState["sections"][number]) => {
+    const sub = systemSellTotal(sec);
+    const active = activeId === sec.id;
+    const built = isBuilt(sec.id);
+    const hot = drop?.kind === "row" && drop.id === sec.id && dragId !== sec.id;
+    const label = sec.name
+      .split(" — ")[0]
+      .split(" & ")[0]
+      .replace("Motorized Hoists", "Hoists");
+    const name = label || "Untitled";
+    // ↑ at the very top / ↓ at the very bottom has nowhere to go (moveSystemBy would return the same order).
+    const atTop = sec.id === firstId && !sec.groupId;
+    const atBottom = sec.id === lastId && (groups.length === 0 || sec.groupId === lastGroupId);
+    return (
+      <div
+        key={sec.id}
+        className="est-rail-row"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", sec.id);
+          e.dataTransfer.effectAllowed = "move";
+          setDragId(sec.id);
+        }}
+        onDragEnd={endDrag}
+        onDragOver={over({ kind: "row", id: sec.id })}
+        onDragLeave={leave({ kind: "row", id: sec.id })}
+        onDrop={dropOn({ groupId: sec.groupId ?? null, beforeId: sec.id })}
+        onClick={() => selectSystem(sec.id)}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: active ? "8px 6px 8px 3px" : "8px 6px",
+          borderRadius: 9,
+          marginBottom: 3,
+          cursor: "pointer",
+          background: active ? ACCENT_SOFT : "transparent",
+          borderLeft: active ? "3px solid var(--accent)" : undefined,
+          boxShadow: hot ? "0 -2px 0 0 var(--accent)" : undefined,
+          opacity: dragId === sec.id ? 0.5 : 1,
+        }}
+      >
+        <span aria-hidden="true" title="Drag to reorder" style={{ color: "#c4c9d2", fontSize: 11, letterSpacing: "-2px", cursor: "grab", flexShrink: 0, userSelect: "none" }}>
+          ⋮⋮
+        </span>
+        <button
+          type="button"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
+            {built && (
+              <span title="Built" style={{ color: "#1f8a5b", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                ✓
+              </span>
+            )}
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: active ? 600 : 500,
+                color: active ? ACCENT_INK : "#3a3f4a",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {name}
+            </span>
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11.5,
+              color: active ? ACCENT_INK : "#9aa0ab",
+              flexShrink: 0,
+            }}
+          >
+            {short(sub)}
+          </span>
+        </button>
+        <button
+          type="button"
+          className="est-action-btn"
+          aria-label={`Move ${name} up`}
+          disabled={atTop}
+          onClick={(e) => {
+            e.stopPropagation();
+            moveSystemByAction(sec.id, -1);
+          }}
+          style={{ ...RAIL_BTN, opacity: atTop ? 0.35 : 1, cursor: atTop ? "default" : "pointer" }}
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          className="est-action-btn"
+          aria-label={`Move ${name} down`}
+          disabled={atBottom}
+          onClick={(e) => {
+            e.stopPropagation();
+            moveSystemByAction(sec.id, 1);
+          }}
+          style={{ ...RAIL_BTN, opacity: atBottom ? 0.35 : 1, cursor: atBottom ? "default" : "pointer" }}
+        >
+          ↓
+        </button>
+      </div>
+    );
+  };
+
+  const ungrouped = blocks.find((b) => b.group === null)?.sections ?? [];
+  const ungroupedHot = drop?.kind === "ungrouped";
+
+  return (
+    <div style={{ padding: "16px 14px 8px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 10,
+          padding: "0 6px",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#9aa0ab",
+            letterSpacing: ".06em",
+            textTransform: "uppercase",
+          }}
+        >
+          Systems
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={addSystem}
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--accent)",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            + Add
+          </button>
+          <button
+            type="button"
+            className="est-side-toggle"
+            onClick={toggleSide}
+            aria-expanded={true}
+            title="Hide systems"
+            style={SIDE_TOGGLE}
+          >
+            ‹ Hide
+          </button>
+        </div>
+      </div>
+      {/* The Ungrouped zone shows only once there are groups — and stays a drop target even when empty. */}
+      {groups.length > 0 && (
+        <div
+          className="est-rail-ungrouped"
+          onDragOver={over({ kind: "ungrouped" })}
+          onDragLeave={leave({ kind: "ungrouped" })}
+          onDrop={dropOn({ groupId: null, beforeId: null })}
+          style={{
+            ...RAIL_HEAD,
+            color: "#9aa0ab",
+            padding: ungrouped.length ? "5px 8px" : "9px 8px",
+            marginBottom: 3,
+            borderRadius: 7,
+            border: ungrouped.length ? "1px solid transparent" : "1px dashed #e4e7ec",
+            outline: ungroupedHot ? "2px solid var(--accent)" : "none",
+            outlineOffset: -2,
+          }}
+        >
+          Ungrouped
+        </div>
+      )}
+      {blocks.map((b) =>
+        b.group === null ? (
+          <Fragment key="ungrouped">{b.sections.map(systemRow)}</Fragment>
+        ) : (
+          <div key={b.group.id}>
+            {groupHeading(b.group, groups.findIndex((g) => g.id === b.group?.id), b.sections)}
+            {b.sections.map(systemRow)}
+          </div>
+        ),
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          const id = addGroupAction();
+          if (id) startRename(id);
+        }}
+        disabled={groups.length >= GROUPS_MAX}
+        title={groups.length >= GROUPS_MAX ? "At most 20 groups" : "Add a group heading"}
+        style={{
+          marginTop: 8,
+          marginLeft: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          color: groups.length >= GROUPS_MAX ? "#c4c9d2" : "var(--accent)",
+          background: "transparent",
+          border: "none",
+          cursor: groups.length >= GROUPS_MAX ? "default" : "pointer",
+          padding: 0,
+        }}
+      >
+        + Add group
+      </button>
     </div>
   );
 }

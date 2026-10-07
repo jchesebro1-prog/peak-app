@@ -1585,6 +1585,18 @@ export function useEstimatorState(props: EstimatorProps) {
     setGroups(next);
     return id;
   };
+  /** The card's "+ New group": creates an Untitled group and moves this system
+   *  into it in ONE render — setSystemGroup right after addGroupAction would
+   *  read the old `groups` and refuse the (still unknown) target. Returns the
+   *  new group's id, or null at the 20-group cap. */
+  const addGroupForSystem = (secId: string): string | null => {
+    const id = newGroupId();
+    const next = addGroup(groups, undefined, id);
+    if (next === groups) return null;
+    setGroups(next);
+    reorderSections(moveSystemTo(sections, next, secId, { groupId: id, beforeId: null }));
+    return id;
+  };
   const renameGroupAction = (id: string, name: string) => {
     const next = renameGroup(groups, id, name);
     if (next !== groups) setGroups(next);
@@ -2578,6 +2590,7 @@ export function useEstimatorState(props: EstimatorProps) {
     addCustomPart,
     addFixture,
     addGroupAction,
+    addGroupForSystem,
     addLabor,
     addMob,
     addPart,

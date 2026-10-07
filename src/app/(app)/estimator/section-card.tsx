@@ -26,6 +26,10 @@ import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, readCsvFile, summarizeCsvErrors, type ImportedMaterial } from "./material-csv";
 import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
 import { DISCIPLINES, DISCIPLINE_LABEL, autoDisciplineLabel, type ScopeDiscipline } from "@/lib/estimate-output/fields";
+import type { SystemGroup } from "@/lib/estimate-groups/groups";
+
+/** Phase 2a: the Group select's "+ New group" option value (never a group id — those are g-…). */
+const NEW_GROUP = "__new";
 
 /**
  * One system card — header (badge / rename / cost / price), per-system margin
@@ -193,6 +197,17 @@ export type SectionCardProps = {
   onCopyHere: () => void;
   /** Live-search other estimates for the "move" picker. */
   onSearchQuotes: (query: string) => Promise<QuoteLite[]>;
+  /** Phase 2a: the quote's system groups, for the Group select. */
+  groups: SystemGroup[];
+  /** Phase 2a: this system's group (null = No group). */
+  groupId: string | null;
+  /** Phase 2a: move this system into a group (null = ungroup); it lands last in that group. */
+  onSetGroup: (groupId: string | null) => void;
+  /** Phase 2a: "+ New group" — an Untitled group with this system in it. */
+  onNewGroup: () => void;
+  /** Phase 2a: marked built (✓ Mark built & collapse); any edit clears it. */
+  built: boolean;
+  onMarkBuilt: () => void;
 };
 
 export default function SectionCard(p: SectionCardProps) {
@@ -389,6 +404,14 @@ export default function SectionCard(p: SectionCardProps) {
                   minWidth: 0,
                 }}
               />
+              {p.built && (
+                <span
+                  title="Marked built — any edit to this system clears it"
+                  style={{ fontSize: 10, fontWeight: 600, color: "#1f8a5b", background: "#e8f5ee", borderRadius: 999, padding: "1px 7px", flexShrink: 0 }}
+                >
+                  built
+                </span>
+              )}
               <span style={{ color: "#c4c9d2", fontSize: 11, flexShrink: 0 }}>
                 {p.expanded ? "▾" : "▸"}
               </span>
@@ -482,6 +505,26 @@ export default function SectionCard(p: SectionCardProps) {
                   ))}
                 </select>
               )}
+              {/* Phase 2a: which group this system sits under (the rail drags too). */}
+              <select
+                value={p.groupId ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === NEW_GROUP) p.onNewGroup();
+                  else p.onSetGroup(v || null);
+                }}
+                aria-label="Group"
+                title="Group"
+                style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11, color: "#5b616e", background: "#fff", maxWidth: 160 }}
+              >
+                <option value="">No group</option>
+                {p.groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+                <option value={NEW_GROUP}>+ New group</option>
+              </select>
               {/* #281: a read-only snippet — the narrative itself is written in the right column. */}
               <button
                 type="button"
@@ -1436,6 +1479,26 @@ export default function SectionCard(p: SectionCardProps) {
               {addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
               {addBtn("+ Build custom part", handleToggleCustom, openMethod === "custom")}
               {addBtn("+ Vendor quote", p.onToggleVendor, openMethod === "vendor")}
+              {/* Phase 2a: done with this system — mark it built and fold it away. */}
+              <button
+                type="button"
+                onClick={p.onMarkBuilt}
+                title="Mark this system built and collapse it — any later edit clears built"
+                style={{
+                  marginLeft: "auto",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: p.built ? "#1f8a5b" : "#5b616e",
+                  background: "#fff",
+                  border: "1px solid #e4e7ec",
+                  borderRadius: 7,
+                  padding: "4px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                {"✓ Mark built & collapse"}
+              </button>
             </div>
 
             {/* An import outlives its panel: the file is read and resolved
