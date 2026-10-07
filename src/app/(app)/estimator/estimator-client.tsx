@@ -55,7 +55,7 @@ export default function EstimatorClient(props: EstimatorProps) {
       <style>{CSS}</style>
       {!s.phone && (
         <>
-          <EstimatorHeader s={s} onActed={onActed} />
+          <EstimatorHeader s={s} onActed={onActed} onStep={goStep} />
           <StepTabs step={step} badges={badges} onStep={goStep} />
           <EstimatorBanners s={s} onActed={onActed} />
         </>

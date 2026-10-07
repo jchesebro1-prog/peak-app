@@ -3,14 +3,15 @@
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { PdfPreviewPane } from "../preview-doc";
+import { ClientLinkPanel } from "../client-link-panel";
 import { CoverPackagePanel } from "../cover-package-panel";
 import { ReviewCostSummary } from "../review-cost-summary";
 import type { EstimatorState } from "../use-estimator-state";
 
 /**
  * #305 — Customer review: the saved customer PDF (main), the review actions
- * and the internal cost summary (right, desktop). A phone shows only the PDF,
- * plus the approver's decision when one is waiting.
+ * and the internal cost summary (right, desktop). A phone shows the PDF,
+ * the approver's decision when one is waiting, and the read-only cover and client link blocks.
  */
 export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextStepAction) => void }) {
   const {
@@ -114,6 +115,7 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
             onNotIncluded={onNotIncluded}
             notIncludedDefault={notIncludedDefault}
           />
+          {loadedId && <ClientLinkPanel quoteId={loadedId} />}
         </div>
       )}
     </div>

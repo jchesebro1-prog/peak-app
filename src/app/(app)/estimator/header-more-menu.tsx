@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChangeTypeControl } from "@/components/quote-flow-controls";
+import type { EstimateStep } from "@/lib/estimate-steps/steps";
 import type { EstimatorState } from "./use-estimator-state";
 import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 
 /** #305 — the header's ⋯ menu: actions used a few times per quote, not per minute. */
-export function HeaderMoreMenu({ s }: { s: EstimatorState }) {
+export function HeaderMoreMenu({ s, onStep }: { s: EstimatorState; onStep: (to: EstimateStep) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -39,7 +40,7 @@ export function HeaderMoreMenu({ s }: { s: EstimatorState }) {
             </div>
           )}
           {s.aiSource && (
-            <button type="button" role="menuitem" style={item} onClick={() => { setOpen(false); s.openAiDraft(); }} title={"Assemble the scope of work from " + s.aiSource.label}>
+            <button type="button" role="menuitem" style={item} onClick={() => { setOpen(false); onStep("build"); s.openAiDraft(); }} title={"Assemble the scope of work from " + s.aiSource.label}>
               Draft from survey/inspection
             </button>
           )}

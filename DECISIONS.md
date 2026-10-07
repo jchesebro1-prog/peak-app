@@ -9614,7 +9614,7 @@ review. Pure rules in `src/lib/estimate-steps/steps.ts`.
 
 ## D644. The component body moved verbatim into one state hook; per-step UI state stays shared for now (#305, 2026-10-07)
 
-The old 8,000-line `EstimatorClient` body became `useEstimatorState` (`use-estimator-state.ts`) unchanged, and the four step
+The old 4,385-line `EstimatorClient` body became `useEstimatorState` (`use-estimator-state.ts`) unchanged, and the four step
 components read what they need from it. State stays in one hook so a step switch cannot drop an edit. Splitting each step's
 own UI state out of the hook is deferred to Phase 2 (Build). The spec harness reads the Estimator as one joined source
 (`estimatorSource()` / `previewDocSource()` over the shell, hook, header and steps), so the pre-existing pins keep reading
@@ -9624,7 +9624,7 @@ the same code after a verbatim move and only the pins that name a new home chang
 
 `src/lib/estimate-steps/readiness.ts` computes the line under each tab from the live (unsaved) state: Build — empty systems
 and unpriced lines counted and named, "✓ N systems priced" when clean; Build package — client-side gaps only (a printed
-narrative system with no intro), "✓ Ready"; Customer review — the approval pill's own label; Send & track — Sent · Rev N /
+narrative system with no intro, a key product still needing its paragraph, a scope without client goals), "✓ Ready", or "Save first" while the estimate is unsaved; Customer review — the approval pill's own label; Send & track — Sent · Rev N /
 Won / Lost / Ready to send / —. Datasheet and drawing gaps stay as chips inside the Package step rather than in the badge.
 A badge is information; no tab is ever disabled by it, and a Rewards credit line neither prices nor fills a system.
 

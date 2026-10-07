@@ -11023,7 +11023,7 @@ touched `src` files.
 ## 305. Estimator in four steps — Phase 1 (the frame) — DONE 2026-10-07 (D643–D647)
 
 **Reported by Jeff 2026-10-07:** "I think we are getting to the point that one window is trying to handle too much." The
-Estimator was one 8,000-line screen that was both the pricing workbench and the customer document.
+Estimator was one 4,385-line screen that was both the pricing workbench and the customer document.
 
 What shipped (Phase 1 only — existing pieces moved into their step, behavior unchanged; no migration, no AI):
 - **Four steps on one URL** — Build · Build package · Customer review · Send & track at `/estimator?id=…&step=…`; Back/forward
@@ -11036,7 +11036,7 @@ What shipped (Phase 1 only — existing pieces moved into their step, behavior u
   Send & track: status, next step, Pipeline (Daylite stages), client link + revisions, client responses, tasks.
 - **Customer review cost summary** — per system cost, sell, margin; Total = Σ systems = items + freight; Rewards credit and
   Customer total rows when credited. (D646)
-- **A phone shows Customer review only** ("View only on phone"; the approver control and cover stay).
+- **A phone shows Customer review only** ("View only on phone"; it keeps the approver control, the read-only cover and the client link).
 - **Next-step navigation** — submit/approve → Customer review, Send → Send & track, send back/withdraw → Build. (D647)
 
 Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md`; plan

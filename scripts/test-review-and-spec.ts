@@ -53949,3 +53949,17 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   const link = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-link-panel.tsx"), "utf8");
   ok(/withPackage = true/.test(link) && /\{withPackage && <PackageStaffPanel quoteId=\{quoteId\} \/>\}/.test(link), "#305 steps: ClientLinkPanel can leave the package panel out");
 }
+
+/* #305 final review — Draft from survey jumps to Build; phone keeps the client link; the joined-source helpers can't go vacuous. */
+{
+  const more = readFileSync(join(process.cwd(), EST_DIR, "header-more-menu.tsx"), "utf8");
+  ok(/onStep\("build"\);\s*s\.openAiDraft\(\)/.test(more) && /onStep: \(to: EstimateStep\) => void/.test(more),
+    "#305 header: Draft from survey/inspection moves to Build before it opens the modal (the modal is mounted only there)");
+  const modalMounts = ESTIMATOR_FILES.filter((f) => existsSync(join(process.cwd(), EST_DIR, f)) && readFileSync(join(process.cwd(), EST_DIR, f), "utf8").includes("<AiScopeModal"));
+  ok(modalMounts.length === 1 && modalMounts[0] === "steps/build-step.tsx", "#305 header: AiScopeModal is mounted only in steps/build-step.tsx");
+  const rv = readFileSync(join(process.cwd(), EST_DIR, "steps/review-step.tsx"), "utf8");
+  const phoneBranch = rv.slice(rv.lastIndexOf("{phone && ("));
+  ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} />") && phoneBranch.includes("<CoverPackagePanel"), "#305 review: the phone's bottom block mounts the cover panel and the Client link panel");
+  ok(ESTIMATOR_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))) && PREVIEW_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))),
+    "#305 harness: every joined Estimator file exists (a rename can't turn the joined-source pins vacuous)");
+}

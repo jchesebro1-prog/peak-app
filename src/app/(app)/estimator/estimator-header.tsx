@@ -6,6 +6,7 @@ import type { NextStepAction } from "@/lib/quote-next-step";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { wonEditMessage } from "@/app/(app)/quotes/new/handoff";
 import { fmt } from "./pricing";
+import type { EstimateStep } from "@/lib/estimate-steps/steps";
 import { HeaderMoreMenu } from "./header-more-menu";
 
 /**
@@ -14,7 +15,7 @@ import { HeaderMoreMenu } from "./header-more-menu";
  * quoted total, status (read-only — set on Send & track), Save, the next-step control and the ⋯ menu. Wraps
  * onto a second row instead of overflowing on a narrow window.
  */
-export function EstimatorHeader({ s, onActed }: { s: EstimatorState; onActed: (action: NextStepAction) => void }) {
+export function EstimatorHeader({ s, onActed, onStep }: { s: EstimatorState; onActed: (action: NextStepAction) => void; onStep: (to: EstimateStep) => void }) {
   const {
     applySync,
     assumptionLibrary,
@@ -305,7 +306,7 @@ export function EstimatorHeader({ s, onActed }: { s: EstimatorState; onActed: (a
               }}
             />
           )}
-          <HeaderMoreMenu s={s} />
+          <HeaderMoreMenu s={s} onStep={onStep} />
         </div>
         {qdOpen && (
           <div
