@@ -3,7 +3,7 @@
 // read the grant cookie and pass the session in; nothing here takes a
 // customer id, a price or a fabric name from the browser.
 import type { PortalSession } from "@/lib/portal";
-import { portalIndex } from "@/lib/portal-catalog-index";
+import { portalIndex, portalPart } from "@/lib/portal-catalog-index";
 import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
 import { cartAddProblem, cleanCurtainRequest, NOT_QUOTABLE_COPY, QTY_COPY } from "@/lib/portal-cart-rules";
 import { buildPartQuestionLead, partQuestionProblem } from "@/lib/portal-leads";
@@ -44,10 +44,11 @@ export async function addToCartFor(session: PortalSession | null, input: unknown
 
   let line: Parameters<typeof addLine>[2];
   if (r.kind === "part") {
-    const sku = typeof r.sku === "string" ? r.sku : "";
-    const problem = cartAddProblem(!!sku && ix.parts.has(sku), r.qty as number);
+    // #302: a former SKU (an old bookmark) adds the live part under its live SKU.
+    const part = typeof r.sku === "string" && r.sku ? portalPart(ix, r.sku) : undefined;
+    const problem = cartAddProblem(!!part, r.qty as number);
     if (problem) return { ok: false, error: problem };
-    line = { kind: "part", sku, qty: r.qty as number };
+    line = { kind: "part", sku: part!.sku, qty: r.qty as number };
   } else if (r.kind === "fixture") {
     const fx = typeof r.fixtureId === "string" ? ix.fixtures.get(r.fixtureId) : undefined;
     const problem = cartAddProblem(!!fx, r.qty as number);
@@ -99,7 +100,7 @@ export async function askAboutPartFor(session: PortalSession | null, input: unkn
     const fx = ix.fixtures.get(key.slice("fixture:".length));
     if (fx) part = { sku: fx.lightEngineSku, title: fx.label };
   } else {
-    const p = key ? ix.parts.get(key) : undefined;
+    const p = key ? portalPart(ix, key) : undefined;
     if (p) part = { sku: p.sku, title: p.desc || p.sku };
   }
   if (!part) return { ok: false, error: PART_UNAVAILABLE_COPY };

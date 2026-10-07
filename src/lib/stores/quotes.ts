@@ -48,6 +48,8 @@ import {
 } from "@/lib/review-limits";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import { approvalFingerprint, approvalSnapshotMatches, type ApprovalSnapshot } from "@/lib/approval-snapshot";
+import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
+import { liveRenameRefs } from "@/lib/stores/catalog-renames";
 
 export { normalizeQuotePipeline };
 
@@ -1231,6 +1233,10 @@ export async function restoreQuoteRevision(
   // quote / no customer / another customer's revision) before it goes back.
   const { restoredCreditFor } = await import("./reward-ledger");
   const credit = await restoredCreditFor(q, target, opts.mayApplyCredit ?? true);
+  // #302: the snapshot keeps the SKUs it was cut with; the spec it puts back
+  // is LIVE, so a part renamed since moves to its live SKU (and model). The
+  // revision itself is never written — the rewrite copies what it changes.
+  const renames = await liveRenameRefs();
 
   const actor = by || DEFAULT_ACTOR;
   const updated = await patchQuote(id, (doc) => {
@@ -1244,6 +1250,7 @@ export async function restoreQuoteRevision(
     doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
     doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
     doc.spec = target.spec ?? null;
+    if (doc.spec && renames.m.size) doc.spec = rewriteQuoteSpec(doc.spec, renames.m, renames.models) ?? doc.spec;
     doc.flameTest = target.flameTest ?? null;
     doc.repair = target.repair ?? null;
     doc.inspection = target.inspection ?? null;

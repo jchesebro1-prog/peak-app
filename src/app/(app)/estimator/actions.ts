@@ -924,7 +924,7 @@ export async function copySystemToEstimateAction(
   const items = Array.isArray(section?.items) ? section.items : [];
 
   // #293 slice 2: today's catalog + resolved fixtures — shared with Load system.
-  const { catalog, fixtures } = await copyPricingFor(items);
+  const { catalog, fixtures, renames } = await copyPricingFor(items);
 
   /* The destination tier. */
   const sourceTier = usableTierMargin(sourceContext?.tierMargin);
@@ -961,6 +961,8 @@ export async function copySystemToEstimateAction(
     fixtures,
     sourceTierMargin: sourceTier,
     targetTierMargin: targetTier,
+    // #302: lines naming a renamed part's old SKU land on the live SKU.
+    renames,
   });
 
   if (target.kind === "same") {

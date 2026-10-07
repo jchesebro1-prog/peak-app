@@ -47,7 +47,7 @@ import type { PartAccessoryLink, PartDocumentLink } from "@/lib/part-docs/types"
 import { RACK_DEFAULTS_BLOB } from "@/lib/rack/defaults";
 import { getSettingsPatchStrict, setSettings } from "@/lib/settings";
 import { list as listCatalog, renamePartDocs, type CatalogPart } from "@/lib/stores/catalog";
-import { allSkuRenames, appendSkuRenames, renameMapOf, type SkuRename } from "@/lib/stores/catalog-renames";
+import { allSkuRenames, appendSkuRenames, liveRenameRefs, renameMapOf, type SkuRename } from "@/lib/stores/catalog-renames";
 import { accessoryLinkId, allAccessoryLinks } from "@/lib/stores/part-accessory-links";
 import { allDocumentLinks, documentLinkId } from "@/lib/stores/part-documents";
 import { markQuotePdfStale } from "@/lib/quote-pdf/schedule";
@@ -118,11 +118,7 @@ type Ctx = {
 type StepOut = { done: boolean; changed: number };
 
 async function refContext(over: () => boolean): Promise<Ctx> {
-  const log = await allSkuRenames();
-  const m = renameMapOf(log);
-  const models = new Map<string, string>();
-  for (const e of log) if (e.model) models.set(e.to, e.model);
-  return { m, models, over };
+  return { ...(await liveRenameRefs()), over };
 }
 
 /**

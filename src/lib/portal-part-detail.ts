@@ -2,7 +2,7 @@
 // prices through portal-pricing.ts. Never import into a client component; it
 // hands the browser sell-only `PartDetail`s (see portal-part-view.ts).
 import type { PortalSession } from "@/lib/portal";
-import { fixtureComponentPart, portalIndex, portalMfrImage, type PortalIndex } from "@/lib/portal-catalog-index";
+import { fixtureComponentPart, portalIndex, portalMfrImage, portalPart, type PortalIndex } from "@/lib/portal-catalog-index";
 import { isCustomCategory, portalFallback } from "@/lib/part-image-fallback";
 import { PORTAL_EXPIRED_COPY, portalBrowseAllowed, PORTAL_BROWSE_RATE_COPY, tilesFor } from "@/lib/portal-catalog-browse";
 import {
@@ -68,7 +68,7 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
     );
   }
 
-  const part = ix.parts.get(key);
+  const part = portalPart(ix, key); // #302: an old `?part=` bookmark opens the renamed part
   if (!part) return null;
   const accessories: SearchEntry[] = [];
   for (const sku of part.accessories) {

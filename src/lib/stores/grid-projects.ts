@@ -51,6 +51,8 @@ import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "
 import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { get as getCatalogPart } from "@/lib/stores/catalog";
+import { liveRenameRefs } from "@/lib/stores/catalog-renames";
+import { rewriteGridProjectLive } from "@/lib/catalog-rename/rewrite";
 import { isFabricPart } from "@/lib/fabric-part";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { arenaGeom, blackboxGeom, buildPlan, churchGeom, planTemplate, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
@@ -1883,6 +1885,8 @@ export async function restoreRevision(
   if (!p) return { ok: false, reason: "not-found" };
   const target = (p.revisions || []).find((r) => r.rev === rev);
   if (!target) return { ok: false, reason: "no-such-rev" };
+  // #302: the snapshot keeps the part ids it was cut with; see below.
+  const { m: renamed } = await liveRenameRefs();
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (doc) => {
     pushRevision(doc, by, "restore", `Auto-saved before recalling v${rev}`);
     doc.name = target.name;
@@ -1927,6 +1931,12 @@ export async function restoreRevision(
     for (const k of Object.keys(restoredEsts)) if (!liveOptionIds.has(k)) delete restoredEsts[k];
     if (Object.keys(restoredEsts).length) doc.autoEstimate = restoredEsts;
     else delete doc.autoEstimate;
+    // #302: the restored design is LIVE — a part renamed since the snapshot
+    // moves to its live SKU (placements, routes, riser links, option
+    // accessories, Auto overrides). Copy-on-write: the snapshot in
+    // `revisions` is never touched.
+    const live = renamed.size ? rewriteGridProjectLive(doc as unknown as Record<string, unknown>, renamed) : null;
+    if (live) Object.assign(doc, live);
     syncQuoteMirror(doc);
     pushRevision(doc, by, "restore", `Recalled v${rev}`);
     doc.updatedAt = Date.now();

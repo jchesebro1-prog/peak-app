@@ -1,5 +1,6 @@
 import { getManyBySku as catalogGetManyBySku, type CatalogPart } from "@/lib/stores/catalog";
 import { listFixtures } from "@/lib/stores/fixtures";
+import { liveRenameRefs } from "@/lib/stores/catalog-renames";
 import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import type { CopyCatalogPart, CopyFixture } from "./copy-system";
 import type { SpecItem } from "./types";
@@ -13,7 +14,12 @@ import type { SpecItem } from "./types";
  */
 export async function copyPricingFor(
   items: readonly SpecItem[]
-): Promise<{ catalog: Map<string, CopyCatalogPart>; fixtures: Map<string, CopyFixture> }> {
+): Promise<{
+  catalog: Map<string, CopyCatalogPart>;
+  fixtures: Map<string, CopyFixture>;
+  /** #302: the rename log, for copySectionForTarget to land the copy on live SKUs. */
+  renames: { m: Map<string, string>; models: Map<string, string> };
+}> {
   /* Today's catalog, for only the SKUs this section names — plus, when a line
      is a catalog-backed fixture, the resolved fixture records (costOverride
      applied) and their own parts. */
@@ -36,7 +42,10 @@ export async function copyPricingFor(
   // #302: keyed by the SKU each line names — Load system copies a SENT
   // revision, which keeps a renamed part's old SKU; it re-costs from the
   // part that SKU now means.
-  const found = skus.size ? await catalogGetManyBySku([...skus]) : new Map<string, CatalogPart>();
+  const [found, renames] = await Promise.all([
+    skus.size ? catalogGetManyBySku([...skus]) : new Map<string, CatalogPart>(),
+    liveRenameRefs(),
+  ]);
   const parts = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];
   const catalog = new Map<string, CopyCatalogPart>();
   for (const [sku, p] of found) {
@@ -58,5 +67,5 @@ export async function copyPricingFor(
       });
     }
   }
-  return { catalog, fixtures };
+  return { catalog, fixtures, renames };
 }

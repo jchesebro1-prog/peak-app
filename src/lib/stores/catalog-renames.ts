@@ -51,6 +51,18 @@ export function renameMapOf(entries: SkuRename[]): Map<string, string> {
   return out;
 }
 
+/** #302 — what a LIVE write needs to follow the renames: `m` (old SKU → the
+ *  SKU it ended up as) and `models` (final SKU → its model, what a moved
+ *  quote line prints). One log read. The rename sweep and the writers that
+ *  copy frozen history back into live fields (Load system, Copy system,
+ *  revision restore) share it. */
+export async function liveRenameRefs(): Promise<{ m: Map<string, string>; models: Map<string, string> }> {
+  const log = await allSkuRenames();
+  const models = new Map<string, string>();
+  for (const e of log) if (e.model) models.set(e.to, e.model);
+  return { m: renameMapOf(log), models };
+}
+
 /** #302 — the importers' row resolver over `live` (the book the import has
  *  already loaded) and the rename log; one log read per import. */
 export async function importResolverFor(live: ResolvablePart[]): Promise<ImportResolver> {

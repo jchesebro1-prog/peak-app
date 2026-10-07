@@ -11321,6 +11321,7 @@ seeded()
   .then(() => modelSku302ApplyAsyncChecks())
   .then(() => modelSku302ImportAsyncChecks())
   .then(() => modelSku302FrozenAsyncChecks())
+  .then(() => modelSku302LiveWritersAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -47805,7 +47806,7 @@ import { tierSeedPrice as n293sSeed } from "@/app/(app)/estimator/tier-reprice";
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const acts = rd("src/app/(app)/estimator/actions.ts");
   const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("), acts.indexOf("\n}\n", acts.indexOf("export async function copySystemToEstimateAction(")));
-  ok(copyFn.includes("const { catalog, fixtures } = await copyPricingFor(items);") && !copyFn.includes("listFixtures(") && copyFn.includes("copySectionForTarget(sanitizeSystemSell(section),"),
+  ok(copyFn.includes("const { catalog, fixtures, renames } = await copyPricingFor(items);") && !copyFn.includes("listFixtures(") && copyFn.includes("copySectionForTarget(sanitizeSystemSell(section),"),
     "#293s copy-pricing: Copy system loads today's catalog + fixtures through the shared copyPricingFor helper");
   const cp = rd("src/app/(app)/estimator/copy-pricing.ts");
   ok(cp.includes("export async function copyPricingFor(") && cp.includes("allAssembliesFrom(fixtureRecords, parts)") && cp.includes("c.found && (c.cost > 0 || c.costOverride !== undefined)"),
@@ -52164,7 +52165,7 @@ import { renderToStaticMarkup as e301cdRender } from "react-dom/server";
      route.includes('"x-content-type-options": "nosniff"') && route.includes(`"content-security-policy": "sandbox; default-src 'none'"`) && !route.includes("quoteAsOfRevision") && !/\b(update|patchQuote|setStatus)\(/.test(route),
     "#301 docs: the route rate-limits first, takes only a v2 token, serves only the pinned revision's documents, as an attachment; read-only");
   const srv = rd("src/lib/estimate-output/package-docs-server.ts");
-  ok(srv.includes("loadScopedCoverage(parts)") && !srv.includes("listCatalog") && !srv.includes("loadPartDocsState") && srv.includes("quoteBom(src, rackOf, internalSkuCheck(parts0))"),
+  ok(srv.includes("loadScopedCoverage(parts)") && !srv.includes("listCatalog") && !srv.includes("loadPartDocsState") && srv.includes("quoteBom(src, rackOf, isInternal)") && srv.includes("internalSkuCheck("),
     "#301 docs: the revision's documents use the scoped loader and the client package's BOM rule — never the whole catalog");
   const load = rd("src/lib/part-docs/load.ts");
   const scoped = load.slice(load.indexOf("export async function loadScopedCoverage("));
@@ -53438,6 +53439,110 @@ async function modelSku302FrozenAsyncChecks(): Promise<void> {
   } finally {
     if (prevToken === undefined) delete process.env.DISPLAYS_API_TOKEN;
     else process.env.DISPLAYS_API_TOKEN = prevToken;
+    await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
+    if (snapshot.length) await db.insert(blobsT).values(snapshot);
+  }
+}
+
+/* #302 Task 8 fix 1 — the writers that copy frozen history back into LIVE
+   fields (Load system, quote + Grid revision restore) land renamed parts on
+   their live SKU; the revision snapshots stay as written. Plus the portal's
+   former-SKU alias and Copy system's pure rename step. */
+async function modelSku302LiveWritersAsyncChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const Cat = await import("@/lib/stores/catalog");
+  const Ren = await import("@/lib/stores/catalog-renames");
+  const DS = await import("@/db/doc-store");
+  const Q = await import("@/lib/stores/quotes");
+  const GP = await import("@/lib/stores/grid-projects");
+  const { getDb } = await import("@/db");
+  const { blobs: blobsT } = await import("@/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  const { loadLibrarySystem } = await import("@/lib/narrative/load-system");
+  const { copySectionForTarget } = await import("@/app/(app)/estimator/copy-system");
+  const PI = await import("@/lib/portal-catalog-index");
+
+  // Pure: Copy system prices under the source's SKU, then lands the copy on the live one.
+  const srcSec = { id: "s1", name: "DSP", kind: "materials", mfr: "", freightPct: 0,
+    items: [{ id: 1, sku: "OLD-LW", desc: "DSP", qty: 1, unit: "ea", cost: 10, price: 20 }],
+    keyProducts: [{ lineKey: "1", sku: "OLD-LW", text: "The DSP." }] };
+  const cp = copySectionForTarget(srcSec as never, {
+    newSectionId: "sysX", catalog: new Map([["OLD-LW", { sku: "Sym:LW", cost: 12, list: 30 }]]), fixtures: new Map(),
+    sourceTierMargin: 0.3, targetTierMargin: 0.3, renames: { m: new Map([["OLD-LW", "Sym:LW"]]), models: new Map([["Sym:LW", "LW"]]) },
+  });
+  const cpLine = cp.section.items[0] as { sku: string; cost: number; manufacturerModelNumber?: string };
+  ok(cpLine.sku === "Sym:LW" && cpLine.manufacturerModelNumber === "LW" && cpLine.cost === 12 && cp.section.keyProducts?.[0]?.sku === "Sym:LW" && srcSec.items[0].sku === "OLD-LW",
+    "#302 live writers: copySectionForTarget re-costs under the old sku, then moves the copied line + key product to the live sku and model (source untouched)");
+  const noRen = copySectionForTarget(srcSec as never, { newSectionId: "sysY", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  ok(noRen.section.items[0].sku === "OLD-LW", "#302 live writers: without a rename log the copy keeps its skus");
+
+  // Pure: the portal's former-SKU alias.
+  const ip = { sku: "Sym:LW" } as never;
+  const fakeIx = { parts: new Map([["Sym:LW", ip]]), formerSkus: new Map([["OLD-LW", "Sym:LW"]]) };
+  ok(PI.portalPart(fakeIx, "OLD-LW") === ip && PI.portalPart(fakeIx, "Sym:LW") === ip && PI.portalPart(fakeIx, "NOPE") === undefined,
+    "#302 live writers: portalPart resolves a former sku to the live part");
+
+  const OLD = fixtureId(302, "lw-old");
+  const NEW = "Symetrix:" + fixtureId(302, "lw-new");
+  registerFixture("catalog_parts", OLD);
+  registerFixture("catalog_parts", NEW);
+  await DS.upsertDoc("catalog_parts", { id: OLD, sku: OLD, desc: "Live writers 302", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "Symetrix" } as never);
+
+  // A quote sent (revision cut) and a Grid design snapshotted BEFORE the rename.
+  const QID = fixtureId(302, "lw-quote");
+  const sec = { id: "s1", name: "DSP", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Intro.",
+    items: [{ id: 1, sku: OLD, desc: "Line " + OLD, qty: 2, unit: "ea", cost: 20, price: 40 }],
+    keyProducts: [{ lineKey: "1", sku: OLD, text: "The DSP.", photo: true }] };
+  await Q.create({ id: QID, name: "#302 live writers", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [sec], mobs: [] } } as never);
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+  const qSnap = JSON.stringify((await Q.get(QID))!.revisions!.find((r) => r.rev === rev.rev));
+
+  const gp = await GP.createProject({ name: "#302 live writers grid", customer: "Spec fixture", customerId: null, by: "Test" });
+  registerFixture("grid_projects", gp.id);
+  const opt = (await GP.getProject(gp.id))!.options![0].id;
+  await GP.addPlacement(gp.id, { sheetId: "sheet-302", page: 1, x: 0.5, y: 0.5, partId: OLD, optionId: opt, by: "Test" });
+  const gRev = (await GP.addRevision(gp.id, { by: "Test", note: "before the rename" }))!;
+  const gSnap = JSON.stringify((await GP.getProject(gp.id))!.revisions!.find((r) => r.rev === gRev.rev));
+
+  const db = await getDb();
+  const blobIds = [Ren.SKU_RENAMES_BLOB];
+  const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
+  try {
+    ok((await Cat.renamePartDocs(OLD, NEW, "Jupiter LW"))?.sku === NEW, "#302 live writers: fixture part renamed");
+    await Ren.appendSkuRenames([{ from: OLD, to: NEW, model: "Jupiter LW", at: Date.now(), by: "Test" }]);
+
+    // Load system from the sent revision.
+    const loaded = await loadLibrarySystem(`${QID}:${rev.rev}:s1`, 0.3);
+    const ld = loaded.ok ? (loaded.section.items[0] as { sku: string; cost: number; manufacturerModelNumber?: string }) : null;
+    ok(!!ld && ld.sku === NEW && ld.manufacturerModelNumber === "Jupiter LW" && ld.cost === 20 && loaded.ok && loaded.section.keyProducts?.[0]?.sku === NEW,
+      "#302 live writers: Load system from a sent revision naming the old sku writes the NEW sku (and model) on the live line and key product, priced from the live part");
+
+    // Quote restore.
+    const qr = await Q.restoreQuoteRevision(QID, rev.rev, "Test");
+    const live = qr.ok ? (qr.quote.spec as { sections: Array<{ items: Array<{ sku: string; manufacturerModelNumber?: string }>; keyProducts: Array<{ sku: string }> }> }).sections[0] : null;
+    ok(!!live && live.items[0].sku === NEW && live.items[0].manufacturerModelNumber === "Jupiter LW" && live.keyProducts[0].sku === NEW,
+      "#302 live writers: restoring a pre-rename quote revision puts the live sku (and model) on the live spec");
+    const qAfter = (await Q.get(QID))!;
+    ok(JSON.stringify(qAfter.revisions!.find((r) => r.rev === rev.rev)) === qSnap,
+      "#302 live writers: the restored quote revision's snapshot is byte-identical (still names the old sku)");
+
+    // Grid restore.
+    await GP.removePlacements(gp.id, (await GP.getProject(gp.id))!.placements.map((p) => p.id));
+    const gr = await GP.restoreRevision(gp.id, gRev.rev, "Test");
+    const gAfter = (await GP.getProject(gp.id))!;
+    ok(gr.ok && gAfter.placements.length === 1 && gAfter.placements[0].partId === NEW,
+      "#302 live writers: restoring a pre-rename Grid revision puts the live sku on the live placements");
+    ok(JSON.stringify(gAfter.revisions!.find((r) => r.rev === gRev.rev)) === gSnap,
+      "#302 live writers: the restored Grid revision's snapshot is byte-identical (still names the old sku)");
+
+    // Portal index: the renamed part answers its former sku.
+    const ix = await PI.portalIndex({ fresh: true });
+    ok(ix.formerSkus.get(OLD) === NEW && PI.portalPart(ix, OLD)?.sku === NEW,
+      "#302 live writers: the portal index maps a former sku to the live part (old ?part= bookmarks, cart lines)");
+  } finally {
+    PI.invalidatePortalIndex();
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
   }

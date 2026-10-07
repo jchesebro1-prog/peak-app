@@ -11,7 +11,8 @@ import { listCurtainMounts } from "@/lib/stores/curtain-mounts";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getProject } from "@/lib/stores/grid-projects";
 import { listManufacturers, manufacturerImageLookup } from "@/lib/stores/manufacturers";
-import { getDocuments, visibleImagesForParts } from "@/lib/stores/part-documents";
+import { getDocuments } from "@/lib/stores/part-documents";
+import { partsAndImagesBySku } from "@/lib/catalog-rename/live-reads";
 import { get as getQuote, type Quote } from "@/lib/stores/quotes";
 import { listTrackSeries } from "@/lib/stores/track-series";
 import { getSettings } from "@/lib/settings";
@@ -129,26 +130,14 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
 export async function cutSheetPhotoDocs(skus: readonly string[]): Promise<Map<string, PartDocument>> {
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
-  const images = await visibleImagesForParts(skus);
-  const bare: string[] = [];
+  // #302: keyed by the SKU asked for — a renamed part's old SKU (a line not
+  // yet swept) reads its photos where they now live, under the live SKU.
+  const { parts, images } = await partsAndImagesBySku(skus);
+  const noPhoto: Array<[string, CatalogPart]> = [];
   for (const sku of skus) {
     const own = images.get(sku)?.[0];
     if (own) out.set(sku, own);
-    else bare.push(sku);
-  }
-  if (!bare.length) return out;
-  // #302: a renamed part's old SKU (a line not yet swept) — its photos are
-  // linked to the live SKU; read them there before falling back.
-  const parts = await getManyBySku(bare);
-  const moved = [...new Set(bare.flatMap((s) => (parts.has(s) && parts.get(s)!.sku !== s ? [parts.get(s)!.sku] : [])))];
-  const liveImages = moved.length ? await visibleImagesForParts(moved) : new Map<string, PartDocument[]>();
-  const noPhoto: Array<[string, CatalogPart]> = [];
-  for (const sku of bare) {
-    const p = parts.get(sku);
-    if (!p) continue;
-    const own = p.sku !== sku ? liveImages.get(p.sku)?.[0] : undefined;
-    if (own) out.set(sku, own);
-    else noPhoto.push([sku, p]);
+    else if (parts.has(sku)) noPhoto.push([sku, parts.get(sku)!]);
   }
   if (!noPhoto.length) return out;
   const imageIdFor = manufacturerImageLookup(await listManufacturers());

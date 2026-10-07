@@ -1,3 +1,4 @@
+import { rewriteQuoteSpec, type RenameMap } from "@/lib/catalog-rename/rewrite";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { remapCurtainTrackKeys } from "@/lib/curtain-cut-sheets/track-link";
 import { syncLaborDraftMargins } from "./labor-group";
@@ -98,6 +99,10 @@ export function copySectionForTarget(
     fixtures: ReadonlyMap<string, CopyFixture>;
     sourceTierMargin: number | null;
     targetTierMargin: number | null;
+    /** #302: the rename log (old SKU → live SKU, live SKU → model). A
+     *  section copied from a sent revision keeps a renamed part's old SKU;
+     *  the copy lands on the live estimate under the live SKU. */
+    renames?: { m: RenameMap; models: RenameMap };
   }
 ): CopySectionResult {
   const src = validMargin(opts.sourceTierMargin);
@@ -210,5 +215,11 @@ export function copySectionForTarget(
     laborSeedMarginOf(tgt)
   );
   delete copied.sellOverride;
-  return { section: copied, costsUpdated, tierRepriced, handPriced };
+  // #302: priced above under the SKU the source names (the catalog map is
+  // keyed by it); the copy is LIVE data, so its lines and key products then
+  // move to the live SKU, and a moved line prints its new model.
+  const live = opts.renames?.m.size
+    ? (rewriteQuoteSpec({ sections: [copied] }, opts.renames.m, opts.renames.models) as { sections: SpecSection[] } | null)
+    : null;
+  return { section: live ? live.sections[0] : copied, costsUpdated, tierRepriced, handPriced };
 }

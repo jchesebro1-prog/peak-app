@@ -10,7 +10,7 @@ import { freightPctForMiles } from "@/lib/freight-rule";
 import { loadFreightRule, loadPortalRules } from "@/lib/freight-rule-load";
 import { loadCurtainSewingPct } from "@/lib/stores/pricing";
 import type { CartLine, CurtainRequest, PortalCart } from "@/lib/portal-cart-types";
-import { fixtureComponentPart, portalIndex, type IndexedFixture, type IndexedPart, type PortalIndex } from "@/lib/portal-catalog-index";
+import { fixtureComponentPart, portalIndex, portalPart, type IndexedFixture, type IndexedPart, type PortalIndex } from "@/lib/portal-catalog-index";
 import { fixtureUnitPrice, unitPriceFor, type FixtureComponentInput, type PriceRuleOpts } from "@/lib/portal-price-rules";
 import { quoteMode } from "@/lib/portal-quote-mode";
 import { partModel } from "@/lib/catalog-rename/sku";
@@ -117,7 +117,7 @@ export async function priceSku(
   sku: string,
   ctx: PortalPricingContext
 ): Promise<{ unitPrice: number | null; por: boolean; porReason?: string } | null> {
-  const part = (await portalIndex()).parts.get(sku);
+  const part = portalPart(await portalIndex(), sku);
   if (!part) return null;
   const u = unitPriceFor(part, ruleOpts(ctx));
   return u.porReason ? { unitPrice: u.unitPrice, por: u.por, porReason: u.porReason } : { unitPrice: u.unitPrice, por: u.por };
@@ -143,7 +143,8 @@ function fxEngineModel(p: IndexedPart | undefined, sku: string): string {
 type Priced = { sell: SellLine; item: Omit<SpecItem, "id"> | null; section: "equip" | "fixt" | "drape" };
 
 function pricePart(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts): Priced {
-  const part: IndexedPart | undefined = l.sku ? ix.parts.get(l.sku) : undefined;
+  // #302: a cart line written before the cart sweep may name a former SKU.
+  const part: IndexedPart | undefined = l.sku ? portalPart(ix, l.sku) : undefined;
   if (!part) return { sell: unavailableLine(l, qty, l.sku ?? null), item: null, section: "equip" };
   const u = unitPriceFor(part, o);
   const sell: SellLine = {

@@ -47,7 +47,9 @@ export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDoc
   const found = await getManyBySku(quoteBom(src, rackOf).map((r) => r.sku));
   const parts0 = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];
   const moved = movedSkus(found);
-  const bom = liveBom(quoteBom(src, rackOf, internalSkuCheck(parts0)), moved);
+  // The internal-row check is asked about the SKU each line names (old or live).
+  const isInternal = internalSkuCheck([...found].map(([sku, p]) => ({ sku, category: p.category })));
+  const bom = liveBom(quoteBom(src, rackOf, isInternal), moved);
   const inBom = new Set(bom.map((r) => r.sku));
   const parts = parts0.filter((p) => inBom.has(p.sku));
   const index = await loadScopedCoverage(parts);
