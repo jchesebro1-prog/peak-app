@@ -5,6 +5,8 @@ import {
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
+import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
+import { planRenames as cr302Plan, crosswalkRowsFromGrid as cr302Rows } from "@/lib/catalog-rename/plan";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { extractLibrary } from "@/lib/davinci/extract";
 import { buildIndex, buildIndexWithStats, matchSku } from "@/lib/davinci/match";
@@ -10601,6 +10603,50 @@ import {
   ok(trvFormula("flame", "flame.total").includes(trvFlyNote), "#208 M4: flame.total's formula string notes flights-over-drive");
   ok(trvFormula("repair", "repair.total").includes(trvFlyNote), "#208 M4: repair.total's formula string notes flights-over-drive");
   ok(trvFormula("inspection", "inspection.total").includes(trvFlyNote), "#208 M4: inspection.total's formula string notes flights-over-drive");
+}
+
+/* --- #302 model-number SKUs: SKU rule, partModel, search, crosswalk planner --- */
+ok(cr302ModelSku("Symetrix", " Jupiter  4 ") === "Symetrix:Jupiter 4", "#302 sku: Brand:Model, whitespace collapsed");
+ok(cr302ModelSku("Biamp", "A/B #1?") === "Biamp:A-B -1-", "#302 sku: / # ? become -");
+ok(cr302ModelSku("", "X") === null && cr302ModelSku("Biamp", "  ") === null, "#302 sku: blank brand or model → null");
+ok(cr302ModelSku("Symetrix", "x".repeat(60)) === null, "#302 sku: over 60 chars → null");
+ok(cr302Clean("W3,  Black, US") === "W3, Black, US", "#302 cleanModel keeps commas");
+ok(cr302PartModel({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }) === "Jupiter 4", "#302 partModel: model first");
+ok(cr302PartModel({ sku: "ETC:S4LED", manufacturerPartNumber: "7060A" }) === "7060A" && cr302PartModel({ sku: "ETC:S4LED" }) === "S4LED" && cr302PartModel({ sku: "PLAIN" }) === "PLAIN", "#302 partModel: P/N, then sku tail, then sku");
+ok(cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP", formerSkus: ["80-0043"] }, "80-0043") && cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "jupiter dsp") && !cr302Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "edge"), "#302 search: former SKUs, model and multi-token");
+ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" })) === JSON.stringify({ primary: "Jupiter 4", secondary: "80-0043" }) && cr302Label({ sku: "X", manufacturerPartNumber: "X" }).secondary === "", "#302 staff label: model · order #, no repeat");
+{
+  const g = [["Manufacturer", "MFR Part # (order number)", "SKU", "Description", "Category", "Model #", "Source URL", "Notes"],
+    ["Symetrix", "80-0043", "80-0043", "Jupiter 4", "DSP", "Jupiter 4", "u", "confirmed"],
+    ["Symetrix", "80-0042", "80-0042", "Jupiter 12", "DSP", "Jupiter 12", "", ""],
+    ["Symetrix", "12-0002", "12-0002", "Rack ears", "", "", "", "accessory: no model name"],
+    ["Symetrix", "80-0099", "80-0099", "Gone", "", "Ghost", "", ""],
+    ["Biamp", "80-0001", "80-0001", "Wrong brand", "", "Thing", "", ""],
+    ["Symetrix", "80-0056", "80-0056", "ARC White", "", "ARC-2e", "", ""],
+    ["Symetrix", "80-0057", "80-0057", "ARC Black", "", "arc-2e", "", ""],
+    ["Symetrix", "80-0060", "80-0060", "Taken", "", "Prism 4x4", "", ""],
+    ["Symetrix", "80-0070", "80-0070", "Long", "", "y".repeat(70), "", ""],
+    ["Symetrix", "80-0080", "80-0080", "Old", "", "Done", "", ""]];
+  const r = cr302Rows(g);
+  ok(r.ok && r.rows.length === 10 && r.rows[0].sku === "80-0043" && r.rows[0].model === "Jupiter 4" && r.rows[0].rowNumber === 2, "#302 crosswalk: header-matched rows, 1-based sheet row numbers");
+  ok(!cr302Rows([["Manufacturer", "SKU"]]).ok, "#302 crosswalk: a sheet with no Model # column is refused");
+  if (r.ok) {
+    const live = [{ sku: "80-0043", mfr: "Symetrix" }, { sku: "80-0042", mfr: "Symetrix" }, { sku: "12-0002", mfr: "Symetrix" }, { sku: "80-0001", mfr: "Symetrix" },
+      { sku: "80-0056", mfr: "Symetrix" }, { sku: "80-0057", mfr: "Symetrix" }, { sku: "80-0060", mfr: "Symetrix" }, { sku: "Symetrix:Prism 4x4", mfr: "Symetrix" },
+      { sku: "80-0070", mfr: "Symetrix" }, { sku: "Symetrix:Done", mfr: "Symetrix", formerSkus: ["80-0080"] }];
+    const p = cr302Plan(r.rows, live, [{ sku: "80-0080", renamedTo: "Symetrix:Done" }]);
+    const o = (sku: string) => p.rows.find((x) => x.row.sku === sku)?.outcome;
+    ok(o("80-0043") === "rename" && o("80-0042") === "rename" && o("12-0002") === "skip:no-model" && o("80-0099") === "skip:not-found" && o("80-0001") === "skip:mfr-mismatch", "#302 plan: rename / no-model / not-found / mfr-mismatch");
+    ok(o("80-0056") === "skip:duplicate" && o("80-0057") === "skip:duplicate", "#302 plan: two rows → one SKU (case-insensitive) skips both");
+    ok(o("80-0060") === "skip:taken" && o("80-0070") === "skip:bad-model" && o("80-0080") === "already", "#302 plan: taken / bad-model / already renamed");
+    ok(p.renames.length === 2 && p.renames[0].to === "Symetrix:Jupiter 4" && p.counts.rename === 2 && p.counts["skip:duplicate"] === 2, "#302 plan: rename map + counts");
+  }
+  // Same sheet SKU twice with different models: one part can't take two SKUs.
+  const dupSheet = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "80-0500", "Alpha"], ["Symetrix", "80-0500", "Beta"]]);
+  if (dupSheet.ok) {
+    const dp = cr302Plan(dupSheet.rows, [{ sku: "80-0500", mfr: "Symetrix" }], []);
+    ok(dp.rows.length === 2 && dp.rows.every((x) => x.outcome === "skip:duplicate") && dp.renames.length === 0, "#302 plan: same SKU, two different models → both skip:duplicate");
+  } else ok(false, "#302 plan: duplicate-SKU sheet parses");
 }
 
 seeded()

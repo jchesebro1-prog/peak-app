@@ -78,6 +78,13 @@ export type CatalogPart = {
   manufacturerPartNumber?: string;
   /** Manufacturer's model number, when the vendor distinguishes it from P/N. */
   manufacturerModelNumber?: string;
+  /** #302 — every SKU this part has had (order numbers replaced by a
+   *  `Brand:Model` SKU). Searched everywhere a part is searched; the
+   *  importers match an incoming row on it. Written only by the rename tool. */
+  formerSkus?: string[];
+  /** #302 — set ONLY on a retired (soft-deleted) part: the SKU it was renamed
+   *  to. get/getMany follow it so frozen history (sent revisions) resolves. */
+  renamedTo?: string;
   /** Minimum advertised price; never treated as Peak cost or sell. */
   mapPrice?: number | null;
   /** Fabric rows only — curtain configurator material cost basis. */
