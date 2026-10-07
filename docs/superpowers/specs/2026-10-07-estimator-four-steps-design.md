@@ -313,3 +313,51 @@ customer as a separately priced alternate they can choose.
 - **Client package page:** an Alternates card mirrors the cover list.
 - **Client scope picker:** alternate systems are offered as extra choices labelled with their group, **unchecked
   by default**; the running total adds them when ticked. Server validation unchanged (ids must be offered).
+
+## 10. Phase 3 — Send & track (detailed, 2026-10-07)
+
+### 10.1 Send from the tab (one server action, in this order)
+`sendEstimateEmailAction(quoteId, { to, cc, subject, body, attachEstimate, attachCover, followUpDays, asOf })`:
+1. **Preflight** — `send` or `approve` permission; quote is a system estimate in `draft` (first send) or `sent`
+   (re-send the current sent revision); the saved estimate PDF is current (the client saves first, as the next-step
+   control does today); `to` holds ≥ 1 valid address; subject and body non-blank.
+2. **Attachments, before anything is marked** — the Estimate PDF bytes from PDF storage (the file `setStatus`
+   copies into the revision); the Cover PDF rendered on demand through the existing signed print route (≤ 45 s)
+   when ticked. Any failure here aborts with nothing changed. Attachments together are capped at 15 MB raw
+   (Gmail's 25 MB limit after base64); over the cap → refuse with "Too large to attach — send the link only".
+3. **Mark sent** (draft only) through `sendQuoteToCustomer` with `asOf` — same approval gate as today; a refusal
+   returns the gate message and nothing is emailed.
+4. **Client link** — `ensureShareLink` → absolute URL from the request origin; the body's `{link}` placeholder is
+   replaced (the default body contains it; if the user removed it, the link is appended on its own line).
+5. **Email** — a comms thread in the **sender's personal mailbox** (`mailbox: "personal"`, `mailboxUser:` the user's
+   name), `link: { type: "quote", id, label }`, To/Cc/subject/body, the attachments; sent through the existing
+   draft → send path (Gmail when connected; otherwise a local outbound message, as the Inbox does today).
+6. **Record** — a store-owned `Quote.estimateEmails[]` entry `{ threadId, rev, at, by, to }`.
+7. **Follow-up** — a task for the Lead estimator due in `followUpDays` (default 5; `Off`, 2, 3, 5, 7, 14).
+If steps 5–7 fail after step 3, the action reports "Marked sent, but the email didn't go out — open it in Inbox";
+the quote stays sent (the link already works).
+
+### 10.2 Defaults
+To = the quote contact's email (else blank); Cc = the Lead estimator's email when it isn't the sender's; subject
+`<project name> — estimate <EST number>`; body: greeting with the contact's first name, one line on what's
+attached, the `{link}` line inviting them to view the package and choose alternates, sign-off with the sender's
+name. Defaults are computed server-side (`estimateEmailDefaults`) and edited freely in the composer.
+
+### 10.3 Escape hatches (kept)
+- **Open in Inbox** — does steps 1–4 and 6 (marks sent, mints the link), then creates the same thread as a
+  **draft** with the attachments and opens `/inbox?draft=<id>`; the composer warns "This marks the estimate sent
+  now". Sending it from the Inbox needs no extra hook (the quote is already sent).
+- **Mark sent without emailing** — the existing next-step / status control.
+- **Copy link only** — the existing Client link panel.
+
+### 10.4 Track (after send)
+- `sendTrackAction(quoteId)` returns, per recorded email: subject, to, sent time, rev, Gmail delivery state
+  (`gmailId` present / local only), and every message in its thread (direction, from, time, plain-text snippet),
+  with unread inbound marked. Replies arrive through the existing Gmail import (same `gmailThreadId`).
+- The tab shows an **Activity** card: emails with their replies (newest first), an inline **Reply** box (sends
+  through the same thread with the existing `reply()`), and **Mark read**; plus the existing revisions/opens,
+  client responses, tasks and pipeline cards.
+- The Send tab badge shows `Sent · Rev N · 👁 <opens> · <n> new repl(y|ies)` when the track data is loaded
+  (fetched on the Send step and on window focus).
+- The bell: an unread reply already shows in the sender's Inbox unread count; no new bell group in Phase 3.
+- Not in Phase 3: "Revise with these scopes →" (needs the revision workflow; parked).
