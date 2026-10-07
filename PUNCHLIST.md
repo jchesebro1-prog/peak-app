@@ -10936,3 +10936,29 @@ Not changed: the allowance path's tier-margin fallback code (but a typed cost no
 the form lands at 35%, not the tier — the fallback is effectively unreachable from the form), Estimator catalog pricing (still tier-seeded), saved lines. No migration.
 
 Gates: `tsc --noEmit` 0 errors; `test:specs` 12,549 PASS / 0 FAIL (12,541 at #301 + 8 new "#302" checks); `test:smoke` ALL PASSED; eslint clean on the touched files.
+
+## 303. Catalog — Datasheets table: scrolls in view, sticky header + Part column, Columns toggle — DONE 2026-10-07
+
+**Asked by Jeff 2026-10-07:** "The datasheets and photos window needs to be able to scroll or turn off columns to get a better
+view." `/catalog/documents` capped the page at 1240 px while the table (Part, Quoted, Last quoted, three 200 px slot cells,
+Image) needs ~1,200+; the card did scroll sideways, but its scrollbar sat at the bottom of a 200-row table and macOS hides
+overlay scrollbars, so the Image column just looked cut off.
+
+What changed (this page only, no migration):
+- **Wider page** — `pk-content` cap 1240 → 1680.
+- **A scroll box you can use** — the table card is bounded (`maxHeight: calc(100dvh - 220px)`, `minHeight: 320`, `overflow:
+  auto`) so the horizontal scrollbar is on screen; the header row is sticky, and the select checkbox + Part columns are sticky
+  on the left (opaque white, right-edge shadow, corner cells on top). Table switched to `border-collapse: separate` so sticky
+  cells keep their borders. The bulk-actions bar is unchanged.
+- **Columns button** (right end, above the table) — checkbox per optional column (Quoted, Last quoted, Datasheet, Spec sheet,
+  Manual, Image) plus Show all; Part and the select box are always shown. Closes on Escape / outside click. Hidden columns
+  leave thead and tbody, the empty-state `colSpan` and the table `min-width` follow the visible set. The hidden list persists
+  per browser in `localStorage` (`catalog-documents-columns-v1`, try/catch, read after mount so there is no hydration mismatch;
+  default all shown). Rules are a pure module, `catalog/documents/columns.ts`.
+
+Not changed: the photo-sheet page, the filters/paging, the server data.
+
+Gates: `tsc --noEmit` 0 errors; `test:specs` 12,566 PASS / 0 FAIL (12,549 + 17 new "#303" checks); eslint clean on the three
+touched `src` files (the 50k-line spec harness overflows eslint's react-hooks rule stack, so it is not linted); `test:smoke`
+ALL PASSED. Browser-checked at 1000×700 on the dev server: header and Part column stay pinned while the box scrolls both
+ways, the horizontal scrollbar sits on screen, hiding Spec sheet + Manual narrows the table and survives a reload.

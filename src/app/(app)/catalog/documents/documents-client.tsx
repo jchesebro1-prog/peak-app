@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
 import { FETCH_BATCH_SIZE, PART_DOC_KINDS, PART_DOC_KIND_LABEL, type DocSlotKind } from "@/lib/part-docs/types";
@@ -9,6 +9,18 @@ import type { FetchOutcome, FetchTarget } from "@/lib/part-docs/fetch-links";
 import AlsoCovers from "./also-covers";
 import ImageCell from "./image-cell";
 import SlotCell from "./slot-cell";
+import {
+  CHECK_COL_W,
+  COLUMNS_STORAGE_KEY,
+  OPTIONAL_COLUMN_KEYS,
+  PART_COL_W,
+  columnCount,
+  parseStoredHiddenColumns,
+  tableMinWidth,
+  toggleHiddenColumn,
+  visibleColumns,
+  type OptionalColumnKey,
+} from "./columns";
 import {
   attachExistingDocumentAction,
   fetchLinksAction,
@@ -36,6 +48,29 @@ import {
 const TH: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: "#aab0bb", textTransform: "uppercase", letterSpacing: ".04em", textAlign: "left", padding: "8px 8px" };
 const TD: React.CSSProperties = { fontSize: 12.5, color: "#3a3f4a", padding: "9px 8px", verticalAlign: "top", borderTop: "1px solid #f0f1f4" };
 
+/* #303 — the table scrolls inside its own bounded box so the horizontal
+ * scrollbar is always on screen. The header row sticks to the top of that box;
+ * the select box + Part column stick to its left. Sticky cells need an opaque
+ * background (rows scroll under them) and, in the corner, the highest z-index. */
+const STICKY_BG = "#fff";
+const EDGE = "#e6e8ec";
+const TH_STICKY: React.CSSProperties = { position: "sticky", top: 0, zIndex: 2, background: STICKY_BG, boxShadow: `0 1px 0 ${EDGE}` };
+const CHECK_BOX: React.CSSProperties = { width: CHECK_COL_W, minWidth: CHECK_COL_W, maxWidth: CHECK_COL_W, boxSizing: "border-box" };
+const PART_BOX: React.CSSProperties = { width: PART_COL_W, minWidth: PART_COL_W, maxWidth: PART_COL_W, boxSizing: "border-box" };
+const CHECK_TH: React.CSSProperties = { ...TH, ...TH_STICKY, ...CHECK_BOX, left: 0, zIndex: 4 };
+const PART_TH: React.CSSProperties = { ...TH, ...TH_STICKY, ...PART_BOX, left: CHECK_COL_W, zIndex: 4, boxShadow: `1px 0 0 ${EDGE}, 0 1px 0 ${EDGE}` };
+const CHECK_TD: React.CSSProperties = { ...TD, ...CHECK_BOX, position: "sticky", left: 0, zIndex: 1, background: STICKY_BG };
+const PART_TD: React.CSSProperties = { ...TD, ...PART_BOX, position: "sticky", left: CHECK_COL_W, zIndex: 1, background: STICKY_BG, boxShadow: `1px 0 0 ${EDGE}` };
+
+const COLUMN_LABEL: Record<OptionalColumnKey, string> = {
+  quoted: "Quoted",
+  lastQuoted: "Last quoted",
+  datasheet: PART_DOC_KIND_LABEL.datasheet,
+  specsheet: PART_DOC_KIND_LABEL.specsheet,
+  manual: PART_DOC_KIND_LABEL.manual,
+  image: PART_DOC_KIND_LABEL.image,
+};
+
 /** Mirrors fetch-links.ts's NOT_ATTEMPTED_ERROR — not imported directly since
  *  that module pulls in server-only stores and blob code, and this file is
  *  "use client" (a client file may only import pure/type-safe modules). */
@@ -51,6 +86,48 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
   const [error, setError] = useState<string | null>(null);
   const [docQuery, setDocQuery] = useState("");
   const [docHits, setDocHits] = useState<DocumentHit[]>([]);
+
+  // #303 — hidden optional columns. Starts empty (all shown) so server and
+  // first client render match; the saved choice is read after mount.
+  const [hidden, setHidden] = useState<OptionalColumnKey[]>([]);
+  const [colsOpen, setColsOpen] = useState(false);
+  const colsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // queueMicrotask — a callback boundary (react-hooks/set-state-in-effect
+    // flags a direct setState in the effect body); same pattern as inbox-shell.
+    queueMicrotask(() => {
+      try {
+        setHidden(parseStoredHiddenColumns(window.localStorage.getItem(COLUMNS_STORAGE_KEY)));
+      } catch {
+        /* storage blocked — keep every column shown */
+      }
+    });
+  }, []);
+  const saveHidden = (next: OptionalColumnKey[]) => {
+    setHidden(next);
+    try {
+      window.localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage blocked — the choice lasts for this page view only */
+    }
+  };
+  useEffect(() => {
+    if (!colsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (colsRef.current && !colsRef.current.contains(e.target as Node)) setColsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setColsOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [colsOpen]);
+  const shown = visibleColumns(hidden);
+  const showCol = (k: OptionalColumnKey) => shown.includes(k);
 
   const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.sku));
   const toggle = (sku: string) =>
@@ -180,11 +257,38 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
         </div>
       )}
 
-      <div className="pk-card" style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <div ref={colsRef} style={{ position: "relative" }}>
+          <button type="button" className="pk-btn-outline" aria-haspopup="true" aria-expanded={colsOpen} onClick={() => setColsOpen((o) => !o)}>
+            Columns{hidden.length ? ` (${shown.length} of ${OPTIONAL_COLUMN_KEYS.length})` : ""}
+          </button>
+          {colsOpen && (
+            <div role="group" aria-label="Show columns" className="pk-card" style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 20, minWidth: 190, padding: "8px 10px", boxShadow: "0 6px 20px rgba(0,0,0,.12)" }}>
+              <div style={{ fontSize: 11, color: "#8c919c", marginBottom: 4 }}>Part is always shown.</div>
+              {OPTIONAL_COLUMN_KEYS.map((k) => (
+                <label key={k} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, padding: "4px 0", cursor: "pointer" }}>
+                  <input type="checkbox" checked={showCol(k)} onChange={() => saveHidden(toggleHiddenColumn(hidden, k))} />
+                  {COLUMN_LABEL[k]}
+                </label>
+              ))}
+              <button
+                type="button"
+                onClick={() => saveHidden([])}
+                disabled={!hidden.length}
+                style={{ border: "none", background: "none", padding: "6px 0 2px", fontSize: 12, color: hidden.length ? "var(--accent)" : "#aab0bb", cursor: hidden.length ? "pointer" : "default" }}
+              >
+                Show all
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="pk-card" style={{ padding: 0, overflow: "auto", maxHeight: "calc(100dvh - 220px)", minHeight: 320 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: tableMinWidth(shown) }}>
           <thead>
             <tr>
-              <th style={{ ...TH, width: 28 }}>
+              <th style={CHECK_TH}>
                 <input
                   type="checkbox"
                   aria-label="Select every row on this page"
@@ -192,41 +296,43 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
                   onChange={() => setSelected(allOnPage ? new Set() : new Set(rows.map((r) => r.sku)))}
                 />
               </th>
-              <th style={TH}>Part</th>
-              <th style={{ ...TH, textAlign: "right" }}>Quoted</th>
-              <th style={TH}>Last quoted</th>
-              {PART_DOC_KINDS.map((k) => (
-                <th key={k} style={TH}>{PART_DOC_KIND_LABEL[k]}</th>
+              <th style={PART_TH}>Part</th>
+              {showCol("quoted") && <th style={{ ...TH, ...TH_STICKY, textAlign: "right" }}>Quoted</th>}
+              {showCol("lastQuoted") && <th style={{ ...TH, ...TH_STICKY }}>Last quoted</th>}
+              {PART_DOC_KINDS.filter((k) => showCol(k)).map((k) => (
+                <th key={k} style={{ ...TH, ...TH_STICKY }}>{PART_DOC_KIND_LABEL[k]}</th>
               ))}
-              <th style={TH}>Image</th>
+              {showCol("image") && <th style={{ ...TH, ...TH_STICKY }}>Image</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.sku}>
-                <td style={TD}>
+                <td style={CHECK_TD}>
                   <input type="checkbox" aria-label={`Select ${r.sku}`} checked={selected.has(r.sku)} onChange={() => toggle(r.sku)} />
                 </td>
-                <td style={{ ...TD, maxWidth: 320 }}>
+                <td style={PART_TD}>
                   <a href={`/catalog?edit=${encodeURIComponent(r.sku)}`} style={{ fontWeight: 650, color: "#16181d", textDecoration: "none" }}>{r.sku}</a>
                   <div style={{ fontSize: 11.5, color: "#6b7079" }}>{[r.mfr, r.model].filter(Boolean).join(" · ")}</div>
                   <div style={{ fontSize: 11.5, color: "#8c919c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.desc}</div>
                 </td>
-                <td style={{ ...TD, textAlign: "right", fontFamily: "var(--font-mono)" }}>{r.quotes}</td>
-                <td style={{ ...TD, whiteSpace: "nowrap", color: "#8c919c" }}>{r.lastQuotedAt ? dateYear(r.lastQuotedAt) : "—"}</td>
-                {PART_DOC_KINDS.map((k) => (
+                {showCol("quoted") && <td style={{ ...TD, textAlign: "right", fontFamily: "var(--font-mono)" }}>{r.quotes}</td>}
+                {showCol("lastQuoted") && <td style={{ ...TD, whiteSpace: "nowrap", color: "#8c919c" }}>{r.lastQuotedAt ? dateYear(r.lastQuotedAt) : "—"}</td>}
+                {PART_DOC_KINDS.filter((k) => showCol(k)).map((k) => (
                   <td key={k} style={{ ...TD, minWidth: 200 }}>
                     <SlotCell sku={r.sku} kind={k} view={r[k]} onUploaded={(sku, documentId, fileName) => setJustUploaded({ sku, documentId, fileName })} />
                   </td>
                 ))}
-                <td style={{ ...TD, minWidth: 140 }}>
-                  <ImageCell sku={r.sku} view={r.image} />
-                </td>
+                {showCol("image") && (
+                  <td style={{ ...TD, minWidth: 140 }}>
+                    <ImageCell sku={r.sku} view={r.image} />
+                  </td>
+                )}
               </tr>
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={5 + PART_DOC_KINDS.length} style={{ ...TD, textAlign: "center", color: "#8c919c", padding: 28 }}>Nothing matches these filters.</td>
+                <td colSpan={columnCount(shown)} style={{ ...TD, textAlign: "center", color: "#8c919c", padding: 28 }}>Nothing matches these filters.</td>
               </tr>
             )}
           </tbody>

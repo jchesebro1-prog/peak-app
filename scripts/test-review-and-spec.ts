@@ -52404,3 +52404,43 @@ import { CUSTOM_PART_MARGIN as t302Margin, customPartSell as t302Sell } from "@/
   ok(card302.includes("p.customError") && card302.includes("p.savingCustom") && card302.includes("customSavedNote") && card302.includes("Auto · "),
     "#302: the section card renders the error, the Saving… state, the saved-to-catalog note and the Auto hint");
 }
+
+/* ======================================================================
+   #303 — Catalog → Datasheets table: bounded scroll box, sticky header +
+   Part column, per-viewer Columns toggle. Pure column rules + source pins.
+   ====================================================================== */
+import {
+  COLUMNS_STORAGE_KEY as t303Key,
+  OPTIONAL_COLUMN_KEYS as t303Keys,
+  columnCount as t303Count,
+  parseStoredHiddenColumns as t303Parse,
+  sanitizeHiddenColumns as t303Sanitize,
+  tableMinWidth as t303MinW,
+  toggleHiddenColumn as t303Toggle,
+  visibleColumns as t303Visible,
+} from "@/app/(app)/catalog/documents/columns";
+{
+  ok(t303Key === "catalog-documents-columns-v1", "#303: the columns choice persists under catalog-documents-columns-v1");
+  ok(t303Keys.join(",") === "quoted,lastQuoted,datasheet,specsheet,manual,image", "#303: the optional columns are Quoted, Last quoted, the three slots and Image — never Part");
+  ok(t303Sanitize(["image", "part", "select", 7, null, "image", "quoted"]).join(",") === "quoted,image", "#303: sanitize drops unknown keys (Part and select can never be hidden), non-strings and duplicates, in column order");
+  ok(t303Sanitize("image").length === 0 && t303Sanitize(null).length === 0 && t303Sanitize({ 0: "image" }).length === 0, "#303: a non-array stored value means nothing hidden");
+  ok(t303Parse(null).length === 0 && t303Parse("{not json").length === 0 && t303Parse('["manual"]').join(",") === "manual", "#303: parse tolerates a missing or corrupt value and reads a valid one");
+  ok(t303Visible([]).length === 6 && t303Visible(["manual", "image"]).join(",") === "quoted,lastQuoted,datasheet,specsheet", "#303: visible columns are the complement of the hidden list");
+  ok(t303Count(t303Visible([])) === 8 && t303Count(t303Visible(["quoted", "image"])) === 6 && t303Count([]) === 2, "#303: column count = select box + Part + visible optional columns (the empty-state colSpan)");
+  ok(t303MinW(t303Visible([])) > t303MinW(t303Visible(["manual"])) && t303MinW(t303Visible(["manual"])) > t303MinW(t303Visible(["manual", "image"])) && t303MinW(t303Visible([])) >= 1080, "#303: hiding columns narrows the table's min-width");
+  ok(t303Toggle([], "image").join(",") === "image" && t303Toggle(["image"], "image").length === 0 && t303Toggle(["quoted"], "manual").join(",") === "quoted,manual", "#303: toggling a column flips it in the hidden list");
+
+  const dir303 = "src/app/(app)/catalog/documents";
+  const client303 = readFileSync(join(process.cwd(), dir303, "documents-client.tsx"), "utf8");
+  const page303 = readFileSync(join(process.cwd(), dir303, "page.tsx"), "utf8");
+  ok(page303.includes('className="pk-content" style={{ maxWidth: 1680 }}') && !page303.includes("maxWidth: 1240"), "#303: the Datasheets page uses a wider (1680) content cap");
+  ok(/overflow: "auto", maxHeight: "calc\(100dvh - 220px\)", minHeight: 320/.test(client303), "#303: the table card is a bounded scroll box so the horizontal scrollbar stays on screen");
+  ok(client303.includes('position: "sticky", top: 0') && client303.includes("PART_TH") && client303.includes("zIndex: 4") && client303.includes("CHECK_TD") && client303.includes("PART_TD"),
+    "#303: header row sticks to the top; the select box and Part columns stick to the left, corner cells on top");
+  ok(/STICKY_BG = "#fff"/.test(client303) && /PART_TD[^\n]*background: STICKY_BG/.test(client303) && /CHECK_TD[^\n]*background: STICKY_BG/.test(client303), "#303: sticky body cells keep an opaque background");
+  ok(client303.includes("COLUMNS_STORAGE_KEY") && /try \{\s*setHidden\(parseStoredHiddenColumns\(window\.localStorage\.getItem/.test(client303) && /try \{\s*window\.localStorage\.setItem\(COLUMNS_STORAGE_KEY/.test(client303),
+    "#303: the choice is read in an effect after mount and written, both inside try/catch");
+  ok(client303.includes("colSpan={columnCount(shown)}") && client303.includes("tableMinWidth(shown)") && !client303.includes("minWidth: 1080"), "#303: colSpan and min-width follow the visible columns");
+  ok(client303.includes('e.key === "Escape"') && client303.includes('document.addEventListener("mousedown"') && client303.includes("Show all"), "#303: the Columns popover closes on Escape / outside click and has Show all");
+  ok(client303.includes("position: \"sticky\", top: 8, zIndex: 5"), "#303: the bulk-actions bar stays sticky");
+}
