@@ -46,3 +46,10 @@ against `docs/superpowers/fixtures/p2b-quote-document-no-alternates.json`, writt
 - `npm run test:specs`: 13241 PASS / 0 FAIL (baseline 13196)
 - `npx next build`: OK
 - Visual check: headless-Chrome screenshot of a print render looked right (block between bands and options box).
+
+## Fix round 1
+
+- quote-document.tsx: an alternate system's option lines are now kept out of the Optional additions box only when that system actually prints in the Alternates block (`printedAltIds`, built from `alternateGroups`). An option-only alternate (sell $0, not printed) routes its option lines to the box as before the phase.
+- Empty-narrative alternate text is now "Scope and pricing for this alternate are shown above." (the old pinned test updated).
+- Tests: "#P2b document fix" block appended to scripts/test-review-and-spec.ts (option-only alternate -> box, no Alternates block; printing alternate keeps option in band, out of box; new empty-narrative text) in print and web layouts.
+- Gates: tsc 0, eslint clean, test:specs 13246 PASS / 0 FAIL (baseline 13241 + 5); no-alternates byte-identical fixture passes.

@@ -468,7 +468,7 @@ function SystemBody({ ps, p, lineCols, freightRowLabel, alternate }: { ps: DocSy
         const blocks = narrativeBlocks(ps.narrative);
         // Phase 2b: an empty alternate never claims to be "included in the total".
         if (!blocks.length && !ps.keyProducts.length)
-          return alternate ? "Priced separately — not included in the total." : "System scope and pricing are included in the total above.";
+          return alternate ? "Scope and pricing for this alternate are shown above." : "System scope and pricing are included in the total above.";
         return (
           <>
             {renderNarrativeBlocks(blocks)}
@@ -583,6 +583,10 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
     systems: ag.sections.map((sec) => ({ ps: docSystem(sec, "A" + ++altNum, p), options: p.pdfOptions ? sec.items.filter((it) => it.option) : [] })),
   }));
   const altCount = altNum;
+  // The alternate systems that actually print in the Alternates block; an
+  // alternate that doesn't (no sell, so nothing prints) can't carry its option
+  // lines there, so they stay in the Optional additions box as before.
+  const printedAltIds = new Set(alternateGroups.flatMap((ag) => ag.sections.map((sec) => sec.id)));
 
   // #245 final review: any POR line left on a SENT portal-catalog quote
   // (staff sent it before every price-on-request item was resolved) means
@@ -594,9 +598,9 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
 
   const lineCount = previewSections.reduce((a, s) => a + s.lines.length, 0);
   const optionItems: Array<{ sec: string; it: SpecItem }> = [];
-  // Phase 2b: an alternate's option lines print inside its own band instead.
+  // Phase 2b: a PRINTED alternate's option lines print inside its own band instead.
   p.sections.forEach((sec) =>
-    sec.alternate === true ? undefined : sec.items.forEach((it) => {
+    sec.alternate === true && printedAltIds.has(sec.id) ? undefined : sec.items.forEach((it) => {
       if (it.option) optionItems.push({ sec: sec.name, it });
     })
   );

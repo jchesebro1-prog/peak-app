@@ -54753,7 +54753,7 @@ import { qd293Props as p2bdProps, qd293Sections as p2bdSections, qdP2bNoAltCases
   const emptyAlt = alts().map((s) => (s.id === "a2" ? { ...s, narrative: "" } : s));
   const ea = p2bdRender(p2bdProps({ sections: [...inTotal(), ...emptyAlt], groups: G }));
   const eaBlock = ea.slice(ea.indexOf('class="est-alts"'), ea.indexOf("Optional additions"));
-  ok(eaBlock.includes("Priced separately — not included in the total.</div>") && !eaBlock.includes("included in the total above") && ea.slice(0, ea.indexOf('class="est-alts"')).includes("System scope and pricing are included in the total above."),
+  ok(eaBlock.includes("Scope and pricing for this alternate are shown above.</div>") && !eaBlock.includes("included in the total above") && ea.slice(0, ea.indexOf('class="est-alts"')).includes("System scope and pricing are included in the total above."),
     "#P2b document: an empty narrative alternate never reads \"included in the total above\" (body systems still do)");
 
   // appendix: In-total only
@@ -54783,4 +54783,35 @@ import { qd293Props as p2bdProps, qd293Sections as p2bdSections, qdP2bNoAltCases
   ok((doc.match(/function docSystem\(/g) || []).length === 1 && doc.includes("alternateGroupsForPrint(p.sections, p.groups)") && doc.includes(".filter((sec) => sec.alternate !== true && (systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0))"),
     "#P2b document: printed systems are built once (docSystem) for both, the body filter leaving alternate systems out");
   ok(doc.includes('className="est-secband est-althead"'), "#P2b document: the block title keeps with its first band (est-secband break rules)");
+}
+
+/* #P2b document fix — an option-only alternate's option lines still print; clearer empty-alternate text. */
+{
+  const fxProps = p2bdProps, fxSections = p2bdSections, fxRender = p2bdRender;
+  type FxSec = ReturnType<typeof fxSections>[number];
+  const fxLn = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 100, price: 400, ...extra });
+  const fxG = [
+    { id: "g-a", name: "Stage", alternate: false },
+    { id: "g-x", name: "Upgrades", alternate: true },
+  ];
+  const fxIn = () => fxSections().map((s) => (s.id === "s2" || s.id === "s3" ? { ...s, groupId: "g-a" } : s));
+  const optOnly = { id: "o1", name: "Options only", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", items: [fxLn(21, { option: true, desc: "Orphan option line" })] } as unknown as FxSec;
+  const printing = { id: "o2", name: "Printing alt", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", items: [fxLn(22), fxLn(23, { option: true, desc: "Banded option line" })] } as unknown as FxSec;
+  for (const layout of [undefined, "web"] as const) {
+    const tag = layout ?? "print";
+    const a = fxRender({ ...fxProps({ sections: [...fxIn(), optOnly], groups: fxG }), layout });
+    const aBox = a.slice(a.indexOf("Optional additions"), a.indexOf('class="est-totals"'));
+    ok(a.indexOf("Optional additions") > 0 && aBox.includes("Orphan option line") && aBox.includes("Options only") && !a.includes("est-alts") && !a.includes("alternate"),
+      `#P2b document fix (${tag}): an option-only alternate's option line appears in the Optional additions box, with no Alternates block`);
+    const b = fxRender({ ...fxProps({ sections: [...fxIn(), printing], groups: fxG }), layout });
+    const bBlock = b.slice(b.indexOf('class="est-alts"'), b.indexOf("Optional additions"));
+    const bBox = b.slice(b.indexOf("Optional additions"), b.indexOf('class="est-totals"'));
+    ok(bBlock.includes("Banded option line") && !bBox.includes("Banded option line"),
+      `#P2b document fix (${tag}): a printing alternate keeps its option line in its band, out of the Optional additions box`);
+  }
+  const emptyNarr = { id: "o3", name: "Empty narrative alt", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", presentation: "narrative", narrative: "", items: [fxLn(24)] } as unknown as FxSec;
+  const en = fxRender(fxProps({ sections: [...fxIn(), emptyNarr], groups: fxG }));
+  const enBlock = en.slice(en.indexOf('class="est-alts"'));
+  ok(enBlock.includes("Scope and pricing for this alternate are shown above.") && !enBlock.includes("Priced separately — not included in the total.</div>"),
+    "#P2b document fix: an empty-narrative alternate reads 'Scope and pricing for this alternate are shown above.'");
 }
