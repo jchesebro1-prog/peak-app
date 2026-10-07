@@ -341,7 +341,19 @@ export type Quote = {
    *  package page, append-only, ≤ 200. Written only by appendClientResponse;
    *  update() drops it; never content, never snapshotted. Staff-only. */
   clientResponses?: ClientResponse[] | null;
+  /** Estimator Phase 3 — the comms threads this estimate was emailed on
+   *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
+   *  by recordEstimateEmail under the row lock; update() drops it so an
+   *  Estimator save can never erase it; never content, never snapshotted. */
+  estimateEmails?: EstimateEmailEntry[] | null;
 };
+
+/** One emailed copy of the estimate: the comms thread, the sent revision it
+ *  carried, when, by whom (user name) and the To line. */
+export type EstimateEmailEntry = { threadId: string; rev: number; at: number; by: string; to: string };
+
+/** Most entries kept on a quote; the oldest are dropped past it. */
+export const ESTIMATE_EMAILS_MAX = 50;
 
 /** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
 export type QuoteShareLink = {
@@ -790,6 +802,8 @@ export async function update(
     // #301 slice C: the drawings list and the client responses have their own writers.
     delete clean.packageFiles;
     delete clean.clientResponses;
+    // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
+    delete clean.estimateEmails;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -1098,6 +1112,35 @@ export async function recordShareOpen(id: string, rev: number, now: number): Pro
     const next = nextOpens(doc.shareOpens, rev, now);
     if (!next) return;
     doc.shareOpens = next;
+    wrote = true;
+  });
+  return wrote;
+}
+
+/**
+ * Estimator Phase 3 — the ONLY writer of `Quote.estimateEmails`: remember
+ * that this estimate went out on a comms thread. Under the row lock, append-
+ * only, de-duplicated by threadId (a repeat is a no-op), capped at
+ * ESTIMATE_EMAILS_MAX with the oldest dropped. Never bumps `updatedAt` and
+ * never changes content. false = nothing written (unknown quote, a malformed
+ * entry, or the thread was already recorded).
+ */
+export async function recordEstimateEmail(id: string, entry: EstimateEmailEntry): Promise<boolean> {
+  const threadId = typeof entry?.threadId === "string" ? entry.threadId.trim() : "";
+  if (!threadId || threadId.length > 200) return false;
+  if (!Number.isSafeInteger(entry.rev) || entry.rev < 0 || !Number.isFinite(entry.at)) return false;
+  const clean: EstimateEmailEntry = {
+    threadId,
+    rev: entry.rev,
+    at: entry.at,
+    by: String(entry.by ?? "").slice(0, 200),
+    to: String(entry.to ?? "").slice(0, 1000),
+  };
+  let wrote = false;
+  await patchQuote(id, (doc) => {
+    const cur = Array.isArray(doc.estimateEmails) ? doc.estimateEmails : [];
+    if (cur.some((e) => !!e && e.threadId === threadId)) return;
+    doc.estimateEmails = [...cur, clean].slice(-ESTIMATE_EMAILS_MAX);
     wrote = true;
   });
   return wrote;

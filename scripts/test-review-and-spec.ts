@@ -11381,6 +11381,7 @@ seeded()
   .then(() => specRecordsBomSeamAsyncChecks())
   .then(() => p2bConsumersAsyncChecks())
   .then(() => p2bOutputsAsyncChecks())
+  .then(() => p3EstimateEmailsAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
@@ -54998,4 +54999,67 @@ async function p2bOutputsAsyncChecks(): Promise<void> {
     "#P2b outputs (DB): a submitted alternate id is accepted, recorded by its label and priced into the selection total; the status stays sent");
   const bad = await R.submitClientResponse("accept", QID, tok, { name: "Pat", sectionIds: ["nope"] }, "198.51.100.2-" + salt, deps);
   ok(!bad.ok && bad.error === "Check at least one scope." && (await Q.get(QID))!.clientResponses?.length === 1, "#P2b outputs (DB): an unknown id alone is refused and nothing is written");
+}
+
+// ---- #P3 compose: Estimator Phase 3 (Send & track) pure email helpers ----
+import {
+  ESTIMATE_EMAIL_ATTACH_MAX as p3ComposeMax, FOLLOW_UP_CHOICES as p3ComposeFollow, attachmentsFit as p3ComposeFit,
+  estimateEmailDefaults as p3ComposeDefaults, parseRecipients as p3ComposeParse, summarizeThread as p3ComposeSummarize, withLink as p3ComposeWithLink,
+} from "@/lib/estimate-email/compose";
+{
+  const base = { projectName: "North HS Auditorium", estimateNumber: "EST-1042", contactName: "Pat Rivera", contactEmail: "pat@school.org", senderName: "Sam Mills", senderEmail: "sam@peak.com", leadName: "Lee Lead", leadEmail: "lee@peak.com" };
+  const d = p3ComposeDefaults(base);
+  ok(d.to === "pat@school.org" && d.cc === "lee@peak.com", "#P3 compose: defaults — To is the contact, Cc is the Lead estimator");
+  ok(d.subject === "North HS Auditorium — estimate EST-1042", "#P3 compose: defaults — subject is `<project> — estimate <EST>`");
+  ok(d.body.split("{link}").length === 2 && d.body.includes("Hi Pat,") && d.body.trimEnd().endsWith("Sam Mills"), "#P3 compose: defaults — body holds {link} once, the contact's first name and the sender's sign-off");
+  ok(p3ComposeDefaults({ ...base, leadEmail: "SAM@peak.com" }).cc === "" && p3ComposeDefaults({ ...base, leadEmail: "" }).cc === "", "#P3 compose: defaults — Cc blank when the lead is the sender (any case) or has no address");
+  ok(p3ComposeDefaults({ ...base, contactName: "  ", contactEmail: "" }).body.startsWith("Hi there,") && p3ComposeDefaults({ ...base, contactEmail: "" }).to === "", "#P3 compose: defaults — first name falls back to \"there\"; To blank without a contact email");
+
+  ok(p3ComposeWithLink("a {link} b {link}", "https://x/y") === "a https://x/y b https://x/y", "#P3 compose: withLink replaces every {link}");
+  ok(p3ComposeWithLink("Hello\n\n", "https://x/y") === "Hello\n\nhttps://x/y" && p3ComposeWithLink("", "https://x/y") === "\n\nhttps://x/y", "#P3 compose: withLink appends the URL on its own line when there is no {link}");
+
+  const pr = p3ComposeParse(" a@b.com; C@D.org,\n a@B.com ,Pat <pat@x.io> ");
+  ok(pr.ok && pr.list.join("|") === "a@b.com|C@D.org|Pat <pat@x.io>", "#P3 compose: parseRecipients splits on comma / semicolon / newline, trims and de-duplicates case-insensitively");
+  const bad = p3ComposeParse("a@b.com, nope, x@y, @z.com");
+  ok(!bad.ok && bad.bad.join("|") === "nope|x@y|@z.com", "#P3 compose: parseRecipients names every bad entry");
+  const empty = p3ComposeParse("  ;, \n");
+  ok(empty.ok && empty.list.length === 0, "#P3 compose: parseRecipients — blank input is ok and empty");
+
+  ok(p3ComposeMax === 15 * 1024 * 1024 && p3ComposeFollow.join() === "0,2,3,5,7,14", "#P3 compose: constants — 15 MB cap; follow-ups Off,2,3,5,7,14");
+  ok(p3ComposeFit([]) && p3ComposeFit([p3ComposeMax]) && p3ComposeFit([p3ComposeMax - 1, 1]) && !p3ComposeFit([p3ComposeMax, 1]) && !p3ComposeFit([-5, p3ComposeMax + 5]) && !p3ComposeFit([NaN]), "#P3 compose: attachmentsFit — sum ≤ cap, bad sizes never fit");
+
+  const thread = { id: "C-1", subject: "Estimate", contactEmail: "pat@school.org", unread: true, createdAt: 50, messages: [
+    { direction: "out" as const, at: 100, author: "Sam Mills", body: "Hi <b>Pat</b>,&nbsp;see<br>attached &amp; link", gmailId: "g1", to: "pat@school.org" },
+    { direction: "in" as const, at: 200, author: "Pat", fromEmail: "pat@school.org", body: "<style>p{}</style><p>Looks   good</p>" + "x".repeat(400) },
+  ] };
+  const sum = p3ComposeSummarize(thread)!;
+  ok(sum.threadId === "C-1" && sum.subject === "Estimate" && sum.to === "pat@school.org" && sum.sentAt === 100 && sum.delivered && sum.unread === 1, "#P3 compose: summarizeThread — id, subject, to, first-out time, delivered (an out message has gmailId), unread count");
+  ok(sum.messages[0].snippet === "Hi Pat, see attached & link" && sum.messages[0].from === "Sam Mills" && !sum.messages[0].unread && sum.messages[1].unread && sum.messages[1].from === "pat@school.org", "#P3 compose: summarizeThread — html stripped to plain text; only inbound after our last send is unread");
+  ok(sum.messages[1].snippet.length <= 280 && sum.messages[1].snippet.startsWith("Looks good") && sum.messages[1].snippet.endsWith("…"), "#P3 compose: summarizeThread — snippets cap at 280 characters");
+  ok(!p3ComposeSummarize({ ...thread, unread: false })!.messages.some((m) => m.unread) && p3ComposeSummarize({ ...thread, unread: false })!.unread === 0, "#P3 compose: summarizeThread — nothing is unread on a read thread");
+  ok(!p3ComposeSummarize({ ...thread, messages: [{ ...thread.messages[0], gmailId: undefined }] })!.delivered, "#P3 compose: summarizeThread — a local-only send is not delivered");
+  ok(p3ComposeSummarize(null) === null && p3ComposeSummarize({}) === null && p3ComposeSummarize("x") === null && p3ComposeSummarize({ id: "C-2" })!.messages.length === 0, "#P3 compose: summarizeThread — non-threads are null; a message-less thread summarises empty");
+}
+
+async function p3EstimateEmailsAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const QID = fixtureId(303, "p3-estimate-emails");
+  await Q.create({ id: QID, name: "#P3 estimateEmails", customer: "Spec fixture", customerId: null, owner: "Lead P3", quoteType: "system", source: "estimator", spec: { sections: [], mobs: [] } });
+  registerFixture("quotes", QID);
+  const e = (n: number) => ({ threadId: "C-P3-" + n, rev: 1, at: 1000 + n, by: "Sam", to: "pat@school.org" });
+  const updatedAt = (await Q.get(QID))!.updatedAt;
+  ok(await Q.recordEstimateEmail(QID, e(1)) && (await Q.get(QID))!.estimateEmails?.length === 1, "#P3 compose (DB): recordEstimateEmail appends an entry");
+  ok(!(await Q.recordEstimateEmail(QID, { ...e(1), at: 9999 })) && (await Q.get(QID))!.estimateEmails?.length === 1 && (await Q.get(QID))!.estimateEmails![0].at === 1001, "#P3 compose (DB): a repeat threadId is a no-op");
+  ok(!(await Q.recordEstimateEmail(QID, { ...e(2), threadId: " " })) && !(await Q.recordEstimateEmail(QID, { ...e(2), rev: 1.5 })) && !(await Q.recordEstimateEmail("Q-NOPE-P3", e(2))) && (await Q.get(QID))!.estimateEmails?.length === 1, "#P3 compose (DB): malformed entries and unknown quotes write nothing");
+  // A normal Estimator save patch (no estimateEmails) leaves it alone; even a stale patch carrying the key cannot erase or replace it.
+  ok((await Q.get(QID))!.updatedAt === updatedAt, "#P3 compose (DB): recording never bumps updatedAt");
+  await Q.update(QID, { name: "#P3 estimateEmails (saved)" });
+  ok((await Q.get(QID))!.estimateEmails?.length === 1 && (await Q.get(QID))!.name === "#P3 estimateEmails (saved)", "#P3 compose (DB): an Estimator save patch without estimateEmails keeps it");
+  await Q.update(QID, { estimateEmails: [] });
+  await Q.update(QID, { estimateEmails: null });
+  ok((await Q.get(QID))!.estimateEmails?.length === 1, "#P3 compose (DB): update() drops a patch that carries estimateEmails — the list is recordEstimateEmail's alone");
+  for (let n = 2; n <= 52; n++) await Q.recordEstimateEmail(QID, e(n));
+  const list = (await Q.get(QID))!.estimateEmails!;
+  ok(list.length === 50 && list[0].threadId === "C-P3-3" && list[49].threadId === "C-P3-52", "#P3 compose (DB): capped at 50 — the oldest entries are dropped");
 }
