@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { apiEnvelope, authorizeDisplaysRequest, catalogEtag, decodeDisplaysCursor, displayTimestamp, displaysRateHeaders, displaysRateLimit, encodeDisplaysCursor, isAfterDisplaysCursor, publicCatalogPart, unauthorizedMessage } from "@/lib/displays-api";
 import type { SpecCatalogPart } from "@/lib/bid-spec";
 import { allSections } from "@/lib/stores/spec-sections";
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
   const filteredParts = parts
     .filter((part) => !since || displayTimestamp(part) > since)
     .filter((part) => !category || part.category === category)
-    .filter((part) => !q || [part.sku, part.desc, part.mfr, part.manufacturerPartNumber, part.manufacturerModelNumber].some((value) => value?.toLowerCase().includes(q)))
+    .filter((part) => !q || partSearchHaystack(part).includes(q))
     .sort((a, b) => displayTimestamp(b) - displayTimestamp(a) || a.id.localeCompare(b.id))
     .filter((part) => !cursor || isAfterDisplaysCursor(part, cursor));
   const page = filteredParts.slice(0, limit);

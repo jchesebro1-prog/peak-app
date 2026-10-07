@@ -1,4 +1,5 @@
 import { listDocsFiltered } from "@/db/doc-store";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { getMany, list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
@@ -50,7 +51,9 @@ export type SpecPickerPart = {
 
 export const PICKER_LIMIT = 60;
 const CANDIDATE_CAP = 2000;
-const TEXT_FIELDS = ["sku", "desc", "mfr"] as const;
+// #302 — `formerSkus` is a JSON array; `doc->>'formerSkus'` is its text form, so the
+// LIKE prefilter still finds a retired order # (the JS filter below is exact).
+const TEXT_FIELDS = ["sku", "desc", "mfr", "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus"] as const;
 const SPEC_TEXT_FIELDS = ["specBody", "specSameAs"] as const;
 
 export async function searchSpecParts(doc: Pick<SpecDocument, "sectionId" | "products">, q: string, showAll: boolean): Promise<SpecPickerPart[]> {
@@ -69,8 +72,7 @@ export async function searchSpecParts(doc: Pick<SpecDocument, "sectionId" | "pro
   const candidates = rows.filter((part) => {
     if (onDoc.has(part.sku.toUpperCase())) return false;
     if (!query) return true;
-    const hay = `${part.sku} ${part.desc || ""} ${part.mfr || ""}`.toLowerCase();
-    return hay.includes(query);
+    return partSearchHaystack(part).includes(query);
   });
 
   // Same-as targets: exact-key reads of each pointer and its uppercase.

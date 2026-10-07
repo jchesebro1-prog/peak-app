@@ -10682,6 +10682,28 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   } else ok(false, "#302 plan: duplicate-SKU sheet parses");
 }
 
+/* --- #302 search: the spec picker, typeahead, datasheets and Displays API --- */
+{
+  // typeahead-rank: Model #, MFR P/N and former SKUs join the haystack; category stays.
+  const tp = { sku: "Symetrix:Jupiter 4", desc: "DSP", mfr: "Symetrix", category: "Audio", manufacturerPartNumber: "80-0043", manufacturerModelNumber: "Jupiter 4", formerSkus: ["80-0042-OLD"] };
+  ok(catalogFilter("80-0042-old", tp) && catalogFilter("jupiter", tp) && catalogFilter("80-0043 audio", tp) && !catalogFilter("edge", tp), "#302 search: typeahead catalogFilter matches former SKU, Model #, MFR P/N and category");
+  ok(catalogFilter("dsp", { sku: "X", desc: "DSP", formerSkus: null, manufacturerModelNumber: null }), "#302 search: typeahead rows without the new fields still match");
+  // datasheets: documentRowMatches reads formerSkus (present only when non-empty).
+  const dsIdx = buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] });
+  const dsRow = documentRow({ sku: "Symetrix:Jupiter 4", quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: "Symetrix:Jupiter 4", desc: "DSP", category: "Audio", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", formerSkus: ["80-0043"] }, dsIdx, () => "");
+  ok(JSON.stringify(dsRow.formerSkus) === JSON.stringify(["80-0043"]) && documentRowMatches(dsRow, parseDocumentsFilter({ q: "80-0043" })) && documentRowMatches(dsRow, parseDocumentsFilter({ q: "jupiter dsp" })) && !documentRowMatches(dsRow, parseDocumentsFilter({ q: "edge" })), "#302 search: datasheets row matches a former SKU and Model #");
+  const dsPlain = documentRow({ sku: "P", quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: "P", desc: "Plain", category: "Audio", formerSkus: [] }, dsIdx, () => "");
+  ok(!("formerSkus" in dsPlain), "#302 search: datasheets row carries formerSkus only when non-empty");
+  // source pins: the SQL-prefiltered / server-only sites use the shared haystack.
+  const pin302 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pk = pin302("src/lib/specs/picker.ts");
+  ok(/TEXT_FIELDS = \[[^\]]*"manufacturerPartNumber"[^\]]*"manufacturerModelNumber"[^\]]*"formerSkus"/.test(pk) && pk.includes("partSearchHaystack(part).includes(query)"), "#302 search: spec picker prefilter lists P/N, Model # and formerSkus and the JS filter uses the haystack");
+  for (const f of ["src/app/api/v1/displays/catalog/route.ts", "src/app/api/displays/catalog/route.ts"]) {
+    const src = pin302(f);
+    ok(src.includes("partSearchHaystack(part).includes(q)") && !src.includes("part.manufacturerModelNumber].some"), `#302 search: ${f} filters q through the shared haystack (former SKUs included)`);
+  }
+}
+
 /* --- #302 pure reference rewriters (src/lib/catalog-rename/rewrite.ts) --- */
 {
   const OLD = "80-0043", NEW = "Symetrix:Jupiter 4", OTHER = "80-0099";
