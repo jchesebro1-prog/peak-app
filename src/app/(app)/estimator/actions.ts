@@ -35,6 +35,7 @@ import {
 } from "@/lib/stores/inspections";
 import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import { copySectionForTarget } from "./copy-system";
+import { normalizeSystemOrder, sanitizeGroups, withoutGroupMeta, type SystemGroup } from "@/lib/estimate-groups/groups";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf, usableTierMargin } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
@@ -129,7 +130,7 @@ type QuoteExtras = {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: PaymentTerms;
-  spec?: { sections: SpecSection[]; mobs: SpecMob[] };
+  spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[] };
   /** #143: top-level, NOT inside `spec` — the attachment proxy route reads
    *  `quote.vendorQuotes`, and file bytes buried in `spec` would be copied
    *  into every revision snapshot. */
@@ -163,6 +164,8 @@ export type SavePayload = {
   baseStatus: QuoteStatus;
   sections: SpecSection[];
   mobs: SpecMob[];
+  /** Phase 2a: the named system groups. Optional — an older caller that omits it keeps the stored groups. */
+  groups?: SystemGroup[];
   /** Always sent in full (#143) — the stored list is replaced, so removing a
    *  vendor quote in the builder actually removes it from the doc. */
   vendorQuotes: VendorQuote[];
@@ -418,6 +421,8 @@ export async function saveQuoteAction(
     };
   }
   const postedSections = credit.sections;
+  // Phase 2a: an older caller without `groups` keeps the stored ones.
+  const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
   const { sections: savedSections, anyPor, anyConfirm } = isPortalCatalog
     ? clearPricedPor(postedSections)
     : { sections: postedSections, anyPor: false, anyConfirm: false };
@@ -456,7 +461,7 @@ export async function saveQuoteAction(
     pricingTier: tier.tier,
     tierMargin: tier.margin,
     source: savedSource,
-    spec: { sections: savedSections, mobs: payload.mobs },
+    spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
     // #301 (R14): not content fields — they never re-render the estimate PDF.
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
@@ -810,11 +815,11 @@ async function placeSystemInEstimate(
       return { ok: false, error: "That estimate could not be found." };
     }
     const existingSpec = existing.spec as
-      | { sections?: SpecSection[]; mobs?: SpecMob[] }
+      | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[] }
       | null
       | undefined;
     // #282 phase 2: the target's own Rewards credit stays on ITS last system.
-    const appended = [...(existingSpec?.sections || []), ...withoutRewardCredit([placed])];
+    const appended = [...(existingSpec?.sections || []), ...withoutRewardCredit([withoutGroupMeta(placed)])];
     const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
@@ -822,7 +827,7 @@ async function placeSystemInEstimate(
       ? await storeVendorQuotes(target.quoteId, placedVq)
       : [];
     const updated = await update(target.quoteId, {
-      spec: { sections: mergedSections, mobs: existingSpec?.mobs || [] },
+      spec: { sections: mergedSections, mobs: existingSpec?.mobs || [], groups: existingSpec?.groups ?? [] },
       value: t.grand,
       margin: t.margin,
       ...(carried.length
@@ -853,7 +858,7 @@ async function placeSystemInEstimate(
       locationId: opts.sourceContext.locationId,
       source: "estimator",
       status: "draft",
-      spec: { sections: withoutRewardCredit([placed]), mobs: [] },
+      spec: { sections: withoutRewardCredit([withoutGroupMeta(placed)]), mobs: [] },
       value: t.grand,
       margin: t.margin,
       owner: opts.owner,

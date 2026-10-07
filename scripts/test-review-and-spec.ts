@@ -54121,3 +54121,35 @@ import * as p2a from "@/lib/estimate-groups/groups";
   const dropSelfUnnorm = p2a.moveSystemTo(unnormalized, [], "1", { groupId: null, beforeId: "1" });
   ok(ids(dropSelfUnnorm) === "1,2" && !("groupId" in dropSelfUnnorm[0]), "#P2a groups: moveSystemTo drop on self on a non-normal input returns a normalised result");
 }
+
+/* #P2a persistence — spec.groups is saved, loaded, and dropped when a system leaves an estimate. */
+{
+  const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const actionsSrc = src("src/app/(app)/estimator/actions.ts");
+  const pageSrc = src("src/app/(app)/estimator/page.tsx");
+  const copySrc = src("src/app/(app)/estimator/copy-system.ts");
+  const libSrc = src("src/lib/narrative/system-library.ts");
+  const keySrc = src("src/app/(app)/estimator/pdf-doc-key.ts");
+  const typesSrc = src("src/app/(app)/estimator/types.ts");
+
+  ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
+  ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
+  ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
+  ok(/\.\.\.withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\)\];/.test(actionsSrc) && /groups: existingSpec\?\.groups \?\? \[\]/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/spec: \{ sections: withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\), mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
+  ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
+  ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
+  ok(/i\.sections\.map\(withoutBuilt\)/.test(keySrc) && /i\.groups \?\? \[\]/.test(keySrc), "#P2a persistence: pdfDocKey includes groups and strips built from sections");
+  ok(/groupId\?: string;/.test(typesSrc) && /built\?: true;/.test(typesSrc) && /groups: SystemGroup\[\];/.test(typesSrc), "#P2a persistence: SpecSection.groupId/built and InitialQuote.groups are typed");
+
+  const keyBase = {
+    projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "", paymentTerms: "Unknown",
+    vendorQuotes: [], pdfOptions: {},
+  };
+  const kSec = { id: "s1", name: "A", kind: "materials", items: [] };
+  const kIn = (sections: unknown[], groups?: unknown[]) => ({ ...keyBase, sections, groups }) as unknown as Parameters<typeof pdfDocKey>[0];
+  ok(pdfDocKey(kIn([kSec])) === pdfDocKey(kIn([{ ...kSec, built: true }])), "#P2a persistence: pdfDocKey ignores built");
+  ok(pdfDocKey(kIn([kSec], [{ id: "g-a", name: "One", alternate: false }])) !== pdfDocKey(kIn([kSec], [{ id: "g-a", name: "Two", alternate: false }])), "#P2a persistence: pdfDocKey changes with a group rename");
+  ok(pdfDocKey(kIn([kSec])) === pdfDocKey(kIn([kSec], [])), "#P2a persistence: pdfDocKey treats missing groups as []");
+}

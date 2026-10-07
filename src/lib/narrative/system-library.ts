@@ -2,6 +2,7 @@ import type { Quote } from "@/lib/stores/quotes";
 import type { KeyProduct, SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { latestSentRevision } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { applyAutoFreight } from "@/app/(app)/estimator/freight-default";
 import {
@@ -246,7 +247,8 @@ export function librarySectionForLoad(
     base.freightAuto = true;
   }
   const kps = sanitizeKeyProducts(sec.keyProducts).filter((k) => keptIds.has(k.lineKey));
-  return { section: withKeyProducts(base, kps), source, vendorLinesDropped: items.length - kept.length };
+  // Phase 2a: the source estimate's group and built mark mean nothing here.
+  return { section: withKeyProducts(withoutGroupMeta(base), kps), source, vendorLinesDropped: items.length - kept.length };
 }
 
 /** Client placement of a loaded system: a fresh section id, every line

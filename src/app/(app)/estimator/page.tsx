@@ -36,6 +36,7 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type {
@@ -88,7 +89,7 @@ type QuoteDoc = Quote & {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: PaymentTerms;
-  spec?: { sections?: unknown; mobs?: unknown } | null;
+  spec?: { sections?: unknown; mobs?: unknown; groups?: unknown } | null;
 };
 
 /**
@@ -138,6 +139,7 @@ async function initialFrom(
       pricingTier: null,
       tierMargin: null,
       sections: null,
+      groups: [],
       vendorQuotes: [],
       replaces: "",
       pdfOptions: { ...DEFAULT_PDF_OPTIONS },
@@ -166,9 +168,11 @@ async function initialFrom(
     contactName = pc ? pc.name : "";
   }
   const spec = q.spec;
+  // Phase 2a: stored groups, cleaned; systems normalised into group order (unknown groupId dropped).
+  const groups = sanitizeGroups(spec?.groups);
   const sections =
     spec && Array.isArray(spec.sections) && spec.sections.length
-      ? (spec.sections as SpecSection[])
+      ? normalizeSystemOrder(spec.sections as SpecSection[], groups)
       : null;
   return {
     loadedId: q.id,
@@ -206,6 +210,7 @@ async function initialFrom(
     pricingTier: q.pricingTier ?? null,
     tierMargin: q.tierMargin ?? null,
     sections,
+    groups,
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),

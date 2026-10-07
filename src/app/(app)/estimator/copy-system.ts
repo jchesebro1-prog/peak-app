@@ -1,4 +1,5 @@
 import { rewriteQuoteSpec, type RenameMap } from "@/lib/catalog-rename/rewrite";
+import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { remapCurtainTrackKeys } from "@/lib/curtain-cut-sheets/track-link";
 import { syncLaborDraftMargins } from "./labor-group";
@@ -215,11 +216,13 @@ export function copySectionForTarget(
     laborSeedMarginOf(tgt)
   );
   delete copied.sellOverride;
+  // Phase 2a: a copy lands ungrouped and unbuilt; copying within one estimate sets its group in the hook.
+  const ungrouped = withoutGroupMeta(copied);
   // #304: priced above under the SKU the source names (the catalog map is
   // keyed by it); the copy is LIVE data, so its lines and key products then
   // move to the live SKU, and a moved line prints its new model.
   const live = opts.renames?.m.size
-    ? (rewriteQuoteSpec({ sections: [copied] }, opts.renames.m, opts.renames.models) as { sections: SpecSection[] } | null)
+    ? (rewriteQuoteSpec({ sections: [ungrouped] }, opts.renames.m, opts.renames.models) as { sections: SpecSection[] } | null)
     : null;
-  return { section: live ? live.sections[0] : copied, costsUpdated, tierRepriced, handPriced };
+  return { section: live ? live.sections[0] : ungrouped, costsUpdated, tierRepriced, handPriced };
 }

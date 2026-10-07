@@ -1,5 +1,6 @@
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { SpecSection, VendorQuote } from "./types";
+import { withoutBuilt, type SystemGroup } from "@/lib/estimate-groups/groups";
 
 /**
  * Fingerprint of what the customer PDF shows (#222). The preview compares the
@@ -23,6 +24,8 @@ export type PdfDocKeyInput = {
   assumptions: string;
   paymentTerms: string;
   sections: SpecSection[];
+  /** Phase 2a: group headings print on the document, so a rename/reorder is a document change. */
+  groups?: SystemGroup[];
   vendorQuotes: VendorQuote[];
   pdfOptions: QuotePdfOptions;
 };
@@ -44,7 +47,8 @@ export function pdfDocKey(i: PdfDocKeyInput): string {
     i.quoteNote,
     i.assumptions,
     i.paymentTerms,
-    i.sections,
+    i.sections.map(withoutBuilt),
+    i.groups ?? [],
     printedVendorQuotes(i.sections, i.vendorQuotes).map((v) => [v.id, v.vendor, v.quoteNumber, v.description, v.display, v.lines]),
     i.pdfOptions,
   ]);

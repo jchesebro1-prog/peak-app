@@ -8,6 +8,7 @@ import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemb
 import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
 import type { CurtainRequest } from "@/lib/portal-cart-types";
+import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
@@ -260,6 +261,12 @@ export type SpecSection = {
    *  the system header). Absent = inferred from the name for goal matching only
    *  (inferDiscipline) — never stored by inference. Cleaned on save. */
   discipline?: "lighting" | "rigging" | "curtain" | "av";
+  /** Phase 2a: the group (spec.groups) this system sits under; absent = ungrouped. A group id
+   *  that names no group is dropped on read and on save (normalizeSystemOrder). */
+  groupId?: string;
+  /** Phase 2a: staff-only "built" mark (collapsed in the Build step). Never printed, never in the
+   *  PDF doc key; absent when not built (never false). Any other edit to the system clears it. */
+  built?: true;
   /** #301: the client's goals for this scope (≤ 1,000, plain text). Copied
    *  from the site visit; dropped by Load system (R5). */
   clientGoals?: string;
@@ -551,6 +558,8 @@ export type InitialQuote = {
   tierMargin: number | null;
   /** Saved builder state (spec.sections) — null starts a clean estimate. */
   sections: SpecSection[] | null;
+  /** Phase 2a: named system groups (spec.groups) — [] when none. */
+  groups: SystemGroup[];
   /** Imported vendor quotes (#143) — top-level on the doc, not in spec. */
   vendorQuotes: VendorQuote[];
   /** #160 / D205 — the draft this new estimate replaces ("Change type"); "" otherwise.
