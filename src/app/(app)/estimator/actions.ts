@@ -770,7 +770,9 @@ export async function moveSystemToEstimateAction(
   // #293: blocks travel as-is (ids are kept) — sanitized like a save.
   const [movedRaw] = withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })]);
   // #301: a moved system keeps its discipline, goals and cover paragraph — cleaned like a save.
-  const moved = withSanitizedOutputFields(movedRaw);
+  // Phase 2b: a client-posted section may carry the derived `alternate` stamp / group id —
+  // stripped ONCE here, before the value is computed, so the new estimate's stored value counts it.
+  const moved = withoutGroupMeta(withSanitizedOutputFields(movedRaw));
   const placed = await placeSystemInEstimate(moved, target, {
     newName: moved.name + " (moved)",
     sourceContext,

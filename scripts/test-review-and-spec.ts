@@ -51010,7 +51010,7 @@ import type { SpecSection as E301fSec } from "@/app/(app)/estimator/types";
   // ---- the save paths sanitize ----
   const acts = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   ok(acts.includes("payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields)"), "#301 save: saveQuoteAction cleans the output fields beside the key products");
-  ok(acts.includes("const moved = withSanitizedOutputFields(movedRaw);"), "#301 move: a moved system's output fields are cleaned");
+  ok(acts.includes("const moved = withoutGroupMeta(withSanitizedOutputFields(movedRaw));"), "#301 move: a moved system's output fields are cleaned (Phase 2b: stripped once)");
   const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("));
   ok(/section = withSanitizedKeyProducts\(section\);\s+section = withSanitizedOutputFields\(section\);/.test(copyFn.slice(0, 1400)), "#301 copy: a copied system's output fields are cleaned");
 }
@@ -54512,4 +54512,20 @@ import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
   ok(fp0.linesKey === "550a2b5d", "#P2b core: linesKeyOf of a quote with no alternates is unchanged from before Phase 2b (existing approvals stay valid)");
   const fpAlt = p2bFingerprint({ value: 1500, spec: { sections: [fpSpec.sections[0], { ...fpSpec.sections[1], alternate: true }] } });
   ok(fpAlt.linesKey !== fp0.linesKey, "#P2b core: linesKeyOf differs when only a section's alternate stamp differs (flipping a group re-asks approval)");
+}
+
+/* #P2b core fix — a system moved to a NEW estimate is unstamped before its value is computed. */
+{
+  const fixSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  const fStart = fixSrc.indexOf("export async function moveSystemToEstimateAction(");
+  const fEnd = fixSrc.indexOf("\n}\n", fStart);
+  const fBody = fStart >= 0 && fEnd > fStart ? fixSrc.slice(fStart, fEnd) : "";
+  const iStrip = fBody.indexOf("withoutGroupMeta(");
+  const iPlace = fBody.indexOf("placeSystemInEstimate(");
+  const iTotals = fBody.indexOf("totals(");
+  ok(fBody.length > 0 && iStrip >= 0 && iPlace > iStrip && (iTotals < 0 || iStrip < iTotals), "#P2b core fix: moveSystemToEstimateAction applies withoutGroupMeta before placeSystemInEstimate / any totals( call (Phase 2b: stripped once)");
+  const stamped = { id: "m1", name: "Moved", kind: "materials", mfr: "", freightPct: 0, groupId: "g-b", alternate: true as const, items: [{ id: 1, sku: "S1", desc: "d", qty: 2, unit: "ea", cost: 100, price: 200 }] };
+  const rawT = p2bTotals(r282bWithout([stamped]) as never, 0);
+  const fixedT = p2bTotals(r282bWithout([p2bGroups.withoutGroupMeta(stamped)]) as never, 0);
+  ok(rawT.grand === 0 && fixedT.grand > 0, "#P2b core fix: a stamped section's sell lands in alt (grand 0) until withoutGroupMeta strips it, then grand > 0");
 }
