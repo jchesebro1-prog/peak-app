@@ -1,4 +1,4 @@
-import type { PartLite } from "./grid-bom";
+import { partLiteHaystack, type PartLite } from "./grid-bom";
 import type { PaletteQuery } from "./grid-palette";
 import { GRID_LAYERS, scopeLayerKey, typeLayerKey, type GridLayer } from "./grid-scopes";
 
@@ -94,10 +94,6 @@ export function assemblyParts(parts: PartLite[], search: string): PartLite[] {
   const q = search.trim().toLowerCase();
   return parts
     .filter((p) => p.kind === "assembly")
-    .filter(
-      (p) =>
-        !q ||
-        [p.desc, p.modelNumber, p.manufacturer].some((s) => (s || "").toLowerCase().includes(q)),
-    )
+    .filter((p) => !q || partLiteHaystack(p).includes(q))
     .sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));
 }

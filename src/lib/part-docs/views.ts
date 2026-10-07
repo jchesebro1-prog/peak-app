@@ -6,6 +6,7 @@ import {
   type DocRef,
   type SlotCoverage,
 } from "./coverage";
+import { partModel, partSearchHaystack } from "@/lib/catalog-rename/sku";
 import type { QuotedPartStat } from "./quoted-parts";
 import { compareImages, DOC_SLOT_KINDS, isDrawingKind, type DocSlotKind, type DrawingKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
 
@@ -149,6 +150,8 @@ export type DocumentRow = {
   sku: string;
   mfr: string;
   model: string;
+  /** #304 — retired order #s, searchable; present only when non-empty. */
+  formerSkus?: string[];
   desc: string;
   category: string;
   quotes: number;
@@ -164,13 +167,14 @@ function slotViews(index: CoverageIndex, sku: string, descOf: (sku: string) => s
   return out;
 }
 
-export type RowPart = { sku: string; desc: string; category: string; mfr?: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string };
+export type RowPart = { sku: string; desc: string; category: string; mfr?: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string; formerSkus?: string[] };
 
 export function documentRow(stat: QuotedPartStat, part: RowPart, index: CoverageIndex, descOf: (sku: string) => string, images: readonly ImageRef[] = []): DocumentRow {
   return {
     sku: part.sku,
     mfr: part.mfr || "",
-    model: part.manufacturerModelNumber || part.manufacturerPartNumber || "",
+    model: partModel(part), // #304: the one model rule (model → P/N → SKU tail → SKU)
+    ...(part.formerSkus?.length ? { formerSkus: part.formerSkus } : {}),
     desc: part.desc,
     category: part.category || "",
     quotes: stat.quotes,
@@ -214,7 +218,7 @@ export function documentRowMatches(r: DocumentRow, f: DocumentsFilter): boolean 
   if (f.show === "link" && !DOC_SLOT_KINDS.some((k) => r[k].state === "link-only")) return false;
   if (f.show === "covered" && !DOC_SLOT_KINDS.some((k) => r[k].state === "covered")) return false;
   if (f.q) {
-    const hay = `${r.sku} ${r.mfr} ${r.model} ${r.desc}`.toLowerCase();
+    const hay = partSearchHaystack({ sku: r.sku, mfr: r.mfr, desc: r.desc, manufacturerModelNumber: r.model, formerSkus: r.formerSkus });
     if (!f.q.toLowerCase().split(/\s+/).filter(Boolean).every((t) => hay.includes(t))) return false;
   }
   return true;

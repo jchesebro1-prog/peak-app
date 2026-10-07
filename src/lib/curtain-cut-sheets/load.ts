@@ -3,14 +3,16 @@
  * stores and blobs): never import from a client component.
  */
 import { getBlobStream } from "@/lib/blob";
+import { partModel } from "@/lib/catalog-rename/sku";
 import { isFabricPart } from "@/lib/fabric-part";
 import { shrinkImage } from "@/lib/part-docs/shrink";
-import { fabricPartsByCategory, getMany, type CatalogPart } from "@/lib/stores/catalog";
+import { fabricPartsByCategory, getMany, getManyBySku, type CatalogPart } from "@/lib/stores/catalog";
 import { listCurtainMounts } from "@/lib/stores/curtain-mounts";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getProject } from "@/lib/stores/grid-projects";
 import { listManufacturers, manufacturerImageLookup } from "@/lib/stores/manufacturers";
-import { getDocuments, visibleImagesForParts } from "@/lib/stores/part-documents";
+import { getDocuments } from "@/lib/stores/part-documents";
+import { partsAndImagesBySku } from "@/lib/catalog-rename/live-reads";
 import { get as getQuote, type Quote } from "@/lib/stores/quotes";
 import { listTrackSeries } from "@/lib/stores/track-series";
 import { getSettings } from "@/lib/settings";
@@ -31,17 +33,37 @@ type FabricReaders = { getMany: (skus: readonly string[]) => Promise<CatalogPart
  * Only the fabric rows the curtains name (final review #2): their SKUs by
  * primary key; the fabric categories (never the whole catalog) only when a
  * line must be matched by its printed fabric NAME. `read` is a harness seam.
+ * #304: a line naming a renamed fabric's old SKU gets that fabric's row
+ * under the SKU it names (getMany follows the rename; the live part lists
+ * the old SKU in formerSkus), so the collector still matches it.
  */
 export async function cutSheetFabricRows(
   need: ReturnType<typeof curtainFabricLookups>,
   read: FabricReaders = { getMany, byCategory: fabricPartsByCategory },
 ): Promise<CatalogPart[]> {
-  const bySku = need.skus.length ? (await read.getMany(need.skus)).filter(isFabricPart) : [];
+  const bySku = need.skus.length ? underRequestedSkus((await read.getMany(need.skus)).filter(isFabricPart), need.skus) : [];
   const found = new Set(bySku.map((p) => p.sku));
   if (!need.byName && need.byNameIfMissing.every((s) => found.has(s))) return bySku;
   const all = await read.byCategory();
   const have = new Set(all.map((p) => p.sku));
   return [...all, ...bySku.filter((p) => !have.has(p.sku))];
+}
+
+/** `parts` plus, for each requested SKU a part lists in `formerSkus` (a
+ *  rename moved it) and no part answers directly, that part again under the
+ *  requested SKU (#304). Read-only rows for matching — never written back. */
+function underRequestedSkus(parts: CatalogPart[], requested: readonly string[]): CatalogPart[] {
+  const have = new Set(parts.map((p) => p.sku));
+  const out = [...parts];
+  for (const sku of requested) {
+    if (have.has(sku)) continue;
+    const p = parts.find((x) => (x.formerSkus ?? []).includes(sku));
+    if (p) {
+      out.push({ ...p, sku });
+      have.add(sku);
+    }
+  }
+  return out;
 }
 
 /**
@@ -71,11 +93,12 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
     partInfo: new Map(),
     grid: isGrid ? { project } : null,
   };
-  // Pass 1 names the hardware SKUs; one getMany reads their live desc/unit; pass 2 prints them.
+  // Pass 1 names the hardware SKUs; one catalog read gets their live desc/unit; pass 2 prints them.
+  // #304: keyed by the SKU the line names — a renamed part's old SKU resolves.
   const first = collectCurtainTypes(base);
   const skus = [...new Set(first.types.flatMap((t) => t.hardware.map((h) => h.sku)))];
   const result = skus.length
-    ? collectCurtainTypes({ ...base, partInfo: new Map((await getMany(skus)).map((p) => [p.sku, { desc: p.desc, unit: p.unit || "ea" }])) })
+    ? collectCurtainTypes({ ...base, partInfo: new Map([...(await getManyBySku(skus))].map(([sku, p]) => [sku, { desc: p.desc, unit: p.unit || "ea", model: partModel(p) }])) })
     : first;
 
   const doc = quoteDocumentDataFor(quote, customer, settings);
@@ -107,19 +130,21 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
 export async function cutSheetPhotoDocs(skus: readonly string[]): Promise<Map<string, PartDocument>> {
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
-  const images = await visibleImagesForParts(skus);
-  const bare: string[] = [];
+  // #304: keyed by the SKU asked for — a renamed part's old SKU (a line not
+  // yet swept) reads its photos where they now live, under the live SKU.
+  const { parts, images } = await partsAndImagesBySku(skus);
+  const noPhoto: Array<[string, CatalogPart]> = [];
   for (const sku of skus) {
     const own = images.get(sku)?.[0];
     if (own) out.set(sku, own);
-    else bare.push(sku);
+    else if (parts.has(sku)) noPhoto.push([sku, parts.get(sku)!]);
   }
-  if (!bare.length) return out;
+  if (!noPhoto.length) return out;
   const imageIdFor = manufacturerImageLookup(await listManufacturers());
   const idBySku = new Map<string, string>();
-  for (const p of await getMany(bare)) {
+  for (const [sku, p] of noPhoto) {
     const id = p.mfr ? imageIdFor(p.mfr) : null;
-    if (id) idBySku.set(p.sku, id);
+    if (id) idBySku.set(sku, id);
   }
   if (!idBySku.size) return out;
   const docs = new Map((await getDocuments([...idBySku.values()])).map((d) => [d.id, d]));

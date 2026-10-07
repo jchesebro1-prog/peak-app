@@ -36,7 +36,9 @@ export async function deletePartAction(sku: string): Promise<Result> {
   await requirePerm("manage_users");
   const clean = sku.trim();
   if (!clean) return { ok: false, error: "Missing SKU." };
-  await removePart(clean);
+  // #304: remove() deletes only a live doc at this exact id — an old SKU
+  // retired by a rename (or an already-deleted part) acts on nothing.
+  if (!(await removePart(clean))) return { ok: false, error: "That part was renamed or already deleted." };
   invalidatePortalIndex();
   revalidatePath("/catalog");
   return { ok: true };

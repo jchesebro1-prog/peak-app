@@ -10,6 +10,7 @@ import { textExtent, type Shape } from "@/lib/curtain-cut-sheets/shapes";
 import { wholeRu } from "./drag";
 import { childrenOf, laneSpan, occupiedSpan, placementFacts, ruRangeLabel } from "./layout";
 import { ruLabel } from "./rules";
+import { rackModelOf } from "./part-facts";
 import { RU_IN, type PlacementKind, type RackConfig, type RackFace, type RackLayout, type RackPartInfo, type RackPartLookup, type RackPlacement } from "./types";
 
 export const RACK_GEOM = { railIn: 1.6, panelIn: 19, marginIn: 0.6, labelSize: 0.55, ruNumberSize: 0.45 } as const;
@@ -128,7 +129,7 @@ export function rackGeometry(
     const maxW = r.w - LABEL_PAD;
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
-    const l2 = p.kind !== "reserved" && p.kind !== "vent" && p.ruHeight >= 2 ? `${clean(info?.mfr)} ${clean(p.sku)}`.trim() : "";
+    const l2 = p.kind !== "reserved" && p.kind !== "vent" && p.ruHeight >= 2 ? `${clean(info?.mfr)} ${clean(rackModelOf(info, p.sku ?? ""))}`.trim() : "";
     const size2 = labelSize * 0.8;
     const t1 = fitText(line1, labelSize, maxW);
     const t2 = l2 && l2 !== line1 ? fitText(l2, size2, maxW) : null;

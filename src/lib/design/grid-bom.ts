@@ -17,6 +17,8 @@ import type { CurtainSpec } from "@/lib/curtain-geom";
 import type { GridShape } from "./grid-symbols";
 // Pure (no store/db imports) — safe in this client-safe module.
 import { curtainSpecKey } from "@/lib/specs/record-keys";
+// Pure and import-free (#304) — client-safe.
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 
 /** The slice of a catalog part the BOM needs — structurally satisfied by
  *  stores/catalog.CatalogPart, mapped server-side and passed to the client. */
@@ -66,6 +68,14 @@ export type PartLite = {
   /** Grid-owned symbol metadata; pricing remains optional and separate. */
   manufacturer?: string;
   modelNumber?: string;
+  /** #304: the catalog part's Model # and old order numbers — search only
+   *  (same names as CatalogPart so raw rows pass straight through). Sent only
+   *  when present. */
+  manufacturerModelNumber?: string;
+  /** #304: the catalog part's MFR P/N — what a schedule prints when there is
+   *  no Model # (partModel's order). Sent only when present. */
+  manufacturerPartNumber?: string;
+  formerSkus?: string[];
   gridScope?: string;
   symbolWidth?: number;
   symbolHeight?: number;
@@ -530,4 +540,16 @@ export function bomTotals(
     cost += part.cost * q;
   }
   return { value, cost, margin: value > 0 ? (value - cost) / value : 0 };
+}
+
+/** #304: the one text a Grid part search matches — description, the Grid
+ *  model (or sku), the maker, and the catalog part's Model # + former SKUs. */
+export function partLiteHaystack(p: PartLite): string {
+  return partSearchHaystack({
+    sku: p.modelNumber || p.sku,
+    desc: p.desc,
+    mfr: p.manufacturer,
+    manufacturerModelNumber: p.manufacturerModelNumber,
+    formerSkus: p.formerSkus,
+  });
 }

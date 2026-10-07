@@ -452,6 +452,9 @@ export type CatalogHit = {
   list: number;
   mfr: string;
   pricedAt?: number;
+  /** #304 — Model # and MFR P/N (omitted when blank): the staff row leads with the model, the order # beside it. */
+  model?: string;
+  mpn?: string;
   /** #296 — rack data when the part carries any (omitted otherwise). */
   rack?: RackPartFacts;
 };

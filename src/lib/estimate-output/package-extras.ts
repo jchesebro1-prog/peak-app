@@ -18,6 +18,8 @@ export async function loadPackageExtras(hit: SharedPackage, base: string): Promi
   try {
     const docs = await revisionPackageDocs(hit.rev);
     extras.datasheets = datasheetLinks(docs.bySku, base);
+    // #304: the page looks a key product up by its line SKU — a renamed part's old one too.
+    for (const [old, live] of docs.moved) if (extras.datasheets[live]) extras.datasheets[old] = extras.datasheets[live];
     const specReady = specReadyFor(docs.parts, await allSections());
     extras.downloads = downloadsView(docs.documents, specReady, base);
   } catch (e) {

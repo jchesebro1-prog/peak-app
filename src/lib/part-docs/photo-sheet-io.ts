@@ -23,7 +23,9 @@ import { buildImageIndex } from "./views";
 
 export type ListDrive = () => Promise<{ files: DriveListedPhoto[] } | { files: null; reason: string }>;
 
-export async function readSheetFile(buf: Buffer, fileName: string): Promise<{ ok: true; grid: string[][] } | { ok: false; error: string }> {
+/** An .xlsx reads the sheet named `sheetName` (the photo sheet's "Photos" by
+ *  default; #304's crosswalk passes "Crosswalk"), else the first sheet. */
+export async function readSheetFile(buf: Buffer, fileName: string, sheetName: string = PHOTO_SHEET_NAME): Promise<{ ok: true; grid: string[][] } | { ok: false; error: string }> {
   if (/\.(csv|tsv|txt)$/i.test(fileName)) {
     const t = parseCsv(buf.toString("utf8"));
     if (!t.ok) return { ok: false, error: t.error || "That CSV couldn't be read." };
@@ -35,7 +37,7 @@ export async function readSheetFile(buf: Buffer, fileName: string): Promise<{ ok
   } catch {
     return { ok: false, error: "That file couldn't be read as an Excel workbook or CSV." };
   }
-  const ws = wb.worksheets.find((w) => w.name === PHOTO_SHEET_NAME) ?? wb.worksheets[0];
+  const ws = wb.worksheets.find((w) => w.name === sheetName) ?? wb.worksheets[0];
   if (!ws) return { ok: false, error: "That workbook has no sheets." };
   const grid: string[][] = [];
   ws.eachRow({ includeEmpty: false }, (row, n) => {

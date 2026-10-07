@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { requirePerm, requireUser } from "@/lib/session";
 import { blobEnabled, deleteBlob, putBlob } from "@/lib/blob";
 import { searchDocs } from "@/db/doc-store";
+import { partMatchesQuery } from "@/lib/catalog-rename/sku";
 import { get as getPart, list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import {
   allDocuments,
@@ -375,10 +376,7 @@ export async function searchPartsAction(q: string): Promise<DocActionResult<{ hi
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   const candidates = await searchDocs<CatalogPart>("catalog_parts", mostSelectiveToken(tokens), 200);
   const hits = candidates
-    .filter((p) => {
-      const hay = `${p.sku} ${p.desc} ${p.mfr || ""} ${p.manufacturerPartNumber || ""} ${p.manufacturerModelNumber || ""}`.toLowerCase();
-      return tokens.every((t) => hay.includes(t));
-    })
+    .filter((p) => partMatchesQuery(p, query)) // #304: + former SKUs
     .slice(0, 20)
     .map(hitOf);
   return { ok: true, hits };

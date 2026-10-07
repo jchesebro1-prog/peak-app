@@ -81,11 +81,11 @@ function SubmittalSheet({ m }: { m: CutSheetModel }) {
                   <h2 className="pk-dw-h">Mounting hardware</h2>
                   <table className="pk-dw-table">
                     <thead>
-                      <tr><th>Part</th><th>Description</th><th style={{ textAlign: "right" }}>Qty</th><th>Unit</th></tr>
+                      <tr><th>Model</th><th>Description</th><th style={{ textAlign: "right" }}>Qty</th><th>Unit</th></tr>
                     </thead>
                     <tbody>
                       {m.hardware.map((h) => (
-                        <tr key={h.sku}><td className="pk-dw-mono">{h.sku}</td><td>{h.desc}</td><td style={{ textAlign: "right" }}>{h.qty.toLocaleString("en-US")}</td><td>{h.unit}</td></tr>
+                        <tr key={h.sku}><td className="pk-dw-mono">{h.model}</td><td>{h.desc}</td><td style={{ textAlign: "right" }}>{h.qty.toLocaleString("en-US")}</td><td>{h.unit}</td></tr>
                       ))}
                     </tbody>
                   </table>

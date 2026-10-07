@@ -4,6 +4,7 @@ import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { dateYear, money } from "@/lib/format";
+import { partSearchHaystack, staffPartLabel } from "@/lib/catalog-rename/sku";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel } from "./controls";
@@ -149,7 +150,8 @@ export default async function CatalogPage({
     if (catParam !== "all" && (p.category || "Uncategorized") !== catParam) return false;
     if (unitParam !== "all" && (p.unit || "ea") !== unitParam) return false;
     if (tokens.length) {
-      const hay = [p.desc, p.sku, p.mfr, p.category].filter(Boolean).join(" ").toLowerCase();
+      // #304: + MFR P/N, Model # and former SKUs (one haystack); category stays searchable.
+      const hay = partSearchHaystack(p) + " " + (p.category || "").toLowerCase();
       if (!tokens.every((token) => hay.includes(token))) return false;
     }
     return true;
@@ -321,6 +323,24 @@ export default async function CatalogPage({
               }}
             >
               Departments
+            </Link>
+          )}
+          {/* #304 — order-number SKUs → Brand:Model from a crosswalk sheet (admin). */}
+          {isAdmin && (
+            <Link
+              href="/catalog/model-numbers"
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#16181d",
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "10px 15px",
+                textDecoration: "none",
+              }}
+            >
+              Model numbers
             </Link>
           )}
           <Link
@@ -526,6 +546,17 @@ export default async function CatalogPage({
                     >
                       {p.sku}
                     </span>
+                    {/* #304: the model leads, the order # beside it — shown only when it adds to the SKU itself. */}
+                    {(() => {
+                      const lbl = staffPartLabel(p);
+                      const text = lbl.secondary ? `${lbl.primary} · ${lbl.secondary}` : lbl.primary;
+                      return text && text !== p.sku ? (
+                        <span style={{ fontSize: 11, color: "#8c919c", display: "block", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {lbl.primary}
+                          {lbl.secondary && <span style={{ color: "#aab0bb" }}> · {lbl.secondary}</span>}
+                        </span>
+                      ) : null;
+                    })()}
                   </span>
                   <span style={{ minWidth: 0 }}>
                     <span style={{

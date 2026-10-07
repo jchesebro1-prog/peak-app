@@ -693,6 +693,18 @@ export async function setBlob(
 }
 
 /**
+ * Ids of every blob whose id starts with `prefix` (#304 — the per-user
+ * `gridFavorites:<userId>` blobs, which the rename sweep has to visit). The
+ * prefix is matched literally: `%`, `_` and `\` are escaped for LIKE.
+ */
+export async function listBlobIds(prefix: string): Promise<string[]> {
+  const db = await getDb();
+  const pattern = prefix.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const rows = await db.select({ id: blobs.id }).from(blobs).where(sql`${blobs.id} like ${pattern} escape '\\'`);
+  return rows.map((r) => r.id).sort();
+}
+
+/**
  * #226: merge `patch` into blob `id` WITHOUT replacing any key already
  * there — the mirror image of setBlob's `||` (here the EXISTING row is the
  * right-hand side, so it wins per top-level key), in one atomic statement.

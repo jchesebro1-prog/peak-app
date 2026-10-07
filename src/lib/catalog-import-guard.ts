@@ -6,6 +6,7 @@
  * and "too big".
  */
 import { mfrKey } from "./catalog-books";
+import type { ImportResolver } from "./catalog-rename/import-resolve";
 
 /** 1 MB, exactly. Applies to the CSV/TSV file, the pasted text, and .xlsx uploads for the catalog type. */
 export const MAX_CATALOG_IMPORT_BYTES = 1_048_576;
@@ -57,11 +58,23 @@ function plural(n: number, word: string): string {
  * - a new manufacturer, or any overlap → ok.
  * Unbranded parts (no mfr) are never foreign: importing them under a
  * manufacturer is how they get one.
+ *
+ * #304 — `resolve` (the importers' own buildImportResolver) judges each file
+ * SKU by the live part it resolves to: an old order number that now means a
+ * renamed `Brand:Model` part counts as overlap (or as foreign, when that part
+ * is another manufacturer's), exactly as the importer will write it. Messages
+ * still name the row's own SKU.
  */
 export function checkManufacturer(input: {
   mfr: string;
   fileSkus: string[];
+  /** #304 — each file row's MFR P/N, index-aligned with `fileSkus` ("" =
+   *  none), so a row whose SKU matches nothing but whose P/N column names one
+   *  of this manufacturer's parts counts as overlap, exactly as the importer
+   *  will resolve it. Optional; only read through `resolve`. */
+  filePns?: string[];
   catalog: CatalogRef[];
+  resolve?: ImportResolver;
 }): ManufacturerCheck {
   const typed = (input.mfr || "").trim();
   const key = mfrKey(typed);
@@ -87,12 +100,25 @@ export function checkManufacturer(input: {
     ? [...spellings.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0]
     : typed;
 
+  const pnBySku = new Map<string, string>(); // first non-blank P/N per file SKU
+  input.fileSkus.forEach((raw, i) => {
+    const s = (raw || "").trim();
+    const pn = String(input.filePns?.[i] ?? "").trim();
+    if (s && pn && !pnBySku.has(s)) pnBySku.set(s, pn);
+  });
   const fileSkus = Array.from(new Set(input.fileSkus.map((s) => (s || "").trim()).filter(Boolean)));
   const n = fileSkus.length;
+  // A SKU already on file (any spelling — the hub's own `ci` match) is judged
+  // as before; only one that matches nothing goes through the resolver.
+  const rowKey = (s: string) => {
+    const k = skuKey(s);
+    if (!input.resolve || mine.has(k) || foreignBySku.has(k)) return k;
+    return skuKey(input.resolve({ sku: s, mfr: typed, manufacturerPartNumber: pnBySku.get(s) }) ?? s);
+  };
 
   const foreign = fileSkus
-    .filter((s) => foreignBySku.has(skuKey(s)) && !mine.has(skuKey(s)))
-    .map((s) => ({ sku: s, mfr: foreignBySku.get(skuKey(s)) as string }));
+    .filter((s) => foreignBySku.has(rowKey(s)) && !mine.has(rowKey(s)))
+    .map((s) => ({ sku: s, mfr: foreignBySku.get(rowKey(s)) as string }));
   if (foreign.length) {
     const examples = foreign.slice(0, 10);
     const more = foreign.length - examples.length;
@@ -109,7 +135,7 @@ export function checkManufacturer(input: {
     };
   }
 
-  const overlap = fileSkus.filter((s) => mine.has(skuKey(s))).length;
+  const overlap = fileSkus.filter((s) => mine.has(rowKey(s))).length;
   if (mine.size > 0 && n > 0 && overlap === 0) {
     return {
       ok: false,
@@ -120,18 +146,23 @@ export function checkManufacturer(input: {
   return { ok: true, normalizedMfr, isNew: mine.size === 0, overlap };
 }
 
-export type ManufacturerGroup = { mfr: string; skus: string[] };
+/** `pns` (#304), when present, is index-aligned with `skus`: each row's MFR
+ *  P/N ("" = none). */
+export type ManufacturerGroup = { mfr: string; skus: string[]; pns?: string[] };
 
 /** Rows → one group per mfrKey, keeping the first spelling seen. Blank
  *  manufacturers form their own group (which then fails as `missing`). */
-export function groupRowsByManufacturer(rows: Array<{ mfr: string; sku: string }>): ManufacturerGroup[] {
+export function groupRowsByManufacturer(rows: Array<{ mfr: string; sku: string; pn?: string }>): ManufacturerGroup[] {
   const by = new Map<string, ManufacturerGroup>();
   for (const r of rows) {
     const mfr = (r.mfr || "").trim();
     const key = mfrKey(mfr);
-    const g = by.get(key) || { mfr, skus: [] };
+    const g = by.get(key) || { mfr, skus: [], pns: [] };
     const sku = (r.sku || "").trim();
-    if (sku) g.skus.push(sku);
+    if (sku) {
+      g.skus.push(sku);
+      g.pns!.push((r.pn || "").trim());
+    }
     by.set(key, g);
   }
   return [...by.values()];
@@ -139,10 +170,10 @@ export function groupRowsByManufacturer(rows: Array<{ mfr: string; sku: string }
 
 export type GroupCheck = { mfr: string; count: number; result: ManufacturerCheck };
 
-export function checkManufacturerGroups(groups: ManufacturerGroup[], catalog: CatalogRef[]): GroupCheck[] {
+export function checkManufacturerGroups(groups: ManufacturerGroup[], catalog: CatalogRef[], resolve?: ImportResolver): GroupCheck[] {
   return groups.map((g) => ({
     mfr: g.mfr,
     count: g.skus.length,
-    result: checkManufacturer({ mfr: g.mfr, fileSkus: g.skus, catalog }),
+    result: checkManufacturer({ mfr: g.mfr, fileSkus: g.skus, filePns: g.pns, catalog, resolve }),
   }));
 }

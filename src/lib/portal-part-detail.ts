@@ -2,7 +2,7 @@
 // prices through portal-pricing.ts. Never import into a client component; it
 // hands the browser sell-only `PartDetail`s (see portal-part-view.ts).
 import type { PortalSession } from "@/lib/portal";
-import { fixtureComponentPart, portalIndex, portalMfrImage, type PortalIndex } from "@/lib/portal-catalog-index";
+import { fixtureComponentPart, portalIndex, portalMfrImage, portalPart, type PortalIndex } from "@/lib/portal-catalog-index";
 import { isCustomCategory, portalFallback } from "@/lib/part-image-fallback";
 import { PORTAL_EXPIRED_COPY, portalBrowseAllowed, PORTAL_BROWSE_RATE_COPY, tilesFor } from "@/lib/portal-catalog-browse";
 import {
@@ -19,6 +19,7 @@ import { cleanCurtainRequest } from "@/lib/portal-cart-rules";
 import { priceCurtainInputs, priceFixture, priceSku, pricingContextFor, type PortalPricingContext } from "@/lib/portal-pricing";
 import type { SearchEntry } from "@/lib/portal-search";
 import { rateLimit } from "@/lib/rate-limit";
+import { partModel } from "@/lib/catalog-rename/sku";
 import { unitPriceFor } from "@/lib/portal-price-rules";
 
 /**
@@ -59,11 +60,15 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
         return p ? unitPriceFor(p, o) : null;
       },
       { images: engine?.imageIds ?? [], docs: docsFor(ix, docIds) },
-      portalFallback({ mfr: engine?.mfr, custom: isCustomCategory(engine?.category), por: !fixturePrice || fixturePrice.por }, portalMfrImage(ix))
+      portalFallback({ mfr: engine?.mfr, custom: isCustomCategory(engine?.category), por: !fixturePrice || fixturePrice.por }, portalMfrImage(ix)),
+      (sku) => {
+        const p = fixtureComponentPart(ix, sku);
+        return partModel({ sku, manufacturerModelNumber: p?.model, manufacturerPartNumber: p?.mpn });
+      }
     );
   }
 
-  const part = ix.parts.get(key);
+  const part = portalPart(ix, key); // #304: an old `?part=` bookmark opens the renamed part
   if (!part) return null;
   const accessories: SearchEntry[] = [];
   for (const sku of part.accessories) {

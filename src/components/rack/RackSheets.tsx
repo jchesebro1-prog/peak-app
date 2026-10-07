@@ -186,7 +186,7 @@ function ScheduleSheet({ data, footer }: { data: RackSheetsData; footer: string 
                 <td>{rackText(r.face)}</td>
                 <td className="rk-num">{r.qty}</td>
                 <td>{rackText(r.mfr)}</td>
-                <td>{rackText(r.sku)}</td>
+                <td>{rackText(r.model || r.sku)}</td>
                 <td>{rackText(r.desc)}</td>
                 <td className="rk-num">{rackCell(r.depthIn)}</td>
                 <td className="rk-num">{rackCell(r.weightLb)}</td>
@@ -225,7 +225,7 @@ function ScheduleSheet({ data, footer }: { data: RackSheetsData; footer: string 
               <tr key={i}>
                 <td className="rk-num">{r.qty}</td>
                 <td>{rackText(r.mfr)}</td>
-                <td>{rackText(r.sku)}</td>
+                <td>{rackText(r.model || r.sku)}</td>
                 <td>{rackText(r.desc)}</td>
                 <td className="rk-num">{rackCell(r.weightLb)}</td>
                 <td className="rk-num">{rackCell(r.watts)}</td>

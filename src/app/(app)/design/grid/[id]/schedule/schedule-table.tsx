@@ -52,7 +52,7 @@ export default function ScheduleTable({ schedule, accent }: { schedule: Schedule
             <thead>
               <tr>
                 <th style={{ ...th, width: 54 }}>Qty</th>
-                <th style={{ ...th, width: 150 }}>Part</th>
+                <th style={{ ...th, width: 150 }}>Model</th>
                 <th style={th}>Description</th>
               </tr>
             </thead>
@@ -60,7 +60,7 @@ export default function ScheduleTable({ schedule, accent }: { schedule: Schedule
               {sec.rows.map((r) => (
                 <tr key={r.partId}>
                   <td style={td}>{r.qty}</td>
-                  <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.code || r.partId}</td>
+                  <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.code || r.model || r.partId}</td>
                   <td style={td}>{r.desc}</td>
                 </tr>
               ))}
@@ -83,7 +83,7 @@ export default function ScheduleTable({ schedule, accent }: { schedule: Schedule
             <tbody>
               {wires.map((e) => (
                 <tr key={e.id}>
-                  <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{e.partId}</td>
+                  <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{e.model || e.partId}</td>
                   <td style={td}>{e.fromName} → {e.toName}</td>
                   <td style={td}>{e.lengthFt !== null ? formatMeasure(e.lengthFt, e.unit as MeasureUnit) : "unmeasured"}</td>
                 </tr>
@@ -99,7 +99,7 @@ export default function ScheduleTable({ schedule, accent }: { schedule: Schedule
         {wireFeet.map((w) => (
           <span key={w.partId}>
             {" · "}
-            <strong>{Math.ceil(w.ft)} {w.unit}</strong> {w.partId}
+            <strong>{Math.ceil(w.ft)} {w.unit}</strong> {w.model || w.partId}
             {w.unmeasured > 0 ? ` (+${w.unmeasured} unmeasured)` : ""}
           </span>
         ))}

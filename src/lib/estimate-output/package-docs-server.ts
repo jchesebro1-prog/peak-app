@@ -5,7 +5,8 @@ import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadScopedCoverage } from "@/lib/part-docs/load";
 import { resolvePackageDocs, type PackageDocument, type PackageSkuDocs } from "@/lib/part-docs/package";
 import { isDocumentId, type PartDocument } from "@/lib/part-docs/types";
-import { getMany, type CatalogPart } from "@/lib/stores/catalog";
+import { getManyBySku, type CatalogPart } from "@/lib/stores/catalog";
+import { movedSkus } from "@/lib/catalog-rename/live-reads";
 import { listFixtures } from "@/lib/stores/fixtures";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 
@@ -24,6 +25,10 @@ export type RevisionPackageDocs = {
   index: CoverageIndex;
   bySku: Map<string, PackageSkuDocs>;
   documents: PackageDocument[];
+  /** #304: the spec's SKU → its live SKU, for SKUs a rename moved. `bom`,
+   *  `parts` and `bySku` speak live SKUs; a caller keyed by the spec's own
+   *  line SKU (the package page's per-key-product datasheet) maps through this. */
+  moved: Map<string, string>;
 };
 
 function hasAssemblyLines(spec: unknown): boolean {
@@ -35,16 +40,35 @@ export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDoc
   const src = { spec } as Pick<Quote, "spec">;
   const fixtures = hasAssemblyLines(spec) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
   const rackOf = (id: string) => fixtures.get(id);
-  // Pass 1 lists every sku a rack expands to, so one getMany covers the
+  // Pass 1 lists every sku a rack expands to, so one catalog read covers the
   // internal-row check pass 2 needs (labor members drop out, #296).
-  const parts0 = await getMany(quoteBom(src, rackOf).map((r) => r.sku));
-  const bom = quoteBom(src, rackOf, internalSkuCheck(parts0));
+  // #304: a sent revision keeps a renamed part's old SKU — its row is read,
+  // covered and listed under the live SKU.
+  const found = await getManyBySku(quoteBom(src, rackOf).map((r) => r.sku));
+  const parts0 = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];
+  const moved = movedSkus(found);
+  // The internal-row check is asked about the SKU each line names (old or live).
+  const isInternal = internalSkuCheck([...found].map(([sku, p]) => ({ sku, category: p.category })));
+  const bom = liveBom(quoteBom(src, rackOf, isInternal), moved);
   const inBom = new Set(bom.map((r) => r.sku));
   const parts = parts0.filter((p) => inBom.has(p.sku));
   const index = await loadScopedCoverage(parts);
   const known = new Set(parts.map((p) => p.sku));
   const { bySku, documents } = resolvePackageDocs(index, bom.filter((r) => known.has(r.sku)).map((r) => r.sku));
-  return { bom, parts, index, bySku, documents };
+  return { bom, parts, index, bySku, documents, moved };
+}
+
+/** BOM rows under their live SKUs; an old and a new SKU on one spec merge into one row. */
+function liveBom(rows: Array<{ sku: string; desc: string; qty: number }>, moved: ReadonlyMap<string, string>): Array<{ sku: string; desc: string; qty: number }> {
+  if (!moved.size) return rows;
+  const out = new Map<string, { sku: string; desc: string; qty: number }>();
+  for (const r of rows) {
+    const sku = moved.get(r.sku) ?? r.sku;
+    const cur = out.get(sku);
+    if (cur) cur.qty += r.qty;
+    else out.set(sku, { ...r, sku });
+  }
+  return [...out.values()];
 }
 
 export function revisionPackageDocs(rev: Pick<QuoteRevision, "spec">): Promise<RevisionPackageDocs> {

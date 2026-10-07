@@ -1,8 +1,10 @@
 /**
- * #121 — pure filter/rank helpers behind the shared Typeahead. No imports:
- * the spec harness runs this DB-free, and the Typeahead is a client
- * component that must not drag anything heavier into the browser bundle.
+ * #121 — pure filter/rank helpers behind the shared Typeahead. The only
+ * import is the pure, client-safe #304 search haystack: the spec harness runs
+ * this DB-free, and the Typeahead is a client component that must not drag
+ * anything heavier into the browser bundle.
  */
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 
 /** Filter, optionally rank (ascending, stable), then cap. `q` is trimmed. */
 export function typeaheadMatches<T>(
@@ -28,14 +30,26 @@ export type CatalogLike = {
   desc: string;
   mfr?: string | null;
   category?: string | null;
+  /** #304 — searched too when the row carries them. */
+  manufacturerPartNumber?: string | null;
+  manufacturerModelNumber?: string | null;
+  formerSkus?: string[] | null;
 };
 
 function haystack(p: CatalogLike): string {
-  return `${p.sku} ${p.desc} ${p.mfr || ""} ${p.category || ""}`.toLowerCase();
+  const hay = partSearchHaystack({
+    sku: p.sku,
+    desc: p.desc,
+    mfr: p.mfr || undefined,
+    manufacturerPartNumber: p.manufacturerPartNumber || undefined,
+    manufacturerModelNumber: p.manufacturerModelNumber || undefined,
+    formerSkus: p.formerSkus || undefined,
+  });
+  return p.category ? `${hay} ${p.category.toLowerCase()}` : hay;
 }
 
 /** Every whitespace-separated token must appear somewhere in
- *  sku/desc/mfr/category (the Subassemblies picker's rule, kept). Empty → all. */
+ *  sku/desc/mfr/category/MFR P-N/Model #/former SKUs (the Subassemblies picker's rule, kept). Empty → all. */
 export function catalogFilter(q: string, p: CatalogLike): boolean {
   const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!tokens.length) return true;

@@ -7,6 +7,6 @@ import type { PreparedRow } from "./parse";
  *  disagree about which rows a manufacturer check covers. */
 export function catalogGroups(rows: PreparedRow[]): ManufacturerGroup[] {
   return groupRowsByManufacturer(
-    rows.filter((r) => r.valid).map((r) => ({ mfr: String(r.values.mfr ?? ""), sku: String(r.values.sku ?? "") }))
+    rows.filter((r) => r.valid).map((r) => ({ mfr: String(r.values.mfr ?? ""), sku: String(r.values.sku ?? ""), pn: String(r.values.manufacturerPartNumber ?? "") }))
   );
 }

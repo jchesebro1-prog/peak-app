@@ -1,5 +1,5 @@
-import { getMany } from "@/lib/stores/catalog";
-import { getDocuments, visibleImagesForParts } from "@/lib/stores/part-documents";
+import { partsAndImagesBySku } from "@/lib/catalog-rename/live-reads";
+import { getDocuments } from "@/lib/stores/part-documents";
 import { listManufacturers, manufacturerImageLookup } from "@/lib/stores/manufacturers";
 import { getBlobStream } from "@/lib/blob";
 import { manufacturerFallbackSkusOf, photoSkusOf } from "@/app/(app)/estimator/narrative";
@@ -47,23 +47,24 @@ export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<
   const skus = photoSkusOf(sections);
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
-  const [parts, images] = await Promise.all([getMany(skus), visibleImagesForParts(skus)]);
-  const live = new Set(parts.map((p) => p.sku));
+  // #304: keyed by the sku the section names — a sent revision keeps a
+  // renamed part's old SKU, and its photo is found under the new one.
+  const { parts, images } = await partsAndImagesBySku(skus);
   for (const sku of skus) {
-    const doc = live.has(sku) ? images.get(sku)?.[0] : undefined;
+    const doc = parts.has(sku) ? images.get(sku)?.[0] : undefined;
     if (doc) out.set(sku, doc);
   }
   // No photo of its own: the part's manufacturer image (never for a legacy
   // allowance/custom block — its placeholder comes first).
   const fallbackOk = new Set(manufacturerFallbackSkusOf(sections));
-  const missing = skus.filter((s) => live.has(s) && !out.has(s) && fallbackOk.has(s));
+  const missing = skus.filter((s) => parts.has(s) && !out.has(s) && fallbackOk.has(s));
   if (missing.length) {
     const look = manufacturerImageLookup(await listManufacturers());
     const want = new Map<string, string>();
-    for (const p of parts) {
-      if (!missing.includes(p.sku)) continue;
+    for (const sku of missing) {
+      const p = parts.get(sku)!;
       const id = p.mfr ? look(p.mfr) : null;
-      if (id) want.set(p.sku, id);
+      if (id) want.set(sku, id);
     }
     if (want.size) {
       const byId = new Map((await getDocuments([...new Set(want.values())])).map((d) => [d.id, d]));

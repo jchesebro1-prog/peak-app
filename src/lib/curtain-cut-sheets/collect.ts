@@ -5,6 +5,7 @@
  * the quote prices and the lineset tool weighs with (decision 2). DB-free,
  * but imports steel.ts — server and harness only, never a client component.
  */
+import { partModel } from "@/lib/catalog-rename/sku";
 import { curtainCost } from "@/lib/design/curtain-pricing";
 import { CHAIN_JACK, CHAIN_NONE } from "@/lib/design/goods";
 import { computeSetWeight, DEFAULT_WEIGHTS, fabricFromPart } from "@/lib/design/steel";
@@ -15,7 +16,8 @@ import { topMarks } from "./geometry";
 import { curtainTypeKey, readCurtains, type CurtainFabricRow, type CurtainLineRef, type CutSheetCurtain, type GridProjectLite } from "./estimator-curtains";
 import { DEFAULT_MARK_SPACING_IN, MOUNT_KEY_LABELS, isMountTypeId, type CurtainMountTypeId } from "./vocab";
 
-export type CutSheetHardware = { sku: string; desc: string; qty: number; unit: string; from: "track" | "mount-rules" };
+/** `model` (#304) is what the sheet prints (partModel); `sku` stays the lookup key. */
+export type CutSheetHardware = { sku: string; model: string; desc: string; qty: number; unit: string; from: "track" | "mount-rules" };
 export type CurtainType = {
   key: string;
   sheetNo: string;
@@ -43,7 +45,7 @@ export type CollectInput = {
   trackSeries: readonly TrackSeries[];
   mounts: Partial<Record<CurtainMountTypeId, CurtainMountHardware>>;
   /** Live desc/unit for hardware SKUs (track components + mount rules). */
-  partInfo: ReadonlyMap<string, { desc: string; unit: string }>;
+  partInfo: ReadonlyMap<string, { desc: string; unit: string; model?: string }>;
   /** Loaded only for a grid quote. */
   grid: { project: GridProjectLite | null } | null;
 };
@@ -86,7 +88,7 @@ function trackHardware(curtains: CutSheetCurtain[], partInfo: CollectInput["part
       if (!comp.sku || !(comp.qty > 0)) continue;
       const cur = out.get(comp.sku);
       if (cur) cur.qty += comp.qty;
-      else out.set(comp.sku, { sku: comp.sku, desc: partInfo.get(comp.sku)?.desc || comp.label || comp.sku, qty: comp.qty, unit: comp.unit || partInfo.get(comp.sku)?.unit || "ea", from: "track" });
+      else out.set(comp.sku, { sku: comp.sku, model: partInfo.get(comp.sku)?.model || partModel({ sku: comp.sku }), desc: partInfo.get(comp.sku)?.desc || comp.label || comp.sku, qty: comp.qty, unit: comp.unit || partInfo.get(comp.sku)?.unit || "ea", from: "track" });
     }
   }
   return [...out.values()];
@@ -110,7 +112,7 @@ function ruleHardware(curtains: CutSheetCurtain[], spacingIn: number, input: Col
     const info = input.partInfo.get(row.sku);
     const cur = out.get(row.sku);
     if (cur) cur.qty += qty;
-    else out.set(row.sku, { sku: row.sku, desc: info?.desc || row.sku, qty, unit: info?.unit || "ea", from: "mount-rules" });
+    else out.set(row.sku, { sku: row.sku, model: info?.model || partModel({ sku: row.sku }), desc: info?.desc || row.sku, qty, unit: info?.unit || "ea", from: "mount-rules" });
   }
   return [...out.values()];
 }

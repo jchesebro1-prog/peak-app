@@ -91,13 +91,8 @@ export function PartSidebar({
                 </h2>
                 {detail.kind === "part" ? (
                   <div className="ps-meta">
-                    {detail.mpn && detail.mpn !== detail.sku && (
-                      <span>
-                        Mfr part # <b>{detail.mpn}</b>
-                      </span>
-                    )}
                     <span>
-                      SKU <b>{detail.sku}</b>
+                      Model <b>{detail.model}</b>
                     </span>
                     {detail.unit && detail.unit !== "ea" && (
                       <span>
@@ -357,7 +352,7 @@ function GoesWithRow({
         <Link href={href} scroll={false} className="ps-row-title">
           {t.title}
         </Link>
-        <div className="ps-row-sub">{[t.mfr, t.sku].filter(Boolean).join(" · ")}</div>
+        <div className="ps-row-sub">{[t.mfr, t.model].filter(Boolean).join(" · ")}</div>
         {add.error && <div className="ps-err">{add.error}</div>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5, flexShrink: 0 }}>

@@ -313,7 +313,7 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
                 </td>
                 <td style={PART_TD}>
                   <a href={`/catalog?edit=${encodeURIComponent(r.sku)}`} style={{ fontWeight: 650, color: "#16181d", textDecoration: "none" }}>{r.sku}</a>
-                  <div style={{ fontSize: 11.5, color: "#6b7079" }}>{[r.mfr, r.model].filter(Boolean).join(" · ")}</div>
+                  <div style={{ fontSize: 11.5, color: "#6b7079" }}>{[r.mfr, r.model !== r.sku ? r.model : ""].filter(Boolean).join(" · ")}</div>
                   <div style={{ fontSize: 11.5, color: "#8c919c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.desc}</div>
                 </td>
                 {showCol("quoted") && <td style={{ ...TD, textAlign: "right", fontFamily: "var(--font-mono)" }}>{r.quotes}</td>}

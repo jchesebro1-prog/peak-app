@@ -183,7 +183,7 @@ function Tile({
         <Link href={href} scroll={false} className="pc-title" title={t.title}>
           {t.title}
         </Link>
-        {t.kind === "fixture" ? (t.subline ? <div className="pc-subline">{t.subline}</div> : null) : <div className="pc-sku">{t.sku}</div>}
+        {t.kind === "fixture" ? (t.subline ? <div className="pc-subline">{t.subline}</div> : null) : <div className="pc-sku">{t.model}</div>}
         <div className="pc-foot">
           {t.unitPrice != null ? (
             <span className="pc-price">

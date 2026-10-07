@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { list as listCatalog } from "@/lib/stores/catalog";
 
 /**
@@ -17,8 +18,7 @@ export async function GET(req: Request) {
   const parts = await listCatalog();
   const filtered = parts
     .filter((part) => !category || part.category === category)
-    .filter((part) => !q || [part.sku, part.desc, part.mfr, part.manufacturerPartNumber, part.manufacturerModelNumber]
-      .some((value) => value?.toLowerCase().includes(q)))
+    .filter((part) => !q || partSearchHaystack(part).includes(q))
     .slice(0, limit)
     .map((part) => ({
       id: part.id,

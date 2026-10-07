@@ -1,5 +1,6 @@
-import { getMany as catalogGetMany } from "@/lib/stores/catalog";
+import { getManyBySku as catalogGetManyBySku, type CatalogPart } from "@/lib/stores/catalog";
 import { listFixtures } from "@/lib/stores/fixtures";
+import { liveRenameRefs } from "@/lib/stores/catalog-renames";
 import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import type { CopyCatalogPart, CopyFixture } from "./copy-system";
 import type { SpecItem } from "./types";
@@ -13,7 +14,12 @@ import type { SpecItem } from "./types";
  */
 export async function copyPricingFor(
   items: readonly SpecItem[]
-): Promise<{ catalog: Map<string, CopyCatalogPart>; fixtures: Map<string, CopyFixture> }> {
+): Promise<{
+  catalog: Map<string, CopyCatalogPart>;
+  fixtures: Map<string, CopyFixture>;
+  /** #304: the rename log, for copySectionForTarget to land the copy on live SKUs. */
+  renames: { m: Map<string, string>; models: Map<string, string> };
+}> {
   /* Today's catalog, for only the SKUs this section names — plus, when a line
      is a catalog-backed fixture, the resolved fixture records (costOverride
      applied) and their own parts. */
@@ -33,13 +39,20 @@ export async function copyPricingFor(
     fixtureRecords = (await listFixtures()).filter((r) => fixtureIds.has(r.id));
     fixtureRecords.forEach((r) => fixtureSkus(r).forEach((s) => skus.add(s)));
   }
-  const parts = skus.size ? await catalogGetMany([...skus]) : [];
+  // #304: keyed by the SKU each line names — Load system copies a SENT
+  // revision, which keeps a renamed part's old SKU; it re-costs from the
+  // part that SKU now means.
+  const [found, renames] = await Promise.all([
+    skus.size ? catalogGetManyBySku([...skus]) : new Map<string, CatalogPart>(),
+    liveRenameRefs(),
+  ]);
+  const parts = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];
   const catalog = new Map<string, CopyCatalogPart>();
-  for (const p of parts) {
+  for (const [sku, p] of found) {
     const cost = Number(p.cost);
     // A part with no real cost today is no basis for re-costing a line.
-    if (!p.sku || !(Number.isFinite(cost) && cost > 0) || catalog.has(p.sku)) continue;
-    catalog.set(p.sku, { sku: p.sku, cost, list: Number(p.list) || 0 });
+    if (!p.sku || !(Number.isFinite(cost) && cost > 0) || catalog.has(sku)) continue;
+    catalog.set(sku, { sku: p.sku, cost, list: Number(p.list) || 0 });
   }
   const fixtures = new Map<string, CopyFixture>();
   if (fixtureRecords.length) {
@@ -54,5 +67,5 @@ export async function copyPricingFor(
       });
     }
   }
-  return { catalog, fixtures };
+  return { catalog, fixtures, renames };
 }

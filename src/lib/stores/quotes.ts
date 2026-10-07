@@ -48,6 +48,8 @@ import {
 } from "@/lib/review-limits";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import { approvalFingerprint, approvalSnapshotMatches, type ApprovalSnapshot } from "@/lib/approval-snapshot";
+import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
+import { liveRenameRefs } from "@/lib/stores/catalog-renames";
 
 export { normalizeQuotePipeline };
 
@@ -957,6 +959,31 @@ function stampContentChange(doc: Quote, mutate: (doc: Quote) => Quote | void): Q
 }
 
 /**
+ * #304 — the catalog rename sweep's one quote writer: `rewrite` maps the
+ * LIVE `spec` (re-run here on the doc read under the row lock) to its renamed
+ * copy, or null when nothing moved. Never touches `revisions` (sent copies
+ * keep the old SKU and resolve through the redirect) and never bumps
+ * `updatedAt` (the printed date / sort key / approval version) — patchQuote
+ * still stamps `contentChangedAt`, since the document now prints the model.
+ * A #284 approval that matched before the rename is re-fingerprinted: a SKU
+ * swap is not a priced-line change. Returns the written quote (its
+ * `contentChangedAt` is what the caller marks the PDF stale as of — the
+ * bulk-writer contract in quote-pdf/schedule.ts), or null when nothing moved.
+ */
+export async function rewriteQuoteSpecRefs(id: string, rewrite: (spec: unknown) => unknown | null): Promise<Quote | null> {
+  let wrote = false;
+  const out = await patchQuote(id, (doc) => {
+    const next = rewrite(doc.spec);
+    if (next === null) return;
+    const held = !!doc.review?.approvedAgainst && approvalSnapshotMatches(doc);
+    doc.spec = next;
+    if (held) doc.review = { ...doc.review, approvedAgainst: approvalFingerprint(doc) };
+    wrote = true;
+  });
+  return wrote ? out : null;
+}
+
+/**
  * Read-modify-write the quote's `pdf` state (#222) as a compare-and-set:
  * `mutate` sees the state re-read under the row lock and returns the next
  * state, or `undefined` to leave it (a superseded render). Deliberately does
@@ -1206,6 +1233,10 @@ export async function restoreQuoteRevision(
   // quote / no customer / another customer's revision) before it goes back.
   const { restoredCreditFor } = await import("./reward-ledger");
   const credit = await restoredCreditFor(q, target, opts.mayApplyCredit ?? true);
+  // #304: the snapshot keeps the SKUs it was cut with; the spec it puts back
+  // is LIVE, so a part renamed since moves to its live SKU (and model). The
+  // revision itself is never written — the rewrite copies what it changes.
+  const renames = await liveRenameRefs();
 
   const actor = by || DEFAULT_ACTOR;
   const updated = await patchQuote(id, (doc) => {
@@ -1219,6 +1250,7 @@ export async function restoreQuoteRevision(
     doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
     doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
     doc.spec = target.spec ?? null;
+    if (doc.spec && renames.m.size) doc.spec = rewriteQuoteSpec(doc.spec, renames.m, renames.models) ?? doc.spec;
     doc.flameTest = target.flameTest ?? null;
     doc.repair = target.repair ?? null;
     doc.inspection = target.inspection ?? null;

@@ -16,7 +16,7 @@
  * an allowance. A part that has left the library prices $0 and says so
  * (the bomLines rule) — never dropped.
  */
-import type { BomLine, PartLite } from "./grid-bom";
+import { partLiteHaystack, type BomLine, type PartLite } from "./grid-bom";
 import { groupOfPart, isBomGroupKey, type BomGroupKey } from "./grid-bom-groups";
 import { isFabricPart } from "@/lib/fabric-part";
 
@@ -192,7 +192,7 @@ const byName = (a: PartLite, b: PartLite) => a.desc.localeCompare(b.desc) || a.s
 export function accessoryCandidates(parts: readonly PartLite[], group: BomGroupKey, search: string, all: boolean): PartLite[] {
   const q = search.trim().toLowerCase();
   if (all && !q) return [];
-  const hit = (p: PartLite) => !q || `${p.desc} ${p.modelNumber || p.sku} ${p.manufacturer || ""}`.toLowerCase().includes(q);
+  const hit = (p: PartLite) => !q || partLiteHaystack(p).includes(q); // #304: + Model # and former SKUs
   const inGroup = (p: PartLite) => !!p.deviceType && groupOfPart(p) === group;
   return parts
     .filter((p) => placeable(p) && (all || inGroup(p)) && hit(p))

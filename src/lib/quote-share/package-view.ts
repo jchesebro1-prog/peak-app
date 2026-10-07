@@ -20,7 +20,7 @@ export const PACKAGE_COPY = {
   goals: "Your goals",
   narrative: "Narrative",
   bom: "BOM",
-  bomHead: ["Qty", "Manufacturer", "Part", "Description"],
+  bomHead: ["Qty", "Manufacturer", "Model", "Description"],
   seeBom: "The full parts list for this scope is under BOM.",
   noParts: "No parts listed for this scope.",
   options: "Add options",

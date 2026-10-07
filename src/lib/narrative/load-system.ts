@@ -26,7 +26,7 @@ export async function loadLibrarySystem(key: string, targetTierMargin: number | 
     invalidateSystemLibrary();
     return { ok: false, error: LIBRARY_GONE };
   }
-  const { catalog, fixtures } = await copyPricingFor(picked.section.items);
+  const { catalog, fixtures, renames } = await copyPricingFor(picked.section.items);
   const copied = copySectionForTarget(sanitizeSystemSell(picked.section), {
     newSectionId: "sys" + Date.now(),
     catalog,
@@ -35,6 +35,8 @@ export async function loadLibrarySystem(key: string, targetTierMargin: number | 
     // An estimate with no tier stamp prices at the Estimator's own fallback
     // seed (what addPart gives a new line), never at the source customer's tier.
     targetTierMargin: usableTierMargin(targetTierMargin) ?? TIER_FALLBACK_MARGIN,
+    // #304: a sent revision keeps a renamed part's old SKU — the loaded copy takes the live one.
+    renames,
   });
   return {
     ok: true,

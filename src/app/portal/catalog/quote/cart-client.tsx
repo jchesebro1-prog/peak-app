@@ -122,7 +122,7 @@ function CartLineRow({
       <div className="pq-line pq-gone">
         <div>
           <div className="pq-line-title">No longer available</div>
-          {line.sku && <div className="pq-line-sku">{line.sku}</div>}
+          {line.model && <div className="pq-line-sku">{line.model}</div>}
           <div className="pq-line-detail">Left out when you generate — remove it or ask us for an alternative.</div>
         </div>
         <div className="pq-right">
@@ -141,7 +141,7 @@ function CartLineRow({
     <div className="pq-line">
       <div style={{ minWidth: 0 }}>
         <div className="pq-line-title">{line.title}</div>
-        {line.sku && line.kind !== "curtain" && <div className="pq-line-sku">{line.sku}</div>}
+        {line.model && line.kind !== "curtain" && <div className="pq-line-sku">{line.model}</div>}
         {line.detail && <div className="pq-line-detail">{line.detail}</div>}
         <div className="pq-line-unit">
           {line.por ? <span className="pq-por">Price on request</span> : unitLabel(line)}

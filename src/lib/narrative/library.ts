@@ -1,5 +1,4 @@
-import { getMany } from "@/lib/stores/catalog";
-import { visibleImagesForParts } from "@/lib/stores/part-documents";
+import { partsAndImagesBySku } from "@/lib/catalog-rename/live-reads";
 import { listManufacturers, manufacturerImageLookup } from "@/lib/stores/manufacturers";
 import { isLineToken, MAX_LIBRARY_SKUS, type KeyProductLibraryRow } from "@/app/(app)/estimator/narrative";
 
@@ -25,9 +24,10 @@ export async function keyProductLibrary(skus: readonly string[]): Promise<Record
     ),
   ].slice(0, MAX_LIBRARY_SKUS);
   if (!wanted.length) return {};
-  const [parts, images] = await Promise.all([getMany(wanted), visibleImagesForParts(wanted)]);
-  const bySku = new Map(parts.map((p) => [p.sku, p]));
-  const needsFallback = parts.some((p) => !images.get(p.sku)?.[0] && (p.mfr || "").trim());
+  // #304: keyed by the requested sku — a line loaded from a sent revision may
+  // still name a renamed part's old SKU.
+  const { parts: bySku, images } = await partsAndImagesBySku(wanted);
+  const needsFallback = [...bySku].some(([sku, p]) => !images.get(sku)?.[0] && (p.mfr || "").trim());
   const look = needsFallback ? manufacturerImageLookup(await listManufacturers()) : () => null;
   const out: Record<string, KeyProductLibraryRow> = {};
   for (const sku of wanted) {

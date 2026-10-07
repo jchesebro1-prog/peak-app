@@ -61,6 +61,8 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { isFabricPart } from "@/lib/fabric-part";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
+import { quoteSpecFollowingRenames } from "@/lib/stores/catalog-renames";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -461,6 +463,11 @@ export async function saveQuoteAction(
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
+  // #304: an Estimator tab opened before a model-number rename still holds the
+  // old SKUs — move the live spec onto the renamed parts (sku + model) before
+  // it is written, so a save never re-introduces a retired SKU. Revisions are
+  // frozen and never touched here.
+  patch.spec = await quoteSpecFollowingRenames(patch.spec);
   let q: Quote | null = null;
   let statusError: string | undefined;
   let statusNotice: string | undefined = credit.notice;
@@ -932,7 +939,7 @@ export async function copySystemToEstimateAction(
   const items = Array.isArray(section?.items) ? section.items : [];
 
   // #293 slice 2: today's catalog + resolved fixtures — shared with Load system.
-  const { catalog, fixtures } = await copyPricingFor(items);
+  const { catalog, fixtures, renames } = await copyPricingFor(items);
 
   /* The destination tier. */
   const sourceTier = usableTierMargin(sourceContext?.tierMargin);
@@ -969,6 +976,8 @@ export async function copySystemToEstimateAction(
     fixtures,
     sourceTierMargin: sourceTier,
     targetTierMargin: targetTier,
+    // #304: lines naming a renamed part's old SKU land on the live SKU.
+    renames,
   });
 
   if (target.kind === "same") {
@@ -1391,7 +1400,7 @@ export async function draftQuoteScopeAction(input: {
 
 /**
  * Catalog search for the estimator's "Add part from catalog" picker (team-only).
- * In-memory substring match over sku/desc/mfr (optionally scoped to a category),
+ * In-memory substring match over sku/desc/mfr/MFR P/N/Model #/former SKUs (#304; optionally scoped to a category),
  * ranked so prefix hits on the SKU or description come first. Returns up to
  * `limit` hits plus the pre-cap total so the UI can say "refine to narrow".
  */
@@ -1413,14 +1422,15 @@ export async function searchCatalog(
     .map((p) => {
       const sku = (p.sku || "").toLowerCase();
       const desc = (p.desc || "").toLowerCase();
-      const mfr = (p.mfr || "").toLowerCase();
       const cat = (p.category || "").toLowerCase();
+      // #304: the Model # and old order numbers rank like the SKU does.
+      const names = [sku, (p.manufacturerModelNumber || "").toLowerCase(), ...(p.formerSkus ?? []).map((s) => s.toLowerCase())].filter(Boolean);
       if (!q) return { p, score: 0 };
       let score = -1;
-      if (sku === q || desc === q) score = 5;
-      else if (sku.startsWith(q) || desc.startsWith(q)) score = 4;
-      else if (desc.includes(q) || sku.includes(q)) score = 2;
-      else if (cat.includes(q) || mfr.includes(q)) score = 1;
+      if (names.includes(q) || desc === q) score = 5;
+      else if (names.some((n) => n.startsWith(q)) || desc.startsWith(q)) score = 4;
+      else if (desc.includes(q) || names.some((n) => n.includes(q))) score = 2;
+      else if (cat.includes(q) || partSearchHaystack(p).includes(q)) score = 1; // mfr, MFR P/N …
       return { p, score };
     })
     .filter((s) => s.score >= 0)
@@ -1435,6 +1445,8 @@ export async function searchCatalog(
     list: p.list || 0,
     mfr: p.mfr || "",
     ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
+    ...(p.manufacturerModelNumber?.trim() ? { model: p.manufacturerModelNumber.trim() } : {}),
+    ...(p.manufacturerPartNumber?.trim() ? { mpn: p.manufacturerPartNumber.trim() } : {}),
     rack: rackFactsOrUndefined(p),
   }));
   return { hits, total: scored.length };

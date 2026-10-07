@@ -5,6 +5,7 @@ import { applyFillIns, fillInSlots, staleFillInKeys, type FillInSlot } from "@/l
 import type { SpecDocHeader, SpecDocProduct, SpecDocument } from "@/lib/specs/spec-document";
 import { sectionIdForRecord, type SpecRecord } from "@/lib/specs/records";
 import { isPlaceholderSku, normPartNumber, partNumberCandidates, specRowKey, wildcardMatches } from "@/lib/specs/record-keys";
+import { partModel } from "@/lib/catalog-rename/sku";
 import { companionsFor, matchRow, type RowMatch } from "@/lib/specs/record-match";
 import { answeredSpans, applyJobValues, jobValueSlots, staleJobValueKeys, type JobValueSlot } from "@/lib/specs/record-fill-ins";
 
@@ -142,7 +143,6 @@ function continueLetters(lines: OutlineLine[], before: number): OutlineLine[] {
   return lines.map((l) => (l.depth === 0 ? { ...l, label: outlineLabel(0, ++k) } : l));
 }
 const prefix = (sku: string) => (sku.indexOf(":") > 0 ? sku.slice(0, sku.indexOf(":")) : "");
-const tail = (sku: string) => (sku.indexOf(":") >= 0 ? sku.slice(sku.indexOf(":") + 1) : "");
 
 /** Whether `articleId` names a live article inside `sectionId` — the one
  *  check for a per-spec header override, shared between `placeProduct`
@@ -439,7 +439,7 @@ export function assembleSection(input: {
         return {
           sku: c.part.sku,
           mfr: c.part.mfr || prefix(c.part.sku) || "",
-          model: c.part.manufacturerModelNumber || c.part.manufacturerPartNumber || tail(c.part.sku) || c.part.sku,
+          model: partModel(c.part), // #304: the one model rule
           description: c.tp.specTitle || c.part.desc || "",
           ...(showQty && (c.p.qty || 0) > 0 ? { qty: c.p.qty } : {}),
         };

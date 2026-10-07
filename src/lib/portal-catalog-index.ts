@@ -116,7 +116,20 @@ export type PortalIndex = {
    *  photo of their own. Never feeds `IndexedPart.imageIds`, visibility or the
    *  browse rule. */
   mfrImageDocs: Map<string, string>;
+  /** #304 — a renamed part's former SKU → its live SKU (from the parts'
+   *  `formerSkus`), so an old `?part=` bookmark or a cart line written before
+   *  the cart sweep still finds the part. Read through `portalPart`. */
+  formerSkus: Map<string, string>;
 };
+
+/** The quotable part `sku` names — its live SKU, or a former one a rename
+ *  moved (#304). The returned part carries the live `sku`. */
+export function portalPart(ix: Pick<PortalIndex, "parts" | "formerSkus">, sku: string): IndexedPart | undefined {
+  const own = ix.parts.get(sku);
+  if (own) return own;
+  const to = ix.formerSkus.get(sku);
+  return to ? ix.parts.get(to) : undefined;
+}
 
 /** Manufacturer name → its image document id (servable), or null. */
 export function portalMfrImage(ix: Pick<PortalIndex, "mfrImageDocs">): (mfr: string) => string | null {
@@ -166,8 +179,8 @@ export function packageCategoryOf(portalCategory: unknown): string {
 /** The cached index (5 min per process); `fresh` forces a rebuild. */
 /** A fixture component: a quotable part, or a labor row the fixture carries.
  *  Only fixture resolution/pricing may call this — never a lone-part path. */
-export function fixtureComponentPart(ix: Pick<PortalIndex, "parts" | "componentParts">, sku: string): IndexedPart | undefined {
-  return ix.parts.get(sku) ?? ix.componentParts.get(sku);
+export function fixtureComponentPart(ix: Pick<PortalIndex, "parts" | "componentParts" | "formerSkus">, sku: string): IndexedPart | undefined {
+  return portalPart(ix, sku) ?? ix.componentParts.get(sku);
 }
 
 export async function portalIndex(opts?: { fresh?: boolean }): Promise<PortalIndex> {
@@ -285,6 +298,7 @@ async function buildIndex(): Promise<Built> {
   const liveSkus = new Set(live.map((p) => p.sku));
 
   const parts = new Map<string, IndexedPart>();
+  const formerSkus = new Map<string, string>();
   const facts = new Map<string, VisibilityFacts>();
   const docMeta: PortalIndex["docMeta"] = new Map();
   const fabrics: PortalIndex["fabrics"] = [];
@@ -324,6 +338,7 @@ async function buildIndex(): Promise<Built> {
       quoteCount: f.quoteCount,
     };
     parts.set(p.sku, ip);
+    for (const old of p.formerSkus ?? []) if (old && !liveSkus.has(old)) formerSkus.set(old, p.sku);
     for (const id of ip.datasheetIds) {
       if (docMeta.has(id)) continue;
       const d = state.index.docsById.get(id);
@@ -344,7 +359,7 @@ async function buildIndex(): Promise<Built> {
       sku: ip.sku,
       mfr: ip.mfr,
       category: ip.category,
-      haystack: buildHaystack([ip.sku, ip.desc, ip.mfr, ip.category, ip.mpn, ip.model]),
+      haystack: buildHaystack([ip.sku, ip.desc, ip.mfr, ip.category, ip.mpn, ip.model, ...(p.formerSkus ?? [])]), // #304: old order numbers find the part
       browsable: browsable(f, rule),
       rank: ip.quoteCount,
     });
@@ -418,7 +433,7 @@ async function buildIndex(): Promise<Built> {
 
   fabrics.sort((a, b) => a.name.localeCompare(b.name));
 
-  return { at: now, ix: { parts, componentParts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics, fabricRates, mfrImageDocs }, facts, rule };
+  return { at: now, ix: { parts, componentParts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics, fabricRates, mfrImageDocs, formerSkus }, facts, rule };
 }
 
 function headQty(q: number | undefined): number {

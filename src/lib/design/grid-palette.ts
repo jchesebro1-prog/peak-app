@@ -1,4 +1,4 @@
-import type { PartLite } from "./grid-bom";
+import { partLiteHaystack, type PartLite } from "./grid-bom";
 import { isFabricPart } from "@/lib/fabric-part";
 import { scopeOfPart, type GridLayer } from "./grid-scopes";
 import { ALLOWANCE_TYPE, ASSEMBLY_TYPE, UNMAPPED_TYPE, typeKeyOfPart, typeLabel, type DeviceType } from "./device-types";
@@ -30,7 +30,7 @@ export type PaletteView = {
 
 // #264: a fabric (isFabricPart — incl. Soft Goods sold per sq ft) is never a device.
 const placeable = (p: PartLite) => !p.virtual && !isFabricPart(p) && p.category !== "Labor";
-const matches = (p: PartLite, q: string) => (p.desc + " " + (p.modelNumber || p.sku) + " " + (p.manufacturer || "")).toLowerCase().includes(q);
+const matches = (p: PartLite, q: string) => partLiteHaystack(p).includes(q); // #304: + Model # and former SKUs
 const byName = (a: PartLite, b: PartLite) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku);
 
 export function isMapped(p: PartLite): boolean {

@@ -85,6 +85,7 @@ const ROUTES = [
   "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/catalog/manufacturers", // Manufacturer section Part 1
   "/catalog/manufacturers/rosebrand", // Manufacturer section Part 2 — one manufacturer's page
+  "/catalog/model-numbers", // #304 — crosswalk upload → preview → apply (admin)
   "/estimating-rules",
   "/estimating-rules/track-series", // #274 — the track configurator's parts map (admin)
   "/estimating-rules/curtain-mounts", // #292 — curtain-mount hardware (admin)

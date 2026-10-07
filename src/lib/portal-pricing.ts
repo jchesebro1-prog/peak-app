@@ -10,9 +10,10 @@ import { freightPctForMiles } from "@/lib/freight-rule";
 import { loadFreightRule, loadPortalRules } from "@/lib/freight-rule-load";
 import { loadCurtainSewingPct } from "@/lib/stores/pricing";
 import type { CartLine, CurtainRequest, PortalCart } from "@/lib/portal-cart-types";
-import { fixtureComponentPart, portalIndex, type IndexedFixture, type IndexedPart, type PortalIndex } from "@/lib/portal-catalog-index";
+import { fixtureComponentPart, portalIndex, portalPart, type IndexedFixture, type IndexedPart, type PortalIndex } from "@/lib/portal-catalog-index";
 import { fixtureUnitPrice, unitPriceFor, type FixtureComponentInput, type PriceRuleOpts } from "@/lib/portal-price-rules";
 import { quoteMode } from "@/lib/portal-quote-mode";
+import { partModel } from "@/lib/catalog-rename/sku";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { travelForId } from "@/lib/stores/customers";
 
@@ -59,6 +60,8 @@ export type SellLine = {
   kind: "part" | "fixture" | "curtain";
   title: string;
   sku: string | null;
+  /** #304: what the customer sees as the line's identity — the Model # (partModel); "" for a curtain. */
+  model?: string;
   qty: number;
   unit: string;
   unitPrice: number | null;
@@ -114,7 +117,7 @@ export async function priceSku(
   sku: string,
   ctx: PortalPricingContext
 ): Promise<{ unitPrice: number | null; por: boolean; porReason?: string } | null> {
-  const part = (await portalIndex()).parts.get(sku);
+  const part = portalPart(await portalIndex(), sku);
   if (!part) return null;
   const u = unitPriceFor(part, ruleOpts(ctx));
   return u.porReason ? { unitPrice: u.unitPrice, por: u.por, porReason: u.porReason } : { unitPrice: u.unitPrice, por: u.por };
@@ -130,13 +133,18 @@ const SLOT_ROLE: Record<string, AssemblyRole> = {
 };
 
 function unavailableLine(l: CartLine, qty: number, sku: string | null): SellLine {
-  return { lineId: l.lineId, kind: l.kind, title: "No longer available", sku, qty, unit: "ea", unitPrice: null, extPrice: null, por: false, unavailable: true };
+  return { lineId: l.lineId, kind: l.kind, title: "No longer available", sku, ...(sku ? { model: partModel({ sku }) } : {}), qty, unit: "ea", unitPrice: null, extPrice: null, por: false, unavailable: true };
+}
+
+function fxEngineModel(p: IndexedPart | undefined, sku: string): string {
+  return partModel({ sku, manufacturerModelNumber: p?.model, manufacturerPartNumber: p?.mpn });
 }
 
 type Priced = { sell: SellLine; item: Omit<SpecItem, "id"> | null; section: "equip" | "fixt" | "drape" };
 
 function pricePart(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts): Priced {
-  const part: IndexedPart | undefined = l.sku ? ix.parts.get(l.sku) : undefined;
+  // #304: a cart line written before the cart sweep may name a former SKU.
+  const part: IndexedPart | undefined = l.sku ? portalPart(ix, l.sku) : undefined;
   if (!part) return { sell: unavailableLine(l, qty, l.sku ?? null), item: null, section: "equip" };
   const u = unitPriceFor(part, o);
   const sell: SellLine = {
@@ -144,6 +152,7 @@ function pricePart(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts):
     kind: "part",
     title: part.desc || part.sku,
     sku: part.sku,
+    model: partModel({ sku: part.sku, manufacturerModelNumber: part.model, manufacturerPartNumber: part.mpn }),
     qty,
     unit: part.unit,
     unitPrice: u.unitPrice,
@@ -161,6 +170,7 @@ function pricePart(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts):
     price: u.unitPrice ?? 0,
     ...(part.mfr ? { manufacturer: part.mfr } : {}),
     ...(part.mpn ? { manufacturerPartNumber: part.mpn } : {}),
+    ...(part.model ? { manufacturerModelNumber: part.model } : {}), // #304: the quote line carries its Model # for customer documents
     ...(u.por ? { por: true } : {}),
   };
   return { sell, item, section: "equip" };
@@ -207,6 +217,7 @@ function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRul
     kind: "fixture",
     title: fx.label,
     sku: fx.lightEngineSku,
+    model: fxEngineModel(ix.parts.get(fx.lightEngineSku), fx.lightEngineSku),
     qty,
     unit: "ea",
     unitPrice: priced.unitPrice,
@@ -231,6 +242,7 @@ function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRul
     fixtureId: fx.id,
     ...(l.fixtureOptions ? { fixtureOptions: { ...l.fixtureOptions } } : {}),
     ...(engine?.mfr ? { manufacturer: engine.mfr } : {}),
+    ...(engine?.model ? { manufacturerModelNumber: engine.model } : {}),
     components: chosen
       .filter((c) => c.qty > 0 && !!fixtureComponentPart(ix, c.line.sku))
       .map((c) => {

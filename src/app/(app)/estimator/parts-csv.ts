@@ -1,4 +1,5 @@
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { lineModel, partModel } from "@/lib/catalog-rename/sku";
 import { systemItemsRev, systemSellTotal } from "./pricing";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 
@@ -51,12 +52,12 @@ function infoOf(info: Record<string, PartInfo>, sku: string): PartInfo | undefin
   return sku && Object.prototype.hasOwnProperty.call(info, sku) ? info[sku] : undefined;
 }
 
-/** Model rule (#262): printed model > printed P/N > the SKU itself for a
- *  known catalog part; "" for an unknown SKU. */
+/** Model rule (#262, #304): partModel for a known catalog part (model > P/N >
+ *  the SKU's tail after `Brand:` > the SKU); "" for an unknown SKU. */
 function modelFromInfo(info: Record<string, PartInfo>, sku: string): string {
   const p = infoOf(info, sku);
   if (!p) return "";
-  return p.manufacturerModelNumber?.trim() || p.manufacturerPartNumber?.trim() || sku;
+  return partModel({ sku, manufacturerModelNumber: p.manufacturerModelNumber, manufacturerPartNumber: p.manufacturerPartNumber });
 }
 
 /** Unit sell of one estimate line (#262) — a typed extended sell wins over the unit price. */
@@ -186,7 +187,7 @@ function expand(
       const p = infoOf(info, sku);
       out.push({
         manufacturer: item.manufacturer?.trim() || p?.mfr?.trim() || "",
-        modelNumber: item.manufacturerModelNumber?.trim() || item.manufacturerPartNumber?.trim() || modelFromInfo(info, sku),
+        modelNumber: lineModel(item, p ? { sku, manufacturerModelNumber: p.manufacturerModelNumber, manufacturerPartNumber: p.manufacturerPartNumber } : undefined),
         room,
         system,
         sku,
