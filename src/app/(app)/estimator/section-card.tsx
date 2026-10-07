@@ -26,7 +26,7 @@ import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, readCsvFile, summarizeCsvErrors, type ImportedMaterial } from "./material-csv";
 import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
 import { DISCIPLINES, DISCIPLINE_LABEL, autoDisciplineLabel, type ScopeDiscipline } from "@/lib/estimate-output/fields";
-import type { SystemGroup } from "@/lib/estimate-groups/groups";
+import { GROUPS_MAX, type SystemGroup } from "@/lib/estimate-groups/groups";
 
 /** Phase 2a: the Group select's "+ New group" option value (never a group id — those are g-…). */
 const NEW_GROUP = "__new";
@@ -523,7 +523,9 @@ export default function SectionCard(p: SectionCardProps) {
                     {g.name}
                   </option>
                 ))}
-                <option value={NEW_GROUP}>+ New group</option>
+                <option value={NEW_GROUP} disabled={p.groups.length >= GROUPS_MAX}>
+                  {p.groups.length >= GROUPS_MAX ? "+ New group (limit reached)" : "+ New group"}
+                </option>
               </select>
               {/* #281: a read-only snippet — the narrative itself is written in the right column. */}
               <button

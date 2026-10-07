@@ -54253,8 +54253,8 @@ import * as p2a from "@/lib/estimate-groups/groups";
     "#P2a build UI: each row has ↑/↓ buttons (Move <name> up/down) calling moveSystemByAction");
   ok(rail.includes("onClick={() => selectSystem(sec.id)}"), "#P2a build UI: clicking a row still selects the system");
   ok(rail.includes("{built && (") && /title="Built"[^>]*>\s*✓/.test(rail) && rail.includes("const built = isBuilt(sec.id);"), "#P2a build UI: a built rail row shows ✓");
-  ok(rail.includes("{fmt(blockSell(secs))}") && /function blockSell\([^)]*\): number \{\s*return secs\.reduce\(\(n, sec\) => n \+ systemSellTotal\(sec\), 0\);/.test(build),
-    "#P2a build UI: a group heading's subtotal is fmt(Σ systemSellTotal) of its systems");
+  ok(rail.includes("{short(blockSell(secs))}") && /function blockSell\([^)]*\): number \{\s*return secs\.reduce\(\(n, sec\) => n \+ systemSellTotal\(sec\), 0\);/.test(build),
+    "#P2a build UI: a group heading's subtotal is short(Σ systemSellTotal) of its systems, the same formatter as the rows (polish)");
   ok(rail.includes("autoFocus") && rail.includes('if (e.key === "Enter")') && rail.includes('} else if (e.key === "Escape")') && rail.includes("renameGroupAction(id, value)") && rail.includes('title="Rename group"'),
     "#P2a build UI: a group name renames inline (click → input; Enter / blur commits, Escape cancels)");
   ok(rail.includes("moveGroupByAction(g.id, -1)") && rail.includes("moveGroupByAction(g.id, 1)") && rail.includes("aria-label={`Move group ${g.name} up`}"), "#P2a build UI: group headings reorder with ↑/↓");
@@ -54268,9 +54268,11 @@ import * as p2a from "@/lib/estimate-groups/groups";
     && step.includes("const id = addGroupForSystem(sec.id);") && step.includes("setEditingGroupId(id);") && step.includes("if (!sideOpen) toggleSide();")
     && step.includes("built={isBuilt(sec.id)}") && step.includes("onMarkBuilt={() => markBuilt(sec.id)}"),
     "#P2a build UI: BuildStep wires the card's Group select, + New group (focuses its rename in the rail) and Mark built");
-  ok(/<option value="">No group<\/option>\s*\{p\.groups\.map\(\(g\) => \(/.test(card) && card.includes("<option value={NEW_GROUP}>+ New group</option>") && card.includes('aria-label="Group"')
+  ok(/<option value="">No group<\/option>\s*\{p\.groups\.map\(\(g\) => \(/.test(card) && card.includes("<option value={NEW_GROUP} disabled={p.groups.length >= GROUPS_MAX}>") && card.includes('aria-label="Group"')
     && card.includes("if (v === NEW_GROUP) p.onNewGroup();") && card.includes("else p.onSetGroup(v || null);"),
     "#P2a build UI: SectionCard has a Group select — No group, each group, + New group");
+  ok(card.includes('import { GROUPS_MAX, type SystemGroup } from "@/lib/estimate-groups/groups";') && card.includes('"+ New group (limit reached)"') && card.includes(': "+ New group"'),
+    "#P2a build UI: the Group select's + New group is disabled and reads (limit reached) at GROUPS_MAX groups (polish)");
   ok(card.includes('{"✓ Mark built & collapse"}') && card.includes("onClick={p.onMarkBuilt}"), "#P2a build UI: SectionCard has a ✓ Mark built & collapse button");
   ok(/\{p\.built && \(\s*<span[\s\S]{0,260}>\s*built\s*<\/span>/.test(card), "#P2a build UI: a built card's header shows a built tag");
   ok(["groups: SystemGroup[];", "groupId: string | null;", "onSetGroup: (groupId: string | null) => void;", "onNewGroup: () => void;", "built: boolean;", "onMarkBuilt: () => void;"].every((x) => card.includes(x)),

@@ -870,7 +870,7 @@ function SystemsRail({
               {g.name}
             </button>
           )}
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#6b7079", flexShrink: 0 }}>{fmt(blockSell(secs))}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#6b7079", flexShrink: 0 }}>{short(blockSell(secs))}</span>
           <button
             type="button"
             className="est-action-btn"
