@@ -1,18 +1,19 @@
 "use client";
 
-import { CSS, CHEVRON_CLIP, CTX_LABEL, DARK_SELECT, META_HEAD, META_HINT, META_SECTION, META_SUB, META_TOGGLE, SIDE_TOGGLE, STATUS_DOT } from "./estimator-styles";
-import { useEstimatorState, INSTALL_TIMEFRAMES } from "./use-estimator-state";
+import { useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import type { NextStepAction } from "@/lib/quote-next-step";
+import { parseStep, stepAfterAction, stepSearch, type EstimateStep } from "@/lib/estimate-steps/steps";
+import { estimateReadiness } from "@/lib/estimate-steps/readiness";
+import { CSS, CHEVRON_CLIP, DARK_SELECT, SIDE_TOGGLE } from "./estimator-styles";
+import { useEstimatorState } from "./use-estimator-state";
 import { withDiscipline } from "@/lib/estimate-output/fields";
-import type { QuoteStatus } from "@/lib/stores/quotes";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { addQuoteTaskAction, removeQuoteTaskAction, applyQuoteTemplateAction, setQuoteTaskStatusAction, updateQuoteTaskAction } from "./actions";
 import { RewardCreditPanel } from "./reward-credit-panel";
-import { PurchasePerksBanner } from "@/components/rewards/purchase-perks-banner";
 import { pointsLabel } from "@/lib/rewards/points";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
-import { ChangeTypeControl } from "@/components/quote-flow-controls";
-import { wonEditMessage } from "@/app/(app)/quotes/new/handoff";
 import { fmt, short, systemSellTotal } from "./pricing";
 import type { EstimatorProps } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
@@ -27,21 +28,45 @@ import LaborModal from "./labor-modal";
 import TrackModal from "./track-modal";
 import VendorQuoteModal from "./vendor-quote-modal";
 import PreviewDoc from "./preview-doc";
-import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 import { PortalPanel } from "./portal-panel";
-import { tierRepriceMessage } from "./tier-reprice";
+import { EstimatorHeader } from "./estimator-header";
+import { EstimatorBanners } from "./estimator-banners";
+import { StepTabs } from "./step-tabs";
 
 /**
- * Estimator workspace — client port of Estimator.dc.html (build + preview
- * modes). All state lives here; pricing math in ./pricing; persistence via
- * server actions on the quotes store.
+ * #304 (spec 2026-10-07 §4) — the Estimator shell: one header, four step
+ * tabs (`?step=`), the banners, and the active step. All quote state lives in
+ * useEstimatorState, so switching steps never drops unsaved edits.
  */
-
 export default function EstimatorClient(props: EstimatorProps) {
   const s = useEstimatorState(props);
+  const params = useSearchParams();
+  const step: EstimateStep = s.phone ? "review" : parseStep(params.get("step"));
+  const goStep = (next: EstimateStep) => {
+    if (next === step) return;
+    window.history.pushState(null, "", window.location.pathname + stepSearch(window.location.search, next));
+  };
+  const onActed = (action: NextStepAction) => {
+    const to = stepAfterAction(action);
+    if (to) goStep(to);
+  };
+  // The first save gives a new estimate its id — put it in the URL so a reload or a copied step link reopens it.
+  useEffect(() => {
+    if (!s.loadedId || params.get("id") === s.loadedId) return;
+    window.history.replaceState(null, "", window.location.pathname + stepSearch(window.location.search, step, s.loadedId));
+  }, [s.loadedId, params, step]);
+  const badges = useMemo(
+    () =>
+      estimateReadiness({
+        saved: !!s.loadedId,
+        sections: s.sections,
+        review: s.next ? { label: s.next.pill.label, tone: s.next.pill.tone } : null,
+        status: s.status,
+        revNum: s.revNum,
+      }),
+    [s.loadedId, s.sections, s.next, s.status, s.revNum]
+  );
   const {
-    actionError,
-    actionNotice,
     activeId,
     addAiLine,
     addCurtain,
@@ -67,29 +92,18 @@ export default function EstimatorClient(props: EstimatorProps) {
     applyCredit,
     applySync,
     applyTravelTrip,
-    assumptionLibrary,
-    assumptions,
     blobUploads,
     canApplyCredit,
     canWriteNarrativeLibrary,
     cardRefs,
-    category,
-    categorySaved,
-    changePeople,
     changePipeline,
     changeStage,
-    changeStatus,
-    checkedAssumptions,
     closeInput,
-    closeQd,
-    closeTitle,
     cols,
     commitVendorQuote,
-    contactOptions,
     copySystem,
     coverSummary,
     creditInfo,
-    currentContact,
     curtainDraft,
     curtainEdit,
     curtainFor,
@@ -99,32 +113,25 @@ export default function EstimatorClient(props: EstimatorProps) {
     customDraft,
     customError,
     customerId,
-    customerOptions,
     cutSheetCount,
     dec,
     deleteSystem,
     detail,
     doSave,
-    exportPartsList,
     fabrics,
     fixtureAssemblies,
     fixtureDraft,
     fixtureFor,
     fixtureSec,
     freightDefault,
-    gateRefused,
     importMaterials,
     inc,
     initial,
     insertAiScope,
-    installTimeframe,
     intros,
-    isBuild,
     isExpanded,
     isInternal,
     isOpenFor,
-    isPreview,
-    justSaved,
     kpLib,
     laborDraft,
     laborEdit,
@@ -133,9 +140,7 @@ export default function EstimatorClient(props: EstimatorProps) {
     libraryOpen,
     loadVendorLines,
     loadedId,
-    locationId,
     moveItem,
-    moveNotice,
     moveSystem,
     narrOpen,
     narrRef,
@@ -143,21 +148,14 @@ export default function EstimatorClient(props: EstimatorProps) {
     next,
     notIncluded,
     notIncludedDefault,
-    onAssumptions,
     onCoverSummary,
-    onInstallTimeframe,
     onNotIncluded,
-    onQuoteNote,
-    openAiDraft,
     openCurtainEdit,
     openInput,
     openInputMethod,
     openLaborEdit,
-    openTitle,
     openTrackEdit,
     openVendorEdit,
-    ownerValue,
-    partsBusy,
     paymentTerms,
     pdf,
     pdfCover,
@@ -170,24 +168,10 @@ export default function EstimatorClient(props: EstimatorProps) {
     pdfQty,
     pdfTerms,
     people,
-    peopleBusy,
-    peopleOptions,
-    persistMeta,
     phone,
-    pickContact,
-    pickCustomer,
-    pickVenue,
     pipelines,
     placeLibrarySystem,
     portalStatusError,
-    preparedValue,
-    projectName,
-    qdChipLabel,
-    qdChipRef,
-    qdOpen,
-    qdPanelRef,
-    quoteId,
-    quoteNote,
     quoteTasks,
     rate,
     removeCredit,
@@ -197,22 +181,17 @@ export default function EstimatorClient(props: EstimatorProps) {
     renameSystem,
     resetAutoHrs,
     resetSystemSell,
-    revNum,
     roundSystemPrice,
     runAiDraft,
-    samePerson,
-    saveNow,
     savingCustom,
     scrollRef,
     searchQuotes,
     sections,
     selectSystem,
     setActionError,
-    setActionNotice,
     setActiveId,
     setAiOpen,
     setAutoHrs,
-    setCategory,
     setCurtainField,
     setCurtainTrack,
     setCustomField,
@@ -231,8 +210,6 @@ export default function EstimatorClient(props: EstimatorProps) {
     setMarginAll,
     setMob,
     setMobNameSelect,
-    setMode,
-    setMoveNotice,
     setNarrFocusReq,
     setPaymentTerms,
     setPdf,
@@ -244,38 +221,29 @@ export default function EstimatorClient(props: EstimatorProps) {
     setPdfPrices,
     setPdfQty,
     setPdfTerms,
-    setQdOpen,
     setQty,
     setSystemMargin,
     setSystemPresentation,
     setSystemRoom,
     setSystemSell,
-    setTierReprice,
-    setTitleDraft,
     setTrackDraft,
     setTripLocal,
     setVendorDisplay,
     setVendorField,
     setVendorLine,
-    setWonMetaGuard,
-    showContactPick,
     showNarr,
     showStageBar,
-    showVenuePick,
     sideOpen,
     specKeys,
     stageBarCurIdx,
     stageBarLostLabel,
     stageBarPipeline,
+    status,
     statusChanging,
     t,
     templateSets,
     tierMargin,
-    tierReprice,
     tierResolving,
-    titleDraft,
-    titleEditing,
-    toggleAssumption,
     toggleCurtainTrack,
     toggleExpand,
     toggleKeyProductLine,
@@ -288,7 +256,6 @@ export default function EstimatorClient(props: EstimatorProps) {
     trackSec,
     trackSeries,
     travelEstNow,
-    undoTierReprice,
     updateSection,
     useMobNameList,
     vendorDraft,
@@ -299,613 +266,28 @@ export default function EstimatorClient(props: EstimatorProps) {
     vendorQuotes,
     vendorSec,
     vendors,
-    venueOptions,
     venueRoomName,
-    viewerCanApprove,
-    viewerName,
-    wonMetaGuard,
   } = s;
-  return (
-    <div
-      className="est-root"
-      style={{
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "var(--font-ui)",
-        color: "#16181d",
-        background: "#f7f8fa",
-        overflow: "hidden",
-      }}
-    >
-      <style>{CSS}</style>
 
-      {/* ===================== BUILD MODE ===================== */}
-      {isBuild && (
+  return (
+    <div className="est-root" style={{ height: "100%", display: "flex", flexDirection: "column", fontFamily: "var(--font-ui)", color: "#16181d", background: "#f7f8fa", overflow: "hidden" }}>
+      <style>{CSS}</style>
+      {!s.phone && (
+        <>
+          <EstimatorHeader s={s} onActed={onActed} />
+          <StepTabs step={step} badges={badges} onStep={goStep} />
+          <EstimatorBanners s={s} />
+        </>
+      )}
+
+      {/* Task 7 renders the four steps here; until then keep today's build body + preview,
+          switched on `step === "review"` instead of the old build/preview mode. */}
+      {step !== "review" && (
         <div
           data-screen-label="Estimator workspace"
           className="est-screen"
           style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
         >
-          {/* contextual project toolbar */}
-          <div
-            className="est-topbar"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 18,
-              padding: "11px 22px",
-              background: "#1d2026",
-              borderTop: "1px solid #2b2e35",
-              color: "#fff",
-              flexShrink: 0,
-              position: "sticky",
-              top: 0,
-              zIndex: 20,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
-              <div style={{ minWidth: 0 }}>
-                {titleEditing ? (
-                  <input
-                    autoFocus
-                    aria-label="Quote name"
-                    value={titleDraft}
-                    onChange={(e) => setTitleDraft(e.target.value)}
-                    onBlur={() => closeTitle(true)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        closeTitle(true);
-                      } else if (e.key === "Escape") {
-                        e.preventDefault();
-                        closeTitle(false);
-                      }
-                    }}
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 600,
-                      lineHeight: 1.2,
-                      fontFamily: "var(--font-ui)",
-                      color: "#fff",
-                      background: "#2b2e35",
-                      border: "1px solid #4a4e56",
-                      borderRadius: 6,
-                      padding: "2px 6px",
-                      width: 340,
-                      maxWidth: "100%",
-                      outline: "none",
-                    }}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={openTitle}
-                    title="Rename this quote"
-                    style={{
-                      display: "block",
-                      maxWidth: "100%",
-                      fontSize: 14,
-                      fontWeight: 600,
-                      lineHeight: 1.2,
-                      fontFamily: "var(--font-ui)",
-                      color: "#fff",
-                      background: "none",
-                      border: "1px dashed transparent",
-                      borderRadius: 6,
-                      padding: "2px 6px",
-                      margin: "-3px -7px",
-                      cursor: "text",
-                      textAlign: "left",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                    className="est-title"
-                  >
-                    {projectName}
-                  </button>
-                )}
-                <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 2, minWidth: 0 }}>
-                  <span style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)", flexShrink: 0, whiteSpace: "nowrap" }}>
-                    {quoteId} · Rev {revNum}
-                  </span>
-                  {loadedId && <ChangeTypeControl quoteId={loadedId} status={status} tone="dark" />}
-                  {/* #281: Quote details moved from the right column into a dropdown. */}
-                  <button
-                    ref={qdChipRef}
-                    type="button"
-                    className="est-qd-chip"
-                    onClick={() => (qdOpen ? closeQd() : setQdOpen(true))}
-                    aria-expanded={qdOpen}
-                    aria-controls="est-quote-details"
-                    title="Prepared for, venue, contact, category, quote note, assumptions, install timeframe"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 5,
-                      minWidth: 0,
-                      maxWidth: 420,
-                      fontFamily: "var(--font-ui)",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: qdOpen ? "#fff" : "#cfd3da",
-                      background: qdOpen ? "#2b2e35" : "transparent",
-                      border: "1px solid " + (qdOpen ? "#4a4e56" : "#3a3e46"),
-                      borderRadius: 6,
-                      padding: "2px 8px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {qdChipLabel}
-                    </span>
-                    <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 9 }}>
-                      {qdOpen ? "▴" : "▾"}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div
-              className="est-topright"
-              style={{ display: "flex", alignItems: "center", gap: 22, flexShrink: 0 }}
-            >
-              <div style={{ textAlign: "right" }}>
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: "#9aa0ab",
-                    textTransform: "uppercase",
-                    letterSpacing: ".05em",
-                  }}
-                >
-                  Blended margin
-                </div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    color: "#5fd29a",
-                  }}
-                >
-                  {(t.margin * 100).toFixed(1)}%
-                </div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: "#9aa0ab",
-                    textTransform: "uppercase",
-                    letterSpacing: ".05em",
-                  }}
-                >
-                  Quoted total
-                </div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 600 }}>
-                  {fmt(t.grand)}
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: STATUS_DOT[status] || "#c98a2b",
-                    flexShrink: 0,
-                  }}
-                />
-                <select
-                  value={status}
-                  onChange={(e) => changeStatus(e.target.value as QuoteStatus)}
-                  style={{ ...DARK_SELECT, borderRadius: 8, padding: "9px 10px" }}
-                >
-                  <option value="draft">Draft</option>
-                  <option value="sent">Sent</option>
-                  <option value="won">Won</option>
-                  <option value="lost">Lost</option>
-                </select>
-              </div>
-              {loadedId && <DeleteQuoteButton id={loadedId} won={status === "won"} redirectTo="/estimator" />}
-              {aiSource && (
-                <button
-                  type="button"
-                  onClick={openAiDraft}
-                  title={"Assemble the scope of work from " + aiSource.label}
-                  style={{
-                    fontFamily: "var(--font-ui)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    borderRadius: 8,
-                    padding: "9px 15px",
-                    cursor: "pointer",
-                    border: "1px solid var(--accent)",
-                    background: ACCENT_SOFT,
-                    color: ACCENT_INK,
-                  }}
-                >
-                  Draft from survey/inspection
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={exportPartsList}
-                disabled={partsBusy}
-                title="Model numbers, descriptions and cost for every part — assemblies broken into their parts. For purchasing."
-                style={{
-                  fontFamily: "var(--font-ui)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "9px 15px",
-                  cursor: partsBusy ? "not-allowed" : "pointer",
-                  opacity: partsBusy ? 0.6 : 1,
-                  background: "#2b2e35",
-                  color: "#cfd3da",
-                }}
-              >
-                Parts list (CSV)
-              </button>
-              <button
-                type="button"
-                onClick={doSave}
-                disabled={statusChanging || tierResolving}
-                title={
-                  statusChanging
-                    ? "A status change is still saving — try again in a moment."
-                    : tierResolving
-                      ? "Looking up the customer’s pricing tier — Save in a moment."
-                      : undefined
-                }
-                style={{
-                  fontFamily: "var(--font-ui)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "9px 15px",
-                  cursor: statusChanging || tierResolving ? "not-allowed" : "pointer",
-                  opacity: statusChanging || tierResolving ? 0.6 : 1,
-                  ...(justSaved
-                    ? { background: "#22361f", color: "#5fd29a" }
-                    : { background: "#2b2e35", color: "#cfd3da" }),
-                }}
-              >
-                {justSaved ? "Saved ✓" : "Save"}
-              </button>
-              {/* #284 — the one next-step control: pill · Submit / Approve / Send → · ⋯ */}
-              {loadedId && next && (
-                <QuoteNextStep
-                  quoteId={loadedId}
-                  view={next}
-                  variant="toolbar"
-                  savedOnly={pdfDirty}
-                  disabled={statusChanging || tierResolving}
-                  beforeAction={pdfDirty ? saveNow : undefined}
-                  onSync={(r) => {
-                    applySync(r);
-                    if (r.ok) {
-                      setActionError(null);
-                      setGateRefused(false);
-                    }
-                  }}
-                  onError={(m) => {
-                    setActionError(m);
-                    setGateRefused(false);
-                  }}
-                />
-              )}
-              {loadedId && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const href = `/estimator/cut-sheets?id=${encodeURIComponent(loadedId)}`;
-                    if (!pdfDirty) {
-                      window.open(href, "_blank", "noopener");
-                      return;
-                    }
-                    // Opened inside the click so it isn't popup-blocked; navigated after the save lands.
-                    const w = window.open("", "_blank");
-                    const saved = await saveNow();
-                    if (!w) return;
-                    if (saved === false) w.close();
-                    else w.location.href = href;
-                  }}
-                  style={{ fontFamily: "var(--font-ui)", fontSize: 13, fontWeight: 600, color: "#cfd3da", background: "#2b2e35", padding: "9px 14px", borderRadius: 8, border: "none", cursor: "pointer" }}
-                >
-                  Cut sheets
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setMode("preview")}
-                style={{
-                  fontFamily: "var(--font-ui)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#16181d",
-                  background: "#fff",
-                  padding: "9px 16px",
-                  borderRadius: 8,
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                Customer preview →
-              </button>
-            </div>
-            {qdOpen && (
-              <div
-                ref={qdPanelRef}
-                id="est-quote-details"
-                className="est-qd est-scroll"
-                role="region"
-                aria-label="Quote details"
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  right: 0,
-                  zIndex: 30,
-                  maxHeight: "min(70vh, 640px)",
-                  overflowY: "auto",
-                  background: "#23262d",
-                  borderTop: "1px solid #2b2e35",
-                  borderBottom: "1px solid #2b2e35",
-                  boxShadow: "0 12px 28px rgba(0,0,0,.28)",
-                  color: "#fff",
-                }}
-              >
-                <div style={META_HEAD}>
-                  <span style={{ ...CTX_LABEL, fontWeight: 600 }}>Quote details</span>
-                  <button type="button" className="est-qd-done" onClick={closeQd} style={META_TOGGLE}>
-                    Done
-                  </button>
-                </div>
-                <div className="est-qd-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-                  <div className="est-qd-col">
-                  <section style={META_SECTION}>
-                    <span style={CTX_LABEL}>Prepared for</span>
-                    <select
-                      value={customerId || ""}
-                      onChange={(e) => pickCustomer(e.target.value)}
-                      title="Linked customer — flows to the project when this quote is won"
-                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                    >
-                      {customerOptions.map((o) => (
-                        <option key={o.value || "__none"} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    {showVenuePick && (
-                      <>
-                        <span style={META_SUB}>at</span>
-                        <select
-                          value={locationId || ""}
-                          onChange={(e) => pickVenue(e.target.value)}
-                          title="Which of the customer's venues"
-                          style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                        >
-                          {venueOptions.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      </>
-                    )}
-                    {showContactPick && (
-                      <>
-                        <span style={META_SUB}>attn</span>
-                        <select
-                          value={currentContact ? currentContact.name : ""}
-                          onChange={(e) => pickContact(e.target.value)}
-                          title="Contact this quote is prepared for"
-                          style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                        >
-                          {contactOptions.map((o) => (
-                            <option key={o.value || "__none"} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      </>
-                    )}
-                    {wonMetaGuard && (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                          gap: 7,
-                          marginTop: 2,
-                          padding: "7px 9px",
-                          fontSize: 11.5,
-                          lineHeight: 1.35,
-                          color: "#e3c26e",
-                          background: "#3a331d",
-                          border: "1px solid #55471f",
-                          borderRadius: 7,
-                        }}
-                      >
-                        <span style={{ flex: 1, minWidth: 140 }}>
-                          {wonEditMessage(wonMetaGuard.field)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const run = wonMetaGuard.run;
-                            setWonMetaGuard(null);
-                            run();
-                          }}
-                          style={{
-                            fontFamily: "var(--font-ui)",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: "#16181d",
-                            background: "#e3c26e",
-                            border: "none",
-                            borderRadius: 6,
-                            padding: "4px 9px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Change
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setWonMetaGuard(null)}
-                          style={{
-                            fontFamily: "var(--font-ui)",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: "#e3c26e",
-                            background: "transparent",
-                            border: "1px solid #55471f",
-                            borderRadius: 6,
-                            padding: "4px 9px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                    <span style={META_SUB}>category</span>
-                    <input
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      onBlur={() => {
-                        const v = category.trim();
-                        if (v !== category) setCategory(v);
-                        if (v === categorySaved.current) return;
-                        // eslint-disable-next-line react-hooks/immutability -- a ref owned by useEstimatorState; the ref lives there, this handler still writes it
-                        categorySaved.current = v;
-                        persistMeta({ category: v });
-                      }}
-                      placeholder="Category"
-                      title="Quote category — shown on the Quotes hub"
-                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0, cursor: "text" }}
-                    />
-                  </section>
-                  <section style={META_SECTION}>
-                    <span style={CTX_LABEL}>Lead estimator</span>
-                    <select
-                      value={ownerValue}
-                      onChange={(e) => changePeople({ owner: e.target.value })}
-                      disabled={!loadedId || peopleBusy}
-                      aria-label="Lead estimator"
-                      title={
-                        viewerCanApprove
-                          ? "Owns the quote — their review limit applies and it lists under them on the Quotes hub"
-                          : "Only an approver can hand a quote to someone else"
-                      }
-                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
-                    >
-                      {peopleOptions(ownerValue).map((o) => {
-                        const locked = !viewerCanApprove && !samePerson(o.value, viewerName) && o.value !== ownerValue;
-                        return (
-                          <option
-                            key={o.value || "__none"}
-                            value={o.value}
-                            disabled={locked || !o.value}
-                            title={locked ? "Only an approver can hand a quote to someone else" : undefined}
-                          >
-                            {o.label}
-                          </option>
-                        );
-                      })}
-                    </select>
-                    <span style={{ ...CTX_LABEL, marginTop: 4 }}>Prepared by</span>
-                    <select
-                      value={preparedValue}
-                      onChange={(e) => changePeople({ preparedBy: e.target.value })}
-                      disabled={!loadedId || peopleBusy}
-                      aria-label="Prepared by"
-                      title="Prints under Prepared by on the customer document"
-                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
-                    >
-                      {peopleOptions(preparedValue).map((o) => (
-                        <option key={o.value || "__none"} value={o.value} disabled={!o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <span style={META_HINT}>
-                      {loadedId ? "Saved as you pick" : "Save the quote to change these"}
-                    </span>
-                  </section>
-                  <section style={{ ...META_SECTION, borderBottom: "none" }}>
-                    <span style={CTX_LABEL}>Suggested install timeframe</span>
-                    <select
-                      value={installTimeframe}
-                      onChange={(e) => onInstallTimeframe(e.target.value)}
-                      aria-label="Suggested install timeframe"
-                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                    >
-                      {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
-                    </select>
-                    <span style={META_HINT}>Carries to the project goal when this quote is won</span>
-                  </section>
-                  </div>
-                  <div className="est-qd-col">
-                  <section style={{ ...META_SECTION, borderBottom: "none" }}>
-                    <span style={CTX_LABEL}>Quote note</span>
-                    <input
-                      className="est-notefield"
-                      value={quoteNote}
-                      onChange={(e) => onQuoteNote(e.target.value)}
-                      placeholder="Cover language printed on the quote header — e.g. Thank you for the opportunity…"
-                      style={{
-                        width: "100%",
-                        minWidth: 0,
-                        fontFamily: "var(--font-ui)",
-                        fontSize: 12.5,
-                        color: "#fff",
-                        background: "#2b2e35",
-                        border: "1px solid #3a3e46",
-                        borderRadius: 7,
-                        padding: "8px 11px",
-                      }}
-                    />
-                    <span style={META_HINT}>Shows on the PDF header</span>
-                  </section>
-                  </div>
-                  <div className="est-qd-col">
-                  <section style={{ ...META_SECTION, borderBottom: "none" }}>
-                    <span style={CTX_LABEL}>Assumptions</span>
-                    {assumptionLibrary.length > 0 && (
-                      <div style={{ display: "grid", gap: 5 }}>
-                        {assumptionLibrary.map((line) => (
-                          <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
-                            <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
-                            <span>{line}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    <textarea
-                      className="est-notefield"
-                      value={assumptions}
-                      onChange={(e) => onAssumptions(e.target.value)}
-                      placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
-                      rows={3}
-                      style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
-                    />
-                    <span style={META_HINT}>Company defaults + editable exceptions</span>
-                  </section>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* Daylite stage bar (Task 6) — system quotes only, none for an
               unsaved estimate. Read-only + a "Lost" marker on a lost quote;
               the pipeline switch (Estimate/Design ⇄ BID SPEC) only while
@@ -988,244 +370,6 @@ export default function EstimatorClient(props: EstimatorProps) {
                   ))}
                 </select>
               )}
-            </div>
-          )}
-
-          {/* #284 — the next step's note (a send-back note, the limit chip, an
-              approval line), always visible; the actions live in the toolbar. */}
-          {loadedId && next?.strip && (
-            <div style={{ padding: "7px 22px", fontSize: 12.5, color: "#5b616e", background: "#f8f9fb", borderBottom: "1px solid #e4e7ec", flexShrink: 0 }}>
-              {next.strip}
-            </div>
-          )}
-
-          {/* action rejection banner (punch #60: send/won gated server-side) */}
-          {actionError && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "9px 22px",
-                background: "#fdecea",
-                borderBottom: "1px solid #f3c8c2",
-                color: "#9a2f22",
-                fontSize: 12.5,
-                fontWeight: 600,
-                flexShrink: 0,
-              }}
-            >
-              <span>{actionError}</span>
-              {/* #284: the gate refused Sent/Won — offer the way through right here. */}
-              {gateRefused && loadedId && next?.primary && next.primary.action !== "approve" && (
-                <QuoteNextStep
-                  quoteId={loadedId}
-                  view={{ ...next, secondary: [], pill: { ...next.pill, label: "" } }}
-                  variant="panel"
-                  disabled={statusChanging || tierResolving}
-                  beforeAction={pdfDirty ? saveNow : undefined}
-                  onSync={(r) => {
-                    applySync(r);
-                    if (r.ok) {
-                      setActionError(null);
-                      setGateRefused(false);
-                    }
-                  }}
-                  onError={(m) => {
-                    setActionError(m);
-                    setGateRefused(false);
-                  }}
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setActionError(null);
-                  setGateRefused(false);
-                }}
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: "#9a2f22",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "2px 4px",
-                  flexShrink: 0,
-                }}
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          {/* informational save notice (#180 review 3) — a stale tab's
-              status got refreshed, but nothing this save asked for failed */}
-          {!actionError && actionNotice && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "9px 22px",
-                background: "#eef3fb",
-                borderBottom: "1px solid #cddaf0",
-                color: "#2b4a7a",
-                fontSize: 12.5,
-                fontWeight: 600,
-                flexShrink: 0,
-              }}
-            >
-              <span>{actionNotice}</span>
-              <button
-                type="button"
-                onClick={() => setActionNotice(null)}
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: "#2b4a7a",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "2px 4px",
-                  flexShrink: 0,
-                }}
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          {/* #282 perks+points — the customer's standing purchase perks
-              (informational; only the answer for the customer picked now). */}
-          {customerId && creditInfo?.customerId === customerId && <PurchasePerksBanner text={creditInfo.purchasePerks} />}
-
-          {/* "Move system" result banner — success links to the target
-              estimate without auto-navigating (this estimate may have
-              other unsaved edits); failure surfaces the server's reason. */}
-          {moveNotice && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "9px 22px",
-                background: moveNotice.ok ? "#ecf6f0" : "#fdecea",
-                borderBottom: moveNotice.ok ? "1px solid #cce9da" : "1px solid #f3c8c2",
-                color: moveNotice.ok ? "#1f7a52" : "#9a2f22",
-                fontSize: 12.5,
-                fontWeight: 600,
-                flexShrink: 0,
-              }}
-            >
-              <span>
-                {moveNotice.ok && moveNotice.verb === "Loaded" ? (
-                  <>{moveNotice.detail}</>
-                ) : moveNotice.ok && moveNotice.verb === "Copied" ? (
-                  moveNotice.targetId ? (
-                    <>
-                      Copied to {moveNotice.targetNumber} · {moveNotice.targetName} — {moveNotice.detail} —{" "}
-                      <a
-                        href={`/estimator?id=${moveNotice.targetId}`}
-                        style={{ color: "inherit", textDecoration: "underline" }}
-                      >
-                        Open {moveNotice.targetName} →
-                      </a>
-                    </>
-                  ) : (
-                    <>Copied within this estimate — {moveNotice.detail}</>
-                  )
-                ) : moveNotice.ok ? (
-                  <>
-                    Moved to {moveNotice.targetName} ({moveNotice.targetNumber}) —{" "}
-                    <a
-                      href={`/estimator?id=${moveNotice.targetId}`}
-                      style={{ color: "inherit", textDecoration: "underline" }}
-                    >
-                      Open {moveNotice.targetName} →
-                    </a>
-                  </>
-                ) : (
-                  moveNotice.error
-                )}
-              </span>
-              <button
-                type="button"
-                onClick={() => setMoveNotice(null)}
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: "inherit",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "2px 4px",
-                  flexShrink: 0,
-                }}
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          {/* #254 tier re-price banner — internal only, never on the
-              customer document; clears on the next edit or Undo. */}
-          {tierReprice && (
-            <div
-              role="status"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "9px 22px",
-                background: "#eef3fb",
-                borderBottom: "1px solid #cddaf0",
-                color: "#2b4a7a",
-                fontSize: 12.5,
-                fontWeight: 600,
-                flexShrink: 0,
-              }}
-            >
-              <span>
-                {tierRepriceMessage(tierReprice.repriced, tierReprice.handPriced, tierReprice.label, tierReprice.margin, tierReprice.unsaved)}
-                {" · "}
-                <button
-                  type="button"
-                  onClick={undoTierReprice}
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: "inherit",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 0,
-                    textDecoration: "underline",
-                  }}
-                >
-                  Undo
-                </button>
-              </span>
-              <button
-                type="button"
-                onClick={() => setTierReprice(null)}
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: "inherit",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "2px 4px",
-                  flexShrink: 0,
-                }}
-              >
-                Dismiss
-              </button>
             </div>
           )}
 
@@ -1926,8 +1070,8 @@ export default function EstimatorClient(props: EstimatorProps) {
         </div>
       )}
 
-      {/* ===================== PREVIEW MODE (the saved customer PDF, #222) ===================== */}
-      {isPreview && (
+      {/* the saved customer PDF (#222) — the Customer review step for now */}
+      {step === "review" && (
         <>
           {/* #284 — an approver on a phone can decide right from the preview.
               The build-mode error banner isn't rendered here, so the control
@@ -1952,7 +1096,7 @@ export default function EstimatorClient(props: EstimatorProps) {
           <PreviewDoc
             phone={phone}
             canBuild={!phone}
-            onBack={() => setMode("build")}
+            onBack={() => goStep("build")}
             savedQuoteId={loadedId}
             pdf={pdf}
             onPdf={setPdf}

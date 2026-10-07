@@ -240,7 +240,6 @@ export function useEstimatorState(props: EstimatorProps) {
     ? "RB-MV-MN"
     : fabrics[0]?.sku ?? "RB-MV-MN";
 
-  const [mode, setMode] = useState<"build" | "preview">("build");
   const [phone, setPhone] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [loadedId, setLoadedId] = useState(initial.loadedId);
@@ -583,8 +582,6 @@ export function useEstimatorState(props: EstimatorProps) {
     setSections((ss) => withRewardCredit(ss, amount, nextId()));
   const removeCredit = () => setSections((ss) => withoutRewardCredit(ss));
 
-  const isBuild = !phone && mode === "build";
-  const isPreview = phone || mode === "preview";
   const isInternal = true; // build mode is the internal view (prototype view: 'internal')
   /* One shared line-item grid template — header, item rows and the freight
      row all render off this SAME `cols` (section-card.tsx), so a column can
@@ -1592,6 +1589,32 @@ export function useEstimatorState(props: EstimatorProps) {
     }
   };
 
+  /* #304 — the Quote details panel's Category field commits on blur (trimmed;
+     persisted only when it changed). Lives here so the ref write stays in the hook. */
+  const commitCategory = () => {
+    const v = category.trim();
+    if (v !== category) setCategory(v);
+    if (v === categorySaved.current) return;
+    categorySaved.current = v;
+    persistMeta({ category: v });
+  };
+
+  /* #304 — the ⋯ menu's Cut sheets: save first when the PDF is out of date, then open in a new tab. */
+  const openCutSheets = async () => {
+    if (!loadedId) return;
+    const href = `/estimator/cut-sheets?id=${encodeURIComponent(loadedId)}`;
+    if (!pdfDirty) {
+      window.open(href, "_blank", "noopener");
+      return;
+    }
+    // Opened inside the click so it isn't popup-blocked; navigated after the save lands.
+    const w = window.open("", "_blank");
+    const saved = await saveNow();
+    if (!w) return;
+    if (saved === false) w.close();
+    else w.location.href = href;
+  };
+
   /* ---- Scope draft from survey/inspection (S12/D83 — rules-based) ----
      Deterministic: the linked record's captured fields are assembled into a
      scope paragraph (no model call, no line items — Jeff adds items
@@ -2455,7 +2478,7 @@ export function useEstimatorState(props: EstimatorProps) {
     canWriteNarrativeLibrary,
     cardRefs,
     category,
-    categorySaved,
+    commitCategory,
     changePeople,
     changePipeline,
     changeStage,
@@ -2468,6 +2491,7 @@ export function useEstimatorState(props: EstimatorProps) {
     commitVendorQuote,
     contactOptions,
     copySystem,
+    openCutSheets,
     coverSummary,
     creditInfo,
     currentContact,
@@ -2500,11 +2524,9 @@ export function useEstimatorState(props: EstimatorProps) {
     insertAiScope,
     installTimeframe,
     intros,
-    isBuild,
     isExpanded,
     isInternal,
     isOpenFor,
-    isPreview,
     justSaved,
     kpLib,
     laborDraft,
@@ -2552,7 +2574,6 @@ export function useEstimatorState(props: EstimatorProps) {
     people,
     peopleBusy,
     peopleOptions,
-    persistMeta,
     phone,
     pickContact,
     pickCustomer,
@@ -2611,7 +2632,6 @@ export function useEstimatorState(props: EstimatorProps) {
     setMarginAll,
     setMob,
     setMobNameSelect,
-    setMode,
     setMoveNotice,
     setNarrFocusReq,
     setPaymentTerms,
@@ -2647,6 +2667,7 @@ export function useEstimatorState(props: EstimatorProps) {
     stageBarCurIdx,
     stageBarLostLabel,
     stageBarPipeline,
+    status,
     statusChanging,
     t,
     templateSets,

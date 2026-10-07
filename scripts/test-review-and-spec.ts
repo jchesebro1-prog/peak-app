@@ -52552,3 +52552,20 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(/const run = \(action: NextStepAction, fn:/.test(ns304) && /\(onSync \?\? \(\(\) => router\.refresh\(\)\)\)\(r, action\);/.test(ns304), "#304 next step: run threads its action into onSync");
   ok(!/\brun\(\(\)/.test(ns304) && !/\brun\(\(shown\)/.test(ns304), "#304 next step: every run(...) call names its action first");
 }
+
+/* #304 — the shell: four tabs, URL-synced, one header, the ⋯ menu. */
+{
+  const shell304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  const header304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-header.tsx"), "utf8");
+  const more304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/header-more-menu.tsx"), "utf8");
+  const tabs304 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/step-tabs.tsx"), "utf8");
+  ok(/useSearchParams\(\)/.test(shell304) && /parseStep\(/.test(shell304) && /window\.history\.pushState\(null, "", /.test(shell304), "#304 shell: the step comes from ?step= and moves with pushState (unsaved edits survive)");
+  ok(/s\.phone \? "review"/.test(shell304), "#304 shell: a phone always shows Customer review");
+  ok(/window\.history\.replaceState\(null, "", /.test(shell304) && /s\.loadedId/.test(shell304), "#304 shell: the first save writes ?id= into the URL");
+  ok(/stepAfterAction\(action\)/.test(shell304), "#304 shell: a successful next-step action moves to its step");
+  ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#304 shell: the old build/preview mode and its button are gone");
+  ok(/flexWrap: "wrap"/.test(header304), "#304 header: wraps instead of overflowing at 1024 px");
+  ok(["ChangeTypeControl", "Parts list (CSV)", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Parts list \(CSV\)|DeleteQuoteButton/.test(header304),
+    "#304 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
+  ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#304 tabs: labelled from STEP_LABEL, current tab marked");
+}
