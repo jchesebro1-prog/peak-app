@@ -6,6 +6,7 @@
  * and "too big".
  */
 import { mfrKey } from "./catalog-books";
+import type { ImportResolver } from "./catalog-rename/import-resolve";
 
 /** 1 MB, exactly. Applies to the CSV/TSV file, the pasted text, and .xlsx uploads for the catalog type. */
 export const MAX_CATALOG_IMPORT_BYTES = 1_048_576;
@@ -57,11 +58,18 @@ function plural(n: number, word: string): string {
  * - a new manufacturer, or any overlap → ok.
  * Unbranded parts (no mfr) are never foreign: importing them under a
  * manufacturer is how they get one.
+ *
+ * #302 — `resolve` (the importers' own buildImportResolver) judges each file
+ * SKU by the live part it resolves to: an old order number that now means a
+ * renamed `Brand:Model` part counts as overlap (or as foreign, when that part
+ * is another manufacturer's), exactly as the importer will write it. Messages
+ * still name the row's own SKU.
  */
 export function checkManufacturer(input: {
   mfr: string;
   fileSkus: string[];
   catalog: CatalogRef[];
+  resolve?: ImportResolver;
 }): ManufacturerCheck {
   const typed = (input.mfr || "").trim();
   const key = mfrKey(typed);
@@ -89,10 +97,17 @@ export function checkManufacturer(input: {
 
   const fileSkus = Array.from(new Set(input.fileSkus.map((s) => (s || "").trim()).filter(Boolean)));
   const n = fileSkus.length;
+  // A SKU already on file (any spelling — the hub's own `ci` match) is judged
+  // as before; only one that matches nothing goes through the resolver.
+  const rowKey = (s: string) => {
+    const k = skuKey(s);
+    if (!input.resolve || mine.has(k) || foreignBySku.has(k)) return k;
+    return skuKey(input.resolve({ sku: s, mfr: typed }) ?? s);
+  };
 
   const foreign = fileSkus
-    .filter((s) => foreignBySku.has(skuKey(s)) && !mine.has(skuKey(s)))
-    .map((s) => ({ sku: s, mfr: foreignBySku.get(skuKey(s)) as string }));
+    .filter((s) => foreignBySku.has(rowKey(s)) && !mine.has(rowKey(s)))
+    .map((s) => ({ sku: s, mfr: foreignBySku.get(rowKey(s)) as string }));
   if (foreign.length) {
     const examples = foreign.slice(0, 10);
     const more = foreign.length - examples.length;
@@ -109,7 +124,7 @@ export function checkManufacturer(input: {
     };
   }
 
-  const overlap = fileSkus.filter((s) => mine.has(skuKey(s))).length;
+  const overlap = fileSkus.filter((s) => mine.has(rowKey(s))).length;
   if (mine.size > 0 && n > 0 && overlap === 0) {
     return {
       ok: false,
@@ -139,10 +154,10 @@ export function groupRowsByManufacturer(rows: Array<{ mfr: string; sku: string }
 
 export type GroupCheck = { mfr: string; count: number; result: ManufacturerCheck };
 
-export function checkManufacturerGroups(groups: ManufacturerGroup[], catalog: CatalogRef[]): GroupCheck[] {
+export function checkManufacturerGroups(groups: ManufacturerGroup[], catalog: CatalogRef[], resolve?: ImportResolver): GroupCheck[] {
   return groups.map((g) => ({
     mfr: g.mfr,
     count: g.skus.length,
-    result: checkManufacturer({ mfr: g.mfr, fileSkus: g.skus, catalog }),
+    result: checkManufacturer({ mfr: g.mfr, fileSkus: g.skus, catalog, resolve }),
   }));
 }

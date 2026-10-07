@@ -10,6 +10,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { checkManufacturerGroups, type GroupCheck } from "@/lib/catalog-import-guard";
 import { setPriceListEffective } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { importResolverFor } from "@/lib/stores/catalog-renames";
 import { catalogGroups } from "./catalog-groups";
 import type { PreparedRow } from "./parse";
 import { commitImport, type ImportMode, type ImportResult } from "./registry";
@@ -43,7 +44,10 @@ function guardMessage(c: GroupCheck): string {
 export async function commitCatalogImport(input: CatalogCommitInput): Promise<CatalogCommitResult> {
   // #132 — the wrong-manufacturer guard, per manufacturer in the file,
   // before anything is written; a failure rejects the whole file.
-  const checks = checkManufacturerGroups(catalogGroups(input.rows), await listCatalog());
+  // #302 — a row keyed by a renamed part's old order number counts as that
+  // part, exactly as commitImport's catalog writer will resolve it.
+  const catalog = await listCatalog();
+  const checks = checkManufacturerGroups(catalogGroups(input.rows), catalog, await importResolverFor(catalog));
   const bad = checks.find((c) => !c.result.ok);
   if (bad) return { ok: false, error: guardMessage(bad) };
 

@@ -8,6 +8,7 @@ import { normalizeSku } from "@/lib/davinci/sku";
 import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
 import { planRenames as cr302Plan, crosswalkRowsFromGrid as cr302Rows } from "@/lib/catalog-rename/plan";
 import * as cr302Rw from "@/lib/catalog-rename/rewrite";
+import { buildImportResolver as cr302Resolver } from "@/lib/catalog-rename/import-resolve";
 import type { SpecItem as Cr302SpecItem, SpecSection as Cr302Section } from "@/app/(app)/estimator/types";
 import type { CartLine as Cr302CartLine } from "@/lib/portal-cart-types";
 import type { ProcurementLine as Cr302ProcLine } from "@/lib/stores/projects";
@@ -10888,6 +10889,47 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   }
 }
 
+/* --- #302 Task 5: importers resolve renamed parts (src/lib/catalog-rename/import-resolve.ts) --- pure */
+{
+  const live = [
+    { sku: "Symetrix:Jupiter 4", mfr: "Symetrix", manufacturerPartNumber: "80-0043", formerSkus: ["80-0043"] },
+    { sku: "Symetrix:Radius 12", mfr: "Symetrix", manufacturerPartNumber: "80-0050" },
+    { sku: "ETC-S4", mfr: "ETC", manufacturerPartNumber: "7060A" },
+    { sku: "ETC-S4-BLK", mfr: "ETC", manufacturerPartNumber: "7061A" },
+    { sku: "ETC-S4-WHT", mfr: "E.T.C.", manufacturerPartNumber: "7061-A" },
+    { sku: "PLAIN-1" },
+  ];
+  const renames = new Map([["80-0050", "Symetrix:Radius 12"], ["OLD-A", "OLD-B"], ["OLD-B", "Symetrix:Radius 12"], ["GONE-1", "GONE-2"]]);
+  const r = cr302Resolver(live, renames);
+  ok(r({ sku: "ETC-S4", mfr: "Symetrix" }) === "ETC-S4", "#302 import resolve: an exact live SKU wins first (whatever the row's manufacturer)");
+  ok(r({ sku: "80-0043" }) === "Symetrix:Jupiter 4", "#302 import resolve: a former SKU finds the renamed part");
+  ok(r({ sku: "80 0043" }) === "Symetrix:Jupiter 4" && r({ sku: "800043" }) === "Symetrix:Jupiter 4", "#302 import resolve: former SKUs compare punctuation/space-insensitively");
+  ok(r({ sku: "80-0050" }) === "Symetrix:Radius 12", "#302 import resolve: the rename log maps an old SKU with no formerSkus entry");
+  ok(r({ sku: "OLD-A" }) === "Symetrix:Radius 12", "#302 import resolve: a rename chain is followed to the live SKU");
+  ok(r({ sku: "GONE-1" }) === null, "#302 import resolve: a rename that ends at no live part is a new part (null)");
+  ok(r({ sku: "7060A", mfr: "ETC" }) === "ETC-S4", "#302 import resolve: same manufacturer + MFR P/N equal to the row SKU");
+  ok(r({ sku: "NEW-9", mfr: "etc", manufacturerPartNumber: "7060-a" }) === "ETC-S4", "#302 import resolve: same manufacturer (mfrKey) + MFR P/N equal to the row's MFR P/N, normalized");
+  ok(r({ sku: "7060A", mfr: "Chauvet" }) === null && r({ sku: "7060A" }) === null, "#302 import resolve: a different (or no) manufacturer never matches on P/N");
+  ok(r({ sku: "7061A", mfr: "ETC" }) === null, "#302 import resolve: two parts of one manufacturer sharing a normalized P/N is ambiguous → null");
+  ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "7061A" }) === null, "#302 import resolve: row SKU and row P/N naming two different parts is ambiguous → null");
+  ok(r({ sku: "BRAND-NEW", mfr: "ETC" }) === null && r({ sku: "" }) === null, "#302 import resolve: no match is a new part (null)");
+  ok(r({ sku: "plain-1" }) === null, "#302 import resolve: step 1 is exact — case-insensitive matching stays the importer's own rule");
+  // The import guard counts resolved rows as overlap (a renamed manufacturer's
+  // whole price list is still keyed by order number).
+  const cat302 = live.map(({ sku, mfr }) => ({ sku, mfr }));
+  const noRes = checkManufacturer({ mfr: "Symetrix", fileSkus: ["80-0043", "80-0050"], catalog: cat302 });
+  ok(!noRes.ok && noRes.reason === "no-overlap", "#302 import guard: without the resolver an order-number file reads as the wrong manufacturer");
+  const withRes = checkManufacturer({ mfr: "Symetrix", fileSkus: ["80-0043", "80-0050"], catalog: cat302, resolve: r });
+  ok(withRes.ok && withRes.overlap === 2, "#302 import guard: with the resolver, rows that resolve to a renamed part count as overlap");
+  const foreign302 = checkManufacturer({ mfr: "ETC", fileSkus: ["80-0043", "ETC-S4"], catalog: cat302, resolve: r });
+  ok(!foreign302.ok && foreign302.reason === "foreign-skus" && foreign302.examples[0].sku === "80-0043" && foreign302.examples[0].mfr === "Symetrix", "#302 import guard: an old SKU that resolves to another manufacturer's part is foreign, named by the row's own SKU");
+  const grp302 = checkManufacturerGroups([{ mfr: "Symetrix", skus: ["80-0043"] }], cat302, r);
+  ok(grp302[0].result.ok, "#302 import guard: checkManufacturerGroups threads the resolver");
+  const liveX = [{ sku: "ETC-S4", mfr: "ETC" }, { sku: "Symetrix:Odd", mfr: "Symetrix", formerSkus: ["ETC S4"] }];
+  const ciFirst = checkManufacturer({ mfr: "ETC", fileSkus: ["etc-s4"], catalog: liveX, resolve: cr302Resolver(liveX, new Map()) });
+  ok(ciFirst.ok && ciFirst.overlap === 1, "#302 import guard: a SKU already on file in any spelling is judged as before — the resolver only sees rows that match nothing");
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -11081,6 +11123,7 @@ seeded()
   .then(() => estimateOutput301CAsyncChecks())
   .then(() => modelSku302StoreAsyncChecks())
   .then(() => modelSku302ApplyAsyncChecks())
+  .then(() => modelSku302ImportAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -52978,5 +53021,80 @@ async function modelSku302ApplyAsyncChecks(): Promise<void> {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
     await Settings.setSettings({ wireTypes: wireBefore });
+  }
+}
+
+/** #302 Task 5 — both catalog importers update a renamed part when a price
+ *  list still keys it by its old order number: no duplicate at the old SKU,
+ *  no revived tombstone, and the import guard doesn't refuse the file. Driven
+ *  through the importers' own server entry points (runCatalogImport — the
+ *  Catalog page; commitCatalogImport → commitImport("catalog") — the hub). */
+async function modelSku302ImportAsyncChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const Cat = await import("@/lib/stores/catalog");
+  const Ren = await import("@/lib/stores/catalog-renames");
+  const DS = await import("@/db/doc-store");
+  const { runCatalogImport: runPage } = await import("@/app/(app)/catalog/import");
+  const { commitCatalogImport } = await import("@/app/(app)/import/catalog-commit");
+  const { prepareRows: prep, autoMap: amap } = await import("@/app/(app)/import/parse");
+  const { getTypeMeta: meta } = await import("@/app/(app)/import/types");
+  const { setPriceListEffective: setPle } = await import("@/lib/settings");
+  const { mfrKey: mk } = await import("@/lib/catalog-books");
+  const { getDb } = await import("@/db");
+  const { blobs: blobsT } = await import("@/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  type D302 = import("@/db/doc-store").Doc;
+
+  // A manufacturer only this check's parts carry, so the guard's overlap
+  // test sees exactly these parts.
+  const MFR = fixtureId(302, "imp-mfr");
+  const O1 = fixtureId(302, "imp-o1"); // Catalog page path
+  const O2 = fixtureId(302, "imp-o2"); // Import hub path
+  const N1 = `${MFR}:Jupiter 4`;
+  const N2 = `${MFR}:Radius 12`;
+  for (const id of [O1, O2, N1, N2]) registerFixture("catalog_parts", id);
+  const base = { desc: "Fixture 302 import", category: "Other", unit: "ea", cost: 50, mfr: MFR };
+  const db = await getDb();
+  const blobIds = [Ren.SKU_RENAMES_BLOB];
+  const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
+  try {
+    await DS.upsertDoc("catalog_parts", { ...base, id: O1, sku: O1, list: 100 } as never);
+    await DS.upsertDoc("catalog_parts", { ...base, id: O2, sku: O2, list: 200 } as never);
+    ok(!!(await Cat.renamePartDocs(O1, N1, "Jupiter 4")) && !!(await Cat.renamePartDocs(O2, N2, "Radius 12")), "#302 import: fixture parts renamed");
+    await Ren.appendSkuRenames([
+      { from: O1, to: N1, model: "Jupiter 4", at: 1, by: "Test" },
+      { from: O2, to: N2, model: "Radius 12", at: 1, by: "Test" },
+    ]);
+    const liveHasOld = async (old: string) => (await DS.listDocs<D302>("catalog_parts")).some((d) => d.id === old);
+    const tomb = async (old: string, to: string) => {
+      const row = (await DS.getDocRows<D302>("catalog_parts", [old]))[0];
+      return row?.deleted === true && (row.doc as { renamedTo?: string }).renamedTo === to;
+    };
+
+    // ---- Catalog page (runCatalogImport) ----
+    const csv = `SKU,Description,List,MFR M/N\n${O1},Jupiter 4 DSP (2026),150,WRONG MODEL\n`;
+    const pg = await runPage({ mfr: MFR, text: csv, bytes: Buffer.byteLength(csv, "utf8"), effectiveAt: Date.now(), defaultCategory: "Other" });
+    ok(pg.ok && pg.imported === 1, "#302 import page: an order-number price list for a renamed manufacturer is not refused by the guard" + (pg.ok ? "" : ` (${pg.error})`));
+    const p1 = await Cat.get(N1);
+    ok(p1?.list === 150 && p1.desc === "Jupiter 4 DSP (2026)", "#302 import page: the renamed part's price and description changed");
+    ok(p1?.sku === N1 && p1.manufacturerModelNumber === "Jupiter 4" && p1.manufacturerPartNumber === O1 && JSON.stringify(p1.formerSkus) === JSON.stringify([O1]), "#302 import page: the renamed part keeps its sku, model #, P/N and formerSkus");
+    ok(!(await liveHasOld(O1)) && (await tomb(O1, N1)) && (await Cat.get(O1))?.sku === N1, "#302 import page: no live part at the old SKU — the tombstone stays a redirect");
+
+    // ---- Import hub (commitCatalogImport → commitImport("catalog")) ----
+    const fields = meta("catalog")!.fields;
+    const hubRows = (list: number) => prep([[O2, MFR, "Radius 12 (2026)", String(list)]], amap(["SKU", "Manufacturer", "Description", "List Price"], fields), fields).rows;
+    const hu = await commitCatalogImport({ rows: hubRows(250), mode: "update", effectiveAt: Date.now(), priced: true });
+    ok(hu.ok && hu.res.updated === 1 && hu.res.created === 0, "#302 import hub: Update existing matches the renamed part by its old SKU" + (hu.ok ? "" : ` (${hu.error})`));
+    const p2 = await Cat.get(N2);
+    ok(p2?.list === 250 && p2.desc === "Radius 12 (2026)" && p2.sku === N2 && p2.manufacturerModelNumber === "Radius 12" && JSON.stringify(p2.formerSkus) === JSON.stringify([O2]), "#302 import hub: the renamed part's price changed, its identity did not");
+    ok(!(await liveHasOld(O2)) && (await tomb(O2, N2)), "#302 import hub: no live part at the old SKU after Update existing");
+    const hc = await commitCatalogImport({ rows: hubRows(275), mode: "create", effectiveAt: Date.now(), priced: true });
+    ok(hc.ok && (await Cat.get(N2))?.list === 275 && !(await liveHasOld(O2)) && (await tomb(O2, N2)), "#302 import hub: Create new on an old SKU merges into the renamed part, never a duplicate or a revived tombstone");
+    const hs = await commitCatalogImport({ rows: hubRows(999), mode: "skip", effectiveAt: Date.now(), priced: true });
+    ok(hs.ok && hs.res.skipped === 1 && (await Cat.get(N2))?.list === 275, "#302 import hub: Skip duplicates treats the old SKU as a duplicate of the renamed part");
+  } finally {
+    await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
+    if (snapshot.length) await db.insert(blobsT).values(snapshot);
+    await setPle(mk(MFR), null);
   }
 }

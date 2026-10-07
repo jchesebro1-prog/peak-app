@@ -9,6 +9,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { checkManufacturer, checkSize } from "@/lib/catalog-import-guard";
 import { setPriceListEffective } from "@/lib/settings";
 import { list as listCatalog, mergeUpsert, type CatalogProductMetadata, type CatalogPart } from "@/lib/stores/catalog";
+import { importResolverFor } from "@/lib/stores/catalog-renames";
 import { looksLikeSpecId, resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
@@ -41,7 +42,10 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
 
   // #132 — the guard runs before any upsert, so a rejected file writes nothing.
   const catalog = await listCatalog();
-  const guard = checkManufacturer({ mfr: input.mfr, fileSkus: valid.map((r) => r.sku), catalog });
+  // #302 — a row keyed by a renamed part's old order number (or by its MFR
+  // P/N) updates that part; the guard judges rows by the same resolution.
+  const resolve = await importResolverFor(catalog);
+  const guard = checkManufacturer({ mfr: input.mfr, fileSkus: valid.map((r) => r.sku), catalog, resolve });
   if (!guard.ok) return { ok: false, error: guard.detail };
   const mfr = guard.normalizedMfr;
 
@@ -69,8 +73,16 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   }
   const priced = parsed.hasList || parsed.hasCost;
   for (const r of valid) {
-    const isNew = !existing.has(r.sku);
-    const ex = bySku.get(r.sku);
+    // #302 — write to the RESOLVED live SKU, never the row's old one:
+    // mergeUpsert(old) would follow the tombstone's renamedTo on read but
+    // write under the key it was given. A row resolving to a different part
+    // owns only what an exact match owns — the part's SKU, formerSkus and
+    // model # stay (its P/N only moves when the row carries one).
+    const resolved = resolve({ sku: r.sku, mfr: r.mfr || mfr, manufacturerPartNumber: r.manufacturerPartNumber });
+    const sku = resolved ?? r.sku;
+    const sameSku = sku === r.sku;
+    const isNew = !existing.has(sku);
+    const ex = bySku.get(sku);
     const secId = resolveSectionRef(r.specSection, specSections);
     const artId = resolveArticleRef(r.specArticle, specArticles, secId ?? (ex?.specSectionId || null));
     const artSection = artId ? specArticles.find((a) => a.id === artId)!.sectionId : null;
@@ -102,7 +114,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         : {}),
     };
     await mergeUpsert(
-      r.sku,
+      sku,
       {
         desc: r.desc,
         category: r.category || "Uncategorized",
@@ -111,7 +123,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         ...(parsed.hasCost ? { cost: r.cost } : {}),
         mfr: r.mfr || mfr,
         ...(r.manufacturerPartNumber ? { manufacturerPartNumber: r.manufacturerPartNumber } : {}),
-        ...(r.manufacturerModelNumber ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),
+        ...(r.manufacturerModelNumber && sameSku ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),
         ...(parsed.hasMap || isNew ? { mapPrice: r.mapPrice || null } : {}),
         // #227 — only a carried, positive rate/bolt width is written.
         ...fabricFieldsOf(r),
@@ -124,7 +136,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
       },
       { pricedAt: input.effectiveAt }
     );
-    existing.add(r.sku);
+    existing.add(sku);
   }
   // D156: the file's effective date is the manufacturer's price-list date —
   // it confirms the unchanged rows too, not just the ones whose price moved.

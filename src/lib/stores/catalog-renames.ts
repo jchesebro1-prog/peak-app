@@ -1,4 +1,5 @@
 import { getBlob, setBlob } from "@/db/doc-store";
+import { buildImportResolver, type ImportResolver, type ResolvablePart } from "@/lib/catalog-rename/import-resolve";
 
 /**
  * #302 — the append-only log of SKU renames (order number → `Brand:Model`).
@@ -48,4 +49,10 @@ export function renameMapOf(entries: SkuRename[]): Map<string, string> {
     out.set(from, to);
   }
   return out;
+}
+
+/** #302 — the importers' row resolver over `live` (the book the import has
+ *  already loaded) and the rename log; one log read per import. */
+export async function importResolverFor(live: ResolvablePart[]): Promise<ImportResolver> {
+  return buildImportResolver(live, renameMapOf(await allSkuRenames()));
 }

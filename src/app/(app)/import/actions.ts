@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePerm } from "@/lib/session";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { importResolverFor } from "@/lib/stores/catalog-renames";
 import { parseEffectiveDate } from "@/lib/catalog-books";
 import {
   checkManufacturerGroups,
@@ -110,5 +111,7 @@ export async function checkCatalogImportAction(groups: ManufacturerGroup[]): Pro
     skus: (Array.isArray(g?.skus) ? g.skus : []).slice(0, 20000).map((s) => String(s ?? "").slice(0, 200)),
   }));
   if (!clean.length) return [];
-  return checkManufacturerGroups(clean, await listCatalog());
+  // #302 — the same resolution the commit runs (renamed parts' old SKUs).
+  const catalog = await listCatalog();
+  return checkManufacturerGroups(clean, catalog, await importResolverFor(catalog));
 }

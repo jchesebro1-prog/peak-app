@@ -16,6 +16,8 @@ import * as Projects from "@/lib/stores/projects";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { DEFAULT_PIPELINES, projectPipelineFor, resolveProjectStage, type Pipelines } from "@/lib/pipelines";
 import * as Catalog from "@/lib/stores/catalog";
+import { importResolverFor } from "@/lib/stores/catalog-renames";
+import type { ImportResolver } from "@/lib/catalog-rename/import-resolve";
 import { looksLikeSpecId, resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
@@ -714,6 +716,32 @@ function needsSpecLib(v: Values): boolean {
   return !!(str(v.specSectionId) || str(v.specArticleId));
 }
 
+/** #302 — the catalog commit's row resolver, built once in the writer's
+ *  `load` from the same snapshot it returns (the cache array is the key).
+ *  Rows created later in the file are found by the exact `ci` match first. */
+const CATALOG_RESOLVERS = new WeakMap<object, ImportResolver>();
+
+/** The cached part a catalog row means: the hub's own case/punctuation-
+ *  insensitive SKU match first, then (#302) the resolver — a renamed part's
+ *  old order number (formerSkus / rename log) or its manufacturer + MFR P/N. */
+function findCatalogPart(v: Values, cache: Record<string, unknown>[]): Record<string, unknown> | null {
+  const exact = cache.find((p) => ci(p.sku, v.sku));
+  if (exact) return exact;
+  const to = CATALOG_RESOLVERS.get(cache)?.({ sku: str(v.sku), mfr: str(v.mfr), manufacturerPartNumber: str(v.manufacturerPartNumber) });
+  return to ? (cache.find((p) => p.sku === to) ?? null) : null;
+}
+
+/** #302 — a row that matched a DIFFERENT part (not its own SKU) owns only
+ *  what an exact match owns: the part's model # stays (its sku and
+ *  formerSkus are never in a catalogPatch; its P/N moves only when the row
+ *  carries one, as for any match). */
+function ownedCatalogPatch(patch: ReturnType<typeof catalogPatch>, ex: Record<string, unknown> | null, v: Values): ReturnType<typeof catalogPatch> {
+  if (!ex || ci(ex.sku, v.sku)) return patch;
+  const out = { ...patch };
+  delete out.manufacturerModelNumber;
+  return out;
+}
+
 const WRITERS: Record<string, Writer> = {
   customers: {
     count: async () => (await Customers.all()).length,
@@ -1153,8 +1181,13 @@ const WRITERS: Record<string, Writer> = {
 
   catalog: {
     count: async () => (await Catalog.list()).length,
-    load: async () => (await Catalog.list()) as unknown as Record<string, unknown>[],
-    find: (v, cache) => cache.find((p) => ci(p.sku, v.sku)) || null,
+    load: async () => {
+      const parts = await Catalog.list();
+      const cache = parts as unknown as Record<string, unknown>[];
+      CATALOG_RESOLVERS.set(cache, await importResolverFor(parts));
+      return cache;
+    },
+    find: (v, cache) => findCatalogPart(v, cache),
     create: async (v, cache, ctx) => {
       // "Create new" on a SKU that already exists cannot create a second
       // part — the SKU is the document id — so it is a merge like update,
@@ -1163,9 +1196,11 @@ const WRITERS: Record<string, Writer> = {
       // overlapping part (final review item 3). The existing record comes
       // from the same cache `find` reads, so an in-file duplicate sees the
       // row written just before it.
-      const ex = cache.find((p) => ci(p.sku, v.sku)) || null;
+      // #302 — the same lookup `find` uses, so an old order number merges
+      // into the renamed part under ITS sku (never a write at the old SKU).
+      const ex = findCatalogPart(v, cache);
       const sku = ex ? str(ex.sku) : str(v.sku);
-      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined });
+      const patch = ownedCatalogPatch(catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined }), ex, v);
       // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported. pricedAt
@@ -1178,7 +1213,7 @@ const WRITERS: Record<string, Writer> = {
     // the catalog update path dedupes through `find` alone and reads only ctx.
     update: async (ex, v, _cache, ctx) => {
       const sku = str(ex.sku);
-      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined });
+      const patch = ownedCatalogPatch(catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined }), ex, v);
       await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
     },
     exportObjects: async () => {
