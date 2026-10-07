@@ -5,7 +5,7 @@ import {
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
-import { modelSku as cr304ModelSku, partModel as cr304PartModel, partMatchesQuery as cr304Match, partSearchHaystack as cr304Hay, staffPartLabel as cr304Label, cleanModel as cr304Clean } from "@/lib/catalog-rename/sku";
+import { modelSku as cr304ModelSku, partModel as cr304PartModel, partMatchesQuery as cr304Match, partSearchHaystack as cr304Hay, staffPartLabel as cr304Label, cleanModel as cr304Clean, orderNumberOf as cr304OrderNo } from "@/lib/catalog-rename/sku";
 import { planRenames as cr304Plan, crosswalkRowsFromGrid as cr304Rows } from "@/lib/catalog-rename/plan";
 import * as cr304Rw from "@/lib/catalog-rename/rewrite";
 import { cleanCrosswalkRows as cr304CleanRows, cleanRenameBatchInput as cr304CleanInput, isRenameStep as cr304IsStep, REF_STEPS as cr304RefSteps, RENAME_OUTCOME_LABEL as cr304OutcomeLabel, RENAME_STEP_LABEL as cr304StepLabel } from "@/lib/catalog-rename/steps";
@@ -10633,6 +10633,8 @@ ok(cr304ModelSku("A/V: Co", "X") === "A-V- Co:X", "#304 sku: brand sanitized lik
   ok(cr304ModelSku("Symetrix", len60)?.length === 60 && cr304ModelSku("Symetrix", len60 + "x") === null, "#304 sku: exactly 60 chars passes, 61 → null");
 }
 ok(cr304Clean("W3,  Black, US") === "W3, Black, US", "#304 cleanModel keeps commas");
+ok(cr304OrderNo("Symetrix:20-0026") === "20-0026" && cr304OrderNo("A: B:C") === "B:C" && cr304OrderNo("80-0043") === "80-0043" && cr304OrderNo("Brand: ") === "Brand: ",
+  "#304 orderNumberOf: the old SKU's text after its FIRST colon (trimmed), else the whole old SKU — the MFR P/N a renamed part keeps");
 ok(cr304PartModel({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }) === "Jupiter 4", "#304 partModel: model first");
 ok(cr304PartModel({ sku: "ETC:S4LED", manufacturerPartNumber: "7060A" }) === "7060A" && cr304PartModel({ sku: "ETC:S4LED" }) === "S4LED" && cr304PartModel({ sku: "PLAIN" }) === "PLAIN", "#304 partModel: P/N, then sku tail, then sku");
 ok(cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP", formerSkus: ["80-0043"] }, "80-0043") && cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "jupiter dsp") && !cr304Match({ sku: "Symetrix:Jupiter 4", desc: "DSP" }, "edge"), "#304 search: former SKUs, model and multi-token");
@@ -10689,7 +10691,25 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
       ok(al.rows[0].outcome === "already" && al.rows[0].to === "Symetrix:Jupiter 4", "#304 plan: already via a prefixed former SKU");
       const alOther = cr304Plan(pr.rows, [{ sku: "Biamp:Jupiter 4", mfr: "Biamp", formerSkus: ["Biamp:20-0026"] }], []);
       ok(alOther.rows[0].outcome === "skip:not-found", "#304 plan: another manufacturer's prefixed former SKU is not 'already'");
+      ok(al.rows[0].from === "Symetrix:20-0026" && al.rows[0].reason === "Already renamed.", "#304 plan: an already row found via a prefixed former SKU names the REAL former SKU (what a re-log writes)");
+      const alDiff = cr304Plan(pr.rows, [{ sku: "Symetrix:Jupiter 4 Pro", mfr: "Symetrix", formerSkus: ["Symetrix:20-0026"] }], []);
+      ok(alDiff.rows[0].outcome === "already" && alDiff.rows[0].to === "Symetrix:Jupiter 4 Pro" && alDiff.rows[0].reason === "Already renamed to Symetrix:Jupiter 4 Pro.",
+        "#304 plan: an already row whose sheet model differs from the live part's names the live SKU in its reason");
     } else ok(false, "#304 plan: prefixed sheet parses");
+  }
+  // A half-finished rename: the copy at the new SKU was written (listing the
+  // old SKU in formerSkus), then the call died before the old part retired.
+  {
+    const hs = cr304Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "80-0043", "Jupiter 4"]]);
+    if (hs.ok) {
+      const hp = cr304Plan(hs.rows, [{ sku: "80-0043", mfr: "Symetrix" }, { sku: "Symetrix:Jupiter 4", mfr: "Symetrix", formerSkus: ["80-0043"] }], []);
+      ok(hp.rows[0].outcome === "rename" && hp.renames.length === 1 && hp.renames[0].from === "80-0043" && hp.renames[0].to === "Symetrix:Jupiter 4",
+        "#304 plan: a half-finished rename (copy written, old SKU still live) plans as rename so it can finish");
+      const notMine = cr304Plan(hs.rows, [{ sku: "80-0043", mfr: "Symetrix" }, { sku: "Symetrix:Jupiter 4", mfr: "Symetrix", formerSkus: ["80-0099"] }], []);
+      ok(notMine.rows[0].outcome === "skip:taken", "#304 plan: a live owner of the new SKU that was never this part stays skip:taken");
+      ok(cr304Plan(hs.rows, [{ sku: "80-0043", mfr: "Symetrix" }], [{ sku: "Symetrix:Jupiter 4" }]).rows[0].outcome === "skip:taken",
+        "#304 plan: a soft-deleted part (no renamedTo) holding the new SKU is taken");
+    } else ok(false, "#304 plan: half-finished sheet parses");
   }
   // Same sheet SKU twice with different models: one part can't take two SKUs.
   const dupSheet = cr304Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "80-0500", "Alpha"], ["Symetrix", "80-0500", "Beta"]]);
@@ -10936,9 +10956,11 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   const live = [
     { sku: "Symetrix:Jupiter 4", mfr: "Symetrix", manufacturerPartNumber: "80-0043", formerSkus: ["80-0043"] },
     { sku: "Symetrix:Radius 12", mfr: "Symetrix", manufacturerPartNumber: "80-0050" },
-    { sku: "ETC-S4", mfr: "ETC", manufacturerPartNumber: "7060A" },
-    { sku: "ETC-S4-BLK", mfr: "ETC", manufacturerPartNumber: "7061A" },
-    { sku: "ETC-S4-WHT", mfr: "E.T.C.", manufacturerPartNumber: "7061-A" },
+    // Step 4 (MFR P/N) only ever matches RENAMED parts — these carry formerSkus.
+    { sku: "ETC-S4", mfr: "ETC", manufacturerPartNumber: "7060A", formerSkus: ["ETC-OLD-1"] },
+    { sku: "ETC-S4-BLK", mfr: "ETC", manufacturerPartNumber: "7061A", formerSkus: ["ETC-OLD-2"] },
+    { sku: "ETC-S4-WHT", mfr: "E.T.C.", manufacturerPartNumber: "7061-A", formerSkus: ["ETC-OLD-3"] },
+    { sku: "CHV-1", mfr: "Chauvet", manufacturerPartNumber: "CHV-NEW-1" },
     { sku: "PLAIN-1" },
   ];
   const renames = new Map([["80-0050", "Symetrix:Radius 12"], ["OLD-A", "OLD-B"], ["OLD-B", "Symetrix:Radius 12"], ["GONE-1", "GONE-2"]]);
@@ -10958,6 +10980,8 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   ok(r({ sku: "7060A", mfr: "ETC", manufacturerPartNumber: "  " }) === "ETC-S4", "#304 import resolve: a blank row P/N falls back to matching the row SKU");
   ok(r({ sku: "BRAND-NEW", mfr: "ETC" }) === null && r({ sku: "" }) === null, "#304 import resolve: no match is a new part (null)");
   ok(r({ sku: "plain-1" }) === null, "#304 import resolve: step 1 is exact — case-insensitive matching stays the importer's own rule");
+  ok(r({ sku: "CHV-NEW-1", mfr: "Chauvet" }) === null && r({ sku: "X-1", mfr: "Chauvet", manufacturerPartNumber: "CHV-NEW-1" }) === null,
+    "#304 import resolve: a never-renamed part whose MFR P/N equals an incoming SKU (or row P/N) is NOT matched — every other brand keeps exact-SKU behaviour");
   // The import guard counts resolved rows as overlap (a renamed manufacturer's
   // whole price list is still keyed by order number).
   const cat304 = live.map(({ sku, mfr }) => ({ sku, mfr }));
@@ -10974,10 +10998,10 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   ok(ciFirst.ok && ciFirst.overlap === 1, "#304 import guard: a SKU already on file in any spelling is judged as before — the resolver only sees rows that match nothing");
   // The guard passes each row's P/N to the resolver: a file that matches this
   // manufacturer only through its MFR P/N column is overlap, not "wrong file".
-  const pnOnly = checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1", "NEW-ORDER-2"], filePns: ["80 0050", ""], catalog: cat304, resolve: r });
+  const pnOnly = checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1", "NEW-ORDER-2"], filePns: ["80 0043", ""], catalog: cat304, resolve: r });
   ok(pnOnly.ok && pnOnly.overlap === 1, "#304 import guard: a row matching only by its MFR P/N column counts as overlap");
   ok(!checkManufacturer({ mfr: "Symetrix", fileSkus: ["NEW-ORDER-1"], catalog: cat304, resolve: r }).ok, "#304 import guard: the same file without its P/N column still reads as no-overlap");
-  const grpPn = checkManufacturerGroups(groupRowsByManufacturer([{ mfr: "Symetrix", sku: "NEW-ORDER-1", pn: "80-0050" }, { mfr: "Symetrix", sku: "NEW-ORDER-3" }]), cat304, r);
+  const grpPn = checkManufacturerGroups(groupRowsByManufacturer([{ mfr: "Symetrix", sku: "NEW-ORDER-1", pn: "80-0043" }, { mfr: "Symetrix", sku: "NEW-ORDER-3" }]), cat304, r);
   ok(grpPn[0].result.ok && grpPn[0].result.overlap === 1, "#304 import guard: groupRowsByManufacturer carries each row's P/N through checkManufacturerGroups");
   // A live part whose SKU normalizes to the row SKU outranks another part's
   // former SKU / rename-log entry (steps 2/3) — in both importers.
@@ -11099,6 +11123,14 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
     "#304 grid schedule: a resolved part prints its Model #; an unresolved one keeps its part id; wire rows + footage line follow");
   ok(JSON.stringify(cr304BuildSchedule({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0, y: 0, partId: "P1" }], spaces: [], descOf: () => "d", wires: [] }).sections[0].rows[0]) === JSON.stringify({ partId: "P1", desc: "d", qty: 1 }),
     "#304 grid schedule: with no modelOf the rows are unchanged");
+  ok(cr304SchedModel({ sku: "ETC:S4", manufacturerPartNumber: "7060A" }) === "7060A" && cr304SchedModel({ sku: "ETC:S4", manufacturerModelNumber: "S4 LED", manufacturerPartNumber: "7060A" }) === "S4 LED"
+    && cr304SchedModel({ sku: "ETC:S4" }) === "S4" && cr304SchedModel(undefined) === undefined,
+    "#304 grid schedule: scheduleModelOf follows partModel's full order — Model #, then MFR P/N, then the SKU tail");
+  {
+    const gpSrc = src304("src/lib/design/grid-parts.ts");
+    ok(gpSrc.includes("...(p?.manufacturerPartNumber ? { manufacturerPartNumber: p.manufacturerPartNumber } : {})") && gpSrc.includes("...(p.manufacturerPartNumber ? { manufacturerPartNumber: p.manufacturerPartNumber } : {})"),
+      "#304 grid schedule: Grid parts carry the catalog part's MFR P/N (only when set), symbol and catalog-fallback rows alike");
+  }
   ok(src304("src/components/drawing/drawing-set-sheets.tsx").includes("it.model || it.partId") && src304("src/lib/design/drawing-set-data.ts").includes("modelOf:") && src304("src/lib/design/grid-schedule-server.ts").includes("modelOf:"), "#304 grid schedule: drawing set, /schedule and the printer all read the model");
 
   // Rack sheets: the schedule row / CSV carry the model; sku stays the lookup key.
@@ -11157,6 +11189,27 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
   ok(client.includes("setResume({ step, refsOnly })") && client.includes("resuming?.step ??"), "#304 page: a stopped run keeps its step and the same button resumes there");
   ok(!/from "@\/lib\/catalog-rename\/apply"/.test(client) && !/from "@\/lib\/stores\//.test(client) && /import type \{[^}]*\} from "@\/lib\/catalog-rename\/plan"/.test(client), "#304 page: the client never imports the server engine or a store (plan types only)");
   ok(src304("scripts/smoke-routes.ts").includes('"/catalog/model-numbers"'), "#304 page: smoke-routes lists /catalog/model-numbers");
+  ok(/if \(r\.ok && \(r\.renamed > 0 \|\| partsDone \|\| r\.complete\)\) \{\s*invalidatePortalIndex\(\);\s*invalidateSystemLibrary\(\);/.test(actions) && actions.includes('const partsDone = clean.step === "parts" && r.ok && r.step !== "parts";'),
+    "#304 page: the batch action drops the portal index and system library caches after renaming parts / the parts step and on completion");
+  ok(client.includes("const STALL_LIMIT = 3;") && client.includes('const NO_PROGRESS = "No progress — try again.";')
+    && client.includes("stalled = !r.complete && r.step === step && r.changed === 0 ? stalled + 1 : 0;")
+    && /if \(stalled >= STALL_LIMIT\) \{\s*setError\(NO_PROGRESS\);/.test(client)
+    && client.indexOf("setResume({ step, refsOnly });\n      if (r.complete) break;") < client.indexOf("if (stalled >= STALL_LIMIT)"),
+    "#304 page: the client loop stops after 3 unchanged, incomplete results on one step, keeping the resume point (\"No progress — try again.\")");
+  ok(/if \(!\(await removePart\(clean\)\)\) return \{ ok: false, error: "That part was renamed or already deleted\." \};/.test(src304("src/app/(app)/catalog/actions.ts")),
+    "#304 page: deletePartAction reports an error when remove() acted on nothing (a renamed or already-deleted SKU)");
+  {
+    const est = src304("src/app/(app)/estimator/actions.ts");
+    const fn = est.slice(est.indexOf("export async function saveQuoteAction"));
+    const at = fn.indexOf("patch.spec = await quoteSpecFollowingRenames(patch.spec);");
+    ok(at > 0 && at < fn.indexOf("let q: Quote | null = null;") && at > fn.indexOf("const patch: QuotePatch = {"),
+      "#304 estimator save: saveQuoteAction moves the live spec onto renamed parts after building the patch and before create/update");
+  }
+  {
+    const ap = src304("src/lib/catalog-rename/apply.ts");
+    ok(ap.includes("return cleanCrosswalkRows(raw);") && !ap.includes("CROSSWALK_CELL_MAX") && !ap.includes("a concurrent edit is not overwritten"),
+      "#304 apply: one crosswalk row cleaner (steps.ts) and an honest patchDoc comment");
+  }
   ok(/isAdmin && \(\s*<Link\s+href="\/catalog\/model-numbers"/.test(src304("src/app/(app)/catalog/page.tsx")), "#304 page: the catalog page links Model numbers for admins only");
 
   // Step labels cover every step; outcome labels every outcome.
@@ -52983,13 +53036,14 @@ async function modelSku304StoreAsyncChecks(): Promise<void> {
 
   const renamed = await Cat.renamePartDocs(p1, to, "Fixture 304 A");
   ok(renamed?.sku === to && renamed.id === to, "#304 store: renamePartDocs returns the new part keyed by the new SKU");
-  ok(renamed?.manufacturerModelNumber === "Fixture 304 A" && renamed.manufacturerPartNumber === p1, "#304 store: the model is stored and the old SKU becomes the MFR P/N when none was set");
+  ok(renamed?.manufacturerModelNumber === "Fixture 304 A" && renamed.manufacturerPartNumber === p1.slice(p1.indexOf(":") + 1), "#304 store: the model is stored and the old SKU's text after its first colon becomes the MFR P/N when none was set");
   ok(JSON.stringify(renamed?.formerSkus) === JSON.stringify([p1]) && renamed?.renamedTo === undefined, "#304 store: formerSkus = [old], renamedTo is not carried onto the live doc");
   ok(renamed?.pricedAt === 111 && renamed?.narrativeText === "x", "#304 store: pricedAt and the narrative carry over untouched");
   ok((await Cat.get(p1))?.sku === to, "#304 store: get(old) follows renamedTo to the new part");
   const many = await Cat.getMany([p1, to, p2]);
   ok(many.length === 2 && many.filter((p) => p.sku === to).length === 1 && many.some((p) => p.sku === p2), "#304 store: getMany follows the redirect and dedupes by sku");
   ok((await Cat.getManyAnyCase([p1]))[0]?.sku === to, "#304 store: getManyAnyCase follows the redirect");
+  ok((await Cat.getManyAnyCase([p1.toLowerCase()])).length === 0, "#304 store: getManyAnyCase — a wrong-case old SKU does not follow the redirect (documented)");
   const bySku = await Cat.getManyBySku([p1, to, p2, fixtureId(304, "gone")]);
   ok(bySku.get(p1)?.sku === to && bySku.get(to)?.sku === to && bySku.get(p2)?.sku === p2 && bySku.size === 3, "#304 store: getManyBySku keys by the REQUESTED sku and omits misses");
   const live = (await Cat.list()).map((p) => p.sku);
@@ -53014,7 +53068,7 @@ async function modelSku304StoreAsyncChecks(): Promise<void> {
   const to2 = "Symetrix:" + fixtureId(304, "model-b");
   registerFixture("catalog_parts", to2);
   const second = await Cat.renamePartDocs(to, to2, "Fixture 304 B");
-  ok(JSON.stringify(second?.formerSkus) === JSON.stringify([p1, to]) && second?.manufacturerPartNumber === p1, "#304 store: a second rename accumulates formerSkus and keeps the first MFR P/N");
+  ok(JSON.stringify(second?.formerSkus) === JSON.stringify([p1, to]) && second?.manufacturerPartNumber === p1.slice(p1.indexOf(":") + 1), "#304 store: a second rename accumulates formerSkus and keeps the first MFR P/N");
   ok((await Cat.get(p1))?.sku === to2, "#304 store: a two-hop redirect resolves to the live part");
 
   // The rename log.
@@ -53267,6 +53321,57 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
 
     const refs = await runAll(true);
     ok(refs.length === Apply.REF_STEPS.length && refs.every((r) => r.renamed === 0 && r.plan === null) && refs[0].step === Apply.REF_STEPS[1], "#304 apply: refsOnly skips the parts step");
+
+    // ---- An Estimator tab opened before the rename saves its old SKU: the save path moves it ----
+    const staleSpec = { sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: A, desc: "Jupiter mixer", qty: 2, unit: "ea", cost: 5, price: 10 }] }], mobs: [] };
+    const untouched = { sections: [{ id: "s", name: "S", items: [{ id: 1, sku: B, desc: "b", qty: 1 }] }], mobs: [] };
+    ok((await Ren.quoteSpecFollowingRenames(untouched)) === untouched, "#304 estimator save: a spec naming no old SKU passes through as-is");
+    await Q.update(QID, { spec: await Ren.quoteSpecFollowingRenames(staleSpec) } as never);
+    const qSaved = (await Q.get(QID))!;
+    const savedItem = (qSaved.spec as { sections: Array<{ items: Array<{ sku: string; manufacturerModelNumber?: string }> }> }).sections[0].items[0];
+    ok(savedItem.sku === NEW && savedItem.manufacturerModelNumber === model && JSON.stringify(qSaved.revisions).includes(`"${A}"`),
+      "#304 estimator save: saving a spec holding an old SKU stores the new SKU + model; revisions keep the old SKU");
+
+    // ---- A half-finished rename (copy written, `from` never retired) finishes ----
+    const HF = fixtureId(304, "hf-from");
+    const HM = fixtureId(304, "hf-model");
+    const HT = "Symetrix:" + HM;
+    for (const id of [HF, HT]) registerFixture("catalog_parts", id);
+    await DS.upsertDoc("catalog_parts", { ...base, id: HF, sku: HF } as never);
+    await DS.upsertDoc("catalog_parts", { ...base, id: HT, sku: HT, manufacturerModelNumber: HM, formerSkus: [HF] } as never);
+    const hfRows = [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: HF, model: HM, notes: "" }];
+    const hf = await Apply.runRenameBatch({ rows: hfRows, step: "parts" }, "Test", 45_000);
+    const hfRow = (await DS.getDocRows<D304>("catalog_parts", [HF]))[0];
+    const hfLive = (await Cat.list()).filter((p) => p.sku === HT || p.sku === HF);
+    ok(hf.ok && hf.plan?.rows[0].outcome === "rename" && hf.renamed === 1 && hfRow?.deleted === true && hfRow.doc.renamedTo === HT
+      && hfLive.length === 1 && hfLive[0].sku === HT && (await Ren.allSkuRenames()).some((e) => e.from === HF && e.to === HT && e.model === HM),
+      "#304 apply: a half-finished rename finishes — `from` retired with renamedTo, one live part, and the log has the entry");
+
+    // ---- A lost log entry for a part found via a PREFIXED former SKU re-logs that real former SKU ----
+    const RLBARE = fixtureId(304, "rl-order");
+    const RLO = "Symetrix:" + RLBARE;
+    const RLM = fixtureId(304, "rl-model");
+    const RLN = "Symetrix:" + RLM;
+    registerFixture("catalog_parts", RLN);
+    await DS.upsertDoc("catalog_parts", { ...base, id: RLN, sku: RLN, manufacturerModelNumber: RLM, formerSkus: [RLO] } as never);
+    const rl = await Apply.runRenameBatch({ rows: [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: RLBARE, model: RLM, notes: "" }], step: "parts" }, "Test", 45_000);
+    const rlLog = await Ren.allSkuRenames();
+    ok(rl.ok && rl.plan?.rows[0].outcome === "already" && rlLog.some((e) => e.from === RLO && e.to === RLN) && !rlLog.some((e) => e.from === RLBARE),
+      "#304 apply: re-logging an already row matched via a prefixed former SKU logs the real former SKU, not the bare sheet SKU");
+
+    // ---- A soft-deleted part (no renamedTo) holding the new SKU is taken ----
+    const SDF = fixtureId(304, "sd-from");
+    const SDM = fixtureId(304, "sd-model");
+    const SDT = "Symetrix:" + SDM;
+    for (const id of [SDF, SDT]) registerFixture("catalog_parts", id);
+    await DS.upsertDoc("catalog_parts", { ...base, id: SDF, sku: SDF } as never);
+    await DS.upsertDoc("catalog_parts", { ...base, id: SDT, sku: SDT } as never);
+    await DS.softDeleteDoc("catalog_parts", SDT);
+    const sdCtx = await Apply.loadPlanContext();
+    const sdRetired = sdCtx.retired.find((r) => r.sku === SDT);
+    ok(!!sdRetired && sdRetired.renamedTo === undefined, "#304 apply: loadPlanContext lists every soft-deleted part, renamedTo only when set");
+    const sd = await Apply.runRenameBatch({ rows: [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: SDF, model: SDM, notes: "" }], step: "parts" }, "Test", 45_000);
+    ok(sd.ok && sd.plan?.rows[0].outcome === "skip:taken" && sd.renamed === 0 && (await Cat.get(SDF))?.sku === SDF, "#304 apply: a soft-deleted part holding the new SKU plans as skip:taken and nothing is renamed");
   } finally {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
@@ -53327,7 +53432,7 @@ async function modelSku304ImportAsyncChecks(): Promise<void> {
     ok(pg.ok && pg.imported === 1, "#304 import page: an order-number price list for a renamed manufacturer is not refused by the guard" + (pg.ok ? "" : ` (${pg.error})`));
     const p1 = await Cat.get(N1);
     ok(p1?.list === 150 && p1.desc === "Jupiter 4 DSP (2026)", "#304 import page: the renamed part's price and description changed");
-    ok(p1?.sku === N1 && p1.manufacturerModelNumber === "Jupiter 4" && p1.manufacturerPartNumber === O1 && JSON.stringify(p1.formerSkus) === JSON.stringify([O1]), "#304 import page: the renamed part keeps its sku, model #, P/N and formerSkus");
+    ok(p1?.sku === N1 && p1.manufacturerModelNumber === "Jupiter 4" && p1.manufacturerPartNumber === O1.slice(O1.indexOf(":") + 1) && JSON.stringify(p1.formerSkus) === JSON.stringify([O1]), "#304 import page: the renamed part keeps its sku, model #, P/N and formerSkus");
     ok(!(await liveHasOld(O1)) && (await tomb(O1, N1)) && (await Cat.get(O1))?.sku === N1, "#304 import page: no live part at the old SKU — the tombstone stays a redirect");
 
     // ---- Import hub (commitCatalogImport → commitImport("catalog")) ----
@@ -53343,6 +53448,18 @@ async function modelSku304ImportAsyncChecks(): Promise<void> {
     ok((await Cat.get(N2))?.manufacturerModelNumber === "Radius 12", "#304 import hub: Create new on an old SKU keeps the renamed part's model # over the file's MFR M/N");
     const hs = await commitCatalogImport({ rows: hubRows(999), mode: "skip", effectiveAt: Date.now(), priced: true });
     ok(hs.ok && hs.res.skipped === 1 && (await Cat.get(N2))?.list === 275, "#304 import hub: Skip duplicates treats the old SKU as a duplicate of the renamed part");
+
+    // ---- Step 4 (MFR P/N) is for renamed parts only: a never-renamed part keeps exact-SKU behaviour ----
+    const KEEP = fixtureId(304, "imp-keep");
+    const KEEP_PN = fixtureId(304, "imp-keep-pn");
+    for (const id of [KEEP, KEEP_PN]) registerFixture("catalog_parts", id);
+    await DS.upsertDoc("catalog_parts", { ...base, id: KEEP, sku: KEEP, list: 10, manufacturerPartNumber: KEEP_PN } as never);
+    const keepRows = prep([[O2, MFR, "Radius 12 (2026)", "275", ""], [KEEP_PN, MFR, "New order-number part", "33", ""]], amap(["SKU", "Manufacturer", "Description", "List Price", "MFR M/N"], fields), fields).rows;
+    const hk = await commitCatalogImport({ rows: keepRows, mode: "create", effectiveAt: Date.now(), priced: true });
+    const keepAfter = await Cat.get(KEEP);
+    const newAtPn = await Cat.get(KEEP_PN);
+    ok(hk.ok && keepAfter?.list === 10 && keepAfter.sku === KEEP && newAtPn?.sku === KEEP_PN && newAtPn.list === 33,
+      "#304 import hub: a never-renamed part whose MFR P/N equals an incoming SKU is NOT matched — the row lands as its own part" + (hk.ok ? "" : ` (${hk.error})`));
 
     // ---- Store guard: every writer handed an OLD sku lands on the renamed part ----
     const liveCount = async (sku: string) => (await DS.listDocs<D304>("catalog_parts")).filter((d) => d.id === sku || (d as { sku?: string }).sku === sku).length;
