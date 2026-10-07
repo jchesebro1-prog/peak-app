@@ -14,7 +14,8 @@ import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
  * turns into the saved PDF, and (until the preview shows that PDF) the
  * Estimator's customer preview. No "use client", no hooks and no handlers, so
  * a server component can render it from saved data alone. Its controls (Show
- * on PDF, per-system Itemized/Narrative) live in PreviewDoc's sidebar.
+ * on PDF, per-system Itemized/Narrative) live on the Build package step
+ * (PdfOptionsPanel).
  *
  * D69 redesign (Jeff, Jul 12): branded accent styling, a document title
  * block, the REAL project/venue, an at-a-glance investment band, Optional

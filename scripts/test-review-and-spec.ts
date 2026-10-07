@@ -351,6 +351,7 @@ const ESTIMATOR_FILES = [
   "header-more-menu.tsx",
   "estimator-banners.tsx",
   "step-tabs.tsx",
+  "review-cost-summary.tsx",
   "steps/build-step.tsx",
   "steps/package-step.tsx",
   "steps/review-step.tsx",
@@ -50671,8 +50672,10 @@ async function e301GoalsAsyncChecks(): Promise<void> {
      panel.includes("Reset to default") && panel.includes("p.onNotIncluded(p.notIncludedDefault)") && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/quote-pdf)/m.test(panel),
     "#301 preview: the Cover & package block (summary, Not included, Reset to default)");
   const prev = previewDocSource();
-  ok(prev.includes("<CoverPackagePanel") && prev.indexOf("<CoverPackagePanel") < prev.indexOf("<ClientLinkPanel") && !prev.includes('className="est-doc"') && !prev.includes("customerLines("),
-    "#301 preview: mounted above the Client link block; the #222 preview pins still hold (#304: moved to its step)");
+  const pkgStep304 = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  const sendStep304 = rd("src/app/(app)/estimator/steps/send-step.tsx");
+  ok(pkgStep304.includes("<CoverPackagePanel") && sendStep304.includes("<ClientLinkPanel") && !prev.includes('className="est-doc"') && !prev.includes("customerLines("),
+    "#301 preview: CoverPackagePanel and ClientLinkPanel stay mounted; the #222 preview pins still hold (#304: Cover & package on Build package, Client link on Send & track)");
 }
 
 async function e301DefaultsAsyncChecks(): Promise<void> {

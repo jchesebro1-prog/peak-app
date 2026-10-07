@@ -16,7 +16,7 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
             <th style={{ ...cell, textAlign: "left", fontWeight: 500 }}>System</th>
             <th style={{ ...num, fontWeight: 500 }}>Cost</th>
             <th style={{ ...num, fontWeight: 500 }}>Sell</th>
-            <th style={{ ...num, fontWeight: 500 }}>Margin</th>
+            <th style={{ ...num, fontWeight: 500 }}>Margin (excl. freight)</th>
           </tr>
         </thead>
         <tbody>
@@ -31,9 +31,25 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
           <tr style={{ fontWeight: 600 }}>
             <td style={cell}>Total</td>
             <td style={num}>{fmt(totals.cost + totals.fr)}</td>
-            <td style={num}>{fmt(totals.grand)}</td>
+            <td style={num}>{fmt(totals.rev + totals.fr)}</td>
             <td style={num}>{(totals.margin * 100).toFixed(1)}%</td>
           </tr>
+          {(totals.credit || 0) > 0 && (
+            <>
+              <tr>
+                <td style={cell}>Rewards credit</td>
+                <td style={num} />
+                <td style={num}>−{fmt(totals.credit || 0)}</td>
+                <td style={num} />
+              </tr>
+              <tr style={{ fontWeight: 600 }}>
+                <td style={cell}>Customer total</td>
+                <td style={num} />
+                <td style={num}>{fmt(totals.grand)}</td>
+                <td style={num} />
+              </tr>
+            </>
+          )}
         </tbody>
       </table>
       <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 6 }}>

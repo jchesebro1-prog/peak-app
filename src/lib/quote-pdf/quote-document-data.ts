@@ -10,7 +10,7 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
  * A saved quote → the props of the customer QuoteDocument (#222). Mirrors what
- * the Estimator hands PreviewDoc (estimator/page.tsx initialFrom + estimator-
+ * the Estimator hands its customer preview (estimator/page.tsx initialFrom + estimator-
  * client.tsx: custName, the "attn" contact ladder, the primary-venue fallback,
  * "Label — City" venue, Rev = revisions.length) so the saved PDF and the
  * builder agree. Pure given its inputs; the print route loads them.

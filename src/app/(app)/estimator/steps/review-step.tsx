@@ -3,6 +3,7 @@
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { PdfPreviewPane } from "../preview-doc";
+import { CoverPackagePanel } from "../cover-package-panel";
 import { ReviewCostSummary } from "../review-cost-summary";
 import type { EstimatorState } from "../use-estimator-state";
 
@@ -14,8 +15,13 @@ import type { EstimatorState } from "../use-estimator-state";
 export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextStepAction) => void }) {
   const {
     applySync,
+    coverSummary,
     doSave,
     loadedId,
+    notIncluded,
+    notIncludedDefault,
+    onCoverSummary,
+    onNotIncluded,
     pdf,
     pdfDirty,
     phone,
@@ -95,6 +101,20 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
           </aside>
         )}
       </div>
+      {phone && (
+        <div style={{ padding: "10px 14px", borderTop: "1px solid #e4e7ec", background: "#fff", overflowY: "auto", flexShrink: 0, maxHeight: "45%" }}>
+          <CoverPackagePanel
+            savedQuoteId={loadedId}
+            canEdit={false}
+            dirty={pdfDirty}
+            coverSummary={coverSummary}
+            onCoverSummary={onCoverSummary}
+            notIncluded={notIncluded}
+            onNotIncluded={onNotIncluded}
+            notIncludedDefault={notIncludedDefault}
+          />
+        </div>
+      )}
     </div>
   );
 }
