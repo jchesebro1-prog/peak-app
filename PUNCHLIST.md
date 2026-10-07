@@ -11098,3 +11098,37 @@ picker), then Phases 3–6 per #305.
 
 **Open (minor, not blocking).** No end-of-list drop target when there are no groups; Firefox / Safari drag from the name
 button unverified; card-header drag deferred (D650).
+
+## 307. Estimator Phase 2b — In total / Alternate groups — DONE 2026-10-07 (D653–D657)
+
+Part of #305's roadmap (see #305, #306): Phase 2b makes a group's In total / Alternate setting real end to end.
+
+What shipped (no migration, no AI):
+- **Alternate groups** — a group marked Alternate stamps its systems `alternate` (derived only by the normaliser); the Build
+  rail toggles it and shows "Alternates (not in total)". (D653)
+- **Money** — `totals().alt`; alternates add nothing to the total, value, pipeline or review limits; the Rewards credit pins
+  to the last In-total system; existing approvals stay valid. (D654)
+- **Consumers** — labor check, dashboard, manufacturer analytics, spec BOM, purchasing CSV, cut sheets skip alternates;
+  the "No client goals" gap chip ignores them. (D655)
+- **Estimate PDF / online view** — In-total body, then an Alternates block (bands A1…), then Optional additions; option lines
+  inside a printed alternate print in its band. Byte-identical when there are no alternates. (D656)
+- **Cover, package page, scope picker** — Alternates list with one shared note; the picker offers them unchecked and the
+  total adds ticked ones; validated server-side against the revision. (D657)
+
+Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md` §9; plan
+`docs/superpowers/plans/2026-10-07-estimator-phase2b-alternates.md`.
+
+**Verification.** Gates: `tsc --noEmit` 0 errors; scoped eslint clean; `test:specs` 13,295 PASS / 0 FAIL; `next build` OK;
+`test:smoke` ALL PASSED. Browser pass (scratch DB, controller): flipping Upgrades to Alternate took the total $2,375 → $1,575
+with "Alternates (not in total) $800" in the sidebar and a heading suffix; saved and sent; the share link's picker shows Base
+checked and "Alternate — Upgrades: LED Upgrade $800" unchecked, ticking it gives Selected $2,375; the package page shows the
+Alternates card; the review table lists alternates below the Total; the PDF prints the LED Upgrade band before the totals.
+
+**New customer-facing copy for Jeff to approve:** "Alternates"; "Priced separately — not included in the total"; "Not included
+in the total above."; "Optional — not included in this alternate's price"; "Scope and pricing for this alternate are shown
+above."; "Alternate — <group>: <system>"; "Alternate · not in total"; "Alternates (not in total)". The cover/package note and
+the PDF sub-line are worded differently on purpose.
+
+**Open (minor, not blocking).**
+- The approval fingerprint can't tell which of two otherwise-identical systems is the alternate (the gross value catches most).
+- The Build rail's active toggle is a no-op without `aria-disabled`; one toggle line per group; a long group name truncates the suffix.

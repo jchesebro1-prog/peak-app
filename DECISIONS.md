@@ -9690,3 +9690,40 @@ The customer PDF and the online / share / portal views (all through `quoteDocume
 group name and the subtotal of its printed systems — before the group's first printed band. Band numbering and totals do not
 change. The Itemized appendix, the cover PDF, the package page and the client scope picker are unchanged. In total / Alternate
 is Phase 2b.
+
+## D653. The derived `alternate` stamp (#307, 2026-10-07)
+
+A system section is an alternate when its group is marked Alternate. The flag is stamped on each section (`alternate`) by
+`normalizeSystemOrder` alone — on every mutation, on load, on save and in the PDF loader — so it can never drift from the group
+table. A system leaving an estimate (move, copy, library load) drops it with its group metadata; `moveSystemToEstimate` strips
+it once before the new estimate's value is computed. A client-posted stamp is never trusted: `sanitizeSectionGroupMeta`
+discards it and the server re-derives.
+
+## D654. Money: alternates are priced but not in the total (#307, 2026-10-07)
+
+`totals()` gains `alt` (the alternates' gross sell), omitted when there are none — read `t.alt ?? 0`. An alternate contributes
+nothing else to the total; credit lines inside one still count. The Rewards credit pins to the last In-total system. The
+approval fingerprint adds the alternate flag only on alternate sections, so approvals made before 2b stay valid. The stored
+value, pipeline value and review limits follow `totals()`, i.e. exclude alternates.
+
+## D655. Which consumers skip alternates (#307, 2026-10-07)
+
+Alternate sections are excluded the way option lines already were from: the review-limits labor check, dashboard equipment
+sold, manufacturer analytics, the spec BOM, the purchasing parts CSV and curtain cut sheets. Unchanged: key-product
+eligibility and portal pricing. The package gap chip "No client goals" no longer counts alternates (`outputScopes`).
+
+## D656. Alternates on the estimate PDF and online view (#307, 2026-10-07)
+
+The body prints In-total systems only. An Alternates block follows the bands and precedes Optional additions: bands numbered
+A1…, header suffixed "· N alternate(s)". A printed alternate's option lines print inside its own band as "Optional — not
+included in this alternate's price"; an option-only (unprinted) alternate's option lines stay in Optional additions. A
+price-on-request line inside an alternate does not change the Total label. An alternate with no narrative says "Scope and
+pricing for this alternate are shown above." Output is byte-identical for quotes with no alternates (fixture from the base).
+
+## D657. Alternates on the cover, package page and scope picker (#307, 2026-10-07)
+
+In-total scopes keep R1 (per-scope prices sum to the total). The cover and the package page list Alternates whenever present,
+under one shared note (`ALTERNATES_NOTE`, `src/lib/estimate-output/alternates-copy.ts`). The client picker offers each
+alternate as "Alternate — <group>: <system>", unchecked by default; ticking adds it to the selected total. The server
+validates picked ids against the revision's own data (`revisionGroupedSections`), not the client's list, and the question note
+names the alternate.

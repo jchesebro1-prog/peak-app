@@ -786,7 +786,7 @@ See `.env.example`.
     Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
     sheets come back (PUNCHLIST #304).
 
-42. 🚧 **Estimator in four steps** (#305, D643–D652) — Phase 1 ✅ (the frame): the
+42. 🚧 **Estimator in four steps** (#305, D643–D657) — Phase 1 ✅ (the frame): the
     Estimator is Build · Build package · Customer review · Send & track on one URL
     (`?step=`, pushState, Build canonical), one shared header with a More ▾ menu, a
     readiness line under each tab (never blocking), the status select and Daylite
@@ -796,7 +796,12 @@ See `.env.example`.
     Phase 2a ✅ (#306, D648–D652): system groups (`spec.groups`, ≤ 20, order normalised
     by one pure function), a Build rail with drag / ↑↓ reorder, rename and delete,
     ✓ Mark built & collapse (staff-only), and group heading rows on the customer PDF
-    and online views. Next: Phase 2b (In total / Alternate end to end), 3 Send & track (Gmail send, replies, opens), 4 Customer review
+    and online views.
+    Phase 2b ✅ (#307, D653–D657): a group marked Alternate prices separately — `totals().alt`,
+    excluded from the total, value, review limits and the other option-line consumers; the PDF/online view
+    prints an Alternates block (A1…), the cover and package page list them, and the client picker offers
+    them unchecked. Next: Phase 3 Send & track (Gmail send from the sender's personal inbox, escape hatches, open counts,
+    replies to that email in the tab), 4 Customer review
     (cost/margin/labor sidebar, pinned comments), 5 package document editor (TipTap),
     6 system categories (Jeff-gated content). Remaining is Jeff-gated: Phase 6
     typical items per category, and the exact repro for "Send → Home" (PUNCHLIST #305).
