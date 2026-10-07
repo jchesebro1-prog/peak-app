@@ -5,7 +5,8 @@ import { systemSellTotal } from "./pricing";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
-import { appendixSystemIds } from "./quote-document-view";
+import { appendixSystemIds, printedGroupHeadings } from "./quote-document-view";
+import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 
 /**
@@ -42,6 +43,9 @@ export type QuoteDocumentProps = {
   quoteNote: string;
   assumptions: string;
   sections: SpecSection[];
+  /** Estimator Phase 2a — the quote's system groups; each prints a heading
+   *  row with its subtotal before its first printed system. Absent = none. */
+  groups?: SystemGroup[];
   /** #143 — a vendor line reads from its record here too, but NEVER its cost,
    *  terms or notes: those are internal only (Jeff). */
   vendorQuotes: VendorQuote[];
@@ -174,6 +178,29 @@ function renderNarrativeBlocks(blocks: NarrativeBlock[]) {
         ))}
       </p>
     )
+  );
+}
+
+/** Estimator Phase 2a — a group's heading row: a light divider (not a band)
+ *  with the group name left and its subtotal right, kept with the next band. */
+function GroupHeading({ name, subtotalLabel }: { name: string; subtotalLabel: string }) {
+  return (
+    <div
+      className="est-secband est-grouphead"
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 10,
+        padding: "0 2px 5px",
+        marginTop: 22,
+        borderBottom: `1.5px solid ${ACCENT_BD}`,
+        color: "#16181d",
+      }}
+    >
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", minWidth: 0 }}>{name}</span>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#6b7280", flexShrink: 0 }}>{subtotalLabel}</span>
+    </div>
   );
 }
 
@@ -341,6 +368,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const freightRowLabel = p.freightLabel || "Freight & delivery";
   const standingLines = (p.standingLines || []).filter((l) => l.trim());
 
+  const groupHeadings = new Map(printedGroupHeadings(p.sections, p.groups).map((h) => [h.beforeSectionId, h]));
   const previewSections = p.sections
     .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0)
     .map((sec, i) => {
@@ -623,6 +651,9 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
           {/* sections */}
           {previewSections.map((ps) => (
             <div key={ps.num + ps.name}>
+              {groupHeadings.has(ps.id) && (
+                <GroupHeading name={groupHeadings.get(ps.id)!.name} subtotalLabel={fmt(groupHeadings.get(ps.id)!.subtotal)} />
+              )}
               <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
               {ps.presentation === "narrative" ? (
                 <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>

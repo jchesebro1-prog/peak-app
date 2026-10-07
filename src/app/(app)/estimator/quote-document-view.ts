@@ -1,6 +1,7 @@
 import { systemFreight, systemItemsRev, systemSellTotal } from "./pricing";
 import type { SpecSection } from "./types";
 import type { QuoteDocumentProps } from "./quote-document";
+import type { SystemGroup } from "@/lib/estimate-groups/groups";
 
 /**
  * #293 — QuoteDocument's pure view helpers, kept out of quote-document.tsx
@@ -12,6 +13,32 @@ import type { QuoteDocumentProps } from "./quote-document";
  *  only when it carries some revenue. */
 export function systemPrintsInBody(sec: SpecSection): boolean {
   return systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0;
+}
+
+/** Estimator Phase 2a — a group heading row on the customer document: one per
+ *  group with at least one PRINTED system (systemPrintsInBody), placed before
+ *  that group's first printed system, carrying the Σ systemSellTotal of its
+ *  printed systems. Ungrouped systems never get one; no groups → []. Pure. */
+export function printedGroupHeadings(
+  sections: SpecSection[],
+  groups: SystemGroup[] | undefined,
+): Array<{ beforeSectionId: string; name: string; subtotal: number }> {
+  if (!groups || !groups.length) return [];
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const out: Array<{ beforeSectionId: string; name: string; subtotal: number }> = [];
+  const at = new Map<string, number>();
+  for (const sec of sections || []) {
+    const g = sec.groupId ? byId.get(sec.groupId) : undefined;
+    if (!g || !systemPrintsInBody(sec)) continue;
+    const i = at.get(g.id);
+    if (i === undefined) {
+      at.set(g.id, out.length);
+      out.push({ beforeSectionId: sec.id, name: g.name, subtotal: systemSellTotal(sec) });
+    } else {
+      out[i].subtotal += systemSellTotal(sec);
+    }
+  }
+  return out;
 }
 
 /** Systems whose lines the body didn't itemize — every narrative system, or

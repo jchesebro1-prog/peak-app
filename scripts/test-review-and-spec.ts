@@ -54288,3 +54288,77 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(!/\.components|customerLines\(|window\.print|est-doc|reviewBarOpen/.test(build) && !/from "@\/lib\/(stores|db)\//.test(build.replace(/import type [^\n]+\n/g, "")),
     "#P2a build UI: build-step.tsx stays clear of the pinned hazards (no components/customerLines/print/est-doc/reviewBarOpen, no store/db value imports)");
 }
+
+/* #P2a document — group headings with subtotals on the customer document (PDF + online view). */
+import { printedGroupHeadings as p2adHeads, systemPrintsInBody as p2adPrints } from "@/app/(app)/estimator/quote-document-view";
+import { systemSellTotal as p2adSell } from "@/app/(app)/estimator/pricing";
+import { quoteDocumentDataFor as p2adData } from "@/lib/quote-pdf/quote-document-data";
+import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocument293 as p2adRender } from "./qd293-cases";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const base = p2adSections(); // s1 Rigging, s2 Lighting (narrative), s3 Install (labor), s4 Empty narrative
+  const G = [{ id: "g-a", name: "Stage", alternate: false }, { id: "g-b", name: "House", alternate: false }, { id: "g-c", name: "Empty", alternate: false }];
+  const withG = (m: Record<string, string>) => base.map((x) => (m[x.id] ? { ...x, groupId: m[x.id] } : x));
+  const ghost = { id: "zz", name: "Prints nothing", kind: "materials", mfr: "", freightPct: 0, items: [], groupId: "g-c" } as unknown as (typeof base)[number];
+  ok(!p2adPrints(ghost), "#P2a document: fixture — a system with no revenue does not print");
+
+  // printedGroupHeadings — pure
+  ok(p2adHeads(base, []).length === 0 && p2adHeads(base, undefined).length === 0, "#P2a document: no groups → no headings");
+  ok(p2adHeads(base, G).length === 0, "#P2a document: groups but no grouped systems → no headings");
+  ok(p2adHeads(withG({ s1: "g-a", s2: "g-a" }), G).length === 1, "#P2a document: ungrouped systems never get a heading (only the group with systems does)");
+  const h1 = p2adHeads(withG({ s2: "g-a", s3: "g-a", s4: "g-b" }), G);
+  ok(h1.length === 2 && h1[0].beforeSectionId === "s2" && h1[0].name === "Stage" && h1[1].beforeSectionId === "s4" && h1[1].name === "House",
+    "#P2a document: one heading per group, before the group's first printed system, in document order");
+  ok(h1[0].subtotal === p2adSell(base[1]) + p2adSell(base[2]) && h1[1].subtotal === p2adSell(base[3]) && h1[0].subtotal > 0,
+    "#P2a document: a heading's subtotal = Σ systemSellTotal of the group's printed systems");
+  const h2 = p2adHeads([...withG({ s1: "g-a" }), ghost], G);
+  ok(h2.length === 1 && h2[0].name === "Stage", "#P2a document: a group whose systems print nothing gets no heading");
+  const lead = { ...ghost, id: "zz2", groupId: "g-a" } as (typeof base)[number];
+  const h3 = p2adHeads([lead, ...withG({ s1: "g-a" })], G);
+  ok(h3.length === 1 && h3[0].beforeSectionId === "s1" && h3[0].subtotal === p2adSell(base[0]),
+    "#P2a document: an unprinted leading system neither anchors the heading nor adds to its subtotal");
+  ok(p2adHeads(withG({ s1: "g-zz" }), G).length === 0, "#P2a document: a groupId that names no group gets no heading");
+  const rev = p2adHeads(withG({ s1: "g-b", s2: "g-a" }), G);
+  ok(rev.map((x) => x.name).join() === "House,Stage", "#P2a document: headings follow section order, not the groups array order");
+
+  // real render — print and web layouts
+  const props = { ...p2adProps({ sections: withG({ s2: "g-a", s3: "g-a", s4: "g-b" }) }), groups: G };
+  for (const layout of [undefined, "web"] as const) {
+    const html = p2adRender({ ...props, layout });
+    const tag = layout ?? "print";
+    ok(html.includes("est-grouphead") && (html.match(/est-grouphead/g) || []).length === 2 && html.includes("Stage") && html.includes("House"), `#P2a document (${tag}): two group heading rows render`);
+    ok(html.indexOf("Stage") < html.indexOf("Lighting") && html.indexOf("House") < html.indexOf("Empty narrative") && html.indexOf("Rigging") < html.indexOf("Stage"),
+      `#P2a document (${tag}): each heading sits just before its group's first band, after the ungrouped system`);
+    ok(["01", "02", "03", "04"].every((n, i, a) => i === 0 || html.indexOf(`>${n}<`) > html.indexOf(`>${a[i - 1]}<`)), `#P2a document (${tag}): band numbering stays continuous`);
+  }
+  const plain = p2adRender({ ...p2adProps({ sections: base }), groups: [] });
+  ok(!plain.includes("est-grouphead") && plain === p2adRender(p2adProps({ sections: base })), "#P2a document: no groups → markup is byte-identical to the groups-less document");
+  ok(p2adRender({ ...props, groups: [] }) === p2adRender({ ...props, groups: undefined }) && !p2adRender({ ...props, groups: [] }).includes("est-grouphead"),
+    "#P2a document: grouped systems with an empty groups list print no heading");
+
+  // loader — groups come from the same spec as sections
+  const q = { id: "Q-1", name: "n", customer: "c", customerId: null, owner: "o", preparedBy: "", updatedAt: 1, createdAt: 1, revisions: [], spec: { sections: withG({ s1: "g-a" }), groups: [...G, { id: "bad", name: "x" }] } };
+  const d = p2adData(q as never, null, { companyName: "Peak", logoDark: null });
+  ok(d.groups?.map((x) => x.id).join() === "g-a,g-b,g-c", "#P2a document: quoteDocumentDataFor passes sanitizeGroups(spec.groups) through");
+  ok(p2adData({ ...q, spec: { sections: base } } as never, null, { companyName: "Peak", logoDark: null }).groups?.length === 0, "#P2a document: a quote with no spec.groups gets []");
+
+  // source pins
+  const doc = rd("src/app/(app)/estimator/quote-document.tsx");
+  const view = rd("src/app/(app)/estimator/quote-document-view.ts");
+  const data = rd("src/lib/quote-pdf/quote-document-data.ts");
+  const loader = rd("src/lib/quote-pdf/document-loader.ts");
+  const printPage = rd("src/app/print/quote/[id]/page.tsx");
+  ok(doc.includes("groups?: SystemGroup[];") && doc.includes("printedGroupHeadings(p.sections, p.groups)") && doc.includes("groupHeadings.has(ps.id) && (") && doc.includes("<GroupHeading")
+    && doc.indexOf("<GroupHeading") < doc.indexOf("<SectionBand num={ps.num}"),
+    "#P2a document: QuoteDocument renders a GroupHeading from printedGroupHeadings before the matching band");
+  ok(doc.includes('className="est-secband est-grouphead"') && doc.includes("textTransform: \"uppercase\"") && doc.includes("fmt(groupHeadings.get(ps.id)!.subtotal)"),
+    "#P2a document: the heading row is uppercase name + subtotal, and keeps with its band (est-secband break rules)");
+  ok(view.includes("export function printedGroupHeadings(") && view.includes("systemPrintsInBody(sec)") && !/from "@\/lib\/(stores|db)\/|from "server-only"/.test(view),
+    "#P2a document: the helper lives in the client-safe quote-document-view.ts");
+  ok(data.includes("groups: sanitizeGroups(spec?.groups),") && data.includes("as { sections?: unknown; groups?: unknown }"),
+    "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
+  ok(loader.includes("quoteDocumentDataFor(src, cust, settings)") && printPage.includes("quoteDocumentDataFor(q, cust, settings)"),
+    "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
+  const online = rd("src/components/online-estimate/online-estimate.tsx");
+  ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");
+}

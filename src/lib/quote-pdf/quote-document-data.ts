@@ -6,6 +6,7 @@ import { totals } from "@/app/(app)/estimator/pricing";
 import { PAYMENT_TERMS, type PaymentTerms, type SpecSection, type VendorQuote } from "@/app/(app)/estimator/types";
 import { normalizePdfOptions } from "./pdf-options";
 import { documentRevStamp } from "./state";
+import { sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
@@ -64,7 +65,7 @@ export function quoteDocumentDataFor(
   cust: DocCustomer | null,
   settings: Pick<AppSettingsData, "companyName" | "logoDark">
 ): QuoteDocumentProps {
-  const spec = (q.spec || null) as { sections?: unknown } | null;
+  const spec = (q.spec || null) as { sections?: unknown; groups?: unknown } | null;
   const sections = spec && Array.isArray(spec.sections) ? (spec.sections as SpecSection[]) : [];
   const vendorQuotes = Array.isArray(q.vendorQuotes)
     ? (q.vendorQuotes as VendorQuote[]).filter((v) => !!v && typeof v.id === "string")
@@ -112,6 +113,8 @@ export function quoteDocumentDataFor(
     quoteNote: q.quoteNote || "",
     assumptions: q.assumptions || "",
     sections,
+    // Phase 2a — read from the same spec (live quote or a frozen revision) as `sections`.
+    groups: sanitizeGroups(spec?.groups),
     vendorQuotes,
     t: totals(sections, TAX_RATE_PCT),
     taxRatePct: TAX_RATE_PCT,
