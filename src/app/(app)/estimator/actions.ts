@@ -62,6 +62,7 @@ import { isFabricPart } from "@/lib/fabric-part";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { partSearchHaystack } from "@/lib/catalog-rename/sku";
+import { quoteSpecFollowingRenames } from "@/lib/stores/catalog-renames";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -453,6 +454,11 @@ export async function saveQuoteAction(
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
+  // #304: an Estimator tab opened before a model-number rename still holds the
+  // old SKUs — move the live spec onto the renamed parts (sku + model) before
+  // it is written, so a save never re-introduces a retired SKU. Revisions are
+  // frozen and never touched here.
+  patch.spec = await quoteSpecFollowingRenames(patch.spec);
   let q: Quote | null = null;
   let statusError: string | undefined;
   let statusNotice: string | undefined = credit.notice;

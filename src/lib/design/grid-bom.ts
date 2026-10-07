@@ -72,6 +72,9 @@ export type PartLite = {
    *  (same names as CatalogPart so raw rows pass straight through). Sent only
    *  when present. */
   manufacturerModelNumber?: string;
+  /** #304: the catalog part's MFR P/N — what a schedule prints when there is
+   *  no Model # (partModel's order). Sent only when present. */
+  manufacturerPartNumber?: string;
   formerSkus?: string[];
   gridScope?: string;
   symbolWidth?: number;

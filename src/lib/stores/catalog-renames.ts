@@ -1,5 +1,6 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { buildImportResolver, type ImportResolver, type ResolvablePart } from "@/lib/catalog-rename/import-resolve";
+import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 
 /**
  * #304 — the append-only log of SKU renames (order number → `Brand:Model`).
@@ -61,6 +62,17 @@ export async function liveRenameRefs(): Promise<{ m: Map<string, string>; models
   const models = new Map<string, string>();
   for (const e of log) if (e.model) models.set(e.to, e.model);
   return { m: renameMapOf(log), models };
+}
+
+/** #304 — a LIVE quote spec about to be saved, moved onto the renamed parts
+ *  (sku + model), so an Estimator tab opened before a rename never writes a
+ *  retired SKU back. Returns `spec` itself when the log is empty or nothing
+ *  in it names an old SKU. Never for revisions — those stay frozen. */
+export async function quoteSpecFollowingRenames<T>(spec: T): Promise<T> {
+  const { m, models } = await liveRenameRefs();
+  if (!m.size) return spec;
+  const next = rewriteQuoteSpec(spec, m, models);
+  return next === null ? spec : (next as T);
 }
 
 /** #304 — the importers' row resolver over `live` (the book the import has

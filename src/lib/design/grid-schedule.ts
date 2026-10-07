@@ -111,9 +111,11 @@ export function buildSchedule(input: {
   };
 }
 
-/** #304: a part's printed Model # for a schedule — undefined when the part isn't known (the row then prints its part id). */
-export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: string } | undefined): string | undefined {
-  return p ? partModel({ sku: p.sku, manufacturerModelNumber: p.manufacturerModelNumber }) || undefined : undefined;
+/** #304: a part's printed Model # for a schedule — partModel's full order
+ *  (Model # → MFR P/N → SKU tail → SKU); undefined when the part isn't known
+ *  (the row then prints its part id). */
+export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string } | undefined): string | undefined {
+  return p ? partModel({ sku: p.sku, manufacturerModelNumber: p.manufacturerModelNumber, manufacturerPartNumber: p.manufacturerPartNumber }) || undefined : undefined;
 }
 
 export type ScheduleHead = { kind: "section"; name: string; cont: boolean } | { kind: "wires"; cont: boolean };

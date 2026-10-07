@@ -38,21 +38,24 @@ function claim(m: Map<string, string | null>, k: string, sku: string): void {
  *    to the row SKU's key: a live part's SKU outranks another part's former
  *    SKU. (Without a 2/3 hit, a normalized-only live match stays the
  *    importer's own rule — the hub's `ci`; the page is exact.)
- * 4. the UNIQUE live part of the same manufacturer (mfrKey) whose normalized
- *    MFR P/N equals the row's MFR P/N when the row carries one — else the
- *    row SKU. A row P/N is never second-guessed by its SKU.
+ * 4. the UNIQUE live RENAMED part (one with `formerSkus`) of the same
+ *    manufacturer (mfrKey) whose normalized MFR P/N equals the row's MFR P/N
+ *    when the row carries one — else the row SKU. A row P/N is never
+ *    second-guessed by its SKU. A never-renamed part is never matched here:
+ *    every other brand keeps the importers' old exact-SKU behaviour.
  * Anything else — including an ambiguous step 2/4 — is null.
  */
 export function buildImportResolver(live: ResolvablePart[], renames: ReadonlyMap<string, string>): ImportResolver {
   const liveSkus = new Set<string>();
   const byLiveKey = new Map<string, string | null>(); // normalized live SKU → sku
   const byFormer = new Map<string, string | null>();
-  const byMfrPn = new Map<string, string | null>(); // `${mfrKey}\u0000${pnKey}` → sku
+  const byMfrPn = new Map<string, string | null>(); // `${mfrKey}\u0000${pnKey}` → sku (renamed parts only)
   for (const p of live) {
     if (!p?.sku) continue;
     liveSkus.add(p.sku);
     claim(byLiveKey, key(p.sku), p.sku);
     for (const f of p.formerSkus ?? []) claim(byFormer, key(f), p.sku);
+    if (!p.formerSkus?.length) continue; // step 4 is for renamed parts only
     const mk = key(p.mfr);
     const pk = key(p.manufacturerPartNumber);
     if (mk && pk) claim(byMfrPn, `${mk}\u0000${pk}`, p.sku);
