@@ -223,3 +223,51 @@ category.
 - Phase 5: confirm TipTap's licence fits (core is MIT; avoid paid Pro extensions).
 - DECISIONS numbers and the punch number are assigned when each phase's plan is written (recompute from
   `origin/main` first — two sessions write those files).
+
+## 8. Phase 2a — Build step (detailed, 2026-10-07)
+
+Jeff asked to "keep going until you can't" after Phase 1 shipped, so Phase 2 proceeds on the decisions locked in
+§5.1 without a new brainstorm. Phase 2 is split: **2a** (this section) = rail, drag/reorder, groups as headings
+with subtotals, Mark built & collapse; **2b** = the In total / Alternate switch end to end (totals and the dozen
+`option`-line consumers, cover scopes, client scope picker), because an Alternate that only half-works (excluded
+from the total but printed as an included band) would mislead a customer.
+
+### 8.1 Data
+- `spec.groups?: SystemGroup[]` beside `spec.sections` (so revisions and client packages carry it — `snapshotOf`
+  copies `spec` whole). `SystemGroup = { id: string; name: string; alternate: boolean }`; ids `g-<base36>`;
+  name ≤ 80 chars, blank → "Untitled group"; ≤ 20 groups; `alternate` is stored but always written `false` in
+  2a and has no UI.
+- `SpecSection.groupId?: string` and `SpecSection.built?: true`.
+- **Order rule:** the stored `sections` array is always in display order — ungrouped systems first (no heading),
+  then each group in `groups` order; a group's systems keep their relative order. A `groupId` naming no group is
+  dropped. One pure function normalises this (`normalizeSystemOrder`) and every mutation and the save run it.
+- `built` and the collapsed state are **not** customer content: `built` is stripped from the PDF doc key; collapse
+  is per person, per quote, in `localStorage` (`quartzite.estimator.collapsed.v1:<quoteId>`), never saved.
+- Editing a built system (any change other than `built` itself) clears `built`.
+
+### 8.2 Build UI
+- **Rail** (the Build sidebar): systems listed under group headings (name, subtotal, ↑/↓ to reorder groups,
+  rename inline, delete → its systems become ungrouped). Each system row: drag handle, ✓ when built, name, total,
+  and ↑/↓ buttons (keyboard path; moving past a group edge joins the neighbouring group). HTML5 drag-and-drop
+  (the board's house pattern): drop on a system row → insert before it and join its group; drop on a group
+  heading → append to that group; drop on the "Ungrouped" zone → ungroup. **+ Add group** in the rail.
+  Drag is rail-only in 2a (card-header drag deferred).
+- **Cards:** the main column stacks systems in the same order with a divider per group (name + subtotal). The
+  card's controls row gains a **Group** select (No group / each group / + New group). The card footer gains
+  **✓ Mark built & collapse**; a built, collapsed card shows a "built" tag in its header and the rail row a ✓.
+- The Rewards credit line stays on the last system after any reorder (re-pinned as delete/move do today).
+- Readiness: Build badge appends built progress when at least one system is built — "✓ 4 systems priced · 2 of
+  4 built"; all built → "✓ 4 of 4 built". Gap labels unchanged.
+
+### 8.3 Output (2a)
+- Customer PDF + online view (`QuoteDocument`): when the quote has groups, a group heading row (name + group
+  subtotal = Σ printed systems' sell) prints before the group's first band; ungrouped systems print first with
+  no heading. Band numbering is unchanged (continuous). Totals unchanged (no alternates in 2a).
+- Cover PDF, client package page, scope picker, cut sheets, parts CSV: unchanged in 2a.
+
+### 8.4 Other writers
+- Save writes `spec.groups` (sanitised) and normalised sections.
+- Move system to an existing estimate keeps the TARGET's `spec.groups`; the moved system loses its `groupId`
+  (the target doesn't have that group). Move to a new estimate, Copy system to another estimate, and the system
+  library (save/load) strip `groupId` and `built`. Copy within this estimate keeps the source's group and
+  drops `built`. Portal quote rebuilds keep writing `{ sections, mobs }` (portal carts have no groups).
