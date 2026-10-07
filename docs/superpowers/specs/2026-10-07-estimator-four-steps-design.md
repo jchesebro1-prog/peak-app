@@ -271,3 +271,45 @@ from the total but printed as an included band) would mislead a customer.
   (the target doesn't have that group). Move to a new estimate, Copy system to another estimate, and the system
   library (save/load) strip `groupId` and `built`. Copy within this estimate keeps the source's group and
   drops `built`. Portal quote rebuilds keep writing `{ sections, mobs }` (portal carts have no groups).
+
+## 9. Phase 2b — In total / Alternate (detailed, 2026-10-07)
+
+### 9.1 Rule
+A group's switch is **In total** (default) or **Alternate — priced separately**. Every system in an Alternate
+group is out of the estimate total everywhere a per-line `option` item is out of it today, and is shown to the
+customer as a separately priced alternate they can choose.
+
+### 9.2 Data
+- `SpecSection.alternate?: true` is a **derived stamp**: `normalizeSystemOrder` sets it on every section whose
+  group is `alternate: true` and deletes it everywhere else. It runs on every client mutation, page load, save
+  and the PDF data loader, so stored and printed sections always carry the right stamp and every consumer reads
+  only `sec.alternate`. Systems leaving an estimate (`withoutGroupMeta`, `sanitizeSectionGroupMeta`) drop it.
+- `QuoteTotals.alt` = Σ `systemSellTotal` of alternate systems (shown, never added to `grand`).
+
+### 9.3 Totals and money
+- `totals()`: an alternate section adds its `systemSellTotal` to `alt` and contributes nothing else (no lines,
+  freight or sell adjustment to rev/cost/mat/lab/fr). A Rewards credit line inside an alternate section still
+  counts (defensive). Stored `value`/`margin`, pipeline value, approval limits and the review-limit gate follow
+  `totals()` unchanged.
+- The Rewards credit is pinned to the **last In-total system** (fallback: last system).
+- Approval fingerprint (`linesKeyOf`) includes each section's `alternate` so flipping a group re-asks approval.
+- Excluded like options: review-limits labor check, dashboard equipment sold, manufacturer analytics, the
+  spec BOM, the purchasing parts CSV, curtain cut sheets. Unchanged: key-product eligibility, portal pricing.
+
+### 9.4 Build UI
+- Rail group heading and card-column divider get an **In total / Alternate** toggle; an Alternate group's
+  heading reads "Alternate · not in total". The sidebar Cost breakdown adds "Alternates (not in total)" when
+  `t.alt > 0`. Customer review's internal cost table lists alternate systems below the Total under
+  "Alternates (not in total)", so its rows still add up to its Total.
+
+### 9.5 Customer outputs
+- **Estimate PDF / online view:** body bands, numbering, group headings and the itemized appendix cover In-total
+  systems only. After the bands, an **Alternates** block ("Priced separately — not included in the total")
+  prints each Alternate group (heading + group subtotal) and its systems as bands numbered `A1, A2…` with
+  their own lines or narrative (per the system's presentation). The header line adds "· N alternate(s)".
+  Totals unchanged.
+- **Cover PDF:** scopes are In-total systems only (keeps R1: Σ scopes − credit = grand); a new **Alternates**
+  list (always printed when any exist) shows each Alternate group — name, price, its systems.
+- **Client package page:** an Alternates card mirrors the cover list.
+- **Client scope picker:** alternate systems are offered as extra choices labelled with their group, **unchecked
+  by default**; the running total adds them when ticked. Server validation unchanged (ids must be offered).
