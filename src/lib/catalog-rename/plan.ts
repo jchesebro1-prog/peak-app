@@ -57,6 +57,9 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
   const liveUpper = new Map(live.map((p) => [p.sku.toUpperCase(), p]));
   const formerUpper = new Set(live.flatMap((p) => (p.formerSkus ?? []).map((s) => s.toUpperCase())));
   const retiredBy = new Map(retired.map((r) => [r.sku, r.renamedTo]));
+  const retiredUpper = new Set(retired.map((r) => r.sku.toUpperCase()));
+  const formerOwner = new Map<string, PlanPart>();
+  for (const p of live) for (const s of p.formerSkus ?? []) if (!formerOwner.has(s)) formerOwner.set(s, p);
   const first: PlannedRow[] = rows.map((row) => {
     const model = cleanModel(row.model);
     const mk = (outcome: RenameOutcome, to: string | null = null): PlannedRow => ({ row, outcome, from: row.sku, to, model, reason: REASON[outcome] });
@@ -65,17 +68,17 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
     const brand = part?.mfr || row.manufacturer;
     const to = modelSku(brand, model);
     if (!part) {
+      const holder = formerOwner.get(row.sku);
+      if (holder) return mk("already", holder.sku);
       const target = retiredBy.get(row.sku);
-      if (target && to && target === to) return mk("already", to);
-      const owner = to ? liveUpper.get(to.toUpperCase()) : undefined;
-      if (owner && (owner.formerSkus ?? []).includes(row.sku)) return mk("already", owner.sku);
+      if (target && to && target.toUpperCase() === to.toUpperCase()) return mk("already", to);
       return mk("skip:not-found");
     }
     if (mfrKey(part.mfr) !== mfrKey(row.manufacturer)) return mk("skip:mfr-mismatch");
     if (!to) return mk("skip:bad-model");
-    if (to === part.sku) return mk("skip:same", to);
+    if (to.toUpperCase() === part.sku.toUpperCase()) return mk("skip:same", to);
     const owner = liveUpper.get(to.toUpperCase());
-    if ((owner && owner.sku !== part.sku) || formerUpper.has(to.toUpperCase())) return mk("skip:taken", to);
+    if ((owner && owner.sku !== part.sku) || formerUpper.has(to.toUpperCase()) || retiredUpper.has(to.toUpperCase())) return mk("skip:taken", to);
     return mk("rename", to);
   });
   const byTo = new Map<string, number>();

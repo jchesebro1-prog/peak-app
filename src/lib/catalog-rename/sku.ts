@@ -10,8 +10,12 @@ export function cleanModel(model: string): string {
   return String(model ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** `Brand:Model`. `/ \ # ? %` and control characters become `-` in both halves;
+ *  the brand also loses any `:` (the brand/model separator is the FIRST colon —
+ *  `partModel` reads the text after it, so a colon inside the model is harmless).
+ *  Null when either half is blank or the SKU exceeds MODEL_SKU_MAX. */
 export function modelSku(mfr: string, model: string): string | null {
-  const brand = cleanModel(mfr);
+  const brand = cleanModel(mfr).replace(/[/\\#?%:\u0000-\u001f\u007f]/g, "-");
   const m = cleanModel(model).replace(/[/\\#?%\u0000-\u001f\u007f]/g, "-");
   if (!brand || !m) return null;
   const sku = `${brand}:${m}`;

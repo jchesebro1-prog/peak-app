@@ -10610,6 +10610,11 @@ ok(cr302ModelSku("Symetrix", " Jupiter  4 ") === "Symetrix:Jupiter 4", "#302 sku
 ok(cr302ModelSku("Biamp", "A/B #1?") === "Biamp:A-B -1-", "#302 sku: / # ? become -");
 ok(cr302ModelSku("", "X") === null && cr302ModelSku("Biamp", "  ") === null, "#302 sku: blank brand or model → null");
 ok(cr302ModelSku("Symetrix", "x".repeat(60)) === null, "#302 sku: over 60 chars → null");
+ok(cr302ModelSku("A/V: Co", "X") === "A-V- Co:X", "#302 sku: brand sanitized like the model, colon → -");
+{
+  const len60 = "x".repeat(60 - "Symetrix:".length);
+  ok(cr302ModelSku("Symetrix", len60)?.length === 60 && cr302ModelSku("Symetrix", len60 + "x") === null, "#302 sku: exactly 60 chars passes, 61 → null");
+}
 ok(cr302Clean("W3,  Black, US") === "W3, Black, US", "#302 cleanModel keeps commas");
 ok(cr302PartModel({ sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }) === "Jupiter 4", "#302 partModel: model first");
 ok(cr302PartModel({ sku: "ETC:S4LED", manufacturerPartNumber: "7060A" }) === "7060A" && cr302PartModel({ sku: "ETC:S4LED" }) === "S4LED" && cr302PartModel({ sku: "PLAIN" }) === "PLAIN", "#302 partModel: P/N, then sku tail, then sku");
@@ -10640,6 +10645,18 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     ok(o("80-0056") === "skip:duplicate" && o("80-0057") === "skip:duplicate", "#302 plan: two rows → one SKU (case-insensitive) skips both");
     ok(o("80-0060") === "skip:taken" && o("80-0070") === "skip:bad-model" && o("80-0080") === "already", "#302 plan: taken / bad-model / already renamed");
     ok(p.renames.length === 2 && p.renames[0].to === "Symetrix:Jupiter 4" && p.counts.rename === 2 && p.counts["skip:duplicate"] === 2, "#302 plan: rename map + counts");
+  }
+  {
+    const sr = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Meyer-Sound", "09.084.001.07", "UPM-1P"], ["Symetrix", "S-2", "Ghost"]]);
+    if (sr.ok) {
+      const sp = cr302Plan(sr.rows, [{ sku: "Meyer Sound:UPM-1P", mfr: "Meyer Sound", formerSkus: ["09.084.001.07"] }, { sku: "S-2", mfr: "Symetrix" }], [{ sku: "Symetrix:Ghost" }]);
+      const so = (sku: string) => sp.rows.find((x) => x.row.sku === sku);
+      ok(so("09.084.001.07")?.outcome === "already" && so("09.084.001.07")?.to === "Meyer Sound:UPM-1P", "#302 plan: already via a live part's formerSkus despite brand spelling");
+      ok(so("S-2")?.outcome === "skip:taken", "#302 plan: a retired part's SKU is taken");
+    } else ok(false, "#302 plan: extra sheet parses");
+    const cs = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "Symetrix:Jupiter 4", "JUPITER 4"]]);
+    if (cs.ok) ok(cr302Plan(cs.rows, [{ sku: "Symetrix:Jupiter 4", mfr: "Symetrix" }], [])?.rows[0].outcome === "skip:same", "#302 plan: skip:same is case-insensitive");
+    else ok(false, "#302 plan: skip:same sheet parses");
   }
   // Same sheet SKU twice with different models: one part can't take two SKUs.
   const dupSheet = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "80-0500", "Alpha"], ["Symetrix", "80-0500", "Beta"]]);
