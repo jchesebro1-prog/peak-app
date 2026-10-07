@@ -344,7 +344,7 @@ async function buildIndex(): Promise<Built> {
       sku: ip.sku,
       mfr: ip.mfr,
       category: ip.category,
-      haystack: buildHaystack([ip.sku, ip.desc, ip.mfr, ip.category, ip.mpn, ip.model]),
+      haystack: buildHaystack([ip.sku, ip.desc, ip.mfr, ip.category, ip.mpn, ip.model, ...(p.formerSkus ?? [])]), // #302: old order numbers find the part
       browsable: browsable(f, rule),
       rank: ip.quoteCount,
     });

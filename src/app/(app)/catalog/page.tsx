@@ -4,6 +4,7 @@ import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { dateYear, money } from "@/lib/format";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel } from "./controls";
@@ -149,7 +150,8 @@ export default async function CatalogPage({
     if (catParam !== "all" && (p.category || "Uncategorized") !== catParam) return false;
     if (unitParam !== "all" && (p.unit || "ea") !== unitParam) return false;
     if (tokens.length) {
-      const hay = [p.desc, p.sku, p.mfr, p.category].filter(Boolean).join(" ").toLowerCase();
+      // #302: + MFR P/N, Model # and former SKUs (one haystack); category stays searchable.
+      const hay = partSearchHaystack(p) + " " + (p.category || "").toLowerCase();
       if (!tokens.every((token) => hay.includes(token))) return false;
     }
     return true;

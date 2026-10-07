@@ -16,6 +16,7 @@ import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
 import { summarySearchText } from "@/lib/krisp/derive";
+import { partSearchHaystack, type SearchPartLike } from "@/lib/catalog-rename/sku";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -250,7 +251,8 @@ export async function GET(req: Request) {
   add(
     "Catalog",
     parts
-      .filter((d) => matches(q, d.sku, d.desc, d.category))
+      // #302: sku/desc/mfr/MFR P/N/Model #/former SKUs (one haystack), plus the category.
+      .filter((d) => partSearchHaystack(d as unknown as SearchPartLike).includes(q) || matches(q, d.category))
       .map((d) => ({
         id: d.id,
         title: String(d.desc || d.sku),

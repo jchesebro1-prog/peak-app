@@ -61,6 +61,7 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { isFabricPart } from "@/lib/fabric-part";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -1382,7 +1383,7 @@ export async function draftQuoteScopeAction(input: {
 
 /**
  * Catalog search for the estimator's "Add part from catalog" picker (team-only).
- * In-memory substring match over sku/desc/mfr (optionally scoped to a category),
+ * In-memory substring match over sku/desc/mfr/MFR P/N/Model #/former SKUs (#302; optionally scoped to a category),
  * ranked so prefix hits on the SKU or description come first. Returns up to
  * `limit` hits plus the pre-cap total so the UI can say "refine to narrow".
  */
@@ -1404,14 +1405,15 @@ export async function searchCatalog(
     .map((p) => {
       const sku = (p.sku || "").toLowerCase();
       const desc = (p.desc || "").toLowerCase();
-      const mfr = (p.mfr || "").toLowerCase();
       const cat = (p.category || "").toLowerCase();
+      // #302: the Model # and old order numbers rank like the SKU does.
+      const names = [sku, (p.manufacturerModelNumber || "").toLowerCase(), ...(p.formerSkus ?? []).map((s) => s.toLowerCase())].filter(Boolean);
       if (!q) return { p, score: 0 };
       let score = -1;
-      if (sku === q || desc === q) score = 5;
-      else if (sku.startsWith(q) || desc.startsWith(q)) score = 4;
-      else if (desc.includes(q) || sku.includes(q)) score = 2;
-      else if (cat.includes(q) || mfr.includes(q)) score = 1;
+      if (names.includes(q) || desc === q) score = 5;
+      else if (names.some((n) => n.startsWith(q)) || desc.startsWith(q)) score = 4;
+      else if (desc.includes(q) || names.some((n) => n.includes(q))) score = 2;
+      else if (cat.includes(q) || partSearchHaystack(p).includes(q)) score = 1; // mfr, MFR P/N …
       return { p, score };
     })
     .filter((s) => s.score >= 0)

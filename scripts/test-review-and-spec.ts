@@ -5,10 +5,13 @@ import {
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
-import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
+import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, partSearchHaystack as cr302Hay, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
 import { planRenames as cr302Plan, crosswalkRowsFromGrid as cr302Rows } from "@/lib/catalog-rename/plan";
 import * as cr302Rw from "@/lib/catalog-rename/rewrite";
 import { buildImportResolver as cr302Resolver } from "@/lib/catalog-rename/import-resolve";
+import { assemblyParts as cr302GridLib } from "@/lib/design/grid-library";
+import { paletteView as cr302Palette } from "@/lib/design/grid-palette";
+import { accessoryCandidates as cr302AccCand } from "@/lib/design/grid-accessories";
 import type { SpecItem as Cr302SpecItem, SpecSection as Cr302Section } from "@/app/(app)/estimator/types";
 import type { CartLine as Cr302CartLine } from "@/lib/portal-cart-types";
 import type { ProcurementLine as Cr302ProcLine } from "@/lib/stores/projects";
@@ -10946,6 +10949,45 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   ok(cr302Resolver([{ sku: "X:Model", mfr: "X", formerSkus: ["ab 12"] }], new Map())({ sku: "ab12" }) === "X:Model", "#302 import resolve: with no live SKU of that spelling, the former SKU still resolves");
   ok(cr302Resolver([{ sku: "AB-12", mfr: "X" }], new Map())({ sku: "ab12" }) === null, "#302 import resolve: without a step 2/3 hit a normalized-only live match is still not the resolver's call");
 }
+
+/* --- #302 Task 6: every part search matches Model # and former SKUs --- */
+{
+  const src302 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const pinRel = (rel: string, name: string) => ok(/from "@\/lib\/catalog-rename\/sku"/.test(src302(rel)) && src302(rel).includes(name), `#302 search ${rel}: reads the shared haystack (${name})`);
+  pinRel("src/app/api/search/route.ts", "partSearchHaystack(");
+  pinRel("src/app/(app)/catalog/page.tsx", "partSearchHaystack(");
+  pinRel("src/app/(app)/estimator/actions.ts", "partSearchHaystack(");
+  pinRel("src/app/(app)/catalog/documents/actions.ts", "partMatchesQuery(");
+  pinRel("src/lib/design/grid-bom.ts", "partSearchHaystack(");
+  ok(["grid-library", "grid-palette", "grid-accessories"].every((f) => src302(`src/lib/design/${f}.ts`).includes("partLiteHaystack(")), "#302 search: the Grid library, palette and accessory pickers share partLiteHaystack");
+  ok(src302("src/lib/portal-catalog-index.ts").includes("...(p.formerSkus ?? [])"), "#302 search: the portal index haystack carries former SKUs");
+  ok(src302("src/lib/design/grid-parts.ts").split("formerSkus").length > 2, "#302 search: gridPartsFrom carries formerSkus onto PartLite (catalog-linked and fallback rows)");
+  // The two server pickers that wrap the Estimator search (Assembly Builder, Grid Equipment map) inherit it.
+  ok(src302("src/app/(app)/design/assemblies/actions.ts").includes("searchCatalog(") && src302("src/app/(app)/design/grid/settings/actions.ts").includes("searchCatalog("), "#302 search: the Assembly Builder and Equipment-map pickers wrap the Estimator's searchCatalog");
+
+  // Behaviour: Grid parts (library tree, palette, accessory picker).
+  const lite = (over: Record<string, unknown>) => ({ id: "x", sku: "G-1", desc: "Rack DSP", category: "Audio", unit: "ea", list: 0, cost: 0, ...over }) as unknown as import("@/lib/design/grid-bom").PartLite;
+  const renamed = lite({ id: "p1", sku: "Symetrix:Jupiter 4", modelNumber: "80-0043", manufacturer: "Symetrix", manufacturerModelNumber: "Jupiter 4", formerSkus: ["80-0043-OLD"], kind: "assembly" });
+  const other = lite({ id: "p2", sku: "G-2", desc: "Speaker", modelNumber: "S-2", manufacturer: "JBL", kind: "assembly" });
+  const asm = (q: string) => cr302GridLib([renamed, other], q).map((p) => p.id);
+  ok(asm("jupiter 4").join() === "p1" && asm("80-0043-old").join() === "p1" && asm("symetrix").join() === "p1" && asm("s-2").join() === "p2", "#302 search: Grid assembly list finds by Model # / former SKU, still by maker / model");
+  const pal = (q: string) => cr302Palette([renamed, other], { tab: "all", search: q, scope: "", typeKey: "", mfr: "" }, [], [], []).rows.map((p) => p.id);
+  ok(pal("jupiter 4").join() === "p1" && pal("80-0043-old").join() === "p1" && pal("rack dsp").join() === "p1" && pal("speaker").join() === "p2", "#302 search: Grid palette search finds by Model # / former SKU, still by desc");
+  const accRows = (q: string) => cr302AccCand([renamed, other], "audio" as never, q, true).map((p) => p.id);
+  ok(accRows("jupiter 4").join() === "p1" && accRows("80-0043-old").join() === "p1" && accRows("jbl").join() === "p2", "#302 search: '+ Add accessory' (all categories) finds by Model # / former SKU, still by maker");
+
+  // Behaviour: portal catalog index entries use buildHaystack; a former SKU in it is found (and punctuation-insensitive).
+  const entry = (key: string, hay: Array<string | undefined>): D242Entry => ({ key, kind: "part", title: key, sku: key, mfr: "", category: "", haystack: d245Hay(hay), browsable: true, rank: 0 });
+  const pe = [entry("Symetrix:Jupiter 4", ["Symetrix:Jupiter 4", "DSP", "Symetrix", "80-0043-OLD"]), entry("G-2", ["G-2", "Speaker"])];
+  const pq = (q: string) => d245Search(pe, { q, mfr: [], cat: [], page: 1, pageSize: 20 }).entries.map((e) => e.key).join();
+  ok(pq("80-0043-old") === "Symetrix:Jupiter 4" && pq("800043old") === "Symetrix:Jupiter 4" && pq("speaker") === "G-2", "#302 search: a former SKU in a portal index haystack finds the part");
+
+  // Behaviour: the shared haystack/matcher the ⌘K, catalog page and picker filters read.
+  const rp = { sku: "Symetrix:Jupiter 4", desc: "DSP", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043", formerSkus: ["80-0043-OLD"] };
+  ok(cr302Hay(rp).includes("80-0043-old") && cr302Hay(rp).includes("jupiter 4") && cr302Hay(rp).includes("80-0043"), "#302 search: haystack holds Model #, MFR P/N and former SKUs");
+  ok(cr302Match(rp, "jupiter dsp") && cr302Match(rp, "80-0043-old") && !cr302Match(rp, "jupiter 12"), "#302 search: document picker token match (every token)");
+}
+
 
 seeded()
   .then(() => fixtureLeakChecks())

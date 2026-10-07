@@ -70,6 +70,9 @@ export function gridPartsFrom(
       ...typed(s, p),
       manufacturer: s.manufacturer,
       modelNumber: s.modelNumber,
+      // #302: search-only — the live catalog part's Model # and old order numbers.
+      ...(p?.manufacturerModelNumber ? { manufacturerModelNumber: p.manufacturerModelNumber } : {}),
+      ...(p?.formerSkus?.length ? { formerSkus: p.formerSkus } : {}),
       symbolWidth: s.width,
       symbolHeight: s.height,
       kind: s.kind || "device",
@@ -90,6 +93,8 @@ export function gridPartsFrom(
       unit: p.unit,
       list: p.list,
       cost: p.cost,
+      ...(p.manufacturerModelNumber ? { manufacturerModelNumber: p.manufacturerModelNumber } : {}),
+      ...(p.formerSkus?.length ? { formerSkus: p.formerSkus } : {}),
       ...(dt ? { deviceType: key ?? null, deviceTypeLabel: key ? typeLabel(key, dt.types) : null } : {}),
       ...(dt && key ? { gridScope: scopeOfType(key, dt.types) } : {}),
     });
