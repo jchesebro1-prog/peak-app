@@ -10910,3 +10910,55 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
 - Minor review notes not fixed: a cover selection longer than 1,500 chars is silently capped; the cover has Attn and Venue
   rows beyond the brief; whitespace-only goals count as present; a `Q 1` / `Q_1` quote id could collide in the zip cache key
   (irrelevant for `Q-####`).
+
+## 302. Estimates — custom part: Add to catalog never fails silently + Unit sell auto-fills at 35% margin — DONE 2026-10-07 (D635)
+
+**Asked by Jeff 2026-10-07.** In the Estimator's **Custom part** form, "Add custom part" with **Add to catalog** checked did
+nothing visible: the Part no. / SKU field's grey "CUSTOM-001" looks filled in, but the server refuses a blank SKU, and the
+client `return`ed on that refusal (and let a thrown error escape) — no message, no line added, nothing saved. A success also
+said nothing. Worse, the save is a merge, so typing a SKU that already exists in the catalog quietly rewrote that real
+part's description, cost, list, category and manufacturer.
+
+What changed:
+- **Unit sell follows Unit cost at a flat 35% margin** (`customPartSell`, `CUSTOM_PART_MARGIN` in `tier-reprice.ts`; $100 →
+  $153.85). Typing a sell turns the follow off; clearing it turns it back on and refills from the cost. A muted "Auto · 35%
+  margin" sits by the label while it follows. Draft flag `priceAuto`; field logic in `setCustomField`.
+- **Add to catalog says why it didn't.** A blank / "CUSTOM" SKU is caught in the form ("Enter a Part no. / SKU to save this
+  part to the catalog."); the server's refusal is shown as-is; a thrown save reads "Couldn't save to the catalog — try
+  again." In every case no line is added and the form stays open with what was typed. The button shows "Saving…" and ignores
+  a second click while the save runs.
+- **Never overwrites an existing part.** `saveEstimatorCustomPartAction` refuses a SKU with a live catalog part (a
+  soft-deleted one can be re-created) and points at "+ Add part from catalog".
+- **Success is confirmed:** "Saved <SKU> to the catalog under Custom Parts." stands under the section's add buttons until
+  dismissed or another catalog/custom form opens.
+
+Not changed: the allowance path's tier-margin fallback code (but a typed cost now seeds a sell, so an allowance priced from
+the form lands at 35%, not the tier — the fallback is effectively unreachable from the form), Estimator catalog pricing (still tier-seeded), saved lines. No migration.
+
+Gates: `tsc --noEmit` 0 errors; `test:specs` 12,549 PASS / 0 FAIL (12,541 at #301 + 8 new "#302" checks); `test:smoke` ALL PASSED; eslint clean on the touched files.
+
+## 303. Catalog — Datasheets table: scrolls in view, sticky header + Part column, Columns toggle — DONE 2026-10-07
+
+**Asked by Jeff 2026-10-07:** "The datasheets and photos window needs to be able to scroll or turn off columns to get a better
+view." `/catalog/documents` capped the page at 1240 px while the table (Part, Quoted, Last quoted, three 200 px slot cells,
+Image) needs ~1,200+; the card did scroll sideways, but its scrollbar sat at the bottom of a 200-row table and macOS hides
+overlay scrollbars, so the Image column just looked cut off.
+
+What changed (this page only, no migration):
+- **Wider page** — `pk-content` cap 1240 → 1680.
+- **A scroll box you can use** — the table card is bounded (`maxHeight: calc(100dvh - 220px)`, `minHeight: 320`, `overflow:
+  auto`) so the horizontal scrollbar is on screen; the header row is sticky, and the select checkbox + Part columns are sticky
+  on the left (opaque white, right-edge shadow, corner cells on top). Table switched to `border-collapse: separate` so sticky
+  cells keep their borders. The bulk-actions bar is unchanged.
+- **Columns button** (right end, above the table) — checkbox per optional column (Quoted, Last quoted, Datasheet, Spec sheet,
+  Manual, Image) plus Show all; Part and the select box are always shown. Closes on Escape / outside click. Hidden columns
+  leave thead and tbody, the empty-state `colSpan` and the table `min-width` follow the visible set. The hidden list persists
+  per browser in `localStorage` (`catalog-documents-columns-v1`, try/catch, read after mount so there is no hydration mismatch;
+  default all shown). Rules are a pure module, `catalog/documents/columns.ts`.
+
+Not changed: the photo-sheet page, the filters/paging, the server data.
+
+Gates: `tsc --noEmit` 0 errors; `test:specs` 12,566 PASS / 0 FAIL (12,549 + 17 new "#303" checks); eslint clean on the three
+touched `src` files (the 50k-line spec harness overflows eslint's react-hooks rule stack, so it is not linted); `test:smoke`
+ALL PASSED. Browser-checked at 1000×700 on the dev server: header and Part column stay pinned while the box scrolls both
+ways, the horizontal scrollbar sits on screen, hiding Spec sheet + Manual narrows the table and survives a reload.

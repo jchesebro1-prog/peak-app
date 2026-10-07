@@ -106,7 +106,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   const select: React.CSSProperties = { fontSize: 12.5, padding: "7px 9px", borderRadius: 8, border: "1px solid #dfe2e8", background: "#fff" };
 
   return (
-    <div className="pk-content" style={{ maxWidth: 1240 }}>
+    <div className="pk-content" style={{ maxWidth: 1680 }}>
       <Link href="/catalog" style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>← Catalog</Link>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap", margin: "7px 0 14px" }}>
         <div>

@@ -9525,3 +9525,13 @@ The Client goals box is also on paper. The Dropbox site-visit sheets were revise
 bumped), with a sheet-versus-app field reconciliation in `knowledge/peak/site-visit-sheet-field-reconciliation-2026-10.md`.
 No PDFs: there is no Word or LibreOffice on this Mac. The Rigging sheet has no paper discipline section yet. Nothing in the
 repo changed for this.
+
+## D635. A custom part's Unit sell seeds at a flat 35% margin (#302, 2026-10-07)
+
+The Estimator's Custom part form fills Unit sell from Unit cost at a **flat 35% margin**, by Jeff's instruction. It is **not**
+the customer's pricing tier that the catalog picker seeds at (`seedMarginOf`, stamp else 0.30), so a tier change never moves
+it. Margin, not markup: sell = `round2(cost ÷ 0.65)`, so $100 → $153.85 (`customPartSell`, `CUSTOM_PART_MARGIN`,
+`tier-reprice.ts`). A typed sell wins and stops the auto-fill; clearing the sell re-seeds it from the current cost. The
+margin readout beside the field is unchanged. Add to catalog now **refuses a SKU already in the catalog** instead of
+merging over it (the part's own description, cost, list, category and manufacturer are never rewritten from an estimate);
+the message points at "+ Add part from catalog". A soft-deleted part reads as absent, so its SKU can be re-created.

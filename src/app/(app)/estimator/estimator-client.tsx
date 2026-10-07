@@ -152,7 +152,7 @@ import VendorQuoteModal, {
 import PreviewDoc from "./preview-doc";
 import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 import { PortalPanel } from "./portal-panel";
-import { catalogAddPrice, repriceForTier, tierRepriceMessage } from "./tier-reprice";
+import { catalogAddPrice, customPartSell, repriceForTier, tierRepriceMessage } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 
 /**
@@ -243,7 +243,14 @@ const freshCustom = (): CustomDraft => ({
   qty: "1",
   cost: "",
   price: "",
+  priceAuto: "1", // #302: Unit sell follows Unit cost until a sell is typed
 });
+
+/** #302 — the Unit sell text a cost seeds ("" when the cost isn't above 0). */
+const autoSellText = (cost: string) => {
+  const sell = customPartSell(parseFloat(cost));
+  return sell > 0 ? sell.toFixed(2) : "";
+};
 
 const freshCurtain = (fabricSku: string): CurtainDraft => ({
   name: "",
@@ -680,6 +687,10 @@ export default function EstimatorClient({
   const vendorFor = openFor("vendor");
   const trackFor = openFor("track");
   const [customDraft, setCustomDraft] = useState<CustomDraft>(freshCustom);
+  // #302: why the last "Add custom part" didn't add, and the in-flight guard.
+  const [customError, setCustomError] = useState("");
+  const [savingCustom, setSavingCustom] = useState(false);
+  const savingCustomRef = useRef(false);
   const [curtainDraft, setCurtainDraft] = useState<CurtainDraft>(() =>
     freshCurtain(defaultFabric)
   );
@@ -1955,8 +1966,10 @@ export default function EstimatorClient({
    *  banner, which deliberately OUTLIVES the panel: an import closed
    *  mid-flight still has to report what it did. */
   const discardDraft = (kind: InputKind, secId: string) => {
-    if (kind === "custom") setCustomDraft(freshCustom());
-    else if (kind === "curtain") {
+    if (kind === "custom") {
+      setCustomDraft(freshCustom());
+      setCustomError("");
+    } else if (kind === "curtain") {
       setCurtainDraft(freshCurtain(defaultFabric));
       setCurtainTrack(null);
       curtainEditRef.current = null;
@@ -1983,8 +1996,10 @@ export default function EstimatorClient({
 
   /** Seed the incoming method's draft (the prototype defaults each had). */
   const seedDraft = (kind: InputKind, secId: string) => {
-    if (kind === "custom") setCustomDraft(freshCustom());
-    else if (kind === "curtain") {
+    if (kind === "custom") {
+      setCustomDraft(freshCustom());
+      setCustomError("");
+    } else if (kind === "curtain") {
       const edit = curtainEditRef.current;
       curtainEditRef.current = null;
       setCurtainEdit(edit ? { lineId: edit.lineId, linkedTrack: edit.linkedTrack } : null);
@@ -2158,7 +2173,29 @@ export default function EstimatorClient({
     setCurtainTrack(curtainTrackDraft(curtainDraft, trackSeries));
   };
 
-  const addCustomPart = async (secId: string) => {
+  /** #302 — one field of the Custom part form. Unit sell follows Unit cost at
+   *  the flat custom-part margin until a sell is typed; clearing the sell
+   *  hands it back to the cost. Any edit clears a stale error. */
+  const setCustomField = (field: keyof CustomDraft, v: string) => {
+    setCustomError("");
+    setCustomDraft((d) => {
+      const next = { ...d, [field]: v };
+      if (field === "cost" && d.priceAuto) next.price = autoSellText(v);
+      else if (field === "price") {
+        if (v.trim()) next.priceAuto = "";
+        else {
+          next.priceAuto = "1";
+          next.price = autoSellText(d.cost);
+        }
+      }
+      return next;
+    });
+  };
+
+  /** Resolves to a one-line confirmation when the part was also saved to the
+   *  catalog (the section card shows it); nothing otherwise. */
+  const addCustomPart = async (secId: string): Promise<string | void> => {
+    if (savingCustomRef.current) return;
     const d = customDraft;
     const desc = (d.desc || "").trim();
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
@@ -2171,19 +2208,40 @@ export default function EstimatorClient({
       ? round2(cost / (1 - margin))
       : typedPrice;
     if (!desc || !Number.isFinite(price) || price <= 0) return;
+    let savedMessage: string | undefined;
     if (d.addToCatalog && !d.allowance) {
-      const saved = await saveEstimatorCustomPartAction({
-        sku: (d.sku || "").trim(),
-        desc,
-        category: "Custom Parts",
-        unit: (d.unit || "").trim() || "ea",
-        cost,
-        list: price,
-        mfr: d.manufacturer.trim(),
-        manufacturerPartNumber: d.manufacturerPartNumber.trim(),
-        priceGoodThrough: d.priceGoodThrough,
-      });
-      if (!saved.ok) return;
+      const catalogSku = (d.sku || "").trim();
+      if (!catalogSku || catalogSku.toUpperCase() === "CUSTOM") {
+        setCustomError("Enter a Part no. / SKU to save this part to the catalog.");
+        return;
+      }
+      savingCustomRef.current = true;
+      setSavingCustom(true);
+      setCustomError("");
+      try {
+        const saved = await saveEstimatorCustomPartAction({
+          sku: catalogSku,
+          desc,
+          category: "Custom Parts",
+          unit: (d.unit || "").trim() || "ea",
+          cost,
+          list: price,
+          mfr: d.manufacturer.trim(),
+          manufacturerPartNumber: d.manufacturerPartNumber.trim(),
+          priceGoodThrough: d.priceGoodThrough,
+        });
+        if (!saved.ok) {
+          setCustomError(saved.error);
+          return;
+        }
+        savedMessage = `Saved ${saved.sku} to the catalog under Custom Parts.`;
+      } catch {
+        setCustomError("Couldn't save to the catalog \u2014 try again.");
+        return;
+      } finally {
+        savingCustomRef.current = false;
+        setSavingCustom(false);
+      }
     }
     pushItems(secId, [
       {
@@ -2204,6 +2262,7 @@ export default function EstimatorClient({
       },
     ]);
     closeInput(); // closing discards, so the draft reseed happens there
+    return savedMessage;
   };
 
   /* ---------------- vendor quote (#143, D162) ----------------
@@ -3946,8 +4005,10 @@ export default function EstimatorClient({
                   onEditLabor={(group) => openLaborEdit(sec.id, group)}
                   onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
                   onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
-                  onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
+                  onSetCustomDraft={setCustomField}
                   onAddCustomPart={() => addCustomPart(sec.id)}
+                  customError={customError}
+                  savingCustom={savingCustom}
                   onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
                   onMoveToExisting={(targetQuoteId) =>
                     moveSystem(sec.id, { kind: "existing", quoteId: targetQuoteId })

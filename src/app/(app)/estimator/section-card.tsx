@@ -17,6 +17,7 @@ import {
   systemSellTotal,
   systemSellWarning,
 } from "./pricing";
+import { CUSTOM_PART_MARGIN } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { isLaborLineEditable } from "./labor-group";
@@ -165,7 +166,11 @@ export type SectionCardProps = {
   /** CSV batch-add (#112): resolves SKUs against the catalog, returns how many priced from it vs. landed custom. */
   onImportMaterials: (items: ImportedMaterial[]) => Promise<{ fromCatalog: number; custom: number }>;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;
-  onAddCustomPart: () => void | Promise<void>;
+  /** Resolves to a one-line confirmation when the part also went to the catalog. */
+  onAddCustomPart: () => void | string | Promise<string | void>;
+  /** #302: why the last add didn't happen, and the in-flight guard. */
+  customError: string;
+  savingCustom: boolean;
   /** Live Single/Itemized flip on a stored vendor quote (#143). */
   onSetVendorDisplay: (vendorQuoteId: string, display: "single" | "itemized") => void;
   /** Reopen the vendor form on a stored quote to edit it in place (#144). */
@@ -194,6 +199,8 @@ export default function SectionCard(p: SectionCardProps) {
   // #281: the snippet shows the narrative's first non-blank line.
   const narrativeSnippet = (p.sec.narrative || "").split(/\r?\n/).find((l) => l.trim())?.trim() || "";
   const [importMessage, setImportMessage] = useState("");
+  // #302: "Saved X to the catalog" — outlives the custom form, which closes on add.
+  const [customSavedNote, setCustomSavedNote] = useState("");
   const [linkRevealed, setLinkRevealed] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   // #266: the one picker serves both Move… and Copy…; opening either while the
@@ -231,11 +238,17 @@ export default function SectionCard(p: SectionCardProps) {
      mid-flight still has a result to report (see the notice below). */
   const handleToggleCatalog = () => {
     setImportMessage(""); // a stale "12 materials added" must not greet the next open
+    setCustomSavedNote("");
     p.onToggleCatalog();
   };
   const handleToggleCustom = () => {
     setLinkRevealed(false); // the draft is reseeded on open; the URL field goes with it
+    setCustomSavedNote("");
     p.onToggleCustom();
+  };
+  const handleAddCustom = async () => {
+    const msg = await p.onAddCustomPart();
+    if (typeof msg === "string") setCustomSavedNote(msg);
   };
 
   const handleMoveToNew = () => {
@@ -1431,6 +1444,19 @@ export default function SectionCard(p: SectionCardProps) {
                 outcome — "Import failed; nothing was added" above all — has to
                 land somewhere the user can still see it, so it stands here
                 until dismissed or until the catalog panel is reopened. */}
+            {customSavedNote && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+                <span role="status" style={{ fontSize: 12, color: "#1f7a52" }}>{customSavedNote}</span>
+                <button
+                  type="button"
+                  onClick={() => setCustomSavedNote("")}
+                  title="Dismiss"
+                  style={{ border: 0, background: "none", cursor: "pointer", fontSize: 12, color: "#aab0bb", padding: 0, lineHeight: 1 }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             {!p.catalogOpen && importMessage && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
                 <span role="status" style={{ fontSize: 12, color: importMsgColor(importMessage) }}>{importMessage}</span>
@@ -1614,7 +1640,12 @@ export default function SectionCard(p: SectionCardProps) {
                     </div>
                   </div>
                   <div>
-                    <label style={LBL}>Unit sell</label>
+                    <label style={LBL}>
+                      Unit sell
+                      {cd.priceAuto && cdPrice > 0 && (
+                        <span style={{ marginLeft: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "#9aa0ab" }}>{`Auto · ${Math.round(CUSTOM_PART_MARGIN * 100)}% margin`}</span>
+                      )}
+                    </label>
                     <div style={{ position: "relative" }}>
                       <span
                         style={{
@@ -1713,7 +1744,7 @@ export default function SectionCard(p: SectionCardProps) {
                       </div>
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={handleToggleCustom}
@@ -1738,10 +1769,13 @@ export default function SectionCard(p: SectionCardProps) {
                       <input type="checkbox" checked={!!cd.addToCatalog} disabled={!!cd.allowance} onChange={(e) => p.onSetCustomDraft("addToCatalog", e.target.checked ? "1" : "")} />
                       Add to catalog
                     </label>
+                    {p.customError && (
+                      <span role="alert" style={{ fontSize: 12, color: "#b4543a" }}>{p.customError}</span>
+                    )}
                     <button
                       type="button"
-                      onClick={p.onAddCustomPart}
-                      disabled={!cdValid}
+                      onClick={handleAddCustom}
+                      disabled={!cdValid || p.savingCustom}
                       style={{
                         fontFamily: "var(--font-ui)",
                         fontSize: 12.5,
@@ -1749,12 +1783,12 @@ export default function SectionCard(p: SectionCardProps) {
                         border: "none",
                         borderRadius: 7,
                         padding: "8px 15px",
-                        ...(cdValid
+                        ...(cdValid && !p.savingCustom
                           ? { background: "var(--accent)", color: "#fff", cursor: "pointer" }
                           : { background: "#e7e9ee", color: "#aab0bb", cursor: "not-allowed" }),
                       }}
                     >
-                      Add custom part
+                      {p.savingCustom ? "Saving\u2026" : "Add custom part"}
                     </button>
                   </div>
                 </div>
