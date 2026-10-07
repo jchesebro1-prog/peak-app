@@ -12,7 +12,7 @@
 import { parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import type { FixtureRecord } from "@/lib/fixture-assemblies";
 import { emptyRackLayout, placementFacts, ruRangeLabel } from "./layout";
-import { RACK_FACT_LABEL, rackFactsOf } from "./part-facts";
+import { RACK_FACT_LABEL, rackFactsOf, rackModelOf } from "./part-facts";
 import { ruLabel, totals as rackTotals, validate } from "./rules";
 import { CIRCUIT_VOLTS, type RackIssue, type RackLayout, type RackPartLookup, type RackPlacement, type RackTotals } from "./types";
 
@@ -22,6 +22,8 @@ export type ScheduleRow = {
   qty: number;
   mfr: string;
   sku: string;
+  /** #302: the Model # a customer sheet prints (`sku` stays the lookup key); absent → print the sku. */
+  model?: string;
   desc: string;
   depthIn: number | null;
   weightLb: number | null;
@@ -30,7 +32,7 @@ export type ScheduleRow = {
   optional: boolean;
   reserved: boolean;
 };
-export type RackLevelRow = { qty: number; mfr: string; sku: string; desc: string; weightLb: number | null; watts: number | null };
+export type RackLevelRow = { qty: number; mfr: string; sku: string; model?: string; desc: string; weightLb: number | null; watts: number | null };
 export type RackSubmittalGap = { sku: string; label: string; kind: "missing-data" | "missing-datasheet" | "missing-catalog"; detail: string };
 export type RackSubmittal = {
   title: string;
@@ -104,7 +106,7 @@ export function rackSubmittal(rec: Pick<FixtureRecord, "label" | "scope" | "rack
       : ruRangeLabel(config, p.ruStart, topOf(p));
     const face = p.face === "rear" ? "Rear" : "Front";
     if (p.kind === "reserved") {
-      return { ru, face, qty: 1, mfr: "", sku: "", desc: "Reserved — future", depthIn: null, weightLb: null, watts: null, notes: p.notes ?? "", optional: false, reserved: true };
+      return { ru, face, qty: 1, mfr: "", sku: "", model: "", desc: "Reserved — future", depthIn: null, weightLb: null, watts: null, notes: p.notes ?? "", optional: false, reserved: true };
     }
     const info = p.sku ? lookup(p.sku) : undefined;
     const f = placementFacts(p, lookup);
@@ -115,6 +117,7 @@ export function rackSubmittal(rec: Pick<FixtureRecord, "label" | "scope" | "rack
       qty: 1,
       mfr: info?.mfr || "",
       sku: p.sku ?? "",
+      model: p.sku ? rackModelOf(info, p.sku) : "",
       desc: p.label || info?.desc || p.sku || "",
       depthIn: orNull(f.depthIn),
       weightLb: orNull(f.weightLb),
@@ -130,7 +133,7 @@ export function rackSubmittal(rec: Pick<FixtureRecord, "label" | "scope" | "rack
   const rackLevel: RackLevelRow[] = parts.filter((l) => !isInternal(l.sku)).map((l) => {
     const info = lookup(l.sku);
     const f = rackFactsOf(info);
-    return { qty: l.qty, mfr: info?.mfr || "", sku: l.sku, desc: l.label || info?.desc || l.sku, weightLb: orNull(f.weightLb), watts: orNull(f.powerWatts) };
+    return { qty: l.qty, mfr: info?.mfr || "", sku: l.sku, model: rackModelOf(info, l.sku), desc: l.label || info?.desc || l.sku, weightLb: orNull(f.weightLb), watts: orNull(f.powerWatts) };
   });
 
   const t = rackTotals(layout, lookup, parts.map((l) => ({ sku: l.sku, qty: l.qty })));
@@ -202,12 +205,12 @@ export function scheduleCsv(s: RackSubmittal): string {
   const lines: string[] = [SCHEDULE_CSV_HEADER];
   for (const r of s.schedule) {
     lines.push(
-      [textCell(r.ru), textCell(r.face), numCell(r.qty), textCell(r.mfr), textCell(r.sku), textCell(r.desc), numCell(r.depthIn), numCell(r.weightLb), numCell(r.watts), textCell(r.notes)].join(",")
+      [textCell(r.ru), textCell(r.face), numCell(r.qty), textCell(r.mfr), textCell(r.model || r.sku), textCell(r.desc), numCell(r.depthIn), numCell(r.weightLb), numCell(r.watts), textCell(r.notes)].join(",")
     );
   }
   lines.push("", "Rack-level parts", RACK_LEVEL_CSV_HEADER);
   for (const r of s.rackLevel) {
-    lines.push([numCell(r.qty), textCell(r.mfr), textCell(r.sku), textCell(r.desc), numCell(r.weightLb), numCell(r.watts)].join(","));
+    lines.push([numCell(r.qty), textCell(r.mfr), textCell(r.model || r.sku), textCell(r.desc), numCell(r.weightLb), numCell(r.watts)].join(","));
   }
   return CSV_BOM + lines.join("\r\n") + "\r\n";
 }

@@ -1,6 +1,7 @@
 import type { SearchEntry, SearchQuery } from "@/lib/portal-search";
 import { PACKAGES_DEPT } from "@/lib/portal-departments";
 import type { ImageFallback } from "@/lib/part-image-fallback";
+import { partModel } from "@/lib/catalog-rename/sku";
 
 /**
  * Portal catalog browse page — pure, client-safe helpers (#245 Task 10,
@@ -17,6 +18,8 @@ export type TileVM = {
   kind: "part" | "fixture";
   title: string;
   sku: string;
+  /** #302: what the customer sees as the part's identity (partModel); "" on a fixture tile. */
+  model: string;
   mfr: string;
   category: string;
   imageId: string | null;
@@ -206,7 +209,7 @@ export function quotedBeforeSkus(
 }
 
 type TileIdentity = Pick<SearchEntry, "key" | "kind" | "title" | "sku" | "mfr" | "category">;
-type TileMedia = { imageIds?: readonly string[]; datasheetIds?: readonly string[]; unit?: string } | null | undefined;
+type TileMedia = { imageIds?: readonly string[]; datasheetIds?: readonly string[]; unit?: string; mpn?: string; model?: string } | null | undefined;
 type TilePrice = { unitPrice: number | null; por: boolean } | null | undefined;
 type TileFixture = { lines: readonly { required: boolean }[] } | null | undefined;
 
@@ -222,6 +225,7 @@ export function toTileVM(e: TileIdentity, media: TileMedia, price: TilePrice, fi
     kind: e.kind === "fixture" ? "fixture" : "part",
     title: String(e.title || e.sku || ""),
     sku: String(e.sku || ""),
+    model: e.kind === "fixture" ? "" : partModel({ sku: String(e.sku || ""), manufacturerModelNumber: media?.model, manufacturerPartNumber: media?.mpn }),
     mfr: String(e.mfr || ""),
     category: String(e.category || ""),
     imageId,

@@ -1428,6 +1428,8 @@ export async function searchCatalog(
     list: p.list || 0,
     mfr: p.mfr || "",
     ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
+    ...(p.manufacturerModelNumber?.trim() ? { model: p.manufacturerModelNumber.trim() } : {}),
+    ...(p.manufacturerPartNumber?.trim() ? { mpn: p.manufacturerPartNumber.trim() } : {}),
     rack: rackFactsOrUndefined(p),
   }));
   return { hits, total: scored.length };

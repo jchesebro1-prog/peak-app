@@ -11011,6 +11011,121 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
 }
 
 
+/* --- #302 Task 7: customer documents print the Model # only; staff rows lead with it --- */
+import { lineModel as cr302LineModel } from "@/lib/catalog-rename/sku";
+import { packageBomRows as cr302BomRows } from "@/lib/estimate-output/bom";
+import { toTileVM as cr302Tile } from "@/lib/portal-catalog-view";
+import { toPartDetailVM as cr302PartVM, toFixtureDetailVM as cr302FixVM } from "@/lib/portal-part-view";
+import { buildSchedule as cr302BuildSchedule, scheduleGroups as cr302Groups, scheduleModelOf as cr302SchedModel } from "@/lib/design/grid-schedule";
+import { rackSubmittal as cr302RackSub, scheduleCsv as cr302RackCsv } from "@/lib/rack/submittal";
+import { rackPartInfo as cr302RackInfo } from "@/lib/rack/part-facts";
+import { collectCurtainTypes as cr302Collect } from "@/lib/curtain-cut-sheets/collect";
+import { partsListRows as cr302PartsRows } from "@/app/(app)/estimator/parts-csv";
+import { documentRow as cr302DocRow } from "@/lib/part-docs/views";
+{
+  const src302 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const ORDER = "80-0043";
+  const JUP = { sku: "Symetrix:Jupiter 4", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER };
+
+  // lineModel: the line's model → the catalog part's model → the line's P/N → partModel(part); never the order # when a model exists.
+  ok(cr302LineModel({ sku: JUP.sku, manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }) === "Jupiter 4", "#302 lineModel: the line's own Model # first");
+  ok(cr302LineModel({ sku: JUP.sku, manufacturerPartNumber: ORDER }, JUP) === "Jupiter 4", "#302 lineModel: a line copy with only the order # reads the catalog part's Model #");
+  ok(cr302LineModel({ sku: "X", manufacturerPartNumber: "LC-2" }, { sku: "X", manufacturerPartNumber: "CC" }) === "LC-2" && cr302LineModel({ sku: "A:B" }, { sku: "A:B" }) === "B" && cr302LineModel({ sku: "X" }) === "",
+    "#302 lineModel: line P/N before the part's P/N, SKU tail last, blank with no identity");
+
+  // BOM (the package page): the part column is the model, the order # never prints.
+  const bomSec = { id: "m", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [
+    { id: 1, ...JUP, desc: "Jupiter DSP", qty: 1, unit: "ea", cost: 1, price: 2 },
+    { id: 2, sku: JUP.sku, manufacturerPartNumber: ORDER, desc: "Older line (no model copy)", qty: 1, unit: "ea", cost: 1, price: 2 },
+  ] } as never;
+  const bomRows = cr302BomRows(bomSec, new Map([[JUP.sku, { mfr: "Symetrix", manufacturerPartNumber: ORDER, manufacturerModelNumber: "Jupiter 4" }]]));
+  ok(bomRows.map((r) => r.part).join("|") === "Jupiter 4|Jupiter 4" && !JSON.stringify(bomRows).includes(ORDER), "#302 BOM: part column is the Model # (line copy, else the catalog part's), the order # never appears");
+  ok(src302("src/lib/quote-share/package-view.ts").includes('bomHead: ["Qty", "Manufacturer", "Model", "Description"]'), "#302 BOM: the package table header says Model");
+  ok(/manufacturerModelNumber: p\.manufacturerModelNumber/.test(src302("src/lib/estimate-output/package-loader.ts")), "#302 BOM: the package loader reads the catalog Model #");
+
+  // Parts list (CSV): line model → part model; the order # stays out of the model column.
+  const pl = cr302PartsRows([{ id: "s", name: "Sys", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: JUP.sku, manufacturerPartNumber: ORDER, desc: "DSP", qty: 1, unit: "ea", cost: 1, price: 2 }] }] as never, [], { [JUP.sku]: { mfr: "Symetrix", manufacturerPartNumber: ORDER, manufacturerModelNumber: "Jupiter 4" } });
+  ok(pl[0]?.modelNumber === "Jupiter 4", "#302 parts list: the catalog Model # beats a line's older order # copy");
+  ok(/partModel\(/.test(src302("src/lib/specs/assemble-section.ts")) && !src302("src/lib/specs/assemble-section.ts").includes("const tail ="), "#302 spec table: assemble-section uses the one partModel rule");
+
+  // Portal: tiles, sidebar, fixture rows, cart lines carry a server-computed model; mpn is gone from the sidebar payload.
+  const tile = cr302Tile({ key: JUP.sku, kind: "part", title: "DSP", sku: JUP.sku, mfr: "Symetrix", category: "Audio" }, { mpn: ORDER, model: "Jupiter 4" }, null);
+  ok(tile.model === "Jupiter 4" && !JSON.stringify(tile).includes(ORDER), "#302 portal tile: identity is the Model # (no order #)");
+  ok(cr302Tile({ key: "ETC:S4", kind: "part", title: "S4", sku: "ETC:S4", mfr: "ETC", category: "" }, { mpn: "7060A" }, null).model === "7060A" && cr302Tile({ key: "fixture:A", kind: "fixture", title: "F", sku: "ETC:S4", mfr: "", category: "" }, undefined, null).model === "",
+    "#302 portal tile: no model → MFR P/N; a fixture tile has none");
+  const det = cr302PartVM({ sku: JUP.sku, desc: "DSP", mfr: "Symetrix", mpn: ORDER, model: "Jupiter 4" }, null, [], []);
+  ok(det.model === "Jupiter 4" && !JSON.stringify(det).includes(ORDER) && !("mpn" in det), "#302 portal sidebar: Model # only, the order # never ships to the browser");
+  const fxVm = cr302FixVM({ id: "F", label: "Fx", description: "", lightEngineSku: "ETC:S4", lensSku: null, lines: [{ slot: "lightEngine", sku: "ETC:S4", label: "Engine", qty: 1, required: true }, { slot: "accessories", sku: "Symetrix:Hook 9", label: "Hook", qty: 0, required: false }] }, "ETC", null, () => null, { images: [], docs: [] });
+  ok(fxVm.fixed[0].model === "S4" && fxVm.addOns[0].model === "Hook 9", "#302 portal fixture rows: model defaults to the SKU tail; the server passes the real Model #");
+  const pp = src302("src/lib/portal-pricing.ts");
+  ok(/model: partModel\(\{ sku: part\.sku, manufacturerModelNumber: part\.model, manufacturerPartNumber: part\.mpn \}\)/.test(pp) && pp.includes("manufacturerModelNumber: part.model"), "#302 portal cart: a priced part line carries its model, and the quote item copies the Model #");
+  const readsModel = (rel: string, expr: string) => ok(src302(rel).includes(expr), `#302 portal ${rel}: prints ${expr}`);
+  readsModel("src/app/portal/catalog/part-sidebar.tsx", "<b>{detail.model}</b>");
+  readsModel("src/app/portal/catalog/part-sidebar.tsx", "[t.mfr, t.model]");
+  readsModel("src/app/portal/catalog/catalog-client.tsx", "{t.model}");
+  readsModel("src/app/portal/catalog/fixture-config.tsx", "{l.model}");
+  readsModel("src/app/portal/catalog/fixture-config.tsx", "{a.model}");
+  readsModel("src/app/portal/catalog/quote/cart-client.tsx", "{line.model}");
+  ok(!src302("src/app/portal/catalog/part-sidebar.tsx").includes("detail.mpn"), "#302 portal sidebar: never reads the order # (mpn)");
+
+  // Grid schedule (drawing set + /schedule): the Model # replaces the part id when the part resolves.
+  const sched = cr302BuildSchedule({
+    placements: [{ id: "pl1", sheetId: "s", page: 1, x: 0, y: 0, partId: "P1" }, { id: "pl2", sheetId: "s", page: 1, x: 1, y: 1, partId: "P9" }],
+    spaces: [],
+    descOf: (pid) => (pid === "P1" ? "DSP" : undefined),
+    modelOf: (pid) => cr302SchedModel(pid === "P1" ? { sku: JUP.sku, manufacturerModelNumber: "Jupiter 4" } : undefined),
+    wires: [{ id: "w1", partId: "P1", fromName: "A", toName: "B", lengthFt: 10, unit: "ft" }],
+  });
+  const grp = cr302Groups(sched);
+  const codes = grp[0].rows.map((r) => (r.kind === "row" ? r.code : "")).join("|");
+  ok(codes === "Jupiter 4|P9" && grp[1].rows[0].kind === "wire" && (grp[1].rows[0] as { model?: string }).model === "Jupiter 4" && sched.wireFeet[0].model === "Jupiter 4" && !JSON.stringify(sched).includes(ORDER),
+    "#302 grid schedule: a resolved part prints its Model #; an unresolved one keeps its part id; wire rows + footage line follow");
+  ok(JSON.stringify(cr302BuildSchedule({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0, y: 0, partId: "P1" }], spaces: [], descOf: () => "d", wires: [] }).sections[0].rows[0]) === JSON.stringify({ partId: "P1", desc: "d", qty: 1 }),
+    "#302 grid schedule: with no modelOf the rows are unchanged");
+  ok(src302("src/components/drawing/drawing-set-sheets.tsx").includes("it.model || it.partId") && src302("src/lib/design/drawing-set-data.ts").includes("modelOf:") && src302("src/lib/design/grid-schedule-server.ts").includes("modelOf:"), "#302 grid schedule: drawing set, /schedule and the printer all read the model");
+
+  // Rack sheets: the schedule row / CSV carry the model; sku stays the lookup key.
+  const rackInfo = cr302RackInfo({ sku: JUP.sku, desc: "Jupiter DSP", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER, ruHeight: 1 }, JUP.sku);
+  const rLookup = (sku: string) => (sku === JUP.sku ? rackInfo : undefined);
+  const rack = cr302RackSub(
+    { label: "R", scope: "Audio", rack: { config: { ruCount: 12, widthIn: 19, numbering: "bottom-up" }, placements: [{ id: "RP-1", kind: "device", sku: JUP.sku, ruStart: 1, ruHeight: 1, face: "front" }] }, parts: [{ sku: JUP.sku, qty: 1 }] } as never,
+    rLookup
+  );
+  ok(rack.schedule[0].model === "Jupiter 4" && rack.schedule[0].sku === JUP.sku && rack.rackLevel[0].model === "Jupiter 4", "#302 rack submittal: schedule + rack-level rows carry the Model # (sku kept for datasheets)");
+  const rcsv = cr302RackCsv(rack);
+  ok(rcsv.includes("Jupiter 4") && !rcsv.includes(ORDER) && !rcsv.includes("Symetrix:Jupiter 4"), "#302 rack CSV: the model column prints the Model #, never the order # or the Brand: SKU");
+  ok(src302("src/components/rack/RackSheets.tsx").includes("rackText(r.model || r.sku)") && src302("src/lib/rack/geometry.ts").includes("rackModelOf("), "#302 rack sheets + elevation labels read the model");
+
+  // Cut sheets: hardware prints the model.
+  const cs = cr302Collect({
+    quote: { spec: { sections: [{ id: "s1", name: "s1", kind: "materials", mfr: "", freightPct: 0, items: [
+      { id: 1, sku: "X", desc: "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness", qty: 2, unit: "ea", cost: 0, price: 0, curtain: true,
+        curtainInputs: { name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "9", width: "21.5", height: "18", fullness: "50", mountType: "wall-hookloop" } },
+    ] }], mobs: [] } } as never,
+    fabrics: [{ sku: "FAB-CH25", desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 }],
+    trackSeries: [],
+    mounts: { "wall-hookloop": { rows: [{ sku: JUP.sku, rule: { kind: "perCurtain", qty: 2 } }] } } as never,
+    partInfo: new Map([[JUP.sku, { desc: "Hook", unit: "ea", model: "Jupiter 4" }]]),
+    grid: null,
+  });
+  ok(cs.types[0]?.hardware[0]?.sku === JUP.sku && cs.types[0].hardware[0].model === "Jupiter 4", "#302 cut sheets: hardware rows carry the live part's Model # (sku kept as the key)");
+  const csNo = cr302Collect({ quote: { spec: { sections: [{ id: "s1", name: "s1", kind: "materials", mfr: "", freightPct: 0, items: [
+      { id: 1, sku: "X", desc: "Main Drape — Charisma Velour 25 oz, 21.5'W × 18'H, 50% fullness", qty: 2, unit: "ea", cost: 0, price: 0, curtain: true,
+        curtainInputs: { name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "9", width: "21.5", height: "18", fullness: "50", mountType: "wall-hookloop" } },
+    ] }], mobs: [] } } as never,
+    fabrics: [{ sku: "FAB-CH25", desc: "Charisma Velour 25 oz", oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 }], trackSeries: [],
+    mounts: { "wall-hookloop": { rows: [{ sku: JUP.sku, rule: { kind: "perCurtain", qty: 2 } }] } } as never, partInfo: new Map(), grid: null });
+  ok(csNo.types[0]?.hardware[0]?.model === "Jupiter 4", "#302 cut sheets: with no live part the SKU tail stands in (never the Brand: prefix)");
+  ok(src302("src/components/cutsheets/cut-sheet-pages.tsx").includes("{h.model}") && src302("src/lib/curtain-cut-sheets/load.ts").includes("model: partModel(p)"), "#302 cut sheets: the printer + loader read the model");
+
+  // Staff rows.
+  ok(src302("src/app/(app)/catalog/page.tsx").includes("staffPartLabel(p)") && src302("src/app/api/search/route.ts").includes("staffPartLabel(p)") && src302("src/app/(app)/estimator/catalog-picker.tsx").includes("staffPartLabel("), "#302 staff rows: the catalog list, ⌘K and the Estimator picker use staffPartLabel");
+  ok(src302("src/app/(app)/estimator/actions.ts").includes("model: p.manufacturerModelNumber.trim()") && src302("src/app/(app)/estimator/actions.ts").includes("mpn: p.manufacturerPartNumber.trim()"), "#302 staff rows: searchCatalog hits carry the model / order # when present");
+  const dr = cr302DocRow({ sku: JUP.sku, quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: JUP.sku, desc: "DSP", category: "Audio", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }, buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] }), () => "");
+  ok(dr.model === "Jupiter 4", "#302 datasheets row: the Model # (partModel)");
+}
+
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -29132,7 +29247,7 @@ import {
 
   const leaky = { imageIds: ["IMG-1", "IMG-2"], datasheetIds: ["DS-1"], unit: "ft", cost: 42, list: 99, note: "x", margin: 0.3 };
   const t = d245Tile({ key: "SKU-1", kind: "part", title: "Widget", sku: "SKU-1", mfr: "ETC", category: "Lighting" }, leaky, { unitPrice: 12.5, por: false });
-  ok(eq(Object.keys(t).sort(), ["category", "fallback", "hasDatasheet", "imageId", "key", "kind", "mfr", "por", "sku", "title", "unit", "unitPrice"]),
+  ok(eq(Object.keys(t).sort(), ["category", "fallback", "hasDatasheet", "imageId", "key", "kind", "mfr", "model", "por", "sku", "title", "unit", "unitPrice"]),
     "#245 tile: TileVM is exactly the sell-only whitelist");
   ok(t.imageId === "IMG-1" && t.hasDatasheet && t.unit === "ft" && t.unitPrice === 12.5 && !t.por && !JSON.stringify(t).includes("42"),
     "#245 tile: hero image = first image id; no cost rides along from an IndexedPart");
@@ -29331,7 +29446,7 @@ import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
   const docVms = d245PartVM(leakyPart, null, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false, blobKey: "x" } as never, { id: "D2", kind: "datasheet", title: "DS", pdf: true }], []).docs;
   ok(eq(docVms, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false }, { id: "D2", kind: "datasheet", title: "DS", pdf: true }]),
     "#245 sidebar (fix 1): a document carries pdf — only a PDF opens inline; the doc VM is a whitelist");
-  ok(eq(Object.keys(pv).sort(), ["docs", "fallback", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
+  ok(eq(Object.keys(pv).sort(), ["docs", "fallback", "goesWith", "images", "key", "kind", "mfr", "model", "por", "sku", "specText", "title", "unit", "unitPrice"]),
     "#245 sidebar: the part detail is exactly the sell-only whitelist");
   const pj = JSON.stringify(pv);
   ok(!pj.includes("\"cost\"") && !pj.includes("\"list\"") && !pj.includes("margin") && !pj.includes("tier") && !pj.includes("silver") && !pj.includes("note") && !pj.includes("pricedAt") && !pj.includes("42"),
@@ -29434,7 +29549,7 @@ async function portal245SidebarAsyncChecks(): Promise<void> {
 
     // Part detail.
     const d = await d245Detail(ctx, P);
-    ok(!!d && d.kind === "part" && d.unitPrice === (await d245PriceSku(P, ctx))?.unitPrice && d.mpn === "SBW-1" && d.mfr === "Test242 SbMfr",
+    ok(!!d && d.kind === "part" && d.unitPrice === (await d245PriceSku(P, ctx))?.unitPrice && d.model === "SBW-1" && d.mfr === "Test242 SbMfr",
       "#245 sidebar: a part's detail is priced at the viewer's tier");
     ok(!!d && d.kind === "part" && d.goesWith.map((t) => t.key).join() === ACC, "#245 sidebar: Goes with = quotable accessories only (a hidden accessory is left out)");
     const dj = JSON.stringify(d);
@@ -45565,7 +45680,7 @@ async function rack296ZipAsyncChecks(): Promise<void> {
     const ds = ok1.ok ? ok1.files.find((f) => f.name === "datasheets.pdf") : undefined;
     ok(!!ds && (await C296zPdf.load(ds.data)).getPageCount() === 1, "#296 rack zip: with no datasheets on file the PDF is just the cover listing the gaps");
     const csv = ok1.ok ? ok1.files.find((f) => f.name === "schedule.csv")?.data.toString("utf8") ?? "" : "";
-    ok(csv.includes(AMP) && csv.includes("Model/SKU"), "#296 rack zip: schedule.csv carries the schedule");
+    ok(csv.includes(cr302PartModel({ sku: AMP })) && csv.includes("Model/SKU"), "#296 rack zip: schedule.csv carries the schedule (#302: its model column prints the model — the SKU tail)");
 
     const ok2 = await c296zFiles(rec.id, { origin: "http://x" }, { deadline: Date.now() + 60_000, render: async () => { throw new Error("no chrome"); } });
     ok(ok2.ok && ok2.files.map((f) => f.name).join() === "schedule.csv,datasheets.pdf", "#296 rack zip: failed renders leave the sheets out, CSV and datasheets stay");
@@ -51506,7 +51621,7 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
   ok(pm.scopes[0].price === "$37.85" && !pj.includes("26.74") && !pj.includes("13.37") && !pj.includes("11.11") && !pj.includes("7.77") && !pj.includes("INTERNAL-301B") && !pj.includes("ROOM-301B"),
     "#301 model: the scope price only — never a line or unit price, cost, internal note or room (§10)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|quote-document-view)"|@\/lib\/specs\/record-keys")/m.test(rd("src/lib/estimate-output/bom.ts")) &&
+  ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|quote-document-view)"|@\/lib\/specs\/record-keys"|@\/lib\/catalog-rename\/sku")/m.test(rd("src/lib/estimate-output/bom.ts")) &&
      !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback")/m.test(rd("src/lib/estimate-output/package-model.ts")),
     "#301 purity: bom.ts and package-model.ts are pure and client-safe");
 }

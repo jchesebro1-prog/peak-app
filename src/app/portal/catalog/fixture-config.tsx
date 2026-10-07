@@ -78,7 +78,7 @@ export function FixtureConfig({
             <div key={l.sku + l.label} className="ps-row">
               <div className="ps-row-main">
                 <div className="ps-row-title">{l.label}</div>
-                <div className="ps-row-sub">{l.sku}</div>
+                <div className="ps-row-sub">{l.model}</div>
               </div>
               <span className="ps-inc-qty">×{l.qty}</span>
             </div>
@@ -99,7 +99,7 @@ export function FixtureConfig({
                   <label htmlFor={id} className="ps-row-main" style={{ cursor: "pointer" }}>
                     <div className="ps-row-title">{a.label}</div>
                     <div className="ps-row-sub">
-                      {a.sku}
+                      {a.model}
                       {" · "}
                       {a.unitPrice != null ? "+" + money(a.unitPrice) + " each" : "Price on request"}
                     </div>

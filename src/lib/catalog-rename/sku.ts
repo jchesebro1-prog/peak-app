@@ -58,3 +58,20 @@ export function staffPartLabel(p: ModelPartLike): { primary: string; secondary: 
   const pn = p.manufacturerPartNumber?.trim() || "";
   return { primary, secondary: pn && pn.toLowerCase() !== primary.toLowerCase() ? pn : "" };
 }
+
+export type ModelLineLike = { sku?: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string };
+
+/** What a customer document prints for a quote line: the line's own Model #
+ *  (frozen with the revision) → the catalog part's Model # → the line's MFR P/N
+ *  → the part's `partModel` (P/N, SKU tail, SKU). "" with no line identity and
+ *  no part. Never the order # when any Model # exists. */
+export function lineModel(line: ModelLineLike, part?: Partial<ModelPartLike> | null): string {
+  const own = line.manufacturerModelNumber?.trim();
+  if (own) return own;
+  const partModelNo = part?.manufacturerModelNumber?.trim();
+  if (partModelNo) return partModelNo;
+  const pn = line.manufacturerPartNumber?.trim();
+  if (pn) return pn;
+  if (part) return partModel({ sku: part.sku ?? line.sku ?? "", manufacturerPartNumber: part.manufacturerPartNumber });
+  return "";
+}

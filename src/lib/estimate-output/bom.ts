@@ -2,19 +2,21 @@ import type { SpecItem, SpecSection, VendorQuote } from "@/app/(app)/estimator/t
 import { customerLines } from "@/app/(app)/estimator/pricing";
 import { systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { lineModel } from "@/lib/catalog-rename/sku";
 
 /**
  * #301 slice B (spec §2, R6) — the package page's parts list: Qty ·
- * Manufacturer · Part · Description from the customer's own rows
+ * Manufacturer · Model · Description from the customer's own rows
  * (customerLines — options, the Rewards credit and the overhead lines never
- * appear). Manufacturer / Part come from the line first (frozen with the
+ * appear). Manufacturer / Model come from the line first (frozen with the
  * revision), then the catalog part by sku, else blank. Labor lines are
  * dropped, except that a labor system is its one document row. PackageBomRow
  * has NO money field — nothing priced can leak through it. Pure.
  */
 
 export type PackageBomRow = { key: string; qty: number | null; unit: string; manufacturer: string; part: string; description: string };
-export type BomCatalogPart = { mfr?: string | null; manufacturerPartNumber?: string | null };
+/** #302: `part` prints the Model # (lineModel), never the order # when a model exists. */
+export type BomCatalogPart = { mfr?: string | null; manufacturerPartNumber?: string | null; manufacturerModelNumber?: string | null };
 
 export const LABOR_BOM_DESC = "Installation, commissioning & project management";
 export const MAX_BOM_SKUS = 2000;
@@ -60,7 +62,10 @@ export function packageBomRows(sec: SpecSection, catalog: ReadonlyMap<string, Bo
       qty: typeof it.qty === "number" && Number.isFinite(it.qty) ? it.qty : null,
       unit: str(it.unit),
       manufacturer: str(it.manufacturer) || str(part?.mfr),
-      part: str(it.manufacturerPartNumber) || str(part?.manufacturerPartNumber),
+      part: lineModel(
+        { sku: it.sku, manufacturerModelNumber: it.manufacturerModelNumber, manufacturerPartNumber: it.manufacturerPartNumber },
+        part ? { manufacturerModelNumber: str(part.manufacturerModelNumber), manufacturerPartNumber: str(part.manufacturerPartNumber) } : undefined
+      ),
       description: vq
         ? `${vq.vendor} · ${vq.quoteNumber} — ${vq.description}`
         : it.allowance

@@ -45,7 +45,7 @@ async function catalogFor(skus: string[]): Promise<Map<string, BomCatalogPart>> 
   const out = new Map<string, BomCatalogPart>();
   if (!skus.length) return out;
   try {
-    for (const p of await getMany(skus)) out.set(p.sku, { mfr: p.mfr ?? null, manufacturerPartNumber: p.manufacturerPartNumber ?? null });
+    for (const p of await getMany(skus)) out.set(p.sku, { mfr: p.mfr ?? null, manufacturerPartNumber: p.manufacturerPartNumber ?? null, manufacturerModelNumber: p.manufacturerModelNumber ?? null });
   } catch (e) {
     console.warn("[package] catalog lookup failed", e instanceof Error ? e.message : e);
   }

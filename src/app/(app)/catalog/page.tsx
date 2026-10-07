@@ -4,7 +4,7 @@ import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { dateYear, money } from "@/lib/format";
-import { partSearchHaystack } from "@/lib/catalog-rename/sku";
+import { partSearchHaystack, staffPartLabel } from "@/lib/catalog-rename/sku";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel } from "./controls";
@@ -528,6 +528,17 @@ export default async function CatalogPage({
                     >
                       {p.sku}
                     </span>
+                    {/* #302: the model leads, the order # beside it — shown only when it adds to the SKU itself. */}
+                    {(() => {
+                      const lbl = staffPartLabel(p);
+                      const text = lbl.secondary ? `${lbl.primary} · ${lbl.secondary}` : lbl.primary;
+                      return text && text !== p.sku ? (
+                        <span style={{ fontSize: 11, color: "#8c919c", display: "block", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {lbl.primary}
+                          {lbl.secondary && <span style={{ color: "#aab0bb" }}> · {lbl.secondary}</span>}
+                        </span>
+                      ) : null;
+                    })()}
                   </span>
                   <span style={{ minWidth: 0 }}>
                     <span style={{

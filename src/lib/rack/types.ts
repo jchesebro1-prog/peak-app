@@ -41,7 +41,8 @@ export type RackFactKey = (typeof RACK_FACT_KEYS)[number];
  * `isInternalCategory`): it prices like any part but has no weight, power or
  * datasheet, so totals, the submittal and coverage leave it out.
  */
-export type RackPartInfo = RackPartFacts & { sku: string; desc: string; mfr?: string; found: boolean; internal?: boolean };
+/** `model` (#302): the part's Model #, else its MFR P/N — present only when the catalog row has one; read it through `rackModelOf`. */
+export type RackPartInfo = RackPartFacts & { sku: string; desc: string; mfr?: string; model?: string; found: boolean; internal?: boolean };
 export type RackPartLookup = (sku: string) => RackPartInfo | undefined;
 
 export type RackFace = "front" | "rear";

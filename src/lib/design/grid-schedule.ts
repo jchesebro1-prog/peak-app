@@ -8,6 +8,7 @@ import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { spaceOf, type SpaceLite } from "./grid-geometry";
 import { curtainDesc, placementQty, type GridCurtain } from "./grid-bom";
 import type { RiserView } from "./grid-riser-doc";
+import { partModel } from "@/lib/catalog-rename/sku";
 
 /**
  * The catalog rows a schedule can look up by id: parts placed or routed in the
@@ -27,16 +28,16 @@ export function catalogForSchedule<C extends { id: string }>(
   return catalog.filter((p) => need.has(p.id));
 }
 
-/** `code` overrides the printed Part cell for rows with no SKU (curtains). */
-export type ScheduleRow = { partId: string; code?: string; desc: string; qty: number };
+/** `code` overrides the printed Part cell for rows with no SKU (curtains). `model` (#302) is the part's Model # — what a printed schedule shows instead of the part id. */
+export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number };
 export type ScheduleSection = { key: string; name: string; rows: ScheduleRow[] };
-export type ScheduleWire = { id: string; partId: string; fromName: string; toName: string; lengthFt: number | null; unit: string };
+export type ScheduleWire = { id: string; partId: string; model?: string; fromName: string; toName: string; lengthFt: number | null; unit: string };
 export type ScheduleData = {
   sections: ScheduleSection[];
   wires: ScheduleWire[];
   /** Device UNITS (#211: a lot marker counts its qty), curtains excluded. */
   unitCount: number;
-  wireFeet: Array<{ partId: string; ft: number; unit: string; unmeasured: number }>;
+  wireFeet: Array<{ partId: string; model?: string; ft: number; unit: string; unmeasured: number }>;
 };
 
 /**
@@ -67,8 +68,13 @@ export function buildSchedule(input: {
   placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number }>;
   spaces: Array<SpaceLite & { name: string }>;
   descOf: (partId: string) => string | undefined;
+  /** #302: the printed Model # per part id; blank/absent = print the part id as before. */
+  modelOf?: (partId: string) => string | undefined;
   wires: ScheduleWire[];
 }): ScheduleData {
+  const modelOf = input.modelOf;
+  const modelFor = (pid: string) => (modelOf ? modelOf(pid) || undefined : undefined);
+  const wires = modelOf ? input.wires.map((w) => { const m = modelFor(w.partId); return m ? { ...w, model: m } : w; }) : input.wires;
   const bySpace = new Map<string | null, ScheduleRow[]>();
   for (const pl of input.placements) {
     const home = spaceOf(pl, input.spaces);
@@ -79,7 +85,10 @@ export function buildSchedule(input: {
     } else {
       const row = rows.find((r) => r.partId === pl.partId && !r.code);
       if (row) row.qty += placementQty(pl);
-      else rows.push({ partId: pl.partId, desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) });
+      else {
+        const m = modelFor(pl.partId);
+        rows.push({ partId: pl.partId, ...(m ? { model: m } : {}), desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) });
+      }
     }
     bySpace.set(key, rows);
   }
@@ -87,32 +96,37 @@ export function buildSchedule(input: {
     ...input.spaces.filter((s) => bySpace.has(s.id)).map((s) => ({ key: s.id, name: s.name, rows: bySpace.get(s.id)! })),
     ...(bySpace.has(null) ? [{ key: "un", name: "Unassigned", rows: bySpace.get(null)! }] : []),
   ];
-  const feet = new Map<string, { partId: string; ft: number; unit: string; unmeasured: number }>();
-  for (const w of input.wires) {
-    const f = feet.get(w.partId) || { partId: w.partId, ft: 0, unit: w.unit, unmeasured: 0 };
+  const feet = new Map<string, { partId: string; model?: string; ft: number; unit: string; unmeasured: number }>();
+  for (const w of wires) {
+    const f = feet.get(w.partId) || { partId: w.partId, ...(w.model ? { model: w.model } : {}), ft: 0, unit: w.unit, unmeasured: 0 };
     if (w.lengthFt === null) f.unmeasured += 1;
     else f.ft += w.lengthFt;
     feet.set(w.partId, f);
   }
   return {
     sections,
-    wires: input.wires,
+    wires,
     unitCount: input.placements.reduce((a, pl) => (pl.curtain ? a : a + placementQty(pl)), 0),
     wireFeet: [...feet.values()],
   };
+}
+
+/** #302: a part's printed Model # for a schedule — undefined when the part isn't known (the row then prints its part id). */
+export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: string } | undefined): string | undefined {
+  return p ? partModel({ sku: p.sku, manufacturerModelNumber: p.manufacturerModelNumber }) || undefined : undefined;
 }
 
 export type ScheduleHead = { kind: "section"; name: string; cont: boolean } | { kind: "wires"; cont: boolean };
 export type ScheduleItem =
   | ScheduleHead
   | { kind: "row"; qty: number; code: string; desc: string }
-  | { kind: "wire"; partId: string; run: string; length: string };
+  | { kind: "wire"; partId: string; model?: string; run: string; length: string };
 export type ScheduleGroup = { head: ScheduleHead; rows: ScheduleItem[] };
 
 export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
   const groups: ScheduleGroup[] = d.sections.map((s) => ({
     head: { kind: "section", name: s.name, cont: false },
-    rows: s.rows.map((r) => ({ kind: "row" as const, qty: r.qty, code: r.code || r.partId, desc: r.desc })),
+    rows: s.rows.map((r) => ({ kind: "row" as const, qty: r.qty, code: r.code || r.model || r.partId, desc: r.desc })),
   }));
   if (d.wires.length) {
     groups.push({
@@ -120,6 +134,7 @@ export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
       rows: d.wires.map((w) => ({
         kind: "wire" as const,
         partId: w.partId,
+        ...(w.model ? { model: w.model } : {}),
         run: `${w.fromName} → ${w.toName}`,
         length: w.lengthFt !== null ? formatMeasure(w.lengthFt, w.unit as MeasureUnit) : "unmeasured",
       })),

@@ -6,6 +6,7 @@ import { searchCatalog } from "./actions";
 import type { CatalogHit } from "./types";
 import type { SuggestPart } from "./estimator-data";
 import { fmt, marginColor, parseAddQty } from "./pricing";
+import { staffPartLabel } from "@/lib/catalog-rename/sku";
 
 /**
  * Estimator "Add part from catalog" picker — searches the real catalog (10k+
@@ -184,6 +185,12 @@ export default function CatalogPicker({
               </span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>
                 {h.sku}
+                {(() => {
+                  // #302: the model leads, the order # beside it (the SKU stays — it's the key).
+                  const l = staffPartLabel({ sku: h.sku, manufacturerModelNumber: h.model, manufacturerPartNumber: h.mpn });
+                  const text = l.secondary ? `${l.primary} · ${l.secondary}` : l.primary;
+                  return text && text !== h.sku ? <span style={{ color: "#8c919c" }}>{" · " + text}</span> : null;
+                })()}
                 {h.mfr ? " · " + h.mfr : ""}
                 {h.category ? " · " + h.category : ""}
               </span>

@@ -19,6 +19,7 @@ import { cleanCurtainRequest } from "@/lib/portal-cart-rules";
 import { priceCurtainInputs, priceFixture, priceSku, pricingContextFor, type PortalPricingContext } from "@/lib/portal-pricing";
 import type { SearchEntry } from "@/lib/portal-search";
 import { rateLimit } from "@/lib/rate-limit";
+import { partModel } from "@/lib/catalog-rename/sku";
 import { unitPriceFor } from "@/lib/portal-price-rules";
 
 /**
@@ -59,7 +60,11 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
         return p ? unitPriceFor(p, o) : null;
       },
       { images: engine?.imageIds ?? [], docs: docsFor(ix, docIds) },
-      portalFallback({ mfr: engine?.mfr, custom: isCustomCategory(engine?.category), por: !fixturePrice || fixturePrice.por }, portalMfrImage(ix))
+      portalFallback({ mfr: engine?.mfr, custom: isCustomCategory(engine?.category), por: !fixturePrice || fixturePrice.por }, portalMfrImage(ix)),
+      (sku) => {
+        const p = fixtureComponentPart(ix, sku);
+        return partModel({ sku, manufacturerModelNumber: p?.model, manufacturerPartNumber: p?.mpn });
+      }
     );
   }
 

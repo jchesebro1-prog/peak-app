@@ -26,7 +26,7 @@ import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import type { EquipmentMap, EquipPriceCtx } from "@/lib/design/equipment-map";
 import { symbolContext } from "@/lib/design/grid-icons";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
-import { buildSchedule, catalogForSchedule, scheduleWiresFromView, type ScheduleData } from "@/lib/design/grid-schedule";
+import { buildSchedule, catalogForSchedule, scheduleModelOf, scheduleWiresFromView, type ScheduleData } from "@/lib/design/grid-schedule";
 
 export async function scheduleForOption(
   project: GridProject,
@@ -61,6 +61,7 @@ export async function scheduleForOption(
     placements: slice.placements,
     spaces,
     descOf: (pid) => partById.get(pid)?.desc,
+    modelOf: (pid) => scheduleModelOf(partById.get(pid)),
     wires: scheduleWiresFromView(view),
   });
 }

@@ -40,7 +40,7 @@ export type CutSheetModel = {
   materials: Array<{ label: string; value: string }>;
   sizes: Array<{ size: string; qty: number }>;
   /** Submittal only. */
-  hardware: Array<{ sku: string; desc: string; qty: number; unit: string }>;
+  hardware: Array<{ sku: string; model: string; desc: string; qty: number; unit: string }>;
   /** Client only ("" for Submittal). */
   description: string;
 };
@@ -208,7 +208,7 @@ export function cutSheetModel(type: CurtainType, ctx: CutSheetContext): CutSheet
     mount: { label: mountLabel, detail: mountDetail(c.mount.key) },
     materials: submittal ? materialRows(type) : [],
     sizes: type.sizes.map((s) => ({ size: `${ftIn(s.widthFt)} W × ${ftIn(s.heightFt)} H`, qty: s.qty })),
-    hardware: submittal ? type.hardware.map(({ sku, desc, qty, unit }) => ({ sku, desc, qty, unit })) : [],
+    hardware: submittal ? type.hardware.map(({ sku, model, desc, qty, unit }) => ({ sku, model, desc, qty, unit })) : [],
     description: submittal ? "" : plainDescription(type),
   };
 }

@@ -49,7 +49,7 @@ function scheduleRow(it: ScheduleItem, key: number) {
   return (
     <tr key={key}>
       <td className="pk-dw-ellip">{it.length}</td>
-      <td className="pk-dw-mono pk-dw-ellip">{it.partId}</td>
+      <td className="pk-dw-mono pk-dw-ellip">{it.model || it.partId}</td>
       <td className="pk-dw-ellip">{it.run}</td>
     </tr>
   );
@@ -253,7 +253,7 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
         {last && !empty && (
           <div className="pk-dw-foot">
             {`${schedule.unitCount} unit${schedule.unitCount === 1 ? "" : "s"} across ${schedule.sections.length} area${schedule.sections.length === 1 ? "" : "s"}`}
-            {schedule.wireFeet.map((w) => ` · ${Math.ceil(w.ft)} ${w.unit} ${w.partId}${w.unmeasured ? ` (+${w.unmeasured} unmeasured)` : ""}`).join("")}
+            {schedule.wireFeet.map((w) => ` · ${Math.ceil(w.ft)} ${w.unit} ${w.model || w.partId}${w.unmeasured ? ` (+${w.unmeasured} unmeasured)` : ""}`).join("")}
           </div>
         )}
       </div>

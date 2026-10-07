@@ -6,7 +6,7 @@ import {
   type DocRef,
   type SlotCoverage,
 } from "./coverage";
-import { partSearchHaystack } from "@/lib/catalog-rename/sku";
+import { partModel, partSearchHaystack } from "@/lib/catalog-rename/sku";
 import type { QuotedPartStat } from "./quoted-parts";
 import { compareImages, DOC_SLOT_KINDS, isDrawingKind, type DocSlotKind, type DrawingKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
 
@@ -173,7 +173,7 @@ export function documentRow(stat: QuotedPartStat, part: RowPart, index: Coverage
   return {
     sku: part.sku,
     mfr: part.mfr || "",
-    model: part.manufacturerModelNumber || part.manufacturerPartNumber || "",
+    model: partModel(part), // #302: the one model rule (model → P/N → SKU tail → SKU)
     ...(part.formerSkus?.length ? { formerSkus: part.formerSkus } : {}),
     desc: part.desc,
     category: part.category || "",

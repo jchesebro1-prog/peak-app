@@ -3,6 +3,7 @@
  * stores and blobs): never import from a client component.
  */
 import { getBlobStream } from "@/lib/blob";
+import { partModel } from "@/lib/catalog-rename/sku";
 import { isFabricPart } from "@/lib/fabric-part";
 import { shrinkImage } from "@/lib/part-docs/shrink";
 import { fabricPartsByCategory, getMany, type CatalogPart } from "@/lib/stores/catalog";
@@ -75,7 +76,7 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
   const first = collectCurtainTypes(base);
   const skus = [...new Set(first.types.flatMap((t) => t.hardware.map((h) => h.sku)))];
   const result = skus.length
-    ? collectCurtainTypes({ ...base, partInfo: new Map((await getMany(skus)).map((p) => [p.sku, { desc: p.desc, unit: p.unit || "ea" }])) })
+    ? collectCurtainTypes({ ...base, partInfo: new Map((await getMany(skus)).map((p) => [p.sku, { desc: p.desc, unit: p.unit || "ea", model: partModel(p) }])) })
     : first;
 
   const doc = quoteDocumentDataFor(quote, customer, settings);

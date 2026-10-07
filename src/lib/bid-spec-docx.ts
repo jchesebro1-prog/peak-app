@@ -108,7 +108,7 @@ function rackTable(rack: RackSpecSection): Table {
     rows: [
       new TableRow({ tableHeader: true, children: RACK_COLS.map((h, i) => rackCell(h, RACK_COL_W[i], true)) }),
       ...rack.schedule.map(
-        (r) => new TableRow({ children: [r.ru, r.face, String(r.qty), r.mfr, r.sku, r.desc, wattsText(r.watts)].map((t, i) => rackCell(t, RACK_COL_W[i])) })
+        (r) => new TableRow({ children: [r.ru, r.face, String(r.qty), r.mfr, r.model || r.sku, r.desc, wattsText(r.watts)].map((t, i) => rackCell(t, RACK_COL_W[i])) })
       ),
     ],
   });

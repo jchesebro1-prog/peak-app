@@ -16,7 +16,7 @@ import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
 import { summarySearchText } from "@/lib/krisp/derive";
-import { partSearchHaystack, type SearchPartLike } from "@/lib/catalog-rename/sku";
+import { partSearchHaystack, staffPartLabel, type SearchPartLike } from "@/lib/catalog-rename/sku";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -47,6 +47,12 @@ function matches(q: string, ...fields: Array<unknown>): boolean {
 /** #223 — a doc as the estimate-number helpers read it. */
 type NumberedDoc = QuoteNumberFields & { id: string; name?: string | null; customer?: string | null };
 const asNumbered = (d: Doc): NumberedDoc => d as unknown as NumberedDoc;
+
+/** #302: "Jupiter 4 · 80-0043" — the model first, the order # beside it. */
+function staffLabelText(p: SearchPartLike): string {
+  const l = staffPartLabel(p);
+  return [l.primary, l.secondary].filter(Boolean).join(" · ");
+}
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -256,7 +262,7 @@ export async function GET(req: Request) {
       .map((d) => ({
         id: d.id,
         title: String(d.desc || d.sku),
-        sub: `${String(d.sku || "")} · ${String(d.category || "")}`,
+        sub: `${staffLabelText(d as unknown as SearchPartLike)} · ${String(d.category || "")}`,
         href: `/catalog`,
         letter: "P",
         color: "#5b616e",

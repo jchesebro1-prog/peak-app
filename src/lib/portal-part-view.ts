@@ -1,6 +1,7 @@
 import type { IndexedFixture } from "@/lib/portal-catalog-index";
 import { includedLines, type TileVM } from "@/lib/portal-catalog-view";
 import type { ImageFallback } from "@/lib/part-image-fallback";
+import { partModel } from "@/lib/catalog-rename/sku";
 
 /**
  * Portal part sidebar — pure, client-safe shapes + helpers (#245 Task 11,
@@ -27,7 +28,8 @@ export type PartDetailPart = {
   sku: string;
   title: string;
   mfr: string;
-  mpn: string;
+  /** #302: the part's Model # (partModel) — the only identity a customer sees; the order # never ships. */
+  model: string;
   unit: string;
   unitPrice: number | null;
   por: boolean;
@@ -39,7 +41,7 @@ export type PartDetailPart = {
   goesWith: TileVM[];
 };
 
-export type FixtureAddOnVM = { key: string; sku: string; label: string; unitPrice: number | null; por: boolean };
+export type FixtureAddOnVM = { key: string; sku: string; /** #302: the add-on part's Model # */ model: string; label: string; unitPrice: number | null; por: boolean };
 
 export type PartDetailFixture = {
   kind: "fixture";
@@ -51,7 +53,7 @@ export type PartDetailFixture = {
   unitPrice: number | null;
   por: boolean;
   unavailable: boolean;
-  fixed: Array<{ sku: string; label: string; qty: number }>;
+  fixed: Array<{ sku: string; model: string; label: string; qty: number }>;
   addOns: FixtureAddOnVM[];
   images: string[];
   fallback: ImageFallback | null;
@@ -122,6 +124,7 @@ type PartSource = {
   desc?: string;
   mfr?: string;
   mpn?: string;
+  model?: string;
   unit?: string;
   imageIds?: readonly string[];
   specText?: string | null;
@@ -137,7 +140,7 @@ export function toPartDetailVM(p: PartSource, price: Price, docs: readonly PartD
     sku: String(p.sku),
     title: String(p.desc || p.sku),
     mfr: String(p.mfr || ""),
-    mpn: String(p.mpn || ""),
+    model: partModel({ sku: String(p.sku), manufacturerModelNumber: p.model, manufacturerPartNumber: p.mpn }),
     unit: String(p.unit || "ea"),
     unitPrice: s.unitPrice,
     por: s.por,
@@ -161,7 +164,9 @@ export function toFixtureDetailVM(
   price: Price,
   addOnPrice: (sku: string) => Price,
   media: { images: readonly string[]; docs: readonly PartDocVM[] },
-  fallback: ImageFallback | null = null
+  fallback: ImageFallback | null = null,
+  /** #302: a component part's Model # (the server reads the index; default = the sku's tail). */
+  modelOf: (sku: string) => string = (sku) => partModel({ sku })
 ): PartDetailFixture {
   const s = sell(price);
   return {
@@ -174,12 +179,12 @@ export function toFixtureDetailVM(
     unitPrice: s.unitPrice,
     por: price ? s.por : false,
     unavailable: !price,
-    fixed: includedLines(fx.lines).map((l) => ({ sku: String(l.sku), label: String(l.label || l.sku), qty: Number(l.qty) || 1 })),
+    fixed: includedLines(fx.lines).map((l) => ({ sku: String(l.sku), model: modelOf(l.sku), label: String(l.label || l.sku), qty: Number(l.qty) || 1 })),
     addOns: fx.lines
       .filter((l) => !l.required)
       .map((l) => {
         const a = sell(addOnPrice(l.sku));
-        return { key: fixtureOptionKey(l), sku: String(l.sku), label: String(l.label || l.sku), unitPrice: a.unitPrice, por: a.por };
+        return { key: fixtureOptionKey(l), sku: String(l.sku), model: modelOf(l.sku), label: String(l.label || l.sku), unitPrice: a.unitPrice, por: a.por };
       }),
     images: [...media.images].map(String),
     fallback: media.images.length ? null : fallback,

@@ -11,7 +11,7 @@ import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { legendRows, symbolContext, type SymbolEntry } from "@/lib/design/grid-icons";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
-import { buildSchedule, paginateSchedule, scheduleGroups, scheduleWiresFromView } from "@/lib/design/grid-schedule";
+import { buildSchedule, paginateSchedule, scheduleGroups, scheduleModelOf, scheduleWiresFromView } from "@/lib/design/grid-schedule";
 import { SHEET_SIZES, buildSheetList, drawingArea, planSheetGroups, resolveGeneralNotes, resolveSheetSize, revisionRows } from "@/lib/design/grid-drawing-set";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
@@ -112,6 +112,7 @@ export async function loadDrawingSetData(
     placements: slice.placements,
     spaces,
     descOf: (pid) => partById.get(pid)?.desc,
+    modelOf: (pid) => scheduleModelOf(partById.get(pid)),
     wires: scheduleWiresFromView(view),
   });
   const schedulePages = paginateSchedule(scheduleGroups(schedule), SCHEDULE_ROWS_PER_COLUMN, 2);

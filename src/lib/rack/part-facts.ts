@@ -4,6 +4,7 @@
  * Absent = unknown, never zero; 0 means "measured, none".
  */
 import { isInternalCategory } from "@/lib/portal-visibility";
+import { partModel } from "@/lib/catalog-rename/sku";
 import {
   AIRFLOWS,
   MOUNT_FACES,
@@ -145,15 +146,17 @@ export function rackFactsOrUndefined(part: Partial<RackPartFacts> | null | undef
  * `isInternalCategory`) comes back `internal: true`.
  */
 export function rackPartInfo(
-  part: ({ sku: string; desc: string; mfr?: string; category?: string | null } & Partial<RackPartFacts>) | undefined,
+  part: ({ sku: string; desc: string; mfr?: string; category?: string | null; manufacturerModelNumber?: string; manufacturerPartNumber?: string } & Partial<RackPartFacts>) | undefined,
   sku: string
 ): RackPartInfo {
   if (!part) return { sku, desc: "", found: false };
+  const hasModel = !!(part.manufacturerModelNumber?.trim() || part.manufacturerPartNumber?.trim());
   return {
     ...rackFactsOf(part),
     sku: part.sku || sku,
     desc: part.desc,
     ...(part.mfr ? { mfr: part.mfr } : {}),
+    ...(hasModel ? { model: partModel({ sku: part.sku || sku, manufacturerModelNumber: part.manufacturerModelNumber, manufacturerPartNumber: part.manufacturerPartNumber }) } : {}),
     found: true,
     ...(isInternalCategory(part.category) ? { internal: true } : {}),
   };
@@ -173,4 +176,9 @@ export function rackDataCoverage(
     for (const f of COVERAGE_FIELDS) if (!info || info[f] === undefined) missing[f].push(sku);
   }
   return { total: distinct.length, missing };
+}
+
+/** #302: what a rack sheet prints for a part — its Model # (else MFR P/N, else the SKU's tail), never the order # when a model exists. */
+export function rackModelOf(info: Pick<RackPartInfo, "model"> | undefined, sku: string): string {
+  return info?.model || partModel({ sku });
 }
