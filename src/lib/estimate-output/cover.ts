@@ -16,9 +16,8 @@ export type CoverOffice = { street?: string; city?: string; state?: string; zip?
 
 export const COVER_DEFAULT_TITLE = "Estimate Summary";
 export const COVER_LINK_LEAD = "View the full estimate online:";
-/** Estimator Phase 2b — the cover / package page Alternates list. */
-export const ALTERNATES_TITLE = "Alternates";
-export const ALTERNATES_NOTE = "Not included in the total above.";
+/** Estimator Phase 2b — the cover / package page Alternates list copy (shared, alternates-copy.ts). */
+export { ALTERNATES_TITLE, ALTERNATES_NOTE } from "./alternates-copy";
 
 
 export type CoverDocumentProps = {

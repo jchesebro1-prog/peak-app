@@ -51589,9 +51589,9 @@ import type { Quote as E301bsQuote, QuoteRevision as E301bsRev } from "@/lib/sto
 
   // ---- purity ----
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/quote-pdf\/state"|\.\/view"|@\/lib\/estimate-output\/opens")/m.test(rd("src/lib/quote-share/package-view.ts")) &&
-     !/^import (?!type)/m.test(rd("src/lib/estimate-output/opens.ts")),
-    "#301 purity: package-view.ts value-imports only quote-pdf/state, ./view and opens; opens.ts imports nothing");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/quote-pdf\/state"|\.\/view"|@\/lib\/estimate-output\/opens"|@\/lib\/estimate-output\/alternates-copy")/m.test(rd("src/lib/quote-share/package-view.ts")) &&
+     !/^import (?!type)/m.test(rd("src/lib/estimate-output/opens.ts")) && !/^import /m.test(rd("src/lib/estimate-output/alternates-copy.ts")),
+    "#301 purity: package-view.ts value-imports only quote-pdf/state, ./view, opens and the import-free alternates-copy; opens.ts imports nothing");
 }
 
 /* ======================================================================
@@ -54819,6 +54819,7 @@ import { qd293Props as p2bdProps, qd293Sections as p2bdSections, qdP2bNoAltCases
 
 /* #P2b outputs — alternates on the cover PDF, the client package page and the client's scope picker. */
 import { alternateScopes as p2boAltScopes, outputScopes as p2boScopes, addOptions as p2boOptions, coverTotals as p2boTotals } from "@/lib/estimate-output/scopes";
+import { ALTERNATES_NOTE as p2boAltNoteSrc, ALTERNATES_TITLE as p2boAltTitleSrc } from "@/lib/estimate-output/alternates-copy";
 import { coverDocumentPropsFor as p2boCover, ALTERNATES_TITLE as p2boAltTitle, ALTERNATES_NOTE as p2boAltNote } from "@/lib/estimate-output/cover";
 import CoverDocumentP2bo from "@/components/estimate-output/cover-document";
 import { packageViewModel as p2boModel } from "@/lib/estimate-output/package-model";
@@ -54913,7 +54914,7 @@ import { renderToStaticMarkup as p2boRender } from "react-dom/server";
     "#P2b outputs: the package model's Alternates mirror the cover's; scopes and totals stay the In-total ones; no key without alternates");
   const ph = p2boRender(p2boEl(PackageViewP2bo, { model: pm }));
   const iCard = ph.indexOf(`<h2>${p2boPkgCopy.alternates}</h2>`);
-  ok(iCard > ph.indexOf("pkg-row pkg-total") && ph.slice(iCard).includes(p2boPkgCopy.alternatesNote) && p2boPkgCopy.alternatesNote === p2boAltNote && p2boPkgCopy.alternates === p2boAltTitle &&
+  ok(iCard > ph.indexOf("pkg-row pkg-total") && ph.slice(iCard).includes(p2boPkgCopy.alternatesNote) && p2boPkgCopy.alternatesNote === p2boAltNote && p2boPkgCopy.alternates === p2boAltTitle && p2boAltNote === p2boAltNoteSrc && p2boAltTitle === p2boAltTitleSrc &&
      ["Upgrades", "$800.00", "LED Upgrade", "Motorized battens"].every((x) => ph.slice(iCard).includes(x)) && !ph.slice(0, iCard).includes("LED Upgrade") &&
      !p2boRender(p2boEl(PackageViewP2bo, { model: pml })).includes(`<h2>${p2boPkgCopy.alternates}</h2>`),
     "#P2b outputs: the package page shows an Alternates card after the totals (same copy as the cover), and none without alternates; alternates never appear as scopes");

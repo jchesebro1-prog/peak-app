@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore, useTransition, type CSSProperties, type FormEvent } from "react";
+import { useId, useState, useSyncExternalStore, useTransition, type CSSProperties, type FormEvent } from "react";
 import { fmt } from "@/app/(app)/estimator/pricing";
 import { CLIENT_ACTION_COPY, defaultSelectedScopeIds, selectedTotal, type ClientActionResult, type ResponseScope } from "@/lib/estimate-output/responses";
 import { submitScopeSelection } from "./actions";
@@ -22,6 +22,7 @@ const btn: CSSProperties = { font: "inherit", fontWeight: 700, fontSize: 14, col
 
 export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; token: string; scopes: ResponseScope[]; creditNote: string | null }) {
   const hydrated = useSyncExternalStore(subscribeNothing, () => true, () => false);
+  const altHeadId = useId();
   const [picked, setPicked] = useState<string[]>(() => defaultSelectedScopeIds(scopes));
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
@@ -75,8 +76,8 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
       </p>
       {scopes.filter((s) => s.alternate !== true).map(scopeRow)}
       {alternates.length > 0 && (
-        <div role="group" aria-label={CLIENT_ACTION_COPY.alternates} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <strong style={{ fontSize: 14 }}>{CLIENT_ACTION_COPY.alternates}</strong>
+        <div role="group" aria-labelledby={altHeadId} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <strong id={altHeadId} style={{ fontSize: 14 }}>{CLIENT_ACTION_COPY.alternates}</strong>
           {alternates.map(scopeRow)}
         </div>
       )}
