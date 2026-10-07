@@ -34664,7 +34664,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
     "#254 wiring: applyTierStamp re-prices the latest sections, and no re-priced line means no new banner");
   ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
-  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);\s*setSectionsState\(v\);/.test(t254Client)
+  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,120}?setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\);/.test(t254Client)
     && (t254Client.match(/setSectionsState\(/g) || []).length === 5,
     "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo and the site-visit goals pre-fill write the raw state");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
@@ -54135,7 +54135,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
   ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
-  ok(/\.\.\.withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\)\];/.test(actionsSrc) && /groups: existingSpec\?\.groups \?\? \[\]/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/\.\.\.withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
   ok(/spec: \{ sections: withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\), mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
@@ -54152,4 +54152,78 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(pdfDocKey(kIn([kSec])) === pdfDocKey(kIn([{ ...kSec, built: true }])), "#P2a persistence: pdfDocKey ignores built");
   ok(pdfDocKey(kIn([kSec], [{ id: "g-a", name: "One", alternate: false }])) !== pdfDocKey(kIn([kSec], [{ id: "g-a", name: "Two", alternate: false }])), "#P2a persistence: pdfDocKey changes with a group rename");
   ok(pdfDocKey(kIn([kSec])) === pdfDocKey(kIn([kSec], [])), "#P2a persistence: pdfDocKey treats missing groups as []");
+}
+
+/* #P2a hook — groups, moves, built and remembered collapse in useEstimatorState. */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const actionsSrc = rd("src/app/(app)/estimator/actions.ts");
+  const between = (a: string, b: string) => {
+    const i = hook.indexOf(a);
+    const j = hook.indexOf(b, i + 1);
+    return i >= 0 && j > i ? hook.slice(i, j) : "";
+  };
+  ok(hook.includes("const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? [])"), "#P2a hook: groups state seeds from initial.groups");
+  ok(hook.includes("const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups])"), "#P2a hook: blocks = groupBlocks(sections, groups, { includeEmpty: true })");
+  ok(/setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\)/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 5,
+    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (still 5 raw writes)");
+  const um = between("function unmarkUserEdits(", "const COLLAPSED_KEY_PREFIX");
+  ok(um.includes("unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next))") && um.includes("withoutBuilt(s)"),
+    "#P2a hook: un-marking ignores the Rewards credit line (a re-pin after a reorder is not an edit)");
+  const reorder = between("const reorderSections = ", "const addGroupAction = ");
+  ok(reorder.includes("if (list === sections) return;") && reorder.includes("setSections(withRewardCredit(list, rewardCreditOf(sections), nextId()))"),
+    "#P2a hook: every reorder re-pins the Rewards credit like deleteSystem; a no-op writes nothing");
+  const ops = between("const addGroupAction = ", "const isBuilt = ");
+  ok(ops.includes("addGroup(groups, name, id)") && ops.includes("renameGroup(groups, id, name)") && ops.includes("moveGroupBy(groups, id, delta)") && ops.includes("removeGroup(sections, groups, id)")
+    && ops.includes("reorderSections(normalizeSystemOrder(sections, next))") && ops.includes("reorderSections(res.sections)")
+    && ops.includes("reorderSections(moveSystemTo(sections, groups, id, target))") && ops.includes("reorderSections(moveSystemBy(sections, groups, id, delta))")
+    && ops.includes("reorderSections(moveSystemTo(sections, groups, secId, { groupId, beforeId: null }))"),
+    "#P2a hook: group and move actions route through the pure rules, then reorderSections");
+  ok(/const addGroupAction = \(name\?: string\): string \| null =>/.test(hook) && ops.includes("if (next === groups) return null;") && ops.includes("return id;"), "#P2a hook: addGroupAction returns the new id (null at the cap)");
+  const mb = between("const markBuilt = ", "const isBuilt = ");
+  ok(mb.includes("setSections((ss) => ss.map((s) => (s.id === secId && !s.built ? { ...s, built: true as const } : s)))") && mb.includes("setExpandedRemembered({ ...expanded, [secId]: false })") && !mb.includes("setSectionsState"),
+    "#P2a hook: markBuilt sets built through setSections and collapses (remembered)");
+  ok(hook.includes("const isBuilt = (secId: string) => sections.some((s) => s.id === secId && s.built === true);"), "#P2a hook: isBuilt reads the live sections");
+  const save = between("const saveNow = async (): Promise<number | false> =>", "const changeStatus = (v: QuoteStatus)");
+  ok(/mobs,\s*\/\/ Phase 2a[^\n]*\n\s*groups,\s*vendorQuotes,/.test(save) && (save.match(/unsaved: false/g) || []).length === 1, "#P2a hook: the save payload sends groups");
+  const doc = between("const docInput = useMemo<PdfDocKeyInput>(", "const docKey = ");
+  ok(/sections,\s*groups,\s*vendorQuotes,/.test(doc) && doc.includes("sections, groups, vendorQuotes, pdfOpts]"), "#P2a hook: docInput passes groups (and depends on them)");
+  ok(hook.includes('const COLLAPSED_KEY_PREFIX = "quartzite.estimator.collapsed.v1:";'), "#P2a hook: collapse key is quartzite.estimator.collapsed.v1:<quoteId>");
+  const rd1 = between("const collapseReadFor = useRef<string | null>(null);", "const setExpandedRemembered = ");
+  ok(rd1.includes("if (!loadedId || collapseReadFor.current === loadedId) return;") && rd1.includes("window.localStorage.getItem(key)") && rd1.includes("} catch {") && rd1.includes("}, [loadedId]);")
+    && rd1.includes("window.localStorage.setItem(key, JSON.stringify(shut))"),
+    "#P2a hook: collapse is read after mount once per quote id (try/catch), and a new estimate writes its collapses when it gains an id");
+  const wr = between("const setExpandedRemembered = ", "/* The add-part row is exclusive");
+  ok(wr.includes("if (!loadedId) return;") && wr.includes("window.localStorage.setItem(") && wr.includes("COLLAPSED_KEY_PREFIX + loadedId") && wr.includes("} catch {"), "#P2a hook: every collapse change is written for a saved quote only, inside try/catch");
+  ok(hook.includes("const toggleExpand = (id: string) => setExpandedRemembered({ ...expanded, [id]: !isExpanded(id) });") && hook.includes("const isExpanded = (id: string) => expanded[id] !== false;"), "#P2a hook: toggleExpand / isExpanded keep their names and remember the collapse");
+  const copy = between("const copySystem = (secId: string, target: CopySystemTarget)", "const searchQuotes = ");
+  ok(copy.includes("...(sec.groupId ? { groupId: sec.groupId } : {})") && copy.includes("withoutBuilt({ ...res.section") && copy.includes("], groups);"), "#P2a hook: Copy here joins the source's group, never built, normalised");
+  const add = between("const addSystem = () => {", "/* ---------------- Phase 2a: groups, moves, built");
+  ok(add.includes("sections.find((s) => s.id === activeId)?.groupId") && add.includes("...(groupId ? { groupId } : {})") && add.includes("], groups));"), "#P2a hook: + Add system joins the active system's group, normalised");
+  const place = between("const placeLibrarySystem = ", "const pushItems = ");
+  ok(place.includes("sections.find((s) => s.id === activeId)?.groupId") && place.includes("groupId ? { ...loaded, groupId } : loaded") && place.includes("], groups);"), "#P2a hook: Load system joins the active system's group, normalised");
+  const ret = hook.slice(hook.lastIndexOf("  return {\n    ...props,"));
+  ok(["groups", "blocks", "addGroupAction", "renameGroupAction", "moveGroupByAction", "removeGroupAction", "moveSystemToAction", "moveSystemByAction", "setSystemGroup", "markBuilt", "isBuilt", "isExpanded", "toggleExpand"].every((n) => new RegExp(`\\n    ${n},\\n`).test(ret))
+    && /\n    next,\n  \};\n\}/.test(ret), "#P2a hook: the state returns every group/built name, with next still last");
+  ok(/const existingGroups = sanitizeGroups\(existingSpec\?\.groups\);/.test(actionsSrc) && /spec: \{ sections: normalizeSystemOrder\(mergedSections, existingGroups\), mobs: existingSpec\?\.mobs \|\| \[\], groups: existingGroups \}/.test(actionsSrc),
+    "#P2a hook: move-to-existing normalises the merged sections against the same sanitised groups it writes");
+}
+
+/* #P2a readiness — built progress on the Build badge. */
+{
+  type Sec = import("@/app/(app)/estimator/types").SpecSection;
+  const line = (o: Record<string, unknown> = {}) => ({ id: 1, sku: "A", desc: "Part", qty: 1, unit: "ea", cost: 50, price: 100, ...o });
+  const sec = (o: Record<string, unknown> = {}): Sec => ({ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [line()], ...o }) as unknown as Sec;
+  const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
+  const none = e304Ready({ ...base, sections: [sec(), sec({ id: "s2" }), sec({ id: "s3" })] }).build;
+  ok(none.state === "ok" && none.label === "✓ 3 systems priced", "#P2a readiness: none built → the #305 label, unchanged");
+  const some = e304Ready({ ...base, sections: [sec({ built: true }), sec({ id: "s2" }), sec({ id: "s3", built: true })] }).build;
+  ok(some.state === "ok" && some.label === "✓ 3 systems priced · 2 of 3 built", "#P2a readiness: some built → ✓ N systems priced · M of N built");
+  const all = e304Ready({ ...base, sections: [sec({ built: true }), sec({ id: "s2", built: true })] }).build;
+  ok(all.state === "ok" && all.label === "✓ 2 of 2 built", "#P2a readiness: all built → ✓ N of N built");
+  const one = e304Ready({ ...base, sections: [sec({ built: true })] }).build;
+  ok(one.label === "✓ 1 of 1 built", "#P2a readiness: a single built system → ✓ 1 of 1 built");
+  const gapsBuilt = e304Ready({ ...base, sections: [sec({ built: true }), sec({ id: "s2", items: [line({ price: 0 })] })] }).build;
+  ok(gapsBuilt.state === "gaps" && gapsBuilt.label === "1 unpriced line" && gapsBuilt.count === 1, "#P2a readiness: gaps win over built progress (label unchanged)");
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { fillClientGoals } from "@/lib/estimate-output/goals";
+import { addGroup, groupBlocks, moveGroupBy, moveSystemBy, moveSystemTo, newGroupId, normalizeSystemOrder, removeGroup, renameGroup, unmarkEdited, withoutBuilt, type SystemGroup } from "@/lib/estimate-groups/groups";
 import type { Dispatch, SetStateAction } from "react";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
@@ -53,6 +54,24 @@ const freshSections = (freightPct: number): SpecSection[] => [
   // #267: a new system's auto price rounds up to the next $25.
   { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
 ];
+
+/** Phase 2a — unmarkEdited, blind to the Rewards credit line. The credit
+ *  re-pins to the last system after every reorder; that move is not an edit
+ *  to either system, so it must not clear their `built`. */
+function unmarkUserEdits(prev: SpecSection[], next: SpecSection[]): SpecSection[] {
+  if (!next.some((s) => s.built)) return next;
+  const kept = unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next));
+  let changed = false;
+  const out = next.map((s, i) => {
+    if (!s.built || kept[i].built) return s;
+    changed = true;
+    return withoutBuilt(s);
+  });
+  return changed ? out : next;
+}
+
+/** Phase 2a — which systems this person has collapsed on this quote (JSON array of section ids). */
+const COLLAPSED_KEY_PREFIX = "quartzite.estimator.collapsed.v1:";
 
 /* ---------------- fresh drafts (prototype defaults) ---------------- */
 
@@ -226,7 +245,8 @@ export function useEstimatorState(props: EstimatorProps) {
    *  setSectionsState directly. */
   const setSections: Dispatch<SetStateAction<SpecSection[]>> = (v) => {
     setTierReprice(null);
-    setSectionsState(v);
+    // Phase 2a: any edit to a built system other than `built` itself un-marks it.
+    setSectionsState((prev) => unmarkUserEdits(prev, typeof v === "function" ? v(prev) : v));
   };
   /** The latest committed sections, read when a tier stamp lands (#254). */
   const sectionsRef = useRef(sections);
@@ -236,6 +256,10 @@ export function useEstimatorState(props: EstimatorProps) {
   const nidRef = useRef<number | null>(null);
   if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
   const nextId = () => ++(nidRef.current as number);
+  /** Phase 2a — the quote's named system groups (spec.groups). Sections stay
+   *  stored ungrouped-first, then each group in this order (normalizeSystemOrder). */
+  const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? []);
+  const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups]);
 
   const defaultFabric = fabrics.some((f) => f.sku === "RB-MV-MN")
     ? "RB-MV-MN"
@@ -390,6 +414,48 @@ export function useEstimatorState(props: EstimatorProps) {
     () => (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.id ?? null
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  /** Phase 2a — collapse is remembered per person per SAVED quote in
+   *  localStorage. Read once after mount (hydration-safe, like sideOpen) and
+   *  again when a brand-new estimate gains its id — that first id writes the
+   *  collapses made before the first Save. Every access is try/catch'd. */
+  const expandedRef = useRef(expanded);
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
+  const collapseReadFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!loadedId || collapseReadFor.current === loadedId) return;
+    collapseReadFor.current = loadedId;
+    const key = COLLAPSED_KEY_PREFIX + loadedId;
+    try {
+      const raw = window.localStorage.getItem(key);
+      const ids: unknown = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(ids)) {
+        const shut = ids.filter((x): x is string => typeof x === "string");
+        if (shut.length) setExpanded((e) => ({ ...e, ...Object.fromEntries(shut.map((id) => [id, false])) }));
+      } else {
+        const cur = expandedRef.current;
+        const shut = Object.keys(cur).filter((id) => cur[id] === false);
+        if (shut.length) window.localStorage.setItem(key, JSON.stringify(shut));
+      }
+    } catch {
+      /* storage unavailable or a bad value — collapse just isn't remembered */
+    }
+  }, [loadedId]);
+  /** Every collapse change goes through here, so it is written for a saved quote. */
+  const setExpandedRemembered = (next: Record<string, boolean>) => {
+    setExpanded(next);
+    if (!loadedId) return;
+    try {
+      const live = new Set(sections.map((s) => s.id));
+      window.localStorage.setItem(
+        COLLAPSED_KEY_PREFIX + loadedId,
+        JSON.stringify(Object.keys(next).filter((id) => next[id] === false && live.has(id)))
+      );
+    } catch {
+      /* ignore */
+    }
+  };
   /* The add-part row is exclusive: at most ONE input method is open across the
      whole estimate, named by this one descriptor. Opening a different method
      closes and discards the last one (see openInputMethod). Five per-method
@@ -688,10 +754,11 @@ export function useEstimatorState(props: EstimatorProps) {
       assumptions,
       paymentTerms,
       sections,
+      groups,
       vendorQuotes,
       pdfOptions: pdfOpts,
     }),
-    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, sections, vendorQuotes, pdfOpts]
+    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, sections, groups, vendorQuotes, pdfOpts]
   );
   const docKey = useMemo(() => pdfDocKey(docInput), [docInput]);
   // #267: when the load-time $25 stamp moved a system's price, the saved PDF
@@ -980,6 +1047,8 @@ export function useEstimatorState(props: EstimatorProps) {
           baseStatus,
           sections,
           mobs,
+          // Phase 2a: the named system groups ride every Save.
+          groups,
           vendorQuotes,
           pdfOptions: pdfOpts,
           // #301 (R14): the cover fields ride every Save.
@@ -1252,7 +1321,7 @@ export function useEstimatorState(props: EstimatorProps) {
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
-  const toggleExpand = (id: string) => setExpanded((e) => ({ ...e, [id]: !isExpanded(id) }));
+  const toggleExpand = (id: string) => setExpandedRemembered({ ...expanded, [id]: !isExpanded(id) });
 
   const patchItem = (id: number, f: (it: SpecItem) => SpecItem) =>
     setSections((ss) =>
@@ -1455,13 +1524,14 @@ export function useEstimatorState(props: EstimatorProps) {
           idMap.set(it.id, nid);
           return { ...it, id: nid };
         });
+        // Phase 2a: a copy within this estimate joins the source's group (never built).
         const copy: SpecSection = withKeyProducts(
-          { ...res.section, id: newId, name: sec.name + " (copy)", items: copyItems },
+          withoutBuilt({ ...res.section, id: newId, name: sec.name + " (copy)", items: copyItems, ...(sec.groupId ? { groupId: sec.groupId } : {}) }),
           remapKeyProducts(res.section.keyProducts, idMap)
         );
         setSections((ss) => {
           const at = ss.findIndex((s) => s.id === secId);
-          return at < 0 ? [...ss, copy] : [...ss.slice(0, at + 1), copy, ...ss.slice(at + 1)];
+          return normalizeSystemOrder(at < 0 ? [...ss, copy] : [...ss.slice(0, at + 1), copy, ...ss.slice(at + 1)], groups);
         });
         requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(newId)));
         setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Copied", detail });
@@ -1490,24 +1560,75 @@ export function useEstimatorState(props: EstimatorProps) {
   };
   const addSystem = () => {
     const id = "sys" + nextId();
-    setSections((ss) => [
+    // Phase 2a: a new system joins the active system's group ("+ Add system" under a group stays in it).
+    const groupId = sections.find((s) => s.id === activeId)?.groupId;
+    setSections((ss) => normalizeSystemOrder([
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
-    ]);
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [], ...(groupId ? { groupId } : {}) },
+    ], groups));
     setActiveId(id);
     openInputMethod("catalog", id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(id)));
   };
+  /* ---------------- Phase 2a: groups, moves, built ---------------- */
+  /** Every reorder writes through here: the Rewards credit re-pins to the new
+   *  last system, exactly like deleteSystem. A no-op (same reference) writes nothing. */
+  const reorderSections = (list: SpecSection[]) => {
+    if (list === sections) return;
+    setSections(withRewardCredit(list, rewardCreditOf(sections), nextId()));
+  };
+  /** + Add group — returns the new group's id, or null at the 20-group cap. */
+  const addGroupAction = (name?: string): string | null => {
+    const id = newGroupId();
+    const next = addGroup(groups, name, id);
+    if (next === groups) return null;
+    setGroups(next);
+    return id;
+  };
+  const renameGroupAction = (id: string, name: string) => {
+    const next = renameGroup(groups, id, name);
+    if (next !== groups) setGroups(next);
+  };
+  const moveGroupByAction = (id: string, delta: -1 | 1) => {
+    const next = moveGroupBy(groups, id, delta);
+    if (next === groups) return;
+    setGroups(next);
+    reorderSections(normalizeSystemOrder(sections, next));
+  };
+  /** Removing a group keeps its systems — they become ungrouped. */
+  const removeGroupAction = (id: string) => {
+    const res = removeGroup(sections, groups, id);
+    if (res.groups === groups) return;
+    setGroups(res.groups);
+    reorderSections(res.sections);
+  };
+  const moveSystemToAction = (id: string, target: { groupId: string | null; beforeId: string | null }) =>
+    reorderSections(moveSystemTo(sections, groups, id, target));
+  const moveSystemByAction = (id: string, delta: -1 | 1) => reorderSections(moveSystemBy(sections, groups, id, delta));
+  /** The card's Group select: lands last in the chosen group (null = Ungrouped). */
+  const setSystemGroup = (secId: string, groupId: string | null) =>
+    reorderSections(moveSystemTo(sections, groups, secId, { groupId, beforeId: null }));
+  /** ✓ Mark built & collapse. Written through setSections: unmarkEdited keeps
+   *  `built` when it is the only change, by construction. */
+  const markBuilt = (secId: string) => {
+    setSections((ss) => ss.map((s) => (s.id === secId && !s.built ? { ...s, built: true as const } : s)));
+    setExpandedRemembered({ ...expanded, [secId]: false });
+  };
+  const isBuilt = (secId: string) => sections.some((s) => s.id === secId && s.built === true);
+
   /** #293 slice 2: Load system — the server re-read and re-priced the library
    *  system (today's catalog, this estimate's tier, vendor-quote lines left
    *  out). Here it gets fresh ids (blocks follow), lands after the active
    *  system like Copy here, and is selected; Save persists it. */
   const placeLibrarySystem = (res: LoadedLibrarySystem) => {
     const newId = "sys" + nextId();
-    const placed = placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct });
+    const loaded = placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct });
+    // Phase 2a: it joins the active system's group (the library copy carries none, never built).
+    const groupId = sections.find((s) => s.id === activeId)?.groupId;
+    const placed: SpecSection = groupId ? { ...loaded, groupId } : loaded;
     setSections((ss) => {
       const at = ss.findIndex((s) => s.id === activeId);
-      return at < 0 ? [...ss, placed] : [...ss.slice(0, at + 1), placed, ...ss.slice(at + 1)];
+      return normalizeSystemOrder(at < 0 ? [...ss, placed] : [...ss.slice(0, at + 1), placed, ...ss.slice(at + 1)], groups);
     });
     setLibraryOpen(false);
     requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(newId)));
@@ -2456,6 +2577,7 @@ export function useEstimatorState(props: EstimatorProps) {
     addCurtain,
     addCustomPart,
     addFixture,
+    addGroupAction,
     addLabor,
     addMob,
     addPart,
@@ -2479,6 +2601,7 @@ export function useEstimatorState(props: EstimatorProps) {
     assumptionLibrary,
     assumptions,
     blobUploads,
+    blocks,
     canApplyCredit,
     canWriteNarrativeLibrary,
     cardRefs,
@@ -2496,6 +2619,12 @@ export function useEstimatorState(props: EstimatorProps) {
     commitVendorQuote,
     contactOptions,
     copySystem,
+    groups,
+    isBuilt,
+    markBuilt,
+    moveGroupByAction,
+    moveSystemByAction,
+    moveSystemToAction,
     openCutSheets,
     coverSummary,
     creditInfo,
@@ -2597,9 +2726,11 @@ export function useEstimatorState(props: EstimatorProps) {
     quoteTasks,
     rate,
     removeCredit,
+    removeGroupAction,
     removeItem,
     removeMob,
     removeVendorLine,
+    renameGroupAction,
     renameSystem,
     resetAutoHrs,
     resetSystemSell,
@@ -2651,6 +2782,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setPdfTerms,
     setQdOpen,
     setQty,
+    setSystemGroup,
     setSystemMargin,
     setSystemPresentation,
     setSystemRoom,

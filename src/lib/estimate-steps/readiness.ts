@@ -36,7 +36,14 @@ function buildBadge(sections: SpecSection[]): StepBadge {
     unpriced += lines.filter((it) => !(Number(it.price) > 0)).length;
   }
   const count = empty + unpriced;
-  if (count === 0) return { state: "ok", label: `✓ ${plural(sections.length, "system", "systems")} priced` };
+  if (count === 0) {
+    // Phase 2a: built progress rides the priced badge once any system is marked built.
+    const n = sections.length;
+    const built = sections.filter((s) => s.built).length;
+    if (built === n) return { state: "ok", label: `✓ ${n} of ${n} built` };
+    if (built > 0) return { state: "ok", label: `✓ ${plural(n, "system", "systems")} priced · ${built} of ${n} built` };
+    return { state: "ok", label: `✓ ${plural(n, "system", "systems")} priced` };
+  }
   const parts = [empty ? plural(empty, "empty system", "empty systems") : "", unpriced ? plural(unpriced, "unpriced line", "unpriced lines") : ""].filter(Boolean);
   return { state: "gaps", count, label: parts.join(" · ") };
 }

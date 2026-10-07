@@ -818,8 +818,11 @@ async function placeSystemInEstimate(
       | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[] }
       | null
       | undefined;
-    // #282 phase 2: the target's own Rewards credit stays on ITS last system.
-    const appended = [...(existingSpec?.sections || []), ...withoutRewardCredit([withoutGroupMeta(placed)])];
+    // Phase 2a: the target keeps its own (sanitised) groups; the moved system lands ungrouped.
+    const existingGroups = sanitizeGroups(existingSpec?.groups);
+    // #282 phase 2: the target's own Rewards credit stays on ITS last system —
+    // re-pinned after the order is normalised, so it really is the last one.
+    const appended = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([withoutGroupMeta(placed)])], existingGroups);
     const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
@@ -827,7 +830,7 @@ async function placeSystemInEstimate(
       ? await storeVendorQuotes(target.quoteId, placedVq)
       : [];
     const updated = await update(target.quoteId, {
-      spec: { sections: mergedSections, mobs: existingSpec?.mobs || [], groups: existingSpec?.groups ?? [] },
+      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups },
       value: t.grand,
       margin: t.margin,
       ...(carried.length
