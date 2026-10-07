@@ -99,6 +99,8 @@ export function moveSystemTo<S extends Grouped>(
   const moving = sections.find((s) => s.id === id);
   if (!moving) return sections;
   if (target.groupId !== null && !groups.some((g) => g.id === target.groupId)) return sections;
+  // Dropping onto itself is a no-op: return the normalised order (same reference if already normal).
+  if (target.beforeId === id) return normalizeSystemOrder(sections, groups);
   const base = normalizeSystemOrder(sections, groups);
   const rest = base.filter((s) => s.id !== id);
   const placed = target.groupId === null ? dropGroupId(moving) : moving.groupId === target.groupId ? moving : { ...moving, groupId: target.groupId };
@@ -110,7 +112,7 @@ export function moveSystemTo<S extends Grouped>(
   const next = normalizeSystemOrder(blocks.flat(), groups);
   // A drop that lands the system exactly where it already is changes nothing.
   const same = next.length === base.length && next.every((s, i) => s.id === base[i].id && (s.groupId ?? null) === (base[i].groupId ?? null));
-  return same ? sections : next;
+  return same ? base : next;
 }
 
 export function moveSystemBy<S extends Grouped>(sections: S[], groups: SystemGroup[], id: string, delta: -1 | 1): S[] {

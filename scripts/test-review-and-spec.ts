@@ -54113,4 +54113,11 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(p2a.unmarkEdited([], emptyPrev) === emptyPrev, "#P2a groups: unmarkEdited with an empty prev clears nothing");
   const unbuiltEdit: P2aSys[] = [pb, { ...pu, name: "Changed" }];
   ok(p2a.unmarkEdited(prev, unbuiltEdit) === unbuiltEdit, "#P2a groups: editing an unbuilt section clears nothing (same array)");
+  // Test moveSystemTo with beforeId === id (drop on self is a no-op).
+  const normal = [s("1"), s("2"), s("3")] as P2aSys[];
+  const dropOnSelf = p2a.moveSystemTo(normal, [], "2", { groupId: null, beforeId: "2" });
+  ok(dropOnSelf === p2a.normalizeSystemOrder(normal, []) && ids(dropOnSelf) === "1,2,3", "#P2a groups: moveSystemTo with beforeId === id returns the same reference for a normal input and keeps order");
+  const unnormalized = [s("1", "g-zz"), s("2")] as P2aSys[];
+  const dropSelfUnnorm = p2a.moveSystemTo(unnormalized, [], "1", { groupId: null, beforeId: "1" });
+  ok(ids(dropSelfUnnorm) === "1,2" && !("groupId" in dropSelfUnnorm[0]), "#P2a groups: moveSystemTo drop on self on a non-normal input returns a normalised result");
 }
