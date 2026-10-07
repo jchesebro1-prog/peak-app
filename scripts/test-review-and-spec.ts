@@ -10675,6 +10675,22 @@ ok(JSON.stringify(cr302Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     if (cs.ok) ok(cr302Plan(cs.rows, [{ sku: "Symetrix:Jupiter 4", mfr: "Symetrix" }], [])?.rows[0].outcome === "skip:same", "#302 plan: skip:same is case-insensitive");
     else ok(false, "#302 plan: skip:same sheet parses");
   }
+  // Brand:OrderNo catalogs — the sheet's bare order number still finds the part.
+  {
+    const pr = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "20-0026", "Jupiter 4"]]);
+    if (pr.ok) {
+      const pp = cr302Plan(pr.rows, [{ sku: "Symetrix:20-0026", mfr: "Symetrix" }], []);
+      ok(pp.rows[0].outcome === "rename" && pp.rows[0].from === "Symetrix:20-0026" && pp.rows[0].to === "Symetrix:Jupiter 4" && pp.renames[0]?.from === "Symetrix:20-0026", "#302 plan: Brand:-prefixed live part matched from a bare sheet SKU (from = real sku)");
+      const two = cr302Plan(pr.rows, [{ sku: "Symetrix:20-0026", mfr: "Symetrix" }, { sku: "Symetrix Inc:20-0026", mfr: "Symetrix" }], []);
+      ok(two.rows[0].outcome === "skip:not-found" && two.rows[0].reason === "No catalog part has this SKU." && two.renames.length === 0, "#302 plan: two same-mfr prefixed candidates → not-found");
+      const other = cr302Plan(pr.rows, [{ sku: "Biamp:20-0026", mfr: "Biamp" }], []);
+      ok(other.rows[0].outcome === "skip:not-found", "#302 plan: a different manufacturer's prefixed part never matches");
+      const al = cr302Plan(pr.rows, [{ sku: "Symetrix:Jupiter 4", mfr: "Symetrix", formerSkus: ["Symetrix:20-0026"] }], []);
+      ok(al.rows[0].outcome === "already" && al.rows[0].to === "Symetrix:Jupiter 4", "#302 plan: already via a prefixed former SKU");
+      const alOther = cr302Plan(pr.rows, [{ sku: "Biamp:Jupiter 4", mfr: "Biamp", formerSkus: ["Biamp:20-0026"] }], []);
+      ok(alOther.rows[0].outcome === "skip:not-found", "#302 plan: another manufacturer's prefixed former SKU is not 'already'");
+    } else ok(false, "#302 plan: prefixed sheet parses");
+  }
   // Same sheet SKU twice with different models: one part can't take two SKUs.
   const dupSheet = cr302Rows([["Manufacturer", "SKU", "Model #"], ["Symetrix", "80-0500", "Alpha"], ["Symetrix", "80-0500", "Beta"]]);
   if (dupSheet.ok) {

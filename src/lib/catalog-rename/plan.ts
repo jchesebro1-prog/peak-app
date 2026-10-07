@@ -60,15 +60,39 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
   const retiredUpper = new Set(retired.map((r) => r.sku.toUpperCase()));
   const formerOwner = new Map<string, PlanPart>();
   for (const p of live) for (const s of p.formerSkus ?? []) if (!formerOwner.has(s)) formerOwner.set(s, p);
+  // Some catalogs store these parts as "Brand:OrderNo" while the sheet's SKU
+  // column holds the bare order number — index each live part (and each
+  // former SKU) by manufacturer + the text after its first colon.
+  const tail = (s: string) => {
+    const i = s.indexOf(":");
+    return i < 0 ? null : s.slice(i + 1).trim().toUpperCase();
+  };
+  const tailParts = new Map<string, PlanPart[]>();
+  const tailFormer = new Map<string, PlanPart>();
+  for (const p of live) {
+    const mk = mfrKey(p.mfr);
+    const t = tail(p.sku);
+    if (t) tailParts.set(`${mk}|${t}`, [...(tailParts.get(`${mk}|${t}`) ?? []), p]);
+    for (const f of p.formerSkus ?? []) {
+      const ft = tail(f);
+      if (ft && !tailFormer.has(`${mk}|${ft}`)) tailFormer.set(`${mk}|${ft}`, p);
+    }
+  }
   const first: PlannedRow[] = rows.map((row) => {
     const model = cleanModel(row.model);
-    const mk = (outcome: RenameOutcome, to: string | null = null): PlannedRow => ({ row, outcome, from: row.sku, to, model, reason: REASON[outcome] });
+    const mk = (outcome: RenameOutcome, to: string | null = null, from: string = row.sku): PlannedRow => ({ row, outcome, from, to, model, reason: REASON[outcome] });
     if (!model) return mk("skip:no-model");
-    const part = liveBy.get(row.sku);
+    let part = liveBy.get(row.sku);
+    if (!part) {
+      const key = `${mfrKey(row.manufacturer)}|${row.sku.trim().toUpperCase()}`;
+      const cands = tailParts.get(key) ?? [];
+      if (cands.length > 1) return mk("skip:not-found");
+      if (cands.length === 1) part = cands[0];
+    }
     const brand = part?.mfr || row.manufacturer;
     const to = modelSku(brand, model);
     if (!part) {
-      const holder = formerOwner.get(row.sku);
+      const holder = formerOwner.get(row.sku) ?? tailFormer.get(`${mfrKey(row.manufacturer)}|${row.sku.trim().toUpperCase()}`);
       if (holder) return mk("already", holder.sku);
       const target = retiredBy.get(row.sku);
       if (target && to && target.toUpperCase() === to.toUpperCase()) return mk("already", to);
@@ -76,10 +100,10 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
     }
     if (mfrKey(part.mfr) !== mfrKey(row.manufacturer)) return mk("skip:mfr-mismatch");
     if (!to) return mk("skip:bad-model");
-    if (to.toUpperCase() === part.sku.toUpperCase()) return mk("skip:same", to);
+    if (to.toUpperCase() === part.sku.toUpperCase()) return mk("skip:same", to, part.sku);
     const owner = liveUpper.get(to.toUpperCase());
     if ((owner && owner.sku !== part.sku) || formerUpper.has(to.toUpperCase()) || retiredUpper.has(to.toUpperCase())) return mk("skip:taken", to);
-    return mk("rename", to);
+    return mk("rename", to, part.sku);
   });
   const byTo = new Map<string, number>();
   const byFrom = new Map<string, number>();
