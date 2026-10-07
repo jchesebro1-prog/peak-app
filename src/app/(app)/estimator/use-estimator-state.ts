@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { fillClientGoals } from "@/lib/estimate-output/goals";
-import { addGroup, groupBlocks, moveGroupBy, moveSystemBy, moveSystemTo, newGroupId, normalizeSystemOrder, removeGroup, renameGroup, unmarkEdited, withoutBuilt, type SystemGroup } from "@/lib/estimate-groups/groups";
+import { addGroup, groupBlocks, moveGroupBy, moveSystemBy, moveSystemTo, newGroupId, normalizeSystemOrder, removeGroup, renameGroup, setGroupAlternate, unmarkEdited, withoutBuilt, type SystemGroup } from "@/lib/estimate-groups/groups";
 import type { Dispatch, SetStateAction } from "react";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
@@ -1607,6 +1607,15 @@ export function useEstimatorState(props: EstimatorProps) {
     setGroups(next);
     reorderSections(normalizeSystemOrder(sections, next));
   };
+  /** Phase 2b: In total / Alternate. Re-normalises at once so every system in
+   *  the group gains/loses its `alternate` stamp (and the Rewards credit
+   *  re-pins inside reorderSections) in the same render. */
+  const setGroupAlternateAction = (id: string, alternate: boolean) => {
+    const next = setGroupAlternate(groups, id, alternate);
+    if (next === groups) return;
+    setGroups(next);
+    reorderSections(normalizeSystemOrder(sections, next));
+  };
   /** Removing a group keeps its systems — they become ungrouped. */
   const removeGroupAction = (id: string) => {
     const res = removeGroup(sections, groups, id);
@@ -2758,6 +2767,7 @@ export function useEstimatorState(props: EstimatorProps) {
     sections,
     selectSystem,
     setActionError,
+    setGroupAlternateAction,
     setActionNotice,
     setActiveId,
     setAiOpen,

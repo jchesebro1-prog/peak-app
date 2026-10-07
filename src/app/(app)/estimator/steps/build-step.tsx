@@ -35,6 +35,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     groups,
     isBuilt,
     markBuilt,
+    setGroupAlternateAction,
     setSystemGroup,
     addAiLine,
     addCurtain,
@@ -299,6 +300,12 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                 <span style={{ color: "#5b616e" }}>Freight</span>
                 <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.fr)}</span>
               </div>
+              {(t.alt ?? 0) > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#8c919c" }}>
+                  <span>Alternates (not in total)</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.alt ?? 0)}</span>
+                </div>
+              )}
               {(t.credit || 0) > 0 && (
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#1f8a5b", fontWeight: 600 }}>
                   <span>Rewards credit · {pointsLabel(t.credit || 0)}</span>
@@ -371,6 +378,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
           {/* Phase 2a: cards stack in `blocks` order (= the stored order) with a divider per group. */}
           {blocks.map((b, bi) => {
             const first = blocks.slice(0, bi).reduce((n, x) => n + x.sections.length, 0);
+            const groupId = b.group?.id ?? null;
             return (
               <div key={b.group ? b.group.id : "ungrouped"}>
                 {b.group && (
@@ -378,7 +386,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                     className="est-group-divider"
                     style={{
                       display: "flex",
-                      alignItems: "baseline",
+                      alignItems: "center",
                       justifyContent: "space-between",
                       gap: 12,
                       margin: bi === 0 ? "2px 4px 12px" : "22px 4px 12px",
@@ -396,12 +404,23 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        minWidth: 0,
                       }}
                     >
                       {b.group.name}
+                      {b.group.alternate && <span style={ALT_SUFFIX}>{ALT_HEADING_SUFFIX}</span>}
                     </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", flexShrink: 0 }}>
-                      {fmt(blockSell(b.sections))}
+                    <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                      <AlternateToggle
+                        alternate={b.group.alternate}
+                        groupName={b.group.name}
+                        onChange={(alternate) => {
+                          if (groupId) setGroupAlternateAction(groupId, alternate);
+                        }}
+                      />
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", flexShrink: 0 }}>
+                        {fmt(blockSell(b.sections))}
+                      </span>
                     </span>
                   </div>
                 )}
@@ -710,6 +729,49 @@ const RAIL_HEAD: CSSProperties = {
   textTransform: "uppercase",
 };
 
+/** Phase 2b: an Alternate group's heading suffix (rail and card divider). */
+const ALT_HEADING_SUFFIX = "Alternate · not in total";
+const ALT_SUFFIX: CSSProperties = {
+  marginLeft: 8,
+  fontWeight: 600,
+  letterSpacing: 0,
+  textTransform: "none",
+  color: ACCENT_INK,
+};
+
+/**
+ * Phase 2b — a group's In total | Alternate switch: two small segmented
+ * buttons, the active one accented. An Alternate group is priced on its own
+ * and never counts toward the estimate total.
+ */
+function AlternateToggle({ alternate, groupName, onChange }: { alternate: boolean; groupName: string; onChange: (alternate: boolean) => void }) {
+  const seg = (on: boolean, first: boolean): CSSProperties => ({
+    fontFamily: "var(--font-ui)",
+    fontSize: 10.5,
+    fontWeight: 600,
+    lineHeight: 1.2,
+    padding: "2px 7px",
+    cursor: on ? "default" : "pointer",
+    border: "1px solid " + (on ? "var(--accent)" : "#e4e7ec"),
+    background: on ? ACCENT_SOFT : "#fff",
+    color: on ? ACCENT_INK : "#6b7079",
+    borderRadius: first ? "5px 0 0 5px" : "0 5px 5px 0",
+    marginLeft: first ? 0 : -1,
+    position: "relative",
+    zIndex: on ? 1 : 0,
+  });
+  return (
+    <span role="group" aria-label={`${groupName}: in total or alternate`} style={{ display: "inline-flex", flexShrink: 0 }}>
+      <button type="button" aria-pressed={!alternate} onClick={() => alternate && onChange(false)} style={seg(!alternate, true)}>
+        In total
+      </button>
+      <button type="button" aria-pressed={alternate} onClick={() => !alternate && onChange(true)} style={seg(alternate, false)}>
+        Alternate
+      </button>
+    </span>
+  );
+}
+
 /**
  * Phase 2a — the Build rail: systems under group headings, HTML5 drag (the
  * board's house pattern: draggable rows, dataTransfer "text/plain", onDragOver
@@ -740,6 +802,7 @@ function SystemsRail({
     renameGroupAction,
     sections,
     selectSystem,
+    setGroupAlternateAction,
     toggleSide,
   } = s;
   const [dragId, setDragId] = useState<string | null>(null);
@@ -903,6 +966,13 @@ function SystemsRail({
           >
             ×
           </button>
+        </div>
+        {/* Phase 2b: In total / Alternate on its own line (the rail is 262px). */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px 0 8px" }}>
+          {g.alternate && <span style={{ ...ALT_SUFFIX, marginLeft: 0, fontSize: 10.5 }}>{ALT_HEADING_SUFFIX}</span>}
+          <span style={{ marginLeft: "auto" }}>
+            <AlternateToggle alternate={g.alternate} groupName={g.name} onChange={(alternate) => setGroupAlternateAction(g.id, alternate)} />
+          </span>
         </div>
         {/* Inline confirm — no browser dialog. */}
         {confirmDeleteId === g.id && (

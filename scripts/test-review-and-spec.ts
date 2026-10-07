@@ -54597,3 +54597,73 @@ async function p2bConsumersAsyncChecks(): Promise<void> {
   ok((await skus("Q-P2BC-0")) === "BASE-1,ALT-1" && (await skus("Q-P2BC-1")) === "BASE-1", "#P2b consumers: bomFromQuote (bid-spec BOM) leaves an Alternate system out");
   ok((await skus("Q-P2BC-2")) === (await skus("Q-P2BC-1")), "#P2b consumers: ...exactly as it leaves an option line out");
 }
+
+/* #P2b build UI — the In total / Alternate switch on groups, the sidebar Alternates row and the review cost table. */
+import { setGroupAlternate as p2buSetAlt, normalizeSystemOrder as p2buNorm, sanitizeGroups as p2buSanitize } from "@/lib/estimate-groups/groups";
+import { ReviewCostSummary as P2buReviewCost } from "@/app/(app)/estimator/review-cost-summary";
+import { totals as p2buTotals, systemSellTotal as p2buSell } from "@/app/(app)/estimator/pricing";
+import { createElement as p2buEl } from "react";
+import { renderToStaticMarkup as p2buRender } from "react-dom/server";
+{
+  // setGroupAlternate (pure)
+  const G = p2buSanitize([{ id: "g-a", name: "Base" }, { id: "g-b", name: "Upgrades" }]);
+  const on = p2buSetAlt(G, "g-b", true);
+  ok(on !== G && on[1].alternate === true && on[0] === G[0] && G[1].alternate === false, "#P2b build UI: setGroupAlternate flips one group (new array, others keep identity, input not mutated)");
+  ok(p2buSetAlt(on, "g-b", true) === on && p2buSetAlt(G, "g-b", false) === G, "#P2b build UI: setGroupAlternate returns the same reference when already set that way");
+  ok(p2buSetAlt(G, "g-zz", true) === G, "#P2b build UI: setGroupAlternate returns the same reference for an unknown id");
+  const off = p2buSetAlt(on, "g-b", false);
+  ok(off[1].alternate === false && off[0] === on[0], "#P2b build UI: setGroupAlternate switches back to In total");
+  // ...and the stamps follow at once through normalizeSystemOrder (what the hook action runs).
+  const secs: { id: string; groupId?: string; alternate?: true }[] = [{ id: "1" }, { id: "2", groupId: "g-a" }, { id: "3", groupId: "g-b" }];
+  const stamped = p2buNorm(secs, on);
+  ok(!("alternate" in stamped[0]) && !("alternate" in stamped[1]) && stamped[2].alternate === true, "#P2b build UI: switching a group to Alternate stamps its systems (and only them)");
+  const unstamped = p2buNorm(stamped, off);
+  ok(unstamped.every((x) => !("alternate" in x)), "#P2b build UI: switching back to In total removes the stamp (key absent, never false)");
+
+  // ReviewCostSummary rendered: alternates sit after the Total; In-total rows add up to the Total.
+  const line = (id: number, cost: number, price: number) => ({ id, sku: "S" + id, desc: "d", qty: 1, unit: "ea", cost, price });
+  const mk = (id: string, name: string, items: unknown[], extra: Record<string, unknown> = {}) => ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const sections = p2buNorm([
+    mk("s1", "Base Lighting", [line(1, 400, 1000)], { groupId: "g-a" }),
+    mk("s2", "Rigging", [line(2, 300, 600)]),
+    mk("s3", "LED Upgrade", [line(3, 900, 2000)], { groupId: "g-b" }),
+  ] as never[], on) as never as Parameters<typeof P2buReviewCost>[0]["sections"];
+  const t = p2buTotals(sections, 0);
+  const html = p2buRender(p2buEl(P2buReviewCost, { sections, totals: t }));
+  const iTotal = html.indexOf(">Total<");
+  const iAltHead = html.indexOf("Alternates (not in total)");
+  const iAlt = html.indexOf("LED Upgrade");
+  ok(iTotal > 0 && iAltHead > iTotal && iAlt > iAltHead && html.indexOf("Base Lighting") < iTotal && html.indexOf("Rigging") < iTotal,
+    "#P2b build UI: ReviewCostSummary lists In-total systems above the Total and alternate systems below it under Alternates (not in total)");
+  const inTotalSum = sections.filter((x) => x.alternate !== true).reduce((n, x) => n + p2buSell(x), 0);
+  ok(inTotalSum === t.rev + t.fr && t.alt === 2000 && inTotalSum === 1600 && html.slice(iTotal, iAltHead).includes("$1,600.00") && html.slice(iAltHead).includes("$2,000.00"),
+    "#P2b build UI: the In-total rows add up to the table's Total (rev + fr), the alternate is in totals.alt only");
+  const noAlt = p2buRender(p2buEl(P2buReviewCost, { sections: p2buNorm(sections, G) as never, totals: p2buTotals(p2buNorm(sections, G) as never, 0) }));
+  ok(!noAlt.includes("Alternates (not in total)") && noAlt.indexOf("LED Upgrade") < noAlt.indexOf(">Total<"), "#P2b build UI: with no alternates the table is unchanged (no Alternates heading, every system above the Total)");
+
+  // Source pins.
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const build = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const act = hook.slice(hook.indexOf("const setGroupAlternateAction = "), hook.indexOf("/** Removing a group keeps its systems"));
+  ok(act.includes("const next = setGroupAlternate(groups, id, alternate);") && act.includes("if (next === groups) return;") && act.includes("setGroups(next);") && act.includes("reorderSections(normalizeSystemOrder(sections, next));")
+    && /\n    setGroupAlternateAction,\n/.test(hook),
+    "#P2b build UI: setGroupAlternateAction updates groups AND reorderSections(normalizeSystemOrder(sections, next)) so stamps + credit pin apply at once; returned from the hook");
+  const toggle = build.slice(build.indexOf("function AlternateToggle("), build.indexOf("function SystemsRail("));
+  ok(toggle.includes("aria-pressed={!alternate}") && toggle.includes("aria-pressed={alternate}") && />\s*In total\s*</.test(toggle) && />\s*Alternate\s*</.test(toggle)
+    && toggle.includes('"1px solid " + (on ? "var(--accent)" : "#e4e7ec")') && toggle.includes("background: on ? ACCENT_SOFT") && toggle.includes("color: on ? ACCENT_INK"),
+    "#P2b build UI: the toggle is two segmented buttons In total | Alternate with aria-pressed, the active one accented via --accent / ACCENT_SOFT / ACCENT_INK");
+  ok(build.includes('const ALT_HEADING_SUFFIX = "Alternate · not in total";'), "#P2b build UI: the heading suffix copy is Alternate · not in total");
+  const rail = build.slice(build.indexOf("function SystemsRail("));
+  const step = build.slice(build.indexOf("export function BuildStep("), build.indexOf("function blockSell("));
+  ok(rail.includes("<AlternateToggle alternate={g.alternate} groupName={g.name} onChange={(alternate) => setGroupAlternateAction(g.id, alternate)} />")
+    && rail.includes("{g.alternate && <span style={{ ...ALT_SUFFIX, marginLeft: 0, fontSize: 10.5 }}>{ALT_HEADING_SUFFIX}</span>}"),
+    "#P2b build UI: the rail group heading has the toggle and, for an Alternate group, the suffix");
+  ok(step.includes("<AlternateToggle") && step.includes("alternate={b.group.alternate}") && step.includes("if (groupId) setGroupAlternateAction(groupId, alternate);")
+    && step.includes("{b.group.alternate && <span style={ALT_SUFFIX}>{ALT_HEADING_SUFFIX}</span>}"),
+    "#P2b build UI: the card-column group divider has the toggle and, for an Alternate group, the suffix");
+  ok(/\{\(t\.alt \?\? 0\) > 0 && \(\s*<div[^>]*>\s*<span>Alternates \(not in total\)<\/span>\s*<span[^>]*>\{fmt\(t\.alt \?\? 0\)\}<\/span>/.test(step),
+    "#P2b build UI: the sidebar Cost breakdown shows Alternates (not in total) only when t.alt > 0");
+  ok(!/\.components|customerLines\(|window\.print|est-doc|reviewBarOpen/.test(build) && !/from "@\/lib\/(stores|db)\//.test(build.replace(/import type [^\n]+\n/g, "")),
+    "#P2b build UI: build-step.tsx still clear of the pinned hazards");
+}

@@ -171,6 +171,19 @@ export function renameGroup(groups: SystemGroup[], id: string, name: string): Sy
   return groups.map((g, i) => (i === at ? { ...g, name: next } : g));
 }
 
+/**
+ * Phase 2b: the In total / Alternate switch. Same reference when the group is
+ * unknown or already set that way. Callers re-run normalizeSystemOrder so the
+ * sections' `alternate` stamps follow.
+ */
+export function setGroupAlternate(groups: SystemGroup[], id: string, alternate: boolean): SystemGroup[] {
+  const at = groups.findIndex((g) => g.id === id);
+  if (at < 0) return groups;
+  const want = alternate === true;
+  if (groups[at].alternate === want) return groups;
+  return groups.map((g, i) => (i === at ? { ...g, alternate: want } : g));
+}
+
 export function moveGroupBy(groups: SystemGroup[], id: string, delta: -1 | 1): SystemGroup[] {
   const at = groups.findIndex((g) => g.id === id);
   const to = at + delta;
