@@ -288,6 +288,9 @@ export type CustomDraft = {
   addToCatalog: string;
   /** Spec records design §6 — optional system match key ("" = none). */
   specKey: string;
+  /** #302 — "1" = Unit sell follows Unit cost at the flat custom-part margin
+   *  (`customPartSell`); typing a sell turns it off, clearing it turns it on. */
+  priceAuto: string;
 };
 
 export type CurtainDraft = {

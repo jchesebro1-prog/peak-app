@@ -10910,3 +10910,29 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
 - Minor review notes not fixed: a cover selection longer than 1,500 chars is silently capped; the cover has Attn and Venue
   rows beyond the brief; whitespace-only goals count as present; a `Q 1` / `Q_1` quote id could collide in the zip cache key
   (irrelevant for `Q-####`).
+
+## 302. Estimates — custom part: Add to catalog never fails silently + Unit sell auto-fills at 35% margin — DONE 2026-10-07 (D635)
+
+**Asked by Jeff 2026-10-07.** In the Estimator's **Custom part** form, "Add custom part" with **Add to catalog** checked did
+nothing visible: the Part no. / SKU field's grey "CUSTOM-001" looks filled in, but the server refuses a blank SKU, and the
+client `return`ed on that refusal (and let a thrown error escape) — no message, no line added, nothing saved. A success also
+said nothing. Worse, the save is a merge, so typing a SKU that already exists in the catalog quietly rewrote that real
+part's description, cost, list, category and manufacturer.
+
+What changed:
+- **Unit sell follows Unit cost at a flat 35% margin** (`customPartSell`, `CUSTOM_PART_MARGIN` in `tier-reprice.ts`; $100 →
+  $153.85). Typing a sell turns the follow off; clearing it turns it back on and refills from the cost. A muted "Auto · 35%
+  margin" sits by the label while it follows. Draft flag `priceAuto`; field logic in `setCustomField`.
+- **Add to catalog says why it didn't.** A blank / "CUSTOM" SKU is caught in the form ("Enter a Part no. / SKU to save this
+  part to the catalog."); the server's refusal is shown as-is; a thrown save reads "Couldn't save to the catalog — try
+  again." In every case no line is added and the form stays open with what was typed. The button shows "Saving…" and ignores
+  a second click while the save runs.
+- **Never overwrites an existing part.** `saveEstimatorCustomPartAction` refuses a SKU with a live catalog part (a
+  soft-deleted one can be re-created) and points at "+ Add part from catalog".
+- **Success is confirmed:** "Saved <SKU> to the catalog under Custom Parts." stands under the section's add buttons until
+  dismissed or another catalog/custom form opens.
+
+Not changed: the allowance path's tier-margin fallback code (but a typed cost now seeds a sell, so an allowance priced from
+the form lands at 35%, not the tier — the fallback is effectively unreachable from the form), Estimator catalog pricing (still tier-seeded), saved lines. No migration.
+
+Gates: `tsc --noEmit` 0 errors; `test:specs` 12,549 PASS / 0 FAIL (12,541 at #301 + 8 new "#302" checks); `test:smoke` ALL PASSED; eslint clean on the touched files.

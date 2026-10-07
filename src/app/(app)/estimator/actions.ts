@@ -33,7 +33,7 @@ import {
   get as getInspection,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
+import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import { copySectionForTarget } from "./copy-system";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf, usableTierMargin } from "./tier-reprice";
@@ -79,6 +79,15 @@ export async function saveEstimatorCustomPartAction(input: {
   if (!sku || sku.toUpperCase() === "CUSTOM") return { ok: false, error: "A catalog SKU is required." };
   if (!desc || !Number.isFinite(input.cost) || input.cost < 0 || !Number.isFinite(input.list) || input.list <= 0) {
     return { ok: false, error: "Catalog parts need a description, cost, and sell price." };
+  }
+  /* #302: mergeUpsert MERGES OVER a live part with this SKU — never let a
+     custom part silently rewrite a real one. (A soft-deleted SKU reads null,
+     so re-creating one is fine.) */
+  if (await catalogGet(sku)) {
+    return {
+      ok: false,
+      error: `${sku} is already in the catalog \u2014 add it with "+ Add part from catalog", or use a different SKU.`,
+    };
   }
   await mergeUpsert(sku, {
     desc,

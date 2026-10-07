@@ -62,6 +62,18 @@ export function laborSeedMarginOf(m: number | null | undefined): number {
 
 const sellAt = (cost: number, margin: number) => round2(cost / (1 - margin));
 
+/** #302 (D635) — the flat margin the Estimator's Custom part form seeds Unit
+ *  sell at. Jeff's instruction: a fixed 35 %, NOT the customer's tier
+ *  (`seedMarginOf`) that the catalog picker uses. */
+export const CUSTOM_PART_MARGIN = 0.35;
+
+/** #302 — a custom part's seeded Unit sell: margin, not markup, so
+ *  `round2(cost ÷ 0.65)` ($100 → $153.85). 0 for a cost that isn't a finite
+ *  number above zero. */
+export function customPartSell(cost: number): number {
+  return Number.isFinite(cost) && cost > 0 ? sellAt(cost, CUSTOM_PART_MARGIN) : 0;
+}
+
 /** The unit sell a catalog part gets when it is added from the Estimator's
  *  catalog picker (addPart): its cost at the tier seed (`seedMarginOf` — the
  *  stamp, else 0.30), or its catalog list price when it has no cost. The one

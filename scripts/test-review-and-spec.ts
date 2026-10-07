@@ -52376,3 +52376,31 @@ function gridSetSources301(): string {
     .map((p) => readFileSync(join(process.cwd(), p), "utf8"))
     .join("\n");
 }
+
+/* ======================================================================
+   #302 — Estimator custom part: Unit sell seeds at a flat 35 % margin, and
+   Add to catalog never fails silently (D635). Pure math + source pins.
+   ====================================================================== */
+import { CUSTOM_PART_MARGIN as t302Margin, customPartSell as t302Sell } from "@/app/(app)/estimator/tier-reprice";
+{
+  ok(t302Margin === 0.35, "#302: the custom-part margin is a flat 35 %");
+  ok(t302Sell(100) === 153.85, "#302: customPartSell is margin, not markup — $100 cost → $153.85 sell");
+  ok(t302Sell(0) === 0 && t302Sell(-5) === 0 && t302Sell(NaN) === 0 && t302Sell(Infinity) === 0, "#302: customPartSell is 0 for a zero, negative or non-finite cost");
+  const est302 = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator", f), "utf8");
+  const act302 = est302("actions.ts");
+  const save302 = act302.slice(act302.indexOf("export async function saveEstimatorCustomPartAction"));
+  const guardAt = save302.indexOf("catalogGet(sku)");
+  ok(guardAt > 0 && guardAt < save302.indexOf("await mergeUpsert(sku") && /already in the catalog/.test(save302.slice(guardAt, guardAt + 400)),
+    "#302: saveEstimatorCustomPartAction refuses a SKU already in the catalog before mergeUpsert can overwrite it");
+  const client302 = est302("estimator-client.tsx");
+  const add302 = client302.slice(client302.indexOf("const addCustomPart = async"), client302.indexOf("/* ---------------- vendor quote"));
+  ok(!/if \(!saved\.ok\) return;/.test(add302) && /if \(!saved\.ok\) \{\s*setCustomError\(saved\.error\);\s*return;/.test(add302),
+    "#302: addCustomPart shows the server's refusal instead of a bare return on !saved.ok");
+  ok(/catch \{\s*setCustomError\(/.test(add302) && add302.includes("Enter a Part no. / SKU to save this part to the catalog.") && add302.includes("savingCustomRef.current"),
+    "#302: addCustomPart reports a thrown save, pre-checks a blank SKU and guards a double-click");
+  ok(client302.includes("onSetCustomDraft={setCustomField}") && client302.includes("customPartSell(parseFloat(cost))") && client302.includes('priceAuto: "1"'),
+    "#302: the custom form's cost → sell auto-fill goes through setCustomField / customPartSell, fresh drafts start auto");
+  const card302 = est302("section-card.tsx");
+  ok(card302.includes("p.customError") && card302.includes("p.savingCustom") && card302.includes("customSavedNote") && card302.includes("Auto · "),
+    "#302: the section card renders the error, the Saving… state, the saved-to-catalog note and the Auto hint");
+}
