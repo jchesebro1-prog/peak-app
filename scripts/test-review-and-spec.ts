@@ -10857,6 +10857,7 @@ seeded()
   .then(() => estimateOutput301AAsyncChecks())
   .then(() => estimateOutput301BAsyncChecks())
   .then(() => estimateOutput301CAsyncChecks())
+  .then(() => modelSku302StoreAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -52438,4 +52439,86 @@ function gridSetSources301(): string {
   return ["src/app/(app)/design/grid/[id]/set/page.tsx", "src/lib/design/drawing-set-data.ts", "src/components/drawing/drawing-set-sheets.tsx"]
     .map((p) => readFileSync(join(process.cwd(), p), "utf8"))
     .join("\n");
+}
+
+/** #302 Task 2 — the rename store: renamedTo redirect, getManyBySku, the idempotent
+ *  renamePartDocs, the rename-log blob and listBlobIds. */
+async function modelSku302StoreAsyncChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const Cat = await import("@/lib/stores/catalog");
+  const Ren = await import("@/lib/stores/catalog-renames");
+  const DS = await import("@/db/doc-store");
+  const { getDb } = await import("@/db");
+  const { blobs: blobs302 } = await import("@/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+
+  const p1 = fixtureId(302, "p1");
+  const p2 = fixtureId(302, "p2");
+  const to = "Symetrix:" + fixtureId(302, "model-a");
+  registerFixture("catalog_parts", p1);
+  registerFixture("catalog_parts", p2);
+  registerFixture("catalog_parts", to);
+  const base = { desc: "Fixture 302", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Symetrix" };
+  await DS.upsertDoc("catalog_parts", { ...base, id: p1, sku: p1, pricedAt: 111, narrativeText: "x" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: p2, sku: p2 } as never);
+
+  // Never-renamed SKUs read exactly as before.
+  ok((await Cat.get(p1))?.sku === p1 && (await Cat.get(fixtureId(302, "nope"))) === null, "#302 store: an un-renamed SKU reads as before and a missing SKU is null");
+
+  const renamed = await Cat.renamePartDocs(p1, to, "Fixture 302 A");
+  ok(renamed?.sku === to && renamed.id === to, "#302 store: renamePartDocs returns the new part keyed by the new SKU");
+  ok(renamed?.manufacturerModelNumber === "Fixture 302 A" && renamed.manufacturerPartNumber === p1, "#302 store: the model is stored and the old SKU becomes the MFR P/N when none was set");
+  ok(JSON.stringify(renamed?.formerSkus) === JSON.stringify([p1]) && renamed?.renamedTo === undefined, "#302 store: formerSkus = [old], renamedTo is not carried onto the live doc");
+  ok(renamed?.pricedAt === 111 && renamed?.narrativeText === "x", "#302 store: pricedAt and the narrative carry over untouched");
+  ok((await Cat.get(p1))?.sku === to, "#302 store: get(old) follows renamedTo to the new part");
+  const many = await Cat.getMany([p1, to, p2]);
+  ok(many.length === 2 && many.filter((p) => p.sku === to).length === 1 && many.some((p) => p.sku === p2), "#302 store: getMany follows the redirect and dedupes by sku");
+  ok((await Cat.getManyAnyCase([p1]))[0]?.sku === to, "#302 store: getManyAnyCase follows the redirect");
+  const bySku = await Cat.getManyBySku([p1, to, p2, fixtureId(302, "gone")]);
+  ok(bySku.get(p1)?.sku === to && bySku.get(to)?.sku === to && bySku.get(p2)?.sku === p2 && bySku.size === 3, "#302 store: getManyBySku keys by the REQUESTED sku and omits misses");
+  const live = (await Cat.list()).map((p) => p.sku);
+  ok(!live.includes(p1) && live.includes(to), "#302 store: the old SKU is gone from the live list");
+  const oldRow = (await DS.getDocRows<import("@/db/doc-store").Doc>("catalog_parts", [p1]))[0];
+  ok(oldRow?.deleted === true && oldRow.doc.renamedTo === to, "#302 store: the retired old doc is soft-deleted with renamedTo");
+
+  const again = await Cat.renamePartDocs(p1, to, "Fixture 302 A");
+  ok(again?.sku === to && (await Cat.list()).filter((p) => p.sku === to).length === 1, "#302 store: a second identical rename is idempotent, no duplicate");
+  ok((await Cat.renamePartDocs(p2, to, "Fixture 302 A")) === null, "#302 store: renaming another part onto a live SKU returns null");
+  ok((await Cat.get(p2))?.sku === p2, "#302 store: the refused rename left the other part alone");
+  ok((await Cat.renamePartDocs(fixtureId(302, "gone"), "Symetrix:" + fixtureId(302, "model-z"), "z")) === null, "#302 store: renaming a missing part returns null");
+
+  // Defence in depth: never overwrite another part's tombstone.
+  const tomb = "Symetrix:" + fixtureId(302, "tomb");
+  registerFixture("catalog_parts", tomb);
+  await DS.upsertDoc("catalog_parts", { ...base, id: tomb, sku: tomb } as never);
+  await DS.softDeleteDoc("catalog_parts", tomb);
+  ok((await Cat.renamePartDocs(p2, tomb, "tomb")) === null && (await Cat.get(p2))?.sku === p2, "#302 store: renaming onto another part's soft-deleted SKU is refused");
+
+  // formerSkus dedupes exact strings across a second rename.
+  const to2 = "Symetrix:" + fixtureId(302, "model-b");
+  registerFixture("catalog_parts", to2);
+  const second = await Cat.renamePartDocs(to, to2, "Fixture 302 B");
+  ok(JSON.stringify(second?.formerSkus) === JSON.stringify([p1, to]) && second?.manufacturerPartNumber === p1, "#302 store: a second rename accumulates formerSkus and keeps the first MFR P/N");
+  ok((await Cat.get(p1))?.sku === to2, "#302 store: a two-hop redirect resolves to the live part");
+
+  // The rename log.
+  ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("a") === "c", "#302 store: renameMapOf collapses a→b→c to a→c");
+  ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("b") === "c", "#302 store: renameMapOf keeps b→c");
+  const db = await getDb();
+  const ids302 = [Ren.SKU_RENAMES_BLOB, "gridFavorites:" + fixtureId(302, "u")];
+  const snapshot = await db.select().from(blobs302).where(inArray(blobs302.id, ids302));
+  try {
+    await db.delete(blobs302).where(inArray(blobs302.id, ids302));
+    ok((await Ren.allSkuRenames()).length === 0, "#302 store: an empty rename log reads as []");
+    await Ren.appendSkuRenames([{ from: p1, to, model: "one", at: 1, by: "u" }]);
+    await Ren.appendSkuRenames([{ from: p1, to: to2, model: "two", at: 2, by: "u" }, { from: p2, to: "q", model: "m", at: 3, by: "u" }]);
+    const log = await Ren.allSkuRenames();
+    ok(log.filter((e) => e.from === p1).length === 1 && log.find((e) => e.from === p1)?.to === to2 && log.length === 2, "#302 store: appendSkuRenames dedupes by from, last wins");
+    await DS.setBlob("gridFavorites:" + fixtureId(302, "u"), { ids: [] });
+    ok((await DS.listBlobIds("gridFavorites:")).includes("gridFavorites:" + fixtureId(302, "u")), "#302 store: listBlobIds finds blobs by prefix");
+    ok(!(await DS.listBlobIds("gridFavorites_")).length && !(await DS.listBlobIds("grid%")).length, "#302 store: listBlobIds escapes % and _ in the prefix");
+  } finally {
+    await db.delete(blobs302).where(inArray(blobs302.id, ids302));
+    if (snapshot.length) await db.insert(blobs302).values(snapshot);
+  }
 }

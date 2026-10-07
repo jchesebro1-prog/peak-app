@@ -1,4 +1,4 @@
-import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, listDocs, listDocsByField, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, listDocs, listDocsByField, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
@@ -219,25 +219,68 @@ export async function list(): Promise<CatalogPart[]> {
   return listDocs<CatalogPart>("catalog_parts");
 }
 
+/** #302 — how many renamedTo links a read follows (a→b→c is two). */
+const MAX_RENAME_HOPS = 8;
+
+/** requested SKU → the live part it now means (#302). Exact primary-key reads
+ *  first; only a SKU that reads as a retired part with `renamedTo` costs
+ *  another batched read, so a book that was never renamed reads exactly as it
+ *  did. Missing, deleted-without-redirect and cyclic/over-long chains are
+ *  absent from the result. Never reads the whole book. */
+async function resolveLiveBySku(skus: readonly string[]): Promise<Map<string, CatalogPart>> {
+  const out = new Map<string, CatalogPart>();
+  let pending = new Map<string, string>(); // requested → SKU to read this hop
+  for (const s of skus) if (s) pending.set(s, s);
+  for (let hop = 0; hop <= MAX_RENAME_HOPS && pending.size; hop++) {
+    const rows = new Map((await getDocRows<CatalogPart>("catalog_parts", [...pending.values()])).map((r) => [r.id, r]));
+    const next = new Map<string, string>();
+    for (const [requested, key] of pending) {
+      const row = rows.get(key);
+      if (!row) continue;
+      if (!row.deleted) out.set(requested, row.doc);
+      else if (row.doc.renamedTo && row.doc.renamedTo !== key) next.set(requested, row.doc.renamedTo);
+    }
+    pending = next;
+  }
+  return out;
+}
+
+/** The live part for `sku`; a SKU retired by a rename (#302) resolves to the
+ *  part it became, so frozen history that names the old SKU still finds it. */
 export async function get(sku: string): Promise<CatalogPart | null> {
-  return getDoc<CatalogPart>("catalog_parts", sku);
+  const live = await getDoc<CatalogPart>("catalog_parts", sku);
+  if (live) return live;
+  return (await resolveLiveBySku([sku])).get(sku) ?? null;
 }
 
 /** The live parts among `skus`, read by primary key (the SKU is the document
  *  id) — batched, never the whole book and never one query per part. Missing
- *  and deleted SKUs are simply absent. */
+ *  and deleted SKUs are simply absent; a retired SKU follows `renamedTo`
+ *  (#302), and the result is deduped by sku. */
 export async function getMany(skus: readonly string[]): Promise<CatalogPart[]> {
-  return (await getDocRows<CatalogPart>("catalog_parts", skus)).filter((r) => !r.deleted).map((r) => r.doc);
+  return dedupeBySku([...(await resolveLiveBySku(skus)).values()]);
 }
 
-/** getMany, ignoring SKU case: exact primary-key reads first, then one
- *  case-insensitive query for only the SKUs that missed (#205 spec builder). */
+/** getMany keyed by the REQUESTED sku (#302): `map.get(oldSku)` is the part
+ *  that SKU now means. Two requested SKUs may map to the same part. */
+export async function getManyBySku(skus: readonly string[]): Promise<Map<string, CatalogPart>> {
+  return resolveLiveBySku(skus);
+}
+
+function dedupeBySku(parts: CatalogPart[]): CatalogPart[] {
+  const seen = new Set<string>();
+  return parts.filter((p) => (seen.has(p.sku) ? false : (seen.add(p.sku), true)));
+}
+
+/** getMany, ignoring SKU case: exact primary-key reads first (renamed SKUs
+ *  followed), then one case-insensitive query for only the SKUs that missed
+ *  (#205 spec builder). */
 export async function getManyAnyCase(skus: readonly string[]): Promise<CatalogPart[]> {
-  const found = await getMany(skus);
-  const have = new Set(found.map((p) => p.sku.toUpperCase()));
-  const missed = skus.filter((s) => s && !have.has(s.toUpperCase()));
+  const bySku = await resolveLiveBySku(skus);
+  const found = dedupeBySku([...bySku.values()]);
+  const missed = skus.filter((s) => s && !bySku.has(s));
   if (!missed.length) return found;
-  return [...found, ...(await getDocsByIdAnyCase<CatalogPart>("catalog_parts", missed))];
+  return dedupeBySku([...found, ...(await getDocsByIdAnyCase<CatalogPart>("catalog_parts", missed))]);
 }
 
 /** Rows of a given category (port of window.catalogByCategory). */
@@ -386,4 +429,50 @@ export async function clearCatalogPriceList(): Promise<number> {
  */
 export async function remove(sku: string): Promise<void> {
   await softDeleteDoc("catalog_parts", sku);
+}
+
+/**
+ * #302 — rename a part's SKU: write the copy under `to` and retire `from`
+ * with `renamedTo`, so get/getMany keep resolving the old SKU. One write path
+ * for the whole feature; it never touches frozen data (quote revisions, Grid
+ * revisions, generated specs) — those keep the old SKU and resolve through
+ * the redirect. Idempotent: a `from` already retired to `to` returns the
+ * live part. Returns null (writes nothing) when `from` is missing or retired
+ * elsewhere, or when `to` is a live part — or another part's tombstone —
+ * that is not a previous rename of `from`.
+ *
+ * Written through upsertDoc, not writePart/upsert, so `pricedAt` is carried
+ * as-is: a rename is not a price change.
+ */
+export async function renamePartDocs(from: string, to: string, model: string): Promise<CatalogPart | null> {
+  if (!from || !to || from === to) return null;
+  const [oldRow, toRow] = await getDocRows<CatalogPart>("catalog_parts", [from, to]).then((rows) => [
+    rows.find((r) => r.id === from),
+    rows.find((r) => r.id === to),
+  ]);
+  if (!oldRow) return null;
+  if (oldRow.deleted) return oldRow.doc.renamedTo === to ? get(to) : null;
+  const old = oldRow.doc;
+  const retire = async () => {
+    await patchDoc<CatalogPart>("catalog_parts", from, (d) => { d.renamedTo = to; });
+    await softDeleteDoc("catalog_parts", from);
+  };
+  if (toRow && !(toRow.doc.formerSkus ?? []).includes(from)) return null;
+  if (toRow && !toRow.deleted) {
+    await retire();
+    return toRow.doc;
+  }
+  const copy: CatalogPart = {
+    ...old,
+    id: to,
+    sku: to,
+    manufacturerModelNumber: model,
+    manufacturerPartNumber: old.manufacturerPartNumber || from,
+    formerSkus: [...new Set([...(old.formerSkus ?? []), from])],
+    updatedAt: Date.now(),
+  };
+  delete copy.renamedTo;
+  const written = await upsertDoc<CatalogPart>("catalog_parts", copy);
+  await retire();
+  return written;
 }
