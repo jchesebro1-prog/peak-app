@@ -54667,3 +54667,120 @@ import { renderToStaticMarkup as p2buRender } from "react-dom/server";
   ok(!/\.components|customerLines\(|window\.print|est-doc|reviewBarOpen/.test(build) && !/from "@\/lib\/(stores|db)\//.test(build.replace(/import type [^\n]+\n/g, "")),
     "#P2b build UI: build-step.tsx still clear of the pinned hazards");
 }
+
+/* #P2b document — the Alternates block on the customer document (PDF + online view). */
+import { alternateGroupsForPrint as p2bdAltGroups, printedGroupHeadings as p2bdHeads } from "@/app/(app)/estimator/quote-document-view";
+import { systemSellTotal as p2bdSell, fmt as p2bdFmt } from "@/app/(app)/estimator/pricing";
+import { qd293Props as p2bdProps, qd293Sections as p2bdSections, qdP2bNoAltCases as p2bdNoAlt, renderQuoteDocument293 as p2bdRender } from "./qd293-cases";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  type Sec = ReturnType<typeof p2bdSections>[number];
+  const ln = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 100, price: 400, ...extra });
+  const G = [
+    { id: "g-a", name: "Stage", alternate: false },
+    { id: "g-x", name: "Upgrades", alternate: true },
+    { id: "g-y", name: "Rigging alternates", alternate: true },
+    { id: "g-z", name: "Ghost alternates", alternate: true },
+  ];
+  const alts = (): Sec[] => [
+    { id: "a1", name: "LED Upgrade", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", items: [ln(11), ln(12, { option: true, desc: "Alt option line" })] },
+    { id: "a2", name: "Haze package", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", presentation: "narrative", narrative: "Haze intro.", items: [ln(13)] },
+    { id: "a3", name: "Motorized battens", kind: "materials", mfr: "", freightPct: 0, groupId: "g-y", items: [ln(14)] },
+    { id: "a4", name: "Prints nothing", kind: "materials", mfr: "", freightPct: 0, groupId: "g-z", items: [] },
+  ] as unknown as Sec[];
+  const inTotal = () => p2bdSections().map((s) => (s.id === "s2" || s.id === "s3" ? { ...s, groupId: "g-a" } : s));
+  const props = p2bdProps({ sections: [...inTotal(), ...alts()], groups: G });
+  const plainProps = p2bdProps({ sections: inTotal(), groups: [G[0]] });
+
+  // fixture sanity — the loader stamped exactly the alternate systems
+  ok(props.sections.filter((s) => s.alternate === true).map((s) => s.id).join() === "a1,a2,a3,a4" && props.t.alt === 1200 && props.t.grand === plainProps.t.grand,
+    "#P2b document: fixture — quoteDocumentDataFor stamps the alternate systems; totals.alt = their sell, grand unchanged");
+
+  // pure helpers
+  const ag = p2bdAltGroups(props.sections, props.groups);
+  ok(ag.length === 2 && ag[0].group.id === "g-x" && ag[1].group.id === "g-y" && ag[0].sections.map((s) => s.id).join() === "a1,a2" && ag[1].sections.map((s) => s.id).join() === "a3",
+    "#P2b document: alternateGroupsForPrint — one entry per Alternate group with a printed system, document order, an empty-revenue group left out");
+  ok(ag[0].subtotal === p2bdSell(props.sections.find((s) => s.id === "a1")!) + p2bdSell(props.sections.find((s) => s.id === "a2")!) && ag[0].subtotal === 800 && ag[1].subtotal === 400,
+    "#P2b document: alternateGroupsForPrint — subtotal = Σ systemSellTotal of the printed systems (an option line is not in it)");
+  ok(p2bdAltGroups(props.sections, []).length === 0 && p2bdAltGroups(props.sections, undefined).length === 0 && p2bdAltGroups(plainProps.sections, plainProps.groups).length === 0,
+    "#P2b document: alternateGroupsForPrint — no groups or no Alternate groups → []");
+  const flipped = [...G].reverse();
+  ok(p2bdAltGroups(props.sections, flipped).map((x) => x.group.id).join() === "g-x,g-y", "#P2b document: alternateGroupsForPrint follows section order, not the groups array order");
+  const unstamped = props.sections.map((s) => { const { alternate: _a, ...r } = s; return r as Sec; });
+  ok(p2bdAltGroups(unstamped, G).length === 0, "#P2b document: alternateGroupsForPrint keys on the alternate stamp (the same test totals() uses)");
+  ok(p2bdHeads(props.sections, props.groups).map((h) => h.name).join() === "Stage", "#P2b document: printedGroupHeadings leaves Alternate groups out of the body");
+
+  for (const layout of [undefined, "web"] as const) {
+    const tag = layout ?? "print";
+    const html = p2bdRender({ ...props, layout });
+    const plain = p2bdRender({ ...plainProps, layout });
+    const iBlock = html.indexOf('class="est-alts"');
+    ok(iBlock > 0 && (html.match(/class="est-alts"/g) || []).length === 1 && html.includes(">Alternates</span>") && html.includes(">Priced separately — not included in the total</span>"),
+      `#P2b document (${tag}): one Alternates block with its title and sub-line`);
+    ok(html.indexOf(">Empty narrative<") < iBlock && iBlock < html.indexOf("Optional additions") && html.indexOf("Optional additions") < html.indexOf('class="est-totals"'),
+      `#P2b document (${tag}): the block sits after the last body band and before the Optional additions box and the totals`);
+    const block = html.slice(iBlock, html.indexOf("Optional additions"));
+    ok(block.includes(">Upgrades<") && block.includes(">Rigging alternates<") && block.includes(">" + p2bdFmt(800) + "<") && !block.includes("Ghost alternates") && (block.match(/est-grouphead/g) || []).length === 2,
+      `#P2b document (${tag}): each Alternate group prints its heading + subtotal; a group with nothing printed is left out`);
+    ok([">A1<", ">A2<", ">A3<"].every((n, i, a) => block.includes(n) && (i === 0 || block.indexOf(n) > block.indexOf(a[i - 1]))) && block.indexOf(">A1<") < block.indexOf(">LED Upgrade<") && block.indexOf(">A3<") > block.indexOf(">Rigging alternates<"),
+      `#P2b document (${tag}): alternate bands are numbered A1, A2, A3 in order, under their group heading`);
+    ok(block.includes(">Line 11</span>") && block.includes("Haze intro.") && !block.includes(">Line 13</span>"),
+      `#P2b document (${tag}): an alternate prints its own lines (itemized) or its narrative (narrative), per its presentation`);
+    const body = html.slice(0, iBlock);
+    ok(!body.includes("LED Upgrade") && !body.includes("Upgrades") && !body.includes(">05<") && ["01", "02", "03", "04"].every((n) => body.includes(`>${n}<`)),
+      `#P2b document (${tag}): the body bands, numbering and group headings cover In-total systems only`);
+    ok(html.includes("4 systems · 7 line items · 3 alternates · 1 optional") && plain.includes("4 systems · 7 line items · 1 optional"),
+      `#P2b document (${tag}): the header adds · N alternates (alternate systems); systems and line items count In-total only`);
+    const tot = (h: string) => h.slice(h.indexOf('class="est-totals"'), h.indexOf('class="est-terms"'));
+    const invest = (h: string) => h.slice(h.indexOf("Total investment"), h.indexOf("systems ·"));
+    ok(tot(html) === tot(plain) && tot(html).length > 100 && invest(html) === invest(plain),
+      `#P2b document (${tag}): the totals and the Total investment band are the same as the In-total-only quote's`);
+    const box = html.slice(html.indexOf("Optional additions"), html.indexOf('class="est-totals"'));
+    ok(!box.includes("Alt option line") && box.includes(">Line 3<!-- -->") === plain.slice(plain.indexOf("Optional additions")).includes(">Line 3<!-- -->") && block.includes("Alt option line") && block.includes("Optional — not included in this alternate’s price"),
+      `#P2b document (${tag}): an alternate's option line prints inside the alternate, not in the Optional additions box`);
+    ok(html.slice(html.indexOf('class="est-totals"')).indexOf("Alternates") < 0, `#P2b document (${tag}): nothing about alternates after the block (totals, terms, footer)`);
+  }
+
+  // singular count; options off hides the alternate's option line too; an empty alternate group prints no block
+  const one = p2bdRender(p2bdProps({ sections: [...inTotal(), alts()[2]], groups: G }));
+  ok(one.includes("· 1 alternate ·") && !one.includes("1 alternates") && one.includes(">A1<") && !one.includes(">A2<"), "#P2b document: one alternate system reads · 1 alternate");
+  const offOpts = p2bdRender(p2bdProps({ sections: [...inTotal(), ...alts()], groups: G, pdfOptions: { pdfOptions: false } }));
+  ok(!offOpts.includes("Alt option line") && !offOpts.includes("Optional additions") && offOpts.includes("4 systems · 7 line items · 3 alternates<"),
+    "#P2b document: Show options off hides option lines everywhere (box and alternates)");
+  const ghostOnly = p2bdRender(p2bdProps({ sections: [...inTotal(), alts()[3]], groups: G }));
+  ok(!ghostOnly.includes("est-alts") && !ghostOnly.includes("alternate"), "#P2b document: an Alternate group that prints nothing → no block, no header count");
+
+  const emptyAlt = alts().map((s) => (s.id === "a2" ? { ...s, narrative: "" } : s));
+  const ea = p2bdRender(p2bdProps({ sections: [...inTotal(), ...emptyAlt], groups: G }));
+  const eaBlock = ea.slice(ea.indexOf('class="est-alts"'), ea.indexOf("Optional additions"));
+  ok(eaBlock.includes("Priced separately — not included in the total.</div>") && !eaBlock.includes("included in the total above") && ea.slice(0, ea.indexOf('class="est-alts"')).includes("System scope and pricing are included in the total above."),
+    "#P2b document: an empty narrative alternate never reads \"included in the total above\" (body systems still do)");
+
+  // appendix: In-total only
+  const apx = p2bdRender(p2bdProps({ sections: [...inTotal(), ...alts()], groups: G, pdfOptions: { pdfItemizedAppendix: true } }));
+  const apxPart = apx.slice(apx.indexOf('class="est-appendix"'));
+  ok(apxPart.includes(">Lighting<") && !apxPart.includes("Haze package") && !apxPart.includes(">A2<"), "#P2b document: the Itemized appendix lists In-total systems only");
+  // sectioned detail: alternate bands show the line-count row like the body
+  const sec = p2bdRender(p2bdProps({ sections: [...inTotal(), ...alts()], groups: G, pdfOptions: { detail: "sectioned" } }));
+  ok(/>1(<!-- -->)? line (<!-- -->)?item<\/div>/.test(sec.slice(sec.indexOf('class="est-alts"'), sec.indexOf("Optional additions"))), "#P2b document: sectioned detail prints the alternate's line-count row, like a body band");
+
+  // POR: an alternate's POR line reads Price on request in its band; the Total label is unaffected
+  const porAlts = alts().map((s) => (s.id === "a3" ? { ...s, items: [...s.items, ln(15, { por: true, price: 0 })] } : s));
+  const por = p2bdRender({ ...p2bdProps({ sections: [...inTotal(), ...porAlts], groups: G }), isPortalCatalog: true });
+  ok(por.slice(por.indexOf('class="est-alts"')).includes("Price on request") && !por.includes("Total (excludes items pending price)") && por.includes(">Total</span>"),
+    "#P2b document: a POR line in an alternate reads Price on request there; the Total (which excludes alternates) is not relabelled");
+
+  // no alternates → byte-for-byte as before (pre-change render, committed fixture)
+  const baseline = JSON.parse(readFileSync(join(process.cwd(), "docs/superpowers/fixtures/p2b-quote-document-no-alternates.json"), "utf8")) as Record<string, string>;
+  const cases = p2bdNoAlt();
+  ok(Object.keys(cases).length === 7 && Object.keys(cases).every((k) => typeof baseline[k] === "string"), "#P2b document: every no-alternates baseline case is in the committed fixture");
+  for (const [k, pr] of Object.entries(cases)) ok(p2bdRender(pr) === baseline[k], `#P2b document: a quote without alternates renders byte-for-byte as before (${k})`);
+
+  // source pins — one band body for the body loop and the Alternates block
+  const doc = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok((doc.match(/<SystemBody\b/g) || []).length === 2 && doc.includes("function SystemBody(") && (doc.match(/narrativeBlocks\(/g) || []).length === 1 && (doc.match(/<ItemizedLines\b/g) || []).length === 2,
+    "#P2b document: the band body is one SystemBody component used by the body loop and the Alternates block (no duplicated JSX)");
+  ok((doc.match(/function docSystem\(/g) || []).length === 1 && doc.includes("alternateGroupsForPrint(p.sections, p.groups)") && doc.includes(".filter((sec) => sec.alternate !== true && (systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0))"),
+    "#P2b document: printed systems are built once (docSystem) for both, the body filter leaving alternate systems out");
+  ok(doc.includes('className="est-secband est-althead"'), "#P2b document: the block title keeps with its first band (est-secband break rules)");
+}

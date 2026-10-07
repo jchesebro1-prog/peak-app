@@ -63,3 +63,22 @@ export function qd293Cases(): Record<string, QuoteDocumentProps> {
     lean: qd293Props({ pdfOptions: { pdfQty: false, pdfPrices: false, pdfCover: false, pdfTerms: false } }),
   };
 }
+
+/** Estimator Phase 2b — quotes WITHOUT alternates (groups all In total, the
+ *  P2a fixtures, print + web, sectioned, appendix, options off, a portal POR
+ *  line): the Alternates work must leave every one byte-for-byte as it was.
+ *  scripts/qdp2b-baseline.ts wrote their pre-change render once. */
+export function qdP2bNoAltCases(): Record<string, QuoteDocumentProps> {
+  const G = [{ id: "g-a", name: "Stage", alternate: false }, { id: "g-b", name: "House", alternate: false }];
+  const grouped = (): SpecSection[] => qd293Sections().map((s) => (s.id === "s2" || s.id === "s3" ? { ...s, groupId: "g-a" } : s.id === "s4" ? { ...s, groupId: "g-b" } : s));
+  const por = (): SpecSection[] => qd293Sections().map((s) => (s.id === "s1" ? { ...s, items: [...s.items, line(9, { por: true, price: 0 })] } : s));
+  return {
+    groupedPrint: qd293Props({ sections: grouped(), groups: G }),
+    groupedWeb: { ...qd293Props({ sections: grouped(), groups: G }), layout: "web" },
+    groupedSectioned: qd293Props({ sections: grouped(), groups: G, pdfOptions: { detail: "sectioned" } }),
+    groupedAppendix: qd293Props({ sections: grouped(), groups: G, pdfOptions: { pdfItemizedAppendix: true } }),
+    groupedOptionsOff: qd293Props({ sections: grouped(), groups: G, pdfOptions: { pdfOptions: false } }),
+    portalPor: { ...qd293Props({ sections: por() }), isPortalCatalog: true },
+    ungroupedWeb: { ...qd293Props(), layout: "web" },
+  };
+}

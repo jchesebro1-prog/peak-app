@@ -29,13 +29,41 @@ export function printedGroupHeadings(
   const at = new Map<string, number>();
   for (const sec of sections || []) {
     const g = sec.groupId ? byId.get(sec.groupId) : undefined;
-    if (!g || !systemPrintsInBody(sec)) continue;
+    // Phase 2b: an alternate system prints in the Alternates block, not the body.
+    if (!g || sec.alternate === true || !systemPrintsInBody(sec)) continue;
     const i = at.get(g.id);
     if (i === undefined) {
       at.set(g.id, out.length);
       out.push({ beforeSectionId: sec.id, name: g.name, subtotal: systemSellTotal(sec) });
     } else {
       out[i].subtotal += systemSellTotal(sec);
+    }
+  }
+  return out;
+}
+
+/** Estimator Phase 2b — the Alternates block: one entry per Alternate group
+ *  with at least one printed system (an `alternate: true` system that
+ *  systemPrintsInBody), in document order (first printed system), carrying
+ *  those printed systems and their Σ systemSellTotal. No groups → []. Pure. */
+export function alternateGroupsForPrint<S extends SpecSection>(
+  sections: S[],
+  groups: SystemGroup[] | undefined,
+): Array<{ group: SystemGroup; subtotal: number; sections: S[] }> {
+  if (!groups || !groups.length) return [];
+  const byId = new Map(groups.filter((g) => g.alternate === true).map((g) => [g.id, g]));
+  const out: Array<{ group: SystemGroup; subtotal: number; sections: S[] }> = [];
+  const at = new Map<string, number>();
+  for (const sec of sections || []) {
+    const g = sec.groupId ? byId.get(sec.groupId) : undefined;
+    if (!g || sec.alternate !== true || !systemPrintsInBody(sec)) continue;
+    const i = at.get(g.id);
+    if (i === undefined) {
+      at.set(g.id, out.length);
+      out.push({ group: g, subtotal: systemSellTotal(sec), sections: [sec] });
+    } else {
+      out[i].subtotal += systemSellTotal(sec);
+      out[i].sections.push(sec);
     }
   }
   return out;

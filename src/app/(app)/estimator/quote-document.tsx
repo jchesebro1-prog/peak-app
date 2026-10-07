@@ -5,7 +5,7 @@ import { systemSellTotal } from "./pricing";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
-import { appendixSystemIds, printedGroupHeadings } from "./quote-document-view";
+import { alternateGroupsForPrint, appendixSystemIds, printedGroupHeadings } from "./quote-document-view";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 
@@ -204,8 +204,9 @@ function GroupHeading({ name, subtotalLabel }: { name: string; subtotalLabel: st
   );
 }
 
-/** The dark system band (number · name · subtotal) — body and appendix. */
-function SectionBand({ num, name, subtotalLabel }: { num: number; name: string; subtotalLabel: string }) {
+/** The dark system band (number · name · subtotal) — body, appendix and
+ *  (Phase 2b) the Alternates block, whose bands read A1, A2… */
+function SectionBand({ num, name, subtotalLabel }: { num: number | string; name: string; subtotalLabel: string }) {
   return (
     <div
       className="est-secband"
@@ -357,10 +358,213 @@ function ItemizedLines(props: {
   );
 }
 
-export default function QuoteDocument(p: QuoteDocumentProps) {
+/** One printed system — band number, name, subtotal, narrative / key
+ *  products and the customer rows. Built once per system for the body
+ *  (numbered 1, 2…) and the Phase 2b Alternates block (A1, A2…). */
+function docSystem(sec: SpecSection, num: number | string, p: QuoteDocumentProps) {
+  const secFr = systemFreight(sec);
+  // #267: the system's own price — a typed sell or the $25 round-up —
+  // which customerLines' rows (+ freight) always add up to.
+  const sub = systemSellTotal(sec);
+  const rows = customerLines(sec);
+  return {
+    id: sec.id,
+    num,
+    name: sec.name,
+    narrative: (sec.narrative || "").trim(),
+    presentation: sec.presentation || "itemized",
+    // #293: resolved key-product blocks (printed in Narrative only).
+    keyProducts: printableKeyProducts(sec),
+    subtotalLabel: fmt(sub),
+    hasFreight: secFr > 0,
+    freightLabel: fmt(secFr),
+    lines:
+      sec.kind === "labor"
+        ? [
+            {
+              key: "labor",
+              desc: "Installation, commissioning & project management",
+              comment: "",
+              showComment: false,
+              sub: [] as { key: string; qty: number; unit: string; text: string }[],
+              qty: "" as string | number,
+              unit: "",
+              ext: fmt(rows.reduce((a, cl) => a + cl.ext, 0)),
+            },
+          ]
+        : /* Never the shop & engineering / performance-bonus / allowance
+             lines themselves — customerLines folds their sell into the
+             mobilization line(s) (or another labor line, or a neutral
+             combined row) so the section subtotal is unchanged but those
+             categories never appear by name (owner request). */
+          rows.map((cl) => {
+            if (!cl.item) {
+              return {
+                key: "labor-overhead-combined",
+                desc: cl.desc,
+                comment: "",
+                showComment: false,
+                sub: [] as { key: string; qty: number; unit: string; text: string }[],
+                qty: "" as string | number,
+                unit: "",
+                ext: fmt(cl.ext),
+              };
+            }
+            const it = cl.item;
+            /* #143: a vendor quote shows as one line reading
+               "Vendor · Quote no. — Description", or, set to Itemized, the
+               same line with its material descriptions underneath and the
+               price rolled up on the parent. Terms, notes and the vendor's
+               cost never appear here. */
+            const vq = it.vendorQuoteId
+              ? p.vendorQuotes.find((v) => v.id === it.vendorQuoteId)
+              : undefined;
+            const desc = vq
+              ? vq.vendor + " \u00b7 " + vq.quoteNumber + " \u2014 " + vq.description
+              : it.allowance
+              ? "Budget allowance — " + it.desc
+              : it.desc;
+            return {
+              key: String(it.id),
+              desc,
+              comment: (it.comment || "").trim(),
+              showComment: !!(p.pdfNotes && it.comment && it.comment.trim()),
+              /* Qty/unit stay SEPARATE from the text (#143 re-review):
+                 baked into the description they printed straight past the
+                 Quantities toggle the rest of the document obeys. */
+              sub:
+                vq && vq.display === "itemized"
+                  ? vq.lines.map((l) => ({
+                      key: String(l.id),
+                      qty: l.qty,
+                      unit: l.unit,
+                      text: l.description,
+                    }))
+                  : [],
+              qty: it.qty as string | number,
+              unit: it.unit,
+              // #245 final review: a POR line on a portal-catalog quote
+              // still reads $0.00 in cl.ext (nothing else to sum), which
+              // printed as if the item were actually free — say why.
+              ext: p.isPortalCatalog && it.por ? "Price on request" : fmt(cl.ext),
+            };
+          }),
+  };
+}
+
+type DocSystem = ReturnType<typeof docSystem>;
+
+/** What prints under a system's band — its narrative + key products, its
+ *  itemized lines, or (sectioned detail) a line-count row. Shared by the body
+ *  and the Phase 2b Alternates block so the two can't drift. */
+function SystemBody({ ps, p, lineCols, freightRowLabel, alternate }: { ps: DocSystem; p: QuoteDocumentProps; lineCols: string; freightRowLabel: string; alternate?: boolean }) {
   const isItemized = p.detail === "itemized";
-  const web = p.layout === "web";
   const showLines = p.pdfQty || p.pdfNotes || p.pdfPrices;
+  return ps.presentation === "narrative" ? (
+    <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
+      {/* #281: blank line = paragraph, "- " = bullet, single breaks kept.
+          #293: then each key product — heading, paragraph, photo floated right. */}
+      {(() => {
+        const blocks = narrativeBlocks(ps.narrative);
+        // Phase 2b: an empty alternate never claims to be "included in the total".
+        if (!blocks.length && !ps.keyProducts.length)
+          return alternate ? "Priced separately — not included in the total." : "System scope and pricing are included in the total above.";
+        return (
+          <>
+            {renderNarrativeBlocks(blocks)}
+            {ps.keyProducts.map((kp, ki) => {
+              // Own photo (or its manufacturer's image) first; an allowance /
+              // custom line with neither prints its placeholder (a public
+              // /placeholders/ URL — same origin for print, share and portal).
+              const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
+              const photo = own ?? (kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : undefined);
+              return (
+                <div key={"kp-" + kp.sku} className="est-kp" style={{ display: "flow-root", marginTop: blocks.length || ki ? 12 : 0 }}>
+                  {photo ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photo.src}
+                        alt={photo.alt}
+                        style={{ float: "right", width: "34%", maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" }}
+                      />
+                    </>
+                  ) : null}
+                  <div style={{ fontWeight: 600, color: "#16181d", marginBottom: kp.blocks.length ? 3 : 0 }}>{kp.heading}</div>
+                  {renderNarrativeBlocks(kp.blocks)}
+                </div>
+              );
+            })}
+          </>
+        );
+      })()}
+    </div>
+  ) : isItemized && showLines ? (
+    <ItemizedLines
+      lines={ps.lines}
+      hasFreight={ps.hasFreight}
+      freightLabel={ps.freightLabel}
+      freightRowLabel={freightRowLabel}
+      showDesc={p.pdfNotes}
+      pdfQty={p.pdfQty}
+      pdfPrices={p.pdfPrices}
+      lineCols={lineCols}
+    />
+  ) : !isItemized ? (
+    <div
+      className="est-line"
+      style={{
+        padding: "7px 13px 9px",
+        fontSize: 11.5,
+        color: "#8c919c",
+        borderBottom: "1px solid #f0f1f4",
+        marginBottom: 6,
+      }}
+    >
+      {ps.lines.length} line {ps.lines.length === 1 ? "item" : "items"}
+      {ps.hasFreight ? " · includes freight & delivery" : ""}
+    </div>
+  ) : null;
+}
+
+/** One priced option row — the Optional additions box (note = the system's
+ *  name) and, Phase 2b, an alternate system's own option lines. */
+function OptionRow({ it, note, lineCols, pdfQty, pdfPrices }: { it: SpecItem; note: string; lineCols: string; pdfQty: boolean; pdfPrices: boolean }) {
+  return (
+    <div
+      className="est-line"
+      style={{
+        display: "grid",
+        gridTemplateColumns: lineCols,
+        gap: 8,
+        padding: "7px 0 5px",
+        fontSize: 12.5,
+        borderBottom: "1px solid #f0f1f4",
+        alignItems: "center",
+      }}
+    >
+      <span>
+        {it.desc}
+        <span style={{ display: "block", fontSize: 10.5, color: "#9aa0ab", marginTop: 1 }}>
+          {note}
+        </span>
+      </span>
+      {pdfQty && (
+        <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#8c919c" }}>
+          {it.qty} {it.unit}
+        </span>
+      )}
+      {pdfPrices && (
+        <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>
+          {fmt(lineExtSellOf(it))}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export default function QuoteDocument(p: QuoteDocumentProps) {
+  const web = p.layout === "web";
   const lineCols = [p.pdfNotes ? "1fr" : "", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
   const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
   const revDateLabel = longDate(p.revDateMs);
@@ -369,109 +573,30 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const standingLines = (p.standingLines || []).filter((l) => l.trim());
 
   const groupHeadings = new Map(printedGroupHeadings(p.sections, p.groups).map((h) => [h.beforeSectionId, h]));
+  // Phase 2b: alternate systems print in their own block (A1, A2…), not the body.
   const previewSections = p.sections
-    .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0)
-    .map((sec, i) => {
-      const secFr = systemFreight(sec);
-      // #267: the system's own price — a typed sell or the $25 round-up —
-      // which customerLines' rows (+ freight) always add up to.
-      const sub = systemSellTotal(sec);
-      const rows = customerLines(sec);
-      return {
-        id: sec.id,
-        num: i + 1,
-        name: sec.name,
-        narrative: (sec.narrative || "").trim(),
-        presentation: sec.presentation || "itemized",
-        // #293: resolved key-product blocks (printed in Narrative only).
-        keyProducts: printableKeyProducts(sec),
-        subtotalLabel: fmt(sub),
-        hasFreight: secFr > 0,
-        freightLabel: fmt(secFr),
-        lines:
-          sec.kind === "labor"
-            ? [
-                {
-                  key: "labor",
-                  desc: "Installation, commissioning & project management",
-                  comment: "",
-                  showComment: false,
-                  sub: [] as { key: string; qty: number; unit: string; text: string }[],
-                  qty: "" as string | number,
-                  unit: "",
-                  ext: fmt(rows.reduce((a, cl) => a + cl.ext, 0)),
-                },
-              ]
-            : /* Never the shop & engineering / performance-bonus / allowance
-                 lines themselves — customerLines folds their sell into the
-                 mobilization line(s) (or another labor line, or a neutral
-                 combined row) so the section subtotal is unchanged but those
-                 categories never appear by name (owner request). */
-              rows.map((cl) => {
-                if (!cl.item) {
-                  return {
-                    key: "labor-overhead-combined",
-                    desc: cl.desc,
-                    comment: "",
-                    showComment: false,
-                    sub: [] as { key: string; qty: number; unit: string; text: string }[],
-                    qty: "" as string | number,
-                    unit: "",
-                    ext: fmt(cl.ext),
-                  };
-                }
-                const it = cl.item;
-                /* #143: a vendor quote shows as one line reading
-                   "Vendor · Quote no. — Description", or, set to Itemized, the
-                   same line with its material descriptions underneath and the
-                   price rolled up on the parent. Terms, notes and the vendor's
-                   cost never appear here. */
-                const vq = it.vendorQuoteId
-                  ? p.vendorQuotes.find((v) => v.id === it.vendorQuoteId)
-                  : undefined;
-                const desc = vq
-                  ? vq.vendor + " \u00b7 " + vq.quoteNumber + " \u2014 " + vq.description
-                  : it.allowance
-                  ? "Budget allowance — " + it.desc
-                  : it.desc;
-                return {
-                  key: String(it.id),
-                  desc,
-                  comment: (it.comment || "").trim(),
-                  showComment: !!(p.pdfNotes && it.comment && it.comment.trim()),
-                  /* Qty/unit stay SEPARATE from the text (#143 re-review):
-                     baked into the description they printed straight past the
-                     Quantities toggle the rest of the document obeys. */
-                  sub:
-                    vq && vq.display === "itemized"
-                      ? vq.lines.map((l) => ({
-                          key: String(l.id),
-                          qty: l.qty,
-                          unit: l.unit,
-                          text: l.description,
-                        }))
-                      : [],
-                  qty: it.qty as string | number,
-                  unit: it.unit,
-                  // #245 final review: a POR line on a portal-catalog quote
-                  // still reads $0.00 in cl.ext (nothing else to sum), which
-                  // printed as if the item were actually free — say why.
-                  ext: p.isPortalCatalog && it.por ? "Price on request" : fmt(cl.ext),
-                };
-              }),
-      };
-    });
+    .filter((sec) => sec.alternate !== true && (systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0))
+    .map((sec, i) => docSystem(sec, i + 1, p));
+  let altNum = 0;
+  const alternateGroups = alternateGroupsForPrint(p.sections, p.groups).map((ag) => ({
+    ...ag,
+    systems: ag.sections.map((sec) => ({ ps: docSystem(sec, "A" + ++altNum, p), options: p.pdfOptions ? sec.items.filter((it) => it.option) : [] })),
+  }));
+  const altCount = altNum;
 
   // #245 final review: any POR line left on a SENT portal-catalog quote
   // (staff sent it before every price-on-request item was resolved) means
   // the printed Total is understated by whatever those lines turn out to
   // cost — the label says so instead of implying the total is final.
-  const anyPorPrinted = !!p.isPortalCatalog && p.sections.some((sec) => sec.items.some((it) => !it.option && it.por));
+  // Phase 2b: an alternate's POR line doesn't touch the Total (alternates are
+  // never in it) — it reads "Price on request" in its own band instead.
+  const anyPorPrinted = !!p.isPortalCatalog && p.sections.some((sec) => sec.alternate !== true && sec.items.some((it) => !it.option && it.por));
 
   const lineCount = previewSections.reduce((a, s) => a + s.lines.length, 0);
   const optionItems: Array<{ sec: string; it: SpecItem }> = [];
+  // Phase 2b: an alternate's option lines print inside its own band instead.
   p.sections.forEach((sec) =>
-    sec.items.forEach((it) => {
+    sec.alternate === true ? undefined : sec.items.forEach((it) => {
       if (it.option) optionItems.push({ sec: sec.name, it });
     })
   );
@@ -625,9 +750,10 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               <div>
                 {previewSections.length} {previewSections.length === 1 ? "system" : "systems"} ·{" "}
                 {lineCount} line {lineCount === 1 ? "item" : "items"}
-                {optionItems.length > 0 && showOptions
+                {(altCount > 0 ? ` · ${altCount} ${altCount === 1 ? "alternate" : "alternates"}` : "") +
+                  (optionItems.length > 0 && showOptions
                   ? ` · ${optionItems.length} optional`
-                  : ""}
+                  : "")}
               </div>
               {inclusions && <div>{inclusions}</div>}
             </div>
@@ -655,71 +781,49 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 <GroupHeading name={groupHeadings.get(ps.id)!.name} subtotalLabel={fmt(groupHeadings.get(ps.id)!.subtotal)} />
               )}
               <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-              {ps.presentation === "narrative" ? (
-                <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
-                  {/* #281: blank line = paragraph, "- " = bullet, single breaks kept.
-                      #293: then each key product — heading, paragraph, photo floated right. */}
-                  {(() => {
-                    const blocks = narrativeBlocks(ps.narrative);
-                    if (!blocks.length && !ps.keyProducts.length) return "System scope and pricing are included in the total above.";
-                    return (
-                      <>
-                        {renderNarrativeBlocks(blocks)}
-                        {ps.keyProducts.map((kp, ki) => {
-                          // Own photo (or its manufacturer's image) first; an allowance /
-                          // custom line with neither prints its placeholder (a public
-                          // /placeholders/ URL — same origin for print, share and portal).
-                          const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
-                          const photo = own ?? (kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : undefined);
-                          return (
-                            <div key={"kp-" + kp.sku} className="est-kp" style={{ display: "flow-root", marginTop: blocks.length || ki ? 12 : 0 }}>
-                              {photo ? (
-                                <>
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={photo.src}
-                                    alt={photo.alt}
-                                    style={{ float: "right", width: "34%", maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" }}
-                                  />
-                                </>
-                              ) : null}
-                              <div style={{ fontWeight: 600, color: "#16181d", marginBottom: kp.blocks.length ? 3 : 0 }}>{kp.heading}</div>
-                              {renderNarrativeBlocks(kp.blocks)}
-                            </div>
-                          );
-                        })}
-                      </>
-                    );
-                  })()}
-                </div>
-              ) : isItemized && showLines ? (
-                <ItemizedLines
-                  lines={ps.lines}
-                  hasFreight={ps.hasFreight}
-                  freightLabel={ps.freightLabel}
-                  freightRowLabel={freightRowLabel}
-                  showDesc={p.pdfNotes}
-                  pdfQty={p.pdfQty}
-                  pdfPrices={p.pdfPrices}
-                  lineCols={lineCols}
-                />
-              ) : !isItemized ? (
-                <div
-                  className="est-line"
-                  style={{
-                    padding: "7px 13px 9px",
-                    fontSize: 11.5,
-                    color: "#8c919c",
-                    borderBottom: "1px solid #f0f1f4",
-                    marginBottom: 6,
-                  }}
-                >
-                  {ps.lines.length} line {ps.lines.length === 1 ? "item" : "items"}
-                  {ps.hasFreight ? " · includes freight & delivery" : ""}
-                </div>
-              ) : null}
+              <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} />
             </div>
           ))}
+
+          {/* Phase 2b: alternates — each Alternate group (heading + subtotal) and
+              its systems as bands A1, A2…, priced separately, never in the total */}
+          {alternateGroups.length > 0 && (
+            <div className="est-alts" style={{ marginTop: 26 }}>
+              <div
+                className="est-secband est-althead"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  paddingBottom: 4,
+                  borderBottom: "2px solid #16181d",
+                }}
+              >
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#16181d" }}>Alternates</span>
+                <span style={{ fontSize: 11, color: "#8c919c" }}>Priced separately — not included in the total</span>
+              </div>
+              {alternateGroups.map((ag) => (
+                <div key={"alt-" + ag.group.id}>
+                  <GroupHeading name={ag.group.name} subtotalLabel={fmt(ag.subtotal)} />
+                  {ag.systems.map(({ ps, options }) => (
+                    <div key={"alt-" + ps.id}>
+                      <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
+                      <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} alternate />
+                      {options.length > 0 && (
+                        <div style={{ padding: "0 13px", marginBottom: 6 }}>
+                          {options.map((it) => (
+                            <OptionRow key={"alt-opt-" + it.id} it={it} note="Optional — not included in this alternate’s price" lineCols={lineCols} pdfQty={p.pdfQty} pdfPrices={p.pdfPrices} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* optional additions — priced, not in the total */}
           {showOptions && (
@@ -749,36 +853,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 </span>
               </div>
               {optionItems.map(({ sec, it }) => (
-                <div
-                  key={sec + "-" + it.id}
-                  className="est-line"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: lineCols,
-                    gap: 8,
-                    padding: "7px 0 5px",
-                    fontSize: 12.5,
-                    borderBottom: "1px solid #f0f1f4",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>
-                    {it.desc}
-                    <span style={{ display: "block", fontSize: 10.5, color: "#9aa0ab", marginTop: 1 }}>
-                      {sec}
-                    </span>
-                  </span>
-                  {p.pdfQty && (
-                    <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#8c919c" }}>
-                      {it.qty} {it.unit}
-                    </span>
-                  )}
-                  {p.pdfPrices && (
-                    <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>
-                      {fmt(lineExtSellOf(it))}
-                    </span>
-                  )}
-                </div>
+                <OptionRow key={sec + "-" + it.id} it={it} note={sec} lineCols={lineCols} pdfQty={p.pdfQty} pdfPrices={p.pdfPrices} />
               ))}
               <div style={{ fontSize: 11, color: "#8c919c", marginTop: 8, lineHeight: 1.5 }}>
                 Want any of these included? Let us know and we’ll issue a revised quote.
