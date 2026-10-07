@@ -177,6 +177,26 @@ export function withoutGroupMeta<S extends { groupId?: string; built?: boolean }
   return rest as unknown as S;
 }
 
+/**
+ * Server-side hardening on save: `built` survives only when exactly `true`,
+ * `groupId` only when a string (unknown ids are dropped by normalizeSystemOrder).
+ * Returns the same reference when nothing needs stripping.
+ */
+export function sanitizeSectionGroupMeta<S extends { groupId?: unknown; built?: unknown }>(sec: S): S {
+  if (!sec || typeof sec !== "object") return sec;
+  const badBuilt = "built" in sec && sec.built !== true;
+  const badGroup = "groupId" in sec && typeof sec.groupId !== "string";
+  if (!badBuilt && !badGroup) return sec;
+  const { built: _b, groupId: _g, ...rest } = sec;
+  void _b;
+  void _g;
+  return {
+    ...rest,
+    ...(!badBuilt && "built" in sec ? { built: sec.built } : {}),
+    ...(!badGroup && "groupId" in sec ? { groupId: sec.groupId } : {}),
+  } as unknown as S;
+}
+
 export function withoutBuilt<S extends { built?: boolean }>(sec: S): S {
   if (!("built" in sec)) return sec;
   const { built: _b, ...rest } = sec;

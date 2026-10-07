@@ -54324,7 +54324,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
   ok(rev.map((x) => x.name).join() === "House,Stage", "#P2a document: headings follow section order, not the groups array order");
 
   // real render — print and web layouts
-  const props = { ...p2adProps({ sections: withG({ s2: "g-a", s3: "g-a", s4: "g-b" }) }), groups: G };
+  const props = p2adProps({ sections: withG({ s2: "g-a", s3: "g-a", s4: "g-b" }), groups: G });
   for (const layout of [undefined, "web"] as const) {
     const html = p2adRender({ ...props, layout });
     const tag = layout ?? "print";
@@ -54357,10 +54357,41 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
     "#P2a document: the heading row is uppercase name + subtotal, and keeps with its band (est-secband break rules)");
   ok(view.includes("export function printedGroupHeadings(") && view.includes("systemPrintsInBody(sec)") && !/from "@\/lib\/(stores|db)\/|from "server-only"/.test(view),
     "#P2a document: the helper lives in the client-safe quote-document-view.ts");
-  ok(data.includes("groups: sanitizeGroups(spec?.groups),") && data.includes("as { sections?: unknown; groups?: unknown }"),
+  ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown }"),
     "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
   ok(loader.includes("quoteDocumentDataFor(src, cust, settings)") && printPage.includes("quoteDocumentDataFor(q, cust, settings)"),
     "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
   const online = rd("src/components/online-estimate/online-estimate.tsx");
   ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");
+}
+
+/* #P2a hardening — final review: normalise before the credit settle and in the PDF loader, sanitise built/groupId. */
+import * as p2h from "@/lib/estimate-groups/groups";
+import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-data";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const G = [{ id: "g-a", name: "Stage", alternate: false }];
+  // sanitizeSectionGroupMeta
+  const clean = { id: "1", built: true, groupId: "g-a" };
+  ok(p2h.sanitizeSectionGroupMeta(clean) === clean, "#P2a hardening: valid built/groupId keep the same reference");
+  const bad = p2h.sanitizeSectionGroupMeta({ id: "1", built: "yes", groupId: 5 } as never) as Record<string, unknown>;
+  ok(!("built" in bad) && !("groupId" in bad) && bad.id === "1", "#P2a hardening: built that is not exactly true and a non-string groupId are stripped");
+  const falsy = p2h.sanitizeSectionGroupMeta({ id: "1", built: false, groupId: "g-a" } as never) as Record<string, unknown>;
+  ok(!("built" in falsy) && falsy.groupId === "g-a", "#P2a hardening: built:false is stripped, a string groupId is kept");
+  // loader normalises the printed order
+  const q = { id: "Q-1", name: "n", customer: "c", customerId: null, owner: "o", preparedBy: "", updatedAt: 1, createdAt: 1, revisions: [],
+    spec: { sections: [{ id: "x", groupId: "g-a", items: [] }, { id: "y", items: [] }, { id: "z", groupId: "g-zz", items: [] }], groups: G } };
+  const d = p2hData(q as never, null, { companyName: "Peak", logoDark: null });
+  ok(d.sections.map((s) => s.id).join() === "y,z,x" && !("groupId" in d.sections[1]), "#P2a hardening: quoteDocumentDataFor prints ungrouped first and drops an unknown groupId");
+  // unmarkEdited: a groupId change plus a content change loses built
+  type P2h = { id: string; built?: boolean; groupId?: string; name: string };
+  const prev: P2h[] = [{ id: "1", built: true, name: "Main" }];
+  const out = p2h.unmarkEdited(prev, [{ id: "1", built: true, name: "Main 2", groupId: "g-a" }] as P2h[]);
+  ok(out[0].built === undefined && !("built" in out[0]) && out[0].groupId === "g-a" && out[0].name === "Main 2", "#P2a hardening: a groupId change AND a content change loses built");
+  // source pins
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  const norm = acts.indexOf("normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups)");
+  const settle = acts.indexOf("await settleRewardCredit(sellSanitized,");
+  ok(norm > 0 && settle > norm, "#P2a hardening: saveQuoteAction normalises the sections (and sanitises built/groupId) before the Rewards credit is settled");
+  ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups }"), "#P2a hardening: the final write stays normalised");
 }

@@ -35,7 +35,7 @@ import {
 } from "@/lib/stores/inspections";
 import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import { copySectionForTarget } from "./copy-system";
-import { normalizeSystemOrder, sanitizeGroups, withoutGroupMeta, type SystemGroup } from "@/lib/estimate-groups/groups";
+import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, withoutGroupMeta, type SystemGroup } from "@/lib/estimate-groups/groups";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf, usableTierMargin } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
@@ -401,7 +401,13 @@ export async function saveQuoteAction(
   // otherwise, before anything prices or stores the sections.
   // #293: key-product blocks are shape-cleaned server-side whatever the client posts.
   // #301: the output fields (discipline, client goals, cover text) are cleaned the same way.
-  const sellSanitized = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields) : payload.sections;
+  const sellSanitizedRaw = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields) : payload.sections;
+  // Phase 2a: the groups are sanitised (an older caller without `groups` keeps
+  // the stored ones) and the sections normalised BEFORE the Rewards credit is
+  // settled, so the credit always lands on the true last system. built/groupId
+  // are hardened (built only when exactly true, groupId only when a string).
+  const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
+  const sellSanitized = Array.isArray(sellSanitizedRaw) ? normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups) : sellSanitizedRaw;
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
   // when any other line carries one.
@@ -421,8 +427,6 @@ export async function saveQuoteAction(
     };
   }
   const postedSections = credit.sections;
-  // Phase 2a: an older caller without `groups` keeps the stored ones.
-  const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
   const { sections: savedSections, anyPor, anyConfirm } = isPortalCatalog
     ? clearPricedPor(postedSections)
     : { sections: postedSections, anyPor: false, anyConfirm: false };

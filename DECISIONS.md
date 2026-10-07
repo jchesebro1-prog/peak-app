@@ -9653,8 +9653,10 @@ A quote's systems can be grouped. `spec.groups` is a list of `SystemGroup {id, n
 so revisions and packages carry it like the sections. Ids are `g-…`; at most 20 groups; a name is trimmed to 80 characters
 and falls back to "Untitled group". `alternate` is stored but always false until Phase 2b (In total / Alternate end to end).
 The order invariant is: ungrouped systems first, then each group's systems in group order. One pure function
-(`src/lib/estimate-groups/`) restores it and is run on every mutation, on load and on save, so a stale or hand-edited
-document can never print out of order.
+(`src/lib/estimate-groups/`) restores it and is run on every mutation, on load, on save (before the Rewards credit is
+settled, so the credit lands on the true last system) and in the PDF data loader (`quoteDocumentDataFor`) — the save, the
+page load and the PDF loader all normalise the order. Save also hardens the metadata: `built` is kept only when exactly
+`true` and `groupId` only when a string.
 
 ## D649. `built` and collapse are staff-only; what clears `built` (#306, 2026-10-07)
 
@@ -9662,7 +9664,10 @@ document can never print out of order.
 customer document. Collapse is per person per quote in localStorage, never stored on the quote. A content edit to a system
 clears `built`; a move between groups does not (a move is not an edit). Automatic writes — tier re-price and its undo,
 freight auto-apply, goals pre-fill — and the Rewards credit re-pin do not clear it either. Mark built also clears the #254
-tier-reprice banner for that system, because it goes through the normal wrapper.
+tier-reprice banner for that system, because it goes through the normal wrapper. The #254 tier re-price banner (and its
+Undo) is quote-wide, and is cleared by Mark built AND by every reorder / group change (drag, ↑/↓, Group select, group
+delete) — they all go through the setSections wrapper. Marking built does not flag the PDF as unsaved (built isn't
+printed), so built flags are only kept by the next Save, while collapse is remembered in the browser.
 
 ## D650. Rail interactions: drag, arrows, delete, New group (#306, 2026-10-07)
 
@@ -9676,7 +9681,8 @@ call (`addGroupForSystem`), then focuses the group's rename in the rail; the opt
 
 A system that leaves an estimate drops its group metadata: move to an existing or new estimate, copy to another estimate, and
 loading a system from the library. Copy within the same estimate keeps the source's group. Add system and Load system join
-the active system's group. The target of a move keeps its own groups; the moved system arrives ungrouped.
+the active system's group. The target of a move keeps its own groups; the moved system arrives ungrouped. A system moved into an estimate that has groups therefore lands at the TOP of the
+target (ungrouped first). Portal Refresh pricing rebuilds the spec without groups (portal carts have none).
 
 ## D652. Groups on the customer document (#306, 2026-10-07)
 

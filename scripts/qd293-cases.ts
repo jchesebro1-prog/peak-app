@@ -44,11 +44,11 @@ export function qd293Sections(): SpecSection[] {
   ];
 }
 
-export function qd293Props(opts: { sections?: SpecSection[]; pdfOptions?: Record<string, unknown> } = {}): QuoteDocumentProps {
+export function qd293Props(opts: { sections?: SpecSection[]; groups?: unknown; pdfOptions?: Record<string, unknown> } = {}): QuoteDocumentProps {
   const quote = {
     id: "Q-293", name: "Narrative test", customer: "Walk-in", customerId: null, owner: "Pat Estimator", preparedBy: "",
     updatedAt: AT, createdAt: AT, revisions: [], quoteNote: "Cover note.", assumptions: "Assume access.", paymentTerms: "Net 30",
-    spec: { sections: opts.sections ?? qd293Sections() },
+    spec: { sections: opts.sections ?? qd293Sections(), ...(opts.groups !== undefined ? { groups: opts.groups } : {}) },
     vendorQuotes: [{ id: "VQ-1", vendor: "Acme", quoteNumber: "Q9", description: "Motors", display: "itemized", lines: [{ id: 1, description: "Motor", qty: 2, unit: "ea", amount: 100 }], terms: "", notes: "", total: 100, includesFreight: false }],
     pdfOptions: { ...(opts.pdfOptions || {}) },
   };

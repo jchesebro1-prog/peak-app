@@ -6,7 +6,7 @@ import { totals } from "@/app/(app)/estimator/pricing";
 import { PAYMENT_TERMS, type PaymentTerms, type SpecSection, type VendorQuote } from "@/app/(app)/estimator/types";
 import { normalizePdfOptions } from "./pdf-options";
 import { documentRevStamp } from "./state";
-import { sanitizeGroups } from "@/lib/estimate-groups/groups";
+import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
@@ -66,7 +66,9 @@ export function quoteDocumentDataFor(
   settings: Pick<AppSettingsData, "companyName" | "logoDark">
 ): QuoteDocumentProps {
   const spec = (q.spec || null) as { sections?: unknown; groups?: unknown } | null;
-  const sections = spec && Array.isArray(spec.sections) ? (spec.sections as SpecSection[]) : [];
+  const groups = sanitizeGroups(spec?.groups);
+  // Phase 2a: the printed order is always normalised (same reference when already valid).
+  const sections = normalizeSystemOrder(spec && Array.isArray(spec.sections) ? (spec.sections as SpecSection[]) : [], groups);
   const vendorQuotes = Array.isArray(q.vendorQuotes)
     ? (q.vendorQuotes as VendorQuote[]).filter((v) => !!v && typeof v.id === "string")
     : [];
@@ -114,7 +116,7 @@ export function quoteDocumentDataFor(
     assumptions: q.assumptions || "",
     sections,
     // Phase 2a — read from the same spec (live quote or a frozen revision) as `sections`.
-    groups: sanitizeGroups(spec?.groups),
+    groups,
     vendorQuotes,
     t: totals(sections, TAX_RATE_PCT),
     taxRatePct: TAX_RATE_PCT,
