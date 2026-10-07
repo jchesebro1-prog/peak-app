@@ -53,28 +53,11 @@ import { allDocumentLinks, documentLinkId } from "@/lib/stores/part-documents";
 import { markQuotePdfStale } from "@/lib/quote-pdf/schedule";
 import { rewriteQuoteSpecRefs } from "@/lib/stores/quotes";
 import { TRACK_SERIES_BLOB } from "@/lib/track-series";
-import { CROSSWALK_CELL_MAX, CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart, type RenamePlan } from "./plan";
+import { CROSSWALK_CELL_MAX, CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart } from "./plan";
 import * as RW from "./rewrite";
+import { REF_STEPS, type RefStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
 
-export const REF_STEPS = [
-  "parts-refs",
-  "doc-links",
-  "accessory-links",
-  "quotes",
-  "projects",
-  "portal-carts",
-  "spec-documents",
-  "subassemblies",
-  "grid-symbols",
-  "grid-projects",
-  "blobs",
-] as const;
-export type RefStep = (typeof REF_STEPS)[number];
-export type RenameStep = "parts" | RefStep | "done";
-export type RenameBatchInput = { rows: CrosswalkRow[]; step: RenameStep; refsOnly?: boolean };
-export type RenameBatchResult =
-  | { ok: true; step: RenameStep; complete: boolean; renamed: number; changed: number; plan: RenamePlan | null }
-  | { ok: false; error: string };
+export { REF_STEPS, type RefStep, type RenameStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => !!v && typeof v === "object" && !Array.isArray(v);

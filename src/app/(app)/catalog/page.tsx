@@ -325,6 +325,24 @@ export default async function CatalogPage({
               Departments
             </Link>
           )}
+          {/* #302 — order-number SKUs → Brand:Model from a crosswalk sheet (admin). */}
+          {isAdmin && (
+            <Link
+              href="/catalog/model-numbers"
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#16181d",
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "10px 15px",
+                textDecoration: "none",
+              }}
+            >
+              Model numbers
+            </Link>
+          )}
           <Link
             href="/catalog?new=1"
             style={{

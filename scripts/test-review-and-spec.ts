@@ -8,6 +8,7 @@ import { normalizeSku } from "@/lib/davinci/sku";
 import { modelSku as cr302ModelSku, partModel as cr302PartModel, partMatchesQuery as cr302Match, partSearchHaystack as cr302Hay, staffPartLabel as cr302Label, cleanModel as cr302Clean } from "@/lib/catalog-rename/sku";
 import { planRenames as cr302Plan, crosswalkRowsFromGrid as cr302Rows } from "@/lib/catalog-rename/plan";
 import * as cr302Rw from "@/lib/catalog-rename/rewrite";
+import { cleanCrosswalkRows as cr302CleanRows, cleanRenameBatchInput as cr302CleanInput, isRenameStep as cr302IsStep, REF_STEPS as cr302RefSteps, RENAME_OUTCOME_LABEL as cr302OutcomeLabel, RENAME_STEP_LABEL as cr302StepLabel } from "@/lib/catalog-rename/steps";
 import { buildImportResolver as cr302Resolver } from "@/lib/catalog-rename/import-resolve";
 import { assemblyParts as cr302GridLib } from "@/lib/design/grid-library";
 import { paletteView as cr302Palette } from "@/lib/design/grid-palette";
@@ -11125,6 +11126,40 @@ import { documentRow as cr302DocRow } from "@/lib/part-docs/views";
   ok(dr.model === "Jupiter 4", "#302 datasheets row: the Model # (partModel)");
 }
 
+/* --- #302 Task 9: Catalog → Model numbers (admin page, batch input cleaning) --- */
+{
+  const src302 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const dir = "src/app/(app)/catalog/model-numbers";
+  const page = src302(`${dir}/page.tsx`);
+  const actions = src302(`${dir}/actions.ts`);
+  const client = src302(`${dir}/model-numbers-client.tsx`);
+  ok(page.includes('requirePerm("manage_users")') && page.includes("export const maxDuration = 60"), "#302 page: the page is admin-only (manage_users) with a 60 s maxDuration");
+  ok(actions.split('requirePerm("manage_users")').length === 3, "#302 page: both actions require manage_users");
+  ok(actions.includes("cleanRenameBatchInput(input)") && actions.includes("FETCH_ACTION_BUDGET_MS") && /if \(r\.ok && r\.complete\) \{\s*revalidatePath\("\/catalog"\)/.test(actions), "#302 page: the batch action cleans its input, runs under the fetch budget and revalidates /catalog when complete");
+  ok(actions.includes('readSheetFile(Buffer.from(await file.arrayBuffer()), file.name, CROSSWALK_SHEET_NAME)') && actions.includes('CROSSWALK_SHEET_NAME = "Crosswalk"') && actions.includes("MAX_SHEET_BYTES"), "#302 page: the preview reads the Crosswalk sheet under the 800 KB cap");
+  ok(/try \{\s*r = await runModelNumbersBatchAction\(/.test(client) && /try \{\s*r = await planModelNumbersAction\(/.test(client) && client.includes('"Could not reach the server. Try again."'), "#302 page: the client catches each action await (Could not reach the server)");
+  ok(client.includes("setResume({ step, refsOnly })") && client.includes("resuming?.step ??"), "#302 page: a stopped run keeps its step and the same button resumes there");
+  ok(!/from "@\/lib\/catalog-rename\/apply"/.test(client) && !/from "@\/lib\/stores\//.test(client) && /import type \{[^}]*\} from "@\/lib\/catalog-rename\/plan"/.test(client), "#302 page: the client never imports the server engine or a store (plan types only)");
+  ok(src302("scripts/smoke-routes.ts").includes('"/catalog/model-numbers"'), "#302 page: smoke-routes lists /catalog/model-numbers");
+  ok(/isAdmin && \(\s*<Link\s+href="\/catalog\/model-numbers"/.test(src302("src/app/(app)/catalog/page.tsx")), "#302 page: the catalog page links Model numbers for admins only");
+
+  // Step labels cover every step; outcome labels every outcome.
+  ok(["parts", ...cr302RefSteps, "done"].every((st) => cr302IsStep(st) && !!cr302StepLabel[st as keyof typeof cr302StepLabel]) && Object.keys(cr302StepLabel).length === cr302RefSteps.length + 2, "#302 page: every rename step has a plain-words label");
+  ok(cr302StepLabel.parts === "Renaming parts" && cr302StepLabel.quotes === "Updating quotes" && !cr302IsStep("bogus") && !cr302IsStep("toString") && !cr302IsStep(3), "#302 page: step labels read plainly; unknown steps (incl. prototype keys) are refused");
+  const planned302 = cr302Plan([{ rowNumber: 2, manufacturer: "X", mfrPart: "", sku: "a", model: "b", notes: "" }], [], []);
+  ok(Object.keys(planned302.counts).every((o) => !!cr302OutcomeLabel[o as keyof typeof cr302OutcomeLabel]) && Object.keys(cr302OutcomeLabel).length === Object.keys(planned302.counts).length, "#302 page: every plan outcome has a chip label");
+
+  // Untrusted batch rows.
+  const long = "x".repeat(3000);
+  const cleaned = cr302CleanRows([{ rowNumber: 7, manufacturer: " Biamp ", sku: 1234, model: long, notes: { evil: 1 } }, null, "junk", [1], { rowNumber: "abc", sku: "s" }, { rowNumber: -3, sku: "t" }]);
+  ok(cleaned.length === 3 && cleaned[0].rowNumber === 7 && cleaned[0].manufacturer === "Biamp" && cleaned[0].sku === "1234" && cleaned[0].model.length === 2048 && cleaned[0].notes === "" && cleaned[0].mfrPart === "", "#302 page: rows are cleaned — strings trimmed + capped at 2,048, numbers stringified, objects dropped to blank");
+  ok(cleaned[1].rowNumber === 6 && cleaned[2].rowNumber === 7, "#302 page: a non-numeric or non-positive rowNumber falls back to its sheet position");
+  ok(cr302CleanRows(Array.from({ length: 5100 }, () => ({ sku: "s" }))).length === 5000 && cr302CleanRows("nope").length === 0, "#302 page: rows are capped at 5,000; a non-list is no rows");
+  ok(cr302CleanInput({ rows: [], step: "nope" }) === null && cr302CleanInput(null) === null, "#302 page: an unknown step is refused before the engine runs");
+  const ci = cr302CleanInput({ rows: [{ sku: "a" }], step: "quotes", refsOnly: "yes" });
+  ok(!!ci && ci.step === "quotes" && ci.refsOnly === false && ci.rows.length === 1 && cr302CleanInput({ rows: [], step: cr302RefSteps[0], refsOnly: true })?.refsOnly === true, "#302 page: step kept, refsOnly only when literally true");
+}
+
 
 seeded()
   .then(() => fixtureLeakChecks())
@@ -11322,6 +11357,7 @@ seeded()
   .then(() => modelSku302ImportAsyncChecks())
   .then(() => modelSku302FrozenAsyncChecks())
   .then(() => modelSku302LiveWritersAsyncChecks())
+  .then(() => modelSku302PageAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -53546,4 +53582,22 @@ async function modelSku302LiveWritersAsyncChecks(): Promise<void> {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
   }
+}
+
+/** #302 Task 9 — readSheetFile reads the named sheet (the crosswalk passes "Crosswalk"), default unchanged. */
+async function modelSku302PageAsyncChecks(): Promise<void> {
+  const wb = new ExcelJS.Workbook();
+  wb.addWorksheet("Instructions").addRow(["Read me first"]);
+  const cw = wb.addWorksheet("Crosswalk");
+  cw.addRow(["Manufacturer", "MFR Part # (order number)", "SKU", "Description", "Category", "Model #", "Source URL", "Notes"]);
+  cw.addRow(["Symetrix", "80-0043", "80-0043", "DSP", "Audio", "Jupiter 4", "https://x", ""]);
+  const buf = Buffer.from(await wb.xlsx.writeBuffer());
+  const named = await phsRead(buf, "crosswalk.xlsx", "Crosswalk");
+  ok(named.ok && named.grid[0][2] === "SKU" && named.grid[1][5] === "Jupiter 4", "#302 page: readSheetFile reads the sheet named by sheetName (Crosswalk second)");
+  const parsed = named.ok ? cr302Rows(named.grid) : null;
+  ok(!!parsed && parsed.ok && parsed.rows.length === 1 && parsed.rows[0].sku === "80-0043" && parsed.rows[0].model === "Jupiter 4", "#302 page: the Crosswalk sheet parses into crosswalk rows");
+  const dflt = await phsRead(buf, "crosswalk.xlsx");
+  ok(dflt.ok && dflt.grid[0][0] === "Read me first", "#302 page: without sheetName (and no Photos sheet) readSheetFile still reads the first sheet");
+  const missing = await phsRead(buf, "crosswalk.xlsx", "Nope");
+  ok(missing.ok && missing.grid[0][0] === "Read me first", "#302 page: an absent sheetName falls back to the first sheet");
 }
