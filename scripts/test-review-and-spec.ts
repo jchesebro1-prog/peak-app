@@ -52474,3 +52474,41 @@ import {
     "#304 steps: other params are kept; a newly saved id is written");
   ok(e304Search("?id=Q-1&step=review", "review", "Q-1") === "?id=Q-1&step=review", "#304 steps: idempotent");
 }
+
+/* #304 — readiness badges on the four tabs. */
+import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
+{
+  type Sec = import("@/app/(app)/estimator/types").SpecSection;
+  const line = (o: Record<string, unknown> = {}) => ({ id: 1, sku: "A", desc: "Part", qty: 1, unit: "ea", cost: 50, price: 100, ...o });
+  const sec = (o: Record<string, unknown> = {}): Sec => ({ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [line()], ...o }) as unknown as Sec;
+  const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
+
+  const empty = e304Ready({ ...base, sections: [] });
+  ok(empty.build.state === "idle" && empty.build.label === "No systems yet", "#304 readiness: no systems → Build idle");
+
+  const good = e304Ready({ ...base, sections: [sec(), sec({ id: "s2", name: "Rigging" })] });
+  ok(good.build.state === "ok" && good.build.label === "✓ 2 systems priced", "#304 readiness: every system has priced lines → ✓ N systems priced");
+
+  const gaps = e304Ready({ ...base, sections: [sec({ items: [] }), sec({ id: "s2", items: [line({ price: 0 }), line({ id: 2, price: 0 }), line({ id: 3 })] })] });
+  ok(gaps.build.state === "gaps" && gaps.build.count === 3 && gaps.build.label === "1 empty system · 2 unpriced lines", "#304 readiness: empty systems + unpriced lines are counted and named");
+
+  const credit = e304Ready({ ...base, sections: [sec({ items: [line({ rewardCredit: true, price: -50 })] })] });
+  ok(credit.build.state === "gaps" && credit.build.label === "1 empty system", "#304 readiness: a Rewards credit line neither prices nor fills a system");
+
+  ok(e304Ready({ ...base, saved: false, sections: [sec()] }).package.state === "idle" && e304Ready({ ...base, saved: false, sections: [sec()] }).package.label === "Save first",
+    "#304 readiness: an unsaved quote's Package is idle");
+  const narr = e304Ready({ ...base, sections: [sec({ presentation: "narrative", narrative: "" })] });
+  ok(narr.package.state === "gaps" && (narr.package.count ?? 0) >= 1 && /gap/.test(narr.package.label), "#304 readiness: a printed narrative system with no intro is a Package gap");
+  const narrOk = e304Ready({ ...base, sections: [sec({ presentation: "narrative", narrative: "A new LED system.", clientGoals: "Brighter stage." })] });
+  ok(narrOk.package.state === "ok" && narrOk.package.label === "✓ Ready", "#304 readiness: no gaps → ✓ Ready");
+
+  ok(e304Ready({ ...base, sections: [sec()] }).review.label === "Not submitted" && e304Ready({ ...base, sections: [sec()] }).review.state === "idle", "#304 readiness: no review view → Not submitted");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).review.state === "ok", "#304 readiness: approved → ok");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Changes requested", tone: "changes" } }).review.state === "gaps", "#304 readiness: changes requested → gaps");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "In review · Jeff", tone: "review" } }).review.label === "In review · Jeff", "#304 readiness: the review label is the pill's own");
+
+  ok(e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.label === "Sent · Rev 2" && e304Ready({ ...base, sections: [sec()], status: "sent", revNum: 2 }).send.state === "ok", "#304 readiness: sent → Sent · Rev N");
+  ok(e304Ready({ ...base, sections: [sec()], status: "won" }).send.label === "Won" && e304Ready({ ...base, sections: [sec()], status: "lost" }).send.label === "Lost", "#304 readiness: won / lost");
+  ok(e304Ready({ ...base, sections: [sec()], review: { label: "Approved", tone: "approved" } }).send.label === "Ready to send", "#304 readiness: an approved draft is Ready to send");
+  ok(e304Ready({ ...base, sections: [sec()] }).send.label === "—", "#304 readiness: an unapproved draft shows —");
+}
