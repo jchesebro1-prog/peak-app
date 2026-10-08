@@ -34421,16 +34421,17 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
     "spec pickers: the estimator page reads the records on the server and passes specKeys as strings");
   const client = estimatorSource();
   const addCustom = client.slice(client.indexOf("const addCustomPart = async"), client.indexOf("/* ---------------- vendor quote (#143"));
-  ok(/specKey: d\.specKey \|\| undefined/.test(addCustom), "spec pickers: the custom-part path writes SpecItem.specKey from the form");
+  ok(!/specKey/.test(addCustom), "spec pickers: the custom-part path no longer carries a form specKey (#312 moved the Spec select to Customer review; the Specs card sets it)");
   const addCurtain = client.slice(client.indexOf("const addCurtain = (secId: string)"), client.indexOf("const setFixture ="));
   ok(/specKey: curtainSpecKey\(undefined, name\) \|\| undefined/.test(addCurtain), "spec pickers: an estimator curtain add defaults its specKey from the curtain name");
-  ok(/const setItemSpecKey = /.test(client) && /onSetSpecKey=\{setItemSpecKey\}/.test(client) && /specKeys=\{specKeys\}/.test(client),
-    "spec pickers: the estimator hands the section card its Spec options and setter");
-  ok(/specKey: "",/.test(client.slice(client.indexOf("const freshCustom ="), client.indexOf("const freshCustom =") + 600)), "spec pickers: a fresh custom-part draft starts with no spec key");
+  ok(/const setItemSpecKey = /.test(client) && /setItemSpecKey\(r\.item\.id, v\)/.test(client) && /options=\{specKeys\}/.test(client),
+    "spec pickers: the Spec options and setter reach the review sidebar's Specs card (#312 moved them off the Build rows)");
+  ok(!/specKey/.test(client.slice(client.indexOf("const freshCustom ="), client.indexOf("const freshCustom =") + 600)) && !/CustomDraft = \{[^}]*specKey/.test(src("src/app/(app)/estimator/types.ts")), "spec pickers: the custom-part draft has no spec key field (#312 fix round 1: the dead CustomDraft.specKey is gone)");
   const card = src("src/app/(app)/estimator/section-card.tsx");
-  ok(/isInternal && \(it\.custom \|\| it\.curtain\) && \(/.test(card) && /auto=\{autoSpecKeyFor\(it\)\}/.test(card) && /p\.onSetSpecKey\(it\.id, v\)/.test(card),
-    "spec pickers: custom and curtain lines get a Spec select (Auto placeholder for a curtain)");
-  ok(/p\.onSetCustomDraft\("specKey", v\)/.test(card), "spec pickers: the custom-part form offers the Spec select");
+  const sidebar = src("src/app/(app)/estimator/steps/review-sidebar.tsx");
+  ok(/item\.custom \|\| item\.curtain/.test(src("src/lib/estimate-review/review-ui.ts")) && /auto=\{autoSpecKeyFor\(r\.item\)\}/.test(sidebar) && /value=\{r\.item\.specKey \|\| ""\}/.test(sidebar),
+    "spec pickers: custom and curtain lines get a Spec select on Customer review (Auto placeholder for a curtain) — moved from the Build rows in #312");
+  ok(!/SpecKeySelect|onSetSpecKey/.test(card), "spec pickers: the custom-part form and Build rows no longer offer the Spec select (#312)");
   const sel = src("src/components/spec-key-select.tsx");
   ok(/`Auto: \$\{auto\}`/.test(sel) && /"— none —"/.test(sel), "spec pickers: the empty option reads Auto: <key> or — none —");
 
@@ -58557,4 +58558,150 @@ import { Fragment as P312Fragment, Slice as P312Slice } from "@tiptap/pm/model";
     "#312 price lines: the editor view shows a muted 'Not printed' note for an existing system that doesn't print, and amber 'removed' only for a missing one");
   ok(rd("src/components/package-doc/package-doc-view.tsx").includes('case "systotal"') && rd("src/lib/package-doc/sanitize.ts").includes('case "systemTotal"') && rd("src/lib/package-doc/resolve.ts").includes('case "systemTotal"'),
     "#312 price lines: the sanitizer, resolver and renderer each handle systemTotal");
+}
+
+// ---- #312 estimator: edit custom parts in place; Specs move to Customer review ----
+import * as cpe312 from "@/app/(app)/estimator/custom-part-edit";
+import * as tr312 from "@/app/(app)/estimator/tier-reprice";
+import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const build = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  const side = rd("src/app/(app)/estimator/steps/review-sidebar.tsx");
+  const base = { id: 7, sku: "CUSTOM", desc: "Bracket", qty: 2, unit: "ea", cost: 100, price: 142.86, custom: true } as const;
+  type Item = Parameters<typeof cpe312.customDraftFromLine>[0];
+  const it = (o: Partial<Item> = {}): Item => ({ ...base, ...o } as Item);
+
+  ok(cpe312.isCustomLineEditable(it()) && cpe312.isCustomLineEditable(it({ allowance: true, sku: "" })),
+    "#312 estimator: a hand-entered custom part and a custom allowance are click-to-edit");
+  ok(!cpe312.isCustomLineEditable(it({ custom: false })) && !cpe312.isCustomLineEditable(it({ labor: true })) && !cpe312.isCustomLineEditable(it({ curtain: true })) &&
+     !cpe312.isCustomLineEditable(it({ fixture: true })) && !cpe312.isCustomLineEditable(it({ vendorQuoteId: "vq1" })) && !cpe312.isCustomLineEditable(it({ por: true })) &&
+     !cpe312.isCustomLineEditable(it({ rackId: "R1" })),
+    "#312 estimator: catalog, labor, curtain, fixture, vendor-quote, price-on-request and rack lines are not custom-editable");
+
+  const d = cpe312.customDraftFromLine(it({ manufacturer: "ETC", link: "https://x.test", priceGoodThrough: "2026-11-01" }), "2026-10-08");
+  ok(d.desc === "Bracket" && d.qty === "2" && d.cost === "100" && d.price === "142.86" && d.manufacturer === "ETC" && d.link === "https://x.test" && d.priceGoodThrough === "2026-11-01" &&
+     d.sku === "" && d.addToCatalog === "" && d.allowance === "",
+    "#312 estimator: the draft fills from the line; the CUSTOM placeholder SKU shows blank; Add to catalog starts unticked");
+  ok(cpe312.customDraftFromLine(it({ price: 123.45 })).priceAuto === "" && cpe312.customDraftFromLine(it({ price: tr312.customPartSell(100) })).priceAuto === "1",
+    "#312 estimator: a hand-set sell stops following cost; the auto sell keeps following it");
+  ok(cpe312.customDraftFromLine(it({ sku: "ABC-1" })).sku === "ABC-1" && cpe312.customDraftFromLine(it({ allowance: true, sku: "" })).allowance === "1",
+    "#312 estimator: a real SKU and the allowance flag round-trip into the draft");
+
+  const sec = {
+    id: "s1", name: "Rigging", items: [
+      it({ id: 1, sku: "A", custom: false, desc: "first" }),
+      it({ id: 7, lineOrder: 5, comment: "c", internalNote: "n", option: true, specKey: "SK", link: "https://x.test", manufacturer: "ETC" }),
+      it({ id: 9, sku: "B", custom: false, desc: "last" }),
+    ],
+  } as unknown as Parameters<typeof cpe312.replaceCustomLine>[0];
+  const fresh = { id: 7, sku: "NEW-1", desc: "Bracket v2", qty: 3, unit: "ea", cost: 90, price: 130, custom: true, specKey: undefined } as Item;
+  const out = cpe312.replaceCustomLine(sec, 7, fresh);
+  const rep = out.items[1];
+  ok(out.items.length === 3 && out.items[0].id === 1 && out.items[2].id === 9 && rep.id === 7 && rep.sku === "NEW-1" && rep.desc === "Bracket v2" && rep.qty === 3 && rep.price === 130 && rep.cost === 90,
+    "#312 estimator: Save changes replaces the line's fields at the same id and position");
+  ok(rep.lineOrder === 5 && rep.comment === "c" && rep.internalNote === "n" && rep.option === true && rep.specKey === "SK" && rep.custom === true,
+    "#312 estimator: lineOrder, comment, internal note, option and specKey survive an edit");
+  ok(!("link" in rep) && !("manufacturer" in rep), "#312 estimator: a field the form cleared is removed, not left stale");
+  ok(cpe312.replaceCustomLine(sec, 999, fresh) === sec, "#312 estimator: a line deleted while the form was open leaves the system unchanged");
+  const ov = cpe312.replaceCustomLine({ ...sec, items: [it({ id: 7, extSellOverride: 500 })] } as typeof sec, 7, it({ id: 7, price: 130, qty: 2 }));
+  const ov2 = cpe312.replaceCustomLine({ ...sec, items: [it({ id: 7, extSellOverride: 500 })] } as typeof sec, 7, it({ id: 7 }));
+  ok(!("extSellOverride" in ov.items[0]) && ov2.items[0].extSellOverride === 500,
+    "#312 estimator: a hand extended-sell survives only while unit sell and qty are unchanged");
+
+  ok(/const customEditable = isInternal && !!p\.onEditCustom && isCustomLineEditable\(it\);/.test(card) && card.includes('lineDesc + " — click to edit this custom part"') &&
+     /else if \(customEditable\) p\.onEditCustom\?\.\(it\.id\);/.test(card) && card.includes("curtainEditable || customEditable") &&
+     card.includes("aria-label={`Edit custom part ${it.desc}`}") && card.includes("✎"),
+    "#312 estimator: a custom line's description (title '… — click to edit this custom part') and a ✎ button reopen the form");
+  ok(card.includes('p.customEditing ? "Save changes" : "Add custom part"') && card.includes('p.customEditing ? "Edit custom part" : "Custom part"') && card.includes("onClick={handleToggleCustom}") && card.includes("Cancel"),
+    "#312 estimator: the form's button reads Save changes while editing (Add custom part otherwise), with Cancel");
+  ok(!card.includes("SpecKeySelect") && !card.includes("onSetSpecKey") && !card.includes("specKeys") && !build.includes("setItemSpecKey") && !build.includes("specKeys="),
+    "#312 estimator: the Build rows and the Custom part form no longer carry the Spec select");
+  ok(build.includes("onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}") && build.includes("customEditing={!!customEdit}"),
+    "#312 estimator: the Build step wires the custom edit to the section card");
+  ok(hook.includes("const openCustomEdit = (secId: string, lineId: number)") && hook.includes("customEditRef.current = { lineId, draft: customDraftFromLine(it) };") && hook.includes("closeInput();\n    customEditRef.current") &&
+     hook.includes("const edit = customEditRef.current;") && hook.includes("saveCustomEdit(x, editId, customItem, sellUntouched(d, at)).section") && hook.includes("else pushItems(secId, [{ ...customItem, id: nextId() }]);"),
+    "#312 estimator: the hook stages the pre-filled draft, consumes it on open, and saves through replaceCustomLine (add path unchanged)");
+  ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
+    "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
+  ok((hook.match(/setSectionsState\(/g) || []).length === 5 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
+    "#312 estimator: setSectionsState( count stays 5; `next` stays last in the hook's return");
+
+  type R312 = { id: number; custom?: boolean; curtain?: boolean };
+  const rows = specLineRows312<R312>([
+    { name: "Drapes", items: [{ id: 1, custom: false }, { id: 2, curtain: true }] },
+    { name: "", items: [{ id: 3, custom: true }, { id: 4 }] },
+  ]);
+  ok(rows.length === 2 && rows[0].system === "Drapes" && rows[0].item.id === 2 && rows[1].system === "System" && rows[1].item.id === 3 && specLineRows312<R312>([{ name: "X", items: [{ id: 1 }] }]).length === 0,
+    "#312 estimator: the Specs card lists every custom and curtain line with its system, nothing when there are none");
+  ok(side.includes("<SpecsCard s={s} />") && side.includes("if (rows.length === 0) return null;") && side.includes("COPY.specs") && side.includes("onChange={(v) => setItemSpecKey(r.item.id, v)}") &&
+     side.includes("value={r.item.specKey || \"\"}") && side.includes("options={specKeys}") && side.includes("auto={autoSpecKeyFor(r.item)}") && /specs: "Specs"/.test(rd("src/lib/estimate-review/review-ui.ts")),
+    "#312 estimator: Customer review's internal sidebar gains a 'Specs' card (SpecKeySelect, auto key, setItemSpecKey), hidden when empty");
+}
+
+// ---- #312 estimator fix round 1: exact sell kept, star + document re-anchor, removed-line notice ----
+import * as rean312 from "@/lib/package-doc/reanchor";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  type Item = Parameters<typeof cpe312.customDraftFromLine>[0];
+  type Sec = Parameters<typeof cpe312.replaceCustomLine>[0];
+  const line = (o: Partial<Item> = {}): Item => ({ id: 7, sku: "CUSTOM", desc: "Bracket", qty: 3, unit: "ea", cost: 600, price: 1000 / 3, custom: true, ...o } as Item);
+
+  // 1. Unit sell untouched -> the exact stored price (and ext override) survive; touching it applies the typed value.
+  const old = line({ extSellOverride: 1000 });
+  const sec = { id: "s1", name: "Rigging", items: [old] } as unknown as Sec;
+  const draft = cpe312.customDraftFromLine(old);
+  ok(draft.price === "333.33" && cpe312.sellUntouched(draft, old) && !cpe312.sellUntouched({ price: "340" }, old),
+    "#312 fix1: the pre-filled Unit sell is the cents text; sellUntouched is true only while it is unchanged");
+  const keep = cpe312.replaceCustomLine(sec, 7, line({ desc: "Bracket v2", price: 333.33 }), true).items[0];
+  ok(keep.price === 1000 / 3 && keep.qty * keep.price === 1000 && keep.extSellOverride === 1000 && keep.desc === "Bracket v2",
+    "#312 fix1: editing only the description keeps the exact unit sell (qty 3 at $1,000 stays $1,000, not $999.99) and the ext override");
+  const qtyChanged = cpe312.replaceCustomLine(sec, 7, line({ qty: 4, price: 333.33 }), true).items[0];
+  ok(qtyChanged.price === 1000 / 3 && !("extSellOverride" in qtyChanged), "#312 fix1: a changed qty keeps the exact unit sell but drops a stale extended-sell override");
+  const typed = cpe312.replaceCustomLine(sec, 7, line({ price: 340 }), false).items[0];
+  ok(typed.price === 340 && !("extSellOverride" in typed), "#312 fix1: a typed unit sell still replaces the price");
+
+  // 2. Re-anchor: ★ entry and document blocks follow a changed anchor.
+  const starred = {
+    id: "s1", name: "Rigging", items: [line()], keyProducts: [{ lineKey: "7", sku: "line:7", text: "T", photo: true }],
+  } as unknown as Sec;
+  const r1 = cpe312.saveCustomEdit(starred, 7, line({ sku: "BRK-1" }));
+  ok(r1.section.keyProducts?.[0].sku === "BRK-1" && r1.section.keyProducts?.[0].text === "T" && r1.anchor?.sku === "BRK-1" && r1.anchor?.lineKey === "7",
+    "#312 fix1: CUSTOM -> BRK-1 re-anchors the starred line's key product in the same save, keeping its text");
+  const back = cpe312.saveCustomEdit({ ...r1.section, items: r1.section.items } as Sec, 7, line({ sku: "CUSTOM" }));
+  ok(back.section.keyProducts?.[0].sku === "line:7" && back.anchor?.sku === "line:7", "#312 fix1: BRK-1 -> CUSTOM re-anchors back to the line token");
+  const allow = cpe312.saveCustomEdit(starred, 7, line({ sku: "", allowance: true }));
+  ok(allow.section.keyProducts?.[0].sku === "line:7" && allow.anchor === null, "#312 fix1: CUSTOM <-> allowance keeps the same line token: no anchor change");
+  const dup = cpe312.saveCustomEdit(
+    { ...starred, items: [line(), line({ id: 8, sku: "BRK-1", custom: false })], keyProducts: [{ lineKey: "7", sku: "line:7", text: "", photo: true }, { lineKey: "8", sku: "BRK-1", text: "", photo: true }] } as unknown as Sec,
+    7, line({ sku: "BRK-1" }));
+  ok(dup.section.keyProducts?.[0].sku === "line:7" && dup.anchor?.sku === "BRK-1", "#312 fix1: a duplicate SKU skips the ★ re-anchor (as Re-anchor does) but still reports the move");
+  const same = cpe312.saveCustomEdit(starred, 7, line({ desc: "Other" }));
+  ok(same.anchor === null && same.section.keyProducts?.[0].sku === "line:7", "#312 fix1: an edit that does not move the anchor leaves the ★ alone");
+  ok(cpe312.saveCustomEdit(starred, 999, line()).section === starred && cpe312.saveCustomEdit(starred, 999, line()).anchor === null, "#312 fix1: saveCustomEdit on a missing line is a no-op");
+
+  const pb = (sectionId: string, lineKey: string, sku: string) => ({ type: "productBlock", attrs: { sectionId, lineKey, sku, photo: { show: false, align: "right", width: 34 } }, content: [{ type: "paragraph" }] });
+  const doc = { type: "doc", version: 1, content: [{ type: "paragraph" }, pb("s1", "7", "line:7"), pb("s1", "8", "X"), pb("s2", "7", "line:7")] } as unknown as Parameters<typeof rean312.reanchorDocLine>[0];
+  const d2 = rean312.reanchorDocLine(doc, "s1", "7", "BRK-1") as unknown as { content: Array<{ attrs?: { sku: string } }> };
+  const orig = doc as unknown as { content: Array<{ attrs?: { sku: string } }> };
+  ok(d2 && d2.content[1].attrs?.sku === "BRK-1" && d2.content[2].attrs?.sku === "X" && d2.content[3].attrs?.sku === "line:7" && orig.content[1].attrs?.sku === "line:7" && d2.content[0] === orig.content[0],
+    "#312 fix1: reanchorDocLine rewrites only the matching section + line block, never mutates the input, keeps untouched nodes' identity");
+  ok(rean312.reanchorDocLine(doc, "s1", "7", "line:7") === null && rean312.reanchorDocLine(doc, "s1", "99", "Z") === null && rean312.reanchorDocLine(null, "s1", "7", "Z") === null,
+    "#312 fix1: reanchorDocLine returns null when unchanged, no block matches, or there is no document");
+  ok(Array.isArray(rean312.LINE_ANCHORED_NODES) && rean312.LINE_ANCHORED_NODES.length === 1 && rean312.LINE_ANCHORED_NODES[0] === "productBlock" && /LINE_ANCHORED_NODES/.test(rd("src/lib/package-doc/reanchor.ts")),
+    "#312 fix1: line-anchored node types are listed in one const");
+  const nested = { type: "doc", version: 1, content: [{ type: "bulletList", content: [{ type: "listItem", content: [pb("s1", "7", "line:7")] }] }] } as unknown as Parameters<typeof rean312.reanchorDocLine>[0];
+  ok(JSON.stringify(rean312.reanchorDocLine(nested, "s1", "7", "Q")).includes('"sku":"Q"'), "#312 fix1: reanchorDocLine also reaches nested blocks");
+
+  // 3-5. Source pins on the hook.
+  ok(hook.includes('import { reanchorDocLine } from "@/lib/package-doc/reanchor";') && hook.includes("reanchorDocLine(packageDocRef.current, secId, res.anchor.lineKey, res.anchor.sku)") && hook.includes("setPackageDoc(nd);"),
+    "#312 fix1: a changed anchor rewrites the Build package document through the existing setPackageDoc");
+  ok(hook.includes('if (isNaN(qty) || qty < 0 || (qty === 0 && editId == null)) qty = 1;'), "#312 fix1: an edited line keeps qty 0; only an add defaults to 1");
+  ok((hook.match(/if \(lineGone\(\)\) \{\n\s+setCustomError\(GONE\);\n\s+return;/g) || []).length === 2 && hook.includes('const GONE = "That line was removed \\u2014 nothing was changed.";') &&
+     hook.includes("sectionsRef.current.find((x) => x.id === secId)?.items.some((x) => x.id === editId)"),
+    "#312 fix1: a line removed before saving or during the catalog save shows 'That line was removed — nothing was changed.' and keeps the form open");
+  ok(!/customEdit[\s\S]{0,400}adds fresh/.test(hook) && !/specKey: d\.specKey/.test(hook), "#312 fix1: no add-fresh fallback for a removed line, and no CustomDraft.specKey");
 }
