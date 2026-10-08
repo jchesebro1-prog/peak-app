@@ -55083,7 +55083,7 @@ async function p3EstimateEmailsAsyncChecks(): Promise<void> {
 // ---- #P3 send: Estimator Phase 3 — the ordered send action (fake deps; never real email) ----
 import {
   BODY_MAX as p3sBodyMax, EstimateEmailError as P3sError, estimatePdfPath as p3sPdfPath, followUpDueAt as p3sDue, inboxDraftHref as p3sHref,
-  openEstimateInInbox as p3sOpenInbox, SEND_COPY as P3S, sendEstimateEmail as p3sSend,
+  inboxThreadHref as p3sThreadHref, openEstimateInInbox as p3sOpenInbox, SEND_COPY as P3S, sendEstimateEmail as p3sSend,
   type EstimateEmailDeps as P3sDeps, type FollowUpSpec as P3sTask, type ThreadSpec as P3sThread,
 } from "@/lib/estimate-email/send-server";
 import type { EstimateEmailEntry as P3sEntry, Quote as P3sQuote } from "@/lib/stores/quotes";
@@ -55102,19 +55102,23 @@ async function p3SendAsyncChecks(): Promise<void> {
   } as unknown as P3sQuote);
   const fakes = (quote: Partial<P3sQuote> = {}, over: Partial<P3sDeps> = {}) => {
     const calls: string[] = [];
-    const st = { q: { ...baseQuote(), ...quote } as P3sQuote, threads: [] as P3sThread[], drafts: [] as P3sThread[], records: [] as P3sEntry[], tasks: [] as P3sTask[], asOf: [] as Array<number | undefined> };
+    const st = { q: { ...baseQuote(), ...quote } as P3sQuote, threads: [] as P3sThread[], drafts: [] as P3sThread[], records: [] as P3sEntry[], tasks: [] as P3sTask[], asOf: [] as Array<number | undefined>,
+      claims: [] as Array<{ by: string; until: number }>, released: [] as Array<{ by: string; until: number }> };
     const deps: P3sDeps = {
       now: () => NOW,
       getQuote: async (id) => (id === st.q.id ? st.q : null),
-      readEstimatePdf: async (q) => { calls.push("readEstimatePdf:" + p3sPdfPath(q)); return Buffer.from("%PDF-estimate"); },
+      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
       renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
+      claimSend: async (_id, by, now) => { calls.push("claimSend"); const claim = { by, until: now + 120_000 }; st.claims.push(claim); return { ok: true, claim }; },
+      releaseSend: async (_id, claim) => { calls.push("releaseSend"); st.released.push(claim); },
+      applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills · Peak"; },
       sendQuote: async (_id, actor, asOf) => {
         calls.push("sendQuote"); st.asOf.push(asOf);
-        st.q = { ...st.q, status: "sent", revisions: [...(st.q.revisions || []), { rev: 4, at: NOW, by: actor.name, reason: "sent" }] } as P3sQuote;
+        st.q = { ...st.q, status: "sent", revisions: [...(st.q.revisions || []), { rev: 4, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-4.pdf" }] } as P3sQuote;
         return { ok: true };
       },
       ensureLink: async () => { calls.push("ensureLink"); return URL; },
-      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec); return { threadId: "C-9001", delivered: false }; },
+      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec); return { threadId: "C-9001", delivery: "local" as const }; },
       createDraftThread: async (spec) => { calls.push("createDraftThread"); st.drafts.push(spec); return { threadId: "C-9002" }; },
       recordEmail: async (_id, e) => { calls.push("recordEmail"); st.records.push(e); return true; },
       addFollowUpTask: async (spec) => { calls.push("addFollowUpTask"); st.tasks.push(spec); },
@@ -55132,17 +55136,22 @@ async function p3SendAsyncChecks(): Promise<void> {
   {
     const f = fakes();
     const r = await p3sSend(f.deps, SAM, "Q-P3S", input());
-    ok(r.ok && r.threadId === "C-9001" && r.delivered === false && r.status === "sent" && !r.warning, "#P3 send: happy path — ok, the thread id, delivery (local only = false), status sent");
-    ok(f.calls.join(" > ") === "readEstimatePdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > sendQuote > ensureLink > createAndSendThread > recordEmail > addFollowUpTask",
-      "#P3 send: happy path — attachments, then mark sent, then the link, then the email, then record, then the follow-up (spec §10.1 order)");
+    ok(r.ok && r.threadId === "C-9001" && r.delivery === "local" && r.status === "sent" && !r.warning, "#P3 send: happy path — ok, the thread id, delivery local (no Gmail connection), status sent");
+    ok(f.calls.join(" > ") === "applySignature > readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > claimSend > sendQuote > ensureLink > createAndSendThread > recordEmail > addFollowUpTask > releaseSend",
+      "#P3 send: happy path — signature, attachments, the send claim, then mark sent, the link, the email, record, the follow-up, and the claim released last (spec §10.1 order)");
+    ok(f.st.released.length === 1 && f.st.released[0] === f.st.claims[0] && f.st.claims[0]?.by === "Sam Mills", "#P3 send fix: the claim taken is the claim released (on success)");
     ok(f.st.asOf.join() === "77", "#P3 send: mark sent passes the shown version (asOf) to the approval gate");
     const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
-    ok(t.body === "Hi Pat,\n\nView it here: " + URL + "\n\nThanks,\nSam" && !t.body.includes("{link}"), "#P3 send: {link} becomes the absolute client-link URL");
+    ok(t.body === "Hi Pat,\n\nView it here: " + URL + "\n\nThanks,\nSam\n\n-- \nSam Mills · Peak" && !t.body.includes("{link}"), "#P3 send: {link} becomes the absolute client-link URL; the sender's signature is applied (Inbox rule)");
     ok(t.to === "pat@school.org, ops@school.org" && t.cc === "lee@peak.com" && t.mailboxUser === "Sam Mills" && t.customerId === "co-1" && t.contactName === "Pat Rivera",
       "#P3 send: the thread holds the FULL To line, the Cc, the sender's personal box and the quote's customer + contact");
     ok(t.link.type === "quote" && t.link.id === "Q-P3S" && t.link.label === "EST-1042 · North HS Auditorium", "#P3 send: the thread links the quote as `<EST number> · <project name>`");
-    ok(t.attachments.map((a) => a.name).join("|") === "EST-1042.pdf|EST-1042 Cover.pdf" && t.attachments.every((a) => a.mime === "application/pdf" && a.dataUrl.startsWith("data:application/pdf;base64,")) &&
-       t.attachments[0].size === Buffer.from("%PDF-estimate").length, "#P3 send: the estimate + cover PDFs ride as data-URL attachments with raw sizes");
+    const [estA, covA] = t.attachments;
+    ok(t.attachments.map((a) => a.name).join("|") === "EST-1042.pdf|EST-1042 Cover.pdf" && t.attachments.every((a) => a.mime === "application/pdf") &&
+       estA?.size === Buffer.from("%PDF-estimate").length && covA?.size === Buffer.from("%PDF-cover").length, "#P3 send: the estimate + cover PDFs attach with raw sizes");
+    ok(!!estA && estA.dataUrl === undefined && estA.pdfPath === "quote-pdfs/Q-P3S/rev-4.pdf" && estA.href === "/api/quotes/Q-P3S/pdf?rev=4&download=1",
+      "#P3 send fix (Phase 3: by reference): the estimate PDF carries NO dataUrl — the sent revision's stored path + its team download URL");
+    ok(!!covA && !!covA.dataUrl?.startsWith("data:application/pdf;base64,") && !covA.pdfPath, "#P3 send fix: the cover (rendered on demand, small) still rides as a data-URL");
     const e = f.st.records[0] ?? ({} as P3sEntry);
     ok(f.st.records.length === 1 && e.threadId === "C-9001" && e.rev === 4 && e.at === NOW && e.by === "Sam Mills" && e.to === "pat@school.org, ops@school.org",
       "#P3 send: records {threadId, rev = the new sent revision, at, by, to}");
@@ -55156,7 +55165,7 @@ async function p3SendAsyncChecks(): Promise<void> {
   {
     const f = fakes({ owner: "Nobody Here" });
     const r = await p3sSend(f.deps, SAM, "Q-P3S", input({ body: "Hi Pat,\n\nAttached.\n", followUpDays: 0, attachCover: false }));
-    ok(r.ok && f.st.threads[0]?.body === "Hi Pat,\n\nAttached.\n\n" + URL, "#P3 send: without {link} the URL is appended on its own line");
+    ok(r.ok && f.st.threads[0]?.body === "Hi Pat,\n\nAttached.\n\n" + URL + "\n\n-- \nSam Mills · Peak", "#P3 send: without {link} the URL is appended on its own line — above the signature");
     ok(f.st.tasks.length === 0 && !f.calls.includes("addFollowUpTask") && !f.calls.includes("renderCoverPdf") && f.st.threads[0]?.attachments.length === 1, "#P3 send: follow-up Off creates no task; an unticked cover isn't rendered");
     const g = fakes({ owner: "Nobody Here" });
     await p3sSend(g.deps, SAM, "Q-P3S", input({ followUpDays: 2 }));
@@ -55166,8 +55175,9 @@ async function p3SendAsyncChecks(): Promise<void> {
   {
     const f = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] });
     const r = await p3sSend(f.deps, SAM, "Q-P3S", input({ attachCover: false }));
-    ok(r.ok && !f.calls.includes("sendQuote") && f.st.records[0]?.rev === 2 && f.calls[0] === "readEstimatePdf:quote-pdfs/Q-P3S/rev-2.pdf",
-      "#P3 send: re-send on `sent` skips mark-sent, records the current sent revision and attaches that revision's own PDF");
+    ok(r.ok && !f.calls.includes("sendQuote") && f.st.records[0]?.rev === 2 && f.calls[1] === "readPdf:quote-pdfs/Q-P3S/rev-2.pdf" &&
+       f.st.threads[0]?.attachments[0]?.pdfPath === "quote-pdfs/Q-P3S/rev-2.pdf" && f.st.threads[0]?.attachments[0]?.href === "/api/quotes/Q-P3S/pdf?rev=2&download=1",
+      "#P3 send: re-send on `sent` skips mark-sent, records the current sent revision and attaches that revision's own PDF (by reference)");
   }
   // Preflight refusals — each leaves nothing touched (no dep after the read).
   const refusals: Array<[string, Partial<P3sQuote>, Record<string, unknown>, string, typeof SAM]> = [
@@ -55176,7 +55186,10 @@ async function p3SendAsyncChecks(): Promise<void> {
     ["lost", { status: "lost" }, {}, P3S.closed, SAM],
     ["a service quote", { quoteType: "flame_test" }, {}, P3S.notEstimate, SAM],
     ["a stale PDF", { contentChangedAt: 99 }, {}, P3S.pdfStale, SAM],
-    ["a pending PDF", { pdf: { status: "pending", at: 20, savedAt: 20, blobPath: "x" } as P3sQuote["pdf"] }, {}, P3S.pdfStale, SAM],
+    ["a pending PDF past the render window", { pdf: { status: "pending", at: 20, savedAt: 20, blobPath: "x" } as P3sQuote["pdf"] }, {}, P3S.pdfStale, SAM],
+    ["a PDF still rendering", { pdf: { status: "pending", at: NOW - 5_000, savedAt: NOW - 5_000, blobPath: "x" } as P3sQuote["pdf"] }, {}, P3S.pdfRendering, SAM],
+    ["a stale view (asOf)", {}, { asOf: 76 }, P3S.changedSince, SAM],
+    ["a stale view on a re-send", { status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] }, { asOf: 76 }, P3S.changedSince, SAM],
     ["no To", {}, { to: "  " }, P3S.noTo, SAM],
     ["a bad To", {}, { to: "pat@school.org, nope" }, P3S.badTo(["nope"]), SAM],
     ["a bad Cc", {}, { cc: "x@y" }, P3S.badCc(["x@y"]), SAM],
@@ -55190,7 +55203,7 @@ async function p3SendAsyncChecks(): Promise<void> {
     const f = fakes(quote);
     const r = await p3sSend(f.deps, actor, "Q-P3S", input(inp));
     ok(!r.ok && r.error === error && !r.markedSent && f.calls.length === 0 && !f.st.threads.length && !f.st.records.length,
-      `#P3 send: preflight refuses ${label} — nothing read, marked, linked or emailed`);
+      `#P3 send: preflight refuses ${label} — nothing read, claimed, marked, linked or emailed`);
   }
   {
     const f = fakes();
@@ -55199,13 +55212,17 @@ async function p3SendAsyncChecks(): Promise<void> {
   }
   // Attachments fail / over cap → nothing marked.
   {
-    const big = fakes({}, { readEstimatePdf: async () => Buffer.alloc(10 * 1024 * 1024), renderCoverPdf: async () => Buffer.alloc(6 * 1024 * 1024) });
+    const big = fakes({}, { readPdf: async () => Buffer.alloc(10 * 1024 * 1024), renderCoverPdf: async () => Buffer.alloc(6 * 1024 * 1024) });
     const r = await p3sSend(big.deps, SAM, "Q-P3S", input());
-    ok(!r.ok && r.error === P3S.tooLarge && !big.calls.includes("sendQuote") && big.st.q.status === "draft", "#P3 send: attachments over 15 MB are refused before anything is marked");
+    ok(!r.ok && r.error === P3S.tooLarge && !big.calls.includes("sendQuote") && !big.calls.includes("claimSend") && big.st.q.status === "draft", "#P3 send: attachments over 15 MB are refused before anything is claimed or marked");
+    let coverRendered = false;
+    const huge = fakes({}, { readPdf: async () => Buffer.alloc(16 * 1024 * 1024), renderCoverPdf: async () => { coverRendered = true; return Buffer.from("%PDF-cover"); } });
+    const rh = await p3sSend(huge.deps, SAM, "Q-P3S", input());
+    ok(!rh.ok && rh.error === P3S.tooLarge && !coverRendered && huge.st.q.status === "draft", "#P3 send fix: an estimate PDF over the cap on its own is refused before the cover is rendered");
     const cov = fakes({}, { renderCoverPdf: async () => { throw new P3sError("The cover PDF couldn’t be rendered — try again."); } });
     const r2 = await p3sSend(cov.deps, SAM, "Q-P3S", input());
     ok(!r2.ok && r2.error === "The cover PDF couldn’t be rendered — try again." && !cov.calls.includes("sendQuote") && cov.st.q.status === "draft", "#P3 send: a failed cover render aborts with its reason, nothing marked");
-    const nopdf = fakes({}, { readEstimatePdf: async () => null });
+    const nopdf = fakes({}, { readPdf: async () => null });
     const r3 = await p3sSend(nopdf.deps, SAM, "Q-P3S", input());
     ok(!r3.ok && r3.error === P3S.pdfUnreadable && nopdf.st.q.status === "draft" && !nopdf.st.threads.length, "#P3 send: an unreadable estimate PDF aborts, nothing marked");
   }
@@ -55224,8 +55241,9 @@ async function p3SendAsyncChecks(): Promise<void> {
       "#P3 send: the email failing after mark-sent → \"Marked sent, but the email didn't go out — open it in Inbox.\", markedSent, the leftover draft's Inbox link, no record/task");
     const l = fakes({}, { ensureLink: async () => { throw new P3sError("Client links aren’t set up on this server (AUTH_SECRET is missing)."); } });
     const rl = await p3sSend(l.deps, SAM, "Q-P3S", input());
-    ok(!rl.ok && rl.error === P3S.partial && rl.markedSent === true && !l.st.threads.length, "#P3 send: the link failing after mark-sent → markedSent, nothing emailed");
-    const rs = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent" }] as P3sQuote["revisions"] }, { createAndSendThread: async () => { throw new Error("boom"); } });
+    ok(!rl.ok && rl.error === P3S.partial && rl.markedSent === true && !l.st.threads.length && !l.st.records.length && !l.st.tasks.length && l.st.released.length === 1,
+      "#P3 send: the link failing after mark-sent → markedSent, nothing emailed, no record, no task; the claim is still released");
+    const rs = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] }, { createAndSendThread: async () => { throw new Error("boom"); } });
     const rr = await p3sSend(rs.deps, SAM, "Q-P3S", input());
     ok(!rr.ok && rr.error === P3S.notSent && !rr.markedSent, "#P3 send: a failed re-send says the email didn't go out (nothing was marked this time)");
   }
@@ -55243,8 +55261,8 @@ async function p3SendAsyncChecks(): Promise<void> {
     const r = await p3sOpenInbox(f.deps, SAM, "Q-P3S", input({ followUpDays: 4 }));
     ok(r.ok && r.href === "/inbox?box=personal&folder=drafts&draft=C-9002" && r.threadId === "C-9002" && r.status === "sent",
       "#P3 send: Open in Inbox returns the personal-box draft link");
-    ok(f.calls.join(" > ") === "readEstimatePdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > sendQuote > ensureLink > createDraftThread > recordEmail" && !f.st.threads.length && !f.st.tasks.length,
-      "#P3 send: Open in Inbox — same order through the link, then a draft + record; never createAndSendThread, no task");
+    ok(f.calls.join(" > ") === "readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > claimSend > sendQuote > ensureLink > createDraftThread > recordEmail > releaseSend" && !f.st.threads.length && !f.st.tasks.length,
+      "#P3 send: Open in Inbox — same order through the link (claimed), then a draft + record; never createAndSendThread, no task, no signature (the Inbox applies it at send)");
     ok(!!f.st.drafts[0]?.body.includes(URL) && f.st.drafts[0]?.attachments.length === 2 && f.st.records[0]?.threadId === "C-9002" && f.st.records[0]?.rev === 4,
       "#P3 send: the Inbox draft carries the link and attachments; the record names the draft thread");
     const blank = fakes();
@@ -55252,12 +55270,136 @@ async function p3SendAsyncChecks(): Promise<void> {
     ok(rb.ok && blank.st.drafts[0]?.to === "", "#P3 send: Open in Inbox leaves a blank To for the composer");
     const gate = fakes({}, { sendQuote: async () => ({ ok: false, error: "Needs approval." }) });
     const rg = await p3sOpenInbox(gate.deps, SAM, "Q-P3S", input());
-    ok(!rg.ok && rg.error === "Needs approval." && !gate.st.drafts.length, "#P3 send: Open in Inbox — a gate refusal makes no draft");
+    ok(!rg.ok && rg.error === "Needs approval." && !gate.st.drafts.length && !gate.st.records.length, "#P3 send: Open in Inbox — a gate refusal makes no draft and records nothing");
     const fail = fakes({}, { createDraftThread: async () => { throw new Error("db"); } });
     const rf = await p3sOpenInbox(fail.deps, SAM, "Q-P3S", input());
     ok(!rf.ok && rf.error === P3S.inboxPartial && rf.markedSent === true, "#P3 send: Open in Inbox — a failed draft after mark-sent reports markedSent");
     const won = fakes({ status: "won" });
     ok(!(await p3sOpenInbox(won.deps, SAM, "Q-P3S", input())).ok && won.calls.length === 0, "#P3 send: Open in Inbox refuses a won quote");
+  }
+
+  // Fix round 1 — Gmail delivery outcomes.
+  {
+    const g = fakes({}, { createAndSendThread: async () => ({ threadId: "C-9101", delivery: "gmail" as const }) });
+    const rg = await p3sSend(g.deps, SAM, "Q-P3S", input());
+    ok(rg.ok && rg.delivery === "gmail" && g.st.records.length === 1 && g.st.tasks.length === 1, "#P3 send fix: a Gmail-delivered send is ok with delivery \"gmail\"");
+    const f = fakes({}, { createAndSendThread: async () => ({ threadId: "C-9102", delivery: "failed" as const }) });
+    const rf = await p3sSend(f.deps, SAM, "Q-P3S", input());
+    ok(!rf.ok && rf.error === P3S.gmailFailed && rf.error === "Marked sent, but Gmail didn’t accept the email — open it in Inbox." && rf.markedSent === true &&
+       rf.href === p3sThreadHref("C-9102") && rf.href === "/inbox?thread=C-9102" && !f.st.records.length && !f.st.tasks.length && f.st.released.length === 1,
+      "#P3 send fix: connected but Gmail didn't accept it → not ok, markedSent, the THREAD's Inbox link, no record, no task, claim released");
+    const rs = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] },
+      { createAndSendThread: async () => ({ threadId: "C-9103", delivery: "failed" as const }) });
+    const rr = await p3sSend(rs.deps, SAM, "Q-P3S", input());
+    ok(!rr.ok && rr.error === P3S.gmailFailedResend && !rr.markedSent && rr.href === p3sThreadHref("C-9103"), "#P3 send fix: a Gmail refusal on a re-send says so without claiming a mark");
+    const left = fakes({}, { createAndSendThread: async () => { throw new P3sError(P3S.notSent, "C-LEFT", false); } });
+    const rl = await p3sSend(left.deps, SAM, "Q-P3S", input());
+    ok(!rl.ok && rl.error === P3S.partial && rl.href === p3sThreadHref("C-LEFT"), "#P3 send fix: a failed send whose thread already left Drafts links the thread, not a draft");
+  }
+  // Fix round 1 — one send at a time.
+  {
+    const busy = fakes({}, { claimSend: async () => ({ ok: false as const, reason: "busy" as const }) });
+    const rb = await p3sSend(busy.deps, SAM, "Q-P3S", input());
+    ok(!rb.ok && rb.error === P3S.inProgress && rb.error === "Another send of this estimate is in progress." && !busy.calls.includes("sendQuote") && !busy.st.threads.length && !busy.calls.includes("releaseSend"),
+      "#P3 send fix: an in-flight send's claim refuses a second send — nothing marked or emailed");
+    const ib = fakes({}, { claimSend: async () => ({ ok: false as const, reason: "busy" as const }) });
+    const rib = await p3sOpenInbox(ib.deps, SAM, "Q-P3S", input());
+    ok(!rib.ok && rib.error === P3S.inProgress && !ib.st.drafts.length, "#P3 send fix: Open in Inbox honours the same claim");
+    const thrown = fakes({}, { sendQuote: async () => { throw new Error("db"); } });
+    const rt = await p3sSend(thrown.deps, SAM, "Q-P3S", input());
+    ok(!rt.ok && rt.error === P3S.markFailed && thrown.st.released.length === 1 && thrown.st.released[0] === thrown.st.claims[0], "#P3 send fix: the claim is released on failure too");
+  }
+  // Fix round 1 — the sent revision's PDF copy.
+  {
+    const pre = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent" }] as P3sQuote["revisions"] });
+    const rp = await p3sSend(pre.deps, SAM, "Q-P3S", input());
+    ok(!rp.ok && rp.error === P3S.pdfPreparing && rp.error === "The sent PDF is still being prepared — try again in a moment." && !pre.calls.some((c) => c.startsWith("readPdf")) && !pre.st.threads.length,
+      "#P3 send fix: a re-send whose sent revision has no PDF copy yet is refused — never the current file");
+    ok(p3sPdfPath({ status: "sent", pdf: { status: "ready", at: 1, savedAt: 1, blobPath: "quote-pdfs/Q/cur.pdf" }, revisions: [{ rev: 1, at: 1, by: "x", reason: "sent" }] } as unknown as P3sQuote) === null &&
+       p3sPdfPath({ status: "draft", pdf: { status: "ready", at: 1, savedAt: 1, blobPath: "quote-pdfs/Q/cur.pdf" }, revisions: [] } as unknown as P3sQuote) === "quote-pdfs/Q/cur.pdf",
+      "#P3 send fix: estimatePdfPath — sent → the revision's copy or nothing; never sent → the current file");
+    const nocopy = fakes({}, { sendQuote: async (_id, actor) => {
+      nocopy.st.q = { ...nocopy.st.q, status: "sent", revisions: [{ rev: 4, at: NOW, by: actor.name, reason: "sent" }] } as P3sQuote; return { ok: true };
+    } });
+    const rn = await p3sSend(nocopy.deps, SAM, "Q-P3S", input());
+    ok(!rn.ok && rn.error === P3S.partial && rn.markedSent === true && !nocopy.st.threads.length && !nocopy.st.records.length,
+      "#P3 send fix: a first send whose new revision got no PDF copy reports markedSent and emails nothing");
+    const noEst = fakes({}, { sendQuote: async (_id, actor) => {
+      noEst.st.q = { ...noEst.st.q, status: "sent", revisions: [{ rev: 4, at: NOW, by: actor.name, reason: "sent" }] } as P3sQuote; return { ok: true };
+    } });
+    const rne = await p3sSend(noEst.deps, SAM, "Q-P3S", input({ attachEstimate: false }));
+    ok(rne.ok && noEst.st.threads[0]?.attachments.map((a) => a.name).join() === "EST-1042 Cover.pdf", "#P3 send fix: without the estimate attached, a missing revision copy doesn't matter");
+  }
+  // Fix round 1 — Cc never repeats a To.
+  {
+    const f = fakes();
+    await p3sSend(f.deps, SAM, "Q-P3S", input({ cc: "PAT@school.org, Lee <lee@peak.com>, ops@SCHOOL.org" }));
+    ok(f.st.threads[0]?.cc === "Lee <lee@peak.com>", "#P3 send fix: Cc addresses already in To are dropped (case-insensitive)");
+  }
+  // Fix round 1 — the DB-level claim (the real quotes store).
+  {
+    const { fixtureId } = await import("./test-fixtures");
+    const Q = await import("@/lib/stores/quotes");
+    const QID = fixtureId(303, "p3-send-claim");
+    await Q.create({ id: QID, name: "#P3 send claim", customer: "Spec fixture", customerId: null, owner: "Lead P3", quoteType: "system", source: "estimator", spec: { sections: [], mobs: [] } });
+    registerFixture("quotes", QID);
+    const before = (await Q.get(QID))!;
+    const c1 = await Q.claimEstimateEmailSend(QID, "Sam", 1_000_000);
+    const c2 = await Q.claimEstimateEmailSend(QID, "Ann", 1_000_500);
+    ok(c1.ok && c1.claim.until === 1_000_000 + Q.ESTIMATE_EMAIL_CLAIM_MS && !c2.ok && c2.reason === "busy", "#P3 send fix (DB): a second claim while one is live is refused (busy)");
+    const after = (await Q.get(QID))!;
+    ok(after.updatedAt === before.updatedAt && after.contentChangedAt === before.contentChangedAt, "#P3 send fix (DB): claiming never bumps updatedAt or content");
+    await Q.update(QID, { emailSending: null, name: "#P3 send claim (saved)" });
+    ok((await Q.get(QID))!.emailSending?.by === "Sam", "#P3 send fix (DB): update() drops emailSending — an Estimator save can't clear a live claim");
+    const c3 = await Q.claimEstimateEmailSend(QID, "Ann", 1_000_000 + Q.ESTIMATE_EMAIL_CLAIM_MS + 1);
+    ok(c3.ok && c3.claim.by === "Ann", "#P3 send fix (DB): an expired claim is ignored and taken over");
+    if (c1.ok) await Q.releaseEstimateEmailSend(QID, c1.claim);
+    ok((await Q.get(QID))!.emailSending?.by === "Ann", "#P3 send fix (DB): releasing an old claim leaves the newer one alone");
+    if (c3.ok) await Q.releaseEstimateEmailSend(QID, c3.claim);
+    ok(!(await Q.get(QID))!.emailSending && (await Q.claimEstimateEmailSend(QID, "Sam", 2_000_000)).ok, "#P3 send fix (DB): release clears the claim; the next send can claim");
+    ok(!(await Q.claimEstimateEmailSend("Q-NOPE-P3C", "Sam", 1)).ok, "#P3 send fix (DB): an unknown quote can't be claimed");
+    ok(!(Q.QUOTE_CONTENT_FIELDS as readonly string[]).includes("emailSending"), "#P3 send fix (DB): emailSending is not a content field");
+  }
+  // Fix round 1 — attachments by reference (pure resolution + the bridge's MIME).
+  {
+    const { attachmentHref, attachmentMimePart } = await import("@/lib/comms-attachments");
+    ok(attachmentHref({ dataUrl: "data:application/pdf;base64,QQ==", href: "/api/quotes/Q/pdf?rev=1&download=1" }) === "data:application/pdf;base64,QQ==" &&
+       attachmentHref({ href: "/api/quotes/Q/pdf?rev=1&download=1" }) === "/api/quotes/Q/pdf?rev=1&download=1" &&
+       attachmentHref({ href: "//evil.example/x" }) === "" && attachmentHref({ href: "javascript:alert(1)" }) === "" && attachmentHref({}) === "",
+      "#P3 send fix: the Inbox reader prefers the dataUrl, then a same-origin href; nothing else is a link");
+    const reads: string[] = [];
+    const fakeRead = async (path: string) => { reads.push(path); return path === "quote-pdfs/Q-P3S/rev-4.pdf" ? Buffer.from("%PDF-rev4") : null; };
+    const byRef = await attachmentMimePart({ name: "EST-1042.pdf", mime: "application/pdf", pdfPath: "quote-pdfs/Q-P3S/rev-4.pdf", href: "/x" }, fakeRead);
+    ok(!!byRef && byRef.name === "EST-1042.pdf" && byRef.mime === "application/pdf" && Buffer.from(byRef.dataBase64, "base64").toString() === "%PDF-rev4" && reads.join() === "quote-pdfs/Q-P3S/rev-4.pdf",
+      "#P3 send fix: the bridge MIME part for a by-reference PDF is read from storage");
+    let threw = false;
+    try { await attachmentMimePart({ name: "gone.pdf", pdfPath: "quote-pdfs/Q-P3S/gone.pdf" }, fakeRead); } catch { threw = true; }
+    ok(threw, "#P3 send fix: an unreadable by-reference PDF throws — the email is never sent without it");
+    const legacy = await attachmentMimePart({ name: "a.pdf", mime: "application/pdf", dataUrl: "data:application/pdf;base64,QUJD" }, fakeRead);
+    const notB64 = await attachmentMimePart({ name: "b.txt", dataUrl: "data:text/plain,hi" }, fakeRead);
+    ok(legacy?.dataBase64 === "QUJD" && notB64 === null && reads.length === 2, "#P3 send fix: data-URL attachments resolve exactly as before (non-base64 skipped, no storage read)");
+    const bridge = readFileSync(join(process.cwd(), "src/lib/gmail/bridge.ts"), "utf8");
+    ok(bridge.includes("attachmentMimePart(a, readQuotePdf)") && bridge.includes("pdfStorage()"), "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store");
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/inbox/page.tsx"), "utf8");
+    const reader = readFileSync(join(process.cwd(), "src/app/(app)/inbox/thread-reader.tsx"), "utf8");
+    ok(page.includes("href: attachmentHref(a)") && reader.includes("href={a.href || undefined}") && !reader.includes("a.dataUrl"),
+      "#P3 send fix: the Inbox reader links attachmentHref (dataUrl, else the team href)");
+  }
+  // Fix round 1 — signature + link placement (pure).
+  {
+    const { bodyWithLink, withoutAddresses, estimateEmailDefaults } = await import("@/lib/estimate-email/compose");
+    ok(bodyWithLink("Hi\n\nThanks,\nSam\n\n-- \nSam Mills", "https://x/y") === "Hi\n\nThanks,\nSam\n\nhttps://x/y\n\n-- \nSam Mills" &&
+       bodyWithLink("Hi\n\n--\nSam", "https://x/y") === "Hi\n\nhttps://x/y\n\n--\nSam" &&
+       bodyWithLink("Go {link}\n\n-- \nS", "https://x/y") === "Go https://x/y\n\n-- \nS" && bodyWithLink("Hi", "https://x/y") === "Hi\n\nhttps://x/y",
+      "#P3 send fix: bodyWithLink — an appended link goes above a #127 or legacy signature; {link} still wins");
+    ok(withoutAddresses(["A@b.com", "Lee <lee@p.com>", "c@d.org"], ["a@B.com", "Pat <C@D.org>"]).join() === "Lee <lee@p.com>", "#P3 send fix: withoutAddresses compares bare addresses case-insensitively");
+    const base = { projectName: "North HS", estimateNumber: "EST-1042", contactName: "Pat", contactEmail: "p@x.org", senderName: "Sam Mills", senderEmail: "s@p.com", leadName: "", leadEmail: "" };
+    const signed = estimateEmailDefaults({ ...base, signature: "Sam Mills\nPeak Systems" });
+    ok(signed.body.endsWith("Thanks,\nSam Mills\n\n-- \nSam Mills\nPeak Systems") && estimateEmailDefaults(base).body === estimateEmailDefaults({ ...base, signature: "" }).body && !estimateEmailDefaults(base).body.includes("-- "),
+      "#P3 send fix: the defaults seed the sender's #127 signature below a \"-- \" line (as the Inbox composer does); none → unchanged");
+    const { applyOutboundSignature } = await import("@/lib/email-signature");
+    ok(applyOutboundSignature("Hi", false, { name: "Sam Mills", email: "s@p.com" }) === "Hi\n\n--\nSam Mills\ns@p.com" && applyOutboundSignature("Hi", true, { name: "Sam" }) === "Hi",
+      "#P3 send fix: the Inbox's own rule — no #127 signature → the legacy footer; a #127 signature → left as written");
   }
 
   // Source pins: the "use server" wrappers.
@@ -55272,8 +55414,11 @@ async function p3SendAsyncChecks(): Promise<void> {
   ok(src.startsWith('"use server";') && src.includes("asOf: typeof o.asOf === \"number\"") && src.includes("printOriginFor(process.env,") && src.includes("await headers()"),
     "#P3 send: the wrappers are server actions, pass the client's asOf through, and build the origin from the request (printOriginFor)");
   ok(fnBody("estimateEmailDefaultsAction").includes("await requireUser()") && src.includes("getConnectionInfo(personalKey(user.id))"), "#P3 send: the defaults action needs a session and reads the sender's own Gmail connection");
+  ok(fnBody("estimateEmailDefaultsAction").includes("signatureFor(user.name)") && fnBody("estimateEmailDefaultsAction").includes("signature,"), "#P3 send fix: the defaults action seeds the sender's #127 signature");
   const server = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
   ok(server.includes("sendQuoteToCustomer(id, actor, asOf)") && server.includes("ensureShareLink(id, opts.actor.name)") && server.includes("sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true })") &&
-     server.includes('mailbox: "personal" as const') && server.includes("pdfIsCurrent(q.pdf, q.contentChangedAt)") && server.includes("renderCoverPdfLive(q.id, opts.host, opts.proto)") && !server.trimStart().startsWith('"use server"'),
+     server.includes('mailbox: "personal" as const') && server.includes("pdfIsCurrent(q.pdf, q.contentChangedAt)") && server.includes("renderCoverPdfLive(q.id, opts.host, opts.proto)") && !server.trimStart().startsWith('"use server"') &&
+     server.includes("gmailEnabled() && !!(await getConnectionInfo(personalKey(opts.actor.id)))") && server.includes("applyOutboundSignature(body, !!signature,") &&
+     server.includes("claimEstimateEmailSend(id, by, now)") && server.includes("releaseEstimateEmailSend(id, claim)"),
     "#P3 send: the live deps — the review-ops gate, the share link, the comms draft→send path (personal box), the preview's pdfIsCurrent rule, the shared cover render");
 }

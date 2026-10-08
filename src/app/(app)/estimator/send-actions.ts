@@ -19,6 +19,7 @@ import { shareSecret } from "@/lib/quote-share/links";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { requireUser, type SessionUser } from "@/lib/session";
 import { contactByName } from "@/lib/stores/customers";
+import { signatureFor } from "@/lib/stores/signatures";
 import { get as getQuote, type QuoteStatus } from "@/lib/stores/quotes";
 import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
@@ -81,7 +82,7 @@ export async function sendEstimateEmailAction(quoteId: string, input: unknown): 
   const where = await requestWhere();
   if ("error" in where) return { ok: false, error: where.error };
   const id = String(quoteId || "");
-  const actor = { id: user.id, name: user.name, roles: user.roles };
+  const actor = { id: user.id, name: user.name, roles: user.roles, email: user.email ?? null };
   const r = await sendEstimateEmail(liveEstimateEmailDeps({ ...where, actor }), actor, id, cleanInput(input));
   if (!r.ok && !r.markedSent) return r;
   return { ...r, ...(await freshView(id, user)) };
@@ -94,7 +95,7 @@ export async function openEstimateInInboxAction(quoteId: string, input: unknown)
   const where = await requestWhere();
   if ("error" in where) return { ok: false, error: where.error };
   const id = String(quoteId || "");
-  const actor = { id: user.id, name: user.name, roles: user.roles };
+  const actor = { id: user.id, name: user.name, roles: user.roles, email: user.email ?? null };
   const r = await openEstimateInInbox(liveEstimateEmailDeps({ ...where, actor }), actor, id, cleanInput(input));
   if (!r.ok && !r.markedSent) return r;
   return { ...r, ...(await freshView(id, user)) };
@@ -110,10 +111,13 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
   const q = await getQuote(String(quoteId || ""));
   if (!q) return { ok: false, error: SEND_COPY.gone };
   if (pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: SEND_COPY.notEstimate };
-  const [contact, roster, me] = await Promise.all([
+  const [contact, roster, me, signature] = await Promise.all([
     q.customerId && q.contactName ? contactByName(q.customerId, q.contactName).catch(() => null) : Promise.resolve(null),
     activeUsers(),
     getUser(user.id),
+    // #127 — seeded into the body so it's visible and editable; the send
+    // applies the Inbox's rule (applyOutboundSignature) either way.
+    signatureFor(user.name).catch(() => ""),
   ]);
   const lead = leadEstimator(q.owner, q.preparedBy, roster);
   const senderEmail = (me?.email || user.email || "").trim();
@@ -140,6 +144,7 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
       leadName: lead?.name || "",
       // The sender is never Cc'd on their own email, whatever address Gmail sends from.
       leadEmail: lead && lead.id !== user.id ? (lead.email || "").trim() : "",
+      signature,
     }),
     gmailConnected,
     fromAddress,

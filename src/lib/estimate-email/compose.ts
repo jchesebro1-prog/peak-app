@@ -4,6 +4,8 @@
  * lean on these, and the harness exercises them without a database.
  */
 
+import { withSignature } from "@/lib/inbox-signature";
+
 /** Attachments together, raw bytes (Gmail's 25 MB limit after base64). */
 export const ESTIMATE_EMAIL_ATTACH_MAX = 15 * 1024 * 1024;
 
@@ -21,6 +23,9 @@ export type EstimateEmailDefaultsInput = {
   senderEmail: string;
   leadName: string;
   leadEmail: string;
+  /** The sender's #127 signature (lib/stores/signatures) — seeded below a
+   *  "-- " line exactly as the Inbox composer seeds it; "" = none. */
+  signature?: string;
 };
 
 const LINK_TOKEN = "{link}";
@@ -53,7 +58,7 @@ export function estimateEmailDefaults(i: EstimateEmailDefaultsInput): EstimateEm
     "",
     sender ? `Thanks,\n${sender}` : "Thanks,",
   ].join("\n");
-  return { to, cc, subject, body };
+  return { to, cc, subject, body: i.signature ? withSignature(body, i.signature, "add") : body };
 }
 
 /** Replace every `{link}`; with none present, append the URL on its own line. */
@@ -61,6 +66,26 @@ export function withLink(body: string, url: string): string {
   const text = String(body ?? "");
   if (text.includes(LINK_TOKEN)) return text.split(LINK_TOKEN).join(url);
   return text.replace(/\s+$/, "") + "\n\n" + url;
+}
+
+// A signature separator line: the #127 "-- " (inbox-signature SIG_SEP) or the
+// legacy footer's "--" (email-signature withEmailSignature).
+const SIGNATURE_LINE = /\n--[ \t]*\n/;
+
+/** withLink, except that a link appended to a signed body (no `{link}`) goes
+ *  ABOVE the signature, never under it. */
+export function bodyWithLink(body: string, url: string): string {
+  const text = String(body ?? "");
+  if (text.includes(LINK_TOKEN)) return withLink(text, url);
+  const m = SIGNATURE_LINE.exec(text);
+  if (!m) return withLink(text, url);
+  return withLink(text.slice(0, m.index), url) + "\n" + text.slice(m.index);
+}
+
+/** `list` without any entry whose bare address is in `exclude` (case-insensitive) — Cc never repeats a To. */
+export function withoutAddresses(list: string[], exclude: string[]): string[] {
+  const seen = new Set(exclude.map((e) => (addressOf(e) || e).toLowerCase()));
+  return list.filter((e) => !seen.has((addressOf(e) || e).toLowerCase()));
 }
 
 // local@domain.tld — deliberately simple (no quoted locals, no IP literals).

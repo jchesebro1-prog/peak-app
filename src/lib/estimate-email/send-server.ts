@@ -3,15 +3,22 @@ import { renderCoverPdf as renderCoverPdfLive } from "@/lib/estimate-output/cove
 import { coverPdfFileName } from "@/lib/estimate-output/cover";
 import { chicagoDayEnd, leadEstimator } from "@/lib/estimate-output/responses";
 import { pdfStorage } from "@/lib/quote-pdf/storage";
-import { latestSentRevision, pdfFileName, pdfIsCurrent, pdfKindForQuoteType, teamPdfPath } from "@/lib/quote-pdf/state";
+import { applyOutboundSignature } from "@/lib/email-signature";
+import { gmailEnabled, personalKey } from "@/lib/gmail/config";
+import { getConnectionInfo } from "@/lib/gmail/connections";
+import { latestSentRevision, pdfFileName, pdfIsCurrent, pdfKindForQuoteType, pdfView, teamPdfPath } from "@/lib/quote-pdf/state";
 import { ensureShareLink } from "@/lib/quote-share/links";
 import { sendQuoteToCustomer, type ReviewOpResult } from "@/lib/quote-review-ops";
 import { get as getThread, saveDraft, sendDraft, type CommAttachment, type CommLink } from "@/lib/stores/comms";
-import { get as getQuoteLive, recordEstimateEmail, type EstimateEmailEntry, type Quote, type QuoteStatus } from "@/lib/stores/quotes";
+import {
+  claimEstimateEmailSend, get as getQuoteLive, recordEstimateEmail, releaseEstimateEmailSend,
+  type EstimateEmailClaim, type EstimateEmailEntry, type Quote, type QuoteRevision, type QuoteStatus,
+} from "@/lib/stores/quotes";
+import { signatureFor } from "@/lib/stores/signatures";
 import { createTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
-import { activeUsers } from "@/lib/users";
-import { attachmentsFit, FOLLOW_UP_CHOICES, parseRecipients, withLink } from "./compose";
+import { activeUsers, getUser } from "@/lib/users";
+import { attachmentsFit, bodyWithLink, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
 
 /**
  * Estimator Phase 3 (spec §10.1, §10.3) — email the estimate from the
@@ -28,6 +35,14 @@ import { attachmentsFit, FOLLOW_UP_CHOICES, parseRecipients, withLink } from "./
  * record or follow-up never reads as a failed send (that would invite a
  * duplicate email): the result stays ok with a `warning`.
  *
+ * Fix round 1: one send at a time per quote (a store-owned claim,
+ * `Quote.emailSending`, taken before anything is marked and released in
+ * `finally`); a stale view (`asOf`) is refused on a re-send too; Gmail
+ * refusing a connected sender's email is a failure, never "sent locally";
+ * the estimate PDF rides BY REFERENCE (`pdfPath` + `href`) — its bytes are
+ * never copied into the comms thread; the sender's signature is applied the
+ * way the Inbox applies it.
+ *
  * Every side effect is an injected dep so the spec harness proves the order
  * with fakes; `liveEstimateEmailDeps` wires the real ones (the "use server"
  * wrappers in src/app/(app)/estimator/send-actions.ts).
@@ -38,7 +53,10 @@ export const SEND_COPY = {
   gone: "Quote not found.",
   notEstimate: "Only system estimates can be emailed from here.",
   closed: "This estimate is closed — it can’t be emailed.",
+  changedSince: "This quote changed since you opened it — reload to review the current version.",
   pdfStale: "Save the estimate first — its PDF is out of date.",
+  pdfRendering: "The PDF is still being made — try again in a moment.",
+  pdfPreparing: "The sent PDF is still being prepared — try again in a moment.",
   pdfUnreadable: "The estimate PDF couldn’t be read — save the estimate and try again.",
   noTo: "Add at least one To address.",
   badTo: (bad: string[]) => `Check the To address${bad.length === 1 ? "" : "es"}: ${bad.join(", ")}`,
@@ -51,9 +69,14 @@ export const SEND_COPY = {
   badFollowUp: "Pick a follow-up option.",
   tooLarge: "Too large to attach — send the link only.",
   attachFailed: "The attachments couldn’t be prepared — try again.",
+  prepareFailed: "The email couldn’t be prepared — try again.",
+  inProgress: "Another send of this estimate is in progress.",
+  claimFailed: "The send couldn’t start — try again.",
   markFailed: "The estimate couldn’t be marked sent — nothing was emailed. Try again.",
   partial: "Marked sent, but the email didn’t go out — open it in Inbox.",
   notSent: "The email didn’t go out — try again.",
+  gmailFailed: "Marked sent, but Gmail didn’t accept the email — open it in Inbox.",
+  gmailFailedResend: "Gmail didn’t accept the email — open it in Inbox.",
   inboxPartial: "Marked sent, but the Inbox draft couldn’t be created — try Open in Inbox again.",
   inboxFailed: "The Inbox draft couldn’t be created — try again.",
   recordFailed: "Sent — but it couldn’t be logged on the estimate’s Activity.",
@@ -71,14 +94,17 @@ const DAY_MS = 86_400_000;
 export class EstimateEmailError extends Error {
   /** A comms thread already exists (the draft whose send failed). */
   threadId?: string;
-  constructor(message: string, threadId?: string) {
+  /** That thread is still a draft (false = it left Drafts — link the thread). */
+  stillDraft?: boolean;
+  constructor(message: string, threadId?: string, stillDraft?: boolean) {
     super(message);
     this.name = "EstimateEmailError";
     if (threadId) this.threadId = threadId;
+    if (typeof stillDraft === "boolean") this.stillDraft = stillDraft;
   }
 }
 
-export type SendActor = { id: string; name: string; roles: string[] };
+export type SendActor = { id: string; name: string; roles: string[]; email?: string | null };
 export type RosterUser = { id: string; name: string; status?: string | null };
 
 export type EstimateEmailInput = {
@@ -90,7 +116,7 @@ export type EstimateEmailInput = {
   attachCover: boolean;
   /** 0 = Off; one of FOLLOW_UP_CHOICES. Ignored by Open in Inbox. */
   followUpDays?: number;
-  /** The quote's updatedAt the sender was shown — refuse a version they didn't see (first send only). */
+  /** The quote's updatedAt the sender was shown — a version they didn't see is refused (first send and re-send). */
   asOf?: number;
 };
 
@@ -121,17 +147,26 @@ export type FollowUpSpec = {
   leadId?: string;
 };
 
+/** How the email left: through the sender's Gmail, locally only (no Gmail
+ *  connection / bridge off), or `failed` — connected, but Gmail didn't take it. */
+export type EmailDelivery = "gmail" | "local" | "failed";
+
 export type EstimateEmailDeps = {
   now: () => number;
   getQuote: (id: string) => Promise<Quote | null>;
-  /** The estimate PDF bytes (estimatePdfPath); null = not readable. */
-  readEstimatePdf: (q: Quote) => Promise<Buffer | null>;
+  /** A stored quote PDF's bytes (estimatePdfPath); null = not readable. */
+  readPdf: (path: string) => Promise<Buffer | null>;
   /** The cover, rendered now; throws EstimateEmailError with the reason. */
   renderCoverPdf: (q: Quote) => Promise<Buffer>;
+  /** Take the quote's one in-flight send (Quote.emailSending). */
+  claimSend: (id: string, by: string, now: number) => Promise<{ ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" }>;
+  releaseSend: (id: string, claim: EstimateEmailClaim) => Promise<void>;
+  /** The sender's signature, applied as the Inbox applies it at send. */
+  applySignature: (body: string, actor: SendActor) => Promise<string>;
   sendQuote: (id: string, actor: SendActor, asOf?: number) => Promise<ReviewOpResult>;
   /** The absolute client-link URL; throws EstimateEmailError when refused. */
   ensureLink: (id: string) => Promise<string>;
-  createAndSendThread: (spec: ThreadSpec) => Promise<{ threadId: string; delivered: boolean }>;
+  createAndSendThread: (spec: ThreadSpec) => Promise<{ threadId: string; delivery: EmailDelivery }>;
   createDraftThread: (spec: ThreadSpec) => Promise<{ threadId: string }>;
   recordEmail: (id: string, entry: EstimateEmailEntry) => Promise<boolean>;
   addFollowUpTask: (spec: FollowUpSpec, actor: SendActor) => Promise<unknown>;
@@ -140,7 +175,7 @@ export type EstimateEmailDeps = {
 };
 
 export type SendEstimateResult =
-  | { ok: true; threadId: string; delivered: boolean; status: QuoteStatus; warning?: string }
+  | { ok: true; threadId: string; delivery: "gmail" | "local"; status: QuoteStatus; warning?: string }
   | { ok: false; error: string; markedSent?: boolean; href?: string };
 
 export type OpenInInboxResult =
@@ -152,6 +187,16 @@ export function inboxDraftHref(threadId: string): string {
   return `/inbox?box=personal&folder=drafts&draft=${encodeURIComponent(threadId)}`;
 }
 
+/** The Inbox reader opened on a thread that has left Drafts. */
+export function inboxThreadHref(threadId: string): string {
+  return `/inbox?thread=${encodeURIComponent(threadId)}`;
+}
+
+/** The team download URL of one sent revision's PDF (api/quotes/[id]/pdf). */
+export function revisionPdfHref(quoteId: string, rev: number): string {
+  return `/api/quotes/${encodeURIComponent(quoteId)}/pdf?rev=${rev}&download=1`;
+}
+
 /** The thread's record link label: `<EST number> · <project name>`. */
 export function estimateLinkLabel(q: Quote): string {
   const number = displayQuoteNumber(q);
@@ -160,14 +205,16 @@ export function estimateLinkLabel(q: Quote): string {
 }
 
 /**
- * Which stored PDF goes out: on a re-send (status `sent`) the latest sent
- * revision's own copy when it has one — exactly what the customer was sent —
- * else the current file (preflight already required it to be current).
+ * Which stored PDF goes out. Once the quote has been sent, only the latest
+ * sent revision's own copy — exactly what the customer was sent; null while
+ * that copy isn't there yet ("being prepared"), never the current file (the
+ * rule in quote-pdf/state.ts portalPdfSource). A quote never sent: its
+ * current file (preflight requires it to be current).
  */
 export function estimatePdfPath(q: Pick<Quote, "status" | "pdf" | "revisions">): string | null {
   if (q.status === "sent") {
     const rev = latestSentRevision(q.revisions);
-    if (rev?.pdfBlobPath) return rev.pdfBlobPath;
+    if (rev) return rev.pdfBlobPath || null;
   }
   return teamPdfPath(q, null);
 }
@@ -183,7 +230,9 @@ type Prepared = {
   cc: string;
   subject: string;
   body: string;
-  attachments: CommAttachment[];
+  /** The estimate PDF (by reference once the revision is known): its file name and raw size. */
+  estimate: { name: string; size: number } | null;
+  cover: CommAttachment | null;
 };
 
 type Refusal = { ok: false; error: string };
@@ -206,7 +255,12 @@ async function prepare(
   if (!q) return { ok: false, error: SEND_COPY.gone };
   if (pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: SEND_COPY.notEstimate };
   if (q.status !== "draft" && q.status !== "sent") return { ok: false, error: SEND_COPY.closed };
-  if (!pdfIsCurrent(q.pdf, q.contentChangedAt)) return { ok: false, error: SEND_COPY.pdfStale };
+  // A re-send never reaches sendQuote's version check — the shown version is checked here for both.
+  const asOf = input?.asOf;
+  if (typeof asOf === "number" && asOf > 0 && q.updatedAt !== asOf) return { ok: false, error: SEND_COPY.changedSince };
+  if (!pdfIsCurrent(q.pdf, q.contentChangedAt)) {
+    return { ok: false, error: pdfView(q.pdf, deps.now())?.status === "pending" ? SEND_COPY.pdfRendering : SEND_COPY.pdfStale };
+  }
 
   const rawTo = String(input?.to ?? "");
   const rawCc = String(input?.cc ?? "");
@@ -215,12 +269,13 @@ async function prepare(
   if (!to.ok) return { ok: false, error: SEND_COPY.badTo(to.bad) };
   // Open in Inbox may leave To for the composer; a send needs one.
   if (mode === "send" && to.list.length === 0) return { ok: false, error: SEND_COPY.noTo };
-  const cc = parseRecipients(rawCc);
-  if (!cc.ok) return { ok: false, error: SEND_COPY.badCc(cc.bad) };
-  if (to.list.length + cc.list.length > RECIPIENTS_MAX) return { ok: false, error: SEND_COPY.tooManyRecipients };
+  const ccParsed = parseRecipients(rawCc);
+  if (!ccParsed.ok) return { ok: false, error: SEND_COPY.badCc(ccParsed.bad) };
+  const cc = withoutAddresses(ccParsed.list, to.list);
+  if (to.list.length + cc.length > RECIPIENTS_MAX) return { ok: false, error: SEND_COPY.tooManyRecipients };
   // One line: a subject can never carry a header break.
   const subject = String(input?.subject ?? "").replace(/[\r\n]+/g, " ").trim();
-  const body = String(input?.body ?? "");
+  let body = String(input?.body ?? "");
   if (!subject) return { ok: false, error: SEND_COPY.noSubject };
   if (!body.trim()) return { ok: false, error: SEND_COPY.noBody };
   if (subject.length > SUBJECT_MAX) return { ok: false, error: SEND_COPY.subjectTooLong };
@@ -228,31 +283,46 @@ async function prepare(
   if (mode === "send" && !(FOLLOW_UP_CHOICES as readonly number[]).includes(Number(input?.followUpDays))) {
     return { ok: false, error: SEND_COPY.badFollowUp };
   }
+  // The Inbox's own send rule (applyOutboundSignature). An Inbox draft is
+  // left as written — the Inbox applies it when that draft is sent.
+  if (mode === "send") {
+    try {
+      body = await deps.applySignature(body, actor);
+    } catch (e) {
+      console.error("[estimate-email] signature failed", e);
+      return { ok: false, error: SEND_COPY.prepareFailed };
+    }
+  }
 
-  // Step 2 — attachments, before anything is marked.
+  // Step 2 — attachments, before anything is marked. The estimate's size is
+  // checked against the cap before the cover is rendered at all.
   const number = displayQuoteNumber(q);
-  const attachments: CommAttachment[] = [];
+  let estimate: Prepared["estimate"] = null;
+  let cover: CommAttachment | null = null;
   try {
     if (input.attachEstimate === true) {
-      const bytes = await deps.readEstimatePdf(q);
+      const path = estimatePdfPath(q);
+      if (!path) return { ok: false, error: SEND_COPY.pdfPreparing };
+      const bytes = await deps.readPdf(path);
       if (!bytes || !bytes.length) return { ok: false, error: SEND_COPY.pdfUnreadable };
-      attachments.push(pdfAttachment(pdfFileName(number, null), bytes));
+      estimate = { name: pdfFileName(number, null), size: bytes.length };
+      if (!attachmentsFit([estimate.size])) return { ok: false, error: SEND_COPY.tooLarge };
     }
     if (input.attachCover === true) {
-      attachments.push(pdfAttachment(coverPdfFileName(number), await deps.renderCoverPdf(q)));
+      const bytes = await deps.renderCoverPdf(q);
+      // The cover is rendered on demand and small: it rides as a data-URL.
+      cover = { name: coverPdfFileName(number), mime: "application/pdf", size: bytes.length, dataUrl: "data:application/pdf;base64," + bytes.toString("base64") };
     }
   } catch (e) {
     if (!(e instanceof EstimateEmailError)) console.error("[estimate-email] attachments failed", e);
     return { ok: false, error: userMessage(e, SEND_COPY.attachFailed) };
   }
-  if (!attachmentsFit(attachments.map((a) => a.size))) return { ok: false, error: SEND_COPY.tooLarge };
+  if (!attachmentsFit([estimate?.size ?? 0, cover?.size ?? 0])) return { ok: false, error: SEND_COPY.tooLarge };
 
-  return { q, to: to.list.join(", "), cc: cc.list.join(", "), subject, body, attachments };
+  return { q, to: to.list.join(", "), cc: cc.join(", "), subject, body, estimate, cover };
 }
 
-function pdfAttachment(name: string, bytes: Buffer): CommAttachment {
-  return { name, mime: "application/pdf", size: bytes.length, dataUrl: "data:application/pdf;base64," + bytes.toString("base64") };
-}
+type Linked = { ok: true; markedSent: boolean; url: string; q: Quote; rev: QuoteRevision };
 
 /** Steps 3–4: mark sent (draft only) and mint the link. */
 async function markAndLink(
@@ -260,7 +330,7 @@ async function markAndLink(
   actor: SendActor,
   p: Prepared,
   asOf: number | undefined
-): Promise<{ ok: true; markedSent: boolean; url: string; q: Quote; rev: number } | { ok: false; error: string; markedSent: boolean }> {
+): Promise<Linked | { ok: false; error: string; markedSent: boolean }> {
   let markedSent = false;
   if (p.q.status === "draft") {
     let r: ReviewOpResult;
@@ -274,19 +344,42 @@ async function markAndLink(
     if (!r.ok) return { ok: false, error: r.error, markedSent: false };
     markedSent = true;
   }
+  let linked: Linked;
   try {
     const url = await deps.ensureLink(p.q.id);
     const fresh = markedSent ? (await deps.getQuote(p.q.id)) ?? p.q : p.q;
-    const rev = latestSentRevision(fresh.revisions)?.rev;
-    if (typeof rev !== "number") throw new Error("no sent revision after send");
-    return { ok: true, markedSent, url, q: fresh, rev };
+    const rev = latestSentRevision(fresh.revisions);
+    if (!rev || typeof rev.rev !== "number") throw new Error("no sent revision after send");
+    linked = { ok: true, markedSent, url, q: fresh, rev };
   } catch (e) {
     if (!(e instanceof EstimateEmailError)) console.error("[estimate-email] client link failed", e);
     return { ok: false, error: markedSent ? SEND_COPY.partial : userMessage(e, SEND_COPY.notSent), markedSent };
   }
+  // The estimate goes out as the sent revision's own copy (by reference).
+  if (p.estimate && !linked.rev.pdfBlobPath) {
+    console.error("[estimate-email] the sent revision has no PDF copy", p.q.id, linked.rev.rev);
+    return { ok: false, error: markedSent ? SEND_COPY.partial : SEND_COPY.pdfPreparing, markedSent };
+  }
+  return linked;
 }
 
-function threadSpecFor(actor: SendActor, q: Quote, p: Prepared, body: string): ThreadSpec {
+function attachmentsFor(p: Prepared, m: Linked): CommAttachment[] {
+  const out: CommAttachment[] = [];
+  if (p.estimate && m.rev.pdfBlobPath) {
+    out.push({
+      name: p.estimate.name,
+      mime: "application/pdf",
+      size: p.estimate.size,
+      pdfPath: m.rev.pdfBlobPath,
+      href: revisionPdfHref(m.q.id, m.rev.rev),
+    });
+  }
+  if (p.cover) out.push(p.cover);
+  return out;
+}
+
+function threadSpecFor(actor: SendActor, p: Prepared, m: Linked): ThreadSpec {
+  const q = m.q;
   return {
     mailboxUser: actor.name,
     customerId: q.customerId ?? null,
@@ -295,10 +388,38 @@ function threadSpecFor(actor: SendActor, q: Quote, p: Prepared, body: string): T
     to: p.to,
     cc: p.cc,
     subject: p.subject,
-    body,
+    body: bodyWithLink(p.body, m.url),
     link: { type: "quote", id: q.id, label: estimateLinkLabel(q) },
-    attachments: p.attachments,
+    attachments: attachmentsFor(p, m),
   };
+}
+
+/** Take the one in-flight send, run `work`, always release. */
+async function withClaim<T extends { ok: boolean }>(
+  deps: EstimateEmailDeps,
+  actor: SendActor,
+  quoteId: string,
+  work: () => Promise<T>
+): Promise<T | Refusal> {
+  let claim: EstimateEmailClaim;
+  try {
+    const c = await deps.claimSend(quoteId, actor.name, deps.now());
+    if (!c.ok) return { ok: false, error: c.reason === "busy" ? SEND_COPY.inProgress : SEND_COPY.gone };
+    claim = c.claim;
+  } catch (e) {
+    console.error("[estimate-email] claim failed", e);
+    return { ok: false, error: SEND_COPY.claimFailed };
+  }
+  try {
+    return await work();
+  } finally {
+    try {
+      await deps.releaseSend(quoteId, claim);
+    } catch (e) {
+      // It expires on its own (ESTIMATE_EMAIL_CLAIM_MS).
+      console.error("[estimate-email] releasing the send claim failed", e);
+    }
+  }
 }
 
 /** §10.1 — Send & mark sent → / Send email →. */
@@ -310,22 +431,37 @@ export async function sendEstimateEmail(
 ): Promise<SendEstimateResult> {
   const p = await prepare(deps, actor, quoteId, input, "send");
   if ("ok" in p) return p;
+  return withClaim(deps, actor, p.q.id, () => sendClaimed(deps, actor, p, input));
+}
+
+async function sendClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepared, input: EstimateEmailInput): Promise<SendEstimateResult> {
   const m = await markAndLink(deps, actor, p, input.asOf);
   if (!m.ok) return { ok: false, error: m.error, ...(m.markedSent ? { markedSent: true } : {}) };
-  const { q, rev, markedSent } = m;
+  const { q, markedSent } = m;
+  const rev = m.rev.rev;
 
   // Step 5 — the email.
-  let sent: { threadId: string; delivered: boolean };
+  let sent: { threadId: string; delivery: EmailDelivery };
   try {
-    sent = await deps.createAndSendThread(threadSpecFor(actor, q, p, withLink(p.body, m.url)));
+    sent = await deps.createAndSendThread(threadSpecFor(actor, p, m));
   } catch (e) {
     console.error("[estimate-email] send failed", e);
     const threadId = e instanceof EstimateEmailError ? e.threadId : undefined;
+    const stillDraft = e instanceof EstimateEmailError ? e.stillDraft !== false : true;
     return {
       ok: false,
       error: markedSent ? SEND_COPY.partial : SEND_COPY.notSent,
       ...(markedSent ? { markedSent: true } : {}),
-      ...(threadId ? { href: inboxDraftHref(threadId) } : {}),
+      ...(threadId ? { href: stillDraft ? inboxDraftHref(threadId) : inboxThreadHref(threadId) } : {}),
+    };
+  }
+  // Connected, but Gmail didn't take it: the partial path — no record, no task.
+  if (sent.delivery !== "gmail" && sent.delivery !== "local") {
+    return {
+      ok: false,
+      error: markedSent ? SEND_COPY.gmailFailed : SEND_COPY.gmailFailedResend,
+      ...(markedSent ? { markedSent: true } : {}),
+      href: inboxThreadHref(sent.threadId),
     };
   }
 
@@ -368,7 +504,7 @@ export async function sendEstimateEmail(
   return {
     ok: true,
     threadId: sent.threadId,
-    delivered: sent.delivered === true,
+    delivery: sent.delivery,
     status: q.status,
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
@@ -383,22 +519,26 @@ export async function openEstimateInInbox(
 ): Promise<OpenInInboxResult> {
   const p = await prepare(deps, actor, quoteId, input, "inbox");
   if ("ok" in p) return p;
+  return withClaim(deps, actor, p.q.id, () => openClaimed(deps, actor, p, input));
+}
+
+async function openClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepared, input: EstimateEmailInput): Promise<OpenInInboxResult> {
   const m = await markAndLink(deps, actor, p, input.asOf);
   if (!m.ok) {
     const error = m.markedSent ? SEND_COPY.inboxPartial : m.error;
     return { ok: false, error, ...(m.markedSent ? { markedSent: true } : {}) };
   }
-  const { q, rev, markedSent } = m;
+  const { q, markedSent } = m;
   let threadId: string;
   try {
-    threadId = (await deps.createDraftThread(threadSpecFor(actor, q, p, withLink(p.body, m.url)))).threadId;
+    threadId = (await deps.createDraftThread(threadSpecFor(actor, p, m))).threadId;
   } catch (e) {
     console.error("[estimate-email] inbox draft failed", e);
     return { ok: false, error: markedSent ? SEND_COPY.inboxPartial : SEND_COPY.inboxFailed, ...(markedSent ? { markedSent: true } : {}) };
   }
   let warning: string | undefined;
   try {
-    if (!(await deps.recordEmail(q.id, { threadId, rev, at: deps.now(), by: actor.name, to: p.to }))) warning = SEND_COPY.recordFailed;
+    if (!(await deps.recordEmail(q.id, { threadId, rev: m.rev.rev, at: deps.now(), by: actor.name, to: p.to }))) warning = SEND_COPY.recordFailed;
   } catch (e) {
     console.error("[estimate-email] record failed", e);
     warning = SEND_COPY.recordFailed;
@@ -418,16 +558,24 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
   return {
     now: Date.now,
     getQuote: getQuoteLive,
-    readEstimatePdf: async (q) => {
-      const path = estimatePdfPath(q);
+    readPdf: async (path) => {
       const store = pdfStorage();
-      if (!path || "unavailable" in store) return null;
+      if ("unavailable" in store) return null;
       return store.read(path);
     },
     renderCoverPdf: async (q) => {
       const r = await renderCoverPdfLive(q.id, opts.host, opts.proto);
       if (!r.ok) throw new EstimateEmailError(r.error);
       return r.pdf;
+    },
+    claimSend: (id, by, now) => claimEstimateEmailSend(id, by, now),
+    releaseSend: (id, claim) => releaseEstimateEmailSend(id, claim),
+    applySignature: async (body, actor) => {
+      // The Inbox's rule: a #127 signature means the composer handled it
+      // (seeded by the defaults, kept or removed by the sender); none → the
+      // legacy footer from the sender's profile (inbox/actions composeSendAction).
+      const [signature, profile] = await Promise.all([signatureFor(actor.name), getUser(actor.id)]);
+      return applyOutboundSignature(body, !!signature, profile || { name: actor.name, email: actor.email ?? null });
     },
     sendQuote: (id, actor, asOf) => sendQuoteToCustomer(id, actor, asOf),
     ensureLink: async (id) => {
@@ -439,18 +587,29 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
       return origin + path;
     },
     createAndSendThread: async (spec) => {
+      // "local" only when Gmail can't be involved at all: the bridge is off
+      // or the sender has no connection. An unknown lookup counts as
+      // connected — a missing gmailId then reads as failed, never "local".
+      let connected = true;
+      try {
+        connected = gmailEnabled() && !!(await getConnectionInfo(personalKey(opts.actor.id)));
+      } catch (e) {
+        console.error("[estimate-email] gmail connection lookup failed", e);
+      }
       const draft = await saveDraft({ ...draftInput(spec), me: spec.mailboxUser });
       try {
         const sent = await sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true });
         if (!sent) throw new Error("the draft vanished before it was sent");
       } catch (e) {
         console.error("[estimate-email] sendDraft failed", e);
-        throw new EstimateEmailError(SEND_COPY.notSent, draft.id);
+        const t = await getThread(draft.id).catch(() => null);
+        throw t ? new EstimateEmailError(SEND_COPY.notSent, draft.id, t.status === "draft") : new EstimateEmailError(SEND_COPY.notSent);
       }
-      // Gmail stamps gmailId after the write (dispatchOutbound); none = local only.
+      if (!connected) return { threadId: draft.id, delivery: "local" };
+      // addMessage awaits the bridge's dispatch, so a Gmail send has stamped its gmailId by now.
       const t = await getThread(draft.id);
       const outs = (t?.messages || []).filter((x) => x.direction === "out");
-      return { threadId: draft.id, delivered: !!outs[outs.length - 1]?.gmailId };
+      return { threadId: draft.id, delivery: outs[outs.length - 1]?.gmailId ? "gmail" : "failed" };
     },
     createDraftThread: async (spec) => ({ threadId: (await saveDraft({ ...draftInput(spec), me: spec.mailboxUser })).id }),
     recordEmail: recordEstimateEmail,

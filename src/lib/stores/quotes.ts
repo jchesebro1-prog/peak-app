@@ -346,7 +346,19 @@ export type Quote = {
    *  by recordEstimateEmail under the row lock; update() drops it so an
    *  Estimator save can never erase it; never content, never snapshotted. */
   estimateEmails?: EstimateEmailEntry[] | null;
+  /** Estimator Phase 3 fix round 1 — an in-flight estimate email: who holds
+   *  the send and until when (epoch-ms). Written only by
+   *  claimEstimateEmailSend / releaseEstimateEmailSend under the row lock;
+   *  update() drops it; never content (not a QUOTE_CONTENT_FIELDS member),
+   *  never snapshotted, never bumps updatedAt. An expired claim is ignored. */
+  emailSending?: EstimateEmailClaim | null;
 };
+
+/** One in-flight estimate email (`Quote.emailSending`). */
+export type EstimateEmailClaim = { by: string; until: number };
+
+/** How long a send claim holds — the Estimator page's maxDuration (120 s). */
+export const ESTIMATE_EMAIL_CLAIM_MS = 120_000;
 
 /** One emailed copy of the estimate: the comms thread, the sent revision it
  *  carried, when, by whom (user name) and the To line. */
@@ -804,6 +816,7 @@ export async function update(
     delete clean.clientResponses;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
+    delete clean.emailSending;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -1144,6 +1157,42 @@ export async function recordEstimateEmail(id: string, entry: EstimateEmailEntry)
     wrote = true;
   });
   return wrote;
+}
+
+/**
+ * Estimator Phase 3 fix round 1 — claim the quote's one in-flight estimate
+ * email (`Quote.emailSending`) under the row lock. "busy" = another send's
+ * claim hasn't expired; an expired claim is taken over. Never bumps
+ * `updatedAt`, never changes content. Returns the claim to release with.
+ */
+export async function claimEstimateEmailSend(
+  id: string,
+  by: string,
+  now: number,
+  ttlMs: number = ESTIMATE_EMAIL_CLAIM_MS
+): Promise<{ ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" }> {
+  if (!Number.isFinite(now) || !(ttlMs > 0)) return { ok: false, reason: "gone" };
+  let out: { ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" } = { ok: false, reason: "gone" };
+  await patchQuote(id, (doc) => {
+    const cur = doc.emailSending;
+    if (cur && typeof cur.until === "number" && cur.until > now) {
+      out = { ok: false, reason: "busy" };
+      return;
+    }
+    const claim: EstimateEmailClaim = { by: String(by ?? "").slice(0, 200), until: now + ttlMs };
+    doc.emailSending = claim;
+    out = { ok: true, claim };
+  });
+  return out;
+}
+
+/** Release a claim taken by claimEstimateEmailSend — only that exact claim
+ *  (a later sender's takeover of an expired one is left alone). */
+export async function releaseEstimateEmailSend(id: string, claim: EstimateEmailClaim): Promise<void> {
+  await patchQuote(id, (doc) => {
+    const cur = doc.emailSending;
+    if (cur && cur.by === claim.by && cur.until === claim.until) doc.emailSending = null;
+  });
 }
 
 /** #301 slice C (R13) — mirror the drawings list onto the latest SENT
