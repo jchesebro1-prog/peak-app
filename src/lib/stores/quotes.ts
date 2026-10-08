@@ -47,6 +47,7 @@ import {
   type ReviewLimitContext,
 } from "@/lib/review-limits";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
+import { REVIEW_COMMENTS_MAX, sanitizeComment, type ReviewComment } from "@/lib/estimate-review/comments";
 import { approvalFingerprint, approvalSnapshotMatches, type ApprovalSnapshot } from "@/lib/approval-snapshot";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 import { liveRenameRefs } from "@/lib/stores/catalog-renames";
@@ -346,6 +347,13 @@ export type Quote = {
    *  by recordEstimateEmail under the row lock; update() drops it so an
    *  Estimator save can never erase it; never content, never snapshotted. */
   estimateEmails?: EstimateEmailEntry[] | null;
+  /** Estimator Phase 4 (spec §11.3) — review comments pinned to systems
+   *  (sectionId null = the whole estimate), oldest first, ≤ 200. Written only
+   *  by addReviewComment / resolveReviewComment / deleteReviewComment under
+   *  the row lock; update() drops it so an Estimator save can never erase it;
+   *  never content (not a QUOTE_CONTENT_FIELDS member), never snapshotted, never
+   *  copied by buildQuote, never bumps updatedAt. Staff-only. */
+  reviewComments?: ReviewComment[] | null;
   /** Estimator Phase 3 fix round 1 — an in-flight estimate email: who holds
    *  the send and until when (epoch-ms). Written only by
    *  claimEstimateEmailSend / releaseEstimateEmailSend under the row lock;
@@ -816,6 +824,8 @@ export async function update(
     delete clean.clientResponses;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
+    // Phase 4: the review comments are the add/resolve/delete writers' alone.
+    delete clean.reviewComments;
     delete clean.emailSending;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
@@ -1157,6 +1167,104 @@ export async function recordEstimateEmail(id: string, entry: EstimateEmailEntry)
     wrote = true;
   });
   return wrote;
+}
+
+export type ReviewCommentWrite =
+  | { ok: true; comments: ReviewComment[]; comment?: ReviewComment }
+  | { ok: false; reason: "gone" | "invalid" | "no-system" | "full" | "missing" | "forbidden" };
+
+const cleanComments = (doc: Quote): ReviewComment[] => (Array.isArray(doc.reviewComments) ? doc.reviewComments.filter((c) => !!c && typeof c.id === "string") : []);
+
+/**
+ * Estimator Phase 4 — add one review comment (the ONLY creator). Under the row
+ * lock: the body must clean to 1–2,000 characters, `sectionId` must be null (the
+ * whole estimate) or a system that is on the saved estimate, and the list holds
+ * at most REVIEW_COMMENTS_MAX — a full list drops its oldest RESOLVED comment to
+ * make room and refuses ("full") when every comment is still open. `by` is the
+ * author's display name. Never bumps `updatedAt`, never changes content.
+ */
+export async function addReviewComment(
+  id: string,
+  input: { sectionId: string | null; body: unknown; by: string; at?: number }
+): Promise<ReviewCommentWrite> {
+  const body = sanitizeComment(input?.body);
+  const by = String(input?.by ?? "").trim().slice(0, 200);
+  const sectionId = input?.sectionId == null ? null : typeof input.sectionId === "string" ? input.sectionId : undefined;
+  if (body === null || !by || sectionId === undefined) return { ok: false, reason: "invalid" };
+  const at = typeof input.at === "number" && Number.isFinite(input.at) ? input.at : Date.now();
+  const res: { v: ReviewCommentWrite } = { v: { ok: false, reason: "gone" } };
+  await patchQuote(id, (doc) => {
+    if (sectionId !== null) {
+      const secs = (doc.spec as { sections?: Array<{ id?: unknown }> } | null | undefined)?.sections;
+      if (!Array.isArray(secs) || !secs.some((x) => x && x.id === sectionId)) {
+        res.v = { ok: false, reason: "no-system" };
+        return;
+      }
+    }
+    let cur = cleanComments(doc);
+    if (cur.length >= REVIEW_COMMENTS_MAX) {
+      const oldestResolved = cur.findIndex((c) => c.resolvedAt != null);
+      if (oldestResolved < 0) {
+        res.v = { ok: false, reason: "full" };
+        return;
+      }
+      cur = cur.filter((_, i) => i !== oldestResolved);
+    }
+    const comment: ReviewComment = { id: "rc-" + globalThis.crypto.randomUUID(), sectionId, body, by, at };
+    doc.reviewComments = [...cur, comment];
+    res.v = { ok: true, comments: doc.reviewComments, comment };
+  });
+  return res.v;
+}
+
+/**
+ * Estimator Phase 4 — mark one comment resolved (idempotent: an already
+ * resolved comment keeps its first resolver and time). "missing" = no such
+ * comment (deleted meanwhile).
+ */
+export async function resolveReviewComment(id: string, commentId: string, by: string, now: number = Date.now()): Promise<ReviewCommentWrite> {
+  const who = String(by ?? "").trim().slice(0, 200);
+  if (!who || !Number.isFinite(now)) return { ok: false, reason: "invalid" };
+  const res: { v: ReviewCommentWrite } = { v: { ok: false, reason: "gone" } };
+  await patchQuote(id, (doc) => {
+    const cur = cleanComments(doc);
+    const hit = cur.find((c) => c.id === commentId);
+    if (!hit) {
+      res.v = { ok: false, reason: "missing" };
+      return;
+    }
+    if (hit.resolvedAt == null) {
+      doc.reviewComments = cur.map((c) => (c.id === commentId ? { ...c, resolvedAt: now, resolvedBy: who } : c));
+      res.v = { ok: true, comments: doc.reviewComments };
+    } else {
+      res.v = { ok: true, comments: cur };
+    }
+  });
+  return res.v;
+}
+
+/**
+ * Estimator Phase 4 — delete one comment. `allow` is judged on the comment as
+ * read UNDER the row lock (so a resolve that lands first is respected); false =
+ * "forbidden", nothing written.
+ */
+export async function deleteReviewComment(id: string, commentId: string, allow: (c: ReviewComment) => boolean): Promise<ReviewCommentWrite> {
+  const res: { v: ReviewCommentWrite } = { v: { ok: false, reason: "gone" } };
+  await patchQuote(id, (doc) => {
+    const cur = cleanComments(doc);
+    const hit = cur.find((c) => c.id === commentId);
+    if (!hit) {
+      res.v = { ok: false, reason: "missing" };
+      return;
+    }
+    if (!allow(hit)) {
+      res.v = { ok: false, reason: "forbidden" };
+      return;
+    }
+    doc.reviewComments = cur.filter((c) => c.id !== commentId);
+    res.v = { ok: true, comments: doc.reviewComments };
+  });
+  return res.v;
 }
 
 /**

@@ -22,6 +22,17 @@ export const REVIEW_COMMENTS_MAX = 200;
 export const COMMENT_BODY_MAX = 2000;
 export const WHOLE_ESTIMATE = "Whole estimate";
 
+/** Refusal copy for the review-comment actions. */
+export const REVIEW_COMMENT_COPY = {
+  gone: "That estimate no longer exists.",
+  needsPerm: "You don't have permission to do that.",
+  empty: "Write a comment first (up to 2,000 characters).",
+  noSystem: "That system is no longer on the estimate — save the estimate and try again.",
+  full: "This estimate has 200 open comments — resolve some before adding more.",
+  missing: "That comment is already gone.",
+  cantDelete: "Only the author or an approver can delete a comment.",
+} as const;
+
 /** Trim; null when not a string, empty, or longer than COMMENT_BODY_MAX. */
 export function sanitizeComment(raw: unknown): string | null {
   if (typeof raw !== "string") return null;

@@ -11390,6 +11390,7 @@ seeded()
   .then(() => p3TrackAsyncChecks())
   .then(() => p3TrackFixAsyncChecks())
   .then(() => p3FinalReviewAsyncChecks())
+  .then(() => p4CommentsAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
@@ -56515,3 +56516,103 @@ function p4CommentChecks(): void {
     "#P4 comments: delete = the author while unresolved (name match, case-blind), or anyone with approve at any time");
 }
 p4CommentChecks();
+
+// ---- #P4 comments (DB): the store-owned Quote.reviewComments + the actions' guards ----
+async function p4CommentsAsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const { numberComments, REVIEW_COMMENTS_MAX, canDelete } = await import("@/lib/estimate-review/comments");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const QID = fixtureId(308, "p4-review-comments");
+  await Q.create({
+    id: QID, name: "#P4 comments", customer: "Spec fixture", customerId: null, owner: "Lead P4", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s-a", name: "Rigging", items: [] }, { id: "s-b", name: "Lighting", items: [] }], mobs: [] },
+  });
+  registerFixture("quotes", QID);
+  const updatedAt = (await Q.get(QID))!.updatedAt;
+
+  const a1 = await Q.addReviewComment(QID, { sectionId: "s-b", body: "  Lights need a cut sheet  ", by: "Ann Lee", at: 100 });
+  const a2 = await Q.addReviewComment(QID, { sectionId: null, body: "Add the venue address", by: "Bo Park", at: 200 });
+  const a3 = await Q.addReviewComment(QID, { sectionId: "s-a", body: "Confirm truss span", by: "Ann Lee", at: 300 });
+  ok(a1.ok && a2.ok && a3.ok && a3.ok && a3.comments.length === 3 && a1.ok && a1.comment?.body === "Lights need a cut sheet" && a1.comment.by === "Ann Lee" && a1.comment.sectionId === "s-b" && /^rc-/.test(a1.comment.id),
+    "#P4 comments (DB): addReviewComment appends a trimmed, id'd comment and returns the fresh list");
+  ok((await Q.get(QID))!.updatedAt === updatedAt, "#P4 comments (DB): comments never bump updatedAt");
+  const secs = (await Q.get(QID))!.spec as { sections: Array<{ id: string; name: string }> };
+  ok(numberComments((await Q.get(QID))!.reviewComments, secs.sections).map((r) => r.comment.body.split(" ")[0]).join() === "Add,Confirm,Lights",
+    "#P4 comments (DB): numbering follows whole-estimate, then system order");
+
+  // Refusals write nothing.
+  const before = (await Q.get(QID))!.reviewComments!.length;
+  const bad = [
+    await Q.addReviewComment(QID, { sectionId: "s-a", body: "   ", by: "Ann" }),
+    await Q.addReviewComment(QID, { sectionId: "s-a", body: "x".repeat(2001), by: "Ann" }),
+    await Q.addReviewComment(QID, { sectionId: "s-a", body: "ok", by: " " }),
+    await Q.addReviewComment(QID, { sectionId: 7 as unknown as string, body: "ok", by: "Ann" }),
+    await Q.addReviewComment(QID, { sectionId: "s-gone", body: "ok", by: "Ann" }),
+    await Q.addReviewComment("Q-NOPE-P4", { sectionId: null, body: "ok", by: "Ann" }),
+  ];
+  ok(bad.map((r) => (r.ok ? "ok" : r.reason)).join() === "invalid,invalid,invalid,invalid,no-system,gone" && (await Q.get(QID))!.reviewComments!.length === before,
+    "#P4 comments (DB): an empty / over-long body, no author, a bad or unknown system, or an unknown quote is refused and writes nothing");
+
+  // A save can't clobber: a normal save keeps them; a patch carrying the key (even []) is dropped.
+  await Q.update(QID, { name: "#P4 comments (saved)" });
+  ok((await Q.get(QID))!.reviewComments?.length === 3, "#P4 comments (DB): an Estimator save patch without reviewComments keeps them");
+  await Q.update(QID, { reviewComments: [] } as never);
+  await Q.update(QID, { reviewComments: null } as never);
+  await Q.update(QID, { reviewComments: [{ id: "forged", sectionId: null, body: "x", by: "x", at: 1 }] } as never);
+  ok((await Q.get(QID))!.reviewComments?.length === 3 && !(await Q.get(QID))!.reviewComments!.some((c) => c.id === "forged"),
+    "#P4 comments (DB): update() drops a patch that carries reviewComments — the list belongs to the comment writers alone");
+  ok(!("reviewComments" in Q.buildQuote("Q-X", { name: "dup", reviewComments: [{ id: "c", sectionId: null, body: "x", by: "x", at: 1 }] } as never, "system", null, 1)),
+    "#P4 comments (DB): buildQuote never copies comments, so a duplicate starts clean");
+  ok(!Q.QUOTE_CONTENT_FIELDS.includes("reviewComments" as never), "#P4 comments (DB): comments are not a content field (never stale a PDF)");
+
+  // Resolve: stamped once, numbering drops it.
+  const id1 = a1.ok ? a1.comment!.id : "";
+  const r1 = await Q.resolveReviewComment(QID, id1, "Cy Dee", 5000);
+  const r1b = await Q.resolveReviewComment(QID, id1, "Someone Else", 9000);
+  const stored = (await Q.get(QID))!.reviewComments!.find((c) => c.id === id1)!;
+  ok(r1.ok && r1b.ok && stored.resolvedAt === 5000 && stored.resolvedBy === "Cy Dee", "#P4 comments (DB): resolving stamps who and when once — a second resolve is a no-op");
+  ok(numberComments((await Q.get(QID))!.reviewComments, secs.sections).map((r) => `${r.n}:${r.comment.body.split(" ")[0]}`).join() === "1:Add,2:Confirm",
+    "#P4 comments (DB): after a resolve the open comments renumber 1…n");
+  const rMiss = await Q.resolveReviewComment(QID, "rc-nope", "Cy", 1);
+  const rBad = await Q.resolveReviewComment(QID, id1, " ", 1);
+  const rGone = await Q.resolveReviewComment("Q-NOPE-P4", id1, "Cy", 1);
+  ok(!rMiss.ok && rMiss.reason === "missing" && !rBad.ok && rBad.reason === "invalid" && !rGone.ok && rGone.reason === "gone", "#P4 comments (DB): resolving an unknown comment / author / quote is refused");
+
+  // Delete: the guard is judged on the comment as read under the lock.
+  const id2 = a2.ok ? a2.comment!.id : "";
+  const dNo = await Q.deleteReviewComment(QID, id2, (c) => canDelete(["Estimator"], c, "Ann Lee"));
+  ok(!dNo.ok && dNo.reason === "forbidden" && (await Q.get(QID))!.reviewComments!.some((c) => c.id === id2), "#P4 comments (DB): a non-author estimator cannot delete — nothing written");
+  const dResolvedAuthor = await Q.deleteReviewComment(QID, id1, (c) => canDelete(["Estimator"], c, "Ann Lee"));
+  ok(!dResolvedAuthor.ok && dResolvedAuthor.reason === "forbidden", "#P4 comments (DB): the author cannot delete once it is resolved");
+  const dApprover = await Q.deleteReviewComment(QID, id1, (c) => canDelete(["Reviewer"], c, "Dee Nobody"));
+  ok(dApprover.ok && !dApprover.comments.some((c) => c.id === id1), "#P4 comments (DB): an approver deletes any comment, resolved or not");
+  const dAuthor = await Q.deleteReviewComment(QID, id2, (c) => canDelete(["Estimator"], c, "bo park"));
+  ok(dAuthor.ok && dAuthor.comments.length === 1, "#P4 comments (DB): the author deletes their own unresolved comment");
+  const dMiss = await Q.deleteReviewComment(QID, id2, () => true);
+  ok(!dMiss.ok && dMiss.reason === "missing", "#P4 comments (DB): deleting an already-deleted comment reports missing");
+
+  // Cap: 200; a full list evicts the oldest RESOLVED one, and refuses when all are open.
+  const CAP = REVIEW_COMMENTS_MAX;
+  const seeded = (await Q.get(QID))!.reviewComments!.length;
+  for (let n = seeded; n < CAP; n++) await Q.addReviewComment(QID, { sectionId: null, body: "filler " + n, by: "Ann Lee", at: 1000 + n });
+  const full = await Q.addReviewComment(QID, { sectionId: null, body: "one too many", by: "Ann Lee" });
+  ok((await Q.get(QID))!.reviewComments!.length === CAP && !full.ok && full.reason === "full", "#P4 comments (DB): capped at 200 — an add with every comment open is refused");
+  const filler = (await Q.get(QID))!.reviewComments!;
+  await Q.resolveReviewComment(QID, filler[5].id, "Cy", 7);
+  const evict = await Q.addReviewComment(QID, { sectionId: null, body: "fits now", by: "Ann Lee", at: 2000 });
+  const afterEvict = (await Q.get(QID))!.reviewComments!;
+  ok(evict.ok && afterEvict.length === CAP && !afterEvict.some((c) => c.id === filler[5].id) && afterEvict[CAP - 1].body === "fits now",
+    "#P4 comments (DB): a full list drops its oldest resolved comment to make room");
+
+  // The actions: guards run before any write, and the store is the only writer.
+  const act = rd("src/app/(app)/estimator/review-actions.ts");
+  ok(act.startsWith('"use server";') && act.includes("await requireUser()") && act.includes("if (!canAddComment(user.roles)) return { ok: false, error: COPY.needsPerm };") &&
+     act.indexOf("canAddComment(user.roles)") < act.indexOf("await addReviewComment(") && act.includes("if (!canResolve(user.roles, {})) return { ok: false, error: COPY.needsPerm };") &&
+     act.indexOf("canResolve(user.roles") < act.indexOf("await resolveReviewComment(") && act.includes("(c) => canDelete(user.roles, c, user.name)") && act.includes("by: user.name"),
+    "#P4 comments (actions): add needs create|send|approve, resolve needs create (both refused before the write), delete is judged under the row lock, the author is the session user's name");
+  ok(act.includes("numbered: numberComments(comments, sectionsOf(q))") && /listReviewCommentsAction[\s\S]*await requireUser\(\)/.test(act),
+    "#P4 comments (actions): every result carries the fresh list numbered against the saved estimate's systems");
+  const store = rd("src/lib/stores/quotes.ts");
+  ok(store.includes("delete clean.reviewComments;") && (store.match(/doc\.reviewComments = /g) || []).length === 3, "#P4 comments (DB): only the add, resolve and delete writers assign doc.reviewComments in the store");
+}
