@@ -9933,3 +9933,41 @@ exists, and the Package readiness badge counts the same way), BOM (drag a system
 when present), Library (system intros, Not included list — disabled with a hint when the quote and the default are both
 empty —, Price table, Page break). Drops only land on a block boundary. List depth is capped at 5; the toolbar is Normal /
 Heading 1–3, Bold, Italic, lists, Page break, + Price table.
+
+## D675. System categories: storage, defaults, caps, permission (#311, 2026-10-08)
+
+Categories live in the settings blob `system_categories` (`src/lib/system-categories.ts` holds the pure rules and the
+sanitizer; `src/lib/stores/system-categories.ts` reads and writes it). The seven defaults — Controls, Fixtures, Rigging,
+Video, Infrastructure, Wireless, Communications (ids `cat-controls`…, empty item lists) — are returned when the blob is
+missing; a read never writes, and a saved empty list stays empty (it does not re-seed). Caps: at most 40 categories and 100
+items each; quantity 0.01–100,000 (blank or junk becomes 1); an optional discipline (Lighting / Rigging / Curtains / AV); a
+note per item; no duplicate SKU within a category (the earlier item wins). The admin page, Estimating Rules → System
+categories (`/estimating-rules/system-categories`), needs `manage_users` and otherwise reads "Admin access required".
+Categories store SKUs, quantities and notes only — never prices.
+
+## D676. Add a system: the modal and pricing at add time (#311, 2026-10-08)
+
+Both "+ Add system" (card column) and the rail's "+ Add" open one `Add a system` modal: `Blank system` (exactly the old
+addSystem) plus a tile per category with its item count. A category shows its items ticked with editable quantities, then
+`Add system`. The pure builder `systemFromCategory` (with `pickQty`) creates a system named after the category, with the
+category's discipline, joining the active system's group, normalized, selected and scrolled to. Each line is built exactly
+like "+ Add part from catalog" and priced at add time from the LIVE catalog through `catalogAddPrice(cost, list, tierMargin)`,
+so a category never goes stale on price. A typed quantity of 0 or less leaves the item out; an empty result opens the
+catalog search, like Blank. Categories load server-side in `estimator/page.tsx` inside the page's existing `Promise.all` (one
+`getManyBySku` over every SKU) and fail soft to no categories. Anyone who can edit the estimate can use it. The phone
+Estimator is view-only, so the modal is desktop and tablet.
+
+## D677. Catalog renames, live SKU and "Not in the catalog" (#311, 2026-10-08)
+
+A catalog model-number rename (#304) rewrites category items: `rewriteSystemCategories` is registered in the rename sweep
+(`src/lib/catalog-rename/apply.ts`, blobs step), and if two items collapse onto one SKU the earlier one is kept. Lines are
+built from the part's live (post-rename) SKU and de-duplicated on it, so a stale stored SKU never doubles a line. The admin
+page shows "now <sku>" beside a renamed part. A part the catalog does not have shows `Not in the catalog` on both the admin
+page and in the modal, where it cannot be ticked. Items are picked with the shared PartPicker, which gained an optional
+`search` prop (`searchCategoryPartsAction`).
+
+## D678. Fractional category quantity and the line-box limit (#311, 2026-10-08)
+
+A category quantity may be fractional (say 2.5 for cable by the foot) and lands that way on the new line. Known limit, not
+fixed here: the Estimator's line quantity box (`setQty`) uses `parseInt`, so editing such a line rounds it down to a whole
+number. That behavior pre-dates Phase 6 and applies to any fractional quantity; it is logged on #311 rather than changed.

@@ -11059,11 +11059,12 @@ buttons in the header (More ▾), and the Send stage bar uncarded with a doubled
   client responses, Revise with these scopes.
 - Phase 4 — Customer review: client's-eye tabs, internal cost / margin / labor sidebar, pinned comments, Approve / Send back.
 - Phase 5 — Package document editor: Word-like (TipTap) with live chips, product-linked paragraphs, image placement, drag from BOM.
-- Phase 6 — System categories: "+ Add system…" opens a category picker pre-filling that category's typical BOM items.
+- Phase 6 — System categories: "+ Add system…" opens a category picker pre-filling that category's typical BOM items. (DONE — #311, D675–D678.)
 
 **Jeff-gated.**
-1. **Phase 6 content** — the typical BOM items for each category (seeded, editable list): Controls, Fixtures, Rigging, Video,
-   Infrastructure, Wireless, Communications; and how a category relates to a system's Discipline.
+1. **Phase 6 content** — the typical BOM items for each category: Controls, Fixtures, Rigging, Video, Infrastructure, Wireless,
+   Communications. The machinery shipped in #311; Jeff fills the lists in Estimating Rules → System categories (a category
+   carries an optional discipline).
 2. **"Send → Home"** (#301 item 12): not reproducible (D647). Tell us the exact repro — which quote (new or saved), which
    button (header, Review panel or Send & track), which browser — and it gets a pin.
 
@@ -11294,3 +11295,40 @@ included list on the right first.", "Couldn't insert <x> — it may have left th
 - The Not included list can print twice on the package page if it is inserted into the document.
 - Datasheet links on the package page are keyed by key-product sku only (a document product block with no key product has none).
 - Approval doesn't go stale on document text edits (same as narrative text today).
+
+## 311. Estimator Phase 6 — system categories — DONE 2026-10-08 (D675–D678)
+
+Part of #305's roadmap (see #305, #306, #307, #308, #309, #310): Phase 6 adds typical-item categories to "+ Add system".
+Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md` §13; plan
+`docs/superpowers/plans/2026-10-08-estimator-phase6-system-categories.md`.
+
+What shipped (no migration, no AI):
+- **Categories** — settings blob `system_categories`; seven defaults (Controls, Fixtures, Rigging, Video, Infrastructure,
+  Wireless, Communications) returned when missing, a read never writes; caps 40 categories / 100 items, qty 0.01–100,000,
+  optional discipline, note per item, no duplicate SKUs. (D675; 3712e3d6, 91f723b1)
+- **Admin page** — Estimating Rules → System categories (`manage_users`): ↑↓, rename (Escape cancels), discipline, delete with
+  inline confirm, + Add category; items by the shared PartPicker (new `search` prop), qty / note / ↑↓ / Remove, `Not in the
+  catalog`, "now <sku>" after a rename, one Save with an unsaved indicator. (D675, D677; 2c871597)
+- **Add a system** — one modal behind both "+ Add system" buttons: Blank system plus a tile per category; items ticked with
+  editable qty, priced at add time from the live catalog at the tier margin; named after the category, discipline set, joins
+  the active group. Empty result opens the catalog search; qty ≤ 0 leaves an item out. (D676; f8c3e2b0, 8ff2ddd3)
+- **Renames** — catalog model-number renames rewrite category items (dedupe keeps the earlier); lines use the live SKU. (D677)
+
+**Verification.** Gates: `tsc --noEmit` 0; scoped eslint clean; `test:specs` 14,073 PASS / 0 FAIL; `next build` OK. Browser
+pass (scratch DB, 2026-10-08): admin added two parts to Rigging with qty 8 and saved (persisted on reload); Estimator → + Add
+system → Rigging → unticked one → Add system made "Rigging" with one labor line x8 at the tier margin (cost $75 became $107.14
+at 30%); rail + Add → Controls (empty) opened the catalog search; Escape closed the modal; Blank system still works; the admin
+page fits 375 px with no horizontal scroll; no console errors.
+
+**Jeff to try.** Fill Rigging and Controls in Estimating Rules → System categories on production, then add a system from each
+on a real estimate and compare prices to "+ Add part from catalog".
+
+**New copy for Jeff to approve:** "Add a system", "Blank system", "Add system", "Not in the catalog", "System categories",
+"+ Add category", "Admin access required", "now <sku>".
+
+**Remaining (Jeff-gated).** Fill each category's typical items on production; Jeff supplies the content.
+
+**Open (minor, not blocking).**
+- A fractional category quantity (2.5) lands correctly, but the Estimator's line qty box (`setQty`, `parseInt`) rounds it down
+  if edited — pre-existing. (D678)
+- The phone Estimator is view-only, so the modal is desktop and tablet only.

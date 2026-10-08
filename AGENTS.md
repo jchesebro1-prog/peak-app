@@ -786,7 +786,7 @@ See `.env.example`.
     Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
     sheets come back (PUNCHLIST #304).
 
-42. 🚧 **Estimator in four steps** (#305, D643–D674) — Phase 1 ✅ (the frame): the
+42. ✅ **Estimator in four steps** (#305, D643–D678) — Phase 1 ✅ (the frame): the
     Estimator is Build · Build package · Customer review · Send & track on one URL
     (`?step=`, pushState, Build canonical), one shared header with a More ▾ menu, a
     readiness line under each tab (never blocking), the status select and Daylite
@@ -812,9 +812,13 @@ See `.env.example`.
     Phase 5 ✅ (#310, D669–D674): Build package gains a TipTap document editor (`spec.document`, one server validator,
     live price / name / quantity chips, product blocks with Save to product and photos, a Gaps / BOM-drag / Library left pane);
     a document replaces the In-total bands on the PDF and package page (itemized lines go to the appendix), and a quote
-    without one prints byte-identically. Next: Phase 6 system categories (typical items for Controls, Fixtures, Rigging, Video,
-    Infrastructure, Wireless, Communications — Jeff-gated content). Remaining is Jeff-gated: Phase 6
-    typical items per category, and the exact repro for "Send → Home" (PUNCHLIST #305).
+    without one prints byte-identically.
+    Phase 6 ✅ (#311, D675–D678): "+ Add system" opens an Add a system modal — Blank system or one tile per category
+    (Controls, Fixtures, Rigging, Video, Infrastructure, Wireless, Communications; settings blob `system_categories`, seven
+    defaults, admin page at Estimating Rules → System categories). A category adds its ticked typical items, priced at add
+    time from the live catalog at the tier margin, as a system named after it; catalog renames follow. Remaining is
+    Jeff-gated: filling each category's typical items in Estimating Rules → System categories, and the exact repro for
+    "Send → Home" (PUNCHLIST #305, #311).
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
