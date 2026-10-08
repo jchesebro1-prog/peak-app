@@ -43,6 +43,7 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
     statusChanging,
     tierResolving,
     next,
+    packageDoc,
   } = s;
 
   /* Phase 4 — the SAVED package's Datasheets / Drawings rows and gap chips,
@@ -74,8 +75,9 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
         review: next ? { label: next.pill.label, tone: next.pill.tone } : null,
         status,
         revNum,
+        hasDocument: !!packageDoc,
       }).package,
-    [loadedId, sections, next, status, revNum]
+    [loadedId, sections, next, status, revNum, packageDoc]
   );
 
   return (

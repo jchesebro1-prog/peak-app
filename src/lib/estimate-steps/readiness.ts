@@ -24,6 +24,9 @@ export type ReadinessInput = {
   revNum: number;
   /** Phase 3: client-link opens and unread replies on the sent estimate's emails. */
   track?: { opens: number; newReplies: number };
+  /** Phase 5: the estimate has a package document — it replaces the narrative
+   *  fields, so their gaps (system intros, key-product paragraphs) don't count. */
+  hasDocument?: boolean;
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -50,8 +53,12 @@ function buildBadge(sections: SpecSection[]): StepBadge {
   return { state: "gaps", count, label: parts.join(" · ") };
 }
 
-function packageBadge(saved: boolean, sections: SpecSection[]): StepBadge {
+function packageBadge(saved: boolean, sections: SpecSection[], hasDocument = false): StepBadge {
   if (!saved) return { state: "idle", label: "Save first" };
+  if (hasDocument) {
+    const goals = scopesWithoutGoals(sections);
+    return goals === 0 ? { state: "ok", label: "✓ Ready" } : { state: "gaps", count: goals, label: plural(goals, "gap", "gaps") };
+  }
   const noIntro = sections.filter((s) => systemPrintsInBody(s) && s.presentation === "narrative" && !(s.narrative || "").trim()).length;
   const count = noIntro + keyProductsNeedingText(sections) + scopesWithoutGoals(sections);
   return count === 0 ? { state: "ok", label: "✓ Ready" } : { state: "gaps", count, label: plural(count, "gap", "gaps") };
@@ -81,7 +88,7 @@ function sendBadge(i: ReadinessInput): StepBadge {
 export function estimateReadiness(i: ReadinessInput): Record<EstimateStep, StepBadge> {
   return {
     build: buildBadge(i.sections),
-    package: packageBadge(i.saved, i.sections),
+    package: packageBadge(i.saved, i.sections, i.hasDocument === true),
     review: reviewBadge(i.review),
     send: sendBadge(i),
   };

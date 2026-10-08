@@ -46,6 +46,8 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
   const isLine = isLineTokenSku(sku);
   const rows = env?.library.rows;
   const row = !isLine && sku && rows && Object.hasOwn(rows, sku) ? rows[sku] : undefined;
+  /** A line token, or a sku the catalog doesn't have: no library paragraph, so no Save / Revert. */
+  const isCustom = isLine || (!!row && !row.inCatalog);
   const text = productBlockText(block);
   const libraryText = isLine || !sku ? null : row ? row.paragraph : undefined;
   const state = productTagState(text, libraryText);
@@ -138,13 +140,13 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
         <span data-drag-handle="" title="Drag to move" aria-hidden="true" style={{ cursor: "grab", color: "#aab0bb", fontSize: 12 }}>
           ⋮⋮
         </span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: state === "from" ? "#1f7a52" : "#5b616e" }}>{isLine ? customLineTagText(label) : productTagText(label, state)}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: state === "from" ? "#1f7a52" : "#5b616e" }}>{isCustom ? customLineTagText(label) : productTagText(label, state)}</span>
         {!inBom && (
           <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 8px" }}>No longer in BOM</span>
         )}
         {(outlined || ask || note) && (
           <span style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
-            {!isLine && (
+            {!isCustom && (
               <button type="button" style={{ ...BTN, opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }} disabled={!canSave || pending} title={saveTitle} onClick={onSave}>
                 {pending ? "Saving…" : "Save to product"}
               </button>

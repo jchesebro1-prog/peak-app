@@ -53,6 +53,7 @@ export type DocLeftPaneProps = {
   library: KeyProductLibrary;
 };
 
+const NOT_INCLUDED_HINT = "Add a Not included list on the right first.";
 const TITLE: CSSProperties = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".06em", textTransform: "uppercase", margin: "0 0 6px" };
 const SUB: CSSProperties = { fontSize: 11, fontWeight: 600, color: "#5b616e", margin: "8px 0 3px" };
 const SMALL: CSSProperties = { fontSize: 11.5, color: "#8c919c", lineHeight: 1.45 };
@@ -110,7 +111,7 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
   const presence = useMemo(() => docPresence(doc), [doc]);
   const { rows: libRows, ensure } = library;
   const rows = useMemo(
-    () => gapRows(docGaps(doc, sections), packageReadinessGaps(sections), (sku) => (Object.hasOwn(libRows, sku) ? libRows[sku].desc : null)),
+    () => gapRows(docGaps(doc, sections), packageReadinessGaps(sections, true), (sku) => (Object.hasOwn(libRows, sku) ? libRows[sku].desc : null)),
     [doc, sections, libRows]
   );
 
@@ -128,6 +129,7 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
   }, [skuKey, ensure]);
 
   const ready = !!api;
+  const notIncludedEmpty = notIncludedNodes(notIncluded, notIncludedDefault).length === 0;
   const done = (ok: boolean, what: string) => setNote(ok ? "" : `Couldn't insert ${what} — it may have left the BOM.`);
   /** A Library item: `empty` says why nothing went in when it builds no blocks. */
   const insertRow = (p: DocNodePayload, what: string) => {
@@ -250,10 +252,22 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
           ))
         )}
         <div style={SUB}>Blocks</div>
-        <button type="button" disabled={!ready} style={LIB_BTN} onClick={() => insertNodes(notIncludedNodes(notIncluded, notIncludedDefault), "The Not included list is empty — fill it in Cover & package.")}>
+        <button
+          type="button"
+          disabled={!ready || notIncludedEmpty}
+          title={notIncludedEmpty ? NOT_INCLUDED_HINT : undefined}
+          aria-describedby={notIncludedEmpty ? "pd-ni-hint" : undefined}
+          style={{ ...LIB_BTN, opacity: notIncludedEmpty ? 0.55 : 1, cursor: notIncludedEmpty ? "not-allowed" : "pointer" }}
+          onClick={() => insertNodes(notIncludedNodes(notIncluded, notIncludedDefault), NOT_INCLUDED_HINT)}
+        >
           <span aria-hidden="true" style={{ color: ACCENT_INK, fontWeight: 600 }}>+</span>
           Not included list
         </button>
+        {notIncludedEmpty && (
+          <div id="pd-ni-hint" style={{ ...SMALL, marginBottom: 4 }}>
+            {NOT_INCLUDED_HINT}
+          </div>
+        )}
         <button type="button" disabled={!ready} style={LIB_BTN} onClick={() => insertNodes(priceTableNodes(), "")}>
           <span aria-hidden="true" style={{ color: ACCENT_INK, fontWeight: 600 }}>+</span>
           Price table

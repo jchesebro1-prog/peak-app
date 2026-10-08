@@ -57909,7 +57909,7 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
   ok(p5fm.customLineTagText("Budget allowance — Line 2") === "Budget allowance — Line 2 · custom line" && p5fm.SAVED_TO_PRODUCT_MS > 0 && p5fm.SAVED_TO_PRODUCT_MS <= 6000,
     "#P5 editor fix: a line-token block's tag is exactly '<label> · custom line'");
   const pbSrc = rd(`${ED}/product-block-view.tsx`);
-  ok(pbSrc.includes("{isLine ? customLineTagText(label) : productTagText(label, state)}") && /\{!isLine && \(\s*<button/.test(pbSrc) &&
+  ok(pbSrc.includes("{isCustom ? customLineTagText(label) : productTagText(label, state)}") && /\{!isCustom && \(\s*<button/.test(pbSrc) &&
      pbSrc.includes('const note = msg || (savedFor !== null && savedFor === text ? SAVED : "");') &&
      pbSrc.includes("savedTimer.current = setTimeout(() => setSavedFor(null), SAVED_TO_PRODUCT_MS);") && !pbSrc.includes('setMsg("Saved to the product.")'),
     "#P5 editor fix: custom lines show no Save to product (Revert needs a library row); 'Saved to the product.' clears after a few seconds or as soon as the words change");
@@ -58059,4 +58059,44 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
   ok(/const DocLeftPane = dynamic\(\(\) => import\("@\/components\/package-doc\/editor\/left-pane"\), \{ ssr: false \}\);/.test(pkgStep) && pkgStep.includes("onReady={setDocApi}") &&
      pkgStep.includes("api={docApi}") && pkgStep.includes('<aside aria-label="Document tools"') && pkgStep.includes("width: 240") && !/^import [^\n]*@\/components\/package-doc\/editor/m.test(pkgStep),
     "#P5 left pane: Build package renders the pane (code-split, ssr: false) in the 240 px left column and wires the editor's onReady to it");
+}
+
+// ---- #P5 polish: empty Not-included hint, custom-part tag, document-aware gaps ----
+import { estimateReadiness as p5pReady } from "@/lib/estimate-steps/readiness";
+import { packageReadinessGaps as p5pGaps } from "@/lib/package-doc/insert";
+import { keyProductsNeedingText as p5pKpNeed, scopesWithoutGoals as p5pNoGoals } from "@/lib/estimate-output/package-gaps";
+import { qd293Sections as p5pSections } from "./qd293-cases";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const ED = "src/components/package-doc/editor";
+  const J = JSON.stringify;
+  const base = p5pSections().map((s) => ({ ...s, presentation: "narrative" as const, narrative: "" }));
+  const secs = base.map((s, i) => (i === 0 && s.items.length ? { ...s, keyProducts: [{ lineKey: String(s.items[0].id), sku: s.items[0].sku, text: "", photo: true }] } : s));
+  const badge = (hasDocument?: boolean, sections = secs) =>
+    p5pReady({ saved: true, sections, review: null, status: "draft", revNum: 1, ...(hasDocument === undefined ? {} : { hasDocument }) }).package;
+  const noGoals = p5pNoGoals(secs), kp = p5pKpNeed(secs);
+
+  // (1) Without a document nothing changes; the badge count equals the pane's gap rows.
+  ok(J(badge()) === J(badge(false)) && J(p5pGaps(secs)) === J(p5pGaps(secs, false)) && badge(false).count === ((secs.filter((s) => s.presentation === "narrative" && !s.narrative.trim()).length) + kp + noGoals),
+    "#P5 polish: no document → the Package badge and the pane's package gaps are exactly as before (hasDocument absent = false)");
+  // (2) With a document the narrative-field gaps drop; client goals stay; the badge and the pane agree.
+  const withDoc = p5pGaps(secs, true);
+  ok(withDoc.length === (noGoals ? 1 : 0) && !withDoc.some((g) => /intro|paragraph/.test(g)) && (badge(true).count ?? 0) === noGoals &&
+     (noGoals ? withDoc[0].startsWith("No client goals on ") : badge(true).label === "✓ Ready"),
+    `#P5 polish: with a document the 'no intro' / 'key product needs a paragraph' gaps are gone (key-product gaps without it: ${kp}); client goals still count; badge = pane`);
+  ok(p5pGaps(secs).some((g) => /no intro/.test(g)) && badge(false).count! > (badge(true).count ?? 0),
+    "#P5 polish: the same estimate without a document still counts the narrative gaps");
+  ok(p5pReady({ saved: false, sections: secs, review: null, status: "draft", revNum: 1, hasDocument: true }).package.label === "Save first",
+    "#P5 polish: an unsaved estimate still reads 'Save first'");
+  const paneSrc = rd(`${ED}/left-pane.tsx`), pbSrc = rd(`${ED}/product-block-view.tsx`);
+  ok(rd("src/app/(app)/estimator/estimator-client.tsx").includes("hasDocument: !!s.packageDoc") && rd("src/app/(app)/estimator/steps/review-step.tsx").includes("hasDocument: !!packageDoc") &&
+     paneSrc.includes("packageReadinessGaps(sections, true)"),
+    "#P5 polish: the tab badge, the Review checklist badge and the left pane all pass the document flag");
+  // (3) Not included hint: disabled with a reason when both texts are empty.
+  ok(paneSrc.includes('const NOT_INCLUDED_HINT = "Add a Not included list on the right first.";') && paneSrc.includes("const notIncludedEmpty = notIncludedNodes(notIncluded, notIncludedDefault).length === 0;") &&
+     paneSrc.includes("disabled={!ready || notIncludedEmpty}") && paneSrc.includes("title={notIncludedEmpty ? NOT_INCLUDED_HINT : undefined}") && paneSrc.includes("{notIncludedEmpty && ("),
+    "#P5 polish: '+ Not included list' is disabled with the hint 'Add a Not included list on the right first.' when the quote's text and the default are both empty");
+  // (4) A sku the catalog doesn't have reads like a custom line.
+  ok(pbSrc.includes("const isCustom = isLine || (!!row && !row.inCatalog);") && pbSrc.includes("{isCustom ? customLineTagText(label) : productTagText(label, state)}") && /\{!isCustom && \(\s*<button/.test(pbSrc),
+    "#P5 polish: a product block whose part isn't in the catalog shows '<label> · custom line' instead of 'edited here', and no Save to product");
 }

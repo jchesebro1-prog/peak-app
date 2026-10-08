@@ -167,9 +167,13 @@ export function joinNames(names: readonly string[]): string {
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** The Build package tab's own (client-side) gaps — readiness.ts's
- *  packageBadge counts, worded like the package panel's chips. */
-export function packageReadinessGaps(sections: SpecSection[]): string[] {
+ *  packageBadge counts, worded like the package panel's chips. With a
+ *  document (`hasDocument`) the narrative-field gaps are left out. */
+export function packageReadinessGaps(sections: SpecSection[], hasDocument = false): string[] {
   const secs = Array.isArray(sections) ? sections : [];
+  // A document replaces the narrative fields: only client goals (and the
+  // package's drawings, always satisfied here) still count.
+  if (hasDocument) return packageGapChips({ noDatasheet: 0, drawings: 1, keyProductsNeedText: 0, scopesNoGoals: scopesWithoutGoals(secs) });
   const noIntro = secs.filter((s) => systemPrintsInBody(s) && s.presentation === "narrative" && !(s.narrative || "").trim()).length;
   const out = noIntro ? [`${plural(noIntro, "narrative system has", "narrative systems have")} no intro`] : [];
   return out.concat(packageGapChips({ noDatasheet: 0, drawings: 1, keyProductsNeedText: keyProductsNeedingText(secs), scopesNoGoals: scopesWithoutGoals(secs) }));
