@@ -283,6 +283,10 @@ export function useEstimatorState(props: EstimatorProps) {
   const [next, setNext] = useState<QuoteNextStepView | null>(initialNext);
   /** #284 — the actionError banner came from the approval gate, so it offers the next step. */
   const [gateRefused, setGateRefused] = useState(false);
+  /** Phase 3 — the Send step's Activity card reports the client-link opens and
+   *  unread customer replies here (null until it has loaded); the Send tab
+   *  badge reads it. */
+  const [trackSummary, setTrackSummary] = useState<{ opens: number; newReplies: number } | null>(null);
   /* Daylite stage bar (Task 6) — quoteType never changes client-side (no UI
      changes it), so it stays a plain const rather than state. */
   const quoteType = initial.quoteType;
@@ -2865,6 +2869,8 @@ export function useEstimatorState(props: EstimatorProps) {
     viewerCanApprove,
     viewerName,
     wonMetaGuard,
+    trackSummary,
+    setTrackSummary,
     next,
   };
 }

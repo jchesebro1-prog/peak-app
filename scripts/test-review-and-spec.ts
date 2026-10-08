@@ -375,8 +375,12 @@ const ESTIMATOR_FILES = [
   "steps/package-step.tsx",
   "steps/review-step.tsx",
   "steps/send-step.tsx",
+  "steps/send-composer.tsx",
+  "steps/send-activity.tsx",
 ];
-const PREVIEW_FILES = ["preview-doc.tsx", "steps/package-step.tsx", "steps/review-step.tsx", "steps/send-step.tsx"];
+const PREVIEW_FILES = [
+  "preview-doc.tsx", "steps/package-step.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
+];
 const readJoined = (files: string[]) =>
   files
     .map((f) => join(process.cwd(), EST_DIR, f))
@@ -55856,4 +55860,94 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const act = readFileSync(join(process.cwd(), "src/app/(app)/estimator/send-actions.ts"), "utf8");
     ok(act.includes("trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }") && act.includes("markEstimateEmailRead(liveTrackDeps(), { name: user.name }"), "#P3 track fix: the wrappers pass the viewer / actor");
   }
+}
+
+// ---- #P3 send UI: Estimator Phase 3 — the Send & track composer, Activity card and layout ----
+import * as p3ui from "@/lib/estimate-email/send-ui";
+{
+  const C = p3ui.SEND_UI_COPY;
+  ok(C.primaryDraft === "Send & mark sent →" && C.primarySent === "Send email →", "#P3 send UI: primary copy (draft / sent)");
+  ok(C.openInbox === "Open in Inbox" && C.markSentOnly === "Mark sent without emailing" && C.copyLinkOnly === "Copy link only", "#P3 send UI: escape-hatch copy");
+  ok(C.inboxWarning === "This marks the estimate sent now.", "#P3 send UI: Open in Inbox warning copy");
+  ok(C.activity === "Activity" && C.reply === "Reply" && C.markRead === "Mark read" && C.empty === "No emails sent from here yet.", "#P3 send UI: Activity / Reply / Mark read / empty copy");
+  ok(C.linkHint === "Keep {link} where the client link should go." && C.attachEstimate === "Estimate PDF" && C.attachCover === "Cover PDF", "#P3 send UI: link hint and attachment labels");
+  ok(C.gmailOff === "Gmail not connected — it will be saved as sent here; connect Gmail in Settings → Mailboxes" && C.from("sam@peak.com") === "From sam@peak.com", "#P3 send UI: Gmail state line");
+  ok(C.sentGmail === "Sent through Gmail." && C.sentLocal === "Sent locally (Gmail not connected).", "#P3 send UI: delivery copy");
+  ok(C.textHidden("Sam Mills") === "Message text is visible to Sam Mills, approvers and the lead estimator." && C.textHidden("").includes("the mailbox owner"), "#P3 send UI: hidden-text explanation names the owner");
+  ok(p3ui.FOLLOW_UP_OPTIONS.map((o) => `${o.value}:${o.label}`).join("|") === "0:Off|2:2 days|3:3 days|5:5 days|7:7 days|14:14 days" && p3ui.FOLLOW_UP_DEFAULT === 5, "#P3 send UI: follow-up options Off, 2/3/5/7/14 days; default 5");
+
+  const init = p3ui.composerInitial({ to: "pat@school.org", cc: "lee@peak.com", subject: "S", body: "B {link}" });
+  ok(init.to === "pat@school.org" && init.cc === "lee@peak.com" && init.subject === "S" && init.body === "B {link}" && init.attachEstimate && init.attachCover && init.followUpDays === 5,
+    "#P3 send UI: composerInitial — the defaults, both PDFs ticked, follow-up 5 days");
+  const blank = p3ui.composerInitial(null);
+  ok(blank.to === "" && blank.body === "" && blank.attachEstimate && blank.attachCover && blank.followUpDays === 5, "#P3 send UI: composerInitial(null) — blank fields, same ticks");
+  ok(p3ui.primaryLabel("draft") === "Send & mark sent →" && p3ui.primaryLabel("sent") === "Send email →", "#P3 send UI: primary label follows status");
+  ok(p3ui.canCompose("draft") && p3ui.canCompose("sent") && !p3ui.canCompose("won") && !p3ui.canCompose("lost"), "#P3 send UI: won/lost can't compose");
+
+  const L = (st: "draft" | "sent" | "won" | "lost", pipe = true) => p3ui.sendStepLayout(st, pipe).join(",");
+  ok(L("draft") === "composer,status,pipeline,clientLink,tasks", "#P3 send UI: draft — composer first, then Status, Pipeline, Client link (+ responses), Tasks");
+  ok(L("sent") === "activity,composer,clientLink,tasks,pipeline,status", "#P3 send UI: sent — Activity first, then the re-send composer, Client link, Tasks, Pipeline, Status");
+  ok(L("won") === "activity,clientLink,tasks,pipeline,status" && L("lost") === L("won"), "#P3 send UI: won/lost — Activity first, no composer");
+  ok(L("draft", false) === "composer,status,clientLink,tasks" && !L("sent", false).includes("pipeline"), "#P3 send UI: no Pipeline card when the stage bar doesn't apply");
+
+  const mGmail = p3ui.sendResultMessage({ ok: true, delivery: "gmail", status: "sent", next: null });
+  const mLocal = p3ui.sendResultMessage({ ok: true, delivery: "local", status: "sent", warning: "Sent — but the follow-up task couldn’t be created. Add it by hand." });
+  ok(mGmail.tone === "ok" && mGmail.text === "Sent through Gmail." && !mGmail.warning, "#P3 send UI: a Gmail send reads Sent through Gmail.");
+  ok(mLocal.text === "Sent locally (Gmail not connected)." && mLocal.warning === "Sent — but the follow-up task couldn’t be created. Add it by hand.", "#P3 send UI: a local send reads Sent locally and carries the warning");
+  const mFail = p3ui.sendResultMessage({ ok: false, error: "Marked sent, but Gmail didn’t accept the email — open it in Inbox.", markedSent: true, href: "/inbox?thread=C-1" });
+  ok(mFail.tone === "error" && mFail.text.startsWith("Marked sent, but Gmail") && mFail.href === "/inbox?thread=C-1", "#P3 send UI: a failure shows its error and keeps the Inbox link");
+  const mGate = p3ui.sendResultMessage({ ok: false, error: "This quote needs approval before it can be sent." });
+  ok(mGate.tone === "error" && mGate.text === "This quote needs approval before it can be sent." && !mGate.href, "#P3 send UI: a gate refusal shows inline as returned");
+
+  const nextView = { asOf: 7 } as unknown as import("@/lib/quote-next-step").QuoteNextStepView;
+  const sOk = p3ui.sendSync({ ok: true, delivery: "gmail", status: "sent", next: nextView });
+  ok(!!sOk && sOk.ok && sOk.status === "sent" && sOk.next === nextView && sOk.review === null, "#P3 send UI: sendSync on success carries status + next for applySync");
+  const sMarked = p3ui.sendSync({ ok: false, error: "x", markedSent: true, status: "sent", next: null });
+  ok(!!sMarked && !sMarked.ok && sMarked.status === "sent" && sMarked.next === null, "#P3 send UI: sendSync on markedSent still syncs the sent status");
+  ok(p3ui.sendSync({ ok: false, error: "Add a subject." }) === null, "#P3 send UI: sendSync — nothing to sync when nothing changed");
+  const sNoNext = p3ui.sendSync({ ok: true, delivery: "local", status: "sent" });
+  ok(!!sNoNext && !("next" in sNoNext), "#P3 send UI: sendSync leaves next alone when the action sent none");
+  ok(p3ui.newRepliesOf([{ unread: 2 }, { unread: 0 }, { unread: 1 }]) === 3 && p3ui.newRepliesOf([]) === 0, "#P3 send UI: newRepliesOf sums unread replies");
+  ok(p3ui.activityTime(0) === "" && /Oct/.test(p3ui.activityTime(Date.UTC(2026, 9, 7, 17, 0))), "#P3 send UI: activityTime (blank for none)");
+
+  const rdP3 = (f: string) => readFileSync(join(process.cwd(), EST_DIR, f), "utf8");
+  const comp = rdP3("steps/send-composer.tsx");
+  const act = rdP3("steps/send-activity.tsx");
+  const step = rdP3("steps/send-step.tsx");
+  const hook = rdP3("use-estimator-state.ts");
+  const ui = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-ui.ts"), "utf8");
+  ok(comp.startsWith('"use client";') && act.startsWith('"use client";'), "#P3 send UI: composer and Activity are client components");
+  ok(!/^import\s+(?!type\b)[^;]*?from\s+"@\/(lib\/stores|db)/m.test(ui) && !/from "react"|from "next/.test(ui), "#P3 send UI: send-ui.ts is pure (no store/db value, React or next import)");
+  ok(comp.includes("estimateEmailDefaultsAction(loadedId)") && comp.includes("setFields(composerInitial(r))"), "#P3 send UI: the composer loads its defaults on mount");
+  ok(/if \(pdfDirty\) return await saveNow\(\);\s+return next\?\.asOf;/.test(comp) && comp.includes("if (asOf === false) return;") && comp.includes("const input = { ...fields, asOf };"),
+    "#P3 send UI: send saves unsaved edits first and passes the saved version (else next.asOf) as asOf");
+  ok(comp.includes("if (busy.current) return;") && comp.includes("const disabled = pending ||") && (comp.match(/disabled=\{disabled\}/g) || []).length >= 8,
+    "#P3 send UI: everything is disabled while a send is pending (no double submit)");
+  ok((comp.match(/const sync = sendSync\(r\);\s+if \(sync\) applySync\(sync\);/g) || []).length === 2, "#P3 send UI: send and Open in Inbox both applySync on success or markedSent");
+  ok(comp.includes("setNotice(sendResultMessage(r));") && comp.includes("{notice.href && (") && comp.includes("{SEND_UI_COPY.openInbox}"), "#P3 send UI: the result shows inline, with an Open in Inbox link when the action returns one");
+  ok(comp.includes("openEstimateInInboxAction(loadedId, input)") && comp.includes("window.location.assign(r.href);") && /status === "draft" && <span[^>]*>\{SEND_UI_COPY\.inboxWarning\}/.test(comp),
+    "#P3 send UI: Open in Inbox calls the action, then navigates; the warning shows beside it while draft");
+  ok(comp.includes("goTo(SEND_STEP_IDS.status, SEND_STEP_IDS.statusSelect)") && comp.includes("goTo(SEND_STEP_IDS.clientLink)") && comp.includes("{SEND_UI_COPY.markSentOnly}") && comp.includes("{SEND_UI_COPY.copyLinkOnly}"),
+    "#P3 send UI: Mark sent without emailing focuses the Status control; Copy link only scrolls to the Client link card");
+  ok(comp.includes("{primaryLabel(status)}") && comp.includes("{SEND_UI_COPY.linkHint}") && comp.includes("SEND_UI_COPY.from(gmail.from) : SEND_UI_COPY.gmailOff") && comp.includes("FOLLOW_UP_OPTIONS.map("),
+    "#P3 send UI: composer shows the primary label, the {link} hint, the Gmail line and the follow-up select");
+  ok(comp.includes("{SEND_UI_COPY.sendAnother}") && comp.includes("useState(!collapsible)") && comp.includes("setOpen(false);"), "#P3 send UI: the re-send composer collapses to Send another email");
+  ok(step.includes("sendStepLayout(status, showStageBar).map((k) => cards[k])") && step.includes("collapsible={status !== \"draft\"}") && ['key="composer"', 'key="activity"', 'key="status"', 'key="pipeline"', 'key="clientLink"', 'key="tasks"'].every((k) => step.includes(k)),
+    "#P3 send UI: the step renders its cards as one keyed list ordered by status");
+  ok(step.includes("id={SEND_STEP_IDS.status}") && step.includes("id={SEND_STEP_IDS.statusSelect}") && step.includes("id={SEND_STEP_IDS.clientLink}"), "#P3 send UI: the hatches' targets carry their ids");
+  ok(step.includes("<SendActivity quoteId={loadedId} refreshKey={trackKey} onTrack={setTrackSummary} />") && step.includes("onSent={() => setTrackKey((k) => k + 1)}"), "#P3 send UI: a send refreshes Activity; Activity reports to the hook");
+  ok(/onSync=\{\(r, action\) => \{\s+applySync\(r\);\s+if \(r\.ok\) \{[\s\S]{0,120}onActed\(action\);/.test(step), "#P3 send UI: the Status panel's QuoteNextStep still moves steps only on r.ok");
+  ok(/trackSummary,\s+setTrackSummary,\s+next,\s+\};\s+\}/.test(hook) && hook.includes("useState<{ opens: number; newReplies: number } | null>(null)"), "#P3 send UI: the hook holds trackSummary (next stays last in its return)");
+  ok(act.includes("sendTrackAction(quoteId)") && act.includes('window.addEventListener("focus", refresh)') && act.includes("}, [quoteId, refreshKey]);"), "#P3 send UI: Activity reads on mount, on window focus and after a send");
+  ok(act.includes("onTrackRef.current({ opens: r.opens.total, newReplies: r.newReplies })"), "#P3 send UI: Activity lifts opens + new replies to the shell");
+  ok(/e\.textHidden \? \(\s*<div[^>]*>\{SEND_UI_COPY\.textHidden\(e\.ownerName\)\}/.test(act), "#P3 send UI: hidden text shows the explanation instead of messages");
+  ok(act.includes("{e.canReply && (") && act.includes("{e.canReply && replyOpen && (") && /\{e\.canReply && \([\s\S]{0,400}\{SEND_UI_COPY\.reply\}[\s\S]{0,200}e\.unread > 0 &&[\s\S]{0,200}\{SEND_UI_COPY\.markRead\}/.test(act),
+    "#P3 send UI: Reply and Mark read (unread > 0) only when canReply");
+  ok(act.includes("replyToEstimateEmailAction(quoteId, e.threadId, text)") && act.includes("markEstimateEmailReadAction(quoteId, e.threadId)") && act.includes("onPatch(r.summary)") && act.includes("disabled={pending || !text.trim()}"),
+    "#P3 send UI: Reply / Mark read update that email in place; Send is pending-disabled");
+  ok(act.includes("m.unread ? ACCENT_SOFT") && act.includes("{SEND_UI_COPY.empty}") && act.includes("Rev {e.rev}") && act.includes("SEND_UI_COPY.deliveredGmail : SEND_UI_COPY.deliveredLocal"),
+    "#P3 send UI: emails show Rev N, delivery state and highlight unread replies; empty state");
+  ok(!/#[0-9a-f]{3,6}"?\s*\/\*\s*accent/i.test(comp + act) && !comp.includes("est-doc") && !act.includes("window.print"), "#P3 send UI: no hardcoded accent, no preview-doc forbidden strings");
+  ok(ESTIMATOR_FILES.includes("steps/send-composer.tsx") && ESTIMATOR_FILES.includes("steps/send-activity.tsx") && PREVIEW_FILES.includes("steps/send-composer.tsx") && PREVIEW_FILES.includes("steps/send-activity.tsx"),
+    "#P3 send UI: the new step files are in the joined-source lists");
 }
