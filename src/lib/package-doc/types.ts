@@ -36,7 +36,10 @@ export type PDProductBlock = {
   content: PDParagraph[];
 };
 
-export type PDBlock = PDParagraph | PDHeading | PDBulletList | PDOrderedList | PDPageBreak | PDPriceTable | PDProductBlock;
+/** A system's live price line (atom): "<system name>  <sell total>", read at render. */
+export type PDSystemTotal = { type: "systemTotal"; attrs: { sectionId: string } };
+
+export type PDBlock = PDParagraph | PDHeading | PDBulletList | PDOrderedList | PDPageBreak | PDPriceTable | PDProductBlock | PDSystemTotal;
 export type PDNode = PDBlock | PDListItem | PDInline;
 
 export type PackageDoc = { type: "doc"; version: 1; content: PDBlock[] };

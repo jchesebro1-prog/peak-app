@@ -8,12 +8,14 @@ import type { ChipKind, PackageDoc, PDProductBlock } from "./types";
 /**
  * Estimator Phase 5 — what the document is missing against the live BOM
  * (the editor's Gaps list). Words are never rewritten; these are only flags.
- *  - removedChips: chips whose system/line no longer exists (deduped).
+ *  - removedChips: chips whose system/line no longer exists (deduped); a
+ *    system price line (systemTotal) whose system is gone counts as a removed
+ *    systemPrice chip.
  *  - productsNotInBom: product blocks whose line left its system, or whose
  *    line's sku changed (`No longer in BOM`; kept until the user deletes it).
  *  - systemsNotMentioned: printed In-total systems (systemPrintsInBody, not
  *    alternate) the document never refers to — no chip or product block on
- *    the system and no heading whose text is its name (case-insensitive).
+ *    the system (a price line counts) and no heading whose text is its name (case-insensitive).
  *  - itemizedInAppendix: informational — the names of printed In-total
  *    systems whose presentation is itemized (or unset); with a document their
  *    lines print in the Itemized appendix whatever the toggle says
@@ -60,6 +62,15 @@ export function docGaps(doc: PackageDoc | null | undefined, sections: readonly S
       if (!chipRefExists(n, secs) && !seenChip.has(key)) {
         seenChip.add(key);
         out.removedChips.push({ kind, ref });
+      }
+    } else if (n.type === "systemTotal") {
+      // A removed system's price line is listed with the removed price chips.
+      const ref = n.attrs.sectionId;
+      mentioned.add(ref);
+      const key = "systemPrice\u0000" + ref;
+      if (!chipRefExists({ kind: "systemPrice", ref }, secs) && !seenChip.has(key)) {
+        seenChip.add(key);
+        out.removedChips.push({ kind: "systemPrice", ref });
       }
     } else if (n.type === "productBlock") {
       const { sectionId, lineKey, sku } = n.attrs;

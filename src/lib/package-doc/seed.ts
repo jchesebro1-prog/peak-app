@@ -5,21 +5,21 @@ import { groupBlocks, type SystemGroup } from "@/lib/estimate-groups/groups";
 import { DEFAULT_PHOTO, DOC_VERSION } from "./schema";
 import { sanitizePackageDoc } from "./sanitize";
 import { textToBlocks, textToParagraphs } from "./text";
-import type { PackageDoc, PDBlock, PDHeading, PDParagraph, PDProductBlock, PhotoAttrs } from "./types";
+import type { PackageDoc, PDBlock, PDHeading, PDProductBlock, PDSystemTotal, PhotoAttrs } from "./types";
 
 /**
  * Estimator Phase 5 — "Start the document": a first draft built from the
  * quote's current narrative fields (spec §12.5). For each PRINTED
  * (systemPrintsInBody) In-total system, in Build order (groupBlocks):
- *   heading (level 2, the system name) → a paragraph holding its
- *   systemPrice chip → its intro (`sec.narrative`) as
+ *   heading (level 2, the system name) → its intro (`sec.narrative`) as
  *   paragraphs / bullet lists → a product block per printable key product
  *   (resolved "ok" blocks, in order; photo { show: the block's photo flag,
- *   align right, width 34 } — today's float).
+ *   align right, width 34 } — today's float) → its live systemTotal price
+ *   line, last.
  * Then the live price table. Then, when any alternate system prints, an
  * "Alternates" heading (level 1) and those systems the same way.
  * The result is run through the validator; a draft too big for the caps
- * falls back to headings + price chips + the table (the words stay in the
+ * falls back to headings + price lines + the table (the words stay in the
  * narrative fields). Pure; client-safe.
  */
 
@@ -33,12 +33,14 @@ export const ALTERNATES_HEADING = "Alternates";
 const textHeading = (text: string, level: 1 | 2 | 3): PDHeading =>
   text ? { type: "heading", attrs: { level }, content: [{ type: "text", text }] } : { type: "heading", attrs: { level } };
 
-/** A system's heading + its price chip — also what dragging a system into the editor inserts. */
+/** A system's heading (level 2, its name) — what both the seed and a BOM system drop start with. */
 export function systemHeadingBlocks(sec: Pick<SpecSection, "id" | "name">): PDBlock[] {
   const name = typeof sec.name === "string" ? sec.name.trim() : "";
-  const price: PDParagraph = { type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: sec.id } }] };
-  return [textHeading(name || "Untitled system", 2), price];
+  return [textHeading(name || "Untitled system", 2)];
 }
+
+/** A system's live price line (the node `+ Price line` and a system drop end with). */
+export const systemTotalBlock = (sectionId: string): PDSystemTotal => ({ type: "systemTotal", attrs: { sectionId } });
 
 /** One product-linked block (seed, BOM drag, + Key product). */
 export function productBlockFor(
@@ -65,9 +67,11 @@ export function keyProductBlocks(sec: SpecSection): PDProductBlock[] {
 
 function systemBlocks(sec: SpecSection, withWords: boolean): PDBlock[] {
   const out = systemHeadingBlocks(sec);
-  if (!withWords) return out;
-  out.push(...textToBlocks(typeof sec.narrative === "string" ? sec.narrative : ""));
-  out.push(...keyProductBlocks(sec).filter((b) => b.attrs.lineKey));
+  if (withWords) {
+    out.push(...textToBlocks(typeof sec.narrative === "string" ? sec.narrative : ""));
+    out.push(...keyProductBlocks(sec).filter((b) => b.attrs.lineKey));
+  }
+  out.push(systemTotalBlock(sec.id));
   return out;
 }
 

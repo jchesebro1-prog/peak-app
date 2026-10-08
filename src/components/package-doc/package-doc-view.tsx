@@ -1,5 +1,5 @@
 import { Fragment, type CSSProperties, type ReactNode } from "react";
-import { resolvePackageDoc, type PackageDocCtx, type RBlock, type RInline, type RList, type RParagraph, type RPriceTable, type RProduct, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
+import { resolvePackageDoc, type PackageDocCtx, type RBlock, type RInline, type RList, type RParagraph, type RPriceTable, type RProduct, type RSysTotal, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
 import type { PackageDoc } from "@/lib/package-doc/types";
 
 /**
@@ -24,6 +24,9 @@ import type { PackageDoc } from "@/lib/package-doc/types";
  *     centred; phones (≤ 480px) always put it full width above
  *   priceTable → systems · price rows, tax / Rewards credit rows, Total
  *     (t.grand); alternates listed after it as "priced separately"
+ *   systemTotal → one bold row: the system name left, its sell total right
+ *     (mono) under a thin rule; an alternate system adds " — priced
+ *     separately"; a missing system prints nothing
  *   pageBreak → break-after: page in print, a thin dashed rule on screen
  */
 
@@ -142,6 +145,22 @@ function PriceTable({ b }: { b: RPriceTable }) {
   );
 }
 
+/** A system's price line: name left, sell total right, a thin rule above. */
+export function SystemTotal({ b }: { b: RSysTotal }) {
+  return (
+    <div
+      className="pd-systotal"
+      style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, margin: "8px 0 14px", padding: "6px 0 0", borderTop: "1px solid #d5d8de", fontWeight: 700, color: INK, breakInside: "avoid", pageBreakInside: "avoid", clear: "both" }}
+    >
+      <span>
+        {b.name}
+        {b.alternate ? <span style={{ fontWeight: 400, color: "#8c919c", fontSize: "0.88em" }}> — priced separately</span> : null}
+      </span>
+      <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{b.price}</span>
+    </div>
+  );
+}
+
 function Block({ b, extra }: { b: RBlock; extra?: Record<string, ReactNode> }) {
   switch (b.t) {
     case "p":
@@ -161,6 +180,8 @@ function Block({ b, extra }: { b: RBlock; extra?: Record<string, ReactNode> }) {
       return <Product b={b} extra={extra && Object.hasOwn(extra, b.sku) ? extra[b.sku] : undefined} />;
     case "price":
       return <PriceTable b={b} />;
+    case "systotal":
+      return <SystemTotal b={b} />;
     case "pagebreak":
       return <div className="pd-pagebreak" aria-hidden="true" style={{ breakAfter: "page", pageBreakAfter: "always", height: 0, borderTop: "1px dashed #d5d8de", margin: "16px 0" }} />;
     default:

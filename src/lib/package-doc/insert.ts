@@ -7,7 +7,7 @@ import type { GroupBlock, SystemGroup } from "@/lib/estimate-groups/groups";
 import { findLine, findSection } from "./chips";
 import type { DocGaps } from "./gaps";
 import { MAX_LINE_KEY, MAX_SECTION_ID } from "./schema";
-import { productBlockFor, systemHeadingBlocks } from "./seed";
+import { productBlockFor, systemHeadingBlocks, systemTotalBlock } from "./seed";
 import { bulletListOf, inlineText, textToBlocks, walkDoc } from "./text";
 import type { ChipKind, PackageDoc, PDBlock, PDPageBreak, PDPriceTable } from "./types";
 
@@ -22,7 +22,8 @@ import type { ChipKind, PackageDoc, PDBlock, PDPageBreak, PDPriceTable } from ".
 /** The drag MIME a BOM row sets; the editor's drop handler reads only this. */
 export const DOC_NODE_MIME = "application/x-peak-docnode";
 
-export type DocNodePayload = { kind: "line" | "system"; sectionId: string; lineKey: string };
+/** `system` = heading + slot + price line; `systemTotal` = just the price line. */
+export type DocNodePayload = { kind: "line" | "system" | "systemTotal"; sectionId: string; lineKey: string };
 
 const str = (v: unknown, max: number): string | null => (typeof v === "string" && v.length <= max ? v : null);
 
@@ -39,7 +40,7 @@ export function parseDocNodePayload(raw: unknown): DocNodePayload | null {
   }
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
-  const kind = o.kind === "line" || o.kind === "system" ? o.kind : null;
+  const kind = o.kind === "line" || o.kind === "system" || o.kind === "systemTotal" ? o.kind : null;
   const sectionId = str(o.sectionId, MAX_SECTION_ID);
   const lineKey = o.lineKey === undefined ? "" : str(o.lineKey, MAX_LINE_KEY);
   if (!kind || !sectionId || lineKey === null) return null;
@@ -58,8 +59,12 @@ export function lineNodes(sec: Pick<SpecSection, "id">, it: SpecItem, paragraph:
   return [productBlockFor(sec.id, it.id, sku, isLineToken(sku) ? "" : paragraph || "")];
 }
 
-/** A system: heading (level 2, its name) + a paragraph holding its live price chip. */
-export const systemNodes = (sec: Pick<SpecSection, "id" | "name">): PDBlock[] => systemHeadingBlocks(sec);
+/** A system: heading (level 2, its name), an empty paragraph (the cursor
+ *  lands there — the intro goes above the price line) and its live price line. */
+export const systemNodes = (sec: Pick<SpecSection, "id" | "name">): PDBlock[] => [...systemHeadingBlocks(sec), { type: "paragraph" }, systemTotalBlock(sec.id)];
+
+/** The system price line alone. */
+export const systemTotalNodes = (sec: Pick<SpecSection, "id">): PDBlock[] => [systemTotalBlock(sec.id)];
 
 /** A saved system intro → paragraphs / bullet lists (narrativeBlocks rules). */
 export const introNodes = (text: string | null | undefined): PDBlock[] => textToBlocks(text);
@@ -81,6 +86,7 @@ export function docNodesFor(p: DocNodePayload, sections: readonly SpecSection[],
   const sec = findSection(sections, p.sectionId);
   if (!sec) return null;
   if (p.kind === "system") return systemNodes(sec);
+  if (p.kind === "systemTotal") return systemTotalNodes(sec);
   const it = findLine(sec, p.lineKey);
   if (!it || !isKeyProductEligible(it)) return null;
   const sku = keyProductSkuOf(it);
@@ -107,6 +113,7 @@ export function docPresence(doc: PackageDoc | null | undefined): DocPresence {
   const out: DocPresence = { chipSystems: new Set(), headings: new Set(), lines: new Set() };
   for (const n of walkDoc(doc)) {
     if (n.type === "chip" && (n.attrs.kind === "systemPrice" || n.attrs.kind === "systemName")) out.chipSystems.add(n.attrs.ref);
+    else if (n.type === "systemTotal") out.chipSystems.add(n.attrs.sectionId);
     else if (n.type === "heading") {
       const t = norm(inlineText(n.content));
       if (t) out.headings.add(t);
@@ -115,7 +122,7 @@ export function docPresence(doc: PackageDoc | null | undefined): DocPresence {
   return out;
 }
 
-/** A system is in the document when a price/name chip refers to it or a heading carries its name. */
+/** A system is in the document when a price/name chip or price line refers to it or a heading carries its name. */
 export function systemInDoc(sec: Pick<SpecSection, "id" | "name">, pr: DocPresence): boolean {
   const name = norm(sec.name || "");
   return pr.chipSystems.has(sec.id) || (!!name && pr.headings.has(name));

@@ -37,6 +37,8 @@ export function docIdFloor(doc: PackageDoc | null | undefined): number {
           n = bump(n, r.lineKey, NUM_RE);
         }
       }
+    } else if (node.type === "systemTotal") {
+      n = bump(n, node.attrs.sectionId, SYS_RE);
     } else if (node.type === "productBlock") {
       n = bump(n, node.attrs.sectionId, SYS_RE);
       n = bump(n, node.attrs.lineKey, NUM_RE);

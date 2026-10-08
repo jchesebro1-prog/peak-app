@@ -24,6 +24,8 @@ import type { PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, P
  *   productBlock → heading = keyProductHeading(line) while the line is in the
  *     BOM (else none); photo (photo.show) = photos[sku] → the line's kind
  *     placeholder → none
+ *   systemTotal → the system's name + systemSellTotal (alternate systems
+ *     flagged); a missing system → dropped
  *   priceTable → printed In-total systems (name · systemSellTotal), the tax
  *     and Rewards credit rows, Total = t.grand — the totals block's numbers;
  *     printed alternates listed separately ("priced separately")
@@ -48,7 +50,9 @@ export type RPhoto = { src: string; alt: string; align: PhotoAlign; width: numbe
 export type RProduct = { t: "product"; sku: string; heading: string | null; photo: RPhoto | null; paras: RParagraph[] };
 export type RPriceRow = { name: string; price: string };
 export type RPriceTable = { t: "price"; rows: RPriceRow[]; extra: RPriceRow[]; totalLabel: string; total: string; alternates: RPriceRow[] };
-export type RBlock = RParagraph | { t: "h"; level: 1 | 2 | 3; content: RInline[] } | RList | RProduct | RPriceTable | { t: "pagebreak" };
+/** A system's price line: its name and systemSellTotal; `alternate` adds " — priced separately". */
+export type RSysTotal = { t: "systotal"; name: string; price: string; alternate: boolean };
+export type RBlock = RParagraph | { t: "h"; level: 1 | 2 | 3; content: RInline[] } | RList | RProduct | RPriceTable | RSysTotal | { t: "pagebreak" };
 export type ResolvedPackageDoc = { blocks: RBlock[] };
 
 function inline(content: readonly PDInline[] | undefined, ctx: PackageDocCtx): RInline[] {
@@ -117,6 +121,12 @@ export function priceTableOf(ctx: PackageDocCtx): RPriceTable {
   };
 }
 
+/** A system's live price line, or null when the system is gone (prints nothing). */
+export function systemTotalOf(sectionId: unknown, ctx: Pick<PackageDocCtx, "sections">): RSysTotal | null {
+  const sec = findSection(ctx.sections, typeof sectionId === "string" ? sectionId : "");
+  return sec ? { t: "systotal", name: sec.name || "", price: fmt(systemSellTotal(sec)), alternate: sec.alternate === true } : null;
+}
+
 function block(b: PDBlock, ctx: PackageDocCtx): RBlock | null {
   switch (b?.type) {
     case "paragraph":
@@ -130,6 +140,8 @@ function block(b: PDBlock, ctx: PackageDocCtx): RBlock | null {
       return product(b, ctx);
     case "priceTable":
       return priceTableOf(ctx);
+    case "systemTotal":
+      return systemTotalOf(b.attrs?.sectionId, ctx);
     case "pageBreak":
       return { t: "pagebreak" };
     default:

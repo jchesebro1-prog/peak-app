@@ -45,6 +45,8 @@ import type { PackageDoc, PDBlock, PDMark, PDMarkType, PhotoAttrs } from "./type
  *    paragraphs merge into its first (joined with a hard break) so it reads
  *    `paragraph (bulletList | orderedList)*` like the editor, an empty doc
  *    gets one empty paragraph. Empty text nodes are dropped (ProseMirror rejects them).
+ *  - A systemTotal (the live system price line) is an atom with one attr,
+ *    `sectionId`; an empty or over-long sectionId drops the node.
  *  - An ordered list keeps an integer `start` of 2–9999 (1 is the default, dropped).
  *
  * Iterative (an explicit stack), never recursive, so hostile nesting can't
@@ -57,7 +59,7 @@ type Frame = { raw: unknown; parent: Container; depth: number; only?: "paragraph
 type Made = { node: { type: string; content?: unknown[] }; parent: Container; kind: Kind };
 
 const ALLOWED: Record<Kind, ReadonlySet<string>> = {
-  doc: new Set(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock"]),
+  doc: new Set(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock", "systemTotal"]),
   list: new Set(["listItem"]),
   listItem: new Set(["paragraph", "bulletList", "orderedList"]),
   productBlock: new Set(["paragraph"]),
@@ -85,6 +87,12 @@ function cleanPhoto(raw: unknown): PhotoAttrs {
     align: isPhotoAlign(o.align) ? o.align : DEFAULT_PHOTO.align,
     width: clampPhotoWidth(o.width),
   };
+}
+
+/** A block's system anchor, or null when empty / over-long. */
+function sectionIdOf(attrs: unknown): string | null {
+  const id = strOf(isObj(attrs) ? attrs.sectionId : null);
+  return id && id.length <= MAX_SECTION_ID ? id : null;
 }
 
 /** Anchors of a product block, or null when unusable (→ unwrap). */
@@ -208,6 +216,14 @@ export function sanitizePackageDoc(raw: unknown): PackageDoc | null {
         p.content.push({ type });
         count++;
         break;
+      case "systemTotal": {
+        // An atom anchored on a system; no usable sectionId → dropped.
+        const sectionId = sectionIdOf(r.attrs);
+        if (!sectionId) break;
+        p.content.push({ type: "systemTotal", attrs: { sectionId } });
+        count++;
+        break;
+      }
       case "productBlock": {
         const anchors = productAnchors(r.attrs);
         if (!anchors) {

@@ -1,4 +1,4 @@
-import { getSchema, mergeAttributes, Node, type AnyExtension, type Editor, type NodeViewRenderer } from "@tiptap/react";
+import { getSchema, mergeAttributes, Node, type AnyExtension, type Attributes, type Editor, type NodeViewRenderer } from "@tiptap/react";
 import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
 import { sinkListItem } from "@tiptap/pm/schema-list";
 import { TextSelection, type Command, type Transaction } from "@tiptap/pm/state";
@@ -23,6 +23,7 @@ import type { PhotoAttrs } from "@/lib/package-doc/types";
  *    stay — they are plugins, not nodes.
  *  - chip: inline atom { kind, ref }. productBlock: block, `paragraph+`,
  *    { sectionId, lineKey, sku, photo }. priceTable, pageBreak: block atoms.
+ *  - systemTotal: block atom { sectionId } — a system's live price line.
  */
 
 export const STARTER_KIT_OPTIONS: Partial<StarterKitOptions> = {
@@ -141,6 +142,13 @@ function parsePhoto(raw: string | null): PhotoAttrs {
   }
 }
 
+/** A string attr stored as a `data-*` attribute (the anchors of product-linked nodes). */
+export const stringAttr = (key: string, dataAttr: string) => ({
+  default: "",
+  parseHTML: (el: HTMLElement) => el.getAttribute(dataAttr) || "",
+  renderHTML: (a: Record<string, unknown>) => ({ [dataAttr]: String(a[key] ?? "") }),
+});
+
 /** Is the cursor on an empty LAST paragraph of a product block? Enter there
  *  leaves the block (drops that empty line, opens a paragraph after it). */
 export function exitProductBlockOnEmptyLine(editor: Editor): boolean {
@@ -174,21 +182,9 @@ export const ProductBlockNode = Node.create({
   draggable: true,
   addAttributes() {
     return {
-      sectionId: {
-        default: "",
-        parseHTML: (el) => el.getAttribute("data-section-id") || "",
-        renderHTML: (a) => ({ "data-section-id": a.sectionId }),
-      },
-      lineKey: {
-        default: "",
-        parseHTML: (el) => el.getAttribute("data-line-key") || "",
-        renderHTML: (a) => ({ "data-line-key": a.lineKey }),
-      },
-      sku: {
-        default: "",
-        parseHTML: (el) => el.getAttribute("data-sku") || "",
-        renderHTML: (a) => ({ "data-sku": a.sku }),
-      },
+      sectionId: stringAttr("sectionId", "data-section-id"),
+      lineKey: stringAttr("lineKey", "data-line-key"),
+      sku: stringAttr("sku", "data-sku"),
       photo: {
         default: { ...DEFAULT_PHOTO },
         parseHTML: (el) => parsePhoto(el.getAttribute("data-photo")),
@@ -207,13 +203,15 @@ export const ProductBlockNode = Node.create({
   },
 });
 
-const atomBlock = (name: "priceTable" | "pageBreak", attr: string) =>
+/** A block atom (no content); `attrs` adds attributes when it carries any. */
+const atomBlock = (name: "priceTable" | "pageBreak" | "systemTotal", attr: string, attrs?: () => Attributes) =>
   Node.create({
     name,
     group: "block",
     atom: true,
     selectable: true,
     draggable: true,
+    ...(attrs ? { addAttributes: attrs } : {}),
     parseHTML() {
       return [{ tag: `div[${attr}]` }];
     },
@@ -224,8 +222,9 @@ const atomBlock = (name: "priceTable" | "pageBreak", attr: string) =>
 
 export const PriceTableNode = atomBlock("priceTable", "data-pd-price-table");
 export const PageBreakNode = atomBlock("pageBreak", "data-pd-page-break");
+export const SystemTotalNode = atomBlock("systemTotal", "data-pd-system-total", () => ({ sectionId: stringAttr("sectionId", "data-section-id") }));
 
-export type DocNodeViews = Partial<Record<"chip" | "productBlock" | "priceTable" | "pageBreak", NodeViewRenderer>>;
+export type DocNodeViews = Partial<Record<"chip" | "productBlock" | "priceTable" | "pageBreak" | "systemTotal", NodeViewRenderer>>;
 
 /** The ONE extension list (extensions.ts passes the React node views). */
 export function buildExtensions(views: DocNodeViews = {}): AnyExtension[] {
@@ -237,6 +236,7 @@ export function buildExtensions(views: DocNodeViews = {}): AnyExtension[] {
     withView(ProductBlockNode, views.productBlock),
     withView(PriceTableNode, views.priceTable),
     withView(PageBreakNode, views.pageBreak),
+    withView(SystemTotalNode, views.systemTotal),
   ];
 }
 

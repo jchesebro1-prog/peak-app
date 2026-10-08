@@ -57095,7 +57095,7 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   const J = (x: unknown) => JSON.stringify(x);
 
   // Schema as data.
-  ok(J(p5s.BLOCK_NODES) === J(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock"]) &&
+  ok(J(p5s.BLOCK_NODES) === J(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock", "systemTotal"]) &&
     J(p5s.INLINE_NODES) === J(["text", "hardBreak", "chip"]) && J(p5s.MARK_NAMES) === J(["bold", "italic"]) &&
     J(p5s.CHIP_KINDS) === J(["systemPrice", "systemName", "lineQty", "quoteNumber", "grandTotal"]) && J(p5s.PHOTO_ALIGNS) === J(["left", "right", "full"]),
     "#P5 model: the schema lists are exactly the spec's nodes, marks, chip kinds and photo aligns");
@@ -57201,15 +57201,16 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   const groups = [{ id: "g1", name: "Options", alternate: true }];
   const seeded = p5Seed({ sections: secs, groups });
   const types = seeded.content.map((b) => b.type + (b.type === "heading" ? b.attrs.level + ":" + p5t.inlineText(b.content) : ""));
-  ok(J(types) === J(["heading2:Stage lighting", "paragraph", "paragraph", "bulletList", "productBlock", "productBlock", "heading2:Sys Two", "paragraph", "priceTable", `heading1:${p5AltH}`, "heading2:Alt sys", "paragraph", "paragraph"]),
-    "#P5 model: seed — In-total systems in Build order (heading + price chip + intro + key products), the price table, then 'Alternates' + alternate systems; zero-revenue systems skipped");
-  ok(J(seeded.content[1]) === J({ type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s1" } }] }) && J(seeded.content[7]) === J({ type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s2" } }] }),
-    "#P5 model: seed — each system heading is followed by its systemPrice chip");
-  ok(J(seeded.content[2]) === J({ type: "paragraph", content: [{ type: "text", text: "Intro para" }, { type: "hardBreak" }, { type: "text", text: "line 2" }] }) &&
-    J(seeded.content[3]) === J({ type: "bulletList", content: [{ type: "listItem", content: [P("b1")] }, { type: "listItem", content: [P("b2")] }] }) &&
-    J(seeded.content[8]) === J({ type: "priceTable" }) && J(seeded.content[12]) === J(P("Alt words")),
-    "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a system with no narrative gets just its heading and price chip");
-  const kp1 = seeded.content[4] as P5PB, kp2 = seeded.content[5] as P5PB;
+  ok(J(types) === J(["heading2:Stage lighting", "paragraph", "bulletList", "productBlock", "productBlock", "systemTotal", "heading2:Sys Two", "systemTotal", "priceTable", `heading1:${p5AltH}`, "heading2:Alt sys", "paragraph", "systemTotal"]),
+    "#P5 model: seed — In-total systems in Build order (heading + intro + key products + its price line, #312), the price table, then 'Alternates' + alternate systems; zero-revenue systems skipped");
+  ok(J(seeded.content[5]) === J({ type: "systemTotal", attrs: { sectionId: "s1" } }) && J(seeded.content[7]) === J({ type: "systemTotal", attrs: { sectionId: "s2" } }) &&
+     J(seeded.content[12]) === J({ type: "systemTotal", attrs: { sectionId: "s3" } }) && !seeded.content.some((b) => b.type === "paragraph" && (b.content || []).some((c) => c.type === "chip")),
+    "#P5 model: seed — each system ends with its systemTotal price line (#312); no price-chip paragraph under the heading");
+  ok(J(seeded.content[1]) === J({ type: "paragraph", content: [{ type: "text", text: "Intro para" }, { type: "hardBreak" }, { type: "text", text: "line 2" }] }) &&
+    J(seeded.content[2]) === J({ type: "bulletList", content: [{ type: "listItem", content: [P("b1")] }, { type: "listItem", content: [P("b2")] }] }) &&
+    J(seeded.content[8]) === J({ type: "priceTable" }) && J(seeded.content[11]) === J(P("Alt words")),
+    "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a system with no narrative gets just its heading and price line");
+  const kp1 = seeded.content[3] as P5PB, kp2 = seeded.content[4] as P5PB;
   ok(J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: true, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
     p5t.productBlockText(kp1) === "Fixture one paragraph.\n\nSecond para." && p5t.productBlockText(kp2) === "- f1\n- f2",
     "#P5 model: seed — product blocks for printable key products only (missing line skipped), photo { show: kp.photo, right, 34 }, words read back verbatim");
@@ -57966,8 +57967,8 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
   const asked: string[] = [];
   const paraOf = (sku: string) => { asked.push(sku); return sku === "SKU-5" ? "First para.\n\nSecond para." : null; };
   const sys = p5l.docNodesFor({ kind: "system", sectionId: "s2", lineKey: "" }, secs, paraOf);
-  ok(valid(sys) && J(sys) === J([H("Lighting"), P({ type: "chip", attrs: { kind: "systemPrice", ref: "s2" } })]),
-    "#P5 left pane: a system drops as a level-2 heading with its name + a paragraph holding its live price chip");
+  ok(valid(sys) && J(sys) === J([H("Lighting"), P(), { type: "systemTotal", attrs: { sectionId: "s2" } }]),
+    "#P5 left pane: a system drops as a level-2 heading with its name + an empty paragraph (the cursor lands there) + its live price line (#312)");
   const line5 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "5" }, secs, paraOf);
   ok(valid(line5) && J(line5) === J([{ type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: true, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
     "#P5 left pane: a line drops as a product block (sectionId / lineKey / sku, photo right 34 %) holding its library paragraph split into paragraphs");
@@ -58067,10 +58068,10 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
      /event\.preventDefault\(\);\s*const at = view\.posAtCoords\(\{ left: event\.clientX, top: event\.clientY \}\);/.test(dropSrc) && dropSrc.includes("handleDrop(view, event)"),
     "#P5 left pane: the editor's drop handler reads only application/x-peak-docnode (other drops fall through to ProseMirror), maps the drop with posAtCoords and prevents the default");
   ok(edSrc.includes("const extensions = useMemo(() => [...editorExtensions(), DocNodeDrop], []);") && /setDocNodeDropHandler\(editor, \(p, pos\) => \{[\s\S]*?insertBlocksAt\(editor, pos, nodes\)/.test(edSrc) &&
-     /return at !== null && editor\.chain\(\)\.focus\(\)\.insertContentAt\(at, json\)\.run\(\);/.test(cmdSrc) && cmdSrc.includes("dropPoint(doc, at, slice)") &&
+     /return at !== null && settleIntroSlot\(editor\.chain\(\)\.focus\(\)\.insertContentAt\(at, json\), json\)\.run\(\);/.test(cmdSrc) && cmdSrc.includes("dropPoint(doc, at, slice)") &&
      edSrc.includes("onReady?.(api);") && edSrc.includes("onReady?.(null);") && edSrc.includes("rows = await libraryRef.current.ensure([sku]);"),
     "#P5 left pane: drops insert through editor commands (one undo step) after fetching a missing library paragraph; the editor hands the pane its insert API via onReady");
-  ok(paneSrc.startsWith('"use client";') && paneSrc.includes("e.dataTransfer.setData(DOC_NODE_MIME, docNodeDragData(p));") && (paneSrc.match(/draggable onDragStart=\{dragStart\(/g) || []).length === 2 &&
+  ok(paneSrc.startsWith('"use client";') && paneSrc.includes("e.dataTransfer.setData(DOC_NODE_MIME, docNodeDragData(p));") && (paneSrc.match(/draggable onDragStart=\{dragStart\(/g) || []).length === 3 &&
      paneSrc.includes("aria-label={`Insert ${name}`}") && paneSrc.includes("aria-label={`Insert ${label}`}") && paneSrc.includes("aria-label={`Insert ${x.title}`}") &&
      [">Gaps</h3>", ">BOM</h3>", ">Library</h3>", "No gaps.", "Not included list", "Price table", "Page break"].every((x) => paneSrc.includes(x)) &&
      !/from "@tiptap\//.test(paneSrc) && paneSrc.includes("api.insertDocNode(p)") && paneSrc.includes("api.scrollToProduct(") && !/#[0-9a-f]{6}[^\n]*accent/i.test(paneSrc),
@@ -58401,4 +58402,127 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(mod.includes("const onCloseRef = useRef(onClose);") && mod.includes("onCloseRef.current = onClose;") && mod.includes("onCloseRef.current();") && mod.includes("e.stopImmediatePropagation();") && mod.includes("e.preventDefault();") &&
      mod.includes('window.addEventListener("keydown", onKey, true);') && mod.includes('window.removeEventListener("keydown", onKey, true);') && mod.includes("}, []);") && !mod.includes("}, [onClose]);"),
     "#P6 estimator: the modal's Escape binds once (onClose in a ref), in capture on window, and stops other Escape handlers");
+}
+
+// ---- #312 price lines: removable price table / page break + the live system price line ----
+import { docIdFloor as p312Floor } from "@/lib/package-doc/ids";
+import { introSlotSectionId as p312SlotId, introSlotSelection as p312Slot } from "@/components/package-doc/editor/editor-commands";
+import { systemTotalOf as p312Total } from "@/lib/package-doc/resolve";
+import PackageDocView312 from "@/components/package-doc/package-doc-view";
+import { NodeSelection as P312NodeSel, TextSelection as P312TextSel } from "@tiptap/pm/state";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  const ED = "src/components/package-doc/editor";
+  const secs = p5rSections();
+  const byId = (id: string) => secs.find((s) => s.id === id)!;
+  const total = (sectionId: string) => ({ type: "systemTotal", attrs: { sectionId } });
+  const doc = (content: unknown[]) => ({ type: "doc", version: 1, content });
+  const P = (text?: string) => ({ type: "paragraph", ...(text ? { content: [{ type: "text", text }] } : {}) });
+  const H = (text: string) => ({ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text }] });
+
+  // Sanitizer: accepts, canonicalizes, drops.
+  ok(J(p5San(doc([total("s1")]))) === J(doc([total("s1")])) && J(p5San(doc([{ type: "systemTotal", attrs: { sectionId: " s1 ", extra: 1 }, content: [P("x")] }])))  === J(doc([total("s1")])),
+    "#312 price lines: the sanitizer keeps a systemTotal { sectionId }, trims the id and drops other attrs and any content");
+  const bad = p5San(doc([P("keep"), { type: "systemTotal" }, { type: "systemTotal", attrs: {} }, total(""), total("   "), total("x".repeat(65)), { type: "systemTotal", attrs: { sectionId: { a: 1 } } }]))!;
+  ok(J(bad.content) === J([P("keep")]), "#312 price lines: a systemTotal with no / empty / blank / over-64-character / non-text sectionId is dropped");
+  ok(!JSON.stringify(p5San(doc([{ type: "paragraph", content: [total("s1")] }, { type: "bulletList", content: [{ type: "listItem", content: [P("a"), total("s1")] }] }, { type: "productBlock", attrs: { sectionId: "s1", lineKey: "1", sku: "A" }, content: [P("w"), total("s1")] }]))!.content).includes("systemTotal"),
+    "#312 price lines: a systemTotal is a top-level block only — inside a paragraph, list item or product block it is dropped");
+  const once = p5San(doc([H("A"), total("s1"), total("s1"), P()]))!;
+  ok(J(p5San(once)) === J(once) && once.content.length === 4 && p5s.NODE_NAMES.includes("systemTotal" as never) && p5s.BLOCK_NODES.includes("systemTotal"),
+    "#312 price lines: sanitize is idempotent; a system may carry more than one price line; systemTotal is in the schema lists");
+
+  // Resolver: in-total, alternate, missing.
+  const alt = { ...byId("s3"), alternate: true } as typeof secs[number];
+  const ctx = { sections: [byId("s1"), byId("s2"), alt] as typeof secs, t: { grand: 0, tax: 0, credit: 0 } as never, quoteId: "Q-312" };
+  const r = p5rResolve(p5San(doc([total("s1"), total("s3"), total("s9"), total("")]))!, ctx);
+  ok(J(r.blocks) === J([
+      { t: "systotal", name: "Rigging", price: p5fmt(p5Sell(byId("s1"))), alternate: false },
+      { t: "systotal", name: "Install", price: p5fmt(p5Sell(byId("s3"))), alternate: true },
+    ]) && p312Total("s9", ctx) === null && p312Total(undefined, ctx) === null && p312Total("s2", ctx)!.alternate === false,
+    "#312 price lines: resolver — { t: 'systotal', name, price: fmt(systemSellTotal), alternate } for an in-total and an alternate system; a missing system resolves to nothing");
+
+  // Renderer: one bold row, name left / mono price right, rule above, alternate suffix, missing prints nothing.
+  const html = p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([H("Rigging"), total("s1"), total("s3"), total("s9")]))!, ctx }));
+  const rows = [...html.matchAll(/<div class="pd-systotal" style="([^"]*)">(.*?)<\/div>/g)];
+  ok(rows.length === 2 && /justify-content:space-between/.test(rows[0][1]) && /border-top:1px solid/.test(rows[0][1]) && /font-weight:700/.test(rows[0][1]) &&
+     rows[0][2] === `<span>Rigging</span><span style="font-family:var(--font-mono);white-space:nowrap">${p5fmt(p5Sell(byId("s1")))}</span>` &&
+     rows[1][2].includes("Install<span") && rows[1][2].includes(" — priced separately") && rows[1][2].includes(p5fmt(p5Sell(byId("s3")))),
+    "#312 price lines: renders as one bold row — name left, sell total right (mono), thin rule above; an alternate adds ' — priced separately'; a missing system prints nothing");
+  ok(!html.includes("s9") && !p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([total("s9")]))!, ctx })).includes("pd-systotal"), "#312 price lines: a removed system's price line prints nothing");
+
+  // Printed end to end through the customer document.
+  const printed = p5rRender(p5rProps({ sections: p5rSections(), document: doc([H("Rigging"), P("Words."), total("s1")]) }));
+  ok(printed.includes('class="pd-systotal"') && printed.includes(">Rigging</span><span") && printed.indexOf("Words.") < printed.indexOf('class="pd-systotal"'),
+    "#312 price lines: the customer document prints the price line where it sits in the document");
+
+  // Seed: heading → intro → key products → systemTotal, no price-chip paragraph.
+  const grouped = p5rSections().map((s) => (s.id === "s3" ? { ...s, groupId: "g1" } : s));
+  const seeded = p5Seed({ sections: grouped, groups: [{ id: "g1", name: "Options", alternate: true }] });
+  const idByName = new Map(grouped.map((s) => [s.name, s.id]));
+  let lastHeading = "", okSeed = true, totals = 0;
+  seeded.content.forEach((b, i) => {
+    const next = seeded.content[i + 1];
+    if (b.type === "heading" && b.attrs.level === 2) lastHeading = p5t.inlineText(b.content);
+    if (b.type === "systemTotal") {
+      totals++;
+      okSeed = okSeed && b.attrs.sectionId === idByName.get(lastHeading) && (!next || next.type === "heading" || next.type === "priceTable");
+    }
+    if (b.type === "heading" && b.attrs.level === 2) okSeed = okSeed && !(next && next.type === "paragraph" && (next.content || []).some((c) => c.type === "chip"));
+  });
+  const headings = seeded.content.filter((b) => b.type === "heading" && b.attrs.level === 2).length;
+  ok(okSeed && totals === headings && headings >= 3 && seeded.content.some((b) => b.type === "systemTotal" && b.attrs.sectionId === "s3") && J(p5San(seeded)) === J(seeded),
+    "#312 price lines: seed — every system ends with its systemTotal (after intro and key products), alternates too; no price chip under the heading; the seed is valid");
+
+  // Insert paths: system = heading + empty paragraph + price line; the price line alone; payload kind.
+  const sysNodes = p5l.docNodesFor({ kind: "system", sectionId: "s2", lineKey: "" }, secs, () => null)!;
+  ok(J(sysNodes) === J([H("Lighting"), P(), total("s2")]) && J(p5l.docNodesFor({ kind: "systemTotal", sectionId: "s2", lineKey: "" }, secs, () => null)) === J([total("s2")]) &&
+     p5l.docNodesFor({ kind: "systemTotal", sectionId: "s9", lineKey: "" }, secs, () => null) === null,
+    "#312 price lines: a BOM system inserts heading + empty paragraph + price line; '+ Price line' inserts just the price line (null when the system is gone)");
+  const payload = { kind: "systemTotal", sectionId: "s1", lineKey: "zz" };
+  ok(J(p5l.parseDocNodePayload(payload)) === J({ kind: "systemTotal", sectionId: "s1", lineKey: "" }) && J(p5l.parseDocNodePayload(p5l.docNodeDragData({ kind: "systemTotal", sectionId: "s1", lineKey: "" }))) === J({ kind: "systemTotal", sectionId: "s1", lineKey: "" }) &&
+     p5l.parseDocNodePayload({ kind: "systemTotal", sectionId: "" }) === null && p5l.parseDocNodePayload({ kind: "nope", sectionId: "s1" }) === null,
+    "#312 price lines: the drag payload kind systemTotal parses (lineKey forced empty) and round-trips through the drag data");
+  ok(p312SlotId(sysNodes as never) === "s2" && p312SlotId([total("s2")] as never) === null && p312SlotId([H("x"), P("typed"), total("s2")] as never) === null && p312SlotId([H("x"), total("s2")] as never) === null,
+    "#312 price lines: only [..., empty paragraph, price line] puts the cursor in the intro slot");
+  const pr = p5l.docPresence(p5San(doc([total("s1")]))!);
+  ok(p5l.systemInDoc({ id: "s1", name: "Rigging" }, pr) && !p5l.systemInDoc({ id: "s2", name: "Lighting" }, pr), "#312 price lines: a price line marks its system as in the document (the BOM tick)");
+
+  // Cursor lands in the empty intro paragraph (headless ProseMirror).
+  const schema = p5eGetSchema(p5eBuild());
+  const pm = schema.nodeFromJSON(doc([P("before"), H("Lighting"), P(), total("s2"), P("after")]));
+  let at = -1;
+  pm.descendants((n, p) => { if (n.type.name === "systemTotal") at = p; });
+  const sel = p312Slot(pm, P312NodeSel.create(pm, at), "s2");
+  ok(sel instanceof P312TextSel && sel.empty && sel.$from.parent.type.name === "paragraph" && sel.$from.parent.content.size === 0 && sel.$from.index(0) === 2 && sel.from === at - 1 &&
+     p312Slot(pm, P312NodeSel.create(pm, at), "s1") === null && p312Slot(pm, P312TextSel.create(pm, 1), "s2") === null,
+    "#312 price lines: after a system insert the selected price line hands the cursor to the empty paragraph above it; other selections are left alone");
+  const typed = schema.nodeFromJSON(doc([P("typed"), total("s2")]));
+  ok(p312Slot(typed, P312NodeSel.create(typed, 7), "s2") === null, "#312 price lines: a price line after typed text does not steal the cursor");
+
+  // Gaps.
+  const g = p5Gaps(p5San(doc([total("s9"), total("s9"), total("s1"), { type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s9" } }] }]))!, secs);
+  ok(J(g.removedChips) === J([{ kind: "systemPrice", ref: "s9" }]) && p5l.gapRows(g, [])[0].text === "A price for a removed system" &&
+     !g.systemsNotMentioned.some((x) => x.id === "s1") && p5Gaps(p5San(doc([total("s2")])), secs).systemsNotMentioned.every((x) => x.id !== "s2"),
+    "#312 price lines: gaps — a removed system's price line is a 'removed system' row (once, with a matching chip); a price line counts as mentioning its system");
+
+  // Ids + emptiness.
+  ok(p312Floor(p5San(doc([total("sys41")]))) === 41 && !p5t.isEmptyDoc(p5San(doc([total("s1")]))) && p5t.isEmptyDoc(p5San(doc([P(), { type: "pageBreak" }]))),
+    "#312 price lines: docIdFloor reads a price line's system id; a document holding only a price line is not empty");
+
+  // Editor schema + views.
+  const names = p5eNames();
+  ok(J(names.nodes) === J([...p5eNodeNames].sort()) && names.nodes.includes("systemTotal") && schema.nodes.systemTotal.isAtom && !schema.nodes.systemTotal.isInline && schema.nodes.systemTotal.spec.group === "block" && schema.nodes.systemTotal.spec.draggable === true &&
+     J(p5eSan(schema.nodeFromJSON(doc([total("s1"), P("t"), total("s2")])).toJSON())) === J(doc([total("s1"), P("t"), total("s2")])),
+    "#312 price lines: the editor schema registers systemTotal (block atom, draggable, { sectionId }) matching schema.ts, and round-trips through the sanitizer unchanged");
+  const ext = rd(`${ED}/extensions.ts`), nodes = rd(`${ED}/schema-nodes.ts`), pt = rd(`${ED}/price-table-view.tsx`), pb = rd(`${ED}/page-break-view.tsx`), st = rd(`${ED}/system-total-view.tsx`), rm = rd(`${ED}/atom-remove.tsx`), pane = rd(`${ED}/left-pane.tsx`);
+  ok(ext.includes("systemTotal: ReactNodeViewRenderer(SystemTotalView)") && nodes.includes('atomBlock("systemTotal", "data-pd-system-total"') && nodes.includes("withView(SystemTotalNode, views.systemTotal)"),
+    "#312 price lines: extensions.ts attaches SystemTotalView to the schema-nodes.ts systemTotal node (one list)");
+  ok([pt, pb, st].every((s) => s.includes("<AtomRemove editor={editor} getPos={getPos}") && s.includes("(hover || selected)")) && rm.includes("deleteNodeAt(editor, p)") && rm.includes("Remove\n"),
+    "#312 price lines: the price table, page break and system price line each show a Remove button on hover / when selected, deleting just that node");
+  ok(st.includes("System price · live") && st.includes(">removed<") && st.includes("data-drag-handle") && st.includes("systemTotalOf(node.attrs.sectionId, env.ctx)") &&
+     pane.includes("+ Price line") && pane.includes('kind: "systemTotal"') && pane.includes("Insert price line for ${name}"),
+    "#312 price lines: the editor view is tagged 'System price · live', draggable, amber 'removed' when the system is gone; the BOM system row has '+ Price line'");
+  ok(rd("src/components/package-doc/package-doc-view.tsx").includes('case "systotal"') && rd("src/lib/package-doc/sanitize.ts").includes('case "systemTotal"') && rd("src/lib/package-doc/resolve.ts").includes('case "systemTotal"'),
+    "#312 price lines: the sanitizer, resolver and renderer each handle systemTotal");
 }

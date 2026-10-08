@@ -126,12 +126,12 @@ export function docPhotoSkus(doc: PackageDoc | null | undefined): string[] {
 }
 
 /** Nothing printable: no document, or only empty paragraphs/headings/lists
- *  and page breaks. A chip, a price table or a product block is content. */
+ *  and page breaks. A chip, a price table, a system price line or a product block is content. */
 export function isEmptyDoc(doc: PackageDoc | null | undefined): boolean {
   if (!doc || !Array.isArray(doc.content)) return true;
   for (const n of walkDoc(doc)) {
     if (n.type === "text" && n.text.trim()) return false;
-    if (n.type === "chip" || n.type === "priceTable" || n.type === "productBlock") return false;
+    if (n.type === "chip" || n.type === "priceTable" || n.type === "productBlock" || n.type === "systemTotal") return false;
   }
   return true;
 }

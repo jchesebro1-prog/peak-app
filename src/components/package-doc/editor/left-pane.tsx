@@ -36,7 +36,8 @@ import type { PackageDoc, PDBlock } from "@/lib/package-doc/types";
  *    tab's package gaps. "No gaps." when there are none.
  *  - BOM: systems by group (Build order), each with the lines that can be
  *    featured. Drag a row into the document (application/x-peak-docnode), or
- *    press its + to insert at the cursor (the keyboard path). ✓ = already in
+ *    press its + to insert at the cursor (the keyboard path); a system row
+ *    also has + Price line (just its live price line, draggable too). ✓ = already in
  *    the document.
  *  - Library: saved system intros, Not included list, Price table, Page break.
  * The pane only talks to the editor through `api` (PackageDocApi).
@@ -76,6 +77,7 @@ const PLUS: CSSProperties = {
   cursor: "pointer",
   padding: 0,
 };
+const PRICE_LINE: CSSProperties = { ...PLUS, width: "auto", height: 22, padding: "0 7px", fontSize: 11 };
 const LIB_BTN: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -146,7 +148,7 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
     if (r.action.kind === "scroll") api.scrollToProduct({ sectionId: r.action.sectionId, lineKey: r.action.lineKey, sku: r.action.sku });
     else void api.insertDocNode({ kind: "system", sectionId: r.action.sectionId, lineKey: "" }, "end");
   };
-  const dragStart = (p: DocNodePayload) => (e: DragEvent<HTMLDivElement>) => {
+  const dragStart = (p: DocNodePayload) => (e: DragEvent<HTMLElement>) => {
     e.dataTransfer.setData(DOC_NODE_MIME, docNodeDragData(p));
     e.dataTransfer.effectAllowed = "copy";
   };
@@ -193,7 +195,7 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
 
       <section aria-label="BOM">
         <h3 style={TITLE}>BOM</h3>
-        <div style={{ ...SMALL, marginBottom: 6 }}>Drag a system or a line into the document, or press + to add it at the cursor.</div>
+        <div style={{ ...SMALL, marginBottom: 6 }}>Drag a system, its price line or a line into the document, or press + to add it at the cursor.</div>
         {tree.length === 0 && <div style={SMALL}>Add a system on the Build step.</div>}
         {tree.map((g) => (
           <div key={g.group?.id ?? "ungrouped"} style={{ marginBottom: 6 }}>
@@ -206,6 +208,7 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
             {g.systems.map(({ sec, lines }) => {
               const name = (sec.name || "").trim() || "Untitled system";
               const sys: DocNodePayload = { kind: "system", sectionId: sec.id, lineKey: "" };
+              const total: DocNodePayload = { kind: "systemTotal", sectionId: sec.id, lineKey: "" };
               return (
                 <div key={sec.id} style={{ marginBottom: 4 }}>
                   <div draggable onDragStart={dragStart(sys)} style={{ ...ROW, fontWeight: 600, color: "#16181d", cursor: "grab" }} title="Drag into the document">
@@ -214,6 +217,11 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
                       {sec.alternate === true ? <span style={{ fontWeight: 500, color: "#8c919c" }}> · Alternate</span> : null}
                     </span>
                     <Check on={systemInDoc(sec, presence)} />
+                    <span draggable onDragStart={dragStart(total)} title="Drag into the document, or press to add at the cursor" style={{ display: "inline-flex", cursor: "grab" }}>
+                      <button type="button" aria-label={`Insert price line for ${name}`} disabled={!ready} style={PRICE_LINE} onClick={() => insertRow(total, `${name} price line`)}>
+                        + Price line
+                      </button>
+                    </span>
                     <button type="button" aria-label={`Insert ${name}`} disabled={!ready} style={PLUS} onClick={() => insertRow(sys, name)}>
                       +
                     </button>
