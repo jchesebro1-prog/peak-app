@@ -57057,3 +57057,198 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
     "#P4 final fix: the sidebar shows Other labor lines, 'No labor' only when totals().lab is 0, no mount re-read, no aria-label on a plain span");
   ok(acts.includes("user.name || user.email") && acts.includes("findGrid: async () => null"), "#P4 final fix: comment author falls back to the email; reviewDocsAction skips the Grid lookup");
 }
+
+// ---- #P5 model: the package document — schema, validator, seed, chips, gaps, text ----
+import * as p5s from "@/lib/package-doc/schema";
+import { sanitizePackageDoc as p5San, countNodes as p5Count } from "@/lib/package-doc/sanitize";
+import { seedPackageDoc as p5Seed, systemHeadingBlocks as p5SysHead, productBlockFor as p5PB, ALTERNATES_HEADING as p5AltH } from "@/lib/package-doc/seed";
+import { resolveChip as p5Chip, splitLineRef as p5Split, fmtQty as p5Qty } from "@/lib/package-doc/chips";
+import { docGaps as p5Gaps, productBlockInBom as p5InBom } from "@/lib/package-doc/gaps";
+import * as p5t from "@/lib/package-doc/text";
+import type { PackageDoc as P5Doc, PDProductBlock as P5PB } from "@/lib/package-doc/types";
+import { fmt as p5fmt, systemSellTotal as p5Sell } from "@/app/(app)/estimator/pricing";
+import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
+{
+  const S = (o: Record<string, unknown>) => o;
+  const doc = (content: unknown[]) => ({ type: "doc", content });
+  const P = (text: string) => ({ type: "paragraph" as const, content: [{ type: "text" as const, text }] });
+  const J = (x: unknown) => JSON.stringify(x);
+
+  // Schema as data.
+  ok(J(p5s.BLOCK_NODES) === J(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock"]) &&
+    J(p5s.INLINE_NODES) === J(["text", "hardBreak", "chip"]) && J(p5s.MARK_NAMES) === J(["bold", "italic"]) &&
+    J(p5s.CHIP_KINDS) === J(["systemPrice", "systemName", "lineQty", "quoteNumber", "grandTotal"]) && J(p5s.PHOTO_ALIGNS) === J(["left", "right", "full"]),
+    "#P5 model: the schema lists are exactly the spec's nodes, marks, chip kinds and photo aligns");
+  ok(p5s.MAX_NODES === 2000 && p5s.MAX_JSON_CHARS === 204800 && p5s.MAX_BLOCK_TEXT === 20000 && J(p5s.DEFAULT_PHOTO) === J({ show: true, align: "right", width: 34 }),
+    "#P5 model: caps 2,000 nodes / 200 KB / 20,000 chars per block; default photo right 34 %");
+
+  // Non-docs → null.
+  ok([null, undefined, "doc", 3, [], {}, { type: "paragraph", content: [] }, { type: "doc" }, { type: "doc", content: {} }, { type: "doc", version: 2, content: [] }].every((x) => p5San(x) === null),
+    "#P5 model: non-docs (wrong type, no content array, version ≠ 1) sanitize to null");
+  ok(J(p5San(doc([]))) === J({ type: "doc", version: 1, content: [{ type: "paragraph" }] }) && p5San({ type: "doc", version: 1, content: [P("a")] })!.version === 1,
+    "#P5 model: an empty doc gets one empty paragraph; version 1 is stamped/accepted");
+
+  // Unknown nodes / marks / attrs dropped.
+  const dirty = p5San({
+    type: "doc", extra: 1, content: [
+      { type: "blockquote", content: [P("gone")] },
+      { type: "image", attrs: { src: "x" } },
+      { type: "paragraph", attrs: { textAlign: "center" }, content: [
+        { type: "text", text: "hi", marks: [{ type: "bold", attrs: { x: 1 } }, { type: "link", attrs: { href: "javascript:alert(1)" } }, { type: "italic" }, { type: "bold" }], foo: 1 },
+        { type: "text", text: "" },
+        { type: "hardBreak", attrs: { y: 1 } },
+        { type: "chip", attrs: { kind: "systemPrice", ref: "s1", extra: "z" } },
+        { type: "chip", attrs: { kind: "evil", ref: "s1" } },
+        { type: "chip", attrs: { kind: "quoteNumber", ref: "leak" } },
+        { type: "chip", attrs: { kind: "systemName", ref: "x".repeat(201) } },
+        { type: "mention", attrs: { id: "u1" } },
+      ] },
+      { type: "heading", attrs: { level: 7, id: "h" }, content: [{ type: "text", text: "H" }] },
+      { type: "heading", attrs: { level: "x" } },
+      { type: "orderedList", attrs: { start: 5 }, content: [{ type: "listItem", content: [P("one"), { type: "heading", attrs: { level: 1 } }, { type: "bulletList", content: [{ type: "listItem", content: [P("n")] }] }] }] },
+      { type: "text", text: "loose" },
+      { type: "pageBreak", attrs: { a: 1 }, content: [P("x")] },
+      { type: "priceTable" },
+    ],
+  })!;
+  ok(J(dirty.content.map((b) => b.type)) === J(["paragraph", "heading", "heading", "orderedList", "pageBreak", "priceTable"]),
+    "#P5 model: unknown blocks (blockquote, image) and a text node at doc level are dropped, with their children");
+  const para = dirty.content[0] as { attrs?: unknown; content: unknown[] };
+  ok(para.attrs === undefined && J(para.content) === J([
+    { type: "text", text: "hi", marks: [{ type: "bold" }, { type: "italic" }] },
+    { type: "hardBreak" },
+    { type: "chip", attrs: { kind: "systemPrice", ref: "s1" } },
+    { type: "chip", attrs: { kind: "quoteNumber", ref: "" } },
+  ]), "#P5 model: unknown marks/attrs dropped, marks deduped, empty text dropped, bad chip kinds and over-long refs dropped, quoteNumber ref forced to ''");
+  ok(J(dirty.content[1]) === J({ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: "H" }] }) && J(dirty.content[2]) === J({ type: "heading", attrs: { level: 1 } }),
+    "#P5 model: heading level clamps to 1–3 (non-number → 1), other heading attrs dropped");
+  ok(J(dirty.content[3]) === J({ type: "orderedList", content: [{ type: "listItem", content: [P("one"), { type: "bulletList", content: [{ type: "listItem", content: [P("n")] }] }] }] }) &&
+    J(dirty.content[4]) === J({ type: "pageBreak" }),
+    "#P5 model: list attrs dropped, a heading inside a list item dropped, nested lists kept; atoms lose attrs and content");
+
+  // Product blocks: photo coercion, unwrap on bad anchors, nesting.
+  const pb = (attrs: unknown, content: unknown[] = [P("t")]) => p5San(doc([{ type: "productBlock", attrs, content }]))!;
+  const w = (photo: unknown) => (pb({ sectionId: "s1", lineKey: "1", sku: "A", photo }).content[0] as P5PB).attrs.photo;
+  ok(w({ show: true, align: "left", width: 5 }).width === 25 && w({ width: 400 }).width === 100 && w({ width: "50" }).width === 34 && w({ width: 50.6 }).width === 51,
+    "#P5 model: photo width clamps to 25–100 and rounds; a non-number → 34");
+  ok(J(w({ show: "yes", align: "center", extra: 1 })) === J({ show: true, align: "right", width: 34 }) && J(w(undefined)) === J(p5s.DEFAULT_PHOTO) && w({ show: false, align: "full" }).align === "full" && w({ show: false }).show === false,
+    "#P5 model: photo show/align coerce to defaults, unknown photo keys dropped");
+  const pbOk = pb({ sectionId: "s1", lineKey: 7, sku: "A", photo: {}, foo: 1 }, [P("x"), { type: "bulletList", content: [{ type: "listItem", content: [P("y")] }] }, { type: "productBlock", attrs: { sectionId: "s1", lineKey: "2", sku: "B" }, content: [P("z")] }]);
+  ok(J(Object.keys((pbOk.content[0] as P5PB).attrs)) === J(["sectionId", "lineKey", "sku", "photo"]) && (pbOk.content[0] as P5PB).attrs.lineKey === "7" &&
+    J((pbOk.content[0] as P5PB).content) === J([P("x")]),
+    "#P5 model: a product block keeps only its anchors + photo, holds only paragraphs (lists and nested product blocks dropped)");
+  const unwrapped = pb({ sectionId: "", lineKey: "1", sku: "A" }, [P("keep me"), { type: "bulletList", content: [] }, P("and me")]);
+  ok(J(unwrapped.content) === J([P("keep me"), P("and me")]) && pb({ sectionId: "s1", lineKey: "x".repeat(33), sku: "A" }).content[0].type === "paragraph" && pb({ sectionId: "s1", lineKey: "1", sku: { a: 1 } }).content[0].type === "paragraph",
+    "#P5 model: a product block with unusable anchors is unwrapped — its paragraphs survive");
+  ok(J(pb({ sectionId: "s1", lineKey: "1", sku: "A" }, []).content[0]) === J({ type: "productBlock", attrs: { sectionId: "s1", lineKey: "1", sku: "A", photo: p5s.DEFAULT_PHOTO }, content: [{ type: "paragraph" }] }),
+    "#P5 model: an empty product block gets one empty paragraph");
+  ok(J(p5San(doc([{ type: "bulletList", content: [] }, { type: "bulletList", content: [{ type: "listItem", content: [] }] }, { type: "orderedList", content: [{ type: "listItem", content: [{ type: "bulletList", content: [{ type: "listItem", content: [P("n")] }] }] }] }]))!.content) ===
+    J([{ type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph" }] }] }, { type: "orderedList", content: [{ type: "listItem", content: [{ type: "paragraph" }, { type: "bulletList", content: [{ type: "listItem", content: [P("n")] }] }] }] }]),
+    "#P5 model: an empty list is dropped; a list item gets a leading paragraph when it has none");
+
+  // Caps.
+  const many = p5San(doc(Array.from({ length: 3000 }, (_, i) => P("p" + i))))!;
+  ok(p5Count(many.content) <= 2000 && many.content.length === 1000 && J(many.content[0]) === J(P("p0")),
+    "#P5 model: nodes past 2,000 (document order) are dropped — the start of the document is kept");
+  const longT = p5San(doc([{ type: "paragraph", content: [{ type: "text", text: "a".repeat(15000) }, { type: "text", text: "b".repeat(15000), marks: [{ type: "bold" }] }, { type: "text", text: "c" }] }]))!;
+  const lt = (longT.content[0] as { content: Array<{ text: string }> }).content;
+  ok(lt.length === 2 && lt[0].text.length === 15000 && lt[1].text.length === 5000, "#P5 model: text past 20,000 characters in one paragraph is cut");
+  ok(p5San(doc(Array.from({ length: 15 }, () => P("x".repeat(20000))))) === null, "#P5 model: a document over 200 KB of JSON → null");
+  let deep: Record<string, unknown> = P("bottom");
+  for (let i = 0; i < 20000; i++) deep = { type: "bulletList", content: [{ type: "listItem", content: [deep] }] };
+  let deepOut: P5Doc | null = null;
+  let threw = false;
+  try { deepOut = p5San(doc([deep, P("after")])); } catch { threw = true; }
+  let depth = 0;
+  for (let n: unknown = deepOut?.content[0]; n && typeof n === "object" && Array.isArray((n as { content?: unknown[] }).content); n = (n as { content: unknown[] }).content.at(-1)) depth++;
+  ok(!threw && deepOut !== null && depth <= p5s.MAX_DEPTH && J(deepOut.content.at(-1)) === J(P("after")),
+    "#P5 model: 20,000-deep nesting doesn't throw (iterative); nodes deeper than 12 are dropped, later blocks survive");
+  const hostile = { type: "doc", content: Array.from({ length: 200000 }, () => ({ type: "nope" })).concat([P("late") as never]) };
+  ok(J(p5San(hostile)) === J({ type: "doc", version: 1, content: [{ type: "paragraph" }] }), "#P5 model: reading stops after MAX_RAW_VISITS raw nodes (hostile input bounded)");
+  ok(J(p5San(dirty)) === J(dirty) && J(p5San(many)) === J(many), "#P5 model: sanitize is idempotent");
+
+  // Fixture: two In-total systems, one alternate, one zero-revenue system.
+  const it = (id: number, o: Record<string, unknown> = {}) => S({ id, sku: "SKU" + id, desc: "Item " + id, qty: 2, unit: "ea", cost: 10, price: 20, ...o });
+  const s1 = S({ id: "s1", name: "Stage lighting", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative",
+    narrative: "Intro para\nline 2\n\n- b1\n- b2",
+    items: [it(1), it(2), it(3, { labor: true, sku: "LAB" })],
+    keyProducts: [{ lineKey: "1", sku: "SKU1", text: "Fixture one paragraph.\n\nSecond para.", photo: true }, { lineKey: "2", sku: "SKU2", text: "- f1\n- f2", photo: false }, { lineKey: "99", sku: "GONE", text: "x", photo: true }] });
+  const s2 = S({ id: "s2", name: "Sys Two", kind: "materials", mfr: "", freightPct: 0, items: [it(1, { qty: 1.5, unit: "ft" })] });
+  const s3 = S({ id: "s3", name: "Alt sys", kind: "materials", mfr: "", freightPct: 0, groupId: "g1", narrative: "Alt words", items: [it(1)] });
+  const s4 = S({ id: "s4", name: "Empty", kind: "materials", mfr: "", freightPct: 0, items: [] });
+  const s5 = S({ id: "s5", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1)] });
+  const secs = [s3, s1, s4, s2] as unknown as P5Section[];
+  const groups = [{ id: "g1", name: "Options", alternate: true }];
+  const seeded = p5Seed({ sections: secs, groups, intros: { s2: "Fallback intro", s1: "unused" } });
+  const types = seeded.content.map((b) => b.type + (b.type === "heading" ? b.attrs.level + ":" + p5t.inlineText(b.content) : ""));
+  ok(J(types) === J(["heading2:Stage lighting", "paragraph", "paragraph", "bulletList", "productBlock", "productBlock", "heading2:Sys Two", "paragraph", "paragraph", "priceTable", `heading1:${p5AltH}`, "heading2:Alt sys", "paragraph", "paragraph"]),
+    "#P5 model: seed — In-total systems in Build order (heading + price chip + intro + key products), the price table, then 'Alternates' + alternate systems; zero-revenue systems skipped");
+  ok(J(seeded.content[1]) === J({ type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s1" } }] }) && J(seeded.content[7]) === J({ type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s2" } }] }),
+    "#P5 model: seed — each system heading is followed by its systemPrice chip");
+  ok(J(seeded.content[2]) === J({ type: "paragraph", content: [{ type: "text", text: "Intro para" }, { type: "hardBreak" }, { type: "text", text: "line 2" }] }) &&
+    J(seeded.content[3]) === J({ type: "bulletList", content: [{ type: "listItem", content: [P("b1")] }, { type: "listItem", content: [P("b2")] }] }) &&
+    J(seeded.content[8]) === J(P("Fallback intro")) && J(seeded.content[13]) === J(P("Alt words")),
+    "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a blank narrative falls back to intros[sectionId]");
+  const kp1 = seeded.content[4] as P5PB, kp2 = seeded.content[5] as P5PB;
+  ok(J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: true, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
+    p5t.productBlockText(kp1) === "Fixture one paragraph.\n\nSecond para." && p5t.productBlockText(kp2) === "- f1\n- f2",
+    "#P5 model: seed — product blocks for printable key products only (missing line skipped), photo { show: kp.photo, right, 34 }, words read back verbatim");
+  ok(J(p5San(seeded)) === J(seeded) && J(p5Seed({ sections: [], groups: [] }).content) === J([{ type: "priceTable" }]),
+    "#P5 model: a seed is already valid; an estimate with no printed systems seeds just the price table");
+  const huge = Array.from({ length: 40 }, (_, i) => S({ ...s1, id: "h" + i, narrative: "y".repeat(8000) })) as unknown as P5Section[];
+  const hugeSeed = p5Seed({ sections: huge });
+  ok(p5San(hugeSeed) !== null && hugeSeed.content.length === 81 && hugeSeed.content.every((b) => b.type !== "productBlock"),
+    "#P5 model: a seed too big for the caps falls back to headings + price chips + the table");
+  ok(J(p5SysHead({ id: "s9", name: "  " })[0]) === J({ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Untitled system" }] }) &&
+    J(p5PB("s1", 4, "X", "").content) === J([{ type: "paragraph" }]),
+    "#P5 model: helpers — a blank system name heads 'Untitled system'; a product block with no text holds one empty paragraph");
+
+  // Chips.
+  // Live hook state is normalized (normalizeSystemOrder stamps `alternate`).
+  const ctx = { sections: [{ ...s3, alternate: true }, s1, s4, s2, s5] as unknown as P5Section[], t: { grand: 1234.5 }, quoteId: "Q-2041" };
+  ok(p5Chip({ kind: "systemPrice", ref: "s1" }, ctx) === p5fmt(p5Sell(s1 as unknown as P5Section)) && p5Chip({ type: "chip", attrs: { kind: "systemName", ref: "s2" } }, ctx) === "Sys Two" &&
+    p5Chip({ kind: "lineQty", ref: "s2:1" }, ctx) === "1.5 ft" && p5Chip({ kind: "quoteNumber", ref: "" }, ctx) === "Q-2041" && p5Chip({ kind: "grandTotal", ref: "" }, ctx) === "$1,234.50",
+    "#P5 model: chips resolve live — system price (fmt(systemSellTotal)), name, line qty + unit, quote number, grand total");
+  ok(p5Chip({ kind: "systemPrice", ref: "nope" }, ctx) === null && p5Chip({ kind: "lineQty", ref: "s1:99" }, ctx) === null && p5Chip({ kind: "lineQty", ref: "s1" }, ctx) === null &&
+    p5Chip({ kind: "grandTotal", ref: "" }, { sections: [] }) === null && p5Chip({ kind: "quoteNumber", ref: "" }, { sections: [], quoteId: "" }) === null,
+    "#P5 model: a chip whose system/line is gone (or a missing total/quote id) resolves to null");
+  ok(J(p5Split("a:b:12")) === J({ sectionId: "a:b", lineKey: "12" }) && p5Split(":1") === null && p5Split("s1:") === null && p5Qty({ qty: 3, unit: "" }) === "3" && p5Qty({ qty: 1234.567, unit: "ea" }) === "1,234.57 ea",
+    "#P5 model: lineQty refs split on the last colon; qty formats with grouping, ≤ 2 decimals, unit appended");
+
+  // Gaps.
+  const gapDoc = p5San(doc([
+    { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "  sys   TWO " }] },
+    { type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s1" } }, { type: "chip", attrs: { kind: "systemPrice", ref: "s9" } }, { type: "chip", attrs: { kind: "systemPrice", ref: "s9" } }, { type: "chip", attrs: { kind: "lineQty", ref: "s1:42" } }, { type: "chip", attrs: { kind: "grandTotal", ref: "" } }] },
+    p5PB("s1", 1, "SKU1", "ok"), p5PB("s1", 99, "GONE", "gone"), p5PB("s1", 2, "ZZ", "sku changed"), p5PB("s3", 1, "SKU1", "alt"),
+  ]))!;
+  const g = p5Gaps(gapDoc, ctx.sections);
+  ok(J(g.removedChips) === J([{ kind: "systemPrice", ref: "s9" }, { kind: "lineQty", ref: "s1:42" }]), "#P5 model: gaps — removed chips listed once each; totals/quote number never 'removed'");
+  ok(J(g.productsNotInBom) === J([{ sectionId: "s1", lineKey: "99", sku: "GONE" }, { sectionId: "s1", lineKey: "2", sku: "ZZ" }]), "#P5 model: gaps — product blocks whose line left the BOM or whose sku changed");
+  ok(J(g.systemsNotMentioned) === J([{ id: "s5", name: "Rigging" }]), "#P5 model: gaps — In-total printed systems never mentioned (chip, product block or a heading with the name); alternates and zero-revenue systems skipped");
+  ok(p5InBom(p5PB("s1", 1, "SKU1", "") as P5PB, ctx.sections) && !p5InBom(p5PB("s7", 1, "SKU1", "") as P5PB, ctx.sections) && p5InBom(p5PB("s1", 3, "", "") as P5PB, ctx.sections),
+    "#P5 model: productBlockInBom — line + anchor sku; missing system → false; a blank-sku block needs only its line");
+  ok(J(p5Gaps(null, ctx.sections).systemsNotMentioned.map((x) => x.id)) === J(["s1", "s2", "s5"]), "#P5 model: gaps — with no document every printed In-total system is unmentioned");
+
+  // Skus + text.
+  const skuDoc = p5San(doc([p5PB("s1", 1, "A", "x"), p5PB("s1", 2, "B", "x", { show: false }), p5PB("s1", 3, "A", "x"), p5PB("s1", 4, "line:4", "x"), p5PB("s1", 5, "", "x")]))!;
+  ok(J(p5t.docProductSkus(skuDoc)) === J(["A", "B", "line:4"]) && J(p5t.docPhotoSkus(skuDoc)) === J(["A"]) && J(p5t.docProductSkus(null)) === J([]),
+    "#P5 model: docProductSkus — distinct, in order; docPhotoSkus — photo shown, line tokens excluded");
+  ok(p5t.normalizeProductText("Intro\n- a\n- b") === "Intro\n\n- a\n- b" && p5t.normalizeProductText("  One  \n\n\nTwo ") === "One\n\nTwo" &&
+    p5t.productBlockText(p5PB("s", 1, "x", "Intro\n- a\n- b")) === p5t.normalizeProductText("Intro\n- a\n- b"),
+    "#P5 model: normalizeProductText matches what productBlockText reads back (from product vs edited here)");
+  ok(p5t.productBlockText({ type: "productBlock", attrs: { sectionId: "s", lineKey: "1", sku: "", photo: p5s.DEFAULT_PHOTO }, content: [{ type: "paragraph", content: [{ type: "text", text: "A " }, { type: "chip", attrs: { kind: "grandTotal", ref: "" } }, { type: "hardBreak" }, { type: "text", text: "b", marks: [{ type: "bold" }] }] }, { type: "paragraph" }, P("c")] }) === "A\nb\n\nc",
+    "#P5 model: productBlockText — hard breaks are line breaks, chips print nothing, empty paragraphs skipped");
+  ok(p5t.isEmptyDoc(null) && p5t.isEmptyDoc(p5San(doc([]))) && p5t.isEmptyDoc(p5San(doc([P("   "), { type: "pageBreak" }, { type: "heading", attrs: { level: 1 } }, { type: "bulletList", content: [{ type: "listItem", content: [] }] }]))) &&
+    !p5t.isEmptyDoc(p5San(doc([P("x")]))) && !p5t.isEmptyDoc(p5San(doc([{ type: "priceTable" }]))) && !p5t.isEmptyDoc(p5San(doc([{ type: "paragraph", content: [{ type: "chip", attrs: { kind: "grandTotal", ref: "" } }] }]))),
+    "#P5 model: isEmptyDoc — blank text, page breaks and empty lists are empty; text, a chip or the price table are content");
+  ok(J(p5t.textToBlocks("a\n\n- x\n- \n")) === J([P("a"), { type: "bulletList", content: [{ type: "listItem", content: [P("x")] }] }]) && J(p5t.bulletListOf(["", " "])) === "null" && J(p5t.textToParagraphs("")) === J([{ type: "paragraph" }]),
+    "#P5 model: textToBlocks / bulletListOf / textToParagraphs");
+
+  // Client-safe: no server imports in the module.
+  const p5src = ["types", "schema", "sanitize", "seed", "chips", "gaps", "text"].map((f) => readFileSync(join(process.cwd(), `src/lib/package-doc/${f}.ts`), "utf8")).join("\n");
+  ok(!/from "(@\/db|@\/lib\/stores|@\/lib\/session|server-only|next\/|react)/.test(p5src) && !/"use server"|"use client"/.test(p5src),
+    "#P5 model: src/lib/package-doc is pure — no db/store/session/next/react imports");
+  const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { dependencies: Record<string, string> };
+  ok(["@tiptap/react", "@tiptap/pm", "@tiptap/starter-kit"].every((d) => /^\^3\./.test(pkg.dependencies[d] || "")) && !Object.keys(pkg.dependencies).some((d) => d.startsWith("@tiptap-pro")),
+    "#P5 model: TipTap 3.x core dependencies, no @tiptap-pro packages");
+}
