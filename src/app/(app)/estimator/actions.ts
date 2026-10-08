@@ -402,10 +402,13 @@ export async function saveQuoteAction(
   // edit can never wipe the stored document.
   const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);
   if (!docSave.ok) {
+    // id/number null: nothing was written, and the client adopts a returned
+    // id as "saved" (clears the PDF-dirty / tier-reprice flags, takes the
+    // rev/date) — a refusal must leave the edit visibly unsaved.
     return {
       ok: false,
-      id: loadedId,
-      number: prior ? displayQuoteNumber(prior) : null,
+      id: null,
+      number: null,
       revNum: Math.max(1, prior?.revisions?.length || 1),
       updatedAt: prior?.updatedAt ?? Date.now(),
       review: prior?.review ?? null,

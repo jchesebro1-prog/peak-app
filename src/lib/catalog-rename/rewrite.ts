@@ -147,7 +147,8 @@ export function rewriteSpecItems<T extends SpecItemShape>(items: T[], m: RenameM
  *  together), and a Grid quote's flat `lines[].sku` (`source: "grid"`,
  *  GridQuoteSpecLine in grid-quote.ts — the placement's partId; "CURTAIN" and
  *  the virtual `asm:` / `allow:` ids are never renamed SKUs, so they pass
- *  through; the line has no model field to set). The section/spec envelope
+ *  through; the line has no model field to set), plus the package document's
+ *  product-block skus (rewritePackageDocSkus). The section/spec envelope
  *  and every other field carry over. */
 export function rewriteQuoteSpec(spec: unknown, m: RenameMap, models: RenameMap): unknown | null {
   if (!isRec(spec)) return null;
@@ -165,7 +166,54 @@ export function rewriteQuoteSpec(spec: unknown, m: RenameMap, models: RenameMap)
   if (sections) patch.sections = sections;
   const lines = mapObjs(spec.lines, (ln) => swapFields(ln, ["sku"], m));
   if (lines) patch.lines = lines;
+  const pkgDoc = rewritePackageDocSkus(spec.document, m);
+  if (pkgDoc) patch.document = pkgDoc;
   return overlay(spec, patch);
+}
+
+/**
+ * Estimator Phase 5 — a quote's package document (`spec.document`,
+ * ProseMirror JSON): every `productBlock`'s `attrs.sku` follows the rename
+ * (the block matches its BOM line by sku, so a stale one would read "No
+ * longer in BOM" and lose its photo). Walked iteratively (an explicit stack,
+ * never recursion); copy-on-write along the path to each moved block only,
+ * so every other node — text, chips, photo attrs, key order — is the same
+ * object as before. Null when no block moved.
+ */
+export function rewritePackageDocSkus(doc: unknown, m: RenameMap): Rec | null {
+  if (!isRec(doc) || !Array.isArray(doc.content)) return null;
+  const hits: Array<{ path: number[]; to: string }> = [];
+  const stack: Array<{ node: unknown; path: number[] }> = [];
+  for (let i = doc.content.length - 1; i >= 0; i--) stack.push({ node: doc.content[i], path: [i] });
+  while (stack.length) {
+    const { node, path } = stack.pop()!;
+    if (!isRec(node)) continue;
+    if (node.type === "productBlock" && isRec(node.attrs)) {
+      const to = moved(m, node.attrs.sku);
+      if (to !== undefined) hits.push({ path, to });
+    }
+    if (Array.isArray(node.content)) {
+      for (let i = node.content.length - 1; i >= 0; i--) stack.push({ node: node.content[i], path: [...path, i] });
+    }
+  }
+  if (!hits.length) return null;
+  const root: Rec = { ...doc, content: (doc.content as unknown[]).slice() };
+  const fresh = new Set<Rec>([root]);
+  for (const { path, to } of hits) {
+    let parent = root;
+    for (const i of path) {
+      const kids = parent.content as unknown[];
+      let child = kids[i] as Rec;
+      if (!fresh.has(child)) {
+        child = Array.isArray(child.content) ? { ...child, content: (child.content as unknown[]).slice() } : { ...child };
+        kids[i] = child;
+        fresh.add(child);
+      }
+      parent = child;
+    }
+    parent.attrs = { ...(parent.attrs as Rec), sku: to };
+  }
+  return root;
 }
 
 /** A portal cart's `lines` (CartLine): `sku`, `fixtureOptions` keys, `curtainInputs.fabricSku`. `fixtureId` is an assembly id, not a SKU. */

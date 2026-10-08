@@ -85,7 +85,9 @@ function product(b: PDProductBlock, ctx: PackageDocCtx): RProduct {
   const a = b.attrs;
   const line = productBlockInBom(b, ctx.sections) ? findLine(findSection(ctx.sections, a.sectionId), a.lineKey) : undefined;
   const ph = docBlockPlaceholder(b, ctx.sections);
-  const src = a.photo?.show ? (ctx.photos?.[a.sku] ?? (ph ? { src: PLACEHOLDER_SRC[ph], alt: "" } : undefined)) : undefined;
+  // Own-key lookup only: a `__proto__` / `constructor` sku must never read Object.prototype.
+  const own = ctx.photos && Object.hasOwn(ctx.photos, a.sku) ? ctx.photos[a.sku] : undefined;
+  const src = a.photo?.show ? (own ?? (ph ? { src: PLACEHOLDER_SRC[ph], alt: "" } : undefined)) : undefined;
   return {
     t: "product",
     sku: a.sku,

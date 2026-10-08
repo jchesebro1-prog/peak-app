@@ -45,7 +45,9 @@ export function revisionGroupedSections(rev: QuoteRevision): { sections: SpecSec
 export async function photoDocForRevision(rev: QuoteRevision, docId: string): Promise<PartDocument | null> {
   if (typeof docId !== "string" || !docId) return null;
   // Phase 5: the package document's photo-on product blocks are servable too.
-  const docs = await keyProductPhotoDocs(revisionSections(rev), revisionDocument(rev));
+  // Alternates are told apart on the normalised, group-stamped systems — the
+  // ones the customer document printed (quoteDocumentDataFor) — not raw spec.
+  const docs = await keyProductPhotoDocs(revisionGroupedSections(rev).sections, revisionDocument(rev));
   for (const d of docs.values()) if (d.id === docId) return d;
   return null;
 }
@@ -54,7 +56,7 @@ export async function photoDocForRevision(rev: QuoteRevision, docId: string): Pr
  *  products, whatever its presentation (package-model.ts packagePhotoSections). */
 export async function packagePhotoDocForRevision(rev: QuoteRevision, docId: string): Promise<PartDocument | null> {
   if (typeof docId !== "string" || !docId) return null;
-  const docs = await keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)), revisionDocument(rev));
+  const docs = await keyProductPhotoDocs(packagePhotoSections(revisionGroupedSections(rev).sections), revisionDocument(rev));
   for (const d of docs.values()) if (d.id === docId) return d;
   return null;
 }

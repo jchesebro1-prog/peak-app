@@ -81,6 +81,26 @@ export function appendixSystemIds(sections: SpecSection[], detail: "itemized" | 
     .map((sec) => sec.id);
 }
 
+/** Estimator Phase 5 — the Itemized appendix's systems. No package document:
+ *  exactly the #293 rule (appendixSystemIds, only when Show on PDF → Itemized
+ *  appendix is on). With a document the body itemizes nothing, so an
+ *  itemized system's lines would otherwise print nowhere — every printed
+ *  In-total (not alternate) system whose presentation is itemized (or unset)
+ *  is listed ALWAYS; narrative systems only when the toggle is on, as before.
+ *  Section order is kept. Pure. */
+export function documentAppendixSystemIds(
+  sections: SpecSection[],
+  detail: "itemized" | "sectioned",
+  pdfItemizedAppendix: boolean,
+  hasDocument: boolean,
+): string[] {
+  if (!hasDocument) return pdfItemizedAppendix ? appendixSystemIds(sections, detail) : [];
+  return (sections || [])
+    .filter((sec) => !!sec && sec.alternate !== true && systemPrintsInBody(sec))
+    .filter((sec) => pdfItemizedAppendix || (sec.presentation || "itemized") !== "narrative")
+    .map((sec) => sec.id);
+}
+
 /** #293 slice 3 (spec §2.3) — the online BOM view: every system itemized,
  *  quantities and descriptions on, the appendix off. Prices keep the quote's
  *  own choice (an estimator who hid prices still hides them). Pure. */

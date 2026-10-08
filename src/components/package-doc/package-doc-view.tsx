@@ -158,7 +158,7 @@ function Block({ b, extra }: { b: RBlock; extra?: Record<string, ReactNode> }) {
     case "ol":
       return <List list={b} />;
     case "product":
-      return <Product b={b} extra={extra?.[b.sku]} />;
+      return <Product b={b} extra={extra && Object.hasOwn(extra, b.sku) ? extra[b.sku] : undefined} />;
     case "price":
       return <PriceTable b={b} />;
     case "pagebreak":

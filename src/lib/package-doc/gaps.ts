@@ -14,6 +14,10 @@ import type { ChipKind, PackageDoc, PDProductBlock } from "./types";
  *  - systemsNotMentioned: printed In-total systems (systemPrintsInBody, not
  *    alternate) the document never refers to — no chip or product block on
  *    the system and no heading whose text is its name (case-insensitive).
+ *  - itemizedInAppendix: informational — the names of printed In-total
+ *    systems whose presentation is itemized (or unset); with a document their
+ *    lines print in the Itemized appendix whatever the toggle says
+ *    (documentAppendixSystemIds) — "Lines for <names> print in the appendix."
  * Pure; client-safe.
  */
 
@@ -21,6 +25,7 @@ export type DocGaps = {
   removedChips: Array<{ kind: ChipKind; ref: string }>;
   productsNotInBom: Array<{ sectionId: string; lineKey: string; sku: string }>;
   systemsNotMentioned: Array<{ id: string; name: string }>;
+  itemizedInAppendix: string[];
 };
 
 /** Is this product block's line still in the BOM with the same anchor sku? */
@@ -38,7 +43,7 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function docGaps(doc: PackageDoc | null | undefined, sections: readonly SpecSection[]): DocGaps {
   const secs = Array.isArray(sections) ? sections : [];
-  const out: DocGaps = { removedChips: [], productsNotInBom: [], systemsNotMentioned: [] };
+  const out: DocGaps = { removedChips: [], productsNotInBom: [], systemsNotMentioned: [], itemizedInAppendix: [] };
   const mentioned = new Set<string>();
   const headings = new Set<string>();
   const seenChip = new Set<string>();
@@ -71,6 +76,7 @@ export function docGaps(doc: PackageDoc | null | undefined, sections: readonly S
   }
   for (const sec of secs) {
     if (!sec || sec.alternate === true || !systemPrintsInBody(sec)) continue;
+    if ((sec.presentation || "itemized") !== "narrative") out.itemizedInAppendix.push(sec.name || "");
     if (mentioned.has(sec.id) || headings.has(norm(sec.name || ""))) continue;
     out.systemsNotMentioned.push({ id: sec.id, name: sec.name || "" });
   }

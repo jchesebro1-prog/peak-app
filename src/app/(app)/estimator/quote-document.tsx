@@ -5,7 +5,7 @@ import { systemSellTotal } from "./pricing";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
-import { alternateGroupsForPrint, appendixSystemIds, printedGroupHeadings } from "./quote-document-view";
+import { alternateGroupsForPrint, documentAppendixSystemIds, printedGroupHeadings } from "./quote-document-view";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import PackageDocView from "@/components/package-doc/package-doc-view";
@@ -619,11 +619,13 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const inclusions = inclusionsLine(p.t);
   // #293: the Itemized appendix — the systems the body left un-itemized.
   // Phase 5: the package document (when it applies) replaces EVERY In-total
-  // band, so the body itemizes nothing — the appendix then lists every
-  // printed In-total system (appendixSystemIds' "sectioned" rule), still only
-  // when Show on PDF → Itemized appendix is on.
+  // band, so the body itemizes nothing — every itemized (or unset) In-total
+  // system's lines then print in the appendix whatever the toggle says, so
+  // they never vanish; narrative systems still follow Show on PDF → Itemized
+  // appendix (documentAppendixSystemIds). No document → the #293 rule.
   const docOn = documentApplies(p.document);
-  const appendixIds = p.pdfItemizedAppendix ? new Set(appendixSystemIds(p.sections, docOn ? "sectioned" : p.detail)) : null;
+  const appendixIdList = documentAppendixSystemIds(p.sections, p.detail, p.pdfItemizedAppendix, docOn);
+  const appendixIds = appendixIdList.length ? new Set(appendixIdList) : null;
   const appendixSections = appendixIds ? previewSections.filter((ps) => appendixIds.has(ps.id)) : [];
   const appendixCols = ["1fr", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
 

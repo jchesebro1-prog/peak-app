@@ -48646,7 +48646,7 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
      loader.includes("Promise<QuoteDocumentProps | null>"),
     "#293t loader: the web path fails closed — only a sent revision that is this quote's own object renders; anything else is null");
   const pr = rd("src/lib/quote-share/photo-response.ts");
-  ok(pr.includes("keyProductPhotoDocs(revisionSections(rev), revisionDocument(rev))") && pr.includes("PHOTO_TYPES.has(doc.contentType)") && pr.includes('"x-content-type-options": "nosniff"') &&
+  ok(pr.includes("keyProductPhotoDocs(revisionGroupedSections(rev).sections, revisionDocument(rev))") && pr.includes("PHOTO_TYPES.has(doc.contentType)") && pr.includes('"x-content-type-options": "nosniff"') &&
      pr.includes('"private, max-age=3600"') && pr.includes('createHash("sha1").update(doc.blobKey)'),
     "#293t photos: only the sent revision's printed photo docs, PNG/JPEG/WebP, nosniff, private 1 h, ETag on id + blobKey hash");
 
@@ -51876,7 +51876,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
      photo.slice(photo.indexOf("} catch (e) {")).includes("console.warn(") && photo.slice(photo.indexOf("} catch (e) {")).includes('return new Response("Not found", { status: 404 })') && photo.includes("return await servePackagePhotoForRevision("),
     "#301 photos fix: a DB error resolving a v2 photo link is the same uniform 404, logged (never a 500)");
   const pr = rd("src/lib/quote-share/photo-response.ts");
-  ok(pr.includes("keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)), revisionDocument(rev))") && pr.includes("async function serveDoc("), "#301 photos: one serving path, two photo sets");
+  ok(pr.includes("keyProductPhotoDocs(packagePhotoSections(revisionGroupedSections(rev).sections), revisionDocument(rev))") && pr.includes("async function serveDoc("), "#301 photos: one serving path, two photo sets");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes(`"/share/quote/Q-2041/1.1.${"A".repeat(43)}",`) && smoke.includes(`"/share/quote/Q-2041/1.1.${"A".repeat(43)}?view=bom",`) &&
      smoke.includes(`{ route: "/share/quote/Q-2041/1.1.${"A".repeat(43)}/photo/PD-1", expectNotFound: true }`),
@@ -57349,7 +57349,9 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
 
   // replace / keep
   const body = html.slice(html.indexOf('class="est-pkgdoc"'), html.indexOf('class="est-totals"'));
-  ok(!html.includes('class="est-secband"') && !html.includes(">01<") && !html.includes("Intro para.") && !body.slice(0, body.indexOf("Optional additions")).includes('class="est-line"') && !body.includes("Customer note") && !html.includes("System scope and pricing are included"),
+  // Fix round 1: itemized systems now print in the appendix with a document — the body is everything before it.
+  const preApx = html.slice(0, html.indexOf('class="est-appendix"'));
+  ok(html.includes('class="est-appendix"') && !preApx.includes('class="est-secband"') && !preApx.includes(">01<") && !html.includes("Intro para.") && !body.slice(0, body.indexOf("Optional additions")).includes('class="est-line"') && !body.includes("Customer note") && !html.includes("System scope and pricing are included"),
     "#P5 render: the document replaces ALL In-total bands — no band, numbering, narrative, key products or itemized lines (itemized systems too)");
   ok(html.includes(">QUOTE</div>") && html.includes("Total investment") && html.includes("4 systems · 7 line items · 1 optional") && html.includes("Cover note.") && html.includes("Optional additions") &&
      html.includes('class="est-totals"') && html.includes('class="est-terms"') && html.includes('class="est-accept"') && html.includes("Assumptions &amp; exceptions") && body.length > 1000,
@@ -57358,8 +57360,10 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const apxOff = p5rRender(props());
   const apxOn = p5rRender(props({ pdfOptions: { pdfItemizedAppendix: true } }));
   const apx = apxOn.slice(apxOn.indexOf('class="est-appendix"'));
-  ok(!apxOff.includes("est-appendix") && ["Rigging", "Lighting", "Install", "Empty narrative"].every((n) => apx.includes(">" + n + "<")) && apx.includes('class="est-line"') && apx.includes("Customer note"),
-    "#P5 render: the Itemized appendix still follows its toggle; with a document it lists every printed In-total system (the body itemized none)");
+  const apxO = apxOff.slice(apxOff.indexOf('class="est-appendix"'));
+  ok(apxOff.includes("est-appendix") && ["Rigging", "Install"].every((n) => apxO.includes(">" + n + "<")) && !["Lighting", "Empty narrative"].some((n) => apxO.includes(">" + n + "<")) &&
+     ["Rigging", "Lighting", "Install", "Empty narrative"].every((n) => apx.includes(">" + n + "<")) && apx.includes('class="est-line"') && apx.includes("Customer note"),
+    "#P5 render: with a document itemized systems always print in the appendix (toggle off); the toggle adds the narrative ones (on → every printed In-total system)");
   // alternates keep their block
   const G = [{ id: "g-a", name: "Stage", alternate: false }, { id: "g-x", name: "Upgrades", alternate: true }];
   const alt = { id: "a1", name: "LED Upgrade", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", items: [{ id: 11, sku: "SKU-11", desc: "Line 11", qty: 1, unit: "ea", cost: 100, price: 400 }] } as unknown as Sec;
@@ -57403,7 +57407,7 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const loader = rd("src/lib/quote-pdf/document-loader.ts");
   const prSrc = rd("src/lib/quote-share/photo-response.ts");
   ok(printRoute.includes("keyProductPhotoDataUris(doc.sections, doc.document)") && loader.includes("keyProductPhotoDataUris(doc.sections, doc.document)") && loader.includes("keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document)") &&
-     prSrc.includes("keyProductPhotoDocs(revisionSections(rev), revisionDocument(rev))") && prSrc.includes("keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)), revisionDocument(rev))") &&
+     prSrc.includes("keyProductPhotoDocs(revisionGroupedSections(rev).sections, revisionDocument(rev))") && prSrc.includes("keyProductPhotoDocs(packagePhotoSections(revisionGroupedSections(rev).sections), revisionDocument(rev))") &&
      rd("src/lib/quote-pdf/quote-document-data.ts").includes("document: sanitizePackageDoc(spec?.document),"),
     "#P5 render: print route, web loader and both photo routes read the same (revision's) document's photos");
 
@@ -57500,4 +57504,135 @@ async function p5RenderPhotoAsyncChecks(): Promise<void> {
     "#P5 photos: the share / portal and package photo routes serve the document's product photo");
   ok((await photoDocForRevision(without, img.id)) === null && (await packagePhotoDocForRevision(without, img.id)) === null,
     "#P5 photos: without a document that photo is not servable (the allowlist only widens by the document)");
+}
+
+// ── #P5 render fix — Estimator Phase 5, Task 2 fix round 1 ──────────────
+// (1) with a document, itemized systems always print in the Itemized
+//     appendix (narrative ones still follow the toggle); docGaps names them;
+// (2) a document-too-large refusal returns no id, so the client stays unsaved;
+// (3) a #304 rename moves the document's product-block skus;
+// (4) sku-keyed photo / extra lookups read own keys only;
+// (5) both photo routes tell alternates apart on the grouped sections.
+import { documentAppendixSystemIds as p5fApx, appendixSystemIds as p5fApxOld } from "@/app/(app)/estimator/quote-document-view";
+import { rewriteQuoteSpec as p5fRewrite, rewritePackageDocSkus as p5fRewriteDoc } from "@/lib/catalog-rename/rewrite";
+import { docGaps as p5fGaps } from "@/lib/package-doc/gaps";
+import { resolvePackageDoc as p5fResolve, type ResolvedPackageDoc as P5fResolved } from "@/lib/package-doc/resolve";
+import { sanitizePackageDoc as p5fSan } from "@/lib/package-doc/sanitize";
+import { ResolvedPackageDocView as P5fView } from "@/components/package-doc/package-doc-view";
+import { qd293Props as p5fProps, qd293Sections as p5fSections, renderQuoteDocument293 as p5fRender } from "./qd293-cases";
+import { createElement as p5fEl } from "react";
+import { renderToStaticMarkup as p5fMarkup } from "react-dom/server";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  type Sec = ReturnType<typeof p5fSections>[number];
+  const T = (text: string) => ({ type: "text", text });
+  const P = (...content: unknown[]) => ({ type: "paragraph", ...(content.length ? { content } : {}) });
+  const PB = (sectionId: string, lineKey: string, sku: string, text: string) =>
+    ({ type: "productBlock", attrs: { sectionId, lineKey, sku, photo: { show: true, align: "right", width: 34 } }, content: [P(T(text))] });
+  const doc = (content: unknown[]) => ({ type: "doc", version: 1, content });
+
+  // (1) the pure appendix rule
+  const alt = { id: "a1", name: "LED Upgrade", kind: "materials", mfr: "", freightPct: 0, alternate: true, items: [{ id: 11, sku: "SKU-11", desc: "Line 11", qty: 1, unit: "ea", cost: 100, price: 400 }] } as unknown as Sec;
+  const zero = { id: "z1", name: "Nothing", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as Sec;
+  const secs = [...p5fSections(), alt, zero];
+  ok(J(p5fApx(secs, "itemized", false, false)) === "[]" && J(p5fApx(secs, "sectioned", false, false)) === "[]" &&
+     J(p5fApx(secs, "itemized", true, false)) === J(p5fApxOld(secs, "itemized")) && J(p5fApx(secs, "sectioned", true, false)) === J(p5fApxOld(secs, "sectioned")),
+    "#P5 render fix: no document → exactly the #293 appendix rule (only with the toggle on)");
+  ok(J(p5fApx(secs, "itemized", false, true)) === J(["s1", "s3"]) && J(p5fApx(secs, "sectioned", false, true)) === J(["s1", "s3"]) &&
+     J(p5fApx(secs, "itemized", true, true)) === J(["s1", "s2", "s3", "s4"]),
+    "#P5 render fix: with a document itemized (or unset) In-total systems are always in the appendix; the toggle adds the narrative ones; alternates and zero-revenue systems never");
+  const unset = secs.map((s) => (s.id === "s1" ? ({ ...s, presentation: undefined } as Sec) : s));
+  ok(J(p5fApx(unset, "itemized", false, true)) === J(["s1", "s3"]), "#P5 render fix: an unset presentation counts as itemized");
+  ok(rd("src/app/(app)/estimator/quote-document.tsx").includes("const appendixIdList = documentAppendixSystemIds(p.sections, p.detail, p.pdfItemizedAppendix, docOn);"),
+    "#P5 render fix: QuoteDocument picks the appendix through documentAppendixSystemIds");
+
+  // (1) rendered: a portal POR line on an itemized system prints in the appendix with the toggle off
+  const docOnly = doc([P(T("Our package."))]);
+  const porSecs = (): Sec[] => p5fSections().map((s) => (s.id === "s1" ? { ...s, items: [...s.items, { id: 9, sku: "SKU-9", desc: "Line 9", qty: 1, unit: "ea", cost: 0, price: 0, por: true }] } as Sec : s));
+  const porHtml = p5fRender({ ...p5fProps({ sections: porSecs(), document: docOnly }), isPortalCatalog: true });
+  const apx = porHtml.slice(porHtml.indexOf('class="est-appendix"'));
+  ok(porHtml.includes('class="est-appendix"') && porHtml.indexOf('class="est-appendix"') > porHtml.indexOf('class="pd-doc"') &&
+     apx.includes(">Rigging<") && apx.includes(">Install<") && !apx.includes(">Lighting<") && !apx.includes(">Empty narrative<") &&
+     apx.includes("Line 9") && apx.includes("Price on request") && apx.includes("Customer note"),
+    "#P5 render fix: with a document and the toggle off, itemized systems' lines (a portal POR line reads Price on request) print in the appendix — never vanish");
+  ok(!p5fRender(p5fProps()).includes("est-appendix") && !p5fRender(p5fProps({ sections: p5fSections().map((s) => ({ ...s, presentation: "itemized" as const })) })).includes("est-appendix"),
+    "#P5 render fix: without a document the toggle-off appendix stays absent (no change)");
+  const narrOnly = p5fSections().map((s) => ({ ...s, presentation: "narrative" as const }));
+  ok(!p5fRender(p5fProps({ sections: narrOnly, document: docOnly })).includes("est-appendix") && p5fRender(p5fProps({ sections: narrOnly, document: docOnly, pdfOptions: { pdfItemizedAppendix: true } })).includes("est-appendix"),
+    "#P5 render fix: an all-narrative quote with a document still follows the toggle");
+
+  // (1) gaps
+  const gaps = p5fGaps(p5fSan(docOnly), secs);
+  ok(J(gaps.itemizedInAppendix) === J(["Rigging", "Install"]) && J(p5fGaps(null, unset).itemizedInAppendix) === J(["Rigging", "Install"]) && J(p5fGaps(p5fSan(docOnly), narrOnly).itemizedInAppendix) === "[]",
+    "#P5 render fix: docGaps.itemizedInAppendix names the printed In-total itemized systems (alternates and zero-revenue skipped)");
+
+  // (2) the refused save stays unsaved
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("await settleRewardCredit(", acts.indexOf("export async function saveQuoteAction")));
+  const refusal = fn.slice(fn.indexOf("if (!docSave.ok) {"), fn.indexOf("error: docSave.error,"));
+  ok(/ok: false,\n\s+id: null,\n\s+number: null,/.test(refusal) && !refusal.includes("id: loadedId"),
+    "#P5 render fix: a document-too-large refusal returns id null / number null (nothing was written)");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const save = hook.slice(hook.indexOf("const res = await saveQuoteAction(loadedId, {"), hook.indexOf("const doSave = () => {"));
+  const adopt = save.slice(save.indexOf("if (res.id) {"), save.indexOf("if (res.ok) {"));
+  ok(adopt.includes("setTierReprice(") && adopt.includes("setSavedDoc(") && adopt.includes("setRevNum(res.revNum);") && adopt.includes("setRevDateMs(res.updatedAt);") &&
+     save.includes('setActionError(res.error || "That save did not go through — nothing was written.");'),
+    "#P5 render fix: the client marks a save done (PDF dirty, tier reprice, rev/date) only when an id comes back — the refusal shows its error instead");
+
+  // (3) renames reach product blocks
+  const listed = { type: "bulletList", content: [{ type: "listItem", content: [P(T("nested")), PB("s1", "2", "OLD-1", "deep")] }] };
+  const spec = {
+    sections: [{ id: "s1", name: "Rigging", items: [{ id: 1, sku: "OLD-1", desc: "x" }], keyProducts: [] }],
+    mobs: [],
+    document: doc([P(T("Intro OLD-1 stays as written")), PB("s1", "1", "OLD-1", "Moved."), PB("s1", "3", "KEEP-3", "Kept."), listed]),
+  };
+  const before = J(spec);
+  const m = new Map([["OLD-1", "Brand:New 1"]]);
+  const out = p5fRewrite(spec, m, new Map()) as typeof spec;
+  const d = out.document as unknown as { content: Array<Record<string, unknown>> };
+  ok(J(spec) === before && out !== spec && out.document !== spec.document, "#P5 render fix: the rename rewrite never mutates its input");
+  ok((d.content[1].attrs as { sku: string }).sku === "Brand:New 1" && J(d.content[1].attrs) === J({ ...((spec.document.content[1] as { attrs: object }).attrs), sku: "Brand:New 1" }) &&
+     ((d.content[3].content as Array<{ content: Array<{ attrs: { sku: string } }> }>)[0].content[1].attrs.sku === "Brand:New 1"),
+    "#P5 render fix: a renamed sku moves on every product block in spec.document (nested ones too), photo attrs kept");
+  ok(d.content[0] === spec.document.content[0] && d.content[2] === spec.document.content[2] && J(out) === before.split('"sku":"OLD-1"').join('"sku":"Brand:New 1"'),
+    "#P5 render fix: everything else in the document is untouched (shared nodes, prose naming the old sku kept, key order byte-identical)");
+  const noHit = p5fRewrite({ ...spec, sections: [] }, new Map([["NOPE", "X"]]), new Map());
+  ok(noHit === null && p5fRewriteDoc(spec.document, new Map([["NOPE", "X"]])) === null && p5fRewriteDoc(null, m) === null && p5fRewriteDoc({ type: "doc", content: "junk" }, m) === null,
+    "#P5 render fix: no moved product block → null (the area reports no change)");
+  const docOnlyHit = p5fRewrite({ sections: [], mobs: [], document: spec.document }, m, new Map()) as Record<string, unknown>;
+  ok(!!docOnlyHit && J(docOnlyHit.sections) === "[]" && p5fRewrite({ sections: [], mobs: [] }, m, new Map()) === null,
+    "#P5 render fix: a quote whose only reference is in the document is still rewritten; no document → no document key");
+  const rw = rd("src/lib/catalog-rename/rewrite.ts");
+  const rwFn = rw.slice(rw.indexOf("export function rewritePackageDocSkus"), rw.indexOf("/** A portal cart's"));
+  ok(rwFn.includes("while (stack.length)") && !/rewritePackageDocSkus\(/.test(rwFn.slice(rwFn.indexOf("{"))), "#P5 render fix: the document walk is iterative (no recursion)");
+
+  // (4) own-key photo / extra lookups
+  const protoDoc = { type: "doc", version: 1, content: [PB("s1", "1", "__proto__", "proto"), PB("s1", "1", "constructor", "ctor"), PB("s1", "1", "toString", "ts")] } as never;
+  let resolved: P5fResolved | null = null;
+  let threw = false;
+  try {
+    resolved = p5fResolve(protoDoc, { sections: p5fSections(), t: p5fProps().t, quoteId: "Q", photos: {} });
+  } catch {
+    threw = true;
+  }
+  const prods = (resolved?.blocks || []).filter((b) => b.t === "product") as Array<{ photo: unknown }>;
+  ok(!threw && prods.length === 3 && prods.every((b) => b.photo === null), "#P5 render fix: a __proto__ / constructor / toString sku never reads a photo off Object.prototype");
+  let markup = "";
+  try {
+    markup = p5fMarkup(p5fEl(P5fView, { resolved: resolved!, productExtra: {} }));
+  } catch {
+    markup = "THREW";
+  }
+  ok(markup.includes("proto") && markup.includes("ctor") && !markup.includes("THREW") && !/function|native code/.test(markup),
+    "#P5 render fix: productExtra is read by own key — a constructor sku renders no inherited extra");
+  ok(rd("src/lib/package-doc/resolve.ts").includes("Object.hasOwn(ctx.photos, a.sku)") && rd("src/components/package-doc/package-doc-view.tsx").includes("Object.hasOwn(extra, b.sku)"),
+    "#P5 render fix: both sku-keyed lookups use Object.hasOwn");
+
+  // (5) photo routes on grouped sections
+  const pr = rd("src/lib/quote-share/photo-response.ts");
+  const fnOf = (name: string) => pr.slice(pr.indexOf(`export async function ${name}(`), pr.indexOf("\n}\n", pr.indexOf(`export async function ${name}(`)));
+  ok(fnOf("photoDocForRevision").includes("keyProductPhotoDocs(revisionGroupedSections(rev).sections, revisionDocument(rev))") && !fnOf("photoDocForRevision").includes("revisionSections(rev)") &&
+     fnOf("packagePhotoDocForRevision").includes("packagePhotoSections(revisionGroupedSections(rev).sections)") && !fnOf("packagePhotoDocForRevision").includes("revisionSections(rev)"),
+    "#P5 render fix: both photo routes read the revision's normalised, group-stamped systems (alternates as printed), not the raw spec");
 }
