@@ -786,7 +786,7 @@ See `.env.example`.
     Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
     sheets come back (PUNCHLIST #304).
 
-42. 🚧 **Estimator in four steps** (#305, D643–D668) — Phase 1 ✅ (the frame): the
+42. 🚧 **Estimator in four steps** (#305, D643–D674) — Phase 1 ✅ (the frame): the
     Estimator is Build · Build package · Customer review · Send & track on one URL
     (`?step=`, pushState, Build canonical), one shared header with a More ▾ menu, a
     readiness line under each tab (never blocking), the status select and Daylite
@@ -808,8 +808,12 @@ See `.env.example`.
     Phase 4 ✅ (#309, D664–D668): Customer review gains client's-eye tabs (Document, Package page, BOM, Cut sheets,
     Datasheets, Drawings; Desktop/Phone) served by a saved-quote staff preview route, an internal sidebar (cost, labor,
     package checklist), store-owned numbered review comments with pins on Build / Build package, and one send-back that
-    lists them. Next: Phase 5 (Build package document editor — TipTap, live chips, product-linked paragraphs, Save to
-    product, image placement, drag from BOM, PDF from the document; older quotes ignored), 6 system categories (Jeff-gated content). Remaining is Jeff-gated: Phase 6
+    lists them.
+    Phase 5 ✅ (#310, D669–D674): Build package gains a TipTap document editor (`spec.document`, one server validator,
+    live price / name / quantity chips, product blocks with Save to product and photos, a Gaps / BOM-drag / Library left pane);
+    a document replaces the In-total bands on the PDF and package page (itemized lines go to the appendix), and a quote
+    without one prints byte-identically. Next: Phase 6 system categories (typical items for Controls, Fixtures, Rigging, Video,
+    Infrastructure, Wireless, Communications — Jeff-gated content). Remaining is Jeff-gated: Phase 6
     typical items per category, and the exact repro for "Send → Home" (PUNCHLIST #305).
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults

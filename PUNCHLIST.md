@@ -11242,3 +11242,53 @@ button on the unsaved banner, "Client scope choices and questions appear here on
 - `staffPackageExtras` repeats helpers from the package-extras model (drift risk); the Cut sheets tab loads the quote twice.
 - Datasheet links in the Package page preview use `download`, so a click downloads rather than navigating the frame.
 - Key-product and file links open in a new tab (the staff routes keep the global frame DENY).
+
+## 310. Estimator Phase 5 — package document editor — DONE 2026-10-07 (D669–D674)
+
+Part of #305's roadmap (see #305, #306, #307, #308, #309): Phase 5 turns Build package into a Word-like editor for the
+client document. Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md` §12; plan
+`docs/superpowers/plans/2026-10-07-estimator-phase5-package-document.md`.
+
+What shipped (no migration, no AI):
+- **The document** — `spec.document`, one server-side validator, caps and refusal (never wipes a stored document). (D670)
+- **TipTap editor** — MIT core, one lazy chunk, toolbar (headings, bold / italic, lists, page break, price table), photo
+  Left / Right / Full + size. (D669, D674)
+- **Live chips + price table** — system price / name, line quantity, quote number, grand total; removed refs print nothing. (D672)
+- **Product blocks** — from product / edited here / custom line tags, Save to product, Revert, No longer in BOM, photos. (D673)
+- **Left pane** — Gaps, BOM (drag or +), Library (intros, Not included list, Price table, Page break). (D674)
+- **Output** — the document replaces every In-total band on the customer PDF and the package page's Narrative view; header,
+  totals, Alternates, options, terms and signature stay; itemized lines print in the appendix. Without a document the output
+  is byte-identical (fixtures). (D671)
+
+**Verification.** Gates: `tsc --noEmit` 0; scoped eslint clean (`src/components/package-doc`, `src/lib/package-doc`,
+`src/lib/estimate-steps`, `src/app/(app)/estimator`); `test:specs` 14,005 PASS / 0 FAIL (baseline 13,805 at Phase 5 start,
++200); `next build` OK; `test:smoke` ALL PASSED. Controller browser pass (scratch DB): Start the document, edit text /
+headings / lists, drag a line and a system from the BOM, chips and the price table update after a price change on Build,
+Save to product disabled for a custom line, Revert, photo align / size, a removed line flags, Save → the PDF shows the
+document plus the appendix, the package page shows it, Remove document returns the old output. That pass found three polish
+items, all fixed here: an empty Not included list now disables its Library button with a hint; a block for a part not in the
+catalog reads "custom line"; the narrative-field gaps no longer show (or count in the badge) once a document exists.
+
+**Jeff to try.** Start the document on a real estimate with catalog parts, then Save to product on a real part (it writes the
+part's narrative paragraph); read the PDF and the package page.
+
+**New copy for Jeff to approve:** "Client document", "Start the document", "Narrative fields", "Remove document", "Remove the
+document? The estimate goes back to the narrative fields.", "The document is too large to save — shorten it.", "Save to
+product", "Replace the product's saved paragraph for <sku>?", "Replace anyway", "Revert", "No longer in BOM",
+"<label> · from product / · edited here / · custom line", "Saved to the product.", "Hide photo / Show photo", "Photo hidden",
+"No photo for this part", "removed" (chip), "Gaps", "BOM", "Library", "No gaps.", "<x> — No longer in BOM", "<name> isn't in
+the document", "A price / name for a removed system", "A quantity for a removed line", "Lines for <names> print in the
+appendix.", "System intros", "No saved intros yet.", "Blocks", "Not included list", "Price table", "Page break", "Add a Not
+included list on the right first.", "Couldn't insert <x> — it may have left the BOM.".
+
+**Open (minor, not blocking).**
+- Over-limit edits are lost if the user leaves the step (the editor remounts from the last valid copy).
+- An ordered list's start number is not kept; only Tab is depth-capped (pasted deeper lists count as over).
+- Alternates can print twice (the document's Alternates section plus the priced Alternates block).
+- Portal Refresh pricing rebuilds `spec` without the document.
+- The Cover PDF still reads the narrative fields, not the document.
+- The #282 Rewards-credit refusal returns `id: loadedId`, so a refused credit save looks saved on the client.
+- Review's Package checklist still shows the saved package's server gap chips (key-product text), which are not
+  document-aware.
+- The cap can be exceeded by 1–2 nodes; a 20,000-character cut can split a surrogate pair; an alternate without a group.
+- An async drop (library row not cached) can land shifted by edits made while it fetches.

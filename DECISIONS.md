@@ -9864,3 +9864,72 @@ matches what the commenters saw. `QuoteNextStep`'s own send-back is hidden on Re
 disabled while the draft is unsaved so the numbering cannot drift. A submitter cannot send back their own submission (the
 control appears only in approver mode on a quote in review). The sidebar list numbers against the live systems and the pins
 match the cards; the note is built from the saved numbering — they differ only for systems added or removed since the last save.
+
+## D669. TipTap for the package document (#310, 2026-10-07)
+
+The Build package document editor is TipTap 3.31.4 (`@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`) — MIT core only, no
+`@tiptap-pro` package; the 51 new transitive packages (TipTap extensions, ProseMirror, floating-ui, linkifyjs, …) were each
+checked MIT. It is loaded with `next/dynamic` (`ssr: false`) from `steps/package-step.tsx`, so TipTap/ProseMirror live in ONE
+lazy chunk referenced only by the estimator page (a test pins that no other file statically imports the editor or TipTap). The
+left pane is a second dynamic import and never imports TipTap. StarterKit's blockquote, code, code block, strike, underline,
+link, horizontal rule, list item and trailing node are switched off so the editor can only make what the validator keeps.
+
+## D670. Document model and server validator (#310, 2026-10-07)
+
+The document is `spec.document` (`{ type: "doc", version: 1, content }`), a schema-as-data model in `src/lib/package-doc/`
+with one validator, `sanitizePackageDoc`, used by the client, the save action, the loaders and the print route.
+Blocks: paragraph, heading 1–3, bullet / ordered list (list item = a paragraph, then paragraphs or lists), page break, price
+table, product block (paragraphs only, with `sectionId`, `lineKey`, `sku` and `photo { show, align left|right|full, width
+25–100 }`); inline text (bold, italic), hard break, chip. Anything else, or anything in the wrong place, is dropped with its
+children. Caps: 2,000 nodes, 200 KB JSON, 20,000 characters per paragraph, depth 12 (the editor allows 5 list levels), 50,000
+raw nodes read. The validator is idempotent and iterative (a 20,000-deep input does not throw). A NON-null document that
+sanitizes to null (over the caps) is REFUSED on save, on the client (`packageDocOver` blocks every save path) and on the
+server ("The document is too large to save — shorten it.", `id: null`) — a stored document is never wiped; `null` is the only
+way to remove one, and an absent field (an older client) keeps the stored one. The editor warns near the caps and never emits
+an over-limit document.
+
+## D671. The document replaces the In-total bands (#310, 2026-10-07)
+
+With a document that prints, the customer PDF / online view replaces EVERY In-total system band (group headings, section
+bands, narrative intros, key products, itemized lines); the document renders once, after the cover note. Kept: letterhead,
+title + Rev, Prepared for / by, Total investment band, cover note, the Alternates block with its A1… bands, Optional additions,
+the totals block, terms, signature and footer. Itemized systems (and narrative ones when Show on PDF → Itemized appendix is
+on) print their lines in the appendix automatically, so a priced line never disappears. The package page's Narrative view
+renders the document in place of the scope cards; the BOM view is unchanged (no document). A quote without a document is
+byte-identical to before (15 committed fixtures, `docs/superpowers/fixtures/p5-quote-document-no-document.json`). Older quotes
+have no document and are ignored — no migration. Known: an Alternates section in the document can print alongside the priced
+Alternates block.
+
+## D672. Live chips and the price table (#310, 2026-10-07)
+
+A chip is an inline atom `{ kind, ref }` resolved on every render from the live quote: `systemPrice` and `systemName` (ref =
+section id), `lineQty` (ref = `sectionId:lineKey`; quantity + unit), `quoteNumber` and `grandTotal` (ref forced empty). A chip
+whose ref is gone prints NOTHING and shows amber `removed` in the editor (and a row in Gaps); the editor and the print
+renderer share `resolveChip`. The price table prints the printed In-total systems (name · sell total), then Sales tax and
+Rewards credit when present, then Total with the totals block's label; printed alternates sit in a second "priced separately"
+table, never above Total. Packages carry strings only, so the no-cost rule holds.
+
+## D673. Product blocks (#310, 2026-10-07)
+
+A product block is one BOM line's paragraphs. Its tag reads `<label> · from product` while the words equal the part's saved
+narrative paragraph (normalized), `<label> · edited here` once they differ, and `<label> · custom line` for a line token
+(`line:<id>`, allowances / custom lines) or a sku the catalog does not have — those two have no Save to product or Revert.
+Save to product is the existing `saveProductParagraphAction` (create permission, creates the paragraph when the part has none,
+stale-checked against the library row's stamp with a Replace anyway ask); Revert replaces the words with the saved paragraph in
+one undo step. A block whose line left the BOM turns amber with `No longer in BOM` and stays until deleted. Photo: Show / Hide,
+Left / Right / Full, size 25–100 %, resolved by the key-product rule (own photo → allowance / custom placeholder →
+manufacturer image → none) with the same allowlists, so print, web and package routes serve it. A catalog model-number rename
+rewrites product-block skus in the live quote's document (`rewritePackageDocSkus`); revisions are left as sent.
+
+## D674. Editor UX (#310, 2026-10-07)
+
+No document: today's narrative layout plus a "Client document" box with Start the document, which seeds a heading, a price
+chip, the intro and a product block per key product, then a price table (and an Alternates section). With one: the editor is the main area
+and the narrative fields sit behind a `Narrative fields` toggle (they still drive the Cover PDF, which is unchanged in
+Phase 5); Remove document confirms inline and goes back to the narrative layout (the pending edit is dropped, nothing is
+resurrected). A left pane: Gaps (removed chips, products no longer in the BOM, systems the document never mentions — click to
+jump or add —, the itemized-appendix note, and the tab's package gaps; the narrative-field gaps are left out when a document
+exists, and the Package readiness badge counts the same way), BOM (drag a system or a line into the document or press +, ✓
+when present), Library (system intros, Not included list — disabled with a hint when the quote and the default are both
+empty —, Price table, Page break). Drops only land on a block boundary. List depth is capped at 5; the toolbar is Normal /
+Heading 1–3, Bold, Italic, lists, Page break, + Price table.
