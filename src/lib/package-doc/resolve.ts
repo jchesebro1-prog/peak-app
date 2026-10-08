@@ -121,10 +121,11 @@ export function priceTableOf(ctx: PackageDocCtx): RPriceTable {
   };
 }
 
-/** A system's live price line, or null when the system is gone (prints nothing). */
+/** A system's live price line, or null when the system is gone or does not
+ *  print in the body (zero revenue / hidden — the price table skips it too). */
 export function systemTotalOf(sectionId: unknown, ctx: Pick<PackageDocCtx, "sections">): RSysTotal | null {
   const sec = findSection(ctx.sections, typeof sectionId === "string" ? sectionId : "");
-  return sec ? { t: "systotal", name: sec.name || "", price: fmt(systemSellTotal(sec)), alternate: sec.alternate === true } : null;
+  return sec && systemPrintsInBody(sec) ? { t: "systotal", name: (sec.name || "").trim() || "Untitled system", price: fmt(systemSellTotal(sec)), alternate: sec.alternate === true } : null;
 }
 
 function block(b: PDBlock, ctx: PackageDocCtx): RBlock | null {

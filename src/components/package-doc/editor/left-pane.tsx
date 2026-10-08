@@ -32,7 +32,7 @@ import type { PackageDoc, PDBlock } from "@/lib/package-doc/types";
  * Estimator Phase 5 — the Build package editor's left pane:
  *  - Gaps: removed chips, products no longer in the BOM (click → scroll to
  *    the block), In-total systems the document never mentions (click →
- *    heading + price chip at the end), the itemized-appendix note, and the
+ *    heading + empty intro paragraph + price line at the end), the itemized-appendix note, and the
  *    tab's package gaps. "No gaps." when there are none.
  *  - BOM: systems by group (Build order), each with the lines that can be
  *    featured. Drag a row into the document (application/x-peak-docnode), or
@@ -149,6 +149,11 @@ export default function DocLeftPane({ api, doc, sections, blocks, intros, notInc
     else void api.insertDocNode({ kind: "system", sectionId: r.action.sectionId, lineKey: "" }, "end");
   };
   const dragStart = (p: DocNodePayload) => (e: DragEvent<HTMLElement>) => {
+    // Draggables nest (the + Price line span sits inside its system row): only
+    // the element actually dragged writes the payload, and the event stops here
+    // so an outer row can never overwrite it.
+    if (e.target !== e.currentTarget) return;
+    e.stopPropagation();
     e.dataTransfer.setData(DOC_NODE_MIME, docNodeDragData(p));
     e.dataTransfer.effectAllowed = "copy";
   };

@@ -1,7 +1,7 @@
 import type { Editor, JSONContent } from "@tiptap/react";
 import { Fragment, Slice, type Node as PMNode } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection, type EditorState, type Selection } from "@tiptap/pm/state";
-import { dropPoint } from "@tiptap/pm/transform";
+import { dropPoint, type StepMap } from "@tiptap/pm/transform";
 import { textToParagraphs } from "@/lib/package-doc/text";
 import type { PhotoAttrs } from "@/lib/package-doc/types";
 import { withPhoto } from "./editor-model";
@@ -76,25 +76,52 @@ export function introSlotSectionId(json: JSONContent | JSONContent[]): string | 
   return typeof id === "string" && id ? id : null;
 }
 
-/** After inserting a system, the cursor belongs in its empty intro paragraph
- *  (the price line, an atom, ends up selected otherwise). Pure on (doc,
- *  selection): the text selection inside the empty paragraph that sits right
- *  before the selected price line of `sectionId`, or null. */
-export function introSlotSelection(doc: PMNode, selection: Selection, sectionId: string): Selection | null {
-  if (!(selection instanceof NodeSelection) || selection.node.type.name !== "systemTotal" || selection.node.attrs.sectionId !== sectionId) return null;
-  const $pos = doc.resolve(selection.from);
+/** The document range a transaction's steps inserted or replaced, in the
+ *  final document's coordinates (each step's new range, carried through the
+ *  steps after it), or null when no step changed anything. */
+export function insertedRange(maps: readonly StepMap[]): { from: number; to: number } | null {
+  let from = Infinity;
+  let to = -Infinity;
+  maps.forEach((map) => {
+    if (from <= to) {
+      from = map.map(from, -1);
+      to = map.map(to, 1);
+    }
+    map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+      from = Math.min(from, newStart);
+      to = Math.max(to, newEnd);
+    });
+  });
+  return from <= to ? { from, to } : null;
+}
+
+/** After inserting a system, the cursor belongs in its empty intro paragraph.
+ *  Pure on (doc, inserted range): finds the last price line of `sectionId`
+ *  inside the range and returns a text selection inside the empty paragraph
+ *  right before it — wherever the insert landed (end or middle of a paragraph,
+ *  between blocks) and whatever selection TipTap left behind. Null when the
+ *  inserted nodes aren't [.., empty paragraph, price line]. */
+export function introSlotSelection(doc: PMNode, range: { from: number; to: number }, sectionId: string): Selection | null {
+  let at = -1;
+  doc.nodesBetween(Math.max(0, range.from), Math.min(doc.content.size, range.to), (n, pos) => {
+    if (n.type.name === "systemTotal" && n.attrs.sectionId === sectionId) at = pos;
+    return true;
+  });
+  if (at < 0) return null;
+  const $pos = doc.resolve(at);
   const i = $pos.index();
   const prev = i > 0 ? $pos.parent.child(i - 1) : null;
   if (!prev || prev.type.name !== "paragraph" || prev.content.size !== 0) return null;
-  return TextSelection.create(doc, selection.from - 1);
+  return TextSelection.create(doc, at - 1);
 }
 
 /** Chain step: put the cursor in a just-inserted system's intro slot. */
 function settleIntroSlot(chain: ReturnType<Editor["chain"]>, json: JSONContent | JSONContent[]) {
   const id = introSlotSectionId(json);
   if (id === null) return chain;
-  return chain.command(({ tr, state }) => {
-    const sel = introSlotSelection(state.doc, state.selection, id);
+  return chain.command(({ tr }) => {
+    const range = insertedRange(tr.mapping.maps);
+    const sel = range ? introSlotSelection(tr.doc, range, id) : null;
     if (sel) tr.setSelection(sel);
     return true;
   });

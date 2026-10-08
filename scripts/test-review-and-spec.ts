@@ -57219,7 +57219,7 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   const huge = Array.from({ length: 40 }, (_, i) => S({ ...s1, id: "h" + i, narrative: "y".repeat(8000) })) as unknown as P5Section[];
   const hugeSeed = p5Seed({ sections: huge });
   ok(p5San(hugeSeed) !== null && hugeSeed.content.length === 81 && hugeSeed.content.every((b) => b.type !== "productBlock"),
-    "#P5 model: a seed too big for the caps falls back to headings + price chips + the table");
+    "#P5 model: a seed too big for the caps falls back to headings + price lines + the table");
   ok(J(p5SysHead({ id: "s9", name: "  " })[0]) === J({ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Untitled system" }] }) &&
     J(p5PB("s1", 4, "X", "").content) === J([{ type: "paragraph" }]),
     "#P5 model: helpers — a blank system name heads 'Untitled system'; a product block with no text holds one empty paragraph");
@@ -58406,10 +58406,11 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
 
 // ---- #312 price lines: removable price table / page break + the live system price line ----
 import { docIdFloor as p312Floor } from "@/lib/package-doc/ids";
-import { introSlotSectionId as p312SlotId, introSlotSelection as p312Slot } from "@/components/package-doc/editor/editor-commands";
+import { insertedRange as p312Range, introSlotSectionId as p312SlotId, introSlotSelection as p312Slot } from "@/components/package-doc/editor/editor-commands";
 import { systemTotalOf as p312Total } from "@/lib/package-doc/resolve";
 import PackageDocView312 from "@/components/package-doc/package-doc-view";
-import { NodeSelection as P312NodeSel, TextSelection as P312TextSel } from "@tiptap/pm/state";
+import { EditorState as P312State, TextSelection as P312TextSel } from "@tiptap/pm/state";
+import { Fragment as P312Fragment, Slice as P312Slice } from "@tiptap/pm/model";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const J = JSON.stringify;
@@ -58441,6 +58442,14 @@ import { NodeSelection as P312NodeSel, TextSelection as P312TextSel } from "@tip
       { t: "systotal", name: "Install", price: p5fmt(p5Sell(byId("s3"))), alternate: true },
     ]) && p312Total("s9", ctx) === null && p312Total(undefined, ctx) === null && p312Total("s2", ctx)!.alternate === false,
     "#312 price lines: resolver — { t: 'systotal', name, price: fmt(systemSellTotal), alternate } for an in-total and an alternate system; a missing system resolves to nothing");
+
+  // Systems that exist but do not print in the body print nothing; an unnamed system reads "Untitled system".
+  const quiet = { ...byId("s2"), id: "sq", items: [] } as typeof secs[number];
+  const unnamed = { ...byId("s1"), id: "sn", name: "  " } as typeof secs[number];
+  const ctx2 = { ...ctx, sections: [byId("s1"), quiet, unnamed] as typeof secs };
+  ok(!p2adPrints(quiet) && p312Total("sq", ctx2) === null && p312Total("sn", ctx2)!.name === "Untitled system" && p312Total("s1", ctx2)!.name === "Rigging" &&
+     !p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([total("sq")]))!, ctx: ctx2 })).includes("pd-systotal"),
+    "#312 price lines: a system that exists but does not print in the body (zero revenue / hidden) resolves to nothing, like the price table; an unnamed system reads 'Untitled system'");
 
   // Renderer: one bold row, name left / mono price right, rule above, alternate suffix, missing prints nothing.
   const html = p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([H("Rigging"), total("s1"), total("s3"), total("s9")]))!, ctx }));
@@ -58488,17 +58497,34 @@ import { NodeSelection as P312NodeSel, TextSelection as P312TextSel } from "@tip
   const pr = p5l.docPresence(p5San(doc([total("s1")]))!);
   ok(p5l.systemInDoc({ id: "s1", name: "Rigging" }, pr) && !p5l.systemInDoc({ id: "s2", name: "Lighting" }, pr), "#312 price lines: a price line marks its system as in the document (the BOM tick)");
 
-  // Cursor lands in the empty intro paragraph (headless ProseMirror).
+  // Cursor lands in the empty intro paragraph (headless ProseMirror, the real editor schema; position mapping, not selection).
   const schema = p5eGetSchema(p5eBuild());
-  const pm = schema.nodeFromJSON(doc([P("before"), H("Lighting"), P(), total("s2"), P("after")]));
-  let at = -1;
-  pm.descendants((n, p) => { if (n.type.name === "systemTotal") at = p; });
-  const sel = p312Slot(pm, P312NodeSel.create(pm, at), "s2");
-  ok(sel instanceof P312TextSel && sel.empty && sel.$from.parent.type.name === "paragraph" && sel.$from.parent.content.size === 0 && sel.$from.index(0) === 2 && sel.from === at - 1 &&
-     p312Slot(pm, P312NodeSel.create(pm, at), "s1") === null && p312Slot(pm, P312TextSel.create(pm, 1), "s2") === null,
-    "#312 price lines: after a system insert the selected price line hands the cursor to the empty paragraph above it; other selections are left alone");
-  const typed = schema.nodeFromJSON(doc([P("typed"), total("s2")]));
-  ok(p312Slot(typed, P312NodeSel.create(typed, 7), "s2") === null, "#312 price lines: a price line after typed text does not steal the cursor");
+  const insertAt = (docJson: unknown, cursorIn: (d: ReturnType<typeof schema.nodeFromJSON>) => number, nodes: unknown[], id: string) => {
+    const start = schema.nodeFromJSON(docJson as never);
+    const st = P312State.create({ schema, doc: start, selection: P312TextSel.create(start, cursorIn(start)) });
+    const tr = st.tr.replaceSelection(new P312Slice(P312Fragment.fromArray(nodes.map((n) => schema.nodeFromJSON(n as never))), 0, 0));
+    const range = p312Range(tr.mapping.maps);
+    const sel = range ? p312Slot(tr.doc, range, id) : null;
+    return { tr, range, sel };
+  };
+  const slotOk = (r: ReturnType<typeof insertAt>, id: string) => {
+    const s = r.sel;
+    if (!(s instanceof P312TextSel) || !s.empty || s.$from.parent.type.name !== "paragraph" || s.$from.parent.content.size !== 0) return false;
+    const next = s.$from.parent === s.$from.node(0) ? null : s.$from.node(0).child(s.$from.index(0) + 1);
+    return next?.type.name === "systemTotal" && next.attrs.sectionId === id;
+  };
+  const sysJson = [H("Lighting"), P(), total("s2")];
+  const endOfPara = insertAt(doc([P("typed here"), P("after")]), (d) => 1 + "typed here".length, sysJson, "s2");
+  const midPara = insertAt(doc([P("typed here"), P("after")]), (d) => 1 + 5, sysJson, "s2");
+  const emptyPara = insertAt(doc([P("before"), P(), P("after")]), (d) => d.child(0).nodeSize + 1, sysJson, "s2");
+  const startOfDoc = insertAt(doc([P("typed")]), () => 1, sysJson, "s2");
+  ok(slotOk(endOfPara, "s2") && slotOk(midPara, "s2") && slotOk(emptyPara, "s2") && slotOk(startOfDoc, "s2"),
+    "#312 price lines: after a system insert the cursor lands in the new empty paragraph — at the end of, in the middle of, and at the start of a non-empty paragraph, and in an empty one");
+  ok(midPara.range !== null && midPara.tr.doc.childCount >= 5 && p312Slot(midPara.tr.doc, { from: 0, to: 1 }, "s2") === null && p312Slot(midPara.tr.doc, midPara.range!, "s1") === null &&
+     p312Range([]) === null,
+    "#312 price lines: the slot helper only looks inside the inserted range and for its own system; no steps → no range");
+  const typedOnly = insertAt(doc([P("a")]), () => 2, [H("x"), P("typed"), total("s2")], "s2");
+  ok(typedOnly.sel === null, "#312 price lines: a price line after typed text (no empty paragraph) does not steal the cursor");
 
   // Gaps.
   const g = p5Gaps(p5San(doc([total("s9"), total("s9"), total("s1"), { type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s9" } }] }]))!, secs);
@@ -58523,6 +58549,12 @@ import { NodeSelection as P312NodeSel, TextSelection as P312TextSel } from "@tip
   ok(st.includes("System price · live") && st.includes(">removed<") && st.includes("data-drag-handle") && st.includes("systemTotalOf(node.attrs.sectionId, env.ctx)") &&
      pane.includes("+ Price line") && pane.includes('kind: "systemTotal"') && pane.includes("Insert price line for ${name}"),
     "#312 price lines: the editor view is tagged 'System price · live', draggable, amber 'removed' when the system is gone; the BOM system row has '+ Price line'");
+  const dragFn = pane.slice(pane.indexOf("const dragStart = (p: DocNodePayload)"), pane.indexOf("return (", pane.indexOf("const dragStart = (p: DocNodePayload)")));
+  ok(/if \(e\.target !== e\.currentTarget\) return;\s*e\.stopPropagation\(\);\s*e\.dataTransfer\.setData\(DOC_NODE_MIME/.test(dragFn) &&
+     pane.includes("<span draggable onDragStart={dragStart(total)}") && (pane.match(/onDragStart=\{dragStart\(/g) || []).length === 3,
+    "#312 price lines: every BOM drag handler stops propagation and ignores drags that began on a child, so dragging '+ Price line' can't be overwritten by its system row's payload");
+  ok(st.includes("findSection(env.ctx.sections") && st.includes("Not printed — this system doesn't print in the body") && st.includes("env && !row && !exists"),
+    "#312 price lines: the editor view shows a muted 'Not printed' note for an existing system that doesn't print, and amber 'removed' only for a missing one");
   ok(rd("src/components/package-doc/package-doc-view.tsx").includes('case "systotal"') && rd("src/lib/package-doc/sanitize.ts").includes('case "systemTotal"') && rd("src/lib/package-doc/resolve.ts").includes('case "systemTotal"'),
     "#312 price lines: the sanitizer, resolver and renderer each handle systemTotal");
 }

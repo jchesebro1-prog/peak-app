@@ -188,7 +188,7 @@ export function packageReadinessGaps(sections: SpecSection[], hasDocument = fals
 
 /** The Gaps list, in order: removed chips, products no longer in the BOM
  *  (click scrolls to the block), systems the document never mentions (click
- *  inserts heading + price chip at the end), the itemized-appendix note, then
+ *  inserts heading + intro paragraph + price line at the end), the itemized-appendix note, then
  *  the package gaps. `nameOf` names a product block's sku (library description). */
 export function gapRows(gaps: DocGaps, packageGaps: readonly string[], nameOf: (sku: string) => string | null | undefined = () => null): GapRow[] {
   const rows: GapRow[] = [];
