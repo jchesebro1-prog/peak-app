@@ -6,7 +6,7 @@ import type { PackageDoc, PDNode } from "./types";
  * changes (editing a custom part's SKU, toggling it to an allowance…), these
  * nodes follow it. Add a later line-anchored node type HERE and nowhere else.
  */
-export const LINE_ANCHORED_NODES = ["productBlock"] as const;
+export const LINE_ANCHORED_NODES = ["productBlock", "productImage"] as const;
 
 type Anchored = { type: string; attrs: { sectionId?: string; lineKey?: string; sku?: string }; content?: PDNode[] };
 

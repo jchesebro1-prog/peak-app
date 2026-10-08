@@ -1,5 +1,5 @@
 import { Fragment, type CSSProperties, type ReactNode } from "react";
-import { resolvePackageDoc, type PackageDocCtx, type RBlock, type RInline, type RList, type RParagraph, type RPriceTable, type RProduct, type RSysTotal, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
+import { resolvePackageDoc, type PackageDocCtx, type RBlock, type RImage, type RInline, type RList, type RParagraph, type RPhoto, type RPriceTable, type RProduct, type RSysTotal, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
 import type { PackageDoc } from "@/lib/package-doc/types";
 
 /**
@@ -21,7 +21,13 @@ import type { PackageDoc } from "@/lib/package-doc/types";
  *   productBlock → bold heading (the line's name, while in the BOM), the
  *     block's own paragraphs, the photo floated left/right at `width` % of
  *     the column, or ("full") block-level above the text, `width` % wide,
- *     centred; phones (≤ 480px) always put it full width above
+ *     centred; phones (≤ 480px) always put it full width above. Only a block
+ *     with a photo is a flow-root.
+ *   productImage (#312) → just the photo (`.pd-image`), floated left/right at
+ *     `width` % of the column (max-height 2.4in) so the paragraphs after it
+ *     wrap beside it, or full (block, centred, max-height 4in); phones
+ *     always full width; headings clear it (an image never spills into the
+ *     next system); no photo source → nothing
  *   priceTable → systems · price rows, tax / Rewards credit rows, Total
  *     (t.grand); alternates listed after it as "priced separately"
  *   systemTotal → one bold row: the system name left, its sell total right
@@ -34,10 +40,13 @@ import type { PackageDoc } from "@/lib/package-doc/types";
 export const PACKAGE_DOC_CSS = `
 .pd-doc .pd-product { display: flow-root; break-inside: avoid; page-break-inside: avoid; }
 .pd-doc h2, .pd-doc h3, .pd-doc h4 { break-after: avoid; page-break-after: avoid; }
+.pd-doc h2, .pd-doc h3, .pd-doc h4, .pd-doc .pd-pagebreak { clear: both; }
+.pd-doc .pd-image, .pd-doc .pd-image img { break-inside: avoid; page-break-inside: avoid; }
 .pd-doc .pd-price tr { break-inside: avoid; page-break-inside: avoid; }
 @media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }
 @media (max-width: 480px) {
   .pd-doc .pd-product img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+  .pd-doc .pd-image img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
 }
 `;
 
@@ -83,17 +92,23 @@ function List({ list }: { list: RList }) {
   return list.t === "ol" ? <ol start={list.start} style={style}>{items}</ol> : <ul style={style}>{items}</ul>;
 }
 
+/** A photo's float: left / right at `width` % (max-height 2.4in) or full (block, centred, max-height 4in). */
+function photoStyle(ph: RPhoto): CSSProperties {
+  return ph.align === "full"
+    ? { display: "block", width: `${ph.width}%`, maxHeight: "4in", objectFit: "contain", margin: "0 auto 10px" }
+    : ph.align === "left"
+      ? { float: "left", width: `${ph.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 14px 8px 0" }
+      : { float: "right", width: `${ph.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" };
+}
+
 function Product({ b, extra }: { b: RProduct; extra?: ReactNode }) {
   const ph = b.photo;
-  const imgStyle: CSSProperties | null = !ph
-    ? null
-    : ph.align === "full"
-      ? { display: "block", width: `${ph.width}%`, maxHeight: "4in", objectFit: "contain", margin: "0 auto 10px" }
-      : ph.align === "left"
-        ? { float: "left", width: `${ph.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 14px 8px 0" }
-        : { float: "right", width: `${ph.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" };
+  const imgStyle: CSSProperties | null = ph ? photoStyle(ph) : null;
   return (
-    <div className="pd-product" data-sku={b.sku} style={{ display: "flow-root", margin: "12px 0" }}>
+    // A block with its own photo is a flow-root (the float stays inside); a
+    // words-only block (#312) is a plain block, so a product image floated
+    // before it wraps its text — the same lines either way when nothing floats.
+    <div className="pd-product" data-sku={b.sku} style={{ display: ph ? "flow-root" : "block", margin: "12px 0" }}>
       {ph && imgStyle ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={ph.src} alt={ph.alt} style={imgStyle} />
@@ -103,6 +118,17 @@ function Product({ b, extra }: { b: RProduct; extra?: ReactNode }) {
         <Paragraph key={i} p={p} style={i === b.paras.length - 1 ? { margin: 0 } : undefined} />
       ))}
       {extra}
+    </div>
+  );
+}
+
+/** #312 — a product's photo on its own. The wrapper is a plain block (not a
+ *  flow-root), so a floated photo lets the following paragraphs wrap beside it. */
+function ProductImage({ b }: { b: RImage }) {
+  return (
+    <div className="pd-image" data-sku={b.sku}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={b.photo.src} alt={b.photo.alt} style={photoStyle(b.photo)} />
     </div>
   );
 }
@@ -178,6 +204,8 @@ function Block({ b, extra }: { b: RBlock; extra?: Record<string, ReactNode> }) {
       return <List list={b} />;
     case "product":
       return <Product b={b} extra={extra && Object.hasOwn(extra, b.sku) ? extra[b.sku] : undefined} />;
+    case "image":
+      return <ProductImage b={b} />;
     case "price":
       return <PriceTable b={b} />;
     case "systotal":

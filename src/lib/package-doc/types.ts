@@ -36,10 +36,17 @@ export type PDProductBlock = {
   content: PDParagraph[];
 };
 
+/** What a line-anchored node (product block, product image) points at: one BOM line of one system. */
+export type LineAnchor = { sectionId: string; lineKey: string; sku: string };
+
+/** #312 — a product's photo as its own piece (atom): just the image, floated
+ *  left / right (`width` % of the column) or full width, anchored like a product block. */
+export type PDProductImage = { type: "productImage"; attrs: LineAnchor & { align: PhotoAlign; /** 25–100 (% of the text column). */ width: number } };
+
 /** A system's live price line (atom): "<system name>  <sell total>", read at render. */
 export type PDSystemTotal = { type: "systemTotal"; attrs: { sectionId: string } };
 
-export type PDBlock = PDParagraph | PDHeading | PDBulletList | PDOrderedList | PDPageBreak | PDPriceTable | PDProductBlock | PDSystemTotal;
+export type PDBlock = PDParagraph | PDHeading | PDBulletList | PDOrderedList | PDPageBreak | PDPriceTable | PDProductBlock | PDProductImage | PDSystemTotal;
 export type PDNode = PDBlock | PDListItem | PDInline;
 
 export type PackageDoc = { type: "doc"; version: 1; content: PDBlock[] };

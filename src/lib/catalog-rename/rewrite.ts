@@ -18,6 +18,8 @@
  * calls these, so this file stays client-safe.
  */
 
+import { LINE_ANCHORED_NODES } from "@/lib/package-doc/reanchor";
+
 export type RenameMap = ReadonlyMap<string, string>;
 
 type Rec = Record<string, unknown>;
@@ -173,9 +175,9 @@ export function rewriteQuoteSpec(spec: unknown, m: RenameMap, models: RenameMap)
 
 /**
  * Estimator Phase 5 — a quote's package document (`spec.document`,
- * ProseMirror JSON): every `productBlock`'s `attrs.sku` follows the rename
- * (the block matches its BOM line by sku, so a stale one would read "No
- * longer in BOM" and lose its photo). Walked iteratively (an explicit stack,
+ * ProseMirror JSON): every line-anchored node's (LINE_ANCHORED_NODES —
+ * `productBlock`, and `productImage` since #312) `attrs.sku` follows the rename (the node matches its BOM line by sku, so a
+ * stale one would read "No longer in BOM" and lose its photo). Walked iteratively (an explicit stack,
  * never recursion); copy-on-write along the path to each moved block only,
  * so every other node — text, chips, photo attrs, key order — is the same
  * object as before. Null when no block moved.
@@ -188,7 +190,7 @@ export function rewritePackageDocSkus(doc: unknown, m: RenameMap): Rec | null {
   while (stack.length) {
     const { node, path } = stack.pop()!;
     if (!isRec(node)) continue;
-    if (node.type === "productBlock" && isRec(node.attrs)) {
+    if (typeof node.type === "string" && (LINE_ANCHORED_NODES as readonly string[]).includes(node.type) && isRec(node.attrs)) {
       const to = moved(m, node.attrs.sku);
       if (to !== undefined) hits.push({ path, to });
     }

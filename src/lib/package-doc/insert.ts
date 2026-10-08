@@ -7,7 +7,7 @@ import type { GroupBlock, SystemGroup } from "@/lib/estimate-groups/groups";
 import { findLine, findSection } from "./chips";
 import type { DocGaps } from "./gaps";
 import { MAX_LINE_KEY, MAX_SECTION_ID } from "./schema";
-import { productBlockFor, systemHeadingBlocks, systemTotalBlock } from "./seed";
+import { productNodesFor, systemHeadingBlocks, systemTotalBlock } from "./seed";
 import { bulletListOf, inlineText, textToBlocks, walkDoc } from "./text";
 import type { ChipKind, PackageDoc, PDBlock, PDPageBreak, PDPriceTable } from "./types";
 
@@ -51,12 +51,14 @@ export function parseDocNodePayload(raw: unknown): DocNodePayload | null {
 /** What a BOM row's dragstart writes (application/x-peak-docnode). */
 export const docNodeDragData = (p: DocNodePayload): string => JSON.stringify({ kind: p.kind, sectionId: p.sectionId, lineKey: p.lineKey });
 
-/** A line's product block: its library paragraph (else one empty paragraph),
- *  photo on the right at 34 % (DEFAULT_PHOTO). A custom / allowance line
+/** A line's photo and words (#312): a productImage (right at 34 %; always —
+ *  with no photo it shows "No photo for this part" in the editor and prints
+ *  nothing), then a product block holding its library paragraph (else one
+ *  empty paragraph) with its own photo hidden. A custom / allowance line
  *  anchors on its `line:<id>` token and never reads the library. */
 export function lineNodes(sec: Pick<SpecSection, "id">, it: SpecItem, paragraph: string | null | undefined): PDBlock[] {
   const sku = keyProductSkuOf(it);
-  return [productBlockFor(sec.id, it.id, sku, isLineToken(sku) ? "" : paragraph || "")];
+  return productNodesFor(sec.id, it.id, sku, isLineToken(sku) ? "" : paragraph || "", true);
 }
 
 /** A system: heading (level 2, its name), an empty paragraph (the cursor
@@ -117,7 +119,7 @@ export function docPresence(doc: PackageDoc | null | undefined): DocPresence {
     else if (n.type === "heading") {
       const t = norm(inlineText(n.content));
       if (t) out.headings.add(t);
-    } else if (n.type === "productBlock") out.lines.add(lineId(n.attrs.sectionId, n.attrs.lineKey));
+    } else if (n.type === "productBlock" || n.type === "productImage") out.lines.add(lineId(n.attrs.sectionId, n.attrs.lineKey));
   }
   return out;
 }
@@ -128,7 +130,7 @@ export function systemInDoc(sec: Pick<SpecSection, "id" | "name">, pr: DocPresen
   return pr.chipSystems.has(sec.id) || (!!name && pr.headings.has(name));
 }
 
-/** A line is in the document when a product block anchors on it (same system + line). */
+/** A line is in the document when a product block or product image anchors on it (same system + line). */
 export const lineInDoc = (sectionId: string, lineKey: string | number, pr: DocPresence): boolean => pr.lines.has(lineId(sectionId, lineKey));
 
 /* ---- BOM tree ---- */
@@ -213,7 +215,7 @@ export type PackageDocApi = {
   insertBlocks: (nodes: PDBlock[], where?: "cursor" | "end") => boolean;
   /** Build a BOM row's nodes (fetching its library paragraph first when needed) and insert them at the cursor / end. */
   insertDocNode: (p: DocNodePayload, where?: "cursor" | "end") => Promise<boolean>;
-  /** Put the cursor in a product block and scroll it into view. */
+  /** Put the cursor in (or select) a product block / product image and scroll it into view. */
   scrollToProduct: (t: { sectionId: string; lineKey: string; sku?: string }) => boolean;
   /** Emit any pending keystrokes now (a programmatic Save calls this before it reads the document). */
   flush: () => void;

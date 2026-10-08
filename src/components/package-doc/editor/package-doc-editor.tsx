@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { EditorContent, useEditor, type JSONContent } from "@tiptap/react";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import type { ParagraphSaveResponse } from "@/app/(app)/estimator/narrative";
 import type { KeyProductLibrary } from "@/app/(app)/estimator/use-key-product-library";
 import type { PackageDocCtx } from "@/lib/package-doc/resolve";
@@ -65,6 +65,7 @@ const PROSE_CSS = `
 @media (max-width: 720px) { .pd-ed-page { padding: 24px 18px; margin: 12px auto 24px; } }
 .pd-ed-prose { outline: none; min-height: 8in; }
 .pd-ed-prose p { margin: 0 0 8px; }
+.pd-ed-prose h1, .pd-ed-prose h2, .pd-ed-prose h3 { clear: both; }
 .pd-ed-prose h1 { font-size: 1.32em; font-weight: 700; color: #16181d; margin: 18px 0 8px; line-height: 1.25; }
 .pd-ed-prose h2 { font-size: 1.14em; font-weight: 700; color: #16181d; margin: 16px 0 6px; line-height: 1.3; }
 .pd-ed-prose h3 { font-size: 1em; font-weight: 700; color: #16181d; margin: 12px 0 4px; line-height: 1.35; }
@@ -74,6 +75,7 @@ const PROSE_CSS = `
 .pd-ed-prose strong { font-weight: 700; color: #16181d; }
 .pd-ed-prose .pd-ed-product-text p:last-child { margin-bottom: 0; }
 .pd-ed-prose .ProseMirror-selectednode { outline: 2px solid #6b8fd1; }
+.pd-ed-prose .node-productImage.ProseMirror-selectednode { outline: none; }
 `;
 
 const EDITOR_PROPS = { attributes: { class: "pd-ed-prose", role: "textbox", "aria-multiline": "true", "aria-label": "Client document" } };
@@ -222,7 +224,17 @@ export default function PackageDocEditor({ value, onChange, onOverChange, overDr
         if (!live()) return false;
         const pos = findProductBlock(editor.state.doc, t);
         if (pos < 0) return false;
-        editor.chain().focus().setTextSelection(pos + 2).run();
+        // A product image (an atom) is selected; a product block gets the cursor in its first line.
+        if (editor.state.doc.nodeAt(pos)?.type.name === "productImage")
+          editor
+            .chain()
+            .focus()
+            .command(({ tr }) => {
+              tr.setSelection(NodeSelection.create(tr.doc, pos));
+              return true;
+            })
+            .run();
+        else editor.chain().focus().setTextSelection(pos + 2).run();
         const dom = editor.view.nodeDOM(pos);
         if (dom instanceof HTMLElement) dom.scrollIntoView({ block: "center", behavior: "smooth" });
         return true;

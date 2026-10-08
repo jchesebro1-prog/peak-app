@@ -1,5 +1,5 @@
 import { narrativeBlocks, type NarrativeBlock } from "@/app/(app)/estimator/narrative";
-import type { PackageDoc, PDBlock, PDBulletList, PDInline, PDNode, PDParagraph, PDProductBlock } from "./types";
+import type { PackageDoc, PDBlock, PDBulletList, PDInline, PDNode, PDParagraph, PDProductBlock, PDProductImage } from "./types";
 
 /**
  * Estimator Phase 5 — plain-text helpers for the package document: walking
@@ -104,34 +104,46 @@ export function docProductBlocks(doc: PackageDoc | null | undefined): PDProductB
   return walkDoc(doc).filter((n): n is PDProductBlock => n.type === "productBlock");
 }
 
-/** Distinct product-block skus in document order ("" skipped). */
+/** #312 — the line-anchored nodes (product blocks and product images) in document order. */
+export function docLineNodes(doc: PackageDoc | null | undefined): Array<PDProductBlock | PDProductImage> {
+  return walkDoc(doc).filter((n): n is PDProductBlock | PDProductImage => n.type === "productBlock" || n.type === "productImage");
+}
+
+/** Does this line-anchored node print a photo? A product image always tries
+ *  to; an (older) product block only while its photo.show is on. */
+export const nodeShowsPhoto = (n: PDProductBlock | PDProductImage): boolean => (n.type === "productImage" ? true : !!n.attrs?.photo?.show);
+
+/** Distinct product-block and product-image skus in document order ("" skipped)
+ *  — the editor's library prefetch (tags, Revert, photo previews). */
 export function docProductSkus(doc: PackageDoc | null | undefined): string[] {
   const out: string[] = [];
-  for (const b of docProductBlocks(doc)) {
+  for (const b of docLineNodes(doc)) {
     const s = b.attrs?.sku;
     if (typeof s === "string" && s && !out.includes(s)) out.push(s);
   }
   return out;
 }
 
-/** Product-block skus whose photo prints (photo.show), excluding `line:<id>`
- *  tokens (they print a placeholder, never a catalog photo read). */
+/** Skus whose photo prints — every product image, and every product block
+ *  whose photo.show is on — excluding `line:<id>` tokens (they print a
+ *  placeholder, never a catalog photo read). */
 export function docPhotoSkus(doc: PackageDoc | null | undefined): string[] {
   const out: string[] = [];
-  for (const b of docProductBlocks(doc)) {
+  for (const b of docLineNodes(doc)) {
     const s = b.attrs?.sku;
-    if (b.attrs?.photo?.show && typeof s === "string" && s && !/^line:\d+$/.test(s) && !out.includes(s)) out.push(s);
+    if (nodeShowsPhoto(b) && typeof s === "string" && s && !/^line:\d+$/.test(s) && !out.includes(s)) out.push(s);
   }
   return out;
 }
 
 /** Nothing printable: no document, or only empty paragraphs/headings/lists
- *  and page breaks. A chip, a price table, a system price line or a product block is content. */
+ *  and page breaks. A chip, a price table, a system price line, a product
+ *  block or a product image is content. */
 export function isEmptyDoc(doc: PackageDoc | null | undefined): boolean {
   if (!doc || !Array.isArray(doc.content)) return true;
   for (const n of walkDoc(doc)) {
     if (n.type === "text" && n.text.trim()) return false;
-    if (n.type === "chip" || n.type === "priceTable" || n.type === "productBlock" || n.type === "systemTotal") return false;
+    if (n.type === "chip" || n.type === "priceTable" || n.type === "productBlock" || n.type === "productImage" || n.type === "systemTotal") return false;
   }
   return true;
 }

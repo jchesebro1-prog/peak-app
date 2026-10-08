@@ -3,7 +3,7 @@ import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
 import { sinkListItem } from "@tiptap/pm/schema-list";
 import { TextSelection, type Command, type Transaction } from "@tiptap/pm/state";
 import StarterKit, { type StarterKitOptions } from "@tiptap/starter-kit";
-import { CHIP_KINDS, clampPhotoWidth, DEFAULT_PHOTO, HEADING_LEVELS, isChipKind, isPhotoAlign } from "@/lib/package-doc/schema";
+import { CHIP_KINDS, clampPhotoWidth, DEFAULT_IMAGE, DEFAULT_PHOTO, HEADING_LEVELS, isChipKind, isPhotoAlign } from "@/lib/package-doc/schema";
 import type { PhotoAttrs } from "@/lib/package-doc/types";
 
 /**
@@ -24,6 +24,8 @@ import type { PhotoAttrs } from "@/lib/package-doc/types";
  *  - chip: inline atom { kind, ref }. productBlock: block, `paragraph+`,
  *    { sectionId, lineKey, sku, photo }. priceTable, pageBreak: block atoms.
  *  - systemTotal: block atom { sectionId } — a system's live price line.
+ *  - productImage (#312): block atom { sectionId, lineKey, sku, align, width }
+ *    — a product's photo as its own piece.
  */
 
 export const STARTER_KIT_OPTIONS: Partial<StarterKitOptions> = {
@@ -204,7 +206,7 @@ export const ProductBlockNode = Node.create({
 });
 
 /** A block atom (no content); `attrs` adds attributes when it carries any. */
-const atomBlock = (name: "priceTable" | "pageBreak" | "systemTotal", attr: string, attrs?: () => Attributes) =>
+const atomBlock = (name: "priceTable" | "pageBreak" | "systemTotal" | "productImage", attr: string, attrs?: () => Attributes) =>
   Node.create({
     name,
     group: "block",
@@ -223,8 +225,26 @@ const atomBlock = (name: "priceTable" | "pageBreak" | "systemTotal", attr: strin
 export const PriceTableNode = atomBlock("priceTable", "data-pd-price-table");
 export const PageBreakNode = atomBlock("pageBreak", "data-pd-page-break");
 export const SystemTotalNode = atomBlock("systemTotal", "data-pd-system-total", () => ({ sectionId: stringAttr("sectionId", "data-section-id") }));
+export const ProductImageNode = atomBlock("productImage", "data-pd-product-image", () => ({
+  sectionId: stringAttr("sectionId", "data-section-id"),
+  lineKey: stringAttr("lineKey", "data-line-key"),
+  sku: stringAttr("sku", "data-sku"),
+  align: {
+    default: DEFAULT_IMAGE.align,
+    parseHTML: (el: HTMLElement) => {
+      const v = el.getAttribute("data-align");
+      return isPhotoAlign(v) ? v : DEFAULT_IMAGE.align;
+    },
+    renderHTML: (a: Record<string, unknown>) => ({ "data-align": String(a.align ?? DEFAULT_IMAGE.align) }),
+  },
+  width: {
+    default: DEFAULT_IMAGE.width,
+    parseHTML: (el: HTMLElement) => clampPhotoWidth(Number(el.getAttribute("data-width"))),
+    renderHTML: (a: Record<string, unknown>) => ({ "data-width": String(a.width ?? DEFAULT_IMAGE.width) }),
+  },
+}));
 
-export type DocNodeViews = Partial<Record<"chip" | "productBlock" | "priceTable" | "pageBreak" | "systemTotal", NodeViewRenderer>>;
+export type DocNodeViews = Partial<Record<"chip" | "productBlock" | "priceTable" | "pageBreak" | "systemTotal" | "productImage", NodeViewRenderer>>;
 
 /** The ONE extension list (extensions.ts passes the React node views). */
 export function buildExtensions(views: DocNodeViews = {}): AnyExtension[] {
@@ -237,6 +257,7 @@ export function buildExtensions(views: DocNodeViews = {}): AnyExtension[] {
     withView(PriceTableNode, views.priceTable),
     withView(PageBreakNode, views.pageBreak),
     withView(SystemTotalNode, views.systemTotal),
+    withView(ProductImageNode, views.productImage),
   ];
 }
 

@@ -6,9 +6,9 @@ import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import { findLine, findSection, resolveChip } from "./chips";
 import { productBlockInBom } from "./gaps";
-import { docBlockPlaceholder } from "./print";
+import { linePlaceholder } from "./print";
 import { clampPhotoWidth, LIST_START_MAX } from "./schema";
-import type { PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, PDOrderedList, PDParagraph, PDProductBlock, PhotoAlign } from "./types";
+import type { LineAnchor, PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, PDOrderedList, PDParagraph, PDProductBlock, PDProductImage, PhotoAlign } from "./types";
 
 /**
  * Estimator Phase 5 — the package document resolved for a CLIENT output:
@@ -24,6 +24,8 @@ import type { PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, P
  *   productBlock → heading = keyProductHeading(line) while the line is in the
  *     BOM (else none); photo (photo.show) = photos[sku] → the line's kind
  *     placeholder → none
+ *   productImage (#312) → the same photo source (photos[sku] → the line's
+ *     kind placeholder) with its own align / width; no source → dropped
  *   systemTotal → the system's name + systemSellTotal (alternate systems
  *     flagged); a missing system → dropped
  *   priceTable → printed In-total systems (name · systemSellTotal), the tax
@@ -48,11 +50,13 @@ export type RParagraph = { t: "p"; content: RInline[] };
 export type RList = { t: "ul" | "ol"; /** An ordered list that does not begin at 1. */ start?: number; items: Array<Array<RParagraph | RList>> };
 export type RPhoto = { src: string; alt: string; align: PhotoAlign; width: number };
 export type RProduct = { t: "product"; sku: string; heading: string | null; photo: RPhoto | null; paras: RParagraph[] };
+/** #312 — a product's photo on its own (no words, no heading). */
+export type RImage = { t: "image"; sku: string; photo: RPhoto };
 export type RPriceRow = { name: string; price: string };
 export type RPriceTable = { t: "price"; rows: RPriceRow[]; extra: RPriceRow[]; totalLabel: string; total: string; alternates: RPriceRow[] };
 /** A system's price line: its name and systemSellTotal; `alternate` adds " — priced separately". */
 export type RSysTotal = { t: "systotal"; name: string; price: string; alternate: boolean };
-export type RBlock = RParagraph | { t: "h"; level: 1 | 2 | 3; content: RInline[] } | RList | RProduct | RPriceTable | RSysTotal | { t: "pagebreak" };
+export type RBlock = RParagraph | { t: "h"; level: 1 | 2 | 3; content: RInline[] } | RList | RProduct | RImage | RPriceTable | RSysTotal | { t: "pagebreak" };
 export type ResolvedPackageDoc = { blocks: RBlock[] };
 
 function inline(content: readonly PDInline[] | undefined, ctx: PackageDocCtx): RInline[] {
@@ -87,20 +91,38 @@ function list(l: PDBulletList | PDOrderedList, ctx: PackageDocCtx): RList {
   };
 }
 
+/** The photo a line-anchored node prints: the part's own (photos[sku]) →
+ *  the line's kind placeholder → none. The one source for product blocks and
+ *  product images. */
+export function linePhotoSource(a: LineAnchor, ctx: Pick<PackageDocCtx, "sections" | "photos">): { src: string; alt: string } | undefined {
+  const ph = linePlaceholder(a, ctx.sections);
+  // Own-key lookup only: a `__proto__` / `constructor` sku must never read Object.prototype.
+  const own = ctx.photos && typeof a.sku === "string" && Object.hasOwn(ctx.photos, a.sku) ? ctx.photos[a.sku] : undefined;
+  return own ?? (ph ? { src: PLACEHOLDER_SRC[ph], alt: "" } : undefined);
+}
+
+const alignOf = (v: unknown): PhotoAlign => (v === "left" || v === "full" ? v : "right");
+
 function product(b: PDProductBlock, ctx: PackageDocCtx): RProduct {
   const a = b.attrs;
   const line = productBlockInBom(b, ctx.sections) ? findLine(findSection(ctx.sections, a.sectionId), a.lineKey) : undefined;
-  const ph = docBlockPlaceholder(b, ctx.sections);
-  // Own-key lookup only: a `__proto__` / `constructor` sku must never read Object.prototype.
-  const own = ctx.photos && Object.hasOwn(ctx.photos, a.sku) ? ctx.photos[a.sku] : undefined;
-  const src = a.photo?.show ? (own ?? (ph ? { src: PLACEHOLDER_SRC[ph], alt: "" } : undefined)) : undefined;
+  const src = a.photo?.show ? linePhotoSource(a, ctx) : undefined;
   return {
     t: "product",
     sku: a.sku,
     heading: line ? keyProductHeading(line) : null,
-    photo: src ? { src: src.src, alt: src.alt, align: a.photo.align === "left" || a.photo.align === "full" ? a.photo.align : "right", width: clampPhotoWidth(a.photo.width) } : null,
+    photo: src ? { src: src.src, alt: src.alt, align: alignOf(a.photo.align), width: clampPhotoWidth(a.photo.width) } : null,
     paras: (Array.isArray(b.content) ? b.content : []).map((p) => para(p, ctx)),
   };
+}
+
+/** A product image: its photo source with its own align / width, or null
+ *  (prints nothing) when no source resolves. */
+export function productImageOf(b: PDProductImage, ctx: Pick<PackageDocCtx, "sections" | "photos">): RImage | null {
+  const a = b?.attrs;
+  if (!a) return null;
+  const src = linePhotoSource(a, ctx);
+  return src ? { t: "image", sku: a.sku, photo: { src: src.src, alt: src.alt, align: alignOf(a.align), width: clampPhotoWidth(a.width) } } : null;
 }
 
 /** The live price table — the same numbers as QuoteDocument's totals block. */
@@ -139,6 +161,8 @@ function block(b: PDBlock, ctx: PackageDocCtx): RBlock | null {
       return list(b, ctx);
     case "productBlock":
       return product(b, ctx);
+    case "productImage":
+      return productImageOf(b, ctx);
     case "priceTable":
       return priceTableOf(ctx);
     case "systemTotal":

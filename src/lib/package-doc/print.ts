@@ -1,14 +1,14 @@
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { PlaceholderName } from "@/lib/part-image-fallback";
 import { findLine, findSection } from "./chips";
-import { productBlockInBom } from "./gaps";
-import { docPhotoSkus, docProductBlocks, isEmptyDoc } from "./text";
-import type { PackageDoc, PDProductBlock } from "./types";
+import { lineAnchorInBom } from "./gaps";
+import { docLineNodes, docPhotoSkus, isEmptyDoc } from "./text";
+import type { LineAnchor, PackageDoc, PDProductBlock } from "./types";
 
 /**
  * Estimator Phase 5 — what the client outputs need to print a package
- * document: whether one applies at all, which photo a product block takes
- * when the part has none of its own, and which document skus may take their
+ * document: whether one applies at all, which photo a product block or a
+ * product image (#312) takes when the part has none of its own, and which document skus may take their
  * manufacturer's image. Pure; client-safe.
  */
 
@@ -18,25 +18,32 @@ export function documentApplies(doc: PackageDoc | null | undefined): doc is Pack
   return !!doc && typeof doc === "object" && doc.type === "doc" && Array.isArray(doc.content) && !isEmptyDoc(doc);
 }
 
-/** The kind placeholder a product block prints when it has no photo of its
- *  own — the key products' rule (narrative.ts printableKeyProducts): an
- *  allowance line → allowance, a custom line → custom device. Only while the
- *  block's line is still in the BOM; otherwise none. */
-export function docBlockPlaceholder(block: PDProductBlock, sections: readonly SpecSection[]): PlaceholderName | undefined {
-  if (!productBlockInBom(block, sections)) return undefined;
-  const it = findLine(findSection(sections, block.attrs.sectionId), block.attrs.lineKey);
+/** The kind placeholder a line-anchored node (a product block's or a
+ *  product image's attrs) prints when the part has no photo of its own — the
+ *  key products' rule (narrative.ts printableKeyProducts): an allowance line →
+ *  allowance, a custom line → custom device. Only while the anchor's line is
+ *  still in the BOM; otherwise none. */
+export function linePlaceholder(a: LineAnchor | null | undefined, sections: readonly SpecSection[]): PlaceholderName | undefined {
+  if (!a || !lineAnchorInBom(a, sections)) return undefined;
+  const it = findLine(findSection(sections, a.sectionId), a.lineKey);
   return it?.allowance ? "allowance" : it?.custom ? "custom-device" : undefined;
 }
 
+/** A product block's kind placeholder (linePlaceholder on its attrs). */
+export function docBlockPlaceholder(block: PDProductBlock, sections: readonly SpecSection[]): PlaceholderName | undefined {
+  return linePlaceholder(block?.attrs, sections);
+}
+
 /** Document photo skus that may fall back to their manufacturer's image:
- *  every photo-on block's catalog sku except one whose block prints a kind
- *  placeholder (the placeholder comes before the manufacturer image). */
+ *  every product image's and photo-on block's catalog sku except one whose
+ *  node prints a kind placeholder (the placeholder comes before the
+ *  manufacturer image). */
 export function docManufacturerFallbackSkus(doc: PackageDoc | null | undefined, sections: readonly SpecSection[]): string[] {
   const want = new Set(docPhotoSkus(doc));
   const out: string[] = [];
-  for (const b of docProductBlocks(doc)) {
+  for (const b of docLineNodes(doc)) {
     const s = b.attrs?.sku;
-    if (!want.has(s) || out.includes(s) || docBlockPlaceholder(b, sections)) continue;
+    if (!want.has(s) || out.includes(s) || linePlaceholder(b.attrs, sections)) continue;
     out.push(s);
   }
   return out;

@@ -1,5 +1,6 @@
 import {
   clampPhotoWidth,
+  DEFAULT_IMAGE,
   DEFAULT_PHOTO,
   DOC_VERSION,
   isChipKind,
@@ -47,6 +48,11 @@ import type { PackageDoc, PDBlock, PDMark, PDMarkType, PhotoAttrs } from "./type
  *    gets one empty paragraph. Empty text nodes are dropped (ProseMirror rejects them).
  *  - A systemTotal (the live system price line) is an atom with one attr,
  *    `sectionId`; an empty or over-long sectionId drops the node.
+ *  - A productImage (#312, a product's photo as its own piece) is a top-level
+ *    atom `{ sectionId, lineKey, sku, align, width }` — the product block's
+ *    anchors (unusable anchors drop it: it has no words to keep), align →
+ *    left/right/full (default right), width → 25–100 (default 34); any
+ *    content is dropped.
  *  - An ordered list keeps an integer `start` of 2–9999 (1 is the default, dropped).
  *
  * Iterative (an explicit stack), never recursive, so hostile nesting can't
@@ -59,7 +65,7 @@ type Frame = { raw: unknown; parent: Container; depth: number; only?: "paragraph
 type Made = { node: { type: string; content?: unknown[] }; parent: Container; kind: Kind };
 
 const ALLOWED: Record<Kind, ReadonlySet<string>> = {
-  doc: new Set(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock", "systemTotal"]),
+  doc: new Set(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock", "productImage", "systemTotal"]),
   list: new Set(["listItem"]),
   listItem: new Set(["paragraph", "bulletList", "orderedList"]),
   productBlock: new Set(["paragraph"]),
@@ -221,6 +227,15 @@ export function sanitizePackageDoc(raw: unknown): PackageDoc | null {
         const sectionId = sectionIdOf(r.attrs);
         if (!sectionId) break;
         p.content.push({ type: "systemTotal", attrs: { sectionId } });
+        count++;
+        break;
+      }
+      case "productImage": {
+        // An atom anchored on one BOM line; unusable anchors → dropped.
+        const anchors = productAnchors(r.attrs);
+        if (!anchors) break;
+        const a = isObj(r.attrs) ? r.attrs : {};
+        p.content.push({ type: "productImage", attrs: { ...anchors, align: isPhotoAlign(a.align) ? a.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(a.width) } });
         count++;
         break;
       }

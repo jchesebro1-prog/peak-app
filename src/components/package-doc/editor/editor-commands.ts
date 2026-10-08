@@ -1,10 +1,10 @@
 import type { Editor, JSONContent } from "@tiptap/react";
 import { Fragment, Slice, type Node as PMNode } from "@tiptap/pm/model";
-import { NodeSelection, TextSelection, type EditorState, type Selection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection, type EditorState, type Selection, type Transaction } from "@tiptap/pm/state";
 import { dropPoint, type StepMap } from "@tiptap/pm/transform";
 import { textToParagraphs } from "@/lib/package-doc/text";
 import type { PhotoAttrs } from "@/lib/package-doc/types";
-import { withPhoto } from "./editor-model";
+import { withImage, withPhoto, type ImageAttrs } from "./editor-model";
 
 /**
  * Estimator Phase 5 — editor commands shared by the toolbar and the node
@@ -21,6 +21,66 @@ export function activeProductBlock(state: EditorState): { pos: number; node: PMN
     if (n.type.name === "productBlock") return { pos: $from.before(d), node: n };
   }
   return null;
+}
+
+/** What the toolbar's photo controls act on (#312): a selected product image,
+ *  else an (older) product block that still shows its own photo. A product
+ *  block whose photo is hidden — every block made since #312 — offers none. */
+export type PhotoTarget =
+  | { kind: "image"; pos: number; align: ImageAttrs["align"]; width: number }
+  | { kind: "block"; pos: number; align: PhotoAttrs["align"]; width: number; show: true };
+
+export function activePhotoTarget(state: EditorState): PhotoTarget | null {
+  const sel = state.selection;
+  if (sel instanceof NodeSelection && sel.node.type.name === "productImage") {
+    const img = withImage(sel.node.attrs as Partial<ImageAttrs>, {});
+    return { kind: "image", pos: sel.from, align: img.align, width: img.width };
+  }
+  const pb = activeProductBlock(state);
+  if (!pb) return null;
+  const photo = withPhoto(pb.node.attrs.photo as Partial<PhotoAttrs>, {});
+  return photo.show ? { kind: "block", pos: pb.pos, align: photo.align, width: photo.width, show: true } : null;
+}
+
+/** Patch a product image's align / width (clamped like the validator). */
+export function setImageAttrs(editor: Editor, pos: number, patch: Partial<ImageAttrs>): boolean {
+  const node = editor.state.doc.nodeAt(pos);
+  if (!node || node.type.name !== "productImage") return false;
+  const img = withImage(node.attrs as Partial<ImageAttrs>, patch);
+  return editor
+    .chain()
+    .command(({ tr }) => {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...img });
+      // Keep the image selected so its controls (and the toolbar's) stay up.
+      tr.setSelection(NodeSelection.create(tr.doc, pos));
+      return true;
+    })
+    .run();
+}
+
+/** "Separate photo" (#312) on an older product block whose photo shows: a
+ *  productImage with the block's anchors, align and width goes in right
+ *  before the block, and the block's photo is hidden — in ONE transaction
+ *  (one undo step). Pure on the transaction; false when `pos` isn't such a block. */
+export function separatePhotoIn(tr: Transaction, pos: number): boolean {
+  const node = tr.doc.nodeAt(pos);
+  const imageType = tr.doc.type.schema.nodes.productImage;
+  if (!node || node.type.name !== "productBlock" || !imageType) return false;
+  const photo = withPhoto(node.attrs.photo as Partial<PhotoAttrs>, {});
+  if (!photo.show) return false;
+  const image = imageType.create({ sectionId: node.attrs.sectionId, lineKey: node.attrs.lineKey, sku: node.attrs.sku, align: photo.align, width: photo.width });
+  tr.setNodeMarkup(pos, undefined, { ...node.attrs, photo: { ...photo, show: false } });
+  tr.insert(pos, image);
+  tr.setSelection(NodeSelection.create(tr.doc, pos));
+  return true;
+}
+
+export function separatePhoto(editor: Editor, pos: number): boolean {
+  return editor
+    .chain()
+    .focus()
+    .command(({ tr }) => separatePhotoIn(tr, pos))
+    .run();
 }
 
 /** Patch a product block's photo (clamped like the validator). */
@@ -167,12 +227,13 @@ export function appendBlocks(editor: Editor, json: JSONContent[]): boolean {
   return settleIntroSlot(editor.chain().focus().insertContentAt(editor.state.doc.content.size, json), json).scrollIntoView().run();
 }
 
-/** The first product block on this system + line (and sku, when given). */
+/** The first product block or product image (#312) on this system + line
+ *  (and sku, when given) — what a "No longer in BOM" gap row scrolls to. */
 export function findProductBlock(doc: PMNode, t: { sectionId: string; lineKey: string; sku?: string }): number {
   let found = -1;
   doc.descendants((n, pos) => {
     if (found >= 0) return false;
-    if (n.type.name !== "productBlock") return true;
+    if (n.type.name !== "productBlock" && n.type.name !== "productImage") return true;
     if (n.attrs.sectionId === t.sectionId && n.attrs.lineKey === t.lineKey && (!t.sku || n.attrs.sku === t.sku)) found = pos;
     return false;
   });

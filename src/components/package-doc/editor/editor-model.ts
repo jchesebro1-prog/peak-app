@@ -3,11 +3,11 @@ import type { KeyProductLibraryRow } from "@/app/(app)/estimator/narrative";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { findLine, findSection } from "@/lib/package-doc/chips";
 import { productBlockInBom } from "@/lib/package-doc/gaps";
-import { docBlockPlaceholder } from "@/lib/package-doc/print";
-import { clampPhotoWidth, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
+import { linePlaceholder } from "@/lib/package-doc/print";
+import { clampPhotoWidth, DEFAULT_IMAGE, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
 import { countNodes, sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { normalizeProductText } from "@/lib/package-doc/text";
-import type { PackageDoc, PDProductBlock, PhotoAttrs } from "@/lib/package-doc/types";
+import type { LineAnchor, PackageDoc, PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 
 /**
@@ -24,7 +24,10 @@ import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
  *    a silently cut document must never replace the stored one).
  *  - productBlockLabel / productPhotoPreview: what the product block's tag and
  *    photo preview show (the same photo order as the narrative column).
- *  - withPhoto: a photo patch, clamped the way the validator clamps.
+ *  - withPhoto / withImage: a photo / product-image patch, clamped the way
+ *    the validator clamps.
+ *  - linePhotoPreview (#312): the same preview for any line anchor — a
+ *    product image uses it exactly as an old photo'd product block does.
  */
 
 export type ProductTagState = "from" | "edited";
@@ -76,8 +79,17 @@ export function productPhotoPreview(
   sections: readonly SpecSection[],
   row?: KeyProductLibraryRow | null
 ): { src: string; note: string | null } | null {
+  return linePhotoPreview(block?.attrs, sections, row);
+}
+
+/** productPhotoPreview for any line anchor (a product block's or a product image's attrs). */
+export function linePhotoPreview(
+  a: LineAnchor | null | undefined,
+  sections: readonly SpecSection[],
+  row?: KeyProductLibraryRow | null
+): { src: string; note: string | null } | null {
   if (row && row.photoDocId) return { src: "/api/part-documents/" + encodeURIComponent(row.photoDocId), note: null };
-  const ph = docBlockPlaceholder(block, sections);
+  const ph = linePlaceholder(a, sections);
   if (ph === "allowance") return { src: PLACEHOLDER_SRC.allowance, note: "Prints the Allowance placeholder" };
   if (ph === "custom-device") return { src: PLACEHOLDER_SRC["custom-device"], note: "Prints the Custom Device placeholder" };
   if (row && row.fallbackDocId) return { src: "/api/part-documents/" + encodeURIComponent(row.fallbackDocId), note: `Prints the manufacturer image (${row.fallbackLabel || "manufacturer"})` };
@@ -89,6 +101,14 @@ export function withPhoto(photo: Partial<PhotoAttrs> | null | undefined, patch: 
   const cur = { show: true, align: "right" as const, width: 34, ...(photo || {}) };
   const next = { ...cur, ...patch };
   return { show: next.show !== false, align: isPhotoAlign(next.align) ? next.align : "right", width: clampPhotoWidth(next.width) };
+}
+
+export type ImageAttrs = { align: PhotoAlign; width: number };
+
+/** A product-image patch, clamped like the validator (width 25–100, align left/right/full). */
+export function withImage(img: Partial<ImageAttrs> | null | undefined, patch: Partial<ImageAttrs>): ImageAttrs {
+  const next = { ...DEFAULT_IMAGE, ...(img || {}), ...patch };
+  return { align: isPhotoAlign(next.align) ? next.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(next.width) };
 }
 
 export type DocSizeState = {

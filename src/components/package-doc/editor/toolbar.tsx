@@ -4,14 +4,15 @@ import type { CSSProperties } from "react";
 import { useEditorState, type Editor } from "@tiptap/react";
 import { clampPhotoWidth, PHOTO_WIDTH_MAX, PHOTO_WIDTH_MIN } from "@/lib/package-doc/schema";
 import type { PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
-import { activeProductBlock, insertBlock, setBlockPhoto } from "./editor-commands";
-import { withPhoto } from "./editor-model";
+import { activePhotoTarget, insertBlock, setBlockPhoto, setImageAttrs, type PhotoTarget } from "./editor-commands";
 
 /**
  * Estimator Phase 5 — the document toolbar: Normal / Heading 1–3, Bold,
  * Italic, Bullet list, Numbered list, Page break, + Price table; with a
- * product block selected (or the cursor in one): photo Left / Right / Full,
- * size (25–100 %) and Hide / Show photo.
+ * product image selected (#312): photo Left / Right / Full and size
+ * (25–100 %); with the cursor in an older product block that still shows
+ * its own photo: the same plus Hide photo. A block whose photo is hidden
+ * (every block made since #312) shows no photo controls.
  */
 
 const BTN: CSSProperties = {
@@ -36,21 +37,20 @@ type Snap = {
   italic: boolean;
   bullet: boolean;
   ordered: boolean;
-  product: { pos: number; photo: PhotoAttrs } | null;
+  photo: PhotoTarget | null;
 };
 
 export default function DocToolbar({ editor }: { editor: Editor }) {
   const s = useEditorState<Snap>({
     editor,
     selector: ({ editor: e }) => {
-      const pb = activeProductBlock(e.state);
       return {
         style: e.isActive("heading", { level: 1 }) ? "1" : e.isActive("heading", { level: 2 }) ? "2" : e.isActive("heading", { level: 3 }) ? "3" : "p",
         bold: e.isActive("bold"),
         italic: e.isActive("italic"),
         bullet: e.isActive("bulletList"),
         ordered: e.isActive("orderedList"),
-        product: pb ? { pos: pb.pos, photo: withPhoto(pb.node.attrs.photo as Partial<PhotoAttrs>, {}) } : null,
+        photo: activePhotoTarget(e.state),
       };
     },
   });
@@ -60,8 +60,11 @@ export default function DocToolbar({ editor }: { editor: Editor }) {
     if (v === "1" || v === "2" || v === "3") c.setHeading({ level: Number(v) as 1 | 2 | 3 }).run();
     else c.setParagraph().run();
   };
+  const t = s.photo;
   const photo = (patch: Partial<PhotoAttrs>) => {
-    if (s.product) setBlockPhoto(editor, s.product.pos, patch);
+    if (!t) return;
+    if (t.kind === "image") setImageAttrs(editor, t.pos, { ...(patch.align ? { align: patch.align } : {}), ...(patch.width !== undefined ? { width: patch.width } : {}) });
+    else setBlockPhoto(editor, t.pos, patch);
   };
 
   return (
@@ -98,12 +101,12 @@ export default function DocToolbar({ editor }: { editor: Editor }) {
       <button type="button" style={BTN} onClick={() => insertBlock(editor, { type: "priceTable" })}>
         + Price table
       </button>
-      {s.product && (
+      {t && (
         <>
           <span style={SEP} />
           <span style={{ fontSize: 11.5, color: "#5b616e", fontWeight: 600 }}>Photo</span>
           {ALIGNS.map(([a, l]) => (
-            <button key={a} type="button" aria-pressed={s.product!.photo.align === a} style={on(s.product!.photo.align === a)} disabled={!s.product!.photo.show} onClick={() => photo({ align: a })}>
+            <button key={a} type="button" aria-pressed={t.align === a} style={on(t.align === a)} onClick={() => photo({ align: a })}>
               {l}
             </button>
           ))}
@@ -115,16 +118,17 @@ export default function DocToolbar({ editor }: { editor: Editor }) {
               min={PHOTO_WIDTH_MIN}
               max={PHOTO_WIDTH_MAX}
               step={1}
-              value={s.product.photo.width}
-              disabled={!s.product.photo.show}
+              value={t.width}
               onChange={(e) => photo({ width: clampPhotoWidth(Number(e.target.value)) })}
               style={{ width: 100 }}
             />
-            <span style={{ fontFamily: "var(--font-mono)", minWidth: 32 }}>{s.product.photo.width}%</span>
+            <span style={{ fontFamily: "var(--font-mono)", minWidth: 32 }}>{t.width}%</span>
           </label>
-          <button type="button" aria-pressed={!s.product.photo.show} style={BTN} onClick={() => photo({ show: !s.product!.photo.show })}>
-            {s.product.photo.show ? "Hide photo" : "Show photo"}
-          </button>
+          {t.kind === "block" && (
+            <button type="button" style={BTN} onClick={() => photo({ show: false })}>
+              Hide photo
+            </button>
+          )}
         </>
       )}
     </div>

@@ -3,7 +3,7 @@ import { systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { chipRefExists, findLine, findSection, splitLineRef } from "./chips";
 import { inlineText, walkDoc } from "./text";
-import type { ChipKind, PackageDoc, PDProductBlock } from "./types";
+import type { ChipKind, LineAnchor, PackageDoc, PDProductBlock } from "./types";
 
 /**
  * Estimator Phase 5 — what the document is missing against the live BOM
@@ -11,11 +11,13 @@ import type { ChipKind, PackageDoc, PDProductBlock } from "./types";
  *  - removedChips: chips whose system/line no longer exists (deduped); a
  *    system price line (systemTotal) whose system is gone counts as a removed
  *    systemPrice chip.
- *  - productsNotInBom: product blocks whose line left its system, or whose
- *    line's sku changed (`No longer in BOM`; kept until the user deletes it).
+ *  - productsNotInBom: product blocks and product images (#312) whose line
+ *    left its system, or whose line's sku changed (`No longer in BOM`; kept
+ *    until the user deletes it). A block and an image of the same line share
+ *    one row.
  *  - systemsNotMentioned: printed In-total systems (systemPrintsInBody, not
- *    alternate) the document never refers to — no chip or product block on
- *    the system (a price line counts) and no heading whose text is its name (case-insensitive).
+ *    alternate) the document never refers to — no chip, product block or
+ *    product image on the system (a price line counts) and no heading whose text is its name (case-insensitive).
  *  - itemizedInAppendix: informational — the names of printed In-total
  *    systems whose presentation is itemized (or unset); with a document their
  *    lines print in the Itemized appendix whatever the toggle says
@@ -30,15 +32,20 @@ export type DocGaps = {
   itemizedInAppendix: string[];
 };
 
-/** Is this product block's line still in the BOM with the same anchor sku? */
-export function productBlockInBom(block: PDProductBlock, sections: readonly SpecSection[]): boolean {
-  const a = block?.attrs;
+/** Is this anchor's line still in the BOM with the same anchor sku? (A
+ *  product block's or a product image's attrs — the one rule for both.) */
+export function lineAnchorInBom(a: LineAnchor | null | undefined, sections: readonly SpecSection[]): boolean {
   if (!a) return false;
   const it = findLine(findSection(sections, a.sectionId), a.lineKey);
   if (!it) return false;
   if (!a.sku) return true;
   const own = typeof it.sku === "string" ? it.sku.trim() : "";
   return keyProductSkuOf(it) === a.sku || own === a.sku;
+}
+
+/** Is this product block's line still in the BOM with the same anchor sku? */
+export function productBlockInBom(block: PDProductBlock, sections: readonly SpecSection[]): boolean {
+  return lineAnchorInBom(block?.attrs, sections);
 }
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
@@ -72,11 +79,11 @@ export function docGaps(doc: PackageDoc | null | undefined, sections: readonly S
         seenChip.add(key);
         out.removedChips.push({ kind: "systemPrice", ref });
       }
-    } else if (n.type === "productBlock") {
+    } else if (n.type === "productBlock" || n.type === "productImage") {
       const { sectionId, lineKey, sku } = n.attrs;
       mentioned.add(sectionId);
       const key = sectionId + "\u0000" + lineKey + "\u0000" + sku;
-      if (!productBlockInBom(n, secs) && !seenBlock.has(key)) {
+      if (!lineAnchorInBom(n.attrs, secs) && !seenBlock.has(key)) {
         seenBlock.add(key);
         out.productsNotInBom.push({ sectionId, lineKey, sku });
       }

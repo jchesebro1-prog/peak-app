@@ -7,7 +7,7 @@ import type { PackageDoc } from "./types";
  * `sys<N>` and line ids as numbers from one counter seeded on load. A chip or
  * product block stores such an id; if the counter were seeded only from the
  * CURRENT sections, deleting the highest system/line and reloading would
- * reissue its id and an old reference would silently re-bind to the new one.
+ * reissue its id and an old reference (a product image's too, #312) would silently re-bind to the new one.
  * docIdFloor is the highest numeric id the document refers to, so the counter
  * starts above it. Ids beyond MAX_FLOOR are ignored (a hostile document can't
  * push the counter out of range). Pure; client-safe.
@@ -39,7 +39,7 @@ export function docIdFloor(doc: PackageDoc | null | undefined): number {
       }
     } else if (node.type === "systemTotal") {
       n = bump(n, node.attrs.sectionId, SYS_RE);
-    } else if (node.type === "productBlock") {
+    } else if (node.type === "productBlock" || node.type === "productImage") {
       n = bump(n, node.attrs.sectionId, SYS_RE);
       n = bump(n, node.attrs.lineKey, NUM_RE);
     }

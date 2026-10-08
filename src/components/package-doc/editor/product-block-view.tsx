@@ -7,7 +7,7 @@ import { clampPhotoWidth, PHOTO_WIDTH_MAX, PHOTO_WIDTH_MIN } from "@/lib/package
 import { productBlockText } from "@/lib/package-doc/text";
 import type { PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
 import { usePackageDocEnv } from "./editor-context";
-import { deleteNodeAt, revertProductBlock, setBlockPhoto } from "./editor-commands";
+import { deleteNodeAt, revertProductBlock, separatePhoto, setBlockPhoto } from "./editor-commands";
 import { customLineTagText, isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState, productTagText, SAVED_TO_PRODUCT_MS, withPhoto } from "./editor-model";
 
 /**
@@ -17,8 +17,13 @@ import { customLineTagText, isLineTokenSku, productBlockLabel, productPhotoPrevi
  * line: `<label> · custom line`, no Save or Revert); Save to product
  * (create permission, stale-checked against the library row's stamp) and
  * Revert (the library paragraph); amber `No longer in BOM` while its line is
- * gone (kept until deleted); the photo preview with Left / Right / Full, size
- * and Show / Hide photo when selected.
+ * gone (kept until deleted). Since #312 a product's photo is its own
+ * productImage and a block holds words only (photo.show false: no photo
+ * controls). An OLDER block whose photo still shows keeps its preview with
+ * Left / Right / Full, size and Hide photo when selected, plus `Separate
+ * photo` (the photo becomes a productImage before the block, one undo step).
+ * Only a block that shows a photo is a flow-root (its own float stays
+ * inside); a words-only block lets a product image before it wrap its text.
  */
 
 const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer" };
@@ -112,6 +117,12 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
     const p = pos();
     if (p !== null) deleteNodeAt(editor, p);
   };
+  const onSeparate = () => {
+    const p = pos();
+    if (p !== null) separatePhoto(editor, p);
+  };
+  /** An older block that still prints its own photo (#312: new blocks never do). */
+  const ownPhoto = !!preview && photo.show;
 
   const imgStyle: CSSProperties =
     photo.align === "full"
@@ -128,7 +139,7 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
       onMouseLeave={() => setHover(false)}
       style={{
         position: "relative",
-        display: "flow-root",
+        display: photo.show ? "flow-root" : "block",
         margin: "14px -10px",
         padding: "6px 10px 8px",
         borderRadius: 6,
@@ -156,9 +167,14 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
                 Revert
               </button>
             )}
-            {preview && (
-              <button type="button" style={BTN} aria-pressed={photo.show} onClick={() => patchPhoto({ show: !photo.show })}>
-                {photo.show ? "Hide photo" : "Show photo"}
+            {photo.show && (
+              <button type="button" style={BTN} title="Make the photo its own piece you can move around the document" onClick={onSeparate}>
+                Separate photo
+              </button>
+            )}
+            {ownPhoto && (
+              <button type="button" style={BTN} onClick={() => patchPhoto({ show: false })}>
+                Hide photo
               </button>
             )}
             <button type="button" style={{ ...BTN, color: "#b4543a" }} title="Remove this product block" onClick={onRemove}>
@@ -188,7 +204,7 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
         </div>
       )}
 
-      {active && preview && photo.show && (
+      {active && ownPhoto && preview && (
         <div contentEditable={false} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 11, color: "#5b616e", userSelect: "none" }}>
           <span role="group" aria-label="Photo position" style={{ display: "inline-flex", gap: 3 }}>
             {ALIGNS.map(([a, l]) => (
@@ -214,12 +230,10 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
         </div>
       )}
 
-      {preview && photo.show && (
+      {ownPhoto && preview && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={preview.src} alt="" contentEditable={false} draggable={false} style={imgStyle} />
       )}
-      {preview && !photo.show && active && <div contentEditable={false} style={{ fontSize: 11, color: "#8c919c", marginBottom: 4 }}>Photo hidden</div>}
-      {!preview && row && active && <div contentEditable={false} style={{ fontSize: 11, color: "#8c919c", marginBottom: 4 }}>No photo for this part</div>}
 
       <NodeViewContent className="pd-ed-product-text" />
     </NodeViewWrapper>

@@ -57096,7 +57096,7 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   const J = (x: unknown) => JSON.stringify(x);
 
   // Schema as data.
-  ok(J(p5s.BLOCK_NODES) === J(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock", "systemTotal"]) &&
+  ok(J(p5s.BLOCK_NODES) === J(["paragraph", "heading", "bulletList", "orderedList", "pageBreak", "priceTable", "productBlock", "productImage", "systemTotal"]) &&
     J(p5s.INLINE_NODES) === J(["text", "hardBreak", "chip"]) && J(p5s.MARK_NAMES) === J(["bold", "italic"]) &&
     J(p5s.CHIP_KINDS) === J(["systemPrice", "systemName", "lineQty", "quoteNumber", "grandTotal"]) && J(p5s.PHOTO_ALIGNS) === J(["left", "right", "full"]),
     "#P5 model: the schema lists are exactly the spec's nodes, marks, chip kinds and photo aligns");
@@ -57202,24 +57202,25 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   const groups = [{ id: "g1", name: "Options", alternate: true }];
   const seeded = p5Seed({ sections: secs, groups });
   const types = seeded.content.map((b) => b.type + (b.type === "heading" ? b.attrs.level + ":" + p5t.inlineText(b.content) : ""));
-  ok(J(types) === J(["heading2:Stage lighting", "paragraph", "bulletList", "productBlock", "productBlock", "systemTotal", "heading2:Sys Two", "systemTotal", "priceTable", `heading1:${p5AltH}`, "heading2:Alt sys", "paragraph", "systemTotal"]),
-    "#P5 model: seed — In-total systems in Build order (heading + intro + key products + its price line, #312), the price table, then 'Alternates' + alternate systems; zero-revenue systems skipped");
-  ok(J(seeded.content[5]) === J({ type: "systemTotal", attrs: { sectionId: "s1" } }) && J(seeded.content[7]) === J({ type: "systemTotal", attrs: { sectionId: "s2" } }) &&
-     J(seeded.content[12]) === J({ type: "systemTotal", attrs: { sectionId: "s3" } }) && !seeded.content.some((b) => b.type === "paragraph" && (b.content || []).some((c) => c.type === "chip")),
+  ok(J(types) === J(["heading2:Stage lighting", "paragraph", "bulletList", "productImage", "productBlock", "productBlock", "systemTotal", "heading2:Sys Two", "systemTotal", "priceTable", `heading1:${p5AltH}`, "heading2:Alt sys", "paragraph", "systemTotal"]),
+    "#P5 model: seed — In-total systems in Build order (heading + intro + key products (#312: a photo'd one's productImage, then its words) + its price line, #312), the price table, then 'Alternates' + alternate systems; zero-revenue systems skipped");
+  ok(J(seeded.content[6]) === J({ type: "systemTotal", attrs: { sectionId: "s1" } }) && J(seeded.content[8]) === J({ type: "systemTotal", attrs: { sectionId: "s2" } }) &&
+     J(seeded.content[13]) === J({ type: "systemTotal", attrs: { sectionId: "s3" } }) && !seeded.content.some((b) => b.type === "paragraph" && (b.content || []).some((c) => c.type === "chip")),
     "#P5 model: seed — each system ends with its systemTotal price line (#312); no price-chip paragraph under the heading");
   ok(J(seeded.content[1]) === J({ type: "paragraph", content: [{ type: "text", text: "Intro para" }, { type: "hardBreak" }, { type: "text", text: "line 2" }] }) &&
     J(seeded.content[2]) === J({ type: "bulletList", content: [{ type: "listItem", content: [P("b1")] }, { type: "listItem", content: [P("b2")] }] }) &&
-    J(seeded.content[8]) === J({ type: "priceTable" }) && J(seeded.content[11]) === J(P("Alt words")),
+    J(seeded.content[9]) === J({ type: "priceTable" }) && J(seeded.content[12]) === J(P("Alt words")),
     "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a system with no narrative gets just its heading and price line");
-  const kp1 = seeded.content[3] as P5PB, kp2 = seeded.content[4] as P5PB;
-  ok(J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: true, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
+  const kp1 = seeded.content[4] as P5PB, kp2 = seeded.content[5] as P5PB;
+  ok(J(seeded.content[3]) === J({ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU1", align: "right", width: 34 } }) &&
+    J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: false, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
     p5t.productBlockText(kp1) === "Fixture one paragraph.\n\nSecond para." && p5t.productBlockText(kp2) === "- f1\n- f2",
-    "#P5 model: seed — product blocks for printable key products only (missing line skipped), photo { show: kp.photo, right, 34 }, words read back verbatim");
+    "#P5 model: seed — product blocks for printable key products only (missing line skipped), words read back verbatim; #312: the photo is its own productImage (right, 34) before the words when kp.photo, the block's own photo hidden");
   ok(J(p5San(seeded)) === J(seeded) && J(p5Seed({ sections: [], groups: [] }).content) === J([{ type: "priceTable" }]),
     "#P5 model: a seed is already valid; an estimate with no printed systems seeds just the price table");
   const huge = Array.from({ length: 40 }, (_, i) => S({ ...s1, id: "h" + i, narrative: "y".repeat(8000) })) as unknown as P5Section[];
   const hugeSeed = p5Seed({ sections: huge });
-  ok(p5San(hugeSeed) !== null && hugeSeed.content.length === 81 && hugeSeed.content.every((b) => b.type !== "productBlock"),
+  ok(p5San(hugeSeed) !== null && hugeSeed.content.length === 81 && hugeSeed.content.every((b) => b.type !== "productBlock" && b.type !== "productImage"),
     "#P5 model: a seed too big for the caps falls back to headings + price lines + the table");
   ok(J(p5SysHead({ id: "s9", name: "  " })[0]) === J({ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Untitled system" }] }) &&
     J(p5PB("s1", 4, "X", "").content) === J([{ type: "paragraph" }]),
@@ -57802,12 +57803,12 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
   const pbSrc = rd(`${ED}/product-block-view.tsx`), chipSrc = rd(`${ED}/chip-view.tsx`), tbSrc = rd(`${ED}/toolbar.tsx`);
   ok(pbSrc.includes('"Save to product"') && />\s*Revert\s*</.test(pbSrc) && pbSrc.includes(">No longer in BOM<") && pbSrc.includes("productTagText(label, state)") &&
      pbSrc.includes("env.onSaveToProduct(sku, text, expect)") && pbSrc.includes("doSave(row?.paragraphUpdatedAt ?? null)") && pbSrc.includes("revertProductBlock(editor, p, row.paragraph)") &&
-     pbSrc.includes('"Hide photo" : "Show photo"') && pbSrc.includes("selectionInside") && /1\.5px dashed/.test(pbSrc),
-    "#P5 editor: product block — dashed outline on hover / cursor, tag, Save to product (stamp from the library row), Revert, No longer in BOM, Hide / Show photo");
+     />\s*Hide photo\s*</.test(pbSrc) && />\s*Separate photo\s*</.test(pbSrc) && pbSrc.includes("selectionInside") && /1\.5px dashed/.test(pbSrc),
+    "#P5 editor: product block — dashed outline on hover / cursor, tag, Save to product (stamp from the library row), Revert, No longer in BOM; #312: an older block showing its photo has Hide photo + Separate photo (no Show photo)");
   ok(chipSrc.includes('removed ? "removed"') && chipSrc.includes("resolveChip("), "#P5 editor: a chip shows its live value, or amber 'removed'");
-  ok(["Normal", "Heading 1", "Heading 2", "Heading 3", '"Bold"', '"Italic"', "Bullet list", "Numbered list", "Page break", "+ Price table", '"Left"', '"Right"', '"Full"', '"Hide photo" : "Show photo"'].every((c) => tbSrc.includes(c)) &&
-     tbSrc.includes("{s.product && (") && tbSrc.includes('min={PHOTO_WIDTH_MIN}') && tbSrc.includes('max={PHOTO_WIDTH_MAX}'),
-    "#P5 editor: toolbar — Normal / Heading 1–3, Bold, Italic, lists, Page break, + Price table; photo Left / Right / Full, size 25–100, Hide / Show with a product block selected");
+  ok(["Normal", "Heading 1", "Heading 2", "Heading 3", '"Bold"', '"Italic"', "Bullet list", "Numbered list", "Page break", "+ Price table", '"Left"', '"Right"', '"Full"', "Hide photo"].every((c) => tbSrc.includes(c)) &&
+     tbSrc.includes("photo: activePhotoTarget(e.state)") && tbSrc.includes("{t && (") && tbSrc.includes('min={PHOTO_WIDTH_MIN}') && tbSrc.includes('max={PHOTO_WIDTH_MAX}'),
+    "#P5 editor: toolbar — Normal / Heading 1–3, Bold, Italic, lists, Page break, + Price table; photo Left / Right / Full, size 25–100 with a product image selected (#312) or an older photo'd product block (+ Hide photo)");
 
   // (9) Build package: Start / Remove / Narrative fields; the hook prefetches document skus.
   ok(/onClick=\{startDocument\}>\s*Start the document\s*<\/button>/.test(pkgStep) && pkgStep.includes("setPackageDoc(seedPackageDoc({ sections, groups }));") &&
@@ -57971,10 +57972,10 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
   ok(valid(sys) && J(sys) === J([H("Lighting"), P(), { type: "systemTotal", attrs: { sectionId: "s2" } }]),
     "#P5 left pane: a system drops as a level-2 heading with its name + an empty paragraph (the cursor lands there) + its live price line (#312)");
   const line5 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "5" }, secs, paraOf);
-  ok(valid(line5) && J(line5) === J([{ type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: true, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
-    "#P5 left pane: a line drops as a product block (sectionId / lineKey / sku, photo right 34 %) holding its library paragraph split into paragraphs");
+  ok(valid(line5) && J(line5) === J([{ type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 } }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
+    "#P5 left pane: a line drops as its productImage (right 34 %, #312) + a product block (sectionId / lineKey / sku, own photo hidden) holding its library paragraph split into paragraphs");
   const line6 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, paraOf);
-  ok(valid(line6) && J((line6![0] as { content: unknown }).content) === J([P()]),
+  ok(valid(line6) && J((line6![1] as { content: unknown }).content) === J([P()]),
     "#P5 left pane: a line with no library paragraph drops with one empty paragraph");
   asked.length = 0;
   const allow = p5l.docNodesFor({ kind: "line", sectionId: "s1", lineKey: "2" }, secs, paraOf);
@@ -58691,8 +58692,8 @@ import * as rean312 from "@/lib/package-doc/reanchor";
     "#312 fix1: reanchorDocLine rewrites only the matching section + line block, never mutates the input, keeps untouched nodes' identity");
   ok(rean312.reanchorDocLine(doc, "s1", "7", "line:7") === null && rean312.reanchorDocLine(doc, "s1", "99", "Z") === null && rean312.reanchorDocLine(null, "s1", "7", "Z") === null,
     "#312 fix1: reanchorDocLine returns null when unchanged, no block matches, or there is no document");
-  ok(Array.isArray(rean312.LINE_ANCHORED_NODES) && rean312.LINE_ANCHORED_NODES.length === 1 && rean312.LINE_ANCHORED_NODES[0] === "productBlock" && /LINE_ANCHORED_NODES/.test(rd("src/lib/package-doc/reanchor.ts")),
-    "#312 fix1: line-anchored node types are listed in one const");
+  ok(Array.isArray(rean312.LINE_ANCHORED_NODES) && JSON.stringify(rean312.LINE_ANCHORED_NODES) === JSON.stringify(["productBlock", "productImage"]) && /LINE_ANCHORED_NODES/.test(rd("src/lib/package-doc/reanchor.ts")),
+    "#312 fix1: line-anchored node types are listed in one const (productImage joined in #312 images)");
   const nested = { type: "doc", version: 1, content: [{ type: "bulletList", content: [{ type: "listItem", content: [pb("s1", "7", "line:7")] }] }] } as unknown as Parameters<typeof rean312.reanchorDocLine>[0];
   ok(JSON.stringify(rean312.reanchorDocLine(nested, "s1", "7", "Q")).includes('"sku":"Q"'), "#312 fix1: reanchorDocLine also reaches nested blocks");
 
@@ -58704,4 +58705,185 @@ import * as rean312 from "@/lib/package-doc/reanchor";
      hook.includes("sectionsRef.current.find((x) => x.id === secId)?.items.some((x) => x.id === editId)"),
     "#312 fix1: a line removed before saving or during the catalog save shows 'That line was removed — nothing was changed.' and keeps the form open");
   ok(!/customEdit[\s\S]{0,400}adds fresh/.test(hook) && !/specKey: d\.specKey/.test(hook), "#312 fix1: no add-fresh fallback for a removed line, and no CustomDraft.specKey");
+}
+
+// ---- #312 images: the product photo as its own piece (productImage) ----
+import { activePhotoTarget as i312Target, findProductBlock as i312Find, separatePhotoIn as i312Sep } from "@/components/package-doc/editor/editor-commands";
+import { linePhotoSource as i312Src, productImageOf as i312Img } from "@/lib/package-doc/resolve";
+import { keyProductBlocks as i312Kp, productImageFor as i312ImgFor, productNodesFor as i312Nodes } from "@/lib/package-doc/seed";
+import { linePlaceholder as i312Ph } from "@/lib/package-doc/print";
+import { lineAnchorInBom as i312InBom } from "@/lib/package-doc/gaps";
+import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  const ED = "src/components/package-doc/editor";
+  const T = (text: string) => ({ type: "text", text });
+  const P = (text?: string) => ({ type: "paragraph", ...(text ? { content: [T(text)] } : {}) });
+  const doc = (content: unknown[]) => ({ type: "doc", version: 1, content });
+  const IMG = (sectionId: string, lineKey: string, sku: string, align: string = "right", width: number = 34) => ({ type: "productImage", attrs: { sectionId, lineKey, sku, align, width } });
+  const PB = (sectionId: string, lineKey: string, sku: string, text: string, photo: Record<string, unknown> = {}) =>
+    ({ type: "productBlock", attrs: { sectionId, lineKey, sku, photo: { show: true, align: "right", width: 34, ...photo } }, content: [P(text)] });
+  type Secs = ReturnType<typeof p5rSections>;
+  const base = p5rSections();
+  // + a custom line (s1 line 9): its anchor is the line:9 token and it prints the Custom Device placeholder.
+  const secs = base.map((s) => (s.id === "s1" ? { ...s, items: [...s.items, { ...s.items[0], id: 9, sku: "CUSTOM", desc: "Custom bracket", custom: true }] } : s)) as Secs;
+  const photos = { "SKU-5": { src: "data:image/png;base64,I5", alt: "Five" }, "GONE-77": { src: "data:image/png;base64,I77", alt: "Gone" } };
+  const ctx = { sections: secs, t: { grand: 4321, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos };
+
+  // (1) Sanitizer.
+  ok(J(p5San(doc([IMG("s2", "5", "SKU-5", "left", 40)]))) === J(doc([IMG("s2", "5", "SKU-5", "left", 40)])) &&
+     J(p5San(doc([{ type: "productImage", attrs: { width: 40, align: "full", sku: " SKU-5 ", lineKey: 5, sectionId: " s2 ", extra: 1, photo: { show: true } }, content: [P("x")] }]))) === J(doc([IMG("s2", "5", "SKU-5", "full", 40)])),
+    "#312 images: the sanitizer keeps a productImage { sectionId, lineKey, sku, align, width } in that order, trims anchors, drops other attrs and any content");
+  const coerced = p5San(doc([IMG("s2", "5", "A", "middle", 5), IMG("s2", "5", "A", "left", 300), IMG("s2", "5", "A", "right", 62.4), { type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "A", width: "x" } }]))!;
+  ok(J(coerced.content.map((b) => [(b as { attrs: { align: string } }).attrs.align, (b as { attrs: { width: number } }).attrs.width])) === J([["right", 25], ["left", 100], ["right", 62], ["right", 34]]),
+    "#312 images: align coerces to left/right/full (default right), width clamps to 25–100 and rounds (non-number → 34)");
+  const dropped = p5San(doc([P("keep"), { type: "productImage" }, IMG("", "5", "A"), IMG("s2", "", "A"), IMG("x".repeat(65), "5", "A"), IMG("s2", "x".repeat(33), "A"), IMG("s2", "5", "x".repeat(129)),
+    { type: "bulletList", content: [{ type: "listItem", content: [P("li"), IMG("s2", "5", "A")] }] }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "A" }, content: [P("w"), IMG("s2", "5", "A")] },
+    { type: "paragraph", content: [IMG("s2", "5", "A")] }]))!;
+  ok(!J(dropped).includes("productImage") && J(dropped.content[0]) === J(P("keep")),
+    "#312 images: a productImage with unusable anchors is dropped (it has no words to keep); inside a list item, product block or paragraph it is dropped (top-level only)");
+  const blankSku = p5San(doc([IMG("s2", "5", "")]))!;
+  const once = p5San(doc([IMG("s2", "5", "SKU-5"), PB("s2", "5", "SKU-5", "w", { show: false }), IMG("s2", "5", "SKU-5", "full", 80)]))!;
+  ok(J(blankSku.content[0]) === J(IMG("s2", "5", "")) && J(p5San(once)) === J(once) && once.content.length === 3 &&
+     p5s.BLOCK_NODES.includes("productImage") && (p5s.NODE_NAMES as readonly string[]).includes("productImage") && J(p5s.DEFAULT_IMAGE) === J({ align: "right", width: 34 }),
+    "#312 images: a blank sku is kept (like a product block); sanitize is idempotent; productImage is in the schema lists; the default image is right at 34 %");
+
+  // (2) Resolver: own photo, kind placeholder, nothing.
+  const r = p5rResolve(p5San(doc([IMG("s2", "5", "SKU-5", "left", 40), IMG("s1", "2", "line:2", "full", 60), IMG("s1", "9", "line:9"), IMG("s2", "6", "SKU-6"), IMG("s1", "77", "GONE-77", "right", 50), IMG("s1", "88", "line:88"), IMG("s2", "5", "__proto__")]))!, ctx);
+  ok(J(r.blocks) === J([
+      { t: "image", sku: "SKU-5", photo: { src: "data:image/png;base64,I5", alt: "Five", align: "left", width: 40 } },
+      { t: "image", sku: "line:2", photo: { src: "/placeholders/allowance.webp", alt: "", align: "full", width: 60 } },
+      { t: "image", sku: "line:9", photo: { src: "/placeholders/custom-device.webp", alt: "", align: "right", width: 34 } },
+      { t: "image", sku: "GONE-77", photo: { src: "data:image/png;base64,I77", alt: "Gone", align: "right", width: 50 } },
+    ]),
+    "#312 images: resolver — the part's own photo (photos[sku]) with the image's align/width; else the line's kind placeholder (allowance / custom device); no source (or a `__proto__` sku) → nothing; a line gone from the BOM still prints its own photo");
+  const hidden = p5rResolve(p5San(doc([PB("s2", "5", "SKU-5", "Words.", { show: false }), IMG("s2", "6", "SKU-6")]))!, ctx);
+  ok(hidden.blocks.length === 1 && (hidden.blocks[0] as { t: string; photo: unknown }).t === "product" && (hidden.blocks[0] as { photo: unknown }).photo === null,
+    "#312 images: a words-only product block (photo hidden) prints no photo of its own; an image with no source prints nothing at all");
+  ok(J(i312Src({ sectionId: "s2", lineKey: "5", sku: "SKU-5" }, ctx)) === J(photos["SKU-5"]) && i312Src({ sectionId: "s1", lineKey: "2", sku: "line:2" }, { sections: secs })!.src === "/placeholders/allowance.webp" &&
+     i312Img({ type: "productImage", attrs: { sectionId: "s2", lineKey: "6", sku: "SKU-6", align: "right", width: 34 } }, ctx) === null &&
+     i312Ph({ sectionId: "s1", lineKey: "2", sku: "line:2" }, secs) === "allowance" && i312Ph({ sectionId: "s1", lineKey: "2", sku: "OTHER" }, secs) === undefined &&
+     i312InBom({ sectionId: "s1", lineKey: "9", sku: "line:9" }, secs) && !i312InBom({ sectionId: "s1", lineKey: "77", sku: "GONE-77" }, secs) && i312InBom({ sectionId: "s1", lineKey: "1", sku: "" }, secs),
+    "#312 images: one photo source for blocks and images (linePhotoSource / linePlaceholder / lineAnchorInBom take { sectionId, lineKey, sku })");
+
+  // (3) Renderer.
+  const html = p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([{ type: "heading", attrs: { level: 2 }, content: [T("Rigging")] }, IMG("s2", "5", "SKU-5", "left", 40), PB("s2", "5", "SKU-5", "Words beside.", { show: false }), IMG("s1", "2", "line:2", "full", 60), IMG("s2", "6", "SKU-6")]))!, ctx }));
+  ok(html.includes('<div class="pd-image" data-sku="SKU-5"><img src="data:image/png;base64,I5" alt="Five" style="float:left;width:40%;max-height:2.4in;object-fit:contain;margin:0 14px 8px 0"/></div>') &&
+     html.includes('<div class="pd-image" data-sku="line:2"><img src="/placeholders/allowance.webp" alt="" style="display:block;width:60%;max-height:4in;object-fit:contain;margin:0 auto 10px"/></div>') &&
+     !html.includes('data-sku="SKU-6"') && html.indexOf('class="pd-image" data-sku="SKU-5"') < html.indexOf("Words beside.") &&
+     html.includes('<div class="pd-product" data-sku="SKU-5" style="display:block;margin:12px 0">'),
+    "#312 images: renders just the image — floated left/right at width % (max-height 2.4in) or full (block, centred, max-height 4in) — before the words, which (a plain block, not a flow-root) wrap beside it; no source prints nothing");
+  ok(p5rCss.includes(".pd-doc h2, .pd-doc h3, .pd-doc h4, .pd-doc .pd-pagebreak { clear: both; }") && p5rCss.includes(".pd-doc .pd-image, .pd-doc .pd-image img { break-inside: avoid; page-break-inside: avoid; }") &&
+     /@media \(max-width: 480px\) \{[^}]*\}\s*\.pd-doc \.pd-image img \{ float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; \}\s*\}/.test(p5rCss),
+    "#312 images: headings (and page breaks) clear floats so an image never spills into the next system; images keep together in print; phones (≤ 480px) put every image full width");
+  const printed = p5rRender({ ...p5rProps({ sections: base, document: doc([P("Before."), IMG("s2", "5", "SKU-5"), PB("s2", "5", "SKU-5", "Five words.", { show: false })]) }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,I5P", alt: "Five" } } });
+  const noPhoto = p5rRender(p5rProps({ sections: base, document: doc([P("Before."), IMG("s2", "5", "SKU-5")]) }));
+  ok(printed.includes('<div class="pd-image" data-sku="SKU-5"><img src="data:image/png;base64,I5P"') && printed.indexOf("Before.") < printed.indexOf('class="pd-image"') && printed.indexOf('class="pd-image"') < printed.indexOf("Five words.") &&
+     noPhoto.includes("Before.") && !noPhoto.includes('class="pd-image"'),
+    "#312 images: the customer document prints the image where it sits; with no photo it prints nothing");
+
+  // (4) Old documents: a photo'd product block resolves byte-identically to before #312 (snapshot taken on da0cb193).
+  const OLD_JSON = String.raw`{"r":{"blocks":[{"t":"h","level":2,"content":[{"t":"text","text":"Rigging"}]},{"t":"product","sku":"SKU-5","heading":"Line 5","photo":{"src":"data:image/png;base64,P5R5","alt":"Five","align":"right","width":40},"paras":[{"t":"p","content":[{"t":"text","text":"Five words."}]}]},{"t":"product","sku":"SKU-6","heading":"Line 6","photo":{"src":"data:image/png;base64,P5R6","alt":"Six","align":"left","width":30},"paras":[{"t":"p","content":[{"t":"text","text":"Six words."}]}]},{"t":"product","sku":"SKU-1","heading":"Line 1","photo":{"src":"data:image/png;base64,P5R1","alt":"One","align":"full","width":60},"paras":[{"t":"p","content":[{"t":"text","text":"One words."}]}]},{"t":"product","sku":"SKU-4","heading":"Line 4","photo":null,"paras":[{"t":"p","content":[{"t":"text","text":"Hidden photo."}]}]},{"t":"product","sku":"SKU-2","heading":"Budget allowance — Line 2","photo":{"src":"/placeholders/allowance.webp","alt":"","align":"right","width":34},"paras":[{"t":"p","content":[{"t":"text","text":"Allowance words."}]}]},{"t":"product","sku":"line:3","heading":null,"photo":null,"paras":[{"t":"p","content":[{"t":"text","text":"Token words."}]}]},{"t":"product","sku":"GONE-77","heading":null,"photo":null,"paras":[{"t":"p","content":[{"t":"text","text":"Orphan words."}]}]},{"t":"systotal","name":"Rigging","price":"$153.00","alternate":false},{"t":"price","rows":[{"name":"Rigging","price":"$153.00"},{"name":"Lighting","price":"$100.00"},{"name":"Install","price":"$50.00"},{"name":"Empty narrative","price":"$50.00"}],"extra":[],"totalLabel":"Total","total":"$4,321.00","alternates":[]}]},"photo":["SKU-5","SKU-6","SKU-1","SKU-2","GONE-77"],"prod":["SKU-5","SKU-6","SKU-1","SKU-4","SKU-2","line:3","GONE-77"],"mfr":["SKU-5","SKU-6","SKU-1","GONE-77"],"gaps":{"removedChips":[],"productsNotInBom":[{"sectionId":"s1","lineKey":"3","sku":"line:3"},{"sectionId":"s1","lineKey":"77","sku":"GONE-77"}],"systemsNotMentioned":[{"id":"s3","name":"Install"},{"id":"s4","name":"Empty narrative"}],"itemizedInAppendix":["Rigging","Install"]}}`;
+  const OLD_HTML = String.raw`<link rel="preload" as="image" href="/placeholders/allowance.webp"/><div class="pd-doc"><h3 style="font-size:1.14em;font-weight:700;color:#16181d;margin:16px 0 6px;line-height:1.3">Rigging</h3><div class="pd-product" data-sku="SKU-5" style="display:flow-root;margin:12px 0"><img src="data:image/png;base64,P5R5" alt="Five" style="float:right;width:40%;max-height:2.4in;object-fit:contain;margin:0 0 8px 14px"/><div style="font-weight:600;color:#16181d;margin-bottom:3px">Line 5</div><p style="margin:0">Five words.</p></div><div class="pd-product" data-sku="SKU-6" style="display:flow-root;margin:12px 0"><img src="data:image/png;base64,P5R6" alt="Six" style="float:left;width:30%;max-height:2.4in;object-fit:contain;margin:0 14px 8px 0"/><div style="font-weight:600;color:#16181d;margin-bottom:3px">Line 6</div><p style="margin:0">Six words.</p></div><div class="pd-product" data-sku="SKU-1" style="display:flow-root;margin:12px 0"><img src="data:image/png;base64,P5R1" alt="One" style="display:block;width:60%;max-height:4in;object-fit:contain;margin:0 auto 10px"/><div style="font-weight:600;color:#16181d;margin-bottom:3px">Line 1</div><p style="margin:0">One words.</p></div><div class="pd-product" data-sku="SKU-4" style="display:flow-root;margin:12px 0"><div style="font-weight:600;color:#16181d;margin-bottom:3px">Line 4</div><p style="margin:0">Hidden photo.</p></div><div class="pd-product" data-sku="SKU-2" style="display:flow-root;margin:12px 0"><img src="/placeholders/allowance.webp" alt="" style="float:right;width:34%;max-height:2.4in;object-fit:contain;margin:0 0 8px 14px"/><div style="font-weight:600;color:#16181d;margin-bottom:3px">Budget allowance — Line 2</div><p style="margin:0">Allowance words.</p></div><div class="pd-product" data-sku="line:3" style="display:flow-root;margin:12px 0"><p style="margin:0">Token words.</p></div><div class="pd-product" data-sku="GONE-77" style="display:flow-root;margin:12px 0"><p style="margin:0">Orphan words.</p></div><div class="pd-systotal" style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:8px 0 14px;padding:6px 0 0;border-top:1px solid #d5d8de;font-weight:700;color:#16181d;break-inside:avoid;page-break-inside:avoid;clear:both"><span>Rigging</span><span style="font-family:var(--font-mono);white-space:nowrap">$153.00</span></div><div class="pd-pricewrap" style="margin:10px 0 14px"><table class="pd-price" style="width:100%;border-collapse:collapse;font-size:1em"><tbody><tr><td style="border-bottom:1px solid #eef0f3;padding:6px 0">Rigging</td><td style="border-bottom:1px solid #eef0f3;padding:6px 0;font-family:var(--font-mono);text-align:right;white-space:nowrap;padding-left:12px">$153.00</td></tr><tr><td style="border-bottom:1px solid #eef0f3;padding:6px 0">Lighting</td><td style="border-bottom:1px solid #eef0f3;padding:6px 0;font-family:var(--font-mono);text-align:right;white-space:nowrap;padding-left:12px">$100.00</td></tr><tr><td style="border-bottom:1px solid #eef0f3;padding:6px 0">Install</td><td style="border-bottom:1px solid #eef0f3;padding:6px 0;font-family:var(--font-mono);text-align:right;white-space:nowrap;padding-left:12px">$50.00</td></tr><tr><td style="border-bottom:1px solid #eef0f3;padding:6px 0">Empty narrative</td><td style="border-bottom:1px solid #eef0f3;padding:6px 0;font-family:var(--font-mono);text-align:right;white-space:nowrap;padding-left:12px">$50.00</td></tr><tr class="pd-price-total"><td style="padding:8px 0 4px;font-weight:700;color:#16181d;border-top:1.5px solid #16181d">Total</td><td style="padding:8px 0 4px;font-weight:700;color:#16181d;border-top:1.5px solid #16181d;font-family:var(--font-mono);text-align:right;white-space:nowrap;padding-left:12px">$4,321.00</td></tr></tbody></table></div></div>`;
+  const oldDoc = p5San(doc([{ type: "heading", attrs: { level: 2 }, content: [T("Rigging")] },
+    PB("s2", "5", "SKU-5", "Five words.", { align: "right", width: 40 }), PB("s2", "6", "SKU-6", "Six words.", { align: "left", width: 30 }), PB("s1", "1", "SKU-1", "One words.", { align: "full", width: 60 }),
+    PB("s1", "4", "SKU-4", "Hidden photo.", { show: false }), PB("s1", "2", "SKU-2", "Allowance words."), PB("s1", "3", "line:3", "Token words."), PB("s1", "77", "GONE-77", "Orphan words."),
+    { type: "systemTotal", attrs: { sectionId: "s1" } }, { type: "priceTable" }]))!;
+  const oldPhotos = { "SKU-5": { src: "data:image/png;base64,P5R5", alt: "Five" }, "SKU-6": { src: "data:image/png;base64,P5R6", alt: "Six" }, "SKU-1": { src: "data:image/png;base64,P5R1", alt: "One" } };
+  const oldCtx = { sections: base, t: { grand: 4321, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: oldPhotos };
+  const nowJson = J({ r: p5rResolve(oldDoc, oldCtx), photo: p5t.docPhotoSkus(oldDoc), prod: p5t.docProductSkus(oldDoc), mfr: p5rMfrSkus(oldDoc, base), gaps: p5Gaps(oldDoc, base) });
+  ok(nowJson === OLD_JSON, "#312 images: an old document with photo.show product blocks resolves byte-identically to before (resolvePackageDoc, docPhotoSkus, docProductSkus, manufacturer-fallback skus, gaps)");
+  const nowHtml = p5rMarkup(p5rEl(PackageDocView312, { doc: oldDoc, ctx: oldCtx })).replace(/<style>[\s\S]*?<\/style>/, "");
+  // The one intended markup change: a product block WITHOUT a photo is a plain block now (it lays out the same when nothing floats).
+  const wantHtml = OLD_HTML.replace(/(<div class="pd-product" data-sku="[^"]*" style="display:)flow-root(;margin:12px 0"><(?!img))/g, "$1block$2");
+  ok(nowHtml === wantHtml && wantHtml !== OLD_HTML && (nowHtml.match(/display:flow-root;margin:12px 0"><img/g) || []).length === 4,
+    "#312 images: an old document prints the same markup — every photo'd block identical (flow-root, same float); only photo-less blocks' wrapper reads display:block");
+
+  // (5) Seed + insert shapes.
+  const s2 = { ...secs.find((s) => s.id === "s2")!, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "Five.", photo: true }, { lineKey: "6", sku: "SKU-6", text: "Six.", photo: false }] } as Secs[number];
+  const kp = i312Kp(s2);
+  ok(J(kp.map((b) => b.type)) === J(["productImage", "productBlock", "productBlock"]) && J(kp[0]) === J(IMG("s2", "5", "SKU-5")) &&
+     J((kp[1] as { attrs: unknown }).attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }) && (kp[2] as { attrs: { photo: { show: boolean } } }).attrs.photo.show === false,
+    "#312 images: seed — a key product with its photo flag on becomes productImage (right 34 %) then its words (photo hidden); with the flag off, words only");
+  const seeded = p5Seed({ sections: [s2] });
+  ok(J(seeded.content.map((b) => b.type)) === J(["heading", "paragraph", "bulletList", "productImage", "productBlock", "productBlock", "systemTotal", "priceTable"]) && J(p5San(seeded)) === J(seeded),
+    "#312 images: seed — heading → intro → key products (image + words) → price line; the seed is valid");
+  ok(J(i312Nodes("s1", 4, "X", "", false)) === J([{ type: "productBlock", attrs: { sectionId: "s1", lineKey: "4", sku: "X", photo: { show: false, align: "right", width: 34 } }, content: [{ type: "paragraph" }] }]) &&
+     J(i312ImgFor("s1", 4, "X", { align: "full", width: 500 })) === J(IMG("s1", "4", "X", "full", 100)) && J(i312ImgFor("s1", "4", "X")) === J(IMG("s1", "4", "X")),
+    "#312 images: productNodesFor / productImageFor — words-only without a photo; image attrs default right 34, clamp like the validator");
+  const allowNodes = p5l.docNodesFor({ kind: "line", sectionId: "s1", lineKey: "2" }, secs, () => "never read")!;
+  const noPara = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, () => null)!;
+  ok(J(allowNodes.map((b) => b.type)) === J(["productImage", "productBlock"]) && J(allowNodes[0]) === J(IMG("s1", "2", "line:2")) && J((allowNodes[1] as { content: unknown }).content) === J([P()]) &&
+     J(noPara[0]) === J(IMG("s2", "6", "SKU-6")),
+    "#312 images: a BOM line (drag / +) always inserts its image then its words — even a line with no photo (the image shows 'No photo for this part' in the editor and prints nothing)");
+  const pres = p5l.docPresence(p5San(doc([IMG("s2", "6", "SKU-6")]))!);
+  ok(p5l.lineInDoc("s2", "6", pres) && !p5l.lineInDoc("s2", "5", pres), "#312 images: an image alone marks its line as in the document (the BOM tick)");
+
+  // (6) Every sku walker.
+  const walk = p5San(doc([PB("s1", "1", "SKU-1", "w", { show: false }), IMG("s2", "5", "SKU-5"), IMG("s1", "2", "line:2"), IMG("s1", "1", "SKU-1"), IMG("s1", "4", "SKU-4"), PB("s1", "4", "SKU-4", "w", { show: false }), IMG("sys41", "507", "Z")]))!;
+  ok(J(p5t.docPhotoSkus(walk)) === J(["SKU-5", "SKU-1", "SKU-4", "Z"]) && J(p5t.docProductSkus(walk)) === J(["SKU-1", "SKU-5", "line:2", "SKU-4", "Z"]) &&
+     J(p5t.docLineNodes(walk).map((n) => n.type)) === J(["productBlock", "productImage", "productImage", "productImage", "productImage", "productBlock", "productImage"]),
+    "#312 images: docPhotoSkus takes every image's sku (line tokens excluded) and only photo-on blocks; docProductSkus (the library prefetch) takes images and blocks");
+  const mfr = p5rMfrSkus(p5San(doc([IMG("s2", "5", "SKU-5"), IMG("s1", "2", "SKU-2"), PB("s2", "6", "SKU-6", "w", { show: false })]))!, secs);
+  ok(J(mfr) === J(["SKU-5"]), "#312 images: manufacturer-fallback skus include an image's catalog sku, never one whose line prints a kind placeholder, never a words-only block's");
+  ok(!p5t.isEmptyDoc(p5San(doc([IMG("s2", "5", "SKU-5")]))) && p5rApplies(p5San(doc([IMG("s2", "5", "SKU-5")]))) && p312Floor(walk) === 507,
+    "#312 images: a document holding only an image is content (it prints); docIdFloor reads an image's system and line ids");
+  const g = p5Gaps(p5San(doc([IMG("s1", "77", "GONE-77"), PB("s1", "77", "GONE-77", "w", { show: false }), IMG("s2", "5", "OLD-SKU"), IMG("s4", "8", "SKU-8")]))!, secs);
+  ok(J(g.productsNotInBom) === J([{ sectionId: "s1", lineKey: "77", sku: "GONE-77" }, { sectionId: "s2", lineKey: "5", sku: "OLD-SKU" }]) && !g.systemsNotMentioned.some((x) => x.id === "s4"),
+    "#312 images: gaps — an image whose line left the BOM (or whose sku changed) is a 'No longer in BOM' row (one row with its words block); an image counts as mentioning its system");
+
+  // (7) #304 rename rewrite + #312 re-anchor follow images.
+  const rn = p5San(doc([P("x"), IMG("s2", "5", "OLD"), PB("s2", "5", "OLD", "w", { show: false }), IMG("s2", "6", "KEEP")]))!;
+  const rw = p5fRewriteDoc(rn, new Map([["OLD", "Brand:New"]])) as unknown as { content: Array<{ attrs?: { sku: string; align?: string } }> };
+  const rnc = rn.content as unknown as Array<{ attrs?: { sku: string } }>;
+  ok(rw && rw.content[1].attrs?.sku === "Brand:New" && rw.content[1].attrs?.align === "right" && rw.content[2].attrs?.sku === "Brand:New" && rw.content[3] === rnc[3] && rw.content[0] === rnc[0] && rnc[1].attrs?.sku === "OLD" &&
+     p5fRewriteDoc(rn, new Map([["NOPE", "X"]])) === null && rd("src/lib/catalog-rename/rewrite.ts").includes("LINE_ANCHORED_NODES"),
+    "#312 images: the #304 rename rewrite moves an image's sku with its block's (LINE_ANCHORED_NODES), copy-on-write, input untouched");
+  const ra = rean312.reanchorDocLine(rn, "s2", "5", "line:5") as unknown as { content: Array<{ type: string; attrs?: { sku: string } }> };
+  ok(ra && ra.content[1].type === "productImage" && ra.content[1].attrs?.sku === "line:5" && ra.content[2].attrs?.sku === "line:5" && ra.content[3].attrs?.sku === "KEEP",
+    "#312 images: re-anchoring a line (custom part SKU edit) moves its image too");
+
+  // (8) Editor: schema, Separate photo, toolbar target, Gaps scroll.
+  const schema = p5eGetSchema(p5eBuild());
+  const it = schema.nodes.productImage;
+  ok(it && it.isAtom && !it.isInline && it.spec.group === "block" && it.spec.draggable === true && J(p5eNames().nodes) === J([...p5eNodeNames].sort()) &&
+     J(p5eSan(schema.nodeFromJSON(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])).toJSON())) === J(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])) &&
+     J(schema.nodes.productImage.create({ sectionId: "s", lineKey: "1", sku: "A" }).attrs) === J({ sectionId: "s", lineKey: "1", sku: "A", align: "right", width: 34 }),
+    "#312 images: the editor schema registers productImage (block atom, draggable, attrs default right 34) matching schema.ts, round-tripping through the sanitizer");
+  const pmDoc = schema.nodeFromJSON(doc([P("a"), PB("s2", "5", "SKU-5", "w", { align: "left", width: 40 }), P("b")]) as never);
+  const st0 = P312State.create({ schema, doc: pmDoc });
+  const tr = st0.tr;
+  const at = pmDoc.child(0).nodeSize;
+  const did = i312Sep(tr, at);
+  const after = tr.doc.toJSON() as { content: Array<{ type: string; attrs?: Record<string, unknown> }> };
+  ok(did && tr.steps.length === 2 && J(after.content.map((n) => n.type)) === J(["paragraph", "productImage", "productBlock", "paragraph"]) &&
+     J(after.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "left", width: 40 }) && J(after.content[2].attrs?.photo) === J({ show: false, align: "left", width: 40 }) &&
+     tr.selection instanceof I312NodeSel && tr.selection.node.type.name === "productImage",
+    "#312 images: Separate photo puts a productImage with the block's anchors, align and width before it and hides the block's photo — one transaction (one undo step), image selected");
+  const tr2 = P312State.create({ schema, doc: tr.doc }).tr;
+  ok(!i312Sep(tr2, at + tr.doc.child(1).nodeSize) && !i312Sep(tr2, 0) && tr2.steps.length === 0, "#312 images: Separate photo does nothing on a block whose photo is already hidden, or on anything else");
+  const withSel = (d: typeof pmDoc, sel: (d: typeof pmDoc) => InstanceType<typeof I312NodeSel> | InstanceType<typeof P312TextSel>) => P312State.create({ schema, doc: d, selection: sel(d) });
+  const sepDoc = tr.doc;
+  const imgPos = sepDoc.child(0).nodeSize;
+  const tImg = i312Target(withSel(sepDoc, (d) => I312NodeSel.create(d, imgPos)));
+  const tHidden = i312Target(withSel(sepDoc, (d) => P312TextSel.create(d, imgPos + d.child(1).nodeSize + 2)));
+  const tOld = i312Target(withSel(pmDoc, (d) => P312TextSel.create(d, at + 2)));
+  ok(J(tImg) === J({ kind: "image", pos: imgPos, align: "left", width: 40 }) && tHidden === null && J(tOld) === J({ kind: "block", pos: at, align: "left", width: 40, show: true }),
+    "#312 images: the toolbar's photo controls act on a selected image, on an older block that still shows its photo — and on nothing for a words-only block");
+  ok(i312Find(sepDoc, { sectionId: "s2", lineKey: "5" }) === imgPos && i312Find(pmDoc, { sectionId: "s2", lineKey: "5", sku: "SKU-5" }) === at && i312Find(sepDoc, { sectionId: "s2", lineKey: "9" }) === -1,
+    "#312 images: a 'No longer in BOM' gap row scrolls to the line's first image or block");
+
+  // (9) Views + wiring (source).
+  const iv = rd(`${ED}/product-image-view.tsx`), pbv = rd(`${ED}/product-block-view.tsx`), tb = rd(`${ED}/toolbar.tsx`), ext = rd(`${ED}/extensions.ts`), nodes = rd(`${ED}/schema-nodes.ts`), ed = rd(`${ED}/package-doc-editor.tsx`);
+  ok(['"Left"', '"Right"', '"Full"', "Size", ">No longer in BOM<", "No photo for this part", "<AtomRemove editor={editor} getPos={getPos}", "data-drag-handle", "linePhotoPreview(a, sections, row)", "lineAnchorInBom(a, sections)", "setImageAttrs(editor, at, p)", "{selected && ("].every((c) => iv.includes(c)) &&
+     !/productTagText|customLineTagText/.test(iv) && iv.includes('float: "right"') && iv.includes('float: "left"'),
+    "#312 images: the image view — just the image (no label), floated like print, Left / Right / Full + Size + Remove when selected, amber No longer in BOM, 'No photo for this part' box, draggable");
+  ok(ext.includes("productImage: ReactNodeViewRenderer(ProductImageView)") && nodes.includes('atomBlock("productImage", "data-pd-product-image"') && nodes.includes("withView(ProductImageNode, views.productImage)"),
+    "#312 images: extensions.ts attaches ProductImageView to the schema-nodes.ts productImage node (one list)");
+  ok(pbv.includes("separatePhoto(editor, p)") && />\s*Separate photo\s*</.test(pbv) && !pbv.includes("Show photo") && !pbv.includes("No photo for this part") && pbv.includes('display: photo.show ? "flow-root" : "block"') &&
+     tb.includes("setImageAttrs(editor, t.pos") && tb.includes("activePhotoTarget(e.state)") && ed.includes("NodeSelection.create(tr.doc, pos)") && ed.includes(".pd-ed-prose h1, .pd-ed-prose h2, .pd-ed-prose h3 { clear: both; }"),
+    "#312 images: an old photo'd block offers Separate photo (no Show photo on a words-only block); the toolbar routes to the image; Gaps select an image; editor headings clear floats");
+  ok(["src/lib/package-doc/sanitize.ts", "src/lib/package-doc/resolve.ts"].every((f) => rd(f).includes('case "productImage"')) && rd("src/components/package-doc/package-doc-view.tsx").includes('case "image"'),
+    "#312 images: the sanitizer, resolver and renderer each handle productImage");
 }
