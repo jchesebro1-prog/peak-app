@@ -58769,11 +58769,11 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
 
   // (3) Renderer.
   const html = p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([{ type: "heading", attrs: { level: 2 }, content: [T("Rigging")] }, IMG("s2", "5", "SKU-5", "left", 40), PB("s2", "5", "SKU-5", "Words beside.", { show: false }), IMG("s1", "2", "line:2", "full", 60), IMG("s2", "6", "SKU-6")]))!, ctx }));
-  ok(html.includes('<div class="pd-image" data-sku="SKU-5"><img src="data:image/png;base64,I5" alt="Five" style="float:left;width:40%;max-height:2.4in;object-fit:contain;margin:0 14px 8px 0"/></div>') &&
-     html.includes('<div class="pd-image" data-sku="line:2"><img src="/placeholders/allowance.webp" alt="" style="display:block;width:60%;max-height:4in;object-fit:contain;margin:0 auto 10px"/></div>') &&
+  ok(html.includes('<div class="pd-image" data-sku="SKU-5"><img src="data:image/png;base64,I5" alt="Five" style="float:left;width:40%;max-height:2.4in;object-fit:contain;margin:0 14px 8px 0;object-position:left top"/></div>') &&
+     html.includes('<div class="pd-image" data-sku="line:2"><img src="/placeholders/allowance.webp" alt="" style="display:block;width:60%;max-height:4in;object-fit:contain;margin:0 auto 10px;object-position:center top"/></div>') &&
      !html.includes('data-sku="SKU-6"') && html.indexOf('class="pd-image" data-sku="SKU-5"') < html.indexOf("Words beside.") &&
      html.includes('<div class="pd-product" data-sku="SKU-5" style="display:block;margin:12px 0">'),
-    "#312 images: renders just the image — floated left/right at width % (max-height 2.4in) or full (block, centred, max-height 4in) — before the words, which (a plain block, not a flow-root) wrap beside it; no source prints nothing");
+    "#312 images: renders just the image — floated left/right at width % (max-height 2.4in) or full (block, centred, max-height 4in), the picture held to its alignment edge (object-position) — before the words, which (a plain block, not a flow-root) wrap beside it; no source prints nothing");
   ok(p5rCss.includes(".pd-doc h2, .pd-doc h3, .pd-doc h4, .pd-doc .pd-pagebreak { clear: both; }") && p5rCss.includes(".pd-doc .pd-image, .pd-doc .pd-image img { break-inside: avoid; page-break-inside: avoid; }") &&
      /@media \(max-width: 480px\) \{[^}]*\}\s*\.pd-doc \.pd-image img \{ float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; \}\s*\}/.test(p5rCss),
     "#312 images: headings (and page breaks) clear floats so an image never spills into the next system; images keep together in print; phones (≤ 480px) put every image full width");
