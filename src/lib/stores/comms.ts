@@ -193,14 +193,20 @@ export type CommLink = {
   renewal?: boolean;
 };
 
-/** A real file riding on a message/draft (IDEAS #36). Small documents only —
- *  stored as a data-URL inside the thread doc, same approach as the D59
- *  logo uploads (generated quote PDFs run a few KB). */
+/** A real file riding on a message/draft (IDEAS #36). Small documents ride
+ *  as a data-URL inside the thread doc, same approach as the D59 logo
+ *  uploads (generated quote PDFs run a few KB). Estimator Phase 3: a stored
+ *  quote PDF rides BY REFERENCE instead — `pdfPath` (a quote-PDF storage
+ *  path, read by the Gmail bridge when it builds the MIME) plus `href` (a
+ *  team-authenticated download URL the Inbox reader links). Resolution rules
+ *  live in lib/comms-attachments.ts. */
 export type CommAttachment = {
   name: string;
   mime: string;
   size: number; // bytes
-  dataUrl: string;
+  dataUrl?: string;
+  pdfPath?: string;
+  href?: string;
 };
 
 export type CommMessage = {

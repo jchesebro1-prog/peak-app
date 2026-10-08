@@ -7,6 +7,7 @@ import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { signatureFor } from "@/lib/stores/signatures";
+import { attachmentHref } from "@/lib/comms-attachments";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
@@ -873,7 +874,7 @@ export default async function InboxPage({
         name: a.name,
         mime: a.mime,
         size: a.size,
-        dataUrl: a.dataUrl,
+        href: attachmentHref(a),
       })),
       link: m.link
         ? {

@@ -61,12 +61,15 @@ export type SidebarVM = {
   connection: ConnectionVM;
 };
 
-/** A real file on a message (IDEAS #36) — dataUrl doubles as the download href. */
+/** A real file on a message (IDEAS #36) — `href` is the download link: the
+ *  data-URL when the bytes ride along, else the team download URL of a
+ *  by-reference PDF (Estimator Phase 3, lib/comms-attachments attachmentHref);
+ *  "" when there is neither. */
 export type AttachmentVM = {
   name: string;
   mime: string;
   size: number;
-  dataUrl: string;
+  href: string;
 };
 
 /** Composer-side attachment chip (no bytes shipped to the client). */

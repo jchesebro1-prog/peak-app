@@ -302,7 +302,7 @@ function ExpandedMessage({
               {(m.attachments || []).map((a, i) => (
                 <a
                   key={`${a.name}-${i}`}
-                  href={a.dataUrl}
+                  href={a.href || undefined}
                   download={a.name}
                   title="Download attachment"
                   style={{

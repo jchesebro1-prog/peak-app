@@ -47,6 +47,8 @@ import {
   sendRaw,
   type GmailLabelEvent,
 } from "./api";
+import { attachmentMimePart } from "@/lib/comms-attachments";
+import { pdfStorage } from "@/lib/quote-pdf/storage";
 import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
@@ -95,6 +97,12 @@ function mailboxOfKey(key: MailboxKey): { mailbox: MailboxId; userName: string |
 
 /* ---- outbound ------------------------------------------------------------- */
 
+/** A by-reference attachment's bytes (storage guards the quote-PDF path). */
+async function readQuotePdf(path: string): Promise<Buffer | null> {
+  const store = pdfStorage();
+  return "unavailable" in store ? null : store.read(path);
+}
+
 /**
  * Send every outbound message on the thread that hasn't been handed to Gmail
  * yet. Idempotent: a message carries `gmailId` once sent, so re-runs skip it.
@@ -123,18 +131,12 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
 
   for (const m of pending) {
     try {
-      // data-URL attachments → raw base64 MIME parts (IDEAS #36)
-      const attachments = (m.attachments || [])
-        .map((a) => {
-          const comma = (a.dataUrl || "").indexOf(",");
-          if (comma < 0 || !/;base64,/.test(a.dataUrl)) return null;
-          return {
-            name: a.name || "attachment",
-            mime: a.mime || "application/octet-stream",
-            dataBase64: a.dataUrl.slice(comma + 1),
-          };
-        })
-        .filter((a): a is NonNullable<typeof a> => !!a);
+      // data-URL attachments → raw base64 MIME parts (IDEAS #36); a
+      // by-reference quote PDF (Estimator Phase 3) is read from storage — an
+      // unreadable one throws, so the message is never sent without it.
+      const attachments = (
+        await Promise.all((m.attachments || []).map((a) => attachmentMimePart(a, readQuotePdf)))
+      ).filter((a): a is NonNullable<typeof a> => !!a);
       const raw = buildRaw({
         from: fromAddr,
         to: toAddr,
