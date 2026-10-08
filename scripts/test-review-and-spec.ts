@@ -57636,3 +57636,173 @@ import { renderToStaticMarkup as p5fMarkup } from "react-dom/server";
      fnOf("packagePhotoDocForRevision").includes("packagePhotoSections(revisionGroupedSections(rev).sections)") && !fnOf("packagePhotoDocForRevision").includes("revisionSections(rev)"),
     "#P5 render fix: both photo routes read the revision's normalised, group-stamped systems (alternates as printed), not the raw spec");
 }
+
+// ---- #P5 editor: the TipTap document editor — schema parity, StarterKit cut, dynamic import, value sync, tags, Start / Remove ----
+import { buildExtensions as p5eBuild, editorSchemaNames as p5eNames, STARTER_KIT_OPTIONS as p5eKit } from "@/components/package-doc/editor/schema-nodes";
+import * as p5em from "@/components/package-doc/editor/editor-model";
+import { getSchema as p5eGetSchema } from "@tiptap/react";
+import { NODE_NAMES as p5eNodeNames, MARK_NAMES as p5eMarkNames, MAX_NODES as p5eMaxNodes } from "@/lib/package-doc/schema";
+import { sanitizePackageDoc as p5eSan } from "@/lib/package-doc/sanitize";
+import { normalizeProductText as p5eNorm, productBlockText as p5eBlockText, textToParagraphs as p5eParas } from "@/lib/package-doc/text";
+import { qd293Sections as p5eSections } from "./qd293-cases";
+import type { KeyProductLibraryRow as P5eRow } from "@/app/(app)/estimator/narrative";
+import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  const ED = "src/components/package-doc/editor";
+  const T = (text: string, marks?: unknown[]) => ({ type: "text", text, ...(marks ? { marks } : {}) });
+  const P = (...content: unknown[]) => ({ type: "paragraph", ...(content.length ? { content } : {}) });
+  const PB = (sectionId: string, lineKey: string, sku: string, paras: unknown[], photo = { show: true, align: "right", width: 34 }) =>
+    ({ type: "productBlock", attrs: { sectionId, lineKey, sku, photo }, content: paras }) as unknown as P5ePB;
+
+  // (1) Schema parity: the editor's registered nodes/marks ARE the validator's lists.
+  const names = p5eNames();
+  ok(J(names.nodes) === J([...p5eNodeNames].sort()) && J(names.marks) === J([...p5eMarkNames].sort()),
+    "#P5 editor: the editor schema registers exactly schema.ts's node names and mark names (no blockquote/code/strike/underline/link/horizontalRule/image)");
+  const schema = p5eGetSchema(p5eBuild());
+  ok(schema.nodes.listItem.spec.content === "paragraph (bulletList | orderedList)*" && schema.nodes.productBlock.spec.content === "paragraph+" &&
+     schema.nodes.chip.isInline && schema.nodes.chip.isAtom && schema.nodes.priceTable.isAtom && schema.nodes.pageBreak.isAtom && !schema.nodes.priceTable.isInline &&
+     schema.topNodeType.name === "doc",
+    "#P5 editor: list items hold a paragraph then lists only; a product block holds paragraphs; chip is an inline atom; price table / page break are block atoms");
+  const headingInItem = () => schema.nodeFromJSON({ type: "doc", content: [{ type: "bulletList", content: [{ type: "listItem", content: [P(T("a")), { type: "heading", attrs: { level: 1 } }] }] }] }).check();
+  const pbInItem = () => schema.nodeFromJSON({ type: "doc", content: [{ type: "bulletList", content: [{ type: "listItem", content: [P(), PB("s1", "1", "SKU-1", [P()])] }] }] }).check();
+  const threw = (f: () => void) => { try { f(); return false; } catch { return true; } };
+  ok(threw(headingInItem) && threw(pbInItem), "#P5 editor: the editor schema itself refuses a heading or a product block inside a list item (the validator would drop it)");
+  const full = p5eSan({
+    type: "doc", version: 1, content: [
+      { type: "heading", attrs: { level: 2 }, content: [T("Lighting")] },
+      P(T("Price ", [{ type: "bold" }]), { type: "chip", attrs: { kind: "systemPrice", ref: "s1" } }, { type: "hardBreak" }, T("x", [{ type: "italic" }]), { type: "chip", attrs: { kind: "quoteNumber", ref: "" } }),
+      { type: "bulletList", content: [{ type: "listItem", content: [P(T("a")), { type: "orderedList", content: [{ type: "listItem", content: [P()] }] }] }] },
+      PB("s1", "1", "SKU-1", [P(T("p1")), P()], { show: false, align: "left", width: 50 }),
+      { type: "priceTable" }, { type: "pageBreak" }, P(),
+    ],
+  })!;
+  const pm = schema.nodeFromJSON(p5em.toEditorContent(full));
+  ok(!threw(() => pm.check()) && J(p5eSan(pm.toJSON())) === J(full),
+    "#P5 editor: every schema node round-trips editor → sanitizePackageDoc unchanged (the editor never produces what the server drops)");
+
+  // (2) StarterKit is cut to the schema.
+  const kit = p5eKit as Record<string, unknown>;
+  ok(["blockquote", "code", "codeBlock", "strike", "underline", "link", "horizontalRule", "listItem", "trailingNode"].every((k) => kit[k] === false) &&
+     J((kit.heading as { levels?: number[] })?.levels) === J([1, 2, 3]),
+    "#P5 editor: StarterKit disables blockquote, code, codeBlock, strike, underline, link, horizontalRule (+ its listItem, trailingNode); headings 1–3");
+  const nodesSrc = rd(`${ED}/schema-nodes.ts`), extSrc = rd(`${ED}/extensions.ts`);
+  ok(nodesSrc.includes("StarterKit.configure(STARTER_KIT_OPTIONS)") && (nodesSrc.match(/StarterKit\.configure\(/g) || []).length === 1 &&
+     extSrc.startsWith('"use client";') && /return buildExtensions\(\{\s*chip: ReactNodeViewRenderer\(ChipView/.test(extSrc) &&
+     extSrc.includes("productBlock: ReactNodeViewRenderer(ProductBlockView)") && extSrc.includes("priceTable: ReactNodeViewRenderer(PriceTableView)") &&
+     extSrc.includes("pageBreak: ReactNodeViewRenderer(PageBreakView)") && !/Node\.create\(|StarterKit\.|Extension\.create\(|from "@tiptap\/starter-kit"/.test(extSrc),
+    "#P5 editor: extensions.ts only attaches the React node views to schema-nodes.ts's one list (no extra nodes)");
+
+  // (3) MIT core only; client-only and code-split.
+  const pkgJson = JSON.parse(rd("package.json")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  const deps = { ...(pkgJson.dependencies || {}), ...(pkgJson.devDependencies || {}) };
+  const tiptap = Object.keys(deps).filter((d) => d.startsWith("@tiptap"));
+  ok(!rd("package.json").includes("@tiptap-pro") && !Object.keys(deps).some((d) => d.startsWith("@tiptap-pro")) &&
+     J(tiptap.sort()) === J(["@tiptap/pm", "@tiptap/react", "@tiptap/starter-kit"]) &&
+     tiptap.every((d) => (JSON.parse(rd(`node_modules/${d}/package.json`)) as { license?: string }).license === "MIT"),
+    "#P5 editor: TipTap is the MIT core only (@tiptap/pm, react, starter-kit) — no @tiptap-pro package");
+  const pkgStep = rd(`${EST_DIR}/steps/package-step.tsx`);
+  ok(/const PackageDocEditor = dynamic\(\(\) => import\("@\/components\/package-doc\/editor\/package-doc-editor"\), \{\s*ssr: false,/.test(pkgStep) &&
+     pkgStep.includes('import dynamic from "next/dynamic";') && !/^import [^\n]*@\/components\/package-doc\/editor/m.test(pkgStep),
+    "#P5 editor: package-step loads the editor with next/dynamic, ssr: false — never a static import");
+  const walkSrc = (d: string): string[] =>
+    readdirSync284(join(process.cwd(), d), { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walkSrc(`${d}/${e.name}`) : /\.(ts|tsx)$/.test(e.name) ? [`${d}/${e.name}`] : []);
+  const outside = walkSrc("src").filter((f) => !f.startsWith(`${ED}/`)).filter((f) => {
+    const src = rd(f);
+    return /from "@tiptap\//.test(src) || /^import [^\n]*from "@\/components\/package-doc\/editor/m.test(src);
+  });
+  ok(outside.length === 0, `#P5 editor: nothing outside src/components/package-doc/editor imports TipTap or the editor statically (${outside.join(", ")})`);
+  const edFiles = ["package-doc-editor.tsx", "extensions.ts", "chip-view.tsx", "product-block-view.tsx", "price-table-view.tsx", "page-break-view.tsx", "toolbar.tsx", "editor-context.tsx"];
+  ok(edFiles.every((f) => rd(`${ED}/${f}`).startsWith('"use client";')) &&
+     walkSrc(ED).every((f) => !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(rd(f)) && !rd(f).includes("window.print")),
+    "#P5 editor: the editor's React files are client components; no store/db value import anywhere in the editor");
+
+  // (4) Value sync: debounced, sanitized, never emits an over-cap document; outside changes re-set without an update.
+  const edSrc = rd(`${ED}/package-doc-editor.tsx`);
+  ok(edSrc.includes("export const CHANGE_DEBOUNCE_MS = 300;") && edSrc.includes("timerRef.current = setTimeout(flush, CHANGE_DEBOUNCE_MS);") &&
+     edSrc.includes("const st = docSizeState(raw);") && /if \(!st\.doc\) return;/.test(edSrc) && edSrc.includes("if (str === knownRef.current) return;") &&
+     edSrc.includes("onChangeRef.current(st.doc);") && edSrc.includes("onBlur: () => flush()") && edSrc.includes("useEffect(() => () => flush(), [flush]);") &&
+     edSrc.includes("immediatelyRender: false") && edSrc.includes("setContent(toEditorContent(value), { emitUpdate: false })"),
+    "#P5 editor: edits emit through docSizeState → sanitizePackageDoc after 300 ms (or on blur / unmount), only when changed, never over the caps; an outside value re-sets without an update event");
+  const modelSrc = rd(`${ED}/editor-model.ts`);
+  ok(/: sanitizePackageDoc\(raw\);/.test(modelSrc), "#P5 editor: docSizeState's document is sanitizePackageDoc's output");
+
+  // (5) Caps warning (pure).
+  const small = p5em.docSizeState({ type: "doc", content: [P(T("Hello"))] });
+  ok(small.level === "ok" && small.message === "" && J(small.doc) === J({ type: "doc", version: 1, content: [P(T("Hello"))] }), "#P5 editor: a small document is ok and emits its sanitized form");
+  const paras = (n: number) => ({ type: "doc", content: Array.from({ length: n }, () => P(T("x"))) });
+  const near = p5em.docSizeState(paras(Math.ceil(p5eMaxNodes * 0.9 / 2)));
+  const over = p5em.docSizeState(paras(p5eMaxNodes / 2 + 1));
+  ok(near.level === "near" && !!near.doc && near.message.startsWith("The document is near its size limit") &&
+     over.level === "over" && over.doc === null && over.message === p5em.TOO_LARGE && p5em.TOO_LARGE === "The document is too large to save — shorten it.",
+    "#P5 editor: within 10 % of the 2,000-node cap warns (still emits); past it the editor refuses to emit and says the server's own words");
+  const bigJson = p5em.docSizeState({ type: "doc", content: Array.from({ length: 10 }, () => P(T("y".repeat(18800)))) });
+  const longBlock = p5em.docSizeState({ type: "doc", content: [P(T("z".repeat(20001)))] });
+  ok(bigJson.level === "near" && !!bigJson.doc && longBlock.level === "over" && longBlock.doc === null,
+    "#P5 editor: within 10 % of 200 KB warns; a paragraph over 20,000 characters (the validator would cut it) refuses to emit");
+
+  // (6) Product block tags: "from product" = productBlockText(node) === normalizeProductText(narrativeText).
+  const lib = "ETC Ion Xe 20 is a console.\n\n- Fast\n- Quiet";
+  const seeded = PB("s1", "1", "SKU-1", p5eParas(lib));
+  ok(p5em.productTagState(p5eBlockText(seeded), lib) === "from" && p5em.productTagState(p5eBlockText(seeded), lib + "\n\n") === "from" &&
+     p5em.productTagState(p5eBlockText(seeded), "  " + lib.replace("\n\n", "\n\n\n") + "  ") === "from",
+    "#P5 editor: a block holding the library paragraph reads 'from product' (blank-line / outer whitespace differences don't count)");
+  const edited = PB("s1", "1", "SKU-1", [P(T("ETC Ion Xe 20 is a great console."))]);
+  ok(p5em.productTagState(p5eBlockText(edited), lib) === "edited" && p5em.productTagState("", null) === "edited" && p5em.productTagState("x", null) === "edited" &&
+     p5em.productTagState("x", undefined) === null,
+    "#P5 editor: changed words (or no library paragraph) read 'edited here'; a row still loading claims neither");
+  ok(p5em.productTagText("ETC Ion Xe 20", "from") === "ETC Ion Xe 20 · from product" && p5em.productTagText("ETC Ion Xe 20", "edited") === "ETC Ion Xe 20 · edited here" &&
+     p5em.productTagText("ETC Ion Xe 20", null) === "ETC Ion Xe 20",
+    "#P5 editor: tag copy is exactly '<label> · from product' / '<label> · edited here'");
+  const reverted = PB("s1", "1", "SKU-1", p5eParas(lib));
+  ok(p5eBlockText(reverted) === p5eNorm(lib) && p5em.productTagState(p5eBlockText(reverted), lib) === "from",
+    "#P5 editor: Revert's paragraphs (textToParagraphs of the library text) read 'from product' again");
+
+  // (7) Labels, photo preview order, photo clamp.
+  const secs = p5eSections();
+  const row = (o: Partial<P5eRow>): P5eRow => ({ inCatalog: true, desc: "Catalog desc", paragraph: null, paragraphUpdatedAt: null, paragraphUpdatedBy: null, photoDocId: null, fallbackDocId: null, fallbackLabel: null, ...o });
+  ok(p5em.productBlockLabel(PB("s1", "1", "SKU-1", [P()]), secs, row({})) === "Line 1" && p5em.productBlockLabel(PB("s1", "99", "SKU-99", [P()]), secs, row({})) === "Catalog desc" &&
+     p5em.productBlockLabel(PB("s1", "99", "SKU-99", [P()]), secs, null) === "SKU-99" && p5em.productBlockLabel(PB("s1", "2", "line:2", [P()]), secs, null) === "Budget allowance — Line 2",
+    "#P5 editor: the tag names the line while it's in the BOM (allowances 'Budget allowance — …'), else the catalog description, else the sku");
+  const pb1 = PB("s1", "1", "SKU-1", [P()]);
+  ok(p5em.productPhotoPreview(pb1, secs, row({ photoDocId: "PD 1", fallbackDocId: "MF" }))?.src === "/api/part-documents/PD%201" &&
+     p5em.productPhotoPreview(PB("s1", "2", "line:2", [P()]), secs, null)?.src === "/placeholders/allowance.webp" &&
+     p5em.productPhotoPreview(pb1, secs, row({ fallbackDocId: "MF-1", fallbackLabel: "ETC" }))?.note === "Prints the manufacturer image (ETC)" &&
+     p5em.productPhotoPreview(pb1, secs, row({})) === null && p5em.productPhotoPreview(pb1, secs, undefined) === null,
+    "#P5 editor: photo preview = the part's own photo (in-app route) → the kind placeholder → the manufacturer image → none");
+  ok(J(p5em.withPhoto({ show: true, align: "right", width: 34 }, { width: 5 })) === J({ show: true, align: "right", width: 25 }) &&
+     p5em.withPhoto(null, { width: 300 }).width === 100 && p5em.withPhoto(null, { align: "x" as never }).align === "right" &&
+     p5em.withPhoto({ show: true, align: "left", width: 40 }, { show: false }).show === false && p5em.withPhoto({ show: false, align: "full", width: 40 }, { width: 62.4 }).width === 62,
+    "#P5 editor: photo patches clamp like the validator (25–100 %, rounded; left/right/full; show kept unless patched)");
+
+  // (8) Node view + toolbar copy.
+  const pbSrc = rd(`${ED}/product-block-view.tsx`), chipSrc = rd(`${ED}/chip-view.tsx`), tbSrc = rd(`${ED}/toolbar.tsx`);
+  ok(pbSrc.includes('"Save to product"') && />\s*Revert\s*</.test(pbSrc) && pbSrc.includes(">No longer in BOM<") && pbSrc.includes("productTagText(label, state)") &&
+     pbSrc.includes("env.onSaveToProduct(sku, text, expect)") && pbSrc.includes("doSave(row?.paragraphUpdatedAt ?? null)") && pbSrc.includes("revertProductBlock(editor, p, row.paragraph)") &&
+     pbSrc.includes('"Hide photo" : "Show photo"') && pbSrc.includes("selectionInside") && /1\.5px dashed/.test(pbSrc),
+    "#P5 editor: product block — dashed outline on hover / cursor, tag, Save to product (stamp from the library row), Revert, No longer in BOM, Hide / Show photo");
+  ok(chipSrc.includes('removed ? "removed"') && chipSrc.includes("resolveChip("), "#P5 editor: a chip shows its live value, or amber 'removed'");
+  ok(["Normal", "Heading 1", "Heading 2", "Heading 3", '"Bold"', '"Italic"', "Bullet list", "Numbered list", "Page break", "+ Price table", '"Left"', '"Right"', '"Full"', '"Hide photo" : "Show photo"'].every((c) => tbSrc.includes(c)) &&
+     tbSrc.includes("{s.product && (") && tbSrc.includes('min={PHOTO_WIDTH_MIN}') && tbSrc.includes('max={PHOTO_WIDTH_MAX}'),
+    "#P5 editor: toolbar — Normal / Heading 1–3, Bold, Italic, lists, Page break, + Price table; photo Left / Right / Full, size 25–100, Hide / Show with a product block selected");
+
+  // (9) Build package: Start / Remove / Narrative fields; the hook prefetches document skus.
+  ok(/onClick=\{startDocument\}>\s*Start the document\s*<\/button>/.test(pkgStep) && pkgStep.includes("setPackageDoc(seedPackageDoc({ sections, groups }));") &&
+     pkgStep.includes("Remove document") && pkgStep.includes("Remove the document? The estimate goes back to the narrative fields.") &&
+     /const removeDocument = \(\) => \{[\s\S]*?setPackageDoc\(null\);/.test(pkgStep) && pkgStep.includes("aria-pressed={narrOpen}") && pkgStep.includes("Narrative fields") &&
+     pkgStep.includes("const showNarrative = !hasDoc || narrOpen;") && pkgStep.includes("<NarrativeColumn") && pkgStep.includes("<PdfOptionsPanel") && pkgStep.includes("<CoverPackagePanel") &&
+     pkgStep.includes('display: narrOpen ? "none" : "flex"'),
+    "#P5 editor: Build package — Start the document seeds from the narrative fields; Remove document confirms inline then clears it; the narrative fields sit behind 'Narrative fields'; the right aside stays");
+  ok(pkgStep.includes("value={packageDoc}") && pkgStep.includes("onChange={setPackageDoc}") && pkgStep.includes("library={kpLib}") &&
+     pkgStep.includes("canWriteLibrary={canWriteNarrativeLibrary}") && pkgStep.includes("const out = await saveProductParagraphAction(sku, text, expectUpdatedAt);") &&
+     pkgStep.includes("if (out.row) setLibraryRow(sku, out.row);"),
+    "#P5 editor: the editor is wired to the hook's packageDoc / setPackageDoc and Save to product refreshes the library row");
+  const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
+  ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus);") &&
+     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 5,
+    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count unchanged");
+  ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
+    "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
+}

@@ -28,6 +28,7 @@ import { laborGroupEdits, laborGroupRecord, newLaborGroupId, pruneLaborGroups, s
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { docProductSkus } from "@/lib/package-doc/text";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
 import { saveEstimatorCustomPartAction } from "./actions";
 import type { InputKind } from "./section-card";
@@ -2574,12 +2575,15 @@ export function useEstimatorState(props: EstimatorProps) {
   /** #293: the active system's eligible skus — the library cache prefetches them.
    *  An allowance/custom line anchors on a `line:<id>` token (no library row);
    *  a block saved on such a line's real sku before that still prefetches. */
+  /* Phase 5: plus every product block's sku in the package document, so its
+     tags (from product / edited here), Revert and photo previews have rows. */
   const narrSkus = useMemo(
     () =>
-      narrSec
-        ? [...narrSec.items.filter(isKeyProductEligible).map(keyProductSkuOf), ...(narrSec.keyProducts || []).map((k) => k.sku)].filter((k) => !!k && !isLineToken(k))
-        : [],
-    [narrSec]
+      [
+        ...(narrSec ? [...narrSec.items.filter(isKeyProductEligible).map(keyProductSkuOf), ...(narrSec.keyProducts || []).map((k) => k.sku)] : []),
+        ...docProductSkus(packageDoc),
+      ].filter((k) => !!k && !isLineToken(k)),
+    [narrSec, packageDoc]
   );
   const kpLib = useKeyProductLibrary(narrSkus);
   const updateSection = (secId: string, fn: (s: SpecSection) => SpecSection) =>
