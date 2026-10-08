@@ -1,6 +1,7 @@
 import type { Editor, JSONContent } from "@tiptap/react";
-import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
+import { Fragment, Slice, type Node as PMNode } from "@tiptap/pm/model";
 import { NodeSelection, type EditorState } from "@tiptap/pm/state";
+import { dropPoint } from "@tiptap/pm/transform";
 import { textToParagraphs } from "@/lib/package-doc/text";
 import type { PhotoAttrs } from "@/lib/package-doc/types";
 import { withPhoto } from "./editor-model";
@@ -69,7 +70,7 @@ export function deleteNodeAt(editor: Editor, pos: number): boolean {
  *  paragraph/heading it lands at the cursor; inside a list or a product
  *  block (which can't hold it) it lands after that top-level block, never
  *  splitting it. */
-export function insertBlock(editor: Editor, json: JSONContent): boolean {
+export function insertBlock(editor: Editor, json: JSONContent | JSONContent[]): boolean {
   const sel = editor.state.selection;
   // A selected node (a price table, a chip…) is never replaced: insert after it.
   if (sel instanceof NodeSelection) return editor.chain().focus().insertContentAt(sel.to, json).run();
@@ -78,4 +79,41 @@ export function insertBlock(editor: Editor, json: JSONContent): boolean {
   if (!top || top.type.name === "paragraph" || top.type.name === "heading") return editor.chain().focus().insertContent(json).run();
   const at = $from.after(1);
   return editor.chain().focus().insertContentAt(at, json).run();
+}
+
+/** Insert blocks where a drag was dropped: ProseMirror's own dropPoint moves
+ *  the position to the nearest place the blocks fit (out of a paragraph, a
+ *  list or a product block — never splitting one). One command → one undo step. */
+export function insertBlocksAt(editor: Editor, pos: number, json: JSONContent[]): boolean {
+  const at = dropInsertPos(editor.state.doc, pos, json);
+  return at !== null && editor.chain().focus().insertContentAt(at, json).run();
+}
+
+/** Where dropped blocks go: the nearest position (dropPoint) where they fit,
+ *  or null when they aren't valid schema. Pure (ProseMirror only). */
+export function dropInsertPos(doc: PMNode, pos: number, json: JSONContent[]): number | null {
+  const at = Math.max(0, Math.min(pos, doc.content.size));
+  try {
+    const slice = new Slice(Fragment.fromArray(json.map((j) => doc.type.schema.nodeFromJSON(j))), 0, 0);
+    return dropPoint(doc, at, slice) ?? at;
+  } catch {
+    return null;
+  }
+}
+
+/** Append blocks at the end of the document (the Gaps list's "isn't in the document"). */
+export function appendBlocks(editor: Editor, json: JSONContent[]): boolean {
+  return editor.chain().focus().insertContentAt(editor.state.doc.content.size, json).scrollIntoView().run();
+}
+
+/** The first product block on this system + line (and sku, when given). */
+export function findProductBlock(doc: PMNode, t: { sectionId: string; lineKey: string; sku?: string }): number {
+  let found = -1;
+  doc.descendants((n, pos) => {
+    if (found >= 0) return false;
+    if (n.type.name !== "productBlock") return true;
+    if (n.attrs.sectionId === t.sectionId && n.attrs.lineKey === t.lineKey && (!t.sku || n.attrs.sku === t.sku)) found = pos;
+    return false;
+  });
+  return found;
 }

@@ -57914,3 +57914,149 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
      pbSrc.includes("savedTimer.current = setTimeout(() => setSavedFor(null), SAVED_TO_PRODUCT_MS);") && !pbSrc.includes('setMsg("Saved to the product.")'),
     "#P5 editor fix: custom lines show no Save to product (Revert needs a library row); 'Saved to the product.' clears after a few seconds or as soon as the words change");
 }
+
+// ---- #P5 left pane: Gaps / BOM (drag or +) / Library — node builders, ✓, gap rows, drop wiring ----
+import * as p5l from "@/lib/package-doc/insert";
+import { docGaps as p5lGaps } from "@/lib/package-doc/gaps";
+import { sanitizePackageDoc as p5lSan } from "@/lib/package-doc/sanitize";
+import { buildExtensions as p5lBuild } from "@/components/package-doc/editor/schema-nodes";
+import { dropInsertPos as p5lDropPos } from "@/components/package-doc/editor/editor-commands";
+import { getSchema as p5lGetSchema } from "@tiptap/react";
+import { groupBlocks as p5lGroupBlocks } from "@/lib/estimate-groups/groups";
+import { qd293Sections as p5lSections } from "./qd293-cases";
+import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  const ED = "src/components/package-doc/editor";
+  const T = (text: string) => ({ type: "text", text });
+  const P = (...content: unknown[]) => ({ type: "paragraph", ...(content.length ? { content } : {}) });
+  const H = (text: string, level = 2) => ({ type: "heading", attrs: { level }, content: [T(text)] });
+  const schema = p5lGetSchema(p5lBuild());
+  const secs = p5lSections();
+  /** sanitize keeps the blocks exactly, and the real editor schema accepts them. */
+  const valid = (blocks: P5lBlock[] | null) => {
+    if (!blocks || !blocks.length) return false;
+    const doc = { type: "doc", version: 1, content: blocks };
+    const san = p5lSan(doc);
+    if (!san || J(san.content) !== J(blocks)) return false;
+    try { schema.nodeFromJSON({ type: "doc", content: blocks }).check(); return true; } catch { return false; }
+  };
+
+  // (1) Builders: every inserted node is schema the server keeps unchanged.
+  const asked: string[] = [];
+  const paraOf = (sku: string) => { asked.push(sku); return sku === "SKU-5" ? "First para.\n\nSecond para." : null; };
+  const sys = p5l.docNodesFor({ kind: "system", sectionId: "s2", lineKey: "" }, secs, paraOf);
+  ok(valid(sys) && J(sys) === J([H("Lighting"), P({ type: "chip", attrs: { kind: "systemPrice", ref: "s2" } })]),
+    "#P5 left pane: a system drops as a level-2 heading with its name + a paragraph holding its live price chip");
+  const line5 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "5" }, secs, paraOf);
+  ok(valid(line5) && J(line5) === J([{ type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: true, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
+    "#P5 left pane: a line drops as a product block (sectionId / lineKey / sku, photo right 34 %) holding its library paragraph split into paragraphs");
+  const line6 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, paraOf);
+  ok(valid(line6) && J((line6![0] as { content: unknown }).content) === J([P()]),
+    "#P5 left pane: a line with no library paragraph drops with one empty paragraph");
+  asked.length = 0;
+  const allow = p5l.docNodesFor({ kind: "line", sectionId: "s1", lineKey: "2" }, secs, paraOf);
+  ok(valid(allow) && (allow![0] as { attrs: { sku: string } }).attrs.sku === "line:2" && asked.length === 0 &&
+     p5l.payloadLibrarySku({ kind: "line", sectionId: "s1", lineKey: "2" }, secs) === "" && p5l.payloadLibrarySku({ kind: "line", sectionId: "s2", lineKey: "5" }, secs) === "SKU-5",
+    "#P5 left pane: an allowance / custom line anchors on its line:<id> token and never reads the library");
+  ok(p5l.docNodesFor({ kind: "line", sectionId: "s1", lineKey: "3" }, secs, paraOf) === null && p5l.docNodesFor({ kind: "line", sectionId: "s3", lineKey: "7" }, secs, paraOf) === null &&
+     p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "99" }, secs, paraOf) === null && p5l.docNodesFor({ kind: "system", sectionId: "gone", lineKey: "" }, secs, paraOf) === null,
+    "#P5 left pane: options, labor, missing lines and missing systems build nothing");
+  const intro = p5l.introNodes("Our rigging package.\n\n- Fly system\n- Arbors");
+  ok(valid(intro) && J(intro) === J([P(T("Our rigging package.")), { type: "bulletList", content: [{ type: "listItem", content: [P(T("Fly system"))] }, { type: "listItem", content: [P(T("Arbors"))] }] }]) &&
+     p5l.introNodes("   ").length === 0,
+    "#P5 left pane: a saved intro inserts as paragraphs / bullet lists (narrativeBlocks rules); a blank one inserts nothing");
+  const ni = p5l.notIncludedNodes("- Permits;\nElectrical\n\nelectrical", "Default A\nDefault B");
+  const niDefault = p5l.notIncludedNodes("  ", "Default A\nDefault B");
+  const items = (b: P5lBlock[]) => (b[0] as { content: { content: { content: { text: string }[] }[] }[] }).content.map((li) => li.content[0].content[0].text);
+  ok(valid(ni) && J(items(ni)) === J(["Permits", "Electrical"]) && valid(niDefault) && J(items(niDefault)) === J(["Default A", "Default B"]) && p5l.notIncludedNodes("", "").length === 0,
+    "#P5 left pane: Not included list = one bullet per item of the quote's text (markers / repeats dropped), else the default");
+  ok(valid(p5l.priceTableNodes()) && valid(p5l.pageBreakNodes()) && J(p5l.priceTableNodes()) === J([{ type: "priceTable" }]) && J(p5l.pageBreakNodes()) === J([{ type: "pageBreak" }]),
+    "#P5 left pane: Price table and Page break insert their atoms");
+
+  // (2) The drag payload.
+  const pay = { kind: "line" as const, sectionId: "s2", lineKey: "5" };
+  ok(p5l.DOC_NODE_MIME === "application/x-peak-docnode" && J(p5l.parseDocNodePayload(p5l.docNodeDragData(pay))) === J(pay) &&
+     J(p5l.parseDocNodePayload('{"kind":"system","sectionId":"s1","lineKey":"9"}')) === J({ kind: "system", sectionId: "s1", lineKey: "" }) &&
+     [ "", "nope", "{}", '{"kind":"image","sectionId":"s1"}', '{"kind":"line","sectionId":"s1"}', '{"kind":"line","sectionId":"s1","lineKey":5}',
+       J({ kind: "system", sectionId: "x".repeat(65) }), "x".repeat(2000), null, 42 ].every((r) => p5l.parseDocNodePayload(r) === null),
+    "#P5 left pane: the drag carries { kind, sectionId, lineKey } as application/x-peak-docnode; anything else parses to null");
+
+  // (3) ✓ — already in the document.
+  const doc = p5lSan({ type: "doc", version: 1, content: [
+    H("lighting "), P({ type: "chip", attrs: { kind: "systemName", ref: "s4" } }),
+    { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: true, align: "right", width: 34 } }, content: [P()] },
+  ] })!;
+  const pr = p5l.docPresence(doc);
+  ok(p5l.systemInDoc(secs[1], pr) && p5l.systemInDoc(secs[3], pr) && !p5l.systemInDoc(secs[0], pr) && !p5l.systemInDoc(secs[2], pr) &&
+     p5l.lineInDoc("s2", 5, pr) && !p5l.lineInDoc("s2", 6, pr) && !p5l.lineInDoc("s1", 5, pr),
+    "#P5 left pane: ✓ on a system with a heading of its name or a price/name chip; ✓ on a line a product block anchors on (same system + line)");
+
+  // (4) BOM tree: Build order by group, featurable lines only.
+  const grouped = secs.map((s) => (s.id === "s3" ? { ...s, groupId: "g-a" } : s));
+  const tree = p5l.bomTree(p5lGroupBlocks(grouped, [{ id: "g-a", name: "Labor", alternate: false }, { id: "g-b", name: "Empty", alternate: false }], { includeEmpty: true }));
+  ok(J(tree.map((g) => [g.group?.name ?? null, g.systems.map((s) => [s.sec.id, s.lines.map((l) => l.id)])])) ===
+       J([[null, [["s1", [1, 2, 4]], ["s2", [5, 6]], ["s4", [8]]]], ["Labor", [["s3", []]]]]) &&
+     p5l.lineLabel(secs[0].items[1]) === "Budget allowance — Line 2",
+    "#P5 left pane: BOM = systems by group in Build order (empty groups left out), lines that can be featured only (no options / labor)");
+
+  // (5) Gap rows.
+  const gapDoc = p5lSan({ type: "doc", version: 1, content: [
+    H("Lighting"), P({ type: "chip", attrs: { kind: "systemPrice", ref: "gone" } }, { type: "chip", attrs: { kind: "lineQty", ref: "s2:99" } }),
+    { type: "productBlock", attrs: { sectionId: "s2", lineKey: "99", sku: "SKU-OLD", photo: { show: true, align: "right", width: 34 } }, content: [P()] },
+    { type: "productBlock", attrs: { sectionId: "s1", lineKey: "77", sku: "line:77", photo: { show: true, align: "right", width: 34 } }, content: [P()] },
+  ] })!;
+  const g = p5lGaps(gapDoc, secs);
+  const rows = p5l.gapRows(g, ["1 narrative system has no intro"], (sku) => (sku === "SKU-OLD" ? "Old fixture" : null));
+  const txt = rows.map((r) => r.text);
+  const notMentioned = g.systemsNotMentioned.map((s) => `${s.name} isn't in the document`);
+  ok(txt[0] === "A price for a removed system" && txt[1] === "A quantity for a removed line" && txt[2] === "Old fixture — No longer in BOM" && txt[3] === "A custom line — No longer in BOM" &&
+     J(txt.slice(4, 4 + notMentioned.length)) === J(notMentioned) && notMentioned.includes("Install isn't in the document") &&
+     (g.itemizedInAppendix.length ? txt.includes(`Lines for ${p5l.joinNames(g.itemizedInAppendix)} print in the appendix.`) : true) &&
+     txt[txt.length - 1] === "1 narrative system has no intro",
+    "#P5 left pane: Gaps = removed chips, products no longer in the BOM, systems never mentioned (\"<name> isn't in the document\"), the appendix note, then the package gaps");
+  const pbRow = rows[2], sysRow = rows.find((r) => r.text === "Install isn't in the document");
+  ok(pbRow.action?.kind === "scroll" && J(pbRow.action) === J({ kind: "scroll", sectionId: "s2", lineKey: "99", sku: "SKU-OLD" }) &&
+     J(sysRow?.action) === J({ kind: "insertSystem", sectionId: "s3" }) && rows.find((r) => r.key === "appendix")?.tone !== "warn",
+    "#P5 left pane: a product gap scrolls to its block; a missing system inserts its heading + price at the end; the appendix line is info");
+  ok(p5l.joinNames(["A"]) === "A" && p5l.joinNames(["A", "B"]) === "A and B" && p5l.joinNames(["A", "B", "C"]) === "A, B and C" &&
+     p5l.gapRows({ removedChips: [], productsNotInBom: [], systemsNotMentioned: [], itemizedInAppendix: [] }, []).length === 0,
+    "#P5 left pane: names join as 'A, B and C'; no gaps → no rows");
+  const ready = p5l.packageReadinessGaps(secs);
+  ok(ready[0] === "1 narrative system has no intro" && p5l.packageReadinessGaps([]).length === 0,
+    "#P5 left pane: the package gaps repeat the tab badge's client-side counts (narrative systems without an intro, key products without a paragraph, scopes without goals)");
+
+  // (6) Drop position: blocks land where they fit — never inside a paragraph, a list item or a product block.
+  const pmDoc = schema.nodeFromJSON(p5lSan({ type: "doc", version: 1, content: [
+    P(T("Hello world")),
+    { type: "bulletList", content: [{ type: "listItem", content: [P(T("item"))] }] },
+    { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: true, align: "right", width: 34 } }, content: [P(T("words"))] },
+  ] })!);
+  const tops: number[] = [];
+  pmDoc.forEach((_n, off) => tops.push(off));
+  tops.push(pmDoc.content.size);
+  const sysJson = sys as unknown as Parameters<typeof p5lDropPos>[2];
+  const inPara = p5lDropPos(pmDoc, 4, sysJson), inItem = p5lDropPos(pmDoc, tops[1] + 4, sysJson), inPb = p5lDropPos(pmDoc, tops[2] + 3, line5 as unknown as Parameters<typeof p5lDropPos>[2]);
+  ok([inPara, inItem, inPb].every((x) => x !== null && tops.includes(x)) && p5lDropPos(pmDoc, 99999, sysJson) === pmDoc.content.size &&
+     p5lDropPos(pmDoc, 1, [{ type: "nope" }]) === null,
+    "#P5 left pane: a drop inside a paragraph, a list item or a product block lands on the nearest block boundary (dropPoint); invalid nodes insert nothing");
+
+  // (7) Wiring pins.
+  const dropSrc = rd(`${ED}/doc-drop.ts`), paneSrc = rd(`${ED}/left-pane.tsx`), edSrc = rd(`${ED}/package-doc-editor.tsx`), cmdSrc = rd(`${ED}/editor-commands.ts`), pkgStep = rd(`${EST_DIR}/steps/package-step.tsx`);
+  ok(/if \(!dt \|\| !Array\.from\(dt\.types \|\| \[\]\)\.includes\(DOC_NODE_MIME\)\) return false;/.test(dropSrc) && dropSrc.includes("parseDocNodePayload(dt.getData(DOC_NODE_MIME))") &&
+     /event\.preventDefault\(\);\s*const at = view\.posAtCoords\(\{ left: event\.clientX, top: event\.clientY \}\);/.test(dropSrc) && dropSrc.includes("handleDrop(view, event)"),
+    "#P5 left pane: the editor's drop handler reads only application/x-peak-docnode (other drops fall through to ProseMirror), maps the drop with posAtCoords and prevents the default");
+  ok(edSrc.includes("const extensions = useMemo(() => [...editorExtensions(), DocNodeDrop], []);") && /setDocNodeDropHandler\(editor, \(p, pos\) => \{[\s\S]*?insertBlocksAt\(editor, pos, nodes\)/.test(edSrc) &&
+     /return at !== null && editor\.chain\(\)\.focus\(\)\.insertContentAt\(at, json\)\.run\(\);/.test(cmdSrc) && cmdSrc.includes("dropPoint(doc, at, slice)") &&
+     edSrc.includes("onReady?.(api);") && edSrc.includes("onReady?.(null);") && edSrc.includes("rows = await libraryRef.current.ensure([sku]);"),
+    "#P5 left pane: drops insert through editor commands (one undo step) after fetching a missing library paragraph; the editor hands the pane its insert API via onReady");
+  ok(paneSrc.startsWith('"use client";') && paneSrc.includes("e.dataTransfer.setData(DOC_NODE_MIME, docNodeDragData(p));") && (paneSrc.match(/draggable onDragStart=\{dragStart\(/g) || []).length === 2 &&
+     paneSrc.includes("aria-label={`Insert ${name}`}") && paneSrc.includes("aria-label={`Insert ${label}`}") && paneSrc.includes("aria-label={`Insert ${x.title}`}") &&
+     [">Gaps</h3>", ">BOM</h3>", ">Library</h3>", "No gaps.", "Not included list", "Price table", "Page break"].every((x) => paneSrc.includes(x)) &&
+     !/from "@tiptap\//.test(paneSrc) && paneSrc.includes("api.insertDocNode(p)") && paneSrc.includes("api.scrollToProduct(") && !/#[0-9a-f]{6}[^\n]*accent/i.test(paneSrc),
+    "#P5 left pane: system and line rows are draggable with the custom MIME and each has a + 'Insert <name>' button; Gaps / BOM / Library copy; the pane never imports TipTap");
+  ok(/const DocLeftPane = dynamic\(\(\) => import\("@\/components\/package-doc\/editor\/left-pane"\), \{ ssr: false \}\);/.test(pkgStep) && pkgStep.includes("onReady={setDocApi}") &&
+     pkgStep.includes("api={docApi}") && pkgStep.includes('<aside aria-label="Document tools"') && pkgStep.includes("width: 240") && !/^import [^\n]*@\/components\/package-doc\/editor/m.test(pkgStep),
+    "#P5 left pane: Build package renders the pane (code-split, ssr: false) in the 240 px left column and wires the editor's onReady to it");
+}

@@ -7,6 +7,9 @@ import type { ParagraphSaveResponse } from "@/app/(app)/estimator/narrative";
 import type { KeyProductLibrary } from "@/app/(app)/estimator/use-key-product-library";
 import type { PackageDocCtx } from "@/lib/package-doc/resolve";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { docNodesFor, payloadLibrarySku, type DocNodePayload, type PackageDocApi } from "@/lib/package-doc/insert";
+import { DocNodeDrop, setDocNodeDropHandler } from "./doc-drop";
+import { appendBlocks, findProductBlock, insertBlock, insertBlocksAt } from "./editor-commands";
 import { PackageDocEditorContext, type PackageDocEditorEnv } from "./editor-context";
 import { docSizeState, toEditorContent, type DocSizeState } from "./editor-model";
 import { editorExtensions } from "./extensions";
@@ -48,6 +51,8 @@ export type PackageDocEditorProps = {
   library: KeyProductLibrary;
   canWriteLibrary: boolean;
   onSaveToProduct: (sku: string, text: string, expectUpdatedAt: number | null) => Promise<ParagraphSaveResponse>;
+  /** The left pane's insert API once the editor exists (null when it goes away). */
+  onReady?: (api: PackageDocApi | null) => void;
 };
 
 const PROSE_CSS = `
@@ -68,8 +73,9 @@ const PROSE_CSS = `
 
 const EDITOR_PROPS = { attributes: { class: "pd-ed-prose", role: "textbox", "aria-multiline": "true", "aria-label": "Client document" } };
 
-export default function PackageDocEditor({ value, onChange, onOverChange, discardRef, ctx, library, canWriteLibrary, onSaveToProduct }: PackageDocEditorProps) {
-  const extensions = useMemo(() => editorExtensions(), []);
+export default function PackageDocEditor({ value, onChange, onOverChange, discardRef, ctx, library, canWriteLibrary, onSaveToProduct, onReady }: PackageDocEditorProps) {
+  /* + DocNodeDrop: a BOM row dropped from the left pane (handler registered below). */
+  const extensions = useMemo(() => [...editorExtensions(), DocNodeDrop], []);
   const onChangeRef = useRef(onChange);
   const onOverRef = useRef(onOverChange);
   useEffect(() => {
@@ -161,6 +167,56 @@ export default function PackageDocEditor({ value, onChange, onOverChange, discar
     setSize(null);
     onOverRef.current?.(false);
   }, [editor, value]);
+
+  /* The left pane's insert API: BOM rows (dropped or + inserted), Library
+     items, Gaps actions. Nodes come from the pure builders in
+     lib/package-doc/insert.ts; every insert is one editor command. */
+  const sectionsRef = useRef(ctx.sections);
+  const libraryRef = useRef(library);
+  useEffect(() => {
+    sectionsRef.current = ctx.sections;
+    libraryRef.current = library;
+  }, [ctx.sections, library]);
+  useEffect(() => {
+    if (!editor) return;
+    const build = async (p: DocNodePayload) => {
+      const sku = payloadLibrarySku(p, sectionsRef.current);
+      let rows = libraryRef.current.rows;
+      if (sku && !Object.hasOwn(rows, sku)) rows = await libraryRef.current.ensure([sku]);
+      return docNodesFor(p, sectionsRef.current, (k) => (Object.hasOwn(rows, k) ? rows[k].paragraph : null));
+    };
+    const live = () => !editor.isDestroyed;
+    setDocNodeDropHandler(editor, (p, pos) => {
+      void build(p).then((nodes) => {
+        if (nodes && live()) insertBlocksAt(editor, pos, nodes);
+      });
+    });
+    const insertBlocks: PackageDocApi["insertBlocks"] = (nodes, where = "cursor") => {
+      if (!live() || !nodes.length) return false;
+      return where === "end" ? appendBlocks(editor, nodes) : insertBlock(editor, nodes);
+    };
+    const api: PackageDocApi = {
+      insertBlocks,
+      insertDocNode: async (p, where = "cursor") => {
+        const nodes = await build(p);
+        return !!nodes && insertBlocks(nodes, where);
+      },
+      scrollToProduct: (t) => {
+        if (!live()) return false;
+        const pos = findProductBlock(editor.state.doc, t);
+        if (pos < 0) return false;
+        editor.chain().focus().setTextSelection(pos + 2).run();
+        const dom = editor.view.nodeDOM(pos);
+        if (dom instanceof HTMLElement) dom.scrollIntoView({ block: "center", behavior: "smooth" });
+        return true;
+      },
+    };
+    onReady?.(api);
+    return () => {
+      setDocNodeDropHandler(editor, null);
+      onReady?.(null);
+    };
+  }, [editor, onReady]);
 
   const env = useMemo<PackageDocEditorEnv>(() => ({ ctx, library, canWriteLibrary, onSaveToProduct }), [ctx, library, canWriteLibrary, onSaveToProduct]);
 

@@ -13,6 +13,7 @@ import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import { saveProductParagraphAction } from "../narrative-actions";
 import { seedPackageDoc } from "@/lib/package-doc/seed";
 import type { PackageDocCtx } from "@/lib/package-doc/resolve";
+import type { PackageDocApi } from "@/lib/package-doc/insert";
 import type { EstimatorState } from "../use-estimator-state";
 
 /** Screen-reader-only text (an aria-label on a plain span isn't reliably announced). */
@@ -33,12 +34,16 @@ const PackageDocEditor = dynamic(() => import("@/components/package-doc/editor/p
   loading: () => <div style={{ padding: 24, fontSize: 12.5, color: "#8c919c" }}>Loading the editor…</div>,
 });
 
+/** Phase 5 — the editor's left pane (Gaps / BOM / Library), code-split with it. */
+const DocLeftPane = dynamic(() => import("@/components/package-doc/editor/left-pane"), { ssr: false });
+
 const BAR_BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 6, padding: "5px 10px", cursor: "pointer" };
 const START_BTN: CSSProperties = { ...BAR_BTN, color: "#fff", background: "var(--accent)", padding: "7px 14px", fontSize: 12.5 };
 
 /** #305 — Build package: what the client receives. Narrative for the picked system (left), output options (right). */
 export function PackageStep({ s }: { s: EstimatorState }) {
   const {
+    blocks,
     canWriteNarrativeLibrary,
     coverSummary,
     customerId,
@@ -114,6 +119,8 @@ export function PackageStep({ s }: { s: EstimatorState }) {
     setPackageDocOver(false);
     setPackageDoc(null);
   };
+  /** The editor's insert API for the left pane (null until the editor exists). */
+  const [docApi, setDocApi] = useState<PackageDocApi | null>(null);
   const docCtx = useMemo<PackageDocCtx>(() => ({ sections, t, quoteId: quoteId || "", taxRatePct: 0 }), [sections, t, quoteId]);
   const { setRow: setLibraryRow, rows: libraryRows } = kpLib;
   /** Save to product: the narrative column's action (create permission, stale
@@ -200,8 +207,20 @@ export function PackageStep({ s }: { s: EstimatorState }) {
           ))}
         </nav>
       ) : (
-        /* Task 4: Gaps / BOM / Library pane. */
-        <aside aria-label="Document tools" className="est-scroll" style={{ width: 240, flexShrink: 0, overflowY: "auto", background: "#fff", borderRight: "1px solid #ececf0", padding: "16px 14px" }} />
+        <aside aria-label="Document tools" className="est-scroll" style={{ width: 240, flexShrink: 0, overflowY: "auto", background: "#fff", borderRight: "1px solid #ececf0", padding: "16px 14px" }}>
+          {packageDoc && (
+            <DocLeftPane
+              api={docApi}
+              doc={packageDoc}
+              sections={sections}
+              blocks={blocks}
+              intros={intros}
+              notIncluded={notIncluded}
+              notIncludedDefault={notIncludedDefault}
+              library={kpLib}
+            />
+          )}
+        </aside>
       )}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {docBar}
@@ -281,6 +300,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
               library={kpLib}
               canWriteLibrary={canWriteNarrativeLibrary}
               onSaveToProduct={saveToProduct}
+              onReady={setDocApi}
             />
           </div>
         )}
