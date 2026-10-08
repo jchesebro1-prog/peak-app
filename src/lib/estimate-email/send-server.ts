@@ -6,10 +6,10 @@ import { pdfStorage } from "@/lib/quote-pdf/storage";
 import { applyOutboundSignature } from "@/lib/email-signature";
 import { gmailEnabled, personalKey } from "@/lib/gmail/config";
 import { getConnectionInfo } from "@/lib/gmail/connections";
-import { latestSentRevision, pdfFileName, pdfIsCurrent, pdfKindForQuoteType, pdfView, teamPdfPath } from "@/lib/quote-pdf/state";
+import { latestSentRevision, pdfFileName, pdfIsCurrent, pdfKindForQuoteType, pdfStoragePath, pdfView, teamPdfPath } from "@/lib/quote-pdf/state";
 import { ensureShareLink } from "@/lib/quote-share/links";
 import { sendQuoteToCustomer, type ReviewOpResult } from "@/lib/quote-review-ops";
-import { get as getThread, saveDraft, sendDraft, type CommAttachment, type CommLink } from "@/lib/stores/comms";
+import { findDraftByLink, get as getThread, holdLastOutbound, saveDraft, sendDraft, type CommAttachment, type CommLink } from "@/lib/stores/comms";
 import {
   claimEstimateEmailSend, get as getQuoteLive, recordEstimateEmail, releaseEstimateEmailSend,
   type EstimateEmailClaim, type EstimateEmailEntry, type Quote, type QuoteRevision, type QuoteStatus,
@@ -18,7 +18,7 @@ import { signatureFor } from "@/lib/stores/signatures";
 import { createTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
-import { attachmentsFit, bodyWithLink, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
+import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
 
 /**
  * Estimator Phase 3 (spec §10.1, §10.3) — email the estimate from the
@@ -52,6 +52,13 @@ import { attachmentsFit, bodyWithLink, FOLLOW_UP_CHOICES, parseRecipients, witho
  * Gmail-refused send is still recorded on the estimate's Activity (no
  * follow-up task). A partial failure with no thread to open says to send
  * again rather than "open it in Inbox".
+ *
+ * Final review: an email that didn't go out through Gmail (local, refused,
+ * or no answer in time — "unknown", which Gmail may have accepted) is held
+ * back from every later send on the thread (`noAutoRetry`), so a reply can
+ * never silently push it with its PDF. The cover PDF rides by reference too
+ * (stored under the quote's own folder; a data-URL only when storage fails).
+ * Open in Inbox reuses the sender's own still-current draft for the quote.
  *
  * Every side effect is an injected dep so the spec harness proves the order
  * with fakes; `liveEstimateEmailDeps` wires the real ones (the "use server"
@@ -87,8 +94,11 @@ export const SEND_COPY = {
   /** Marked sent, nothing went out and no thread exists to open. */
   partialNoThread: "Marked sent, but the email didn’t go out — send it again in a moment.",
   notSent: "The email didn’t go out — try again.",
-  gmailFailed: "Marked sent, but Gmail didn’t accept the email — open it in Inbox.",
-  gmailFailedResend: "Gmail didn’t accept the email — open it in Inbox.",
+  gmailFailed: "Marked sent, but Gmail didn’t accept the email — send it again from here.",
+  gmailFailedResend: "Gmail didn’t accept the email — send it again from here.",
+  /** Gmail didn't answer in time: it may have been accepted — never resend blind. */
+  gmailUnknown: "Marked sent, but Gmail didn’t answer in time — check your Gmail Sent folder before sending again.",
+  gmailUnknownResend: "Gmail didn’t answer in time — check your Gmail Sent folder before sending again.",
   inboxPartial: "Marked sent, but the Inbox draft couldn’t be created — try Open in Inbox again.",
   inboxFailed: "The Inbox draft couldn’t be created — try again.",
   recordFailed: "Sent — but it couldn’t be logged on the estimate’s Activity.",
@@ -160,8 +170,12 @@ export type FollowUpSpec = {
 };
 
 /** How the email left: through the sender's Gmail, locally only (no Gmail
- *  connection / bridge off), or `failed` — connected, but Gmail didn't take it. */
-export type EmailDelivery = "gmail" | "local" | "failed";
+ *  connection / bridge off), `failed` — connected, but Gmail refused it — or
+ *  `unknown` — Gmail didn't answer in time (it may have been accepted). */
+export type EmailDelivery = "gmail" | "local" | "failed" | "unknown";
+
+/** An unsent Inbox draft linked to the quote, in the sender's own mailbox. */
+export type InboxDraftRef = { threadId: string; createdAt: number; attachments: Array<{ pdfPath?: string }> };
 
 export type EstimateEmailDeps = {
   now: () => number;
@@ -170,6 +184,11 @@ export type EstimateEmailDeps = {
   readPdf: (path: string) => Promise<Buffer | null>;
   /** The cover, rendered now; throws EstimateEmailError with the reason. */
   renderCoverPdf: (q: Quote) => Promise<Buffer>;
+  /** Keep the rendered cover in PDF storage (`quote-pdfs/<id>/cover-<now>.pdf`);
+   *  the stored path, or null when storage is unavailable / the write failed. */
+  storeCover: (quoteId: string, bytes: Buffer, now: number) => Promise<string | null>;
+  /** The sender's newest unsent Inbox draft linked to this quote (Open in Inbox reuses it). */
+  findInboxDraft: (quoteId: string, mailboxUser: string) => Promise<InboxDraftRef | null>;
   /** Take the quote's one in-flight send (Quote.emailSending). */
   claimSend: (id: string, by: string, now: number) => Promise<{ ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" }>;
   releaseSend: (id: string, claim: EstimateEmailClaim) => Promise<void>;
@@ -191,7 +210,7 @@ export type SendEstimateResult =
   | { ok: false; error: string; markedSent?: boolean; href?: string };
 
 export type OpenInInboxResult =
-  | { ok: true; href: string; threadId: string; status: QuoteStatus; warning?: string }
+  | { ok: true; href: string; threadId: string; status: QuoteStatus; warning?: string; reused?: true }
   | { ok: false; error: string; markedSent?: boolean };
 
 /** The Inbox composer opened on a draft (shared boxes are retired — the personal box). */
@@ -248,7 +267,8 @@ type Checked = {
 type Prepared = Checked & {
   /** The estimate PDF (by reference once the revision is known): its file name and raw size. */
   estimate: { name: string; size: number } | null;
-  cover: CommAttachment | null;
+  /** The rendered cover — stored (by reference) just before the thread is made. */
+  cover: { name: string; bytes: Buffer } | null;
 };
 
 type Refusal = { ok: false; error: string };
@@ -326,11 +346,13 @@ async function attach(deps: EstimateEmailDeps, actor: SendActor, c: Checked, inp
   // checked against the cap before the cover is rendered at all.
   const number = displayQuoteNumber(q);
   let estimate: Prepared["estimate"] = null;
-  let cover: CommAttachment | null = null;
+  let cover: Prepared["cover"] = null;
   try {
     if (input.attachEstimate === true) {
       const path = estimatePdfPath(q);
       if (!path) return { ok: false, error: SEND_COPY.pdfPreparing };
+      // The PDF state stores no size, so the file is read to size it (and to
+      // prove it is readable before anything is marked).
       const bytes = await deps.readPdf(path);
       if (!bytes || !bytes.length) return { ok: false, error: SEND_COPY.pdfUnreadable };
       estimate = { name: pdfFileName(number, null), size: bytes.length };
@@ -338,14 +360,13 @@ async function attach(deps: EstimateEmailDeps, actor: SendActor, c: Checked, inp
     }
     if (input.attachCover === true) {
       const bytes = await deps.renderCoverPdf(q);
-      // The cover is rendered on demand and small: it rides as a data-URL.
-      cover = { name: coverPdfFileName(number), mime: "application/pdf", size: bytes.length, dataUrl: "data:application/pdf;base64," + bytes.toString("base64") };
+      cover = { name: coverPdfFileName(number), bytes };
     }
   } catch (e) {
     if (!(e instanceof EstimateEmailError)) console.error("[estimate-email] attachments failed", e);
     return { ok: false, error: userMessage(e, SEND_COPY.attachFailed) };
   }
-  if (!attachmentsFit([estimate?.size ?? 0, cover?.size ?? 0])) return { ok: false, error: SEND_COPY.tooLarge };
+  if (!attachmentsFit([estimate?.size ?? 0, cover?.bytes.length ?? 0])) return { ok: false, error: SEND_COPY.tooLarge };
 
   return { ...c, body, estimate, cover };
 }
@@ -420,7 +441,10 @@ async function markAndLink(
   return linked;
 }
 
-function attachmentsFor(p: Prepared, m: Linked): CommAttachment[] {
+/** The thread's attachments: the estimate (the sent revision's copy) and the
+ *  cover, both by reference. The cover is stored now — only once the email is
+ *  certain to be made — and rides as a data-URL only when storing it fails. */
+async function attachmentsFor(deps: EstimateEmailDeps, p: Prepared, m: Linked): Promise<CommAttachment[]> {
   const out: CommAttachment[] = [];
   if (p.estimate && m.rev.pdfBlobPath) {
     out.push({
@@ -431,11 +455,24 @@ function attachmentsFor(p: Prepared, m: Linked): CommAttachment[] {
       href: revisionPdfHref(m.q.id, m.rev.rev),
     });
   }
-  if (p.cover) out.push(p.cover);
+  if (p.cover) {
+    const { name, bytes } = p.cover;
+    let path: string | null = null;
+    try {
+      path = await deps.storeCover(m.q.id, bytes, deps.now());
+    } catch (e) {
+      console.error("[estimate-email] storing the cover failed — attaching it inline", e);
+    }
+    out.push(
+      path
+        ? { name, mime: "application/pdf", size: bytes.length, pdfPath: path, href: coverPdfHref(m.q.id, path) }
+        : { name, mime: "application/pdf", size: bytes.length, dataUrl: "data:application/pdf;base64," + bytes.toString("base64") }
+    );
+  }
   return out;
 }
 
-function threadSpecFor(actor: SendActor, p: Prepared, m: Linked): ThreadSpec {
+async function threadSpecFor(deps: EstimateEmailDeps, actor: SendActor, p: Prepared, m: Linked): Promise<ThreadSpec> {
   const q = m.q;
   return {
     mailboxUser: actor.name,
@@ -447,7 +484,7 @@ function threadSpecFor(actor: SendActor, p: Prepared, m: Linked): ThreadSpec {
     subject: p.subject,
     body: bodyWithLink(p.body, m.url),
     link: { type: "quote", id: q.id, label: estimateLinkLabel(q) },
-    attachments: attachmentsFor(p, m),
+    attachments: await attachmentsFor(deps, p, m),
   };
 }
 
@@ -503,7 +540,7 @@ async function sendClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepare
   // Step 5 — the email.
   let sent: { threadId: string; delivery: EmailDelivery };
   try {
-    sent = await deps.createAndSendThread(threadSpecFor(actor, p, m));
+    sent = await deps.createAndSendThread(await threadSpecFor(deps, actor, p, m));
   } catch (e) {
     console.error("[estimate-email] send failed", e);
     const threadId = e instanceof EstimateEmailError ? e.threadId : undefined;
@@ -515,22 +552,24 @@ async function sendClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepare
       ...(threadId ? { href: stillDraft ? inboxDraftHref(threadId) : inboxThreadHref(threadId) } : {}),
     };
   }
-  // Connected, but Gmail didn't take it: not ok, no follow-up task — but the
-  // thread IS recorded, so the estimate's Activity shows it (and reads as
-  // delivered once the bridge later pushes it). A failed record only logs.
+  // Connected, but Gmail refused it or didn't answer (it may have been
+  // accepted): not ok, no follow-up task — but the thread IS recorded, so the
+  // estimate's Activity shows it with that state. The message is held back
+  // (noAutoRetry) — nothing ever re-sends it on its own. A failed record only logs.
   if (sent.delivery !== "gmail" && sent.delivery !== "local") {
     try {
       if (!(await deps.recordEmail(q.id, { threadId: sent.threadId, rev, at: deps.now(), by: actor.name, to: p.to }))) {
-        console.error("[estimate-email] recording a Gmail-refused send wrote nothing", q.id, sent.threadId);
+        console.error("[estimate-email] recording an undelivered send wrote nothing", q.id, sent.threadId, sent.delivery);
       }
     } catch (e) {
-      console.error("[estimate-email] record failed (Gmail-refused send)", e);
+      console.error("[estimate-email] record failed (undelivered send)", e);
     }
+    const unknown = sent.delivery === "unknown";
     return {
       ok: false,
-      error: markedSent ? SEND_COPY.gmailFailed : SEND_COPY.gmailFailedResend,
+      error: markedSent ? (unknown ? SEND_COPY.gmailUnknown : SEND_COPY.gmailFailed) : unknown ? SEND_COPY.gmailUnknownResend : SEND_COPY.gmailFailedResend,
+      // No Inbox link: the Inbox can't resend it — the Activity card shows the thread.
       ...(markedSent ? { markedSent: true } : {}),
-      href: inboxThreadHref(sent.threadId),
     };
   }
 
@@ -589,9 +628,31 @@ export async function openEstimateInInbox(
   const c = await preflight(deps, actor, quoteId, input, "inbox");
   if ("ok" in c) return c;
   return withClaim(deps, actor, c.q.id, async () => {
+    const reused = await reuseInboxDraft(deps, actor, c.q.id);
+    if (reused) return reused;
     const p = await prepareClaimed(deps, actor, c, input, "inbox");
     return "ok" in p ? p : openClaimed(deps, actor, p, input);
   });
+}
+
+/**
+ * Final review (I3b) — the sender's own unsent draft for this quote, when it
+ * still matches the quote (estimateDraftIsCurrent, made at or after the
+ * latest sent revision): Open in Inbox opens it again instead of making (and
+ * recording) another. Under the claim; a failed lookup just makes a new one.
+ */
+async function reuseInboxDraft(deps: EstimateEmailDeps, actor: SendActor, quoteId: string): Promise<OpenInInboxResult | null> {
+  try {
+    const d = await deps.findInboxDraft(quoteId, actor.name);
+    if (!d) return null;
+    const q = await deps.getQuote(quoteId);
+    const rev = q ? latestSentRevision(q.revisions) : null;
+    if (!q || !rev || !estimateDraftIsCurrent(q, d.attachments) || !(Number(d.createdAt) >= (Number(rev.at) || 0))) return null;
+    return { ok: true, href: inboxDraftHref(d.threadId), threadId: d.threadId, status: q.status, reused: true };
+  } catch (e) {
+    console.error("[estimate-email] looking up an open Inbox draft failed", e);
+    return null;
+  }
 }
 
 async function openClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepared, input: EstimateEmailInput): Promise<OpenInInboxResult> {
@@ -603,7 +664,7 @@ async function openClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepare
   const { q, markedSent } = m;
   let threadId: string;
   try {
-    threadId = (await deps.createDraftThread(threadSpecFor(actor, p, m))).threadId;
+    threadId = (await deps.createDraftThread(await threadSpecFor(deps, actor, p, m))).threadId;
   } catch (e) {
     console.error("[estimate-email] inbox draft failed", e);
     return { ok: false, error: markedSent ? SEND_COPY.inboxPartial : SEND_COPY.inboxFailed, ...(markedSent ? { markedSent: true } : {}) };
@@ -640,6 +701,20 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
       if (!r.ok) throw new EstimateEmailError(r.error);
       return r.pdf;
     },
+    storeCover: async (quoteId, bytes, now) => {
+      const store = pdfStorage();
+      if ("unavailable" in store) return null;
+      try {
+        return await store.put(pdfStoragePath(quoteId, `cover-${now}`), bytes);
+      } catch (e) {
+        console.error("[estimate-email] cover storage write failed", e);
+        return null;
+      }
+    },
+    findInboxDraft: async (quoteId, mailboxUser) => {
+      const t = await findDraftByLink("quote", quoteId, { mailboxUser });
+      return t ? { threadId: t.id, createdAt: t.createdAt, attachments: t.draft?.attachments || [] } : null;
+    },
     claimSend: (id, by, now) => claimEstimateEmailSend(id, by, now),
     releaseSend: (id, claim) => releaseEstimateEmailSend(id, claim),
     applySignature: applySenderSignature,
@@ -663,8 +738,11 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
         const t = await getThread(draft.id).catch(() => null);
         throw t ? new EstimateEmailError(SEND_COPY.notSent, draft.id, t.status === "draft") : new EstimateEmailError(SEND_COPY.notSent);
       }
-      // addMessage awaits the bridge's dispatch, so a Gmail send has stamped its gmailId by now.
-      return { threadId: draft.id, delivery: await deliveryAfterSend(connected, () => getThread(draft.id)) };
+      // addMessage awaits the bridge's dispatch, so a Gmail send has stamped its gmailId (or its sendFailure) by now.
+      const delivery = await deliveryAfterSend(connected, () => getThread(draft.id));
+      // I1: not through Gmail → never pushed later by a reply on the thread.
+      if (delivery !== "gmail") await holdOutbound(draft.id, delivery);
+      return { threadId: draft.id, delivery };
     },
     createDraftThread: async (spec) => ({ threadId: (await saveDraft({ ...draftInput(spec), me: spec.mailboxUser })).id }),
     recordEmail: recordEstimateEmail,
@@ -695,11 +773,28 @@ export async function gmailConnectedFor(userId: string): Promise<boolean> {
 }
 
 /** How a thread's latest outbound message left: not connected → local; else
- *  the bridge stamped a gmailId (gmail) or it didn't (failed). */
-export function deliveryOfThread(t: { messages?: Array<{ direction?: string; gmailId?: string }> } | null | undefined, connected: boolean): EmailDelivery {
+ *  the bridge stamped a gmailId (gmail), or its send timed out (unknown — Gmail
+ *  may have accepted it), or anything else (failed). */
+export function deliveryOfThread(
+  t: { messages?: Array<{ direction?: string; gmailId?: string; sendFailure?: string }> } | null | undefined,
+  connected: boolean
+): EmailDelivery {
   if (!connected) return "local";
   const outs = (t?.messages || []).filter((x) => x.direction === "out");
-  return outs[outs.length - 1]?.gmailId ? "gmail" : "failed";
+  const last = outs[outs.length - 1];
+  if (last?.gmailId) return "gmail";
+  return last?.sendFailure === "timeout" ? "unknown" : "failed";
+}
+
+/** I1 — hold the thread's latest outbound email back from every later bridge
+ *  send (comms holdLastOutbound). Best effort: logged, never thrown — the
+ *  email's outcome is already decided. */
+export async function holdOutbound(threadId: string, delivery: Exclude<EmailDelivery, "gmail">): Promise<void> {
+  try {
+    if (!(await holdLastOutbound(threadId, delivery))) console.error("[estimate-email] nothing to hold back on", threadId);
+  } catch (e) {
+    console.error("[estimate-email] holding the message back from auto-send failed", threadId, e);
+  }
 }
 
 /** The delivery of a send that already went out. Not connected is "local"

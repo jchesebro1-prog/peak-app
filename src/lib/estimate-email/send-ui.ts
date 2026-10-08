@@ -8,7 +8,7 @@
 
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { QuoteStatus } from "@/lib/stores/quotes";
-import { FOLLOW_UP_CHOICES, type EstimateEmailDefaults } from "./compose";
+import { FOLLOW_UP_CHOICES, type EmailDeliveryState, type EstimateEmailDefaults } from "./compose";
 
 export const SEND_UI_COPY = {
   composerTitle: "Email the estimate",
@@ -38,6 +38,9 @@ export const SEND_UI_COPY = {
   markRead: "Mark read",
   deliveredGmail: "Sent through Gmail",
   deliveredLocal: "Sent locally (Gmail not connected)",
+  deliveredFailed: "Gmail didn't accept it",
+  deliveredUnknown: "Gmail didn't answer — check your Sent folder",
+  deliveredDraft: "Draft in Inbox — not sent",
   replyTo: (subject: string) => `Reply to "${subject || "(no subject)"}"`,
   markReadOf: (subject: string) => `Mark read "${subject || "(no subject)"}"`,
   textHidden: (owner: string) => `Message text is visible to ${owner || "the mailbox owner"}, approvers and the lead estimator.`,
@@ -129,6 +132,22 @@ export function sendSync(r: SendLikeResult): { ok: boolean; review: null; status
   // A stale-version refusal carries the fresh view (`next`) so the retry uses the new asOf.
   if (!r.ok && !r.markedSent && r.next === undefined) return null;
   return { ok: r.ok, review: null, status: r.status ?? null, ...(r.next !== undefined ? { next: r.next } : {}) };
+}
+
+/** The Activity card's delivery pill (final review I2): what really happened to the email. */
+export function deliveryLabel(d: EmailDeliveryState | null | undefined): string {
+  switch (d) {
+    case "gmail": return SEND_UI_COPY.deliveredGmail;
+    case "failed": return SEND_UI_COPY.deliveredFailed;
+    case "unknown": return SEND_UI_COPY.deliveredUnknown;
+    case "draft": return SEND_UI_COPY.deliveredDraft;
+    default: return SEND_UI_COPY.deliveredLocal;
+  }
+}
+
+/** The pill's tone: ok (Gmail), warn (local / no answer), error (refused), muted (draft). */
+export function deliveryTone(d: EmailDeliveryState | null | undefined): "ok" | "warn" | "error" | "muted" {
+  return d === "gmail" ? "ok" : d === "failed" ? "error" : d === "draft" ? "muted" : "warn";
 }
 
 /** Activity times, Chicago (the app's business clock). */

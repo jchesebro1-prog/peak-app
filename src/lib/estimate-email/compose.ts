@@ -5,6 +5,8 @@
  */
 
 import { withSignature } from "@/lib/inbox-signature";
+import { latestSentRevision } from "@/lib/quote-pdf/state";
+import type { Quote } from "@/lib/stores/quotes";
 
 /** Attachments together, raw bytes (Gmail's 25 MB limit after base64). */
 export const ESTIMATE_EMAIL_ATTACH_MAX = 15 * 1024 * 1024;
@@ -128,11 +130,22 @@ export function attachmentsFit(sizes: number[]): boolean {
   return sum <= ESTIMATE_EMAIL_ATTACH_MAX;
 }
 
+/** How one tracked estimate email left (final review I2): through Gmail,
+ *  locally (Gmail not connected), refused by Gmail, no answer from Gmail in
+ *  time (it may have been accepted), or still a draft in the Inbox. */
+export type EmailDeliveryState = "gmail" | "local" | "failed" | "unknown" | "draft";
+
 export type ThreadSummary = {
   threadId: string;
   subject: string;
   to: string;
+  /** When the estimate email went out (a draft: when it was made — not shown). */
   sentAt: number;
+  /** The thread is still a draft, or has no outbound message at all. */
+  isDraft: boolean;
+  /** How the estimate email (the thread's first outbound message) left. */
+  delivery: EmailDeliveryState;
+  /** delivery === "gmail". */
   delivered: boolean;
   unread: number;
   messages: Array<{ direction: "in" | "out"; from: string; at: number; snippet: string; unread: boolean }>;
@@ -146,6 +159,8 @@ export type SummarizableThread = {
   contactEmail?: string;
   unread?: boolean;
   createdAt?: number;
+  /** "draft" while it sits unsent in the Inbox. */
+  status?: string;
   messages?: Array<{
     direction: "in" | "out";
     at: number;
@@ -154,8 +169,21 @@ export type SummarizableThread = {
     gmailId?: string;
     fromEmail?: string;
     to?: string;
+    /** Final review (I1) stamps: how a message with no gmailId left / why the bridge's send threw. */
+    deliveryNote?: string;
+    sendFailure?: string;
   }>;
 };
+
+/** One outbound message's delivery: a gmailId wins; else the I1 stamps
+ *  (deliveryNote, then the bridge's sendFailure); else it went out locally. */
+export function messageDelivery(m: { gmailId?: string; deliveryNote?: string; sendFailure?: string }): Exclude<EmailDeliveryState, "draft"> {
+  if (m.gmailId) return "gmail";
+  if (m.deliveryNote === "failed" || m.deliveryNote === "unknown" || m.deliveryNote === "local") return m.deliveryNote;
+  if (m.sendFailure === "timeout") return "unknown";
+  if (m.sendFailure === "error") return "failed";
+  return "local";
+}
 
 const SNIPPET_MAX = 280;
 
@@ -238,13 +266,74 @@ export function summarizeThread(t: unknown): ThreadSummary | null {
     snippet: snippetOf(m.body ?? ""),
     unread: th.unread === true && m.direction === "in" && i > lastOut,
   }));
+  const isDraft = th.status === "draft" || !firstOut;
+  const delivery: EmailDeliveryState = isDraft || !firstOut ? "draft" : messageDelivery(firstOut);
   return {
     threadId: th.id,
     subject: String(th.subject || ""),
     to: String(firstOut?.to || th.contactEmail || ""),
     sentAt: Number(firstOut?.at ?? th.createdAt) || 0,
-    delivered: msgs.some((m) => m.direction === "out" && !!m.gmailId),
+    isDraft,
+    delivery,
+    delivered: delivery === "gmail",
     unread: messages.filter((m) => m.unread).length,
     messages,
   };
+}
+
+/* ---- Final review: the cover by reference, and Inbox drafts tied to the sent revision ---- */
+
+/** The team download URL of a stored cover (api/quotes/[id]/pdf?file=cover-…). */
+export function coverPdfHref(quoteId: string, path: string): string {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  return `/api/quotes/${encodeURIComponent(quoteId)}/pdf?file=${encodeURIComponent(base)}&download=1`;
+}
+
+/** A stored cover's file name: `cover-<ms>[-<Blob suffix>].pdf`. */
+const COVER_FILE_RE = /^cover-(\d{10,16})(?:-[A-Za-z0-9]{1,64})?\.pdf$/;
+
+/** True for a cover file name the download route may serve (no directory part). */
+export function isCoverFileName(name: unknown): name is string {
+  return typeof name === "string" && COVER_FILE_RE.test(name);
+}
+
+/** The quote's own PDF folder (quote-pdf/state.ts pdfStoragePath). */
+function quotePdfDir(quoteId: string): string {
+  return `quote-pdfs/${String(quoteId).replace(/[^A-Za-z0-9_-]/g, "_")}/`;
+}
+
+/** When `path` is one of THIS quote's stored covers: the ms it was stored; else null. */
+export function coverStampOf(quoteId: string, path: string): number | null {
+  const dir = quotePdfDir(quoteId);
+  if (typeof path !== "string" || !path.startsWith(dir)) return null;
+  const m = COVER_FILE_RE.exec(path.slice(dir.length));
+  return m ? Number(m[1]) : null;
+}
+
+/** I3 — the refusal when an estimate email's Inbox draft no longer matches the quote. */
+export const ESTIMATE_DRAFT_STALE = "This estimate changed since this draft was made — open it from the Estimator again.";
+
+/**
+ * Final review (I3) — an estimate email's Inbox draft still matches the
+ * quote: the quote is `sent`, and every by-reference PDF on the draft is the
+ * latest sent revision's own copy or a cover of this quote stored at or
+ * after that revision went out. Anything else (recalled, re-sent, closed, a
+ * foreign path) is stale — sending it would mail an estimate the customer
+ * is no longer being offered.
+ */
+export function estimateDraftIsCurrent(
+  q: Pick<Quote, "id" | "status" | "revisions"> | null | undefined,
+  attachments: ReadonlyArray<{ pdfPath?: string } | null | undefined> | null | undefined
+): boolean {
+  if (!q || q.status !== "sent") return false;
+  const rev = latestSentRevision(q.revisions);
+  if (!rev) return false;
+  for (const a of attachments || []) {
+    if (!a?.pdfPath) continue;
+    if (rev.pdfBlobPath && a.pdfPath === rev.pdfBlobPath) continue;
+    const stamp = coverStampOf(q.id, a.pdfPath);
+    if (stamp !== null && stamp >= (Number(rev.at) || 0)) continue;
+    return false;
+  }
+  return true;
 }

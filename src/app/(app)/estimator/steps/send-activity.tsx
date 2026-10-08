@@ -2,13 +2,20 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { TrackedEmail } from "@/lib/estimate-email/track-server";
-import { activityTime, applyLoad, newRepliesOf, patchEmail, SEND_UI_COPY, shouldFocusLoad } from "@/lib/estimate-email/send-ui";
+import { activityTime, applyLoad, deliveryLabel, deliveryTone, newRepliesOf, patchEmail, SEND_UI_COPY, shouldFocusLoad } from "@/lib/estimate-email/send-ui";
 import { markEstimateEmailReadAction, replyToEstimateEmailAction, sendTrackAction } from "../send-actions";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 } as const;
 const SMALL: CSSProperties = { fontSize: 11.5, color: "#5b616e", lineHeight: 1.45 };
 const PILL: CSSProperties = { fontSize: 10.5, fontWeight: 600, borderRadius: 20, padding: "2px 8px", whiteSpace: "nowrap" };
+/** The delivery pill per tone (send-ui deliveryTone). */
+const DELIVERY_TONE: Record<ReturnType<typeof deliveryTone>, CSSProperties> = {
+  ok: { background: ACCENT_SOFT, color: ACCENT_INK },
+  warn: { background: "#fdf6e7", color: "#7a5a12" },
+  error: { background: "#fbeceb", color: "#9b3a2a" },
+  muted: { background: "#f1f2f5", color: "#5b616e" },
+};
 const BTN: CSSProperties = {
   fontFamily: "var(--font-ui)",
   fontSize: 12,
@@ -178,13 +185,12 @@ function EmailRow({ quoteId, email: e, onPatch }: { quoteId: string; email: Trac
           {e.subject || "(no subject)"}
         </span>
         <span style={{ ...PILL, background: "#f1f2f5", color: "#5b616e" }}>Rev {e.rev}</span>
-        <span style={{ ...PILL, ...(e.delivered ? { background: ACCENT_SOFT, color: ACCENT_INK } : { background: "#fdf6e7", color: "#7a5a12" }) }}>
-          {e.delivered ? SEND_UI_COPY.deliveredGmail : SEND_UI_COPY.deliveredLocal}
-        </span>
+        <span style={{ ...PILL, ...DELIVERY_TONE[deliveryTone(e.delivery)] }}>{deliveryLabel(e.delivery)}</span>
         {e.unread > 0 && <span style={{ ...PILL, background: "var(--accent)", color: "#16181d" }}>{e.unread} new</span>}
       </div>
       <div style={{ ...SMALL, marginTop: 3, overflowWrap: "anywhere" }}>
-        To {e.to || "—"} · {activityTime(e.sentAt)}
+        To {e.to || "—"}
+        {!e.isDraft && <> · {activityTime(e.sentAt)}</>}
       </div>
       {e.textHidden ? (
         <div style={{ ...SMALL, marginTop: 8, color: "#8a8f99" }}>{SEND_UI_COPY.textHidden(e.ownerName)}</div>
