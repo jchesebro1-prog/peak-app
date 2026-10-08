@@ -11139,3 +11139,45 @@ does re-ask approval. Keep it, or make the limit count alternates too?
 - A labor system in an Alternate group still flags the won project as needing install labor (`quoteHasLabor`).
 - The approval fingerprint can't tell which of two otherwise-identical systems is the alternate (the gross value catches most).
 - The Build rail's active toggle is a no-op without `aria-disabled`; one toggle line per group; a long group name truncates the suffix.
+
+## 308. Estimator Phase 3 — Send & track — DONE 2026-10-07 (D658–D663)
+
+Part of #305's roadmap (see #305, #306, #307): Phase 3 sends the estimate from the Send & track tab and tracks it afterwards.
+
+What shipped (no migration, no AI):
+- **Send from the tab** — a composer (To, Cc, Subject, Body with `{link}`, Estimate PDF + Cover PDF, follow-up Off/2/3/5/7/14
+  days, default 5) and one ordered server action: preflight, claim, attachments, mark sent, link, thread, record, follow-up
+  task. Draft shows `Send & mark sent ->`, sent shows `Send email ->`; won/lost have no composer. (D658)
+- **Escape hatches** — Open in Inbox (marks sent, creates the draft, never sends), Mark sent without emailing, Copy link only. (D658)
+- **From the sender's personal mailbox**, linked to the quote, full To line, `Quote.estimateEmails` + `emailSending` claim. (D659)
+- **Attachments** — Estimate PDF by reference, Cover PDF rendered on demand, 15 MB cap. (D660)
+- **Delivery truth + signature** — Sent through Gmail / Sent locally (Gmail not connected) / Gmail didn't accept it. (D661)
+- **Activity** — the recorded emails with delivery, Rev, new-reply count and messages; inline Reply and Mark read from the
+  owner's mailbox; link opens. (D662)
+- **Send badge** — `Sent · Rev N · 👁 opens · N new replies`. (D663)
+
+Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md` §10; plan
+`docs/superpowers/plans/2026-10-07-estimator-phase3-send-track.md`.
+
+**Verification.** Gates: `tsc --noEmit` 0 errors; scoped eslint clean; `test:specs` 13,582 PASS / 0 FAIL (baseline 13,295);
+`next build` OK; `test:smoke` ALL PASSED. Browser pass (scratch DB, Gmail off, controller): composer defaults (contact email,
+subject "<project> — estimate EST-1020", body with `{link}` and sign-off, follow-up 5); Send & mark sent took about 2 s and
+read "Sent locally (Gmail not connected).", badge `Sent · Rev 1`; Activity showed the email with the link substituted; the
+follow-up task was due Oct 12; the Inbox thread held EST-1020.pdf by reference (200, 380 KB PDF) and Cover.pdf (232 KB);
+an inline Reply went out with the signature. Gmail is off locally, so a real Gmail send and reply round trip is Jeff-gated on
+production.
+
+**Questions for Jeff.**
+(a) Reply-text visibility: message text shows to the thread owner, send/approve holders and the Lead estimator; everyone else
+sees metadata only. Keep that, or show text to anyone who can open the quote? (D662)
+(b) New customer-facing email copy: the default subject ("<project> — estimate EST-####") and default body wording, with the
+signature and `{link}` line. Approve or reword.
+(c) Approve the composer strings added beyond the plan: "Email the estimate", "Client link opened N time(s)", "N new".
+
+**Jeff-gated.** From production, send an estimate to yourself and reply to it; the reply should land in Activity and the badge.
+
+**Open (minor, not blocking).**
+- `contentChangedAt` is not compared in the final re-read, and the claim TTL (120 s) is close to the ~90 s render worst case.
+- A Gmail-`failed` send leaves a locally-sent thread that nothing retries.
+- The first-send cover has no link line (rendered before the link exists).
+- "Revise with these scopes ->" is parked for Phase 4.

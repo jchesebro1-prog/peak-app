@@ -9727,3 +9727,60 @@ under one shared note (`ALTERNATES_NOTE`, `src/lib/estimate-output/alternates-co
 alternate as "Alternate — <group>: <system>", unchecked by default; ticking adds it to the selected total. The server
 validates picked ids against the revision's own data (`revisionGroupedSections`), not the client's list, and the scope-selection
 note and task name the alternate by its picker label (a question carries no scopes).
+
+## D658. The send action runs in a fixed order (#308, 2026-10-07)
+
+`sendEstimateEmailAction` runs: cheap preflight (permission send|approve, status draft|sent, estimate PDF current, To >= 1,
+subject/body, follow-up) -> an in-flight claim on the quote, taken right after that preflight with the whole preflight re-read
+under it (a render can take ~90 s, so a double submit, a recall or a save during attachments is refused) -> attachments ->
+mark sent (draft only, through `sendQuoteToCustomer`, carrying the `asOf` the page saw so the approval gate checks the version
+on screen) -> client link -> comms thread created and sent -> `estimateEmails` record -> follow-up task. Nothing is marked or
+sent unless preflight, the claim and the attachments all succeed; a gate refusal emails nothing. After mark-sent a failure
+returns the "Marked sent, but ..." copy: "open it in Inbox" when a thread exists (the leftover draft or sent thread is linked),
+"send it again in a moment" when none does. A record or task failure after the email is out is `ok` with a `warning`, never
+"didn't go out" (that would invite a duplicate customer email). Re-sending on a `sent` quote emails the current sent revision,
+changes no status and still honours `asOf`; `won` and `lost` are refused. Open in Inbox runs the same preflight, claim and mark,
+creates the draft and never sends.
+
+## D659. Mailbox, link and record for an estimate email (#308, 2026-10-07)
+
+The email goes from the sender's personal mailbox (shared boxes are retired), linked `{ type: "quote", id, label: "<EST number>
+· <project>" }`. The thread and the outbound message both hold the full To line; Cc is de-duplicated against To by bare address,
+case-insensitive. Two store-owned fields on `Quote`, written only by quotes-store functions and dropped by `update()` so an
+Estimator save can never overwrite them: `estimateEmails` (append, de-duplicated by thread id, capped at 50, no `updatedAt`
+bump) and the `emailSending` claim (120 s TTL, taken over once expired, released in `finally`, never a content change).
+
+## D660. Attachments (#308, 2026-10-07)
+
+The Estimate PDF goes by reference: `CommAttachment.pdfPath` + `href`, no bytes in the comms doc. The Gmail bridge reads storage
+at MIME time, and only for quote-PDF paths of the quote the thread is linked to (`pdfPathFitsLink`); the Inbox reader opens the
+`href`. On a re-send the latest sent revision's own copy is attached. The Cover PDF is rendered on demand by the shared
+`cover-pdf-server` (the same render the cover route uses) and attached as a small data URL. Raw bytes are capped at 15 MB
+(`Too large to attach — send the link only.`), checked on the estimate before the cover render. A pending render reads
+"The PDF is still being made — try again in a moment."; an out-of-date PDF reads "Save the estimate first — its PDF is out of
+date." A first-send cover has no link line, because it is rendered before the link exists; re-send covers carry it, and the
+email body always carries the link (`{link}`, appended on its own line when the placeholder is missing).
+
+## D661. Delivery truth and signature (#308, 2026-10-07)
+
+Delivery is `gmail | local | failed`. `local` = no Gmail connection (dev, or the sender never connected); `failed` = connected
+but the sent message has no `gmailId`. A failed send is recorded on the estimate and creates no follow-up task; the sender sees
+"Gmail didn't accept the email" with a link to the thread. The signature reuses the Inbox rule: #127's signature is seeded into
+the default body above the sign-off, with the legacy footer as fallback, and the link sits above it.
+
+## D662. Track and reply privacy (#308, 2026-10-07)
+
+Activity reads the threads recorded in `estimateEmails` (newest first), plus link opens from `shareOpens`. Reply and Mark read
+work only from the thread owner's mailbox, because the bridge sends from that account ("Only <owner> can reply"). Message text
+is visible to the owner, anyone holding send or approve, and the quote's Lead estimator; everyone else sees subject, To, Rev,
+delivery and unread count with the text withheld. **Question for Jeff** (PUNCHLIST #308). The client refreshes Activity on
+mount, on window focus (debounced to 1 s and skipped while a read is in flight) and after its own actions; a load-sequence guard
+plus a patch-version guard stop a slow read overwriting a Reply or Mark read. No new bell group: the Inbox unread count already
+covers a reply.
+
+## D663. Send badge and what is parked (#308, 2026-10-07)
+
+When the quote is `sent` the Send badge reads `Sent · Rev N`, then ` · 👁 N` for client-link opens and ` · N new reply|replies`
+for unread replies; with no track data it is unchanged. "Revise with these scopes ->" (turning a client's scope choice into a
+revision) is parked for Phase 4. Composer copy beyond the plan's list, for Jeff to approve: "Email the estimate", "Client link
+opened N time(s)", "N new".
