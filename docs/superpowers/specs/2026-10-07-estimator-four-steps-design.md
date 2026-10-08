@@ -398,3 +398,47 @@ Tabs: **Document** (the saved estimate PDF — today's pane), **Package page**, 
   click) so the estimator fixes things where they are.
 - **Send back with N comments** — the approver's send-back uses a note built from the open comments (numbered,
   system name, text) plus any extra text; Approve / Approve & send unchanged (QuoteNextStep).
+
+## 12. Phase 5 — Build package document editor (detailed, 2026-10-07)
+
+### 12.1 What it is
+A Word-like client document on the Build package step, edited with TipTap (MIT core only), stored as
+ProseMirror JSON at `spec.document` (so each sent revision freezes its own copy). **When a quote has a document,
+it replaces the per-system narrative body** of the customer PDF, the online/share/portal estimate and the client
+package page's narrative; the header, totals, alternates/options blocks, terms, signature and the itemized
+appendix are unchanged. **Quotes without a document print exactly as today** (Jeff: ignore older quotes — no
+migration).
+
+### 12.2 Document model (schema, validated server-side)
+Blocks: `paragraph`, `heading` (levels 1–3), `bulletList`/`orderedList`/`listItem`, `pageBreak` (atom),
+`priceTable` (atom, live), `productBlock` (`{ sectionId, lineKey, sku }` + photo `{ show, align: left|right|full,
+width: 25–100 % }`, content = paragraphs). Inline: text with `bold`/`italic` marks, `hardBreak`, `chip` (atom,
+`{ kind: systemPrice | systemName | lineQty | quoteNumber | grandTotal, ref }`). Caps: 2,000 nodes, 200 KB JSON,
+text 20,000 chars per block. Anything else is dropped by the validator.
+
+### 12.3 Numbers live, words yours
+Chips render the current value at print/view time from the same props the document already uses
+(`systemSellTotal`, line qty, `displayQuoteNumber`, `t.grand`). A chip whose system/line no longer exists prints
+nothing in client outputs and shows amber `removed` in the editor; it is listed as a gap. Words and photo
+placement are never rewritten by the app.
+
+### 12.4 Product-linked paragraphs
+A product block shows a dashed outline with a tag — `<product> · from product` when its text equals the catalog
+part's `narrativeText`, `<product> · edited here` otherwise — and **Save to product** (writes the plain text through
+the existing `saveProductParagraphAction`, `create` permission, stale-check) and **Revert** (replace with the library
+text). A block whose line left the BOM gets an amber `No longer in BOM` flag (kept until the user deletes it).
+
+### 12.5 Editor layout
+- **Left pane:** Gaps (removed chips, products no longer in BOM, In-total systems the document never mentions, the
+  package gaps), the **BOM** by group/system (drag a line → a product block with its library paragraph and photo;
+  drag a system → a heading with the system name + a price chip; click-to-insert at the cursor as the keyboard
+  path; ✓ on items already in the document), **Library** (saved system intros → paragraphs; the default Not-included
+  list → a bullet list; Price table; Page break).
+- **Right:** the document on a page-like canvas with a toolbar (Normal / Heading 1–3, Bold, Italic, bullet and
+  numbered lists, Page break, + Price table; when a product block is selected: photo Left / Right / Full, size,
+  hide/show photo).
+- **Start the document** (no document yet) seeds it from the quote's current narrative fields: per printed
+  In-total system in order — heading + price chip, intro paragraphs, product blocks for its key products — then a
+  price table; Alternates follow under an "Alternates" heading. **Remove document** returns the quote to today's
+  output (confirm inline).
+- The document saves with the estimate (Save); the PDF goes stale when it changes.
