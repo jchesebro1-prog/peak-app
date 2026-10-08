@@ -11395,6 +11395,7 @@ seeded()
   .then(() => p3FinalReviewAsyncChecks())
   .then(() => p4CommentsAsyncChecks())
   .then(() => p5RenderPhotoAsyncChecks())
+  .then(() => p6CategoriesAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
@@ -58192,4 +58193,93 @@ import { renderToStaticMarkup as p5zMarkup } from "react-dom/server";
     "#P5 final: Build package reads the Estimator's TAX_RATE_PCT instead of a hard-coded 0");
   ok(!rd("src/lib/package-doc/seed.ts").includes("intros") && J(p5zSeed({ sections: p5zSections(), groups: [] })) === J(p5zSeed({ sections: p5zSections(), groups: [], ...({ intros: { s2: "x" } } as object) })),
     "#P5 final: seedPackageDoc has no intros parameter (the system's own narrative is the only intro)");
+}
+
+// ---- #P6 rules: system categories (Estimator Phase 6) ----
+import * as p6c from "@/lib/system-categories";
+{
+  const J = JSON.stringify;
+  const D = p6c.DEFAULT_SYSTEM_CATEGORIES;
+  ok(D.map((c) => c.name).join(",") === "Controls,Fixtures,Rigging,Video,Infrastructure,Wireless,Communications" && D.every((c) => c.items.length === 0 && /^cat-[a-z]+$/.test(c.id)) &&
+     D[0].id === "cat-controls" && new Set(D.map((c) => c.id)).size === 7 && p6c.SYSTEM_CATEGORIES_BLOB === "system_categories",
+    "#P6 rules: the seven default categories, empty items, stable cat- ids, blob key system_categories");
+
+  // sanitize: shapes and caps
+  const dflt = p6c.sanitizeSystemCategories(undefined);
+  ok(J(dflt) === J(D) && J(p6c.sanitizeSystemCategories("x")) === J(D) && J(p6c.sanitizeSystemCategories({ categories: "x" })) === J(D) && p6c.sanitizeSystemCategories({ categories: [] }).length === 0 && p6c.sanitizeSystemCategories([]).length === 0,
+    "#P6 rules: missing or non-list input → the defaults; a real empty list stays empty");
+  const messy = p6c.sanitizeSystemCategories({ categories: [
+    null, 7, { name: "  " }, { id: "cat-a", name: " Lights  \n x ", discipline: "lighting", items: [{ sku: " A-1 ", qty: "3" }, { sku: "A-1", qty: 9 }, { sku: "", qty: 1 }, { sku: "B", qty: 0 }, { sku: "C", qty: 1e9, note: "  hi \t there " }, { sku: "D", qty: "nope" }, { sku: "E", qty: 2.499 }, null] },
+    { id: "cat-a", name: "Dup id", discipline: "bogus" }, { id: "evil<id>", name: "Bad id", items: "x" },
+  ] });
+  ok(messy.length === 3 && messy[0].name === "Lights x" && messy[0].discipline === "lighting" && new Set(messy.map((c) => c.id)).size === 3 && messy.every((c) => /^cat-[a-z0-9-]+$/.test(c.id)) && messy[1].id !== "cat-a" && !("discipline" in messy[1]) && messy[2].items.length === 0,
+    "#P6 rules: sanitize trims names, drops blank/junk rows, makes ids unique and cat-shaped, drops an unknown discipline");
+  ok(J(messy[0].items) === J([{ sku: "A-1", qty: 3 }, { sku: "B", qty: 0.01 }, { sku: "C", qty: 100000, note: "hi there" }, { sku: "D", qty: 1 }, { sku: "E", qty: 2.5 }]),
+    "#P6 rules: sanitize items — trimmed unique SKUs, qty clamped 0.01–100,000 (junk → 1), note cleaned and omitted when blank");
+  const big = p6c.sanitizeSystemCategories(Array.from({ length: 60 }, (_, i) => ({ name: "C" + i, items: Array.from({ length: 150 }, (_, k) => ({ sku: "S" + k, qty: 1 })) })));
+  ok(big.length === 40 && big.every((c) => c.items.length === 100) && p6c.sanitizeSystemCategories([{ name: "x".repeat(200), items: [{ sku: "s".repeat(300), qty: 1 }] }])[0].name.length === 60 &&
+     p6c.sanitizeSystemCategories([{ name: "n", items: [{ sku: "s".repeat(300), qty: 1, note: "n".repeat(500) }] }])[0].items[0].note!.length === 200,
+    "#P6 rules: caps — 40 categories, 100 items each, name 60, note 200");
+  const again = p6c.sanitizeSystemCategories({ categories: messy });
+  ok(J(again) === J(messy) && /^cat-[0-9a-z]+$/.test(p6c.newCategoryId()) && p6c.newCategoryId() !== p6c.newCategoryId(), "#P6 rules: sanitize is idempotent; newCategoryId is cat-<base36> and fresh each call");
+
+  // operations
+  const L = p6c.sanitizeSystemCategories({ categories: [
+    { id: "cat-one", name: "One", items: [{ sku: "A", qty: 1 }, { sku: "B", qty: 2, note: "n" }, { sku: "C", qty: 3 }] },
+    { id: "cat-two", name: "Two", discipline: "av", items: [] },
+  ] });
+  const names = (l: readonly p6c.SystemCategory[]) => l.map((c) => c.id).join(",");
+  const skus = (l: readonly p6c.SystemCategory[], id: string) => l.find((c) => c.id === id)!.items.map((i) => i.sku).join(",");
+  ok(p6c.addCategory(L, "Three", "cat-three").length === 3 && p6c.addCategory(L, "  ", "cat-x") === L && p6c.addCategory(L, "Dup", "cat-one") === L && p6c.addCategory(big, "Over") === big && L.length === 2,
+    "#P6 ops: addCategory appends; blank name, duplicate id or a full list → same list; the original is untouched");
+  ok(p6c.renameCategory(L, "cat-one", " Uno ")[0].name === "Uno" && p6c.renameCategory(L, "cat-one", "One") === L && p6c.renameCategory(L, "cat-one", " ") === L && p6c.renameCategory(L, "nope", "X") === L,
+    "#P6 ops: renameCategory trims; unchanged, blank or unknown id → same list");
+  ok(names(p6c.removeCategory(L, "cat-one")) === "cat-two" && p6c.removeCategory(L, "nope") === L, "#P6 ops: removeCategory; unknown id → same list");
+  ok(names(p6c.moveCategory(L, "cat-two", -1)) === "cat-two,cat-one" && names(p6c.moveCategory(L, "cat-one", 1)) === "cat-two,cat-one" && p6c.moveCategory(L, "cat-one", -1) === L && p6c.moveCategory(L, "cat-two", 1) === L && p6c.moveCategory(L, "nope", 1) === L,
+    "#P6 ops: moveCategory swaps one place; at an end or unknown → same list");
+  const dsc = p6c.setCategoryDiscipline(L, "cat-one", "rigging");
+  ok(dsc[0].discipline === "rigging" && p6c.setCategoryDiscipline(L, "cat-one", "") === L && p6c.setCategoryDiscipline(L, "cat-two", "av") === L && !("discipline" in p6c.setCategoryDiscipline(L, "cat-two", null)[1]) && !("discipline" in p6c.setCategoryDiscipline(L, "cat-two", "bogus")[1]) && p6c.setCategoryDiscipline(L, "nope", "av") === L,
+    "#P6 ops: setCategoryDiscipline sets, clears (null/unknown removes the key); unchanged → same list");
+  const added = p6c.addItem(L, "cat-two", " Z-9 ", 4);
+  ok(J(added[1].items) === J([{ sku: "Z-9", qty: 4 }]) && p6c.addItem(L, "cat-one", "A") === L && p6c.addItem(L, "cat-one", "  ") === L && p6c.addItem(L, "nope", "Q") === L && p6c.addItem(L, "cat-two", "Q", "junk")[1].items[0].qty === 1 &&
+     p6c.addItem(big, big[0].id, "NEW") === big,
+    "#P6 ops: addItem appends (qty cleaned, default 1); duplicate, blank, unknown category or a full category → same list");
+  ok(skus(p6c.removeItem(L, "cat-one", "B"), "cat-one") === "A,C" && p6c.removeItem(L, "cat-one", "Q") === L && p6c.removeItem(L, "nope", "A") === L, "#P6 ops: removeItem; unknown → same list");
+  ok(p6c.setItemQty(L, "cat-one", "A", 7)[0].items[0].qty === 7 && p6c.setItemQty(L, "cat-one", "A", 1) === L && p6c.setItemQty(L, "cat-one", "A", 0)[0].items[0].qty === 0.01 && p6c.setItemQty(L, "cat-one", "Q", 2) === L,
+    "#P6 ops: setItemQty clamps; unchanged or unknown SKU → same list");
+  const noted = p6c.setItemNote(L, "cat-one", "A", "  hello ");
+  ok(noted[0].items[0].note === "hello" && p6c.setItemNote(L, "cat-one", "B", "n") === L && !("note" in p6c.setItemNote(L, "cat-one", "B", "")[0].items[1]) && p6c.setItemNote(L, "cat-one", "A", "") === L && p6c.setItemNote(L, "cat-one", "Q", "x") === L,
+    "#P6 ops: setItemNote trims and clears (blank removes the key); unchanged or unknown → same list");
+  ok(skus(p6c.moveItem(L, "cat-one", "B", -1), "cat-one") === "B,A,C" && skus(p6c.moveItem(L, "cat-one", "B", 1), "cat-one") === "A,C,B" && p6c.moveItem(L, "cat-one", "A", -1) === L && p6c.moveItem(L, "cat-one", "C", 1) === L && p6c.moveItem(L, "cat-one", "Q", 1) === L,
+    "#P6 ops: moveItem swaps one place; at an end or unknown → same list");
+  const mut = J(L);
+  p6c.addItem(L, "cat-one", "N"); p6c.moveItem(L, "cat-one", "B", 1); p6c.removeCategory(L, "cat-one"); p6c.setItemNote(L, "cat-one", "A", "z");
+  ok(J(L) === mut, "#P6 ops: no operation mutates its input");
+
+  const act = readFileSync(join(process.cwd(), "src/app/(app)/estimating-rules/system-categories/actions.ts"), "utf8");
+  ok((act.match(/await requirePerm\("manage_users"\)/g) || []).length === 3 && act.includes("saveSystemCategories(list)") && act.includes("getManyBySku(wanted)") && act.includes("searchCatalog(String(query ?? \"\"), \"\", 20)") &&
+     act.includes('revalidatePath("/estimating-rules/system-categories")'),
+    "#P6 rules: all three actions require manage_users; save sanitizes through the store and revalidates; resolve reads getManyBySku");
+}
+
+/** #P6 rules — the settings blob: defaults when missing (no write on read), save round trip. */
+async function p6CategoriesAsyncChecks(): Promise<void> {
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const S = await import("@/lib/stores/system-categories");
+  const before = await getBlob<Record<string, unknown>>("system_categories", {});
+  const had = "categories" in before;
+  try {
+    // Missing blob → defaults; reading must not create it.
+    if (had) await setBlob("system_categories", { categories: null });
+    const dflt = await S.getSystemCategories();
+    ok(dflt.length === 7 && dflt[0].id === "cat-controls" && dflt.every((c) => c.items.length === 0), "#P6 store: a missing/blank blob returns the seven defaults");
+    const out = await S.saveSystemCategories({ categories: [{ id: "cat-t1", name: " Test ", discipline: "av", items: [{ sku: "X-1", qty: "2", note: " n " }, { sku: "X-1", qty: 5 }] }, { name: "" }] });
+    const back = await S.getSystemCategories();
+    ok(out.length === 1 && JSON.stringify(out) === JSON.stringify(back) && back[0].name === "Test" && back[0].discipline === "av" && JSON.stringify(back[0].items) === JSON.stringify([{ sku: "X-1", qty: 2, note: "n" }]),
+      "#P6 store: save sanitizes then writes; the read-back matches what save returned");
+    await S.saveSystemCategories({ categories: [] });
+    ok((await S.getSystemCategories()).length === 0, "#P6 store: an admin who deletes every category keeps an empty list (defaults are for a missing blob only)");
+  } finally {
+    await setBlob("system_categories", { categories: had ? before.categories : null });
+  }
 }
