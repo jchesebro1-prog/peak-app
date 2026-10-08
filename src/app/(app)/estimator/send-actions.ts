@@ -159,11 +159,12 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
  * §10.4 — the Activity card: the quote's tracked emails (newest first), the
  * client-link opens and the unread-reply count. Anyone who can see the
  * estimate may read it (the shareLinkStatusAction rule); only threads
- * recorded on THIS quote are ever returned.
+ * recorded on THIS quote are ever returned, and the message text only to the
+ * thread's owner, send|approve holders and the quote's Lead estimator.
  */
 export async function sendTrackAction(quoteId: string): Promise<TrackResult> {
-  await requireUser();
-  return trackEstimate(liveTrackDeps(), String(quoteId || ""));
+  const user = await requireUser();
+  return trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }, String(quoteId || ""));
 }
 
 /** §10.4 — Reply on one of the quote's estimate emails (send|approve; the Inbox's signature rule). */
@@ -179,10 +180,10 @@ export async function replyToEstimateEmailAction(quoteId: string, threadId: stri
   return r;
 }
 
-/** §10.4 — Mark read: clears unread on one of the quote's estimate emails. */
+/** §10.4 — Mark read: clears unread on one of the quote's estimate emails (the thread owner's alone). */
 export async function markEstimateEmailReadAction(quoteId: string, threadId: string): Promise<TrackReadResult> {
-  await requireUser();
-  const r = await markEstimateEmailRead(liveTrackDeps(), String(quoteId || ""), String(threadId || ""));
+  const user = await requireUser();
+  const r = await markEstimateEmailRead(liveTrackDeps(), { name: user.name }, String(quoteId || ""), String(threadId || ""));
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }

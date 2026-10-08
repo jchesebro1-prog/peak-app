@@ -664,7 +664,7 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
         throw t ? new EstimateEmailError(SEND_COPY.notSent, draft.id, t.status === "draft") : new EstimateEmailError(SEND_COPY.notSent);
       }
       // addMessage awaits the bridge's dispatch, so a Gmail send has stamped its gmailId by now.
-      return { threadId: draft.id, delivery: deliveryOfThread(await getThread(draft.id), connected) };
+      return { threadId: draft.id, delivery: await deliveryAfterSend(connected, () => getThread(draft.id)) };
     },
     createDraftThread: async (spec) => ({ threadId: (await saveDraft({ ...draftInput(spec), me: spec.mailboxUser })).id }),
     recordEmail: recordEstimateEmail,
@@ -700,6 +700,14 @@ export function deliveryOfThread(t: { messages?: Array<{ direction?: string; gma
   if (!connected) return "local";
   const outs = (t?.messages || []).filter((x) => x.direction === "out");
   return outs[outs.length - 1]?.gmailId ? "gmail" : "failed";
+}
+
+/** The delivery of a send that already went out. Not connected is "local"
+ *  whatever the thread holds, so a failed read must not fail that send; when
+ *  connected the read decides gmail vs failed (a throw there is a real error). */
+export async function deliveryAfterSend(connected: boolean, readThread: () => Promise<Parameters<typeof deliveryOfThread>[0]>): Promise<EmailDelivery> {
+  if (!connected) return "local";
+  return deliveryOfThread(await readThread(), connected);
 }
 
 function draftInput(spec: ThreadSpec) {
