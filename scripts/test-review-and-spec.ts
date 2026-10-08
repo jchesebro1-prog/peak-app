@@ -11383,6 +11383,7 @@ seeded()
   .then(() => p2bOutputsAsyncChecks())
   .then(() => p3EstimateEmailsAsyncChecks())
   .then(() => p3SendAsyncChecks())
+  .then(() => p3TrackAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
@@ -55517,7 +55518,204 @@ async function p3SendAsyncChecks(): Promise<void> {
   const server = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
   ok(server.includes("sendQuoteToCustomer(id, actor, asOf)") && server.includes("ensureShareLink(id, opts.actor.name)") && server.includes("sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true })") &&
      server.includes('mailbox: "personal" as const') && server.includes("pdfIsCurrent(q.pdf, q.contentChangedAt)") && server.includes("renderCoverPdfLive(q.id, opts.host, opts.proto)") && !server.trimStart().startsWith('"use server"') &&
-     server.includes("gmailEnabled() && !!(await getConnectionInfo(personalKey(opts.actor.id)))") && server.includes("applyOutboundSignature(body, !!signature,") &&
+     server.includes("gmailEnabled() && !!(await getConnectionInfo(personalKey(userId)))") && server.includes("applyOutboundSignature(body, !!signature,") &&
      server.includes("claimEstimateEmailSend(id, by, now)") && server.includes("releaseEstimateEmailSend(id, claim)"),
     "#P3 send: the live deps — the review-ops gate, the share link, the comms draft→send path (personal box), the preview's pdfIsCurrent rule, the shared cover render");
+}
+
+// ---- #P3 track: Estimator Phase 3 — Activity reads + the inline reply (fake deps; never Gmail) ----
+import {
+  markEstimateEmailRead as p3tMarkRead, opensOf as p3tOpens, replyToEstimateEmail as p3tReply, TRACK_COPY as P3T, trackEstimate as p3tTrack,
+  liveTrackDeps as p3tLive, type TrackDeps as P3tDeps,
+} from "@/lib/estimate-email/track-server";
+import { deliveryOfThread as p3tDelivery } from "@/lib/estimate-email/send-server";
+
+async function p3TrackAsyncChecks(): Promise<void> {
+  const SAM = { id: "u1", name: "Sam Mills", roles: ["Admin"] };
+  const VIEWER = { id: "u9", name: "Vic Viewer", roles: ["Crew"] };
+  type FakeMsg = { direction: "in" | "out"; at: number; author?: string; body?: string; gmailId?: string; fromEmail?: string; to?: string };
+  type FakeThread = { id: string; subject: string; contactEmail: string; unread: boolean; createdAt: number; messages: FakeMsg[] };
+  const out = (at: number, gmailId?: string): FakeMsg => ({ direction: "out", at, author: "Sam Mills", body: "Here is the estimate", to: "pat@school.org", ...(gmailId ? { gmailId } : {}) });
+  const inn = (at: number, body = "Looks good"): FakeMsg => ({ direction: "in", at, body, fromEmail: "pat@school.org" });
+  const th = (id: string, unread: boolean, messages: FakeMsg[]): FakeThread => ({ id, subject: "Estimate " + id, contactEmail: "pat@school.org", unread, createdAt: messages[0]?.at ?? 0, messages });
+  const mkQuote = (over: Record<string, unknown> = {}) => ({
+    id: "Q-P3T", name: "North HS", status: "sent", quoteType: "system", createdAt: 1, updatedAt: 2,
+    estimateEmails: [
+      { threadId: "C-OLD", rev: 1, at: 100, by: "Sam", to: "pat@school.org" },
+      { threadId: "C-GONE", rev: 1, at: 150, by: "Sam", to: "pat@school.org" },
+      { threadId: "C-NEW", rev: 2, at: 300, by: "Sam", to: "pat@school.org" },
+    ],
+    shareOpens: { "1": { first: 10, last: 20, count: 3 }, "2": { first: 30, last: 40, count: 2 } },
+    ...over,
+  }) as unknown as import("@/lib/stores/quotes").Quote;
+  const fakes = (quote: import("@/lib/stores/quotes").Quote | null = mkQuote(), threadsIn?: FakeThread[], over: Partial<P3tDeps> = {}) => {
+    const calls: string[] = [];
+    const threads = new Map<string, FakeThread>((threadsIn ?? [
+      th("C-OLD", false, [out(1000, "g1")]),
+      th("C-NEW", true, [out(5000, "g2"), inn(6000, "<p>Looks <b>good</b></p>"), inn(7000, "One more thing")]),
+      th("C-FOREIGN", true, [out(2000, "g3"), inn(2500)]),
+    ]).map((t) => [t.id, t]));
+    const replies: Array<{ id: string; body: string; me: string }> = [];
+    let gmail = false;
+    const deps: P3tDeps = {
+      getQuote: async (id) => (quote && id === quote.id ? quote : null),
+      getThread: async (id) => threads.get(id) ?? null,
+      applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills"; },
+      gmailConnected: async () => gmail,
+      reply: async (id, body, me) => {
+        calls.push("reply"); replies.push({ id, body, me });
+        const t = threads.get(id); if (!t) return null;
+        t.messages.push({ direction: "out", at: 9000, author: me, body, to: "pat@school.org", ...(gmail ? { gmailId: "gx" } : {}) });
+        t.unread = false;
+        return t;
+      },
+      markRead: async (id) => { calls.push("markRead"); const t = threads.get(id); if (t) t.unread = false; return t ?? null; },
+      ...over,
+    };
+    return { deps, calls, threads, replies, setGmail: (v: boolean) => { gmail = v; } };
+  };
+
+  // Reads: ordering, skipped, opens, newReplies.
+  {
+    const f = fakes();
+    const r = await p3tTrack(f.deps, "Q-P3T");
+    ok(r.ok && r.emails.map((e) => e.threadId).join() === "C-NEW,C-OLD", "#P3 track: emails are newest first and a thread that no longer exists is skipped");
+    ok(r.ok && r.opens.total === 5 && r.opens.byRev["1"] === 3 && r.opens.byRev["2"] === 2 && Object.keys(r.opens.byRev).length === 2, "#P3 track: opens — total and per-revision counts from shareOpens");
+    ok(r.ok && r.newReplies === 2 && r.emails[0].unread === 2 && r.emails[1].unread === 0, "#P3 track: newReplies sums the unread inbound replies across the emails");
+    ok(r.ok && r.emails[0].messages[1].snippet === "Looks good" && r.emails[0].delivered && r.emails[0].to === "pat@school.org", "#P3 track: summaries carry plain-text snippets, delivered and the recipient");
+    ok(!(await p3tTrack(f.deps, "Q-NOPE")).ok && (await p3tTrack(f.deps, "")).ok === false && (await p3tTrack(f.deps, "x".repeat(65))).ok === false, "#P3 track: an unknown quote id is Not found.");
+    const bad = await p3tTrack(f.deps, "Q-NOPE");
+    ok(!bad.ok && bad.error === P3T.gone && P3T.gone === "Not found.", "#P3 track: the refusal is the generic \"Not found.\"");
+    const none = await p3tTrack(fakes(mkQuote({ estimateEmails: null, shareOpens: null })).deps, "Q-P3T");
+    ok(none.ok && none.emails.length === 0 && none.opens.total === 0 && none.newReplies === 0, "#P3 track: a quote with nothing recorded tracks empty");
+    const tie = await p3tTrack(fakes(mkQuote({ estimateEmails: [
+      { threadId: "C-A", rev: 1, at: 1, by: "S", to: "a@b.co" }, { threadId: "C-B", rev: 1, at: 2, by: "S", to: "a@b.co" },
+    ] }), [th("C-A", false, [out(500)]), th("C-B", false, [out(500)])]).deps, "Q-P3T");
+    ok(tie.ok && tie.emails.map((e) => e.threadId).join() === "C-B,C-A", "#P3 track: a tie goes to the later-recorded email");
+    const dup = await p3tTrack(fakes(mkQuote({ estimateEmails: [
+      { threadId: "C-A", rev: 1, at: 1, by: "S", to: "a@b.co" }, { threadId: "C-A", rev: 1, at: 3, by: "S", to: "a@b.co" },
+    ] }), [th("C-A", false, [out(500)])]).deps, "Q-P3T");
+    ok(dup.ok && dup.emails.length === 1, "#P3 track: a repeated thread id appears once");
+    const flaky = await p3tTrack(fakes(mkQuote(), undefined, { getThread: async (id) => { if (id === "C-NEW") throw new Error("boom"); return th(id, false, [out(1)]); } }).deps, "Q-P3T");
+    ok(flaky.ok && flaky.emails.map((e) => e.threadId).join() === "C-GONE,C-OLD", "#P3 track: a thread that throws on read is skipped, never fails the card");
+    ok(p3tOpens({ shareOpens: { "1": { first: 1, last: 2, count: 4 }, "zz": { first: 1, last: 1, count: 9 }, "2": "junk" } as never }).total === 4, "#P3 track: opensOf drops malformed revision entries");
+  }
+
+  // Reply.
+  {
+    const f = fakes();
+    const r = await p3tReply(f.deps, SAM, "Q-P3T", "C-NEW", "  Thanks Pat — see you Monday.  ");
+    ok(r.ok && r.summary.threadId === "C-NEW" && r.delivery === "local" && !r.warning && r.summary.messages.length === 4 && r.summary.messages[3].direction === "out" && r.summary.unread === 0,
+      "#P3 track: a reply appends an outbound message, returns the fresh summary (local delivery without Gmail) and the thread reads as read");
+    ok(f.replies.length === 1 && f.replies[0].id === "C-NEW" && f.replies[0].me === "Sam Mills" && f.replies[0].body === "Thanks Pat — see you Monday.\n\n-- \nSam Mills" && f.calls.filter((c) => c === "applySignature").length === 1,
+      "#P3 track: the reply is sent as the acting user, trimmed, with the signature applied exactly once");
+    ok(f.calls.join() === "applySignature,reply,markRead", "#P3 track: signature → reply → mark read");
+    const g = fakes(); g.setGmail(true);
+    const gr = await p3tReply(g.deps, SAM, "Q-P3T", "C-NEW", "Hello");
+    ok(gr.ok && gr.delivery === "gmail" && !gr.warning, "#P3 track: a connected sender whose reply carries a gmailId is delivery gmail");
+    const bad = fakes(); bad.setGmail(true);
+    bad.deps.reply = async (id, body, me) => { const t = bad.threads.get(id)!; t.messages.push({ direction: "out", at: 9100, author: me, body }); return t; };
+    const br = await p3tReply(bad.deps, SAM, "Q-P3T", "C-NEW", "Hello");
+    ok(br.ok && br.delivery === "failed" && br.warning === P3T.gmailFailed, "#P3 track: a connected sender whose reply Gmail did not take is delivery failed + a warning");
+    const nf = fakes();
+    for (const [label, res] of [
+      ["foreign thread", await p3tReply(nf.deps, SAM, "Q-P3T", "C-FOREIGN", "Hi")],
+      ["unrecorded unknown thread", await p3tReply(nf.deps, SAM, "Q-P3T", "C-NOPE", "Hi")],
+      ["recorded but vanished thread", await p3tReply(nf.deps, SAM, "Q-P3T", "C-GONE", "Hi")],
+      ["unknown quote", await p3tReply(nf.deps, SAM, "Q-NOPE", "C-NEW", "Hi")],
+    ] as const) ok(!res.ok && res.error === "Not found.", `#P3 track: reply refused with the generic Not found. — ${label}`);
+    ok(nf.replies.length === 0 && nf.calls.length === 0, "#P3 track: a refused reply touches nothing (no signature, no reply)");
+    const blank = fakes();
+    const b1 = await p3tReply(blank.deps, SAM, "Q-P3T", "C-NEW", "   \n ");
+    const b2 = await p3tReply(blank.deps, SAM, "Q-P3T", "C-NEW", undefined as never);
+    ok(!b1.ok && b1.error === P3T.noBody && !b2.ok && b2.error === P3T.noBody && blank.replies.length === 0 && blank.calls.length === 0, "#P3 track: a blank reply is refused before the signature or the send");
+    const huge = await p3tReply(blank.deps, SAM, "Q-P3T", "C-NEW", "x".repeat(20_001));
+    ok(!huge.ok && huge.error === P3T.bodyTooLong && blank.replies.length === 0, "#P3 track: an over-long reply is refused");
+    const perm = await p3tReply(blank.deps, VIEWER, "Q-P3T", "C-NEW", "Hi");
+    ok(!perm.ok && perm.error === P3T.needsPerm && blank.replies.length === 0, "#P3 track: replying needs send or approve");
+    const thrown = await p3tReply(fakes(undefined, undefined, { reply: async () => { throw new Error("db"); } }).deps, SAM, "Q-P3T", "C-NEW", "Hi");
+    ok(!thrown.ok && thrown.error === P3T.replyFailed, "#P3 track: a reply that throws reads as a failure");
+    const sigFail = fakes(undefined, undefined, { applySignature: async () => { throw new Error("sig"); } });
+    const sf = await p3tReply(sigFail.deps, SAM, "Q-P3T", "C-NEW", "Hi");
+    ok(!sf.ok && sf.error === P3T.replyFailed && sigFail.replies.length === 0, "#P3 track: a signature failure sends nothing");
+    const sigAlready = fakes(undefined, undefined, { applySignature: async (b) => b });
+    await p3tReply(sigAlready.deps, SAM, "Q-P3T", "C-NEW", "Body\n\n-- \nSam");
+    ok(sigAlready.replies[0].body === "Body\n\n-- \nSam", "#P3 track: the signature rule is the injected one — a body it leaves alone goes out as typed");
+  }
+
+  // Mark read.
+  {
+    const f = fakes();
+    ok(f.threads.get("C-NEW")!.unread, "#P3 track: precondition — C-NEW unread");
+    const r = await p3tMarkRead(f.deps, "Q-P3T", "C-NEW");
+    ok(r.ok && r.summary.unread === 0 && !r.summary.messages.some((m) => m.unread) && f.threads.get("C-NEW")!.unread === false, "#P3 track: mark read clears unread and returns the fresh summary");
+    ok(f.threads.get("C-FOREIGN")!.unread === true, "#P3 track: another thread's unread flag is untouched");
+    const g = fakes();
+    for (const res of [await p3tMarkRead(g.deps, "Q-P3T", "C-FOREIGN"), await p3tMarkRead(g.deps, "Q-P3T", "C-GONE"), await p3tMarkRead(g.deps, "Q-NOPE", "C-NEW"), await p3tMarkRead(g.deps, "Q-P3T", "")]) {
+      ok(!res.ok && res.error === "Not found.", "#P3 track: mark read refuses foreign / missing threads with Not found.");
+    }
+    ok(g.calls.length === 0 && g.threads.get("C-FOREIGN")!.unread, "#P3 track: a refused mark read writes nothing");
+  }
+
+  // Delivery helper (shared with the send).
+  {
+    ok(p3tDelivery(null, false) === "local" && p3tDelivery({ messages: [{ direction: "out" }] }, false) === "local", "#P3 track: delivery — not connected is local");
+    ok(p3tDelivery({ messages: [{ direction: "out", gmailId: "a" }, { direction: "in" }] }, true) === "gmail" && p3tDelivery({ messages: [{ direction: "out", gmailId: "a" }, { direction: "out" }] }, true) === "failed" && p3tDelivery(null, true) === "failed",
+      "#P3 track: delivery — connected: the latest outbound's gmailId decides gmail vs failed");
+  }
+
+  // Real store: seeded comms threads, the live deps (bridge inactive — no Gmail).
+  {
+    const { fixtureId, createFixture } = await import("./test-fixtures");
+    const Q = await import("@/lib/stores/quotes");
+    const C = await import("@/lib/stores/comms");
+    const QID = fixtureId(304, "p3-track");
+    const T_IN = fixtureId(304, "p3-track-thread");
+    const T_OTHER = fixtureId(304, "p3-track-foreign");
+    await Q.create({ id: QID, name: "#P3 track", customer: "Spec fixture", customerId: null, owner: "Lead P3", quoteType: "system", source: "estimator", spec: { sections: [], mobs: [] } });
+    await patchDoc169("quotes", QID, (doc) => { (doc as unknown as { revisions: unknown[] }).revisions = [{ rev: 1, at: 900, by: "Sam Mills", reason: "sent" }]; });
+    registerFixture("quotes", QID);
+    const base = { mailbox: "personal", mailboxUser: "Sam Mills", archived: false, customerId: null, customer: "Spec fixture", contactName: "Pat", contactEmail: "pat@school.org", cc: "", channel: "email", status: "waiting", assignedTo: "Sam Mills", link: null, updatedAt: 5000, createdAt: 1000 };
+    await createFixture("comms", { ...base, id: T_IN, subject: "Estimate EST-1", unread: true, messages: [
+      { id: "m1", at: 1000, direction: "out", channel: "email", author: "Sam Mills", body: "Estimate attached", to: "pat@school.org", gmailId: "g-1" },
+      { id: "m2", at: 2000, direction: "in", channel: "email", author: "Pat", body: "<div>Can you add a second option?</div>", fromEmail: "pat@school.org" },
+    ] } as never);
+    await createFixture("comms", { ...base, id: T_OTHER, subject: "Someone else", unread: true, messages: [
+      { id: "m1", at: 1500, direction: "in", channel: "email", author: "Zed", body: "Unrelated", fromEmail: "zed@x.org" },
+    ] } as never);
+    await Q.recordEstimateEmail(QID, { threadId: T_IN, rev: 1, at: 1000, by: "Sam Mills", to: "pat@school.org" });
+    await Q.recordShareOpen(QID, 1, 1500);
+    await Q.recordShareOpen(QID, 1, 1600);
+    const live = { ...p3tLive(), applySignature: async (b: string) => b + "\n\n-- \nSam", gmailConnected: async () => false };
+    const tr = await p3tTrack(live, QID);
+    ok(tr.ok && tr.emails.length === 1 && tr.emails[0].threadId === T_IN && tr.emails[0].unread === 1 && tr.emails[0].delivered && tr.newReplies === 1 && tr.opens.total === 2 && tr.opens.byRev["1"] === 2,
+      "#P3 track (DB): summaries from a seeded thread — in/out, unread, delivered; opens from the quote");
+    const refused = await p3tReply(live, SAM, QID, T_OTHER, "Hi");
+    ok(!refused.ok && refused.error === "Not found." && (await C.get(T_OTHER))!.messages.length === 1 && (await C.get(T_OTHER))!.unread === true, "#P3 track (DB): a thread not recorded on the quote is refused and untouched");
+    const rr = await p3tReply(live, SAM, QID, T_IN, "On it.");
+    const after = await C.get(T_IN);
+    ok(rr.ok && rr.delivery === "local" && after!.messages.length === 3 && after!.messages[2].direction === "out" && after!.messages[2].body === "On it.\n\n-- \nSam" && after!.messages[2].author === "Sam Mills" && !after!.messages[2].gmailId,
+      "#P3 track (DB): the reply appends one outbound message as the acting user, signed once, with no Gmail id (bridge inactive)");
+    ok(after!.unread === false && rr.ok && rr.summary.unread === 0 && rr.summary.messages.length === 3, "#P3 track (DB): replying leaves the thread read");
+    await C.markUnread(T_IN);
+    const mr = await p3tMarkRead(live, QID, T_IN);
+    ok(mr.ok && (await C.get(T_IN))!.unread === false && (await C.get(T_OTHER))!.unread === true, "#P3 track (DB): mark read clears unread on that thread only");
+    ok(!(await p3tMarkRead(live, QID, T_OTHER)).ok && (await C.get(T_OTHER))!.unread === true, "#P3 track (DB): mark read refuses a foreign thread");
+  }
+
+  // Source pins: the wrappers.
+  {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/estimator/send-actions.ts"), "utf8");
+    const fn = (name: string) => src.slice(src.indexOf(`export async function ${name}(`), src.indexOf("\n}\n", src.indexOf(`export async function ${name}(`)));
+    for (const name of ["sendTrackAction", "replyToEstimateEmailAction", "markEstimateEmailReadAction"]) {
+      const b = fn(name);
+      ok(b.startsWith(`export async function ${name}(`) && b.indexOf("await requireUser()") > 0 && b.indexOf("await requireUser()") < b.indexOf("liveTrackDeps()"), `#P3 track: ${name} requires a session before wiring the live deps`);
+    }
+    ok(fn("replyToEstimateEmailAction").includes("roles: user.roles") && fn("replyToEstimateEmailAction").includes("replyToEstimateEmail("), "#P3 track: the reply wrapper passes the acting user (roles decide send|approve)");
+    const server = readFileSync(join(process.cwd(), "src/lib/estimate-email/track-server.ts"), "utf8");
+    ok(server.includes("replyLive(threadId, { body, me })") && server.includes("markReadLive") && server.includes("applySenderSignature") && !server.trimStart().startsWith('"use server"') && server.includes('can("send", actor.roles) && !can("approve", actor.roles)'),
+      "#P3 track: the live deps — the comms store's own reply and markRead, the shared signature rule; the reply needs send|approve");
+    const send = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
+    ok(send.includes("applySignature: applySenderSignature") && send.includes("deliveryOfThread(await getThread(draft.id), connected)"), "#P3 track: the send reuses the same signature and delivery helpers the reply does");
+  }
 }

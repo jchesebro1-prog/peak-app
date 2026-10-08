@@ -642,13 +642,7 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
     },
     claimSend: (id, by, now) => claimEstimateEmailSend(id, by, now),
     releaseSend: (id, claim) => releaseEstimateEmailSend(id, claim),
-    applySignature: async (body, actor) => {
-      // The Inbox's rule: a #127 signature means the composer handled it
-      // (seeded by the defaults, kept or removed by the sender); none → the
-      // legacy footer from the sender's profile (inbox/actions composeSendAction).
-      const [signature, profile] = await Promise.all([signatureFor(actor.name), getUser(actor.id)]);
-      return applyOutboundSignature(body, !!signature, profile || { name: actor.name, email: actor.email ?? null });
-    },
+    applySignature: applySenderSignature,
     sendQuote: (id, actor, asOf) => sendQuoteToCustomer(id, actor, asOf),
     ensureLink: async (id) => {
       const r = await ensureShareLink(id, opts.actor.name);
@@ -659,15 +653,7 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
       return origin + path;
     },
     createAndSendThread: async (spec) => {
-      // "local" only when Gmail can't be involved at all: the bridge is off
-      // or the sender has no connection. An unknown lookup counts as
-      // connected — a missing gmailId then reads as failed, never "local".
-      let connected = true;
-      try {
-        connected = gmailEnabled() && !!(await getConnectionInfo(personalKey(opts.actor.id)));
-      } catch (e) {
-        console.error("[estimate-email] gmail connection lookup failed", e);
-      }
+      const connected = await gmailConnectedFor(opts.actor.id);
       const draft = await saveDraft({ ...draftInput(spec), me: spec.mailboxUser });
       try {
         const sent = await sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true });
@@ -677,17 +663,43 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
         const t = await getThread(draft.id).catch(() => null);
         throw t ? new EstimateEmailError(SEND_COPY.notSent, draft.id, t.status === "draft") : new EstimateEmailError(SEND_COPY.notSent);
       }
-      if (!connected) return { threadId: draft.id, delivery: "local" };
       // addMessage awaits the bridge's dispatch, so a Gmail send has stamped its gmailId by now.
-      const t = await getThread(draft.id);
-      const outs = (t?.messages || []).filter((x) => x.direction === "out");
-      return { threadId: draft.id, delivery: outs[outs.length - 1]?.gmailId ? "gmail" : "failed" };
+      return { threadId: draft.id, delivery: deliveryOfThread(await getThread(draft.id), connected) };
     },
     createDraftThread: async (spec) => ({ threadId: (await saveDraft({ ...draftInput(spec), me: spec.mailboxUser })).id }),
     recordEmail: recordEstimateEmail,
     addFollowUpTask: (spec, actor) => createTask(spec, { id: actor.id, name: actor.name }),
     roster: async () => (await activeUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
   };
+}
+
+/** The Inbox's own outbound-signature rule, for the sender: a #127 signature
+ *  means the composer handled it (seeded by the defaults, kept or removed by
+ *  the sender); none → the legacy footer from the sender's profile
+ *  (inbox/actions composeSendAction). Shared by the send and the inline reply. */
+export async function applySenderSignature(body: string, actor: SendActor): Promise<string> {
+  const [signature, profile] = await Promise.all([signatureFor(actor.name), getUser(actor.id)]);
+  return applyOutboundSignature(body, !!signature, profile || { name: actor.name, email: actor.email ?? null });
+}
+
+/** Can Gmail be involved in this sender's mail at all? "local" only when the
+ *  bridge is off or the sender has no connection; an unknown lookup counts as
+ *  connected — a missing gmailId then reads as failed, never "local". */
+export async function gmailConnectedFor(userId: string): Promise<boolean> {
+  try {
+    return gmailEnabled() && !!(await getConnectionInfo(personalKey(userId)));
+  } catch (e) {
+    console.error("[estimate-email] gmail connection lookup failed", e);
+    return true;
+  }
+}
+
+/** How a thread's latest outbound message left: not connected → local; else
+ *  the bridge stamped a gmailId (gmail) or it didn't (failed). */
+export function deliveryOfThread(t: { messages?: Array<{ direction?: string; gmailId?: string }> } | null | undefined, connected: boolean): EmailDelivery {
+  if (!connected) return "local";
+  const outs = (t?.messages || []).filter((x) => x.direction === "out");
+  return outs[outs.length - 1]?.gmailId ? "gmail" : "failed";
 }
 
 function draftInput(spec: ThreadSpec) {

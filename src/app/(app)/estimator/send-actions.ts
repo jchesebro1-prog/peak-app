@@ -8,6 +8,10 @@ import {
   liveEstimateEmailDeps, openEstimateInInbox, SEND_COPY, sendEstimateEmail,
   type EstimateEmailInput, type OpenInInboxResult, type SendEstimateResult,
 } from "@/lib/estimate-email/send-server";
+import {
+  liveTrackDeps, markEstimateEmailRead, replyToEstimateEmail, trackEstimate,
+  type TrackReadResult, type TrackReplyResult, type TrackResult,
+} from "@/lib/estimate-email/track-server";
 import { leadEstimator } from "@/lib/estimate-output/responses";
 import { gmailEnabled, personalKey } from "@/lib/gmail/config";
 import { getConnectionInfo } from "@/lib/gmail/connections";
@@ -149,4 +153,36 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
     gmailConnected,
     fromAddress,
   };
+}
+
+/**
+ * §10.4 — the Activity card: the quote's tracked emails (newest first), the
+ * client-link opens and the unread-reply count. Anyone who can see the
+ * estimate may read it (the shareLinkStatusAction rule); only threads
+ * recorded on THIS quote are ever returned.
+ */
+export async function sendTrackAction(quoteId: string): Promise<TrackResult> {
+  await requireUser();
+  return trackEstimate(liveTrackDeps(), String(quoteId || ""));
+}
+
+/** §10.4 — Reply on one of the quote's estimate emails (send|approve; the Inbox's signature rule). */
+export async function replyToEstimateEmailAction(quoteId: string, threadId: string, body: string): Promise<TrackReplyResult> {
+  const user = await requireUser();
+  const r = await replyToEstimateEmail(
+    liveTrackDeps(),
+    { id: user.id, name: user.name, roles: user.roles, email: user.email ?? null },
+    String(quoteId || ""), String(threadId || ""), typeof body === "string" ? body : ""
+  );
+  // The nav unread badge and the bell follow the thread's read state.
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+
+/** §10.4 — Mark read: clears unread on one of the quote's estimate emails. */
+export async function markEstimateEmailReadAction(quoteId: string, threadId: string): Promise<TrackReadResult> {
+  await requireUser();
+  const r = await markEstimateEmailRead(liveTrackDeps(), String(quoteId || ""), String(threadId || ""));
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
 }
