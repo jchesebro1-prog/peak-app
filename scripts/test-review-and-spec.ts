@@ -58283,3 +58283,20 @@ async function p6CategoriesAsyncChecks(): Promise<void> {
     await setBlob("system_categories", { categories: had ? before.categories : null });
   }
 }
+
+// ---- #P6 admin: Estimating Rules → System categories page ----
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const A = "src/app/(app)/estimating-rules/system-categories";
+  const page = rd(`${A}/page.tsx`), cl = rd(`${A}/system-categories-client.tsx`), rules = rd("src/app/(app)/estimating-rules/page.tsx"), picker = rd("src/app/(app)/design/grid/settings/equipment-map/part-picker.tsx");
+  ok(page.includes('can("manage_users", user.roles)') && page.includes("Admin access required") && page.includes("await requireUser()") && page.includes("await getSystemCategories()") && page.includes("getManyBySku(skus)") &&
+     page.includes(">System categories</div>") && page.includes('href="/estimating-rules"'),
+    "#P6 admin: the page requires a signed-in admin (manage_users, else 'Admin access required'), loads the categories and only their SKUs");
+  ok(cl.includes('<PartPicker sku="" showSku={false} search={searchCategoryPartsAction}') && cl.includes("pick(selected.id, sku, hit)") && cl.includes("Not in the catalog") && picker.includes("search: searchAction = searchEquipmentPartsAction") &&
+     cl.includes("saveSystemCategoriesAction(list)") && cl.includes("● Unsaved changes") && cl.includes("+ Add category") && cl.includes("<ConfirmButton onConfirm={() => remove(c.id)}") && cl.includes("DISCIPLINES.map") && cl.includes('<option value="">—</option>'),
+    "#P6 admin: PartPicker wired to the category search; Not in the catalog flag; whole-list Save with a dirty indicator; + Add category; confirmed delete; discipline select");
+  ok(cl.includes("moveCategory(list, c.id, -1)") && cl.includes("moveItem(list, selected.id, it.sku, 1)") && cl.includes("setItemQty(list") && cl.includes("setItemNote(list") && cl.includes("setCategoryDiscipline(list") && cl.includes("renameCategory(list, id, nameDraft)"),
+    "#P6 admin: reorder, qty, note, discipline and rename all go through the pure list operations");
+  ok(rules.includes('href="/estimating-rules/system-categories"') && rules.includes("<div style={{ fontSize: 14, fontWeight: 600 }}>System categories</div>") && rules.includes("Typical parts that pre-fill a new system on the Estimator."),
+    "#P6 admin: Estimating Rules has a System categories card with its one-line description");
+}

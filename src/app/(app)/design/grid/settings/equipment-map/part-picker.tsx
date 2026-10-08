@@ -22,12 +22,15 @@ export function PartPicker({
   onPick,
   onSuggest,
   showSku = true,
+  search: searchAction = searchEquipmentPartsAction,
 }: {
   sku: string;
   onPick: (sku: string, hit: EquipPartHit) => void;
   onSuggest?: () => Promise<{ hits: EquipPartHit[] }>;
   /** Print the current SKU above the search box (the Equipment map does; Track series shows its own summary). */
   showSku?: boolean;
+  /** The server search to call (default: the Equipment map's). Must gate on manage_users itself. */
+  search?: (query: string) => Promise<{ hits: EquipPartHit[]; total: number }>;
 }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<EquipPartHit[]>([]);
@@ -40,7 +43,7 @@ export function PartPicker({
     timer.current = setTimeout(
       () =>
         start(async () => {
-          const r = await searchEquipmentPartsAction(v);
+          const r = await searchAction(v);
           setHits(r.hits);
           setNote(r.hits.length ? `${r.total} match${r.total === 1 ? "" : "es"}${r.total > r.hits.length ? " — refine to narrow" : ""}` : "No matches");
         }),
