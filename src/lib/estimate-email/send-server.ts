@@ -25,7 +25,8 @@ import { attachmentsFit, bodyWithLink, FOLLOW_UP_CHOICES, parseRecipients, witho
  * Estimator's Send & track step, server-only. The order is fixed and is the
  * whole point of this module:
  *
- *   preflight → attachments → mark sent (draft only) → client link →
+ *   preflight → claim → preflight again → attachments → re-read →
+ *   mark sent (draft only) → client link →
  *   comms thread (send, or a draft for Open in Inbox) → record → follow-up
  *
  * Nothing is marked or emailed when preflight or the attachments fail; an
@@ -42,6 +43,15 @@ import { attachmentsFit, bodyWithLink, FOLLOW_UP_CHOICES, parseRecipients, witho
  * the estimate PDF rides BY REFERENCE (`pdfPath` + `href`) — its bytes are
  * never copied into the comms thread; the sender's signature is applied the
  * way the Inbox applies it.
+ *
+ * Fix round 2: the claim is taken right after the cheap preflight — BEFORE
+ * the PDF read and the (up to 45 s) cover render — and the quote is re-read
+ * under it twice: once on acquiring it (the whole preflight again, plus the
+ * status the first read saw) and once after the attachments, just before
+ * anything is marked (a recall/close/save during the render refuses). A
+ * Gmail-refused send is still recorded on the estimate's Activity (no
+ * follow-up task). A partial failure with no thread to open says to send
+ * again rather than "open it in Inbox".
  *
  * Every side effect is an injected dep so the spec harness proves the order
  * with fakes; `liveEstimateEmailDeps` wires the real ones (the "use server"
@@ -74,6 +84,8 @@ export const SEND_COPY = {
   claimFailed: "The send couldn’t start — try again.",
   markFailed: "The estimate couldn’t be marked sent — nothing was emailed. Try again.",
   partial: "Marked sent, but the email didn’t go out — open it in Inbox.",
+  /** Marked sent, nothing went out and no thread exists to open. */
+  partialNoThread: "Marked sent, but the email didn’t go out — send it again in a moment.",
   notSent: "The email didn’t go out — try again.",
   gmailFailed: "Marked sent, but Gmail didn’t accept the email — open it in Inbox.",
   gmailFailedResend: "Gmail didn’t accept the email — open it in Inbox.",
@@ -224,12 +236,16 @@ export function followUpDueAt(now: number, days: number): number {
   return chicagoDayEnd(now + days * DAY_MS);
 }
 
-type Prepared = {
+/** Step 1's output: the quote as read plus the cleaned fields. */
+type Checked = {
   q: Quote;
   to: string;
   cc: string;
   subject: string;
   body: string;
+};
+
+type Prepared = Checked & {
   /** The estimate PDF (by reference once the revision is known): its file name and raw size. */
   estimate: { name: string; size: number } | null;
   cover: CommAttachment | null;
@@ -241,17 +257,20 @@ function userMessage(e: unknown, fallback: string): string {
   return e instanceof EstimateEmailError ? e.message : fallback;
 }
 
-/** Steps 1–2: preflight and attachments. Reads only — nothing is written. */
-async function prepare(
+/** Step 1: the cheap preflight — one quote read, no file read, no render.
+ *  Run before the claim and again under it. Nothing is written. */
+async function preflight(
   deps: EstimateEmailDeps,
   actor: SendActor,
   quoteId: string,
   input: EstimateEmailInput,
-  mode: "send" | "inbox"
-): Promise<Prepared | Refusal> {
+  mode: "send" | "inbox",
+  /** Under the claim: the quote just re-read (no second read). */
+  reread?: Quote
+): Promise<Checked | Refusal> {
   if (!can("send", actor.roles) && !can("approve", actor.roles)) return { ok: false, error: SEND_COPY.needsPerm };
   const id = String(quoteId || "");
-  const q = id && id.length <= 64 ? await deps.getQuote(id) : null;
+  const q = reread ?? (id && id.length <= 64 ? await deps.getQuote(id) : null);
   if (!q) return { ok: false, error: SEND_COPY.gone };
   if (pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: SEND_COPY.notEstimate };
   if (q.status !== "draft" && q.status !== "sent") return { ok: false, error: SEND_COPY.closed };
@@ -275,7 +294,7 @@ async function prepare(
   if (to.list.length + cc.length > RECIPIENTS_MAX) return { ok: false, error: SEND_COPY.tooManyRecipients };
   // One line: a subject can never carry a header break.
   const subject = String(input?.subject ?? "").replace(/[\r\n]+/g, " ").trim();
-  let body = String(input?.body ?? "");
+  const body = String(input?.body ?? "");
   if (!subject) return { ok: false, error: SEND_COPY.noSubject };
   if (!body.trim()) return { ok: false, error: SEND_COPY.noBody };
   if (subject.length > SUBJECT_MAX) return { ok: false, error: SEND_COPY.subjectTooLong };
@@ -283,6 +302,15 @@ async function prepare(
   if (mode === "send" && !(FOLLOW_UP_CHOICES as readonly number[]).includes(Number(input?.followUpDays))) {
     return { ok: false, error: SEND_COPY.badFollowUp };
   }
+  // A re-send whose sent revision has no PDF copy yet: never the current file.
+  if (input?.attachEstimate === true && !estimatePdfPath(q)) return { ok: false, error: SEND_COPY.pdfPreparing };
+  return { q, to: to.list.join(", "), cc: cc.join(", "), subject, body };
+}
+
+/** Step 2 (under the claim): the signature and the attachments. Reads only. */
+async function attach(deps: EstimateEmailDeps, actor: SendActor, c: Checked, input: EstimateEmailInput, mode: "send" | "inbox"): Promise<Prepared | Refusal> {
+  const { q } = c;
+  let body = c.body;
   // The Inbox's own send rule (applyOutboundSignature). An Inbox draft is
   // left as written — the Inbox applies it when that draft is sent.
   if (mode === "send") {
@@ -319,7 +347,35 @@ async function prepare(
   }
   if (!attachmentsFit([estimate?.size ?? 0, cover?.size ?? 0])) return { ok: false, error: SEND_COPY.tooLarge };
 
-  return { q, to: to.list.join(", "), cc: cc.join(", "), subject, body, estimate, cover };
+  return { ...c, body, estimate, cover };
+}
+
+/**
+ * Steps 1–2 under the claim. The first preflight ran before the claim: run it
+ * again on a fresh read (asOf, status, PDF-current — anything that changed
+ * before the claim was taken) and require the status it saw (draft → first
+ * send, sent → re-send). Then the slow work, then one more read: a quote
+ * saved, recalled or closed during the render is refused, nothing marked.
+ */
+async function prepareClaimed(
+  deps: EstimateEmailDeps,
+  actor: SendActor,
+  first: Checked,
+  input: EstimateEmailInput,
+  mode: "send" | "inbox"
+): Promise<Prepared | Refusal> {
+  const fresh = await deps.getQuote(first.q.id);
+  if (!fresh) return { ok: false, error: SEND_COPY.gone };
+  // Recalled, closed or sent by someone else since the first read.
+  if (fresh.status !== first.q.status) return { ok: false, error: SEND_COPY.changedSince };
+  const again = await preflight(deps, actor, first.q.id, input, mode, fresh);
+  if ("ok" in again) return again;
+  const p = await attach(deps, actor, again, input, mode);
+  if ("ok" in p) return p;
+  const now = await deps.getQuote(p.q.id);
+  if (!now) return { ok: false, error: SEND_COPY.gone };
+  if (now.status !== p.q.status || now.updatedAt !== p.q.updatedAt) return { ok: false, error: SEND_COPY.changedSince };
+  return p;
 }
 
 type Linked = { ok: true; markedSent: boolean; url: string; q: Quote; rev: QuoteRevision };
@@ -353,12 +409,13 @@ async function markAndLink(
     linked = { ok: true, markedSent, url, q: fresh, rev };
   } catch (e) {
     if (!(e instanceof EstimateEmailError)) console.error("[estimate-email] client link failed", e);
-    return { ok: false, error: markedSent ? SEND_COPY.partial : userMessage(e, SEND_COPY.notSent), markedSent };
+    // No thread exists yet — nothing to open in Inbox.
+    return { ok: false, error: markedSent ? SEND_COPY.partialNoThread : userMessage(e, SEND_COPY.notSent), markedSent };
   }
   // The estimate goes out as the sent revision's own copy (by reference).
   if (p.estimate && !linked.rev.pdfBlobPath) {
     console.error("[estimate-email] the sent revision has no PDF copy", p.q.id, linked.rev.rev);
-    return { ok: false, error: markedSent ? SEND_COPY.partial : SEND_COPY.pdfPreparing, markedSent };
+    return { ok: false, error: markedSent ? SEND_COPY.partialNoThread : SEND_COPY.pdfPreparing, markedSent };
   }
   return linked;
 }
@@ -429,9 +486,12 @@ export async function sendEstimateEmail(
   quoteId: string,
   input: EstimateEmailInput
 ): Promise<SendEstimateResult> {
-  const p = await prepare(deps, actor, quoteId, input, "send");
-  if ("ok" in p) return p;
-  return withClaim(deps, actor, p.q.id, () => sendClaimed(deps, actor, p, input));
+  const c = await preflight(deps, actor, quoteId, input, "send");
+  if ("ok" in c) return c;
+  return withClaim(deps, actor, c.q.id, async () => {
+    const p = await prepareClaimed(deps, actor, c, input, "send");
+    return "ok" in p ? p : sendClaimed(deps, actor, p, input);
+  });
 }
 
 async function sendClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepared, input: EstimateEmailInput): Promise<SendEstimateResult> {
@@ -450,13 +510,22 @@ async function sendClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepare
     const stillDraft = e instanceof EstimateEmailError ? e.stillDraft !== false : true;
     return {
       ok: false,
-      error: markedSent ? SEND_COPY.partial : SEND_COPY.notSent,
+      error: markedSent ? (threadId ? SEND_COPY.partial : SEND_COPY.partialNoThread) : SEND_COPY.notSent,
       ...(markedSent ? { markedSent: true } : {}),
       ...(threadId ? { href: stillDraft ? inboxDraftHref(threadId) : inboxThreadHref(threadId) } : {}),
     };
   }
-  // Connected, but Gmail didn't take it: the partial path — no record, no task.
+  // Connected, but Gmail didn't take it: not ok, no follow-up task — but the
+  // thread IS recorded, so the estimate's Activity shows it (and reads as
+  // delivered once the bridge later pushes it). A failed record only logs.
   if (sent.delivery !== "gmail" && sent.delivery !== "local") {
+    try {
+      if (!(await deps.recordEmail(q.id, { threadId: sent.threadId, rev, at: deps.now(), by: actor.name, to: p.to }))) {
+        console.error("[estimate-email] recording a Gmail-refused send wrote nothing", q.id, sent.threadId);
+      }
+    } catch (e) {
+      console.error("[estimate-email] record failed (Gmail-refused send)", e);
+    }
     return {
       ok: false,
       error: markedSent ? SEND_COPY.gmailFailed : SEND_COPY.gmailFailedResend,
@@ -517,9 +586,12 @@ export async function openEstimateInInbox(
   quoteId: string,
   input: EstimateEmailInput
 ): Promise<OpenInInboxResult> {
-  const p = await prepare(deps, actor, quoteId, input, "inbox");
-  if ("ok" in p) return p;
-  return withClaim(deps, actor, p.q.id, () => openClaimed(deps, actor, p, input));
+  const c = await preflight(deps, actor, quoteId, input, "inbox");
+  if ("ok" in c) return c;
+  return withClaim(deps, actor, c.q.id, async () => {
+    const p = await prepareClaimed(deps, actor, c, input, "inbox");
+    return "ok" in p ? p : openClaimed(deps, actor, p, input);
+  });
 }
 
 async function openClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepared, input: EstimateEmailInput): Promise<OpenInInboxResult> {

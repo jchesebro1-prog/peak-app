@@ -51,3 +51,15 @@ export async function attachmentMimePart(
   }
   return null;
 }
+
+/**
+ * Fix round 2 (defence in depth) — on a thread linked to a quote, a
+ * by-reference PDF must live under THAT quote's folder
+ * (`quote-pdfs/<sanitized id>/…`, quote-pdf/state.ts pdfStoragePath). Any
+ * other thread is left to the storage guard alone.
+ */
+export function pdfPathFitsLink(path: string, link?: { type?: string | null; id?: string | null } | null): boolean {
+  if (link?.type !== "quote") return true;
+  const id = String(link.id ?? "").replace(/[^A-Za-z0-9_-]/g, "_");
+  return !!id && typeof path === "string" && path.startsWith(`quote-pdfs/${id}/`) && !path.includes("..");
+}

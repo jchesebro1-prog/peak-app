@@ -55137,8 +55137,8 @@ async function p3SendAsyncChecks(): Promise<void> {
     const f = fakes();
     const r = await p3sSend(f.deps, SAM, "Q-P3S", input());
     ok(r.ok && r.threadId === "C-9001" && r.delivery === "local" && r.status === "sent" && !r.warning, "#P3 send: happy path — ok, the thread id, delivery local (no Gmail connection), status sent");
-    ok(f.calls.join(" > ") === "applySignature > readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > claimSend > sendQuote > ensureLink > createAndSendThread > recordEmail > addFollowUpTask > releaseSend",
-      "#P3 send: happy path — signature, attachments, the send claim, then mark sent, the link, the email, record, the follow-up, and the claim released last (spec §10.1 order)");
+    ok(f.calls.join(" > ") === "claimSend > applySignature > readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > sendQuote > ensureLink > createAndSendThread > recordEmail > addFollowUpTask > releaseSend",
+      "#P3 send (fix round 2): happy path — the send claim first (after the cheap preflight), then signature, attachments, mark sent, the link, the email, record, the follow-up, and the claim released last");
     ok(f.st.released.length === 1 && f.st.released[0] === f.st.claims[0] && f.st.claims[0]?.by === "Sam Mills", "#P3 send fix: the claim taken is the claim released (on success)");
     ok(f.st.asOf.join() === "77", "#P3 send: mark sent passes the shown version (asOf) to the approval gate");
     const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
@@ -55175,7 +55175,7 @@ async function p3SendAsyncChecks(): Promise<void> {
   {
     const f = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] });
     const r = await p3sSend(f.deps, SAM, "Q-P3S", input({ attachCover: false }));
-    ok(r.ok && !f.calls.includes("sendQuote") && f.st.records[0]?.rev === 2 && f.calls[1] === "readPdf:quote-pdfs/Q-P3S/rev-2.pdf" &&
+    ok(r.ok && !f.calls.includes("sendQuote") && f.st.records[0]?.rev === 2 && f.calls[2] === "readPdf:quote-pdfs/Q-P3S/rev-2.pdf" &&
        f.st.threads[0]?.attachments[0]?.pdfPath === "quote-pdfs/Q-P3S/rev-2.pdf" && f.st.threads[0]?.attachments[0]?.href === "/api/quotes/Q-P3S/pdf?rev=2&download=1",
       "#P3 send: re-send on `sent` skips mark-sent, records the current sent revision and attaches that revision's own PDF (by reference)");
   }
@@ -55214,7 +55214,7 @@ async function p3SendAsyncChecks(): Promise<void> {
   {
     const big = fakes({}, { readPdf: async () => Buffer.alloc(10 * 1024 * 1024), renderCoverPdf: async () => Buffer.alloc(6 * 1024 * 1024) });
     const r = await p3sSend(big.deps, SAM, "Q-P3S", input());
-    ok(!r.ok && r.error === P3S.tooLarge && !big.calls.includes("sendQuote") && !big.calls.includes("claimSend") && big.st.q.status === "draft", "#P3 send: attachments over 15 MB are refused before anything is claimed or marked");
+    ok(!r.ok && r.error === P3S.tooLarge && !big.calls.includes("sendQuote") && big.st.released.length === 1 && big.st.q.status === "draft", "#P3 send: attachments over 15 MB are refused before anything is marked (the claim released)");
     let coverRendered = false;
     const huge = fakes({}, { readPdf: async () => Buffer.alloc(16 * 1024 * 1024), renderCoverPdf: async () => { coverRendered = true; return Buffer.from("%PDF-cover"); } });
     const rh = await p3sSend(huge.deps, SAM, "Q-P3S", input());
@@ -55241,8 +55241,8 @@ async function p3SendAsyncChecks(): Promise<void> {
       "#P3 send: the email failing after mark-sent → \"Marked sent, but the email didn't go out — open it in Inbox.\", markedSent, the leftover draft's Inbox link, no record/task");
     const l = fakes({}, { ensureLink: async () => { throw new P3sError("Client links aren’t set up on this server (AUTH_SECRET is missing)."); } });
     const rl = await p3sSend(l.deps, SAM, "Q-P3S", input());
-    ok(!rl.ok && rl.error === P3S.partial && rl.markedSent === true && !l.st.threads.length && !l.st.records.length && !l.st.tasks.length && l.st.released.length === 1,
-      "#P3 send: the link failing after mark-sent → markedSent, nothing emailed, no record, no task; the claim is still released");
+    ok(!rl.ok && rl.error === P3S.partialNoThread && rl.markedSent === true && !("href" in rl) && !l.st.threads.length && !l.st.records.length && !l.st.tasks.length && l.st.released.length === 1,
+      "#P3 send: the link failing after mark-sent → markedSent, \"send it again\" (no thread to open), nothing emailed, no record, no task; the claim is still released");
     const rs = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] }, { createAndSendThread: async () => { throw new Error("boom"); } });
     const rr = await p3sSend(rs.deps, SAM, "Q-P3S", input());
     ok(!rr.ok && rr.error === P3S.notSent && !rr.markedSent, "#P3 send: a failed re-send says the email didn't go out (nothing was marked this time)");
@@ -55261,7 +55261,7 @@ async function p3SendAsyncChecks(): Promise<void> {
     const r = await p3sOpenInbox(f.deps, SAM, "Q-P3S", input({ followUpDays: 4 }));
     ok(r.ok && r.href === "/inbox?box=personal&folder=drafts&draft=C-9002" && r.threadId === "C-9002" && r.status === "sent",
       "#P3 send: Open in Inbox returns the personal-box draft link");
-    ok(f.calls.join(" > ") === "readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > claimSend > sendQuote > ensureLink > createDraftThread > recordEmail > releaseSend" && !f.st.threads.length && !f.st.tasks.length,
+    ok(f.calls.join(" > ") === "claimSend > readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > sendQuote > ensureLink > createDraftThread > recordEmail > releaseSend" && !f.st.threads.length && !f.st.tasks.length,
       "#P3 send: Open in Inbox — same order through the link (claimed), then a draft + record; never createAndSendThread, no task, no signature (the Inbox applies it at send)");
     ok(!!f.st.drafts[0]?.body.includes(URL) && f.st.drafts[0]?.attachments.length === 2 && f.st.records[0]?.threadId === "C-9002" && f.st.records[0]?.rev === 4,
       "#P3 send: the Inbox draft carries the link and attachments; the record names the draft thread");
@@ -55286,8 +55286,14 @@ async function p3SendAsyncChecks(): Promise<void> {
     const f = fakes({}, { createAndSendThread: async () => ({ threadId: "C-9102", delivery: "failed" as const }) });
     const rf = await p3sSend(f.deps, SAM, "Q-P3S", input());
     ok(!rf.ok && rf.error === P3S.gmailFailed && rf.error === "Marked sent, but Gmail didn’t accept the email — open it in Inbox." && rf.markedSent === true &&
-       rf.href === p3sThreadHref("C-9102") && rf.href === "/inbox?thread=C-9102" && !f.st.records.length && !f.st.tasks.length && f.st.released.length === 1,
-      "#P3 send fix: connected but Gmail didn't accept it → not ok, markedSent, the THREAD's Inbox link, no record, no task, claim released");
+       rf.href === p3sThreadHref("C-9102") && rf.href === "/inbox?thread=C-9102" && !f.st.tasks.length && f.st.released.length === 1,
+      "#P3 send fix: connected but Gmail didn't accept it → not ok, markedSent, the THREAD's Inbox link, no task, claim released");
+    ok(f.st.records.length === 1 && f.st.records[0]?.threadId === "C-9102" && f.st.records[0]?.rev === 4 && f.st.records[0]?.by === "Sam Mills" && f.st.records[0]?.to === "pat@school.org, ops@school.org",
+      "#P3 send fix round 2: a Gmail-refused send is still recorded on the estimate (its Activity shows the thread) — still no follow-up task");
+    const fr = fakes({}, { createAndSendThread: async () => ({ threadId: "C-9104", delivery: "failed" as const }), recordEmail: async () => { throw new Error("db"); } });
+    const rfr = await p3sSend(fr.deps, SAM, "Q-P3S", input());
+    ok(!rfr.ok && rfr.error === P3S.gmailFailed && rfr.href === p3sThreadHref("C-9104") && !fr.st.tasks.length && fr.st.released.length === 1,
+      "#P3 send fix round 2: a failed record on a Gmail-refused send changes nothing about the result");
     const rs = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] },
       { createAndSendThread: async () => ({ threadId: "C-9103", delivery: "failed" as const }) });
     const rr = await p3sSend(rs.deps, SAM, "Q-P3S", input());
@@ -55309,6 +55315,93 @@ async function p3SendAsyncChecks(): Promise<void> {
     const rt = await p3sSend(thrown.deps, SAM, "Q-P3S", input());
     ok(!rt.ok && rt.error === P3S.markFailed && thrown.st.released.length === 1 && thrown.st.released[0] === thrown.st.claims[0], "#P3 send fix: the claim is released on failure too");
   }
+  // Fix round 2 — the claim is taken before the slow work, and the quote is re-read under it.
+  {
+    // A stateful claim: one holder at a time; release clears only the exact claim.
+    const claimed = (quote: Partial<P3sQuote> = {}, over: Partial<P3sDeps> = {}) => {
+      const f = fakes(quote, over);
+      const held = { cur: null as { by: string; until: number } | null };
+      f.deps.claimSend = async (_id, by, now) => {
+        f.calls.push("claimSend");
+        if (held.cur) return { ok: false as const, reason: "busy" as const };
+        const claim = { by, until: now + 120_000 }; held.cur = claim; f.st.claims.push(claim); return { ok: true as const, claim };
+      };
+      f.deps.releaseSend = async (_id, claim) => { f.calls.push("releaseSend"); f.st.released.push(claim); if (held.cur === claim) held.cur = null; };
+      return { ...f, held };
+    };
+    const sentQ = { status: "sent" as const, revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as P3sQuote["revisions"] };
+
+    // (a) A double-submitted re-send: the first holds the claim through its slow
+    // cover render; the second is refused by the claim — one email, not two.
+    {
+      let open!: () => void;
+      const gate = new Promise<void>((r) => { open = r; });
+      let renders = 0;
+      let started!: () => void;
+      const rendering = new Promise<void>((r) => { started = r; });
+      const f = claimed(sentQ, { renderCoverPdf: async () => { renders++; if (renders === 1) { started(); await gate; } return Buffer.from("%PDF-cover"); } });
+      const first = p3sSend(f.deps, SAM, "Q-P3S", input({ asOf: undefined }));
+      await rendering;
+      const second = await p3sSend(f.deps, SAM, "Q-P3S", input({ asOf: undefined }));
+      ok(renders === 1 && !second.ok && second.error === P3S.inProgress && f.st.threads.length === 0,
+        "#P3 send fix round 2: a second send while the first is still rendering its cover is refused by the claim (claimed before the slow work)");
+      open();
+      const r1 = await first;
+      ok(r1.ok && f.st.threads.length === 1 && f.st.records.length === 1 && f.held.cur === null && renders === 1,
+        "#P3 send fix round 2: the first send then completes — exactly one email, the claim cleared");
+      const third = await p3sSend(f.deps, SAM, "Q-P3S", input({ asOf: undefined }));
+      ok(third.ok && f.st.threads.length === 2, "#P3 send fix round 2: once released, a deliberate re-send can claim again");
+    }
+    // (b) The quote changes while the claim is held — nothing is marked or emailed.
+    {
+      const lost = claimed({}, { renderCoverPdf: async () => { lost.st.q = { ...lost.st.q, status: "lost", updatedAt: 78 } as P3sQuote; return Buffer.from("%PDF-cover"); } });
+      const rl = await p3sSend(lost.deps, SAM, "Q-P3S", input());
+      ok(!rl.ok && rl.error === P3S.changedSince && !lost.calls.includes("sendQuote") && !lost.st.threads.length && !lost.st.records.length && lost.held.cur === null,
+        "#P3 send fix round 2: a quote closed (lost) during the cover render is refused — never marked or emailed; the claim released");
+      const recalled = claimed(sentQ, { renderCoverPdf: async () => { recalled.st.q = { ...recalled.st.q, status: "draft", updatedAt: 78 } as P3sQuote; return Buffer.from("%PDF-cover"); } });
+      const rr = await p3sSend(recalled.deps, SAM, "Q-P3S", input({ asOf: undefined }));
+      ok(!rr.ok && rr.error === P3S.changedSince && !recalled.calls.includes("sendQuote") && !recalled.st.threads.length && recalled.held.cur === null,
+        "#P3 send fix round 2: a re-send whose quote is recalled during the render is refused — nothing emailed");
+      const saved = claimed({}, { readPdf: async () => { saved.st.q = { ...saved.st.q, updatedAt: 90 } as P3sQuote; return Buffer.from("%PDF-estimate"); } });
+      const rs = await p3sSend(saved.deps, SAM, "Q-P3S", input({ asOf: undefined }));
+      ok(!rs.ok && rs.error === P3S.changedSince && !saved.calls.includes("sendQuote") && !saved.st.threads.length,
+        "#P3 send fix round 2: a save during the attachments (no asOf given) is refused too — the version read under the claim is the one emailed");
+      // Between the cheap preflight and the claim: the preflight runs again under it.
+      const early = claimed({}, {});
+      const realClaim = early.deps.claimSend;
+      early.deps.claimSend = async (id, by, now) => { early.st.q = { ...early.st.q, status: "lost", updatedAt: 78 } as P3sQuote; return realClaim(id, by, now); };
+      const re = await p3sSend(early.deps, SAM, "Q-P3S", input());
+      ok(!re.ok && re.error === P3S.changedSince && !early.calls.some((c) => c.startsWith("readPdf")) && !early.calls.includes("renderCoverPdf") && !early.st.threads.length && early.held.cur === null,
+        "#P3 send fix round 2: a change between preflight and the claim is caught on the re-read under it — before any PDF read or render");
+      const flip = claimed({}, {});
+      const realFlip = flip.deps.claimSend;
+      flip.deps.claimSend = async (id, by, now) => { flip.st.q = { ...flip.st.q, status: "sent", revisions: sentQ.revisions } as P3sQuote; return realFlip(id, by, now); };
+      const rfl = await p3sSend(flip.deps, SAM, "Q-P3S", input({ asOf: undefined }));
+      ok(!rfl.ok && rfl.error === P3S.changedSince && !flip.st.threads.length, "#P3 send fix round 2: a draft that became sent before the claim (another send won) is refused — never a second first-send");
+      const ib = claimed({}, { renderCoverPdf: async () => { ib.st.q = { ...ib.st.q, status: "lost", updatedAt: 78 } as P3sQuote; return Buffer.from("%PDF-cover"); } });
+      const rib = await p3sOpenInbox(ib.deps, SAM, "Q-P3S", input());
+      ok(!rib.ok && rib.error === P3S.changedSince && !ib.calls.includes("sendQuote") && !ib.st.drafts.length && ib.held.cur === null,
+        "#P3 send fix round 2: Open in Inbox re-checks under the claim the same way");
+    }
+    // (c) work() throwing through withClaim still releases the claim.
+    {
+      let reads = 0;
+      const f = claimed({}, {});
+      const realGet = f.deps.getQuote;
+      f.deps.getQuote = async (id) => { reads++; if (reads === 2) throw new Error("db down"); return realGet(id); };
+      let threw = false;
+      try { await p3sSend(f.deps, SAM, "Q-P3S", input()); } catch { threw = true; }
+      ok(threw && f.held.cur === null && f.st.released.length === 1 && f.st.released[0] === f.st.claims[0] && !f.st.threads.length,
+        "#P3 send fix round 2: a throw inside the claimed work still releases the claim (finally)");
+    }
+    // Fix round 2 — no thread to open: the email threw before a thread existed.
+    {
+      const f = fakes({}, { createAndSendThread: async () => { throw new Error("db"); } });
+      const r = await p3sSend(f.deps, SAM, "Q-P3S", input());
+      ok(!r.ok && r.error === P3S.partialNoThread && r.markedSent === true && !("href" in r),
+        "#P3 send fix round 2: marked sent but the email threw with no thread → \"send it again in a moment\", no Inbox link");
+    }
+  }
   // Fix round 1 — the sent revision's PDF copy.
   {
     const pre = fakes({ status: "sent", revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent" }] as P3sQuote["revisions"] });
@@ -55322,8 +55415,8 @@ async function p3SendAsyncChecks(): Promise<void> {
       nocopy.st.q = { ...nocopy.st.q, status: "sent", revisions: [{ rev: 4, at: NOW, by: actor.name, reason: "sent" }] } as P3sQuote; return { ok: true };
     } });
     const rn = await p3sSend(nocopy.deps, SAM, "Q-P3S", input());
-    ok(!rn.ok && rn.error === P3S.partial && rn.markedSent === true && !nocopy.st.threads.length && !nocopy.st.records.length,
-      "#P3 send fix: a first send whose new revision got no PDF copy reports markedSent and emails nothing");
+    ok(!rn.ok && rn.error === P3S.partialNoThread && rn.error === "Marked sent, but the email didn’t go out — send it again in a moment." && rn.markedSent === true && !("href" in rn) && !nocopy.st.threads.length && !nocopy.st.records.length,
+      "#P3 send fix: a first send whose new revision got no PDF copy reports markedSent, emails nothing, and says send again (no thread exists to open)");
     const noEst = fakes({}, { sendQuote: async (_id, actor) => {
       noEst.st.q = { ...noEst.st.q, status: "sent", revisions: [{ rev: 4, at: NOW, by: actor.name, reason: "sent" }] } as P3sQuote; return { ok: true };
     } });
@@ -55379,7 +55472,13 @@ async function p3SendAsyncChecks(): Promise<void> {
     const notB64 = await attachmentMimePart({ name: "b.txt", dataUrl: "data:text/plain,hi" }, fakeRead);
     ok(legacy?.dataBase64 === "QUJD" && notB64 === null && reads.length === 2, "#P3 send fix: data-URL attachments resolve exactly as before (non-base64 skipped, no storage read)");
     const bridge = readFileSync(join(process.cwd(), "src/lib/gmail/bridge.ts"), "utf8");
-    ok(bridge.includes("attachmentMimePart(a, readQuotePdf)") && bridge.includes("pdfStorage()"), "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store");
+    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && bridge.includes("pdfStorage()"),
+      "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store, scoped to the thread's linked quote (fix round 2)");
+    const { pdfPathFitsLink } = await import("@/lib/comms-attachments");
+    ok(pdfPathFitsLink("quote-pdfs/Q-P3S/rev-4.pdf", { type: "quote", id: "Q-P3S" }) && !pdfPathFitsLink("quote-pdfs/Q-OTHER/rev-4.pdf", { type: "quote", id: "Q-P3S" }) &&
+       !pdfPathFitsLink("quote-pdfs/Q-P3S2/rev-4.pdf", { type: "quote", id: "Q-P3S" }) && !pdfPathFitsLink("quote-pdfs/Q-P3S/../Q-X/a.pdf", { type: "quote", id: "Q-P3S" }) &&
+       pdfPathFitsLink("quote-pdfs/Q_1/a.pdf", { type: "quote", id: "Q.1" }) && pdfPathFitsLink("quote-pdfs/Q-X/a.pdf", { type: "customer", id: "co-1" }) && pdfPathFitsLink("quote-pdfs/Q-X/a.pdf", null),
+      "#P3 send fix round 2: on a quote-linked thread a by-reference PDF must sit under that quote's own folder; other threads are left to the storage guard");
     const page = readFileSync(join(process.cwd(), "src/app/(app)/inbox/page.tsx"), "utf8");
     const reader = readFileSync(join(process.cwd(), "src/app/(app)/inbox/thread-reader.tsx"), "utf8");
     ok(page.includes("href: attachmentHref(a)") && reader.includes("href={a.href || undefined}") && !reader.includes("a.dataUrl"),

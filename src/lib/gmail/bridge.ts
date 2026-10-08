@@ -47,7 +47,7 @@ import {
   sendRaw,
   type GmailLabelEvent,
 } from "./api";
-import { attachmentMimePart } from "@/lib/comms-attachments";
+import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
 import { pdfStorage } from "@/lib/quote-pdf/storage";
 import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
@@ -129,13 +129,15 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
   const lastIn = lastInbound(t);
   const inReplyTo = lastIn?.gmailMessageId || undefined;
 
+  const readPdfForThread = (path: string) => (pdfPathFitsLink(path, t.link) ? readQuotePdf(path) : Promise.resolve(null));
   for (const m of pending) {
     try {
       // data-URL attachments → raw base64 MIME parts (IDEAS #36); a
       // by-reference quote PDF (Estimator Phase 3) is read from storage — an
       // unreadable one throws, so the message is never sent without it.
       const attachments = (
-        await Promise.all((m.attachments || []).map((a) => attachmentMimePart(a, readQuotePdf)))
+        // A quote-linked thread only reads that quote's own PDFs (a refused path reads as missing → throws).
+        await Promise.all((m.attachments || []).map((a) => attachmentMimePart(a, readPdfForThread)))
       ).filter((a): a is NonNullable<typeof a> => !!a);
       const raw = buildRaw({
         from: fromAddr,
