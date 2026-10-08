@@ -361,3 +361,40 @@ name. Defaults are computed server-side (`estimateEmailDefaults`) and edited fre
   (fetched on the Send step and on window focus).
 - The bell: an unread reply already shows in the sender's Inbox unread count; no new bell group in Phase 3.
 - Not in Phase 3: "Revise with these scopes →" (needs the revision workflow; parked).
+
+## 11. Phase 4 — Customer review (detailed, 2026-10-07)
+
+### 11.1 Client's-eye tabs (the saved estimate, as the client gets it)
+Tabs: **Document** (the saved estimate PDF — today's pane), **Package page**, **BOM**, **Cut sheets**,
+**Datasheets**, **Drawings**, with a **Desktop / Phone** toggle for the framed tabs.
+- Package page, BOM and Cut sheets render from the **saved** quote (not unsaved edits) in a staff-only preview
+  route outside the app layout (`/estimator-preview/[id]?tab=package|bom|cutsheets`, `requireUser`, a
+  `SAMEORIGIN` frame exception like the existing ones), framed full width or at 390 px for Phone so the pages'
+  own media queries apply. The package page is built from the live quote with the existing pure model
+  (`packageViewModel`) — no token, no open beacon, no client actions (an inert note says where the client's
+  scope choices and questions appear), datasheet/plan links pointing at staff routes.
+- Datasheets: every printed part with its datasheet / spec sheet / manual state (`specPackageDocs`), each open
+  link to the staff part-document route (new tab). Drawings: the quote's package files with a new staff download
+  route `/api/quotes/[id]/package-files/[fileId]` (`requireUser`).
+- When the editor has unsaved changes the step says "Unsaved changes — Save to refresh what the client sees."
+
+### 11.2 Internal sidebar (never client-visible)
+- Cost / sell / margin per system (existing `ReviewCostSummary`, alternates below the Total).
+- **Labor**: per labor group (system name · discipline) hours, cost, sell — hours = Σ mobilization straight +
+  OT + supervision hours + PM/shop/drafting hours from the configurator draft (`computeLabor`), sell = the group's
+  CURRENT line sells (flag "edited" when lines were hand-changed after configuring); hand-added labor lines with
+  `unit: "hr"` count their qty as hours; a crew/days/OT line (max crew, Σ days, Σ OT hours); totals row.
+- **Package checklist**: the package gaps (datasheets, drawings, key-product text, client goals) + the Package
+  step's readiness gaps.
+- **Comments** (below).
+
+### 11.3 Review comments
+- Store-owned `Quote.reviewComments[]` `{ id, sectionId | null, body, by, at, resolvedAt?, resolvedBy? }`
+  (append; ≤ 200; body ≤ 2,000 chars) — never written by the Estimator save.
+- Add from the sidebar: pick a system (or "Whole estimate") and type; open comments are numbered 1…n in system
+  order then time. Anyone with `create`, `send` or `approve` may comment; the author or an approver may delete an
+  unresolved comment; the estimator (anyone with `create`) resolves.
+- Pins: numbered markers on the system cards in Build and in the Package step's system list (count + list on
+  click) so the estimator fixes things where they are.
+- **Send back with N comments** — the approver's send-back uses a note built from the open comments (numbered,
+  system name, text) plus any extra text; Approve / Approve & send unchanged (QuoteNextStep).
