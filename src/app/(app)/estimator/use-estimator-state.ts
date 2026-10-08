@@ -1675,6 +1675,8 @@ export function useEstimatorState(props: EstimatorProps) {
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setActiveId(sec.id);
     setAddSystemOpen(false);
+    // Nothing picked (or nothing resolvable): open the catalog picker exactly like Blank system / addSystem.
+    if (sec.items.length === 0) openInputMethod("catalog", sec.id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(sec.id)));
   };
   /* ---------------- Phase 2a: groups, moves, built ---------------- */

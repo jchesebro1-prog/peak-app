@@ -58376,4 +58376,19 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
      (hook.match(/setSectionsState\(/g) || []).length === 5 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
     "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count unchanged; `next` stays last");
+  // Fix round 1
+  ok(page.includes(".catch((e) => {") && page.includes("return []") && /estimateOutputDefaults, systemCategories\] =/.test(page) && page.includes("loadSystemCategoryOptions(),") && !page.includes("await loadSystemCategoryOptions()"),
+    "#P6 estimator: the category load is fail-soft ([] + a server warning) and runs inside the page's Promise.all, not serially after it");
+  ok(/if \(sec\.items\.length === 0\) openInputMethod\("catalog", sec\.id\);/.test(hook),
+    "#P6 estimator: a category system with no lines opens the catalog picker like Blank system");
+  ok(p6c.pickQty(undefined, 2) === 2 && p6c.pickQty("", 2) === 2 && p6c.pickQty("abc", 2) === 2 && p6c.pickQty("3", 2) === 3 && p6c.pickQty("0", 2) === null && p6c.pickQty("-1", 2) === null && p6c.pickQty("1.5", 2) === 1.5,
+    "#P6 estimator: a typed qty <= 0 leaves the item out; blank/junk falls back to the default");
+  ok(modal.includes("pickQty(") && modal.includes("const on = ticked && !zeroed(i.sku, i.qty);") && modal.includes("disabled={!ticked}"),
+    "#P6 estimator: the modal unticks a zero-qty row (keeping the qty editable) and excludes it on submit");
+  const dupCat: p6c.CategoryOption = { id: "cat-d", name: "Dup", items: [
+    { sku: "OLD-1", qty: 1, part: { sku: "LIVE-X", desc: "X", unit: "ea", cost: 10, list: 20 } },
+    { sku: "OLD-2", qty: 5, part: { sku: "LIVE-X", desc: "X", unit: "ea", cost: 10, list: 20 } },
+  ] };
+  const dup = p6c.systemFromCategory(dupCat, [{ sku: "OLD-1", qty: 1 }, { sku: "OLD-2", qty: 5 }], ctx);
+  ok(dup.items.length === 1 && dup.items[0].qty === 1, "#P6 estimator: two stored skus resolving to one live part give one line, first wins");
 }

@@ -220,6 +220,18 @@ export type SystemFromCategoryCtx = {
 };
 
 /**
+ * The qty a modal row contributes: `typed` blank/junk falls back to the item's
+ * default; a typed number ≤ 0 means the item is left out (null).
+ */
+export function pickQty(typed: string | undefined, fallback: number): number | null {
+  const t = (typed ?? "").trim();
+  if (t === "") return fallback;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return fallback;
+  return n > 0 ? n : null;
+}
+
+/**
  * The new system for "Add system" on a category: named after it (its
  * discipline set when it has one), joining the active system's group, with the
  * PICKED parts as lines built exactly like "+ Add part from catalog" (addPart):
@@ -237,8 +249,10 @@ export function systemFromCategory(
   const seen = new Set<string>();
   for (const pick of picks) {
     const item = category.items.find((i) => i.sku === pick.sku);
-    if (!item || !item.part || seen.has(item.sku)) continue;
-    seen.add(item.sku);
+    if (!item || !item.part) continue;
+    // Dedupe on the LIVE sku: two stored skus that resolve to one live part make one line (first wins).
+    if (seen.has(item.part.sku)) continue;
+    seen.add(item.part.sku);
     const p = item.part;
     const qty = Number.isFinite(pick.qty) && pick.qty > 0 ? Math.round(pick.qty * 100) / 100 || QTY_MIN : 1;
     items.push({ id: ctx.nextId(), sku: p.sku, desc: p.desc, qty, unit: p.unit || "ea", cost: p.cost, price: ctx.price(p.cost, p.list, ctx.tierMargin) });

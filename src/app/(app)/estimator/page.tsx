@@ -253,6 +253,13 @@ async function initialFrom(
 
 /** Estimator Phase 6 — the admin-set categories with each item's live catalog part (live sku, desc, unit, cost, list). */
 async function loadSystemCategoryOptions(): Promise<CategoryOption[]> {
+  // Fail-soft: a categories/catalog read error must never take the Estimator down, so the modal just offers Blank system.
+  return loadSystemCategoryOptionsUnsafe().catch((e) => {
+    console.warn("[estimator] system categories unavailable — Add a system offers Blank only", e);
+    return [];
+  });
+}
+async function loadSystemCategoryOptionsUnsafe(): Promise<CategoryOption[]> {
   const categories = await getSystemCategories();
   const skus = [...new Set(categories.flatMap((c) => c.items.map((i) => i.sku)))];
   const found = skus.length ? await getManyBySku(skus) : new Map();
@@ -316,7 +323,7 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults] =
+  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
       fabricParts(),
       byCategory("Labor"),
@@ -333,6 +340,7 @@ export default async function EstimatorPage({
       listTrackSeries(),
       listIntros(),
       getEstimateOutputDefaults(),
+      loadSystemCategoryOptions(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -397,7 +405,6 @@ export default async function EstimatorPage({
 
   // Phase 6: the Add a system modal's categories, each typical part resolved against the live catalog
   // (a retired SKU follows its rename; a part that left the catalog is `part: null`). Read-only.
-  const systemCategories = await loadSystemCategoryOptions();
   const initial = await initialFrom(q, customers, user.name, systemCategories);
 
   // Seed the customer/venue/contact picked in the guided intake (quotes/new).

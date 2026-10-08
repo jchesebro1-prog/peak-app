@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DISCIPLINE_LABEL } from "@/lib/estimate-output/fields";
-import type { CategoryOption } from "@/lib/system-categories";
+import { pickQty, type CategoryOption } from "@/lib/system-categories";
 import { addBtnStyle, ConfigModal, NUMFIELD } from "./est-ui";
 
 const TILE: React.CSSProperties = {
@@ -51,11 +51,14 @@ export default function AddSystemModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const qtyOf = (sku: string, fallback: number) => {
-    const n = Number(qtys[sku] ?? fallback);
-    return Number.isFinite(n) && n > 0 ? n : fallback;
-  };
-  const picked = cat ? cat.items.filter((i) => i.part && !off[i.sku]) : [];
+  /** A typed qty ≤ 0 leaves the item out (pickQty → null); blank/junk falls back to the default. */
+  const zeroed = (sku: string, fallback: number) => pickQty(qtys[sku], fallback) === null;
+  const picked = cat
+    ? cat.items.flatMap((i) => {
+        const qty = i.part && !off[i.sku] ? pickQty(qtys[i.sku], i.qty) : null;
+        return qty === null ? [] : [{ sku: i.sku, qty }];
+      })
+    : [];
 
   const choose = (id: string) => {
     setCatId(id);
@@ -87,7 +90,7 @@ export default function AddSystemModal({
       }
       footerRight={
         cat ? (
-          <button type="button" style={addBtnStyle(true)} onClick={() => onAdd(cat.id, picked.map((i) => ({ sku: i.sku, qty: qtyOf(i.sku, i.qty) })))}>
+          <button type="button" style={addBtnStyle(true)} onClick={() => onAdd(cat.id, picked)}>
             Add system
           </button>
         ) : (
@@ -119,7 +122,8 @@ export default function AddSystemModal({
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {cat.items.map((i) => {
             const missing = !i.part;
-            const on = !missing && !off[i.sku];
+            const ticked = !missing && !off[i.sku];
+            const on = ticked && !zeroed(i.sku, i.qty);
             return (
               <label
                 key={i.sku}
@@ -129,7 +133,11 @@ export default function AddSystemModal({
                   type="checkbox"
                   checked={on}
                   disabled={missing}
-                  onChange={(e) => setOff((o) => ({ ...o, [i.sku]: !e.target.checked }))}
+                  onChange={(e) => {
+                    setOff((o) => ({ ...o, [i.sku]: !e.target.checked }));
+                    // Ticking a row whose typed qty is 0 restores its default qty, so the tick actually takes.
+                    if (e.target.checked && zeroed(i.sku, i.qty)) setQtys((q) => ({ ...q, [i.sku]: String(i.qty) }));
+                  }}
                   aria-label={missing ? `${i.sku} — Not in the catalog` : `Include ${i.part?.desc}`}
                 />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -149,7 +157,7 @@ export default function AddSystemModal({
                     inputMode="decimal"
                     aria-label={`Quantity of ${i.part?.desc}`}
                     value={qtys[i.sku] ?? String(i.qty)}
-                    disabled={!on}
+                    disabled={!ticked}
                     onChange={(e) => setQtys((q) => ({ ...q, [i.sku]: e.target.value }))}
                     style={{ ...NUMFIELD, width: 72, padding: "6px 8px" }}
                   />
