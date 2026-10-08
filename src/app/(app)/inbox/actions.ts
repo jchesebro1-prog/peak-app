@@ -50,9 +50,11 @@ import { getUser } from "@/lib/users";
 import { applyOutboundSignature } from "@/lib/email-signature";
 import {
   byRenewalOf,
+  get as getQuote,
   setStatus as setQuoteStatus,
   statusFailureMessage,
 } from "@/lib/stores/quotes";
+import { estimateDraftIsCurrent, ESTIMATE_DRAFT_STALE } from "@/lib/estimate-email/compose";
 import {
   get as getFlameJob,
   setRenewalOutreach as setFlameRenewalOutreach,
@@ -421,6 +423,22 @@ async function completeRenewalOutreach(
   }
 }
 
+/**
+ * Estimator Phase 3 final review (I3a) — an estimate email's Inbox draft
+ * (linked to the quote, carrying its PDF by reference) may only go out while
+ * it still matches the quote: sent, and the PDF is the latest sent
+ * revision's own copy (compose.ts estimateDraftIsCurrent). Any other draft
+ * passes. Returns the refusal text, or null.
+ */
+async function staleEstimateDraft(id: string): Promise<string | null> {
+  const t = await getThread(id);
+  if (!t || t.status !== "draft" || t.link?.type !== "quote") return null;
+  const attachments = t.draft?.attachments || [];
+  if (!attachments.some((a) => !!a.pdfPath)) return null;
+  const q = await getQuote(t.link.id);
+  return estimateDraftIsCurrent(q, attachments) ? null : ESTIMATE_DRAFT_STALE;
+}
+
 export async function composeSendAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
@@ -428,6 +446,10 @@ export async function composeSendAction(d: ComposePayload) {
   const body = applyOutboundSignature(d.body || "", d.signatureHandled, profile || { name: me, email: user.email });
   if (!(d.to || "").trim() || !((d.subject || "").trim() || (d.body || "").trim())) {
     return { ok: false as const, id: null };
+  }
+  if (d.id) {
+    const stale = await staleEstimateDraft(d.id);
+    if (stale) return { ok: false as const, id: null, error: stale };
   }
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   let id: string | null = null;

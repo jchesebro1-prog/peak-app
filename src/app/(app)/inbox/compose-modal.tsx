@@ -32,6 +32,8 @@ export default function ComposeModal({
     body: init.id || init.body ? init.body : withSignature("", signature, "add"),
   }));
   const [busy, setBusy] = useState<false | "save" | "send">(false);
+  // A refused send's reason (e.g. an estimate draft that no longer matches its quote).
+  const [sendError, setSendError] = useState<string | null>(null);
   const set = (patch: Partial<ComposeInit>) =>
     setCd((c) => ({ ...c, ...patch }));
   // I review — a blank "To" still needs the user's attention first; only
@@ -89,9 +91,11 @@ export default function ComposeModal({
   const doSend = async () => {
     if (!composeReady || busy) return;
     setBusy("send");
+    setSendError(null);
     try {
       const res = await composeSendAction(payload());
       if (res.ok) onSent(cd.mailbox, res.id);
+      else if ("error" in res && res.error) setSendError(res.error);
     } finally {
       setBusy(false);
     }
@@ -391,6 +395,11 @@ export default function ComposeModal({
             >
               {sigOn ? "Remove signature" : "Add signature"}
             </button>
+          )}
+          {sendError && (
+            <span role="alert" style={{ fontSize: 12, color: "#9b3a2a", padding: "0 6px", lineHeight: 1.4 }}>
+              {sendError}
+            </span>
           )}
           <span style={{ flex: 1 }} />
           <button
