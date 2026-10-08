@@ -40,6 +40,10 @@ export function newCategoryId(): string {
 const clean = (v: unknown, max: number): string =>
   typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
 
+/** SKUs are trim-only (control chars stripped, length capped): never collapse internal whitespace, so a catalog SKU with a double space still resolves after Save. */
+const cleanSku = (v: unknown, max: number): string =>
+  typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max).trim() : "";
+
 export function cleanQty(v: unknown): number {
   // Blank / whitespace is "no quantity given", like junk (Number("") would be 0).
   const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
@@ -55,7 +59,7 @@ function cleanItems(raw: unknown): CategoryItem[] {
     if (out.length >= MAX_ITEMS) break;
     if (!r || typeof r !== "object") continue;
     const o = r as Record<string, unknown>;
-    const sku = clean(o.sku, SKU_MAX);
+    const sku = cleanSku(o.sku, SKU_MAX);
     if (!sku || seen.has(sku)) continue;
     seen.add(sku);
     const note = clean(o.note, NOTE_MAX);

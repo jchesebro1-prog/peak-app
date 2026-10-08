@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DISCIPLINE_LABEL } from "@/lib/estimate-output/fields";
 import { pickQty, type CategoryOption } from "@/lib/system-categories";
 import { addBtnStyle, ConfigModal, NUMFIELD } from "./est-ui";
@@ -43,13 +43,22 @@ export default function AddSystemModal({
   const [qtys, setQtys] = useState<Record<string, string>>({});
   const cat = categories.find((c) => c.id === catId) || null;
 
+  // Held in a ref so the listener binds once; capture + stopImmediatePropagation so the
+  // Estimator's own Escape handlers (e.g. the quote-details popover) don't also fire.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      onCloseRef.current();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   /** A typed qty ≤ 0 leaves the item out (pickQty → null); blank/junk falls back to the default. */
   const zeroed = (sku: string, fallback: number) => pickQty(qtys[sku], fallback) === null;

@@ -58367,7 +58367,7 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(pick.items.length === 1 && pick.items[0].sku === "LIVE-B", "#P6 estimator: only the picked items come in; an unknown sku and a repeated pick are ignored");
 
   const modal = rd(`${EST_DIR}/add-system-modal.tsx`), build = rd(`${EST_DIR}/steps/build-step.tsx`), page = rd(`${EST_DIR}/page.tsx`), hook = rd(`${EST_DIR}/use-estimator-state.ts`);
-  ok(modal.includes('title="Add a system"') && modal.includes("Blank system") && modal.includes("Add system") && modal.includes("Not in the catalog") && modal.includes('e.key === "Escape"') && modal.includes("disabled={missing}") && modal.includes("<ConfigModal"),
+  ok(modal.includes('title="Add a system"') && modal.includes("Blank system") && modal.includes("Add system") && modal.includes("Not in the catalog") && modal.includes('e.key !== "Escape"') && modal.includes("disabled={missing}") && modal.includes("<ConfigModal"),
     "#P6 estimator: the modal has the exact copy (Add a system / Blank system / Add system / Not in the catalog), closes on Escape, and a missing part can't be ticked");
   ok(ESTIMATOR_FILES.includes("add-system-modal.tsx") && (build.match(/onClick=\{\(\) => setAddSystemOpen\(true\)\}/g) || []).length === 2 && !/onClick=\{addSystem\}/.test(build) && build.includes("<AddSystemModal") && build.includes("onBlank={() => {") && build.includes("addSystem();") && build.includes("onAdd={addSystemFromCategory}") && build.includes("categories={initial.systemCategories}"),
     "#P6 estimator: both + Add system and the rail + Add open the modal; Blank system is today's addSystem; the modal reads initial.systemCategories");
@@ -58391,4 +58391,14 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ] };
   const dup = p6c.systemFromCategory(dupCat, [{ sku: "OLD-1", qty: 1 }, { sku: "OLD-2", qty: 5 }], ctx);
   ok(dup.items.length === 1 && dup.items[0].qty === 1, "#P6 estimator: two stored skus resolving to one live part give one line, first wins");
+}
+
+// ---- #P6 rules: trim-only SKUs, modal Escape ----
+{
+  const sk = (sku: string) => p6c.sanitizeSystemCategories({ categories: [{ id: "cat-k", name: "K", items: [{ sku }] }] })[0].items[0]?.sku;
+  ok(sk("AB  12") === "AB  12" && sk(" X1 ") === "X1", "#P6 rules: SKUs are trim-only — an internal double space survives sanitize, outer whitespace is trimmed");
+  const mod = readFileSync(join(process.cwd(), "src/app/(app)/estimator/add-system-modal.tsx"), "utf8");
+  ok(mod.includes("const onCloseRef = useRef(onClose);") && mod.includes("onCloseRef.current = onClose;") && mod.includes("onCloseRef.current();") && mod.includes("e.stopImmediatePropagation();") && mod.includes("e.preventDefault();") &&
+     mod.includes('window.addEventListener("keydown", onKey, true);') && mod.includes('window.removeEventListener("keydown", onKey, true);') && mod.includes("}, []);") && !mod.includes("}, [onClose]);"),
+    "#P6 estimator: the modal's Escape binds once (onClose in a ref), in capture on window, and stops other Escape handlers");
 }
