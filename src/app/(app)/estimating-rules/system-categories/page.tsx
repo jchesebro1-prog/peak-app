@@ -44,8 +44,8 @@ export default async function SystemCategoriesPage() {
   const found = skus.length ? await getManyBySku(skus) : new Map();
   const parts: Record<string, CategoryPartInfo | null> = {};
   for (const s of skus) {
-    const p = found.get(s);
-    parts[s] = p ? { desc: p.desc, unit: p.unit || "ea", cost: p.cost || 0, list: p.list || 0 } : null;
+    const p = found.get(s); // a retired SKU resolves to its renamed part
+    parts[s] = p ? { sku: p.sku, desc: p.desc, unit: p.unit || "ea", cost: p.cost || 0, list: p.list || 0 } : null;
   }
 
   return (

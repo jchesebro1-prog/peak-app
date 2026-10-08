@@ -346,6 +346,25 @@ export function rewriteCurtainMounts(blob: Record<string, unknown>, m: RenameMap
   return rows ? { ...blob, rows } : null;
 }
 
+/** The `system_categories` blob (`{ categories: [{ items: [{ sku }] }] }`): each item's `sku` moves. A category holding both the old and the new SKU keeps one item (the earlier position), so a category never lists a SKU twice. */
+export function rewriteSystemCategories(blob: Record<string, unknown>, m: RenameMap): Record<string, unknown> | null {
+  if (!isRec(blob)) return null;
+  const categories = mapObjs(blob.categories, (c) => {
+    const swapped = mapObjs(c.items, (it) => swapFields(it, ["sku"], m));
+    if (!swapped) return null;
+    const seen = new Set<unknown>();
+    const items = swapped.filter((it) => {
+      const sku = isRec(it) ? it.sku : undefined;
+      if (typeof sku !== "string") return true;
+      if (seen.has(sku)) return false;
+      seen.add(sku);
+      return true;
+    });
+    return { ...c, items };
+  });
+  return categories ? { ...blob, categories } : null;
+}
+
 /** The `rack_defaults` blob: `blankSku` and `ventSku`. */
 export function rewriteRackDefaults(blob: Record<string, unknown>, m: RenameMap): Record<string, unknown> | null {
   return isRec(blob) ? swapFields(blob, ["blankSku", "ventSku"], m) : null;

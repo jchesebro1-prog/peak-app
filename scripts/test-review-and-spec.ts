@@ -10950,6 +10950,19 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     holds("curtainMounts", (v, m) => cr304Rw.rewriteCurtainMounts(v, m), mk(OLD), mk(NEW));
   }
 
+  // rewriteSystemCategories
+  {
+    const cat = (id: string, skus: string[]) => ({ id, name: OLD, discipline: "av", items: skus.map((sku, i) => ({ sku, qty: i + 1, note: OLD })) });
+    const blob = { categories: [cat("cat-a", [OLD, OTHER]), cat("cat-b", [OTHER])] };
+    const exp = JSON.parse(JSON.stringify(blob)); exp.categories[0].items[0].sku = NEW;
+    holds("systemCategories", (v, m) => cr304Rw.rewriteSystemCategories(v, m), blob, exp);
+    ok(same(cr304Rw.rewriteSystemCategories({ categories: [cat("cat-a", [OLD, OTHER, NEW])] }, m304), { categories: [{ ...cat("cat-a", [NEW, OTHER]) }] }),
+      "#P6 rewrite systemCategories: a category holding both the old and new SKU keeps one item (the earlier position, its qty and note)");
+    ok(same(cr304Rw.rewriteSystemCategories({ categories: [cat("cat-a", [NEW, OTHER, OLD])] }, m304), { categories: [cat("cat-a", [NEW, OTHER])] }) &&
+       cr304Rw.rewriteSystemCategories({ categories: "x" }, m304) === null && cr304Rw.rewriteSystemCategories({}, m304) === null,
+      "#P6 rewrite systemCategories: new-before-old keeps the earlier; a missing or malformed list → null");
+  }
+
   // rewriteRackDefaults
   {
     const d = (blankSku: string, ventSku: string): Cr304RackDefaults => ({ blankSku, ventSku });
@@ -53284,7 +53297,7 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
   const FAV = "gridFavorites:" + fixtureId(304, "ap-u");
   const EQ = fixtureId(304, "ap-eq");
   const WIRE = fixtureId(304, "ap-wire");
-  const blobIds = [Ren.SKU_RENAMES_BLOB, "grid_equipment_map", "track_series", "curtain_mount_hardware", "rack_defaults", "drive_photo_sync", FAV];
+  const blobIds = [Ren.SKU_RENAMES_BLOB, "grid_equipment_map", "track_series", "curtain_mount_hardware", "rack_defaults", "drive_photo_sync", "system_categories", FAV];
   const db = await getDb();
   const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
   const settingsBefore = await Settings.getSettingsPatchStrict();
@@ -53306,6 +53319,7 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
   try {
     await db.delete(blobsT).where(inArray(blobsT.id, [Ren.SKU_RENAMES_BLOB, FAV]));
     await DS.setBlob(FAV, { ids: [A, "GRID-AUD-SPEAKER"] });
+    await DS.setBlob("system_categories", { categories: [{ id: "cat-t304a", name: "T304 a", items: [{ sku: A, qty: 2 }, { sku: "GRID-AUD-SPEAKER", qty: 1 }] }, { id: "cat-t304b", name: "T304 b", items: [{ sku: A, qty: 3 }, { sku: NEW, qty: 1 }] }] });
     await DS.setBlob("grid_equipment_map", { [EQ]: { tiers: { good: { kind: "part", sku: A }, better: { kind: "allowance", amount: 5 } } } });
     await Settings.setSettings({ wireTypes: [...(Array.isArray(wireBefore) ? wireBefore : []), { id: WIRE, name: "T304 wire", cableSku: A }] });
 
@@ -53370,6 +53384,9 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
     ok(eq?.tiers.good.sku === NEW && eq?.tiers.better.kind === "allowance", "#304 apply: blobs — the Equipment map part cell follows the rename");
     const wires = (await Settings.getSettingsPatchStrict()).wireTypes as Array<{ id: string; cableSku?: string }>;
     ok(wires.find((w) => w.id === WIRE)?.cableSku === NEW, "#304 apply: blobs — settings.wireTypes cableSku follows the rename");
+    const sc = (await DS.getBlob<{ categories: Array<{ items: Array<{ sku: string; qty: number }> }> }>("system_categories", { categories: [] })).categories;
+    ok(sc[0].items.map((i) => `${i.sku}|${i.qty}`).join(",") === `${NEW}|2,GRID-AUD-SPEAKER|1` && sc[1].items.map((i) => `${i.sku}|${i.qty}`).join(",") === `${NEW}|3`,
+      "#P6 apply: blobs — system categories follow the rename; a category holding both the old and new SKU keeps one item");
 
     const second = await runAll();
     ok(second.length === first.length && second.every((r) => r.changed === 0 && r.renamed === 0) && second[0].plan?.counts.already === 1, "#304 apply: a second full run changes nothing (changed 0 on every step)");
@@ -58197,6 +58214,7 @@ import { renderToStaticMarkup as p5zMarkup } from "react-dom/server";
 
 // ---- #P6 rules: system categories (Estimator Phase 6) ----
 import * as p6c from "@/lib/system-categories";
+const L0 = () => p6c.sanitizeSystemCategories([{ id: "cat-q", name: "Q", items: [{ sku: "a", qty: 5 }] }]);
 {
   const J = JSON.stringify;
   const D = p6c.DEFAULT_SYSTEM_CATEGORIES;
@@ -58220,6 +58238,9 @@ import * as p6c from "@/lib/system-categories";
   ok(big.length === 40 && big.every((c) => c.items.length === 100) && p6c.sanitizeSystemCategories([{ name: "x".repeat(200), items: [{ sku: "s".repeat(300), qty: 1 }] }])[0].name.length === 60 &&
      p6c.sanitizeSystemCategories([{ name: "n", items: [{ sku: "s".repeat(300), qty: 1, note: "n".repeat(500) }] }])[0].items[0].note!.length === 200,
     "#P6 rules: caps — 40 categories, 100 items each, name 60, note 200");
+  ok(p6c.cleanQty("") === 1 && p6c.cleanQty("   ") === 1 && p6c.cleanQty("\t") === 1 && p6c.cleanQty("0") === 0.01 && p6c.cleanQty(0) === 0.01 &&
+     J(p6c.sanitizeSystemCategories([{ name: "n", items: [{ sku: "a", qty: "" }, { sku: "b", qty: "  " }] }])[0].items) === J([{ sku: "a", qty: 1 }, { sku: "b", qty: 1 }]) && p6c.setItemQty(L0(), "cat-q", "a", "")[0].items[0].qty === 1,
+    "#P6 rules: a blank or whitespace qty is junk (→ 1), not 0.01; a typed 0 still clamps to 0.01");
   const again = p6c.sanitizeSystemCategories({ categories: messy });
   ok(J(again) === J(messy) && /^cat-[0-9a-z]+$/.test(p6c.newCategoryId()) && p6c.newCategoryId() !== p6c.newCategoryId(), "#P6 rules: sanitize is idempotent; newCategoryId is cat-<base36> and fresh each call");
 
@@ -58257,9 +58278,9 @@ import * as p6c from "@/lib/system-categories";
   ok(J(L) === mut, "#P6 ops: no operation mutates its input");
 
   const act = readFileSync(join(process.cwd(), "src/app/(app)/estimating-rules/system-categories/actions.ts"), "utf8");
-  ok((act.match(/await requirePerm\("manage_users"\)/g) || []).length === 3 && act.includes("saveSystemCategories(list)") && act.includes("getManyBySku(wanted)") && act.includes("searchCatalog(String(query ?? \"\"), \"\", 20)") &&
+  ok((act.match(/await requirePerm\("manage_users"\)/g) || []).length === 2 && act.includes("saveSystemCategories(list)") && !act.includes("resolveCategoryPartsAction") && !act.includes("getManyBySku") && act.includes("searchCatalog(String(query ?? \"\"), \"\", 20)") &&
      act.includes('revalidatePath("/estimating-rules/system-categories")'),
-    "#P6 rules: all three actions require manage_users; save sanitizes through the store and revalidates; resolve reads getManyBySku");
+    "#P6 rules: both actions (save, search) require manage_users; save sanitizes through the store and revalidates; the unused resolve action is gone");
 }
 
 /** #P6 rules — the settings blob: defaults when missing (no write on read), save round trip. */
@@ -58271,8 +58292,16 @@ async function p6CategoriesAsyncChecks(): Promise<void> {
   try {
     // Missing blob → defaults; reading must not create it.
     if (had) await setBlob("system_categories", { categories: null });
+    const { getDb } = await import("@/db");
+    const { blobs: blobsT } = await import("@/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    const rowFor = async () => (await (await getDb()).select().from(blobsT).where(eq(blobsT.id, "system_categories")).limit(1))[0];
+    const rowBefore = await rowFor();
     const dflt = await S.getSystemCategories();
     ok(dflt.length === 7 && dflt[0].id === "cat-controls" && dflt.every((c) => c.items.length === 0), "#P6 store: a missing/blank blob returns the seven defaults");
+    const rowAfter = await rowFor();
+    ok(JSON.stringify(rowAfter ?? null) === JSON.stringify(rowBefore ?? null) && (had ? true : rowAfter === undefined),
+      "#P6 store: reading defaults writes nothing (the blob row is exactly as it was before the read; absent when it never existed)");
     const out = await S.saveSystemCategories({ categories: [{ id: "cat-t1", name: " Test ", discipline: "av", items: [{ sku: "X-1", qty: "2", note: " n " }, { sku: "X-1", qty: 5 }] }, { name: "" }] });
     const back = await S.getSystemCategories();
     ok(out.length === 1 && JSON.stringify(out) === JSON.stringify(back) && back[0].name === "Test" && back[0].discipline === "av" && JSON.stringify(back[0].items) === JSON.stringify([{ sku: "X-1", qty: 2, note: "n" }]),
@@ -58288,6 +58317,7 @@ async function p6CategoriesAsyncChecks(): Promise<void> {
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const A = "src/app/(app)/estimating-rules/system-categories";
+  const applySrc = rd("src/lib/catalog-rename/apply.ts");
   const page = rd(`${A}/page.tsx`), cl = rd(`${A}/system-categories-client.tsx`), rules = rd("src/app/(app)/estimating-rules/page.tsx"), picker = rd("src/app/(app)/design/grid/settings/equipment-map/part-picker.tsx");
   ok(page.includes('can("manage_users", user.roles)') && page.includes("Admin access required") && page.includes("await requireUser()") && page.includes("await getSystemCategories()") && page.includes("getManyBySku(skus)") &&
      page.includes(">System categories</div>") && page.includes('href="/estimating-rules"'),
@@ -58297,6 +58327,9 @@ async function p6CategoriesAsyncChecks(): Promise<void> {
     "#P6 admin: PartPicker wired to the category search; Not in the catalog flag; whole-list Save with a dirty indicator; + Add category; confirmed delete; discipline select");
   ok(cl.includes("moveCategory(list, c.id, -1)") && cl.includes("moveItem(list, selected.id, it.sku, 1)") && cl.includes("setItemQty(list") && cl.includes("setItemNote(list") && cl.includes("setCategoryDiscipline(list") && cl.includes("renameCategory(list, id, nameDraft)"),
     "#P6 admin: reorder, qty, note, discipline and rename all go through the pure list operations");
+  ok(cl.includes("renameCancelled.current = true;") && cl.includes("if (renameCancelled.current) {") && cl.includes("info.sku !== it.sku") && cl.includes("now {info.sku}") && cl.includes('if (e.target.value.trim() === "") e.target.value = String(it.qty);') && page.includes("sku: p.sku"),
+    "#P6 admin: Escape cancels the inline rename (blur does not commit); a renamed part shows 'now <sku>'; a cleared qty box restores the previous value");
+  ok(applySrc.includes("[SYSTEM_CATEGORIES_BLOB, (raw) => RW.rewriteSystemCategories(raw, m)]"), "#P6 rename: the catalog-rename blob sweep includes system_categories");
   ok(rules.includes('href="/estimating-rules/system-categories"') && rules.includes("<div style={{ fontSize: 14, fontWeight: 600 }}>System categories</div>") && rules.includes("Typical parts that pre-fill a new system on the Estimator."),
     "#P6 admin: Estimating Rules has a System categories card with its one-line description");
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type CSSProperties } from "react";
+import { useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import { PartPicker } from "@/app/(app)/design/grid/settings/equipment-map/part-picker";
@@ -44,6 +44,8 @@ export default function SystemCategoriesClient({ initial, parts: initialParts }:
   const [selectedId, setSelectedId] = useState<string | null>(initial[0]?.id ?? null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
+  /** Escape cancels a rename; the blur that follows must not commit it. */
+  const renameCancelled = useRef(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
@@ -63,11 +65,16 @@ export default function SystemCategoriesClient({ initial, parts: initialParts }:
     if (next === list) return;
     edit(next);
     setSelectedId(id);
+    renameCancelled.current = false;
     setRenaming(id);
     setNameDraft("New category");
   };
 
   const commitRename = (id: string) => {
+    if (renameCancelled.current) {
+      renameCancelled.current = false;
+      return;
+    }
     edit(renameCategory(list, id, nameDraft));
     setRenaming(null);
   };
@@ -86,7 +93,7 @@ export default function SystemCategoriesClient({ initial, parts: initialParts }:
       setNote(`${sku} is already in this category.`);
       return;
     }
-    setParts((p) => ({ ...p, [sku]: { desc: hit.desc, unit: hit.unit || "ea", cost: hit.cost || 0, list: hit.list || 0 } }));
+    setParts((p) => ({ ...p, [sku]: { sku, desc: hit.desc, unit: hit.unit || "ea", cost: hit.cost || 0, list: hit.list || 0 } }));
     edit(next);
   };
 
@@ -145,7 +152,10 @@ export default function SystemCategoriesClient({ initial, parts: initialParts }:
                         onBlur={() => commitRename(c.id)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitRename(c.id);
-                          if (e.key === "Escape") setRenaming(null);
+                          if (e.key === "Escape") {
+                            renameCancelled.current = true;
+                            setRenaming(null);
+                          }
                         }}
                         style={{ ...INPUT, flex: 1, padding: "4px 7px" }}
                       />
@@ -185,6 +195,7 @@ export default function SystemCategoriesClient({ initial, parts: initialParts }:
                         type="button"
                         style={{ ...BTN, padding: "4px 9px" }}
                         onClick={() => {
+                          renameCancelled.current = false;
                           setRenaming(c.id);
                           setNameDraft(c.name);
                         }}
@@ -225,7 +236,10 @@ export default function SystemCategoriesClient({ initial, parts: initialParts }:
                     <div key={it.sku} style={{ border: "1px solid #e4e7ec", borderRadius: 8, padding: "9px 10px", display: "grid", gap: 7 }}>
                       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{it.sku}</div>
+                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
+                            {it.sku}
+                            {info && info.sku !== it.sku && <span style={{ color: "#8a6d1f" }}> · now {info.sku}</span>}
+                          </div>
                           {missing ? (
                             <div style={{ fontSize: 12, color: "var(--danger, #b42318)", fontWeight: 600 }}>Not in the catalog</div>
                           ) : (
@@ -256,7 +270,11 @@ export default function SystemCategoriesClient({ initial, parts: initialParts }:
                             step="any"
                             defaultValue={it.qty}
                             aria-label={`${it.sku} quantity`}
-                            onBlur={(e) => edit(setItemQty(list, selected.id, it.sku, e.target.value))}
+                            onBlur={(e) => {
+                              // Cleared box → put the previous value back instead of saving a made-up one.
+                              if (e.target.value.trim() === "") e.target.value = String(it.qty);
+                              else edit(setItemQty(list, selected.id, it.sku, e.target.value));
+                            }}
                             style={{ ...INPUT, width: 84 }}
                           />
                         </label>

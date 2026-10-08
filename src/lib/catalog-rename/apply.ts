@@ -53,6 +53,7 @@ import { accessoryLinkId, allAccessoryLinks } from "@/lib/stores/part-accessory-
 import { allDocumentLinks, documentLinkId } from "@/lib/stores/part-documents";
 import { markQuotePdfStale } from "@/lib/quote-pdf/schedule";
 import { rewriteQuoteSpecRefs } from "@/lib/stores/quotes";
+import { SYSTEM_CATEGORIES_BLOB } from "@/lib/system-categories";
 import { TRACK_SERIES_BLOB } from "@/lib/track-series";
 import { CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart } from "./plan";
 import * as RW from "./rewrite";
@@ -271,6 +272,7 @@ async function blobsStep(ctx: Ctx): Promise<StepOut> {
         return d ? { ...raw, defaults: d } : null;
       },
     ],
+    [SYSTEM_CATEGORIES_BLOB, (raw) => RW.rewriteSystemCategories(raw, m)],
     [DRIVE_PHOTO_SYNC_BLOB, (raw) => RW.rewriteDrivePhotoSync(raw, m)],
   ];
   const [favs, recents] = await Promise.all([listBlobIds(favoritesBlobId("")), listBlobIds(recentBlobId(""))]);

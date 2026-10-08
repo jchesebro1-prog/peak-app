@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getManyBySku } from "@/lib/stores/catalog";
 import { saveSystemCategories } from "@/lib/stores/system-categories";
 import type { SystemCategory } from "@/lib/system-categories";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
@@ -14,7 +13,8 @@ import type { EquipPartHit } from "@/app/(app)/design/grid/settings/actions";
  * re-sanitizes whatever the client posts and returns what was stored.
  */
 
-export type CategoryPartInfo = { desc: string; unit: string; cost: number; list: number };
+/** `sku` is the catalog record's CURRENT sku — it differs from the stored one when the part was renamed (#304). */
+export type CategoryPartInfo = { sku: string; desc: string; unit: string; cost: number; list: number };
 
 export async function saveSystemCategoriesAction(list: unknown): Promise<{ ok: true; categories: SystemCategory[] } | { ok: false; error: string }> {
   await requirePerm("manage_users");
@@ -36,17 +36,4 @@ export async function searchCategoryPartsAction(query: string): Promise<{ hits: 
     hits: hits.map((h) => ({ sku: h.sku, desc: h.desc, category: h.category, unit: h.unit, cost: h.cost, list: h.list })),
     total,
   };
-}
-
-/** SKU → live catalog facts (a retired SKU follows its rename); null = not in the catalog. */
-export async function resolveCategoryPartsAction(skus: readonly string[]): Promise<Record<string, CategoryPartInfo | null>> {
-  await requirePerm("manage_users");
-  const wanted = [...new Set((Array.isArray(skus) ? skus : []).map((s) => String(s ?? "")).filter(Boolean))].slice(0, 2000);
-  const found = wanted.length ? await getManyBySku(wanted) : new Map();
-  const out: Record<string, CategoryPartInfo | null> = {};
-  for (const s of wanted) {
-    const p = found.get(s);
-    out[s] = p ? { desc: p.desc, unit: p.unit || "ea", cost: p.cost || 0, list: p.list || 0 } : null;
-  }
-  return out;
 }

@@ -40,7 +40,8 @@ const clean = (v: unknown, max: number): string =>
   typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
 
 export function cleanQty(v: unknown): number {
-  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  // Blank / whitespace is "no quantity given", like junk (Number("") would be 0).
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
   if (!Number.isFinite(n)) return 1;
   return Math.min(QTY_MAX, Math.max(QTY_MIN, Math.round(n * 100) / 100 || QTY_MIN));
 }
