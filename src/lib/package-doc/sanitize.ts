@@ -4,6 +4,8 @@ import {
   DOC_VERSION,
   isChipKind,
   isPhotoAlign,
+  LIST_START_MAX,
+  LIST_START_MIN,
   MARK_NAMES,
   MAX_BLOCK_TEXT,
   MAX_DEPTH,
@@ -43,6 +45,7 @@ import type { PackageDoc, PDBlock, PDMark, PDMarkType, PhotoAttrs } from "./type
  *    paragraphs merge into its first (joined with a hard break) so it reads
  *    `paragraph (bulletList | orderedList)*` like the editor, an empty doc
  *    gets one empty paragraph. Empty text nodes are dropped (ProseMirror rejects them).
+ *  - An ordered list keeps an integer `start` of 2–9999 (1 is the default, dropped).
  *
  * Iterative (an explicit stack), never recursive, so hostile nesting can't
  * blow the call stack. Pure; client-safe.
@@ -183,7 +186,13 @@ export function sanitizePackageDoc(raw: unknown): PackageDoc | null {
       }
       case "bulletList":
       case "orderedList": {
-        const c = open({ type }, p, "list");
+        const node: { type: string; attrs?: { start: number }; content?: unknown[] } = { type };
+        if (type === "orderedList") {
+          // An integer start 2–9999 survives (1 is the default and stays implicit).
+          const st = isObj(r.attrs) ? r.attrs.start : undefined;
+          if (typeof st === "number" && Number.isInteger(st) && st > LIST_START_MIN && st <= LIST_START_MAX) node.attrs = { start: st };
+        }
+        const c = open(node, p, "list");
         count++;
         pushKids(r.content, c, f.depth + 1);
         break;

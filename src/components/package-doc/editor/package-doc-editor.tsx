@@ -32,7 +32,8 @@ import DocToolbar from "./toolbar";
  *    storing the last valid copy and saying "Saved ✓".
  *  - unmount: emits what's pending, unless `discardRef` is set (Remove
  *    document unmounts the editor — its flush must not bring the document
- *    back); the over flag clears (the estimator keeps the last valid copy).
+ *    back). An over flag is kept (Save keeps refusing) together with the
+ *    over-the-caps draft, which the editor restores on the next mount.
  *  - in: a `value` the editor didn't emit (Remove / Start / an outside
  *    change) re-sets the content without an update event, keeping the cursor
  *    where the new document still has room for it.
@@ -43,8 +44,12 @@ export const CHANGE_DEBOUNCE_MS = 300;
 export type PackageDocEditorProps = {
   value: PackageDoc;
   onChange: (doc: PackageDoc) => void;
-  /** true while the editor holds more than the caps allow (nothing emitted). */
-  onOverChange?: (over: boolean) => void;
+  /** true while the editor holds more than the caps allow (nothing emitted);
+   *  `draft` is that over-the-caps content, kept by the estimator so a step
+   *  change and return gives it back. */
+  onOverChange?: (over: boolean, draft?: unknown) => void;
+  /** The over-the-caps content the estimator kept from a previous mount. */
+  overDraft?: unknown;
   /** Set by Remove document: skip the unmount flush. */
   discardRef?: RefObject<boolean>;
   ctx: PackageDocCtx;
@@ -73,7 +78,7 @@ const PROSE_CSS = `
 
 const EDITOR_PROPS = { attributes: { class: "pd-ed-prose", role: "textbox", "aria-multiline": "true", "aria-label": "Client document" } };
 
-export default function PackageDocEditor({ value, onChange, onOverChange, discardRef, ctx, library, canWriteLibrary, onSaveToProduct, onReady }: PackageDocEditorProps) {
+export default function PackageDocEditor({ value, onChange, onOverChange, overDraft, discardRef, ctx, library, canWriteLibrary, onSaveToProduct, onReady }: PackageDocEditorProps) {
   /* + DocNodeDrop: a BOM row dropped from the left pane (handler registered below). */
   const extensions = useMemo(() => [...editorExtensions(), DocNodeDrop], []);
   const onChangeRef = useRef(onChange);
@@ -88,6 +93,9 @@ export default function PackageDocEditor({ value, onChange, onOverChange, discar
   const pendingRef = useRef<JSONContent | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [size, setSize] = useState<DocSizeState | null>(null);
+  /** The over-the-caps draft the editor starts from (fixed at mount). */
+  const [initialDraft] = useState<JSONContent | null>(() => (overDraft && typeof overDraft === "object" ? (overDraft as JSONContent) : null));
+  const draftShownRef = useRef(false);
 
   const flush = useCallback(() => {
     if (timerRef.current) {
@@ -99,7 +107,7 @@ export default function PackageDocEditor({ value, onChange, onOverChange, discar
     pendingRef.current = null;
     const st = docSizeState(raw);
     setSize(st.level === "ok" ? null : st);
-    onOverRef.current?.(st.level === "over");
+    onOverRef.current?.(st.level === "over", st.level === "over" ? raw : null);
     // Over the caps: never emit — a cut document must not replace the stored one.
     if (!st.doc) return;
     const str = JSON.stringify(st.doc);
@@ -110,7 +118,7 @@ export default function PackageDocEditor({ value, onChange, onOverChange, discar
 
   const editor = useEditor({
     extensions,
-    content: toEditorContent(value),
+    content: initialDraft ?? toEditorContent(value),
     immediatelyRender: false,
     shouldRerenderOnTransaction: false,
     editorProps: EDITOR_PROPS,
@@ -123,6 +131,8 @@ export default function PackageDocEditor({ value, onChange, onOverChange, discar
   });
 
   // Unmount (step change…): emit what's pending — never after Remove document.
+  // The over flag is NOT cleared here: Save keeps refusing until the user
+  // returns (the draft comes back) and shortens the document.
   useEffect(
     () => () => {
       if (discardRef?.current) {
@@ -130,10 +140,17 @@ export default function PackageDocEditor({ value, onChange, onOverChange, discar
         timerRef.current = null;
         pendingRef.current = null;
       } else flush();
-      onOverRef.current?.(false);
     },
     [flush, discardRef]
   );
+
+  // Back on the step with an over-the-caps draft: re-show the warning bar.
+  useEffect(() => {
+    if (!editor || !initialDraft || draftShownRef.current) return;
+    draftShownRef.current = true;
+    pendingRef.current = initialDraft;
+    flush();
+  }, [editor, flush, initialDraft]);
 
   // Outside changes to `value` (not our own echo) re-set the content.
   useEffect(() => {
@@ -210,13 +227,14 @@ export default function PackageDocEditor({ value, onChange, onOverChange, discar
         if (dom instanceof HTMLElement) dom.scrollIntoView({ block: "center", behavior: "smooth" });
         return true;
       },
+      flush,
     };
     onReady?.(api);
     return () => {
       setDocNodeDropHandler(editor, null);
       onReady?.(null);
     };
-  }, [editor, onReady]);
+  }, [editor, onReady, flush]);
 
   const env = useMemo<PackageDocEditorEnv>(() => ({ ctx, library, canWriteLibrary, onSaveToProduct }), [ctx, library, canWriteLibrary, onSaveToProduct]);
 

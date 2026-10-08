@@ -12,7 +12,7 @@ import type { PackageDoc, PDBlock, PDHeading, PDParagraph, PDProductBlock, Photo
  * quote's current narrative fields (spec §12.5). For each PRINTED
  * (systemPrintsInBody) In-total system, in Build order (groupBlocks):
  *   heading (level 2, the system name) → a paragraph holding its
- *   systemPrice chip → its intro (`sec.narrative`, else `intros[sec.id]`) as
+ *   systemPrice chip → its intro (`sec.narrative`) as
  *   paragraphs / bullet lists → a product block per printable key product
  *   (resolved "ok" blocks, in order; photo { show: the block's photo flag,
  *   align right, width 34 } — today's float).
@@ -26,8 +26,6 @@ import type { PackageDoc, PDBlock, PDHeading, PDParagraph, PDProductBlock, Photo
 export type SeedInput = {
   sections: readonly SpecSection[];
   groups?: readonly SystemGroup[] | null;
-  /** Fallback intro text per sectionId, used when the system's own narrative is blank. */
-  intros?: Readonly<Record<string, string>> | null;
 };
 
 export const ALTERNATES_HEADING = "Alternates";
@@ -65,12 +63,10 @@ export function keyProductBlocks(sec: SpecSection): PDProductBlock[] {
   return printable.map((p, i) => productBlockFor(sec.id, ok[i]?.kp.lineKey ?? "", p.sku, ok[i]?.kp.text ?? "", { show: p.photo }));
 }
 
-function systemBlocks(sec: SpecSection, intros: SeedInput["intros"], withWords: boolean): PDBlock[] {
+function systemBlocks(sec: SpecSection, withWords: boolean): PDBlock[] {
   const out = systemHeadingBlocks(sec);
   if (!withWords) return out;
-  const own = typeof sec.narrative === "string" ? sec.narrative : "";
-  const intro = own.trim() ? own : (intros && typeof intros[sec.id] === "string" ? intros[sec.id] : "");
-  out.push(...textToBlocks(intro));
+  out.push(...textToBlocks(typeof sec.narrative === "string" ? sec.narrative : ""));
   out.push(...keyProductBlocks(sec).filter((b) => b.attrs.lineKey));
   return out;
 }
@@ -82,11 +78,11 @@ function build(input: SeedInput, withWords: boolean): PackageDoc {
   const inTotal = printed.filter((s) => s.alternate !== true);
   const alternates = printed.filter((s) => s.alternate === true);
   const content: PDBlock[] = [];
-  for (const sec of inTotal) content.push(...systemBlocks(sec, input.intros, withWords));
+  for (const sec of inTotal) content.push(...systemBlocks(sec, withWords));
   content.push({ type: "priceTable" });
   if (alternates.length) {
     content.push(textHeading(ALTERNATES_HEADING, 1));
-    for (const sec of alternates) content.push(...systemBlocks(sec, input.intros, withWords));
+    for (const sec of alternates) content.push(...systemBlocks(sec, withWords));
   }
   return { type: "doc", version: DOC_VERSION, content };
 }

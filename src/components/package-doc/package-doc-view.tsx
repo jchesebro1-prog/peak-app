@@ -77,7 +77,7 @@ function List({ list }: { list: RList }) {
       {kids.map((c, j) => (c.t === "p" ? <Paragraph key={j} p={c} style={{ margin: 0 }} /> : <List key={j} list={c} />))}
     </li>
   ));
-  return list.t === "ol" ? <ol style={style}>{items}</ol> : <ul style={style}>{items}</ul>;
+  return list.t === "ol" ? <ol start={list.start} style={style}>{items}</ol> : <ul style={style}>{items}</ul>;
 }
 
 function Product({ b, extra }: { b: RProduct; extra?: ReactNode }) {

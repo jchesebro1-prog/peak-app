@@ -1,6 +1,9 @@
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
 import { keyProductsNeedingText, scopesWithoutGoals } from "@/lib/estimate-output/package-gaps";
+import { docGaps } from "@/lib/package-doc/gaps";
+import { documentApplies } from "@/lib/package-doc/print";
+import type { PackageDoc } from "@/lib/package-doc/types";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import type { NextStepTone } from "@/lib/quote-next-step";
 import type { QuoteStatus } from "@/lib/stores/quotes";
@@ -24,9 +27,11 @@ export type ReadinessInput = {
   revNum: number;
   /** Phase 3: client-link opens and unread replies on the sent estimate's emails. */
   track?: { opens: number; newReplies: number };
-  /** Phase 5: the estimate has a package document — it replaces the narrative
-   *  fields, so their gaps (system intros, key-product paragraphs) don't count. */
-  hasDocument?: boolean;
+  /** Phase 5: the estimate's package document. When it applies (documentApplies)
+   *  it replaces the narrative fields, so their gaps (system intros,
+   *  key-product paragraphs) don't count — its own broken pieces do (chips
+   *  whose system/line is gone, product blocks no longer in the BOM). */
+  document?: PackageDoc | null;
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -53,11 +58,12 @@ function buildBadge(sections: SpecSection[]): StepBadge {
   return { state: "gaps", count, label: parts.join(" · ") };
 }
 
-function packageBadge(saved: boolean, sections: SpecSection[], hasDocument = false): StepBadge {
+function packageBadge(saved: boolean, sections: SpecSection[], document?: PackageDoc | null): StepBadge {
   if (!saved) return { state: "idle", label: "Save first" };
-  if (hasDocument) {
-    const goals = scopesWithoutGoals(sections);
-    return goals === 0 ? { state: "ok", label: "✓ Ready" } : { state: "gaps", count: goals, label: plural(goals, "gap", "gaps") };
+  if (documentApplies(document)) {
+    const g = docGaps(document, sections);
+    const count = scopesWithoutGoals(sections) + g.removedChips.length + g.productsNotInBom.length;
+    return count === 0 ? { state: "ok", label: "✓ Ready" } : { state: "gaps", count, label: plural(count, "gap", "gaps") };
   }
   const noIntro = sections.filter((s) => systemPrintsInBody(s) && s.presentation === "narrative" && !(s.narrative || "").trim()).length;
   const count = noIntro + keyProductsNeedingText(sections) + scopesWithoutGoals(sections);
@@ -88,7 +94,7 @@ function sendBadge(i: ReadinessInput): StepBadge {
 export function estimateReadiness(i: ReadinessInput): Record<EstimateStep, StepBadge> {
   return {
     build: buildBadge(i.sections),
-    package: packageBadge(i.saved, i.sections, i.hasDocument === true),
+    package: packageBadge(i.saved, i.sections, i.document),
     review: reviewBadge(i.review),
     send: sendBadge(i),
   };

@@ -23,7 +23,8 @@ export type PDParagraph = { type: "paragraph"; content?: PDInline[] };
 export type PDHeading = { type: "heading"; attrs: { level: 1 | 2 | 3 }; content?: PDInline[] };
 export type PDListItem = { type: "listItem"; content: Array<PDParagraph | PDBulletList | PDOrderedList> };
 export type PDBulletList = { type: "bulletList"; content: PDListItem[] };
-export type PDOrderedList = { type: "orderedList"; content: PDListItem[] };
+/** `attrs.start` (an integer 1–9999) only when the list does not begin at 1. */
+export type PDOrderedList = { type: "orderedList"; attrs?: { start: number }; content: PDListItem[] };
 export type PDPageBreak = { type: "pageBreak" };
 /** The live price table (atom). */
 export type PDPriceTable = { type: "priceTable" };

@@ -208,4 +208,6 @@ export type PackageDocApi = {
   insertDocNode: (p: DocNodePayload, where?: "cursor" | "end") => Promise<boolean>;
   /** Put the cursor in a product block and scroll it into view. */
   scrollToProduct: (t: { sectionId: string; lineKey: string; sku?: string }) => boolean;
+  /** Emit any pending keystrokes now (a programmatic Save calls this before it reads the document). */
+  flush: () => void;
 };

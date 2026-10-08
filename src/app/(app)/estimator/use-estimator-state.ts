@@ -28,6 +28,7 @@ import { laborGroupEdits, laborGroupRecord, newLaborGroupId, pruneLaborGroups, s
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { docIdFloor } from "@/lib/package-doc/ids";
 import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";
 import { docProductSkus } from "@/lib/package-doc/text";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
@@ -50,7 +51,7 @@ import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice"
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
-const TAX_RATE_PCT = 0;
+export const TAX_RATE_PCT = 0;
 
 /** #245: freightPct comes from the caller — this runs at module scope (used by
  *  a lazy useState initializer before props are in scope), so it can't read
@@ -180,8 +181,9 @@ const freshLabor = (
   misc: "",
 });
 
-function computeNid(secs: SpecSection[] | null): number {
-  let n = 100;
+function computeNid(secs: SpecSection[] | null, document?: PackageDoc | null): number {
+  // Phase 5: ids the package document still refers to are never reissued.
+  let n = Math.max(100, docIdFloor(document));
   (secs || []).forEach((s) => {
     const m = /^sys(\d+)$/.exec(s.id);
     if (m) n = Math.max(n, parseInt(m[1], 10));
@@ -259,17 +261,38 @@ export function useEstimatorState(props: EstimatorProps) {
     sectionsRef.current = sections;
   }, [sections]);
   const nidRef = useRef<number | null>(null);
-  if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
+  if (nidRef.current == null) nidRef.current = computeNid(initial.sections, initial.document);
   const nextId = () => ++(nidRef.current as number);
   /** Phase 2a — the quote's named system groups (spec.groups). Sections stay
    *  stored ungrouped-first, then each group in this order (normalizeSystemOrder). */
   const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? []);
   /** Estimator Phase 5 — the Build package document (spec.document); null = none.
    *  Rides every Save (null removes it) and the PDF doc key. */
-  const [packageDoc, setPackageDoc] = useState<PackageDoc | null>(initial.document ?? null);
+  const [packageDoc, setPackageDocState] = useState<PackageDoc | null>(initial.document ?? null);
   /** Phase 5 fix — the editor holds more than the caps allow (it never emits
-   *  that copy), so a Save would only store the last valid document: refuse. */
-  const [packageDocOver, setPackageDocOver] = useState(false);
+   *  that copy), so a Save would only store the last valid document: refuse.
+   *  Not cleared when the editor unmounts while over (a step change): Save
+   *  keeps refusing until the user returns and shortens the document. */
+  const [packageDocOver, setPackageDocOverState] = useState(false);
+  /** Phase 5 final fix — synchronous mirrors of the two, so saveNow reads the
+   *  editor's pending keystrokes right after asking it to flush (state would
+   *  still be the previous render's). */
+  const packageDocRef = useRef<PackageDoc | null>(packageDoc);
+  const packageDocOverRef = useRef(false);
+  /** The over-the-caps editor content (never emitted), kept so a step change
+   *  and return gives the user their text back instead of a stale copy. */
+  const [packageDocOverDraft, setPackageDocOverDraft] = useState<unknown>(null);
+  /** The editor registers its flush() here while mounted. */
+  const packageDocFlushRef = useRef<(() => void) | null>(null);
+  const setPackageDoc = useCallback((doc: PackageDoc | null) => {
+    packageDocRef.current = doc;
+    setPackageDocState(doc);
+  }, []);
+  const setPackageDocOver = useCallback((over: boolean, draft?: unknown) => {
+    packageDocOverRef.current = over;
+    setPackageDocOverState(over);
+    setPackageDocOverDraft(over ? draft ?? null : null);
+  }, []);
   const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups]);
 
   const defaultFabric = fabrics.some((f) => f.sku === "RB-MV-MN")
@@ -1066,13 +1089,16 @@ export function useEstimatorState(props: EstimatorProps) {
     if (tierResolvingRef.current) return false;
     // Phase 5 fix: the editor's document is over the caps — nothing is written
     // (a Save would otherwise store the last valid copy and say "Saved ✓").
-    if (packageDoc && packageDocOver) {
+    // Pending keystrokes first: the editor emits (or flags over) synchronously.
+    packageDocFlushRef.current?.();
+    const docNow = packageDocRef.current;
+    if (docNow && packageDocOverRef.current) {
       setActionNotice(null);
       setGateRefused(false);
       setActionError(PACKAGE_DOC_TOO_LARGE);
       return false;
     }
-    const docAtSave = docInput;
+    const docAtSave = { ...docInput, document: docNow };
     const repriceSeqAtSave = tierRepriceSeqRef.current;
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
@@ -1111,7 +1137,7 @@ export function useEstimatorState(props: EstimatorProps) {
           coverSummary,
           notIncluded,
           // Estimator Phase 5: the package document rides every Save (null = remove it).
-          document: packageDoc,
+          document: docNow,
         });
         // #181: adopt the id whenever the server hands one back, even when
         // `ok` is false — the create branch mints the quote FIRST and only
@@ -2928,6 +2954,8 @@ export function useEstimatorState(props: EstimatorProps) {
     wonMetaGuard,
     packageDocOver,
     setPackageDocOver,
+    packageDocOverDraft,
+    packageDocFlushRef,
     trackSummary,
     setTrackSummary,
     packageDoc,

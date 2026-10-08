@@ -10,7 +10,7 @@ import { usePackageDocEnv } from "./editor-context";
 export default function ChipView({ node, selected }: ReactNodeViewProps) {
   const env = usePackageDocEnv();
   const kind = isChipKind(node.attrs.kind) ? node.attrs.kind : null;
-  const value = kind && env ? resolveChip({ kind, ref: String(node.attrs.ref ?? "") }, { sections: env.ctx.sections, t: env.ctx.t, quoteId: env.ctx.quoteId }) : null;
+  const value = kind && env ? resolveChip({ kind, ref: String(node.attrs.ref ?? "") }, { sections: env.ctx.sections, t: env.ctx.t, quoteId: env.ctx.quoteId, totalLabel: env.ctx.totalLabel }) : null;
   const removed = value === null;
   return (
     <NodeViewWrapper

@@ -75,7 +75,7 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
         review: next ? { label: next.pill.label, tone: next.pill.tone } : null,
         status,
         revNum,
-        hasDocument: !!packageDoc,
+        document: packageDoc,
       }).package,
     [loadedId, sections, next, status, revNum, packageDoc]
   );

@@ -43,6 +43,10 @@ export const MAX_SECTION_ID = 64;
 export const MAX_LINE_KEY = 32;
 export const MAX_SKU = 128;
 
+/** An ordered list's `start` (when not 1). */
+export const LIST_START_MIN = 1;
+export const LIST_START_MAX = 9999;
+
 export const PHOTO_WIDTH_MIN = 25;
 export const PHOTO_WIDTH_MAX = 100;
 /** Today's narrative float: the photo sits 34 % wide on the right. */

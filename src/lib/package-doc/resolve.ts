@@ -7,7 +7,7 @@ import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import { findLine, findSection, resolveChip } from "./chips";
 import { productBlockInBom } from "./gaps";
 import { docBlockPlaceholder } from "./print";
-import { clampPhotoWidth } from "./schema";
+import { clampPhotoWidth, LIST_START_MAX } from "./schema";
 import type { PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, PDOrderedList, PDParagraph, PDProductBlock, PhotoAlign } from "./types";
 
 /**
@@ -43,7 +43,7 @@ export type PackageDocCtx = {
 
 export type RInline = { t: "text"; text: string; bold?: true; italic?: true } | { t: "br" } | { t: "chip"; text: string };
 export type RParagraph = { t: "p"; content: RInline[] };
-export type RList = { t: "ul" | "ol"; items: Array<Array<RParagraph | RList>> };
+export type RList = { t: "ul" | "ol"; /** An ordered list that does not begin at 1. */ start?: number; items: Array<Array<RParagraph | RList>> };
 export type RPhoto = { src: string; alt: string; align: PhotoAlign; width: number };
 export type RProduct = { t: "product"; sku: string; heading: string | null; photo: RPhoto | null; paras: RParagraph[] };
 export type RPriceRow = { name: string; price: string };
@@ -61,7 +61,7 @@ function inline(content: readonly PDInline[] | undefined, ctx: PackageDocCtx): R
       out.push({ t: "text", text: n.text, ...(marks.has("bold") ? { bold: true as const } : {}), ...(marks.has("italic") ? { italic: true as const } : {}) });
     } else if (n.type === "hardBreak") out.push({ t: "br" });
     else if (n.type === "chip") {
-      const v = resolveChip(n, { sections: ctx.sections, t: ctx.t, quoteId: ctx.quoteId });
+      const v = resolveChip(n, { sections: ctx.sections, t: ctx.t, quoteId: ctx.quoteId, totalLabel: ctx.totalLabel });
       if (v) out.push({ t: "chip", text: v });
     }
   }
@@ -71,8 +71,10 @@ function inline(content: readonly PDInline[] | undefined, ctx: PackageDocCtx): R
 const para = (p: PDParagraph, ctx: PackageDocCtx): RParagraph => ({ t: "p", content: inline(p?.content, ctx) });
 
 function list(l: PDBulletList | PDOrderedList, ctx: PackageDocCtx): RList {
+  const start = l.type === "orderedList" && l.attrs && Number.isInteger(l.attrs.start) && l.attrs.start > 1 && l.attrs.start <= LIST_START_MAX ? l.attrs.start : undefined;
   return {
     t: l.type === "orderedList" ? "ol" : "ul",
+    ...(start ? { start } : {}),
     items: (Array.isArray(l.content) ? l.content : []).map((li: PDListItem) =>
       (Array.isArray(li?.content) ? li.content : []).flatMap((c): Array<RParagraph | RList> =>
         c?.type === "paragraph" ? [para(c, ctx)] : c?.type === "bulletList" || c?.type === "orderedList" ? [list(c, ctx)] : []

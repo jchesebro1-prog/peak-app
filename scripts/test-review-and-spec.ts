@@ -57123,9 +57123,9 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   ]), "#P5 model: unknown marks/attrs dropped, marks deduped, empty text dropped, bad chip kinds and over-long refs dropped, quoteNumber ref forced to ''");
   ok(J(dirty.content[1]) === J({ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: "H" }] }) && J(dirty.content[2]) === J({ type: "heading", attrs: { level: 1 } }),
     "#P5 model: heading level clamps to 1–3 (non-number → 1), other heading attrs dropped");
-  ok(J(dirty.content[3]) === J({ type: "orderedList", content: [{ type: "listItem", content: [P("one"), { type: "bulletList", content: [{ type: "listItem", content: [P("n")] }] }] }] }) &&
+  ok(J(dirty.content[3]) === J({ type: "orderedList", attrs: { start: 5 }, content: [{ type: "listItem", content: [P("one"), { type: "bulletList", content: [{ type: "listItem", content: [P("n")] }] }] }] }) &&
     J(dirty.content[4]) === J({ type: "pageBreak" }),
-    "#P5 model: list attrs dropped, a heading inside a list item dropped, nested lists kept; atoms lose attrs and content");
+    "#P5 model: an ordered list keeps its start (#P5 final), other list attrs dropped, a heading inside a list item dropped, nested lists kept; atoms lose attrs and content");
 
   // Product blocks: photo coercion, unwrap on bad anchors, nesting.
   const pb = (attrs: unknown, content: unknown[] = [P("t")]) => p5San(doc([{ type: "productBlock", attrs, content }]))!;
@@ -57180,16 +57180,16 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   const s5 = S({ id: "s5", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1)] });
   const secs = [s3, s1, s4, s2] as unknown as P5Section[];
   const groups = [{ id: "g1", name: "Options", alternate: true }];
-  const seeded = p5Seed({ sections: secs, groups, intros: { s2: "Fallback intro", s1: "unused" } });
+  const seeded = p5Seed({ sections: secs, groups });
   const types = seeded.content.map((b) => b.type + (b.type === "heading" ? b.attrs.level + ":" + p5t.inlineText(b.content) : ""));
-  ok(J(types) === J(["heading2:Stage lighting", "paragraph", "paragraph", "bulletList", "productBlock", "productBlock", "heading2:Sys Two", "paragraph", "paragraph", "priceTable", `heading1:${p5AltH}`, "heading2:Alt sys", "paragraph", "paragraph"]),
+  ok(J(types) === J(["heading2:Stage lighting", "paragraph", "paragraph", "bulletList", "productBlock", "productBlock", "heading2:Sys Two", "paragraph", "priceTable", `heading1:${p5AltH}`, "heading2:Alt sys", "paragraph", "paragraph"]),
     "#P5 model: seed — In-total systems in Build order (heading + price chip + intro + key products), the price table, then 'Alternates' + alternate systems; zero-revenue systems skipped");
   ok(J(seeded.content[1]) === J({ type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s1" } }] }) && J(seeded.content[7]) === J({ type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "s2" } }] }),
     "#P5 model: seed — each system heading is followed by its systemPrice chip");
   ok(J(seeded.content[2]) === J({ type: "paragraph", content: [{ type: "text", text: "Intro para" }, { type: "hardBreak" }, { type: "text", text: "line 2" }] }) &&
     J(seeded.content[3]) === J({ type: "bulletList", content: [{ type: "listItem", content: [P("b1")] }, { type: "listItem", content: [P("b2")] }] }) &&
-    J(seeded.content[8]) === J(P("Fallback intro")) && J(seeded.content[13]) === J(P("Alt words")),
-    "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a blank narrative falls back to intros[sectionId]");
+    J(seeded.content[8]) === J({ type: "priceTable" }) && J(seeded.content[12]) === J(P("Alt words")),
+    "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a system with no narrative gets just its heading and price chip");
   const kp1 = seeded.content[4] as P5PB, kp2 = seeded.content[5] as P5PB;
   ok(J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: true, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
     p5t.productBlockText(kp1) === "Fixture one paragraph.\n\nSecond para." && p5t.productBlockText(kp2) === "- f1\n- f2",
@@ -57442,8 +57442,8 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
   ok(page.includes("document: sanitizePackageDoc(spec?.document),") && page.includes("      document: null,") && rd("src/app/(app)/estimator/types.ts").includes("document: PackageDoc | null;"),
     "#P5 save: page.tsx loads initial.document (sanitized; a new quote null)");
-  ok(hook.includes("const [packageDoc, setPackageDoc] = useState<PackageDoc | null>(initial.document ?? null);") && hook.includes("document: packageDoc,\n    }),") &&
-     hook.includes("          document: packageDoc,\n        });") && /\n    packageDoc,\n    setPackageDoc,\n/.test(hook) && /\n    next,\n  \};\n\}/.test(hook),
+  ok(hook.includes("const [packageDoc, setPackageDocState] = useState<PackageDoc | null>(initial.document ?? null);") && hook.includes("document: packageDoc,\n    }),") &&
+     hook.includes("          document: docNow,\n        });") && /\n    packageDoc,\n    setPackageDoc,\n/.test(hook) && /\n    next,\n  \};\n\}/.test(hook),
     "#P5 save: the hook holds packageDoc, puts it in docInput and the save payload, returns packageDoc / setPackageDoc with next still last");
   const kb = { quoteNumber: "Q", projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "", paymentTerms: "Net 30", sections: [], vendorQuotes: [], pdfOptions: {} } as unknown as Parameters<typeof p5rKey>[0];
   ok(p5rKey(kb) === p5rKey({ ...kb, document: null }) && p5rKey(kb) !== p5rKey({ ...kb, document: stored }) && p5rKey({ ...kb, document: stored }) !== p5rKey({ ...kb, document: p5San(doc([P(T("stored!"))])) }),
@@ -57829,16 +57829,16 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
   // (1) An over-limit document: the editor reports it; the estimator's Save refuses with the server's words, nothing written.
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`), edSrc = rd(`${ED}/package-doc-editor.tsx`), pkgStep = rd(`${EST_DIR}/steps/package-step.tsx`);
   const saveNowBody = hook.slice(hook.indexOf("const saveNow = async (): Promise<number | false> => {"), hook.indexOf("const doSave = () => {"));
-  const refuse = saveNowBody.indexOf("if (packageDoc && packageDocOver) {");
-  ok(hook.includes("const [packageDocOver, setPackageDocOver] = useState(false);") && refuse > 0 && refuse < saveNowBody.indexOf("saveQuoteAction(") &&
-     /if \(packageDoc && packageDocOver\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(PACKAGE_DOC_TOO_LARGE\);\s*return false;\s*\}/.test(saveNowBody) &&
+  const refuse = saveNowBody.indexOf("if (docNow && packageDocOverRef.current) {");
+  ok(hook.includes("const [packageDocOver, setPackageDocOverState] = useState(false);") && refuse > 0 && refuse < saveNowBody.indexOf("saveQuoteAction(") &&
+     /if \(docNow && packageDocOverRef\.current\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(PACKAGE_DOC_TOO_LARGE\);\s*return false;\s*\}/.test(saveNowBody) &&
      hook.includes('import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";') && /startTransition\(async \(\) => \{\s*await saveNow\(\);/.test(hook),
     "#P5 editor fix: Save (doSave → saveNow, the next-step control's saveNow too) refuses while the editor's document is over the caps — the action-error banner, no saveQuoteAction call");
   ok(P5F_TOO_LARGE === "The document is too large to save — shorten it." && p5fm.TOO_LARGE === P5F_TOO_LARGE,
     "#P5 editor fix: the refusal copy is the server's own ('The document is too large to save — shorten it.')");
-  ok(edSrc.includes("onOverChange?: (over: boolean) => void;") && /setSize\(st\.level === "ok" \? null : st\);\s*onOverRef\.current\?\.\(st\.level === "over"\);\s*\/\/ Over the caps/.test(edSrc) &&
-     /setSize\(null\);\s*onOverRef\.current\?\.\(false\);/.test(edSrc) && /\} else flush\(\);\s*onOverRef\.current\?\.\(false\);/.test(edSrc),
-    "#P5 editor fix: the editor reports over on every flush, and clears it when an outside value re-sets the content or it unmounts");
+  ok(edSrc.includes("onOverChange?: (over: boolean, draft?: unknown) => void;") && /setSize\(st\.level === "ok" \? null : st\);\s*onOverRef\.current\?\.\(st\.level === "over", st\.level === "over" \? raw : null\);\s*\/\/ Over the caps/.test(edSrc) &&
+     /setSize\(null\);\s*onOverRef\.current\?\.\(false\);/.test(edSrc) && /\} else flush\(\);\s*\},\s*\[flush, discardRef\]/.test(edSrc),
+    "#P5 editor fix: the editor reports over on every flush, and clears it when an outside value re-sets the content (an unmount keeps it — #P5 final)");
   ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 5,
@@ -58056,7 +58056,7 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
      [">Gaps</h3>", ">BOM</h3>", ">Library</h3>", "No gaps.", "Not included list", "Price table", "Page break"].every((x) => paneSrc.includes(x)) &&
      !/from "@tiptap\//.test(paneSrc) && paneSrc.includes("api.insertDocNode(p)") && paneSrc.includes("api.scrollToProduct(") && !/#[0-9a-f]{6}[^\n]*accent/i.test(paneSrc),
     "#P5 left pane: system and line rows are draggable with the custom MIME and each has a + 'Insert <name>' button; Gaps / BOM / Library copy; the pane never imports TipTap");
-  ok(/const DocLeftPane = dynamic\(\(\) => import\("@\/components\/package-doc\/editor\/left-pane"\), \{ ssr: false \}\);/.test(pkgStep) && pkgStep.includes("onReady={setDocApi}") &&
+  ok(/const DocLeftPane = dynamic\(\(\) => import\("@\/components\/package-doc\/editor\/left-pane"\), \{ ssr: false \}\);/.test(pkgStep) && pkgStep.includes("onReady={onEditorReady}") &&
      pkgStep.includes("api={docApi}") && pkgStep.includes('<aside aria-label="Document tools"') && pkgStep.includes("width: 240") && !/^import [^\n]*@\/components\/package-doc\/editor/m.test(pkgStep),
     "#P5 left pane: Build package renders the pane (code-split, ssr: false) in the 240 px left column and wires the editor's onReady to it");
 }
@@ -58072,8 +58072,10 @@ import { qd293Sections as p5pSections } from "./qd293-cases";
   const J = JSON.stringify;
   const base = p5pSections().map((s) => ({ ...s, presentation: "narrative" as const, narrative: "" }));
   const secs = base.map((s, i) => (i === 0 && s.items.length ? { ...s, keyProducts: [{ lineKey: String(s.items[0].id), sku: s.items[0].sku, text: "", photo: true }] } : s));
+  // A document that applies, every chip / product block resolvable (no document gaps of its own).
+  const DOC1 = { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text: "Words." }] }] } as unknown as import("@/lib/package-doc/types").PackageDoc;
   const badge = (hasDocument?: boolean, sections = secs) =>
-    p5pReady({ saved: true, sections, review: null, status: "draft", revNum: 1, ...(hasDocument === undefined ? {} : { hasDocument }) }).package;
+    p5pReady({ saved: true, sections, review: null, status: "draft", revNum: 1, ...(hasDocument === undefined ? {} : { document: hasDocument ? DOC1 : null }) }).package;
   const noGoals = p5pNoGoals(secs), kp = p5pKpNeed(secs);
 
   // (1) Without a document nothing changes; the badge count equals the pane's gap rows.
@@ -58086,10 +58088,10 @@ import { qd293Sections as p5pSections } from "./qd293-cases";
     `#P5 polish: with a document the 'no intro' / 'key product needs a paragraph' gaps are gone (key-product gaps without it: ${kp}); client goals still count; badge = pane`);
   ok(p5pGaps(secs).some((g) => /no intro/.test(g)) && badge(false).count! > (badge(true).count ?? 0),
     "#P5 polish: the same estimate without a document still counts the narrative gaps");
-  ok(p5pReady({ saved: false, sections: secs, review: null, status: "draft", revNum: 1, hasDocument: true }).package.label === "Save first",
+  ok(p5pReady({ saved: false, sections: secs, review: null, status: "draft", revNum: 1, document: DOC1 }).package.label === "Save first",
     "#P5 polish: an unsaved estimate still reads 'Save first'");
   const paneSrc = rd(`${ED}/left-pane.tsx`), pbSrc = rd(`${ED}/product-block-view.tsx`);
-  ok(rd("src/app/(app)/estimator/estimator-client.tsx").includes("hasDocument: !!s.packageDoc") && rd("src/app/(app)/estimator/steps/review-step.tsx").includes("hasDocument: !!packageDoc") &&
+  ok(rd("src/app/(app)/estimator/estimator-client.tsx").includes("document: s.packageDoc") && rd("src/app/(app)/estimator/steps/review-step.tsx").includes("document: packageDoc") &&
      paneSrc.includes("packageReadinessGaps(sections, true)"),
     "#P5 polish: the tab badge, the Review checklist badge and the left pane all pass the document flag");
   // (3) Not included hint: disabled with a reason when both texts are empty.
@@ -58099,4 +58101,95 @@ import { qd293Sections as p5pSections } from "./qd293-cases";
   // (4) A sku the catalog doesn't have reads like a custom line.
   ok(pbSrc.includes("const isCustom = isLine || (!!row && !row.inCatalog);") && pbSrc.includes("{isCustom ? customLineTagText(label) : productTagText(label, state)}") && /\{!isCustom && \(\s*<button/.test(pbSrc),
     "#P5 polish: a product block whose part isn't in the catalog shows '<label> · custom line' instead of 'edited here', and no Save to product");
+}
+
+// ---- #P5 final fix: id reuse, document-aware badge, list start, flush, POR grand total ----
+import { docIdFloor as p5zFloor } from "@/lib/package-doc/ids";
+import { estimateReadiness as p5zReady } from "@/lib/estimate-steps/readiness";
+import { sanitizePackageDoc as p5zSan } from "@/lib/package-doc/sanitize";
+import { resolvePackageDoc as p5zResolve, type PackageDocCtx as P5zCtx } from "@/lib/package-doc/resolve";
+import { resolveChip as p5zChip, GRAND_PENDING_SUFFIX as p5zSuffix } from "@/lib/package-doc/chips";
+import { seedPackageDoc as p5zSeed } from "@/lib/package-doc/seed";
+import { ResolvedPackageDocView as P5zView } from "@/components/package-doc/package-doc-view";
+import { qd293Sections as p5zSections } from "./qd293-cases";
+import { createElement as p5zEl } from "react";
+import { renderToStaticMarkup as p5zMarkup } from "react-dom/server";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  const T = (text: string) => ({ type: "text", text });
+  const P = (...content: unknown[]) => ({ type: "paragraph", ...(content.length ? { content } : {}) });
+  const chip = (kind: string, ref = "") => ({ type: "chip", attrs: { kind, ref } });
+  const doc = (content: unknown[]) => ({ type: "doc", version: 1, content }) as unknown as import("@/lib/package-doc/types").PackageDoc;
+
+  // (1) docIdFloor — the highest numeric id the document still refers to.
+  ok(p5zFloor(null) === 0 && p5zFloor(doc([P(T("hi"))])) === 0 && p5zFloor(doc([P(chip("quoteNumber"), chip("grandTotal"))])) === 0,
+    "#P5 final: docIdFloor — no document, plain words, quoteNumber/grandTotal chips → 0");
+  const refs = doc([
+    P(chip("systemPrice", "sys107"), chip("systemName", "sys102")),
+    P(chip("lineQty", "sys103:150")),
+    { type: "productBlock", attrs: { sectionId: "sys110", lineKey: "212", sku: "X", photo: { show: true, align: "right", width: 34 } }, content: [P(T("t"))] },
+    { type: "bulletList", content: [{ type: "listItem", content: [P(chip("systemPrice", "s4"), chip("lineQty", "s9:77x"))] }] },
+  ]);
+  ok(p5zFloor(refs) === 212, "#P5 final: docIdFloor reads sysN in system chips, the sectionId and lineKey of lineQty chips and product blocks (nested too); non-numeric ids (s4, 77x) are ignored");
+  ok(p5zFloor(doc([P(chip("systemPrice", "sys99999999999"))])) === 0 && p5zFloor(doc([P(chip("systemPrice", "sys100"))])) === 100,
+    "#P5 final: docIdFloor ignores an absurd id (a hostile document can't push the counter out of range)");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(hook.includes("function computeNid(secs: SpecSection[] | null, document?: PackageDoc | null): number {") && hook.includes("let n = Math.max(100, docIdFloor(document));") && hook.includes("computeNid(initial.sections, initial.document)"),
+    "#P5 final: the Estimator's id counter is seeded above every id the package document refers to");
+
+  // (2) The Package badge counts the document's own broken pieces.
+  const secs = p5zSections().map((s) => ({ ...s, presentation: "narrative" as const, narrative: "" }));
+  const live = secs[0].id, liveLine = String(secs[0].items[0].id), liveSku = secs[0].items[0].sku;
+  const badge = (d?: import("@/lib/package-doc/types").PackageDoc | null) => p5zReady({ saved: true, sections: secs, review: null, status: "draft", revNum: 1, ...(d === undefined ? {} : { document: d }) }).package;
+  const clean = doc([P(chip("systemPrice", live), chip("lineQty", `${live}:${liveLine}`))]);
+  const base = badge(clean).count ?? 0;
+  const gone = doc([P(chip("systemPrice", live), chip("systemName", "sys9999"), chip("systemName", "sys9999"), chip("lineQty", `${live}:99999`))]);
+  ok((badge(gone).count ?? 0) === base + 2 && badge(gone).label !== "✓ Ready",
+    "#P5 final: removed chips (deduped) add to the Package badge count");
+  const orphan = doc([P(chip("systemPrice", live)), { type: "productBlock", attrs: { sectionId: live, lineKey: "99999", sku: liveSku, photo: { show: true, align: "right", width: 34 } }, content: [P(T("t"))] }]);
+  ok((badge(orphan).count ?? 0) === base + 1, "#P5 final: a product block no longer in the BOM adds one to the Package badge count");
+  ok(badge(doc([P(T("   "))])).count === badge().count && badge(null).count === badge().count && J(badge()) === J(badge(null)),
+    "#P5 final: an empty document (documentApplies false) and a null one badge exactly like no document");
+  ok(rd("src/lib/estimate-steps/readiness.ts").includes("documentApplies(document)") && rd("src/app/(app)/estimator/estimator-client.tsx").includes("document: s.packageDoc,") && rd("src/app/(app)/estimator/steps/review-step.tsx").includes("document: packageDoc,"),
+    "#P5 final: the tab badge and the Review checklist badge hand the document to estimateReadiness, which tests documentApplies");
+
+  // (3) Ordered-list start.
+  const ol = (attrs: unknown) => ({ type: "orderedList", ...(attrs === undefined ? {} : { attrs }), content: [{ type: "listItem", content: [P(T("a"))] }] });
+  const startOf = (a: unknown) => (p5zSan({ type: "doc", content: [ol(a)] })!.content[0] as { attrs?: { start: number } }).attrs?.start;
+  ok(startOf({ start: 5 }) === 5 && startOf({ start: 9999 }) === 9999 && startOf({ start: 2 }) === 2 && startOf({ start: 1 }) === undefined && startOf(undefined) === undefined &&
+     startOf({ start: 0 }) === undefined && startOf({ start: 10000 }) === undefined && startOf({ start: 2.5 }) === undefined && startOf({ start: "5" }) === undefined && startOf({ start: -3 }) === undefined && startOf({ start: null }) === undefined,
+    "#P5 final: an ordered list keeps an integer start 2–9999; 1, fractions, strings and out-of-range values are dropped");
+  const bullet = p5zSan({ type: "doc", content: [{ type: "bulletList", attrs: { start: 5 }, content: [{ type: "listItem", content: [P(T("b"))] }] }] })!;
+  ok(!("attrs" in bullet.content[0]), "#P5 final: a bullet list never carries start");
+  const ctxZ: P5zCtx = { sections: secs, t: { grand: 1234 } as P5zCtx["t"], quoteId: "Q-1" };
+  const html = p5zMarkup(p5zEl(P5zView, { resolved: p5zResolve(p5zSan({ type: "doc", content: [ol({ start: 5 }), ol(undefined)] })!, ctxZ) }));
+  ok(html.includes("<ol start=\"5\"") && (html.match(/<ol /g) || []).length === 2 && (html.match(/<ol start=/g) || []).length === 1,
+    "#P5 final: PackageDocView renders <ol start> for a list that doesn't begin at 1, and a plain <ol> otherwise");
+
+  // (4) The over-the-caps flag survives an unmount; flush is on the editor API and runs before saveNow reads the document.
+  const ed = rd("src/components/package-doc/editor/package-doc-editor.tsx"), pstep = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  const cleanup = ed.slice(ed.indexOf("// Unmount (step change…)"), ed.indexOf("// Back on the step"));
+  ok(cleanup.length > 100 && !cleanup.includes("onOverRef.current?.(false)") && ed.includes("flush,\n    };") && rd("src/lib/package-doc/insert.ts").includes("flush: () => void;") &&
+     ed.includes("overDraft") && ed.includes("onOverRef.current?.(st.level === \"over\", st.level === \"over\" ? raw : null)"),
+    "#P5 final: unmounting the editor while over keeps the over flag (and its draft, restored on return); the editor API exposes flush()");
+  ok(pstep.includes("packageDocFlushRef.current = api ? api.flush : null;") && pstep.includes("overDraft={packageDocOverDraft}") &&
+     hook.includes("packageDocFlushRef.current?.();\n    const docNow = packageDocRef.current;") && hook.includes("if (docNow && packageDocOverRef.current) {") && hook.includes("document: docNow,") &&
+     hook.includes("packageDocRef.current = doc;") && hook.includes("packageDocOverRef.current = over;"),
+    "#P5 final: saveNow flushes the editor first and then reads the document and over flag from synchronous refs");
+
+  // (5) Grand-total chip on a pending-price quote.
+  const gt = { kind: "grandTotal", ref: "" } as const;
+  ok(p5zChip(gt, { sections: secs, t: { grand: 1234 }, quoteId: "Q" }) === "$1,234.00" && p5zChip(gt, { sections: secs, t: { grand: 1234 }, quoteId: "Q", totalLabel: "Total" }) === "$1,234.00" &&
+     p5zChip(gt, { sections: secs, t: { grand: 1234 }, quoteId: "Q", totalLabel: "Total (excludes items pending price)" }) === "$1,234.00" + p5zSuffix && p5zSuffix === " (excludes items pending price)",
+    "#P5 final: the grand-total chip appends ' (excludes items pending price)' exactly when the totals block's label does");
+  const rg = p5zResolve(doc([P(chip("grandTotal"))]), { ...ctxZ, totalLabel: "Total (excludes items pending price)" });
+  ok(J(rg).includes("pending price") && !J(p5zResolve(doc([P(chip("grandTotal"))]), ctxZ)).includes("pending price"),
+    "#P5 final: resolvePackageDoc passes the totals label to its chips");
+
+  // (6) Small cleanups.
+  ok(pstep.includes("taxRatePct: TAX_RATE_PCT") && pstep.includes("import { TAX_RATE_PCT, type EstimatorState }") && hook.includes("export const TAX_RATE_PCT = 0;") && !pstep.includes("taxRatePct: 0"),
+    "#P5 final: Build package reads the Estimator's TAX_RATE_PCT instead of a hard-coded 0");
+  ok(!rd("src/lib/package-doc/seed.ts").includes("intros") && J(p5zSeed({ sections: p5zSections(), groups: [] })) === J(p5zSeed({ sections: p5zSections(), groups: [], ...({ intros: { s2: "x" } } as object) })),
+    "#P5 final: seedPackageDoc has no intros parameter (the system's own narrative is the only intro)");
 }

@@ -14,7 +14,7 @@ import { saveProductParagraphAction } from "../narrative-actions";
 import { seedPackageDoc } from "@/lib/package-doc/seed";
 import type { PackageDocCtx } from "@/lib/package-doc/resolve";
 import type { PackageDocApi } from "@/lib/package-doc/insert";
-import type { EstimatorState } from "../use-estimator-state";
+import { TAX_RATE_PCT, type EstimatorState } from "../use-estimator-state";
 
 /** Screen-reader-only text (an aria-label on a plain span isn't reliably announced). */
 const VISUALLY_HIDDEN: CSSProperties = {
@@ -71,6 +71,8 @@ export function PackageStep({ s }: { s: EstimatorState }) {
     pdfQty,
     pdfTerms,
     packageDoc,
+    packageDocFlushRef,
+    packageDocOverDraft,
     quoteId,
     sections,
     setActiveId,
@@ -121,7 +123,15 @@ export function PackageStep({ s }: { s: EstimatorState }) {
   };
   /** The editor's insert API for the left pane (null until the editor exists). */
   const [docApi, setDocApi] = useState<PackageDocApi | null>(null);
-  const docCtx = useMemo<PackageDocCtx>(() => ({ sections, t, quoteId: quoteId || "", taxRatePct: 0 }), [sections, t, quoteId]);
+  /** The editor's insert API for the left pane, and its flush for a programmatic Save. */
+  const onEditorReady = useCallback(
+    (api: PackageDocApi | null) => {
+      setDocApi(api);
+      packageDocFlushRef.current = api ? api.flush : null;
+    },
+    [packageDocFlushRef]
+  );
+  const docCtx = useMemo<PackageDocCtx>(() => ({ sections, t, quoteId: quoteId || "", taxRatePct: TAX_RATE_PCT }), [sections, t, quoteId]);
   const { setRow: setLibraryRow, rows: libraryRows } = kpLib;
   /** Save to product: the narrative column's action (create permission, stale
    *  check), then the cached library row follows (saved row, or the newer
@@ -295,12 +305,13 @@ export function PackageStep({ s }: { s: EstimatorState }) {
               value={packageDoc}
               onChange={setPackageDoc}
               onOverChange={setPackageDocOver}
+              overDraft={packageDocOverDraft}
               discardRef={discardRef}
               ctx={docCtx}
               library={kpLib}
               canWriteLibrary={canWriteNarrativeLibrary}
               onSaveToProduct={saveToProduct}
-              onReady={setDocApi}
+              onReady={onEditorReady}
             />
           </div>
         )}

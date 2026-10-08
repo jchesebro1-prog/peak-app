@@ -16,7 +16,14 @@ export type ChipCtx = {
   /** QuoteTotals (only `grand` is read). */
   t?: { grand: number } | null;
   quoteId?: string | null;
+  /** The totals block's Total label. Anything but "Total" means the totals
+   *  block says "(excludes items pending price)" (a portal quote with a POR
+   *  line), and the grand-total chip says it too. */
+  totalLabel?: string;
 };
+
+/** Appended to a grand-total chip when the totals block's label carries it. */
+export const GRAND_PENDING_SUFFIX = " (excludes items pending price)";
 
 /** Editor-facing names for each kind (toolbar / gap list). */
 export const CHIP_LABEL: Record<ChipKind, string> = {
@@ -70,7 +77,9 @@ export function resolveChip(chip: PDChip | PDChip["attrs"], ctx: ChipCtx): strin
     case "quoteNumber":
       return ctx.quoteId ? String(ctx.quoteId) : null;
     case "grandTotal":
-      return ctx.t && typeof ctx.t.grand === "number" && Number.isFinite(ctx.t.grand) ? fmt(ctx.t.grand) : null;
+      return ctx.t && typeof ctx.t.grand === "number" && Number.isFinite(ctx.t.grand)
+        ? fmt(ctx.t.grand) + (ctx.totalLabel && ctx.totalLabel !== "Total" ? GRAND_PENDING_SUFFIX : "")
+        : null;
     default:
       return null;
   }

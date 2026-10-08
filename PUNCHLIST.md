@@ -11282,8 +11282,7 @@ appendix.", "System intros", "No saved intros yet.", "Blocks", "Not included lis
 included list on the right first.", "Couldn't insert <x> — it may have left the BOM.".
 
 **Open (minor, not blocking).**
-- Over-limit edits are lost if the user leaves the step (the editor remounts from the last valid copy).
-- An ordered list's start number is not kept; only Tab is depth-capped (pasted deeper lists count as over).
+- Only Tab is depth-capped (pasted deeper lists count as over).
 - Alternates can print twice (the document's Alternates section plus the priced Alternates block).
 - Portal Refresh pricing rebuilds `spec` without the document.
 - The Cover PDF still reads the narrative fields, not the document.
@@ -11292,3 +11291,6 @@ included list on the right first.", "Couldn't insert <x> — it may have left th
   document-aware.
 - The cap can be exceeded by 1–2 nodes; a 20,000-character cut can split a surrogate pair; an alternate without a group.
 - An async drop (library row not cached) can land shifted by edits made while it fetches.
+- The Not included list can print twice on the package page if it is inserted into the document.
+- Datasheet links on the package page are keyed by key-product sku only (a document product block with no key product has none).
+- Approval doesn't go stale on document text edits (same as narrative text today).
