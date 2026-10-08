@@ -49,15 +49,20 @@ export function sellUntouched(draft: Pick<CustomDraft, "price">, old: Pick<SpecI
   return draft.price === money(old.price);
 }
 
+/** Same protection for Unit cost: untouched text keeps a stored cost with more than 2 decimals exact. */
+export function costUntouched(draft: Pick<CustomDraft, "cost">, old: Pick<SpecItem, "cost">): boolean {
+  return draft.cost === money(old.cost);
+}
+
 /**
  * The line `lineId` replaced IN PLACE by `fresh` (the fields the form owns).
  * Kept from the old line: id, position, lineOrder and every field the form does
- * not own (comment, internal note, option, specKey, …). With `keepSell` (the
- * Unit sell field was not touched) the stored price is kept exactly. An
+ * not own (comment, internal note, option, specKey, …). With `keepSell` / `keepCost` (the
+ * Unit sell / Unit cost field was not touched) the stored value is kept exactly. An
  * extended-sell override survives only while the unit sell and quantity are
  * unchanged. A line no longer there leaves the section untouched.
  */
-export function replaceCustomLine(sec: SpecSection, lineId: number, fresh: SpecItem, keepSell = false): SpecSection {
+export function replaceCustomLine(sec: SpecSection, lineId: number, fresh: SpecItem, keepSell = false, keepCost = false): SpecSection {
   const at = sec.items.findIndex((it) => it.id === lineId);
   if (at < 0) return sec;
   const old = sec.items[at];
@@ -70,6 +75,7 @@ export function replaceCustomLine(sec: SpecSection, lineId: number, fresh: SpecI
   if (old.specKey) next.specKey = old.specKey;
   else delete next.specKey;
   if (keepSell) next.price = old.price;
+  if (keepCost) next.cost = old.cost;
   if (old.extSellOverride != null && (next.price !== old.price || old.qty !== fresh.qty)) delete next.extSellOverride;
   const items = sec.items.slice();
   items[at] = next;
@@ -89,10 +95,11 @@ export function saveCustomEdit(
   lineId: number,
   fresh: SpecItem,
   keepSell = false,
+  keepCost = false,
 ): { section: SpecSection; anchor: { lineKey: string; sku: string } | null } {
   const old = sec.items.find((it) => it.id === lineId);
   if (!old) return { section: sec, anchor: null };
-  let section = replaceCustomLine(sec, lineId, fresh, keepSell);
+  let section = replaceCustomLine(sec, lineId, fresh, keepSell, keepCost);
   const neu = section.items.find((it) => it.id === lineId)!;
   const from = keyProductSkuOf(old);
   const to = keyProductSkuOf(neu);

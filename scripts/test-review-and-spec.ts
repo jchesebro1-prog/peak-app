@@ -58712,7 +58712,7 @@ import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui
   ok(build.includes("onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}") && build.includes("customEditing={!!customEdit}"),
     "#312 estimator: the Build step wires the custom edit to the section card");
   ok(hook.includes("const openCustomEdit = (secId: string, lineId: number)") && hook.includes("customEditRef.current = { lineId, draft: customDraftFromLine(it) };") && hook.includes("closeInput();\n    customEditRef.current") &&
-     hook.includes("const edit = customEditRef.current;") && hook.includes("saveCustomEdit(x, editId, customItem, sellUntouched(d, at)).section") && hook.includes("else pushItems(secId, [{ ...customItem, id: nextId() }]);"),
+     hook.includes("const edit = customEditRef.current;") && hook.includes("saveCustomEdit(x, editId, customItem, sellUntouched(d, at), costUntouched(d, at)).section") && hook.includes("else pushItems(secId, [{ ...customItem, id: nextId() }]);"),
     "#312 estimator: the hook stages the pre-filled draft, consumes it on open, and saves through replaceCustomLine (add path unchanged)");
   ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
     "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
@@ -59023,4 +59023,25 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   // (7) dead handler gone; meaningful alt.
   ok(!iv.includes("onDragStart") && iv.includes("alt={name}") && !iv.includes('alt=""') && iv.includes("keyProductHeading(line)"),
     "#312 fix round 1: the strip has no dead onDragStart; the editor image's alt is the part label (heading, else description, else sku)");
+}
+
+// ---- #312 final: an untouched cost stays exact; the over-cap draft re-anchors too ----
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  type Item = Parameters<typeof cpe312.customDraftFromLine>[0];
+  type Sec = Parameters<typeof cpe312.replaceCustomLine>[0];
+  const old = { id: 7, sku: "CUSTOM", desc: "Bracket", qty: 2, unit: "ea", cost: 12.3456, price: 20, custom: true } as unknown as Item;
+  const sec = { id: "s1", name: "Rigging", items: [old] } as unknown as Sec;
+  const draft = cpe312.customDraftFromLine(old);
+  ok(draft.cost === "12.35" && cpe312.costUntouched(draft, old) && !cpe312.costUntouched({ cost: "13" }, old),
+    "#312 final: the pre-filled Unit cost is the cents text; costUntouched is true only while it is unchanged");
+  const fresh = { ...old, desc: "Bracket v2", cost: 12.35 } as Item;
+  ok(cpe312.replaceCustomLine(sec, 7, fresh, false, true).items[0].cost === 12.3456 && cpe312.saveCustomEdit(sec, 7, fresh, false, true).section.items[0].cost === 12.3456,
+    "#312 final: an untouched cost keeps the exact stored cost (12.3456, not 12.35) through replaceCustomLine and saveCustomEdit");
+  ok(cpe312.replaceCustomLine(sec, 7, { ...fresh, cost: 15 } as Item, false, false).items[0].cost === 15 && cpe312.replaceCustomLine(sec, 7, fresh).items[0].cost === 12.35,
+    "#312 final: a typed cost still replaces the stored cost");
+  ok(hook.includes("costUntouched(d, cur)") && hook.includes("costUntouched(d, at)).section") &&
+     hook.includes("reanchorDocLine(packageDocOverDraft as PackageDoc | null, secId, res.anchor.lineKey, res.anchor.sku)") && hook.includes("if (od) setPackageDocOverDraft(od);"),
+    "#312 final: the custom-part save passes costUntouched and re-anchors the over-cap draft alongside the document");
 }

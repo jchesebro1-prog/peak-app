@@ -786,7 +786,7 @@ See `.env.example`.
     Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
     sheets come back (PUNCHLIST #304).
 
-42. ✅ **Estimator in four steps** (#305, D643–D684) — Phase 1 ✅ (the frame): the
+42. ✅ **Estimator in four steps** (#305, D643–D678, D680–D684) — Phase 1 ✅ (the frame): the
     Estimator is Build · Build package · Customer review · Send & track on one URL
     (`?step=`, pushState, Build canonical), one shared header with a More ▾ menu, a
     readiness line under each tab (never blocking), the status select and Daylite

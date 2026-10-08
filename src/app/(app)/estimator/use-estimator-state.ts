@@ -43,7 +43,7 @@ import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
 import { downloadCsv, fileStem } from "../design/export";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
-import { customDraftFromLine, isCustomLineEditable, saveCustomEdit, sellUntouched } from "./custom-part-edit";
+import { customDraftFromLine, isCustomLineEditable, costUntouched, saveCustomEdit, sellUntouched } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
 import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/curtain-cut-sheets/vocab";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
@@ -2299,16 +2299,19 @@ export function useEstimatorState(props: EstimatorProps) {
     // #312: Save changes replaces the line in place; the ★ and any document blocks follow a changed anchor.
     if (editId != null) {
       const cur = sectionsRef.current.find((x) => x.id === secId)?.items.find((x) => x.id === editId);
-      const res = cur ? saveCustomEdit(sectionsRef.current.find((x) => x.id === secId)!, editId, customItem, sellUntouched(d, cur)) : null;
+      const res = cur ? saveCustomEdit(sectionsRef.current.find((x) => x.id === secId)!, editId, customItem, sellUntouched(d, cur), costUntouched(d, cur)) : null;
       setSections((ss) =>
         ss.map((x) => {
           const at = x.id === secId ? x.items.find((i) => i.id === editId) : undefined;
-          return at ? saveCustomEdit(x, editId, customItem, sellUntouched(d, at)).section : x;
+          return at ? saveCustomEdit(x, editId, customItem, sellUntouched(d, at), costUntouched(d, at)).section : x;
         }),
       );
       if (res?.anchor) {
         const nd = reanchorDocLine(packageDocRef.current, secId, res.anchor.lineKey, res.anchor.sku);
         if (nd) setPackageDoc(nd);
+        // The over-cap draft (restored on return to Build package) follows the same anchor.
+        const od = reanchorDocLine(packageDocOverDraft as PackageDoc | null, secId, res.anchor.lineKey, res.anchor.sku);
+        if (od) setPackageDocOverDraft(od);
       }
     } else pushItems(secId, [{ ...customItem, id: nextId() }]);
     closeInput(); // closing discards, so the draft reseed happens there
