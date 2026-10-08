@@ -56616,3 +56616,50 @@ async function p4CommentsAsyncChecks(): Promise<void> {
   const store = rd("src/lib/stores/quotes.ts");
   ok(store.includes("delete clean.reviewComments;") && (store.match(/doc\.reviewComments = /g) || []).length === 3, "#P4 comments (DB): only the add, resolve and delete writers assign doc.reviewComments in the store");
 }
+
+// ---- #P4 pure fix: the Labor table leaves alternates and option lines out of its totals ----
+function p4AltOptionChecks(): void {
+  const rate = p4MakeRate({});
+  const mob = { name: "Mob", nameCustom: false, tripType: "local", tripAuto: false, people: "2", days: "2", hoursPerDay: "8", otHrs: "0", sup: true, milesRT: "0", lift: false };
+  const draft = { discipline: "RIG", margin: "30", mobs: [mob], pmHrs: "0", pmAuto: false, shopHrs: "0", drfHrs: "0", drfAuto: false, misc: "0" } as unknown as P4Draft;
+  const calc = p4ComputeLabor(draft, rate);
+  const line = (o: Record<string, unknown>) => ({ id: 1, sku: "LAB-X", desc: "Labor", qty: 1, unit: "ea", cost: 0, price: 0, labor: true, ...o });
+  const base = {
+    id: "s-base", name: "Base", kind: "materials", items: [line({ id: 1, price: calc.totalPrice, laborGroup: "g1" })],
+    laborGroups: { g1: { draft, lines: 1 } },
+  } as unknown as P4Section;
+  const alt = {
+    id: "s-alt", name: "Alt Rigging", kind: "materials", alternate: true,
+    items: [line({ id: 2, price: calc.totalPrice, laborGroup: "g2" }), line({ id: 3, qty: 5, unit: "hr", cost: 10, price: 20 })],
+    laborGroups: { g2: { draft, lines: 1 } },
+  } as unknown as P4Section;
+  const only = p4LaborSummary([base], rate);
+  const both = p4LaborSummary([base, alt], rate);
+  ok(only.alternate === null && both.alternate !== null, "#P4 pure fix: no alternate system -> alternate bucket is null");
+  ok(both.groups.length === 1 && both.groups[0].id === "g1" && both.loose === null &&
+     both.totals.hours === only.totals.hours && both.totals.cost === only.totals.cost && both.totals.sell === only.totals.sell &&
+     both.crew.days === only.crew.days && both.crew.maxCrew === only.crew.maxCrew && both.crew.otHours === only.crew.otHours,
+    "#P4 pure fix: an alternate section's labor never reaches groups, loose, totals or crew");
+  const a = both.alternate!;
+  ok(a.groups.length === 1 && a.groups[0].id === "g2" && a.groups[0].alternate === true && a.groups[0].hours === only.groups[0].hours &&
+     a.loose !== null && a.loose.hours === 5 && a.loose.cost === 50 && a.loose.sell === 100 &&
+     a.totals.hours === only.groups[0].hours + 5 && Math.abs(a.totals.sell - (only.groups[0].sell + 100)) < 0.011,
+    "#P4 pure fix: alternate labor lands in the alternate bucket (group row flagged alternate, loose hr lines, own totals)");
+  ok(both.groups[0].alternate === undefined, "#P4 pure fix: main rows carry no alternate flag");
+
+  // Option lines are outside the totals: out of a group's sell and out of the loose row.
+  const withOpt = {
+    ...base,
+    items: [line({ id: 1, price: calc.totalPrice, laborGroup: "g1" }), line({ id: 4, price: 700, laborGroup: "g1", option: true }), line({ id: 5, qty: 3, unit: "hr", cost: 10, price: 20, option: true })],
+  } as unknown as P4Section;
+  const o = p4LaborSummary([withOpt], rate);
+  ok(Math.abs(o.groups[0].sell - calc.totalPrice) < 0.01 && o.groups[0].edited === false && o.loose === null && o.totals.hours === only.totals.hours,
+    "#P4 pure fix: an option-flagged line is excluded from a group's sell and from the loose row");
+  const optOnly = {
+    ...base,
+    items: [line({ id: 1, price: calc.totalPrice, laborGroup: "g1", option: true })],
+  } as unknown as P4Section;
+  const oo = p4LaborSummary([optOnly], rate).groups[0];
+  ok(oo.sell === 0 && oo.edited === true && oo.hours === only.groups[0].hours, "#P4 pure fix: a group whose configured lines are all optioned sells $0 and reads edited");
+}
+p4AltOptionChecks();
