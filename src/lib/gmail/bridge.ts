@@ -10,6 +10,7 @@ import {
   DEFAULT_DOMAIN,
   boxAddress,
   deriveStatus,
+  isAutoDeliverable,
   lastInbound,
   statusFromDirection,
   type CommMessage,
@@ -45,6 +46,7 @@ import {
   listThreadIds,
   modifyThread,
   sendRaw,
+  GmailTimeoutError,
   type GmailLabelEvent,
 } from "./api";
 import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
@@ -103,9 +105,15 @@ async function readQuotePdf(path: string): Promise<Buffer | null> {
   return "unavailable" in store ? null : store.read(path);
 }
 
+/** I1 — how a send threw: no answer in time ("timeout": Gmail may have
+ *  accepted it) vs anything else ("error"). */
+export function sendFailureKind(err: unknown): "timeout" | "error" {
+  return err instanceof GmailTimeoutError || (err as { name?: unknown } | null)?.name === "GmailTimeoutError" ? "timeout" : "error";
+}
+
 /**
  * Send every outbound message on the thread that hasn't been handed to Gmail
- * yet. Idempotent: a message carries `gmailId` once sent, so re-runs skip it.
+ * yet (and isn't held back — isAutoDeliverable). Idempotent: a message carries `gmailId` once sent, so re-runs skip it.
  * A queued (offline) message is left alone — flushOutbox() clears the queue
  * flag first, then dispatches.
  */
@@ -117,9 +125,10 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
   const info = await getConnectionInfo(key);
   if (!info) return;
 
-  const pending = (t.messages || []).filter(
-    (m) => m.direction === "out" && m.channel === "email" && !m.queued && !m.gmailId
-  );
+  // Final review (I1): a message held back with noAutoRetry (an estimate
+  // email that went out locally, was refused, or got no answer) is never
+  // pushed by a later send on the thread.
+  const pending = (t.messages || []).filter(isAutoDeliverable);
   if (!pending.length) return;
 
   const fromAddr = info.address || boxAddress(t.mailbox || "info", t.mailboxUser || undefined);
@@ -162,7 +171,14 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
       });
     } catch (err) {
       console.error("[gmail] send failed for", threadId, m.id, err);
-      // leave the message locally sent; a later flush retries it
+      // leave the message locally sent; a later flush retries it (unless the
+      // sender holds it back — noAutoRetry). Record HOW it failed: a timeout
+      // may have been accepted by Gmail (I1 "unknown").
+      const failure = sendFailureKind(err);
+      await patchDoc<CommThread>("comms", threadId, (d) => {
+        const target = (d.messages || []).find((x) => x.id === m.id);
+        if (target && !target.gmailId) target.sendFailure = failure;
+      }).catch((e: unknown) => console.error("[gmail] stamping the send failure failed", threadId, m.id, e));
     }
   }
 }

@@ -7,6 +7,27 @@ import { accessTokenFor } from "./connections";
  * Only the handful of endpoints the bridge needs are wrapped.
  */
 
+/**
+ * Estimator Phase 3 final review (I1) — Gmail didn't answer within the
+ * request timeout. Unlike a refusal (a non-2xx answer), the request may have
+ * been accepted: a send that ends this way is "unknown", never "failed", and
+ * is never sent again automatically. Thrown only for the Gmail call itself
+ * (after the access token is in hand), so a slow token refresh is an ordinary
+ * error.
+ */
+export class GmailTimeoutError extends Error {
+  constructor(path: string) {
+    super("Gmail API " + path + " → no answer in time");
+    this.name = "GmailTimeoutError";
+  }
+}
+
+/** An abort raised by the request's own timeout signal (fetch or body read). */
+export function isAbortError(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  return name === "TimeoutError" || name === "AbortError";
+}
+
 async function gapi<T>(
   mailboxKey: string,
   path: string,
@@ -14,21 +35,27 @@ async function gapi<T>(
 ): Promise<T> {
   const token = await accessTokenFor(mailboxKey);
   if (!token) throw new Error("Mailbox not connected: " + mailboxKey);
-  const res = await fetch(GMAIL_API_BASE + path, {
-    ...init,
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) {
-    throw new Error(
-      "Gmail API " + path + " → " + res.status + " " + (await res.text())
-    );
+  try {
+    const res = await fetch(GMAIL_API_BASE + path, {
+      ...init,
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json",
+        ...(init.headers || {}),
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+    // Gmail answered with a refusal: a definite failure, whatever the body read does.
+    if (!res.ok) {
+      throw new Error(
+        "Gmail API " + path + " → " + res.status + " " + (await res.text().catch(() => ""))
+      );
+    }
+    return (await res.json()) as T;
+  } catch (err) {
+    if (isAbortError(err)) throw new GmailTimeoutError(path);
+    throw err;
   }
-  return (await res.json()) as T;
 }
 
 /** Send a raw RFC-2822 message (base64url). Returns the created message +

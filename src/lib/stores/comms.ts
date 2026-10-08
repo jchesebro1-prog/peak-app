@@ -243,7 +243,29 @@ export type CommMessage = {
   /** #214 — set once that lazy Cc fetch has run (whether or not the
    *  message had a Cc), so it never runs twice. */
   ccFetched?: true;
+  /** Estimator Phase 3 final review (I1) — the Gmail bridge's last send of
+   *  this message threw: "timeout" (Gmail didn't answer in time — it may
+   *  have been accepted) or "error" (refused / couldn't be built). Cleared
+   *  by nothing; a later successful send stamps gmailId. */
+  sendFailure?: "timeout" | "error";
+  /** I1 — never handed to Gmail by a later send on the thread (the bridge
+   *  skips it). Stamped on an estimate email (or its inline reply) that did
+   *  not go out through Gmail, so a later reply can't silently push it —
+   *  with its PDF — to the customer. */
+  noAutoRetry?: true;
+  /** I1 — how that message left when it has no gmailId: "local" (Gmail not
+   *  connected), "failed" (Gmail refused it) or "unknown" (Gmail didn't
+   *  answer in time). Stamped together with noAutoRetry. */
+  deliveryNote?: OutboundDeliveryNote;
 };
+
+export type OutboundDeliveryNote = "local" | "failed" | "unknown";
+
+/** I1 — an outbound email the Gmail bridge may (still) send: not yet sent
+ *  (no gmailId), not queued offline, and not held back by noAutoRetry. */
+export function isAutoDeliverable(m: Pick<CommMessage, "direction" | "channel" | "queued" | "gmailId" | "noAutoRetry">): boolean {
+  return m.direction === "out" && m.channel === "email" && !m.queued && !m.gmailId && !m.noAutoRetry;
+}
 
 export type CommDraft = {
   to?: string;
@@ -1397,15 +1419,20 @@ export async function setDraftAttachments(
 }
 
 /** Newest un-sent draft thread linked to a given record (IDEAS #36 — clicking
- *  ✉ twice re-opens the same renewal draft instead of minting another). */
+ *  ✉ twice re-opens the same renewal draft instead of minting another).
+ *  Estimator Phase 3 final review (I3b) — `mailboxUser` narrows it to one
+ *  person's own (not deleted) drafts. */
 export async function findDraftByLink(
   type: string,
-  id: string
+  id: string,
+  opts: { mailboxUser?: string } = {}
 ): Promise<CommThread | null> {
   const list = await listDocs<CommThread>("comms");
+  const owner = (opts.mailboxUser || "").trim().toLowerCase();
   const matches = list.filter(
     (t) =>
-      t.status === "draft" && !!t.link && t.link.type === type && t.link.id === id
+      t.status === "draft" && !!t.link && t.link.type === type && t.link.id === id &&
+      (!owner || (!t.deleted && (t.mailboxUser || "").trim().toLowerCase() === owner))
   );
   matches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   return matches[0] || null;
@@ -1451,6 +1478,26 @@ export async function sendDraft(id: string, me?: string, opts: { stampAddresses?
     me,
     ...(opts.stampAddresses ? { to: d.to || "", cc: d.cc || "" } : {}),
   });
+}
+
+/**
+ * Estimator Phase 3 final review (I1) — stamp how the thread's latest
+ * outbound email left when it has no gmailId ("local" / "failed" /
+ * "unknown") and hold it back from every later bridge send (noAutoRetry).
+ * A message that did get a gmailId is left alone. Returns the stamped
+ * message id, or null (no thread / nothing to stamp).
+ */
+export async function holdLastOutbound(threadId: string, note: OutboundDeliveryNote): Promise<string | null> {
+  let stamped: string | null = null;
+  await patchDoc<CommThread>("comms", threadId, (t) => {
+    const outs = (t.messages || []).filter((m) => m.direction === "out" && m.channel === "email");
+    const m = outs[outs.length - 1];
+    if (!m || m.gmailId) return;
+    m.noAutoRetry = true;
+    m.deliveryNote = note;
+    stamped = m.id;
+  });
+  return stamped;
 }
 
 /** The Phase-2 "send" — alias of sendDraft (real Gmail bridge lands inside
