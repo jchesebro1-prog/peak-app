@@ -56328,4 +56328,52 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     const found = await live.findInboxDraft(QL, "Ann P3F");
     ok(found?.threadId === fixtureId(308, "p3f-d-ann") && found.createdAt === 100 && found.attachments[0]?.pdfPath === "quote-pdfs/x/rev-1.pdf", "#P3 final review (I3b, DB): the live findInboxDraft returns the draft's id, creation time and attachments");
   }
+
+  // ---- #P3 inbox hold: an estimate sent from its Inbox draft is held back when it didn't go through Gmail ----
+  {
+    const QH = fixtureId(308, "p3h-quote");
+    const base = { mailbox: "personal", mailboxUser: "Spec P3H Sender", archived: false, customerId: null, customer: "Spec fixture", contactName: "Pat", contactEmail: "pat@school.org", cc: "", channel: "email", assignedTo: "Spec P3H Sender", unread: false, subject: "Estimate", messages: [], createdAt: 1000, updatedAt: 1000 };
+    const draft = { to: "pat@school.org", cc: "", subject: "Estimate", body: "Hi" };
+    const TE = fixtureId(308, "p3h-estimate-draft");
+    const TN = fixtureId(308, "p3h-plain-draft");
+    await createFixture("comms", { ...base, id: TE, status: "draft", link: { type: "quote", id: QH, label: "EST" }, draft: { ...draft, attachments: [{ name: "EST.pdf", pdfPath: "quote-pdfs/x/rev-1.pdf" }] } } as never);
+    await createFixture("comms", { ...base, id: TN, status: "draft", link: { type: "quote", id: QH, label: "EST" }, draft: { ...draft, attachments: [{ name: "notes.txt" }] } } as never);
+
+    const acts = rd("src/app/(app)/inbox/actions.ts");
+    const fn = acts.slice(acts.indexOf("export async function composeSendAction("), acts.indexOf("export async function saveDraftAction("));
+    ok(fn.includes("const isEstimateDraft = d.id ? await isEstimateEmailDraft(d.id) : false;") && fn.indexOf("isEstimateEmailDraft(d.id)") < fn.indexOf("await sendDraft(d.id, me)") &&
+       fn.includes("if (isEstimateDraft) await holdEstimateIfNotGmail(id, connected);") && fn.indexOf("await sendDraft(d.id, me)") < fn.indexOf("holdEstimateIfNotGmail(id, connected)"),
+      "#P3 inbox hold: composeSendAction classifies the draft before sending, then holds a non-Gmail estimate email back");
+    ok(acts.includes('t.link?.type === "quote" && (t.draft?.attachments || []).some((a) => !!a.pdfPath)') && acts.includes("if (delivery !== \"gmail\") await holdOutbound(threadId, delivery);") &&
+       acts.includes("deliveryAfterSend(connected, () => getThread(threadId))"),
+      "#P3 inbox hold: only a quote-linked draft with a PDF by reference is held; the delivery and the hold reuse the Estimator send's helpers");
+
+    const prevGmail = process.env.GMAIL_ENABLED;
+    process.env.GMAIL_ENABLED = "false"; // never Gmail in the harness
+    try {
+      // The same steps composeSendAction runs, on the real comms store.
+      const sendLikeInbox = async (id: string, isEstimate: boolean) => {
+        await C.sendDraft(id, "Spec P3H Sender");
+        if (isEstimate) {
+          const delivery = await S.deliveryAfterSend(false, () => C.get(id));
+          if (delivery !== "gmail") await S.holdOutbound(id, delivery);
+        }
+        return delivery_of(id);
+      };
+      const delivery_of = async (id: string) => (await C.get(id))!.messages.filter((m) => m.direction === "out");
+      const est = await sendLikeInbox(TE, true);
+      ok(est.length === 1 && est[0].noAutoRetry === true && est[0].deliveryNote === "local" && !est[0].gmailId && !C.isAutoDeliverable(est[0]),
+        "#P3 inbox hold: an Inbox-sent estimate draft that went out local is stamped noAutoRetry + local — the bridge's filter skips it");
+      await C.reply(TE, { body: "Following up", me: "Spec P3H Sender" });
+      const afterEst = (await C.get(TE))!;
+      ok(afterEst.messages.filter(C.isAutoDeliverable).length === 1 && afterEst.messages.filter(C.isAutoDeliverable)[0].body === "Following up",
+        "#P3 inbox hold: after a later reply on that thread, only the reply is deliverable — the old estimate is not pushed");
+      const plain = await sendLikeInbox(TN, false);
+      ok(plain.length === 1 && !plain[0].noAutoRetry && plain[0].deliveryNote === undefined && C.isAutoDeliverable(plain[0]),
+        "#P3 inbox hold: a non-estimate Inbox draft is unaffected — it still flushes as before");
+    } finally {
+      if (prevGmail === undefined) delete process.env.GMAIL_ENABLED;
+      else process.env.GMAIL_ENABLED = prevGmail;
+    }
+  }
 }

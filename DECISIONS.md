@@ -9779,7 +9779,7 @@ stamped by the bridge as `sendFailure: "timeout"`) — Gmail may have accepted i
 estimate and create no follow-up task; the sender sees "Marked sent, but Gmail didn't accept the email — send it again from
 here." (re-send: "Gmail didn't accept the email — send it again from here.") or "Gmail didn't answer in time — check your
 Gmail Sent folder before sending again.", with no Inbox link (the Inbox has no resend). **No silent re-send:** every estimate
-email (and inline reply) that did not go through Gmail — local, failed or unknown — is stamped `noAutoRetry` + `deliveryNote`
+email, whether sent from the Estimator or from its Inbox draft (and every inline reply), that did not go through Gmail — local, failed or unknown — is stamped `noAutoRetry` + `deliveryNote`
 on its comms message, and the bridge's `deliverThreadOutbound` skips such messages (`isAutoDeliverable`), so a later reply or a
 later Gmail connection never pushes the estimate and its PDF on its own. Ordinary Inbox messages keep the old flush behaviour.
 Activity labels each email from its first outbound message: Sent through Gmail / Sent locally (Gmail not connected) / Gmail

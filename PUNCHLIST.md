@@ -11196,3 +11196,8 @@ signature and `{link}` line. Approve or reword.
 - The estimate PDF is read once to size it (no stored size on the PDF state).
 - The first-send cover has no link line (rendered before the link exists).
 - "Revise with these scopes ->" is parked for Phase 4.
+- Cover PDFs under `quote-pdfs/<id>/cover-*.pdf` are never cleaned up (like the revision PDFs).
+- Open in Inbox reuses the sender's existing draft without saying so (no "Opened your existing draft" toast) and ignores any
+  new composer inputs.
+- A tiny window remains between an Inbox- or Estimator-sent email going out and its hold-back stamp (`holdOutbound`): a send
+  landing in that gap could still push it. Best effort, logged on failure.

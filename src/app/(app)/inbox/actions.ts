@@ -55,6 +55,7 @@ import {
   statusFailureMessage,
 } from "@/lib/stores/quotes";
 import { estimateDraftIsCurrent, ESTIMATE_DRAFT_STALE } from "@/lib/estimate-email/compose";
+import { deliveryAfterSend, gmailConnectedFor, holdOutbound } from "@/lib/estimate-email/send-server";
 import {
   get as getFlameJob,
   setRenewalOutreach as setFlameRenewalOutreach,
@@ -439,6 +440,28 @@ async function staleEstimateDraft(id: string): Promise<string | null> {
   return estimateDraftIsCurrent(q, attachments) ? null : ESTIMATE_DRAFT_STALE;
 }
 
+/** A quote-linked draft carrying an estimate PDF by reference (Open in Inbox). */
+async function isEstimateEmailDraft(id: string): Promise<boolean> {
+  try {
+    const t = await getThread(id);
+    return !!t && t.status === "draft" && t.link?.type === "quote" && (t.draft?.attachments || []).some((a) => !!a.pdfPath);
+  } catch (e) {
+    console.error("[inbox] estimate draft lookup failed", id, e);
+    return false;
+  }
+}
+
+/** After an estimate email was sent from its Inbox draft: when it did not go through Gmail
+ *  (local / failed / unknown), hold it back from every later send. Best effort, logged. */
+async function holdEstimateIfNotGmail(threadId: string, connected: boolean): Promise<void> {
+  try {
+    const delivery = await deliveryAfterSend(connected, () => getThread(threadId));
+    if (delivery !== "gmail") await holdOutbound(threadId, delivery);
+  } catch (e) {
+    console.error("[inbox] holding the estimate email back failed", threadId, e);
+  }
+}
+
 export async function composeSendAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
@@ -451,12 +474,17 @@ export async function composeSendAction(d: ComposePayload) {
     const stale = await staleEstimateDraft(d.id);
     if (stale) return { ok: false as const, id: null, error: stale };
   }
+  // An estimate email (quote-linked draft carrying a PDF by reference) is held back from every
+  // later bridge send when it doesn't go out through Gmail (D661) — same rule as the Estimator's send.
+  const isEstimateDraft = d.id ? await isEstimateEmailDraft(d.id) : false;
+  const connected = isEstimateDraft ? await gmailConnectedFor(user.id) : true;
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   let id: string | null = null;
   if (d.id) {
     await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body });
     const rec = await sendDraft(d.id, me);
     id = rec ? rec.id : d.id;
+    if (isEstimateDraft) await holdEstimateIfNotGmail(id, connected);
     await completeRenewalOutreach(id, me);
   } else {
     const rec = await compose({
