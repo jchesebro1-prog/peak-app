@@ -29,6 +29,7 @@ import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { docIdFloor } from "@/lib/package-doc/ids";
+import { reanchorDocLine } from "@/lib/package-doc/reanchor";
 import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";
 import { docProductSkus } from "@/lib/package-doc/text";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
@@ -42,7 +43,7 @@ import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
 import { downloadCsv, fileStem } from "../design/export";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
-import { customDraftFromLine, isCustomLineEditable, replaceCustomLine } from "./custom-part-edit";
+import { customDraftFromLine, isCustomLineEditable, saveCustomEdit, sellUntouched } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
 import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/curtain-cut-sheets/vocab";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
@@ -92,7 +93,6 @@ const freshCustom = (): CustomDraft => ({
   link: "",
   allowance: "",
   addToCatalog: "",
-  specKey: "",
   sku: "",
   unit: "ea",
   qty: "1",
@@ -2224,8 +2224,13 @@ export function useEstimatorState(props: EstimatorProps) {
     const d = customDraft;
     const desc = (d.desc || "").trim();
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    const editId = customEdit?.lineId;
+    // #312: a typed 0 on an EDITED line stays 0 (a zero-quantity option); only an add defaults to 1.
     let qty = parseInt(d.qty, 10);
-    if (isNaN(qty) || qty < 1) qty = 1;
+    if (isNaN(qty) || qty < 0 || (qty === 0 && editId == null)) qty = 1;
+    // #312: the line may have been deleted while the form was open (or during the catalog save below).
+    const lineGone = () => editId != null && !sectionsRef.current.find((x) => x.id === secId)?.items.some((x) => x.id === editId);
+    const GONE = "That line was removed \u2014 nothing was changed.";
     let cost = parseFloat(d.cost);
     if (isNaN(cost) || cost < 0) cost = 0;
     const typedPrice = parseFloat(d.price);
@@ -2233,6 +2238,10 @@ export function useEstimatorState(props: EstimatorProps) {
       ? round2(cost / (1 - margin))
       : typedPrice;
     if (!desc || !Number.isFinite(price) || price <= 0) return;
+    if (lineGone()) {
+      setCustomError(GONE);
+      return;
+    }
     let savedMessage: string | undefined;
     if (d.addToCatalog && !d.allowance) {
       const catalogSku = (d.sku || "").trim();
@@ -2268,7 +2277,10 @@ export function useEstimatorState(props: EstimatorProps) {
         setSavingCustom(false);
       }
     }
-    const editId = customEdit?.lineId;
+    if (lineGone()) {
+      setCustomError(GONE);
+      return;
+    }
     const customItem: SpecItem = {
         id: editId ?? 0,
         sku: d.allowance ? "" : ((d.sku || "").trim() || "CUSTOM"),
@@ -2283,11 +2295,21 @@ export function useEstimatorState(props: EstimatorProps) {
         priceGoodThrough: d.priceGoodThrough || undefined,
         link: (d.link || "").trim() || undefined,
         allowance: d.allowance ? true : undefined,
-        specKey: d.specKey || undefined,
     };
-    // #312: Save changes replaces the line in place; a line deleted meanwhile adds fresh.
-    if (editId != null && sections.find((x) => x.id === secId)?.items.some((x) => x.id === editId)) {
-      setSections((ss) => ss.map((x) => (x.id === secId ? replaceCustomLine(x, editId, customItem) : x)));
+    // #312: Save changes replaces the line in place; the ★ and any document blocks follow a changed anchor.
+    if (editId != null) {
+      const cur = sectionsRef.current.find((x) => x.id === secId)?.items.find((x) => x.id === editId);
+      const res = cur ? saveCustomEdit(sectionsRef.current.find((x) => x.id === secId)!, editId, customItem, sellUntouched(d, cur)) : null;
+      setSections((ss) =>
+        ss.map((x) => {
+          const at = x.id === secId ? x.items.find((i) => i.id === editId) : undefined;
+          return at ? saveCustomEdit(x, editId, customItem, sellUntouched(d, at)).section : x;
+        }),
+      );
+      if (res?.anchor) {
+        const nd = reanchorDocLine(packageDocRef.current, secId, res.anchor.lineKey, res.anchor.sku);
+        if (nd) setPackageDoc(nd);
+      }
     } else pushItems(secId, [{ ...customItem, id: nextId() }]);
     closeInput(); // closing discards, so the draft reseed happens there
     return savedMessage;
