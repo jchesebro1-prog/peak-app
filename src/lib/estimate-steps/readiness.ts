@@ -22,6 +22,8 @@ export type ReadinessInput = {
   review: { label: string; tone: NextStepTone } | null;
   status: QuoteStatus;
   revNum: number;
+  /** Phase 3: client-link opens and unread replies on the sent estimate's emails. */
+  track?: { opens: number; newReplies: number };
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -63,7 +65,14 @@ function reviewBadge(review: ReadinessInput["review"]): StepBadge {
 }
 
 function sendBadge(i: ReadinessInput): StepBadge {
-  if (i.status === "sent") return { state: "ok", label: `Sent · Rev ${i.revNum}` };
+  if (i.status === "sent") {
+    const opens = i.track?.opens ?? 0;
+    const replies = i.track?.newReplies ?? 0;
+    let label = `Sent · Rev ${i.revNum}`;
+    if (opens > 0) label += ` · 👁 ${opens}`;
+    if (replies > 0) label += ` · ${replies} new ${replies === 1 ? "reply" : "replies"}`;
+    return { state: "ok", label };
+  }
   if (i.status === "won") return { state: "ok", label: "Won" };
   if (i.status === "lost") return { state: "idle", label: "Lost" };
   return { state: "idle", label: i.review?.tone === "approved" ? "Ready to send" : "—" };

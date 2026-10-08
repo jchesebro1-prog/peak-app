@@ -55997,3 +55997,21 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(server.includes("export const SEND_COPY") && actions.includes("r.error === SEND_COPY.changedSince") && (actions.match(/if \(!r\.ok && !r\.markedSent && !isStaleRefusal\(r\)\) return r;/g) || []).length === 2,
     "#P3 send UI fix: both send actions attach the fresh view to the stale-version refusal");
 }
+
+// ---- #P3 badge: the Send badge shows opens and new replies ----
+import { estimateReadiness as p3Ready } from "@/lib/estimate-steps/readiness";
+{
+  const base = { saved: true, sections: [], review: null, revNum: 2 };
+  const sentLabel = (track?: { opens: number; newReplies: number }, status: "sent" | "draft" | "won" | "lost" = "sent") => p3Ready({ ...base, status, track }).send.label;
+  ok(sentLabel() === "Sent · Rev 2", "#P3 badge: no track → unchanged");
+  ok(sentLabel({ opens: 0, newReplies: 0 }) === "Sent · Rev 2", "#P3 badge: zero track → unchanged");
+  ok(sentLabel({ opens: 3, newReplies: 0 }) === "Sent · Rev 2 · 👁 3", "#P3 badge: opens only");
+  ok(sentLabel({ opens: 0, newReplies: 1 }) === "Sent · Rev 2 · 1 new reply", "#P3 badge: one new reply is singular");
+  ok(sentLabel({ opens: 0, newReplies: 2 }) === "Sent · Rev 2 · 2 new replies", "#P3 badge: replies plural");
+  ok(sentLabel({ opens: 1, newReplies: 2 }) === "Sent · Rev 2 · 👁 1 · 2 new replies", "#P3 badge: opens and replies together");
+  ok(sentLabel({ opens: 5, newReplies: 3 }, "draft") === "—" && sentLabel({ opens: 5, newReplies: 3 }, "won") === "Won" && sentLabel({ opens: 5, newReplies: 3 }, "lost") === "Lost", "#P3 badge: track only changes the sent label");
+  const sent = p3Ready({ ...base, status: "sent", track: { opens: 1, newReplies: 1 } }).send;
+  ok(sent.state === "ok", "#P3 badge: state stays ok");
+  const cl = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(cl.includes("track: s.trackSummary ?? undefined") && cl.includes("s.revNum, s.trackSummary]"), "#P3 badge: the client passes the hook's trackSummary into the readiness");
+}
