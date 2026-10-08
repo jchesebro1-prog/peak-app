@@ -103,7 +103,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
             src={preview.src}
             alt={name}
             draggable={false}
-            style={{ display: "block", width: "100%", maxHeight: img.align === "full" ? "4in" : "2.4in", objectFit: "contain" }}
+            style={{ display: "block", width: "100%", maxHeight: img.align === "full" ? "4in" : "2.4in", objectFit: "contain", objectPosition: img.align === "left" ? "left top" : img.align === "right" ? "right top" : "center top" }}
           />
         ) : (
           <div

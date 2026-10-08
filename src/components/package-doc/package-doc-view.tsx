@@ -130,7 +130,11 @@ function ProductImage({ b }: { b: RImage }) {
   return (
     <div className="pd-image" data-sku={b.sku}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={b.photo.src} alt={b.photo.alt} style={photoStyle(b.photo)} />
+      <img
+        src={b.photo.src}
+        alt={b.photo.alt}
+        style={{ ...photoStyle(b.photo), objectPosition: b.photo.align === "left" ? "left top" : b.photo.align === "right" ? "right top" : "center top" }}
+      />
     </div>
   );
 }
