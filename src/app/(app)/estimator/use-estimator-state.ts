@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
+import { listReviewCommentsAction } from "./review-actions";
+import type { ReviewComment } from "@/lib/estimate-review/comments";
 import { fillClientGoals } from "@/lib/estimate-output/goals";
 import { addGroup, groupBlocks, moveGroupBy, moveSystemBy, moveSystemTo, newGroupId, normalizeSystemOrder, removeGroup, renameGroup, setGroupAlternate, unmarkEdited, withoutBuilt, type SystemGroup } from "@/lib/estimate-groups/groups";
 import type { Dispatch, SetStateAction } from "react";
@@ -287,6 +289,36 @@ export function useEstimatorState(props: EstimatorProps) {
    *  unread customer replies here (null until it has loaded); the Send tab
    *  badge reads it. */
   const [trackSummary, setTrackSummary] = useState<{ opens: number; newReplies: number } | null>(null);
+  /** Phase 4 (spec §11.3) — the SAVED quote's review comments (all of them,
+   *  oldest first; store-owned, never part of a Save). Read once per saved
+   *  quote; the Customer review sidebar (and Task 5's pins) replace it with
+   *  each action's fresh list. `seq` drops a read that a newer read or a
+   *  mutation's result has overtaken. */
+  const [reviewComments, setReviewCommentsState] = useState<ReviewComment[]>([]);
+  const reviewSeqRef = useRef(0);
+  const setReviewComments = useCallback((list: ReviewComment[]) => {
+    reviewSeqRef.current += 1;
+    setReviewCommentsState(list);
+  }, []);
+  const refreshReviewComments = useCallback(async () => {
+    if (!loadedId) return;
+    const seq = ++reviewSeqRef.current;
+    try {
+      const r = await listReviewCommentsAction(loadedId);
+      if (seq === reviewSeqRef.current && r.ok) setReviewCommentsState(r.comments);
+    } catch {
+      /* the list keeps what it had; the next action answers with a fresh one */
+    }
+  }, [loadedId]);
+  useEffect(() => {
+    if (!loadedId) return;
+    const seq = ++reviewSeqRef.current;
+    listReviewCommentsAction(loadedId)
+      .then((r) => {
+        if (seq === reviewSeqRef.current && r.ok) setReviewCommentsState(r.comments);
+      })
+      .catch(() => undefined);
+  }, [loadedId]);
   /* Daylite stage bar (Task 6) — quoteType never changes client-side (no UI
      changes it), so it stays a plain const rather than state. */
   const quoteType = initial.quoteType;
@@ -2871,6 +2903,9 @@ export function useEstimatorState(props: EstimatorProps) {
     wonMetaGuard,
     trackSummary,
     setTrackSummary,
+    reviewComments,
+    setReviewComments,
+    refreshReviewComments,
     next,
   };
 }

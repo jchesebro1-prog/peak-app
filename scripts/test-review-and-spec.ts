@@ -377,9 +377,12 @@ const ESTIMATOR_FILES = [
   "steps/send-step.tsx",
   "steps/send-composer.tsx",
   "steps/send-activity.tsx",
+  "steps/review-tabs.tsx",
+  "steps/review-sidebar.tsx",
 ];
 const PREVIEW_FILES = [
   "preview-doc.tsx", "steps/package-step.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
+  "steps/review-tabs.tsx", "steps/review-sidebar.tsx",
 ];
 const readJoined = (files: string[]) =>
   files
@@ -53954,7 +53957,9 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
     "#305 steps: Build holds the systems sidebar, cards, modals and Rewards credit — not Tasks");
   ok(pkg.includes("<NarrativeColumn") && pkg.includes("<PdfOptionsPanel") && pkg.includes("<CoverPackagePanel") && pkg.includes('section="package"'),
     "#305 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
-  ok(review.includes("<PdfPreviewPane") && review.includes("<ReviewCostSummary") && review.includes('variant="panel"'),
+  // Phase 4: the desktop tabs and sidebar moved into review-tabs.tsx / review-sidebar.tsx.
+  const reviewAll = review + st("review-tabs.tsx") + st("review-sidebar.tsx");
+  ok(reviewAll.includes("<PdfPreviewPane") && reviewAll.includes("<ReviewCostSummary") && review.includes('variant="panel"') && review.includes("<ReviewSidebar") && review.includes("<ReviewTabs"),
     "#305 steps: Customer review holds the PDF, the cost summary and the review actions");
   ok(send.includes("<ClientLinkPanel") && send.includes("withPackage={false}") && send.includes('section="responses"') && send.includes("<TasksCard") && send.includes("changeStatus(") && send.includes("stageBarPipeline"),
     "#305 steps: Send & track holds status, the client link + revisions, responses, tasks and the pipeline");
@@ -56010,7 +56015,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(step.includes("id={SEND_STEP_IDS.status}") && step.includes("id={SEND_STEP_IDS.statusSelect}") && step.includes("id={SEND_STEP_IDS.clientLink}"), "#P3 send UI: the hatches' targets carry their ids");
   ok(step.includes("<SendActivity quoteId={loadedId} refreshKey={trackKey} onTrack={setTrackSummary} />") && step.includes("onSent={() => setTrackKey((k) => k + 1)}"), "#P3 send UI: a send refreshes Activity; Activity reports to the hook");
   ok(/onSync=\{\(r, action\) => \{\s+applySync\(r\);\s+if \(r\.ok\) \{[\s\S]{0,120}onActed\(action\);/.test(step), "#P3 send UI: the Status panel's QuoteNextStep still moves steps only on r.ok");
-  ok(/trackSummary,\s+setTrackSummary,\s+next,\s+\};\s+\}/.test(hook) && hook.includes("useState<{ opens: number; newReplies: number } | null>(null)"), "#P3 send UI: the hook holds trackSummary (next stays last in its return)");
+  ok(/trackSummary,\s+setTrackSummary,\s+(?:[A-Za-z]+,\s+){0,6}next,\s+\};\s+\}/.test(hook) && hook.includes("useState<{ opens: number; newReplies: number } | null>(null)"), "#P3 send UI: the hook holds trackSummary (next stays last in its return)");
   ok(act.includes("sendTrackAction(quoteId)") && act.includes('window.addEventListener("focus", refresh)') && act.includes("}, [quoteId, refreshKey]);"), "#P3 send UI: Activity reads on mount, on window focus and after a send");
   ok(act.includes("onTrackRef.current({ opens, newReplies: newRepliesOf(emails) })"), "#P3 send UI: Activity lifts opens + new replies to the shell");
   ok(/e\.textHidden \? \(\s*<div[^>]*>\{SEND_UI_COPY\.textHidden\(e\.ownerName\)\}/.test(act), "#P3 send UI: hidden text shows the explanation instead of messages");
@@ -56739,7 +56744,7 @@ function p4PreviewChecks(): void {
   const PAGE = "src/app/estimator-preview/[id]/page.tsx";
   ok(existsSync(join(process.cwd(), PAGE)) && !existsSync(join(process.cwd(), "src/app/(app)/estimator-preview")), "#P4 preview: the route lives outside the (app) group (no Nav)");
   const page = rd(PAGE);
-  ok(page.includes("await requireUser();") && page.indexOf("await requireUser();") < page.indexOf("await getQuote(") && page.includes("if (!q || estimatorShouldRedirect(q)) notFound();"),
+  ok(page.includes("await requireUser();") && page.indexOf("await requireUser();") < page.indexOf("await getQuote(") && page.includes('if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();'),
     "#P4 preview: signed-in only, and a missing or non-Estimator quote is a 404");
   ok(!/OpenBeacon|ScopeSelection|QuestionForm|package-slots|\/share\/|sharePath|zipHref/.test(page) && page.includes("PREVIEW_COPY.actionsNote") &&
      p4pCopy.actionsNote === "Client scope choices and questions appear here on the client's page.",
@@ -56780,3 +56785,116 @@ function p4PreviewChecks(): void {
   ok(["package", "bom", "cutsheets"].every((t) => smoke.includes(`{ route: "/estimator-preview/Q-2041?tab=${t}" }`)), "#P4 preview: the smoke run requests all three preview tabs");
 }
 p4PreviewChecks();
+
+// ---- #P4 review UI: the Customer review step's tabs, sidebar and comments ----
+import * as p4r from "@/lib/estimate-review/review-ui";
+import { quoteNextStep as p4rNextStep } from "@/lib/quote-next-step";
+import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/estimate-review/comments";
+{
+  const C = p4r.REVIEW_UI_COPY;
+  // Exact copy (constraints).
+  ok(p4r.REVIEW_TABS.map((t) => p4r.REVIEW_TAB_LABEL[t]).join("|") === "Document|Package page|BOM|Cut sheets|Datasheets|Drawings",
+    "#P4 review UI: tabs read Document, Package page, BOM, Cut sheets, Datasheets, Drawings — in that order");
+  ok(p4r.REVIEW_DEVICES.map((d) => p4r.REVIEW_DEVICE_LABEL[d]).join("|") === "Desktop|Phone", "#P4 review UI: the frame toggle reads Desktop / Phone");
+  ok(C.unsaved === "Unsaved changes — Save to refresh what the client sees." && C.saveFirst === "Save the estimate first.",
+    "#P4 review UI: the unsaved banner and the save-first note are exact");
+  ok(C.internalOnly === "Internal only" && C.labor === "Labor" && C.checklist === "Package checklist" && C.comments === "Comments" &&
+     C.wholeEstimate === "Whole estimate" && C.addComment === "Add comment" && C.resolve === "Resolve" && C.delete === "Delete" && C.edited === "edited",
+    "#P4 review UI: sidebar titles, Whole estimate, Add comment, Resolve, Delete and the edited marker are exact");
+
+  // Framed tabs: src + width + key.
+  ok(p4r.frameSrc("Q-2041", "package") === "/estimator-preview/Q-2041?tab=package" && p4r.frameSrc("Q-2041", "bom") === "/estimator-preview/Q-2041?tab=bom" &&
+     p4r.frameSrc("Q-2041", "cutsheets") === "/estimator-preview/Q-2041?tab=cutsheets",
+    "#P4 review UI: Package page / BOM / Cut sheets frame /estimator-preview/<id>?tab=package|bom|cutsheets");
+  ok(p4r.frameSrc("Q-2041", "document") === null && p4r.frameSrc("Q-2041", "datasheets") === null && p4r.frameSrc("Q-2041", "drawings") === null &&
+     p4r.frameSrc(null, "package") === null && p4r.frameSrc("", "bom") === null,
+    "#P4 review UI: Document / Datasheets / Drawings aren't framed, and an unsaved quote frames nothing");
+  ok(p4r.frameWidth("desktop") === "100%" && p4r.frameWidth("phone") === "390px" && p4r.PHONE_FRAME_WIDTH === 390, "#P4 review UI: the frame is 100% wide on Desktop, 390 px on Phone");
+  ok(p4r.frameKey("bom", 1, 2) !== p4r.frameKey("bom", 3, 2) && p4r.frameKey("bom", 1, 2) !== p4r.frameKey("bom", 1, 5) && p4r.frameKey("bom", 1, 2) === p4r.frameKey("bom", 1, 2),
+    "#P4 review UI: the frame remounts after a Save (pdf.savedAt) or a status change (asOf), not otherwise");
+  ok(p4r.tabNeedsSave("document") === false && ["package", "bom", "cutsheets", "datasheets", "drawings"].every((t) => p4r.tabNeedsSave(t as p4r.ReviewTab)),
+    "#P4 review UI: every tab but Document needs a saved quote");
+
+  // Send back: label pluralisation, enablement, visibility.
+  ok(p4r.sendBackLabel(0) === "Send back with 0 comments" && p4r.sendBackLabel(1) === "Send back with 1 comment" && p4r.sendBackLabel(3) === "Send back with 3 comments",
+    "#P4 review UI: Send back with N comment(s) pluralises exactly");
+  ok(!p4r.sendBackEnabled(0, "") && !p4r.sendBackEnabled(0, "   ") && p4r.sendBackEnabled(0, "fix the rigging") && p4r.sendBackEnabled(2, ""),
+    "#P4 review UI: Send back is disabled with no open comments and no typed text");
+  const nsIn: Parameters<typeof p4rNextStep>[0] = { status: "draft", review: { state: "in_review", reviewer: null, submittedBy: "Sam Est", decidedBy: null, note: "" }, holds: true, chip: null,
+    owner: "Sam Est", viewer: "Jeff Boss", viewerCanApprove: true, viewerCanCreate: true, viewerCanSend: true, submittedAgo: "", reviewers: [] };
+  ok(p4r.canSendBackFromReview(p4rNextStep({ ...nsIn, review: { ...nsIn.review! } })) === true, "#P4 review UI: an approver on a quote in review gets Send back");
+  ok(p4r.canSendBackFromReview(p4rNextStep({ ...nsIn, review: { ...nsIn.review! }, viewerCanApprove: false })) === false &&
+     p4r.canSendBackFromReview(p4rNextStep({ ...nsIn, review: { ...nsIn.review! }, viewer: "Sam Est" })) === false &&
+     p4r.canSendBackFromReview(p4rNextStep({ ...nsIn, review: null })) === false && p4r.canSendBackFromReview(null) === false,
+    "#P4 review UI: no Send back for a non-approver, the owner, a quote not in review, or no view");
+
+  // The note: built by sendBackNote from the open comments, numbered like the list.
+  const secs = [{ id: "s1", name: "Rigging" }, { id: "s2", name: "Lighting" }];
+  const cm = (id: string, sectionId: string | null, at: number, body: string, extra: Record<string, unknown> = {}) => ({ id, sectionId, body, by: "Jeff Boss", at, ...extra });
+  const list = [cm("c1", "s2", 3, "Swap the dimmer"), cm("c2", null, 5, "Check terms"), cm("c3", "s1", 1, "Load math", { resolvedAt: 9, resolvedBy: "Sam Est" }), cm("c4", "s1", 2, "Add a\nhoist")];
+  ok(p4rNote(list, secs, "  Thanks  ") === "3 comments to address:\n1. Whole estimate — Check terms\n2. Rigging — Add a hoist\n3. Lighting — Swap the dimmer\n\nThanks" &&
+     p4r.sendBackLabel(p4rNumber(list, secs).length) === "Send back with 3 comments",
+    "#P4 review UI: the send-back note lists the open comments numbered (Whole estimate first, system order) then the extra text, and the button counts the same 3");
+
+  // Labor crew line, checklist, datasheet cells, comment targets.
+  ok(p4r.crewLine({ maxCrew: 4, days: 6, otHours: 20 }) === "Crew up to 4 · 6 days · 20 OT hrs" && p4r.crewLine({ maxCrew: 0, days: 1.5, otHours: 0 }) === "Crew up to 0 · 1.5 days · 0 OT hrs",
+    "#P4 review UI: the crew line reads Crew up to N · N days · N OT hrs");
+  const ck = p4r.checklistRows(["2 parts without a datasheet", "No drawings"], { state: "gaps", label: "3 gaps" });
+  ok(ck.map((r) => r.text).join("|") === "2 parts without a datasheet|No drawings|Build package: 3 gaps" && ck.every((r) => !r.ok),
+    "#P4 review UI: the Package checklist lists the saved package's gaps, then the Build package badge's gaps");
+  ok(p4r.checklistRows([], { state: "ok", label: "✓ Ready" }).map((r) => `${r.ok}:${r.text}`).join() === "true:Nothing missing." &&
+     p4r.checklistRows(null, { state: "ok", label: "✓ Ready" }).length === 0,
+    "#P4 review UI: no gaps and a ready badge → Nothing missing. (nothing claimed before the package has loaded)");
+  const ds = (o: Partial<{ datasheet: { href: string; name: string } | null; datasheetCoveredBy: string[]; datasheetOk: boolean }>) =>
+    p4r.datasheetCell({ datasheet: null, datasheetCoveredBy: [], datasheetOk: false, ...o });
+  const own = ds({ datasheet: { href: "/api/part-documents/PD-1", name: "ds.pdf" }, datasheetOk: true });
+  ok(own.kind === "link" && own.href === "/api/part-documents/PD-1" && JSON.stringify(ds({ datasheetOk: true, datasheetCoveredBy: ["FIX-1", "FIX-2"] })) === JSON.stringify({ kind: "note", text: "covered by FIX-1, FIX-2" }) &&
+     JSON.stringify(ds({ datasheetOk: true })) === JSON.stringify({ kind: "note", text: "not needed" }) && ds({}).kind === "missing",
+    "#P4 review UI: a Datasheets cell is its own document, covered by …, not needed, or Missing");
+  const tg = p4r.commentTargets([{ id: "s1", name: "Rigging" }, { id: "s2", name: " " }]);
+  ok(tg.map((o) => `${o.value}=${o.label}`).join("|") === "=Whole estimate|s1=Rigging|s2=Untitled system", "#P4 review UI: the comment target select offers Whole estimate first, then the systems in order");
+
+  // Source pins.
+  const r4 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const tabs = r4(`${EST_DIR}/steps/review-tabs.tsx`);
+  const side = r4(`${EST_DIR}/steps/review-sidebar.tsx`);
+  const step = r4(`${EST_DIR}/steps/review-step.tsx`);
+  const hook = r4(`${EST_DIR}/use-estimator-state.ts`);
+  ok(/<iframe\s+key=\{frameKey\(tab, pdf\?\.savedAt, next\?\.asOf\)\}\s+src=\{src\}\s+title=\{/.test(tabs) && tabs.includes("width: frameWidth(device)") && tabs.includes("const src = frameSrc(loadedId, tab);") &&
+     (!/sandbox=/.test(tabs) || /sandbox="[^"]*allow-same-origin[^"]*"/.test(tabs) && /allow-downloads/.test(tabs)),
+    "#P4 review UI: the framed tabs are an iframe keyed on the saved version, titled, sized by the device, never sandboxed without downloads");
+  ok(/\{framed && \(\s*<div role="group"/.test(tabs) && tabs.includes("REVIEW_DEVICE_LABEL[d]"), "#P4 review UI: the Desktop / Phone toggle shows only on a framed tab");
+  ok(/\{pdfDirty && tab !== "document" && \(/.test(tabs) && tabs.includes("{COPY.unsaved}") && /tabNeedsSave\(tab\) && !loadedId\) \{\s*body = <p style=\{NOTE\}>\{COPY\.saveFirst\}<\/p>;/.test(tabs),
+    "#P4 review UI: unsaved edits show the banner (Document keeps its own Save), and an unsaved quote reads Save the estimate first.");
+  ok(tabs.includes("<PdfPreviewPane") && tabs.includes("actionsInline={!phone}") && tabs.includes("onSave={doSave}") && (tabs.match(/target="_blank" rel="noopener noreferrer"/g) || []).length >= 2,
+    "#P4 review UI: Document is the existing PDF pane; Datasheets / Drawings links open in a new tab");
+  ok(step.includes("reviewDocsAction(loadedId)") && /\}, \[phone, loadedId, savedAt, asOf\]\);/.test(step) && /\{phone \? \(\s*<PdfPreviewPane/.test(step) &&
+     step.includes("<ReviewTabs s={s} docs={loadedId ? docs : null} />") && step.includes("estimateReadiness(") && step.includes("}).package,"),
+    "#P4 review UI: the step reads the docs once (re-read after a Save / status change) for both tabs and checklist; a phone keeps the plain PDF");
+  ok(/savedOnly=\{pdfDirty\}\s+disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/.test(side) && side.includes("onActed(action);"),
+    "#P4 review UI: the sidebar's QuoteNextStep keeps its wiring (savedOnly, disabled, beforeAction, onActed on ok)");
+  const sb = side.slice(side.indexOf("function SendBackWithComments"), side.indexOf("function LaborTable"));
+  ok(sb.includes("nsSendBackAction(loadedId, sendBackNote(reviewComments, sections, extra), next.asOf)") && /applySync\(r\);\s*if \(r\.ok\) \{[\s\S]{0,160}onActed\("sendBack"\);/.test(sb) &&
+     sb.includes("sendBackEnabled(openCount, extra)") && sb.includes("sendBackLabel(openCount)") && side.includes("{loadedId && canSendBackFromReview(next) && <SendBackWithComments"),
+    "#P4 review UI: Send back posts sendBackNote(open comments, systems, extra) at the shown asOf, syncs, and moves on only on success");
+  ok(side.includes("laborSummary(sections, rate)") && side.includes("crewLine(sum.crew)") && side.includes("{g.edited && <span") && side.includes("COPY.alternates") &&
+     side.includes("<ReviewCostSummary sections={sections} totals={t} />") && side.includes("checklistRows(gaps, packageBadge)"),
+    "#P4 review UI: the sidebar shows the cost summary, the Labor table (edited marker, alternates, crew line) and the Package checklist");
+  ok(side.includes("const mayAdd = canAddComment(viewerRoles);") && side.includes("{mayAdd && (") && side.includes("{canResolve(viewerRoles, c) && (") &&
+     side.includes("{canDelete(viewerRoles, c, viewerName) && (") && side.includes("addReviewCommentAction(loadedId, target || null, body)") &&
+     side.includes("setReviewComments(r.comments)") && side.includes("<details>") && side.includes("commentTargets(sections)"),
+    "#P4 review UI: comments — add form for create/send/approve, Resolve for create, Delete for the author or an approver, resolved collapsed");
+  ok(r4(`${EST_DIR}/page.tsx`).includes("viewerRoles={user.roles}") && r4(`${EST_DIR}/types.ts`).includes("viewerRoles: string[];"), "#P4 review UI: the Estimator gets the viewer's roles for the comment rules");
+  ok(/reviewComments,\s+setReviewComments,\s+refreshReviewComments,\s+next,\s+\};\s+\}/.test(hook) && hook.includes("listReviewCommentsAction(loadedId)") && (hook.match(/reviewSeqRef\.current \+= 1;/g) || []).length === 1,
+    "#P4 review UI: the hook owns the comments (load once per saved quote, a mutation overtakes a read) with next still last");
+  for (const [name, src] of [["review-tabs", tabs], ["review-sidebar", side], ["review-step", step]] as const)
+    ok(!/\.components|customerLines\(|window\.print|est-doc|reviewBarOpen/.test(src) && !/from "@\/lib\/(stores|db)\//.test(src.replace(/import type [^\n]+\n/g, "")),
+      `#P4 review UI: ${name}.tsx stays clear of the pinned hazards and store/db value imports`);
+
+  // One "system estimate" rule across the preview page, the staff file route and reviewDocsAction (the print route's).
+  const rule = 'pdfKindForQuoteType(q.quoteType) !== "quote"';
+  const pg = r4("src/app/estimator-preview/[id]/page.tsx");
+  ok(pg.includes(rule) && !pg.includes("estimatorShouldRedirect") && r4("src/app/api/quotes/[id]/package-files/[fileId]/route.ts").includes(rule) &&
+     r4(`${EST_DIR}/review-actions.ts`).includes(rule) && r4("src/app/print/quote/[id]/page.tsx").includes(rule),
+    "#P4 review UI: the preview page, the staff file route and reviewDocsAction share the print route's system-estimate rule");
+}

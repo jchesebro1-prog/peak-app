@@ -9,7 +9,7 @@ import PackageView, { type PackageSlots } from "@/components/estimate-output/pac
 import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
 import { liveQuoteDocumentProps, loadLivePackagePreview } from "@/lib/estimate-output/package-live-loader";
 import { PREVIEW_COPY, previewTab, type StaffPackageExtras } from "@/lib/estimate-output/package-preview";
-import { estimatorShouldRedirect } from "@/lib/quote-links";
+import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { onlineView } from "@/lib/quote-share/view";
 import { requireUser } from "@/lib/session";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -26,9 +26,9 @@ const EMPTY_CARD = { background: "#fff", border: "1px solid #e4e7ec", borderRadi
  * Estimator Phase 4 (spec §11.1) — `/estimator-preview/[id]?tab=package|bom|cutsheets`:
  * the SAVED system estimate as the client gets it, framed by the Customer
  * review step (a SAMEORIGIN frame exception in next.config.ts, this path
- * only). Staff-only (requireUser); a missing quote or one the Estimator
- * doesn't build is a 404. The package page comes from the live quote through
- * the pure package model — no token, no open beacon, no client actions (an
+ * only). Staff-only (requireUser); a missing quote or one that isn't a
+ * system estimate (pdfKindForQuoteType, the print route's rule) is a 404.
+ * The package page comes from the live quote through the pure package model — no token, no open beacon, no client actions (an
  * inert note stands in for them), datasheet / plan links to staff routes and
  * no zip. BOM = the online estimate's BOM view; Cut sheets = the Client style.
  */
@@ -42,7 +42,8 @@ export default async function EstimatorPreviewPage({
   await requireUser();
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const q = await getQuote(id);
-  if (!q || estimatorShouldRedirect(q)) notFound();
+  // One "system estimate" rule with the staff file route, reviewDocsAction and the print route.
+  if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
   const tab = previewTab(sp.tab);
 
   if (tab === "cutsheets") {

@@ -1,17 +1,25 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
+import { estimateReadiness } from "@/lib/estimate-steps/readiness";
+import { REVIEW_UI_COPY } from "@/lib/estimate-review/review-ui";
 import { PdfPreviewPane } from "../preview-doc";
 import { ClientLinkPanel } from "../client-link-panel";
 import { CoverPackagePanel } from "../cover-package-panel";
-import { ReviewCostSummary } from "../review-cost-summary";
+import { reviewDocsAction, type ReviewDocsResult } from "../review-actions";
 import type { EstimatorState } from "../use-estimator-state";
+import { ReviewSidebar } from "./review-sidebar";
+import { ReviewTabs } from "./review-tabs";
 
 /**
- * #305 — Customer review: the saved customer PDF (main), the review actions
- * and the internal cost summary (right, desktop). A phone shows the PDF,
- * the approver's decision when one is waiting, and the read-only cover and client link blocks.
+ * #305 — Customer review. Desktop (Phase 4, spec §11): the client's-eye tabs
+ * (review-tabs.tsx — Document = the saved PDF, the framed package page / BOM /
+ * cut sheets, Datasheets, Drawings) and the internal sidebar (review-sidebar.tsx —
+ * the review actions, cost, Labor, Package checklist, Comments). A phone keeps
+ * the view-only Review: the PDF, the approver's decision when one is waiting,
+ * and the read-only cover and client link blocks.
  */
 export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextStepAction) => void }) {
   const {
@@ -26,16 +34,49 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
     pdf,
     pdfDirty,
     phone,
-    saveNow,
+    revNum,
     sections,
     setActionError,
     setGateRefused,
     setPdf,
+    status,
     statusChanging,
-    t,
     tierResolving,
     next,
   } = s;
+
+  /* Phase 4 — the SAVED package's Datasheets / Drawings rows and gap chips,
+     shared by the tabs and the Package checklist; re-read after every Save
+     (pdf.savedAt) or status change (next.asOf). Desktop only. */
+  const [docs, setDocs] = useState<ReviewDocsResult | null>(null);
+  const savedAt = pdf?.savedAt ?? 0;
+  const asOf = next?.asOf ?? 0;
+  useEffect(() => {
+    if (phone || !loadedId) return;
+    let live = true;
+    reviewDocsAction(loadedId).then(
+      (r) => {
+        if (live) setDocs(r);
+      },
+      () => {
+        if (live) setDocs({ ok: false, error: REVIEW_UI_COPY.docsError });
+      }
+    );
+    return () => {
+      live = false;
+    };
+  }, [phone, loadedId, savedAt, asOf]);
+  const packageBadge = useMemo(
+    () =>
+      estimateReadiness({
+        saved: !!loadedId,
+        sections,
+        review: next ? { label: next.pill.label, tone: next.pill.tone } : null,
+        status,
+        revNum,
+      }).package,
+    [loadedId, sections, next, status, revNum]
+  );
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -60,47 +101,23 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <PdfPreviewPane
-          phone={phone}
-          canBuild={!phone}
-          savedQuoteId={loadedId}
-          pdf={pdf}
-          onPdf={setPdf}
-          dirty={pdfDirty}
-          onSave={doSave}
-          saveDisabled={statusChanging || tierResolving}
-          actionsInline={!phone}
-        />
-        {!phone && (
-          <aside
-            aria-label="Review"
-            className="est-scroll"
-            style={{ width: 320, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 18, padding: 18, background: "#fff", borderLeft: "1px solid #ececf0" }}
-          >
-            {loadedId && next && (
-              <QuoteNextStep
-                quoteId={loadedId}
-                view={next}
-                variant="panel"
-                savedOnly={pdfDirty}
-                disabled={statusChanging || tierResolving}
-                beforeAction={pdfDirty ? saveNow : undefined}
-                onSync={(r, action) => {
-                  applySync(r);
-                  if (r.ok) {
-                    setActionError(null);
-                    setGateRefused(false);
-                    onActed(action);
-                  }
-                }}
-                onError={(m) => {
-                  setActionError(m);
-                  setGateRefused(false);
-                }}
-              />
-            )}
-            <ReviewCostSummary sections={sections} totals={t} />
-          </aside>
+        {phone ? (
+          <PdfPreviewPane
+            phone={phone}
+            canBuild={!phone}
+            savedQuoteId={loadedId}
+            pdf={pdf}
+            onPdf={setPdf}
+            dirty={pdfDirty}
+            onSave={doSave}
+            saveDisabled={statusChanging || tierResolving}
+            actionsInline={!phone}
+          />
+        ) : (
+          <>
+            <ReviewTabs s={s} docs={loadedId ? docs : null} />
+            <ReviewSidebar s={s} onActed={onActed} docs={loadedId ? docs : null} packageBadge={packageBadge} />
+          </>
         )}
       </div>
       {phone && (

@@ -661,6 +661,9 @@ export type EstimatorProps = {
   viewerName: string;
   /** #287 task B — may this user make someone else the lead estimator (`approve`)? */
   viewerCanApprove: boolean;
+  /** Estimator Phase 4 — the signed-in user's roles, for the review-comment
+   *  rules (src/lib/estimate-review/comments.ts: add / resolve / delete). */
+  viewerRoles: string[];
   /** #293 — may this user save product paragraphs / system intros (`create`)? */
   canWriteNarrativeLibrary: boolean;
   /** #293 — the system-intro library (Settings blob `narrative_intros`). */
