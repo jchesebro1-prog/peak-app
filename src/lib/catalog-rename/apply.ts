@@ -40,13 +40,14 @@ import {
   type Doc,
 } from "@/db/doc-store";
 import type { CollectionName } from "@/db/doc-tables";
+import { mfrKey } from "@/lib/catalog-books";
 import { CURTAIN_MOUNTS_BLOB } from "@/lib/curtain-mounts";
 import { favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
 import { EQUIPMENT_MAP_BLOB } from "@/lib/design/equipment-map";
 import { DRIVE_PHOTO_SYNC_BLOB } from "@/lib/part-docs/drive-photo-sync";
 import type { PartAccessoryLink, PartDocumentLink } from "@/lib/part-docs/types";
 import { RACK_DEFAULTS_BLOB } from "@/lib/rack/defaults";
-import { getSettingsPatchStrict, setSettings } from "@/lib/settings";
+import { getSettings, getSettingsPatchStrict, setPriceListEffective, setSettings } from "@/lib/settings";
 import { list as listCatalog, renamePartDocs, type CatalogPart } from "@/lib/stores/catalog";
 import { allSkuRenames, appendSkuRenames, liveRenameRefs, renameMapOf, type SkuRename } from "@/lib/stores/catalog-renames";
 import { accessoryLinkId, allAccessoryLinks } from "@/lib/stores/part-accessory-links";
@@ -321,6 +322,22 @@ function refStep(step: RefStep, ctx: Ctx): Promise<StepOut> {
   }
 }
 
+/** #313 — a part moved to a new manufacturer: when that manufacturer has no
+ *  price-list effective date yet, it takes the previous one's (never
+ *  overwriting a date, silent when the old manufacturer has none). */
+async function carryPriceDates(moves: Array<{ fromMfr: string; mfr: string }>): Promise<void> {
+  if (!moves.length) return;
+  const dates = (await getSettings()).priceListEffective ?? {};
+  const seen = new Set<string>();
+  for (const { fromMfr, mfr } of moves) {
+    const key = mfrKey(mfr);
+    const at = dates[mfrKey(fromMfr)];
+    if (!key || seen.has(key) || dates[key] != null || at == null) continue;
+    seen.add(key);
+    await setPriceListEffective(key, at);
+  }
+}
+
 /** The parts step: re-plan, then rename one part at a time — the budget is
  *  checked before EVERY rename — with a log append per chunk and before any
  *  early return, so a renamed part is never left out of the log. */
@@ -335,16 +352,21 @@ async function partsStep(rows: CrosswalkRow[], by: string, over: () => boolean):
     .filter((r) => r.outcome === "already" && r.to && logged.get(r.from) !== r.to && r.from !== r.to)
     .map((r) => ({ from: r.from, to: r.to!, model: r.model, at: Date.now(), by }));
   await appendSkuRenames(relog);
+  const mfrOf = new Map(ctx.live.map((p) => [p.sku, p.mfr ?? ""]));
   let renamed = 0;
   let entries: SkuRename[] = [];
+  const moves: Array<{ fromMfr: string; mfr: string }> = [];
   for (const r of plan.renames) {
     if (over()) {
       await appendSkuRenames(entries);
+      await carryPriceDates(moves);
       return { ok: true, step: "parts", complete: false, renamed, changed: renamed, plan };
     }
-    const part = await renamePartDocs(r.from, r.to, r.model);
+    const part = await renamePartDocs(r.from, r.to, r.model, r.mfr);
     if (!part) continue; // taken since planning, or retired elsewhere — skipped
-    entries.push({ from: r.from, to: part.sku, model: r.model, at: Date.now(), by });
+    const fromMfr = mfrOf.get(r.from) ?? "";
+    entries.push({ from: r.from, to: part.sku, model: r.model, at: Date.now(), by, ...(r.mfr ? { mfr: r.mfr, fromMfr } : {}) });
+    if (r.mfr) moves.push({ fromMfr, mfr: r.mfr });
     renamed++;
     if (entries.length >= PARTS_CHUNK) {
       await appendSkuRenames(entries);
@@ -352,6 +374,7 @@ async function partsStep(rows: CrosswalkRow[], by: string, over: () => boolean):
     }
   }
   await appendSkuRenames(entries);
+  await carryPriceDates(moves);
   return { ok: true, step: REF_STEPS[0], complete: false, renamed, changed: renamed, plan };
 }
 

@@ -132,6 +132,7 @@ export default function ModelNumbersClient() {
   };
 
   const renameRows = plan ? plan.rows.filter((r) => r.outcome === "rename") : [];
+  const movesMfr = renameRows.some((r) => !!r.mfr);
   const otherRows = plan ? plan.rows.filter((r) => r.outcome !== "rename") : [];
   const n = plan?.counts.rename ?? 0;
   const applyResume = resume && !resume.refsOnly ? resume : null;
@@ -143,6 +144,7 @@ export default function ModelNumbersClient() {
         <span style={label}>1. Upload the filled crosswalk</span>
         <p style={{ fontSize: 12, color: "#8c919c", margin: "0 0 10px" }}>
           The &ldquo;Crosswalk&rdquo; sheet (or the first sheet) with Manufacturer, SKU and Model # columns. Up to 5,000 rows, 800 KB.
+          An optional &ldquo;New manufacturer&rdquo; column also moves that part to the manufacturer you name.
         </p>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
           <input type="file" accept=".xlsx,.csv" disabled={busy} onChange={(e) => pick(e.target.files?.[0] ?? null)} style={{ fontSize: 12.5, maxWidth: "100%" }} />
@@ -181,6 +183,7 @@ export default function ModelNumbersClient() {
                 <thead>
                   <tr style={{ textAlign: "left", color: "#8c919c" }}>
                     <th style={th}>Row</th><th style={th}>Old SKU</th><th style={th}>New SKU</th><th style={th}>Model #</th>
+                    {movesMfr && <th style={th}>New manufacturer</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -190,6 +193,7 @@ export default function ModelNumbersClient() {
                       <td style={{ ...td, ...mono }}>{r.from}</td>
                       <td style={{ ...td, ...mono }}>→ {r.to}</td>
                       <td style={td}>{r.model}</td>
+                      {movesMfr && <td style={td}>{r.mfr ?? ""}</td>}
                     </tr>
                   ))}
                 </tbody>
