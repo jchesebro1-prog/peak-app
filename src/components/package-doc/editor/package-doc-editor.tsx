@@ -75,6 +75,7 @@ const PROSE_CSS = `
 .pd-ed-prose strong { font-weight: 700; color: #16181d; }
 .pd-ed-prose .pd-ed-product-text p:last-child { margin-bottom: 0; }
 .pd-ed-prose .ProseMirror-selectednode { outline: 2px solid #6b8fd1; }
+.pd-ed-prose .node-productImage { clear: both; }
 .pd-ed-prose .node-productImage.ProseMirror-selectednode { outline: none; }
 `;
 

@@ -41,6 +41,8 @@ export const PACKAGE_DOC_CSS = `
 .pd-doc .pd-product { display: flow-root; break-inside: avoid; page-break-inside: avoid; }
 .pd-doc h2, .pd-doc h3, .pd-doc h4 { break-after: avoid; page-break-after: avoid; }
 .pd-doc h2, .pd-doc h3, .pd-doc h4, .pd-doc .pd-pagebreak { clear: both; }
+.pd-doc .pd-image { clear: both; }
+.pd-doc .pd-image, .pd-doc .pd-image img { break-after: avoid; page-break-after: avoid; }
 .pd-doc .pd-image, .pd-doc .pd-image img { break-inside: avoid; page-break-inside: avoid; }
 .pd-doc .pd-price tr { break-inside: avoid; page-break-inside: avoid; }
 @media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }

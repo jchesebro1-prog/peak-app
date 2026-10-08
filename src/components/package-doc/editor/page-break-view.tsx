@@ -14,7 +14,7 @@ export default function PageBreakView({ selected, editor, getPos }: ReactNodeVie
       data-drag-handle=""
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0", cursor: "grab", outline: selected ? "2px solid #6b8fd1" : "none", outlineOffset: 3, borderRadius: 4 }}
+      style={{ display: "flex", alignItems: "center", clear: "both", gap: 8, margin: "14px 0", cursor: "grab", outline: selected ? "2px solid #6b8fd1" : "none", outlineOffset: 3, borderRadius: 4 }}
     >
       <span style={{ flex: 1, borderTop: "1px dashed #b9bec8" }} />
       <span style={{ fontSize: 10.5, fontWeight: 600, color: "#8c919c", letterSpacing: ".04em", textTransform: "uppercase" }}>Page break</span>

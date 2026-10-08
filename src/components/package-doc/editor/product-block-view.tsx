@@ -7,7 +7,7 @@ import { clampPhotoWidth, PHOTO_WIDTH_MAX, PHOTO_WIDTH_MIN } from "@/lib/package
 import { productBlockText } from "@/lib/package-doc/text";
 import type { PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
 import { usePackageDocEnv } from "./editor-context";
-import { deleteNodeAt, revertProductBlock, separatePhoto, setBlockPhoto } from "./editor-commands";
+import { addPhoto, deleteNodeAt, docHasImageFor, revertProductBlock, separatePhoto, setBlockPhoto } from "./editor-commands";
 import { customLineTagText, isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState, productTagText, SAVED_TO_PRODUCT_MS, withPhoto } from "./editor-model";
 
 /**
@@ -123,6 +123,12 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
   };
   /** An older block that still prints its own photo (#312: new blocks never do). */
   const ownPhoto = !!preview && photo.show;
+  /** A words-only block with no image for its line anywhere in the document, and a photo to show: offer Add photo. */
+  const canAddPhoto = !!preview && !photo.show && !docHasImageFor(editor.state.doc, { sectionId: block.attrs.sectionId, lineKey: block.attrs.lineKey });
+  const onAddPhoto = () => {
+    const p = pos();
+    if (p !== null) addPhoto(editor, p);
+  };
 
   const imgStyle: CSSProperties =
     photo.align === "full"
@@ -167,7 +173,12 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
                 Revert
               </button>
             )}
-            {photo.show && (
+            {canAddPhoto && (
+              <button type="button" style={BTN} title="Add this product's photo as its own piece you can move around the document" onClick={onAddPhoto}>
+                Add photo
+              </button>
+            )}
+            {ownPhoto && (
               <button type="button" style={BTN} title="Make the photo its own piece you can move around the document" onClick={onSeparate}>
                 Separate photo
               </button>

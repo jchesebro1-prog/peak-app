@@ -239,7 +239,12 @@ export const ProductImageNode = atomBlock("productImage", "data-pd-product-image
   },
   width: {
     default: DEFAULT_IMAGE.width,
-    parseHTML: (el: HTMLElement) => clampPhotoWidth(Number(el.getAttribute("data-width"))),
+    parseHTML: (el: HTMLElement) => {
+      // Missing / invalid data-width is the default 34 (not Number(null) = 0 → 25).
+      const raw = el.getAttribute("data-width");
+      const n = raw === null || raw.trim() === "" ? NaN : Number(raw);
+      return Number.isFinite(n) ? clampPhotoWidth(n) : DEFAULT_IMAGE.width;
+    },
     renderHTML: (a: Record<string, unknown>) => ({ "data-width": String(a.width ?? DEFAULT_IMAGE.width) }),
   },
 }));

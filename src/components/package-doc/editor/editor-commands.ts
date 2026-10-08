@@ -83,6 +83,39 @@ export function separatePhoto(editor: Editor, pos: number): boolean {
     .run();
 }
 
+/** True when the document holds a productImage for this system + line (any sku). */
+export function docHasImageFor(doc: PMNode, a: { sectionId: string; lineKey: string }): boolean {
+  let found = false;
+  doc.descendants((n) => {
+    if (found) return false;
+    if (n.type.name === "productImage" && n.attrs.sectionId === a.sectionId && n.attrs.lineKey === a.lineKey) found = true;
+    return !found && n.type.name !== "productImage";
+  });
+  return found;
+}
+
+/** "Add photo" (#312) on a words-only product block: a productImage with the
+ *  block's anchors and the default align / width goes in right before it,
+ *  selected, in ONE transaction. Pure on the transaction; false when `pos`
+ *  isn't a product block or the document already has an image for its line. */
+export function addPhotoIn(tr: Transaction, pos: number): boolean {
+  const node = tr.doc.nodeAt(pos);
+  const imageType = tr.doc.type.schema.nodes.productImage;
+  if (!node || node.type.name !== "productBlock" || !imageType) return false;
+  if (docHasImageFor(tr.doc, { sectionId: String(node.attrs.sectionId || ""), lineKey: String(node.attrs.lineKey || "") })) return false;
+  tr.insert(pos, imageType.create({ sectionId: node.attrs.sectionId, lineKey: node.attrs.lineKey, sku: node.attrs.sku }));
+  tr.setSelection(NodeSelection.create(tr.doc, pos));
+  return true;
+}
+
+export function addPhoto(editor: Editor, pos: number): boolean {
+  return editor
+    .chain()
+    .focus()
+    .command(({ tr }) => addPhotoIn(tr, pos))
+    .run();
+}
+
 /** Patch a product block's photo (clamped like the validator). */
 export function setBlockPhoto(editor: Editor, pos: number, patch: Partial<PhotoAttrs>): boolean {
   const node = editor.state.doc.nodeAt(pos);

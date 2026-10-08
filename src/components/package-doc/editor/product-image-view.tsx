@@ -2,6 +2,8 @@
 
 import { useState, type CSSProperties } from "react";
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
+import { keyProductHeading } from "@/app/(app)/estimator/narrative";
+import { findLine, findSection } from "@/lib/package-doc/chips";
 import { lineAnchorInBom } from "@/lib/package-doc/gaps";
 import { clampPhotoWidth, PHOTO_WIDTH_MAX, PHOTO_WIDTH_MIN } from "@/lib/package-doc/schema";
 import type { LineAnchor, PhotoAlign } from "@/lib/package-doc/types";
@@ -27,11 +29,13 @@ const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWei
 const ALIGNS: Array<[PhotoAlign, string]> = [["left", "Left"], ["right", "Right"], ["full", "Full"]];
 const AMBER = "#d9a63a";
 
-/** Where the image sits: the print's float (package-doc-view photoStyle), on the wrapper. */
+/** Where the image sits: the print's float (package-doc-view photoStyle), on the
+ *  wrapper. `clear: both` starts each image below an earlier float (consecutive
+ *  photos stack instead of sitting side by side), like `.pd-doc .pd-image`. */
 function wrapperStyle(img: ImageAttrs): CSSProperties {
-  if (img.align === "full") return { display: "block", width: `${img.width}%`, margin: "4px auto 10px" };
-  if (img.align === "left") return { float: "left", width: `${img.width}%`, margin: "4px 14px 8px 0" };
-  return { float: "right", width: `${img.width}%`, margin: "4px 0 8px 14px" };
+  if (img.align === "full") return { display: "block", width: `${img.width}%`, margin: "4px auto 10px", clear: "both" };
+  if (img.align === "left") return { float: "left", width: `${img.width}%`, margin: "4px 14px 8px 0", clear: "both" };
+  return { float: "right", width: `${img.width}%`, margin: "4px 0 8px 14px", clear: "both" };
 }
 
 export default function ProductImageView({ node, editor, getPos, selected }: ReactNodeViewProps) {
@@ -44,7 +48,8 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
   const row = !isLineTokenSku(a.sku) && a.sku && rows && Object.hasOwn(rows, a.sku) ? rows[a.sku] : undefined;
   const preview = linePhotoPreview(a, sections, row);
   const inBom = !env || lineAnchorInBom(a, sections);
-  const name = (row && row.desc) || a.sku || "Product";
+  const line = inBom ? findLine(findSection(sections, a.sectionId), a.lineKey) : null;
+  const name = (line && keyProductHeading(line)) || (row && row.desc) || a.sku || "Product";
 
   const patch = (p: Partial<ImageAttrs>) => {
     const at = getPos();
@@ -80,7 +85,11 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
+        // Above the following product block's own `position: relative` wrapper
+        // (later in the DOM), which otherwise paints over the floated image and
+        // swallows its clicks; the selected image (and its strip) sits higher.
         position: "relative",
+        zIndex: selected ? 5 : 2,
         ...wrapperStyle(img),
         borderRadius: 4,
         outline: selected ? "2px solid #6b8fd1" : !inBom ? `2px solid ${AMBER}` : hover ? "1.5px dashed #b9bec8" : "1.5px dashed transparent",
@@ -92,7 +101,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={preview.src}
-            alt=""
+            alt={name}
             draggable={false}
             style={{ display: "block", width: "100%", maxHeight: img.align === "full" ? "4in" : "2.4in", objectFit: "contain" }}
           />
@@ -109,7 +118,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
       </div>
 
       {selected && (
-        <div style={strip} onDragStart={(e) => e.preventDefault()}>
+        <div style={strip}>
           <span role="group" aria-label="Photo position" style={{ display: "inline-flex", gap: 3 }}>
             {ALIGNS.map(([al, l]) => (
               <button key={al} type="button" aria-pressed={img.align === al} style={{ ...BTN, background: img.align === al ? "#dfe6f4" : BTN.background }} onClick={() => patch({ align: al })}>

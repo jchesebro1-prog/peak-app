@@ -30,7 +30,7 @@ export default function SystemTotalView({ node, selected, editor, getPos }: Reac
       data-removed={env && !row && !exists ? "true" : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{ position: "relative", margin: "4px 0", borderRadius: 6, outline: selected ? "2px solid #6b8fd1" : "1px dashed transparent", outlineOffset: 4, cursor: "grab" }}
+      style={{ position: "relative", clear: "both", margin: "4px 0", borderRadius: 6, outline: selected ? "2px solid #6b8fd1" : "1px dashed transparent", outlineOffset: 4, cursor: "grab" }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
         <span style={{ fontSize: 10.5, fontWeight: 600, color: "#8c919c", letterSpacing: ".04em", textTransform: "uppercase" }}>System price · live</span>

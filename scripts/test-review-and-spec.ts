@@ -58887,3 +58887,51 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   ok(["src/lib/package-doc/sanitize.ts", "src/lib/package-doc/resolve.ts"].every((f) => rd(f).includes('case "productImage"')) && rd("src/components/package-doc/package-doc-view.tsx").includes('case "image"'),
     "#312 images: the sanitizer, resolver and renderer each handle productImage");
 }
+
+// ---- #312 task 2 fix round 1: image clickable above blocks, clears previous floats, keeps with its words, Add photo ----
+import { addPhotoIn as f312Add, docHasImageFor as f312Has } from "@/components/package-doc/editor/editor-commands";
+import { ProductImageNode as F312ImageNode } from "@/components/package-doc/editor/schema-nodes";
+import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/pm/state";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  const ED = "src/components/package-doc/editor";
+  const iv = rd(`${ED}/product-image-view.tsx`), pbv = rd(`${ED}/product-block-view.tsx`), ed = rd(`${ED}/package-doc-editor.tsx`);
+  const view = rd("src/components/package-doc/package-doc-view.tsx");
+  // (1) the image sits above the following block's positioned wrapper; (2) clears earlier floats.
+  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\(img\)/.test(iv) && iv.includes("zIndex: 4"),
+    "#312 fix round 1: the image's float wrapper is position: relative with z-index 2 (5 selected), above the next product block's own relative wrapper, and the strip sits inside it");
+  ok((iv.match(/clear: "both"/g) || []).length === 3 && view.includes(".pd-doc .pd-image { clear: both; }") && ed.includes(".pd-ed-prose .node-productImage { clear: both; }"),
+    "#312 fix round 1: an image starts below any earlier float — editor wrapper (all three aligns), .node-productImage and print .pd-image clear both");
+  ok(view.includes(".pd-doc .pd-image, .pd-doc .pd-image img { break-after: avoid; page-break-after: avoid; }") && !view.includes("data-align={b.photo.align}"),
+    "#312 fix round 1: the image keeps with its words — break-after avoid on the (zero-height when floated) wrapper AND on the img, a block box whenever the image is full width; the printed markup is unchanged");
+  // (3) editor parity for the system price line and page break.
+  ok(rd(`${ED}/system-total-view.tsx`).includes('position: "relative", clear: "both"') && rd(`${ED}/page-break-view.tsx`).includes('clear: "both"'),
+    "#312 fix round 1: the editor's system price line and page break clear floats like the print");
+  // (5) Add photo: pure command + button gating.
+  const schema = p5eGetSchema(p5eBuild());
+  const mk = (content: unknown[]) => schema.nodeFromJSON({ type: "doc", version: 1, content } as never);
+  const PBn = (line: string, show = false) => ({ type: "productBlock", attrs: { sectionId: "s2", lineKey: line, sku: "SKU-5", photo: { show, align: "right", width: 34 } }, content: [{ type: "paragraph", content: [{ type: "text", text: "w" }] }] });
+  const d0 = mk([{ type: "paragraph" }, PBn("5")]);
+  const at0 = d0.child(0).nodeSize;
+  const t0 = F312State.create({ schema, doc: d0 }).tr;
+  const did0 = f312Add(t0, at0);
+  const out0 = t0.doc.toJSON() as { content: Array<{ type: string; attrs?: Record<string, unknown> }> };
+  ok(did0 && t0.steps.length === 1 && J(out0.content.map((n) => n.type)) === J(["paragraph", "productImage", "productBlock"]) &&
+     J(out0.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 }) &&
+     t0.selection instanceof F312NodeSel && t0.selection.node.type.name === "productImage",
+    "#312 fix round 1: Add photo inserts a default productImage with the block's anchors right before it, selected, in one step");
+  const t1 = F312State.create({ schema, doc: t0.doc }).tr;
+  ok(!f312Add(t1, at0 + t0.doc.child(1).nodeSize) && t1.steps.length === 0 && f312Has(t0.doc, { sectionId: "s2", lineKey: "5" }) && !f312Has(t0.doc, { sectionId: "s2", lineKey: "6" }) && !f312Add(t1, 0),
+    "#312 fix round 1: Add photo refuses when the document already has an image for that system + line (or the target isn't a product block)");
+  ok(/const canAddPhoto = !!preview && !photo\.show && !docHasImageFor\(/.test(pbv) && />\s*Add photo\s*</.test(pbv) && /\{ownPhoto && \(\s*<button[^>]*onClick=\{onSeparate\}/.test(pbv) && !/\{photo\.show && \(\s*<button[^>]*onClick=\{onSeparate\}/.test(pbv),
+    "#312 fix round 1: Add photo shows only on a words-only block with no image for its line and a resolvable photo; Separate photo only when a photo resolves");
+  // (6) pasted HTML without data-width → 34.
+  const wAttr = (F312ImageNode.config.addAttributes as unknown as () => Record<string, { parseHTML: (el: unknown) => unknown }>)().width;
+  const el = (v: string | null) => ({ getAttribute: () => v });
+  ok(wAttr.parseHTML(el(null)) === 34 && wAttr.parseHTML(el("")) === 34 && wAttr.parseHTML(el("abc")) === 34 && wAttr.parseHTML(el("50")) === 50 && wAttr.parseHTML(el("5")) === 25 && wAttr.parseHTML(el("500")) === 100,
+    "#312 fix round 1: pasted image HTML with a missing / invalid data-width is the default 34; valid widths clamp 25–100");
+  // (7) dead handler gone; meaningful alt.
+  ok(!iv.includes("onDragStart") && iv.includes("alt={name}") && !iv.includes('alt=""') && iv.includes("keyProductHeading(line)"),
+    "#312 fix round 1: the strip has no dead onDragStart; the editor image's alt is the part label (heading, else description, else sku)");
+}
