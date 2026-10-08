@@ -9732,7 +9732,8 @@ note and task name the alternate by its picker label (a question carries no scop
 
 `sendEstimateEmailAction` runs: cheap preflight (permission send|approve, status draft|sent, estimate PDF current, To >= 1,
 subject/body, follow-up) -> an in-flight claim on the quote, taken right after that preflight with the whole preflight re-read
-under it (a render can take ~90 s, so a double submit, a recall or a save during attachments is refused) -> attachments ->
+under it (the cover render is capped at 45 s inside a 55 s deadline, so a double submit, a recall or a save during attachments
+is refused) -> attachments ->
 mark sent (draft only, through `sendQuoteToCustomer`, carrying the `asOf` the page saw so the approval gate checks the version
 on screen) -> client link -> comms thread created and sent -> `estimateEmails` record -> follow-up task. Nothing is marked or
 sent unless preflight, the claim and the attachments all succeed; a gate refusal emails nothing. After mark-sent a failure
@@ -9740,7 +9741,9 @@ returns the "Marked sent, but ..." copy: "open it in Inbox" when a thread exists
 "send it again in a moment" when none does. A record or task failure after the email is out is `ok` with a `warning`, never
 "didn't go out" (that would invite a duplicate customer email). Re-sending on a `sent` quote emails the current sent revision,
 changes no status and still honours `asOf`; `won` and `lost` are refused. Open in Inbox runs the same preflight, claim and mark,
-creates the draft and never sends.
+creates the draft and never sends. Final review: Open in Inbox first looks for the sender's own unsent draft for this quote
+(`findDraftByLink` scoped to the mailbox owner, not deleted); if it still matches the quote (D660's draft rule, made at or after
+the latest sent revision) its link is returned and nothing is rendered, marked, created or recorded again.
 
 ## D659. Mailbox, link and record for an estimate email (#308, 2026-10-07)
 
@@ -9755,7 +9758,14 @@ bump) and the `emailSending` claim (120 s TTL, taken over once expired, released
 The Estimate PDF goes by reference: `CommAttachment.pdfPath` + `href`, no bytes in the comms doc. The Gmail bridge reads storage
 at MIME time, and only for quote-PDF paths of the quote the thread is linked to (`pdfPathFitsLink`); the Inbox reader opens the
 `href`. On a re-send the latest sent revision's own copy is attached. The Cover PDF is rendered on demand by the shared
-`cover-pdf-server` (the same render the cover route uses) and attached as a small data URL. Raw bytes are capped at 15 MB
+`cover-pdf-server` (the same render the cover route uses) and also goes by reference (final review): once the email is certain
+to be made it is written to `quote-pdfs/<id>/cover-<ms>.pdf` (Blob adds its suffix) and attached as `{ pdfPath, href }`, the href
+being `/api/quotes/<id>/pdf?file=cover-…` — that route serves only a bare `cover-<ms>[-suffix].pdf` name from the quote's own
+folder, behind the team session. A data URL is the fallback only when storage is unavailable or the write fails. **An Inbox
+draft is tied to the quote's current state:** `composeSendAction` refuses a quote-linked draft carrying a PDF by reference
+unless the quote is `sent` and every such PDF is the latest sent revision's `pdfBlobPath` or a cover of that quote stored at
+or after that revision ("This estimate changed since this draft was made — open it from the Estimator again.";
+`estimateDraftIsCurrent`). The estimate PDF is still read once to size it — the PDF state stores no size. Raw bytes are capped at 15 MB
 (`Too large to attach — send the link only.`), checked on the estimate before the cover render. A pending render reads
 "The PDF is still being made — try again in a moment."; an out-of-date PDF reads "Save the estimate first — its PDF is out of
 date." A first-send cover has no link line, because it is rendered before the link exists; re-send covers carry it, and the
@@ -9763,9 +9773,20 @@ email body always carries the link (`{link}`, appended on its own line when the 
 
 ## D661. Delivery truth and signature (#308, 2026-10-07)
 
-Delivery is `gmail | local | failed`. `local` = no Gmail connection (dev, or the sender never connected); `failed` = connected
-but the sent message has no `gmailId`. A failed send is recorded on the estimate and creates no follow-up task; the sender sees
-"Gmail didn't accept the email" with a link to the thread. The signature reuses the Inbox rule: #127's signature is seeded into
+Delivery is `gmail | local | failed | unknown`. `local` = no Gmail connection (dev, or the sender never connected); `failed` =
+connected but Gmail refused it (no `gmailId`); `unknown` = the Gmail call hit the api layer's 20 s timeout (`GmailTimeoutError`,
+stamped by the bridge as `sendFailure: "timeout"`) — Gmail may have accepted it. Failed and unknown sends are recorded on the
+estimate and create no follow-up task; the sender sees "Marked sent, but Gmail didn't accept the email — send it again from
+here." (re-send: "Gmail didn't accept the email — send it again from here.") or "Gmail didn't answer in time — check your
+Gmail Sent folder before sending again.", with no Inbox link (the Inbox has no resend). **No silent re-send:** every estimate
+email (and inline reply) that did not go through Gmail — local, failed or unknown — is stamped `noAutoRetry` + `deliveryNote`
+on its comms message, and the bridge's `deliverThreadOutbound` skips such messages (`isAutoDeliverable`), so a later reply or a
+later Gmail connection never pushes the estimate and its PDF on its own. Ordinary Inbox messages keep the old flush behaviour.
+Activity labels each email from its first outbound message: Sent through Gmail / Sent locally (Gmail not connected) / Gmail
+didn't accept it / Gmail didn't answer — check your Sent folder / Draft in Inbox — not sent (no send time); Reply is refused and
+hidden on a draft, a thread with no outbound message, or one with no recipient ("This email hasn't been sent yet — finish it in
+the Inbox."). The Lead estimator for text visibility is the shared `leadEstimator()` (owner, else preparedBy when the owner is
+not active). The signature reuses the Inbox rule: #127's signature is seeded into
 the default body above the sign-off, with the legacy footer as fallback, and the link sits above it.
 
 ## D662. Track and reply privacy (#308, 2026-10-07)

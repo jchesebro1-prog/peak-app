@@ -11150,8 +11150,11 @@ What shipped (no migration, no AI):
   task. Draft shows `Send & mark sent ->`, sent shows `Send email ->`; won/lost have no composer. (D658)
 - **Escape hatches** — Open in Inbox (marks sent, creates the draft, never sends), Mark sent without emailing, Copy link only. (D658)
 - **From the sender's personal mailbox**, linked to the quote, full To line, `Quote.estimateEmails` + `emailSending` claim. (D659)
-- **Attachments** — Estimate PDF by reference, Cover PDF rendered on demand, 15 MB cap. (D660)
-- **Delivery truth + signature** — Sent through Gmail / Sent locally (Gmail not connected) / Gmail didn't accept it. (D661)
+- **Attachments** — Estimate PDF and Cover PDF both by reference (the cover stored under the quote's folder, data URL only as
+  a fallback), 15 MB cap; an Inbox draft must still match the quote's latest sent revision to be sent. (D660)
+- **Delivery truth + signature** — Sent through Gmail / Sent locally (Gmail not connected) / Gmail didn't accept it / Gmail
+  didn't answer — check your Sent folder / Draft in Inbox — not sent; failed, local and unknown estimate messages are never
+  auto-pushed by a later send. (D661)
 - **Activity** — the recorded emails with delivery, Rev, new-reply count and messages; inline Reply and Mark read from the
   owner's mailbox; link opens. (D662)
 - **Send badge** — `Sent · Rev N · 👁 opens · N new replies`. (D663)
@@ -11174,10 +11177,22 @@ sees metadata only. Keep that, or show text to anyone who can open the quote? (D
 signature and `{link}` line. Approve or reword.
 (c) Approve the composer strings added beyond the plan: "Email the estimate", "Client link opened N time(s)", "N new".
 
-**Jeff-gated.** From production, send an estimate to yourself and reply to it; the reply should land in Activity and the badge.
+**Jeff-gated.**
+- From production, send an estimate to yourself and reply to it; the reply should land in Activity and the badge.
+- From production, send a LARGE estimate (multi-MB, photo-heavy) to yourself to confirm Gmail accepts that size through
+  `/messages/send`; if it refuses, we switch the bridge to Gmail's upload endpoint.
+- Never test sends from a preview deploy — previews share the production database and the production Gmail connections.
+- Confirm `QUOTE_PDF_ORIGIN` is set in Production (it is the client link's host in the email).
+- Rollback: don't roll back past #308 while estimate emails are pending in comms (an older build doesn't know `noAutoRetry`
+  and would push held-back estimate emails on the next send).
 
 **Open (minor, not blocking).**
-- `contentChangedAt` is not compared in the final re-read, and the claim TTL (120 s) is close to the ~90 s render worst case.
-- A Gmail-`failed` send leaves a locally-sent thread that nothing retries.
+- `contentChangedAt` is not compared in the final re-read (the claim TTL is 120 s against a cover render capped at 45 s inside
+  a 55 s deadline).
+- A failed, local or unknown estimate email is never auto-pushed by a later send (`noAutoRetry`) — the sender sends it again
+  from the tab (or, for unknown, checks Gmail's Sent folder first).
+- An "unknown" send that Gmail did accept may come back through the Gmail import as a separate thread (it has no `gmailId`
+  to match).
+- The estimate PDF is read once to size it (no stored size on the PDF state).
 - The first-send cover has no link line (rendered before the link exists).
 - "Revise with these scopes ->" is parked for Phase 4.
