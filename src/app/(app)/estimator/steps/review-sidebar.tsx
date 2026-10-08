@@ -32,6 +32,8 @@ const BTN: CSSProperties = {
   cursor: "pointer",
 };
 const LINK_BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11.5, fontWeight: 600, color: "#5b616e", background: "none", border: "none", padding: 0, cursor: "pointer" };
+/** Screen-reader-only text (an aria-label on a plain span isn't reliably announced). */
+const VISUALLY_HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", clipPath: "inset(50%)", whiteSpace: "nowrap" };
 const FIELD: CSSProperties = { width: "100%", boxSizing: "border-box", fontFamily: "var(--font-ui)", fontSize: 12.5, border: "1px solid #d8dbe1", borderRadius: 7, padding: "6px 8px", background: "#fff" };
 
 /**
@@ -57,7 +59,7 @@ export function ReviewSidebar({
      comments), so while this sidebar offers the comment-aware one, the panel doesn't. */
   const panelView = useMemo(() => (next && sendBackHere ? withoutSendBack(next) : next), [next, sendBackHere]);
 
-  /* Keep the comments fresh: read on opening the step, and again (debounced) when the tab regains focus. */
+  /* Keep the comments fresh when the tab regains focus (debounced). The mount load is the hook's own — no second read on opening. */
   useEffect(() => {
     if (!loadedId) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -65,7 +67,6 @@ export function ReviewSidebar({
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void refreshReviewComments(), 400);
     };
-    kick();
     window.addEventListener("focus", kick);
     return () => {
       if (timer) clearTimeout(timer);
@@ -194,7 +195,7 @@ function SendBackWithComments({ s, onActed }: { s: EstimatorState; onActed: (a: 
 }
 
 function LaborTable({ s }: { s: EstimatorState }) {
-  const { rate, sections } = s;
+  const { rate, sections, t } = s;
   const sum = useMemo(() => laborSummary(sections, rate), [sections, rate]);
   const row = (g: LaborSummaryGroup) => (
     <tr key={g.id}>
@@ -207,15 +208,17 @@ function LaborTable({ s }: { s: EstimatorState }) {
       <td style={NUM}>{fmt(g.sell)}</td>
     </tr>
   );
-  const looseRow = (l: { hours: number; cost: number; sell: number }, key: string) => (
+  const sumRow = (l: { hours: number; cost: number; sell: number }, key: string, label: string, noHours = false) => (
     <tr key={key}>
-      <td style={CELL}>{COPY.looseLabor}</td>
-      <td style={NUM}>{l.hours}</td>
+      <td style={CELL}>{label}</td>
+      <td style={NUM}>{noHours ? "—" : l.hours}</td>
       <td style={NUM}>{fmt(l.cost)}</td>
       <td style={NUM}>{fmt(l.sell)}</td>
     </tr>
   );
-  const empty = sum.groups.length === 0 && !sum.loose && !sum.alternate;
+  const looseRow = (l: { hours: number; cost: number; sell: number }, key: string) => sumRow(l, key, COPY.looseLabor);
+  const otherRow = (l: { hours: number; cost: number; sell: number }, key: string) => sumRow(l, key, COPY.otherLabor, true);
+  const empty = sum.groups.length === 0 && !sum.loose && !sum.other && !sum.alternate && t.lab === 0;
   return (
     <div>
       <div style={TITLE}>{COPY.labor}</div>
@@ -235,6 +238,7 @@ function LaborTable({ s }: { s: EstimatorState }) {
             <tbody>
               {sum.groups.map(row)}
               {sum.loose && looseRow(sum.loose, "loose")}
+              {sum.other && otherRow(sum.other, "other")}
               <tr style={{ fontWeight: 600 }}>
                 <td style={CELL}>{COPY.laborTotal}</td>
                 <td style={NUM}>{sum.totals.hours}</td>
@@ -250,6 +254,7 @@ function LaborTable({ s }: { s: EstimatorState }) {
                   </tr>
                   {sum.alternate.groups.map(row)}
                   {sum.alternate.loose && looseRow(sum.alternate.loose, "alt-loose")}
+                  {sum.alternate.other && otherRow(sum.alternate.other, "alt-other")}
                 </>
               )}
             </tbody>
@@ -349,10 +354,10 @@ function ReviewComments({ s }: { s: EstimatorState }) {
               {numbered.map(({ n, comment, system }) => (
                 <li key={comment.id} style={{ display: "flex", gap: 8 }}>
                   <span
-                    aria-label={`Comment ${n}`}
-                    style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 10, background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)" }}
+                    style={{ position: "relative", flexShrink: 0, width: 20, height: 20, borderRadius: 10, background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)" }}
                   >
-                    {n}
+                    <span aria-hidden="true">{n}</span>
+                    <span style={VISUALLY_HIDDEN}>{`Comment ${n}`}</span>
                   </span>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 11.5, fontWeight: 600, color: "#5b616e" }}>{system}</div>

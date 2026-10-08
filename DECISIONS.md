@@ -9835,7 +9835,12 @@ Pure `laborSummary(sections, rate)` (`src/lib/estimate-review/labor.ts`). Per gr
 (regular + overtime hours) + PM + shop + drafting hours from `computeLabor` (supervision hours are INSIDE regular, so they are
 not added again); cost = the configured `totalCost`; sell = Σ the group's CURRENT line ext sells (`laborGroup === id`); a row
 shows `edited` when that differs from the configured `totalPrice` by more than $1. Hand-added labor lines with unit `hr` (and
-groups whose draft record is gone) are "Hand-added labor (hr)": hours = qty. Alternate-group labor is bucketed separately under
+groups whose draft record is gone) are "Hand-added labor (hr)": hours = qty. Every OTHER labor line the totals count
+(`it.labor`, or any line of a labor-kind section; reward credits, option lines and alternate sections excluded) that sits in
+no configured group — pre-#269 labor, a lot-priced configurator line whose draft is gone, a labor-section line — sums into
+"Other labor lines": cost = qty × cost, sell = current ext sell, hours "—" (0; only `hr` lines have an honest hour count),
+and it is in the totals row. The sidebar says "No labor on this estimate." only when there are no groups, loose or other
+rows AND `totals().lab` is 0. Alternate-group labor is bucketed separately under
 "Alternates (priced separately)"; option-flagged lines are excluded. The summary line is max crew, Σ days, Σ OT hours. The
 table can differ from `totals().lab` by any system price adjustment, because it adds lines, not adjustments.
 

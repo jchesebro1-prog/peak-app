@@ -1,4 +1,5 @@
 import { computeLabor, lineExtSellOf, round2, type RateFn } from "@/app/(app)/estimator/pricing";
+import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 
 /**
@@ -27,8 +28,15 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
  * `loose`, `totals` or `crew`: alternates go to the `alternate` bucket, option lines are
  * left out of every sell/loose row (a group with optioned lines reads `edited`).
  *
- * The table's sell can differ from `totals().lab` by system price adjustments ($25
- * round-ups / typed system sells) and by unflagged lines in labor-kind sections.
+ * "Other labor lines" (`other`) catch every remaining labor line the way `totals().lab`
+ * counts it — `it.labor` or any line of a labor-kind section (reward credits, option lines
+ * and alternate sections excluded) that is neither in a configured group nor a loose `hr`
+ * line: a pre-#269 labor line, a lot-priced configurator line whose draft is gone, a
+ * labor-section line. cost = qty × cost, sell = current ext sell; hours = 0 (an `hr` line
+ * is loose, not other — a non-hour line has no honest hour count).
+ *
+ * The table's sell can still differ from `totals().lab` by system price adjustments ($25
+ * round-ups / typed system sells).
  */
 
 export type LaborSummaryGroup = {
@@ -49,11 +57,13 @@ export type LaborSummary = {
   groups: LaborSummaryGroup[];
   /** Hand-added labor lines billed by the hour (unit "hr", no configured group). */
   loose: LaborSums | null;
+  /** Every other labor line (see header); hours are always 0. Null when none. */
+  other: LaborSums | null;
   totals: LaborSums;
   /** Largest crew across mobilizations, Σ days, Σ overtime hours. */
   crew: { maxCrew: number; days: number; otHours: number };
   /** Alternate-group systems' labor — priced separately, shown below the totals row; null when none. */
-  alternate: { groups: LaborSummaryGroup[]; loose: LaborSums | null; totals: LaborSums } | null;
+  alternate: { groups: LaborSummaryGroup[]; loose: LaborSums | null; other: LaborSums | null; totals: LaborSums } | null;
 };
 
 /** A group's sell may differ from the configured price by this much before it reads as edited. */
@@ -66,6 +76,8 @@ export function laborSummary(sections: SpecSection[], rate: RateFn): LaborSummar
   const altGroups: LaborSummaryGroup[] = [];
   const loose = { hours: 0, cost: 0, sell: 0, count: 0 };
   const altLoose = { hours: 0, cost: 0, sell: 0, count: 0 };
+  const other = { hours: 0, cost: 0, sell: 0, count: 0 };
+  const altOther = { hours: 0, cost: 0, sell: 0, count: 0 };
   let maxCrew = 0;
   let days = 0;
   let otHours = 0;
@@ -76,6 +88,7 @@ export function laborSummary(sections: SpecSection[], rate: RateFn): LaborSummar
     if (isAlt) sawAlternate = true;
     const outGroups = isAlt ? altGroups : groups;
     const outLoose = isAlt ? altLoose : loose;
+    const outOther = isAlt ? altOther : other;
     const records = sec.laborGroups || {};
     const items = sec.items || [];
     for (const id of Object.keys(records)) {
@@ -104,32 +117,44 @@ export function laborSummary(sections: SpecSection[], rate: RateFn): LaborSummar
       });
     }
     for (const it of items) {
-      if (!it.labor || !isHourUnit(it.unit) || it.option) continue;
+      if (it.option || isRewardCreditItem(it)) continue;
+      if (!it.labor && sec.kind !== "labor") continue;
       if (it.laborGroup && records[it.laborGroup]?.draft) continue; // counted with its group
       const qty = Number.isFinite(it.qty) ? it.qty : 0;
-      outLoose.hours += qty;
-      outLoose.cost += qty * (Number.isFinite(it.cost) ? it.cost : 0);
-      outLoose.sell += lineExtSellOf(it);
-      outLoose.count += 1;
+      const cost = qty * (Number.isFinite(it.cost) ? it.cost : 0);
+      const sell = lineExtSellOf(it);
+      if (isHourUnit(it.unit)) {
+        outLoose.hours += qty;
+        outLoose.cost += cost;
+        outLoose.sell += sell;
+        outLoose.count += 1;
+      } else if (cost !== 0 || sell !== 0) {
+        outOther.cost += cost;
+        outOther.sell += sell;
+        outOther.count += 1;
+      }
     }
   }
 
   const finish = (l: typeof loose): LaborSums | null =>
     l.count > 0 ? { hours: round2(l.hours), cost: round2(l.cost), sell: round2(l.sell) } : null;
-  const totalsOf = (gs: LaborSummaryGroup[], l: LaborSums | null): LaborSums => {
-    const sum = (pick: (g: LaborSums) => number) => round2(gs.reduce((a, g) => a + pick(g), 0) + (l ? pick(l) : 0));
+  const totalsOf = (gs: LaborSummaryGroup[], l: LaborSums | null, o: LaborSums | null): LaborSums => {
+    const sum = (pick: (g: LaborSums) => number) => round2(gs.reduce((a, g) => a + pick(g), 0) + (l ? pick(l) : 0) + (o ? pick(o) : 0));
     return { hours: sum((g) => g.hours), cost: sum((g) => g.cost), sell: sum((g) => g.sell) };
   };
   const looseOut = finish(loose);
   const altLooseOut = finish(altLoose);
+  const otherOut = finish(other);
+  const altOtherOut = finish(altOther);
   return {
     groups,
     loose: looseOut,
-    totals: totalsOf(groups, looseOut),
+    other: otherOut,
+    totals: totalsOf(groups, looseOut, otherOut),
     crew: { maxCrew, days: round2(days), otHours: round2(otHours) },
     alternate:
-      sawAlternate && (altGroups.length > 0 || altLooseOut)
-        ? { groups: altGroups, loose: altLooseOut, totals: totalsOf(altGroups, altLooseOut) }
+      sawAlternate && (altGroups.length > 0 || altLooseOut || altOtherOut)
+        ? { groups: altGroups, loose: altLooseOut, other: altOtherOut, totals: totalsOf(altGroups, altLooseOut, altOtherOut) }
         : null,
   };
 }

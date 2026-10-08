@@ -8,6 +8,7 @@ import { wonEditMessage } from "@/app/(app)/quotes/new/handoff";
 import { fmt } from "./pricing";
 import type { EstimateStep } from "@/lib/estimate-steps/steps";
 import { HeaderMoreMenu } from "./header-more-menu";
+import { canSendBackFromReview, withoutSendBack } from "@/lib/estimate-review/review-ui";
 
 /**
  * #305 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
@@ -15,7 +16,17 @@ import { HeaderMoreMenu } from "./header-more-menu";
  * quoted total, status (read-only — set on Send & track), Save, the next-step control and the ⋯ menu. Wraps
  * onto a second row instead of overflowing on a narrow window.
  */
-export function EstimatorHeader({ s, onActed, onStep }: { s: EstimatorState; onActed: (action: NextStepAction) => void; onStep: (to: EstimateStep) => void }) {
+export function EstimatorHeader({
+  s,
+  step,
+  onActed,
+  onStep,
+}: {
+  s: EstimatorState;
+  step: EstimateStep;
+  onActed: (action: NextStepAction) => void;
+  onStep: (to: EstimateStep) => void;
+}) {
   const {
     applySync,
     assumptionLibrary,
@@ -287,7 +298,8 @@ export function EstimatorHeader({ s, onActed, onStep }: { s: EstimatorState; onA
           {loadedId && next && (
             <QuoteNextStep
               quoteId={loadedId}
-              view={next}
+              /* On Review the sidebar owns the comment-aware Send back; the toolbar's modal one would drop the comments. */
+              view={step === "review" && canSendBackFromReview(next) ? withoutSendBack(next) : next}
               variant="toolbar"
               savedOnly={pdfDirty}
               disabled={statusChanging || tierResolving}

@@ -31127,7 +31127,7 @@ import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip"
   const ec = estimatorSource();
   // #284 task 5: the Estimator's state now reads on the next-step pill — the toolbar control gets savedOnly={pdfDirty}.
   const qnsComp242 = readFileSync(join(process.cwd(), "src/components/quote-review/quote-next-step.tsx"), "utf8");
-  ok(/<QuoteNextStep\s+quoteId=\{loadedId\}\s+view=\{next\}\s+variant="toolbar"\s+savedOnly=\{pdfDirty\}/.test(ec) && qnsComp242.includes('(savedOnly ? " · as last saved" : "")'),
+  ok(/<QuoteNextStep\s+quoteId=\{loadedId\}[\s\S]{0,300}?variant="toolbar"\s+savedOnly=\{pdfDirty\}/.test(ec) && qnsComp242.includes('(savedOnly ? " · as last saved" : "")'),
     "#242 fix: the Estimator chip says 'as last saved' while the form has unsaved changes");
   const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
   const iChip = hub.indexOf("const reviewLimit = reviewLimitChip(q, limitCtx, me);");
@@ -56453,9 +56453,11 @@ function p4PureChecks(): void {
   ok(both.groups.length === 2 && both.groups[1].label === "House Lights · Lighting" && both.groups[1].hours === 4 * 2 * 8 + 4 * 2 * 1 + 3,
     "#P4 pure: groups come in system order; Lighting group hours = 64 straight + 8 OT + 3 manual PM");
   ok(both.loose !== null && both.loose.hours === 6.5 && both.loose.cost === 4 * 50 + 2.5 * 40 && both.loose.sell === 4 * 80 + 2.5 * 70,
-    "#P4 pure: hand-added labor lines with unit hr count their qty as hours (a group-less or orphaned one too); non-hr and non-labor lines are ignored");
-  ok(both.totals.hours === 98 + 75 + 6.5 && Math.abs(both.totals.cost - (both.groups[0].cost + both.groups[1].cost + 300)) < 0.011 && Math.abs(both.totals.sell - (both.groups[0].sell + both.groups[1].sell + 495)) < 0.011,
-    "#P4 pure: totals = groups + loose");
+    "#P4 pure: hand-added labor lines with unit hr count their qty as hours (a group-less or orphaned one too); non-labor lines are ignored");
+  ok(both.other !== null && both.other.hours === 0 && both.other.cost === 90 && both.other.sell === 180,
+    "#P4 pure: a non-hour labor line outside any configured group lands in Other labor lines (qty × cost, ext sell, 0 hours)");
+  ok(both.totals.hours === 98 + 75 + 6.5 && Math.abs(both.totals.cost - (both.groups[0].cost + both.groups[1].cost + 300 + 90)) < 0.011 && Math.abs(both.totals.sell - (both.groups[0].sell + both.groups[1].sell + 495 + 180)) < 0.011,
+    "#P4 pure: totals = groups + loose + other");
   ok(both.crew.maxCrew === 4 && both.crew.days === 6 && both.crew.otHours === 12 + 4 * 2 * 1, "#P4 pure: crew spans every group (max 4, days 3+1+2 = 6, OT 20)");
 
   const empty = p4LaborSummary([], rate);
@@ -56615,7 +56617,7 @@ async function p4CommentsAsyncChecks(): Promise<void> {
   const act = rd("src/app/(app)/estimator/review-actions.ts");
   ok(act.startsWith('"use server";') && act.includes("await requireUser()") && act.includes("if (!canAddComment(user.roles)) return { ok: false, error: COPY.needsPerm };") &&
      act.indexOf("canAddComment(user.roles)") < act.indexOf("await addReviewComment(") && act.includes("if (!canResolve(user.roles, {})) return { ok: false, error: COPY.needsPerm };") &&
-     act.indexOf("canResolve(user.roles") < act.indexOf("await resolveReviewComment(") && act.includes("(c) => canDelete(user.roles, c, user.name)") && act.includes("by: user.name"),
+     act.indexOf("canResolve(user.roles") < act.indexOf("await resolveReviewComment(") && act.includes("(c) => canDelete(user.roles, c, user.name || user.email)") && act.includes("by: user.name || user.email"),
     "#P4 comments (actions): add needs create|send|approve, resolve needs create (both refused before the write), delete is judged under the row lock, the author is the session user's name");
   ok(act.includes("numbered: numberComments(comments, sectionsOf(q))") && /listReviewCommentsAction[\s\S]*await requireUser\(\)/.test(act),
     "#P4 comments (actions): every result carries the fresh list numbered against the saved estimate's systems");
@@ -57006,4 +57008,52 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(pinSrc.includes("window.innerHeight") && pinSrc.includes("r.top - 6 - h") && pinSrc.includes("useLayoutEffect"), "#P4 polish: the popover flips above the badge when it would overflow the viewport bottom");
   ok(/e\.key === "Escape"\) \{\s+e\.stopPropagation\(\);/.test(pinSrc), "#P4 polish: Escape in the popover stops propagation");
   ok(!/<span\s+aria-label=|<span aria-label=/.test(pkgSrc) && pkgSrc.includes("VISUALLY_HIDDEN"), "#P4 polish: the nav comment counts use visually-hidden text, not aria-label on a span");
+}
+
+// ---- #P4 final fix: one send-back on Review, labor table counts every labor line, small hardening ----
+{
+  const rate = p4MakeRate({});
+  const L = (o: Record<string, unknown>) => ({ id: 1, sku: "X", desc: "Labor", qty: 1, unit: "ea", cost: 0, price: 0, ...o });
+  // Pre-#269 labor: a lot-priced configurator line with no draft behind it.
+  const pre = { id: "s1", name: "Rigging", kind: "materials", items: [L({ labor: true, unit: "lot", qty: 1, cost: 1000, price: 1600 }), L({ id: 2, unit: "ea", qty: 3, cost: 5, price: 9 })] } as unknown as P4Section;
+  const a = p4LaborSummary([pre], rate);
+  ok(a.groups.length === 0 && a.loose === null && a.other !== null && a.other.cost === 1000 && a.other.sell === 1600 && a.other.hours === 0 &&
+     a.totals.cost === 1000 && a.totals.sell === 1600 && a.totals.hours === 0,
+    "#P4 final fix: a pre-#269 lot labor line (no draft) shows as Other labor lines and counts in the totals; a material line doesn't");
+  // A labor-kind section's lines count without the per-line flag.
+  const lsec = { id: "s2", name: "Install", kind: "labor", items: [L({ unit: "ea", qty: 2, cost: 100, price: 150 }), L({ id: 2, unit: "hr", qty: 4, cost: 50, price: 80 })] } as unknown as P4Section;
+  const b = p4LaborSummary([lsec], rate);
+  ok(b.other !== null && b.other.cost === 200 && b.other.sell === 300 && b.loose !== null && b.loose.hours === 4 && b.loose.sell === 320 && b.totals.sell === 620 && b.totals.hours === 4,
+    "#P4 final fix: lines of a labor-kind section count (hr lines loose, the rest other) without it.labor");
+  // Credit / option lines out; an alternate system's labor goes to the alternate bucket only.
+  const mix = {
+    id: "s3", name: "Mix", kind: "materials",
+    items: [L({ labor: true, unit: "lot", cost: 10, price: 20 }), L({ id: 2, labor: true, unit: "lot", cost: 99, price: 99, option: true }), L({ id: 3, labor: true, unit: "lot", qty: 1, price: -50, rewardCredit: true })],
+  } as unknown as P4Section;
+  const altSec = { id: "s4", name: "Alt", kind: "materials", alternate: true, items: [L({ labor: true, unit: "lot", cost: 7, price: 14 })] } as unknown as P4Section;
+  const c = p4LaborSummary([mix, altSec], rate);
+  ok(c.other!.cost === 10 && c.other!.sell === 20 && c.totals.sell === 20 && c.alternate !== null && c.alternate.other!.cost === 7 && c.alternate.other!.sell === 14 && c.alternate.totals.sell === 14,
+    "#P4 final fix: option and reward-credit lines are excluded; alternate labor is its own bucket");
+  ok(p4LaborSummary([{ id: "x", name: "Mat", kind: "materials", items: [L({ unit: "ea", cost: 5, price: 9 })] } as unknown as P4Section], rate).other === null,
+    "#P4 final fix: no labor lines → other is null");
+
+  // Send-back note: capped at 4,000 characters with "…and N more"; the typed text survives; whole-estimate by sectionId.
+  const many = Array.from({ length: 60 }, (_, i) => ({ id: `c${i}`, sectionId: null, body: "x".repeat(200), by: "A", at: i + 1, resolvedAt: null, resolvedBy: null })) as unknown as P4Comment[];
+  const note = p4Note(many, [], "Please fix.");
+  ok(note.length <= 4000 && /\n…and \d+ more\n\nPlease fix\.$/.test(note) && note.startsWith("60 comments to address:") && note.includes("\n1. Whole estimate — "),
+    "#P4 final fix: a long send-back note is cut to 4,000 characters, listing the rest as '…and N more', with the typed text kept");
+  const shortNote = p4Note(many.slice(0, 2), [], "");
+  ok(!shortNote.includes("…and") && shortNote.split("\n").length === 3, "#P4 final fix: a short note is unchanged");
+  const named = p4r.sendBackNoteFromNumbered(
+    [{ n: 1, system: "Whole estimate", comment: { id: "a", sectionId: "s9", body: "keep", by: "A", at: 1, resolvedAt: null, resolvedBy: null } } as unknown as import("@/lib/estimate-review/comments").NumberedComment], "");
+  ok(named.includes("1. Whole estimate — keep"), "#P4 final fix: a system literally named 'Whole estimate' is still a system (decided by sectionId, not the name)");
+
+  // Source pins.
+  const rf = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const head = rf(`${EST_DIR}/estimator-header.tsx`), cli = rf(`${EST_DIR}/estimator-client.tsx`), side = rf(`${EST_DIR}/steps/review-sidebar.tsx`), acts = rf(`${EST_DIR}/review-actions.ts`);
+  ok(head.includes('step === "review" && canSendBackFromReview(next) ? withoutSendBack(next) : next') && cli.includes("<EstimatorHeader s={s} step={step}"),
+    "#P4 final fix: the header toolbar drops the comment-blind Send back… on Review (one send-back there)");
+  ok(side.includes("COPY.otherLabor") && side.includes("t.lab === 0") && !/\n\s+kick\(\);\n/.test(side) && !/aria-label=\{`Comment \$\{n\}`\}/.test(side) && side.includes("VISUALLY_HIDDEN"),
+    "#P4 final fix: the sidebar shows Other labor lines, 'No labor' only when totals().lab is 0, no mount re-read, no aria-label on a plain span");
+  ok(acts.includes("user.name || user.email") && acts.includes("findGrid: async () => null"), "#P4 final fix: comment author falls back to the email; reviewDocsAction skips the Grid lookup");
 }

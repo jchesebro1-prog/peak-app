@@ -61,7 +61,7 @@ export async function addReviewCommentAction(quoteId: string, sectionId: string 
   const user = await requireUser();
   if (!canAddComment(user.roles)) return { ok: false, error: COPY.needsPerm };
   const id = String(quoteId || "");
-  const r = await addReviewComment(id, { sectionId: sectionId == null ? null : String(sectionId), body, by: user.name });
+  const r = await addReviewComment(id, { sectionId: sectionId == null ? null : String(sectionId), body, by: user.name || user.email });
   return finish(id, r);
 }
 
@@ -70,14 +70,14 @@ export async function resolveReviewCommentAction(quoteId: string, commentId: str
   const user = await requireUser();
   if (!canResolve(user.roles, {})) return { ok: false, error: COPY.needsPerm };
   const id = String(quoteId || "");
-  return finish(id, await resolveReviewComment(id, String(commentId || ""), user.name));
+  return finish(id, await resolveReviewComment(id, String(commentId || ""), user.name || user.email));
 }
 
 /** Delete a comment — its author while unresolved, or an approver. */
 export async function deleteReviewCommentAction(quoteId: string, commentId: string): Promise<ReviewCommentsResult> {
   const user = await requireUser();
   const id = String(quoteId || "");
-  return finish(id, await deleteReviewComment(id, String(commentId || ""), (c) => canDelete(user.roles, c, user.name)));
+  return finish(id, await deleteReviewComment(id, String(commentId || ""), (c) => canDelete(user.roles, c, user.name || user.email)));
 }
 
 export type ReviewDocsResult = ({ ok: true } & ReviewDocsView) | { ok: false; error: string };
@@ -101,6 +101,7 @@ export async function reviewDocsAction(quoteId: string): Promise<ReviewDocsResul
     console.warn("[review] package documents unavailable", e instanceof Error ? e.message : e);
   }
   const panel = await loadPackagePanel(q, false, {
+    findGrid: async () => null, // this view doesn't use the Grid lookup — skip the project scan
     datasheetGaps: async () => (docs ? [...docs.bySku.values()].filter((x) => !x.datasheetOk).length : 0),
   });
   return {

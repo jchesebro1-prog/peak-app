@@ -28,6 +28,7 @@ export const REVIEW_UI_COPY = {
   edited: "edited",
   noLabor: "No labor on this estimate.",
   looseLabor: "Hand-added labor (hr)",
+  otherLabor: "Other labor lines",
   laborTotal: "Total",
   alternates: "Alternates (priced separately)",
   checklistClear: "Nothing missing.",
@@ -168,7 +169,7 @@ export function withoutSendBack<T extends Pick<QuoteNextStepView, "secondary">>(
 export function sendBackNoteFromNumbered(numbered: ReadonlyArray<NumberedComment>, extra: string): string {
   const sections: Array<{ id: string; name: string }> = [];
   const comments = (numbered || []).map(({ comment, system }) => {
-    const whole = system === WHOLE_ESTIMATE || comment.sectionId === null;
+    const whole = comment.sectionId === null;
     if (whole) return { ...comment, sectionId: null };
     if (!sections.some((s) => s.id === comment.sectionId)) sections.push({ id: comment.sectionId as string, name: system });
     return comment;

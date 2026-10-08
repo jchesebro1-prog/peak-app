@@ -21,6 +21,8 @@ export type ReviewComment = {
 export const REVIEW_COMMENTS_MAX = 200;
 export const COMMENT_BODY_MAX = 2000;
 export const WHOLE_ESTIMATE = "Whole estimate";
+/** The longest send-back note the Review step builds (the list is cut with "…and N more"). */
+export const SEND_BACK_NOTE_MAX = 4000;
 
 /** Refusal copy for the review-comment actions. */
 export const REVIEW_COMMENT_COPY = {
@@ -110,8 +112,20 @@ export function sendBackNote(
   const typed = (extra || "").trim();
   if (rows.length === 0) return typed;
   const head = `${rows.length} comment${rows.length === 1 ? "" : "s"} to address:`;
+  const tail = typed ? `\n\n${typed.length > SEND_BACK_NOTE_MAX ? `${typed.slice(0, SEND_BACK_NOTE_MAX - 1)}…` : typed}` : "";
   const lines = rows.map((r) => `${r.n}. ${r.system} — ${r.comment.body.replace(/\s*\n\s*/g, " ").trim()}`);
-  return [head, ...lines].join("\n") + (typed ? `\n\n${typed}` : "");
+  const whole = [head, ...lines].join("\n") + tail;
+  if (whole.length <= SEND_BACK_NOTE_MAX) return whole;
+  /* Too long: keep as many whole numbered lines as fit, then "…and N more" (the typed text always survives). */
+  const more = (k: number) => `…and ${k} more`;
+  const kept: string[] = [];
+  let used = head.length + tail.length + 1 + more(lines.length).length + 1;
+  for (const line of lines) {
+    if (used + line.length + 1 > SEND_BACK_NOTE_MAX) break;
+    kept.push(line);
+    used += line.length + 1;
+  }
+  return [head, ...kept, more(lines.length - kept.length)].join("\n") + tail;
 }
 
 /** Anyone who can create, send or approve may comment. */
